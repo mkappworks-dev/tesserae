@@ -40,12 +40,22 @@ which is step 26. Applying at open keeps the commit the Server's alone: the
 launcher writes only the sidecar, and the change reaches the save in the
 Server's next commit like any other Player state.
 
-## Amendment 2026-11-07: Creative spends Items
+## Amendment 2026-11-07: Creative and Survival share one economy
 
-Creative placing is no longer free: it spends one Item per Voxel from the
-selected slot, as Survival does, and a Layout is paid up front. The modes still
-differ in what the Catalogue does (it gives only in Creative, and refills the
-slot), in flight, and in damage, hunger and death. The supersession and its
-reasons are in
+Two rules in this ADR are superseded. Placing is no longer free in Creative: it
+spends one Item per Voxel from the selected slot, as Survival does, and a Layout
+is paid up front. Removing a Voxel in Creative is no longer free of a drop: a
+solid or a fluid source drops its Item, as in Survival, to be picked up, and
+flowing fluid still cannot be removed.
+
+The modes now differ in what the Catalogue does (it gives only in Creative, and
+refills a spent slot), in flight, and in damage, hunger and death; they no
+longer differ in what a Voxel costs or yields. Undo keeps the cost each entry
+was made with, as before. Pickup is the same in both modes, including the
+Inventory-full notice, which still appears only when a Pickup leaves something
+on the ground.
+
+The reasons are in
 [ADR-0023's amendment](0023-the-inventory-is-server-owned-and-pays-inside-the-undo-journal.md#amendment-2026-11-07-creative-spends-items-too).
-The old rule, "placing is free in Creative", is superseded.
+The old rules, "placing is free in Creative" and "in Creative removing a Voxel
+drops nothing", are superseded.

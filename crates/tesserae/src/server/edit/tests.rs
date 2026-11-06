@@ -1512,7 +1512,7 @@ fn removing_through_flowing_fluid_drops_only_the_bed_under_it() {
 }
 
 #[test]
-fn a_creative_removal_of_a_source_drops_nothing() {
+fn a_creative_removal_of_a_source_drops_its_item_as_survival_does() {
     let mut app = stocked(&[(4, "t:water")], 4);
     send(&mut app, place_held(SHAPE_FULL_CUBE, Orientation::IDENTITY));
     tick(&mut app);
@@ -1520,7 +1520,7 @@ fn a_creative_removal_of_a_source_drops_nothing() {
     tick(&mut app);
     assert!(rejections(&mut app).is_empty());
     assert_eq!(occupants_at(&app, [5, 8, 5]).fluid, None);
-    assert!(dropped(&app).is_empty());
+    assert_eq!(dropped(&app), [3], "the water Item");
 }
 
 #[test]

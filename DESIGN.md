@@ -591,14 +591,15 @@ Notes:
   backpack and a 9-slot Hotbar of Stacks, whose rules are a pure module in
   `tesserae-core`; the Client sends intents and draws what the Server sends.
   Pickup fills it and leaves on the ground what does not fit. In every mode,
-  Place spends one Item from the selected slot and a Layout is paid up front or
-  refused. Undo pays and refunds Items in the same Server transaction, by the
-  mode each entry was made in, and anything that does not fit drops at the
-  Player. A Material with no declared Item has an implicit one, so every
-  placeable Material is an Item and drops as one: a fluid source drops its Item
-  when removed, flowing fluid never does. Carried is retired: a save's totals
-  pack into slots once. In Creative the Catalogue sits beside the Inventory and
-  gives Items. Games declare stack limits (`max-stack`, 64 when absent). See
+  Place spends one Item from the selected slot, a Layout is paid up front or
+  refused, and removing a Voxel drops its Item. Undo pays and refunds Items in
+  the same Server transaction, by the mode each entry was made in, and anything
+  that does not fit drops at the Player. A Material with no declared Item has an
+  implicit one, so every placeable Material is an Item and drops as one: a fluid
+  source drops its Item when removed, flowing fluid never does. Carried is
+  retired: a save's totals pack into slots once. In Creative the Catalogue sits
+  beside the Inventory and gives Items. Games declare stack limits (`max-stack`,
+  64 when absent). See
   [ADR-0023](docs/adr/0023-the-inventory-is-server-owned-and-pays-inside-the-undo-journal.md).
 - **Step 21** is done. A World has a default game mode and each Player their
   own, Creative or Survival; Edit World's changes wait in the sidecar until the

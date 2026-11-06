@@ -158,6 +158,10 @@ fn a_new_world_of_every_demo_game_has_its_food_within_a_short_walk_of_the_spawn(
 
 /// Stone below 8 m, as the edit tests' ground, with the Game's own Items and placing rules.
 fn kitchen(game: &str) -> (super::Install, App, super::LoadedMods) {
+    kitchen_in(game, true)
+}
+
+fn kitchen_in(game: &str, survival_mode: bool) -> (super::Install, App, super::LoadedMods) {
     let (install, loaded) = loaded(game, 1.0);
     let rock = Voxel::cube(loaded.world.unwrap().ground.unwrap().rock);
     let mut ground = Chunk::air();
@@ -169,7 +173,9 @@ fn kitchen(game: &str) -> (super::Install, App, super::LoadedMods) {
         }
     }
     let mut app = app_with_tables(&[(ChunkCoord::new(0, 0, 0), ground)], loaded.tables.clone());
-    survival(&mut app);
+    if survival_mode {
+        survival(&mut app);
+    }
     let items = Items(loaded.items.clone());
     let solid = |id| loaded.tables.materials.solid(Voxel::cube(id));
     app.insert_resource(PlacingItems::new(
@@ -245,6 +251,35 @@ fn every_demo_games_food_places_breaks_picks_up_and_eats() {
             food.item
         );
         assert_eq!(held(&mut app, food.item), 0);
+    }
+}
+
+/// Creative shares Survival's economy: the melon, like each Game's food, is spent by placing and
+/// drops on the ground when broken, to be picked up.
+#[test]
+fn in_creative_every_demo_games_food_is_spent_by_placing_and_drops_when_broken() {
+    let cell = [5, 8, 5];
+    for food in &FOODS {
+        let (_install, mut app, loaded) = kitchen_in(food.game, false);
+        let voxel = Voxel::cube(material(&loaded, food.item));
+
+        give(&mut app, food.item);
+        send(&mut app, place_held(SHAPE_FULL_CUBE, Orientation::IDENTITY));
+        tick(&mut app);
+        assert_eq!(voxel_at(&app, cell), voxel, "{} places", food.item);
+        assert_eq!(held(&mut app, food.item), 0, "{} is spent", food.item);
+
+        send(&mut app, down(EditAction::Remove));
+        tick(&mut app);
+        assert!(voxel_at(&app, cell).is_air(), "{} breaks", food.item);
+        assert_eq!(app.world().resource::<EntityStore>().len(), 1);
+
+        for _ in 0..40 {
+            app.world_mut().run_system_once(step_entities).unwrap();
+        }
+        set_eye(&mut app, Vec3::new(5.5, 9.0, 5.5));
+        app.world_mut().run_system_once(pick_up).unwrap();
+        assert_eq!(held(&mut app, food.item), 1, "{} is picked up", food.item);
     }
 }
 

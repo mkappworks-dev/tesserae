@@ -237,8 +237,9 @@ Inventory.
 from Use and from Sample, which copies what is aimed at into the hand.
 
 **Game mode** — Creative or Survival. A World has a default; each Player has
-their own. Both spend an Item per placed Voxel; Creative's Catalogue gives
-Items, and only Survival has damage, hunger and death.
+their own. Both spend an Item per placed Voxel and drop one per removed Voxel;
+Creative's Catalogue gives Items, and only Survival has damage, hunger and
+death.
 
 **Vitals** — a Player's health, hunger and air.
 
@@ -283,8 +284,8 @@ one fluid Material.
 
 **Source** — fluid that stays: generated lake fluid, and fluid a player or a Mod
 places. It feeds flow without losing volume, and only an Edit, a Command or a
-reaction removes it. Flow never becomes one. In Survival removing one drops its
-Item; no Edit aims at flow, so it drops nothing.
+reaction removes it. Flow never becomes one. Removing one drops its Item; no
+Edit aims at flow, so it drops nothing.
 
 **Flowing** — fluid a source supports, carrying its remaining reach and its
 descent since the reach was last renewed. It recedes when nothing supports it.

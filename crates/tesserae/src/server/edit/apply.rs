@@ -16,13 +16,9 @@ pub(in crate::server) fn apply_pending(
         ResMut<crate::server::entities::EntityStore>,
         Res<crate::server::items::Items>,
     ),
-    mut players: Query<(
-        &Player,
-        &mut crate::server::inventory::Inventory,
-        &PlayerMode,
-    )>,
+    mut players: Query<(&Player, &mut crate::server::inventory::Inventory)>,
 ) {
-    let Ok((player, mut inventory, mode)) = players.single_mut() else {
+    let Ok((player, mut inventory)) = players.single_mut() else {
         return;
     };
     let body = player.solid_body();
@@ -61,8 +57,7 @@ pub(in crate::server) fn apply_pending(
                     }
                     // Spawned here rather than from a message so the Entry
                     // holds the Dropped item an undo takes back.
-                    if mode.survival()
-                        && let Some(material) = removal(p.intent.action, &entry)
+                    if let Some(material) = removal(p.intent.action, &entry)
                         && let Some(item) = items.dropped_by(material)
                     {
                         let id = crate::server::entities::drop_one(

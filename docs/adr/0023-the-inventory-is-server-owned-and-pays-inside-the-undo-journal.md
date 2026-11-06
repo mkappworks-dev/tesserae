@@ -66,12 +66,12 @@ single-player would hide.
 
 An implicit Item is an Item like any declared one: it drops as a quarter-Voxel
 cube drawn as its Material, and Pickup takes it back, so death, an undo refund,
-a redo and a save's Carried overflow lose nothing. Removing a fluid source in
-Survival drops its Item as removing a solid does, so a source placed from the
-Hotbar can be taken back, as Minecraft's and Luanti's buckets allow; flowing
-fluid drops nothing. Only an Item that no content names has nothing to become;
-it is lost, and a death does not report it. Throwing an Item away, containers
-and crafting are later work.
+a redo and a save's Carried overflow lose nothing. Removing a fluid source drops
+its Item as removing a solid does, so a source placed from the Hotbar can be
+taken back, as Minecraft's and Luanti's buckets allow; flowing fluid drops
+nothing. Only an Item that no content names has nothing to become; it is lost,
+and a death does not report it. Throwing an Item away, containers and crafting
+are later work.
 
 ## Amendment 2026-11-07: Creative spends Items too
 
@@ -93,4 +93,13 @@ Player can take any Material from the Catalogue at will, so it is not an economy
 to guard, and refusing it would only break the Server's own tests and Mod
 scenarios. Survival still refuses it.
 
-The old rule, "Creative placing is free", is superseded.
+The maintainer then made Creative removal drop too: breaking a solid or a fluid
+source in Creative drops its Item as in Survival, with the same journal
+bookkeeping (the entry records the Item and the Dropped item's id; undo takes
+the Dropped item back if it still lies there; redo drops it again). A player who
+broke a Terra melon in Creative and got nothing to pick up prompted it. Pickup
+needs nothing different in Creative.
+
+The old rules, "Creative placing is free" and, from
+[ADR-0024](0024-game-mode-is-per-player-with-a-world-default.md), "in Creative
+removing a Voxel drops nothing", are superseded.

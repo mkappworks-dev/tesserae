@@ -687,20 +687,20 @@ mod tests {
         }
 
         #[test]
-        fn creative_entries_stay_free_after_a_switch_to_survival() {
+        fn creative_entries_keep_their_cost_after_a_switch_to_survival() {
             let mut app = game(false);
             remove(&mut app);
             place(&mut app);
-            assert_eq!(drops(&app), []);
+            assert_eq!(drops(&app), [(0, 1)], "the removal dropped its Item");
+            assert_eq!(held(&mut app, "t:stone"), 2, "the placement spent one");
             survival(&mut app);
-            set_inventory(&mut app, Inventory::default());
             for action in [Undo, Undo, Redo, Redo] {
                 replay(&mut app, action);
                 assert!(rejections(&mut app).is_empty(), "{action:?}");
             }
             assert_eq!(voxel_at(&app, GROUND), stone(), "the place filled it back");
-            assert_eq!(inventory(&mut app), Inventory::default());
-            assert_eq!(drops(&app), []);
+            assert_eq!(held(&mut app, "t:stone"), 2);
+            assert_eq!(drops(&app), [(0, 1)]);
         }
     }
 

@@ -244,7 +244,7 @@ mod tests {
         }])
     }
 
-    /// In Survival, where a removal drops.
+    /// In Survival; a removal drops in either mode.
     fn game() -> App {
         let mut app = app_with(&[(Default::default(), ground())]);
         survival(&mut app);
@@ -347,7 +347,7 @@ mod tests {
     }
 
     #[test]
-    fn a_creative_removal_drops_nothing() {
+    fn a_creative_removal_drops_its_item_as_survival_does() {
         let mut app = game();
         let mut mode = app
             .world_mut()
@@ -355,7 +355,7 @@ mod tests {
         mode.single_mut(app.world_mut()).unwrap().0 = super::super::game_mode::GameMode::Creative;
         remove_the_ground(&mut app);
         assert!(voxel_at(&app, [5, 7, 5]).is_air());
-        assert_eq!(drops(&app), 0);
+        assert_eq!(drops(&app), 1);
     }
 
     #[test]

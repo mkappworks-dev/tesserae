@@ -79,7 +79,6 @@ function placeHeld(){
 }
 function breakVoxel(){
   state.journal.push({kind:'remove',id:'rock'});
-  if(!survival()){log('Removed Stone. Creative: no drop.');render();return;}
   const left=receive('rock',1);
   state.pickupRefused=left?'1 Rock':null;
   if(!left)feed('rock',1);
