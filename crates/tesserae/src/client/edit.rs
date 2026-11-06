@@ -192,13 +192,6 @@ pub(super) fn item_holding(
     }
 }
 
-/// Whether the Player is building: the hand holds a block, a fluid, fire or a
-/// tool, or Layout mode is on. With an empty hand the Player is free roaming,
-/// which shows no crosshair, outline or preview and breaks nothing.
-pub(super) fn building(hotbar: &Hotbar, layout: Option<&super::layout::LayoutMode>) -> bool {
-    hotbar.held() != Holding::Empty || layout.is_some_and(|layout| layout.on)
-}
-
 /// The hand: the Server's hotbar as it last sent it, the Shape and Orientation
 /// the Player chose for whatever the held Item places, and what is held
 /// outside the hotbar.

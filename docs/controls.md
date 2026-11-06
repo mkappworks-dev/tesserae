@@ -53,9 +53,10 @@ with or without a modifier; a bound wheel chord owns the wheel, so it never also
 steps the Hotbar slots, and plain wheel stays slot selection. The view and zoom
 are saved in the user profile, not in any World.
 
-The crosshair, the targeted-Voxel outline, the placement preview and breaking
-are for building: they show only while the hand holds something (a block, a
-fluid, fire or a tool) or Layout mode is on. With an empty hand you only look.
+The crosshair, the targeted-Voxel outline and breaking work whatever the hand
+holds, an empty hand included, so a Player always sees what a left click would
+break. The placement preview and its "Right-click to place" hint need something
+placeable in the hand (a block or a fluid) or Layout mode.
 
 **L** opens and closes the Layout card, and Layout mode stays on while it is
 closed. Place commits a layout, Remove cancels it and the clear key

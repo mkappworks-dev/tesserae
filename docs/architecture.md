@@ -159,9 +159,9 @@ line passes B, so a height can be set in open sky. The preview draws each cell
 as a ghost of the block that would land, tinted where it would not; the cells of
 one tint are one merged mesh, so blended ghosts never re-sort against each other
 as the view moves, and touching cells draw only their outer surface, so every
-cell looks the same. The crosshair, outline, preview and removal are building
-only, shown while the hand holds something or Layout mode is on
-(`edit::building`). The Layout key opens the Layout menu
+cell looks the same. The crosshair, outline and removal work with an empty hand
+too, so a walking Player always sees what they would break; the preview needs
+something placeable in the hand. The Layout key opens the Layout menu
 (`client/layout_menu.rs`), a panel docked over the live game with its own input
 context: the cursor is released and the pad navigates it. Its lengths along X, Y
 and Z, the way each grows, and the gap apply as they are set and are saved when

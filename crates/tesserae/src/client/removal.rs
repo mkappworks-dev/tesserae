@@ -140,12 +140,7 @@ fn spawn(mut commands: Commands) {
 }
 pub(super) fn hold(
     (actions, preferences, ownership, cursor, menu, hotbar, mut previous_hand): Controls,
-    (target, sent, time, layout): (
-        Res<Target>,
-        Res<Sent>,
-        Res<Time>,
-        Option<Res<super::layout::LayoutMode>>,
-    ),
+    (target, sent, time): (Res<Target>, Res<Sent>, Res<Time>),
     catalogue: Res<Catalogue>,
     camera: Single<&GlobalTransform, With<FlyCamera>>,
     mut progress: ResMut<Progress>,
@@ -180,8 +175,6 @@ pub(super) fn hold(
         || (repeating && progress.chain && hand_edited);
     if !ownership.gameplay()
         || hotbar.held().tool().is_some()
-        // Free roaming breaks nothing, so nothing is ever changed unseen.
-        || !super::edit::building(&hotbar, layout.as_deref())
         || state.cancelled
         || !ready
         || menu.open
@@ -615,6 +608,23 @@ mod tests {
         assert_eq!(sent.len(), 1);
         assert_eq!(sent[0].action, EditAction::RemoveAt(target(0)));
         assert!(step(&mut app, 1.0).is_empty(), "one action per hold");
+    }
+
+    #[test]
+    fn left_click_removes_with_an_empty_hand() {
+        let mut app = app();
+        app.world_mut()
+            .resource_mut::<super::super::edit::Hotbar>()
+            .outside = Some(super::super::edit::Holding::Empty);
+        step(&mut app, 0.0);
+        step(&mut app, 0.0);
+        app.world_mut()
+            .resource_mut::<ButtonInput<MouseButton>>()
+            .press(MouseButton::Left);
+        assert!(step(&mut app, 0.1).is_empty());
+        let sent = step(&mut app, 0.36);
+        assert_eq!(sent.len(), 1);
+        assert_eq!(sent[0].action, EditAction::RemoveAt(target(0)));
     }
 
     fn repeating() -> App {
