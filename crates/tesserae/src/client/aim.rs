@@ -212,7 +212,11 @@ mod tests {
         app.world_mut().resource_mut::<Target>().0.use_aim = None;
         app.update();
         let colour = app.world().get::<TextColor>(id).unwrap().0.to_srgba();
-        assert!(colour.green > 0.9 && colour.blue > 0.9);
+        assert_eq!(
+            colour.with_alpha(1.0),
+            super::super::theme::RETICLE.to_srgba(),
+            "the reticle's own tint again"
+        );
     }
 
     #[test]
