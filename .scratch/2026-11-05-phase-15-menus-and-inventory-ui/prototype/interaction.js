@@ -30,6 +30,13 @@ function validationError(message,bind) {
   if(control){control.setAttribute('aria-invalid','true');control.setAttribute('aria-describedby','validation-error');control.focus();control.scrollIntoView({block:'nearest',behavior:'instant'});}
   return false;
 }
+function stepValid(step) {
+  if(step===0)return state.name.length<=64;
+  if(step!==2)return true;
+  if(!state.biomes.some(b=>b.enabled))return false;
+  if(!['tempSize','humiditySize'].every(key=>{const n=Number(state[key]);return Number.isFinite(n)&&n>0&&n<=100000;}))return false;
+  return state.biomes.every(b=>[['t',1],['h',1],['caves',4]].every(([key,maximum])=>Number.isFinite(b[key])&&b[key]>=0&&b[key]<=maximum));
+}
 function validateStep(step) {
   if(step===0&&state.name.length>64)return validationError('Use a World name of 64 characters or fewer.','name');
   if(step!==2)return true;
