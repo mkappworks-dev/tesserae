@@ -652,6 +652,7 @@ fn close_request(
 
 fn logic(app: &mut App) {
     app.init_resource::<Queue>()
+        .init_resource::<Scenery>()
         .init_resource::<LastFailure>()
         .init_resource::<Remover>()
         .init_resource::<Previewer>()
@@ -721,7 +722,9 @@ fn leave(
     screens: Query<Entity, ListScreens>,
     mut ownership: ResMut<super::input::Ownership>,
     (mut last, mut returning): (ResMut<LastFailure>, ResMut<Returning>),
+    mut scenery: ResMut<Scenery>,
 ) {
+    *scenery = Scenery::default();
     for screen in &screens {
         commands.entity(screen).despawn();
     }
@@ -1121,6 +1124,7 @@ fn render(
     roots: Query<Entity, With<Root>>,
     scrolled: Query<&ScrollPosition, With<PageScroll>>,
     logo: Option<Res<ui::Mosaic>>,
+    scenery: Res<Scenery>,
     (mut built, mut shown, mut covered): (Local<Option<u64>>, Local<Option<Screen>>, Local<bool>),
 ) {
     let Some(l) = launcher else {
@@ -1143,7 +1147,14 @@ fn render(
     for root in &roots {
         commands.entity(root).despawn();
     }
-    let focus = pages::spawn(&mut commands, &l, &installed, logo.as_deref(), scroll);
+    let focus = pages::spawn(
+        &mut commands,
+        &l,
+        &installed,
+        logo.as_deref(),
+        &scenery,
+        scroll,
+    );
     if let Some(entity) = focus {
         commands.queue(move |world: &mut World| {
             if let Some(mut focus) = world.get_resource_mut::<InputFocus>() {
@@ -1409,6 +1420,21 @@ struct Painted {
     at_s: f32,
 }
 
+/// The painted scenery, kept across page rebuilds so a new Backdrop spawns already showing it
+/// instead of being empty for the frames until `paint_scenery` reaches it.
+#[derive(Resource, Default)]
+struct Scenery([Painted; 2]);
+
+impl Scenery {
+    fn slot(filter: super::scenery::Filter) -> usize {
+        usize::from(filter == super::scenery::SOFT)
+    }
+
+    fn image(&self, filter: super::scenery::Filter) -> Option<Handle<Image>> {
+        self.0[Self::slot(filter)].image.clone()
+    }
+}
+
 /// Paints the scenery for each backdrop at its size, again after a resize
 /// once the size has held for a moment.
 fn paint_scenery(
@@ -1416,7 +1442,7 @@ fn paint_scenery(
     backdrops: Query<(Entity, &pages::Backdrop, &ComputedNode, Option<&ImageNode>)>,
     images: Option<ResMut<Assets<Image>>>,
     time: Res<Time<Real>>,
-    mut painted: Local<[Painted; 2]>,
+    mut scenery: ResMut<Scenery>,
 ) {
     use super::scenery;
     const SETTLE_S: f32 = 0.2;
@@ -1429,7 +1455,7 @@ fn paint_scenery(
         if size.x == 0 || size.y == 0 {
             continue;
         }
-        let slot = &mut painted[usize::from(backdrop.0 == scenery::SOFT)];
+        let slot = &mut scenery.0[Scenery::slot(backdrop.0)];
         let stale = slot.size != size;
         if stale && (slot.image.is_none() || now - slot.at_s >= SETTLE_S) {
             let scale = 1.0 / node.inverse_scale_factor();

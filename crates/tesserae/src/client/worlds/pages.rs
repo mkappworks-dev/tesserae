@@ -31,6 +31,7 @@ pub(super) fn spawn(
     l: &Launcher,
     installed: &Installed,
     logo: Option<&ui::Mosaic>,
+    scenery: &Scenery,
     scroll: Vec2,
 ) -> Option<Entity> {
     let mut focus = None;
@@ -62,7 +63,10 @@ pub(super) fn spawn(
             },
         ))
         .with_children(|root| {
-            root.spawn((Backdrop(filter), fill(), Pickable::IGNORE));
+            let mut backdrop = root.spawn((Backdrop(filter), fill(), Pickable::IGNORE));
+            if let Some(image) = scenery.image(filter) {
+                backdrop.insert(ImageNode::new(image));
+            }
             root.spawn((theme::shade(), fill(), Pickable::IGNORE));
             header(root, logo);
             root.spawn(Node {

@@ -1800,3 +1800,23 @@ fn returning_from_a_world_lands_on_the_worlds() {
     app.update();
     assert_eq!(launcher(&app).screen, Screen::Worlds);
 }
+
+#[test]
+fn a_rebuilt_page_spawns_its_backdrop_already_painted() {
+    let worlds = Directory::new();
+    let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
+    app.update();
+    let image = Handle::<Image>::default();
+    // No layout runs headless, so `paint_scenery` never reaches the new Backdrop: only the cache can.
+    app.world_mut().resource_mut::<Scenery>().0[Scenery::slot(super::super::scenery::CLEAR)]
+        .image = Some(image.clone());
+    launcher_mut(&mut app).version += 1;
+    app.update();
+    let shown: Vec<_> = app
+        .world_mut()
+        .query_filtered::<&ImageNode, With<pages::Backdrop>>()
+        .iter(app.world())
+        .map(|n| n.image.clone())
+        .collect();
+    assert_eq!(shown, [image]);
+}
