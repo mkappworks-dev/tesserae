@@ -94,6 +94,13 @@ pub(super) const WARNING: Color = Color::srgb_u8(0xf0, 0xc0, 0x80);
 pub(super) const ACCENT: Color = Color::srgb_u8(0xa8, 0xb5, 0xa2);
 pub(super) const NOTICE_CARD: Color = Color::srgba_u8(0x0b, 0x0b, 0x0d, 0xe6);
 
+/// The title screen's words, straight on the scenery.
+pub(super) const HERO_INK: Color = Color::srgb_u8(0xd1, 0xd1, 0xd0);
+pub(super) const HERO_EYEBROW: Color = Color::srgb_u8(0xdd, 0xde, 0xda);
+/// The launcher header's Settings button, which sits on the band unfilled.
+pub(super) const ICON_EDGE: Color = Color::srgba_u8(0xff, 0xff, 0xff, 0x38);
+pub(super) const ICON_INK: Color = Color::srgb_u8(0xe8, 0xeb, 0xe4);
+
 pub(super) const SLOT_FILL: Color = Color::srgb_u8(23, 24, 26);
 pub(super) const SLOT_HOVER: Color = Color::srgb_u8(32, 34, 37);
 pub(super) const SLOT_EDGE: Color = Color::srgb_u8(5, 5, 6);
@@ -103,6 +110,14 @@ pub(super) const SLOT_ACTIVE_FILL: Color = Color::srgb_u8(38, 42, 37);
 pub(super) const SLOT_ACTIVE_EDGE: Color = Color::srgb_u8(238, 243, 228);
 pub(super) const SLOT_GLOW: Color = Color::srgba_u8(230, 238, 214, 0x55);
 
+/// The title screen's headline: 5.5 % of the window's width within these
+/// bounds, and larger again on a wide window.
+pub(super) const TEXT_HERO: std::ops::RangeInclusive<f32> = 42.0..=74.0;
+pub(super) const TEXT_HERO_VW: f32 = 5.5;
+pub(super) const TEXT_HERO_WIDE: f32 = 80.0;
+pub(super) const WIDE_WINDOW: f32 = 1500.0;
+/// -0.045 em.
+pub(super) const HERO_TRACKING: f32 = -0.045;
 pub(super) const TEXT_TITLE: f32 = 28.0;
 pub(super) const TEXT_DIALOG_TITLE: f32 = 22.0;
 pub(super) const TEXT_HEADING: f32 = 19.0;
@@ -119,6 +134,7 @@ pub(super) const SECTION_TRACKING: f32 = 1.44;
 pub(super) const LINE_HEIGHT: f32 = 1.6;
 
 pub(super) const REGULAR: u16 = 400;
+pub(super) const BOOK: u16 = 450;
 pub(super) const MEDIUM: u16 = 500;
 pub(super) const LABEL: u16 = 550;
 pub(super) const SEMIBOLD: u16 = 600;
@@ -150,8 +166,20 @@ pub(super) fn font(size: f32) -> TextFont {
     TextFont {
         font: bevy::text::FontSource::family(BODY_FAMILY),
         font_size: bevy::text::FontSize::Px(size),
+        font_variations: optical(size),
         ..default()
     }
+}
+
+/// Inter's optical size for text at `size`, as a browser picks it
+/// (`font-optical-sizing: auto`): its display cut is tighter at large sizes.
+pub(super) fn optical(size: f32) -> bevy::text::FontVariations {
+    bevy::text::FontVariations::builder()
+        .set(
+            bevy::text::FontVariationTag::OPTICAL_SIZE,
+            size.clamp(14.0, 32.0),
+        )
+        .build()
 }
 
 pub(super) fn weighted(size: f32, weight: u16) -> TextFont {

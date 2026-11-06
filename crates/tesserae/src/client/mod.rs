@@ -47,6 +47,7 @@ pub(crate) mod profile;
 mod removal;
 pub(crate) mod render_scale;
 mod save;
+mod scenery;
 mod settings;
 #[cfg(feature = "profiling")]
 pub mod sight;

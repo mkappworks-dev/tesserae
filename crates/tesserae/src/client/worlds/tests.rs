@@ -141,7 +141,7 @@ fn the_title_continues_the_last_played_world_and_names_it_and_its_game() {
     app.update();
     assert_eq!(launcher(&app).screen, Screen::Title);
     assert!(shown(&mut app, "River bend"));
-    assert!(shown(&mut app, "Terra 0.1.0"));
+    assert!(shown(&mut app, "Terra \u{00b7} Played"));
     assert_eq!(focused_act(&app), Some(Act::Continue));
     act(&mut app, Act::Continue);
     assert_eq!(
@@ -451,6 +451,36 @@ fn quit_exits_without_restarting() {
     act(&mut app, Act::Quit);
     assert_eq!(exits(&app), 1);
     assert!(app.world().resource::<Switch>().0.is_none());
+}
+
+fn controls(app: &mut App, wanted: &Act) -> usize {
+    app.world_mut()
+        .query::<&Act>()
+        .iter(app.world())
+        .filter(|act| *act == wanted)
+        .count()
+}
+
+#[test]
+fn quit_is_a_title_action_and_every_screen_keeps_settings_in_the_header() {
+    let worlds = Directory::new();
+    let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
+    app.update();
+    app.update();
+    assert_eq!(controls(&mut app, &Act::Quit), 1);
+    assert_eq!(
+        controls(&mut app, &Act::Settings),
+        2,
+        "the header's and the title's"
+    );
+    for screen in [Act::Worlds, Act::Home, Act::Library] {
+        act(&mut app, screen);
+        if launcher(&app).screen == Screen::Title {
+            continue;
+        }
+        assert_eq!(controls(&mut app, &Act::Quit), 0, "only the title quits");
+        assert_eq!(controls(&mut app, &Act::Settings), 1);
+    }
 }
 
 #[test]
@@ -898,7 +928,7 @@ fn tab_and_shift_tab_reach_every_control_on_each_screen() {
             "library",
             Screen::Library,
             None,
-            vec!["Home", "New", "Quit"],
+            vec!["Home", "New", "Settings"],
         ),
         (
             "create",
@@ -1389,6 +1419,8 @@ fn arrow_keys_move_focus_between_buttons_and_enter_activates() {
     ));
     assert_eq!(focused_act(&app), Some(Act::Continue));
     // The headless layout stacks buttons in reverse spawn order.
+    key(&mut app, KeyCode::ArrowDown);
+    assert_eq!(focused_act(&app), Some(Act::Quit));
     key(&mut app, KeyCode::ArrowDown);
     assert_eq!(focused_act(&app), Some(Act::Settings));
     key(&mut app, KeyCode::ArrowDown);

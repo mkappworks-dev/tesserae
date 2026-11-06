@@ -7,12 +7,23 @@ use bevy::text::EditableText;
 use bevy::ui_widgets::TextInput;
 
 use super::super::cinematic::{self as cine, Kind, Sheet};
+use super::super::menu_ui::IconKind;
+use super::super::scenery;
 use super::*;
 use crate::client::theme;
 
 /// Shown in a text field while it is empty.
 #[derive(Component)]
 pub(super) struct Placeholder(pub(super) Entity);
+
+/// Where the launcher's scenery is painted, softened under a sheet as the
+/// prototype softens it.
+#[derive(Component)]
+pub(super) struct Backdrop(pub(super) scenery::Filter);
+
+/// The title screen's headline, sized from the window's width.
+#[derive(Component)]
+pub(super) struct Hero;
 
 /// Builds the screen `l` is on and returns what should take focus.
 pub(super) fn spawn(
@@ -23,12 +34,15 @@ pub(super) fn spawn(
     scroll: Vec2,
 ) -> Option<Entity> {
     let mut focus = None;
+    let filter = match l.screen {
+        Screen::Title | Screen::Worlds | Screen::Opening(_) => scenery::CLEAR,
+        _ => scenery::SOFT,
+    };
     commands
         .spawn((
             Root,
             TabGroup::default(),
             BackgroundColor(theme::SCENE),
-            theme::shade(),
             Node {
                 // Absolute, like the in-game menus' roots: a flow root is as tall as its content,
                 // so a long page would overflow the window instead of scrolling inside it.
@@ -42,11 +56,18 @@ pub(super) fn spawn(
             },
         ))
         .with_children(|root| {
+            root.spawn((Backdrop(filter), fill(), Pickable::IGNORE));
+            root.spawn((theme::shade(), fill(), Pickable::IGNORE));
             header(root, logo);
             root.spawn(Node {
                 flex_grow: 1.0,
                 min_height: Val::Px(0.0),
-                padding: UiRect::axes(Val::Px(34.0), Val::Px(24.0)),
+                padding: UiRect::new(
+                    Val::Px(theme::SCREEN_PAD_X),
+                    Val::Px(theme::SCREEN_PAD_X),
+                    Val::Px(28.0),
+                    Val::Px(22.0),
+                ),
                 justify_content: JustifyContent::Center,
                 ..default()
             })
@@ -76,6 +97,18 @@ pub(super) fn spawn(
     focus
 }
 
+/// A node that covers its parent, under the parent's other children.
+fn fill() -> Node {
+    Node {
+        position_type: PositionType::Absolute,
+        left: Val::Px(0.0),
+        right: Val::Px(0.0),
+        top: Val::Px(0.0),
+        bottom: Val::Px(0.0),
+        ..default()
+    }
+}
+
 fn header(root: &mut ChildSpawnerCommands, logo: Option<&ui::Mosaic>) {
     root.spawn((
         BackgroundColor(theme::BAND),
@@ -86,7 +119,7 @@ fn header(root: &mut ChildSpawnerCommands, logo: Option<&ui::Mosaic>) {
             padding: UiRect::horizontal(Val::Px(theme::SCREEN_PAD_X)),
             justify_content: JustifyContent::SpaceBetween,
             align_items: AlignItems::Center,
-            border: UiRect::bottom(Val::Px(1.0)),
+            border: UiRect::bottom(Val::Px(theme::RULE)),
             ..default()
         },
     ))
@@ -94,6 +127,7 @@ fn header(root: &mut ChildSpawnerCommands, logo: Option<&ui::Mosaic>) {
         row.spawn(Node {
             align_items: AlignItems::Center,
             column_gap: Val::Px(10.0),
+            padding: UiRect::axes(Val::Px(6.0), Val::Px(1.0)),
             ..default()
         })
         .with_children(|brand| {
@@ -114,6 +148,7 @@ fn header(root: &mut ChildSpawnerCommands, logo: Option<&ui::Mosaic>) {
                     font: bevy::text::FontSource::family(theme::BRAND_FAMILY),
                     ..theme::weighted(19.0, theme::SEMIBOLD)
                 },
+                bevy::text::LineHeight::RelativeToFont(1.1),
                 TextColor(theme::INK),
                 Pickable::IGNORE,
             ));
@@ -125,61 +160,110 @@ fn header(root: &mut ChildSpawnerCommands, logo: Option<&ui::Mosaic>) {
             TextColor(theme::CHROME_INK),
             Pickable::IGNORE,
         ));
-        buttons::button(
-            row,
-            "Quit",
-            Act::Quit,
-            ButtonStyle::Cinematic {
-                kind: Kind::Ghost,
-                align: Align::Centre,
+        row.spawn((
+            bevy::ui_widgets::Button,
+            TabIndex(0),
+            Act::Settings,
+            HeaderButton,
+            bevy::picking::hover::Hovered::default(),
+            theme::focus_ring(),
+            BackgroundColor(Color::NONE),
+            BorderColor::all(theme::ICON_EDGE),
+            Node {
+                width: Val::Px(theme::CONTROL_HEIGHT),
+                height: Val::Px(theme::CONTROL_HEIGHT),
+                border: UiRect::all(Val::Px(theme::RULE)),
+                border_radius: BorderRadius::all(Val::Px(theme::RADIUS_CONTROL)),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                ..default()
             },
-        );
+        ))
+        .with_children(|b| ui::icon(b, IconKind::Settings, theme::ICON_INK, 16.0));
     });
 }
 
+/// The header's Settings button, quiet on the band until hovered.
+#[derive(Component)]
+pub(super) struct HeaderButton;
+
 fn footer(root: &mut ChildSpawnerCommands) {
+    let chrome = |value: &str| {
+        (
+            Text::new(value),
+            theme::font(theme::TEXT_FOOTER),
+            bevy::text::LetterSpacing::Px(0.9),
+            TextColor(theme::CHROME_INK),
+            Pickable::IGNORE,
+        )
+    };
     root.spawn((
         BackgroundColor(theme::BAND),
         BorderColor::all(theme::BAND_RULE),
         Node {
             height: Val::Px(40.0),
             flex_shrink: 0.0,
-            justify_content: JustifyContent::Center,
+            padding: UiRect::horizontal(Val::Px(theme::SCREEN_PAD_X)),
             align_items: AlignItems::Center,
-            column_gap: Val::Px(18.0),
-            border: UiRect::top(Val::Px(1.0)),
+            border: UiRect::top(Val::Px(theme::RULE)),
             ..default()
         },
     ))
-    .with_children(|hints| {
-        for (key, what) in [("Tab", "Navigate"), ("Enter", "Select"), ("Esc", "Back")] {
-            hints
-                .spawn(Node {
-                    column_gap: Val::Px(6.0),
-                    align_items: AlignItems::Center,
-                    ..default()
-                })
-                .with_children(|hint| {
-                    hint.spawn((
-                        BorderColor::all(theme::KEY_EDGE),
-                        Node {
-                            padding: UiRect::axes(Val::Px(4.0), Val::Px(2.0)),
-                            border: UiRect::all(Val::Px(theme::RULE)),
-                            border_radius: BorderRadius::all(Val::Px(theme::RADIUS_TAG)),
-                            ..default()
-                        },
-                    ))
-                    .with_children(|k| ui::text(k, key, theme::TEXT_KEY, theme::CHROME_INK));
-                    hint.spawn((
-                        Text::new(what),
-                        theme::font(theme::TEXT_FOOTER),
-                        bevy::text::LetterSpacing::Px(0.9),
-                        TextColor(theme::CHROME_INK),
-                        Pickable::IGNORE,
-                    ));
-                });
-        }
+    .with_children(|footer| {
+        // The scenery's place, as the prototype names its landscape.
+        footer
+            .spawn(Node {
+                flex_grow: 1.0,
+                flex_basis: Val::Px(0.0),
+                ..default()
+            })
+            .with_child(chrome("TERRA / THE GREENWOOD"));
+        footer
+            .spawn(Node {
+                align_items: AlignItems::Center,
+                ..default()
+            })
+            .with_children(|hints| {
+                for (key, what) in [("Tab", "Navigate"), ("Enter", "Select"), ("Esc", "Back")] {
+                    hints
+                        .spawn((
+                            BorderColor::all(theme::KEY_EDGE),
+                            Node {
+                                padding: UiRect::axes(Val::Px(4.0), Val::Px(2.0)),
+                                margin: UiRect::new(
+                                    Val::Px(9.0),
+                                    Val::Px(3.0),
+                                    Val::Px(0.0),
+                                    Val::Px(0.0),
+                                ),
+                                border: UiRect::all(Val::Px(theme::RULE)),
+                                border_radius: BorderRadius::all(Val::Px(theme::RADIUS_TAG)),
+                                ..default()
+                            },
+                        ))
+                        .with_child((
+                            Text::new(key),
+                            theme::font(theme::TEXT_KEY),
+                            bevy::text::LetterSpacing::Px(0.9),
+                            TextColor(theme::CHROME_INK),
+                            Pickable::IGNORE,
+                        ));
+                    hints.spawn(chrome(what));
+                }
+            });
+        footer.spawn(Node {
+            flex_grow: 1.0,
+            flex_basis: Val::Px(0.0),
+            ..default()
+        });
     });
+}
+
+fn shadowed() -> TextShadow {
+    TextShadow {
+        offset: Vec2::new(0.0, 1.0),
+        color: Color::BLACK.with_alpha(0.5),
+    }
 }
 
 fn title(main: &mut ChildSpawnerCommands, l: &Launcher, installed: &Installed) -> Option<Entity> {
@@ -189,83 +273,76 @@ fn title(main: &mut ChildSpawnerCommands, l: &Launcher, installed: &Installed) -
         flex_direction: FlexDirection::Column,
         justify_content: JustifyContent::Center,
         align_items: AlignItems::FlexStart,
-        padding: UiRect::left(Val::Percent(4.0)),
-        row_gap: Val::Px(8.0),
+        padding: UiRect::left(Val::Vw(4.0)),
         ..default()
     })
     .with_children(|hero| {
-        buttons::eyebrow(
-            hero,
-            "A LITTLE CURIOSITY. A WHOLE WORLD.",
-            Eyebrow::Cinematic,
-        );
         hero.spawn((
-            Text::new("Make room\nfor wonder."),
-            TextFont {
-                weight: bevy::text::FontWeight(450),
-                ..ui::font(58.0)
-            },
-            bevy::text::LineHeight::RelativeToFont(1.04),
-            bevy::text::LetterSpacing::Px(-2.4),
-            TextColor(theme::INK),
+            Text::new("A LITTLE CURIOSITY. A WHOLE WORLD."),
+            theme::weighted(theme::TEXT_EYEBROW, theme::STRONG),
+            bevy::text::LetterSpacing::Px(theme::EYEBROW_TRACKING),
+            TextColor(theme::HERO_EYEBROW),
+            shadowed(),
             Pickable::IGNORE,
         ));
-        ui::paragraph(
-            hero,
-            "A place to explore, build and call your own.\nEvery world begins with a possibility.",
-            15.0,
-            theme::MUTED,
-        );
+        hero.spawn((
+            Hero,
+            Text::new("Make room\nfor wonder."),
+            theme::weighted(*theme::TEXT_HERO.end(), theme::BOOK),
+            bevy::text::LineHeight::RelativeToFont(1.04),
+            bevy::text::LetterSpacing::Px(theme::HERO_TRACKING * theme::TEXT_HERO.end()),
+            TextColor(theme::INK),
+            shadowed(),
+            Node {
+                margin: UiRect::new(Val::Px(0.0), Val::Px(0.0), Val::Px(16.0), Val::Px(19.0)),
+                ..default()
+            },
+            Pickable::IGNORE,
+        ));
+        hero.spawn((
+            Text::new(
+                "A place to explore, build and call your own.\nEvery world begins with a possibility.",
+            ),
+            theme::font(theme::TEXT_BODY),
+            bevy::text::LineHeight::RelativeToFont(1.8),
+            TextColor(theme::HERO_INK),
+            shadowed(),
+            Node {
+                margin: UiRect::bottom(Val::Px(26.0)),
+                ..default()
+            },
+            Pickable::IGNORE,
+        ));
         hero.spawn((
             cine::surface(theme::PANEL),
-            Node {
+            cine::framed(Node {
                 width: Val::Px(300.0),
-                margin: UiRect::top(Val::Px(18.0)),
                 padding: UiRect::all(Val::Px(10.0)),
-                border: UiRect::all(Val::Px(theme::FRAME)),
-                border_radius: BorderRadius::all(Val::Px(theme::RADIUS_PANEL)),
                 flex_direction: FlexDirection::Column,
                 row_gap: Val::Px(8.0),
                 ..default()
-            },
+            }),
         ))
         .with_children(|actions| {
-            let worlds = buttons::button(
-                actions,
-                "Your Worlds",
-                Act::Worlds,
-                ButtonStyle::Cinematic {
-                    kind: Kind::Primary,
-                    align: Align::Left,
-                },
-            );
-            let create = buttons::button(
-                actions,
-                "Create a World",
-                Act::New,
-                ButtonStyle::Cinematic {
-                    kind: Kind::Plain,
-                    align: Align::Glyph("+"),
-                },
-            );
-            buttons::button(
-                actions,
-                "Mods",
-                Act::Library,
-                ButtonStyle::Cinematic {
-                    kind: Kind::Ghost,
-                    align: Align::Left,
-                },
-            );
-            buttons::button(
-                actions,
-                "Settings",
-                Act::Settings,
-                ButtonStyle::Cinematic {
-                    kind: Kind::Ghost,
-                    align: Align::Left,
-                },
-            );
+            let action = |actions: &mut ChildSpawnerCommands, label, act, kind, align| {
+                let entity = buttons::button(actions, label, act, ButtonStyle::Cinematic { kind, align });
+                actions.commands().entity(entity).insert(Node {
+                    min_height: Val::Px(47.0),
+                    padding: UiRect::axes(Val::Px(18.0), Val::Px(13.0)),
+                    border: UiRect::all(Val::Px(theme::RULE)),
+                    border_radius: BorderRadius::all(Val::Px(theme::RADIUS_CONTROL)),
+                    align_items: AlignItems::Center,
+                    justify_content: JustifyContent::Center,
+                    column_gap: Val::Px(8.0),
+                    ..default()
+                });
+                entity
+            };
+            let worlds = action(actions, "Your Worlds", Act::Worlds, Kind::Primary, Align::After("\u{2192}"));
+            let create = action(actions, "Create a World", Act::New, Kind::Plain, Align::After("+"));
+            action(actions, "Mods", Act::Library, Kind::Ghost, Align::After("\u{25c7}"));
+            action(actions, "Settings", Act::Settings, Kind::Ghost, Align::Icon(IconKind::Settings));
+            action(actions, "Quit", Act::Quit, Kind::Ghost, Align::Centre);
             if installed.game.is_none() {
                 actions
                     .commands()
@@ -279,13 +356,22 @@ fn title(main: &mut ChildSpawnerCommands, l: &Launcher, installed: &Installed) -
             });
         });
         if installed.game.is_none() {
-            ui::paragraph(hero, NO_GAME, 13.0, theme::WARNING);
+            hero.spawn(Node {
+                margin: UiRect::top(Val::Px(14.0)),
+                max_width: Val::Px(300.0),
+                ..default()
+            })
+            .with_children(|well| {
+                well.spawn(cine::error_well()).with_children(|w| {
+                    ui::paragraph(w, NO_GAME, theme::TEXT_SMALL, theme::DANGER_INK)
+                });
+            });
             if let Some(error) = &installed.error {
                 ui::paragraph(
                     hero,
                     format!("Installed Mods could not be read: {error}"),
-                    12.0,
-                    theme::MUTED,
+                    theme::TEXT_SMALL,
+                    theme::HERO_INK,
                 );
             }
         }
@@ -297,44 +383,58 @@ fn title(main: &mut ChildSpawnerCommands, l: &Launcher, installed: &Installed) -
             .unwrap_or_default();
         main.spawn((
             cine::surface(theme::PANEL),
-            Node {
+            cine::framed(Node {
                 position_type: PositionType::Absolute,
-                right: Val::Px(34.0),
-                bottom: Val::Px(24.0),
-                width: Val::Px(290.0),
-                padding: UiRect::all(Val::Px(18.0)),
-                border: UiRect::all(Val::Px(2.0)),
-                border_radius: BorderRadius::all(Val::Px(8.0)),
+                right: Val::Px(theme::SCREEN_PAD_X),
+                bottom: Val::Px(22.0 + 10.0),
+                width: Val::Px(275.0),
+                padding: UiRect::all(Val::Px(17.0)),
                 flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(6.0),
+                align_items: AlignItems::FlexStart,
                 ..default()
-            },
+            }),
         ))
         .with_children(|card| {
-            buttons::eyebrow(card, "CONTINUE", Eyebrow::Cinematic);
-            ui::weighted_text(card, entry.name().unwrap_or(UNNAMED), 17.0, 600, theme::INK);
+            card.spawn(Node {
+                margin: UiRect::bottom(Val::Px(12.0)),
+                ..default()
+            })
+            .with_children(|e| buttons::eyebrow(e, "CONTINUE", Eyebrow::Cinematic));
+            ui::weighted_text(
+                card,
+                entry.name().unwrap_or(UNNAMED),
+                theme::TEXT_SMALL,
+                theme::BOLD,
+                theme::INK,
+            );
             if let Some(d) = entry.details() {
-                ui::paragraph(
-                    card,
-                    format!(
-                        "{} · played {}",
-                        game_label(d.game.as_ref()),
-                        relative(d.last_played_unix_s)
-                    ),
-                    13.0,
-                    theme::MUTED,
-                );
+                card.spawn(Node {
+                    margin: UiRect::new(Val::Px(0.0), Val::Px(0.0), Val::Px(6.0), Val::Px(15.0)),
+                    ..default()
+                })
+                .with_children(|line| {
+                    ui::paragraph(
+                        line,
+                        format!(
+                            "{} \u{00b7} Played {}",
+                            game_title(d.game.as_ref()),
+                            relative(d.last_played_unix_s)
+                        ),
+                        theme::TEXT_SMALL,
+                        theme::MUTED,
+                    )
+                });
             }
             for line in &unmet {
-                ui::paragraph(card, line, 12.0, theme::WARNING);
+                ui::paragraph(card, line, theme::TEXT_SMALL, theme::WARNING);
             }
             let button = buttons::button(
                 card,
-                "Continue",
+                "Continue \u{2192}",
                 Act::Continue,
                 ButtonStyle::Cinematic {
                     kind: Kind::Primary,
-                    align: Align::Left,
+                    align: Align::Centre,
                 },
             );
             if unmet.is_empty() {

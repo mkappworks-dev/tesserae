@@ -17,6 +17,10 @@ pub(super) enum Align<'a> {
     Left,
     /// Left, with a glyph such as a key or `+` at the right.
     Glyph(&'a str),
+    /// Centred, with a glyph such as `→` just after the label.
+    After(&'a str),
+    /// Centred, with an icon just after the label, for a glyph the font lacks.
+    Icon(IconKind),
 }
 
 /// How a button looks.
@@ -304,10 +308,9 @@ fn cinematic(
                 border: UiRect::all(Val::Px(theme::RULE)),
                 border_radius: BorderRadius::all(Val::Px(theme::RADIUS_CONTROL)),
                 align_items: AlignItems::Center,
-                justify_content: if align == Align::Centre {
-                    JustifyContent::Center
-                } else {
-                    JustifyContent::SpaceBetween
+                justify_content: match align {
+                    Align::Left | Align::Glyph(_) => JustifyContent::SpaceBetween,
+                    _ => JustifyContent::Center,
                 },
                 column_gap: Val::Px(8.0),
                 flex_shrink: 0.0,
@@ -318,10 +321,12 @@ fn cinematic(
         ))
         .with_children(|b| {
             spawn_label(b, label.into());
-            if let Align::Glyph(glyph) = align
-                && !glyph.is_empty()
-            {
-                spawn_label(b, glyph.into());
+            match align {
+                Align::Glyph(glyph) | Align::After(glyph) if !glyph.is_empty() => {
+                    spawn_label(b, glyph.into());
+                }
+                Align::Icon(kind) => icon(b, kind, ink, theme::TEXT_SMALL),
+                _ => {}
             }
         })
         .id()

@@ -890,15 +890,17 @@ fn search_presentation(
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum IconKind {
     Search,
     Reset,
     Close,
     Sync,
     Uncapped,
+    /// Inter has no ⚙.
+    Settings,
 }
-const ICONS: usize = 5;
+const ICONS: usize = 6;
 #[derive(Component)]
 pub(super) struct Icon(pub IconKind, pub Color);
 #[derive(Resource)]
@@ -921,6 +923,13 @@ fn make_icons(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
         for x in 0..width {
             let i = x / 64;
             let p = Vec2::new(((x % 64) as f32 + 0.5) / 4.0, (y as f32 + 0.5) / 4.0);
+            if i == IconKind::Settings as usize {
+                let p = Vec2::new((x % 64) as f32 + 0.5, y as f32 + 0.5) * 24.0 / 64.0;
+                let alpha = (gear(p) * 255.0).round() as u8;
+                data[(y * width + x) * 4..(y * width + x) * 4 + 4]
+                    .copy_from_slice(&[255, 255, 255, alpha]);
+                continue;
+            }
             let ink = match i {
                 0 => {
                     (p.distance(Vec2::new(6.5, 6.5)) - 3.5).abs() < 0.6
@@ -992,6 +1001,16 @@ fn make_icons(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
         icons,
         empty_border,
     });
+}
+/// How much of a pixel at `p`, in a 24-unit icon grid, a filled gear with
+/// eight teeth covers.
+fn gear(p: Vec2) -> f32 {
+    const UNITS_PER_PIXEL: f32 = 24.0 / 64.0;
+    let d = p - Vec2::splat(12.0);
+    let teeth = (d.y.atan2(d.x) * 8.0).cos();
+    let outer = if teeth > 0.0 { 9.5 } else { 7.6 };
+    let signed = (d.length() - outer).max(3.2 - d.length());
+    (0.5 - signed / UNITS_PER_PIXEL).clamp(0.0, 1.0)
 }
 fn materialize_icons(
     mut commands: Commands,

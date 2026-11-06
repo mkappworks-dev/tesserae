@@ -25,6 +25,7 @@ use tesserae_core::save::GameMode;
 use tesserae_core::save::library::{self, Entry, GameRef, Sidecar};
 
 use super::menu_ui::{self as ui, Tone};
+use super::theme;
 use crate::launch::{BiomePreview, Installed};
 use crate::launch::{Switch, Target};
 use crate::open::{OpenRequest, What};
@@ -626,6 +627,7 @@ fn logic(app: &mut App) {
                 filter,
                 placeholders,
                 opening,
+                (hero_size, header_hover, paint_scenery),
             )
                 .chain()
                 .run_if(in_list),
@@ -1068,11 +1070,138 @@ fn relative(then_s: u64) -> String {
     let ago = library::now_unix_s().saturating_sub(then_s);
     match ago {
         0..60 => "just now".into(),
-        60..3600 => format!("{} min ago", ago / 60),
-        3600..86_400 => format!("{} h ago", ago / 3600),
+        60..120 => "1 minute ago".into(),
+        120..3600 => format!("{} minutes ago", ago / 60),
+        3600..7200 => "1 hour ago".into(),
+        7200..86_400 => format!("{} hours ago", ago / 3600),
         86_400..172_800 => "yesterday".into(),
         _ => format!("{} days ago", ago / 86_400),
     }
+}
+
+/// The headline follows the window's width as the prototype's `clamp()` does.
+fn hero_size(
+    mut heroes: Query<(&mut TextFont, &mut bevy::text::LetterSpacing), With<pages::Hero>>,
+    roots: Query<&ComputedNode, With<Root>>,
+) {
+    let Some(root) = roots.iter().next() else {
+        return;
+    };
+    let width = root.size().x * root.inverse_scale_factor();
+    if width <= 0.0 {
+        return;
+    }
+    let size = if width >= theme::WIDE_WINDOW {
+        theme::TEXT_HERO_WIDE
+    } else {
+        (width * theme::TEXT_HERO_VW / 100.0)
+            .clamp(*theme::TEXT_HERO.start(), *theme::TEXT_HERO.end())
+    };
+    for (mut font, mut spacing) in &mut heroes {
+        let wanted = bevy::text::FontSize::Px(size);
+        if font.font_size != wanted {
+            font.font_size = wanted;
+            font.font_variations = theme::optical(size);
+            *spacing = bevy::text::LetterSpacing::Px(theme::HERO_TRACKING * size);
+        }
+    }
+}
+
+fn header_hover(
+    mut buttons: Query<
+        (
+            Entity,
+            &bevy::picking::hover::Hovered,
+            &mut BackgroundColor,
+            &mut BorderColor,
+            &mut Outline,
+        ),
+        With<pages::HeaderButton>,
+    >,
+    focus: Res<InputFocus>,
+    visible: Option<Res<bevy::input_focus::InputFocusVisible>>,
+) {
+    let focused = ui::visible_focus(Some(&focus), visible.as_deref());
+    for (entity, hovered, mut fill, mut edge, mut outline) in &mut buttons {
+        let (f, e) = if hovered.0 {
+            (theme::QUIET_HOVER, theme::QUIET_HOVER_EDGE)
+        } else {
+            (Color::NONE, theme::ICON_EDGE)
+        };
+        fill.set_if_neq(BackgroundColor(f));
+        edge.set_if_neq(BorderColor::all(e));
+        let ring = if focused == Some(entity) {
+            theme::FOCUS
+        } else {
+            Color::NONE
+        };
+        if outline.color != ring {
+            outline.color = ring;
+        }
+    }
+}
+
+/// What the scenery was last painted at, per filter.
+#[derive(Default)]
+struct Painted {
+    size: UVec2,
+    image: Option<Handle<Image>>,
+    at_s: f32,
+}
+
+/// Paints the scenery for each backdrop at its size, again after a resize
+/// once the size has held for a moment.
+fn paint_scenery(
+    mut commands: Commands,
+    backdrops: Query<(Entity, &pages::Backdrop, &ComputedNode, Option<&ImageNode>)>,
+    images: Option<ResMut<Assets<Image>>>,
+    time: Res<Time<Real>>,
+    mut painted: Local<[Painted; 2]>,
+) {
+    use super::scenery;
+    const SETTLE_S: f32 = 0.2;
+    let Some(mut images) = images else {
+        return;
+    };
+    let now = time.elapsed_secs();
+    for (entity, backdrop, node, shown) in &backdrops {
+        let size = node.size().round().as_uvec2();
+        if size.x == 0 || size.y == 0 {
+            continue;
+        }
+        let slot = &mut painted[usize::from(backdrop.0 == scenery::SOFT)];
+        let stale = slot.size != size;
+        if stale && (slot.image.is_none() || now - slot.at_s >= SETTLE_S) {
+            let scale = 1.0 / node.inverse_scale_factor();
+            let image = Image::new(
+                bevy::render::render_resource::Extent3d {
+                    width: size.x,
+                    height: size.y,
+                    depth_or_array_layers: 1,
+                },
+                bevy::render::render_resource::TextureDimension::D2,
+                scenery::paint(size.x, size.y, scale, backdrop.0),
+                bevy::render::render_resource::TextureFormat::Rgba8UnormSrgb,
+                bevy::asset::RenderAssetUsages::RENDER_WORLD,
+            );
+            slot.image = Some(images.add(image));
+            slot.size = size;
+            slot.at_s = now;
+        } else if stale {
+            continue;
+        }
+        let Some(image) = slot.image.clone() else {
+            continue;
+        };
+        if shown.is_none_or(|shown| shown.image != image) {
+            commands.entity(entity).insert(ImageNode::new(image));
+        }
+    }
+}
+
+/// A Game as the launcher names it: its title, without the version.
+fn game_title(game: Option<&GameRef>) -> String {
+    game.map_or_else(|| "No Game".into(), |g| ui::title(&g.id))
 }
 
 fn game_label(game: Option<&GameRef>) -> String {
