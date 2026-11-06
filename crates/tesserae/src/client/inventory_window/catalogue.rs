@@ -1,8 +1,9 @@
 //! The Catalogue beside the Inventory: search, categories and the Materials as
 //! tiles. A take is an intent the Server answers like any other change.
 
-use crate::client::buttons::{self, ButtonStyle, Eyebrow};
-use bevy::input_focus::{FocusCause, InputFocus};
+use crate::client::buttons::{self, Eyebrow};
+use crate::client::cinematic::Kind;
+use bevy::input_focus::{FocusCause, InputFocus, InputFocusVisible};
 use bevy::picking::events::PointerDragStart;
 use bevy::picking::hover::Hovered;
 use bevy::picking::pointer::PointerButton;
@@ -11,7 +12,8 @@ use bevy::ui_widgets::{Activate, ScrollArea};
 use tesserae_core::inventory::{Destination, Slot};
 use tesserae_core::{MaterialId, SHAPE_FULL_CUBE};
 
-use super::{INK, InventoryWindow, RULE, SOFT, weighted};
+use super::look::{self, Flat, Flavour};
+use super::{InventoryWindow, item_shadow};
 use crate::client::edit::{Catalogue, Holding, Hotbar};
 use crate::client::menu_ui::{self as ui, Searches};
 use crate::client::theme;
@@ -30,13 +32,12 @@ const TILE_PX: f32 =
 /// Two clicks on one tile within this make a double-click.
 const DOUBLE_CLICK_S: f64 = 0.4;
 const COUNT_PRESETS: [u32; 3] = [1, 16, MAX_STACK];
-
-const PANEL: Color = Color::srgb_u8(11, 11, 13);
-const FOOTER: Color = Color::srgb_u8(14, 14, 17);
-const FOOTER_RULE: Color = Color::srgb_u8(52, 52, 60);
-const SUBTITLE: Color = Color::srgb_u8(169, 173, 182);
-const TILE_SELECTED: Color = Color::srgb_u8(44, 48, 42);
-const MONO: Color = Color::srgb_u8(159, 164, 173);
+const SEARCH_PX: f32 = 37.0;
+const TILE_MIN_PX: f32 = 66.0;
+const TILE_ICON_PX: f32 = 30.0;
+const CHOSEN_ICON_PX: f32 = 34.0;
+const COUNT_LABEL_PX: f32 = 42.0;
+const PRESET_PX: f32 = 30.0;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub(super) enum Category {
@@ -254,21 +255,16 @@ pub(super) fn panel(row: &mut ChildSpawnerCommands, query: &str) {
             flex_shrink: 0.0,
             flex_direction: FlexDirection::Column,
             border: UiRect::all(Val::Px(PANEL_BORDER_PX)),
-            border_radius: BorderRadius::all(Val::Px(9.0)),
+            border_radius: BorderRadius::all(Val::Px(theme::ITEM_RADIUS)),
             overflow: Overflow::clip(),
             ..default()
         },
-        BackgroundColor(PANEL),
-        BorderColor::all(Color::BLACK),
-        BoxShadow::new(
-            Color::BLACK.with_alpha(0.65),
-            Val::Px(0.0),
-            Val::Px(20.0),
-            Val::Px(0.0),
-            Val::Px(60.0),
-        ),
+        BackgroundColor(theme::ITEM_SURFACE),
+        BorderColor::all(theme::GROUT),
+        item_shadow(),
     ))
     .with_children(|panel| {
+        panel.spawn(theme::ring(theme::ITEM_RADIUS));
         panel
             .spawn(Node {
                 flex_direction: FlexDirection::Column,
@@ -283,12 +279,17 @@ pub(super) fn panel(row: &mut ChildSpawnerCommands, query: &str) {
             })
             .with_children(|header| {
                 buttons::eyebrow(header, "CREATIVE", Eyebrow::Inventory);
-                header.spawn(weighted("Catalogue", 19.0, 550, INK));
-                header.spawn(weighted(
+                header.spawn(look::label(
+                    "Catalogue",
+                    theme::ITEM_TEXT_HEADING,
+                    theme::LABEL,
+                    theme::INK,
+                ));
+                header.spawn(look::label(
                     "Drag a Material into any slot",
-                    12.0,
-                    400,
-                    SUBTITLE,
+                    theme::TEXT_EYEBROW,
+                    theme::REGULAR,
+                    theme::CATALOGUE_SUBTITLE,
                 ));
             });
         panel
@@ -297,7 +298,7 @@ pub(super) fn panel(row: &mut ChildSpawnerCommands, query: &str) {
                 ..default()
             })
             .with_children(|search| {
-                let input = ui::search_frame(search, ui::Tab::Catalogue, query, 36.0);
+                let input = ui::search_frame(search, ui::Tab::Catalogue, query, SEARCH_PX);
                 search.commands().entity(input).insert(SearchBox);
             });
         panel.spawn((
@@ -344,8 +345,8 @@ pub(super) fn panel(row: &mut ChildSpawnerCommands, query: &str) {
                 border: UiRect::top(Val::Px(1.0)),
                 ..default()
             },
-            BackgroundColor(FOOTER),
-            BorderColor::all(FOOTER_RULE),
+            BackgroundColor(theme::CATALOGUE_FOOTER),
+            BorderColor::all(theme::ITEM_ROW_RULE),
         ));
     });
 }
@@ -383,15 +384,20 @@ pub(super) fn fill(
                 .despawn_related::<Children>()
                 .with_children(|row| {
                     for category in Category::ALL {
-                        buttons::button(
+                        look::flat_text(
                             row,
                             category.label(),
                             CatalogueControl::Category(category),
-                            ButtonStyle::Compact {
+                            Flat {
+                                flavour: Flavour::Chip,
                                 selected: category == side.category,
-                                height_px: 26.0,
-                                text_px: 11.0,
                             },
+                            Node {
+                                padding: UiRect::axes(Val::Px(7.0), Val::Px(5.0)),
+                                border_radius: BorderRadius::all(Val::Px(theme::RADIUS_SMALL)),
+                                ..default()
+                            },
+                            (theme::ITEM_TEXT_EYEBROW, theme::REGULAR),
                         );
                     }
                 });
@@ -412,7 +418,12 @@ pub(super) fn fill(
                         tile(grid, material, name, holding);
                     }
                     if !any {
-                        grid.spawn(weighted("No Materials match.", 12.0, 400, SOFT));
+                        grid.spawn(look::label(
+                            "No Materials match.",
+                            theme::TEXT_EYEBROW,
+                            theme::REGULAR,
+                            theme::ITEM_SOFT,
+                        ));
                     }
                 });
         }
@@ -446,6 +457,7 @@ fn preview(parent: &mut ChildSpawnerCommands, holding: Holding, size: f32) {
 }
 
 fn tile(grid: &mut ChildSpawnerCommands, material: MaterialId, name: &str, holding: Holding) {
+    let (gradient, edge, _, glow) = look::frame(look::Frame::Plain);
     grid.spawn((
         bevy::ui_widgets::Button,
         bevy::input_focus::tab_navigation::TabIndex(0),
@@ -453,23 +465,31 @@ fn tile(grid: &mut ChildSpawnerCommands, material: MaterialId, name: &str, holdi
         Hovered::default(),
         Node {
             width: Val::Px(TILE_PX),
-            min_height: Val::Px(66.0),
+            min_height: Val::Px(TILE_MIN_PX),
             flex_direction: FlexDirection::Column,
             align_items: AlignItems::Center,
             justify_content: JustifyContent::Center,
             row_gap: Val::Px(4.0),
             padding: UiRect::axes(Val::Px(3.0), Val::Px(6.0)),
-            border: UiRect::all(Val::Px(2.0)),
-            border_radius: BorderRadius::all(Val::Px(4.0)),
+            border: UiRect::all(Val::Px(theme::FRAME)),
+            border_radius: BorderRadius::all(Val::Px(theme::RADIUS_SMALL)),
             ..default()
         },
-        BackgroundColor(theme::SLOT_FILL),
-        BorderColor::all(theme::SLOT_EDGE),
+        gradient,
+        BorderColor::all(edge),
+        glow,
+        look::slot_focus(),
     ))
     .with_children(|tile| {
-        preview(tile, holding, 30.0);
+        look::bevel(tile);
+        preview(tile, holding, TILE_ICON_PX);
         tile.spawn((
-            weighted(ui::title(name), 11.0, 550, INK),
+            look::label(
+                ui::title(name),
+                theme::ITEM_TEXT_EYEBROW,
+                theme::MEDIUM,
+                theme::ITEM_INK,
+            ),
             TextLayout::new(Justify::Center, bevy::text::LineBreak::WordOrCharacter),
         ));
     });
@@ -483,7 +503,12 @@ fn transfer_rows(
     slot: Slot,
 ) {
     let Some(chosen) = material.and_then(|id| catalogue.material(id)) else {
-        footer.spawn(weighted("Choose a Material to take.", 12.0, 400, SOFT));
+        footer.spawn(look::label(
+            "Choose a Material to take.",
+            theme::TEXT_EYEBROW,
+            theme::REGULAR,
+            theme::ITEM_SOFT,
+        ));
         return;
     };
     let holding = if chosen.fluid.is_some() {
@@ -498,14 +523,24 @@ fn transfer_rows(
             ..default()
         })
         .with_children(|item| {
-            preview(item, holding, 34.0);
+            preview(item, holding, CHOSEN_ICON_PX);
             item.spawn(Node {
                 flex_direction: FlexDirection::Column,
                 ..default()
             })
             .with_children(|names| {
-                names.spawn(weighted(ui::title(&chosen.name), 14.0, 550, INK));
-                names.spawn(weighted(chosen.name.clone(), 11.0, 400, MONO));
+                names.spawn(look::label(
+                    ui::title(&chosen.name),
+                    theme::TEXT_SMALL,
+                    theme::LABEL,
+                    theme::INK,
+                ));
+                names.spawn(look::label(
+                    chosen.name.clone(),
+                    theme::ITEM_TEXT_EYEBROW,
+                    theme::REGULAR,
+                    theme::CATALOGUE_ID,
+                ));
             });
         });
     footer
@@ -517,53 +552,23 @@ fn transfer_rows(
         .with_children(|row| {
             row.spawn((
                 Node {
-                    width: Val::Px(42.0),
+                    width: Val::Px(COUNT_LABEL_PX),
                     ..default()
                 },
                 Pickable::IGNORE,
             ))
-            .with_child(weighted("Count", 12.0, 400, SOFT));
-            row.spawn((
-                Node {
-                    align_items: AlignItems::Center,
-                    border: UiRect::all(Val::Px(1.0)),
-                    border_radius: BorderRadius::all(Val::Px(4.0)),
-                    ..default()
-                },
-                BorderColor::all(RULE),
-            ))
-            .with_children(|stepper| {
-                buttons::button(
-                    stepper,
-                    "−",
-                    CatalogueControl::Fewer,
-                    ButtonStyle::Compact {
-                        selected: false,
-                        height_px: 34.0,
-                        text_px: 15.0,
-                    },
-                );
-                stepper
-                    .spawn((
-                        Node {
-                            width: Val::Px(44.0),
-                            justify_content: JustifyContent::Center,
-                            ..default()
-                        },
-                        Pickable::IGNORE,
-                    ))
-                    .with_child(weighted(side.count.to_string(), 13.0, 600, INK));
-                buttons::button(
-                    stepper,
-                    "+",
-                    CatalogueControl::More,
-                    ButtonStyle::Compact {
-                        selected: false,
-                        height_px: 34.0,
-                        text_px: 15.0,
-                    },
-                );
-            });
+            .with_child(look::label(
+                "Count",
+                theme::TEXT_EYEBROW,
+                theme::REGULAR,
+                theme::CATALOGUE_LABEL,
+            ));
+            look::stepper(
+                row,
+                (CatalogueControl::Fewer, CatalogueControl::More),
+                side.count.to_string(),
+                (look::CATALOGUE_STEPPER, true),
+            );
             row.spawn(Node {
                 margin: UiRect::left(Val::Auto),
                 column_gap: Val::Px(4.0),
@@ -571,15 +576,21 @@ fn transfer_rows(
             })
             .with_children(|presets| {
                 for count in COUNT_PRESETS {
-                    buttons::button(
+                    look::flat_text(
                         presets,
                         count.to_string(),
                         CatalogueControl::Count(count),
-                        ButtonStyle::Compact {
+                        Flat {
+                            flavour: Flavour::Preset,
                             selected: count == side.count,
-                            height_px: 30.0,
-                            text_px: 11.0,
                         },
+                        Node {
+                            min_width: Val::Px(PRESET_PX),
+                            padding: UiRect::all(Val::Px(6.0)),
+                            border_radius: BorderRadius::all(Val::Px(theme::RADIUS_SMALL)),
+                            ..default()
+                        },
+                        (theme::ITEM_TEXT_EYEBROW, theme::SEMIBOLD),
                     );
                 }
             });
@@ -593,35 +604,29 @@ fn transfer_rows(
             let Slot::Hotbar(at) = slot else {
                 return;
             };
-            for (label, control, primary) in [
+            for (label, control, kind) in [
                 (
                     "To backpack".to_owned(),
                     CatalogueControl::ToBackpack,
-                    false,
+                    Kind::Ghost,
                 ),
                 (
                     format!("To hotbar {}", at + 1),
                     CatalogueControl::ToHotbar,
-                    true,
+                    Kind::Primary,
                 ),
             ] {
-                let button = buttons::button(
-                    actions,
-                    label,
-                    control,
-                    if primary {
-                        ButtonStyle::Primary
-                    } else {
-                        ButtonStyle::Plain
-                    },
-                );
+                let button = look::button(actions, label, control, kind, look::COMPACT);
                 actions.commands().entity(button).insert(Node {
                     flex_grow: 1.0,
-                    flex_basis: Val::Px(0.0),
-                    min_height: Val::Px(38.0),
-                    padding: UiRect::axes(Val::Px(8.0), Val::Px(9.0)),
-                    border: UiRect::all(Val::Px(1.0)),
-                    border_radius: BorderRadius::all(Val::Px(5.0)),
+                    flex_basis: Val::ZERO,
+                    min_height: Val::Px(theme::ITEM_BUTTON_HEIGHT),
+                    padding: UiRect::axes(
+                        Val::Px(theme::BUTTON_PAD_X),
+                        Val::Px(theme::BUTTON_PAD_Y),
+                    ),
+                    border: UiRect::all(Val::Px(theme::RULE)),
+                    border_radius: BorderRadius::all(Val::Px(theme::RADIUS_CONTROL)),
                     align_items: AlignItems::Center,
                     justify_content: JustifyContent::Center,
                     ..default()
@@ -645,40 +650,54 @@ pub(super) fn focus_search(
     }
 }
 
-/// Hover and the chosen tile, without a rebuild.
+/// Hover, focus and the chosen tile, without a rebuild.
+#[allow(clippy::type_complexity)]
 pub(super) fn paint(
     window: Res<InventoryWindow>,
     side: Res<Side>,
     (catalogue, searches): (Res<Catalogue>, Res<Searches>),
     mut tiles: Query<(
+        Entity,
         &CatalogueControl,
         &Hovered,
-        &mut BackgroundColor,
+        &Children,
+        &mut BackgroundGradient,
         &mut BorderColor,
+        &mut BoxShadow,
+        &mut Outline,
     )>,
+    mut rims: Query<&mut BorderColor, (With<look::Rim>, Without<CatalogueControl>)>,
+    (focus, visible): (Option<Res<InputFocus>>, Option<Res<InputFocusVisible>>),
 ) {
     if !window.open {
         return;
     }
     let chosen = shown(&side, &catalogue.0, &searches.catalogue);
-    for (control, hovered, mut fill, mut border) in &mut tiles {
+    let focused = ui::visible_focus(focus.as_deref(), visible.as_deref());
+    for (entity, control, hovered, children, gradient, border, shadow, mut outline) in &mut tiles {
         let CatalogueControl::Tile(material) = *control else {
             continue;
         };
-        let selected = chosen == Some(material);
-        fill.set_if_neq(BackgroundColor(if selected {
-            TILE_SELECTED
+        let state = if chosen == Some(material) {
+            look::Frame::Active
         } else if hovered.get() {
-            theme::SLOT_HOVER
+            look::Frame::Hover
         } else {
-            theme::SLOT_FILL
-        }));
-        border.set_if_neq(BorderColor::all(if selected {
-            theme::SLOT_ACTIVE_EDGE
-        } else if hovered.get() {
-            theme::SLOT_RIM_HOVER
+            look::Frame::Plain
+        };
+        let rim = children.iter().find(|child| rims.contains(*child));
+        look::paint_frame(
+            state,
+            (gradient, border, shadow),
+            rim.and_then(|rim| rims.get_mut(rim).ok()),
+        );
+        let ring = if focused == Some(entity) {
+            theme::FOCUS_TIGHT
         } else {
-            theme::SLOT_EDGE
-        }));
+            Color::NONE
+        };
+        if outline.color != ring {
+            outline.color = ring;
+        }
     }
 }

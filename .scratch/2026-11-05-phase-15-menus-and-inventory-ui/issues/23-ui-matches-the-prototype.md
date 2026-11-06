@@ -64,3 +64,13 @@ Every screen this spec added or restyled matches the approved prototype one to o
   - **Hint wrapping**: Inter at 14 px is a little wider than the prototype's system font, so a few hints near the 320 px measure wrap one word earlier.
   - **World details overlay**: without a backdrop blur, the Menu under the 0.70 overlay reads clearer than in the prototype.
 
+
+- Fix pass D (Inventory, Catalogue, quick Layout), 2026-11-06: where the engine cannot do what the CSS does:
+  - **Monospace text** (stack counts, slot numbers, the Catalogue's count and presets, Material ids, the axis letters): the interface bundles no monospace face, so these are set in Inter at the prototype's size and weight.
+  - **Inset slot shading** (`inset 3px 3px #00000070`, `inset -2px -2px #ffffff0d`, the selected slot's inner glow): Bevy's `BoxShadow` has no inset, so a child with an uneven border draws the dark top-left and light bottom-right bands under the 1 px rim; the selected slot's 10 px inner glow is left out.
+  - **Dashed outline** on a picked-up slot: Bevy UI borders are solid, so the rim turns #e7d9a8 and the Item fades to 0.6.
+  - **Filters on the World** under the Inventory (`saturate(.8) brightness(.82)`): the scrim is deepened to #030405 at 0xdb, which lands the World at about the prototype's ×0.41 brightness without the desaturation.
+  - **SVG icons** (the storage bag, Line, Plane and Box): drawn from bordered nodes, rotated and squashed for the diamonds. Inter has no ⇆, so an axis's way reads "East ↔".
+  - **Editable counts**: the steppers' values are text, not inputs; digits typed while the Layout panel is open still set the active axis.
+  - **In-play footer**: play has none, so the Inventory centres in the full 848 px (window top 104, not 87) and the Layout panel runs to 22 px from the bottom.
+- Fix pass D, 2026-11-06: what still differs on purpose. The Layout panel keeps the live "In the World" box (from the prototype's engine parity additions) and hides its key hints as polish.css does; the closed-panel card sits top left in the prototype's look but has no Edit or Exit buttons, because play keeps the cursor grabbed, and it keeps the key hints. The Inventory shows its Shape choices only while a solid is held, since the Shape is the Player's choice for the held Material. The HUD hotbar and the cursor hint still draw under the Inventory (pass E's files).

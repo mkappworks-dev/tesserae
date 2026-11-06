@@ -771,9 +771,21 @@ fn span_counts(a: [i32; 3], b: [i32; 3], c: Option<[i32; 3]>) -> [u32; 3] {
     })
 }
 
-/// One line: the counts, then the same in metres.
-fn size_line(counts: [u32; 3], voxel_size: f32) -> String {
-    let metres = counts.map(|count| count as f32 * voxel_size);
+/// How far a row of `count` Voxels with `gap` empty Voxels between them
+/// reaches, in metres.
+pub(super) fn extent_m(count: u32, gap: u32, voxel_size: f32) -> f32 {
+    (count.saturating_sub(1) * (gap + 1) + 1) as f32 * voxel_size
+}
+
+/// Metres as the panel writes them: at most two decimals, no trailing zeros.
+pub(super) fn metres(value: f32) -> String {
+    let text = format!("{value:.2}");
+    text.trim_end_matches('0').trim_end_matches('.').to_owned()
+}
+
+/// One line: the counts, then how far they reach in metres.
+fn size_line(counts: [u32; 3], gap: u32, voxel_size: f32) -> String {
+    let metres = counts.map(|count| extent_m(count, gap, voxel_size));
     format!(
         "{} × {} × {} · {:.1} × {:.1} × {:.1} m",
         counts[0], counts[1], counts[2], metres[0], metres[1], metres[2]
@@ -979,7 +991,9 @@ pub(super) fn summary(
         Some(layout.lengths)
     }
     .map(|counts| {
-        let line = size_line(counts, voxel_size);
+        // Point to point measures the span itself, gaps and all.
+        let gap = if between { 0 } else { layout.gap };
+        let line = size_line(counts, gap, voxel_size);
         if between {
             line
         } else {
