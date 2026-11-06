@@ -5,22 +5,26 @@
 //! It is its own input context, as the Layout menu is: the cursor is free and
 //! gameplay input waits until it closes.
 
-use crate::client::buttons::{self, ButtonStyle, Eyebrow};
+use crate::client::buttons::{self, Eyebrow};
+use crate::client::cinematic::Kind;
 use bevy::input_focus::InputFocus;
 use bevy::picking::events::{PointerDragDrop, PointerDragEnd, PointerDragStart, PointerPress};
 use bevy::picking::hover::Hovered;
 use bevy::picking::pointer::PointerButton;
 use bevy::prelude::*;
-use bevy::ui_widgets::Activate;
+use bevy::ui::InteractionDisabled;
+use bevy::ui_widgets::{Activate, ScrollArea};
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
 use tesserae_core::inventory::{BACKPACK_SLOTS, HOTBAR_SLOTS, Inventory, Slot, Stack};
+use tesserae_core::{MaterialId, ShapeId};
 
 mod catalogue;
+pub(super) mod look;
 
 use super::actions::{Action, Actions};
 use super::drops::Looks;
 use super::edit::{Catalogue, Holding};
-use super::menu_ui::{self as ui, font};
+use super::menu_ui as ui;
 use super::theme;
 use super::tile_preview::TilePreview;
 use crate::server::inventory::{InventoryChanged, InventoryIntent, InventoryRefused, MAX_STACK};
@@ -29,23 +33,14 @@ use crate::session::SessionApp;
 const SLOT_PX: f32 = 52.0;
 const SLOT_GAP_PX: f32 = 4.0;
 const GRID_PX: f32 = SLOT_PX * HOTBAR_SLOTS as f32 + SLOT_GAP_PX * (HOTBAR_SLOTS - 1) as f32;
+const SLOT_ICON_PX: f32 = 32.0;
 const INSPECTOR_PX: f32 = 220.0;
-
-/// The World dims without blur, as Minecraft and Luanti do; only menus blur.
-const SURFACE: Color = Color::srgb_u8(11, 11, 13);
-const HEADER: Color = Color::srgb_u8(17, 17, 19);
-const FOOTER: Color = Color::srgb_u8(13, 13, 16);
-const INSPECTOR: Color = Color::srgb_u8(19, 19, 21);
-const RULE: Color = Color::srgb_u8(69, 69, 76);
-const FOOTER_RULE: Color = Color::srgb_u8(85, 85, 94);
-const ROW_RULE: Color = Color::srgb_u8(52, 52, 60);
-const RIM_INSPECTED: Color = Color::srgb_u8(201, 209, 189);
-const PICKED: Color = Color::srgb_u8(231, 217, 168);
-const DROP_TARGET: Color = Color::srgb_u8(214, 200, 143);
-const FULL: Color = Color::srgb_u8(232, 210, 159);
-const INK: Color = Color::srgb_u8(244, 244, 237);
-const SOFT: Color = Color::srgb_u8(173, 175, 185);
-const SOURCE: Color = Color::srgb_u8(153, 156, 167);
+const INSPECTOR_ICON_PX: f32 = 80.0;
+const EMPTY_PX: f32 = 100.0;
+const EMPTY_ICON_PX: f32 = 40.0;
+const NOTE_LINE_HEIGHT: f32 = 1.7;
+/// Below this window width the details column is a toggle, as in the prototype.
+const NARROW_PX: f32 = 1180.0;
 
 #[derive(Resource, Default)]
 pub(super) struct InventoryWindow {
@@ -104,10 +99,6 @@ enum Control {
 #[derive(Component)]
 struct SlotCount;
 
-/// The inner rim of a slot, which carries its hover, inspected and picked state.
-#[derive(Component)]
-struct SlotRim;
-
 pub(super) fn plugin(app: &mut App) {
     app.init_session_state::<InventoryWindow>()
         .init_session_state::<Held>()
@@ -119,7 +110,7 @@ pub(super) fn plugin(app: &mut App) {
         .add_observer(drag_start)
         .add_observer(drag_end)
         .add_observer(drop_on_slot)
-        .add_plugins(catalogue::plugin)
+        .add_plugins((catalogue::plugin, look::plugin))
         .add_session_systems(
             Update,
             (
@@ -377,11 +368,19 @@ struct Built {
     key: String,
     /// The Catalogue is beside the Inventory only outside Survival.
     survival: bool,
+    /// Too narrow for the details column beside the grid, so it is toggled.
+    narrow: bool,
     /// The Material the selected slot places and the Shape chosen for it.
     shaping: Option<(tesserae_core::MaterialId, tesserae_core::ShapeId)>,
 }
 
-type Frame<'w, 's> = (
+impl Built {
+    fn details_shown(&self) -> bool {
+        !self.narrow || self.details
+    }
+}
+
+type Parts<'w, 's> = (
     Query<'w, 's, Entity, With<WindowRoot>>,
     Query<'w, 's, Entity, With<WindowRow>>,
     Query<'w, 's, Entity, With<Card>>,
@@ -395,13 +394,13 @@ fn render(
     held: Res<Held>,
     (looks, catalogue, searches): (Res<Looks>, Res<Catalogue>, Res<super::menu_ui::Searches>),
     (bindings, labels): (Res<super::actions::Bindings>, Res<super::actions::Labels>),
-    (roots, rows, cards, controls): Frame,
+    (roots, rows, cards, controls): Parts,
     (mode, hotbar, preferences): (
         Res<super::game_mode::Mode>,
         Res<super::edit::Hotbar>,
         Res<super::profile::Preferences>,
     ),
-    focus: Option<Res<InputFocus>>,
+    (focus, screen): (Option<Res<InputFocus>>, Single<&Window, With<PrimaryWindow>>),
     mut built: Local<Option<Built>>,
 ) {
     let wanted = window.open.then(|| Built {
@@ -411,6 +410,7 @@ fn render(
         details: window.details,
         key: bindings.label(Action::Inventory, &labels),
         survival: mode.survival(),
+        narrow: screen.width() < NARROW_PX,
         shaping: match hotbar.held() {
             Holding::Solid {
                 material, shape, ..
@@ -454,8 +454,10 @@ fn render(
                 .spawn((
                     WindowRow,
                     Node {
-                        max_height: Val::Percent(96.0),
-                        column_gap: Val::Px(14.0),
+                        height: Val::Px(theme::ITEM_WINDOW_HEIGHT),
+                        max_height: Val::Percent(100.0),
+                        column_gap: Val::Px(theme::ITEM_GAP),
+                        align_items: AlignItems::Stretch,
                         ..default()
                     },
                 ))
@@ -497,26 +499,26 @@ fn render(
             ChildOf(row),
             Node {
                 flex_direction: FlexDirection::Column,
-                border: UiRect::all(Val::Px(2.0)),
-                border_radius: BorderRadius::all(Val::Px(9.0)),
+                border: UiRect::all(Val::Px(theme::FRAME)),
+                border_radius: BorderRadius::all(Val::Px(theme::ITEM_RADIUS)),
                 overflow: Overflow::clip(),
                 ..default()
             },
-            BackgroundColor(SURFACE),
-            BorderColor::all(Color::BLACK),
-            BoxShadow::new(
-                Color::BLACK.with_alpha(0.65),
-                Val::Px(0.0),
-                Val::Px(20.0),
-                Val::Px(0.0),
-                Val::Px(60.0),
-            ),
+            BackgroundColor(theme::ITEM_SURFACE),
+            BorderColor::all(theme::GROUT),
+            item_shadow(),
         ))
         .with_children(|card| {
-            header(card, &state.key);
-            card.spawn(Node::default()).with_children(|main| {
+            card.spawn(theme::ring(theme::ITEM_RADIUS));
+            header(card, &state);
+            card.spawn(Node {
+                flex_grow: 1.0,
+                min_height: Val::Px(0.0),
+                ..default()
+            })
+            .with_children(|main| {
                 backpack(main, &state, &names);
-                if state.details {
+                if state.details_shown() {
                     details(main, &state, &names);
                 }
             });
@@ -536,6 +538,18 @@ fn render(
             focus.set(entity, bevy::input_focus::FocusCause::Auto);
         }
     });
+}
+
+/// The Inventory's and the Catalogue's drop shadow, a little deeper than a
+/// menu panel's.
+pub(super) fn item_shadow() -> BoxShadow {
+    BoxShadow::new(
+        Color::BLACK.with_alpha(theme::ITEM_SHADOW_ALPHA),
+        Val::ZERO,
+        Val::Px(20.0),
+        Val::ZERO,
+        Val::Px(60.0),
+    )
 }
 
 /// How an Item reads on screen: its name, its icon and the Material it places.
@@ -571,39 +585,38 @@ impl Names<'_> {
         let name = &self.catalogue.0.material(material)?.name;
         (name != item).then_some(name.as_str())
     }
+
+    /// The Shape a stack is placed in: the Player's choice for the Material
+    /// in hand, the Catalogue's first Shape for any other solid.
+    fn shape(&self, item: &str, shaping: Option<(MaterialId, ShapeId)>) -> Option<String> {
+        let Holding::Solid { material, .. } =
+            super::edit::item_holding(item, &self.looks.0, &self.catalogue.0)
+        else {
+            return None;
+        };
+        let shapes = &self.catalogue.0.shapes;
+        let chosen = shaping
+            .filter(|(held, _)| *held == material)
+            .and_then(|(_, shape)| shapes.iter().find(|s| s.id == shape))
+            .or(shapes.first());
+        Some(chosen.map_or_else(|| "Cube".to_owned(), |shape| ui::title(&shape.name)))
+    }
 }
 
-pub(super) fn weighted(
-    value: impl Into<String>,
-    size: f32,
-    weight: u16,
-    color: Color,
-) -> impl Bundle {
-    (
-        Text::new(value),
-        TextFont {
-            weight: bevy::text::FontWeight(weight),
-            ..font(size)
-        },
-        bevy::text::LineHeight::RelativeToFont(1.25),
-        TextColor(color),
-        Pickable::IGNORE,
-    )
-}
-
-fn header(card: &mut ChildSpawnerCommands, key: &str) {
+fn header(card: &mut ChildSpawnerCommands, state: &Built) {
     card.spawn((
         Node {
-            min_height: Val::Px(64.0),
-            padding: UiRect::axes(Val::Px(18.0), Val::Px(0.0)),
+            min_height: Val::Px(theme::ITEM_HEADER_HEIGHT),
+            padding: UiRect::axes(Val::Px(18.0), Val::ZERO),
             align_items: AlignItems::Center,
             justify_content: JustifyContent::SpaceBetween,
             column_gap: Val::Px(12.0),
-            border: UiRect::bottom(Val::Px(1.0)),
+            border: UiRect::bottom(Val::Px(theme::RULE)),
+            flex_shrink: 0.0,
             ..default()
         },
-        BackgroundColor(HEADER),
-        BorderColor::all(RULE),
+        BackgroundColor(theme::SHEET_HEADER),
+        BorderColor::all(theme::ITEM_RULE),
     ))
     .with_children(|header| {
         header
@@ -613,25 +626,36 @@ fn header(card: &mut ChildSpawnerCommands, key: &str) {
                 ..default()
             })
             .with_children(|title| {
-                title.spawn(weighted("Inventory", 19.0, 550, INK));
+                look::storage_icon(title, theme::ICON_SIZE, theme::INK);
+                title.spawn(look::label(
+                    "Inventory",
+                    theme::ITEM_TEXT_HEADING,
+                    theme::LABEL,
+                    theme::INK,
+                ));
                 title
                     .spawn((
                         Node {
                             min_width: Val::Px(20.0),
                             padding: UiRect::axes(Val::Px(5.0), Val::Px(2.0)),
                             border: UiRect {
-                                bottom: Val::Px(2.0),
-                                ..UiRect::all(Val::Px(1.0))
+                                bottom: Val::Px(theme::FRAME),
+                                ..UiRect::all(Val::Px(theme::RULE))
                             },
-                            border_radius: BorderRadius::all(Val::Px(3.0)),
+                            border_radius: BorderRadius::all(Val::Px(theme::RADIUS_TAG)),
                             justify_content: JustifyContent::Center,
                             ..default()
                         },
-                        BackgroundColor(Color::BLACK.with_alpha(0.73)),
-                        BorderColor::all(Color::WHITE.with_alpha(0.3)),
+                        BackgroundColor(theme::KEY_CHIP),
+                        BorderColor::all(theme::KEY_CHIP_EDGE),
                         Pickable::IGNORE,
                     ))
-                    .with_child(weighted(key, 10.0, 600, INK));
+                    .with_child(look::label(
+                        state.key.clone(),
+                        theme::TEXT_KEY,
+                        theme::SEMIBOLD,
+                        theme::KEY_CHIP_INK,
+                    ));
             });
         header
             .spawn(Node {
@@ -640,26 +664,47 @@ fn header(card: &mut ChildSpawnerCommands, key: &str) {
                 ..default()
             })
             .with_children(|context| {
-                buttons::button(
-                    context,
-                    "i",
-                    Control::Details,
-                    ButtonStyle::Compact {
-                        selected: false,
-                        height_px: 38.0,
-                        text_px: 13.0,
-                    },
-                );
-                buttons::button(
-                    context,
-                    "×",
-                    Control::Close,
-                    ButtonStyle::Compact {
-                        selected: false,
-                        height_px: 38.0,
-                        text_px: 13.0,
-                    },
-                );
+                if state.narrow {
+                    look::flat_text(
+                        context,
+                        "i",
+                        Control::Details,
+                        look::Flat {
+                            flavour: look::Flavour::Close,
+                            selected: state.details,
+                        },
+                        Node {
+                            width: Val::Px(theme::CLOSE_SIZE),
+                            height: Val::Px(theme::CLOSE_SIZE),
+                            border_radius: BorderRadius::all(Val::Px(theme::RADIUS_CONTROL)),
+                            ..default()
+                        },
+                        (theme::TEXT_SMALL, theme::SEMIBOLD),
+                    );
+                }
+                context
+                    .spawn((
+                        Node {
+                            padding: UiRect::axes(Val::Px(9.0), Val::Px(6.0)),
+                            border: UiRect::all(Val::Px(theme::RULE)),
+                            border_radius: BorderRadius::all(Val::Px(theme::RADIUS_SMALL)),
+                            ..default()
+                        },
+                        BackgroundColor(theme::BADGE),
+                        BorderColor::all(theme::BADGE_EDGE),
+                        Pickable::IGNORE,
+                    ))
+                    .with_child(look::label(
+                        if state.survival {
+                            "Survival · reference only"
+                        } else {
+                            "Creative access"
+                        },
+                        theme::ITEM_TEXT_EYEBROW,
+                        theme::REGULAR,
+                        theme::BADGE_INK,
+                    ));
+                look::close(context, Control::Close);
             });
     });
 }
@@ -669,6 +714,7 @@ fn backpack(main: &mut ChildSpawnerCommands, state: &Built, names: &Names) {
     let full = used == BACKPACK_SLOTS;
     main.spawn(Node {
         flex_direction: FlexDirection::Column,
+        flex_grow: 1.0,
         padding: UiRect::axes(Val::Px(22.0), Val::Px(20.0)),
         ..default()
     })
@@ -690,7 +736,12 @@ fn backpack(main: &mut ChildSpawnerCommands, state: &Built, names: &Names) {
                     })
                     .with_children(|title| {
                         buttons::eyebrow(title, "YOUR ITEMS", Eyebrow::Inventory);
-                        title.spawn(weighted("Backpack", 23.0, 500, INK));
+                        title.spawn(look::label(
+                            "Backpack",
+                            theme::ITEM_TEXT_TITLE,
+                            theme::MEDIUM,
+                            theme::INK,
+                        ));
                     });
                 heading
                     .spawn(Node {
@@ -701,38 +752,42 @@ fn backpack(main: &mut ChildSpawnerCommands, state: &Built, names: &Names) {
                     .with_children(|row| {
                         let capacity = format!("{used} / {BACKPACK_SLOTS} slots");
                         row.spawn(if full {
-                            weighted(format!("Full · {capacity}"), 11.0, 600, FULL)
+                            look::label(
+                                format!("Full · {capacity}"),
+                                theme::TEXT_EYEBROW,
+                                theme::SEMIBOLD,
+                                theme::ITEM_FULL,
+                            )
                         } else {
-                            weighted(capacity, 11.0, 400, SOFT)
+                            look::label(
+                                capacity,
+                                theme::TEXT_EYEBROW,
+                                theme::REGULAR,
+                                theme::ITEM_CAPACITY,
+                            )
                         });
-                        buttons::button(
-                            row,
-                            "Sort",
-                            Control::Sort,
-                            ButtonStyle::Compact {
-                                selected: false,
-                                height_px: 36.0,
-                                text_px: 12.0,
-                            },
-                        );
+                        look::button(row, "Sort", Control::Sort, Kind::Ghost, look::SMALL);
                     });
             });
         grid(browser, state, names, Slot::Backpack, BACKPACK_SLOTS);
         browser
             .spawn(Node {
                 width: Val::Px(GRID_PX),
-                padding: UiRect::axes(Val::Px(0.0), Val::Px(17.0)),
+                padding: UiRect::axes(Val::ZERO, Val::Px(8.0)),
                 ..default()
             })
-            .with_child(weighted(
-                if state.picked.is_some() {
-                    "Stack selected. Choose a destination, or select the source again to cancel."
-                } else {
-                    "Click to move · Shift-click for quick transfer · Drag and drop supported"
-                },
-                12.0,
-                400,
-                SOFT,
+            .with_child((
+                look::label(
+                    if state.picked.is_some() {
+                        "Stack selected. Choose a destination, or select the source again to cancel."
+                    } else {
+                        "Click to move · Shift-click for quick transfer · Drag and drop supported"
+                    },
+                    theme::TEXT_EYEBROW,
+                    theme::REGULAR,
+                    theme::ITEM_SOFT,
+                ),
+                bevy::text::LineHeight::RelativeToFont(theme::LINE_HEIGHT),
             ));
     });
 }
@@ -750,6 +805,7 @@ fn grid(
             flex_wrap: FlexWrap::Wrap,
             row_gap: Val::Px(SLOT_GAP_PX),
             column_gap: Val::Px(SLOT_GAP_PX),
+            flex_shrink: 0.0,
             ..default()
         })
         .with_children(|grid| {
@@ -773,6 +829,7 @@ fn slot_button(
     names: &Names,
     picked: bool,
 ) {
+    let (gradient, edge, _, glow) = look::frame(look::Frame::Plain);
     parent
         .spawn((
             bevy::ui_widgets::Button,
@@ -782,49 +839,34 @@ fn slot_button(
             Node {
                 width: Val::Px(SLOT_PX),
                 height: Val::Px(SLOT_PX),
-                border: UiRect::all(Val::Px(2.0)),
-                border_radius: BorderRadius::all(Val::Px(4.0)),
+                border: UiRect::all(Val::Px(theme::FRAME)),
+                border_radius: BorderRadius::all(Val::Px(theme::RADIUS_SMALL)),
                 align_items: AlignItems::Center,
                 justify_content: JustifyContent::Center,
                 ..default()
             },
-            BackgroundColor(theme::SLOT_FILL),
-            BorderColor::all(theme::SLOT_EDGE),
+            gradient,
+            BorderColor::all(edge),
+            glow,
+            look::slot_focus(),
         ))
         .with_children(|button| {
-            button.spawn((
-                SlotRim,
-                Node {
-                    position_type: PositionType::Absolute,
-                    left: Val::Px(0.0),
-                    right: Val::Px(0.0),
-                    top: Val::Px(0.0),
-                    bottom: Val::Px(0.0),
-                    border: UiRect::all(Val::Px(1.0)),
-                    border_radius: BorderRadius::all(Val::Px(2.0)),
-                    ..default()
-                },
-                BorderColor::all(theme::SLOT_RIM),
-                Pickable::IGNORE,
-            ));
+            look::bevel(button);
             if let Some(stack) = stack {
-                item_icon(button, names.icon(&stack.item), 32.0, picked);
+                item_icon(button, names.icon(&stack.item), SLOT_ICON_PX, picked);
                 button.spawn((
                     SlotCount,
                     Text::new(stack.count.to_string()),
-                    TextFont {
-                        weight: bevy::text::FontWeight(650),
-                        ..font(13.0)
-                    },
-                    TextColor(INK.with_alpha(if picked { 0.6 } else { 1.0 })),
+                    theme::weighted(theme::TEXT_EYEBROW, theme::BOLD),
+                    TextColor(Color::WHITE.with_alpha(if picked { 0.6 } else { 1.0 })),
                     TextShadow {
-                        offset: Vec2::new(0.0, 1.0),
+                        offset: Vec2::ONE,
                         color: Color::BLACK,
                     },
                     Node {
                         position_type: PositionType::Absolute,
                         right: Val::Px(4.0),
-                        bottom: Val::Px(1.0),
+                        bottom: Val::Px(2.0),
                         ..default()
                     },
                     Pickable::IGNORE,
@@ -833,15 +875,12 @@ fn slot_button(
             if let Slot::Hotbar(at) = slot {
                 button.spawn((
                     Text::new((at + 1).to_string()),
-                    TextFont {
-                        weight: bevy::text::FontWeight(600),
-                        ..font(9.0)
-                    },
-                    TextColor(Color::WHITE.with_alpha(0.45)),
+                    theme::weighted(theme::TEXT_FOOTER, theme::SEMIBOLD),
+                    TextColor(theme::SLOT_NUMBER),
                     Node {
                         position_type: PositionType::Absolute,
-                        left: Val::Px(4.0),
-                        top: Val::Px(2.0),
+                        left: Val::Px(5.0),
+                        top: Val::Px(3.0),
                         ..default()
                     },
                     Pickable::IGNORE,
@@ -880,7 +919,7 @@ pub(super) fn item_icon(
                         right: Val::Px(2.0),
                         ..default()
                     },
-                    border_radius: BorderRadius::all(Val::Px(3.0)),
+                    border_radius: BorderRadius::all(Val::Px(theme::RADIUS_TAG)),
                     ..node
                 },
                 BackgroundColor(color.with_alpha(alpha)),
@@ -895,121 +934,70 @@ fn details(main: &mut ChildSpawnerCommands, state: &Built, names: &Names) {
     let shown = state.picked.or(state.inspected);
     let stack = shown.and_then(|slot| state.held.get(slot).map(|stack| (slot, stack)));
     main.spawn((
+        ScrollArea,
+        ScrollPosition::default(),
         Node {
             width: Val::Px(INSPECTOR_PX),
+            min_height: Val::Px(0.0),
+            flex_shrink: 0.0,
             flex_direction: FlexDirection::Column,
             padding: UiRect::all(Val::Px(20.0)),
-            border: UiRect::left(Val::Px(1.0)),
+            border: UiRect::left(Val::Px(theme::RULE)),
+            overflow: Overflow::scroll_y(),
             ..default()
         },
-        BackgroundColor(INSPECTOR),
-        BorderColor::all(RULE),
+        BackgroundColor(theme::ITEM_INSPECTOR),
+        BorderColor::all(theme::ITEM_RULE),
     ))
     .with_children(|panel| {
-        buttons::eyebrow(
-            panel,
-            if state.picked.is_some() {
-                "MOVING STACK"
-            } else {
-                "ITEM DETAILS"
-            },
-            Eyebrow::Inventory,
-        );
+        panel
+            .spawn(Node {
+                margin: UiRect::bottom(Val::Px(12.0)),
+                flex_shrink: 0.0,
+                ..default()
+            })
+            .with_children(|eyebrow| {
+                buttons::eyebrow(
+                    eyebrow,
+                    if state.picked.is_some() {
+                        "MOVING STACK"
+                    } else {
+                        "ITEM DETAILS"
+                    },
+                    Eyebrow::Inventory,
+                );
+            });
         match stack {
-            Some((slot, stack)) => {
-                panel
-                    .spawn(Node {
-                        justify_content: JustifyContent::Center,
-                        margin: UiRect::axes(Val::Px(0.0), Val::Px(14.0)),
-                        ..default()
-                    })
-                    .with_children(|icon| item_icon(icon, names.icon(&stack.item), 64.0, false));
-                panel.spawn(weighted(ui::title(&stack.item), 22.0, 550, INK));
-                let source = match names.places(&stack.item) {
-                    Some(material) => format!("{} · places {}", stack.item, ui::title(material)),
-                    None => stack.item.clone(),
-                };
-                panel
-                    .spawn(Node {
-                        margin: UiRect {
-                            top: Val::Px(7.0),
-                            bottom: Val::Px(14.0),
-                            ..default()
-                        },
-                        ..default()
-                    })
-                    .with_child(weighted(source, 11.0, 400, SOURCE));
-                for (term, value) in [
-                    ("Count", stack.count.to_string()),
-                    ("Stack limit", names.stack_limit(&stack.item).to_string()),
-                ] {
-                    panel
-                        .spawn((
-                            Node {
-                                justify_content: JustifyContent::SpaceBetween,
-                                padding: UiRect::axes(Val::Px(0.0), Val::Px(7.0)),
-                                border: UiRect::bottom(Val::Px(1.0)),
-                                ..default()
-                            },
-                            BorderColor::all(ROW_RULE),
-                        ))
-                        .with_children(|row| {
-                            row.spawn(weighted(term, 13.0, 400, SOFT));
-                            row.spawn(weighted(value, 13.0, 400, INK));
-                        });
-                }
-                panel
-                    .spawn(Node {
-                        flex_direction: FlexDirection::Column,
-                        row_gap: Val::Px(7.0),
-                        margin: UiRect::top(Val::Px(14.0)),
-                        ..default()
-                    })
-                    .with_children(|actions| {
-                        let other = match slot {
-                            Slot::Hotbar(_) => "Move to backpack",
-                            Slot::Backpack(_) => "Move to hotbar",
-                        };
-                        buttons::button(
-                            actions,
-                            other,
-                            Control::QuickTransfer(slot),
-                            ButtonStyle::Plain,
-                        );
-                        if stack.count >= 2 {
-                            buttons::button(
-                                actions,
-                                "Split stack",
-                                Control::Split(slot),
-                                ButtonStyle::Plain,
-                            );
-                        }
-                        if state.picked.is_some() {
-                            buttons::button(
-                                actions,
-                                "Cancel move",
-                                Control::CancelMove,
-                                ButtonStyle::Plain,
-                            );
-                        }
-                    });
-            }
+            Some((slot, stack)) => inspected(panel, state, names, slot, stack),
             None => {
-                panel.spawn(Node {
-                    height: Val::Px(24.0),
-                    ..default()
-                });
-                panel.spawn(weighted("Choose an item", 22.0, 550, INK));
+                panel
+                    .spawn(Node {
+                        height: Val::Px(EMPTY_PX),
+                        align_items: AlignItems::Center,
+                        justify_content: JustifyContent::Center,
+                        flex_shrink: 0.0,
+                        ..default()
+                    })
+                    .with_children(|empty| {
+                        look::storage_icon(empty, EMPTY_ICON_PX, theme::ITEM_EMPTY_ICON);
+                    });
+                panel.spawn(look::label(
+                    "Choose an item",
+                    theme::ITEM_TEXT_NAME,
+                    theme::LABEL,
+                    theme::INK,
+                ));
                 panel
                     .spawn(Node {
                         margin: UiRect::top(Val::Px(7.0)),
+                        flex_shrink: 0.0,
                         ..default()
                     })
-                    .with_child(weighted(
+                    .with_child(look::label(
                         "Select a carried stack to inspect or move it.",
-                        13.0,
-                        400,
-                        SOFT,
+                        theme::TEXT_SMALL,
+                        theme::REGULAR,
+                        theme::MUTED,
                     ));
             }
         }
@@ -1018,25 +1006,144 @@ fn details(main: &mut ChildSpawnerCommands, state: &Built, names: &Names) {
                 Node {
                     margin: UiRect::top(Val::Px(17.0)),
                     padding: UiRect::top(Val::Px(17.0)),
-                    border: UiRect::top(Val::Px(1.0)),
+                    border: UiRect::top(Val::Px(theme::RULE)),
+                    flex_shrink: 0.0,
                     ..default()
                 },
-                BorderColor::all(ROW_RULE),
+                BorderColor::all(theme::ITEM_ROW_RULE),
             ))
-            .with_child(weighted(
-                if state.picked.is_some() {
-                    "Choose another slot to move, merge or swap this stack."
-                } else {
-                    "Shift-click moves a stack between your backpack and hotbar."
-                },
-                12.0,
-                400,
-                SOFT,
+            .with_child((
+                look::label(
+                    if state.picked.is_some() {
+                        "Choose another slot to move, merge or swap this stack."
+                    } else {
+                        "Shift-click moves a stack between your backpack and hotbar."
+                    },
+                    theme::TEXT_EYEBROW,
+                    theme::REGULAR,
+                    theme::ITEM_NOTE,
+                ),
+                bevy::text::LineHeight::RelativeToFont(NOTE_LINE_HEIGHT),
             ));
-        if let Some((material, chosen)) = state.shaping {
-            shape_row(panel, material, chosen, names);
-        }
     });
+}
+
+/// A stack's icon, name, facts, Shape choice and actions.
+fn inspected(
+    panel: &mut ChildSpawnerCommands,
+    state: &Built,
+    names: &Names,
+    slot: Slot,
+    stack: &Stack,
+) {
+    panel
+        .spawn(Node {
+            justify_content: JustifyContent::Center,
+            margin: UiRect::new(Val::ZERO, Val::ZERO, Val::Px(2.0), Val::Px(12.0)),
+            flex_shrink: 0.0,
+            ..default()
+        })
+        .with_children(|icon| {
+            item_icon(icon, names.icon(&stack.item), INSPECTOR_ICON_PX, false)
+        });
+    panel.spawn(look::label(
+        ui::title(&stack.item),
+        theme::ITEM_TEXT_NAME,
+        theme::LABEL,
+        theme::INK,
+    ));
+    let source = match names.places(&stack.item) {
+        Some(material) => format!("{} · places {}", stack.item, ui::title(material)),
+        None => stack.item.clone(),
+    };
+    panel
+        .spawn(Node {
+            margin: UiRect::new(Val::ZERO, Val::ZERO, Val::Px(7.0), Val::Px(20.0)),
+            flex_shrink: 0.0,
+            ..default()
+        })
+        .with_child(look::label(
+            source,
+            theme::ITEM_TEXT_EYEBROW,
+            theme::REGULAR,
+            theme::ITEM_SOURCE,
+        ));
+    let mut facts = vec![("Count", stack.count.to_string())];
+    if let Some(shape) = names.shape(&stack.item, state.shaping) {
+        facts.push(("Shape", shape));
+    }
+    facts.push(("Stack limit", names.stack_limit(&stack.item).to_string()));
+    for (term, value) in facts {
+        panel
+            .spawn((
+                Node {
+                    justify_content: JustifyContent::SpaceBetween,
+                    column_gap: Val::Px(12.0),
+                    padding: UiRect::axes(Val::ZERO, Val::Px(7.0)),
+                    border: UiRect::bottom(Val::Px(theme::RULE)),
+                    flex_shrink: 0.0,
+                    ..default()
+                },
+                BorderColor::all(theme::ITEM_ROW_RULE),
+            ))
+            .with_children(|row| {
+                row.spawn(look::label(
+                    term,
+                    theme::TEXT_CAPTION,
+                    theme::REGULAR,
+                    theme::ITEM_TERM,
+                ));
+                row.spawn(look::label(
+                    value,
+                    theme::TEXT_CAPTION,
+                    theme::REGULAR,
+                    theme::ITEM_VALUE,
+                ));
+            });
+    }
+    if let Some((material, chosen)) = state.shaping {
+        shape_row(panel, material, chosen, names);
+    }
+    panel
+        .spawn(Node {
+            flex_direction: FlexDirection::Column,
+            row_gap: Val::Px(7.0),
+            margin: UiRect::top(Val::Px(8.0)),
+            flex_shrink: 0.0,
+            ..default()
+        })
+        .with_children(|actions| {
+            let other = match slot {
+                Slot::Hotbar(_) => "Move to backpack",
+                Slot::Backpack(_) => "Move to hotbar",
+            };
+            look::button(
+                actions,
+                other,
+                Control::QuickTransfer(slot),
+                Kind::Plain,
+                look::ROOMY,
+            );
+            let split = look::button(
+                actions,
+                "Split stack",
+                Control::Split(slot),
+                Kind::Plain,
+                look::ROOMY,
+            );
+            if stack.count < 2 {
+                actions.commands().entity(split).insert(InteractionDisabled);
+            }
+            if state.picked.is_some() {
+                look::button(
+                    actions,
+                    "Cancel move",
+                    Control::CancelMove,
+                    Kind::Ghost,
+                    look::ROOMY,
+                );
+            }
+        });
 }
 
 /// The Shapes the selected slot's Material can be placed in. The choice is the
@@ -1059,33 +1166,35 @@ fn shape_row(
     panel
         .spawn(Node {
             flex_direction: FlexDirection::Column,
-            row_gap: Val::Px(8.0),
-            margin: UiRect::top(Val::Px(16.0)),
+            row_gap: Val::Px(12.0),
+            margin: UiRect::top(Val::Px(25.0)),
+            flex_shrink: 0.0,
             ..default()
         })
         .with_children(|row| {
             buttons::eyebrow(
                 row,
                 &format!("SHAPE · {}", placed.to_uppercase()),
-                Eyebrow::Inventory,
+                Eyebrow::Menu,
             );
             row.spawn(Node {
                 flex_wrap: FlexWrap::Wrap,
-                column_gap: Val::Px(6.0),
-                row_gap: Val::Px(6.0),
+                column_gap: Val::Px(10.0),
+                row_gap: Val::Px(10.0),
                 ..default()
             })
             .with_children(|choices| {
                 for shape in shapes {
-                    buttons::button(
+                    look::button(
                         choices,
                         ui::title(&shape.name),
                         Control::Shape(shape.id),
-                        ButtonStyle::Compact {
-                            selected: shape.id == chosen,
-                            height_px: 30.0,
-                            text_px: 12.0,
+                        if shape.id == chosen {
+                            Kind::Plain
+                        } else {
+                            Kind::Ghost
                         },
+                        look::SMALL,
                     );
                 }
             });
@@ -1096,36 +1205,45 @@ fn footer(card: &mut ChildSpawnerCommands, state: &Built, names: &Names) {
     card.spawn((
         Node {
             flex_direction: FlexDirection::Column,
-            align_items: AlignItems::Center,
             padding: UiRect::axes(Val::Px(22.0), Val::Px(13.0)),
-            border: UiRect::top(Val::Px(1.0)),
+            border: UiRect::top(Val::Px(theme::RULE)),
+            flex_shrink: 0.0,
             ..default()
         },
-        BackgroundColor(FOOTER),
-        BorderColor::all(FOOTER_RULE),
+        BackgroundColor(theme::ITEM_FOOTER),
+        BorderColor::all(theme::ITEM_FOOTER_RULE),
     ))
     .with_children(|footer| {
         footer
             .spawn(Node {
-                width: Val::Px(GRID_PX),
                 justify_content: JustifyContent::SpaceBetween,
                 align_items: AlignItems::Center,
+                column_gap: Val::Px(10.0),
                 margin: UiRect::bottom(Val::Px(8.0)),
                 ..default()
             })
             .with_children(|caption| {
-                caption.spawn(weighted("Hotbar", 12.0, 500, INK));
-                caption.spawn(weighted(
+                caption.spawn(look::label(
+                    "Hotbar",
+                    theme::TEXT_EYEBROW,
+                    theme::MEDIUM,
+                    theme::INK,
+                ));
+                caption.spawn(look::label(
                     "Quick access · the same slots you use in game",
-                    11.0,
-                    400,
-                    SOFT,
+                    theme::ITEM_TEXT_EYEBROW,
+                    theme::REGULAR,
+                    theme::ITEM_CAPTION,
                 ));
             });
-        grid(footer, state, names, Slot::Hotbar, HOTBAR_SLOTS);
         footer
             .spawn(Node {
-                width: Val::Percent(100.0),
+                justify_content: JustifyContent::Center,
+                ..default()
+            })
+            .with_children(|row| grid(row, state, names, Slot::Hotbar, HOTBAR_SLOTS));
+        footer
+            .spawn(Node {
                 justify_content: JustifyContent::SpaceBetween,
                 align_items: AlignItems::Center,
                 column_gap: Val::Px(12.0),
@@ -1133,50 +1251,92 @@ fn footer(card: &mut ChildSpawnerCommands, state: &Built, names: &Names) {
                 ..default()
             })
             .with_children(|actions| {
-                actions.spawn(weighted(
-                    "Item counts stay intact when switching screens.",
-                    12.0,
-                    400,
-                    SOFT,
+                actions.spawn((
+                    look::label(
+                        if state.survival {
+                            "Item counts stay intact when switching screens."
+                        } else {
+                            "Drag from the Catalogue into any slot, or set a count and transfer."
+                        },
+                        theme::TEXT_EYEBROW,
+                        theme::REGULAR,
+                        theme::ITEM_SOFT,
+                    ),
+                    bevy::text::LineHeight::RelativeToFont(theme::LINE_HEIGHT),
                 ));
-                buttons::button(actions, "Back to game", Control::Close, ButtonStyle::Plain);
+                look::button(
+                    actions,
+                    "Back to game",
+                    Control::Close,
+                    Kind::Ghost,
+                    look::COMPACT,
+                );
             });
     });
 }
 
-/// Hover, inspected, picked and drop-target state, without a rebuild.
+type Slots<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static Control,
+        &'static Hovered,
+        &'static Children,
+        &'static mut BackgroundGradient,
+        &'static mut BorderColor,
+        &'static mut BoxShadow,
+        &'static mut Outline,
+    ),
+>;
+
+/// Hover, inspected, picked, selected and drop-target state, without a rebuild.
 fn paint(
-    (window, side): (Res<InventoryWindow>, Res<catalogue::Side>),
-    mut slots: Query<(&Control, &Hovered, &Children, &mut BackgroundColor)>,
-    mut rims: Query<&mut BorderColor, With<SlotRim>>,
+    (window, side, hotbar): (
+        Res<InventoryWindow>,
+        Res<catalogue::Side>,
+        Res<super::edit::Hotbar>,
+    ),
+    mut slots: Slots,
+    mut rims: Query<&mut BorderColor, (With<look::Rim>, Without<Control>)>,
+    focus: Option<Res<InputFocus>>,
+    visible: Option<Res<bevy::input_focus::InputFocusVisible>>,
 ) {
     if !window.open {
         return;
     }
-    for (control, hovered, children, mut fill) in &mut slots {
+    let focused = ui::visible_focus(focus.as_deref(), visible.as_deref());
+    for (entity, control, hovered, children, gradient, border, shadow, mut outline) in &mut slots
+    {
         let Control::Slot(slot) = *control else {
             continue;
         };
-        let rim = if window.picked == Some(slot) || window.dragging == Some(slot) {
-            PICKED
+        let state = if window.picked == Some(slot) || window.dragging == Some(slot) {
+            look::Frame::Picked
         } else if hovered.get() && (window.dragging.is_some() || side.taking.is_some()) {
-            DROP_TARGET
-        } else if hovered.get() {
-            theme::SLOT_RIM_HOVER
+            look::Frame::DropTarget
+        } else if slot == Slot::Hotbar(hotbar.selected) && hotbar.outside.is_none() {
+            look::Frame::Active
         } else if window.inspected == Some(slot) {
-            RIM_INSPECTED
+            look::Frame::Inspected
+        } else if hovered.get() {
+            look::Frame::Hover
         } else {
-            theme::SLOT_RIM
+            look::Frame::Plain
         };
-        fill.set_if_neq(BackgroundColor(if hovered.get() {
-            theme::SLOT_HOVER
+        let rim = children.iter().find(|child| rims.contains(*child));
+        look::paint_frame(
+            state,
+            (gradient, border, shadow),
+            rim.and_then(|rim| rims.get_mut(rim).ok()),
+        );
+        let ring = if focused == Some(entity) {
+            theme::FOCUS_TIGHT
         } else {
-            theme::SLOT_FILL
-        }));
-        for child in children {
-            if let Ok(mut border) = rims.get_mut(*child) {
-                border.set_if_neq(BorderColor::all(rim));
-            }
+            Color::NONE
+        };
+        if outline.color != ring {
+            outline.color = ring;
         }
     }
 }
@@ -1396,17 +1556,7 @@ mod tests {
             Holding::solid(ROCK, SHAPE_FULL_CUBE),
         ));
         press(&mut app, KeyCode::KeyI);
-        assert!(shown(&mut app));
-        if !app.world().resource::<InventoryWindow>().details {
-            let details = app
-                .world_mut()
-                .query::<(Entity, &Control)>()
-                .iter(app.world())
-                .find_map(|(e, c)| (*c == Control::Details).then_some(e))
-                .unwrap();
-            app.world_mut().trigger(Activate { entity: details });
-            app.update();
-        }
+        assert!(shown(&mut app), "and wide enough to show the details");
         let slab = app
             .world_mut()
             .query::<(Entity, &Control)>()

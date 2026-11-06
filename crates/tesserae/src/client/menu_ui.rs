@@ -656,7 +656,7 @@ pub(super) fn search_frame(
                     input.spawn((
                         SearchPlaceholder,
                         Text::new(if tab == Tab::Catalogue {
-                            "Search materials…"
+                            "Search Materials…"
                         } else {
                             "Search actions or keys…"
                         }),
