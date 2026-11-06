@@ -181,6 +181,7 @@ pub(super) fn activate(
         Operation::Reset => settings.resetting = true,
         Operation::CancelReset => settings.resetting = false,
         Operation::Reference => settings.show_reference = !settings.show_reference,
+        Operation::TouchControls => settings.touch_open = !settings.touch_open,
         Operation::Stay => {
             settings.unsaved = false;
             settings.pending = None;

@@ -609,10 +609,16 @@ fn rail(workspace: &mut ChildSpawnerCommands, tab: Tab) {
         });
 }
 
+/// A borderless button, such as a disclosure row, that shows only the focus
+/// ring.
+#[derive(Component)]
+#[require(bevy::picking::hover::Hovered, Outline = theme::focus_ring())]
+pub(super) struct Bare;
+
 /// The rail keeps the prototype's look: no hover fill, and the focus ring
 /// only when focus is being shown.
 fn rail_focus(
-    mut entries: Query<(Entity, &mut Outline), With<RailEntry>>,
+    mut entries: Query<(Entity, &mut Outline), Or<(With<RailEntry>, With<Bare>)>>,
     focus: Res<InputFocus>,
     visible: Option<Res<bevy::input_focus::InputFocusVisible>>,
 ) {

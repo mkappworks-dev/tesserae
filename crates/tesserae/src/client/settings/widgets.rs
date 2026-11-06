@@ -634,6 +634,60 @@ pub(super) fn group(
         });
 }
 
+/// A ruled row that shows or hides the rows under it, as a `<details>` does.
+pub(super) fn disclosure(
+    parent: &mut ChildSpawnerCommands,
+    title: &str,
+    open: bool,
+    content: impl FnOnce(&mut ChildSpawnerCommands),
+) {
+    use crate::client::menu_ui as ui;
+    parent
+        .spawn((
+            BorderColor::all(theme::EDGE),
+            Node {
+                flex_direction: FlexDirection::Column,
+                margin: UiRect::top(Val::Px(20.0)),
+                padding: UiRect::top(Val::Px(14.0)),
+                border: UiRect::top(Val::Px(theme::RULE)),
+                flex_shrink: 0.0,
+                ..default()
+            },
+        ))
+        .with_children(|details| {
+            details
+                .spawn((
+                    bevy::ui_widgets::Button,
+                    bevy::input_focus::tab_navigation::TabIndex(0),
+                    Operation::TouchControls,
+                    ui::Bare,
+                    Node {
+                        column_gap: Val::Px(6.0),
+                        align_items: AlignItems::Center,
+                        padding: UiRect::vertical(Val::Px(3.0)),
+                        margin: UiRect::bottom(Val::Px(12.0)),
+                        ..default()
+                    },
+                ))
+                .with_children(|summary| {
+                    ui::icon(
+                        summary,
+                        if open {
+                            ui::IconKind::Expanded
+                        } else {
+                            ui::IconKind::Collapsed
+                        },
+                        theme::INK,
+                        12.0,
+                    );
+                    ui::text(summary, title, theme::TEXT_BODY, theme::INK);
+                });
+            if open {
+                content(details);
+            }
+        });
+}
+
 /// A checkbox: on, it is sage with a dark check.
 #[derive(Component)]
 pub(super) struct Checkbox {

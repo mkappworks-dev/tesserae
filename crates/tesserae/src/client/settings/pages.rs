@@ -209,7 +209,7 @@ pub(super) fn page(
         Tab::Behavior => behavior(list, settings, bindings, p, labels, context),
         Tab::Display => display(list, p),
         Tab::Bindings => bindings_page(list, settings, bindings, labels, searches),
-        Tab::Controller => controller(list, bindings, p, labels),
+        Tab::Controller => controller(list, settings, bindings, p, labels),
         Tab::Accessibility => accessibility(list, p),
         Tab::Catalogue => {}
     }
@@ -694,82 +694,54 @@ pub(super) fn binding_rows(
 }
 pub(super) fn controller(
     list: &mut ChildSpawnerCommands,
+    settings: &Settings,
     bindings: &Bindings,
     p: &Preferences,
     labels: &crate::client::actions::Labels,
 ) {
     use crate::client::menu_ui as ui;
     let pad = &p.pad;
-    group(list, "STICKS", |card| {
-        setting_row(
-            card,
-            "Look sensitivity",
-            "Turn speed at full right-stick deflection.",
-            |row| slider(row, Scalar::PadLook, pad.look_sensitivity),
-        );
-        setting_row(
-            card,
-            "Invert vertical look",
-            "Reverse the right-stick look direction. Mouse look is separate.",
-            |row| switch(row, pad.invert_y, Operation::PadInvert),
-        );
+    group(list, "STICKS & BUTTONS", |card| {
+        setting_row(card, "Look sensitivity", "", |row| {
+            slider(row, Scalar::PadLook, pad.look_sensitivity)
+        });
+        setting_row(card, "Invert vertical look", "", |row| {
+            switch(row, pad.invert_y, Operation::PadInvert)
+        });
         setting_row(
             card,
             "Movement deadzone",
-            "Left-stick travel ignored as drift.",
+            "Ignore small movements caused by stick drift.",
             |row| slider(row, Scalar::MoveDeadzone, pad.move_deadzone),
         );
-        setting_row(
-            card,
-            "Look deadzone",
-            "Right-stick travel ignored as drift.",
-            |row| slider(row, Scalar::LookDeadzone, pad.look_deadzone),
-        );
-        setting_row(
-            card,
-            "Crouch activation",
-            if pad.toggle_crouch {
-                "Press once to crouch on foot; press again to stand. Hold to descend in flight."
-            } else {
-                "Crouch or descend while the binding is held."
-            },
-            |row| {
-                segment(row, |buttons| {
-                    option(
-                        buttons,
-                        "Hold",
-                        Operation::PadCrouch(false),
-                        !pad.toggle_crouch,
-                    );
-                    option(
-                        buttons,
-                        "Toggle",
-                        Operation::PadCrouch(true),
-                        pad.toggle_crouch,
-                    );
-                })
-            },
-        );
-    });
-    group(list, "TOUCH", |card| {
-        let touch = &p.touch;
-        setting_row(
-            card,
-            "Look sensitivity",
-            "How far a drag on the look side turns the view.",
-            |row| slider(row, Scalar::TouchLook, touch.look_sensitivity),
-        );
-        setting_row(
-            card,
-            "Invert vertical look",
-            "Reverse the touch look direction. Mouse look is separate.",
-            |row| switch(row, touch.invert_y, Operation::TouchInvert),
-        );
-        setting_row(
-            card,
-            "Layout",
-            "Which hand moves. Mirroring also swaps Place and Remove.",
-            |row| {
+        setting_row(card, "Look deadzone", "", |row| {
+            slider(row, Scalar::LookDeadzone, pad.look_deadzone)
+        });
+        setting_row(card, "Crouch activation", "", |row| {
+            segment(row, |buttons| {
+                option(
+                    buttons,
+                    "Hold",
+                    Operation::PadCrouch(false),
+                    !pad.toggle_crouch,
+                );
+                option(
+                    buttons,
+                    "Toggle",
+                    Operation::PadCrouch(true),
+                    pad.toggle_crouch,
+                );
+            })
+        });
+        disclosure(card, "Touch controls", settings.touch_open, |touch_rows| {
+            let touch = &p.touch;
+            setting_row(touch_rows, "Look sensitivity", "", |row| {
+                slider(row, Scalar::TouchLook, touch.look_sensitivity)
+            });
+            setting_row(touch_rows, "Invert vertical look", "", |row| {
+                switch(row, touch.invert_y, Operation::TouchInvert)
+            });
+            setting_row(touch_rows, "Layout", "", |row| {
                 segment(row, |buttons| {
                     option(
                         buttons,
@@ -784,13 +756,8 @@ pub(super) fn controller(
                         touch.mirrored,
                     );
                 })
-            },
-        );
-        setting_row(
-            card,
-            "Control size",
-            "Every control stays at least 44 pixels.",
-            |row| {
+            });
+            setting_row(touch_rows, "Control size", "", |row| {
                 segment(row, |buttons| {
                     use crate::client::profile::TouchSize::*;
                     for (label, size) in
@@ -804,43 +771,39 @@ pub(super) fn controller(
                         );
                     }
                 })
-            },
-        );
-        setting_row(
-            card,
-            "Control opacity",
-            "How solid the on-screen controls are.",
-            |row| slider(row, Scalar::TouchOpacity, touch.opacity),
-        );
+            });
+            setting_row(touch_rows, "Control opacity", "", |row| {
+                slider(row, Scalar::TouchOpacity, touch.opacity)
+            });
+        });
     });
     use bevy::input::gamepad::GamepadButton::{East, LeftTrigger, RightTrigger, South, Start};
-    ui::text(
-        list,
-        format!(
-            "The left stick moves and the right stick looks. In menus the D-pad or left stick \
-             moves focus, {} selects, {} goes back, {} and {} switch pages, and {} closes.",
-            labels.pad(South),
-            labels.pad(East),
-            labels.pad(LeftTrigger),
-            labels.pad(RightTrigger),
-            labels.pad(Start),
-        ),
-        12.0,
-        theme::MUTED,
-    );
-    binding_row(list, true, |row| {
-        for label in ["ACTION", "PRIMARY", "ALTERNATIVE", ""] {
-            ui::text(row, label, 9.0, theme::MUTED);
-        }
+    group(list, "CONTROLLER BUTTONS", |buttons| {
+        ui::paragraph(
+            buttons,
+            format!(
+                "The left stick moves and the right stick looks. In menus the D-pad or left \
+                 stick moves focus, {} selects, {} goes back, {} and {} switch pages, and {} \
+                 closes.",
+                labels.pad(South),
+                labels.pad(East),
+                labels.pad(LeftTrigger),
+                labels.pad(RightTrigger),
+                labels.pad(Start),
+            ),
+            theme::TEXT_SMALL,
+            theme::MUTED,
+        );
+        let mut entries: Vec<_> = bindings
+            .pad
+            .iter()
+            .filter(|(action, _)| !matches!(action, Action::ReleaseCursor))
+            .collect();
+        entries.sort_by_key(|(action, _)| binding_order(**action));
+        binding_rows(buttons, Device::Pad, entries, labels, false);
     });
-    let mut entries: Vec<_> = bindings
-        .pad
-        .iter()
-        .filter(|(action, _)| !matches!(action, Action::ReleaseCursor))
-        .collect();
-    entries.sort_by_key(|(action, _)| binding_order(**action));
-    binding_rows(list, Device::Pad, entries, labels, true);
 }
+
 pub(super) fn binding_row(
     parent: &mut ChildSpawnerCommands,
     content: impl FnOnce(&mut ChildSpawnerCommands),

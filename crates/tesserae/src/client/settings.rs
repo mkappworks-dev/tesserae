@@ -29,6 +29,8 @@ pub(super) struct Settings {
     conflict: Option<Conflict>,
     unsaved: bool,
     show_reference: bool,
+    /// Whether Controller's Touch controls are expanded.
+    touch_open: bool,
     resetting: bool,
     category: Category,
     notice: String,
@@ -106,6 +108,7 @@ pub(super) enum Operation {
     ConfirmReset,
     CancelReset,
     Reference,
+    TouchControls,
     ResetAction(Device, Action),
     Capture(Device, Action, usize),
     Clear(Device, Action, usize),
