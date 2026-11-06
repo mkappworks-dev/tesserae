@@ -41,6 +41,8 @@ pub struct Death {
 pub struct DeathReport {
     pub death: Death,
     pub from_spawn_m: f32,
+    /// The Game's safe fall height, which a fall's cause names.
+    pub safe_fall_m: f32,
     /// Whole seconds, rounded up, until the first of the death's Dropped items
     /// still lying there despawns; `None` when none are.
     pub despawns_in_s: Option<u32>,
@@ -211,6 +213,7 @@ fn announce(
     player: Single<Option<Ref<Death>>, With<Player>>,
     spawn: Res<SpawnPoint>,
     entities: Res<EntityStore>,
+    survival: Option<Res<Survival>>,
     mut told: Local<Told>,
     mut changed: MessageWriter<DeathChanged>,
 ) {
@@ -221,6 +224,7 @@ fn announce(
                 *told = Told::Dead(left);
                 changed.write(DeathChanged(Some(DeathReport {
                     from_spawn_m: death.at_m.distance(spawn.metres()),
+                    safe_fall_m: survival.as_ref().map(|s| s.rules).unwrap_or_default().safe_fall_m,
                     death: Death::clone(&death),
                     despawns_in_s: left,
                 })));

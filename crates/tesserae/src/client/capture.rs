@@ -499,6 +499,7 @@ fn hud_fixture(
                 kept_inventory: kept,
             },
             from_spawn_m: 182.0,
+            safe_fall_m: 3.0,
             despawns_in_s: (!kept).then_some(287),
         })));
     }

@@ -246,3 +246,12 @@ pub(super) const FULL_NOTICE: Color = Color::srgba_u8(11, 11, 13, 0xcc);
 pub(super) const FULL_NOTICE_EDGE: Color = Color::srgba_u8(0xd6, 0xc8, 0x8f, 0x80);
 pub(super) const FULL_NOTICE_INK: Color = Color::srgb_u8(0xea, 0xdf, 0xb4);
 pub(super) const NOTICE_CARD_INK: Color = Color::srgb_u8(0xf1, 0xf0, 0xed);
+pub(super) const DEATH_SCRIM: [Color; 2] = [Color::srgba_u8(0x1c, 0x08, 0x08, 0x4d), Color::srgba_u8(0x0a, 0x03, 0x03, 0xa6)];
+pub(super) const DEATH_TITLE: Color = Color::srgb_u8(0xf4, 0xec, 0xe8);
+pub(super) const DEATH_CAUSE: Color = Color::srgb_u8(0xd4, 0xcf, 0xcc);
+pub(super) const DEATH_EYEBROW: Color = Color::srgb_u8(0xd8, 0xa5, 0x9c);
+pub(super) const TEXT_DEATH_TITLE: f32 = 46.0;
+/// −0.01 em of the death title.
+pub(super) const DEATH_TITLE_TRACKING: f32 = -0.46;
+/// The cursor hint and the F3 readout.
+pub(super) const READOUT: Color = Color::srgba(1.0, 1.0, 1.0, 0.7);
