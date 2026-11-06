@@ -295,7 +295,7 @@ pub(super) fn accessibility(list: &mut ChildSpawnerCommands, p: &Preferences) {
         setting_row(
             card,
             "Reduced motion",
-            "Use immediate interface transitions, and still the HUD's pulses and slides.",
+            "Use immediate interface transitions.",
             |row| {
                 switch(
                     row,
@@ -307,7 +307,7 @@ pub(super) fn accessibility(list: &mut ChildSpawnerCommands, p: &Preferences) {
         setting_row(
             card,
             "Simple menu background",
-            "Show menus over a solid background instead of the dimmed World.",
+            "Replace the scenery with a solid background.",
             |row| {
                 switch(
                     row,
