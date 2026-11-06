@@ -140,3 +140,23 @@ The prototype shows the ones with a screen.
 - In Survival, removing a fluid source drops its Item and flowing fluid drops
   nothing, as Minecraft's and Luanti's buckets do; a bucket Tool waits for
   Crafting.
+
+## UI fidelity (ticket 23)
+
+Taken with the maintainer on 2026-11-06, after the audit compared every engine
+screen with the prototype.
+
+- Quit lives on the title screen's action list; the launcher header keeps the
+  Settings button, as the prototype shows.
+- A World opens with the hotbar slot that was selected when it was left (slot
+  1 for a new World), so the held name and reticle show. X still empties the
+  hand.
+- The F3 diagnostics readout ships and is listed under Settings › Key bindings
+  › Interface.
+- The Catalogue keeps All, Solids and Fluids. Material groups come with
+  Crafting (step 16), where recipes, tools and Catalogue tabs share them; the
+  prototype is updated to match.
+- Undo and redo show no notice; the World changing is the feedback, and
+  refusals still show.
+- Menus and the launcher keep the key-hint footer; play has none, and the
+  hotbar sits near the bottom edge.
