@@ -111,7 +111,7 @@ impl Canvas {
                 }
             }
             crossings.sort_by(f32::total_cmp);
-            for pair in crossings.chunks_exact(2) {
+            for pair in crossings.as_chunks::<2>().0 {
                 let start = (pair[0] - 0.5).ceil().max(0.0) as usize;
                 let end = ((pair[1] - 0.5).floor() as isize).min(self.width as isize - 1);
                 if end < start as isize {
@@ -378,7 +378,7 @@ mod tests {
     fn the_landscape_is_opaque_and_the_same_every_time() {
         let first = paint(96, 60, 1.0, SOFT);
         assert_eq!(first.len(), 96 * 60 * 4);
-        assert!(first.chunks_exact(4).all(|p| p[3] == 255));
+        assert!(first.as_chunks::<4>().0.iter().all(|p| p[3] == 255));
         assert_eq!(first, paint(96, 60, 1.0, SOFT));
         assert_ne!(first, paint(96, 60, 1.0, CLEAR));
     }
