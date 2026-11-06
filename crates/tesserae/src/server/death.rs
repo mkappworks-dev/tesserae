@@ -224,7 +224,11 @@ fn announce(
                 *told = Told::Dead(left);
                 changed.write(DeathChanged(Some(DeathReport {
                     from_spawn_m: death.at_m.distance(spawn.metres()),
-                    safe_fall_m: survival.as_ref().map(|s| s.rules).unwrap_or_default().safe_fall_m,
+                    safe_fall_m: survival
+                        .as_ref()
+                        .map(|s| s.rules)
+                        .unwrap_or_default()
+                        .safe_fall_m,
                     death: Death::clone(&death),
                     despawns_in_s: left,
                 })));

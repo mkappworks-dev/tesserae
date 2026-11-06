@@ -295,7 +295,9 @@ impl RejectReason {
             RejectReason::Busy => "The Server is busy. Try again.",
             RejectReason::NoUndo => "Nothing to undo.",
             RejectReason::NoRedo => "Nothing to redo.",
-            RejectReason::HistoryChanged => "That Voxel changed since, so it cannot be undone or redone.",
+            RejectReason::HistoryChanged => {
+                "That Voxel changed since, so it cannot be undone or redone."
+            }
             RejectReason::TargetChanged => "The target changed. Hold again.",
             RejectReason::BadLayout => "That Layout is not allowed.",
             RejectReason::LayoutPartial => "Some Voxels of the Layout were skipped.",

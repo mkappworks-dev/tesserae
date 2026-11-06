@@ -142,7 +142,11 @@ fn age_feed(time: Res<Time>, mut feed: ResMut<Feed>) {
 }
 
 /// The death screen hides the feed and the notice, as the Menu does.
-fn in_play(menu: &Menu, settings: Option<&Settings>, dead: Option<Res<super::death::Dead>>) -> bool {
+fn in_play(
+    menu: &Menu,
+    settings: Option<&Settings>,
+    dead: Option<Res<super::death::Dead>>,
+) -> bool {
     !menu.open && !settings.is_some_and(|s| s.open) && super::death::alive(dead)
 }
 
@@ -150,7 +154,11 @@ fn show_feed(
     mut commands: Commands,
     feed: Res<Feed>,
     (looks, catalogue): (Res<Looks>, Res<Catalogue>),
-    (menu, settings, dead): (Res<Menu>, Option<Res<Settings>>, Option<Res<super::death::Dead>>),
+    (menu, settings, dead): (
+        Res<Menu>,
+        Option<Res<Settings>>,
+        Option<Res<super::death::Dead>>,
+    ),
     roots: Query<Entity, With<FeedRoot>>,
     mut shown: Local<Option<Vec<(String, u32)>>>,
 ) {
@@ -228,7 +236,7 @@ fn show_feed(
                         Pickable::IGNORE,
                     ));
                 });
-        }
+            }
         });
 }
 

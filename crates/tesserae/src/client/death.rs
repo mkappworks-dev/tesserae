@@ -67,11 +67,7 @@ pub(super) fn plugin(app: &mut App) {
 
 /// UI cannot filter the 3D view, so the camera's own colour grading greys the
 /// World while dead; there is no blur.
-fn grade_world(
-    mut commands: Commands,
-    dead: Res<Dead>,
-    cameras: Query<Entity, With<FlyCamera>>,
-) {
+fn grade_world(mut commands: Commands, dead: Res<Dead>, cameras: Query<Entity, With<FlyCamera>>) {
     if !dead.is_changed() {
         return;
     }
@@ -244,7 +240,12 @@ fn items_line(report: &DeathReport) -> String {
     format!("{items} in {stacks} lie where you fell, at {x}, {y}, {z}. {left}")
 }
 
-fn centred(parent: &mut ChildSpawnerCommands, value: String, font: TextFont, color: Color) -> Entity {
+fn centred(
+    parent: &mut ChildSpawnerCommands,
+    value: String,
+    font: TextFont,
+    color: Color,
+) -> Entity {
     parent
         .spawn((
             Text::new(value),
@@ -350,7 +351,12 @@ fn render(
                         });
                     } else {
                         centre.spawn(cause).with_children(|cause| {
-                            centred(cause, detail, theme::font(theme::TEXT_BODY), theme::DEATH_CAUSE);
+                            centred(
+                                cause,
+                                detail,
+                                theme::font(theme::TEXT_BODY),
+                                theme::DEATH_CAUSE,
+                            );
                         });
                     }
                     centre
