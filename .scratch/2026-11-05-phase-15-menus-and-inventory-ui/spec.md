@@ -1,4 +1,4 @@
-Status: done
+Status: ready-for-agent
 
 # Phase 15: Menus, Inventory and the Survival loop
 
