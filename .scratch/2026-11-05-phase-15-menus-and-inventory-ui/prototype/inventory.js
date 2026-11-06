@@ -1,12 +1,12 @@
 const catalogueItems=[
-  {id:'stone',itemId:'rock',name:'Stone',group:'Terrain',color:'#969a97'},
-  {id:'dirt',itemId:'dirt',name:'Dirt',group:'Terrain',color:'#a18360'},
-  {id:'grass',itemId:'grass',name:'Grass',group:'Terrain',color:'#8ca968'},
-  {id:'sand',itemId:'sand',name:'Sand',group:'Terrain',color:'#d7c49c'},
-  {id:'snow',itemId:'snow',name:'Snow',group:'Terrain',color:'#e0e8e4'},
-  {id:'iron',itemId:'iron',name:'Iron ore',group:'Ores',color:'#b59a85'},
-  {id:'melon',itemId:'melon',name:'Melon',group:'Terrain',color:'#54963a'},
-  {id:'lamp',itemId:'lamp',name:'Lamp',group:'Lighting',color:'#efce8d'},
+  {id:'stone',itemId:'rock',name:'Stone',group:'Solids',color:'#969a97'},
+  {id:'dirt',itemId:'dirt',name:'Dirt',group:'Solids',color:'#a18360'},
+  {id:'grass',itemId:'grass',name:'Grass',group:'Solids',color:'#8ca968'},
+  {id:'sand',itemId:'sand',name:'Sand',group:'Solids',color:'#d7c49c'},
+  {id:'snow',itemId:'snow',name:'Snow',group:'Solids',color:'#e0e8e4'},
+  {id:'iron',itemId:'iron',name:'Iron ore',group:'Solids',color:'#b59a85'},
+  {id:'melon',itemId:'melon',name:'Melon',group:'Solids',color:'#54963a'},
+  {id:'lamp',itemId:'lamp',name:'Lamp',group:'Solids',color:'#efce8d'},
   {id:'water',itemId:'water',name:'Water source',group:'Fluids',color:'#75a9be'},
   {id:'lava',itemId:'lava',name:'Lava source',group:'Fluids',color:'#dc9160'},
   {id:'mud',itemId:'mud',name:'Mud source',group:'Fluids',color:'#96866b'}
@@ -72,11 +72,12 @@ function storagePage(){
   const win=itemShell(main,`${itemHotbar()}<div class="item-footer-actions"><small>${creativeAccess()?'Drag from the Catalogue into any slot, or set a count and transfer.':'Item counts stay intact when switching screens.'}</small>${button('Back to game','inventory-close',{ghost:true})}</div>`);
   return `<div class="inventory-overlay ${creativeAccess()?'with-catalogue':''}">${creativeAccess()?catalogueSide():''}${win}</div>`;
 }
-function sideItems(){const q=(state.quickAddQuery||'').toLowerCase(),g=state.sideGroup||'All';return catalogueItems.filter(x=>(g==='All'||x.group===g)&&x.name.toLowerCase().includes(q));}
+const catalogueGroups=['All','Solids','Fluids'];
+function sideItems(){const q=(state.quickAddQuery||'').toLowerCase(),g=catalogueGroups.includes(state.sideGroup)?state.sideGroup:'All';return catalogueItems.filter(x=>(g==='All'||x.group===g)&&x.name.toLowerCase().includes(q));}
 function sideGrid(){const items=sideItems();return items.length?items.map(item=>`<button class="catalogue-tile side-tile ${item.id===state.sideItem?'selected':''}" draggable="true" data-catalogue-drag="${item.id}" data-action="side-pick" data-value="${item.id}" aria-pressed="${item.id===state.sideItem}" title="${item.name}: drag to a slot · double-click for hotbar slot ${state.quickSlot+1} · Shift-click for backpack">${voxelIcon(item)}<b>${item.name}</b></button>`).join(''):'<p class="quick-add-empty">No Materials match.</p>';}
 function catalogueSide(){
   const item=catalogueItems.find(x=>x.id===state.sideItem)||catalogueItems[0],n=state.transferCount;
-  return `<aside class="catalogue-side" aria-label="Catalogue"><header><p class="item-eyebrow">CREATIVE</p><h2>Catalogue</h2><small>Drag a Material into any slot</small></header><div class="catalogue-search side-search">${icon('search',16)}<input class="input" data-bind="quickAddQuery" value="${esc(state.quickAddQuery||'')}" placeholder="Search Materials…" aria-label="Search Catalogue"></div><div class="side-filters" aria-label="Catalogue category">${['All','Terrain','Ores','Lighting','Fluids'].map(g=>`<button data-action="side-group" data-value="${g}" class="${(state.sideGroup||'All')===g?'active':''}" aria-pressed="${(state.sideGroup||'All')===g}">${g}</button>`).join('')}</div><div class="side-grid" id="side-grid">${sideGrid()}</div><footer class="transfer"><div class="transfer-item">${voxelIcon(item)}<span><b>${item.name}</b><small>terra:${item.id}</small></span></div><div class="transfer-count"><span>Count</span><div class="layout-stepper"><button data-action="transfer-count" data-value="-1" aria-label="One fewer">−</button><input class="input" type="number" min="1" max="64" inputmode="numeric" data-bind="transferCount" value="${n}" aria-label="Count to transfer"><button data-action="transfer-count" data-value="1" aria-label="One more">+</button></div><div class="count-presets">${[1,16,64].map(v=>`<button data-action="transfer-preset" data-value="${v}" class="${n===v?'active':''}">${v}</button>`).join('')}</div></div><div class="transfer-actions">${button('To backpack','transfer-bag',{ghost:true})}${button(`To hotbar ${state.quickSlot+1}`,'transfer-bar',{primary:true})}</div></footer></aside>`;
+  return `<aside class="catalogue-side" aria-label="Catalogue"><header><p class="item-eyebrow">CREATIVE</p><h2>Catalogue</h2><small>Drag a Material into any slot</small></header><div class="catalogue-search side-search">${icon('search',16)}<input class="input" data-bind="quickAddQuery" value="${esc(state.quickAddQuery||'')}" placeholder="Search Materials…" aria-label="Search Catalogue"></div><div class="side-filters" aria-label="Catalogue category">${catalogueGroups.map(g=>`<button data-action="side-group" data-value="${g}" class="${(catalogueGroups.includes(state.sideGroup)?state.sideGroup:'All')===g?'active':''}" aria-pressed="${(catalogueGroups.includes(state.sideGroup)?state.sideGroup:'All')===g}">${g}</button>`).join('')}</div><div class="side-grid" id="side-grid">${sideGrid()}</div><footer class="transfer"><div class="transfer-item">${voxelIcon(item)}<span><b>${item.name}</b><small>terra:${item.id}</small></span></div><div class="transfer-count"><span>Count</span><div class="layout-stepper"><button data-action="transfer-count" data-value="-1" aria-label="One fewer">−</button><input class="input" type="number" min="1" max="64" inputmode="numeric" data-bind="transferCount" value="${n}" aria-label="Count to transfer"><button data-action="transfer-count" data-value="1" aria-label="One more">+</button></div><div class="count-presets">${[1,16,64].map(v=>`<button data-action="transfer-preset" data-value="${v}" class="${n===v?'active':''}">${v}</button>`).join('')}</div></div><div class="transfer-actions">${button('To backpack','transfer-bag',{ghost:true})}${button(`To hotbar ${state.quickSlot+1}`,'transfer-bar',{primary:true})}</div></footer></aside>`;
 }
 function giveToBag(id,count){
   const item=catalogueItems.find(x=>x.id===id),next=stashStack(state.bag,{id:item.itemId,count,shape:'Cube'});
