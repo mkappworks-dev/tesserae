@@ -90,9 +90,7 @@ pub(super) fn spawn(
                     Screen::Edit(path) => edit(main, l, installed, path, scroll),
                     Screen::Trust(next) => trust(main, l, installed, next, scroll),
                     Screen::Opening(name) => {
-                        centered(main, false, |card| {
-                            super::super::loading::opening(card, name)
-                        });
+                        opening(main, name);
                         None
                     }
                 };
@@ -460,6 +458,56 @@ fn title(main: &mut ChildSpawnerCommands, l: &Launcher, installed: &Installed) -
         });
     }
     focus
+}
+
+/// The Opening card, where the Menu's panel sits, until the loader takes over.
+fn opening(main: &mut ChildSpawnerCommands, name: &str) {
+    main.spawn(Node {
+        flex_grow: 1.0,
+        align_items: AlignItems::Center,
+        padding: UiRect::horizontal(Val::Vw(5.0)),
+        ..default()
+    })
+    .with_children(|screen| {
+        screen
+            .spawn((
+                cine::surface(theme::PANEL),
+                cine::framed(Node {
+                    width: Val::Px(300.0),
+                    padding: UiRect::all(Val::Px(25.0)),
+                    flex_direction: FlexDirection::Column,
+                    ..default()
+                }),
+            ))
+            .with_children(|card| {
+                card.spawn((
+                    Text::new(format!("Opening {name}\u{2026}")),
+                    theme::weighted(theme::TEXT_PANEL_TITLE, theme::BOOK),
+                    bevy::text::LineHeight::RelativeToFont(1.2),
+                    TextColor(theme::INK),
+                    Node {
+                        margin: UiRect::new(
+                            Val::Px(0.0),
+                            Val::Px(0.0),
+                            Val::Px(10.0),
+                            Val::Px(6.0),
+                        ),
+                        ..default()
+                    },
+                    Pickable::IGNORE,
+                ));
+                ui::paragraph(card, "Loading the World.", theme::TEXT_SMALL, theme::MUTED);
+                card.spawn((
+                    BackgroundColor(theme::RAISED),
+                    Node {
+                        height: Val::Px(4.0),
+                        margin: UiRect::top(Val::Px(18.0)),
+                        border_radius: BorderRadius::all(Val::Px(2.0)),
+                        ..default()
+                    },
+                ));
+            });
+    });
 }
 
 /// A sheet, centred and bounded so a wide window does not stretch its lines.
@@ -1813,38 +1861,6 @@ fn game_picker(col: &mut ChildSpawnerCommands, f: &Form, installed: &Installed) 
     }
 }
 
-/// A card in the middle of the screen. Only a dialog traps Tab and pad focus.
-fn centered(
-    main: &mut ChildSpawnerCommands,
-    modal: bool,
-    children: impl FnOnce(&mut ChildSpawnerCommands),
-) {
-    main.spawn(Node {
-        flex_grow: 1.0,
-        align_items: AlignItems::Center,
-        justify_content: JustifyContent::Center,
-        ..default()
-    })
-    .with_children(|center| {
-        center
-            .spawn((
-                TabGroup { modal, ..default() },
-                cine::surface(theme::PANEL),
-                Node {
-                    width: Val::Px(440.0),
-                    max_width: Val::Percent(92.0),
-                    padding: UiRect::all(Val::Px(25.0)),
-                    border: UiRect::all(Val::Px(2.0)),
-                    border_radius: BorderRadius::all(Val::Px(8.0)),
-                    flex_direction: FlexDirection::Column,
-                    row_gap: Val::Px(10.0),
-                    ..default()
-                },
-            ))
-            .with_children(children);
-    });
-}
-
 /// Step two: the Mods, with what the Game needs locked on and what would clash left out.
 fn mods_page(
     main: &mut ChildSpawnerCommands,
@@ -2285,10 +2301,7 @@ fn trust(
         format!("Trust {} items?", items.len())
     };
     main.spawn((
-        TabGroup {
-            modal: true,
-            ..default()
-        },
+        TabGroup::modal(),
         Node {
             flex_grow: 1.0,
             max_width: Val::Px(1180.0),
@@ -2311,7 +2324,7 @@ fn trust(
             page_scroll(scroll),
             |col| {
                 problem(col, l.problem.as_ref());
-                for item in items {
+                for (at, item) in items.iter().enumerate() {
                     let manifest = &item.found.manifest;
                     let data = manifest.declaration.is_some();
                     // A component's requested limits are worth reading; a data Mod has none to show.
@@ -2324,30 +2337,70 @@ fn trust(
                             .trim_end()
                             .to_owned()
                     };
-                    mod_card(
-                        col,
-                        ModCard {
-                            act: None,
-                            check: None,
-                            border: theme::EDGE,
-                            title: format!("{} {}", ui::title(&manifest.id), manifest.version),
-                            detail,
-                            tag: Some(if data {
-                                ("Data only".to_owned(), theme::MUTED)
-                            } else {
-                                ("Runs code".to_owned(), theme::WARNING)
-                            }),
+                    col.spawn((
+                        BackgroundColor(theme::CARD),
+                        BorderColor::all(theme::EDGE),
+                        Node {
+                            margin: UiRect::top(Val::Px(if at == 0 { 0.0 } else { 10.0 })),
+                            padding: UiRect::all(Val::Px(17.0)),
+                            border: UiRect::all(Val::Px(theme::RULE)),
+                            border_radius: BorderRadius::all(Val::Px(theme::RADIUS_MENU)),
+                            align_items: AlignItems::Center,
+                            column_gap: Val::Px(15.0),
+                            flex_shrink: 0.0,
+                            ..default()
                         },
-                    );
+                    ))
+                    .with_children(|card| {
+                        card.spawn(Node {
+                            flex_direction: FlexDirection::Column,
+                            row_gap: Val::Px(5.0),
+                            flex_grow: 1.0,
+                            min_width: Val::Px(0.0),
+                            ..default()
+                        })
+                        .with_children(|info| {
+                            ui::weighted_text(
+                                info,
+                                format!("{} {}", ui::title(&manifest.id), manifest.version),
+                                theme::TEXT_BODY,
+                                theme::LABEL,
+                                theme::INK,
+                            );
+                            info.spawn((
+                                Text::new(detail),
+                                theme::font(theme::TEXT_CAPTION),
+                                bevy::text::LineHeight::RelativeToFont(theme::LINE_HEIGHT),
+                                TextColor(theme::MUTED),
+                                Pickable::IGNORE,
+                            ));
+                        });
+                        cine::pill(card, if data { "Data only" } else { "Runs code" });
+                    });
                 }
             },
             |foot| {
-                focus = Some(buttons::button(foot, match next {
+                focus = Some(buttons::button(
+                    foot,
+                    match next {
                         Next::Create => "Back to Review",
                         Next::Biomes => "Back to Mods",
                         Next::Open(_) => "Cancel",
-                    }, Act::Back, ButtonStyle::Cinematic { kind: Kind::Ghost, align: Align::Centre }));
-                buttons::button(foot, format!(
+                    },
+                    Act::Back,
+                    ButtonStyle::Cinematic {
+                        kind: Kind::Ghost,
+                        align: if matches!(next, Next::Open(_)) {
+                            Align::Centre
+                        } else {
+                            Align::Before("\u{2190}")
+                        },
+                    },
+                ));
+                footer_hint(foot, "Trust is for these exact files");
+                buttons::button(
+                    foot,
+                    format!(
                         "Trust {} and {}",
                         if items.len() == 1 {
                             "it".to_owned()
@@ -2359,7 +2412,13 @@ fn trust(
                             Next::Create => "create",
                             Next::Biomes => "show their Biomes",
                         }
-                    ), Act::Trust, ButtonStyle::Cinematic { kind: Kind::Primary, align: Align::Centre });
+                    ),
+                    Act::Trust,
+                    ButtonStyle::Cinematic {
+                        kind: Kind::Primary,
+                        align: Align::Centre,
+                    },
+                );
             },
         );
     });

@@ -154,6 +154,7 @@ pub(super) const TEXT_HERO_WIDE: f32 = 80.0;
 pub(super) const WIDE_WINDOW: f32 = 1500.0;
 /// -0.045 em.
 pub(super) const HERO_TRACKING: f32 = -0.045;
+pub(super) const TEXT_PANEL_TITLE: f32 = 31.0;
 pub(super) const TEXT_TITLE: f32 = 28.0;
 pub(super) const TEXT_DIALOG_TITLE: f32 = 22.0;
 pub(super) const TEXT_HEADING: f32 = 19.0;

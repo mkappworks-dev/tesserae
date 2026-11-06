@@ -518,7 +518,7 @@ pub fn plugin(app: &mut App) {
 #[cfg(feature = "dev")]
 type Script<'w, 's> = (
     ResMut<'w, Queue>,
-    Option<Res<'w, Launcher>>,
+    Option<ResMut<'w, Launcher>>,
     Query<'w, 's, (Entity, &'static Act)>,
 );
 
@@ -528,7 +528,7 @@ type Untargeted<'w, 's> = Query<'w, 's, Entity, (With<Camera2d>, Without<IsDefau
 #[cfg(feature = "dev")]
 fn review_capture(
     mut commands: Commands,
-    (mut queue, launcher, acts): Script,
+    (mut queue, mut launcher, acts): Script,
     mut relaunch: ResMut<Switch>,
     mut exit: MessageWriter<AppExit>,
     (pending, failure): (
@@ -599,6 +599,14 @@ fn review_capture(
                 "back" => Act::Back,
                 "randomize" => Act::Randomize,
                 "reset" => Act::ResetBiomes,
+                // The Opening card stays up: no World is handed to the loader.
+                "opening" => {
+                    if let Some(l) = launcher.as_mut() {
+                        let name = l.display_name(&first);
+                        l.show(Screen::Opening(name));
+                    }
+                    continue;
+                }
                 other => panic!("unknown TESSERAE_LIST_SCRIPT step `{other}`"),
             });
         }
