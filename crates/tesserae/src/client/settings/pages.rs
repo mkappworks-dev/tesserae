@@ -337,8 +337,9 @@ pub(super) fn accessibility(list: &mut ChildSpawnerCommands, p: &Preferences) {
 }
 
 pub(super) fn display(list: &mut ChildSpawnerCommands, p: &Preferences) {
+    use crate::client::cinematic as cine;
     use crate::client::menu_ui as ui;
-    group(list, "PRESENTATION", |card| {
+    group(list, "FRAME PRESENTATION", |card| {
         setting_row(
             card,
             "Display sync",
@@ -355,10 +356,56 @@ pub(super) fn display(list: &mut ChildSpawnerCommands, p: &Preferences) {
                 })
             },
         );
+        card.spawn(Node {
+            flex_direction: FlexDirection::Column,
+            margin: UiRect::new(Val::Px(0.0), Val::Px(0.0), Val::Px(14.0), Val::Px(19.0)),
+            flex_shrink: 0.0,
+            ..default()
+        })
+        .with_children(|notice| {
+            cine::notice(
+                notice,
+                if p.display_sync {
+                    "Recommended for normal play. Keeps presentation free of tearing."
+                } else {
+                    "Sync is off. Frames may tear; choose a limit below to reduce unnecessary work."
+                },
+            )
+        });
+        setting_row(
+            card,
+            "Frame rate limit",
+            "An optional ceiling, independent of display sync.",
+            |row| {
+                segment(row, |buttons| {
+                    for cap in [Some(60), Some(120), Some(144), Some(240), Some(1000), None] {
+                        option(
+                            buttons,
+                            cap.map_or("No limit".into(), |n: u32| n.to_string()),
+                            Operation::Cap(cap),
+                            p.fps_cap == cap,
+                        );
+                    }
+                })
+            },
+        );
+        let pacing = if p.display_sync {
+            "Display synced"
+        } else if p.fps_cap.is_none() {
+            "Uncapped rendering"
+        } else {
+            "Sync off"
+        };
+        let ceiling = p
+            .fps_cap
+            .map_or("No additional frame limit".into(), |n| format!("{n} FPS ceiling"));
+        setting_row(card, pacing, &ceiling, |row| cine::pill(row, "Frame pacing"));
+    });
+    group(list, "IMAGE QUALITY", |card| {
         setting_row(
             card,
             "Anti-aliasing",
-            "Smooths block edges. MSAA 4x also smooths the held item and costs more; Off is fastest.",
+            "Smooth voxel edges. MSAA costs more.",
             |row| {
                 segment(row, |buttons| {
                     for aa in crate::client::anti_alias::CHOICES {
@@ -375,159 +422,25 @@ pub(super) fn display(list: &mut ChildSpawnerCommands, p: &Preferences) {
         setting_row(
             card,
             "Render scale",
-            "Draws the World at a fraction of the window and scales it up. Menus and text stay sharp.",
+            "Lower values reduce rendering work. Menus stay sharp.",
             |row| {
                 segment(row, |buttons| {
-                    for scale in crate::client::render_scale::SCALES {
+                    for scale in crate::client::render_scale::SCALES.iter().rev() {
                         option(
                             buttons,
                             format!("{scale}%"),
-                            Operation::Scale(scale),
-                            p.render_scale == scale,
+                            Operation::Scale(*scale),
+                            p.render_scale == *scale,
                         );
                     }
                 })
             },
         );
-        card.spawn((
-            BackgroundColor(theme::NOTICE),
-            Node {
-                padding: UiRect::axes(Val::Px(14.0), Val::Px(12.0)),
-                margin: UiRect::top(Val::Px(15.0)),
-                border_radius: BorderRadius::all(Val::Px(4.0)),
-                ..default()
-            },
-        ))
-        .with_children(|notice| {
-            ui::text(
-                notice,
-                if p.display_sync {
-                    "Recommended for normal play. Keeps presentation free of tearing."
-                } else {
-                    "Sync is off. Frames may tear; choose a limit below to reduce unnecessary work."
-                },
-                11.0,
-                if p.display_sync {
-                    theme::MUTED
-                } else {
-                    theme::WARNING
-                },
-            )
-        });
-        card.spawn((
-            BorderColor::all(theme::EDGE),
-            Node {
-                flex_direction: FlexDirection::Column,
-                padding: UiRect::vertical(Val::Px(17.0)),
-                border: UiRect::bottom(Val::Px(1.0)),
-                row_gap: Val::Px(4.0),
-                ..default()
-            },
-        ))
-        .with_children(|limit| {
-            ui::weighted_text(limit, "Frame rate limit", 13.0, 550, theme::INK);
-            ui::description(limit, "An optional ceiling, independent of display sync.");
-            limit
-                .spawn(Node {
-                    column_gap: Val::Px(6.0),
-                    row_gap: Val::Px(6.0),
-                    flex_wrap: FlexWrap::Wrap,
-                    margin: UiRect::top(Val::Px(8.0)),
-                    ..default()
-                })
-                .with_children(|caps| {
-                    for cap in [None, Some(60), Some(120), Some(144), Some(240), Some(1000)] {
-                        let button = buttons::button(
-                            caps,
-                            cap.map_or("No limit".into(), |n| n.to_string()),
-                            Operation::Cap(cap),
-                            ButtonStyle::Compact {
-                                selected: p.fps_cap == cap,
-                                height_px: 35.0,
-                                text_px: 11.0,
-                            },
-                        );
-                        caps.commands().entity(button).insert(Node {
-                            min_width: Val::Px(48.0),
-                            min_height: Val::Px(35.0),
-                            padding: UiRect::axes(Val::Px(13.0), Val::Px(9.0)),
-                            border: UiRect::all(Val::Px(1.0)),
-                            border_radius: BorderRadius::all(Val::Px(5.0)),
-                            align_items: AlignItems::Center,
-                            justify_content: JustifyContent::Center,
-                            ..default()
-                        });
-                    }
-                });
-        });
-        card.spawn(Node {
-            padding: UiRect::top(Val::Px(17.0)),
-            column_gap: Val::Px(10.0),
-            align_items: AlignItems::Center,
-            ..default()
-        })
-        .with_children(|summary| {
-            summary
-                .spawn((
-                    BackgroundColor(theme::CHOSEN),
-                    BorderColor::all(theme::CHOSEN_EDGE),
-                    Node {
-                        width: Val::Px(29.0),
-                        height: Val::Px(29.0),
-                        border: UiRect::all(Val::Px(1.0)),
-                        border_radius: BorderRadius::all(Val::Px(5.0)),
-                        align_items: AlignItems::Center,
-                        justify_content: JustifyContent::Center,
-                        ..default()
-                    },
-                ))
-                .with_children(|icon| {
-                    ui::icon(
-                        icon,
-                        if p.display_sync {
-                            ui::IconKind::Sync
-                        } else {
-                            ui::IconKind::Uncapped
-                        },
-                        theme::SAGE,
-                        16.0,
-                    )
-                });
-            summary
-                .spawn(Node {
-                    flex_direction: FlexDirection::Column,
-                    row_gap: Val::Px(2.0),
-                    ..default()
-                })
-                .with_children(|policy| {
-                    ui::weighted_text(
-                        policy,
-                        if p.display_sync {
-                            "Display synced"
-                        } else if p.fps_cap.is_none() {
-                            "Uncapped rendering"
-                        } else {
-                            "Sync off"
-                        },
-                        12.0,
-                        550,
-                        theme::INK,
-                    );
-                    ui::text(
-                        policy,
-                        p.fps_cap.map_or("No additional frame limit".into(), |n| {
-                            format!("{n} FPS ceiling")
-                        }),
-                        11.0,
-                        theme::MUTED,
-                    );
-                });
-        });
     });
-    ui::text(
+    ui::paragraph(
         list,
         "View distance, textures, shadows, and simulation settings stay unchanged.",
-        12.0,
+        theme::TEXT_SMALL,
         theme::MUTED,
     );
 }

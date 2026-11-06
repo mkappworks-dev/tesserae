@@ -927,8 +927,6 @@ pub(super) enum IconKind {
     Search,
     Reset,
     Close,
-    Sync,
-    Uncapped,
     /// Inter has no ⚙.
     Settings,
     Mods,
@@ -947,7 +945,7 @@ pub(super) enum IconKind {
     Display,
     Accessibility,
 }
-const ICONS: usize = 19;
+const ICONS: usize = 17;
 /// The icons drawn from the prototype's 24-unit outlines, in atlas order.
 const DRAWN: [IconKind; 14] = [
     IconKind::Settings,
@@ -1005,21 +1003,9 @@ fn make_icons(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
                         || segment(p, Vec2::new(3.0, 3.0), Vec2::new(3.0, 7.0))
                         || segment(p, Vec2::new(3.0, 3.0), Vec2::new(7.0, 3.0))
                 }
-                2 => {
+                _ => {
                     segment(p, Vec2::splat(5.0), Vec2::splat(11.0))
                         || segment(p, Vec2::new(5.0, 11.0), Vec2::new(11.0, 5.0))
-                }
-                3 => {
-                    segment(p, Vec2::new(2.0, 8.0), Vec2::new(14.0, 8.0))
-                        || segment(p, Vec2::new(2.0, 8.0), Vec2::new(5.0, 5.0))
-                        || segment(p, Vec2::new(2.0, 8.0), Vec2::new(5.0, 11.0))
-                        || segment(p, Vec2::new(14.0, 8.0), Vec2::new(11.0, 5.0))
-                        || segment(p, Vec2::new(14.0, 8.0), Vec2::new(11.0, 11.0))
-                }
-                _ => {
-                    segment(p, Vec2::new(4.0, 12.0), Vec2::new(12.0, 4.0))
-                        || segment(p, Vec2::new(6.0, 4.0), Vec2::new(12.0, 4.0))
-                        || segment(p, Vec2::new(12.0, 10.0), Vec2::new(12.0, 4.0))
                 }
             };
             if ink {
