@@ -109,7 +109,9 @@ decisions it illustrates are in [../decisions.md](../decisions.md). Code is in
   the HUD does not jump. A vignette marks low health. Creative shows no vitals.
 - `/death` centres the cause, what it means, where your items are and for how
   long, then Respawn and Return to Worlds. Enter respawns; Escape does nothing
-  there.
+  there. The World behind greys and darkens, and the HUD hides.
+- `/play` and `/death` show no footer: it belongs to the launcher and the menus.
+  The hotbar sits 12 px above the window's edge.
 - Create World has a Game mode picker; Edit World has the World's default mode
   and your own mode. The bar's **Your mode** control mirrors your mode in the
   open World.
