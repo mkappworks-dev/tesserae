@@ -2390,11 +2390,7 @@ fn trust(
                     Act::Back,
                     ButtonStyle::Cinematic {
                         kind: Kind::Ghost,
-                        align: if matches!(next, Next::Open(_)) {
-                            Align::Centre
-                        } else {
-                            Align::Before("\u{2190}")
-                        },
+                        align: Align::Centre,
                     },
                 ));
                 footer_hint(foot, "Trust is for these exact files");
