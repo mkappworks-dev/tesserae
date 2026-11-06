@@ -124,6 +124,12 @@ pub struct SkyFogTarget {
     pub fog: [f32; 3],
 }
 
+/// The Biome at the Player's Eye, as an index into [`WorldFacts::biomes`], sent as it changes;
+/// `None` where the World has no Biomes. The Client holds no generator to work it out itself
+/// (ADR-0002).
+#[derive(Message, Clone, Copy, Debug, PartialEq)]
+pub struct HereBiome(pub Option<usize>);
+
 /// What the Server says about the open World when a session starts, for the
 /// Menu's World details.
 #[derive(Message, Clone, Debug, PartialEq)]

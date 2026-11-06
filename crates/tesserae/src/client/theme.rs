@@ -292,3 +292,7 @@ pub(super) const WORKSPACE_MAX: f32 = 1180.0;
 pub(super) const WORKSPACE_GAP: f32 = 24.0;
 pub(super) const RAIL_WIDTH: f32 = 224.0;
 pub(super) const RAIL_ENTRY_HEIGHT: f32 = 48.0;
+pub(super) const MENU_WIDTH: f32 = 300.0;
+/// "You are here" on the World, under the Menu.
+pub(super) const STATUS_INK: Color = Color::srgb_u8(0xee, 0xf1, 0xea);
+pub(super) const TEXT_STATUS: f32 = 24.0;

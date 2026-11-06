@@ -16,7 +16,7 @@ use super::actions::{Action, Actions};
 use super::cinematic::{self as cine, Kind};
 use super::menu_ui as ui;
 use super::theme;
-use crate::content::{MaterialPalette, WorldFacts};
+use crate::content::{HereBiome, MaterialPalette, WorldFacts};
 use crate::render::chunk_material::{ChunkMaterialExtension, FLAME_SLOT};
 use crate::server::game_mode::GameMode;
 use crate::session::SessionApp;
@@ -72,6 +72,10 @@ impl Swatches {
 #[derive(Resource, Default)]
 pub(super) struct Facts(pub(super) Option<WorldFacts>);
 
+/// The Biome the Server last said the Player is in.
+#[derive(Resource, Default)]
+struct Here(Option<usize>);
+
 #[derive(Component, Clone, Copy, PartialEq, Eq, Debug)]
 pub(super) enum Choice {
     Resume,
@@ -88,7 +92,9 @@ pub(super) fn plugin(app: &mut App) {
     app.init_session_state::<Menu>()
         .init_session_state::<Swatches>()
         .init_session_state::<Facts>()
+        .init_session_state::<Here>()
         .add_session_message::<WorldFacts>()
+        .add_session_message::<HereBiome>()
         .add_observer(choose)
         .add_observer(choose_settings)
         .add_session_systems(
@@ -101,6 +107,7 @@ pub(super) fn plugin(app: &mut App) {
                     .before(super::edit::send_intents),
                 receive_palette,
                 receive_facts,
+                receive_here,
                 render,
             )
                 .chain(),
@@ -225,14 +232,34 @@ fn receive_facts(mut messages: MessageReader<WorldFacts>, mut facts: ResMut<Fact
     }
 }
 
+fn receive_here(mut messages: MessageReader<HereBiome>, mut here: ResMut<Here>) {
+    if let Some(latest) = messages.read().last() {
+        here.0 = latest.0;
+    }
+}
+
+/// Where the Player is, as the footer names it: "TERRA / RIVER BEND".
+pub(super) fn place(facts: Option<&WorldFacts>) -> String {
+    let game = facts
+        .and_then(|f| f.game.as_ref())
+        .map(|(id, _)| ui::title(id));
+    let world = facts.and_then(|f| f.name.clone());
+    match (game, world) {
+        (Some(game), Some(world)) => format!("{game} / {world}"),
+        (game, world) => world.or(game).unwrap_or_else(|| "Your World".into()),
+    }
+    .to_uppercase()
+}
+
 /// Whether World details show, and whether the background is solid.
 type Shown = (bool, bool);
 
 fn render(
     mut commands: Commands,
-    (menu, facts, settings): (
+    (menu, facts, here, settings): (
         Res<Menu>,
         Res<Facts>,
+        Res<Here>,
         Option<Res<super::settings::Settings>>,
     ),
     own: Option<Res<super::game_mode::Mode>>,
@@ -243,7 +270,11 @@ fn render(
 ) {
     let solid = preferences.is_some_and(|p| p.solid_background);
     let wanted = (menu.open && !settings.is_some_and(|s| s.open)).then_some((menu.details, solid));
-    if *shown == wanted && !facts.is_changed() && !own.as_ref().is_some_and(|o| o.is_changed()) {
+    if *shown == wanted
+        && !facts.is_changed()
+        && !here.is_changed()
+        && !own.as_ref().is_some_and(|o| o.is_changed())
+    {
         return;
     }
     *shown = wanted;
@@ -274,90 +305,46 @@ fn render(
                 position_type: PositionType::Absolute,
                 width: Val::Percent(100.0),
                 height: Val::Percent(100.0),
-                padding: UiRect::horizontal(Val::Percent(5.0)),
-                align_items: AlignItems::Center,
+                flex_direction: FlexDirection::Column,
                 ..default()
             },
         ))
         .with_children(|root| {
-            root.spawn((
-                TabGroup {
-                    modal: !details,
-                    ..default()
-                },
-                cine::surface(theme::PANEL),
-                Node {
-                    width: Val::Px(300.0),
-                    padding: UiRect::all(Val::Px(25.0)),
-                    border: UiRect::all(Val::Px(2.0)),
-                    border_radius: BorderRadius::all(Val::Px(8.0)),
-                    flex_direction: FlexDirection::Column,
-                    row_gap: Val::Px(8.0),
-                    ..default()
-                },
-            ))
-            .with_children(|panel| {
-                buttons::eyebrow(panel, "TAKE A MOMENT", Eyebrow::Cinematic);
-                ui::weighted_text(panel, "Menu", 31.0, 450, theme::INK);
-                let place = facts
-                    .and_then(|f| f.name.clone())
-                    .unwrap_or_else(|| "Your World".into());
-                let subtitle = match own {
-                    Some(mode) => format!("{place} · {}", mode_name(mode)),
-                    None => place,
-                };
-                ui::paragraph(panel, subtitle, 13.0, theme::MUTED);
-                panel
+            root.spawn(Node {
+                flex_grow: 1.0,
+                min_height: Val::Px(0.0),
+                padding: UiRect::new(
+                    Val::Px(theme::SCREEN_PAD_X),
+                    Val::Px(theme::SCREEN_PAD_X),
+                    Val::Px(theme::SCREEN_PAD_TOP),
+                    Val::Px(theme::SCREEN_PAD_BOTTOM),
+                ),
+                ..default()
+            })
+            .with_children(|screen| {
+                screen
                     .spawn(Node {
-                        flex_direction: FlexDirection::Column,
-                        row_gap: Val::Px(8.0),
-                        margin: UiRect::top(Val::Px(16.0)),
+                        flex_grow: 1.0,
+                        padding: UiRect::horizontal(Val::Vw(5.0)),
+                        align_items: AlignItems::Center,
+                        justify_content: JustifyContent::SpaceBetween,
                         ..default()
                     })
-                    .with_children(|list| {
-                        let key = |action| bindings.label(action, &labels);
-                        let resume = buttons::button(
-                            list,
-                            "Resume",
-                            Choice::Resume,
-                            ButtonStyle::Cinematic {
-                                kind: Kind::Primary,
-                                align: Align::Glyph(&key(Action::ReleaseCursor)),
-                            },
-                        );
+                    .with_children(|pause| {
+                        let resume = panel(pause, facts, own, details, (&bindings, &labels));
                         if !details {
                             focus = Some(resume);
                         }
-                        buttons::button(
-                            list,
-                            "Inventory",
-                            Choice::Inventory,
-                            ButtonStyle::Cinematic {
-                                kind: Kind::Plain,
-                                align: Align::Glyph(&key(Action::Inventory)),
-                            },
-                        );
-                        buttons::button(
-                            list,
-                            "Settings",
-                            Choice::Settings,
-                            ButtonStyle::Cinematic {
-                                kind: Kind::Plain,
-                                align: Align::Left,
-                            },
-                        );
-                        buttons::button(
-                            list,
-                            "World details",
-                            Choice::Details,
-                            ButtonStyle::Cinematic {
-                                kind: Kind::Plain,
-                                align: Align::Left,
-                            },
-                        );
-                        super::save::return_buttons(list);
+                        let biome = here
+                            .0
+                            .and_then(|i| facts.and_then(|f| f.biomes.get(i)))
+                            .map(|name| ui::declared_title(name));
+                        if let Some(biome) = biome {
+                            world_status(pause, facts, &biome);
+                        }
                     });
             });
+            super::worlds::pages::footer(root, &place(facts));
             if details {
                 focus = world_details(root, facts, own);
             }
@@ -371,6 +358,164 @@ fn render(
     }
 }
 
+/// The Menu's panel; returns Resume, which takes focus.
+fn panel(
+    pause: &mut ChildSpawnerCommands,
+    facts: Option<&WorldFacts>,
+    own: Option<GameMode>,
+    details: bool,
+    (bindings, labels): (&super::actions::Bindings, &super::actions::Labels),
+) -> Entity {
+    let mut resume = Entity::PLACEHOLDER;
+    pause
+        .spawn((
+            TabGroup {
+                modal: !details,
+                ..default()
+            },
+            cine::surface(theme::PANEL),
+            cine::framed(Node {
+                width: Val::Px(theme::MENU_WIDTH),
+                padding: UiRect::all(Val::Px(25.0)),
+                flex_direction: FlexDirection::Column,
+                flex_shrink: 0.0,
+                ..default()
+            }),
+        ))
+        .with_children(|panel| {
+            panel
+                .spawn(Node {
+                    margin: UiRect::bottom(Val::Px(12.0)),
+                    ..default()
+                })
+                .with_children(|e| buttons::eyebrow(e, "TAKE A MOMENT", Eyebrow::Cinematic));
+            panel.spawn((
+                Text::new("Menu"),
+                theme::weighted(theme::TEXT_PANEL_TITLE, theme::BOOK),
+                bevy::text::LineHeight::RelativeToFont(1.2),
+                TextColor(theme::INK),
+                Node {
+                    margin: UiRect::bottom(Val::Px(6.0)),
+                    ..default()
+                },
+                Pickable::IGNORE,
+            ));
+            let place = facts
+                .and_then(|f| f.name.clone())
+                .unwrap_or_else(|| "Your World".into());
+            let subtitle = match own {
+                Some(mode) => format!("{place} · {}", mode_name(mode)),
+                None => place,
+            };
+            ui::paragraph(panel, subtitle, theme::TEXT_SMALL, theme::MUTED);
+            panel
+                .spawn(Node {
+                    flex_direction: FlexDirection::Column,
+                    row_gap: Val::Px(8.0),
+                    margin: UiRect::top(Val::Px(24.0)),
+                    ..default()
+                })
+                .with_children(|list| {
+                    let key = |action| short_key(bindings.label(action, labels));
+                    let glyph = |kind, glyph: &str| ButtonStyle::Cinematic {
+                        kind,
+                        align: Align::Glyph(glyph),
+                    };
+                    resume = buttons::button(
+                        list,
+                        "Resume",
+                        Choice::Resume,
+                        glyph(Kind::Primary, &key(Action::ReleaseCursor)),
+                    );
+                    buttons::button(
+                        list,
+                        "Inventory",
+                        Choice::Inventory,
+                        glyph(Kind::Plain, &key(Action::Inventory)),
+                    );
+                    let settings = buttons::button(
+                        list,
+                        "Settings",
+                        Choice::Settings,
+                        ButtonStyle::Cinematic {
+                            kind: Kind::Plain,
+                            align: Align::Icon(ui::IconKind::Settings),
+                        },
+                    );
+                    // The gear sits at the right edge, as the other rows' glyphs do.
+                    list.commands().queue(move |world: &mut World| {
+                        if let Some(mut node) = world.get_mut::<Node>(settings) {
+                            node.justify_content = JustifyContent::SpaceBetween;
+                        }
+                    });
+                    buttons::button(
+                        list,
+                        "World details",
+                        Choice::Details,
+                        glyph(Kind::Plain, "↗"),
+                    );
+                    super::save::return_buttons(list);
+                });
+        });
+    resume
+}
+
+/// The prototype's key names are short: Esc, not Escape.
+fn short_key(label: String) -> String {
+    if label == "Escape" {
+        "Esc".into()
+    } else {
+        label
+    }
+}
+
+/// Where the Player stands, at the bottom right.
+fn world_status(pause: &mut ChildSpawnerCommands, facts: Option<&WorldFacts>, biome: &str) {
+    let shadow = |y: f32| TextShadow {
+        offset: Vec2::new(0.0, y),
+        color: Color::BLACK.with_alpha(0.8),
+    };
+    let game = facts
+        .and_then(|f| f.game.as_ref())
+        .map_or_else(|| "Your World".into(), |(id, _)| ui::title(id));
+    pause
+        .spawn(Node {
+            align_self: AlignSelf::FlexEnd,
+            flex_direction: FlexDirection::Column,
+            align_items: AlignItems::FlexEnd,
+            margin: UiRect::bottom(Val::Px(15.0)),
+            ..default()
+        })
+        .with_children(|status| {
+            status.spawn((
+                Text::new("YOU ARE HERE"),
+                theme::weighted(theme::TEXT_EYEBROW, theme::STRONG),
+                bevy::text::LetterSpacing::Px(theme::EYEBROW_TRACKING),
+                TextColor(theme::STATUS_INK),
+                shadow(1.0),
+                Pickable::IGNORE,
+            ));
+            status.spawn((
+                Text::new(biome),
+                theme::weighted(theme::TEXT_STATUS, theme::BOOK),
+                TextColor(theme::INK),
+                shadow(2.0),
+                Node {
+                    margin: UiRect::vertical(Val::Px(8.0)),
+                    ..default()
+                },
+                Pickable::IGNORE,
+            ));
+            status.spawn((
+                Text::new(format!("{game}   /   a little further to explore.")),
+                theme::font(theme::TEXT_TAG),
+                TextColor(theme::STATUS_INK),
+                shadow(1.0),
+                Pickable::IGNORE,
+            ));
+        });
+}
+
 /// The World's facts in a dialog over the Menu.
 fn world_details(
     root: &mut ChildSpawnerCommands,
@@ -378,14 +523,17 @@ fn world_details(
     own: Option<GameMode>,
 ) -> Option<Entity> {
     let mut close = None;
-    root.spawn(Node {
-        position_type: PositionType::Absolute,
-        width: Val::Percent(100.0),
-        height: Val::Percent(100.0),
-        align_items: AlignItems::Center,
-        justify_content: JustifyContent::Center,
-        ..default()
-    })
+    root.spawn((
+        BackgroundColor(theme::OVERLAY),
+        Node {
+            position_type: PositionType::Absolute,
+            width: Val::Percent(100.0),
+            height: Val::Percent(100.0),
+            align_items: AlignItems::Center,
+            justify_content: JustifyContent::Center,
+            ..default()
+        },
+    ))
     .with_children(|center| {
         center
             .spawn((
@@ -393,29 +541,26 @@ fn world_details(
                     modal: true,
                     ..default()
                 },
-                cine::surface(theme::PANEL),
-                Node {
-                    width: Val::Px(420.0),
-                    max_width: Val::Percent(92.0),
-                    padding: UiRect::all(Val::Px(25.0)),
-                    border: UiRect::all(Val::Px(2.0)),
-                    border_radius: BorderRadius::all(Val::Px(8.0)),
-                    flex_direction: FlexDirection::Column,
-                    row_gap: Val::Px(8.0),
-                    ..default()
-                },
+                cine::dialog_box(),
             ))
             .with_children(|dialog| {
-                buttons::eyebrow(dialog, "WORLD DETAILS", Eyebrow::Cinematic);
-                let Some(facts) = facts else {
-                    ui::paragraph(
-                        dialog,
-                        "The Server has not described this World yet.",
-                        13.0,
-                        theme::MUTED,
-                    );
+                match facts {
+                    Some(facts) => {
+                        cine::dialog_title(dialog, facts.name.as_deref().unwrap_or("This World"));
+                        cine::dialog_text(dialog, lines(facts, own).join("\n"), theme::MUTED);
+                    }
+                    None => {
+                        cine::dialog_title(dialog, "This World");
+                        cine::dialog_text(
+                            dialog,
+                            "The Server has not described this World yet.",
+                            theme::MUTED,
+                        );
+                    }
+                }
+                dialog.spawn(cine::dialog_actions()).with_children(|actions| {
                     close = Some(buttons::button(
-                        dialog,
+                        actions,
                         "Close",
                         Choice::CloseDetails,
                         ButtonStyle::Cinematic {
@@ -423,27 +568,7 @@ fn world_details(
                             align: Align::Centre,
                         },
                     ));
-                    return;
-                };
-                ui::weighted_text(
-                    dialog,
-                    facts.name.as_deref().unwrap_or("This World"),
-                    22.0,
-                    500,
-                    theme::INK,
-                );
-                for line in lines(facts, own) {
-                    ui::paragraph(dialog, line, 13.0, theme::MUTED);
-                }
-                close = Some(buttons::button(
-                    dialog,
-                    "Close",
-                    Choice::CloseDetails,
-                    ButtonStyle::Cinematic {
-                        kind: Kind::Primary,
-                        align: Align::Centre,
-                    },
-                ));
+                });
             });
     });
     close
@@ -456,23 +581,24 @@ fn mode_name(mode: GameMode) -> &'static str {
     }
 }
 
-/// The World details, one fact per line.
+/// The World details, one fact per line, as the prototype words them.
 fn lines(facts: &WorldFacts, own: Option<GameMode>) -> Vec<String> {
-    let game = facts.game.as_ref().map_or_else(
-        || "No Game".to_owned(),
-        |(id, version)| format!("{} {version}", ui::title(id)),
-    );
-    let biomes: Vec<_> = facts.biomes.iter().map(|b| ui::declared_title(b)).collect();
+    let game = facts
+        .game
+        .as_ref()
+        .map_or_else(|| "No Game".to_owned(), |(id, _)| ui::title(id));
     vec![
-        format!("Game: {game}"),
-        format!("Voxel size: {} m", facts.voxel_size_m),
+        format!("{game} · {} m voxels", facts.voxel_size_m),
         format!("Seed: {}", facts.seed),
-        match biomes.len() {
-            0 => "Biomes: none declared".to_owned(),
-            n => format!("{n} Biomes: {}", biomes.join(" · ")),
+        match facts.biomes.len() {
+            1 => "1 biome".to_owned(),
+            n => format!("{n} biomes"),
         },
-        format!("Default mode: {}", mode_name(facts.default_mode)),
-        format!("Your mode: {}", own.map_or("not yet known", mode_name)),
+        format!(
+            "Default mode {} · your mode {}",
+            mode_name(facts.default_mode),
+            own.map_or("not yet known", mode_name)
+        ),
     ]
 }
 
@@ -695,17 +821,9 @@ mod tests {
         press(&mut app, KeyCode::Tab);
         choose(&mut app, Choice::Details);
         let shown = texts(&mut app);
-        for line in [
-            "River bend",
-            "Game: Terra 0.1.0",
-            "Voxel size: 0.5 m",
-            "Seed: 42",
-            "2 Biomes: Ash flats · Meadow",
-            "Default mode: Survival",
-            "Your mode: Creative",
-        ] {
-            assert!(shown.iter().any(|t| t == line), "{line} in {shown:?}");
-        }
+        assert!(shown.iter().any(|t| t == "River bend"), "{shown:?}");
+        let body = "Terra · 0.5 m voxels\nSeed: 42\n2 biomes\nDefault mode Survival · your mode Creative";
+        assert!(shown.iter().any(|t| t == body), "{body} in {shown:?}");
         press(&mut app, KeyCode::Escape);
         assert!(open(&app), "Escape closes the details only");
         assert!(!app.world().resource::<Menu>().details);

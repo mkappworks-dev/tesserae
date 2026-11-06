@@ -141,8 +141,14 @@ fn show_hint(
     bindings: Res<super::actions::Bindings>,
     labels: Res<super::actions::Labels>,
     touch: Res<super::touch::TouchFrame>,
+    (menu, settings): (
+        Option<Res<super::menu::Menu>>,
+        Option<Res<super::settings::Settings>>,
+    ),
 ) {
-    let wanted = if cursor.grab_mode == CursorGrabMode::None {
+    // The Menu and Settings free the cursor too, but say where to go themselves.
+    let covered = menu.is_some_and(|m| m.open) || settings.is_some_and(|s| s.open);
+    let wanted = if cursor.grab_mode == CursorGrabMode::None && !covered {
         Visibility::Inherited
     } else {
         Visibility::Hidden
