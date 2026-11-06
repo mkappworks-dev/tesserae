@@ -34,13 +34,13 @@ licensed under BSL 1.1.
 Some parts of the repo are deliberately **not** BSL, because they are templates
 people copy:
 
-| Path                        | Licence    | Why                                                                                                                                                             |
-| --------------------------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `games/terra/`              | CC0 or MIT | It is the starting point for every game built on Tesserae. BSL here would block the on-ramp. See [ADR-0004](docs/adr/0004-terra-game-in-repo-real-game-out.md). |
-| `games/*/` and `mods/*/`    | MIT        | The demo Games and the shared data Mods they depend on; authors copy them as worked examples. See [Demo Games and shared Mods](docs/demo-games.md).             |
-| `starters/`                 | MIT        | Templates a Game author copies out of the checkout; a proprietary Game must be free to start from them.                                                         |
-| `crates/tesserae-mods/wit/` | MIT        | The public Mod contract, and the copy each Rust starter bundles; building against it must not need BSL terms.                                                   |
-| `assets/`                   | CC0        | Default and placeholder art must be reusable in proprietary games.                                                                                              |
+| Path                        | Licence                | Why                                                                                                                                                                          |
+| --------------------------- | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `games/terra/`              | CC0 or MIT             | It is the starting point for every game built on Tesserae. BSL here would block the on-ramp. See [ADR-0004](docs/adr/0004-terra-game-in-repo-real-game-out.md).              |
+| `games/*/` and `mods/*/`    | MIT                    | The demo Games and the shared data Mods they depend on; authors copy them as worked examples. See [Demo Games and shared Mods](docs/demo-games.md).                          |
+| `starters/`                 | MIT                    | Templates a Game author copies out of the checkout; a proprietary Game must be free to start from them.                                                                      |
+| `crates/tesserae-mods/wit/` | MIT                    | The public Mod contract, and the copy each Rust starter bundles; building against it must not need BSL terms.                                                                |
+| `assets/`                   | CC0, fonts SIL OFL 1.1 | Default and placeholder art must be reusable in proprietary games. A font keeps its OFL text beside it; see [ADR-0005](docs/adr/0005-assets-live-at-the-repository-root.md). |
 
 BSL is **source-available, not open source** — it is not OSI-approved, and the
 licence text says so itself. Please don't describe the project as open source.

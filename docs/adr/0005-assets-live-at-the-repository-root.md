@@ -48,3 +48,19 @@ the public domain under CC0, consistent with this directory's existing rule. The
 menu reference uses the same faces. The default Font asset is also replaced with
 Aileron Regular so HUD and save dialogs use the same family. See
 [asset provenance](../../assets/README.md#bundled-ui-fonts).
+
+## Fonts under the SIL Open Font License
+
+Amended 2026-11-06, from the phase 15 spec's ticket 23. `assets/` may also hold
+fonts under the SIL Open Font License 1.1, each with its licence text in a file
+beside it, as the licence requires of every copy. Everything else in `assets/`
+stays CC0. The OFL permits bundling, modification and commercial use, and binds
+only the font itself, so a Game built on Tesserae is not bound by it; a modified
+font must not reuse a Reserved Font Name, and Inter declares none.
+
+The interface's body face is Inter 4.1's variable font, `InterVariable.ttf`,
+unchanged from the official release and embedded as Aileron was, so every weight
+the approved prototype uses renders exactly. It also replaces Bevy's default
+Font asset for HUD text and save dialogs. Aileron SemiBold stays for the
+wordmark only, and Aileron Regular and Bold are no longer bundled. See
+[asset provenance](../../assets/README.md#bundled-ui-fonts).

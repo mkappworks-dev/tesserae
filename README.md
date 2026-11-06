@@ -167,6 +167,7 @@ the plain-English summary of what else is allowed, and the file to read first.
 > name, because the library it uses to detect licences does not carry BUSL. That
 > is a gap in GitHub's tooling, not an unlicensed repository.
 
-`assets/` is **CC0**, not BSL, so the placeholder art is reusable — see
+`assets/` is **CC0**, not BSL, so the placeholder art is reusable; its interface
+font is under the SIL Open Font License — see
 [assets/README.md](assets/README.md). Contributions require a CLA; see
 [CONTRIBUTING.md](CONTRIBUTING.md#contributor-license-agreement-cla).
