@@ -324,3 +324,4 @@ pub(super) const STEPPER_VALUE_TEXT: f32 = 15.0;
 pub(super) const SLOT_RECESS_PX: f32 = 3.0;
 pub(super) const SLOT_LIFT_PX: f32 = 2.0;
 pub(super) const GLYPH_SIZE: f32 = 22.0;
+pub(super) const TOOL_TRACKING: f32 = 1.2;

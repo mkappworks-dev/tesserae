@@ -4,14 +4,16 @@
 //!
 //! It is its own input context beside the Catalogue and the settings: the
 //! cursor is released and the pad navigates it, and gameplay input waits.
+use super::inventory_window::look::{self, Flat, Flavour, Glyph};
 use super::theme;
 use super::{
     actions::{Action, Actions},
-    layout::{AXIS_NAMES, Kind, LayoutMode, LayoutPreferences, way_name},
+    cinematic as cine,
+    layout::{AXIS_NAMES, Kind, LayoutMode, LayoutPreferences, extent_m, metres, way_name},
     menu_ui as ui,
     profile::{Preferences, Store},
 };
-use crate::client::buttons::{self, ButtonStyle, Eyebrow};
+use crate::client::buttons::{self, Eyebrow};
 use crate::session::SessionApp;
 use crate::world::WorldSettings;
 use bevy::input_focus::{FocusCause, InputFocus};
@@ -20,16 +22,25 @@ use bevy::ui_widgets::{Activate, ScrollArea};
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
 use tesserae_core::layout::MAX_LAYOUT_VOXELS;
 
-const CARD_WIDTH: f32 = 370.0;
-const STATUS_WIDTH: f32 = 320.0;
+const CARD_WIDTH: f32 = 360.0;
+const STATUS_WIDTH: f32 = 300.0;
+const PANEL_TOP_PX: f32 = 28.0;
+/// The prototype's 22 px over its in-play footer; play has no footer.
+const PANEL_BOTTOM_PX: f32 = 22.0;
+const STATUS_TOP_PX: f32 = 95.0;
+const PAD_X: f32 = 20.0;
+const METHOD_PX: f32 = 42.0;
+const PRESET_PX: f32 = 63.0;
+const AXIS_MARGIN_PX: f32 = 11.0;
+const POINT_PX: f32 = 27.0;
+const NOTE_LINE_HEIGHT: f32 = 1.7;
+const CAP_NOTE: &str = "One layout can contain at most 256 Voxels. Each axis needs at least one.";
 
 #[derive(Resource, Default)]
 pub(super) struct LayoutMenu {
     pub(super) open: bool,
     /// Digits typed into an axis count, and which axis.
     typed: Option<(usize, String)>,
-    /// The Gap row is unfolded.
-    gap_open: bool,
     notice: String,
     dirty: bool,
     /// What the panel is now: the menu, the status card, or nothing.
@@ -57,8 +68,13 @@ enum Control {
     Way(usize, bool),
     Count(usize, i32),
     Gap(i32),
-    GapToggle,
+    /// A quick shape: Line, Plane or Box.
+    Preset(usize),
+    /// Back to play with the layout ready, as the Layout key does.
     Close,
+    Ready,
+    /// Out of the mode, as the clear key does.
+    Exit,
 }
 
 #[derive(Component)]
@@ -70,7 +86,7 @@ struct Card;
 
 /// The lines that say what the aim would lay, what to do next and which keys do
 /// what.
-#[derive(Component, Clone, Copy)]
+#[derive(Component, Clone, Copy, PartialEq)]
 enum Info {
     Count,
     Size,
@@ -84,7 +100,7 @@ struct StepDot(usize);
 #[derive(Component)]
 struct StepLetter(usize);
 #[derive(Component)]
-struct StepLine(usize);
+struct StepCaption(usize);
 
 pub(super) fn plugin(app: &mut App) {
     app.init_session_state::<LayoutMenu>()
@@ -193,16 +209,25 @@ fn activate(
             mode.active = axis;
             menu.typed = None;
         }
-        Control::GapToggle => menu.gap_open = !menu.gap_open,
         Control::Count(axis, by) => {
             mode.active = axis;
             menu.typed = None;
             if layout.bump(axis, by) {
-                menu.notice = format!("Most is {MAX_LAYOUT_VOXELS} Voxels in all.");
+                menu.notice = CAP_NOTE.to_owned();
             }
         }
         Control::Gap(by) => layout.set_gap(by),
-        Control::Close => {
+        Control::Preset(at) => {
+            layout.kind = Kind::Directions;
+            layout.lengths = PRESETS[at].2;
+            menu.typed = None;
+        }
+        Control::Close | Control::Ready => {
+            for mut cursor in &mut cursor {
+                close(&mut menu, &mut cursor, true);
+            }
+        }
+        Control::Exit => {
             mode.leave();
             for mut cursor in &mut cursor {
                 close(&mut menu, &mut cursor, true);
@@ -279,7 +304,7 @@ fn type_count(
     {
         let mut layout = preferences.layout.clone();
         if layout.set_count(axis, count) {
-            menu.notice = format!("Most is {MAX_LAYOUT_VOXELS} Voxels in all.");
+            menu.notice = CAP_NOTE.to_owned();
         } else if layout != preferences.layout {
             preferences.layout = layout;
         }
@@ -311,398 +336,565 @@ fn persist(
     }
 }
 
-fn weighted(size: f32, weight: u16) -> TextFont {
-    TextFont {
-        weight: bevy::text::FontWeight(weight),
-        ..ui::font(size)
+/// The quick shapes, as the prototype sets them.
+const PRESETS: [(&str, Glyph, [u32; 3]); 3] = [
+    ("Line", Glyph::Line, [4, 1, 1]),
+    ("Plane", Glyph::Plane, [4, 1, 4]),
+    ("Box", Glyph::Box, [4, 3, 4]),
+];
+
+/// What the lengths make, in the quick shapes' words.
+fn shape_name(lengths: [u32; 3]) -> &'static str {
+    match lengths.iter().filter(|&&length| length > 1).count() {
+        0 => "Single Voxel",
+        1 => "Line",
+        2 => "Plane",
+        _ => "Box",
     }
 }
 
-fn section(parent: &mut ChildSpawnerCommands, title: &str) {
-    parent
-        .spawn(Node {
-            margin: UiRect::top(Val::Px(8.0)),
-            ..default()
-        })
-        .with_children(|p| buttons::eyebrow(p, title, Eyebrow::Menu));
+fn capitalised(word: &str) -> String {
+    let mut chars = word.chars();
+    chars
+        .next()
+        .map(|first| first.to_uppercase().chain(chars).collect())
+        .unwrap_or_default()
 }
 
-fn header(card: &mut ChildSpawnerCommands, open: bool, kind: Kind) {
-    card.spawn(Node {
-        justify_content: JustifyContent::SpaceBetween,
-        align_items: AlignItems::Center,
-        ..default()
-    })
+fn eyebrow(parent: &mut ChildSpawnerCommands, title: &str) {
+    parent
+        .spawn(Node {
+            margin: UiRect::bottom(Val::Px(12.0)),
+            flex_shrink: 0.0,
+            ..default()
+        })
+        .with_children(|p| buttons::eyebrow(p, title, Eyebrow::Inventory));
+}
+
+/// The band at the top: what the tool is, its name and the close cross.
+fn header(card: &mut ChildSpawnerCommands) {
+    card.spawn((
+        Node {
+            justify_content: JustifyContent::SpaceBetween,
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(12.0),
+            padding: UiRect::axes(Val::Px(PAD_X), Val::Px(18.0)),
+            border: UiRect::bottom(Val::Px(theme::RULE)),
+            flex_shrink: 0.0,
+            ..default()
+        },
+        BackgroundColor(theme::SHEET_HEADER),
+        BorderColor::all(theme::LAYOUT_RULE),
+    ))
     .with_children(|header| {
         header
             .spawn(Node {
-                align_items: AlignItems::Center,
-                column_gap: Val::Px(10.0),
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(5.0),
                 ..default()
             })
             .with_children(|title| {
                 title.spawn((
-                    Text::new("Layout"),
-                    weighted(18.0, 650),
-                    TextColor(theme::INK),
-                    Pickable::IGNORE,
+                    look::label(
+                        "BUILDING TOOL",
+                        theme::TEXT_KEY,
+                        theme::LABEL,
+                        theme::ITEM_EYEBROW,
+                    ),
+                    bevy::text::LetterSpacing::Px(theme::TOOL_TRACKING),
                 ));
-                // What the layout is set to, at a glance.
-                title
-                    .spawn((
-                        Node {
-                            padding: UiRect::axes(Val::Px(8.0), Val::Px(2.0)),
-                            border: UiRect::all(Val::Px(1.0)),
-                            border_radius: BorderRadius::all(Val::Px(10.0)),
-                            ..default()
-                        },
-                        BorderColor::all(theme::SAGE),
-                        Pickable::IGNORE,
-                    ))
-                    .with_child((
-                        Text::new(match kind {
-                            Kind::Directions => "DIRECTION AND COUNT",
-                            Kind::Between => "POINT TO POINT",
-                        }),
-                        weighted(9.0, 650),
-                        bevy::text::LetterSpacing::Px(0.8),
-                        TextColor(theme::SAGE),
-                        Pickable::IGNORE,
-                    ));
+                title.spawn(look::label(
+                    "Quick layout",
+                    theme::ITEM_TEXT_TITLE,
+                    theme::MEDIUM,
+                    theme::INK,
+                ));
             });
-        if open {
-            button(header, "×", Control::Close, false);
+        look::close(header, Control::Close);
+    });
+}
+
+/// Direction & count or point to point, as one full-width track.
+fn method(body: &mut ChildSpawnerCommands, kind: Kind) {
+    body.spawn((
+        Node {
+            column_gap: Val::Px(5.0),
+            padding: UiRect::all(Val::Px(4.0)),
+            margin: UiRect::bottom(Val::Px(20.0)),
+            border: UiRect::all(Val::Px(theme::RULE)),
+            border_radius: BorderRadius::all(Val::Px(theme::RADIUS_MENU)),
+            flex_shrink: 0.0,
+            ..default()
+        },
+        BackgroundColor(theme::METHOD),
+        BorderColor::all(theme::METHOD_EDGE),
+    ))
+    .with_children(|track| {
+        for (choice, name) in [
+            (Kind::Directions, "Direction & count"),
+            (Kind::Between, "Point to point"),
+        ] {
+            look::flat_text(
+                track,
+                name,
+                Control::Kind(choice),
+                Flat {
+                    flavour: Flavour::Method,
+                    selected: kind == choice,
+                },
+                Node {
+                    flex_grow: 1.0,
+                    flex_basis: Val::ZERO,
+                    min_height: Val::Px(METHOD_PX),
+                    padding: UiRect::all(Val::Px(7.0)),
+                    border_radius: BorderRadius::all(Val::Px(theme::RADIUS_SMALL)),
+                    ..default()
+                },
+                (theme::TEXT_EYEBROW, theme::REGULAR),
+            );
         }
     });
 }
 
-/// A set of choices in one rounded track, the chosen one outlined.
-fn segmented(parent: &mut ChildSpawnerCommands, children: impl FnOnce(&mut ChildSpawnerCommands)) {
-    parent
-        .spawn((
-            Node {
-                // As wide as its choices, not the card.
-                align_self: AlignSelf::FlexStart,
-                padding: UiRect::all(Val::Px(3.0)),
-                column_gap: Val::Px(2.0),
-                row_gap: Val::Px(2.0),
-                flex_wrap: FlexWrap::Wrap,
-                border: UiRect::all(Val::Px(1.0)),
-                border_radius: BorderRadius::all(Val::Px(7.0)),
-                ..default()
-            },
-            BackgroundColor(theme::PANEL),
-            BorderColor::all(theme::EDGE),
-        ))
-        .with_children(children);
-}
-
-fn choice(parent: &mut ChildSpawnerCommands, label: &str, control: Control, selected: bool) {
-    buttons::button(
-        parent,
-        label,
-        control,
-        ButtonStyle::Compact {
-            selected,
-            height_px: 26.0,
-            text_px: 11.0,
-        },
-    );
-}
-
-fn button(parent: &mut ChildSpawnerCommands, label: &str, control: Control, selected: bool) {
-    buttons::button(
-        parent,
-        label,
-        control,
-        ButtonStyle::Compact {
-            selected,
-            height_px: 28.0,
-            text_px: 11.0,
-        },
-    );
-}
-
-/// A row that is itself the button: it unfolds what is under it.
-fn fold_row(
-    parent: &mut ChildSpawnerCommands,
-    control: Control,
-    left: impl FnOnce(&mut ChildSpawnerCommands),
-    right: &str,
-) {
-    parent
-        .spawn((
-            bevy::ui_widgets::Button,
-            bevy::input_focus::tab_navigation::TabIndex(0),
-            control,
-            ui::Styled {
-                selected: false,
-                tab: false,
-                primary: false,
-            },
-            Node {
-                width: Val::Percent(100.0),
-                min_height: Val::Px(34.0),
-                padding: UiRect::axes(Val::Px(10.0), Val::Px(6.0)),
-                border: UiRect::all(Val::Px(1.0)),
-                border_radius: BorderRadius::all(Val::Px(8.0)),
-                justify_content: JustifyContent::SpaceBetween,
-                align_items: AlignItems::Center,
-                ..default()
-            },
-            BackgroundColor(Color::NONE),
-            BorderColor::all(theme::EDGE),
-        ))
-        .with_children(|row| {
-            row.spawn((
+fn presets(body: &mut ChildSpawnerCommands, lengths: [u32; 3]) {
+    eyebrow(body, "QUICK SHAPES");
+    body.spawn(Node {
+        column_gap: Val::Px(7.0),
+        margin: UiRect::bottom(Val::Px(22.0)),
+        flex_shrink: 0.0,
+        ..default()
+    })
+    .with_children(|row| {
+        let current = shape_name(lengths);
+        for (at, (name, shape, _)) in PRESETS.into_iter().enumerate() {
+            look::flat(
+                row,
+                Control::Preset(at),
+                Flat {
+                    flavour: Flavour::Shape,
+                    selected: current == name,
+                },
                 Node {
-                    align_items: AlignItems::Center,
-                    column_gap: Val::Px(7.0),
+                    flex_grow: 1.0,
+                    flex_basis: Val::ZERO,
+                    flex_direction: FlexDirection::Column,
+                    row_gap: Val::Px(5.0),
+                    min_height: Val::Px(PRESET_PX),
+                    padding: UiRect::all(Val::Px(9.0)),
+                    border_radius: BorderRadius::all(Val::Px(theme::RADIUS_CONTROL)),
                     ..default()
                 },
-                Pickable::IGNORE,
-            ))
-            .with_children(left);
-            row.spawn((
-                Text::new(right),
-                ui::font(11.0),
-                TextColor(theme::MUTED),
-                Pickable::IGNORE,
-            ));
-        });
+                |b, ink| {
+                    look::glyph(b, shape, ink);
+                    b.spawn((
+                        look::FlatInk,
+                        look::label(name, theme::TEXT_EYEBROW, theme::REGULAR, ink),
+                    ));
+                },
+            );
+        }
+    });
 }
 
-/// A minus, the value and a plus.
-fn stepper(parent: &mut ChildSpawnerCommands, less: Control, value: String, more: Control) {
-    parent
-        .spawn(Node {
-            align_items: AlignItems::Center,
-            column_gap: Val::Px(6.0),
-            ..default()
-        })
-        .with_children(|stepper| {
-            choice(stepper, "−", less, false);
-            stepper
-                .spawn(Node {
-                    min_width: Val::Px(28.0),
-                    justify_content: JustifyContent::Center,
-                    ..default()
-                })
-                .with_child((
-                    Text::new(value),
-                    weighted(14.0, 650),
-                    TextColor(theme::INK),
-                    Pickable::IGNORE,
-                ));
-            choice(stepper, "+", more, false);
-        });
-}
-
-fn note(parent: &mut ChildSpawnerCommands, text: &str) {
-    parent.spawn((
-        Text::new(text),
-        ui::font(11.0),
-        bevy::text::LineHeight::RelativeToFont(1.5),
-        TextColor(theme::MUTED),
-        Pickable::IGNORE,
-    ));
-}
-
-/// One world axis on one line: its letter and the way it grows, a plus or minus
-/// to say which side, and its count beside them.
-fn axis_line(card: &mut ChildSpawnerCommands, layout: &LayoutPreferences, axis: usize) {
+/// One world axis on one line: its letter, the way it grows as a button that
+/// turns it round, and its count.
+fn axis_line(body: &mut ChildSpawnerCommands, layout: &LayoutPreferences, axis: usize) {
     let negative = layout.negative[axis];
-    let used = layout.lengths[axis] > 1;
-    // An axis of one is left out of the layout, so its line is quieter.
-    let letter = if used { theme::INK } else { theme::MUTED };
-    card.spawn((
-        Node {
-            width: Val::Percent(100.0),
-            align_items: AlignItems::Center,
-            column_gap: Val::Px(10.0),
-            padding: UiRect::axes(Val::Px(10.0), Val::Px(8.0)),
-            border: UiRect::all(Val::Px(1.0)),
-            border_radius: BorderRadius::all(Val::Px(8.0)),
-            ..default()
-        },
-        BorderColor::all(theme::EDGE),
-    ))
+    body.spawn(Node {
+        justify_content: JustifyContent::SpaceBetween,
+        align_items: AlignItems::Center,
+        column_gap: Val::Px(12.0),
+        margin: UiRect::vertical(Val::Px(AXIS_MARGIN_PX)),
+        flex_shrink: 0.0,
+        ..default()
+    })
     .with_children(|line| {
         line.spawn(Node {
-            width: Val::Px(54.0),
-            flex_direction: FlexDirection::Column,
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(9.0),
             ..default()
         })
         .with_children(|name| {
             name.spawn((
-                Text::new(AXIS_NAMES[axis]),
-                weighted(13.0, 650),
-                TextColor(letter),
+                Node {
+                    padding: UiRect::all(Val::Px(7.0)),
+                    border_radius: BorderRadius::all(Val::Px(theme::RADIUS_TAG)),
+                    ..default()
+                },
+                BackgroundColor(theme::AXIS_TAG),
                 Pickable::IGNORE,
+            ))
+            .with_child(look::label(
+                AXIS_NAMES[axis],
+                theme::TEXT_CAPTION,
+                theme::SEMIBOLD,
+                theme::AXIS_TAG_INK,
             ));
-            name.spawn((
-                Text::new(way_name(axis, negative)),
-                ui::font(10.0),
-                TextColor(theme::MUTED),
-                Pickable::IGNORE,
-            ));
-        });
-        segmented(line, |r| {
-            choice(r, "+", Control::Way(axis, false), !negative);
-            choice(r, "−", Control::Way(axis, true), negative);
-        });
-        line.spawn(Node {
-            margin: UiRect::left(Val::Auto),
-            ..default()
-        })
-        .with_children(|count| {
-            stepper(
-                count,
-                Control::Count(axis, -1),
-                layout.lengths[axis].to_string(),
-                Control::Count(axis, 1),
+            look::flat(
+                name,
+                Control::Way(axis, !negative),
+                Flat {
+                    flavour: Flavour::Way,
+                    selected: false,
+                },
+                Node {
+                    column_gap: Val::Px(8.0),
+                    padding: UiRect::axes(Val::Px(4.0), Val::Px(8.0)),
+                    border: UiRect::ZERO,
+                    ..default()
+                },
+                |b, ink| {
+                    b.spawn((
+                        look::FlatInk,
+                        look::label(
+                            capitalised(way_name(axis, negative)),
+                            theme::TEXT_CAPTION,
+                            theme::REGULAR,
+                            ink,
+                        ),
+                    ));
+                    // Inter has no ⇆, the prototype's two-way arrow.
+                    b.spawn((
+                        look::FlatInk,
+                        look::label("↔", theme::TEXT_SMALL, theme::REGULAR, ink),
+                    ));
+                },
             );
         });
+        look::stepper(
+            line,
+            (Control::Count(axis, -1), Control::Count(axis, 1)),
+            layout.lengths[axis].to_string(),
+            (look::LAYOUT_STEPPER, true),
+        );
     });
 }
 
-/// The answer, first: how many Voxels, how big, and what to do next, with the
-/// A, B, C line under it in point to point.
-fn status_block(parent: &mut ChildSpawnerCommands, between: bool) {
-    parent
-        .spawn((
-            Node {
+/// A, B and C as circles that fill in as the corners are picked.
+fn points(body: &mut ChildSpawnerCommands) {
+    body.spawn(Node {
+        column_gap: Val::Px(7.0),
+        margin: UiRect::new(Val::ZERO, Val::ZERO, Val::Px(12.0), Val::Px(18.0)),
+        flex_shrink: 0.0,
+        ..default()
+    })
+    .with_children(|line| {
+        for (i, caption) in ["A · Start", "B · Plane", "C · Depth"].into_iter().enumerate() {
+            line.spawn(Node {
+                flex_grow: 1.0,
+                flex_basis: Val::ZERO,
                 flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(4.0),
-                margin: UiRect::top(Val::Px(10.0)),
-                padding: UiRect::axes(Val::Px(14.0), Val::Px(12.0)),
-                border_radius: BorderRadius::all(Val::Px(8.0)),
+                align_items: AlignItems::Center,
+                row_gap: Val::Px(8.0),
                 ..default()
-            },
-            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.38)),
-        ))
-        .with_children(|block| {
-            // One run of text, so the number and its word share a baseline.
-            block
-                .spawn((
-                    Info::Count,
-                    Text::new("0"),
-                    weighted(30.0, 700),
-                    TextColor(theme::SAGE),
+            })
+            .with_children(|step| {
+                step.spawn((
+                    StepDot(i),
+                    Node {
+                        width: Val::Px(POINT_PX),
+                        height: Val::Px(POINT_PX),
+                        border: UiRect::all(Val::Px(theme::RULE)),
+                        border_radius: BorderRadius::all(Val::Percent(50.0)),
+                        align_items: AlignItems::Center,
+                        justify_content: JustifyContent::Center,
+                        ..default()
+                    },
+                    BackgroundColor(Color::NONE),
+                    BorderColor::all(theme::POINT_EDGE),
                     Pickable::IGNORE,
                 ))
                 .with_child((
-                    TextSpan::new(" Voxels"),
-                    weighted(13.0, 600),
-                    TextColor(theme::INK),
+                    StepLetter(i),
+                    look::label(
+                        (i + 1).to_string(),
+                        theme::TEXT_EYEBROW,
+                        theme::REGULAR,
+                        theme::POINT_INK,
+                    ),
                 ));
-            for (part, font, colour) in [
-                (Info::Size, ui::font(12.0), theme::MUTED),
-                (Info::Body, ui::font(12.0), theme::INK),
-            ] {
-                if part_is_body(&part) && between {
-                    steps(block);
-                }
-                block.spawn((
-                    part,
-                    Text::new(""),
-                    font,
-                    bevy::text::LineHeight::RelativeToFont(1.5),
-                    TextColor(colour),
-                    Pickable::IGNORE,
+                step.spawn((
+                    StepCaption(i),
+                    look::label(caption, theme::TEXT_KEY, theme::REGULAR, theme::POINT_INK),
                 ));
-            }
-        });
+            });
+        }
+    });
+    body.spawn((
+        look::label(
+            "Set A, then B for a flat rectangle. C adds depth and completes the layout.",
+            theme::TEXT_CAPTION,
+            theme::REGULAR,
+            theme::LAYOUT_NOTE,
+        ),
+        bevy::text::LineHeight::RelativeToFont(NOTE_LINE_HEIGHT),
+    ));
 }
 
-fn part_is_body(part: &Info) -> bool {
-    matches!(part, Info::Body)
-}
-
-/// A, B and C joined by lines that fill in as the corners are picked.
-fn steps(parent: &mut ChildSpawnerCommands) {
-    parent
-        .spawn(Node {
+/// The gap between Voxels, with its stepper always to hand.
+fn gap_row(body: &mut ChildSpawnerCommands, layout: &LayoutPreferences, voxel_size: f32) {
+    body.spawn((
+        Node {
+            justify_content: JustifyContent::SpaceBetween,
             align_items: AlignItems::Center,
-            margin: UiRect::axes(Val::Px(0.0), Val::Px(8.0)),
+            column_gap: Val::Px(10.0),
+            padding: UiRect::vertical(Val::Px(17.0)),
+            margin: UiRect::top(Val::Px(15.0)),
+            border: UiRect::top(Val::Px(theme::RULE)),
+            flex_shrink: 0.0,
+            ..default()
+        },
+        BorderColor::all(theme::GAP_RULE),
+    ))
+    .with_children(|row| {
+        row.spawn(Node {
+            flex_direction: FlexDirection::Column,
+            row_gap: Val::Px(5.0),
             ..default()
         })
-        .with_children(|line| {
-            for (i, (letter, caption)) in [("A", "set"), ("B", "plane"), ("C", "depth")]
-                .into_iter()
-                .enumerate()
-            {
-                line.spawn(Node {
-                    flex_direction: FlexDirection::Column,
-                    align_items: AlignItems::Center,
-                    row_gap: Val::Px(3.0),
-                    ..default()
-                })
-                .with_children(|step| {
-                    step.spawn((
-                        StepDot(i),
-                        Node {
-                            width: Val::Px(22.0),
-                            height: Val::Px(22.0),
-                            border: UiRect::all(Val::Px(2.0)),
-                            border_radius: BorderRadius::all(Val::Px(11.0)),
-                            align_items: AlignItems::Center,
-                            justify_content: JustifyContent::Center,
-                            ..default()
-                        },
-                        BackgroundColor(Color::NONE),
-                        BorderColor::all(theme::MUTED),
-                        Pickable::IGNORE,
-                    ))
-                    .with_child((
-                        StepLetter(i),
-                        Text::new(letter),
-                        weighted(11.0, 700),
-                        TextColor(theme::MUTED),
-                        Pickable::IGNORE,
-                    ));
-                    step.spawn((
-                        Text::new(caption),
-                        ui::font(9.5),
-                        TextColor(theme::MUTED),
-                        Pickable::IGNORE,
-                    ));
-                });
-                if i < 2 {
-                    line.spawn((
-                        StepLine(i),
-                        Node {
-                            flex_grow: 1.0,
-                            height: Val::Px(2.0),
-                            margin: UiRect::bottom(Val::Px(14.0)),
-                            ..default()
-                        },
-                        BackgroundColor(theme::EDGE),
-                        Pickable::IGNORE,
-                    ));
-                }
-            }
+        .with_children(|words| {
+            words.spawn(look::label(
+                "Gap",
+                theme::TEXT_CAPTION,
+                theme::MEDIUM,
+                theme::INK,
+            ));
+            words.spawn(look::label(
+                format!(
+                    "{} m between Voxels",
+                    metres(layout.gap as f32 * voxel_size)
+                ),
+                theme::ITEM_TEXT_EYEBROW,
+                theme::REGULAR,
+                theme::GAP_NOTE,
+            ));
+        });
+        look::stepper(
+            row,
+            (Control::Gap(-1), Control::Gap(1)),
+            layout.gap.to_string(),
+            (look::GAP_STEPPER, false),
+        );
+    });
+}
+
+/// A box of label and value rows.
+fn totals(body: &mut ChildSpawnerCommands, rows: impl FnOnce(&mut ChildSpawnerCommands)) {
+    body.spawn((
+        Node {
+            flex_direction: FlexDirection::Column,
+            padding: UiRect::axes(Val::Px(12.0), Val::Px(6.0)),
+            border: UiRect::all(Val::Px(theme::RULE)),
+            border_radius: BorderRadius::all(Val::Px(theme::RADIUS_CONTROL)),
+            flex_shrink: 0.0,
+            ..default()
+        },
+        BackgroundColor(theme::TOTALS),
+        BorderColor::all(theme::TOTALS_EDGE),
+    ))
+    .with_children(rows);
+}
+
+fn total_row(parent: &mut ChildSpawnerCommands, term: impl Bundle, value: impl Bundle) {
+    parent
+        .spawn(Node {
+            justify_content: JustifyContent::SpaceBetween,
+            column_gap: Val::Px(12.0),
+            padding: UiRect::vertical(Val::Px(9.0)),
+            ..default()
+        })
+        .with_children(|row| {
+            row.spawn(term);
+            row.spawn(value);
         });
 }
 
-/// The keys, under a rule, at the foot of the card.
-fn footer(parent: &mut ChildSpawnerCommands) {
-    parent
-        .spawn(Node {
-            margin: UiRect::top(Val::Px(8.0)),
-            padding: UiRect::top(Val::Px(10.0)),
-            border: UiRect::top(Val::Px(1.0)),
+/// A value with a quieter word after it, in one run of text.
+fn value_with(value: impl Into<String>, after: impl Into<String>) -> impl Bundle {
+    (
+        Text::new(value),
+        theme::weighted(theme::TEXT_EYEBROW, theme::LABEL),
+        TextColor(theme::TOTALS_VALUE),
+        Pickable::IGNORE,
+        children![(
+            TextSpan::new(after),
+            theme::weighted(theme::ITEM_TEXT_EYEBROW, theme::LABEL),
+            TextColor(theme::MUTED),
+        )],
+    )
+}
+
+fn term(value: impl Into<String>) -> impl Bundle {
+    look::label(value, theme::TEXT_EYEBROW, theme::REGULAR, theme::TOTALS_TERM)
+}
+
+fn value(value: impl Into<String>) -> impl Bundle {
+    look::label(value, theme::TEXT_EYEBROW, theme::LABEL, theme::TOTALS_VALUE)
+}
+
+/// How many, how big and at what Voxel size: what the controls above make.
+fn sums(body: &mut ChildSpawnerCommands, layout: &LayoutPreferences, voxel_size: f32) {
+    let extent = layout
+        .lengths
+        .map(|count| metres(extent_m(count, layout.gap, voxel_size)));
+    totals(body, |rows| {
+        total_row(
+            rows,
+            term("Voxels"),
+            value_with(
+                layout.total(layout.lengths).to_string(),
+                format!(" / {MAX_LAYOUT_VOXELS}"),
+            ),
+        );
+        total_row(
+            rows,
+            term("Dimensions"),
+            value(format!("{} m", extent.join(" × "))),
+        );
+        total_row(
+            rows,
+            term("Voxel size"),
+            value(format!("{} m", metres(voxel_size))),
+        );
+    });
+}
+
+/// What the aim would lay, live, and what to do next.
+fn in_the_world(body: &mut ChildSpawnerCommands, between: bool) {
+    totals(body, |rows| {
+        // One run of text, so the number and its word share a baseline.
+        total_row(rows, term("In the World"), (Info::Count, value_with("0", " Voxels")));
+        if between {
+            info_row(rows, Info::Size);
+        }
+        info_row(rows, Info::Body);
+    });
+}
+
+fn info_row(rows: &mut ChildSpawnerCommands, part: Info) {
+    rows.spawn(Node {
+        padding: UiRect::vertical(Val::Px(9.0)),
+        ..default()
+    })
+    .with_child((
+        part,
+        look::label("", theme::TEXT_EYEBROW, theme::REGULAR, theme::TOTALS_TERM),
+        bevy::text::LineHeight::RelativeToFont(theme::LINE_HEIGHT),
+    ));
+}
+
+fn cap_note(body: &mut ChildSpawnerCommands, note: &str) {
+    body.spawn((
+        Node {
+            margin: UiRect::top(Val::Px(12.0)),
+            padding: UiRect::all(Val::Px(10.0)),
+            border: UiRect::left(Val::Px(theme::FRAME)),
+            flex_shrink: 0.0,
             ..default()
-        })
-        .with_children(|foot| {
-            foot.spawn((
-                Info::Hint,
-                Text::new(""),
-                ui::font(10.5),
-                bevy::text::LineHeight::RelativeToFont(1.5),
-                TextColor(theme::MUTED),
-                Pickable::IGNORE,
+        },
+        BackgroundColor(theme::LAYOUT_ERROR),
+        BorderColor::all(theme::LAYOUT_ERROR_EDGE),
+    ))
+    .with_child((
+        look::label(
+            note,
+            theme::TEXT_EYEBROW,
+            theme::REGULAR,
+            theme::LAYOUT_ERROR_INK,
+        ),
+        bevy::text::LineHeight::RelativeToFont(theme::LINE_HEIGHT),
+    ));
+}
+
+/// Back to play ready to build, or out of the mode.
+fn footer(card: &mut ChildSpawnerCommands) {
+    card.spawn((
+        Node {
+            flex_direction: FlexDirection::Column,
+            row_gap: Val::Px(8.0),
+            padding: UiRect::axes(Val::Px(PAD_X), Val::Px(14.0)),
+            border: UiRect::top(Val::Px(theme::RULE)),
+            flex_shrink: 0.0,
+            ..default()
+        },
+        BorderColor::all(theme::LAYOUT_RULE),
+    ))
+    .with_children(|foot| {
+        look::button(foot, "Ready to build", Control::Ready, cine::Kind::Primary, look::WIDE);
+        look::button(foot, "Exit layout", Control::Exit, cine::Kind::Ghost, look::WIDE);
+    });
+}
+
+/// In play with the menu shut: what is set, what the aim would do and the keys.
+fn status(parent: &mut ChildSpawnerCommands, layout: &LayoutPreferences, voxel_size: f32) {
+    let extent = layout
+        .lengths
+        .map(|count| metres(extent_m(count, layout.gap, voxel_size)));
+    let (what, size) = match layout.kind {
+        Kind::Directions => {
+            let total = layout.total(layout.lengths);
+            (
+                format!(
+                    "{} · {total} Voxel{}",
+                    shape_name(layout.lengths),
+                    if total == 1 { "" } else { "s" }
+                ),
+                Some(format!("{} m", extent.join(" × "))),
+            )
+        }
+        Kind::Between => ("Point to point".to_owned(), None),
+    };
+    parent
+        .spawn((
+            Card,
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(theme::SCREEN_PAD_X),
+                top: Val::Px(STATUS_TOP_PX),
+                max_width: Val::Px(STATUS_WIDTH),
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(7.0),
+                padding: UiRect::all(Val::Px(14.0)),
+                border: UiRect::all(Val::Px(theme::FRAME)),
+                border_radius: BorderRadius::all(Val::Px(theme::RADIUS_MENU)),
+                ..default()
+            },
+            BackgroundColor(theme::LAYOUT_SURFACE),
+            BorderColor::all(theme::GROUT),
+            theme::shadow(),
+            Pickable::IGNORE,
+        ))
+        .with_children(|card| {
+            card.spawn(theme::ring(theme::RADIUS_MENU));
+            card.spawn(look::label(
+                "Layout ready",
+                theme::TEXT_EYEBROW,
+                theme::REGULAR,
+                theme::LAYOUT_STATUS_INK,
             ));
+            card.spawn(look::label(what, theme::TEXT_BODY, theme::MEDIUM, theme::INK));
+            if let Some(size) = size {
+                card.spawn(look::label(
+                    size,
+                    theme::TEXT_EYEBROW,
+                    theme::REGULAR,
+                    theme::MUTED,
+                ));
+            }
+            for (part, colour) in [
+                (Info::Size, theme::MUTED),
+                (Info::Body, theme::INK),
+                (Info::Hint, theme::MUTED),
+            ] {
+                if part == Info::Size && layout.kind == Kind::Directions {
+                    continue;
+                }
+                card.spawn((
+                    part,
+                    look::label("", theme::TEXT_EYEBROW, theme::REGULAR, colour),
+                    bevy::text::LineHeight::RelativeToFont(theme::LINE_HEIGHT),
+                ));
+            }
         });
 }
 
@@ -717,8 +909,8 @@ type Steps<'w, 's> = (
             &'static mut BorderColor,
         ),
     >,
-    Query<'w, 's, (&'static StepLetter, &'static mut TextColor)>,
-    Query<'w, 's, (&'static StepLine, &'static mut BackgroundColor), Without<StepDot>>,
+    Query<'w, 's, (&'static StepLetter, &'static mut Text, &'static mut TextColor)>,
+    Query<'w, 's, (&'static StepCaption, &'static mut TextColor), Without<StepLetter>>,
 );
 
 /// What each frame says about the layout, wherever the card is.
@@ -735,8 +927,8 @@ fn update_info(
         Res<WorldSettings>,
     ),
     time: Res<Time>,
-    mut text: Query<(&Info, &mut Text)>,
-    (mut dots, mut letters, mut lines): Steps,
+    mut text: Query<(&Info, &mut Text), (Without<StepLetter>, Without<StepCaption>)>,
+    (mut dots, mut letters, mut captions): Steps,
 ) {
     let said = super::layout::summary(
         &mode,
@@ -760,32 +952,32 @@ fn update_info(
         }
     }
     let picked = mode.points.len();
+    let state = |i: usize| picked.cmp(&i);
     for (StepDot(i), mut fill, mut edge) in &mut dots {
-        let (done, active) = (picked > *i, picked == *i);
-        let colour = if done || active {
-            theme::SAGE
-        } else {
-            theme::MUTED
+        let (f, e) = match state(*i) {
+            std::cmp::Ordering::Greater => (theme::POINT_DONE, theme::POINT_DONE),
+            std::cmp::Ordering::Equal => (Color::NONE, theme::POINT_NEXT),
+            std::cmp::Ordering::Less => (Color::NONE, theme::POINT_EDGE),
         };
-        fill.set_if_neq(BackgroundColor(if done {
-            theme::SAGE
-        } else {
-            Color::NONE
-        }));
-        edge.set_if_neq(BorderColor::all(colour));
+        fill.set_if_neq(BackgroundColor(f));
+        edge.set_if_neq(BorderColor::all(e));
     }
-    for (StepLetter(i), mut colour) in &mut letters {
-        colour.set_if_neq(TextColor(match picked.cmp(i) {
-            std::cmp::Ordering::Greater => theme::SAGE_INK,
-            std::cmp::Ordering::Equal => theme::SAGE,
-            std::cmp::Ordering::Less => theme::MUTED,
-        }));
+    for (StepLetter(i), mut text, mut colour) in &mut letters {
+        let (line, ink) = match state(*i) {
+            std::cmp::Ordering::Greater => ("✓".to_owned(), theme::POINT_DONE_INK),
+            std::cmp::Ordering::Equal => ((i + 1).to_string(), theme::POINT_NEXT_INK),
+            std::cmp::Ordering::Less => ((i + 1).to_string(), theme::POINT_INK),
+        };
+        if text.0 != line {
+            text.0 = line;
+        }
+        colour.set_if_neq(TextColor(ink));
     }
-    for (StepLine(i), mut fill) in &mut lines {
-        fill.set_if_neq(BackgroundColor(if picked > *i + 1 {
-            theme::SAGE
+    for (StepCaption(i), mut colour) in &mut captions {
+        colour.set_if_neq(TextColor(if state(*i) == std::cmp::Ordering::Equal {
+            theme::POINT_NEXT_INK
         } else {
-            theme::EDGE
+            theme::POINT_INK
         }));
     }
 }
@@ -813,7 +1005,7 @@ fn render(
     if !rebuild {
         return;
     }
-    // A rebuild must not throw the Player back to the top of a long card.
+    // A rebuild must not throw the Player back to the top of a long panel.
     let scroll = match (menu.shown, want) {
         (Some(true), Some(true)) => cards.iter().next().map_or(Vec2::ZERO, |s| s.0),
         _ => Vec2::ZERO,
@@ -831,109 +1023,80 @@ fn render(
         return;
     };
     let layout = &preferences.layout;
+    let voxel_size = world.voxel_size;
+    if !open {
+        commands
+            .spawn((
+                Panel,
+                Node {
+                    position_type: PositionType::Absolute,
+                    width: Val::Percent(100.0),
+                    height: Val::Percent(100.0),
+                    ..default()
+                },
+                Pickable::IGNORE,
+            ))
+            .with_children(|wrapper| status(wrapper, layout, voxel_size));
+        return;
+    }
     let between = layout.kind == Kind::Between;
-    // A card as tall as its content, at the right edge and halfway down, so it
-    // never covers the crosshair or the preview.
     commands
         .spawn((
             Panel,
             Node {
                 position_type: PositionType::Absolute,
-                right: Val::Px(16.0),
-                top: Val::Px(0.0),
-                bottom: Val::Px(0.0),
+                right: Val::Px(theme::SCREEN_PAD_X),
+                top: Val::Px(PANEL_TOP_PX),
+                bottom: Val::Px(PANEL_BOTTOM_PX),
+                width: Val::Px(CARD_WIDTH),
                 flex_direction: FlexDirection::Column,
-                justify_content: JustifyContent::Center,
+                border: UiRect::all(Val::Px(theme::FRAME)),
+                border_radius: BorderRadius::all(Val::Px(theme::ITEM_RADIUS)),
+                overflow: Overflow::clip(),
                 ..default()
             },
-            Pickable::IGNORE,
+            BackgroundColor(theme::LAYOUT_SURFACE),
+            BorderColor::all(theme::GROUT),
+            theme::shadow(),
         ))
-        .with_children(|wrapper| {
-            wrapper
+        .with_children(|panel| {
+            panel.spawn(theme::ring(theme::ITEM_RADIUS));
+            header(panel);
+            panel
                 .spawn((
                     Card,
                     ScrollArea,
                     ScrollPosition(scroll),
                     Node {
-                        width: Val::Px(if open { CARD_WIDTH } else { STATUS_WIDTH }),
-                        max_height: Val::Percent(92.0),
+                        flex_grow: 1.0,
+                        min_height: Val::Px(0.0),
                         flex_direction: FlexDirection::Column,
-                        row_gap: Val::Px(6.0),
-                        padding: UiRect::all(Val::Px(18.0)),
-                        border: UiRect::all(Val::Px(1.0)),
-                        border_radius: BorderRadius::all(Val::Px(12.0)),
+                        padding: UiRect::axes(Val::Px(PAD_X), Val::Px(17.0)),
                         overflow: Overflow::scroll_y(),
                         ..default()
                     },
-                    BackgroundColor(theme::PANEL),
-                    BorderColor::all(theme::EDGE),
                 ))
-                .with_children(|card| {
-                    header(card, open, layout.kind);
-                    status_block(card, between);
-                    if !open {
-                        footer(card);
-                        return;
-                    }
-                    section(card, "HOW");
-                    segmented(card, |r| {
-                        for (kind, name) in [
-                            (Kind::Directions, "Direction and count"),
-                            (Kind::Between, "Point to point"),
-                        ] {
-                            choice(r, name, Control::Kind(kind), layout.kind == kind);
-                        }
-                    });
+                .with_children(|body| {
+                    method(body, layout.kind);
                     if between {
-                        note(
-                            card,
-                            "Place A, then B for a flat rectangle between them, then C for \
-                             its depth, and C lays it. Hold Place on A and drag to B if you \
-                             like. C level with A keeps it flat. Each point must be within \
-                             reach.",
-                        );
+                        points(body);
                     } else {
-                        section(card, "COUNT AND DIRECTION");
+                        presets(body, layout.lengths);
+                        eyebrow(body, "COUNT & DIRECTION");
                         for axis in 0..3 {
-                            axis_line(card, layout, axis);
+                            axis_line(body, layout, axis);
                         }
                     }
-                    section(card, "GAP");
-                    fold_row(
-                        card,
-                        Control::GapToggle,
-                        |left| {
-                            left.spawn((
-                                Text::new(format!("{} Voxels", layout.gap)),
-                                weighted(12.0, 600),
-                                TextColor(theme::INK),
-                                Pickable::IGNORE,
-                            ));
-                            left.spawn((
-                                Text::new(format!(
-                                    "{:.1} m between",
-                                    layout.gap as f32 * world.voxel_size
-                                )),
-                                ui::font(11.0),
-                                TextColor(theme::MUTED),
-                                Pickable::IGNORE,
-                            ));
-                        },
-                        if menu.gap_open { "^" } else { ">" },
-                    );
-                    if menu.gap_open {
-                        stepper(
-                            card,
-                            Control::Gap(-1),
-                            layout.gap.to_string(),
-                            Control::Gap(1),
-                        );
+                    gap_row(body, layout, voxel_size);
+                    if !between {
+                        sums(body, layout, voxel_size);
                     }
                     if !menu.notice.is_empty() {
-                        ui::text(card, menu.notice.clone(), 11.0, theme::WARNING);
+                        cap_note(body, &menu.notice);
                     }
-                    footer(card);
+                    in_the_world(body, between);
                 });
+            footer(panel);
         });
     // The rebuilt panel keeps focus where it was, or starts at the top.
     let target = focused.unwrap_or(Control::Kind(layout.kind));
@@ -1132,12 +1295,35 @@ mod tests {
     }
 
     #[test]
-    fn the_close_cross_leaves_the_mode_like_the_clear_key_and_grabs_the_cursor() {
+    fn the_close_cross_and_ready_go_back_to_play_with_the_layout_still_ready() {
+        for control in [Control::Close, Control::Ready] {
+            let mut app = app();
+            open(&mut app);
+            activate_control(&mut app, control);
+            assert!(!menu(&app).open && app.world().resource::<LayoutMode>().on);
+            assert_eq!(cursor(&mut app), (CursorGrabMode::Locked, false));
+        }
+    }
+
+    #[test]
+    fn exit_layout_leaves_the_mode_like_the_clear_key_and_grabs_the_cursor() {
         let mut app = app();
         open(&mut app);
-        activate_control(&mut app, Control::Close);
+        activate_control(&mut app, Control::Exit);
         assert!(!menu(&app).open && !app.world().resource::<LayoutMode>().on);
         assert_eq!(cursor(&mut app), (CursorGrabMode::Locked, false));
+    }
+
+    #[test]
+    fn a_quick_shape_sets_the_counts_it_names() {
+        let mut app = app();
+        open(&mut app);
+        activate_control(&mut app, Control::Kind(Kind::Between));
+        activate_control(&mut app, Control::Preset(2));
+        let saved = layout(&app);
+        assert_eq!(saved.kind, Kind::Directions);
+        assert_eq!(saved.lengths, [4, 3, 4]);
+        assert_eq!(shape_name(saved.lengths), "Box");
     }
 
     #[test]
@@ -1246,8 +1432,8 @@ mod tests {
         );
         assert_eq!(
             panels(&mut app),
-            (1, 4),
-            "but it still says what the aim does"
+            (1, 2),
+            "but it still says what the aim does and which keys"
         );
         app.world_mut().resource_mut::<LayoutMode>().on = false;
         controls(&mut app);
@@ -1259,11 +1445,11 @@ mod tests {
     }
 
     #[test]
-    fn the_menu_holds_the_information_that_used_to_sit_in_the_corner() {
+    fn the_menu_says_what_the_aim_would_lay_live() {
         let mut app = render_app();
         open(&mut app);
         controls(&mut app);
-        assert_eq!(panels(&mut app), (1, 4));
+        assert_eq!(panels(&mut app), (1, 2), "the count and the next step");
     }
 
     #[test]
@@ -1304,14 +1490,14 @@ mod tests {
                 .world_mut()
                 .query_filtered::<(&Node, &ScrollPosition), (With<Card>, With<ScrollArea>)>();
             let (node, scroll) = query.single(app.world()).expect("one scrolling card");
-            (node.overflow.y, node.max_height, scroll.0)
+            (node.overflow.y, node.min_height, scroll.0)
         };
-        let (overflow, max_height, _) = card(&mut app);
+        let (overflow, min_height, _) = card(&mut app);
         assert_eq!(overflow, OverflowAxis::Scroll);
         assert_eq!(
-            max_height,
-            Val::Percent(92.0),
-            "never taller than the screen"
+            min_height,
+            Val::Px(0.0),
+            "it shrinks to the panel, which is never taller than the screen"
         );
         app.world_mut()
             .query_filtered::<&mut ScrollPosition, With<Card>>()
@@ -1325,29 +1511,24 @@ mod tests {
             Vec2::new(0.0, 140.0),
             "not thrown back to the top"
         );
-        press(&mut app, KeyCode::KeyL);
-        controls(&mut app);
-        assert_eq!(
-            card(&mut app).2,
-            Vec2::ZERO,
-            "the status card starts at its top"
-        );
     }
 
     #[test]
-    fn every_axis_has_its_own_line_with_a_way_and_a_count() {
+    fn every_axis_has_its_own_line_with_a_way_to_turn_round_and_a_count() {
         let mut app = render_app();
+        app.world_mut().resource_mut::<Preferences>().layout.negative[1] = true;
         open(&mut app);
         let shown = controls(&mut app);
         for axis in 0..3 {
+            let turned = axis == 1;
             for expected in [
-                Control::Way(axis, false),
-                Control::Way(axis, true),
+                Control::Way(axis, !turned),
                 Control::Count(axis, -1),
                 Control::Count(axis, 1),
             ] {
                 assert!(shown.contains(&expected), "{expected:?}");
             }
+            assert!(!shown.contains(&Control::Way(axis, turned)));
         }
     }
 
@@ -1366,17 +1547,11 @@ mod tests {
     }
 
     #[test]
-    fn the_gap_is_folded_until_asked_for() {
+    fn the_gap_stepper_is_always_to_hand() {
         let mut app = render_app();
         open(&mut app);
         let shown = controls(&mut app);
-        assert!(shown.contains(&Control::GapToggle));
-        assert!(!shown.contains(&Control::Gap(1)));
-        activate_control(&mut app, Control::GapToggle);
-        let shown = controls(&mut app);
         assert!(shown.contains(&Control::Gap(1)) && shown.contains(&Control::Gap(-1)));
-        activate_control(&mut app, Control::GapToggle);
-        assert!(!controls(&mut app).contains(&Control::Gap(1)));
     }
 
     #[test]
@@ -1397,7 +1572,7 @@ mod tests {
             let mut dots = app.world_mut().query::<(&StepDot, &BackgroundColor)>();
             let mut found: Vec<_> = dots
                 .iter(app.world())
-                .map(|(StepDot(i), fill)| (*i, fill.0 == theme::SAGE))
+                .map(|(StepDot(i), fill)| (*i, fill.0 == theme::POINT_DONE))
                 .collect();
             found.sort();
             found.into_iter().map(|(_, filled)| filled).collect()
@@ -1423,8 +1598,11 @@ mod tests {
         for expected in [
             Control::Kind(Kind::Directions),
             Control::Kind(Kind::Between),
-            Control::GapToggle,
+            Control::Preset(0),
+            Control::Gap(1),
             Control::Close,
+            Control::Ready,
+            Control::Exit,
         ] {
             assert!(shown.contains(&expected), "{expected:?}");
         }
