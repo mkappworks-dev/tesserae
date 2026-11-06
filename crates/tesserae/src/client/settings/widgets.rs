@@ -132,7 +132,10 @@ pub(super) fn segment(
                     Text::default(),
                     theme::font(theme::TEXT_BODY),
                     TextColor(theme::INK),
+                    // Grown to the trigger's width: the label arrives after the first
+                    // layout, which would otherwise wrap it at its empty width.
                     Node {
+                        flex_grow: 1.0,
                         flex_shrink: 1.0,
                         min_width: Val::Px(0.0),
                         ..default()
@@ -627,7 +630,11 @@ pub(super) fn group(
                 theme::font(theme::TEXT_EYEBROW),
                 bevy::text::LetterSpacing::Px(theme::SECTION_TRACKING),
                 TextColor(theme::MUTED),
-                bevy::text::LineHeight::RelativeToFont(1.5),
+                bevy::text::LineHeight::RelativeToFont(1.25),
+                Node {
+                    margin: UiRect::bottom(Val::Px(12.0)),
+                    ..default()
+                },
                 Pickable::IGNORE,
             ));
             content(section);

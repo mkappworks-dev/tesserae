@@ -809,4 +809,6 @@ pub(super) fn binding_display(value: String) -> String {
         .replace("AltRight", "Right Alt")
         .replace("SuperLeft", "Left Super")
         .replace("SuperRight", "Right Super")
+        .replace("BracketLeft", "[")
+        .replace("BracketRight", "]")
 }

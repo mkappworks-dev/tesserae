@@ -30,10 +30,10 @@ pub(super) struct Menu {
 
 impl Menu {
     #[cfg(any(feature = "dev", feature = "profiling"))]
-    pub(super) fn opened() -> Self {
+    pub(super) fn opened(details: bool) -> Self {
         Menu {
             open: true,
-            details: false,
+            details,
         }
     }
 }
