@@ -4,9 +4,6 @@
 use super::*;
 use crate::client::theme;
 
-pub(super) fn button(parent: &mut ChildSpawnerCommands, text: String, operation: Operation) {
-    buttons::button(parent, text, operation, ButtonStyle::Plain);
-}
 pub(super) fn setting_row(
     parent: &mut ChildSpawnerCommands,
     title: &str,
@@ -433,13 +430,9 @@ impl Scalar {
             _ => 0.05,
         }
     }
+    /// The plain reading the prototype's range output shows: "1", "0.15".
     fn display(self, value: f32) -> String {
-        match self {
-            Self::MoveDeadzone | Self::LookDeadzone | Self::TouchOpacity => {
-                format!("{:.0}%", value * 100.0)
-            }
-            _ => format!("{value:.2}×"),
-        }
+        format!("{}", (value * 100.0).round() / 100.0)
     }
     fn fraction(self, value: f32) -> f32 {
         let range = self.range();

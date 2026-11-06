@@ -228,40 +228,22 @@ pub(super) fn behavior(
     ),
 ) {
     group(list, "MOVEMENT & BUILDING", |card| {
-        setting_row(
-            card,
-            "Sprint activation",
-            if p.toggle_sprint {
-                "Press once to enable sprint; press again to stop."
-            } else {
-                "Sprint while the binding is held."
-            },
-            |row| {
-                segment(row, |buttons| {
-                    option(buttons, "Hold", Operation::Sprint(false), !p.toggle_sprint);
-                    option(buttons, "Toggle", Operation::Sprint(true), p.toggle_sprint);
-                })
-            },
-        );
-        setting_row(
-            card,
-            "Removal activation",
-            if p.tap_remove {
-                "Timed removal on one target. A second tap cancels."
-            } else {
-                "Hold on one target until removal completes."
-            },
-            |row| {
-                segment(row, |buttons| {
-                    option(buttons, "Hold", Operation::Removal(false), !p.tap_remove);
-                    option(buttons, "Timed tap", Operation::Removal(true), p.tap_remove);
-                })
-            },
-        );
+        setting_row(card, "Sprint activation", "", |row| {
+            segment(row, |buttons| {
+                option(buttons, "Hold", Operation::Sprint(false), !p.toggle_sprint);
+                option(buttons, "Toggle", Operation::Sprint(true), p.toggle_sprint);
+            })
+        });
+        setting_row(card, "Removal activation", "", |row| {
+            segment(row, |buttons| {
+                option(buttons, "Hold", Operation::Removal(false), !p.tap_remove);
+                option(buttons, "Timed tap", Operation::Removal(true), p.tap_remove);
+            })
+        });
         setting_row(
             card,
             "Repeat while held",
-            "Keep placing solids, and removing one target after another, while held. Timed tap removal stays one per tap.",
+            "Keep placing or removing while the binding is held.",
             |row| switch(row, p.repeat_held, Operation::Repeat),
         );
     });
@@ -272,59 +254,37 @@ pub(super) fn behavior(
             "Relative to the default mouse feel.",
             |row| slider(row, Scalar::Mouse, p.sensitivity / 0.003),
         );
-        setting_row(
-            card,
-            "Invert vertical look",
-            "Reverse the mouse look direction.",
-            |row| switch(row, p.invert_y, Operation::Invert),
-        );
-        setting_row(
-            card,
-            "Scroll direction",
-            if p.reverse_scroll {
-                "Wheel up selects the next quick slot."
-            } else {
-                "Wheel down selects the next quick slot."
-            },
-            |row| {
-                segment(row, |buttons| {
-                    option(
-                        buttons,
-                        "Standard",
-                        Operation::ScrollDirection(false),
-                        !p.reverse_scroll,
-                    );
-                    option(
-                        buttons,
-                        "Reversed",
-                        Operation::ScrollDirection(true),
-                        p.reverse_scroll,
-                    );
-                })
-            },
-        );
-        setting_row(
-            card,
-            "Scroll sensitivity",
-            "Higher values move through quick slots faster.",
-            |row| slider(row, Scalar::Scroll, p.scroll_sensitivity),
-        );
+        setting_row(card, "Invert vertical look", "", |row| {
+            switch(row, p.invert_y, Operation::Invert)
+        });
+        setting_row(card, "Scroll direction", "", |row| {
+            segment(row, |buttons| {
+                option(
+                    buttons,
+                    "Standard",
+                    Operation::ScrollDirection(false),
+                    !p.reverse_scroll,
+                );
+                option(
+                    buttons,
+                    "Reversed",
+                    Operation::ScrollDirection(true),
+                    p.reverse_scroll,
+                );
+            })
+        });
+        setting_row(card, "Scroll sensitivity", "", |row| {
+            slider(row, Scalar::Scroll, p.scroll_sensitivity)
+        });
+        setting_row(card, "Show quick reference", "", |row| {
+            switch(row, settings.show_reference, Operation::Reference)
+        });
     });
-    button(
-        list,
-        if settings.show_reference {
-            "Hide quick reference"
-        } else {
-            "Show quick reference"
-        }
-        .into(),
-        Operation::Reference,
-    );
     if settings.show_reference {
-        crate::client::menu_ui::text(
+        crate::client::menu_ui::paragraph(
             list,
             crate::client::edit::hud_text(context.0, &context.1.0, context.2, bindings, labels, p),
-            12.0,
+            theme::TEXT_SMALL,
             theme::MUTED,
         );
     }
