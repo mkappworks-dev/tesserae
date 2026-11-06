@@ -542,20 +542,32 @@ pub(super) fn bindings_page(
     use crate::client::menu_ui as ui;
     let searching = !searches.bindings.trim().is_empty();
     if searching {
-        ui::text(list, "Searching all categories", 11.0, theme::MUTED);
+        list.spawn(Node {
+            margin: UiRect::bottom(Val::Px(14.0)),
+            ..default()
+        })
+        .with_children(|line| {
+            ui::paragraph(
+                line,
+                "Searching all categories",
+                theme::TEXT_SMALL,
+                theme::MUTED,
+            )
+        });
     } else {
         list.spawn((
             Node {
-                border: UiRect::bottom(Val::Px(1.0)),
-                column_gap: Val::Px(22.0),
-                margin: UiRect::bottom(Val::Px(14.0)),
+                border: UiRect::bottom(Val::Px(theme::RULE)),
+                column_gap: Val::Px(15.0),
+                margin: UiRect::bottom(Val::Px(17.0)),
+                flex_shrink: 0.0,
                 ..default()
             },
             BorderColor::all(theme::EDGE),
         ))
         .with_children(|filters| {
             for category in [Category::Movement, Category::Building, Category::Interface] {
-                let entity = buttons::button(
+                buttons::button(
                     filters,
                     category.label(),
                     Operation::Category(category),
@@ -563,33 +575,24 @@ pub(super) fn bindings_page(
                         selected: settings.category == category,
                     },
                 );
-                filters.commands().queue(move |world: &mut World| {
-                    let children: Vec<_> = world
-                        .get::<Children>(entity)
-                        .map(|children| children.iter().collect())
-                        .unwrap_or_default();
-                    for child in children {
-                        if let Some(mut font) = world.get_mut::<TextFont>(child) {
-                            font.font_size = bevy::text::FontSize::Px(11.0);
-                        }
-                    }
-                    if let Some(mut node) = world.get_mut::<Node>(entity) {
-                        node.min_height = Val::Px(38.0);
-                    }
-                });
             }
         });
     }
-    ui::text(
-        list,
-        "Select a binding to change it. Either alternative activates the action.",
-        12.0,
-        theme::MUTED,
-    );
-    binding_row(list, true, |row| {
-        for label in ["ACTION", "PRIMARY", "ALTERNATIVE", ""] {
-            ui::text(row, label, 9.0, theme::MUTED);
-        }
+    list.spawn(Node {
+        justify_content: JustifyContent::SpaceBetween,
+        align_items: AlignItems::Center,
+        column_gap: Val::Px(10.0),
+        flex_shrink: 0.0,
+        ..default()
+    })
+    .with_children(|intro| {
+        ui::paragraph(
+            intro,
+            "Keyboard & mouse · primary and alternative",
+            theme::TEXT_SMALL,
+            theme::MUTED,
+        );
+        crate::client::cinematic::pill(intro, "Select to rebind");
     });
     let mut entries: Vec<_> = bindings
         .keyboard
@@ -600,15 +603,26 @@ pub(super) fn bindings_page(
         .collect();
     entries.sort_by_key(|(action, _)| binding_order(**action));
     if entries.is_empty() {
-        ui::text(
-            list,
-            "No matches. Try another name or clear your search.",
-            13.0,
-            theme::INK,
-        );
+        list.spawn(Node {
+            justify_content: JustifyContent::Center,
+            padding: UiRect::axes(Val::Px(10.0), Val::Px(35.0)),
+            ..default()
+        })
+        .with_children(|empty| {
+            ui::paragraph(
+                empty,
+                "No matches. Try another name or clear your search.",
+                theme::TEXT_BODY,
+                theme::INK,
+            )
+        });
     }
     binding_rows(list, Device::KeyboardMouse, entries, labels, searching);
 }
+
+/// One row per action: its name, then a button per binding, and ↺ once it
+/// differs from the default. A controller row offers its alternative only
+/// once one is bound, as the prototype shows one button per action.
 pub(super) fn binding_rows(
     list: &mut ChildSpawnerCommands,
     device: Device,
@@ -616,98 +630,65 @@ pub(super) fn binding_rows(
     labels: &crate::client::actions::Labels,
     searching: bool,
 ) {
+    use crate::client::cinematic::Kind;
     use crate::client::menu_ui as ui;
+    let defaults = Bindings::default();
     for (&action, alternatives) in entries {
-        binding_row(list, false, |row| {
+        binding_row(list, |row| {
             row.spawn(Node {
                 flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(4.0),
+                row_gap: Val::Px(5.0),
+                min_width: Val::Px(0.0),
                 ..default()
             })
             .with_children(|name| {
-                ui::text(name, action_name(action), 12.0, theme::INK);
-                if searching {
-                    ui::text(name, category(action), 9.0, theme::MUTED);
+                ui::weighted_text(
+                    name,
+                    action_name(action),
+                    theme::TEXT_BODY,
+                    theme::LABEL,
+                    theme::INK,
+                );
+                if searching && device == Device::KeyboardMouse {
+                    ui::description(name, category(action));
                 }
             });
-            for (slot, binding) in alternatives.iter().enumerate() {
-                row.spawn(Node {
-                    column_gap: Val::Px(4.0),
-                    align_items: AlignItems::Center,
-                    ..default()
-                })
-                .with_children(|cell| {
-                    let button = cell
-                        .spawn((
-                            bevy::ui_widgets::Button,
-                            bevy::input_focus::tab_navigation::TabIndex(0),
-                            Operation::Capture(device, action, slot),
-                            ui::Styled {
-                                selected: false,
-                                tab: false,
-                                primary: false,
-                            },
-                            Node {
-                                flex_grow: 1.0,
-                                min_width: Val::Px(0.0),
-                                min_height: Val::Px(33.0),
-                                padding: UiRect::axes(Val::Px(4.0), Val::Px(7.0)),
-                                border: UiRect::all(Val::Px(1.0)),
-                                border_radius: BorderRadius::all(Val::Px(4.0)),
-                                align_items: AlignItems::Center,
-                                justify_content: JustifyContent::Center,
-                                ..default()
-                            },
-                            BackgroundColor(theme::PANEL),
-                            BorderColor::all(theme::EDGE),
-                        ))
-                        .with_child((
-                            Text::new(binding.map_or("Add binding".into(), |b| {
-                                binding_display(labels.binding(b))
-                            })),
-                            ui::font(10.0),
-                            TextColor(if binding.is_some() {
-                                theme::INK
+            row.spawn(Node {
+                column_gap: Val::Px(10.0),
+                align_items: AlignItems::Center,
+                flex_shrink: 0.0,
+                ..default()
+            })
+            .with_children(|cells| {
+                for (slot, binding) in alternatives.iter().enumerate() {
+                    if device == Device::Pad && slot == 1 && binding.is_none() {
+                        continue;
+                    }
+                    buttons::button(
+                        cells,
+                        binding.map_or("Add binding".into(), |b| {
+                            binding_display(labels.binding(b))
+                        }),
+                        Operation::Capture(device, action, slot),
+                        ButtonStyle::Cinematic {
+                            kind: if binding.is_some() {
+                                Kind::Plain
                             } else {
-                                theme::MUTED
-                            }),
-                            bevy::text::LineHeight::RelativeToFont(1.5),
-                            Pickable::IGNORE,
-                        ))
-                        .id();
-                    if binding.is_none() {
-                        cell.commands()
-                            .entity(button)
-                            .insert(ui::EmptyBinding)
-                            .with_child((
-                                ui::EmptyBorder(button),
-                                Node {
-                                    position_type: PositionType::Absolute,
-                                    left: Val::Px(-1.0),
-                                    right: Val::Px(-1.0),
-                                    top: Val::Px(-1.0),
-                                    bottom: Val::Px(-1.0),
-                                    ..default()
-                                },
-                                Pickable::IGNORE,
-                            ));
-                    }
-                    if binding.is_some() {
-                        buttons::button(
-                            cell,
-                            "×",
-                            Operation::Clear(device, action, slot),
-                            ButtonStyle::Quiet { text_px: 12.0 },
-                        );
-                    }
-                });
-            }
-            buttons::button(
-                row,
-                "↺",
-                Operation::ResetAction(device, action),
-                ButtonStyle::Quiet { text_px: 16.0 },
-            );
+                                Kind::Ghost
+                            },
+                            align: Align::Centre,
+                        },
+                    );
+                }
+                if defaults.map(device).get(&action) != Some(alternatives) {
+                    buttons::button(
+                        cells,
+                        "↺",
+                        Operation::ResetAction(device, action),
+                        ButtonStyle::Small { kind: Kind::Ghost },
+                    );
+                }
+            });
         });
     }
 }
@@ -862,29 +843,20 @@ pub(super) fn controller(
 }
 pub(super) fn binding_row(
     parent: &mut ChildSpawnerCommands,
-    heading: bool,
     content: impl FnOnce(&mut ChildSpawnerCommands),
 ) {
     parent
         .spawn((
             Node {
-                display: Display::Grid,
-                grid_template_columns: vec![
-                    GridTrack::flex(1.0),
-                    GridTrack::px(150.0),
-                    GridTrack::px(150.0),
-                    GridTrack::px(28.0),
-                ],
-                column_gap: Val::Px(12.0),
-                padding: UiRect::axes(Val::Px(12.0), Val::Px(10.0)),
-                min_height: Val::Px(if heading { 32.0 } else { 55.0 }),
-                margin: UiRect::top(Val::Px(5.0)),
-                border_radius: BorderRadius::all(Val::Px(6.0)),
+                justify_content: JustifyContent::SpaceBetween,
                 align_items: AlignItems::Center,
+                column_gap: Val::Px(15.0),
+                padding: UiRect::vertical(Val::Px(16.0)),
+                border: UiRect::bottom(Val::Px(theme::RULE)),
                 flex_shrink: 0.0,
                 ..default()
             },
-            BackgroundColor(if heading { Color::NONE } else { theme::RAISED }),
+            BorderColor::all(theme::EDGE),
         ))
         .with_children(content);
 }

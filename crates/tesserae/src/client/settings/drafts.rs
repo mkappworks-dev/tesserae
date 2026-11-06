@@ -88,7 +88,13 @@ pub(super) fn activate(
         return;
     };
     if settings.capture.is_some() {
-        if matches!(operation, Operation::Cancel) {
+        if let Operation::Clear(device, action, slot) = *operation
+            && let Some((draft, _)) = settings.draft.as_mut()
+            && let Some(slots) = draft.map_mut(device).get_mut(&action)
+        {
+            slots[slot] = None;
+        }
+        if matches!(operation, Operation::Cancel | Operation::Clear(..)) {
             settings.capture = None;
             settings.notice.clear();
             settings.dirty = true;
@@ -269,9 +275,10 @@ pub(in crate::client) fn capture(
     active: (Res<Bindings>, Res<Preferences>),
     mut actions: ResMut<crate::client::actions::Actions>,
     save: Option<Res<crate::server::persistence::SaveStatus>>,
-    (ui, focus): (
+    (ui, focus, dialog_buttons): (
         Option<Res<crate::client::input::UiInput>>,
         Option<Res<bevy::input_focus::InputFocus>>,
+        Query<&bevy::picking::hover::Hovered, With<CaptureButton>>,
     ),
 ) {
     if save.is_some_and(|status| status.modal()) {
@@ -332,6 +339,10 @@ pub(in crate::client) fn capture(
         {
             settings.capture = Some((device, action, slot, true));
         }
+        return;
+    }
+    // A click on the dialog's own buttons is theirs, not the new binding.
+    if mouse.get_just_pressed().next().is_some() && dialog_buttons.iter().any(|hovered| hovered.0) {
         return;
     }
     let binding = match device {

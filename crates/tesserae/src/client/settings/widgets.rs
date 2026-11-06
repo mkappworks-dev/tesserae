@@ -789,6 +789,10 @@ pub(super) fn footer(parent: &mut ChildSpawnerCommands, changed: bool) {
 
 #[derive(Component)]
 pub(super) struct ModalFocus;
+
+/// A button in the binding capture dialog, whose clicks capture ignores.
+#[derive(Component)]
+pub(super) struct CaptureButton;
 pub(super) fn capture_focus(
     settings: Res<Settings>,
     anchors: Query<Entity, With<ModalFocus>>,
@@ -838,65 +842,77 @@ pub(super) fn modal(commands: &mut Commands, settings: &Settings) {
                 ))
                 .with_children(|dialog| {
                     if let Some((device, action, slot, _)) = settings.capture {
-                        let (prompt, cancel) = match device {
+                        let (place, prompt) = match device {
                             Device::KeyboardMouse => (
-                                "Press a key or mouse button",
-                                "Esc cancels. The opening click is ignored.",
+                                if slot == 0 { "Primary" } else { "Alternative" },
+                                "Press a key or mouse button. Escape cancels.",
                             ),
-                            Device::Pad => (
-                                "Press a controller button",
-                                "Menu or Esc cancels. The opening press is ignored.",
-                            ),
+                            Device::Pad => {
+                                ("Controller", "Press a controller button. Menu or Esc cancels.")
+                            }
                         };
                         cine::dialog_title(dialog, "Change binding");
-                        cine::dialog_text(
-                            dialog,
-                            format!(
-                                "{} · {}",
-                                action_name(action),
-                                if slot == 0 { "Primary" } else { "Alternative" }
-                            ),
-                            theme::MUTED,
-                        );
                         dialog
                             .spawn((
-                                BackgroundColor(theme::FIELD),
-                                BorderColor::all(theme::FIELD_EDGE),
-                                Node {
-                                    padding: UiRect::all(Val::Px(28.0)),
-                                    margin: UiRect::vertical(Val::Px(5.0)),
-                                    border: UiRect::all(Val::Px(theme::RULE)),
-                                    border_radius: BorderRadius::all(Val::Px(
-                                        theme::RADIUS_CONTROL,
-                                    )),
-                                    justify_content: JustifyContent::Center,
-                                    ..default()
-                                },
+                                Text::default(),
+                                theme::font(theme::TEXT_EYEBROW),
+                                bevy::text::LineHeight::RelativeToFont(1.8),
+                                TextColor(theme::MUTED),
+                                Pickable::IGNORE,
                             ))
-                            .with_children(|well| {
-                                crate::client::menu_ui::technical_text(
-                                    well,
-                                    prompt,
-                                    theme::TEXT_BODY,
-                                    theme::INK,
-                                )
+                            .with_children(|line| {
+                                line.spawn((
+                                    TextSpan::new(action_name(action)),
+                                    theme::weighted(theme::TEXT_EYEBROW, theme::BOLD),
+                                    TextColor(theme::MUTED),
+                                ));
+                                line.spawn((
+                                    TextSpan::new(format!(" · {place}")),
+                                    theme::font(theme::TEXT_EYEBROW),
+                                    TextColor(theme::MUTED),
+                                ));
                             });
-                        cine::dialog_text(dialog, cancel, theme::MUTED);
+                        cine::dialog_text(dialog, prompt, theme::MUTED);
+                        let bound = settings
+                            .draft
+                            .as_ref()
+                            .and_then(|(bindings, _)| bindings.map(device).get(&action))
+                            .is_some_and(|slots| slots[slot].is_some());
                         dialog
                             .spawn(cine::dialog_actions())
                             .with_children(|actions| {
-                                buttons::button(actions, "Cancel", Operation::Cancel, kind(Kind::Plain));
+                                if bound {
+                                    let clear = buttons::button(
+                                        actions,
+                                        "Clear binding",
+                                        Operation::Clear(device, action, slot),
+                                        kind(Kind::Ghost),
+                                    );
+                                    actions.commands().entity(clear).insert(CaptureButton);
+                                }
+                                let cancel = buttons::button(
+                                    actions,
+                                    "Cancel",
+                                    Operation::Cancel,
+                                    kind(Kind::Plain),
+                                );
+                                actions.commands().entity(cancel).insert(CaptureButton);
                             });
                     } else {
                         let (title, description) = if settings.unsaved {
                             (
                                 "Keep your changes?",
-                                "You have unapplied behavior, binding or display changes.".into(),
+                                "You have unapplied settings. Apply them before leaving, or discard the draft.".into(),
                             )
                         } else if settings.resetting {
                             (
-                                "Restore defaults?",
-                                "This resets the controls and display draft. Your saved preferences stay unchanged until you apply.".into(),
+                                "Restore settings defaults?",
+                                if settings.tab == crate::client::menu_ui::Tab::Controller {
+                                    "This resets your draft controller and touch preferences. Apply to keep them."
+                                } else {
+                                    "This resets your draft preferences, except the controller's. Apply to keep them."
+                                }
+                                .into(),
                             )
                         } else {
                             let names = settings
@@ -923,7 +939,7 @@ pub(super) fn modal(commands: &mut Commands, settings: &Settings) {
                                 if settings.unsaved {
                                     first = Some(buttons::button(
                                         actions,
-                                        "Stay",
+                                        "Keep editing",
                                         Operation::Stay,
                                         kind(Kind::Ghost),
                                     ));
@@ -931,18 +947,18 @@ pub(super) fn modal(commands: &mut Commands, settings: &Settings) {
                                         actions,
                                         "Discard",
                                         Operation::Discard,
-                                        kind(Kind::Danger),
+                                        kind(Kind::Plain),
                                     );
                                     buttons::button(
                                         actions,
-                                        "Save changes",
+                                        "Apply & return",
                                         Operation::Apply,
                                         kind(Kind::Primary),
                                     );
                                 } else if settings.resetting {
                                     first = Some(buttons::button(
                                         actions,
-                                        "Cancel",
+                                        "Keep changes",
                                         Operation::CancelReset,
                                         kind(Kind::Ghost),
                                     ));
@@ -950,7 +966,7 @@ pub(super) fn modal(commands: &mut Commands, settings: &Settings) {
                                         actions,
                                         "Restore defaults",
                                         Operation::ConfirmReset,
-                                        kind(Kind::Danger),
+                                        kind(Kind::Primary),
                                     );
                                 } else {
                                     first = Some(buttons::button(
