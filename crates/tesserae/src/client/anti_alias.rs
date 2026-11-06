@@ -26,7 +26,7 @@ pub(crate) enum AntiAliasing {
 
 /// The settings menu's choices; a profile holding another is rejected.
 pub(crate) const CHOICES: [AntiAliasing; 3] =
-    [AntiAliasing::Smaa, AntiAliasing::Msaa4, AntiAliasing::Off];
+    [AntiAliasing::Off, AntiAliasing::Smaa, AntiAliasing::Msaa4];
 
 impl AntiAliasing {
     /// The hand camera must match it: a camera layered with a different

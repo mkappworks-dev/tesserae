@@ -392,7 +392,6 @@ pub(super) fn plugin(app: &mut App) {
         .init_session_state::<Catalogue>()
         .init_session_state::<Notice>()
         .init_session_state::<QuietUntil>()
-        .add_session_message::<crate::server::undo::HistoryApplied>()
         .add_session_message::<InventoryChanged>()
         .add_session_message::<InventoryIntent>()
         .add_session_systems(Startup, spawn_hud)
@@ -700,19 +699,10 @@ pub(super) fn send_intents(
 fn show_rejections(
     mut commands: Commands,
     mut rejected: MessageReader<EditRejected>,
-    mut applied: MessageReader<crate::server::undo::HistoryApplied>,
     mut notice: ResMut<Notice>,
     quiet: Res<QuietUntil>,
     time: Res<Time>,
 ) {
-    for message in applied.read() {
-        let text = match message.0 {
-            crate::server::undo::HistoryAction::Undo => "Undone",
-            crate::server::undo::HistoryAction::Redo => "Redone",
-        };
-        notice.show(text);
-        super::menu_ui::notify(&mut commands, text, super::menu_ui::Tone::Change);
-    }
     for message in rejected.read() {
         if time.elapsed_secs_f64() < quiet.0 {
             continue;
@@ -1081,7 +1071,6 @@ mod tests {
             .add_message::<ContentCatalogue>()
             .add_message::<EditIntent>()
             .add_message::<EditRejected>()
-            .add_message::<crate::server::undo::HistoryApplied>()
             .add_message::<MovementFeedback>()
             .add_message::<crate::server::player::RestoreView>()
             .add_message::<PoseCorrection>()

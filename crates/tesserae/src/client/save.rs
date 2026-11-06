@@ -30,7 +30,7 @@ pub(super) fn return_buttons(parent: &mut ChildSpawnerCommands) {
         ToList,
         ButtonStyle::Cinematic {
             kind: Kind::Plain,
-            align: Align::Left,
+            align: Align::Glyph("→"),
         },
     );
     let quit = buttons::button(
@@ -39,7 +39,7 @@ pub(super) fn return_buttons(parent: &mut ChildSpawnerCommands) {
         Action(SaveAction::SaveQuit),
         ButtonStyle::Cinematic {
             kind: Kind::Plain,
-            align: Align::Left,
+            align: Align::Glyph("→"),
         },
     );
     parent.commands().entity(quit).insert(DirectQuit);

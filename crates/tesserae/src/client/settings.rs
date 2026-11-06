@@ -29,6 +29,8 @@ pub(super) struct Settings {
     conflict: Option<Conflict>,
     unsaved: bool,
     show_reference: bool,
+    /// Whether Controller's Touch controls are expanded.
+    touch_open: bool,
     resetting: bool,
     category: Category,
     notice: String,
@@ -60,11 +62,6 @@ impl Settings {
             )
     }
 
-    pub(super) fn changed(&self, bindings: &Bindings, preferences: &Preferences) -> bool {
-        self.draft
-            .as_ref()
-            .is_some_and(|(b, p)| b != bindings || p != preferences)
-    }
     pub(super) fn modal(&self) -> bool {
         self.unsaved || self.conflict.is_some() || self.resetting
     }
@@ -106,6 +103,7 @@ pub(super) enum Operation {
     ConfirmReset,
     CancelReset,
     Reference,
+    TouchControls,
     ResetAction(Device, Action),
     Capture(Device, Action, usize),
     Clear(Device, Action, usize),
@@ -225,7 +223,12 @@ pub(super) struct Opener<'w, 's> {
 
 impl Opener<'_, '_> {
     /// At the category used last.
+    /// Opening Settings again while they show, from the header's button,
+    /// keeps the draft.
     pub(super) fn open(&mut self) {
+        if self.settings.open {
+            return;
+        }
         let last = self.settings.last;
         self.open_at(last);
     }

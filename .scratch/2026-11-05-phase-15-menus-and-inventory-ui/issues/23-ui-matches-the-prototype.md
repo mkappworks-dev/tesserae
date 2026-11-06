@@ -46,3 +46,21 @@ Every screen this spec added or restyled matches the approved prototype one to o
   - **Opening**: the launcher's card shows an empty bar: the loader has not started, and its own screen takes over with the real progress.
   - **Dialog overlay**: as pass A records, the overlay is the flat #090a0c at 0.70 without the 4 px blur.
   - **Rail**: a step shows its tick only once it is valid, as decided; the prototype's rail now does the same (`stepValid` in interaction.js).
+
+- Fix pass C (Menu and Settings), 2026-11-06: what still differs from the prototype, and why:
+  - **Biome in "You are here"**: the Server now sends the Biome at the Player's Eye (`HereBiome`), and the block shows only while one is known, so a World without Biomes has none.
+  - **World details**: the Server reports no Generator version or climate sizes, so those lines are left out, and the Game shows without its version, as the prototype words it.
+  - **Menu panel position**: the prototype's "Single-player prototype" notice is prototype chrome and is not ported, so the shorter panel centres a little lower.
+  - **Settings applied**: the engine keeps its top-right notice card; it has no bottom toast for menus.
+  - **Stronger UI contrast**: the engine has no such setting, so Accessibility has no row for it.
+  - **Defaults, slider ranges and options**: the prototype now uses the engine's (Toggle sprint, 0.25–3 sensitivities, SMAA, no 50 % render scale, a 1000 cap, no 90), since they are what the profile validates. The same goes for the action names, key labels and binding order, which the prototype already used for the rows it added.
+  - **Text size hint**: kept as the engine's, "100% is standard; 200% doubles…", because the prototype's "1 is standard" contradicts its own percent dropdown; the prototype now says the same.
+  - **Restore defaults**: the engine resets the Controller page apart from the rest, so the dialog says which; the prototype now does too.
+  - **Clearing a binding**: the prototype's rows have no ×, so Clear binding moved into the capture dialog; the prototype has it too. Capture takes every key, so clearing needs the pointer.
+  - **Controller rows**: an alternative pad binding shows only once one is bound, as the prototype shows one button per action.
+  - **Quick reference**: a session toggle, off by default, that lists the HUD keys under the page; the prototype's toggle shows nothing.
+  - **Key bindings search**: it stays above the scrolling body, so a page rebuild cannot take its focus; at the top of the page it lands where the prototype's does.
+  - **Sheet header**: 5 px taller than the prototype's, because the eyebrow's line box is 1.5 of its size where the browser's normal line height is about 1.2; it is the shared `cinematic::sheet_header`, so every sheet shows it.
+  - **Hint wrapping**: Inter at 14 px is a little wider than the prototype's system font, so a few hints near the 320 px measure wrap one word earlier.
+  - **World details overlay**: without a backdrop blur, the Menu under the 0.70 overlay reads clearer than in the prototype.
+

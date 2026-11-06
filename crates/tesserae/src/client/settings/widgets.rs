@@ -4,9 +4,6 @@
 use super::*;
 use crate::client::theme;
 
-pub(super) fn button(parent: &mut ChildSpawnerCommands, text: String, operation: Operation) {
-    buttons::button(parent, text, operation, ButtonStyle::Plain);
-}
 pub(super) fn setting_row(
     parent: &mut ChildSpawnerCommands,
     title: &str,
@@ -135,7 +132,10 @@ pub(super) fn segment(
                     Text::default(),
                     theme::font(theme::TEXT_BODY),
                     TextColor(theme::INK),
+                    // Grown to the trigger's width: the label arrives after the first
+                    // layout, which would otherwise wrap it at its empty width.
                     Node {
+                        flex_grow: 1.0,
                         flex_shrink: 1.0,
                         min_width: Val::Px(0.0),
                         ..default()
@@ -433,13 +433,9 @@ impl Scalar {
             _ => 0.05,
         }
     }
+    /// The plain reading the prototype's range output shows: "1", "0.15".
     fn display(self, value: f32) -> String {
-        match self {
-            Self::MoveDeadzone | Self::LookDeadzone | Self::TouchOpacity => {
-                format!("{:.0}%", value * 100.0)
-            }
-            _ => format!("{value:.2}×"),
-        }
+        format!("{}", (value * 100.0).round() / 100.0)
     }
     fn fraction(self, value: f32) -> f32 {
         let range = self.range();
@@ -634,10 +630,68 @@ pub(super) fn group(
                 theme::font(theme::TEXT_EYEBROW),
                 bevy::text::LetterSpacing::Px(theme::SECTION_TRACKING),
                 TextColor(theme::MUTED),
-                bevy::text::LineHeight::RelativeToFont(1.5),
+                bevy::text::LineHeight::RelativeToFont(1.25),
+                Node {
+                    margin: UiRect::bottom(Val::Px(12.0)),
+                    ..default()
+                },
                 Pickable::IGNORE,
             ));
             content(section);
+        });
+}
+
+/// A ruled row that shows or hides the rows under it, as a `<details>` does.
+pub(super) fn disclosure(
+    parent: &mut ChildSpawnerCommands,
+    title: &str,
+    open: bool,
+    content: impl FnOnce(&mut ChildSpawnerCommands),
+) {
+    use crate::client::menu_ui as ui;
+    parent
+        .spawn((
+            BorderColor::all(theme::EDGE),
+            Node {
+                flex_direction: FlexDirection::Column,
+                margin: UiRect::top(Val::Px(20.0)),
+                padding: UiRect::top(Val::Px(14.0)),
+                border: UiRect::top(Val::Px(theme::RULE)),
+                flex_shrink: 0.0,
+                ..default()
+            },
+        ))
+        .with_children(|details| {
+            details
+                .spawn((
+                    bevy::ui_widgets::Button,
+                    bevy::input_focus::tab_navigation::TabIndex(0),
+                    Operation::TouchControls,
+                    ui::Bare,
+                    Node {
+                        column_gap: Val::Px(6.0),
+                        align_items: AlignItems::Center,
+                        padding: UiRect::vertical(Val::Px(3.0)),
+                        margin: UiRect::bottom(Val::Px(12.0)),
+                        ..default()
+                    },
+                ))
+                .with_children(|summary| {
+                    ui::icon(
+                        summary,
+                        if open {
+                            ui::IconKind::Expanded
+                        } else {
+                            ui::IconKind::Collapsed
+                        },
+                        theme::INK,
+                        12.0,
+                    );
+                    ui::text(summary, title, theme::TEXT_BODY, theme::INK);
+                });
+            if open {
+                content(details);
+            }
         });
 }
 
@@ -745,7 +799,7 @@ pub(super) fn footer(parent: &mut ChildSpawnerCommands, changed: bool) {
     parent.spawn(cine::sheet_footer()).with_children(|footer| {
         buttons::button(
             footer,
-            "Back",
+            "← Back",
             Operation::Back,
             ButtonStyle::Cinematic {
                 kind: Kind::Ghost,
@@ -767,20 +821,13 @@ pub(super) fn footer(parent: &mut ChildSpawnerCommands, changed: bool) {
                         "All changes applied"
                     },
                     theme::TEXT_EYEBROW,
-                    if changed {
-                        theme::WARNING
-                    } else {
-                        theme::MUTED
-                    },
+                    theme::MUTED,
                 );
                 buttons::button(
                     actions,
                     "Restore defaults",
                     Operation::Reset,
-                    ButtonStyle::Cinematic {
-                        kind: Kind::Ghost,
-                        align: Align::Centre,
-                    },
+                    ButtonStyle::Small { kind: Kind::Ghost },
                 );
                 let apply = buttons::button(
                     actions,
@@ -803,6 +850,10 @@ pub(super) fn footer(parent: &mut ChildSpawnerCommands, changed: bool) {
 
 #[derive(Component)]
 pub(super) struct ModalFocus;
+
+/// A button in the binding capture dialog, whose clicks capture ignores.
+#[derive(Component)]
+pub(in crate::client) struct CaptureButton;
 pub(super) fn capture_focus(
     settings: Res<Settings>,
     anchors: Query<Entity, With<ModalFocus>>,
@@ -852,65 +903,77 @@ pub(super) fn modal(commands: &mut Commands, settings: &Settings) {
                 ))
                 .with_children(|dialog| {
                     if let Some((device, action, slot, _)) = settings.capture {
-                        let (prompt, cancel) = match device {
+                        let (place, prompt) = match device {
                             Device::KeyboardMouse => (
-                                "Press a key or mouse button",
-                                "Esc cancels. The opening click is ignored.",
+                                if slot == 0 { "Primary" } else { "Alternative" },
+                                "Press a key or mouse button. Escape cancels.",
                             ),
-                            Device::Pad => (
-                                "Press a controller button",
-                                "Menu or Esc cancels. The opening press is ignored.",
-                            ),
+                            Device::Pad => {
+                                ("Controller", "Press a controller button. Menu or Esc cancels.")
+                            }
                         };
                         cine::dialog_title(dialog, "Change binding");
-                        cine::dialog_text(
-                            dialog,
-                            format!(
-                                "{} · {}",
-                                action_name(action),
-                                if slot == 0 { "Primary" } else { "Alternative" }
-                            ),
-                            theme::MUTED,
-                        );
                         dialog
                             .spawn((
-                                BackgroundColor(theme::FIELD),
-                                BorderColor::all(theme::FIELD_EDGE),
-                                Node {
-                                    padding: UiRect::all(Val::Px(28.0)),
-                                    margin: UiRect::vertical(Val::Px(5.0)),
-                                    border: UiRect::all(Val::Px(theme::RULE)),
-                                    border_radius: BorderRadius::all(Val::Px(
-                                        theme::RADIUS_CONTROL,
-                                    )),
-                                    justify_content: JustifyContent::Center,
-                                    ..default()
-                                },
+                                Text::default(),
+                                theme::font(theme::TEXT_EYEBROW),
+                                bevy::text::LineHeight::RelativeToFont(1.8),
+                                TextColor(theme::MUTED),
+                                Pickable::IGNORE,
                             ))
-                            .with_children(|well| {
-                                crate::client::menu_ui::technical_text(
-                                    well,
-                                    prompt,
-                                    theme::TEXT_BODY,
-                                    theme::INK,
-                                )
+                            .with_children(|line| {
+                                line.spawn((
+                                    TextSpan::new(action_name(action)),
+                                    theme::weighted(theme::TEXT_EYEBROW, theme::BOLD),
+                                    TextColor(theme::MUTED),
+                                ));
+                                line.spawn((
+                                    TextSpan::new(format!(" · {place}")),
+                                    theme::font(theme::TEXT_EYEBROW),
+                                    TextColor(theme::MUTED),
+                                ));
                             });
-                        cine::dialog_text(dialog, cancel, theme::MUTED);
+                        cine::dialog_text(dialog, prompt, theme::MUTED);
+                        let bound = settings
+                            .draft
+                            .as_ref()
+                            .and_then(|(bindings, _)| bindings.map(device).get(&action))
+                            .is_some_and(|slots| slots[slot].is_some());
                         dialog
                             .spawn(cine::dialog_actions())
                             .with_children(|actions| {
-                                buttons::button(actions, "Cancel", Operation::Cancel, kind(Kind::Plain));
+                                if bound {
+                                    let clear = buttons::button(
+                                        actions,
+                                        "Clear binding",
+                                        Operation::Clear(device, action, slot),
+                                        kind(Kind::Ghost),
+                                    );
+                                    actions.commands().entity(clear).insert(CaptureButton);
+                                }
+                                let cancel = buttons::button(
+                                    actions,
+                                    "Cancel",
+                                    Operation::Cancel,
+                                    kind(Kind::Plain),
+                                );
+                                actions.commands().entity(cancel).insert(CaptureButton);
                             });
                     } else {
                         let (title, description) = if settings.unsaved {
                             (
                                 "Keep your changes?",
-                                "You have unapplied behavior, binding or display changes.".into(),
+                                "You have unapplied settings. Apply them before leaving, or discard the draft.".into(),
                             )
                         } else if settings.resetting {
                             (
-                                "Restore defaults?",
-                                "This resets the controls and display draft. Your saved preferences stay unchanged until you apply.".into(),
+                                "Restore settings defaults?",
+                                if settings.tab == crate::client::menu_ui::Tab::Controller {
+                                    "This resets your draft controller and touch preferences. Apply to keep them."
+                                } else {
+                                    "This resets your draft preferences, except the controller's. Apply to keep them."
+                                }
+                                .into(),
                             )
                         } else {
                             let names = settings
@@ -937,7 +1000,7 @@ pub(super) fn modal(commands: &mut Commands, settings: &Settings) {
                                 if settings.unsaved {
                                     first = Some(buttons::button(
                                         actions,
-                                        "Stay",
+                                        "Keep editing",
                                         Operation::Stay,
                                         kind(Kind::Ghost),
                                     ));
@@ -945,18 +1008,18 @@ pub(super) fn modal(commands: &mut Commands, settings: &Settings) {
                                         actions,
                                         "Discard",
                                         Operation::Discard,
-                                        kind(Kind::Danger),
+                                        kind(Kind::Plain),
                                     );
                                     buttons::button(
                                         actions,
-                                        "Save changes",
+                                        "Apply & return",
                                         Operation::Apply,
                                         kind(Kind::Primary),
                                     );
                                 } else if settings.resetting {
                                     first = Some(buttons::button(
                                         actions,
-                                        "Cancel",
+                                        "Keep changes",
                                         Operation::CancelReset,
                                         kind(Kind::Ghost),
                                     ));
@@ -964,7 +1027,7 @@ pub(super) fn modal(commands: &mut Commands, settings: &Settings) {
                                         actions,
                                         "Restore defaults",
                                         Operation::ConfirmReset,
-                                        kind(Kind::Danger),
+                                        kind(Kind::Primary),
                                     );
                                 } else {
                                     first = Some(buttons::button(

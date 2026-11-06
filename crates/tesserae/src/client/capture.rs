@@ -280,8 +280,9 @@ pub(super) fn plugin(app: &mut App) {
     if std::env::var_os("TESSERAE_SCREENSHOT_SPRINT").is_some() {
         app.insert_resource(super::camera::Sprint(true));
     }
-    if std::env::var_os("TESSERAE_SCREENSHOT_MENU").is_some() {
-        app.insert_resource(super::menu::Menu::opened());
+    // `TESSERAE_SCREENSHOT_MENU=details` shows World details over it.
+    if let Some(menu) = std::env::var_os("TESSERAE_SCREENSHOT_MENU") {
+        app.insert_resource(super::menu::Menu::opened(menu == "details"));
     }
     // `TESSERAE_SCREENSHOT_LAYOUT` opens the Layout menu with the mode on.
     if std::env::var_os("TESSERAE_SCREENSHOT_LAYOUT").is_some() {

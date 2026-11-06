@@ -19,7 +19,7 @@ pub(super) struct Placeholder(pub(super) Entity);
 /// Where the launcher's scenery is painted, softened under a sheet as the
 /// prototype softens it.
 #[derive(Component)]
-pub(super) struct Backdrop(pub(super) scenery::Filter);
+pub(in crate::client) struct Backdrop(pub(in crate::client) scenery::Filter);
 
 /// The title screen's headline, sized from the window's width.
 #[derive(Component)]
@@ -95,7 +95,7 @@ pub(super) fn spawn(
                     }
                 };
             });
-            footer(root);
+            footer(root, SCENERY_PLACE);
             let resetting = l.screen == Screen::Create(Step::Biomes)
                 && l.form.biomes.as_ref().is_some_and(|d| d.resetting);
             match &l.screen {
@@ -108,8 +108,11 @@ pub(super) fn spawn(
     focus
 }
 
+/// The scenery's place, as the prototype's footer names its landscape.
+pub(in crate::client) const SCENERY_PLACE: &str = "TERRA / THE GREENWOOD";
+
 /// A node that covers its parent, under the parent's other children.
-fn fill() -> Node {
+pub(in crate::client) fn fill() -> Node {
     Node {
         position_type: PositionType::Absolute,
         left: Val::Px(0.0),
@@ -120,7 +123,7 @@ fn fill() -> Node {
     }
 }
 
-fn header(root: &mut ChildSpawnerCommands, logo: Option<&ui::Mosaic>) {
+pub(in crate::client) fn header(root: &mut ChildSpawnerCommands, logo: Option<&ui::Mosaic>) {
     root.spawn((
         BackgroundColor(theme::BAND),
         BorderColor::all(theme::BAND_RULE),
@@ -198,7 +201,8 @@ fn header(root: &mut ChildSpawnerCommands, logo: Option<&ui::Mosaic>) {
 #[derive(Component)]
 pub(super) struct HeaderButton;
 
-fn footer(root: &mut ChildSpawnerCommands) {
+/// `place` names where the Player is, as the prototype's footer does.
+pub(in crate::client) fn footer(root: &mut ChildSpawnerCommands, place: &str) {
     let chrome = |value: &str| {
         (
             Text::new(value),
@@ -221,14 +225,13 @@ fn footer(root: &mut ChildSpawnerCommands) {
         },
     ))
     .with_children(|footer| {
-        // The scenery's place, as the prototype names its landscape.
         footer
             .spawn(Node {
                 flex_grow: 1.0,
                 flex_basis: Val::Px(0.0),
                 ..default()
             })
-            .with_child(chrome("TERRA / THE GREENWOOD"));
+            .with_child(chrome(place));
         footer
             .spawn(Node {
                 align_items: AlignItems::Center,

@@ -90,7 +90,7 @@ pub(in crate::client) fn render(
     (labels, searches, active): RenderData,
     scrolls: Query<&ScrollPosition, With<SettingsScroll>>,
     (mut positions, mut previous, mut query): (
-        Local<[Vec2; 4]>,
+        Local<[Vec2; crate::client::menu_ui::Tab::ORDER.len()]>,
         Local<Option<crate::client::menu_ui::Tab>>,
         Local<String>,
     ),
@@ -100,19 +100,13 @@ pub(in crate::client) fn render(
     if !pressed.is_empty() || (!settings.dirty && !labels.is_changed()) {
         return;
     }
-    if let Some(tab) = *previous {
-        let index = match tab {
-            Tab::Behavior => 0,
-            Tab::Bindings => 1,
-            Tab::Controller => 3,
-            _ => 2,
-        };
-        if let Some(scroll) = scrolls.iter().next() {
-            positions[index] = scroll.0;
-        }
+    if let Some(tab) = *previous
+        && let Some(scroll) = scrolls.iter().next()
+    {
+        positions[scroll_slot(tab)] = scroll.0;
     }
     if *query != searches.bindings {
-        positions[1] = Vec2::ZERO;
+        positions[scroll_slot(Tab::Bindings)] = Vec2::ZERO;
         *query = searches.bindings.clone();
     }
     *previous = settings.open.then_some(settings.tab);
@@ -140,12 +134,7 @@ pub(in crate::client) fn render(
         return;
     };
     let changed = bindings != &*active.0 || p != &*active.1;
-    let index = match settings.tab {
-        Tab::Behavior => 0,
-        Tab::Bindings => 1,
-        Tab::Controller => 3,
-        _ => 2,
-    };
+    let index = scroll_slot(settings.tab);
     commands
         .spawn((
             Panel,
@@ -170,7 +159,17 @@ pub(in crate::client) fn render(
                     flex_grow: 1.0,
                     flex_basis: Val::Px(0.0),
                     min_height: Val::Px(0.0),
-                    padding: UiRect::axes(Val::Px(theme::SHEET_PAD_X), Val::Px(20.0)),
+                    padding: UiRect::new(
+                        Val::Px(theme::SHEET_PAD_X),
+                        Val::Px(theme::SHEET_PAD_X),
+                        // The search field above the body already leaves this gap.
+                        Val::Px(if settings.tab == Tab::Bindings {
+                            0.0
+                        } else {
+                            20.0
+                        }),
+                        Val::Px(20.0),
+                    ),
                     overflow: Overflow::scroll_y(),
                     ..default()
                 },
@@ -191,6 +190,12 @@ pub(in crate::client) fn render(
     }
 }
 
+/// Where each category keeps its scroll position while another shows.
+fn scroll_slot(tab: crate::client::menu_ui::Tab) -> usize {
+    use crate::client::menu_ui::Tab;
+    Tab::ORDER.iter().position(|t| *t == tab).unwrap_or(0)
+}
+
 pub(super) fn page(
     list: &mut ChildSpawnerCommands,
     settings: &Settings,
@@ -208,7 +213,7 @@ pub(super) fn page(
         Tab::Behavior => behavior(list, settings, bindings, p, labels, context),
         Tab::Display => display(list, p),
         Tab::Bindings => bindings_page(list, settings, bindings, labels, searches),
-        Tab::Controller => controller(list, bindings, p, labels),
+        Tab::Controller => controller(list, settings, bindings, p, labels),
         Tab::Accessibility => accessibility(list, p),
         Tab::Catalogue => {}
     }
@@ -227,40 +232,22 @@ pub(super) fn behavior(
     ),
 ) {
     group(list, "MOVEMENT & BUILDING", |card| {
-        setting_row(
-            card,
-            "Sprint activation",
-            if p.toggle_sprint {
-                "Press once to enable sprint; press again to stop."
-            } else {
-                "Sprint while the binding is held."
-            },
-            |row| {
-                segment(row, |buttons| {
-                    option(buttons, "Hold", Operation::Sprint(false), !p.toggle_sprint);
-                    option(buttons, "Toggle", Operation::Sprint(true), p.toggle_sprint);
-                })
-            },
-        );
-        setting_row(
-            card,
-            "Removal activation",
-            if p.tap_remove {
-                "Timed removal on one target. A second tap cancels."
-            } else {
-                "Hold on one target until removal completes."
-            },
-            |row| {
-                segment(row, |buttons| {
-                    option(buttons, "Hold", Operation::Removal(false), !p.tap_remove);
-                    option(buttons, "Timed tap", Operation::Removal(true), p.tap_remove);
-                })
-            },
-        );
+        setting_row(card, "Sprint activation", "", |row| {
+            segment(row, |buttons| {
+                option(buttons, "Hold", Operation::Sprint(false), !p.toggle_sprint);
+                option(buttons, "Toggle", Operation::Sprint(true), p.toggle_sprint);
+            })
+        });
+        setting_row(card, "Removal activation", "", |row| {
+            segment(row, |buttons| {
+                option(buttons, "Hold", Operation::Removal(false), !p.tap_remove);
+                option(buttons, "Timed tap", Operation::Removal(true), p.tap_remove);
+            })
+        });
         setting_row(
             card,
             "Repeat while held",
-            "Keep placing solids, and removing one target after another, while held. Timed tap removal stays one per tap.",
+            "Keep placing or removing while the binding is held.",
             |row| switch(row, p.repeat_held, Operation::Repeat),
         );
     });
@@ -271,59 +258,37 @@ pub(super) fn behavior(
             "Relative to the default mouse feel.",
             |row| slider(row, Scalar::Mouse, p.sensitivity / 0.003),
         );
-        setting_row(
-            card,
-            "Invert vertical look",
-            "Reverse the mouse look direction.",
-            |row| switch(row, p.invert_y, Operation::Invert),
-        );
-        setting_row(
-            card,
-            "Scroll direction",
-            if p.reverse_scroll {
-                "Wheel up selects the next quick slot."
-            } else {
-                "Wheel down selects the next quick slot."
-            },
-            |row| {
-                segment(row, |buttons| {
-                    option(
-                        buttons,
-                        "Standard",
-                        Operation::ScrollDirection(false),
-                        !p.reverse_scroll,
-                    );
-                    option(
-                        buttons,
-                        "Reversed",
-                        Operation::ScrollDirection(true),
-                        p.reverse_scroll,
-                    );
-                })
-            },
-        );
-        setting_row(
-            card,
-            "Scroll sensitivity",
-            "Higher values move through quick slots faster.",
-            |row| slider(row, Scalar::Scroll, p.scroll_sensitivity),
-        );
+        setting_row(card, "Invert vertical look", "", |row| {
+            switch(row, p.invert_y, Operation::Invert)
+        });
+        setting_row(card, "Scroll direction", "", |row| {
+            segment(row, |buttons| {
+                option(
+                    buttons,
+                    "Standard",
+                    Operation::ScrollDirection(false),
+                    !p.reverse_scroll,
+                );
+                option(
+                    buttons,
+                    "Reversed",
+                    Operation::ScrollDirection(true),
+                    p.reverse_scroll,
+                );
+            })
+        });
+        setting_row(card, "Scroll sensitivity", "", |row| {
+            slider(row, Scalar::Scroll, p.scroll_sensitivity)
+        });
+        setting_row(card, "Show quick reference", "", |row| {
+            switch(row, settings.show_reference, Operation::Reference)
+        });
     });
-    button(
-        list,
-        if settings.show_reference {
-            "Hide quick reference"
-        } else {
-            "Show quick reference"
-        }
-        .into(),
-        Operation::Reference,
-    );
     if settings.show_reference {
-        crate::client::menu_ui::text(
+        crate::client::menu_ui::paragraph(
             list,
             crate::client::edit::hud_text(context.0, &context.1.0, context.2, bindings, labels, p),
-            12.0,
+            theme::TEXT_SMALL,
             theme::MUTED,
         );
     }
@@ -334,7 +299,7 @@ pub(super) fn accessibility(list: &mut ChildSpawnerCommands, p: &Preferences) {
         setting_row(
             card,
             "Reduced motion",
-            "Use immediate interface transitions, and still the HUD's pulses and slides.",
+            "Use immediate interface transitions.",
             |row| {
                 switch(
                     row,
@@ -346,7 +311,7 @@ pub(super) fn accessibility(list: &mut ChildSpawnerCommands, p: &Preferences) {
         setting_row(
             card,
             "Simple menu background",
-            "Show menus over a solid background instead of the dimmed World.",
+            "Replace the scenery with a solid background.",
             |row| {
                 switch(
                     row,
@@ -376,8 +341,9 @@ pub(super) fn accessibility(list: &mut ChildSpawnerCommands, p: &Preferences) {
 }
 
 pub(super) fn display(list: &mut ChildSpawnerCommands, p: &Preferences) {
+    use crate::client::cinematic as cine;
     use crate::client::menu_ui as ui;
-    group(list, "PRESENTATION", |card| {
+    group(list, "FRAME PRESENTATION", |card| {
         setting_row(
             card,
             "Display sync",
@@ -394,10 +360,58 @@ pub(super) fn display(list: &mut ChildSpawnerCommands, p: &Preferences) {
                 })
             },
         );
+        card.spawn(Node {
+            flex_direction: FlexDirection::Column,
+            margin: UiRect::new(Val::Px(0.0), Val::Px(0.0), Val::Px(14.0), Val::Px(19.0)),
+            flex_shrink: 0.0,
+            ..default()
+        })
+        .with_children(|notice| {
+            cine::notice(
+                notice,
+                if p.display_sync {
+                    "Recommended for normal play. Keeps presentation free of tearing."
+                } else {
+                    "Sync is off. Frames may tear; choose a limit below to reduce unnecessary work."
+                },
+            )
+        });
+        setting_row(
+            card,
+            "Frame rate limit",
+            "An optional ceiling, independent of display sync.",
+            |row| {
+                segment(row, |buttons| {
+                    for cap in [Some(60), Some(120), Some(144), Some(240), Some(1000), None] {
+                        option(
+                            buttons,
+                            cap.map_or("No limit".into(), |n: u32| n.to_string()),
+                            Operation::Cap(cap),
+                            p.fps_cap == cap,
+                        );
+                    }
+                })
+            },
+        );
+        let pacing = if p.display_sync {
+            "Display synced"
+        } else if p.fps_cap.is_none() {
+            "Uncapped rendering"
+        } else {
+            "Sync off"
+        };
+        let ceiling = p.fps_cap.map_or("No additional frame limit".into(), |n| {
+            format!("{n} FPS ceiling")
+        });
+        setting_row(card, pacing, &ceiling, |row| {
+            cine::pill(row, "Frame pacing")
+        });
+    });
+    group(list, "IMAGE QUALITY", |card| {
         setting_row(
             card,
             "Anti-aliasing",
-            "Smooths block edges. MSAA 4x also smooths the held item and costs more; Off is fastest.",
+            "Smooth voxel edges. MSAA costs more.",
             |row| {
                 segment(row, |buttons| {
                     for aa in crate::client::anti_alias::CHOICES {
@@ -414,159 +428,25 @@ pub(super) fn display(list: &mut ChildSpawnerCommands, p: &Preferences) {
         setting_row(
             card,
             "Render scale",
-            "Draws the World at a fraction of the window and scales it up. Menus and text stay sharp.",
+            "Lower values reduce rendering work. Menus stay sharp.",
             |row| {
                 segment(row, |buttons| {
-                    for scale in crate::client::render_scale::SCALES {
+                    for scale in crate::client::render_scale::SCALES.iter().rev() {
                         option(
                             buttons,
                             format!("{scale}%"),
-                            Operation::Scale(scale),
-                            p.render_scale == scale,
+                            Operation::Scale(*scale),
+                            p.render_scale == *scale,
                         );
                     }
                 })
             },
         );
-        card.spawn((
-            BackgroundColor(theme::NOTICE),
-            Node {
-                padding: UiRect::axes(Val::Px(14.0), Val::Px(12.0)),
-                margin: UiRect::top(Val::Px(15.0)),
-                border_radius: BorderRadius::all(Val::Px(4.0)),
-                ..default()
-            },
-        ))
-        .with_children(|notice| {
-            ui::text(
-                notice,
-                if p.display_sync {
-                    "Recommended for normal play. Keeps presentation free of tearing."
-                } else {
-                    "Sync is off. Frames may tear; choose a limit below to reduce unnecessary work."
-                },
-                11.0,
-                if p.display_sync {
-                    theme::MUTED
-                } else {
-                    theme::WARNING
-                },
-            )
-        });
-        card.spawn((
-            BorderColor::all(theme::EDGE),
-            Node {
-                flex_direction: FlexDirection::Column,
-                padding: UiRect::vertical(Val::Px(17.0)),
-                border: UiRect::bottom(Val::Px(1.0)),
-                row_gap: Val::Px(4.0),
-                ..default()
-            },
-        ))
-        .with_children(|limit| {
-            ui::weighted_text(limit, "Frame rate limit", 13.0, 550, theme::INK);
-            ui::description(limit, "An optional ceiling, independent of display sync.");
-            limit
-                .spawn(Node {
-                    column_gap: Val::Px(6.0),
-                    row_gap: Val::Px(6.0),
-                    flex_wrap: FlexWrap::Wrap,
-                    margin: UiRect::top(Val::Px(8.0)),
-                    ..default()
-                })
-                .with_children(|caps| {
-                    for cap in [None, Some(60), Some(120), Some(144), Some(240), Some(1000)] {
-                        let button = buttons::button(
-                            caps,
-                            cap.map_or("No limit".into(), |n| n.to_string()),
-                            Operation::Cap(cap),
-                            ButtonStyle::Compact {
-                                selected: p.fps_cap == cap,
-                                height_px: 35.0,
-                                text_px: 11.0,
-                            },
-                        );
-                        caps.commands().entity(button).insert(Node {
-                            min_width: Val::Px(48.0),
-                            min_height: Val::Px(35.0),
-                            padding: UiRect::axes(Val::Px(13.0), Val::Px(9.0)),
-                            border: UiRect::all(Val::Px(1.0)),
-                            border_radius: BorderRadius::all(Val::Px(5.0)),
-                            align_items: AlignItems::Center,
-                            justify_content: JustifyContent::Center,
-                            ..default()
-                        });
-                    }
-                });
-        });
-        card.spawn(Node {
-            padding: UiRect::top(Val::Px(17.0)),
-            column_gap: Val::Px(10.0),
-            align_items: AlignItems::Center,
-            ..default()
-        })
-        .with_children(|summary| {
-            summary
-                .spawn((
-                    BackgroundColor(theme::CHOSEN),
-                    BorderColor::all(theme::CHOSEN_EDGE),
-                    Node {
-                        width: Val::Px(29.0),
-                        height: Val::Px(29.0),
-                        border: UiRect::all(Val::Px(1.0)),
-                        border_radius: BorderRadius::all(Val::Px(5.0)),
-                        align_items: AlignItems::Center,
-                        justify_content: JustifyContent::Center,
-                        ..default()
-                    },
-                ))
-                .with_children(|icon| {
-                    ui::icon(
-                        icon,
-                        if p.display_sync {
-                            ui::IconKind::Sync
-                        } else {
-                            ui::IconKind::Uncapped
-                        },
-                        theme::SAGE,
-                        16.0,
-                    )
-                });
-            summary
-                .spawn(Node {
-                    flex_direction: FlexDirection::Column,
-                    row_gap: Val::Px(2.0),
-                    ..default()
-                })
-                .with_children(|policy| {
-                    ui::weighted_text(
-                        policy,
-                        if p.display_sync {
-                            "Display synced"
-                        } else if p.fps_cap.is_none() {
-                            "Uncapped rendering"
-                        } else {
-                            "Sync off"
-                        },
-                        12.0,
-                        550,
-                        theme::INK,
-                    );
-                    ui::text(
-                        policy,
-                        p.fps_cap.map_or("No additional frame limit".into(), |n| {
-                            format!("{n} FPS ceiling")
-                        }),
-                        11.0,
-                        theme::MUTED,
-                    );
-                });
-        });
     });
-    ui::text(
+    ui::paragraph(
         list,
         "View distance, textures, shadows, and simulation settings stay unchanged.",
-        12.0,
+        theme::TEXT_SMALL,
         theme::MUTED,
     );
 }
@@ -581,20 +461,32 @@ pub(super) fn bindings_page(
     use crate::client::menu_ui as ui;
     let searching = !searches.bindings.trim().is_empty();
     if searching {
-        ui::text(list, "Searching all categories", 11.0, theme::MUTED);
+        list.spawn(Node {
+            margin: UiRect::bottom(Val::Px(14.0)),
+            ..default()
+        })
+        .with_children(|line| {
+            ui::paragraph(
+                line,
+                "Searching all categories",
+                theme::TEXT_SMALL,
+                theme::MUTED,
+            )
+        });
     } else {
         list.spawn((
             Node {
-                border: UiRect::bottom(Val::Px(1.0)),
-                column_gap: Val::Px(22.0),
-                margin: UiRect::bottom(Val::Px(14.0)),
+                border: UiRect::bottom(Val::Px(theme::RULE)),
+                column_gap: Val::Px(15.0),
+                margin: UiRect::bottom(Val::Px(17.0)),
+                flex_shrink: 0.0,
                 ..default()
             },
             BorderColor::all(theme::EDGE),
         ))
         .with_children(|filters| {
             for category in [Category::Movement, Category::Building, Category::Interface] {
-                let entity = buttons::button(
+                buttons::button(
                     filters,
                     category.label(),
                     Operation::Category(category),
@@ -602,33 +494,24 @@ pub(super) fn bindings_page(
                         selected: settings.category == category,
                     },
                 );
-                filters.commands().queue(move |world: &mut World| {
-                    let children: Vec<_> = world
-                        .get::<Children>(entity)
-                        .map(|children| children.iter().collect())
-                        .unwrap_or_default();
-                    for child in children {
-                        if let Some(mut font) = world.get_mut::<TextFont>(child) {
-                            font.font_size = bevy::text::FontSize::Px(11.0);
-                        }
-                    }
-                    if let Some(mut node) = world.get_mut::<Node>(entity) {
-                        node.min_height = Val::Px(38.0);
-                    }
-                });
             }
         });
     }
-    ui::text(
-        list,
-        "Select a binding to change it. Either alternative activates the action.",
-        12.0,
-        theme::MUTED,
-    );
-    binding_row(list, true, |row| {
-        for label in ["ACTION", "PRIMARY", "ALTERNATIVE", ""] {
-            ui::text(row, label, 9.0, theme::MUTED);
-        }
+    list.spawn(Node {
+        justify_content: JustifyContent::SpaceBetween,
+        align_items: AlignItems::Center,
+        column_gap: Val::Px(10.0),
+        flex_shrink: 0.0,
+        ..default()
+    })
+    .with_children(|intro| {
+        ui::paragraph(
+            intro,
+            "Keyboard & mouse · primary and alternative",
+            theme::TEXT_SMALL,
+            theme::MUTED,
+        );
+        crate::client::cinematic::pill(intro, "Select to rebind");
     });
     let mut entries: Vec<_> = bindings
         .keyboard
@@ -639,15 +522,26 @@ pub(super) fn bindings_page(
         .collect();
     entries.sort_by_key(|(action, _)| binding_order(**action));
     if entries.is_empty() {
-        ui::text(
-            list,
-            "No matches. Try another name or clear your search.",
-            13.0,
-            theme::INK,
-        );
+        list.spawn(Node {
+            justify_content: JustifyContent::Center,
+            padding: UiRect::axes(Val::Px(10.0), Val::Px(35.0)),
+            ..default()
+        })
+        .with_children(|empty| {
+            ui::paragraph(
+                empty,
+                "No matches. Try another name or clear your search.",
+                theme::TEXT_BODY,
+                theme::INK,
+            )
+        });
     }
     binding_rows(list, Device::KeyboardMouse, entries, labels, searching);
 }
+
+/// One row per action: its name, then a button per binding, and ↺ once it
+/// differs from the default. A controller row offers its alternative only
+/// once one is bound, as the prototype shows one button per action.
 pub(super) fn binding_rows(
     list: &mut ChildSpawnerCommands,
     device: Device,
@@ -655,179 +549,117 @@ pub(super) fn binding_rows(
     labels: &crate::client::actions::Labels,
     searching: bool,
 ) {
+    use crate::client::cinematic::Kind;
     use crate::client::menu_ui as ui;
+    let defaults = Bindings::default();
     for (&action, alternatives) in entries {
-        binding_row(list, false, |row| {
+        binding_row(list, |row| {
             row.spawn(Node {
                 flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(4.0),
+                row_gap: Val::Px(5.0),
+                min_width: Val::Px(0.0),
                 ..default()
             })
             .with_children(|name| {
-                ui::text(name, action_name(action), 12.0, theme::INK);
-                if searching {
-                    ui::text(name, category(action), 9.0, theme::MUTED);
+                ui::weighted_text(
+                    name,
+                    action_name(action),
+                    theme::TEXT_BODY,
+                    theme::LABEL,
+                    theme::INK,
+                );
+                if searching && device == Device::KeyboardMouse {
+                    ui::description(name, category(action));
                 }
             });
-            for (slot, binding) in alternatives.iter().enumerate() {
-                row.spawn(Node {
-                    column_gap: Val::Px(4.0),
-                    align_items: AlignItems::Center,
-                    ..default()
-                })
-                .with_children(|cell| {
-                    let button = cell
-                        .spawn((
-                            bevy::ui_widgets::Button,
-                            bevy::input_focus::tab_navigation::TabIndex(0),
-                            Operation::Capture(device, action, slot),
-                            ui::Styled {
-                                selected: false,
-                                tab: false,
-                                primary: false,
-                            },
-                            Node {
-                                flex_grow: 1.0,
-                                min_width: Val::Px(0.0),
-                                min_height: Val::Px(33.0),
-                                padding: UiRect::axes(Val::Px(4.0), Val::Px(7.0)),
-                                border: UiRect::all(Val::Px(1.0)),
-                                border_radius: BorderRadius::all(Val::Px(4.0)),
-                                align_items: AlignItems::Center,
-                                justify_content: JustifyContent::Center,
-                                ..default()
-                            },
-                            BackgroundColor(theme::PANEL),
-                            BorderColor::all(theme::EDGE),
-                        ))
-                        .with_child((
-                            Text::new(binding.map_or("Add binding".into(), |b| {
-                                binding_display(labels.binding(b))
-                            })),
-                            ui::font(10.0),
-                            TextColor(if binding.is_some() {
-                                theme::INK
+            row.spawn(Node {
+                column_gap: Val::Px(10.0),
+                align_items: AlignItems::Center,
+                flex_shrink: 0.0,
+                ..default()
+            })
+            .with_children(|cells| {
+                for (slot, binding) in alternatives.iter().enumerate() {
+                    if device == Device::Pad && slot == 1 && binding.is_none() {
+                        continue;
+                    }
+                    buttons::button(
+                        cells,
+                        binding
+                            .map_or("Add binding".into(), |b| binding_display(labels.binding(b))),
+                        Operation::Capture(device, action, slot),
+                        ButtonStyle::Cinematic {
+                            kind: if binding.is_some() {
+                                Kind::Plain
                             } else {
-                                theme::MUTED
-                            }),
-                            bevy::text::LineHeight::RelativeToFont(1.5),
-                            Pickable::IGNORE,
-                        ))
-                        .id();
-                    if binding.is_none() {
-                        cell.commands()
-                            .entity(button)
-                            .insert(ui::EmptyBinding)
-                            .with_child((
-                                ui::EmptyBorder(button),
-                                Node {
-                                    position_type: PositionType::Absolute,
-                                    left: Val::Px(-1.0),
-                                    right: Val::Px(-1.0),
-                                    top: Val::Px(-1.0),
-                                    bottom: Val::Px(-1.0),
-                                    ..default()
-                                },
-                                Pickable::IGNORE,
-                            ));
-                    }
-                    if binding.is_some() {
-                        buttons::button(
-                            cell,
-                            "×",
-                            Operation::Clear(device, action, slot),
-                            ButtonStyle::Quiet { text_px: 12.0 },
-                        );
-                    }
-                });
-            }
-            buttons::button(
-                row,
-                "↺",
-                Operation::ResetAction(device, action),
-                ButtonStyle::Quiet { text_px: 16.0 },
-            );
+                                Kind::Ghost
+                            },
+                            align: Align::Centre,
+                        },
+                    );
+                }
+                if defaults.map(device).get(&action) != Some(alternatives) {
+                    buttons::button(
+                        cells,
+                        "↺",
+                        Operation::ResetAction(device, action),
+                        ButtonStyle::Small { kind: Kind::Ghost },
+                    );
+                }
+            });
         });
     }
 }
 pub(super) fn controller(
     list: &mut ChildSpawnerCommands,
+    settings: &Settings,
     bindings: &Bindings,
     p: &Preferences,
     labels: &crate::client::actions::Labels,
 ) {
     use crate::client::menu_ui as ui;
     let pad = &p.pad;
-    group(list, "STICKS", |card| {
-        setting_row(
-            card,
-            "Look sensitivity",
-            "Turn speed at full right-stick deflection.",
-            |row| slider(row, Scalar::PadLook, pad.look_sensitivity),
-        );
-        setting_row(
-            card,
-            "Invert vertical look",
-            "Reverse the right-stick look direction. Mouse look is separate.",
-            |row| switch(row, pad.invert_y, Operation::PadInvert),
-        );
+    group(list, "STICKS & BUTTONS", |card| {
+        setting_row(card, "Look sensitivity", "", |row| {
+            slider(row, Scalar::PadLook, pad.look_sensitivity)
+        });
+        setting_row(card, "Invert vertical look", "", |row| {
+            switch(row, pad.invert_y, Operation::PadInvert)
+        });
         setting_row(
             card,
             "Movement deadzone",
-            "Left-stick travel ignored as drift.",
+            "Ignore small movements caused by stick drift.",
             |row| slider(row, Scalar::MoveDeadzone, pad.move_deadzone),
         );
-        setting_row(
-            card,
-            "Look deadzone",
-            "Right-stick travel ignored as drift.",
-            |row| slider(row, Scalar::LookDeadzone, pad.look_deadzone),
-        );
-        setting_row(
-            card,
-            "Crouch activation",
-            if pad.toggle_crouch {
-                "Press once to crouch on foot; press again to stand. Hold to descend in flight."
-            } else {
-                "Crouch or descend while the binding is held."
-            },
-            |row| {
-                segment(row, |buttons| {
-                    option(
-                        buttons,
-                        "Hold",
-                        Operation::PadCrouch(false),
-                        !pad.toggle_crouch,
-                    );
-                    option(
-                        buttons,
-                        "Toggle",
-                        Operation::PadCrouch(true),
-                        pad.toggle_crouch,
-                    );
-                })
-            },
-        );
-    });
-    group(list, "TOUCH", |card| {
-        let touch = &p.touch;
-        setting_row(
-            card,
-            "Look sensitivity",
-            "How far a drag on the look side turns the view.",
-            |row| slider(row, Scalar::TouchLook, touch.look_sensitivity),
-        );
-        setting_row(
-            card,
-            "Invert vertical look",
-            "Reverse the touch look direction. Mouse look is separate.",
-            |row| switch(row, touch.invert_y, Operation::TouchInvert),
-        );
-        setting_row(
-            card,
-            "Layout",
-            "Which hand moves. Mirroring also swaps Place and Remove.",
-            |row| {
+        setting_row(card, "Look deadzone", "", |row| {
+            slider(row, Scalar::LookDeadzone, pad.look_deadzone)
+        });
+        setting_row(card, "Crouch activation", "", |row| {
+            segment(row, |buttons| {
+                option(
+                    buttons,
+                    "Hold",
+                    Operation::PadCrouch(false),
+                    !pad.toggle_crouch,
+                );
+                option(
+                    buttons,
+                    "Toggle",
+                    Operation::PadCrouch(true),
+                    pad.toggle_crouch,
+                );
+            })
+        });
+        disclosure(card, "Touch controls", settings.touch_open, |touch_rows| {
+            let touch = &p.touch;
+            setting_row(touch_rows, "Look sensitivity", "", |row| {
+                slider(row, Scalar::TouchLook, touch.look_sensitivity)
+            });
+            setting_row(touch_rows, "Invert vertical look", "", |row| {
+                switch(row, touch.invert_y, Operation::TouchInvert)
+            });
+            setting_row(touch_rows, "Layout", "", |row| {
                 segment(row, |buttons| {
                     option(
                         buttons,
@@ -842,13 +674,8 @@ pub(super) fn controller(
                         touch.mirrored,
                     );
                 })
-            },
-        );
-        setting_row(
-            card,
-            "Control size",
-            "Every control stays at least 44 pixels.",
-            |row| {
+            });
+            setting_row(touch_rows, "Control size", "", |row| {
                 segment(row, |buttons| {
                     use crate::client::profile::TouchSize::*;
                     for (label, size) in
@@ -862,68 +689,55 @@ pub(super) fn controller(
                         );
                     }
                 })
-            },
-        );
-        setting_row(
-            card,
-            "Control opacity",
-            "How solid the on-screen controls are.",
-            |row| slider(row, Scalar::TouchOpacity, touch.opacity),
-        );
+            });
+            setting_row(touch_rows, "Control opacity", "", |row| {
+                slider(row, Scalar::TouchOpacity, touch.opacity)
+            });
+        });
     });
     use bevy::input::gamepad::GamepadButton::{East, LeftTrigger, RightTrigger, South, Start};
-    ui::text(
-        list,
-        format!(
-            "The left stick moves and the right stick looks. In menus the D-pad or left stick \
-             moves focus, {} selects, {} goes back, {} and {} switch pages, and {} closes.",
-            labels.pad(South),
-            labels.pad(East),
-            labels.pad(LeftTrigger),
-            labels.pad(RightTrigger),
-            labels.pad(Start),
-        ),
-        12.0,
-        theme::MUTED,
-    );
-    binding_row(list, true, |row| {
-        for label in ["ACTION", "PRIMARY", "ALTERNATIVE", ""] {
-            ui::text(row, label, 9.0, theme::MUTED);
-        }
+    group(list, "CONTROLLER BUTTONS", |buttons| {
+        ui::paragraph(
+            buttons,
+            format!(
+                "The left stick moves and the right stick looks. In menus the D-pad or left \
+                 stick moves focus, {} selects, {} goes back, {} and {} switch pages, and {} \
+                 closes.",
+                labels.pad(South),
+                labels.pad(East),
+                labels.pad(LeftTrigger),
+                labels.pad(RightTrigger),
+                labels.pad(Start),
+            ),
+            theme::TEXT_SMALL,
+            theme::MUTED,
+        );
+        let mut entries: Vec<_> = bindings
+            .pad
+            .iter()
+            .filter(|(action, _)| !matches!(action, Action::ReleaseCursor))
+            .collect();
+        entries.sort_by_key(|(action, _)| binding_order(**action));
+        binding_rows(buttons, Device::Pad, entries, labels, false);
     });
-    let mut entries: Vec<_> = bindings
-        .pad
-        .iter()
-        .filter(|(action, _)| !matches!(action, Action::ReleaseCursor))
-        .collect();
-    entries.sort_by_key(|(action, _)| binding_order(**action));
-    binding_rows(list, Device::Pad, entries, labels, true);
 }
+
 pub(super) fn binding_row(
     parent: &mut ChildSpawnerCommands,
-    heading: bool,
     content: impl FnOnce(&mut ChildSpawnerCommands),
 ) {
     parent
         .spawn((
             Node {
-                display: Display::Grid,
-                grid_template_columns: vec![
-                    GridTrack::flex(1.0),
-                    GridTrack::px(150.0),
-                    GridTrack::px(150.0),
-                    GridTrack::px(28.0),
-                ],
-                column_gap: Val::Px(12.0),
-                padding: UiRect::axes(Val::Px(12.0), Val::Px(10.0)),
-                min_height: Val::Px(if heading { 32.0 } else { 55.0 }),
-                margin: UiRect::top(Val::Px(5.0)),
-                border_radius: BorderRadius::all(Val::Px(6.0)),
+                justify_content: JustifyContent::SpaceBetween,
                 align_items: AlignItems::Center,
+                column_gap: Val::Px(15.0),
+                padding: UiRect::vertical(Val::Px(16.0)),
+                border: UiRect::bottom(Val::Px(theme::RULE)),
                 flex_shrink: 0.0,
                 ..default()
             },
-            BackgroundColor(if heading { Color::NONE } else { theme::RAISED }),
+            BorderColor::all(theme::EDGE),
         ))
         .with_children(content);
 }
@@ -995,4 +809,6 @@ pub(super) fn binding_display(value: String) -> String {
         .replace("AltRight", "Right Alt")
         .replace("SuperLeft", "Left Super")
         .replace("SuperRight", "Right Super")
+        .replace("BracketLeft", "[")
+        .replace("BracketRight", "]")
 }

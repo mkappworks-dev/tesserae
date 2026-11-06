@@ -5,7 +5,7 @@
 mod create;
 mod edit_world;
 mod open;
-mod pages;
+pub(super) mod pages;
 
 use create::*;
 use edit_world::*;

@@ -88,7 +88,13 @@ pub(super) fn activate(
         return;
     };
     if settings.capture.is_some() {
-        if matches!(operation, Operation::Cancel) {
+        if let Operation::Clear(device, action, slot) = *operation
+            && let Some((draft, _)) = settings.draft.as_mut()
+            && let Some(slots) = draft.map_mut(device).get_mut(&action)
+        {
+            slots[slot] = None;
+        }
+        if matches!(operation, Operation::Cancel | Operation::Clear(..)) {
             settings.capture = None;
             settings.notice.clear();
             settings.dirty = true;
@@ -175,6 +181,7 @@ pub(super) fn activate(
         Operation::Reset => settings.resetting = true,
         Operation::CancelReset => settings.resetting = false,
         Operation::Reference => settings.show_reference = !settings.show_reference,
+        Operation::TouchControls => settings.touch_open = !settings.touch_open,
         Operation::Stay => {
             settings.unsaved = false;
             settings.pending = None;
@@ -263,16 +270,19 @@ pub(super) fn activate(
         }
     }
 }
+type CaptureContext<'w, 's> = (
+    Option<Res<'w, crate::client::input::UiInput>>,
+    Option<Res<'w, bevy::input_focus::InputFocus>>,
+    Query<'w, 's, &'static bevy::picking::hover::Hovered, With<CaptureButton>>,
+);
+
 pub(in crate::client) fn capture(
     (keys, mouse, pad): crate::client::actions::Devices,
     mut settings: ResMut<Settings>,
     active: (Res<Bindings>, Res<Preferences>),
     mut actions: ResMut<crate::client::actions::Actions>,
     save: Option<Res<crate::server::persistence::SaveStatus>>,
-    (ui, focus): (
-        Option<Res<crate::client::input::UiInput>>,
-        Option<Res<bevy::input_focus::InputFocus>>,
-    ),
+    (ui, focus, dialog_buttons): CaptureContext,
 ) {
     if save.is_some_and(|status| status.modal()) {
         if settings.capture.take().is_some() {
@@ -332,6 +342,10 @@ pub(in crate::client) fn capture(
         {
             settings.capture = Some((device, action, slot, true));
         }
+        return;
+    }
+    // A click on the dialog's own buttons is theirs, not the new binding.
+    if mouse.get_just_pressed().next().is_some() && dialog_buttons.iter().any(|hovered| hovered.0) {
         return;
     }
     let binding = match device {
