@@ -1,14 +1,16 @@
 const settingsDefaults = {
-  sprint:'Hold', removal:'Hold', repeat:true, mouse:1, invert:false,
-  scroll:'Standard', scrollSpeed:1, reference:true, padLook:1,
-  padInvert:false, moveDeadzone:.15, lookDeadzone:.12, crouch:'Hold',
+  // The engine's defaults (profile.rs, actions.rs).
+  sprint:'Toggle', removal:'Hold', repeat:false, mouse:1, invert:false,
+  scroll:'Standard', scrollSpeed:1, reference:false, padLook:1,
+  padInvert:false, moveDeadzone:.15, lookDeadzone:.15, crouch:'Toggle',
   touchLook:1, touchInvert:false, touchLayout:'Normal', touchSize:'Normal',
-  touchOpacity:.8, sync:'Display synced', aa:'FXAA', renderScale:'100%',
-  fps:'120', sound:70, music:50, effects:80, motion:false, contrast:false, simpleBackground:false, textScale:"1",
+  touchOpacity:.7, sync:'Display synced', aa:'SMAA', renderScale:'100%',
+  fps:'No limit', sound:70, music:50, effects:80, motion:false, contrast:false, simpleBackground:false, textScale:"1",
+  // Engine action names and key labels (settings/pages.rs:5-57, actions.rs:265-370).
   bindings:{'Move forward':'W','Move backward':'S','Move left':'A','Move right':'D',
-    'Jump':'Space','Sprint':'Shift','Crouch':'Control','Place':'Mouse right',
-    'Remove':'Mouse left','Catalogue':'C','Inventory':'I','Flip':'E','Layout':'L','Menu':'Tab','Back / menu':'Escape','Settings':'F10',
-    // Engine actions (settings/pages.rs:5-57, defaults actions.rs:265-370).
+    'Ascend / jump':'Space','Sprint':'Left Shift','Descend / crouch':'Left Ctrl','Place / ignite':'Right mouse',
+    'Remove':'Left mouse','Search the Catalogue':'C','Open Inventory':'I','Flip Shape':'E','Layout mode and menu':'L',
+    'Open the Menu':'Tab','Release cursor':'Escape','Open Settings':'F10',
     'Respawn':'R','Switch flight / physics':'V','Switch first / third person':'F5',
     'Third-person zoom in':'Alt+Wheel up','Third-person zoom out':'Alt+Wheel down',
     'Increase flight speed':'=','Decrease flight speed':'-',
@@ -16,29 +18,32 @@ const settingsDefaults = {
     'Take tool':'M','Use tool':'G','Clear tool':'Backspace',
     'Layout: more Voxels':'Shift+Wheel up','Layout: fewer Voxels':'Shift+Wheel down',
     'Layout: reverse the axis':'T','Layout: next axis':'J',
-    'Undo':'Cmd+Z','Redo':'Cmd+Shift+Z',
+    'Undo':'Ctrl/Cmd+Z','Redo':'Ctrl/Cmd+Shift+Z',
     'Quick slot 1':'1','Quick slot 2':'2','Quick slot 3':'3','Quick slot 4':'4','Quick slot 5':'5',
     'Quick slot 6':'6','Quick slot 7':'7','Quick slot 8':'8','Quick slot 9':'9',
-    'Previous quick slot':'','Next quick slot':'','Open input settings':'F1'},
+    'Previous quick slot':'','Next quick slot':'','Open input settings':'F1','Diagnostics':'F3'},
   // The engine keeps a second binding per action; an empty one reads "Add binding".
   altBindings:{'Sprint':'Right Shift','Sample':'Middle mouse','Redo':'Ctrl+Y',
     'Layout: more Voxels':']','Layout: fewer Voxels':'['},
-  padBindings:{'Jump':'A','Crouch':'B','Menu':'Y','Next Shape':'X','Sprint':'Left stick',
-    'Sample':'Right stick','Remove':'RT','Place':'LT','Previous quick slot':'LB','Next quick slot':'RB',
-    'Turn Shape':'D-pad left','Flip':'D-pad right','Empty hand':'D-pad down','Use tool':'D-pad up',
+  padBindings:{'Ascend / jump':'A','Descend / crouch':'B','Open the Menu':'Y','Next Shape':'X','Sprint':'Left stick',
+    'Sample':'Right stick','Remove':'RT','Place / ignite':'LT','Previous quick slot':'LB','Next quick slot':'RB',
+    'Turn Shape':'D-pad left','Flip Shape':'D-pad right','Empty hand':'D-pad down','Use tool':'D-pad up',
     'Open input settings':'Start','Switch flight / physics':'Select'}
 };
-const settingsCategories = ['Behavior','Key bindings','Controller','Display','Audio','Accessibility'];
+// Audio is hidden until it lands (decisions.md).
+const settingsCategories = ['Behavior','Key bindings','Controller','Display','Accessibility'];
+// The engine's order and categories (settings/pages.rs binding_order, category).
 const bindingGroups = {
-  Movement:['Move forward','Move backward','Move left','Move right','Jump','Crouch','Sprint','Respawn',
-    'Switch flight / physics','Switch first / third person','Third-person zoom in','Third-person zoom out',
-    'Increase flight speed','Decrease flight speed'],
-  Building:['Place','Remove','Sample','Empty hand','Next Shape','Turn Shape','Flip','Take tool','Use tool',
-    'Clear tool','Layout','Layout: more Voxels','Layout: fewer Voxels','Layout: reverse the axis',
-    'Layout: next axis','Undo','Redo'],
-  Interface:['Quick slot 1','Quick slot 2','Quick slot 3','Quick slot 4','Quick slot 5','Quick slot 6',
-    'Quick slot 7','Quick slot 8','Quick slot 9','Previous quick slot','Next quick slot','Catalogue',
-    'Inventory','Menu','Back / menu','Settings','Open input settings']
+  Movement:['Move forward','Move backward','Move left','Move right','Ascend / jump','Descend / crouch','Sprint',
+    'Respawn','Switch flight / physics','Increase flight speed','Decrease flight speed',
+    'Switch first / third person','Third-person zoom in','Third-person zoom out'],
+  Building:['Place / ignite','Remove','Sample','Empty hand','Turn Shape','Flip Shape','Next Shape','Take tool',
+    'Use tool','Clear tool','Layout mode and menu','Layout: more Voxels','Layout: fewer Voxels',
+    'Layout: reverse the axis','Layout: next axis'],
+  Interface:['Open the Menu','Open Inventory','Search the Catalogue','Open input settings','Open Settings',
+    'Release cursor','Undo','Redo','Diagnostics','Quick slot 1','Quick slot 2','Quick slot 3','Quick slot 4',
+    'Quick slot 5','Quick slot 6','Quick slot 7','Quick slot 8','Quick slot 9','Previous quick slot',
+    'Next quick slot']
 };
 
 function bindingGroup(name) {
@@ -84,37 +89,37 @@ function settingsBody() {
       row('Removal activation','removal','select',['Hold','Timed tap'])+
       row('Repeat while held','repeat','toggle',[],'Keep placing or removing while the binding is held.')+
       group('Mouse & quick slots')+
-      row('Mouse sensitivity','mouse','range',[.1,3,.1],'Relative to the default mouse feel.')+
+      row('Mouse sensitivity','mouse','range',[.25,3,.05],'Relative to the default mouse feel.')+
       row('Invert vertical look','invert','toggle')+
       row('Scroll direction','scroll','select',['Standard','Reversed'])+
-      row('Scroll sensitivity','scrollSpeed','range',[.1,3,.1])+
+      row('Scroll sensitivity','scrollSpeed','range',[.25,3,.05])+
       row('Show quick reference','reference','toggle');
     case 'Key bindings': return `<div class="search-line"><input class="input" aria-label="Search actions or keys" data-bind="bindingSearch" placeholder="Search actions or keys…" value="${esc(state.bindingSearch||'')}"></div>`+
       (state.bindingSearch?`<p class="muted">Searching all categories</p>`:`<div class="library-tabs">${Object.keys(bindingGroups).map(n=>`<button class="${(state.bindingGroup||'Movement')===n?'active':''}" data-action="settings-binding-group" data-value="${n}">${n}</button>`).join('')}</div>`)+
       `<div class="row between"><span class="muted">Keyboard & mouse · primary and alternative</span><span class="pill">Select to rebind</span></div><div id="binding-results">${bindingRows()}</div>`;
     case 'Controller': return group('Sticks & buttons')+
-      row('Look sensitivity','padLook','range',[.1,3,.1])+
+      row('Look sensitivity','padLook','range',[.25,3,.05])+
       row('Invert vertical look','padInvert','toggle')+
-      row('Movement deadzone','moveDeadzone','range',[0,.5,.01],'Ignore small movements caused by stick drift.')+
-      row('Look deadzone','lookDeadzone','range',[0,.5,.01])+
+      row('Movement deadzone','moveDeadzone','range',[.05,.5,.01],'Ignore small movements caused by stick drift.')+
+      row('Look deadzone','lookDeadzone','range',[.05,.5,.01])+
       row('Crouch activation','crouch','select',['Hold','Toggle'])+
       `<details><summary>Touch controls</summary>`+
-      row('Look sensitivity','touchLook','range',[.1,3,.1])+
+      row('Look sensitivity','touchLook','range',[.25,3,.05])+
       row('Invert vertical look','touchInvert','toggle')+
       row('Layout','touchLayout','select',['Normal','Mirrored'])+
       row('Control size','touchSize','select',['Small','Normal','Enlarged'])+
-      row('Control opacity','touchOpacity','range',[.2,1,.05])+`</details>`+
+      row('Control opacity','touchOpacity','range',[.3,1,.01])+`</details>`+
       group('Controller buttons')+
       `<p class="muted">The left stick moves and the right stick looks. In menus the D-pad or left stick moves focus, A selects, B goes back, LB and RB switch pages, and Start closes.</p>`+
-      Object.values(bindingGroups).flat().filter(n=>n!=='Back / menu').map(n=>{const b=state.settingsDraft.padBindings[n];return `<div class="setting-row binding-row"><b>${esc(n)}</b>${b?button(esc(b),'settings-rebind-pad',{value:n}):button('Add binding','settings-rebind-pad',{value:n,ghost:true})}</div>`;}).join('');
+      Object.values(bindingGroups).flat().filter(n=>n!=='Release cursor').map(n=>{const b=state.settingsDraft.padBindings[n];return `<div class="setting-row binding-row"><b>${esc(n)}</b>${b?button(esc(b),'settings-rebind-pad',{value:n}):button('Add binding','settings-rebind-pad',{value:n,ghost:true})}</div>`;}).join('');
     case 'Display': return group('Frame presentation')+
       row('Display sync','sync','select',['Display synced','Sync off'],'Match frame presentation to your display.')+
       `<div class="notice">${state.settingsDraft.sync==='Sync off'?'Sync is off. Frames may tear; choose a limit below to reduce unnecessary work.':'Recommended for normal play. Keeps presentation free of tearing.'}</div>`+
-      row('Frame rate limit','fps','select',['60','90','120','144','240','1000','No limit'],'An optional ceiling, independent of display sync.')+
+      row('Frame rate limit','fps','select',['60','120','144','240','1000','No limit'],'An optional ceiling, independent of display sync.')+
       `<div class="setting-row"><div class="setting-copy"><b>${state.settingsDraft.sync==='Sync off'?(state.settingsDraft.fps==='No limit'?'Uncapped rendering':'Sync off'):'Display synced'}</b><small>${state.settingsDraft.fps==='No limit'?'No additional frame limit':`${state.settingsDraft.fps} FPS ceiling`}</small></div><span class="pill">Frame pacing</span></div>`+
       group('Image quality')+
-      row('Anti-aliasing','aa','select',['Off','FXAA','SMAA','MSAA 4x'],'Smooth voxel edges. MSAA costs more.')+
-      row('Render scale','renderScale','select',['50%','67%','75%','85%','100%'],'Lower values reduce rendering work. Menus stay sharp.')+
+      row('Anti-aliasing','aa','select',['Off','SMAA','MSAA 4x'],'Smooth voxel edges. MSAA costs more.')+
+      row('Render scale','renderScale','select',['67%','75%','85%','100%'],'Lower values reduce rendering work. Menus stay sharp.')+
       `<p class="muted">View distance, textures, shadows, and simulation settings stay unchanged.</p>`;
     case 'Audio': return `<div class="row between"><p class="section-label">Sound mix</p><span class="pill">Proposed category</span></div>`+
       row('Master volume','sound','range',[0,100,1])+
@@ -124,13 +129,13 @@ function settingsBody() {
       row('Reduced motion','motion','toggle',[],'Use immediate interface transitions.')+
       row('Stronger UI contrast','contrast','toggle',[],'Increase panel borders and secondary text contrast.')+
       row('Simple menu background','simpleBackground','toggle',[],'Replace the scenery with a solid background.')+
-      row('Text size','textScale','select',['1','1.25','1.5','1.75','2'],'1 is standard; 2 doubles interface text. Layouts adapt.');
+      row('Text size','textScale','select',['1','1.25','1.5','1.75','2'],'100% is standard; 200% doubles the text in menus and the HUD.');
   }
 }
 
 function settings() {
   ensureSettings();
-  const icons=['behavior','keyboard','controller','display','audio','accessibility'];
+  const icons=['behavior','keyboard','controller','display','accessibility'];
   const nav=`<nav class="rail settings-rail" aria-label="Settings categories"><div class="rail-title">SETTINGS</div>${settingsCategories.map((name,i)=>`<button class="${state.settingsTab===name?'active':''}" data-action="settings-category" data-value="${name}" ${state.settingsTab===name?'aria-current="page"':''}><span class="category-icon">${icon(icons[i])}</span><span class="nav-label">${name}</span><span class="nav-arrow">${icon('chevron',12)}</span></button>`).join('')}</nav>`;
   return frame({title:state.settingsTab,subtitle:'Your preferences, across every World.',eyebrow:'MENU / SETTINGS',rail:nav,body:settingsBody(),footer:`${button('← Back','settings-back',{ghost:true})}<div class="row wrap"><span class="footer-hint" id="settings-status">${state.settingsDirty?'Unapplied changes':'All changes applied'}</span>${button('Restore defaults','settings-reset',{ghost:true,small:true})}${button('Apply changes','settings-apply',{primary:true,disabled:!state.settingsDirty})}</div>`});
 }
@@ -154,7 +159,7 @@ function applySettings() {
 function settingsAction(name,value) {
   if(name==='settings-category'){state.settingsTab=value;render();return true;}
   if(name==='settings-apply'){applySettings();render();toast('Preferences applied in the prototype.');return true;}
-  if(name==='settings-reset'){dialog('Restore settings defaults?','<p>This resets your draft preferences across all categories. Apply to keep them.</p>',button('Keep changes','close-dialog',{ghost:true})+button('Restore defaults','settings-confirm-reset',{primary:true}));return true;}
+  if(name==='settings-reset'){dialog('Restore settings defaults?',`<p>${state.settingsTab==='Controller'?'This resets your draft controller and touch preferences. Apply to keep them.':'This resets your draft preferences, except the controller\'s. Apply to keep them.'}</p>`,button('Keep changes','close-dialog',{ghost:true})+button('Restore defaults','settings-confirm-reset',{primary:true}));return true;}
   if(name==='settings-confirm-reset'){state.settingsDraft=clone(settingsDefaults);settingsChanged();closeDialog();render();return true;}
   if(name==='settings-back'){
     if(state.settingsDirty)dialog('Keep your changes?','<p>You have unapplied settings. Apply them before leaving, or discard the draft.</p>',button('Keep editing','close-dialog',{ghost:true})+button('Discard','settings-discard')+button('Apply & return','settings-return',{primary:true}));
@@ -163,9 +168,10 @@ function settingsAction(name,value) {
   }
   if(name==='settings-discard'){state.settingsDraft=null;state.settingsDirty=false;closeDialog();navigate(state.returnTo);return true;}
   if(name==='settings-return'){applySettings();state.settingsDraft=null;closeDialog();navigate(state.returnTo);return true;}
-  if(name==='settings-rebind'||name==='settings-rebind-alt'){state.pendingConflict=null;state.rebinding=value;state.rebindingSlot=name==='settings-rebind'?'bindings':'altBindings';dialog('Change binding',`<p><b>${esc(value)}</b> · ${name==='settings-rebind'?'Primary':'Alternative'}</p><p>Press a key or mouse button. Escape cancels.</p>`,button('Cancel','close-dialog'));return true;}
+  if(name==='settings-rebind'||name==='settings-rebind-alt'){state.pendingConflict=null;state.rebinding=value;state.rebindingSlot=name==='settings-rebind'?'bindings':'altBindings';const bound=state.settingsDraft[state.rebindingSlot][value];dialog('Change binding',`<p><b>${esc(value)}</b> · ${name==='settings-rebind'?'Primary':'Alternative'}</p><p>Press a key or mouse button. Escape cancels.</p>`,(bound?button('Clear binding','settings-clear-binding',{ghost:true}):'')+button('Cancel','close-dialog'));return true;}
   if(name==='settings-rebind-pad'){dialog('Change binding',`<p><b>${esc(value)}</b> · Controller</p><p>Press a controller button. Menu or Esc cancels.</p>`,button('Cancel','close-dialog'));return true;}
   if(name==='settings-binding-reset'){const d=state.settingsDraft;d.bindings[value]=settingsDefaults.bindings[value];if(settingsDefaults.altBindings[value])d.altBindings[value]=settingsDefaults.altBindings[value];else delete d.altBindings[value];settingsChanged();render();return true;}
+  if(name==='settings-clear-binding'){state.settingsDraft[state.rebindingSlot][state.rebinding]='';state.rebinding=null;settingsChanged();closeDialog();render();return true;}
   if(name==='settings-binding-group'){state.bindingGroup=value;render();return true;}
   if(name==='settings-replace-binding'){const {key,owners}=state.pendingConflict;const d=state.settingsDraft;for(const [slot,action] of owners)d[slot][action]='';d[state.rebindingSlot][state.rebinding]=key;state.pendingConflict=null;state.rebinding=null;settingsChanged();closeDialog();render();return true;}
   return false;
