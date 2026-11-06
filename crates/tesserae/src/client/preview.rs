@@ -230,12 +230,14 @@ fn model(
     }
 }
 fn position(
-    removal: Option<Res<super::removal::Progress>>,
-    (menu, settings, layout, dead): (
+    (removal, dead): (
+        Option<Res<super::removal::Progress>>,
+        Option<Res<super::death::Dead>>,
+    ),
+    (menu, settings, layout): (
         Res<Menu>,
         Option<Res<super::settings::Settings>>,
         Option<Res<super::layout::LayoutMode>>,
-        Option<Res<super::death::Dead>>,
     ),
     world: Res<WorldSettings>,
     hotbar: Res<Hotbar>,
