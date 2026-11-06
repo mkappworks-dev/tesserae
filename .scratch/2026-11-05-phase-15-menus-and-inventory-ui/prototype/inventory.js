@@ -95,8 +95,25 @@ function giveToSlot(area,index,id,count){
 }
 function catalogueGive(target,id=state.sideItem,count=state.transferCount){
   if(!creativeAccess()){toast('The Catalogue is read-only in Survival preview.');return;}
+  const from=$(`.side-tile[data-value="${id}"]`)?.getBoundingClientRect(),before=JSON.stringify(state.bag);
   const done=target==='bag'?giveToBag(id,count):giveToSlot(target.area,target.index,id,count);
-  if(done){state.carriedFrom=null;refreshInventory();savePrototype();}
+  if(done){
+    const at=target==='bag'?{area:'bag',index:state.bag.findIndex((s,i)=>JSON.stringify(s)!==JSON.stringify(JSON.parse(before)[i]))}:target;
+    state.carriedFrom=null;refreshInventory();savePrototype();flyItem(from,at,id);
+  }
+}
+/* A visual only: the stacks above are already final when this runs. */
+function flyItem(from,at,id){
+  if(!from||state.settings.motion||at.index<0)return;
+  const slot=$(`.item-window [data-drag-area="${at.area}"][data-drag-index="${at.index}"],.item-hotbar [data-drag-area="${at.area}"][data-drag-index="${at.index}"]`);
+  const item=catalogueItems.find(x=>x.id===id);
+  if(!slot||!item)return;
+  const to=slot.getBoundingClientRect(),size=Math.min(to.width,to.height)*.62;
+  const fly=document.createElement('div');fly.className='item-flight';fly.setAttribute('aria-hidden','true');fly.innerHTML=voxelIcon(item);
+  Object.assign(fly.style,{width:size+'px',height:size+'px',left:from.left+from.width/2-size/2+'px',top:from.top+from.height/2-size/2+'px'});
+  document.body.append(fly);
+  const dx=to.left+to.width/2-(from.left+from.width/2),dy=to.top+to.height/2-(from.top+from.height/2);
+  fly.animate([{transform:'translate(0,0) scale(1)',opacity:1},{transform:`translate(${dx}px,${dy}px) scale(.8)`,opacity:1,offset:.85},{transform:`translate(${dx}px,${dy}px) scale(.8)`,opacity:0}],{duration:250,easing:'ease-out',fill:'forwards'}).finished.then(()=>fly.remove(),()=>fly.remove());
 }
 function refreshInventory(){
   const root=$('.item-grid-scroll'),y=root?.scrollTop||0,focused=document.activeElement;
