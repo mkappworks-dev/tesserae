@@ -590,8 +590,8 @@ Notes:
 - **Step 15** is done. Each Player has a Server-owned Inventory, a 27-slot
   backpack and a 9-slot Hotbar of Stacks, whose rules are a pure module in
   `tesserae-core`; the Client sends intents and draws what the Server sends.
-  Pickup fills it and leaves on the ground what does not fit. In Survival, Place
-  spends one Item from the selected slot and a Layout is paid up front or
+  Pickup fills it and leaves on the ground what does not fit. In every mode,
+  Place spends one Item from the selected slot and a Layout is paid up front or
   refused. Undo pays and refunds Items in the same Server transaction, by the
   mode each entry was made in, and anything that does not fit drops at the
   Player. A Material with no declared Item has an implicit one, so every

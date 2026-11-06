@@ -41,8 +41,8 @@ pub(super) struct Entry {
 }
 
 /// What an Entry's Edit did to the Player's Items, settled again by undo and
-/// redo. Kept from when the Edit was made, so a Creative Entry stays free in
-/// Survival.
+/// redo. Kept from when the Edit was made, so an Entry pays and refunds by the
+/// rules it was made under whatever the mode is when it is undone.
 #[derive(Clone, PartialEq, Debug)]
 pub(super) enum Cost {
     Free,
@@ -656,6 +656,34 @@ mod tests {
             assert!(rejections(&mut app).is_empty());
             assert_eq!(voxel_at(&app, ABOVE), source());
             assert_eq!(inventory(&mut app), Inventory::default());
+        }
+
+        #[test]
+        fn undoing_a_creative_placement_refunds_its_item_and_redo_spends_it_again() {
+            let mut app = game(false);
+            let before = inventory(&mut app);
+            place(&mut app);
+            let placed = inventory(&mut app);
+            assert_eq!(held(&mut app, "t:stone"), 2);
+            replay(&mut app, Undo);
+            assert!(rejections(&mut app).is_empty());
+            assert!(voxel_at(&app, ABOVE).is_air());
+            assert_eq!(inventory(&mut app), before);
+            replay(&mut app, Redo);
+            assert!(rejections(&mut app).is_empty());
+            assert_eq!(voxel_at(&app, ABOVE), stone());
+            assert_eq!(inventory(&mut app), placed);
+        }
+
+        #[test]
+        fn a_creative_placement_keeps_its_cost_after_a_switch_to_survival() {
+            let mut app = game(false);
+            let before = inventory(&mut app);
+            place(&mut app);
+            survival(&mut app);
+            replay(&mut app, Undo);
+            assert!(rejections(&mut app).is_empty());
+            assert_eq!(inventory(&mut app), before, "refunded as it was paid");
         }
 
         #[test]

@@ -1,5 +1,5 @@
 //! Intents arriving: checked against the Player and queued, with what a
-//! Survival placement will pay.
+//! placement will pay.
 
 use super::*;
 
@@ -27,7 +27,7 @@ pub(in crate::server) fn receive(
         let paid = match intent.action {
             EditAction::PlaceHeld { shape, orientation } => {
                 held_placement(inventory, placing.as_deref(), &tables.0, shape, orientation)
-                    .map(|(action, item)| (action, mode.survival().then_some(item)))
+                    .map(|(action, item)| (action, Some(item)))
             }
             EditAction::Place(_) | EditAction::PlaceSource(_) if mode.survival() => {
                 Err(RejectReason::CreativeOnly)

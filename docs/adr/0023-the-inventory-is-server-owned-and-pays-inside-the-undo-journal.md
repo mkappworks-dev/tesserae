@@ -26,11 +26,12 @@ solids; fire stays a hand state. Shape and Orientation stay the Player's choice,
 so one Stack of rock places cubes, slabs and stairs at one Item a Voxel.
 
 In Survival the Server resolves Place from the selected slot, checks that its
-Item places the intent's Material and spends one. A Layout is paid up front: if
-the Inventory cannot pay for every Voxel, it is refused before any Voxel
-changes. Pickup merges into matching Stacks, then fills empty slots, Hotbar
-before backpack; what does not fit stays on the ground as a smaller Dropped
-item.
+Item places the intent's Material and spends one (Creative does the same since
+the [amendment below](#amendment-2026-11-07-creative-spends-items-too)). A
+Layout is paid up front: if the Inventory cannot pay for every Voxel, it is
+refused before any Voxel changes. Pickup merges into matching Stacks, then fills
+empty slots, Hotbar before backpack; what does not fit stays on the ground as a
+smaller Dropped item.
 
 Each undo entry records what its Edit did to the Inventory: nothing, the Item a
 placement spent, or the Item and Dropped item id a removal produced. Restoring a
@@ -39,8 +40,8 @@ applies all of it or none of it. Undoing a placement refunds its Item; redoing
 it spends one again and is refused without it. Undoing a removal takes its
 Dropped item back if it still lies there, otherwise spends the Item and is
 refused without it; redoing it drops the Item again. The cost is fixed when the
-Edit is made, so an entry pays and refunds by the mode it was made in: a
-Creative entry stays free after a switch to Survival, and a Survival entry still
+Edit is made, so an entry pays and refunds by the mode it was made in: an entry
+made free stays free after a switch to Survival, and a Survival entry still
 refunds in Creative. Reading the mode at undo time would let a switch mint or
 destroy Items.
 
@@ -71,3 +72,25 @@ Hotbar can be taken back, as Minecraft's and Luanti's buckets allow; flowing
 fluid drops nothing. Only an Item that no content names has nothing to become;
 it is lost, and a death does not report it. Throwing an Item away, containers
 and crafting are later work.
+
+## Amendment 2026-11-07: Creative spends Items too
+
+The maintainer reversed the rule that placing is free in Creative, which this
+ADR and [ADR-0024](0024-game-mode-is-per-player-with-a-world-default.md)
+accepted. In every mode the Server now resolves Place and Layout from the
+selected slot and spends one Item per Voxel; a Layout is paid up front, and a
+Place from an empty slot is refused as NothingHeld ("Nothing to place in hotbar
+slot N."). Undo and redo pay and refund Creative entries as they do Survival
+ones.
+
+Entries recorded before this keep the cost they were recorded with, as the
+paragraph above already said, so a save made in Creative needs no migration. The
+Catalogue still gives Materials only in Creative, which refills a spent slot.
+
+A Place that names its own Voxel (`EditAction::Place`, `PlaceSource`) stays free
+in Creative. The Client never sends it and nothing is gained by it: a Creative
+Player can take any Material from the Catalogue at will, so it is not an economy
+to guard, and refusing it would only break the Server's own tests and Mod
+scenarios. Survival still refuses it.
+
+The old rule, "Creative placing is free", is superseded.

@@ -19,7 +19,6 @@ use super::{
     PendingEdits, Reach, RejectReason, land, reach_from, resolve,
 };
 use crate::server::ContentTables;
-use crate::server::game_mode::PlayerMode;
 use crate::server::inventory::Inventory;
 use crate::server::items::PlacingItems;
 use crate::server::mods::EditHistory;
@@ -132,7 +131,7 @@ pub(super) struct PendingLayout {
     skipped: usize,
     first_skip: Option<RejectReason>,
     waited: u32,
-    /// The Item each Voxel spends, in Survival.
+    /// The Item each Voxel spends.
     pay: Option<String>,
 }
 
@@ -148,10 +147,10 @@ pub(super) fn receive(
     mut intents: MessageReader<LayoutIntent>,
     mut pending: ResMut<PendingEdits>,
     mut rejected: MessageWriter<EditRejected>,
-    player: Single<(&Player, &Inventory, &PlayerMode)>,
+    player: Single<(&Player, &Inventory)>,
     placing: Option<Res<PlacingItems>>,
 ) {
-    let (player, inventory, mode) = *player;
+    let (player, inventory) = *player;
     for intent in intents.read() {
         let reach = match reach_from(&place_intent(intent), player.eye()) {
             Ok(reach) => reach,
@@ -174,20 +173,15 @@ pub(super) fn receive(
             continue;
         }
         // The Client's Voxel stands only for its Shape and Orientation here.
-        let (intent, pay) = if mode.survival() {
-            match super::held_material(inventory, placing.as_deref()) {
-                Ok((item, material)) => {
-                    let voxel =
-                        Voxel::new(material, intent.voxel.shape(), intent.voxel.orientation());
-                    (LayoutIntent { voxel, ..*intent }, Some(item))
-                }
-                Err(reason) => {
-                    rejected.write(EditRejected { reason });
-                    continue;
-                }
+        let (intent, pay) = match super::held_material(inventory, placing.as_deref()) {
+            Ok((item, material)) => {
+                let voxel = Voxel::new(material, intent.voxel.shape(), intent.voxel.orientation());
+                (LayoutIntent { voxel, ..*intent }, Some(item))
             }
-        } else {
-            (*intent, None)
+            Err(reason) => {
+                rejected.write(EditRejected { reason });
+                continue;
+            }
         };
         pending.1.push_back(PendingLayout {
             intent,
@@ -499,8 +493,8 @@ pub(super) fn drain(
 mod tests {
     use super::super::EDITS_PER_TICK;
     use super::super::tests::{
-        DOWN_EYE, app_with, ground, held, origin, rejections, replay, set_eye, stocked, stone,
-        survival, tick, voxel_at,
+        DOWN_EYE, app_with_stone, ground, held, origin, rejections, replay, set_eye, stocked,
+        stone, survival, tick, voxel_at,
     };
     use super::*;
     use crate::server::undo::HistoryAction::{Redo, Undo};
@@ -624,21 +618,35 @@ mod tests {
     }
 
     #[test]
-    fn a_survival_layout_with_nothing_held_is_refused_and_creative_spends_nothing() {
-        let mut app = stocked(&[(4, "t:soil")], 2);
-        survival(&mut app);
-        send(&mut app, line(2));
-        assert_eq!(rejections(&mut app), [RejectReason::NothingHeld]);
+    fn a_layout_with_nothing_held_is_refused_in_both_modes() {
+        for survival_mode in [false, true] {
+            let mut app = stocked(&[(4, "t:soil")], 2);
+            if survival_mode {
+                survival(&mut app);
+            }
+            send(&mut app, line(2));
+            assert_eq!(rejections(&mut app), [RejectReason::NothingHeld]);
+        }
+    }
+
+    #[test]
+    fn a_creative_layout_is_paid_up_front_like_a_survival_one() {
         let mut app = stocked(&[(4, "t:soil")], 4);
         send(&mut app, line(3));
         tick(&mut app);
-        assert_eq!(placed(&app), 3, "Creative lays the Voxel it names");
-        assert_eq!(held(&mut app, "t:soil"), 3);
+        assert!(rejections(&mut app).is_empty());
+        assert_eq!(held(&mut app, "t:soil"), 0);
+        let mut app = stocked(&[(4, "t:soil")], 4);
+        send(&mut app, line(4));
+        tick(&mut app);
+        assert_eq!(rejections(&mut app), [RejectReason::TooFewItems]);
+        assert!((5..9).all(|x| voxel_at(&app, [x, 8, 5]).is_air()));
+        assert_eq!(held(&mut app, "t:soil"), 3, "nothing was spent");
     }
 
     #[test]
     fn a_line_lands_from_the_aimed_cell_along_its_axis() {
-        let mut app = app_with(&[(origin(), ground())]);
+        let mut app = app_with_stone(&[(origin(), ground())]);
         send(&mut app, line(3));
         tick(&mut app);
         assert_eq!(placed(&app), 3);
@@ -650,7 +658,7 @@ mod tests {
 
     #[test]
     fn occupied_cells_are_skipped_and_the_rest_land() {
-        let mut app = app_with(&[(origin(), ground())]);
+        let mut app = app_with_stone(&[(origin(), ground())]);
         let mut chunk = ground();
         chunk.set(6, 8, 5, stone());
         app.world_mut()
@@ -722,7 +730,7 @@ mod tests {
     #[test]
     fn a_and_b_lay_a_flat_rectangle_and_c_gives_it_depth() {
         for (c, cells) in [([5, 8, 5], 5 * 4), ([5, 10, 5], 5 * 4 * 3)] {
-            let mut app = app_with(&[(origin(), ground())]);
+            let mut app = app_with_stone(&[(origin(), ground())]);
             send(&mut app, between([5, 8, 5], Some([9, 8, 8]), Some(c), 0));
             for _ in 0..6 {
                 tick(&mut app);
@@ -734,7 +742,7 @@ mod tests {
 
     #[test]
     fn the_preview_follows_the_aim_as_b_and_then_as_c() {
-        let mut app = app_with(&[(origin(), ground())]);
+        let mut app = app_with_stone(&[(origin(), ground())]);
         set_eye(&mut app, DOWN_EYE);
         let mut seq = 0;
         let mut answer_for = |app: &mut App, intent| {
@@ -771,7 +779,7 @@ mod tests {
 
     #[test]
     fn the_preview_reports_the_aimed_cell_for_point_to_point() {
-        let mut app = app_with(&[(origin(), ground())]);
+        let mut app = app_with_stone(&[(origin(), ground())]);
         set_eye(&mut app, DOWN_EYE);
         app.world_mut().write_message(LayoutAim {
             seq: 1,
@@ -790,7 +798,7 @@ mod tests {
 
     #[test]
     fn a_span_over_the_cap_is_refused_before_it_is_queued() {
-        let mut app = app_with(&[(origin(), ground())]);
+        let mut app = app_with_stone(&[(origin(), ground())]);
         send(
             &mut app,
             between([0, 8, 0], Some([16, 8, 15]), Some([0, 8, 0]), 0),
@@ -801,7 +809,7 @@ mod tests {
 
     #[test]
     fn one_undo_takes_a_whole_span_back() {
-        let mut app = app_with(&[(origin(), ground())]);
+        let mut app = app_with_stone(&[(origin(), ground())]);
         send(
             &mut app,
             between([5, 8, 5], Some([8, 8, 6]), Some([5, 8, 5]), 0),
@@ -816,7 +824,7 @@ mod tests {
 
     #[test]
     fn cells_beyond_reach_of_the_eye_are_not_placed() {
-        let mut app = app_with(&[(origin(), ground())]);
+        let mut app = app_with_stone(&[(origin(), ground())]);
         send(&mut app, line(12));
         tick(&mut app);
         assert_eq!(placed(&app), 8, "cells 0 to 7 are within 8 m of the Eye");
@@ -829,7 +837,7 @@ mod tests {
         for y in 8..14 {
             chunk.set(6, y, 5, stone());
         }
-        let mut app = app_with(&[(origin(), chunk)]);
+        let mut app = app_with_stone(&[(origin(), chunk)]);
         send(&mut app, line(3));
         tick(&mut app);
         assert_eq!(voxel_at(&app, [5, 8, 5]), stone());
@@ -839,7 +847,7 @@ mod tests {
 
     #[test]
     fn a_layout_drains_through_the_per_tick_budget() {
-        let mut app = app_with(&[(origin(), ground())]);
+        let mut app = app_with_stone(&[(origin(), ground())]);
         send(&mut app, intent([axis(Dim::X, 6), axis(Dim::Z, 6), None]));
         tick(&mut app);
         assert_eq!(placed(&app), EDITS_PER_TICK);
@@ -851,7 +859,7 @@ mod tests {
 
     #[test]
     fn a_layout_over_the_cap_is_refused_before_it_is_queued() {
-        let mut app = app_with(&[(origin(), ground())]);
+        let mut app = app_with_stone(&[(origin(), ground())]);
         send(&mut app, intent([axis(Dim::X, 17), axis(Dim::Z, 16), None]));
         assert_eq!(rejections(&mut app), [RejectReason::BadLayout]);
         assert!(app.world().resource::<PendingEdits>().is_empty());
@@ -859,7 +867,7 @@ mod tests {
 
     #[test]
     fn a_layout_counts_once_against_the_pending_bound() {
-        let mut app = app_with(&[(origin(), ground())]);
+        let mut app = app_with_stone(&[(origin(), ground())]);
         for _ in 0..MAX_PENDING {
             send(&mut app, line(256));
         }
@@ -870,7 +878,7 @@ mod tests {
 
     #[test]
     fn a_layout_does_not_starve_single_edits() {
-        let mut app = app_with(&[(origin(), ground())]);
+        let mut app = app_with_stone(&[(origin(), ground())]);
         send(&mut app, intent([axis(Dim::X, 6), axis(Dim::Z, 6), None]));
         // Another column, so the Edit and the layout's anchor do not meet.
         let mut remove = super::super::tests::down(EditAction::Remove);
@@ -883,7 +891,7 @@ mod tests {
 
     #[test]
     fn one_undo_reverses_the_whole_layout_and_one_redo_restores_it() {
-        let mut app = app_with(&[(origin(), ground())]);
+        let mut app = app_with_stone(&[(origin(), ground())]);
         send(&mut app, line(5));
         tick(&mut app);
         assert_eq!(placed(&app), 5);
@@ -896,7 +904,7 @@ mod tests {
 
     #[test]
     fn a_box_lands_every_cell_and_one_undo_takes_them_all_back() {
-        let mut app = app_with(&[(origin(), ground())]);
+        let mut app = app_with_stone(&[(origin(), ground())]);
         send(
             &mut app,
             intent([axis(Dim::X, 3), axis(Dim::Z, 2), axis(Dim::Y, 2)]),
@@ -917,7 +925,7 @@ mod tests {
 
     #[test]
     fn an_undo_is_refused_whole_when_one_cell_has_changed() {
-        let mut app = app_with(&[(origin(), ground())]);
+        let mut app = app_with_stone(&[(origin(), ground())]);
         send(&mut app, line(3));
         tick(&mut app);
         app.world_mut()
@@ -930,7 +938,7 @@ mod tests {
 
     #[test]
     fn the_preview_answers_each_cell_the_layout_would_meet() {
-        let mut app = app_with(&[(origin(), ground())]);
+        let mut app = app_with_stone(&[(origin(), ground())]);
         set_eye(&mut app, DOWN_EYE);
         app.world_mut().write_message(LayoutAim {
             seq: 1,

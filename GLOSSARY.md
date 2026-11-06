@@ -237,7 +237,8 @@ Inventory.
 from Use and from Sample, which copies what is aimed at into the hand.
 
 **Game mode** — Creative or Survival. A World has a default; each Player has
-their own.
+their own. Both spend an Item per placed Voxel; Creative's Catalogue gives
+Items, and only Survival has damage, hunger and death.
 
 **Vitals** — a Player's health, hunger and air.
 

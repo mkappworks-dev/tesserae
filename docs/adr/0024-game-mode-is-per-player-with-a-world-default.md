@@ -3,10 +3,12 @@
 Status: accepted.
 
 Step 21 brings two ways to play a World: Creative, where the Catalogue gives
-Items, placing is free and nothing hurts, and Survival, where placing spends
-Items, flight is refused and the Server keeps Vitals. The engine has one Server
-Player today, but the save and the Server are shaped so that multiplayer needs
-no format change.
+Items and nothing hurts, and Survival, where flight is refused and the Server
+keeps Vitals. (Placing was free in Creative and spent Items in Survival; it
+spends in both since the
+[amendment below](#amendment-2026-11-07-creative-spends-items).) The engine has
+one Server Player today, but the save and the Server are shaped so that
+multiplayer needs no format change.
 
 A World has a default game mode and each Player has their own. The default is
 World state: an optional `game_mode` on the commit, absent meaning Creative, so
@@ -37,3 +39,13 @@ need a Client to change Player state (ADR-0002) or a command with permissions,
 which is step 26. Applying at open keeps the commit the Server's alone: the
 launcher writes only the sidecar, and the change reaches the save in the
 Server's next commit like any other Player state.
+
+## Amendment 2026-11-07: Creative spends Items
+
+Creative placing is no longer free: it spends one Item per Voxel from the
+selected slot, as Survival does, and a Layout is paid up front. The modes still
+differ in what the Catalogue does (it gives only in Creative, and refills the
+slot), in flight, and in damage, hunger and death. The supersession and its
+reasons are in
+[ADR-0023's amendment](0023-the-inventory-is-server-owned-and-pays-inside-the-undo-journal.md#amendment-2026-11-07-creative-spends-items-too).
+The old rule, "placing is free in Creative", is superseded.

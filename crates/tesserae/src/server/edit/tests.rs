@@ -134,7 +134,7 @@ pub(in crate::server) fn tick(app: &mut App) {
 }
 
 pub(super) fn physics_app(size: f32) -> App {
-    let mut app = app_with(&[(origin(), ground())]);
+    let mut app = app_with_stone(&[(origin(), ground())]);
     app.insert_resource(WorldSettings {
         voxel_size: size,
         ..default()
@@ -514,7 +514,23 @@ fn a_message_written_in_a_frame_with_no_tick_is_still_applied_by_a_later_one() {
 /// soil and the fixture water are placed by implicit Items of their own
 /// names, Items 1 to 3, and `t:dust`, Item 0, places nothing.
 pub(in crate::server) fn stocked(stacks: &[(usize, &str)], selected: usize) -> App {
-    let mut app = app_with(&[(origin(), ground())]);
+    stocked_in(&[(origin(), ground())], stacks, selected)
+}
+
+/// Creative placing spends an Item too, so a test that places a lot holds
+/// plenty of stone, in hotbar slot 0.
+pub(in crate::server) fn app_with_stone(chunks: &[(ChunkCoord, Chunk)]) -> App {
+    let mut app = stocked_in(chunks, &[], 0);
+    let mut held = app
+        .world_mut()
+        .query::<&mut super::super::inventory::Inventory>();
+    let mut inventory = held.single_mut(app.world_mut()).unwrap();
+    inventory.0.receive("t:stone", 2048, 64);
+    app
+}
+
+fn stocked_in(chunks: &[(ChunkCoord, Chunk)], stacks: &[(usize, &str)], selected: usize) -> App {
+    let mut app = app_with(chunks);
     let rock = tesserae_core::testgen::fixtures().ground.rock;
     let soil = tesserae_core::testgen::fixtures().ground.soil;
     let materials = [(rock, "t:stone"), (soil, "t:soil"), (water(), "t:water")];
@@ -572,8 +588,8 @@ pub(in crate::server) fn held(app: &mut App, item: &str) -> u32 {
 }
 
 #[test]
-fn survival_placing_spends_one_item_per_voxel_and_creative_spends_none() {
-    for (survival_mode, left) in [(false, 3), (true, 2)] {
+fn placing_spends_one_item_per_voxel_in_both_modes() {
+    for survival_mode in [false, true] {
         let mut app = stocked(&[(4, "t:stone")], 4);
         if survival_mode {
             survival(&mut app);
@@ -582,8 +598,32 @@ fn survival_placing_spends_one_item_per_voxel_and_creative_spends_none() {
         tick(&mut app);
         assert!(rejections(&mut app).is_empty());
         assert_eq!(voxel_at(&app, [5, 8, 5]), stone());
-        assert_eq!(held(&mut app, "t:stone"), left, "survival: {survival_mode}");
+        assert_eq!(held(&mut app, "t:stone"), 2, "survival: {survival_mode}");
     }
+}
+
+#[test]
+fn creative_places_nothing_from_an_empty_slot_or_once_the_stack_is_spent() {
+    let mut app = stocked(&[], 4);
+    send(&mut app, place_held(SHAPE_FULL_CUBE, Orientation::IDENTITY));
+    tick(&mut app);
+    assert_eq!(rejections(&mut app), [RejectReason::NothingHeld]);
+    assert!(voxel_at(&app, [5, 8, 5]).is_air());
+
+    let mut app = stocked(&[(4, "t:stone")], 4);
+    for _ in 0..4 {
+        send(&mut app, place_held(SHAPE_FULL_CUBE, Orientation::IDENTITY));
+    }
+    tick(&mut app);
+    assert_eq!(held(&mut app, "t:stone"), 0);
+    assert_eq!(rejections(&mut app), [RejectReason::NothingHeld]);
+    assert_eq!(
+        (8..12)
+            .filter(|&y| voxel_at(&app, [5, y, 5]) == stone())
+            .count(),
+        3,
+        "one Voxel per Item"
+    );
 }
 
 #[test]

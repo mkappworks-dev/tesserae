@@ -73,9 +73,9 @@ function tickTime(seconds,sprinting){
 function placeHeld(){
   const stack=state.bagHotbar[state.quickSlot],item=stackItem(stack);
   if(!stack){notice(`Nothing to place in hotbar slot ${state.quickSlot+1}.`,'warn');return;}
-  if(survival()){stack.count--;if(!stack.count)state.bagHotbar[state.quickSlot]=null;state.pickupRefused=null;}
-  state.journal.push({kind:'place',id:item.id,free:!survival()});
-  log(`Placed ${item.material}${survival()?'':' (free)'}.`);render();
+  stack.count--;if(!stack.count)state.bagHotbar[state.quickSlot]=null;state.pickupRefused=null;
+  state.journal.push({kind:'place',id:item.id});
+  log(`Placed ${item.material}.`);render();
 }
 function breakVoxel(){
   state.journal.push({kind:'remove',id:'rock'});
@@ -90,7 +90,6 @@ function undo(){
   if(!last){notice('Nothing to undo.','warn');return;}
   if(last.kind==='place'){
     state.journal.pop();
-    if(last.free||!survival()){log('Undid the placement.');render();return;}
     const left=receive(last.id,1);
     if(left)notice(`No room: 1 ${itemName(last.id)} dropped at your feet.`,'info');
     log(`Undid the placement${left?'':'; 1 '+itemName(last.id)+' refunded'}.`);render();return;
@@ -159,7 +158,7 @@ function deathScreen(){
 }
 
 function modePicks(key,value,{legend,hint,compact}){
-  const modes={Creative:'Take any Material from the Catalogue. Placing is free. No damage or hunger.',Survival:'Gather what you place. Health and hunger matter, and the Catalogue is closed.'};
+  const modes={Creative:'Take any Material from the Catalogue. Placing spends Items, as in Survival. No damage or hunger.',Survival:'Gather what you place. Health and hunger matter, and the Catalogue is closed.'};
   return `<fieldset class="mode-picks ${compact?'compact':''}"><legend class="section-label">${legend}</legend><div class="mode-options">${Object.entries(modes).map(([name,about])=>`<button type="button" class="mode-pick ${value===name?'selected':''}" data-action="pick-mode" data-value="${key}:${name}" aria-pressed="${value===name}"><b>${name}${value===name?' ✓':''}</b><small>${about}</small></button>`).join('')}</div>${hint?`<small class="mode-hint">${hint}</small>`:''}</fieldset>`;
 }
 

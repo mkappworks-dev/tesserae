@@ -482,6 +482,21 @@ mod tests {
     }
 
     #[test]
+    fn a_take_onto_a_stack_that_placing_has_part_spent_tops_it_up_to_the_limit() {
+        let mut app = game();
+        holding(&mut app, &[(Slot::Hotbar(2), "t:rock", 40)]);
+        let (sent, refused) = ask(&mut app, take(ROCK, 64, Destination::Slot(Slot::Hotbar(2))));
+        assert!(refused.is_empty(), "{refused:?}");
+        assert_eq!(sent[0].get(Slot::Hotbar(2)).cloned(), stack("t:rock", 64));
+        let (_, refused) = ask(&mut app, take(ROCK, 64, Destination::Slot(Slot::Hotbar(2))));
+        assert_eq!(
+            refused,
+            [Reason::Rule(Refusal::StackFull)],
+            "a full slot has nothing to top up"
+        );
+    }
+
+    #[test]
     fn a_declared_stack_limit_bounds_every_stack_the_server_forms() {
         let mut app = game();
         let item = |name: &str, max_stack| tesserae_mods::ItemDef {
