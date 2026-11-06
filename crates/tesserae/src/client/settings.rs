@@ -178,6 +178,7 @@ fn launch(
             Ok("bindings") => super::menu_ui::Tab::Bindings,
             Ok("controller") => super::menu_ui::Tab::Controller,
             Ok("display") => super::menu_ui::Tab::Display,
+            Ok("accessibility") => super::menu_ui::Tab::Accessibility,
             _ => super::menu_ui::Tab::Behavior,
         };
         settings.open = true;

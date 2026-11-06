@@ -301,7 +301,8 @@ pub(super) fn plugin(app: &mut App) {
             .after(super::removal::hold)
             .before(super::removal::bar),
     );
-    app.add_session_systems(PreUpdate, save_preview);
+    app.add_session_systems(PreUpdate, save_preview)
+        .add_session_systems(Update, hud_fixture);
     if let Ok(size) = std::env::var("TESSERAE_SCREENSHOT_TOUCH") {
         app.insert_resource(TouchCapture(match size.as_str() {
             "small" => super::profile::TouchSize::Small,
@@ -380,6 +381,144 @@ fn save_preview(
         _ => return,
     }
     *shown = true;
+}
+
+type HudWriters<'w> = (
+    MessageWriter<'w, crate::server::game_mode::GameModeChanged>,
+    MessageWriter<'w, crate::server::inventory::InventoryChanged>,
+    MessageWriter<'w, crate::server::vitals::VitalsChanged>,
+    MessageWriter<'w, crate::server::death::DeathChanged>,
+    MessageWriter<'w, crate::server::entities::Pickup>,
+);
+
+/// Tells the Client what the Server would in a Survival state that is slow to
+/// play into, shortly before the shutter so the pickup feed has not faded:
+/// `TESSERAE_SCREENSHOT_SURVIVAL` (with sample stacks),
+/// `TESSERAE_SCREENSHOT_VITALS=<health>,<hunger>,<air s>`,
+/// `TESSERAE_SCREENSHOT_DEATH=fall|drowning|lava|starvation[,kept]`,
+/// `TESSERAE_SCREENSHOT_PICKUP=<taken>[,<left>]` and
+/// `TESSERAE_SCREENSHOT_NOTICE=<text>`. Messages only; the World is untouched.
+fn hud_fixture(
+    mut commands: Commands,
+    time: Res<Time<Real>>,
+    capture: Res<Capture>,
+    looks: Res<super::drops::Looks>,
+    mut sent: Local<bool>,
+    (mut mode, mut inventory, mut vitals, mut death, mut pickup): HudWriters,
+) {
+    use crate::server::death::{Death, DeathChanged, DeathReport};
+    use crate::server::vitals::{Vitals, VitalsChanged};
+    use tesserae_core::save::DeathCause;
+
+    let var = |name| std::env::var(name).ok();
+    let (vitals_at, death_as, pickup_of, notice) = (
+        var("TESSERAE_SCREENSHOT_VITALS"),
+        var("TESSERAE_SCREENSHOT_DEATH"),
+        var("TESSERAE_SCREENSHOT_PICKUP"),
+        var("TESSERAE_SCREENSHOT_NOTICE"),
+    );
+    let survival = std::env::var_os("TESSERAE_SCREENSHOT_SURVIVAL").is_some()
+        || vitals_at.is_some()
+        || death_as.is_some();
+    if *sent
+        || !capture.before_shutter(capture.elapsed_s(&time), 1.5)
+        || !(survival || pickup_of.is_some() || notice.is_some())
+    {
+        return;
+    }
+    *sent = true;
+    let names: Vec<&str> = looks.0.iter().map(|l| l.name.as_str()).collect();
+    let sample = |at: usize| {
+        names
+            .get(at % names.len().max(1))
+            .copied()
+            .unwrap_or("rock")
+    };
+    if survival {
+        mode.write(crate::server::game_mode::GameModeChanged(
+            crate::server::game_mode::GameMode::Survival,
+        ));
+        let mut held = tesserae_core::inventory::Inventory::default();
+        for (at, count) in [64, 37, 12, 5, 64, 1, 20, 8, 3, 16, 9]
+            .into_iter()
+            .enumerate()
+        {
+            held.receive(sample(at), count, 64);
+        }
+        let _ = held.select(2);
+        inventory.write(crate::server::inventory::InventoryChanged(held));
+    }
+    let full = Vitals {
+        health: 20.0,
+        hunger: 20.0,
+        air_s: 10.0,
+    };
+    let mut now = Vitals {
+        health: if death_as.is_some() { 0.0 } else { full.health },
+        ..full
+    };
+    if let Some(at) = vitals_at {
+        let parts: Vec<f32> = at.split(',').filter_map(|p| p.parse().ok()).collect();
+        now.health = parts.first().copied().unwrap_or(full.health);
+        now.hunger = parts.get(1).copied().unwrap_or(full.hunger);
+        now.air_s = parts.get(2).copied().unwrap_or(full.air_s);
+    }
+    if survival {
+        vitals.write(VitalsChanged {
+            vitals: now,
+            full,
+            cause: None,
+        });
+    }
+    if let Some(how) = death_as {
+        let kept = how.ends_with(",kept");
+        let cause = match how.trim_end_matches(",kept") {
+            "drowning" => DeathCause::Drowning,
+            "lava" => DeathCause::Contact {
+                material: "terra:lava".into(),
+            },
+            "starvation" => DeathCause::Starvation,
+            _ => DeathCause::Fall { height_m: 14.0 },
+        };
+        let dropped = if kept {
+            Vec::new()
+        } else {
+            (0..4)
+                .map(|at| tesserae_core::inventory::Stack {
+                    item: sample(at).into(),
+                    count: 12,
+                })
+                .collect()
+        };
+        death.write(DeathChanged(Some(DeathReport {
+            death: Death {
+                cause: Some(cause),
+                at_m: Vec3::ZERO,
+                dropped,
+                drops: Vec::new(),
+                kept_inventory: kept,
+            },
+            from_spawn_m: 182.0,
+            despawns_in_s: (!kept).then_some(287),
+        })));
+    }
+    if let Some(counts) = pickup_of {
+        let counts: Vec<u32> = counts.split(',').filter_map(|p| p.parse().ok()).collect();
+        for at in 0..3 {
+            pickup.write(crate::server::entities::Pickup {
+                item: sample(at).into(),
+                taken: counts.first().copied().unwrap_or(4) + at as u32,
+                left: if at == 0 {
+                    counts.get(1).copied().unwrap_or(0)
+                } else {
+                    0
+                },
+            });
+        }
+    }
+    if let Some(text) = notice {
+        super::menu_ui::notify_for(&mut commands, &text, super::menu_ui::Tone::Alert, 10.0);
+    }
 }
 
 /// Presents without waiting for the display, unless `TESSERAE_SCREENSHOT_VSYNC`
