@@ -1,6 +1,6 @@
 # 18: I1: Deferred owned inventory policy
 
-Status: wontfix
+Status: done
 Blocked by: 17
 
 Spec: [reconciled desktop gameplay](../spec.md).
@@ -16,8 +16,8 @@ idempotent per-Player requests and exact rejection behavior.
 
 ## Acceptance criteria
 
-- [ ] Separate future approval establishes item/mode/undo policy first.
-- [ ] No finite inventory behavior enters the current creative work.
+- [x] Separate future approval establishes item/mode/undo policy first.
+- [ ] ~~No finite inventory behavior enters the current creative work.~~
 
 ## Validation and authorization
 

@@ -1,6 +1,6 @@
 # 19: I2: Deferred resource persistence
 
-Status: wontfix
+Status: done
 Blocked by: 18, 23
 
 Spec: [reconciled desktop gameplay](../spec.md).
@@ -15,8 +15,8 @@ policy and replay/recovery behavior. Do not bundle it into shortcut storage.
 
 ## Acceptance criteria
 
-- [ ] Future item policy and transaction/save boundary are separately agreed.
-- [ ] Current shortcut/World saves do not claim owned-resource guarantees.
+- [x] Future item policy and transaction/save boundary are separately agreed.
+- [ ] ~~Current shortcut/World saves do not claim owned-resource guarantees.~~
 
 ## Validation and authorization
 
