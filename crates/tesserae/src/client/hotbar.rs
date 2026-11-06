@@ -10,11 +10,11 @@ use tesserae_core::inventory::HOTBAR_SLOTS;
 use super::drops::Looks;
 use super::edit::{Catalogue, Holding, Hotbar};
 use super::inventory_window::{Names, item_icon};
-use super::menu_ui::{font, title};
+use super::menu_ui::title;
 use super::theme;
 use crate::session::SessionApp;
 
-const BOTTOM_PX: f32 = 10.0;
+const BOTTOM_PX: f32 = 12.0;
 const SLOT_PX: f32 = 56.0;
 const ICON_PX: f32 = 34.0;
 const GAP_PX: f32 = 4.0;
@@ -39,9 +39,6 @@ pub(super) fn top_px(survival: bool) -> f32 {
     }
 }
 
-const BAR: Color = Color::srgba_u8(6, 7, 8, 0xc7);
-const NAME: Color = Color::srgb_u8(246, 247, 241);
-
 #[derive(Component)]
 pub(super) struct HotbarRoot;
 #[derive(Component)]
@@ -54,6 +51,8 @@ enum BarSlot {
 }
 #[derive(Component)]
 struct Rim;
+#[derive(Component)]
+struct Bevel;
 
 pub(super) fn plugin(app: &mut App) {
     app.add_session_systems(Update, (rebuild, paint).chain());
@@ -101,11 +100,8 @@ pub(super) fn rebuild(
             root.spawn((
                 HeldName,
                 Text::new(held_name(&hotbar, &catalogue)),
-                TextFont {
-                    weight: bevy::text::FontWeight(600),
-                    ..font(14.0)
-                },
-                TextColor(NAME),
+                theme::weighted(theme::TEXT_SMALL, theme::SEMIBOLD),
+                TextColor(theme::HUD_INK),
                 TextShadow {
                     offset: Vec2::new(0.0, 1.0),
                     color: Color::BLACK,
@@ -177,20 +173,43 @@ fn panel() -> impl Bundle {
             column_gap: Val::Px(GAP_PX),
             padding: UiRect::all(Val::Px(PADDING_PX)),
             border: UiRect::all(Val::Px(FRAME_PX)),
-            border_radius: BorderRadius::all(Val::Px(6.0)),
+            border_radius: BorderRadius::all(Val::Px(theme::RADIUS_MENU)),
             ..default()
         },
-        BackgroundColor(BAR),
-        BorderColor::all(Color::BLACK),
-        BoxShadow::new(
-            Color::BLACK.with_alpha(0.53),
-            Val::Px(0.0),
-            Val::Px(10.0),
-            Val::Px(0.0),
-            Val::Px(30.0),
-        ),
+        BackgroundColor(theme::HUD_BAR),
+        BorderColor::all(theme::GROUT),
+        hud_shadow(),
         Pickable::IGNORE,
+        Children::spawn(Spawn(theme::ring(theme::RADIUS_MENU))),
     )
+}
+
+/// The drop shadow under the hotbar, the pickup feed's rows and the notices.
+pub(super) fn hud_shadow() -> BoxShadow {
+    BoxShadow::new(
+        theme::HUD_SHADOW,
+        Val::Px(0.0),
+        Val::Px(10.0),
+        Val::Px(0.0),
+        Val::Px(30.0),
+    )
+}
+
+fn vertical([top, bottom]: [Color; 2]) -> BackgroundGradient {
+    BackgroundGradient::from(LinearGradient::to_bottom(vec![
+        ColorStop::auto(top),
+        ColorStop::auto(bottom),
+    ]))
+}
+
+/// Recessed when idle, lit by its rim when hovered.
+fn bevel([dark, light]: [Color; 2]) -> BorderColor {
+    BorderColor {
+        top: dark,
+        left: dark,
+        bottom: light,
+        right: light,
+    }
 }
 
 type Icon = Result<Holding, Color>;
@@ -201,6 +220,16 @@ fn slot(
     icon: Option<(Icon, Option<u32>)>,
     active: bool,
 ) {
+    let inset = |border: UiRect| Node {
+        position_type: PositionType::Absolute,
+        left: Val::Px(0.0),
+        right: Val::Px(0.0),
+        top: Val::Px(0.0),
+        bottom: Val::Px(0.0),
+        border,
+        border_radius: BorderRadius::all(Val::Px(theme::RADIUS_SMALL - FRAME_PX)),
+        ..default()
+    };
     let mut button = parent.spawn((
         at,
         Hovered::default(),
@@ -208,16 +237,16 @@ fn slot(
             width: Val::Px(SLOT_PX),
             height: Val::Px(SLOT_PX),
             top: Val::Px(if active { -LIFT_PX } else { 0.0 }),
-            border: UiRect::all(Val::Px(2.0)),
-            border_radius: BorderRadius::all(Val::Px(4.0)),
+            border: UiRect::all(Val::Px(FRAME_PX)),
+            border_radius: BorderRadius::all(Val::Px(theme::RADIUS_SMALL)),
             align_items: AlignItems::Center,
             justify_content: JustifyContent::Center,
             ..default()
         },
-        BackgroundColor(if active {
-            theme::SLOT_ACTIVE_FILL
+        vertical(if active {
+            theme::HUD_SLOT_ACTIVE
         } else {
-            theme::SLOT_FILL
+            theme::HUD_SLOT
         }),
         BorderColor::all(if active {
             theme::SLOT_ACTIVE_EDGE
@@ -226,29 +255,53 @@ fn slot(
         }),
     ));
     if active {
-        button.insert(BoxShadow::new(
-            theme::SLOT_GLOW,
-            Val::Px(0.0),
-            Val::Px(0.0),
-            Val::Px(0.0),
-            Val::Px(14.0),
-        ));
-    }
-    button.with_children(|button| {
-        button.spawn((
-            Rim,
-            Node {
-                position_type: PositionType::Absolute,
-                left: Val::Px(0.0),
-                right: Val::Px(0.0),
-                top: Val::Px(0.0),
-                bottom: Val::Px(0.0),
-                border: UiRect::all(Val::Px(1.0)),
-                border_radius: BorderRadius::all(Val::Px(2.0)),
+        button.insert(BoxShadow(vec![
+            ShadowStyle {
+                color: theme::GROUT,
+                spread_radius: Val::Px(1.0),
                 ..default()
             },
+            ShadowStyle {
+                color: theme::SLOT_GLOW,
+                blur_radius: Val::Px(14.0),
+                ..default()
+            },
+        ]));
+    }
+    button.with_children(|button| {
+        if active {
+            // Bevy has no inset shadow; a radial fade towards the edge stands in
+            // for the inner 10 px glow.
+            button.spawn((
+                inset(UiRect::ZERO),
+                BackgroundGradient::from(RadialGradient::new(
+                    UiPosition::CENTER,
+                    RadialGradientShape::ClosestSide,
+                    vec![
+                        ColorStop::percent(Color::NONE, 60.0),
+                        ColorStop::percent(theme::HUD_SLOT_INNER_GLOW, 100.0),
+                    ],
+                )),
+                Pickable::IGNORE,
+            ));
+        } else {
+            button.spawn((
+                Bevel,
+                inset(UiRect {
+                    left: Val::Px(3.0),
+                    top: Val::Px(3.0),
+                    right: Val::Px(2.0),
+                    bottom: Val::Px(2.0),
+                }),
+                bevel(theme::HUD_BEVEL),
+                Pickable::IGNORE,
+            ));
+        }
+        button.spawn((
+            Rim,
+            inset(UiRect::all(Val::Px(1.0))),
             BorderColor::all(if active {
-                Color::BLACK
+                theme::GROUT
             } else {
                 theme::SLOT_RIM
             }),
@@ -259,14 +312,11 @@ fn slot(
             if let Some(count) = count {
                 button.spawn((
                     Text::new(count.to_string()),
-                    TextFont {
-                        weight: bevy::text::FontWeight(700),
-                        ..font(12.0)
-                    },
+                    theme::weighted(theme::TEXT_EYEBROW, theme::BOLD),
                     TextColor(Color::WHITE),
                     TextShadow {
                         offset: Vec2::ONE,
-                        color: Color::BLACK,
+                        color: theme::GROUT,
                     },
                     Node {
                         position_type: PositionType::Absolute,
@@ -281,11 +331,8 @@ fn slot(
         if let BarSlot::Hotbar(at) = at {
             button.spawn((
                 Text::new((at + 1).to_string()),
-                TextFont {
-                    weight: bevy::text::FontWeight(600),
-                    ..font(9.0)
-                },
-                TextColor(Color::WHITE.with_alpha(0.45)),
+                theme::weighted(theme::TEXT_FOOTER, theme::SEMIBOLD),
+                TextColor(theme::HUD_SLOT_NUMBER),
                 Node {
                     position_type: PositionType::Absolute,
                     left: Val::Px(5.0),
@@ -301,8 +348,9 @@ fn slot(
 /// The bright inner rim on hover; the lit frame of the selected slot stays.
 fn paint(
     hotbar: Res<Hotbar>,
-    mut slots: Query<(&BarSlot, &Hovered, &Children, &mut BackgroundColor)>,
-    mut rims: Query<&mut BorderColor, With<Rim>>,
+    mut slots: Query<(&BarSlot, &Hovered, &Children, &mut BackgroundGradient)>,
+    mut rims: Query<&mut BorderColor, (With<Rim>, Without<Bevel>)>,
+    mut bevels: Query<&mut BorderColor, (With<Bevel>, Without<Rim>)>,
 ) {
     for (at, hovered, children, mut fill) in &mut slots {
         let active = match *at {
@@ -312,15 +360,22 @@ fn paint(
         if active {
             continue;
         }
-        let (background, rim) = if hovered.get() {
-            (theme::SLOT_HOVER, theme::SLOT_RIM_HOVER)
+        let (background, rim, recess) = if hovered.get() {
+            (
+                theme::HUD_SLOT_HOVER,
+                theme::SLOT_RIM_HOVER,
+                theme::HUD_BEVEL_HOVER,
+            )
         } else {
-            (theme::SLOT_FILL, theme::SLOT_RIM)
+            (theme::HUD_SLOT, theme::SLOT_RIM, theme::HUD_BEVEL)
         };
-        fill.set_if_neq(BackgroundColor(background));
+        fill.set_if_neq(vertical(background));
         for child in children {
             if let Ok(mut border) = rims.get_mut(*child) {
                 border.set_if_neq(BorderColor::all(rim));
+            }
+            if let Ok(mut border) = bevels.get_mut(*child) {
+                border.set_if_neq(bevel(recess));
             }
         }
     }

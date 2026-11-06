@@ -412,15 +412,11 @@ pub(super) fn plugin(app: &mut App) {
 
 #[derive(Component)]
 pub(super) struct Crosshair;
-pub(super) const CROSSHAIR_ALPHA: f32 = 0.8;
+pub(super) const CROSSHAIR_ALPHA: f32 = super::theme::RETICLE_ALPHA;
 /// While the Server reports the camera sees past what the Eye can.
 pub(super) const BLOCKED_CROSSHAIR_ALPHA: f32 = 0.3;
 
 fn spawn_hud(mut commands: Commands) {
-    let font = |size| TextFont {
-        font_size: bevy::text::FontSize::Px(size),
-        ..default()
-    };
     commands
         .spawn(Node {
             position_type: PositionType::Absolute,
@@ -433,8 +429,8 @@ fn spawn_hud(mut commands: Commands) {
         .with_child((
             Crosshair,
             Text::new("+"),
-            font(22.0),
-            TextColor(Color::srgba(1.0, 1.0, 1.0, CROSSHAIR_ALPHA)),
+            super::theme::font(super::theme::TEXT_RETICLE),
+            TextColor(super::theme::RETICLE.with_alpha(CROSSHAIR_ALPHA)),
         ));
 }
 

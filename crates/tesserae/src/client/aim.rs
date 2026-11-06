@@ -73,9 +73,13 @@ fn crosshair(
         super::edit::CROSSHAIR_ALPHA
     };
     let refused = current && target.0.use_aim.is_some_and(|aim| aim.is_err());
-    let (green, blue) = if refused { (0.4, 0.35) } else { (1.0, 1.0) };
+    let tint = if refused {
+        super::theme::RETICLE_REFUSED
+    } else {
+        super::theme::RETICLE
+    };
     for mut colour in &mut crosshair {
-        colour.set_if_neq(TextColor(Color::srgba(1.0, green, blue, alpha)));
+        colour.set_if_neq(TextColor(tint.with_alpha(alpha)));
     }
 }
 pub(super) fn report(

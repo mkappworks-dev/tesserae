@@ -213,3 +213,20 @@ pub(super) fn shade() -> BackgroundGradient {
         .into(),
     ])
 }
+
+// Pass E: the in-play HUD and the death screen.
+pub(super) const HUD_BAR: Color = Color::srgba_u8(6, 7, 8, 0xc7);
+pub(super) const HUD_INK: Color = Color::srgb_u8(0xf6, 0xf7, 0xf1);
+pub(super) const HUD_SHADOW: Color = Color::srgba_u8(0, 0, 0, 0x88);
+pub(super) const HUD_SLOT: [Color; 2] = [Color::srgb_u8(0x1b, 0x1c, 0x1f), Color::srgb_u8(0x13, 0x14, 0x16)];
+pub(super) const HUD_SLOT_HOVER: [Color; 2] = [Color::srgb_u8(0x25, 0x27, 0x2b), Color::srgb_u8(0x1b, 0x1c, 0x1f)];
+pub(super) const HUD_SLOT_ACTIVE: [Color; 2] = [Color::srgb_u8(0x2c, 0x30, 0x2a), Color::srgb_u8(0x20, 0x23, 0x20)];
+/// A slot's recess: dark along the top and left, light along the bottom and right.
+pub(super) const HUD_BEVEL: [Color; 2] = [Color::srgba_u8(0, 0, 0, 0x70), Color::srgba_u8(0xff, 0xff, 0xff, 0x0d)];
+pub(super) const HUD_BEVEL_HOVER: [Color; 2] = [Color::srgba_u8(0, 0, 0, 0x60), Color::srgba_u8(0xff, 0xff, 0xff, 0x14)];
+pub(super) const HUD_SLOT_INNER_GLOW: Color = Color::srgba_u8(0xe6, 0xee, 0xd6, 0x1f);
+pub(super) const HUD_SLOT_NUMBER: Color = Color::srgba_u8(0xff, 0xff, 0xff, 0x73);
+pub(super) const RETICLE: Color = Color::srgb_u8(0xed, 0xf8, 0xdf);
+pub(super) const RETICLE_ALPHA: f32 = 0.7;
+pub(super) const RETICLE_REFUSED: Color = Color::srgb(1.0, 0.4, 0.35);
+pub(super) const TEXT_RETICLE: f32 = 26.0;
