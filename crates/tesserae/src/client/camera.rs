@@ -146,11 +146,12 @@ fn show_hint(
 ) {
     // The Menu, Settings and death screen free the cursor too, but say where to go themselves.
     let covered = menu.is_some_and(|m| m.open) || settings.is_some_and(|s| s.open);
-    let wanted = if cursor.grab_mode == CursorGrabMode::None && !covered && super::death::alive(dead) {
-        Visibility::Inherited
-    } else {
-        Visibility::Hidden
-    };
+    let wanted =
+        if cursor.grab_mode == CursorGrabMode::None && !covered && super::death::alive(dead) {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        };
     // Through change detection rather than unconditionally, so the UI is not
     // re-laid out every frame.
     let (mut visibility, mut text) = hint.into_inner();

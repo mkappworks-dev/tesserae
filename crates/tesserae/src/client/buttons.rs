@@ -33,12 +33,6 @@ pub(super) enum ButtonStyle<'a> {
     Tab {
         selected: bool,
     },
-    /// A small button among other controls.
-    Compact {
-        selected: bool,
-        height_px: f32,
-        text_px: f32,
-    },
     /// Borderless until hovered: a glyph such as × or an inline action.
     Quiet {
         text_px: f32,
@@ -77,11 +71,6 @@ pub(super) fn button(
         ButtonStyle::Plain => button(parent, label, act, kind(Kind::Plain)),
         ButtonStyle::Primary => button(parent, label, act, kind(Kind::Primary)),
         ButtonStyle::Tab { selected } => tab(parent, label, act, styled(selected, true, false)),
-        ButtonStyle::Compact {
-            selected,
-            height_px,
-            text_px,
-        } => compact(parent, label, act, selected, height_px, text_px),
         ButtonStyle::Quiet { text_px } => quiet(parent, label, act, text_px),
         ButtonStyle::Cinematic { kind, align } => cinematic(
             parent,

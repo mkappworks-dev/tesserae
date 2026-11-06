@@ -137,8 +137,6 @@ pub(super) const THUMBNAIL: [Color; 4] = [
 ];
 pub(super) const THUMBNAIL_TREE: Color = Color::srgb_u8(0x26, 0x3e, 0x2f);
 
-pub(super) const SLOT_FILL: Color = Color::srgb_u8(23, 24, 26);
-pub(super) const SLOT_HOVER: Color = Color::srgb_u8(32, 34, 37);
 pub(super) const SLOT_EDGE: Color = Color::srgb_u8(5, 5, 6);
 pub(super) const SLOT_RIM: Color = Color::srgb_u8(58, 60, 65);
 pub(super) const SLOT_RIM_HOVER: Color = Color::srgb_u8(154, 159, 147);
