@@ -123,6 +123,7 @@ pub(super) const MEDIUM: u16 = 500;
 pub(super) const LABEL: u16 = 550;
 pub(super) const SEMIBOLD: u16 = 600;
 pub(super) const STRONG: u16 = 650;
+pub(super) const BOLD: u16 = 700;
 
 pub(super) const CONTROL_HEIGHT: f32 = 44.0;
 pub(super) const BUTTON_PAD_X: f32 = 15.0;
@@ -140,9 +141,9 @@ pub(super) const RULE: f32 = 1.0;
 pub(super) const FOCUS_WIDTH: f32 = 3.0;
 pub(super) const FOCUS_OFFSET: f32 = 3.0;
 
-/// TODO: the prototype's system UI face, once bundling it or discovering it
-/// is decided; Aileron until then.
-pub(super) const BODY_FAMILY: &str = "Aileron";
+/// One variable face, so every weight the theme names renders exactly.
+pub(super) const BODY_FAMILY: &str = "Inter Variable";
+/// The wordmark's, and nothing else's.
 pub(super) const BRAND_FAMILY: &str = "Aileron";
 
 pub(super) fn font(size: f32) -> TextFont {

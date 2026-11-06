@@ -704,10 +704,7 @@ pub(super) fn binding_rows(
                             Text::new(binding.map_or("Add binding".into(), |b| {
                                 binding_display(labels.binding(b))
                             })),
-                            TextFont {
-                                font: bevy::text::FontSource::family("Aileron"),
-                                ..ui::font(10.0)
-                            },
+                            ui::font(10.0),
                             TextColor(if binding.is_some() {
                                 theme::INK
                             } else {

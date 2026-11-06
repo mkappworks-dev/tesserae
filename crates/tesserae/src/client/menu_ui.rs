@@ -796,24 +796,17 @@ fn make_logo(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
 }
 
 fn load_fonts(mut commands: Commands, mut fonts: ResMut<Assets<Font>>) {
-    // Replace the default asset too, so HUD and save dialogs use the same face.
+    // The body face replaces the default asset, so HUD and save dialogs use it too.
     fonts
         .insert(
             bevy::asset::AssetId::default(),
-            Font::from_bytes(
-                include_bytes!("../../../../assets/fonts/Aileron-Regular.otf").to_vec(),
-            ),
+            Font::from_bytes(include_bytes!("../../../../assets/fonts/InterVariable.ttf").to_vec()),
         )
         .expect("the default Font asset can be replaced");
     commands.insert_resource(Fonts {
-        _handles: vec![
-            fonts.add(Font::from_bytes(
-                include_bytes!("../../../../assets/fonts/Aileron-SemiBold.otf").to_vec(),
-            )),
-            fonts.add(Font::from_bytes(
-                include_bytes!("../../../../assets/fonts/Aileron-Bold.otf").to_vec(),
-            )),
-        ],
+        _handles: vec![fonts.add(Font::from_bytes(
+            include_bytes!("../../../../assets/fonts/Aileron-SemiBold.otf").to_vec(),
+        ))],
     });
 }
 
@@ -904,10 +897,8 @@ pub(super) enum IconKind {
     Close,
     Sync,
     Uncapped,
-    Check,
-    Chevron,
 }
-const ICONS: usize = 7;
+const ICONS: usize = 5;
 #[derive(Component)]
 pub(super) struct Icon(pub IconKind, pub Color);
 #[derive(Resource)]
@@ -922,11 +913,10 @@ fn make_icons(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
     };
     let width = ICONS * 64;
     let mut data = vec![0; width * 64 * 4];
-    let stroke = |p: Vec2, a: Vec2, b: Vec2, half: f32| {
+    let segment = |p: Vec2, a: Vec2, b: Vec2| {
         let along = ((p - a).dot(b - a) / (b - a).length_squared()).clamp(0.0, 1.0);
-        p.distance(a + (b - a) * along) < half
+        p.distance(a + (b - a) * along) < 0.6
     };
-    let segment = |p: Vec2, a: Vec2, b: Vec2| stroke(p, a, b, 0.6);
     for y in 0..64 {
         for x in 0..width {
             let i = x / 64;
@@ -953,18 +943,10 @@ fn make_icons(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
                         || segment(p, Vec2::new(14.0, 8.0), Vec2::new(11.0, 5.0))
                         || segment(p, Vec2::new(14.0, 8.0), Vec2::new(11.0, 11.0))
                 }
-                4 => {
+                _ => {
                     segment(p, Vec2::new(4.0, 12.0), Vec2::new(12.0, 4.0))
                         || segment(p, Vec2::new(6.0, 4.0), Vec2::new(12.0, 4.0))
                         || segment(p, Vec2::new(12.0, 10.0), Vec2::new(12.0, 4.0))
-                }
-                5 => {
-                    stroke(p, Vec2::new(3.5, 8.5), Vec2::new(6.5, 11.5), 1.2)
-                        || stroke(p, Vec2::new(6.5, 11.5), Vec2::new(12.5, 4.5), 1.2)
-                }
-                _ => {
-                    stroke(p, Vec2::new(4.0, 6.0), Vec2::new(8.0, 10.0), 0.75)
-                        || stroke(p, Vec2::new(8.0, 10.0), Vec2::new(12.0, 6.0), 0.75)
                 }
             };
             if ink {

@@ -80,7 +80,6 @@ pub(super) fn segment(
     parent: &mut ChildSpawnerCommands,
     choices: impl FnOnce(&mut ChildSpawnerCommands),
 ) {
-    use crate::client::menu_ui as ui;
     use bevy::input_focus::tab_navigation::TabIndex;
     let menu = parent
         .commands()
@@ -144,7 +143,17 @@ pub(super) fn segment(
                     Pickable::IGNORE,
                 ))
                 .id();
-            ui::icon(t, ui::IconKind::Chevron, theme::INK.with_alpha(0.8), 16.0);
+            t.spawn((
+                Text::new("⌄"),
+                theme::font(theme::TEXT_BODY),
+                TextColor(theme::INK.with_alpha(0.8)),
+                // Inter draws ⌄ on the baseline; lift it to the label's middle.
+                Node {
+                    top: Val::Px(-3.0),
+                    ..default()
+                },
+                Pickable::IGNORE,
+            ));
         })
         .id();
     parent
@@ -202,7 +211,7 @@ pub(super) fn option(
             },
         );
         if selected {
-            ui::icon(o, ui::IconKind::Check, theme::OPTION_CHOSEN_INK, 18.0);
+            ui::text(o, "✓", theme::TEXT_BODY, theme::OPTION_CHOSEN_INK);
         }
     });
     if selected {
@@ -640,7 +649,6 @@ pub(super) struct Checkbox {
 }
 
 pub(super) fn switch(parent: &mut ChildSpawnerCommands, on: bool, operation: Operation) {
-    use crate::client::menu_ui as ui;
     let mut ring = Entity::PLACEHOLDER;
     let mut checkbox = parent.spawn((
         bevy::ui_widgets::Button,
@@ -685,7 +693,13 @@ pub(super) fn switch(parent: &mut ChildSpawnerCommands, on: bool, operation: Ope
             ))
             .id();
         if on {
-            ui::icon(b, ui::IconKind::Check, theme::SAGE_INK, 16.0);
+            b.spawn((
+                Text::new("✓"),
+                theme::weighted(theme::TEXT_SMALL, theme::BOLD),
+                bevy::text::LineHeight::RelativeToFont(1.0),
+                TextColor(theme::SAGE_INK),
+                Pickable::IGNORE,
+            ));
         }
     });
     checkbox.insert(Checkbox { on, ring });
