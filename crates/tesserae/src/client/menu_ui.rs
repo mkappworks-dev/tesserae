@@ -514,9 +514,7 @@ fn shell(
 /// chevron.
 #[derive(Component)]
 #[require(bevy::picking::hover::Hovered, Outline = theme::focus_ring())]
-pub(super) struct RailEntry {
-    pub selected: bool,
-}
+pub(super) struct RailEntry;
 
 fn rail(workspace: &mut ChildSpawnerCommands, tab: Tab) {
     use super::cinematic as cine;
@@ -558,12 +556,8 @@ fn rail(workspace: &mut ChildSpawnerCommands, tab: Tab) {
                     bevy::ui_widgets::Button,
                     TabIndex(0),
                     Operation::Navigate(page),
-                    RailEntry { selected },
-                    BackgroundColor(if selected {
-                        theme::CHOSEN
-                    } else {
-                        Color::NONE
-                    }),
+                    RailEntry,
+                    BackgroundColor(if selected { theme::CHOSEN } else { Color::NONE }),
                     BorderColor::all(if selected {
                         theme::CHOSEN_EDGE
                     } else {
@@ -1102,7 +1096,9 @@ fn drawn(kind: IconKind, p: Vec2) -> f32 {
     let arc = |a: Vec2, b: Vec2, radius: f32, clockwise: bool| -> Vec<Vec2> {
         let mid = (a + b) / 2.0;
         let chord = b - a;
-        let rise = (radius * radius - chord.length_squared() / 4.0).max(0.0).sqrt();
+        let rise = (radius * radius - chord.length_squared() / 4.0)
+            .max(0.0)
+            .sqrt();
         let normal = v(-chord.y, chord.x).normalize();
         let sign = if clockwise { 1.0 } else { -1.0 };
         let span = |c: Vec2| {
@@ -1123,7 +1119,11 @@ fn drawn(kind: IconKind, p: Vec2) -> f32 {
             [6.0, 12.0, 18.0]
                 .iter()
                 .map(|y| segment(v(4.0, *y), v(20.0, *y)))
-                .chain([ring(v(8.0, 6.0), 2.0), ring(v(16.0, 12.0), 2.0), ring(v(10.0, 18.0), 2.0)])
+                .chain([
+                    ring(v(8.0, 6.0), 2.0),
+                    ring(v(16.0, 12.0), 2.0),
+                    ring(v(10.0, 18.0), 2.0),
+                ])
                 .fold(f32::MAX, f32::min),
         ),
         IconKind::Keyboard => stroke(
@@ -1279,20 +1279,6 @@ pub(super) fn icon(parent: &mut ChildSpawnerCommands, kind: IconKind, color: Col
     ));
 }
 
-pub(super) fn technical_text(
-    parent: &mut ChildSpawnerCommands,
-    label: &str,
-    size: f32,
-    color: Color,
-) {
-    parent.spawn((
-        Text::new(label),
-        font(size),
-        bevy::text::LineHeight::RelativeToFont(1.5),
-        TextColor(color),
-        Pickable::IGNORE,
-    ));
-}
 type ButtonLabels<'w, 's> = Query<
     'w,
     's,
@@ -1611,10 +1597,10 @@ mod tests {
         app.update();
         let looks: Vec<(Tab, bool)> = app
             .world_mut()
-            .query::<(&Operation, &RailEntry)>()
+            .query_filtered::<(&Operation, &BackgroundColor), With<RailEntry>>()
             .iter(app.world())
-            .filter_map(|(op, entry)| match op {
-                Operation::Navigate(tab) => Some((*tab, entry.selected)),
+            .filter_map(|(op, fill)| match op {
+                Operation::Navigate(tab) => Some((*tab, fill.0 == theme::CHOSEN)),
                 _ => None,
             })
             .collect();

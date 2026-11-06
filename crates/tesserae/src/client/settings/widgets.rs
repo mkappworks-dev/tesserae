@@ -846,7 +846,7 @@ pub(super) struct ModalFocus;
 
 /// A button in the binding capture dialog, whose clicks capture ignores.
 #[derive(Component)]
-pub(super) struct CaptureButton;
+pub(in crate::client) struct CaptureButton;
 pub(super) fn capture_focus(
     settings: Res<Settings>,
     anchors: Query<Entity, With<ModalFocus>>,

@@ -62,11 +62,6 @@ impl Settings {
             )
     }
 
-    pub(super) fn changed(&self, bindings: &Bindings, preferences: &Preferences) -> bool {
-        self.draft
-            .as_ref()
-            .is_some_and(|(b, p)| b != bindings || p != preferences)
-    }
     pub(super) fn modal(&self) -> bool {
         self.unsaved || self.conflict.is_some() || self.resetting
     }

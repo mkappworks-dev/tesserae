@@ -417,10 +417,6 @@ fn panel(
                 })
                 .with_children(|list| {
                     let key = |action| short_key(bindings.label(action, labels));
-                    let glyph = |kind, glyph: &str| ButtonStyle::Cinematic {
-                        kind,
-                        align: Align::Glyph(glyph),
-                    };
                     resume = buttons::button(
                         list,
                         "Resume",
@@ -458,6 +454,13 @@ fn panel(
                 });
         });
     resume
+}
+
+fn glyph(kind: Kind, glyph: &str) -> ButtonStyle<'_> {
+    ButtonStyle::Cinematic {
+        kind,
+        align: Align::Glyph(glyph),
+    }
 }
 
 /// The prototype's key names are short: Esc, not Escape.
@@ -558,17 +561,19 @@ fn world_details(
                         );
                     }
                 }
-                dialog.spawn(cine::dialog_actions()).with_children(|actions| {
-                    close = Some(buttons::button(
-                        actions,
-                        "Close",
-                        Choice::CloseDetails,
-                        ButtonStyle::Cinematic {
-                            kind: Kind::Primary,
-                            align: Align::Centre,
-                        },
-                    ));
-                });
+                dialog
+                    .spawn(cine::dialog_actions())
+                    .with_children(|actions| {
+                        close = Some(buttons::button(
+                            actions,
+                            "Close",
+                            Choice::CloseDetails,
+                            ButtonStyle::Cinematic {
+                                kind: Kind::Primary,
+                                align: Align::Centre,
+                            },
+                        ));
+                    });
             });
     });
     close
@@ -822,7 +827,8 @@ mod tests {
         choose(&mut app, Choice::Details);
         let shown = texts(&mut app);
         assert!(shown.iter().any(|t| t == "River bend"), "{shown:?}");
-        let body = "Terra · 0.5 m voxels\nSeed: 42\n2 biomes\nDefault mode Survival · your mode Creative";
+        let body =
+            "Terra · 0.5 m voxels\nSeed: 42\n2 biomes\nDefault mode Survival · your mode Creative";
         assert!(shown.iter().any(|t| t == body), "{body} in {shown:?}");
         press(&mut app, KeyCode::Escape);
         assert!(open(&app), "Escape closes the details only");

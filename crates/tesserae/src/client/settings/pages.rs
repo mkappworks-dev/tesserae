@@ -163,7 +163,11 @@ pub(in crate::client) fn render(
                         Val::Px(theme::SHEET_PAD_X),
                         Val::Px(theme::SHEET_PAD_X),
                         // The search field above the body already leaves this gap.
-                        Val::Px(if settings.tab == Tab::Bindings { 0.0 } else { 20.0 }),
+                        Val::Px(if settings.tab == Tab::Bindings {
+                            0.0
+                        } else {
+                            20.0
+                        }),
                         Val::Px(20.0),
                     ),
                     overflow: Overflow::scroll_y(),
@@ -396,10 +400,12 @@ pub(super) fn display(list: &mut ChildSpawnerCommands, p: &Preferences) {
         } else {
             "Sync off"
         };
-        let ceiling = p
-            .fps_cap
-            .map_or("No additional frame limit".into(), |n| format!("{n} FPS ceiling"));
-        setting_row(card, pacing, &ceiling, |row| cine::pill(row, "Frame pacing"));
+        let ceiling = p.fps_cap.map_or("No additional frame limit".into(), |n| {
+            format!("{n} FPS ceiling")
+        });
+        setting_row(card, pacing, &ceiling, |row| {
+            cine::pill(row, "Frame pacing")
+        });
     });
     group(list, "IMAGE QUALITY", |card| {
         setting_row(
@@ -579,9 +585,8 @@ pub(super) fn binding_rows(
                     }
                     buttons::button(
                         cells,
-                        binding.map_or("Add binding".into(), |b| {
-                            binding_display(labels.binding(b))
-                        }),
+                        binding
+                            .map_or("Add binding".into(), |b| binding_display(labels.binding(b))),
                         Operation::Capture(device, action, slot),
                         ButtonStyle::Cinematic {
                             kind: if binding.is_some() {

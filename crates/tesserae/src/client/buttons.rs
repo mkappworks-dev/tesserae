@@ -13,8 +13,6 @@ use super::theme;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Align<'a> {
     Centre,
-    /// As the other labels of a stacked menu do.
-    Left,
     /// Left, with a glyph such as a key or `+` at the right.
     Glyph(&'a str),
     /// Centred, with a glyph such as `→` just after the label.
@@ -337,7 +335,7 @@ fn cinematic(
                 border_radius: BorderRadius::all(Val::Px(theme::RADIUS_CONTROL)),
                 align_items: AlignItems::Center,
                 justify_content: match align {
-                    Align::Left | Align::Glyph(_) => JustifyContent::SpaceBetween,
+                    Align::Glyph(_) => JustifyContent::SpaceBetween,
                     _ => JustifyContent::Center,
                 },
                 column_gap: Val::Px(8.0),
