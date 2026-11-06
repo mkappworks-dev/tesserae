@@ -230,3 +230,11 @@ pub(super) const RETICLE: Color = Color::srgb_u8(0xed, 0xf8, 0xdf);
 pub(super) const RETICLE_ALPHA: f32 = 0.7;
 pub(super) const RETICLE_REFUSED: Color = Color::srgb(1.0, 0.4, 0.35);
 pub(super) const TEXT_RETICLE: f32 = 26.0;
+pub(super) const HEALTH: Color = Color::srgb_u8(0xc8, 0x64, 0x5a);
+pub(super) const HUNGER: Color = Color::srgb_u8(0xc9, 0xa3, 0x5a);
+pub(super) const AIR: Color = Color::srgb_u8(0x8f, 0xb6, 0xc9);
+pub(super) const VITAL_EMPTY: Color = Color::srgb_u8(0x1a, 0x1b, 0x1e);
+/// A vitals tile's raised edge: light along the top and left, dark below.
+pub(super) const VITAL_BEVEL: [Color; 2] = [Color::srgba_u8(255, 255, 255, 0x2e), Color::srgba_u8(0, 0, 0, 0x59)];
+pub(super) const LOW_HEALTH_VIGNETTE: Color = Color::srgba_u8(0x5a, 0x0d, 0x0d, 0x8c);
+pub(super) const HIT_FLASH: Color = Color::srgba_u8(0x8a, 0x1d, 0x1d, 0x40);
