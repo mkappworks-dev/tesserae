@@ -7,13 +7,59 @@ const settingsDefaults = {
   fps:'120', sound:70, music:50, effects:80, motion:false, contrast:false, simpleBackground:false, textScale:"1",
   bindings:{'Move forward':'W','Move backward':'S','Move left':'A','Move right':'D',
     'Jump':'Space','Sprint':'Shift','Crouch':'Control','Place':'Mouse right',
-    'Remove':'Mouse left','Catalogue':'C','Inventory':'I','Flip':'E','Layout':'L','Menu':'Tab','Back / menu':'Escape','Settings':'F10'}
+    'Remove':'Mouse left','Catalogue':'C','Inventory':'I','Flip':'E','Layout':'L','Menu':'Tab','Back / menu':'Escape','Settings':'F10',
+    // Engine actions (settings/pages.rs:5-57, defaults actions.rs:265-370).
+    'Respawn':'R','Switch flight / physics':'V','Switch first / third person':'F5',
+    'Third-person zoom in':'Alt+Wheel up','Third-person zoom out':'Alt+Wheel down',
+    'Increase flight speed':'=','Decrease flight speed':'-',
+    'Sample':'P','Empty hand':'X','Next Shape':'F','Turn Shape':'Q',
+    'Take tool':'M','Use tool':'G','Clear tool':'Backspace',
+    'Layout: more Voxels':'Shift+Wheel up','Layout: fewer Voxels':'Shift+Wheel down',
+    'Layout: reverse the axis':'T','Layout: next axis':'J',
+    'Undo':'Cmd+Z','Redo':'Cmd+Shift+Z',
+    'Quick slot 1':'1','Quick slot 2':'2','Quick slot 3':'3','Quick slot 4':'4','Quick slot 5':'5',
+    'Quick slot 6':'6','Quick slot 7':'7','Quick slot 8':'8','Quick slot 9':'9',
+    'Previous quick slot':'','Next quick slot':'','Open input settings':'F1'},
+  // The engine keeps a second binding per action; an empty one reads "Add binding".
+  altBindings:{'Sprint':'Right Shift','Sample':'Middle mouse','Redo':'Ctrl+Y',
+    'Layout: more Voxels':']','Layout: fewer Voxels':'['},
+  padBindings:{'Jump':'A','Crouch':'B','Menu':'Y','Next Shape':'X','Sprint':'Left stick',
+    'Sample':'Right stick','Remove':'RT','Place':'LT','Previous quick slot':'LB','Next quick slot':'RB',
+    'Turn Shape':'D-pad left','Flip':'D-pad right','Empty hand':'D-pad down','Use tool':'D-pad up',
+    'Open input settings':'Start','Switch flight / physics':'Select'}
 };
 const settingsCategories = ['Behavior','Key bindings','Controller','Display','Audio','Accessibility'];
+const bindingGroups = {
+  Movement:['Move forward','Move backward','Move left','Move right','Jump','Crouch','Sprint','Respawn',
+    'Switch flight / physics','Switch first / third person','Third-person zoom in','Third-person zoom out',
+    'Increase flight speed','Decrease flight speed'],
+  Building:['Place','Remove','Sample','Empty hand','Next Shape','Turn Shape','Flip','Take tool','Use tool',
+    'Clear tool','Layout','Layout: more Voxels','Layout: fewer Voxels','Layout: reverse the axis',
+    'Layout: next axis','Undo','Redo'],
+  Interface:['Quick slot 1','Quick slot 2','Quick slot 3','Quick slot 4','Quick slot 5','Quick slot 6',
+    'Quick slot 7','Quick slot 8','Quick slot 9','Previous quick slot','Next quick slot','Catalogue',
+    'Inventory','Menu','Back / menu','Settings','Open input settings']
+};
+
+function bindingGroup(name) {
+  return Object.keys(bindingGroups).find(g=>bindingGroups[g].includes(name))||'Interface';
+}
+
+function bindingRows() {
+  const d=state.settingsDraft,query=(state.bindingSearch||'').trim().toLowerCase();
+  const names=query?Object.values(bindingGroups).flat():bindingGroups[state.bindingGroup||'Movement'];
+  const rows=names.filter(n=>!query||`${n} ${d.bindings[n]} ${d.altBindings[n]||''}`.toLowerCase().includes(query)).map(n=>{
+    const primary=d.bindings[n],alt=d.altBindings[n];
+    const changed=primary!==settingsDefaults.bindings[n]||(alt||'')!==(settingsDefaults.altBindings[n]||'');
+    return `<div class="setting-row binding-row"><div class="setting-copy"><b>${esc(n)}</b>${query?`<small>${bindingGroup(n)}</small>`:''}</div><div class="row">${primary?button(esc(primary),'settings-rebind',{value:n}):button('Add binding','settings-rebind',{value:n,ghost:true})}${alt?button(esc(alt),'settings-rebind-alt',{value:n}):button('Add binding','settings-rebind-alt',{value:n,ghost:true})}${changed?button('↺','settings-binding-reset',{value:n,ghost:true,small:true}):''}</div></div>`;
+  });
+  return rows.join('')||'<div class="empty-state">No matches. Try another name or clear your search.</div>';
+}
 
 function ensureSettings() {
   if (!state.settingsDraft) {
     state.settings={...clone(settingsDefaults),...state.settings};
+    for(const key of ['bindings','altBindings','padBindings'])state.settings[key]={...clone(settingsDefaults[key]),...state.settings[key]};
     state.settingsDraft=clone(state.settings);
     state.settingsDirty=false;
   }
@@ -43,8 +89,9 @@ function settingsBody() {
       row('Scroll direction','scroll','select',['Standard','Reversed'])+
       row('Scroll sensitivity','scrollSpeed','range',[.1,3,.1])+
       row('Show quick reference','reference','toggle');
-    case 'Key bindings': return `<div class="row between"><span class="muted">Keyboard & mouse</span><span class="pill">Select to rebind</span></div>`+
-      Object.entries(state.settingsDraft.bindings).map(([name,key])=>`<div class="setting-row"><b>${name}</b>${button(esc(key),'settings-rebind',{value:name})}</div>`).join('');
+    case 'Key bindings': return `<div class="search-line"><input class="input" aria-label="Search actions or keys" data-bind="bindingSearch" placeholder="Search actions or keys…" value="${esc(state.bindingSearch||'')}"></div>`+
+      (state.bindingSearch?`<p class="muted">Searching all categories</p>`:`<div class="library-tabs">${Object.keys(bindingGroups).map(n=>`<button class="${(state.bindingGroup||'Movement')===n?'active':''}" data-action="settings-binding-group" data-value="${n}">${n}</button>`).join('')}</div>`)+
+      `<div class="row between"><span class="muted">Keyboard & mouse · primary and alternative</span><span class="pill">Select to rebind</span></div><div id="binding-results">${bindingRows()}</div>`;
     case 'Controller': return group('Sticks & buttons')+
       row('Look sensitivity','padLook','range',[.1,3,.1])+
       row('Invert vertical look','padInvert','toggle')+
@@ -56,13 +103,19 @@ function settingsBody() {
       row('Invert vertical look','touchInvert','toggle')+
       row('Layout','touchLayout','select',['Normal','Mirrored'])+
       row('Control size','touchSize','select',['Small','Normal','Enlarged'])+
-      row('Control opacity','touchOpacity','range',[.2,1,.05])+`</details>`;
+      row('Control opacity','touchOpacity','range',[.2,1,.05])+`</details>`+
+      group('Controller buttons')+
+      `<p class="muted">The left stick moves and the right stick looks. In menus the D-pad or left stick moves focus, A selects, B goes back, LB and RB switch pages, and Start closes.</p>`+
+      Object.values(bindingGroups).flat().filter(n=>n!=='Back / menu').map(n=>{const b=state.settingsDraft.padBindings[n];return `<div class="setting-row binding-row"><b>${esc(n)}</b>${b?button(esc(b),'settings-rebind-pad',{value:n}):button('Add binding','settings-rebind-pad',{value:n,ghost:true})}</div>`;}).join('');
     case 'Display': return group('Frame presentation')+
       row('Display sync','sync','select',['Display synced','Sync off'],'Match frame presentation to your display.')+
-      row('Frame rate limit','fps','select',['60','90','120','144','240','No limit'],'An optional ceiling, independent of display sync.')+
+      `<div class="notice">${state.settingsDraft.sync==='Sync off'?'Sync is off. Frames may tear; choose a limit below to reduce unnecessary work.':'Recommended for normal play. Keeps presentation free of tearing.'}</div>`+
+      row('Frame rate limit','fps','select',['60','90','120','144','240','1000','No limit'],'An optional ceiling, independent of display sync.')+
+      `<div class="setting-row"><div class="setting-copy"><b>${state.settingsDraft.sync==='Sync off'?(state.settingsDraft.fps==='No limit'?'Uncapped rendering':'Sync off'):'Display synced'}</b><small>${state.settingsDraft.fps==='No limit'?'No additional frame limit':`${state.settingsDraft.fps} FPS ceiling`}</small></div><span class="pill">Frame pacing</span></div>`+
       group('Image quality')+
-      row('Anti-aliasing','aa','select',['Off','FXAA','MSAA 4x'],'Smooth voxel edges. MSAA costs more.')+
-      row('Render scale','renderScale','select',['50%','67%','75%','85%','100%'],'Lower values reduce rendering work. Menus stay sharp.');
+      row('Anti-aliasing','aa','select',['Off','FXAA','SMAA','MSAA 4x'],'Smooth voxel edges. MSAA costs more.')+
+      row('Render scale','renderScale','select',['50%','67%','75%','85%','100%'],'Lower values reduce rendering work. Menus stay sharp.')+
+      `<p class="muted">View distance, textures, shadows, and simulation settings stay unchanged.</p>`;
     case 'Audio': return `<div class="row between"><p class="section-label">Sound mix</p><span class="pill">Proposed category</span></div>`+
       row('Master volume','sound','range',[0,100,1])+
       row('Music','music','range',[0,100,1])+
@@ -71,7 +124,7 @@ function settingsBody() {
       row('Reduced motion','motion','toggle',[],'Use immediate interface transitions.')+
       row('Stronger UI contrast','contrast','toggle',[],'Increase panel borders and secondary text contrast.')+
       row('Simple menu background','simpleBackground','toggle',[],'Replace the scenery with a solid background.')+
-      row('Text size','textScale','select',['1','1.25','1.5','2'],'1 is standard; 2 doubles interface text. Layouts adapt.');
+      row('Text size','textScale','select',['1','1.25','1.5','1.75','2'],'1 is standard; 2 doubles interface text. Layouts adapt.');
   }
 }
 
@@ -110,17 +163,32 @@ function settingsAction(name,value) {
   }
   if(name==='settings-discard'){state.settingsDraft=null;state.settingsDirty=false;closeDialog();navigate(state.returnTo);return true;}
   if(name==='settings-return'){applySettings();state.settingsDraft=null;closeDialog();navigate(state.returnTo);return true;}
-  if(name==='settings-rebind'){state.rebinding=value;dialog('Change binding',`<p><b>${esc(value)}</b></p><p>Press a key. Escape cancels.</p>`,button('Cancel','close-dialog'));return true;}
+  if(name==='settings-rebind'||name==='settings-rebind-alt'){state.pendingConflict=null;state.rebinding=value;state.rebindingSlot=name==='settings-rebind'?'bindings':'altBindings';dialog('Change binding',`<p><b>${esc(value)}</b> · ${name==='settings-rebind'?'Primary':'Alternative'}</p><p>Press a key or mouse button. Escape cancels.</p>`,button('Cancel','close-dialog'));return true;}
+  if(name==='settings-rebind-pad'){dialog('Change binding',`<p><b>${esc(value)}</b> · Controller</p><p>Press a controller button. Menu or Esc cancels.</p>`,button('Cancel','close-dialog'));return true;}
+  if(name==='settings-binding-reset'){const d=state.settingsDraft;d.bindings[value]=settingsDefaults.bindings[value];if(settingsDefaults.altBindings[value])d.altBindings[value]=settingsDefaults.altBindings[value];else delete d.altBindings[value];settingsChanged();render();return true;}
+  if(name==='settings-binding-group'){state.bindingGroup=value;render();return true;}
+  if(name==='settings-replace-binding'){const {key,owners}=state.pendingConflict;const d=state.settingsDraft;for(const [slot,action] of owners)d[slot][action]='';d[state.rebindingSlot][state.rebinding]=key;state.pendingConflict=null;state.rebinding=null;settingsChanged();closeDialog();render();return true;}
   return false;
 }
 
+document.addEventListener('input',e=>{
+  if(e.target.dataset.bind!=='bindingSearch')return;
+  state.bindingSearch=e.target.value;
+  if($('#binding-results'))$('#binding-results').innerHTML=bindingRows();
+});
+
 document.addEventListener('keydown',e=>{
-  if(!state.rebinding||!$('#dialog-root').children.length)return;
+  if(!state.rebinding||state.pendingConflict||!$('#dialog-root').children.length)return;
   e.preventDefault();e.stopImmediatePropagation();
   if(e.key==='Escape'){state.rebinding=null;closeDialog();return;}
   const key=e.key===' '?'Space':e.key.length===1?e.key.toUpperCase():e.key;
-  const conflict=Object.entries(state.settingsDraft.bindings).find(([action,binding])=>action!==state.rebinding&&binding===key);
-  if(conflict){toast(`${key} is already used for ${conflict[0]}. Choose another key.`);return;}
-  state.settingsDraft.bindings[state.rebinding]=key;
+  const slot=state.rebindingSlot||'bindings',d=state.settingsDraft;
+  const owners=['bindings','altBindings'].flatMap(s=>Object.entries(d[s]).filter(([action,binding])=>binding===key&&!(s===slot&&action===state.rebinding)).map(([action])=>[s,action]));
+  if(owners.length){
+    state.pendingConflict={key,owners};
+    dialog('Binding already in use',`<p>This binding is assigned to ${owners.map(([,a])=>esc(a)).join(', ')}. Replace it?</p>`,button('Keep existing','close-dialog',{ghost:true})+button('Replace binding','settings-replace-binding',{primary:true}));
+    return;
+  }
+  d[slot][state.rebinding]=key;
   state.rebinding=null;settingsChanged();closeDialog();render();
 });

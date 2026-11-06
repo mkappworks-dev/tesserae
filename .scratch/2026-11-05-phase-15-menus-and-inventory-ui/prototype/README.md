@@ -140,3 +140,25 @@ centred screen were chosen, and the others removed.
 
 Resolved: Survival hides the Catalogue, as the prototype does; the earlier
 "read-only reference" wording is superseded.
+
+## Engine parity additions
+
+Added for ticket 23 so every engine screen has a mockup to compare against.
+They reuse the existing components and tokens.
+
+- Key bindings: every engine action, a primary and an alternative binding
+  (empty reads "Add binding"), search, Movement / Building / Interface tabs, a
+  reset per changed action, and the "Binding already in use" dialog.
+- Controller: the controller button table and its help paragraph.
+- Display: SMAA, a 1000 FPS cap, the sync notice, the frame-pacing summary and
+  the footnote. Accessibility: 175% text.
+- Create World: the resolved seed with Copy, and the cost of each Voxel size.
+  Worlds: "No Worlds yet" when the list is empty.
+- Edit World: Copy seed, locked Mods and Biomes, "Mode changes take effect when
+  the World next opens.", Show folder and the folder line.
+- `/worlds/new/trust` (the Trust sheet) and `/opening` (Opening a World).
+- Inventory: the Shape picker in the inspector.
+- Quick layout: the placement status line and the key-hint footer.
+- Simulate (prototype chrome) gains Starve, Die with items despawned, and an
+  "Engine states" group: Hold remove (break progress), Place hint, Measure tool,
+  Hold Fire (a hand outside the hotbar) and the four save-status states.
