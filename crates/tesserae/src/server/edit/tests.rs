@@ -1446,6 +1446,43 @@ fn the_solid_ray_aims_through_flowing_water() {
     assert!(rejections(&mut app).is_empty());
 }
 
+fn dropped(app: &App) -> Vec<u32> {
+    app.world()
+        .resource::<super::super::entities::EntityStore>()
+        .iter()
+        .map(|e| e.as_dropped().item)
+        .collect()
+}
+
+#[test]
+fn removing_through_flowing_fluid_drops_only_the_bed_under_it() {
+    let mut app = stocked(&[(4, "t:stone")], 4);
+    survival(&mut app);
+    let flow = Occupants {
+        solid: Voxel::AIR,
+        fluid: Some(flowing()),
+        burning: None,
+    };
+    put_occupants(&mut app, [5, 8, 5], flow).1.unwrap();
+    send(&mut app, down(EditAction::Remove));
+    tick(&mut app);
+    assert!(rejections(&mut app).is_empty());
+    assert_eq!(occupants_at(&app, [5, 8, 5]), flow);
+    assert_eq!(dropped(&app), [1], "t:stone, and no t:water");
+}
+
+#[test]
+fn a_creative_removal_of_a_source_drops_nothing() {
+    let mut app = stocked(&[(4, "t:water")], 4);
+    send(&mut app, place_held(SHAPE_FULL_CUBE, Orientation::IDENTITY));
+    tick(&mut app);
+    send(&mut app, down(EditAction::Remove));
+    tick(&mut app);
+    assert!(rejections(&mut app).is_empty());
+    assert_eq!(occupants_at(&app, [5, 8, 5]).fluid, None);
+    assert!(dropped(&app).is_empty());
+}
+
 #[test]
 fn each_tick_applies_a_bounded_number() {
     let mut app = app_with(&[(origin(), ground())]);

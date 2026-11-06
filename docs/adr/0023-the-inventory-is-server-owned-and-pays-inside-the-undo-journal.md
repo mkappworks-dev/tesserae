@@ -65,6 +65,9 @@ single-player would hide.
 
 An implicit Item is an Item like any declared one: it drops as a quarter-Voxel
 cube drawn as its Material, and Pickup takes it back, so death, an undo refund,
-a redo and a save's Carried overflow lose nothing. Only an Item that no content
-names has nothing to become; it is lost, and a death does not report it.
-Throwing an Item away, containers and crafting are later work.
+a redo and a save's Carried overflow lose nothing. Removing a fluid source in
+Survival drops its Item as removing a solid does, so a source placed from the
+Hotbar can be taken back, as Minecraft's and Luanti's buckets allow; flowing
+fluid drops nothing. Only an Item that no content names has nothing to become;
+it is lost, and a death does not report it. Throwing an Item away, containers
+and crafting are later work.

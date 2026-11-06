@@ -613,6 +613,55 @@ mod tests {
             assert_eq!(drops(&app), [(2, 1)]);
         }
 
+        /// Water in hand, placed and dropped by its implicit Item, Item 3.
+        fn watered() -> App {
+            let mut app = stocked(&[(4, "t:water")], 4);
+            survival(&mut app);
+            app
+        }
+
+        fn source() -> tesserae_core::Voxel {
+            tesserae_core::Voxel::cube(tesserae_core::testgen::fixtures().water)
+        }
+
+        #[test]
+        fn undoing_a_source_removal_despawns_its_drop_and_spends_nothing_and_redo_drops_it_again() {
+            let mut app = watered();
+            place(&mut app);
+            remove(&mut app);
+            assert_eq!(drops(&app), [(3, 1)]);
+            let before = inventory(&mut app);
+            replay(&mut app, Undo);
+            assert!(rejections(&mut app).is_empty());
+            assert_eq!(voxel_at(&app, ABOVE), source());
+            assert_eq!(drops(&app), []);
+            assert_eq!(inventory(&mut app), before);
+            replay(&mut app, Redo);
+            assert!(rejections(&mut app).is_empty());
+            assert!(voxel_at(&app, ABOVE).is_air());
+            assert_eq!(drops(&app), [(3, 1)]);
+            assert_eq!(inventory(&mut app), before);
+        }
+
+        #[test]
+        fn undoing_a_source_removal_whose_drop_is_gone_spends_the_item_or_is_refused_without_it() {
+            let mut app = watered();
+            place(&mut app);
+            remove(&mut app);
+            app.world_mut().resource_mut::<EntityStore>().0 = Default::default();
+            set_inventory(&mut app, Inventory::default());
+            replay(&mut app, Undo);
+            assert_eq!(rejections(&mut app), [RejectReason::ItemNeeded]);
+            assert!(voxel_at(&app, ABOVE).is_air());
+            let mut one = Inventory::default();
+            one.receive("t:water", 1, 64);
+            set_inventory(&mut app, one);
+            replay(&mut app, Undo);
+            assert!(rejections(&mut app).is_empty());
+            assert_eq!(voxel_at(&app, ABOVE), source());
+            assert_eq!(inventory(&mut app), Inventory::default());
+        }
+
         #[test]
         fn creative_entries_stay_free_after_a_switch_to_survival() {
             let mut app = game(false);

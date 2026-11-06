@@ -177,8 +177,10 @@ pub(super) fn land(
     })
 }
 
-/// The solid a Player's single deliberate Remove took out of the World, which
-/// is what drops an Item: undo, Layouts, fluid, fire and Mods' Commands do not.
+/// The solid or fluid source a Player's single deliberate Remove took out of
+/// the World, which is what drops an Item: flowing fluid never does, as no
+/// Remove aims at it, and undo, Layouts, the fluid simulation, fire and Mods'
+/// Commands do not.
 pub(super) fn removal(
     action: EditAction,
     entry: &crate::server::undo::Entry,
@@ -188,6 +190,9 @@ pub(super) fn removal(
             if after.is_air() && !before.is_air() =>
         {
             Some(before.material())
+        }
+        (EditAction::Remove | EditAction::RemoveAt(_), EditKind::SourceRemoved(material)) => {
+            Some(material)
         }
         _ => None,
     }

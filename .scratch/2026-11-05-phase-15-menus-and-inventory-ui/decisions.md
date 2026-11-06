@@ -137,3 +137,6 @@ The prototype shows the ones with a screen.
   stands one Voxel above the Biome's surface at a mean spacing in metres, pinned
   with the World's Biome table and absent at coarse levels. Mods still place no
   terrain.
+- In Survival, removing a fluid source drops its Item and flowing fluid drops
+  nothing, as Minecraft's and Luanti's buckets do; a bucket Tool waits for
+  Crafting.

@@ -282,7 +282,8 @@ one fluid Material.
 
 **Source** — fluid that stays: generated lake fluid, and fluid a player or a Mod
 places. It feeds flow without losing volume, and only an Edit, a Command or a
-reaction removes it. Flow never becomes one.
+reaction removes it. Flow never becomes one. In Survival removing one drops its
+Item; no Edit aims at flow, so it drops nothing.
 
 **Flowing** — fluid a source supports, carrying its remaining reach and its
 descent since the reach was last renewed. It recedes when nothing supports it.

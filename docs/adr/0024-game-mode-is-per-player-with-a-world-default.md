@@ -25,9 +25,9 @@ there is no command to do so until step 26.
 
 The mode decides what the Server allows, never what the Client asks: in
 Survival, Catalogue takes and the switch to flight are refused, a Player saved
-flying spawns walking, placing spends, removing drops the Item, and damage,
-hunger and death apply. In Creative removing a Voxel drops nothing. Undo keeps
-the mode each entry was made in
+flying spawns walking, placing spends, removing a solid or a fluid source drops
+its Item, and damage, hunger and death apply. In Creative removing a Voxel drops
+nothing. Undo keeps the mode each entry was made in
 ([ADR-0023](0023-the-inventory-is-server-owned-and-pays-inside-the-undo-journal.md)).
 
 Rejected: a World-only mode, which is simpler for one Player but cannot let one
