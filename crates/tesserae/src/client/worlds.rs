@@ -361,6 +361,8 @@ pub(super) enum Disclosure {
     Ground,
     ClimateScale,
     BiomeParameters,
+    WorldInformation,
+    ManageWorld,
 }
 
 impl Disclosure {

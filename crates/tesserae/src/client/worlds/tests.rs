@@ -251,9 +251,18 @@ fn delete_defaults_to_cancel_refuses_an_open_world_then_removes_it() {
     app.update();
     act(&mut app, Act::Worlds);
     act(&mut app, Act::Edit(path.clone()));
+    act(&mut app, Act::Disclose(Disclosure::ManageWorld));
     act(&mut app, Act::Delete);
     app.update();
     assert_eq!(focused_act(&app), Some(Act::Back));
+    assert_eq!(modal_groups(&mut app), 1, "a dialog");
+    assert!(shown(&mut app, "Edit World"), "over the page it asks about");
+    for line in [
+        "\u{201c}Doomed\u{201d} \u{00b7} Terra \u{00b7} last played",
+        "Trash",
+    ] {
+        assert!(shown(&mut app, line), "{line}");
+    }
     press(&mut app, KeyCode::Escape);
     assert_eq!(launcher(&app).screen, Screen::Edit(path.clone()));
     assert!(path.exists());
@@ -566,7 +575,7 @@ fn a_world_lists_its_mods_and_recreate_opens_them_on_step_two() {
         .world_mut()
         .query::<&Text>()
         .iter(app.world())
-        .any(|t| t.0 == "Mods: Glassworks");
+        .any(|t| t.0 == "Glassworks");
     assert!(listed, "the World's Mods are named");
     act(&mut app, Act::ReCreate);
     assert_eq!(launcher(&app).screen, Screen::Create(Step::World));
@@ -874,6 +883,7 @@ fn only_dialogs_trap_focus_so_the_empty_list_can_reach_create() {
     act(&mut listed, Act::Worlds);
     act(&mut listed, Act::Edit(path));
     assert_eq!(trapping(&mut listed), 0);
+    act(&mut listed, Act::Disclose(Disclosure::ManageWorld));
     act(&mut listed, Act::Delete);
     listed.update();
     assert_eq!(trapping(&mut listed), 1);
@@ -936,6 +946,10 @@ fn tab_and_shift_tab_reach_every_control_on_each_screen() {
     );
     app.update();
     app.update();
+    app.world_mut()
+        .resource_mut::<Launcher>()
+        .flipped
+        .insert(Disclosure::ManageWorld);
     let play = format!("{:?}", Act::Play(path.clone()));
     let edit = format!("{:?}", Act::Edit(path.clone()));
     let screens: [(&str, Screen, Option<Act>, Vec<&str>); 7] = [
@@ -1275,7 +1289,13 @@ fn edit_world_renames_without_touching_the_save_and_records_modes_for_the_next_o
     app.update();
     act(&mut app, Act::Worlds);
     act(&mut app, Act::Edit(path.clone()));
-    for locked in ["Terra 0.1.0", "Seed: 42", "0.5 m"] {
+    for locked in [
+        "Terra 0.1.0",
+        "42",
+        "0.5",
+        "None",
+        "As the Game declared them",
+    ] {
         assert!(shown(&mut app, locked), "{locked} is shown locked");
     }
     type_into(&mut app, Field::Rename, "New name");
@@ -1600,6 +1620,8 @@ fn pad_to_edit(app: &mut App, pad: Entity, path: &Path) {
     reach(app, pad, Act::Edit(path.to_owned()));
     tap(app, pad, GamepadButton::South);
     assert_eq!(launcher(app).screen, Screen::Edit(path.to_owned()));
+    reach(app, pad, Act::Disclose(Disclosure::ManageWorld));
+    tap(app, pad, GamepadButton::South);
 }
 
 #[test]

@@ -46,7 +46,7 @@ pub(super) fn on_edit_world(l: &mut Launcher, cx: &mut Acting, act: Act) {
             };
             let current = l.entry(&path).and_then(Entry::details).map(saved_modes);
             let result = library::valid_name(&l.rename)
-                .map_err(|e| e.to_string())
+                .map_err(|_| too_long())
                 .and_then(|name| library::rename(&path, &name).map_err(describe))
                 .and_then(|()| {
                     // Applied by the Server when the World next opens; nothing changes in play.

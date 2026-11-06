@@ -36,6 +36,7 @@ pub(super) fn spawn(
     let mut focus = None;
     // A dialog draws over the page it asks about.
     let page = match &l.screen {
+        Screen::Delete(path) => Screen::Edit(path.clone()),
         Screen::Discard(step) => Screen::Create(*step),
         screen => screen.clone(),
     };
@@ -85,9 +86,8 @@ pub(super) fn spawn(
                     Screen::Create(Step::Mods) => mods_page(main, l, installed, scroll),
                     Screen::Create(Step::Biomes) => biomes_page(main, l, installed, scroll),
                     Screen::Create(Step::Review) => review(main, l, installed, scroll),
-                    Screen::Discard(_) => None,
+                    Screen::Delete(_) | Screen::Discard(_) => None,
                     Screen::Edit(path) => edit(main, l, installed, path, scroll),
-                    Screen::Delete(path) => delete(main, l, path),
                     Screen::Trust(next) => trust(main, l, installed, next, scroll),
                     Screen::Opening(name) => {
                         centered(main, false, |card| {
@@ -101,6 +101,7 @@ pub(super) fn spawn(
             let resetting = l.screen == Screen::Create(Step::Biomes)
                 && l.form.biomes.as_ref().is_some_and(|d| d.resetting);
             match &l.screen {
+                Screen::Delete(path) => focus = delete(root, l, path),
                 Screen::Discard(_) => focus = discard(root),
                 _ if resetting => focus = reset(root),
                 _ => {}
@@ -992,57 +993,74 @@ fn edit(
             },
             page_scroll(scroll),
             |body| {
-                label(body, "World name");
-                focus = Some(text_field(
+                problem(body, l.problem.as_ref());
+                focus = Some(field(
                     body,
+                    "World name",
                     Field::Rename,
                     &l.rename,
-                    "Renaming keeps your terrain and progress. Up to 64 characters.",
+                    "Renaming keeps your terrain and progress.",
                     "",
                 ));
-                problem(body, l.problem.as_ref());
                 match details {
                     Some(d) => {
-                        row(body, 8.0, |r| {
-                            label(r, "Generation settings");
+                        section(body, |r| {
+                            section_text(r, "Generation settings");
                             cine::pill(r, "Locked");
                         });
-                        locked(body, format!("Game: {}", game_label(d.game.as_ref())));
-                        if !d.mods.is_empty() {
+                        columns(body, 16.0, |c| {
+                            locked(c, "Game", game_label(d.game.as_ref()));
+                            locked(c, "Voxel size (m)", d.voxel_size_m.to_string());
+                        });
+                        gap(body, 18.0);
+                        body.spawn(Node {
+                            column_gap: Val::Px(10.0),
+                            align_items: AlignItems::FlexEnd,
+                            flex_shrink: 0.0,
+                            ..default()
+                        })
+                        .with_children(|r| {
+                            r.spawn(Node {
+                                flex_grow: 1.0,
+                                flex_direction: FlexDirection::Column,
+                                min_width: Val::Px(0.0),
+                                ..default()
+                            })
+                            .with_children(|c| locked(c, "World seed", d.seed.to_string()));
+                            buttons::button(
+                                r,
+                                "Copy",
+                                Act::CopySeed,
+                                ButtonStyle::Small { kind: Kind::Ghost },
+                            );
+                        });
+                        gap(body, 18.0);
+                        columns(body, 16.0, |c| {
                             locked(
-                                body,
-                                format!(
-                                    "Mods: {}",
+                                c,
+                                "Mods",
+                                if d.mods.is_empty() {
+                                    "None".to_owned()
+                                } else {
                                     d.mods
                                         .iter()
                                         .map(|m| ui::title(&m.id))
                                         .collect::<Vec<_>>()
                                         .join(" \u{00b7} ")
-                                ),
+                                },
                             );
-                        }
-                        locked(body, format!("Voxel size: {} m", d.voxel_size_m));
-                        row(body, 8.0, |r| {
-                            locked(r, format!("Seed: {}", d.seed));
-                            buttons::button(
-                                r,
-                                "Copy",
-                                Act::CopySeed,
-                                ButtonStyle::Cinematic {
-                                    kind: Kind::Ghost,
-                                    align: Align::Centre,
+                            locked(
+                                c,
+                                "Biomes",
+                                match &d.biomes {
+                                    Some(edits) => {
+                                        format!("{} changed at creation", edits.biomes.len())
+                                    }
+                                    None => "As the Game declared them".to_owned(),
                                 },
                             );
                         });
-                        locked(
-                            body,
-                            match &d.biomes {
-                                Some(edits) => {
-                                    format!("Biomes: {} changed at creation", edits.biomes.len())
-                                }
-                                None => "Biomes: as the Game declared them".to_owned(),
-                            },
-                        );
+                        gap(body, 18.0);
                         mode_picks(
                             body,
                             "Default game mode",
@@ -1051,6 +1069,7 @@ fn edit(
                             Act::DefaultMode,
                             false,
                         );
+                        gap(body, 18.0);
                         mode_picks(
                             body,
                             "Your game mode",
@@ -1063,76 +1082,91 @@ fn edit(
                             ui::paragraph(
                                 body,
                                 "Mode changes take effect when the World next opens.",
-                                12.0,
+                                theme::TEXT_SMALL,
                                 theme::MUTED,
                             );
                         }
-                        ui::paragraph(
-                            body,
-                            format!(
-                                "Created {} \u{00b7} last played {}",
-                                relative(d.created_unix_s),
-                                relative(d.last_played_unix_s)
-                            ),
-                            12.0,
-                            theme::MUTED,
-                        );
                         for line in &installed.unmet(d) {
-                            ui::paragraph(body, line, 12.0, theme::WARNING);
+                            ui::paragraph(body, line, theme::TEXT_SMALL, theme::WARNING);
                         }
                     }
                     None => ui::paragraph(
                         body,
                         "No details are recorded. Saving a name repairs them from the save.",
-                        12.0,
+                        theme::TEXT_SMALL,
                         theme::MUTED,
                     ),
                 }
-                cine::notice(
+                notice(
                     body,
-                    "This World keeps the Game and generator it was created with. To change its setup, create a new World from these settings.",
+                    "This World keeps the Biomes and generator it was created with. To change its setup, create a new World from these settings.",
                 );
-                row(body, 8.0, |r| {
-                    let same_game = details.is_some_and(|d| {
-                        d.game.is_some()
-                            && d.game == installed.game
-                            && installed.unmet(d).is_empty()
-                    });
-                    if same_game && !entry.is_some_and(Entry::incomplete) {
+                let same_game = details.is_some_and(|d| {
+                    d.game.is_some() && d.game == installed.game && installed.unmet(d).is_empty()
+                });
+                if same_game && !entry.is_some_and(Entry::incomplete) {
+                    body.spawn(Node {
+                        align_self: AlignSelf::FlexStart,
+                        flex_shrink: 0.0,
+                        ..default()
+                    })
+                    .with_children(|r| {
                         buttons::button(
                             r,
                             "Create from these settings",
                             Act::ReCreate,
                             ButtonStyle::Cinematic {
                                 kind: Kind::Plain,
-                                align: Align::Centre,
+                                align: Align::After("\u{2197}"),
                             },
                         );
-                    }
-                    buttons::button(
-                        r,
-                        "Show folder",
-                        Act::ShowFolder,
-                        ButtonStyle::Cinematic {
-                            kind: Kind::Plain,
-                            align: Align::Centre,
+                    });
+                }
+                if let Some(d) = details {
+                    disclosure(
+                        body,
+                        "World information",
+                        l.open(Disclosure::WorldInformation),
+                        Act::Disclose(Disclosure::WorldInformation),
+                        |c| {
+                            let mut lines = vec![
+                                format!("Created {}", relative(d.created_unix_s)),
+                                format!("Last played {}", relative(d.last_played_unix_s)),
+                            ];
+                            if let Some(climate) = d.biomes.as_ref().and_then(|b| b.climate) {
+                                lines.push(format!(
+                                    "Climate size {} m / {} m",
+                                    climate.temperature_size_m, climate.humidity_size_m
+                                ));
+                            }
+                            ui::paragraph(c, lines.join("\n"), theme::TEXT_SMALL, theme::MUTED);
                         },
                     );
-                    buttons::button(
-                        r,
-                        "Delete World…",
-                        Act::Delete,
-                        ButtonStyle::Cinematic {
-                            kind: Kind::Danger,
-                            align: Align::Centre,
-                        },
-                    );
-                });
-                ui::paragraph(
+                }
+                disclosure(
                     body,
-                    format!("Folder: {}", entry.map(Entry::folder).unwrap_or_default()),
-                    12.0,
-                    theme::MUTED,
+                    "Manage World",
+                    l.open(Disclosure::ManageWorld),
+                    Act::Disclose(Disclosure::ManageWorld),
+                    |c| {
+                        ui::paragraph(
+                            c,
+                            format!("Folder: {}", entry.map(Entry::folder).unwrap_or_default()),
+                            theme::TEXT_SMALL,
+                            theme::MUTED,
+                        );
+                        gap(c, 8.0);
+                        small_button(c, "Show folder", Act::ShowFolder, Kind::Ghost);
+                        gap(c, 8.0);
+                        ui::paragraph(
+                            c,
+                            "Deleting moves its folder to the Trash, where you can restore it.",
+                            theme::TEXT_SMALL,
+                            theme::MUTED,
+                        );
+                        gap(c, 8.0);
+                        small_button(c, "Delete World\u{2026}", Act::Delete, Kind::Danger);
+                    },
                 );
             },
             |f| {
@@ -1145,7 +1179,7 @@ fn edit(
                         align: Align::Centre,
                     },
                 );
-                ui::text(f, "Generation is pinned", 12.0, theme::MUTED);
+                footer_hint(f, "Generation is pinned");
                 buttons::button(
                     f,
                     "Save changes",
@@ -1161,23 +1195,17 @@ fn edit(
     focus
 }
 
-/// A value fixed when the World was created, shown but not editable.
-fn locked(parent: &mut ChildSpawnerCommands, value: String) {
+/// A small button at its natural width in a column.
+fn small_button(parent: &mut ChildSpawnerCommands, label: &str, act: Act, kind: Kind) {
     parent
-        .spawn((
-            BackgroundColor(theme::FIELD_LOCKED),
-            BorderColor::all(theme::FIELD_LOCKED_EDGE),
-            Node {
-                min_height: Val::Px(theme::CONTROL_HEIGHT),
-                padding: UiRect::axes(Val::Px(12.0), Val::Px(10.0)),
-                border: UiRect::all(Val::Px(theme::RULE)),
-                border_radius: BorderRadius::all(Val::Px(theme::RADIUS_SMALL)),
-                align_items: AlignItems::Center,
-                flex_shrink: 0.0,
-                ..default()
-            },
-        ))
-        .with_children(|field| ui::text(field, value, theme::TEXT_BODY, theme::FIELD_LOCKED_INK));
+        .spawn(Node {
+            align_self: AlignSelf::FlexStart,
+            flex_shrink: 0.0,
+            ..default()
+        })
+        .with_children(|r| {
+            buttons::button(r, label, act, ButtonStyle::Small { kind });
+        });
 }
 
 /// Equal columns side by side.
@@ -1197,6 +1225,34 @@ fn columns(
             ..default()
         })
         .with_children(children);
+}
+
+/// A value fixed when the World was created, shown as a disabled field.
+fn locked(parent: &mut ChildSpawnerCommands, title: &str, value: String) {
+    parent
+        .spawn(Node {
+            flex_direction: FlexDirection::Column,
+            row_gap: Val::Px(8.0),
+            min_width: Val::Px(0.0),
+            ..default()
+        })
+        .with_children(|c| {
+            label(c, title);
+            c.spawn((
+                BackgroundColor(theme::FIELD_LOCKED),
+                BorderColor::all(theme::FIELD_LOCKED_EDGE),
+                Node {
+                    height: Val::Px(theme::CONTROL_HEIGHT),
+                    padding: UiRect::axes(Val::Px(12.0), Val::Px(0.0)),
+                    border: UiRect::all(Val::Px(theme::RULE)),
+                    border_radius: BorderRadius::all(Val::Px(theme::RADIUS_SMALL)),
+                    align_items: AlignItems::Center,
+                    overflow: Overflow::clip(),
+                    ..default()
+                },
+            ))
+            .with_children(|f| ui::text(f, value, theme::TEXT_BODY, theme::FIELD_LOCKED_INK));
+        });
 }
 
 /// Creative and Survival as two cards, each with what it means unless `compact`.
@@ -2161,43 +2217,41 @@ pub(super) fn sections(installed: &Installed, required: &[String]) -> Vec<(Strin
     out
 }
 
-fn delete(main: &mut ChildSpawnerCommands, l: &Launcher, path: &Path) -> Option<Entity> {
+fn delete(root: &mut ChildSpawnerCommands, l: &Launcher, path: &Path) -> Option<Entity> {
     let entry = l.entry(path);
     let name = l.display_name(path);
-    let mut focus = None;
-    centered(main, true, |card| {
-        ui::weighted_text(card, format!("Delete {name}?"), 22.0, 500, theme::INK);
-        if let Some(d) = entry.and_then(Entry::details) {
-            ui::text(
-                card,
-                format!(
-                    "{} · last played {}",
-                    game_label(d.game.as_ref()),
-                    relative(d.last_played_unix_s)
-                ),
-                13.0,
+    dialog(
+        root,
+        "Delete this World?",
+        |d| {
+            let mut line = format!("\u{201c}{name}\u{201d}");
+            if let Some(details) = entry.and_then(Entry::details) {
+                line += &format!(
+                    " \u{00b7} {} \u{00b7} last played {}",
+                    game_title(details.game.as_ref()),
+                    relative(details.last_played_unix_s)
+                );
+            }
+            cine::dialog_text(d, line, theme::MUTED);
+            cine::dialog_text(
+                d,
+                "Its folder moves to the Trash. You can restore it from there.",
                 theme::MUTED,
             );
-        }
-        ui::paragraph(
-            card,
-            "Its folder moves to the Trash. You can restore it from there.",
-            13.0,
-            theme::MUTED,
-        );
-        problem(card, l.problem.as_ref());
-        row(card, 8.0, |r| {
-            focus = Some(buttons::button(
-                r,
+            problem(d, l.problem.as_ref());
+        },
+        |row| {
+            let keep = buttons::button(
+                row,
                 "Keep World",
                 Act::Back,
                 ButtonStyle::Cinematic {
                     kind: Kind::Ghost,
                     align: Align::Centre,
                 },
-            ));
+            );
             buttons::button(
-                r,
+                row,
                 "Delete World",
                 Act::ConfirmDelete,
                 ButtonStyle::Cinematic {
@@ -2205,9 +2259,9 @@ fn delete(main: &mut ChildSpawnerCommands, l: &Launcher, path: &Path) -> Option<
                     align: Align::Centre,
                 },
             );
-        });
-    });
-    focus
+            keep
+        },
+    )
 }
 
 /// Trust for the whole set on one scrolling page, with its buttons in the footer so they stay
