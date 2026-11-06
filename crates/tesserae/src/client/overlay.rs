@@ -25,11 +25,8 @@ fn spawn_readout(mut commands: Commands) {
         super::help::DebugPanel,
         Visibility::Hidden,
         Text::new("streaming"),
-        TextFont {
-            font_size: bevy::text::FontSize::Px(14.0),
-            ..default()
-        },
-        TextColor(Color::srgba(1.0, 1.0, 1.0, 0.7)),
+        super::theme::font(super::theme::TEXT_SMALL),
+        TextColor(super::theme::READOUT),
         Node {
             position_type: PositionType::Absolute,
             left: Val::Px(16.0),

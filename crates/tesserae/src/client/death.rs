@@ -14,16 +14,18 @@ use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
 use tesserae_core::save::DeathCause;
 
 use super::actions::{Actions, Bindings};
+use super::camera::FlyCamera;
 use super::cinematic::{self as cine, Kind};
 use super::menu_ui as ui;
+use super::theme;
 use crate::server::death::{DeathChanged, DeathReport};
 use crate::server::player::RespawnIntent;
 use crate::session::SessionApp;
 
-const TITLE: Color = Color::srgb_u8(0xf4, 0xec, 0xe8);
-const CAUSE: Color = Color::srgb_u8(0xd4, 0xcf, 0xcc);
-const EYEBROW: Color = Color::srgb_u8(0xd8, 0xa5, 0x9c);
 const RESPAWN_NOTICE_S: f32 = 5.0;
+/// The prototype's `grayscale(.75)` on the World behind; its `brightness(.5)`
+/// is [`theme::DEATH_DIM`], which reaches the sky as grading does not.
+const DEAD_SATURATION: f32 = 0.25;
 
 /// The Server's last word on the Player's death; `None` while alive.
 #[derive(Resource, Default)]
@@ -57,9 +59,25 @@ pub(super) fn plugin(app: &mut App) {
                     .before(super::menu::toggle)
                     .before(super::layout_menu::toggle),
                 render,
+                grade_world,
             )
                 .chain(),
         );
+}
+
+/// UI cannot filter the 3D view, so the camera's own colour grading greys the
+/// World while dead; there is no blur.
+fn grade_world(mut commands: Commands, dead: Res<Dead>, cameras: Query<Entity, With<FlyCamera>>) {
+    if !dead.is_changed() {
+        return;
+    }
+    let mut grading = bevy::render::view::ColorGrading::default();
+    if dead.0.is_some() {
+        grading.global.post_saturation = DEAD_SATURATION;
+    }
+    for camera in &cameras {
+        commands.entity(camera).insert(grading.clone());
+    }
 }
 
 fn receive(
@@ -155,22 +173,25 @@ fn clock(s: u32) -> String {
 }
 
 fn respawn_notice(report: &DeathReport) -> String {
+    if report.death.dropped.is_empty() {
+        return "Back at the World spawn.".into();
+    }
     match report.despawns_in_s {
-        Some(left) if !report.death.dropped.is_empty() => format!(
-            "Back at the World spawn. Your Items are {} m away, for {}.",
+        Some(left) => format!(
+            "Back at the World spawn. Your items are {} m away, for {}.",
             report.from_spawn_m.round(),
             clock(left)
         ),
-        _ => "Back at the World spawn.".into(),
+        None => "Back at the World spawn. Your items have despawned.".into(),
     }
 }
 
 /// The heading and what it means.
-fn cause_lines(cause: Option<&DeathCause>) -> (String, String) {
+fn cause_lines(cause: Option<&DeathCause>, safe_fall_m: f32) -> (String, String) {
     match cause {
         Some(DeathCause::Fall { height_m }) => (
             "You fell too far".into(),
-            format!("Fell {height_m:.0} m. A long fall hurts in proportion to its height."),
+            format!("Fell {height_m:.0} m. Falls over {safe_fall_m} m hurt."),
         ),
         Some(DeathCause::Drowning) => (
             "You ran out of air".into(),
@@ -205,26 +226,35 @@ fn items_line(report: &DeathReport) -> String {
         return "You carried nothing.".into();
     }
     let items: u32 = death.dropped.iter().map(|s| s.count).sum();
-    let items = counted(items as usize, "Item", "Items");
+    let items = counted(items as usize, "item", "items");
     let stacks = counted(death.dropped.len(), "stack", "stacks");
-    let [x, y, z] = death.at_m.to_array().map(|m| m.round() as i64);
-    match report.despawns_in_s {
-        Some(left) => format!(
-            "{items} in {stacks} lie where you fell, at {x}, {y}, {z}. They stay for {}.",
-            clock(left)
-        ),
-        None => format!("{items} in {stacks} fell at {x}, {y}, {z} and have despawned."),
-    }
+    // A typographic minus, as the prototype sets coordinates.
+    let [x, y, z] = death
+        .at_m
+        .to_array()
+        .map(|m| (m.round() as i64).to_string().replace('-', "\u{2212}"));
+    let left = match report.despawns_in_s {
+        Some(left) => format!("They stay for {}.", clock(left)),
+        None => "They have despawned.".into(),
+    };
+    format!("{items} in {stacks} lie where you fell, at {x}, {y}, {z}. {left}")
 }
 
-fn centred(parent: &mut ChildSpawnerCommands, value: String, font: TextFont, color: Color) {
-    parent.spawn((
-        Text::new(value),
-        font,
-        TextLayout::justify(Justify::Center),
-        TextColor(color),
-        Pickable::IGNORE,
-    ));
+fn centred(
+    parent: &mut ChildSpawnerCommands,
+    value: String,
+    font: TextFont,
+    color: Color,
+) -> Entity {
+    parent
+        .spawn((
+            Text::new(value),
+            font,
+            TextLayout::justify(Justify::Center),
+            TextColor(color),
+            Pickable::IGNORE,
+        ))
+        .id()
 }
 
 fn render(
@@ -247,15 +277,16 @@ fn render(
         .and_then(|f| f.0.as_ref())
         .and_then(|f| f.name.clone())
         .unwrap_or_else(|| "Your World".into());
-    let (title, detail) = cause_lines(report.death.cause.as_ref());
+    let (title, detail) = cause_lines(report.death.cause.as_ref(), report.safe_fall_m);
+    let [top, bottom] = theme::DEATH_SCRIM;
     commands
         .spawn((
             Screen,
             GlobalZIndex(9),
-            BackgroundColor(Color::BLACK.with_alpha(0.5)),
+            BackgroundColor(theme::DEATH_DIM),
             BackgroundGradient::from(LinearGradient::to_bottom(vec![
-                ColorStop::auto(Color::srgba_u8(0x1c, 0x08, 0x08, 0x4d)),
-                ColorStop::auto(Color::srgba_u8(0x0a, 0x03, 0x03, 0xa6)),
+                ColorStop::auto(top),
+                ColorStop::auto(bottom),
             ])),
             Node {
                 position_type: PositionType::Absolute,
@@ -282,36 +313,61 @@ fn render(
                     },
                 ))
                 .with_children(|centre| {
-                    centred(
+                    let eyebrow = centred(
                         centre,
                         format!(
                             "{} · {} M FROM THE WORLD SPAWN",
                             place.to_uppercase(),
                             report.from_spawn_m.round()
                         ),
-                        TextFont {
-                            weight: bevy::text::FontWeight(650),
-                            ..ui::font(11.0)
-                        },
-                        EYEBROW,
+                        theme::weighted(theme::TEXT_EYEBROW, theme::STRONG),
+                        theme::DEATH_EYEBROW,
                     );
-                    centred(
+                    centre.commands().entity(eyebrow).insert((
+                        bevy::text::LetterSpacing::Px(theme::EYEBROW_TRACKING),
+                        Node {
+                            margin: UiRect::bottom(Val::Px(12.0)),
+                            ..default()
+                        },
+                    ));
+                    let heading = centred(
                         centre,
                         title,
-                        TextFont {
-                            weight: bevy::text::FontWeight(550),
-                            ..ui::font(46.0)
-                        },
-                        TITLE,
+                        theme::weighted(theme::TEXT_DEATH_TITLE, theme::LABEL),
+                        theme::DEATH_TITLE,
                     );
                     centre
-                        .spawn(Node {
-                            margin: UiRect::new(Val::ZERO, Val::ZERO, Val::Px(10.0), Val::Px(20.0)),
+                        .commands()
+                        .entity(heading)
+                        .insert(bevy::text::LetterSpacing::Px(theme::DEATH_TITLE_TRACKING));
+                    let cause = Node {
+                        margin: UiRect::new(Val::ZERO, Val::ZERO, Val::Px(10.0), Val::Px(20.0)),
+                        ..default()
+                    };
+                    if detail.is_empty() {
+                        centre.spawn(Node {
+                            height: Val::Px(20.0),
                             ..default()
-                        })
-                        .with_children(|cause| centred(cause, detail, ui::font(16.0), CAUSE));
+                        });
+                    } else {
+                        centre.spawn(cause).with_children(|cause| {
+                            centred(
+                                cause,
+                                detail,
+                                theme::font(theme::TEXT_BODY),
+                                theme::DEATH_CAUSE,
+                            );
+                        });
+                    }
                     centre
-                        .spawn((ItemsLine, Node::default()))
+                        .spawn((
+                            ItemsLine,
+                            Node {
+                                align_self: AlignSelf::Stretch,
+                                flex_direction: FlexDirection::Column,
+                                ..default()
+                            },
+                        ))
                         .with_children(|line| cine::notice(line, items_line(report)));
                     centre
                         .spawn(Node {
@@ -321,16 +377,28 @@ fn render(
                             ..default()
                         })
                         .with_children(|actions| {
-                            buttons::button(
+                            let respawn = buttons::button(
                                 actions,
                                 "Respawn",
                                 Respawn,
                                 ButtonStyle::Cinematic {
                                     kind: Kind::Primary,
-                                    align: Align::Glyph("Enter"),
+                                    align: Align::Centre,
                                 },
                             );
-                            super::save::return_buttons(actions);
+                            // The prototype's key hint is quieter than a button's
+                            // own glyph, so it is drawn here and not in `buttons`.
+                            actions.commands().entity(respawn).with_child((
+                                Text::new("Enter"),
+                                theme::weighted(theme::TEXT_KEY, theme::SEMIBOLD),
+                                TextColor(theme::SAGE_INK.with_alpha(0.7)),
+                                Node {
+                                    margin: UiRect::left(Val::Px(2.0)),
+                                    ..default()
+                                },
+                                Pickable::IGNORE,
+                            ));
+                            super::save::return_buttons_as(actions, Kind::Ghost);
                         });
                 });
         });
@@ -414,6 +482,7 @@ mod tests {
                 kept_inventory,
             },
             from_spawn_m: 140.3,
+            safe_fall_m: 3.0,
             despawns_in_s,
         }))
     }
@@ -502,8 +571,8 @@ mod tests {
         for line in [
             "RIVER BEND · 140 M FROM THE WORLD SPAWN",
             "You fell too far",
-            "Fell 25 m. A long fall hurts in proportion to its height.",
-            "64 Items in 2 stacks lie where you fell, at 412, 63, -88. They stay for 5:00.",
+            "Fell 25 m. Falls over 3 m hurt.",
+            "64 items in 2 stacks lie where you fell, at 412, 63, \u{2212}88. They stay for 5:00.",
             "Respawn",
             "Enter",
             "Return to Worlds",
@@ -569,7 +638,7 @@ mod tests {
         assert!(
             texts(&mut app)
                 .iter()
-                .any(|t| t == "Back at the World spawn. Your Items are 140 m away, for 5:00."),
+                .any(|t| t == "Back at the World spawn. Your items are 140 m away, for 5:00."),
             "{:?}",
             texts(&mut app)
         );
@@ -596,7 +665,7 @@ mod tests {
         let on_screen = texts(&mut app);
         assert!(
             on_screen.iter().any(|t| t
-                == "64 Items in 2 stacks lie where you fell, at 412, 63, -88. They stay for 4:12."),
+                == "64 items in 2 stacks lie where you fell, at 412, 63, \u{2212}88. They stay for 4:12."),
             "{on_screen:?}"
         );
         assert!(
@@ -609,7 +678,7 @@ mod tests {
         assert!(
             texts(&mut app)
                 .iter()
-                .any(|t| t == "Back at the World spawn. Your Items are 140 m away, for 4:12."),
+                .any(|t| t == "Back at the World spawn. Your items are 140 m away, for 4:12."),
             "{:?}",
             texts(&mut app)
         );
@@ -623,7 +692,8 @@ mod tests {
         assert!(
             texts(&mut app)
                 .iter()
-                .any(|t| t == "64 Items in 2 stacks fell at 412, 63, -88 and have despawned."),
+                .any(|t| t
+                    == "64 items in 2 stacks lie where you fell, at 412, 63, \u{2212}88. They have despawned."),
             "{:?}",
             texts(&mut app)
         );
@@ -631,7 +701,7 @@ mod tests {
         assert!(
             texts(&mut app)
                 .iter()
-                .any(|t| t == "Back at the World spawn."),
+                .any(|t| t == "Back at the World spawn. Your items have despawned."),
             "{:?}",
             texts(&mut app)
         );

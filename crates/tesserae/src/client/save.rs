@@ -24,12 +24,16 @@ struct DirectQuit;
 /// The Menu's way out: back to the Worlds, or for a World opened directly,
 /// which has no list to return to, Save & Quit.
 pub(super) fn return_buttons(parent: &mut ChildSpawnerCommands) {
+    return_buttons_as(parent, Kind::Plain);
+}
+
+pub(super) fn return_buttons_as(parent: &mut ChildSpawnerCommands, kind: Kind) {
     buttons::button(
         parent,
         "Return to Worlds",
         ToList,
         ButtonStyle::Cinematic {
-            kind: Kind::Plain,
+            kind,
             align: Align::Glyph("→"),
         },
     );
@@ -38,7 +42,7 @@ pub(super) fn return_buttons(parent: &mut ChildSpawnerCommands) {
         "Save & Quit",
         Action(SaveAction::SaveQuit),
         ButtonStyle::Cinematic {
-            kind: Kind::Plain,
+            kind,
             align: Align::Glyph("→"),
         },
     );

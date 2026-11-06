@@ -500,6 +500,7 @@ fn hud_fixture(
                 kept_inventory: kept,
             },
             from_spawn_m: 182.0,
+            safe_fall_m: 3.0,
             despawns_in_s: (!kept).then_some(287),
         })));
     }
@@ -518,7 +519,7 @@ fn hud_fixture(
         }
     }
     if let Some(text) = notice {
-        super::menu_ui::notify_for(&mut commands, &text, super::menu_ui::Tone::Alert, 10.0);
+        super::menu_ui::notify_for(&mut commands, &text, super::menu_ui::Tone::Change, 10.0);
     }
 }
 

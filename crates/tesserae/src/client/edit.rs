@@ -21,7 +21,7 @@ use tesserae_core::{MaterialId, Orientation, SHAPE_FULL_CUBE, ShapeId};
 
 use super::camera::FlyCamera;
 use crate::content::{ContentCatalogue, ItemLook};
-use crate::server::edit::{EditAction, EditIntent, EditRejected};
+use crate::server::edit::{EditAction, EditIntent, EditRejected, RejectReason};
 use crate::server::inventory::{InventoryChanged, InventoryIntent, MAX_STACK};
 use crate::server::tool::ToolId;
 
@@ -365,12 +365,12 @@ pub(super) struct Catalogue(pub(super) ContentCatalogue);
 /// The last thing the Server declined, and how long it has left on screen.
 #[derive(Resource, Default)]
 pub(super) struct Notice {
-    shown: Option<(&'static str, f32)>,
+    shown: Option<(String, f32)>,
 }
 
 impl Notice {
-    pub(super) fn show(&mut self, text: &'static str) {
-        self.shown = Some((text, NOTICE_SECS));
+    pub(super) fn show(&mut self, text: impl Into<String>) {
+        self.shown = Some((text.into(), NOTICE_SECS));
     }
 
     fn tick(&mut self, seconds: f32) {
@@ -382,8 +382,8 @@ impl Notice {
         }
     }
 
-    fn text(&self) -> &'static str {
-        self.shown.map_or("", |(text, _)| text)
+    fn text(&self) -> &str {
+        self.shown.as_ref().map_or("", |(text, _)| text)
     }
 }
 
@@ -412,15 +412,11 @@ pub(super) fn plugin(app: &mut App) {
 
 #[derive(Component)]
 pub(super) struct Crosshair;
-pub(super) const CROSSHAIR_ALPHA: f32 = 0.8;
+pub(super) const CROSSHAIR_ALPHA: f32 = super::theme::RETICLE_ALPHA;
 /// While the Server reports the camera sees past what the Eye can.
 pub(super) const BLOCKED_CROSSHAIR_ALPHA: f32 = 0.3;
 
 fn spawn_hud(mut commands: Commands) {
-    let font = |size| TextFont {
-        font_size: bevy::text::FontSize::Px(size),
-        ..default()
-    };
     commands
         .spawn(Node {
             position_type: PositionType::Absolute,
@@ -433,8 +429,8 @@ fn spawn_hud(mut commands: Commands) {
         .with_child((
             Crosshair,
             Text::new("+"),
-            font(22.0),
-            TextColor(Color::srgba(1.0, 1.0, 1.0, CROSSHAIR_ALPHA)),
+            super::theme::font(super::theme::TEXT_RETICLE),
+            TextColor(super::theme::RETICLE.with_alpha(CROSSHAIR_ALPHA)),
         ));
 }
 
@@ -447,8 +443,9 @@ pub(super) fn receive_catalogue(
         if catalogue.0 == *message {
             continue;
         }
-        // Every World opens empty-handed; a slot key or click picks one up.
-        hotbar.outside = Some(Holding::Empty);
+        // Every World opens holding its selected slot; `hotbar_store` asks for
+        // the one last chosen.
+        hotbar.outside = None;
         catalogue.0 = message.clone();
     }
 }
@@ -696,23 +693,26 @@ pub(super) fn send_intents(
     });
 }
 
+/// A done undo or redo says nothing: the World shows it.
 fn show_rejections(
     mut commands: Commands,
     mut rejected: MessageReader<EditRejected>,
     mut notice: ResMut<Notice>,
-    quiet: Res<QuietUntil>,
+    (quiet, hotbar): (Res<QuietUntil>, Res<Hotbar>),
     time: Res<Time>,
 ) {
     for message in rejected.read() {
         if time.elapsed_secs_f64() < quiet.0 {
             continue;
         }
-        notice.show(message.reason.message());
-        super::menu_ui::notify(
-            &mut commands,
-            message.reason.message(),
-            super::menu_ui::Tone::Alert,
-        );
+        let text = match message.reason {
+            RejectReason::NothingHeld => {
+                format!("Nothing to place in hotbar slot {}.", hotbar.selected + 1)
+            }
+            reason => reason.message().to_owned(),
+        };
+        super::menu_ui::notify(&mut commands, &text, super::menu_ui::Tone::Alert);
+        notice.show(text);
     }
     notice.tick(time.delta_secs());
 }
@@ -846,7 +846,6 @@ mod tests {
     use crate::client::camera::look;
     use crate::client::menu;
     use crate::content::{CatalogueMaterial, CatalogueShape, MaterialPalette};
-    use crate::server::edit::RejectReason;
     use crate::server::player::{MovementFeedback, Player, PoseCorrection};
     use bevy::ecs::message::Messages;
     use bevy::input::mouse::AccumulatedMouseMotion;

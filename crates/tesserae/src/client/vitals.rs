@@ -8,6 +8,7 @@ use bevy::prelude::*;
 
 use super::game_mode::Mode;
 use super::profile::Preferences;
+use super::theme::{self, AIR, HEALTH, HUNGER};
 use crate::server::vitals::{VitalsChanged, drawn_points};
 use crate::session::SessionApp;
 
@@ -15,8 +16,6 @@ const TILE_PX: f32 = 16.0;
 const TILE_GAP_PX: f32 = 3.0;
 const ROW_GAP_PX: f32 = 5.0;
 const ROWS_PADDING_PX: f32 = 6.0;
-/// The air row and the health row; the air row's height is always held.
-pub(super) const ROWS_PX: f32 = 2.0 * TILE_PX + ROW_GAP_PX;
 /// At or below this share of full health the screen's edge reddens.
 const LOW_HEALTH: f32 = 0.3;
 const FLASH_S: f32 = 0.4;
@@ -24,15 +23,9 @@ const VIGNETTE_PULSE_S: f32 = 1.6;
 const THROB_S: f32 = 0.8;
 const THROB_PX: f32 = 2.0;
 
-const HEALTH: Color = Color::srgb_u8(0xc8, 0x64, 0x5a);
-const HUNGER: Color = Color::srgb_u8(0xc9, 0xa3, 0x5a);
-const AIR: Color = Color::srgb_u8(0x8f, 0xb6, 0xc9);
-const EMPTY: Color = Color::srgb_u8(0x1a, 0x1b, 0x1e);
-const TILE_EDGE: Color = Color::srgb_u8(5, 5, 6);
-const BEVEL_LIGHT: Color = Color::srgba_u8(255, 255, 255, 0x2e);
-const BEVEL_DARK: Color = Color::srgba_u8(0, 0, 0, 0x59);
-const VIGNETTE: Color = Color::srgba_u8(0x5a, 0x0d, 0x0d, 0x8c);
-const FLASH: Color = Color::srgba_u8(0x8a, 0x1d, 0x1d, 0x40);
+const EMPTY: Color = theme::VITAL_EMPTY;
+const VIGNETTE: Color = theme::LOW_HEALTH_VIGNETTE;
+const FLASH: Color = theme::HIT_FLASH;
 
 /// Where the hotbar holds the Vitals rows, between the held Item's name and
 /// the bar.
@@ -248,7 +241,7 @@ fn tile(parent: &mut ChildSpawnerCommands, tile: Tile) {
             },
             BackgroundColor(EMPTY),
             BackgroundGradient::default(),
-            BorderColor::all(TILE_EDGE),
+            BorderColor::all(theme::SLOT_EDGE),
             UiTransform::default(),
             Pickable::IGNORE,
         ))
@@ -264,10 +257,10 @@ fn tile(parent: &mut ChildSpawnerCommands, tile: Tile) {
                 ..default()
             },
             BorderColor {
-                top: BEVEL_LIGHT,
-                left: BEVEL_LIGHT,
-                bottom: BEVEL_DARK,
-                right: BEVEL_DARK,
+                top: theme::VITAL_BEVEL[0],
+                left: theme::VITAL_BEVEL[0],
+                bottom: theme::VITAL_BEVEL[1],
+                right: theme::VITAL_BEVEL[1],
             },
             Pickable::IGNORE,
         ));

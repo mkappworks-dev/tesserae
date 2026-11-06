@@ -74,3 +74,7 @@
 .game.reduced-motion #notice-card{transition:none}.game.reduced-motion .feed-row{animation:none}
 @media(prefers-reduced-motion:reduce){.low-health-vignette,.hit-flash,.vital-tile{animation:none!important}}
 @media(max-width:940px){.death-screen h1{font-size:34px}.sim-panel{width:220px}}
+
+/* Play and death have no footer: it is launcher and menu chrome. The hotbar sits 12 px off the edge, as in the engine. */
+.game:is([data-view=play],[data-view=death]) .game-footer{display:none}
+.game[data-view=play] .hud-bottom{bottom:12px}

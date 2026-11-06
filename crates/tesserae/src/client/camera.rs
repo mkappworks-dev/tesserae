@@ -121,11 +121,8 @@ fn spawn_hint(mut commands: Commands) {
     commands.spawn((
         CursorHint,
         Text::new("Click to look around\nEsc to release the cursor"),
-        TextFont {
-            font_size: bevy::text::FontSize::Px(14.0),
-            ..default()
-        },
-        TextColor(Color::srgba(1.0, 1.0, 1.0, 0.7)),
+        super::theme::font(super::theme::TEXT_SMALL),
+        TextColor(super::theme::READOUT),
         Node {
             position_type: PositionType::Absolute,
             left: Val::Px(16.0),
@@ -145,10 +142,11 @@ fn show_hint(
         Option<Res<super::menu::Menu>>,
         Option<Res<super::settings::Settings>>,
     ),
+    dead: Option<Res<super::death::Dead>>,
 ) {
-    // The Menu and Settings free the cursor too, but say where to go themselves.
+    // The Menu, Settings and death screen free the cursor too, but say where to go themselves.
     let covered = menu.is_some_and(|m| m.open) || settings.is_some_and(|s| s.open);
-    let wanted = if cursor.grab_mode == CursorGrabMode::None && !covered {
+    let wanted = if cursor.grab_mode == CursorGrabMode::None && !covered && super::death::alive(dead) {
         Visibility::Inherited
     } else {
         Visibility::Hidden

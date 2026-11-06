@@ -66,7 +66,7 @@ function tickTime(seconds,sprinting){
   v.hunger=Math.max(0,v.hunger-(sprinting?rules.sprintDrain*2:rules.idleDrain));
   if(v.hunger>=rules.regenAbove)v.health=Math.min(rules.maxHealth,v.health+Math.floor(seconds*rules.regenPerSecond));
   log(`${seconds} s ${sprinting?'sprinting':'idle'}.`);
-  if(!v.hunger){hurt(1,{title:'You starved',detail:'Hunger reached zero',short:'Starved'});return;}
+  if(!v.hunger){hurt(1,{title:'You starved',detail:'Hunger reached zero.',short:'Starved'});return;}
   render();
 }
 
@@ -149,7 +149,7 @@ function survivalHud(){
 
 function deathScreen(){
   ensureSurvival();
-  const d=state.death||(deathScreen.sample ||= {cause:{title:'You fell too far',detail:'Fell 25 m',short:'Fell 25 m'},dropped:[{id:'rock',count:40},{id:'dirt',count:24}],at:'412, 63, −88',distance:140,diedAt:Date.now()});
+  const d=state.death||(deathScreen.sample ||= {cause:{title:'You fell too far',detail:'Fell 25 m. Falls over 3 m hurt.',short:'Fell 25 m'},dropped:[{id:'rock',count:40},{id:'dirt',count:24}],at:'412, 63, −88',distance:140,diedAt:Date.now()});
   const left=despawnLeft(d);
   const kept=state.keepInventory,count=d.dropped.reduce((n,s)=>n+s.count,0);
   const items=kept?'You keep your Inventory: this Game declares keep_inventory.':d.dropped.length?`${count} items in ${d.dropped.length} stacks lie where you fell, at ${d.at}.`:'You carried nothing.';
@@ -184,8 +184,8 @@ function survivalAction(name,value){
   if(name==='sim-fill'){fillBackpack();return true;}
   if(name==='sim-fall'){const m=Number(value),dmg=Math.max(0,(m-rules.safeFall)*rules.fallPerMetre);if(!dmg){log('A safe landing.');render();return true;}hurt(dmg,{title:'You fell too far',detail:`Fell ${m} m. Falls over ${rules.safeFall} m hurt.`,short:`Fell ${m} m`});return true;}
   if(name==='sim-dive'){state.vitals.underwater=!state.vitals.underwater;if(!state.vitals.underwater)state.vitals.air=rules.maxAir;render();return true;}
-  if(name==='sim-breath'){const v=state.vitals;if(!survival()){log('Creative: no air limit.');render();return true;}if(!v.underwater){log('Dive first.');render();return true;}if(v.air>0){v.air=Math.max(0,v.air-2);render();}else hurt(rules.drownPerSecond*2,{title:'You ran out of air',detail:'Underwater with no breath left',short:'Drowned'});return true;}
-  if(name==='sim-lava'){hurt(rules.lavaPerSecond,{title:'You touched lava',detail:'terra:lava declares contact damage',short:'Burned'});return true;}
+  if(name==='sim-breath'){const v=state.vitals;if(!survival()){log('Creative: no air limit.');render();return true;}if(!v.underwater){log('Dive first.');render();return true;}if(v.air>0){v.air=Math.max(0,v.air-2);render();}else hurt(rules.drownPerSecond*2,{title:'You ran out of air',detail:'Underwater with no breath left.',short:'Drowned'});return true;}
+  if(name==='sim-lava'){hurt(rules.lavaPerSecond,{title:'You touched lava',detail:'Lava hurts while you touch it.',short:'Burned'});return true;}
   if(name==='sim-time'){tickTime(value==='sprint'?10:60,value==='sprint');return true;}
   if(name==='sim-eat'){eat();return true;}
   if(name==='sim-starve'){hurt(rules.maxHealth,{title:'You starved',detail:'Hunger reached zero.',short:'Starved'});return true;}

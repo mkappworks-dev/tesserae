@@ -230,7 +230,10 @@ fn model(
     }
 }
 fn position(
-    removal: Option<Res<super::removal::Progress>>,
+    (removal, dead): (
+        Option<Res<super::removal::Progress>>,
+        Option<Res<super::death::Dead>>,
+    ),
     (menu, settings, layout): (
         Res<Menu>,
         Option<Res<super::settings::Settings>>,
@@ -242,7 +245,7 @@ fn position(
     mut ghost: Query<(&mut Transform, &mut Visibility), GhostOnly>,
     mut hand: Query<&mut Visibility, HandOnly>,
 ) {
-    let menu_open = menu.open || settings.is_some_and(|s| s.open);
+    let menu_open = menu.open || settings.is_some_and(|s| s.open) || !super::death::alive(dead);
     let cell = (!removal.is_some_and(|r| r.active())
         && !menu_open
         && !layout.is_some_and(|layout| layout.on)
