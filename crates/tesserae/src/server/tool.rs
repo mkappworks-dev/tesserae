@@ -83,14 +83,14 @@ pub enum UseRefusal {
 impl UseRefusal {
     pub fn message(self) -> &'static str {
         match self {
-            UseRefusal::OutOfReach => "nothing in reach",
-            UseRefusal::OriginTooFar => "too far from where the server has you",
-            UseRefusal::Blocked => "something is in the way",
-            UseRefusal::TargetChanged => "that changed; aim again",
-            UseRefusal::NotLoaded => "that part of the world is not loaded",
-            UseRefusal::UnknownTool => "that tool is not available",
-            UseRefusal::NotHungry => "you aren’t hungry",
-            UseRefusal::NotFood => "that is not food",
+            UseRefusal::OutOfReach => "Nothing in reach.",
+            UseRefusal::OriginTooFar => "Too far from where the Server has you.",
+            UseRefusal::Blocked => "Something is in the way.",
+            UseRefusal::TargetChanged => "That changed. Aim again.",
+            UseRefusal::NotLoaded => "That part of the World is not loaded.",
+            UseRefusal::UnknownTool => "That Tool is not available.",
+            UseRefusal::NotHungry => "You aren’t hungry.",
+            UseRefusal::NotFood => "Hold food in the selected hotbar slot to eat.",
         }
     }
 }

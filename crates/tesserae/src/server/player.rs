@@ -94,10 +94,10 @@ impl MovementFeedback {
         match self {
             Self::Switched(MovementMode::Physics) => "Physics mode",
             Self::Switched(MovementMode::Flight) => "Free flight mode",
-            Self::Forbidden => "Movement mode forbidden by Server policy",
-            Self::CreativeOnly => "Flight is Creative-only",
-            Self::Obstructed => "Physics requires a clear body in loaded terrain",
-            Self::RespawnBlocked => "Respawn blocked: no clear space over the spawn",
+            Self::Forbidden => "The Server’s policy forbids that movement mode.",
+            Self::CreativeOnly => "Flight is Creative-only.",
+            Self::Obstructed => "Physics needs a clear body in loaded terrain.",
+            Self::RespawnBlocked => "Respawn blocked: no clear space over the spawn.",
         }
     }
     pub fn refused(self) -> bool {

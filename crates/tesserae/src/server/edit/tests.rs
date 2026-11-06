@@ -1609,22 +1609,22 @@ fn the_fire_tool_refuses_what_a_fire_command_would_and_changes_nothing() {
     };
     let before = column(&app);
     let cases = [
-        (down_at(6.5, EditAction::Ignite), "that does not burn"),
-        (down(EditAction::Ignite), "it is already burning"),
-        (down_at(4.5, EditAction::Ignite), "it is too wet to burn"),
+        (down_at(6.5, EditAction::Ignite), "That does not burn."),
+        (down(EditAction::Ignite), "It is already burning."),
+        (down_at(4.5, EditAction::Ignite), "It is too wet to burn."),
         (
             EditIntent {
                 direction: Vec3::Y,
                 ..down(EditAction::Ignite)
             },
-            "nothing in reach",
+            "Nothing in reach.",
         ),
         (
             EditIntent {
                 origin: Vec3::new(5.5, 30.0, 5.5),
                 ..down(EditAction::Remove)
             },
-            "nothing in reach",
+            "Nothing in reach.",
         ),
     ];
     for (intent, expected) in cases {

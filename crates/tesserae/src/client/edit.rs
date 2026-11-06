@@ -21,7 +21,7 @@ use tesserae_core::{MaterialId, Orientation, SHAPE_FULL_CUBE, ShapeId};
 
 use super::camera::FlyCamera;
 use crate::content::{ContentCatalogue, ItemLook};
-use crate::server::edit::{EditAction, EditIntent, EditRejected};
+use crate::server::edit::{EditAction, EditIntent, EditRejected, RejectReason};
 use crate::server::inventory::{InventoryChanged, InventoryIntent, MAX_STACK};
 use crate::server::tool::ToolId;
 
@@ -365,12 +365,12 @@ pub(super) struct Catalogue(pub(super) ContentCatalogue);
 /// The last thing the Server declined, and how long it has left on screen.
 #[derive(Resource, Default)]
 pub(super) struct Notice {
-    shown: Option<(&'static str, f32)>,
+    shown: Option<(String, f32)>,
 }
 
 impl Notice {
-    pub(super) fn show(&mut self, text: &'static str) {
-        self.shown = Some((text, NOTICE_SECS));
+    pub(super) fn show(&mut self, text: impl Into<String>) {
+        self.shown = Some((text.into(), NOTICE_SECS));
     }
 
     fn tick(&mut self, seconds: f32) {
@@ -382,8 +382,8 @@ impl Notice {
         }
     }
 
-    fn text(&self) -> &'static str {
-        self.shown.map_or("", |(text, _)| text)
+    fn text(&self) -> &str {
+        self.shown.as_ref().map_or("", |(text, _)| text)
     }
 }
 
@@ -392,7 +392,6 @@ pub(super) fn plugin(app: &mut App) {
         .init_session_state::<Catalogue>()
         .init_session_state::<Notice>()
         .init_session_state::<QuietUntil>()
-        .add_session_message::<crate::server::undo::HistoryApplied>()
         .add_session_message::<InventoryChanged>()
         .add_session_message::<InventoryIntent>()
         .add_session_systems(Startup, spawn_hud)
@@ -697,32 +696,26 @@ pub(super) fn send_intents(
     });
 }
 
+/// A done undo or redo says nothing: the World shows it.
 fn show_rejections(
     mut commands: Commands,
     mut rejected: MessageReader<EditRejected>,
-    mut applied: MessageReader<crate::server::undo::HistoryApplied>,
     mut notice: ResMut<Notice>,
-    quiet: Res<QuietUntil>,
+    (quiet, hotbar): (Res<QuietUntil>, Res<Hotbar>),
     time: Res<Time>,
 ) {
-    for message in applied.read() {
-        let text = match message.0 {
-            crate::server::undo::HistoryAction::Undo => "Undone",
-            crate::server::undo::HistoryAction::Redo => "Redone",
-        };
-        notice.show(text);
-        super::menu_ui::notify(&mut commands, text, super::menu_ui::Tone::Change);
-    }
     for message in rejected.read() {
         if time.elapsed_secs_f64() < quiet.0 {
             continue;
         }
-        notice.show(message.reason.message());
-        super::menu_ui::notify(
-            &mut commands,
-            message.reason.message(),
-            super::menu_ui::Tone::Alert,
-        );
+        let text = match message.reason {
+            RejectReason::NothingHeld => {
+                format!("Nothing to place in hotbar slot {}.", hotbar.selected + 1)
+            }
+            reason => reason.message().to_owned(),
+        };
+        super::menu_ui::notify(&mut commands, &text, super::menu_ui::Tone::Alert);
+        notice.show(text);
     }
     notice.tick(time.delta_secs());
 }
@@ -856,7 +849,6 @@ mod tests {
     use crate::client::camera::look;
     use crate::client::menu;
     use crate::content::{CatalogueMaterial, CatalogueShape, MaterialPalette};
-    use crate::server::edit::RejectReason;
     use crate::server::player::{MovementFeedback, Player, PoseCorrection};
     use bevy::ecs::message::Messages;
     use bevy::input::mouse::AccumulatedMouseMotion;
@@ -1081,7 +1073,6 @@ mod tests {
             .add_message::<ContentCatalogue>()
             .add_message::<EditIntent>()
             .add_message::<EditRejected>()
-            .add_message::<crate::server::undo::HistoryApplied>()
             .add_message::<MovementFeedback>()
             .add_message::<crate::server::player::RestoreView>()
             .add_message::<PoseCorrection>()
