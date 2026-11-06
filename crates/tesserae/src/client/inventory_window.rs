@@ -19,6 +19,7 @@ use tesserae_core::inventory::{BACKPACK_SLOTS, HOTBAR_SLOTS, Inventory, Slot, St
 use tesserae_core::{MaterialId, ShapeId};
 
 mod catalogue;
+mod flight;
 pub(super) mod look;
 
 use super::actions::{Action, Actions};
@@ -110,7 +111,7 @@ pub(super) fn plugin(app: &mut App) {
         .add_observer(drag_start)
         .add_observer(drag_end)
         .add_observer(drop_on_slot)
-        .add_plugins((catalogue::plugin, look::plugin))
+        .add_plugins((catalogue::plugin, flight::plugin, look::plugin))
         .add_session_systems(
             Update,
             (
@@ -121,12 +122,14 @@ pub(super) fn plugin(app: &mut App) {
                     .before(super::input::resolve)
                     .before(super::camera::grab_cursor),
                 (
+                    flight::note_takes,
                     receive,
                     render,
                     catalogue::fill,
                     catalogue::focus_search,
                     paint,
                     catalogue::paint,
+                    flight::fly,
                 )
                     .chain()
                     .after(toggle),
@@ -216,8 +219,10 @@ fn receive(
     mut changes: MessageReader<InventoryChanged>,
     mut refusals: MessageReader<InventoryRefused>,
     mut held: ResMut<Held>,
+    mut takeoffs: ResMut<flight::Takeoffs>,
 ) {
     if let Some(InventoryChanged(now)) = changes.read().last() {
+        flight::landed(&mut commands, &mut takeoffs, &held.0, now);
         held.0 = now.clone();
     }
     for InventoryRefused(refusal) in refusals.read() {
