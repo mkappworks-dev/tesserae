@@ -607,6 +607,19 @@ fn lines(facts: &WorldFacts, own: Option<GameMode>) -> Vec<String> {
     ]
 }
 
+/// The screens that free the cursor and hide the HUD while open.
+pub(super) type Covers<'w> = (
+    Option<Res<'w, Menu>>,
+    Option<Res<'w, super::settings::Settings>>,
+    Option<Res<'w, super::inventory_window::InventoryWindow>>,
+);
+
+pub(super) fn covered((menu, settings, inventory): &Covers) -> bool {
+    menu.as_ref().is_some_and(|m| m.open)
+        || settings.as_ref().is_some_and(|s| s.open)
+        || inventory.as_ref().is_some_and(|i| i.open)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

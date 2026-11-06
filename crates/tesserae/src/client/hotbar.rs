@@ -49,17 +49,12 @@ pub(super) fn plugin(app: &mut App) {
 pub(super) fn rebuild(
     mut commands: Commands,
     (hotbar, catalogue, looks): (Res<Hotbar>, Res<Catalogue>, Res<Looks>),
-    menu: Option<Res<super::menu::Menu>>,
-    settings: Option<Res<super::settings::Settings>>,
-    inventory: Option<Res<super::inventory_window::InventoryWindow>>,
+    covers: super::menu::Covers,
     dead: Option<Res<super::death::Dead>>,
     roots: Query<Entity, With<HotbarRoot>>,
     mut shown: Local<Option<Hotbar>>,
 ) {
-    let hidden = menu.is_some_and(|m| m.open)
-        || settings.is_some_and(|s| s.open)
-        || inventory.is_some_and(|i| i.open)
-        || !super::death::alive(dead);
+    let hidden = super::menu::covered(&covers) || !super::death::alive(dead);
     let wanted = (!hidden).then(|| hotbar.clone());
     if *shown == wanted && !catalogue.is_changed() && !looks.is_changed() {
         return;
