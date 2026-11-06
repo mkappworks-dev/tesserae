@@ -375,6 +375,8 @@ struct Built {
     inspected: Option<Slot>,
     details: bool,
     key: String,
+    /// The Catalogue is beside the Inventory only outside Survival.
+    survival: bool,
     /// The Material the selected slot places and the Shape chosen for it.
     shaping: Option<(tesserae_core::MaterialId, tesserae_core::ShapeId)>,
 }
@@ -408,6 +410,7 @@ fn render(
         inspected: window.inspected,
         details: window.details,
         key: bindings.label(Action::Inventory, &labels),
+        survival: mode.survival(),
         shaping: match hotbar.held() {
             Holding::Solid {
                 material, shape, ..
@@ -423,6 +426,7 @@ fn render(
         .and_then(|f| f.get())
         .and_then(|entity| controls.get(entity).ok())
         .copied();
+    let was_survival = built.as_ref().map(|built| built.survival);
     *built = wanted.clone();
     let Some(state) = wanted else {
         for root in &roots {
@@ -430,11 +434,20 @@ fn render(
         }
         return;
     };
-    for card in &cards {
-        commands.entity(card).despawn();
+    // The row is built once per opening, so a mode change while open rebuilds
+    // it with the Catalogue added or taken away.
+    let reframe = was_survival.is_some_and(|was| was != state.survival);
+    if reframe {
+        for root in &roots {
+            commands.entity(root).despawn();
+        }
+    } else {
+        for card in &cards {
+            commands.entity(card).despawn();
+        }
     }
     let opening = rows.is_empty();
-    let row = match rows.iter().next() {
+    let row = match rows.iter().next().filter(|_| !reframe) {
         Some(row) => row,
         None => {
             let row = commands
@@ -447,7 +460,7 @@ fn render(
                     },
                 ))
                 .with_children(|row| {
-                    if !mode.survival() {
+                    if !state.survival {
                         catalogue::panel(row, &searches.catalogue);
                     }
                 })
@@ -1589,6 +1602,29 @@ mod tests {
                 .iter(world)
                 .any(|t| t.0 == crate::server::inventory::CREATIVE_ONLY)
         );
+    }
+
+    #[test]
+    fn the_catalogue_goes_when_the_mode_turns_survival_with_the_window_open() {
+        let mut app = app();
+        press(&mut app, KeyCode::KeyI);
+        let catalogue = |app: &mut App| {
+            let world = app.world_mut();
+            world
+                .query_filtered::<(), With<SearchBox>>()
+                .iter(world)
+                .count()
+        };
+        assert_eq!(catalogue(&mut app), 1);
+        let mut mode = app
+            .world_mut()
+            .query::<&mut crate::server::game_mode::PlayerMode>();
+        mode.single_mut(app.world_mut()).unwrap().0 = crate::server::game_mode::GameMode::Survival;
+        server(&mut app);
+        app.update();
+        assert!(shown(&mut app));
+        assert_eq!(catalogue(&mut app), 0);
+        assert_eq!(count(&mut app, Slot::Backpack(0)).as_deref(), Some("64"));
     }
 
     #[test]
