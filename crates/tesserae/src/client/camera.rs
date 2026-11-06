@@ -138,14 +138,17 @@ fn show_hint(
     bindings: Res<super::actions::Bindings>,
     labels: Res<super::actions::Labels>,
     touch: Res<super::touch::TouchFrame>,
-    (menu, settings): (
+    (menu, settings, inventory): (
         Option<Res<super::menu::Menu>>,
         Option<Res<super::settings::Settings>>,
+        Option<Res<super::inventory_window::InventoryWindow>>,
     ),
     dead: Option<Res<super::death::Dead>>,
 ) {
-    // The Menu, Settings and death screen free the cursor too, but say where to go themselves.
-    let covered = menu.is_some_and(|m| m.open) || settings.is_some_and(|s| s.open);
+    // The Menu, Settings, Inventory and death screen free the cursor too, but say where to go themselves.
+    let covered = menu.is_some_and(|m| m.open)
+        || settings.is_some_and(|s| s.open)
+        || inventory.is_some_and(|i| i.open);
     let wanted =
         if cursor.grab_mode == CursorGrabMode::None && !covered && super::death::alive(dead) {
             Visibility::Inherited

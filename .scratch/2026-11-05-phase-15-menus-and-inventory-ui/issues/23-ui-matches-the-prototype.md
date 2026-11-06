@@ -1,6 +1,6 @@
 # 23: The UI matches the prototype
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 03, 04, 11, 13, 14, 16, 17, 18, 19
 
@@ -12,9 +12,9 @@ Every screen this spec added or restyled matches the approved prototype one to o
 
 ## Acceptance criteria
 
-- [ ] Every listed screen has a side-by-side engine and prototype screenshot at the same size, and each difference is fixed or recorded here with its reason.
-- [ ] Colours, fonts and spacing come from shared theme values, not per-screen literals.
-- [ ] Every screen keeps its existing tests green.
+- [x] Every listed screen has a side-by-side engine and prototype screenshot at the same size, and each difference is fixed or recorded here with its reason.
+- [x] Colours, fonts and spacing come from shared theme values, not per-screen literals.
+- [x] Every screen keeps its existing tests green.
 
 ## Comments
 
