@@ -342,6 +342,9 @@ struct Launcher {
     /// Edit World's choice of modes.
     modes: Modes,
     search: String,
+    /// The Mods step's search and category tab; `None` shows every category.
+    mod_search: String,
+    mod_tab: Option<String>,
     problem: Option<String>,
     /// Installed Mods that would clash with the chosen set, by id, and why.
     clashes: std::collections::BTreeMap<String, crate::launch::Clash>,
@@ -438,6 +441,7 @@ pub(super) enum Act {
     ConfirmDelete,
     Trust,
     Dismiss,
+    ModTab(Option<String>),
 }
 
 #[derive(Resource, Default)]
@@ -449,6 +453,7 @@ enum Field {
     Seed,
     Rename,
     Search,
+    ModSearch,
     Sky,
     Fog,
     TemperatureSize,
@@ -465,15 +470,17 @@ struct Root;
 #[derive(Component)]
 struct PageScroll;
 
-/// One World on the Worlds screen, with the words its search matches.
+/// One World on the Worlds screen, or one Mod on the Mods step, with the
+/// words that field's search matches.
 #[derive(Component)]
 struct WorldCard {
     words: String,
+    by: Field,
 }
 
-/// Shown on the Worlds screen when the search matches nothing.
+/// Shown when the search in that field matches nothing.
 #[derive(Component)]
-struct NoMatch;
+struct NoMatch(Field);
 
 pub fn plugin(app: &mut App) {
     app.add_plugins(bevy::input_focus::tab_navigation::TabNavigationPlugin);
@@ -627,7 +634,13 @@ fn logic(app: &mut App) {
                 filter,
                 placeholders,
                 opening,
-                (hero_size, header_hover, paint_scenery),
+                (
+                    hero_size,
+                    header_hover,
+                    paint_picks,
+                    shape_trees,
+                    paint_scenery,
+                ),
             )
                 .chain()
                 .run_if(in_list),
@@ -700,6 +713,8 @@ fn start(
         rename: String::new(),
         modes: Modes::default(),
         search: String::new(),
+        mod_search: String::new(),
+        mod_tab: None,
         problem: None,
         clashes: Default::default(),
         version: 0,
@@ -772,7 +787,7 @@ fn keys(
             | Field::TemperatureSize
             | Field::HumiditySize => queue.0.push(Act::Next),
             Field::Rename => queue.0.push(Act::SaveName),
-            Field::Search => {}
+            Field::Search | Field::ModSearch => {}
         }
     }
 }
@@ -800,6 +815,7 @@ fn sync_fields(
             }
             // Typing filters the cards in place; a rebuild would take the field's focus.
             Field::Search => launcher.bypass_change_detection().search = value,
+            Field::ModSearch => launcher.bypass_change_detection().mod_search = value,
         }
     }
     for mut text in &mut resolved {
@@ -814,15 +830,24 @@ fn sync_fields(
 fn filter(
     launcher: Option<Res<Launcher>>,
     mut cards: Query<(&WorldCard, &mut Node), Without<NoMatch>>,
-    mut empty: Query<&mut Node, With<NoMatch>>,
+    mut empty: Query<(&NoMatch, &mut Node)>,
 ) {
     let Some(launcher) = launcher else {
         return;
     };
-    let mut any = false;
+    let query = |by: Field| {
+        if by == Field::ModSearch {
+            &launcher.mod_search
+        } else {
+            &launcher.search
+        }
+    };
+    let mut any = std::collections::BTreeSet::new();
     for (card, mut node) in &mut cards {
-        let matched = ui::matches(&launcher.search, &card.words);
-        any |= matched;
+        let matched = ui::matches(query(card.by), &card.words);
+        if matched {
+            any.insert(card.by as u8);
+        }
         let display = if matched {
             Display::Flex
         } else {
@@ -832,8 +857,12 @@ fn filter(
             node.display = display;
         }
     }
-    for mut node in &mut empty {
-        let display = if any { Display::None } else { Display::Flex };
+    for (empty, mut node) in &mut empty {
+        let display = if any.contains(&(empty.0 as u8)) {
+            Display::None
+        } else {
+            Display::Flex
+        };
         if node.display != display {
             node.display = display;
         }
@@ -969,7 +998,8 @@ fn handle(
             | Act::Settings
             | Act::Quit
             | Act::Back
-            | Act::Dismiss => navigate(l, &mut cx, act),
+            | Act::Dismiss
+            | Act::ModTab(..) => navigate(l, &mut cx, act),
         }
     }
 }
@@ -999,6 +1029,10 @@ fn navigate(l: &mut Launcher, cx: &mut Acting, act: Act) {
         Act::Quit => {
             cx.relaunch.0 = None;
             cx.exit.write(AppExit::Success);
+        }
+        Act::ModTab(tab) => {
+            l.mod_tab = tab;
+            l.version += 1;
         }
         Act::Back => match l.screen.clone() {
             Screen::Trust(Next::Create) => l.show(Screen::Create(Step::Review)),
@@ -1138,6 +1172,68 @@ fn header_hover(
         if outline.color != ring {
             outline.color = ring;
         }
+    }
+}
+
+type Picks = (
+    Entity,
+    &'static pages::Pick,
+    &'static bevy::picking::hover::Hovered,
+    Has<bevy::ui::InteractionDisabled>,
+    &'static mut BackgroundColor,
+    &'static mut BorderColor,
+    &'static mut Outline,
+);
+
+fn paint_picks(
+    mut picks: Query<Picks>,
+    focus: Res<InputFocus>,
+    visible: Option<Res<bevy::input_focus::InputFocusVisible>>,
+) {
+    let focused = ui::visible_focus(Some(&focus), visible.as_deref());
+    for (entity, pick, hovered, disabled, mut fill, mut edge, mut outline) in &mut picks {
+        let (f, e) = match pick.hover {
+            Some(hover) if hovered.0 && !disabled => hover,
+            _ => (pick.fill, pick.edge),
+        };
+        fill.set_if_neq(BackgroundColor(f));
+        edge.set_if_neq(BorderColor::all(e));
+        let ring = if focused == Some(entity) {
+            theme::FOCUS
+        } else {
+            Color::NONE
+        };
+        if outline.color != ring {
+            outline.color = ring;
+        }
+    }
+}
+
+/// Cuts each half of a thumbnail's tree along its diagonal once its size is known.
+fn shape_trees(
+    mut commands: Commands,
+    halves: Query<(Entity, &pages::HalfTree, &ComputedNode), Changed<ComputedNode>>,
+) {
+    use bevy::ui::InterpolationColorSpace;
+    for (entity, half, node) in &halves {
+        let size = node.size();
+        if size.x <= 0.0 || size.y <= 0.0 {
+            continue;
+        }
+        // Perpendicular to the diagonal, toward the filled side.
+        let angle = (half.0 * size.y).atan2(-size.x);
+        commands.entity(entity).insert(BackgroundGradient::from(
+            LinearGradient::new(
+                angle,
+                vec![
+                    ColorStop::new(Color::NONE, Val::Percent(0.0)),
+                    ColorStop::new(Color::NONE, Val::Percent(50.0)),
+                    ColorStop::new(theme::THUMBNAIL_TREE, Val::Percent(50.0)),
+                    ColorStop::new(theme::THUMBNAIL_TREE, Val::Percent(100.0)),
+                ],
+            )
+            .in_color_space(InterpolationColorSpace::Srgba),
+        ));
     }
 }
 

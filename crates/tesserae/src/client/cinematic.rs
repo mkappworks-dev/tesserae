@@ -211,7 +211,7 @@ pub(super) fn sheet(
             bevy::ui_widgets::ScrollArea,
             Node {
                 flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(12.0),
+                row_gap: Val::Px(0.0),
                 padding: UiRect::axes(Val::Px(theme::SHEET_PAD_X), Val::Px(20.0)),
                 flex_grow: 1.0,
                 min_height: Val::Px(0.0),

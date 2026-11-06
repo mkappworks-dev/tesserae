@@ -484,6 +484,7 @@ fn worlds(
             |body| {
                 if let Some(card) = &l.card {
                     failure(body, card);
+                    gap(body, 20.0);
                 }
                 body.spawn(Node {
                     column_gap: Val::Px(10.0),
@@ -498,13 +499,7 @@ fn worlds(
                         ..default()
                     })
                     .with_children(|f| {
-                        text_field(
-                            f,
-                            Field::Search,
-                            &l.search,
-                            "",
-                            "Find a World by name or Game…",
-                        );
+                        text_field(f, Field::Search, &l.search, "", "Find a World\u{2026}");
                     });
                     let create = buttons::button(
                         line,
@@ -512,7 +507,7 @@ fn worlds(
                         Act::New,
                         ButtonStyle::Cinematic {
                             kind: Kind::Primary,
-                            align: Align::Glyph("+"),
+                            align: Align::Before("+"),
                         },
                     );
                     if installed.game.is_none() {
@@ -524,8 +519,10 @@ fn worlds(
                     }
                 });
                 if installed.game.is_none() {
-                    ui::paragraph(body, NO_GAME, 13.0, theme::WARNING);
+                    gap(body, 14.0);
+                    ui::paragraph(body, NO_GAME, theme::TEXT_SMALL, theme::WARNING);
                 }
+                gap(body, 10.0);
                 for entry in &l.entries {
                     let play = world_card(body, entry, installed);
                     if focus.is_none() || l.selected.as_deref() == Some(entry.path.as_path()) {
@@ -533,12 +530,12 @@ fn worlds(
                     }
                 }
                 body.spawn((
-                    NoMatch,
+                    NoMatch(Field::Search),
                     Node {
                         display: Display::None,
                         flex_direction: FlexDirection::Column,
                         align_items: AlignItems::Center,
-                        padding: UiRect::all(Val::Px(30.0)),
+                        padding: UiRect::axes(Val::Px(10.0), Val::Px(35.0)),
                         row_gap: Val::Px(6.0),
                         ..default()
                     },
@@ -556,8 +553,8 @@ fn worlds(
                     } else {
                         ("No Worlds found", "Try a different name or create a World.")
                     };
-                    ui::weighted_text(empty, title, 17.0, 550, theme::INK);
-                    ui::paragraph(empty, detail, 13.0, theme::MUTED);
+                    ui::weighted_text(empty, title, theme::TEXT_BODY, theme::LABEL, theme::INK);
+                    ui::paragraph(empty, detail, theme::TEXT_SMALL, theme::MUTED);
                 });
             },
             |f| {
@@ -567,23 +564,40 @@ fn worlds(
                     Act::Home,
                     ButtonStyle::Cinematic {
                         kind: Kind::Ghost,
-                        align: Align::Centre,
+                        align: Align::Before("\u{2190}"),
                     },
                 );
-                ui::text(f, "Stored on this device", 12.0, theme::MUTED);
-                ui::text(
+                footer_hint(f, "Stored on this device");
+                count(
                     f,
                     match l.entries.len() {
                         1 => "1 World".to_owned(),
                         n => format!("{n} Worlds"),
                     },
-                    12.0,
-                    theme::MUTED,
                 );
             },
         );
     });
     focus
+}
+
+/// Vertical space between two blocks of a sheet's body.
+fn gap(parent: &mut ChildSpawnerCommands, px: f32) {
+    parent.spawn(Node {
+        height: Val::Px(px),
+        flex_shrink: 0.0,
+        ..default()
+    });
+}
+
+/// The quiet middle of a sheet's footer.
+fn footer_hint(footer: &mut ChildSpawnerCommands, value: impl Into<String>) {
+    ui::text(footer, value, theme::TEXT_EYEBROW, theme::MUTED);
+}
+
+/// A count at a sheet footer's side.
+fn count(footer: &mut ChildSpawnerCommands, value: impl Into<String>) {
+    ui::paragraph(footer, value, theme::TEXT_SMALL, theme::MUTED);
 }
 
 fn failure(body: &mut ChildSpawnerCommands, card: &Card) {
@@ -592,7 +606,7 @@ fn failure(body: &mut ChildSpawnerCommands, card: &Card) {
         BorderColor::all(theme::WARNING),
         Node {
             padding: UiRect::all(Val::Px(14.0)),
-            border: UiRect::left(Val::Px(2.0)),
+            border: UiRect::left(Val::Px(theme::FRAME)),
             justify_content: JustifyContent::SpaceBetween,
             align_items: AlignItems::Center,
             column_gap: Val::Px(12.0),
@@ -608,13 +622,19 @@ fn failure(body: &mut ChildSpawnerCommands, card: &Card) {
             ..default()
         })
         .with_children(|words| {
-            ui::weighted_text(words, &card.title, 14.0, 620, theme::INK);
-            ui::paragraph(words, &card.detail, 13.0, theme::WARNING);
+            ui::weighted_text(
+                words,
+                &card.title,
+                theme::TEXT_BODY,
+                theme::LABEL,
+                theme::INK,
+            );
+            ui::paragraph(words, &card.detail, theme::TEXT_SMALL, theme::WARNING);
             if card.save_untouched {
                 ui::paragraph(
                     words,
                     "Nothing was changed in its save.",
-                    12.0,
+                    theme::TEXT_SMALL,
                     theme::MUTED,
                 );
             }
@@ -623,13 +643,78 @@ fn failure(body: &mut ChildSpawnerCommands, card: &Card) {
             c,
             "Dismiss",
             Act::Dismiss,
-            ButtonStyle::Cinematic {
-                kind: Kind::Ghost,
-                align: Align::Centre,
-            },
+            ButtonStyle::Small { kind: Kind::Ghost },
         );
     });
 }
+
+/// A Game's landscape in miniature: banded hills under a sky, and a tree.
+fn thumbnail(parent: &mut ChildSpawnerCommands, node: Node) {
+    use bevy::ui::InterpolationColorSpace;
+    let [sky, hills, field, ground] = theme::THUMBNAIL;
+    let band = |colour: Color, from: f32, to: f32| {
+        [
+            ColorStop::new(colour, Val::Percent(from)),
+            ColorStop::new(colour, Val::Percent(to)),
+        ]
+    };
+    let stops = [
+        band(sky, 0.0, 40.0),
+        band(hills, 40.0, 59.0),
+        band(field, 59.0, 67.0),
+        band(ground, 67.0, 100.0),
+    ]
+    .concat();
+    parent
+        .spawn((
+            BackgroundGradient::from(
+                LinearGradient::new(155f32.to_radians(), stops)
+                    .in_color_space(InterpolationColorSpace::Srgba),
+            ),
+            Node {
+                border_radius: BorderRadius::all(Val::Px(2.0)),
+                overflow: Overflow::clip(),
+                flex_shrink: 0.0,
+                ..node
+            },
+            Pickable::IGNORE,
+        ))
+        .with_children(|land| {
+            // A triangle, drawn as two right triangles: each half of a box
+            // cut along its diagonal by a hard gradient stop.
+            land.spawn((
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Percent(24.0),
+                    bottom: Val::Px(0.0),
+                    width: Val::Percent(30.0),
+                    height: Val::Percent(60.0),
+                    ..default()
+                },
+                Pickable::IGNORE,
+            ))
+            .with_children(|tree| {
+                for (side, toward) in [(0.0, 1.0), (50.0, -1.0)] {
+                    tree.spawn((
+                        HalfTree(toward),
+                        Node {
+                            position_type: PositionType::Absolute,
+                            left: Val::Percent(side),
+                            width: Val::Percent(50.0),
+                            height: Val::Percent(100.0),
+                            ..default()
+                        },
+                        Pickable::IGNORE,
+                    ));
+                }
+            });
+        });
+}
+
+/// Half of a thumbnail's tree; its gradient waits for the node's size, since
+/// the diagonal's angle depends on it. `1.0` fills below the rising diagonal.
+#[derive(Component)]
+pub(super) struct HalfTree(pub(super) f32);
 
 /// One World with Play and Edit side by side; returns Play when it can open.
 fn world_card(
@@ -651,13 +736,17 @@ fn world_card(
     };
     let mut play = None;
     body.spawn((
-        WorldCard { words },
+        WorldCard {
+            words,
+            by: Field::Search,
+        },
         BackgroundColor(theme::CARD),
         BorderColor::all(theme::EDGE),
         Node {
-            padding: UiRect::all(Val::Px(16.0)),
-            border: UiRect::all(Val::Px(1.0)),
-            border_radius: BorderRadius::all(Val::Px(6.0)),
+            margin: UiRect::top(Val::Px(10.0)),
+            padding: UiRect::all(Val::Px(17.0)),
+            border: UiRect::all(Val::Px(theme::RULE)),
+            border_radius: BorderRadius::all(Val::Px(theme::RADIUS_MENU)),
             align_items: AlignItems::Center,
             column_gap: Val::Px(15.0),
             flex_shrink: 0.0,
@@ -665,15 +754,41 @@ fn world_card(
         },
     ))
     .with_children(|card| {
+        thumbnail(
+            card,
+            Node {
+                width: Val::Px(108.0),
+                height: Val::Px(76.0),
+                ..default()
+            },
+        );
         card.spawn(Node {
             flex_direction: FlexDirection::Column,
-            row_gap: Val::Px(5.0),
             flex_grow: 1.0,
             min_width: Val::Px(0.0),
             ..default()
         })
         .with_children(|info| {
-            ui::weighted_text(info, name, 16.0, 550, theme::INK);
+            info.spawn((
+                Text::new(name),
+                theme::weighted(theme::TEXT_BODY, theme::LABEL),
+                bevy::text::LineHeight::RelativeToFont(1.2),
+                TextColor(theme::INK),
+                Node {
+                    margin: UiRect::bottom(Val::Px(5.0)),
+                    ..default()
+                },
+                Pickable::IGNORE,
+            ));
+            let small = |info: &mut ChildSpawnerCommands, value: String, colour: Color| {
+                info.spawn((
+                    Text::new(value),
+                    theme::font(theme::TEXT_CAPTION),
+                    bevy::text::LineHeight::RelativeToFont(theme::LINE_HEIGHT),
+                    TextColor(colour),
+                    Pickable::IGNORE,
+                ));
+            };
             match (entry.details(), &entry.sidecar) {
                 (Some(d), _) => {
                     info.spawn(Node {
@@ -682,45 +797,37 @@ fn world_card(
                         ..default()
                     })
                     .with_children(|facts| {
-                        cine::pill(facts, game_label(d.game.as_ref()));
-                        ui::text(
-                            facts,
-                            format!("{} m voxels", d.voxel_size_m),
-                            12.0,
+                        cine::pill(facts, game_title(d.game.as_ref()));
+                        small(facts, format!("{} m voxels", d.voxel_size_m), theme::MUTED);
+                    });
+                    if entry.incomplete() {
+                        small(
+                            info,
+                            "Creation did not finish. Retry to create it, or delete it.".into(),
+                            theme::WARNING,
+                        );
+                    } else {
+                        small(
+                            info,
+                            format!("Played {}", relative(d.last_played_unix_s)),
                             theme::MUTED,
                         );
-                    });
-                    ui::text(
-                        info,
-                        if entry.incomplete() {
-                            "Creation did not finish. Retry to create it, or delete it.".to_owned()
-                        } else {
-                            format!("Played {}", relative(d.last_played_unix_s))
-                        },
-                        12.0,
-                        if entry.incomplete() {
-                            theme::WARNING
-                        } else {
-                            theme::MUTED
-                        },
-                    );
+                    }
                     for line in &unmet {
-                        ui::paragraph(info, line, 12.0, theme::WARNING);
+                        small(info, line.clone(), theme::WARNING);
                     }
                 }
-                (None, Err(reason)) => ui::paragraph(
+                (None, Err(reason)) => small(
                     info,
                     format!("Its details could not be read: {reason}. Saving a name in Edit repairs them."),
-                    12.0,
                     theme::WARNING,
                 ),
-                (None, Ok(_)) => ui::paragraph(
+                (None, Ok(_)) => small(
                     info,
                     format!(
                         "Folder {}. Saving a name in Edit records its details.",
                         entry.folder()
                     ),
-                    12.0,
                     theme::MUTED,
                 ),
             }
@@ -733,9 +840,33 @@ fn world_card(
         })
         .with_children(|actions| {
             if unmet.is_empty() {
-                play = Some(buttons::button(actions, if entry.incomplete() { "Retry" } else { "Play" }, Act::Play(entry.path.clone()), ButtonStyle::Cinematic { kind: Kind::Primary, align: Align::Centre }));
+                let button = buttons::button(
+                    actions,
+                    if entry.incomplete() { "Retry" } else { "Play" },
+                    Act::Play(entry.path.clone()),
+                    ButtonStyle::Cinematic {
+                        kind: Kind::Primary,
+                        align: Align::After("\u{2192}"),
+                    },
+                );
+                actions.commands().entity(button).insert(Node {
+                    min_height: Val::Px(40.0),
+                    padding: UiRect::axes(Val::Px(theme::BUTTON_PAD_X), Val::Px(theme::BUTTON_PAD_Y)),
+                    border: UiRect::all(Val::Px(theme::RULE)),
+                    border_radius: BorderRadius::all(Val::Px(theme::RADIUS_CONTROL)),
+                    align_items: AlignItems::Center,
+                    justify_content: JustifyContent::Center,
+                    column_gap: Val::Px(4.0),
+                    ..default()
+                });
+                play = Some(button);
             }
-            buttons::button(actions, "Edit", Act::Edit(entry.path.clone()), ButtonStyle::Cinematic { kind: Kind::Ghost, align: Align::Centre });
+            buttons::button(
+                actions,
+                "Edit",
+                Act::Edit(entry.path.clone()),
+                ButtonStyle::Small { kind: Kind::Ghost },
+            );
         });
     });
     play
@@ -760,28 +891,36 @@ fn library_page(
                 ui::paragraph(
                     body,
                     "Installed on this device. You choose which ones a World uses when you create it.",
-                    13.0,
+                    theme::TEXT_SMALL,
                     theme::MUTED,
                 );
                 if installed.mods.is_empty() {
+                    gap(body, 14.0);
                     cine::notice(body, "No Mods are installed. Add them to the Mods folder.");
                 }
                 for m in &installed.mods {
+                    gap(body, 8.0);
                     let (category, about) = installed.about(&m.id);
                     mod_card(
                         body,
                         ModCard {
                             act: None,
+                            check: None,
                             border: theme::EDGE,
-                            selected: false,
-                            title: format!("{} {}", ui::title(&m.id), m.version),
+                            title: ui::title(&m.id),
                             detail: about.unwrap_or_default().to_owned(),
-                            tag: category.map(|c| (c.to_owned(), theme::MUTED)),
+                            tag: category.map(|c| (c.to_owned(), theme::CATEGORY_INK)),
                         },
                     );
                 }
                 for line in &installed.rejected {
-                    ui::paragraph(body, format!("Skipped: {line}"), 12.0, theme::WARNING);
+                    gap(body, 8.0);
+                    ui::paragraph(
+                        body,
+                        format!("Skipped: {line}"),
+                        theme::TEXT_SMALL,
+                        theme::WARNING,
+                    );
                 }
             },
             |f| {
@@ -791,17 +930,15 @@ fn library_page(
                     Act::Home,
                     ButtonStyle::Cinematic {
                         kind: Kind::Ghost,
-                        align: Align::Centre,
+                        align: Align::Before("\u{2190}"),
                     },
                 ));
-                ui::text(
+                count(
                     f,
                     match installed.mods.len() {
                         1 => "1 Mod installed".to_owned(),
                         n => format!("{n} Mods installed"),
                     },
-                    12.0,
-                    theme::MUTED,
                 );
                 let create = buttons::button(
                     f,
@@ -809,7 +946,7 @@ fn library_page(
                     Act::New,
                     ButtonStyle::Cinematic {
                         kind: Kind::Primary,
-                        align: Align::Centre,
+                        align: Align::After("\u{2192}"),
                     },
                 );
                 if installed.game.is_none() {
@@ -1368,137 +1505,329 @@ fn mods_page(
         problem(col, f.problem.as_ref());
         let required = installed.required(&game);
         let locked = installed.closure_for(&game, &f.mods);
-        if !required.is_empty() {
-            label(col, &format!("Required by {}", ui::title(&game)));
-            for id in &required {
+        let required_names: Vec<String> = required.iter().map(|id| ui::title(id)).collect();
+        cine::notice(
+            col,
+            if required.is_empty() {
+                format!(
+                    "{} needs no additional Mods. All choices below are optional.",
+                    ui::title(&game)
+                )
+            } else {
+                format!(
+                    "{} requires {}. These stay enabled.",
+                    ui::title(&game),
+                    required_names.join(", ")
+                )
+            },
+        );
+        gap(col, 20.0);
+        text_field(
+            col,
+            Field::ModSearch,
+            &l.mod_search,
+            "",
+            "Search installed Mods\u{2026}",
+        );
+        gap(col, 20.0);
+        let sections = sections(installed, &[]);
+        col.spawn((
+            BorderColor::all(theme::EDGE),
+            Node {
+                column_gap: Val::Px(15.0),
+                border: UiRect::bottom(Val::Px(theme::RULE)),
+                flex_wrap: FlexWrap::Wrap,
+                flex_shrink: 0.0,
+                ..default()
+            },
+        ))
+        .with_children(|tabs| {
+            buttons::button(
+                tabs,
+                "All",
+                Act::ModTab(None),
+                ButtonStyle::Tab {
+                    selected: l.mod_tab.is_none(),
+                },
+            );
+            for (name, _) in &sections {
+                buttons::button(
+                    tabs,
+                    name.clone(),
+                    Act::ModTab(Some(name.clone())),
+                    ButtonStyle::Tab {
+                        selected: l.mod_tab.as_ref() == Some(name),
+                    },
+                );
+            }
+        });
+        gap(col, 17.0);
+        let shown = |id: &str| {
+            l.mod_tab
+                .as_ref()
+                .is_none_or(|tab| installed.about(id).0.unwrap_or(OTHER_SECTION) == tab.as_str())
+        };
+        col.spawn(Node {
+            flex_direction: FlexDirection::Column,
+            row_gap: Val::Px(8.0),
+            flex_shrink: 0.0,
+            ..default()
+        })
+        .with_children(|list| {
+            for id in required.iter().filter(|id| shown(id)) {
                 if let Some(m) = installed.mods.iter().find(|m| &m.id == id) {
                     let (_, about) = installed.about(id);
                     mod_card(
-                        col,
+                        list,
                         ModCard {
                             act: None,
+                            check: Some((true, false)),
                             border: theme::EDGE,
-                            selected: false,
-                            title: format!("{} {}", ui::title(&m.id), m.version),
+                            title: ui::title(&m.id),
                             detail: about.unwrap_or_default().to_owned(),
-                            tag: Some(("Required".to_owned(), theme::MUTED)),
+                            tag: Some(("Required".to_owned(), theme::CATEGORY_INK)),
                         },
                     );
                 }
             }
-        }
-        for section in sections(installed, &required) {
-            label(col, &section.0);
-            for i in section.1 {
+            for i in sections.iter().flat_map(|(_, mods)| mods.iter().copied()) {
                 let m = &installed.mods[i];
-                let (_, about) = installed.about(&m.id);
-                let title = format!("{} {}", ui::title(&m.id), m.version);
-                let mut shown = ModCard {
+                if required.contains(&m.id) || !shown(&m.id) {
+                    continue;
+                }
+                let (category, about) = installed.about(&m.id);
+                let ticked = f.mods.contains(&m.id);
+                let mut card = ModCard {
                     act: Some(Act::ToggleMod(i)),
+                    check: Some((ticked, true)),
                     border: theme::EDGE,
-                    selected: f.mods.contains(&m.id),
-                    title,
+                    title: ui::title(&m.id),
                     detail: about.unwrap_or_default().to_owned(),
-                    tag: None,
+                    tag: category.map(|c| (c.to_owned(), theme::CATEGORY_INK)),
                 };
                 if let Some(why) = installed.blocked(&game, &m.id) {
-                    shown.act = None;
-                    shown.detail = format!("Unavailable: {why}");
-                    shown.tag = Some(("Unavailable".to_owned(), theme::MUTED));
+                    card.act = None;
+                    card.check = Some((false, false));
+                    card.detail = format!("Unavailable: {why}");
+                    card.tag = Some(("Unavailable".to_owned(), theme::CATEGORY_INK));
                 } else if let Some(clash) = l.clashes.get(&m.id) {
-                    shown.border = theme::WARNING;
-                    shown.detail = format!("Conflicts: {}", clash.reason);
+                    card.border = theme::WARNING;
+                    card.detail = format!("Conflicts: {}", clash.reason);
                     match &clash.replaces {
                         Some(out) => {
-                            shown.tag =
+                            card.tag =
                                 Some((format!("Replaces {}", ui::title(out)), theme::WARNING));
                         }
                         None => {
-                            shown.act = None;
-                            shown.tag = Some(("Conflict".to_owned(), theme::WARNING));
+                            card.act = None;
+                            card.check = Some((false, false));
+                            card.tag = Some(("Conflict".to_owned(), theme::WARNING));
                         }
                     }
-                } else if locked.contains(&m.id) && !f.mods.contains(&m.id) {
-                    shown.act = None;
-                    shown.tag = Some(("Needed by another Mod".to_owned(), theme::MUTED));
-                } else if shown.selected {
-                    shown.tag = Some(("Added".to_owned(), theme::SAGE));
+                } else if locked.contains(&m.id) && !ticked {
+                    card.act = None;
+                    card.check = Some((true, false));
+                    card.tag = Some(("Needed by another Mod".to_owned(), theme::CATEGORY_INK));
                 }
-                mod_card(col, shown);
+                let words = format!("{} {}", card.title, card.detail);
+                let entity = mod_card(list, card);
+                list.commands().entity(entity).insert(WorldCard {
+                    words,
+                    by: Field::ModSearch,
+                });
             }
-        }
+        });
+        col.spawn((
+            NoMatch(Field::ModSearch),
+            Node {
+                display: Display::None,
+                justify_content: JustifyContent::Center,
+                padding: UiRect::axes(Val::Px(10.0), Val::Px(35.0)),
+                flex_shrink: 0.0,
+                ..default()
+            },
+        ))
+        .with_children(|empty| {
+            ui::text(empty, "No matching Mods.", theme::TEXT_SMALL, theme::MUTED)
+        });
         for line in &installed.rejected {
-            ui::paragraph(col, format!("Skipped: {line}"), 12.0, theme::WARNING);
+            gap(col, 8.0);
+            ui::paragraph(
+                col,
+                format!("Skipped: {line}"),
+                theme::TEXT_SMALL,
+                theme::WARNING,
+            );
         }
+        gap(col, 14.0);
+        ui::paragraph(
+            col,
+            "Biomes supplied by the selected set appear in the next step.",
+            theme::TEXT_SMALL,
+            theme::MUTED,
+        );
     })
 }
 
 /// What one Mod card shows. `act` makes it a button; without one it only informs.
 struct ModCard {
     act: Option<Act>,
+    /// The Mods step's tick box: whether it is ticked, and whether it can change.
+    check: Option<(bool, bool)>,
     border: Color,
-    selected: bool,
     title: String,
     detail: String,
     tag: Option<(String, Color)>,
 }
 
-fn mod_card(parent: &mut ChildSpawnerCommands, c: ModCard) {
+fn mod_card(parent: &mut ChildSpawnerCommands, c: ModCard) -> Entity {
     let node = Node {
-        padding: UiRect::axes(Val::Px(15.0), Val::Px(12.0)),
-        border: UiRect::all(Val::Px(1.0)),
-        border_radius: BorderRadius::all(Val::Px(5.0)),
-        justify_content: JustifyContent::SpaceBetween,
+        padding: UiRect::all(Val::Px(15.0)),
+        border: UiRect::all(Val::Px(theme::RULE)),
+        border_radius: BorderRadius::all(Val::Px(theme::RADIUS_CONTROL)),
         align_items: AlignItems::Center,
         column_gap: Val::Px(12.0),
         flex_shrink: 0.0,
         ..default()
     };
     let body = |card: &mut ChildSpawnerCommands| {
+        if let Some((ticked, enabled)) = c.check {
+            tick_box(card, ticked, enabled, 20.0);
+        }
+        card.spawn((
+            BackgroundColor(theme::PILL),
+            Node {
+                width: Val::Px(34.0),
+                height: Val::Px(34.0),
+                border_radius: BorderRadius::all(Val::Px(theme::RADIUS_SMALL)),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                flex_shrink: 0.0,
+                ..default()
+            },
+            Pickable::IGNORE,
+        ))
+        .with_children(|tile| ui::icon(tile, IconKind::Mods, theme::PILL_INK, 18.0));
         card.spawn(Node {
             flex_direction: FlexDirection::Column,
-            row_gap: Val::Px(2.0),
+            row_gap: Val::Px(4.0),
+            flex_grow: 1.0,
             flex_shrink: 1.0,
+            min_width: Val::Px(0.0),
             ..default()
         })
         .with_children(|text| {
-            ui::weighted_text(text, c.title.clone(), 14.0, 550, theme::INK);
+            ui::weighted_text(
+                text,
+                c.title.clone(),
+                theme::TEXT_BODY,
+                theme::LABEL,
+                theme::INK,
+            );
             if !c.detail.is_empty() {
-                ui::paragraph(text, c.detail.clone(), 12.0, theme::MUTED);
+                text.spawn((
+                    Text::new(c.detail.clone()),
+                    theme::font(theme::TEXT_CAPTION),
+                    bevy::text::LineHeight::RelativeToFont(theme::LINE_HEIGHT),
+                    TextColor(theme::MUTED),
+                    Pickable::IGNORE,
+                ));
             }
         });
         if let Some((tag, colour)) = c.tag {
-            ui::text(card, tag, 12.0, colour);
+            card.spawn((
+                Text::new(tag),
+                theme::font(theme::TEXT_TAG),
+                bevy::text::LetterSpacing::Px(0.44),
+                TextColor(colour),
+                Pickable::IGNORE,
+            ));
         }
     };
-    match c.act.clone() {
-        Some(act) => {
-            parent
-                .spawn((
-                    bevy::ui_widgets::Button,
-                    TabIndex(0),
-                    act,
-                    cine::Look {
-                        kind: Kind::Plain,
-                        selected: c.selected,
-                    },
-                    BackgroundColor(theme::RAISED),
-                    BorderColor::all(if c.selected { theme::SAGE } else { c.border }),
-                    node,
-                ))
-                .with_children(body);
-        }
-        None => {
-            parent
-                .spawn((
-                    BackgroundColor(theme::CARD),
-                    BorderColor::all(c.border),
-                    node,
-                ))
-                .with_children(body);
-        }
+    let mut card = parent.spawn((
+        BackgroundColor(theme::CARD),
+        BorderColor::all(c.border),
+        node,
+    ));
+    if let Some(act) = c.act {
+        card.insert((
+            bevy::ui_widgets::Button,
+            TabIndex(0),
+            act,
+            Pick {
+                fill: theme::CARD,
+                edge: c.border,
+                hover: None,
+            },
+        ));
     }
+    card.with_children(body).id()
 }
+
+/// A checkbox drawn inside a card that is itself the button.
+fn tick_box(parent: &mut ChildSpawnerCommands, ticked: bool, enabled: bool, size: f32) {
+    let fade = |colour: Color| {
+        if enabled {
+            colour
+        } else {
+            colour.with_alpha(colour.alpha() * 0.55)
+        }
+    };
+    let mut tick = parent.spawn((
+        BorderColor::all(fade(theme::CHECK_EDGE)),
+        Node {
+            width: Val::Px(size),
+            height: Val::Px(size),
+            border: UiRect::all(Val::Px(theme::FRAME)),
+            border_radius: BorderRadius::all(Val::Px(theme::RADIUS_SMALL)),
+            align_items: AlignItems::Center,
+            justify_content: JustifyContent::Center,
+            flex_shrink: 0.0,
+            ..default()
+        },
+        Pickable::IGNORE,
+    ));
+    if ticked {
+        tick.insert(BackgroundColor(fade(theme::SAGE)));
+    } else {
+        tick.insert(BackgroundGradient::from(LinearGradient::to_bottom(vec![
+            ColorStop::auto(fade(theme::CHECK_TOP)),
+            ColorStop::auto(fade(theme::CHECK_BOTTOM)),
+        ])));
+    }
+    tick.with_children(|b| {
+        b.spawn((
+            BorderColor::all(fade(if ticked {
+                theme::CHECK_RING_ON
+            } else {
+                theme::CHECK_RING
+            })),
+            Node {
+                border: UiRect::all(Val::Px(theme::RULE)),
+                border_radius: BorderRadius::all(Val::Px(2.0)),
+                ..fill()
+            },
+            Pickable::IGNORE,
+        ));
+        if ticked {
+            ui::icon(b, IconKind::Check, fade(theme::SAGE_INK), size * 0.75);
+        }
+    });
+}
+
+/// A card that is a button: its own fill and edge, a lighter edge or fill on
+/// hover, and the focus ring.
+#[derive(Component, Clone, Copy)]
+#[require(bevy::picking::hover::Hovered, Outline = theme::focus_ring())]
+pub(super) struct Pick {
+    pub(super) fill: Color,
+    pub(super) edge: Color,
+    /// Fill and edge under the pointer.
+    pub(super) hover: Option<(Color, Color)>,
+}
+
+/// The section of a Mod whose Manifest names none.
+const OTHER_SECTION: &str = "Other";
 
 /// Optional Mods grouped under their Manifest's category, known sections first, then the rest
 /// alphabetically, with uncategorised ones last. Each holds indexes into `installed.mods`.
@@ -1511,20 +1840,20 @@ pub(super) fn sections(installed: &Installed, required: &[String]) -> Vec<(Strin
         "Building",
         "Characters",
     ];
-    const OTHER: &str = "Other";
+
     let mut groups: std::collections::BTreeMap<String, Vec<usize>> = Default::default();
     for (i, m) in installed.mods.iter().enumerate() {
         if required.contains(&m.id) {
             continue;
         }
-        let name = installed.about(&m.id).0.unwrap_or(OTHER).to_owned();
+        let name = installed.about(&m.id).0.unwrap_or(OTHER_SECTION).to_owned();
         groups.entry(name).or_default().push(i);
     }
     let rank = |name: &str| {
         ORDER
             .iter()
             .position(|known| *known == name)
-            .unwrap_or(if name == OTHER {
+            .unwrap_or(if name == OTHER_SECTION {
                 usize::MAX
             } else {
                 ORDER.len()
@@ -1648,8 +1977,8 @@ fn trust(
                         col,
                         ModCard {
                             act: None,
+                            check: None,
                             border: theme::EDGE,
-                            selected: false,
                             title: format!("{} {}", ui::title(&manifest.id), manifest.version),
                             detail,
                             tag: Some(if data {

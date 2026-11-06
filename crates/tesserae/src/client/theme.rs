@@ -100,6 +100,17 @@ pub(super) const HERO_EYEBROW: Color = Color::srgb_u8(0xdd, 0xde, 0xda);
 /// The launcher header's Settings button, which sits on the band unfilled.
 pub(super) const ICON_EDGE: Color = Color::srgba_u8(0xff, 0xff, 0xff, 0x38);
 pub(super) const ICON_INK: Color = Color::srgb_u8(0xe8, 0xeb, 0xe4);
+/// A Mod's category beside its card.
+pub(super) const CATEGORY_INK: Color = Color::srgb_u8(0xae, 0xb2, 0xb9);
+/// A World's or a Game's thumbnail: sky, far hills, a near field, the ground,
+/// and the tree against them.
+pub(super) const THUMBNAIL: [Color; 4] = [
+    Color::srgb_u8(0x7b, 0xab, 0xa0),
+    Color::srgb_u8(0x40, 0x5c, 0x3b),
+    Color::srgb_u8(0x73, 0x98, 0x5a),
+    Color::srgb_u8(0x33, 0x4a, 0x30),
+];
+pub(super) const THUMBNAIL_TREE: Color = Color::srgb_u8(0x26, 0x3e, 0x2f);
 
 pub(super) const SLOT_FILL: Color = Color::srgb_u8(23, 24, 26);
 pub(super) const SLOT_HOVER: Color = Color::srgb_u8(32, 34, 37);
@@ -125,6 +136,7 @@ pub(super) const TEXT_BODY: f32 = 16.0;
 pub(super) const TEXT_SMALL: f32 = 14.0;
 pub(super) const TEXT_CAPTION: f32 = 13.0;
 pub(super) const TEXT_EYEBROW: f32 = 12.0;
+pub(super) const TEXT_TAG: f32 = 11.0;
 pub(super) const TEXT_KEY: f32 = 10.0;
 pub(super) const TEXT_FOOTER: f32 = 9.0;
 pub(super) const TITLE_TRACKING: f32 = -0.7;
@@ -144,6 +156,8 @@ pub(super) const BOLD: u16 = 700;
 pub(super) const CONTROL_HEIGHT: f32 = 44.0;
 pub(super) const BUTTON_PAD_X: f32 = 15.0;
 pub(super) const BUTTON_PAD_Y: f32 = 9.0;
+pub(super) const SMALL_PAD_X: f32 = 12.0;
+pub(super) const SMALL_PAD_Y: f32 = 8.0;
 pub(super) const SHEET_PAD_X: f32 = 26.0;
 pub(super) const SCREEN_PAD_X: f32 = 34.0;
 

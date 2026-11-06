@@ -899,8 +899,12 @@ pub(super) enum IconKind {
     Uncapped,
     /// Inter has no ⚙.
     Settings,
+    Mods,
+    Check,
 }
-const ICONS: usize = 6;
+const ICONS: usize = 8;
+/// The icons drawn from the prototype's 24-unit outlines, in atlas order.
+const DRAWN: [IconKind; 3] = [IconKind::Settings, IconKind::Mods, IconKind::Check];
 #[derive(Component)]
 pub(super) struct Icon(pub IconKind, pub Color);
 #[derive(Resource)]
@@ -923,9 +927,9 @@ fn make_icons(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
         for x in 0..width {
             let i = x / 64;
             let p = Vec2::new(((x % 64) as f32 + 0.5) / 4.0, (y as f32 + 0.5) / 4.0);
-            if i == IconKind::Settings as usize {
+            if let Some(kind) = DRAWN.iter().find(|k| **k as usize == i) {
                 let p = Vec2::new((x % 64) as f32 + 0.5, y as f32 + 0.5) * 24.0 / 64.0;
-                let alpha = (gear(p) * 255.0).round() as u8;
+                let alpha = (drawn(*kind, p) * 255.0).round() as u8;
                 data[(y * width + x) * 4..(y * width + x) * 4 + 4]
                     .copy_from_slice(&[255, 255, 255, alpha]);
                 continue;
@@ -1002,15 +1006,49 @@ fn make_icons(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
         empty_border,
     });
 }
-/// How much of a pixel at `p`, in a 24-unit icon grid, a filled gear with
-/// eight teeth covers.
-fn gear(p: Vec2) -> f32 {
+/// How much of a pixel at `p`, in the prototype's 24-unit icon grid, an
+/// icon covers; strokes are its 1.7-unit round-capped lines.
+fn drawn(kind: IconKind, p: Vec2) -> f32 {
     const UNITS_PER_PIXEL: f32 = 24.0 / 64.0;
-    let d = p - Vec2::splat(12.0);
-    let teeth = (d.y.atan2(d.x) * 8.0).cos();
-    let outer = if teeth > 0.0 { 9.5 } else { 7.6 };
-    let signed = (d.length() - outer).max(3.2 - d.length());
-    (0.5 - signed / UNITS_PER_PIXEL).clamp(0.0, 1.0)
+    let v = Vec2::new;
+    let segment = |a: Vec2, b: Vec2| {
+        let along = ((p - a).dot(b - a) / (b - a).length_squared()).clamp(0.0, 1.0);
+        p.distance(a + (b - a) * along)
+    };
+    let path = |points: &[Vec2]| {
+        points
+            .windows(2)
+            .map(|w| segment(w[0], w[1]))
+            .fold(f32::MAX, f32::min)
+    };
+    let stroke = |distance: f32| ((0.85 - distance) / UNITS_PER_PIXEL + 0.5).clamp(0.0, 1.0);
+    let fill = |signed: f32| (0.5 - signed / UNITS_PER_PIXEL).clamp(0.0, 1.0);
+    match kind {
+        IconKind::Mods => stroke(
+            path(&[
+                v(12.0, 3.0),
+                v(21.0, 8.0),
+                v(12.0, 13.0),
+                v(3.0, 8.0),
+                v(12.0, 3.0),
+            ])
+            .min(path(&[
+                v(3.0, 8.0),
+                v(3.0, 17.0),
+                v(12.0, 22.0),
+                v(21.0, 17.0),
+                v(21.0, 8.0),
+            ]))
+            .min(segment(v(12.0, 13.0), v(12.0, 22.0))),
+        ),
+        IconKind::Check => stroke(path(&[v(5.0, 12.0), v(9.0, 16.0), v(19.0, 6.0)])),
+        _ => {
+            let d = p - v(12.0, 12.0);
+            let teeth = (d.y.atan2(d.x) * 8.0).cos();
+            let outer = if teeth > 0.0 { 9.5 } else { 7.6 };
+            fill((d.length() - outer).max(3.2 - d.length()))
+        }
+    }
 }
 fn materialize_icons(
     mut commands: Commands,

@@ -629,6 +629,33 @@ fn trust_for_a_new_world_goes_back_to_the_mods_page() {
 }
 
 #[test]
+fn the_mods_step_shows_one_category_per_tab_and_filters_by_search() {
+    let mut installed = Installed::fake(Some(("terra", "0.1.0")), &[])
+        .with_mod("lamps", &[])
+        .with_mod("strata", &[]);
+    installed.set_about("lamps", Some("Fire & light"), Some("Glowstone"));
+    installed.set_about("strata", Some("Terrain"), Some("Stone and clay"));
+    let worlds = Directory::new();
+    let mut app = app(&worlds, installed);
+    app.update();
+    act(&mut app, Act::New);
+    act(&mut app, Act::Next);
+    assert!(shown(&mut app, "Lamps") && shown(&mut app, "Strata"));
+    act(&mut app, Act::ModTab(Some("Terrain".into())));
+    assert!(shown(&mut app, "Strata") && !shown(&mut app, "Lamps"));
+    act(&mut app, Act::ModTab(None));
+    type_into(&mut app, Field::ModSearch, "glow");
+    let visible: Vec<String> = app
+        .world_mut()
+        .query::<(&WorldCard, &Node)>()
+        .iter(app.world())
+        .filter(|(_, node)| node.display != Display::None)
+        .map(|(card, _)| card.words.clone())
+        .collect();
+    assert_eq!(visible, ["Lamps Glowstone"]);
+}
+
+#[test]
 fn optional_mods_are_grouped_by_category_in_a_fixed_order() {
     let mut installed = Installed::fake(Some(("terra", "0.1.0")), &[])
         .with_mod("zeta", &[])

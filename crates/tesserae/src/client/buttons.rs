@@ -19,6 +19,8 @@ pub(super) enum Align<'a> {
     Glyph(&'a str),
     /// Centred, with a glyph such as `→` just after the label.
     After(&'a str),
+    /// Centred, with a glyph such as `+` just before the label.
+    Before(&'a str),
     /// Centred, with an icon just after the label, for a glyph the font lacks.
     Icon(IconKind),
 }
@@ -51,6 +53,10 @@ pub(super) enum ButtonStyle<'a> {
     /// One of a set of Cinematic options.
     Choice {
         selected: bool,
+    },
+    /// A Cinematic button among a card's or a row's other content.
+    Small {
+        kind: Kind,
     },
 }
 
@@ -88,6 +94,7 @@ pub(super) fn button(
                 kind,
                 selected: false,
             },
+            false,
         ),
         ButtonStyle::Choice { selected } => cinematic(
             parent,
@@ -98,6 +105,18 @@ pub(super) fn button(
                 kind: Kind::Plain,
                 selected,
             },
+            false,
+        ),
+        ButtonStyle::Small { kind } => cinematic(
+            parent,
+            label,
+            Align::Centre,
+            act,
+            Look {
+                kind,
+                selected: false,
+            },
+            true,
         ),
     }
 }
@@ -276,10 +295,15 @@ fn cinematic(
     align: Align,
     act: impl Bundle,
     look: Look,
+    small: bool,
 ) -> Entity {
     let (fill, edge, ink) = cine::colours(look, false, false);
     let font = theme::weighted(
-        theme::TEXT_BODY,
+        if small {
+            theme::TEXT_SMALL
+        } else {
+            theme::TEXT_BODY
+        },
         if look.kind == Kind::Primary {
             theme::STRONG
         } else {
@@ -304,7 +328,11 @@ fn cinematic(
             look,
             Node {
                 min_height: Val::Px(theme::CONTROL_HEIGHT),
-                padding: UiRect::axes(Val::Px(theme::BUTTON_PAD_X), Val::Px(theme::BUTTON_PAD_Y)),
+                padding: if small {
+                    UiRect::axes(Val::Px(theme::SMALL_PAD_X), Val::Px(theme::SMALL_PAD_Y))
+                } else {
+                    UiRect::axes(Val::Px(theme::BUTTON_PAD_X), Val::Px(theme::BUTTON_PAD_Y))
+                },
                 border: UiRect::all(Val::Px(theme::RULE)),
                 border_radius: BorderRadius::all(Val::Px(theme::RADIUS_CONTROL)),
                 align_items: AlignItems::Center,
@@ -320,6 +348,9 @@ fn cinematic(
             BorderColor::all(edge),
         ))
         .with_children(|b| {
+            if let Align::Before(glyph) = align {
+                spawn_label(b, glyph.into());
+            }
             spawn_label(b, label.into());
             match align {
                 Align::Glyph(glyph) | Align::After(glyph) if !glyph.is_empty() => {
