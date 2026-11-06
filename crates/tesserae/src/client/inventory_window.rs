@@ -1000,6 +1000,9 @@ fn details(main: &mut ChildSpawnerCommands, state: &Built, names: &Names) {
                         theme::REGULAR,
                         theme::MUTED,
                     ));
+                if let Some((material, chosen)) = state.shaping {
+                    shape_row(panel, material, chosen, names);
+                }
             }
         }
         panel
