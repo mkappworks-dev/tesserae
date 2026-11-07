@@ -392,6 +392,7 @@ type HudWriters<'w> = (
 /// Tells the Client what the Server would in a Survival state that is slow to
 /// play into, shortly before the shutter so the pickup feed has not faded:
 /// `TESSERAE_SCREENSHOT_SURVIVAL` (with sample stacks),
+/// `TESSERAE_SCREENSHOT_HELD=<item name>` (that Item alone, selected),
 /// `TESSERAE_SCREENSHOT_VITALS=<health>,<hunger>,<air s>`,
 /// `TESSERAE_SCREENSHOT_DEATH=fall|drowning|lava|starvation[,kept]`,
 /// `TESSERAE_SCREENSHOT_PICKUP=<taken>[,<left>]` and
@@ -415,7 +416,9 @@ fn hud_fixture(
         var("TESSERAE_SCREENSHOT_PICKUP"),
         var("TESSERAE_SCREENSHOT_NOTICE"),
     );
+    let held_item = var("TESSERAE_SCREENSHOT_HELD");
     let survival = std::env::var_os("TESSERAE_SCREENSHOT_SURVIVAL").is_some()
+        || held_item.is_some()
         || vitals_at.is_some()
         || death_as.is_some();
     if *sent
@@ -444,6 +447,12 @@ fn hud_fixture(
             held.receive(sample(at), count, 64);
         }
         let _ = held.select(2);
+        // One stack of the named Item in the selected slot, for the hand's picture.
+        if let Some(item) = &held_item {
+            held = tesserae_core::inventory::Inventory::default();
+            held.receive(item, 5, 64);
+            let _ = held.select(0);
+        }
         inventory.write(crate::server::inventory::InventoryChanged(held));
     }
     let full = Vitals {

@@ -4,7 +4,6 @@ use super::{
     camera::FlyCamera,
     edit::{Holding, Hotbar},
     material_textures::{PreviewContent, Textures},
-    menu::Menu,
 };
 use crate::render::{chunk_material::FLAME_SLOT, texture_atlas};
 use crate::world::WorldSettings;
@@ -346,7 +345,10 @@ pub(super) fn position(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::client::{edit::Catalogue, menu::Swatches};
+    use crate::client::{
+        edit::Catalogue,
+        menu::{Menu, Swatches},
+    };
     use crate::content::{CatalogueShape, ContentCatalogue};
     use crate::server::tool::ToolId;
     use tesserae_core::{Orientation, SHAPE_STAIR};
