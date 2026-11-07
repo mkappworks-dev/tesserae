@@ -33,6 +33,7 @@ pub(crate) struct Preferences {
     /// not the World's, so no save holds it.
     pub view: super::view::View,
     pub zoom_m: f32,
+    pub volumes: tesserae_core::audio::Volumes,
     pub layout: super::layout::LayoutPreferences,
     /// Stills the HUD's pulses and flashes.
     pub reduced_motion: bool,
@@ -118,6 +119,7 @@ impl Default for Preferences {
             touch: TouchPreferences::default(),
             view: default(),
             zoom_m: super::view::DEFAULT_ZOOM_M,
+            volumes: default(),
             layout: default(),
             reduced_motion: false,
             text_scale: 100,
@@ -273,6 +275,7 @@ fn decode(bytes: &[u8]) -> io::Result<(Bindings, Preferences)> {
         || !PAD_SENSITIVITY.contains(&p.touch.look_sensitivity)
         || !TOUCH_OPACITY.contains(&p.touch.opacity)
         || !super::view::ZOOM_M.contains(&p.zoom_m)
+        || !p.volumes.valid()
         || !p.layout.valid()
         || !TEXT_SCALES.contains(&p.text_scale)
     {
@@ -701,6 +704,42 @@ mod tests {
         for zoom in ["1.4", "6.1", "-1"] {
             let bytes = format!(r#"{{"version":1,"preferences":{{"zoom_m":{zoom}}}}}"#);
             assert!(decode(bytes.as_bytes()).is_err(), "{zoom}");
+        }
+    }
+    #[test]
+    fn volumes_round_trip_an_older_profile_gets_the_defaults_and_over_100_is_refused() {
+        use tesserae_core::audio::Volumes;
+        let prefs = Preferences {
+            volumes: Volumes {
+                master: 0,
+                effects: 50,
+                ambient: 100,
+                music: 25,
+            },
+            ..default()
+        };
+        let bytes = encode(&Bindings::default(), &prefs).unwrap();
+        assert_eq!(decode(&bytes).unwrap().1.volumes, prefs.volumes);
+
+        let (_, older) = decode(br#"{"version":3,"preferences":{"invert_y":true}}"#).unwrap();
+        let v = older.volumes;
+        assert_eq!(
+            (v.master, v.effects, v.ambient, v.music),
+            (100, 100, 70, 50)
+        );
+        let (_, partial) =
+            decode(br#"{"version":3,"preferences":{"volumes":{"music":0}}}"#).unwrap();
+        assert_eq!(
+            partial.volumes,
+            Volumes {
+                music: 0,
+                ..Volumes::default()
+            }
+        );
+
+        for bad in [r#"{"master":101}"#, r#"{"ambient":-1}"#, r#"{"music":0.5}"#] {
+            let bytes = format!(r#"{{"version":3,"preferences":{{"volumes":{bad}}}}}"#);
+            assert!(decode(bytes.as_bytes()).is_err(), "{bad}");
         }
     }
     #[test]

@@ -163,3 +163,86 @@ fn gain_is_master_times_category_times_volume_times_attenuation() {
     };
     assert_eq!(muted.gain(SoundCategory::Effects, 1.0, 1.0), 0.0);
 }
+
+#[test]
+fn each_volume_setting_maps_0_50_and_100_to_silence_half_and_whole() {
+    let whole = Volumes {
+        master: 100,
+        effects: 100,
+        ambient: 100,
+        music: 100,
+    };
+    for (setting, expected) in [(0, 0.0), (50, 0.5), (100, 1.0)] {
+        let master = Volumes {
+            master: setting,
+            ..whole
+        };
+        let effects = Volumes {
+            effects: setting,
+            ..whole
+        };
+        let ambient = Volumes {
+            ambient: setting,
+            ..whole
+        };
+        let music = Volumes {
+            music: setting,
+            ..whole
+        };
+        for category in [
+            SoundCategory::Effects,
+            SoundCategory::Ambient,
+            SoundCategory::Music,
+        ] {
+            assert!(close(master.gain(category, 1.0, 1.0), expected));
+        }
+        assert!(close(
+            effects.gain(SoundCategory::Effects, 1.0, 1.0),
+            expected
+        ));
+        assert!(close(
+            ambient.gain(SoundCategory::Ambient, 1.0, 1.0),
+            expected
+        ));
+        assert!(close(music.gain(SoundCategory::Music, 1.0, 1.0), expected));
+        // A category's setting leaves the other categories whole.
+        assert_eq!(effects.gain(SoundCategory::Music, 1.0, 1.0), 1.0);
+        assert_eq!(music.gain(SoundCategory::Ambient, 1.0, 1.0), 1.0);
+        assert_eq!(ambient.gain(SoundCategory::Effects, 1.0, 1.0), 1.0);
+    }
+    let half = Volumes {
+        master: 50,
+        effects: 50,
+        ambient: 50,
+        music: 50,
+    };
+    assert!(close(half.gain(SoundCategory::Effects, 0.8, 0.5), 0.1));
+}
+
+#[test]
+fn only_settings_from_0_to_100_are_valid() {
+    assert!(Volumes::default().valid());
+    for setting in [0, 50, 100] {
+        assert!(
+            Volumes {
+                music: setting,
+                ..Volumes::default()
+            }
+            .valid()
+        );
+    }
+    assert!(
+        !Volumes {
+            master: 101,
+            ..Volumes::default()
+        }
+        .valid()
+    );
+    assert!(
+        !Volumes {
+            ambient: 255,
+            ..Volumes::default()
+        }
+        .valid()
+    );
+}
