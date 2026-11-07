@@ -1,6 +1,8 @@
 //! What an Ogg Vorbis recording is, read from its first page by hand so the
 //! crate needs no decoder: Bevy's already decodes it on the Client.
 
+use std::ops::RangeInclusive;
+
 /// The Vorbis identification header's channel count and sample rate.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) struct Format {
@@ -8,8 +10,15 @@ pub(crate) struct Format {
     pub sample_rate: u32,
 }
 
-/// The largest recording of any Sound category, a Music one.
-pub(crate) const MAX_FILE_BYTES: u64 = 8 << 20;
+pub(crate) const CHANNELS: RangeInclusive<u8> = 1..=2;
+/// In hertz.
+pub(crate) const SAMPLE_RATE: RangeInclusive<u32> = 8_000..=96_000;
+/// The largest Effects or Ambient recording.
+pub(crate) const MAX_SHORT_BYTES: u64 = 512 << 10;
+/// The largest Music recording.
+pub(crate) const MAX_MUSIC_BYTES: u64 = 8 << 20;
+/// All recordings a World holds, each reference counted, since each is a copy in memory.
+pub(crate) const MAX_WORLD_BYTES: u64 = 32 << 20;
 
 const NOT_VORBIS: &str = "is not an Ogg Vorbis file";
 

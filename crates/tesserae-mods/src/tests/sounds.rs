@@ -371,3 +371,261 @@ fn two_sets_for_one_material_name_both_mods() {
     };
     assert_names(&refused(vec![("a", twice_in_one)]), &["`a`", "a:stone"]);
 }
+
+/// The mono fixture followed by zeros up to `len` bytes, which still identifies as Ogg Vorbis.
+fn padded(len: usize) -> Vec<u8> {
+    let mut bytes = MONO.to_vec();
+    bytes.resize(len, 0);
+    bytes
+}
+
+fn recorded(category: content::SoundCategory, bytes: Vec<u8>) -> Declaration {
+    let effects = category == content::SoundCategory::Effects;
+    Declaration {
+        sounds: vec![content::SoundDef {
+            recordings: vec![content::Recording { bytes, weight: 1 }],
+            category,
+            distance: effects.then_some(content::SoundDistance {
+                reference_m: 2.0,
+                max_m: 24.0,
+            }),
+            ..effect("crack")
+        }],
+        ..empty()
+    }
+}
+
+#[test]
+fn a_recording_over_its_categorys_limit_is_refused_by_name() {
+    use content::SoundCategory::{Ambient, Effects, Music};
+    for (category, max) in [(Effects, 512 << 10), (Ambient, 512 << 10), (Music, 8 << 20)] {
+        if category == Music {
+            load(vec![("a", recorded(category, padded((512 << 10) + 1)))]).unwrap();
+        }
+        load(vec![("a", recorded(category, padded(max)))]).unwrap();
+        assert_names(
+            &refused(vec![("a", recorded(category, padded(max + 1)))]),
+            &["`a`", "sounds", "a:crack", "recordings", &max.to_string()],
+        );
+    }
+}
+
+#[test]
+fn a_mod_holds_at_most_64_sounds_16_sets_and_8_recordings_a_sound() {
+    let names = |n: usize| (0..n).map(|i| format!("s{i}"));
+    let sounds = |n| Declaration {
+        sounds: names(n).map(|name| effect(&name)).collect(),
+        sound_sets: Vec::new(),
+        material_sounds: Vec::new(),
+        ..rock_mod()
+    };
+    load(vec![("a", sounds(64))]).unwrap();
+    assert_names(&refused(vec![("a", sounds(65))]), &["`a`", "sound", "64"]);
+
+    let sets = |n| Declaration {
+        sound_sets: names(n).map(|name| set(&name, Some("a:crack"))).collect(),
+        material_sounds: Vec::new(),
+        ..rock_mod()
+    };
+    load(vec![("a", sets(16))]).unwrap();
+    assert_names(&refused(vec![("a", sets(17))]), &["`a`", "sound-set", "16"]);
+
+    let recordings = |n| Declaration {
+        sounds: vec![content::SoundDef {
+            recordings: (0..n)
+                .map(|_| content::Recording {
+                    bytes: MONO.to_vec(),
+                    weight: 1,
+                })
+                .collect(),
+            ..effect("crack")
+        }],
+        ..rock_mod()
+    };
+    load(vec![("a", recordings(8))]).unwrap();
+    assert_names(
+        &refused(vec![("a", recordings(9))]),
+        &["`a`", "sounds", "a:crack", "recordings", "8"],
+    );
+}
+
+#[test]
+fn every_range_is_refused_by_name_at_both_ends() {
+    let range = |min, max| content::SoundRange { min, max };
+    let distance = |reference_m, max_m| Some(content::SoundDistance { reference_m, max_m });
+    let weight = |weight| content::SoundDef {
+        recordings: vec![content::Recording {
+            bytes: MONO.to_vec(),
+            weight,
+        }],
+        ..effect("crack")
+    };
+    let accepted = [
+        weight(1),
+        weight(16),
+        content::SoundDef {
+            volume: range(0.0, 1.0),
+            pitch: range(0.5, 2.0),
+            distance: distance(0.25, 128.0),
+            ..effect("crack")
+        },
+        content::SoundDef {
+            distance: distance(16.0, 16.5),
+            ..effect("crack")
+        },
+    ];
+    for sound in accepted {
+        let d = Declaration {
+            sounds: vec![sound],
+            ..rock_mod()
+        };
+        load(vec![("a", d)]).unwrap();
+    }
+    let refusals = [
+        (weight(0), "weight"),
+        (weight(17), "weight"),
+        (
+            content::SoundDef {
+                volume: range(-0.1, 1.0),
+                ..effect("crack")
+            },
+            "volume",
+        ),
+        (
+            content::SoundDef {
+                volume: range(0.5, 1.1),
+                ..effect("crack")
+            },
+            "volume",
+        ),
+        (
+            content::SoundDef {
+                volume: range(0.9, 0.8),
+                ..effect("crack")
+            },
+            "volume",
+        ),
+        (
+            content::SoundDef {
+                pitch: range(0.4, 1.0),
+                ..effect("crack")
+            },
+            "pitch",
+        ),
+        (
+            content::SoundDef {
+                pitch: range(1.0, 2.1),
+                ..effect("crack")
+            },
+            "pitch",
+        ),
+        (
+            content::SoundDef {
+                pitch: range(f32::NAN, 1.0),
+                ..effect("crack")
+            },
+            "pitch",
+        ),
+        (
+            content::SoundDef {
+                distance: distance(0.2, 24.0),
+                ..effect("crack")
+            },
+            "distance",
+        ),
+        (
+            content::SoundDef {
+                distance: distance(17.0, 24.0),
+                ..effect("crack")
+            },
+            "distance",
+        ),
+        (
+            content::SoundDef {
+                distance: distance(2.0, 129.0),
+                ..effect("crack")
+            },
+            "distance",
+        ),
+        (
+            content::SoundDef {
+                distance: distance(4.0, 3.0),
+                ..effect("crack")
+            },
+            "distance",
+        ),
+    ];
+    for (sound, field) in refusals {
+        let d = Declaration {
+            sounds: vec![sound],
+            ..rock_mod()
+        };
+        assert_names(
+            &refused(vec![("a", d)]),
+            &["`a`", "sounds", "a:crack", field],
+        );
+    }
+}
+
+/// The mono fixture with its identification header claiming `channels` and `rate`.
+fn claiming(channels: u8, rate: u32) -> Vec<u8> {
+    let mut bytes = MONO.to_vec();
+    let header = 27 + usize::from(bytes[26]);
+    bytes[header + 11] = channels;
+    bytes[header + 12..header + 16].copy_from_slice(&rate.to_le_bytes());
+    bytes
+}
+
+#[test]
+fn a_recording_has_one_or_two_channels_at_8_to_96_khz() {
+    use content::SoundCategory::{Ambient, Effects};
+    for (channels, rate) in [(1, 8_000), (1, 96_000), (2, 44_100)] {
+        load(vec![("a", recorded(Ambient, claiming(channels, rate)))]).unwrap();
+    }
+    for (channels, rate, why) in [
+        (1, 7_999, "sample rate"),
+        (1, 96_001, "sample rate"),
+        (3, 44_100, "channels"),
+    ] {
+        assert_names(
+            &refused(vec![("a", recorded(Ambient, claiming(channels, rate)))]),
+            &["`a`", "sounds", "a:crack", "recordings", why],
+        );
+    }
+    assert_names(
+        &refused(vec![("a", recorded(Effects, claiming(1, 7_999)))]),
+        &["`a`", "a:crack", "sample rate"],
+    );
+}
+
+#[test]
+fn a_world_holds_at_most_32_mib_of_recordings_across_its_mods() {
+    let music = |name: &str| Declaration {
+        sounds: vec![content::SoundDef {
+            recordings: vec![content::Recording {
+                bytes: padded(8 << 20),
+                weight: 1,
+            }],
+            category: content::SoundCategory::Music,
+            distance: None,
+            ..effect(name)
+        }],
+        ..empty()
+    };
+    let mut mods = vec![
+        ("a", music("one")),
+        ("b", music("two")),
+        ("c", music("three")),
+        ("d", music("four")),
+    ];
+    load(mods.clone()).unwrap();
+    let small = Declaration {
+        sounds: vec![effect("crack")],
+        ..empty()
+    };
+    mods.push(("e", small));
+    assert_names(
+        &refused(mods),
+        &["`e`", "sounds", "e:crack", "recordings", "33554432"],
+    );
+}
