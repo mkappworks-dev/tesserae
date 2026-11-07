@@ -10,7 +10,7 @@ pub(in crate::server) fn apply_pending(
         ResMut<crate::server::undo::Journal>,
     ),
     (mut store, mut meshes): (ResMut<ChunkStore>, ResMut<MeshState>),
-    mut rejected: MessageWriter<EditRejected>,
+    (mut rejected, mut applied_edits): (MessageWriter<EditRejected>, MessageWriter<EditApplied>),
     (tables, world): (Res<ContentTables>, Res<WorldSettings>),
     (mut entities, items): (
         ResMut<crate::server::entities::EntityStore>,
@@ -69,6 +69,9 @@ pub(in crate::server) fn apply_pending(
                         );
                         entry.cost = Cost::Dropped(items.0[item].name.clone(), id);
                     }
+                    if let Some(kind) = applied_kind(p.intent.action, &entry) {
+                        applied_edits.write(EditApplied { at: entry.at, kind });
+                    }
                     journal.record(entry)
                 })
             });
@@ -102,6 +105,23 @@ pub(in crate::server) fn apply_pending(
         body,
         &mut inventory,
     );
+}
+
+/// What a Player's own single Place or Remove did, for the Client to show.
+fn applied_kind(action: EditAction, entry: &crate::server::undo::Entry) -> Option<AppliedKind> {
+    if let Some(material) = removal(action, entry) {
+        return Some(AppliedKind::Removed(material));
+    }
+    match (action, entry.event.kind) {
+        (
+            EditAction::Place(_) | EditAction::PlaceHeld { .. },
+            EditKind::Solid { before, after },
+        ) if before.is_air() && !after.is_air() => Some(AppliedKind::Placed(after.material())),
+        (EditAction::Place(_) | EditAction::PlaceHeld { .. }, EditKind::SourcePlaced(material)) => {
+            Some(AppliedKind::Placed(material))
+        }
+        _ => None,
+    }
 }
 
 /// Applies one resolved change and reports it to Mods, returning the history

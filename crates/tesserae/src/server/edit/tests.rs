@@ -211,6 +211,31 @@ fn a_placement_clear_of_the_body_and_any_flight_placement_are_unchanged() {
 }
 
 #[test]
+fn only_an_edit_that_landed_is_announced_as_applied() {
+    let mut app = app_with(&[(origin(), ground())]);
+    let applied = |app: &mut App| -> Vec<AppliedKind> {
+        app.world_mut()
+            .resource_mut::<Messages<EditApplied>>()
+            .drain()
+            .map(|a| a.kind)
+            .collect()
+    };
+    let rock = tesserae_core::testgen::fixtures().ground.rock;
+    send(&mut app, down(EditAction::Remove));
+    tick(&mut app);
+    assert_eq!(applied(&mut app), vec![AppliedKind::Removed(rock)]);
+
+    send(&mut app, down(EditAction::Place(stone())));
+    tick(&mut app);
+    assert_eq!(applied(&mut app), vec![AppliedKind::Placed(rock)]);
+
+    send(&mut app, down(EditAction::Place(Voxel::AIR)));
+    tick(&mut app);
+    assert!(applied(&mut app).is_empty());
+    assert!(!rejections(&mut app).is_empty());
+}
+
+#[test]
 fn breaking_removes_the_voxel_the_ray_strikes_and_placing_fills_the_cell_in_front() {
     let mut app = app_with(&[(origin(), ground())]);
     assert_eq!(voxel_at(&app, [5, 7, 5]), stone());

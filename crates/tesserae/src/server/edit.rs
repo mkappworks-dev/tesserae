@@ -333,6 +333,20 @@ pub struct EditRejected {
     pub reason: RejectReason,
 }
 
+/// A Place or Remove the Server applied, sent so the Client can show it landed.
+/// Layouts, undo and redo are not announced: they have no single hand motion.
+#[derive(Message, Clone, Copy, Debug, PartialEq)]
+pub struct EditApplied {
+    pub at: [i32; 3],
+    pub kind: AppliedKind,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum AppliedKind {
+    Placed(MaterialId),
+    Removed(MaterialId),
+}
+
 struct Pending {
     intent: EditIntent,
     waited: u32,
@@ -373,6 +387,7 @@ pub(super) fn plugin(app: &mut App) {
         .init_session_resource::<super::mods::EditHistory>()
         .add_player_intent::<EditIntent>()
         .add_session_message::<EditRejected>()
+        .add_session_message::<EditApplied>()
         .init_session_resource::<super::entities::EntityStore>()
         .init_session_resource::<super::items::Items>()
         // Every frame, so a click is never lost to a frame that runs no tick.
