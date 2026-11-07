@@ -425,10 +425,8 @@ fn shell(
             },
             BackgroundColor(if solid {
                 theme::SOLID_BACKGROUND
-            } else if over_world {
-                Color::NONE
             } else {
-                theme::SCENE
+                Color::NONE
             }),
             Node {
                 position_type: PositionType::Absolute,
@@ -440,13 +438,6 @@ fn shell(
         ))
         .with_children(|root| {
             if !solid {
-                if !over_world {
-                    root.spawn((
-                        pages::Backdrop(super::scenery::SOFT),
-                        pages::fill(),
-                        Pickable::IGNORE,
-                    ));
-                }
                 root.spawn((theme::shade(), pages::fill(), Pickable::IGNORE));
             }
             pages::header(root, logo.as_deref());

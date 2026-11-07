@@ -1801,22 +1801,127 @@ fn returning_from_a_world_lands_on_the_worlds() {
     assert_eq!(launcher(&app).screen, Screen::Worlds);
 }
 
+/// Both scenery layers with the image each shows and whether it is on show.
+fn layers(
+    app: &mut App,
+) -> Vec<(
+    Entity,
+    super::super::scenery::Filter,
+    Option<Handle<Image>>,
+    bool,
+)> {
+    let mut found: Vec<_> = app
+        .world_mut()
+        .query::<(Entity, &pages::Backdrop, Option<&ImageNode>, &Visibility)>()
+        .iter(app.world())
+        .map(|(entity, backdrop, image, visibility)| {
+            (
+                entity,
+                backdrop.0,
+                image.map(|n| n.image.clone()),
+                *visibility != Visibility::Hidden,
+            )
+        })
+        .collect();
+    found.sort_by_key(|l| l.0);
+    found
+}
+
+/// Gives each layer an image the way `paint_scenery` does once layout has sized it, which no
+/// headless App has.
+fn paint_layers(app: &mut App) -> Vec<Handle<Image>> {
+    let ids: Vec<_> = layers(app).iter().map(|l| l.0).collect();
+    let handles: Vec<_> = (1..=ids.len() as u128)
+        .map(|n| {
+            Handle::<Image>::Uuid(
+                bevy::asset::uuid::Uuid::from_u128(n),
+                std::marker::PhantomData,
+            )
+        })
+        .collect();
+    for (id, handle) in ids.into_iter().zip(&handles) {
+        app.world_mut()
+            .entity_mut(id)
+            .insert(ImageNode::new(handle.clone()));
+    }
+    handles
+}
+
 #[test]
-fn a_rebuilt_page_spawns_its_backdrop_already_painted() {
+fn the_scenery_layers_and_their_images_survive_every_screen_change() {
     let worlds = Directory::new();
     let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
     app.update();
-    let image = Handle::<Image>::default();
-    // No layout runs headless, so `paint_scenery` never reaches the new Backdrop: only the cache can.
-    app.world_mut().resource_mut::<Scenery>().0[Scenery::slot(super::super::scenery::CLEAR)]
-        .image = Some(image.clone());
-    launcher_mut(&mut app).version += 1;
-    app.update();
-    let shown: Vec<_> = app
+    let before = layers(&mut app);
+    assert_eq!(before.len(), 2, "one layer per filter");
+    paint_layers(&mut app);
+    let painted = layers(&mut app);
+    for screen in [
+        Screen::Library,
+        Screen::Create(Step::World),
+        Screen::Create(Step::Mods),
+        Screen::Title,
+        Screen::Worlds,
+    ] {
+        launcher_mut(&mut app).show(screen.clone());
+        // Several frames: the page is rebuilt on the first, settles on the rest.
+        for frame in 0..3 {
+            app.update();
+            let now = layers(&mut app);
+            assert_eq!(
+                now.iter().map(|l| (l.0, l.2.clone())).collect::<Vec<_>>(),
+                painted
+                    .iter()
+                    .map(|l| (l.0, l.2.clone()))
+                    .collect::<Vec<_>>(),
+                "{screen:?}, frame {frame}: same entities, same images"
+            );
+        }
+    }
+    let pages_backdrops = app
         .world_mut()
-        .query_filtered::<&ImageNode, With<pages::Backdrop>>()
+        .query_filtered::<(), (With<pages::Backdrop>, With<ChildOf>)>()
         .iter(app.world())
-        .map(|n| n.image.clone())
-        .collect();
-    assert_eq!(shown, [image]);
+        .count();
+    assert_eq!(pages_backdrops, 2, "none is a child of a page's Root");
+}
+
+#[test]
+fn moving_between_a_clear_and_a_softened_screen_swaps_layers_with_an_image_on_every_frame() {
+    use super::super::scenery::{CLEAR, SOFT};
+    let worlds = Directory::new();
+    let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
+    app.update();
+    paint_layers(&mut app);
+    let on_show = |app: &mut App| -> Vec<_> {
+        layers(app)
+            .into_iter()
+            .filter(|l| l.3)
+            .map(|l| l.1)
+            .collect()
+    };
+    assert!(on_show(&mut app).contains(&CLEAR), "the Worlds are clear");
+    for (screen, expected_top) in [
+        (Screen::Create(Step::World), SOFT),
+        (Screen::Worlds, CLEAR),
+        (Screen::Library, SOFT),
+        (Screen::Title, CLEAR),
+    ] {
+        launcher_mut(&mut app).show(screen.clone());
+        for _ in 0..3 {
+            app.update();
+            let now = layers(&mut app);
+            assert!(
+                now.iter().all(|l| l.2.is_some()),
+                "{screen:?}: no layer is ever without its image"
+            );
+            let shown = on_show(&mut app);
+            assert!(shown.contains(&SOFT), "the softened layer is always drawn");
+            assert_eq!(
+                shown.contains(&CLEAR),
+                expected_top == CLEAR,
+                "{screen:?}: the clear layer covers it only on a clear screen"
+            );
+        }
+    }
 }

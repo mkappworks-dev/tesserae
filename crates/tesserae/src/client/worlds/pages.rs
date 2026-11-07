@@ -16,8 +16,8 @@ use crate::client::theme;
 #[derive(Component)]
 pub(super) struct Placeholder(pub(super) Entity);
 
-/// Where the launcher's scenery is painted, softened under a sheet as the
-/// prototype softens it.
+/// One layer of the launcher's scenery. They belong to the list, not to a page, so a page
+/// change never touches them.
 #[derive(Component)]
 pub(in crate::client) struct Backdrop(pub(in crate::client) scenery::Filter);
 
@@ -25,13 +25,21 @@ pub(in crate::client) struct Backdrop(pub(in crate::client) scenery::Filter);
 #[derive(Component)]
 pub(super) struct Hero;
 
+/// The scenery a screen is drawn over: clear under the title and the Worlds, softened under a
+/// sheet with a rail or a form.
+pub(super) fn filter_for(screen: &Screen) -> scenery::Filter {
+    match screen {
+        Screen::Title | Screen::Worlds | Screen::Opening(_) => scenery::CLEAR,
+        _ => scenery::SOFT,
+    }
+}
+
 /// Builds the screen `l` is on and returns what should take focus.
 pub(super) fn spawn(
     commands: &mut Commands,
     l: &Launcher,
     installed: &Installed,
     logo: Option<&ui::Mosaic>,
-    scenery: &Scenery,
     scroll: Vec2,
 ) -> Option<Entity> {
     let mut focus = None;
@@ -41,15 +49,10 @@ pub(super) fn spawn(
         Screen::Discard(step) => Screen::Create(*step),
         screen => screen.clone(),
     };
-    let filter = match page {
-        Screen::Title | Screen::Worlds | Screen::Opening(_) => scenery::CLEAR,
-        _ => scenery::SOFT,
-    };
     commands
         .spawn((
             Root,
             TabGroup::default(),
-            BackgroundColor(theme::SCENE),
             Node {
                 // Absolute, like the in-game menus' roots: a flow root is as tall as its content,
                 // so a long page would overflow the window instead of scrolling inside it.
@@ -63,10 +66,6 @@ pub(super) fn spawn(
             },
         ))
         .with_children(|root| {
-            let mut backdrop = root.spawn((Backdrop(filter), fill(), Pickable::IGNORE));
-            if let Some(image) = scenery.image(filter) {
-                backdrop.insert(ImageNode::new(image));
-            }
             root.spawn((theme::shade(), fill(), Pickable::IGNORE));
             header(root, logo);
             root.spawn(Node {

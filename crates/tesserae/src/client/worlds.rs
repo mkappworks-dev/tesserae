@@ -669,6 +669,7 @@ fn logic(app: &mut App) {
                 sync_fields,
                 handle,
                 render,
+                show_filter,
                 filter,
                 placeholders,
                 opening,
@@ -705,8 +706,49 @@ pub(crate) fn headless_support(app: &mut App) {
 #[derive(Component)]
 struct ListCamera;
 
+/// Holds the scenery for as long as the list is up. Pages are rebuilt on every click, so
+/// nothing a page owns can carry the backdrop across one without a blank frame.
+#[derive(Component)]
+struct Scene;
+
+/// The softened scenery lies below the clear one and is never hidden, so both are always drawn
+/// and uploaded; a screen that wants it softened hides the clear layer, a straight swap with
+/// an image on every frame.
 fn camera(mut commands: Commands) {
     commands.spawn((Camera2d, ListCamera));
+    commands
+        .spawn((
+            Scene,
+            GlobalZIndex(-1),
+            BackgroundColor(theme::SCENE),
+            pages::fill(),
+            Pickable::IGNORE,
+        ))
+        .with_children(|scene| {
+            for filter in [super::scenery::SOFT, super::scenery::CLEAR] {
+                scene.spawn((pages::Backdrop(filter), pages::fill(), Pickable::IGNORE));
+            }
+        });
+}
+
+fn show_filter(
+    launcher: Option<Res<Launcher>>,
+    settings: Option<Res<super::settings::Settings>>,
+    mut layers: Query<(&pages::Backdrop, &mut Visibility)>,
+) {
+    let Some(launcher) = launcher else {
+        return;
+    };
+    let soft = settings.is_some_and(|s| s.open)
+        || pages::filter_for(&launcher.screen) == super::scenery::SOFT;
+    for (layer, mut visibility) in &mut layers {
+        let wanted = if layer.0 == super::scenery::SOFT || !soft {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        };
+        visibility.set_if_neq(wanted);
+    }
 }
 
 /// The launcher reads the pad and navigates focus as the in-game menus do,
@@ -715,7 +757,7 @@ fn standing_owner(mut ownership: ResMut<super::input::Ownership>) {
     ownership.owner = super::input::Owner::Modal;
 }
 
-type ListScreens = Or<(With<Root>, With<ListCamera>)>;
+type ListScreens = Or<(With<Root>, With<ListCamera>, With<Scene>)>;
 
 fn leave(
     mut commands: Commands,
@@ -1120,7 +1162,7 @@ fn render(
         Option<Res<Launcher>>,
         Option<Res<super::settings::Settings>>,
     ),
-    (installed, scenery): (Res<Installed>, Res<Scenery>),
+    installed: Res<Installed>,
     roots: Query<Entity, With<Root>>,
     scrolled: Query<&ScrollPosition, With<PageScroll>>,
     logo: Option<Res<ui::Mosaic>>,
@@ -1146,14 +1188,7 @@ fn render(
     for root in &roots {
         commands.entity(root).despawn();
     }
-    let focus = pages::spawn(
-        &mut commands,
-        &l,
-        &installed,
-        logo.as_deref(),
-        &scenery,
-        scroll,
-    );
+    let focus = pages::spawn(&mut commands, &l, &installed, logo.as_deref(), scroll);
     if let Some(entity) = focus {
         commands.queue(move |world: &mut World| {
             if let Some(mut focus) = world.get_resource_mut::<InputFocus>() {
@@ -1419,8 +1454,7 @@ struct Painted {
     at_s: f32,
 }
 
-/// The painted scenery, kept across page rebuilds so a new Backdrop spawns already showing it
-/// instead of being empty for the frames until `paint_scenery` reaches it.
+/// The painted scenery, one image per filter, repainted when the window's size has settled.
 #[derive(Resource, Default)]
 struct Scenery([Painted; 2]);
 
@@ -1428,17 +1462,20 @@ impl Scenery {
     fn slot(filter: super::scenery::Filter) -> usize {
         usize::from(filter == super::scenery::SOFT)
     }
-
-    fn image(&self, filter: super::scenery::Filter) -> Option<Handle<Image>> {
-        self.0[Self::slot(filter)].image.clone()
-    }
 }
 
-/// Paints the scenery for each backdrop at its size, again after a resize
-/// once the size has held for a moment.
+/// Paints the scenery for each backdrop at its size, again after a resize once the size has held
+/// for a moment. One paint a frame, the layer on show first, so the first frames never hitch
+/// twice and the visible layer is never the one waiting.
 fn paint_scenery(
     mut commands: Commands,
-    backdrops: Query<(Entity, &pages::Backdrop, &ComputedNode, Option<&ImageNode>)>,
+    backdrops: Query<(
+        Entity,
+        &pages::Backdrop,
+        &ComputedNode,
+        &Visibility,
+        Option<&ImageNode>,
+    )>,
     images: Option<ResMut<Assets<Image>>>,
     time: Res<Time<Real>>,
     mut scenery: ResMut<Scenery>,
@@ -1449,14 +1486,18 @@ fn paint_scenery(
         return;
     };
     let now = time.elapsed_secs();
-    for (entity, backdrop, node, shown) in &backdrops {
+    let mut layers: Vec<_> = backdrops.iter().collect();
+    layers.sort_by_key(|(.., visibility, _)| **visibility == Visibility::Hidden);
+    let mut painted = false;
+    for (entity, backdrop, node, _, shown) in layers {
         let size = node.size().round().as_uvec2();
         if size.x == 0 || size.y == 0 {
             continue;
         }
         let slot = &mut scenery.0[Scenery::slot(backdrop.0)];
         let stale = slot.size != size;
-        if stale && (slot.image.is_none() || now - slot.at_s >= SETTLE_S) {
+        let due = slot.image.is_none() || now - slot.at_s >= SETTLE_S;
+        if stale && due && !painted {
             let scale = 1.0 / node.inverse_scale_factor();
             let image = Image::new(
                 bevy::render::render_resource::Extent3d {
@@ -1472,8 +1513,7 @@ fn paint_scenery(
             slot.image = Some(images.add(image));
             slot.size = size;
             slot.at_s = now;
-        } else if stale {
-            continue;
+            painted = true;
         }
         let Some(image) = slot.image.clone() else {
             continue;
