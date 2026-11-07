@@ -1,12 +1,10 @@
-//! The first-person hand's one animation state machine: idle, a swing for a
-//! Place, a steady mining rhythm while a removal runs, and bites for eating.
+//! The hand's one animation state machine: idle, a swing for a Place, a steady
+//! mining rhythm while a removal runs, bites for eating and a lower-and-raise
+//! when the slot changes. It poses the first-person viewmodel (`viewmodel.rs`)
+//! and, as [`Pose::arm_rad`], the avatar's right arm in third person.
 //! Client-only, started by what the Server confirmed and never by an intent.
 
-use super::{
-    edit::Hotbar,
-    preview::{Hand, HandRest},
-    profile::Preferences,
-};
+use super::{edit::Hotbar, profile::Preferences};
 use crate::server::edit::{AppliedKind, EditApplied};
 use crate::server::tool::UseOutcome;
 use crate::server::vitals::EatIntent;
@@ -14,16 +12,27 @@ use crate::session::SessionApp;
 use bevy::prelude::*;
 
 const SWING_S: f32 = 0.2;
-const SWING_FORWARD: f32 = 0.35;
+const SWING_FORWARD: f32 = 0.22;
 const SWING_PITCH_RAD: f32 = 0.5;
 const MINE_PERIOD_S: f32 = 0.35;
 const BITE_S: f32 = 1.0;
 const RISE_S: f32 = 0.25;
+/// A slot change lowers the item and raises it again, the new one at the bottom.
+const SWITCH_S: f32 = 0.24;
+const SWITCH_DROP: f32 = 0.4;
 const BITES: u32 = 3;
 const BITE_EACH_S: f32 = 0.2;
 const LOWER_S: f32 = BITE_S - RISE_S - BITES as f32 * BITE_EACH_S;
-/// Where the food sits at the mouth, relative to the resting hand.
-const MOUTH: Vec3 = Vec3::new(0.55, 0.55, 0.15);
+/// Where the food sits at the mouth, relative to the resting hand, in the
+/// camera's frame.
+const MOUTH: Vec3 = Vec3::new(-0.2, 0.27, 0.0);
+/// How far the avatar's right arm swings forward at the far point of a Place or
+/// a chop, and how far it is raised to bring food to the mouth.
+pub(super) const ARM_SWING_RAD: f32 = 1.0;
+const ARM_MOUTH_RAD: f32 = 2.0;
+/// The viewmodel tips back at the elbow as the fist comes up, so the forearm
+/// stays low in the view instead of crossing it.
+const MOUTH_TILT_RAD: f32 = 0.7;
 /// The food left in the hand after the last bite.
 const FOOD_LEFT: f32 = 0.45;
 /// How long after asking to eat the Server's answer may take.
@@ -33,6 +42,7 @@ const EAT_PATIENCE_S: f64 = 1.5;
 enum Motion {
     Swing(f32),
     Bite(f32),
+    Switch(f32),
 }
 
 /// How far the hand is from rest this frame.
@@ -42,6 +52,8 @@ pub(super) struct Pose {
     pub(super) pitch: f32,
     /// Of what the hand holds; below one only while it is being eaten.
     pub(super) scale: f32,
+    /// How far the avatar's right arm is raised from its side, forward.
+    pub(super) arm_rad: f32,
 }
 
 impl Pose {
@@ -49,6 +61,7 @@ impl Pose {
         offset: Vec3::ZERO,
         pitch: 0.0,
         scale: 1.0,
+        arm_rad: 0.0,
     };
 }
 
@@ -74,6 +87,20 @@ impl HandAnim {
         self.motion = Some(Motion::Bite(0.0));
     }
 
+    /// The slot changed: lower the item and raise the next. A bite in progress
+    /// is finished first, as a swing waits for it.
+    pub(super) fn switch(&mut self) {
+        if !matches!(self.motion, Some(Motion::Bite(_))) {
+            self.motion = Some(Motion::Switch(0.0));
+        }
+    }
+
+    /// Whether the item drawn may change now: not before a switch has lowered
+    /// the old one out of sight.
+    pub(super) fn swapped(&self) -> bool {
+        !matches!(self.motion, Some(Motion::Switch(t)) if t < SWITCH_S / 2.0)
+    }
+
     pub(super) fn set_mining(&mut self, mining: bool) {
         if mining && !self.mining {
             self.mine_s = 0.0;
@@ -92,6 +119,7 @@ impl HandAnim {
         self.motion = match self.motion {
             Some(Motion::Swing(t)) if t + dt < SWING_S => Some(Motion::Swing(t + dt)),
             Some(Motion::Bite(t)) if t + dt < BITE_S => Some(Motion::Bite(t + dt)),
+            Some(Motion::Switch(t)) if t + dt < SWITCH_S => Some(Motion::Switch(t + dt)),
             _ => None,
         };
     }
@@ -104,6 +132,7 @@ impl HandAnim {
         match self.motion {
             Some(Motion::Bite(t)) => bite_pose(t),
             Some(Motion::Swing(t)) => swing_pose(t / SWING_S),
+            Some(Motion::Switch(t)) => switch_pose(t / SWITCH_S),
             None if self.mining => swing_pose(self.mine_s / MINE_PERIOD_S),
             None => Pose::REST,
         }
@@ -121,6 +150,16 @@ fn swing_pose(phase: f32) -> Pose {
         offset: Vec3::new(0.0, 0.0, -SWING_FORWARD * reach),
         pitch: -SWING_PITCH_RAD * reach,
         scale: 1.0,
+        arm_rad: ARM_SWING_RAD * reach,
+    }
+}
+
+/// Down and back up over `0..1`.
+fn switch_pose(phase: f32) -> Pose {
+    let low = (phase * std::f32::consts::PI).sin();
+    Pose {
+        offset: Vec3::new(0.0, -SWITCH_DROP * low, 0.0),
+        ..Pose::REST
     }
 }
 
@@ -130,8 +169,9 @@ fn bite_pose(t: f32) -> Pose {
         let up = ease_out(t / RISE_S);
         return Pose {
             offset: MOUTH * up,
-            pitch: 0.0,
+            pitch: MOUTH_TILT_RAD * up,
             scale: 1.0,
+            arm_rad: ARM_MOUTH_RAD * up,
         };
     }
     if t < bites_end {
@@ -143,16 +183,18 @@ fn bite_pose(t: f32) -> Pose {
         let eaten = (bite + ease_out(within)) / BITES as f32;
         return Pose {
             offset: MOUTH + Vec3::new(-0.08, -0.04, 0.0) * dip,
-            pitch: 0.25 * dip,
+            pitch: MOUTH_TILT_RAD + 0.25 * dip,
             scale: 1.0 - (1.0 - FOOD_LEFT) * eaten,
+            arm_rad: ARM_MOUTH_RAD + 0.25 * dip,
         };
     }
     let down = ease_out((t - bites_end) / LOWER_S);
     Pose {
         offset: MOUTH * (1.0 - down),
-        pitch: 0.0,
+        pitch: MOUTH_TILT_RAD * (1.0 - down),
         // The next bite of the stack is a whole Item again.
         scale: FOOD_LEFT + (1.0 - FOOD_LEFT) * down,
+        arm_rad: ARM_MOUTH_RAD * (1.0 - down),
     }
 }
 
@@ -166,10 +208,7 @@ struct AskedToEat {
 pub(super) fn plugin(app: &mut App) {
     app.init_session_state::<HandAnim>().add_session_systems(
         Update,
-        (confirm, animate)
-            .chain()
-            .after(super::preview::position)
-            .after(super::edit::follow_server),
+        (confirm, animate).chain().after(super::edit::follow_server),
     );
 }
 
@@ -188,12 +227,19 @@ fn confirm(
     hotbar: Res<Hotbar>,
     progress: Option<Res<super::removal::Progress>>,
     time: Res<Time>,
-    mut asked: Local<Option<AskedToEat>>,
+    (mut slot, mut asked): (Local<Option<usize>>, Local<Option<AskedToEat>>),
 ) {
     for edit in applied.read() {
         if matches!(edit.kind, AppliedKind::Placed(_)) {
             anim.swing();
         }
+    }
+    // The first frame only learns the slot: a World opening is not a switch.
+    if slot
+        .replace(hotbar.selected)
+        .is_some_and(|was| was != hotbar.selected)
+    {
+        anim.switch();
     }
     let now = time.elapsed_secs_f64();
     if eats.read().last().is_some() {
@@ -226,22 +272,10 @@ pub(super) fn still(preferences: &Option<Res<Preferences>>) -> bool {
     preferences.as_ref().is_some_and(|p| p.reduced_motion)
 }
 
-fn animate(
-    mut anim: ResMut<HandAnim>,
-    preferences: Option<Res<Preferences>>,
-    time: Res<Time>,
-    mut hand: Query<(&mut Transform, &HandRest), With<Hand>>,
-) {
-    let still = still(&preferences);
+/// Advances the one state both views read.
+pub(super) fn animate(mut anim: ResMut<HandAnim>, time: Res<Time>) {
     if anim.playing() {
         anim.tick(time.delta_secs());
-    }
-    let pose = anim.pose(still);
-    for (mut transform, rest) in &mut hand {
-        let next = rest.posed(pose);
-        if *transform != next {
-            *transform = next;
-        }
     }
 }
 
@@ -254,6 +288,91 @@ mod tests {
         for _ in 0..steps {
             anim.tick(0.01);
         }
+    }
+
+    #[test]
+    fn the_arm_swings_forward_for_a_place_and_the_food_raises_it_to_the_mouth() {
+        let mut anim = HandAnim::default();
+        assert_eq!(anim.pose(false).arm_rad, 0.0, "at rest the arm hangs");
+        anim.swing();
+        run(&mut anim, SWING_S / 2.0);
+        let swung = anim.pose(false).arm_rad;
+        assert!((swung - ARM_SWING_RAD).abs() < 0.06, "{swung}");
+        run(&mut anim, SWING_S);
+        assert_eq!(anim.pose(false).arm_rad, 0.0, "and it returns");
+
+        anim.bite();
+        run(&mut anim, RISE_S);
+        assert!(
+            anim.pose(false).arm_rad > ARM_SWING_RAD * 1.9,
+            "to the mouth"
+        );
+        let shrunk = (0..60).any(|_| {
+            anim.tick(0.01);
+            anim.pose(false).scale < 0.8
+        });
+        assert!(shrunk, "the food shrinks as it is bitten");
+        run(&mut anim, BITE_S);
+        assert_eq!(anim.pose(false), Pose::REST);
+    }
+
+    #[test]
+    fn a_removal_chops_the_arm_over_and_over_and_reduced_motion_holds_it_still() {
+        let mut anim = HandAnim::default();
+        anim.set_mining(true);
+        let mut peaks = 0;
+        let mut last = 0.0;
+        for _ in 0..200 {
+            anim.tick(0.01);
+            let arm = anim.pose(false).arm_rad;
+            if last > arm && last > ARM_SWING_RAD * 0.9 {
+                peaks += 1;
+            }
+            last = arm;
+            assert_eq!(anim.pose(true), Pose::REST);
+        }
+        assert!(peaks >= 3, "chopped {peaks} times in two seconds");
+    }
+
+    #[test]
+    fn a_switch_lowers_the_hand_and_raises_it_swapping_the_item_at_the_bottom() {
+        let mut anim = HandAnim::default();
+        anim.switch();
+        assert!(!anim.swapped(), "the old item is still showing");
+        run(&mut anim, SWITCH_S / 2.0 + 0.02);
+        assert!(anim.swapped());
+        assert!(
+            anim.pose(false).offset.y < -SWITCH_DROP * 0.9,
+            "lowest at the middle"
+        );
+        run(&mut anim, SWITCH_S);
+        assert_eq!(anim.pose(false), Pose::REST);
+        anim.bite();
+        anim.switch();
+        assert!(
+            matches!(anim.motion, Some(Motion::Bite(_))),
+            "a bite is not cut short"
+        );
+    }
+
+    #[test]
+    fn changing_the_selected_slot_starts_a_switch_but_opening_a_world_does_not() {
+        let mut app = App::new();
+        app.init_resource::<Time>()
+            .init_resource::<HandAnim>()
+            .init_resource::<Hotbar>()
+            .add_message::<EditApplied>()
+            .add_message::<EatIntent>()
+            .add_message::<UseOutcome>()
+            .add_systems(Update, confirm);
+        app.update();
+        assert!(
+            !app.world().resource::<HandAnim>().playing(),
+            "the first frame learns the slot"
+        );
+        app.world_mut().resource_mut::<Hotbar>().selected = 3;
+        app.update();
+        assert!(app.world().resource::<HandAnim>().playing());
     }
 
     #[test]

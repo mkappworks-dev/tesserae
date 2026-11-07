@@ -80,8 +80,11 @@
 .game[data-view=play] .hud-bottom{bottom:12px}
 
 /* The first-person hand (engine: hand_anim, hand_fx). */
-.hand{position:absolute;right:12%;bottom:-4%;width:150px;height:150px;pointer-events:none;z-index:2;transform-origin:70% 100%;filter:drop-shadow(0 6px 8px #0008)}
-.hand svg{width:100%;height:100%}
+.hand{position:absolute;right:11%;bottom:-2%;width:110px;height:110px;pointer-events:none;z-index:2;transform-origin:70% 100%;filter:drop-shadow(0 6px 8px #0008)}
+.hand .arm{position:absolute;right:-18px;bottom:-90px;width:60px;height:190px;border-radius:4px;background:linear-gradient(90deg,#a97f63,#c99b7b 55%,#b58a6d);transform:rotate(24deg);transform-origin:50% 100%;z-index:-1}
+.hand svg{width:100%;height:100%;transform:rotate(-10deg)}
+.hand.switch{animation:hand-switch .24s ease-in-out}
+@keyframes hand-switch{50%{transform:translateY(70px)}}
 .hand.swing{animation:hand-swing .2s ease-out}
 .hand.mine{animation:hand-swing .35s ease-out infinite}
 .hand.bite{animation:hand-bite 1s linear}

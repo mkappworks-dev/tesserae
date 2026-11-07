@@ -119,20 +119,21 @@ A World with no Game is empty air: it has no ground, lakes, fluid or fuel. See
 The Client sends aim reports beside edit intents. The Server answers with metre
 outline bounds and an acceptable ghost cell through the edit resolver. The
 Client meshes held Shapes from catalogue geometry and draws the outline, ghost
-and corner model. The Catalogue, hotbar and drag follower share a cached model
-atlas from the same geometry. Games supply one optional, bounded texture per
-Material through the Declaration's appearance rows. One GPU texture atlas is
-shared by World surfaces and item models; the Client draws it without naming
-Materials. Greedy terrain faces repeat per Voxel, and colour, depth and shadow
-passes use the same texture alpha. Older contract lines retain colour fallback.
-Fire uses engine flame artwork. The placement ghost uses the held model at 75
-percent opacity. The Client tracks a bounded history of aim requests and accepts
-monotonic Server replies; it retains a compatible answer for at most 200 ms
-while waiting for the next. Item changes, large turns or Eye displacement hide
-it immediately. Sampling a Voxel is a separate read-only Server intent, not an
-Edit; the Client applies a reply only if its hand selection has not changed. UI
-atlas images use premultiplied blending to preserve transparency. No preview
-reads World storage.
+and the first-person viewmodel (the arm and held Item at the lower right of the
+view; the avatar's arm and hand in third person). The Catalogue, hotbar and drag
+follower share a cached model atlas from the same geometry. Games supply one
+optional, bounded texture per Material through the Declaration's appearance
+rows. One GPU texture atlas is shared by World surfaces and item models; the
+Client draws it without naming Materials. Greedy terrain faces repeat per Voxel,
+and colour, depth and shadow passes use the same texture alpha. Older contract
+lines retain colour fallback. Fire uses engine flame artwork. The placement
+ghost uses the held model at 75 percent opacity. The Client tracks a bounded
+history of aim requests and accepts monotonic Server replies; it retains a
+compatible answer for at most 200 ms while waiting for the next. Item changes,
+large turns or Eye displacement hide it immediately. Sampling a Voxel is a
+separate read-only Server intent, not an Edit; the Client applies a reply only
+if its hand selection has not changed. UI atlas images use premultiplied
+blending to preserve transparency. No preview reads World storage.
 
 The Server also supplies removal target identity and bounds. The Client draws a
 progress bar above it and sends a guarded removal after the Material's hold

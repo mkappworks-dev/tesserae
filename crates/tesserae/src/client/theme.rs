@@ -556,6 +556,8 @@ pub(super) const DEATH_EYEBROW: Color = Color::srgb_u8(0xd8, 0xa5, 0x9c);
 pub(super) const TEXT_DEATH_TITLE: f32 = 46.0;
 /// −0.01 em of the death title.
 pub(super) const DEATH_TITLE_TRACKING: f32 = -0.46;
+/// The first-person arm, drawn unlit under the viewmodel's own camera.
+pub(super) const VIEWMODEL_ARM: Color = Color::srgb_u8(0xc9, 0x9b, 0x7b);
 /// The cursor hint and the F3 readout.
 pub(super) const READOUT: Color = Color::srgba(1.0, 1.0, 1.0, 0.7);
 /// CSS `brightness(.5)` halves sRGB values; Bevy UI blends in linear light,

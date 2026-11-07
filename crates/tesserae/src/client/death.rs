@@ -31,6 +31,26 @@ const DEAD_SATURATION: f32 = 0.25;
 #[derive(Resource, Default)]
 pub(super) struct Dead(Option<DeathReport>);
 
+#[cfg(test)]
+impl Dead {
+    /// A Player who has died, for the tests of what hides while dead.
+    pub(super) fn after_a_fall() -> Self {
+        use crate::server::death::Death;
+        Dead(Some(DeathReport {
+            death: Death {
+                cause: None,
+                at_m: Vec3::ZERO,
+                dropped: Vec::new(),
+                drops: Vec::new(),
+                kept_inventory: false,
+            },
+            from_spawn_m: 0.0,
+            safe_fall_m: 3.0,
+            despawns_in_s: None,
+        }))
+    }
+}
+
 pub(super) fn alive(dead: Option<Res<Dead>>) -> bool {
     dead.is_none_or(|d| d.0.is_none())
 }

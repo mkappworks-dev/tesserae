@@ -21,6 +21,7 @@ pub mod edit;
 mod game_mode;
 mod hand_anim;
 mod hand_fx;
+mod held_item;
 mod help;
 mod history;
 #[cfg(feature = "profiling")]
@@ -63,6 +64,7 @@ mod tool;
 mod touch;
 mod underwater;
 mod view;
+mod viewmodel;
 mod vitals;
 pub mod worlds;
 
@@ -108,7 +110,7 @@ pub fn plugin(app: &mut App) {
         avatar::plugin,
     ));
     app.add_plugins((hand_anim::plugin, hand_fx::plugin, place_settle::plugin));
-    app.add_plugins(menu_blur::plugin);
+    app.add_plugins((menu_blur::plugin, held_item::plugin, viewmodel::plugin));
     app.add_plugins((
         view::plugin,
         loading::plugin,

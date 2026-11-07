@@ -300,7 +300,7 @@ pub(super) fn plugin(app: &mut App) {
             .before(super::removal::bar),
     );
     app.add_session_systems(PreUpdate, save_preview)
-        .add_session_systems(Update, hud_fixture);
+        .add_session_systems(Update, (hud_fixture, action_fixture));
     if let Ok(size) = std::env::var("TESSERAE_SCREENSHOT_TOUCH") {
         app.insert_resource(TouchCapture(match size.as_str() {
             "small" => super::profile::TouchSize::Small,
@@ -335,6 +335,46 @@ pub(super) fn plugin(app: &mut App) {
             )
                 .chain(),
         );
+}
+
+/// `TESSERAE_SCREENSHOT_ACTION=place|swing|eat` starts that hand motion shortly
+/// before the shutter, so the picture catches it midway: `place` is a Place
+/// the Server confirmed one Voxel ahead of the Eye (which also starts the
+/// placed block's settle), `swing` a bare swing and `eat` a bite.
+fn action_fixture(
+    time: Res<Time<Real>>,
+    capture: Res<Capture>,
+    (world, hotbar): (Res<WorldSettings>, Res<super::edit::Hotbar>),
+    camera: Single<(&FlyCamera, &Transform), With<MainCamera>>,
+    mut anim: ResMut<super::hand_anim::HandAnim>,
+    mut applied: MessageWriter<crate::server::edit::EditApplied>,
+    mut sent: Local<bool>,
+) {
+    let Ok(action) = std::env::var("TESSERAE_SCREENSHOT_ACTION") else {
+        return;
+    };
+    let lead_s = if action == "eat" { 0.4 } else { 0.1 };
+    if *sent || !capture.before_shutter(capture.elapsed_s(&time), lead_s) {
+        return;
+    }
+    *sent = true;
+    match action.as_str() {
+        "place" => {
+            let (fly, transform) = *camera;
+            let ahead = fly.eye + transform.forward() * 1.5;
+            if let Some(material) = hotbar.held().material() {
+                applied.write(crate::server::edit::EditApplied {
+                    at: ahead
+                        .to_array()
+                        .map(|c| (c / world.voxel_size).floor() as i32),
+                    kind: crate::server::edit::AppliedKind::Placed(material),
+                });
+            }
+        }
+        "swing" => anim.swing(),
+        "eat" => anim.bite(),
+        other => panic!("Unknown fixture action: {other}"),
+    }
 }
 
 /// `TESSERAE_SCREENSHOT_VIEW=third` and `TESSERAE_SCREENSHOT_ZOOM_M` choose the

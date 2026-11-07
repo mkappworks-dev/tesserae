@@ -40,12 +40,20 @@ pub(super) struct Avatar {
 #[derive(Component)]
 struct Limb(Role);
 
+/// The right hand's grip, at the foot of the right arm, where the held Item is
+/// attached so it moves with the arm.
+#[derive(Component)]
+pub(super) struct HandMount;
+
 pub(super) fn plugin(app: &mut App) {
     app.init_session_state::<AvatarShown>()
         .add_session_message::<CharacterModel>()
         .add_session_systems(
             Update,
-            (rebuild, pose).chain().after(super::pose::apply_correction),
+            (rebuild, pose)
+                .chain()
+                .after(super::pose::apply_correction)
+                .after(super::hand_anim::animate),
         );
 }
 
@@ -79,7 +87,7 @@ fn plain_box() -> Character {
     }
 }
 
-fn rebuild(
+pub(super) fn rebuild(
     mut commands: Commands,
     mut models: MessageReader<CharacterModel>,
     existing: Query<Entity, With<Avatar>>,
@@ -152,8 +160,37 @@ fn rebuild(
                 ChildOf(entity),
             ));
         }
+        if bone.role == Role::ArmRight
+            && let Some(grip) = grip(bone, character.pixel_m)
+        {
+            commands.spawn((
+                HandMount,
+                Transform::from_translation(grip),
+                Visibility::Inherited,
+                ChildOf(entity),
+            ));
+        }
         bones.push(entity);
     }
+}
+
+/// The middle of the bottom of a limb's cubes, in the limb's frame: the hand.
+fn grip(bone: &Bone, pixel_m: f32) -> Option<Vec3> {
+    let pivot = Vec3::from_array(bone.pivot);
+    let low = bone
+        .cubes
+        .iter()
+        .min_by(|a, b| a.origin[1].total_cmp(&b.origin[1]))?;
+    let [w, _, d] = low.size.map(f32::from);
+    let origin = Vec3::from_array(low.origin);
+    Some((origin + Vec3::new(w / 2.0, 0.0, d / 2.0) - pivot) * pixel_m)
+}
+
+/// The right arm's angle forward: the walk's swing gives way to the hand's
+/// action as it grows, so the two blend and never fight.
+fn right_arm(raise: f32, swing: f32, action: f32) -> f32 {
+    let walk = 1.0 - (action.abs() / super::hand_anim::ARM_SWING_RAD).clamp(0.0, 1.0);
+    raise + swing * walk + action
 }
 
 /// Six faces with the Minecraft skin's box-UV layout, in the bone's frame:
@@ -227,6 +264,10 @@ fn pose(
     shown: Res<AvatarShown>,
     body: Res<PublishedBody>,
     camera: Single<&FlyCamera>,
+    (anim, preferences): (
+        Option<Res<super::hand_anim::HandAnim>>,
+        Option<Res<super::profile::Preferences>>,
+    ),
     mut avatar: Query<(&mut Avatar, &mut Transform, &mut Visibility), Without<Limb>>,
     mut limbs: Query<(&Limb, &mut Transform)>,
 ) {
@@ -275,6 +316,10 @@ fn pose(
     avatar.swing += (wanted.swing_deg.to_radians() - avatar.swing) * settle;
     avatar.raise += (wanted.arm_raise_deg.to_radians() - avatar.raise) * settle;
     let swing = avatar.swing * avatar.phase.sin();
+    let action = anim.map_or(0.0, |anim| {
+        anim.pose(preferences.is_some_and(|p| p.reduced_motion))
+            .arm_rad
+    });
     let head = Quat::from_euler(
         EulerRot::YXZ,
         wrap(fly.yaw - avatar.body_yaw),
@@ -284,7 +329,7 @@ fn pose(
     for (limb, mut transform) in &mut limbs {
         transform.rotation = match limb.0 {
             Role::Head => head,
-            Role::ArmRight => Quat::from_rotation_x(avatar.raise + swing),
+            Role::ArmRight => Quat::from_rotation_x(right_arm(avatar.raise, swing, action)),
             Role::ArmLeft => Quat::from_rotation_x(avatar.raise - swing),
             Role::LegRight => Quat::from_rotation_x(-swing),
             Role::LegLeft => Quat::from_rotation_x(swing),
@@ -382,6 +427,125 @@ mod tests {
         for _ in 0..120 {
             app.update();
         }
+    }
+
+    #[test]
+    fn the_hand_s_action_replaces_the_walking_swing_on_the_right_arm_instead_of_adding() {
+        assert_eq!(
+            right_arm(0.1, 0.4, 0.0),
+            0.5,
+            "no action: the walk as before"
+        );
+        let full = super::super::hand_anim::ARM_SWING_RAD;
+        assert!(
+            (right_arm(0.0, 0.4, full) - full).abs() < 1e-6,
+            "the walk gives way"
+        );
+        let half = right_arm(0.0, 0.4, full / 2.0);
+        assert!(
+            half > full / 2.0 && half < full / 2.0 + 0.4,
+            "and blends between"
+        );
+    }
+
+    #[test]
+    fn a_landed_place_swings_the_right_arm_and_reduced_motion_holds_it() {
+        let mut app = app();
+        app.init_resource::<super::super::hand_anim::HandAnim>();
+        // Standing on the ground, so no airborne raise mixes in.
+        set_body(
+            &mut app,
+            BodyState {
+                grounded: true,
+                ..default()
+            },
+        );
+        app.world_mut()
+            .write_message(CharacterModel(Some(Arc::new(figure()))));
+        app.update();
+        let at_rest = limb(&mut app, Role::ArmRight);
+        app.world_mut()
+            .resource_mut::<super::super::hand_anim::HandAnim>()
+            .swing();
+        // The hand's own tick is not in this app, so the swing sits at its start;
+        // a mining state holds the arm out for the check.
+        app.world_mut()
+            .resource_mut::<super::super::hand_anim::HandAnim>()
+            .set_mining(true);
+        for _ in 0..12 {
+            app.world_mut()
+                .resource_mut::<super::super::hand_anim::HandAnim>()
+                .tick(0.01);
+            app.update();
+        }
+        let swung = limb(&mut app, Role::ArmRight).to_euler(EulerRot::XYZ).0;
+        assert!(swung > 0.1, "the arm came forward: {swung}");
+        assert!(at_rest.to_euler(EulerRot::XYZ).0.abs() < 1e-3);
+
+        app.insert_resource(super::super::profile::Preferences {
+            reduced_motion: true,
+            ..default()
+        });
+        app.update();
+        let held = limb(&mut app, Role::ArmRight).to_euler(EulerRot::XYZ).0;
+        assert!(held.abs() < 1e-3, "{held}");
+    }
+
+    #[test]
+    fn the_right_arm_carries_a_mount_at_its_foot_and_only_that_arm() {
+        let mut app = app();
+        app.world_mut()
+            .write_message(CharacterModel(Some(Arc::new(figure()))));
+        app.update();
+        let mounts = app
+            .world_mut()
+            .query::<(&HandMount, &Transform, &ChildOf)>()
+            .iter(app.world())
+            .map(|(_, t, parent)| (t.translation, parent.parent()))
+            .collect::<Vec<_>>();
+        assert_eq!(mounts.len(), 1);
+        let arm = app
+            .world_mut()
+            .query::<(Entity, &Limb)>()
+            .iter(app.world())
+            .find(|(_, l)| l.0 == Role::ArmRight)
+            .unwrap()
+            .0;
+        assert_eq!(mounts[0].1, arm);
+        assert!(mounts[0].0.y < 0.0, "below the shoulder: {:?}", mounts[0].0);
+    }
+
+    #[test]
+    fn the_hand_mount_hangs_from_the_avatar_so_first_person_never_draws_what_it_holds() {
+        let mut app = app();
+        app.world_mut()
+            .write_message(CharacterModel(Some(Arc::new(figure()))));
+        app.update();
+        let mount = app
+            .world_mut()
+            .query_filtered::<Entity, With<HandMount>>()
+            .single(app.world())
+            .unwrap();
+        let mut at = mount;
+        while let Some(parent) = app.world().get::<ChildOf>(at) {
+            at = parent.parent();
+        }
+        assert!(
+            app.world().get::<Avatar>(at).is_some(),
+            "under the avatar root"
+        );
+        assert_eq!(
+            *app.world().get::<Visibility>(at).unwrap(),
+            Visibility::Hidden,
+            "which first person hides"
+        );
+        app.world_mut().resource_mut::<AvatarShown>().0 = true;
+        app.update();
+        assert_eq!(
+            *app.world().get::<Visibility>(at).unwrap(),
+            Visibility::Inherited,
+            "and third person shows"
+        );
     }
 
     #[test]

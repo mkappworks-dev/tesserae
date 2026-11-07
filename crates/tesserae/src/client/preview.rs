@@ -1,4 +1,5 @@
-//! Single-item geometry from content, positioned by the Server's aim answer.
+//! Single-item geometry from content, shared by the placement ghost, the first-person
+//! viewmodel and the avatar's hand, positioned by the Server's aim answer.
 use super::{
     aim::{Sent, Target},
     camera::FlyCamera,
@@ -14,36 +15,13 @@ use bevy::prelude::*;
 
 use crate::session::SessionApp;
 
-const HAND_LAYER: usize = 31;
-type Models = Or<(With<Ghost>, With<Hand>)>;
-type GhostOnly = (With<Ghost>, Without<Hand>);
-type HandOnly = (With<Hand>, Without<Ghost>);
+/// What only the viewmodel's camera draws.
+pub(super) const HAND_LAYER: usize = 31;
 #[derive(Component)]
 pub(super) struct Ghost;
-#[derive(Component)]
-pub(super) struct Hand;
-/// Where the hand sits at rest, which `hand_anim` poses away from and back to.
-#[derive(Component, Clone, Copy)]
-pub(super) struct HandRest {
-    translation: Vec3,
-    rotation: Quat,
-    scale: f32,
-}
-impl HandRest {
-    const AT: HandRest = HandRest {
-        translation: Vec3::new(-0.60, -0.33, -1.0),
-        rotation: Quat::from_xyzw(0.0, -0.198_669_33, 0.0, 0.980_066_6),
-        scale: 0.06,
-    };
-    pub(super) fn posed(&self, pose: super::hand_anim::Pose) -> Transform {
-        Transform::from_translation(self.translation + pose.offset)
-            .with_rotation(self.rotation * Quat::from_rotation_x(pose.pitch))
-            .with_scale(Vec3::splat(self.scale * pose.scale))
-    }
-}
 /// Colour of an Item that has no declared look.
 const PLAIN_ITEM: [u8; 4] = [190, 190, 190, 255];
-/// What the first-person hand draws for what is selected.
+/// What the hand holds, as the viewmodel and the avatar's hand draw it.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub(super) enum HandModel {
     /// A placeable Material, fire or a Tool, each with its own look.
@@ -72,12 +50,14 @@ pub(super) fn hand_model(hotbar: &Hotbar, looks: &[crate::content::ItemLook]) ->
 }
 #[derive(Component)]
 pub(super) struct HandCamera;
+/// What the hand draws now, built once for both views: the first-person hand
+/// and the avatar's hand share this mesh and material.
 #[derive(Resource, Default)]
-struct Model {
-    held: Option<HandModel>,
-    mesh: Handle<Mesh>,
+pub(super) struct Model {
+    pub(super) held: Option<HandModel>,
+    pub(super) mesh: Handle<Mesh>,
     ghost: Handle<StandardMaterial>,
-    hand: Handle<StandardMaterial>,
+    pub(super) hand: Handle<StandardMaterial>,
 }
 pub(super) fn plugin(app: &mut App) {
     app.init_session_state::<Model>()
@@ -226,14 +206,13 @@ fn fire_mesh() -> Mesh {
     .with_inserted_indices(Indices::U32(vec![0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7]))
 }
 
-fn model(
+pub(super) fn model(
     mut commands: Commands,
     (hotbar, content, looks): (Res<Hotbar>, PreviewContent, Res<super::drops::Looks>),
     mut model: ResMut<Model>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    old: Query<Entity, Models>,
-    main: Query<Entity, With<FlyCamera>>,
+    old: Query<Entity, With<Ghost>>,
 ) {
     let wanted = hand_model(&hotbar, &looks.0);
     if model.held == Some(wanted) && !content.changed() && !looks.is_changed() {
@@ -242,9 +221,8 @@ fn model(
     for entity in &old {
         commands.entity(entity).despawn();
     }
-    meshes.remove(model.mesh.id());
-    materials.remove(model.ghost.id());
-    materials.remove(model.hand.id());
+    // The old mesh and materials go with their last handle, which the viewmodel
+    // may still hold while a slot switch lowers it.
     model.held = Some(wanted);
     let (mesh, hand, ghost) = match wanted {
         HandModel::Nothing => return,
@@ -282,19 +260,6 @@ fn model(
             Visibility::Hidden,
         ));
     }
-    if let Ok(parent) = main.single() {
-        commands.spawn((
-            Hand,
-            HandRest::AT,
-            bevy::light::NotShadowCaster,
-            Mesh3d(model.mesh.clone()),
-            MeshMaterial3d(model.hand.clone()),
-            RenderLayers::layer(HAND_LAYER),
-            HandRest::AT.posed(super::hand_anim::Pose::REST),
-            Visibility::Hidden,
-            ChildOf(parent),
-        ));
-    }
 }
 fn item_cube_mesh() -> Mesh {
     let mut mesh = Mesh::from(Cuboid::new(0.8, 0.8, 0.8)).translated_by(Vec3::splat(0.5));
@@ -311,8 +276,7 @@ pub(super) fn position(
     world: Res<WorldSettings>,
     hotbar: Res<Hotbar>,
     (target, sent, time): (Res<Target>, Res<Sent>, Res<Time>),
-    mut ghost: Query<(&mut Transform, &mut Visibility), GhostOnly>,
-    mut hand: Query<&mut Visibility, HandOnly>,
+    mut ghost: Query<(&mut Transform, &mut Visibility), With<Ghost>>,
 ) {
     let menu_open = super::menu::covered(&covers) || !super::death::alive(dead);
     let cell = (!removal.is_some_and(|r| r.active())
@@ -332,13 +296,6 @@ pub(super) fn position(
             transform.translation = cell;
             transform.scale = Vec3::splat(world.voxel_size);
         }
-    }
-    for mut visibility in &mut hand {
-        *visibility = if menu_open {
-            Visibility::Hidden
-        } else {
-            Visibility::Visible
-        };
     }
 }
 
@@ -450,7 +407,7 @@ mod tests {
         app.update();
         assert!(
             app.world_mut()
-                .query_filtered::<&Visibility, Models>()
+                .query_filtered::<&Visibility, With<Ghost>>()
                 .iter(app.world())
                 .all(|v| *v == Visibility::Hidden)
         );
@@ -461,15 +418,10 @@ mod tests {
         app.update();
         assert!(
             app.world_mut()
-                .query_filtered::<&Visibility, Models>()
+                .query_filtered::<&Visibility, With<Ghost>>()
                 .iter(app.world())
                 .all(|v| *v == Visibility::Hidden)
         );
-    }
-    #[test]
-    fn the_resting_quaternion_is_a_turn_of_four_tenths_of_a_radian() {
-        let expected = Quat::from_rotation_y(-0.4);
-        assert!(HandRest::AT.rotation.angle_between(expected) < 1e-5);
     }
     #[test]
     fn the_hand_picks_a_model_per_held_kind() {

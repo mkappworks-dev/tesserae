@@ -116,7 +116,7 @@ function eat(){
 }
 
 /* The first-person hand. Only a Server-accepted action starts a motion; reduced motion keeps it still. */
-const HAND_FX_MS={swing:200,break:400,bite:1000};
+const HAND_FX_MS={swing:200,break:400,bite:1000,switch:240};
 function handFx(kind){
   if($('#game')?.classList.contains('reduced-motion'))return;
   state.handFx={kind,at:Date.now()};
@@ -128,7 +128,7 @@ function handMarkup(stack){
   const rock=carriedItems.find(x=>x.id==='rock')?.color||'#8d9087';
   const burst=fx==='break'?`<div class="burst" aria-hidden="true">${[...Array(8)].map((_,i)=>`<i style="--dx:${(i-3.5)*9}px;--dy:${-18-(i%3)*10}px;background:${rock}"></i>`).join('')}</div>`:'';
   const crack=state.aimHelper==='breaking'?'<div class="crack" aria-hidden="true"></div>':'';
-  return `${crack}${burst}${item?`<div class="hand ${motion}" aria-hidden="true">${voxelIcon(item)}</div>`:''}`;
+  return `${crack}${burst}<div class="hand ${motion}" aria-hidden="true"><i class="arm"></i>${item?voxelIcon(item):''}</div>`;
 }
 
 /* The engine's notice card (menu_ui::notify): top right, one at a time, 2.6 s by default. */

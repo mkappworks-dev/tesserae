@@ -174,7 +174,7 @@ function inventoryAction(name,value){
     let list=Array(27).fill(null);for(const stack of sorted)list=stashStack(list,stack);
     state.bag=list;state.carriedFrom=null;state.inspected={area:'bag',index:0};refreshInventory();return true;
   }
-  if(name==='play-slot'){state.quickSlot=Number(value);refreshInventory();return true;}
+  if(name==='play-slot'){const was=state.quickSlot;state.quickSlot=Number(value);if(was!==state.quickSlot&&state.screen==='play')handFx('switch');refreshInventory();return true;}
   if(name==='side-pick'){state.sideItem=value;refreshInventory();return true;}
   if(name==='side-group'){state.sideGroup=value;refreshInventory();return true;}
   if(name==='transfer-count'){state.transferCount=Math.max(1,Math.min(64,state.transferCount+Number(value)));refreshInventory();return true;}
@@ -211,7 +211,7 @@ document.addEventListener('keydown',e=>{
   }
   if(e.key==='F10'){e.preventDefault();e.stopImmediatePropagation();action('settings');return;}
   if(/^[1-9]$/.test(e.key)&&state.screen==='play'){
-    e.preventDefault();ensureInventory();state.quickSlot=Number(e.key)-1;refreshInventory();
+    e.preventDefault();ensureInventory();const was=state.quickSlot;state.quickSlot=Number(e.key)-1;if(was!==state.quickSlot&&state.screen==='play')handFx('switch');refreshInventory();
   }
 });
 document.addEventListener('dblclick',e=>{const tile=e.target.closest('[data-action=side-pick]');if(!tile)return;e.preventDefault();state.sideItem=tile.dataset.value;catalogueGive({area:'bar',index:state.quickSlot});});

@@ -475,7 +475,7 @@ mod tests {
             .query_filtered::<&Camera, With<HandCamera>>()
             .single(app.world())
             .unwrap();
-        assert!(!hand.is_active, "no corner model in third-person");
+        assert!(!hand.is_active, "no viewmodel in third-person");
 
         let near = wall(&mut app, EYE.z + 2.0);
         app.update();
