@@ -171,10 +171,10 @@ pub(super) fn eat(
     mut intents: MessageReader<EatIntent>,
     survival: Res<Survival>,
     items: Option<Res<Items>>,
-    player: Single<(&mut Inventory, &mut Vitals)>,
+    player: Single<(&mut Inventory, &mut Vitals, &PlayerMode)>,
     mut outcomes: MessageWriter<UseOutcome>,
 ) {
-    let (mut inventory, mut vitals) = player.into_inner();
+    let (mut inventory, mut vitals, mode) = player.into_inner();
     let max = survival.rules.max_hunger;
     for _ in intents.read() {
         let food = inventory
@@ -184,7 +184,8 @@ pub(super) fn eat(
             outcomes.write(UseOutcome(Err(UseRefusal::NotFood)));
             continue;
         };
-        if vitals.hunger >= max {
+        // The HUD rounds hunger up, so a Player who sees it full has less than max.
+        if !mode.survival() || drawn_points(vitals.hunger) >= drawn_points(max) {
             outcomes.write(UseOutcome(Err(UseRefusal::NotHungry)));
             continue;
         }
@@ -812,6 +813,29 @@ mod tests {
             "full"
         );
         assert_eq!(held(&mut app), Some(("m:bread".into(), 1)));
+    }
+
+    #[test]
+    fn eating_at_full_hunger_spends_nothing_in_either_mode() {
+        use super::super::tool::{UseOutcome, UseRefusal};
+        for (mode, hunger) in [
+            (GameMode::Survival, 20.0),
+            // Drawn as full: the HUD rounds up.
+            (GameMode::Survival, 19.9),
+            (GameMode::Creative, 20.0),
+            (GameMode::Creative, 5.0),
+        ] {
+            let mut app = field(no_drain(), mode);
+            pantry(&mut app, &[("m:bread", 3)]);
+            set_vitals(&mut app, 20.0, hunger);
+            assert_eq!(
+                eat(&mut app),
+                [UseOutcome(Err(UseRefusal::NotHungry))],
+                "{mode:?} at {hunger}"
+            );
+            assert_eq!(held(&mut app), Some(("m:bread".into(), 3)));
+            assert_eq!(vitals(&mut app).hunger, hunger);
+        }
     }
 
     #[test]
