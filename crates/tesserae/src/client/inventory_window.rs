@@ -690,28 +690,26 @@ fn header(card: &mut ChildSpawnerCommands, state: &Built) {
                         (theme::TEXT_SMALL, theme::SEMIBOLD),
                     );
                 }
-                context
-                    .spawn((
-                        Node {
-                            padding: UiRect::axes(Val::Px(9.0), Val::Px(6.0)),
-                            border: UiRect::all(Val::Px(theme::RULE)),
-                            border_radius: BorderRadius::all(Val::Px(theme::RADIUS_SMALL)),
-                            ..default()
-                        },
-                        BackgroundColor(theme::BADGE),
-                        BorderColor::all(theme::BADGE_EDGE),
-                        Pickable::IGNORE,
-                    ))
-                    .with_child(look::label(
-                        if state.survival {
-                            "Survival · reference only"
-                        } else {
-                            "Creative access"
-                        },
-                        theme::ITEM_TEXT_EYEBROW,
-                        theme::REGULAR,
-                        theme::BADGE_INK,
-                    ));
+                if !state.survival {
+                    context
+                        .spawn((
+                            Node {
+                                padding: UiRect::axes(Val::Px(9.0), Val::Px(6.0)),
+                                border: UiRect::all(Val::Px(theme::RULE)),
+                                border_radius: BorderRadius::all(Val::Px(theme::RADIUS_SMALL)),
+                                ..default()
+                            },
+                            BackgroundColor(theme::BADGE),
+                            BorderColor::all(theme::BADGE_EDGE),
+                            Pickable::IGNORE,
+                        ))
+                        .with_child(look::label(
+                            "Creative access",
+                            theme::ITEM_TEXT_EYEBROW,
+                            theme::REGULAR,
+                            theme::BADGE_INK,
+                        ));
+                }
                 look::close(context, Control::Close);
             });
     });

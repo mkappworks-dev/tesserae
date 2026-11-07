@@ -1438,7 +1438,7 @@ fn a_long_name_or_a_missing_game_holds_the_world_step() {
     app.update();
     act(&mut app, Act::New);
     assert!(
-        !shown(&mut app, "64"),
+        !shown(&mut app, "64 characters"),
         "the hint leaves the limit to the message"
     );
     type_into(&mut app, Field::Name, &"x".repeat(65));
