@@ -222,6 +222,21 @@ when a Tool is used and nothing crosses the contract per Use or per Voxel
 door or a container, must also be declared data or a batched event, never a
 per-use Mod callback.
 
+### What the Server confirms, and what the Client animates
+
+The Client never guesses an outcome. A Place or Remove that landed is announced
+by the Server (`EditApplied`), so the placed-block settle, the hand's swing and
+the break particles play only after it, and nothing plays for a refusal. An undo
+says what it did to the Inventory in the same way: `RefundDropped` when a refund
+had no room and dropped at the Player's feet, and `HistoryNeedsItems` when it
+was refused for missing Items. A meal runs on the Server (`Eating`): the first
+bite spends the Item and three bites refill hunger over a second, and a slot
+change or death stops it. The hand's one state machine (rest, swing, mining,
+bite, slot switch) is Client-only presentation; it feeds the first-person
+viewmodel and the avatar's right arm alike and is held still under reduced
+motion. Dropping an Item is the Server's `InventoryIntent::Drop`, which throws
+it ahead of the Player with a pickup delay, outside the undo journal.
+
 ## The three invariants this diagram exists to protect
 
 Each of these is a mistake that will not look wrong in review.
