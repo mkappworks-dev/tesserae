@@ -24,7 +24,7 @@ fn spawn_readout(mut commands: Commands) {
         super::help::DebugPanel,
         Visibility::Hidden,
         Text::new("streaming"),
-        super::theme::font(super::theme::TEXT_SMALL),
+        super::theme::tabular(super::theme::font(super::theme::TEXT_SMALL)),
         TextColor(super::theme::READOUT),
         Node {
             position_type: PositionType::Absolute,

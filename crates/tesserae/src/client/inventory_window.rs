@@ -861,7 +861,7 @@ fn slot_button(
                 button.spawn((
                     SlotCount,
                     Text::new(stack.count.to_string()),
-                    theme::weighted(theme::TEXT_EYEBROW, theme::BOLD),
+                    theme::figures(theme::TEXT_EYEBROW, theme::BOLD),
                     TextColor(Color::WHITE.with_alpha(if picked { 0.6 } else { 1.0 })),
                     TextShadow {
                         offset: Vec2::ONE,
@@ -879,7 +879,7 @@ fn slot_button(
             if let Slot::Hotbar(at) = slot {
                 button.spawn((
                     Text::new((at + 1).to_string()),
-                    theme::weighted(theme::TEXT_FOOTER, theme::SEMIBOLD),
+                    theme::figures(theme::TEXT_FOOTER, theme::SEMIBOLD),
                     TextColor(theme::SLOT_NUMBER),
                     Node {
                         position_type: PositionType::Absolute,
@@ -1096,7 +1096,7 @@ fn inspected(
                     theme::REGULAR,
                     theme::ITEM_TERM,
                 ));
-                row.spawn(look::label(
+                row.spawn(look::figures(
                     value,
                     theme::TEXT_CAPTION,
                     theme::REGULAR,

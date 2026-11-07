@@ -302,7 +302,16 @@ pub(super) fn notice(parent: &mut ChildSpawnerCommands, value: impl Into<String>
                 ..default()
             },
         ))
-        .with_children(|n| ui::paragraph(n, value.into(), theme::TEXT_SMALL, theme::MUTED));
+        .with_children(|n| {
+            // Tabular so the despawn countdown does not jitter as it ticks.
+            n.spawn((
+                Text::new(value.into()),
+                theme::tabular(theme::font(theme::TEXT_SMALL)),
+                bevy::text::LineHeight::RelativeToFont(theme::LINE_HEIGHT),
+                TextColor(theme::MUTED),
+                Pickable::IGNORE,
+            ));
+        });
 }
 
 /// A small outlined tag, in capitals.

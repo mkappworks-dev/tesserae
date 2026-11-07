@@ -30,7 +30,7 @@
 .death-screen{width:100%;height:100%;display:flex;align-items:center;justify-content:center;padding:24px}
 .death-screen h1{margin:0;font-weight:550;letter-spacing:-.01em;color:#f4ece8}
 .death-actions{display:flex;gap:10px;margin-top:22px}
-.death-actions .btn span{margin-left:10px;font:600 10px ui-monospace,monospace;opacity:.7}
+.death-actions .btn span{margin-left:10px;font:600 10px Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;opacity:.7}
 .death-screen .eyebrow{color:#d8a59c}
 .death-centre{max-width:540px;text-align:center}
 .death-centre h1{font-size:46px}
@@ -51,9 +51,9 @@
 .item-capacity.full{color:#e8d29f;font-weight:600}
 
 /* Prototype-only chrome: deliberately not in the game's look. */
-.sim-panel{position:absolute;top:12px;left:12px;z-index:6;width:270px;max-height:calc(100% - 24px);overflow:auto;padding:10px 12px;background:#f3eedb;color:#1d1c18;border:2px dashed #8a7a3c;border-radius:6px;font:12px ui-monospace,monospace}
+.sim-panel{position:absolute;top:12px;left:12px;z-index:6;width:270px;max-height:calc(100% - 24px);overflow:auto;padding:10px 12px;background:#f3eedb;color:#1d1c18;border:2px dashed #8a7a3c;border-radius:6px;font:12px Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
 .sim-panel header{display:flex;align-items:center;gap:6px;flex-wrap:wrap}.sim-panel header span{flex:1;color:#6b6450;font-size:10px}
-.sim-panel button{margin:2px 3px 2px 0;padding:4px 7px;border:1px solid #8a7a3c;border-radius:3px;background:#fffaf0;color:#1d1c18;font:11px ui-monospace,monospace;cursor:pointer}
+.sim-panel button{margin:2px 3px 2px 0;padding:4px 7px;border:1px solid #8a7a3c;border-radius:3px;background:#fffaf0;color:#1d1c18;font:11px Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;cursor:pointer}
 .sim-panel button:hover{background:#efe3b8}
 .sim-group{margin-top:8px}.sim-group small{display:block;margin-bottom:2px;color:#6b6450;text-transform:uppercase;font-size:10px;letter-spacing:.06em}
 .sim-group label{display:flex;gap:6px;align-items:center}
@@ -69,7 +69,7 @@
 #pickup-feed{position:absolute;right:24px;bottom:58px;z-index:3;display:flex;flex-direction:column;align-items:flex-end;gap:4px;pointer-events:none}
 .game:not([data-view=play]) #pickup-feed{display:none}
 .feed-row{display:flex;align-items:center;gap:8px;padding:4px 12px 4px 6px;background:#060708c7;border:2px solid #000;border-radius:6px;box-shadow:inset 0 0 0 1px #ffffff1a;color:#f6f7f1;font-size:13px;animation:feed-in .18s ease-out}
-.feed-row .voxel-icon{width:22px;height:22px}.feed-row b{font:700 13px ui-monospace,monospace}.feed-row span{color:#c9ccd1}
+.feed-row .voxel-icon{width:22px;height:22px}.feed-row b{font:700 13px Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-variant-numeric:tabular-nums}.feed-row span{color:#c9ccd1}
 @keyframes feed-in{from{transform:translateX(16px);opacity:0}}
 .game.reduced-motion #notice-card{transition:none}.game.reduced-motion .feed-row{animation:none}
 @media(prefers-reduced-motion:reduce){.low-health-vignette,.hit-flash,.vital-tile{animation:none!important}}

@@ -15,7 +15,7 @@
 .item-eyebrow{font-size:11px;font-weight:550;letter-spacing:.12em;color:#c0c2c8;margin:0 0 12px}
 .item-inspector>.voxel-icon,.item-inspector #catalogue-model>.voxel-icon{width:80px;height:80px;margin:2px auto 12px}
 .item-inspector h2{font-size:22px;line-height:1.2;font-weight:550;margin:10px 0 7px;overflow-wrap:anywhere}
-.item-source{font:11px ui-monospace,monospace;color:#999ca7;margin:0 0 20px}
+.item-source{font:11px Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#999ca7;margin:0 0 20px}
 .item-inspector dl{font-size:13px;margin:14px 0}.item-inspector dl>div{display:flex;justify-content:space-between;gap:12px;padding:7px 0;border-bottom:1px solid #34343c}.item-inspector dt{color:#aeb0b8}.item-inspector dd{margin:0;color:#ececec}
 .inspector-actions{display:grid;gap:7px}.inspector-actions .btn{font-size:13px;white-space:normal}
 .inspector-note{font-size:12px;line-height:1.7;color:#a9adb7;padding-top:17px;margin-top:17px;border-top:1px solid #34343c}

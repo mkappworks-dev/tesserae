@@ -308,7 +308,7 @@ fn slot(
             if let Some(count) = count {
                 button.spawn((
                     Text::new(count.to_string()),
-                    theme::weighted(theme::TEXT_EYEBROW, theme::BOLD),
+                    theme::figures(theme::TEXT_EYEBROW, theme::BOLD),
                     TextColor(Color::WHITE),
                     TextShadow {
                         offset: Vec2::ONE,
@@ -327,7 +327,7 @@ fn slot(
         if let BarSlot::Hotbar(at) = at {
             button.spawn((
                 Text::new((at + 1).to_string()),
-                theme::weighted(theme::TEXT_FOOTER, theme::SEMIBOLD),
+                theme::figures(theme::TEXT_FOOTER, theme::SEMIBOLD),
                 TextColor(theme::HUD_SLOT_NUMBER),
                 Node {
                     position_type: PositionType::Absolute,

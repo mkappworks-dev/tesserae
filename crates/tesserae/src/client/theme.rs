@@ -222,6 +222,23 @@ pub(super) fn optical(size: f32) -> bevy::text::FontVariations {
         .build()
 }
 
+/// `font` with Inter's tabular figures, so a changing number keeps one width
+/// per digit. The prototype sets these in a monospace face; the interface
+/// bundles none, and Inter's `tnum` gives the same steadiness.
+pub(super) fn tabular(font: TextFont) -> TextFont {
+    TextFont {
+        font_features: bevy::text::FontFeatures::builder()
+            .enable(bevy::text::FontFeatureTag::TABULAR_FIGURES)
+            .build(),
+        ..font
+    }
+}
+
+/// [`weighted`], in tabular figures.
+pub(super) fn figures(size: f32, weight: u16) -> TextFont {
+    tabular(weighted(size, weight))
+}
+
 pub(super) fn weighted(size: f32, weight: u16) -> TextFont {
     TextFont {
         weight: bevy::text::FontWeight(weight),
@@ -470,3 +487,85 @@ pub(super) const READOUT: Color = Color::srgba(1.0, 1.0, 1.0, 0.7);
 /// CSS `brightness(.5)` halves sRGB values; Bevy UI blends in linear light,
 /// where that is black at 1 − 0.5^2.2.
 pub(super) const DEATH_DIM: Color = Color::srgba(0.0, 0.0, 0.0, 0.78);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bevy::asset::AssetPlugin;
+    use bevy::text::TextPlugin;
+    use bevy::ui::UiPlugin;
+    use bevy::window::WindowPlugin;
+
+    fn width_of(digits: &str, font: TextFont) -> f32 {
+        let mut app = App::new();
+        app.add_plugins((
+            MinimalPlugins,
+            AssetPlugin::default(),
+            bevy::transform::TransformPlugin,
+            bevy::input::InputPlugin,
+            bevy::a11y::AccessibilityPlugin,
+            bevy::picking::DefaultPickingPlugins,
+            bevy::input_focus::InputFocusPlugin,
+            WindowPlugin::default(),
+            bevy::image::ImagePlugin::default(),
+            TextPlugin,
+            UiPlugin,
+        ));
+        app.add_message::<bevy::window::WindowEvent>()
+            .add_message::<bevy::picking::backend::PointerHits>()
+            .init_asset::<Image>()
+            .init_asset::<bevy::image::TextureAtlasLayout>()
+            .init_asset::<Mesh>()
+            .init_asset::<bevy::shader::Shader>();
+        app.world_mut()
+            .resource_mut::<Assets<Font>>()
+            .insert(
+                bevy::asset::AssetId::default(),
+                Font::from_bytes(
+                    include_bytes!("../../../../assets/fonts/InterVariable.ttf").to_vec(),
+                ),
+            )
+            .expect("the default Font asset can be replaced");
+        app.world_mut()
+            .spawn((Window::default(), bevy::window::PrimaryWindow));
+        app.world_mut().spawn(Camera2d);
+        let text = app
+            .world_mut()
+            .spawn((
+                Text::new(digits),
+                font,
+                Node {
+                    position_type: PositionType::Absolute,
+                    ..default()
+                },
+            ))
+            .id();
+        for _ in 0..3 {
+            app.update();
+        }
+        app.world().get::<ComputedNode>(text).unwrap().size.x
+    }
+
+    #[test]
+    fn tabular_figures_give_every_digit_one_width() {
+        for font in [figures(14.0, SEMIBOLD), tabular(font(12.0))] {
+            let wide = width_of("0000", font.clone());
+            let narrow = width_of("1111", font.clone());
+            assert!(wide > 0.0, "the text was not laid out");
+            assert!(
+                (wide - narrow).abs() < 0.01,
+                "0000 is {wide} px, 1111 is {narrow} px"
+            );
+        }
+    }
+
+    #[test]
+    fn proportional_figures_do_not() {
+        let wide = width_of("0000", weighted(14.0, SEMIBOLD));
+        let narrow = width_of("1111", weighted(14.0, SEMIBOLD));
+        assert!(
+            wide - narrow > 1.0,
+            "{wide} vs {narrow}: the control cannot tell"
+        );
+    }
+}

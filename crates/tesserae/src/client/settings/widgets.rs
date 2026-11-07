@@ -466,7 +466,7 @@ pub(super) fn slider(parent: &mut ChildSpawnerCommands, kind: Scalar, value: f32
             let label = row
                 .spawn((
                     Text::new(kind.display(value)),
-                    theme::font(theme::TEXT_SMALL),
+                    theme::tabular(theme::font(theme::TEXT_SMALL)),
                     TextColor(theme::MUTED),
                     TextLayout::justify(Justify::Right),
                     Node {

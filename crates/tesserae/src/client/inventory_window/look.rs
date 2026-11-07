@@ -34,6 +34,22 @@ pub(in crate::client) fn label(
     )
 }
 
+/// [`label`] in tabular figures, for a number that changes.
+pub(in crate::client) fn figures(
+    value: impl Into<String>,
+    size: f32,
+    weight: u16,
+    color: Color,
+) -> impl Bundle {
+    (
+        Text::new(value),
+        theme::figures(size, weight),
+        bevy::text::LineHeight::RelativeToFont(1.25),
+        TextColor(color),
+        Pickable::IGNORE,
+    )
+}
+
 /// A run of text set to a line height of its own.
 pub(in crate::client) fn paragraph(
     value: impl Into<String>,
@@ -238,7 +254,11 @@ pub(in crate::client) fn flat_text(
 ) -> Entity {
     let value = value.into();
     flat(parent, act, look, node, |b, ink| {
-        b.spawn((FlatInk, label(value, size, weight, ink)));
+        if look.flavour == Flavour::Preset {
+            b.spawn((FlatInk, figures(value, size, weight, ink)));
+        } else {
+            b.spawn((FlatInk, label(value, size, weight, ink)));
+        }
     })
 }
 
@@ -383,7 +403,7 @@ pub(in crate::client) fn stepper(
                 }),
                 Pickable::IGNORE,
             ))
-            .with_child(label(
+            .with_child(figures(
                 value,
                 theme::STEPPER_VALUE_TEXT,
                 size.value_weight,

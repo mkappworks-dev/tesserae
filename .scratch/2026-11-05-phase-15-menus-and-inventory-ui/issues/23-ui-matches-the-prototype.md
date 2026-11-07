@@ -32,14 +32,14 @@ Every screen this spec added or restyled matches the approved prototype one to o
   - **Text shadow**: Bevy's `TextShadow` has no blur, so the title's `0 1px 5px #000` is a 1 px offset in black at half strength.
   - **Headline and display sizes**: Inter is a little wider than the SF Pro the prototype rendered, so "Make room for wonder." runs about 15 px wider at 74 px. Text sets Inter's optical size from its size, as a browser does, which tightens the display sizes.
   - **Dark text on sage**: Bevy blends glyph edges in linear light, so dark labels on the sage primary buttons read lighter than the browser's at the same 650 weight.
-  - **Key caps**: the footer's keys are set in Inter: only Inter and Aileron are bundled, so there is no monospace face.
+  - **Key caps**: the footer's keys are set in Inter, as the prototype now sets them: no monospace face is bundled (maintainer, 2026-11-07).
   - **Quit** is the title's fifth action, as decided; the header keeps the ⚙ Settings button, drawn as an icon because Inter has no ⚙.
   - **Thumbnails**: every Game's thumbnail is the prototype's Terra landscape. Its per-Game variants are a CSS `hue-rotate` on illustrative Games; a Game declares no colour the engine could use. The tree is two hard-stop gradients, since Bevy UI has no `clip-path`.
   - **Mod symbols**: a Manifest declares no symbol, so every Mod's tile shows the Mods cube icon in place of the prototype's ▥ ◇ ♨ ❄.
   - **Game cards**: the about line is the Game Manifest's description; the five demo Games now declare the prototype's copy. A Game without one shows its version.
   - **Selects** (Voxel size, Rock, Soil, Surface): Bevy has no native select. Voxel size stays three choice buttons under the prototype's label and cost notice; the ground layers are field-styled buttons that step to the next Material.
   - **Colour pickers**: Sky and Fog colour are hex text fields with "Game default" as the placeholder.
-  - **Sliders and readings**: the Biome sliders are Bevy's `Slider` in the Settings slider's look; the readings are set in Inter, not a monospace face. A slider changes the draft in place, without a rebuild that would drop the drag.
+  - **Sliders and readings**: the Biome sliders are Bevy's `Slider` in the Settings slider's look; the readings are set in Inter with tabular figures (see Monospace text below). A slider changes the draft in place, without a rebuild that would drop the drag.
   - **Biome swatches**: a Biome declares no swatch colour, so its card swatch and its dot take the climate map's colour at its temperature and humidity.
   - **Seed lines**: the World step keeps the engine's resolved seed ("Random seed: 7386…") with Copy, which the prototype mocks as "Random seed: chosen when the World is created"; the Review shows the same seed.
   - **Copy kept from the engine**: "Choose Biomes", "Reset Biome defaults" and "Voxel size" keep GLOSSARY's capitals; the Mods step's closing note drops "Only compatible installed Mods are shown", because the engine also lists unavailable and conflicting Mods with their reason; the Edit World Game field keeps the version, which pins generation.
@@ -66,7 +66,7 @@ Every screen this spec added or restyled matches the approved prototype one to o
 
 
 - Fix pass D (Inventory, Catalogue, quick Layout), 2026-11-06: where the engine cannot do what the CSS does:
-  - **Monospace text** (stack counts, slot numbers, the Catalogue's count and presets, Material ids, the axis letters): the interface bundles no monospace face, so these are set in Inter at the prototype's size and weight.
+  - **Monospace text**: no monospace face is bundled (maintainer, 2026-11-07; ADR-0005 is not amended). Where the prototype used `ui-monospace` for numbers (stack counts, slot numbers, feed counts, slider readings, the Catalogue's count and presets, stepper values, the Layout totals, the item facts, the despawn countdown) the engine sets Inter with its `tnum` feature (`theme::tabular`, `theme::figures`) and the prototype uses Inter with `font-variant-numeric: tabular-nums`, so the two match. Key caps, Material ids, axis letters and Respawn's "Enter" are plain Inter in both. A test pins that "0000" and "1111" measure alike with the feature and differ without it.
   - **Inset slot shading** (`inset 3px 3px #00000070`, `inset -2px -2px #ffffff0d`, the selected slot's inner glow): Bevy's `BoxShadow` has no inset, so a child with an uneven border draws the dark top-left and light bottom-right bands under the 1 px rim; the selected slot's 10 px inner glow is left out.
   - **Dashed outline** on a picked-up slot: Bevy UI borders are solid, so the rim turns #e7d9a8 and the Item fades to 0.6.
   - **Filters on the World** under the Inventory (`saturate(.8) brightness(.82)`): the scrim is deepened to #030405 at 0xdb, which lands the World at about the prototype's ×0.41 brightness without the desaturation.
@@ -79,7 +79,6 @@ Every screen this spec added or restyled matches the approved prototype one to o
   - **Filters on the World under the death screen** (`grayscale(.75) brightness(.5) blur(1px)`): the camera's colour grading takes the World's saturation to 0.25 while dead. Brightness is a black layer at 0.78 under the red scrim: CSS halves sRGB values and Bevy UI blends in linear light, where that is 1 − 0.5^2.2, and unlike grading it also reaches the sky. Measured against the prototype, the sky lands at ×0.41 (prototype ×0.40) and mid terrain at ×0.35 (×0.39). There is no blur.
   - **Inset shadows on hotbar slots**: the 3 px dark and 2 px light bevel and the 1 px rim are child nodes with per-side borders; the selected slot's inner 10 px glow is a radial gradient child fading from 60 % to the edge.
   - **Blurred text shadows** (held name `0 1px 3px, 0 0 8px`, stack counts `0 0 3px`, the Inventory-full notice `0 1px 2px`): Bevy's `TextShadow` has one hard offset and no blur, so each keeps its offset in black and drops the blur.
-  - **`ui-monospace`** on stack counts, slot numbers, feed counts and Respawn's "Enter": no monospace face is bundled, so they use Inter at the same size and weight.
   - **The feed row's fade-in**: rows slide in 16 px over 0.18 s but do not fade, because the Item tiles are 3D previews that cannot take an opacity. Rows leave at 3 s with no fade, as in the prototype.
   - **The prototype's reticle offset**: its "+" is anchored by its top-left at the centre, about (+8, +17) px off; the engine keeps it centred.
 - Fix pass E, not done, 2026-11-06: The air row still shows only once air drops below full, not on the first frame under water.

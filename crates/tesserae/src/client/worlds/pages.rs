@@ -3504,7 +3504,7 @@ fn slider(parent: &mut ChildSpawnerCommands, title: &str, knob: Knob, value: f32
                 reading_text = head
                     .spawn((
                         Text::new(reading(knob, value)),
-                        theme::weighted(theme::TEXT_CAPTION, theme::SEMIBOLD),
+                        theme::figures(theme::TEXT_CAPTION, theme::SEMIBOLD),
                         TextColor(theme::VALUE_INK),
                         Pickable::IGNORE,
                     ))

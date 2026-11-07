@@ -225,7 +225,7 @@ fn show_feed(
                     item_icon(row, names.icon(item), ICON_PX, false);
                     row.spawn((
                         Text::new(format!("+{count}")),
-                        theme::weighted(theme::TEXT_CAPTION, theme::BOLD),
+                        theme::figures(theme::TEXT_CAPTION, theme::BOLD),
                         TextColor(theme::HUD_INK),
                         Pickable::IGNORE,
                     ));

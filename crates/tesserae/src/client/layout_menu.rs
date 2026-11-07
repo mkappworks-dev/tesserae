@@ -609,7 +609,7 @@ fn points(body: &mut ChildSpawnerCommands) {
                 ))
                 .with_child((
                     StepLetter(i),
-                    look::label(
+                    look::figures(
                         (i + 1).to_string(),
                         theme::TEXT_EYEBROW,
                         theme::REGULAR,
@@ -735,7 +735,7 @@ fn term(value: impl Into<String>) -> impl Bundle {
 }
 
 fn value(value: impl Into<String>) -> impl Bundle {
-    look::label(
+    look::figures(
         value,
         theme::TEXT_EYEBROW,
         theme::LABEL,
