@@ -7,6 +7,12 @@ menu, Tab moves focus. **I** opens and closes the Inventory, and **C** opens it
 with the Catalogue search focused; in Survival the Catalogue is closed and C
 says it is Creative-only.
 
+**F3** shows or hides a diagnostics line (the Chunk the Eye is in, how many the
+Server holds and has sent meshes for, how many meshes are drawn, and the frame
+rate). It works in every build and is hidden until pressed; the Server publishes
+its counts all the time at a cost of tens of nanoseconds a tick, and the Client
+reads them only while the line is shown.
+
 Settings is one screen, reached from the title screen and from the Menu, with
 **Behavior**, **Key bindings**, **Controller**, **Display** and
 **Accessibility**. **F10** opens it at the category used last, and Help (**F1**)

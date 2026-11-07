@@ -235,6 +235,10 @@ impl ChunkStore {
         self.chunks.keys().copied()
     }
 
+    pub fn len(&self) -> usize {
+        self.chunks.len()
+    }
+
     /// A Chunk arrives dark. `super::streaming`'s relight stage fills it in
     /// from its neighbours, which is also what makes a Chunk arriving next to
     /// it brighten this one.

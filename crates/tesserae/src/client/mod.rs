@@ -36,7 +36,6 @@ pub(crate) mod loading;
 mod material_textures;
 mod menu;
 mod menu_ui;
-#[cfg(feature = "dev")]
 mod overlay;
 mod pad;
 mod palette;
@@ -129,10 +128,10 @@ pub fn plugin(app: &mut App) {
             .run_if(chunk_view::terrain_arrived)
             .run_if(not(resource_exists::<loading::TerrainArrived>)),
     );
-    #[cfg(feature = "dev")]
     app.add_plugins((
         bevy::diagnostic::FrameTimeDiagnosticsPlugin::default(),
         overlay::plugin,
-        soak::plugin,
     ));
+    #[cfg(feature = "dev")]
+    app.add_plugins(soak::plugin);
 }
