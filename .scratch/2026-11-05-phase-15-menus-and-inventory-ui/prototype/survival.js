@@ -75,6 +75,7 @@ function placeHeld(){
   if(!stack){notice(`Nothing to place in hotbar slot ${state.quickSlot+1}.`,'warn');return;}
   stack.count--;if(!stack.count)state.bagHotbar[state.quickSlot]=null;state.pickupRefused=null;
   state.journal.push({kind:'place',id:item.id});
+  handFx('swing');
   log(`Placed ${item.material}.`);render();
 }
 function breakVoxel(){
@@ -82,6 +83,7 @@ function breakVoxel(){
   const left=receive('rock',1);
   state.pickupRefused=left?'1 Rock':null;
   if(!left)feed('rock',1);
+  handFx('break');
   log('Removed Stone.');render();
 }
 function undo(){
@@ -106,9 +108,27 @@ function fillBackpack(){for(let i=0;i<state.bag.length;i++)state.bag[i] ||= {id:
 function eat(){
   const stack=state.bagHotbar[state.quickSlot],item=stackItem(stack),v=state.vitals;
   if(!item?.food){notice('Hold food in the selected hotbar slot to eat.','warn');return;}
-  if(v.hunger>=rules.maxHunger){notice('You aren’t hungry.','warn');return;}
+  /* Creative never drains, and the bar rounds up: both refuse before anything is spent. */
+  if(!survival()||Math.ceil(v.hunger)>=Math.ceil(rules.maxHunger)){notice('You aren’t hungry.','warn');return;}
   v.hunger=Math.min(rules.maxHunger,v.hunger+item.food);stack.count--;if(!stack.count)state.bagHotbar[state.quickSlot]=null;state.pickupRefused=null;
+  handFx('bite');
   log(`Ate ${item.name}.`);render();
+}
+
+/* The first-person hand. Only a Server-accepted action starts a motion; reduced motion keeps it still. */
+const HAND_FX_MS={swing:200,break:400,bite:1000};
+function handFx(kind){
+  if($('#game')?.classList.contains('reduced-motion'))return;
+  state.handFx={kind,at:Date.now()};
+  setTimeout(()=>{if(state.handFx&&Date.now()-state.handFx.at>=HAND_FX_MS[kind]&&state.screen==='play'){state.handFx=null;render();}},HAND_FX_MS[kind]+30);
+}
+function handMarkup(stack){
+  const item=stackItem(stack),fx=state.handFx&&Date.now()-state.handFx.at<HAND_FX_MS[state.handFx.kind]?state.handFx.kind:'';
+  const motion=fx==='break'?'swing':fx||(state.aimHelper==='breaking'?'mine':'');
+  const rock=carriedItems.find(x=>x.id==='rock')?.color||'#8d9087';
+  const burst=fx==='break'?`<div class="burst" aria-hidden="true">${[...Array(8)].map((_,i)=>`<i style="--dx:${(i-3.5)*9}px;--dy:${-18-(i%3)*10}px;background:${rock}"></i>`).join('')}</div>`:'';
+  const crack=state.aimHelper==='breaking'?'<div class="crack" aria-hidden="true"></div>':'';
+  return `${crack}${burst}${item?`<div class="hand ${motion}" aria-hidden="true">${voxelIcon(item)}</div>`:''}`;
 }
 
 /* The engine's notice card (menu_ui::notify): top right, one at a time, 2.6 s by default. */

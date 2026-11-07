@@ -78,3 +78,18 @@
 /* Play and death have no footer: it is launcher and menu chrome. The hotbar sits 12 px off the edge, as in the engine. */
 .game:is([data-view=play],[data-view=death]) .game-footer{display:none}
 .game[data-view=play] .hud-bottom{bottom:12px}
+
+/* The first-person hand (engine: hand_anim, hand_fx). */
+.hand{position:absolute;right:12%;bottom:-4%;width:150px;height:150px;pointer-events:none;z-index:2;transform-origin:70% 100%;filter:drop-shadow(0 6px 8px #0008)}
+.hand svg{width:100%;height:100%}
+.hand.swing{animation:hand-swing .2s ease-out}
+.hand.mine{animation:hand-swing .35s ease-out infinite}
+.hand.bite{animation:hand-bite 1s linear}
+@keyframes hand-swing{0%{transform:none}50%{transform:translate(-30px,-34px) rotate(-14deg)}100%{transform:none}}
+@keyframes hand-bite{0%{transform:none}25%{transform:translate(-140px,-150px)}35%{transform:translate(-128px,-140px) rotate(14deg) scale(.82)}45%{transform:translate(-140px,-150px) scale(.82)}55%{transform:translate(-128px,-140px) rotate(14deg) scale(.63)}65%{transform:translate(-140px,-150px) scale(.63)}75%{transform:translate(-128px,-140px) rotate(14deg) scale(.45)}85%{transform:translate(-140px,-150px) scale(.45)}100%{transform:none}}
+.crack{position:absolute;left:50%;top:50%;width:90px;height:90px;transform:translate(-50%,-50%);background:#000;opacity:.34;pointer-events:none;z-index:1;mix-blend-mode:multiply}
+.burst{position:absolute;left:50%;top:50%;pointer-events:none;z-index:2}
+.burst i{position:absolute;width:9px;height:9px;animation:burst-fall .4s ease-in forwards}
+@keyframes burst-fall{0%{transform:translate(0,0);opacity:1}100%{transform:translate(var(--dx),calc(var(--dy) + 70px));opacity:0}}
+.game.reduced-motion :is(.hand,.burst i){animation:none!important}
+@media(prefers-reduced-motion:reduce){.hand,.burst i{animation:none!important}}
