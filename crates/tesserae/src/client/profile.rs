@@ -1,5 +1,6 @@
 //! User preferences contain no World or Game identifiers.
 use super::actions::Bindings;
+use crate::server::player::SpeedLevel;
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -12,7 +13,8 @@ use std::{
 #[derive(Resource, Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub(crate) struct Preferences {
-    pub toggle_sprint: bool,
+    /// Kept until the next press of Sprint, which cycles it.
+    pub speed_level: SpeedLevel,
     pub tap_remove: bool,
     pub repeat_held: bool,
     pub sensitivity: f32,
@@ -98,7 +100,7 @@ pub(super) const PAD_DEADZONE: std::ops::RangeInclusive<f32> = 0.05..=0.5;
 impl Default for Preferences {
     fn default() -> Self {
         Self {
-            toggle_sprint: true,
+            speed_level: SpeedLevel::Walk,
             tap_remove: false,
             repeat_held: false,
             sensitivity: 0.003,
@@ -192,7 +194,8 @@ impl Store {
     }
 }
 /// Version 2 replaced the Catalogue key with the Menu and moved Help off I.
-const VERSION: u32 = 2;
+/// Version 3 replaced the Hold or Toggle sprint choice with a speed level.
+const VERSION: u32 = 3;
 
 /// Version-1 defaults that version 2 gives to something else. A binding still
 /// equal to one of them was never the player's choice, so it takes the new
@@ -218,7 +221,7 @@ fn migrate_file(
     bindings: &Bindings,
     preferences: &Preferences,
 ) -> io::Result<()> {
-    let kept = path.with_extension("v1.json.bak");
+    let kept = path.with_extension(format!("v{}.json.bak", version(old).unwrap_or(1)));
     if !kept.exists() {
         atomic_write(&kept, old)?;
     }
@@ -227,6 +230,10 @@ fn migrate_file(
 
 fn decode(bytes: &[u8]) -> io::Result<(Bindings, Preferences)> {
     let mut document: Document = serde_json::from_slice(bytes).map_err(io::Error::other)?;
+    if document.version < 3 {
+        // Hold and Toggle both asked for the one sprint there was.
+        document.preferences.speed_level = SpeedLevel::One;
+    }
     match document.version {
         1 => {
             use super::actions::{Binding, Modifier, Trigger};
@@ -244,7 +251,7 @@ fn decode(bytes: &[u8]) -> io::Result<(Bindings, Preferences)> {
                 }
             }
         }
-        VERSION => {}
+        2 | VERSION => {}
         _ => return Err(io::Error::other("unsupported user profile version")),
     }
     let p = &document.preferences;
@@ -498,7 +505,7 @@ mod tests {
             "a binding the player chose is kept"
         );
         let saved: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
-        assert_eq!(saved["version"], 2, "migrated once, on first load");
+        assert_eq!(saved["version"], 3, "migrated once, on first load");
         let backup = fs::read(path.with_extension("v1.json.bak")).unwrap();
         assert_eq!(backup, v1, "the version-1 file is kept");
 
@@ -560,15 +567,37 @@ mod tests {
     }
 
     #[test]
-    fn sprint_toggles_by_default_but_a_saved_hold_choice_is_kept() {
+    fn a_fresh_profile_walks_and_an_old_hold_or_toggle_choice_becomes_speed_one() {
         let missing =
             std::env::temp_dir().join(format!("tesserae-no-profile-{}", std::process::id()));
         let (_, _, fresh) = Store::load(missing);
-        assert!(fresh.toggle_sprint);
-        let (_, unset) = decode(br#"{"version":1,"preferences":{"invert_y":true}}"#).unwrap();
-        assert!(unset.toggle_sprint);
-        let (_, held) = decode(br#"{"version":1,"preferences":{"toggle_sprint":false}}"#).unwrap();
-        assert!(!held.toggle_sprint);
+        assert_eq!(fresh.speed_level, SpeedLevel::Walk);
+        for old in [
+            r#"{"version":1,"preferences":{"invert_y":true}}"#,
+            r#"{"version":1,"preferences":{"toggle_sprint":false}}"#,
+            r#"{"version":2,"preferences":{"toggle_sprint":true}}"#,
+        ] {
+            let (_, migrated) = decode(old.as_bytes()).unwrap();
+            assert_eq!(migrated.speed_level, SpeedLevel::One, "{old}");
+        }
+        let (_, kept) = decode(br#"{"version":3,"preferences":{"speed_level":"three"}}"#).unwrap();
+        assert_eq!(kept.speed_level, SpeedLevel::Three, "a v3 choice is kept");
+    }
+
+    #[test]
+    fn a_version_2_profile_is_migrated_once_with_its_bindings_untouched() {
+        let path = scratch("v2");
+        let v2 = br#"{"version":2,"bindings":{
+            "help":[{"trigger":{"key":"KeyI"},"modifier":"none"},null]
+        },"preferences":{"toggle_sprint":false}}"#;
+        fs::write(&path, v2).unwrap();
+        let (store, bindings, preferences) = Store::load(path.clone());
+        assert!(store.error.is_none(), "{:?}", store.error);
+        assert_eq!(preferences.speed_level, SpeedLevel::One);
+        assert_eq!(bindings.keyboard[&Action::Help], key(KeyCode::KeyI));
+        assert_eq!(fs::read(path.with_extension("v2.json.bak")).unwrap(), v2);
+        let (_, _, again) = Store::load(path);
+        assert_eq!(again.speed_level, SpeedLevel::One);
     }
 
     #[test]

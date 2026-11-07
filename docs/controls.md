@@ -70,10 +70,16 @@ focus change or device cancellation require release before activation. Pending
 sampling replies are discarded. The Server continues simulating while UI is open
 and remains the sole authority over Edits and the Player's pose.
 
-Hold sprint and hold removal are the defaults. Toggle sprint survives stops, but
-clears on UI entry, focus loss and respawn. Its indicator is visible while
-enabled. Timed tap removal uses the Game's Material duration, stays on one
-original target, and completes once. A second tap cancels it. Invalid aim, a
+**Shift** cycles the sprint speed: Walk, Speed 1, Speed 2, Speed 3, then back to
+Walk. There is no hold-to-sprint. The level stays until the next press, through
+stops, menus and respawn, and is saved with the profile; a toast names it on
+each press. Speeds are metres per second on foot: 4.5 walking, then 8 (the
+Game's sprint), 12 and 16; in flight the chosen speed is multiplied by 1, 5, 8
+or 12. Speed above Walk costs hunger at the sprinting rate while moving, and
+crouching always slows to a crouch. Behavior has a **Sprint speed** row that
+shows and sets the level; profiles from before it start at Speed 1. Hold removal
+is the default. Timed tap removal uses the Game's Material duration, stays on
+one original target, and completes once. A second tap cancels it. Invalid aim, a
 lost or changed target, or another selection/edit/history action cancels it
 without restarting.
 
@@ -106,7 +112,7 @@ and are checked for conflicts only against other pad bindings.
 
 | Input               | Default action                  |
 | ------------------- | ------------------------------- |
-| Left stick, click   | Move, Sprint (latched)          |
+| Left stick, click   | Move, Cycle sprint speed        |
 | Right stick, click  | Look, Sample                    |
 | South (A), East (B) | Ascend, Descend (crouch toggle) |
 | North (Y), West (X) | Menu, Shape                     |

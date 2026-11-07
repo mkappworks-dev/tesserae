@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::client::theme;
+use crate::server::player::SpeedLevel;
 
 pub(in crate::client) fn action_name(action: Action) -> &'static str {
     use Action::*;
@@ -12,7 +13,7 @@ pub(in crate::client) fn action_name(action: Action) -> &'static str {
         Right => "Move right",
         Ascend => "Ascend / jump",
         Descend => "Descend / crouch",
-        Sprint => "Sprint",
+        Sprint => "Cycle sprint speed",
         Respawn => "Respawn",
         MovementMode => "Switch flight / physics",
         View => "Switch first / third person",
@@ -232,12 +233,28 @@ pub(super) fn behavior(
     ),
 ) {
     group(list, "MOVEMENT & BUILDING", |card| {
-        setting_row(card, "Sprint activation", "", |row| {
-            segment(row, |buttons| {
-                option(buttons, "Hold", Operation::Sprint(false), !p.toggle_sprint);
-                option(buttons, "Toggle", Operation::Sprint(true), p.toggle_sprint);
-            })
-        });
+        setting_row(
+            card,
+            "Sprint speed",
+            "Sprint cycles through these and keeps the one you stop on.",
+            |row| {
+                segment(row, |buttons| {
+                    for level in [
+                        SpeedLevel::Walk,
+                        SpeedLevel::One,
+                        SpeedLevel::Two,
+                        SpeedLevel::Three,
+                    ] {
+                        option(
+                            buttons,
+                            level.label(),
+                            Operation::Sprint(level),
+                            p.speed_level == level,
+                        );
+                    }
+                })
+            },
+        );
         setting_row(card, "Removal activation", "", |row| {
             segment(row, |buttons| {
                 option(buttons, "Hold", Operation::Removal(false), !p.tap_remove);

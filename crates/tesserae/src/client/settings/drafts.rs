@@ -253,7 +253,7 @@ pub(super) fn activate(
                 Operation::TouchInvert => p.touch.invert_y = !p.touch.invert_y,
                 Operation::TouchMirror(value) => p.touch.mirrored = value,
                 Operation::TouchSize(size) => p.touch.size = size,
-                Operation::Sprint(value) => p.toggle_sprint = value,
+                Operation::Sprint(level) => p.speed_level = level,
                 Operation::Removal(value) => p.tap_remove = value,
                 Operation::Repeat => p.repeat_held = !p.repeat_held,
                 Operation::Invert => p.invert_y = !p.invert_y,

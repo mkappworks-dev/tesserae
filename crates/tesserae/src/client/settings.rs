@@ -109,7 +109,7 @@ pub(super) enum Operation {
     Clear(Device, Action, usize),
     Replace,
     CancelConflict,
-    Sprint(bool),
+    Sprint(crate::server::player::SpeedLevel),
     Removal(bool),
     Repeat,
     Invert,

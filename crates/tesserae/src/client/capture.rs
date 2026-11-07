@@ -277,9 +277,6 @@ pub(super) fn plugin(app: &mut App) {
         pending_seen: false,
         frames: FrameLog::default(),
     });
-    if std::env::var_os("TESSERAE_SCREENSHOT_SPRINT").is_some() {
-        app.insert_resource(super::camera::Sprint(true));
-    }
     // `TESSERAE_SCREENSHOT_MENU=details` shows World details over it.
     if let Some(menu) = std::env::var_os("TESSERAE_SCREENSHOT_MENU") {
         app.insert_resource(super::menu::Menu::opened(menu == "details"));
@@ -698,7 +695,11 @@ fn fly_forward(
         crouch,
         switch_mode,
         jump,
-        sprint,
+        speed: if sprint {
+            crate::server::player::SpeedLevel::One
+        } else {
+            default()
+        },
         direction: velocity,
         speed_mps: velocity.length(),
         yaw: fly.yaw,

@@ -727,8 +727,8 @@ pub(super) fn test_plugin(app: &mut App) {
     app.init_resource::<ButtonInput<KeyCode>>()
         .init_resource::<ButtonInput<MouseButton>>();
     app.init_resource::<super::profile::Preferences>()
-        .init_resource::<super::camera::Sprint>()
-        .init_resource::<super::camera::PadLatch>();
+        .init_resource::<super::camera::PadLatch>()
+        .init_resource::<super::view::PendingSave>();
     plugin(app);
 }
 

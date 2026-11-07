@@ -1,6 +1,6 @@
 const settingsDefaults = {
   // The engine's defaults (profile.rs, actions.rs).
-  sprint:'Toggle', removal:'Hold', repeat:false, mouse:1, invert:false,
+  sprint:'Walk', removal:'Hold', repeat:false, mouse:1, invert:false,
   scroll:'Standard', scrollSpeed:1, reference:false, padLook:1,
   padInvert:false, moveDeadzone:.15, lookDeadzone:.15, crouch:'Toggle',
   touchLook:1, touchInvert:false, touchLayout:'Normal', touchSize:'Normal',
@@ -8,7 +8,7 @@ const settingsDefaults = {
   fps:'No limit', sound:70, music:50, effects:80, motion:false, contrast:false, simpleBackground:false, textScale:"1",
   // Engine action names and key labels (settings/pages.rs:5-57, actions.rs:265-370).
   bindings:{'Move forward':'W','Move backward':'S','Move left':'A','Move right':'D',
-    'Ascend / jump':'Space','Sprint':'Left Shift','Descend / crouch':'Left Ctrl','Place / ignite':'Right mouse',
+    'Ascend / jump':'Space','Cycle sprint speed':'Left Shift','Descend / crouch':'Left Ctrl','Place / ignite':'Right mouse',
     'Remove':'Left mouse','Search the Catalogue':'C','Open Inventory':'I','Flip Shape':'E','Layout mode and menu':'L',
     'Open the Menu':'Tab','Release cursor':'Escape','Open Settings':'F10',
     'Respawn':'R','Switch flight / physics':'V','Switch first / third person':'F5',
@@ -23,9 +23,9 @@ const settingsDefaults = {
     'Quick slot 6':'6','Quick slot 7':'7','Quick slot 8':'8','Quick slot 9':'9',
     'Previous quick slot':'','Next quick slot':'','Open input settings':'F1','Diagnostics':'F3'},
   // The engine keeps a second binding per action; an empty one reads "Add binding".
-  altBindings:{'Sprint':'Right Shift','Sample':'Middle mouse','Redo':'Ctrl+Y',
+  altBindings:{'Cycle sprint speed':'Right Shift','Sample':'Middle mouse','Redo':'Ctrl+Y',
     'Layout: more Voxels':']','Layout: fewer Voxels':'['},
-  padBindings:{'Ascend / jump':'A','Descend / crouch':'B','Open the Menu':'Y','Next Shape':'X','Sprint':'Left stick',
+  padBindings:{'Ascend / jump':'A','Descend / crouch':'B','Open the Menu':'Y','Next Shape':'X','Cycle sprint speed':'Left stick',
     'Sample':'Right stick','Remove':'RT','Place / ignite':'LT','Previous quick slot':'LB','Next quick slot':'RB',
     'Turn Shape':'D-pad left','Flip Shape':'D-pad right','Empty hand':'D-pad down','Use tool':'D-pad up',
     'Open input settings':'Start','Switch flight / physics':'Select'}
@@ -34,7 +34,7 @@ const settingsDefaults = {
 const settingsCategories = ['Behavior','Key bindings','Controller','Display','Accessibility'];
 // The engine's order and categories (settings/pages.rs binding_order, category).
 const bindingGroups = {
-  Movement:['Move forward','Move backward','Move left','Move right','Ascend / jump','Descend / crouch','Sprint',
+  Movement:['Move forward','Move backward','Move left','Move right','Ascend / jump','Descend / crouch','Cycle sprint speed',
     'Respawn','Switch flight / physics','Increase flight speed','Decrease flight speed',
     'Switch first / third person','Third-person zoom in','Third-person zoom out'],
   Building:['Place / ignite','Remove','Sample','Empty hand','Turn Shape','Flip Shape','Next Shape','Take tool',
@@ -85,7 +85,7 @@ function settingsBody() {
   const group=(name)=>`<p class="section-label">${name}</p>`;
   switch(state.settingsTab) {
     case 'Behavior': return group('Movement & building')+
-      row('Sprint activation','sprint','select',['Hold','Toggle'])+
+      row('Sprint speed','sprint','select',['Walk','Speed 1','Speed 2','Speed 3'],'Sprint cycles through these and keeps the one you stop on.')+
       row('Removal activation','removal','select',['Hold','Timed tap'])+
       row('Repeat while held','repeat','toggle',[],'Keep placing or removing while the binding is held.')+
       group('Mouse & quick slots')+

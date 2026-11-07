@@ -1,4 +1,5 @@
 use super::*;
+use crate::server::player::SpeedLevel;
 
 #[test]
 fn every_bindable_action_has_a_place_in_the_controls_list() {
@@ -664,8 +665,8 @@ fn a_dropdown_shows_its_choice_opens_on_it_and_closes_on_a_click_outside() {
         .entity(root)
         .with_children(|row| {
             segment(row, |options| {
-                option(options, "Hold", Operation::Sprint(false), false);
-                option(options, "Toggle", Operation::Sprint(true), true);
+                option(options, "Walk", Operation::Sprint(SpeedLevel::Walk), false);
+                option(options, "Speed 1", Operation::Sprint(SpeedLevel::One), true);
             })
         });
     app.update();
@@ -675,7 +676,7 @@ fn a_dropdown_shows_its_choice_opens_on_it_and_closes_on_a_click_outside() {
         .single(app.world())
         .map(|(entity, select)| (entity, select.value))
         .unwrap();
-    assert_eq!(app.world().get::<Text>(value).unwrap().0, "Toggle");
+    assert_eq!(app.world().get::<Text>(value).unwrap().0, "Speed 1");
     app.world_mut().trigger(Activate { entity: trigger });
     app.update();
     let chosen = app

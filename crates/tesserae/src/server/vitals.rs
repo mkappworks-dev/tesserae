@@ -669,7 +669,11 @@ mod tests {
         app.world_mut()
             .write_message(super::super::player::MovementIntent {
                 direction,
-                sprint,
+                speed: if sprint {
+                    super::super::player::SpeedLevel::One
+                } else {
+                    default()
+                },
                 ..default()
             });
     }

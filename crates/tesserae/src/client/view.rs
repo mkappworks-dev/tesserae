@@ -35,7 +35,7 @@ const HIDE_FIGURE_BELOW_M: f32 = 0.8;
 /// brushing past a pillar does not snap back and forth.
 const EASE_OUT_RATE: f32 = 4.0;
 /// A zoom gesture is many notches; the profile is written once it ends.
-const SAVE_AFTER_S: f32 = 1.0;
+pub(super) const SAVE_AFTER_S: f32 = 1.0;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -51,7 +51,7 @@ pub(crate) enum View {
 pub(super) struct Boom(Option<f32>);
 
 #[derive(Resource, Default)]
-struct PendingSave(Option<f32>);
+pub(super) struct PendingSave(pub(super) Option<f32>);
 
 pub(super) fn plugin(app: &mut App) {
     app.init_session_state::<Boom>()
@@ -100,7 +100,7 @@ fn switch(
     }
 }
 
-fn save(
+pub(super) fn save(
     mut commands: Commands,
     time: Res<Time>,
     mut pending: ResMut<PendingSave>,
@@ -119,10 +119,10 @@ fn save(
     if let Some(mut store) = store
         && let Err(error) = store.save(&bindings, &preferences)
     {
-        warn!("Could not save the view: {error}");
+        warn!("Could not save the view or speed: {error}");
         super::menu_ui::notify(
             &mut commands,
-            "Could not save the view preference",
+            "Could not save your preferences",
             super::menu_ui::Tone::Alert,
         );
     }

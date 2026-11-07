@@ -45,6 +45,64 @@ const SWIM_HOLD_S: f32 = 0.1;
 /// 24 m/s², so 7.5 m/s is what carries the feet over a ledge a metre up.
 const JUMP_OUT_MPS: f32 = 7.5;
 
+pub const WALK_MPS: f32 = 4.5;
+
+/// How fast the Player asks to go: a walk, or one of three speeds above it that
+/// the Player cycles through and keeps until the next press.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SpeedLevel {
+    #[default]
+    Walk,
+    One,
+    Two,
+    Three,
+}
+
+impl SpeedLevel {
+    pub fn next(self) -> Self {
+        match self {
+            Self::Walk => Self::One,
+            Self::One => Self::Two,
+            Self::Two => Self::Three,
+            Self::Three => Self::Walk,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Walk => "Walk",
+            Self::One => "Speed 1",
+            Self::Two => "Speed 2",
+            Self::Three => "Speed 3",
+        }
+    }
+
+    pub fn sprinting(self) -> bool {
+        self != Self::Walk
+    }
+
+    /// On foot, in metres per second. Speed 1 is the sprint every Game has had.
+    pub fn walking_mps(self) -> f32 {
+        match self {
+            Self::Walk => WALK_MPS,
+            Self::One => 8.0,
+            Self::Two => 12.0,
+            Self::Three => 16.0,
+        }
+    }
+
+    /// Of the flight speed the Client asked for.
+    fn flying_factor(self) -> f32 {
+        match self {
+            Self::Walk => 1.0,
+            Self::One => 5.0,
+            Self::Two => 8.0,
+            Self::Three => 12.0,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum MovementMode {
     #[default]
@@ -73,7 +131,7 @@ pub struct MovementIntent {
     pub cancelled: bool,
     pub direction: Vec3,
     pub speed_mps: f32,
-    pub sprint: bool,
+    pub speed: SpeedLevel,
     pub crouch: bool,
     pub jump: bool,
     pub yaw: f32,
@@ -249,7 +307,7 @@ impl Player {
             horizontal_mps: self.travel_mps.with_y(0.0).length(),
             vertical_mps: self.travel_mps.y,
             crouching: self.crouching,
-            sprinting: self.intent.sprint && !self.crouching,
+            sprinting: self.intent.speed.sprinting() && !self.crouching,
             swimming: self.mode == MovementMode::Physics && self.swimming,
             immersion: self.immersion,
         }
@@ -338,7 +396,7 @@ impl Player {
         if self.mode == MovementMode::Flight {
             self.eye += direction.clamp_length_max(1.0)
                 * (self.intent.speed_mps.clamp(0.5, FLY_SPEED_CEILING_MPS)
-                    * if self.intent.sprint { 5.0 } else { 1.0 })
+                    * self.intent.speed.flying_factor())
                 .min(FLY_SPEED_CEILING_MPS)
                 * dt;
             self.intent.jump = false;
@@ -388,10 +446,8 @@ impl Player {
         self.velocity_y = self.velocity_y.max(-50.0);
         let speed = if self.crouching {
             2.25
-        } else if self.intent.sprint {
-            8.0
         } else {
-            4.5
+            self.intent.speed.walking_mps()
         };
         let speed = speed * (1.0 - (1.0 - WATER_SPEED_FACTOR) * (wet / float).min(1.0));
         let horizontal = direction.normalize_or_zero() * throttle * speed * dt;
@@ -795,6 +851,42 @@ mod tests {
         }
     }
     #[test]
+    fn each_speed_level_walks_at_its_own_metres_per_second_and_speed_one_is_the_old_sprint() {
+        let t = tables();
+        let s = scene(1.0);
+        let mut seen = Vec::new();
+        for level in [
+            SpeedLevel::Walk,
+            SpeedLevel::One,
+            SpeedLevel::Two,
+            SpeedLevel::Three,
+        ] {
+            let mut p = player();
+            p.advance(&s, &t, 1.0, 1.0 / 64.0);
+            p.intent.direction = Vec3::X;
+            p.intent.speed = level;
+            p.advance(&s, &t, 1.0, 1.0 / 64.0);
+            let body = p.body_state();
+            assert_eq!(body.sprinting, level.sprinting());
+            assert!((body.horizontal_mps - level.walking_mps()).abs() < 0.01);
+            seen.push(body.horizontal_mps);
+        }
+        assert!((seen[1] - 8.0).abs() < 0.01, "Speed 1 keeps the old sprint");
+        assert!(seen.windows(2).all(|w| w[0] < w[1]), "{seen:?}");
+    }
+
+    #[test]
+    fn the_speed_level_cycles_through_all_four_and_back() {
+        let mut level = SpeedLevel::Walk;
+        let mut order = Vec::new();
+        for _ in 0..5 {
+            order.push(level.label());
+            level = level.next();
+        }
+        assert_eq!(order, ["Walk", "Speed 1", "Speed 2", "Speed 3", "Walk"]);
+    }
+
+    #[test]
     fn a_partly_deflected_stick_scales_speed_and_whole_directions_keep_full_speed() {
         for size in [1.0, 0.5, 0.25] {
             let s = scene(size);
@@ -833,7 +925,7 @@ mod tests {
             let mut p = player();
             p.advance(&s, &t, size, 1.0 / 64.0);
             p.intent.direction = Vec3::X;
-            p.intent.sprint = true;
+            p.intent.speed = SpeedLevel::One;
             p.advance(&s, &t, size, 1.0 / 64.0);
             let body = p.body_state();
             assert!(body.grounded && body.sprinting && !body.crouching);
@@ -1141,7 +1233,7 @@ mod tests {
             p.intent = MovementIntent {
                 direction: Vec3::X,
                 crouch: true,
-                sprint: true,
+                speed: SpeedLevel::One,
                 ..default()
             };
             for _ in 0..64 {
@@ -1388,7 +1480,7 @@ mod tests {
         p.intent = MovementIntent {
             direction: Vec3::X,
             speed_mps: f32::MAX,
-            sprint: true,
+            speed: SpeedLevel::One,
             ..default()
         };
         steps(&mut p, &scene(1.0), 64);
@@ -1725,7 +1817,7 @@ mod tests {
             p.intent = MovementIntent {
                 direction: Vec3::X,
                 speed_mps: 12.0,
-                sprint: true,
+                speed: SpeedLevel::One,
                 ..default()
             };
             steps(&mut p, &s, 64);
