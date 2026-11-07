@@ -35,3 +35,6 @@ after a real fall. The Server measures both from the body it already advances.
 - The solid under the feet is the Voxel a centimetre below the centre of the
   feet; standing out over an edge on a corner of the body reads air and is
   silent.
+- The user kept `land` for a jump on flat ground (it rises 1.33 m): Minecraft
+  plays a quiet per-block land sound on any landing, and a Game sets how loud
+  `land` is through its Sound's volume.
