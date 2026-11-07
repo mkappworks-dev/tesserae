@@ -1120,11 +1120,10 @@ fn render(
         Option<Res<Launcher>>,
         Option<Res<super::settings::Settings>>,
     ),
-    installed: Res<Installed>,
+    (installed, scenery): (Res<Installed>, Res<Scenery>),
     roots: Query<Entity, With<Root>>,
     scrolled: Query<&ScrollPosition, With<PageScroll>>,
     logo: Option<Res<ui::Mosaic>>,
-    scenery: Res<Scenery>,
     (mut built, mut shown, mut covered): (Local<Option<u64>>, Local<Option<Screen>>, Local<bool>),
 ) {
     let Some(l) = launcher else {
