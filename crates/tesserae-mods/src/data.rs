@@ -116,31 +116,41 @@ impl From<Ground> for content::GroundParams {
     }
 }
 
-/// Every artwork file and recording a Declaration names, as (field, Mod-relative path, most
-/// bytes it may hold), in Declaration order.
-pub(crate) fn references(id: &str, bytes: &[u8]) -> Result<Vec<(String, String, u64)>, ModError> {
-    let artwork = crate::artwork::MAX_FILE_BYTES;
+/// A file a data Declaration names, read from the Mod's directory into its payload.
+pub(crate) struct Reference {
+    pub field: String,
+    /// Mod-relative.
+    pub path: String,
+    pub max_bytes: u64,
+    pub recording: bool,
+}
+
+/// Every artwork file and recording a Declaration names, in Declaration order.
+pub(crate) fn references(id: &str, bytes: &[u8]) -> Result<Vec<Reference>, ModError> {
+    let artwork = |field: String, path: &str| Reference {
+        field,
+        path: path.to_owned(),
+        max_bytes: crate::artwork::MAX_FILE_BYTES,
+        recording: false,
+    };
     let data = decode(id, bytes)?;
     let mut found = Vec::new();
     for (row, appearance) in data.appearance.iter().enumerate() {
         if let Some(path) = &appearance.texture {
-            found.push((format!("appearance[{row}].texture"), path.clone(), artwork));
+            found.push(artwork(format!("appearance[{row}].texture"), path));
         }
     }
     if let Some(character) = data.world.and_then(|w| w.character) {
-        found.push((
-            "world.character.skin".into(),
-            character.skin().to_owned(),
-            artwork,
-        ));
+        found.push(artwork("world.character.skin".into(), character.skin()));
     }
     for (row, sound) in data.sounds.iter().enumerate() {
         for (at, file) in sound.files().enumerate() {
-            found.push((
-                recording_field(row, at),
-                file.to_owned(),
-                crate::recording::MAX_FILE_BYTES,
-            ));
+            found.push(Reference {
+                field: recording_field(row, at),
+                path: file.to_owned(),
+                max_bytes: sound.max_bytes(),
+                recording: true,
+            });
         }
     }
     Ok(found)

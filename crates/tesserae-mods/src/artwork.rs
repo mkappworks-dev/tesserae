@@ -26,12 +26,18 @@ pub(crate) fn read(dir: &Path, name: &str, max_bytes: u64) -> Result<Vec<u8>, St
     if !real.starts_with(&base) {
         return Err(format!("`{name}` resolves outside the mod's directory"));
     }
+    let too_large = || format!("`{name}` is larger than {max_bytes} bytes");
+    let file = fs::File::open(&real).map_err(|e| format!("`{name}`: {e}"))?;
+    if file.metadata().is_ok_and(|m| m.len() > max_bytes) {
+        return Err(too_large());
+    }
+    // The take still bounds a file that grows after the size check, or reports none.
     let mut bytes = Vec::new();
-    fs::File::open(&real)
-        .and_then(|file| file.take(max_bytes + 1).read_to_end(&mut bytes))
+    file.take(max_bytes + 1)
+        .read_to_end(&mut bytes)
         .map_err(|e| format!("`{name}`: {e}"))?;
     if bytes.len() as u64 > max_bytes {
-        return Err(format!("`{name}` is larger than {max_bytes} bytes"));
+        return Err(too_large());
     }
     Ok(bytes)
 }
