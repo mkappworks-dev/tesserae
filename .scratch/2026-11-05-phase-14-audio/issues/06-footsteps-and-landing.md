@@ -1,6 +1,6 @@
 # 06: Footsteps and landing
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 02
 
@@ -18,9 +18,20 @@ after a real fall. The Server measures both from the body it already advances.
 
 ## Acceptance criteria
 
-- [ ] Server tests: walking 6 m on one Material makes 4 steps; crouching,
+- [x] Server tests: walking 6 m on one Material makes 4 steps; crouching,
       flying and swimming make none; standing still makes none.
-- [ ] Server tests: a 0.9 m drop makes no `land`, a 1 m drop makes one; the
+- [x] Server tests: a 0.9 m drop makes no `land`, a 1 m drop makes one; the
       Material is the one landed on.
-- [ ] Steps follow the stride in metres at Voxel sizes 0.5 and 2.0.
-- [ ] A solid with no Sound set is silent; the stride still advances.
+- [x] Steps follow the stride in metres at Voxel sizes 0.5 and 2.0.
+- [x] A solid with no Sound set is silent; the stride still advances.
+
+## Comments
+
+- A fall is measured from the feet's highest point since the body last
+  stood, not from the landing speed the Vitals use: at the 64 Hz step, v²/2g
+  reads a 1 m drop as about 0.95 m. Swimming, flight and a respawn forget the
+  height.
+- A jump on flat ground rises 1.33 m and so lands with a `land`.
+- The solid under the feet is the Voxel a centimetre below the centre of the
+  feet; standing out over an edge on a corner of the body reads air and is
+  silent.

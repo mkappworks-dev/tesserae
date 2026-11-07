@@ -214,6 +214,10 @@ pub struct Player {
     against_bank: bool,
     /// The fastest landing since the Vitals last took it.
     impact_mps: f32,
+    /// The feet's highest point since the body last stood, while it falls.
+    fall_top_m: Option<f32>,
+    /// The highest fall landed since the footfall last took it.
+    landed_from_m: f32,
 }
 impl Player {
     fn new(eye: Vec3, mode: MovementMode) -> Self {
@@ -232,6 +236,8 @@ impl Player {
             swim_hold_s: 0.0,
             against_bank: false,
             impact_mps: 0.0,
+            fall_top_m: None,
+            landed_from_m: 0.0,
         }
     }
     pub fn eye(&self) -> Vec3 {
@@ -287,6 +293,11 @@ impl Player {
     pub(in crate::server) fn take_fall_m(&mut self) -> f32 {
         let v = std::mem::take(&mut self.impact_mps);
         v * v / (2.0 * GRAVITY_MPS2)
+    }
+    /// How far in metres the body last fell before standing, measured from
+    /// the feet's highest point, since the last call.
+    pub(in crate::server) fn take_landing_m(&mut self) -> f32 {
+        std::mem::take(&mut self.landed_from_m)
     }
     /// Drops whatever movement the Client last asked for.
     pub(in crate::server) fn stop(&mut self) {
@@ -401,6 +412,7 @@ impl Player {
                 * dt;
             self.intent.jump = false;
             self.swimming = false;
+            self.fall_top_m = None;
             return;
         }
         self.update_stance(store, tables, size);
@@ -452,6 +464,9 @@ impl Player {
         let speed = speed * (1.0 - (1.0 - WATER_SPEED_FACTOR) * (wet / float).min(1.0));
         let horizontal = direction.normalize_or_zero() * throttle * speed * dt;
         let body = self.body();
+        let top = self
+            .fall_top_m
+            .map_or(body.min[1], |top| top.max(body.min[1]));
         let mut moved = collide::sweep(
             store,
             tables,
@@ -485,6 +500,14 @@ impl Player {
         if moved.blocked[1] {
             self.velocity_y = 0.0;
         }
+        self.fall_top_m = if self.swimming {
+            None
+        } else if self.grounded {
+            self.landed_from_m = self.landed_from_m.max(top - moved.aabb.min[1]);
+            None
+        } else {
+            Some(top)
+        };
         self.eye = Vec3::from_array(moved.aabb.min)
             + Vec3::new(BODY_HALF_WIDTH_M, self.eye_height(), BODY_HALF_WIDTH_M);
     }
@@ -690,6 +713,7 @@ pub(super) fn receive(
         player.swimming = false;
         player.swim_hold_s = 0.0;
         player.impact_mps = 0.0;
+        player.fall_top_m = None;
         respawned.write(Respawned);
     }
 }

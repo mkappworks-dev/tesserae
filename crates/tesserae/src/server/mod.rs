@@ -18,6 +18,7 @@ pub mod death;
 pub mod edit;
 pub mod entities;
 mod fluids;
+mod footfall;
 pub mod game_mode;
 #[cfg(feature = "profiling")]
 mod profile_fixture;
@@ -127,6 +128,7 @@ pub fn plugin(app: &mut App) {
         game_mode::plugin,
         vitals::plugin,
         death::plugin,
+        footfall::plugin,
     ));
     #[cfg(feature = "dev")]
     if std::env::var_os("TESSERAE_PROFILE_FIXTURE").is_none() {
