@@ -64,11 +64,9 @@ pub(in crate::server) fn apply_pending(
                             .expect("counted before the Voxel changed");
                         entry.cost = Cost::Paid(item.clone());
                     }
-                    if let Some(material) = removal(p.intent.action, &entry)
-                        && matches!(entry.event.kind, EditKind::Solid { .. })
-                    {
+                    if let Some((cause, material)) = heard_as(p.intent.action, &entry) {
                         heard.write_batch(sounds.voxel(
-                            Cause::Break,
+                            cause,
                             material,
                             entry.at,
                             world.voxel_size,
@@ -112,7 +110,7 @@ pub(in crate::server) fn apply_pending(
     pending.0 = waiting;
     // Single Edits go first, so a large layout never starves them.
     let PendingEdits(_, layouts) = &mut *pending;
-    layout::drain(
+    let started = layout::drain(
         layouts,
         EDITS_PER_TICK - applied,
         &mut history,
@@ -125,6 +123,9 @@ pub(in crate::server) fn apply_pending(
         body,
         &mut inventory,
     );
+    for (at, material) in started {
+        heard.write_batch(sounds.voxel(Cause::Place, material, at, world.voxel_size, player.eye()));
+    }
 }
 
 /// What a Player's own single Place or Remove did, for the Client to show.
@@ -139,6 +140,25 @@ fn applied_kind(action: EditAction, entry: &crate::server::undo::Entry) -> Optio
         ) if before.is_air() && !after.is_air() => Some(AppliedKind::Placed(after.material())),
         (EditAction::Place(_) | EditAction::PlaceHeld { .. }, EditKind::SourcePlaced(material)) => {
             Some(AppliedKind::Placed(material))
+        }
+        _ => None,
+    }
+}
+
+/// The Voxel Cause a Player's own single Edit is heard with, and the Material
+/// whose Sound set voices it. A held fluid arrives here as `PlaceSource`.
+fn heard_as(action: EditAction, entry: &crate::server::undo::Entry) -> Option<(Cause, MaterialId)> {
+    if let Some(material) = removal(action, entry) {
+        return Some((Cause::Break, material));
+    }
+    match (action, entry.event.kind) {
+        (EditAction::Place(_), EditKind::Solid { before, after })
+            if before.is_air() && !after.is_air() =>
+        {
+            Some((Cause::Place, after.material()))
+        }
+        (EditAction::PlaceSource(_), EditKind::SourcePlaced(material)) => {
+            Some((Cause::Place, material))
         }
         _ => None,
     }

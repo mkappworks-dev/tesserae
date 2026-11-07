@@ -141,7 +141,10 @@ time. This is a gesture guard, not a network anti-cheat timer. The unreleased
 0.3 Material Declaration carries optional `remove-time-s`, validated from 0.05
 to 60 seconds and defaulting to 350 ms, published in the content catalogue. Core
 tables and simulation retain no input timing. The Server compares target
-identity again before applying the removal.
+identity again before applying the removal. While the Client's progress runs,
+its aim report carries a flag that Remove is held; the Server strikes the target
+with a `hit` Sound event every 0.25 s while that target is unchanged and in
+reach of the Eye. The flag grants nothing and changes no Voxel.
 
 Layout mode (`client/layout.rs`) takes the placement actions while it is on:
 Place commits, Remove cancels and the count keys change the active axis. The

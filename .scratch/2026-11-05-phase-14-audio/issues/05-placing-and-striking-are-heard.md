@@ -1,6 +1,6 @@
 # 05: Placing and striking are heard
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 02
 
@@ -18,17 +18,27 @@ A Player hears a Voxel being placed and hears it struck while holding Remove.
 
 ## Acceptance criteria
 
-- [ ] Server tests: Place makes one `place` at the Voxel; a placed source uses
+- [x] Server tests: Place makes one `place` at the Voxel; a placed source uses
       its fluid's set; a Layout of 64 cells makes one; a refused Place makes
       none.
-- [ ] Server tests: a held Remove makes `hit` every 0.25 s; a changed target,
+- [x] Server tests: a held Remove makes `hit` every 0.25 s; a changed target,
       out of reach or flag cleared stops it; the flag alone never removes
       anything.
-- [ ] Undo and redo make no `place` or `hit`.
-- [ ] The architecture doc's removal paragraph mentions the flag.
+- [x] Undo and redo make no `place` or `hit`.
+- [x] The architecture doc's removal paragraph mentions the flag.
 
 ## Comments
 
 - From ticket 02: `break` fires for solids only, so removing a fluid source is
   silent although it drops an Item. Decide here, beside `place` for a source,
   whether a source's removal plays its fluid's `break`, and say which.
+- Decided: removing a fluid source plays its fluid Material's `break`, from
+  the same point that drops its Item, symmetric with `place` for a source.
+  `break` now fires wherever a deliberate Remove takes a solid or a source
+  out.
+- A Layout's `place` sounds at the first cell that lands, on the tick it lands:
+  the anchor, unless the anchor cell was skipped.
+- `hit` sounds at once when a hold starts on a target, then every 0.25 s; a new
+  target, aimed at or changed under the aim, starts its own cadence. Reach is
+  judged against the Eye each tick, not when the report came. The Client sets
+  the flag while its removal progress runs.

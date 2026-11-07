@@ -141,6 +141,9 @@ pub struct AimReport {
     pub held: Option<AimItem>,
     /// The tool in hand, which makes the answer carry a `use_aim`.
     pub tool: Option<super::tool::ToolId>,
+    /// Remove is held on the target, so the Server strikes it with `hit`
+    /// Sounds. It grants nothing: removal progress stays the Client's.
+    pub remove_held: bool,
 }
 #[derive(Message, Clone, Copy, Debug)]
 pub struct PickIntent {
@@ -376,6 +379,7 @@ pub(super) fn plugin(app: &mut App) {
     app.init_session_resource::<super::undo::Journal>()
         .add_player_intent::<super::undo::HistoryAction>()
         .init_session_resource::<AimState>()
+        .init_session_resource::<Striking>()
         .init_session_resource::<super::tool::Tools>()
         .init_session_resource::<layout::LayoutAimState>()
         .add_player_intent::<LayoutIntent>()
@@ -420,6 +424,7 @@ pub(super) fn plugin(app: &mut App) {
                     .run_if(super::persistence::playing)
                     .before(super::mods::Drain),
                 answer_aim,
+                strike.run_if(super::persistence::playing),
                 layout::answer_aim,
             )
                 .chain(),

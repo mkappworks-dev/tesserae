@@ -1952,6 +1952,7 @@ fn aim_bounds_follow_shapes_and_the_ghost_matches_the_edit() {
             direction: Vec3::NEG_Y,
             held: Some(AimItem::Solid(stone())),
             tool: None,
+            remove_held: false,
         };
         let target = aim_target(
             app.world().resource::<ChunkStore>(),
@@ -1997,6 +1998,7 @@ fn a_ghost_waits_for_light_and_fire_outlines_fuel_without_a_ghost() {
         direction: Vec3::NEG_Y,
         held: Some(AimItem::Solid(stone())),
         tool: None,
+        remove_held: false,
     };
     let target = |app: &App, held| {
         aim_target(
@@ -2073,6 +2075,7 @@ fn a_target_the_camera_sees_around_a_corner_is_blocked_not_edited() {
         direction: Vec3::NEG_Y,
         held: Some(AimItem::Solid(stone())),
         tool: None,
+        remove_held: false,
     };
     let mut walled = ground();
     for y in 9..12 {
@@ -2195,6 +2198,7 @@ fn stale_far_and_non_finite_aim_reports_do_not_replace_the_latest() {
         direction: Vec3::NEG_Y,
         held: None,
         tool: None,
+        remove_held: false,
     };
     app.world_mut().write_message(report);
     app.world_mut().run_system_once(receive_aim).unwrap();
