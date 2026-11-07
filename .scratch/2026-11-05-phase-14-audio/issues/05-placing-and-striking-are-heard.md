@@ -26,3 +26,9 @@ A Player hears a Voxel being placed and hears it struck while holding Remove.
       anything.
 - [ ] Undo and redo make no `place` or `hit`.
 - [ ] The architecture doc's removal paragraph mentions the flag.
+
+## Comments
+
+- From ticket 02: `break` fires for solids only, so removing a fluid source is
+  silent although it drops an Item. Decide here, beside `place` for a source,
+  whether a source's removal plays its fluid's `break`, and say which.

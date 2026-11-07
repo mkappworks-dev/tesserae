@@ -27,3 +27,10 @@ spec is enforced and refused with the Mod and field named.
 - [ ] Tests at the Declaration loading seam, and through `validate` and
       `package`.
 - [ ] The data-only Mod guide states the limits and the identity rule.
+
+## Comments
+
+- From ticket 02: a data Mod's recordings already join build identity, because
+  they can only be read from the payload Trust checks. What is left here is
+  `validate`, `package`, the limits and the ranges; only `max-m` above
+  `reference-m` is enforced so far, and recordings are capped at 8 MiB on read.
