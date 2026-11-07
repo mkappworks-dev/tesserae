@@ -189,6 +189,8 @@ fn kitchen_in(game: &str, survival_mode: bool) -> (super::Install, App, super::L
     .insert_resource(Survival::default())
     .init_resource::<EntityStore>()
     .init_resource::<Refused>()
+    .init_resource::<crate::server::vitals::Eating>()
+    .init_resource::<Time>()
     .add_message::<Pickup>()
     .add_message::<EatIntent>()
     .add_message::<UseOutcome>();
@@ -237,17 +239,24 @@ fn every_demo_games_food_places_breaks_picks_up_and_eats() {
         let mut vitals = app.world_mut().query::<&mut Vitals>();
         vitals.single_mut(app.world_mut()).unwrap().hunger = 10.0;
         app.world_mut().write_message(EatIntent);
-        app.world_mut().run_system_once(eat).unwrap();
+        // A meal takes a second, the first bite spending the Item.
+        for _ in 0..90 {
+            app.world_mut().run_system_once(eat).unwrap();
+            app.world_mut()
+                .resource_mut::<Time>()
+                .advance_by(std::time::Duration::from_millis(16));
+        }
         let value = loaded
             .items
             .iter()
             .find(|i| i.name == food.item)
             .unwrap()
             .food;
-        assert_eq!(
-            Some(hunger(&mut app) - 10.0),
-            value,
-            "{} is eaten",
+        // Three bites each refill a third, so the sum may be a rounding short.
+        let eaten = hunger(&mut app) - 10.0;
+        assert!(
+            value.is_some_and(|value| (eaten - value).abs() < 1e-4),
+            "{} is eaten: {eaten} of {value:?}",
             food.item
         );
         assert_eq!(held(&mut app, food.item), 0);

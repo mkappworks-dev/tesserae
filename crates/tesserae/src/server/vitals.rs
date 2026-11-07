@@ -99,9 +99,31 @@ pub struct VitalsChanged {
 #[derive(Message, Clone, Copy, Debug)]
 pub struct EatIntent;
 
+/// Eating takes time, as a removal does. The hand rises for [`EAT_RISE_S`], then
+/// takes [`EAT_BITES`] bites [`EAT_BITE_S`] apart: the first spends the Item and
+/// each refills a share of its food. The Client animates the same timeline.
+pub const EAT_S: f32 = 1.0;
+pub const EAT_RISE_S: f32 = 0.25;
+pub const EAT_BITE_S: f32 = 0.2;
+pub const EAT_BITES: u32 = 3;
+
+/// The meal under way, if any: stopped by changing the selected slot or by
+/// dying, which keeps what was already eaten and loses the rest.
+#[derive(Resource, Default)]
+pub(crate) struct Eating(Option<Meal>);
+
+struct Meal {
+    slot: usize,
+    item: String,
+    food: f32,
+    elapsed_s: f32,
+    bites: u32,
+}
+
 pub(crate) fn plugin(app: &mut App) {
     app.add_session_message::<VitalsChanged>()
         .add_player_intent::<EatIntent>()
+        .init_session_resource::<Eating>()
         .add_session_message::<UseOutcome>()
         .add_session_systems(
             FixedPreUpdate,
@@ -171,12 +193,37 @@ pub(super) fn eat(
     mut intents: MessageReader<EatIntent>,
     survival: Res<Survival>,
     items: Option<Res<Items>>,
-    player: Single<(&mut Inventory, &mut Vitals, &PlayerMode)>,
+    player: Single<(&mut Inventory, &mut Vitals, &PlayerMode, Has<Death>)>,
+    (mut meal, time): (ResMut<Eating>, Res<Time>),
     mut outcomes: MessageWriter<UseOutcome>,
 ) {
-    let (mut inventory, mut vitals, mode) = player.into_inner();
+    let (mut inventory, mut vitals, mode, dead) = player.into_inner();
     let max = survival.rules.max_hunger;
+    if meal
+        .0
+        .as_ref()
+        .is_some_and(|m| dead || inventory.selected() != m.slot)
+    {
+        meal.0 = None;
+    }
+    if let Some(m) = meal.0.as_mut() {
+        m.elapsed_s += time.delta_secs();
+        while m.bites < EAT_BITES && m.elapsed_s >= EAT_RISE_S + (m.bites + 1) as f32 * EAT_BITE_S {
+            if m.bites == 0 && inventory.spend(&m.item, 1).is_err() {
+                m.elapsed_s = EAT_S;
+                break;
+            }
+            vitals.hunger = (vitals.hunger + m.food / EAT_BITES as f32).min(max);
+            m.bites += 1;
+        }
+        if m.elapsed_s >= EAT_S {
+            meal.0 = None;
+        }
+    }
     for _ in intents.read() {
+        if meal.0.is_some() {
+            continue;
+        }
         let food = inventory
             .held()
             .and_then(|stack| Some((stack.item.clone(), items.as_ref()?.food(&stack.item)?)));
@@ -189,9 +236,13 @@ pub(super) fn eat(
             outcomes.write(UseOutcome(Err(UseRefusal::NotHungry)));
             continue;
         }
-        if inventory.spend(&item, 1).is_ok() {
-            vitals.hunger = (vitals.hunger + food).min(max);
-        }
+        meal.0 = Some(Meal {
+            slot: inventory.selected(),
+            item,
+            food,
+            elapsed_s: 0.0,
+            bites: 0,
+        });
     }
 }
 
@@ -803,10 +854,26 @@ mod tests {
         pantry(&mut app, &[("m:bread", 2)]);
         set_vitals(&mut app, 20.0, 10.0);
         assert!(eat(&mut app).is_empty(), "no message for a routine success");
-        assert_eq!(vitals(&mut app).hunger, 16.0);
+        assert_eq!(vitals(&mut app).hunger, 10.0, "eating is not instant");
+        assert_eq!(held(&mut app), Some(("m:bread".into(), 2)));
+
+        // The first bite spends the Item and refills a third of its food.
+        seconds(&mut app, EAT_RISE_S + EAT_BITE_S + 0.05);
         assert_eq!(held(&mut app), Some(("m:bread".into(), 1)));
+        assert!(
+            (vitals(&mut app).hunger - 12.0).abs() < 1e-3,
+            "{}",
+            vitals(&mut app).hunger
+        );
+        seconds(&mut app, EAT_S);
+        assert!(
+            (vitals(&mut app).hunger - 16.0).abs() < 1e-3,
+            "three bites: {}",
+            vitals(&mut app).hunger
+        );
 
         eat(&mut app);
+        seconds(&mut app, EAT_S + 0.1);
         assert_eq!(vitals(&mut app).hunger, 20.0, "capped at the maximum");
         assert_eq!(held(&mut app), None);
 
@@ -817,6 +884,44 @@ mod tests {
             "full"
         );
         assert_eq!(held(&mut app), Some(("m:bread".into(), 1)));
+    }
+
+    #[test]
+    fn a_second_press_does_not_restart_the_meal_and_a_slot_change_or_death_stops_it() {
+        let mut app = field(no_drain(), GameMode::Survival);
+        pantry(&mut app, &[("m:bread", 3)]);
+        set_vitals(&mut app, 20.0, 4.0);
+        eat(&mut app);
+        seconds(&mut app, 0.3);
+        eat(&mut app);
+        seconds(&mut app, EAT_S);
+        assert_eq!(
+            held(&mut app),
+            Some(("m:bread".into(), 2)),
+            "one Item, one meal"
+        );
+        assert!((vitals(&mut app).hunger - 10.0).abs() < 1e-3);
+
+        eat(&mut app);
+        seconds(&mut app, EAT_RISE_S + EAT_BITE_S + 0.05);
+        let mut inventory = app
+            .world_mut()
+            .query::<&mut super::super::inventory::Inventory>();
+        let mut inventory = inventory.single_mut(app.world_mut()).unwrap();
+        let _ = inventory.select(4);
+        seconds(&mut app, EAT_S);
+        assert_eq!(held(&mut app), None, "another slot is selected");
+        let back = app
+            .world_mut()
+            .query::<&super::super::inventory::Inventory>()
+            .single(app.world())
+            .unwrap()
+            .count("m:bread");
+        assert_eq!(back, 1, "the first bite spent one and the rest stopped");
+        assert!(
+            (vitals(&mut app).hunger - 12.0).abs() < 1e-3,
+            "a third of the food came"
+        );
     }
 
     #[test]

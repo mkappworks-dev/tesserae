@@ -110,9 +110,19 @@ function eat(){
   if(!item?.food){notice('Hold food in the selected hotbar slot to eat.','warn');return;}
   /* Creative never drains, and the bar rounds up: both refuse before anything is spent. */
   if(!survival()||Math.ceil(v.hunger)>=Math.ceil(rules.maxHunger)){notice('You aren’t hungry.','warn');return;}
-  v.hunger=Math.min(rules.maxHunger,v.hunger+item.food);stack.count--;if(!stack.count)state.bagHotbar[state.quickSlot]=null;state.pickupRefused=null;
-  handFx('bite');
-  log(`Ate ${item.name}.`);render();
+  if(state.eating)return;
+  /* Eating takes a second, as a removal takes its time: the first bite spends the Item and each of
+     the three bites refills a third. Changing slot stops it, and what was not eaten stays unfilled. */
+  const slot=state.quickSlot,each=item.food/3;state.eating={slot};
+  handFx('bite');render();
+  [450,650,850].forEach((at,i)=>setTimeout(()=>{
+    if(!state.eating||state.quickSlot!==slot||state.screen!=='play')return;
+    if(!i){stack.count--;if(!stack.count)state.bagHotbar[slot]=null;state.pickupRefused=null;}
+    v.hunger=Math.min(rules.maxHunger,v.hunger+each);
+    if(i===2){state.eating=null;log(`Ate ${item.name}.`);}
+    render();
+  },at));
+  setTimeout(()=>{state.eating=null;},1000);
 }
 
 /* The first-person hand. Only a Server-accepted action starts a motion; reduced motion keeps it still. */

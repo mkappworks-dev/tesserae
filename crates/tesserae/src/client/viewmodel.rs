@@ -335,6 +335,52 @@ mod tests {
     }
 
     #[test]
+    fn a_real_eat_the_server_confirms_raises_the_arm_through_the_whole_chain() {
+        use crate::server::{tool::UseOutcome, vitals::EatIntent};
+        use tesserae_core::inventory::Stack;
+        let mut app = app();
+        app.add_message::<EatIntent>()
+            .add_message::<UseOutcome>()
+            .add_message::<crate::server::edit::EditApplied>()
+            .init_resource::<crate::client::edit::Hotbar>()
+            .add_systems(
+                Update,
+                (
+                    crate::client::hand_anim::confirm,
+                    crate::client::hand_anim::animate,
+                )
+                    .chain()
+                    .before(build),
+            );
+        app.world_mut()
+            .resource_mut::<crate::client::edit::Hotbar>()
+            .stacks[0] = Some(Stack {
+            item: "m:melon".into(),
+            count: 3,
+        });
+        app.update();
+        let rest = root(&mut app).0.translation;
+        app.world_mut().write_message(EatIntent);
+        app.update();
+        app.world_mut()
+            .resource_mut::<crate::client::edit::Hotbar>()
+            .stacks[0]
+            .as_mut()
+            .unwrap()
+            .count = 2;
+        let mut highest = rest.y;
+        for _ in 0..40 {
+            app.update();
+            highest = highest.max(root(&mut app).0.translation.y);
+        }
+        assert!(
+            highest > rest.y + 0.15,
+            "the arm rose from {} to {highest}",
+            rest.y
+        );
+    }
+
+    #[test]
     fn a_slot_switch_lowers_the_item_and_swaps_it_at_the_bottom() {
         let mut app = app();
         app.update();

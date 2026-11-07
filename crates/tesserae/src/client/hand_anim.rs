@@ -7,7 +7,7 @@
 use super::{edit::Hotbar, profile::Preferences};
 use crate::server::edit::{AppliedKind, EditApplied};
 use crate::server::tool::UseOutcome;
-use crate::server::vitals::EatIntent;
+use crate::server::vitals::{EAT_BITE_S, EAT_BITES, EAT_RISE_S, EAT_S, EatIntent};
 use crate::session::SessionApp;
 use bevy::prelude::*;
 
@@ -15,13 +15,14 @@ const SWING_S: f32 = 0.2;
 const SWING_FORWARD: f32 = 0.22;
 const SWING_PITCH_RAD: f32 = 0.5;
 const MINE_PERIOD_S: f32 = 0.35;
-const BITE_S: f32 = 1.0;
-const RISE_S: f32 = 0.25;
+/// The timeline is the Server's: it spends and refills on these bites.
+const BITE_S: f32 = EAT_S;
+const RISE_S: f32 = EAT_RISE_S;
 /// A slot change lowers the item and raises it again, the new one at the bottom.
 const SWITCH_S: f32 = 0.24;
 const SWITCH_DROP: f32 = 0.4;
-const BITES: u32 = 3;
-const BITE_EACH_S: f32 = 0.2;
+const BITES: u32 = EAT_BITES;
+const BITE_EACH_S: f32 = EAT_BITE_S;
 const LOWER_S: f32 = BITE_S - RISE_S - BITES as f32 * BITE_EACH_S;
 /// Where the food sits at the mouth, relative to the resting hand, in the
 /// camera's frame.
@@ -35,8 +36,6 @@ const ARM_MOUTH_RAD: f32 = 2.0;
 const MOUTH_TILT_RAD: f32 = 0.7;
 /// The food left in the hand after the last bite.
 const FOOD_LEFT: f32 = 0.45;
-/// How long after asking to eat the Server's answer may take.
-const EAT_PATIENCE_S: f64 = 1.5;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum Motion {
@@ -83,8 +82,18 @@ impl HandAnim {
         }
     }
 
+    /// A press while eating goes on with the meal rather than restarting it.
     pub(super) fn bite(&mut self) {
-        self.motion = Some(Motion::Bite(0.0));
+        if !matches!(self.motion, Some(Motion::Bite(_))) {
+            self.motion = Some(Motion::Bite(0.0));
+        }
+    }
+
+    /// The Server refused the meal, or the slot changed under it.
+    pub(super) fn stop_bite(&mut self) {
+        if matches!(self.motion, Some(Motion::Bite(_))) {
+            self.motion = None;
+        }
     }
 
     /// The slot changed: lower the item and raise the next. A bite in progress
@@ -198,13 +207,6 @@ fn bite_pose(t: f32) -> Pose {
     }
 }
 
-/// An eat that has been asked and not yet answered, with the stack as it was.
-#[derive(Default)]
-struct AskedToEat {
-    at_s: f64,
-    before: Option<(String, u32)>,
-}
-
 pub(super) fn plugin(app: &mut App) {
     app.init_session_state::<HandAnim>().add_session_systems(
         Update,
@@ -212,22 +214,17 @@ pub(super) fn plugin(app: &mut App) {
     );
 }
 
-fn selected(hotbar: &Hotbar) -> Option<(String, u32)> {
-    hotbar.stacks[hotbar.selected]
-        .as_ref()
-        .map(|stack| (stack.item.clone(), stack.count))
-}
-
-/// Starts motions from the Server's answers: a landed Place, a removal under
-/// way, and a stack of food that shrank after an eat was asked.
-fn confirm(
+/// Starts motions: from the Server's answers a landed Place and a removal under
+/// way, and an eat from the press that asked for it, which a refusal stops. The
+/// Server spends and refills on the same timeline, so the bites and the Vitals
+/// agree.
+pub(super) fn confirm(
     mut anim: ResMut<HandAnim>,
     mut applied: MessageReader<EditApplied>,
     (mut eats, mut outcomes): (MessageReader<EatIntent>, MessageReader<UseOutcome>),
     hotbar: Res<Hotbar>,
     progress: Option<Res<super::removal::Progress>>,
-    time: Res<Time>,
-    (mut slot, mut asked): (Local<Option<usize>>, Local<Option<AskedToEat>>),
+    mut slot: Local<Option<usize>>,
 ) {
     for edit in applied.read() {
         if matches!(edit.kind, AppliedKind::Placed(_)) {
@@ -239,30 +236,15 @@ fn confirm(
         .replace(hotbar.selected)
         .is_some_and(|was| was != hotbar.selected)
     {
+        // The Server stops a meal when the slot changes.
+        anim.stop_bite();
         anim.switch();
     }
-    let now = time.elapsed_secs_f64();
     if eats.read().last().is_some() {
-        *asked = Some(AskedToEat {
-            at_s: now,
-            before: selected(&hotbar),
-        });
+        anim.bite();
     }
     if outcomes.read().any(|UseOutcome(outcome)| outcome.is_err()) {
-        *asked = None;
-    }
-    if let Some(eat) = asked.as_ref() {
-        let shrank = match (&eat.before, selected(&hotbar)) {
-            (Some((was, count)), Some((item, now))) => *was == item && now < *count,
-            (Some(_), None) => true,
-            _ => false,
-        };
-        if shrank {
-            anim.bite();
-            *asked = None;
-        } else if now - eat.at_s > EAT_PATIENCE_S {
-            *asked = None;
-        }
+        anim.stop_bite();
     }
     anim.set_mining(progress.is_some_and(|p| p.active()));
 }
@@ -446,13 +428,6 @@ mod tests {
         app
     }
 
-    fn count(app: &mut App, to: u32) {
-        app.world_mut().resource_mut::<Hotbar>().stacks[0]
-            .as_mut()
-            .unwrap()
-            .count = to;
-    }
-
     fn biting(app: &App) -> bool {
         matches!(
             app.world().resource::<HandAnim>().motion,
@@ -461,30 +436,41 @@ mod tests {
     }
 
     #[test]
-    fn a_bite_starts_only_when_the_stack_shrinks_after_an_eat_was_asked() {
+    fn asking_to_eat_starts_the_bites_at_once_and_a_second_press_does_not_restart_them() {
         let mut app = confirming_app();
         app.world_mut().write_message(EatIntent);
         app.update();
-        assert!(!biting(&app), "asking is not enough");
-        count(&mut app, 2);
+        assert!(biting(&app), "the hand rises as the meal starts");
+        run(&mut app.world_mut().resource_mut::<HandAnim>(), 0.3);
+        let at = app.world().resource::<HandAnim>().motion;
+        app.world_mut().write_message(EatIntent);
         app.update();
-        assert!(biting(&app), "the Server took one");
+        assert_eq!(app.world().resource::<HandAnim>().motion, at, "same meal");
     }
 
     #[test]
-    fn a_refused_eat_never_bites_and_an_unasked_shrink_is_not_an_eat() {
+    fn a_refused_meal_or_a_changed_slot_stops_the_bites() {
         use crate::server::tool::UseRefusal;
         let mut app = confirming_app();
         app.world_mut().write_message(EatIntent);
         app.world_mut()
             .write_message(UseOutcome(Err(UseRefusal::NotHungry)));
         app.update();
-        count(&mut app, 2);
+        assert!(!biting(&app), "refused");
+
+        app.world_mut().write_message(EatIntent);
         app.update();
-        assert!(!biting(&app));
-        count(&mut app, 1);
+        assert!(biting(&app));
+        app.world_mut().resource_mut::<Hotbar>().selected = 2;
         app.update();
-        assert!(!biting(&app), "shrinking alone, such as a Place, is no eat");
+        assert!(
+            !biting(&app),
+            "the Server stops a meal when the slot changes"
+        );
+        assert!(
+            app.world().resource::<HandAnim>().playing(),
+            "and the hand switches"
+        );
     }
 
     #[test]

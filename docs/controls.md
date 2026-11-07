@@ -99,7 +99,10 @@ the tool's verbs and Edits are inert; undo and redo stay live. One Use per
 press, never repeated while held, and a Use never enters the undo journal. A
 refusal raises the usual alert; success raises none. A tool is never stored in a
 slot or saved. With no tool held and a food Item in the selected Hotbar slot,
-Use eats one and refills hunger by its food value, refused when hunger is full.
+Use eats one: a second of rising and three bites, the first spending the Item
+and each refilling a third of its food value, in the first-person arm and the
+avatar's alike. Changing the selected slot or dying stops the meal, and Use is
+refused when hunger is full.
 
 **Repeat while held** is a Behavior preference, off by default. With it on, a
 held Remove starts a fresh timed removal on the next target after each one
