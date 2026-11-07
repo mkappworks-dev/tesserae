@@ -1,6 +1,6 @@
 # 04: Volume settings
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 02
 
@@ -12,11 +12,11 @@ to every sound, including those already playing. The Settings page that sets the
 
 ## Acceptance criteria
 
-- [ ] The four values round-trip through the profile; a profile without them
+- [x] The four values round-trip through the profile; a profile without them
       loads the defaults.
-- [ ] Core gain is Master × Sound category × Sound volume × attenuation, each
+- [x] Core gain is Master × Sound category × Sound volume × attenuation, each
       setting mapped from 0–100; tested at 0, 50 and 100.
-- [ ] Changing a value recomputes every playing sink's volume the same frame;
+- [x] Changing a value recomputes every playing sink's volume the same frame;
       Bevy's `GlobalVolume` stays at 1.
-- [ ] Volumes are a user preference, never World state or saved with a World.
-- [ ] Tests at the core audio and profile seams.
+- [x] Volumes are a user preference, never World state or saved with a World.
+- [x] Tests at the core audio and profile seams.
