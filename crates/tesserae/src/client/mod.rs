@@ -41,6 +41,7 @@ mod pad;
 mod palette;
 mod pick;
 mod pickup;
+mod place_settle;
 mod pose;
 pub(crate) mod presentation;
 mod preview;
@@ -105,7 +106,7 @@ pub fn plugin(app: &mut App) {
         history::plugin,
         avatar::plugin,
     ));
-    app.add_plugins((hand_anim::plugin, hand_fx::plugin));
+    app.add_plugins((hand_anim::plugin, hand_fx::plugin, place_settle::plugin));
     app.add_plugins((
         view::plugin,
         loading::plugin,

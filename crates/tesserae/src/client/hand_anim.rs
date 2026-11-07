@@ -221,13 +221,18 @@ fn confirm(
     anim.set_mining(progress.is_some_and(|p| p.active()));
 }
 
+/// Whether the Player asked for stillness; what moves on screen checks this.
+pub(super) fn still(preferences: &Option<Res<Preferences>>) -> bool {
+    preferences.as_ref().is_some_and(|p| p.reduced_motion)
+}
+
 fn animate(
     mut anim: ResMut<HandAnim>,
     preferences: Option<Res<Preferences>>,
     time: Res<Time>,
     mut hand: Query<(&mut Transform, &HandRest), With<Hand>>,
 ) {
-    let still = preferences.is_some_and(|p| p.reduced_motion);
+    let still = still(&preferences);
     if anim.playing() {
         anim.tick(time.delta_secs());
     }
