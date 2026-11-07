@@ -40,3 +40,29 @@ version number is enough while the algorithm for version 1 stays in the code.
 
 The fixed noise octaves and the border warp are part of version 2's layout.
 Changing them later needs version 3.
+
+## Surface features
+
+Amended 2026-11-05, from the phase 15 spec's ticket 21. A Biome also owns its
+surface features: at most four solid Materials, each with a mean spacing from 4
+to 1024 metres, that generation stands one Voxel above the Biome's surface
+Material. A column's draw is a hash of the folded seed and its position in
+metres, and each feature's chance is the square of Voxel size over spacing, so
+the density is the same at any Voxel size. A feature stands only where the
+column's top is a full cube of the Biome's surface Material and the cell above
+is still air after lakes and smoothing, with its floor inside the global surface
+bound: never under a fluid, on a stair or slab, or in a cave mouth. So it never
+moves the surface the streaming band and open-sky relight depend on.
+
+- **Pinned with the snapshot.** Features ride in the World's Biome table like
+  the ground and the colours. A World saved before a Game declared one keeps its
+  bare ground; only new Worlds get them.
+- **No new Generator version.** A Biome without features runs no pass, so a
+  version 2 World that has none generates exactly as before; tests pin digests
+  recorded before features existed.
+- **Level 0 only.** The coarse-level sources generate without them, because two
+  features in one octant could win a coarse Voxel's vote
+  ([ADR-0011](0011-coarse-levels-are-derived.md)). A Chunk a player changed
+  keeps the features it held and downsamples like any other Edit.
+- **Mods still place no terrain.** The Engine places what the declaration says;
+  removing a feature drops its Item like any Voxel.

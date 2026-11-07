@@ -47,12 +47,12 @@ Materials and Shapes.
 
 **World** — one save. Owns its Voxel size, its seed and its Chunks.
 
-**World list** — the first screen of a launch: every World folder, before any
-Game runs. Not a "menu" (the in-World catalogue and settings).
+**World list** — the launcher's list of every World folder, reached from the
+title screen before any Game runs. Not the Menu, which opens inside a World.
 
-**World session** — one opening of a World, from loading to Return to World
-list. The window and the app outlive it; everything it added to the ECS, its
-jobs and its Mod instances do not.
+**World session** — one opening of a World, from loading to Return to Worlds.
+The window and the app outlive it; everything it added to the ECS, its jobs and
+its Mod instances do not.
 
 **Voxel** — the atomic unit of world volume. Not "block", not "node".
 
@@ -160,8 +160,12 @@ function of the seed and a position in metres. They choose the Biome; they are
 not a Biome.
 
 **Biome** — a region type a Game or Mod declares and Climate selects. It owns
-the ground Materials, ores, cave tuning and the sky and fog colours of the
-columns it covers.
+the ground Materials, surface features, ores, cave tuning and the sky and fog
+colours of the columns it covers.
+
+**Surface feature** — a Material a Biome declares and world generation stands
+one Voxel above that Biome's full surface Voxels, from the seed, at a mean
+spacing in metres. Level 0 only; a Mod still places no terrain.
 
 **Generator version** — the revision of the world generation algorithm a World
 was created under. A World keeps it for life, so a later revision never changes
@@ -195,7 +199,8 @@ metres. Drawn terrain shortens it; nothing lengthens an Edit's reach along it.
 **Edit** — a change to one Voxel, its solid or its source, applied by the
 Server. A Client sends an intent; it never makes an Edit.
 
-**Use** — a Player pressing a held Tool's action. Answered by the Server, never
+**Use** — a Player pressing a held Tool's action, or, with no Tool in hand,
+eating the food in the selected Hotbar slot. Answered by the Server, never
 applied: it changes no Voxel and enters no history. Not an Edit, not Sample, and
 not Pickup.
 
@@ -205,7 +210,8 @@ Catalogue: while one is held, Place and Remove are its verbs instead of Edits.
 
 **Item** — a thing a Game or Mod declares by name, with a size in metres. Not a
 Voxel and not a Tool. A Material may be tied to one Item: removing a Voxel of it
-drops that Item.
+drops that Item. A placeable Material no declared Item is tied to has an
+implicit Item of its own name.
 
 **Entity** — a Server-owned thing with a position in metres that is not a Voxel,
 fluid or Player. Not a Bevy `Entity`.
@@ -213,11 +219,29 @@ fluid or Player. Not a Bevy `Entity`.
 **Dropped item** — an Entity holding a count of one Item, falling or at rest,
 until picked up or despawned.
 
-**Carried** — how many of each Item a Player holds after Pickup. Not an
-inventory: it has no slots and no limits.
+**Inventory** — the Server-owned Stacks a Player holds: a 27-slot backpack and a
+9-slot Hotbar. Replaces Carried.
 
-**Pickup** — a Dropped item entering a Player's Carried, by nearness. Distinct
+**Stack** — one Item and a count, at most the Item's stack limit. Shape and
+Orientation are the Player's placement choice, not part of a Stack.
+
+**Hotbar** — the nine Inventory slots usable in play; one is selected.
+
+**Catalogue** — the Creative-only list of Materials a Player can take Items
+from. Not the Inventory and not ownership.
+
+**Carried** — retired: what a Player held after Pickup before the Inventory. Use
+Inventory.
+
+**Pickup** — a Dropped item entering a Player's Inventory, by nearness. Distinct
 from Use and from Sample, which copies what is aimed at into the hand.
+
+**Game mode** — Creative or Survival. A World has a default; each Player has
+their own. Both spend an Item per placed Voxel and drop one per removed Voxel;
+Creative's Catalogue gives Items, and only Survival has damage, hunger and
+death.
+
+**Vitals** — a Player's health, hunger and air.
 
 **Measurement** — two corners a Tool's Use resolved, kept by the Client for the
 session. A corner is a vertex of the struck face of a Voxel's drawn Shape.
@@ -260,7 +284,8 @@ one fluid Material.
 
 **Source** — fluid that stays: generated lake fluid, and fluid a player or a Mod
 places. It feeds flow without losing volume, and only an Edit, a Command or a
-reaction removes it. Flow never becomes one.
+reaction removes it. Flow never becomes one. Removing one drops its Item; no
+Edit aims at flow, so it drops nothing.
 
 **Flowing** — fluid a source supports, carrying its remaining reach and its
 descent since the reach was last renewed. It recedes when nothing supports it.

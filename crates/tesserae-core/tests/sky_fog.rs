@@ -24,6 +24,7 @@ fn biome(name: &str, temperature: f32, humidity: f32, sky_fog: Option<SkyFog>) -
         ground: None,
         sky_fog,
         cave_scale: None,
+        surface_features: Default::default(),
     }
 }
 

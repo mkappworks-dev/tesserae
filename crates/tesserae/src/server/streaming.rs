@@ -576,6 +576,7 @@ pub(super) fn plugin(app: &mut App) {
     #[cfg(any(feature = "dev", feature = "profiling"))]
     app.add_session_systems(FixedFirst, crate::cost::tick_started)
         .add_session_systems(FixedLast, crate::cost::tick_ended);
+    app.add_plugins(readout::plugin);
     #[cfg(any(feature = "dev", feature = "profiling"))]
     app.add_plugins(stats::plugin);
 }
@@ -1150,14 +1151,55 @@ fn dispatch_meshes(
     }
 }
 
-/// A summary of what the Server is holding, for the `dev` overlay.
+/// The three counts the F3 readout shows, published in every build.
 ///
-/// `dev` only, because a shipped build should not put engine internals on
-/// screen — and because the alternative is a resource nothing reads. It exists
-/// so the Client can show streaming working while reading a published summary
-/// rather than the Chunk store itself; the invariant in
-/// `docs/adr/0002-client-server-from-day-one.md` is that the Client has no
-/// access to World state, and a count is not a window onto it.
+/// Read from lengths and the Eye, so publishing costs a few nanoseconds a tick;
+/// the full [`stats`] walk the load order and stay `dev` and `profiling` only.
+/// The Client reads this instead of the Chunk store
+/// (`docs/adr/0002-client-server-from-day-one.md`); a count is not a window onto it.
+pub mod readout {
+    use super::*;
+
+    #[derive(Resource, Default, Clone, Debug, PartialEq, Eq)]
+    pub struct StreamingReadout {
+        /// Chunks the Server holds, including the margin the Client never sees.
+        pub loaded: usize,
+        /// Chunks the Server has sent the Client a mesh for. Not the number
+        /// drawn: most of a 3D ring is sky, and an empty mesh is a despawn.
+        pub meshed: usize,
+        /// The Chunk the Eye is in.
+        pub anchor: ChunkCoord,
+    }
+
+    pub(super) fn plugin(app: &mut App) {
+        app.init_session_resource::<StreamingReadout>()
+            .add_session_systems(FixedPostUpdate, publish);
+    }
+
+    pub(super) fn publish(
+        mut readout: ResMut<StreamingReadout>,
+        store: Res<ChunkStore>,
+        meshes: Res<MeshState>,
+        world: Res<WorldSettings>,
+        player: Query<&Player>,
+    ) {
+        let next = StreamingReadout {
+            loaded: store.len(),
+            meshed: meshes.delivered.len(),
+            anchor: player
+                .single()
+                .map(|player| world.chunk_at(player.eye()))
+                .unwrap_or_default(),
+        };
+        readout.set_if_neq(next);
+    }
+}
+
+/// A summary of everything the Server is streaming, for the `dev` and
+/// `profiling` builds.
+///
+/// The F3 readout needs only [`readout`]; this walks the load order and the
+/// coarse levels every tick, which a shipped build should not pay for.
 #[cfg(any(feature = "dev", feature = "profiling"))]
 pub mod stats {
     use super::*;
@@ -2705,6 +2747,31 @@ pub(in crate::server) mod tests {
             h.app.world().resource::<WorldSettings>(),
         );
         assert_lit_like(&h, &expected);
+    }
+
+    #[test]
+    fn the_readout_counts_what_the_server_holds_in_every_build() {
+        let mut h = Harness::new(small(), UNLIMITED);
+        h.app.init_resource::<readout::StreamingReadout>();
+        h.settle();
+        h.app
+            .world_mut()
+            .run_system_once(readout::publish)
+            .expect("the readout ran");
+
+        let readout = h
+            .app
+            .world()
+            .resource::<readout::StreamingReadout>()
+            .clone();
+        let held = h.store().coords().count();
+        assert!(held > 0);
+        assert_eq!(readout.loaded, held);
+        assert_eq!(
+            readout.meshed,
+            h.app.world().resource::<MeshState>().delivered.len()
+        );
+        assert!(readout.meshed > 0, "nothing was sent to the Client");
     }
 
     #[cfg(any(feature = "dev", feature = "profiling"))]

@@ -20,6 +20,7 @@ cargo fmt --all --check
 for game in terra meadow; do
   cargo fmt --manifest-path "games/$game/Cargo.toml" --check
 done
+cargo fmt --manifest-path crates/demo-kit/Cargo.toml --check
 
 step "Format: prettier"
 npm run fmt:check --silent

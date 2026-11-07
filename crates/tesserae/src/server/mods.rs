@@ -118,6 +118,8 @@ pub struct LoadedMods {
     pub tools: Vec<tesserae_mods::ToolDef>,
     pub items: Vec<tesserae_mods::ItemDef>,
     pub required: Vec<tesserae_core::save::RequiredMod>,
+    pub survival: Option<tesserae_core::SurvivalRules>,
+    pub contact_damage: Vec<(MaterialId, f32)>,
 }
 
 impl Default for LoadedMods {
@@ -137,7 +139,31 @@ impl Default for LoadedMods {
             tools: Vec::new(),
             items: Vec::new(),
             required: Vec::new(),
+            survival: None,
+            contact_damage: Vec::new(),
         }
+    }
+}
+
+impl LoadedMods {
+    /// The declared Items and an implicit one for each placeable Material none
+    /// places, in the order a Dropped item's id indexes.
+    pub(super) fn every_item(&self, voxel_size: f32) -> super::items::Items {
+        let colour = |id| {
+            self.appearance
+                .iter()
+                .find(|&&(material, _)| material == id)
+                .map_or([128, 128, 128, 255], |&(_, c)| c)
+        };
+        let placeable = self
+            .registry
+            .names(Kind::Material)
+            .map(|(id, name)| (id as MaterialId, name))
+            .filter(|&(id, _)| {
+                self.tables.materials.def(id).solid || self.tables.fluids.rank(id).is_some()
+            })
+            .map(|(id, name)| (id, name, colour(id)));
+        super::items::Items::with_implicit(self.items.clone(), placeable, voxel_size)
     }
 }
 
@@ -352,6 +378,64 @@ pub(crate) fn load(
     })
 }
 
+/// What a World made from `found` would declare about its Biomes, read by the
+/// declaration pass alone: no instance starts and nothing is saved. Trust
+/// applies as when opening; `check_trust` off trusts them for this read only.
+pub(crate) fn preview(
+    found: Vec<tesserae_mods::Found>,
+    trust_file: &Path,
+    check_trust: bool,
+) -> Result<crate::launch::BiomePreview, String> {
+    use tesserae_core::biome_edits::{BiomeChoice, GroundNames};
+    let plan = plan(found).map_err(|e| e.to_string())?;
+    let mut trust = Trust::load(trust_file);
+    if !check_trust {
+        for found in &plan {
+            trust.grant_for_run(found).map_err(|e| e.to_string())?;
+        }
+    }
+    let host = ModHost::new().map_err(|e| e.to_string())?;
+    let compiled = host.load(plan, &trust).map_err(|e| e.to_string())?;
+    let loaded = bevy::tasks::block_on(declare_all(&host, &compiled, &WorldSettings::default()))?;
+    let params = super::worldgen_params(loaded.world);
+    let name = |id: MaterialId| {
+        loaded
+            .registry
+            .names(Kind::Material)
+            .find(|(at, _)| *at == id as usize)
+            .map_or_else(String::new, |(_, name)| name.to_owned())
+    };
+    let ground = |g: tesserae_core::GroundParams| GroundNames {
+        rock: name(g.rock),
+        soil: name(g.soil),
+        surface: name(g.surface),
+    };
+    Ok(crate::launch::BiomePreview {
+        biomes: params
+            .biomes
+            .as_slice()
+            .iter()
+            .map(|b| BiomeChoice {
+                name: b.name.as_str().to_owned(),
+                enabled: true,
+                temperature: b.temperature,
+                humidity: b.humidity,
+                cave_scale: b.cave_scale,
+                ground: b.ground.map(ground),
+                sky_fog: b.sky_fog,
+            })
+            .collect(),
+        climate: params.climate,
+        ground: params.ground.map(ground),
+        materials: loaded
+            .registry
+            .names(Kind::Material)
+            .filter(|(id, _)| loaded.tables.materials.def(*id as MaterialId).solid)
+            .map(|(_, name)| name.to_owned())
+            .collect(),
+    })
+}
+
 /// Saves `loaded` as a first commit at `path`, as a World created from it would be.
 #[cfg(test)]
 pub(crate) fn save_world(loaded: &LoadedMods, path: &Path) {
@@ -378,6 +462,7 @@ pub(crate) fn save_world(loaded: &LoadedMods, path: &Path) {
             .0,
         paused: vec![],
         entities: Default::default(),
+        game_mode: Default::default(),
     };
     Writer::acquire(path, &id, &content)
         .unwrap()
@@ -468,6 +553,7 @@ pub(crate) async fn declare_all(
         )
         .map_err(|e| e.to_string())?;
         loaded.remove_times.extend(applied.remove_times);
+        loaded.contact_damage.extend(applied.contact_damage);
         behaviours.push(applied.behaviour);
         for row in applied.appearance {
             if let Some(index) = loaded
@@ -489,6 +575,7 @@ pub(crate) async fn declare_all(
             loaded.game = true;
             loaded.movement = applied.movement;
             loaded.tools = applied.tools;
+            loaded.survival = applied.survival;
         }
         if let Some(character) = applied.character {
             if let Some(first) = &character_from {
@@ -623,6 +710,7 @@ pub(super) fn plugin(app: &mut App) {
         .add_session_message::<CharacterModel>()
         .add_session_message::<MaterialPalette>()
         .add_session_message::<ContentCatalogue>()
+        .add_session_message::<crate::content::WorldFacts>()
         .on_session_start(install)
         .add_session_systems(SessionTeardown, release_mods);
 }
@@ -635,6 +723,10 @@ fn release_mods(world: &mut World) {
 
 fn install(world: &mut World) {
     let loaded = world.remove_non_send::<LoadedMods>().unwrap_or_default();
+    let voxel_size = world
+        .get_resource::<WorldSettings>()
+        .map_or(WorldSettings::default().voxel_size, |w| w.voxel_size);
+    let items = loaded.every_item(voxel_size);
     let tables = super::ContentTables::from_loaded(loaded.tables, loaded.game);
     let reopened = world
         .get_resource::<super::persistence::Persistence>()
@@ -683,22 +775,72 @@ fn install(world: &mut World) {
     }
     world.insert_resource(tables);
     world.insert_resource(super::tool::Tools(loaded.tools));
+    world.insert_resource(
+        super::survival::Survival::new(loaded.survival.unwrap_or_default(), loaded.contact_damage)
+            .named(|id| {
+                catalogue
+                    .materials
+                    .iter()
+                    .find(|m| m.id == id)
+                    .map(|m| m.name.clone())
+            }),
+    );
     world.write_message(crate::content::ItemLooks(
-        loaded
-            .items
+        items
+            .0
             .iter()
             .map(|item| crate::content::ItemLook {
                 name: item.name.clone(),
                 size_m: item.size_m,
                 color: item.color,
                 material: item.material,
+                max_stack: item.max_stack,
             })
             .collect(),
     ));
-    world.insert_resource(super::items::Items(loaded.items));
+    world.insert_resource(super::items::PlacingItems::new(
+        catalogue
+            .materials
+            .iter()
+            .map(|m| (m.id, m.name.as_str(), m.fluid.is_some() || m.solid)),
+        &items,
+    ));
+    world.insert_resource(items);
     world.insert_resource(WorldParameters(params));
     world.insert_resource(super::streaming::streaming_settings(loaded.view));
     world.insert_resource(runtime::ModJobs::new(loaded.registry, loaded.mods));
+    let (name, default_mode) = world
+        .get_resource::<super::persistence::Persistence>()
+        .map(|p| (p.name().map(str::to_owned), p.default_mode()))
+        .unwrap_or_default();
+    let settings = world
+        .get_resource::<WorldSettings>()
+        .copied()
+        .unwrap_or_default();
+    let generation = &world.resource::<WorldParameters>().0;
+    let (generator, climate) = (generation.generator, generation.climate);
+    world.write_message(crate::content::WorldFacts {
+        name,
+        game: loaded
+            .required
+            .iter()
+            .find(|m| m.game)
+            .map(|m| (m.id.clone(), m.version.clone())),
+        voxel_size_m: settings.voxel_size,
+        seed: settings.seed,
+        biomes: world
+            .resource::<WorldParameters>()
+            .0
+            .biomes
+            .as_slice()
+            .iter()
+            .map(|b| b.name.as_str().to_owned())
+            .collect(),
+        default_mode,
+        generator,
+        temperature_size_m: climate.temperature_size_m,
+        humidity_size_m: climate.humidity_size_m,
+    });
     world.write_message(MaterialPalette(loaded.appearance));
     world.write_message(MaterialTextures(loaded.textures));
     world.write_message(CharacterModel(loaded.character.map(std::sync::Arc::new)));
@@ -1133,6 +1275,81 @@ biomes = ["plain:dry"]
     }
 
     #[test]
+    fn the_session_reports_the_world_s_facts_for_the_menu() {
+        let s = Scratch::new();
+        let game =
+            format!("{DATA_GAME}\n[[biomes]]\nname = \"dry\"\ntemperature = 0.8\nhumidity = 0.1\n");
+        data(&s, "plain", true, "depends = ['base']", &game);
+        data(&s, "base", false, "", WET);
+        let loaded = s.load(TrustMode::All).unwrap();
+        let mut app = App::new();
+        app.insert_non_send(loaded)
+            .insert_resource(WorldSettings {
+                seed: 123,
+                voxel_size: 0.5,
+            })
+            .add_plugins(plugin)
+            .add_systems(Startup, super::super::open_world);
+        let facts = app
+            .world_mut()
+            .resource_mut::<Messages<crate::content::WorldFacts>>()
+            .drain()
+            .next()
+            .expect("the facts are sent at session start");
+        assert_eq!(
+            facts,
+            crate::content::WorldFacts {
+                name: None,
+                game: Some(("plain".into(), "0.1.0".into())),
+                voxel_size_m: 0.5,
+                seed: 123,
+                biomes: vec!["base:wet".into(), "plain:dry".into()],
+                default_mode: crate::server::game_mode::GameMode::Creative,
+                generator: tesserae_core::save::GENERATOR_VERSION,
+                temperature_size_m: tesserae_core::climate::ClimateParams::default()
+                    .temperature_size_m,
+                humidity_size_m: tesserae_core::climate::ClimateParams::default().humidity_size_m,
+            }
+        );
+    }
+
+    #[test]
+    fn the_facts_carry_the_games_climate_sizes_and_the_worlds_generator() {
+        let s = Scratch::new();
+        let game = format!(
+            "{DATA_GAME}\n[world.climate]\ntemperature-size-m = 300.0\nhumidity-size-m = 700.0\n\
+             [[biomes]]\nname = \"dry\"\ntemperature = 0.8\nhumidity = 0.1\n"
+        );
+        data(&s, "plain", true, "depends = ['base']", &game);
+        data(&s, "base", false, "", WET);
+        let mut loaded = s.load(TrustMode::All).unwrap();
+        // A World made before the current generator keeps its own version.
+        loaded.world.as_mut().unwrap().generator = 1;
+        let mut app = App::new();
+        app.insert_non_send(loaded)
+            .insert_resource(WorldSettings {
+                seed: 1,
+                voxel_size: 0.5,
+            })
+            .add_plugins(plugin)
+            .add_systems(Startup, super::super::open_world);
+        let facts = app
+            .world_mut()
+            .resource_mut::<Messages<crate::content::WorldFacts>>()
+            .drain()
+            .next()
+            .expect("the facts are sent at session start");
+        assert_eq!(
+            (
+                facts.generator,
+                facts.temperature_size_m,
+                facts.humidity_size_m
+            ),
+            (1, 300.0, 700.0)
+        );
+    }
+
+    #[test]
     fn a_mod_may_add_biomes_to_a_game_that_declares_no_world() {
         let s = Scratch::new();
         data(&s, "plain", true, "depends = ['base']", "");
@@ -1281,6 +1498,7 @@ biomes = ["plain:dry"]
                     .0,
                 paused: vec![],
                 entities: Default::default(),
+                game_mode: Default::default(),
             };
             Writer::acquire(&path, &id, &content)
                 .unwrap()
@@ -1792,6 +2010,33 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
     }
 
     #[test]
+    fn the_games_survival_rules_and_harmful_materials_are_installed() {
+        let installed = |loaded: LoadedMods| {
+            let mut app = App::new();
+            app.insert_non_send(loaded).add_plugins(plugin);
+            app.world()
+                .resource::<super::super::survival::Survival>()
+                .clone()
+        };
+        let rules = tesserae_core::SurvivalRules {
+            max_health: 40.0,
+            keep_inventory: true,
+            ..Default::default()
+        };
+        let survival = installed(LoadedMods {
+            survival: Some(rules),
+            contact_damage: vec![(9, 4.0)],
+            ..LoadedMods::default()
+        });
+        assert_eq!(survival.rules, rules);
+        assert_eq!(survival.contact_damage_per_s(9), 4.0);
+        assert_eq!(survival.contact_damage_per_s(8), 0.0);
+        assert_eq!(survival.contact_damage_per_s(200), 0.0);
+        let defaults = installed(LoadedMods::default());
+        assert_eq!(defaults.rules, tesserae_core::SurvivalRules::default());
+    }
+
+    #[test]
     fn the_catalogue_lists_the_games_tools_in_declared_order() {
         let catalogue = published_catalogue(super::runtime::tests::terra_loaded(1.0));
         assert_eq!(
@@ -1849,7 +2094,7 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
         );
         assert!(!turnable.iter().any(|(name, _)| name.starts_with("dev:")));
         let ids: Vec<_> = catalogue.materials.iter().map(|m| m.id).collect();
-        assert_eq!(ids, std::iter::once(0).chain(8..23).collect::<Vec<_>>());
+        assert_eq!(ids, std::iter::once(0).chain(8..24).collect::<Vec<_>>());
     }
 
     #[test]
@@ -1869,7 +2114,7 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
             .drain()
             .next()
             .unwrap();
-        assert_eq!(textures.0.len(), 15);
+        assert_eq!(textures.0.len(), 16);
         for material in catalogue.materials.iter().filter(|m| m.id != 0) {
             let (_, pixels) = textures
                 .0

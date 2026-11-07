@@ -1,7 +1,14 @@
 use super::*;
+use crate::server::death::Death;
+use crate::server::game_mode::PlayerMode;
+use crate::server::inventory::Inventory;
+use crate::server::vitals::Vitals;
 use crate::server::{ContentTables, edit, streaming::MeshState, undo::Journal};
 use bevy::ecs::message::Messages;
+use bevy::ecs::system::EntityCommands;
 use std::time::{Duration, Instant};
+use tesserae_core::biome_edits::{BiomeChoice, BiomeEdits, GroundNames};
+use tesserae_core::save::{GameMode, GameModeV1};
 use tesserae_core::{Burning, Chunk, Fluid, Occupants, Voxel, WorldgenParams};
 use tesserae_mods::Kind;
 
@@ -59,9 +66,12 @@ impl Rig {
             size_m: 0.25,
             color: [1, 2, 3, 255],
             material: None,
+            max_stack: 64,
+            food: None,
         }];
-        let items = Items(loaded.items.clone());
+        let items = loaded.every_item(settings.voxel_size);
         let p = Persistence::prepare(opening, &mut loaded, settings).unwrap();
+        let mode = PlayerMode(p.player_mode());
         let eye = p.reopened_eye.unwrap_or(Vec3::new(8.0, 4.0, 8.0));
         let restored_player = p
             .reopened_view
@@ -78,10 +88,13 @@ impl Rig {
             .init_resource::<Journal>()
             .insert_resource(items)
             .insert_resource(p)
-            .add_message::<edit::VoxelRemoved>()
-            .add_plugins((plugin, super::super::entities::plugin))
+            .add_plugins((
+                plugin,
+                super::super::entities::plugin,
+                super::super::inventory::plugin,
+            ))
             .add_systems(FixedPreUpdate, super::super::fluids::simulate);
-        app.world_mut().spawn(restored_player);
+        app.world_mut().spawn((restored_player, mode));
         app.world_mut().run_schedule(Update);
         Self {
             app,
@@ -459,6 +472,7 @@ fn real_terra_new_builds_but_reopened_guest_never_replays_construction() {
         simulation,
         paused: paused.into_iter().map(|(h, s)| (h, (*s).clone())).collect(),
         entities: Default::default(),
+        game_mode: Default::default(),
     };
     Writer::acquire(&dir.0, &opening.id, &content)
         .unwrap()
@@ -651,7 +665,113 @@ fn details(name: &str, seed: u64, voxel_size_m: f32) -> library::Sidecar {
         last_played_unix_s: 1,
         world: WorldId::new(),
         pending: true,
+        game_mode: GameMode::Creative,
+        biomes: None,
+        player_mode: None,
+        mode_changes: Default::default(),
     }
+}
+
+fn player_mode(rig: &mut Rig) -> GameMode {
+    rig.app
+        .world_mut()
+        .query::<&PlayerMode>()
+        .single(rig.app.world())
+        .unwrap()
+        .0
+}
+
+fn rewrite(dir: &std::path::Path, change: impl FnOnce(&mut Commit)) {
+    let mut commit = save::inspect(dir).unwrap().unwrap().commit;
+    change(&mut commit);
+    commit.sequence += 1;
+    Writer::acquire(dir, &commit.world, &commit.content)
+        .unwrap()
+        .write(&commit)
+        .unwrap();
+}
+
+fn survival_world(worlds: &Directory) -> PathBuf {
+    let created = library::Sidecar {
+        game_mode: GameMode::Survival,
+        ..details("Hard", 7, 1.0)
+    };
+    library::create(&worlds.0, &created).unwrap()
+}
+
+fn reopen(path: &std::path::Path) -> Rig {
+    let opening = Opening::from_folder(path).unwrap();
+    let settings = opening.settings(WorldSettings::default());
+    Rig::open(opening, settings)
+}
+
+#[test]
+fn a_survival_world_starts_its_player_in_survival_and_both_survive_save_and_reopen() {
+    let worlds = Directory::new();
+    let path = survival_world(&worlds);
+    let mut rig = reopen(&path);
+    assert_eq!(player_mode(&mut rig), GameMode::Survival);
+    rig.settled_save();
+    drop(rig);
+    let commit = save::inspect(&path).unwrap().unwrap().commit;
+    assert_eq!(commit.game_mode, GameMode::Survival);
+    assert_eq!(
+        commit.player.get::<GameModeV1>().unwrap(),
+        Some(GameModeV1(GameMode::Survival))
+    );
+    let mut reopened = reopen(&path);
+    assert_eq!(player_mode(&mut reopened), GameMode::Survival);
+    assert_eq!(
+        library::read(&path).unwrap().unwrap().game_mode,
+        GameMode::Survival,
+        "the World list shows the saved default"
+    );
+}
+
+#[test]
+fn a_players_own_mode_outlives_the_worlds_default() {
+    let dir = Directory::new();
+    let mut rig = Rig::new(&dir);
+    assert_eq!(player_mode(&mut rig), GameMode::Creative);
+    rig.settled_save();
+    let player = rig
+        .app
+        .world_mut()
+        .query_filtered::<Entity, With<Player>>()
+        .single(rig.app.world())
+        .unwrap();
+    rig.app
+        .world_mut()
+        .entity_mut(player)
+        .insert(PlayerMode(GameMode::Survival));
+    rig.tick();
+    assert!(rig.app.world().resource::<SaveStatus>().dirty);
+    rig.settled_save();
+    drop(rig);
+    assert_eq!(
+        save::inspect(&dir.0).unwrap().unwrap().commit.game_mode,
+        GameMode::Creative
+    );
+    assert_eq!(player_mode(&mut Rig::new(&dir)), GameMode::Survival);
+}
+
+#[test]
+fn a_save_without_a_players_mode_starts_them_in_the_worlds_default() {
+    let worlds = Directory::new();
+    let path = survival_world(&worlds);
+    reopen(&path).settled_save();
+    rewrite(&path, |c| {
+        c.player
+            .extensions
+            .remove(<GameModeV1 as save::PlayerExtension>::KEY);
+    });
+    assert_eq!(player_mode(&mut reopen(&path)), GameMode::Survival);
+    rewrite(&path, |c| c.game_mode = GameMode::Creative);
+    assert_eq!(
+        player_mode(&mut reopen(&path)),
+        GameMode::Creative,
+        "the save wins over the World list"
+    );
 }
 
 #[test]
@@ -840,7 +960,7 @@ fn the_writer_lock_is_free_as_soon_as_the_session_ends() {
 }
 
 #[test]
-fn dropped_items_and_carried_survive_save_and_reopen() {
+fn dropped_items_and_the_inventory_survive_save_and_reopen() {
     use tesserae_core::entity::DropSpec;
     let dir = Directory::new();
     let mut rig = Rig::new(&dir);
@@ -857,18 +977,16 @@ fn dropped_items_and_carried_survive_save_and_reopen() {
             };
             // Two on the cavity floor, further apart than the merge radius. A
             // drop saved mid-fall is covered where the record is built.
-            entities.spawn_drop(store, &tables.0, 1.0, [4, 3, 4], spec);
-            entities.spawn_drop(store, &tables.0, 1.0, [9, 3, 9], spec);
+            entities.spawn_drop(&tables.terrain(store, 1.0), [4, 3, 4], spec);
+            entities.spawn_drop(&tables.terrain(store, 1.0), [9, 3, 9], spec);
             for _ in 0..200 {
-                entities.step(store, &tables.0, 1.0);
+                entities.step(&tables.terrain(store, 1.0));
             }
         });
-    let mut carried = rig.app.world_mut().query::<&mut Carried>();
-    carried
-        .single_mut(rig.app.world_mut())
+    let mut held = rig.app.world_mut().query::<&mut Inventory>();
+    held.single_mut(rig.app.world_mut())
         .unwrap()
-        .0
-        .insert("terra:rock".into(), 7);
+        .receive("terra:rock", 7, 64);
     let before: Vec<_> = rig
         .app
         .world()
@@ -883,7 +1001,8 @@ fn dropped_items_and_carried_survive_save_and_reopen() {
 
     let commit = save::inspect(&dir.0).unwrap().unwrap().commit;
     assert_eq!(commit.entities.dropped.len(), 2);
-    assert_eq!(commit.player.carried().unwrap()["terra:rock"], 7);
+    let saved = commit.player.get::<save::InventoryV1>().unwrap().unwrap().0;
+    assert_eq!(saved.hotbar()[0].as_ref().unwrap().count, 7);
 
     let reopened = Rig::new(&dir);
     let after: Vec<_> = reopened
@@ -909,17 +1028,363 @@ fn dropped_items_and_carried_survive_save_and_reopen() {
             .zip(&before)
             .all(|(a, b)| a.1.steps_left <= b.1.steps_left)
     );
-    let mut q = reopened
+    assert_eq!(inventory(&reopened), saved);
+}
+
+#[test]
+fn an_inventory_arranged_by_intents_survives_save_and_reopen() {
+    use crate::server::inventory::InventoryIntent;
+    use tesserae_core::inventory::Slot;
+    let dir = Directory::new();
+    let mut rig = Rig::new(&dir);
+    rig.insert();
+    // The first save is under way before any intent, so the settled save
+    // below is the one that holds them.
+    rig.settled_save();
+    let mut held = rig.app.world_mut().query::<&mut Inventory>();
+    let mut player = held.single_mut(rig.app.world_mut()).unwrap();
+    player.receive("terra:rock", 64 + 9, 64);
+    player.receive("terra:dirt", 3, 64);
+    for intent in [
+        InventoryIntent::Move {
+            from: Slot::Hotbar(0),
+            to: Slot::Backpack(4),
+        },
+        InventoryIntent::Split(Slot::Hotbar(1)),
+        InventoryIntent::QuickTransfer(Slot::Hotbar(2)),
+        InventoryIntent::Sort,
+    ] {
+        rig.app.world_mut().write_message(intent);
+        rig.tick();
+    }
+    let arranged = inventory(&rig);
+    let rock = |count| {
+        Some(tesserae_core::inventory::Stack {
+            item: "terra:rock".into(),
+            count,
+        })
+    };
+    assert_eq!(arranged.hotbar()[1], rock(5), "split");
+    assert_eq!(
+        arranged.backpack()[..4]
+            .iter()
+            .map(|s| s.as_ref().map(|s| (s.item.as_str(), s.count)))
+            .collect::<Vec<_>>(),
+        [
+            Some(("terra:dirt", 3)),
+            Some(("terra:rock", 64)),
+            Some(("terra:rock", 4)),
+            None
+        ],
+        "moved, transferred and sorted"
+    );
+    rig.settled_save();
+    drop(rig);
+    assert_eq!(inventory(&Rig::new(&dir)), arranged);
+}
+
+fn vitals(rig: &Rig) -> Vitals {
+    let mut q = rig.app.world().try_query::<&Vitals>().unwrap();
+    *q.single(rig.app.world()).unwrap()
+}
+
+#[test]
+fn vitals_survive_save_and_reopen() {
+    let dir = Directory::new();
+    let mut rig = Rig::new(&dir);
+    rig.settled_save();
+    let hurt = Vitals {
+        health: 7.5,
+        hunger: 19.0,
+        air_s: 4.25,
+    };
+    let player = rig
+        .app
+        .world_mut()
+        .query_filtered::<Entity, With<Player>>()
+        .single(rig.app.world())
+        .unwrap();
+    rig.app.world_mut().entity_mut(player).insert(hurt);
+    rig.tick();
+    assert!(rig.app.world().resource::<SaveStatus>().dirty);
+    rig.settled_save();
+    drop(rig);
+    assert_eq!(
+        save::inspect(&dir.0)
+            .unwrap()
+            .unwrap()
+            .commit
+            .player
+            .get::<save::VitalsV1>()
+            .unwrap(),
+        Some(save::VitalsV1 {
+            health: 7.5,
+            hunger: 19.0,
+            air_s: 4.25,
+        })
+    );
+    assert_eq!(vitals(&Rig::new(&dir)), hurt);
+}
+
+fn death(rig: &Rig) -> Option<Death> {
+    let mut q = rig.app.world().try_query::<&Death>().unwrap();
+    q.iter(rig.app.world()).next().cloned()
+}
+
+#[test]
+fn quitting_while_dead_reopens_still_dead() {
+    let dir = Directory::new();
+    let mut rig = Rig::new(&dir);
+    rig.settled_save();
+    let died = Death {
+        cause: Some(save::DeathCause::Contact {
+            material: "terra:lava".into(),
+        }),
+        at_m: Vec3::new(12.5, 3.0, -4.25),
+        dropped: vec![tesserae_core::inventory::Stack {
+            item: "terra:rock".into(),
+            count: 40,
+        }],
+        drops: Vec::new(),
+        kept_inventory: false,
+    };
+    let player = rig
+        .app
+        .world_mut()
+        .query_filtered::<Entity, With<Player>>()
+        .single(rig.app.world())
+        .unwrap();
+    rig.app.world_mut().entity_mut(player).insert((
+        died.clone(),
+        Vitals {
+            health: 0.0,
+            ..Vitals::default()
+        },
+    ));
+    rig.tick();
+    assert!(rig.app.world().resource::<SaveStatus>().dirty);
+    rig.settled_save();
+    drop(rig);
+    let saved = save::inspect(&dir.0)
+        .unwrap()
+        .unwrap()
+        .commit
+        .player
+        .get::<save::DeathV1>()
+        .unwrap()
+        .expect("the death is saved");
+    assert_eq!(saved.at_m, [12.5, 3.0, -4.25]);
+    let reopened = Rig::new(&dir);
+    assert_eq!(death(&reopened), Some(died));
+    assert_eq!(vitals(&reopened).health, 0.0);
+}
+
+/// The death happened; a switch to Creative in Edit World does not undo it.
+#[test]
+fn a_survival_death_reopens_dead_after_edit_world_switches_the_player_to_creative() {
+    let worlds = Directory::new();
+    let path = survival_world(&worlds);
+    let mut rig = reopen(&path);
+    assert_eq!(player_mode(&mut rig), GameMode::Survival);
+    let died = Death {
+        cause: Some(save::DeathCause::Starvation),
+        at_m: Vec3::new(1.5, 2.0, 1.5),
+        dropped: Vec::new(),
+        drops: Vec::new(),
+        kept_inventory: false,
+    };
+    let player = rig
+        .app
+        .world_mut()
+        .query_filtered::<Entity, With<Player>>()
+        .single(rig.app.world())
+        .unwrap();
+    rig.app.world_mut().entity_mut(player).insert((
+        died.clone(),
+        Vitals {
+            health: 0.0,
+            ..Vitals::default()
+        },
+    ));
+    rig.tick();
+    rig.settled_save();
+    drop(rig);
+    library::request_modes(
+        &path,
+        library::ModeChanges {
+            default: None,
+            own: Some(GameMode::Creative),
+        },
+    )
+    .unwrap();
+
+    let mut reopened = reopen(&path);
+    assert_eq!(player_mode(&mut reopened), GameMode::Creative);
+    assert_eq!(death(&reopened), Some(died));
+    assert_eq!(vitals(&reopened).health, 0.0);
+}
+
+#[test]
+fn a_deaths_despawn_countdown_continues_after_save_and_reopen() {
+    use tesserae_core::entity::{DESPAWN_STEPS, DropSpec, STEP_S};
+    let dir = Directory::new();
+    let mut rig = Rig::new(&dir);
+    rig.insert();
+    let drops = rig
+        .app
+        .world_mut()
+        .resource_scope(|world, mut entities: Mut<EntityStore>| {
+            let store = world.resource::<ChunkStore>();
+            let tables = world.resource::<ContentTables>();
+            let spec = DropSpec {
+                item: 0,
+                count: 40,
+                size_m: 0.25,
+            };
+            entities.spawn_drops_around(&tables.terrain(store, 1.0), [6.0, 2.5, 6.0], [spec])
+        });
+    let died = Death {
+        cause: Some(save::DeathCause::Starvation),
+        at_m: Vec3::new(6.0, 1.0, 6.0),
+        dropped: vec![tesserae_core::inventory::Stack {
+            item: "terra:rock".into(),
+            count: 40,
+        }],
+        drops,
+        kept_inventory: false,
+    };
+    let player = rig
+        .app
+        .world_mut()
+        .query_filtered::<Entity, With<Player>>()
+        .single(rig.app.world())
+        .unwrap();
+    rig.app.world_mut().entity_mut(player).insert(died.clone());
+    let minute = (60.0 / STEP_S) as usize;
+    for _ in 0..minute {
+        rig.tick();
+    }
+    let left = |rig: &Rig| {
+        let death = death(rig).expect("still dead");
+        crate::server::death::despawns_in_s(&death, &rig.app.world().resource::<EntityStore>().0)
+    };
+    let before = left(&rig).expect("the drop lies there");
+    let full = (DESPAWN_STEPS as f32 * STEP_S) as u32;
+    assert!((full - 61..=full - 59).contains(&before), "{before}");
+    rig.settled_save();
+    drop(rig);
+
+    let reopened = Rig::new(&dir);
+    assert_eq!(death(&reopened).map(|d| d.drops), Some(died.drops));
+    let after = left(&reopened).expect("the drop survived the save");
+    assert!(
+        after <= before && after + 2 >= before,
+        "continues from {before}, not from {full}: {after}"
+    );
+}
+
+fn inventory(rig: &Rig) -> tesserae_core::inventory::Inventory {
+    let mut q = rig.app.world().try_query::<&Inventory>().unwrap();
+    q.single(rig.app.world()).unwrap().0.clone()
+}
+
+#[test]
+fn a_save_with_carried_opens_packed_into_slots_with_the_overflow_dropped_beside_the_player() {
+    let dir = Directory::new();
+    let mut rig = Rig::new(&dir);
+    rig.insert();
+    rig.settled_save();
+    drop(rig);
+    let mut commit = save::inspect(&dir.0).unwrap().unwrap().commit;
+    commit.player.extensions.insert(
+        "carried_v1".into(),
+        serde_json::json!({"terra:rock": 36 * 64 + 6}),
+    );
+    commit.sequence += 1;
+    Writer::acquire(&dir.0, &commit.world, &commit.content)
+        .unwrap()
+        .write(&commit)
+        .unwrap();
+
+    let mut reopened = Rig::new(&dir);
+    let packed = inventory(&reopened);
+    assert!(
+        packed
+            .slots()
+            .all(|s| s.as_ref().is_some_and(|s| s.count == 64))
+    );
+    let dropped: Vec<_> = reopened
         .app
         .world()
-        .try_query::<&Carried>()
-        .map(|mut q| {
-            q.iter(reopened.app.world())
-                .map(|c| c.0.clone())
-                .collect::<Vec<_>>()
-        })
+        .resource::<EntityStore>()
+        .iter()
+        .map(|e| *e.as_dropped())
+        .collect();
+    assert_eq!(dropped.len(), 1);
+    assert_eq!((dropped[0].item, dropped[0].count), (0, 6));
+    let eye = reopened
+        .app
+        .world_mut()
+        .query::<&Player>()
+        .single(reopened.app.world())
+        .unwrap()
+        .eye();
+    let beside = Vec3::from_array(dropped[0].pos_m).distance(eye);
+    assert!(beside < 2.0, "{beside} m from the Eye");
+    reopened.tick();
+    assert!(reopened.app.world().resource::<SaveStatus>().dirty);
+    reopened.settled_save();
+    drop(reopened);
+
+    let commit = save::inspect(&dir.0).unwrap().unwrap().commit;
+    assert!(!commit.player.extensions.contains_key("carried_v1"));
+    assert_eq!(
+        commit.player.get::<save::InventoryV1>().unwrap().unwrap().0,
+        packed
+    );
+    assert_eq!(commit.entities.dropped.len(), 1);
+}
+
+#[test]
+fn an_implicit_items_carried_overflow_drops_beside_the_player_and_survives_a_reopen() {
+    let dir = Directory::new();
+    let mut rig = Rig::new(&dir);
+    rig.insert();
+    rig.settled_save();
+    drop(rig);
+    let mut commit = save::inspect(&dir.0).unwrap().unwrap().commit;
+    commit.player.extensions.insert(
+        "carried_v1".into(),
+        serde_json::json!({"terra:rock": 36 * 64, "terra:stone": 5}),
+    );
+    commit.sequence += 1;
+    Writer::acquire(&dir.0, &commit.world, &commit.content)
+        .unwrap()
+        .write(&commit)
         .unwrap();
-    assert_eq!(q.pop().unwrap()["terra:rock"], 7);
+
+    let dropped = |rig: &Rig| -> Vec<(String, u32)> {
+        let items = rig.app.world().resource::<Items>();
+        rig.app
+            .world()
+            .resource::<EntityStore>()
+            .iter()
+            .map(|e| {
+                let d = e.as_dropped();
+                (items.0[d.item as usize].name.clone(), d.count)
+            })
+            .collect()
+    };
+    let mut reopened = Rig::new(&dir);
+    assert_eq!(dropped(&reopened), [("terra:stone".to_owned(), 5)]);
+    reopened.tick();
+    reopened.settled_save();
+    drop(reopened);
+
+    let commit = save::inspect(&dir.0).unwrap().unwrap().commit;
+    assert_eq!(commit.entities.dropped.len(), 1);
+    assert_eq!(commit.entities.dropped[0].item, "terra:stone");
+    assert_eq!(dropped(&Rig::new(&dir)), [("terra:stone".to_owned(), 5)]);
 }
 
 #[test]
@@ -937,9 +1402,7 @@ fn a_change_that_only_moves_the_entity_revision_makes_the_world_dirty() {
             let store = world.resource::<ChunkStore>();
             let tables = world.resource::<ContentTables>();
             entities.spawn_drop(
-                store,
-                &tables.0,
-                1.0,
+                &tables.terrain(store, 1.0),
                 [4, 1, 4],
                 DropSpec {
                     item: 0,
@@ -1007,6 +1470,7 @@ fn declares_biomes(names: [&str; 2]) -> impl FnOnce(&mut crate::server::mods::Lo
             ground: None,
             sky_fog: None,
             cave_scale: None,
+            surface_features: Default::default(),
         };
         loaded.world = Some(WorldgenParams {
             climate: ClimateParams {
@@ -1168,4 +1632,281 @@ fn a_version_1_world_reopens_without_biomes_even_if_its_game_declares_them() {
     let reopened = prepared_world(&dir, declares_biomes(["terra:dry", "terra:wet"]));
     assert!(reopened.biomes.is_empty() && reopened.ores.is_empty());
     assert_eq!(reopened.generator, 1);
+}
+
+/// Stands in for a Player extension a later step registers.
+#[derive(Component, Clone, Copy, PartialEq, Debug, serde::Serialize, serde::Deserialize)]
+pub(super) struct Probe(pub u32);
+impl save::PlayerExtension for Probe {
+    const KEY: &'static str = "probe_v1";
+}
+impl extensions::PlayerState for Probe {
+    fn capture(player: EntityRef) -> Option<Self> {
+        player.get::<Probe>().copied()
+    }
+    fn restore(self, player: &mut EntityCommands) {
+        player.insert(self);
+    }
+}
+
+fn probe(rig: &mut Rig) -> Option<Probe> {
+    rig.app
+        .world_mut()
+        .query_filtered::<Option<&Probe>, With<Player>>()
+        .single(rig.app.world())
+        .unwrap()
+        .copied()
+}
+
+fn set_probe(rig: &mut Rig, value: u32) {
+    let player = rig
+        .app
+        .world_mut()
+        .query_filtered::<Entity, With<Player>>()
+        .single(rig.app.world())
+        .unwrap();
+    rig.app.world_mut().entity_mut(player).insert(Probe(value));
+}
+
+#[test]
+fn a_registered_player_extension_marks_the_world_dirty_and_survives_save_and_reopen() {
+    let dir = Directory::new();
+    let mut rig = Rig::new(&dir);
+    rig.settled_save();
+    rig.tick();
+    assert!(!rig.app.world().resource::<SaveStatus>().dirty);
+    set_probe(&mut rig, 41);
+    rig.tick();
+    assert!(rig.app.world().resource::<SaveStatus>().dirty);
+    rig.settled_save();
+    rig.tick();
+    assert!(!rig.app.world().resource::<SaveStatus>().dirty);
+    drop(rig);
+
+    let commit = save::inspect(&dir.0).unwrap().unwrap().commit;
+    assert_eq!(commit.player.get::<Probe>().unwrap(), Some(Probe(41)));
+    let mut reopened = Rig::new(&dir);
+    assert_eq!(probe(&mut reopened), Some(Probe(41)));
+    reopened.tick();
+    assert!(!reopened.app.world().resource::<SaveStatus>().dirty);
+}
+
+#[test]
+fn a_save_holding_an_unregistered_player_extension_is_refused_as_incompatible() {
+    let dir = Directory::new();
+    Rig::new(&dir).settled_save();
+    let mut commit = save::inspect(&dir.0).unwrap().unwrap().commit;
+    commit
+        .player
+        .extensions
+        .insert("vitals_v9".into(), serde_json::json!({"health": 20}));
+    commit.sequence += 1;
+    Writer::acquire(&dir.0, &commit.world, &commit.content)
+        .unwrap()
+        .write(&commit)
+        .unwrap();
+    let before = folder_bytes(&dir.0);
+    let refused = |e: String| {
+        assert!(e.contains("cannot open World"), "{e}");
+        assert!(e.contains("Player extension"), "{e}");
+    };
+    refused(Opening::from_folder(&dir.0).err().unwrap());
+    let opening = Opening {
+        directory: Some(dir.0.clone()),
+        id: commit.world.clone(),
+        recovered: save::inspect(&dir.0).unwrap(),
+        details: None,
+    };
+    let mut loaded = crate::server::mods::terra_for_save(&opening, &WorldSettings::default());
+    refused(
+        Persistence::prepare(opening, &mut loaded, WorldSettings::default())
+            .err()
+            .unwrap(),
+    );
+    assert_eq!(folder_bytes(&dir.0), before);
+}
+
+#[test]
+fn only_a_world_opened_without_a_save_is_announced_as_new() {
+    let announced = |rig: &mut Rig| {
+        rig.app
+            .world_mut()
+            .resource_mut::<Messages<NewWorld>>()
+            .drain()
+            .count()
+    };
+    let dir = Directory::new();
+    let mut rig = Rig::new(&dir);
+    assert_eq!(announced(&mut rig), 1);
+    rig.insert();
+    rig.settled_save();
+    assert_eq!(announced(&mut rig), 0, "once");
+    drop(rig);
+    assert_eq!(announced(&mut Rig::new(&dir)), 0, "a reopened World");
+}
+
+fn terra_biomes(opening: &Opening) -> Vec<String> {
+    crate::server::mods::terra_for_save(opening, &WorldSettings::default())
+        .world
+        .unwrap()
+        .biomes
+        .as_slice()
+        .iter()
+        .map(|b| b.name.as_str().to_owned())
+        .collect()
+}
+
+fn with_biomes(worlds: &Directory, name: &str, edits: Option<BiomeEdits>) -> PathBuf {
+    library::create(
+        &worlds.0,
+        &library::Sidecar {
+            biomes: edits,
+            ..details(name, 7, 1.0)
+        },
+    )
+    .unwrap()
+}
+
+fn choice(name: &str) -> BiomeChoice {
+    BiomeChoice {
+        name: name.into(),
+        enabled: true,
+        temperature: 0.9,
+        humidity: 0.1,
+        cave_scale: Some(0.0),
+        ground: Some(GroundNames {
+            rock: "terra:stone".into(),
+            soil: "terra:wood".into(),
+            surface: "terra:wood".into(),
+        }),
+        sky_fog: Some(tesserae_core::climate::SkyFog {
+            sky: [10, 20, 30],
+            fog: [40, 50, 60],
+        }),
+    }
+}
+
+fn snapshot(rig: &Rig) -> WorldgenParams {
+    let p = rig.app.world().resource::<Persistence>();
+    p.generation.restore(&p.mapping, p.generator).unwrap()
+}
+
+#[test]
+fn create_time_biome_edits_shape_the_snapshot_and_leave_the_game_alone() {
+    let worlds = Directory::new();
+    let plain = with_biomes(&worlds, "Plain", None);
+    let declared = terra_biomes(&Opening::from_folder(&plain).unwrap());
+    assert!(declared.len() >= 2, "Terra declares Biomes: {declared:?}");
+    let untouched = snapshot(&reopen(&plain));
+    let edits = BiomeEdits {
+        biomes: vec![
+            BiomeChoice {
+                enabled: false,
+                ..choice(&declared[0])
+            },
+            choice(&declared[1]),
+        ],
+        climate: Some(tesserae_core::climate::ClimateParams {
+            temperature_size_m: 900.0,
+            humidity_size_m: 300.0,
+        }),
+    };
+    let tuned = with_biomes(&worlds, "Tuned", Some(edits));
+    let rig = reopen(&tuned);
+    let edited = snapshot(&rig);
+    let names: Vec<_> = edited
+        .biomes
+        .as_slice()
+        .iter()
+        .map(|b| b.name.as_str())
+        .collect();
+    assert!(!names.contains(&declared[0].as_str()), "never generated");
+    let kept = edited.biomes.as_slice()[0];
+    assert_eq!(kept.name.as_str(), declared[1]);
+    assert_eq!((kept.temperature, kept.humidity), (0.9, 0.1));
+    assert_eq!(kept.cave_scale, Some(0.0));
+    assert_eq!(kept.ground.unwrap().rock, rig.stone);
+    assert_eq!(kept.ground.unwrap().soil, rig.wood);
+    assert_eq!(kept.sky_fog.unwrap().sky, [10, 20, 30]);
+    assert_eq!(edited.climate.temperature_size_m, 900.0);
+    drop(rig);
+
+    // The Game's table is unchanged for the next World, which matches one made before.
+    let next = with_biomes(&worlds, "Next", None);
+    assert_eq!(
+        terra_biomes(&Opening::from_folder(&next).unwrap()),
+        declared
+    );
+    assert_eq!(snapshot(&reopen(&next)), untouched);
+}
+
+#[test]
+fn biome_edits_that_cannot_apply_refuse_the_open() {
+    let worlds = Directory::new();
+    let plain = with_biomes(&worlds, "Plain", None);
+    let declared = terra_biomes(&Opening::from_folder(&plain).unwrap());
+    let unknown = BiomeChoice {
+        ground: Some(GroundNames {
+            rock: "terra:stone".into(),
+            soil: "terra:moonrock".into(),
+            surface: "terra:stone".into(),
+        }),
+        ..choice(&declared[0])
+    };
+    let none_left = declared
+        .iter()
+        .map(|name| BiomeChoice {
+            enabled: false,
+            ..choice(name)
+        })
+        .collect();
+    for (name, biomes) in [("Unknown", vec![unknown]), ("Empty", none_left)] {
+        let path = with_biomes(
+            &worlds,
+            name,
+            Some(BiomeEdits {
+                biomes,
+                climate: None,
+            }),
+        );
+        let opening = Opening::from_folder(&path).unwrap();
+        let settings = opening.settings(WorldSettings::default());
+        let mut loaded = crate::server::mods::terra_for_save(&opening, &settings);
+        let refused = Persistence::prepare(opening, &mut loaded, settings);
+        assert!(refused.is_err(), "{name}");
+    }
+}
+
+#[test]
+fn mode_changes_from_edit_world_apply_at_the_next_open_and_not_before() {
+    let worlds = Directory::new();
+    let path = with_biomes(&worlds, "Modes", None);
+    let mut rig = reopen(&path);
+    rig.settled_save();
+    drop(rig);
+    library::request_modes(
+        &path,
+        library::ModeChanges {
+            default: Some(GameMode::Survival),
+            own: Some(GameMode::Survival),
+        },
+    )
+    .unwrap();
+    let saved = save::inspect(&path).unwrap().unwrap().commit;
+    assert_eq!(saved.game_mode, GameMode::Creative, "not before the open");
+
+    let mut rig = reopen(&path);
+    assert_eq!(player_mode(&mut rig), GameMode::Survival);
+    rig.settled_save();
+    drop(rig);
+    let commit = save::inspect(&path).unwrap().unwrap().commit;
+    assert_eq!(commit.game_mode, GameMode::Survival);
+    assert_eq!(
+        commit.player.get::<GameModeV1>().unwrap(),
+        Some(GameModeV1(GameMode::Survival))
+    );
+    let details = library::read(&path).unwrap().unwrap();
+    assert!(details.mode_changes.is_empty(), "applied once");
+    assert_eq!(details.game_mode, GameMode::Survival);
+    assert_eq!(details.player_mode, Some(GameMode::Survival));
 }

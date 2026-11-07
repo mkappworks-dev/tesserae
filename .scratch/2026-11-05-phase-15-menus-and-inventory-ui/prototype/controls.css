@@ -1,0 +1,56 @@
+.game{--panel:#0b0b0c;--panel-raised:#18181b;--edge:#64646b;--ink:#f7f4ec;--muted:#c7c9ce}
+.game .sheet,.game .rail,.game .continue-card,.game .pause-panel,.game .dialog,.game .home-actions{background:#0b0b0c}
+.game .sheet-header{background:#111113}
+.game .sheet-footer{background:#0b0b0c}
+.game .editor,.game .notice{background:#18181b}
+.game .input{background:#131315;border-color:#797981}
+.game .input:disabled{background:#202023;color:#c7c9ce}
+.game .world-card,.game .game-pick,.game .mod-card,.game .biome-card{background:#19191c}
+.game .game-pick.selected{background:#29292e}
+.game .rail button.active{background:#27272b;border-color:#a8b0a2}
+.game .rail button.active:after{display:none}
+.game .rail button{display:grid;grid-template-columns:20px minmax(0,1fr) 12px;column-gap:10px;align-items:center;min-width:0}
+.game .settings-rail{width:224px;flex:0 0 224px;max-height:100%;scrollbar-gutter:stable}
+.game .settings-rail button{height:48px;min-height:48px;flex:0 0 48px;width:100%;padding:10px 8px;white-space:nowrap}
+.game .category-icon{display:grid;place-items:center;width:20px;height:20px}
+.game .nav-label{min-width:0}
+.game .nav-arrow{width:12px;display:grid;place-items:center;visibility:hidden}
+.game .active .nav-arrow{visibility:visible}
+.game .rail button svg{display:block;flex-shrink:0}
+.game .rail .number{border:0;background:transparent!important;color:inherit!important;width:20px;height:20px}
+.game.large-text .settings-rail{width:270px;flex-basis:270px}
+.game.large-text .settings-rail button{height:auto;min-height:80px;flex-basis:80px;white-space:normal}
+.game .setting-row>.select-trigger{width:190px;max-width:190px;flex-shrink:0;margin:0}
+.game .select-trigger{display:flex;align-items:center;justify-content:space-between;gap:12px;text-align:left;cursor:pointer;color:var(--ink);border-radius:5px}
+.game .select-trigger:hover{background:#232327}
+.game .select-trigger[aria-expanded=true]{border-color:#c1cdb5;background:#232327}
+.game .select-trigger[aria-expanded=true]>svg{transform:rotate(180deg)}
+.game .select-trigger .select-value{min-width:0;overflow-wrap:anywhere}
+.game .select-trigger>svg{flex-shrink:0;opacity:.8}
+.game .select-menu{position:absolute;z-index:20;overflow:auto;background:#151517;border:1px solid #82828a;border-radius:6px;padding:5px;box-shadow:0 12px 35px #0009;scrollbar-color:#777780 #1c1c20}
+.game .select-option{width:100%;min-height:48px;display:flex;align-items:center;justify-content:space-between;gap:16px;border:1px solid transparent;border-radius:3px;background:transparent;color:var(--ink);padding:10px 12px;font-size:calc(16px * var(--text-scale));text-align:left}
+.game .select-option:hover,.game .select-option.option-focused{background:#303035;border-color:#777780}
+.game .select-option[aria-selected=true]{color:#dce6d1}
+.game .option-check{width:18px;flex-shrink:0}
+.game .select-option:focus{outline:none}
+.game .select-option:focus-visible{outline:2px solid #e2d5ab;outline-offset:-2px}
+@media(max-width:750px){
+  .game .settings-rail,.game.large-text .settings-rail{width:100%;flex:0 0 auto;scrollbar-gutter:auto}
+  .game .settings-rail button{height:48px;min-height:48px;flex:1 0 29%;grid-template-columns:18px minmax(0,1fr);gap:6px;white-space:normal;padding:6px}
+  .game .rail .nav-arrow{display:none}
+  .game .settings-rail .category-icon{width:18px;height:18px}
+  .game .settings-rail .category-icon svg{width:18px;height:18px}
+  .game.large-text .settings-rail button{min-height:80px;flex:1 0 45%}
+  .game .setting-row>.select-trigger{width:150px;max-width:150px}
+}
+.game .btn.primary:disabled{background:#28282c;border-color:#626269;color:#b6b6be}
+.game .nav-label{overflow-wrap:anywhere}
+@media(max-width:750px){
+  .game .settings-rail{max-height:180px}
+  .game .settings-rail button{flex-basis:45%}
+  .game .rail:not(.settings-rail) button{grid-template-columns:20px minmax(0,1fr);gap:6px}
+}
+@font-face{font-family:TesseraeAileron;src:url('/Aileron-SemiBold.otf') format('opentype');font-weight:600;font-style:normal;font-display:swap}
+.game .brand{gap:10px;letter-spacing:0}
+.game .brand-symbol{display:block;width:29px;height:29px;flex-shrink:0}
+.game .brand-wordmark{font-family:TesseraeAileron,ui-sans-serif,sans-serif;font-size:19px;font-weight:600;letter-spacing:0;line-height:1.1}

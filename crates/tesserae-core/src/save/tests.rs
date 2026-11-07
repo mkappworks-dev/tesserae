@@ -78,6 +78,7 @@ pub(super) fn fixture() -> Commit {
             landing_cursors: vec![],
         },
         entities: Default::default(),
+        game_mode: GameMode::Creative,
     }
 }
 
@@ -512,6 +513,7 @@ fn biome(name: &str, temperature: f32, humidity: f32) -> crate::Biome {
         ground: None,
         sky_fog: None,
         cave_scale: None,
+        surface_features: Default::default(),
     }
 }
 
@@ -677,6 +679,57 @@ fn a_biomes_cave_scale_is_saved_only_when_set_and_restored_as_it_was() {
         .map(|b| b.cave_scale)
         .collect();
     assert_eq!(scales, [Some(0.0), None, Some(2.5)]);
+}
+
+#[test]
+fn a_biomes_surface_features_are_saved_by_name_and_omitted_when_there_are_none() {
+    let mut params = biome_params(2);
+    let table = params.biomes.as_slice().to_vec();
+    let melon = |material| crate::SurfaceFeature {
+        material,
+        spacing_m: 16.0,
+    };
+    params.biomes = crate::BiomeTable::new(&[
+        table[0],
+        crate::Biome {
+            surface_features: crate::SurfaceFeatures::new(&[melon(9), melon(8)]).unwrap(),
+            ..table[1]
+        },
+        table[2],
+    ])
+    .unwrap();
+    let saved = Generation::capture(params, &mapping(8, 9, 4)).unwrap();
+    let json = serde_json::to_value(&saved).unwrap();
+    assert_eq!(
+        json["biomes"][1]["surface_features"],
+        serde_json::json!([
+            { "material": "terra:water", "spacing_m": 16.0 },
+            { "material": "terra:stone", "spacing_m": 16.0 },
+        ])
+    );
+    assert!(json["biomes"][0].get("surface_features").is_none());
+
+    let restored = saved.restore(&mapping(17, 8, 5), 2).unwrap();
+    let biomes = restored.biomes.as_slice();
+    assert_eq!(biomes[1].surface_features.as_slice(), [melon(8), melon(17)]);
+    assert!(biomes[0].surface_features.is_empty() && biomes[2].surface_features.is_empty());
+}
+
+#[test]
+fn a_saved_surface_feature_with_a_bad_spacing_or_an_unknown_material_is_refused() {
+    let params = biome_params(2);
+    let saved = Generation::capture(params, &mapping(8, 9, 4)).unwrap();
+    let with = |material: &str, spacing_m| {
+        let mut saved = saved.clone();
+        saved.biomes.as_mut().unwrap()[0].surface_features = vec![SavedSurfaceFeature {
+            material: material.into(),
+            spacing_m,
+        }];
+        saved.restore(&mapping(8, 9, 4), 2)
+    };
+    assert!(with("terra:stone", 16.0).is_ok());
+    assert!(with("terra:stone", 2.0).is_err());
+    assert!(with("terra:melon", 16.0).is_err());
 }
 
 #[test]
@@ -944,13 +997,14 @@ fn pre_crouch_movement_defaults_to_standing_and_new_stance_round_trips() {
             serde_json::json!({"flight":false,"yaw":1.0,"pitch":0.0}),
         )]),
     };
-    assert!(!player.movement().unwrap().unwrap().crouching);
+    let movement = |p: &Player| p.get::<MovementV1>().unwrap().unwrap();
+    assert!(!movement(&player).crouching);
     player.extensions.get_mut("movement_v1").unwrap()["crouching"] = true.into();
     let bytes = serde_json::to_vec(&player).unwrap();
     let restored: Player = serde_json::from_slice(&bytes).unwrap();
-    assert!(restored.movement().unwrap().unwrap().crouching);
+    assert!(movement(&restored).crouching);
     player.extensions.get_mut("movement_v1").unwrap()["flight"] = true.into();
-    assert!(player.movement().is_err());
+    assert!(matches!(player.get::<MovementV1>(), Err(Error::Corrupt(_))));
 }
 
 #[test]
@@ -972,6 +1026,7 @@ fn a_newer_format_is_incompatible_not_corrupt_and_is_never_rolled_back_past() {
 
 mod dropped_items {
     use super::*;
+    use crate::collide::Terrain;
     use crate::entity::{DESPAWN_STEPS, DropSpec, Entities};
     use crate::save::entities::SavedEntities;
     use crate::testgen::fixtures;
@@ -1009,9 +1064,11 @@ mod dropped_items {
         let mut e = Entities::default();
         for (i, item) in [0u32, 1, 0].into_iter().enumerate() {
             e.spawn_drop(
-                &Floor,
-                &fixtures().tables,
-                SIZE,
+                &Terrain {
+                    voxels: &Floor,
+                    tables: &fixtures().tables,
+                    voxel_size: SIZE,
+                },
                 [i as i32 * 4, 6, 0],
                 DropSpec {
                     item,
@@ -1020,7 +1077,11 @@ mod dropped_items {
                 },
             );
             for _ in 0..40 {
-                e.step(&Floor, &fixtures().tables, SIZE);
+                e.step(&Terrain {
+                    voxels: &Floor,
+                    tables: &fixtures().tables,
+                    voxel_size: SIZE,
+                });
             }
         }
         e
@@ -1055,8 +1116,16 @@ mod dropped_items {
         let saved = SavedEntities::capture(&live, names).unwrap();
         let mut reopened = saved.restore(SIZE, resolve).unwrap();
         for _ in 0..300 {
-            live.step(&Floor, &fixtures().tables, SIZE);
-            reopened.step(&Floor, &fixtures().tables, SIZE);
+            live.step(&Terrain {
+                voxels: &Floor,
+                tables: &fixtures().tables,
+                voxel_size: SIZE,
+            });
+            reopened.step(&Terrain {
+                voxels: &Floor,
+                tables: &fixtures().tables,
+                voxel_size: SIZE,
+            });
         }
         let all = |e: &Entities| {
             e.iter()
@@ -1105,22 +1174,97 @@ mod dropped_items {
     }
 
     #[test]
-    fn carried_is_an_extension_and_an_unknown_one_still_refuses() {
+    fn carried_is_an_extension_and_a_value_of_another_shape_is_incompatible() {
         let mut player = fixture().player;
-        assert!(player.carried().unwrap().is_empty());
+        assert_eq!(player.get::<CarriedV1>().unwrap(), None);
         player.extensions.insert(
             "carried_v1".into(),
             serde_json::json!({"t:rock": 14, "t:dust": 3}),
         );
-        assert!(player.movement().is_ok());
-        assert_eq!(player.carried().unwrap()["t:rock"], 14);
+        assert_eq!(player.get::<CarriedV1>().unwrap().unwrap().0["t:rock"], 14);
         player
             .extensions
             .insert("carried_v1".into(), serde_json::json!("many"));
-        assert!(matches!(player.carried(), Err(Error::Corrupt(_))));
+        assert!(matches!(
+            player.get::<CarriedV1>(),
+            Err(Error::Incompatible(_))
+        ));
+    }
+
+    #[test]
+    fn a_commit_without_a_game_mode_opens_as_creative_and_survival_is_kept() {
+        let mut value = serde_json::to_value(fixture()).unwrap();
+        value.as_object_mut().unwrap().remove("game_mode");
+        let old: Commit = serde_json::from_value(value).unwrap();
+        assert_eq!(old.game_mode, GameMode::Creative);
+        let survival = Commit {
+            game_mode: GameMode::Survival,
+            ..fixture()
+        };
+        let json = serde_json::to_value(&survival).unwrap();
+        assert_eq!(json["game_mode"], "survival");
+        let back: Commit = serde_json::from_value(json).unwrap();
+        assert_eq!(back.game_mode, GameMode::Survival);
+    }
+
+    #[test]
+    fn a_players_game_mode_is_an_extension_and_an_unknown_mode_is_incompatible() {
+        let mut player = fixture().player;
+        assert_eq!(player.get::<GameModeV1>().unwrap(), None);
         player
             .extensions
-            .insert("other_v1".into(), serde_json::json!(1));
-        assert!(matches!(player.movement(), Err(Error::Incompatible(_))));
+            .insert("game_mode_v1".into(), serde_json::json!("survival"));
+        assert_eq!(
+            player.get::<GameModeV1>().unwrap(),
+            Some(GameModeV1(GameMode::Survival))
+        );
+        player
+            .extensions
+            .insert("game_mode_v1".into(), serde_json::json!("spectator"));
+        assert!(matches!(
+            player.get::<GameModeV1>(),
+            Err(Error::Incompatible(_))
+        ));
+    }
+
+    #[test]
+    fn an_inventory_is_saved_by_slot_and_item_name_and_an_empty_stack_is_corrupt() {
+        let mut player = fixture().player;
+        let hotbar = vec![serde_json::Value::Null; 9];
+        let mut backpack = vec![serde_json::Value::Null; 27];
+        backpack[3] = serde_json::json!({"item": "t:rock", "count": 12});
+        let saved = |backpack: &[serde_json::Value]| serde_json::json!({"hotbar": hotbar.clone(), "backpack": backpack});
+        player
+            .extensions
+            .insert("inventory_v1".into(), saved(&backpack));
+        let read = player.get::<InventoryV1>().unwrap().unwrap().0;
+        assert_eq!(read.backpack()[3].as_ref().unwrap().item, "t:rock");
+        assert_eq!(read.slots().flatten().map(|s| s.count).sum::<u32>(), 12);
+        assert_eq!(
+            serde_json::to_value(InventoryV1(read)).unwrap(),
+            saved(&backpack)
+        );
+        let mut selected = saved(&backpack);
+        selected["selected"] = 4.into();
+        player
+            .extensions
+            .insert("inventory_v1".into(), selected.clone());
+        let read = player.get::<InventoryV1>().unwrap().unwrap();
+        assert_eq!(read.0.selected(), 4);
+        assert_eq!(serde_json::to_value(read).unwrap(), selected);
+        selected["selected"] = 9.into();
+        player.extensions.insert("inventory_v1".into(), selected);
+        assert!(matches!(
+            player.get::<InventoryV1>(),
+            Err(Error::Corrupt(_))
+        ));
+        backpack[3]["count"] = 0.into();
+        player
+            .extensions
+            .insert("inventory_v1".into(), saved(&backpack));
+        assert!(matches!(
+            player.get::<InventoryV1>(),
+            Err(Error::Corrupt(_))
+        ));
     }
 }

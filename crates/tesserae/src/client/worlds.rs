@@ -1,18 +1,32 @@
-//! The World list: the first screen of a launch, before any Game runs. It only
-//! manages closed World folders; opening one restarts the process on it.
+//! The launcher: the title screen, the Worlds, Create World and the Mods
+//! library, before any Game runs. It only manages closed World folders;
+//! opening one hands it to the loader.
+
+mod create;
+mod edit_world;
+mod open;
+pub(super) mod pages;
+
+use create::*;
+use edit_world::*;
+use open::*;
 
 use std::path::{Path, PathBuf};
 
-use bevy::input_focus::{FocusCause, InputFocus, tab_navigation::TabGroup};
+use bevy::input_focus::{FocusCause, InputFocus};
 use bevy::prelude::*;
 
 use crate::session::{AppState, has_state, in_list};
 use bevy::text::EditableText;
-use bevy::ui_widgets::{Activate, ScrollArea, TextInput};
+use bevy::ui_widgets::Activate;
+use tesserae_core::biome_edits::{BiomeChoice, BiomeEdits, CLIMATE_SIZES_M};
+use tesserae_core::climate::{ClimateParams, SkyFog};
+use tesserae_core::save::GameMode;
 use tesserae_core::save::library::{self, Entry, GameRef, Sidecar};
 
-use super::menu_ui::{self as ui, Danger, Tone};
-use crate::launch::Installed;
+use super::menu_ui::{self as ui, Tone};
+use super::theme;
+use crate::launch::{BiomePreview, Installed};
 use crate::launch::{Switch, Target};
 use crate::open::{OpenRequest, What};
 
@@ -40,6 +54,22 @@ impl Default for Remover {
     }
 }
 
+/// Reads what the chosen Game and Mods declare about their Biomes; a fixed
+/// answer in tests, where nothing is installed.
+#[derive(Resource, Clone, Copy)]
+pub(super) struct Previewer(pub(super) fn(&Installed, &[String]) -> Result<BiomePreview, String>);
+
+impl Default for Previewer {
+    fn default() -> Self {
+        Self(Installed::preview_biomes)
+    }
+}
+
+/// Set once the launcher has handed a World to the loader, so coming back
+/// from it lands on the Worlds rather than the title screen.
+#[derive(Resource, Default)]
+struct Returning(bool);
+
 /// The tested Voxel sizes (ADR-0003), with what each costs.
 const VOXEL_SIZES: [(f32, &str); 3] = [
     (1.0, "1 m · default"),
@@ -52,20 +82,59 @@ const OPENING_FRAMES: u32 = 2;
 
 #[derive(Clone, Debug, PartialEq)]
 enum Screen {
-    List,
-    Create,
-    /// Step two of Create World: the Mods.
-    Mods,
-    Rename(PathBuf),
+    Title,
+    Worlds,
+    /// The installed Mods, from the title screen.
+    Library,
+    Create(Step),
+    /// Leaving a changed setup, which asks first; it returns to the step.
+    Discard(Step),
+    Edit(PathBuf),
     Delete(PathBuf),
     Trust(Next),
     Opening(String),
 }
 
-/// What runs once every Mod it needs is trusted.
+/// The steps of Create World, in order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(super) enum Step {
+    World,
+    Mods,
+    Biomes,
+    Review,
+}
+
+impl Step {
+    const ORDER: [Step; 4] = [Step::World, Step::Mods, Step::Biomes, Step::Review];
+
+    fn label(self) -> &'static str {
+        match self {
+            Step::World => "World",
+            Step::Mods => "Mods",
+            Step::Biomes => "Biomes",
+            Step::Review => "Review",
+        }
+    }
+
+    fn index(self) -> usize {
+        Self::ORDER.iter().position(|s| *s == self).unwrap_or(0)
+    }
+
+    fn next(self) -> Option<Step> {
+        Self::ORDER.get(self.index() + 1).copied()
+    }
+
+    fn previous(self) -> Option<Step> {
+        self.index().checked_sub(1).map(|i| Self::ORDER[i])
+    }
+}
+
+/// What runs once every Mod it needs is trusted. Create World's Mods step asks for Trust inline
+/// instead, see [`Launcher::trust_asked`].
 #[derive(Clone, Debug, PartialEq)]
 enum Next {
     Open(PathBuf),
+    /// Only when Trust was revoked after the Mods step granted it.
     Create,
 }
 
@@ -77,11 +146,151 @@ struct Form {
     random_seed: u64,
     voxel_size_m: f32,
     more: bool,
+    game_mode: GameMode,
     problem: Option<String>,
     /// The chosen Game's id; `None` until the form opens on an installed one.
     game: Option<String>,
     /// Mods ticked by hand; their dependencies are added when the World is created.
     mods: std::collections::BTreeSet<String>,
+    /// Filled when the Biomes step is first reached for this Game and Mods.
+    biomes: Option<BiomesDraft>,
+    /// Another World's Biome changes, laid over the declarations once they are read.
+    seeded: Option<BiomeEdits>,
+}
+
+/// The Biomes step's working copy: what the selection declares, and the
+/// player's version of it.
+#[derive(Clone, Debug, PartialEq)]
+struct BiomesDraft {
+    /// The Game and Mods it was read for; a different set reads again.
+    ids: Vec<String>,
+    declared: BiomePreview,
+    choices: Vec<BiomeChoice>,
+    climate: ClimateParams,
+    selected: usize,
+    resetting: bool,
+    /// Typed text, kept while it does not parse: Climate sizes, then sky and fog.
+    sizes: [String; 2],
+    colours: [String; 2],
+}
+
+impl BiomesDraft {
+    fn new(ids: Vec<String>, declared: BiomePreview) -> Self {
+        let mut draft = Self {
+            ids,
+            choices: declared.biomes.clone(),
+            climate: declared.climate,
+            declared,
+            selected: 0,
+            resetting: false,
+            sizes: Default::default(),
+            colours: Default::default(),
+        };
+        draft.reset();
+        draft
+    }
+
+    fn reset(&mut self) {
+        self.choices = self.declared.biomes.clone();
+        self.climate = self.declared.climate;
+        self.resetting = false;
+        self.sizes = [
+            self.climate.temperature_size_m.to_string(),
+            self.climate.humidity_size_m.to_string(),
+        ];
+        self.select(self.selected);
+    }
+
+    /// Lays another World's changes over the declarations, Biome by name.
+    fn seed(&mut self, edits: &BiomeEdits) {
+        for choice in &mut self.choices {
+            if let Some(seeded) = edits.biomes.iter().find(|e| e.name == choice.name) {
+                *choice = seeded.clone();
+            }
+        }
+        if let Some(climate) = edits.climate {
+            self.climate = climate;
+            self.sizes = [
+                climate.temperature_size_m.to_string(),
+                climate.humidity_size_m.to_string(),
+            ];
+        }
+        self.select(self.selected);
+    }
+
+    fn select(&mut self, at: usize) {
+        self.selected = at.min(self.choices.len().saturating_sub(1));
+        let sky_fog = self.choices.get(self.selected).and_then(|c| c.sky_fog);
+        self.colours = [
+            sky_fog.map_or_else(String::new, |s| hex(s.sky)),
+            sky_fog.map_or_else(String::new, |s| hex(s.fog)),
+        ];
+    }
+
+    /// What differs from the declarations, or `None` for a World made as declared.
+    fn edits(&self) -> Option<BiomeEdits> {
+        let biomes: Vec<_> = self
+            .choices
+            .iter()
+            .zip(&self.declared.biomes)
+            .filter(|(choice, declared)| choice != declared)
+            .map(|(choice, _)| choice.clone())
+            .collect();
+        let climate = (self.climate != self.declared.climate).then_some(self.climate);
+        (!biomes.is_empty() || climate.is_some()).then_some(BiomeEdits { biomes, climate })
+    }
+
+    fn problem(&self) -> Option<String> {
+        if !self.choices.is_empty() && self.choices.iter().all(|c| !c.enabled) {
+            return Some("Turn on at least one Biome to continue.".into());
+        }
+        let size = |text: &str| {
+            text.trim()
+                .parse::<f32>()
+                .ok()
+                .filter(|m| CLIMATE_SIZES_M.contains(m))
+        };
+        if self.sizes.iter().any(|text| size(text).is_none()) {
+            return Some("Climate sizes must be from 1 to 100000 m.".into());
+        }
+        if self
+            .colours
+            .iter()
+            .any(|t| !t.trim().is_empty() && colour(t).is_none())
+        {
+            return Some("Write colours as #rrggbb.".into());
+        }
+        None
+    }
+}
+
+fn hex(rgb: [u8; 3]) -> String {
+    format!("#{:02x}{:02x}{:02x}", rgb[0], rgb[1], rgb[2])
+}
+
+fn colour(text: &str) -> Option<[u8; 3]> {
+    let digits = text.trim().trim_start_matches('#');
+    if digits.len() != 6 {
+        return None;
+    }
+    let byte = |at: usize| u8::from_str_radix(digits.get(at..at + 2)?, 16).ok();
+    Some([byte(0)?, byte(2)?, byte(4)?])
+}
+
+/// A Biome's value the player sets on a slider.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Knob {
+    Temperature,
+    Humidity,
+    Caves,
+}
+
+/// One of a Biome's three ground layers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Layer {
+    Rock,
+    Soil,
+    Surface,
 }
 
 impl Default for Form {
@@ -92,9 +301,12 @@ impl Default for Form {
             random_seed: tesserae_core::seed::random(),
             voxel_size_m: 1.0,
             more: false,
+            game_mode: GameMode::Creative,
             problem: None,
             game: None,
             mods: Default::default(),
+            biomes: None,
+            seeded: None,
         }
     }
 }
@@ -120,19 +332,53 @@ pub(super) fn listed(world: &World) -> Vec<PathBuf> {
 struct Launcher {
     screen: Screen,
     entries: Vec<Entry>,
+    /// The World being edited, deleted or opened.
     selected: Option<PathBuf>,
     card: Option<Card>,
     form: Form,
+    /// The form as Create World opened it, to tell whether leaving loses anything.
+    initial: Form,
     rename: String,
+    /// Edit World's choice of modes.
+    modes: Modes,
+    search: String,
+    /// The Mods step's search and category tab; `None` shows every category.
+    mod_search: String,
+    mod_tab: Option<String>,
+    /// Disclosure rows the player has flipped from how they start.
+    flipped: std::collections::BTreeSet<Disclosure>,
     problem: Option<String>,
     /// Installed Mods that would clash with the chosen set, by id, and why.
     clashes: std::collections::BTreeMap<String, crate::launch::Clash>,
+    /// The Mods step shows its Trust panel: leaving it runs the chosen Game and Mods to read their
+    /// Biomes. Cleared by every screen change and by every change to the picks it lists.
+    trust_asked: bool,
     /// Bumped whenever the screen must be rebuilt.
     version: u64,
     opening_frames: u32,
 }
 
+/// A row that shows or hides the settings under it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(super) enum Disclosure {
+    Ground,
+    ClimateScale,
+    BiomeParameters,
+    WorldInformation,
+    ManageWorld,
+}
+
+impl Disclosure {
+    fn starts_open(self) -> bool {
+        self == Disclosure::ClimateScale
+    }
+}
+
 impl Launcher {
+    fn open(&self, row: Disclosure) -> bool {
+        row.starts_open() != self.flipped.contains(&row)
+    }
+
     fn entry(&self, path: &Path) -> Option<&Entry> {
         self.entries.iter().find(|e| e.path == path)
     }
@@ -148,9 +394,17 @@ impl Launcher {
             .unwrap_or_else(|| folder(path))
     }
 
+    /// The most recently played World that finished creation; the list is newest first.
+    fn last_played(&self) -> Option<&Entry> {
+        self.entries
+            .iter()
+            .find(|e| e.details().is_some() && !e.incomplete())
+    }
+
     fn show(&mut self, screen: Screen) {
         self.screen = screen;
         self.problem = None;
+        self.trust_asked = false;
         self.version += 1;
     }
 
@@ -166,7 +420,7 @@ impl Launcher {
             }
         }
         if self.selected().is_none() {
-            self.selected = self.entries.first().map(|e| e.path.clone());
+            self.selected = None;
         }
         self.version += 1;
     }
@@ -174,38 +428,64 @@ impl Launcher {
 
 #[derive(Component, Clone, Debug, PartialEq)]
 pub(super) enum Act {
-    Select(PathBuf),
-    Open,
+    Continue,
+    Home,
+    Worlds,
+    Library,
+    Settings,
+    Play(PathBuf),
+    Edit(PathBuf),
     New,
     ReCreate,
-    Rename,
     Delete,
     ShowFolder,
     CopySeed,
     Quit,
     Back,
     Create,
-    NextMods,
     Randomize,
     CopyResolved,
     More,
+    Next,
+    Step(Step),
+    KeepEditing,
+    DiscardSetup,
+    DefaultMode(GameMode),
+    OwnMode(GameMode),
+    ToggleBiome(usize),
+    SelectBiome(usize),
+    CycleGround(Layer),
+    ResetBiomes,
+    ConfirmReset,
+    KeepBiomes,
     Voxel(f32),
+    Mode(GameMode),
     PickGame(usize),
     ToggleMod(usize),
     SaveName,
     ConfirmDelete,
     Trust,
+    /// The Mods step's primary button: trusts what the panel lists, then shows the Biomes.
+    TrustMods,
     Dismiss,
+    Disclose(Disclosure),
+    ModTab(Option<String>),
 }
 
 #[derive(Resource, Default)]
 pub(super) struct Queue(pub(super) Vec<Act>);
 
-#[derive(Component, Clone, Copy, PartialEq, Eq)]
+#[derive(Component, Clone, Copy, PartialEq, Eq, Debug)]
 enum Field {
     Name,
     Seed,
     Rename,
+    Search,
+    ModSearch,
+    Sky,
+    Fog,
+    TemperatureSize,
+    HumiditySize,
 }
 
 #[derive(Component)]
@@ -218,6 +498,18 @@ struct Root;
 #[derive(Component)]
 struct PageScroll;
 
+/// One World on the Worlds screen, or one Mod on the Mods step, with the
+/// words that field's search matches.
+#[derive(Component)]
+struct WorldCard {
+    words: String,
+    by: Field,
+}
+
+/// Shown when the search in that field matches nothing.
+#[derive(Component)]
+struct NoMatch(Field);
+
 pub fn plugin(app: &mut App) {
     app.add_plugins(bevy::input_focus::tab_navigation::TabNavigationPlugin);
     logic(app);
@@ -225,21 +517,31 @@ pub fn plugin(app: &mut App) {
     app.add_systems(Update, review_capture.after(render));
 }
 
-/// `TESSERAE_LIST_SCRIPT=new,more` and `TESSERAE_LIST_SHOT=out.png` drive one
-/// screen and capture it for review, then exit without starting a World.
+/// `TESSERAE_LIST_SCRIPT=worlds,edit` and `TESSERAE_LIST_SHOT=out.png` drive
+/// one screen and capture it for review, then exit without starting a World.
 /// `TESSERAE_SCREENSHOT_OFFSCREEN` renders into an image, as the World capture
 /// does, because a locked display presents nothing and the capture is black.
 #[cfg(feature = "dev")]
+type Script<'w, 's> = (
+    ResMut<'w, Queue>,
+    Option<ResMut<'w, Launcher>>,
+    Query<'w, 's, (Entity, &'static Act)>,
+);
+
+#[cfg(feature = "dev")]
+type Untargeted<'w, 's> = Query<'w, 's, Entity, (With<Camera2d>, Without<IsDefaultUiCamera>)>;
+
+#[cfg(feature = "dev")]
 fn review_capture(
     mut commands: Commands,
-    mut queue: ResMut<Queue>,
+    (mut queue, mut launcher, acts): Script,
     mut relaunch: ResMut<Switch>,
     mut exit: MessageWriter<AppExit>,
     (pending, failure): (
         Query<(), With<bevy::render::view::screenshot::Screenshot>>,
         Res<LastFailure>,
     ),
-    (mut images, cameras): (ResMut<Assets<Image>>, Query<Entity, With<Camera2d>>),
+    (mut images, cameras): (ResMut<Assets<Image>>, Untargeted),
     mut progress: Local<(u32, bool, Option<Handle<Image>>)>,
 ) {
     use bevy::render::view::screenshot::{Screenshot, save_to_disk};
@@ -262,27 +564,55 @@ fn review_capture(
             bevy::render::render_resource::TextureFormat::Rgba8UnormSrgb,
             None,
         ));
+        *offscreen = Some(handle);
+    }
+    // The launcher's camera appears when the list is entered, after the first frame.
+    if let Some(handle) = offscreen.as_ref() {
         for camera in &cameras {
             commands.entity(camera).insert((
                 bevy::camera::RenderTarget::Image(handle.clone().into()),
                 IsDefaultUiCamera,
             ));
         }
-        *offscreen = Some(handle);
     }
     // A restarted list after a failed open must not replay a create script.
     if *frame == 5 && failure.0.is_none() {
+        let first = launcher
+            .as_ref()
+            .and_then(|l| l.entries.first())
+            .map(|e| e.path.clone())
+            .unwrap_or_default();
         let script = std::env::var("TESSERAE_LIST_SCRIPT").unwrap_or_default();
         for step in script.split(',').filter(|s| !s.is_empty()) {
             queue.0.push(match step {
+                "worlds" => Act::Worlds,
+                "library" => Act::Library,
+                // Settings opens through its button, as a click would.
+                "settings" => {
+                    if let Some((button, _)) = acts.iter().find(|(_, a)| **a == Act::Settings) {
+                        commands.trigger(Activate { entity: button });
+                    }
+                    continue;
+                }
                 "new" => Act::New,
                 "more" => Act::More,
-                "rename" => Act::Rename,
+                "edit" => Act::Edit(first.clone()),
                 "delete" => Act::Delete,
                 "recreate" => Act::ReCreate,
-                "open" => Act::Open,
+                "open" => Act::Play(first.clone()),
                 "create" => Act::Create,
-                "mods" => Act::NextMods,
+                "next" => Act::Next,
+                "back" => Act::Back,
+                "randomize" => Act::Randomize,
+                "reset" => Act::ResetBiomes,
+                // The Opening card stays up: no World is handed to the loader.
+                "opening" => {
+                    if let Some(l) = launcher.as_mut() {
+                        let name = l.display_name(&first);
+                        l.show(Screen::Opening(name));
+                    }
+                    continue;
+                }
                 other => panic!("unknown TESSERAE_LIST_SCRIPT step `{other}`"),
             });
         }
@@ -308,7 +638,7 @@ fn review_capture(
     }
 }
 
-/// The World list cannot exit by default: the window plugin leaves closing to us.
+/// The launcher cannot exit by default: the window plugin leaves closing to us.
 fn close_request(
     mut requests: MessageReader<bevy::window::WindowCloseRequested>,
     mut relaunch: ResMut<Switch>,
@@ -322,14 +652,36 @@ fn close_request(
 
 fn logic(app: &mut App) {
     app.init_resource::<Queue>()
+        .init_resource::<Scenery>()
         .init_resource::<LastFailure>()
         .init_resource::<Remover>()
+        .init_resource::<Previewer>()
+        .init_resource::<Returning>()
         .init_resource::<InputFocus>()
         .add_observer(activate)
+        .add_observer(slide)
+        .add_observer(open_settings)
         .add_systems(PreUpdate, close_request.run_if(in_list))
         .add_systems(
             Update,
-            (keys, sync_fields, handle, render, opening)
+            (
+                keys,
+                sync_fields,
+                handle,
+                render,
+                show_filter,
+                filter,
+                placeholders,
+                opening,
+                (
+                    hero_size,
+                    header_hover,
+                    paint_picks,
+                    shape_trees,
+                    paint_scenery,
+                    follow_knobs,
+                ),
+            )
                 .chain()
                 .run_if(in_list),
         );
@@ -354,43 +706,103 @@ pub(crate) fn headless_support(app: &mut App) {
 #[derive(Component)]
 struct ListCamera;
 
+/// Holds the scenery for as long as the list is up. Pages are rebuilt on every click, so
+/// nothing a page owns can carry the backdrop across one without a blank frame.
+#[derive(Component)]
+struct Scene;
+
+/// The softened scenery lies below the clear one and is never hidden, so both are always drawn
+/// and uploaded; a screen that wants it softened hides the clear layer, a straight swap with
+/// an image on every frame.
 fn camera(mut commands: Commands) {
     commands.spawn((Camera2d, ListCamera));
+    commands
+        .spawn((
+            Scene,
+            GlobalZIndex(-1),
+            BackgroundColor(theme::SCENE),
+            pages::fill(),
+            Pickable::IGNORE,
+        ))
+        .with_children(|scene| {
+            for filter in [super::scenery::SOFT, super::scenery::CLEAR] {
+                scene.spawn((pages::Backdrop(filter), pages::fill(), Pickable::IGNORE));
+            }
+        });
 }
 
-/// The list reads the pad and navigates focus as the in-game menus do, under
-/// one standing modal owner.
+fn show_filter(
+    launcher: Option<Res<Launcher>>,
+    settings: Option<Res<super::settings::Settings>>,
+    mut layers: Query<(&pages::Backdrop, &mut Visibility)>,
+) {
+    let Some(launcher) = launcher else {
+        return;
+    };
+    let soft = settings.is_some_and(|s| s.open)
+        || pages::filter_for(&launcher.screen) == super::scenery::SOFT;
+    for (layer, mut visibility) in &mut layers {
+        let wanted = if layer.0 == super::scenery::SOFT || !soft {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        };
+        visibility.set_if_neq(wanted);
+    }
+}
+
+/// The launcher reads the pad and navigates focus as the in-game menus do,
+/// under one standing modal owner.
 fn standing_owner(mut ownership: ResMut<super::input::Ownership>) {
     ownership.owner = super::input::Owner::Modal;
 }
 
-type ListScreens = Or<(With<Root>, With<ListCamera>)>;
+type ListScreens = Or<(With<Root>, With<ListCamera>, With<Scene>)>;
 
 fn leave(
     mut commands: Commands,
     screens: Query<Entity, ListScreens>,
     mut ownership: ResMut<super::input::Ownership>,
-    mut last: ResMut<LastFailure>,
+    (mut last, mut returning): (ResMut<LastFailure>, ResMut<Returning>),
+    mut scenery: ResMut<Scenery>,
 ) {
+    *scenery = Scenery::default();
     for screen in &screens {
         commands.entity(screen).despawn();
     }
     commands.remove_resource::<Launcher>();
     last.0 = None;
+    returning.0 = true;
     *ownership = super::input::Ownership::default();
 }
 
-fn start(mut commands: Commands, worlds: Res<WorldsDir>, failure: Res<LastFailure>) {
+fn start(
+    mut commands: Commands,
+    worlds: Res<WorldsDir>,
+    failure: Res<LastFailure>,
+    returning: Res<Returning>,
+) {
     let mut launcher = Launcher {
-        screen: Screen::List,
+        screen: if returning.0 {
+            Screen::Worlds
+        } else {
+            Screen::Title
+        },
         entries: Vec::new(),
         selected: None,
         card: None,
         form: Form::default(),
+        initial: Form::default(),
         rename: String::new(),
+        modes: Modes::default(),
+        search: String::new(),
+        mod_search: String::new(),
+        mod_tab: None,
+        flipped: Default::default(),
         problem: None,
         clashes: Default::default(),
         version: 0,
+        trust_asked: false,
         opening_frames: 0,
     };
     launcher.refresh(&worlds.0);
@@ -401,6 +813,7 @@ fn start(mut commands: Commands, worlds: Res<WorldsDir>, failure: Res<LastFailur
             save_untouched: true,
         });
         launcher.selected = Some(failure.folder.clone());
+        launcher.screen = Screen::Worlds;
     }
     commands.insert_resource(launcher);
 }
@@ -419,8 +832,16 @@ fn activate(event: On<Activate>, acts: Query<&Act>, mut queue: ResMut<Queue>) {
     }
 }
 
+/// Settings is one screen with the game's, drawn over the launcher.
+fn open_settings(event: On<Activate>, acts: Query<&Act>, mut settings: super::settings::Opener) {
+    if acts.get(event.entity) == Ok(&Act::Settings) {
+        settings.open();
+    }
+}
+
 fn keys(
     keys: Res<ButtonInput<KeyCode>>,
+    settings: Option<Res<super::settings::Settings>>,
     launcher: Option<Res<Launcher>>,
     focus: Res<InputFocus>,
     fields: Query<&Field>,
@@ -430,9 +851,12 @@ fn keys(
     let Some(launcher) = launcher else {
         return;
     };
+    if settings.is_some_and(|s| s.open) {
+        return;
+    }
     if keys.just_pressed(KeyCode::Escape) || pad.is_some_and(|pad| pad.cancel) {
         queue.0.push(match launcher.screen {
-            Screen::List => Act::Dismiss,
+            Screen::Title | Screen::Worlds if launcher.card.is_some() => Act::Dismiss,
             _ => Act::Back,
         });
     }
@@ -440,10 +864,16 @@ fn keys(
     if keys.just_pressed(KeyCode::Enter)
         && let Some(field) = focus.get().and_then(|e| fields.get(e).ok())
     {
-        queue.0.push(match field {
-            Field::Name | Field::Seed => Act::Create,
-            Field::Rename => Act::SaveName,
-        });
+        match field {
+            Field::Name
+            | Field::Seed
+            | Field::Sky
+            | Field::Fog
+            | Field::TemperatureSize
+            | Field::HumiditySize => queue.0.push(Act::Next),
+            Field::Rename => queue.0.push(Act::SaveName),
+            Field::Search | Field::ModSearch => {}
+        }
     }
 }
 
@@ -461,12 +891,114 @@ fn sync_fields(
             Field::Name => launcher.form.name = value,
             Field::Seed => launcher.form.seed = value,
             Field::Rename => launcher.rename = value,
+            Field::Sky | Field::Fog | Field::TemperatureSize | Field::HumiditySize => {
+                // The page keeps the field; rebuilding it would take the focus.
+                let launcher = launcher.bypass_change_detection();
+                if let Some(draft) = launcher.form.biomes.as_mut() {
+                    typed(draft, *field, value);
+                }
+            }
+            // Typing filters the cards in place; a rebuild would take the field's focus.
+            Field::Search => launcher.bypass_change_detection().search = value,
+            Field::ModSearch => launcher.bypass_change_detection().mod_search = value,
         }
     }
     for mut text in &mut resolved {
         let wanted = launcher.form.seed_label();
         if text.0 != wanted {
             text.0 = wanted;
+        }
+    }
+}
+
+/// Hides the World cards the search does not match, without rebuilding the page.
+fn filter(
+    launcher: Option<Res<Launcher>>,
+    mut cards: Query<(&WorldCard, &mut Node), Without<NoMatch>>,
+    mut empty: Query<(&NoMatch, &mut Node)>,
+) {
+    let Some(launcher) = launcher else {
+        return;
+    };
+    let query = |by: Field| {
+        if by == Field::ModSearch {
+            &launcher.mod_search
+        } else {
+            &launcher.search
+        }
+    };
+    let mut any = std::collections::BTreeSet::new();
+    for (card, mut node) in &mut cards {
+        let matched = ui::matches(query(card.by), &card.words);
+        if matched {
+            any.insert(card.by as u8);
+        }
+        let display = if matched {
+            Display::Flex
+        } else {
+            Display::None
+        };
+        if node.display != display {
+            node.display = display;
+        }
+    }
+    for (empty, mut node) in &mut empty {
+        let display = if any.contains(&(empty.0 as u8)) {
+            Display::None
+        } else {
+            Display::Flex
+        };
+        if node.display != display {
+            node.display = display;
+        }
+    }
+}
+
+fn placeholders(
+    fields: Query<&EditableText>,
+    mut hints: Query<(&pages::Placeholder, &mut Visibility)>,
+) {
+    for (hint, mut visibility) in &mut hints {
+        let empty = fields
+            .get(hint.0)
+            .is_ok_and(|t| t.value().to_string().is_empty());
+        visibility.set_if_neq(if empty {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        });
+    }
+}
+
+/// What typing in one of the Biomes step's fields changes.
+fn typed(draft: &mut BiomesDraft, field: Field, value: String) {
+    match field {
+        Field::TemperatureSize | Field::HumiditySize => {
+            let at = usize::from(field == Field::HumiditySize);
+            if let Ok(metres) = value.trim().parse::<f32>() {
+                if at == 0 {
+                    draft.climate.temperature_size_m = metres;
+                } else {
+                    draft.climate.humidity_size_m = metres;
+                }
+            }
+            draft.sizes[at] = value;
+        }
+        _ => {
+            let at = usize::from(field == Field::Fog);
+            let parsed = colour(&value);
+            draft.colours[at] = value;
+            let selected = draft.selected;
+            if let (Some(rgb), Some(choice)) = (parsed, draft.choices.get_mut(selected)) {
+                // A Biome carries both colours or neither, so the other starts equal.
+                let mut pair = choice.sky_fog.unwrap_or(SkyFog { sky: rgb, fog: rgb });
+                if at == 0 {
+                    pair.sky = rgb;
+                } else {
+                    pair.fog = rgb;
+                }
+                choice.sky_fog = Some(pair);
+            }
         }
     }
 }
@@ -493,7 +1025,7 @@ fn handle(
     mut queue: ResMut<Queue>,
     launcher: Option<ResMut<Launcher>>,
     mut installed: ResMut<Installed>,
-    worlds: Res<WorldsDir>,
+    (worlds, previewer): (Res<WorldsDir>, Res<Previewer>),
     remover: Res<Remover>,
     mut relaunch: ResMut<Switch>,
     mut exit: MessageWriter<AppExit>,
@@ -502,419 +1034,147 @@ fn handle(
     let Some(mut l) = launcher else {
         return;
     };
+    let mut cx = Acting {
+        commands: &mut commands,
+        installed: &mut installed,
+        worlds: &worlds.0,
+        previewer: *previewer,
+        remover: &remover,
+        relaunch: &mut relaunch,
+        exit: &mut exit,
+        clipboard: clipboard.as_deref_mut(),
+    };
     for act in std::mem::take(&mut queue.0) {
+        let l = &mut *l;
         match act {
-            Act::Select(path) => {
-                l.selected = Some(path);
-                l.version += 1;
+            Act::Continue | Act::Play(..) | Act::Trust => on_open(l, &mut cx, act),
+            Act::Edit(..)
+            | Act::Delete
+            | Act::ShowFolder
+            | Act::CopySeed
+            | Act::DefaultMode(..)
+            | Act::OwnMode(..)
+            | Act::SaveName
+            | Act::ConfirmDelete => on_edit_world(l, &mut cx, act),
+            Act::New
+            | Act::ReCreate
+            | Act::CopyResolved
+            | Act::Randomize
+            | Act::More
+            | Act::PickGame(..)
+            | Act::ToggleMod(..)
+            | Act::Next
+            | Act::Step(..)
+            | Act::ToggleBiome(..)
+            | Act::SelectBiome(..)
+            | Act::CycleGround(..)
+            | Act::ResetBiomes
+            | Act::ConfirmReset
+            | Act::KeepBiomes
+            | Act::KeepEditing
+            | Act::DiscardSetup
+            | Act::Voxel(..)
+            | Act::Mode(..)
+            | Act::TrustMods
+            | Act::Create => on_create_world(l, &mut cx, act),
+            Act::Home
+            | Act::Worlds
+            | Act::Library
+            | Act::Settings
+            | Act::Quit
+            | Act::Back
+            | Act::Dismiss
+            | Act::Disclose(..)
+            | Act::ModTab(..) => navigate(l, &mut cx, act),
+        }
+    }
+}
+
+/// What an act reaches besides the launcher.
+struct Acting<'a, 'w, 's, 'e> {
+    commands: &'a mut Commands<'w, 's>,
+    installed: &'a mut Installed,
+    worlds: &'a Path,
+    previewer: Previewer,
+    remover: &'a Remover,
+    relaunch: &'a mut Switch,
+    exit: &'a mut MessageWriter<'e, AppExit>,
+    clipboard: Option<&'a mut bevy::clipboard::Clipboard>,
+}
+
+/// The acts that move between the title, the Worlds and the Library, or leave.
+fn navigate(l: &mut Launcher, cx: &mut Acting, act: Act) {
+    match act {
+        Act::Home => l.show(Screen::Title),
+        Act::Worlds => {
+            l.search.clear();
+            l.show(Screen::Worlds);
+        }
+        Act::Library => l.show(Screen::Library),
+        Act::Settings => {}
+        Act::Quit => {
+            cx.relaunch.0 = None;
+            cx.exit.write(AppExit::Success);
+        }
+        Act::Disclose(row) => {
+            if !l.flipped.remove(&row) {
+                l.flipped.insert(row);
             }
-            Act::Open => {
-                let Some(entry) = l.selected() else {
-                    continue;
-                };
-                let path = entry.path.clone();
-                let needs_game = entry.details().is_none_or(|d| d.game.is_some());
-                let ids = match entry.details() {
-                    Some(d) => {
-                        if !installed.unmet(d).is_empty() {
-                            continue;
-                        }
-                        d.game
-                            .iter()
-                            .map(|g| g.id.clone())
-                            .chain(d.mods.iter().map(|m| m.id.clone()))
-                            .collect()
-                    }
-                    None => installed.default_ids(),
-                };
-                if needs_game && let Err(e) = installed.prepare_trust(&ids) {
-                    l.problem = Some(format!("Could not check Trust: {e}"));
-                    l.version += 1;
-                    continue;
-                }
-                if needs_game && !installed.untrusted.is_empty() {
-                    l.show(Screen::Trust(Next::Open(path)));
-                } else {
-                    open(&mut l, &mut relaunch, path);
-                }
+            l.version += 1;
+        }
+        Act::ModTab(tab) => {
+            l.mod_tab = tab;
+            l.version += 1;
+        }
+        // Escape answers the reset dialog rather than leaving the step under it.
+        Act::Back if l.form.biomes.as_ref().is_some_and(|d| d.resetting) => {
+            if let Some(draft) = l.form.biomes.as_mut() {
+                draft.resetting = false;
             }
-            Act::New => {
-                if installed.game.is_none() {
-                    continue;
-                }
-                l.form = Form {
-                    game: installed.game.as_ref().map(|g| g.id.clone()),
-                    mods: installed
-                        .game
-                        .as_ref()
-                        .map(|g| installed.suggested(&g.id))
-                        .unwrap_or_default(),
-                    ..Form::default()
-                };
-                l.show(Screen::Create);
-            }
-            Act::ReCreate => {
-                let Some(details) = l.selected().and_then(Entry::details).cloned() else {
-                    continue;
-                };
-                // A different Game or Mod version would silently change the content.
-                if details.game.is_none() || !installed.unmet(&details).is_empty() {
-                    continue;
-                }
-                let copy = format!("{} (copy)", details.name);
-                l.form = Form {
-                    name: copy.chars().take(library::MAX_NAME_CHARS).collect(),
-                    seed: details.seed.to_string(),
-                    voxel_size_m: details.voxel_size_m,
-                    more: details.voxel_size_m != 1.0,
-                    game: details.game.as_ref().map(|g| g.id.clone()),
-                    mods: details.mods.iter().map(|m| m.id.clone()).collect(),
-                    ..Form::default()
-                };
-                match l.form.game.clone() {
-                    Some(game) if !installed.mods.is_empty() => {
-                        l.clashes = installed.clashes(&game, &l.form.mods);
-                        l.show(Screen::Mods);
-                    }
-                    _ => l.show(Screen::Create),
-                }
-            }
-            Act::Rename => {
-                let Some(entry) = l.selected() else {
-                    continue;
-                };
-                let path = entry.path.clone();
-                l.rename = entry.name().unwrap_or_default().to_owned();
-                l.show(Screen::Rename(path));
-            }
-            Act::Delete => {
-                if let Some(path) = l.selected.clone() {
-                    l.show(Screen::Delete(path));
-                }
-            }
-            Act::ShowFolder => {
-                if let Some(path) = l.selected.clone() {
-                    reveal(&path);
-                }
-            }
-            Act::CopySeed => {
-                if let Some(seed) = l.selected().and_then(Entry::details).map(|d| d.seed) {
-                    copy(&mut commands, clipboard.as_deref_mut(), seed);
-                }
-            }
-            Act::CopyResolved => {
-                if let Ok(seed) = l.form.seed() {
-                    copy(&mut commands, clipboard.as_deref_mut(), seed);
-                }
-            }
-            Act::Quit => {
-                relaunch.0 = None;
-                exit.write(AppExit::Success);
-            }
-            Act::Back => match l.screen {
-                Screen::Trust(Next::Create) => l.show(if installed.mods.is_empty() {
-                    Screen::Create
-                } else {
-                    Screen::Mods
-                }),
-                Screen::Mods => l.show(Screen::Create),
-                Screen::Opening(_) | Screen::List => {}
-                _ => l.show(Screen::List),
+            l.version += 1;
+        }
+        Act::Back => match l.screen.clone() {
+            Screen::Trust(Next::Create) => l.show(Screen::Create(Step::Review)),
+            Screen::Create(step) => match step.previous() {
+                Some(previous) => l.show(Screen::Create(previous)),
+                None if l.form.unchanged_from(&l.initial) => l.show(Screen::Worlds),
+                None => l.show(Screen::Discard(step)),
             },
-            Act::Dismiss => {
-                if l.card.take().is_some() {
-                    l.version += 1;
-                }
-            }
-            Act::Randomize => {
-                l.form.seed = tesserae_core::seed::random().to_string();
+            Screen::Discard(step) => l.show(Screen::Create(step)),
+            Screen::Delete(path) => l.show(Screen::Edit(path)),
+            Screen::Edit(_) | Screen::Trust(Next::Open(_)) => l.show(Screen::Worlds),
+            Screen::Worlds | Screen::Library => l.show(Screen::Title),
+            Screen::Opening(_) | Screen::Title => {}
+        },
+        Act::Dismiss => {
+            let dismissed = l.card.take().is_some();
+            if dismissed {
                 l.version += 1;
-            }
-            Act::More => {
-                l.form.more = !l.form.more;
-                l.version += 1;
-            }
-            Act::PickGame(index) => {
-                let Some(game) = installed.games.get(index) else {
-                    continue;
-                };
-                l.form.game = Some(game.id.clone());
-                // Each Game starts from the Mods it suggests; picks made for another do not carry over.
-                l.form.mods = installed.suggested(&game.id);
-                l.version += 1;
-            }
-            Act::ToggleMod(index) => {
-                let (Some(game), Some(m)) = (l.form.game.clone(), installed.mods.get(index)) else {
-                    continue;
-                };
-                if installed.blocked(&game, &m.id).is_some() {
-                    continue;
-                }
-                if let Some(clash) = l.clashes.get(&m.id) {
-                    // A Mod that clashes with a pick swaps it out; one that clashes with what the
-                    // Game requires cannot be added.
-                    let Some(out) = clash.replaces.clone() else {
-                        continue;
-                    };
-                    l.form.mods.remove(&out);
-                    l.form.mods.insert(m.id.clone());
-                } else if !l.form.mods.remove(&m.id) {
-                    let needed = installed.closure_for(&game, &l.form.mods);
-                    // A dependency of another pick is locked on; ticking it by hand adds nothing.
-                    if !needed.contains(&m.id) {
-                        l.form.mods.insert(m.id.clone());
-                    }
-                }
-                l.clashes = installed.clashes(&game, &l.form.mods);
-                l.version += 1;
-            }
-            Act::NextMods => {
-                if l.screen != Screen::Create {
-                    continue;
-                }
-                let Some(game) = l.form.game.clone() else {
-                    l.problem = Some(NO_GAME.into());
-                    l.version += 1;
-                    continue;
-                };
-                l.clashes = installed.clashes(&game, &l.form.mods);
-                l.show(Screen::Mods);
-            }
-            Act::Voxel(size) => {
-                l.form.voxel_size_m = size;
-                l.version += 1;
-            }
-            Act::Create => {
-                if !matches!(l.screen, Screen::Create | Screen::Mods) {
-                    continue;
-                }
-                let ids = chosen_ids(&l.form, &installed);
-                if let Err(e) = installed.prepare_trust(&ids) {
-                    l.problem = Some(format!("Could not check Trust: {e}"));
-                    l.version += 1;
-                    continue;
-                }
-                let needs_trust = !installed.untrusted.is_empty();
-                if needs_trust && validate(&l.form).is_ok() {
-                    l.show(Screen::Trust(Next::Create));
-                } else {
-                    create(&mut l, &installed, &worlds.0, &mut relaunch);
-                }
-            }
-            Act::Trust => {
-                let Screen::Trust(next) = l.screen.clone() else {
-                    continue;
-                };
-                if let Err(e) = installed.grant_all() {
-                    l.problem = Some(format!("Could not record Trust: {e}"));
-                    l.version += 1;
-                    continue;
-                }
-                if !installed.untrusted.is_empty() {
-                    l.version += 1;
-                    continue;
-                }
-                match next {
-                    Next::Open(path) => open(&mut l, &mut relaunch, path),
-                    Next::Create => create(&mut l, &installed, &worlds.0, &mut relaunch),
-                }
-            }
-            Act::SaveName => {
-                let Screen::Rename(path) = l.screen.clone() else {
-                    continue;
-                };
-                let result = library::valid_name(&l.rename)
-                    .map_err(|e| e.to_string())
-                    .and_then(|name| library::rename(&path, &name).map_err(describe));
-                match result {
-                    Ok(()) => {
-                        l.show(Screen::List);
-                        l.refresh(&worlds.0);
-                    }
-                    Err(e) => {
-                        l.problem = Some(e);
-                        l.version += 1;
-                    }
-                }
-            }
-            Act::ConfirmDelete => {
-                let Screen::Delete(path) = l.screen.clone() else {
-                    continue;
-                };
-                let result = library::ensure_closed(&path)
-                    .map_err(describe)
-                    .and_then(|()| (remover.0)(&path));
-                match result {
-                    Ok(()) => {
-                        l.selected = None;
-                        l.show(Screen::List);
-                        l.refresh(&worlds.0);
-                    }
-                    Err(e) => {
-                        l.problem = Some(e);
-                        l.version += 1;
-                    }
-                }
             }
         }
-    }
-}
-
-fn describe(error: tesserae_core::save::Error) -> String {
-    match error {
-        tesserae_core::save::Error::Busy => "This World is open in another Tesserae.".into(),
-        e => e.to_string(),
-    }
-}
-
-fn validate(form: &Form) -> Result<(String, u64), String> {
-    let name = library::valid_name(&form.name).map_err(|e| e.to_string())?;
-    Ok((name, form.seed()?))
-}
-
-/// The Game and every Mod, dependencies included, a World made from this form would load.
-fn chosen_ids(form: &Form, installed: &Installed) -> Vec<String> {
-    let Some(game) = &form.game else {
-        return Vec::new();
-    };
-    std::iter::once(game.clone())
-        .chain(installed.closure_for(game, &form.mods))
-        .collect()
-}
-
-fn create(l: &mut Launcher, installed: &Installed, worlds: &Path, relaunch: &mut Switch) {
-    let Some(game) = l
-        .form
-        .game
-        .as_ref()
-        .and_then(|id| installed.games.iter().find(|g| &g.id == id))
-        .cloned()
-    else {
-        l.form.problem = Some(NO_GAME.into());
-        l.show(Screen::Create);
-        return;
-    };
-    let missing = installed.missing(&game.id);
-    if !missing.is_empty() {
-        l.form.problem = Some(format!(
-            "{} needs {}, which {} not installed.",
-            ui::title(&game.id),
-            missing.join(", "),
-            if missing.len() == 1 { "is" } else { "are" }
-        ));
-        l.show(Screen::Create);
-        return;
-    }
-    let mods: Vec<_> = installed
-        .closure_for(&game.id, &l.form.mods)
-        .iter()
-        .filter_map(|id| installed.mods.iter().find(|m| &m.id == id))
-        .map(|m| library::ModRef {
-            id: m.id.clone(),
-            version: m.version.clone(),
-        })
-        .collect();
-    let (name, seed) = match validate(&l.form) {
-        Ok(valid) => valid,
-        Err(e) => {
-            l.form.problem = Some(e);
-            l.show(Screen::Create);
-            return;
-        }
-    };
-    let now = library::now_unix_s();
-    let sidecar = Sidecar {
-        name: name.clone(),
-        game: Some(game),
-        mods,
-        seed,
-        voxel_size_m: l.form.voxel_size_m,
-        created_unix_s: now,
-        last_played_unix_s: now,
-        world: tesserae_core::save::WorldId::new(),
-        pending: true,
-    };
-    match library::create(worlds, &sidecar) {
-        Ok(path) => {
-            relaunch.0 = Some(Target::World(path));
-            l.show(Screen::Opening(name));
-        }
-        Err(e) => {
-            l.form.problem = Some(format!("Could not create the World folder: {e}"));
-            l.show(Screen::Create);
-        }
-    }
-}
-
-fn open(l: &mut Launcher, relaunch: &mut Switch, path: PathBuf) {
-    let name = l.display_name(&path);
-    relaunch.0 = Some(Target::World(path));
-    l.show(Screen::Opening(name));
-}
-
-fn copy(commands: &mut Commands, clipboard: Option<&mut bevy::clipboard::Clipboard>, seed: u64) {
-    let copied = clipboard.is_some_and(|c| c.set_text(seed.to_string()).is_ok());
-    if copied {
-        ui::notify(commands, "Seed copied", Tone::Change);
-    } else {
-        ui::notify(commands, "Could not copy the seed", Tone::Alert);
-    }
-}
-
-fn reveal(path: &Path) {
-    let program = if cfg!(target_os = "macos") {
-        "open"
-    } else if cfg!(windows) {
-        "explorer"
-    } else {
-        "xdg-open"
-    };
-    if let Err(e) = std::process::Command::new(program).arg(path).spawn() {
-        warn!("could not show {}: {e}", path.display());
-    }
-}
-
-/// Lets the Opening screen draw, then hands the World to the loader.
-fn opening(
-    mut commands: Commands,
-    launcher: Option<ResMut<Launcher>>,
-    mut switch: ResMut<Switch>,
-    next: Option<ResMut<NextState<AppState>>>,
-) {
-    let Some(mut l) = launcher else {
-        return;
-    };
-    let Screen::Opening(name) = &l.screen else {
-        return;
-    };
-    let name = name.clone();
-    l.opening_frames += 1;
-    if l.opening_frames == OPENING_FRAMES
-        && let Some(mut next) = next
-        && let Some(Target::World(folder)) = switch.0.take()
-    {
-        commands.insert_resource(OpenRequest {
-            what: What::Folder(folder),
-            name: Some(name),
-            from_list: true,
-        });
-        next.set(AppState::Loading);
+        _ => {}
     }
 }
 
 fn render(
     mut commands: Commands,
-    launcher: Option<Res<Launcher>>,
+    (launcher, settings): (
+        Option<Res<Launcher>>,
+        Option<Res<super::settings::Settings>>,
+    ),
     installed: Res<Installed>,
     roots: Query<Entity, With<Root>>,
     scrolled: Query<&ScrollPosition, With<PageScroll>>,
     logo: Option<Res<ui::Mosaic>>,
-    (mut built, mut shown): (Local<Option<u64>>, Local<Option<Screen>>),
+    (mut built, mut shown, mut covered): (Local<Option<u64>>, Local<Option<Screen>>, Local<bool>),
 ) {
     let Some(l) = launcher else {
         return;
     };
-    if *built == Some(l.version) {
+    // Closing Settings rebuilds the page under it, so focus lands on it again.
+    let open = settings.is_some_and(|s| s.open);
+    let uncovered = std::mem::replace(&mut *covered, open) && !open;
+    if *built == Some(l.version) && !uncovered {
         return;
     }
     *built = Some(l.version);
@@ -928,41 +1188,7 @@ fn render(
     for root in &roots {
         commands.entity(root).despawn();
     }
-    let mut focus = None;
-    let mut screen = commands.spawn((
-        Root,
-        BackgroundColor(ui::BG),
-        Node {
-            // Absolute, like the in-game menus' roots: a flow root is as tall as its content, so
-            // a long page would overflow the window instead of scrolling inside it.
-            position_type: PositionType::Absolute,
-            left: Val::Px(0.0),
-            top: Val::Px(0.0),
-            width: Val::Percent(100.0),
-            height: Val::Percent(100.0),
-            padding: UiRect::axes(Val::Percent(5.0), Val::Px(20.0)),
-            flex_direction: FlexDirection::Column,
-            ..default()
-        },
-    ));
-    // The list is the one screen with no group of its own, and Tab needs one.
-    if l.screen == Screen::List {
-        screen.insert(TabGroup::default());
-    }
-    screen.with_children(|root| {
-        header(root, logo.as_deref());
-        match &l.screen {
-            Screen::List => focus = list(root, &l, &installed),
-            Screen::Create => focus = form(root, &l, &installed, scroll),
-            Screen::Mods => focus = mods_page(root, &l, &installed, scroll),
-            Screen::Opening(name) => {
-                centered(root, false, |card| super::loading::opening(card, name));
-            }
-            Screen::Rename(_) => focus = rename(root, &l),
-            Screen::Delete(path) => focus = delete(root, &l, path),
-            Screen::Trust(next) => focus = trust(root, &l, &installed, next, scroll),
-        }
-    });
+    let focus = pages::spawn(&mut commands, &l, &installed, logo.as_deref(), scroll);
     if let Some(entity) = focus {
         commands.queue(move |world: &mut World| {
             if let Some(mut focus) = world.get_resource_mut::<InputFocus>() {
@@ -972,202 +1198,335 @@ fn render(
     }
 }
 
-fn header(root: &mut ChildSpawnerCommands, logo: Option<&ui::Mosaic>) {
-    root.spawn((
-        Node {
-            height: Val::Px(56.0),
-            flex_shrink: 0.0,
-            justify_content: JustifyContent::SpaceBetween,
-            align_items: AlignItems::Center,
-            border: UiRect::bottom(Val::Px(1.0)),
-            margin: UiRect::bottom(Val::Px(18.0)),
-            ..default()
-        },
-        BorderColor::all(ui::EDGE),
-    ))
-    .with_children(|row| {
-        row.spawn(Node {
-            align_items: AlignItems::Center,
-            column_gap: Val::Px(10.0),
-            ..default()
-        })
-        .with_children(|brand| {
-            if let Some(logo) = logo {
-                brand.spawn((
-                    ImageNode::new(logo.0.clone()),
-                    Node {
-                        width: Val::Px(29.0),
-                        height: Val::Px(29.0),
-                        ..default()
-                    },
-                    Pickable::IGNORE,
-                ));
-            }
-            ui::weighted_text(brand, "Tesserae", 17.0, 650, ui::INK);
-        });
-        ui::compact_button(row, "Quit", Act::Quit, false, 32.0, 11.0);
-    });
-}
-
-fn heading(parent: &mut ChildSpawnerCommands, title: &str, subtitle: &str) {
-    parent
-        .spawn(Node {
-            flex_direction: FlexDirection::Column,
-            row_gap: Val::Px(6.0),
-            flex_shrink: 1.0,
-            min_width: Val::Px(0.0),
-            ..default()
-        })
-        .with_children(|t| {
-            ui::weighted_text(t, title, 25.0, 620, ui::INK);
-            ui::text(t, subtitle, 12.0, ui::MUTED);
-        });
-}
-
-fn row(
-    parent: &mut ChildSpawnerCommands,
-    gap: f32,
-    children: impl FnOnce(&mut ChildSpawnerCommands),
-) {
-    parent
-        .spawn(Node {
-            column_gap: Val::Px(gap),
-            row_gap: Val::Px(gap),
-            flex_wrap: FlexWrap::Wrap,
-            align_items: AlignItems::Center,
-            ..default()
-        })
-        .with_children(children);
-}
-
-/// A page's buttons in one line that never wraps or shrinks, however long the heading beside it.
-fn actions(parent: &mut ChildSpawnerCommands, children: impl FnOnce(&mut ChildSpawnerCommands)) {
-    parent
-        .spawn(Node {
-            column_gap: Val::Px(7.0),
-            align_items: AlignItems::Center,
-            flex_shrink: 0.0,
-            ..default()
-        })
-        .with_children(children);
-}
-
-fn panel(parent: &mut ChildSpawnerCommands, children: impl FnOnce(&mut ChildSpawnerCommands)) {
-    parent
-        .spawn((
-            BackgroundColor(ui::CARD),
-            BorderColor::all(ui::EDGE),
-            Node {
-                padding: UiRect::all(Val::Px(18.0)),
-                border: UiRect::all(Val::Px(1.0)),
-                border_radius: BorderRadius::all(Val::Px(8.0)),
-                flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(10.0),
-                ..default()
-            },
-        ))
-        .with_children(children);
-}
-
-/// A card in the middle of the screen. Only a dialog traps Tab and pad focus;
-/// the empty list's card has no controls, and trapping there strands Create.
-fn centered(
-    root: &mut ChildSpawnerCommands,
-    modal: bool,
-    children: impl FnOnce(&mut ChildSpawnerCommands),
-) {
-    root.spawn(Node {
-        flex_grow: 1.0,
-        align_items: AlignItems::Center,
-        justify_content: JustifyContent::Center,
-        ..default()
-    })
-    .with_children(|center| {
-        center
-            .spawn((
-                TabGroup { modal, ..default() },
-                BackgroundColor(ui::CARD),
-                BorderColor::all(ui::EDGE),
-                Node {
-                    width: Val::Px(440.0),
-                    max_width: Val::Percent(92.0),
-                    padding: UiRect::all(Val::Px(26.0)),
-                    border: UiRect::all(Val::Px(1.0)),
-                    border_radius: BorderRadius::all(Val::Px(10.0)),
-                    flex_direction: FlexDirection::Column,
-                    row_gap: Val::Px(10.0),
-                    ..default()
-                },
-            ))
-            .with_children(children);
-    });
-}
-
-fn problem(parent: &mut ChildSpawnerCommands, message: Option<&String>) {
-    if let Some(message) = message {
-        ui::paragraph(parent, message.clone(), 12.0, ui::AMBER);
-    }
-}
-
-fn text_field(parent: &mut ChildSpawnerCommands, field: Field, value: &str, hint: &str) -> Entity {
-    let mut entity = Entity::PLACEHOLDER;
-    parent
-        .spawn((
-            BackgroundColor(ui::BG),
-            BorderColor::all(ui::EDGE),
-            Node {
-                min_width: Val::Px(0.0),
-                height: Val::Px(40.0),
-                border: UiRect::all(Val::Px(1.0)),
-                border_radius: BorderRadius::all(Val::Px(6.0)),
-                padding: UiRect::axes(Val::Px(11.0), Val::Px(0.0)),
-                align_items: AlignItems::Center,
-                width: Val::Percent(100.0),
-                ..default()
-            },
-        ))
-        .with_children(|frame| {
-            entity = frame
-                .spawn((
-                    field,
-                    TextInput,
-                    EditableText::new(value),
-                    bevy::input_focus::tab_navigation::TabIndex(0),
-                    ui::font(13.0),
-                    TextColor(ui::INK),
-                    bevy::text::TextCursorStyle {
-                        color: ui::LEAF,
-                        selection_color: ui::LEAF.with_alpha(0.3),
-                        ..default()
-                    },
-                    TextLayout::linebreak(bevy::text::LineBreak::NoWrap),
-                    Node {
-                        width: Val::Percent(100.0),
-                        height: Val::Px(20.0),
-                        ..default()
-                    },
-                ))
-                .id();
-        });
-    if !hint.is_empty() {
-        ui::description(parent, hint);
-    }
-    entity
-}
-
-fn label(parent: &mut ChildSpawnerCommands, value: &str) {
-    ui::weighted_text(parent, value, 12.0, 600, ui::INK);
-}
-
 fn relative(then_s: u64) -> String {
     let ago = library::now_unix_s().saturating_sub(then_s);
     match ago {
         0..60 => "just now".into(),
-        60..3600 => format!("{} min ago", ago / 60),
-        3600..86_400 => format!("{} h ago", ago / 3600),
+        60..120 => "1 minute ago".into(),
+        120..3600 => format!("{} minutes ago", ago / 60),
+        3600..7200 => "1 hour ago".into(),
+        7200..86_400 => format!("{} hours ago", ago / 3600),
         86_400..172_800 => "yesterday".into(),
         _ => format!("{} days ago", ago / 86_400),
     }
+}
+
+/// The headline follows the window's width as the prototype's `clamp()` does.
+fn hero_size(
+    mut heroes: Query<(&mut TextFont, &mut bevy::text::LetterSpacing), With<pages::Hero>>,
+    roots: Query<&ComputedNode, With<Root>>,
+) {
+    let Some(root) = roots.iter().next() else {
+        return;
+    };
+    let width = root.size().x * root.inverse_scale_factor();
+    if width <= 0.0 {
+        return;
+    }
+    let size = if width >= theme::WIDE_WINDOW {
+        theme::TEXT_HERO_WIDE
+    } else {
+        (width * theme::TEXT_HERO_VW / 100.0)
+            .clamp(*theme::TEXT_HERO.start(), *theme::TEXT_HERO.end())
+    };
+    for (mut font, mut spacing) in &mut heroes {
+        let wanted = bevy::text::FontSize::Px(size);
+        if font.font_size != wanted {
+            font.font_size = wanted;
+            font.font_variations = theme::optical(size);
+            *spacing = bevy::text::LetterSpacing::Px(theme::HERO_TRACKING * size);
+        }
+    }
+}
+
+fn header_hover(
+    mut buttons: Query<
+        (
+            Entity,
+            &bevy::picking::hover::Hovered,
+            &mut BackgroundColor,
+            &mut BorderColor,
+            &mut Outline,
+        ),
+        With<pages::HeaderButton>,
+    >,
+    focus: Res<InputFocus>,
+    visible: Option<Res<bevy::input_focus::InputFocusVisible>>,
+) {
+    let focused = ui::visible_focus(Some(&focus), visible.as_deref());
+    for (entity, hovered, mut fill, mut edge, mut outline) in &mut buttons {
+        let (f, e) = if hovered.0 {
+            (theme::QUIET_HOVER, theme::QUIET_HOVER_EDGE)
+        } else {
+            (Color::NONE, theme::ICON_EDGE)
+        };
+        fill.set_if_neq(BackgroundColor(f));
+        edge.set_if_neq(BorderColor::all(e));
+        let ring = if focused == Some(entity) {
+            theme::FOCUS
+        } else {
+            Color::NONE
+        };
+        if outline.color != ring {
+            outline.color = ring;
+        }
+    }
+}
+
+type Picks = (
+    Entity,
+    &'static pages::Pick,
+    &'static bevy::picking::hover::Hovered,
+    Has<bevy::ui::InteractionDisabled>,
+    &'static mut BackgroundColor,
+    &'static mut BorderColor,
+    &'static mut Outline,
+);
+
+fn paint_picks(
+    mut picks: Query<Picks>,
+    focus: Res<InputFocus>,
+    visible: Option<Res<bevy::input_focus::InputFocusVisible>>,
+) {
+    let focused = ui::visible_focus(Some(&focus), visible.as_deref());
+    for (entity, pick, hovered, disabled, mut fill, mut edge, mut outline) in &mut picks {
+        let (f, e) = match pick.hover {
+            Some(hover) if hovered.0 && !disabled => hover,
+            _ => (pick.fill, pick.edge),
+        };
+        fill.set_if_neq(BackgroundColor(f));
+        edge.set_if_neq(BorderColor::all(e));
+        let ring = if focused == Some(entity) {
+            theme::FOCUS
+        } else {
+            Color::NONE
+        };
+        if outline.color != ring {
+            outline.color = ring;
+        }
+    }
+}
+
+/// Cuts each half of a thumbnail's tree along its diagonal once its size is known.
+fn shape_trees(
+    mut commands: Commands,
+    halves: Query<(Entity, &pages::HalfTree, &ComputedNode), Changed<ComputedNode>>,
+) {
+    use bevy::ui::InterpolationColorSpace;
+    for (entity, half, node) in &halves {
+        let size = node.size();
+        if size.x <= 0.0 || size.y <= 0.0 {
+            continue;
+        }
+        // Perpendicular to the diagonal, toward the filled side.
+        let angle = (half.0 * size.y).atan2(-size.x);
+        commands.entity(entity).insert(BackgroundGradient::from(
+            LinearGradient::new(
+                angle,
+                vec![
+                    ColorStop::new(Color::NONE, Val::Percent(0.0)),
+                    ColorStop::new(Color::NONE, Val::Percent(50.0)),
+                    ColorStop::new(theme::THUMBNAIL_TREE, Val::Percent(50.0)),
+                    ColorStop::new(theme::THUMBNAIL_TREE, Val::Percent(100.0)),
+                ],
+            )
+            .in_color_space(InterpolationColorSpace::Srgba),
+        ));
+    }
+}
+
+/// A Biome slider moved: the draft changes in place, without a rebuild that
+/// would end the drag.
+fn slide(
+    event: On<bevy::ui_widgets::ValueChange<f32>>,
+    sliders: Query<&pages::KnobSlider>,
+    mut commands: Commands,
+    launcher: Option<ResMut<Launcher>>,
+) {
+    let (Ok(knob), Some(mut launcher)) = (sliders.get(event.source), launcher) else {
+        return;
+    };
+    let launcher = launcher.bypass_change_detection();
+    if launcher.screen != Screen::Create(Step::Biomes) {
+        return;
+    }
+    let Some(draft) = launcher.form.biomes.as_mut() else {
+        return;
+    };
+    set(draft, knob.0, event.value);
+    let Some(choice) = draft.choices.get(draft.selected) else {
+        return;
+    };
+    let value = match knob.0 {
+        Knob::Temperature => choice.temperature,
+        Knob::Humidity => choice.humidity,
+        Knob::Caves => choice.cave_scale.unwrap_or(1.0),
+    };
+    commands
+        .entity(event.source)
+        .insert(bevy::ui_widgets::SliderValue(value));
+}
+
+/// Keeps each Biome slider's thumb, fill and reading, and the selected
+/// Biome's dot, on the draft's values.
+type Knobs = (
+    Entity,
+    &'static pages::KnobSlider,
+    &'static bevy::ui_widgets::SliderValue,
+    &'static mut Outline,
+);
+type KnobParts = (
+    &'static pages::KnobPart,
+    Option<&'static mut Node>,
+    Option<&'static mut Text>,
+);
+
+fn follow_knobs(
+    mut sliders: Query<Knobs, Without<pages::CurrentDot>>,
+    mut parts: Query<KnobParts, Without<pages::CurrentDot>>,
+    mut dots: Query<&mut Node, With<pages::CurrentDot>>,
+    launcher: Option<Res<Launcher>>,
+    focus: Res<InputFocus>,
+    visible: Option<Res<bevy::input_focus::InputFocusVisible>>,
+) {
+    let focused = ui::visible_focus(Some(&focus), visible.as_deref());
+    for (entity, _, _, mut outline) in &mut sliders {
+        let ring = if focused == Some(entity) {
+            theme::FOCUS
+        } else {
+            Color::NONE
+        };
+        if outline.color != ring {
+            outline.color = ring;
+        }
+    }
+    for (part, node, text) in &mut parts {
+        let (pages::KnobPart::Thumb(slider)
+        | pages::KnobPart::Fill(slider)
+        | pages::KnobPart::Reading(slider)) = *part;
+        let Ok((_, knob, value, _)) = sliders.get(slider) else {
+            continue;
+        };
+        let range = knob_range(knob.0);
+        let percent =
+            Val::Percent((value.0 - range.start()) / (range.end() - range.start()) * 100.0);
+        match (part, node, text) {
+            (pages::KnobPart::Thumb(_), Some(mut node), _) => {
+                if node.left != percent {
+                    node.left = percent;
+                }
+            }
+            (pages::KnobPart::Fill(_), Some(mut node), _) => {
+                if node.width != percent {
+                    node.width = percent;
+                }
+            }
+            (pages::KnobPart::Reading(_), _, Some(mut text)) => {
+                text.set_if_neq(Text::new(pages::reading(knob.0, value.0)));
+            }
+            _ => {}
+        }
+    }
+    let Some(choice) = launcher
+        .as_ref()
+        .and_then(|l| l.form.biomes.as_ref())
+        .and_then(|d| d.choices.get(d.selected))
+    else {
+        return;
+    };
+    let (left, bottom) = (
+        Val::Percent(choice.temperature * 100.0),
+        Val::Percent(choice.humidity * 100.0),
+    );
+    for mut node in &mut dots {
+        if node.left != left || node.bottom != bottom {
+            node.left = left;
+            node.bottom = bottom;
+        }
+    }
+}
+
+/// What the scenery was last painted at, per filter.
+#[derive(Default)]
+struct Painted {
+    size: UVec2,
+    image: Option<Handle<Image>>,
+    at_s: f32,
+}
+
+/// The painted scenery, one image per filter, repainted when the window's size has settled.
+#[derive(Resource, Default)]
+struct Scenery([Painted; 2]);
+
+impl Scenery {
+    fn slot(filter: super::scenery::Filter) -> usize {
+        usize::from(filter == super::scenery::SOFT)
+    }
+}
+
+/// Paints the scenery for each backdrop at its size, again after a resize once the size has held
+/// for a moment. One paint a frame, the layer on show first, so the first frames never hitch
+/// twice and the visible layer is never the one waiting.
+fn paint_scenery(
+    mut commands: Commands,
+    backdrops: Query<(
+        Entity,
+        &pages::Backdrop,
+        &ComputedNode,
+        &Visibility,
+        Option<&ImageNode>,
+    )>,
+    images: Option<ResMut<Assets<Image>>>,
+    time: Res<Time<Real>>,
+    mut scenery: ResMut<Scenery>,
+) {
+    use super::scenery;
+    const SETTLE_S: f32 = 0.2;
+    let Some(mut images) = images else {
+        return;
+    };
+    let now = time.elapsed_secs();
+    let mut layers: Vec<_> = backdrops.iter().collect();
+    layers.sort_by_key(|(.., visibility, _)| **visibility == Visibility::Hidden);
+    let mut painted = false;
+    for (entity, backdrop, node, _, shown) in layers {
+        let size = node.size().round().as_uvec2();
+        if size.x == 0 || size.y == 0 {
+            continue;
+        }
+        let slot = &mut scenery.0[Scenery::slot(backdrop.0)];
+        let stale = slot.size != size;
+        let due = slot.image.is_none() || now - slot.at_s >= SETTLE_S;
+        if stale && due && !painted {
+            let scale = 1.0 / node.inverse_scale_factor();
+            let image = Image::new(
+                bevy::render::render_resource::Extent3d {
+                    width: size.x,
+                    height: size.y,
+                    depth_or_array_layers: 1,
+                },
+                bevy::render::render_resource::TextureDimension::D2,
+                scenery::paint(size.x, size.y, scale, backdrop.0),
+                bevy::render::render_resource::TextureFormat::Rgba8UnormSrgb,
+                bevy::asset::RenderAssetUsages::RENDER_WORLD,
+            );
+            slot.image = Some(images.add(image));
+            slot.size = size;
+            slot.at_s = now;
+            painted = true;
+        }
+        let Some(image) = slot.image.clone() else {
+            continue;
+        };
+        if shown.is_none_or(|shown| shown.image != image) {
+            commands.entity(entity).insert(ImageNode::new(image));
+        }
+    }
+}
+
+/// A Game as the launcher names it: its title, without the version.
+fn game_title(game: Option<&GameRef>) -> String {
+    game.map_or_else(|| "No Game".into(), |g| ui::title(&g.id))
 }
 
 fn game_label(game: Option<&GameRef>) -> String {
@@ -1177,1753 +1536,5 @@ fn game_label(game: Option<&GameRef>) -> String {
     )
 }
 
-fn list(root: &mut ChildSpawnerCommands, l: &Launcher, installed: &Installed) -> Option<Entity> {
-    let mut focus = None;
-    root.spawn(Node {
-        justify_content: JustifyContent::SpaceBetween,
-        align_items: AlignItems::Center,
-        flex_shrink: 0.0,
-        margin: UiRect::bottom(Val::Px(18.0)),
-        ..default()
-    })
-    .with_children(|top| {
-        heading(
-            top,
-            "Worlds",
-            "Pick up where you left off, or start somewhere new.",
-        );
-        let create = ui::button(top, "Create World", Act::New, false, false, true);
-        if installed.game.is_none() {
-            top.commands()
-                .entity(create)
-                .insert(bevy::ui::InteractionDisabled);
-        } else if l.entries.is_empty() {
-            focus = Some(create);
-        }
-    });
-    if let Some(Card {
-        title,
-        detail,
-        save_untouched,
-    }) = &l.card
-    {
-        root.spawn((
-            BackgroundColor(ui::AMBER.with_alpha(0.06)),
-            BorderColor::all(ui::AMBER.with_alpha(0.3)),
-            Node {
-                padding: UiRect::all(Val::Px(14.0)),
-                border: UiRect::all(Val::Px(1.0)),
-                border_radius: BorderRadius::all(Val::Px(6.0)),
-                margin: UiRect::bottom(Val::Px(14.0)),
-                justify_content: JustifyContent::SpaceBetween,
-                align_items: AlignItems::Center,
-                column_gap: Val::Px(12.0),
-                flex_shrink: 0.0,
-                ..default()
-            },
-        ))
-        .with_children(|card| {
-            card.spawn(Node {
-                flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(4.0),
-                flex_shrink: 1.0,
-                ..default()
-            })
-            .with_children(|words| {
-                ui::weighted_text(words, title, 13.0, 620, ui::INK);
-                ui::paragraph(words, detail, 12.0, ui::AMBER);
-                if *save_untouched {
-                    ui::description(words, "Nothing was changed in its save.");
-                }
-            });
-            ui::compact_button(card, "Dismiss", Act::Dismiss, false, 30.0, 11.0);
-        });
-    }
-    if installed.game.is_none() {
-        root.spawn(Node {
-            flex_direction: FlexDirection::Column,
-            row_gap: Val::Px(4.0),
-            margin: UiRect::bottom(Val::Px(14.0)),
-            flex_shrink: 0.0,
-            ..default()
-        })
-        .with_children(|note| {
-            ui::paragraph(note, NO_GAME, 12.0, ui::AMBER);
-            if let Some(error) = &installed.error {
-                ui::description(note, &format!("Installed Mods could not be read: {error}"));
-            }
-        });
-    }
-    if l.entries.is_empty() {
-        centered(root, false, |card| {
-            ui::weighted_text(card, "No Worlds yet", 19.0, 620, ui::INK);
-            ui::paragraph(
-                card,
-                if installed.game.is_some() {
-                    "Create a World to start playing. You can choose its seed."
-                } else {
-                    NO_GAME
-                },
-                12.0,
-                ui::MUTED,
-            );
-        });
-        return focus;
-    }
-    root.spawn(Node {
-        flex_grow: 1.0,
-        min_height: Val::Px(0.0),
-        column_gap: Val::Px(18.0),
-        ..default()
-    })
-    .with_children(|columns| {
-        columns
-            .spawn((
-                ScrollArea,
-                Node {
-                    flex_direction: FlexDirection::Column,
-                    row_gap: Val::Px(6.0),
-                    flex_basis: Val::Percent(55.0),
-                    min_width: Val::Px(0.0),
-                    overflow: Overflow::scroll_y(),
-                    ..default()
-                },
-            ))
-            .with_children(|rows| {
-                for entry in &l.entries {
-                    let selected = l.selected.as_deref() == Some(entry.path.as_path());
-                    let button = world_row(rows, entry, selected);
-                    if selected {
-                        focus = Some(button);
-                    }
-                }
-            });
-        if let Some(entry) = l.selected() {
-            columns
-                .spawn(Node {
-                    flex_basis: Val::Percent(45.0),
-                    flex_direction: FlexDirection::Column,
-                    min_width: Val::Px(0.0),
-                    ..default()
-                })
-                .with_children(|side| details(side, entry, installed));
-        }
-    });
-    focus
-}
-
-fn world_row(rows: &mut ChildSpawnerCommands, entry: &Entry, selected: bool) -> Entity {
-    let name = entry.name().unwrap_or(UNNAMED);
-    let summary = match entry.details() {
-        Some(d) if entry.incomplete() => {
-            format!("{} · not created yet", game_label(d.game.as_ref()))
-        }
-        Some(d) => format!(
-            "{} · seed {} · {}",
-            game_label(d.game.as_ref()),
-            d.seed,
-            relative(d.last_played_unix_s)
-        ),
-        None => format!("Folder {}", entry.folder()),
-    };
-    rows.spawn((
-        bevy::ui_widgets::Button,
-        bevy::input_focus::tab_navigation::TabIndex(0),
-        Act::Select(entry.path.clone()),
-        ui::Styled {
-            selected,
-            tab: false,
-            primary: false,
-        },
-        BackgroundColor(ui::CARD),
-        BorderColor::all(if selected { ui::LEAF } else { ui::EDGE }),
-        Node {
-            padding: UiRect::axes(Val::Px(14.0), Val::Px(10.0)),
-            border: UiRect::all(Val::Px(1.0)),
-            border_radius: BorderRadius::all(Val::Px(6.0)),
-            flex_direction: FlexDirection::Column,
-            align_items: AlignItems::FlexStart,
-            row_gap: Val::Px(3.0),
-            flex_shrink: 0.0,
-            ..default()
-        },
-    ))
-    .with_children(|b| {
-        ui::weighted_text(b, name, 13.0, 600, ui::INK);
-        ui::text(b, summary, 11.0, ui::MUTED);
-    })
-    .id()
-}
-
-fn details(side: &mut ChildSpawnerCommands, entry: &Entry, installed: &Installed) {
-    let unmet = entry
-        .details()
-        .map(|d| installed.unmet(d))
-        .unwrap_or_default();
-    panel(side, |p| {
-        ui::weighted_text(p, entry.name().unwrap_or(UNNAMED), 19.0, 620, ui::INK);
-        ui::description(p, &format!("Folder: {}", entry.folder()));
-        match (entry.details(), &entry.sidecar) {
-            (Some(d), _) => {
-                ui::text(
-                    p,
-                    format!("Game: {}", game_label(d.game.as_ref())),
-                    12.0,
-                    ui::INK,
-                );
-                if !d.mods.is_empty() {
-                    ui::paragraph(
-                        p,
-                        format!(
-                            "Mods: {}",
-                            d.mods
-                                .iter()
-                                .map(|m| ui::title(&m.id))
-                                .collect::<Vec<_>>()
-                                .join(" · ")
-                        ),
-                        12.0,
-                        ui::INK,
-                    );
-                }
-                row(p, 8.0, |r| {
-                    ui::text(r, format!("Seed: {}", d.seed), 12.0, ui::INK);
-                    ui::compact_button(r, "Copy", Act::CopySeed, false, 26.0, 10.0);
-                });
-                ui::text(
-                    p,
-                    format!("Voxel size: {} m", d.voxel_size_m),
-                    12.0,
-                    ui::INK,
-                );
-                ui::description(
-                    p,
-                    &format!(
-                        "Created {} · last played {}",
-                        relative(d.created_unix_s),
-                        relative(d.last_played_unix_s)
-                    ),
-                );
-                for line in &unmet {
-                    ui::paragraph(p, line, 12.0, ui::AMBER);
-                }
-                if entry.incomplete() {
-                    ui::paragraph(
-                        p,
-                        "Creation did not finish. Retry to create it, or delete it.",
-                        12.0,
-                        ui::AMBER,
-                    );
-                }
-            }
-            (None, Err(reason)) => {
-                ui::paragraph(
-                    p,
-                    format!("Its details could not be read: {reason}"),
-                    12.0,
-                    ui::AMBER,
-                );
-                ui::description(p, "Rename repairs them from the save.");
-            }
-            (None, Ok(_)) => {
-                ui::description(
-                    p,
-                    "No details are recorded. Rename repairs them from the save.",
-                );
-            }
-        }
-        row(p, 7.0, |r| {
-            if unmet.is_empty() {
-                ui::button(
-                    r,
-                    if entry.incomplete() { "Retry" } else { "Open" },
-                    Act::Open,
-                    false,
-                    false,
-                    true,
-                );
-            }
-            let same_game = entry
-                .details()
-                .is_some_and(|d| d.game.is_some() && d.game == installed.game);
-            if same_game && !entry.incomplete() {
-                ui::button(r, "Re-Create", Act::ReCreate, false, false, false);
-            }
-            ui::button(r, "Rename", Act::Rename, false, false, false);
-            ui::button(r, "Show folder", Act::ShowFolder, false, false, false);
-            let delete = ui::button(r, "Delete…", Act::Delete, false, false, false);
-            r.commands().entity(delete).insert(Danger);
-        });
-    });
-}
-
-fn form(
-    root: &mut ChildSpawnerCommands,
-    l: &Launcher,
-    installed: &Installed,
-    scroll: Vec2,
-) -> Option<Entity> {
-    let f = &l.form;
-    let mut focus = None;
-    root.spawn((
-        TabGroup::default(),
-        ScrollArea,
-        ScrollPosition(scroll),
-        PageScroll,
-        Node {
-            flex_direction: FlexDirection::Column,
-            row_gap: Val::Px(10.0),
-            max_width: Val::Px(720.0),
-            flex_grow: 1.0,
-            min_height: Val::Px(0.0),
-            overflow: Overflow::scroll_y(),
-            ..default()
-        },
-    ))
-    .with_children(|col| {
-        // Beside the heading, so they stay visible in a short window.
-        col.spawn(Node {
-            justify_content: JustifyContent::SpaceBetween,
-            align_items: AlignItems::Center,
-            column_gap: Val::Px(12.0),
-            flex_shrink: 0.0,
-            ..default()
-        })
-        .with_children(|top| {
-            heading(
-                top,
-                "Create World",
-                "Name it, pick a Game and, if you like, a seed.",
-            );
-            actions(top, |r| {
-                ui::button(r, "Cancel", Act::Back, false, false, false);
-                if installed.mods.is_empty() {
-                    ui::button(r, "Create World", Act::Create, false, false, true);
-                } else {
-                    ui::button(r, "Next: Mods", Act::NextMods, false, false, true);
-                }
-            });
-        });
-        problem(col, f.problem.as_ref());
-        label(col, "Name");
-        focus = Some(text_field(
-            col,
-            Field::Name,
-            &f.name,
-            "Up to 64 characters. Blank uses \u{201c}New World\u{201d}.",
-        ));
-        game_picker(col, f, installed);
-        label(col, "Seed");
-        row(col, 7.0, |r| {
-            r.spawn(Node {
-                flex_grow: 1.0,
-                min_width: Val::Px(240.0),
-                ..default()
-            })
-            .with_children(|c| {
-                text_field(c, Field::Seed, &f.seed, "");
-            });
-            ui::button(r, "Randomize", Act::Randomize, false, false, false);
-        });
-        ui::description(col, "A number or any words. Blank picks a random seed.");
-        row(col, 8.0, |r| {
-            r.spawn((
-                Resolved,
-                Text::new(f.seed_label()),
-                ui::font(12.0),
-                TextColor(ui::MUTED),
-                Pickable::IGNORE,
-            ));
-            ui::compact_button(r, "Copy", Act::CopyResolved, false, 26.0, 10.0);
-        });
-        row(col, 0.0, |r| {
-            ui::quiet_button(
-                r,
-                if f.more {
-                    "Hide World options"
-                } else {
-                    "More World options"
-                },
-                Act::More,
-                12.0,
-            );
-        });
-        if f.more {
-            label(col, "Voxel size");
-            row(col, 7.0, |r| {
-                for (size, text) in VOXEL_SIZES {
-                    ui::button(
-                        r,
-                        text,
-                        Act::Voxel(size),
-                        f.voxel_size_m == size,
-                        false,
-                        false,
-                    );
-                }
-            });
-            ui::description(col, "Fixed once the World is created.");
-        }
-    });
-    focus
-}
-
-fn game_picker(col: &mut ChildSpawnerCommands, f: &Form, installed: &Installed) {
-    label(col, "Game");
-    for (i, g) in installed.games.iter().enumerate() {
-        let chosen = f.game.as_deref() == Some(g.id.as_str());
-        ui::button(
-            col,
-            format!("{} {}", ui::title(&g.id), g.version),
-            Act::PickGame(i),
-            chosen,
-            false,
-            false,
-        );
-    }
-    if !installed.untrusted.is_empty() {
-        ui::description(col, "Needs Trust before it opens.");
-    }
-    if let Some(game) = f.game.as_deref() {
-        let needs = installed.required(game).len();
-        if needs > 0 {
-            ui::description(
-                col,
-                &format!(
-                    "{} needs {needs} Mods, chosen on the next page.",
-                    ui::title(game)
-                ),
-            );
-        }
-    }
-}
-
-/// Step two: the Mods, with what the Game needs locked on and what would clash left out.
-fn mods_page(
-    root: &mut ChildSpawnerCommands,
-    l: &Launcher,
-    installed: &Installed,
-    scroll: Vec2,
-) -> Option<Entity> {
-    let f = &l.form;
-    let game = f.game.clone().unwrap_or_default();
-    root.spawn((
-        TabGroup::default(),
-        ScrollArea,
-        ScrollPosition(scroll),
-        PageScroll,
-        Node {
-            flex_direction: FlexDirection::Column,
-            row_gap: Val::Px(10.0),
-            max_width: Val::Px(720.0),
-            flex_grow: 1.0,
-            min_height: Val::Px(0.0),
-            overflow: Overflow::scroll_y(),
-            ..default()
-        },
-    ))
-    .with_children(|col| {
-        col.spawn(Node {
-            justify_content: JustifyContent::SpaceBetween,
-            align_items: AlignItems::Center,
-            column_gap: Val::Px(12.0),
-            flex_shrink: 0.0,
-            ..default()
-        })
-        .with_children(|top| {
-            heading(
-                top,
-                &format!("Mods for {}", ui::title(&game)),
-                "Required Mods are locked on. Optional ones load after them.",
-            );
-            actions(top, |r| {
-                ui::button(r, "Back", Act::Back, false, false, false);
-                ui::button(r, "Create World", Act::Create, false, false, true);
-            });
-        });
-        problem(col, f.problem.as_ref());
-        let required = installed.required(&game);
-        let locked = installed.closure_for(&game, &f.mods);
-        if !required.is_empty() {
-            label(col, &format!("Required by {}", ui::title(&game)));
-            for id in &required {
-                if let Some(m) = installed.mods.iter().find(|m| &m.id == id) {
-                    let (_, about) = installed.about(id);
-                    mod_card(
-                        col,
-                        ModCard {
-                            act: None,
-                            border: ui::EDGE,
-                            selected: false,
-                            title: format!("{} {}", ui::title(&m.id), m.version),
-                            detail: about.unwrap_or_default().to_owned(),
-                            tag: Some(("Required".to_owned(), ui::MUTED)),
-                        },
-                    );
-                }
-            }
-        }
-        for section in sections(installed, &required) {
-            label(col, &section.0);
-            for i in section.1 {
-                let m = &installed.mods[i];
-                let (_, about) = installed.about(&m.id);
-                let title = format!("{} {}", ui::title(&m.id), m.version);
-                let mut shown = ModCard {
-                    act: Some(Act::ToggleMod(i)),
-                    border: ui::EDGE,
-                    selected: f.mods.contains(&m.id),
-                    title,
-                    detail: about.unwrap_or_default().to_owned(),
-                    tag: None,
-                };
-                if let Some(why) = installed.blocked(&game, &m.id) {
-                    shown.act = None;
-                    shown.detail = format!("Unavailable: {why}");
-                    shown.tag = Some(("Unavailable".to_owned(), ui::MUTED));
-                } else if let Some(clash) = l.clashes.get(&m.id) {
-                    shown.border = ui::AMBER;
-                    shown.detail = format!("Conflicts: {}", clash.reason);
-                    match &clash.replaces {
-                        Some(out) => {
-                            shown.tag = Some((format!("Replaces {}", ui::title(out)), ui::AMBER));
-                        }
-                        None => {
-                            shown.act = None;
-                            shown.tag = Some(("Conflict".to_owned(), ui::AMBER));
-                        }
-                    }
-                } else if locked.contains(&m.id) && !f.mods.contains(&m.id) {
-                    shown.act = None;
-                    shown.tag = Some(("Needed by another Mod".to_owned(), ui::MUTED));
-                } else if shown.selected {
-                    shown.tag = Some(("Added".to_owned(), ui::LEAF));
-                }
-                mod_card(col, shown);
-            }
-        }
-        for line in &installed.rejected {
-            ui::paragraph(col, format!("Skipped: {line}"), 12.0, ui::AMBER);
-        }
-    });
-    None
-}
-
-/// What one Mod card shows. `act` makes it a button; without one it only informs.
-struct ModCard {
-    act: Option<Act>,
-    border: Color,
-    selected: bool,
-    title: String,
-    detail: String,
-    tag: Option<(String, Color)>,
-}
-
-fn mod_card(parent: &mut ChildSpawnerCommands, c: ModCard) {
-    let node = Node {
-        padding: UiRect::axes(Val::Px(14.0), Val::Px(10.0)),
-        border: UiRect::all(Val::Px(1.0)),
-        border_radius: BorderRadius::all(Val::Px(6.0)),
-        justify_content: JustifyContent::SpaceBetween,
-        align_items: AlignItems::Center,
-        column_gap: Val::Px(12.0),
-        flex_shrink: 0.0,
-        ..default()
-    };
-    let body = |card: &mut ChildSpawnerCommands| {
-        card.spawn(Node {
-            flex_direction: FlexDirection::Column,
-            row_gap: Val::Px(2.0),
-            flex_shrink: 1.0,
-            ..default()
-        })
-        .with_children(|text| {
-            ui::weighted_text(text, c.title.clone(), 13.0, 620, ui::INK);
-            if !c.detail.is_empty() {
-                ui::paragraph(text, c.detail.clone(), 11.0, ui::MUTED);
-            }
-        });
-        if let Some((tag, colour)) = c.tag {
-            ui::text(card, tag, 11.0, colour);
-        }
-    };
-    match c.act.clone() {
-        Some(act) => {
-            parent
-                .spawn((
-                    bevy::ui_widgets::Button,
-                    bevy::input_focus::tab_navigation::TabIndex(0),
-                    act,
-                    ui::Styled {
-                        selected: c.selected,
-                        tab: false,
-                        primary: false,
-                    },
-                    BackgroundColor(ui::CARD),
-                    BorderColor::all(if c.selected { ui::LEAF } else { c.border }),
-                    node,
-                ))
-                .with_children(body);
-        }
-        None => {
-            parent
-                .spawn((BackgroundColor(ui::CARD), BorderColor::all(c.border), node))
-                .with_children(body);
-        }
-    }
-}
-
-/// Optional Mods grouped under their Manifest's category, known sections first, then the rest
-/// alphabetically, with uncategorised ones last. Each holds indexes into `installed.mods`.
-fn sections(installed: &Installed, required: &[String]) -> Vec<(String, Vec<usize>)> {
-    const ORDER: [&str; 6] = [
-        "Terrain",
-        "Water",
-        "Plants",
-        "Fire & light",
-        "Building",
-        "Characters",
-    ];
-    const OTHER: &str = "Other";
-    let mut groups: std::collections::BTreeMap<String, Vec<usize>> = Default::default();
-    for (i, m) in installed.mods.iter().enumerate() {
-        if required.contains(&m.id) {
-            continue;
-        }
-        let name = installed.about(&m.id).0.unwrap_or(OTHER).to_owned();
-        groups.entry(name).or_default().push(i);
-    }
-    let rank = |name: &str| {
-        ORDER
-            .iter()
-            .position(|known| *known == name)
-            .unwrap_or(if name == OTHER {
-                usize::MAX
-            } else {
-                ORDER.len()
-            })
-    };
-    let mut out: Vec<_> = groups.into_iter().collect();
-    out.sort_by_key(|(name, _)| (rank(name), name.clone()));
-    out
-}
-
-fn rename(root: &mut ChildSpawnerCommands, l: &Launcher) -> Option<Entity> {
-    let mut focus = None;
-    centered(root, true, |card| {
-        ui::weighted_text(card, "Rename World", 19.0, 620, ui::INK);
-        ui::description(
-            card,
-            "Only the name changes; the folder and save stay as they are.",
-        );
-        focus = Some(text_field(
-            card,
-            Field::Rename,
-            &l.rename,
-            "Up to 64 characters.",
-        ));
-        problem(card, l.problem.as_ref());
-        row(card, 7.0, |r| {
-            ui::button(r, "Cancel", Act::Back, false, false, false);
-            ui::button(r, "Rename", Act::SaveName, false, false, true);
-        });
-    });
-    focus
-}
-
-fn delete(root: &mut ChildSpawnerCommands, l: &Launcher, path: &Path) -> Option<Entity> {
-    let entry = l.entry(path);
-    let name = l.display_name(path);
-    let mut focus = None;
-    centered(root, true, |card| {
-        ui::weighted_text(card, format!("Delete {name}?"), 19.0, 620, ui::INK);
-        if let Some(d) = entry.and_then(Entry::details) {
-            ui::text(
-                card,
-                format!(
-                    "{} · last played {}",
-                    game_label(d.game.as_ref()),
-                    relative(d.last_played_unix_s)
-                ),
-                12.0,
-                ui::MUTED,
-            );
-        }
-        ui::paragraph(
-            card,
-            "Its folder moves to the Trash. You can restore it from there.",
-            12.0,
-            ui::MUTED,
-        );
-        problem(card, l.problem.as_ref());
-        row(card, 7.0, |r| {
-            let delete = ui::button(r, "Delete", Act::ConfirmDelete, false, false, false);
-            r.commands().entity(delete).insert(Danger);
-            focus = Some(ui::button(r, "Cancel", Act::Back, false, false, true));
-        });
-    });
-    focus
-}
-
-/// Trust for the whole set on one scrolling page, with its buttons above the list so they stay
-/// in view however many items there are.
-fn trust(
-    root: &mut ChildSpawnerCommands,
-    l: &Launcher,
-    installed: &Installed,
-    next: &Next,
-    scroll: Vec2,
-) -> Option<Entity> {
-    let mut focus = None;
-    let items = &installed.untrusted;
-    let code = items
-        .iter()
-        .filter(|u| u.found.manifest.declaration.is_none())
-        .count();
-    root.spawn((
-        TabGroup {
-            modal: true,
-            ..default()
-        },
-        ScrollArea,
-        ScrollPosition(scroll),
-        PageScroll,
-        Node {
-            flex_direction: FlexDirection::Column,
-            row_gap: Val::Px(10.0),
-            max_width: Val::Px(720.0),
-            flex_grow: 1.0,
-            min_height: Val::Px(0.0),
-            overflow: Overflow::scroll_y(),
-            ..default()
-        },
-    ))
-    .with_children(|col| {
-        col.spawn(Node {
-            justify_content: JustifyContent::SpaceBetween,
-            align_items: AlignItems::Center,
-            column_gap: Val::Px(12.0),
-            flex_shrink: 0.0,
-            ..default()
-        })
-        .with_children(|top| {
-            heading(
-                top,
-                &if items.len() == 1 {
-                    "Trust this item?".to_owned()
-                } else {
-                    format!("Trust {} items?", items.len())
-                },
-                if code == 0 {
-                    "Data only: none of it runs code. Trust is for these exact files."
-                } else {
-                    "Items marked \u{201c}runs code\u{201d} run their own code. Trust them only if you know where they came from."
-                },
-            );
-            actions(top, |r| {
-                focus = Some(ui::button(
-                    r,
-                    match next {
-                        Next::Create if !installed.mods.is_empty() => "Back to Mods",
-                        Next::Create => "Back",
-                        Next::Open(_) => "Cancel",
-                    },
-                    Act::Back,
-                    false,
-                    false,
-                    false,
-                ));
-                ui::button(
-                    r,
-                    format!(
-                        "Trust {} and {}",
-                        if items.len() == 1 {
-                            "it".to_owned()
-                        } else {
-                            format!("all {}", items.len())
-                        },
-                        match next {
-                            Next::Open(_) => "open",
-                            Next::Create => "create",
-                        }
-                    ),
-                    Act::Trust,
-                    false,
-                    false,
-                    true,
-                );
-            });
-        });
-        problem(col, l.problem.as_ref());
-        for item in items {
-            let manifest = &item.found.manifest;
-            let data = manifest.declaration.is_some();
-            // A component's requested limits are worth reading; a data Mod has none to show.
-            let detail = if data {
-                format!("Build {}", &item.sha256[..12.min(item.sha256.len())])
-            } else {
-                item.prompt
-                    .trim_end()
-                    .trim_end_matches("Trust this exact build? [y/N]")
-                    .trim_end()
-                    .to_owned()
-            };
-            mod_card(
-                col,
-                ModCard {
-                    act: None,
-                    border: ui::EDGE,
-                    selected: false,
-                    title: format!("{} {}", ui::title(&manifest.id), manifest.version),
-                    detail,
-                    tag: Some(if data {
-                        ("Data only".to_owned(), ui::MUTED)
-                    } else {
-                        ("Runs code".to_owned(), ui::AMBER)
-                    }),
-                },
-            );
-        }
-    });
-    focus
-}
-
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::launch::Switch;
-    use bevy::ecs::message::Messages;
-    use tesserae_core::save::WorldId;
-
-    struct Directory(PathBuf);
-    impl Directory {
-        fn new() -> Self {
-            let path =
-                std::env::temp_dir().join(format!("tesserae-worlds-{}", WorldId::new().as_str()));
-            std::fs::create_dir(&path).unwrap();
-            Self(path)
-        }
-    }
-    impl Drop for Directory {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.0);
-        }
-    }
-
-    fn app(worlds: &Directory, installed: Installed) -> App {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .init_resource::<ButtonInput<KeyCode>>()
-            .add_message::<AppExit>()
-            .add_message::<bevy::window::WindowCloseRequested>()
-            .init_resource::<Switch>()
-            .insert_resource(installed)
-            .insert_resource(WorldsDir(worlds.0.clone()))
-            .insert_resource(Remover(|path| {
-                std::fs::remove_dir_all(path).map_err(|e| e.to_string())
-            }));
-        logic(&mut app);
-        app
-    }
-
-    fn launcher(app: &App) -> &Launcher {
-        app.world().resource::<Launcher>()
-    }
-
-    fn act(app: &mut App, act: Act) {
-        let entity = app
-            .world_mut()
-            .query::<(Entity, &Act)>()
-            .iter(app.world())
-            .find_map(|(e, a)| (*a == act).then_some(e))
-            .unwrap_or_else(|| panic!("no {act:?} control on screen"));
-        app.world_mut().trigger(Activate { entity });
-        app.update();
-    }
-
-    fn type_into(app: &mut App, field: Field, value: &str) {
-        let entity = app
-            .world_mut()
-            .query::<(Entity, &Field)>()
-            .iter(app.world())
-            .find_map(|(e, f)| (*f == field).then_some(e))
-            .unwrap();
-        app.world_mut()
-            .entity_mut(entity)
-            .insert(EditableText::new(value));
-        app.update();
-    }
-
-    fn press(app: &mut App, key: KeyCode) {
-        app.world_mut()
-            .resource_mut::<ButtonInput<KeyCode>>()
-            .press(key);
-        app.update();
-        let mut keys = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
-        keys.release(key);
-        keys.clear();
-    }
-
-    fn focused_act(app: &App) -> Option<Act> {
-        let focus = app.world().resource::<InputFocus>().get()?;
-        app.world().get::<Act>(focus).cloned()
-    }
-
-    fn exits(app: &App) -> usize {
-        app.world().resource::<Messages<AppExit>>().len()
-    }
-
-    fn details(name: &str, game: bool) -> Sidecar {
-        Sidecar {
-            name: name.into(),
-            game: game.then(|| GameRef {
-                id: "terra".into(),
-                version: "0.1.0".into(),
-            }),
-            mods: Vec::new(),
-            seed: 42,
-            voxel_size_m: 0.5,
-            created_unix_s: 1,
-            last_played_unix_s: 1,
-            world: WorldId::new(),
-            pending: false,
-        }
-    }
-
-    #[test]
-    fn an_empty_list_focuses_create_and_creating_loads_the_new_world() {
-        let worlds = Directory::new();
-        let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
-        app.add_plugins(bevy::state::app::StatesPlugin)
-            .init_state::<AppState>();
-        app.world_mut()
-            .resource_mut::<NextState<AppState>>()
-            .set(AppState::List);
-        app.update();
-        app.update();
-        assert_eq!(focused_act(&app), Some(Act::New));
-        act(&mut app, Act::New);
-        type_into(&mut app, Field::Name, "  Ridge ");
-        type_into(&mut app, Field::Seed, "-1");
-        act(&mut app, Act::More);
-        act(&mut app, Act::Voxel(0.25));
-        act(&mut app, Act::Create);
-        let Some(Target::World(path)) = app.world().resource::<Switch>().0.clone() else {
-            panic!("no World to open");
-        };
-        let created = library::read(&path).unwrap().unwrap();
-        assert_eq!(created.name, "Ridge");
-        assert_eq!(created.seed, u64::MAX);
-        assert_eq!(created.voxel_size_m, 0.25);
-        assert_eq!(created.game.unwrap().id, "terra");
-        assert!(created.pending);
-        assert!(matches!(launcher(&app).screen, Screen::Opening(_)));
-        assert!(
-            app.world().get_resource::<OpenRequest>().is_none(),
-            "the Opening screen draws first"
-        );
-        for _ in 0..3 {
-            app.update();
-        }
-        let request = app.world().resource::<OpenRequest>();
-        assert_eq!(request.what, What::Folder(path));
-        assert_eq!(request.name.as_deref(), Some("Ridge"));
-        assert!(request.from_list);
-        assert_eq!(
-            *app.world().resource::<State<AppState>>().get(),
-            AppState::Loading
-        );
-    }
-
-    #[test]
-    fn an_invalid_seed_or_name_keeps_the_form_and_writes_nothing() {
-        let worlds = Directory::new();
-        let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
-        app.update();
-        act(&mut app, Act::New);
-        type_into(&mut app, Field::Seed, "18446744073709551616");
-        act(&mut app, Act::Create);
-        assert_eq!(launcher(&app).screen, Screen::Create);
-        assert!(launcher(&app).form.problem.is_some());
-        type_into(&mut app, Field::Seed, "");
-        type_into(&mut app, Field::Name, &"x".repeat(65));
-        act(&mut app, Act::Create);
-        assert_eq!(launcher(&app).screen, Screen::Create);
-        assert!(std::fs::read_dir(&worlds.0).unwrap().next().is_none());
-        assert!(app.world().resource::<Switch>().0.is_none());
-        press(&mut app, KeyCode::Escape);
-        assert_eq!(launcher(&app).screen, Screen::List);
-    }
-
-    #[test]
-    fn delete_defaults_to_cancel_refuses_an_open_world_then_removes_it() {
-        let worlds = Directory::new();
-        let path = library::create(&worlds.0, &details("Doomed", true)).unwrap();
-        let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
-        app.update();
-        act(&mut app, Act::Delete);
-        app.update();
-        assert_eq!(focused_act(&app), Some(Act::Back));
-        press(&mut app, KeyCode::Escape);
-        assert_eq!(launcher(&app).screen, Screen::List);
-        assert!(path.exists());
-
-        let lock = std::fs::File::create(path.join("writer.lock")).unwrap();
-        lock.try_lock().unwrap();
-        act(&mut app, Act::Delete);
-        act(&mut app, Act::ConfirmDelete);
-        assert!(
-            launcher(&app)
-                .problem
-                .as_ref()
-                .unwrap()
-                .contains("another Tesserae")
-        );
-        assert!(path.exists());
-        drop(lock);
-        act(&mut app, Act::ConfirmDelete);
-        assert!(!path.exists());
-        assert_eq!(launcher(&app).screen, Screen::List);
-        assert!(launcher(&app).entries.is_empty());
-    }
-
-    #[test]
-    fn the_chosen_set_holds_a_games_mods_without_ticking_them() {
-        let installed = Installed::fake(Some(("ember", "0.1.0")), &[])
-            .with_mod("strata", &[])
-            .with_mod("hearth", &["strata"])
-            .with_mod("glassworks", &[])
-            .with_game_depends(&["hearth"]);
-        let mut form = Form {
-            game: Some("ember".into()),
-            ..Form::default()
-        };
-        assert_eq!(chosen_ids(&form, &installed), ["ember", "strata", "hearth"]);
-        form.mods.insert("glassworks".into());
-        assert_eq!(
-            chosen_ids(&form, &installed),
-            ["ember", "strata", "hearth", "glassworks"]
-        );
-    }
-
-    #[test]
-    fn one_trust_grants_every_untrusted_item_and_opens() {
-        let worlds = Directory::new();
-        let path = library::create(&worlds.0, &details("Guarded", true)).unwrap();
-        let mut app = app(
-            &worlds,
-            Installed::fake(Some(("terra", "0.1.0")), &["terra", "strata", "hearth"]),
-        );
-        app.update();
-        act(&mut app, Act::Open);
-        assert_eq!(
-            launcher(&app).screen,
-            Screen::Trust(Next::Open(path.clone()))
-        );
-        act(&mut app, Act::Trust);
-        assert!(app.world().resource::<Installed>().untrusted.is_empty());
-        assert_eq!(
-            app.world().resource::<Switch>().0,
-            Some(Target::World(path))
-        );
-    }
-
-    #[test]
-    fn an_untrusted_game_asks_before_opening_and_cancel_runs_nothing() {
-        let worlds = Directory::new();
-        let path = library::create(&worlds.0, &details("Guarded", true)).unwrap();
-        let mut app = app(
-            &worlds,
-            Installed::fake(Some(("terra", "0.1.0")), &["terra"]),
-        );
-        app.update();
-        act(&mut app, Act::Open);
-        assert_eq!(
-            launcher(&app).screen,
-            Screen::Trust(Next::Open(path.clone()))
-        );
-        app.update();
-        assert_eq!(focused_act(&app), Some(Act::Back));
-        act(&mut app, Act::Back);
-        assert_eq!(launcher(&app).screen, Screen::List);
-        assert!(app.world().resource::<Switch>().0.is_none());
-        act(&mut app, Act::Open);
-        act(&mut app, Act::Trust);
-        assert_eq!(
-            app.world().resource::<Switch>().0,
-            Some(Target::World(path))
-        );
-        assert!(app.world().resource::<Installed>().untrusted.is_empty());
-    }
-
-    #[test]
-    fn a_world_whose_mod_is_missing_or_reversioned_cannot_open() {
-        use tesserae_core::save::library::ModRef;
-        let worlds = Directory::new();
-        let mut needs = details("Needy", true);
-        needs.mods = vec![ModRef {
-            id: "lake".into(),
-            version: "1.0".into(),
-        }];
-        library::create(&worlds.0, &needs).unwrap();
-        let mut installed = Installed::fake(Some(("terra", "0.1.0")), &[]);
-        let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
-        app.update();
-        assert!(app.world().resource::<Switch>().0.is_none());
-        let has_open = app
-            .world_mut()
-            .query::<&Act>()
-            .iter(app.world())
-            .any(|a| *a == Act::Open);
-        assert!(!has_open, "Open is not offered while items are unmet");
-        assert_eq!(
-            app.world().resource::<Installed>().unmet(&needs),
-            vec!["Mod `lake` 1.0 is not installed".to_string()]
-        );
-        installed.mods = vec![GameRef {
-            id: "lake".into(),
-            version: "2.0".into(),
-        }];
-        assert_eq!(
-            installed.unmet(&needs),
-            vec!["Mod `lake` needs 1.0 but 2.0 is installed".to_string()]
-        );
-        installed.mods[0].version = "1.0".into();
-        assert!(installed.unmet(&needs).is_empty());
-    }
-
-    #[test]
-    fn a_world_saved_without_a_game_opens_without_asking_for_trust() {
-        let worlds = Directory::new();
-        let path = library::create(&worlds.0, &details("Plain", false)).unwrap();
-        let mut app = app(
-            &worlds,
-            Installed::fake(Some(("terra", "0.1.0")), &["terra"]),
-        );
-        app.update();
-        act(&mut app, Act::Open);
-        assert_eq!(
-            app.world().resource::<Switch>().0,
-            Some(Target::World(path))
-        );
-    }
-
-    #[test]
-    fn a_failed_open_is_explained_on_the_list_without_touching_the_save() {
-        let worlds = Directory::new();
-        let path = library::create(&worlds.0, &details("Broken", true)).unwrap();
-        let before = std::fs::read(path.join(library::SIDECAR)).unwrap();
-        let mut app = app(&worlds, Installed::fake(None, &[]));
-        app.insert_resource(LastFailure(Some(OpenFailure {
-            folder: path.clone(),
-            reason: "corrupt World save: checksum mismatch".into(),
-        })));
-        app.update();
-        let Card { title, detail, .. } = launcher(&app).card.clone().unwrap();
-        assert_eq!(title, "Could not open Broken");
-        assert!(detail.contains("checksum"));
-        assert_eq!(launcher(&app).selected, Some(path.clone()));
-        press(&mut app, KeyCode::Escape);
-        assert!(launcher(&app).card.is_none());
-        assert_eq!(std::fs::read(path.join(library::SIDECAR)).unwrap(), before);
-    }
-
-    #[test]
-    fn rename_changes_the_listed_name_and_recreate_copies_the_settings() {
-        let worlds = Directory::new();
-        library::create(&worlds.0, &details("Old", true)).unwrap();
-        let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
-        app.update();
-        act(&mut app, Act::Rename);
-        type_into(&mut app, Field::Rename, "New name");
-        act(&mut app, Act::SaveName);
-        assert_eq!(launcher(&app).entries[0].name(), Some("New name"));
-        act(&mut app, Act::ReCreate);
-        let form = launcher(&app).form.clone();
-        assert_eq!(form.name, "New name (copy)");
-        assert_eq!(form.seed, "42");
-        assert_eq!(form.voxel_size_m, 0.5);
-        assert!(form.more);
-    }
-
-    #[test]
-    fn quit_exits_without_restarting() {
-        let worlds = Directory::new();
-        let mut app = app(&worlds, Installed::fake(None, &[]));
-        app.update();
-        act(&mut app, Act::Quit);
-        assert_eq!(exits(&app), 1);
-        assert!(app.world().resource::<Switch>().0.is_none());
-    }
-
-    #[test]
-    fn a_blank_seed_shows_the_random_seed_that_will_be_used() {
-        let worlds = Directory::new();
-        let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
-        app.update();
-        act(&mut app, Act::New);
-        let shown = app
-            .world_mut()
-            .query_filtered::<&Text, With<Resolved>>()
-            .single(app.world())
-            .unwrap()
-            .0
-            .clone();
-        let random = launcher(&app).form.random_seed;
-        assert_eq!(shown, format!("Random seed: {random}"));
-        act(&mut app, Act::Create);
-        let Some(Target::World(path)) = app.world().resource::<Switch>().0.clone() else {
-            panic!("no World to open");
-        };
-        assert_eq!(library::read(&path).unwrap().unwrap().seed, random);
-    }
-
-    #[test]
-    fn recreate_never_swaps_in_a_different_installed_game() {
-        let worlds = Directory::new();
-        library::create(&worlds.0, &details("Terra world", true)).unwrap();
-        let mut app = app(&worlds, Installed::fake(Some(("other", "2.0.0")), &[]));
-        app.update();
-        let offered = app
-            .world_mut()
-            .query::<&Act>()
-            .iter(app.world())
-            .any(|a| *a == Act::ReCreate);
-        assert!(!offered, "Re-Create offered for another Game");
-    }
-
-    #[test]
-    fn creating_takes_two_steps_and_back_keeps_the_picks() {
-        let worlds = Directory::new();
-        let mut app = app(
-            &worlds,
-            Installed::fake(Some(("terra", "0.1.0")), &[])
-                .with_mod("glassworks", &[])
-                .with_mod("lamps", &[]),
-        );
-        app.update();
-        act(&mut app, Act::New);
-        assert_eq!(launcher(&app).screen, Screen::Create);
-        act(&mut app, Act::PickGame(0));
-        act(&mut app, Act::NextMods);
-        assert_eq!(launcher(&app).screen, Screen::Mods);
-        act(&mut app, Act::ToggleMod(1));
-        assert!(launcher(&app).form.mods.contains("lamps"));
-        act(&mut app, Act::Back);
-        assert_eq!(launcher(&app).screen, Screen::Create);
-        assert!(launcher(&app).form.mods.contains("lamps"));
-        assert_eq!(launcher(&app).form.game.as_deref(), Some("terra"));
-    }
-
-    #[test]
-    fn a_world_lists_its_mods_and_recreate_opens_them_on_step_two() {
-        let worlds = Directory::new();
-        let mut world = details("Lit", true);
-        world.mods = vec![library::ModRef {
-            id: "glassworks".into(),
-            version: "1".into(),
-        }];
-        library::create(&worlds.0, &world).unwrap();
-        let mut app = app(
-            &worlds,
-            Installed::fake(Some(("terra", "0.1.0")), &[])
-                .with_mod("glassworks", &[])
-                .with_mod("lamps", &[]),
-        );
-        app.update();
-        let listed = app
-            .world_mut()
-            .query::<&Text>()
-            .iter(app.world())
-            .any(|t| t.0 == "Mods: Glassworks");
-        assert!(listed, "the World's Mods are named");
-        act(&mut app, Act::ReCreate);
-        assert_eq!(launcher(&app).screen, Screen::Mods);
-        assert!(launcher(&app).form.mods.contains("glassworks"));
-        assert!(!launcher(&app).form.mods.contains("lamps"));
-    }
-
-    #[test]
-    fn picking_a_game_ticks_what_it_suggests_and_a_suggestion_can_be_unticked() {
-        let worlds = Directory::new();
-        let mut app = app(
-            &worlds,
-            Installed::fake(Some(("terra", "0.1.0")), &[])
-                .with_mod("wanderer", &[])
-                .with_mod("golem", &[])
-                .with_game_suggests(&["wanderer"]),
-        );
-        app.update();
-        act(&mut app, Act::New);
-        assert!(launcher(&app).form.mods.contains("wanderer"));
-        act(&mut app, Act::NextMods);
-        act(&mut app, Act::ToggleMod(0));
-        assert!(
-            !launcher(&app).form.mods.contains("wanderer"),
-            "it can be unticked"
-        );
-        assert!(
-            installed_required(&app).is_empty(),
-            "a suggestion is not a dependency"
-        );
-    }
-
-    fn installed_required(app: &App) -> Vec<String> {
-        app.world().resource::<Installed>().required("terra")
-    }
-
-    #[test]
-    fn trust_for_a_new_world_goes_back_to_the_mods_page() {
-        let worlds = Directory::new();
-        let mut app = app(
-            &worlds,
-            Installed::fake(Some(("terra", "0.1.0")), &["terra", "lamps"]).with_mod("lamps", &[]),
-        );
-        app.update();
-        act(&mut app, Act::New);
-        act(&mut app, Act::NextMods);
-        act(&mut app, Act::ToggleMod(0));
-        act(&mut app, Act::Create);
-        assert_eq!(launcher(&app).screen, Screen::Trust(Next::Create));
-        act(&mut app, Act::Back);
-        assert_eq!(launcher(&app).screen, Screen::Mods);
-        assert!(
-            launcher(&app).form.mods.contains("lamps"),
-            "the picks are kept"
-        );
-        assert!(
-            std::fs::read_dir(&worlds.0).unwrap().next().is_none(),
-            "nothing created"
-        );
-    }
-
-    #[test]
-    fn optional_mods_are_grouped_by_category_in_a_fixed_order() {
-        let mut installed = Installed::fake(Some(("terra", "0.1.0")), &[])
-            .with_mod("zeta", &[])
-            .with_mod("lamps", &[])
-            .with_mod("strata", &[])
-            .with_mod("mystery", &[])
-            .with_mod("hearth", &[]);
-        installed.set_about("lamps", Some("Fire & light"), None);
-        installed.set_about("hearth", Some("Fire & light"), None);
-        installed.set_about("strata", Some("Terrain"), None);
-        installed.set_about("zeta", Some("Zoology"), None);
-        let names: Vec<_> = sections(&installed, &["hearth".to_string()])
-            .into_iter()
-            .map(|(name, mods)| (name, mods.len()))
-            .collect();
-        assert_eq!(
-            names,
-            [
-                ("Terrain".to_string(), 1),
-                ("Fire & light".to_string(), 1),
-                ("Zoology".to_string(), 1),
-                ("Other".to_string(), 1),
-            ],
-            "a required Mod is left out, and uncategorised Mods come last"
-        );
-    }
-
-    #[test]
-    fn with_no_game_installed_nothing_can_be_created() {
-        let worlds = Directory::new();
-        let mut app = app(&worlds, Installed::fake(None, &[]));
-        app.update();
-        app.update();
-        assert_ne!(focused_act(&app), Some(Act::New));
-        act(&mut app, Act::New);
-        assert_eq!(launcher(&app).screen, Screen::List);
-        assert!(std::fs::read_dir(&worlds.0).unwrap().next().is_none());
-        assert!(app.world().resource::<Switch>().0.is_none());
-    }
-
-    use bevy::input::gamepad::{
-        Gamepad, GamepadButton, RawGamepadButtonChangedEvent, RawGamepadEvent,
-    };
-    use bevy::input_focus::InputFocusVisible;
-    use bevy::ui::{ComputedNode, UiGlobalTransform};
-    use bevy::window::PrimaryWindow;
-
-    #[derive(Component)]
-    struct Placed;
-
-    /// A column of buttons in spawn order; the real layout engine does not run
-    /// headless, and focus navigation needs sizes and positions.
-    fn lay_out(
-        mut commands: Commands,
-        buttons: Query<Entity, (With<bevy::ui_widgets::Button>, Without<Placed>)>,
-    ) {
-        let mut fresh: Vec<Entity> = buttons.iter().collect();
-        fresh.sort();
-        for (i, entity) in fresh.into_iter().enumerate() {
-            commands.entity(entity).insert((
-                Placed,
-                ComputedNode {
-                    size: Vec2::new(200.0, 30.0),
-                    ..default()
-                },
-                UiGlobalTransform::from_translation(Vec2::new(100.0, 40.0 * i as f32)),
-                InheritedVisibility::VISIBLE,
-            ));
-        }
-    }
-
-    fn pad_app(worlds: &Directory, installed: Installed) -> (App, Entity) {
-        let mut app = app(worlds, installed);
-        app.add_plugins(bevy::input::InputPlugin);
-        app.world_mut().spawn((
-            PrimaryWindow,
-            Window {
-                focused: true,
-                ..default()
-            },
-        ));
-        crate::client::pad::launcher(&mut app);
-        app.add_systems(Update, lay_out.after(render));
-        let pad = app.world_mut().spawn(Gamepad::default()).id();
-        app.update();
-        app.update();
-        (app, pad)
-    }
-
-    fn pad_button(app: &mut App, pad: Entity, button: GamepadButton, value: f32) {
-        app.world_mut()
-            .write_message(RawGamepadEvent::Button(RawGamepadButtonChangedEvent::new(
-                pad, button, value,
-            )));
-        app.update();
-    }
-
-    fn tap(app: &mut App, pad: Entity, button: GamepadButton) {
-        pad_button(app, pad, button, 1.0);
-        pad_button(app, pad, button, 0.0);
-        app.update();
-    }
-
-    fn reach(app: &mut App, pad: Entity, target: Act) {
-        for button in [GamepadButton::DPadDown, GamepadButton::DPadUp] {
-            for _ in 0..40 {
-                if focused_act(app) == Some(target.clone()) {
-                    return;
-                }
-                tap(app, pad, button);
-            }
-        }
-        panic!("the controller never reached {target:?}");
-    }
-
-    #[test]
-    fn a_controller_alone_creates_a_world_without_typing() {
-        let worlds = Directory::new();
-        let (mut app, pad) = pad_app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
-        assert_eq!(focused_act(&app), Some(Act::New));
-        tap(&mut app, pad, GamepadButton::South);
-        assert_eq!(launcher(&app).screen, Screen::Create);
-        reach(&mut app, pad, Act::Randomize);
-        tap(&mut app, pad, GamepadButton::South);
-        assert!(!launcher(&app).form.seed.is_empty());
-        reach(&mut app, pad, Act::Create);
-        tap(&mut app, pad, GamepadButton::South);
-        let Some(Target::World(path)) = app.world().resource::<Switch>().0.clone() else {
-            panic!("no World to open");
-        };
-        assert_eq!(library::read(&path).unwrap().unwrap().name, "New World");
-        assert!(app.world().resource::<InputFocusVisible>().0);
-    }
-
-    fn mod_installed() -> Installed {
-        Installed::fake(Some(("terra", "0.1.0")), &[])
-            .with_mod("lake", &["reeds"])
-            .with_mod("reeds", &[])
-            .with_mod("broken", &["ghost"])
-    }
-
-    #[test]
-    fn the_form_locks_dependencies_blocks_unsatisfiable_mods_and_records_the_set() {
-        let worlds = Directory::new();
-        let mut app = app(&worlds, mod_installed());
-        app.update();
-        act(&mut app, Act::New);
-        assert!(launcher(&app).form.mods.is_empty(), "Mods start unticked");
-        act(&mut app, Act::NextMods);
-        act(&mut app, Act::ToggleMod(0));
-        assert_eq!(launcher(&app).form.mods.len(), 1);
-        // reeds is needed by lake: shown locked, with nothing to toggle.
-        let toggles = |app: &mut App| {
-            app.world_mut()
-                .query::<&Act>()
-                .iter(app.world())
-                .filter(|a| matches!(a, Act::ToggleMod(_)))
-                .count()
-        };
-        assert_eq!(toggles(&mut app), 1);
-        // broken needs a Mod that is not installed, so it cannot be ticked at all.
-        app.world_mut()
-            .resource_mut::<Queue>()
-            .0
-            .push(Act::ToggleMod(2));
-        app.update();
-        assert_eq!(launcher(&app).form.mods.len(), 1);
-        act(&mut app, Act::Create);
-        let Some(Target::World(path)) = app.world().resource::<Switch>().0.clone() else {
-            panic!("no World to open");
-        };
-        let ids: Vec<_> = library::read(&path)
-            .unwrap()
-            .unwrap()
-            .mods
-            .into_iter()
-            .map(|m| m.id)
-            .collect();
-        assert_eq!(ids, ["lake", "reeds"]);
-    }
-
-    #[test]
-    fn a_controller_reaches_a_mod_toggle_and_ticks_it() {
-        let worlds = Directory::new();
-        let (mut app, pad) = pad_app(&worlds, mod_installed());
-        tap(&mut app, pad, GamepadButton::South);
-        reach(&mut app, pad, Act::NextMods);
-        tap(&mut app, pad, GamepadButton::South);
-        reach(&mut app, pad, Act::ToggleMod(1));
-        tap(&mut app, pad, GamepadButton::South);
-        assert!(launcher(&app).form.mods.contains("reeds"));
-    }
-
-    #[test]
-    fn only_dialogs_trap_focus_so_the_empty_list_can_reach_create() {
-        let trapping = |app: &mut App| {
-            app.world_mut()
-                .query::<&TabGroup>()
-                .iter(app.world())
-                .filter(|group| group.modal)
-                .count()
-        };
-        let worlds = Directory::new();
-        let mut first = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
-        first.update();
-        first.update();
-        assert_eq!(trapping(&mut first), 0);
-
-        let worlds = Directory::new();
-        library::create(&worlds.0, &details("Doomed", true)).unwrap();
-        let mut listed = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
-        listed.update();
-        assert_eq!(trapping(&mut listed), 0);
-        act(&mut listed, Act::Delete);
-        listed.update();
-        assert_eq!(trapping(&mut listed), 1);
-    }
-
-    /// What Tab (`Next`) or Shift-Tab (`Previous`) visits from the first focus,
-    /// as controls and fields, until it wraps.
-    fn tab_stops(
-        app: &mut App,
-        action: bevy::input_focus::tab_navigation::NavAction,
-    ) -> Vec<String> {
-        use bevy::ecs::system::RunSystemOnce;
-        use bevy::input_focus::tab_navigation::TabNavigation;
-        let name = |app: &App, entity: Entity| {
-            app.world()
-                .get::<Act>(entity)
-                .map(|act| format!("{act:?}"))
-                .or_else(|| {
-                    app.world().get::<Field>(entity).map(|f| match f {
-                        Field::Name => "Name".to_string(),
-                        Field::Seed => "Seed".to_string(),
-                        Field::Rename => "Rename".to_string(),
-                    })
-                })
-                .unwrap_or_else(|| "other".into())
-        };
-        // Visibility propagation does not run headless.
-        let hidden: Vec<Entity> = app
-            .world_mut()
-            .query_filtered::<Entity, With<InheritedVisibility>>()
-            .iter(app.world())
-            .collect();
-        for entity in hidden {
-            app.world_mut()
-                .entity_mut(entity)
-                .insert(InheritedVisibility::VISIBLE);
-        }
-        let first = app.world().resource::<InputFocus>().get();
-        let mut stops = Vec::new();
-        for _ in 0..40 {
-            let next = app
-                .world_mut()
-                .run_system_once(move |nav: TabNavigation, focus: Res<InputFocus>| {
-                    nav.navigate(&focus, action).ok()
-                })
-                .unwrap();
-            let Some(next) = next else {
-                break;
-            };
-            app.world_mut()
-                .resource_mut::<InputFocus>()
-                .set(next, FocusCause::Navigated);
-            stops.push(name(app, next));
-            if Some(next) == first {
-                break;
-            }
-        }
-        stops
-    }
-
-    #[test]
-    fn tab_and_shift_tab_reach_every_control_on_each_screen() {
-        use bevy::input_focus::tab_navigation::NavAction;
-        let worlds = Directory::new();
-        library::create(&worlds.0, &details("Mine", true)).unwrap();
-        let mut app = app(
-            &worlds,
-            Installed::fake(Some(("terra", "0.1.0")), &["terra"]),
-        );
-        app.update();
-        app.update();
-        let screens: [(&str, Option<Act>, &[&str]); 5] = [
-            ("list", None, &["New", "Open", "Rename", "Delete", "Quit"]),
-            (
-                "create",
-                Some(Act::New),
-                &["Name", "Seed", "Randomize", "Create", "Back"],
-            ),
-            ("rename", Some(Act::Rename), &["Rename", "SaveName", "Back"]),
-            ("delete", Some(Act::Delete), &["Back", "ConfirmDelete"]),
-            ("trust", Some(Act::Open), &["Trust", "Back"]),
-        ];
-        for (screen, opener, expected) in screens {
-            if screen != "list" {
-                app.world_mut()
-                    .resource_mut::<Launcher>()
-                    .show(Screen::List);
-                app.update();
-            }
-            if let Some(opener) = opener {
-                act(&mut app, opener);
-                app.update();
-            }
-            for action in [NavAction::Next, NavAction::Previous] {
-                let stops = tab_stops(&mut app, action);
-                for want in expected {
-                    assert!(
-                        stops.iter().any(|s| s == want),
-                        "{screen} {action:?}: {want} missing from {stops:?}"
-                    );
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn east_is_back_on_each_screen_and_dismisses_on_the_list() {
-        let worlds = Directory::new();
-        library::create(&worlds.0, &details("Keep", true)).unwrap();
-        let (mut app, pad) = pad_app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
-        for opener in [Act::New, Act::Rename, Act::Delete] {
-            reach(&mut app, pad, opener.clone());
-            tap(&mut app, pad, GamepadButton::South);
-            assert_ne!(launcher(&app).screen, Screen::List, "{opener:?}");
-            tap(&mut app, pad, GamepadButton::East);
-            assert_eq!(launcher(&app).screen, Screen::List, "{opener:?}");
-        }
-        tap(&mut app, pad, GamepadButton::East);
-        assert_eq!(launcher(&app).screen, Screen::List);
-    }
-
-    #[test]
-    fn a_controller_deletes_only_after_confirming_with_cancel_focused_first() {
-        let worlds = Directory::new();
-        let path = library::create(&worlds.0, &details("Doomed", true)).unwrap();
-        let (mut app, pad) = pad_app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
-        reach(&mut app, pad, Act::Delete);
-        tap(&mut app, pad, GamepadButton::South);
-        assert_eq!(focused_act(&app), Some(Act::Back));
-        tap(&mut app, pad, GamepadButton::South);
-        assert_eq!(launcher(&app).screen, Screen::List);
-        assert!(path.exists());
-        reach(&mut app, pad, Act::Delete);
-        tap(&mut app, pad, GamepadButton::South);
-        reach(&mut app, pad, Act::ConfirmDelete);
-        tap(&mut app, pad, GamepadButton::South);
-        assert!(!path.exists());
-    }
-
-    #[test]
-    fn the_press_that_opens_delete_does_not_also_answer_it() {
-        let worlds = Directory::new();
-        let path = library::create(&worlds.0, &details("Doomed", true)).unwrap();
-        let (mut app, pad) = pad_app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
-        reach(&mut app, pad, Act::Delete);
-        pad_button(&mut app, pad, GamepadButton::South, 1.0);
-        for _ in 0..4 {
-            app.update();
-        }
-        assert!(matches!(launcher(&app).screen, Screen::Delete(_)));
-        assert!(path.exists());
-    }
-
-    #[test]
-    fn a_button_already_down_when_the_list_appears_waits_for_release() {
-        let worlds = Directory::new();
-        let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
-        app.add_plugins(bevy::input::InputPlugin);
-        app.world_mut().spawn((
-            PrimaryWindow,
-            Window {
-                focused: true,
-                ..default()
-            },
-        ));
-        crate::client::pad::launcher(&mut app);
-        app.add_systems(Update, lay_out.after(render));
-        let pad = app.world_mut().spawn(Gamepad::default()).id();
-        pad_button(&mut app, pad, GamepadButton::South, 1.0);
-        for _ in 0..3 {
-            app.update();
-        }
-        assert_eq!(launcher(&app).screen, Screen::List);
-        pad_button(&mut app, pad, GamepadButton::South, 0.0);
-        tap(&mut app, pad, GamepadButton::South);
-        assert_eq!(launcher(&app).screen, Screen::Create);
-    }
-
-    #[test]
-    fn an_unfocused_window_ignores_the_controller() {
-        let worlds = Directory::new();
-        let (mut app, pad) = pad_app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
-        app.world_mut()
-            .query::<&mut Window>()
-            .single_mut(app.world_mut())
-            .unwrap()
-            .focused = false;
-        tap(&mut app, pad, GamepadButton::South);
-        assert_eq!(launcher(&app).screen, Screen::List);
-    }
-
-    #[test]
-    fn a_controller_can_confirm_a_rename_and_grant_trust() {
-        let worlds = Directory::new();
-        library::create(&worlds.0, &details("Old", true)).unwrap();
-        let (mut app, pad) = pad_app(
-            &worlds,
-            Installed::fake(Some(("terra", "0.1.0")), &["terra"]),
-        );
-        reach(&mut app, pad, Act::Rename);
-        tap(&mut app, pad, GamepadButton::South);
-        reach(&mut app, pad, Act::SaveName);
-        tap(&mut app, pad, GamepadButton::South);
-        assert_eq!(launcher(&app).screen, Screen::List);
-        assert_eq!(launcher(&app).entries[0].name(), Some("Old"));
-        reach(&mut app, pad, Act::Open);
-        tap(&mut app, pad, GamepadButton::South);
-        assert!(matches!(launcher(&app).screen, Screen::Trust(_)));
-        reach(&mut app, pad, Act::Trust);
-        tap(&mut app, pad, GamepadButton::South);
-        assert!(matches!(
-            app.world().resource::<Switch>().0,
-            Some(Target::World(_))
-        ));
-    }
-}
+mod tests;

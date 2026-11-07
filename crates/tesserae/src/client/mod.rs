@@ -1,37 +1,49 @@
 //! The Client: rendering, input and camera. Never mutates World state, and has
 //! no access to it — see `docs/adr/0002-client-server-from-day-one.md`.
 
+mod accessibility;
 mod actions;
 mod aim;
 pub(crate) mod anti_alias;
 mod avatar;
 mod blend_order;
+mod buttons;
 pub mod camera;
 #[cfg(any(feature = "dev", feature = "profiling"))]
 mod capture;
 pub mod chunk_mesh;
 pub mod chunk_view;
+mod cinematic;
+mod death;
 pub mod drawn_mask;
 mod drops;
 pub mod edit;
+mod game_mode;
+mod hand_anim;
+mod hand_fx;
+mod held_item;
 mod help;
 mod history;
 #[cfg(feature = "profiling")]
 pub mod holes;
+mod hotbar;
 mod hotbar_store;
 mod in_flight;
 mod input;
+mod inventory_window;
 mod layout;
 mod layout_menu;
 pub(crate) mod loading;
 mod material_textures;
 mod menu;
+mod menu_blur;
 mod menu_ui;
-#[cfg(feature = "dev")]
 mod overlay;
 mod pad;
 mod palette;
 mod pick;
+mod pickup;
+mod place_settle;
 mod pose;
 pub(crate) mod presentation;
 mod preview;
@@ -39,17 +51,21 @@ pub(crate) mod profile;
 mod removal;
 pub(crate) mod render_scale;
 mod save;
+mod scenery;
 mod settings;
 #[cfg(feature = "profiling")]
 pub mod sight;
 mod sky;
 #[cfg(feature = "dev")]
 mod soak;
+mod theme;
 mod tile_preview;
 mod tool;
 mod touch;
 mod underwater;
 mod view;
+mod viewmodel;
+mod vitals;
 pub mod worlds;
 
 use bevy::prelude::*;
@@ -69,6 +85,8 @@ pub fn plugin(app: &mut App) {
         render_scale::plugin,
         settings::plugin,
         menu_ui::plugin,
+        cinematic::plugin,
+        accessibility::plugin,
         actions::plugin,
         input::plugin,
         pad::plugin,
@@ -91,6 +109,8 @@ pub fn plugin(app: &mut App) {
         history::plugin,
         avatar::plugin,
     ));
+    app.add_plugins((hand_anim::plugin, hand_fx::plugin, place_settle::plugin));
+    app.add_plugins((menu_blur::plugin, held_item::plugin, viewmodel::plugin));
     app.add_plugins((
         view::plugin,
         loading::plugin,
@@ -100,6 +120,12 @@ pub fn plugin(app: &mut App) {
         layout::plugin,
         layout_menu::plugin,
         drops::plugin,
+        pickup::plugin,
+        inventory_window::plugin,
+        hotbar::plugin,
+        game_mode::plugin,
+        vitals::plugin,
+        death::plugin,
     ));
     app.add_session_systems(
         Update,
@@ -107,10 +133,10 @@ pub fn plugin(app: &mut App) {
             .run_if(chunk_view::terrain_arrived)
             .run_if(not(resource_exists::<loading::TerrainArrived>)),
     );
-    #[cfg(feature = "dev")]
     app.add_plugins((
         bevy::diagnostic::FrameTimeDiagnosticsPlugin::default(),
         overlay::plugin,
-        soak::plugin,
     ));
+    #[cfg(feature = "dev")]
+    app.add_plugins(soak::plugin);
 }

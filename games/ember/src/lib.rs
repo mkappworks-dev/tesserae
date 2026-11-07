@@ -1,8 +1,10 @@
 //! A volcanic highland. Basalt chimneys are built on start and erupt on a timer; the lava, the
 //! water it meets and the wood it burns behave by the rules in the Mods this Game depends on
-//! (strata, waters, flora, hearth), so none are declared here.
+//! (strata, waters, flora, hearth), so none are declared here; its one Material is its food.
 
 wit_bindgen::generate!({ path: "../../crates/tesserae-mods/wit/0.3", world: "mod" });
+
+mod food;
 
 use std::cell::RefCell;
 use std::collections::VecDeque;
@@ -63,6 +65,7 @@ fn biomes() -> Vec<BiomeDef> {
                 fog: (130, 122, 120),
             }),
             cave_scale: None,
+            surface_features: vec![food::feature()],
         },
         BiomeDef {
             name: "scorched".into(),
@@ -74,6 +77,7 @@ fn biomes() -> Vec<BiomeDef> {
                 fog: (176, 120, 90),
             }),
             cave_scale: Some(1.5),
+            surface_features: Vec::new(),
         },
         BiomeDef {
             name: "highland".into(),
@@ -85,6 +89,7 @@ fn biomes() -> Vec<BiomeDef> {
                 fog: (138, 152, 172),
             }),
             cave_scale: Some(0.5),
+            surface_features: vec![food::feature()],
         },
     ]
 }
@@ -314,17 +319,18 @@ impl Guest for Ember {
             humidity_size_m: CLIMATE_SIZE_M,
         });
         Declaration {
-            materials: Vec::new(),
+            materials: vec![food::material()],
             shapes: Vec::new(),
-            appearance: Vec::new(),
+            appearance: vec![food::appearance()],
             world: Some(world),
             view: None,
             fluids: Vec::new(),
             reactions: Vec::new(),
             combustion: Vec::new(),
             tools: Vec::new(),
-            items: Vec::new(),
+            items: vec![food::item()],
             biomes: biomes(),
+            survival: None,
             ores: vec![OreDef {
                 material: "waters:obsidian".into(),
                 min_depth_m: 6.0,

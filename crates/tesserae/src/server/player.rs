@@ -6,6 +6,7 @@ use super::{
 use crate::world::WorldSettings;
 use bevy::prelude::*;
 
+use super::death::PlayerIntents;
 use crate::session::SessionApp;
 use tesserae_core::collide::{self, Aabb};
 use tesserae_core::flow::CellView;
@@ -15,6 +16,7 @@ pub const FLY_SPEED_CEILING_MPS: f32 = 64.0;
 pub const EYE_HEIGHT: f32 = 1.62;
 pub const CROUCH_EYE_HEIGHT: f32 = 1.02;
 pub const BODY_HEIGHT_M: f32 = 1.8;
+pub const BODY_HALF_WIDTH_M: f32 = 0.3;
 pub const CROUCH_BODY_HEIGHT_M: f32 = 1.2;
 /// How far below the eye a fluid still counts, so a third-person boom that
 /// dips under a surface the eye is above still reads the water.
@@ -42,6 +44,64 @@ const SWIM_HOLD_S: f32 = 0.1;
 /// Lift while the head is out and the body is held against a bank. Gravity is
 /// 24 m/s², so 7.5 m/s is what carries the feet over a ledge a metre up.
 const JUMP_OUT_MPS: f32 = 7.5;
+
+pub const WALK_MPS: f32 = 4.5;
+
+/// How fast the Player asks to go: a walk, or one of three speeds above it that
+/// the Player cycles through and keeps until the next press.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SpeedLevel {
+    #[default]
+    Walk,
+    One,
+    Two,
+    Three,
+}
+
+impl SpeedLevel {
+    pub fn next(self) -> Self {
+        match self {
+            Self::Walk => Self::One,
+            Self::One => Self::Two,
+            Self::Two => Self::Three,
+            Self::Three => Self::Walk,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Walk => "Walk",
+            Self::One => "Speed 1",
+            Self::Two => "Speed 2",
+            Self::Three => "Speed 3",
+        }
+    }
+
+    pub fn sprinting(self) -> bool {
+        self != Self::Walk
+    }
+
+    /// On foot, in metres per second. Speed 1 is the sprint every Game has had.
+    pub fn walking_mps(self) -> f32 {
+        match self {
+            Self::Walk => WALK_MPS,
+            Self::One => 8.0,
+            Self::Two => 12.0,
+            Self::Three => 16.0,
+        }
+    }
+
+    /// Of the flight speed the Client asked for.
+    fn flying_factor(self) -> f32 {
+        match self {
+            Self::Walk => 1.0,
+            Self::One => 5.0,
+            Self::Two => 8.0,
+            Self::Three => 12.0,
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum MovementMode {
@@ -71,7 +131,7 @@ pub struct MovementIntent {
     pub cancelled: bool,
     pub direction: Vec3,
     pub speed_mps: f32,
-    pub sprint: bool,
+    pub speed: SpeedLevel,
     pub crouch: bool,
     pub jump: bool,
     pub yaw: f32,
@@ -82,6 +142,8 @@ pub struct MovementIntent {
 pub enum MovementFeedback {
     Switched(MovementMode),
     Forbidden,
+    /// Flight asked for in Survival.
+    CreativeOnly,
     Obstructed,
     RespawnBlocked,
 }
@@ -90,9 +152,10 @@ impl MovementFeedback {
         match self {
             Self::Switched(MovementMode::Physics) => "Physics mode",
             Self::Switched(MovementMode::Flight) => "Free flight mode",
-            Self::Forbidden => "Movement mode forbidden by Server policy",
-            Self::Obstructed => "Physics requires a clear body in loaded terrain",
-            Self::RespawnBlocked => "Respawn blocked: no clear space over the spawn",
+            Self::Forbidden => "The Server’s policy forbids that movement mode.",
+            Self::CreativeOnly => "Flight is Creative-only.",
+            Self::Obstructed => "Physics needs a clear body in loaded terrain.",
+            Self::RespawnBlocked => "Respawn blocked: no clear space over the spawn.",
         }
     }
     pub fn refused(self) -> bool {
@@ -120,11 +183,19 @@ pub struct BodyState {
 }
 #[derive(Message, Clone, Copy, Debug)]
 pub struct RespawnIntent;
+/// A respawn the Server carried out, for a death to end on.
+#[derive(Message, Clone, Copy, Debug)]
+pub(super) struct Respawned;
 #[derive(Message)]
 pub struct RestoreView(pub f32, pub f32);
 
 #[derive(Component, Debug)]
-#[require(super::entities::Carried)]
+#[require(
+    super::inventory::Inventory,
+    super::game_mode::PlayerMode,
+    super::vitals::Vitals,
+    super::vitals::LastDamage
+)]
 pub struct Player {
     eye: Vec3,
     mode: MovementMode,
@@ -141,6 +212,8 @@ pub struct Player {
     swim_hold_s: f32,
     /// A horizontal axis was blocked on the last step.
     against_bank: bool,
+    /// The fastest landing since the Vitals last took it.
+    impact_mps: f32,
 }
 impl Player {
     fn new(eye: Vec3, mode: MovementMode) -> Self {
@@ -158,6 +231,7 @@ impl Player {
             swimming: false,
             swim_hold_s: 0.0,
             against_bank: false,
+            impact_mps: 0.0,
         }
     }
     pub fn eye(&self) -> Vec3 {
@@ -208,13 +282,32 @@ impl Player {
         p.crouching = saved.crouching;
         p
     }
+    /// The height in metres a free fall lands from at the speed of the
+    /// hardest landing since the last call: v² / 2g.
+    pub(in crate::server) fn take_fall_m(&mut self) -> f32 {
+        let v = std::mem::take(&mut self.impact_mps);
+        v * v / (2.0 * GRAVITY_MPS2)
+    }
+    /// Drops whatever movement the Client last asked for.
+    pub(in crate::server) fn stop(&mut self) {
+        self.intent = default();
+    }
+    /// Sprint held and the body travelling, not merely the key down.
+    pub(in crate::server) fn sprinting(&self) -> bool {
+        const STANDING_MPS: f32 = 0.1;
+        self.body_state().sprinting && self.travel_mps.with_y(0.0).length() > STANDING_MPS
+    }
+    pub(in crate::server) fn eye_submerged(&self) -> bool {
+        self.immersion
+            .is_some_and(|fluid| self.eye.y < fluid.surface_y_m)
+    }
     pub fn body_state(&self) -> BodyState {
         BodyState {
             grounded: self.mode == MovementMode::Physics && self.grounded,
             horizontal_mps: self.travel_mps.with_y(0.0).length(),
             vertical_mps: self.travel_mps.y,
             crouching: self.crouching,
-            sprinting: self.intent.sprint && !self.crouching,
+            sprinting: self.intent.speed.sprinting() && !self.crouching,
             swimming: self.mode == MovementMode::Physics && self.swimming,
             immersion: self.immersion,
         }
@@ -237,8 +330,9 @@ impl Player {
         let eye_height = self.eye_height();
         let height = self.body_height();
         Aabb::new(
-            (self.eye - Vec3::new(0.3, eye_height, 0.3)).to_array(),
-            (self.eye + Vec3::new(0.3, height - eye_height, 0.3)).to_array(),
+            (self.eye - Vec3::new(BODY_HALF_WIDTH_M, eye_height, BODY_HALF_WIDTH_M)).to_array(),
+            (self.eye + Vec3::new(BODY_HALF_WIDTH_M, height - eye_height, BODY_HALF_WIDTH_M))
+                .to_array(),
         )
     }
     fn update_stance(
@@ -252,8 +346,8 @@ impl Player {
         }
         let feet = self.eye - Vec3::Y * self.eye_height();
         let standing = Aabb::new(
-            (feet - Vec3::new(0.3, 0.0, 0.3)).to_array(),
-            (feet + Vec3::new(0.3, BODY_HEIGHT_M, 0.3)).to_array(),
+            (feet - Vec3::new(BODY_HALF_WIDTH_M, 0.0, BODY_HALF_WIDTH_M)).to_array(),
+            (feet + Vec3::new(BODY_HALF_WIDTH_M, BODY_HEIGHT_M, BODY_HALF_WIDTH_M)).to_array(),
         );
         if !self.intent.crouch && collide::overlaps(store, tables, size, standing) {
             return;
@@ -302,7 +396,7 @@ impl Player {
         if self.mode == MovementMode::Flight {
             self.eye += direction.clamp_length_max(1.0)
                 * (self.intent.speed_mps.clamp(0.5, FLY_SPEED_CEILING_MPS)
-                    * if self.intent.sprint { 5.0 } else { 1.0 })
+                    * self.intent.speed.flying_factor())
                 .min(FLY_SPEED_CEILING_MPS)
                 * dt;
             self.intent.jump = false;
@@ -352,10 +446,8 @@ impl Player {
         self.velocity_y = self.velocity_y.max(-50.0);
         let speed = if self.crouching {
             2.25
-        } else if self.intent.sprint {
-            8.0
         } else {
-            4.5
+            self.intent.speed.walking_mps()
         };
         let speed = speed * (1.0 - (1.0 - WATER_SPEED_FACTOR) * (wet / float).min(1.0));
         let horizontal = direction.normalize_or_zero() * throttle * speed * dt;
@@ -387,21 +479,35 @@ impl Player {
         }
         self.against_bank = moved.blocked[0] || moved.blocked[2];
         self.grounded = moved.blocked[1] && self.velocity_y <= 0.0;
+        if self.grounded {
+            self.impact_mps = self.impact_mps.max(-self.velocity_y);
+        }
         if moved.blocked[1] {
             self.velocity_y = 0.0;
         }
-        self.eye = Vec3::from_array(moved.aabb.min) + Vec3::new(0.3, self.eye_height(), 0.3);
+        self.eye = Vec3::from_array(moved.aabb.min)
+            + Vec3::new(BODY_HALF_WIDTH_M, self.eye_height(), BODY_HALF_WIDTH_M);
     }
+}
+impl super::persistence::extensions::PlayerState for tesserae_core::save::MovementV1 {
+    fn capture(player: EntityRef) -> Option<Self> {
+        player.get::<Player>().map(Player::saved_movement)
+    }
+
+    /// Applied by `spawn_player` instead: the saved mode decides the spawn
+    /// height.
+    fn restore(self, _: &mut bevy::ecs::system::EntityCommands) {}
 }
 #[derive(SystemSet, Hash, PartialEq, Eq, Clone, Debug)]
 pub(super) struct PlayerInput;
 pub(super) fn plugin(app: &mut App) {
     app.init_session_resource::<MovementPolicy>()
         .add_session_message::<RestoreView>()
-        .add_session_message::<MovementIntent>()
+        .add_player_intent::<MovementIntent>()
         .add_session_message::<MovementFeedback>()
         .add_session_message::<PoseCorrection>()
         .add_session_message::<RespawnIntent>()
+        .add_session_message::<Respawned>()
         .add_session_systems(PostStartup, spawn_player)
         .add_session_systems(
             RunFixedMainLoop,
@@ -437,7 +543,13 @@ fn spawn_player(
     generator: Option<Res<super::WorldGenerator>>,
     policy: Res<MovementPolicy>,
     persistence: Option<Res<super::persistence::Persistence>>,
+    survival: Option<Res<super::survival::Survival>>,
 ) {
+    let game_mode = super::game_mode::PlayerMode(
+        persistence
+            .as_ref()
+            .map_or_else(default, |p| p.player_mode()),
+    );
     let mode = persistence
         .as_ref()
         .and_then(|p| p.reopened_mode)
@@ -453,6 +565,11 @@ fn spawn_player(
                 MovementMode::Flight
             }
         });
+    let mode = if game_mode.survival() {
+        MovementMode::Physics
+    } else {
+        mode
+    };
     let mut player = Player::new(
         spawn.entry_eye_at_height(if mode == MovementMode::Physics {
             EYE_HEIGHT
@@ -463,13 +580,15 @@ fn spawn_player(
     );
     if let Some(view) = persistence.as_ref().and_then(|p| p.reopened_view) {
         player = Player::from_saved(spawn.entry_eye(), view);
+        player.mode = mode;
         commands.write_message(RestoreView(view.yaw, view.pitch));
     }
     info!(
         "Player spawned: movement={:?}, eye={:?}, view=first_person, fixed_hz=64",
         player.mode, player.eye
     );
-    commands.spawn(player);
+    let vitals = super::vitals::Vitals::full(&survival.map(|s| s.rules).unwrap_or_default());
+    commands.spawn((player, game_mode, vitals));
 }
 /// First standing position over `spawn` whose body is clear, so a Voxel placed
 /// at the spawn lifts the respawn rather than embedding it. `None` when the
@@ -484,8 +603,8 @@ fn clear_respawn_eye(
         let eye = spawn + Vec3::Y * (step as f32 * RESPAWN_LIFT_STEP_M + EYE_HEIGHT);
         let feet = eye - Vec3::Y * EYE_HEIGHT;
         let body = Aabb::new(
-            (feet - Vec3::new(0.3, 0.0, 0.3)).to_array(),
-            (feet + Vec3::new(0.3, BODY_HEIGHT_M, 0.3)).to_array(),
+            (feet - Vec3::new(BODY_HALF_WIDTH_M, 0.0, BODY_HALF_WIDTH_M)).to_array(),
+            (feet + Vec3::new(BODY_HALF_WIDTH_M, BODY_HEIGHT_M, BODY_HALF_WIDTH_M)).to_array(),
         );
         (!collide::overlaps(store, tables, size, body)).then_some(eye)
     })
@@ -493,12 +612,13 @@ fn clear_respawn_eye(
 pub(super) fn receive(
     mut intents: MessageReader<MovementIntent>,
     mut respawn: MessageReader<RespawnIntent>,
-    mut player: Single<&mut Player>,
+    player: Single<(&mut Player, &super::game_mode::PlayerMode)>,
     policy: Res<MovementPolicy>,
     spawn: Res<SpawnPoint>,
     (store, tables, world): (Res<ChunkStore>, Res<ContentTables>, Res<WorldSettings>),
-    mut feedback: MessageWriter<MovementFeedback>,
+    (mut feedback, mut respawned): (MessageWriter<MovementFeedback>, MessageWriter<Respawned>),
 ) {
+    let (mut player, game_mode) = player.into_inner();
     for intent in intents.read() {
         if !intent.direction.is_finite()
             || !intent.speed_mps.is_finite()
@@ -534,6 +654,8 @@ pub(super) fn receive(
             };
             if !allowed {
                 feedback.write(MovementFeedback::Forbidden);
+            } else if next == MovementMode::Flight && game_mode.survival() {
+                feedback.write(MovementFeedback::CreativeOnly);
             } else if next == MovementMode::Physics
                 && collide::overlaps(&*store, &tables, world.voxel_size, player.body())
             {
@@ -567,6 +689,8 @@ pub(super) fn receive(
         player.crouching = false;
         player.swimming = false;
         player.swim_hold_s = 0.0;
+        player.impact_mps = 0.0;
+        respawned.write(Respawned);
     }
 }
 fn publish(mut player: Single<&mut Player>, mut poses: MessageWriter<PoseCorrection>) {
@@ -578,7 +702,7 @@ fn publish(mut player: Single<&mut Player>, mut poses: MessageWriter<PoseCorrect
         body: player.body_state(),
     });
 }
-fn simulate(
+pub(super) fn simulate(
     status: Option<Res<super::persistence::SaveStatus>>,
     policy: Res<MovementPolicy>,
     mut player: Single<&mut Player>,
@@ -727,6 +851,42 @@ mod tests {
         }
     }
     #[test]
+    fn each_speed_level_walks_at_its_own_metres_per_second_and_speed_one_is_the_old_sprint() {
+        let t = tables();
+        let s = scene(1.0);
+        let mut seen = Vec::new();
+        for level in [
+            SpeedLevel::Walk,
+            SpeedLevel::One,
+            SpeedLevel::Two,
+            SpeedLevel::Three,
+        ] {
+            let mut p = player();
+            p.advance(&s, &t, 1.0, 1.0 / 64.0);
+            p.intent.direction = Vec3::X;
+            p.intent.speed = level;
+            p.advance(&s, &t, 1.0, 1.0 / 64.0);
+            let body = p.body_state();
+            assert_eq!(body.sprinting, level.sprinting());
+            assert!((body.horizontal_mps - level.walking_mps()).abs() < 0.01);
+            seen.push(body.horizontal_mps);
+        }
+        assert!((seen[1] - 8.0).abs() < 0.01, "Speed 1 keeps the old sprint");
+        assert!(seen.windows(2).all(|w| w[0] < w[1]), "{seen:?}");
+    }
+
+    #[test]
+    fn the_speed_level_cycles_through_all_four_and_back() {
+        let mut level = SpeedLevel::Walk;
+        let mut order = Vec::new();
+        for _ in 0..5 {
+            order.push(level.label());
+            level = level.next();
+        }
+        assert_eq!(order, ["Walk", "Speed 1", "Speed 2", "Speed 3", "Walk"]);
+    }
+
+    #[test]
     fn a_partly_deflected_stick_scales_speed_and_whole_directions_keep_full_speed() {
         for size in [1.0, 0.5, 0.25] {
             let s = scene(size);
@@ -765,7 +925,7 @@ mod tests {
             let mut p = player();
             p.advance(&s, &t, size, 1.0 / 64.0);
             p.intent.direction = Vec3::X;
-            p.intent.sprint = true;
+            p.intent.speed = SpeedLevel::One;
             p.advance(&s, &t, size, 1.0 / 64.0);
             let body = p.body_state();
             assert!(body.grounded && body.sprinting && !body.crouching);
@@ -1073,7 +1233,7 @@ mod tests {
             p.intent = MovementIntent {
                 direction: Vec3::X,
                 crouch: true,
-                sprint: true,
+                speed: SpeedLevel::One,
                 ..default()
             };
             for _ in 0..64 {
@@ -1278,13 +1438,49 @@ mod tests {
         );
     }
     #[test]
+    fn a_survival_player_is_refused_flight() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(WorldSettings::default())
+            .insert_resource(SpawnPoint::for_tests(Vec3::ZERO))
+            .init_resource::<ChunkStore>()
+            .insert_resource(ContentTables::default())
+            .add_plugins(plugin);
+        app.update();
+        let (mut p, mut mode) = app
+            .world_mut()
+            .query::<(&mut Player, &mut super::super::game_mode::PlayerMode)>()
+            .single_mut(app.world_mut())
+            .unwrap();
+        p.mode = MovementMode::Physics;
+        mode.0 = super::super::game_mode::GameMode::Survival;
+        app.world_mut().write_message(MovementIntent {
+            switch_mode: true,
+            ..default()
+        });
+        app.update();
+        let p = app
+            .world_mut()
+            .query::<&Player>()
+            .single(app.world())
+            .unwrap();
+        assert_eq!(p.mode, MovementMode::Physics);
+        let feedback: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<MovementFeedback>>()
+            .drain()
+            .collect();
+        assert_eq!(feedback, [MovementFeedback::CreativeOnly]);
+        assert!(MovementFeedback::CreativeOnly.refused());
+    }
+    #[test]
     fn noclip_speed_is_server_capped_and_mode_changes_never_move_the_eye() {
         let mut p = player();
         p.mode = MovementMode::Flight;
         p.intent = MovementIntent {
             direction: Vec3::X,
             speed_mps: f32::MAX,
-            sprint: true,
+            speed: SpeedLevel::One,
             ..default()
         };
         steps(&mut p, &scene(1.0), 64);
@@ -1621,7 +1817,7 @@ mod tests {
             p.intent = MovementIntent {
                 direction: Vec3::X,
                 speed_mps: 12.0,
-                sprint: true,
+                speed: SpeedLevel::One,
                 ..default()
             };
             steps(&mut p, &s, 64);

@@ -10,12 +10,14 @@ use std::collections::HashSet;
 pub(super) enum Owner {
     Gameplay,
     PointerFree,
-    Catalogue,
+    Menu,
     LayoutMenu,
+    Inventory,
     Settings,
     BindingCapture,
     TextEntry,
     Modal,
+    Dead,
     #[default]
     Unfocused,
 }
@@ -91,12 +93,14 @@ type Contexts<'w> = (
     Option<Res<'w, UiInput>>,
     Option<Res<'w, crate::server::persistence::SaveStatus>>,
     Option<Res<'w, super::layout_menu::LayoutMenu>>,
+    Option<Res<'w, super::inventory_window::InventoryWindow>>,
+    Option<Res<'w, super::death::Dead>>,
 );
 
 pub(super) fn resolve(
     (keys, mouse, pad): super::actions::Devices,
     touch: Res<super::touch::TouchFrame>,
-    (menu, settings, ui, save, layout_menu): Contexts,
+    (menu, settings, ui, save, layout_menu, inventory, dead): Contexts,
     window: Single<(&Window, &CursorOptions), With<PrimaryWindow>>,
     mut ownership: ResMut<Ownership>,
     bindings: Res<super::actions::Bindings>,
@@ -107,6 +111,8 @@ pub(super) fn resolve(
         Owner::Unfocused
     } else if save.is_some_and(|status| status.modal()) {
         Owner::Modal
+    } else if !super::death::alive(dead) {
+        Owner::Dead
     } else if ui.as_ref().is_some_and(|ui| ui.text_entry) {
         Owner::TextEntry
     } else if settings
@@ -117,9 +123,11 @@ pub(super) fn resolve(
     } else if settings.as_ref().is_some_and(|settings| settings.open) {
         Owner::Settings
     } else if menu.open {
-        Owner::Catalogue
+        Owner::Menu
     } else if layout_menu.is_some_and(|menu| menu.open) {
         Owner::LayoutMenu
+    } else if inventory.is_some_and(|window| window.open) {
+        Owner::Inventory
     } else if cursor.grab_mode == CursorGrabMode::Locked {
         Owner::Gameplay
     } else {
@@ -156,10 +164,15 @@ pub(super) fn resolve(
         actions.axes = default();
     }
     use super::actions::{Action, Trigger};
-    for (&action, alternatives) in &bindings.keyboard {
+    for &action in bindings.keyboard.keys() {
         if matches!(
             action,
-            Action::Catalogue | Action::ReleaseCursor | Action::Help | Action::Diagnostics
+            Action::Menu
+                | Action::Inventory
+                | Action::SearchCatalogue
+                | Action::ReleaseCursor
+                | Action::Help
+                | Action::Diagnostics
         ) {
             if ownership.changed
                 || matches!(
@@ -170,31 +183,23 @@ pub(super) fn resolve(
                         | Owner::BindingCapture
                         | Owner::TextEntry
                         | Owner::Modal
+                        | Owner::Dead
                 )
             {
                 actions.cancel(action);
             }
             continue;
         }
-        // Catalogue shortcuts are keyboard ones; the pad navigates there.
-        let catalogue_action = owner == Owner::Catalogue
-            && !ownership.changed
-            && (super::actions::SLOTS.contains(&action) || action == Action::EmptyHand)
-            && alternatives
-                .iter()
-                .flatten()
-                .any(|binding| binding.active(inputs));
-        if !catalogue_action
-            && (!ownership.gameplay()
-                || bindings.alternatives(action).all(|binding| {
-                    !binding.active(inputs)
-                        || match binding.trigger {
-                            Trigger::Key(key) => !ownership.key(key),
-                            Trigger::Mouse(button) => !ownership.button(button),
-                            Trigger::Pad(button) => !ownership.pad(button),
-                            Trigger::Wheel(_) => false,
-                        }
-                }) && !inputs.touch.pressed(action))
+        if !ownership.gameplay()
+            || bindings.alternatives(action).all(|binding| {
+                !binding.active(inputs)
+                    || match binding.trigger {
+                        Trigger::Key(key) => !ownership.key(key),
+                        Trigger::Mouse(button) => !ownership.button(button),
+                        Trigger::Pad(button) => !ownership.pad(button),
+                        Trigger::Wheel(_) => false,
+                    }
+            }) && !inputs.touch.pressed(action)
         {
             actions.cancel(action);
         }
@@ -208,52 +213,6 @@ pub(super) fn gameplay(ownership: Res<Ownership>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test]
-    fn leaving_search_cancels_same_frame_catalogue_slot_input_until_a_fresh_press() {
-        use super::super::actions::{Action, Actions};
-        for (action, key) in [
-            (Action::Slot5, KeyCode::Digit5),
-            (Action::EmptyHand, KeyCode::KeyX),
-        ] {
-            let mut app = App::new();
-            app.add_plugins(super::super::actions::test_plugin)
-                .init_resource::<Ownership>()
-                .init_resource::<super::super::menu::Menu>()
-                .insert_resource(UiInput {
-                    text_entry: true,
-                    ..default()
-                })
-                .add_systems(Update, resolve);
-            app.world_mut()
-                .resource_mut::<super::super::menu::Menu>()
-                .open = true;
-            app.world_mut().spawn((
-                PrimaryWindow,
-                Window {
-                    focused: true,
-                    ..default()
-                },
-                CursorOptions::default(),
-            ));
-            app.update();
-            app.world_mut().resource_mut::<UiInput>().text_entry = false;
-            app.world_mut()
-                .resource_mut::<ButtonInput<KeyCode>>()
-                .press(key);
-            app.update();
-            assert_eq!(app.world().resource::<Ownership>().owner, Owner::Catalogue);
-            assert!(!app.world().resource::<Actions>().started(action));
-            app.world_mut()
-                .resource_mut::<ButtonInput<KeyCode>>()
-                .reset_all();
-            app.update();
-            app.world_mut()
-                .resource_mut::<ButtonInput<KeyCode>>()
-                .press(key);
-            app.update();
-            assert!(app.world().resource::<Actions>().started(action));
-        }
-    }
     #[test]
     fn save_modals_cancel_input_until_fresh_activation() {
         use super::super::actions::{Action, Actions};
@@ -490,7 +449,7 @@ mod tests {
                 wheel: default(),
             }
         }
-        ownership.resolve(Owner::Catalogue, inputs(&keys, &mouse, &pad));
+        ownership.resolve(Owner::Menu, inputs(&keys, &mouse, &pad));
         ownership.resolve(Owner::Gameplay, inputs(&keys, &mouse, &pad));
         ownership.resolve(Owner::Gameplay, inputs(&keys, &mouse, &pad));
         assert!(!ownership.key(KeyCode::KeyR));

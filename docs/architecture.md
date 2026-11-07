@@ -119,20 +119,21 @@ A World with no Game is empty air: it has no ground, lakes, fluid or fuel. See
 The Client sends aim reports beside edit intents. The Server answers with metre
 outline bounds and an acceptable ghost cell through the edit resolver. The
 Client meshes held Shapes from catalogue geometry and draws the outline, ghost
-and corner model. The menu, hotbar and drag follower share a cached model atlas
-from the same geometry. Games supply one optional, bounded texture per Material
-through the Declaration's appearance rows. One GPU texture atlas is shared by
-World surfaces and item models; the Client draws it without naming Materials.
-Greedy terrain faces repeat per Voxel, and colour, depth and shadow passes use
-the same texture alpha. Older contract lines retain colour fallback. Fire uses
-engine flame artwork. The placement ghost uses the held model at 75 percent
-opacity. The Client tracks a bounded history of aim requests and accepts
-monotonic Server replies; it retains a compatible answer for at most 200 ms
-while waiting for the next. Item changes, large turns or Eye displacement hide
-it immediately. Sampling a Voxel is a separate read-only Server intent, not an
-Edit; the Client applies a reply only if its hand selection has not changed. UI
-atlas images use premultiplied blending to preserve transparency. No preview
-reads World storage.
+and the first-person viewmodel (the arm and held Item at the lower right of the
+view; the avatar's arm and hand in third person). The Catalogue, hotbar and drag
+follower share a cached model atlas from the same geometry. Games supply one
+optional, bounded texture per Material through the Declaration's appearance
+rows. One GPU texture atlas is shared by World surfaces and item models; the
+Client draws it without naming Materials. Greedy terrain faces repeat per Voxel,
+and colour, depth and shadow passes use the same texture alpha. Older contract
+lines retain colour fallback. Fire uses engine flame artwork. The placement
+ghost uses the held model at 75 percent opacity. The Client tracks a bounded
+history of aim requests and accepts monotonic Server replies; it retains a
+compatible answer for at most 200 ms while waiting for the next. Item changes,
+large turns or Eye displacement hide it immediately. Sampling a Voxel is a
+separate read-only Server intent, not an Edit; the Client applies a reply only
+if its hand selection has not changed. UI atlas images use premultiplied
+blending to preserve transparency. No preview reads World storage.
 
 The Server also supplies removal target identity and bounds. The Client draws a
 progress bar above it and sends a guarded removal after the Material's hold
@@ -159,9 +160,9 @@ line passes B, so a height can be set in open sky. The preview draws each cell
 as a ghost of the block that would land, tinted where it would not; the cells of
 one tint are one merged mesh, so blended ghosts never re-sort against each other
 as the view moves, and touching cells draw only their outer surface, so every
-cell looks the same. The crosshair, outline, preview and removal are building
-only, shown while the hand holds something or Layout mode is on
-(`edit::building`). The Layout key opens the Layout menu
+cell looks the same. The crosshair, outline and removal work with an empty hand
+too, so a walking Player always sees what they would break; the preview needs
+something placeable in the hand. The Layout key opens the Layout menu
 (`client/layout_menu.rs`), a panel docked over the live game with its own input
 context: the cursor is released and the pad navigates it. Its lengths along X, Y
 and Z, the way each grows, and the gap apply as they are set and are saved when
@@ -221,6 +222,21 @@ when a Tool is used and nothing crosses the contract per Use or per Voxel
 door or a container, must also be declared data or a batched event, never a
 per-use Mod callback.
 
+### What the Server confirms, and what the Client animates
+
+The Client never guesses an outcome. A Place or Remove that landed is announced
+by the Server (`EditApplied`), so the placed-block settle, the hand's swing and
+the break particles play only after it, and nothing plays for a refusal. An undo
+says what it did to the Inventory in the same way: `RefundDropped` when a refund
+had no room and dropped at the Player's feet, and `HistoryNeedsItems` when it
+was refused for missing Items. A meal runs on the Server (`Eating`): the first
+bite spends the Item and three bites refill hunger over a second, and a slot
+change or death stops it. The hand's one state machine (rest, swing, mining,
+bite, slot switch) is Client-only presentation; it feeds the first-person
+viewmodel and the avatar's right arm alike and is held still under reduced
+motion. Dropping an Item is the Server's `InventoryIntent::Drop`, which throws
+it ahead of the Player with a pickup delay, outside the undo journal.
+
 ## The three invariants this diagram exists to protect
 
 Each of these is a mistake that will not look wrong in review.
@@ -276,6 +292,8 @@ tesserae/
 │   │   │   ├── combustion.rs   heat, fuel and residue, as data              ▸ 8
 │   │   │   ├── fire.rs         exposure, ignition, burning and residue      ▸ 8
 │   │   │   ├── collide.rs      AABB sweep and ray vs grid, in metres        ▸ 5
+│   │   │   ├── inventory.rs    Hotbar and backpack: fit, merge, spend, sort ▸ 15
+│   │   │   ├── survival.rs     Survival rules and the engine's defaults    ▸ 21
 │   │   │   └── layout.rs       line, rectangle, box → Voxel coordinates, ≤256
 │   │   └── benches/        criterion — meshing.rs gates step 1          ▸ 1
 │   │                       lod.rs: downsample, coarse Chunk, mesh, light  ▸ 6
@@ -300,11 +318,15 @@ tesserae/
 │           │   ├── jobs.rs         jobs on the async compute pool           ▸ 3
 │           │   ├── mods.rs         Mod Jobs, fair queues and tick drain      ▸ 7
 │           │   ├── fluids.rs       flow on workers, one step at a time      ▸ 8
-│           │   └── edit.rs         the Voxel-edit path, queued intents      ▸ 5
+│           │   ├── edit.rs         the Voxel-edit path, queued intents      ▸ 5
+│           │   ├── undo.rs         the undo journal, paying in Items        ▸ 15
+│           │   ├── inventory.rs    the Player's Inventory and its intents   ▸ 15
+│           │   └── vitals.rs       health, hunger and air on the tick       ▸ 21
 │           ├── client/         camera, input, UI, mesh upload               ▸ 2
 │           │   ├── chunk_view.rs   one entity per Chunk the Server sent     ▸ 3
 │           │   ├── edit.rs         place/remove intents, hotbar, crosshair   ▸ 5
-│           │   └── menu.rs         tile menu and square play bar      ▸ 8
+│           │   ├── inventory_window.rs  the Inventory and the Catalogue     ▸ 15
+│           │   └── menu.rs         the in-game Menu
 │           └── render/         chunk material, distance fog, look packs   ▸ 2, 9
 │               ├── chunk_material.rs MaterialExtension and its WESL         ▸ 2
 │               └── fog.rs            live FogSettings → one DistanceFog     ▸ 9
@@ -327,11 +349,14 @@ The Client receives save status and sends lifecycle intents. Mods observe
 new/open through WIT, and restored changes also feed coarse derivation. Details
 and limits: [World persistence](world-persistence.md).
 
-The World list (`client/worlds.rs`) runs in a process with no Server and no open
-World. It creates, renames and trashes only closed World folders, through core's
-`save::library`, which refuses any folder whose writer lock another process
-holds. Opening a World restarts the process, so the Server rule above holds for
-everything inside a World.
+The launcher (`client/worlds.rs`: the title screen, the World list, Create
+World, Edit World and the Mods library) runs with no Server and no open World.
+It creates, renames, edits and trashes only closed World folders, through core's
+`save::library`, which refuses any folder whose writer lock is held. What it
+cannot decide alone, Create World's Biome edits and Edit World's game modes, it
+writes to the World's sidecar for the Server to apply when the World opens
+([ADR-0024](adr/0024-game-mode-is-per-player-with-a-world-default.md)), so the
+Server rule above holds for everything inside a World.
 
 Authors do not need this repository to make a Game or Mod: the
 [authoring guide](authoring-guide.md) and the starters are self-contained.

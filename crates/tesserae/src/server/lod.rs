@@ -161,16 +161,19 @@ pub(in crate::server) struct LodGenerators {
 
 impl LodGenerators {
     pub fn new(world: &WorldSettings, level_zero: &Worldgen, levels: u32) -> Self {
+        // Level 1 is the downsample of a level 0 without features, so a pair of them cannot win
+        // a coarse Voxel's vote.
+        let bare = level_zero.params().without_surface_features();
         // The smoothing gate is by metres: a 2 m Voxel passes it and places 1 m stairs that the
         // next downsample rounds back to cubes.
         let coarse = WorldgenParams {
             smoothing: None,
-            ..level_zero.params()
+            ..bare
         };
         let sources = (0..levels.saturating_sub(1))
             .map(|j| {
                 if j == 0 {
-                    level_zero.clone()
+                    Worldgen::new(world.seed, world.voxel_size, bare)
                 } else {
                     Worldgen::new(world.seed, world.voxel_size * 2f32.powi(j as i32), coarse)
                 }

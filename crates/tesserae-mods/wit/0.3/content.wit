@@ -38,6 +38,9 @@ interface content {
         solid: bool,
         /// Hold-to-remove duration, 0.05 to 60 seconds; none uses 0.35.
         remove-time-s: option<f32>,
+        /// Health a Player in Survival loses per second while their body
+        /// overlaps the Material, from 0 to 1000; none is harmless.
+        contact-damage-per-s: option<f32>,
     }
 
     /// One Shape. The engine registers it under `<mod id>:<name>`, derives its
@@ -347,6 +350,44 @@ interface content {
         /// A solid Material, `<mod id>:<name>`, resolved after every Mod's
         /// Declaration. At most one item names a given Material.
         material: option<string>,
+        /// The most one Inventory slot holds, from 1 to 64; none is 64.
+        max-stack: option<u32>,
+        /// Hunger eating one restores, greater than 0 and at most 1000; none
+        /// is not food.
+        food: option<f32>,
+    }
+
+    /// The rules of Survival, from the Game only. Every field is optional and
+    /// an absent one takes the engine's default, shown in brackets. Health and
+    /// hunger are points, distances metres and times seconds.
+    record survival-params {
+        /// 1 to 1000 [20].
+        max-health: option<f32>,
+        /// 1 to 1000 [20].
+        max-hunger: option<f32>,
+        /// Seconds of breath under a fluid's surface, 1 to 600 [10].
+        max-air-s: option<f32>,
+        /// A fall up to this height costs nothing, 0 to 1000 [3].
+        safe-fall-m: option<f32>,
+        /// Health lost per metre fallen beyond `safe-fall-m`, 0 to 1000 [1].
+        fall-damage-per-m: option<f32>,
+        /// Health lost per second with no air left, 0 to 1000 [2].
+        drowning-damage-per-s: option<f32>,
+        /// Hunger lost per minute, 0 to 1000 [1].
+        hunger-per-min: option<f32>,
+        /// Hunger lost per minute while sprinting, 0 to 1000 [2].
+        sprinting-hunger-per-min: option<f32>,
+        /// Health regenerates while hunger is at least this, 0 to
+        /// `max-hunger` [18].
+        regeneration-hunger: option<f32>,
+        /// Health lost per second at zero hunger, 0 to 1000 [0.25].
+        starvation-damage-per-s: option<f32>,
+        /// Whether a dead Player keeps their Inventory instead of dropping it
+        /// [false].
+        keep-inventory: option<bool>,
+        /// Health regained per second while hunger is at least
+        /// `regeneration-hunger`, 0 to 1000 [0.25].
+        regeneration-per-s: option<f32>,
     }
 
     /// A kind of ground: a point in the unit square of Climate, where the
@@ -371,6 +412,23 @@ interface content {
         /// `none` and 1 leave the caves as they are, 0 switches them off. It
         /// blends smoothly across the Biome's border, unlike `ground`.
         cave-scale: option<f32>,
+
+        /// At most 4 Materials the engine stands one Voxel above this Biome's
+        /// surface Material, where the column's top is a full Voxel of it with
+        /// air above: never under a fluid, on a smoothed step or in a cave
+        /// mouth. Distance levels leave them out.
+        surface-features: list<surface-feature>,
+    }
+
+    /// A Material scattered over a Biome's surface, deterministically from the
+    /// World seed. Removing one drops its Item as any Voxel does.
+    record surface-feature {
+        /// A solid Material, `<mod id>:<name>`, resolved after every Mod's
+        /// Declaration.
+        material: string,
+        /// About one in every `spacing-m` by `spacing-m` metres of the Biome's
+        /// surface, at any Voxel size; from 4 to 1024.
+        spacing-m: f32,
     }
 
     /// A sky colour and the fog that matches it, as sRGB bytes. A pair, so a
@@ -429,5 +487,7 @@ interface content {
         biomes: list<biome-def>,
         /// At most 16 rows per Mod and 32 in a World, from any Mod.
         ores: list<ore-def>,
+        /// From the Game only, like `view`; `none` keeps every default.
+        survival: option<survival-params>,
     }
 }

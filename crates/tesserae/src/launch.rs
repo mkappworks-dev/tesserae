@@ -49,6 +49,18 @@ pub enum Target {
     World(PathBuf),
 }
 
+/// What a World about to be created would declare about its Biomes, as the
+/// Biomes step shows and edits it.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct BiomePreview {
+    pub biomes: Vec<tesserae_core::biome_edits::BiomeChoice>,
+    pub climate: tesserae_core::climate::ClimateParams,
+    /// The World's own ground, which a Biome without its own takes.
+    pub ground: Option<tesserae_core::biome_edits::GroundNames>,
+    /// The solid Materials a Biome's ground may be made of, by name.
+    pub materials: Vec<String>,
+}
+
 /// Where the session ends: set before a quit that is not to desktop.
 #[derive(Resource, Default)]
 pub struct Switch(pub Option<Target>);
@@ -135,6 +147,18 @@ impl Installed {
             check_trust,
             trust_file: Some(trust_file),
         }
+    }
+
+    /// The Biomes the Game and Mods in `ids` declare, for Create World.
+    pub fn preview_biomes(&self, ids: &[String]) -> Result<BiomePreview, String> {
+        let trust_file = self.trust_file.as_ref().ok_or("no trust file")?;
+        let found = self
+            .found
+            .iter()
+            .filter(|f| ids.contains(&f.manifest.id))
+            .cloned()
+            .collect();
+        crate::server::mods::preview(found, trust_file, self.check_trust)
     }
 
     pub fn none(error: Option<String>) -> Self {

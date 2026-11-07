@@ -486,6 +486,10 @@ mod tests {
             last_played_unix_s: 0,
             world: WorldId::new(),
             pending: true,
+            game_mode: Default::default(),
+            biomes: None,
+            player_mode: None,
+            mode_changes: Default::default(),
         };
         let folder = library::create(&worlds.0, &sidecar).unwrap();
         let before = snapshot(&folder);
@@ -519,6 +523,10 @@ mod tests {
             last_played_unix_s: 0,
             world: WorldId::new(),
             pending: true,
+            game_mode: Default::default(),
+            biomes: None,
+            player_mode: None,
+            mode_changes: Default::default(),
         };
         let folder = library::create(&worlds.0, &sidecar).unwrap();
         let prepare = || {

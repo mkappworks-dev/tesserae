@@ -12,7 +12,8 @@ use tesserae::mods::commands::{Fill, Placement, SourceFill};
 use tesserae::mods::content::{
     Appearance, BiomeDef, BurnAfter, BurnEnd, ClimateParams, CombustionDef, FluidDef, FluidState,
     GroundParams, HeatDef, ItemDef, MaterialDef, Occlusion, OreDef, Reactant, ReactionDef,
-    ReactionSide, RenderClass, ShapeDef, SkyFog, ToolDef, ToolKind, ViewParams, WaterParams,
+    ReactionSide, RenderClass, ShapeDef, SkyFog, SurfaceFeature, ToolDef, ToolKind, ViewParams,
+    WaterParams,
 };
 use tesserae::mods::types::{
     Arm, BoxM, CollisionBox, ConnectDef, LogLevel, NodeBox, Srgba, Vec3, Voxel,
@@ -95,6 +96,7 @@ fn solid(name: &str) -> MaterialDef {
         occlusion: Occlusion::Opaque,
         render: RenderClass::Opaque,
         remove_time_s: Some(0.35),
+        contact_damage_per_s: None,
         solid: true,
     }
 }
@@ -205,6 +207,7 @@ impl Guest for Terra {
                     occlusion: Occlusion::Opaque,
                     render: RenderClass::Opaque,
                     remove_time_s: None,
+                    contact_damage_per_s: None,
                     solid: true,
                 },
                 MaterialDef {
@@ -214,6 +217,7 @@ impl Guest for Terra {
                     occlusion: Occlusion::Opaque,
                     render: RenderClass::Opaque,
                     remove_time_s: None,
+                    contact_damage_per_s: Some(4.0),
                     solid: false,
                 },
                 solid("wood"),
@@ -228,6 +232,7 @@ impl Guest for Terra {
                     occlusion: Occlusion::SameMaterial,
                     render: RenderClass::Blend,
                     remove_time_s: None,
+                    contact_damage_per_s: None,
                     solid: false,
                 },
                 solid("brick"),
@@ -238,6 +243,7 @@ impl Guest for Terra {
                     occlusion: Occlusion::SameMaterial,
                     render: RenderClass::Blend,
                     remove_time_s: None,
+                    contact_damage_per_s: None,
                     solid: false,
                 },
                 solid("stone"),
@@ -258,6 +264,7 @@ impl Guest for Terra {
                 solid("sand"),
                 solid("snow"),
                 solid("iron"),
+                solid("melon"),
             ],
             shapes: vec![fence()],
             appearance: vec![
@@ -276,6 +283,7 @@ impl Guest for Terra {
                 appearance("sand", [214, 196, 140, 255]),
                 appearance("snow", [236, 240, 246, 255]),
                 appearance("iron", [150, 120, 104, 255]),
+                appearance("melon", [84, 150, 56, 255]),
             ],
             world: Some(world),
             view: Some(ViewParams {
@@ -385,6 +393,8 @@ impl Guest for Terra {
                         a: 255,
                     },
                     material: Some("terra:stone".into()),
+                    max_stack: None,
+                    food: None,
                 },
                 ItemDef {
                     name: "dirt".into(),
@@ -396,6 +406,8 @@ impl Guest for Terra {
                         a: 255,
                     },
                     material: Some("terra:dirt".into()),
+                    max_stack: None,
+                    food: None,
                 },
                 ItemDef {
                     name: "grass".into(),
@@ -407,6 +419,21 @@ impl Guest for Terra {
                         a: 255,
                     },
                     material: Some("terra:grass".into()),
+                    max_stack: None,
+                    food: None,
+                },
+                ItemDef {
+                    name: "melon".into(),
+                    size_m: 0.25,
+                    color: Srgba {
+                        r: 84,
+                        g: 150,
+                        b: 56,
+                        a: 255,
+                    },
+                    material: Some("terra:melon".into()),
+                    max_stack: None,
+                    food: Some(6.0),
                 },
             ],
             biomes: vec![
@@ -420,6 +447,11 @@ impl Guest for Terra {
                         fog: (136, 160, 190),
                     }),
                     cave_scale: None,
+                    // One in every 16 by 16 m of grass: found while exploring, not a carpet.
+                    surface_features: vec![SurfaceFeature {
+                        material: "terra:melon".into(),
+                        spacing_m: 16.0,
+                    }],
                 },
                 BiomeDef {
                     name: "dry".into(),
@@ -435,6 +467,7 @@ impl Guest for Terra {
                         fog: (196, 178, 142),
                     }),
                     cave_scale: Some(1.5),
+                    surface_features: Vec::new(),
                 },
                 BiomeDef {
                     name: "cold".into(),
@@ -450,8 +483,10 @@ impl Guest for Terra {
                         fog: (176, 190, 208),
                     }),
                     cave_scale: Some(0.0),
+                    surface_features: Vec::new(),
                 },
             ],
+            survival: None,
             ores: vec![OreDef {
                 material: "terra:iron".into(),
                 min_depth_m: 5.0,

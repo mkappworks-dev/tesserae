@@ -1,7 +1,7 @@
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use std::hint::black_box;
 use tesserae_core::Voxel;
-use tesserae_core::collide::VoxelVolume;
+use tesserae_core::collide::{Terrain, VoxelVolume};
 use tesserae_core::entity::{DropSpec, Entities, MAX_ENTITIES};
 use tesserae_core::testgen::fixtures;
 
@@ -34,10 +34,22 @@ fn full(steps_before: u32) -> Entities {
             count: 1,
             size_m: 0.25,
         };
-        e.spawn_drop(&Floor, tables, SIZE_M, at, spec);
+        e.spawn_drop(
+            &Terrain {
+                voxels: &Floor,
+                tables,
+                voxel_size: SIZE_M,
+            },
+            at,
+            spec,
+        );
     }
     for _ in 0..steps_before {
-        e.step(&Floor, tables, SIZE_M);
+        e.step(&Terrain {
+            voxels: &Floor,
+            tables,
+            voxel_size: SIZE_M,
+        });
     }
     e
 }
@@ -48,13 +60,25 @@ fn entities(c: &mut Criterion) {
     group.bench_function("step_2048_falling", |b| {
         b.iter_batched(
             || full(0),
-            |mut e| e.step(black_box(&Floor), tables, SIZE_M),
+            |mut e| {
+                e.step(black_box(&Terrain {
+                    voxels: &Floor,
+                    tables,
+                    voxel_size: SIZE_M,
+                }))
+            },
             BatchSize::LargeInput,
         )
     });
     group.bench_function("step_2048_resting", |b| {
         let mut e = full(600);
-        b.iter(|| e.step(black_box(&Floor), tables, SIZE_M))
+        b.iter(|| {
+            e.step(black_box(&Terrain {
+                voxels: &Floor,
+                tables,
+                voxel_size: SIZE_M,
+            }))
+        })
     });
     group.finish();
 }

@@ -38,6 +38,26 @@ Line 0.3 gained `biomes` and `ores` on its `declaration`, and `climate` on its
 and an optional `sky-fog`, a `sky-fog` record of two sRGB colours, and an
 optional `cave-scale`, a multiplier from 0 to 4 on the World's cave radius.
 
+Line 0.3 gained what Survival needs in the same way: an optional
+`contact-damage-per-s` on `material-def`, from 0 to 1000 health per second; an
+optional `max-stack` on `item-def`, from 1 to 64 and 64 when absent, and an
+optional `food`, the hunger one restores, above 0 and at most 1000; and an
+optional `survival` record on `declaration`, from the Game only, so a Mod that
+declares one is refused. Every `survival-params` field is optional and an absent
+one keeps the engine's default. A Declaration for 0.1 or 0.2 loads with none of
+them: harmless Materials, Items that stack to 64 and are not food, and the
+default Survival rules.
+
+`biome-def` then gained `surface-features`, appended in the same way: a list of
+at most four `surface-feature` records, each a solid Material by full name and a
+mean `spacing-m` from 4 to 1024 metres, that the Engine stands one Voxel above
+the Biome's surface. A Biome with none generates exactly as before.
+
+`survival-params` then gained `regeneration-per-s`, appended in the same way:
+the health a Player regains per second while hunger is at or above
+`regeneration-hunger`, from 0 to 1000, and 0.25 when absent, the rate the engine
+used before the Game could declare it.
+
 ## What is not frozen
 
 Line `0.x` is pre-release. Later gameplay steps may add new lines, and

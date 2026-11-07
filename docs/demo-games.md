@@ -1,25 +1,45 @@
 # Demo Games and shared Mods
 
-The repository ships five Games and twelve Mods. `terra` is the one
+The repository ships five Games and fifteen Mods. `terra` is the one
 self-contained Rust Game, the template
 [ADR-0004](adr/0004-demo-game-in-repo-real-game-out.md) describes. The other
-four Games are small Rust components that declare a World and one behaviour, and
-take every Material, fluid and Shape from the data Mods in [`mods/`](../mods/)
-they depend on. That split is the pattern worth copying: code for behaviour,
-data for content, shared across Games.
+four Games are small Rust components that declare a World, one behaviour and a
+food, and take every other Material, and every fluid and Shape, from the data
+Mods in [`mods/`](../mods/) they depend on. That split is the pattern worth
+copying: code for behaviour, data for content, shared across Games.
 
 ## Games
 
 All Games are MIT licensed and sit in `games/<id>/`. Only a Game declares
 `world`, `view` and `tools`.
 
-| Game                             | Behaviour (Rust)                         | Depends on                                              | Shows                                                                                                     |
-| -------------------------------- | ---------------------------------------- | ------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| [terra](../games/terra/)         | Everything; self-contained               | -                                                       | A Game that declares its own content, fluids, fire, a tool, Biomes and an ore                             |
-| [meadow](../games/meadow/)       | Builds a glade, three trees and a gazebo | strata, flora, glassworks (suggests wanderer)           | A Game with no Material of its own; a Shape from one Mod with a Material of another; Biomes from `strata` |
-| [ember](../games/ember/)         | Lava vents erupt on a timer              | strata, waters, flora, hearth (suggests golem)          | Fluid, reaction and fire rules that live in Mods; Biomes that tune the caves                              |
-| [tidewater](../games/tidewater/) | The sea level rises and falls slowly     | strata, waters, flora, crystals (suggests sprite)       | Sea level, caves, smoothing, Biomes and a gem ore; fluid Commands from `tick`                             |
-| [lumen](../games/lumen/)         | Lanterns light up in sequence            | strata, glassworks, frost, crystals (suggests wanderer) | Blended glass, emission and Shapes; timed placement from `tick`; Biomes with a snow court and a gem ore   |
+| Game                             | Behaviour (Rust)                         | Depends on                                              | Shows                                                                                                         |
+| -------------------------------- | ---------------------------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| [terra](../games/terra/)         | Everything; self-contained               | -                                                       | A Game that declares its own content, fluids, fire, a tool, Biomes and an ore                                 |
+| [meadow](../games/meadow/)       | Builds a glade, three trees and a gazebo | strata, flora, glassworks (suggests wanderer)           | A Game whose only Material is its food; a Shape from one Mod with a Material of another; Biomes from `strata` |
+| [ember](../games/ember/)         | Lava vents erupt on a timer              | strata, waters, flora, hearth (suggests golem)          | Fluid, reaction and fire rules that live in Mods; Biomes that tune the caves                                  |
+| [tidewater](../games/tidewater/) | The sea level rises and falls slowly     | strata, waters, flora, crystals (suggests sprite)       | Sea level, caves, smoothing, Biomes and a gem ore; fluid Commands from `tick`                                 |
+| [lumen](../games/lumen/)         | Lanterns light up in sequence            | strata, glassworks, frost, crystals (suggests wanderer) | Blended glass, emission and Shapes; timed placement from `tick`; Biomes with a snow court and a gem ore       |
+
+## Food
+
+Every Game has a food that lies in its World: a solid Material whose Item has a
+food value, scattered by world generation as a surface feature of the Biomes
+whose surface suits it. Break one to pick it up and press G to eat it.
+
+The four SDK Games declare their food through
+[`crates/demo-kit`](../crates/demo-kit/), a small crate, linked by path, of the
+texture noise, the texture layout and the food declarations they share; each
+keeps only its own numbers and pattern. `terra` does not use it, so it stays
+self-contained.
+
+| Game      | Food                | Hunger | On the surface of                                      | Spacing |
+| --------- | ------------------- | ------ | ------------------------------------------------------ | ------- |
+| terra     | `terra:melon`       | 6      | `temperate` (`terra:grass`)                            | 16 m    |
+| meadow    | `meadow:pumpkin`    | 8      | `meadow` (`strata:turf`), `heath` (`strata:soil`)      | 20 m    |
+| ember     | `ember:pepper`      | 4      | `ash_flats` (`hearth:ash`), `highland` (`flora:grass`) | 16 m    |
+| tidewater | `tidewater:coconut` | 6      | `lagoon` (`strata:turf`), `salt_flats` (`strata:sand`) | 16 m    |
+| lumen     | `lumen:glowberry`   | 5      | `garden` (`strata:turf`), `frost_court` (`frost:snow`) | 20 m    |
 
 ## Mods
 

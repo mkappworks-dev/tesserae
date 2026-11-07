@@ -5,7 +5,7 @@ use tesserae_core::SkyFogBlend;
 
 use super::WorldGenerator;
 use super::player::Player;
-use crate::content::SkyFogTarget;
+use crate::content::{HereBiome, SkyFogTarget};
 use crate::session::SessionApp;
 
 /// One 8-bit step: a smaller move cannot be seen, so is not worth a message.
@@ -13,7 +13,8 @@ const VISIBLE_STEP: f32 = 1.0 / 255.0;
 
 pub(super) fn plugin(app: &mut App) {
     app.add_session_message::<SkyFogTarget>()
-        .add_session_systems(Update, publish);
+        .add_session_message::<HereBiome>()
+        .add_session_systems(Update, (publish, publish_biome));
 }
 
 fn moved(sent: SkyFogBlend, now: SkyFogBlend) -> bool {
@@ -45,6 +46,24 @@ fn publish(
     });
 }
 
+/// For the Menu's "You are here".
+fn publish_biome(
+    generator: Option<Res<WorldGenerator>>,
+    player: Query<&Player>,
+    mut sent: Local<Option<HereBiome>>,
+    mut here: MessageWriter<HereBiome>,
+) {
+    let (Some(generator), Ok(player)) = (generator, player.single()) else {
+        return;
+    };
+    let eye = player.eye();
+    let now = HereBiome(generator.biome_at(eye.x, eye.z).map(|id| id.index()));
+    if *sent != Some(now) {
+        *sent = Some(now);
+        here.write(now);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -62,6 +81,7 @@ mod tests {
             ground: None,
             sky_fog,
             cave_scale: None,
+            surface_features: Default::default(),
         }
     }
 

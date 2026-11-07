@@ -16,6 +16,7 @@ use super::{LoadedMods, TrustMode, load};
 use crate::world::WorldSettings;
 
 mod biomes;
+mod food;
 
 fn checkout() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
@@ -236,18 +237,28 @@ fn every_demo_game_draws_the_character_of_the_mod_it_suggests() {
 }
 
 #[test]
-fn meadow_declares_no_material_and_takes_its_ground_from_strata() {
+fn meadow_declares_only_its_pumpkin_and_takes_its_ground_from_strata() {
     let (_install, loaded) = loaded("meadow", 0.5);
     assert!(loaded.game);
     assert_eq!(
         ids(&loaded),
         ["flora", "glassworks", "strata", "meadow", "wanderer"]
     );
-    assert!(
-        loaded
-            .registry
-            .names(Kind::Material)
-            .all(|(_, name)| !name.starts_with("meadow:"))
+    let own: Vec<_> = loaded
+        .registry
+        .names(Kind::Material)
+        .filter(|(_, name)| name.starts_with("meadow:"))
+        .map(|(id, name)| (id, name.to_owned()))
+        .collect();
+    let last = loaded
+        .registry
+        .names(Kind::Material)
+        .map(|(id, _)| id)
+        .max();
+    assert_eq!(
+        own,
+        [(last.unwrap(), "meadow:pumpkin".to_owned())],
+        "appended last"
     );
     let ground = loaded.world.unwrap().ground.unwrap();
     assert_eq!(ground.rock, material(&loaded, "strata:stone"));
@@ -724,6 +735,40 @@ fn terra_has_no_dependencies_and_declares_its_own_sand_snow_and_ore() {
     for name in ["terra:sand", "terra:snow", "terra:iron"] {
         material(&loaded, name);
     }
+}
+
+/// The Catalogue gives a Material's declared Item and removing its Voxel drops it, so a food Item
+/// that places a Material can be taken or gathered.
+#[test]
+fn terra_declares_a_melon_that_feeds_and_places_its_own_material() {
+    let (_install, loaded) = loaded("terra", 0.5);
+    let melon = loaded
+        .items
+        .iter()
+        .find(|item| item.name == "terra:melon")
+        .expect("terra declares a melon Item");
+    assert_eq!(melon.food, Some(6.0));
+    assert_eq!(melon.material, Some(material(&loaded, "terra:melon")));
+}
+
+#[test]
+fn lava_hurts_on_contact_in_every_demo_game_that_has_it() {
+    let mut with_lava = Vec::new();
+    for game in ["terra", "meadow", "ember", "tidewater", "lumen"] {
+        let (_install, loaded) = loaded(game, 0.5);
+        for (id, name) in loaded.registry.names(Kind::Material) {
+            if name.rsplit(':').next() == Some("lava") {
+                let damage = loaded
+                    .contact_damage
+                    .iter()
+                    .find(|(material, _)| usize::from(*material) == id)
+                    .map(|(_, damage)| *damage);
+                assert_eq!(damage, Some(4.0), "{game}: {name}");
+                with_lava.push(game);
+            }
+        }
+    }
+    assert_eq!(with_lava, ["terra", "ember"]);
 }
 
 #[test]

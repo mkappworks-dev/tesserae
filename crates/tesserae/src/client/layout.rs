@@ -771,9 +771,21 @@ fn span_counts(a: [i32; 3], b: [i32; 3], c: Option<[i32; 3]>) -> [u32; 3] {
     })
 }
 
-/// One line: the counts, then the same in metres.
-fn size_line(counts: [u32; 3], voxel_size: f32) -> String {
-    let metres = counts.map(|count| count as f32 * voxel_size);
+/// How far a row of `count` Voxels with `gap` empty Voxels between them
+/// reaches, in metres.
+pub(super) fn extent_m(count: u32, gap: u32, voxel_size: f32) -> f32 {
+    (count.saturating_sub(1) * (gap + 1) + 1) as f32 * voxel_size
+}
+
+/// Metres as the panel writes them: at most two decimals, no trailing zeros.
+pub(super) fn metres(value: f32) -> String {
+    let text = format!("{value:.2}");
+    text.trim_end_matches('0').trim_end_matches('.').to_owned()
+}
+
+/// One line: the counts, then how far they reach in metres.
+fn size_line(counts: [u32; 3], gap: u32, voxel_size: f32) -> String {
+    let metres = counts.map(|count| extent_m(count, gap, voxel_size));
     format!(
         "{} × {} × {} · {:.1} × {:.1} × {:.1} m",
         counts[0], counts[1], counts[2], metres[0], metres[1], metres[2]
@@ -979,7 +991,9 @@ pub(super) fn summary(
         Some(layout.lengths)
     }
     .map(|counts| {
-        let line = size_line(counts, voxel_size);
+        // Point to point measures the span itself, gaps and all.
+        let gap = if between { 0 } else { layout.gap };
+        let line = size_line(counts, gap, voxel_size);
         if between {
             line
         } else {
@@ -1069,7 +1083,7 @@ mod tests {
             .init_resource::<Time>()
             .add_message::<LayoutIntent>();
         let mut hotbar = Hotbar::default();
-        hotbar.slots[0] = Holding::solid(8, tesserae_core::SHAPE_FULL_CUBE);
+        hotbar.outside = Some(Holding::solid(8, tesserae_core::SHAPE_FULL_CUBE));
         app.insert_resource(hotbar);
         app.world_mut().spawn((
             Window::default(),
@@ -1276,7 +1290,7 @@ mod tests {
     fn leaving_gameplay_keeps_the_mode_and_a_return_does_not_commit() {
         let mut app = app();
         turn_on(&mut app);
-        app.world_mut().resource_mut::<Ownership>().owner = super::super::input::Owner::Catalogue;
+        app.world_mut().resource_mut::<Ownership>().owner = super::super::input::Owner::Menu;
         step(&mut app);
         assert!(mode(&app).on, "the Layout menu is one of these contexts");
         assert!(
@@ -1631,8 +1645,8 @@ mod tests {
         .init_resource::<Assets<Mesh>>()
         .init_resource::<Assets<StandardMaterial>>();
         let rock = tesserae_core::testgen::fixtures().ground.rock;
-        app.world_mut().resource_mut::<Hotbar>().slots[0] =
-            Holding::solid(rock, tesserae_core::SHAPE_FULL_CUBE);
+        app.world_mut().resource_mut::<Hotbar>().outside =
+            Some(Holding::solid(rock, tesserae_core::SHAPE_FULL_CUBE));
         turn_on(&mut app);
         app
     }
@@ -1804,7 +1818,7 @@ mod tests {
             Holding::solid(rock, tesserae_core::SHAPE_STAIR),
             Holding::solid(rock, tesserae_core::SHAPE_SLAB),
         ] {
-            app.world_mut().resource_mut::<Hotbar>().slots[0] = held;
+            app.world_mut().resource_mut::<Hotbar>().outside = Some(held);
             answer_with(&mut app, &cells);
             let shown = visible(&mut app);
             assert_eq!(shown.len(), 1);
@@ -1814,15 +1828,15 @@ mod tests {
                 "every cell, the new shape"
             );
         }
-        let Holding::Solid { orientation, .. } = app.world().resource::<Hotbar>().slots[0] else {
+        let Holding::Solid { orientation, .. } = app.world().resource::<Hotbar>().held() else {
             panic!("a solid");
         };
         let before = visible(&mut app)[0].centroid;
-        app.world_mut().resource_mut::<Hotbar>().slots[0] = Holding::Solid {
+        app.world_mut().resource_mut::<Hotbar>().outside = Some(Holding::Solid {
             material: rock,
             shape: tesserae_core::SHAPE_STAIR,
             orientation: orientation.turned(),
-        };
+        });
         answer_with(&mut app, &cells);
         let after = visible(&mut app);
         assert_eq!(after[0].vertices, 6 * cube_vertices(&app));

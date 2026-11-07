@@ -53,9 +53,14 @@ pub(super) enum Action {
     LayoutLess,
     LayoutReverse,
     LayoutActive,
-    Catalogue,
+    /// Saved as `catalogue` before the Menu replaced the Catalogue page.
+    #[serde(alias = "catalogue")]
+    Menu,
+    Inventory,
+    SearchCatalogue,
     ReleaseCursor,
     Help,
+    Settings,
     Diagnostics,
 }
 use Action::*;
@@ -238,7 +243,7 @@ impl Bindings {
         for (action, button) in [
             (Ascend, GamepadButton::South),
             (Descend, GamepadButton::East),
-            (Catalogue, GamepadButton::North),
+            (Menu, GamepadButton::North),
             (Shape, GamepadButton::West),
             (Sprint, GamepadButton::LeftThumb),
             (Sample, GamepadButton::RightThumb),
@@ -280,9 +285,12 @@ impl Bindings {
             (CycleTool, KeyCode::KeyM),
             (Use, KeyCode::KeyG),
             (ClearTool, KeyCode::Backspace),
-            (Catalogue, KeyCode::Tab),
+            (Menu, KeyCode::Tab),
             (ReleaseCursor, KeyCode::Escape),
-            (Help, KeyCode::KeyI),
+            (Inventory, KeyCode::KeyI),
+            (SearchCatalogue, KeyCode::KeyC),
+            (Help, KeyCode::F1),
+            (Settings, KeyCode::F10),
             (Diagnostics, KeyCode::F3),
             (Layout, KeyCode::KeyL),
             (LayoutReverse, KeyCode::KeyT),
@@ -719,8 +727,8 @@ pub(super) fn test_plugin(app: &mut App) {
     app.init_resource::<ButtonInput<KeyCode>>()
         .init_resource::<ButtonInput<MouseButton>>();
     app.init_resource::<super::profile::Preferences>()
-        .init_resource::<super::camera::Sprint>()
-        .init_resource::<super::camera::PadLatch>();
+        .init_resource::<super::camera::PadLatch>()
+        .init_resource::<super::view::PendingSave>();
     plugin(app);
 }
 

@@ -24,6 +24,7 @@ dimming = 2
 occlusion = "never"
 render = "blend"
 solid = false
+contact-damage-per-s = 4.0
 
 [[materials]]
 name = "wood"
@@ -71,6 +72,12 @@ color = [80, 90, 100, 255]
 [[appearance]]
 material = "water"
 color = [30, 80, 200, 128]
+
+[survival]
+max-health = 30
+safe-fall-m = 4.5
+regeneration-per-s = 0.5
+keep-inventory = true
 
 [view]
 view-distance-m = 160.0
@@ -158,11 +165,13 @@ name = "log"
 size-m = 0.25
 color = [120, 80, 40, 255]
 material = "full:wood"
+max-stack = 16
 
 [[items]]
 name = "pebble"
 size-m = 0.1
 color = [150, 150, 150, 255]
+food = 2.5
 
 [world.climate]
 temperature-size-m = 400.0
@@ -181,6 +190,7 @@ temperature = 0.35
 humidity = 0.9
 ground = { rock = "full:rock", soil = "full:ash", surface = "full:wood" }
 cave-scale = 1.5
+surface-features = [{ material = "full:wood", spacing-m = 24.0 }]
 
 [[ores]]
 material = "full:ash"

@@ -7,6 +7,7 @@
 //! `docs/adr/0011-coarse-levels-are-derived.md`).
 
 use crate::noise::fbm2;
+use crate::voxel::{AIR, MaterialId};
 use crate::worldgen::{GroundParams, ParamError};
 
 /// Fixed, not a parameter: a declaration sizes the regions, the border warp adds detail.
@@ -40,6 +41,12 @@ const BLEND_RANGE: f32 = 0.15;
 
 /// A tunnel four times as wide carves sixteen times the rock: the most before the ground is lace.
 pub const MAX_CAVE_SCALE: f32 = 4.0;
+
+/// Bounded so a [`Biome`] stays inline and `Copy`.
+pub const MAX_SURFACE_FEATURES: usize = 4;
+
+/// From one in every 4 by 4 m of ground, already a carpet, to one in a square kilometre.
+pub const SURFACE_FEATURE_SPACING_M: std::ops::RangeInclusive<f32> = 4.0..=1024.0;
 
 /// Each field in `[0, 1)`.
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -304,6 +311,7 @@ pub struct Biome {
     pub sky_fog: Option<SkyFog>,
     /// Multiplies the World's cave radius: `None` leaves the caves alone, `Some(0.0)` removes them.
     pub cave_scale: Option<f32>,
+    pub surface_features: SurfaceFeatures,
 }
 
 impl Biome {
@@ -314,7 +322,75 @@ impl Biome {
         ground: None,
         sky_fog: None,
         cave_scale: None,
+        surface_features: SurfaceFeatures::NONE,
     };
+}
+
+/// A Material standing one Voxel above a Biome's surface, about one in every `spacing_m` by
+/// `spacing_m` metres of it.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct SurfaceFeature {
+    pub material: MaterialId,
+    pub spacing_m: f32,
+}
+
+/// At most [`MAX_SURFACE_FEATURES`], in declaration order.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct SurfaceFeatures {
+    len: u8,
+    features: [SurfaceFeature; MAX_SURFACE_FEATURES],
+}
+
+impl Default for SurfaceFeatures {
+    fn default() -> Self {
+        Self::NONE
+    }
+}
+
+impl SurfaceFeatures {
+    pub const NONE: SurfaceFeatures = SurfaceFeatures {
+        len: 0,
+        features: [SurfaceFeature {
+            material: AIR,
+            spacing_m: 0.0,
+        }; MAX_SURFACE_FEATURES],
+    };
+
+    pub fn new(features: &[SurfaceFeature]) -> Result<Self, ParamError> {
+        if features.len() > MAX_SURFACE_FEATURES {
+            return Err(ParamError {
+                field: "biomes.surface_features",
+                rule: "holds at most 4 features",
+            });
+        }
+        if features.iter().any(|f| f.material == AIR) {
+            return Err(ParamError {
+                field: "biomes.surface_features.material",
+                rule: "must not be Air",
+            });
+        }
+        if !features
+            .iter()
+            .all(|f| SURFACE_FEATURE_SPACING_M.contains(&f.spacing_m))
+        {
+            return Err(ParamError {
+                field: "biomes.surface_features.spacing_m",
+                rule: "must be from 4 to 1024 m",
+            });
+        }
+        let mut table = Self::NONE;
+        table.features[..features.len()].copy_from_slice(features);
+        table.len = features.len() as u8;
+        Ok(table)
+    }
+
+    pub fn as_slice(&self) -> &[SurfaceFeature] {
+        &self.features[..self.len as usize]
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
 }
 
 /// sRGB bytes. A pair, so a Biome carries both or neither.

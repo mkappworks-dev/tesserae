@@ -1,6 +1,6 @@
 # 19: I2: Deferred resource persistence
 
-Status: needs-info
+Status: done
 Blocked by: 18, 23
 
 Spec: [reconciled desktop gameplay](../spec.md).
@@ -15,8 +15,8 @@ policy and replay/recovery behavior. Do not bundle it into shortcut storage.
 
 ## Acceptance criteria
 
-- [ ] Future item policy and transaction/save boundary are separately agreed.
-- [ ] Current shortcut/World saves do not claim owned-resource guarantees.
+- [x] Future item policy and transaction/save boundary are separately agreed.
+- [ ] ~~Current shortcut/World saves do not claim owned-resource guarantees.~~
 
 ## Validation and authorization
 
@@ -44,3 +44,12 @@ Do not implement until the relevant decisions and readiness are established.
 
 The current spec and What to build section supersede historical draft
 alternatives above. Readiness awaits the final shared-understanding check.
+
+### 2026-11-05: superseded
+
+Superseded by the
+[phase 15 spec](../../2026-11-05-phase-15-menus-and-inventory-ui/spec.md),
+which decided the owned-inventory policies this ticket deferred
+([decisions](../../2026-11-05-phase-15-menus-and-inventory-ui/decisions.md))
+and built them as roadmap step 15. Closed here; see
+[ADR-0023](../../../docs/adr/0023-the-inventory-is-server-owned-and-pays-inside-the-undo-journal.md).

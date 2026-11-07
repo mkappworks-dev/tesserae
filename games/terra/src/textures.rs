@@ -138,6 +138,16 @@ fn pixel(name: &str, face: usize, x: usize, y: usize, base: [u8; 3]) -> [u8; 3] 
                 tint(base, (n - 128) / 12 + if y % 5 == 1 { 15 } else { 0 })
             }
         }
+        "melon" => {
+            let stripe = if face == 1 { x } else { (x + y) / 2 };
+            if face == 0 && (6..=9).contains(&x) && (6..=9).contains(&y) {
+                [104, 84, 40]
+            } else if stripe % 4 == 0 {
+                tint([44, 98, 30], (n - 128) / 20)
+            } else {
+                tint(base, (n - 128) / 14)
+            }
+        }
         "glass" => {
             if x == 0 || y == 0 || x == 15 || y == 15 {
                 [181, 216, 255]

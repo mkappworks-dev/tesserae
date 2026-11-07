@@ -1,29 +1,30 @@
 //! Placing and breaking: the Client's half of the edit path.
 //!
-//! It sends the ray through the crosshair, in metres, and what it holds, and
-//! nothing else. The Client has no access to World state, not even to read it,
-//! so it cannot say which Voxel is under the crosshair and does not try: the
-//! Server finds that and decides whether the Edit happens. The ray starts where
-//! the Server has published the Player's Eye.
+//! It sends the ray through the crosshair, in metres, and the Shape and
+//! Orientation the Player chose, and nothing else. The Client has no access to
+//! World state, not even to read it, so it cannot say which Voxel is under the
+//! crosshair and does not try: the Server finds that, resolves what the Item in
+//! the selected hotbar slot places, and decides whether the Edit happens. The
+//! ray starts where the Server has published the Player's Eye.
 //! See `docs/adr/0002-client-server-from-day-one.md`.
 //!
-//! A stopgap: a hotbar of nine slots and two keys for orientation are enough to
-//! exercise the edit path by hand, and a real inventory replaces them. What a
-//! slot can hold comes from the Server's content catalogue.
+//! The hotbar and its selected slot are the Server's; the Client asks to
+//! select and draws what the Server sent.
 
 use bevy::prelude::*;
 
 use crate::session::SessionApp;
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
+use tesserae_core::inventory::{Destination, HOTBAR_SLOTS, Slot, Stack};
 use tesserae_core::mesh::{NEG_X, NEG_Y, NEG_Z, POS_X, POS_Y};
-use tesserae_core::{
-    MaterialId, Orientation, SHAPE_FULL_CUBE, SHAPE_POST, SHAPE_SLAB, SHAPE_STAIR, ShapeId, Voxel,
-};
+use tesserae_core::{MaterialId, Orientation, SHAPE_FULL_CUBE, ShapeId};
 
 use super::camera::FlyCamera;
-use crate::content::ContentCatalogue;
-use crate::server::edit::{EditAction, EditIntent, EditRejected};
+use crate::content::{ContentCatalogue, ItemLook};
+use crate::server::edit::{EditAction, EditIntent, EditRejected, RejectReason};
+use crate::server::inventory::{InventoryChanged, InventoryIntent, MAX_STACK};
 use crate::server::tool::ToolId;
+use crate::server::undo::{HistoryAction, HistoryNeedsItems, RefundDropped};
 
 /// How long a rejection stays on screen.
 const NOTICE_SECS: f32 = 2.5;
@@ -36,7 +37,7 @@ const REPEAT_EVERY_SECS: f64 = 0.2;
 /// it arrives. Rejections reach the Client within a tick or two of the send.
 const REPEAT_SETTLE_SECS: f64 = 0.5;
 
-pub(super) const SLOT_KEYS: [KeyCode; 9] = [
+pub(super) const SLOT_KEYS: [KeyCode; HOTBAR_SLOTS] = [
     KeyCode::Digit1,
     KeyCode::Digit2,
     KeyCode::Digit3,
@@ -48,7 +49,7 @@ pub(super) const SLOT_KEYS: [KeyCode; 9] = [
     KeyCode::Digit9,
 ];
 
-/// What one hotbar slot holds.
+/// What the hand holds, as the Client draws and aims it.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub(super) enum Holding {
     Solid {
@@ -58,6 +59,7 @@ pub(super) enum Holding {
     },
     /// A source of this fluid.
     Fluid(MaterialId),
+    /// Ignite, a hand state like a Tool and not an Item.
     Fire,
     /// Edits are inert; Place and Remove are the tool's verbs (`tool.rs`).
     Tool(ToolId),
@@ -80,20 +82,11 @@ impl Holding {
         }
     }
 
-    fn place(self) -> Option<EditAction> {
+    /// The Material a Catalogue take of this would give the Item of.
+    pub(super) fn material(self) -> Option<MaterialId> {
         match self {
-            Holding::Solid {
-                material,
-                shape,
-                orientation,
-            } => Some(EditAction::Place(Voxel::shaped(
-                material,
-                shape,
-                orientation,
-            ))),
-            Holding::Fluid(material) => Some(EditAction::PlaceSource(material)),
-            Holding::Fire => Some(EditAction::Ignite),
-            Holding::Tool(_) | Holding::Empty => None,
+            Holding::Solid { material, .. } | Holding::Fluid(material) => Some(material),
+            _ => None,
         }
     }
 
@@ -177,29 +170,56 @@ impl Holding {
     }
 }
 
-/// Whether the Player is building: the hand holds a block, a fluid, fire or a
-/// tool, or Layout mode is on. With an empty hand the Player is free roaming,
-/// which shows no crosshair, outline or preview and breaks nothing.
-pub(super) fn building(hotbar: &Hotbar, layout: Option<&super::layout::LayoutMode>) -> bool {
-    hotbar.held() != Holding::Empty || layout.is_some_and(|layout| layout.on)
+/// What a stack of `item` places, as a full cube, by the Server's rule: the
+/// Material a declared Item names, else the solid or fluid named like it that
+/// no declared Item places. `Empty` when it places nothing.
+pub(super) fn item_holding(
+    item: &str,
+    looks: &[ItemLook],
+    catalogue: &ContentCatalogue,
+) -> Holding {
+    let placed = match looks.iter().find(|look| look.name == item) {
+        Some(look) => look.material.and_then(|id| catalogue.material(id)),
+        None => catalogue.materials.iter().find(|m| {
+            m.name == item
+                && (m.solid || m.fluid.is_some())
+                && !looks.iter().any(|look| look.material == Some(m.id))
+        }),
+    };
+    match placed {
+        Some(m) if m.fluid.is_some() => Holding::Fluid(m.id),
+        Some(m) => Holding::solid(m.id, SHAPE_FULL_CUBE),
+        None => Holding::Empty,
+    }
 }
 
-/// The nine slots and which one is held.
+/// The hand: the Server's hotbar as it last sent it, the Shape and Orientation
+/// the Player chose for whatever the held Item places, and what is held
+/// outside the hotbar.
 #[derive(Resource, Clone, PartialEq, Debug)]
 pub(super) struct Hotbar {
-    pub(super) slots: [Holding; SLOT_KEYS.len()],
+    pub(super) stacks: [Option<Stack>; HOTBAR_SLOTS],
+    /// What each stack places, as a full cube; `Empty` for an Item that
+    /// places nothing.
+    places: [Holding; HOTBAR_SLOTS],
     pub(super) selected: usize,
+    pub(super) shape: ShapeId,
+    pub(super) orientation: Orientation,
+    /// An empty hand, fire or a Tool, which put the hotbar aside.
     pub(super) outside: Option<Holding>,
     /// What `outside` was before a tool replaced it, so putting the tool away
-    /// returns to an empty hand or a menu pick rather than the selected slot.
+    /// returns to an empty hand or the hotbar rather than always the hotbar.
     stowed: Option<Option<Holding>>,
 }
 
 impl Default for Hotbar {
     fn default() -> Self {
         Hotbar {
-            slots: [Holding::Empty; SLOT_KEYS.len()],
+            stacks: Default::default(),
+            places: [Holding::Empty; HOTBAR_SLOTS],
             selected: 0,
+            shape: SHAPE_FULL_CUBE,
+            orientation: Orientation::IDENTITY,
             outside: None,
             stowed: None,
         }
@@ -207,82 +227,128 @@ impl Default for Hotbar {
 }
 
 impl Hotbar {
-    fn defaults(catalogue: &ContentCatalogue) -> [Holding; SLOT_KEYS.len()] {
-        let mut slots = Vec::new();
-        if let Some(rock) = catalogue.rock {
-            for shape in [SHAPE_FULL_CUBE, SHAPE_SLAB, SHAPE_STAIR, SHAPE_POST] {
-                slots.push(Holding::solid(rock, shape));
-            }
+    /// What slot `at` places, in the chosen Shape and Orientation.
+    pub(super) fn slot(&self, at: usize) -> Holding {
+        match self.places[at] {
+            Holding::Solid { material, .. } => Holding::Solid {
+                material,
+                shape: self.shape,
+                orientation: self.orientation,
+            },
+            other => other,
         }
-        for material in &catalogue.materials {
-            if slots.len() == 7 {
-                break;
-            }
-            if material.solid && material.fluid.is_none() && Some(material.id) != catalogue.rock {
-                slots.push(Holding::solid(material.id, SHAPE_FULL_CUBE));
-            }
-        }
-        slots.resize(7, Holding::Empty);
-        slots.extend(
-            catalogue
-                .lake
-                .or_else(|| catalogue.first_fluid())
-                .map(Holding::Fluid),
-        );
-        if catalogue.anything_burns() {
-            slots.push(Holding::Fire);
-        }
-        slots.resize(SLOT_KEYS.len(), Holding::Empty);
-        slots.try_into().expect("nine slots")
     }
 
     pub(super) fn held(&self) -> Holding {
-        self.outside.unwrap_or(self.slots[self.selected])
+        self.outside.unwrap_or_else(|| self.slot(self.selected))
     }
 
-    pub(super) fn select(&mut self, slot: usize) {
-        self.selected = slot;
-        self.outside = None;
+    /// The hotbar slot holding an Item that places `material`.
+    fn slot_placing(&self, material: MaterialId) -> Option<usize> {
+        self.places
+            .iter()
+            .position(|held| held.material() == Some(material))
     }
 
-    fn held_mut(&mut self) -> &mut Holding {
-        if let Some(ref mut held) = self.outside {
-            held
-        } else {
-            &mut self.slots[self.selected]
-        }
-    }
-
-    /// The next tool in declared order; past the last, the previous hand.
-    fn cycle_tool(&mut self, tools: &[ToolId]) {
-        if tools.is_empty() {
+    /// The next hand in `hands`; past the last, the hand before the first.
+    fn cycle_tool(&mut self, hands: &[Holding]) {
+        if hands.is_empty() {
             return;
         }
-        let next = match self.held().tool() {
-            Some(current) => tools
+        let next = match self.outside.filter(|held| hands.contains(held)) {
+            Some(current) => hands
                 .iter()
-                .position(|t| *t == current)
-                .and_then(|i| tools.get(i + 1)),
-            None => tools.first(),
+                .position(|h| *h == current)
+                .and_then(|i| hands.get(i + 1)),
+            None => hands.first(),
         };
         match next {
-            Some(&tool) => {
-                if self.held().tool().is_none() {
+            Some(&hand) => {
+                if self.outside.is_none_or(|held| !hands.contains(&held)) {
                     self.stowed = Some(self.outside);
                 }
-                self.outside = Some(Holding::Tool(tool));
+                self.outside = Some(hand);
             }
             None => self.outside = self.stowed.take().flatten(),
         }
     }
+}
 
-    fn step(&mut self, by: i32) {
-        if by == 0 {
-            return;
-        }
-        self.outside = None;
-        let len = self.slots.len() as i32;
-        self.selected = (self.selected as i32 + by).rem_euclid(len) as usize;
+#[cfg(test)]
+impl Hotbar {
+    /// Slot `at` selected and holding an Item that places what `holding` does,
+    /// with a solid's Shape and Orientation chosen, as the Server would have
+    /// it after a take.
+    pub(super) fn holding(at: usize, holding: Holding) -> Self {
+        let mut hotbar = Hotbar {
+            selected: at,
+            ..default()
+        };
+        let Some(material) = holding.material() else {
+            hotbar.outside = Some(holding);
+            return hotbar;
+        };
+        hotbar.stacks[at] = Some(Stack {
+            item: format!("test:{material}"),
+            count: 1,
+        });
+        hotbar.places[at] = match holding {
+            Holding::Solid {
+                shape, orientation, ..
+            } => {
+                (hotbar.shape, hotbar.orientation) = (shape, orientation);
+                Holding::solid(material, SHAPE_FULL_CUBE)
+            }
+            other => other,
+        };
+        hotbar
+    }
+}
+
+/// Asks the Server for hotbar slot `at`, putting aside whatever is held
+/// outside the hotbar.
+pub(super) fn select(hotbar: &mut Hotbar, at: usize, intents: &mut MessageWriter<InventoryIntent>) {
+    hotbar.outside = None;
+    intents.write(InventoryIntent::Select(at));
+}
+
+/// Puts `holding` in hand. Fire and a Tool are hand states. A solid or fluid
+/// is an Item: its hotbar slot is selected, or a stack is taken into the
+/// selected slot; a solid's Shape and Orientation become the Player's choice.
+pub(super) fn hold(
+    hotbar: &mut Hotbar,
+    holding: Holding,
+    intents: &mut MessageWriter<InventoryIntent>,
+) {
+    if let Holding::Solid {
+        shape, orientation, ..
+    } = holding
+    {
+        hotbar.shape = shape;
+        hotbar.orientation = orientation;
+    }
+    let Some(material) = holding.material() else {
+        hotbar.outside = Some(holding);
+        return;
+    };
+    hotbar.outside = None;
+    if hotbar.slot(hotbar.selected).material() == Some(material) {
+        return;
+    }
+    match hotbar.slot_placing(material) {
+        Some(at) => select(hotbar, at, intents),
+        None => assign(hotbar.selected, holding, intents),
+    }
+}
+
+/// Asks for a stack of the Item that places `holding` in hotbar slot `at`.
+pub(super) fn assign(at: usize, holding: Holding, intents: &mut MessageWriter<InventoryIntent>) {
+    if let Some(material) = holding.material() {
+        intents.write(InventoryIntent::Take {
+            material,
+            count: MAX_STACK,
+            into: Destination::Slot(Slot::Hotbar(at)),
+        });
     }
 }
 
@@ -293,12 +359,12 @@ pub(super) struct Catalogue(pub(super) ContentCatalogue);
 /// The last thing the Server declined, and how long it has left on screen.
 #[derive(Resource, Default)]
 pub(super) struct Notice {
-    shown: Option<(&'static str, f32)>,
+    shown: Option<(String, f32)>,
 }
 
 impl Notice {
-    pub(super) fn show(&mut self, text: &'static str) {
-        self.shown = Some((text, NOTICE_SECS));
+    pub(super) fn show(&mut self, text: impl Into<String>) {
+        self.shown = Some((text.into(), NOTICE_SECS));
     }
 
     fn tick(&mut self, seconds: f32) {
@@ -310,8 +376,8 @@ impl Notice {
         }
     }
 
-    fn text(&self) -> &'static str {
-        self.shown.map_or("", |(text, _)| text)
+    fn text(&self) -> &str {
+        self.shown.as_ref().map_or("", |(text, _)| text)
     }
 }
 
@@ -320,33 +386,34 @@ pub(super) fn plugin(app: &mut App) {
         .init_session_state::<Catalogue>()
         .init_session_state::<Notice>()
         .init_session_state::<QuietUntil>()
-        .add_session_message::<crate::server::undo::HistoryApplied>()
+        .add_session_message::<InventoryChanged>()
+        .add_session_message::<InventoryIntent>()
         .add_session_systems(Startup, spawn_hud)
         .add_session_systems(
             Update,
             (
                 receive_catalogue,
+                follow_server,
                 select_held.after(super::input::resolve),
                 // Place the camera at the authoritative Eye, or behind it, before
                 // constructing an Edit ray from it.
                 send_intents.after(super::view::place),
                 show_rejections,
+                show_history_notices,
             )
                 .chain(),
-        );
+        )
+        .add_session_message::<HistoryNeedsItems>()
+        .add_session_message::<RefundDropped>();
 }
 
 #[derive(Component)]
 pub(super) struct Crosshair;
-pub(super) const CROSSHAIR_ALPHA: f32 = 0.8;
+pub(super) const CROSSHAIR_ALPHA: f32 = super::theme::RETICLE_ALPHA;
 /// While the Server reports the camera sees past what the Eye can.
 pub(super) const BLOCKED_CROSSHAIR_ALPHA: f32 = 0.3;
 
 fn spawn_hud(mut commands: Commands) {
-    let font = |size| TextFont {
-        font_size: bevy::text::FontSize::Px(size),
-        ..default()
-    };
     commands
         .spawn(Node {
             position_type: PositionType::Absolute,
@@ -359,8 +426,8 @@ fn spawn_hud(mut commands: Commands) {
         .with_child((
             Crosshair,
             Text::new("+"),
-            font(22.0),
-            TextColor(Color::srgba(1.0, 1.0, 1.0, CROSSHAIR_ALPHA)),
+            super::theme::font(super::theme::TEXT_RETICLE),
+            TextColor(super::theme::RETICLE.with_alpha(CROSSHAIR_ALPHA)),
         ));
 }
 
@@ -368,26 +435,42 @@ pub(super) fn receive_catalogue(
     mut messages: MessageReader<ContentCatalogue>,
     mut catalogue: ResMut<Catalogue>,
     mut hotbar: ResMut<Hotbar>,
-    mut store: Option<ResMut<super::hotbar_store::Store>>,
 ) {
     for message in messages.read() {
         if catalogue.0 == *message {
             continue;
         }
-        hotbar.slots = Hotbar::defaults(message);
-        hotbar.selected = 0;
-        if let Some(store) = store.as_mut() {
-            store.restore(message, &mut hotbar);
-        }
-        // Every World opens empty-handed; a slot key or click picks one up.
-        hotbar.outside = Some(Holding::Empty);
+        // Every World opens holding its selected slot; `hotbar_store` asks for
+        // the one last chosen.
+        hotbar.outside = None;
         catalogue.0 = message.clone();
     }
 }
 
-/// 1 to 9 and the scroll wheel choose the slot. `Q` turns a held Shape a
-/// quarter and `E` flips which way is up; between them they reach all 24
-/// orientations. None of these is a key the camera uses.
+/// The hotbar and its selected slot as the Server last sent them, and what
+/// each stack places in this Game's content.
+pub(super) fn follow_server(
+    mut changes: MessageReader<InventoryChanged>,
+    (looks, catalogue): (Res<super::drops::Looks>, Res<Catalogue>),
+    mut hotbar: ResMut<Hotbar>,
+) {
+    if let Some(InventoryChanged(now)) = changes.read().last() {
+        hotbar.stacks = now.hotbar().clone();
+        hotbar.selected = now.selected();
+    }
+    let places = std::array::from_fn(|at| {
+        hotbar.stacks[at].as_ref().map_or(Holding::Empty, |stack| {
+            item_holding(&stack.item, &looks.0, &catalogue.0)
+        })
+    });
+    if hotbar.places != places {
+        hotbar.places = places;
+    }
+}
+
+/// 1 to 9 and the scroll wheel ask the Server for a slot. `Q` turns the chosen
+/// Shape a quarter and `E` flips which way is up; between them they reach all
+/// 24 orientations. None of these is a key the camera uses.
 ///
 /// A wheel's line is a slot. A trackpad's pixels add up to one, and what is
 /// left over is dropped when a new gesture starts or the direction reverses,
@@ -400,93 +483,120 @@ pub(super) fn select_held(
     ),
     catalogue: Res<Catalogue>,
     mut hotbar: ResMut<Hotbar>,
-    mut scrolled: Local<f32>,
+    mut intents: MessageWriter<InventoryIntent>,
+    // `asked` is the slot last asked for and the Server's selection then:
+    // further steps count from it until the Server answers.
+    (mut scrolled, mut asked): (Local<f32>, Local<Option<(usize, usize)>>),
     menu: Option<Res<super::menu::Menu>>,
-    mut pointer: Option<ResMut<super::menu::PointerState>>,
 ) {
     if ownership.owner == super::input::Owner::Unfocused {
         *scrolled = 0.0;
         return;
     }
+    let menu_open = menu.as_ref().is_some_and(|m| m.open);
     for (slot, action) in super::actions::SLOTS.iter().enumerate() {
-        if actions.started(*action) {
-            if menu.as_ref().is_some_and(|m| m.open)
-                && let Some(item) = pointer
-                    .as_ref()
-                    .and_then(|p| p.hovered)
-                    .and_then(|e| e.holding())
-            {
-                hotbar.slots[slot] = item;
-            } else {
-                hotbar.select(slot);
-            }
+        if actions.started(*action) && !menu_open {
+            select(&mut hotbar, slot, &mut intents);
+            *asked = Some((slot, hotbar.selected));
         }
     }
-    let menu_open = menu.as_ref().is_some_and(|m| m.open);
+    let mut by = 0;
     if menu_open || !ownership.gameplay() {
         *scrolled = 0.0;
     } else {
         use super::actions::Action::{NextSlot, PreviousSlot};
-        let by = i32::from(actions.started(NextSlot)) - i32::from(actions.started(PreviousSlot));
-        if by != 0 {
-            hotbar.step(by);
+        by += i32::from(actions.started(NextSlot)) - i32::from(actions.started(PreviousSlot));
+        for event in &actions.axes.scroll {
+            let notches = event.notches;
+            if event.started || notches * *scrolled < 0.0 {
+                *scrolled = 0.0;
+            }
+            *scrolled += notches
+                * preferences.scroll_sensitivity
+                * if preferences.reverse_scroll {
+                    -1.0
+                } else {
+                    1.0
+                };
+            let whole = scrolled.trunc();
+            *scrolled -= whole;
+            // Scrolling down, a negative y, moves along the bar.
+            by -= whole as i32;
         }
     }
-    for event in &actions.axes.scroll {
-        if menu_open || !ownership.gameplay() {
-            continue;
-        }
-        let notches = event.notches;
-        if event.started || notches * *scrolled < 0.0 {
-            *scrolled = 0.0;
-        }
-        *scrolled += notches
-            * preferences.scroll_sensitivity
-            * if preferences.reverse_scroll {
-                -1.0
-            } else {
-                1.0
-            };
-        let whole = scrolled.trunc();
-        *scrolled -= whole;
-        // Scrolling down, a negative y, moves along the bar.
-        hotbar.step(-whole as i32);
+    if by != 0 {
+        let from = match *asked {
+            Some((slot, then)) if then == hotbar.selected => slot,
+            _ => hotbar.selected,
+        };
+        let to = (from as i32 + by).rem_euclid(HOTBAR_SLOTS as i32) as usize;
+        select(&mut hotbar, to, &mut intents);
+        *asked = Some((to, hotbar.selected));
     }
     if actions.started(super::actions::Action::CycleTool) && !menu_open && ownership.gameplay() {
-        let tools: Vec<_> = catalogue.0.tools.iter().map(|t| t.id).collect();
-        hotbar.cycle_tool(&tools);
+        let fire = catalogue.0.anything_burns().then_some(Holding::Fire);
+        let hands: Vec<_> = fire
+            .into_iter()
+            .chain(catalogue.0.tools.iter().map(|t| Holding::Tool(t.id)))
+            .collect();
+        hotbar.cycle_tool(&hands);
     }
     if actions.started(super::actions::Action::EmptyHand) {
         hotbar.outside = Some(Holding::Empty);
-        if let Some(pointer) = pointer.as_mut() {
-            pointer.assigning = None;
+    }
+    let Holding::Solid {
+        shape, orientation, ..
+    } = hotbar.held()
+    else {
+        return;
+    };
+    let mut chosen = (shape, orientation);
+    if actions.started(super::actions::Action::Shape) && !catalogue.0.shapes.is_empty() {
+        let next = catalogue
+            .0
+            .shapes
+            .iter()
+            .filter(|s| s.id > shape)
+            .map(|s| s.id)
+            .min()
+            .or_else(|| catalogue.0.shapes.iter().map(|s| s.id).min());
+        if let Some(next) = next {
+            chosen.0 = next;
         }
     }
-    if let Holding::Solid {
+    if catalogue.0.shape(chosen.0).is_some_and(|s| s.turnable) {
+        if actions.started(super::actions::Action::Turn) {
+            chosen.1 = chosen.1.turned();
+        }
+        if actions.started(super::actions::Action::Flip) {
+            chosen.1 = chosen.1.flipped();
+        }
+    }
+    if chosen == (shape, orientation) {
+        return;
+    }
+    if let Some(Holding::Solid {
         shape, orientation, ..
-    } = hotbar.held_mut()
+    }) = &mut hotbar.outside
     {
-        if actions.started(super::actions::Action::Shape) && !catalogue.0.shapes.is_empty() {
-            let next = catalogue
-                .0
-                .shapes
-                .iter()
-                .filter(|s| s.id > *shape)
-                .map(|s| s.id)
-                .min()
-                .or_else(|| catalogue.0.shapes.iter().map(|s| s.id).min());
-            if let Some(next) = next {
-                *shape = next;
-            }
+        (*shape, *orientation) = chosen;
+    } else {
+        (hotbar.shape, hotbar.orientation) = chosen;
+    }
+}
+
+/// What Place asks of the Server with this hand. An Item's placement is
+/// resolved there, from the selected slot.
+fn placement(hotbar: &Hotbar) -> Option<EditAction> {
+    match hotbar.held() {
+        Holding::Solid { .. } | Holding::Fluid(_) if hotbar.outside.is_none() => {
+            Some(EditAction::PlaceHeld {
+                shape: hotbar.shape,
+                orientation: hotbar.orientation,
+            })
         }
-        if catalogue.0.shape(*shape).is_some_and(|s| s.turnable) {
-            if actions.started(super::actions::Action::Turn) {
-                *orientation = orientation.turned();
-            }
-            if actions.started(super::actions::Action::Flip) {
-                *orientation = orientation.flipped();
-            }
-        }
+        Holding::Fire => Some(EditAction::Ignite),
+        _ => None,
     }
 }
 
@@ -499,7 +609,9 @@ pub(super) struct Repeat {
     held: f64,
     sent: u32,
     stopped: bool,
-    hand: Option<Hotbar>,
+    /// What is held and from which slot; a stack's count changing, as a
+    /// Pickup does, leaves the hand as it was.
+    hand: Option<(Holding, Option<usize>)>,
 }
 
 /// Right places immediately along the camera centre ray.
@@ -527,10 +639,11 @@ pub(super) fn send_intents(
     let grabbed = cursor.grab_mode == CursorGrabMode::Locked;
     let ready = grabbed && std::mem::replace(&mut *was_grabbed, grabbed);
     *was_grabbed = grabbed;
-    let hand_changed = repeat
-        .hand
-        .replace(hotbar.clone())
-        .is_some_and(|hand| hand != *hotbar);
+    let hand = (
+        hotbar.held(),
+        hotbar.outside.is_none().then_some(hotbar.selected),
+    );
+    let hand_changed = repeat.hand.replace(hand).is_some_and(|was| was != hand);
     let place = actions.state(Action::Place);
     let playing = ready && ownership.gameplay() && menu.is_none_or(|menu| !menu.open);
     if !place.held || place.started {
@@ -542,6 +655,7 @@ pub(super) fn send_intents(
         || hand_changed
         || [Action::Sample, Action::Undo, Action::Redo]
             .into_iter()
+            .chain(super::actions::SLOTS)
             .any(|action| actions.started(action))
     {
         repeat.stopped = true;
@@ -549,15 +663,12 @@ pub(super) fn send_intents(
     if !ready || !ownership.gameplay() {
         return;
     }
-    let held = hotbar.held();
     let action = if place.started {
-        held.place()
+        placement(&hotbar)
     } else if preferences.repeat_held && place.held && playing && !repeat.stopped {
         repeat.held += time.delta_secs_f64();
         let due = REPEAT_DELAY_SECS + REPEAT_EVERY_SECS * f64::from(repeat.sent);
-        let solid = held
-            .place()
-            .filter(|action| matches!(action, EditAction::Place(_)));
+        let solid = placement(&hotbar).filter(|_| matches!(hotbar.held(), Holding::Solid { .. }));
         if repeat.held >= due && solid.is_some() {
             // A stalled frame skips the repeats it missed rather than bursting.
             repeat.sent = ((repeat.held - REPEAT_DELAY_SECS) / REPEAT_EVERY_SECS) as u32 + 1;
@@ -579,34 +690,75 @@ pub(super) fn send_intents(
     });
 }
 
+/// A done undo or redo says nothing: the World shows it.
 fn show_rejections(
     mut commands: Commands,
     mut rejected: MessageReader<EditRejected>,
-    mut applied: MessageReader<crate::server::undo::HistoryApplied>,
     mut notice: ResMut<Notice>,
-    quiet: Res<QuietUntil>,
+    (quiet, hotbar): (Res<QuietUntil>, Res<Hotbar>),
     time: Res<Time>,
 ) {
-    for message in applied.read() {
-        let text = match message.0 {
-            crate::server::undo::HistoryAction::Undo => "Undone",
-            crate::server::undo::HistoryAction::Redo => "Redone",
-        };
-        notice.show(text);
-        super::menu_ui::notify(&mut commands, text, super::menu_ui::Tone::Change);
-    }
     for message in rejected.read() {
         if time.elapsed_secs_f64() < quiet.0 {
             continue;
         }
-        notice.show(message.reason.message());
-        super::menu_ui::notify(
-            &mut commands,
-            message.reason.message(),
-            super::menu_ui::Tone::Alert,
-        );
+        let text = match message.reason {
+            // `HistoryNeedsItems` follows with the Items and the Material.
+            RejectReason::ItemNeeded => continue,
+            RejectReason::NothingHeld => {
+                format!("Nothing to place in hotbar slot {}.", hotbar.selected + 1)
+            }
+            reason => reason.message().to_owned(),
+        };
+        super::menu_ui::notify(&mut commands, &text, super::menu_ui::Tone::Alert);
+        notice.show(text);
     }
     notice.tick(time.delta_secs());
+}
+
+fn history_needs_text(needs: &HistoryNeedsItems, material: &str, item: &str) -> String {
+    let (verb, what, again) = match needs.action {
+        HistoryAction::Undo => ("undo", "putting", "back"),
+        HistoryAction::Redo => ("redo", "placing", "again"),
+    };
+    format!(
+        "Can’t {verb}: {what} the {material} {again} needs {} {item}.",
+        needs.count
+    )
+}
+
+fn refund_dropped_text(dropped: &RefundDropped, item: &str) -> String {
+    format!(
+        "Your Inventory is full: {} {item} dropped at your feet.",
+        dropped.count
+    )
+}
+
+/// What the Server says an undo or redo needed or dropped: the Server decides
+/// both, the Client only words them.
+fn show_history_notices(
+    mut commands: Commands,
+    (mut needs, mut dropped): (
+        MessageReader<HistoryNeedsItems>,
+        MessageReader<RefundDropped>,
+    ),
+    (mut notice, looks, catalogue): (ResMut<Notice>, Res<super::drops::Looks>, Res<Catalogue>),
+) {
+    for needs in needs.read() {
+        let material = catalogue.0.material(needs.material).map_or_else(
+            || "Voxel".to_owned(),
+            |m| super::menu_ui::declared_title(&m.name),
+        );
+        let item = super::pickup::label(&looks, &needs.item);
+        let text = history_needs_text(needs, &material, &item);
+        super::menu_ui::notify(&mut commands, &text, super::menu_ui::Tone::Alert);
+        notice.show(text);
+    }
+    for dropped in dropped.read() {
+        let text = refund_dropped_text(dropped, &super::pickup::label(&looks, &dropped.item));
+        super::menu_ui::notify(&mut commands, &text, super::menu_ui::Tone::Change);
+        notice.show(text);
+    }
 }
 
 fn hints(bindings: &super::actions::Bindings, labels: &super::actions::Labels) -> String {
@@ -617,6 +769,7 @@ fn hints(bindings: &super::actions::Bindings, labels: &super::actions::Labels) -
     let mut lines = Vec::new();
     for (action, verb) in [
         (Help, "controls"),
+        (Inventory, "inventory"),
         (EmptyHand, "empty hand"),
         (CycleTool, "tool"),
         (Undo, "undo"),
@@ -625,7 +778,7 @@ fn hints(bindings: &super::actions::Bindings, labels: &super::actions::Labels) -
         (Turn, "turn"),
         (Flip, "flip"),
         (Shape, "Shape"),
-        (Catalogue, "menu"),
+        (Menu, "menu"),
         (Forward, "forward"),
         (Backward, "backward"),
         (Left, "left"),
@@ -663,7 +816,7 @@ fn pad_hints(bindings: &super::actions::Bindings, labels: &super::actions::Label
     ];
     for (action, verb) in [
         (Help, "controls"),
-        (Catalogue, "menu"),
+        (Menu, "menu"),
         (EmptyHand, "empty hand"),
         (CycleTool, "tool"),
         (Sample, "pick block"),
@@ -734,6 +887,17 @@ pub(super) fn hud_text(
 mod tests {
     use super::super::actions::PIXELS_PER_NOTCH;
     use super::*;
+    use crate::client::camera::look;
+    use crate::client::menu;
+    use crate::content::{CatalogueMaterial, CatalogueShape, MaterialPalette};
+    use crate::server::player::{MovementFeedback, Player, PoseCorrection};
+    use bevy::ecs::message::Messages;
+    use bevy::input::mouse::AccumulatedMouseMotion;
+    use bevy::input::{
+        mouse::{MouseScrollUnit, MouseWheel},
+        touch::TouchPhase,
+    };
+    use tesserae_core::{SHAPE_POST, SHAPE_SLAB, SHAPE_STAIR};
 
     #[test]
     fn the_next_world_starts_with_an_empty_hand() {
@@ -743,27 +907,17 @@ mod tests {
         enter(&mut app);
         {
             let mut hotbar = app.world_mut().resource_mut::<Hotbar>();
-            hotbar.slots[0] = Holding::Fire;
-            hotbar.selected = 0;
+            hotbar.stacks[0] = Some(Stack {
+                item: "test:stone".into(),
+                count: 3,
+            });
+            hotbar.shape = SHAPE_STAIR;
             hotbar.outside = Some(Holding::Fire);
         }
         leave(&mut app);
         enter(&mut app);
-        let hotbar = app.world().resource::<Hotbar>();
-        assert!(hotbar.slots.iter().all(|slot| *slot == Holding::Empty));
-        assert_eq!(hotbar.outside, None);
+        assert_eq!(*app.world().resource::<Hotbar>(), Hotbar::default());
     }
-    use crate::client::camera::look;
-    use crate::client::menu::{self, Entry};
-    use crate::content::{CatalogueMaterial, CatalogueShape, MaterialPalette};
-    use crate::server::edit::RejectReason;
-    use crate::server::player::{MovementFeedback, PoseCorrection};
-    use bevy::input::mouse::AccumulatedMouseMotion;
-    use bevy::input::{
-        mouse::{MouseScrollUnit, MouseWheel},
-        touch::TouchPhase,
-    };
-    use bevy::ui_widgets::Activate;
 
     fn terra_ids() -> &'static [MaterialId; 7] {
         static IDS: std::sync::OnceLock<[MaterialId; 7]> = std::sync::OnceLock::new();
@@ -777,12 +931,11 @@ mod tests {
             })
         })
     }
+
     fn terra_water() -> MaterialId {
         terra_ids()[6]
     }
-    fn lava() -> MaterialId {
-        terra_ids()[1]
-    }
+
     fn wood() -> MaterialId {
         terra_ids()[4]
     }
@@ -843,7 +996,7 @@ mod tests {
         let mut catalogue = dry();
         for (id, name, solid, fluid, burns) in [
             (terra_ids()[0], "terra:lamp", true, None, false),
-            (lava(), "terra:lava", false, Some(1), false),
+            (terra_ids()[1], "terra:lava", false, Some(1), false),
             (terra_ids()[2], "terra:mud", false, Some(2), false),
             (terra_ids()[3], "terra:brick", true, None, false),
             (wood(), "terra:wood", true, None, true),
@@ -858,75 +1011,6 @@ mod tests {
         }
         catalogue.lake = Some(terra_water());
         catalogue
-    }
-
-    fn app(grab: CursorGrabMode) -> App {
-        app_with(grab, terra())
-    }
-
-    fn app_with(grab: CursorGrabMode, catalogue: ContentCatalogue) -> App {
-        let mut app = App::new();
-        app.add_plugins(super::super::actions::test_plugin);
-        app.insert_resource(super::super::input::Ownership::playing());
-        app.add_plugins(MinimalPlugins)
-            .init_resource::<ButtonInput<MouseButton>>()
-            .init_resource::<ButtonInput<KeyCode>>()
-            .init_resource::<Hotbar>()
-            .init_resource::<Catalogue>()
-            .init_resource::<Notice>()
-            .init_resource::<QuietUntil>()
-            .add_message::<MouseWheel>()
-            .add_message::<ContentCatalogue>()
-            .add_message::<EditIntent>()
-            .add_message::<EditRejected>()
-            .add_message::<crate::server::undo::HistoryApplied>()
-            .add_message::<MovementFeedback>()
-            .add_message::<crate::server::player::RestoreView>()
-            .add_message::<PoseCorrection>()
-            .add_message::<MaterialPalette>()
-            .add_plugins((crate::client::pose::plugin, menu::plugin))
-            .add_systems(
-                Update,
-                (
-                    receive_catalogue,
-                    select_held,
-                    send_intents.after(crate::client::pose::apply_correction),
-                    show_rejections,
-                )
-                    .chain(),
-            );
-        app.world_mut().spawn((
-            Window::default(),
-            PrimaryWindow,
-            CursorOptions {
-                grab_mode: grab,
-                ..default()
-            },
-        ));
-        app.world_mut().spawn((
-            FlyCamera::default(),
-            GlobalTransform::from(
-                Transform::from_xyz(1.0, 2.0, 3.0).looking_to(Vec3::new(0.0, 0.0, -1.0), Vec3::Y),
-            ),
-        ));
-        app.world_mut().write_message(catalogue);
-        app
-    }
-
-    /// One frame, then let go of everything: `press` only counts as "just
-    /// pressed" for a button that was released first.
-    fn frame(app: &mut App) -> Vec<EditIntent> {
-        app.update();
-        let mut mouse = app.world_mut().resource_mut::<ButtonInput<MouseButton>>();
-        mouse.release_all();
-        mouse.clear();
-        let mut keys = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
-        keys.release_all();
-        keys.clear();
-        app.world_mut()
-            .resource_mut::<Messages<EditIntent>>()
-            .drain()
-            .collect()
     }
 
     fn grab(app: &mut App, mode: CursorGrabMode) {
@@ -946,15 +1030,187 @@ mod tests {
             .press(button);
     }
 
+    /// A frame at a fixed rate with every button left as it was, so a hold can
+    /// be watched across many of them.
+    fn held_frame(app: &mut App) -> Vec<EditIntent> {
+        app.update();
+        app.world_mut()
+            .resource_mut::<ButtonInput<MouseButton>>()
+            .clear();
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .clear();
+        app.world_mut()
+            .resource_mut::<Messages<EditIntent>>()
+            .drain()
+            .collect()
+    }
+
+    /// Holds Place for `seconds` at 100 Hz and counts the intents sent.
+    fn hold_for(app: &mut App, seconds: f32) -> usize {
+        (0..(seconds * 100.0) as u32)
+            .map(|_| held_frame(app).len())
+            .sum()
+    }
+
+    fn at_100hz(grab: CursorGrabMode, repeat: bool) -> App {
+        let mut app = at_rate(grab, 100);
+        app.world_mut()
+            .resource_mut::<super::super::profile::Preferences>()
+            .repeat_held = repeat;
+        app
+    }
+
+    /// What the Server's hotbar holds in these tests, where the catalogue has
+    /// them: implicit Items, named after their Materials.
+    const STOCK: [(usize, &str); 4] = [
+        (0, "test:stone"),
+        (1, "test:glass"),
+        (2, "test:leaves"),
+        (7, "terra:water"),
+    ];
+
+    fn rock() -> MaterialId {
+        tesserae_core::testgen::fixtures().ground.rock
+    }
+
+    fn app(grab: CursorGrabMode) -> App {
+        app_with(grab, terra())
+    }
+
+    /// The Client's edit path over the Server's Inventory, the hotbar holding
+    /// [`STOCK`].
+    fn app_with(grab: CursorGrabMode, catalogue: ContentCatalogue) -> App {
+        let mut app = bare(grab, catalogue.clone());
+        let stock: Vec<_> = STOCK
+            .into_iter()
+            .filter(|(_, name)| catalogue.materials.iter().any(|m| m.name == *name))
+            .collect();
+        give(&mut app, &stock);
+        app
+    }
+
+    /// The Client's edit path over an empty Server Inventory.
+    fn bare(grab: CursorGrabMode, catalogue: ContentCatalogue) -> App {
+        let mut app = App::new();
+        app.add_plugins(super::super::actions::test_plugin);
+        app.insert_resource(super::super::input::Ownership::playing());
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<ButtonInput<MouseButton>>()
+            .init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<Hotbar>()
+            .init_resource::<Catalogue>()
+            .init_resource::<Notice>()
+            .init_resource::<QuietUntil>()
+            .init_resource::<super::super::drops::Looks>()
+            .insert_resource(crate::server::items::PlacingItems::new(
+                catalogue
+                    .materials
+                    .iter()
+                    .map(|m| (m.id, m.name.as_str(), m.solid || m.fluid.is_some())),
+                &crate::server::items::Items::default(),
+            ))
+            .add_message::<MouseWheel>()
+            .add_message::<ContentCatalogue>()
+            .add_message::<EditIntent>()
+            .add_message::<EditRejected>()
+            .add_message::<HistoryNeedsItems>()
+            .add_message::<RefundDropped>()
+            .add_message::<MovementFeedback>()
+            .add_message::<crate::server::player::RestoreView>()
+            .add_message::<PoseCorrection>()
+            .add_message::<MaterialPalette>()
+            .add_plugins((
+                crate::client::pose::plugin,
+                menu::plugin,
+                crate::server::inventory::plugin,
+            ))
+            .add_systems(
+                Update,
+                (
+                    receive_catalogue,
+                    follow_server,
+                    select_held,
+                    send_intents.after(crate::client::pose::apply_correction),
+                    show_rejections,
+                    show_history_notices,
+                )
+                    .chain(),
+            );
+        app.world_mut().spawn((
+            Window::default(),
+            PrimaryWindow,
+            CursorOptions {
+                grab_mode: grab,
+                ..default()
+            },
+        ));
+        app.world_mut().spawn((
+            FlyCamera::default(),
+            GlobalTransform::from(
+                Transform::from_xyz(1.0, 2.0, 3.0).looking_to(Vec3::new(0.0, 0.0, -1.0), Vec3::Y),
+            ),
+        ));
+        app.world_mut().spawn(Player::at(Vec3::ZERO));
+        app.world_mut().write_message(catalogue);
+        app
+    }
+
+    /// Puts `stacks` in the Server's hotbar in place of what it held, as
+    /// Pickup or a take would.
+    fn give(app: &mut App, stacks: &[(usize, &str)]) {
+        let mut inventory = tesserae_core::inventory::Inventory::default();
+        for &(at, item) in stacks {
+            inventory
+                .take(item, 3, Destination::Slot(Slot::Hotbar(at)), |_| 64)
+                .unwrap();
+        }
+        let mut held = app
+            .world_mut()
+            .query::<&mut crate::server::inventory::Inventory>();
+        let mut held = held.single_mut(app.world_mut()).unwrap();
+        inventory.select(held.selected()).unwrap();
+        held.0 = inventory;
+        frame(app);
+        frame(app);
+    }
+
+    /// The Server's tick after the Client's frame.
+    fn server(app: &mut App) {
+        app.world_mut().run_schedule(bevy::app::FixedMain);
+    }
+
+    /// One Client frame and one Server tick, then let go of everything:
+    /// `press` only counts as "just pressed" for a button that was released
+    /// first.
+    fn frame(app: &mut App) -> Vec<EditIntent> {
+        app.update();
+        server(app);
+        let mut mouse = app.world_mut().resource_mut::<ButtonInput<MouseButton>>();
+        mouse.release_all();
+        mouse.clear();
+        let mut keys = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+        keys.release_all();
+        keys.clear();
+        app.world_mut()
+            .resource_mut::<Messages<EditIntent>>()
+            .drain()
+            .collect()
+    }
+
+    /// A key press, then a frame for the Server's answer to reach the Client.
     fn key(app: &mut App, key: KeyCode) {
         app.world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()
             .press(key);
         frame(app);
+        frame(app);
     }
 
-    fn both_buttons(app: &mut App, slot_key: KeyCode) -> [Option<EditAction>; 2] {
-        key(app, slot_key);
+    fn both_buttons(app: &mut App, keys: &[KeyCode]) -> [Option<EditAction>; 2] {
+        for k in keys {
+            key(app, *k);
+        }
         [MouseButton::Right, MouseButton::Left].map(|button| {
             press(app, button);
             let sent = frame(app);
@@ -979,6 +1235,7 @@ mod tests {
             });
         }
         frame(app);
+        frame(app);
         app.world().resource::<Hotbar>().selected
     }
 
@@ -993,6 +1250,15 @@ mod tests {
         )
     }
 
+    fn held(app: &App) -> Holding {
+        app.world().resource::<Hotbar>().held()
+    }
+
+    const CHOSEN: EditAction = EditAction::PlaceHeld {
+        shape: SHAPE_FULL_CUBE,
+        orientation: Orientation::IDENTITY,
+    };
+
     #[test]
     fn the_click_that_grabs_the_cursor_is_not_also_an_edit() {
         let mut app = app(CursorGrabMode::None);
@@ -1005,104 +1271,67 @@ mod tests {
         press(&mut app, MouseButton::Right);
         assert!(frame(&mut app).is_empty(), "the grabbing click");
 
-        // A World opens empty-handed; pick up the first shortcut.
-        app.world_mut().resource_mut::<Hotbar>().select(0);
+        // A World opens empty-handed; pick up the first slot.
+        key(&mut app, KeyCode::Digit1);
         press(&mut app, MouseButton::Right);
         assert_eq!(frame(&mut app).len(), 1, "the next click is an Edit");
     }
 
     #[test]
-    fn the_default_hotbar_is_the_builtin_solids_then_the_lake_fluid_then_fire() {
-        let solids = [
-            Holding::solid(
-                tesserae_core::testgen::fixtures().ground.rock,
-                SHAPE_FULL_CUBE,
-            ),
-            Holding::solid(tesserae_core::testgen::fixtures().ground.rock, SHAPE_SLAB),
-            Holding::solid(tesserae_core::testgen::fixtures().ground.rock, SHAPE_STAIR),
-            Holding::solid(tesserae_core::testgen::fixtures().ground.rock, SHAPE_POST),
-            Holding::solid(tesserae_core::testgen::fixtures().lantern, SHAPE_FULL_CUBE),
-            Holding::solid(tesserae_core::testgen::fixtures().glass, SHAPE_FULL_CUBE),
-            Holding::solid(tesserae_core::testgen::fixtures().leaves, SHAPE_FULL_CUBE),
-        ];
-        let with = |last: [Holding; 2]| {
-            let mut slots = solids.to_vec();
-            slots.extend(last);
-            slots
-        };
-        assert_eq!(
-            Hotbar::defaults(&terra()).to_vec(),
-            with([Holding::Fluid(terra_water()), Holding::Fire])
-        );
-        assert_eq!(
-            Hotbar::defaults(&dry()).to_vec(),
-            with([Holding::Empty, Holding::Empty])
-        );
-        let no_lake = ContentCatalogue {
-            lake: None,
-            ..terra()
-        };
-        assert_eq!(
-            Hotbar::defaults(&no_lake)[7],
-            Holding::Fluid(terra_water()),
-            "the first declared fluid, not the lowest id"
-        );
-        let mut lava_lakes = terra();
-        lava_lakes.lake = Some(lava());
-        assert_eq!(Hotbar::defaults(&lava_lakes)[7], Holding::Fluid(lava()));
-        let mut fuel_only = dry();
-        fuel_only.materials.push(CatalogueMaterial {
-            remove_time: tesserae_mods::DEFAULT_REMOVE_TIME,
-            burns: true,
-            ..material(8, "wood:log", true)
-        });
-        assert_eq!(
-            Hotbar::defaults(&fuel_only)[7..],
-            [Holding::Fire, Holding::Empty]
-        );
-
-        let mut app = app(CursorGrabMode::Locked);
+    fn the_hotbar_and_the_held_item_follow_the_server_s_messages_only() {
+        let mut app = bare(CursorGrabMode::Locked, terra());
         frame(&mut app);
+        give(&mut app, &[(3, "terra:wood")]);
         assert_eq!(
-            app.world().resource::<Hotbar>().slots.to_vec(),
-            with([Holding::Fluid(terra_water()), Holding::Fire]),
-            "from the catalogue the Server sent"
+            app.world().resource::<Hotbar>().slot(3),
+            Holding::solid(wood(), SHAPE_FULL_CUBE)
         );
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::Digit4);
+        app.update();
+        assert_eq!(
+            app.world().resource::<Hotbar>().selected,
+            0,
+            "asked, not yet answered"
+        );
+        assert_eq!(held(&app), Holding::Empty);
+        server(&mut app);
+        app.update();
+        assert_eq!(app.world().resource::<Hotbar>().selected, 3);
+        assert_eq!(held(&app), Holding::solid(wood(), SHAPE_FULL_CUBE));
+        give(&mut app, &[(3, "terra:water")]);
+        assert_eq!(held(&app), Holding::Fluid(terra_water()));
+        give(&mut app, &[]);
+        assert_eq!(held(&app), Holding::Empty);
     }
 
     /// Placement is immediate; removal belongs to the deliberate-hold system.
     #[test]
-    fn right_click_places_and_left_click_does_not_remove_immediately() {
+    fn right_click_asks_the_server_to_place_the_held_item_and_left_click_does_not_remove() {
         let mut app = app(CursorGrabMode::Locked);
         frame(&mut app);
         assert_eq!(
-            both_buttons(&mut app, KeyCode::Digit3),
-            [
-                Some(EditAction::Place(Voxel::shaped(
-                    tesserae_core::testgen::fixtures().ground.rock,
-                    SHAPE_STAIR,
-                    Orientation::IDENTITY
-                ))),
-                None
-            ]
+            both_buttons(&mut app, &[KeyCode::Digit1]),
+            [Some(CHOSEN), None]
         );
         assert_eq!(
-            both_buttons(&mut app, KeyCode::Digit8),
-            [Some(EditAction::PlaceSource(terra_water())), None]
+            both_buttons(&mut app, &[KeyCode::Digit8]),
+            [Some(CHOSEN), None],
+            "a fluid source's Item, resolved by the Server too"
         );
         assert_eq!(
-            both_buttons(&mut app, KeyCode::Digit9),
-            [Some(EditAction::Ignite), None]
+            both_buttons(&mut app, &[KeyCode::KeyM]),
+            [Some(EditAction::Ignite), None],
+            "fire is a hand state"
         );
-
-        let mut dry = app_with(CursorGrabMode::Locked, dry());
-        frame(&mut dry);
         assert_eq!(
-            both_buttons(&mut dry, KeyCode::Digit9),
+            both_buttons(&mut app, &[KeyCode::Digit5]),
             [None, None],
             "an empty slot"
         );
 
+        key(&mut app, KeyCode::Digit1);
         press(&mut app, MouseButton::Right);
         let sent = frame(&mut app);
         assert_eq!(
@@ -1113,20 +1342,38 @@ mod tests {
         assert!(sent[0].direction.abs_diff_eq(Vec3::NEG_Z, 1e-6));
     }
 
-    /// A frame at a fixed rate with every button left as it was, so a hold can
-    /// be watched across many of them.
-    fn held_frame(app: &mut App) -> Vec<EditIntent> {
-        app.update();
-        app.world_mut()
-            .resource_mut::<ButtonInput<MouseButton>>()
-            .clear();
-        app.world_mut()
-            .resource_mut::<ButtonInput<KeyCode>>()
-            .clear();
-        app.world_mut()
-            .resource_mut::<Messages<EditIntent>>()
-            .drain()
-            .collect()
+    #[test]
+    fn placing_carries_the_chosen_shape_and_orientation_whatever_the_slot() {
+        let mut app = app(CursorGrabMode::Locked);
+        frame(&mut app);
+        let turned = Orientation::IDENTITY.flipped();
+        let stair = Some(EditAction::PlaceHeld {
+            shape: SHAPE_STAIR,
+            orientation: turned,
+        });
+        let keys = [KeyCode::Digit1, KeyCode::KeyF, KeyCode::KeyF, KeyCode::KeyE];
+        assert_eq!(both_buttons(&mut app, &keys)[0], stair);
+        assert_eq!(
+            held(&app),
+            Holding::Solid {
+                material: rock(),
+                shape: SHAPE_STAIR,
+                orientation: turned,
+            }
+        );
+        assert_eq!(
+            both_buttons(&mut app, &[KeyCode::Digit2])[0],
+            stair,
+            "the choice is the Player's, not the stack's"
+        );
+        assert_eq!(
+            held(&app),
+            Holding::Solid {
+                material: tesserae_core::testgen::fixtures().glass,
+                shape: SHAPE_STAIR,
+                orientation: turned,
+            }
+        );
     }
 
     fn at_rate(grab: CursorGrabMode, hz: u32) -> App {
@@ -1145,7 +1392,7 @@ mod tests {
     fn a_held_place_repeats_after_a_quarter_second_then_every_fifth_at_any_rate() {
         for hz in [60, 144, 1000] {
             let mut app = at_rate(CursorGrabMode::Locked, hz);
-            key(&mut app, KeyCode::Digit3);
+            key(&mut app, KeyCode::Digit1);
             press(&mut app, MouseButton::Right);
             let mut times = Vec::new();
             for step in 0..=(hz * 95 / 100) {
@@ -1166,32 +1413,17 @@ mod tests {
         }
     }
 
-    /// Holds Place for `seconds` at 100 Hz and counts the intents sent.
-    fn hold_for(app: &mut App, seconds: f32) -> usize {
-        (0..(seconds * 100.0) as u32)
-            .map(|_| held_frame(app).len())
-            .sum()
-    }
-
-    fn at_100hz(grab: CursorGrabMode, repeat: bool) -> App {
-        let mut app = at_rate(grab, 100);
-        app.world_mut()
-            .resource_mut::<super::super::profile::Preferences>()
-            .repeat_held = repeat;
-        app
-    }
-
     #[test]
     fn fluids_and_fire_and_a_disabled_preference_place_once_per_press() {
-        for (slot, repeat) in [
+        for (hand, repeat) in [
             (KeyCode::Digit8, true),
-            (KeyCode::Digit9, true),
-            (KeyCode::Digit3, false),
+            (KeyCode::KeyM, true),
+            (KeyCode::Digit1, false),
         ] {
             let mut app = at_100hz(CursorGrabMode::Locked, repeat);
-            key(&mut app, slot);
+            key(&mut app, hand);
             press(&mut app, MouseButton::Right);
-            assert_eq!(hold_for(&mut app, 1.5), 1, "{slot:?} repeat={repeat}");
+            assert_eq!(hold_for(&mut app, 1.5), 1, "{hand:?} repeat={repeat}");
         }
     }
 
@@ -1213,7 +1445,9 @@ mod tests {
         ];
         for (name, interrupt) in routes {
             let mut app = at_100hz(CursorGrabMode::Locked, true);
-            key(&mut app, KeyCode::Digit3);
+            for k in [KeyCode::Digit1, KeyCode::KeyF, KeyCode::KeyF] {
+                key(&mut app, k);
+            }
             press(&mut app, MouseButton::Right);
             assert_eq!(
                 hold_for(&mut app, 0.3),
@@ -1230,7 +1464,7 @@ mod tests {
     #[test]
     fn releasing_and_pressing_again_starts_a_fresh_chain() {
         let mut app = at_100hz(CursorGrabMode::Locked, true);
-        key(&mut app, KeyCode::Digit3);
+        key(&mut app, KeyCode::Digit1);
         press(&mut app, MouseButton::Right);
         assert_eq!(hold_for(&mut app, 0.3), 2);
         app.world_mut()
@@ -1248,7 +1482,7 @@ mod tests {
     #[test]
     fn a_repeat_s_refusal_is_silent_but_a_first_press_still_shows_it() {
         let mut app = at_100hz(CursorGrabMode::Locked, true);
-        key(&mut app, KeyCode::Digit3);
+        key(&mut app, KeyCode::Digit1);
         press(&mut app, MouseButton::Right);
         held_frame(&mut app);
         app.world_mut().write_message(EditRejected {
@@ -1266,62 +1500,6 @@ mod tests {
         });
         held_frame(&mut app);
         assert_eq!(app.world().resource::<Notice>().text(), "");
-    }
-
-    #[test]
-    fn a_held_fluid_places_and_removes_sources_of_that_fluid() {
-        let mut lava_lakes = terra();
-        lava_lakes.lake = Some(lava());
-        let mut app = app_with(CursorGrabMode::Locked, lava_lakes);
-        frame(&mut app);
-        assert_eq!(
-            both_buttons(&mut app, KeyCode::Digit8),
-            [Some(EditAction::PlaceSource(lava())), None]
-        );
-    }
-
-    #[test]
-    fn keys_six_and_seven_hold_glass_and_leaves() {
-        let mut app = app(CursorGrabMode::Locked);
-        frame(&mut app);
-        for (slot_key, material) in [
-            (KeyCode::Digit6, tesserae_core::testgen::fixtures().glass),
-            (KeyCode::Digit7, tesserae_core::testgen::fixtures().leaves),
-        ] {
-            assert_eq!(
-                both_buttons(&mut app, slot_key)[0],
-                Some(EditAction::Place(Voxel::cube(material)))
-            );
-        }
-    }
-
-    #[test]
-    fn every_key_selects_its_slot_in_every_build() {
-        let mut app = app(CursorGrabMode::None);
-        for (slot_key, slot) in SLOT_KEYS.iter().zip(0..) {
-            key(&mut app, *slot_key);
-            assert_eq!(app.world().resource::<Hotbar>().selected, slot);
-        }
-    }
-
-    #[test]
-    fn a_scroll_notch_moves_one_slot_and_wraps_at_both_ends() {
-        let mut app = app(CursorGrabMode::Locked);
-        frame(&mut app);
-        let line = MouseScrollUnit::Line;
-        assert_eq!(scroll(&mut app, line, &[-1.0]), 1, "down is the next slot");
-        assert_eq!(scroll(&mut app, line, &[1.0]), 0);
-        assert_eq!(scroll(&mut app, line, &[1.0]), 8, "wraps back to the end");
-        assert_eq!(
-            scroll(&mut app, line, &[-1.0]),
-            0,
-            "and forward to the start"
-        );
-        assert_eq!(scroll(&mut app, line, &[-1.0, -1.0]), 2, "a notch each");
-        assert_eq!(
-            app.world().resource::<Hotbar>().held(),
-            Holding::solid(tesserae_core::testgen::fixtures().ground.rock, SHAPE_STAIR)
-        );
     }
 
     #[test]
@@ -1392,101 +1570,6 @@ mod tests {
     }
 
     #[test]
-    fn q_and_e_turn_and_flip_only_a_shape_the_catalogue_marks_turnable() {
-        let mut app = app(CursorGrabMode::None);
-        frame(&mut app);
-        key(&mut app, KeyCode::Digit3);
-        for k in [KeyCode::KeyQ, KeyCode::KeyE, KeyCode::KeyE] {
-            key(&mut app, k);
-        }
-        // Turned once, flipped twice: up has gone +Y, -Y, +X.
-        let Holding::Solid { orientation: o, .. } = app.world().resource::<Hotbar>().held() else {
-            panic!("a stair");
-        };
-        assert_eq!((o.up(), o.turn()), (POS_X, 1));
-
-        key(&mut app, KeyCode::Digit1);
-        key(&mut app, KeyCode::KeyQ);
-        key(&mut app, KeyCode::KeyE);
-        assert_eq!(
-            app.world().resource::<Hotbar>().held(),
-            Holding::solid(
-                tesserae_core::testgen::fixtures().ground.rock,
-                SHAPE_FULL_CUBE
-            ),
-            "a cube is not turned"
-        );
-        let fence = Holding::solid(tesserae_core::testgen::fixtures().ground.rock, 4);
-        app.world_mut().resource_mut::<Hotbar>().slots[0] = fence;
-        key(&mut app, KeyCode::KeyQ);
-        assert_eq!(
-            app.world().resource::<Hotbar>().held(),
-            fence,
-            "nor is a connected Shape"
-        );
-    }
-
-    #[test]
-    fn f_cycles_the_outside_solid_and_preserves_its_orientation_and_slots() {
-        let mut app = app(CursorGrabMode::Locked);
-        frame(&mut app);
-        let before = app.world().resource::<Hotbar>().slots;
-        let material = tesserae_core::testgen::fixtures().ground.rock;
-        let orientation = Orientation::IDENTITY.turned().flipped();
-        app.world_mut().resource_mut::<Hotbar>().outside = Some(Holding::Solid {
-            material,
-            shape: SHAPE_POST,
-            orientation,
-        });
-        for shape in [4, SHAPE_FULL_CUBE, SHAPE_SLAB] {
-            key(&mut app, KeyCode::KeyF);
-            assert_eq!(
-                app.world().resource::<Hotbar>().held(),
-                Holding::Solid {
-                    material,
-                    shape,
-                    orientation,
-                }
-            );
-        }
-        for held in [Holding::Fluid(terra_water()), Holding::Fire, Holding::Empty] {
-            app.world_mut().resource_mut::<Hotbar>().outside = Some(held);
-            key(&mut app, KeyCode::KeyF);
-            assert_eq!(app.world().resource::<Hotbar>().held(), held);
-        }
-        assert_eq!(app.world().resource::<Hotbar>().slots, before);
-        key(&mut app, KeyCode::Digit2);
-        assert_eq!(app.world().resource::<Hotbar>().outside, None);
-        assert_eq!(app.world().resource::<Hotbar>().selected, 1);
-    }
-
-    #[test]
-    fn the_hud_names_the_held_slot_and_lists_one_control_per_line() {
-        let mut app = app(CursorGrabMode::Locked);
-        frame(&mut app);
-        for (keycode, expected, verb) in [
-            (KeyCode::Digit1, "1: test:stone", "place"),
-            (KeyCode::Digit8, "8: terra:water source", "place source"),
-            (KeyCode::Digit9, "9: fire", "ignite"),
-        ] {
-            key(&mut app, keycode);
-            let text = hud(&app);
-            let lines: Vec<_> = text.lines().collect();
-            assert_eq!(lines[0], expected);
-            assert_eq!(lines[1], "[hold Left mouse] remove");
-            assert!(lines[2].starts_with(&format!("[Right mouse] {verb}")));
-            for hint in hints(
-                app.world().resource::<super::super::actions::Bindings>(),
-                app.world().resource::<super::super::actions::Labels>(),
-            )
-            .lines()
-            {
-                assert!(lines.contains(&hint), "{hint}");
-            }
-        }
-    }
-
-    #[test]
     fn a_rejection_is_shown_and_then_expires() {
         let mut app = app(CursorGrabMode::None);
         app.world_mut().write_message(EditRejected {
@@ -1507,91 +1590,50 @@ mod tests {
         assert_eq!(notice.text(), "");
     }
 
-    fn cursor(app: &mut App) -> CursorGrabMode {
-        let mut q = app.world_mut().query::<&CursorOptions>();
-        q.single(app.world()).unwrap().grab_mode
-    }
-
-    /// Every entry the open menu shows, bar slots aside.
-    fn offered(app: &mut App) -> Vec<Entry> {
-        if !app.world().resource::<menu::Menu>().open {
-            return Vec::new();
-        }
-        let mut q = app.world_mut().query::<&Entry>();
-        q.iter(app.world())
-            .copied()
-            .filter(|e| !matches!(e, Entry::Slot(_)))
-            .collect()
-    }
-
-    fn texts(app: &mut App) -> Vec<String> {
-        let mut q = app.world_mut().query::<&Text>();
-        q.iter(app.world()).map(|t| t.0.clone()).collect()
-    }
-
-    /// Select content in the menu, then close it to resume placement.
-    fn choose(app: &mut App, entry: Entry) {
-        let entity = if let Entry::Solid { shape, .. } = entry {
-            app.world_mut()
-                .query::<(Entity, &menu::DetailAction)>()
-                .iter(app.world())
-                .find_map(|(entity, action)| {
-                    matches!(action, menu::DetailAction::Shape(id) if *id == shape)
-                        .then_some(entity)
-                })
-                .expect("Shape offered")
-        } else {
-            app.world_mut()
-                .query::<(Entity, &Entry)>()
-                .iter(app.world())
-                .find(|(_, value)| **value == entry)
-                .unwrap_or_else(|| panic!("{entry:?} is not offered"))
-                .0
-        };
-        app.world_mut().trigger(Activate { entity });
-        frame(app);
-        if entry.holding().is_some() {
-            key(app, KeyCode::Tab);
-        }
-    }
-
-    fn hover(app: &mut App, entry: Entry) {
-        use bevy::picking::{
-            backend::HitData,
-            events::{Pointer, PointerOver},
-            pointer::{Location, PointerId},
-        };
-        let entity = app
-            .world_mut()
-            .query::<(Entity, &Entry)>()
-            .iter(app.world())
-            .find(|(_, e)| **e == entry)
-            .unwrap()
-            .0;
-        app.world_mut().trigger(PointerOver {
-            entity,
-            pointer: Pointer::new(
-                PointerId::Mouse,
-                Location {
-                    target: bevy::camera::NormalizedRenderTarget::None {
-                        width: 800,
-                        height: 600,
-                    },
-                    position: Vec2::ZERO,
-                },
-            ),
-            hit: HitData::new(Entity::PLACEHOLDER, 0.0, None, None),
+    #[test]
+    fn an_undo_the_server_refuses_for_want_of_items_names_the_material_and_the_item() {
+        let mut app = app(CursorGrabMode::None);
+        let rock = tesserae_core::testgen::fixtures().ground.rock;
+        app.world_mut().write_message(EditRejected {
+            reason: RejectReason::ItemNeeded,
         });
-        frame(app);
+        app.world_mut().write_message(HistoryNeedsItems {
+            action: HistoryAction::Undo,
+            material: rock,
+            item: "test:stone".into(),
+            count: 1,
+        });
+        frame(&mut app);
+        assert_eq!(
+            app.world().resource::<Notice>().text(),
+            "Can’t undo: putting the Stone back needs 1 Stone."
+        );
+
+        app.world_mut().write_message(HistoryNeedsItems {
+            action: HistoryAction::Redo,
+            material: rock,
+            item: "test:stone".into(),
+            count: 3,
+        });
+        frame(&mut app);
+        assert_eq!(
+            app.world().resource::<Notice>().text(),
+            "Can’t redo: placing the Stone again needs 3 Stone."
+        );
     }
 
-    fn id(catalogue: &ContentCatalogue, name: &str) -> MaterialId {
-        catalogue
-            .materials
-            .iter()
-            .find(|m| m.name == name)
-            .unwrap_or_else(|| panic!("{name}"))
-            .id
+    #[test]
+    fn a_refund_that_dropped_at_the_players_feet_says_so() {
+        let mut app = app(CursorGrabMode::None);
+        app.world_mut().write_message(RefundDropped {
+            item: "test:stone".into(),
+            count: 1,
+        });
+        frame(&mut app);
+        assert_eq!(
+            app.world().resource::<Notice>().text(),
+            "Your Inventory is full: 1 Stone dropped at your feet."
+        );
     }
 
     #[test]
@@ -1619,328 +1661,6 @@ mod tests {
             kind: tesserae_mods::ToolKind::Measure,
         }];
         catalogue
-    }
-
-    #[test]
-    fn the_menu_does_not_list_tools_even_when_the_game_declares_one() {
-        let mut app = app_with(CursorGrabMode::Locked, with_measure(terra()));
-        frame(&mut app);
-        key(&mut app, KeyCode::Tab);
-        assert!(!offered(&mut app).contains(&Entry::Tool(ToolId(0))));
-    }
-
-    #[test]
-    fn the_tool_key_takes_the_games_tool_and_a_second_press_puts_it_back() {
-        let mut app = app_with(CursorGrabMode::Locked, with_measure(terra()));
-        frame(&mut app);
-        app.world_mut().resource_mut::<Hotbar>().select(2);
-        let before = app.world().resource::<Hotbar>().held();
-        key(&mut app, KeyCode::KeyM);
-        assert_eq!(
-            app.world().resource::<Hotbar>().held(),
-            Holding::Tool(ToolId(0))
-        );
-        key(&mut app, KeyCode::KeyM);
-        assert_eq!(app.world().resource::<Hotbar>().held(), before);
-        assert_eq!(app.world().resource::<Hotbar>().selected, 2);
-    }
-
-    #[test]
-    fn putting_the_tool_away_restores_an_empty_hand() {
-        let mut app = app_with(CursorGrabMode::Locked, with_measure(terra()));
-        frame(&mut app);
-        key(&mut app, KeyCode::KeyX);
-        key(&mut app, KeyCode::KeyM);
-        key(&mut app, KeyCode::KeyM);
-        assert_eq!(app.world().resource::<Hotbar>().held(), Holding::Empty);
-    }
-
-    #[test]
-    fn the_tool_key_does_nothing_in_a_game_without_tools() {
-        let mut app = app_with(CursorGrabMode::Locked, terra());
-        frame(&mut app);
-        let before = app.world().resource::<Hotbar>().clone();
-        key(&mut app, KeyCode::KeyM);
-        assert_eq!(*app.world().resource::<Hotbar>(), before);
-    }
-
-    #[test]
-    fn choosing_a_slot_or_the_empty_hand_puts_a_held_tool_away() {
-        let mut app = app_with(CursorGrabMode::Locked, with_measure(terra()));
-        frame(&mut app);
-        key(&mut app, KeyCode::KeyM);
-        key(&mut app, KeyCode::Digit3);
-        assert_eq!(app.world().resource::<Hotbar>().held().tool(), None);
-        key(&mut app, KeyCode::KeyM);
-        key(&mut app, KeyCode::KeyX);
-        assert_eq!(app.world().resource::<Hotbar>().held(), Holding::Empty);
-    }
-
-    #[test]
-    fn the_menu_offers_every_solid_in_every_shape_every_fluid_and_fire() {
-        let catalogue = terra();
-        let mut app = app(CursorGrabMode::Locked);
-        frame(&mut app);
-        assert!(offered(&mut app).is_empty(), "closed");
-        key(&mut app, KeyCode::Tab);
-        assert_eq!(cursor(&mut app), CursorGrabMode::None);
-
-        let solids: Vec<_> = catalogue.materials.iter().filter(|m| m.solid).collect();
-        for name in ["terra:wood", "terra:brick", "terra:lamp"] {
-            assert!(solids.iter().any(|m| m.name == name), "{name}");
-        }
-        for solid in &solids {
-            assert!(offered(&mut app).contains(&Entry::Material(solid.id)));
-            hover(&mut app, Entry::Material(solid.id));
-            let shapes: Vec<_> = app
-                .world_mut()
-                .query::<&menu::DetailAction>()
-                .iter(app.world())
-                .filter_map(|action| {
-                    if let menu::DetailAction::Shape(id) = action {
-                        Some(*id)
-                    } else {
-                        None
-                    }
-                })
-                .collect();
-            for shape in &catalogue.shapes {
-                assert!(shapes.contains(&shape.id), "{} {}", solid.name, shape.name);
-            }
-            assert_eq!(shapes.len(), catalogue.shapes.len());
-        }
-        let offered = offered(&mut app);
-        assert_eq!(
-            offered
-                .iter()
-                .filter(|e| matches!(e, Entry::Material(_)))
-                .count(),
-            solids.len(),
-            "solids only"
-        );
-        for fluid in ["terra:water", "terra:lava", "terra:mud"] {
-            assert!(
-                offered.contains(&Entry::Fluid(id(&catalogue, fluid))),
-                "{fluid}"
-            );
-        }
-        assert!(offered.contains(&Entry::Fire));
-
-        let texts = texts(&mut app);
-        for name in [
-            "terra:wood",
-            "terra:brick",
-            "terra:lamp",
-            "core:stair",
-            "dev:fence",
-            "terra:water",
-            "terra:lava",
-            "terra:mud",
-            "fire",
-        ] {
-            assert!(
-                texts
-                    .iter()
-                    .any(|t| t == &super::super::menu_ui::title(name)),
-                "{name} by its display name"
-            );
-        }
-    }
-
-    #[test]
-    fn with_no_fluid_and_no_fuel_the_menu_offers_the_builtin_solids_and_shapes_only() {
-        let mut app = app_with(CursorGrabMode::Locked, dry());
-        frame(&mut app);
-        key(&mut app, KeyCode::Tab);
-        let offered = offered(&mut app);
-        let solids: Vec<_> = dry()
-            .materials
-            .iter()
-            .filter(|m| m.solid)
-            .map(|m| Entry::Material(m.id))
-            .collect();
-        let shapes: Vec<_> = app
-            .world_mut()
-            .query::<&menu::DetailAction>()
-            .iter(app.world())
-            .filter_map(|action| {
-                if let menu::DetailAction::Shape(id) = action {
-                    Some(*id)
-                } else {
-                    None
-                }
-            })
-            .collect();
-        assert_eq!(shapes.len(), 5);
-        assert_eq!(offered.len(), solids.len());
-        for entry in &solids {
-            assert!(offered.contains(entry), "{entry:?}");
-        }
-        let texts = texts(&mut app);
-        assert!(!texts.iter().any(|t| t == "Fluids" || t == "Fire"));
-    }
-
-    #[test]
-    fn catalogue_selection_and_clear_never_edit_until_the_menu_closes() {
-        for entry in [
-            Entry::Material(wood()),
-            Entry::Fluid(terra_water()),
-            Entry::Fire,
-        ] {
-            let mut app = app(CursorGrabMode::Locked);
-            frame(&mut app);
-            key(&mut app, KeyCode::Tab);
-            let before = app.world().resource::<Hotbar>().clone();
-            let entity = app
-                .world_mut()
-                .query::<(Entity, &Entry)>()
-                .iter(app.world())
-                .find(|(_, value)| **value == entry)
-                .unwrap()
-                .0;
-            press(&mut app, MouseButton::Left);
-            app.world_mut().trigger(Activate { entity });
-            assert!(frame(&mut app).is_empty());
-            assert!(app.world().resource::<menu::Menu>().open);
-            assert_eq!(cursor(&mut app), CursorGrabMode::None);
-            let hand = app.world().resource::<Hotbar>();
-            assert_eq!(hand.outside, entry.holding());
-            assert_eq!(hand.slots, before.slots);
-            assert_eq!(hand.selected, before.selected);
-            let cards: Vec<_> = app
-                .world_mut()
-                .query_filtered::<&Node, With<menu::CatalogueItem>>()
-                .iter(app.world())
-                .collect();
-            assert!(!cards.is_empty());
-            assert!(
-                cards
-                    .iter()
-                    .all(|node| node.width == Val::Px(128.0) && node.height == Val::Px(113.0))
-            );
-            let expected = match entry {
-                Entry::Material(_) => "Selected: Wood · Cube",
-                Entry::Fluid(_) => "Selected: Water",
-                _ => "Selected: Fire",
-            };
-            assert!(texts(&mut app).iter().any(|text| text == expected));
-            let selected = app
-                .world_mut()
-                .query::<(Entity, &Entry)>()
-                .iter(app.world())
-                .find(|(_, value)| **value == entry)
-                .unwrap()
-                .0;
-            app.world_mut().trigger(Activate { entity: selected });
-            assert!(frame(&mut app).is_empty());
-            assert_eq!(app.world().resource::<Hotbar>().held(), Holding::Empty);
-            assert!(
-                texts(&mut app)
-                    .iter()
-                    .any(|text| text == "Nothing selected")
-            );
-            let selected = app
-                .world_mut()
-                .query::<(Entity, &Entry)>()
-                .iter(app.world())
-                .find(|(_, value)| **value == entry)
-                .unwrap()
-                .0;
-            app.world_mut().trigger(Activate { entity: selected });
-            assert!(frame(&mut app).is_empty());
-            let clear = app
-                .world_mut()
-                .query::<(Entity, &menu::DetailAction)>()
-                .iter(app.world())
-                .find_map(|(entity, action)| {
-                    matches!(action, menu::DetailAction::Clear).then_some(entity)
-                })
-                .unwrap();
-            app.world_mut().trigger(Activate { entity: clear });
-            assert!(frame(&mut app).is_empty());
-            assert_eq!(app.world().resource::<Hotbar>().held(), Holding::Empty);
-            assert!(app.world().resource::<menu::Menu>().open);
-        }
-    }
-
-    #[test]
-    fn catalogue_clear_shortcut_respects_search_ownership_in_the_edit_schedule() {
-        let mut app = app(CursorGrabMode::Locked);
-        app.init_resource::<super::super::input::UiInput>()
-            .add_systems(
-                Update,
-                super::super::input::resolve
-                    .after(menu::toggle)
-                    .before(select_held),
-            );
-        frame(&mut app);
-        app.world_mut().resource_mut::<Hotbar>().select(0);
-        key(&mut app, KeyCode::Tab);
-        frame(&mut app);
-        let held = app.world().resource::<Hotbar>().held();
-        assert_ne!(held, Holding::Empty);
-        app.world_mut()
-            .resource_mut::<super::super::input::UiInput>()
-            .text_entry = true;
-        key(&mut app, KeyCode::KeyX);
-        assert_eq!(app.world().resource::<Hotbar>().held(), held);
-        app.world_mut()
-            .resource_mut::<super::super::input::UiInput>()
-            .text_entry = false;
-        frame(&mut app);
-        key(&mut app, KeyCode::KeyX);
-        assert_eq!(app.world().resource::<Hotbar>().held(), Holding::Empty);
-        assert!(app.world().resource::<menu::Menu>().open);
-        assert!(frame(&mut app).is_empty());
-    }
-
-    #[test]
-    fn a_chosen_entry_is_held_outside_the_slots_and_the_next_click_places_it() {
-        let mut app = app(CursorGrabMode::Locked);
-        frame(&mut app);
-        key(&mut app, KeyCode::Digit2);
-        key(&mut app, KeyCode::Tab);
-        let slots = app.world().resource::<Hotbar>().slots;
-        hover(&mut app, Entry::Material(wood()));
-        choose(
-            &mut app,
-            Entry::Solid {
-                material: wood(),
-                shape: SHAPE_STAIR,
-            },
-        );
-        assert_eq!(app.world().resource::<Hotbar>().slots, slots);
-        assert_eq!(
-            app.world().resource::<Hotbar>().outside,
-            Some(Holding::solid(wood(), SHAPE_STAIR))
-        );
-        assert_eq!(cursor(&mut app), CursorGrabMode::Locked);
-        press(&mut app, MouseButton::Right);
-        let sent = frame(&mut app);
-        assert_eq!(sent.len(), 1);
-        assert_eq!(
-            sent[0].action,
-            EditAction::Place(Voxel::shaped(wood(), SHAPE_STAIR, Orientation::IDENTITY))
-        );
-        key(&mut app, KeyCode::Digit2);
-        assert_eq!(app.world().resource::<Hotbar>().outside, None);
-    }
-    #[test]
-    fn clicking_a_hotbar_slot_while_the_menu_is_open_selects_it() {
-        let mut app = app(CursorGrabMode::Locked);
-        frame(&mut app);
-        key(&mut app, KeyCode::Tab);
-        choose(&mut app, Entry::Slot(4));
-        assert_eq!(app.world().resource::<Hotbar>().selected, 4);
-        assert!(app.world().resource::<menu::Menu>().open);
-        hover(&mut app, Entry::Fluid(terra_water()));
-        key(&mut app, KeyCode::Digit1);
-        assert_eq!(
-            app.world().resource::<Hotbar>().slots[0],
-            Holding::Fluid(terra_water())
-        );
-        assert_eq!(app.world().resource::<Hotbar>().selected, 4);
-        assert!(app.world().resource::<menu::Menu>().open);
     }
 
     #[test]
@@ -1972,7 +1692,7 @@ mod tests {
         let fly = camera.single(app.world()).unwrap();
         assert_eq!((fly.yaw, fly.pitch), (0.0, 0.0));
 
-        key(&mut app, KeyCode::Tab);
+        key(&mut app, KeyCode::Escape);
         moved(&mut app);
         frame(&mut app);
         assert_ne!(
@@ -1981,53 +1701,219 @@ mod tests {
             "it turns once closed"
         );
     }
+
     #[test]
-    fn defaults_are_empty_without_declared_solids_or_ground() {
-        assert_eq!(
-            Hotbar::defaults(&ContentCatalogue::default()),
-            [Holding::Empty; 9]
-        );
-        let f = tesserae_core::testgen::fixtures();
-        let catalogue = ContentCatalogue {
-            materials: vec![material(f.glass, "test:glass", true)],
-            ..default()
-        };
-        let slots = Hotbar::defaults(&catalogue);
-        assert_eq!(slots[0], Holding::solid(f.glass, SHAPE_FULL_CUBE));
-        assert!(slots[1..].iter().all(|slot| *slot == Holding::Empty));
+    fn a_pickup_into_the_held_stack_does_not_stop_a_hold() {
+        let mut app = at_100hz(CursorGrabMode::Locked, true);
+        key(&mut app, KeyCode::Digit1);
+        press(&mut app, MouseButton::Right);
+        assert_eq!(hold_for(&mut app, 0.3), 2);
+        let mut held = app
+            .world_mut()
+            .query::<&mut crate::server::inventory::Inventory>();
+        held.single_mut(app.world_mut())
+            .unwrap()
+            .receive("test:stone", 5, MAX_STACK);
+        server(&mut app);
+        assert_eq!(hold_for(&mut app, 0.4), 2);
     }
+
     #[test]
-    fn outside_holding_survives_shape_changes_and_slot_selection_restores_the_bar() {
-        let f = tesserae_core::testgen::fixtures();
-        let mut hotbar = Hotbar {
-            outside: Some(Holding::solid(f.glass, SHAPE_STAIR)),
-            ..default()
-        };
-        let slots = hotbar.slots;
-        assert_eq!(
-            hotbar.held().place(),
-            Some(EditAction::Place(Voxel::new(f.glass, SHAPE_STAIR, 0)))
-        );
-        hotbar.select(4);
-        assert_eq!(hotbar.outside, None);
-        assert_eq!(hotbar.slots, slots);
-        hotbar.outside = Some(Holding::Fire);
-        hotbar.step(1);
-        assert_eq!(hotbar.outside, None);
+    fn every_key_asks_for_its_slot_in_every_build() {
+        let mut app = app(CursorGrabMode::None);
+        for (slot_key, slot) in SLOT_KEYS.iter().zip(0..) {
+            key(&mut app, *slot_key);
+            assert_eq!(app.world().resource::<Hotbar>().selected, slot);
+        }
     }
+
+    #[test]
+    fn a_scroll_notch_moves_one_slot_and_wraps_at_both_ends() {
+        let mut app = app(CursorGrabMode::Locked);
+        frame(&mut app);
+        let line = MouseScrollUnit::Line;
+        assert_eq!(scroll(&mut app, line, &[-1.0]), 1, "down is the next slot");
+        assert_eq!(scroll(&mut app, line, &[1.0]), 0);
+        assert_eq!(scroll(&mut app, line, &[1.0]), 8, "wraps back to the end");
+        assert_eq!(
+            scroll(&mut app, line, &[-1.0]),
+            0,
+            "and forward to the start"
+        );
+        assert_eq!(scroll(&mut app, line, &[-1.0, -1.0]), 2, "a notch each");
+        assert_eq!(
+            held(&app),
+            Holding::solid(tesserae_core::testgen::fixtures().leaves, SHAPE_FULL_CUBE)
+        );
+    }
+
+    #[test]
+    fn steps_before_the_server_answers_count_from_the_slot_last_asked_for() {
+        let mut app = app(CursorGrabMode::Locked);
+        frame(&mut app);
+        let window = app
+            .world_mut()
+            .query_filtered::<Entity, With<PrimaryWindow>>()
+            .single(app.world())
+            .unwrap();
+        for _ in 0..3 {
+            app.world_mut().write_message(MouseWheel {
+                unit: MouseScrollUnit::Line,
+                x: 0.0,
+                y: -1.0,
+                window,
+                phase: TouchPhase::Moved,
+            });
+            app.update();
+        }
+        server(&mut app);
+        app.update();
+        assert_eq!(app.world().resource::<Hotbar>().selected, 3);
+    }
+
+    #[test]
+    fn q_and_e_turn_and_flip_only_a_shape_the_catalogue_marks_turnable() {
+        let mut app = app(CursorGrabMode::None);
+        frame(&mut app);
+        for k in [KeyCode::Digit1, KeyCode::KeyF, KeyCode::KeyF] {
+            key(&mut app, k);
+        }
+        for k in [KeyCode::KeyQ, KeyCode::KeyE, KeyCode::KeyE] {
+            key(&mut app, k);
+        }
+        // Turned once, flipped twice: up has gone +Y, -Y, +X.
+        let Holding::Solid { orientation: o, .. } = held(&app) else {
+            panic!("a stair");
+        };
+        assert_eq!((o.up(), o.turn()), (POS_X, 1));
+
+        for (shape, name) in [(SHAPE_FULL_CUBE, "a cube"), (4, "a connected Shape")] {
+            while app.world().resource::<Hotbar>().shape != shape {
+                key(&mut app, KeyCode::KeyF);
+            }
+            let before = held(&app);
+            key(&mut app, KeyCode::KeyQ);
+            key(&mut app, KeyCode::KeyE);
+            assert_eq!(held(&app), before, "{name} is not turned");
+        }
+    }
+
+    #[test]
+    fn f_cycles_the_chosen_shape_and_keeps_its_orientation_and_the_slots() {
+        let mut app = app(CursorGrabMode::Locked);
+        frame(&mut app);
+        for k in [KeyCode::Digit1, KeyCode::KeyF, KeyCode::KeyF, KeyCode::KeyQ] {
+            key(&mut app, k);
+        }
+        let stacks = app.world().resource::<Hotbar>().stacks.clone();
+        let orientation = Orientation::IDENTITY.turned();
+        for shape in [SHAPE_POST, 4, SHAPE_FULL_CUBE, SHAPE_SLAB] {
+            key(&mut app, KeyCode::KeyF);
+            assert_eq!(
+                held(&app),
+                Holding::Solid {
+                    material: rock(),
+                    shape,
+                    orientation,
+                }
+            );
+        }
+        for hand in [KeyCode::Digit8, KeyCode::KeyM, KeyCode::KeyX] {
+            key(&mut app, hand);
+            let before = app.world().resource::<Hotbar>().clone();
+            key(&mut app, KeyCode::KeyF);
+            assert_eq!(*app.world().resource::<Hotbar>(), before, "{hand:?}");
+        }
+        assert_eq!(app.world().resource::<Hotbar>().stacks, stacks);
+    }
+
+    #[test]
+    fn the_hud_names_the_held_slot_and_lists_one_control_per_line() {
+        let mut app = app(CursorGrabMode::Locked);
+        frame(&mut app);
+        for (keycode, expected, verb) in [
+            (KeyCode::Digit1, "1: test:stone", "place"),
+            (KeyCode::Digit8, "8: terra:water source", "place source"),
+            (KeyCode::KeyM, "held: fire", "ignite"),
+        ] {
+            key(&mut app, keycode);
+            let text = hud(&app);
+            let lines: Vec<_> = text.lines().collect();
+            assert_eq!(lines[0], expected);
+            assert_eq!(lines[1], "[hold Left mouse] remove");
+            assert!(lines[2].starts_with(&format!("[Right mouse] {verb}")));
+            for hint in hints(
+                app.world().resource::<super::super::actions::Bindings>(),
+                app.world().resource::<super::super::actions::Labels>(),
+            )
+            .lines()
+            {
+                assert!(lines.contains(&hint), "{hint}");
+            }
+        }
+    }
+
+    #[test]
+    fn the_tool_key_cycles_fire_then_the_games_tools_and_then_puts_them_back() {
+        let mut app = app_with(CursorGrabMode::Locked, with_measure(terra()));
+        frame(&mut app);
+        key(&mut app, KeyCode::Digit3);
+        let before = held(&app);
+        key(&mut app, KeyCode::KeyM);
+        assert_eq!(held(&app), Holding::Fire);
+        key(&mut app, KeyCode::KeyM);
+        assert_eq!(held(&app), Holding::Tool(ToolId(0)));
+        key(&mut app, KeyCode::KeyM);
+        assert_eq!(held(&app), before);
+        assert_eq!(app.world().resource::<Hotbar>().selected, 2);
+    }
+
+    #[test]
+    fn putting_the_tool_away_restores_an_empty_hand() {
+        let mut app = app_with(CursorGrabMode::Locked, with_measure(terra()));
+        frame(&mut app);
+        key(&mut app, KeyCode::KeyX);
+        for _ in 0..3 {
+            key(&mut app, KeyCode::KeyM);
+        }
+        assert_eq!(held(&app), Holding::Empty);
+    }
+
+    #[test]
+    fn the_tool_key_does_nothing_in_a_game_without_tools_or_fuel() {
+        let mut app = app_with(CursorGrabMode::Locked, dry());
+        frame(&mut app);
+        let before = app.world().resource::<Hotbar>().clone();
+        key(&mut app, KeyCode::KeyM);
+        assert_eq!(*app.world().resource::<Hotbar>(), before);
+    }
+
+    #[test]
+    fn choosing_a_slot_or_the_empty_hand_puts_a_held_tool_away() {
+        let mut app = app_with(CursorGrabMode::Locked, with_measure(terra()));
+        frame(&mut app);
+        key(&mut app, KeyCode::KeyM);
+        key(&mut app, KeyCode::Digit3);
+        assert_eq!(app.world().resource::<Hotbar>().outside, None);
+        key(&mut app, KeyCode::KeyM);
+        key(&mut app, KeyCode::KeyX);
+        assert_eq!(held(&app), Holding::Empty);
+    }
+
     #[test]
     fn empty_hand_keeps_slots_and_neither_button_edits_immediately() {
         let mut app = app(CursorGrabMode::Locked);
         frame(&mut app);
-        let before = app.world().resource::<Hotbar>().slots;
+        key(&mut app, KeyCode::Digit1);
+        let before = app.world().resource::<Hotbar>().stacks.clone();
         key(&mut app, KeyCode::KeyX);
-        assert_eq!(app.world().resource::<Hotbar>().held(), Holding::Empty);
-        assert_eq!(app.world().resource::<Hotbar>().slots, before);
+        assert_eq!(held(&app), Holding::Empty);
+        assert_eq!(app.world().resource::<Hotbar>().stacks, before);
         press(&mut app, MouseButton::Right);
         assert!(frame(&mut app).is_empty());
         press(&mut app, MouseButton::Left);
         assert!(frame(&mut app).is_empty());
         key(&mut app, KeyCode::Digit1);
-        assert_eq!(app.world().resource::<Hotbar>().held(), before[0]);
+        assert_eq!(held(&app), Holding::solid(rock(), SHAPE_FULL_CUBE));
     }
 }

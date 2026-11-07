@@ -15,10 +15,16 @@ and `crystals` amethyst in the rock below.
 [strata](../../mods/strata/), [glassworks](../../mods/glassworks/),
 [frost](../../mods/frost/) for the snow of the frost court,
 [crystals](../../mods/crystals/) for the amethyst ore, and it suggests
-[wanderer](../../mods/wanderer/) for its character. This Game declares no
-Material, Shape or fluid of its own; every name it uses is `<mod id>:<name>`
-from those Mods. It declares only its World (ground, sea level, relief, climate
-and the like), its Biomes and ore, and one behaviour.
+[wanderer](../../mods/wanderer/) for its character. Its one Material is its
+food, `lumen:glowberry`; every other name it uses is `<mod id>:<name>` from
+those Mods. It declares only its World (ground, sea level, relief, climate and
+the like), its Biomes and ore, its food and one behaviour.
+
+## Food
+
+`lumen:glowberry`, worth 5 hunger and glowing like the lanterns, lies on the
+surface of `garden` and `frost_court`, about one in every 20 by 20 m. Break it
+to pick it up and press G to eat it.
 
 ## Biomes
 

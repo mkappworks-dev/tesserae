@@ -144,8 +144,9 @@ fn deliberate(pad: &Gamepad, move_deadzone: f32, look_deadzone: f32) -> bool {
 fn ui_context(owner: Owner) -> bool {
     matches!(
         owner,
-        Owner::Catalogue
+        Owner::Menu
             | Owner::LayoutMenu
+            | Owner::Inventory
             | Owner::Settings
             | Owner::BindingCapture
             | Owner::Modal
@@ -304,8 +305,6 @@ type Focusables<'w, 's> = Query<
         &'static ComputedNode,
         &'static UiGlobalTransform,
         &'static InheritedVisibility,
-        Has<super::menu::CatalogueItem>,
-        Option<&'static super::menu::TileState>,
     ),
     (
         Or<(With<Button>, With<Slider>)>,
@@ -327,6 +326,7 @@ type Context<'w> = (
     Res<'w, Ownership>,
     Res<'w, super::actions::Labels>,
     Res<'w, super::settings::Settings>,
+    Option<Res<'w, ButtonInput<KeyCode>>>,
 );
 type Structure<'w, 's> = (
     Query<'w, 's, (Entity, &'static TabGroup)>,
@@ -334,11 +334,10 @@ type Structure<'w, 's> = (
     Query<'w, 's, (), With<InteractionDisabled>>,
     Sliders<'w, 's>,
     Query<'w, 's, (Entity, &'static super::settings::Operation)>,
+    Query<'w, 's, (), With<bevy::ui_widgets::TextInput>>,
 );
 struct Candidate {
     area: FocusableArea,
-    catalogue: bool,
-    selected: bool,
 }
 
 fn area(entity: Entity, node: &ComputedNode, transform: &UiGlobalTransform) -> FocusableArea {
@@ -352,17 +351,17 @@ fn area(entity: Entity, node: &ComputedNode, transform: &UiGlobalTransform) -> F
 
 fn navigate(
     mut commands: Commands,
-    (input, ownership, labels, settings): Context,
+    (input, ownership, labels, settings, keys): Context,
     (time, config): (Res<Time>, Res<AutoNavigationConfig>),
     (mut focus, mut visible): (ResMut<InputFocus>, ResMut<InputFocusVisible>),
     focusables: Focusables,
-    (groups, parents, disabled, sliders, tabs): Structure,
+    (groups, parents, disabled, sliders, tabs, typing): Structure,
     (mut repeat, mut last): (Local<Repeat>, Local<Option<Vec2>>),
 ) {
     let owner = ownership.owner;
     if !matches!(
         owner,
-        Owner::Catalogue | Owner::LayoutMenu | Owner::Settings | Owner::Modal
+        Owner::Menu | Owner::LayoutMenu | Owner::Inventory | Owner::Settings | Owner::Modal
     ) {
         *repeat = default();
         // Capture and dialogs keep the place, so focus returns to the row.
@@ -386,18 +385,30 @@ fn navigate(
                         .iter_ancestors(*entity)
                         .any(|ancestor| modal.contains(&ancestor)))
         })
-        .map(|(entity, node, transform, _, catalogue, tile)| Candidate {
+        .map(|(entity, node, transform, _)| Candidate {
             area: area(entity, node, transform),
-            catalogue,
-            selected: tile.is_some_and(|tile| tile.selected),
         })
         .collect();
     let current = focus
         .get()
         .and_then(|entity| candidates.iter().find(|c| c.area.entity == entity));
+    // Arrows move menu focus as the D-pad does, except in a text field, where they move the caret.
+    let arrow = keys
+        .filter(|_| !focus.get().is_some_and(|entity| typing.contains(entity)))
+        .and_then(|keys| {
+            [
+                (KeyCode::ArrowUp, CompassOctant::North),
+                (KeyCode::ArrowDown, CompassOctant::South),
+                (KeyCode::ArrowLeft, CompassOctant::West),
+                (KeyCode::ArrowRight, CompassOctant::East),
+            ]
+            .into_iter()
+            .find(|(key, _)| keys.just_pressed(*key))
+            .map(|(_, direction)| direction)
+        });
     if let Some(current) = current {
         *last = Some(current.area.position);
-    } else if labels.device == Device::Pad
+    } else if (labels.device == Device::Pad || arrow.is_some())
         && let Some(entity) = initial(&candidates, *last)
     {
         focus.set(entity, FocusCause::Navigated);
@@ -452,6 +463,10 @@ fn navigate(
             due
         }
     };
+    let (direction, step) = match arrow {
+        Some(arrow) => (Some(arrow), true),
+        None => (direction, step),
+    };
     let Some(current) = current else {
         return;
     };
@@ -490,7 +505,7 @@ fn navigate(
         let tab = if settings.open {
             settings.tab
         } else {
-            Tab::Catalogue
+            Tab::Behavior
         };
         let index = ORDER.iter().position(|t| *t == tab).unwrap_or(0) as i32;
         let target = ORDER[(index + shift).rem_euclid(ORDER.len() as i32) as usize];
@@ -503,7 +518,7 @@ fn navigate(
 }
 
 /// Where focus lands when a menu opens or its focused entity is rebuilt: near
-/// the last focused place, else the held Catalogue entry, else the first entry.
+/// the last focused place, else the first entry.
 fn initial(candidates: &[Candidate], last: Option<Vec2>) -> Option<Entity> {
     let reading_order = |c: &&Candidate| {
         (
@@ -524,15 +539,7 @@ fn initial(candidates: &[Candidate], last: Option<Vec2>) -> Option<Entity> {
     }
     candidates
         .iter()
-        .filter(|c| c.catalogue && c.selected)
         .min_by_key(reading_order)
-        .or_else(|| {
-            candidates
-                .iter()
-                .filter(|c| c.catalogue)
-                .min_by_key(reading_order)
-        })
-        .or_else(|| candidates.iter().min_by_key(reading_order))
         .map(|c| c.area.entity)
 }
 
@@ -792,7 +799,7 @@ mod tests {
             .resource_mut::<super::super::menu::Menu>()
             .open = true;
         app.update();
-        assert_eq!(app.world().resource::<Ownership>().owner, Owner::Catalogue);
+        assert_eq!(app.world().resource::<Ownership>().owner, Owner::Menu);
         button(&mut app, pad, GamepadButton::DPadDown, 1.0);
         button(&mut app, pad, GamepadButton::Start, 1.0);
         app.update();
@@ -801,7 +808,7 @@ mod tests {
         assert!(app.world().resource::<Actions>().cancel_requested());
         button(&mut app, pad, GamepadButton::North, 1.0);
         app.update();
-        assert!(state(&app, Action::Catalogue).started);
+        assert!(state(&app, Action::Menu).started);
         assert!(!app.world().resource::<Actions>().cancel_requested());
     }
 
@@ -861,27 +868,23 @@ mod tests {
     }
 
     #[test]
-    fn focus_returns_near_where_it_was_or_to_the_held_entry() {
-        let candidate = |index: u32, x: f32, y: f32, catalogue: bool, selected: bool| Candidate {
+    fn focus_returns_near_where_it_was_or_to_the_first_entry() {
+        let candidate = |index: u32, x: f32, y: f32| Candidate {
             area: FocusableArea {
                 entity: Entity::from_raw_u32(index).unwrap(),
                 position: Vec2::new(x, y),
                 size: Vec2::splat(10.0),
             },
-            catalogue,
-            selected,
         };
         let candidates = [
-            candidate(1, 0.0, 0.0, false, false),
-            candidate(2, 50.0, 100.0, true, false),
-            candidate(3, 10.0, 100.0, true, false),
-            candidate(4, 90.0, 200.0, true, true),
+            candidate(1, 50.0, 100.0),
+            candidate(2, 10.0, 100.0),
+            candidate(3, 90.0, 0.0),
         ];
         let entity = |index| Some(Entity::from_raw_u32(index).unwrap());
-        assert_eq!(initial(&candidates, None), entity(4));
-        assert_eq!(initial(&candidates[..3], None), entity(3));
-        assert_eq!(initial(&candidates[..1], None), entity(1));
-        assert_eq!(initial(&candidates, Some(Vec2::new(45.0, 95.0))), entity(2));
+        assert_eq!(initial(&candidates, None), entity(3));
+        assert_eq!(initial(&candidates[..2], None), entity(2));
+        assert_eq!(initial(&candidates, Some(Vec2::new(45.0, 95.0))), entity(1));
     }
 
     #[test]

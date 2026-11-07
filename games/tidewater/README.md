@@ -18,10 +18,16 @@ above the sea.
 
 [strata](../../mods/strata/), [waters](../../mods/waters/),
 [flora](../../mods/flora/), [crystals](../../mods/crystals/) (for the ore), and
-it suggests [sprite](../../mods/sprite/) for its character. This Game declares
-no Material, Shape or fluid of its own; every name it uses is `<mod id>:<name>`
+it suggests [sprite](../../mods/sprite/) for its character. Its one Material is
+its food, `tidewater:coconut`; every other name it uses is `<mod id>:<name>`
 from those Mods. It declares only its World (ground, sea level, relief, Climate
-and Biomes), an ore and one behaviour.
+and Biomes), an ore, its food and one behaviour.
+
+## Food
+
+`tidewater:coconut`, worth 6 hunger, lies on the dry surface of `lagoon` islands
+and `salt_flats`, about one in every 16 by 16 m, never under the sea. Break it
+to pick it up and press G to eat it.
 
 ## Behaviour
 

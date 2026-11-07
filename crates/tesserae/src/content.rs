@@ -10,7 +10,8 @@ pub struct MaterialPalette(pub Vec<(MaterialId, [u8; 4])>);
 #[derive(Message, Clone, Debug, Default, PartialEq, Eq)]
 pub struct MaterialTextures(pub Vec<(MaterialId, Vec<u8>)>);
 
-/// How the Client draws each declared Item, in the Server's item order.
+/// How the Client draws each Item, declared or implicit, in the Server's item
+/// order.
 #[derive(Message, Clone, Debug, Default, PartialEq)]
 pub struct ItemLooks(pub Vec<ItemLook>);
 
@@ -22,6 +23,7 @@ pub struct ItemLook {
     pub color: [u8; 4],
     /// Its Material's appearance is drawn when set.
     pub material: Option<MaterialId>,
+    pub max_stack: u32,
 }
 
 impl ItemLook {
@@ -109,15 +111,6 @@ impl ContentCatalogue {
         self.shapes.iter().find(|s| s.id == id)
     }
 
-    /// The fluid declared first.
-    pub fn first_fluid(&self) -> Option<MaterialId> {
-        self.materials
-            .iter()
-            .filter_map(|m| Some((m.fluid?, m.id)))
-            .min()
-            .map(|(_, id)| id)
-    }
-
     pub fn anything_burns(&self) -> bool {
         self.materials.iter().any(|m| m.burns)
     }
@@ -129,4 +122,30 @@ impl ContentCatalogue {
 pub struct SkyFogTarget {
     pub sky: [f32; 3],
     pub fog: [f32; 3],
+}
+
+/// The Biome at the Player's Eye, as an index into [`WorldFacts::biomes`], sent as it changes;
+/// `None` where the World has no Biomes. The Client holds no generator to work it out itself
+/// (ADR-0002).
+#[derive(Message, Clone, Copy, Debug, PartialEq)]
+pub struct HereBiome(pub Option<usize>);
+
+/// What the Server says about the open World when a session starts, for the
+/// Menu's World details.
+#[derive(Message, Clone, Debug, PartialEq)]
+pub struct WorldFacts {
+    pub name: Option<String>,
+    /// The Game's id and version.
+    pub game: Option<(String, String)>,
+    pub voxel_size_m: f32,
+    pub seed: u64,
+    /// The snapshotted Biome table's declared names, in table order.
+    pub biomes: Vec<String>,
+    /// The mode a Player new to this World starts in.
+    pub default_mode: tesserae_core::save::GameMode,
+    /// The generator version this World was made with and keeps generating by.
+    pub generator: u32,
+    /// How far apart the Climate map's temperature and humidity change, in metres.
+    pub temperature_size_m: f32,
+    pub humidity_size_m: f32,
 }

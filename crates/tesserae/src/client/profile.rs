@@ -1,5 +1,6 @@
 //! User preferences contain no World or Game identifiers.
 use super::actions::Bindings;
+use crate::server::player::SpeedLevel;
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -12,7 +13,8 @@ use std::{
 #[derive(Resource, Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub(crate) struct Preferences {
-    pub toggle_sprint: bool,
+    /// Kept until the next press of Sprint, which cycles it.
+    pub speed_level: SpeedLevel,
     pub tap_remove: bool,
     pub repeat_held: bool,
     pub sensitivity: f32,
@@ -32,7 +34,18 @@ pub(crate) struct Preferences {
     pub view: super::view::View,
     pub zoom_m: f32,
     pub layout: super::layout::LayoutPreferences,
+    /// Stills the HUD's pulses and flashes.
+    pub reduced_motion: bool,
+    /// Percent of each font's size, one of [`TEXT_SCALES`].
+    pub text_scale: u32,
+    /// Menus over a solid background instead of the dimmed World.
+    pub solid_background: bool,
+    /// Full-ink secondary text, opaque fills, brighter edges and a thicker
+    /// focus ring. Absent from a profile saved before it, which reads as off.
+    pub stronger_contrast: bool,
 }
+
+pub(super) const TEXT_SCALES: [u32; 5] = [100, 125, 150, 175, 200];
 /// Controller feel, kept apart from the mouse so neither overwrites the other.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -90,7 +103,7 @@ pub(super) const PAD_DEADZONE: std::ops::RangeInclusive<f32> = 0.05..=0.5;
 impl Default for Preferences {
     fn default() -> Self {
         Self {
-            toggle_sprint: true,
+            speed_level: SpeedLevel::Walk,
             tap_remove: false,
             repeat_held: false,
             sensitivity: 0.003,
@@ -106,6 +119,10 @@ impl Default for Preferences {
             view: default(),
             zoom_m: super::view::DEFAULT_ZOOM_M,
             layout: default(),
+            reduced_motion: false,
+            text_scale: 100,
+            solid_background: false,
+            stronger_contrast: false,
         }
     }
 }
@@ -129,12 +146,22 @@ impl Store {
     pub fn load(path: PathBuf) -> (Self, Bindings, Preferences) {
         let mut bindings = Bindings::default();
         let mut preferences = Preferences::default();
-        let result = fs::read(&path).and_then(|bytes| decode(&bytes));
+        let read = fs::read(&path);
+        let result = read
+            .as_ref()
+            .map_err(clone_error)
+            .and_then(|bytes| decode(bytes));
         let error = match result {
             Ok((loaded, prefs)) => {
                 bindings = loaded;
                 preferences = prefs;
-                None
+                let bytes = read.as_deref().unwrap_or_default();
+                let older = version(bytes).is_some_and(|v| v < VERSION);
+                // Migrated once: the old file is kept beside it and the new one written.
+                older
+                    .then(|| migrate_file(&path, bytes, &bindings, &preferences))
+                    .and_then(Result::err)
+                    .map(|e| format!("Could not update controls: {e}"))
             }
             Err(error) if error.kind() == io::ErrorKind::NotFound => None,
             Err(error) => Some(format!(
@@ -170,10 +197,66 @@ impl Store {
         result
     }
 }
+/// Version 2 replaced the Catalogue key with the Menu and moved Help off I.
+/// Version 3 replaced the Hold or Toggle sprint choice with a speed level.
+const VERSION: u32 = 3;
+
+/// Version-1 defaults that version 2 gives to something else. A binding still
+/// equal to one of them was never the player's choice, so it takes the new
+/// default; any other binding is kept.
+const RETIRED_DEFAULTS: [(&str, KeyCode); 2] =
+    [("catalogue", KeyCode::Tab), ("help", KeyCode::KeyI)];
+
+fn clone_error(error: &io::Error) -> io::Error {
+    io::Error::new(error.kind(), error.to_string())
+}
+
+fn version(bytes: &[u8]) -> Option<u32> {
+    serde_json::from_slice::<serde_json::Value>(bytes)
+        .ok()?
+        .get("version")?
+        .as_u64()
+        .map(|v| v as u32)
+}
+
+fn migrate_file(
+    path: &Path,
+    old: &[u8],
+    bindings: &Bindings,
+    preferences: &Preferences,
+) -> io::Result<()> {
+    let kept = path.with_extension(format!("v{}.json.bak", version(old).unwrap_or(1)));
+    if !kept.exists() {
+        atomic_write(&kept, old)?;
+    }
+    atomic_write(path, &encode(bindings, preferences)?)
+}
+
 fn decode(bytes: &[u8]) -> io::Result<(Bindings, Preferences)> {
-    let document: Document = serde_json::from_slice(bytes).map_err(io::Error::other)?;
-    if document.version != 1 {
-        return Err(io::Error::other("unsupported user profile version"));
+    let mut document: Document = serde_json::from_slice(bytes).map_err(io::Error::other)?;
+    if document.version < 3 {
+        // Hold and Toggle both asked for the one sprint there was.
+        document.preferences.speed_level = SpeedLevel::One;
+    }
+    match document.version {
+        1 => {
+            use super::actions::{Binding, Modifier, Trigger};
+            for (id, old) in RETIRED_DEFAULTS {
+                let default = serde_json::to_value([
+                    Some(Binding {
+                        trigger: Trigger::Key(old),
+                        modifier: Modifier::None,
+                    }),
+                    None,
+                ])
+                .map_err(io::Error::other)?;
+                if document.bindings.get(id) == Some(&default) {
+                    document.bindings.remove(id);
+                }
+            }
+        }
+        2 | VERSION => {}
+        _ => return Err(io::Error::other("unsupported user profile version")),
     }
     let p = &document.preferences;
     let pad = &p.pad;
@@ -191,6 +274,7 @@ fn decode(bytes: &[u8]) -> io::Result<(Bindings, Preferences)> {
         || !TOUCH_OPACITY.contains(&p.touch.opacity)
         || !super::view::ZOOM_M.contains(&p.zoom_m)
         || !p.layout.valid()
+        || !TEXT_SCALES.contains(&p.text_scale)
     {
         return Err(io::Error::other("invalid preference value"));
     }
@@ -273,7 +357,7 @@ fn encode(bindings: &Bindings, preferences: &Preferences) -> io::Result<Vec<u8>>
         Ok(entries)
     };
     serde_json::to_vec_pretty(&Document {
-        version: 1,
+        version: VERSION,
         bindings: entries(&bindings.keyboard)?,
         pad_bindings: entries(&bindings.pad)?,
         preferences: preferences.clone(),
@@ -345,6 +429,24 @@ mod tests {
     use super::super::actions::Action;
     use super::*;
     #[test]
+    fn stronger_contrast_round_trips_and_a_profile_without_it_reads_as_off() {
+        let on = Preferences {
+            stronger_contrast: true,
+            ..default()
+        };
+        let (_, saved) = decode(&encode(&Bindings::default(), &on).unwrap()).unwrap();
+        assert!(saved.stronger_contrast);
+
+        let mut document: serde_json::Value =
+            serde_json::from_slice(&encode(&Bindings::default(), &on).unwrap()).unwrap();
+        document["preferences"]
+            .as_object_mut()
+            .unwrap()
+            .remove("stronger_contrast");
+        let (_, older) = decode(&serde_json::to_vec(&document).unwrap()).unwrap();
+        assert!(!older.stronger_contrast, "an older profile keeps it off");
+    }
+    #[test]
     fn a_new_default_never_displaces_an_existing_user_binding() {
         let mut document: serde_json::Value =
             serde_json::from_slice(&encode(&Bindings::default(), &Preferences::default()).unwrap())
@@ -361,6 +463,81 @@ mod tests {
             bindings.keyboard[&Action::Forward][0].unwrap().trigger,
             super::super::actions::Trigger::Key(KeyCode::KeyP)
         );
+    }
+
+    fn key(code: KeyCode) -> [Option<super::super::actions::Binding>; 2] {
+        use super::super::actions::{Binding, Modifier, Trigger};
+        [
+            Some(Binding {
+                trigger: Trigger::Key(code),
+                modifier: Modifier::None,
+            }),
+            None,
+        ]
+    }
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "tesserae-profile-{name}-{}",
+            tesserae_core::save::WorldId::new().as_str()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        dir.join("user-profile.json")
+    }
+
+    #[test]
+    fn a_fresh_profile_gets_the_new_key_map() {
+        let (_, bindings, _) = Store::load(scratch("fresh"));
+        for (action, code) in [
+            (Action::Menu, KeyCode::Tab),
+            (Action::Inventory, KeyCode::KeyI),
+            (Action::SearchCatalogue, KeyCode::KeyC),
+            (Action::Settings, KeyCode::F10),
+            (Action::Flip, KeyCode::KeyE),
+            (Action::Layout, KeyCode::KeyL),
+            (Action::Use, KeyCode::KeyG),
+        ] {
+            assert_eq!(bindings.keyboard[&action], key(code), "{action:?}");
+        }
+        assert_ne!(bindings.keyboard[&Action::Help], key(KeyCode::KeyI));
+    }
+
+    #[test]
+    fn a_version_1_profile_moves_old_defaults_once_and_keeps_its_own_choices() {
+        let path = scratch("v1");
+        let v1 = br#"{"version":1,"bindings":{
+            "catalogue":[{"trigger":{"key":"Tab"},"modifier":"none"},null],
+            "help":[{"trigger":{"key":"KeyI"},"modifier":"none"},null],
+            "flip":[{"trigger":{"key":"KeyK"},"modifier":"none"},null]
+        },"preferences":{"invert_y":true}}"#;
+        fs::write(&path, v1).unwrap();
+        let (store, bindings, preferences) = Store::load(path.clone());
+        assert!(store.error.is_none(), "{:?}", store.error);
+        assert!(preferences.invert_y);
+        assert_eq!(bindings.keyboard[&Action::Menu], key(KeyCode::Tab));
+        assert_eq!(
+            bindings.keyboard[&Action::Help],
+            Bindings::default().keyboard[&Action::Help],
+            "an old default takes the new one"
+        );
+        assert_eq!(bindings.keyboard[&Action::Inventory], key(KeyCode::KeyI));
+        assert_eq!(
+            bindings.keyboard[&Action::Flip],
+            key(KeyCode::KeyK),
+            "a binding the player chose is kept"
+        );
+        let saved: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert_eq!(saved["version"], 3, "migrated once, on first load");
+        let backup = fs::read(path.with_extension("v1.json.bak")).unwrap();
+        assert_eq!(backup, v1, "the version-1 file is kept");
+
+        // A version-2 choice of I for Help is the player's own now.
+        let mut chosen = bindings.clone();
+        chosen.keyboard.insert(Action::Help, key(KeyCode::KeyH));
+        let mut store = store;
+        store.save(&chosen, &preferences).unwrap();
+        let (_, reloaded, _) = Store::load(path);
+        assert_eq!(reloaded.keyboard[&Action::Help], key(KeyCode::KeyH));
     }
 
     #[test]
@@ -412,15 +589,37 @@ mod tests {
     }
 
     #[test]
-    fn sprint_toggles_by_default_but_a_saved_hold_choice_is_kept() {
+    fn a_fresh_profile_walks_and_an_old_hold_or_toggle_choice_becomes_speed_one() {
         let missing =
             std::env::temp_dir().join(format!("tesserae-no-profile-{}", std::process::id()));
         let (_, _, fresh) = Store::load(missing);
-        assert!(fresh.toggle_sprint);
-        let (_, unset) = decode(br#"{"version":1,"preferences":{"invert_y":true}}"#).unwrap();
-        assert!(unset.toggle_sprint);
-        let (_, held) = decode(br#"{"version":1,"preferences":{"toggle_sprint":false}}"#).unwrap();
-        assert!(!held.toggle_sprint);
+        assert_eq!(fresh.speed_level, SpeedLevel::Walk);
+        for old in [
+            r#"{"version":1,"preferences":{"invert_y":true}}"#,
+            r#"{"version":1,"preferences":{"toggle_sprint":false}}"#,
+            r#"{"version":2,"preferences":{"toggle_sprint":true}}"#,
+        ] {
+            let (_, migrated) = decode(old.as_bytes()).unwrap();
+            assert_eq!(migrated.speed_level, SpeedLevel::One, "{old}");
+        }
+        let (_, kept) = decode(br#"{"version":3,"preferences":{"speed_level":"three"}}"#).unwrap();
+        assert_eq!(kept.speed_level, SpeedLevel::Three, "a v3 choice is kept");
+    }
+
+    #[test]
+    fn a_version_2_profile_is_migrated_once_with_its_bindings_untouched() {
+        let path = scratch("v2");
+        let v2 = br#"{"version":2,"bindings":{
+            "help":[{"trigger":{"key":"KeyI"},"modifier":"none"},null]
+        },"preferences":{"toggle_sprint":false}}"#;
+        fs::write(&path, v2).unwrap();
+        let (store, bindings, preferences) = Store::load(path.clone());
+        assert!(store.error.is_none(), "{:?}", store.error);
+        assert_eq!(preferences.speed_level, SpeedLevel::One);
+        assert_eq!(bindings.keyboard[&Action::Help], key(KeyCode::KeyI));
+        assert_eq!(fs::read(path.with_extension("v2.json.bak")).unwrap(), v2);
+        let (_, _, again) = Store::load(path);
+        assert_eq!(again.speed_level, SpeedLevel::One);
     }
 
     #[test]

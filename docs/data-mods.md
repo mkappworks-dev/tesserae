@@ -37,11 +37,11 @@ soil = "plain:rock"
 surface = "plain:rock"
 ```
 
-Material rows require the six fields above and accept optional `remove-time-s`.
-`occlusion` is `opaque`, `same-material` or `never`; `render` is `opaque`,
-`blend` or `cutout`. Appearance colours are four RGBA bytes; Material names in
-appearance are local, while ground names include the Mod id. Both formats use
-the same content bounds and validation.
+Material rows require the six fields above and accept optional `remove-time-s`
+and `contact-damage-per-s`. `occlusion` is `opaque`, `same-material` or `never`;
+`render` is `opaque`, `blend` or `cutout`. Appearance colours are four RGBA
+bytes; Material names in appearance are local, while ground names include the
+Mod id. Both formats use the same content bounds and validation.
 
 An appearance row may add `texture = "art/rock.png"`: a PNG inside the Mod
 directory, exactly 48 by 16 pixels (three 16 by 16 faces), used for Material
@@ -71,7 +71,7 @@ Declaration, so bounds, Game-only restrictions and per-Mod limits are identical.
 
 The complete field list, with a Declaration that uses every table, is in the
 [authoring guide](authoring-guide.md#the-declaration-schema). Only Games may
-declare `world`, `view` and `tools`, except that a Mod may supply
+declare `world`, `view`, `tools` and `survival`, except that a Mod may supply
 `world.character` and nothing else of `world`
 ([ADR-0021](adr/0021-a-mod-may-supply-the-character.md)); a World has one
 character source, and two fail the load naming both.
@@ -114,6 +114,17 @@ switches caves off in that Biome. Omitted, the Biome keeps the World's caves.
 Unlike `ground`, it blends smoothly across a Biome's border, so there is no wall
 where a cave field meets a solid one. It does nothing in a World without
 `[world.caves]`, and caves still only turn solid into air.
+
+A Biome row may also add `surface-features`, at most four
+`{ material, spacing-m }` entries: a solid Material by full name from any Mod,
+and the mean distance between two of them in metres, from 4 to 1024. The Engine
+stands one, deterministically from the World seed, about once in every
+`spacing-m` by `spacing-m` metres of the Biome's surface at any Voxel size, one
+Voxel above a column whose top is a full Voxel of the Biome's surface Material
+with air above it: never under water or another fluid, on a smoothed stair or
+slab, or in a cave mouth. Removing one drops its Item like any Voxel. The coarse
+LOD levels leave them out. The World's saved Biome table carries them, so a
+World saved before a Game added features keeps its bare ground.
 
 Tables that are absent change nothing: a World with no Biomes generates as it
 always did.
@@ -255,4 +266,6 @@ never opened, written or checked against the build.
 An item row is `name`, `size-m` (the dropped cube's edge, 0.05 to 0.5 m),
 `color` and an optional `material`: a solid Material, `<mod id>:<name>`, whose
 removed Voxels drop it. Any Mod may declare items, at most 64 per Mod and 256 in
-a World; two items may not name one Material. Lines 0.1 and 0.2 declare none.
+a World; two items may not name one Material. Lines 0.1 and 0.2 declare none. An
+item may also set `max-stack`, the most one Inventory slot holds (1 to 64,
+omitted is 64), and `food`, the hunger eating one restores.

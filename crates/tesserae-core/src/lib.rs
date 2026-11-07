@@ -6,6 +6,7 @@
 //! `Boundaries` job. See `docs/architecture.md`.
 
 pub mod agenda;
+pub mod biome_edits;
 pub mod chunk;
 pub mod climate;
 pub mod collide;
@@ -15,6 +16,7 @@ pub mod fire;
 pub mod flow;
 pub mod fluid;
 pub mod immersion;
+pub mod inventory;
 pub mod layout;
 pub mod light;
 pub mod lod;
@@ -27,6 +29,7 @@ pub mod reaction;
 pub mod save;
 pub mod seed;
 pub mod shape;
+pub mod survival;
 pub mod tables;
 pub mod testgen;
 pub mod visibility;
@@ -36,7 +39,8 @@ pub mod worldgen;
 pub use chunk::{CHUNK_SIZE, CHUNK_VOLUME, Chunk};
 pub use climate::{
     Biome, BiomeId, BiomeName, BiomeTable, Climate, ClimateParams, MAX_BIOME_NAME_BYTES,
-    MAX_BIOMES, MAX_CAVE_SCALE, SkyFog, SkyFogBlend,
+    MAX_BIOMES, MAX_CAVE_SCALE, MAX_SURFACE_FEATURES, SURFACE_FEATURE_SPACING_M, SkyFog,
+    SkyFogBlend, SurfaceFeature, SurfaceFeatures,
 };
 pub use combustion::{Burn, CombustionDef, CombustionError, CombustionTable, Heat, MAX_HEAT};
 pub use fluid::{FluidDef, FluidError, FluidTable};
@@ -63,6 +67,7 @@ pub use shape::{
     Arm, CollisionBox, ConnectDef, Connections, MAX_SHAPED_PER_CHUNK, NodeBox, Orientation,
     SHAPE_POST, SHAPE_SLAB, SHAPE_STAIR, ShapeDef, ShapeError, ShapeTable,
 };
+pub use survival::SurvivalRules;
 pub use tables::{PlaceFault, Tables};
 pub use voxel::{AIR, MaterialId, SHAPE_FULL_CUBE, ShapeId, Voxel};
 pub use worldgen::{

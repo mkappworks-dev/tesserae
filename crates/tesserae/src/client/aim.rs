@@ -61,11 +61,11 @@ fn crosshair(
     target: Res<Target>,
     sent: Res<Sent>,
     time: Res<Time>,
-    (hotbar, layout): (Res<Hotbar>, Option<Res<super::layout::LayoutMode>>),
     mut crosshair: Query<&mut TextColor, With<super::edit::Crosshair>>,
+    dead: Option<Res<super::death::Dead>>,
 ) {
     let current = target.current(&sent, time.elapsed_secs_f64());
-    let alpha = if !super::edit::building(&hotbar, layout.as_deref()) {
+    let alpha = if !super::death::alive(dead) {
         0.0
     } else if target.0.blocked && current {
         super::edit::BLOCKED_CROSSHAIR_ALPHA
@@ -73,9 +73,13 @@ fn crosshair(
         super::edit::CROSSHAIR_ALPHA
     };
     let refused = current && target.0.use_aim.is_some_and(|aim| aim.is_err());
-    let (green, blue) = if refused { (0.4, 0.35) } else { (1.0, 1.0) };
+    let tint = if refused {
+        super::theme::RETICLE_REFUSED
+    } else {
+        super::theme::RETICLE
+    };
     for mut colour in &mut crosshair {
-        colour.set_if_neq(TextColor(Color::srgba(1.0, green, blue, alpha)));
+        colour.set_if_neq(TextColor(tint.with_alpha(alpha)));
     }
 }
 pub(super) fn report(
@@ -140,14 +144,9 @@ fn outline(
     time: Res<Time>,
     menu: Res<Menu>,
     outlines: Query<(Entity, &Outline)>,
-    (settings, hotbar, layout): (
-        Option<Res<super::settings::Settings>>,
-        Res<Hotbar>,
-        Option<Res<super::layout::LayoutMode>>,
-    ),
+    settings: Option<Res<super::settings::Settings>>,
 ) {
-    let wanted = (super::edit::building(&hotbar, layout.as_deref())
-        && !menu.open
+    let wanted = (!menu.open
         && !settings.is_some_and(|s| s.open)
         && target.current(&sent, time.elapsed_secs_f64()))
     .then_some(target.0.outline)
@@ -178,7 +177,7 @@ mod tests {
 
     fn holding_fire() -> Hotbar {
         let mut hotbar = Hotbar::default();
-        hotbar.slots = [Holding::Fire; super::super::edit::SLOT_KEYS.len()];
+        hotbar.outside = Some(Holding::Fire);
         hotbar
     }
 
@@ -206,11 +205,15 @@ mod tests {
         app.world_mut().resource_mut::<Target>().0.use_aim = None;
         app.update();
         let colour = app.world().get::<TextColor>(id).unwrap().0.to_srgba();
-        assert!(colour.green > 0.9 && colour.blue > 0.9);
+        assert_eq!(
+            colour.with_alpha(1.0),
+            super::super::theme::RETICLE.to_srgba(),
+            "the reticle's own tint again"
+        );
     }
 
     #[test]
-    fn free_roaming_shows_no_crosshair_or_outline_until_something_is_held() {
+    fn an_empty_hand_still_shows_the_crosshair_and_the_outline_of_what_it_would_break() {
         let mut app = App::new();
         app.init_resource::<Time>()
             .init_resource::<Target>()
@@ -238,8 +241,9 @@ mod tests {
                 .iter(app.world())
                 .count()
         };
-        assert_eq!(alpha(&app), 0.0);
-        assert_eq!(outlines(&mut app), 0);
+        assert_eq!(app.world().resource::<Hotbar>().held(), Holding::Empty);
+        assert!(alpha(&app) > 0.0);
+        assert_eq!(outlines(&mut app), 1);
         *app.world_mut().resource_mut::<Hotbar>() = holding_fire();
         app.update();
         assert!(alpha(&app) > 0.0);

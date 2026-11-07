@@ -190,6 +190,8 @@ pub(super) struct Item {
     size_m: f32,
     color: [u8; 4],
     material: Option<String>,
+    max_stack: Option<u32>,
+    food: Option<f32>,
 }
 
 impl From<Item> for content::ItemDef {
@@ -200,6 +202,8 @@ impl From<Item> for content::ItemDef {
             size_m: i.size_m,
             color: crate::bindings::tesserae::mods::types::Srgba { r, g, b, a },
             material: i.material,
+            max_stack: i.max_stack,
+            food: i.food,
         }
     }
 }
@@ -216,6 +220,16 @@ pub(super) struct Biome {
     sky_fog: Option<SkyFog>,
 
     cave_scale: Option<f32>,
+
+    #[serde(default)]
+    surface_features: Vec<SurfaceFeature>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+struct SurfaceFeature {
+    material: String,
+    spacing_m: f32,
 }
 
 #[derive(Deserialize)]
@@ -257,6 +271,15 @@ impl From<Biome> for content::BiomeDef {
             sky_fog: b.sky_fog.map(Into::into),
 
             cave_scale: b.cave_scale,
+
+            surface_features: b
+                .surface_features
+                .into_iter()
+                .map(|f| content::SurfaceFeature {
+                    material: f.material,
+                    spacing_m: f.spacing_m,
+                })
+                .collect(),
         }
     }
 }

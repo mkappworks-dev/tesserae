@@ -80,24 +80,22 @@ pub struct CameraHome(pub Transform);
 /// else on screen says so, which reads as the mouse not working at all.
 #[derive(Component)]
 struct CursorHint;
-#[derive(Resource, Default)]
-pub(super) struct Sprint(pub bool);
 /// Controller latches: a thumb cannot hold a stick click while pushing that
 /// stick, or hold B while steering look with the same thumb.
 #[derive(Resource, Default)]
 pub(super) struct PadLatch {
-    pub sprint: bool,
     pub crouch: bool,
 }
 
 pub(super) fn plugin(app: &mut App) {
-    app.init_session_state::<Sprint>()
-        .init_session_state::<PadLatch>();
+    app.init_session_state::<PadLatch>();
     app.add_session_systems(
         Update,
         grab_cursor
             .run_if(crate::server::persistence::playing)
             .run_if(super::menu::closed)
+            .run_if(super::inventory_window::closed)
+            .run_if(super::death::alive)
             .after(super::menu::toggle),
     );
     let input = (
@@ -119,11 +117,8 @@ fn spawn_hint(mut commands: Commands) {
     commands.spawn((
         CursorHint,
         Text::new("Click to look around\nEsc to release the cursor"),
-        TextFont {
-            font_size: bevy::text::FontSize::Px(14.0),
-            ..default()
-        },
-        TextColor(Color::srgba(1.0, 1.0, 1.0, 0.7)),
+        super::theme::font(super::theme::TEXT_SMALL),
+        TextColor(super::theme::READOUT),
         Node {
             position_type: PositionType::Absolute,
             left: Val::Px(16.0),
@@ -139,12 +134,17 @@ fn show_hint(
     bindings: Res<super::actions::Bindings>,
     labels: Res<super::actions::Labels>,
     touch: Res<super::touch::TouchFrame>,
+    covers: super::menu::Covers,
+    dead: Option<Res<super::death::Dead>>,
 ) {
-    let wanted = if cursor.grab_mode == CursorGrabMode::None {
-        Visibility::Inherited
-    } else {
-        Visibility::Hidden
-    };
+    // The Menu, Settings, Inventory and death screen free the cursor too, but say where to go themselves.
+    let covered = super::menu::covered(&covers);
+    let wanted =
+        if cursor.grab_mode == CursorGrabMode::None && !covered && super::death::alive(dead) {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        };
     // Through change detection rather than unconditionally, so the UI is not
     // re-laid out every frame.
     let (mut visibility, mut text) = hint.into_inner();
@@ -263,8 +263,8 @@ pub(super) fn look(
 
 fn fly(
     mut commands: Commands,
-    preferences: Res<super::profile::Preferences>,
-    (mut sprint, mut latch): (ResMut<Sprint>, ResMut<PadLatch>),
+    mut preferences: ResMut<super::profile::Preferences>,
+    (mut latch, mut pending): (ResMut<PadLatch>, ResMut<super::view::PendingSave>),
     (ownership, body): (
         Res<super::input::Ownership>,
         Res<super::pose::PublishedBody>,
@@ -329,43 +329,19 @@ fn fly(
     // Held Jump is a swim stroke, and the lift out of the water carries on until
     // the feet clear it; on land a hold must stay one hop per press.
     let stroking = physics && (body.0.swimming || (body.0.immersion.is_some() && !body.0.grounded));
-    let sprint_state = actions.state(Action::Sprint);
-    if playing && sprint_state.started && sprint_state.from_pad {
-        latch.sprint = true;
+    // A Sprint press from any device steps the level, which is kept until the
+    // next press and saved with the profile.
+    if playing && actions.started(Action::Sprint) {
+        let level = preferences.speed_level.next();
+        preferences.speed_level = level;
+        pending.0 = Some(super::view::SAVE_AFTER_S);
+        super::menu_ui::notify(&mut commands, level.label(), super::menu_ui::Tone::Change);
     }
-    let crouching = latch.crouch || (physics && held_descend);
-    if !playing || actions.started(Action::Respawn) || stick == Vec2::ZERO || crouching {
-        latch.sprint = false;
-    }
-
-    if !playing || actions.started(Action::Respawn) {
-        sprint.0 = false;
-    } else if preferences.toggle_sprint && sprint_state.started && !sprint_state.from_pad {
-        sprint.0 = !sprint.0;
-        super::menu_ui::notify(
-            &mut commands,
-            if sprint.0 {
-                "Sprint enabled"
-            } else {
-                "Sprint disabled"
-            },
-            super::menu_ui::Tone::Change,
-        );
-    }
-    if !preferences.toggle_sprint {
-        sprint.0 = false;
-    }
-    let sprinting = latch.sprint
-        || if preferences.toggle_sprint {
-            sprint.0
-        } else {
-            actions.held(Action::Sprint)
-        };
     intents.write(MovementIntent {
         cancelled: !playing || actions.started(Action::Respawn),
         direction,
         speed_mps: fly.speed,
-        sprint: sprinting,
+        speed: preferences.speed_level,
         crouch: playing && (held_descend || latch.crouch),
         yaw: fly.yaw,
         pitch: fly.pitch,
@@ -501,29 +477,22 @@ mod tests {
     }
 
     #[test]
-    fn a_stick_click_latches_sprint_until_the_stick_rests() {
-        use crate::server::player::MovementMode;
+    fn a_stick_click_cycles_the_speed_level_and_the_level_stays_when_the_stick_rests() {
+        use crate::server::player::{MovementMode, SpeedLevel};
         let mut app = pad_app(MovementMode::Physics);
         let forward = Vec2::new(0.0, 0.6);
-        assert!(frame(&mut app, &[GamepadButton::LeftThumb], forward).sprint);
-        let latched = frame(&mut app, &[], forward);
-        assert!(latched.sprint);
-        assert!((latched.direction.length() - 0.6).abs() < 1e-5);
-        assert!(!frame(&mut app, &[], Vec2::ZERO).sprint);
-        assert!(!frame(&mut app, &[], forward).sprint);
-
-        let jump = frame(&mut app, &[GamepadButton::South], forward);
-        assert!(jump.jump && (jump.direction.length() - 0.6).abs() < 1e-5);
-
-        frame(&mut app, &[GamepadButton::LeftThumb], forward);
-        app.world_mut()
-            .resource_mut::<super::super::input::Ownership>()
-            .owner = super::super::input::Owner::Catalogue;
-        assert!(!frame(&mut app, &[], forward).sprint);
-        app.world_mut()
-            .resource_mut::<super::super::input::Ownership>()
-            .owner = super::super::input::Owner::Gameplay;
-        assert!(!frame(&mut app, &[], forward).sprint);
+        assert_eq!(
+            frame(&mut app, &[GamepadButton::LeftThumb], forward).speed,
+            SpeedLevel::One
+        );
+        let kept = frame(&mut app, &[], forward);
+        assert_eq!(kept.speed, SpeedLevel::One);
+        assert!((kept.direction.length() - 0.6).abs() < 1e-5);
+        assert_eq!(frame(&mut app, &[], Vec2::ZERO).speed, SpeedLevel::One);
+        assert_eq!(
+            frame(&mut app, &[GamepadButton::LeftThumb], forward).speed,
+            SpeedLevel::Two
+        );
     }
 
     #[test]
@@ -597,7 +566,7 @@ mod tests {
         assert_eq!(intent.direction, Vec3::NEG_Y);
         app.world_mut()
             .resource_mut::<super::super::input::Ownership>()
-            .owner = super::super::input::Owner::Catalogue;
+            .owner = super::super::input::Owner::Menu;
         app.update();
         let intent = app
             .world_mut()
@@ -610,8 +579,7 @@ mod tests {
         assert_eq!(intent.direction, Vec3::ZERO);
     }
 
-    #[test]
-    fn toggle_sprint_survives_a_stop_and_clears_on_menu_and_respawn() {
+    fn shift_app() -> App {
         let mut app = App::new();
         app.add_plugins(super::super::actions::test_plugin)
             .insert_resource(super::super::input::Ownership::playing())
@@ -621,51 +589,113 @@ mod tests {
             .add_systems(Update, fly);
         app.world_mut()
             .spawn((Transform::default(), FlyCamera::default()));
-        app.world_mut()
-            .resource_mut::<super::super::profile::Preferences>()
-            .toggle_sprint = true;
+        app
+    }
+
+    fn tap(app: &mut App, key: KeyCode) -> MovementIntent {
         app.world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()
-            .press(KeyCode::ShiftRight);
+            .press(key);
         app.update();
-        assert!(app.world().resource::<Sprint>().0);
+        let mut keys = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+        keys.release(key);
+        keys.clear();
+        app.world_mut()
+            .resource_mut::<Messages<MovementIntent>>()
+            .drain()
+            .last()
+            .unwrap()
+    }
+
+    #[test]
+    fn shift_cycles_walk_and_three_speeds_and_the_level_stays_until_the_next_press() {
+        use crate::server::player::SpeedLevel::*;
+        let mut app = shift_app();
+        let mut seen = Vec::new();
+        for _ in 0..5 {
+            seen.push(tap(&mut app, KeyCode::ShiftLeft).speed);
+        }
+        assert_eq!(seen, [One, Two, Three, Walk, One]);
         let toasts: Vec<_> = app
             .world_mut()
             .query::<&Text>()
             .iter(app.world())
             .map(|text| text.0.clone())
             .collect();
-        assert_eq!(toasts, ["Sprint enabled"]);
-        app.world_mut()
-            .resource_mut::<ButtonInput<KeyCode>>()
-            .release(KeyCode::ShiftRight);
-        app.world_mut()
-            .resource_mut::<ButtonInput<KeyCode>>()
-            .clear();
+        assert_eq!(toasts, ["Speed 1"], "each press names the new level");
+        // Nothing but another press changes it, a stop and a respawn included.
         app.update();
-        assert!(app.world().resource::<Sprint>().0);
+        let after = app
+            .world_mut()
+            .resource_mut::<Messages<MovementIntent>>()
+            .drain()
+            .last()
+            .unwrap();
+        assert_eq!(after.speed, One);
+        assert_eq!(tap(&mut app, KeyCode::KeyR).speed, One);
+        assert_eq!(
+            tap(&mut app, KeyCode::ShiftRight).speed,
+            Two,
+            "either Shift"
+        );
+    }
+
+    #[test]
+    fn a_held_shift_steps_once_and_a_menu_press_does_not_step() {
+        use crate::server::player::SpeedLevel::*;
+        let mut app = shift_app();
         app.world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()
-            .press(KeyCode::KeyR);
-        app.update();
-        assert!(!app.world().resource::<Sprint>().0);
+            .press(KeyCode::ShiftLeft);
+        for _ in 0..4 {
+            app.update();
+            app.world_mut()
+                .resource_mut::<ButtonInput<KeyCode>>()
+                .clear();
+        }
+        let speed = app
+            .world()
+            .resource::<super::super::profile::Preferences>()
+            .speed_level;
+        assert_eq!(speed, One, "holding is not repeating");
+        app.world_mut()
+            .resource_mut::<super::super::input::Ownership>()
+            .owner = super::super::input::Owner::Menu;
         app.world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()
             .release_all();
         app.world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()
             .clear();
-        app.update();
+        assert_eq!(tap(&mut app, KeyCode::ShiftLeft).speed, One);
+    }
+
+    #[test]
+    fn the_level_is_saved_with_the_profile_and_comes_back_after_a_restart() {
+        use super::super::profile::{Preferences, Store};
+        use crate::server::player::SpeedLevel;
+        let root = std::env::temp_dir().join(format!(
+            "tesserae-speed-{}",
+            tesserae_core::save::WorldId::new().as_str()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("user-profile.json");
+        let (store, bindings, preferences) = Store::load(path.clone());
+        let mut app = shift_app();
+        app.insert_resource(store)
+            .insert_resource(bindings)
+            .insert_resource(preferences)
+            .add_systems(Update, super::super::view::save)
+            .init_resource::<Time>();
+        tap(&mut app, KeyCode::ShiftLeft);
+        tap(&mut app, KeyCode::ShiftLeft);
         app.world_mut()
-            .resource_mut::<ButtonInput<KeyCode>>()
-            .press(KeyCode::ShiftLeft);
+            .resource_mut::<Time>()
+            .advance_by(std::time::Duration::from_secs(2));
         app.update();
-        assert!(app.world().resource::<Sprint>().0);
-        app.world_mut()
-            .resource_mut::<super::super::input::Ownership>()
-            .owner = super::super::input::Owner::Catalogue;
-        app.update();
-        assert!(!app.world().resource::<Sprint>().0);
+        let (_, _, reloaded): (_, _, Preferences) = Store::load(path);
+        assert_eq!(reloaded.speed_level, SpeedLevel::Two);
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -673,7 +703,6 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(super::super::actions::test_plugin)
             .init_resource::<super::super::menu::Menu>()
-            .init_resource::<super::super::menu::PointerState>()
             .insert_resource(super::super::input::Ownership::playing())
             .init_resource::<Time>()
             .init_resource::<super::super::pose::PublishedBody>()
@@ -738,10 +767,14 @@ mod tests {
             .resource_mut::<ButtonInput<KeyCode>>()
             .clear();
         app.update();
+        // Escape resumes; Tab inside the Menu only moves focus.
         app.world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()
-            .press(KeyCode::Tab);
+            .press(KeyCode::Escape);
         app.update();
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .release(KeyCode::Escape);
         app.world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()
             .clear();

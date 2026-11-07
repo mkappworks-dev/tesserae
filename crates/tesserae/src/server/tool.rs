@@ -10,6 +10,7 @@
 
 use bevy::prelude::*;
 
+use super::death::PlayerIntents;
 use crate::session::SessionApp;
 use tesserae_core::collide::{RayHit, VoxelVolume};
 use tesserae_core::{NodeBox, Tables, Voxel};
@@ -73,17 +74,23 @@ pub enum UseRefusal {
     /// The struck Voxel's Chunk is not held.
     NotLoaded,
     UnknownTool,
+    /// Eating with hunger full.
+    NotHungry,
+    /// Eating with no food in the selected slot.
+    NotFood,
 }
 
 impl UseRefusal {
     pub fn message(self) -> &'static str {
         match self {
-            UseRefusal::OutOfReach => "nothing in reach",
-            UseRefusal::OriginTooFar => "too far from where the server has you",
-            UseRefusal::Blocked => "something is in the way",
-            UseRefusal::TargetChanged => "that changed; aim again",
-            UseRefusal::NotLoaded => "that part of the world is not loaded",
-            UseRefusal::UnknownTool => "that tool is not available",
+            UseRefusal::OutOfReach => "Nothing in reach.",
+            UseRefusal::OriginTooFar => "Too far from where the Server has you.",
+            UseRefusal::Blocked => "Something is in the way.",
+            UseRefusal::TargetChanged => "That changed. Aim again.",
+            UseRefusal::NotLoaded => "That part of the World is not loaded.",
+            UseRefusal::UnknownTool => "That Tool is not available.",
+            UseRefusal::NotHungry => "You aren’t hungry.",
+            UseRefusal::NotFood => "Hold food in the selected hotbar slot to eat.",
         }
     }
 }
@@ -103,7 +110,7 @@ impl From<RejectReason> for UseRefusal {
 pub struct UseOutcome(pub Result<UseResult, UseRefusal>);
 
 pub(super) fn plugin(app: &mut App) {
-    app.add_session_message::<UseIntent>()
+    app.add_player_intent::<UseIntent>()
         .add_session_message::<UseOutcome>()
         // Every frame, like an Edit's receive: an answer is never lost to a
         // frame that runs no tick, and it touches no World state.

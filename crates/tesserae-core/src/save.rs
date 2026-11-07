@@ -374,6 +374,26 @@ pub struct Rescan {
     pub parked: Option<([i32; 3], [i32; 3])>,
 }
 
+/// Player state saved under its own versioned key. Which keys a build opens
+/// is the Server's registry, not this module's.
+pub trait PlayerExtension: Serialize + serde::de::DeserializeOwned {
+    const KEY: &'static str;
+
+    /// Refuses a value that parses but cannot be opened.
+    fn validate(&self) -> Result<(), Error> {
+        Ok(())
+    }
+
+    /// A value of another shape under a known key was written by another
+    /// build, so it is incompatible rather than damaged.
+    fn read(value: &serde_json::Value) -> Result<Self, Error> {
+        let parsed: Self = serde_json::from_value(value.clone())
+            .map_err(|e| Error::Incompatible(format!("Player extension {}: {e}", Self::KEY)))?;
+        parsed.validate()?;
+        Ok(parsed)
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MovementV1 {
@@ -383,47 +403,143 @@ pub struct MovementV1 {
     pub yaw: f32,
     pub pitch: f32,
 }
-/// The Player extension holding what Pickup collected, by Item name.
-pub const CARRIED_V1: &str = "carried_v1";
 
-impl Player {
-    /// What the Player carried, empty when the extension is absent.
-    pub fn carried(&self) -> Result<BTreeMap<String, u32>, Error> {
-        self.extensions
-            .get(CARRIED_V1)
-            .map(|value| {
-                serde_json::from_value::<BTreeMap<String, u32>>(value.clone())
-                    .map_err(|e| Error::Corrupt(format!("invalid carried items: {e}")))
-            })
-            .transpose()
-            .map(Option::unwrap_or_default)
-    }
+impl PlayerExtension for MovementV1 {
+    const KEY: &'static str = "movement_v1";
 
-    pub fn movement(&self) -> Result<Option<MovementV1>, Error> {
-        if self
-            .extensions
-            .keys()
-            .any(|key| key != "movement_v1" && key != CARRIED_V1)
+    fn validate(&self) -> Result<(), Error> {
+        if !self.yaw.is_finite()
+            || !self.pitch.is_finite()
+            || self.pitch.abs() > std::f32::consts::FRAC_PI_2
+            || (self.flight && self.crouching)
         {
-            return Err(Error::Incompatible(
-                "unknown Player extensions require migration".into(),
+            return Err(Error::Corrupt("invalid Player movement/view".into()));
+        }
+        Ok(())
+    }
+}
+
+/// What Pickup collected before the Inventory, by Item name. Opened, never
+/// written.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct CarriedV1(pub BTreeMap<String, u32>);
+
+impl PlayerExtension for CarriedV1 {
+    const KEY: &'static str = "carried_v1";
+}
+
+/// The Player's Inventory, by slot.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct InventoryV1(pub crate::inventory::Inventory);
+
+impl PlayerExtension for InventoryV1 {
+    const KEY: &'static str = "inventory_v1";
+
+    fn validate(&self) -> Result<(), Error> {
+        if self.0.slots().flatten().any(|s| s.count == 0) {
+            return Err(Error::Corrupt("an Inventory slot holds no Items".into()));
+        }
+        if self.0.selected() >= crate::inventory::HOTBAR_SLOTS {
+            return Err(Error::Corrupt(
+                "the selected hotbar slot does not exist".into(),
             ));
         }
-        self.extensions
-            .get("movement_v1")
-            .map(|value| {
-                let state: MovementV1 = serde_json::from_value(value.clone())
-                    .map_err(|e| Error::Incompatible(e.to_string()))?;
-                if !state.yaw.is_finite()
-                    || !state.pitch.is_finite()
-                    || state.pitch.abs() > std::f32::consts::FRAC_PI_2
-                    || (state.flight && state.crouching)
-                {
-                    return Err(Error::Corrupt("invalid Player movement/view".into()));
-                }
-                Ok(state)
-            })
-            .transpose()
+        Ok(())
+    }
+}
+
+/// Creative or Survival: a World's default for new Players, and each Player's
+/// own.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GameMode {
+    #[default]
+    Creative,
+    Survival,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct GameModeV1(pub GameMode);
+
+impl PlayerExtension for GameModeV1 {
+    const KEY: &'static str = "game_mode_v1";
+}
+
+/// Health and hunger in points, air in seconds.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct VitalsV1 {
+    pub health: f32,
+    pub hunger: f32,
+    pub air_s: f32,
+}
+
+impl PlayerExtension for VitalsV1 {
+    const KEY: &'static str = "vitals_v1";
+
+    fn validate(&self) -> Result<(), Error> {
+        let points = 0.0..=crate::survival::MAX_SURVIVAL_VALUE;
+        if !points.contains(&self.health)
+            || !points.contains(&self.hunger)
+            || !(0.0..=crate::survival::MAX_AIR_S).contains(&self.air_s)
+        {
+            return Err(Error::Corrupt("invalid Player vitals".into()));
+        }
+        Ok(())
+    }
+}
+
+/// What brought a Player's health to zero.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum DeathCause {
+    Fall { height_m: f32 },
+    Drowning,
+    Contact { material: String },
+    Starvation,
+}
+
+/// A Player who died and has not respawned.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DeathV1 {
+    pub cause: Option<DeathCause>,
+    /// Where the feet were.
+    pub at_m: [f32; 3],
+    /// Dropped where they fell; empty when the Game keeps the Inventory.
+    pub dropped: Vec<crate::inventory::Stack>,
+    /// The ids of the Dropped items `dropped` became.
+    #[serde(default)]
+    pub drops: Vec<u64>,
+    pub kept_inventory: bool,
+}
+
+impl PlayerExtension for DeathV1 {
+    const KEY: &'static str = "death_v1";
+
+    fn validate(&self) -> Result<(), Error> {
+        let fall_ok = match self.cause {
+            Some(DeathCause::Fall { height_m }) => height_m.is_finite() && height_m >= 0.0,
+            _ => true,
+        };
+        if !fall_ok
+            || !self.at_m.iter().all(|m| m.is_finite())
+            || self.dropped.iter().any(|s| s.count == 0)
+            || (self.kept_inventory && !self.dropped.is_empty())
+        {
+            return Err(Error::Corrupt("invalid Player death".into()));
+        }
+        Ok(())
+    }
+}
+
+impl Player {
+    /// The value saved under `E::KEY`, `None` when the key is absent.
+    pub fn get<E: PlayerExtension>(&self) -> Result<Option<E>, Error> {
+        self.extensions.get(E::KEY).map(E::read).transpose()
     }
 }
 
@@ -431,8 +547,8 @@ impl Player {
 #[serde(deny_unknown_fields)]
 pub struct Player {
     pub eye_m: [f32; 3],
-    /// Independently versioned controller/view fields.
-    /// Unknown nonempty fields require explicit migration, never guessed modes.
+    /// [`PlayerExtension`] values by key. A key the opening build does not
+    /// register refuses the World rather than being dropped by its next save.
     pub extensions: BTreeMap<String, serde_json::Value>,
 }
 
@@ -473,6 +589,16 @@ pub struct SavedBiome {
     /// Absent is the World's own caves.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cave_scale: Option<f32>,
+    /// Absent is bare ground, as every Biome was before it could declare features.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub surface_features: Vec<SavedSurfaceFeature>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SavedSurfaceFeature {
+    pub material: String,
+    pub spacing_m: f32,
 }
 
 /// Material and Biomes by name, since ids are only meaningful beside the tables that made them.
@@ -595,6 +721,17 @@ fn saved_biome(b: &crate::Biome, mapping: &Mapping) -> Result<SavedBiome, Error>
         ground: b.ground.map(|g| ground_names(g, mapping)).transpose()?,
         sky_fog: b.sky_fog,
         cave_scale: b.cave_scale,
+        surface_features: b
+            .surface_features
+            .as_slice()
+            .iter()
+            .map(|f| {
+                Ok(SavedSurfaceFeature {
+                    material: mapping.material_name(f.material)?,
+                    spacing_m: f.spacing_m,
+                })
+            })
+            .collect::<Result<_, Error>>()?,
     })
 }
 
@@ -629,10 +766,27 @@ fn restored_biomes(saved: &[SavedBiome], mapping: &Mapping) -> Result<crate::Bio
                     .transpose()?,
                 sky_fog: b.sky_fog,
                 cave_scale: b.cave_scale,
+                surface_features: restored_features(&b.surface_features, mapping)?,
             })
         })
         .collect::<Result<Vec<_>, Error>>()?;
     crate::BiomeTable::new(&biomes).map_err(|e| Error::Corrupt(e.to_string()))
+}
+
+fn restored_features(
+    saved: &[SavedSurfaceFeature],
+    mapping: &Mapping,
+) -> Result<crate::SurfaceFeatures, Error> {
+    let features = saved
+        .iter()
+        .map(|f| {
+            Ok(crate::SurfaceFeature {
+                material: mapping.material_id(&f.material)?,
+                spacing_m: f.spacing_m,
+            })
+        })
+        .collect::<Result<Vec<_>, Error>>()?;
+    crate::SurfaceFeatures::new(&features).map_err(|e| Error::Corrupt(e.to_string()))
 }
 
 fn saved_ore(
@@ -704,6 +858,10 @@ pub struct Commit {
     /// Absent in commits written before dropped items: opens with none.
     #[serde(default)]
     pub entities: entities::SavedEntities,
+    /// The mode a new Player starts in. Absent in commits written before game
+    /// modes: those Worlds were Creative.
+    #[serde(default)]
+    pub game_mode: GameMode,
 }
 
 impl Commit {
@@ -723,8 +881,6 @@ impl Commit {
         {
             return Err(Error::Corrupt("invalid World or Player coordinates".into()));
         }
-        self.player.movement()?;
-        self.player.carried()?;
         self.entities.validate()?;
         self.content.require(installed)?;
         let mapping = self.content.validation_mapping()?;

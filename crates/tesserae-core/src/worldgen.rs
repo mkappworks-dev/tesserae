@@ -11,8 +11,8 @@
 
 use crate::chunk::{CHUNK_SIZE, Chunk, ChunkBuilder};
 use crate::climate::{
-    BIOMES_SINCE, BiomeId, BiomeTable, Climate, ClimateField, ClimateParams, MAX_BIOMES,
-    SkyFogBlend,
+    BIOMES_SINCE, Biome, BiomeId, BiomeTable, Climate, ClimateField, ClimateParams, MAX_BIOMES,
+    SkyFogBlend, SurfaceFeatures,
 };
 use crate::mesh::POS_Y;
 use crate::noise::{Fbm3Cache, fbm2, fbm3_cached, fbm3_range};
@@ -285,7 +285,24 @@ impl WorldgenParams {
         Ok(())
     }
 
-    /// Checks the World's ground and every Biome's alike.
+    /// The same World with every Biome's ground bare: what the coarse levels draw (ADR-0011).
+    pub fn without_surface_features(self) -> Self {
+        let bare: Vec<Biome> = self
+            .biomes
+            .as_slice()
+            .iter()
+            .map(|b| Biome {
+                surface_features: SurfaceFeatures::NONE,
+                ..*b
+            })
+            .collect();
+        WorldgenParams {
+            biomes: BiomeTable::new(&bare).expect("only the features changed"),
+            ..self
+        }
+    }
+
+    /// Checks the World's ground and every Biome's alike, and what the Biomes stand on it.
     pub fn validate_ground(&self, tables: &Tables) -> Result<(), ParamError> {
         let grounds = self
             .ground
@@ -309,6 +326,26 @@ impl WorldgenParams {
                 )?;
                 require(!tables.fluids.contains(material), field, "is a fluid")?;
             }
+        }
+        let field = "biomes.surface_features.material";
+        for feature in self
+            .biomes
+            .as_slice()
+            .iter()
+            .flat_map(|b| b.surface_features.as_slice())
+        {
+            let m = feature.material;
+            require(
+                tables.materials.contains(m),
+                field,
+                "names no registered Material",
+            )?;
+            require(
+                tables.materials.solid(Voxel::cube(m)),
+                field,
+                "is not solid",
+            )?;
+            require(!tables.fluids.contains(m), field, "is a fluid")?;
         }
         Ok(())
     }
@@ -498,6 +535,71 @@ pub struct Worldgen {
     /// `None` without ores, and under a Generator version from before them.
     ores: Option<OreField>,
     cave_tuning: Option<CaveTuning>,
+    scatter: Option<SurfaceScatter>,
+}
+
+/// Keeps the feature draw apart from every noise field, which hash the folded seed directly.
+const SCATTER_SEED: u64 = 0x5ca7_7e12_f00d_0001;
+
+/// Which feature, if any, stands on a column. Built only when some Biome declares one, so a World
+/// without features is generated exactly as before they existed.
+#[derive(Clone, Copy, Debug)]
+struct SurfaceScatter {
+    /// A column's chance of one feature spaced 1 m apart: `voxel_size²`, since a column is that
+    /// much ground.
+    unit_chance: f64,
+    /// No draw at or above this picks a feature in any Biome, so most columns never ask their Biome.
+    most: f64,
+}
+
+impl SurfaceScatter {
+    fn new(params: &WorldgenParams, voxel_size: f32) -> Option<Self> {
+        if params.generator < BIOMES_SINCE || params.ground.is_none() {
+            return None;
+        }
+        let unit_chance = f64::from(voxel_size).powi(2);
+        let most = params
+            .biomes
+            .as_slice()
+            .iter()
+            .map(|b| Self::total(unit_chance, &b.surface_features))
+            .fold(0.0, f64::max);
+        (most > 0.0).then_some(SurfaceScatter { unit_chance, most })
+    }
+
+    fn chance(unit_chance: f64, spacing_m: f32) -> f64 {
+        (unit_chance / f64::from(spacing_m).powi(2)).min(1.0)
+    }
+
+    fn total(unit_chance: f64, features: &SurfaceFeatures) -> f64 {
+        features
+            .as_slice()
+            .iter()
+            .map(|f| Self::chance(unit_chance, f.spacing_m))
+            .sum()
+    }
+
+    /// One draw against the features' chances laid end to end, so each keeps its own density.
+    fn pick(&self, features: &SurfaceFeatures, draw: f64) -> Option<MaterialId> {
+        let mut reach = 0.0;
+        features.as_slice().iter().find_map(|f| {
+            reach += Self::chance(self.unit_chance, f.spacing_m);
+            (draw < reach).then_some(f.material)
+        })
+    }
+
+    /// Uniform in `[0, 1)`, from the seed and the column's metre position alone.
+    fn draw(seed: u32, x_m: f32, z_m: f32) -> f64 {
+        let mix = |mut z: u64| {
+            z = z.wrapping_add(0x9e37_79b9_7f4a_7c15);
+            z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+            z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+            z ^ (z >> 31)
+        };
+        let column = u64::from(x_m.to_bits()) << 32 | u64::from(z_m.to_bits());
+        let h = mix(mix(SCATTER_SEED ^ u64::from(seed)) ^ column);
+        (h >> 11) as f64 / (1u64 << 53) as f64
+    }
 }
 
 /// Offsets from the World's scale of 1, so untuned Biomes blend to exactly 1. Built only when some
@@ -590,6 +692,7 @@ impl Worldgen {
             biome_grounds: BiomeGrounds::new(&params),
             ores: OreField::new(folded, &params.ores).filter(|_| params.generator >= BIOMES_SINCE),
             cave_tuning: CaveTuning::new(&params),
+            scatter: SurfaceScatter::new(&params, voxel_size),
         }
     }
 
@@ -681,6 +784,34 @@ impl Worldgen {
         self.params.sea_level_m + n * self.params.relief_m
     }
 
+    /// The metre height above which nothing generated stands in any column
+    /// under a footprint on the ground plane: each column's top Voxel, and a
+    /// surface feature on it. Caves only take away and a lake is apart.
+    pub fn clear_height_m(&self, min_m: [f32; 2], max_m: [f32; 2]) -> f32 {
+        let size = self.voxel_size;
+        let columns =
+            |a: usize| (min_m[a] / size).floor() as i32..=(max_m[a] / size).floor() as i32;
+        let mut clear_m = f32::MIN;
+        for z in columns(1) {
+            for x in columns(0) {
+                let (x_m, z_m) = (self.axis_m(0, x), self.axis_m(0, z));
+                let top = top_index(self.surface_height_m(x_m, z_m), 0.0, size);
+                let featured = self.scatter.is_some_and(|scatter| {
+                    let draw = SurfaceScatter::draw(self.seed, x_m, z_m);
+                    draw < scatter.most
+                        && self
+                            .biome_at(x_m, z_m)
+                            .and_then(|id| self.params.biomes.get(id))
+                            .and_then(|biome| scatter.pick(&biome.surface_features, draw))
+                            .is_some()
+                });
+                let voxels = top + 1 + i32::from(featured);
+                clear_m = clear_m.max(voxels as f32 * size);
+            }
+        }
+        clear_m
+    }
+
     /// The band `surface_height_m` is confined to, as `(lowest, highest)` in
     /// metres. Sound because [`fbm2`] is normalised to `[0, 1)`; the two
     /// early-outs in [`Worldgen::chunk`] and the Server's vertical streaming
@@ -689,7 +820,8 @@ impl Worldgen {
     /// Caves do not move it: they only turn solid Voxels into air, so nothing
     /// above the band is ever solid, which `streaming::relight`'s open-sky
     /// boundary relies on. Neither does smoothing: a stair needs a cube beside it
-    /// in the same cell, so it sits no higher than the ground it eases.
+    /// in the same cell, so it sits no higher than the ground it eases. Nor does a
+    /// surface feature: one stands only where its Voxel's floor is in the band.
     pub fn surface_bounds_m(&self) -> (f32, f32) {
         (
             self.params.sea_level_m,
@@ -863,6 +995,9 @@ impl Worldgen {
                 columns.as_ref(),
             );
         }
+        if let Some(scatter) = &self.scatter {
+            self.scatter(&mut chunk, scatter, &surface_m, [cx, cy, cz], floor_m);
+        }
         chunk
     }
 
@@ -992,6 +1127,58 @@ impl Worldgen {
                 placed += 1;
                 if placed == MAX_SMOOTHED_PER_CHUNK {
                     return;
+                }
+            }
+        }
+    }
+
+    /// Stands a Biome's feature in the cell over a column's top Voxel, after smoothing so a stair
+    /// keeps its cell. Like a stair, a cell over the last Voxel of the Chunk below is made here.
+    fn scatter(
+        &self,
+        chunk: &mut Chunk,
+        scatter: &SurfaceScatter,
+        surface_m: &[f32; SURFACE_W * SURFACE_W],
+        coord: [i32; 3],
+        floor_m: f32,
+    ) {
+        let Some(world) = self.params.ground else {
+            return;
+        };
+        let (_, highest) = self.surface_bounds_m();
+        let size = CHUNK_SIZE as i32;
+        for z in 0..size {
+            for x in 0..size {
+                let top = top_index(surface_m[surface_index(x, z)], floor_m, self.voxel_size);
+                let y = top + 1;
+                if !(0..size).contains(&y)
+                    || floor_m + y as f32 * self.voxel_size > highest
+                    || !chunk.get(x as usize, y as usize, z as usize).is_air()
+                {
+                    continue;
+                }
+                let (x_m, z_m) = (self.axis_m(coord[0], x), self.axis_m(coord[2], z));
+                let draw = SurfaceScatter::draw(self.seed, x_m, z_m);
+                if draw >= scatter.most {
+                    continue;
+                }
+                let Some(biome) = self
+                    .biome_at(x_m, z_m)
+                    .and_then(|id| self.params.biomes.get(id))
+                else {
+                    continue;
+                };
+                let Some(material) = scatter.pick(&biome.surface_features, draw) else {
+                    continue;
+                };
+                let surface = biome.ground.unwrap_or(world).surface;
+                let on_surface = if top >= 0 {
+                    chunk.get(x as usize, top as usize, z as usize) == Voxel::cube(surface)
+                } else {
+                    self.still_solid(chunk, coord, [x, top, z])
+                };
+                if on_surface {
+                    chunk.set(x as usize, y as usize, z as usize, Voxel::cube(material));
                 }
             }
         }
@@ -1540,6 +1727,7 @@ mod tests {
             ground: None,
             sky_fog: None,
             cave_scale: Some(cave_scale),
+            surface_features: Default::default(),
         };
         Worldgen::new(
             SEED,

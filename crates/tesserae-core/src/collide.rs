@@ -40,7 +40,33 @@ impl Aabb {
     pub const fn new(min: [f32; 3], max: [f32; 3]) -> Self {
         Aabb { min, max }
     }
+
+    pub fn centre(&self) -> [f32; 3] {
+        [0, 1, 2].map(|a| (self.min[a] + self.max[a]) / 2.0)
+    }
+
+    /// The centre of the underside, where a standing body's feet are.
+    pub fn feet(&self) -> [f32; 3] {
+        let [x, _, z] = self.centre();
+        [x, self.min[1], z]
+    }
 }
+
+/// What a body moves through: the Voxels, the tables that say what each one
+/// is, and a Voxel's size in metres.
+pub struct Terrain<'a, V: ?Sized> {
+    pub voxels: &'a V,
+    pub tables: &'a Tables,
+    pub voxel_size: f32,
+}
+
+impl<V: ?Sized> Clone for Terrain<'_, V> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<V: ?Sized> Copy for Terrain<'_, V> {}
 
 /// What a sweep did.
 #[derive(Clone, Copy, PartialEq, Debug)]

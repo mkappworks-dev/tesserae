@@ -1,5 +1,6 @@
 id = "meadow"
 version = "0.2.0"
+description = "Soft hills & small wonders"
 api = "0.3"
 root = true
 depends = ["strata", "flora", "glassworks"]

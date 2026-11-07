@@ -1,31 +1,28 @@
 //! Dropped items as the Client sees them: a view-only mirror of what the
-//! Server announces, drawn as small spinning cubes, and the Carried count.
+//! Server announces, drawn as small spinning cubes.
 //!
 //! Nothing here writes entity state. The spin and bob are cosmetic and never
 //! feed back (`docs/adr/0002-client-server-from-day-one.md`).
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 
 use bevy::prelude::*;
 use tesserae_core::entity::EntityId;
 use tesserae_core::{Orientation, SHAPE_FULL_CUBE};
 
 use super::edit::Holding;
-use super::help::DebugPanel;
 use super::material_textures::Textures;
 use super::menu::Swatches;
 use crate::content::{ItemLook, ItemLooks};
 use crate::render::texture_atlas;
-use crate::server::entities::{CarriedChanged, EntityDelta, EntityView};
+use crate::server::entities::{EntityDelta, EntityView};
 use crate::session::SessionApp;
 
 const SPIN_RAD_S: f32 = 1.2;
 const BOB_M: f32 = 0.03;
-const TOAST_S: f32 = 1.5;
-const TOAST_FADE_S: f32 = 0.4;
 
 #[derive(Resource, Default)]
-struct Looks(Vec<ItemLook>);
+pub(super) struct Looks(pub(super) Vec<ItemLook>);
 
 #[derive(Resource, Default)]
 struct Views {
@@ -41,80 +38,12 @@ struct DropCube {
     phase: f32,
 }
 
-#[derive(Resource, Default)]
-struct CarriedView {
-    held: BTreeMap<String, u32>,
-    told: bool,
-}
-
-#[derive(Resource, Default)]
-struct Toast {
-    text: String,
-    left_s: f32,
-}
-
-#[derive(Component)]
-struct CarriedLine;
-#[derive(Component)]
-struct ToastNode;
-
 pub(super) fn plugin(app: &mut App) {
     app.init_session_state::<Looks>()
         .init_session_state::<Views>()
-        .init_session_state::<CarriedView>()
-        .init_session_state::<Toast>()
         .add_session_message::<ItemLooks>()
         .add_session_message::<EntityDelta>()
-        .add_session_message::<CarriedChanged>()
-        .add_session_systems(Startup, spawn_hud)
-        .add_session_systems(
-            Update,
-            (
-                receive_looks,
-                apply_deltas,
-                animate,
-                receive_carried,
-                show_carried,
-                show_toast,
-            )
-                .chain(),
-        );
-}
-
-fn text_font() -> TextFont {
-    TextFont {
-        font_size: bevy::text::FontSize::Px(14.0),
-        ..default()
-    }
-}
-
-fn spawn_hud(mut commands: Commands) {
-    commands.spawn((
-        CarriedLine,
-        DebugPanel,
-        Visibility::Hidden,
-        Text::new("carried: nothing"),
-        text_font(),
-        TextColor(Color::srgba(1.0, 0.88, 0.54, 0.9)),
-        Node {
-            position_type: PositionType::Absolute,
-            left: Val::Px(16.0),
-            top: Val::Px(40.0),
-            ..default()
-        },
-    ));
-    commands.spawn((
-        ToastNode,
-        Text::new(""),
-        text_font(),
-        TextColor(Color::srgba(1.0, 1.0, 1.0, 0.0)),
-        Node {
-            position_type: PositionType::Absolute,
-            right: Val::Px(16.0),
-            bottom: Val::Px(16.0),
-            ..default()
-        },
-    ));
+        .add_session_systems(Update, (receive_looks, apply_deltas, animate).chain());
 }
 
 fn receive_looks(
@@ -287,70 +216,6 @@ fn animate(time: Res<Time>, mut cubes: Query<(&DropCube, &mut Transform)>) {
     }
 }
 
-fn label(looks: &Looks, name: &str) -> String {
-    looks
-        .0
-        .iter()
-        .find(|look| look.name == name)
-        .map_or_else(|| name.to_owned(), |look| look.label().to_owned())
-}
-
-fn receive_carried(
-    mut messages: MessageReader<CarriedChanged>,
-    looks: Res<Looks>,
-    mut view: ResMut<CarriedView>,
-    mut toast: ResMut<Toast>,
-) {
-    for CarriedChanged(now) in messages.read() {
-        // The first message is what a reopened World already held: not news.
-        if view.told {
-            let gained: Vec<String> = now
-                .iter()
-                .filter_map(|(name, &count)| {
-                    let before = view.held.get(name).copied().unwrap_or(0);
-                    (count > before).then(|| format!("+{} {}", count - before, label(&looks, name)))
-                })
-                .collect();
-            if !gained.is_empty() {
-                toast.text = gained.join(", ");
-                toast.left_s = TOAST_S;
-            }
-        }
-        view.held = now.clone();
-        view.told = true;
-    }
-}
-
-fn show_carried(
-    view: Res<CarriedView>,
-    looks: Res<Looks>,
-    mut line: Single<&mut Text, With<CarriedLine>>,
-) {
-    let text = if view.held.is_empty() {
-        "carried: nothing".to_owned()
-    } else {
-        let rows: Vec<_> = view
-            .held
-            .iter()
-            .map(|(name, count)| format!("{} x{count}", label(&looks, name)))
-            .collect();
-        format!("carried: {}", rows.join(", "))
-    };
-    line.set_if_neq(Text::new(text));
-}
-
-fn show_toast(
-    time: Res<Time>,
-    mut toast: ResMut<Toast>,
-    mut node: Single<(&mut Text, &mut TextColor), With<ToastNode>>,
-) {
-    toast.left_s = (toast.left_s - time.delta_secs()).max(0.0);
-    let (text, color) = &mut *node;
-    text.set_if_neq(Text::new(toast.text.clone()));
-    let alpha = (toast.left_s / TOAST_FADE_S).min(1.0);
-    color.0 = Color::srgba(1.0, 1.0, 1.0, alpha);
-}
-
 #[cfg(test)]
 mod tests {
     use bevy::asset::AssetPlugin;
@@ -368,27 +233,23 @@ mod tests {
             .init_resource::<Swatches>()
             .init_resource::<Looks>()
             .init_resource::<Views>()
-            .init_resource::<CarriedView>()
-            .init_resource::<Toast>()
             .add_message::<ItemLooks>()
             .add_message::<EntityDelta>()
-            .add_message::<CarriedChanged>()
-            .add_systems(
-                Update,
-                (receive_looks, apply_deltas, animate, receive_carried).chain(),
-            );
+            .add_systems(Update, (receive_looks, apply_deltas, animate).chain());
         app.world_mut().write_message(ItemLooks(vec![
             ItemLook {
                 name: "t:rock".into(),
                 size_m: 0.25,
                 color: [1, 2, 3, 255],
                 material: None,
+                max_stack: 64,
             },
             ItemLook {
                 name: "t:dust".into(),
                 size_m: 0.1,
                 color: [9, 9, 9, 255],
                 material: None,
+                max_stack: 64,
             },
         ]));
         app
@@ -468,24 +329,6 @@ mod tests {
                 assert_eq!(t.scale, Vec3::splat(size));
             }
         }
-    }
-
-    #[test]
-    fn a_toast_names_what_was_gained_and_the_first_message_is_not_news() {
-        let mut app = app();
-        app.world_mut()
-            .write_message(CarriedChanged(BTreeMap::from([("t:rock".into(), 4)])));
-        app.update();
-        assert!(app.world().resource::<Toast>().text.is_empty());
-        app.world_mut()
-            .write_message(CarriedChanged(BTreeMap::from([
-                ("t:rock".into(), 6),
-                ("t:dust".into(), 1),
-            ])));
-        app.update();
-        let toast = app.world().resource::<Toast>();
-        assert_eq!(toast.text, "+1 dust, +2 rock");
-        assert_eq!(toast.left_s, TOAST_S);
     }
 
     #[test]

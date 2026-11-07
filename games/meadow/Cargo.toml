@@ -11,4 +11,5 @@ publish = false
 crate-type = ["cdylib"]
 
 [dependencies]
+demo-kit = { path = "../../crates/demo-kit" }
 wit-bindgen = { version = "0.63.0", default-features = false, features = ["macros", "realloc"] }

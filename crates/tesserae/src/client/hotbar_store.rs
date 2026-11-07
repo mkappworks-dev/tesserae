@@ -1,14 +1,21 @@
-//! Per-Game creative shortcuts use names, never transient registry ids.
-use super::edit::{Catalogue, Holding, Hotbar};
+//! The per-Game quick slots an older build saved, by name. The file is read,
+//! never written: it seeds a new World's hotbar with Catalogue takes.
+//!
+//! Beside it, the hotbar slot last chosen in any World, which every World opens
+//! on. It is the Player's habit, not World state, so the Client keeps it.
+use super::edit::{Catalogue, Holding};
 use crate::content::ContentCatalogue;
+use crate::server::inventory::{InventoryChanged, InventoryIntent, MAX_STACK};
+use crate::server::persistence::NewWorld;
 use bevy::prelude::*;
 
 use crate::session::{SessionApp, SessionTeardown};
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, fs, io, path::PathBuf};
 use tesserae_core::Orientation;
+use tesserae_core::inventory::{Destination, HOTBAR_SLOTS, Slot};
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 enum Item {
     Empty,
@@ -23,35 +30,6 @@ enum Item {
     Fire,
 }
 impl Item {
-    fn capture(holding: Holding, catalogue: &ContentCatalogue) -> io::Result<Self> {
-        let material_name = |id| {
-            catalogue
-                .material(id)
-                .map(|m| m.name.clone())
-                .ok_or_else(|| io::Error::other("unknown hotbar Material"))
-        };
-        Ok(match holding {
-            Holding::Empty => Self::Empty,
-            Holding::Fire => Self::Fire,
-            Holding::Tool(_) => Self::Empty,
-            Holding::Fluid(material) => Self::Fluid {
-                material: material_name(material)?,
-            },
-            Holding::Solid {
-                material,
-                shape,
-                orientation,
-            } => Self::Solid {
-                material: material_name(material)?,
-                shape: catalogue
-                    .shape(shape)
-                    .ok_or_else(|| io::Error::other("unknown hotbar Shape"))?
-                    .name
-                    .clone(),
-                orientation: orientation.bits(),
-            },
-        })
-    }
     fn resolve(&self, catalogue: &ContentCatalogue) -> Holding {
         match self {
             Self::Solid {
@@ -83,25 +61,17 @@ impl Item {
         }
     }
 }
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Layout {
     slots: [Item; 9],
     selected: usize,
 }
-#[derive(Serialize, Deserialize)]
+#[derive(Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Document {
     version: u32,
     games: BTreeMap<String, Layout>,
-}
-impl Default for Document {
-    fn default() -> Self {
-        Self {
-            version: 1,
-            games: BTreeMap::new(),
-        }
-    }
 }
 fn decode(bytes: &[u8]) -> io::Result<Document> {
     let doc: Document = serde_json::from_slice(bytes).map_err(io::Error::other)?;
@@ -112,106 +82,177 @@ fn decode(bytes: &[u8]) -> io::Result<Document> {
 }
 #[derive(Resource)]
 pub(super) struct Store {
-    path: PathBuf,
     document: Document,
     game: Option<String>,
-    observed: Option<([Holding; 9], usize)>,
-    writable: bool,
-    error: Option<String>,
+    /// A new World opened and its takes are not yet sent.
+    offer: bool,
+    /// The Server has an Inventory for the takes to land in.
+    announced: bool,
 }
 impl Store {
     fn load(path: PathBuf) -> Self {
-        let loaded = fs::read(&path).and_then(|bytes| decode(&bytes));
-        let (document, writable, error) = match loaded {
-            Ok(doc) => (doc, true, None),
-            Err(e) if e.kind() == io::ErrorKind::NotFound => (Document::default(), true, None),
-            Err(e) => (
-                Document::default(),
-                false,
-                Some(format!(
-                    "Could not load hotbar: {e}. Original file retained at {}",
+        let document = match fs::read(&path).and_then(|bytes| decode(&bytes)) {
+            Ok(doc) => doc,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Document::default(),
+            Err(e) => {
+                warn!(
+                    "Ignoring the stored hotbar at {}: {e}; the file is left as it is",
                     path.display()
-                )),
-            ),
+                );
+                Document::default()
+            }
         };
         Self {
-            path,
             document,
             game: None,
-            observed: None,
-            writable,
-            error,
+            offer: false,
+            announced: false,
         }
     }
-    pub fn restore(&mut self, catalogue: &ContentCatalogue, hotbar: &mut Hotbar) {
-        self.game.clone_from(&catalogue.game);
-        if let Some(layout) = self
-            .game
-            .as_ref()
-            .and_then(|game| self.document.games.get(game))
-        {
-            hotbar.slots = std::array::from_fn(|i| layout.slots[i].resolve(catalogue));
-            hotbar.selected = layout.selected;
-        }
-        self.observed = Some((hotbar.slots, hotbar.selected));
+    fn layout(&self) -> Option<&Layout> {
+        self.document.games.get(self.game.as_ref()?)
     }
-    fn save(&mut self, catalogue: &ContentCatalogue, hotbar: &Hotbar) -> io::Result<()> {
-        let snapshot = (hotbar.slots, hotbar.selected);
-        if self.observed == Some(snapshot) {
-            return Ok(());
-        }
-        let Some(game) = self.game.clone() else {
-            return Ok(());
+    /// Each stored slot's Material, by name in this Game; Fire is a Tool.
+    fn takes(&self, catalogue: &ContentCatalogue) -> Vec<(usize, tesserae_core::MaterialId)> {
+        let Some(layout) = self.layout() else {
+            return Vec::new();
         };
-        if !self.writable {
-            return Ok(());
+        layout
+            .slots
+            .iter()
+            .enumerate()
+            .filter_map(|(at, item)| match item.resolve(catalogue) {
+                Holding::Solid { material, .. } | Holding::Fluid(material) => Some((at, material)),
+                _ => None,
+            })
+            .collect()
+    }
+}
+/// The hotbar slot the Player last asked for.
+#[derive(Resource)]
+pub(super) struct LastSlot {
+    path: PathBuf,
+    selected: usize,
+    /// This World's Server has been asked for it.
+    restored: bool,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SlotDocument {
+    version: u32,
+    selected: usize,
+}
+impl LastSlot {
+    fn load(path: PathBuf) -> Self {
+        let selected = fs::read(&path)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<SlotDocument>(&bytes).ok())
+            .filter(|doc| doc.version == 1 && doc.selected < HOTBAR_SLOTS)
+            .map_or(0, |doc| doc.selected);
+        Self {
+            path,
+            selected,
+            restored: false,
         }
-        let previous = self.document.games.get(&game);
-        let mut layout = Layout {
-            slots: std::array::from_fn(|_| Item::Empty),
-            selected: hotbar.selected,
-        };
-        for i in 0..9 {
-            // Preserve unresolved names when another slot changes.
-            layout.slots[i] = match (self.observed, previous) {
-                (Some(seen), Some(saved)) if seen.0[i] == hotbar.slots[i] => saved.slots[i].clone(),
-                _ => Item::capture(hotbar.slots[i], catalogue)?,
-            };
+    }
+    fn remember(&mut self, at: usize) {
+        if at == self.selected || at >= HOTBAR_SLOTS {
+            return;
         }
-        self.document.games.insert(game, layout);
-        let bytes = serde_json::to_vec_pretty(&self.document).map_err(io::Error::other)?;
-        decode(&bytes)?;
-        if let Ok(previous) = fs::read(&self.path) {
-            decode(&previous)?;
-            super::profile::atomic_write(&self.path.with_extension("json.bak"), &previous)?;
+        self.selected = at;
+        let saved = serde_json::to_vec(&SlotDocument {
+            version: 1,
+            selected: at,
+        })
+        .map_err(io::Error::other)
+        .and_then(|bytes| super::profile::atomic_write(&self.path, &bytes));
+        if let Err(e) = saved {
+            warn!(
+                "Could not remember the hotbar slot at {}: {e}",
+                self.path.display()
+            );
         }
-        super::profile::atomic_write(&self.path, &bytes)?;
-        self.observed = Some(snapshot);
-        Ok(())
     }
 }
 pub(super) fn plugin(app: &mut App) {
     let path = super::profile::user_path().with_extension("hotbar.json");
+    let slot = super::profile::user_path().with_extension("slot.json");
     app.insert_resource(Store::load(path))
-        .add_session_systems(PostUpdate, save)
-        // The next World's first frame must not read as the player emptying the bar.
+        .insert_resource(LastSlot::load(slot))
+        .add_session_systems(
+            Update,
+            offer_stored
+                .after(super::edit::receive_catalogue)
+                .after(super::game_mode::receive),
+        )
+        .add_session_systems(Update, (restore_slot, remember_slot).chain())
         .add_session_systems(SessionTeardown, |mut store: ResMut<Store>| {
-            store.observed = None;
             store.game = None;
+            store.offer = false;
+            store.announced = false;
+        })
+        .add_session_systems(SessionTeardown, |mut slot: ResMut<LastSlot>| {
+            slot.restored = false;
         });
 }
-fn save(
-    mut store: ResMut<Store>,
-    catalogue: Res<Catalogue>,
-    hotbar: Res<Hotbar>,
-    mut commands: Commands,
+/// Once the Server has an Inventory, asks it for the slot last chosen.
+fn restore_slot(
+    mut slot: ResMut<LastSlot>,
+    mut held: MessageReader<InventoryChanged>,
+    mut intents: MessageWriter<InventoryIntent>,
 ) {
-    if let Err(error) = store.save(&catalogue.0, &hotbar) {
-        store.error = Some(format!("Could not save hotbar: {error}"));
+    let Some(InventoryChanged(now)) = held.read().last() else {
+        return;
+    };
+    if slot.restored {
+        return;
     }
-    if let Some(error) = store.error.take() {
-        warn!("{error}");
-        super::menu_ui::notify(&mut commands, &error, super::menu_ui::Tone::Alert);
+    slot.restored = true;
+    if now.selected() != slot.selected {
+        intents.write(InventoryIntent::Select(slot.selected));
+    }
+}
+/// What the Player asks for, not what the Server answers, so a reply still on
+/// its way from before the restore cannot overwrite it.
+fn remember_slot(mut slot: ResMut<LastSlot>, mut asked: MessageReader<InventoryIntent>) {
+    for intent in asked.read() {
+        if let InventoryIntent::Select(at) = intent {
+            slot.remember(*at);
+        }
+    }
+}
+/// A new Creative World's hotbar starts as the stored slots, each a full stack
+/// the Server gives or refuses like any Catalogue take.
+fn offer_stored(
+    mut store: ResMut<Store>,
+    (mut news, mut held): (MessageReader<NewWorld>, MessageReader<InventoryChanged>),
+    (catalogue, mode): (Res<Catalogue>, Res<super::game_mode::Mode>),
+    mut intents: MessageWriter<InventoryIntent>,
+) {
+    if news.read().count() > 0 {
+        store.offer = true;
+    }
+    // The Player spawns frames after the session starts, and a take sent
+    // before it has an Inventory expires unread.
+    if held.read().count() > 0 {
+        store.announced = true;
+    }
+    if catalogue.is_changed() {
+        store.game.clone_from(&catalogue.0.game);
+    }
+    if !store.offer || !store.announced || store.game.is_none() || mode.0.is_none() {
+        return;
+    }
+    store.offer = false;
+    if mode.survival() {
+        return;
+    }
+    for (at, material) in store.takes(&catalogue.0) {
+        intents.write(InventoryIntent::Take {
+            material,
+            count: MAX_STACK,
+            into: Destination::Slot(Slot::Hotbar(at)),
+        });
     }
 }
 
@@ -219,6 +260,12 @@ fn save(
 mod tests {
     use super::*;
     use crate::content::{CatalogueMaterial, CatalogueShape};
+    use crate::server::game_mode::{GameMode, PlayerMode};
+    use crate::server::inventory::Inventory;
+    use crate::server::persistence::NewWorld;
+    use crate::server::player::Player;
+    use tesserae_core::inventory::Stack;
+
     struct Directory(PathBuf);
     impl Directory {
         fn new() -> Self {
@@ -276,150 +323,186 @@ mod tests {
             ..default()
         }
     }
-    fn app(path: PathBuf, catalogue: ContentCatalogue) -> App {
+    /// Wood, water, Fire and a Material the Game no longer has, as an older
+    /// build saved them for Terra.
+    fn stored(dir: &Directory) -> Vec<u8> {
+        let empty = serde_json::json!({"kind": "empty"});
+        let mut slots = vec![empty; 9];
+        slots[0] = serde_json::json!({"kind": "solid", "material": "terra:wood", "shape": "terra:step", "orientation": 6});
+        slots[2] = serde_json::json!({"kind": "fluid", "material": "terra:water"});
+        slots[3] = serde_json::json!({"kind": "fire"});
+        slots[4] = serde_json::json!({"kind": "solid", "material": "terra:gone", "shape": "core:cube", "orientation": 0});
+        let document =
+            serde_json::json!({"version": 1, "games": {"terra": {"slots": slots, "selected": 2}}});
+        let bytes = serde_json::to_vec_pretty(&document).unwrap();
+        fs::write(dir.path(), &bytes).unwrap();
+        bytes
+    }
+    /// The Client's store with the Server's Inventory behind it, on a Game
+    /// whose registry put wood at 11 and water at 13.
+    fn app(path: PathBuf) -> App {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .init_resource::<Hotbar>()
+            .init_resource::<super::super::edit::Hotbar>()
             .init_resource::<Catalogue>()
             .insert_resource(Store::load(path))
+            .insert_resource(crate::server::items::PlacingItems::new(
+                [(11, "terra:wood", true), (13, "terra:water", true)],
+                &crate::server::items::Items::default(),
+            ))
             .add_message::<ContentCatalogue>()
-            .add_systems(Update, super::super::edit::receive_catalogue)
-            .add_session_systems(PostUpdate, save);
-        app.world_mut().write_message(catalogue);
-        app.update();
+            .add_message::<NewWorld>()
+            .add_plugins((
+                crate::server::inventory::plugin,
+                crate::server::game_mode::plugin,
+                super::super::game_mode::plugin,
+            ))
+            .add_systems(
+                Update,
+                (
+                    super::super::edit::receive_catalogue,
+                    offer_stored,
+                    count_asks,
+                )
+                    .chain()
+                    .after(super::super::game_mode::receive),
+            )
+            .init_resource::<Asked>();
+        app.world_mut().write_message(catalogue(11, 13, 8));
         app
     }
-    #[test]
-    fn restart_restores_real_slots_by_name_and_orientation_after_registry_reordering() {
-        let dir = Directory::new();
-        let mut first = app(dir.path(), catalogue(7, 9, 6));
-        let orientation = Orientation::new(tesserae_core::mesh::NEG_X, 2);
-        {
-            let mut bar = first.world_mut().resource_mut::<Hotbar>();
-            bar.slots[1] = Holding::Solid {
-                material: 7,
-                shape: 6,
-                orientation,
-            };
-            bar.slots[2] = Holding::Fluid(9);
-            bar.slots[3] = Holding::Fire;
-            bar.slots[4] = Holding::Empty;
-            bar.selected = 2;
-            bar.outside = Some(Holding::Fire);
-        }
-        first.update();
-        drop(first);
-        let mut restarted = app(dir.path(), catalogue(11, 13, 8));
-        let bar = restarted.world().resource::<Hotbar>();
-        assert_eq!(
-            bar.slots[1],
-            Holding::Solid {
-                material: 11,
-                shape: 8,
-                orientation
-            }
-        );
-        assert_eq!(bar.slots[2], Holding::Fluid(13));
-        assert_eq!(bar.slots[3], Holding::Fire);
-        assert_eq!(bar.slots[4], Holding::Empty);
-        assert_eq!(bar.selected, 2);
-        assert_eq!(bar.held(), Holding::Empty, "a World opens empty-handed");
-        let before = bar.clone();
-        restarted.world_mut().write_message(catalogue(11, 13, 8));
-        restarted.update();
-        assert_eq!(*restarted.world().resource::<Hotbar>(), before);
-        let bytes = fs::read_to_string(dir.path()).unwrap();
-        assert!(bytes.contains("terra:wood") && bytes.contains("terra:step"));
-        assert!(!bytes.contains("outside"));
+    /// The Server's Player, which arrives some frames into a session.
+    #[derive(Resource, Default)]
+    struct Asked(usize);
+    fn count_asks(mut intents: MessageReader<InventoryIntent>, mut asked: ResMut<Asked>) {
+        asked.0 += intents.read().count();
     }
-    #[test]
-    fn every_world_opens_empty_handed_with_its_shortcuts_kept() {
-        let dir = Directory::new();
-        let mut fresh = app(dir.path(), catalogue(7, 9, 6));
-        assert_eq!(fresh.world().resource::<Hotbar>().held(), Holding::Empty);
-        {
-            let mut bar = fresh.world_mut().resource_mut::<Hotbar>();
-            bar.slots[2] = Holding::Fluid(9);
-            bar.select(2);
-            assert_eq!(bar.held(), Holding::Fluid(9));
-        }
-        fresh.update();
-        drop(fresh);
-        let mut reopened = app(dir.path(), catalogue(7, 9, 6));
-        let mut bar = reopened.world_mut().resource_mut::<Hotbar>();
-        assert_eq!(bar.held(), Holding::Empty);
-        assert_eq!((bar.selected, bar.slots[2]), (2, Holding::Fluid(9)));
-        bar.select(2);
-        assert_eq!(bar.held(), Holding::Fluid(9));
+    fn arrive(app: &mut App) {
+        arrive_in(app, GameMode::Creative);
+    }
+    fn arrive_in(app: &mut App, mode: GameMode) {
+        app.world_mut()
+            .spawn((Player::at(Vec3::ZERO), PlayerMode(mode)));
+    }
+    /// One Client frame and one whole Server tick, after which unread messages
+    /// expire as they do in play.
+    fn frame(app: &mut App) {
+        app.update();
+        app.world_mut().run_schedule(bevy::app::FixedMain);
+    }
+    fn hotbar(app: &mut App) -> Vec<Option<Stack>> {
+        let mut held = app.world_mut().query::<&Inventory>();
+        held.single(app.world()).unwrap().hotbar().to_vec()
     }
 
     #[test]
-    fn layouts_are_per_game_and_missing_names_survive_changes_to_other_slots() {
+    fn a_new_world_takes_the_stored_slots_by_name_and_skips_what_is_missing() {
         let dir = Directory::new();
-        let mut first = app(dir.path(), catalogue(7, 9, 6));
-        first.world_mut().resource_mut::<Hotbar>().slots[0] = Holding::solid(7, 6);
-        first.update();
-        drop(first);
-        let mut missing = catalogue(11, 13, 8);
-        missing.shapes.retain(|s| s.id == 0);
-        let mut second = app(dir.path(), missing);
-        assert_eq!(second.world().resource::<Hotbar>().slots[0], Holding::Empty);
-        second.world_mut().resource_mut::<Hotbar>().slots[2] = Holding::Fire;
-        second.update();
-        drop(second);
-        let mut other = catalogue(11, 13, 8);
-        other.game = Some("other-game".into());
-        let mut third = app(dir.path(), other);
-        assert_eq!(
-            third.world().resource::<Hotbar>().slots[0],
-            Holding::solid(11, 0)
-        );
-        third.world_mut().resource_mut::<Hotbar>().slots[2] = Holding::Empty;
-        third.update();
-        drop(third);
-        let restored = app(dir.path(), catalogue(11, 13, 8));
-        assert_eq!(
-            restored.world().resource::<Hotbar>().slots[0],
-            Holding::solid(11, 8)
-        );
-        assert_eq!(
-            restored.world().resource::<Hotbar>().slots[2],
-            Holding::Fire
-        );
+        stored(&dir);
+        let mut app = app(dir.path());
+        app.world_mut().write_message(NewWorld);
+        for _ in 0..4 {
+            frame(&mut app);
+        }
+        arrive(&mut app);
+        for _ in 0..3 {
+            frame(&mut app);
+        }
+        let stack = |item: &str| {
+            Some(Stack {
+                item: item.into(),
+                count: crate::server::inventory::MAX_STACK,
+            })
+        };
+        let mut expected = vec![None; 9];
+        expected[0] = stack("terra:wood");
+        expected[2] = stack("terra:water");
+        assert_eq!(hotbar(&mut app), expected);
+        frame(&mut app);
+        assert_eq!(hotbar(&mut app), expected, "offered once");
     }
+
     #[test]
-    fn corrupt_future_and_invalid_layouts_remain_untouched() {
+    fn a_new_survival_world_takes_nothing() {
+        let dir = Directory::new();
+        stored(&dir);
+        let mut app = app(dir.path());
+        app.world_mut().write_message(NewWorld);
+        frame(&mut app);
+        arrive_in(&mut app, GameMode::Survival);
+        for _ in 0..3 {
+            frame(&mut app);
+        }
+        assert!(hotbar(&mut app).iter().all(Option::is_none));
+        assert_eq!(app.world().resource::<Asked>().0, 0, "not even asked");
+    }
+
+    #[test]
+    fn a_reopened_world_takes_nothing_and_the_file_is_never_written() {
+        let dir = Directory::new();
+        let bytes = stored(&dir);
+        let mut app = app(dir.path());
+        arrive(&mut app);
+        frame(&mut app);
+        frame(&mut app);
+        assert!(hotbar(&mut app).iter().all(Option::is_none));
+        app.world_mut().write_message(InventoryIntent::Select(5));
+        frame(&mut app);
+        assert_eq!(fs::read(dir.path()).unwrap(), bytes);
+        let fresh = Directory::new();
+        let mut app = super::tests::app(fresh.path());
+        arrive(&mut app);
+        app.world_mut().write_message(NewWorld);
+        frame(&mut app);
+        frame(&mut app);
+        assert!(!fresh.path().exists());
+    }
+
+    #[test]
+    fn a_corrupt_or_future_file_offers_nothing() {
         for bytes in [b"broken".as_slice(), br#"{"version":2,"games":{}}"#] {
             let dir = Directory::new();
             fs::write(dir.path(), bytes).unwrap();
-            let mut app = app(dir.path(), catalogue(7, 9, 6));
-            app.world_mut().resource_mut::<Hotbar>().slots[2] = Holding::Fire;
-            app.update();
+            let mut app = app(dir.path());
+            arrive(&mut app);
+            app.world_mut().write_message(NewWorld);
+            frame(&mut app);
+            frame(&mut app);
+            assert!(hotbar(&mut app).iter().all(Option::is_none));
             assert_eq!(fs::read(dir.path()).unwrap(), bytes);
         }
+    }
+
+    fn selected(app: &mut App) -> usize {
+        let mut held = app.world_mut().query::<&Inventory>();
+        held.single(app.world()).unwrap().selected()
+    }
+
+    #[test]
+    fn every_world_opens_on_the_slot_last_chosen() {
         let dir = Directory::new();
-        let mut app = app(dir.path(), catalogue(7, 9, 6));
-        app.world_mut().resource_mut::<Hotbar>().slots[2] = Holding::Fire;
-        app.update();
-        let bytes = fs::read(dir.path()).unwrap();
-        let mut document: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-        document["games"]["terra"]["selected"] = 9.into();
-        assert!(decode(&serde_json::to_vec(&document).unwrap()).is_err());
-        document["games"]["terra"]["selected"] = 0.into();
-        document["games"]["terra"]["slots"][0] = serde_json::json!({"kind":"solid","material":"terra:wood","shape":"core:cube","orientation":24});
-        assert!(decode(&serde_json::to_vec(&document).unwrap()).is_err());
-        let previous = bytes.clone();
-        let obstruction = dir.path().with_extension("json.bak");
-        fs::create_dir(&obstruction).unwrap();
-        app.world_mut().resource_mut::<Hotbar>().slots[3] = Holding::Fire;
-        app.update();
-        assert_eq!(fs::read(dir.path()).unwrap(), previous);
-        fs::remove_dir(obstruction).unwrap();
-        app.update();
-        assert_ne!(fs::read(dir.path()).unwrap(), previous);
-        assert_eq!(
-            fs::read(dir.path().with_extension("json.bak")).unwrap(),
-            previous
-        );
+        let path = dir.0.join("slot.json");
+        let open = |path: &std::path::Path| {
+            let mut app = app(dir.path());
+            app.insert_resource(LastSlot::load(path.to_path_buf()))
+                .add_systems(Update, (restore_slot, remember_slot).chain());
+            arrive(&mut app);
+            for _ in 0..3 {
+                frame(&mut app);
+            }
+            app
+        };
+        let mut app = open(&path);
+        assert_eq!(selected(&mut app), 0, "nothing chosen yet");
+        assert!(!path.exists(), "nothing to remember");
+        app.world_mut().write_message(InventoryIntent::Select(5));
+        frame(&mut app);
+        assert_eq!(selected(&mut app), 5);
+
+        let mut app = open(&path);
+        assert_eq!(selected(&mut app), 5, "the next World opens on it");
+        fs::write(&path, b"broken").unwrap();
+        let mut app = open(&path);
+        assert_eq!(selected(&mut app), 0, "a broken file is ignored");
     }
 }

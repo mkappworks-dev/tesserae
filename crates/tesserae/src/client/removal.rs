@@ -27,6 +27,17 @@ impl Progress {
     pub(super) fn active(&self) -> bool {
         self.target.is_some() && !self.consumed
     }
+    /// How far the removal has run, `0..=1`; zero when none is.
+    pub(super) fn fraction(&self) -> f32 {
+        if self.active() {
+            (self.elapsed / self.duration.max(0.05)).clamp(0.0, 1.0)
+        } else {
+            0.0
+        }
+    }
+    pub(super) fn bounds(&self) -> Option<crate::server::edit::AimBounds> {
+        self.target.filter(|_| self.active()).map(|t| t.bounds)
+    }
     fn reset(&mut self) {
         self.target = None;
         self.elapsed = 0.0;
@@ -140,12 +151,7 @@ fn spawn(mut commands: Commands) {
 }
 pub(super) fn hold(
     (actions, preferences, ownership, cursor, menu, hotbar, mut previous_hand): Controls,
-    (target, sent, time, layout): (
-        Res<Target>,
-        Res<Sent>,
-        Res<Time>,
-        Option<Res<super::layout::LayoutMode>>,
-    ),
+    (target, sent, time): (Res<Target>, Res<Sent>, Res<Time>),
     catalogue: Res<Catalogue>,
     camera: Single<&GlobalTransform, With<FlyCamera>>,
     mut progress: ResMut<Progress>,
@@ -180,8 +186,6 @@ pub(super) fn hold(
         || (repeating && progress.chain && hand_edited);
     if !ownership.gameplay()
         || hotbar.held().tool().is_some()
-        // Free roaming breaks nothing, so nothing is ever changed unseen.
-        || !super::edit::building(&hotbar, layout.as_deref())
         || state.cancelled
         || !ready
         || menu.open
@@ -409,7 +413,7 @@ mod tests {
         app.world_mut().resource_mut::<Sent>().last = Some(view);
         app.world_mut()
             .resource_mut::<super::super::edit::Hotbar>()
-            .slots = [super::super::edit::Holding::Fire; super::super::edit::SLOT_KEYS.len()];
+            .outside = Some(super::super::edit::Holding::Fire);
         let mut answer = app.world_mut().resource_mut::<Target>();
         answer.0.removal = Some(target(0));
         answer.1 = Some(view);
@@ -479,7 +483,7 @@ mod tests {
         app.world_mut()
             .resource_mut::<ButtonInput<MouseButton>>()
             .release_all();
-        app.world_mut().resource_mut::<Hotbar>().outside = None;
+        app.world_mut().resource_mut::<Hotbar>().outside = Some(Holding::Fire);
         step(&mut app, 0.0);
         app.world_mut()
             .resource_mut::<ButtonInput<MouseButton>>()
@@ -615,6 +619,23 @@ mod tests {
         assert_eq!(sent.len(), 1);
         assert_eq!(sent[0].action, EditAction::RemoveAt(target(0)));
         assert!(step(&mut app, 1.0).is_empty(), "one action per hold");
+    }
+
+    #[test]
+    fn left_click_removes_with_an_empty_hand() {
+        let mut app = app();
+        app.world_mut()
+            .resource_mut::<super::super::edit::Hotbar>()
+            .outside = Some(super::super::edit::Holding::Empty);
+        step(&mut app, 0.0);
+        step(&mut app, 0.0);
+        app.world_mut()
+            .resource_mut::<ButtonInput<MouseButton>>()
+            .press(MouseButton::Left);
+        assert!(step(&mut app, 0.1).is_empty());
+        let sent = step(&mut app, 0.36);
+        assert_eq!(sent.len(), 1);
+        assert_eq!(sent[0].action, EditAction::RemoveAt(target(0)));
     }
 
     fn repeating() -> App {

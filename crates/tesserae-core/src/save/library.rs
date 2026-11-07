@@ -45,6 +45,38 @@ pub struct Sidecar {
     pub world: WorldId,
     #[serde(default)]
     pub pending: bool,
+    /// Mirrors the commit's, for the World list; absent in Worlds that predate
+    /// game modes.
+    #[serde(default)]
+    pub game_mode: super::GameMode,
+    /// The player's Create-time Biome changes, applied once when the World is
+    /// first opened. Absent leaves the Game's Biomes as declared.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub biomes: Option<crate::biome_edits::BiomeEdits>,
+    /// The Player's own mode when the World last opened, for Edit World.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub player_mode: Option<super::GameMode>,
+    /// Changes Edit World asked for; the Server applies them at the next open.
+    #[serde(default, skip_serializing_if = "ModeChanges::is_empty")]
+    pub mode_changes: ModeChanges,
+}
+
+/// Game mode changes waiting for the World to open. No one changes a mode
+/// while the World runs.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModeChanges {
+    /// The World's default, for Players new to it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default: Option<super::GameMode>,
+    /// The Player's own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub own: Option<super::GameMode>,
+}
+
+impl ModeChanges {
+    pub fn is_empty(&self) -> bool {
+        self.default.is_none() && self.own.is_none()
+    }
 }
 
 /// The name given to the single World that predates the World list.
@@ -110,6 +142,10 @@ impl Sidecar {
             last_played_unix_s: now,
             world: commit.world.clone(),
             pending: false,
+            game_mode: commit.game_mode,
+            biomes: None,
+            player_mode: None,
+            mode_changes: Default::default(),
         }
     }
 }
@@ -190,6 +226,14 @@ fn adopt(path: &Path) -> Result<Option<Sidecar>, Error> {
     let sidecar = Sidecar::from_commit(&recovered.commit, DEFAULT_WORLD_NAME.into(), now_unix_s());
     write(path, &sidecar)?;
     Ok(Some(sidecar))
+}
+
+/// Records mode changes for the next open; refuses while the World is open.
+pub fn request_modes(dir: &Path, changes: ModeChanges) -> Result<(), Error> {
+    let _lock = super::lock(dir)?;
+    let mut sidecar = read(dir)?.ok_or_else(|| Error::Corrupt("World details missing".into()))?;
+    sidecar.mode_changes = changes;
+    Ok(write(dir, &sidecar)?)
 }
 
 /// Refuses while any process holds the World open; repairs missing details.
@@ -326,6 +370,10 @@ mod tests {
             last_played_unix_s: 1,
             world: WorldId::new(),
             pending: true,
+            game_mode: Default::default(),
+            biomes: None,
+            player_mode: None,
+            mode_changes: Default::default(),
         }
     }
 

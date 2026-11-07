@@ -31,6 +31,7 @@ fn biome(name: &str, temperature: f32, ground: GroundParams) -> Biome {
         ground: Some(ground),
         sky_fog: None,
         cave_scale: None,
+        surface_features: Default::default(),
     }
 }
 
@@ -190,4 +191,65 @@ fn the_column_generators_cap_each_column_with_its_biomes_surface() {
         }
     }
     assert!(seen.iter().all(|&n| n > 200), "{seen:?}");
+}
+
+/// Generation never asks the tables about a feature, so an id no fixture uses marks it apart.
+const MELON: tesserae_core::MaterialId = 200;
+
+#[test]
+fn coarse_levels_leave_surface_features_out() {
+    let melons = tesserae_core::SurfaceFeatures::new(&[tesserae_core::SurfaceFeature {
+        material: MELON,
+        spacing_m: 4.0,
+    }])
+    .unwrap();
+    let mut params = params();
+    let featured: Vec<Biome> = params
+        .biomes
+        .as_slice()
+        .iter()
+        .map(|b| Biome {
+            surface_features: melons,
+            ..*b
+        })
+        .collect();
+    params.biomes = BiomeTable::new(&featured).unwrap();
+    let world = WorldSettings::default();
+    let level_zero = Worldgen::new(world.seed, world.voxel_size, params);
+    let generators = LodGenerators::with_probe(
+        LodGenerators::new(&world, &level_zero, LEVELS),
+        &world,
+        FarProbe::Direct { from: 2 },
+    );
+    let tables = &fixtures().tables;
+    let (_, highest) = level_zero.surface_bounds_m();
+    let melons_in = |chunk: &Chunk| {
+        (0..CHUNK_SIZE)
+            .flat_map(|z| {
+                (0..CHUNK_SIZE).flat_map(move |y| (0..CHUNK_SIZE).map(move |x| (x, y, z)))
+            })
+            .filter(|&(x, y, z)| chunk.get(x, y, z).material() == MELON)
+            .count()
+    };
+    for level in 0..LEVELS {
+        let edge_m = world.voxel_size * 2f32.powi(level as i32);
+        let rows = (highest / (CHUNK_SIZE as f32 * edge_m)).ceil() as i32;
+        let found: usize = (-2..2)
+            .flat_map(|cz| (-2..2).flat_map(move |cx| (0..=rows).map(move |cy| (cx, cy, cz))))
+            .map(|(cx, cy, cz)| match level {
+                0 => melons_in(&level_zero.chunk(cx, cy, cz)),
+                _ => melons_in(&chunk_of(
+                    &generators,
+                    tables,
+                    level,
+                    ChunkCoord::new(cx, cy, cz),
+                )),
+            })
+            .sum();
+        if level == 0 {
+            assert!(found > 100, "level 0 has {found} melons");
+        } else {
+            assert_eq!(found, 0, "level {level}");
+        }
+    }
 }
