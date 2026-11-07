@@ -308,6 +308,7 @@ mod tests {
             .init_resource::<Assets<StandardMaterial>>()
             .init_resource::<Assets<Image>>()
             .init_resource::<PublishedBody>()
+            .init_resource::<super::super::pose::NewestCorrection>()
             .add_message::<crate::server::player::PoseCorrection>()
             .add_systems(Update, super::super::pose::apply_correction)
             .add_plugins(plugin);
