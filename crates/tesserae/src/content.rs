@@ -143,4 +143,9 @@ pub struct WorldFacts {
     pub biomes: Vec<String>,
     /// The mode a Player new to this World starts in.
     pub default_mode: tesserae_core::save::GameMode,
+    /// The generator version this World was made with and keeps generating by.
+    pub generator: u32,
+    /// How far apart the Climate map's temperature and humidity change, in metres.
+    pub temperature_size_m: f32,
+    pub humidity_size_m: f32,
 }

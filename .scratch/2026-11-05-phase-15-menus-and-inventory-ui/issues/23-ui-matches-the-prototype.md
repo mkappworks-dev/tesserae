@@ -49,7 +49,7 @@ Every screen this spec added or restyled matches the approved prototype one to o
 
 - Fix pass C (Menu and Settings), 2026-11-06: what still differs from the prototype, and why:
   - **Biome in "You are here"**: the Server now sends the Biome at the Player's Eye (`HereBiome`), and the block shows only while one is known, so a World without Biomes has none.
-  - **World details**: the Server reports no Generator version or climate sizes, so those lines are left out, and the Game shows without its version, as the prototype words it.
+  - **World details**: the Game shows without its version, as the prototype words it. The Server's World facts now carry the World's Generator version and Climate sizes, shown as the prototype shows them.
   - **Menu panel position**: the prototype's "Single-player prototype" notice is prototype chrome and is not ported, so the shorter panel centres a little lower.
   - **Settings applied**: the engine keeps its top-right notice card; it has no bottom toast for menus.
   - **Stronger UI contrast**: the engine has no such setting, so Accessibility has no row for it.

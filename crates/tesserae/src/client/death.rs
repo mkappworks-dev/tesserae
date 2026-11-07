@@ -562,6 +562,9 @@ mod tests {
             seed: 1,
             biomes: Vec::new(),
             default_mode: GameMode::Survival,
+            generator: 2,
+            temperature_size_m: 300.0,
+            humidity_size_m: 700.0,
         });
         app.update();
         tell(&mut app, fell(stones(), false));

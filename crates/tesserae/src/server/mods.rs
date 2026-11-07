@@ -817,6 +817,8 @@ fn install(world: &mut World) {
         .get_resource::<WorldSettings>()
         .copied()
         .unwrap_or_default();
+    let generation = &world.resource::<WorldParameters>().0;
+    let (generator, climate) = (generation.generator, generation.climate);
     world.write_message(crate::content::WorldFacts {
         name,
         game: loaded
@@ -835,6 +837,9 @@ fn install(world: &mut World) {
             .map(|b| b.name.as_str().to_owned())
             .collect(),
         default_mode,
+        generator,
+        temperature_size_m: climate.temperature_size_m,
+        humidity_size_m: climate.humidity_size_m,
     });
     world.write_message(MaterialPalette(loaded.appearance));
     world.write_message(MaterialTextures(loaded.textures));
@@ -1300,7 +1305,47 @@ biomes = ["plain:dry"]
                 seed: 123,
                 biomes: vec!["base:wet".into(), "plain:dry".into()],
                 default_mode: crate::server::game_mode::GameMode::Creative,
+                generator: tesserae_core::save::GENERATOR_VERSION,
+                temperature_size_m: tesserae_core::climate::ClimateParams::default()
+                    .temperature_size_m,
+                humidity_size_m: tesserae_core::climate::ClimateParams::default().humidity_size_m,
             }
+        );
+    }
+
+    #[test]
+    fn the_facts_carry_the_games_climate_sizes_and_the_worlds_generator() {
+        let s = Scratch::new();
+        let game = format!(
+            "{DATA_GAME}\n[world.climate]\ntemperature-size-m = 300.0\nhumidity-size-m = 700.0\n\
+             [[biomes]]\nname = \"dry\"\ntemperature = 0.8\nhumidity = 0.1\n"
+        );
+        data(&s, "plain", true, "depends = ['base']", &game);
+        data(&s, "base", false, "", WET);
+        let mut loaded = s.load(TrustMode::All).unwrap();
+        // A World made before the current generator keeps its own version.
+        loaded.world.as_mut().unwrap().generator = 1;
+        let mut app = App::new();
+        app.insert_non_send(loaded)
+            .insert_resource(WorldSettings {
+                seed: 1,
+                voxel_size: 0.5,
+            })
+            .add_plugins(plugin)
+            .add_systems(Startup, super::super::open_world);
+        let facts = app
+            .world_mut()
+            .resource_mut::<Messages<crate::content::WorldFacts>>()
+            .drain()
+            .next()
+            .expect("the facts are sent at session start");
+        assert_eq!(
+            (
+                facts.generator,
+                facts.temperature_size_m,
+                facts.humidity_size_m
+            ),
+            (1, 300.0, 700.0)
         );
     }
 
