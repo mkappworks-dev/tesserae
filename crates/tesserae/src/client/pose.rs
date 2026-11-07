@@ -7,8 +7,13 @@ use crate::session::SessionApp;
 /// The latest body the Server published, for posing the figure.
 #[derive(Resource, Default)]
 pub(super) struct PublishedBody(pub BodyState);
+/// The newest correction applied, per session: a Local would outlive it, and
+/// the next Player's `seq` restarts at zero, so every correction would look old.
+#[derive(Resource, Default)]
+pub(super) struct NewestCorrection(Option<u32>);
 pub(super) fn plugin(app: &mut App) {
     app.init_session_state::<PublishedBody>()
+        .init_session_state::<NewestCorrection>()
         .add_session_systems(Update, (restore_view, apply_correction, feedback));
 }
 fn feedback(mut messages: MessageReader<MovementFeedback>, mut commands: Commands) {
@@ -25,15 +30,17 @@ pub(super) fn apply_correction(
     mut corrections: MessageReader<PoseCorrection>,
     camera: Single<(&mut Transform, &mut GlobalTransform, &mut FlyCamera)>,
     mut body: ResMut<PublishedBody>,
-    mut newest: Local<Option<u32>>,
+    mut newest: ResMut<NewestCorrection>,
 ) {
     // In order, and the last that is not older than one already applied is where
     // the Player is. A reordered channel can deliver an older one late.
     let mut latest = None;
     for correction in corrections.read() {
-        let older = newest.is_some_and(|seen| (correction.seq.wrapping_sub(seen) as i32) < 0);
+        let older = newest
+            .0
+            .is_some_and(|seen| (correction.seq.wrapping_sub(seen) as i32) < 0);
         if !older {
-            *newest = Some(correction.seq);
+            newest.0 = Some(correction.seq);
             latest = Some(*correction);
         }
     }
@@ -127,5 +134,53 @@ mod tests {
                 .translation(),
             Vec3::splat(4.0)
         );
+    }
+    use crate::session::testing;
+
+    fn correction(seq: u32, x: f32) -> PoseCorrection {
+        PoseCorrection {
+            mode: MovementMode::Physics,
+            seq,
+            eye: Vec3::new(x, 2.0, 0.0),
+            body: BodyState::default(),
+        }
+    }
+
+    fn eye(app: &mut App) -> Vec3 {
+        app.world_mut()
+            .query::<&Transform>()
+            .iter(app.world())
+            .next()
+            .unwrap()
+            .translation
+    }
+
+    fn open_world(app: &mut App) {
+        testing::enter(app);
+        app.world_mut().spawn((
+            Transform::default(),
+            GlobalTransform::default(),
+            FlyCamera::default(),
+        ));
+    }
+
+    #[test]
+    fn a_reopened_world_follows_corrections_whose_seq_restarts_below_the_last_sessions() {
+        let mut app = testing::app();
+        app.add_session_message::<PoseCorrection>()
+            .add_session_message::<MovementFeedback>()
+            .add_session_message::<RestoreView>()
+            .add_plugins(plugin);
+        open_world(&mut app);
+        app.world_mut().write_message(correction(3000, 1.0));
+        app.update();
+        assert_eq!(eye(&mut app).x, 1.0);
+
+        testing::leave(&mut app);
+        open_world(&mut app);
+        // A new Player counts corrections from the start again.
+        app.world_mut().write_message(correction(1, 5.0));
+        app.update();
+        assert_eq!(eye(&mut app).x, 5.0, "the first World's seq must not stick");
     }
 }
