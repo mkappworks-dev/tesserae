@@ -324,6 +324,26 @@ impl Inventory {
             .sum()
     }
 
+    /// Takes `count` of the Stack in `from` out of the Inventory, for a drop:
+    /// an empty slot, none, or more than the Stack holds is refused and changes
+    /// nothing.
+    pub fn take_from(&mut self, from: Slot, count: u32) -> Result<Stack, Refusal> {
+        let slot = self.slot_mut(from)?;
+        let held = slot.as_ref().ok_or(Refusal::Empty)?.count;
+        if count == 0 || count > held {
+            return Err(Refusal::BadCount);
+        }
+        if count == held {
+            return Ok(slot.take().expect("counted above"));
+        }
+        let stack = slot.as_mut().expect("counted above");
+        stack.count -= count;
+        Ok(Stack {
+            item: stack.item.clone(),
+            count,
+        })
+    }
+
     /// Removes `count` of `item`, all of them or none: the held stack first,
     /// then the others hotbar before backpack.
     pub fn spend(&mut self, item: &str, count: u32) -> Result<(), Refusal> {
@@ -385,6 +405,46 @@ mod tests {
             item: item.into(),
             count,
         })
+    }
+
+    #[test]
+    fn taking_from_a_slot_removes_that_many_and_refuses_the_impossible() {
+        let mut inventory = Inventory::default();
+        inventory.receive("m:rock", 40, 64);
+        assert_eq!(
+            inventory.take_from(Slot::Hotbar(0), 1),
+            Ok(Stack {
+                item: "m:rock".into(),
+                count: 1
+            })
+        );
+        assert_eq!(inventory.count("m:rock"), 39);
+        assert_eq!(
+            inventory.take_from(Slot::Hotbar(0), 40),
+            Err(Refusal::BadCount)
+        );
+        assert_eq!(
+            inventory.take_from(Slot::Hotbar(0), 0),
+            Err(Refusal::BadCount)
+        );
+        assert_eq!(inventory.take_from(Slot::Hotbar(3), 1), Err(Refusal::Empty));
+        assert_eq!(
+            inventory.take_from(Slot::Hotbar(99), 1),
+            Err(Refusal::NoSuchSlot)
+        );
+        assert_eq!(inventory.count("m:rock"), 39, "refusals change nothing");
+        assert_eq!(
+            inventory.take_from(Slot::Hotbar(0), 39),
+            Ok(Stack {
+                item: "m:rock".into(),
+                count: 39
+            })
+        );
+        assert_eq!(
+            inventory.held(),
+            None,
+            "the emptied slot is empty, not a stack of none"
+        );
     }
 
     #[test]

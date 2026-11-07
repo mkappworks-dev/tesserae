@@ -70,8 +70,9 @@ a redo and a save's Carried overflow lose nothing. Removing a fluid source drops
 its Item as removing a solid does, so a source placed from the Hotbar can be
 taken back, as Minecraft's and Luanti's buckets allow; flowing fluid drops
 nothing. Only an Item that no content names has nothing to become; it is lost,
-and a death does not report it. Throwing an Item away, containers and crafting
-are later work.
+and a death does not report it. Throwing an Item away is the
+[amendment below](#amendment-2026-11-07-dropping-an-item); containers and
+crafting are later work.
 
 ## Amendment 2026-11-07: Creative spends Items too
 
@@ -103,3 +104,17 @@ needs nothing different in Creative.
 The old rules, "Creative placing is free" and, from
 [ADR-0024](0024-game-mode-is-per-player-with-a-world-default.md), "in Creative
 removing a Voxel drops nothing", are superseded.
+
+## Amendment 2026-11-07: dropping an Item
+
+A Player can throw a carried Item away from the Inventory window, which the
+paragraph above listed as later work. The Client sends
+`InventoryIntent::Drop { slot, count }`; the Server takes `count` out of that
+Stack, refusing an empty slot, none, or more than the Stack holds, and spawns a
+Dropped item a short way in front of the Player's feet, in either mode. An Item
+the World's content names no drop for is refused rather than lost. The Dropped
+item cannot be picked up for four times a broken Voxel's delay, so the Player
+who throws it does not collect it again while it is in the air; it can be picked
+up again after that, by anyone near it. A drop is not an Edit and never enters
+the undo journal: nothing can be undone into the Inventory by it, which is the
+rule that an entry pays and refunds only what its own Edit did.

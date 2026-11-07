@@ -20,6 +20,9 @@ pub const DESPAWN_STEPS: u32 = 300 * 64;
 /// A new drop cannot be picked up for this long, so breaking a Voxel does not
 /// collect its own drop.
 pub const PICKUP_DELAY_STEPS: u32 = 32;
+/// A thrown Item cannot be picked up for this long, so the Player who drops it
+/// does not collect it again while it is still in the air.
+pub const THROWN_PICKUP_DELAY_STEPS: u32 = 4 * PICKUP_DELAY_STEPS;
 /// Resting drops of one Item this close merge into one stack.
 pub const MERGE_RADIUS_M: f32 = 0.5;
 
@@ -31,6 +34,8 @@ const POP_LIFT_M_S: f32 = 2.5;
 /// The outermost stack's throw; with the lift and the slide it lands about a
 /// metre out.
 const SPREAD_SPEED_M_S: f32 = 2.0;
+/// A dropped Item's toss, with the lift it lands about a metre ahead.
+const TOSS_SPEED_M_S: f32 = 2.2;
 const GOLDEN_ANGLE: f32 = 2.399_963;
 /// Horizontal speed kept after a step on the ground.
 const GROUND_KEEP: f32 = 0.85;
@@ -222,6 +227,23 @@ impl Entities {
             ids.push(id);
         }
         ids
+    }
+
+    /// Tosses a drop of `spec` from `pos_m` along the horizontal `toward`, which
+    /// cannot be picked up for [`THROWN_PICKUP_DELAY_STEPS`].
+    pub fn spawn_tossed(
+        &mut self,
+        terrain: &Terrain<impl VoxelVolume>,
+        pos_m: [f32; 3],
+        toward: [f32; 2],
+        spec: DropSpec,
+    ) -> EntityId {
+        let id = self.claim_id();
+        let angle = toward[1].atan2(toward[0]);
+        let mut drop = thrown(spec, pos_m, angle, TOSS_SPEED_M_S);
+        drop.pickup_in = THROWN_PICKUP_DELAY_STEPS;
+        self.insert_drop(terrain, id, drop);
+        id
     }
 
     /// The next id, making room for it by despawning the oldest entity.
@@ -495,6 +517,35 @@ mod tests {
                 size_m: 0.25,
             },
         )
+    }
+
+    #[test]
+    fn a_tossed_drop_flies_ahead_and_waits_longer_than_a_broken_voxels() {
+        let grid = Grid::floor();
+        let mut entities = Entities::default();
+        let terrain = Terrain {
+            voxels: &grid,
+            tables: tables(),
+            voxel_size: SIZE,
+        };
+        let spec = DropSpec {
+            item: 0,
+            count: 5,
+            size_m: 0.25,
+        };
+        let id = entities.spawn_tossed(&terrain, [0.0, 1.0, 0.0], [1.0, 0.0], spec);
+        let d = *entities.get(id).unwrap().as_dropped();
+        assert!(
+            d.vel_m_s[0] > 1.0 && d.vel_m_s[2].abs() < 1e-3,
+            "along +x: {:?}",
+            d.vel_m_s
+        );
+        assert_eq!(d.pickup_in, THROWN_PICKUP_DELAY_STEPS);
+        assert!(d.pickup_in > PICKUP_DELAY_STEPS);
+        run(&mut entities, &grid, 120);
+        let at = entities.get(id).unwrap().as_dropped().pos_m;
+        assert!(at[0] > 0.5 && at[0] < 3.0, "it landed ahead: {at:?}");
+        assert_eq!(entities.get(id).unwrap().as_dropped().count, 5);
     }
 
     fn run(entities: &mut Entities, grid: &Grid, steps: u32) {

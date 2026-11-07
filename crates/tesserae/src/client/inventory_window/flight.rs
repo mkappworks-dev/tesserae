@@ -97,7 +97,7 @@ pub(super) fn note_takes(
     }
 }
 
-fn holding(catalogue: &Catalogue, material: MaterialId) -> Holding {
+pub(super) fn holding(catalogue: &Catalogue, material: MaterialId) -> Holding {
     let fluid = catalogue
         .0
         .materials

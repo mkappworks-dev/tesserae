@@ -250,6 +250,7 @@ fn drag_start(
 /// its place; the parts below it are filled by [`fill`].
 pub(super) fn panel(row: &mut ChildSpawnerCommands, query: &str) {
     row.spawn((
+        super::Panel,
         Node {
             width: Val::Px(PANEL_PX),
             flex_shrink: 0.0,

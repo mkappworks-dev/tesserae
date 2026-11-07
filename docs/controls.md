@@ -39,7 +39,11 @@ double-click it to fill the selected Hotbar slot, Shift-click it to send it to
 the backpack, or choose a count and a destination. In either mode, the details
 of the selected Hotbar slot have a Shape row for the Material its Item places;
 **F** cycles the same Shapes in play. Every change to a slot is an intent the
-Server accepts or refuses.
+Server accepts or refuses. To throw Items away, drag a Stack out over the World
+to drop it whole, or select it and use **Drop 1** or **Drop stack** in the
+details; the Item lands in front of you, in either mode, and cannot be picked up
+again for two seconds. While you drag a Stack or a Catalogue tile, its Item is
+drawn under the pointer.
 
 Each keyboard/mouse action has two alternatives. Behavior, binding and display
 changes share one draft across their pages. **Apply changes** saves and

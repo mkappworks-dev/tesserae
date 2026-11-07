@@ -54,6 +54,12 @@ pub enum InventoryIntent {
         count: u32,
         into: Destination,
     },
+    /// Throws `count` of the Stack in `slot` onto the ground ahead of the
+    /// Player, in either mode. Not an Edit: it never enters the undo journal.
+    Drop {
+        slot: Slot,
+        count: u32,
+    },
 }
 
 /// Why the Server declined an intent.
@@ -64,6 +70,8 @@ pub enum Reason {
     NotInCatalogue,
     /// A take outside Creative.
     CreativeOnly,
+    /// A drop of an Item the World's content has no drop for.
+    CannotDrop,
 }
 
 /// An intent the Server declined; the Inventory is as it was.
@@ -79,6 +87,7 @@ pub fn message(reason: Reason) -> &'static str {
         Reason::Rule(refusal) => refusal,
         Reason::NotInCatalogue => return "That Material is not in the Catalogue.",
         Reason::CreativeOnly => return CREATIVE_ONLY,
+        Reason::CannotDrop => return "That Item cannot be dropped.",
     };
     match refusal {
         Refusal::NoSuchSlot => "That slot does not exist.",
@@ -107,14 +116,67 @@ pub(crate) fn plugin(app: &mut App) {
         );
 }
 
-fn arrange(
+/// What a drop needs to put an Item on the ground.
+#[derive(bevy::ecs::system::SystemParam)]
+pub(super) struct Ground<'w> {
+    entities: Option<ResMut<'w, EntityStore>>,
+    store: Option<Res<'w, ChunkStore>>,
+    tables: Option<Res<'w, ContentTables>>,
+    world: Option<Res<'w, WorldSettings>>,
+}
+
+impl Ground<'_> {
+    /// Tosses `stack` from just ahead of the Player's feet, along where they
+    /// look, as Dropped items. Whether the Item has a drop was checked first.
+    fn toss(&mut self, items: &Items, player: &Player, stack: Stack) -> bool {
+        let (Some(entities), Some(store), Some(tables), Some(world)) = (
+            self.entities.as_deref_mut(),
+            self.store.as_deref(),
+            self.tables.as_deref(),
+            self.world.as_deref(),
+        ) else {
+            return false;
+        };
+        let Some(at) = items.named(&stack.item) else {
+            return false;
+        };
+        let look = player.look();
+        let toward = Vec2::new(look.x, look.z)
+            .try_normalize()
+            .unwrap_or(Vec2::NEG_Y);
+        let body = player.body();
+        let feet = Vec3::new(
+            (body.min[0] + body.max[0]) / 2.0,
+            body.min[1] + TOSS_HEIGHT_M,
+            (body.min[2] + body.max[2]) / 2.0,
+        );
+        let from = feet + Vec3::new(toward.x, 0.0, toward.y) * TOSS_AHEAD_M;
+        entities.spawn_tossed(
+            &tables.terrain(store, world.voxel_size),
+            from.to_array(),
+            toward.to_array(),
+            DropSpec {
+                item: at as u32,
+                count: stack.count,
+                size_m: items.0[at].size_m,
+            },
+        );
+        true
+    }
+}
+
+/// Where a dropped Item starts: this far above the feet and ahead of the body.
+const TOSS_HEIGHT_M: f32 = 0.5;
+const TOSS_AHEAD_M: f32 = 0.5;
+
+pub(super) fn arrange(
     mut intents: MessageReader<InventoryIntent>,
-    player: Single<(&mut Inventory, &PlayerMode)>,
+    player: Single<(&mut Inventory, &PlayerMode, &Player)>,
     placing: Option<Res<PlacingItems>>,
     items: Option<Res<Items>>,
-    mut refused: MessageWriter<InventoryRefused>,
+    (mut refused, mut ground): (MessageWriter<InventoryRefused>, Ground),
 ) {
-    let (mut inventory, mode) = player.into_inner();
+    let (mut inventory, mode, body) = player.into_inner();
     let limit = |item: &str| items.as_ref().map_or(MAX_STACK, |i| i.stack_limit(item));
     for intent in intents.read() {
         let mut next = inventory.0.clone();
@@ -139,6 +201,27 @@ fn arrange(
                 };
                 // At most one stack, so the Catalogue's full stack fits any Item.
                 next.take(item, count.min(limit(item)), into, limit)
+            }
+            InventoryIntent::Drop { slot, count } => {
+                let Some(items) = items.as_ref() else {
+                    refused.write(InventoryRefused(Reason::CannotDrop));
+                    continue;
+                };
+                match next.take_from(slot, count) {
+                    Ok(stack) if items.named(&stack.item).is_none() => {
+                        refused.write(InventoryRefused(Reason::CannotDrop));
+                        continue;
+                    }
+                    Ok(stack) => {
+                        // No World to drop into: nothing was taken.
+                        if !ground.toss(items, body, stack) {
+                            refused.write(InventoryRefused(Reason::CannotDrop));
+                            continue;
+                        }
+                        Ok(())
+                    }
+                    Err(refusal) => Err(refusal),
+                }
             }
         };
         match result {

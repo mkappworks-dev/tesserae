@@ -8,9 +8,13 @@
 use crate::client::buttons::{self, Eyebrow};
 use crate::client::cinematic::Kind;
 use bevy::input_focus::InputFocus;
-use bevy::picking::events::{PointerDragDrop, PointerDragEnd, PointerDragStart, PointerPress};
 use bevy::picking::hover::Hovered;
 use bevy::picking::pointer::PointerButton;
+use bevy::picking::{
+    events::{PointerDragDrop, PointerDragEnd, PointerDragStart, PointerPress},
+    hover::HoverMap,
+    pointer::PointerId,
+};
 use bevy::prelude::*;
 use bevy::ui::InteractionDisabled;
 use bevy::ui_widgets::{Activate, ScrollArea};
@@ -35,6 +39,8 @@ const SLOT_PX: f32 = 52.0;
 const SLOT_GAP_PX: f32 = 4.0;
 const GRID_PX: f32 = SLOT_PX * HOTBAR_SLOTS as f32 + SLOT_GAP_PX * (HOTBAR_SLOTS - 1) as f32;
 const SLOT_ICON_PX: f32 = 32.0;
+/// The Item carried under the pointer by a drag.
+const GHOST_PX: f32 = 44.0;
 const INSPECTOR_PX: f32 = 220.0;
 const INSPECTOR_ICON_PX: f32 = 80.0;
 const EMPTY_PX: f32 = 100.0;
@@ -53,6 +59,8 @@ pub(super) struct InventoryWindow {
     dragging: Option<Slot>,
     /// A drag ends in a click on the slot it started from, which is not a pick.
     suppress_click: bool,
+    /// What was asked to drop, told once the Server's answer shows it did.
+    dropping: Option<(String, u32)>,
 }
 
 impl InventoryWindow {
@@ -95,10 +103,22 @@ enum Control {
     CancelMove,
     /// The Shape the selected slot's Material is placed in.
     Shape(tesserae_core::ShapeId),
+    /// Throws one Item of the Stack, or all of it, onto the ground.
+    DropOne(Slot),
+    DropStack(Slot),
 }
 
 #[derive(Component)]
 struct SlotCount;
+
+/// The Inventory's and the Catalogue's panels: a drag released anywhere else,
+/// over the World, throws the Stack out.
+#[derive(Component)]
+pub(super) struct Panel;
+
+/// The Item under the pointer while a Stack or a Catalogue tile is dragged.
+#[derive(Component)]
+struct DragGhost;
 
 pub(super) fn plugin(app: &mut App) {
     app.init_session_state::<InventoryWindow>()
@@ -130,6 +150,7 @@ pub(super) fn plugin(app: &mut App) {
                     paint,
                     catalogue::paint,
                     flight::fly,
+                    drag_ghost,
                 )
                     .chain()
                     .after(toggle),
@@ -218,14 +239,33 @@ fn receive(
     mut commands: Commands,
     mut changes: MessageReader<InventoryChanged>,
     mut refusals: MessageReader<InventoryRefused>,
-    mut held: ResMut<Held>,
-    mut takeoffs: ResMut<flight::Takeoffs>,
+    (mut held, mut window, mut takeoffs): (
+        ResMut<Held>,
+        ResMut<InventoryWindow>,
+        ResMut<flight::Takeoffs>,
+    ),
+    (looks, catalogue): (Res<Looks>, Res<Catalogue>),
 ) {
     if let Some(InventoryChanged(now)) = changes.read().last() {
         flight::landed(&mut commands, &mut takeoffs, &held.0, now);
+        // The Server's answer to a drop is the Inventory that no longer holds it.
+        if let Some((item, count)) = window.dropping.take() {
+            let names = Names {
+                looks: &looks,
+                catalogue: &catalogue,
+            };
+            if now.count(&item) < held.0.count(&item) {
+                ui::notify(
+                    &mut commands,
+                    &format!("Dropped {count} {}.", names.label(&item)),
+                    ui::Tone::Change,
+                );
+            }
+        }
         held.0 = now.clone();
     }
     for InventoryRefused(refusal) in refusals.read() {
+        window.dropping = None;
         ui::notify(
             &mut commands,
             crate::server::inventory::message(*refusal),
@@ -298,6 +338,19 @@ fn activate(
             intents.write(InventoryIntent::Split(slot));
         }
         Control::CancelMove => window.picked = None,
+        Control::DropOne(slot) | Control::DropStack(slot) => {
+            let Some(stack) = held.0.get(slot) else {
+                return;
+            };
+            let count = if control == Control::DropOne(slot) {
+                1
+            } else {
+                stack.count
+            };
+            window.picked = None;
+            window.dropping = Some((stack.item.clone(), count));
+            intents.write(InventoryIntent::Drop { slot, count });
+        }
         Control::Shape(shape) => match &mut hotbar.outside {
             Some(Holding::Solid { shape: chosen, .. }) => *chosen = shape,
             _ => hotbar.shape = shape,
@@ -328,14 +381,121 @@ fn drag_start(
     }
 }
 
+/// What is being dragged, for the ghost under the pointer.
+#[derive(Clone, PartialEq)]
+enum Dragged {
+    Stack(String),
+    Tile(MaterialId),
+}
+
+/// Draws the Item being dragged, from a slot or the Catalogue, under the
+/// pointer, so a drag is seen to carry something.
+fn drag_ghost(
+    mut commands: Commands,
+    (window, side, held): (Res<InventoryWindow>, Res<catalogue::Side>, Res<Held>),
+    (looks, catalogue): (Res<Looks>, Res<Catalogue>),
+    screen: Single<&Window, With<PrimaryWindow>>,
+    mut ghost: Query<(Entity, &mut Node), With<DragGhost>>,
+    mut shown: Local<Option<Dragged>>,
+) {
+    let dragged = window.open.then(|| {
+        window
+            .dragging
+            .and_then(|slot| held.0.get(slot))
+            .map(|stack| Dragged::Stack(stack.item.clone()))
+            .or(side.taking.map(Dragged::Tile))
+    });
+    let dragged = dragged.flatten();
+    if *shown != dragged {
+        for (entity, _) in &ghost {
+            commands.entity(entity).despawn();
+        }
+        if let Some(what) = &dragged {
+            let names = Names {
+                looks: &looks,
+                catalogue: &catalogue,
+            };
+            let icon = match what {
+                Dragged::Stack(item) => names.icon(item),
+                Dragged::Tile(material) => Ok(flight::holding(&catalogue, *material)),
+            };
+            commands
+                .spawn((
+                    DragGhost,
+                    GlobalZIndex(60),
+                    Node {
+                        position_type: PositionType::Absolute,
+                        width: Val::Px(GHOST_PX),
+                        height: Val::Px(GHOST_PX),
+                        ..default()
+                    },
+                    Pickable::IGNORE,
+                ))
+                .with_children(|ghost| item_icon(ghost, icon, GHOST_PX, false));
+        }
+        *shown = dragged;
+    }
+    if let Some(at) = screen.cursor_position() {
+        for (_, mut node) in &mut ghost {
+            node.left = Val::Px(at.x - GHOST_PX / 2.0);
+            node.top = Val::Px(at.y - GHOST_PX / 2.0);
+        }
+    }
+}
+
+type Hovering<'w, 's> = (
+    Option<Res<'w, HoverMap>>,
+    Query<'w, 's, (), With<Panel>>,
+    Query<'w, 's, &'static ChildOf>,
+);
+
+/// Whether the pointer is over one of the window's panels rather than the World.
+fn over_a_panel(
+    hover: &HoverMap,
+    panels: &Query<(), With<Panel>>,
+    parents: &Query<&ChildOf>,
+) -> bool {
+    hover
+        .get(&PointerId::Mouse)
+        .into_iter()
+        .flat_map(|hits| hits.keys())
+        .any(|&hit| {
+            std::iter::successors(Some(hit), |&at| parents.get(at).ok().map(ChildOf::parent))
+                .any(|at| panels.contains(at))
+        })
+}
+
+/// A Stack let go over the World, not over a slot or a panel, is thrown out
+/// whole. A drop on a slot was taken by [`drop_on_slot`] before this.
 fn drag_end(
     event: On<PointerDragEnd>,
+    (hover, panels, parents): Hovering,
+    held: Res<Held>,
     mut window: ResMut<InventoryWindow>,
     mut side: ResMut<catalogue::Side>,
+    mut intents: MessageWriter<InventoryIntent>,
 ) {
-    if event.button == PointerButton::Primary {
-        window.dragging = None;
-        side.taking = None;
+    if event.button != PointerButton::Primary {
+        return;
+    }
+    side.taking = None;
+    let Some(slot) = window.dragging.take() else {
+        return;
+    };
+    if !window.open
+        || hover
+            .as_deref()
+            .is_some_and(|hover| over_a_panel(hover, &panels, &parents))
+    {
+        return;
+    }
+    if let Some(stack) = held.0.get(slot) {
+        window.dropping = Some((stack.item.clone(), stack.count));
+        window.inspected = None;
+        intents.write(InventoryIntent::Drop {
+            slot,
+            count: stack.count,
+        });
     }
 }
 
@@ -504,6 +664,7 @@ fn render(
     commands
         .spawn((
             Card,
+            Panel,
             ChildOf(row),
             Node {
                 flex_direction: FlexDirection::Column,
@@ -580,6 +741,11 @@ impl Names<'_> {
             })),
             holding => Ok(holding),
         }
+    }
+
+    /// The name the Player reads: the declared title of the Item.
+    fn label(&self, item: &str) -> String {
+        super::pickup::label(self.looks, item)
     }
 
     /// An Item no Mod declares stacks to the engine's limit.
@@ -786,7 +952,7 @@ fn backpack(main: &mut ChildSpawnerCommands, state: &Built, names: &Names) {
                 if state.picked.is_some() {
                     "Stack selected. Choose a destination, or select the source again to cancel."
                 } else {
-                    "Click to move · Shift-click for quick transfer · Drag and drop supported"
+                    "Click to move · Shift-click for quick transfer · Drag and drop supported · Drag out to drop"
                 },
                 theme::TEXT_EYEBROW,
                 theme::REGULAR,
@@ -1137,6 +1303,20 @@ fn inspected(
             if stack.count < 2 {
                 actions.commands().entity(split).insert(InteractionDisabled);
             }
+            look::button(
+                actions,
+                "Drop 1",
+                Control::DropOne(slot),
+                Kind::Plain,
+                look::ROOMY,
+            );
+            look::button(
+                actions,
+                "Drop stack",
+                Control::DropStack(slot),
+                Kind::Plain,
+                look::ROOMY,
+            );
             if state.picked.is_some() {
                 look::button(
                     actions,
@@ -1707,6 +1887,235 @@ mod tests {
             distance: Vec2::ZERO,
         });
         server(app);
+    }
+
+    fn intents(app: &App) -> Vec<InventoryIntent> {
+        app.world()
+            .resource::<Messages<InventoryIntent>>()
+            .iter_current_update_messages()
+            .copied()
+            .collect()
+    }
+
+    fn slot_drag(app: &mut App, slot: Slot, released_over: Option<Entity>) {
+        let pointer = || {
+            Pointer::new(
+                PointerId::Mouse,
+                Location {
+                    target: NormalizedRenderTarget::None {
+                        width: 800,
+                        height: 600,
+                    },
+                    position: Vec2::ZERO,
+                },
+            )
+        };
+        let entity = find(app, Control::Slot(slot));
+        app.world_mut().trigger(PointerDragStart {
+            entity,
+            pointer: pointer(),
+            button: PointerButton::Primary,
+            hit: HitData::new(Entity::PLACEHOLDER, 0.0, None, None),
+        });
+        app.update();
+        let mut hover = HoverMap::default();
+        if let Some(over) = released_over {
+            hover.insert(
+                PointerId::Mouse,
+                [(over, HitData::new(over, 0.0, None, None))].into(),
+            );
+        }
+        app.insert_resource(hover);
+        app.world_mut().trigger(PointerDragEnd {
+            entity,
+            pointer: pointer(),
+            button: PointerButton::Primary,
+            distance: Vec2::ZERO,
+        });
+    }
+
+    fn ghosts(app: &mut App) -> usize {
+        app.world_mut()
+            .query_filtered::<(), With<DragGhost>>()
+            .iter(app.world())
+            .count()
+    }
+
+    #[test]
+    fn dragging_a_stack_out_over_the_world_throws_the_whole_stack_and_a_ghost_follows_the_drag() {
+        let mut app = app();
+        press(&mut app, KeyCode::KeyI);
+        let stack = app
+            .world()
+            .resource::<Held>()
+            .0
+            .get(Slot::Backpack(0))
+            .cloned()
+            .expect("the backpack holds rock");
+        slot_drag(&mut app, Slot::Backpack(0), None);
+        assert_eq!(
+            intents(&app),
+            [InventoryIntent::Drop {
+                slot: Slot::Backpack(0),
+                count: stack.count
+            }]
+        );
+        app.update();
+        assert_eq!(ghosts(&mut app), 0, "the ghost goes when the drag ends");
+    }
+
+    #[test]
+    fn a_drag_shows_the_item_under_the_pointer_from_a_slot_and_from_the_catalogue() {
+        let mut app = app();
+        press(&mut app, KeyCode::KeyI);
+        let entity = find(&mut app, Control::Slot(Slot::Backpack(0)));
+        app.world_mut().trigger(PointerDragStart {
+            entity,
+            pointer: Pointer::new(
+                PointerId::Mouse,
+                Location {
+                    target: NormalizedRenderTarget::None {
+                        width: 800,
+                        height: 600,
+                    },
+                    position: Vec2::ZERO,
+                },
+            ),
+            button: PointerButton::Primary,
+            hit: HitData::new(Entity::PLACEHOLDER, 0.0, None, None),
+        });
+        app.update();
+        assert_eq!(ghosts(&mut app), 1, "a Stack drag carries its Item");
+        app.world_mut().resource_mut::<InventoryWindow>().dragging = None;
+        app.update();
+        assert_eq!(ghosts(&mut app), 0);
+
+        let tile = find(&mut app, CatalogueControl::Tile(ROCK));
+        app.world_mut().trigger(PointerDragStart {
+            entity: tile,
+            pointer: Pointer::new(
+                PointerId::Mouse,
+                Location {
+                    target: NormalizedRenderTarget::None {
+                        width: 800,
+                        height: 600,
+                    },
+                    position: Vec2::ZERO,
+                },
+            ),
+            button: PointerButton::Primary,
+            hit: HitData::new(Entity::PLACEHOLDER, 0.0, None, None),
+        });
+        app.update();
+        assert_eq!(ghosts(&mut app), 1, "so does a Catalogue tile");
+    }
+
+    #[test]
+    fn letting_go_over_a_panel_or_a_slot_does_not_throw_anything() {
+        let mut app = app();
+        press(&mut app, KeyCode::KeyI);
+        let card = app
+            .world_mut()
+            .query_filtered::<Entity, With<Card>>()
+            .single(app.world())
+            .unwrap();
+        slot_drag(&mut app, Slot::Backpack(0), Some(card));
+        assert!(intents(&app).is_empty(), "over the Inventory panel");
+
+        // A drop on another slot is a move, taken before the drag ends.
+        let to = find(&mut app, Control::Slot(Slot::Backpack(2)));
+        let from = find(&mut app, Control::Slot(Slot::Backpack(0)));
+        app.world_mut().trigger(PointerDragStart {
+            entity: from,
+            pointer: Pointer::new(
+                PointerId::Mouse,
+                Location {
+                    target: NormalizedRenderTarget::None {
+                        width: 800,
+                        height: 600,
+                    },
+                    position: Vec2::ZERO,
+                },
+            ),
+            button: PointerButton::Primary,
+            hit: HitData::new(Entity::PLACEHOLDER, 0.0, None, None),
+        });
+        let pointer = || {
+            Pointer::new(
+                PointerId::Mouse,
+                Location {
+                    target: NormalizedRenderTarget::None {
+                        width: 800,
+                        height: 600,
+                    },
+                    position: Vec2::ZERO,
+                },
+            )
+        };
+        app.world_mut().trigger(PointerDragDrop {
+            entity: to,
+            dropped: from,
+            pointer: pointer(),
+            button: PointerButton::Primary,
+            hit: HitData::new(Entity::PLACEHOLDER, 0.0, None, None),
+        });
+        app.insert_resource(HoverMap::default());
+        app.world_mut().trigger(PointerDragEnd {
+            entity: from,
+            pointer: pointer(),
+            button: PointerButton::Primary,
+            distance: Vec2::ZERO,
+        });
+        assert_eq!(
+            intents(&app),
+            [InventoryIntent::Move {
+                from: Slot::Backpack(0),
+                to: Slot::Backpack(2)
+            }]
+        );
+    }
+
+    #[test]
+    fn the_details_buttons_drop_one_or_the_whole_stack_and_the_servers_answer_makes_the_toast() {
+        let mut app = app();
+        press(&mut app, KeyCode::KeyI);
+        click(&mut app, Slot::Backpack(0));
+        let count = app
+            .world()
+            .resource::<Held>()
+            .0
+            .get(Slot::Backpack(0))
+            .unwrap()
+            .count;
+        let one = find(&mut app, Control::DropOne(Slot::Backpack(0)));
+        app.world_mut().trigger(Activate { entity: one });
+        assert_eq!(
+            intents(&app),
+            [InventoryIntent::Drop {
+                slot: Slot::Backpack(0),
+                count: 1
+            }]
+        );
+        let all = find(&mut app, Control::DropStack(Slot::Backpack(0)));
+        app.world_mut().trigger(Activate { entity: all });
+        assert_eq!(
+            intents(&app).last(),
+            Some(&InventoryIntent::Drop {
+                slot: Slot::Backpack(0),
+                count
+            })
+        );
+
+        let mut after = app.world().resource::<Held>().0.clone();
+        after.take_from(Slot::Backpack(0), count).unwrap();
+        app.world_mut().write_message(InventoryChanged(after));
+        app.update();
+        let said = app
+            .world_mut()
+            .query::<&Text>()
+            .iter(app.world())
+            .any(|t| t.0 == format!("Dropped {count} Rock."));
+        assert!(said, "the notice names what the Server took out");
     }
 
     #[test]
