@@ -19,7 +19,10 @@ Settings is one screen, reached from the title screen and from the Menu, with
 at the last of Behavior and Key bindings. Behavior includes an expandable quick
 reference, independent of the **F3** diagnostics. Accessibility scales text from
 100% to 200% in menus and the HUD, offers reduced motion, which also stills the
-HUD's pulses and slides, and a solid menu background.
+HUD's pulses and slides, stronger UI contrast (full-ink secondary text, opaque
+notices, brighter edges and a thicker focus ring) and a solid menu background.
+While the Menu or Settings is open the World behind it is blurred, unless the
+menu background is solid.
 
 Key bindings searches action names, categories and both assigned alternatives.
 **/** focuses search. Escape clears its text, then releases text focus, before
