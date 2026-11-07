@@ -145,10 +145,25 @@ full name, from any Mod, so a sound-only Mod can voice a Game; a Material has at
 most one Sound set in a World, and a second fails the load naming both Mods.
 Names resolve after every Mod has declared. A recording that is not Ogg Vorbis,
 a stereo `effects` recording, an unknown name or an ambient Sound in a set slot
-fails before any World opens, naming the Mod and field. The Server makes a
-`break` when a Player's own Remove takes a solid out of the World, never for
-undo, redo, a Layout, fluid, fire or a Mod's Commands, and only when the Player
-is within the Sound's `max-m`.
+fails before any World opens, naming the Mod and field.
+
+Sounds have limits, each refused naming the Mod and field. A Mod declares at
+most 64 Sounds and 16 Sound sets; a Sound holds at most 8 recordings. An
+`effects` or `ambient` recording is at most 512 KiB and a `music` one 8 MiB, and
+a file over its limit is refused from its size, before it is read. A World holds
+at most 32 MiB of recordings across all its Mods, each reference counted, so a
+file named twice counts twice. A recording has 1 or 2 channels at 8 to 96 kHz.
+`weight` is 1 to 16; `volume` lies in 0 to 1 and `pitch` in 0.5 to 2, each with
+`min` not above `max`; `reference-m` is 0.25 to 16 and `max-m` above it and at
+most 128.
+
+Referenced recordings join build identity like artwork: changing one needs Trust
+again and breaks exact-build reopening of saved Worlds, and unreferenced audio
+files do not.
+
+The Server makes a `break` when a Player's own Remove takes a solid out of the
+World, never for undo, redo, a Layout, fluid, fire or a Mod's Commands, and only
+when the Player is within the Sound's `max-m`.
 
 A combustion `end` is `"permanent"` or
 `{ after = { seconds = 8, residue = "mod:ash" } }`; `residue` omitted removes
@@ -198,13 +213,13 @@ projects named on the command line (never for installed dependencies); the flag
 writes nothing.
 
 `package` writes `games/<id>/` or `mods/<id>/` under `--out`, holding exactly
-`mod.toml`, the Declaration or component, and the referenced PNGs, at the same
-relative paths. Source, development configuration and unreferenced files are
-left out. The bytes written are the bytes that were checked; the copy is then
-loaded again, in place of the source, and must have the same build before
-anything is installed, so a project that changes or fails during the run
-produces no output. An existing folder needs `--force`, and only a packaged Mod
-is replaced. Select the result with `--mods <dir>/mods`.
+`mod.toml`, the Declaration or component, and the referenced PNGs and
+recordings, at the same relative paths. Source, development configuration and
+unreferenced files are left out. The bytes written are the bytes that were
+checked; the copy is then loaded again, in place of the source, and must have
+the same build before anything is installed, so a project that changes or fails
+during the run produces no output. An existing folder needs `--force`, and only
+a packaged Mod is replaced. Select the result with `--mods <dir>/mods`.
 
 ## Watching a project
 

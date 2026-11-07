@@ -18,6 +18,7 @@ use crate::bindings::tesserae::mods::content::{self, Declaration};
 use crate::convert::world_params;
 use crate::error::ModError;
 use crate::registry::{Kind, Registry};
+use crate::sound::{MAX_SOUND_SETS_PER_MOD, MAX_SOUNDS_PER_MOD};
 
 /// The palette has 64 slots; ids 0 through 7 are reserved (`PALETTE_LEN`).
 pub const MAX_MATERIALS: usize = 56;
@@ -234,6 +235,12 @@ pub fn apply(
         ("item", declaration.items.len(), MAX_ITEMS_PER_MOD),
         ("biome", declaration.biomes.len(), MAX_BIOMES_PER_MOD),
         ("ore", declaration.ores.len(), MAX_ORES_PER_MOD),
+        ("sound", declaration.sounds.len(), MAX_SOUNDS_PER_MOD),
+        (
+            "sound-set",
+            declaration.sound_sets.len(),
+            MAX_SOUND_SETS_PER_MOD,
+        ),
     ] {
         if count > max {
             return Err(ModError::TooManyRows {

@@ -1,13 +1,26 @@
 //! Sounds, Sound sets and `material-sounds`: checked per Mod in [`check`], then
 //! resolved by full name once every Mod has declared.
 
+use std::ops::RangeInclusive;
+
 use tesserae_core::MaterialId;
 use tesserae_core::audio::{Falloff, SoundCategory, SoundDef, SoundId, SoundSet, Span};
 
 use crate::bindings::tesserae::mods::content;
 use crate::declare::{Behaviour, NAME_RULE, valid_local};
 use crate::error::ModError;
+use crate::recording::{MAX_MUSIC_BYTES, MAX_SHORT_BYTES, MAX_WORLD_BYTES};
 use crate::registry::{Kind, Registry};
+
+pub const MAX_SOUNDS_PER_MOD: usize = 64;
+pub const MAX_SOUND_SETS_PER_MOD: usize = 16;
+pub const MAX_RECORDINGS_PER_SOUND: usize = 8;
+pub const WEIGHT: RangeInclusive<u8> = 1..=16;
+pub const VOLUME: RangeInclusive<f32> = 0.0..=1.0;
+pub const PITCH: RangeInclusive<f32> = 0.5..=2.0;
+pub const REFERENCE_M: RangeInclusive<f32> = 0.25..=16.0;
+/// The upper bound of `max-m`, which must also exceed `reference-m`.
+pub const MAX_DISTANCE_M: f32 = 128.0;
 
 /// A declared Sound, named `<mod id>:<name>`, with its recordings' checked
 /// Ogg Vorbis bytes in the order `def.weights` gives their weights.
@@ -60,10 +73,60 @@ pub(crate) fn check(
         if sound.recordings.is_empty() {
             return Err(bad("recordings", "must hold at least one".into()));
         }
+        if sound.recordings.len() > MAX_RECORDINGS_PER_SOUND {
+            return Err(bad(
+                "recordings",
+                format!(
+                    "holds {}, at most {MAX_RECORDINGS_PER_SOUND}",
+                    sound.recordings.len()
+                ),
+            ));
+        }
         let effects = sound.category == content::SoundCategory::Effects;
+        let max_bytes = if sound.category == content::SoundCategory::Music {
+            MAX_MUSIC_BYTES
+        } else {
+            MAX_SHORT_BYTES
+        };
         for (at, recording) in sound.recordings.iter().enumerate() {
+            if !WEIGHT.contains(&recording.weight) {
+                return Err(bad(
+                    "weight",
+                    format!(
+                        "recording {at} has weight {}, outside {}",
+                        recording.weight,
+                        shown(&WEIGHT)
+                    ),
+                ));
+            }
+            if recording.bytes.len() as u64 > max_bytes {
+                return Err(bad(
+                    "recordings",
+                    format!("recording {at} is larger than {max_bytes} bytes"),
+                ));
+            }
             let format = crate::recording::identify(&recording.bytes)
                 .map_err(|reason| bad("recordings", format!("recording {at} {reason}")))?;
+            if !crate::recording::CHANNELS.contains(&format.channels) {
+                return Err(bad(
+                    "recordings",
+                    format!(
+                        "recording {at} has {} channels, outside {}",
+                        format.channels,
+                        shown(&crate::recording::CHANNELS)
+                    ),
+                ));
+            }
+            if !crate::recording::SAMPLE_RATE.contains(&format.sample_rate) {
+                return Err(bad(
+                    "recordings",
+                    format!(
+                        "recording {at} has a sample rate of {} Hz, outside {} Hz",
+                        format.sample_rate,
+                        shown(&crate::recording::SAMPLE_RATE)
+                    ),
+                ));
+            }
             if effects && format.channels != 1 {
                 return Err(bad(
                     "recordings",
@@ -71,6 +134,23 @@ pub(crate) fn check(
                         "recording {at} has {} channels; an effects Sound is positional and must \
                          be mono",
                         format.channels
+                    ),
+                ));
+            }
+        }
+        for (field, span, within) in [
+            ("volume", sound.volume, VOLUME),
+            ("pitch", sound.pitch, PITCH),
+        ] {
+            let inside = within.contains(&span.min) && within.contains(&span.max);
+            if !(inside && span.min <= span.max) {
+                return Err(bad(
+                    field,
+                    format!(
+                        "min {} and max {} must lie in {}, min not above max",
+                        span.min,
+                        span.max,
+                        shown(&within)
                     ),
                 ));
             }
@@ -85,10 +165,20 @@ pub(crate) fn check(
                     "is only for effects Sounds; ambient and music are not positional".into(),
                 ));
             }
-            (true, Some(d)) if !(d.reference_m > 0.0 && d.max_m > d.reference_m) => {
+            (true, Some(d))
+                if !(REFERENCE_M.contains(&d.reference_m)
+                    && d.max_m > d.reference_m
+                    && d.max_m <= MAX_DISTANCE_M) =>
+            {
                 return Err(bad(
                     "distance",
-                    "max-m must be greater than reference-m, which must be above 0".into(),
+                    format!(
+                        "reference-m {} must lie in {} m, and max-m {} above it and at most \
+                         {MAX_DISTANCE_M} m",
+                        d.reference_m,
+                        shown(&REFERENCE_M),
+                        d.max_m
+                    ),
                 ));
             }
             _ => {}
@@ -113,8 +203,21 @@ pub(crate) fn check(
 /// in load order once every Declaration is in, like [`crate::resolve_items`].
 pub fn resolve_sounds(behaviours: &[Behaviour], registry: &Registry) -> Result<Sounds, ModError> {
     let mut sounds = Vec::new();
+    let mut held = 0;
     for b in behaviours {
-        for sound in &b.sounds {
+        for (row, sound) in b.sounds.iter().enumerate() {
+            held += sound
+                .recordings
+                .iter()
+                .map(|r| r.bytes.len() as u64)
+                .sum::<u64>();
+            if held > MAX_WORLD_BYTES {
+                let name = format!("{}:{}", b.mod_id, sound.name);
+                return Err(refusal(&b.mod_id, "sounds", row, name)(
+                    "recordings",
+                    format!("bring the World's recordings past {MAX_WORLD_BYTES} bytes"),
+                ));
+            }
             sounds.push(Sound {
                 name: format!("{}:{}", b.mod_id, sound.name),
                 def: def(sound),
@@ -212,4 +315,8 @@ fn def(sound: &content::SoundDef) -> SoundDef {
             max_m: d.max_m,
         }),
     }
+}
+
+fn shown<T: std::fmt::Display>(range: &RangeInclusive<T>) -> String {
+    format!("{} to {}", range.start(), range.end())
 }

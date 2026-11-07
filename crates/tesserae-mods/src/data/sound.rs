@@ -58,6 +58,14 @@ impl Sound {
         self.recordings.iter().map(|r| r.file.as_str())
     }
 
+    /// The most bytes one of this Sound's recordings may hold.
+    pub(super) fn max_bytes(&self) -> u64 {
+        match self.category {
+            Category::Music => crate::recording::MAX_MUSIC_BYTES,
+            Category::Effects | Category::Ambient => crate::recording::MAX_SHORT_BYTES,
+        }
+    }
+
     /// The contract's row, each recording's bytes from `read`, which is given
     /// the recording's index and path.
     pub(super) fn into_def(

@@ -931,6 +931,98 @@ fn a_recording_missing_or_escaping_the_mod_directory_is_refused() {
 }
 
 #[test]
+fn a_referenced_recording_joins_build_identity_and_an_unreferenced_one_does_not() {
+    let s = Scratch::new("sound-identity");
+    let (dir, found) = sound_mod(&s);
+    let original = load_art(&found, &s).unwrap()[0].build_sha256.clone();
+    fs::write(dir.join("sounds/unused.ogg"), super::sounds::STEREO).unwrap();
+    assert_eq!(Trust::hash_of(&found).unwrap(), original);
+
+    let mut trust = s.trust();
+    trust.grant(&found).unwrap();
+    let mut changed = super::sounds::MONO.to_vec();
+    changed.push(0);
+    fs::write(dir.join("sounds/crack.ogg"), changed).unwrap();
+    assert!(matches!(
+        trust.check(&found).unwrap(),
+        Verdict::Untrusted(Untrusted::Changed)
+    ));
+}
+
+/// The mono fixture followed by zeros up to `len` bytes, which still identifies as Ogg Vorbis.
+fn padded(len: u64) -> Vec<u8> {
+    let mut bytes = super::sounds::MONO.to_vec();
+    bytes.resize(len as usize, 0);
+    bytes
+}
+
+const MUSIC_CONTENT: &str = r#"
+[[sounds]]
+name = "tune"
+category = "music"
+recordings = [{ file = "sounds/crack.ogg", weight = 1 }]
+volume = { min = 1.0, max = 1.0 }
+pitch = { min = 1.0, max = 1.0 }
+"#;
+
+#[test]
+fn a_recording_over_its_categorys_limit_is_refused_by_field() {
+    let s = Scratch::new("sound-limit");
+    let (dir, found) = sound_mod(&s);
+    let recording = dir.join("sounds/crack.ogg");
+    let refused = |size: &str| {
+        let error = load_art(&found, &s).err().unwrap().to_string();
+        assert!(
+            error.contains("`art`")
+                && error.contains("sounds[0].recordings[0].file")
+                && error.contains(size),
+            "{error}"
+        );
+    };
+    fs::write(&recording, padded(512 << 10)).unwrap();
+    load_art(&found, &s).unwrap();
+    fs::write(&recording, padded((512 << 10) + 1)).unwrap();
+    refused("524288 bytes");
+
+    fs::write(dir.join("content.toml"), MUSIC_CONTENT).unwrap();
+    load_art(&found, &s).unwrap();
+    fs::write(&recording, padded(8 << 20)).unwrap();
+    load_art(&found, &s).unwrap();
+    fs::write(&recording, padded((8 << 20) + 1)).unwrap();
+    refused("8388608 bytes");
+
+    // Sparse, so only a reader that ignores the limit would notice its size.
+    fs::OpenOptions::new()
+        .write(true)
+        .open(&recording)
+        .unwrap()
+        .set_len(1 << 36)
+        .unwrap();
+    refused("8388608 bytes");
+}
+
+#[test]
+fn a_mods_recordings_are_refused_past_a_worlds_worth_counting_each_reference() {
+    let s = Scratch::new("sound-world");
+    let (dir, found) = sound_mod(&s);
+    fs::write(dir.join("sounds/crack.ogg"), padded(8 << 20)).unwrap();
+    let references = |n: usize| {
+        let one = r#"{ file = "sounds/crack.ogg", weight = 1 }"#;
+        MUSIC_CONTENT.replace(one, &vec![one; n].join(", "))
+    };
+    fs::write(dir.join("content.toml"), references(4)).unwrap();
+    load_art(&found, &s).unwrap();
+    fs::write(dir.join("content.toml"), references(5)).unwrap();
+    let error = load_art(&found, &s).err().unwrap().to_string();
+    assert!(
+        error.contains("`art`")
+            && error.contains("sounds[0].recordings[4].file")
+            && error.contains("33554432 bytes"),
+        "{error}"
+    );
+}
+
+#[test]
 fn non_rgba_png_colour_types_expand_to_straight_rgba() {
     let mut out = Vec::new();
     let mut encoder = png::Encoder::new(&mut out, 2, 1);
