@@ -364,6 +364,9 @@ impl Guest for Meadow {
             items: vec![food::item()],
             biomes: biomes(),
             survival: None,
+            sounds: Vec::new(),
+            sound_sets: Vec::new(),
+            material_sounds: Vec::new(),
             ores: vec![OreDef {
                 material: "strata:basalt".into(),
                 min_depth_m: 6.0,

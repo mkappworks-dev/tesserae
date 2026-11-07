@@ -2,6 +2,7 @@
 //! journal entry and the relight and remesh it needs.
 
 use super::*;
+use tesserae_core::audio::Cause;
 
 pub(in crate::server) fn apply_pending(
     mut pending: ResMut<PendingEdits>,
@@ -10,8 +11,16 @@ pub(in crate::server) fn apply_pending(
         ResMut<crate::server::undo::Journal>,
     ),
     (mut store, mut meshes): (ResMut<ChunkStore>, ResMut<MeshState>),
-    (mut rejected, mut applied_edits): (MessageWriter<EditRejected>, MessageWriter<EditApplied>),
-    (tables, world): (Res<ContentTables>, Res<WorldSettings>),
+    (mut rejected, mut applied_edits, mut heard): (
+        MessageWriter<EditRejected>,
+        MessageWriter<EditApplied>,
+        MessageWriter<crate::server::sound::SoundEvent>,
+    ),
+    (tables, world, sounds): (
+        Res<ContentTables>,
+        Res<WorldSettings>,
+        Res<crate::server::sound::SoundTable>,
+    ),
     (mut entities, items): (
         ResMut<crate::server::entities::EntityStore>,
         Res<crate::server::items::Items>,
@@ -54,6 +63,17 @@ pub(in crate::server) fn apply_pending(
                             .spend(item, 1)
                             .expect("counted before the Voxel changed");
                         entry.cost = Cost::Paid(item.clone());
+                    }
+                    if let Some(material) = removal(p.intent.action, &entry)
+                        && matches!(entry.event.kind, EditKind::Solid { .. })
+                    {
+                        heard.write_batch(sounds.voxel(
+                            Cause::Break,
+                            material,
+                            entry.at,
+                            world.voxel_size,
+                            player.eye(),
+                        ));
                     }
                     // Spawned here rather than from a message so the Entry
                     // holds the Dropped item an undo takes back.

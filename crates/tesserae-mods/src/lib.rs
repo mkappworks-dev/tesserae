@@ -22,8 +22,10 @@ mod manifest;
 mod package;
 mod prompt;
 mod random;
+mod recording;
 mod registry;
 mod sandbox;
+mod sound;
 mod trust;
 
 pub use adapt::Line;
@@ -57,6 +59,7 @@ pub use package::{Staged, stage};
 pub use prompt::{confirm_trust, trust_prompt};
 pub use registry::{Kind, Registry, RegistryMismatch};
 pub use sandbox::{ModFault, ModInstance};
+pub use sound::{Sound, Sounds, resolve_sounds};
 pub use trust::{CheckedPayload, Trust, Untrusted, Verdict};
 
 #[cfg(test)]

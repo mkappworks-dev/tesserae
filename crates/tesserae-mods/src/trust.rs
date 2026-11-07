@@ -221,15 +221,16 @@ fn read_payload(found: &Found) -> Result<CheckedPayload, ModError> {
     let data = found.manifest.declaration.is_some();
     if data {
         let id = &found.manifest.id;
-        for (field, name) in crate::data::references(id, &bytes)? {
+        for (field, name, max_bytes) in crate::data::references(id, &bytes)? {
             if files.contains_key(&name) {
                 continue;
             }
-            let artwork =
-                crate::artwork::read(&found.dir, &name).map_err(|reason| ModError::Data {
+            let artwork = crate::artwork::read(&found.dir, &name, max_bytes).map_err(|reason| {
+                ModError::Data {
                     id: id.clone(),
                     reason: format!("{field}: {reason}"),
-                })?;
+                }
+            })?;
             files.insert(name, artwork);
         }
     }

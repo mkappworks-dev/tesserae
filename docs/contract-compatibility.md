@@ -58,6 +58,15 @@ the health a Player regains per second while hunger is at or above
 `regeneration-hunger`, from 0 to 1000, and 0.25 when absent, the rate the engine
 used before the Game could declare it.
 
+Line 0.3 then gained `sounds`, `sound-sets` and `material-sounds` on its
+`declaration`, appended in the same way. A Declaration for 0.1 or 0.2 loads with
+none of them, so its World is silent. A `sound-def` carries its recordings as
+Ogg Vorbis bytes, each with a weight, a `volume` and a `pitch` `sound-range`, a
+closed `sound-category` of `effects`, `ambient` or `music`, and a `distance` in
+metres that `effects` requires and the others refuse. A `sound-set-def` names an
+`effects` Sound for each of `break`, `place`, `hit`, `step` and `land`, and a
+`material-sound` gives a Material a Sound set, both by full name.
+
 ## What is not frozen
 
 Line `0.x` is pre-release. Later gameplay steps may add new lines, and

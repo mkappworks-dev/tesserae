@@ -60,6 +60,9 @@ impl Guest for Starter {
             items: Vec::new(),
             biomes: Vec::new(),
             survival: None,
+            sounds: Vec::new(),
+            sound_sets: Vec::new(),
+            material_sounds: Vec::new(),
             ores: Vec::new(),
         }
     }

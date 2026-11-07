@@ -55,6 +55,9 @@ fn declaring(materials: &[&str], shapes: &[&str]) -> Declaration {
         biomes: Vec::new(),
         ores: Vec::new(),
         survival: None,
+        sounds: Vec::new(),
+        sound_sets: Vec::new(),
+        material_sounds: Vec::new(),
     }
 }
 

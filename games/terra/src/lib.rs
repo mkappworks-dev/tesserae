@@ -487,6 +487,9 @@ impl Guest for Terra {
                 },
             ],
             survival: None,
+            sounds: Vec::new(),
+            sound_sets: Vec::new(),
+            material_sounds: Vec::new(),
             ores: vec![OreDef {
                 material: "terra:iron".into(),
                 min_depth_m: 5.0,

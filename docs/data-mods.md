@@ -129,6 +129,27 @@ World saved before a Game added features keeps its bare ground.
 Tables that are absent change nothing: a World with no Biomes generates as it
 always did.
 
+Any Mod may declare `[[sounds]]`, `[[sound-sets]]` and `[[material-sounds]]`. A
+Sound row is `name`, `category` (`effects`, `ambient` or `music`), `recordings`
+(one or more `{ file, weight }`, each `file` an Ogg Vorbis path inside the Mod
+directory, read by the same rules as artwork), `volume` and `pitch` (each
+`{ min, max }`, drawn from each time it plays; pitch is a playback speed) and,
+for `effects` only, `distance = { reference-m, max-m }`: whole within
+`reference-m`, fading to silence at `max-m`, in metres at any Voxel size. An
+`effects` Sound is heard from where it happens, so each recording must be mono;
+ambient and music may be stereo, and a `distance` on them is refused. A Sound
+set row is a `name` and an optional `effects` Sound, by full name, for each
+Voxel Cause: `break`, `place`, `hit`, `step` and `land`; a Cause left out is
+silent. A `material-sounds` row gives a Material, by full name, a Sound set, by
+full name, from any Mod, so a sound-only Mod can voice a Game; a Material has at
+most one Sound set in a World, and a second fails the load naming both Mods.
+Names resolve after every Mod has declared. A recording that is not Ogg Vorbis,
+a stereo `effects` recording, an unknown name or an ambient Sound in a set slot
+fails before any World opens, naming the Mod and field. The Server makes a
+`break` when a Player's own Remove takes a solid out of the World, never for
+undo, redo, a Layout, fluid, fire or a Mod's Commands, and only when the Player
+is within the Sound's `max-m`.
+
 A combustion `end` is `"permanent"` or
 `{ after = { seconds = 8, residue = "mod:ash" } }`; `residue` omitted removes
 the solid. Fluid, reaction, combustion, ground and water names are full

@@ -424,6 +424,9 @@ impl Guest for Lumen {
             items: vec![food::item()],
             biomes: biomes(),
             survival: None,
+            sounds: Vec::new(),
+            sound_sets: Vec::new(),
+            material_sounds: Vec::new(),
             ores: vec![OreDef {
                 material: "crystals:amethyst".into(),
                 min_depth_m: 8.0,

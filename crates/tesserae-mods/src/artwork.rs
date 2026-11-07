@@ -7,10 +7,11 @@ use std::path::{Component, Path};
 use png::{ColorType, Decoder, Limits, Transformations};
 
 /// Far above a 64 by 64 image's worst case, so no honest file is refused.
-const MAX_FILE_BYTES: u64 = 1 << 20;
+pub(crate) const MAX_FILE_BYTES: u64 = 1 << 20;
 
-/// Reads one referenced file from inside `dir`, refusing paths that resolve outside it.
-pub(crate) fn read(dir: &Path, name: &str) -> Result<Vec<u8>, String> {
+/// Reads one referenced file of at most `max_bytes` from inside `dir`, refusing paths that
+/// resolve outside it.
+pub(crate) fn read(dir: &Path, name: &str, max_bytes: u64) -> Result<Vec<u8>, String> {
     let path = Path::new(name);
     if name.is_empty() || !path.components().all(|c| matches!(c, Component::Normal(_))) {
         return Err(format!(
@@ -27,10 +28,10 @@ pub(crate) fn read(dir: &Path, name: &str) -> Result<Vec<u8>, String> {
     }
     let mut bytes = Vec::new();
     fs::File::open(&real)
-        .and_then(|file| file.take(MAX_FILE_BYTES + 1).read_to_end(&mut bytes))
+        .and_then(|file| file.take(max_bytes + 1).read_to_end(&mut bytes))
         .map_err(|e| format!("`{name}`: {e}"))?;
-    if bytes.len() as u64 > MAX_FILE_BYTES {
-        return Err(format!("`{name}` is larger than {MAX_FILE_BYTES} bytes"));
+    if bytes.len() as u64 > max_bytes {
+        return Err(format!("`{name}` is larger than {max_bytes} bytes"));
     }
     Ok(bytes)
 }

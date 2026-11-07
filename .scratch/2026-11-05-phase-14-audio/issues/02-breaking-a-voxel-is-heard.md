@@ -1,6 +1,6 @@
 # 02: Breaking a Voxel is heard
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 01
 
@@ -32,19 +32,19 @@ direction.
 
 ## Acceptance criteria
 
-- [ ] Both Declaration formats load the three lists; 0.1 and 0.2 Declarations
+- [x] Both Declaration formats load the three lists; 0.1 and 0.2 Declarations
       adapt to none.
-- [ ] Refusals name the Mod and field: unknown Sound or set, wrong category in
+- [x] Refusals name the Mod and field: unknown Sound or set, wrong category in
       a set slot, stereo Effects, malformed Ogg, missing distances on Effects,
       escaping path, two sets for one Material.
-- [ ] Core tests: attenuation 1 within the reference, 0 at and beyond the
+- [x] Core tests: attenuation 1 within the reference, 0 at and beyond the
       maximum, the same at Voxel sizes 0.5 and 2.0; pan left and right; seeded
       variation stays in range and honours weights.
-- [ ] Server tests: Remove makes one `break` at the Voxel's centre in metres;
+- [x] Server tests: Remove makes one `break` at the Voxel's centre in metres;
       undo, Layout and Commands make none; an event beyond range is dropped; a
       Material with no set is silent.
-- [ ] The Client never decides a Sound event happens; it holds no mutable World
+- [x] The Client never decides a Sound event happens; it holds no mutable World
       state.
-- [ ] Ogg fixtures are tiny, generated once and committed, like the PNG
+- [x] Ogg fixtures are tiny, generated once and committed, like the PNG
       fixtures.
-- [ ] No new dependency in any crate.
+- [x] No new dependency in any crate.

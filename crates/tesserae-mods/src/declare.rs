@@ -139,13 +139,16 @@ pub struct Applied {
 /// Material name.
 #[derive(Clone, PartialEq, Debug, Default)]
 pub struct Behaviour {
-    mod_id: String,
+    pub(crate) mod_id: String,
     fluids: Vec<content::FluidDef>,
     reactions: Vec<content::ReactionDef>,
     combustion: Vec<content::CombustionDef>,
     items: Vec<content::ItemDef>,
     biomes: Vec<content::BiomeDef>,
     ores: Vec<content::OreDef>,
+    pub(crate) sounds: Vec<content::SoundDef>,
+    pub(crate) sound_sets: Vec<content::SoundSetDef>,
+    pub(crate) material_sounds: Vec<content::MaterialSound>,
     lake: Option<content::WaterParams>,
     ground: Option<content::GroundParams>,
 }
@@ -350,6 +353,7 @@ pub fn apply(
 
     check_items(mod_id, &declaration.items)?;
     check_biomes(mod_id, &declaration.biomes)?;
+    crate::sound::check(mod_id, &declaration.sounds, &declaration.sound_sets)?;
 
     let mut remove_times = Vec::new();
     let mut contact_damage = Vec::new();
@@ -424,6 +428,9 @@ pub fn apply(
             items: declaration.items,
             biomes: declaration.biomes,
             ores: declaration.ores,
+            sounds: declaration.sounds,
+            sound_sets: declaration.sound_sets,
+            material_sounds: declaration.material_sounds,
             lake,
             ground,
         },
@@ -982,9 +989,10 @@ fn qualified(mod_id: &str, kind: Kind, row: usize, local: &str) -> Result<String
     })
 }
 
-const NAME_RULE: &str = "must be a lowercase letter then up to 31 lowercase letters, digits or `_`";
+pub(crate) const NAME_RULE: &str =
+    "must be a lowercase letter then up to 31 lowercase letters, digits or `_`";
 
-fn valid_local(local: &str) -> bool {
+pub(crate) fn valid_local(local: &str) -> bool {
     let mut bytes = local.bytes();
     local.len() <= MAX_NAME_BYTES
         && bytes.next().is_some_and(|b| b.is_ascii_lowercase())

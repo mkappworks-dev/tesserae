@@ -351,6 +351,12 @@ fn the_guides_full_declaration_validates_with_its_artwork() {
     .unwrap();
     fs::write(project.join("art/stone.png"), png(48, 16, 1)).unwrap();
     fs::write(project.join("skin.png"), png(64, 64, 2)).unwrap();
+    fs::create_dir_all(project.join("sounds")).unwrap();
+    fs::write(
+        project.join("sounds/crack.ogg"),
+        include_bytes!("../../../tesserae-mods/tests/fixtures/sounds/mono.ogg"),
+    )
+    .unwrap();
     tesserae(&s, &["validate", path(&project)]).unwrap();
 }
 

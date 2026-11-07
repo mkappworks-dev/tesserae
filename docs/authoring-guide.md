@@ -148,7 +148,9 @@ which eases across the border where `ground` switches. A Biome may also name a
 ease to the blend of the Biomes around the Player. A Biome may list up to four
 `surface-features`, solid Materials the Engine stands one Voxel above the
 Biome's surface Material at a mean spacing in metres (see
-[Data Mods](data-mods.md)); a Mod still places no terrain itself.
+[Data Mods](data-mods.md)); a Mod still places no terrain itself. Any Mod may
+declare Sounds and Sound sets and give a Sound set to any Mod's Material (see
+[Data Mods](data-mods.md)).
 
 | Table                       | Fields                                                                                                                                                                                                                                                                                                                                                        |
 | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -176,24 +178,29 @@ Biome's surface Material at a mean spacing in metres (see
 | `[[biomes]]`                | `name`, `temperature`, `humidity` (both 0 to 1), optional `ground` (`rock`, `soil`, `surface`: solid Materials by full name), optional `sky-fog` (`sky`, `fog`: sRGB `[r, g, b]`), optional `cave-scale` (0 to 4), optional `surface-features` (at most 4, each `material`: a solid by full name, `spacing-m`: 4 to 1024); at most 16 per Mod and in a World  |
 | `[survival]` (Game)         | each optional, omitted keeps the engine's default: `max-health` (20), `max-hunger` (20), `max-air-s` (10), `safe-fall-m` (3), `fall-damage-per-m` (1), `drowning-damage-per-s` (2), `hunger-per-min` (1), `sprinting-hunger-per-min` (2), `regeneration-hunger` (18), `regeneration-per-s` (0.25), `starvation-damage-per-s` (0.25), `keep-inventory` (false) |
 | `[[ores]]`                  | `material` (solid), `min-depth-m`, `max-depth-m`, `vein-size-m`, `rarity`, optional `biomes`; 16 per Mod, 32 in a World                                                                                                                                                                                                                                       |
+| `[[sounds]]`                | `name`, `category`, `recordings` (at least one, each `file`: an Ogg Vorbis path, `weight`), `volume` and `pitch` (each `min`, `max`), optional `distance` (`reference-m`, `max-m`: required for `effects`, refused for the others)                                                                                                                            |
+| `[[sound-sets]]`            | `name`, optional `break`, `place`, `hit`, `step`, `land`: each an `effects` Sound by full name                                                                                                                                                                                                                                                                |
+| `[[material-sounds]]`       | `material`, `sound-set`: both by full name; at most one Sound set per Material in a World                                                                                                                                                                                                                                                                     |
 
 Variants: `occlusion` is `opaque`, `same-material` or `never`; `render` is
-`opaque`, `blend` or `cutout`; a bone `role` is `body`, `head`, `arm-left`,
-`arm-right`, `leg-left`, `leg-right` or `fixed`; a reactant `state` is `any`,
-`source` or `flowing`; `consumed` and `receiving` are `first` or `second`; a
-tool `kind` is `measure`. A combustion `end` is `"permanent"` or
+`opaque`, `blend` or `cutout`; a Sound `category` is `effects`, `ambient` or
+`music`; a bone `role` is `body`, `head`, `arm-left`, `arm-right`, `leg-left`,
+`leg-right` or `fixed`; a reactant `state` is `any`, `source` or `flowing`;
+`consumed` and `receiving` are `first` or `second`; a tool `kind` is `measure`.
+A combustion `end` is `"permanent"` or
 `{ after = { seconds = 8, residue = "mod:ash" } }`, and an omitted `residue`
 removes the solid.
 
-Materials, Shapes and Biomes are declared by local name. Ground, water, fluid,
-reaction, combustion, ore and surface feature names, and the Biomes an ore
-lists, are full `<mod id>:<name>` names and resolve after every Mod has
-declared, whether the Material came from data or from a component.
+Materials, Shapes, Biomes, Sounds and Sound sets are declared by local name.
+Ground, water, fluid, reaction, combustion, ore and surface feature names, the
+Biomes an ore lists, and the names in Sound sets and `material-sounds`, are full
+`<mod id>:<name>` names and resolve after every Mod has declared, whether the
+Material came from data or from a component.
 
 ### A Declaration using every table
 
 This Game is checked by the repository's tests: it is extracted from this page,
-given the two PNGs it names, and validated.
+given the two PNGs and the recording it names, and validated.
 
 ```toml
 [[materials]]
@@ -401,6 +408,22 @@ max-depth-m = 40.0
 vein-size-m = 3.0
 rarity = 0.05
 biomes = ["showcase:cold"]
+
+[[sounds]]
+name = "crack"
+category = "effects"
+recordings = [{ file = "sounds/crack.ogg", weight = 1 }]
+volume = { min = 0.8, max = 1.0 }
+pitch = { min = 0.9, max = 1.1 }
+distance = { reference-m = 2.0, max-m = 24.0 }
+
+[[sound-sets]]
+name = "rock"
+break = "showcase:crack"
+
+[[material-sounds]]
+material = "showcase:stone"
+sound-set = "showcase:rock"
 ```
 
 Its `mod.toml` is the data-only starter's with `id = "showcase"`.

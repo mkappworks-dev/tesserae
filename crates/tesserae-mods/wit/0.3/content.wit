@@ -457,6 +457,79 @@ interface content {
         biomes: list<string>,
     }
 
+    /// Which of a user's volume settings a Sound is heard under, all under
+    /// Master. Closed in 0.3: a new case is a breaking change.
+    enum sound-category {
+        /// Positional: heard from where it happens, so every recording must be
+        /// mono.
+        effects,
+        /// Not positional; may be stereo.
+        ambient,
+        /// Not positional; may be stereo.
+        music,
+    }
+
+    /// One Ogg Vorbis file a Sound may play.
+    record recording {
+        /// The whole file. The engine reads its Ogg and Vorbis identification
+        /// headers and refuses one that is not Ogg Vorbis.
+        bytes: list<u8>,
+        /// How often it is chosen against the Sound's other recordings.
+        weight: u8,
+    }
+
+    /// An inclusive range a value is drawn from each time a Sound plays.
+    record sound-range {
+        min: f32,
+        max: f32,
+    }
+
+    /// How far an Effects Sound carries, in metres: whole within
+    /// `reference-m`, falling beyond it and silent from `max-m`, which must be
+    /// greater.
+    record sound-distance {
+        reference-m: f32,
+        max-m: f32,
+    }
+
+    /// A thing that can be heard. The engine registers it under
+    /// `<mod id>:<name>`.
+    record sound-def {
+        /// Local to the Mod, like a Material's.
+        name: string,
+        /// At least one; one is picked by weight each time it plays.
+        recordings: list<recording>,
+        volume: sound-range,
+        /// A playback speed: 2 is an octave up.
+        pitch: sound-range,
+        category: sound-category,
+        /// Required for `effects` and refused for the others.
+        distance: option<sound-distance>,
+    }
+
+    /// What one or more Materials sound like for each Voxel Cause, each an
+    /// `effects` Sound by full name, `<mod id>:<name>`, from any loaded Mod.
+    /// A Cause left out is silent.
+    record sound-set-def {
+        /// Local to the Mod, like a Material's.
+        name: string,
+        /// A deliberate Remove takes the Voxel out of the World.
+        %break: option<string>,
+        place: option<string>,
+        hit: option<string>,
+        step: option<string>,
+        land: option<string>,
+    }
+
+    /// Gives a Material a Sound set. A Material has at most one in a World,
+    /// whichever Mods declare them.
+    record material-sound {
+        /// A Material, `<mod id>:<name>`, of any loaded Mod.
+        material: string,
+        /// A Sound set, `<mod id>:<name>`, of any loaded Mod.
+        sound-set: string,
+    }
+
     /// Everything a Mod adds, in registration order: a name's id is its index
     /// after the engine's built-ins, so Materials start at 8 (7 is retired and
     /// never handed out) and Shapes at 4. A `world` or `view` from a Mod that is
@@ -489,5 +562,10 @@ interface content {
         ores: list<ore-def>,
         /// From the Game only, like `view`; `none` keeps every default.
         survival: option<survival-params>,
+        /// From any Mod. Names in `sound-sets` and `material-sounds` resolve
+        /// after every Mod has declared.
+        sounds: list<sound-def>,
+        sound-sets: list<sound-set-def>,
+        material-sounds: list<material-sound>,
     }
 }

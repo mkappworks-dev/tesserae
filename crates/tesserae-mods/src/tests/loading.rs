@@ -869,6 +869,67 @@ fn artwork_escaping_the_mod_directory_is_refused() {
     assert!(error.contains("relative path"), "{error}");
 }
 
+const SOUND_CONTENT: &str = r#"
+[[sounds]]
+name = "crack"
+category = "effects"
+recordings = [{ file = "sounds/crack.ogg", weight = 1 }]
+volume = { min = 1.0, max = 1.0 }
+pitch = { min = 1.0, max = 1.0 }
+distance = { reference-m = 2.0, max-m = 24.0 }
+"#;
+
+fn sound_mod(s: &Scratch) -> (PathBuf, Found) {
+    s.write_mod("art", ART_MANIFEST, None);
+    let dir = s.mod_dir("art");
+    fs::create_dir_all(dir.join("sounds")).unwrap();
+    fs::write(dir.join("content.toml"), SOUND_CONTENT).unwrap();
+    fs::write(dir.join("sounds/crack.ogg"), super::sounds::MONO).unwrap();
+    let found = only(discover(&s.mods()).unwrap());
+    (dir, found)
+}
+
+#[test]
+fn a_data_recording_is_read_from_the_mod_directory() {
+    let s = Scratch::new("sound-load");
+    let (_, found) = sound_mod(&s);
+    let loaded = load_art(&found, &s).unwrap();
+    let sounds = &loaded[0].declaration().unwrap().sounds;
+    assert_eq!(sounds[0].recordings[0].bytes, super::sounds::MONO);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_recording_missing_or_escaping_the_mod_directory_is_refused() {
+    let s = Scratch::new("sound-escape");
+    let (dir, found) = sound_mod(&s);
+    let field = "sounds[0].recordings[0].file";
+    fs::remove_file(dir.join("sounds/crack.ogg")).unwrap();
+    let error = load_art(&found, &s).err().unwrap().to_string();
+    assert!(
+        error.contains("`art`") && error.contains(field) && error.contains("No such file"),
+        "{error}"
+    );
+    let outside = s.0.join("outside.ogg");
+    fs::write(&outside, super::sounds::MONO).unwrap();
+    std::os::unix::fs::symlink(&outside, dir.join("sounds/crack.ogg")).unwrap();
+    let error = load_art(&found, &s).err().unwrap().to_string();
+    assert!(
+        error.contains(field) && error.contains("outside"),
+        "{error}"
+    );
+    fs::write(
+        dir.join("content.toml"),
+        SOUND_CONTENT.replace("sounds/crack.ogg", "../outside.ogg"),
+    )
+    .unwrap();
+    let error = load_art(&found, &s).err().unwrap().to_string();
+    assert!(
+        error.contains(field) && error.contains("relative path"),
+        "{error}"
+    );
+}
+
 #[test]
 fn non_rgba_png_colour_types_expand_to_straight_rgba() {
     let mut out = Vec::new();

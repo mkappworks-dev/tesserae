@@ -156,6 +156,22 @@ pub enum ModError {
         name: String,
         source: ParamError,
     },
+    /// A row of `sounds`, `sound-sets` or `material-sounds`, named by its full name or, for a
+    /// `material-sounds` row, its Material.
+    Sound {
+        id: String,
+        list: &'static str,
+        row: usize,
+        name: String,
+        field: &'static str,
+        reason: String,
+    },
+    /// A second Sound set for one Material; `other` gave it the first.
+    SecondSoundSet {
+        id: String,
+        other: String,
+        material: String,
+    },
 }
 
 impl fmt::Display for ModError {
@@ -315,6 +331,23 @@ impl fmt::Display for ModError {
                 f,
                 "mod `{id}`: world: {} `{name}` {}",
                 source.field, source.rule
+            ),
+            ModError::Sound {
+                id,
+                list,
+                row,
+                name,
+                field,
+                reason,
+            } => write!(f, "mod `{id}`: {list} {row} `{name}`: {field}: {reason}"),
+            ModError::SecondSoundSet {
+                id,
+                other,
+                material,
+            } => write!(
+                f,
+                "mod `{id}`: material-sounds gives `{material}` a Sound set, but mod `{other}` \
+                 already gave it one; a Material has at most one"
             ),
         }
     }

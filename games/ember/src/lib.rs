@@ -331,6 +331,9 @@ impl Guest for Ember {
             items: vec![food::item()],
             biomes: biomes(),
             survival: None,
+            sounds: Vec::new(),
+            sound_sets: Vec::new(),
+            material_sounds: Vec::new(),
             ores: vec![OreDef {
                 material: "waters:obsidian".into(),
                 min_depth_m: 6.0,

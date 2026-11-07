@@ -26,6 +26,8 @@ mod intake;
 mod layout;
 mod resolve;
 #[cfg(test)]
+mod sound_tests;
+#[cfg(test)]
 pub(in crate::server) mod tests;
 
 use std::collections::{HashMap, VecDeque};
@@ -392,6 +394,8 @@ pub(super) fn plugin(app: &mut App) {
         .add_session_message::<EditApplied>()
         .init_session_resource::<super::entities::EntityStore>()
         .init_session_resource::<super::items::Items>()
+        .init_session_resource::<super::sound::SoundTable>()
+        .add_session_message::<super::sound::SoundEvent>()
         // Every frame, so a click is never lost to a frame that runs no tick.
         .add_session_systems(
             RunFixedMainLoop,

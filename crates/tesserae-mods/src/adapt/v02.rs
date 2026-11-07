@@ -232,6 +232,9 @@ pub(crate) fn declaration(d: old::Declaration, log: &LogHandle) -> content::Decl
         biomes: Vec::new(),
         ores: Vec::new(),
         survival: None,
+        sounds: Vec::new(),
+        sound_sets: Vec::new(),
+        material_sounds: Vec::new(),
     }
 }
 

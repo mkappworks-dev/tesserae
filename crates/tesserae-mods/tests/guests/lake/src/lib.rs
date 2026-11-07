@@ -70,6 +70,9 @@ impl Guest for Lake {
             items: vec![],
             biomes: vec![],
             survival: None,
+            sounds: Vec::new(),
+            sound_sets: Vec::new(),
+            material_sounds: Vec::new(),
             ores: vec![],
         }
     }

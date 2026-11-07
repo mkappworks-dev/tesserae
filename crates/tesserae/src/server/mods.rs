@@ -15,7 +15,8 @@ use bevy::prelude::*;
 use tesserae_core::{MaterialId, SHAPE_FULL_CUBE, ShapeId, Tables, WorldgenParams};
 use tesserae_mods::{
     Kind, ModHost, ModInstance, Registered, Registry, Scan, Trust, Verdict, ViewParams, WorldInfo,
-    apply, games_dir, migrate_legacy_games, plan, resolve, resolve_biomes, resolve_items, scan,
+    apply, games_dir, migrate_legacy_games, plan, resolve, resolve_biomes, resolve_items,
+    resolve_sounds, scan,
 };
 
 use crate::content::{
@@ -120,6 +121,7 @@ pub struct LoadedMods {
     pub required: Vec<tesserae_core::save::RequiredMod>,
     pub survival: Option<tesserae_core::SurvivalRules>,
     pub contact_damage: Vec<(MaterialId, f32)>,
+    pub sounds: tesserae_mods::Sounds,
 }
 
 impl Default for LoadedMods {
@@ -141,6 +143,7 @@ impl Default for LoadedMods {
             required: Vec::new(),
             survival: None,
             contact_damage: Vec::new(),
+            sounds: tesserae_mods::Sounds::default(),
         }
     }
 }
@@ -592,6 +595,7 @@ pub(crate) async fn declare_all(
     // before any Mod starts and the World opens.
     loaded.items =
         resolve_items(&behaviours, &loaded.tables, &loaded.registry).map_err(|e| e.to_string())?;
+    loaded.sounds = resolve_sounds(&behaviours, &loaded.registry).map_err(|e| e.to_string())?;
     let (biomes, ores) =
         resolve_biomes(&behaviours, &loaded.tables, &loaded.registry).map_err(|e| e.to_string())?;
     if !biomes.is_empty() || !ores.is_empty() {
@@ -711,6 +715,7 @@ pub(super) fn plugin(app: &mut App) {
         .add_session_message::<MaterialPalette>()
         .add_session_message::<ContentCatalogue>()
         .add_session_message::<crate::content::WorldFacts>()
+        .add_session_message::<crate::content::SoundLibrary>()
         .on_session_start(install)
         .add_session_systems(SessionTeardown, release_mods);
 }
@@ -775,6 +780,8 @@ fn install(world: &mut World) {
     }
     world.insert_resource(tables);
     world.insert_resource(super::tool::Tools(loaded.tools));
+    world.insert_resource(super::sound::SoundTable::new(&loaded.sounds));
+    world.write_message(crate::content::SoundLibrary::new(loaded.sounds));
     world.insert_resource(
         super::survival::Survival::new(loaded.survival.unwrap_or_default(), loaded.contact_damage)
             .named(|id| {
@@ -988,6 +995,11 @@ mod tests {
         fs::write(dir.join("mod.toml"), format!("id = \"{id}\"\nversion = \"0.1.0\"\napi = \"0.3\"\nroot = {root}\ndeclaration = \"content.toml\"\n{extra}\n")).unwrap();
         fs::write(dir.join("content.toml"), content).unwrap();
         fs::write(dir.join("skin.png"), png(64, 64, 0)).unwrap();
+        let fixtures =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../tesserae-mods/tests/fixtures/sounds");
+        fs::create_dir_all(dir.join("sounds")).unwrap();
+        fs::copy(fixtures.join("mono.ogg"), dir.join("sounds/crack.ogg")).unwrap();
+        fs::copy(fixtures.join("stereo.ogg"), dir.join("sounds/wind.ogg")).unwrap();
         dir
     }
 
@@ -1188,6 +1200,14 @@ surface = "plain:rock"
         data(&s, "full", true, "", &full_game());
         let loaded = s.load(TrustMode::All).unwrap();
         let id = |name| loaded.registry.id_of(Kind::Material, name).unwrap() as MaterialId;
+        let names: Vec<_> = loaded
+            .sounds
+            .sounds
+            .iter()
+            .map(|s| s.name.as_str())
+            .collect();
+        assert_eq!(names, ["full:crack", "full:wind"]);
+        assert_eq!(loaded.sounds.material_sounds[0].0, id("full:rock"));
         let (water, lava, wood, ash, rock) = (
             id("full:water"),
             id("full:lava"),
@@ -2034,6 +2054,60 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
         assert_eq!(survival.contact_damage_per_s(200), 0.0);
         let defaults = installed(LoadedMods::default());
         assert_eq!(defaults.rules, tesserae_core::SurvivalRules::default());
+    }
+
+    #[test]
+    fn the_worlds_sounds_reach_the_server_table_and_the_clients_library() {
+        use tesserae_core::audio::{Cause, Falloff, SoundCategory, SoundDef, SoundSet, Span};
+        let def = SoundDef {
+            weights: vec![2, 1],
+            volume: Span::at(1.0),
+            pitch: Span::at(1.0),
+            category: SoundCategory::Effects,
+            falloff: Some(Falloff {
+                reference_m: 1.0,
+                max_m: 8.0,
+            }),
+        };
+        let sounds = tesserae_mods::Sounds {
+            sounds: vec![tesserae_mods::Sound {
+                name: "t:crack".into(),
+                def: def.clone(),
+                recordings: vec![vec![1, 2], vec![3]],
+            }],
+            material_sounds: vec![(
+                9,
+                SoundSet {
+                    r#break: Some(tesserae_core::audio::SoundId(0)),
+                    ..SoundSet::default()
+                },
+            )],
+        };
+        let mut app = App::new();
+        app.insert_non_send(LoadedMods {
+            sounds,
+            ..LoadedMods::default()
+        })
+        .add_plugins(plugin);
+        let table = app.world().resource::<super::super::sound::SoundTable>();
+        let near = table.voxel(Cause::Break, 9, [0, 0, 0], 1.0, Vec3::new(0.5, 4.5, 0.5));
+        assert_eq!(near.map(|e| e.pos_m), Some([0.5, 0.5, 0.5]));
+        assert_eq!(
+            table.voxel(Cause::Break, 8, [0, 0, 0], 1.0, Vec3::ZERO),
+            None
+        );
+        assert_eq!(
+            table.voxel(Cause::Step, 9, [0, 0, 0], 1.0, Vec3::ZERO),
+            None
+        );
+        let library: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<crate::content::SoundLibrary>>()
+            .drain()
+            .collect();
+        assert_eq!(library.len(), 1);
+        assert_eq!(library[0].0[0].def, def);
+        assert_eq!(*library[0].0[0].recordings[1], [3]);
     }
 
     #[test]

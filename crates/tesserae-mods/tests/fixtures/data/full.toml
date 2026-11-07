@@ -206,3 +206,30 @@ min-depth-m = 0.0
 max-depth-m = 12.0
 vein-size-m = 1.5
 rarity = 1.0
+
+[[sounds]]
+name = "crack"
+category = "effects"
+recordings = [
+  { file = "sounds/crack.ogg", weight = 3 },
+  { file = "sounds/crack.ogg", weight = 1 },
+]
+volume = { min = 0.8, max = 1.0 }
+pitch = { min = 0.9, max = 1.1 }
+distance = { reference-m = 2.0, max-m = 24.0 }
+
+[[sounds]]
+name = "wind"
+category = "ambient"
+recordings = [{ file = "sounds/wind.ogg", weight = 1 }]
+volume = { min = 1.0, max = 1.0 }
+pitch = { min = 1.0, max = 1.0 }
+
+[[sound-sets]]
+name = "rock"
+break = "full:crack"
+step = "full:crack"
+
+[[material-sounds]]
+material = "full:rock"
+sound-set = "full:rock"

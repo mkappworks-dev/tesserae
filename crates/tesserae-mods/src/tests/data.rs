@@ -40,6 +40,8 @@ fn parse(toml: &str) -> Result<Declaration, ModError> {
         [
             ("content.toml", toml.as_bytes().to_vec()),
             ("skin.png", blank_skin()),
+            ("sounds/crack.ogg", super::sounds::MONO.to_vec()),
+            ("sounds/wind.ogg", super::sounds::STEREO.to_vec()),
         ],
     );
     crate::data::parse("full", &payload)
@@ -364,6 +366,47 @@ fn component() -> Declaration {
             starvation_damage_per_s: None,
             keep_inventory: Some(true),
         }),
+        sounds: vec![
+            content::SoundDef {
+                name: "crack".into(),
+                recordings: [3, 1]
+                    .map(|weight| content::Recording {
+                        bytes: super::sounds::MONO.to_vec(),
+                        weight,
+                    })
+                    .into(),
+                volume: content::SoundRange { min: 0.8, max: 1.0 },
+                pitch: content::SoundRange { min: 0.9, max: 1.1 },
+                category: content::SoundCategory::Effects,
+                distance: Some(content::SoundDistance {
+                    reference_m: 2.0,
+                    max_m: 24.0,
+                }),
+            },
+            content::SoundDef {
+                name: "wind".into(),
+                recordings: vec![content::Recording {
+                    bytes: super::sounds::STEREO.to_vec(),
+                    weight: 1,
+                }],
+                volume: content::SoundRange { min: 1.0, max: 1.0 },
+                pitch: content::SoundRange { min: 1.0, max: 1.0 },
+                category: content::SoundCategory::Ambient,
+                distance: None,
+            },
+        ],
+        sound_sets: vec![content::SoundSetDef {
+            name: "rock".into(),
+            break_: Some("full:crack".into()),
+            place: None,
+            hit: None,
+            step: Some("full:crack".into()),
+            land: None,
+        }],
+        material_sounds: vec![content::MaterialSound {
+            material: "full:rock".into(),
+            sound_set: "full:rock".into(),
+        }],
     }
 }
 
@@ -683,4 +726,16 @@ fn ambiguous_reactions_fail_the_load() {
     let applied = apply(d, "full", &mut tables, &mut registry, true).unwrap();
     let error = resolve(vec![applied.behaviour.clone()], &mut tables, &registry).unwrap_err();
     assert!(error.to_string().contains("full"), "{error}");
+}
+
+#[test]
+fn both_formats_resolve_the_same_sounds() {
+    let (_, data_registry, data) = load(parse(&full()).unwrap());
+    let (_, registry, native) = load(component());
+    let data = crate::resolve_sounds(&[data.behaviour], &data_registry).unwrap();
+    let native = crate::resolve_sounds(&[native.behaviour], &registry).unwrap();
+    assert_eq!(data, native);
+    assert_eq!(data.sounds.len(), 2);
+    assert_eq!(data.sounds[0].def.weights, [3, 1]);
+    assert_eq!(data.material_sounds.len(), 1);
 }

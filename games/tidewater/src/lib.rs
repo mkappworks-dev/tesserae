@@ -299,6 +299,9 @@ impl Guest for Tidewater {
                 },
             ],
             survival: None,
+            sounds: Vec::new(),
+            sound_sets: Vec::new(),
+            material_sounds: Vec::new(),
             ores: vec![OreDef {
                 material: "crystals:aquamarine".into(),
                 min_depth_m: 6.0,

@@ -6,6 +6,7 @@
 //! `Boundaries` job. See `docs/architecture.md`.
 
 pub mod agenda;
+pub mod audio;
 pub mod biome_edits;
 pub mod chunk;
 pub mod climate;

@@ -92,6 +92,9 @@ fn empty() -> Declaration {
         biomes: vec![],
         ores: vec![],
         survival: None,
+        sounds: Vec::new(),
+        sound_sets: Vec::new(),
+        material_sounds: Vec::new(),
     }
 }
 

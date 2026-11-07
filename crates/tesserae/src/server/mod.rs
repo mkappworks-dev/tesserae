@@ -37,6 +37,7 @@ pub mod persistence;
 pub mod player;
 mod priority;
 mod sky;
+pub mod sound;
 pub mod streaming;
 pub mod survival;
 pub mod tool;
