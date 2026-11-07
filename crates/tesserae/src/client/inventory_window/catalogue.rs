@@ -346,7 +346,7 @@ pub(super) fn panel(row: &mut ChildSpawnerCommands, query: &str) {
                 ..default()
             },
             BackgroundColor(theme::CATALOGUE_FOOTER),
-            BorderColor::all(theme::ITEM_ROW_RULE),
+            BorderColor::all(theme::item_row_rule()),
         ));
     });
 }
@@ -422,7 +422,7 @@ pub(super) fn fill(
                             "No Materials match.",
                             theme::TEXT_EYEBROW,
                             theme::REGULAR,
-                            theme::ITEM_SOFT,
+                            theme::item_soft(),
                         ));
                     }
                 });
@@ -507,7 +507,7 @@ fn transfer_rows(
             "Choose a Material to take.",
             theme::TEXT_EYEBROW,
             theme::REGULAR,
-            theme::ITEM_SOFT,
+            theme::item_soft(),
         ));
         return;
     };

@@ -252,7 +252,7 @@ pub(super) fn place(facts: Option<&WorldFacts>) -> String {
 }
 
 /// Whether World details show, and whether the background is solid.
-type Shown = (bool, bool);
+type Shown = (bool, bool, bool);
 
 fn render(
     mut commands: Commands,
@@ -268,8 +268,10 @@ fn render(
     roots: Query<Entity, With<MenuRoot>>,
     mut shown: Local<Option<Shown>>,
 ) {
-    let solid = preferences.is_some_and(|p| p.solid_background);
-    let wanted = (menu.open && !settings.is_some_and(|s| s.open)).then_some((menu.details, solid));
+    let solid = preferences.as_ref().is_some_and(|p| p.solid_background);
+    let stronger = preferences.is_some_and(|p| p.stronger_contrast);
+    let wanted =
+        (menu.open && !settings.is_some_and(|s| s.open)).then_some((menu.details, solid, stronger));
     if *shown == wanted
         && !facts.is_changed()
         && !here.is_changed()
@@ -281,7 +283,7 @@ fn render(
     for root in &roots {
         commands.entity(root).despawn();
     }
-    let Some((details, solid)) = wanted else {
+    let Some((details, solid, _)) = wanted else {
         return;
     };
     let facts = facts.0.as_ref();
@@ -373,7 +375,7 @@ fn panel(
                 modal: !details,
                 ..default()
             },
-            cine::surface(theme::PANEL),
+            cine::surface(theme::panel()),
             cine::framed(Node {
                 width: Val::Px(theme::MENU_WIDTH),
                 padding: UiRect::all(Val::Px(25.0)),
@@ -407,7 +409,7 @@ fn panel(
                 Some(mode) => format!("{place} · {}", mode_name(mode)),
                 None => place,
             };
-            ui::paragraph(panel, subtitle, theme::TEXT_SMALL, theme::MUTED);
+            ui::paragraph(panel, subtitle, theme::TEXT_SMALL, theme::muted());
             panel
                 .spawn(Node {
                     flex_direction: FlexDirection::Column,
@@ -527,7 +529,7 @@ fn world_details(
 ) -> Option<Entity> {
     let mut close = None;
     root.spawn((
-        BackgroundColor(theme::OVERLAY),
+        BackgroundColor(theme::overlay()),
         Node {
             position_type: PositionType::Absolute,
             width: Val::Percent(100.0),
@@ -550,14 +552,14 @@ fn world_details(
                 match facts {
                     Some(facts) => {
                         cine::dialog_title(dialog, facts.name.as_deref().unwrap_or("This World"));
-                        cine::dialog_text(dialog, lines(facts, own).join("\n"), theme::MUTED);
+                        cine::dialog_text(dialog, lines(facts, own).join("\n"), theme::muted());
                     }
                     None => {
                         cine::dialog_title(dialog, "This World");
                         cine::dialog_text(
                             dialog,
                             "The Server has not described this World yet.",
-                            theme::MUTED,
+                            theme::muted(),
                         );
                     }
                 }

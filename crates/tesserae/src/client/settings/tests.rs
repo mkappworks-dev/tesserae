@@ -167,6 +167,7 @@ fn accessibility_choices_wait_for_apply_and_are_saved() {
     activate_operation(&mut app, Operation::TextScale(150));
     activate_operation(&mut app, Operation::ReducedMotion(true));
     activate_operation(&mut app, Operation::SolidBackground(true));
+    activate_operation(&mut app, Operation::StrongerContrast(true));
     activate_operation(&mut app, Operation::Navigate(Tab::Behavior));
     activate_operation(&mut app, Operation::Navigate(Tab::Accessibility));
     assert_eq!(app.world().resource::<Preferences>().text_scale, 100);
@@ -191,8 +192,10 @@ fn accessibility_choices_wait_for_apply_and_are_saved() {
         (150, true, true)
     );
     let path = app.world().resource::<Store>().path.clone();
+    assert!(applied.stronger_contrast);
     let (_, _, saved) = Store::load(path);
     assert_eq!(saved, applied);
+    assert!(saved.stronger_contrast, "the preference persists");
 }
 
 #[test]

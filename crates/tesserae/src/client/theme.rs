@@ -4,26 +4,26 @@
 
 use bevy::prelude::*;
 
-pub(super) const PANEL: Color = Color::srgb_u8(0x0b, 0x0b, 0x0c);
+const PANEL: Color = Color::srgb_u8(0x0b, 0x0b, 0x0c);
 pub(super) const RAISED: Color = Color::srgb_u8(0x18, 0x18, 0x1b);
-pub(super) const SHEET_HEADER: Color = Color::srgb_u8(0x11, 0x11, 0x13);
+const SHEET_HEADER: Color = Color::srgb_u8(0x11, 0x11, 0x13);
 pub(super) const SHEET_FOOTER: Color = PANEL;
 /// World, Game, Mod and Biome cards.
 pub(super) const TRUST_PANEL: Color = Color::srgb_u8(0x0f, 0x0f, 0x11);
 pub(super) const CARD: Color = Color::srgb_u8(0x19, 0x19, 0x1c);
 pub(super) const CHOSEN: Color = Color::srgb_u8(0x27, 0x27, 0x2b);
 pub(super) const CHOSEN_EDGE: Color = Color::srgb_u8(0xa8, 0xb0, 0xa2);
-pub(super) const EDGE: Color = Color::srgb_u8(0x64, 0x64, 0x6b);
+const EDGE: Color = Color::srgb_u8(0x64, 0x64, 0x6b);
 pub(super) const GROUT: Color = Color::BLACK;
 /// The 1 px light ring just inside a panel's black frame.
-pub(super) const RING: Color = Color::srgba_u8(0xff, 0xff, 0xff, 0x1f);
+const RING: Color = Color::srgba_u8(0xff, 0xff, 0xff, 0x1f);
 pub(super) const INK: Color = Color::srgb_u8(0xf7, 0xf4, 0xec);
-pub(super) const MUTED: Color = Color::srgb_u8(0xc7, 0xc9, 0xce);
+const MUTED: Color = Color::srgb_u8(0xc7, 0xc9, 0xce);
 /// Rail entries, the edition line and the footer.
-pub(super) const CHROME_INK: Color = Color::srgb_u8(0xe1, 0xe4, 0xe3);
+const CHROME_INK: Color = Color::srgb_u8(0xe1, 0xe4, 0xe3);
 pub(super) const EYEBROW: Color = Color::srgb_u8(0xe3, 0xe7, 0xdf);
 /// The Inventory's and the Catalogue's quieter eyebrows.
-pub(super) const ITEM_EYEBROW: Color = Color::srgb_u8(0xc0, 0xc2, 0xc8);
+const ITEM_EYEBROW: Color = Color::srgb_u8(0xc0, 0xc2, 0xc8);
 pub(super) const SAGE: Color = Color::srgb_u8(0xc1, 0xcd, 0xb5);
 pub(super) const SAGE_HOVER: Color = Color::srgb_u8(0xd4, 0xde, 0xc9);
 pub(super) const SAGE_INK: Color = Color::srgb_u8(0x16, 0x1b, 0x16);
@@ -42,14 +42,14 @@ pub(super) const PRIMARY_DISABLED: Color = Color::srgb_u8(0x28, 0x28, 0x2c);
 pub(super) const PRIMARY_DISABLED_EDGE: Color = Color::srgb_u8(0x62, 0x62, 0x69);
 pub(super) const PRIMARY_DISABLED_INK: Color = Color::srgb_u8(0xb6, 0xb6, 0xbe);
 pub(super) const FIELD: Color = Color::srgb_u8(0x13, 0x13, 0x15);
-pub(super) const FIELD_EDGE: Color = Color::srgb_u8(0x79, 0x79, 0x81);
+const FIELD_EDGE: Color = Color::srgb_u8(0x79, 0x79, 0x81);
 pub(super) const FIELD_HOVER: Color = Color::srgb_u8(0x23, 0x23, 0x27);
 pub(super) const FIELD_LOCKED: Color = Color::srgb_u8(0x12, 0x13, 0x15);
 pub(super) const FIELD_LOCKED_EDGE: Color = Color::srgb_u8(0x4d, 0x4f, 0x55);
 pub(super) const FIELD_LOCKED_INK: Color = Color::srgb_u8(0xb2, 0xb6, 0xbd);
-pub(super) const PLACEHOLDER: Color = Color::srgb_u8(0xae, 0xb2, 0xb8);
+const PLACEHOLDER: Color = Color::srgb_u8(0xae, 0xb2, 0xb8);
 pub(super) const NOTICE: Color = RAISED;
-pub(super) const NOTICE_EDGE: Color = Color::srgb_u8(0xa8, 0xb5, 0xbd);
+const NOTICE_EDGE: Color = Color::srgb_u8(0xa8, 0xb5, 0xbd);
 pub(super) const PILL: Color = Color::srgb_u8(0x51, 0x5e, 0x67);
 pub(super) const PILL_EDGE: Color = Color::srgb_u8(0x9a, 0xa5, 0xac);
 pub(super) const PILL_INK: Color = Color::srgb_u8(0xf0, 0xf2, 0xed);
@@ -58,7 +58,7 @@ pub(super) const FOCUS: Color = Color::srgb_u8(0xe2, 0xd5, 0xab);
 /// The focus ring on checkboxes and slots, which sit tighter.
 pub(super) const FOCUS_TIGHT: Color = Color::srgb_u8(0xf3, 0xf6, 0xec);
 pub(super) const MENU: Color = Color::srgb_u8(0x15, 0x15, 0x17);
-pub(super) const MENU_EDGE: Color = Color::srgb_u8(0x82, 0x82, 0x8a);
+const MENU_EDGE: Color = Color::srgb_u8(0x82, 0x82, 0x8a);
 pub(super) const OPTION_HOVER: Color = Color::srgb_u8(0x30, 0x30, 0x35);
 pub(super) const OPTION_HOVER_EDGE: Color = Color::srgb_u8(0x77, 0x77, 0x80);
 pub(super) const OPTION_CHOSEN_INK: Color = Color::srgb_u8(0xdc, 0xe6, 0xd1);
@@ -78,14 +78,14 @@ pub(super) const SCENE: Color = Color::srgb_u8(0x24, 0x2c, 0x32);
 /// Behind every menu when Simple menu background is on.
 pub(super) const SOLID_BACKGROUND: Color = Color::srgb_u8(0x10, 0x11, 0x13);
 /// The launcher's header and footer bands.
-pub(super) const BAND: Color = Color::srgba_u8(42, 52, 59, 133);
-pub(super) const BAND_RULE: Color = Color::srgba_u8(220, 220, 225, 36);
-pub(super) const KEY_EDGE: Color = Color::srgb_u8(0x62, 0x65, 0x6a);
+const BAND: Color = Color::srgba_u8(42, 52, 59, 133);
+const BAND_RULE: Color = Color::srgba_u8(220, 220, 225, 36);
+const KEY_EDGE: Color = Color::srgb_u8(0x62, 0x65, 0x6a);
 /// Over the World while the Inventory is open: it dims without the menus'
 /// shade so the World stays readable while sorting.
 pub(super) const INVENTORY_SCRIM: Color = Color::srgba_u8(3, 4, 5, 0xdb);
 /// Under a dialog.
-pub(super) const OVERLAY: Color = Color::srgba_u8(0x09, 0x0a, 0x0c, 0xb3);
+const OVERLAY: Color = Color::srgba_u8(0x09, 0x0a, 0x0c, 0xb3);
 /// The shade over the scenery or the World, darkest at the left and the bottom.
 const SHADE: [u8; 3] = [0x19, 0x22, 0x28];
 /// An amber that marks a refusal or a change still to apply.
@@ -93,7 +93,7 @@ pub(super) const WARN: Color = Color::srgb_u8(0xd6, 0xa9, 0x5a);
 pub(super) const WARNING: Color = Color::srgb_u8(0xf0, 0xc0, 0x80);
 /// The notice card's accent for a change that took effect.
 pub(super) const ACCENT: Color = Color::srgb_u8(0xa8, 0xb5, 0xa2);
-pub(super) const NOTICE_CARD: Color = Color::srgba_u8(0x0b, 0x0b, 0x0d, 0xe6);
+const NOTICE_CARD: Color = Color::srgba_u8(0x0b, 0x0b, 0x0d, 0xe6);
 
 /// The title screen's words, straight on the scenery.
 pub(super) const HERO_INK: Color = Color::srgb_u8(0xd1, 0xd1, 0xd0);
@@ -127,7 +127,7 @@ pub(super) const TAG_INK: Color = Color::srgb_u8(0xf3, 0xf5, 0xee);
 /// The band of ground under a Biome's swatch.
 pub(super) const GROUND: Color = Color::srgb_u8(0x55, 0x4d, 0x3c);
 /// A Mod's category beside its card.
-pub(super) const CATEGORY_INK: Color = Color::srgb_u8(0xae, 0xb2, 0xb9);
+const CATEGORY_INK: Color = Color::srgb_u8(0xae, 0xb2, 0xb9);
 /// A World's or a Game's thumbnail: sky, far hills, a near field, the ground,
 /// and the tree against them.
 pub(super) const THUMBNAIL: [Color; 4] = [
@@ -139,7 +139,7 @@ pub(super) const THUMBNAIL: [Color; 4] = [
 pub(super) const THUMBNAIL_TREE: Color = Color::srgb_u8(0x26, 0x3e, 0x2f);
 
 pub(super) const SLOT_EDGE: Color = Color::srgb_u8(5, 5, 6);
-pub(super) const SLOT_RIM: Color = Color::srgb_u8(58, 60, 65);
+const SLOT_RIM: Color = Color::srgb_u8(58, 60, 65);
 pub(super) const SLOT_RIM_HOVER: Color = Color::srgb_u8(154, 159, 147);
 pub(super) const SLOT_ACTIVE_EDGE: Color = Color::srgb_u8(238, 243, 228);
 pub(super) const SLOT_GLOW: Color = Color::srgba_u8(230, 238, 214, 0x40);
@@ -171,6 +171,76 @@ pub(super) const EYEBROW_TRACKING: f32 = 2.4;
 pub(super) const SECTION_TRACKING: f32 = 1.44;
 pub(super) const LINE_HEIGHT: f32 = 1.6;
 
+/// Stronger UI contrast, a Preference. The tokens below change with it: muted
+/// text turns to full ink, fills turn opaque, edges and rules brighten and the
+/// focus ring thickens. Every other token is the same in both modes. A static
+/// rather than a resource so a token stays a plain call; the screens that are
+/// open when the Preference changes are rebuilt.
+static STRONGER_CONTRAST: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub(super) fn set_stronger_contrast(on: bool) {
+    STRONGER_CONTRAST.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub(super) fn stronger_contrast() -> bool {
+    STRONGER_CONTRAST.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+macro_rules! by_contrast {
+    ($($name:ident, $func:ident, $strong:expr;)*) => {
+        $(
+            pub(super) fn $func() -> Color {
+                if stronger_contrast() { $strong } else { $name }
+            }
+        )*
+        /// Each token with whether its two modes differ.
+        #[cfg(test)]
+        fn contrast_pairs() -> Vec<(&'static str, Color, Color)> {
+            vec![$((stringify!($name), $name, $strong)),*]
+        }
+    };
+}
+
+by_contrast! {
+    MUTED, muted, INK;
+    CHROME_INK, chrome_ink, INK;
+    ITEM_EYEBROW, item_eyebrow, INK;
+    CATEGORY_INK, category_ink, INK;
+    PLACEHOLDER, placeholder, INK;
+    ITEM_SOFT, item_soft, ITEM_INK;
+    ITEM_CAPACITY, item_capacity, ITEM_INK;
+    ITEM_SOURCE, item_source, ITEM_INK;
+    ITEM_TERM, item_term, ITEM_INK;
+    HUD_QUIET_INK, hud_quiet_ink, INK;
+    PANEL, panel, Color::srgb_u8(0x11, 0x11, 0x12);
+    SHEET_HEADER, sheet_header, Color::srgb_u8(0x17, 0x19, 0x1c);
+    NOTICE_CARD, notice_card, Color::srgb_u8(0x0b, 0x0b, 0x0d);
+    FULL_NOTICE, full_notice, Color::srgb_u8(11, 11, 13);
+    BAND, band, Color::srgb_u8(42, 52, 59);
+    OVERLAY, overlay, Color::srgba_u8(0x09, 0x0a, 0x0c, 0xe6);
+    EDGE, edge, Color::srgb_u8(0xa2, 0xa6, 0xad);
+    FIELD_EDGE, field_edge, Color::srgb_u8(0xb0, 0xb4, 0xbb);
+    MENU_EDGE, menu_edge, Color::srgb_u8(0xa2, 0xa6, 0xad);
+    NOTICE_EDGE, notice_edge, Color::srgb_u8(0xd0, 0xd8, 0xdd);
+    KEY_EDGE, key_edge, Color::srgb_u8(0xa2, 0xa6, 0xad);
+    SLOT_RIM, slot_rim, Color::srgb_u8(130, 134, 142);
+    ITEM_RULE, item_rule, Color::srgb_u8(0x8a, 0x8a, 0x94);
+    ITEM_FOOTER_RULE, item_footer_rule, Color::srgb_u8(0x8a, 0x8a, 0x94);
+    ITEM_ROW_RULE, item_row_rule, Color::srgb_u8(0x6e, 0x6e, 0x78);
+    BAND_RULE, band_rule, Color::srgba_u8(220, 220, 225, 120);
+    RING, ring_color, Color::srgba_u8(0xff, 0xff, 0xff, 0x59);
+    HUD_ROW_RING, hud_row_ring, Color::srgba_u8(0xff, 0xff, 0xff, 0x59);
+}
+
+/// A focus outline's width, thicker under stronger contrast.
+pub(super) fn focus_width(base: f32) -> f32 {
+    thicker(base, stronger_contrast())
+}
+
+fn thicker(base: f32, stronger: bool) -> f32 {
+    if stronger { base + 2.0 } else { base }
+}
+
 pub(super) const REGULAR: u16 = 400;
 pub(super) const BOOK: u16 = 450;
 pub(super) const MEDIUM: u16 = 500;
@@ -194,7 +264,7 @@ pub(super) const RADIUS_SMALL: f32 = 4.0;
 pub(super) const RADIUS_TAG: f32 = 3.0;
 pub(super) const FRAME: f32 = 2.0;
 pub(super) const RULE: f32 = 1.0;
-pub(super) const FOCUS_WIDTH: f32 = 3.0;
+const FOCUS_WIDTH: f32 = 3.0;
 pub(super) const FOCUS_OFFSET: f32 = 3.0;
 
 /// One variable face, so every weight the theme names renders exactly.
@@ -261,7 +331,7 @@ pub(super) fn shadow() -> BoxShadow {
 /// so it is a child that fills the padding box and draws only its border.
 pub(super) fn ring(outer_radius: f32) -> impl Bundle {
     (
-        BorderColor::all(RING),
+        BorderColor::all(ring_color()),
         Node {
             position_type: PositionType::Absolute,
             left: Val::Px(0.0),
@@ -278,7 +348,11 @@ pub(super) fn ring(outer_radius: f32) -> impl Bundle {
 
 /// A hidden focus ring, lit by whatever paints the control's states.
 pub(super) fn focus_ring() -> Outline {
-    Outline::new(Val::Px(FOCUS_WIDTH), Val::Px(FOCUS_OFFSET), Color::NONE)
+    Outline::new(
+        Val::Px(focus_width(FOCUS_WIDTH)),
+        Val::Px(FOCUS_OFFSET),
+        Color::NONE,
+    )
 }
 
 /// The shade over the World or the launcher's backdrop.
@@ -317,16 +391,16 @@ pub(super) const ITEM_SURFACE: Color = Color::srgb_u8(0x0b, 0x0b, 0x0d);
 pub(super) const ITEM_FOOTER: Color = Color::srgb_u8(0x0d, 0x0d, 0x10);
 pub(super) const ITEM_INSPECTOR: Color = Color::srgb_u8(0x13, 0x13, 0x15);
 pub(super) const CATALOGUE_FOOTER: Color = Color::srgb_u8(0x0e, 0x0e, 0x11);
-pub(super) const ITEM_RULE: Color = Color::srgb_u8(0x45, 0x45, 0x4c);
-pub(super) const ITEM_FOOTER_RULE: Color = Color::srgb_u8(0x55, 0x55, 0x5e);
-pub(super) const ITEM_ROW_RULE: Color = Color::srgb_u8(0x34, 0x34, 0x3c);
+const ITEM_RULE: Color = Color::srgb_u8(0x45, 0x45, 0x4c);
+const ITEM_FOOTER_RULE: Color = Color::srgb_u8(0x55, 0x55, 0x5e);
+const ITEM_ROW_RULE: Color = Color::srgb_u8(0x34, 0x34, 0x3c);
 pub(super) const ITEM_INK: Color = Color::srgb_u8(0xf4, 0xf4, 0xed);
 /// Hints and the hotbar caption under the grids.
-pub(super) const ITEM_SOFT: Color = Color::srgb_u8(0xad, 0xaf, 0xb9);
-pub(super) const ITEM_CAPACITY: Color = Color::srgb_u8(0xb9, 0xbc, 0xc4);
+const ITEM_SOFT: Color = Color::srgb_u8(0xad, 0xaf, 0xb9);
+const ITEM_CAPACITY: Color = Color::srgb_u8(0xb9, 0xbc, 0xc4);
 pub(super) const ITEM_FULL: Color = Color::srgb_u8(0xe8, 0xd2, 0x9f);
-pub(super) const ITEM_SOURCE: Color = Color::srgb_u8(0x99, 0x9c, 0xa7);
-pub(super) const ITEM_TERM: Color = Color::srgb_u8(0xae, 0xb0, 0xb8);
+const ITEM_SOURCE: Color = Color::srgb_u8(0x99, 0x9c, 0xa7);
+const ITEM_TERM: Color = Color::srgb_u8(0xae, 0xb0, 0xb8);
 pub(super) const ITEM_VALUE: Color = Color::srgb_u8(0xec, 0xec, 0xec);
 pub(super) const ITEM_NOTE: Color = Color::srgb_u8(0xa9, 0xad, 0xb7);
 pub(super) const ITEM_CAPTION: Color = Color::srgb_u8(0xa1, 0xa5, 0xaf);
@@ -464,11 +538,11 @@ pub(super) const VITAL_BEVEL: [Color; 2] = [
 ];
 pub(super) const LOW_HEALTH_VIGNETTE: Color = Color::srgba_u8(0x5a, 0x0d, 0x0d, 0x8c);
 pub(super) const HIT_FLASH: Color = Color::srgba_u8(0x8a, 0x1d, 0x1d, 0x40);
-pub(super) const HUD_QUIET_INK: Color = Color::srgb_u8(0xc9, 0xcc, 0xd1);
+const HUD_QUIET_INK: Color = Color::srgb_u8(0xc9, 0xcc, 0xd1);
 /// The 1 px light ring inside a pickup feed row, a shade quieter than [`RING`].
-pub(super) const HUD_ROW_RING: Color = Color::srgba_u8(0xff, 0xff, 0xff, 0x1a);
+const HUD_ROW_RING: Color = Color::srgba_u8(0xff, 0xff, 0xff, 0x1a);
 /// The Inventory-full notice under the held Item's name.
-pub(super) const FULL_NOTICE: Color = Color::srgba_u8(11, 11, 13, 0xcc);
+const FULL_NOTICE: Color = Color::srgba_u8(11, 11, 13, 0xcc);
 pub(super) const FULL_NOTICE_EDGE: Color = Color::srgba_u8(0xd6, 0xc8, 0x8f, 0x80);
 pub(super) const FULL_NOTICE_INK: Color = Color::srgb_u8(0xea, 0xdf, 0xb4);
 pub(super) const NOTICE_CARD_INK: Color = Color::srgb_u8(0xf1, 0xf0, 0xed);
@@ -557,6 +631,36 @@ mod tests {
                 "0000 is {wide} px, 1111 is {narrow} px"
             );
         }
+    }
+
+    #[test]
+    fn every_contrast_token_differs_between_the_modes() {
+        for (name, normal, stronger) in contrast_pairs() {
+            assert_ne!(normal, stronger, "{name} is the same in both modes");
+        }
+    }
+
+    #[test]
+    fn stronger_contrast_lifts_text_to_ink_and_makes_fills_opaque() {
+        let pairs: std::collections::HashMap<_, _> = contrast_pairs()
+            .into_iter()
+            .map(|(name, normal, stronger)| (name, (normal, stronger)))
+            .collect();
+        assert_eq!(pairs["MUTED"].1, INK);
+        for fill in ["NOTICE_CARD", "FULL_NOTICE", "BAND"] {
+            assert_eq!(pairs[fill].1.alpha(), 1.0, "{fill} is not opaque");
+        }
+        for edge in ["EDGE", "FIELD_EDGE", "MENU_EDGE", "SLOT_RIM"] {
+            let (normal, stronger) = pairs[edge];
+            let light = |c: Color| c.to_linear().red;
+            assert!(light(stronger) > light(normal), "{edge} is not brighter");
+        }
+    }
+
+    #[test]
+    fn the_stronger_focus_ring_is_thicker() {
+        assert_eq!(thicker(3.0, false), 3.0);
+        assert!(thicker(3.0, true) > 3.0);
     }
 
     #[test]

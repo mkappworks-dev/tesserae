@@ -56,8 +56,8 @@
 .game.large-text .setting-copy{flex-basis:100%}
 .game.large-text .rail{flex-basis:205px;width:205px}
 .game.large-text .sheet-footer{flex-wrap:wrap}
-.game.strong-contrast{--panel:#111214;--muted:#e1e2e4;--edge:#a2a6ad}
-.game.strong-contrast .muted,.game.strong-contrast small{color:#e1e2e4}
+.game.strong-contrast{--panel:#111212;--muted:#f7f4ec;--edge:#a2a6ad}
+.game.strong-contrast .muted,.game.strong-contrast small{color:#f7f4ec}
 @media(prefers-reduced-motion:reduce){.game *{transition:none!important;scroll-behavior:auto!important}}
 @media(prefers-reduced-transparency:reduce){.game .home-actions{background:#17181a;backdrop-filter:none}}
 .assessment.audit{display:block;max-width:1140px}

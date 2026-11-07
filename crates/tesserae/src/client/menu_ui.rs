@@ -75,6 +75,9 @@ pub(super) fn matches(query: &str, text: &str) -> bool {
 }
 #[derive(Component)]
 struct Shell;
+/// What the Settings shell was built from: the tab, whether it is modal, and
+/// the Preferences that change its look, none when closed.
+type ShellKey = Option<(Tab, bool, bool, bool)>;
 #[derive(Resource)]
 pub(super) struct Mosaic(pub(super) Handle<Image>);
 #[derive(Resource)]
@@ -344,9 +347,9 @@ fn style(
         } else if style.selected {
             (theme::SEGMENT_ON, theme::SEGMENT_ON_EDGE)
         } else if hover {
-            (theme::HOVER, theme::EDGE)
+            (theme::HOVER, theme::edge())
         } else {
-            (theme::RAISED, theme::EDGE)
+            (theme::RAISED, theme::edge())
         };
         background.set_if_neq(BackgroundColor(fill));
         border.set_if_neq(BorderColor::all(edge));
@@ -381,16 +384,19 @@ fn shell(
     searches: Res<Searches>,
     preferences: Res<super::profile::Preferences>,
     roots: Query<Entity, With<Shell>>,
-    mut previous: Local<Option<Option<(Tab, bool, bool)>>>,
+    mut previous: Local<Option<ShellKey>>,
     mut focus: ResMut<InputFocus>,
     (playing, logo, facts): ShellContext,
 ) {
     use super::cinematic as cine;
     use super::worlds::pages;
     let modal = settings.capturing() || settings.modal();
-    let wanted = settings
-        .open
-        .then_some((settings.tab, modal, preferences.solid_background));
+    let wanted = settings.open.then_some((
+        settings.tab,
+        modal,
+        preferences.solid_background,
+        preferences.stronger_contrast,
+    ));
     if *previous == Some(wanted) {
         return;
     }
@@ -404,7 +410,7 @@ fn shell(
     for root in &roots {
         commands.entity(root).despawn();
     }
-    let Some((tab, _modal, solid)) = wanted else {
+    let Some((tab, _modal, solid, _)) = wanted else {
         return;
     };
     // The page lands in the new body this frame.
@@ -465,7 +471,7 @@ fn shell(
                     rail(workspace, tab);
                     workspace
                         .spawn((
-                            cine::surface(theme::PANEL),
+                            cine::surface(theme::panel()),
                             cine::framed(Node {
                                 flex_direction: FlexDirection::Column,
                                 flex_grow: 1.0,
@@ -513,7 +519,7 @@ fn rail(workspace: &mut ChildSpawnerCommands, tab: Tab) {
     use super::cinematic as cine;
     workspace
         .spawn((
-            cine::surface(theme::PANEL),
+            cine::surface(theme::panel()),
             cine::framed(Node {
                 width: Val::Px(theme::RAIL_WIDTH),
                 flex_shrink: 0.0,
@@ -530,7 +536,7 @@ fn rail(workspace: &mut ChildSpawnerCommands, tab: Tab) {
                 font(theme::TEXT_EYEBROW),
                 bevy::text::LetterSpacing::Px(theme::EYEBROW_TRACKING),
                 bevy::text::LineHeight::RelativeToFont(1.2),
-                TextColor(theme::CHROME_INK),
+                TextColor(theme::chrome_ink()),
                 Node {
                     padding: UiRect::horizontal(Val::Px(9.0)),
                     margin: UiRect::bottom(Val::Px(14.0)),
@@ -543,7 +549,7 @@ fn rail(workspace: &mut ChildSpawnerCommands, tab: Tab) {
                 let ink = if selected {
                     theme::INK
                 } else {
-                    theme::CHROME_INK
+                    theme::chrome_ink()
                 };
                 nav.spawn((
                     bevy::ui_widgets::Button,
@@ -635,7 +641,7 @@ pub(super) fn search_frame(
         .spawn((
             SearchFrame,
             BackgroundColor(theme::FIELD),
-            BorderColor::all(theme::FIELD_EDGE),
+            BorderColor::all(theme::field_edge()),
             Node {
                 flex_grow: 1.0,
                 min_width: Val::Px(0.0),
@@ -649,7 +655,7 @@ pub(super) fn search_frame(
             },
         ))
         .with_children(|field| {
-            icon(field, IconKind::Search, theme::MUTED, 16.0);
+            icon(field, IconKind::Search, theme::muted(), 16.0);
             field
                 .spawn(Node {
                     flex_grow: 1.0,
@@ -688,7 +694,7 @@ pub(super) fn search_frame(
                             "Search actions or keys…"
                         }),
                         font(theme::TEXT_SMALL),
-                        TextColor(theme::PLACEHOLDER),
+                        TextColor(theme::placeholder()),
                         Pickable::IGNORE,
                         Node {
                             position_type: PositionType::Absolute,
@@ -717,8 +723,8 @@ pub(super) fn search_frame(
                 SearchSlash,
                 Text::new("/"),
                 font(theme::TEXT_KEY),
-                TextColor(theme::MUTED),
-                BorderColor::all(theme::KEY_EDGE),
+                TextColor(theme::muted()),
+                BorderColor::all(theme::key_edge()),
                 Node {
                     padding: UiRect::axes(Val::Px(5.0), Val::Px(2.0)),
                     border: UiRect::all(Val::Px(1.0)),
@@ -753,7 +759,7 @@ fn search_row(sheet: &mut ChildSpawnerCommands, tab: Tab, value: &str) {
             row.spawn((
                 SearchFrame,
                 BackgroundColor(theme::FIELD),
-                BorderColor::all(theme::FIELD_EDGE),
+                BorderColor::all(theme::field_edge()),
                 Node {
                     height: Val::Px(theme::CONTROL_HEIGHT),
                     border: UiRect::all(Val::Px(theme::RULE)),
@@ -787,7 +793,7 @@ fn search_row(sheet: &mut ChildSpawnerCommands, tab: Tab, value: &str) {
                     SearchPlaceholder,
                     Text::new("Search actions or keys…"),
                     font(theme::TEXT_BODY),
-                    TextColor(theme::PLACEHOLDER),
+                    TextColor(theme::placeholder()),
                     Pickable::IGNORE,
                     Node {
                         position_type: PositionType::Absolute,
@@ -906,7 +912,7 @@ fn search_presentation(
         *border = BorderColor::all(if focused {
             theme::SAGE
         } else {
-            theme::FIELD_EDGE
+            theme::field_edge()
         });
     }
 }
@@ -1256,7 +1262,7 @@ fn materialize_icons(
     for entity in &borders {
         commands.entity(entity).insert(ImageNode {
             image: atlas.empty_border.clone(),
-            color: theme::EDGE,
+            color: theme::edge(),
             ..default()
         });
     }
@@ -1295,11 +1301,11 @@ fn button_label_colors(
         let color = if disabled {
             theme::DISABLED_INK
         } else if empty {
-            theme::MUTED
+            theme::muted()
         } else if style.primary {
             theme::SAGE_INK
         } else if (quiet || style.tab && !style.selected) && !hovered.0 {
-            theme::MUTED
+            theme::muted()
         } else if style.selected && !style.tab {
             theme::SEGMENT_ON_INK
         } else {
@@ -1372,7 +1378,7 @@ pub(super) fn notify_for(commands: &mut Commands, message: &str, tone: Tone, sec
         ))
         .with_children(|root| {
             root.spawn((
-                BackgroundColor(theme::NOTICE_CARD),
+                BackgroundColor(theme::notice_card()),
                 BorderColor {
                     left: accent,
                     ..BorderColor::all(theme::GROUT)
@@ -1440,7 +1446,7 @@ pub(super) fn description(parent: &mut ChildSpawnerCommands, value: &str) {
         Text::new(value),
         font(theme::TEXT_SMALL),
         bevy::text::LineHeight::RelativeToFont(theme::LINE_HEIGHT),
-        TextColor(theme::MUTED),
+        TextColor(theme::muted()),
         Pickable::IGNORE,
     ));
 }
@@ -1470,7 +1476,7 @@ fn dashed_border_colors(
             if focused == Some(border.0) || buttons.get(border.0).is_ok_and(|hovered| hovered.0) {
                 theme::SAGE
             } else {
-                theme::EDGE
+                theme::edge()
             };
     }
 }

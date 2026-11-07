@@ -40,6 +40,9 @@ pub(crate) struct Preferences {
     pub text_scale: u32,
     /// Menus over a solid background instead of the dimmed World.
     pub solid_background: bool,
+    /// Full-ink secondary text, opaque fills, brighter edges and a thicker
+    /// focus ring. Absent from a profile saved before it, which reads as off.
+    pub stronger_contrast: bool,
 }
 
 pub(super) const TEXT_SCALES: [u32; 5] = [100, 125, 150, 175, 200];
@@ -119,6 +122,7 @@ impl Default for Preferences {
             reduced_motion: false,
             text_scale: 100,
             solid_background: false,
+            stronger_contrast: false,
         }
     }
 }
@@ -424,6 +428,24 @@ pub(super) fn plugin(app: &mut App) {
 mod tests {
     use super::super::actions::Action;
     use super::*;
+    #[test]
+    fn stronger_contrast_round_trips_and_a_profile_without_it_reads_as_off() {
+        let on = Preferences {
+            stronger_contrast: true,
+            ..default()
+        };
+        let (_, saved) = decode(&encode(&Bindings::default(), &on).unwrap()).unwrap();
+        assert!(saved.stronger_contrast);
+
+        let mut document: serde_json::Value =
+            serde_json::from_slice(&encode(&Bindings::default(), &on).unwrap()).unwrap();
+        document["preferences"]
+            .as_object_mut()
+            .unwrap()
+            .remove("stronger_contrast");
+        let (_, older) = decode(&serde_json::to_vec(&document).unwrap()).unwrap();
+        assert!(!older.stronger_contrast, "an older profile keeps it off");
+    }
     #[test]
     fn a_new_default_never_displaces_an_existing_user_binding() {
         let mut document: serde_json::Value =

@@ -55,7 +55,7 @@ fn show_loading(mut commands: Commands, request: Option<Res<OpenRequest>>, time:
                 stage_since_s: time.elapsed_secs(),
             },
             GlobalZIndex(200),
-            BackgroundColor(theme::PANEL),
+            BackgroundColor(theme::panel()),
             Node {
                 position_type: PositionType::Absolute,
                 width: Val::Percent(100.0),
@@ -76,7 +76,7 @@ fn show_loading(mut commands: Commands, request: Option<Res<OpenRequest>>, time:
                     font_size: bevy::text::FontSize::Px(12.0),
                     ..default()
                 },
-                TextColor(theme::MUTED),
+                TextColor(theme::muted()),
             ));
             card.spawn((
                 Node {
@@ -85,7 +85,7 @@ fn show_loading(mut commands: Commands, request: Option<Res<OpenRequest>>, time:
                     margin: UiRect::top(Val::Px(8.0)),
                     ..default()
                 },
-                BackgroundColor(theme::EDGE),
+                BackgroundColor(theme::edge()),
             ))
             .with_children(|track| {
                 track.spawn((
@@ -116,7 +116,7 @@ pub(super) fn opening(parent: &mut ChildSpawnerCommands, name: &str) {
         theme::SEMIBOLD,
         theme::INK,
     );
-    ui::paragraph(parent, "Loading the World.", 12.0, theme::MUTED);
+    ui::paragraph(parent, "Loading the World.", 12.0, theme::muted());
 }
 
 /// Inside a stage the bar sweeps toward the next one without reaching it: the

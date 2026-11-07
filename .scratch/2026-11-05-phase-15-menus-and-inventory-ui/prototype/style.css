@@ -79,8 +79,8 @@ html[data-embed] .score-bars em{background:var(--chart-1)}
 .setting-slider .input{width:130px;min-height:28px}
 .setting-row>.btn{min-width:100px}
 .reduced-motion *{transition:none!important;scroll-behavior:auto!important}
-.game.strong-contrast{--muted:#d4d5d8;--edge:#86898e}
-.game.strong-contrast .muted,.game.strong-contrast small{color:#d4d5d8}
+.game.strong-contrast{--muted:#f7f4ec;--edge:#a2a6ad}
+.game.strong-contrast .muted,.game.strong-contrast small{color:#f7f4ec}
 @media(min-width:651px) and (max-width:950px){.rail{flex-basis:138px;width:138px;padding:16px 8px}.settings-rail{flex-basis:155px;width:155px}}
 @media(max-width:650px){
   .rail{align-self:stretch;flex:0 0 auto;width:100%;max-height:none}

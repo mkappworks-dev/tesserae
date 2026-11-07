@@ -438,7 +438,7 @@ pub(in crate::client) fn frame(state: Frame) -> (BackgroundGradient, Color, Colo
         Frame::Plain => (
             gradient(theme::SLOT_TOP, theme::SLOT_BOTTOM),
             theme::SLOT_EDGE,
-            theme::SLOT_RIM,
+            theme::slot_rim(),
             none,
         ),
         Frame::Hover => (
@@ -525,7 +525,7 @@ pub(in crate::client) fn bevel(slot: &mut ChildSpawnerCommands) {
     slot.spawn((
         Rim,
         inset(UiRect::all(Val::Px(theme::RULE))),
-        BorderColor::all(theme::SLOT_RIM),
+        BorderColor::all(theme::slot_rim()),
         Pickable::IGNORE,
     ));
 }
@@ -551,7 +551,11 @@ pub(in crate::client) fn paint_frame(
 
 /// A focused slot or tile is ringed tighter than a button.
 pub(in crate::client) fn slot_focus() -> Outline {
-    Outline::new(Val::Px(theme::FRAME), Val::Px(theme::FRAME), Color::NONE)
+    Outline::new(
+        Val::Px(theme::focus_width(theme::FRAME)),
+        Val::Px(theme::FRAME),
+        Color::NONE,
+    )
 }
 
 /// The bag beside the Inventory's title: a handle over a rounded body with a

@@ -11,7 +11,22 @@ use super::profile::Preferences;
 struct Unscaled(f32);
 
 pub(super) fn plugin(app: &mut App) {
-    app.add_systems(PostUpdate, scale_text.before(bevy::ui::UiSystems::Layout));
+    // Before every screen's rebuild in Update, which reads the tokens.
+    app.add_systems(PreUpdate, sync_contrast)
+        .add_systems(PostUpdate, scale_text.before(bevy::ui::UiSystems::Layout));
+}
+
+fn sync_contrast(preferences: Option<Res<Preferences>>) {
+    if let Some(on) = contrast_to_set(preferences.as_ref().map(|p| (&**p, p.is_changed()))) {
+        super::theme::set_stronger_contrast(on);
+    }
+}
+
+/// What to switch the tokens to, if the Preferences just changed.
+fn contrast_to_set(preferences: Option<(&Preferences, bool)>) -> Option<bool> {
+    preferences
+        .filter(|&(_, changed)| changed)
+        .map(|(p, _)| p.stronger_contrast)
 }
 
 fn scale_text(
@@ -46,6 +61,21 @@ mod tests {
 
     fn size(app: &App, text: Entity) -> FontSize {
         app.world().get::<TextFont>(text).unwrap().font_size
+    }
+
+    #[test]
+    fn the_tokens_follow_the_preference_only_when_it_changes() {
+        let on = Preferences {
+            stronger_contrast: true,
+            ..default()
+        };
+        assert_eq!(contrast_to_set(Some((&on, true))), Some(true));
+        assert_eq!(
+            contrast_to_set(Some((&Preferences::default(), true))),
+            Some(false)
+        );
+        assert_eq!(contrast_to_set(Some((&on, false))), None);
+        assert_eq!(contrast_to_set(None), None);
     }
 
     #[test]

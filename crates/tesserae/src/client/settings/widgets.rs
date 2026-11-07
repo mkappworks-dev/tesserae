@@ -22,7 +22,7 @@ pub(super) fn setting_row(
                 flex_shrink: 0.0,
                 ..default()
             },
-            BorderColor::all(theme::EDGE),
+            BorderColor::all(theme::edge()),
         ))
         .with_children(|row| {
             row.spawn(Node {
@@ -85,7 +85,7 @@ pub(super) fn segment(
             GlobalZIndex(60),
             bevy::picking::hover::Hovered::default(),
             BackgroundColor(theme::MENU),
-            BorderColor::all(theme::MENU_EDGE),
+            BorderColor::all(theme::menu_edge()),
             BoxShadow::new(
                 Color::BLACK.with_alpha(0.6),
                 Val::Px(0.0),
@@ -113,7 +113,7 @@ pub(super) fn segment(
             bevy::picking::hover::Hovered::default(),
             theme::focus_ring(),
             BackgroundColor(theme::FIELD),
-            BorderColor::all(theme::FIELD_EDGE),
+            BorderColor::all(theme::field_edge()),
             Node {
                 width: Val::Px(SELECT_WIDTH_PX),
                 min_height: Val::Px(theme::CONTROL_HEIGHT),
@@ -185,7 +185,7 @@ pub(super) fn option(
         bevy::input_focus::tab_navigation::TabIndex(0),
         operation,
         bevy::picking::hover::Hovered::default(),
-        Outline::new(Val::Px(2.0), Val::Px(-2.0), Color::NONE),
+        Outline::new(Val::Px(theme::focus_width(2.0)), Val::Px(-2.0), Color::NONE),
         BackgroundColor(Color::NONE),
         BorderColor::all(Color::NONE),
         Node {
@@ -375,7 +375,7 @@ pub(super) fn select_visuals(
         edge.set_if_neq(BorderColor::all(if open {
             theme::SAGE
         } else {
-            theme::FIELD_EDGE
+            theme::field_edge()
         }));
         let ring = if focused == Some(entity) {
             theme::FOCUS
@@ -467,7 +467,7 @@ pub(super) fn slider(parent: &mut ChildSpawnerCommands, kind: Scalar, value: f32
                 .spawn((
                     Text::new(kind.display(value)),
                     theme::tabular(theme::font(theme::TEXT_SMALL)),
-                    TextColor(theme::MUTED),
+                    TextColor(theme::muted()),
                     TextLayout::justify(Justify::Right),
                     Node {
                         width: Val::Px(42.0),
@@ -629,7 +629,7 @@ pub(super) fn group(
                 Text::new(title.to_uppercase()),
                 theme::font(theme::TEXT_EYEBROW),
                 bevy::text::LetterSpacing::Px(theme::SECTION_TRACKING),
-                TextColor(theme::MUTED),
+                TextColor(theme::muted()),
                 bevy::text::LineHeight::RelativeToFont(1.25),
                 Node {
                     margin: UiRect::bottom(Val::Px(12.0)),
@@ -651,7 +651,7 @@ pub(super) fn disclosure(
     use crate::client::menu_ui as ui;
     parent
         .spawn((
-            BorderColor::all(theme::EDGE),
+            BorderColor::all(theme::edge()),
             Node {
                 flex_direction: FlexDirection::Column,
                 margin: UiRect::top(Val::Px(20.0)),
@@ -709,7 +709,7 @@ pub(super) fn switch(parent: &mut ChildSpawnerCommands, on: bool, operation: Ope
         bevy::input_focus::tab_navigation::TabIndex(0),
         operation,
         bevy::picking::hover::Hovered::default(),
-        Outline::new(Val::Px(2.0), Val::Px(2.0), Color::NONE),
+        Outline::new(Val::Px(theme::focus_width(2.0)), Val::Px(2.0), Color::NONE),
         BorderColor::all(theme::CHECK_EDGE),
         Node {
             width: Val::Px(22.0),
@@ -821,7 +821,7 @@ pub(super) fn footer(parent: &mut ChildSpawnerCommands, changed: bool) {
                         "All changes applied"
                     },
                     theme::TEXT_EYEBROW,
-                    theme::MUTED,
+                    theme::muted(),
                 );
                 buttons::button(
                     actions,
@@ -879,7 +879,7 @@ pub(super) fn modal(commands: &mut Commands, settings: &Settings) {
         .spawn((
             Panel,
             GlobalZIndex(80),
-            BackgroundColor(theme::OVERLAY),
+            BackgroundColor(theme::overlay()),
             Node {
                 position_type: PositionType::Absolute,
                 left: Val::Px(0.0),
@@ -918,22 +918,22 @@ pub(super) fn modal(commands: &mut Commands, settings: &Settings) {
                                 Text::default(),
                                 theme::font(theme::TEXT_EYEBROW),
                                 bevy::text::LineHeight::RelativeToFont(1.8),
-                                TextColor(theme::MUTED),
+                                TextColor(theme::muted()),
                                 Pickable::IGNORE,
                             ))
                             .with_children(|line| {
                                 line.spawn((
                                     TextSpan::new(action_name(action)),
                                     theme::weighted(theme::TEXT_EYEBROW, theme::BOLD),
-                                    TextColor(theme::MUTED),
+                                    TextColor(theme::muted()),
                                 ));
                                 line.spawn((
                                     TextSpan::new(format!(" · {place}")),
                                     theme::font(theme::TEXT_EYEBROW),
-                                    TextColor(theme::MUTED),
+                                    TextColor(theme::muted()),
                                 ));
                             });
-                        cine::dialog_text(dialog, prompt, theme::MUTED);
+                        cine::dialog_text(dialog, prompt, theme::muted());
                         let bound = settings
                             .draft
                             .as_ref()
@@ -993,7 +993,7 @@ pub(super) fn modal(commands: &mut Commands, settings: &Settings) {
                             )
                         };
                         cine::dialog_title(dialog, title);
-                        cine::dialog_text(dialog, description, theme::MUTED);
+                        cine::dialog_text(dialog, description, theme::muted());
                         dialog
                             .spawn(cine::dialog_actions())
                             .with_children(|actions| {

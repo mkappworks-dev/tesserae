@@ -623,8 +623,8 @@ fn header(card: &mut ChildSpawnerCommands, state: &Built) {
             flex_shrink: 0.0,
             ..default()
         },
-        BackgroundColor(theme::SHEET_HEADER),
-        BorderColor::all(theme::ITEM_RULE),
+        BackgroundColor(theme::sheet_header()),
+        BorderColor::all(theme::item_rule()),
     ))
     .with_children(|header| {
         header
@@ -769,7 +769,7 @@ fn backpack(main: &mut ChildSpawnerCommands, state: &Built, names: &Names) {
                                 capacity,
                                 theme::TEXT_EYEBROW,
                                 theme::REGULAR,
-                                theme::ITEM_CAPACITY,
+                                theme::item_capacity(),
                             )
                         });
                         look::button(row, "Sort", Control::Sort, Kind::Ghost, look::SMALL);
@@ -790,7 +790,7 @@ fn backpack(main: &mut ChildSpawnerCommands, state: &Built, names: &Names) {
                 },
                 theme::TEXT_EYEBROW,
                 theme::REGULAR,
-                theme::ITEM_SOFT,
+                theme::item_soft(),
                 theme::LINE_HEIGHT,
             ),));
     });
@@ -951,7 +951,7 @@ fn details(main: &mut ChildSpawnerCommands, state: &Built, names: &Names) {
             ..default()
         },
         BackgroundColor(theme::ITEM_INSPECTOR),
-        BorderColor::all(theme::ITEM_RULE),
+        BorderColor::all(theme::item_rule()),
     ))
     .with_children(|panel| {
         panel
@@ -1001,7 +1001,7 @@ fn details(main: &mut ChildSpawnerCommands, state: &Built, names: &Names) {
                         "Select a carried stack to inspect or move it.",
                         theme::TEXT_SMALL,
                         theme::REGULAR,
-                        theme::MUTED,
+                        theme::muted(),
                     ));
                 if let Some((material, chosen)) = state.shaping {
                     shape_row(panel, material, chosen, names);
@@ -1017,7 +1017,7 @@ fn details(main: &mut ChildSpawnerCommands, state: &Built, names: &Names) {
                     flex_shrink: 0.0,
                     ..default()
                 },
-                BorderColor::all(theme::ITEM_ROW_RULE),
+                BorderColor::all(theme::item_row_rule()),
             ))
             .with_child((look::paragraph(
                 if state.picked.is_some() {
@@ -1069,7 +1069,7 @@ fn inspected(
             source,
             theme::ITEM_TEXT_EYEBROW,
             theme::REGULAR,
-            theme::ITEM_SOURCE,
+            theme::item_source(),
         ));
     let mut facts = vec![("Count", stack.count.to_string())];
     if let Some(shape) = names.shape(&stack.item, state.shaping) {
@@ -1087,14 +1087,14 @@ fn inspected(
                     flex_shrink: 0.0,
                     ..default()
                 },
-                BorderColor::all(theme::ITEM_ROW_RULE),
+                BorderColor::all(theme::item_row_rule()),
             ))
             .with_children(|row| {
                 row.spawn(look::label(
                     term,
                     theme::TEXT_CAPTION,
                     theme::REGULAR,
-                    theme::ITEM_TERM,
+                    theme::item_term(),
                 ));
                 row.spawn(look::figures(
                     value,
@@ -1214,7 +1214,7 @@ fn footer(card: &mut ChildSpawnerCommands, state: &Built, names: &Names) {
             ..default()
         },
         BackgroundColor(theme::ITEM_FOOTER),
-        BorderColor::all(theme::ITEM_FOOTER_RULE),
+        BorderColor::all(theme::item_footer_rule()),
     ))
     .with_children(|footer| {
         footer
@@ -1262,7 +1262,7 @@ fn footer(card: &mut ChildSpawnerCommands, state: &Built, names: &Names) {
                     },
                     theme::TEXT_EYEBROW,
                     theme::REGULAR,
-                    theme::ITEM_SOFT,
+                    theme::item_soft(),
                     theme::LINE_HEIGHT,
                 ),));
                 look::button(

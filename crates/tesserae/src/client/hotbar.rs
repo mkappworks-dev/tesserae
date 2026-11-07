@@ -299,7 +299,7 @@ fn slot(
             BorderColor::all(if active {
                 theme::GROUT
             } else {
-                theme::SLOT_RIM
+                theme::slot_rim()
             }),
             Pickable::IGNORE,
         ));
@@ -363,7 +363,7 @@ fn paint(
                 theme::HUD_BEVEL_HOVER,
             )
         } else {
-            (theme::HUD_SLOT, theme::SLOT_RIM, theme::HUD_BEVEL)
+            (theme::HUD_SLOT, theme::slot_rim(), theme::HUD_BEVEL)
         };
         fill.set_if_neq(vertical(background));
         for child in children {

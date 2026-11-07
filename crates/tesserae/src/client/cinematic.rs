@@ -54,9 +54,9 @@ pub(super) fn colours(look: Look, lit: bool, disabled: bool) -> (Color, Color, C
             theme::DANGER_EDGE,
             theme::DANGER_INK,
         ),
-        _ if lit => (theme::HOVER, theme::EDGE, theme::INK),
-        Kind::Plain => (theme::RAISED, theme::EDGE, theme::INK),
-        Kind::Ghost => (theme::GHOST, theme::EDGE, theme::INK),
+        _ if lit => (theme::HOVER, theme::edge(), theme::INK),
+        Kind::Plain => (theme::RAISED, theme::edge(), theme::INK),
+        Kind::Ghost => (theme::GHOST, theme::edge(), theme::INK),
     }
 }
 
@@ -121,8 +121,8 @@ pub(super) struct Sheet<'a> {
 pub(super) fn sheet_header(parent: &mut ChildSpawnerCommands, sheet: &Sheet) {
     parent
         .spawn((
-            BackgroundColor(theme::SHEET_HEADER),
-            BorderColor::all(theme::EDGE),
+            BackgroundColor(theme::sheet_header()),
+            BorderColor::all(theme::edge()),
             Node {
                 flex_direction: FlexDirection::Column,
                 row_gap: Val::Px(7.0),
@@ -140,7 +140,7 @@ pub(super) fn sheet_header(parent: &mut ChildSpawnerCommands, sheet: &Sheet) {
         .with_children(|h| {
             super::buttons::eyebrow(h, sheet.eyebrow, super::buttons::Eyebrow::Cinematic);
             title(h, sheet.title);
-            ui::paragraph(h, sheet.subtitle, theme::TEXT_SMALL, theme::MUTED);
+            ui::paragraph(h, sheet.subtitle, theme::TEXT_SMALL, theme::muted());
         });
 }
 
@@ -160,7 +160,7 @@ pub(super) fn title(parent: &mut ChildSpawnerCommands, value: &str) {
 pub(super) fn sheet_footer() -> impl Bundle {
     (
         BackgroundColor(theme::SHEET_FOOTER),
-        BorderColor::all(theme::EDGE),
+        BorderColor::all(theme::edge()),
         Node {
             min_height: Val::Px(76.0),
             padding: UiRect::axes(Val::Px(theme::SHEET_PAD_X), Val::Px(15.0)),
@@ -194,7 +194,7 @@ pub(super) fn sheet(
     footer: impl FnOnce(&mut ChildSpawnerCommands),
 ) {
     root.spawn((
-        surface(theme::PANEL),
+        surface(theme::panel()),
         framed(Node {
             flex_direction: FlexDirection::Column,
             flex_grow: 1.0,
@@ -224,10 +224,10 @@ pub(super) fn sheet(
     });
 }
 
-/// A modal dialog's box, centred over [`theme::OVERLAY`].
+/// A modal dialog's box, centred over [`theme::overlay()`].
 pub(super) fn dialog_box() -> impl Bundle {
     (
-        surface(theme::PANEL),
+        surface(theme::panel()),
         framed(Node {
             width: Val::Px(420.0),
             max_width: Val::Percent(92.0),
@@ -294,7 +294,7 @@ pub(super) fn notice(parent: &mut ChildSpawnerCommands, value: impl Into<String>
     parent
         .spawn((
             BackgroundColor(theme::NOTICE),
-            BorderColor::all(theme::NOTICE_EDGE),
+            BorderColor::all(theme::notice_edge()),
             Node {
                 padding: UiRect::axes(Val::Px(12.0), Val::Px(9.0)),
                 border: UiRect::left(Val::Px(theme::FRAME)),
@@ -308,7 +308,7 @@ pub(super) fn notice(parent: &mut ChildSpawnerCommands, value: impl Into<String>
                 Text::new(value.into()),
                 theme::tabular(theme::font(theme::TEXT_SMALL)),
                 bevy::text::LineHeight::RelativeToFont(theme::LINE_HEIGHT),
-                TextColor(theme::MUTED),
+                TextColor(theme::muted()),
                 Pickable::IGNORE,
             ));
         });

@@ -383,7 +383,7 @@ fn header(card: &mut ChildSpawnerCommands) {
             flex_shrink: 0.0,
             ..default()
         },
-        BackgroundColor(theme::SHEET_HEADER),
+        BackgroundColor(theme::sheet_header()),
         BorderColor::all(theme::LAYOUT_RULE),
     ))
     .with_children(|header| {
@@ -399,7 +399,7 @@ fn header(card: &mut ChildSpawnerCommands) {
                         "BUILDING TOOL",
                         theme::TEXT_KEY,
                         theme::LABEL,
-                        theme::ITEM_EYEBROW,
+                        theme::item_eyebrow(),
                     ),
                     bevy::text::LetterSpacing::Px(theme::TOOL_TRACKING),
                 ));
@@ -720,7 +720,7 @@ fn value_with(value: impl Into<String>, after: impl Into<String>) -> impl Bundle
         children![(
             TextSpan::new(after),
             theme::weighted(theme::ITEM_TEXT_EYEBROW, theme::LABEL),
-            TextColor(theme::MUTED),
+            TextColor(theme::muted()),
         )],
     )
 }
@@ -913,13 +913,13 @@ fn status(parent: &mut ChildSpawnerCommands, layout: &LayoutPreferences, voxel_s
                     size,
                     theme::TEXT_EYEBROW,
                     theme::REGULAR,
-                    theme::MUTED,
+                    theme::muted(),
                 ));
             }
             for (part, colour) in [
-                (Info::Size, theme::MUTED),
+                (Info::Size, theme::muted()),
                 (Info::Body, theme::INK),
-                (Info::Hint, theme::MUTED),
+                (Info::Hint, theme::muted()),
             ] {
                 if part == Info::Size && layout.kind == Kind::Directions {
                     continue;

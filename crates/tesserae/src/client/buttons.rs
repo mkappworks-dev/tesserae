@@ -123,7 +123,7 @@ pub(super) fn eyebrow(parent: &mut ChildSpawnerCommands, label: &str, look: Eyeb
             label,
             theme::font(theme::TEXT_EYEBROW),
             theme::SECTION_TRACKING,
-            theme::MUTED,
+            theme::muted(),
         ),
         Eyebrow::Cinematic => tracked(
             parent,
@@ -137,7 +137,7 @@ pub(super) fn eyebrow(parent: &mut ChildSpawnerCommands, label: &str, look: Eyeb
             label,
             theme::weighted(11.0, theme::LABEL),
             1.32,
-            theme::ITEM_EYEBROW,
+            theme::item_eyebrow(),
         ),
     }
 }
@@ -170,7 +170,7 @@ fn tab(
             Text::new(label),
             theme::font(theme::TEXT_BODY),
             bevy::text::LineHeight::RelativeToFont(1.25),
-            TextColor(if selected { theme::INK } else { theme::MUTED }),
+            TextColor(if selected { theme::INK } else { theme::muted() }),
             Pickable::IGNORE,
         ))
         .id()
@@ -212,7 +212,7 @@ fn compact(
             BorderColor::all(if selected {
                 theme::SEGMENT_ON_EDGE
             } else {
-                theme::EDGE
+                theme::edge()
             }),
         ))
         .with_children(|button| {
@@ -224,7 +224,7 @@ fn compact(
                     } else {
                         IconKind::Reset
                     },
-                    theme::MUTED,
+                    theme::muted(),
                     if label == "×" { 12.0 } else { 16.0 },
                 );
             } else {

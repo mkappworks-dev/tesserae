@@ -128,8 +128,8 @@ pub(in crate::client) fn fill() -> Node {
 
 pub(in crate::client) fn header(root: &mut ChildSpawnerCommands, logo: Option<&ui::Mosaic>) {
     root.spawn((
-        BackgroundColor(theme::BAND),
-        BorderColor::all(theme::BAND_RULE),
+        BackgroundColor(theme::band()),
+        BorderColor::all(theme::band_rule()),
         Node {
             height: Val::Px(73.0),
             flex_shrink: 0.0,
@@ -174,7 +174,7 @@ pub(in crate::client) fn header(root: &mut ChildSpawnerCommands, logo: Option<&u
             Text::new("A WORLD OF YOUR OWN"),
             theme::font(theme::TEXT_FOOTER),
             bevy::text::LetterSpacing::Px(2.7),
-            TextColor(theme::CHROME_INK),
+            TextColor(theme::chrome_ink()),
             Pickable::IGNORE,
         ));
         row.spawn((
@@ -211,13 +211,13 @@ pub(in crate::client) fn footer(root: &mut ChildSpawnerCommands, place: &str) {
             Text::new(value),
             theme::font(theme::TEXT_FOOTER),
             bevy::text::LetterSpacing::Px(0.9),
-            TextColor(theme::CHROME_INK),
+            TextColor(theme::chrome_ink()),
             Pickable::IGNORE,
         )
     };
     root.spawn((
-        BackgroundColor(theme::BAND),
-        BorderColor::all(theme::BAND_RULE),
+        BackgroundColor(theme::band()),
+        BorderColor::all(theme::band_rule()),
         Node {
             height: Val::Px(40.0),
             flex_shrink: 0.0,
@@ -244,7 +244,7 @@ pub(in crate::client) fn footer(root: &mut ChildSpawnerCommands, place: &str) {
                 for (key, what) in [("Tab", "Navigate"), ("Enter", "Select"), ("Esc", "Back")] {
                     hints
                         .spawn((
-                            BorderColor::all(theme::KEY_EDGE),
+                            BorderColor::all(theme::key_edge()),
                             Node {
                                 padding: UiRect::axes(Val::Px(4.0), Val::Px(2.0)),
                                 margin: UiRect::new(
@@ -262,7 +262,7 @@ pub(in crate::client) fn footer(root: &mut ChildSpawnerCommands, place: &str) {
                             Text::new(key),
                             theme::font(theme::TEXT_KEY),
                             bevy::text::LetterSpacing::Px(0.9),
-                            TextColor(theme::CHROME_INK),
+                            TextColor(theme::chrome_ink()),
                             Pickable::IGNORE,
                         ));
                     hints.spawn(chrome(what));
@@ -331,7 +331,7 @@ fn title(main: &mut ChildSpawnerCommands, l: &Launcher, installed: &Installed) -
             Pickable::IGNORE,
         ));
         hero.spawn((
-            cine::surface(theme::PANEL),
+            cine::surface(theme::panel()),
             cine::framed(Node {
                 width: Val::Px(300.0),
                 padding: UiRect::all(Val::Px(10.0)),
@@ -399,7 +399,7 @@ fn title(main: &mut ChildSpawnerCommands, l: &Launcher, installed: &Installed) -
             .map(|d| installed.unmet(d))
             .unwrap_or_default();
         main.spawn((
-            cine::surface(theme::PANEL),
+            cine::surface(theme::panel()),
             cine::framed(Node {
                 position_type: PositionType::Absolute,
                 right: Val::Px(theme::SCREEN_PAD_X),
@@ -438,7 +438,7 @@ fn title(main: &mut ChildSpawnerCommands, l: &Launcher, installed: &Installed) -
                             relative(d.last_played_unix_s)
                         ),
                         theme::TEXT_SMALL,
-                        theme::MUTED,
+                        theme::muted(),
                     )
                 });
             }
@@ -477,7 +477,7 @@ fn opening(main: &mut ChildSpawnerCommands, name: &str) {
     .with_children(|screen| {
         screen
             .spawn((
-                cine::surface(theme::PANEL),
+                cine::surface(theme::panel()),
                 cine::framed(Node {
                     width: Val::Px(300.0),
                     padding: UiRect::all(Val::Px(25.0)),
@@ -502,7 +502,12 @@ fn opening(main: &mut ChildSpawnerCommands, name: &str) {
                     },
                     Pickable::IGNORE,
                 ));
-                ui::paragraph(card, "Loading the World.", theme::TEXT_SMALL, theme::MUTED);
+                ui::paragraph(
+                    card,
+                    "Loading the World.",
+                    theme::TEXT_SMALL,
+                    theme::muted(),
+                );
                 card.spawn((
                     BackgroundColor(theme::RAISED),
                     Node {
@@ -621,7 +626,7 @@ fn worlds(
                         ("No Worlds found", "Try a different name or create a World.")
                     };
                     ui::weighted_text(empty, title, theme::TEXT_BODY, theme::LABEL, theme::INK);
-                    ui::paragraph(empty, detail, theme::TEXT_SMALL, theme::MUTED);
+                    ui::paragraph(empty, detail, theme::TEXT_SMALL, theme::muted());
                 });
             },
             |f| {
@@ -659,12 +664,12 @@ fn gap(parent: &mut ChildSpawnerCommands, px: f32) {
 
 /// The quiet middle of a sheet's footer.
 fn footer_hint(footer: &mut ChildSpawnerCommands, value: impl Into<String>) {
-    ui::text(footer, value, theme::TEXT_EYEBROW, theme::MUTED);
+    ui::text(footer, value, theme::TEXT_EYEBROW, theme::muted());
 }
 
 /// A count at a sheet footer's side.
 fn count(footer: &mut ChildSpawnerCommands, value: impl Into<String>) {
-    ui::paragraph(footer, value, theme::TEXT_SMALL, theme::MUTED);
+    ui::paragraph(footer, value, theme::TEXT_SMALL, theme::muted());
 }
 
 fn failure(body: &mut ChildSpawnerCommands, card: &Card) {
@@ -702,7 +707,7 @@ fn failure(body: &mut ChildSpawnerCommands, card: &Card) {
                     words,
                     "Nothing was changed in its save.",
                     theme::TEXT_SMALL,
-                    theme::MUTED,
+                    theme::muted(),
                 );
             }
         });
@@ -808,7 +813,7 @@ fn world_card(
             by: Field::Search,
         },
         BackgroundColor(theme::CARD),
-        BorderColor::all(theme::EDGE),
+        BorderColor::all(theme::edge()),
         Node {
             margin: UiRect::top(Val::Px(10.0)),
             padding: UiRect::all(Val::Px(17.0)),
@@ -865,7 +870,7 @@ fn world_card(
                     })
                     .with_children(|facts| {
                         cine::pill(facts, game_title(d.game.as_ref()));
-                        small(facts, format!("{} m voxels", d.voxel_size_m), theme::MUTED);
+                        small(facts, format!("{} m voxels", d.voxel_size_m), theme::muted());
                     });
                     if entry.incomplete() {
                         small(
@@ -877,7 +882,7 @@ fn world_card(
                         small(
                             info,
                             format!("Played {}", relative(d.last_played_unix_s)),
-                            theme::MUTED,
+                            theme::muted(),
                         );
                     }
                     for line in &unmet {
@@ -895,7 +900,7 @@ fn world_card(
                         "Folder {}. Saving a name in Edit records its details.",
                         entry.folder()
                     ),
-                    theme::MUTED,
+                    theme::muted(),
                 ),
             }
         });
@@ -959,7 +964,7 @@ fn library_page(
                     body,
                     "Installed on this device. You choose which ones a World uses when you create it.",
                     theme::TEXT_SMALL,
-                    theme::MUTED,
+                    theme::muted(),
                 );
                 if installed.mods.is_empty() {
                     gap(body, 14.0);
@@ -973,10 +978,10 @@ fn library_page(
                         ModCard {
                             act: None,
                             check: None,
-                            border: theme::EDGE,
+                            border: theme::edge(),
                             title: ui::title(&m.id),
                             detail: about.unwrap_or_default().to_owned(),
-                            tag: category.map(|c| (c.to_owned(), theme::CATEGORY_INK)),
+                            tag: category.map(|c| (c.to_owned(), theme::category_ink())),
                         },
                     );
                 }
@@ -1137,7 +1142,7 @@ fn edit(
                                 body,
                                 "Mode changes take effect when the World next opens.",
                                 theme::TEXT_SMALL,
-                                theme::MUTED,
+                                theme::muted(),
                             );
                         }
                         for line in &installed.unmet(d) {
@@ -1148,7 +1153,7 @@ fn edit(
                         body,
                         "No details are recorded. Saving a name repairs them from the save.",
                         theme::TEXT_SMALL,
-                        theme::MUTED,
+                        theme::muted(),
                     ),
                 }
                 notice(
@@ -1193,7 +1198,7 @@ fn edit(
                                     climate.temperature_size_m, climate.humidity_size_m
                                 ));
                             }
-                            ui::paragraph(c, lines.join("\n"), theme::TEXT_SMALL, theme::MUTED);
+                            ui::paragraph(c, lines.join("\n"), theme::TEXT_SMALL, theme::muted());
                         },
                     );
                 }
@@ -1207,7 +1212,7 @@ fn edit(
                             c,
                             format!("Folder: {}", entry.map(Entry::folder).unwrap_or_default()),
                             theme::TEXT_SMALL,
-                            theme::MUTED,
+                            theme::muted(),
                         );
                         gap(c, 8.0);
                         small_button(c, "Show folder", Act::ShowFolder, Kind::Ghost);
@@ -1216,7 +1221,7 @@ fn edit(
                             c,
                             "Deleting moves its folder to the Trash, where you can restore it.",
                             theme::TEXT_SMALL,
-                            theme::MUTED,
+                            theme::muted(),
                         );
                         gap(c, 8.0);
                         small_button(c, "Delete World\u{2026}", Act::Delete, Kind::Danger);
@@ -1350,7 +1355,7 @@ fn mode_picks(
                 let (face, edge) = if selected {
                     (theme::MODE_CHOSEN, theme::MODE_CHOSEN_EDGE)
                 } else {
-                    (theme::MODE, theme::EDGE)
+                    (theme::MODE, theme::edge())
                 };
                 grid.spawn((
                     bevy::ui_widgets::Button,
@@ -1407,7 +1412,7 @@ fn mode_picks(
                             Text::new(about),
                             theme::font(theme::TEXT_MODE_ABOUT),
                             bevy::text::LineHeight::RelativeToFont(1.45),
-                            TextColor(theme::MUTED),
+                            TextColor(theme::muted()),
                             Pickable::IGNORE,
                         ));
                     }
@@ -1415,7 +1420,7 @@ fn mode_picks(
             }
         });
     gap(parent, 8.0);
-    ui::paragraph(parent, hint, theme::TEXT_SMALL, theme::MUTED);
+    ui::paragraph(parent, hint, theme::TEXT_SMALL, theme::muted());
     gap(parent, 6.0);
 }
 
@@ -1461,7 +1466,7 @@ fn text_field(
     parent
         .spawn((
             BackgroundColor(theme::FIELD),
-            BorderColor::all(theme::FIELD_EDGE),
+            BorderColor::all(theme::field_edge()),
             Node {
                 min_width: Val::Px(0.0),
                 height: Val::Px(theme::CONTROL_HEIGHT),
@@ -1501,7 +1506,7 @@ fn text_field(
                     Placeholder(entity),
                     Text::new(placeholder),
                     ui::font(theme::TEXT_BODY),
-                    TextColor(theme::PLACEHOLDER),
+                    TextColor(theme::placeholder()),
                     Pickable::IGNORE,
                     Node {
                         position_type: PositionType::Absolute,
@@ -1518,7 +1523,7 @@ fn text_field(
         });
     if !hint.is_empty() {
         gap(parent, 6.0);
-        ui::paragraph(parent, hint, theme::TEXT_SMALL, theme::MUTED);
+        ui::paragraph(parent, hint, theme::TEXT_SMALL, theme::muted());
     }
     entity
 }
@@ -1558,7 +1563,7 @@ fn section_text(parent: &mut ChildSpawnerCommands, value: &str) {
         Text::new(value.to_uppercase()),
         theme::font(theme::TEXT_EYEBROW),
         bevy::text::LetterSpacing::Px(theme::SECTION_TRACKING),
-        TextColor(theme::MUTED),
+        TextColor(theme::muted()),
         Pickable::IGNORE,
     ));
 }
@@ -1586,7 +1591,7 @@ fn disclosure(
 ) {
     parent
         .spawn((
-            BorderColor::all(theme::EDGE),
+            BorderColor::all(theme::edge()),
             Node {
                 flex_direction: FlexDirection::Column,
                 margin: UiRect::top(Val::Px(20.0)),
@@ -1700,7 +1705,7 @@ fn form(
                 Text::new(f.seed_label()),
                 ui::font(theme::TEXT_SMALL),
                 bevy::text::LineHeight::RelativeToFont(theme::LINE_HEIGHT),
-                TextColor(theme::MUTED),
+                TextColor(theme::muted()),
                 Pickable::IGNORE,
             ));
             buttons::button(
@@ -1766,7 +1771,7 @@ fn game_picker(col: &mut ChildSpawnerCommands, f: &Form, installed: &Installed) 
             let (fill, edge) = if chosen {
                 (theme::CARD_CHOSEN, theme::CARD_CHOSEN_EDGE)
             } else {
-                (theme::CARD, theme::EDGE)
+                (theme::CARD, theme::edge())
             };
             grid.spawn((
                 bevy::ui_widgets::Button,
@@ -1826,7 +1831,7 @@ fn game_picker(col: &mut ChildSpawnerCommands, f: &Form, installed: &Installed) 
                     ),
                     theme::font(theme::TEXT_CAPTION),
                     bevy::text::LineHeight::RelativeToFont(theme::LINE_HEIGHT),
-                    TextColor(theme::MUTED),
+                    TextColor(theme::muted()),
                     Pickable::IGNORE,
                 ));
                 if chosen {
@@ -1851,7 +1856,7 @@ fn game_picker(col: &mut ChildSpawnerCommands, f: &Form, installed: &Installed) 
     });
     let mut note = |value: String| {
         gap(col, 8.0);
-        ui::paragraph(col, value, theme::TEXT_SMALL, theme::MUTED);
+        ui::paragraph(col, value, theme::TEXT_SMALL, theme::muted());
     };
     if !installed.untrusted.is_empty() {
         note("Needs Trust before it opens.".into());
@@ -1907,7 +1912,7 @@ fn mods_page(
         gap(col, 20.0);
         let sections = sections(installed, &[]);
         col.spawn((
-            BorderColor::all(theme::EDGE),
+            BorderColor::all(theme::edge()),
             Node {
                 column_gap: Val::Px(15.0),
                 border: UiRect::bottom(Val::Px(theme::RULE)),
@@ -1957,10 +1962,10 @@ fn mods_page(
                         ModCard {
                             act: None,
                             check: Some((true, false)),
-                            border: theme::EDGE,
+                            border: theme::edge(),
                             title: ui::title(&m.id),
                             detail: about.unwrap_or_default().to_owned(),
-                            tag: Some(("Required".to_owned(), theme::CATEGORY_INK)),
+                            tag: Some(("Required".to_owned(), theme::category_ink())),
                         },
                     );
                 }
@@ -1975,16 +1980,16 @@ fn mods_page(
                 let mut card = ModCard {
                     act: Some(Act::ToggleMod(i)),
                     check: Some((ticked, true)),
-                    border: theme::EDGE,
+                    border: theme::edge(),
                     title: ui::title(&m.id),
                     detail: about.unwrap_or_default().to_owned(),
-                    tag: category.map(|c| (c.to_owned(), theme::CATEGORY_INK)),
+                    tag: category.map(|c| (c.to_owned(), theme::category_ink())),
                 };
                 if let Some(why) = installed.blocked(&game, &m.id) {
                     card.act = None;
                     card.check = Some((false, false));
                     card.detail = format!("Unavailable: {why}");
-                    card.tag = Some(("Unavailable".to_owned(), theme::CATEGORY_INK));
+                    card.tag = Some(("Unavailable".to_owned(), theme::category_ink()));
                 } else if let Some(clash) = l.clashes.get(&m.id) {
                     card.border = theme::WARNING;
                     card.detail = format!("Conflicts: {}", clash.reason);
@@ -2002,7 +2007,7 @@ fn mods_page(
                 } else if locked.contains(&m.id) && !ticked {
                     card.act = None;
                     card.check = Some((true, false));
-                    card.tag = Some(("Needed by another Mod".to_owned(), theme::CATEGORY_INK));
+                    card.tag = Some(("Needed by another Mod".to_owned(), theme::category_ink()));
                 }
                 let words = format!("{} {}", card.title, card.detail);
                 let entity = mod_card(list, card);
@@ -2023,7 +2028,12 @@ fn mods_page(
             },
         ))
         .with_children(|empty| {
-            ui::text(empty, "No matching Mods.", theme::TEXT_SMALL, theme::MUTED)
+            ui::text(
+                empty,
+                "No matching Mods.",
+                theme::TEXT_SMALL,
+                theme::muted(),
+            )
         });
         for line in &installed.rejected {
             gap(col, 8.0);
@@ -2039,7 +2049,7 @@ fn mods_page(
             col,
             "Biomes supplied by the selected set appear in the next step.",
             theme::TEXT_SMALL,
-            theme::MUTED,
+            theme::muted(),
         );
         if l.trust_asked && !installed.untrusted.is_empty() {
             trust_panel(col, installed);
@@ -2107,7 +2117,7 @@ fn mod_card(parent: &mut ChildSpawnerCommands, c: ModCard) -> Entity {
                     Text::new(c.detail.clone()),
                     theme::font(theme::TEXT_CAPTION),
                     bevy::text::LineHeight::RelativeToFont(theme::LINE_HEIGHT),
-                    TextColor(theme::MUTED),
+                    TextColor(theme::muted()),
                     Pickable::IGNORE,
                 ));
             }
@@ -2257,11 +2267,11 @@ fn delete(root: &mut ChildSpawnerCommands, l: &Launcher, path: &Path) -> Option<
                     relative(details.last_played_unix_s)
                 );
             }
-            cine::dialog_text(d, line, theme::MUTED);
+            cine::dialog_text(d, line, theme::muted());
             cine::dialog_text(
                 d,
                 "Its folder moves to the Trash. You can restore it from there.",
-                theme::MUTED,
+                theme::muted(),
             );
             problem(d, l.problem.as_ref());
         },
@@ -2314,7 +2324,7 @@ fn trust_rows(parent: &mut ChildSpawnerCommands, items: &[crate::launch::Untrust
                 };
                 col.spawn((
                     BackgroundColor(theme::CARD),
-                    BorderColor::all(theme::EDGE),
+                    BorderColor::all(theme::edge()),
                     Node {
                         padding: UiRect::all(Val::Px(17.0)),
                         border: UiRect::all(Val::Px(theme::RULE)),
@@ -2345,7 +2355,7 @@ fn trust_rows(parent: &mut ChildSpawnerCommands, items: &[crate::launch::Untrust
                             Text::new(detail),
                             theme::font(theme::TEXT_CAPTION),
                             bevy::text::LineHeight::RelativeToFont(theme::LINE_HEIGHT),
-                            TextColor(theme::MUTED),
+                            TextColor(theme::muted()),
                             Pickable::IGNORE,
                         ));
                     });
@@ -2360,7 +2370,7 @@ fn trust_panel(col: &mut ChildSpawnerCommands, installed: &Installed) {
     let items = &installed.untrusted;
     col.spawn((
         BackgroundColor(theme::TRUST_PANEL),
-        BorderColor::all(theme::EDGE),
+        BorderColor::all(theme::edge()),
         Node {
             flex_direction: FlexDirection::Column,
             row_gap: Val::Px(10.0),
@@ -2389,14 +2399,14 @@ fn trust_panel(col: &mut ChildSpawnerCommands, installed: &Installed) {
             "The next step reads the Biomes these items declare, which runs them. Items marked \u{201c}runs code\u{201d} run their own code. Trust them only if you know where they came from."
                 .to_owned(),
             theme::TEXT_SMALL,
-            theme::MUTED,
+            theme::muted(),
         );
         trust_rows(panel, items);
         ui::paragraph(
             panel,
             "Trust is for these exact files.".to_owned(),
             theme::TEXT_CAPTION,
-            theme::MUTED,
+            theme::muted(),
         );
     });
 }
@@ -2603,7 +2613,7 @@ fn step_frame(
 /// before this one shows a tick only once it is valid.
 fn step_rail(w: &mut ChildSpawnerCommands, l: &Launcher, installed: &Installed, current: Step) {
     w.spawn((
-        cine::surface(theme::PANEL),
+        cine::surface(theme::panel()),
         cine::framed(Node {
             width: Val::Px(165.0),
             flex_shrink: 0.0,
@@ -2619,7 +2629,7 @@ fn step_rail(w: &mut ChildSpawnerCommands, l: &Launcher, installed: &Installed, 
             Text::new("NEW WORLD"),
             theme::font(theme::TEXT_EYEBROW),
             bevy::text::LetterSpacing::Px(theme::EYEBROW_TRACKING),
-            TextColor(theme::CHROME_INK),
+            TextColor(theme::chrome_ink()),
             Node {
                 margin: UiRect::new(Val::Px(9.0), Val::Px(9.0), Val::Px(0.0), Val::Px(14.0)),
                 ..default()
@@ -2632,7 +2642,7 @@ fn step_rail(w: &mut ChildSpawnerCommands, l: &Launcher, installed: &Installed, 
             let (fill, edge, ink) = if active {
                 (theme::CHOSEN, theme::CHOSEN_EDGE, theme::INK)
             } else {
-                (Color::NONE, Color::NONE, theme::CHROME_INK)
+                (Color::NONE, Color::NONE, theme::chrome_ink())
             };
             rail.spawn((
                 bevy::ui_widgets::Button,
@@ -2686,7 +2696,7 @@ fn step_rail(w: &mut ChildSpawnerCommands, l: &Launcher, installed: &Installed, 
             Text::new("Yours to shape.\nOne choice at a time."),
             theme::font(theme::TEXT_EYEBROW),
             bevy::text::LineHeight::RelativeToFont(theme::LINE_HEIGHT),
-            TextColor(theme::CHROME_INK),
+            TextColor(theme::chrome_ink()),
             Node {
                 margin: UiRect::top(Val::Px(20.0)),
                 padding: UiRect::new(Val::Px(9.0), Val::Px(9.0), Val::Px(18.0), Val::Px(5.0)),
@@ -2711,7 +2721,7 @@ fn rich(parent: &mut ChildSpawnerCommands, runs: &[(String, bool)]) {
             Text::new(""),
             theme::font(theme::TEXT_SMALL),
             bevy::text::LineHeight::RelativeToFont(theme::LINE_HEIGHT),
-            TextColor(theme::MUTED),
+            TextColor(theme::muted()),
             Pickable::IGNORE,
         ))
         .with_children(|text| {
@@ -2719,7 +2729,7 @@ fn rich(parent: &mut ChildSpawnerCommands, runs: &[(String, bool)]) {
                 text.spawn((
                     TextSpan::new(run.clone()),
                     style(*bold),
-                    TextColor(theme::MUTED),
+                    TextColor(theme::muted()),
                 ));
             }
         });
@@ -2798,7 +2808,7 @@ fn review(
                         .join(", ")
                 },
                 theme::TEXT_SMALL,
-                theme::MUTED,
+                theme::muted(),
             );
         });
         summary(col, "BIOMES", Step::Biomes, false, |card| match &f.biomes {
@@ -2827,7 +2837,7 @@ fn review(
                         draft.climate.humidity_size_m
                     ),
                     theme::TEXT_SMALL,
-                    theme::MUTED,
+                    theme::muted(),
                 );
                 disclosure(
                     card,
@@ -2875,7 +2885,7 @@ fn review(
                 card,
                 "As the Game and Mods declare them.",
                 theme::TEXT_SMALL,
-                theme::MUTED,
+                theme::muted(),
             ),
         });
         notice(
@@ -2911,7 +2921,7 @@ fn lead(card: &mut ChildSpawnerCommands, value: String, tail: Option<String>) {
             t.spawn((
                 TextSpan::new(tail),
                 theme::font(theme::TEXT_SMALL),
-                TextColor(theme::MUTED),
+                TextColor(theme::muted()),
             ));
         }
     });
@@ -2926,7 +2936,7 @@ fn summary(
     fill: impl FnOnce(&mut ChildSpawnerCommands),
 ) {
     col.spawn((
-        BorderColor::all(theme::EDGE),
+        BorderColor::all(theme::edge()),
         Node {
             flex_direction: FlexDirection::Column,
             padding: UiRect::new(
@@ -2996,7 +3006,7 @@ fn biomes_page(
                     draft.choices.len()
                 ),
                 theme::TEXT_SMALL,
-                theme::MUTED,
+                theme::muted(),
             );
             buttons::button(
                 r,
@@ -3030,7 +3040,7 @@ fn biomes_page(
             split
                 .spawn((
                     BackgroundColor(theme::RAISED),
-                    BorderColor::all(theme::EDGE),
+                    BorderColor::all(theme::edge()),
                     Node {
                         flex_direction: FlexDirection::Column,
                         flex_grow: 1.15,
@@ -3063,7 +3073,7 @@ fn biomes_page(
                     c,
                     "Larger values create broader climate regions. These settings are saved with the World.",
                     theme::TEXT_SMALL,
-                    theme::MUTED,
+                    theme::muted(),
                 );
             },
         );
@@ -3089,7 +3099,7 @@ fn biome_row(list: &mut ChildSpawnerCommands, at: usize, choice: &BiomeChoice, s
         BorderColor::all(if selected {
             theme::CARD_CHOSEN_EDGE
         } else {
-            theme::EDGE
+            theme::edge()
         }),
         Node {
             align_items: AlignItems::Center,
@@ -3185,7 +3195,7 @@ fn biome_row(list: &mut ChildSpawnerCommands, at: usize, choice: &BiomeChoice, s
                 Text::new(words.join(" \u{00b7} ")),
                 theme::font(theme::TEXT_CAPTION),
                 bevy::text::LineHeight::RelativeToFont(theme::LINE_HEIGHT),
-                TextColor(theme::MUTED),
+                TextColor(theme::muted()),
                 Pickable::IGNORE,
             ));
         });
@@ -3218,7 +3228,7 @@ fn biome_editor(editor: &mut ChildSpawnerCommands, l: &Launcher, draft: &BiomesD
             "Disabled \u{00b7} enable it to include it in this World"
         },
         theme::TEXT_SMALL,
-        theme::MUTED,
+        theme::muted(),
     );
     climate_map(editor, draft);
     gap(editor, 8.0);
@@ -3238,7 +3248,7 @@ fn biome_editor(editor: &mut ChildSpawnerCommands, l: &Launcher, draft: &BiomesD
         editor,
         "0 turns caves off. 1 keeps the Game\u{2019}s caves.",
         theme::TEXT_SMALL,
-        theme::MUTED,
+        theme::muted(),
     );
     let ground = choice.ground.as_ref().or(draft.declared.ground.as_ref());
     disclosure(
@@ -3267,11 +3277,11 @@ fn biome_editor(editor: &mut ChildSpawnerCommands, l: &Launcher, draft: &BiomesD
                     Act::CycleGround(layer),
                     Pick {
                         fill: theme::FIELD,
-                        edge: theme::FIELD_EDGE,
-                        hover: Some((theme::FIELD_HOVER, theme::FIELD_EDGE)),
+                        edge: theme::field_edge(),
+                        hover: Some((theme::FIELD_HOVER, theme::field_edge())),
                     },
                     BackgroundColor(theme::FIELD),
-                    BorderColor::all(theme::FIELD_EDGE),
+                    BorderColor::all(theme::field_edge()),
                     Node {
                         height: Val::Px(theme::CONTROL_HEIGHT),
                         padding: UiRect::axes(Val::Px(8.0), Val::Px(0.0)),
@@ -3290,7 +3300,7 @@ fn biome_editor(editor: &mut ChildSpawnerCommands, l: &Launcher, draft: &BiomesD
                         theme::TEXT_BODY,
                         theme::INK,
                     );
-                    ui::text(select, "\u{2304}", theme::TEXT_BODY, theme::MUTED);
+                    ui::text(select, "\u{2304}", theme::TEXT_BODY, theme::muted());
                 });
                 gap(d, 13.0);
             }
@@ -3411,7 +3421,7 @@ fn climate_map(editor: &mut ChildSpawnerCommands, draft: &BiomesDraft) {
                         .with_children(|anchor| {
                             anchor
                                 .spawn((
-                                    BackgroundColor(theme::NOTICE_CARD),
+                                    BackgroundColor(theme::notice_card()),
                                     Node {
                                         padding: UiRect::axes(Val::Px(6.0), Val::Px(2.0)),
                                         border_radius: BorderRadius::all(Val::Px(
@@ -3446,15 +3456,15 @@ fn climate_map(editor: &mut ChildSpawnerCommands, draft: &BiomesDraft) {
                 axis,
                 "Cold \u{2190} temperature",
                 theme::TEXT_CAPTION,
-                theme::MUTED,
+                theme::muted(),
             );
-            ui::text(axis, "Warm \u{2192}", theme::TEXT_CAPTION, theme::MUTED);
+            ui::text(axis, "Warm \u{2192}", theme::TEXT_CAPTION, theme::muted());
         });
     ui::paragraph(
         editor,
         "Humidity increases from bottom to top.",
         theme::TEXT_SMALL,
-        theme::MUTED,
+        theme::muted(),
     );
 }
 
@@ -3619,7 +3629,7 @@ fn dialog(
 ) -> Option<Entity> {
     let mut focus = None;
     root.spawn((
-        BackgroundColor(theme::OVERLAY),
+        BackgroundColor(theme::overlay()),
         Node {
             align_items: AlignItems::Center,
             justify_content: JustifyContent::Center,
@@ -3649,7 +3659,7 @@ fn discard(root: &mut ChildSpawnerCommands) -> Option<Entity> {
             cine::dialog_text(
                 d,
                 "Your new World has not been created. Leaving will discard this setup.",
-                theme::MUTED,
+                theme::muted(),
             )
         },
         |row| {
@@ -3685,7 +3695,7 @@ fn reset(root: &mut ChildSpawnerCommands) -> Option<Entity> {
             cine::dialog_text(
                 d,
                 "Restore every Biome and the Climate sizes to this Game\u{2019}s defaults.",
-                theme::MUTED,
+                theme::muted(),
             )
         },
         |row| {

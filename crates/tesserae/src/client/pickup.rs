@@ -221,7 +221,7 @@ fn show_feed(
                 ))
                 .with_children(|row| {
                     row.spawn(theme::ring(theme::RADIUS_MENU))
-                        .insert(BorderColor::all(theme::HUD_ROW_RING));
+                        .insert(BorderColor::all(theme::hud_row_ring()));
                     item_icon(row, names.icon(item), ICON_PX, false);
                     row.spawn((
                         Text::new(format!("+{count}")),
@@ -232,7 +232,7 @@ fn show_feed(
                     row.spawn((
                         Text::new(label(&looks, item)),
                         theme::font(theme::TEXT_CAPTION),
-                        TextColor(theme::HUD_QUIET_INK),
+                        TextColor(theme::hud_quiet_ink()),
                         Pickable::IGNORE,
                     ));
                 });
@@ -296,7 +296,7 @@ fn show_notice(
                 border_radius: BorderRadius::all(Val::Px(theme::RADIUS_SMALL)),
                 ..default()
             },
-            BackgroundColor(theme::FULL_NOTICE),
+            BackgroundColor(theme::full_notice()),
             BorderColor::all(theme::FULL_NOTICE_EDGE),
             Pickable::IGNORE,
             children![(

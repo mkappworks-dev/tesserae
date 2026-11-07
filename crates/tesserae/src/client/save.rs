@@ -182,7 +182,7 @@ fn show(
                 Pickable::default()
             },
             GlobalZIndex(100),
-            BackgroundColor(if modal { theme::OVERLAY } else { Color::NONE }),
+            BackgroundColor(if modal { theme::overlay() } else { Color::NONE }),
             Node {
                 position_type: PositionType::Absolute,
                 top: Val::Px(if modal { 0.0 } else { 20.0 }),
@@ -256,7 +256,7 @@ fn show(
                         cine::dialog_text(
                             dialog,
                             "Your World is still open. Your latest changes have not been saved.",
-                            theme::MUTED,
+                            theme::muted(),
                         );
                         dialog.spawn(cine::error_well()).with_children(|well| {
                             cine::dialog_text(well, error.clone(), theme::DANGER_INK)

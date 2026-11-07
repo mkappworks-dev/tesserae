@@ -126,6 +126,7 @@ pub(super) enum Operation {
     TextScale(u32),
     ReducedMotion(bool),
     SolidBackground(bool),
+    StrongerContrast(bool),
 }
 
 pub(super) fn plugin(app: &mut App) {

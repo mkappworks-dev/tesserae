@@ -306,7 +306,7 @@ pub(super) fn behavior(
             list,
             crate::client::edit::hud_text(context.0, &context.1.0, context.2, bindings, labels, p),
             theme::TEXT_SMALL,
-            theme::MUTED,
+            theme::muted(),
         );
     }
 }
@@ -322,6 +322,18 @@ pub(super) fn accessibility(list: &mut ChildSpawnerCommands, p: &Preferences) {
                     row,
                     p.reduced_motion,
                     Operation::ReducedMotion(!p.reduced_motion),
+                )
+            },
+        );
+        setting_row(
+            card,
+            "Stronger UI contrast",
+            "Increase panel borders and secondary text contrast.",
+            |row| {
+                switch(
+                    row,
+                    p.stronger_contrast,
+                    Operation::StrongerContrast(!p.stronger_contrast),
                 )
             },
         );
@@ -464,7 +476,7 @@ pub(super) fn display(list: &mut ChildSpawnerCommands, p: &Preferences) {
         list,
         "View distance, textures, shadows, and simulation settings stay unchanged.",
         theme::TEXT_SMALL,
-        theme::MUTED,
+        theme::muted(),
     );
 }
 
@@ -487,7 +499,7 @@ pub(super) fn bindings_page(
                 line,
                 "Searching all categories",
                 theme::TEXT_SMALL,
-                theme::MUTED,
+                theme::muted(),
             )
         });
     } else {
@@ -499,7 +511,7 @@ pub(super) fn bindings_page(
                 flex_shrink: 0.0,
                 ..default()
             },
-            BorderColor::all(theme::EDGE),
+            BorderColor::all(theme::edge()),
         ))
         .with_children(|filters| {
             for category in [Category::Movement, Category::Building, Category::Interface] {
@@ -526,7 +538,7 @@ pub(super) fn bindings_page(
             intro,
             "Keyboard & mouse · primary and alternative",
             theme::TEXT_SMALL,
-            theme::MUTED,
+            theme::muted(),
         );
         crate::client::cinematic::pill(intro, "Select to rebind");
     });
@@ -727,7 +739,7 @@ pub(super) fn controller(
                 labels.pad(Start),
             ),
             theme::TEXT_SMALL,
-            theme::MUTED,
+            theme::muted(),
         );
         let mut entries: Vec<_> = bindings
             .pad
@@ -754,7 +766,7 @@ pub(super) fn binding_row(
                 flex_shrink: 0.0,
                 ..default()
             },
-            BorderColor::all(theme::EDGE),
+            BorderColor::all(theme::edge()),
         ))
         .with_children(content);
 }

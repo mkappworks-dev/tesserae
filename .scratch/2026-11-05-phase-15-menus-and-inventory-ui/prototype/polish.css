@@ -51,3 +51,7 @@
 .game .trust-panel>small{color:var(--muted)}
 /* Changing numbers keep one width per digit, as Inter's tnum does in the engine. */
 .layout-stepper input,.layout-totals b,.item-inspector dd,#despawn-left,.step-letter{font-variant-numeric:tabular-nums}
+/* Stronger UI contrast, as the engine's theme::by_contrast tokens: opaque notices, a thicker focus ring, brighter rules. */
+.game.strong-contrast :focus-visible{outline-width:5px}
+.game.strong-contrast #notice-card,.game.strong-contrast .notice{background:#0b0b0d}
+.game.strong-contrast .stack-count,.game.strong-contrast .slot-number{color:#fff}

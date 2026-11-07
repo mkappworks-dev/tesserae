@@ -265,6 +265,7 @@ pub(super) fn activate(
                 Operation::TextScale(value) => p.text_scale = value,
                 Operation::ReducedMotion(value) => p.reduced_motion = value,
                 Operation::SolidBackground(value) => p.solid_background = value,
+                Operation::StrongerContrast(value) => p.stronger_contrast = value,
                 _ => {}
             }
         }
