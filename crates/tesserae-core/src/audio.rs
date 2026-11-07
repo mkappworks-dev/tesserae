@@ -4,6 +4,8 @@
 //! spatial curve is a fixed inverse square with no range, so it cannot carry a
 //! Sound a declared distance (ADR-0025).
 
+use serde::{Deserialize, Serialize};
+
 /// The group of a user's volume settings a Sound is heard under. Closed in
 /// contract 0.3.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -184,8 +186,10 @@ pub fn equal_power(pan: f32) -> [f32; 2] {
     [angle.cos(), angle.sin()]
 }
 
-/// A user's volume for each Sound category and for all of them, 0 to 100.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+/// A user's volume for each Sound category and for all of them, 0 to 100. A
+/// preference of the user's, so no World or save holds it.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Volumes {
     pub master: u8,
     pub effects: u8,
@@ -205,6 +209,12 @@ impl Default for Volumes {
 }
 
 impl Volumes {
+    pub fn valid(&self) -> bool {
+        [self.master, self.effects, self.ambient, self.music]
+            .iter()
+            .all(|&v| v <= 100)
+    }
+
     /// A sink's volume for a Sound of `category` played at `volume` and
     /// attenuated to `attenuation`.
     pub fn gain(&self, category: SoundCategory, volume: f32, attenuation: f32) -> f32 {

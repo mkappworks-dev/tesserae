@@ -15,6 +15,7 @@ use bevy::prelude::*;
 use tesserae_core::audio::{Falloff, Listener, SoundCategory, SoundRng, Volumes, equal_power, pan};
 
 use super::camera::FlyCamera;
+use super::profile::Preferences;
 use crate::content::SoundLibrary;
 use crate::server::sound::SoundEvent;
 use crate::session::SessionApp;
@@ -29,7 +30,13 @@ pub(super) fn plugin(app: &mut App) {
     app.init_session_resource::<Library>()
         .add_session_message::<SoundLibrary>()
         .add_session_message::<SoundEvent>()
-        .add_session_systems(Update, (receive_library, play, follow).chain());
+        .add_session_systems(Update, (receive_library, play).chain())
+        // After every Update, so a volume applied anywhere this frame reaches
+        // the playing sinks this frame.
+        .add_session_systems(
+            PostUpdate,
+            follow.after(bevy::transform::TransformSystems::Propagate),
+        );
 }
 
 /// The World's Sounds, each recording ready to play from the bytes the Server
@@ -51,9 +58,9 @@ struct Emitter {
 }
 
 impl Emitter {
-    fn gain(&self, listener: &Listener) -> f32 {
+    fn gain(&self, listener: &Listener, volumes: &Volumes) -> f32 {
         let attenuation = self.falloff.gain(listener.distance_m(self.pos_m));
-        Volumes::default().gain(self.category, self.volume, attenuation)
+        volumes.gain(self.category, self.volume, attenuation)
     }
 }
 
@@ -88,6 +95,7 @@ fn listener(camera: &(&FlyCamera, &GlobalTransform)) -> Listener {
 fn play(
     mut events: MessageReader<SoundEvent>,
     library: Res<Library>,
+    preferences: Res<Preferences>,
     camera: Single<(&FlyCamera, &GlobalTransform)>,
     mut panned: ResMut<Assets<Panned>>,
     mut rng: Local<Option<SoundRng>>,
@@ -123,7 +131,7 @@ fn play(
             AudioPlayer(handle),
             PlaybackSettings {
                 mode: PlaybackMode::Despawn,
-                volume: Volume::Linear(emitter.gain(&listener)),
+                volume: Volume::Linear(emitter.gain(&listener, &preferences.volumes)),
                 speed: variation.pitch,
                 ..default()
             },
@@ -132,14 +140,19 @@ fn play(
     }
 }
 
-/// The listener moves while a sound plays, so its gain and pan follow.
+/// The listener and the volume settings change while a sound plays, so its
+/// gain and pan follow. Bevy's `GlobalVolume` is read only when a sound starts,
+/// so it stays at 1 and the settings are applied here.
 fn follow(
     camera: Single<(&FlyCamera, &GlobalTransform)>,
+    preferences: Res<Preferences>,
     mut playing: Query<(&Emitter, &mut AudioSink)>,
 ) {
     let listener = listener(&camera);
     for (emitter, mut sink) in &mut playing {
-        sink.set_volume(Volume::Linear(emitter.gain(&listener)));
+        sink.set_volume(Volume::Linear(
+            emitter.gain(&listener, &preferences.volumes),
+        ));
         emitter
             .pan
             .store(pan(&listener, emitter.pos_m).to_bits(), Ordering::Relaxed);
@@ -230,6 +243,7 @@ mod tests {
     fn app() -> App {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, AssetPlugin::default()))
+            .insert_resource(Preferences::default())
             .add_plugins(plugin);
         app.world_mut().spawn((
             FlyCamera {
@@ -297,6 +311,24 @@ mod tests {
         assert!((gain - 0.2273).abs() < 1e-3, "{gain}");
         assert!((pan - 1.0).abs() < 1e-5, "{pan}");
         assert_eq!(pitch, 1.25);
+    }
+
+    #[test]
+    fn a_sound_event_plays_at_the_players_volumes() {
+        let mut app = app();
+        app.world_mut().resource_mut::<Preferences>().volumes = Volumes {
+            master: 50,
+            effects: 50,
+            ..Volumes::default()
+        };
+        app.world_mut().write_message(SoundEvent {
+            sound: SoundId(0),
+            pos_m: [4.0, 0.0, 0.0],
+            cause: Cause::Break,
+        });
+        app.update();
+        let (gain, _, _) = playing(&mut app)[0];
+        assert!((gain - 0.2273 / 4.0).abs() < 1e-3, "{gain}");
     }
 
     #[test]
