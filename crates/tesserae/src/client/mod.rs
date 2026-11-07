@@ -19,6 +19,8 @@ pub mod drawn_mask;
 mod drops;
 pub mod edit;
 mod game_mode;
+mod hand_anim;
+mod hand_fx;
 mod help;
 mod history;
 #[cfg(feature = "profiling")]
@@ -104,6 +106,7 @@ pub fn plugin(app: &mut App) {
         history::plugin,
         avatar::plugin,
     ));
+    app.add_plugins((hand_anim::plugin, hand_fx::plugin));
     app.add_plugins((
         view::plugin,
         loading::plugin,

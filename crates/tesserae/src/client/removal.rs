@@ -27,6 +27,17 @@ impl Progress {
     pub(super) fn active(&self) -> bool {
         self.target.is_some() && !self.consumed
     }
+    /// How far the removal has run, `0..=1`; zero when none is.
+    pub(super) fn fraction(&self) -> f32 {
+        if self.active() {
+            (self.elapsed / self.duration.max(0.05)).clamp(0.0, 1.0)
+        } else {
+            0.0
+        }
+    }
+    pub(super) fn bounds(&self) -> Option<crate::server::edit::AimBounds> {
+        self.target.filter(|_| self.active()).map(|t| t.bounds)
+    }
     fn reset(&mut self) {
         self.target = None;
         self.elapsed = 0.0;
