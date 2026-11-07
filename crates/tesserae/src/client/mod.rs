@@ -35,6 +35,7 @@ mod layout_menu;
 pub(crate) mod loading;
 mod material_textures;
 mod menu;
+mod menu_blur;
 mod menu_ui;
 mod overlay;
 mod pad;
@@ -107,6 +108,7 @@ pub fn plugin(app: &mut App) {
         avatar::plugin,
     ));
     app.add_plugins((hand_anim::plugin, hand_fx::plugin, place_settle::plugin));
+    app.add_plugins(menu_blur::plugin);
     app.add_plugins((
         view::plugin,
         loading::plugin,
