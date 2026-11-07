@@ -23,11 +23,59 @@ type HandOnly = (With<Hand>, Without<Ghost>);
 pub(super) struct Ghost;
 #[derive(Component)]
 pub(super) struct Hand;
+/// Where the hand sits at rest, which `hand_anim` poses away from and back to.
+#[derive(Component, Clone, Copy)]
+pub(super) struct HandRest {
+    translation: Vec3,
+    rotation: Quat,
+    scale: f32,
+}
+impl HandRest {
+    const AT: HandRest = HandRest {
+        translation: Vec3::new(-0.60, -0.33, -1.0),
+        rotation: Quat::from_xyzw(0.0, -0.198_669_33, 0.0, 0.980_066_6),
+        scale: 0.06,
+    };
+    pub(super) fn posed(&self, pose: super::hand_anim::Pose) -> Transform {
+        Transform::from_translation(self.translation + pose.offset)
+            .with_rotation(self.rotation * Quat::from_rotation_x(pose.pitch))
+            .with_scale(Vec3::splat(self.scale * pose.scale))
+    }
+}
+/// Colour of an Item that has no declared look.
+const PLAIN_ITEM: [u8; 4] = [190, 190, 190, 255];
+/// What the first-person hand draws for what is selected.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub(super) enum HandModel {
+    /// A placeable Material, fire or a Tool, each with its own look.
+    Block(Holding),
+    /// An Item that places nothing, such as food, drawn in its colour.
+    Item([u8; 4]),
+    Nothing,
+}
+pub(super) fn hand_model(hotbar: &Hotbar, looks: &[crate::content::ItemLook]) -> HandModel {
+    let held = hotbar.held();
+    if held != Holding::Empty {
+        return HandModel::Block(held);
+    }
+    if hotbar.outside.is_some() {
+        return HandModel::Nothing;
+    }
+    match &hotbar.stacks[hotbar.selected] {
+        Some(stack) => HandModel::Item(
+            looks
+                .iter()
+                .find(|look| look.name == stack.item)
+                .map_or(PLAIN_ITEM, |look| look.color),
+        ),
+        None => HandModel::Nothing,
+    }
+}
 #[derive(Component)]
 pub(super) struct HandCamera;
 #[derive(Resource, Default)]
 struct Model {
-    held: Option<Holding>,
+    held: Option<HandModel>,
     mesh: Handle<Mesh>,
     ghost: Handle<StandardMaterial>,
     hand: Handle<StandardMaterial>,
@@ -181,15 +229,15 @@ fn fire_mesh() -> Mesh {
 
 fn model(
     mut commands: Commands,
-    (hotbar, content): (Res<Hotbar>, PreviewContent),
+    (hotbar, content, looks): (Res<Hotbar>, PreviewContent, Res<super::drops::Looks>),
     mut model: ResMut<Model>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     old: Query<Entity, Models>,
     main: Query<Entity, With<FlyCamera>>,
 ) {
-    let held = hotbar.held();
-    if model.held == Some(held) && !content.changed() {
+    let wanted = hand_model(&hotbar, &looks.0);
+    if model.held == Some(wanted) && !content.changed() && !looks.is_changed() {
         return;
     }
     for entity in &old {
@@ -198,54 +246,76 @@ fn model(
     meshes.remove(model.mesh.id());
     materials.remove(model.ghost.id());
     materials.remove(model.hand.id());
-    model.held = Some(held);
-    let Some(mesh) = item_mesh(held, &content.catalogue.0) else {
-        return;
+    model.held = Some(wanted);
+    let (mesh, hand, ghost) = match wanted {
+        HandModel::Nothing => return,
+        HandModel::Block(held) => {
+            let Some(mesh) = item_mesh(held, &content.catalogue.0) else {
+                return;
+            };
+            let rgba = content.swatches.rgba(held);
+            (
+                mesh,
+                content.textures.material(held, rgba, false),
+                Some(content.textures.material(held, rgba, true)),
+            )
+        }
+        HandModel::Item([r, g, b, a]) => (
+            item_cube_mesh(),
+            StandardMaterial {
+                base_color: Color::srgba_u8(r, g, b, a),
+                unlit: true,
+                ..default()
+            },
+            None,
+        ),
     };
     model.mesh = meshes.add(mesh);
-    let rgba = content.swatches.rgba(held);
-    model.hand = materials.add(content.textures.material(held, rgba, false));
-    model.ghost = materials.add(content.textures.material(held, rgba, true));
-    commands.spawn((
-        Ghost,
-        bevy::light::NotShadowCaster,
-        Mesh3d(model.mesh.clone()),
-        MeshMaterial3d(model.ghost.clone()),
-        Transform::default(),
-        Visibility::Hidden,
-    ));
+    model.hand = materials.add(hand);
+    if let Some(ghost) = ghost {
+        model.ghost = materials.add(ghost);
+        commands.spawn((
+            Ghost,
+            bevy::light::NotShadowCaster,
+            Mesh3d(model.mesh.clone()),
+            MeshMaterial3d(model.ghost.clone()),
+            Transform::default(),
+            Visibility::Hidden,
+        ));
+    }
     if let Ok(parent) = main.single() {
         commands.spawn((
             Hand,
+            HandRest::AT,
             bevy::light::NotShadowCaster,
             Mesh3d(model.mesh.clone()),
             MeshMaterial3d(model.hand.clone()),
             RenderLayers::layer(HAND_LAYER),
-            Transform::from_xyz(-0.60, -0.33, -1.0)
-                .with_scale(Vec3::splat(0.06))
-                .with_rotation(Quat::from_rotation_y(-0.4)),
+            HandRest::AT.posed(super::hand_anim::Pose::REST),
             Visibility::Hidden,
             ChildOf(parent),
         ));
     }
 }
-fn position(
+fn item_cube_mesh() -> Mesh {
+    let mut mesh = Mesh::from(Cuboid::new(0.8, 0.8, 0.8)).translated_by(Vec3::splat(0.5));
+    let count = mesh.count_vertices();
+    mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, vec![[1.0f32; 4]; count]);
+    mesh
+}
+pub(super) fn position(
     (removal, dead): (
         Option<Res<super::removal::Progress>>,
         Option<Res<super::death::Dead>>,
     ),
-    (menu, settings, layout): (
-        Res<Menu>,
-        Option<Res<super::settings::Settings>>,
-        Option<Res<super::layout::LayoutMode>>,
-    ),
+    (covers, layout): (super::menu::Covers, Option<Res<super::layout::LayoutMode>>),
     world: Res<WorldSettings>,
     hotbar: Res<Hotbar>,
     (target, sent, time): (Res<Target>, Res<Sent>, Res<Time>),
     mut ghost: Query<(&mut Transform, &mut Visibility), GhostOnly>,
     mut hand: Query<&mut Visibility, HandOnly>,
 ) {
-    let menu_open = menu.open || settings.is_some_and(|s| s.open) || !super::death::alive(dead);
+    let menu_open = super::menu::covered(&covers) || !super::death::alive(dead);
     let cell = (!removal.is_some_and(|r| r.active())
         && !menu_open
         && !layout.is_some_and(|layout| layout.on)
@@ -278,6 +348,7 @@ mod tests {
     use super::*;
     use crate::client::{edit::Catalogue, menu::Swatches};
     use crate::content::{CatalogueShape, ContentCatalogue};
+    use crate::server::tool::ToolId;
     use tesserae_core::{Orientation, SHAPE_STAIR};
     fn catalogue() -> ContentCatalogue {
         let tables = crate::server::fixture_tables();
@@ -332,6 +403,7 @@ mod tests {
         app.init_resource::<Hotbar>()
             .insert_resource(Catalogue(catalogue()))
             .init_resource::<Swatches>()
+            .init_resource::<super::super::drops::Looks>()
             .init_resource::<Menu>()
             .init_resource::<WorldSettings>()
             .init_resource::<Sent>()
@@ -390,6 +462,62 @@ mod tests {
                 .query_filtered::<&Visibility, Models>()
                 .iter(app.world())
                 .all(|v| *v == Visibility::Hidden)
+        );
+    }
+    #[test]
+    fn the_resting_quaternion_is_a_turn_of_four_tenths_of_a_radian() {
+        let expected = Quat::from_rotation_y(-0.4);
+        assert!(HandRest::AT.rotation.angle_between(expected) < 1e-5);
+    }
+    #[test]
+    fn the_hand_picks_a_model_per_held_kind() {
+        use crate::content::ItemLook;
+        use tesserae_core::inventory::Stack;
+        let look = |name: &str, color| ItemLook {
+            name: name.into(),
+            size_m: 0.25,
+            color,
+            material: None,
+            max_stack: 64,
+        };
+        let looks = [look("m:melon", [20, 200, 40, 255])];
+        let stack = |item: &str| {
+            Some(Stack {
+                item: item.into(),
+                count: 2,
+            })
+        };
+        let mut hotbar = Hotbar::default();
+        assert_eq!(
+            hand_model(&hotbar, &looks),
+            HandModel::Nothing,
+            "empty slot"
+        );
+
+        hotbar.stacks[0] = stack("m:melon");
+        assert_eq!(
+            hand_model(&hotbar, &looks),
+            HandModel::Item([20, 200, 40, 255]),
+            "food draws as its Item"
+        );
+        hotbar.stacks[0] = stack("m:unlisted");
+        assert_eq!(hand_model(&hotbar, &looks), HandModel::Item(PLAIN_ITEM));
+
+        hotbar.outside = Some(Holding::Empty);
+        assert_eq!(
+            hand_model(&hotbar, &looks),
+            HandModel::Nothing,
+            "empty hand"
+        );
+
+        let rock = Holding::solid(3, 0);
+        hotbar.outside = Some(rock);
+        assert_eq!(hand_model(&hotbar, &looks), HandModel::Block(rock));
+        hotbar.outside = Some(Holding::Tool(ToolId(1)));
+        assert_eq!(
+            hand_model(&hotbar, &looks),
+            HandModel::Block(Holding::Tool(ToolId(1))),
+            "a tool keeps its own look"
         );
     }
     #[test]
