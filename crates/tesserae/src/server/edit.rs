@@ -387,6 +387,8 @@ pub(super) fn plugin(app: &mut App) {
         .init_session_resource::<super::mods::EditHistory>()
         .add_player_intent::<EditIntent>()
         .add_session_message::<EditRejected>()
+        .add_session_message::<super::undo::HistoryNeedsItems>()
+        .add_session_message::<super::undo::RefundDropped>()
         .add_session_message::<EditApplied>()
         .init_session_resource::<super::entities::EntityStore>()
         .init_session_resource::<super::items::Items>()

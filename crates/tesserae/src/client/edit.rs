@@ -24,6 +24,7 @@ use crate::content::{ContentCatalogue, ItemLook};
 use crate::server::edit::{EditAction, EditIntent, EditRejected, RejectReason};
 use crate::server::inventory::{InventoryChanged, InventoryIntent, MAX_STACK};
 use crate::server::tool::ToolId;
+use crate::server::undo::{HistoryAction, HistoryNeedsItems, RefundDropped};
 
 /// How long a rejection stays on screen.
 const NOTICE_SECS: f32 = 2.5;
@@ -398,9 +399,12 @@ pub(super) fn plugin(app: &mut App) {
                 // constructing an Edit ray from it.
                 send_intents.after(super::view::place),
                 show_rejections,
+                show_history_notices,
             )
                 .chain(),
-        );
+        )
+        .add_session_message::<HistoryNeedsItems>()
+        .add_session_message::<RefundDropped>();
 }
 
 #[derive(Component)]
@@ -699,6 +703,8 @@ fn show_rejections(
             continue;
         }
         let text = match message.reason {
+            // `HistoryNeedsItems` follows with the Items and the Material.
+            RejectReason::ItemNeeded => continue,
             RejectReason::NothingHeld => {
                 format!("Nothing to place in hotbar slot {}.", hotbar.selected + 1)
             }
@@ -708,6 +714,51 @@ fn show_rejections(
         notice.show(text);
     }
     notice.tick(time.delta_secs());
+}
+
+fn history_needs_text(needs: &HistoryNeedsItems, material: &str, item: &str) -> String {
+    let (verb, what, again) = match needs.action {
+        HistoryAction::Undo => ("undo", "putting", "back"),
+        HistoryAction::Redo => ("redo", "placing", "again"),
+    };
+    format!(
+        "Can’t {verb}: {what} the {material} {again} needs {} {item}.",
+        needs.count
+    )
+}
+
+fn refund_dropped_text(dropped: &RefundDropped, item: &str) -> String {
+    format!(
+        "Your Inventory is full: {} {item} dropped at your feet.",
+        dropped.count
+    )
+}
+
+/// What the Server says an undo or redo needed or dropped: the Server decides
+/// both, the Client only words them.
+fn show_history_notices(
+    mut commands: Commands,
+    (mut needs, mut dropped): (
+        MessageReader<HistoryNeedsItems>,
+        MessageReader<RefundDropped>,
+    ),
+    (mut notice, looks, catalogue): (ResMut<Notice>, Res<super::drops::Looks>, Res<Catalogue>),
+) {
+    for needs in needs.read() {
+        let material = catalogue.0.material(needs.material).map_or_else(
+            || "Voxel".to_owned(),
+            |m| super::menu_ui::declared_title(&m.name),
+        );
+        let item = super::pickup::label(&looks, &needs.item);
+        let text = history_needs_text(needs, &material, &item);
+        super::menu_ui::notify(&mut commands, &text, super::menu_ui::Tone::Alert);
+        notice.show(text);
+    }
+    for dropped in dropped.read() {
+        let text = refund_dropped_text(dropped, &super::pickup::label(&looks, &dropped.item));
+        super::menu_ui::notify(&mut commands, &text, super::menu_ui::Tone::Change);
+        notice.show(text);
+    }
 }
 
 fn hints(bindings: &super::actions::Bindings, labels: &super::actions::Labels) -> String {
@@ -1063,6 +1114,8 @@ mod tests {
             .add_message::<ContentCatalogue>()
             .add_message::<EditIntent>()
             .add_message::<EditRejected>()
+            .add_message::<HistoryNeedsItems>()
+            .add_message::<RefundDropped>()
             .add_message::<MovementFeedback>()
             .add_message::<crate::server::player::RestoreView>()
             .add_message::<PoseCorrection>()
@@ -1080,6 +1133,7 @@ mod tests {
                     select_held,
                     send_intents.after(crate::client::pose::apply_correction),
                     show_rejections,
+                    show_history_notices,
                 )
                     .chain(),
             );
@@ -1534,6 +1588,52 @@ mod tests {
         assert_eq!(notice.text(), "nope");
         notice.tick(0.2);
         assert_eq!(notice.text(), "");
+    }
+
+    #[test]
+    fn an_undo_the_server_refuses_for_want_of_items_names_the_material_and_the_item() {
+        let mut app = app(CursorGrabMode::None);
+        let rock = tesserae_core::testgen::fixtures().ground.rock;
+        app.world_mut().write_message(EditRejected {
+            reason: RejectReason::ItemNeeded,
+        });
+        app.world_mut().write_message(HistoryNeedsItems {
+            action: HistoryAction::Undo,
+            material: rock,
+            item: "test:stone".into(),
+            count: 1,
+        });
+        frame(&mut app);
+        assert_eq!(
+            app.world().resource::<Notice>().text(),
+            "Can’t undo: putting the Stone back needs 1 Stone."
+        );
+
+        app.world_mut().write_message(HistoryNeedsItems {
+            action: HistoryAction::Redo,
+            material: rock,
+            item: "test:stone".into(),
+            count: 3,
+        });
+        frame(&mut app);
+        assert_eq!(
+            app.world().resource::<Notice>().text(),
+            "Can’t redo: placing the Stone again needs 3 Stone."
+        );
+    }
+
+    #[test]
+    fn a_refund_that_dropped_at_the_players_feet_says_so() {
+        let mut app = app(CursorGrabMode::None);
+        app.world_mut().write_message(RefundDropped {
+            item: "test:stone".into(),
+            count: 1,
+        });
+        frame(&mut app);
+        assert_eq!(
+            app.world().resource::<Notice>().text(),
+            "Your Inventory is full: 1 Stone dropped at your feet."
+        );
     }
 
     #[test]

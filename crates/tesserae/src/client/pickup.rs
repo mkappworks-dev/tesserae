@@ -91,7 +91,7 @@ fn receive_inventory(mut changes: MessageReader<InventoryChanged>, mut notice: R
     }
 }
 
-fn label(looks: &Looks, item: &str) -> String {
+pub(super) fn label(looks: &Looks, item: &str) -> String {
     declared_title(
         looks
             .0

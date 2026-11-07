@@ -92,7 +92,7 @@ function undo(){
   if(last.kind==='place'){
     state.journal.pop();
     const left=receive(last.id,1);
-    if(left)notice(`No room: 1 ${itemName(last.id)} dropped at your feet.`,'info');
+    if(left)notice(`Your Inventory is full: 1 ${itemName(last.id)} dropped at your feet.`,'info');
     log(`Undid the placement${left?'':'; 1 '+itemName(last.id)+' refunded'}.`);render();return;
   }
   if(survival()&&!spend(last.id,1)){notice(`Can’t undo: putting the ${carriedItems.find(x=>x.id===last.id)?.material||'Voxel'} back needs 1 ${itemName(last.id)}.`,'warn');return;}

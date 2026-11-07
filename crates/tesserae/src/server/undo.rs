@@ -13,10 +13,10 @@ use super::{
 use crate::world::WorldSettings;
 use bevy::prelude::*;
 use std::collections::{BTreeMap, VecDeque};
-use tesserae_core::Occupants;
 use tesserae_core::collide::Terrain;
 use tesserae_core::entity::EntityId;
 use tesserae_core::inventory::Stack;
+use tesserae_core::{MaterialId, Occupants};
 use tesserae_mods::{EditEvent, EditKind};
 
 const LIMIT: usize = 128;
@@ -51,6 +51,38 @@ pub(super) enum Cost {
     /// Removing dropped one of this Item as this Dropped item.
     Dropped(String, EntityId),
 }
+/// An undo or redo refused because the Player lacks the Items it takes, sent
+/// beside the [`RejectReason::ItemNeeded`] refusal so the Client can name them.
+#[derive(Message, Clone, Debug, PartialEq, Eq)]
+pub struct HistoryNeedsItems {
+    pub action: HistoryAction,
+    /// The Material of the first Voxel the group could not pay for.
+    pub material: MaterialId,
+    pub item: String,
+    /// What the whole group takes of `item`, not only the shortfall.
+    pub count: u32,
+}
+
+/// An undo's refund that found no room in the Inventory and lay at the
+/// Player's feet as a Dropped item instead.
+#[derive(Message, Clone, Debug, PartialEq, Eq)]
+pub struct RefundDropped {
+    pub item: String,
+    pub count: u32,
+}
+
+/// Why [`restore`] changed nothing.
+enum Refused {
+    Reason(RejectReason),
+    Needs(HistoryNeedsItems),
+}
+
+impl From<RejectReason> for Refused {
+    fn from(reason: RejectReason) -> Self {
+        Refused::Reason(reason)
+    }
+}
+
 /// The Voxels one Edit or one layout changed, undone and redone together.
 type Group = Vec<Entry>;
 
@@ -129,7 +161,11 @@ pub(super) fn apply(
     (tables, items, world): (Res<ContentTables>, Res<Items>, Res<WorldSettings>),
     mut history: ResMut<EditHistory>,
     mut players: Query<(&Player, &mut Inventory)>,
-    mut rejected: MessageWriter<EditRejected>,
+    (mut rejected, mut needs, mut dropped): (
+        MessageWriter<EditRejected>,
+        MessageWriter<HistoryNeedsItems>,
+        MessageWriter<RefundDropped>,
+    ),
 ) {
     let Ok((player, inventory)) = players.single_mut() else {
         return;
@@ -160,7 +196,7 @@ pub(super) fn apply(
         voxel_size: world.voxel_size,
     };
     let result = if !pending.is_empty() {
-        Err(RejectReason::Busy)
+        Err(RejectReason::Busy.into())
     } else {
         restore(
             &mut store,
@@ -172,7 +208,13 @@ pub(super) fn apply(
         )
     };
     match result {
-        Ok(()) => {
+        Ok(refunds_dropped) => {
+            for stack in refunds_dropped {
+                dropped.write(RefundDropped {
+                    item: stack.item,
+                    count: stack.count,
+                });
+            }
             // The Mods hear the changes in the order they were made, or in
             // reverse when they are taken back.
             let mut events: Vec<EditEvent> = group.iter().map(|entry| entry.event).collect();
@@ -192,14 +234,20 @@ pub(super) fn apply(
                 history.record(event);
             }
         }
-        Err(reason) => {
+        Err(Refused::Reason(reason)) => {
             rejected.write(EditRejected { reason });
+        }
+        Err(Refused::Needs(detail)) => {
+            rejected.write(EditRejected {
+                reason: RejectReason::ItemNeeded,
+            });
+            needs.write(detail);
         }
     }
 }
 /// Replays a whole group or none of it: every cell and every Item it needs is
 /// checked before the first is changed, and a change that fails midway is
-/// taken back.
+/// taken back. Returns the refunds that had no room and dropped at the Player.
 fn restore(
     store: &mut ChunkStore,
     meshes: &mut MeshState,
@@ -207,7 +255,7 @@ fn restore(
     settle: &mut Settle,
     group: &mut [Entry],
     action: HistoryAction,
-) -> Result<(), RejectReason> {
+) -> Result<Vec<Stack>, Refused> {
     let undoing = action == HistoryAction::Undo;
     let step = |entry: &Entry| {
         if undoing {
@@ -220,21 +268,21 @@ fn restore(
         let chunk = VoxelCoord::of(entry.at).chunk;
         let lifetime = store.lifetime(chunk).ok_or(RejectReason::NotLoaded)?;
         if lifetime != entry.lifetime {
-            return Err(RejectReason::HistoryChanged);
+            return Err(RejectReason::HistoryChanged.into());
         }
         if meshes.is_unlit(chunk) {
-            return Err(RejectReason::Busy);
+            return Err(RejectReason::Busy.into());
         }
         if store.occupants(entry.at, &tables.fluids) != Some(step(entry).0) {
-            return Err(RejectReason::HistoryChanged);
+            return Err(RejectReason::HistoryChanged.into());
         }
     }
     let owed = owed(group, action, settle.entities);
-    if owed
+    if let Some(short) = group
         .iter()
-        .any(|(item, &count)| settle.inventory.count(item) < count)
+        .find_map(|entry| short_item(entry, action, &owed, settle))
     {
-        return Err(RejectReason::ItemNeeded);
+        return Err(Refused::Needs(short));
     }
     let order: Vec<&Entry> = if undoing {
         group.iter().rev().collect()
@@ -246,7 +294,7 @@ fn restore(
             for undone in order[..done].iter().rev() {
                 let _ = edit::set_occupants(store, meshes, tables, undone.at, step(undone).0);
             }
-            return Err(reason);
+            return Err(reason.into());
         }
     }
     let mut refused = Vec::new();
@@ -291,7 +339,7 @@ fn restore(
             }
         }
     }
-    inventory::drop_around(
+    let dropped = inventory::drop_around(
         settle.entities,
         &Terrain {
             voxels: &*store,
@@ -302,7 +350,42 @@ fn restore(
         &settle.body,
         refused,
     );
-    Ok(())
+    Ok(dropped.into_iter().map(|(stack, _)| stack).collect())
+}
+
+/// What `entry` needs of an Item the Player holds too few of, if it is the
+/// first thing in the group that does.
+fn short_item(
+    entry: &Entry,
+    action: HistoryAction,
+    owed: &BTreeMap<&str, u32>,
+    settle: &Settle,
+) -> Option<HistoryNeedsItems> {
+    let (item, shown) = match (&entry.cost, action) {
+        (Cost::Paid(item), HistoryAction::Redo) => (item, entry.after),
+        (Cost::Dropped(item, id), HistoryAction::Undo) if settle.entities.get(*id).is_none() => {
+            (item, entry.before)
+        }
+        _ => return None,
+    };
+    let count = *owed.get(item.as_str())?;
+    (settle.inventory.count(item) < count).then(|| HistoryNeedsItems {
+        action,
+        material: material_of(shown),
+        item: item.clone(),
+        count,
+    })
+}
+
+/// The Material a Player sees at a position: the solid's, else the fluid's.
+fn material_of(occupants: Occupants) -> MaterialId {
+    if occupants.solid.is_air() {
+        occupants
+            .fluid
+            .map_or_else(|| occupants.solid.material(), |fluid| fluid.material)
+    } else {
+        occupants.solid.material()
+    }
 }
 /// The Items restoring `group` takes from the Inventory: each placement a redo
 /// lays again, and each removal an undo puts back whose Dropped item is gone.
@@ -433,6 +516,7 @@ mod tests {
         use super::super::super::inventory::Inventory;
         use super::super::super::items::Items;
         use super::super::HistoryAction::{Redo, Undo};
+        use super::super::{HistoryNeedsItems, RefundDropped};
         use bevy::prelude::*;
         use tesserae_core::inventory::{BACKPACK_SLOTS, HOTBAR_SLOTS};
         use tesserae_core::{Orientation, SHAPE_FULL_CUBE};
@@ -479,6 +563,20 @@ mod tests {
             *query.single_mut(app.world_mut()).unwrap() = to;
         }
 
+        fn needs(app: &mut App) -> Vec<HistoryNeedsItems> {
+            app.world_mut()
+                .resource_mut::<bevy::ecs::message::Messages<HistoryNeedsItems>>()
+                .drain()
+                .collect()
+        }
+
+        fn refunds_dropped(app: &mut App) -> Vec<RefundDropped> {
+            app.world_mut()
+                .resource_mut::<bevy::ecs::message::Messages<RefundDropped>>()
+                .drain()
+                .collect()
+        }
+
         fn drops(app: &App) -> Vec<(u32, u32)> {
             app.world()
                 .resource::<EntityStore>()
@@ -496,6 +594,7 @@ mod tests {
             assert_eq!(held(&mut app, "t:stone"), 2);
             replay(&mut app, Undo);
             assert!(rejections(&mut app).is_empty());
+            assert!(refunds_dropped(&mut app).is_empty(), "there was room");
             assert!(voxel_at(&app, ABOVE).is_air());
             assert_eq!(inventory(&mut app), before);
             replay(&mut app, Redo);
@@ -512,6 +611,15 @@ mod tests {
             set_inventory(&mut app, Inventory::default());
             replay(&mut app, Redo);
             assert_eq!(rejections(&mut app), [RejectReason::ItemNeeded]);
+            assert_eq!(
+                needs(&mut app),
+                [HistoryNeedsItems {
+                    action: Redo,
+                    material: stone().material(),
+                    item: "t:stone".into(),
+                    count: 1,
+                }]
+            );
             assert!(voxel_at(&app, ABOVE).is_air());
             assert_eq!(inventory(&mut app), Inventory::default());
             assert!(!RejectReason::ItemNeeded.message().is_empty());
@@ -530,6 +638,13 @@ mod tests {
             assert!(voxel_at(&app, ABOVE).is_air());
             assert_eq!(inventory(&mut app), full);
             assert_eq!(drops(&app), [(0, 1)]);
+            assert_eq!(
+                refunds_dropped(&mut app),
+                [RefundDropped {
+                    item: "t:stone".into(),
+                    count: 1
+                }]
+            );
         }
 
         #[test]
@@ -558,6 +673,15 @@ mod tests {
             set_inventory(&mut app, Inventory::default());
             replay(&mut app, Undo);
             assert_eq!(rejections(&mut app), [RejectReason::ItemNeeded]);
+            assert_eq!(
+                needs(&mut app),
+                [HistoryNeedsItems {
+                    action: Undo,
+                    material: stone().material(),
+                    item: "t:stone".into(),
+                    count: 1,
+                }]
+            );
             assert!(voxel_at(&app, GROUND).is_air());
             assert_eq!(inventory(&mut app), Inventory::default());
             let mut one = Inventory::default();
