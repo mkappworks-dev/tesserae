@@ -110,11 +110,12 @@ removing a Voxel drops nothing", are superseded.
 A Player can throw a carried Item away from the Inventory window, which the
 paragraph above listed as later work. The Client sends
 `InventoryIntent::Drop { slot, count }`; the Server takes `count` out of that
-Stack, refusing an empty slot, none, or more than the Stack holds, and spawns a
-Dropped item a short way in front of the Player's feet, in either mode. An Item
-the World's content names no drop for is refused rather than lost. The Dropped
-item cannot be picked up for four times a broken Voxel's delay, so the Player
-who throws it does not collect it again while it is in the air; it can be picked
-up again after that, by anyone near it. A drop is not an Edit and never enters
-the undo journal: nothing can be undone into the Inventory by it, which is the
-rule that an entry pays and refunds only what its own Edit did.
+Stack, refusing an empty slot, none, or more than the Stack holds, and tosses a
+Dropped item a few metres ahead of the Player, past the pickup radius, in either
+mode. An Item the World's content names no drop for is refused rather than lost.
+The Dropped item cannot be picked up for four times a broken Voxel's delay, so
+it is not collected while it is in the air; it lands out of reach, so standing
+still never collects it, and walking to it after the delay does. A drop is not
+an Edit and never enters the undo journal: nothing can be undone into the
+Inventory by it, which is the rule that an entry pays and refunds only what its
+own Edit did.

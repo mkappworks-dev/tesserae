@@ -470,6 +470,140 @@ mod tests {
         app
     }
 
+    fn drop_it(
+        app: &mut App,
+        slot: tesserae_core::inventory::Slot,
+        count: u32,
+    ) -> Vec<super::super::inventory::Reason> {
+        use super::super::inventory::{InventoryIntent, InventoryRefused, arrange};
+        app.world_mut()
+            .write_message(InventoryIntent::Drop { slot, count });
+        app.world_mut().run_system_once(arrange).unwrap();
+        // A one-shot reader starts afresh each time, so spent intents must go.
+        app.world_mut()
+            .resource_mut::<Messages<InventoryIntent>>()
+            .clear();
+        app.world_mut()
+            .resource_mut::<Messages<InventoryRefused>>()
+            .drain()
+            .map(|r| r.0)
+            .collect()
+    }
+
+    fn droppable() -> App {
+        let mut app = game_with_messages();
+        app.add_message::<super::super::inventory::InventoryIntent>()
+            .add_message::<super::super::inventory::InventoryRefused>();
+        near_the_drop(&mut app);
+        give(&mut app, "t:rock", 40);
+        app
+    }
+
+    fn dropped_at(app: &App) -> [f32; 3] {
+        app.world()
+            .resource::<EntityStore>()
+            .iter()
+            .next()
+            .unwrap()
+            .as_dropped()
+            .pos_m
+    }
+
+    #[test]
+    fn a_dropped_stack_lands_out_of_reach_and_is_collected_only_by_walking_to_it_after_the_delay() {
+        use tesserae_core::inventory::Slot;
+        let mut app = droppable();
+        assert!(drop_it(&mut app, Slot::Hotbar(0), 40).is_empty());
+        assert!(inventory(&mut app).is_empty(), "the whole Stack left");
+        assert_eq!(drops(&app), 1);
+        let dropped = *app
+            .world()
+            .resource::<EntityStore>()
+            .iter()
+            .next()
+            .unwrap()
+            .as_dropped();
+        assert_eq!(dropped.count, 40);
+        assert!(dropped.pos_m[2] < 5.5, "ahead of a Player looking down -z");
+
+        for _ in 0..200 {
+            app.world_mut().run_system_once(step_entities).unwrap();
+        }
+        let at = dropped_at(&app);
+        assert!(
+            (5.5 - at[2]) > PICKUP_RADIUS_M + 1.0,
+            "it landed well past the pickup radius: {at:?}"
+        );
+        near_the_drop(&mut app);
+        app.world_mut().run_system_once(pick_up).unwrap();
+        assert!(
+            inventory(&mut app).is_empty(),
+            "standing still never collects it"
+        );
+
+        super::super::edit::tests::set_eye(&mut app, Vec3::new(at[0], at[1] + 1.0, at[2]));
+        app.world_mut().run_system_once(pick_up).unwrap();
+        assert_eq!(
+            inventory(&mut app).hotbar()[0],
+            rock(40),
+            "walked to and picked up"
+        );
+    }
+
+    #[test]
+    fn a_dropped_item_cannot_be_picked_up_during_its_delay_even_beside_the_player() {
+        use tesserae_core::inventory::Slot;
+        let mut app = droppable();
+        assert!(drop_it(&mut app, Slot::Hotbar(0), 1).is_empty());
+        let at = dropped_at(&app);
+        super::super::edit::tests::set_eye(&mut app, Vec3::new(at[0], at[1] + 1.0, at[2]));
+        after_the_pickup_delay(&mut app);
+        app.world_mut().run_system_once(pick_up).unwrap();
+        assert_eq!(
+            inventory(&mut app).hotbar()[0],
+            rock(39),
+            "the broken-Voxel delay is not enough"
+        );
+    }
+
+    #[test]
+    fn dropping_one_leaves_the_rest_and_works_in_creative_too() {
+        use tesserae_core::inventory::Slot;
+        let mut app = droppable();
+        let mut mode = app
+            .world_mut()
+            .query::<&mut super::super::game_mode::PlayerMode>();
+        mode.single_mut(app.world_mut()).unwrap().0 = super::super::game_mode::GameMode::Creative;
+        assert!(drop_it(&mut app, Slot::Hotbar(0), 1).is_empty());
+        assert_eq!(inventory(&mut app).hotbar()[0], rock(39));
+        assert_eq!(drops(&app), 1);
+    }
+
+    #[test]
+    fn a_drop_of_more_than_the_stack_holds_none_an_empty_slot_or_an_unnamed_item_is_refused() {
+        use super::super::inventory::Reason;
+        use tesserae_core::inventory::{Refusal, Slot};
+        let mut app = droppable();
+        for (slot, count, why) in [
+            (Slot::Hotbar(0), 41, Reason::Rule(Refusal::BadCount)),
+            (Slot::Hotbar(0), 0, Reason::Rule(Refusal::BadCount)),
+            (Slot::Hotbar(5), 1, Reason::Rule(Refusal::Empty)),
+            (Slot::Backpack(99), 1, Reason::Rule(Refusal::NoSuchSlot)),
+        ] {
+            assert_eq!(drop_it(&mut app, slot, count), [why]);
+        }
+        give(&mut app, "t:unnamed", 3);
+        let held = inventory(&mut app);
+        assert_eq!(
+            drop_it(&mut app, Slot::Hotbar(1), 3),
+            [Reason::CannotDrop],
+            "no drop to become"
+        );
+        assert_eq!(inventory(&mut app), held, "nothing was taken");
+        assert_eq!(held.hotbar()[0], rock(40));
+        assert_eq!(drops(&app), 0);
+    }
+
     fn rock(count: u32) -> Option<Stack> {
         Some(Stack {
             item: "t:rock".into(),

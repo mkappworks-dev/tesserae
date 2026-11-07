@@ -34,8 +34,9 @@ const POP_LIFT_M_S: f32 = 2.5;
 /// The outermost stack's throw; with the lift and the slide it lands about a
 /// metre out.
 const SPREAD_SPEED_M_S: f32 = 2.0;
-/// A dropped Item's toss, with the lift it lands about a metre ahead.
-const TOSS_SPEED_M_S: f32 = 2.2;
+/// A dropped Item's toss: with the lift and the slide it lands several metres
+/// ahead, past the pickup radius, so the Player does not collect it at once.
+const TOSS_SPEED_M_S: f32 = 7.0;
 const GOLDEN_ANGLE: f32 = 2.399_963;
 /// Horizontal speed kept after a step on the ground.
 const GROUND_KEEP: f32 = 0.85;
@@ -544,7 +545,10 @@ mod tests {
         assert!(d.pickup_in > PICKUP_DELAY_STEPS);
         run(&mut entities, &grid, 120);
         let at = entities.get(id).unwrap().as_dropped().pos_m;
-        assert!(at[0] > 0.5 && at[0] < 3.0, "it landed ahead: {at:?}");
+        assert!(
+            at[0] > 3.0 && at[0] < 6.0,
+            "it landed a few metres ahead: {at:?}"
+        );
         assert_eq!(entities.get(id).unwrap().as_dropped().count, 5);
     }
 
