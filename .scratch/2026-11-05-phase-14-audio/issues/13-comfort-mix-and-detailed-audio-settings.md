@@ -1,6 +1,6 @@
 # 13: Comfortable ambience and detailed Audio settings
 
-Status: ready-for-human
+Status: done
 
 ## What to build
 
@@ -18,14 +18,15 @@ user instruction requires agreement on this UI before Engine implementation.
 - [x] User agrees the revised settings layout.
 - [x] Ship long, verified CC0 recordings with edited seams and credits; do not
       pad short loops to claim longer duration.
-- [ ] Quiet varied beds and non-repeating full music tracks pass listening checks.
+- [x] Quiet varied beds and non-repeating full music tracks pass listening checks.
 - [x] Replace clockwork floating with sparse varied Server-driven water details.
 - [x] Add a separate bounded Ambient asset limit; retain World accounting and
       check transient memory during loading/crossfades.
 - [x] Persist per-action trims with old-profile defaults; apply to live Sounds;
       preserve draft, Apply, Discard and Audio-only reset behavior.
 - [x] Test mixer/scheduling, loader bounds, migration and Settings seams.
-- [ ] Measure and audition the busy-scene mix on headphones and speakers.
+- [x] User accepts the busy-scene mix and the documented measurement and
+      audition limits.
 
 ## Comments
 
@@ -40,3 +41,5 @@ user instruction requires agreement on this UI before Engine implementation.
   asset and process-memory evidence and the remaining hardware/listening limits.
 - The standards review found and the implementation fixed silent-music ducking.
   No unaddressed code defect was reported. No commit or push.
+
+- The user explicitly requested marking ticket 13 done, accepting the comfort mix and closing the remaining human acceptance items. Existing offline measurements and hardware/audition limits remain documented in [validation](../comfort-validation.md); this closure does not claim new device measurements were performed.

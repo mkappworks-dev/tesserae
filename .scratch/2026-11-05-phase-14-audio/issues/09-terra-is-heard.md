@@ -1,6 +1,6 @@
 # 09: Terra is heard
 
-Status: ready-for-human
+Status: done
 
 Blocked by: 03, 05, 06, 07, 08, 11
 
@@ -28,7 +28,7 @@ different. The other demo Games stay silent.
 - [x] Longer beds and full tracks fit the 32 MiB referenced World budget and
       pass `tesserae validate`.
 - [x] The other demo Games and their Worlds open unchanged and silent.
-- [ ] The user has listened to a Terra World, in Creative and Survival, and
+- [x] The user has listened to a Terra World, in Creative and Survival, and
       accepted it.
 
 ## Comments
@@ -41,3 +41,5 @@ different. The other demo Games stay silent.
   ticket stays open until that acceptance.
 
 - The comfort pass supersedes the original 2 MiB target with longer beds and full music tracks, under the existing 32 MiB World budget. Final automated validation passes; listening acceptance remains open in this ticket and the subsequent feedback tickets.
+
+- The user explicitly requested marking ticket 09 done, accepting its remaining listening criterion. Other feedback tickets retain their own acceptance status.

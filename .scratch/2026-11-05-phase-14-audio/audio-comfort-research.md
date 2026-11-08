@@ -1,6 +1,6 @@
 # Audio comfort research and proposed revision
 
-Status: ready-for-human
+Status: done
 
 Research snapshot before implementation. Implemented results and remaining
 listening checks are in [comfort-validation.md](comfort-validation.md).
@@ -133,3 +133,7 @@ output metering or a listening evaluation.
 | cold | -29.71 | -18.82 | 0.30 |
 | water | -28.15 | -10.05 | 0.80 |
 | music-1 | -40.28 | -22.64 | 12.40 |
+
+## Completion
+
+The user explicitly requested marking this research done and accepted the comfort revision. The research snapshot and documented measurement limits remain unchanged.

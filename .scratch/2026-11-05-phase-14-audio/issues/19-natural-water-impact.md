@@ -1,6 +1,6 @@
 # 19: Natural water impact
 
-Status: ready-for-human
+Status: done
 
 ## What to build
 
@@ -14,7 +14,7 @@ Server event timing and current volume settings. Credit a verified CC0 source.
 - [x] Splash resolves to a dedicated real water-impact recording at natural pitch.
 - [x] Water movement and Material interaction recordings remain unchanged.
 - [x] Asset decoding, Game builds and Terra validation pass.
-- [ ] User accepts falling into water in game.
+- [x] User accepts falling into water in game.
 
 ## Comments
 
@@ -25,3 +25,5 @@ Server event timing and current volume settings. Credit a verified CC0 source.
 - The existing Server Splash event now resolves to `terra:water_impact`, a dedicated 2 s natural harbor-jump splash at fixed pitch, authored gain 0.4. Existing enter/exit event timing is retained. Water Material sounds, swimming and floating retain their recordings and mappings.
 - Verified mono 44.1 kHz Vorbis decoding and 19,235-byte size. Game builds pass; Terra validates as build `3ceb1161cba9`. Rust formatting, Prettier and whitespace checks pass. In-game listening remains open.
 - No commit or push. Run package-demo to refresh the packaged Terra asset.
+
+- The user explicitly requested marking this ticket done, accepting its remaining in-game listening criterion.

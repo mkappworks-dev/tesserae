@@ -1,6 +1,6 @@
 # 20: Lava burning instead of water
 
-Status: ready-for-human
+Status: done
 
 ## What to build
 
@@ -17,7 +17,7 @@ Terra supplies CC0 burning audio and a separate lava Material sound set.
 - [x] Lava uses burning audio; water retains Splash; hot fluid has no water movement/bed.
 - [x] Burn binds through component and data declarations; prior contract lines still load.
 - [x] Relevant tests, lint, Game builds and Terra validation pass.
-- [ ] User accepts lava and water entry audio in game.
+- [x] User accepts lava and water entry audio in game.
 
 ## Comments
 
@@ -38,3 +38,5 @@ Terra supplies CC0 burning audio and a separate lava Material sound set.
   and the Vitals trim.
 - In-game listening remains open. No commit or push. Repackage the demo for
   the new SoundCause and Terra recording before running it.
+
+- The user explicitly requested marking this ticket done, accepting its remaining in-game listening criterion.
