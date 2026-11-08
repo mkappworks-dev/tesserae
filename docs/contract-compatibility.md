@@ -58,6 +58,23 @@ the health a Player regains per second while hunger is at or above
 `regeneration-hunger`, from 0 to 1000, and 0.25 when absent, the rate the engine
 used before the Game could declare it.
 
+Line 0.3 then gained `sounds`, `sound-sets` and `material-sounds` on its
+`declaration`, appended in the same way. A Declaration for 0.1 or 0.2 loads with
+none of them, so its World is silent. A `sound-def` carries its recordings as
+Ogg Vorbis bytes, each with a weight, a `volume` and a `pitch` `sound-range`, a
+closed `sound-category` of `effects`, `ambient` or `music`, and a `distance` in
+metres that `effects` requires and the others refuse. A `sound-set-def` names an
+`effects` Sound for each of `break`, `place`, `hit`, `step` and `land`, and a
+`material-sound` gives a Material a Sound set, both by full name.
+
+Line 0.3 then gained `soundscapes` on its `declaration`, appended after
+`material-sounds` in the same way; a Declaration for 0.1 or 0.2 loads with none.
+A `soundscape-def` carries a name, an optional closed `soundscape-context` of
+`default`, `underground` or `underwater` that only the Game may set and at most
+once each, up to 8 `ambient-bed`s (an `ambient` Sound by full name and a volume
+from 0 to 1), up to 8 `music` Sounds by full name, and an optional `silence-s`
+`sound-range` from 0 to 3600 seconds, 60 to 180 when absent.
+
 ## What is not frozen
 
 Line `0.x` is pre-release. Later gameplay steps may add new lines, and
@@ -68,3 +85,31 @@ those steps add. The final **1.0 contract freeze belongs to roadmap step 27**
 Saved Worlds are separate: they require the exact build that created them
 ([ADR-0018](adr/0018-games-and-mods-install-side-by-side.md)), whichever line it
 used.
+
+Unreleased 0.3 also appends `cause-sounds` to `declaration`, a Game-only list of
+`cause-sound` records binding the closed `sound-cause` enum to Effects Sounds,
+and appends optional `soundscape` after `surface-features` in `biome-def`.
+Earlier lines adapt to no Cause bindings and no Biome override.
+
+The unreleased 0.3 `sound-cause` enum also includes `swimming` and `floating`.
+The Game binds them through `cause-sounds`, like `splash`. Swimming strokes
+require roughly 3 m of travel and a seeded 1.6–2.2 s cooldown, including while
+moving at the surface. Gentle idle floating sounds occur at seeded 6–12 s
+intervals. Neither is emitted while grounded, flying, dead or paused. Unbound
+Causes remain silent.
+
+Audio preferences include per-action trims for footsteps, landings, breaking and
+striking, placing, eating, swimming, floating water, pickups, tools, and
+hurt/death. They multiply the Effects and Master settings and apply to playing
+sounds on Apply. Older profiles default every trim to 100. These preferences add
+no Mod contract fields. Ambient recordings have a separate 4 MiB ceiling;
+Effects keep 512 KiB, Music 8 MiB and referenced World audio 32 MiB.
+
+The unreleased 0.3 `sound-cause` enum appends `burn`: the Server emits it once
+when the body enters a fluid whose declaration has `heat`, including a direct
+cold-to-hot fluid transition. Bind it through Game `cause-sounds`, including in
+data declarations; an unbound Cause is silent. Cold-fluid entry/exit uses
+`splash`; hot-fluid exit is quiet. Hot fluids do not emit `swimming`/`floating`
+or select the underwater water Soundscape. Burn uses the Vitals detail trim.
+Health damage and hurt/death timing are unchanged. Older 0.1/0.2 declarations
+retain their existing adaptation without Cause bindings.

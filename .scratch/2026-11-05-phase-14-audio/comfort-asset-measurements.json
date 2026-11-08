@@ -1,0 +1,82 @@
+[
+  {
+    "asset": "open",
+    "duration": "79.781814",
+    "size": "852194",
+    "integrated_lufs": -30.93,
+    "true_peak_dbtp": -10.62,
+    "lra_lu": 8.9
+  },
+  {
+    "asset": "cave",
+    "duration": "90.309751",
+    "size": "1145116",
+    "integrated_lufs": -31.76,
+    "true_peak_dbtp": -6.96,
+    "lra_lu": 3.2
+  },
+  {
+    "asset": "dry",
+    "duration": "111.997823",
+    "size": "964680",
+    "integrated_lufs": -32.13,
+    "true_peak_dbtp": -17.58,
+    "lra_lu": 2.5
+  },
+  {
+    "asset": "cold",
+    "duration": "111.997823",
+    "size": "964095",
+    "integrated_lufs": -32.31,
+    "true_peak_dbtp": -17.65,
+    "lra_lu": 2.8
+  },
+  {
+    "asset": "water",
+    "duration": "176.000000",
+    "size": "1481872",
+    "integrated_lufs": -31.71,
+    "true_peak_dbtp": -12.64,
+    "lra_lu": 2.6
+  },
+  {
+    "asset": "music-1",
+    "duration": "252.639501",
+    "size": "3040741",
+    "integrated_lufs": -24.28,
+    "true_peak_dbtp": -5.67,
+    "lra_lu": 9.5
+  },
+  {
+    "asset": "music-2",
+    "duration": "249.988163",
+    "size": "3627305",
+    "integrated_lufs": -23.56,
+    "true_peak_dbtp": -7.26,
+    "lra_lu": 7.4
+  },
+  {
+    "asset": "floating",
+    "duration": "2.480476",
+    "size": "26302",
+    "integrated_lufs": -36.9,
+    "true_peak_dbtp": -18.19,
+    "lra_lu": 0.0
+  },
+  {
+    "asset": "floating-2",
+    "duration": "2.500000",
+    "size": "23086",
+    "integrated_lufs": -36.63,
+    "true_peak_dbtp": -21.18,
+    "lra_lu": 0.0
+  },
+  {
+    "asset": "floating-3",
+    "duration": "2.441111",
+    "size": "24871",
+    "integrated_lufs": -36.29,
+    "true_peak_dbtp": -13.74,
+    "lra_lu": 0.0
+  }
+]

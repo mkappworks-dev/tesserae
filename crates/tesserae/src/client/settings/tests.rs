@@ -707,3 +707,253 @@ fn a_dropdown_shows_its_choice_opens_on_it_and_closes_on_a_click_outside() {
     app.update();
     assert_eq!(display(&mut app), Display::None);
 }
+
+#[test]
+fn audio_draft_applies_discards_resets_and_remembers_category() {
+    use crate::client::menu_ui::Tab;
+    use bevy::ui_widgets::{SliderValue, ValueChange};
+    let mut app = app();
+    activate_operation(&mut app, Operation::Navigate(Tab::Audio));
+    let source = app
+        .world_mut()
+        .spawn((Scalar::AmbientVolume, SliderValue(70.0)))
+        .id();
+    app.world_mut().trigger(ValueChange {
+        source,
+        value: 23.0_f32,
+        is_final: true,
+    });
+    app.update();
+    assert_eq!(app.world().resource::<Preferences>().volumes.ambient, 70);
+    activate_operation(&mut app, Operation::Apply);
+    assert_eq!(app.world().resource::<Preferences>().volumes.ambient, 23);
+    activate_operation(&mut app, Operation::Reset);
+    activate_operation(&mut app, Operation::ConfirmReset);
+    assert_eq!(
+        app.world()
+            .resource::<Settings>()
+            .draft
+            .as_ref()
+            .unwrap()
+            .1
+            .volumes
+            .ambient,
+        70
+    );
+    assert_eq!(app.world().resource::<Preferences>().volumes.ambient, 23);
+    activate_operation(&mut app, Operation::Discard);
+    assert_eq!(app.world().resource::<Preferences>().volumes.ambient, 23);
+    assert_eq!(app.world().resource::<Settings>().last, Tab::Audio);
+    assert_eq!(
+        Tab::ORDER,
+        [
+            Tab::Behavior,
+            Tab::Bindings,
+            Tab::Controller,
+            Tab::Display,
+            Tab::Audio,
+            Tab::Accessibility
+        ]
+    );
+}
+
+#[test]
+fn resetting_another_page_preserves_the_audio_mix() {
+    let mut app = app();
+    app.world_mut().resource_mut::<Preferences>().volumes.master = 17;
+    activate_operation(
+        &mut app,
+        Operation::Navigate(crate::client::menu_ui::Tab::Behavior),
+    );
+    activate_operation(&mut app, Operation::Reset);
+    activate_operation(&mut app, Operation::ConfirmReset);
+    assert_eq!(
+        app.world()
+            .resource::<Settings>()
+            .draft
+            .as_ref()
+            .unwrap()
+            .1
+            .volumes
+            .master,
+        17
+    );
+}
+
+#[test]
+fn detail_controls_apply_discard_and_reset_as_audio_drafts() {
+    use crate::client::menu_ui::Tab;
+    use bevy::ui_widgets::{SliderValue, ValueChange};
+    use tesserae_core::audio::EffectGroup;
+    let mut app = app();
+    activate_operation(&mut app, Operation::Navigate(Tab::Audio));
+    activate_operation(&mut app, Operation::EffectControls);
+    assert!(app.world().resource::<Settings>().effects_open);
+    let source = app
+        .world_mut()
+        .spawn((
+            Scalar::DetailVolume(EffectGroup::Eating),
+            SliderValue(100.0),
+        ))
+        .id();
+    app.world_mut().trigger(ValueChange {
+        source,
+        value: 20.0_f32,
+        is_final: true,
+    });
+    assert_eq!(
+        app.world().resource::<Preferences>().volumes.detail.eating,
+        100
+    );
+    activate_operation(&mut app, Operation::Apply);
+    assert_eq!(
+        app.world().resource::<Preferences>().volumes.detail.eating,
+        20
+    );
+    activate_operation(&mut app, Operation::Reset);
+    activate_operation(&mut app, Operation::ConfirmReset);
+    assert_eq!(
+        app.world()
+            .resource::<Settings>()
+            .draft
+            .as_ref()
+            .unwrap()
+            .1
+            .volumes
+            .detail
+            .eating,
+        100
+    );
+    activate_operation(&mut app, Operation::Discard);
+    assert_eq!(
+        app.world().resource::<Preferences>().volumes.detail.eating,
+        20
+    );
+}
+
+#[test]
+fn audio_slider_pointer_drag_keeps_the_live_entity_until_release() {
+    use super::super::menu_ui::{Searches, Tab};
+    use bevy::picking::{
+        backend::HitData,
+        events::{Pointer, PointerDrag, PointerDragEnd, PointerDragStart, PointerPress},
+        hover::PointerCaptureMap,
+        pointer::{Location, PointerButton, PointerId},
+    };
+    use bevy::ui_widgets::{SliderPlugin, SliderValue};
+    let mut app = app();
+    app.init_resource::<super::super::actions::Labels>()
+        .init_resource::<Searches>()
+        .init_resource::<super::super::edit::Hotbar>()
+        .init_resource::<super::super::edit::Catalogue>()
+        .init_resource::<super::super::edit::Notice>()
+        .init_resource::<Assets<Image>>()
+        .init_resource::<Assets<Font>>()
+        .init_resource::<super::super::input::UiInput>()
+        .init_resource::<bevy::ui::UiScale>()
+        .init_resource::<PointerCaptureMap>()
+        .add_plugins((SliderPlugin, super::super::menu_ui::plugin))
+        .add_systems(Update, render);
+    activate_operation(&mut app, Operation::Navigate(Tab::Audio));
+    app.update();
+    app.update();
+    let source = app
+        .world_mut()
+        .query::<(Entity, &Scalar)>()
+        .iter(app.world())
+        .find(|(_, scalar)| matches!(scalar, Scalar::MusicVolume))
+        .unwrap()
+        .0;
+    app.world_mut()
+        .entity_mut(source)
+        .insert(bevy::ui::ComputedNode {
+            size: Vec2::new(151.0, 32.0),
+            ..default()
+        });
+    let thumbs: Vec<_> = app
+        .world_mut()
+        .query_filtered::<(Entity, &ChildOf), With<bevy::ui_widgets::SliderThumb>>()
+        .iter(app.world())
+        .filter(|(_, parent)| parent.parent() == source)
+        .map(|(entity, _)| entity)
+        .collect();
+    for thumb in thumbs {
+        assert_eq!(app.world().get::<Pickable>(thumb), Some(&Pickable::IGNORE));
+        app.world_mut()
+            .entity_mut(thumb)
+            .insert(bevy::ui::ComputedNode {
+                size: Vec2::splat(16.0),
+                ..default()
+            });
+    }
+    let pointer = Pointer::new(
+        PointerId::Mouse,
+        Location {
+            target: bevy::camera::NormalizedRenderTarget::None {
+                width: 800,
+                height: 600,
+            },
+            position: Vec2::new(-27.0, 0.0),
+        },
+    );
+    let hit = HitData::new(source, 0.0, None, None);
+    app.world_mut().trigger(PointerPress {
+        entity: source,
+        pointer: pointer.clone(),
+        button: PointerButton::Primary,
+        hit: hit.clone(),
+        count: 1,
+    });
+    app.update();
+    assert!((app.world().get::<SliderValue>(source).unwrap().0 - 30.0).abs() < 0.01);
+    assert!(app.world().get::<bevy::ui::Pressed>(source).is_some());
+    app.world_mut().trigger(PointerDragStart {
+        entity: source,
+        pointer: pointer.clone(),
+        button: PointerButton::Primary,
+        hit,
+    });
+    for (distance, expected) in [(27.0, 50.0), (54.0, 70.0), (135.0, 100.0), (-135.0, 0.0)] {
+        app.world_mut().trigger(PointerDrag {
+            entity: source,
+            pointer: pointer.clone(),
+            button: PointerButton::Primary,
+            distance: Vec2::new(distance, 0.0),
+            delta: Vec2::ZERO,
+        });
+        app.update();
+        assert!((app.world().get::<SliderValue>(source).unwrap().0 - expected).abs() < 0.01);
+        assert_eq!(
+            app.world()
+                .resource::<Settings>()
+                .draft
+                .as_ref()
+                .unwrap()
+                .1
+                .volumes
+                .music,
+            expected as u8
+        );
+    }
+    assert_eq!(app.world().resource::<Preferences>().volumes.music, 50);
+    app.world_mut().trigger(PointerDragEnd {
+        entity: source,
+        pointer,
+        button: PointerButton::Primary,
+        distance: Vec2::new(54.0, 0.0),
+    });
+    app.update();
+    assert_eq!(
+        app.world()
+            .resource::<Settings>()
+            .draft
+            .as_ref()
+            .unwrap()
+            .1
+            .volumes
+            .music,
+        70
+    );
+    activate_operation(&mut app, Operation::Apply);
+    assert_eq!(app.world().resource::<Preferences>().volumes.music, 70);
+}

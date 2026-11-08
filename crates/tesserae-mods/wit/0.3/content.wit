@@ -418,6 +418,8 @@ interface content {
         /// air above: never under a fluid, on a smoothed step or in a cave
         /// mouth. Distance levels leave them out.
         surface-features: list<surface-feature>,
+        /// Optional Soundscape full name, resolved across loaded Mods.
+        soundscape: option<string>,
     }
 
     /// A Material scattered over a Biome's surface, deterministically from the
@@ -457,6 +459,150 @@ interface content {
         biomes: list<string>,
     }
 
+    /// Which of a user's volume settings a Sound is heard under, all under
+    /// Master. Closed in 0.3: a new case is a breaking change.
+    enum sound-category {
+        /// Positional: heard from where it happens, so every recording must be
+        /// mono.
+        effects,
+        /// Not positional; may be stereo.
+        ambient,
+        /// Not positional; may be stereo.
+        music,
+    }
+
+    /// One Ogg Vorbis file a Sound may play.
+    record recording {
+        /// The whole file. The engine reads its Ogg and Vorbis identification
+        /// headers and refuses one that is not Ogg Vorbis.
+        bytes: list<u8>,
+        /// How often it is chosen against the Sound's other recordings.
+        weight: u8,
+    }
+
+    /// An inclusive range a value is drawn from each time a Sound plays.
+    record sound-range {
+        min: f32,
+        max: f32,
+    }
+
+    /// How far an Effects Sound carries, in metres: whole within
+    /// `reference-m`, falling beyond it and silent from `max-m`, which must be
+    /// greater.
+    record sound-distance {
+        reference-m: f32,
+        max-m: f32,
+    }
+
+    /// A thing that can be heard. The engine registers it under
+    /// `<mod id>:<name>`.
+    record sound-def {
+        /// Local to the Mod, like a Material's.
+        name: string,
+        /// At least one; one is picked by weight each time it plays.
+        recordings: list<recording>,
+        volume: sound-range,
+        /// A playback speed: 2 is an octave up.
+        pitch: sound-range,
+        category: sound-category,
+        /// Required for `effects` and refused for the others.
+        distance: option<sound-distance>,
+    }
+
+    /// What one or more Materials sound like for each Voxel Cause, each an
+    /// `effects` Sound by full name, `<mod id>:<name>`, from any loaded Mod.
+    /// A Cause left out is silent.
+    record sound-set-def {
+        /// Local to the Mod, like a Material's.
+        name: string,
+        /// A deliberate Remove takes the Voxel out of the World.
+        %break: option<string>,
+        place: option<string>,
+        hit: option<string>,
+        step: option<string>,
+        land: option<string>,
+    }
+
+    /// Gives a Material a Sound set. A Material has at most one in a World,
+    /// whichever Mods declare them.
+    record material-sound {
+        /// A Material, `<mod id>:<name>`, of any loaded Mod.
+        material: string,
+        /// A Sound set, `<mod id>:<name>`, of any loaded Mod.
+        sound-set: string,
+    }
+
+    /// Where the Player's Eye is, for choosing the Game's Soundscape. Closed in
+    /// 0.3: a new case is a breaking change.
+    enum soundscape-context {
+        /// Anywhere the other contexts are not.
+        %default,
+        /// The Eye's Voxel receives no sky light.
+        underground,
+        /// The Eye is inside a fluid.
+        underwater,
+    }
+
+    /// An ambient loop a Soundscape plays for as long as it applies.
+    record ambient-bed {
+        /// An `ambient` Sound, `<mod id>:<name>`, of any loaded Mod.
+        sound: string,
+        /// From 0 to 1, on top of the Sound's own volume.
+        volume: f32,
+    }
+
+    /// The ambience and music heard where it applies. The engine registers it
+    /// under `<mod id>:<name>`.
+    record soundscape-def {
+        /// Local to the Mod, like a Material's.
+        name: string,
+        /// Only the Game's Soundscapes may carry one, at most one per context.
+        /// A Mod's exists to be named by a Biome.
+        context: option<soundscape-context>,
+        /// At most 8, each looped.
+        beds: list<ambient-bed>,
+        /// At most 8 `music` Sounds by full name; one plays now and then, never
+        /// the one just heard while there are two or more.
+        music: list<string>,
+        /// The silence before each track, in seconds, drawn from 0 to 3600
+        /// [60 to 180].
+        silence-s: option<sound-range>,
+    }
+
+    /// Why the Server makes a Sound event that is not a Voxel's. Closed in
+    /// 0.3: a new case needs new engine mechanism, so it arrives with a
+    /// contract change.
+    enum sound-cause {
+        /// The body enters or leaves a cold fluid.
+        splash,
+        /// An Item joins the Inventory.
+        pickup,
+        /// A Use measured something.
+        use-measured,
+        /// A Use was refused, eating included.
+        use-refused,
+        /// Food is eaten.
+        eat,
+        /// A Player takes damage, whatever its cause.
+        hurt,
+        /// A Player dies.
+        death,
+        /// A swimming stroke, measured by distance travelled.
+        swimming,
+        /// Gentle movement while floating at the surface.
+        floating,
+        /// The body enters a heat-emitting fluid.
+        burn,
+    }
+
+    /// Binds a non-Voxel Cause to an `effects` Sound. A Cause left unbound is
+    /// silent.
+    record cause-sound {
+        cause: sound-cause,
+        /// A Sound, `<mod id>:<name>`, of any loaded Mod.
+        sound: string,
+    }
+
     /// Everything a Mod adds, in registration order: a name's id is its index
     /// after the engine's built-ins, so Materials start at 8 (7 is retired and
     /// never handed out) and Shapes at 4. A `world` or `view` from a Mod that is
@@ -489,5 +635,15 @@ interface content {
         ores: list<ore-def>,
         /// From the Game only, like `view`; `none` keeps every default.
         survival: option<survival-params>,
+        /// From any Mod. Names in `sound-sets` and `material-sounds` resolve
+        /// after every Mod has declared.
+        sounds: list<sound-def>,
+        sound-sets: list<sound-set-def>,
+        material-sounds: list<material-sound>,
+        /// At most 16 rows per Mod, from any Mod; a `context` only from the
+        /// Game. Names resolve after every Mod has declared.
+        soundscapes: list<soundscape-def>,
+        /// From the Game only, like `tools`; each Cause at most once.
+        cause-sounds: list<cause-sound>,
     }
 }

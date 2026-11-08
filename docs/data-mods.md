@@ -129,6 +129,70 @@ World saved before a Game added features keeps its bare ground.
 Tables that are absent change nothing: a World with no Biomes generates as it
 always did.
 
+Any Mod may declare `[[sounds]]`, `[[sound-sets]]` and `[[material-sounds]]`. A
+Sound row is `name`, `category` (`effects`, `ambient` or `music`), `recordings`
+(one or more `{ file, weight }`, each `file` an Ogg Vorbis path inside the Mod
+directory, read by the same rules as artwork), `volume` and `pitch` (each
+`{ min, max }`, drawn from each time it plays; pitch is a playback speed) and,
+for `effects` only, `distance = { reference-m, max-m }`: whole within
+`reference-m`, fading to silence at `max-m`, in metres at any Voxel size. An
+`effects` Sound is heard from where it happens, so each recording must be mono;
+ambient and music may be stereo, and a `distance` on them is refused. A Sound
+set row is a `name` and an optional `effects` Sound, by full name, for each
+Voxel Cause: `break`, `place`, `hit`, `step` and `land`; a Cause left out is
+silent. A `material-sounds` row gives a Material, by full name, a Sound set, by
+full name, from any Mod, so a sound-only Mod can voice a Game; a Material has at
+most one Sound set in a World, and a second fails the load naming both Mods.
+Names resolve after every Mod has declared. A recording that is not Ogg Vorbis,
+a stereo `effects` recording, an unknown name or an ambient Sound in a set slot
+fails before any World opens, naming the Mod and field.
+
+Sounds have limits, each refused naming the Mod and field. A Mod declares at
+most 64 Sounds and 16 Sound sets; a Sound holds at most 8 recordings. An
+`effects` recording is at most 512 KiB, an `ambient` one 4 MiB, and a `music`
+one 8 MiB, and a file over its limit is refused from its size, before it is
+read. A World holds at most 32 MiB of recordings across all its Mods, each
+reference counted, so a file named twice counts twice. A recording has 1 or 2
+channels at 8 to 96 kHz. `weight` is 1 to 16; `volume` lies in 0 to 1 and
+`pitch` in 0.5 to 2, each with `min` not above `max`; `reference-m` is 0.25 to
+16 and `max-m` above it and at most 128.
+
+Referenced recordings join build identity like artwork: changing one needs Trust
+again and breaks exact-build reopening of saved Worlds, and unreferenced audio
+files do not.
+
+Any Mod may declare `[[soundscapes]]`: what is heard around the Player rather
+than at a point. A row is `name`, optional `context` (`default`, `underground`
+or `underwater`), `beds` (at most 8 `{ sound, volume }`, each an `ambient` Sound
+by full name looped at `volume`, 0 to 1), `music` (at most 8 `music` Sounds by
+full name) and optional `silence-s = { min, max }`, the silence before each
+track in seconds, from 0 to 3600 and 60 to 180 when absent. Only the Game's
+Soundscapes may carry a `context`, at most one for each; a Mod's exists to be
+named by a Biome. The Server picks the Soundscape for where the Player's Eye is:
+`underwater` while the Eye is inside a fluid, else `underground` while the Eye's
+Voxel receives no sky light, else `default`, passing over a context the Game
+gave none, so a Game with only a `default` hears it everywhere and one with none
+is silent. On a change the old beds fade out and the new fade in over 2 s, and
+the playing track fades out over 4 s while the new Soundscape's silence begins.
+After each silence one track plays, never the one just heard while there are two
+or more. Ambient and music play at the Player's Ambient and Music volumes, never
+by distance. A Sound of the wrong category as a bed or track, an unknown name, a
+`context` from a Mod or a second one for a context fails the load naming the
+Mod, the Soundscape and the field.
+
+```toml
+[[soundscapes]]
+name = "open"
+context = "default"
+beds = [{ sound = "plain:wind", volume = 0.6 }]
+music = ["plain:morning", "plain:dusk"]
+silence-s = { min = 90.0, max = 240.0 }
+```
+
+The Server makes a `break` when a Player's own Remove takes a solid out of the
+World, never for undo, redo, a Layout, fluid, fire or a Mod's Commands, and only
+when the Player is within the Sound's `max-m`.
+
 A combustion `end` is `"permanent"` or
 `{ after = { seconds = 8, residue = "mod:ash" } }`; `residue` omitted removes
 the solid. Fluid, reaction, combustion, ground and water names are full
@@ -177,13 +241,13 @@ projects named on the command line (never for installed dependencies); the flag
 writes nothing.
 
 `package` writes `games/<id>/` or `mods/<id>/` under `--out`, holding exactly
-`mod.toml`, the Declaration or component, and the referenced PNGs, at the same
-relative paths. Source, development configuration and unreferenced files are
-left out. The bytes written are the bytes that were checked; the copy is then
-loaded again, in place of the source, and must have the same build before
-anything is installed, so a project that changes or fails during the run
-produces no output. An existing folder needs `--force`, and only a packaged Mod
-is replaced. Select the result with `--mods <dir>/mods`.
+`mod.toml`, the Declaration or component, and the referenced PNGs and
+recordings, at the same relative paths. Source, development configuration and
+unreferenced files are left out. The bytes written are the bytes that were
+checked; the copy is then loaded again, in place of the source, and must have
+the same build before anything is installed, so a project that changes or fails
+during the run produces no output. An existing folder needs `--force`, and only
+a packaged Mod is replaced. Select the result with `--mods <dir>/mods`.
 
 ## Watching a project
 
@@ -269,3 +333,43 @@ removed Voxels drop it. Any Mod may declare items, at most 64 per Mod and 256 in
 a World; two items may not name one Material. Lines 0.1 and 0.2 declare none. An
 item may also set `max-stack`, the most one Inventory slot holds (1 to 64,
 omitted is 64), and `food`, the hunger eating one restores.
+
+### Non-Voxel Causes and Biome audio
+
+Only the Game declares `cause-sounds`: each row binds `cause` to a Sound's full
+name in `sound`. The closed Causes are `splash`, `pickup`, `use-measured`,
+`use-refused`, `eat`, `hurt` and `death`. Unbound Causes are silent; duplicate
+bindings and non-Effects Sounds are refused. The Server emits these events.
+
+A Biome may set `soundscape` to a loaded Soundscape's full name, including one
+from a data-only Mod without a context. Unknown names are refused. The Eye
+selects underwater, underground, its Biome, then default, falling through
+missing contexts. Leaving `soundscape` out preserves the default selection.
+
+The unreleased 0.3 `sound-cause` enum also includes `swimming` and `floating`.
+The Game binds them through `cause-sounds`, like `splash`. Swimming strokes
+require roughly 3 m of travel and a seeded 1.6–2.2 s cooldown, including while
+moving at the surface. Gentle idle floating sounds occur at seeded 6–12 s
+intervals. Neither is emitted while grounded, flying, dead or paused. Unbound
+Causes remain silent.
+
+Audio preferences include per-action trims for footsteps, landings, breaking and
+striking, placing, eating, swimming, floating water, pickups, tools, and
+hurt/death. They multiply the Effects and Master settings and apply to playing
+sounds on Apply. Older profiles default every trim to 100. These preferences add
+no Mod contract fields. Ambient recordings have a separate 4 MiB ceiling;
+Effects keep 512 KiB, Music 8 MiB and referenced World audio 32 MiB.
+
+Continuous damage applies every simulation tick, while `hurt` feedback is
+limited to one Sound every 0.75 s to prevent overlapping short clips. Death
+emits once at the health transition; it is not a repeating damage Sound. The
+damage-feedback interval changes neither damage amounts nor hazard rules.
+
+The unreleased 0.3 `sound-cause` enum appends `burn`: the Server emits it once
+when the body enters a fluid whose declaration has `heat`, including a direct
+cold-to-hot fluid transition. Bind it through Game `cause-sounds`, including in
+data declarations; an unbound Cause is silent. Cold-fluid entry/exit uses
+`splash`; hot-fluid exit is quiet. Hot fluids do not emit `swimming`/`floating`
+or select the underwater water Soundscape. Burn uses the Vitals detail trim.
+Health damage and hurt/death timing are unchanged. Older 0.1/0.2 declarations
+retain their existing adaptation without Cause bindings.

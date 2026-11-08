@@ -33,6 +33,43 @@ impl ItemLook {
     }
 }
 
+/// Every Sound in the World, indexed by `SoundId`, with its recordings' checked
+/// Ogg Vorbis bytes: what the Client plays a Sound event with.
+#[derive(Message, Clone, Debug, Default, PartialEq)]
+pub struct SoundLibrary(pub std::sync::Arc<[LibrarySound]>);
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct LibrarySound {
+    pub def: tesserae_core::audio::SoundDef,
+    pub recordings: Vec<std::sync::Arc<[u8]>>,
+}
+
+impl SoundLibrary {
+    pub fn new(sounds: tesserae_mods::Sounds) -> Self {
+        SoundLibrary(
+            sounds
+                .sounds
+                .into_iter()
+                .map(|s| LibrarySound {
+                    def: s.def,
+                    recordings: s.recordings.into_iter().map(Into::into).collect(),
+                })
+                .collect(),
+        )
+    }
+}
+
+/// Every Soundscape in the World, indexed by `SoundscapeId`: what the Client
+/// plays while the Server names one.
+#[derive(Message, Clone, Debug, Default, PartialEq)]
+pub struct SoundscapeLibrary(pub std::sync::Arc<[tesserae_core::audio::SoundscapeDef]>);
+
+impl SoundscapeLibrary {
+    pub fn new(sounds: &tesserae_mods::Sounds) -> Self {
+        SoundscapeLibrary(sounds.soundscapes.iter().map(|s| s.def.clone()).collect())
+    }
+}
+
 /// The Game's player figure, or `None` for the engine's plain box.
 #[derive(Message, Clone, Debug, Default, PartialEq)]
 pub struct CharacterModel(pub Option<std::sync::Arc<tesserae_mods::Character>>);

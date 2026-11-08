@@ -217,20 +217,45 @@ fn read_payload(found: &Found) -> Result<CheckedPayload, ModError> {
         }
     })?;
     let source = found.manifest.source().1.to_owned();
-    let mut files = std::collections::BTreeMap::new();
+    let mut files = std::collections::BTreeMap::<String, Vec<u8>>::new();
     let data = found.manifest.declaration.is_some();
     if data {
         let id = &found.manifest.id;
-        for (field, name) in crate::data::references(id, &bytes)? {
-            if files.contains_key(&name) {
-                continue;
+        let refused = |field: &str, reason: String| ModError::Data {
+            id: id.clone(),
+            reason: format!("{field}: {reason}"),
+        };
+        let mut recorded = 0;
+        for r in crate::data::references(id, &bytes)? {
+            let len = match files.get(&r.path) {
+                Some(read) => read.len() as u64,
+                None => {
+                    let read = crate::artwork::read(&found.dir, &r.path, r.max_bytes)
+                        .map_err(|reason| refused(&r.field, reason))?;
+                    let len = read.len() as u64;
+                    files.insert(r.path.clone(), read);
+                    len
+                }
+            };
+            // A file named twice was read under the first reference's limit.
+            if len > r.max_bytes {
+                let reason = format!("`{}` is larger than {} bytes", r.path, r.max_bytes);
+                return Err(refused(&r.field, reason));
             }
-            let artwork =
-                crate::artwork::read(&found.dir, &name).map_err(|reason| ModError::Data {
-                    id: id.clone(),
-                    reason: format!("{field}: {reason}"),
-                })?;
-            files.insert(name, artwork);
+            // Before parsing copies each reference's bytes, so one Mod cannot fill memory.
+            if r.recording {
+                recorded += len;
+                if recorded > crate::recording::MAX_WORLD_BYTES {
+                    return Err(refused(
+                        &r.field,
+                        format!(
+                            "the Mod's recordings come to more than {} bytes, the most a World \
+                             holds",
+                            crate::recording::MAX_WORLD_BYTES
+                        ),
+                    ));
+                }
+            }
         }
     }
     files.insert(source.clone(), bytes);

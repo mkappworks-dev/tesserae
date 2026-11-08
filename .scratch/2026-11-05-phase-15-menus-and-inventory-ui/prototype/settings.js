@@ -5,7 +5,7 @@ const settingsDefaults = {
   padInvert:false, moveDeadzone:.15, lookDeadzone:.15, crouch:'Toggle',
   touchLook:1, touchInvert:false, touchLayout:'Normal', touchSize:'Normal',
   touchOpacity:.7, sync:'Display synced', aa:'SMAA', renderScale:'100%',
-  fps:'No limit', sound:70, music:50, effects:80, motion:false, contrast:false, simpleBackground:false, textScale:"1",
+  fps:'No limit', sound:100, music:50, effects:100, ambient:70, footsteps:100, landings:100, breaking:100, placing:100, eating:100, swimming:100, floating:100, pickups:100, tools:100, vitals:100, motion:false, contrast:false, simpleBackground:false, textScale:"1",
   // Engine action names and key labels (settings/pages.rs:5-57, actions.rs:265-370).
   bindings:{'Move forward':'W','Move backward':'S','Move left':'A','Move right':'D',
     'Ascend / jump':'Space','Cycle sprint speed':'Left Shift','Descend / crouch':'Left Ctrl','Place / ignite':'Right mouse',
@@ -30,8 +30,8 @@ const settingsDefaults = {
     'Turn Shape':'D-pad left','Flip Shape':'D-pad right','Empty hand':'D-pad down','Use tool':'D-pad up',
     'Open input settings':'Start','Switch flight / physics':'Select'}
 };
-// Audio is hidden until it lands (decisions.md).
-const settingsCategories = ['Behavior','Key bindings','Controller','Display','Accessibility'];
+// Audio includes the proposed detailed effect mix.
+const settingsCategories = ['Behavior','Key bindings','Controller','Display','Audio','Accessibility'];
 // The engine's order and categories (settings/pages.rs binding_order, category).
 const bindingGroups = {
   Movement:['Move forward','Move backward','Move left','Move right','Ascend / jump','Descend / crouch','Cycle sprint speed',
@@ -121,10 +121,23 @@ function settingsBody() {
       row('Anti-aliasing','aa','select',['Off','SMAA','MSAA 4x'],'Smooth voxel edges. MSAA costs more.')+
       row('Render scale','renderScale','select',['67%','75%','85%','100%'],'Lower values reduce rendering work. Menus stay sharp.')+
       `<p class="muted">View distance, textures, shadows, and simulation settings stay unchanged.</p>`;
-    case 'Audio': return `<div class="row between"><p class="section-label">Sound mix</p><span class="pill">Proposed category</span></div>`+
-      row('Master volume','sound','range',[0,100,1])+
-      row('Music','music','range',[0,100,1])+
-      row('Sound effects','effects','range',[0,100,1]);
+    case 'Audio': return group('Sound mix')+
+      row('Master volume','sound','range',[0,100,1],'Everything the World plays.')+
+      row('Effects','effects','range',[0,100,1],'All action sounds, including the fine controls below.')+
+      row('Ambient','ambient','range',[0,100,1],'Environmental beds around you.')+
+      row('Music','music','range',[0,100,1],'Occasional tracks, with silence between them.')+
+      `<details class="audio-details"><summary>Fine-tune sound effects</summary><p class="muted">Relative to Effects. Set any sound to 0 to mute it.</p>`+
+      row('Footsteps','footsteps','range',[0,100,1],'Walking and running on each Material.')+
+      row('Landings','landings','range',[0,100,1],'The impact when you land.')+
+      row('Breaking & striking','breaking','range',[0,100,1],'Removing and striking Voxels.')+
+      row('Placing','placing','range',[0,100,1],'Voxels placed in the World.')+
+      row('Eating','eating','range',[0,100,1],'Bites while eating food.')+
+      row('Swimming','swimming','range',[0,100,1],'Strokes while moving through water.')+
+      row('Floating water','floating','range',[0,100,1],'Gentle water movement while resting at the surface.')+
+      row('Pickups','pickups','range',[0,100,1],'Items joining your Inventory.')+
+      row('Tools','tools','range',[0,100,1],'Successful measurements and refused uses.')+
+      row('Hurt & death','vitals','range',[0,100,1],'Feedback when you take damage or die.')+
+      `</details><div class="notice">Apply changes, then resume to hear your mix. World audio rests while Settings is open.</div>`;
     case 'Accessibility': return `<div class="row between"><p class="section-label">Comfort & readability</p><span class="pill">Proposed category</span></div>`+
       row('Reduced motion','motion','toggle',[],'Use immediate interface transitions.')+
       row('Stronger UI contrast','contrast','toggle',[],'Increase panel borders and secondary text contrast.')+
@@ -135,7 +148,7 @@ function settingsBody() {
 
 function settings() {
   ensureSettings();
-  const icons=['behavior','keyboard','controller','display','accessibility'];
+  const icons=['behavior','keyboard','controller','display','audio','accessibility'];
   const nav=`<nav class="rail settings-rail" aria-label="Settings categories"><div class="rail-title">SETTINGS</div>${settingsCategories.map((name,i)=>`<button class="${state.settingsTab===name?'active':''}" data-action="settings-category" data-value="${name}" ${state.settingsTab===name?'aria-current="page"':''}><span class="category-icon">${icon(icons[i])}</span><span class="nav-label">${name}</span><span class="nav-arrow">${icon('chevron',12)}</span></button>`).join('')}</nav>`;
   return frame({title:state.settingsTab,subtitle:'Your preferences, across every World.',eyebrow:'MENU / SETTINGS',rail:nav,body:settingsBody(),footer:`${button('← Back','settings-back',{ghost:true})}<div class="row wrap"><span class="footer-hint" id="settings-status">${state.settingsDirty?'Unapplied changes':'All changes applied'}</span>${button('Restore defaults','settings-reset',{ghost:true,small:true})}${button('Apply changes','settings-apply',{primary:true,disabled:!state.settingsDirty})}</div>`});
 }
@@ -159,8 +172,8 @@ function applySettings() {
 function settingsAction(name,value) {
   if(name==='settings-category'){state.settingsTab=value;render();return true;}
   if(name==='settings-apply'){applySettings();render();toast('Preferences applied in the prototype.');return true;}
-  if(name==='settings-reset'){dialog('Restore settings defaults?',`<p>${state.settingsTab==='Controller'?'This resets your draft controller and touch preferences. Apply to keep them.':'This resets your draft preferences, except the controller\'s. Apply to keep them.'}</p>`,button('Keep changes','close-dialog',{ghost:true})+button('Restore defaults','settings-confirm-reset',{primary:true}));return true;}
-  if(name==='settings-confirm-reset'){state.settingsDraft=clone(settingsDefaults);settingsChanged();closeDialog();render();return true;}
+  if(name==='settings-reset'){dialog('Restore settings defaults?',`<p>${state.settingsTab==='Audio'?'This resets only your draft audio volumes. Apply to keep them.':state.settingsTab==='Controller'?'This resets your draft controller and touch preferences. Apply to keep them.':'This resets your draft preferences, except the controller\'s. Apply to keep them.'}</p>`,button('Keep changes','close-dialog',{ghost:true})+button('Restore defaults','settings-confirm-reset',{primary:true}));return true;}
+  if(name==='settings-confirm-reset'){if(state.settingsTab==='Audio'){for(const key of ['sound', 'effects', 'ambient', 'music', 'footsteps', 'landings', 'breaking', 'placing', 'eating', 'swimming', 'floating', 'pickups', 'tools', 'vitals'])state.settingsDraft[key]=settingsDefaults[key];}else{state.settingsDraft=clone(settingsDefaults);}settingsChanged();closeDialog();render();return true;}
   if(name==='settings-back'){
     if(state.settingsDirty)dialog('Keep your changes?','<p>You have unapplied settings. Apply them before leaving, or discard the draft.</p>',button('Keep editing','close-dialog',{ghost:true})+button('Discard','settings-discard')+button('Apply & return','settings-return',{primary:true}));
     else {state.settingsDraft=null;navigate(state.returnTo);}

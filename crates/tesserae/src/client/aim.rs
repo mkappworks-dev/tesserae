@@ -34,6 +34,7 @@ impl Target {
 pub(super) struct Sent {
     pub(super) seq: u32,
     pub(super) last: Option<AimView>,
+    remove_held: bool,
     history: VecDeque<(u32, AimView)>,
 }
 #[derive(Component)]
@@ -87,7 +88,9 @@ pub(super) fn report(
     hotbar: Res<Hotbar>,
     mut sent: ResMut<Sent>,
     mut reports: MessageWriter<AimReport>,
+    progress: Option<Res<super::removal::Progress>>,
 ) {
+    let remove_held = progress.is_some_and(|p| p.active());
     let held = match hotbar.held() {
         Holding::Solid {
             material,
@@ -104,11 +107,12 @@ pub(super) fn report(
     };
     let tool = hotbar.held().tool();
     let current = (camera.translation(), *camera.forward(), held, tool);
-    if sent.last == Some(current) {
+    if sent.last == Some(current) && sent.remove_held == remove_held {
         return;
     }
     sent.seq = sent.seq.wrapping_add(1);
     sent.last = Some(current);
+    sent.remove_held = remove_held;
     let seq = sent.seq;
     sent.history.push_back((seq, current));
     if sent.history.len() > 64 {
@@ -120,6 +124,7 @@ pub(super) fn report(
         direction: current.1,
         held,
         tool,
+        remove_held,
     });
 }
 pub(super) fn receive(

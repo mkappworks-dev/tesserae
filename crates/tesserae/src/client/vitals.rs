@@ -18,9 +18,9 @@ const ROW_GAP_PX: f32 = 5.0;
 const ROWS_PADDING_PX: f32 = 6.0;
 /// At or below this share of full health the screen's edge reddens.
 const LOW_HEALTH: f32 = 0.3;
-const FLASH_S: f32 = 0.4;
-const VIGNETTE_PULSE_S: f32 = 1.6;
-const THROB_S: f32 = 0.8;
+const FLASH_S: f32 = 0.65;
+const VIGNETTE_PULSE_S: f32 = 3.0;
+const THROB_S: f32 = 1.5;
 const THROB_PX: f32 = 2.0;
 
 const EMPTY: Color = theme::VITAL_EMPTY;
@@ -40,6 +40,7 @@ struct Shown {
     /// Seconds at low health, while it lasts.
     low_s: Option<f32>,
     clock_s: f32,
+    feedback_in_s: f32,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -90,12 +91,16 @@ pub(super) fn plugin(app: &mut App) {
 fn receive(mut changes: MessageReader<VitalsChanged>, mut shown: ResMut<Shown>, time: Res<Time>) {
     let dt = time.delta_secs();
     shown.clock_s += dt;
+    shown.feedback_in_s = (shown.feedback_in_s - dt).max(0.0);
     shown.hit_s = shown.hit_s.map(|s| s + dt).filter(|s| *s < FLASH_S);
     for change in changes.read() {
-        if shown.last.is_some_and(|last| {
-            drawn_points(change.vitals.health) < drawn_points(last.vitals.health)
-        }) {
+        if shown.feedback_in_s == 0.0
+            && shown.last.is_some_and(|last| {
+                drawn_points(change.vitals.health) < drawn_points(last.vitals.health)
+            })
+        {
             shown.hit_s = Some(0.0);
+            shown.feedback_in_s = tesserae_core::audio::HURT_FEEDBACK_INTERVAL_S;
         }
         shown.last = Some(*change);
     }
@@ -550,7 +555,7 @@ mod tests {
             (count::<Vignette>(&mut app), count::<HitFlash>(&mut app)),
             (1, 1)
         );
-        for _ in 0..5 {
+        for _ in 0..8 {
             app.update();
         }
         assert_eq!(count::<HitFlash>(&mut app), 0, "the flash is brief");
@@ -571,7 +576,7 @@ mod tests {
         assert_eq!(count::<HitFlash>(&mut app), 0, "still drawn as 12");
         send(&mut app, 10.8, 10.0);
         assert_eq!(count::<HitFlash>(&mut app), 1, "drawn as 11");
-        for _ in 0..5 {
+        for _ in 0..8 {
             app.update();
         }
         send(&mut app, 10.5, 10.0);
@@ -612,5 +617,21 @@ mod tests {
             }
             assert_eq!(vignette_alpha(&mut app) == vignette, reduced, "{reduced}");
         }
+    }
+    #[test]
+    fn continuing_damage_does_not_restart_the_flash_on_every_health_update() {
+        let mut app = app();
+        mode(&mut app, GameMode::Survival);
+        send(&mut app, 20.0, 10.0);
+        send(&mut app, 19.0, 10.0);
+        let first = flash_alpha(&mut app);
+        send(&mut app, 18.0, 10.0);
+        assert!(flash_alpha(&mut app) < first);
+        send(&mut app, 17.0, 10.0);
+        assert!(app.world().resource::<Shown>().hit_s.unwrap() > 0.0);
+        assert_eq!(
+            app.world().resource::<Shown>().last.unwrap().vitals.health,
+            17.0
+        );
     }
 }

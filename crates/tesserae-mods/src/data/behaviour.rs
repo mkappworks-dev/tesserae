@@ -223,6 +223,7 @@ pub(super) struct Biome {
 
     #[serde(default)]
     surface_features: Vec<SurfaceFeature>,
+    soundscape: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -262,6 +263,7 @@ impl From<SkyFog> for content::SkyFog {
 impl From<Biome> for content::BiomeDef {
     fn from(b: Biome) -> Self {
         Self {
+            soundscape: b.soundscape,
             name: b.name,
             temperature: b.temperature,
             humidity: b.humidity,

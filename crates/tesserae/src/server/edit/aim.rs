@@ -62,6 +62,65 @@ pub(super) fn receive_aim(
     }
 }
 
+/// Seconds between the `hit` Sounds of a held Remove.
+pub const HIT_INTERVAL_S: f32 = 0.25;
+
+/// What a held Remove strikes, and the seconds until it is struck again.
+#[derive(Resource, Default)]
+pub(super) struct Striking {
+    target: Option<AimRemoval>,
+    next_in_s: f32,
+}
+
+/// Strikes the target of a held Remove at once and every [`HIT_INTERVAL_S`]
+/// after, while it stays the same Voxel and in reach; a new target starts
+/// afresh.
+pub(super) fn strike(
+    state: Res<AimState>,
+    (store, tables, world): (Res<ChunkStore>, Res<ContentTables>, Res<WorldSettings>),
+    (sounds, time): (Res<crate::server::sound::SoundTable>, Res<Time<Fixed>>),
+    player: Single<&Player>,
+    mut striking: ResMut<Striking>,
+    mut heard: MessageWriter<crate::server::sound::SoundEvent>,
+) {
+    let target = state
+        .latest
+        .filter(|(report, _)| report.remove_held)
+        .and_then(|(report, _)| {
+            let intent = EditIntent {
+                origin: report.origin,
+                direction: report.direction,
+                action: EditAction::Remove,
+            };
+            // Judged against the Eye now, not when the report came: a Player
+            // who walks off with Remove held stops striking.
+            let reach = reach_from(&intent, player.eye()).ok()?;
+            let (at, _) = resolve(&store, &tables, &world, &intent, reach).ok()?;
+            removal_target(&store, &tables, &world, at)
+        });
+    if target != striking.target {
+        *striking = Striking {
+            target,
+            next_in_s: 0.0,
+        };
+    } else {
+        striking.next_in_s -= time.delta_secs();
+    }
+    let Some(target) = target else {
+        return;
+    };
+    if striking.next_in_s <= 0.0 {
+        striking.next_in_s += HIT_INTERVAL_S;
+        heard.write_batch(sounds.voxel(
+            tesserae_core::audio::Cause::Hit,
+            target.material,
+            target.at,
+            world.voxel_size,
+            player.eye(),
+        ));
+    }
+}
+
 pub(super) fn answer_aim(
     state: Res<AimState>,
     store: Res<ChunkStore>,

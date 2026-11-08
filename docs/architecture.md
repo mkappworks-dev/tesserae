@@ -141,7 +141,10 @@ time. This is a gesture guard, not a network anti-cheat timer. The unreleased
 0.3 Material Declaration carries optional `remove-time-s`, validated from 0.05
 to 60 seconds and defaulting to 350 ms, published in the content catalogue. Core
 tables and simulation retain no input timing. The Server compares target
-identity again before applying the removal.
+identity again before applying the removal. While the Client's progress runs,
+its aim report carries a flag that Remove is held; the Server strikes the target
+with a `hit` Sound event every 0.25 s while that target is unchanged and in
+reach of the Eye. The flag grants nothing and changes no Voxel.
 
 Layout mode (`client/layout.rs`) takes the placement actions while it is on:
 Place commits, Remove cancels and the count keys change the active axis. The
@@ -236,6 +239,19 @@ bite, slot switch) is Client-only presentation; it feeds the first-person
 viewmodel and the avatar's right arm alike and is held still under reduced
 motion. Dropping an Item is the Server's `InventoryIntent::Drop`, which throws
 it ahead of the Player with a pickup delay, outside the undo journal.
+
+Sound follows the same rule. The Server decides that a Sound event happens; the
+Client only plays it. Ambience is the Server's too: each tick it works out the
+Eye's context (underwater while the Eye is inside a fluid, underground while the
+Eye's Voxel has no sky light, then the Eye's Biome override, else the open
+world), and sends the Soundscape that applies (`HereSoundscape`) only when it
+changes, as it sends the sky and fog. The Client loops that Soundscape's beds,
+crossfading them over 2 s, and plays its music from the core scheduler
+(`tesserae_core::audio::Music`), which picks each track and silence from a seed.
+Menu, Settings and save modals fade World playback out using real time, pause
+background sinks and the music scheduler, and discard action sounds rather than
+queueing them for resume. This is a Client playback policy; it does not pause
+authoritative simulation.
 
 ## The three invariants this diagram exists to protect
 

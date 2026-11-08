@@ -19,6 +19,8 @@ mod lines;
 mod loading;
 mod sandbox;
 mod shared_mods;
+mod sounds;
+mod soundscapes;
 mod starters;
 
 fn guest(name: &str) -> PathBuf {

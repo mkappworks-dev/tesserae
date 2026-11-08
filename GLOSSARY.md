@@ -364,3 +364,30 @@ generation could have made; any other fluid there is dynamic.
 **Emitter bound** — how many changes that start or stop block light, such as
 lava arriving or fuel catching, one Logical step may land (`EMITTERS_PER_STEP`).
 Each relights the whole reach of its light.
+
+## Audio
+
+**Sound** — a thing a Game or Mod declares by name that can be heard: one or
+more recordings, one picked each time, with how loud it is, how far it carries
+in metres and its Sound category. None is built in, so a World with no Game is
+silent.
+
+**Sound event** — the Server making one Sound heard at a position in metres,
+because of a Cause. The Client plays it and never decides that it happens.
+
+**Cause** — why the Server makes a Sound event: a Voxel broken, placed, struck
+or stepped on, a landing, a splash, swimming, floating, a Pickup, a Use
+answered, food eaten, a Player hurt or dying. A closed list the engine owns;
+what each one sounds like is the Game's.
+
+**Sound set** — the Sounds one or more Materials make for the Voxel Causes:
+break, place, hit, step and land. A Material with none is silent for them.
+
+**Sound category** — the group a Sound's loudness is set by in a user's
+settings: Effects, Ambient or Music, all under Master. A user's preference, not
+World state.
+
+**Soundscape** — what a Player hears around them when nothing happens: looping
+ambient Sounds and a list of music. A Game declares one per context (default,
+underground or underwater) and a Biome may name its own; the Server says which
+applies to the Eye.

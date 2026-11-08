@@ -7,6 +7,7 @@ use crate::{Declaration, ModError};
 mod behaviour;
 mod character;
 mod shape;
+mod sound;
 mod world;
 
 #[derive(Deserialize)]
@@ -35,6 +36,16 @@ struct Data {
     #[serde(default)]
     ores: Vec<behaviour::Ore>,
     survival: Option<world::Survival>,
+    #[serde(default)]
+    sounds: Vec<sound::Sound>,
+    #[serde(default, rename = "sound-sets")]
+    sound_sets: Vec<sound::SoundSet>,
+    #[serde(default, rename = "material-sounds")]
+    material_sounds: Vec<sound::MaterialSound>,
+    #[serde(default)]
+    soundscapes: Vec<sound::Soundscape>,
+    #[serde(default, rename = "cause-sounds")]
+    cause_sounds: Vec<sound::CauseSound>,
 }
 
 #[derive(Deserialize)]
@@ -109,19 +120,48 @@ impl From<Ground> for content::GroundParams {
     }
 }
 
-/// Every artwork file a Declaration names, as (field, Mod-relative path), in Declaration order.
-pub(crate) fn references(id: &str, bytes: &[u8]) -> Result<Vec<(String, String)>, ModError> {
+/// A file a data Declaration names, read from the Mod's directory into its payload.
+pub(crate) struct Reference {
+    pub field: String,
+    /// Mod-relative.
+    pub path: String,
+    pub max_bytes: u64,
+    pub recording: bool,
+}
+
+/// Every artwork file and recording a Declaration names, in Declaration order.
+pub(crate) fn references(id: &str, bytes: &[u8]) -> Result<Vec<Reference>, ModError> {
+    let artwork = |field: String, path: &str| Reference {
+        field,
+        path: path.to_owned(),
+        max_bytes: crate::artwork::MAX_FILE_BYTES,
+        recording: false,
+    };
     let data = decode(id, bytes)?;
     let mut found = Vec::new();
     for (row, appearance) in data.appearance.iter().enumerate() {
         if let Some(path) = &appearance.texture {
-            found.push((format!("appearance[{row}].texture"), path.clone()));
+            found.push(artwork(format!("appearance[{row}].texture"), path));
         }
     }
     if let Some(character) = data.world.and_then(|w| w.character) {
-        found.push(("world.character.skin".into(), character.skin().to_owned()));
+        found.push(artwork("world.character.skin".into(), character.skin()));
+    }
+    for (row, sound) in data.sounds.iter().enumerate() {
+        for (at, file) in sound.files().enumerate() {
+            found.push(Reference {
+                field: recording_field(row, at),
+                path: file.to_owned(),
+                max_bytes: sound.max_bytes(),
+                recording: true,
+            });
+        }
     }
     Ok(found)
+}
+
+fn recording_field(row: usize, at: usize) -> String {
+    format!("sounds[{row}].recordings[{at}].file")
 }
 
 fn decode(id: &str, bytes: &[u8]) -> Result<Data, ModError> {
@@ -230,5 +270,24 @@ pub(crate) fn parse(id: &str, payload: &CheckedPayload) -> Result<Declaration, M
         biomes: data.biomes.into_iter().map(Into::into).collect(),
         ores: data.ores.into_iter().map(Into::into).collect(),
         survival: data.survival.map(Into::into),
+        sounds: data
+            .sounds
+            .into_iter()
+            .enumerate()
+            .map(|(row, sound)| {
+                sound.into_def(|at, path| {
+                    payload.file(path).map(<[u8]>::to_vec).ok_or_else(|| {
+                        error(format!(
+                            "{}: `{path}` was not checked",
+                            recording_field(row, at)
+                        ))
+                    })
+                })
+            })
+            .collect::<Result<_, ModError>>()?,
+        sound_sets: data.sound_sets.into_iter().map(Into::into).collect(),
+        material_sounds: data.material_sounds.into_iter().map(Into::into).collect(),
+        soundscapes: data.soundscapes.into_iter().map(Into::into).collect(),
+        cause_sounds: data.cause_sounds.into_iter().map(Into::into).collect(),
     })
 }

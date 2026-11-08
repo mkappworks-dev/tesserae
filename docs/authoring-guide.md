@@ -148,7 +148,11 @@ which eases across the border where `ground` switches. A Biome may also name a
 ease to the blend of the Biomes around the Player. A Biome may list up to four
 `surface-features`, solid Materials the Engine stands one Voxel above the
 Biome's surface Material at a mean spacing in metres (see
-[Data Mods](data-mods.md)); a Mod still places no terrain itself.
+[Data Mods](data-mods.md)); a Mod still places no terrain itself. Any Mod may
+declare Sounds and Sound sets and give a Sound set to any Mod's Material, and
+Soundscapes of ambient beds and music; only the Game's Soundscapes take a
+`context`, which the Engine plays as the Player's Eye goes underground or
+underwater (see [Data Mods](data-mods.md)).
 
 | Table                       | Fields                                                                                                                                                                                                                                                                                                                                                        |
 | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -176,24 +180,30 @@ Biome's surface Material at a mean spacing in metres (see
 | `[[biomes]]`                | `name`, `temperature`, `humidity` (both 0 to 1), optional `ground` (`rock`, `soil`, `surface`: solid Materials by full name), optional `sky-fog` (`sky`, `fog`: sRGB `[r, g, b]`), optional `cave-scale` (0 to 4), optional `surface-features` (at most 4, each `material`: a solid by full name, `spacing-m`: 4 to 1024); at most 16 per Mod and in a World  |
 | `[survival]` (Game)         | each optional, omitted keeps the engine's default: `max-health` (20), `max-hunger` (20), `max-air-s` (10), `safe-fall-m` (3), `fall-damage-per-m` (1), `drowning-damage-per-s` (2), `hunger-per-min` (1), `sprinting-hunger-per-min` (2), `regeneration-hunger` (18), `regeneration-per-s` (0.25), `starvation-damage-per-s` (0.25), `keep-inventory` (false) |
 | `[[ores]]`                  | `material` (solid), `min-depth-m`, `max-depth-m`, `vein-size-m`, `rarity`, optional `biomes`; 16 per Mod, 32 in a World                                                                                                                                                                                                                                       |
+| `[[sounds]]`                | `name`, `category`, `recordings` (at least one, each `file`: an Ogg Vorbis path, `weight`), `volume` and `pitch` (each `min`, `max`), optional `distance` (`reference-m`, `max-m`: required for `effects`, refused for the others)                                                                                                                            |
+| `[[sound-sets]]`            | `name`, optional `break`, `place`, `hit`, `step`, `land`: each an `effects` Sound by full name                                                                                                                                                                                                                                                                |
+| `[[material-sounds]]`       | `material`, `sound-set`: both by full name; at most one Sound set per Material in a World                                                                                                                                                                                                                                                                     |
+| `[[soundscapes]]`           | `name`, optional `context` (Game only, at most one each), `beds` (at most 8, each `sound`: an `ambient` Sound by full name, `volume`: 0 to 1), `music` (at most 8 `music` Sounds by full name), optional `silence-s` (`min`, `max`: 0 to 3600 s, default 60 to 180); 16 per Mod                                                                               |
 
 Variants: `occlusion` is `opaque`, `same-material` or `never`; `render` is
-`opaque`, `blend` or `cutout`; a bone `role` is `body`, `head`, `arm-left`,
-`arm-right`, `leg-left`, `leg-right` or `fixed`; a reactant `state` is `any`,
-`source` or `flowing`; `consumed` and `receiving` are `first` or `second`; a
-tool `kind` is `measure`. A combustion `end` is `"permanent"` or
-`{ after = { seconds = 8, residue = "mod:ash" } }`, and an omitted `residue`
-removes the solid.
+`opaque`, `blend` or `cutout`; a Sound `category` is `effects`, `ambient` or
+`music`; a Soundscape `context` is `default`, `underground` or `underwater`; a
+bone `role` is `body`, `head`, `arm-left`, `arm-right`, `leg-left`, `leg-right`
+or `fixed`; a reactant `state` is `any`, `source` or `flowing`; `consumed` and
+`receiving` are `first` or `second`; a tool `kind` is `measure`. A combustion
+`end` is `"permanent"` or `{ after = { seconds = 8, residue = "mod:ash" } }`,
+and an omitted `residue` removes the solid.
 
-Materials, Shapes and Biomes are declared by local name. Ground, water, fluid,
-reaction, combustion, ore and surface feature names, and the Biomes an ore
-lists, are full `<mod id>:<name>` names and resolve after every Mod has
-declared, whether the Material came from data or from a component.
+Materials, Shapes, Biomes, Sounds, Sound sets and Soundscapes are declared by
+local name. Ground, water, fluid, reaction, combustion, ore and surface feature
+names, the Biomes an ore lists, and the names in Sound sets, `material-sounds`
+and Soundscapes, are full `<mod id>:<name>` names and resolve after every Mod
+has declared, whether the Material came from data or from a component.
 
 ### A Declaration using every table
 
 This Game is checked by the repository's tests: it is extracted from this page,
-given the two PNGs it names, and validated.
+given the two PNGs and the recordings it names, and validated.
 
 ```toml
 [[materials]]
@@ -401,6 +411,48 @@ max-depth-m = 40.0
 vein-size-m = 3.0
 rarity = 0.05
 biomes = ["showcase:cold"]
+
+[[sounds]]
+name = "crack"
+category = "effects"
+recordings = [{ file = "sounds/crack.ogg", weight = 1 }]
+volume = { min = 0.8, max = 1.0 }
+pitch = { min = 0.9, max = 1.1 }
+distance = { reference-m = 2.0, max-m = 24.0 }
+
+[[sound-sets]]
+name = "rock"
+break = "showcase:crack"
+
+[[material-sounds]]
+material = "showcase:stone"
+sound-set = "showcase:rock"
+
+[[sounds]]
+name = "wind"
+category = "ambient"
+recordings = [{ file = "sounds/wind.ogg", weight = 1 }]
+volume = { min = 1.0, max = 1.0 }
+pitch = { min = 1.0, max = 1.0 }
+
+[[sounds]]
+name = "theme"
+category = "music"
+recordings = [{ file = "sounds/theme.ogg", weight = 1 }]
+volume = { min = 0.8, max = 0.8 }
+pitch = { min = 1.0, max = 1.0 }
+
+[[soundscapes]]
+name = "open"
+context = "default"
+beds = [{ sound = "showcase:wind", volume = 0.6 }]
+music = ["showcase:theme"]
+silence-s = { min = 60.0, max = 180.0 }
+
+[[soundscapes]]
+name = "cave"
+context = "underground"
+beds = [{ sound = "showcase:wind", volume = 0.2 }]
 ```
 
 Its `mod.toml` is the data-only starter's with `id = "showcase"`.
@@ -552,3 +604,43 @@ Line `0.x` is pre-release. This guide documents how contracts evolve; it does
 - If `CARGO_TARGET_DIR` is set, Cargo builds outside the project and `output` in
   `dev.toml` is not found; unset it for `tesserae dev`, or point `output` at the
   real path.
+
+### Non-Voxel Causes and Biome audio
+
+Only the Game declares `cause-sounds`: each row binds `cause` to a Sound's full
+name in `sound`. The closed Causes are `splash`, `pickup`, `use-measured`,
+`use-refused`, `eat`, `hurt` and `death`. Unbound Causes are silent; duplicate
+bindings and non-Effects Sounds are refused. The Server emits these events.
+
+A Biome may set `soundscape` to a loaded Soundscape's full name, including one
+from a data-only Mod without a context. Unknown names are refused. The Eye
+selects underwater, underground, its Biome, then default, falling through
+missing contexts. Leaving `soundscape` out preserves the default selection.
+
+The unreleased 0.3 `sound-cause` enum also includes `swimming` and `floating`.
+The Game binds them through `cause-sounds`, like `splash`. Swimming strokes
+require roughly 3 m of travel and a seeded 1.6–2.2 s cooldown, including while
+moving at the surface. Gentle idle floating sounds occur at seeded 6–12 s
+intervals. Neither is emitted while grounded, flying, dead or paused. Unbound
+Causes remain silent.
+
+Audio preferences include per-action trims for footsteps, landings, breaking and
+striking, placing, eating, swimming, floating water, pickups, tools, and
+hurt/death. They multiply the Effects and Master settings and apply to playing
+sounds on Apply. Older profiles default every trim to 100. These preferences add
+no Mod contract fields. Ambient recordings have a separate 4 MiB ceiling;
+Effects keep 512 KiB, Music 8 MiB and referenced World audio 32 MiB.
+
+Continuous damage applies every simulation tick, while `hurt` feedback is
+limited to one Sound every 0.75 s to prevent overlapping short clips. Death
+emits once at the health transition; it is not a repeating damage Sound. The
+damage-feedback interval changes neither damage amounts nor hazard rules.
+
+The unreleased 0.3 `sound-cause` enum appends `burn`: the Server emits it once
+when the body enters a fluid whose declaration has `heat`, including a direct
+cold-to-hot fluid transition. Bind it through Game `cause-sounds`, including in
+data declarations; an unbound Cause is silent. Cold-fluid entry/exit uses
+`splash`; hot-fluid exit is quiet. Hot fluids do not emit `swimming`/`floating`
+or select the underwater water Soundscape. Burn uses the Vitals detail trim.
+Health damage and hurt/death timing are unchanged. Older 0.1/0.2 declarations
+retain their existing adaptation without Cause bindings.

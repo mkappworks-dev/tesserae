@@ -3,6 +3,7 @@ wit_bindgen::generate!({ path: "../../crates/tesserae-mods/wit/0.3", world: "mod
 use exports::tesserae::mods::guest::{
     Command, Declaration, Guest, Registered, TickContext, WorldInfo,
 };
+mod audio;
 mod character;
 mod textures;
 
@@ -438,6 +439,7 @@ impl Guest for Terra {
             ],
             biomes: vec![
                 BiomeDef {
+                    soundscape: Some("terra:temperate".into()),
                     name: "temperate".into(),
                     temperature: 0.5,
                     humidity: 0.5,
@@ -454,6 +456,7 @@ impl Guest for Terra {
                     }],
                 },
                 BiomeDef {
+                    soundscape: Some("terra:dry".into()),
                     name: "dry".into(),
                     temperature: 0.7,
                     humidity: 0.3,
@@ -470,6 +473,7 @@ impl Guest for Terra {
                     surface_features: Vec::new(),
                 },
                 BiomeDef {
+                    soundscape: Some("terra:cold".into()),
                     name: "cold".into(),
                     temperature: 0.3,
                     humidity: 0.55,
@@ -487,6 +491,11 @@ impl Guest for Terra {
                 },
             ],
             survival: None,
+            sounds: audio::sounds(),
+            sound_sets: audio::sets(),
+            material_sounds: audio::materials(),
+            soundscapes: audio::soundscapes(),
+            cause_sounds: audio::causes(),
             ores: vec![OreDef {
                 material: "terra:iron".into(),
                 min_depth_m: 5.0,

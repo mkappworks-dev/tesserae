@@ -12,7 +12,7 @@ use std::collections::VecDeque;
 use bevy::prelude::*;
 use tesserae_core::collide::{Aabb, VoxelVolume, overlaps, raycast_until};
 use tesserae_core::layout::{Layout, LayoutAxis, LayoutError, layout_cells, layout_span};
-use tesserae_core::{Tables, Voxel};
+use tesserae_core::{MaterialId, Tables, Voxel};
 
 use super::{
     Change, EDIT_REACH_M, EditAction, EditIntent, EditRejected, MAX_DEFERRED_TICKS, MAX_PENDING,
@@ -362,6 +362,9 @@ fn clear_of(
 
 /// Lands pending layouts' cells, at most `budget` of them, front first. A
 /// layout that runs out of budget keeps its place.
+///
+/// Returns where each layout whose first Voxel landed here put it, and its
+/// Material: the one cell a layout is heard at.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn drain(
     layouts: &mut VecDeque<PendingLayout>,
@@ -376,7 +379,8 @@ pub(super) fn drain(
     body: Option<Aabb>,
     // Not `&mut Inventory`: that would mark it changed, and so sent, every tick.
     inventory: &mut Mut<Inventory>,
-) {
+) -> Vec<([i32; 3], MaterialId)> {
+    let mut started = Vec::new();
     while budget > 0 {
         let Some(mut layout) = layouts.pop_front() else {
             break;
@@ -452,6 +456,9 @@ pub(super) fn drain(
                             .expect("counted before the Voxel changed");
                         entry.cost = Cost::Paid(item.clone());
                     }
+                    if layout.applied.is_empty() {
+                        started.push((at, layout.intent.voxel.material()));
+                    }
                     layout.applied.push(entry);
                     budget -= 1;
                     layout.waited = 0;
@@ -487,6 +494,7 @@ pub(super) fn drain(
             });
         }
     }
+    started
 }
 
 #[cfg(test)]

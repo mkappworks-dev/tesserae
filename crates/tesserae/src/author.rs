@@ -603,6 +603,102 @@ solid = true
         assert_eq!(ids, ["world", "zextra", "zzdata"]);
     }
 
+    const MONO: &[u8] = include_bytes!("../../tesserae-mods/tests/fixtures/sounds/mono.ogg");
+
+    const CRACK: &str = r#"
+[[sounds]]
+name = "crack"
+category = "effects"
+recordings = [{ file = "sounds/crack.ogg", weight = 1 }]
+volume = { min = 1.0, max = 1.0 }
+pitch = { min = 1.0, max = 1.0 }
+distance = { reference-m = 2.0, max-m = 24.0 }
+"#;
+
+    /// [`data_game`] with a crack Sound, its recording and an unreferenced one beside it.
+    fn sounding_game(root: &Path, recording: &[u8], sound: &str) -> PathBuf {
+        let game = data_game(root, "plain", "");
+        fs::create_dir_all(game.join("sounds")).unwrap();
+        fs::write(game.join("sounds/crack.ogg"), recording).unwrap();
+        fs::write(game.join("sounds/unused.ogg"), MONO).unwrap();
+        let mut content = fs::read_to_string(game.join("content.toml")).unwrap();
+        content.push_str(sound);
+        fs::write(game.join("content.toml"), content).unwrap();
+        game
+    }
+
+    #[test]
+    fn packaging_carries_exactly_the_referenced_recordings_under_the_same_build() {
+        let s = Scratch::new();
+        let src = s.dir("src");
+        let game = sounding_game(&src, MONO, CRACK);
+        let source_build = tesserae_mods::Trust::hash_of(&Found::read(&game).unwrap()).unwrap();
+        let out = s.dir("out");
+        let mods = out.join("mods");
+        assert_eq!(
+            s.run(&[
+                "package",
+                path(&game),
+                "--out",
+                path(&out),
+                "--mods",
+                path(&mods)
+            ]),
+            Outcome::Done
+        );
+        assert_eq!(
+            files(&out.join("games/plain")),
+            [
+                "art/rock.png",
+                "content.toml",
+                "mod.toml",
+                "sounds/crack.ogg"
+            ]
+        );
+
+        fs::remove_dir_all(&src).unwrap();
+        let loaded = load(
+            &mods,
+            &s.0.join("trust.json"),
+            TrustMode::All,
+            &WorldSettings::default(),
+        )
+        .unwrap();
+        assert_eq!(loaded.required[0].build_sha256, source_build);
+        assert_eq!(loaded.sounds.sounds[0].recordings, [MONO]);
+    }
+
+    #[test]
+    fn validation_refuses_a_recording_past_its_limit_or_a_range_by_mod_and_field() {
+        let s = Scratch::new();
+        let mods = s.dir("installed/mods");
+        let validate = |dir: &Path| failed(s.run(&["validate", path(dir), "--mods", path(&mods)]));
+
+        let mut large = MONO.to_vec();
+        large.resize((512 << 10) + 1, 0);
+        let game = sounding_game(&s.dir("a"), &large, CRACK);
+        let message = validate(&game);
+        assert!(
+            message.contains("`plain`")
+                && message.contains("sounds[0].recordings[0].file")
+                && message.contains("524288 bytes"),
+            "{message}"
+        );
+
+        let game = sounding_game(
+            &s.dir("b"),
+            MONO,
+            &CRACK.replace("weight = 1", "weight = 17"),
+        );
+        let message = validate(&game);
+        assert!(
+            message.contains("`plain`")
+                && message.contains("plain:crack")
+                && message.contains("weight"),
+            "{message}"
+        );
+    }
+
     #[test]
     fn an_invalid_project_produces_no_output() {
         let s = Scratch::new();

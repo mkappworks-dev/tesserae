@@ -141,7 +141,12 @@ pub(super) fn activate(
                 settings.open = true;
                 settings.tab = tab;
                 settings.last = tab;
-                if tab != crate::client::menu_ui::Tab::Display {
+                if matches!(
+                    tab,
+                    crate::client::menu_ui::Tab::Behavior
+                        | crate::client::menu_ui::Tab::Bindings
+                        | crate::client::menu_ui::Tab::Controller
+                ) {
                     settings.last_controls = tab;
                 }
                 menu.open = false;
@@ -181,6 +186,7 @@ pub(super) fn activate(
         Operation::Reset => settings.resetting = true,
         Operation::CancelReset => settings.resetting = false,
         Operation::Reference => settings.show_reference = !settings.show_reference,
+        Operation::EffectControls => settings.effects_open = !settings.effects_open,
         Operation::TouchControls => settings.touch_open = !settings.touch_open,
         Operation::Stay => {
             settings.unsaved = false;
@@ -225,6 +231,7 @@ pub(super) fn activate(
             if matches!(operation, Operation::ConfirmReset) {
                 settings.resetting = false;
             }
+            let audio = settings.tab == crate::client::menu_ui::Tab::Audio;
             let controller = settings.tab == crate::client::menu_ui::Tab::Controller;
             let Some((draft, p)) = settings.draft.as_mut() else {
                 return;
@@ -232,6 +239,9 @@ pub(super) fn activate(
             match operation {
                 // Each page restores its own device, so a reset on one never
                 // discards preferences tuned for the other.
+                Operation::ConfirmReset if audio => {
+                    p.volumes = default();
+                }
                 Operation::ConfirmReset if controller => {
                     draft.pad = Bindings::default().pad;
                     p.pad = default();
@@ -240,6 +250,7 @@ pub(super) fn activate(
                 Operation::ConfirmReset => {
                     draft.keyboard = Bindings::default().keyboard;
                     *p = Preferences {
+                        volumes: p.volumes,
                         pad: p.pad.clone(),
                         touch: p.touch.clone(),
                         ..default()
