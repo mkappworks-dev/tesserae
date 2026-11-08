@@ -495,7 +495,10 @@ pub(super) fn slider(parent: &mut ChildSpawnerCommands, kind: Scalar, value: f32
             let slider = row
                 .spawn((
                     kind,
-                    Slider::default(),
+                    Slider {
+                        track_click: bevy::ui_widgets::TrackClick::Snap,
+                        ..default()
+                    },
                     SliderRange::new(*kind.range().start(), *kind.range().end()),
                     SliderValue(value),
                     SliderStep(kind.step()),
@@ -537,6 +540,7 @@ pub(super) fn slider(parent: &mut ChildSpawnerCommands, kind: Scalar, value: f32
                     ));
                 track.spawn((
                     SliderThumb,
+                    Pickable::IGNORE,
                     ScalarThumb(slider, kind),
                     BackgroundColor(theme::SAGE),
                     BorderColor::all(theme::SAGE_INK.with_alpha(0.35)),
