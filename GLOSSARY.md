@@ -376,9 +376,9 @@ silent.
 because of a Cause. The Client plays it and never decides that it happens.
 
 **Cause** — why the Server makes a Sound event: a Voxel broken, placed, struck
-or stepped on, a landing, a splash, a Pickup, a Use answered, food eaten, a
-Player hurt or dying. A closed list the engine owns; what each one sounds like
-is the Game's.
+or stepped on, a landing, a splash, swimming, floating, a Pickup, a Use
+answered, food eaten, a Player hurt or dying. A closed list the engine owns;
+what each one sounds like is the Game's.
 
 **Sound set** — the Sounds one or more Materials make for the Voxel Causes:
 break, place, hit, step and land. A Material with none is silent for them.

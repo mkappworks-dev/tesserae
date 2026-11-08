@@ -42,6 +42,10 @@ struct Data {
     sound_sets: Vec<sound::SoundSet>,
     #[serde(default, rename = "material-sounds")]
     material_sounds: Vec<sound::MaterialSound>,
+    #[serde(default)]
+    soundscapes: Vec<sound::Soundscape>,
+    #[serde(default, rename = "cause-sounds")]
+    cause_sounds: Vec<sound::CauseSound>,
 }
 
 #[derive(Deserialize)]
@@ -283,5 +287,7 @@ pub(crate) fn parse(id: &str, payload: &CheckedPayload) -> Result<Declaration, M
             .collect::<Result<_, ModError>>()?,
         sound_sets: data.sound_sets.into_iter().map(Into::into).collect(),
         material_sounds: data.material_sounds.into_iter().map(Into::into).collect(),
+        soundscapes: data.soundscapes.into_iter().map(Into::into).collect(),
+        cause_sounds: data.cause_sounds.into_iter().map(Into::into).collect(),
     })
 }

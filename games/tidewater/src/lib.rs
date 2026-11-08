@@ -254,6 +254,7 @@ impl Guest for Tidewater {
             items: vec![food::item()],
             biomes: vec![
                 BiomeDef {
+                    soundscape: None,
                     name: "lagoon".into(),
                     temperature: 0.5,
                     humidity: 0.5,
@@ -266,6 +267,7 @@ impl Guest for Tidewater {
                     surface_features: vec![food::feature()],
                 },
                 BiomeDef {
+                    soundscape: None,
                     name: "salt_flats".into(),
                     temperature: 0.7,
                     humidity: 0.3,
@@ -282,6 +284,7 @@ impl Guest for Tidewater {
                     surface_features: vec![food::feature()],
                 },
                 BiomeDef {
+                    soundscape: None,
                     name: "cold_shallows".into(),
                     temperature: 0.3,
                     humidity: 0.55,
@@ -302,6 +305,8 @@ impl Guest for Tidewater {
             sounds: Vec::new(),
             sound_sets: Vec::new(),
             material_sounds: Vec::new(),
+            soundscapes: Vec::new(),
+            cause_sounds: Vec::new(),
             ores: vec![OreDef {
                 material: "crystals:aquamarine".into(),
                 min_depth_m: 6.0,

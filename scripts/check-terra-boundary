@@ -19,6 +19,15 @@ for path in [manifest, *(root / "games/terra/src").rglob("*")]:
     if path.is_dir():
         continue
     text = path.read_text().replace("../../crates/tesserae-mods/wit", "WIT_CONTRACT")
+
+    def recording(match):
+        asset = (path.parent / match[1]).resolve()
+        if (asset.suffix != ".ogg" or not asset.is_file()
+                or not asset.is_relative_to((root / "games/terra/audio").resolve())):
+            raise SystemExit(f"{path}: embedded recordings must stay in terra/audio")
+        return "EMBEDDED_RECORDING"
+
+    text = re.sub(r'\binclude_bytes!\(\s*"([^"\n]+)"\s*\)', recording, text)
     if re.search(r"crates[/\\]|tesserae[-_]core|\.\.[/\\]|\b(?:include|include_str|include_bytes)!", text):
         raise SystemExit(f"{path}: terra must use only the WIT contract")
 print("terra contract boundary is clean")

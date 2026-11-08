@@ -56,6 +56,7 @@ fn biomes() -> Vec<BiomeDef> {
     };
     vec![
         BiomeDef {
+            soundscape: None,
             name: "ash_flats".into(),
             temperature: 0.5,
             humidity: 0.5,
@@ -68,6 +69,7 @@ fn biomes() -> Vec<BiomeDef> {
             surface_features: vec![food::feature()],
         },
         BiomeDef {
+            soundscape: None,
             name: "scorched".into(),
             temperature: 0.75,
             humidity: 0.3,
@@ -80,6 +82,7 @@ fn biomes() -> Vec<BiomeDef> {
             surface_features: Vec::new(),
         },
         BiomeDef {
+            soundscape: None,
             name: "highland".into(),
             temperature: 0.25,
             humidity: 0.7,
@@ -334,6 +337,8 @@ impl Guest for Ember {
             sounds: Vec::new(),
             sound_sets: Vec::new(),
             material_sounds: Vec::new(),
+            soundscapes: Vec::new(),
+            cause_sounds: Vec::new(),
             ores: vec![OreDef {
                 material: "waters:obsidian".into(),
                 min_depth_m: 6.0,

@@ -213,6 +213,7 @@ pub(super) fn page(
     match settings.tab {
         Tab::Behavior => behavior(list, settings, bindings, p, labels, context),
         Tab::Display => display(list, p),
+        Tab::Audio => audio(list, settings, p),
         Tab::Bindings => bindings_page(list, settings, bindings, labels, searches),
         Tab::Controller => controller(list, settings, bindings, p, labels),
         Tab::Accessibility => accessibility(list, p),
@@ -680,49 +681,55 @@ pub(super) fn controller(
                 );
             })
         });
-        disclosure(card, "Touch controls", settings.touch_open, |touch_rows| {
-            let touch = &p.touch;
-            setting_row(touch_rows, "Look sensitivity", "", |row| {
-                slider(row, Scalar::TouchLook, touch.look_sensitivity)
-            });
-            setting_row(touch_rows, "Invert vertical look", "", |row| {
-                switch(row, touch.invert_y, Operation::TouchInvert)
-            });
-            setting_row(touch_rows, "Layout", "", |row| {
-                segment(row, |buttons| {
-                    option(
-                        buttons,
-                        "Normal",
-                        Operation::TouchMirror(false),
-                        !touch.mirrored,
-                    );
-                    option(
-                        buttons,
-                        "Mirrored",
-                        Operation::TouchMirror(true),
-                        touch.mirrored,
-                    );
-                })
-            });
-            setting_row(touch_rows, "Control size", "", |row| {
-                segment(row, |buttons| {
-                    use crate::client::profile::TouchSize::*;
-                    for (label, size) in
-                        [("Small", Small), ("Normal", Normal), ("Enlarged", Enlarged)]
-                    {
+        disclosure(
+            card,
+            "Touch controls",
+            settings.touch_open,
+            Operation::TouchControls,
+            |touch_rows| {
+                let touch = &p.touch;
+                setting_row(touch_rows, "Look sensitivity", "", |row| {
+                    slider(row, Scalar::TouchLook, touch.look_sensitivity)
+                });
+                setting_row(touch_rows, "Invert vertical look", "", |row| {
+                    switch(row, touch.invert_y, Operation::TouchInvert)
+                });
+                setting_row(touch_rows, "Layout", "", |row| {
+                    segment(row, |buttons| {
                         option(
                             buttons,
-                            label,
-                            Operation::TouchSize(size),
-                            touch.size == size,
+                            "Normal",
+                            Operation::TouchMirror(false),
+                            !touch.mirrored,
                         );
-                    }
-                })
-            });
-            setting_row(touch_rows, "Control opacity", "", |row| {
-                slider(row, Scalar::TouchOpacity, touch.opacity)
-            });
-        });
+                        option(
+                            buttons,
+                            "Mirrored",
+                            Operation::TouchMirror(true),
+                            touch.mirrored,
+                        );
+                    })
+                });
+                setting_row(touch_rows, "Control size", "", |row| {
+                    segment(row, |buttons| {
+                        use crate::client::profile::TouchSize::*;
+                        for (label, size) in
+                            [("Small", Small), ("Normal", Normal), ("Enlarged", Enlarged)]
+                        {
+                            option(
+                                buttons,
+                                label,
+                                Operation::TouchSize(size),
+                                touch.size == size,
+                            );
+                        }
+                    })
+                });
+                setting_row(touch_rows, "Control opacity", "", |row| {
+                    slider(row, Scalar::TouchOpacity, touch.opacity)
+                });
+            },
+        );
     });
     use bevy::input::gamepad::GamepadButton::{East, LeftTrigger, RightTrigger, South, Start};
     group(list, "CONTROLLER BUTTONS", |buttons| {
@@ -840,4 +847,90 @@ pub(super) fn binding_display(value: String) -> String {
         .replace("SuperRight", "Right Super")
         .replace("BracketLeft", "[")
         .replace("BracketRight", "]")
+}
+
+fn audio(list: &mut ChildSpawnerCommands, settings: &Settings, p: &Preferences) {
+    group(list, "Sound mix", |card| {
+        for (name, hint, kind, value) in [
+            (
+                "Master volume",
+                "Everything the World plays.",
+                Scalar::MasterVolume,
+                p.volumes.master,
+            ),
+            (
+                "Effects",
+                "All action sounds, including the fine controls below.",
+                Scalar::EffectsVolume,
+                p.volumes.effects,
+            ),
+            (
+                "Ambient",
+                "Environmental beds around you.",
+                Scalar::AmbientVolume,
+                p.volumes.ambient,
+            ),
+            (
+                "Music",
+                "Occasional tracks, with silence between them.",
+                Scalar::MusicVolume,
+                p.volumes.music,
+            ),
+        ] {
+            setting_row(card, name, hint, |row| slider(row, kind, f32::from(value)));
+        }
+    });
+    disclosure(
+        list,
+        "Fine-tune sound effects",
+        settings.effects_open,
+        Operation::EffectControls,
+        |card| {
+            crate::client::menu_ui::description(
+                card,
+                "Relative to Effects. Set any sound to 0 to mute it.",
+            );
+            use tesserae_core::audio::EffectGroup::*;
+            for (name, hint, group) in [
+                (
+                    "Footsteps",
+                    "Walking and running on each Material.",
+                    Footsteps,
+                ),
+                ("Landings", "The impact when you land.", Landings),
+                (
+                    "Breaking & striking",
+                    "Removing and striking Voxels.",
+                    Breaking,
+                ),
+                ("Placing", "Voxels placed in the World.", Placing),
+                ("Eating", "Bites while eating food.", Eating),
+                ("Swimming", "Strokes while moving through water.", Swimming),
+                (
+                    "Floating water",
+                    "Gentle water movement while resting at the surface.",
+                    Floating,
+                ),
+                ("Pickups", "Items joining your Inventory.", Pickups),
+                ("Tools", "Successful measurements and refused uses.", Tools),
+                (
+                    "Hurt & death",
+                    "Feedback when you take damage or die.",
+                    Vitals,
+                ),
+            ] {
+                setting_row(card, name, hint, |row| {
+                    slider(
+                        row,
+                        Scalar::DetailVolume(group),
+                        f32::from(p.volumes.detail.get(group)),
+                    )
+                });
+            }
+        },
+    );
+    crate::client::menu_ui::description(
+        list,
+        "Apply changes, then resume to hear your mix. World audio rests while Settings is open.",
+    );
 }

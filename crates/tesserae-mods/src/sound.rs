@@ -1,20 +1,28 @@
-//! Sounds, Sound sets and `material-sounds`: checked per Mod in [`check`], then
-//! resolved by full name once every Mod has declared.
+//! Sounds, Sound sets, `material-sounds` and Soundscapes: checked per Mod in
+//! [`check`], then resolved by full name once every Mod has declared.
 
 use std::ops::RangeInclusive;
 
 use tesserae_core::MaterialId;
-use tesserae_core::audio::{Falloff, SoundCategory, SoundDef, SoundId, SoundSet, Span};
+use tesserae_core::audio::{
+    Bed, DEFAULT_SILENCE_S, Falloff, SoundCategory, SoundDef, SoundId, SoundSet, SoundscapeContext,
+    SoundscapeDef, Span,
+};
+use tesserae_core::audio::{Cause, SoundscapeId};
 
 use crate::bindings::tesserae::mods::content;
 use crate::declare::{Behaviour, NAME_RULE, valid_local};
 use crate::error::ModError;
-use crate::recording::{MAX_MUSIC_BYTES, MAX_SHORT_BYTES, MAX_WORLD_BYTES};
+use crate::recording::{MAX_AMBIENT_BYTES, MAX_MUSIC_BYTES, MAX_SHORT_BYTES, MAX_WORLD_BYTES};
 use crate::registry::{Kind, Registry};
 
 pub const MAX_SOUNDS_PER_MOD: usize = 64;
 pub const MAX_SOUND_SETS_PER_MOD: usize = 16;
 pub const MAX_RECORDINGS_PER_SOUND: usize = 8;
+pub const MAX_SOUNDSCAPES_PER_MOD: usize = 16;
+pub const MAX_BEDS_PER_SOUNDSCAPE: usize = 8;
+pub const MAX_MUSIC_PER_SOUNDSCAPE: usize = 8;
+pub const SILENCE_S: RangeInclusive<f32> = 0.0..=3600.0;
 pub const WEIGHT: RangeInclusive<u8> = 1..=16;
 pub const VOLUME: RangeInclusive<f32> = 0.0..=1.0;
 pub const PITCH: RangeInclusive<f32> = 0.5..=2.0;
@@ -31,12 +39,25 @@ pub struct Sound {
     pub recordings: Vec<Vec<u8>>,
 }
 
-/// Every Mod's Sounds in load order, so a [`SoundId`] is an index, and the
-/// Sound set each voiced Material resolved to.
+/// A declared Soundscape, named `<mod id>:<name>`.
+#[derive(Clone, PartialEq, Debug)]
+pub struct Soundscape {
+    pub name: String,
+    /// Only ever on one of the Game's.
+    pub context: Option<SoundscapeContext>,
+    pub def: SoundscapeDef,
+}
+
+/// Every Mod's Sounds and Soundscapes in load order, so a [`SoundId`] or a
+/// `SoundscapeId` is an index, and the Sound set each voiced Material resolved
+/// to.
 #[derive(Clone, PartialEq, Debug, Default)]
 pub struct Sounds {
     pub sounds: Vec<Sound>,
     pub material_sounds: Vec<(MaterialId, SoundSet)>,
+    pub soundscapes: Vec<Soundscape>,
+    pub cause_sounds: Vec<(tesserae_core::audio::Cause, SoundId)>,
+    pub biome_soundscapes: Vec<(String, Option<SoundscapeId>)>,
 }
 
 fn refusal(
@@ -58,8 +79,10 @@ fn refusal(
 /// What one Mod's rows can be refused for before any other Mod's names are known.
 pub(crate) fn check(
     mod_id: &str,
+    is_root: bool,
     sounds: &[content::SoundDef],
     sets: &[content::SoundSetDef],
+    soundscapes: &[content::SoundscapeDef],
 ) -> Result<(), ModError> {
     for (row, sound) in sounds.iter().enumerate() {
         let bad = refusal(mod_id, "sounds", row, sound.name.clone());
@@ -85,6 +108,8 @@ pub(crate) fn check(
         let effects = sound.category == content::SoundCategory::Effects;
         let max_bytes = if sound.category == content::SoundCategory::Music {
             MAX_MUSIC_BYTES
+        } else if sound.category == content::SoundCategory::Ambient {
+            MAX_AMBIENT_BYTES
         } else {
             MAX_SHORT_BYTES
         };
@@ -196,7 +221,90 @@ pub(crate) fn check(
             ));
         }
     }
+    for (row, scape) in soundscapes.iter().enumerate() {
+        let bad = refusal(mod_id, "soundscapes", row, scape.name.clone());
+        if !valid_local(&scape.name) {
+            return Err(bad("name", NAME_RULE.into()));
+        }
+        if soundscapes[..row].iter().any(|s| s.name == scape.name) {
+            return Err(bad(
+                "name",
+                "must be unique among the Mod's Soundscapes".into(),
+            ));
+        }
+        let bad = refusal(
+            mod_id,
+            "soundscapes",
+            row,
+            format!("{mod_id}:{}", scape.name),
+        );
+        if let Some(context) = scape.context {
+            if !is_root {
+                return Err(bad(
+                    "context",
+                    "only the Game's Soundscapes may carry one; a Mod's is named by a Biome".into(),
+                ));
+            }
+            if soundscapes[..row]
+                .iter()
+                .any(|s| s.context == Some(context))
+            {
+                return Err(bad(
+                    "context",
+                    format!(
+                        "`{}` already has a Soundscape; a context has at most one",
+                        context_name(context)
+                    ),
+                ));
+            }
+        }
+        for (field, len, max) in [
+            ("beds", scape.beds.len(), MAX_BEDS_PER_SOUNDSCAPE),
+            ("music", scape.music.len(), MAX_MUSIC_PER_SOUNDSCAPE),
+        ] {
+            if len > max {
+                return Err(bad(field, format!("holds {len}, at most {max}")));
+            }
+        }
+        if let Some((at, b)) = scape
+            .beds
+            .iter()
+            .enumerate()
+            .find(|(_, b)| !VOLUME.contains(&b.volume))
+        {
+            return Err(bad(
+                "beds",
+                format!(
+                    "bed {at} has volume {}, outside {}",
+                    b.volume,
+                    shown(&VOLUME)
+                ),
+            ));
+        }
+        if let Some(span) = scape.silence_s {
+            let inside = SILENCE_S.contains(&span.min) && SILENCE_S.contains(&span.max);
+            if !(inside && span.min <= span.max) {
+                return Err(bad(
+                    "silence-s",
+                    format!(
+                        "min {} and max {} must lie in {} s, min not above max",
+                        span.min,
+                        span.max,
+                        shown(&SILENCE_S)
+                    ),
+                ));
+            }
+        }
+    }
     Ok(())
+}
+
+fn context_name(context: content::SoundscapeContext) -> &'static str {
+    match context {
+        content::SoundscapeContext::Default => "default",
+        content::SoundscapeContext::Underground => "underground",
+        content::SoundscapeContext::Underwater => "underwater",
+    }
 }
 
 /// Every Mod's Sounds, Sound sets and `material-sounds`, resolved by full name
@@ -290,10 +398,140 @@ pub fn resolve_sounds(behaviours: &[Behaviour], registry: &Registry) -> Result<S
             voiced_by.push(&b.mod_id);
         }
     }
+    let mut soundscapes = Vec::new();
+    for b in behaviours {
+        for (row, scape) in b.soundscapes.iter().enumerate() {
+            let full = format!("{}:{}", b.mod_id, scape.name);
+            let bad = refusal(&b.mod_id, "soundscapes", row, full.clone());
+            let named = |field, name: &str, category| -> Result<SoundId, ModError> {
+                let at = sounds
+                    .iter()
+                    .position(|s| s.name == name)
+                    .ok_or_else(|| bad(field, format!("names no declared Sound `{name}`")))?;
+                if sounds[at].def.category != category {
+                    return Err(bad(
+                        field,
+                        format!("names `{name}`, which is not {}", category_name(category)),
+                    ));
+                }
+                Ok(SoundId(at as u16))
+            };
+            let def = SoundscapeDef {
+                beds: scape
+                    .beds
+                    .iter()
+                    .map(|bed| {
+                        Ok(Bed {
+                            sound: named("beds", &bed.sound, SoundCategory::Ambient)?,
+                            volume: bed.volume,
+                        })
+                    })
+                    .collect::<Result<_, ModError>>()?,
+                music: scape
+                    .music
+                    .iter()
+                    .map(|track| named("music", track, SoundCategory::Music))
+                    .collect::<Result<_, ModError>>()?,
+                silence_s: scape.silence_s.map_or(DEFAULT_SILENCE_S, |s| Span {
+                    min: s.min,
+                    max: s.max,
+                }),
+            };
+            soundscapes.push(Soundscape {
+                name: full,
+                context: scape.context.map(|c| match c {
+                    content::SoundscapeContext::Default => SoundscapeContext::Default,
+                    content::SoundscapeContext::Underground => SoundscapeContext::Underground,
+                    content::SoundscapeContext::Underwater => SoundscapeContext::Underwater,
+                }),
+                def,
+            });
+        }
+    }
+    let mut cause_sounds: Vec<(Cause, SoundId)> = Vec::new();
+    for b in behaviours {
+        for (row, binding) in b.cause_sounds.iter().enumerate() {
+            let (cause, named) = cause(binding.cause);
+            let bad = refusal(&b.mod_id, "cause-sounds", row, named.into());
+            if cause_sounds.iter().any(|&(c, _)| c == cause) {
+                return Err(bad("cause", "is bound more than once".into()));
+            }
+            let sound = effects(&sounds, &binding.sound).map_err(|reason| bad("sound", reason))?;
+            cause_sounds.push((cause, sound));
+        }
+    }
+    let biome_soundscapes = behaviours
+        .iter()
+        .flat_map(|b| {
+            b.biomes
+                .iter()
+                .enumerate()
+                .map(move |(row, biome)| (b, row, biome))
+        })
+        .map(|(b, row, biome)| {
+            biome
+                .soundscape
+                .as_ref()
+                .map(|name| {
+                    soundscapes
+                        .iter()
+                        .position(|s| &s.name == name)
+                        .map(|index| SoundscapeId(index as u16))
+                        .ok_or_else(|| {
+                            refusal(&b.mod_id, "biomes", row, biome.name.clone())(
+                                "soundscape",
+                                format!("unknown Soundscape `{name}`"),
+                            )
+                        })
+                })
+                .transpose()
+                .map(|soundscape| (format!("{}:{}", b.mod_id, biome.name), soundscape))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
     Ok(Sounds {
         sounds,
         material_sounds,
+        cause_sounds,
+        biome_soundscapes,
+        soundscapes,
     })
+}
+
+fn category_name(category: SoundCategory) -> &'static str {
+    match category {
+        SoundCategory::Effects => "an effects Sound",
+        SoundCategory::Ambient => "an ambient Sound",
+        SoundCategory::Music => "a music Sound",
+    }
+}
+
+/// The effects Sound named `name`, or why it cannot fill a slot.
+fn effects(sounds: &[Sound], name: &str) -> Result<SoundId, String> {
+    let at = sounds
+        .iter()
+        .position(|s| s.name == name)
+        .ok_or_else(|| format!("names no declared Sound `{name}`"))?;
+    if sounds[at].def.category != SoundCategory::Effects {
+        return Err(format!("names `{name}`, which is not an effects Sound"));
+    }
+    Ok(SoundId(at as u16))
+}
+
+/// The engine's Cause and the name a Declaration gives it.
+fn cause(cause: content::SoundCause) -> (Cause, &'static str) {
+    use content::SoundCause as C;
+    match cause {
+        C::Swimming => (Cause::Swimming, "swimming"),
+        C::Floating => (Cause::Floating, "floating"),
+        C::Burn => (Cause::Burn, "burn"),
+        C::Splash => (Cause::Splash, "splash"),
+        C::Pickup => (Cause::Pickup, "pickup"),
+        C::UseMeasured => (Cause::UseMeasured, "use-measured"),
+        C::UseRefused => (Cause::UseRefused, "use-refused"),
+        C::Eat => (Cause::Eat, "eat"),
+        C::Hurt => (Cause::Hurt, "hurt"),
+        C::Death => (Cause::Death, "death"),
+    }
 }
 
 fn def(sound: &content::SoundDef) -> SoundDef {

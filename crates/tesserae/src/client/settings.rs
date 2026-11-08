@@ -31,6 +31,7 @@ pub(super) struct Settings {
     show_reference: bool,
     /// Whether Controller's Touch controls are expanded.
     touch_open: bool,
+    effects_open: bool,
     resetting: bool,
     category: Category,
     notice: String,
@@ -104,6 +105,7 @@ pub(super) enum Operation {
     CancelReset,
     Reference,
     TouchControls,
+    EffectControls,
     ResetAction(Device, Action),
     Capture(Device, Action, usize),
     Clear(Device, Action, usize),
@@ -187,6 +189,7 @@ fn launch(
         settings.tab = match std::env::var("TESSERAE_SCREENSHOT_SETTINGS_TAB").as_deref() {
             Ok("bindings") => super::menu_ui::Tab::Bindings,
             Ok("controller") => super::menu_ui::Tab::Controller,
+            Ok("audio") => super::menu_ui::Tab::Audio,
             Ok("display") => super::menu_ui::Tab::Display,
             Ok("accessibility") => super::menu_ui::Tab::Accessibility,
             _ => super::menu_ui::Tab::Behavior,
@@ -283,3 +286,8 @@ pub(super) fn open_shortcut(
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+pub(super) fn observe_drafts_for_test(app: &mut App) {
+    app.add_observer(activate).add_observer(scalar_changed);
+}

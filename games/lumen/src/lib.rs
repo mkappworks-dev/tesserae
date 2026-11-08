@@ -68,6 +68,7 @@ fn biomes() -> Vec<BiomeDef> {
     };
     vec![
         BiomeDef {
+            soundscape: None,
             name: "garden".into(),
             temperature: 0.5,
             humidity: 0.5,
@@ -80,6 +81,7 @@ fn biomes() -> Vec<BiomeDef> {
             surface_features: vec![food::feature()],
         },
         BiomeDef {
+            soundscape: None,
             name: "arid_court".into(),
             temperature: 0.78,
             humidity: 0.25,
@@ -92,6 +94,7 @@ fn biomes() -> Vec<BiomeDef> {
             surface_features: Vec::new(),
         },
         BiomeDef {
+            soundscape: None,
             name: "frost_court".into(),
             temperature: 0.22,
             humidity: 0.65,
@@ -427,6 +430,8 @@ impl Guest for Lumen {
             sounds: Vec::new(),
             sound_sets: Vec::new(),
             material_sounds: Vec::new(),
+            soundscapes: Vec::new(),
+            cause_sounds: Vec::new(),
             ores: vec![OreDef {
                 material: "crystals:amethyst".into(),
                 min_depth_m: 8.0,

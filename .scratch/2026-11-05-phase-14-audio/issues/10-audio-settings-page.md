@@ -1,6 +1,6 @@
 # 10: Audio settings page
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 04
 
@@ -18,13 +18,13 @@ Ambient row added. It is agreed with the user before any implementation.
 ## Acceptance criteria
 
 - [x] The mockup with the Ambient row is agreed before implementation.
-- [ ] The sliders go through the same draft, Apply, Discard and Reset as every
+- [x] The sliders go through the same draft, Apply, Discard and Reset as every
       other category; after Apply, playing sounds change at once.
-- [ ] The Settings sidebar lists Audio between Display and Accessibility, with
+- [x] The Settings sidebar lists Audio between Display and Accessibility, with
       the prototype's speaker icon, and LB/RB step through it in that order.
-- [ ] F10 can open Settings at Audio as the category used last.
-- [ ] Pad, keyboard and touch reach every slider, as on the other categories.
-- [ ] Tests at the Settings drafts seam.
+- [x] F10 can open Settings at Audio as the category used last.
+- [x] Pad, keyboard and touch reach every slider, as on the other categories.
+- [x] Tests at the Settings drafts seam.
 
 ## Comments
 
@@ -39,3 +39,5 @@ Ambient row added. It is agreed with the user before any implementation.
   sounds already playing when you apply them." No "Proposed category" pill.
   Restore defaults gives 100, 100, 70 and 50; volumes apply on Apply changes,
   not while dragging.
+
+- Audio uses the shared Scalar controls and draft preferences. Regression coverage checks Apply, Discard, reset defaults, remembered Audio category, six-category order and preserving audio when resetting another page.

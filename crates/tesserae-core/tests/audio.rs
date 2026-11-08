@@ -171,6 +171,7 @@ fn each_volume_setting_maps_0_50_and_100_to_silence_half_and_whole() {
         effects: 100,
         ambient: 100,
         music: 100,
+        ..Volumes::default()
     };
     for (setting, expected) in [(0, 0.0), (50, 0.5), (100, 1.0)] {
         let master = Volumes {
@@ -215,6 +216,7 @@ fn each_volume_setting_maps_0_50_and_100_to_silence_half_and_whole() {
         effects: 50,
         ambient: 50,
         music: 50,
+        ..Volumes::default()
     };
     assert!(close(half.gain(SoundCategory::Effects, 0.8, 0.5), 0.1));
 }
@@ -245,4 +247,30 @@ fn only_settings_from_0_to_100_are_valid() {
         }
         .valid()
     );
+}
+
+#[test]
+fn detailed_effect_mix_maps_causes_independently_and_stays_bounded() {
+    use tesserae_core::audio::{Cause, EffectGroup, EffectVolumes};
+    let mut detail = EffectVolumes::default();
+    detail.set(EffectGroup::Breaking, 25);
+    detail.set(EffectGroup::Eating, 0);
+    assert_eq!(detail.for_cause(Cause::Break), 0.25);
+    assert_eq!(detail.for_cause(Cause::Hit), 0.25);
+    assert_eq!(detail.for_cause(Cause::Eat), 0.0);
+    assert_eq!(detail.for_cause(Cause::Step), 1.0);
+    detail.set(EffectGroup::Footsteps, 255);
+    assert_eq!(detail.get(EffectGroup::Footsteps), 100);
+    detail.floating = 101;
+    assert!(!detail.valid());
+}
+
+#[test]
+fn burn_uses_the_vitals_volume_trim() {
+    use tesserae_core::audio::{Cause, EffectVolumes};
+    let detail = EffectVolumes {
+        vitals: 25,
+        ..EffectVolumes::default()
+    };
+    assert_eq!(detail.for_cause(Cause::Burn), 0.25);
 }

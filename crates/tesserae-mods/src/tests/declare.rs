@@ -58,6 +58,8 @@ fn declaring(materials: &[&str], shapes: &[&str]) -> Declaration {
         sounds: Vec::new(),
         sound_sets: Vec::new(),
         material_sounds: Vec::new(),
+        soundscapes: Vec::new(),
+        cause_sounds: Vec::new(),
     }
 }
 
@@ -1419,6 +1421,7 @@ fn a_mod_that_is_not_the_game_may_not_declare_survival() {
 
 fn biome(name: &str, temperature: f32, humidity: f32) -> content::BiomeDef {
     content::BiomeDef {
+        soundscape: None,
         name: name.into(),
         temperature,
         humidity,
@@ -1526,6 +1529,7 @@ fn a_biomes_ground_resolves_to_material_ids_and_an_omitted_ground_stays_none() {
                     &["sand", "clay", "dust"],
                     vec![
                         content::BiomeDef {
+                            soundscape: None,
                             ground: ground("a:sand", "a:clay", "a:dust"),
                             ..biome("dry", 0.8, 0.1)
                         },
@@ -1540,6 +1544,7 @@ fn a_biomes_ground_resolves_to_material_ids_and_an_omitted_ground_stays_none() {
                 with_biomes(
                     &[],
                     vec![content::BiomeDef {
+                        soundscape: None,
                         ground: ground("a:dust", "a:dust", "a:sand"),
                         ..biome("cold", 0.1, 0.4)
                     }],
@@ -1581,6 +1586,7 @@ fn a_biomes_sky_and_fog_resolve_as_a_pair_and_an_omitted_pair_stays_none() {
                 &[],
                 vec![
                     content::BiomeDef {
+                        soundscape: None,
                         sky_fog: Some(content::SkyFog {
                             sky: (126, 146, 168),
                             fog: (136, 160, 190),
@@ -1615,11 +1621,13 @@ fn a_biomes_cave_scale_resolves_and_an_omitted_one_stays_none() {
                 &[],
                 vec![
                     content::BiomeDef {
+                        soundscape: None,
                         cave_scale: Some(0.0),
                         ..biome("flat", 0.8, 0.1)
                     },
                     biome("plain", 0.5, 0.5),
                     content::BiomeDef {
+                        soundscape: None,
                         cave_scale: Some(2.5),
                         ..biome("holey", 0.2, 0.9)
                     },
@@ -1643,6 +1651,7 @@ fn a_bad_cave_scale_names_the_mod_that_declared_it() {
                 with_biomes(
                     &[],
                     vec![content::BiomeDef {
+                        soundscape: None,
                         cave_scale: Some(scale),
                         ..biome("odd", 0.5, 0.5)
                     }],
@@ -1686,6 +1695,7 @@ fn a_biomes_surface_features_resolve_to_any_mods_solid_in_order() {
                     &["gourd"],
                     vec![
                         content::BiomeDef {
+                            soundscape: None,
                             surface_features: vec![
                                 feature("b:gourd", 24.0),
                                 feature("a:melon", 16.0),
@@ -1723,6 +1733,7 @@ fn a_bad_surface_feature_names_the_mod_and_the_field() {
         let mut d = with_biomes(
             &["melon"],
             vec![content::BiomeDef {
+                soundscape: None,
                 surface_features: features,
                 ..biome("field", 0.5, 0.5)
             }],
@@ -1783,6 +1794,7 @@ fn a_bad_biome_ground_names_the_mod_and_the_field() {
         let mut d = with_biomes(
             &["rock"],
             vec![content::BiomeDef {
+                soundscape: None,
                 ground,
                 ..biome("dry", 0.5, 0.5)
             }],

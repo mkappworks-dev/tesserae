@@ -95,6 +95,8 @@ fn empty() -> Declaration {
         sounds: Vec::new(),
         sound_sets: Vec::new(),
         material_sounds: Vec::new(),
+        soundscapes: Vec::new(),
+        cause_sounds: Vec::new(),
     }
 }
 

@@ -40,6 +40,8 @@ fn voiced(max_m: f32) -> App {
 
 fn voice(mut app: App, max_m: f32) -> App {
     app.insert_resource(SoundTable::new(&tesserae_mods::Sounds {
+        biome_soundscapes: vec![],
+        cause_sounds: vec![],
         sounds: vec![crack(max_m); 5],
         material_sounds: vec![
             (
@@ -60,6 +62,7 @@ fn voice(mut app: App, max_m: f32) -> App {
                 },
             ),
         ],
+        soundscapes: Vec::new(),
     }));
     app
 }

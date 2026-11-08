@@ -306,6 +306,7 @@ fn component() -> Declaration {
         ],
         biomes: vec![
             content::BiomeDef {
+                soundscape: None,
                 name: "dry".into(),
                 temperature: 0.8,
                 humidity: 0.15,
@@ -318,6 +319,7 @@ fn component() -> Declaration {
                 surface_features: Vec::new(),
             },
             content::BiomeDef {
+                soundscape: None,
                 name: "wet".into(),
                 temperature: 0.35,
                 humidity: 0.9,
@@ -394,6 +396,17 @@ fn component() -> Declaration {
                 category: content::SoundCategory::Ambient,
                 distance: None,
             },
+            content::SoundDef {
+                name: "tune".into(),
+                recordings: vec![content::Recording {
+                    bytes: super::sounds::STEREO.to_vec(),
+                    weight: 1,
+                }],
+                volume: content::SoundRange { min: 1.0, max: 1.0 },
+                pitch: content::SoundRange { min: 1.0, max: 1.0 },
+                category: content::SoundCategory::Music,
+                distance: None,
+            },
         ],
         sound_sets: vec![content::SoundSetDef {
             name: "rock".into(),
@@ -407,6 +420,34 @@ fn component() -> Declaration {
             material: "full:rock".into(),
             sound_set: "full:rock".into(),
         }],
+        soundscapes: vec![
+            content::SoundscapeDef {
+                name: "surface".into(),
+                context: Some(content::SoundscapeContext::Default),
+                beds: vec![content::AmbientBed {
+                    sound: "full:wind".into(),
+                    volume: 0.6,
+                }],
+                music: vec!["full:tune".into()],
+                silence_s: None,
+            },
+            content::SoundscapeDef {
+                name: "cave".into(),
+                context: Some(content::SoundscapeContext::Underground),
+                beds: Vec::new(),
+                music: vec!["full:tune".into()],
+                silence_s: Some(content::SoundRange {
+                    min: 20.0,
+                    max: 40.0,
+                }),
+            },
+        ],
+        cause_sounds: [content::SoundCause::Hurt, content::SoundCause::UseMeasured]
+            .map(|cause| content::CauseSound {
+                cause,
+                sound: "full:crack".into(),
+            })
+            .into(),
     }
 }
 
@@ -735,7 +776,52 @@ fn both_formats_resolve_the_same_sounds() {
     let data = crate::resolve_sounds(&[data.behaviour], &data_registry).unwrap();
     let native = crate::resolve_sounds(&[native.behaviour], &registry).unwrap();
     assert_eq!(data, native);
-    assert_eq!(data.sounds.len(), 2);
+    assert_eq!(data.sounds.len(), 3);
     assert_eq!(data.sounds[0].def.weights, [3, 1]);
     assert_eq!(data.material_sounds.len(), 1);
+    assert_eq!(data.soundscapes.len(), 2);
+    assert_eq!(data.soundscapes[1].def.silence_s.max, 40.0);
+    assert_eq!(
+        data.cause_sounds,
+        [
+            (
+                tesserae_core::audio::Cause::Hurt,
+                tesserae_core::audio::SoundId(0)
+            ),
+            (
+                tesserae_core::audio::Cause::UseMeasured,
+                tesserae_core::audio::SoundId(0)
+            ),
+        ]
+    );
+}
+
+#[test]
+fn data_biome_can_name_a_soundscape() {
+    let declaration =
+        parse("[[biomes]]\nname='dry'\ntemperature=0.8\nhumidity=0.2\nsoundscape='my-mod:wind'\n")
+            .unwrap();
+    assert_eq!(
+        declaration.biomes[0].soundscape.as_deref(),
+        Some("my-mod:wind")
+    );
+}
+
+#[test]
+fn water_motion_causes_parse_from_data() {
+    let declaration = parse("[[cause-sounds]]\ncause='swimming'\nsound='full:crack'\n[[cause-sounds]]\ncause='floating'\nsound='full:crack'\n").unwrap();
+    assert_eq!(
+        declaration.cause_sounds[0].cause,
+        content::SoundCause::Swimming
+    );
+    assert_eq!(
+        declaration.cause_sounds[1].cause,
+        content::SoundCause::Floating
+    );
+}
+
+#[test]
+fn burn_cause_parses_from_data() {
+    let declaration = parse("[[cause-sounds]]\ncause='burn'\nsound='full:fire'\n").unwrap();
+    assert_eq!(declaration.cause_sounds[0].cause, content::SoundCause::Burn);
 }

@@ -21,6 +21,7 @@ use super::tool::{UseOutcome, UseRefusal};
 use super::world_state::ChunkStore;
 use crate::session::SessionApp;
 use crate::world::WorldSettings;
+use tesserae_core::audio::Cause;
 
 /// Health and hunger in points, air in seconds.
 #[derive(Component, Clone, Copy, PartialEq, Debug)]
@@ -120,10 +121,17 @@ struct Meal {
     bites: u32,
 }
 
+#[derive(Resource, Default)]
+pub(super) struct HurtFeedback {
+    remaining_s: f32,
+    died: bool,
+}
+
 pub(crate) fn plugin(app: &mut App) {
     app.add_session_message::<VitalsChanged>()
         .add_player_intent::<EatIntent>()
         .init_session_resource::<Eating>()
+        .init_session_resource::<HurtFeedback>()
         .add_session_message::<UseOutcome>()
         .add_session_systems(
             FixedPreUpdate,
@@ -190,6 +198,7 @@ fn announce(
 }
 
 pub(super) fn eat(
+    (mut audio, position): (super::sound::Emitter, Single<&Player>),
     mut intents: MessageReader<EatIntent>,
     survival: Res<Survival>,
     items: Option<Res<Items>>,
@@ -212,6 +221,9 @@ pub(super) fn eat(
             if m.bites == 0 && inventory.spend(&m.item, 1).is_err() {
                 m.elapsed_s = EAT_S;
                 break;
+            }
+            if m.bites == 0 {
+                audio.emit(Cause::Eat, position.eye());
             }
             vitals.hunger = (vitals.hunger + m.food / EAT_BITES as f32).min(max);
             m.bites += 1;
@@ -247,6 +259,7 @@ pub(super) fn eat(
 }
 
 pub(super) fn tick(
+    (mut audio, mut feedback): (super::sound::Emitter, ResMut<HurtFeedback>),
     survival: Res<Survival>,
     player: Single<(&mut Player, &PlayerMode, &mut Vitals, &mut LastDamage)>,
     (store, tables, world): (Res<ChunkStore>, Res<ContentTables>, Res<WorldSettings>),
@@ -258,12 +271,19 @@ pub(super) fn tick(
     let dt = time.delta_secs();
     // Taken in Creative too, so a landing there never hurts later.
     let fall_m = player.take_fall_m();
-    if !mode.survival() || status.is_some_and(|s| s.modal()) {
+    if !mode.survival() || vitals.health <= 0.0 || status.is_some_and(|s| s.modal()) {
         return;
     }
+    if feedback.died {
+        feedback.remaining_s = 0.0;
+        feedback.died = false;
+    }
+    feedback.remaining_s = (feedback.remaining_s - dt).max(0.0);
+    let mut damaged = false;
     let mut now = *vitals;
     let mut hurt = |now: &mut Vitals, damage: f32, cause: DamageCause| {
         if damage > 0.0 {
+            damaged = true;
             now.health -= damage;
             last.set_if_neq(LastDamage(Some(cause)));
         }
@@ -305,6 +325,14 @@ pub(super) fn tick(
         );
     } else if now.hunger >= rules.regeneration_hunger {
         now.health += rules.regeneration_per_s * dt;
+    }
+    if damaged && feedback.remaining_s == 0.0 {
+        audio.emit(Cause::Hurt, player.eye());
+        feedback.remaining_s = tesserae_core::audio::HURT_FEEDBACK_INTERVAL_S;
+    }
+    if vitals.health > 0.0 && now.health <= 0.0 {
+        audio.emit(Cause::Death, player.eye());
+        feedback.died = true;
     }
     now.health = now.health.clamp(0.0, rules.max_health);
     now.hunger = now.hunger.clamp(0.0, rules.max_hunger);
@@ -976,5 +1004,254 @@ mod tests {
             }
         );
         assert_eq!(last_damage(&mut app), None);
+    }
+    #[test]
+    fn lethal_falls_emit_hurt_then_death_and_creative_is_silent() {
+        use super::super::sound::{SoundEvent, SoundTable};
+        use tesserae_core::audio::{Cause, SoundId};
+        #[derive(Resource, Default)]
+        struct Heard(Vec<Cause>);
+        for mode in [GameMode::Survival, GameMode::Creative] {
+            let mut app = app(1.0, 2.0, Vec3::new(4.0, 12.0, 4.0), mode);
+            set_vitals(&mut app, 1.0, 20.0);
+            let sounds = tesserae_mods::Sounds {
+                cause_sounds: vec![(Cause::Hurt, SoundId(0)), (Cause::Death, SoundId(1))],
+                ..default()
+            };
+            app.insert_resource(SoundTable::new(&sounds))
+                .add_message::<SoundEvent>()
+                .init_resource::<Heard>();
+            app.add_systems(
+                Update,
+                |mut events: MessageReader<SoundEvent>, mut heard: ResMut<Heard>| {
+                    heard.0.extend(events.read().map(|event| event.cause));
+                },
+            );
+            seconds(&mut app, 4.0);
+            let heard = &app.world().resource::<Heard>().0;
+            if mode == GameMode::Creative {
+                assert!(heard.is_empty());
+            } else {
+                assert_eq!(heard, &[Cause::Hurt, Cause::Death]);
+            }
+        }
+    }
+    #[test]
+    fn entering_hot_fluid_emits_burn_once_and_leaving_is_quiet() {
+        use super::super::{
+            entities::Pickup,
+            sound::{SoundEvent, SoundTable},
+        };
+        use tesserae_core::audio::{Cause, SoundId};
+        let mut app = lake(
+            1.0,
+            (2.0, 8.0),
+            Vec3::new(4.0, 12.0, 4.0),
+            GameMode::Creative,
+        );
+        let material = tesserae_core::testgen::fixtures().water;
+        let mut tables = crate::server::fixture_tables();
+        let mut fluid = *tables.fluids.get(material).unwrap();
+        fluid.extinguishes = false;
+        fluid.heat = Some(tesserae_core::Heat {
+            strength: 8,
+            reach_m: 1.0,
+        });
+        tables.fluids = tesserae_core::FluidTable::builtin();
+        tables.fluids.register(material, fluid).unwrap();
+        let sounds = tesserae_mods::Sounds {
+            cause_sounds: vec![
+                (Cause::Splash, SoundId(0)),
+                (Cause::Burn, SoundId(1)),
+                (Cause::Swimming, SoundId(2)),
+                (Cause::Floating, SoundId(3)),
+            ],
+            ..default()
+        };
+        app.insert_resource(ContentTables(Arc::new(tables)))
+            .insert_resource(SoundTable::new(&sounds))
+            .add_message::<SoundEvent>()
+            .add_message::<Pickup>()
+            .add_plugins(super::super::causal_sound::plugin);
+        app.update();
+        put_eye(&mut app, Vec3::new(4.0, 6.0, 4.0));
+        app.update();
+        let events: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<SoundEvent>>()
+            .drain()
+            .collect();
+        assert_eq!(
+            events
+                .iter()
+                .map(|event| (event.cause, event.sound))
+                .collect::<Vec<_>>(),
+            [(Cause::Burn, SoundId(1))]
+        );
+        for _ in 0..4 {
+            app.update();
+            assert_eq!(
+                app.world_mut()
+                    .resource_mut::<Messages<SoundEvent>>()
+                    .drain()
+                    .count(),
+                0
+            );
+        }
+        put_eye(&mut app, Vec3::new(4.0, 12.0, 4.0));
+        app.update();
+        assert_eq!(
+            app.world_mut()
+                .resource_mut::<Messages<SoundEvent>>()
+                .drain()
+                .count(),
+            0
+        );
+    }
+
+    #[test]
+    fn entering_and_leaving_water_emit_one_splash_each() {
+        use super::super::{
+            entities::Pickup,
+            sound::{SoundEvent, SoundTable},
+        };
+        use tesserae_core::audio::{Cause, SoundId};
+        let mut app = lake(
+            1.0,
+            (2.0, 8.0),
+            Vec3::new(4.0, 12.0, 4.0),
+            GameMode::Creative,
+        );
+        let sounds = tesserae_mods::Sounds {
+            cause_sounds: vec![(Cause::Splash, SoundId(0))],
+            ..default()
+        };
+        app.insert_resource(SoundTable::new(&sounds))
+            .add_message::<SoundEvent>()
+            .add_message::<Pickup>()
+            .add_plugins(super::super::causal_sound::plugin);
+        app.update();
+        assert_eq!(
+            app.world_mut()
+                .resource_mut::<Messages<SoundEvent>>()
+                .drain()
+                .count(),
+            0
+        );
+        for eye in [Vec3::new(4.0, 6.0, 4.0), Vec3::new(4.0, 12.0, 4.0)] {
+            put_eye(&mut app, eye);
+            app.update();
+            let events: Vec<_> = app
+                .world_mut()
+                .resource_mut::<Messages<SoundEvent>>()
+                .drain()
+                .collect();
+            assert_eq!(events.len(), 1);
+            assert_eq!(events[0].cause, Cause::Splash);
+            app.update();
+            assert_eq!(
+                app.world_mut()
+                    .resource_mut::<Messages<SoundEvent>>()
+                    .drain()
+                    .count(),
+                0
+            );
+        }
+    }
+    #[test]
+    fn eating_emits_once_when_food_is_spent() {
+        use super::super::sound::{SoundEvent, SoundTable};
+        use tesserae_core::audio::{Cause, SoundId};
+        #[derive(Resource, Default)]
+        struct Heard(usize);
+        let mut app = field(no_drain(), GameMode::Survival);
+        pantry(&mut app, &[("m:bread", 2)]);
+        set_vitals(&mut app, 20.0, 10.0);
+        let sounds = tesserae_mods::Sounds {
+            cause_sounds: vec![(Cause::Eat, SoundId(0))],
+            ..default()
+        };
+        app.insert_resource(SoundTable::new(&sounds))
+            .add_message::<SoundEvent>()
+            .init_resource::<Heard>();
+        app.add_systems(
+            Update,
+            |mut events: MessageReader<SoundEvent>, mut heard: ResMut<Heard>| {
+                heard.0 += events.read().filter(|e| e.cause == Cause::Eat).count();
+            },
+        );
+        eat(&mut app);
+        seconds(&mut app, EAT_S + 0.1);
+        assert_eq!(app.world().resource::<Heard>().0, 1);
+    }
+    #[test]
+    fn continuous_contact_keeps_damage_rate_but_paces_hurt_and_emits_one_death() {
+        use super::super::sound::{SoundEvent, SoundTable};
+        use tesserae_core::audio::{Cause, HURT_FEEDBACK_INTERVAL_S, SoundId};
+        #[derive(Resource, Default)]
+        struct Heard(Vec<(Cause, f64)>);
+        for mode in [GameMode::Survival, GameMode::Creative] {
+            let harmful = Survival::new(default(), vec![(water(), 4.0)]);
+            let mut app = lake_with(1.0, (2.0, 3.0), Vec3::new(4.0, 3.62, 4.0), mode, harmful);
+            let sounds = tesserae_mods::Sounds {
+                cause_sounds: vec![(Cause::Hurt, SoundId(0)), (Cause::Death, SoundId(1))],
+                ..default()
+            };
+            app.insert_resource(SoundTable::new(&sounds))
+                .add_message::<SoundEvent>()
+                .init_resource::<Heard>();
+            app.add_systems(
+                Update,
+                |mut events: MessageReader<SoundEvent>,
+                 mut heard: ResMut<Heard>,
+                 time: Res<Time<Fixed>>| {
+                    heard.0.extend(
+                        events
+                            .read()
+                            .map(|event| (event.cause, time.elapsed_secs_f64())),
+                    );
+                },
+            );
+            seconds(&mut app, 1.5);
+            let expected = if mode == GameMode::Survival {
+                14.0
+            } else {
+                20.0
+            };
+            assert!(close(vitals(&mut app).health, expected));
+            seconds(&mut app, 5.0);
+            let heard = &app.world().resource::<Heard>().0;
+            if mode == GameMode::Creative {
+                assert!(heard.is_empty());
+                continue;
+            }
+            let hurt: Vec<_> = heard
+                .iter()
+                .filter(|(cause, _)| *cause == Cause::Hurt)
+                .map(|(_, time)| *time)
+                .collect();
+            assert!((6..=8).contains(&hurt.len()), "{hurt:?}");
+            for pair in hurt.windows(2) {
+                assert!(pair[1] - pair[0] >= f64::from(HURT_FEEDBACK_INTERVAL_S) - 1e-5);
+            }
+            assert_eq!(
+                heard
+                    .iter()
+                    .filter(|(cause, _)| *cause == Cause::Death)
+                    .count(),
+                1
+            );
+            assert_eq!(heard.last().unwrap().0, Cause::Death);
+            let before = heard.len();
+            set_vitals(&mut app, 20.0, HELD_HUNGER);
+            seconds(&mut app, 0.03125);
+            let heard = &app.world().resource::<Heard>().0;
+            assert_eq!(
+                heard.len(),
+                before + 1,
+                "the next life gets immediate feedback"
+            );
+            assert_eq!(heard.last().unwrap().0, Cause::Hurt);
+        }
     }
 }

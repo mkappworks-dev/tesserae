@@ -410,6 +410,11 @@ pub(super) fn select_visuals(
 }
 #[derive(Component, Clone, Copy)]
 pub(in crate::client) enum Scalar {
+    DetailVolume(tesserae_core::audio::EffectGroup),
+    MasterVolume,
+    EffectsVolume,
+    AmbientVolume,
+    MusicVolume,
     Mouse,
     Scroll,
     PadLook,
@@ -421,6 +426,11 @@ pub(in crate::client) enum Scalar {
 impl Scalar {
     fn range(self) -> std::ops::RangeInclusive<f32> {
         match self {
+            Self::DetailVolume(_)
+            | Self::MasterVolume
+            | Self::EffectsVolume
+            | Self::AmbientVolume
+            | Self::MusicVolume => 0.0..=100.0,
             Self::Mouse | Self::Scroll => 0.25..=3.0,
             Self::PadLook | Self::TouchLook => crate::client::profile::PAD_SENSITIVITY,
             Self::TouchOpacity => crate::client::profile::TOUCH_OPACITY,
@@ -429,6 +439,11 @@ impl Scalar {
     }
     fn step(self) -> f32 {
         match self {
+            Self::DetailVolume(_)
+            | Self::MasterVolume
+            | Self::EffectsVolume
+            | Self::AmbientVolume
+            | Self::MusicVolume => 1.0,
             Self::MoveDeadzone | Self::LookDeadzone | Self::TouchOpacity => 0.01,
             _ => 0.05,
         }
@@ -564,6 +579,11 @@ pub(super) fn scalar_changed(
         .entity(event.source)
         .insert(bevy::ui_widgets::SliderValue(value));
     match kind {
+        Scalar::DetailVolume(group) => preferences.volumes.detail.set(*group, value.round() as u8),
+        Scalar::MasterVolume => preferences.volumes.master = value.round() as u8,
+        Scalar::EffectsVolume => preferences.volumes.effects = value.round() as u8,
+        Scalar::AmbientVolume => preferences.volumes.ambient = value.round() as u8,
+        Scalar::MusicVolume => preferences.volumes.music = value.round() as u8,
         Scalar::Mouse => preferences.sensitivity = value * 0.003,
         Scalar::Scroll => preferences.scroll_sensitivity = value,
         Scalar::PadLook => preferences.pad.look_sensitivity = value,
@@ -646,6 +666,7 @@ pub(super) fn disclosure(
     parent: &mut ChildSpawnerCommands,
     title: &str,
     open: bool,
+    operation: Operation,
     content: impl FnOnce(&mut ChildSpawnerCommands),
 ) {
     use crate::client::menu_ui as ui;
@@ -666,7 +687,7 @@ pub(super) fn disclosure(
                 .spawn((
                     bevy::ui_widgets::Button,
                     bevy::input_focus::tab_navigation::TabIndex(0),
-                    Operation::TouchControls,
+                    operation,
                     ui::Bare,
                     Node {
                         column_gap: Val::Px(6.0),
@@ -968,10 +989,12 @@ pub(super) fn modal(commands: &mut Commands, settings: &Settings) {
                         } else if settings.resetting {
                             (
                                 "Restore settings defaults?",
-                                if settings.tab == crate::client::menu_ui::Tab::Controller {
+                                if settings.tab == crate::client::menu_ui::Tab::Audio {
+                                    "This resets your draft audio volumes. Apply to keep them."
+                                } else if settings.tab == crate::client::menu_ui::Tab::Controller {
                                     "This resets your draft controller and touch preferences. Apply to keep them."
                                 } else {
-                                    "This resets your draft preferences, except the controller's. Apply to keep them."
+                                    "This resets your draft preferences, except controller and audio settings. Apply to keep them."
                                 }
                                 .into(),
                             )

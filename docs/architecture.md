@@ -240,6 +240,19 @@ viewmodel and the avatar's right arm alike and is held still under reduced
 motion. Dropping an Item is the Server's `InventoryIntent::Drop`, which throws
 it ahead of the Player with a pickup delay, outside the undo journal.
 
+Sound follows the same rule. The Server decides that a Sound event happens; the
+Client only plays it. Ambience is the Server's too: each tick it works out the
+Eye's context (underwater while the Eye is inside a fluid, underground while the
+Eye's Voxel has no sky light, then the Eye's Biome override, else the open
+world), and sends the Soundscape that applies (`HereSoundscape`) only when it
+changes, as it sends the sky and fog. The Client loops that Soundscape's beds,
+crossfading them over 2 s, and plays its music from the core scheduler
+(`tesserae_core::audio::Music`), which picks each track and silence from a seed.
+Menu, Settings and save modals fade World playback out using real time, pause
+background sinks and the music scheduler, and discard action sounds rather than
+queueing them for resume. This is a Client playback policy; it does not pause
+authoritative simulation.
+
 ## The three invariants this diagram exists to protect
 
 Each of these is a mistake that will not look wrong in review.

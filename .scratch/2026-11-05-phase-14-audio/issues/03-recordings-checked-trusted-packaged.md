@@ -42,3 +42,9 @@ spec is enforced and refused with the Mod and field named.
 - Checked with `cargo test -p tesserae-mods`, the `author` tests in `tesserae`
   and `cargo clippy --workspace --all-targets -- -D warnings`; the full suite
   was stopped by host load and runs on the integration branch.
+
+- PR validation: the Terra boundary guard now permits literal `include_bytes!`
+  only for existing `.ogg` files that resolve inside Terra's own audio folder.
+  Engine source, text includes and computed include paths remain refused;
+  negative probes cover all three. This permits Game-owned recordings while
+  retaining the WIT-only Engine boundary.

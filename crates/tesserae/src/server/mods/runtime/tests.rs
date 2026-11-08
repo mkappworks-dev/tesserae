@@ -1303,13 +1303,13 @@ fn terra_contract_content_build_and_scenarios_reach_real_voxels_and_light() {
             .init_resource::<crate::server::fluids::FluidSim>()
             .add_plugins(super::super::plugin);
         assert_eq!(h.app.world().resource::<ContentTables>().shapes.len(), 5);
-        #[cfg(feature = "dev")]
         h.app
-            .insert_resource(crate::server::world_state::SpawnPoint::new(Vec3::new(
-                0.0, 28.0, 0.0,
-            )));
+            .insert_resource(crate::server::world_state::SpawnPoint::for_tests(
+                Vec3::new(0.0, 28.0, 0.0),
+            ));
         h.call();
-        assert!(h.log(0).is_empty());
+        let log = h.log(0);
+        assert!(log.is_empty(), "{log}");
         assert_eq!(h.app.world().resource::<ModJobs>().tick, 0);
         // The site, the stage on it, what its fluids fall into and the spawn
         // neighbourhood.

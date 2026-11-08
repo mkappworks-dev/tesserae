@@ -1,4 +1,4 @@
-Status: ready-for-agent
+Status: ready-for-human
 
 # Phase 14: Audio
 
@@ -305,7 +305,8 @@ demo Games stay silent, showing that sound is optional.
   the three contexts, and a Soundscape for each of its Biomes that should sound
   different. Recordings are CC0 only (Kenney,
   OpenGameArt or freesound entries that are CC0), converted to Ogg Vorbis
-  locally, about 2 MiB in all. Each recording is listed in a `CREDITS.md` in
+  locally, within the 32 MiB referenced World budget. Longer beds and full music
+  tracks replace the initial 2 MiB target. Each recording is listed in a `CREDITS.md` in
   Terra's folder with its source URL and licence. No CC-BY, no non-commercial
   licence, no Sonniss bundle.
 - The data-only Mod guide, the authoring guide's schema, `architecture.md`,
@@ -374,3 +375,101 @@ demo Games stay silent, showing that sound is optional.
   loop (#57) merged. Both appended to the 0.3 `declaration` and took ADR-0022 to
   ADR-0024, so this step's record is ADR-0025. Carried is retired: Pickup fills
   the Inventory.
+
+## Follow-up: Biome recordings and water movement
+
+Terra's temperate, dry and cold Biomes now use distinct Ambient recordings:
+birds/breeze, band-limited dry wind, and lower cold gusts. Dry and cold are
+separately processed variants of a credited CC0 wind loop. Music remains shared.
+The Server also emits Game-bound `swimming` and `floating` Causes: strokes follow
+1.2 m of movement, and floating water sounds repeat at seeded 6–12 s intervals while stationary
+at the surface. Flying, grounded wading, death and paused play emit neither.
+See ticket 12 for validation and the updated authoring guides for bindings.
+
+## Approved audio comfort revision
+
+The user approved the detailed Audio settings mockup in ticket 13. The engine
+now persists ten per-action trims and applies them to already-playing effects.
+Terra uses long seam-edited beds and complete independent music tracks, with
+quiet, varied floating details and smooth ambience ducking during audible
+music. Old profiles retain neutral trims. The 32 MiB referenced World budget
+remains; Ambient has its own 4 MiB file ceiling. See
+[validation](comfort-validation.md) for measurements and the listening checks
+that remain open. No new dependencies, commit or push.
+
+## Listening feedback: green-area tone and menu noise
+
+The user confirmed the “ooo” remains with Music muted and occurs in green
+areas. Replace the temperate bird-and-synth bed with neutral field-recorded
+wind/rustle; remove the bird-containing music track from selection. Future bird
+calls belong to nearby animal entities and positional Server events, not global
+Biome beds. No animals are added by this change.
+
+Menu, Settings and save modals fade World playback down over 0.1 s in real time,
+pause background sinks and music scheduling, and discard one-shots rather than
+replaying stale actions. Resume fades audio back in without restarting the
+track. Music volume changes go through Apply and become audible after resuming;
+Ambient independently controls environmental beds. The Music-slider regression
+covers draft change through Apply to the existing track, at 0 and 100.
+
+## Listening feedback: sustained lava damage
+
+User found the lava damage/death sound and feedback animation too rapid and
+short. Health loss remains continuous and unchanged, but repeated `hurt` audio
+is limited to one event per 0.75 s. Death remains a single transition event;
+dead Players do not emit more damage feedback, and the next life starts fresh.
+The Client injury flash lasts 0.65 s without restarting on every decrement;
+low-health edge pulses take 3 s and health tile pulses 1.5 s. Reduced motion
+keeps its existing still presentation. Terra's death cue has a single roughly
+1.56 s release at fixed pitch. These are feedback timings, not invulnerability
+frames or a change to how fast lava kills a Player.
+
+## Listening feedback: surface movement
+
+Forward motion while floating uses Swimming feedback. The distance-only
+1.2 m trigger overlapped short splash clips at higher speeds. It now requires
+roughly 3 m of travel and a seeded 1.6–2.2 s cooldown; accumulating extra travel
+cannot queue bursts, and brief stops or water exit/re-entry cannot reset the
+cooldown. Terra supplies three quiet 1.2 s water gestures; even at minimum
+pitch they end before the next stroke. Idle Floating retains its 6–12 s gaps.
+Fluid physics and actual swimming speed are unchanged.
+
+## Listening feedback: footsteps and stone removal
+
+Walking must use real footstep recordings rather than clones of material break
+sounds. Terra uses varied CC0 stone and grass/sand steps, and quiet generic shoe
+steps for wood and metal. Stone removal uses three actual rock-breaking takes
+instead of a door closing. Shape sharp attacks and tails and keep the walking
+cadence, Server events, controls and movement unchanged. Existing water feedback
+is outside this asset correction. Listening remains a human acceptance check.
+
+## Startup crash: fractional coarse water
+
+A reported async Chunk palette panic exposed a coarse-water rendering hazard:
+looking up the cell under a partial-height surface truncates the height before
+subtracting one. A bottom-row surface underflows; higher fractional surfaces
+read the preceding row. Round the top upward before subtracting one, preserving
+exact integer tops and the distinction between generated lakes and moved fluid.
+Regressions must check bottom-row partial water, every row and full surfaces,
+and preserve flowed-water geometry. This correction changes no audio behavior.
+
+## Listening feedback: falling into water
+
+Use a real water-impact recording for the Server's Splash event, with a clear
+initial splash and settling water tail. Give it its own Terra sound rather than
+sharing the water Material's short interaction sample. Keep swimming, floating,
+water footsteps, event timing and settings unchanged. Use CC0 field-recorded
+water, mono 44.1 kHz Vorbis, without pitch alteration. Listening acceptance
+remains open until the user tries falling into water in game.
+
+## Lava is not water
+
+Fluid entry must distinguish declared heat-emitting fluids from cold fluids.
+The Server emits a new `burn` Cause once on hot-fluid entry, including a direct
+water-to-lava transition, rather than Splash. Hot-fluid exit is quiet; cold
+fluid entry/exit keeps Splash. Initial spawn in fluid keeps the existing silent
+initialization. Hot fluids do not produce Swimming/Floating or select underwater
+water ambience. Terra binds `burn` to a credited CC0 fire recording at natural
+pitch and uses its burning material set for lava contacts. Health damage and
+hurt/death pacing remain unchanged. Append `burn` to unreleased 0.3 only; older
+contract lines adapt without it, and an unbound burn Cause stays silent.

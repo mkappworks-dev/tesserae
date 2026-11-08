@@ -1,7 +1,7 @@
-//! Sounds, Sound sets and `material-sounds` resolve across Mods, and every
-//! refusal names the Mod and the field.
+//! Sounds, Sound sets, `material-sounds` and `cause-sounds` resolve across
+//! Mods, and every refusal names the Mod and the field.
 
-use tesserae_core::audio::{Falloff, SoundCategory, SoundId, SoundSet, Span};
+use tesserae_core::audio::{Cause, Falloff, SoundCategory, SoundId, SoundSet, Span};
 use tesserae_core::{MaterialId, Tables};
 
 use crate::bindings::tesserae::mods::content::{self, Declaration};
@@ -10,7 +10,7 @@ use crate::{Applied, Kind, ModError, Registry, Sounds, apply, resolve_sounds};
 pub(super) const MONO: &[u8] = include_bytes!("../../tests/fixtures/sounds/mono.ogg");
 pub(super) const STEREO: &[u8] = include_bytes!("../../tests/fixtures/sounds/stereo.ogg");
 
-fn empty() -> Declaration {
+pub(super) fn empty() -> Declaration {
     Declaration {
         materials: Vec::new(),
         shapes: Vec::new(),
@@ -28,6 +28,8 @@ fn empty() -> Declaration {
         sounds: Vec::new(),
         sound_sets: Vec::new(),
         material_sounds: Vec::new(),
+        soundscapes: Vec::new(),
+        cause_sounds: Vec::new(),
     }
 }
 
@@ -44,7 +46,7 @@ fn stone() -> content::MaterialDef {
     }
 }
 
-fn effect(name: &str) -> content::SoundDef {
+pub(super) fn effect(name: &str) -> content::SoundDef {
     content::SoundDef {
         name: name.into(),
         recordings: vec![content::Recording {
@@ -61,7 +63,7 @@ fn effect(name: &str) -> content::SoundDef {
     }
 }
 
-fn ambience(name: &str) -> content::SoundDef {
+pub(super) fn ambience(name: &str) -> content::SoundDef {
     content::SoundDef {
         recordings: vec![content::Recording {
             bytes: STEREO.to_vec(),
@@ -102,12 +104,13 @@ fn rock_mod() -> Declaration {
     }
 }
 
+/// The first of `mods` is the Game.
 fn load(mods: Vec<(&str, Declaration)>) -> Result<(Registry, Sounds), ModError> {
     let mut tables = Tables::builtin();
     let mut registry = Registry::builtin();
     let mut behaviours = Vec::new();
-    for (id, d) in mods {
-        let applied: Applied = apply(d, id, &mut tables, &mut registry, false)?;
+    for (at, (id, d)) in mods.into_iter().enumerate() {
+        let applied: Applied = apply(d, id, &mut tables, &mut registry, at == 0)?;
         behaviours.push(applied.behaviour);
     }
     let sounds = resolve_sounds(&behaviours, &registry)?;
@@ -195,7 +198,7 @@ fn refused(mods: Vec<(&str, Declaration)>) -> String {
     load(mods).expect_err("refused").to_string()
 }
 
-fn assert_names(error: &str, parts: &[&str]) {
+pub(super) fn assert_names(error: &str, parts: &[&str]) {
     for part in parts {
         assert!(error.contains(part), "`{part}` missing from: {error}");
     }
@@ -398,8 +401,8 @@ fn recorded(category: content::SoundCategory, bytes: Vec<u8>) -> Declaration {
 #[test]
 fn a_recording_over_its_categorys_limit_is_refused_by_name() {
     use content::SoundCategory::{Ambient, Effects, Music};
-    for (category, max) in [(Effects, 512 << 10), (Ambient, 512 << 10), (Music, 8 << 20)] {
-        if category == Music {
+    for (category, max) in [(Effects, 512 << 10), (Ambient, 4 << 20), (Music, 8 << 20)] {
+        if category != Effects {
             load(vec![("a", recorded(category, padded((512 << 10) + 1)))]).unwrap();
         }
         load(vec![("a", recorded(category, padded(max)))]).unwrap();
@@ -627,5 +630,109 @@ fn a_world_holds_at_most_32_mib_of_recordings_across_its_mods() {
     assert_names(
         &refused(mods),
         &["`e`", "sounds", "e:crack", "recordings", "33554432"],
+    );
+}
+
+fn bind(cause: content::SoundCause, sound: &str) -> content::CauseSound {
+    content::CauseSound {
+        cause,
+        sound: sound.into(),
+    }
+}
+
+#[test]
+fn the_game_binds_non_voxel_causes_to_sounds_by_full_name() {
+    let game = Declaration {
+        sounds: vec![effect("ouch"), effect("crunch")],
+        cause_sounds: vec![
+            bind(content::SoundCause::Hurt, "a:ouch"),
+            bind(content::SoundCause::Eat, "b:munch"),
+            bind(content::SoundCause::UseRefused, "a:crunch"),
+        ],
+        ..empty()
+    };
+    let food = Declaration {
+        sounds: vec![effect("munch")],
+        ..empty()
+    };
+    let (_, sounds) = load(vec![("a", game), ("b", food)]).unwrap();
+    assert_eq!(
+        sounds.cause_sounds,
+        vec![
+            (Cause::Hurt, SoundId(0)),
+            (Cause::Eat, SoundId(2)),
+            (Cause::UseRefused, SoundId(1)),
+        ]
+    );
+}
+
+#[test]
+fn every_cause_binds_from_a_component() {
+    use content::SoundCause as C;
+    let causes = [
+        (C::Splash, Cause::Splash),
+        (C::Burn, Cause::Burn),
+        (C::Pickup, Cause::Pickup),
+        (C::UseMeasured, Cause::UseMeasured),
+        (C::UseRefused, Cause::UseRefused),
+        (C::Eat, Cause::Eat),
+        (C::Hurt, Cause::Hurt),
+        (C::Death, Cause::Death),
+        (C::Swimming, Cause::Swimming),
+        (C::Floating, Cause::Floating),
+    ];
+    let game = Declaration {
+        sounds: vec![effect("thud")],
+        cause_sounds: causes.iter().map(|&(c, _)| bind(c, "a:thud")).collect(),
+        ..empty()
+    };
+    let (_, sounds) = load(vec![("a", game)]).unwrap();
+    let bound: Vec<_> = causes.iter().map(|&(_, c)| (c, SoundId(0))).collect();
+    assert_eq!(sounds.cause_sounds, bound);
+}
+
+#[test]
+fn cause_sounds_from_a_mod_that_is_not_the_game_are_refused_by_name() {
+    let binding = Declaration {
+        sounds: vec![effect("ouch")],
+        cause_sounds: vec![bind(content::SoundCause::Hurt, "b:ouch")],
+        ..empty()
+    };
+    assert_names(
+        &refused(vec![("a", empty()), ("b", binding)]),
+        &["`b`", "cause-sounds", "only the Game"],
+    );
+}
+
+#[test]
+fn a_cause_bound_twice_or_to_an_unknown_or_non_effects_sound_is_refused() {
+    let twice = Declaration {
+        sounds: vec![effect("ouch"), effect("oof")],
+        cause_sounds: vec![
+            bind(content::SoundCause::Hurt, "a:ouch"),
+            bind(content::SoundCause::Hurt, "a:oof"),
+        ],
+        ..empty()
+    };
+    assert_names(
+        &refused(vec![("a", twice)]),
+        &["`a`", "cause-sounds", "hurt", "once"],
+    );
+    let unknown = Declaration {
+        cause_sounds: vec![bind(content::SoundCause::Death, "a:gone")],
+        ..empty()
+    };
+    assert_names(
+        &refused(vec![("a", unknown)]),
+        &["`a`", "cause-sounds", "death", "sound", "a:gone"],
+    );
+    let ambient = Declaration {
+        sounds: vec![ambience("wind")],
+        cause_sounds: vec![bind(content::SoundCause::Splash, "a:wind")],
+        ..empty()
+    };
+    assert_names(
+        &refused(vec![("a", ambient)]),
+        &["`a`", "cause-sounds", "splash", "a:wind", "effects"],
     );
 }

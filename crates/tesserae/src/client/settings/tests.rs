@@ -707,3 +707,126 @@ fn a_dropdown_shows_its_choice_opens_on_it_and_closes_on_a_click_outside() {
     app.update();
     assert_eq!(display(&mut app), Display::None);
 }
+
+#[test]
+fn audio_draft_applies_discards_resets_and_remembers_category() {
+    use crate::client::menu_ui::Tab;
+    use bevy::ui_widgets::{SliderValue, ValueChange};
+    let mut app = app();
+    activate_operation(&mut app, Operation::Navigate(Tab::Audio));
+    let source = app
+        .world_mut()
+        .spawn((Scalar::AmbientVolume, SliderValue(70.0)))
+        .id();
+    app.world_mut().trigger(ValueChange {
+        source,
+        value: 23.0_f32,
+        is_final: true,
+    });
+    app.update();
+    assert_eq!(app.world().resource::<Preferences>().volumes.ambient, 70);
+    activate_operation(&mut app, Operation::Apply);
+    assert_eq!(app.world().resource::<Preferences>().volumes.ambient, 23);
+    activate_operation(&mut app, Operation::Reset);
+    activate_operation(&mut app, Operation::ConfirmReset);
+    assert_eq!(
+        app.world()
+            .resource::<Settings>()
+            .draft
+            .as_ref()
+            .unwrap()
+            .1
+            .volumes
+            .ambient,
+        70
+    );
+    assert_eq!(app.world().resource::<Preferences>().volumes.ambient, 23);
+    activate_operation(&mut app, Operation::Discard);
+    assert_eq!(app.world().resource::<Preferences>().volumes.ambient, 23);
+    assert_eq!(app.world().resource::<Settings>().last, Tab::Audio);
+    assert_eq!(
+        Tab::ORDER,
+        [
+            Tab::Behavior,
+            Tab::Bindings,
+            Tab::Controller,
+            Tab::Display,
+            Tab::Audio,
+            Tab::Accessibility
+        ]
+    );
+}
+
+#[test]
+fn resetting_another_page_preserves_the_audio_mix() {
+    let mut app = app();
+    app.world_mut().resource_mut::<Preferences>().volumes.master = 17;
+    activate_operation(
+        &mut app,
+        Operation::Navigate(crate::client::menu_ui::Tab::Behavior),
+    );
+    activate_operation(&mut app, Operation::Reset);
+    activate_operation(&mut app, Operation::ConfirmReset);
+    assert_eq!(
+        app.world()
+            .resource::<Settings>()
+            .draft
+            .as_ref()
+            .unwrap()
+            .1
+            .volumes
+            .master,
+        17
+    );
+}
+
+#[test]
+fn detail_controls_apply_discard_and_reset_as_audio_drafts() {
+    use crate::client::menu_ui::Tab;
+    use bevy::ui_widgets::{SliderValue, ValueChange};
+    use tesserae_core::audio::EffectGroup;
+    let mut app = app();
+    activate_operation(&mut app, Operation::Navigate(Tab::Audio));
+    activate_operation(&mut app, Operation::EffectControls);
+    assert!(app.world().resource::<Settings>().effects_open);
+    let source = app
+        .world_mut()
+        .spawn((
+            Scalar::DetailVolume(EffectGroup::Eating),
+            SliderValue(100.0),
+        ))
+        .id();
+    app.world_mut().trigger(ValueChange {
+        source,
+        value: 20.0_f32,
+        is_final: true,
+    });
+    assert_eq!(
+        app.world().resource::<Preferences>().volumes.detail.eating,
+        100
+    );
+    activate_operation(&mut app, Operation::Apply);
+    assert_eq!(
+        app.world().resource::<Preferences>().volumes.detail.eating,
+        20
+    );
+    activate_operation(&mut app, Operation::Reset);
+    activate_operation(&mut app, Operation::ConfirmReset);
+    assert_eq!(
+        app.world()
+            .resource::<Settings>()
+            .draft
+            .as_ref()
+            .unwrap()
+            .1
+            .volumes
+            .detail
+            .eating,
+        100
+    );
+    activate_operation(&mut app, Operation::Discard);
+    assert_eq!(
+        app.world().resource::<Preferences>().volumes.detail.eating,
+        20
+    );
+}

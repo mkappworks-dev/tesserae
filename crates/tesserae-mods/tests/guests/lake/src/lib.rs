@@ -73,6 +73,8 @@ impl Guest for Lake {
             sounds: Vec::new(),
             sound_sets: Vec::new(),
             material_sounds: Vec::new(),
+            soundscapes: Vec::new(),
+            cause_sounds: Vec::new(),
             ores: vec![],
         }
     }

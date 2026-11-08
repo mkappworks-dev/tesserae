@@ -59,6 +59,7 @@ mod sky;
 #[cfg(feature = "dev")]
 mod soak;
 mod sound;
+mod soundscape;
 mod theme;
 mod tile_preview;
 mod tool;
@@ -128,7 +129,7 @@ pub fn plugin(app: &mut App) {
         vitals::plugin,
         death::plugin,
     ));
-    app.add_plugins(sound::plugin);
+    app.add_plugins((sound::plugin, soundscape::plugin));
     app.add_session_systems(
         Update,
         (|mut commands: Commands| commands.insert_resource(loading::TerrainArrived))

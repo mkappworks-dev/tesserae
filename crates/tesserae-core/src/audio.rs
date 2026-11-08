@@ -6,6 +6,9 @@
 
 use serde::{Deserialize, Serialize};
 
+/// Repeated damage is continuous, but its feedback must not fire every tick.
+pub const HURT_FEEDBACK_INTERVAL_S: f32 = 0.75;
+
 /// The group of a user's volume settings a Sound is heard under. Closed in
 /// contract 0.3.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -16,8 +19,8 @@ pub enum SoundCategory {
     Music,
 }
 
-/// Why the Server makes a Sound event. The Voxel Causes, which a Material's
-/// Sound set answers.
+/// Why the Server makes a Sound event. A Material's Sound set answers the
+/// Voxel Causes, `Break` to `Land`; the Game's `cause-sounds` the rest.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Cause {
     Break,
@@ -25,6 +28,18 @@ pub enum Cause {
     Hit,
     Step,
     Land,
+    /// The body enters or leaves a cold fluid.
+    Splash,
+    /// The body enters a heat-emitting fluid.
+    Burn,
+    Swimming,
+    Floating,
+    Pickup,
+    UseMeasured,
+    UseRefused,
+    Eat,
+    Hurt,
+    Death,
 }
 
 /// A registered Sound: its index in the World's Sound table.
@@ -49,6 +64,16 @@ impl SoundSet {
             Cause::Hit => self.hit,
             Cause::Step => self.step,
             Cause::Land => self.land,
+            Cause::Swimming
+            | Cause::Floating
+            | Cause::Splash
+            | Cause::Burn
+            | Cause::Pickup
+            | Cause::UseMeasured
+            | Cause::UseRefused
+            | Cause::Eat
+            | Cause::Hurt
+            | Cause::Death => None,
         }
     }
 }
@@ -186,6 +211,114 @@ pub fn equal_power(pan: f32) -> [f32; 2] {
     [angle.cos(), angle.sin()]
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum EffectGroup {
+    Footsteps,
+    Landings,
+    Breaking,
+    Placing,
+    Eating,
+    Swimming,
+    Floating,
+    Pickups,
+    Tools,
+    Vitals,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[serde(default)]
+pub struct EffectVolumes {
+    pub footsteps: u8,
+    pub landings: u8,
+    pub breaking: u8,
+    pub placing: u8,
+    pub eating: u8,
+    pub swimming: u8,
+    pub floating: u8,
+    pub pickups: u8,
+    pub tools: u8,
+    pub vitals: u8,
+}
+impl Default for EffectVolumes {
+    fn default() -> Self {
+        Self {
+            footsteps: 100,
+            landings: 100,
+            breaking: 100,
+            placing: 100,
+            eating: 100,
+            swimming: 100,
+            floating: 100,
+            pickups: 100,
+            tools: 100,
+            vitals: 100,
+        }
+    }
+}
+impl EffectVolumes {
+    pub fn get(&self, group: EffectGroup) -> u8 {
+        match group {
+            EffectGroup::Footsteps => self.footsteps,
+            EffectGroup::Landings => self.landings,
+            EffectGroup::Breaking => self.breaking,
+            EffectGroup::Placing => self.placing,
+            EffectGroup::Eating => self.eating,
+            EffectGroup::Swimming => self.swimming,
+            EffectGroup::Floating => self.floating,
+            EffectGroup::Pickups => self.pickups,
+            EffectGroup::Tools => self.tools,
+            EffectGroup::Vitals => self.vitals,
+        }
+    }
+    pub fn set(&mut self, group: EffectGroup, value: u8) {
+        match group {
+            EffectGroup::Footsteps => self.footsteps = value.min(100),
+            EffectGroup::Landings => self.landings = value.min(100),
+            EffectGroup::Breaking => self.breaking = value.min(100),
+            EffectGroup::Placing => self.placing = value.min(100),
+            EffectGroup::Eating => self.eating = value.min(100),
+            EffectGroup::Swimming => self.swimming = value.min(100),
+            EffectGroup::Floating => self.floating = value.min(100),
+            EffectGroup::Pickups => self.pickups = value.min(100),
+            EffectGroup::Tools => self.tools = value.min(100),
+            EffectGroup::Vitals => self.vitals = value.min(100),
+        }
+    }
+    pub fn valid(&self) -> bool {
+        [
+            self.footsteps,
+            self.landings,
+            self.breaking,
+            self.placing,
+            self.eating,
+            self.swimming,
+            self.floating,
+            self.pickups,
+            self.tools,
+            self.vitals,
+        ]
+        .iter()
+        .all(|&v| v <= 100)
+    }
+    pub fn for_cause(&self, cause: Cause) -> f32 {
+        use EffectGroup::*;
+        let group = match cause {
+            Cause::Step => Footsteps,
+            Cause::Land => Landings,
+            Cause::Break | Cause::Hit => Breaking,
+            Cause::Place => Placing,
+            Cause::Eat => Eating,
+            Cause::Swimming => Swimming,
+            Cause::Floating => Floating,
+            Cause::Pickup => Pickups,
+            Cause::UseMeasured | Cause::UseRefused => Tools,
+            Cause::Hurt | Cause::Death | Cause::Burn => Vitals,
+            Cause::Splash => return 1.0,
+        };
+        f32::from(self.get(group).min(100)) / 100.0
+    }
+}
+
 /// A user's volume for each Sound category and for all of them, 0 to 100. A
 /// preference of the user's, so no World or save holds it.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
@@ -195,6 +328,7 @@ pub struct Volumes {
     pub effects: u8,
     pub ambient: u8,
     pub music: u8,
+    pub detail: EffectVolumes,
 }
 
 impl Default for Volumes {
@@ -204,6 +338,7 @@ impl Default for Volumes {
             effects: 100,
             ambient: 70,
             music: 50,
+            detail: EffectVolumes::default(),
         }
     }
 }
@@ -213,6 +348,7 @@ impl Volumes {
         [self.master, self.effects, self.ambient, self.music]
             .iter()
             .all(|&v| v <= 100)
+            && self.detail.valid()
     }
 
     /// A sink's volume for a Sound of `category` played at `volume` and
@@ -237,6 +373,10 @@ impl SoundRng {
         SoundRng(seed)
     }
 
+    pub fn between(&mut self, span: Span) -> f32 {
+        span.draw(self)
+    }
+
     fn next(&mut self) -> u64 {
         self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
         let mut z = self.0;
@@ -252,5 +392,164 @@ impl SoundRng {
     /// From 0 to 1 inclusive.
     fn unit(&mut self) -> f32 {
         (self.next() >> 40) as f32 / ((1u64 << 24) - 1) as f32
+    }
+}
+
+/// A registered Soundscape: its index in the World's Soundscape table.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct SoundscapeId(pub u16);
+
+/// Where the Eye is, for choosing the Game's Soundscape. Closed in contract 0.3.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum SoundscapeContext {
+    Default,
+    /// The Eye's Voxel receives no sky light.
+    Underground,
+    /// The Eye is inside a fluid.
+    Underwater,
+}
+
+/// An Ambient Sound a Soundscape loops, at a volume on top of the Sound's own.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct Bed {
+    pub sound: SoundId,
+    pub volume: f32,
+}
+
+/// The ambience and music heard while a Soundscape applies.
+#[derive(Clone, PartialEq, Debug)]
+pub struct SoundscapeDef {
+    pub beds: Vec<Bed>,
+    /// Music Sounds.
+    pub music: Vec<SoundId>,
+    /// The silence before each track.
+    pub silence_s: Span,
+}
+
+/// A Soundscape's silence when its Declaration gives none.
+pub const DEFAULT_SILENCE_S: Span = Span {
+    min: 60.0,
+    max: 180.0,
+};
+
+/// How long the old beds take to fade out, and the new to fade in, when the
+/// Soundscape changes.
+pub const AMBIENT_FADE_S: f32 = 2.0;
+
+/// How long a playing track takes to fade out when the Soundscape changes.
+pub const MUSIC_FADE_S: f32 = 4.0;
+
+/// One playing of a Music Sound: `fade` is 1 while it plays and falls to 0 as
+/// it fades out.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct MusicVoice {
+    /// New for every start, so a player can tell one playing of a track from
+    /// the next.
+    pub id: u32,
+    pub track: SoundId,
+    pub fade: f32,
+}
+
+/// What music a Soundscape plays: a silence drawn from its range, then a track
+/// that is not the one just heard, until that track ends and the next silence
+/// begins. Whoever plays the tracks tells it when one [`ended`](Music::ended),
+/// since only the decoder knows a recording's length.
+#[derive(Clone, Debug)]
+pub struct Music {
+    rng: SoundRng,
+    tracks: Vec<SoundId>,
+    silence_s: Span,
+    /// Seconds of silence left, while no track plays.
+    waiting_s: Option<f32>,
+    playing: Option<MusicVoice>,
+    /// Each with the seconds of fade it has left.
+    fading: Vec<(MusicVoice, f32)>,
+    last: Option<SoundId>,
+    next_id: u32,
+}
+
+impl Music {
+    pub fn new(seed: u64) -> Music {
+        Music {
+            rng: SoundRng::new(seed),
+            tracks: Vec::new(),
+            silence_s: Span::at(0.0),
+            waiting_s: None,
+            playing: None,
+            fading: Vec::new(),
+            last: None,
+            next_id: 0,
+        }
+    }
+
+    /// The Soundscape changed: the playing track fades out and a silence from
+    /// the new range begins.
+    pub fn change(&mut self, tracks: &[SoundId], silence_s: Span) {
+        if let Some(voice) = self.playing.take() {
+            self.fading.push((voice, MUSIC_FADE_S));
+        }
+        self.tracks = tracks.to_vec();
+        self.silence_s = silence_s;
+        self.begin_silence();
+    }
+
+    pub fn advance(&mut self, dt_s: f32) {
+        for (voice, left_s) in &mut self.fading {
+            *left_s -= dt_s;
+            voice.fade = (*left_s / MUSIC_FADE_S).max(0.0);
+        }
+        self.fading.retain(|&(_, left_s)| left_s > 0.0);
+        let Some(left_s) = &mut self.waiting_s else {
+            return;
+        };
+        *left_s -= dt_s;
+        if *left_s <= 0.0 {
+            self.waiting_s = None;
+            self.start();
+        }
+    }
+
+    /// The voice's recording played to its end.
+    pub fn ended(&mut self, id: u32) {
+        self.fading.retain(|(voice, _)| voice.id != id);
+        if self.playing.is_some_and(|voice| voice.id == id) {
+            self.playing = None;
+            self.begin_silence();
+        }
+    }
+
+    pub fn voices(&self) -> impl Iterator<Item = MusicVoice> + '_ {
+        self.fading
+            .iter()
+            .map(|&(voice, _)| voice)
+            .chain(self.playing)
+    }
+
+    fn begin_silence(&mut self) {
+        self.waiting_s = (!self.tracks.is_empty()).then(|| self.silence_s.draw(&mut self.rng));
+    }
+
+    fn start(&mut self) {
+        let mut others: Vec<SoundId> = match self.tracks.len() {
+            0 => return,
+            1 => self.tracks.clone(),
+            _ => self
+                .tracks
+                .iter()
+                .copied()
+                .filter(|&t| Some(t) != self.last)
+                .collect(),
+        };
+        if others.is_empty() {
+            others = self.tracks.clone();
+        }
+        let track = others[self.rng.below(others.len() as u32) as usize];
+        self.last = Some(track);
+        self.playing = Some(MusicVoice {
+            id: self.next_id,
+            track,
+            fade: 1.0,
+        });
+        self.next_id = self.next_id.wrapping_add(1);
     }
 }

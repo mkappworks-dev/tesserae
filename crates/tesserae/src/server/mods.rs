@@ -716,6 +716,7 @@ pub(super) fn plugin(app: &mut App) {
         .add_session_message::<ContentCatalogue>()
         .add_session_message::<crate::content::WorldFacts>()
         .add_session_message::<crate::content::SoundLibrary>()
+        .add_session_message::<crate::content::SoundscapeLibrary>()
         .on_session_start(install)
         .add_session_systems(SessionTeardown, release_mods);
 }
@@ -781,6 +782,8 @@ fn install(world: &mut World) {
     world.insert_resource(tables);
     world.insert_resource(super::tool::Tools(loaded.tools));
     world.insert_resource(super::sound::SoundTable::new(&loaded.sounds));
+    world.insert_resource(super::soundscape::Soundscapes::new(&loaded.sounds));
+    world.write_message(crate::content::SoundscapeLibrary::new(&loaded.sounds));
     world.write_message(crate::content::SoundLibrary::new(loaded.sounds));
     world.insert_resource(
         super::survival::Survival::new(loaded.survival.unwrap_or_default(), loaded.contact_damage)
@@ -1206,7 +1209,14 @@ surface = "plain:rock"
             .iter()
             .map(|s| s.name.as_str())
             .collect();
-        assert_eq!(names, ["full:crack", "full:wind"]);
+        assert_eq!(names, ["full:crack", "full:wind", "full:tune"]);
+        let scapes: Vec<_> = loaded
+            .sounds
+            .soundscapes
+            .iter()
+            .map(|s| s.name.as_str())
+            .collect();
+        assert_eq!(scapes, ["full:surface", "full:cave"]);
         assert_eq!(loaded.sounds.material_sounds[0].0, id("full:rock"));
         let (water, lava, wood, ash, rock) = (
             id("full:water"),
@@ -2070,6 +2080,8 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
             }),
         };
         let sounds = tesserae_mods::Sounds {
+            biome_soundscapes: vec![],
+            cause_sounds: vec![],
             sounds: vec![tesserae_mods::Sound {
                 name: "t:crack".into(),
                 def: def.clone(),
@@ -2082,6 +2094,7 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
                     ..SoundSet::default()
                 },
             )],
+            soundscapes: Vec::new(),
         };
         let mut app = App::new();
         app.insert_non_send(LoadedMods {

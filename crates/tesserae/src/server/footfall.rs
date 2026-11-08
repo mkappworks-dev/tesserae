@@ -133,6 +133,9 @@ mod tests {
             .init_resource::<ChunkStore>()
             .insert_resource(ContentTables(Arc::new(fixture_tables())))
             .insert_resource(SoundTable::new(&tesserae_mods::Sounds {
+                biome_soundscapes: vec![],
+                cause_sounds: vec![],
+                soundscapes: vec![],
                 sounds: vec![sound(); 3],
                 material_sounds: vec![
                     (

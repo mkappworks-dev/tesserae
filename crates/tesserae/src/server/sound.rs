@@ -20,6 +20,7 @@ pub struct SoundEvent {
 /// each voiced Material's Sound set.
 #[derive(Resource, Default)]
 pub struct SoundTable {
+    causes: HashMap<Cause, SoundId>,
     defs: Vec<SoundDef>,
     sets: HashMap<MaterialId, SoundSet>,
 }
@@ -27,6 +28,7 @@ pub struct SoundTable {
 impl SoundTable {
     pub fn new(sounds: &tesserae_mods::Sounds) -> Self {
         SoundTable {
+            causes: sounds.cause_sounds.iter().copied().collect(),
             defs: sounds.sounds.iter().map(|s| s.def.clone()).collect(),
             sets: sounds.material_sounds.iter().copied().collect(),
         }
@@ -56,5 +58,24 @@ impl SoundTable {
                 pos_m,
                 cause,
             })
+    }
+}
+
+#[derive(bevy::ecs::system::SystemParam)]
+pub(super) struct Emitter<'w> {
+    table: Option<Res<'w, SoundTable>>,
+    events: Option<ResMut<'w, Messages<SoundEvent>>>,
+}
+impl Emitter<'_> {
+    pub fn emit(&mut self, cause: Cause, pos: Vec3) {
+        if let (Some(table), Some(events)) = (&self.table, &mut self.events)
+            && let Some(&sound) = table.causes.get(&cause)
+        {
+            events.write(SoundEvent {
+                sound,
+                pos_m: pos.to_array(),
+                cause,
+            });
+        }
     }
 }

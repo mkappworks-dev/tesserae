@@ -545,26 +545,26 @@ ships no content: ADR-0016 keeps air as the only built-in Material. The
 controls, movement, save, camera and input work already in flight is tracked in
 `.scratch/2026-10-27-gameplay-performance-and-controls` and is not repeated.
 
-| #   | Step                    | Engine adds                                                                                       | Game or Mod supplies               | Depends on | Status          |
-| --- | ----------------------- | ------------------------------------------------------------------------------------------------- | ---------------------------------- | ---------- | --------------- |
-| 10  | Modding SDK             | Data-only declarations, folder loading, reload loop, SDK docs and WIT compatibility policy        | Example Game                       | -          | Done            |
-| 11  | Use action, first tool  | Server "use" verb, target validation, success and refusal feedback (tickets 20-21)                | Which tools exist and what they do | -          | First tool done |
-| 12  | Dropped items, pickup   | Entity system: Server simulation, pickup, save                                                    | Item definitions                   | -          | Done            |
-| 13  | Biomes, richer worldgen | Biome and climate seam, generator version pinned in the save                                      | Biomes, ores, surface features     | -          | Done            |
-| 14  | Audio                   | Audio engine, Server-driven events, mixing                                                        | Sound and music assets             | -          | Not started     |
-| 15  | Inventory               | Server-owned transactions that compose with the undo journal, save                                | Stack sizes, item rules            | 11, 12     | Done            |
-| 16  | Crafting                | Recipe schema, station interaction, UI host                                                       | Recipes, stations                  | 15         | Not started     |
-| 17  | Weather                 | Weather state and tick, particles, sky hooks                                                      | Weather types, climate rules       | 13         | Not started     |
-| 18  | Plants                  | Growth on the Server tick, placement rules, harvesting                                            | Plant data                         | 13         | Not started     |
-| 19  | Map, compass            | Server-provided summaries (the Client never reads World storage), map view                        | Map style, markers                 | 13         | Not started     |
-| 20  | Structures              | Template format, deterministic placement by worldgen and tools                                    | Templates                          | 13         | Not started     |
-| 21  | Survival loop           | Health, damage, hunger, death, respawn, game modes                                                | Numbers and rules                  | 15         | Done            |
-| 22  | Mobs, animals           | Entity AI hooks, spawning, replication shape designed against transport                           | Behaviours, spawn tables           | 12, 13, 21 | Not started     |
-| 23  | NPCs                    | Persistent identity, dialogue and trade plumbing                                                  | NPC definitions, dialogue          | 15, 22     | Not started     |
-| 24  | Logic and machines      | Wiring and automation, then moving and flying Voxel bodies (see below)                            | Machine parts, logic components    | 12, 20     | Not started     |
-| 25  | Creation tools          | Structure, material and texture editors, screenshot and replay mode                               | Content made with them             | 10, 20     | Not started     |
-| 26  | Chat and commands       | Command registry, parser, permissions                                                             | The commands                       | -          | Not started     |
-| 27  | Release hardening       | Final 1.0 contract freeze, macOS bundle, first-run, save migration tests, diagnostics, CI budgets | -                                  | all        | Not started     |
+| #   | Step                    | Engine adds                                                                                       | Game or Mod supplies               | Depends on | Status                  |
+| --- | ----------------------- | ------------------------------------------------------------------------------------------------- | ---------------------------------- | ---------- | ----------------------- |
+| 10  | Modding SDK             | Data-only declarations, folder loading, reload loop, SDK docs and WIT compatibility policy        | Example Game                       | -          | Done                    |
+| 11  | Use action, first tool  | Server "use" verb, target validation, success and refusal feedback (tickets 20-21)                | Which tools exist and what they do | -          | First tool done         |
+| 12  | Dropped items, pickup   | Entity system: Server simulation, pickup, save                                                    | Item definitions                   | -          | Done                    |
+| 13  | Biomes, richer worldgen | Biome and climate seam, generator version pinned in the save                                      | Biomes, ores, surface features     | -          | Done                    |
+| 14  | Audio                   | Server-driven events, metre attenuation, mixing, Soundscapes and Audio settings                   | CC0 Terra sounds and music         | -          | Listening check pending |
+| 15  | Inventory               | Server-owned transactions that compose with the undo journal, save                                | Stack sizes, item rules            | 11, 12     | Done                    |
+| 16  | Crafting                | Recipe schema, station interaction, UI host                                                       | Recipes, stations                  | 15         | Not started             |
+| 17  | Weather                 | Weather state and tick, particles, sky hooks                                                      | Weather types, climate rules       | 13         | Not started             |
+| 18  | Plants                  | Growth on the Server tick, placement rules, harvesting                                            | Plant data                         | 13         | Not started             |
+| 19  | Map, compass            | Server-provided summaries (the Client never reads World storage), map view                        | Map style, markers                 | 13         | Not started             |
+| 20  | Structures              | Template format, deterministic placement by worldgen and tools                                    | Templates                          | 13         | Not started             |
+| 21  | Survival loop           | Health, damage, hunger, death, respawn, game modes                                                | Numbers and rules                  | 15         | Done                    |
+| 22  | Mobs, animals           | Entity AI hooks, spawning, replication shape designed against transport                           | Behaviours, spawn tables           | 12, 13, 21 | Not started             |
+| 23  | NPCs                    | Persistent identity, dialogue and trade plumbing                                                  | NPC definitions, dialogue          | 15, 22     | Not started             |
+| 24  | Logic and machines      | Wiring and automation, then moving and flying Voxel bodies (see below)                            | Machine parts, logic components    | 12, 20     | Not started             |
+| 25  | Creation tools          | Structure, material and texture editors, screenshot and replay mode                               | Content made with them             | 10, 20     | Not started             |
+| 26  | Chat and commands       | Command registry, parser, permissions                                                             | The commands                       | -          | Not started             |
+| 27  | Release hardening       | Final 1.0 contract freeze, macOS bundle, first-run, save migration tests, diagnostics, CI budgets | -                                  | all        | Not started             |
 
 Notes:
 

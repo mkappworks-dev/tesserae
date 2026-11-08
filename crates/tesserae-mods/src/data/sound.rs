@@ -62,7 +62,8 @@ impl Sound {
     pub(super) fn max_bytes(&self) -> u64 {
         match self.category {
             Category::Music => crate::recording::MAX_MUSIC_BYTES,
-            Category::Effects | Category::Ambient => crate::recording::MAX_SHORT_BYTES,
+            Category::Effects => crate::recording::MAX_SHORT_BYTES,
+            Category::Ambient => crate::recording::MAX_AMBIENT_BYTES,
         }
     }
 
@@ -137,6 +138,98 @@ impl From<MaterialSound> for content::MaterialSound {
         Self {
             material: m.material,
             sound_set: m.sound_set,
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "kebab-case")]
+enum Context {
+    Default,
+    Underground,
+    Underwater,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Bed {
+    sound: String,
+    volume: f32,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+pub(super) struct Soundscape {
+    name: String,
+    context: Option<Context>,
+    #[serde(default)]
+    beds: Vec<Bed>,
+    #[serde(default)]
+    music: Vec<String>,
+    silence_s: Option<Range>,
+}
+
+impl From<Soundscape> for content::SoundscapeDef {
+    fn from(s: Soundscape) -> Self {
+        Self {
+            name: s.name,
+            context: s.context.map(|c| match c {
+                Context::Default => content::SoundscapeContext::Default,
+                Context::Underground => content::SoundscapeContext::Underground,
+                Context::Underwater => content::SoundscapeContext::Underwater,
+            }),
+            beds: s
+                .beds
+                .into_iter()
+                .map(|b| content::AmbientBed {
+                    sound: b.sound,
+                    volume: b.volume,
+                })
+                .collect(),
+            music: s.music,
+            silence_s: s.silence_s.map(Into::into),
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "kebab-case")]
+enum Cause {
+    Burn,
+    Splash,
+    Swimming,
+    Floating,
+    Pickup,
+    UseMeasured,
+    UseRefused,
+    Eat,
+    Hurt,
+    Death,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct CauseSound {
+    cause: Cause,
+    sound: String,
+}
+
+impl From<CauseSound> for content::CauseSound {
+    fn from(c: CauseSound) -> Self {
+        Self {
+            cause: match c.cause {
+                Cause::Swimming => content::SoundCause::Swimming,
+                Cause::Floating => content::SoundCause::Floating,
+                Cause::Burn => content::SoundCause::Burn,
+                Cause::Splash => content::SoundCause::Splash,
+                Cause::Pickup => content::SoundCause::Pickup,
+                Cause::UseMeasured => content::SoundCause::UseMeasured,
+                Cause::UseRefused => content::SoundCause::UseRefused,
+                Cause::Eat => content::SoundCause::Eat,
+                Cause::Hurt => content::SoundCause::Hurt,
+                Cause::Death => content::SoundCause::Death,
+            },
+            sound: c.sound,
         }
     }
 }

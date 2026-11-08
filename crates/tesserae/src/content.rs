@@ -59,6 +59,17 @@ impl SoundLibrary {
     }
 }
 
+/// Every Soundscape in the World, indexed by `SoundscapeId`: what the Client
+/// plays while the Server names one.
+#[derive(Message, Clone, Debug, Default, PartialEq)]
+pub struct SoundscapeLibrary(pub std::sync::Arc<[tesserae_core::audio::SoundscapeDef]>);
+
+impl SoundscapeLibrary {
+    pub fn new(sounds: &tesserae_mods::Sounds) -> Self {
+        SoundscapeLibrary(sounds.soundscapes.iter().map(|s| s.def.clone()).collect())
+    }
+}
+
 /// The Game's player figure, or `None` for the engine's plain box.
 #[derive(Message, Clone, Debug, Default, PartialEq)]
 pub struct CharacterModel(pub Option<std::sync::Arc<tesserae_mods::Character>>);

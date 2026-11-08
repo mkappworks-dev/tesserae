@@ -12,13 +12,50 @@ use bevy::audio::{
     SampleRate, Source, Volume,
 };
 use bevy::prelude::*;
-use tesserae_core::audio::{Falloff, Listener, SoundCategory, SoundRng, Volumes, equal_power, pan};
+use tesserae_core::audio::{
+    Falloff, Listener, SoundCategory, SoundId, SoundRng, Variation, Volumes, equal_power, pan,
+};
 
 use super::camera::FlyCamera;
 use super::profile::Preferences;
 use crate::content::SoundLibrary;
 use crate::server::sound::SoundEvent;
 use crate::session::SessionApp;
+
+#[derive(Resource)]
+pub(super) struct PlaybackFocus {
+    pub gain: f32,
+    pub quiet: bool,
+}
+impl Default for PlaybackFocus {
+    fn default() -> Self {
+        Self {
+            gain: 1.0,
+            quiet: false,
+        }
+    }
+}
+type AudioOverlays<'w> = (
+    Option<Res<'w, super::menu::Menu>>,
+    Option<Res<'w, super::settings::Settings>>,
+    Option<Res<'w, crate::server::persistence::SaveStatus>>,
+);
+fn playback_focus(
+    time: Res<Time<Real>>,
+    overlays: AudioOverlays,
+    mut focus: ResMut<PlaybackFocus>,
+) {
+    let quiet = overlays.0.is_some_and(|menu| menu.open)
+        || overlays.1.is_some_and(|settings| settings.open)
+        || overlays.2.is_some_and(|save| save.modal());
+    focus.quiet = quiet;
+    let step = time.delta_secs() / 0.1;
+    focus.gain = if quiet {
+        (focus.gain - step).max(0.0)
+    } else {
+        (focus.gain + step).min(1.0)
+    };
+}
 
 pub(super) fn plugin(app: &mut App) {
     // Without Bevy's audio there is no output to play into, as in a headless test.
@@ -27,7 +64,16 @@ pub(super) fn plugin(app: &mut App) {
     } else {
         app.init_asset::<Panned>();
     }
-    app.init_session_resource::<Library>()
+    app.init_session_resource::<PlaybackFocus>()
+        .add_session_systems(
+            Update,
+            playback_focus
+                .after(super::menu::toggle)
+                .after(super::settings::capture)
+                .before(play)
+                .before(super::soundscape::MusicScheduling),
+        )
+        .init_session_resource::<Library>()
         .add_session_message::<SoundLibrary>()
         .add_session_message::<SoundEvent>()
         .add_session_systems(Update, (receive_library, play).chain())
@@ -42,9 +88,23 @@ pub(super) fn plugin(app: &mut App) {
 /// The World's Sounds, each recording ready to play from the bytes the Server
 /// checked.
 #[derive(Resource, Default)]
-struct Library {
+pub(super) struct Library {
     sounds: SoundLibrary,
     sources: Vec<Vec<AudioSource>>,
+}
+
+impl Library {
+    /// One playing of `sound`: a recording and its variation.
+    pub(super) fn vary(
+        &self,
+        sound: SoundId,
+        rng: &mut SoundRng,
+    ) -> Option<(AudioSource, Variation)> {
+        let at = usize::from(sound.0);
+        let variation = self.sounds.0.get(at)?.def.vary(rng);
+        let source = self.sources.get(at)?.get(variation.recording)?;
+        Some((source.clone(), variation))
+    }
 }
 
 /// One Sound playing from a fixed point.
@@ -53,6 +113,7 @@ struct Emitter {
     pos_m: [f32; 3],
     falloff: Falloff,
     category: SoundCategory,
+    cause: tesserae_core::audio::Cause,
     volume: f32,
     pan: Arc<AtomicU32>,
 }
@@ -60,11 +121,18 @@ struct Emitter {
 impl Emitter {
     fn gain(&self, listener: &Listener, volumes: &Volumes) -> f32 {
         let attenuation = self.falloff.gain(listener.distance_m(self.pos_m));
-        volumes.gain(self.category, self.volume, attenuation)
+        volumes.gain(
+            self.category,
+            self.volume * volumes.detail.for_cause(self.cause),
+            attenuation,
+        )
     }
 }
 
-fn receive_library(mut messages: MessageReader<SoundLibrary>, mut library: ResMut<Library>) {
+pub(super) fn receive_library(
+    mut messages: MessageReader<SoundLibrary>,
+    mut library: ResMut<Library>,
+) {
     let Some(sounds) = messages.read().last() else {
         return;
     };
@@ -95,12 +163,16 @@ fn listener(camera: &(&FlyCamera, &GlobalTransform)) -> Listener {
 fn play(
     mut events: MessageReader<SoundEvent>,
     library: Res<Library>,
-    preferences: Res<Preferences>,
+    (preferences, focus): (Res<Preferences>, Res<PlaybackFocus>),
     camera: Single<(&FlyCamera, &GlobalTransform)>,
     mut panned: ResMut<Assets<Panned>>,
     mut rng: Local<Option<SoundRng>>,
     mut commands: Commands,
 ) {
+    if focus.quiet {
+        events.clear();
+        return;
+    }
     let listener = listener(&camera);
     let rng = rng.get_or_insert_with(|| SoundRng::new(seed()));
     for event in events.read() {
@@ -120,6 +192,7 @@ fn play(
             pos_m: event.pos_m,
             falloff,
             category: sound.def.category,
+            cause: event.cause,
             volume: variation.volume,
             pan: Arc::new(AtomicU32::new(pan(&listener, event.pos_m).to_bits())),
         };
@@ -131,7 +204,7 @@ fn play(
             AudioPlayer(handle),
             PlaybackSettings {
                 mode: PlaybackMode::Despawn,
-                volume: Volume::Linear(emitter.gain(&listener, &preferences.volumes)),
+                volume: Volume::Linear(emitter.gain(&listener, &preferences.volumes) * focus.gain),
                 speed: variation.pitch,
                 ..default()
             },
@@ -146,20 +219,28 @@ fn play(
 fn follow(
     camera: Single<(&FlyCamera, &GlobalTransform)>,
     preferences: Res<Preferences>,
-    mut playing: Query<(&Emitter, &mut AudioSink)>,
+    focus: Res<PlaybackFocus>,
+    mut playing: Query<(Entity, &Emitter, Option<&mut AudioSink>)>,
+    mut commands: Commands,
 ) {
     let listener = listener(&camera);
-    for (emitter, mut sink) in &mut playing {
-        sink.set_volume(Volume::Linear(
-            emitter.gain(&listener, &preferences.volumes),
-        ));
+    for (entity, emitter, sink) in &mut playing {
+        if focus.quiet && focus.gain == 0.0 {
+            commands.entity(entity).despawn();
+            continue;
+        }
+        if let Some(mut sink) = sink {
+            sink.set_volume(Volume::Linear(
+                emitter.gain(&listener, &preferences.volumes) * focus.gain,
+            ));
+        }
         emitter
             .pan
             .store(pan(&listener, emitter.pos_m).to_bits(), Ordering::Relaxed);
     }
 }
 
-fn seed() -> u64 {
+pub(super) fn seed() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |t| t.as_nanos() as u64)
@@ -332,6 +413,32 @@ mod tests {
     }
 
     #[test]
+    fn detailed_trim_changes_the_gain_of_an_existing_emitter() {
+        let mut app = app();
+        app.world_mut().write_message(SoundEvent {
+            sound: SoundId(0),
+            pos_m: [4.0, 0.0, 0.0],
+            cause: Cause::Break,
+        });
+        app.update();
+        let entity = app
+            .world_mut()
+            .query_filtered::<Entity, With<Emitter>>()
+            .single(app.world())
+            .unwrap();
+        let emitter = app.world().get::<Emitter>(entity).unwrap();
+        let listener = Listener {
+            eye_m: [0.0; 3],
+            forward: [0.0, 0.0, -1.0],
+        };
+        let before = emitter.gain(&listener, &Volumes::default());
+        let mut volumes = Volumes::default();
+        volumes.detail.breaking = 20;
+        assert!((emitter.gain(&listener, &volumes) - before * 0.2).abs() < 1e-5);
+        assert_eq!(volumes.detail.eating, 100);
+    }
+
+    #[test]
     fn an_unknown_sound_plays_nothing() {
         let mut app = app();
         app.world_mut().write_message(SoundEvent {
@@ -361,5 +468,42 @@ mod tests {
         pan.store((-1.0f32).to_bits(), Ordering::Relaxed);
         let frames: Vec<f32> = right.take(2000).collect();
         assert!(frames.chunks(2).all(|f| f[1].abs() < 1e-6));
+    }
+    #[test]
+    fn menu_drops_action_sounds_and_does_not_replay_them_on_resume() {
+        use bevy::time::TimeUpdateStrategy;
+        let mut app = app();
+        app.insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_secs_f32(
+            0.05,
+        )))
+        .init_resource::<super::super::menu::Menu>();
+        app.world_mut().write_message(SoundEvent {
+            sound: SoundId(0),
+            pos_m: [4.0, 0.0, 0.0],
+            cause: Cause::Break,
+        });
+        app.update();
+        assert_eq!(playing(&mut app).len(), 1);
+        app.world_mut()
+            .resource_mut::<super::super::menu::Menu>()
+            .open = true;
+        for _ in 0..4 {
+            app.world_mut().write_message(SoundEvent {
+                sound: SoundId(0),
+                pos_m: [4.0, 0.0, 0.0],
+                cause: Cause::Break,
+            });
+            app.update();
+        }
+        assert!(playing(&mut app).is_empty());
+        assert_eq!(app.world().resource::<PlaybackFocus>().gain, 0.0);
+        app.world_mut()
+            .resource_mut::<super::super::menu::Menu>()
+            .open = false;
+        for _ in 0..4 {
+            app.update();
+        }
+        assert!(playing(&mut app).is_empty());
+        assert_eq!(app.world().resource::<PlaybackFocus>().gain, 1.0);
     }
 }

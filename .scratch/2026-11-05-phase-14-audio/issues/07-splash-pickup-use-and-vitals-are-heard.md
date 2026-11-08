@@ -1,6 +1,6 @@
 # 07: Splash, Pickup, Use and Vitals are heard
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 02
 
@@ -20,11 +20,15 @@ A Game binds the engine's non-Voxel Causes to Sounds, and a Player hears them.
 
 ## Acceptance criteria
 
-- [ ] Both formats load `cause-sounds`; a Mod's is refused by name; a Cause
+- [x] Both formats load `cause-sounds`; a Mod's is refused by name; a Cause
       bound twice is refused.
-- [ ] Server tests: entering and leaving water each make one `splash`; a Pickup
+- [x] Server tests: entering and leaving water each make one `splash`; a Pickup
       makes one `pickup`; a measured and a refused Use make their Sounds;
       eating makes `eat`; a fall that damages makes `land` and `hurt`; a death
       makes one `death`.
-- [ ] Creative, which has no damage, makes no `hurt` or `death`.
-- [ ] The data-only Mod guide and the authoring guide list the Causes.
+- [x] Creative, which has no damage, makes no `hurt` or `death`.
+- [x] The data-only Mod guide and the authoring guide list the Causes.
+
+## Comments
+
+- Server coverage exercises water entry/exit, successful and refused Use, Pickup, eating, lethal fall hurt/death, and Creative silence. Core and Mod declaration tests cover every Cause, duplicates and Game-only bindings.

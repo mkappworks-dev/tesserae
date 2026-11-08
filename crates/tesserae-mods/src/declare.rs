@@ -18,7 +18,7 @@ use crate::bindings::tesserae::mods::content::{self, Declaration};
 use crate::convert::world_params;
 use crate::error::ModError;
 use crate::registry::{Kind, Registry};
-use crate::sound::{MAX_SOUND_SETS_PER_MOD, MAX_SOUNDS_PER_MOD};
+use crate::sound::{MAX_SOUND_SETS_PER_MOD, MAX_SOUNDS_PER_MOD, MAX_SOUNDSCAPES_PER_MOD};
 
 /// The palette has 64 slots; ids 0 through 7 are reserved (`PALETTE_LEN`).
 pub const MAX_MATERIALS: usize = 56;
@@ -145,11 +145,13 @@ pub struct Behaviour {
     reactions: Vec<content::ReactionDef>,
     combustion: Vec<content::CombustionDef>,
     items: Vec<content::ItemDef>,
-    biomes: Vec<content::BiomeDef>,
+    pub(crate) biomes: Vec<content::BiomeDef>,
     ores: Vec<content::OreDef>,
     pub(crate) sounds: Vec<content::SoundDef>,
     pub(crate) sound_sets: Vec<content::SoundSetDef>,
     pub(crate) material_sounds: Vec<content::MaterialSound>,
+    pub(crate) soundscapes: Vec<content::SoundscapeDef>,
+    pub(crate) cause_sounds: Vec<content::CauseSound>,
     lake: Option<content::WaterParams>,
     ground: Option<content::GroundParams>,
 }
@@ -203,6 +205,7 @@ pub fn apply(
             (declaration.view.is_some(), "view"),
             (!declaration.tools.is_empty(), "tools"),
             (declaration.survival.is_some(), "survival"),
+            (!declaration.cause_sounds.is_empty(), "cause-sounds"),
         ] {
             if set {
                 return Err(ModError::NotAGame { id: id(), field });
@@ -240,6 +243,11 @@ pub fn apply(
             "sound-set",
             declaration.sound_sets.len(),
             MAX_SOUND_SETS_PER_MOD,
+        ),
+        (
+            "soundscape",
+            declaration.soundscapes.len(),
+            MAX_SOUNDSCAPES_PER_MOD,
         ),
     ] {
         if count > max {
@@ -360,7 +368,13 @@ pub fn apply(
 
     check_items(mod_id, &declaration.items)?;
     check_biomes(mod_id, &declaration.biomes)?;
-    crate::sound::check(mod_id, &declaration.sounds, &declaration.sound_sets)?;
+    crate::sound::check(
+        mod_id,
+        is_root,
+        &declaration.sounds,
+        &declaration.sound_sets,
+        &declaration.soundscapes,
+    )?;
 
     let mut remove_times = Vec::new();
     let mut contact_damage = Vec::new();
@@ -438,6 +452,8 @@ pub fn apply(
             sounds: declaration.sounds,
             sound_sets: declaration.sound_sets,
             material_sounds: declaration.material_sounds,
+            soundscapes: declaration.soundscapes,
+            cause_sounds: declaration.cause_sounds,
             lake,
             ground,
         },

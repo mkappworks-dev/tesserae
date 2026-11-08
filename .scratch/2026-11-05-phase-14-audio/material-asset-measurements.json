@@ -1,0 +1,154 @@
+[
+  {
+    "file": "stone-step-1.ogg",
+    "source": "/tmp/terra-footsteps/Fantozzi-footsteps/flac/Fantozzi-StoneL1.flac",
+    "duration_s": 0.372902,
+    "lowpass_hz": 5000,
+    "pre_fade_peak_target_dbfs": -8,
+    "bytes": 6284
+  },
+  {
+    "file": "stone-step-2.ogg",
+    "source": "/tmp/terra-footsteps/Fantozzi-footsteps/flac/Fantozzi-StoneR1.flac",
+    "duration_s": 0.356667,
+    "lowpass_hz": 5000,
+    "pre_fade_peak_target_dbfs": -8,
+    "bytes": 6165
+  },
+  {
+    "file": "stone-step-3.ogg",
+    "source": "/tmp/terra-footsteps/Fantozzi-footsteps/flac/Fantozzi-StoneL2.flac",
+    "duration_s": 0.331633,
+    "lowpass_hz": 5000,
+    "pre_fade_peak_target_dbfs": -8,
+    "bytes": 6078
+  },
+  {
+    "file": "stone-step-4.ogg",
+    "source": "/tmp/terra-footsteps/Fantozzi-footsteps/flac/Fantozzi-StoneR2.flac",
+    "duration_s": 0.322608,
+    "lowpass_hz": 5000,
+    "pre_fade_peak_target_dbfs": -8,
+    "bytes": 5988
+  },
+  {
+    "file": "stone-step-5.ogg",
+    "source": "/tmp/terra-footsteps/Fantozzi-footsteps/flac/Fantozzi-StoneL3.flac",
+    "duration_s": 0.33093,
+    "lowpass_hz": 5000,
+    "pre_fade_peak_target_dbfs": -8,
+    "bytes": 5933
+  },
+  {
+    "file": "stone-step-6.ogg",
+    "source": "/tmp/terra-footsteps/Fantozzi-footsteps/flac/Fantozzi-StoneR3.flac",
+    "duration_s": 0.342063,
+    "lowpass_hz": 5000,
+    "pre_fade_peak_target_dbfs": -8,
+    "bytes": 6165
+  },
+  {
+    "file": "soft-step-1.ogg",
+    "source": "/tmp/terra-footsteps/Fantozzi-footsteps/flac/Fantozzi-SandL1.flac",
+    "duration_s": 0.44254,
+    "lowpass_hz": 3500,
+    "pre_fade_peak_target_dbfs": -8,
+    "bytes": 7369
+  },
+  {
+    "file": "soft-step-2.ogg",
+    "source": "/tmp/terra-footsteps/Fantozzi-footsteps/flac/Fantozzi-SandR1.flac",
+    "duration_s": 0.40576,
+    "lowpass_hz": 3500,
+    "pre_fade_peak_target_dbfs": -8,
+    "bytes": 6825
+  },
+  {
+    "file": "soft-step-3.ogg",
+    "source": "/tmp/terra-footsteps/Fantozzi-footsteps/flac/Fantozzi-SandL2.flac",
+    "duration_s": 0.319592,
+    "lowpass_hz": 3500,
+    "pre_fade_peak_target_dbfs": -8,
+    "bytes": 5979
+  },
+  {
+    "file": "soft-step-4.ogg",
+    "source": "/tmp/terra-footsteps/Fantozzi-footsteps/flac/Fantozzi-SandR2.flac",
+    "duration_s": 0.340181,
+    "lowpass_hz": 3500,
+    "pre_fade_peak_target_dbfs": -8,
+    "bytes": 6244
+  },
+  {
+    "file": "soft-step-5.ogg",
+    "source": "/tmp/terra-footsteps/Fantozzi-footsteps/flac/Fantozzi-SandL3.flac",
+    "duration_s": 0.299524,
+    "lowpass_hz": 3500,
+    "pre_fade_peak_target_dbfs": -8,
+    "bytes": 5895
+  },
+  {
+    "file": "soft-step-6.ogg",
+    "source": "/tmp/terra-footsteps/Fantozzi-footsteps/flac/Fantozzi-SandR3.flac",
+    "duration_s": 0.329456,
+    "lowpass_hz": 3500,
+    "pre_fade_peak_target_dbfs": -8,
+    "bytes": 6160
+  },
+  {
+    "file": "stone.ogg",
+    "source": "/tmp/terra-breaking/bfh1_rock_breaking_01.ogg",
+    "duration_s": 1.146542,
+    "lowpass_hz": 4200,
+    "pre_fade_peak_target_dbfs": -8,
+    "bytes": 8216
+  },
+  {
+    "file": "stone-2.ogg",
+    "source": "/tmp/terra-breaking/bfh1_rock_breaking_02.ogg",
+    "duration_s": 0.864625,
+    "lowpass_hz": 4200,
+    "pre_fade_peak_target_dbfs": -8,
+    "bytes": 12195
+  },
+  {
+    "file": "stone-3.ogg",
+    "source": "/tmp/terra-breaking/bfh1_rock_breaking_03.ogg",
+    "duration_s": 0.455479,
+    "lowpass_hz": 4200,
+    "pre_fade_peak_target_dbfs": -8,
+    "bytes": 8202
+  },
+  {
+    "file": "step-1.ogg",
+    "source": "/tmp/terra-rpg/OGG/footstep00.ogg",
+    "duration_s": 0.248854,
+    "lowpass_hz": 4000,
+    "pre_fade_peak_target_dbfs": -8,
+    "bytes": 5512
+  },
+  {
+    "file": "step-2.ogg",
+    "source": "/tmp/terra-rpg/OGG/footstep01.ogg",
+    "duration_s": 0.282479,
+    "lowpass_hz": 4000,
+    "pre_fade_peak_target_dbfs": -8,
+    "bytes": 5614
+  },
+  {
+    "file": "step-3.ogg",
+    "source": "/tmp/terra-rpg/OGG/footstep02.ogg",
+    "duration_s": 0.242146,
+    "lowpass_hz": 4000,
+    "pre_fade_peak_target_dbfs": -8,
+    "bytes": 5446
+  },
+  {
+    "file": "step-4.ogg",
+    "source": "/tmp/terra-rpg/OGG/footstep03.ogg",
+    "duration_s": 0.269021,
+    "lowpass_hz": 4000,
+    "pre_fade_peak_target_dbfs": -8,
+    "bytes": 5634
+  }
+]

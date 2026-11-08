@@ -57,6 +57,7 @@ fn biomes() -> Vec<BiomeDef> {
     };
     vec![
         BiomeDef {
+            soundscape: None,
             name: "meadow".into(),
             temperature: 0.5,
             humidity: 0.5,
@@ -69,6 +70,7 @@ fn biomes() -> Vec<BiomeDef> {
             surface_features: vec![food::feature()],
         },
         BiomeDef {
+            soundscape: None,
             name: "heath".into(),
             temperature: 0.3,
             humidity: 0.7,
@@ -81,6 +83,7 @@ fn biomes() -> Vec<BiomeDef> {
             surface_features: vec![food::feature()],
         },
         BiomeDef {
+            soundscape: None,
             name: "dunes".into(),
             temperature: 0.75,
             humidity: 0.25,
@@ -367,6 +370,8 @@ impl Guest for Meadow {
             sounds: Vec::new(),
             sound_sets: Vec::new(),
             material_sounds: Vec::new(),
+            soundscapes: Vec::new(),
+            cause_sounds: Vec::new(),
             ores: vec![OreDef {
                 material: "strata:basalt".into(),
                 min_depth_m: 6.0,

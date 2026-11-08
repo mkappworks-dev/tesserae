@@ -357,6 +357,13 @@ fn the_guides_full_declaration_validates_with_its_artwork() {
         include_bytes!("../../../tesserae-mods/tests/fixtures/sounds/mono.ogg"),
     )
     .unwrap();
+    for name in ["wind", "theme"] {
+        fs::write(
+            project.join(format!("sounds/{name}.ogg")),
+            include_bytes!("../../../tesserae-mods/tests/fixtures/sounds/stereo.ogg"),
+        )
+        .unwrap();
+    }
     tesserae(&s, &["validate", path(&project)]).unwrap();
 }
 

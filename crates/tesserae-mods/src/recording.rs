@@ -13,8 +13,10 @@ pub(crate) struct Format {
 pub(crate) const CHANNELS: RangeInclusive<u8> = 1..=2;
 /// In hertz.
 pub(crate) const SAMPLE_RATE: RangeInclusive<u32> = 8_000..=96_000;
-/// The largest Effects or Ambient recording.
+/// The largest Effects recording.
 pub(crate) const MAX_SHORT_BYTES: u64 = 512 << 10;
+/// Long ambient beds, bounded independently of one-shot Effects.
+pub(crate) const MAX_AMBIENT_BYTES: u64 = 4 << 20;
 /// The largest Music recording.
 pub(crate) const MAX_MUSIC_BYTES: u64 = 8 << 20;
 /// All recordings a World holds, each reference counted, since each is a copy in memory.

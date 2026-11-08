@@ -19,15 +19,17 @@ pub(super) enum Tab {
     Bindings,
     Controller,
     Display,
+    Audio,
     Accessibility,
 }
 impl Tab {
     /// Page order in the header, which LB/RB also follow.
-    pub const ORDER: [Tab; 5] = [
+    pub const ORDER: [Tab; 6] = [
         Tab::Behavior,
         Tab::Bindings,
         Tab::Controller,
         Tab::Display,
+        Tab::Audio,
         Tab::Accessibility,
     ];
     pub fn label(self) -> &'static str {
@@ -37,6 +39,7 @@ impl Tab {
             Self::Bindings => "Key bindings",
             Self::Controller => "Controller",
             Self::Display => "Display",
+            Self::Audio => "Audio",
             Self::Accessibility => "Accessibility",
         }
     }
@@ -46,6 +49,7 @@ impl Tab {
             Self::Bindings => IconKind::Keyboard,
             Self::Controller => IconKind::Controller,
             Self::Display => IconKind::Display,
+            Self::Audio => IconKind::Audio,
             Self::Accessibility => IconKind::Accessibility,
         }
     }
@@ -938,11 +942,12 @@ pub(super) enum IconKind {
     Keyboard,
     Controller,
     Display,
+    Audio,
     Accessibility,
 }
-const ICONS: usize = 17;
+const ICONS: usize = 18;
 /// The icons drawn from the prototype's 24-unit outlines, in atlas order.
-const DRAWN: [IconKind; 14] = [
+const DRAWN: [IconKind; 15] = [
     IconKind::Settings,
     IconKind::Mods,
     IconKind::Check,
@@ -956,6 +961,7 @@ const DRAWN: [IconKind; 14] = [
     IconKind::Keyboard,
     IconKind::Controller,
     IconKind::Display,
+    IconKind::Audio,
     IconKind::Accessibility,
 ];
 #[derive(Component)]
@@ -1159,6 +1165,19 @@ fn drawn(kind: IconKind, p: Vec2) -> f32 {
             rounded(v(12.0, 10.0), v(10.0, 7.0), 2.0)
                 .min(segment(v(8.0, 21.0), v(16.0, 21.0)))
                 .min(segment(v(12.0, 17.0), v(12.0, 21.0))),
+        ),
+        IconKind::Audio => stroke(
+            path(&[
+                v(3.0, 9.0),
+                v(7.0, 9.0),
+                v(12.0, 5.0),
+                v(12.0, 19.0),
+                v(7.0, 15.0),
+                v(3.0, 15.0),
+                v(3.0, 9.0),
+            ])
+            .min(path(&[v(16.0, 8.0), v(19.0, 12.0), v(16.0, 16.0)]))
+            .min(path(&[v(19.0, 4.0), v(23.0, 12.0), v(19.0, 20.0)])),
         ),
         IconKind::Accessibility => stroke(
             ring(v(12.0, 4.0), 2.0)

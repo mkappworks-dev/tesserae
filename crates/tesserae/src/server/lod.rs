@@ -874,7 +874,8 @@ fn level_the_water(
 fn cells_under(corners: &[[f32; 3]]) -> impl Iterator<Item = [usize; 3]> {
     let lo = |axis: usize| corners.iter().map(|c| c[axis]).fold(f32::MAX, f32::min) as usize;
     let hi = |axis: usize| corners.iter().map(|c| c[axis]).fold(f32::MIN, f32::max) as usize;
-    let y = corners[0][1] as usize - 1;
+    // Partial fluid tops lie inside their cell; integer tops lie just above it.
+    let y = corners[0][1].ceil() as usize - 1;
     let (x0, x1, z0, z1) = (lo(0), hi(0), lo(2), hi(2));
     (z0..z1).flat_map(move |z| (x0..x1).map(move |x| [x, y, z]))
 }
@@ -3514,6 +3515,115 @@ mod tests {
                 .all(|&y| y == 48.0),
             "without a water level there is nothing to snap to"
         );
+    }
+
+    #[test]
+    fn coarse_water_levelling_keeps_partial_overlay_surfaces_in_their_cells() {
+        let material = tesserae_core::testgen::fixtures().water;
+        for row in 0..CHUNK_SIZE {
+            for fraction in [0.125, 0.5, 1.0] {
+                let top = row as f32 + fraction;
+                let corners = [
+                    [0.0, top, 5.0],
+                    [0.0, top, 6.0],
+                    [1.0, top, 6.0],
+                    [1.0, top, 5.0],
+                ];
+                let mut overlay = ChunkOverlay::none();
+                overlay.set(
+                    0,
+                    row,
+                    5,
+                    tesserae_core::Overlay {
+                        fluid: Some(tesserae_core::Fluid {
+                            source: false,
+                            surface: (fraction * 16.0) as u8,
+                            ..tesserae_core::Fluid::source(material)
+                        }),
+                        burning: None,
+                    },
+                );
+                let mut layer = MeshLayer::default();
+                push_quad(
+                    &mut layer,
+                    &corners,
+                    &[[0.0; 2]; 4],
+                    &[0.0, 1.0, 0.0],
+                    u32::from(material),
+                    &[0; 4],
+                );
+                level_the_water(
+                    &mut layer,
+                    UnderWater {
+                        level_m: row as f32 + 0.25,
+                        material,
+                        dimming: 0,
+                        step_m: 0.25,
+                    },
+                    0.0,
+                    1.0,
+                    &overlay,
+                );
+                assert_eq!(
+                    layer.positions, corners,
+                    "row {row}, fraction {fraction}: flowed water must keep its height"
+                );
+                assert_eq!(cells_under(&corners).collect::<Vec<_>>(), [[0, row, 5]]);
+            }
+        }
+    }
+
+    #[test]
+    fn coarse_water_levelling_splits_lake_and_overlay_cells() {
+        let material = tesserae_core::testgen::fixtures().water;
+        let mut overlay = ChunkOverlay::none();
+        overlay.set(
+            0,
+            0,
+            5,
+            tesserae_core::Overlay {
+                fluid: Some(tesserae_core::Fluid::source(material)),
+                burning: None,
+            },
+        );
+        let mut layer = MeshLayer::default();
+        push_quad(
+            &mut layer,
+            &[
+                [0.0, 1.0, 5.0],
+                [0.0, 1.0, 6.0],
+                [2.0, 1.0, 6.0],
+                [2.0, 1.0, 5.0],
+            ],
+            &[[0.0, 0.0], [0.0, 1.0], [2.0, 1.0], [2.0, 0.0]],
+            &[0.0, 1.0, 0.0],
+            u32::from(material),
+            &[0; 4],
+        );
+        level_the_water(
+            &mut layer,
+            UnderWater {
+                level_m: 0.5,
+                material,
+                dimming: 0,
+                step_m: 0.25,
+            },
+            0.0,
+            1.0,
+            &overlay,
+        );
+        assert_eq!(layer.positions.len(), 8);
+        assert!(
+            layer.positions[..4]
+                .iter()
+                .all(|p| p[1] == 1.0 && p[0] <= 1.0)
+        );
+        assert!(
+            layer.positions[4..]
+                .iter()
+                .all(|p| p[1] == 0.5 && p[0] >= 1.0)
+        );
+        assert_eq!(layer.indices.len(), 12);
     }
 
     /// The mesh `mesh_coarse` makes of a level-`level` Chunk of `source`'s ground.

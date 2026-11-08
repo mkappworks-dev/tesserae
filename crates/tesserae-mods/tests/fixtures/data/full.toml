@@ -225,6 +225,13 @@ recordings = [{ file = "sounds/wind.ogg", weight = 1 }]
 volume = { min = 1.0, max = 1.0 }
 pitch = { min = 1.0, max = 1.0 }
 
+[[sounds]]
+name = "tune"
+category = "music"
+recordings = [{ file = "sounds/wind.ogg", weight = 1 }]
+volume = { min = 1.0, max = 1.0 }
+pitch = { min = 1.0, max = 1.0 }
+
 [[sound-sets]]
 name = "rock"
 break = "full:crack"
@@ -233,3 +240,22 @@ step = "full:crack"
 [[material-sounds]]
 material = "full:rock"
 sound-set = "full:rock"
+
+[[soundscapes]]
+name = "surface"
+context = "default"
+beds = [{ sound = "full:wind", volume = 0.6 }]
+music = ["full:tune"]
+
+[[soundscapes]]
+name = "cave"
+context = "underground"
+music = ["full:tune"]
+silence-s = { min = 20.0, max = 40.0 }
+[[cause-sounds]]
+cause = "hurt"
+sound = "full:crack"
+
+[[cause-sounds]]
+cause = "use-measured"
+sound = "full:crack"

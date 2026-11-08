@@ -715,6 +715,7 @@ mod tests {
                 effects: 50,
                 ambient: 100,
                 music: 25,
+                ..Volumes::default()
             },
             ..default()
         };
@@ -737,10 +738,26 @@ mod tests {
             }
         );
 
-        for bad in [r#"{"master":101}"#, r#"{"ambient":-1}"#, r#"{"music":0.5}"#] {
+        for bad in [
+            r#"{"master":101}"#,
+            r#"{"ambient":-1}"#,
+            r#"{"music":0.5}"#,
+            r#"{"detail":{"eating":101}}"#,
+        ] {
             let bytes = format!(r#"{{"version":3,"preferences":{{"volumes":{bad}}}}}"#);
             assert!(decode(bytes.as_bytes()).is_err(), "{bad}");
         }
+    }
+    #[test]
+    fn old_mix_profiles_get_neutral_details_and_new_details_round_trip() {
+        use tesserae_core::audio::{EffectGroup, EffectVolumes};
+        let (_, old) = decode(br#"{"version":3,"preferences":{"volumes":{"master":42,"effects":31,"ambient":20,"music":9}}}"#).unwrap();
+        assert_eq!(old.volumes.master, 42);
+        assert_eq!(old.volumes.detail, EffectVolumes::default());
+        let mut preferences = old;
+        preferences.volumes.detail.set(EffectGroup::Eating, 0);
+        let encoded = encode(&Bindings::default(), &preferences).unwrap();
+        assert_eq!(decode(&encoded).unwrap().1.volumes, preferences.volumes);
     }
     #[test]
     fn corrupt_and_failed_writes_preserve_the_last_file() {

@@ -14,6 +14,7 @@
 
 #[cfg(any(feature = "dev", feature = "profiling"))]
 mod builder;
+mod causal_sound;
 pub mod death;
 pub mod edit;
 pub mod entities;
@@ -39,6 +40,7 @@ pub mod player;
 mod priority;
 mod sky;
 pub mod sound;
+pub mod soundscape;
 pub mod streaming;
 pub mod survival;
 pub mod tool;
@@ -120,6 +122,7 @@ pub fn plugin(app: &mut App) {
             fluids::plugin,
             player::plugin,
             sky::plugin,
+            soundscape::plugin,
         ));
     app.add_plugins(persistence::plugin);
     app.add_plugins((
@@ -129,6 +132,7 @@ pub fn plugin(app: &mut App) {
         vitals::plugin,
         death::plugin,
         footfall::plugin,
+        causal_sound::plugin,
     ));
     #[cfg(feature = "dev")]
     if std::env::var_os("TESSERAE_PROFILE_FIXTURE").is_none() {
