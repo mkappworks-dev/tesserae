@@ -190,3 +190,100 @@
   padding-left: 8px;
   color: #a9adb6;
 }
+
+/* Item details fit the window without scrolling. */
+.inventory-overlay .item-inspector {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  overflow: hidden;
+}
+.inventory-overlay .item-inspector .item-eyebrow {
+  margin: 0;
+}
+.inspector-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.inventory-overlay .inspector-head > .voxel-icon {
+  flex: 0 0 44px;
+  width: 44px;
+  height: 44px;
+  margin: 0;
+}
+.inventory-overlay .inspector-head h2 {
+  margin: 0 0 2px;
+  font-size: 17px;
+}
+.inventory-overlay .inspector-head .item-source {
+  margin: 0;
+}
+.inventory-overlay .inspector-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  margin: 0;
+  border-block: 1px solid #34343c;
+}
+.inventory-overlay .inspector-stats > div {
+  display: flex;
+  flex-direction: column-reverse;
+  align-items: center;
+  gap: 1px;
+  padding: 7px 0;
+  border: 0;
+}
+.inventory-overlay .inspector-stats > div + div {
+  border-left: 1px solid #34343c;
+}
+.inventory-overlay .inspector-stats dd {
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+.inventory-overlay .inspector-stats dt {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.inspector-label {
+  margin: 0 0 -6px;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #a9adb6;
+}
+.shape-chips {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 3px;
+}
+.shape-chips button {
+  padding: 5px 0;
+  border: 1px solid #45464d;
+  border-radius: 4px;
+  background: #17181b;
+  color: #c4c7cd;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.shape-chips button.active {
+  background: #e9eee0;
+  border-color: #e9eee0;
+  color: #111;
+}
+.inventory-overlay .inspector-actions {
+  grid-template-columns: 1fr 1fr;
+  gap: 5px;
+  margin-top: auto;
+}
+.inventory-overlay .inspector-actions .btn {
+  min-height: 32px;
+  padding: 4px 6px;
+  font-size: 12px;
+}
+.inventory-overlay .inspector-actions .btn:nth-child(5) {
+  grid-column: 1 / -1;
+}
