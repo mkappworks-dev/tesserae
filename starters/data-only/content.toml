@@ -14,6 +14,38 @@ occlusion = "opaque"
 render = "opaque"
 solid = true
 
+[[materials]]
+name = "workbench"
+emission = 0
+dimming = 15
+occlusion = "opaque"
+render = "opaque"
+solid = true
+
+[[materials]]
+name = "chest"
+emission = 0
+dimming = 15
+occlusion = "opaque"
+render = "opaque"
+solid = true
+
+[[materials]]
+name = "door"
+emission = 0
+dimming = 15
+occlusion = "opaque"
+render = "opaque"
+solid = true
+
+[[materials]]
+name = "door_open"
+emission = 0
+dimming = 0
+occlusion = "never"
+render = "blend"
+solid = true
+
 [[appearance]]
 material = "stone"
 color = [110, 115, 125, 255]
@@ -23,6 +55,22 @@ texture = "art/stone.png"
 material = "turf"
 color = [90, 160, 60, 255]
 texture = "art/turf.png"
+
+[[appearance]]
+material = "workbench"
+color = [167, 116, 63, 255]
+
+[[appearance]]
+material = "chest"
+color = [107, 68, 35, 255]
+
+[[appearance]]
+material = "door"
+color = [128, 88, 50, 255]
+
+[[appearance]]
+material = "door_open"
+color = [128, 88, 50, 90]
 
 [world]
 relief-m = 12.0
@@ -36,3 +84,28 @@ start-in-flight = false
 rock = "starter_data:stone"
 soil = "starter_data:stone"
 surface = "starter_data:turf"
+
+[[voxel-uses]]
+kind = "station"
+material = "starter_data:workbench"
+tag = "workbench"
+
+[[voxel-uses]]
+kind = "container"
+material = "starter_data:chest"
+slots = 27
+
+[[voxel-uses]]
+kind = "door"
+material = "starter_data:door"
+open = "starter_data:door_open"
+
+[[recipes]]
+inputs = [{ item = "starter_data:stone", count = 4 }]
+output = { item = "starter_data:workbench", count = 1 }
+station = "hand"
+
+[[recipes]]
+inputs = [{ item = "starter_data:stone", count = 8 }]
+output = { item = "starter_data:chest", count = 1 }
+station = "workbench"

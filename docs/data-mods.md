@@ -336,12 +336,14 @@ omitted is 64), and `food`, the hunger eating one restores.
 
 A `[[voxel-uses]]` row makes a Material a Usable Voxel, which Use acts on. Its
 `kind` is `door`, with a closed `material` and an `open` one, both solid
-Materials by full name; bodies pass through the open one, and removing it drops
-the closed one's Item. Or it is `station`, with a solid `material` and a `tag`:
-Use opens the Recipes whose `station` is that tag, craftable while the Player
-stays in reach. Materials may share a tag, so another Mod's bench opens the same
-Recipes; `hand` is reserved. Any Mod may declare them, at most 64 per Mod, and a
-Material is in at most one row, as either state.
+Materials by full name; bodies pass through the open one while aim still stops
+on it, Use toggles the vertical run of up to 4 Voxels of that Door, and removing
+the open one drops the closed one's Item. The open Material gets no implicit
+Item and cannot be placed. Or it is `station`, with a solid `material` and a
+`tag`: Use opens the Recipes whose `station` is that tag, craftable while the
+Player stays in reach. Materials may share a tag, so another Mod's bench opens
+the same Recipes; `hand` is reserved. Any Mod may declare them, at most 64 per
+Mod, and a Material is in at most one row, as either state.
 
 A `container` row gives its `material` Stacks of its own in `slots` slots, from
 1 to 54, 27 when omitted. Use opens it beside the Inventory. A Player cannot
@@ -365,6 +367,33 @@ material = "plain:workbench"
 tag = "workbench"
 ```
 
+A `[[recipes]]` row is what one Craft spends and makes: `inputs`, 1 to 9
+different Items each with a `count` of at least 1; one `output`, an Item and a
+`count` from 1 to its `max-stack`; and a required `station`. `station = "hand"`
+is crafted from the Crafting tab anywhere; any other value is a Station's tag,
+crafted only while the Player has that Station open. Item names are full names
+and may be a Material's implicit Item, which has the Material's full name. Any
+Mod may declare Recipes, for its own or another Mod's Items and Stations, at
+most 256 per Mod and 1024 in a World; names resolve after every Mod has
+declared, and an unknown Item or tag is a load error naming the Recipe.
+
+```toml
+[[recipes]]
+inputs = [{ item = "plain:rock", count = 4 }]
+output = { item = "plain:workbench", count = 1 }
+station = "hand"
+
+[[recipes]]
+inputs = [{ item = "plain:rock", count = 8 }]
+output = { item = "plain:chest", count = 1 }
+station = "workbench"
+```
+
+A Craft is instant, takes its inputs from the Inventory and gives to it, drops
+what does not fit at the Player, and never enters the undo journal. The
+[authoring guide](authoring-guide.md#recipes-and-usable-voxels) sets hand and
+Station Recipes side by side.
+
 ### Non-Voxel Causes and Biome audio
 
 Only the Game declares `cause-sounds`: each row binds `cause` to a Sound's full
@@ -372,7 +401,9 @@ name in `sound`. The closed Causes are `splash`, `burn`, `swimming`, `floating`,
 `pickup`, `use-measured`, `use-refused`, `eat`, `hurt`, `death`, `door-open`,
 `door-close`, `container-open`, `container-close` and `craft`. Unbound Causes
 are silent; duplicate bindings and non-Effects Sounds are refused. The Server
-emits these events.
+emits these events. `door-open` and `door-close` sound at the Door,
+`container-open` and `container-close` at the Container, and `craft` at the
+Player, once per landed action and never for a refusal.
 
 A Biome may set `soundscape` to a loaded Soundscape's full name, including one
 from a data-only Mod without a context. Unknown names are refused. The Eye

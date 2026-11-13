@@ -22,12 +22,23 @@ no UI, so nothing crosses the contract per frame or per click.
 
 A Door's state is its Material: Use swaps the closed and open Materials of the
 vertical run it belongs to, at most 4 Voxels, as an Edit that never enters the
-undo journal. Saving, meshing, collision and light need nothing new.
+undo journal. Saving, meshing and light need nothing new. Collision needs one
+rule: `Tables::blocks` lets bodies pass through a Door's open Material, while
+rays still stop on it, so it can be aimed at, used and broken. The open Material
+gets no implicit Item and cannot be placed; removing it drops the closed one's
+Item.
 
 A Container's Stacks live outside the Chunk, keyed by Voxel position, and are
 saved as an additive list in the World commit. A Player's Remove of a Container
-that holds Stacks is refused, and so is an undo or redo that would remove one;
-anything else that removes it spills the Stacks as Dropped items.
+that holds Stacks is refused, and so is an undo or redo that would remove one.
+Anything else that removes it spills the Stacks as Dropped items: the Server
+checks every held Container each tick, and one whose Voxel is no longer a
+Container spills there, as does what no longer fits when a smaller Container
+replaces it.
+
+Station and Container sessions close when the Voxel changes or the Player leaves
+Edit reach of it, measured from the Eye to the Voxel's nearest point, so a
+session opened at the edge of reach does not close at once.
 
 Rejected:
 
@@ -44,7 +55,8 @@ Rejected:
 
 ## Consequences
 
-Container sessions are the first per-Voxel Server state outside the Chunk. Every
-path that removes or replaces a Voxel (edit, Mod Commands, burning, undo) must
-check for a Container: refuse for the Player's own Remove and history, spill
-otherwise.
+Container sessions are the first per-Voxel Server state outside the Chunk. The
+Player's own Remove and history check for a Container and refuse. Spilling is
+polled rather than hooked into each path that removes or replaces a Voxel (edit,
+Mod Commands, burning), so a new path is covered without change, at the cost of
+a lookup per held Container per tick.

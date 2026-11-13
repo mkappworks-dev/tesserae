@@ -553,7 +553,7 @@ controls, movement, save, camera and input work already in flight is tracked in
 | 13  | Biomes, richer worldgen | Biome and climate seam, generator version pinned in the save                                      | Biomes, ores, surface features     | -          | Done            |
 | 14  | Audio                   | Server-driven events, metre attenuation, mixing, Soundscapes and Audio settings                   | CC0 Terra sounds and music         | -          | Done            |
 | 15  | Inventory               | Server-owned transactions that compose with the undo journal, save                                | Stack sizes, item rules            | 11, 12     | Done            |
-| 16  | Crafting                | Recipe schema, station interaction, Use on Voxels (doors, containers), UI host                    | Recipes, stations                  | 15         | Not started     |
+| 16  | Crafting                | Recipe schema, station interaction, Use on Voxels (doors, containers), UI host                    | Recipes, stations                  | 15         | Done            |
 | 17  | Weather                 | Weather state and tick, particles, sky hooks                                                      | Weather types, climate rules       | 13         | Not started     |
 | 18  | Plants                  | Growth on the Server tick, placement rules, harvesting                                            | Plant data                         | 13         | Not started     |
 | 19  | Map, compass            | Server-provided summaries (the Client never reads World storage), map view                        | Map style, markers                 | 13         | Not started     |
@@ -602,6 +602,22 @@ Notes:
   beside the Inventory and gives Items. Games declare stack limits (`max-stack`,
   64 when absent). See
   [ADR-0023](docs/adr/0023-the-inventory-is-server-owned-and-pays-inside-the-undo-journal.md).
+- **Step 16** is done. A Game or Mod declares Recipes as data (1 to 9 inputs,
+  one output, and a required `station` that is `"hand"` or a Station's tag) and
+  Usable Voxels as `voxel-uses` rows of a closed kind: a Door (a closed and an
+  open Material), a Container (1 to 54 slots) or a Station (a tag). The Server
+  runs each kind natively. Use runs a held Tool, else the Usable Voxel aimed at
+  in reach, else eats. A Door toggles its vertical run outside the undo journal;
+  bodies pass through its open Material. A Station session allows its tag's
+  Recipes; a Container's Stacks live outside the Chunk, are saved in the World
+  commit, are refused to the Player's Remove and history while full, and spill
+  when anything else removes them. Crafting is instant and never journalled. The
+  Inventory window gains a Crafting tab and a compact item details panel; Terra
+  ships a Workbench, Chest and Door with CC0 sounds. See
+  [ADR-0026](docs/adr/0026-usable-voxels-are-declared-kinds-the-server-runs.md)
+  and the 2026-11-13 amendment to
+  [ADR-0023](docs/adr/0023-the-inventory-is-server-owned-and-pays-inside-the-undo-journal.md).
+  Spec and tickets: `.scratch/2026-11-13-phase-16-crafting/`.
 - **Step 21** is done. A World has a default game mode and each Player their
   own, Creative or Survival; Edit World's changes wait in the sidecar until the
   Server applies them at the next open

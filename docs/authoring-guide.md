@@ -132,8 +132,8 @@ at every level, naming the Mod. Absent optional tables mean _none_, never a
 default; the single exception is the numeric fields of a present `[world]`,
 which take the Engine's terrain values. Omitted lists are empty.
 
-Only a Game may declare `world`, `view` and `tools`, except that a Mod may
-supply `world.character` alone
+Only a Game may declare `world`, `view`, `tools` and `cause-sounds`, except that
+a Mod may supply `world.character` alone
 ([ADR-0021](adr/0021-a-mod-may-supply-the-character.md)). Any Mod may add
 `[[biomes]]` and `[[ores]]` to the Game's World, in load order, a Biome's id
 being its place in that order; only the Game declares `[world.climate]`. A Biome
@@ -183,6 +183,9 @@ underwater (see [Data Mods](data-mods.md)).
 | `[[sounds]]`                | `name`, `category`, `recordings` (at least one, each `file`: an Ogg Vorbis path, `weight`), `volume` and `pitch` (each `min`, `max`), optional `distance` (`reference-m`, `max-m`: required for `effects`, refused for the others)                                                                                                                            |
 | `[[sound-sets]]`            | `name`, optional `break`, `place`, `hit`, `step`, `land`: each an `effects` Sound by full name                                                                                                                                                                                                                                                                |
 | `[[material-sounds]]`       | `material`, `sound-set`: both by full name; at most one Sound set per Material in a World                                                                                                                                                                                                                                                                     |
+| `[[recipes]]`               | `inputs` (1 to 9 different Items, each `item`: by full name, `count`: at least 1), `output` (`item`, `count`: 1 to the Item's `max-stack`), `station` (`"hand"` or a Station's tag); 256 per Mod, 1024 in a World                                                                                                                                             |
+| `[[voxel-uses]]`            | `kind`, `material` (solid, by full name), then by kind: `open` for a `door` (solid, by full name), optional `slots` for a `container` (1 to 54; omitted is 27), `tag` for a `station`; 64 per Mod                                                                                                                                                             |
+| `[[cause-sounds]]` (Game)   | `cause`, `sound` (an `effects` Sound by full name); each Cause at most once                                                                                                                                                                                                                                                                                   |
 | `[[soundscapes]]`           | `name`, optional `context` (Game only, at most one each), `beds` (at most 8, each `sound`: an `ambient` Sound by full name, `volume`: 0 to 1), `music` (at most 8 `music` Sounds by full name), optional `silence-s` (`min`, `max`: 0 to 3600 s, default 60 to 180); 16 per Mod                                                                               |
 
 Variants: `occlusion` is `opaque`, `same-material` or `never`; `render` is
@@ -190,15 +193,18 @@ Variants: `occlusion` is `opaque`, `same-material` or `never`; `render` is
 `music`; a Soundscape `context` is `default`, `underground` or `underwater`; a
 bone `role` is `body`, `head`, `arm-left`, `arm-right`, `leg-left`, `leg-right`
 or `fixed`; a reactant `state` is `any`, `source` or `flowing`; `consumed` and
-`receiving` are `first` or `second`; a tool `kind` is `measure`. A combustion
-`end` is `"permanent"` or `{ after = { seconds = 8, residue = "mod:ash" } }`,
-and an omitted `residue` removes the solid.
+`receiving` are `first` or `second`; a tool `kind` is `measure`; a voxel-use
+`kind` is `door`, `container` or `station`. A combustion `end` is `"permanent"`
+or `{ after = { seconds = 8, residue = "mod:ash" } }`, and an omitted `residue`
+removes the solid.
 
 Materials, Shapes, Biomes, Sounds, Sound sets and Soundscapes are declared by
 local name. Ground, water, fluid, reaction, combustion, ore and surface feature
-names, the Biomes an ore lists, and the names in Sound sets, `material-sounds`
-and Soundscapes, are full `<mod id>:<name>` names and resolve after every Mod
-has declared, whether the Material came from data or from a component.
+names, the Biomes an ore lists, the names in Sound sets, `material-sounds` and
+Soundscapes, and the Items and Materials in `recipes` and `voxel-uses`, are full
+`<mod id>:<name>` names and resolve after every Mod has declared, whether the
+Material came from data or from a component. A Recipe may name a Material's
+implicit Item, which has the Material's full name.
 
 ### A Declaration using every table
 
@@ -253,6 +259,38 @@ emission = 0
 dimming = 15
 occlusion = "opaque"
 render = "opaque"
+solid = true
+
+[[materials]]
+name = "bench"
+emission = 0
+dimming = 15
+occlusion = "opaque"
+render = "opaque"
+solid = true
+
+[[materials]]
+name = "crate"
+emission = 0
+dimming = 15
+occlusion = "opaque"
+render = "opaque"
+solid = true
+
+[[materials]]
+name = "hatch"
+emission = 0
+dimming = 15
+occlusion = "opaque"
+render = "opaque"
+solid = true
+
+[[materials]]
+name = "hatch_open"
+emission = 0
+dimming = 0
+occlusion = "never"
+render = "blend"
 solid = true
 
 [[shapes]]
@@ -424,6 +462,10 @@ distance = { reference-m = 2.0, max-m = 24.0 }
 name = "rock"
 break = "showcase:crack"
 
+[[cause-sounds]]
+cause = "craft"
+sound = "showcase:crack"
+
 [[material-sounds]]
 material = "showcase:stone"
 sound-set = "showcase:rock"
@@ -453,9 +495,76 @@ silence-s = { min = 60.0, max = 180.0 }
 name = "cave"
 context = "underground"
 beds = [{ sound = "showcase:wind", volume = 0.2 }]
+
+[[voxel-uses]]
+kind = "station"
+material = "showcase:bench"
+tag = "bench"
+
+[[voxel-uses]]
+kind = "container"
+material = "showcase:crate"
+slots = 9
+
+[[voxel-uses]]
+kind = "door"
+material = "showcase:hatch"
+open = "showcase:hatch_open"
+
+[[recipes]]
+inputs = [{ item = "showcase:wood", count = 4 }]
+output = { item = "showcase:bench", count = 1 }
+station = "hand"
+
+[[recipes]]
+inputs = [{ item = "showcase:wood", count = 6 }, { item = "showcase:iron", count = 1 }]
+output = { item = "showcase:crate", count = 1 }
+station = "bench"
 ```
 
 Its `mod.toml` is the data-only starter's with `id = "showcase"`.
+
+## Recipes and Usable Voxels
+
+A Recipe is data: the Items a Craft spends, the one Item it makes, and where it
+is crafted. `station` is required. `"hand"` makes a hand Recipe; any other value
+is a Station's tag, so a forgotten field is a load error rather than an
+accidental hand Recipe.
+
+|                  | Hand Recipe                        | Station Recipe                                   |
+| ---------------- | ---------------------------------- | ------------------------------------------------ |
+| Declared as      | `station = "hand"`                 | `station = "workbench"`                          |
+| Block needed     | None: craftable anywhere, any time | A Station of that tag placed in the World        |
+| Opened by        | I, then the Crafting tab           | Aim at the Station and press Use (G)             |
+| Where you can be | Anywhere                           | Within reach of it; walking away closes the pane |
+| Lists            | Hand Recipes only                  | That Station's Recipes only                      |
+
+Both take their inputs from the Inventory and give to it; what does not fit
+drops at the Player. A Craft is instant, makes at most one output Stack, and is
+not an Edit, so undo leaves it alone.
+
+A `voxel-uses` row makes a solid Material usable. The Server runs each kind
+natively; no Mod is called when a Voxel is used
+([ADR-0026](adr/0026-usable-voxels-are-declared-kinds-the-server-runs.md)).
+
+- `door`: Use swaps `material` and `open`, two solid Materials, over the
+  vertical run of up to 4 Voxels of that Door, keeping Shape and Orientation.
+  Bodies pass through the open one; aim, Use and Remove still stop on it. The
+  open Material gets no implicit Item and cannot be placed, and removing it
+  drops the closed one's Item. Draw it open yourself, for example with
+  `render = "blend"` or a cutout texture. Toggling never enters the undo
+  journal.
+- `container`: the Voxel holds `slots` Stacks of its own, shown beside the
+  Inventory. A Player cannot break one that holds Stacks; anything else that
+  removes it spills them as Dropped items.
+- `station`: Use opens the Recipes whose `station` is its `tag`. Materials may
+  share a tag, so another Mod's bench opens the same Recipes. `hand` is
+  reserved.
+
+A Material is in at most one row, as its `material` or as a Door's open one. Any
+Mod may add Recipes for another Mod's Items and Stations; names resolve after
+every Mod has declared, and an unknown Item or tag is a load error naming the
+Recipe. Both starters declare one of each kind and one Recipe of each sort.
 
 ## Artwork
 
@@ -612,7 +721,9 @@ name in `sound`. The closed Causes are `splash`, `burn`, `swimming`, `floating`,
 `pickup`, `use-measured`, `use-refused`, `eat`, `hurt`, `death`, `door-open`,
 `door-close`, `container-open`, `container-close` and `craft`. Unbound Causes
 are silent; duplicate bindings and non-Effects Sounds are refused. The Server
-emits these events.
+emits these events. `door-open` and `door-close` sound at the Door,
+`container-open` and `container-close` at the Container, and `craft` at the
+Player, once per landed action and never for a refusal.
 
 A Biome may set `soundscape` to a loaded Soundscape's full name, including one
 from a data-only Mod without a context. Unknown names are refused. The Eye

@@ -168,11 +168,12 @@ reuse the existing components and tokens.
   "Engine states" group: Hold remove (break progress), Place hint, Measure tool,
   Hold Fire (a hand outside the hotbar) and the four save-status states.
 
-## Crafting, Stations, Containers and Doors (step 16, proposed, awaiting approval)
+## Crafting, Stations, Containers and Doors (step 16)
 
-Illustrates DESIGN.md step 16. Code is in `crafting.js` and `crafting.css`. The
-Wood, Glass, Brick, Workbench, Chest and Door Items and every Recipe are
-illustrative Terra content, not declarations.
+Approved, and implemented in DESIGN.md step 16. Illustrates that step. Code is
+in `crafting.js` and `crafting.css`. The Wood, Glass, Brick, Workbench, Chest
+and Door Items and every Recipe are illustrative Terra content, not
+declarations.
 
 Every Recipe names where it is crafted: `station = "hand"` or a Station's tag.
 The field is required, and `hand` is reserved, so no Station may declare it.

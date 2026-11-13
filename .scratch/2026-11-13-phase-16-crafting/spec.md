@@ -1,4 +1,4 @@
-Status: ready-for-agent
+Status: done
 
 # Phase 16: Crafting, Stations, Containers and Doors
 
@@ -196,7 +196,9 @@ gains two lists, and the `sound-cause` enum grows.
 - `voxel-uses`, from any Mod, at most 64 per Mod. A row names a Material and a
   closed kind:
   - `door`, with an `open` Material. Both are solid Materials. The open one is
-    the passable state the Game draws open.
+    the passable state the Game draws open: collision asks `Tables::blocks`,
+    which lets bodies through it, while rays still stop on it. It gets no implicit Item
+    of its own and cannot be placed.
   - `container`, with `slots` from 1 to 54 (27 when absent).
   - `station`, with a tag. The tag `hand` is reserved and a load error.
 - A Material is at most one kind, and a Material is the closed or open state of
@@ -221,9 +223,10 @@ gains two lists, and the `sound-cause` enum grows.
 
 - Use no longer requires a Tool. The Server resolves Use in this order: a held
   Tool runs; otherwise a Usable Voxel within Edit reach is used; otherwise the
-  selected Stack is eaten. The aim answer's `use_aim` reports the Usable kind
-  and its verb (Open, Close, Use Workbench, Open Chest), or the refusal (out of
-  reach), for the prompt before the press.
+  selected Stack is eaten. A Usable Voxel past Edit reach but within twice it
+  refuses Use as out of reach rather than eating. The aim answer's `use_aim`
+  reports the Usable kind and its verb (Open, Close, Use Workbench, Open Chest),
+  or the refusal (out of reach), for the prompt before the press.
 - Door: Use toggles the aimed Voxel and the vertical run of connected Voxels of
   the same Door, at most 4, as one Edit group that never enters the undo
   journal. Shape and Orientation carry across. Closing into a Player's body is
@@ -238,13 +241,17 @@ gains two lists, and the `sound-cause` enum grows.
   viewing it whenever they change. Inventory intents take a slot address that
   names an Inventory slot or a Container slot; Take all and Sort act on the
   Container. Moves are not Edits and never enter the journal.
-- Sessions close when the Player leaves Edit reach of the Voxel, or the Voxel
-  changes or is removed; the Server tells the Client, which closes the pane with
+- Sessions close when the Player leaves Edit reach of the Voxel, measured from
+  the Eye to the Voxel's nearest point so a session opened at the edge of reach
+  does not close at once, or the Voxel changes or is removed; the Server tells the Client, which closes the pane with
   a notice ("Out of reach of the Chest.").
 - A Player's Remove of a Container that holds Stacks is refused ("Empty the
   Chest first."), and so is an undo or redo that would remove one. Anything else
   that removes or replaces it (a Mod Command, burning) spills its Stacks as
-  Dropped items at the Voxel.
+  Dropped items at the Voxel. Spilling is a per-tick check of every held
+  Container rather than a hook in each removal path: a Voxel that is no longer a
+  Container spills all its Stacks, and a smaller Container spills what no longer
+  fits.
 - Craft: a `Craft { recipe, count }` intent. Count is 1 or "as many as
   affordable". Refused with "Missing items." when nothing is affordable. Output
   that does not fit drops at the Player as Dropped items, reported like an undo

@@ -105,7 +105,13 @@ fn the_data_starter_installs_and_loads_without_a_rust_build() {
     let (_, compiled, found) = load_installed(&outside, "starter_data");
     assert_eq!(found.manifest.api, "0.3");
     let declaration = compiled[0].declaration().unwrap().clone();
-    assert!(declaration.appearance.iter().all(|a| a.texture.is_some()));
+    let textured = |m: &str| {
+        declaration
+            .appearance
+            .iter()
+            .any(|a| a.material == m && a.texture.is_some())
+    };
+    assert!(textured("stone") && textured("turf"));
     registers_ground(declaration, "starter_data");
 }
 

@@ -199,11 +199,11 @@ metres. Drawn terrain shortens it; nothing lengthens an Edit's reach along it.
 **Edit** — a change to one Voxel, its solid or its source, applied by the
 Server. A Client sends an intent; it never makes an Edit.
 
-**Use** — a Player pressing a held Tool's action, or, with no Tool in hand,
-eating the food in the selected Hotbar slot, or, aimed at a Usable Voxel,
-opening or toggling it. Answered by the Server, never applied: it changes no
-Voxel and enters no history, though toggling a Door asks the Server for an Edit.
-Not an Edit, not Sample, and not Pickup.
+**Use** — a Player pressing Use: a held Tool's action; with no Tool in hand,
+using the Usable Voxel aimed at within Edit reach; otherwise eating the food in
+the selected Hotbar slot. Answered by the Server, never applied: it enters no
+history, and changes no Voxel except a Door it toggles. Not an Edit, not Sample,
+and not Pickup.
 
 **Tool** — a thing a Player holds whose Use the Server runs, declared by the
 Game by name and kind. A hand state taken with its own key, not from the
@@ -246,14 +246,17 @@ gives the output together. Not an Edit.
 **Usable Voxel** — a Voxel whose Material is declared a Door, a Container or a
 Station, so Use acts on it.
 
-**Station** — a Material whose Use opens the Recipes that name it, crafted only
-within reach of it. A hand Recipe needs no Station and is crafted from the
-Inventory anywhere.
+**Station** — a Material whose Use opens the Recipes that name its tag, crafted
+only while the Player stays within Edit reach of it. Materials may share a tag.
+A hand Recipe needs no Station and is crafted from the Inventory anywhere.
 
 **Container** — a Material whose Voxel holds Stacks of its own, apart from any
-Player's Inventory.
+Player's Inventory. A Player cannot remove one that holds Stacks; anything else
+that removes it spills them as Dropped items.
 
-**Door** — two Materials, closed and open, that Use toggles between.
+**Door** — two Materials, closed and open, that Use toggles between. Bodies pass
+through the open one; aim still stops on it, and removing it drops the closed
+one's Item.
 
 **Game mode** — Creative or Survival. A World has a default; each Player has
 their own. Both spend an Item per placed Voxel and drop one per removed Voxel;

@@ -214,18 +214,21 @@ Use is a separate Server intent, not an Edit. A Client sends `UseIntent` (the
 crosshair ray, the Tool held, if any, and the target it was shown) and the
 Server answers with `UseOutcome`. The Server resolves it in order: a held Tool
 runs; otherwise a Usable Voxel in Edit reach is used; otherwise the selected
-Stack is eaten. The aim answer's `use_aim` previews the Tool's action or the
-Usable Voxel's verb, or why not, so the prompt under the reticle can say it
-before the press. A Tool changes no Voxel; a Door toggles its vertical run as an
-Edit group that never enters the undo journal; a Station opens a session, held
-while the Player stays in Edit reach and the Voxel unchanged, that allows Crafts
-of the Recipes at its tag; a Container opens a session too, and the Server sends
-its Stacks whole to every viewer whenever they change. A Container's Stacks live
-outside the Chunk, keyed by Voxel position, and the Server polls each held one
-every tick: a Voxel that is no longer its Container, whatever removed it, spills
-them as Dropped items. A target that changed since it was shown is refused
-rather than re-aimed. The Server keeps no measurement: the Client holds the
-corners it was told, so no Client system reads World state.
+Stack is eaten; a Usable Voxel just past reach refuses rather than eats. The aim
+answer's `use_aim` previews the Tool's action or the Usable Voxel's verb, or why
+not, so the prompt under the reticle can say it before the press. A Tool changes
+no Voxel; a Door toggles its vertical run, at most 4 Voxels, as an Edit group
+that never enters the undo journal, and collision (`Tables::blocks`) lets bodies
+through its open Material while rays stop on it; a Station opens a session, held
+while the Player stays in Edit reach, measured to the Voxel's nearest point, and
+the Voxel unchanged, that allows Crafts of the Recipes at its tag; a Container
+opens a session too, and the Server sends its Stacks whole to every viewer
+whenever they change. A Container's Stacks live outside the Chunk, keyed by
+Voxel position, and the Server polls each held one every tick: a Voxel that is
+no longer its Container, whatever removed it, spills them as Dropped items. A
+target that changed since it was shown is refused rather than re-aimed. The
+Server keeps no measurement: the Client holds the corners it was told, so no
+Client system reads World state.
 
 A Game declares its Tools once, as `tool-def` rows (a name and a closed kind) in
 the Declaration. The Server runs the kind in native code, so no Mod is called

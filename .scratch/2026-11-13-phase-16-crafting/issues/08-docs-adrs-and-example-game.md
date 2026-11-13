@@ -1,6 +1,6 @@
 # 08: Docs, ADRs and the Example Game
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 01, 02, 03, 04, 05, 06, 07
 
@@ -19,7 +19,7 @@ Done.
 
 ## Acceptance criteria
 
-- [ ] Every new row and Cause is documented where Mod authors look.
-- [ ] The Example Game loads, and its starter test passes.
-- [ ] ADR-0026, the ADR-0023 amendment and GLOSSARY.md match the code.
-- [ ] DESIGN.md step 16 is Done; `npm run fmt:check` passes.
+- [x] Every new row and Cause is documented where Mod authors look.
+- [x] The Example Game loads, and its starter test passes.
+- [x] ADR-0026, the ADR-0023 amendment and GLOSSARY.md match the code.
+- [x] DESIGN.md step 16 is Done; `npm run fmt:check` passes.
