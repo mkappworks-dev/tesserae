@@ -1,6 +1,6 @@
 # 01: Slot rules work across two slot sets
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: None (can start immediately)
 
@@ -16,8 +16,8 @@ nothing outside `tesserae-core` changes behaviour.
 
 ## Acceptance criteria
 
-- [ ] Move, merge, swap, split, quick transfer and sort are expressed once over
+- [x] Move, merge, swap, split, quick transfer and sort are expressed once over
       a pair of slot sets.
-- [ ] A unit test moves, merges and quick-transfers between an Inventory and a
+- [x] A unit test moves, merges and quick-transfers between an Inventory and a
       second slot set of another length.
-- [ ] Every existing Inventory, Server and save test passes unchanged.
+- [x] Every existing Inventory, Server and save test passes unchanged.
