@@ -1,6 +1,6 @@
 # 06: Item details: compact, with Shape previews
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: None (can start immediately)
 
@@ -17,9 +17,9 @@ its own row while moving. The panel never scrolls at the default window size.
 
 ## Acceptance criteria
 
-- [ ] The panel fits without scrolling at the default window size and at 100%
+- [x] The panel fits without scrolling at the default window size and at 100%
       text.
-- [ ] Each Shape chip previews the Item in that Shape and selecting it changes
+- [x] Each Shape chip previews the Item in that Shape and selecting it changes
       the header icon and the Player's Shape choice.
-- [ ] The actions behave as before.
-- [ ] A review-only screenshot matches the mockup.
+- [x] The actions behave as before.
+- [x] A review-only screenshot matches the mockup.
