@@ -1,107 +1,623 @@
-.direction-label{color:#b9bec4;font-size:11px;letter-spacing:.16em;margin-right:auto}
-.game{--panel:#30373d;--panel-raised:#414b53;--edge:#939da3;--ink:#f7f4ec;--muted:#cbd0d1;--leaf:#c1cdb5;--leaf-ink:#161b16;--text-scale:1}
-.game #landscape{filter:saturate(.78) brightness(1.06);transform:scale(1.01)}
-.game[data-view=wizard] #landscape,.game[data-view=settings] #landscape,.game[data-view=edit] #landscape,.game[data-view=mods-library] #landscape{filter:saturate(.66) brightness(1.04) blur(1.5px)}
-.game[data-view=pause] #landscape{filter:saturate(.7) brightness(1.04) blur(1.5px)}
-.game .sheet,.game .rail,.game .continue-card,.game .pause-panel,.game .dialog{background:var(--panel)}
-.game .editor{background:#3b444c}
-.game .rail button.active{border-color:#858d84;background:#515d66}
-.game .rail button.active:after{content:'›';font-size:20px;margin-left:auto;color:var(--ink)}
-.game .rail .number{border-color:#989c9f}
-.game .rail .active .number{background:#dce3d4;color:#181c19;border-color:#dce3d4}
-.game .biome-card.selected{border-color:#c0c7bb;box-shadow:inset 3px 0 #c0c7bb}
-.game .game-pick.selected{border-color:#c0c7bb;box-shadow:inset 0 -3px #c0c7bb}
-.game .btn,.game .input,.game .game-pick,.game .rail button{font-size:calc(16px * var(--text-scale));min-height:44px}
-.game .btn.small{min-height:44px;padding:8px 12px;font-size:calc(14px * var(--text-scale))}
-.game .muted,.game small,.game .summary-list,.game .notice,.game .field-label>small,.game .editor small,.game .setting-copy small{font-size:calc(14px * var(--text-scale));line-height:1.6;color:var(--muted)}
-.game .field-label,.game .editor .field-label,.game .setting-copy b,.game .summary-card h3,.game summary,.game .library-tabs button{font-size:calc(16px * var(--text-scale))}
-.game .game-pick b,.game .biome-card b,.game .mod-card b,.game .world-card h3{font-size:calc(16px * var(--text-scale))}
-.game .biome-card small,.game .game-pick small,.game .world-card small,.game .mod-card small,.game .axis-label,.game .pill{font-size:calc(13px * var(--text-scale))}
-.game .eyebrow,.game .section-label,.game .rail-title,.game .rail-note,.game .footer-hint{font-size:calc(12px * var(--text-scale))}
-.game .sheet-header h2{font-size:calc(28px * var(--text-scale))}
-.game .editor h3,.game .summary-card p{font-size:calc(19px * var(--text-scale))}
-.game .input::placeholder{color:#aeb2b8;opacity:1}
-.game .input:disabled{color:#aeb2b8;opacity:1}
-.game button:disabled{opacity:1;background:#292c30;color:#b2b6bc;border-color:#62666c}
-.game .btn.primary{background:#c1cdb5;border-color:#c1cdb5;color:#161b16}
-.game .btn.danger{background:#302426;border-color:#bc8e86;color:#f4c3ba}
-.game .btn:hover:not(:disabled){background:#53616b;filter:none}
-.game .btn.primary:hover:not(:disabled){background:#d4dec9}
-.game :is(button,input,select,summary,[tabindex]):focus-visible{outline:3px solid #e2d5ab;outline-offset:3px}
-.game :is(button,input,select,summary){scroll-margin-block:14px}
-.game .home-actions{background:rgba(44,52,59,.94);padding:10px;border:1px solid #62666c;border-radius:8px;backdrop-filter:blur(12px) saturate(.3);width:300px}
-.game .home p:not(.eyebrow){font-size:calc(16px * var(--text-scale));color:#d1d1d0;text-shadow:0 1px 5px #000}
-.game .home .eyebrow{color:#dddeda;text-shadow:0 1px 5px #000}
-.game .body{scrollbar-color:#7c8086 #222428;scrollbar-width:auto;scroll-padding:14px}
-.game .library-tabs button{min-height:44px}
-.game .setting-row{gap:20px;align-items:center}
-.game .setting-slider output{font-size:calc(14px * var(--text-scale));width:42px}
-.game .setting-slider{width:205px}
-.game .toggle,.game .choice input,.game .mod-card input{width:24px;height:24px;accent-color:#a8b5a2}
-.game .biome-card{position:relative;padding-left:39px}
-.game .biome-card input{position:absolute;left:1px;width:36px;height:44px;margin:0;appearance:none;cursor:pointer}
-.game .biome-card input:before{content:'';position:absolute;left:8px;top:13px;width:18px;height:18px;border:1px solid #aab0b4;border-radius:3px;background:#202226}
-.game .biome-card input:checked:before{content:'✓';color:#182018;background:#c1cdb5;display:grid;place-items:center;font-size:15px}
-.game .biome-card button{min-height:44px}
-.game .sheet-header{padding-top:20px;padding-bottom:18px}
-.game .sheet-footer{min-height:76px}
-.game .body>.validation-summary{position:sticky;top:0;z-index:2;background:#302426;border:1px solid #bc8e86;color:#f4c3ba;border-radius:5px;padding:12px;margin:0 0 18px;font-size:16px;line-height:1.5}
-.game .overlay{backdrop-filter:blur(4px)}
-.game.no-transparency .home-actions{background:#17181a;backdrop-filter:none}
-.game.no-transparency #landscape,.game.no-transparency .shade{display:none}
-.game.no-transparency{background:#101113}
-.game.large-text .biome-layout,.game.large-text .two-col{grid-template-columns:1fr}
-.game.large-text .game-picks{grid-template-columns:repeat(2,minmax(0,1fr))}
-.game.large-text .setting-row{align-items:flex-start;flex-wrap:wrap}
-.game.large-text .setting-copy{flex-basis:100%}
-.game.large-text .rail{flex-basis:205px;width:205px}
-.game.large-text .sheet-footer{flex-wrap:wrap}
-.game.strong-contrast{--panel:#111212;--muted:#f7f4ec;--edge:#a2a6ad}
-.game.strong-contrast .muted,.game.strong-contrast small{color:#f7f4ec}
-@media(prefers-reduced-motion:reduce){.game *{transition:none!important;scroll-behavior:auto!important}}
-@media(prefers-reduced-transparency:reduce){.game .home-actions{background:#17181a;backdrop-filter:none}}
-.assessment.audit{display:block;max-width:1140px}
-.audit-intro{max-width:800px}.audit-intro p{color:var(--muted-foreground,#adb2ba)}
-.audit-table-wrap{overflow:auto;max-width:100%}
-.audit-table{width:100%;border-collapse:collapse;font-size:13px;margin:24px 0}
-.audit-table th,.audit-table td{padding:12px 10px;text-align:left;border-bottom:1px solid var(--border,#3a3d42);vertical-align:top}
-.audit-table th{font-weight:500;color:var(--muted-foreground,#adb2ba)}
-.audit-table td:last-child{color:var(--muted-foreground,#adb2ba);min-width:220px;font-size:12px}
-.audit-meter{width:75px;height:5px;background:var(--secondary,#34373c);margin-top:6px}
-.audit-meter span{height:5px;display:block;background:var(--chart-1,#a8b5a2)}
-.audit-summary{display:flex;gap:22px;flex-wrap:wrap;margin:25px 0;padding:20px;background:var(--card,#1c1e21);border:1px solid var(--border,#3a3d42);border-radius:8px}
-.audit-summary strong{font-size:26px;display:block;margin-top:6px}.audit-summary small{color:var(--muted-foreground,#adb2ba)}
-@media(max-width:1100px){.game .biome-layout{grid-template-columns:1fr}.game .biome-list{grid-template-columns:1fr 1fr}.game .rail{width:160px;flex-basis:160px}.game .settings-rail{width:180px;flex-basis:180px}}
-@media(max-width:750px){.game .workspace{flex-direction:column;gap:10px}.game .rail,.game.large-text .rail{width:100%;flex:0 0 auto;align-self:stretch;flex-direction:row;flex-wrap:wrap;max-height:135px;padding:7px;gap:4px}.game .rail-title,.game .rail-note{display:none}.game .rail button{flex:1;min-height:44px;font-size:14px;padding:8px 5px;gap:5px}.game .rail button.active:after{display:none}.game .settings-rail button{flex:1 0 29%;font-size:14px}.game .setting-slider{width:170px}.game .body{padding:16px}.game .two-col{grid-template-columns:1fr}.game .sheet-footer{padding:12px 15px;gap:8px}.game .sheet-footer .btn{font-size:14px}.game .sheet-header h2{font-size:calc(23px * var(--text-scale))}.game .rail .number{width:18px;height:18px;flex-shrink:0}.game .game-picks{grid-template-columns:repeat(2,minmax(0,1fr))}.game .game-footer{font-size:10px;letter-spacing:0}.game .game-footer>span:first-child{display:none}.game .game-footer>span:nth-child(2){margin:auto}.game .biome-list{grid-template-columns:1fr}.game .continue-card{position:static;margin-top:24px}.game .home{justify-content:flex-start;padding-top:25px}.game .home h1{font-size:44px}.game .home p:not(.eyebrow){font-size:16px}.game .home-actions{width:100%;max-width:310px}.game .edition{display:none}.game .setting-row>.input{max-width:160px}.game .world-card .land-mini{display:none}.game .mod-card .pill{display:none}.game .dialog .row{flex-wrap:wrap}.game .game-header{height:60px}.game .world-card h3{overflow-wrap:anywhere}}
-.game .biome-card{padding-left:48px}
-.game .biome-card input{width:44px}
-.game .biome-card input:before{left:13px}
-.game .icon-button{min-width:44px;min-height:44px}
-.game .body>.validation-summary{position:static}
-.game .input{background:#252d34;border-color:#9ba6ad}
-.game .input:disabled{background:#363f46;border-color:#7e8a92;color:#cbd0d1}
-@media(max-width:750px){
-  .game .rail{overflow-y:auto}
-  .game .rail button,.game .settings-rail button{font-size:calc(14px * var(--text-scale));white-space:normal}
-  .game .sheet-footer{flex-wrap:wrap}
-  .game .sheet-footer .btn{font-size:calc(14px * var(--text-scale))}
+.direction-label {
+  color: #b9bec4;
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  margin-right: auto;
 }
-.game .body>.scrolling-header{padding:0 0 18px;margin-bottom:20px}
-.game.large-text .body .btn{white-space:normal;max-width:100%;text-align:center}
+.game {
+  --panel: #30373d;
+  --panel-raised: #414b53;
+  --edge: #939da3;
+  --ink: #f7f4ec;
+  --muted: #cbd0d1;
+  --leaf: #c1cdb5;
+  --leaf-ink: #161b16;
+  --text-scale: 1;
+}
+.game #landscape {
+  filter: saturate(0.78) brightness(1.06);
+  transform: scale(1.01);
+}
+.game[data-view="wizard"] #landscape,
+.game[data-view="settings"] #landscape,
+.game[data-view="edit"] #landscape,
+.game[data-view="mods-library"] #landscape {
+  filter: saturate(0.66) brightness(1.04) blur(1.5px);
+}
+.game[data-view="pause"] #landscape {
+  filter: saturate(0.7) brightness(1.04) blur(1.5px);
+}
+.game .sheet,
+.game .rail,
+.game .continue-card,
+.game .pause-panel,
+.game .dialog {
+  background: var(--panel);
+}
+.game .editor {
+  background: #3b444c;
+}
+.game .rail button.active {
+  border-color: #858d84;
+  background: #515d66;
+}
+.game .rail button.active:after {
+  content: "›";
+  font-size: 20px;
+  margin-left: auto;
+  color: var(--ink);
+}
+.game .rail .number {
+  border-color: #989c9f;
+}
+.game .rail .active .number {
+  background: #dce3d4;
+  color: #181c19;
+  border-color: #dce3d4;
+}
+.game .biome-card.selected {
+  border-color: #c0c7bb;
+  box-shadow: inset 3px 0 #c0c7bb;
+}
+.game .game-pick.selected {
+  border-color: #c0c7bb;
+  box-shadow: inset 0 -3px #c0c7bb;
+}
+.game .btn,
+.game .input,
+.game .game-pick,
+.game .rail button {
+  font-size: calc(16px * var(--text-scale));
+  min-height: 44px;
+}
+.game .btn.small {
+  min-height: 44px;
+  padding: 8px 12px;
+  font-size: calc(14px * var(--text-scale));
+}
+.game .muted,
+.game small,
+.game .summary-list,
+.game .notice,
+.game .field-label > small,
+.game .editor small,
+.game .setting-copy small {
+  font-size: calc(14px * var(--text-scale));
+  line-height: 1.6;
+  color: var(--muted);
+}
+.game .field-label,
+.game .editor .field-label,
+.game .setting-copy b,
+.game .summary-card h3,
+.game summary,
+.game .library-tabs button {
+  font-size: calc(16px * var(--text-scale));
+}
+.game .game-pick b,
+.game .biome-card b,
+.game .mod-card b,
+.game .world-card h3 {
+  font-size: calc(16px * var(--text-scale));
+}
+.game .biome-card small,
+.game .game-pick small,
+.game .world-card small,
+.game .mod-card small,
+.game .axis-label,
+.game .pill {
+  font-size: calc(13px * var(--text-scale));
+}
+.game .eyebrow,
+.game .section-label,
+.game .rail-title,
+.game .rail-note,
+.game .footer-hint {
+  font-size: calc(12px * var(--text-scale));
+}
+.game .sheet-header h2 {
+  font-size: calc(28px * var(--text-scale));
+}
+.game .editor h3,
+.game .summary-card p {
+  font-size: calc(19px * var(--text-scale));
+}
+.game .input::placeholder {
+  color: #aeb2b8;
+  opacity: 1;
+}
+.game .input:disabled {
+  color: #aeb2b8;
+  opacity: 1;
+}
+.game button:disabled {
+  opacity: 1;
+  background: #292c30;
+  color: #b2b6bc;
+  border-color: #62666c;
+}
+.game .btn.primary {
+  background: #c1cdb5;
+  border-color: #c1cdb5;
+  color: #161b16;
+}
+.game .btn.danger {
+  background: #302426;
+  border-color: #bc8e86;
+  color: #f4c3ba;
+}
+.game .btn:hover:not(:disabled) {
+  background: #53616b;
+  filter: none;
+}
+.game .btn.primary:hover:not(:disabled) {
+  background: #d4dec9;
+}
+.game :is(button, input, select, summary, [tabindex]):focus-visible {
+  outline: 3px solid #e2d5ab;
+  outline-offset: 3px;
+}
+.game :is(button, input, select, summary) {
+  scroll-margin-block: 14px;
+}
+.game .home-actions {
+  background: rgba(44, 52, 59, 0.94);
+  padding: 10px;
+  border: 1px solid #62666c;
+  border-radius: 8px;
+  backdrop-filter: blur(12px) saturate(0.3);
+  width: 300px;
+}
+.game .home p:not(.eyebrow) {
+  font-size: calc(16px * var(--text-scale));
+  color: #d1d1d0;
+  text-shadow: 0 1px 5px #000;
+}
+.game .home .eyebrow {
+  color: #dddeda;
+  text-shadow: 0 1px 5px #000;
+}
+.game .body {
+  scrollbar-color: #7c8086 #222428;
+  scrollbar-width: auto;
+  scroll-padding: 14px;
+}
+.game .library-tabs button {
+  min-height: 44px;
+}
+.game .setting-row {
+  gap: 20px;
+  align-items: center;
+}
+.game .setting-slider output {
+  font-size: calc(14px * var(--text-scale));
+  width: 42px;
+}
+.game .setting-slider {
+  width: 205px;
+}
+.game .toggle,
+.game .choice input,
+.game .mod-card input {
+  width: 24px;
+  height: 24px;
+  accent-color: #a8b5a2;
+}
+.game .biome-card {
+  position: relative;
+  padding-left: 39px;
+}
+.game .biome-card input {
+  position: absolute;
+  left: 1px;
+  width: 36px;
+  height: 44px;
+  margin: 0;
+  appearance: none;
+  cursor: pointer;
+}
+.game .biome-card input:before {
+  content: "";
+  position: absolute;
+  left: 8px;
+  top: 13px;
+  width: 18px;
+  height: 18px;
+  border: 1px solid #aab0b4;
+  border-radius: 3px;
+  background: #202226;
+}
+.game .biome-card input:checked:before {
+  content: "✓";
+  color: #182018;
+  background: #c1cdb5;
+  display: grid;
+  place-items: center;
+  font-size: 15px;
+}
+.game .biome-card button {
+  min-height: 44px;
+}
+.game .sheet-header {
+  padding-top: 20px;
+  padding-bottom: 18px;
+}
+.game .sheet-footer {
+  min-height: 76px;
+}
+.game .body > .validation-summary {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: #302426;
+  border: 1px solid #bc8e86;
+  color: #f4c3ba;
+  border-radius: 5px;
+  padding: 12px;
+  margin: 0 0 18px;
+  font-size: 16px;
+  line-height: 1.5;
+}
+.game .overlay {
+  backdrop-filter: blur(4px);
+}
+.game.no-transparency .home-actions {
+  background: #17181a;
+  backdrop-filter: none;
+}
+.game.no-transparency #landscape,
+.game.no-transparency .shade {
+  display: none;
+}
+.game.no-transparency {
+  background: #101113;
+}
+.game.large-text .biome-layout,
+.game.large-text .two-col {
+  grid-template-columns: 1fr;
+}
+.game.large-text .game-picks {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.game.large-text .setting-row {
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+.game.large-text .setting-copy {
+  flex-basis: 100%;
+}
+.game.large-text .rail {
+  flex-basis: 205px;
+  width: 205px;
+}
+.game.large-text .sheet-footer {
+  flex-wrap: wrap;
+}
+.game.strong-contrast {
+  --panel: #111212;
+  --muted: #f7f4ec;
+  --edge: #a2a6ad;
+}
+.game.strong-contrast .muted,
+.game.strong-contrast small {
+  color: #f7f4ec;
+}
+@media (prefers-reduced-motion: reduce) {
+  .game * {
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .game .home-actions {
+    background: #17181a;
+    backdrop-filter: none;
+  }
+}
+.assessment.audit {
+  display: block;
+  max-width: 1140px;
+}
+.audit-intro {
+  max-width: 800px;
+}
+.audit-intro p {
+  color: var(--muted-foreground, #adb2ba);
+}
+.audit-table-wrap {
+  overflow: auto;
+  max-width: 100%;
+}
+.audit-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  margin: 24px 0;
+}
+.audit-table th,
+.audit-table td {
+  padding: 12px 10px;
+  text-align: left;
+  border-bottom: 1px solid var(--border, #3a3d42);
+  vertical-align: top;
+}
+.audit-table th {
+  font-weight: 500;
+  color: var(--muted-foreground, #adb2ba);
+}
+.audit-table td:last-child {
+  color: var(--muted-foreground, #adb2ba);
+  min-width: 220px;
+  font-size: 12px;
+}
+.audit-meter {
+  width: 75px;
+  height: 5px;
+  background: var(--secondary, #34373c);
+  margin-top: 6px;
+}
+.audit-meter span {
+  height: 5px;
+  display: block;
+  background: var(--chart-1, #a8b5a2);
+}
+.audit-summary {
+  display: flex;
+  gap: 22px;
+  flex-wrap: wrap;
+  margin: 25px 0;
+  padding: 20px;
+  background: var(--card, #1c1e21);
+  border: 1px solid var(--border, #3a3d42);
+  border-radius: 8px;
+}
+.audit-summary strong {
+  font-size: 26px;
+  display: block;
+  margin-top: 6px;
+}
+.audit-summary small {
+  color: var(--muted-foreground, #adb2ba);
+}
+@media (max-width: 1100px) {
+  .game .biome-layout {
+    grid-template-columns: 1fr;
+  }
+  .game .biome-list {
+    grid-template-columns: 1fr 1fr;
+  }
+  .game .rail {
+    width: 160px;
+    flex-basis: 160px;
+  }
+  .game .settings-rail {
+    width: 180px;
+    flex-basis: 180px;
+  }
+}
+@media (max-width: 750px) {
+  .game .workspace {
+    flex-direction: column;
+    gap: 10px;
+  }
+  .game .rail,
+  .game.large-text .rail {
+    width: 100%;
+    flex: 0 0 auto;
+    align-self: stretch;
+    flex-direction: row;
+    flex-wrap: wrap;
+    max-height: 135px;
+    padding: 7px;
+    gap: 4px;
+  }
+  .game .rail-title,
+  .game .rail-note {
+    display: none;
+  }
+  .game .rail button {
+    flex: 1;
+    min-height: 44px;
+    font-size: 14px;
+    padding: 8px 5px;
+    gap: 5px;
+  }
+  .game .rail button.active:after {
+    display: none;
+  }
+  .game .settings-rail button {
+    flex: 1 0 29%;
+    font-size: 14px;
+  }
+  .game .setting-slider {
+    width: 170px;
+  }
+  .game .body {
+    padding: 16px;
+  }
+  .game .two-col {
+    grid-template-columns: 1fr;
+  }
+  .game .sheet-footer {
+    padding: 12px 15px;
+    gap: 8px;
+  }
+  .game .sheet-footer .btn {
+    font-size: 14px;
+  }
+  .game .sheet-header h2 {
+    font-size: calc(23px * var(--text-scale));
+  }
+  .game .rail .number {
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
+  }
+  .game .game-picks {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .game .game-footer {
+    font-size: 10px;
+    letter-spacing: 0;
+  }
+  .game .game-footer > span:first-child {
+    display: none;
+  }
+  .game .game-footer > span:nth-child(2) {
+    margin: auto;
+  }
+  .game .biome-list {
+    grid-template-columns: 1fr;
+  }
+  .game .continue-card {
+    position: static;
+    margin-top: 24px;
+  }
+  .game .home {
+    justify-content: flex-start;
+    padding-top: 25px;
+  }
+  .game .home h1 {
+    font-size: 44px;
+  }
+  .game .home p:not(.eyebrow) {
+    font-size: 16px;
+  }
+  .game .home-actions {
+    width: 100%;
+    max-width: 310px;
+  }
+  .game .edition {
+    display: none;
+  }
+  .game .setting-row > .input {
+    max-width: 160px;
+  }
+  .game .world-card .land-mini {
+    display: none;
+  }
+  .game .mod-card .pill {
+    display: none;
+  }
+  .game .dialog .row {
+    flex-wrap: wrap;
+  }
+  .game .game-header {
+    height: 60px;
+  }
+  .game .world-card h3 {
+    overflow-wrap: anywhere;
+  }
+}
+.game .biome-card {
+  padding-left: 48px;
+}
+.game .biome-card input {
+  width: 44px;
+}
+.game .biome-card input:before {
+  left: 13px;
+}
+.game .icon-button {
+  min-width: 44px;
+  min-height: 44px;
+}
+.game .body > .validation-summary {
+  position: static;
+}
+.game .input {
+  background: #252d34;
+  border-color: #9ba6ad;
+}
+.game .input:disabled {
+  background: #363f46;
+  border-color: #7e8a92;
+  color: #cbd0d1;
+}
+@media (max-width: 750px) {
+  .game .rail {
+    overflow-y: auto;
+  }
+  .game .rail button,
+  .game .settings-rail button {
+    font-size: calc(14px * var(--text-scale));
+    white-space: normal;
+  }
+  .game .sheet-footer {
+    flex-wrap: wrap;
+  }
+  .game .sheet-footer .btn {
+    font-size: calc(14px * var(--text-scale));
+  }
+}
+.game .body > .scrolling-header {
+  padding: 0 0 18px;
+  margin-bottom: 20px;
+}
+.game.large-text .body .btn {
+  white-space: normal;
+  max-width: 100%;
+  text-align: center;
+}
 
-.game .shade{background:linear-gradient(90deg,rgba(25,34,40,.48),rgba(25,34,40,.06) 70%),linear-gradient(0deg,rgba(25,34,40,.24),transparent 40%)}
-.game .sheet-header{background:#3a444c}
-.game .sheet-footer{background:#2d353c}
-.game .game-header,.game .game-footer{background:rgba(42,52,59,.52)}
-.game .rail button,.game .rail-title,.game .rail-note,.game .edition,.game .game-footer{color:#e1e4e3}
-.game .eyebrow{color:#e3e7df}
-.game .game-pick.selected{background:#515d66}
-.game .notice{background:#414c55;border-color:#a8b5bd}
-.game .btn.ghost{background:rgba(40,48,55,.32)}
-.game .mod-symbol,.game .pill{background:#515e67;color:#f0f2ed;border-color:#9aa5ac}
-.game .status-dot:before{color:#c1cdb5}
-.game .continue-card{box-shadow:0 10px 35px #23323833}
-.game .body>.scrolling-header{background:transparent}
-.game.strong-contrast .sheet-header,.game.strong-contrast .sheet-footer{background:#17191c}
-.game.strong-contrast .input{background:#111214;color:#f7f4ec}
-.game.strong-contrast .editor{background:#191c20}
+.game .shade {
+  background:
+    linear-gradient(90deg, rgba(25, 34, 40, 0.48), rgba(25, 34, 40, 0.06) 70%),
+    linear-gradient(0deg, rgba(25, 34, 40, 0.24), transparent 40%);
+}
+.game .sheet-header {
+  background: #3a444c;
+}
+.game .sheet-footer {
+  background: #2d353c;
+}
+.game .game-header,
+.game .game-footer {
+  background: rgba(42, 52, 59, 0.52);
+}
+.game .rail button,
+.game .rail-title,
+.game .rail-note,
+.game .edition,
+.game .game-footer {
+  color: #e1e4e3;
+}
+.game .eyebrow {
+  color: #e3e7df;
+}
+.game .game-pick.selected {
+  background: #515d66;
+}
+.game .notice {
+  background: #414c55;
+  border-color: #a8b5bd;
+}
+.game .btn.ghost {
+  background: rgba(40, 48, 55, 0.32);
+}
+.game .mod-symbol,
+.game .pill {
+  background: #515e67;
+  color: #f0f2ed;
+  border-color: #9aa5ac;
+}
+.game .status-dot:before {
+  color: #c1cdb5;
+}
+.game .continue-card {
+  box-shadow: 0 10px 35px #23323833;
+}
+.game .body > .scrolling-header {
+  background: transparent;
+}
+.game.strong-contrast .sheet-header,
+.game.strong-contrast .sheet-footer {
+  background: #17191c;
+}
+.game.strong-contrast .input {
+  background: #111214;
+  color: #f7f4ec;
+}
+.game.strong-contrast .editor {
+  background: #191c20;
+}

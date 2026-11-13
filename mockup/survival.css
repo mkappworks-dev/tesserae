@@ -1,98 +1,580 @@
 /* PROTOTYPE, throwaway. Loaded last: vitals HUD, death screen, game-mode picker, Survival states. */
-:root{--health:#c8645a;--health-deep:#6e2c27;--hunger:#c9a35a;--hunger-deep:#65502a;--air:#8fb6c9;--air-deep:#3c5866;--tile-empty:#1a1b1e}
-.game[data-view=death] .game-header{display:none}
+:root {
+  --health: #c8645a;
+  --health-deep: #6e2c27;
+  --hunger: #c9a35a;
+  --hunger-deep: #65502a;
+  --air: #8fb6c9;
+  --air-deep: #3c5866;
+  --tile-empty: #1a1b1e;
+}
+.game[data-view="death"] .game-header {
+  display: none;
+}
 
 /* Shared HUD pieces */
-.hud-notice{padding:5px 10px;border:1px solid #d6c88f80;border-radius:4px;background:#0b0b0dcc;color:#eadfb4;font-size:12px;font-weight:600;text-shadow:0 1px 2px #000}
-.low-health-vignette{position:absolute;inset:0;pointer-events:none;z-index:2;background:radial-gradient(ellipse at center,transparent 55%,#5a0d0d8c 100%);animation:vignette-pulse 1.6s ease-in-out infinite}
-.hit-flash{position:absolute;inset:0;pointer-events:none;z-index:2;background:#8a1d1d40;animation:hit-flash .4s ease-out forwards}
-@keyframes vignette-pulse{50%{opacity:.6}}
-@keyframes hit-flash{to{opacity:0}}
+.hud-notice {
+  padding: 5px 10px;
+  border: 1px solid #d6c88f80;
+  border-radius: 4px;
+  background: #0b0b0dcc;
+  color: #eadfb4;
+  font-size: 12px;
+  font-weight: 600;
+  text-shadow: 0 1px 2px #000;
+}
+.low-health-vignette {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 2;
+  background: radial-gradient(
+    ellipse at center,
+    transparent 55%,
+    #5a0d0d8c 100%
+  );
+  animation: vignette-pulse 1.6s ease-in-out infinite;
+}
+.hit-flash {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 2;
+  background: #8a1d1d40;
+  animation: hit-flash 0.4s ease-out forwards;
+}
+@keyframes vignette-pulse {
+  50% {
+    opacity: 0.6;
+  }
+}
+@keyframes hit-flash {
+  to {
+    opacity: 0;
+  }
+}
 
 /* Vitals: mosaic tiles over the hotbar. A half point splits the tile on its diagonal. */
-.vital-rows{align-self:stretch;display:flex;flex-direction:column;gap:5px;padding:0 6px}
-.vital-main-row{display:flex;justify-content:space-between}
-.vital-air-row{display:flex;justify-content:flex-end}
-.vital-air-row[data-idle]{visibility:hidden}
-.vital-tiles{display:flex;gap:3px}
-.vital-tiles.hunger{flex-direction:row-reverse}
-.vital-tiles.air{flex-direction:row-reverse}
-.vital-tile{width:16px;height:16px;border:2px solid #050506;border-radius:2px;box-shadow:inset 1px 1px 0 #ffffff2e,inset -1px -1px 0 #00000059;background:var(--tile-empty)}
-.vital-tile.health.full{background:var(--health)}.vital-tile.health.half{background:linear-gradient(135deg,var(--health) 50%,var(--tile-empty) 50%)}
-.vital-tile.hunger.full{background:var(--hunger)}.vital-tile.hunger.half{background:linear-gradient(225deg,var(--hunger) 50%,var(--tile-empty) 50%)}
-.vital-tile.air{border-radius:50%}.vital-tile.air.full{background:var(--air)}.vital-tile.air.half{background:linear-gradient(225deg,var(--air) 50%,var(--tile-empty) 50%)}
-.vital-tiles.health.low .vital-tile.full,.vital-tiles.health.low .vital-tile.half{animation:tile-throb .8s ease-in-out infinite}
-@keyframes tile-throb{50%{transform:translateY(-2px)}}
+.vital-rows {
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 0 6px;
+}
+.vital-main-row {
+  display: flex;
+  justify-content: space-between;
+}
+.vital-air-row {
+  display: flex;
+  justify-content: flex-end;
+}
+.vital-air-row[data-idle] {
+  visibility: hidden;
+}
+.vital-tiles {
+  display: flex;
+  gap: 3px;
+}
+.vital-tiles.hunger {
+  flex-direction: row-reverse;
+}
+.vital-tiles.air {
+  flex-direction: row-reverse;
+}
+.vital-tile {
+  width: 16px;
+  height: 16px;
+  border: 2px solid #050506;
+  border-radius: 2px;
+  box-shadow:
+    inset 1px 1px 0 #ffffff2e,
+    inset -1px -1px 0 #00000059;
+  background: var(--tile-empty);
+}
+.vital-tile.health.full {
+  background: var(--health);
+}
+.vital-tile.health.half {
+  background: linear-gradient(135deg, var(--health) 50%, var(--tile-empty) 50%);
+}
+.vital-tile.hunger.full {
+  background: var(--hunger);
+}
+.vital-tile.hunger.half {
+  background: linear-gradient(225deg, var(--hunger) 50%, var(--tile-empty) 50%);
+}
+.vital-tile.air {
+  border-radius: 50%;
+}
+.vital-tile.air.full {
+  background: var(--air);
+}
+.vital-tile.air.half {
+  background: linear-gradient(225deg, var(--air) 50%, var(--tile-empty) 50%);
+}
+.vital-tiles.health.low .vital-tile.full,
+.vital-tiles.health.low .vital-tile.half {
+  animation: tile-throb 0.8s ease-in-out infinite;
+}
+@keyframes tile-throb {
+  50% {
+    transform: translateY(-2px);
+  }
+}
 
 /* Death screen */
-.game[data-view=death] #landscape{filter:grayscale(.75) brightness(.5) blur(1px)}
-.game[data-view=death] #screen{background:linear-gradient(#1c08084d,#0a0303a6)}
-.death-screen{width:100%;height:100%;display:flex;align-items:center;justify-content:center;padding:24px}
-.death-screen h1{margin:0;font-weight:550;letter-spacing:-.01em;color:#f4ece8}
-.death-actions{display:flex;gap:10px;margin-top:22px}
-.death-actions .btn span{margin-left:10px;font:600 10px Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;opacity:.7}
-.death-screen .eyebrow{color:#d8a59c}
-.death-centre{max-width:540px;text-align:center}
-.death-centre h1{font-size:46px}
-.death-cause{margin:10px 0 20px;color:#d4cfcc;font-size:16px}
-.death-centre .notice{text-align:left}
-.death-centre .death-actions{justify-content:center}
+.game[data-view="death"] #landscape {
+  filter: grayscale(0.75) brightness(0.5) blur(1px);
+}
+.game[data-view="death"] #screen {
+  background: linear-gradient(#1c08084d, #0a0303a6);
+}
+.death-screen {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+.death-screen h1 {
+  margin: 0;
+  font-weight: 550;
+  letter-spacing: -0.01em;
+  color: #f4ece8;
+}
+.death-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 22px;
+}
+.death-actions .btn span {
+  margin-left: 10px;
+  font:
+    600 10px Inter,
+    ui-sans-serif,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+  opacity: 0.7;
+}
+.death-screen .eyebrow {
+  color: #d8a59c;
+}
+.death-centre {
+  max-width: 540px;
+  text-align: center;
+}
+.death-centre h1 {
+  font-size: 46px;
+}
+.death-cause {
+  margin: 10px 0 20px;
+  color: #d4cfcc;
+  font-size: 16px;
+}
+.death-centre .notice {
+  text-align: left;
+}
+.death-centre .death-actions {
+  justify-content: center;
+}
 
 /* Game-mode picker */
-.mode-picks{margin:0;padding:0;border:0;min-width:0}
-.mode-picks legend{padding:0;margin-bottom:8px}
-.mode-options{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-.mode-pick{display:flex;flex-direction:column;gap:5px;padding:14px 16px;text-align:left;background:#15161a;border:1px solid var(--edge);border-radius:var(--radius);color:var(--ink);cursor:pointer}
-.mode-pick:hover{border-color:#6c7076}
-.mode-pick.selected{border-color:#e9eee0;box-shadow:inset 0 0 0 1px #e9eee0;background:#1d201c}
-.mode-pick b{font-size:15px;font-weight:600}.mode-pick small{font-size:12.5px;color:var(--muted);line-height:1.45}
-.mode-hint{display:block;margin-top:8px;font-size:12px;color:var(--muted)}
-.mode-picks{margin-bottom:6px}.mode-picks+.mode-picks{margin-top:18px}.mode-picks.compact .mode-pick small{display:none}.mode-picks.compact .mode-pick{padding:10px 16px}
-.item-capacity.full{color:#e8d29f;font-weight:600}
+.mode-picks {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+.mode-picks legend {
+  padding: 0;
+  margin-bottom: 8px;
+}
+.mode-options {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.mode-pick {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 14px 16px;
+  text-align: left;
+  background: #15161a;
+  border: 1px solid var(--edge);
+  border-radius: var(--radius);
+  color: var(--ink);
+  cursor: pointer;
+}
+.mode-pick:hover {
+  border-color: #6c7076;
+}
+.mode-pick.selected {
+  border-color: #e9eee0;
+  box-shadow: inset 0 0 0 1px #e9eee0;
+  background: #1d201c;
+}
+.mode-pick b {
+  font-size: 15px;
+  font-weight: 600;
+}
+.mode-pick small {
+  font-size: 12.5px;
+  color: var(--muted);
+  line-height: 1.45;
+}
+.mode-hint {
+  display: block;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.mode-picks {
+  margin-bottom: 6px;
+}
+.mode-picks + .mode-picks {
+  margin-top: 18px;
+}
+.mode-picks.compact .mode-pick small {
+  display: none;
+}
+.mode-picks.compact .mode-pick {
+  padding: 10px 16px;
+}
+.item-capacity.full {
+  color: #e8d29f;
+  font-weight: 600;
+}
 
 /* Prototype-only chrome: deliberately not in the game's look. */
-.sim-panel{position:absolute;top:12px;left:12px;z-index:6;width:270px;max-height:calc(100% - 24px);overflow:auto;padding:10px 12px;background:#f3eedb;color:#1d1c18;border:2px dashed #8a7a3c;border-radius:6px;font:12px Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
-.sim-panel header{display:flex;align-items:center;gap:6px;flex-wrap:wrap}.sim-panel header span{flex:1;color:#6b6450;font-size:10px}
-.sim-panel button{margin:2px 3px 2px 0;padding:4px 7px;border:1px solid #8a7a3c;border-radius:3px;background:#fffaf0;color:#1d1c18;font:11px Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;cursor:pointer}
-.sim-panel button:hover{background:#efe3b8}
-.sim-group{margin-top:8px}.sim-group small{display:block;margin-bottom:2px;color:#6b6450;text-transform:uppercase;font-size:10px;letter-spacing:.06em}
-.sim-group label{display:flex;gap:6px;align-items:center}
-.sim-state{margin:8px 0 0;padding:6px;background:#fffaf0;border:1px solid #d8cc9c;white-space:pre-wrap;font-size:10.5px;line-height:1.5}
+.sim-panel {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 6;
+  width: 270px;
+  max-height: calc(100% - 24px);
+  overflow: auto;
+  padding: 10px 12px;
+  background: #f3eedb;
+  color: #1d1c18;
+  border: 2px dashed #8a7a3c;
+  border-radius: 6px;
+  font:
+    12px Inter,
+    ui-sans-serif,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+}
+.sim-panel header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.sim-panel header span {
+  flex: 1;
+  color: #6b6450;
+  font-size: 10px;
+}
+.sim-panel button {
+  margin: 2px 3px 2px 0;
+  padding: 4px 7px;
+  border: 1px solid #8a7a3c;
+  border-radius: 3px;
+  background: #fffaf0;
+  color: #1d1c18;
+  font:
+    11px Inter,
+    ui-sans-serif,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+  cursor: pointer;
+}
+.sim-panel button:hover {
+  background: #efe3b8;
+}
+.sim-group {
+  margin-top: 8px;
+}
+.sim-group small {
+  display: block;
+  margin-bottom: 2px;
+  color: #6b6450;
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+}
+.sim-group label {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.sim-state {
+  margin: 8px 0 0;
+  padding: 6px;
+  background: #fffaf0;
+  border: 1px solid #d8cc9c;
+  white-space: pre-wrap;
+  font-size: 10.5px;
+  line-height: 1.5;
+}
 
-.game.reduced-motion :is(.low-health-vignette,.hit-flash,.vital-tile){animation:none!important}
+.game.reduced-motion :is(.low-health-vignette, .hit-flash, .vital-tile) {
+  animation: none !important;
+}
 /* Notice card, as the engine draws it: top right, slides in, one at a time. */
-#notice-card{position:absolute;top:16px;right:16px;z-index:8;max-width:360px;padding:11px 16px;background:#0b0b0de6;border:2px solid #000;border-left:4px solid #a8b5a2;border-radius:6px;box-shadow:inset 0 0 0 1px #ffffff1f,0 10px 30px #0008;color:#f1f0ed;font-size:13px;transform:translateX(calc(100% + 24px));opacity:0;transition:transform .22s cubic-bezier(.2,.7,.3,1),opacity .22s;pointer-events:none}
-#notice-card.show{transform:none;opacity:1}
-#notice-card[data-tone=warn]{border-left-color:#d6a95a}
-.game[data-view=death] #notice-card{display:none}
+#notice-card {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 8;
+  max-width: 360px;
+  padding: 11px 16px;
+  background: #0b0b0de6;
+  border: 2px solid #000;
+  border-left: 4px solid #a8b5a2;
+  border-radius: 6px;
+  box-shadow:
+    inset 0 0 0 1px #ffffff1f,
+    0 10px 30px #0008;
+  color: #f1f0ed;
+  font-size: 13px;
+  transform: translateX(calc(100% + 24px));
+  opacity: 0;
+  transition:
+    transform 0.22s cubic-bezier(0.2, 0.7, 0.3, 1),
+    opacity 0.22s;
+  pointer-events: none;
+}
+#notice-card.show {
+  transform: none;
+  opacity: 1;
+}
+#notice-card[data-tone="warn"] {
+  border-left-color: #d6a95a;
+}
+.game[data-view="death"] #notice-card {
+  display: none;
+}
 /* Pickup feed: bottom right, newest on top, the same Item merges. */
-#pickup-feed{position:absolute;right:24px;bottom:58px;z-index:3;display:flex;flex-direction:column;align-items:flex-end;gap:4px;pointer-events:none}
-.game:not([data-view=play]) #pickup-feed{display:none}
-.feed-row{display:flex;align-items:center;gap:8px;padding:4px 12px 4px 6px;background:#060708c7;border:2px solid #000;border-radius:6px;box-shadow:inset 0 0 0 1px #ffffff1a;color:#f6f7f1;font-size:13px;animation:feed-in .18s ease-out}
-.feed-row .voxel-icon{width:22px;height:22px}.feed-row b{font:700 13px Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-variant-numeric:tabular-nums}.feed-row span{color:#c9ccd1}
-@keyframes feed-in{from{transform:translateX(16px);opacity:0}}
-.game.reduced-motion #notice-card{transition:none}.game.reduced-motion .feed-row{animation:none}
-@media(prefers-reduced-motion:reduce){.low-health-vignette,.hit-flash,.vital-tile{animation:none!important}}
-@media(max-width:940px){.death-screen h1{font-size:34px}.sim-panel{width:220px}}
+#pickup-feed {
+  position: absolute;
+  right: 24px;
+  bottom: 58px;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  pointer-events: none;
+}
+.game:not([data-view="play"]) #pickup-feed {
+  display: none;
+}
+.feed-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px 4px 6px;
+  background: #060708c7;
+  border: 2px solid #000;
+  border-radius: 6px;
+  box-shadow: inset 0 0 0 1px #ffffff1a;
+  color: #f6f7f1;
+  font-size: 13px;
+  animation: feed-in 0.18s ease-out;
+}
+.feed-row .voxel-icon {
+  width: 22px;
+  height: 22px;
+}
+.feed-row b {
+  font:
+    700 13px Inter,
+    ui-sans-serif,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+  font-variant-numeric: tabular-nums;
+}
+.feed-row span {
+  color: #c9ccd1;
+}
+@keyframes feed-in {
+  from {
+    transform: translateX(16px);
+    opacity: 0;
+  }
+}
+.game.reduced-motion #notice-card {
+  transition: none;
+}
+.game.reduced-motion .feed-row {
+  animation: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .low-health-vignette,
+  .hit-flash,
+  .vital-tile {
+    animation: none !important;
+  }
+}
+@media (max-width: 940px) {
+  .death-screen h1 {
+    font-size: 34px;
+  }
+  .sim-panel {
+    width: 220px;
+  }
+}
 
 /* Play and death have no footer: it is launcher and menu chrome. The hotbar sits 12 px off the edge, as in the engine. */
-.game:is([data-view=play],[data-view=death]) .game-footer{display:none}
-.game[data-view=play] .hud-bottom{bottom:12px}
+.game:is([data-view="play"], [data-view="death"]) .game-footer {
+  display: none;
+}
+.game[data-view="play"] .hud-bottom {
+  bottom: 12px;
+}
 
 /* The first-person hand (engine: hand_anim, hand_fx). */
-.hand{position:absolute;right:11%;bottom:-2%;width:110px;height:110px;pointer-events:none;z-index:2;transform-origin:70% 100%;filter:drop-shadow(0 6px 8px #0008)}
-.hand .arm{position:absolute;right:-18px;bottom:-90px;width:60px;height:190px;border-radius:4px;background:linear-gradient(90deg,#a97f63,#c99b7b 55%,#b58a6d);transform:rotate(24deg);transform-origin:50% 100%;z-index:-1}
-.hand svg{width:100%;height:100%;transform:rotate(-10deg)}
-.hand.switch{animation:hand-switch .24s ease-in-out}
-@keyframes hand-switch{50%{transform:translateY(70px)}}
-.hand.swing{animation:hand-swing .2s ease-out}
-.hand.mine{animation:hand-swing .35s ease-out infinite}
-.hand.bite{animation:hand-bite 1s linear}
-@keyframes hand-swing{0%{transform:none}50%{transform:translate(-30px,-34px) rotate(-14deg)}100%{transform:none}}
-@keyframes hand-bite{0%{transform:none}25%{transform:translate(-140px,-150px)}35%{transform:translate(-128px,-140px) rotate(14deg) scale(.82)}45%{transform:translate(-140px,-150px) scale(.82)}55%{transform:translate(-128px,-140px) rotate(14deg) scale(.63)}65%{transform:translate(-140px,-150px) scale(.63)}75%{transform:translate(-128px,-140px) rotate(14deg) scale(.45)}85%{transform:translate(-140px,-150px) scale(.45)}100%{transform:none}}
-.crack{position:absolute;left:50%;top:50%;width:90px;height:90px;transform:translate(-50%,-50%);background:#000;opacity:.34;pointer-events:none;z-index:1;mix-blend-mode:multiply}
-.burst{position:absolute;left:50%;top:50%;pointer-events:none;z-index:2}
-.burst i{position:absolute;width:9px;height:9px;animation:burst-fall .4s ease-in forwards}
-@keyframes burst-fall{0%{transform:translate(0,0);opacity:1}100%{transform:translate(var(--dx),calc(var(--dy) + 70px));opacity:0}}
-.game.reduced-motion :is(.hand,.burst i){animation:none!important}
-@media(prefers-reduced-motion:reduce){.hand,.burst i{animation:none!important}}
+.hand {
+  position: absolute;
+  right: 11%;
+  bottom: -2%;
+  width: 110px;
+  height: 110px;
+  pointer-events: none;
+  z-index: 2;
+  transform-origin: 70% 100%;
+  filter: drop-shadow(0 6px 8px #0008);
+}
+.hand .arm {
+  position: absolute;
+  right: -18px;
+  bottom: -90px;
+  width: 60px;
+  height: 190px;
+  border-radius: 4px;
+  background: linear-gradient(90deg, #a97f63, #c99b7b 55%, #b58a6d);
+  transform: rotate(24deg);
+  transform-origin: 50% 100%;
+  z-index: -1;
+}
+.hand svg {
+  width: 100%;
+  height: 100%;
+  transform: rotate(-10deg);
+}
+.hand.switch {
+  animation: hand-switch 0.24s ease-in-out;
+}
+@keyframes hand-switch {
+  50% {
+    transform: translateY(70px);
+  }
+}
+.hand.swing {
+  animation: hand-swing 0.2s ease-out;
+}
+.hand.mine {
+  animation: hand-swing 0.35s ease-out infinite;
+}
+.hand.bite {
+  animation: hand-bite 1s linear;
+}
+@keyframes hand-swing {
+  0% {
+    transform: none;
+  }
+  50% {
+    transform: translate(-30px, -34px) rotate(-14deg);
+  }
+  100% {
+    transform: none;
+  }
+}
+@keyframes hand-bite {
+  0% {
+    transform: none;
+  }
+  25% {
+    transform: translate(-140px, -150px);
+  }
+  35% {
+    transform: translate(-128px, -140px) rotate(14deg) scale(0.82);
+  }
+  45% {
+    transform: translate(-140px, -150px) scale(0.82);
+  }
+  55% {
+    transform: translate(-128px, -140px) rotate(14deg) scale(0.63);
+  }
+  65% {
+    transform: translate(-140px, -150px) scale(0.63);
+  }
+  75% {
+    transform: translate(-128px, -140px) rotate(14deg) scale(0.45);
+  }
+  85% {
+    transform: translate(-140px, -150px) scale(0.45);
+  }
+  100% {
+    transform: none;
+  }
+}
+.crack {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 90px;
+  height: 90px;
+  transform: translate(-50%, -50%);
+  background: #000;
+  opacity: 0.34;
+  pointer-events: none;
+  z-index: 1;
+  mix-blend-mode: multiply;
+}
+.burst {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  pointer-events: none;
+  z-index: 2;
+}
+.burst i {
+  position: absolute;
+  width: 9px;
+  height: 9px;
+  animation: burst-fall 0.4s ease-in forwards;
+}
+@keyframes burst-fall {
+  0% {
+    transform: translate(0, 0);
+    opacity: 1;
+  }
+  100% {
+    transform: translate(var(--dx), calc(var(--dy) + 70px));
+    opacity: 0;
+  }
+}
+.game.reduced-motion :is(.hand, .burst i) {
+  animation: none !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  .hand,
+  .burst i {
+    animation: none !important;
+  }
+}

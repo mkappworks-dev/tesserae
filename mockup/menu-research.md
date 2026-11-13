@@ -5,39 +5,40 @@ accessibility certification or a report of player testing.
 
 ## Recommendation
 
-Keep Cinematic as the single direction. Use brighter slate-charcoal surfaces, warm-white
-text, clear focus outlines and a restrained sage accent. Preserve colour in the
-World itself and in meaningful biome previews. Keep the background scene static;
-it should establish the game's identity without competing with decisions.
+Keep Cinematic as the single direction. Use brighter slate-charcoal surfaces,
+warm-white text, clear focus outlines and a restrained sage accent. Preserve
+colour in the World itself and in meaningful biome previews. Keep the background
+scene static; it should establish the game's identity without competing with
+decisions.
 
 The previous 9.2 assessed a visual direction with a narrower rubric. A broader,
 equal-weight audit across 16 areas puts the original prototype at 7.4 and the
 refined version provisionally at 8.8. The individual scores are judgment calls.
-They are useful for identifying gaps, not evidence of a measurable quality level.
-The live prototype includes the full scorecard and the remaining work for each
-area. A 9.5+ score needs evidence across interaction, accessibility and engine
-integration as well as visual polish.
+They are useful for identifying gaps, not evidence of a measurable quality
+level. The live prototype includes the full scorecard and the remaining work for
+each area. A 9.5+ score needs evidence across interaction, accessibility and
+engine integration as well as visual polish.
 
 ## Background, blur and saturation
 
 A recognisable scene is a good fit for this voxel game. It is not a universal
 requirement for good menus. The prototype currently draws an illustrative voxel
 landscape in canvas; a captured scene from the engine would better represent the
-actual game. Use a static scene for the title and creation flows. An in-game menu
-can use a captured view of the current World. Displaying a captured background
-does not imply that the Server simulation pauses.
+actual game. Use a static scene for the title and creation flows. An in-game
+menu can use a captured view of the current World. Displaying a captured
+background does not imply that the Server simulation pauses.
 
 Use different treatment by context:
 
-| Context | Treatment | Reason |
-| --- | --- | --- |
-| Title | Relatively sharp scene, darker on the text side | Identity and atmosphere |
+| Context                       | Treatment                                                | Reason                                             |
+| ----------------------------- | -------------------------------------------------------- | -------------------------------------------------- |
+| Title                         | Relatively sharp scene, darker on the text side          | Identity and atmosphere                            |
 | World, Mods, Biomes, Settings | Opaque charcoal panels; scenery outside softened by 3 px | Stable control contrast and less peripheral detail |
-| In-game menu | Mild 2 px background blur with an opaque control panel | Separate menu interaction from gameplay |
-| Simple background option | Solid charcoal, no scene or blur | Predictability and visual comfort |
+| In-game menu                  | Mild 2 px background blur with an opaque control panel   | Separate menu interaction from gameplay            |
+| Simple background option      | Solid charcoal, no scene or blur                         | Predictability and visual comfort                  |
 
-Those pixel values are prototype choices, not research-prescribed constants.
-Do not blur text, controls or their focus indicators. Strong opacity makes blur
+Those pixel values are prototype choices, not research-prescribed constants. Do
+not blur text, controls or their focus indicators. Strong opacity makes blur
 behind the actual form panel unnecessary. Restrict the translucent treatment to
 the title's action group, with a solid fallback.
 
@@ -56,19 +57,20 @@ reinforce meaning rather than carry it alone.
 
 Avoid an animated fly-through behind forms. Microsoft specifically identifies
 moving backgrounds behind stationary reading content as a potential source of
-discomfort. Reduced motion and a solid background are available in the prototype.
+discomfort. Reduced motion and a solid background are available in the
+prototype.
 [Xbox XAG 117: Visual distractions and motion](https://learn.microsoft.com/en-us/xbox/accessibility/xbox-accessibility-guidelines/117).
 
 ## What matters more than decoration
 
-**Readable text.** The previous 9–12 px metadata was too small for a game-oriented
-interface. Primary controls are now 16 px and supporting copy generally 13–14 px,
-with a 100–200% text-size setting. This improves the desktop prototype but does
-not meet every Xbox text-size recommendation. Microsoft recommends minimums of
-18 px for PC and 26 px for console at 1080p, with larger text and scaling for
-other contexts. Before game integration, verify the actual rendered pixel size,
-viewing distance, languages and device DPI. Large text reflows the header into
-the scrolling body so it cannot consume the entire form.
+**Readable text.** The previous 9–12 px metadata was too small for a
+game-oriented interface. Primary controls are now 16 px and supporting copy
+generally 13–14 px, with a 100–200% text-size setting. This improves the desktop
+prototype but does not meet every Xbox text-size recommendation. Microsoft
+recommends minimums of 18 px for PC and 26 px for console at 1080p, with larger
+text and scaling for other contexts. Before game integration, verify the actual
+rendered pixel size, viewing distance, languages and device DPI. Large text
+reflows the header into the scrolling body so it cannot consume the entire form.
 [Xbox XAG 101: Text display](https://learn.microsoft.com/en-us/xbox/accessibility/xbox-accessibility-guidelines/101).
 
 **Predictable navigation.** The World creation order remains World → Mods →
@@ -81,18 +83,18 @@ Microsoft's guidance calls for consistent layouts, logical focus order and
 complete digital-input navigation.
 [Xbox XAG 112: UI navigation](https://learn.microsoft.com/en-us/xbox/accessibility/xbox-accessibility-guidelines/112).
 
-**Obvious focus.** Focus uses a warm high-contrast outline distinct from the sage
-selection state. Modals make the background inert, trap keyboard focus and return
-focus to the opener. Controls scroll into view when focused. Focus must remain
-perceivable and cannot disappear behind fixed chrome.
+**Obvious focus.** Focus uses a warm high-contrast outline distinct from the
+sage selection state. Modals make the background inert, trap keyboard focus and
+return focus to the opener. Controls scroll into view when focused. Focus must
+remain perceivable and cannot disappear behind fixed chrome.
 [Xbox XAG 113: Focus handling](https://learn.microsoft.com/en-us/xbox/accessibility/xbox-accessibility-guidelines/113),
 [W3C: Focus Not Obscured](https://www.w3.org/WAI/WCAG22/Understanding/focus-not-obscured-minimum.html).
 
 **Comfortable targets.** Custom action targets generally use a 44 px minimum
-height; biome checkboxes have a 44 × 44 px hit region. Some native controls still
-need a full touch audit. WCAG's enhanced target criterion uses 44 × 44 CSS pixels;
-its minimum criterion uses 24 × 24 with defined exceptions. The larger size is
-our design preference, not a claim that 44 px is universally mandatory.
+height; biome checkboxes have a 44 × 44 px hit region. Some native controls
+still need a full touch audit. WCAG's enhanced target criterion uses 44 × 44 CSS
+pixels; its minimum criterion uses 24 × 24 with defined exceptions. The larger
+size is our design preference, not a claim that 44 px is universally mandatory.
 [W3C: Target Size Enhanced](https://www.w3.org/WAI/WCAG22/Understanding/target-size-enhanced.html),
 [W3C: Target Size Minimum](https://www.w3.org/WAI/WCAG22/Understanding/target-size-minimum.html).
 
@@ -115,13 +117,13 @@ remembering settings and testing with disabled players.
 ## Verification and limits
 
 Browser checks cover creation, validation, focus return, modal isolation,
-settings drafts, simulated controller actions and session snapshot content.
-The layout audit checks all major screens and Settings categories at standard
-and doubled text size. It checks horizontal overflow, footer placement and a
-usable scrolling body. It is not a complete screen-reader or gamepad audit.
+settings drafts, simulated controller actions and session snapshot content. The
+layout audit checks all major screens and Settings categories at standard and
+doubled text size. It checks horizontal overflow, footer placement and a usable
+scrolling body. It is not a complete screen-reader or gamepad audit.
 
-The earlier browser measurements were superseded by the brighter daylight palette.
-Calculated sRGB contrast ratios for its opaque colour tokens are:
+The earlier browser measurements were superseded by the brighter daylight
+palette. Calculated sRGB contrast ratios for its opaque colour tokens are:
 
 - Primary text against panel: 10.98:1.
 - Supporting text against panel: 7.75:1.
@@ -135,8 +137,8 @@ corrected by increasing input-border contrast.
 
 Remaining limitations include metadata size, physical controller and text-entry
 behavior, narration, assistive technologies, colour-vision checks, translation,
-long lists, television readability and engine profiling. Session storage is local
-to the browser tab; it is not a game save or a durable project store.
+long lists, television readability and engine profiling. Session storage is
+local to the browser tab; it is not a game save or a durable project store.
 
 ## How to earn 9.5+
 

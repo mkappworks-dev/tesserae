@@ -1,7 +1,7 @@
 # Catalogue, personal storage and the game menu
 
-This is a UI proposal in the browser prototype. Engine key bindings and inventory
-behavior have not been changed.
+This is a UI proposal in the browser prototype. Engine key bindings and
+inventory behavior have not been changed.
 
 ## Current engine
 
@@ -17,29 +17,29 @@ behavior have not been changed.
 
 ## Proposed prototype navigation
 
-| Input during gameplay | Screen |
-| --- | --- |
-| Tab | Menu (`/menu`) |
-| Escape | Menu, or close the current overlay |
-| I | Inventory (`/inventory`) |
-| C | Catalogue (`/catalogue`) |
-| F10 | Settings, remembering the last category |
-| E | Preserve Flip in the engine |
+| Input during gameplay | Screen                                  |
+| --------------------- | --------------------------------------- |
+| Tab                   | Menu (`/menu`)                          |
+| Escape                | Menu, or close the current overlay      |
+| I                     | Inventory (`/inventory`)                |
+| C                     | Catalogue (`/catalogue`)                |
+| F10                   | Settings, remembering the last category |
+| E                     | Preserve Flip in the engine             |
 
 Inside menus, Tab retains its keyboard-focus role. Text entry owns I/C while
 typing. Repeating I or C closes its corresponding item screen; Escape closes an
 item screen before opening another menu. Custom dropdowns consume Escape first.
 
 Inventory and Catalogue share an item-oriented frame with labelled tabs, so the
-Catalogue is one click away from Inventory. Inventory holds finite example stacks
-and the nine-slot hotbar used during play. Catalogue has search, categories, a
-Material preview and Shape selection, with no quick slots.
+Catalogue is one click away from Inventory. Inventory holds finite example
+stacks and the nine-slot hotbar used during play. Catalogue has search,
+categories, a Material preview and Shape selection, with no quick slots.
 
 In Creative preview, Add to inventory adds a stack to the backpack, merging with
 matching stacks when possible. Open inventory returns to the carried items;
-Shift-click or Move to hotbar gives them quick access during play. A full backpack
-rejects the addition without changing existing items. Survival preview keeps the
-Catalogue read-only.
+Shift-click or Move to hotbar gives them quick access during play. A full
+backpack rejects the addition without changing existing items. Survival preview
+keeps the Catalogue read-only.
 
 The example backpack has 27 slots and the hotbar has nine. These are layout
 proposals, not engine capacities or approved stack-size rules. Click a stack and
