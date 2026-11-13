@@ -300,8 +300,6 @@ async function drawBlocks() {
     (m) => m.use?.door && m.name === m.use.door.closed,
   );
   const shapeMaterial = named(state.blocksShapeMaterial) || textured[0];
-  const option = (value, label, selected) =>
-    `<option value="${esc(value)}" ${value === selected ? "selected" : ""}>${esc(label)}</option>`;
   const shapeCards = index.shapes
     .flatMap((shape) => [
       { label: shape.name, boxes: shape.boxes },
@@ -318,10 +316,22 @@ async function drawBlocks() {
     ...(shape.joined ? [shape.joined] : []),
   ]);
   root.innerHTML = `<section><header class="blocks-heading"><div><p class="item-eyebrow">MATERIALS</p><h3>${textured.length} Materials</h3></div></header><div class="block-grid">${textured.map(blockCard).join("")}</div></section>
-<section><header class="blocks-heading"><div><p class="item-eyebrow">SHAPES</p><h3>Placeable Shapes</h3></div><label class="blocks-control">Material <select id="blocks-shape-material">${textured.map((m) => option(m.name, m.name.split(":")[1], shapeMaterial.name)).join("")}</select></label></header><div class="shape-grid">${shapeCards.join("")}</div></section>
+<section><header class="blocks-heading"><div><p class="item-eyebrow">SHAPES</p><h3>Placeable Shapes</h3></div><label class="blocks-control">Material ${customSelect(
+    "Material",
+    "blocksShapeMaterial",
+    shapeMaterial.name,
+    textured.map((m) => ({ value: m.name, label: m.name.split(":")[1] })),
+    "blocks-shape-material",
+  )}</label></header><div class="shape-grid">${shapeCards.join("")}</div></section>
 ${
   door
-    ? `<section><header class="blocks-heading"><div><p class="item-eyebrow">DOOR</p><h3>Door at Player scale</h3><p class="muted">${DOOR_M.width} m wide, ${DOOR_M.height} m tall, one Voxel thick: ${Math.ceil(DOOR_M.width / Number(state.blocksVoxel))} × ${Math.ceil(DOOR_M.height / Number(state.blocksVoxel))} cells, each drawn with the whole texture. Grid squares are 1 m.</p></div><label class="blocks-control">Voxel size <select id="blocks-voxel">${["1", "0.5", "0.25"].map((v) => option(v, `${v} m`, state.blocksVoxel)).join("")}</select></label></header><div class="door-grid"><figure><canvas class="door-scene" data-door="closed" width="420" height="320"></canvas><figcaption>Closed · ${esc(door.name)}</figcaption></figure><figure><canvas class="door-scene" data-door="open" width="420" height="320"></canvas><figcaption>Open · ${esc(door.use.door.open)}</figcaption></figure></div></section>`
+    ? `<section><header class="blocks-heading"><div><p class="item-eyebrow">DOOR</p><h3>Door at Player scale</h3><p class="muted">${DOOR_M.width} m wide, ${DOOR_M.height} m tall, one Voxel thick: ${Math.ceil(DOOR_M.width / Number(state.blocksVoxel))} × ${Math.ceil(DOOR_M.height / Number(state.blocksVoxel))} cells, each drawn with the whole texture. Grid squares are 1 m.</p></div><label class="blocks-control">Voxel size ${customSelect(
+        "Voxel size",
+        "blocksVoxel",
+        state.blocksVoxel,
+        ["1", "0.5", "0.25"].map((v) => ({ value: v, label: `${v} m` })),
+        "blocks-voxel",
+      )}</label></header><div class="door-grid"><figure><canvas class="door-scene" data-door="closed" width="420" height="320"></canvas><figcaption>Closed · ${esc(door.name)}</figcaption></figure><figure><canvas class="door-scene" data-door="open" width="420" height="320"></canvas><figcaption>Open · ${esc(door.use.door.open)}</figcaption></figure></div></section>`
     : ""
 }`;
   root.querySelector("#blocks-shape-material").onchange = (e) => {
