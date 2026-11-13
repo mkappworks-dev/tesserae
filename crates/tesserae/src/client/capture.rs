@@ -287,11 +287,14 @@ pub(super) fn plugin(app: &mut App) {
             .insert_resource(super::layout_menu::LayoutMenu::opened());
     }
     // `TESSERAE_SCREENSHOT_INVENTORY` opens the Inventory window with its
-    // details; `=crafting` brings the Crafting tab to the front.
+    // details; `=crafting` brings the Crafting tab to the front, and
+    // `=container` a Chest's slots holding Wood.
     if let Some(inventory) = std::env::var_os("TESSERAE_SCREENSHOT_INVENTORY") {
         app.insert_resource(super::inventory_window::InventoryWindow::opened());
         if inventory == "crafting" {
             super::inventory_window::crafting_in_front(app);
+        } else if inventory == "container" {
+            super::inventory_window::container_in_front(app);
         }
     }
     app.insert_resource(super::help::Panels {

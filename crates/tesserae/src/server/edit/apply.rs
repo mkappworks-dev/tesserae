@@ -21,9 +21,10 @@ pub(in crate::server) fn apply_pending(
         Res<WorldSettings>,
         Res<crate::server::sound::SoundTable>,
     ),
-    (mut entities, items): (
+    (mut entities, items, containers): (
         ResMut<crate::server::entities::EntityStore>,
         Res<crate::server::items::Items>,
+        Option<Res<crate::server::container::Containers>>,
     ),
     mut players: Query<(&Player, &mut crate::server::inventory::Inventory)>,
 ) {
@@ -42,6 +43,15 @@ pub(in crate::server) fn apply_pending(
                 // Checked before the Voxel changes, so nothing lands unpaid.
                 match &p.pay {
                     Some(item) if inventory.count(item) == 0 => Err(RejectReason::NothingHeld),
+                    _ if matches!(
+                        p.intent.action,
+                        EditAction::Remove | EditAction::RemoveAt(_)
+                    ) && containers
+                        .as_ref()
+                        .is_some_and(|c| c.holds_stacks(landing.0)) =>
+                    {
+                        Err(RejectReason::ContainerNotEmpty)
+                    }
                     _ => Ok(landing),
                 }
             })

@@ -340,11 +340,21 @@ Materials by full name; bodies pass through the open one, and removing it drops
 the closed one's Item. Any Mod may declare them, at most 64 per Mod, and a
 Material is in at most one row, as either state.
 
+A `container` row gives its `material` Stacks of its own in `slots` slots, from
+1 to 54, 27 when omitted. Use opens it beside the Inventory. A Player cannot
+break one that holds Stacks; anything else that removes it spills them as
+Dropped items.
+
 ```toml
 [[voxel-uses]]
 kind = "door"
 material = "plain:door"
 open = "plain:door_open"
+
+[[voxel-uses]]
+kind = "container"
+material = "plain:chest"
+slots = 27
 ```
 
 ### Non-Voxel Causes and Biome audio

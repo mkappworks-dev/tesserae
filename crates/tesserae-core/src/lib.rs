@@ -72,7 +72,7 @@ pub use shape::{
 };
 pub use survival::SurvivalRules;
 pub use tables::{PlaceFault, Tables};
-pub use usable::{Door, UseError, VoxelUse, VoxelUses};
+pub use usable::{CONTAINER_SLOTS, Door, MAX_CONTAINER_SLOTS, UseError, VoxelUse, VoxelUses};
 pub use voxel::{AIR, MaterialId, SHAPE_FULL_CUBE, ShapeId, Voxel};
 pub use worldgen::{
     CaveParams, GroundParams, MAX_HEIGHT_M, MAX_OCTAVES, MAX_SMOOTHED_PER_CHUNK, ParamError,

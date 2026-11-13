@@ -268,6 +268,7 @@ struct Completed {
     eye: Vec3,
     extensions: extensions::Saved,
     entities: u64,
+    containers: u64,
     details_completed: bool,
     #[cfg(feature = "profiling")]
     write_ms: f64,
@@ -304,6 +305,8 @@ pub struct Persistence {
     saved_extensions: Option<extensions::Saved>,
     saved_entities: u64,
     initial_entities: Option<tesserae_core::entity::Entities>,
+    saved_containers: u64,
+    initial_containers: Vec<save::containers::SavedContainer>,
     restored_extensions: extensions::Saved,
     pub(super) reopened_mode: Option<super::player::MovementMode>,
     pub(super) reopened_view: Option<save::MovementV1>,
@@ -382,13 +385,15 @@ impl Persistence {
         let game_mode = changes.default.unwrap_or(game_mode);
         let reopened_game_mode = changes.own.or(reopened_game_mode);
         let mut restored_entities = None;
+        let mut initial_containers = Vec::new();
         let (reopened_eye, initial_simulation, initial_chunks, generation, saved_revisions, detail) =
             if let Some(recovered) = opening.recovered {
                 recovered
                     .commit
                     .compatible(&content)
                     .map_err(|e| e.to_string())?;
-                let c = recovered.commit;
+                let mut c = recovered.commit;
+                initial_containers = std::mem::take(&mut c.containers);
                 let items = loaded.every_item(settings.voxel_size);
                 restored_entities = Some(
                     c.entities
@@ -499,6 +504,8 @@ impl Persistence {
             saved_extensions,
             saved_entities: 0,
             initial_entities: restored_entities,
+            saved_containers: 0,
+            initial_containers,
             reopened_mode: restored
                 .map(|s| {
                     if s.flight {
@@ -577,6 +584,9 @@ fn install(world: &mut World) {
         p.saved_entities = entities.revision();
         world.insert_resource(EntityStore(entities));
     }
+    world.insert_resource(super::container::Containers::restore(std::mem::take(
+        &mut p.initial_containers,
+    )));
     world.insert_resource(p);
 }
 
@@ -649,13 +659,14 @@ fn requests(
 
 /// What a save reads of the Player's side of the World.
 #[derive(bevy::ecs::system::SystemParam)]
-struct Held<'w, 's> {
+pub(super) struct Held<'w, 's> {
     player: Query<'w, 's, EntityRef<'static>, (With<Player>, Without<IsResource>)>,
     entities: Res<'w, EntityStore>,
     items: Res<'w, Items>,
+    containers: Res<'w, super::container::Containers>,
 }
 
-fn drive(
+pub(super) fn drive(
     mut p: ResMut<Persistence>,
     mut status: ResMut<SaveStatus>,
     mut store: ResMut<ChunkStore>,
@@ -669,7 +680,7 @@ fn drive(
     };
     let player = held_player.get::<Player>().expect("filtered on Player");
     let extensions = extensions::capture(held_player);
-    let (entities, items) = (&held.entities, &held.items);
+    let (entities, items, containers) = (&held.entities, &held.items, &held.containers);
     let now = time.elapsed_secs_f64();
     p.elapsed += (now - p.last_clock).max(0.0);
     p.last_clock = now;
@@ -695,6 +706,7 @@ fn drive(
                 p.saved_simulation = done.simulation_revision;
                 p.saved_eye = Some(done.eye);
                 p.saved_entities = done.entities;
+                p.saved_containers = done.containers;
                 if done.details_completed
                     && let Some((_, d)) = p.details.as_mut()
                 {
@@ -709,6 +721,7 @@ fn drive(
                     && extensions.as_ref().ok() == p.saved_extensions.as_ref()
                     && p.saved_simulation == sim.revision
                     && p.saved_entities == entities.revision()
+                    && p.saved_containers == containers.revision()
                 {
                     leave.now();
                 } else if status.quitting {
@@ -733,7 +746,8 @@ fn drive(
         || p.saved_eye != Some(player.eye())
         || p.saved_extensions.as_ref() != extensions.as_ref().ok()
         || p.saved_simulation != sim.revision
-        || p.saved_entities != entities.revision();
+        || p.saved_entities != entities.revision()
+        || p.saved_containers != containers.revision();
     if p.elapsed >= 30.0 {
         p.elapsed = 0.0;
         if status.dirty && !status.quitting {
@@ -817,6 +831,7 @@ fn drive(
         }
     };
     let entities_revision = entities.revision();
+    let (saved_containers, containers_revision) = (containers.capture(), containers.revision());
     let eye = player.eye();
     let writer = Arc::clone(p.writer.as_ref().expect("persistent"));
     let mapping = p.mapping.clone();
@@ -868,6 +883,7 @@ fn drive(
                     .map(|(home, saved)| (home, (*saved).clone()))
                     .collect(),
                 entities: saved_entities,
+                containers: saved_containers,
                 game_mode,
             };
             writer.write(&commit)
@@ -890,6 +906,7 @@ fn drive(
             eye,
             extensions,
             entities: entities_revision,
+            containers: containers_revision,
             #[cfg(feature = "profiling")]
             write_ms: write_started.elapsed().as_secs_f64() * 1e3,
         }

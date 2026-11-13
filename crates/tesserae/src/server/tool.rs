@@ -58,6 +58,7 @@ pub struct UseTarget {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Usable {
     Door { open: bool },
+    Container,
 }
 
 impl Usable {
@@ -66,6 +67,7 @@ impl Usable {
         match self {
             Usable::Door { open: false } => "Open",
             Usable::Door { open: true } => "Close",
+            Usable::Container => "Open",
         }
     }
 }
@@ -89,7 +91,11 @@ pub struct UseIntent {
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum UseResult {
     Measured(UseTarget),
-    Door { opened: bool },
+    Door {
+        opened: bool,
+    },
+    /// A session opened on the Container at this Voxel.
+    Container([i32; 3]),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -170,8 +176,13 @@ pub(super) fn answer_use(
         ResMut<EditHistory>,
     ),
     (tables, world, tools): (Res<ContentTables>, Res<WorldSettings>, Res<Tools>),
-    (player, status): (Single<&Player>, Option<Res<super::persistence::SaveStatus>>),
+    (player, status): (
+        Single<(Entity, &Player)>,
+        Option<Res<super::persistence::SaveStatus>>,
+    ),
+    mut containers: Option<ResMut<super::container::Containers>>,
 ) {
+    let (viewer, player) = *player;
     let playing = super::persistence::playing(status);
     for intent in intents.read() {
         let ray = (intent.origin, intent.direction);
@@ -189,6 +200,15 @@ pub(super) fn answer_use(
                     unchanged(intent, aimed)?;
                     if !playing {
                         return Err(UseRefusal::Busy);
+                    }
+                    if aimed.usable == Some(Usable::Container) {
+                        let slots = tables.uses.container(aimed.voxel.material());
+                        let (Some(containers), Some(slots)) = (containers.as_deref_mut(), slots)
+                        else {
+                            return Err(UseRefusal::TargetChanged);
+                        };
+                        containers.open(viewer, aimed.at, aimed.voxel, slots);
+                        return Ok(UseResult::Container(aimed.at));
                     }
                     super::usable::toggle_door(
                         (&mut store, &mut meshes),

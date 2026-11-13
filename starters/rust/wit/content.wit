@@ -346,12 +346,17 @@ interface content {
         /// which bodies pass through. Removing either drops the closed one's
         /// Item.
         door(string),
+        /// Holds Stacks of its own, in this many slots from 1 to 54; 27 when
+        /// absent. Removing it while it holds any is refused to the Player, and
+        /// anything else that removes it spills them as Dropped items.
+        container(option<u8>),
     }
 
     /// A Material that Use acts on. The engine runs the kind; a Mod is never
     /// called when it is used.
     record voxel-use {
-        /// A solid Material, by full name: a Door's closed state.
+        /// A solid Material, by full name: a Door's closed state, or the
+        /// Container.
         material: string,
         kind: voxel-use-kind,
     }

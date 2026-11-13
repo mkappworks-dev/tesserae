@@ -275,6 +275,7 @@ impl Guest for Terra {
                     render: RenderClass::Cutout,
                     ..solid("door_open")
                 },
+                solid("chest"),
             ],
             shapes: vec![fence()],
             appearance: vec![
@@ -297,6 +298,7 @@ impl Guest for Terra {
                 appearance("workbench", [167, 116, 63, 255]),
                 appearance("door", [128, 88, 50, 255]),
                 appearance("door_open", [128, 88, 50, 255]),
+                appearance("chest", [107, 68, 35, 255]),
             ],
             world: Some(world),
             view: Some(ViewParams {
@@ -474,6 +476,19 @@ impl Guest for Terra {
                     max_stack: None,
                     food: None,
                 },
+                ItemDef {
+                    name: "chest".into(),
+                    size_m: 0.25,
+                    color: Srgba {
+                        r: 107,
+                        g: 68,
+                        b: 35,
+                        a: 255,
+                    },
+                    material: Some("terra:chest".into()),
+                    max_stack: None,
+                    food: None,
+                },
             ],
             biomes: vec![
                 BiomeDef {
@@ -545,10 +560,16 @@ impl Guest for Terra {
                 },
                 station: "hand".into(),
             }],
-            voxel_uses: vec![VoxelUse {
-                material: "terra:door".into(),
-                kind: VoxelUseKind::Door("terra:door_open".into()),
-            }],
+            voxel_uses: vec![
+                VoxelUse {
+                    material: "terra:door".into(),
+                    kind: VoxelUseKind::Door("terra:door_open".into()),
+                },
+                VoxelUse {
+                    material: "terra:chest".into(),
+                    kind: VoxelUseKind::Container(None),
+                },
+            ],
             ores: vec![OreDef {
                 material: "terra:iron".into(),
                 min_depth_m: 5.0,

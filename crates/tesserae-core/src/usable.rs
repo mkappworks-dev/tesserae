@@ -4,6 +4,10 @@
 
 use crate::voxel::MaterialId;
 
+/// A Container's slots when its row names none.
+pub const CONTAINER_SLOTS: u8 = 27;
+pub const MAX_CONTAINER_SLOTS: u8 = 54;
+
 /// Two solid Materials Use toggles between. Bodies pass through the open one.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Door {
@@ -31,6 +35,8 @@ impl Door {
 pub enum VoxelUse {
     /// Toggles with its open Material.
     Door { open: MaterialId },
+    /// Holds Stacks of its own in this many slots.
+    Container { slots: u8 },
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -42,6 +48,8 @@ pub enum UseError {
     /// A Material another row already uses, as its own or as a Door's open
     /// state: Use would have two meanings.
     AlreadyUsable(MaterialId),
+    /// A Container with no slots or more than [`MAX_CONTAINER_SLOTS`].
+    Slots,
 }
 
 impl std::fmt::Display for UseError {
@@ -52,6 +60,7 @@ impl std::fmt::Display for UseError {
             UseError::SameMaterial => {
                 f.write_str("a Door's open Material must not be its closed one")
             }
+            UseError::Slots => write!(f, "a Container holds from 1 to {MAX_CONTAINER_SLOTS} slots"),
             UseError::AlreadyUsable(id) => write!(
                 f,
                 "Material {id} is already a Usable Voxel or another Door's state"
@@ -70,6 +79,7 @@ pub struct VoxelUses {
 fn named(&(material, ref kind): &(MaterialId, VoxelUse)) -> Vec<MaterialId> {
     match *kind {
         VoxelUse::Door { open } => vec![material, open],
+        VoxelUse::Container { .. } => vec![material],
     }
 }
 
@@ -79,6 +89,11 @@ impl VoxelUses {
     pub(crate) fn push(&mut self, material: MaterialId, kind: VoxelUse) -> Result<(), UseError> {
         if kind == (VoxelUse::Door { open: material }) {
             return Err(UseError::SameMaterial);
+        }
+        if let VoxelUse::Container { slots } = kind
+            && !(1..=MAX_CONTAINER_SLOTS).contains(&slots)
+        {
+            return Err(UseError::Slots);
         }
         let row = (material, kind);
         for taken in named(&row) {
@@ -102,6 +117,15 @@ impl VoxelUses {
     pub fn door(&self, material: MaterialId) -> Option<Door> {
         match self.of(material)? {
             (closed, &VoxelUse::Door { open }) => Some(Door { closed, open }),
+            _ => None,
+        }
+    }
+
+    /// How many slots a Voxel of `material` holds, if it is a Container.
+    pub fn container(&self, material: MaterialId) -> Option<usize> {
+        match self.of(material)? {
+            (_, &VoxelUse::Container { slots }) => Some(usize::from(slots)),
+            _ => None,
         }
     }
 

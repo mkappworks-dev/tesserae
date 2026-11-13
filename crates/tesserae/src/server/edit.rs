@@ -271,6 +271,9 @@ pub enum RejectReason {
     /// An undo or redo that puts back a Voxel whose Item the Player does not
     /// hold.
     ItemNeeded,
+    /// A Player's Remove, undo or redo that would take away a Container
+    /// holding Stacks.
+    ContainerNotEmpty,
 }
 
 impl RejectReason {
@@ -286,6 +289,7 @@ impl RejectReason {
             RejectReason::UnknownShape => "That Shape is unknown.",
             RejectReason::BadOrientation => "That Orientation is not allowed.",
             RejectReason::InsidePlayer => "You are standing there.",
+            RejectReason::ContainerNotEmpty => "Empty the Chest first.",
             RejectReason::NoMaterial => "Nothing to place.",
             RejectReason::TooManyShaped => "Too many shaped Voxels in this Chunk.",
             RejectReason::NotSolid => "A fluid is not placed as a solid.",

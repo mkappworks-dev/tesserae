@@ -465,10 +465,16 @@ fn component() -> Declaration {
             },
             station: "hand".into(),
         }],
-        voxel_uses: vec![content::VoxelUse {
-            material: "full:wood".into(),
-            kind: content::VoxelUseKind::Door("full:ash".into()),
-        }],
+        voxel_uses: vec![
+            content::VoxelUse {
+                material: "full:wood".into(),
+                kind: content::VoxelUseKind::Door("full:ash".into()),
+            },
+            content::VoxelUse {
+                material: "full:rock".into(),
+                kind: content::VoxelUseKind::Container(None),
+            },
+        ],
     }
 }
 

@@ -78,6 +78,7 @@ pub(super) fn fixture() -> Commit {
             landing_cursors: vec![],
         },
         entities: Default::default(),
+        containers: Vec::new(),
         game_mode: GameMode::Creative,
     }
 }
@@ -1267,4 +1268,44 @@ mod dropped_items {
             Err(Error::Corrupt(_))
         ));
     }
+}
+
+#[test]
+fn a_commit_without_containers_opens_with_none_and_a_bad_entry_is_corrupt() {
+    use crate::inventory::Stack;
+    use crate::save::containers::SavedContainer;
+    let mut json = serde_json::to_value(fixture()).unwrap();
+    assert!(json.get("containers").is_none(), "none held, none written");
+    let opened: Commit = serde_json::from_value(json.clone()).unwrap();
+    assert!(opened.containers.is_empty());
+    let rock = Some(Stack {
+        item: "t:rock".into(),
+        count: 3,
+    });
+    json["containers"] = serde_json::to_value([SavedContainer {
+        at: [1, 2, 3],
+        slots: vec![None, rock.clone()],
+    }])
+    .unwrap();
+    let held: Commit = serde_json::from_value(json).unwrap();
+    assert_eq!(held.containers[0].slots[1], rock);
+    for bad in [
+        vec![],
+        vec![None; 55],
+        vec![Some(Stack {
+            item: "t:rock".into(),
+            count: 0,
+        })],
+    ] {
+        let entry = SavedContainer {
+            at: [0; 3],
+            slots: bad,
+        };
+        assert!(crate::save::containers::validate(&[entry]).is_err());
+    }
+    let twice = SavedContainer {
+        at: [0; 3],
+        slots: vec![rock],
+    };
+    assert!(crate::save::containers::validate(&[twice.clone(), twice]).is_err());
 }

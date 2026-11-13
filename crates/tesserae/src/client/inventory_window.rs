@@ -23,6 +23,7 @@ use tesserae_core::inventory::{BACKPACK_SLOTS, HOTBAR_SLOTS, Inventory, Slot, St
 use tesserae_core::{MaterialId, ShapeId};
 
 mod catalogue;
+mod container;
 mod crafting;
 mod flight;
 pub(super) mod look;
@@ -33,7 +34,9 @@ use super::edit::{Catalogue, Holding};
 use super::menu_ui as ui;
 use super::theme;
 use super::tile_preview::TilePreview;
-use crate::server::inventory::{InventoryChanged, InventoryIntent, InventoryRefused, MAX_STACK};
+use crate::server::inventory::{
+    InventoryChanged, InventoryIntent, InventoryRefused, MAX_STACK, SlotAddress,
+};
 use crate::session::SessionApp;
 
 const SLOT_PX: f32 = 52.0;
@@ -63,10 +66,10 @@ const NARROW_PX: f32 = 1180.0;
 pub(super) struct InventoryWindow {
     pub(super) open: bool,
     /// The stack chosen to move; the next slot clicked receives it.
-    picked: Option<Slot>,
+    picked: Option<SlotAddress>,
     inspected: Option<Slot>,
     details: bool,
-    dragging: Option<Slot>,
+    dragging: Option<SlotAddress>,
     /// A drag ends in a click on the slot it started from, which is not a pick.
     suppress_click: bool,
     /// What was asked to drop, told once the Server's answer shows it did.
@@ -92,9 +95,36 @@ pub(super) fn crafting_in_front(app: &mut App) {
     app.insert_resource(crafting::Pane::Crafting);
 }
 
+/// A Chest's slots beside the Inventory, for a capture of them.
+#[cfg(any(feature = "dev", feature = "profiling"))]
+pub(super) fn container_in_front(app: &mut App) {
+    let wood = Some(Stack {
+        item: "terra:wood".into(),
+        count: 24,
+    });
+    let mut slots = vec![None; 27];
+    slots[0] = wood.clone();
+    slots[4] = wood;
+    app.insert_resource(container::Open(Some(
+        crate::server::container::ContainerShown {
+            at: [0; 3],
+            material: MaterialId::MAX,
+            slots,
+        },
+    )));
+}
+
 /// The Inventory as the Server last sent it.
 #[derive(Resource, Default)]
 struct Held(Inventory);
+
+/// The Stack at a slot of the Inventory or of the open Container.
+fn stack_at<'a>(held: &'a Held, open: &'a container::Open, at: SlotAddress) -> Option<&'a Stack> {
+    match at {
+        SlotAddress::Inventory(slot) => held.0.get(slot),
+        SlotAddress::Container(at) => open.stack(at),
+    }
+}
 
 #[derive(Component)]
 struct WindowRoot;
@@ -110,8 +140,11 @@ struct Card;
 
 #[derive(Component, Clone, Copy, PartialEq, Debug)]
 enum Control {
-    Slot(Slot),
+    Slot(SlotAddress),
     Sort,
+    /// The open Container's.
+    SortContainer,
+    TakeAll,
     Details,
     Close,
     QuickTransfer(Slot),
@@ -153,6 +186,7 @@ pub(super) fn plugin(app: &mut App) {
         .add_observer(drop_on_slot)
         .add_plugins((
             catalogue::plugin,
+            container::plugin,
             crafting::plugin,
             flight::plugin,
             look::plugin,
@@ -169,6 +203,8 @@ pub(super) fn plugin(app: &mut App) {
                 (
                     flight::note_takes,
                     receive,
+                    container::receive,
+                    container::leave,
                     crafting::receive,
                     render,
                     catalogue::fill,
@@ -312,7 +348,7 @@ fn activate(
     controls: Query<&Control>,
     mut window: ResMut<InventoryWindow>,
     mut hotbar: ResMut<super::edit::Hotbar>,
-    held: Res<Held>,
+    (held, open): (Res<Held>, Res<container::Open>),
     keys: Res<ButtonInput<KeyCode>>,
     mut intents: MessageWriter<InventoryIntent>,
     mut cursor: Query<&mut CursorOptions, With<PrimaryWindow>>,
@@ -328,8 +364,10 @@ fn activate(
             if std::mem::take(&mut window.suppress_click) {
                 return;
             }
-            window.inspected = Some(slot);
-            let filled = held.0.get(slot).is_some();
+            if let Some(slot) = slot.inventory() {
+                window.inspected = Some(slot);
+            }
+            let filled = stack_at(&held, &open, slot).is_some();
             if shift_held(&keys) {
                 window.picked = None;
                 if filled {
@@ -351,6 +389,14 @@ fn activate(
             window.inspected = Some(Slot::Backpack(0));
             intents.write(InventoryIntent::Sort);
         }
+        Control::SortContainer => {
+            window.picked = None;
+            intents.write(InventoryIntent::SortContainer);
+        }
+        Control::TakeAll => {
+            window.picked = None;
+            intents.write(InventoryIntent::TakeAll);
+        }
         Control::Details => window.details = !window.details,
         Control::Close => {
             for mut cursor in &mut cursor {
@@ -359,11 +405,11 @@ fn activate(
         }
         Control::QuickTransfer(slot) => {
             window.picked = None;
-            intents.write(InventoryIntent::QuickTransfer(slot));
+            intents.write(InventoryIntent::QuickTransfer(slot.into()));
         }
         Control::Split(slot) => {
             window.picked = None;
-            intents.write(InventoryIntent::Split(slot));
+            intents.write(InventoryIntent::Split(slot.into()));
         }
         Control::CancelMove => window.picked = None,
         Control::DropOne(slot) | Control::DropStack(slot) => {
@@ -395,13 +441,13 @@ fn press(event: On<PointerPress>, mut window: ResMut<InventoryWindow>) {
 fn drag_start(
     event: On<PointerDragStart>,
     controls: Query<&Control>,
-    held: Res<Held>,
+    (held, open): (Res<Held>, Res<container::Open>),
     mut window: ResMut<InventoryWindow>,
 ) {
     if window.open
         && event.button == PointerButton::Primary
         && let Ok(&Control::Slot(slot)) = controls.get(event.entity)
-        && held.0.get(slot).is_some()
+        && stack_at(&held, &open, slot).is_some()
     {
         window.dragging = Some(slot);
         window.picked = None;
@@ -420,7 +466,12 @@ enum Dragged {
 /// pointer, so a drag is seen to carry something.
 fn drag_ghost(
     mut commands: Commands,
-    (window, side, held): (Res<InventoryWindow>, Res<catalogue::Side>, Res<Held>),
+    (window, side, held, open): (
+        Res<InventoryWindow>,
+        Res<catalogue::Side>,
+        Res<Held>,
+        Res<container::Open>,
+    ),
     (looks, catalogue): (Res<Looks>, Res<Catalogue>),
     screen: Single<&Window, With<PrimaryWindow>>,
     mut ghost: Query<(Entity, &mut Node), With<DragGhost>>,
@@ -429,7 +480,7 @@ fn drag_ghost(
     let dragged = window.open.then(|| {
         window
             .dragging
-            .and_then(|slot| held.0.get(slot))
+            .and_then(|slot| stack_at(&held, &open, slot))
             .map(|stack| Dragged::Stack(stack.item.clone()))
             .or(side.taking.map(Dragged::Tile))
     });
@@ -507,7 +558,8 @@ fn drag_end(
         return;
     }
     side.taking = None;
-    let Some(slot) = window.dragging.take() else {
+    // A Container's Stack is not thrown from it; it stays where it was.
+    let Some(slot) = window.dragging.take().and_then(SlotAddress::inventory) else {
         return;
     };
     if !window.open
@@ -541,12 +593,14 @@ fn drop_on_slot(
         return;
     };
     if let Some(material) = side.taking.take() {
-        window.inspected = Some(to);
-        intents.write(side.take(material, to));
+        if let Some(to) = to.inventory() {
+            window.inspected = Some(to);
+            intents.write(side.take(material, to));
+        }
     } else if let Some(from) = window.dragging.take()
         && from != to
     {
-        window.inspected = Some(to);
+        window.inspected = to.inventory().or(window.inspected);
         intents.write(InventoryIntent::Move { from, to });
     }
 }
@@ -555,10 +609,12 @@ fn drop_on_slot(
 #[derive(Clone, PartialEq)]
 struct Built {
     held: Inventory,
-    picked: Option<Slot>,
+    picked: Option<SlotAddress>,
     inspected: Option<Slot>,
     details: bool,
     key: String,
+    /// The open Container, whose pane takes the side pane's place.
+    container: Option<crate::server::container::ContainerShown>,
     /// The Catalogue is beside the Inventory only outside Survival.
     survival: bool,
     pane: crafting::Pane,
@@ -585,7 +641,7 @@ type Parts<'w, 's> = (
 fn render(
     mut commands: Commands,
     window: Res<InventoryWindow>,
-    held: Res<Held>,
+    (held, open): (Res<Held>, Res<container::Open>),
     (looks, catalogue, searches): (Res<Looks>, Res<Catalogue>, Res<super::menu_ui::Searches>),
     (bindings, labels): (Res<super::actions::Bindings>, Res<super::actions::Labels>),
     (roots, rows, cards, controls): Parts,
@@ -607,6 +663,7 @@ fn render(
         inspected: window.inspected,
         details: window.details,
         key: bindings.label(Action::Inventory, &labels),
+        container: open.0.clone(),
         survival: mode.survival(),
         pane: pane.shown(mode.survival()),
         narrow: screen.width() < NARROW_PX,
@@ -623,7 +680,8 @@ fn render(
         .and_then(|f| f.get())
         .and_then(|entity| controls.get(entity).ok())
         .copied();
-    let was_side = built.as_ref().map(|built| (built.survival, built.pane));
+    let side_of = |built: &Built| (built.survival, built.pane, built.container.clone());
+    let was_side = built.as_ref().map(side_of);
     *built = wanted.clone();
     let Some(state) = wanted else {
         for root in &roots {
@@ -633,7 +691,7 @@ fn render(
     };
     // The row is built once per opening, so a mode or tab change while open
     // rebuilds it with the other side pane.
-    let reframe = was_side.is_some_and(|was| was != (state.survival, state.pane));
+    let reframe = was_side.is_some_and(|was| was != side_of(&state));
     if reframe {
         for root in &roots {
             commands.entity(root).despawn();
@@ -659,6 +717,14 @@ fn render(
                     },
                 ))
                 .with_children(|row| match state.pane {
+                    _ if state.container.is_some() => container::panel(
+                        row,
+                        &state,
+                        &Names {
+                            looks: &looks,
+                            catalogue: &catalogue,
+                        },
+                    ),
                     crafting::Pane::Catalogue => catalogue::panel(row, &searches.catalogue),
                     crafting::Pane::Crafting => {
                         crafting::panel(row, &searches.recipes, !state.survival)
@@ -724,7 +790,7 @@ fn render(
             footer(card, &state, &names);
         });
     // Focus elsewhere, in the Catalogue's search or tiles, outlives the card.
-    let target = focused.or(opening.then_some(Control::Slot(Slot::Backpack(0))));
+    let target = focused.or(opening.then_some(Control::Slot(Slot::Backpack(0).into())));
     commands.queue(move |world: &mut World| {
         let Some(target) = target else {
             return;
@@ -781,6 +847,24 @@ impl Names<'_> {
     /// An Item no Mod declares stacks to the engine's limit.
     fn stack_limit(&self, item: &str) -> u32 {
         self.look(item).map_or(MAX_STACK, |look| look.max_stack)
+    }
+
+    /// What the Player calls a Material: the title of the Item that places
+    /// it, else its declared name.
+    fn material_label(&self, material: MaterialId) -> String {
+        match self
+            .looks
+            .0
+            .iter()
+            .find(|look| look.material == Some(material))
+        {
+            Some(look) => self.label(&look.name),
+            None => self
+                .catalogue
+                .0
+                .material(material)
+                .map_or_else(|| "Container".into(), |m| m.name.clone()),
+        }
     }
 
     /// The Material's declared name, when it differs from the Item's.
@@ -997,10 +1081,10 @@ fn grid(
                 let slot = slot(at);
                 slot_button(
                     grid,
-                    slot,
+                    slot.into(),
                     state.held.get(slot),
                     names,
-                    state.picked == Some(slot),
+                    state.picked == Some(slot.into()),
                 );
             }
         });
@@ -1008,7 +1092,7 @@ fn grid(
 
 fn slot_button(
     parent: &mut ChildSpawnerCommands,
-    slot: Slot,
+    slot: SlotAddress,
     stack: Option<&Stack>,
     names: &Names,
     picked: bool,
@@ -1056,7 +1140,7 @@ fn slot_button(
                     Pickable::IGNORE,
                 ));
             }
-            if let Slot::Hotbar(at) = slot {
+            if let SlotAddress::Inventory(Slot::Hotbar(at)) = slot {
                 button.spawn((
                     Text::new((at + 1).to_string()),
                     theme::figures(theme::TEXT_FOOTER, theme::SEMIBOLD),
@@ -1115,7 +1199,10 @@ pub(super) fn item_icon(
 }
 
 fn details(main: &mut ChildSpawnerCommands, state: &Built, names: &Names) {
-    let shown = state.picked.or(state.inspected);
+    let shown = state
+        .picked
+        .and_then(SlotAddress::inventory)
+        .or(state.inspected);
     let stack = shown.and_then(|slot| state.held.get(slot).map(|stack| (slot, stack)));
     // Laid out to fit the window, so it clips rather than scrolls.
     main.spawn((
@@ -1447,7 +1534,9 @@ fn footer(card: &mut ChildSpawnerCommands, state: &Built, names: &Names) {
             })
             .with_children(|actions| {
                 actions.spawn((look::paragraph(
-                    if state.survival {
+                    if state.container.is_some() {
+                        "Shift-click moves a stack between the Container and your Inventory."
+                    } else if state.survival {
                         "Item counts stay intact when switching screens."
                     } else {
                         "Drag from the Catalogue into any slot, or set a count and transfer."
@@ -1507,9 +1596,9 @@ fn paint(
             look::Frame::Picked
         } else if hovered.get() && (window.dragging.is_some() || side.taking.is_some()) {
             look::Frame::DropTarget
-        } else if slot == Slot::Hotbar(hotbar.selected) && hotbar.outside.is_none() {
+        } else if slot == Slot::Hotbar(hotbar.selected).into() && hotbar.outside.is_none() {
             look::Frame::Active
-        } else if window.inspected == Some(slot) {
+        } else if window.inspected.map(SlotAddress::from) == Some(slot) {
             look::Frame::Inspected
         } else if hovered.get() {
             look::Frame::Hover
@@ -1665,7 +1754,9 @@ mod tests {
             .world_mut()
             .query::<(Entity, &Control)>()
             .iter(app.world())
-            .find_map(|(entity, control)| (*control == Control::Slot(slot)).then_some(entity))
+            .find_map(|(entity, control)| {
+                (*control == Control::Slot(slot.into())).then_some(entity)
+            })
             .unwrap_or_else(|| panic!("no {slot:?} on screen"));
         app.world_mut().trigger(Activate { entity });
         server(app);
@@ -1677,7 +1768,7 @@ mod tests {
         let (_, children) = world
             .query::<(&Control, &Children)>()
             .iter(world)
-            .find(|(control, _)| **control == Control::Slot(slot))?;
+            .find(|(control, _)| **control == Control::Slot(slot.into()))?;
         children
             .iter()
             .find_map(|child| world.get::<SlotCount>(child).and(world.get::<Text>(child)))
@@ -1690,7 +1781,7 @@ mod tests {
         let (_, children) = world
             .query::<(&Control, &Children)>()
             .iter(world)
-            .find(|(control, _)| **control == Control::Slot(slot))?;
+            .find(|(control, _)| **control == Control::Slot(slot.into()))?;
         children
             .iter()
             .find_map(|child| world.get::<TilePreview>(child))
@@ -1906,7 +1997,7 @@ mod tests {
         };
         let hit = || HitData::new(Entity::PLACEHOLDER, 0.0, None, None);
         let tile = find(app, CatalogueControl::Tile(material));
-        let slot = find(app, Control::Slot(onto));
+        let slot = find(app, Control::Slot(onto.into()));
         app.world_mut().trigger(PointerDragStart {
             entity: tile,
             pointer: pointer(),
@@ -1950,7 +2041,7 @@ mod tests {
                 },
             )
         };
-        let entity = find(app, Control::Slot(slot));
+        let entity = find(app, Control::Slot(slot.into()));
         app.world_mut().trigger(PointerDragStart {
             entity,
             pointer: pointer(),
@@ -2008,7 +2099,7 @@ mod tests {
     fn a_drag_shows_the_item_under_the_pointer_from_a_slot_and_from_the_catalogue() {
         let mut app = app();
         press(&mut app, KeyCode::KeyI);
-        let entity = find(&mut app, Control::Slot(Slot::Backpack(0)));
+        let entity = find(&mut app, Control::Slot(Slot::Backpack(0).into()));
         app.world_mut().trigger(PointerDragStart {
             entity,
             pointer: Pointer::new(
@@ -2063,8 +2154,8 @@ mod tests {
         assert!(intents(&app).is_empty(), "over the Inventory panel");
 
         // A drop on another slot is a move, taken before the drag ends.
-        let to = find(&mut app, Control::Slot(Slot::Backpack(2)));
-        let from = find(&mut app, Control::Slot(Slot::Backpack(0)));
+        let to = find(&mut app, Control::Slot(Slot::Backpack(2).into()));
+        let from = find(&mut app, Control::Slot(Slot::Backpack(0).into()));
         app.world_mut().trigger(PointerDragStart {
             entity: from,
             pointer: Pointer::new(
@@ -2109,8 +2200,8 @@ mod tests {
         assert_eq!(
             intents(&app),
             [InventoryIntent::Move {
-                from: Slot::Backpack(0),
-                to: Slot::Backpack(2)
+                from: Slot::Backpack(0).into(),
+                to: Slot::Backpack(2).into()
             }]
         );
     }

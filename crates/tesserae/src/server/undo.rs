@@ -159,7 +159,10 @@ pub(super) fn apply(
         ResMut<EntityStore>,
     ),
     (tables, items, world): (Res<ContentTables>, Res<Items>, Res<WorldSettings>),
-    mut history: ResMut<EditHistory>,
+    (mut history, containers): (
+        ResMut<EditHistory>,
+        Option<Res<super::container::Containers>>,
+    ),
     mut players: Query<(&Player, &mut Inventory)>,
     (mut rejected, mut needs, mut dropped): (
         MessageWriter<EditRejected>,
@@ -205,6 +208,7 @@ pub(super) fn apply(
             &mut settle,
             &mut group,
             action,
+            &|at| containers.as_ref().is_some_and(|c| c.holds_stacks(at)),
         )
     };
     match result {
@@ -255,6 +259,7 @@ fn restore(
     settle: &mut Settle,
     group: &mut [Entry],
     action: HistoryAction,
+    holds_stacks: &dyn Fn([i32; 3]) -> bool,
 ) -> Result<Vec<Stack>, Refused> {
     let undoing = action == HistoryAction::Undo;
     let step = |entry: &Entry| {
@@ -276,6 +281,14 @@ fn restore(
         let here = store.occupants(entry.at, &tables.fluids);
         if here.map(|o| as_closed(tables, o)) != Some(as_closed(tables, step(entry).0)) {
             return Err(RejectReason::HistoryChanged.into());
+        }
+        if holds_stacks(entry.at)
+            && tables
+                .uses
+                .container(step(entry).1.solid.material())
+                .is_none()
+        {
+            return Err(RejectReason::ContainerNotEmpty.into());
         }
     }
     let owed = owed(group, action, settle.entities);

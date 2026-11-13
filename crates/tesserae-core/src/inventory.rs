@@ -277,6 +277,37 @@ impl<'a> SlotSets<'a> {
         }
         Ok(())
     }
+
+    /// Moves as much of each stack in `from` as the other set takes, into
+    /// matching stacks first and then empty slots; what does not fit stays.
+    /// Refused only when nothing moves.
+    pub fn take_all(&mut self, from: Side, limit: impl Fn(&str) -> u32) -> Result<(), Refusal> {
+        let len = self.set_mut(from).iter().map(|run| run.len()).sum();
+        let (mut held, mut moved) = (false, false);
+        for index in 0..len {
+            let at = At { side: from, index };
+            let Some(stack) = self.slot_mut(at)?.clone() else {
+                continue;
+            };
+            held = true;
+            let left = stash(
+                self.set_mut(from.other()),
+                &stack.item,
+                stack.count,
+                limit(&stack.item),
+            );
+            moved |= left < stack.count;
+            *self.slot_mut(at)? = (left > 0).then_some(Stack {
+                count: left,
+                ..stack
+            });
+        }
+        match (held, moved) {
+            (false, _) => Err(Refusal::Empty),
+            (true, false) => Err(Refusal::NoRoom),
+            (true, true) => Ok(()),
+        }
+    }
 }
 
 impl Inventory {
@@ -994,6 +1025,34 @@ mod tests {
         assert_eq!(
             chest,
             [stack("t:dust", 64), stack("t:zinc", 2), stack("t:zinc", 1)]
+        );
+    }
+
+    #[test]
+    fn take_all_moves_what_fits_and_leaves_the_rest() {
+        let mut inventory = Inventory::default();
+        for slot in inventory.backpack.iter_mut() {
+            *slot = stack("t:dust", 64);
+        }
+        inventory.hotbar[0] = stack("t:rock", 60);
+        for slot in &mut inventory.hotbar[1..] {
+            *slot = stack("t:dust", 64);
+        }
+        let mut chest = vec![stack("t:rock", 10), None, stack("t:zinc", 2)];
+        let mut sets = inventory.beside(&mut chest);
+        assert_eq!(sets.take_all(Side::Second, limit), Ok(()));
+        assert_eq!(
+            sets.take_all(Side::Second, limit),
+            Err(Refusal::NoRoom),
+            "nothing more fits"
+        );
+        drop(sets);
+        assert_eq!(inventory.hotbar[0], stack("t:rock", 64));
+        assert_eq!(chest, [stack("t:rock", 6), None, stack("t:zinc", 2)]);
+        let mut empty = vec![None; 2];
+        assert_eq!(
+            inventory.beside(&mut empty).take_all(Side::Second, limit),
+            Err(Refusal::Empty)
         );
     }
 

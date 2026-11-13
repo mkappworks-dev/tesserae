@@ -847,6 +847,9 @@ pub fn resolve(
                 content::VoxelUseKind::Door(open) => VoxelUse::Door {
                     open: lookup(b, registry, "voxel-uses", row, open)?,
                 },
+                content::VoxelUseKind::Container(slots) => VoxelUse::Container {
+                    slots: slots.unwrap_or(tesserae_core::CONTAINER_SLOTS),
+                },
             };
             tables
                 .register_use(material, kind)

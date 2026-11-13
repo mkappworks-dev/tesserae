@@ -6,9 +6,10 @@ use bevy::prelude::*;
 
 use super::actions::{Action, Bindings, Labels};
 use super::aim::{Sent, Target};
+use super::drops::Looks;
 use super::edit::{Holding, Hotbar};
 use super::theme;
-use crate::server::tool::UseRefusal;
+use crate::server::tool::{Usable, UseRefusal};
 use crate::session::SessionApp;
 
 /// Below the reticle's centre, in pixels, to the prompt's centre.
@@ -34,21 +35,37 @@ pub(super) fn plugin(app: &mut App) {
 }
 
 /// What the prompt says: the verb after the Use key, or a refusal alone.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 enum Wording {
-    Verb(&'static str),
-    Refused(&'static str),
+    Verb(String),
+    Refused(String),
 }
 
 /// The prompt for the current aim answer; none with a Tool in hand, whose
 /// preview is its own, or when Use would eat.
-fn wording(target: &Target, sent: &Sent, now: f64, hotbar: &Hotbar) -> Option<Wording> {
+fn wording(
+    target: &Target,
+    sent: &Sent,
+    now: f64,
+    (hotbar, looks): (&Hotbar, &Looks),
+) -> Option<Wording> {
     if matches!(hotbar.held(), Holding::Tool(_)) || !target.current(sent, now) {
         return None;
     }
     match target.0.use_aim? {
-        Ok(aimed) => aimed.usable.map(|usable| Wording::Verb(usable.verb())),
-        Err(UseRefusal::OutOfReach) => Some(Wording::Refused("Out of reach")),
+        Ok(aimed) => aimed.usable.map(|usable| match usable {
+            // Named by the Item that places it, as the Chest's pane is.
+            Usable::Container => {
+                let material = Some(aimed.voxel.material());
+                let item = looks.0.iter().find(|look| look.material == material);
+                let name = item.map_or("Container".into(), |look| {
+                    super::pickup::label(looks, &look.name)
+                });
+                Wording::Verb(format!("{} {name}", usable.verb()))
+            }
+            _ => Wording::Verb(usable.verb().into()),
+        }),
+        Err(UseRefusal::OutOfReach) => Some(Wording::Refused("Out of reach".into())),
         Err(_) => None,
     }
 }
@@ -124,12 +141,13 @@ type PromptParts<'w, 's> = (
 );
 
 fn show(
-    (target, sent, time, hotbar): (Res<Target>, Res<Sent>, Res<Time>, Res<Hotbar>),
+    (target, sent, time): (Res<Target>, Res<Sent>, Res<Time>),
+    (hotbar, looks): (Res<Hotbar>, Res<Looks>),
     (bindings, labels): (Res<Bindings>, Res<Labels>),
     dead: Option<Res<super::death::Dead>>,
     (mut prompt, mut row, mut key, mut text): PromptParts,
 ) {
-    let wording = wording(&target, &sent, time.elapsed_secs_f64(), &hotbar)
+    let wording = wording(&target, &sent, time.elapsed_secs_f64(), (&hotbar, &looks))
         .filter(|_| super::death::alive(dead));
     for mut visibility in &mut prompt {
         visibility.set_if_neq(if wording.is_some() {
@@ -167,7 +185,7 @@ fn show(
     }
     for (mut shown, mut colour) in &mut text {
         if shown.0 != words {
-            shown.0 = words.to_owned();
+            shown.0 = words.clone();
         }
         colour.set_if_neq(TextColor(if refused { REFUSED_INK } else { PROMPT_INK }));
     }
@@ -185,6 +203,7 @@ mod tests {
             .init_resource::<Hotbar>()
             .init_resource::<Target>()
             .init_resource::<Sent>()
+            .init_resource::<Looks>()
             .add_systems(Startup, spawn)
             .add_systems(Update, show);
         app
@@ -246,6 +265,27 @@ mod tests {
         assert_eq!(
             prompt(&mut app, Some(door(true)), None),
             Some((Some("G".into()), "Close".into()))
+        );
+    }
+
+    #[test]
+    fn aimed_at_a_container_the_prompt_names_it() {
+        let mut app = app();
+        app.insert_resource(Looks(vec![crate::content::ItemLook {
+            name: "t:chest".into(),
+            size_m: 0.25,
+            color: [0; 4],
+            material: Some(7),
+            max_stack: 64,
+        }]));
+        let chest = Ok(UseTarget {
+            voxel: tesserae_core::Voxel::cube(7),
+            usable: Some(Usable::Container),
+            ..door(false).unwrap()
+        });
+        assert_eq!(
+            prompt(&mut app, Some(chest), None),
+            Some((Some("G".into()), "Open Chest".into()))
         );
     }
 

@@ -858,6 +858,10 @@ pub struct Commit {
     /// Absent in commits written before dropped items: opens with none.
     #[serde(default)]
     pub entities: entities::SavedEntities,
+    /// Absent in commits written before Containers, or with none holding
+    /// Stacks: opens with none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub containers: Vec<containers::SavedContainer>,
     /// The mode a new Player starts in. Absent in commits written before game
     /// modes: those Worlds were Creative.
     #[serde(default)]
@@ -882,6 +886,7 @@ impl Commit {
             return Err(Error::Corrupt("invalid World or Player coordinates".into()));
         }
         self.entities.validate()?;
+        containers::validate(&self.containers)?;
         self.content.require(installed)?;
         let mapping = self.content.validation_mapping()?;
         self.parameters.restore(&mapping, self.generator)?;
@@ -1258,6 +1263,7 @@ impl DirtyState {
     }
 }
 
+pub mod containers;
 pub mod entities;
 pub mod library;
 #[cfg(test)]

@@ -269,3 +269,7 @@ station = "hand"
 kind = "door"
 material = "full:wood"
 open = "full:ash"
+
+[[voxel-uses]]
+kind = "container"
+material = "full:rock"

@@ -65,6 +65,7 @@ fn usable(tables: &Tables, voxel: Voxel) -> Option<Usable> {
         (_, &VoxelUse::Door { open }) => Some(Usable::Door {
             open: voxel.material() == open,
         }),
+        (_, &VoxelUse::Container { .. }) => Some(Usable::Container),
     }
 }
 

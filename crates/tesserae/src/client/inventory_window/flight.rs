@@ -167,7 +167,7 @@ pub(super) fn fly(
         }
         // The slot is rebuilt with the window, so it is looked up again every frame.
         let target = slots.iter().find_map(|(control, node, transform)| {
-            (*control == Control::Slot(flight.to)).then(|| centre(node, transform))
+            (*control == Control::Slot(flight.to.into())).then(|| centre(node, transform))
         });
         let Some(target) = target else {
             continue;

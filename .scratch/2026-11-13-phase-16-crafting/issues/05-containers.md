@@ -1,6 +1,6 @@
 # 05: Containers
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 01, 03
 
@@ -24,14 +24,14 @@ the Inventory as the mockup shows. Terra's Chest becomes a Container.
 
 ## Acceptance criteria
 
-- [ ] Move, split, merge, swap, quick transfer, Take all and Sort work between a
+- [x] Move, split, merge, swap, quick transfer, Take all and Sort work between a
       Container and the Inventory.
-- [ ] Two sessions on one Container see the same contents after either changes
+- [x] Two sessions on one Container see the same contents after either changes
       it.
-- [ ] Remove, undo and redo of a non-empty Container are refused; of an empty
+- [x] Remove, undo and redo of a non-empty Container are refused; of an empty
       one they behave as for any Voxel.
-- [ ] A Mod Command or burning that replaces a full Container spills every
+- [x] A Mod Command or burning that replaces a full Container spills every
       Stack.
-- [ ] Contents survive reopening; a commit without `containers` opens; an
+- [x] Contents survive reopening; a commit without `containers` opens; an
       orphaned entry spills at open.
-- [ ] Leaving reach or the Container changing closes the pane with a notice.
+- [x] Leaving reach or the Container changing closes the pane with a notice.

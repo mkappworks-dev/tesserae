@@ -2118,3 +2118,45 @@ fn no_mod_declares_more_than_64_voxel_uses() {
         }
     ));
 }
+
+fn container(material: &str, slots: Option<u8>) -> content::VoxelUse {
+    content::VoxelUse {
+        material: material.into(),
+        kind: content::VoxelUseKind::Container(slots),
+    }
+}
+
+#[test]
+fn a_container_holds_27_slots_unless_it_declares_from_1_to_54() {
+    let mut d = declaring(&["chest", "pouch", "vault"], &[]);
+    d.voxel_uses = vec![
+        container("m:chest", None),
+        container("m:pouch", Some(1)),
+        container("m:vault", Some(54)),
+    ];
+    let load = resolved_uses(&[("m", d)]).unwrap();
+    let id = |name| load.registry.id_of(Kind::Material, name).unwrap() as MaterialId;
+    let slots = |name| load.tables.uses.container(id(name));
+    assert_eq!(
+        [slots("m:chest"), slots("m:pouch"), slots("m:vault")],
+        [Some(27), Some(1), Some(54)]
+    );
+    for bad in [0, 55] {
+        let mut d = declaring(&["chest"], &[]);
+        d.voxel_uses = vec![container("m:chest", Some(bad))];
+        let error = resolved_uses(&[("m", d)]).err().unwrap().to_string();
+        assert!(error.contains("voxel-uses 0 `m:chest`"), "{error}");
+        assert!(error.contains("from 1 to 54 slots"), "{error}");
+    }
+}
+
+#[test]
+fn a_material_is_not_both_a_door_and_a_container() {
+    let mut d = declaring(&["door", "door_open"], &[]);
+    d.voxel_uses = vec![
+        door("m:door", "m:door_open"),
+        container("m:door_open", None),
+    ];
+    let error = resolved_uses(&[("m", d)]).err().unwrap().to_string();
+    assert!(error.contains("already a Usable Voxel"), "{error}");
+}
