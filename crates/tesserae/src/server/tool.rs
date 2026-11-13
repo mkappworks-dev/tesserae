@@ -78,13 +78,20 @@ impl Usable {
 /// What Use would do, or why not, for the preview before the press.
 pub type UseAim = Result<UseTarget, UseRefusal>;
 
+/// What a Use is made with.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum UseWith {
+    /// The Tool in hand, which runs whatever is aimed at.
+    Tool(ToolId),
+    /// No Tool: a Usable Voxel in reach, else, if `eat`, the food in the
+    /// selected slot. Not `eat` while the hand holds something from outside
+    /// the hotbar.
+    Hand { eat: bool },
+}
+
 #[derive(Message, Clone, Copy, Debug)]
 pub struct UseIntent {
-    /// The Tool in hand, which runs whatever is aimed at.
-    pub tool: Option<ToolId>,
-    /// Whether a Use that finds nothing usable eats from the selected slot:
-    /// not while the hand holds something from outside the hotbar.
-    pub eat: bool,
+    pub with: UseWith,
     pub origin: Vec3,
     pub direction: Vec3,
     /// What the Client was shown; `None` takes whatever the ray strikes.
@@ -196,64 +203,68 @@ pub(super) fn answer_use(
     let playing = super::persistence::playing(status);
     for intent in intents.read() {
         let ray = (intent.origin, intent.direction);
-        let result = match intent.tool {
-            Some(tool) => run_tool(&store, &tables, &world, &tools, tool, intent, player.eye()),
-            None => match super::usable::aim(&store, &tables, &world, ray, player.eye()) {
-                None if intent.expected.is_some() => Err(UseRefusal::TargetChanged),
-                None => {
-                    if intent.eat {
-                        eat.write(EatIntent);
-                    }
-                    continue;
-                }
-                Some(aimed) => aimed.and_then(|aimed| {
-                    unchanged(intent, aimed)?;
-                    if !playing {
-                        return Err(UseRefusal::Busy);
-                    }
-                    match aimed.usable {
-                        Some(Usable::Station) => {
-                            let tag = tables
-                                .uses
-                                .station(aimed.voxel.material())
-                                .ok_or(UseRefusal::TargetChanged)?;
-                            let at = (aimed.at, aimed.voxel);
-                            super::station::open(&mut commands, &mut opened, entity, at, tag);
-                            Ok(UseResult::Station)
+        let result = match intent.with {
+            UseWith::Tool(tool) => {
+                run_tool(&store, &tables, &world, &tools, tool, intent, player.eye())
+            }
+            UseWith::Hand { eat: may_eat } => {
+                match super::usable::aim(&store, &tables, &world, ray, player.eye()) {
+                    None if intent.expected.is_some() => Err(UseRefusal::TargetChanged),
+                    None => {
+                        if may_eat {
+                            eat.write(EatIntent);
                         }
-                        Some(Usable::Container) => {
-                            let slots = tables.uses.container(aimed.voxel.material());
-                            let (Some(containers), Some(slots)) =
-                                (containers.as_deref_mut(), slots)
-                            else {
-                                return Err(UseRefusal::TargetChanged);
-                            };
-                            containers.open(entity, aimed.at, aimed.voxel, slots);
-                            audio.emit_at(Cause::ContainerOpen, aimed.at);
-                            Ok(UseResult::Container(aimed.at))
+                        continue;
+                    }
+                    Some(aimed) => aimed.and_then(|aimed| {
+                        unchanged(intent, aimed)?;
+                        if !playing {
+                            return Err(UseRefusal::Busy);
                         }
-                        _ => {
-                            let toggled = super::usable::toggle_door(
-                                (&mut store, &mut meshes),
-                                &tables,
-                                &world,
-                                &mut history,
-                                player.solid_body(),
-                                aimed.at,
-                            );
-                            if let Ok(UseResult::Door { opened }) = toggled {
-                                let cause = if opened {
-                                    Cause::DoorOpen
-                                } else {
-                                    Cause::DoorClose
-                                };
-                                audio.emit_at(cause, aimed.at);
+                        match aimed.usable {
+                            Some(Usable::Station) => {
+                                let tag = tables
+                                    .uses
+                                    .station(aimed.voxel.material())
+                                    .ok_or(UseRefusal::TargetChanged)?;
+                                let at = (aimed.at, aimed.voxel);
+                                super::station::open(&mut commands, &mut opened, entity, at, tag);
+                                Ok(UseResult::Station)
                             }
-                            toggled
+                            Some(Usable::Container) => {
+                                let slots = tables.uses.container(aimed.voxel.material());
+                                let (Some(containers), Some(slots)) =
+                                    (containers.as_deref_mut(), slots)
+                                else {
+                                    return Err(UseRefusal::TargetChanged);
+                                };
+                                containers.open(entity, aimed.at, aimed.voxel, slots);
+                                audio.emit_at(Cause::ContainerOpen, aimed.at);
+                                Ok(UseResult::Container(aimed.at))
+                            }
+                            _ => {
+                                let toggled = super::usable::toggle_door(
+                                    (&mut store, &mut meshes),
+                                    &tables,
+                                    &world,
+                                    &mut history,
+                                    player.solid_body(),
+                                    aimed.at,
+                                );
+                                if let Ok(UseResult::Door { opened }) = toggled {
+                                    let cause = if opened {
+                                        Cause::DoorOpen
+                                    } else {
+                                        Cause::DoorClose
+                                    };
+                                    audio.emit_at(cause, aimed.at);
+                                }
+                                toggled
+                            }
                         }
-                    }
-                }),
-            },
+                    }),
+                }
+            }
         };
         outcomes.write(UseOutcome(result));
     }
@@ -426,8 +437,7 @@ mod tests {
         let mut players = app.world_mut().query::<&mut Player>();
         players.single_mut(app.world_mut()).unwrap().set_eye(eye);
         app.world_mut().write_message(UseIntent {
-            tool: Some(ToolId(0)),
-            eat: false,
+            with: UseWith::Tool(ToolId(0)),
             origin: eye,
             direction,
             expected,
@@ -560,8 +570,7 @@ mod tests {
         let mut far = EYE;
         far.x += 100.0;
         app.world_mut().write_message(UseIntent {
-            tool: Some(ToolId(0)),
-            eat: false,
+            with: UseWith::Tool(ToolId(0)),
             origin: far,
             direction: Vec3::NEG_Y,
             expected: None,
@@ -622,8 +631,7 @@ mod tests {
         for (walled, expected) in [(false, Ok(())), (true, Err(UseRefusal::Blocked))] {
             let (mut app, camera) = camera_over_the_shoulder(walled);
             app.world_mut().write_message(UseIntent {
-                tool: Some(ToolId(0)),
-                eat: false,
+                with: UseWith::Tool(ToolId(0)),
                 origin: camera,
                 direction: Vec3::NEG_Y,
                 expected: None,
@@ -665,8 +673,7 @@ mod tests {
             .unwrap()
             .set_eye(Vec3::new(2.5, 12.0, 2.5));
         app.world_mut().write_message(UseIntent {
-            tool: Some(ToolId(0)),
-            eat: false,
+            with: UseWith::Tool(ToolId(0)),
             origin: Vec3::new(28.5, 12.0, 2.5),
             direction: Vec3::NEG_Y,
             expected: None,
@@ -694,8 +701,7 @@ mod tests {
         let mut players = third.world_mut().query::<&mut Player>();
         players.single_mut(third.world_mut()).unwrap().set_eye(eye);
         third.world_mut().write_message(UseIntent {
-            tool: Some(ToolId(0)),
-            eat: false,
+            with: UseWith::Tool(ToolId(0)),
             origin: camera,
             direction: (seen - camera).normalize(),
             expected: None,

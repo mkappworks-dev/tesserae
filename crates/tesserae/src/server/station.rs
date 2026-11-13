@@ -122,7 +122,7 @@ mod tests {
     };
     use super::super::edit::{EditAction, EditIntent};
     use super::super::inventory::Inventory;
-    use super::super::tool::{self, Usable, UseIntent, UseOutcome, UseResult, answer_use};
+    use super::super::tool::{self, Usable, UseIntent, UseOutcome, UseResult, UseWith, answer_use};
     use super::*;
     use crate::world::ChunkCoord;
 
@@ -168,8 +168,7 @@ mod tests {
         let eye = Vec3::new(x, EYE.y, EYE.z);
         set_eye(app, eye);
         app.world_mut().write_message(UseIntent {
-            tool: None,
-            eat: true,
+            with: UseWith::Hand { eat: true },
             origin: eye,
             direction: Vec3::NEG_Y,
             expected: None,

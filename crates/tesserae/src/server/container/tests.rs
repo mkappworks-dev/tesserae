@@ -12,7 +12,7 @@ use super::super::inventory::{
 };
 use super::super::items::{Items, PlacingItems};
 use super::super::streaming::MeshState;
-use super::super::tool::{self, UseIntent, UseOutcome, UseResult, answer_use};
+use super::super::tool::{self, UseIntent, UseOutcome, UseResult, UseWith, answer_use};
 use super::super::undo::HistoryAction::{Redo, Undo};
 use super::*;
 use crate::world::ChunkCoord;
@@ -78,8 +78,7 @@ fn chest_material(tables: &mut Tables) -> MaterialId {
 fn use_down(app: &mut App) -> Vec<UseOutcome> {
     set_eye(app, EYE);
     app.world_mut().write_message(UseIntent {
-        tool: None,
-        eat: true,
+        with: UseWith::Hand { eat: true },
         origin: EYE,
         direction: Vec3::NEG_Y,
         expected: None,

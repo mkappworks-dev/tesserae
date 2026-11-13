@@ -178,7 +178,7 @@ mod tests {
     use super::super::edit::{EditAction, EditIntent};
     use super::super::inventory::Inventory;
     use super::super::items::{Items, PlacingItems};
-    use super::super::tool::{self, ToolId, UseIntent, UseOutcome, answer_use};
+    use super::super::tool::{self, ToolId, UseIntent, UseOutcome, UseWith, answer_use};
     use super::super::undo::HistoryAction::{Redo, Undo};
     use super::super::vitals::EatIntent;
     use super::*;
@@ -241,8 +241,7 @@ mod tests {
     fn press(app: &mut App, eye: Vec3, direction: Vec3, tool: Option<ToolId>) -> Vec<UseOutcome> {
         super::super::edit::tests::set_eye(app, eye);
         app.world_mut().write_message(UseIntent {
-            tool,
-            eat: true,
+            with: tool.map_or(UseWith::Hand { eat: true }, UseWith::Tool),
             origin: eye,
             direction,
             expected: None,

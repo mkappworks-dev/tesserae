@@ -15,7 +15,7 @@ use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
 use super::aim::{Sent, Target};
 use super::camera::FlyCamera;
 use super::edit::{Catalogue, Holding, Hotbar};
-use crate::server::tool::{ToolKind, UseIntent, UseOutcome, UseResult, UseTarget};
+use crate::server::tool::{ToolKind, UseIntent, UseOutcome, UseResult, UseTarget, UseWith};
 use crate::world::WorldSettings;
 
 /// The corners the Server resolved: one being placed and one finished.
@@ -130,8 +130,9 @@ pub(super) fn use_tool(
     let Holding::Tool(tool) = hotbar.held() else {
         if actions.started(Action::Use) {
             intents.write(UseIntent {
-                tool: None,
-                eat: hotbar.outside.is_none() && hotbar.stacks[hotbar.selected].is_some(),
+                with: UseWith::Hand {
+                    eat: hotbar.outside.is_none() && hotbar.stacks[hotbar.selected].is_some(),
+                },
                 origin: camera.translation(),
                 direction: *camera.forward(),
                 expected,
@@ -145,8 +146,7 @@ pub(super) fn use_tool(
     // A press on an answer too old to trust is dropped, as a removal's is.
     if (actions.started(Action::Use) || actions.started(Action::Remove)) && current {
         intents.write(UseIntent {
-            tool: Some(tool),
-            eat: false,
+            with: UseWith::Tool(tool),
             origin: camera.translation(),
             direction: *camera.forward(),
             expected,
@@ -442,7 +442,7 @@ mod tests {
             frame(&mut app, None, Some(MouseButton::Left)),
         ] {
             assert_eq!(sent.len(), 1);
-            assert_eq!(sent[0].tool, Some(ToolId(0)));
+            assert_eq!(sent[0].with, UseWith::Tool(ToolId(0)));
             assert_eq!(sent[0].origin, Vec3::new(1.0, 2.0, 3.0));
             assert_eq!(sent[0].direction, Vec3::NEG_Z);
             assert_eq!(sent[0].expected, None, "a refused aim vouches for nothing");
@@ -521,7 +521,7 @@ mod tests {
             let mut app = app(held);
             let sent = frame(&mut app, Some(KeyCode::KeyG), None);
             assert_eq!(sent.len(), 1, "{held:?}");
-            assert_eq!(sent[0].tool, None, "{held:?}");
+            assert!(matches!(sent[0].with, UseWith::Hand { .. }), "{held:?}");
             for button in [MouseButton::Left, MouseButton::Right] {
                 assert!(frame(&mut app, None, Some(button)).is_empty(), "{held:?}");
             }
@@ -532,7 +532,8 @@ mod tests {
     fn eats(app: &mut App, key: Option<KeyCode>, button: Option<MouseButton>) -> Option<bool> {
         let sent = frame(app, key, button);
         assert!(sent.len() <= 1);
-        sent.first().map(|intent| intent.eat)
+        sent.first()
+            .map(|intent| intent.with == UseWith::Hand { eat: true })
     }
 
     #[test]
