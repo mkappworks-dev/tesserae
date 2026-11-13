@@ -23,6 +23,7 @@ use tesserae_core::inventory::{BACKPACK_SLOTS, HOTBAR_SLOTS, Inventory, Slot, St
 use tesserae_core::{MaterialId, ShapeId};
 
 mod catalogue;
+mod crafting;
 mod flight;
 pub(super) mod look;
 
@@ -74,6 +75,12 @@ impl InventoryWindow {
             ..default()
         }
     }
+}
+
+/// The Crafting tab in front, for a capture of it.
+#[cfg(any(feature = "dev", feature = "profiling"))]
+pub(super) fn crafting_in_front(app: &mut App) {
+    app.insert_resource(crafting::Pane::Crafting);
 }
 
 /// The Inventory as the Server last sent it.
@@ -131,7 +138,12 @@ pub(super) fn plugin(app: &mut App) {
         .add_observer(drag_start)
         .add_observer(drag_end)
         .add_observer(drop_on_slot)
-        .add_plugins((catalogue::plugin, flight::plugin, look::plugin))
+        .add_plugins((
+            catalogue::plugin,
+            crafting::plugin,
+            flight::plugin,
+            look::plugin,
+        ))
         .add_session_systems(
             Update,
             (
@@ -144,11 +156,14 @@ pub(super) fn plugin(app: &mut App) {
                 (
                     flight::note_takes,
                     receive,
+                    crafting::receive,
                     render,
                     catalogue::fill,
+                    crafting::fill,
                     catalogue::focus_search,
                     paint,
                     catalogue::paint,
+                    crafting::paint,
                     flight::fly,
                     drag_ghost,
                 )
@@ -533,6 +548,7 @@ struct Built {
     key: String,
     /// The Catalogue is beside the Inventory only outside Survival.
     survival: bool,
+    pane: crafting::Pane,
     /// Too narrow for the details column beside the grid, so it is toggled.
     narrow: bool,
     /// The Material the selected slot places and the Shape chosen for it.
@@ -560,10 +576,11 @@ fn render(
     (looks, catalogue, searches): (Res<Looks>, Res<Catalogue>, Res<super::menu_ui::Searches>),
     (bindings, labels): (Res<super::actions::Bindings>, Res<super::actions::Labels>),
     (roots, rows, cards, controls): Parts,
-    (mode, hotbar, preferences): (
+    (mode, hotbar, preferences, pane): (
         Res<super::game_mode::Mode>,
         Res<super::edit::Hotbar>,
         Res<super::profile::Preferences>,
+        Res<crafting::Pane>,
     ),
     (focus, screen): (
         Option<Res<InputFocus>>,
@@ -578,6 +595,7 @@ fn render(
         details: window.details,
         key: bindings.label(Action::Inventory, &labels),
         survival: mode.survival(),
+        pane: pane.shown(mode.survival()),
         narrow: screen.width() < NARROW_PX,
         shaping: match hotbar.held() {
             Holding::Solid {
@@ -594,7 +612,7 @@ fn render(
         .and_then(|f| f.get())
         .and_then(|entity| controls.get(entity).ok())
         .copied();
-    let was_survival = built.as_ref().map(|built| built.survival);
+    let was_side = built.as_ref().map(|built| (built.survival, built.pane));
     *built = wanted.clone();
     let Some(state) = wanted else {
         for root in &roots {
@@ -602,9 +620,9 @@ fn render(
         }
         return;
     };
-    // The row is built once per opening, so a mode change while open rebuilds
-    // it with the Catalogue added or taken away.
-    let reframe = was_survival.is_some_and(|was| was != state.survival);
+    // The row is built once per opening, so a mode or tab change while open
+    // rebuilds it with the other side pane.
+    let reframe = was_side.is_some_and(|was| was != (state.survival, state.pane));
     if reframe {
         for root in &roots {
             commands.entity(root).despawn();
@@ -629,9 +647,10 @@ fn render(
                         ..default()
                     },
                 ))
-                .with_children(|row| {
-                    if !state.survival {
-                        catalogue::panel(row, &searches.catalogue);
+                .with_children(|row| match state.pane {
+                    crafting::Pane::Catalogue => catalogue::panel(row, &searches.catalogue),
+                    crafting::Pane::Crafting => {
+                        crafting::panel(row, &searches.recipes, !state.survival)
                     }
                 })
                 .id();
@@ -1554,7 +1573,7 @@ mod tests {
 
     /// The Client with the Server's Inventory behind it, a Player holding rock
     /// in the backpack and dust on the hotbar, and hotbar slot 4 selected.
-    fn app() -> App {
+    pub(super) fn app() -> App {
         let mut app = App::new();
         app.add_plugins(super::super::actions::test_plugin)
             .init_resource::<super::super::menu::Menu>()
@@ -1615,12 +1634,12 @@ mod tests {
     }
 
     /// One Server tick, then one Client frame.
-    fn server(app: &mut App) {
+    pub(super) fn server(app: &mut App) {
         app.world_mut().run_schedule(FixedPreUpdate);
         app.update();
     }
 
-    fn press(app: &mut App, key: KeyCode) {
+    pub(super) fn press(app: &mut App, key: KeyCode) {
         app.world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()
             .press(key);
@@ -1640,7 +1659,7 @@ mod tests {
         (cursor.grab_mode, cursor.visible)
     }
 
-    fn shown(app: &mut App) -> bool {
+    pub(super) fn shown(app: &mut App) -> bool {
         app.world_mut()
             .query::<&WindowRoot>()
             .iter(app.world())
@@ -1845,7 +1864,7 @@ mod tests {
     }
 
     /// Lets enough time pass that the next click is not a double-click.
-    fn later(app: &mut App) {
+    pub(super) fn later(app: &mut App) {
         app.world_mut()
             .resource_mut::<Time<Real>>()
             .advance_by(std::time::Duration::from_secs(1));

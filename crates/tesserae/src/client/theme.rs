@@ -408,6 +408,14 @@ pub(super) const ITEM_EMPTY_ICON: Color = Color::srgb_u8(0x8b, 0x92, 0x9d);
 pub(super) const CATALOGUE_SUBTITLE: Color = Color::srgb_u8(0xa9, 0xad, 0xb6);
 pub(super) const CATALOGUE_ID: Color = Color::srgb_u8(0x9f, 0xa4, 0xad);
 pub(super) const CATALOGUE_LABEL: Color = Color::srgb_u8(0xc3, 0xc6, 0xcc);
+pub(super) const RECIPE: Color = Color::srgb_u8(0x14, 0x15, 0x18);
+pub(super) const RECIPE_EDGE: Color = Color::srgb_u8(0x2a, 0x2b, 0x31);
+pub(super) const RECIPE_HOVER_EDGE: Color = Color::srgb_u8(0x55, 0x57, 0x5f);
+pub(super) const RECIPE_CHOSEN: Color = Color::srgb_u8(0x1a, 0x1f, 0x1a);
+/// An input the Inventory holds too few of.
+pub(super) const RECIPE_SHORT: Color = Color::srgb_u8(0xd9, 0x9a, 0x83);
+pub(super) const TEXT_RECIPE: f32 = 13.0;
+pub(super) const RADIUS_ROW: f32 = 6.0;
 pub(super) const BADGE: Color = Color::srgb_u8(0x23, 0x26, 0x20);
 pub(super) const BADGE_EDGE: Color = Color::srgb_u8(0x57, 0x5a, 0x53);
 pub(super) const BADGE_INK: Color = Color::srgb_u8(0xc2, 0xc9, 0xba);

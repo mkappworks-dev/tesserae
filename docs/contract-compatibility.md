@@ -75,6 +75,14 @@ once each, up to 8 `ambient-bed`s (an `ambient` Sound by full name and a volume
 from 0 to 1), up to 8 `music` Sounds by full name, and an optional `silence-s`
 `sound-range` from 0 to 3600 seconds, 60 to 180 when absent.
 
+Line 0.3 then gained `recipes` on its `declaration`, appended after
+`cause-sounds` in the same way; a Declaration for 0.1 or 0.2 loads with none. A
+`recipe-def` carries 1 to 9 `inputs` and one `output`, each a `recipe-stack` of
+an Item by full name and a count, the output's at most its Item's `max-stack`,
+and a required `station`: `hand` or a Station's tag. Names resolve after every
+Mod has declared, implicit Items included. A Mod declares at most 256 and a
+World holds at most 1024.
+
 ## What is not frozen
 
 Line `0.x` is pre-release. Later gameplay steps may add new lines, and

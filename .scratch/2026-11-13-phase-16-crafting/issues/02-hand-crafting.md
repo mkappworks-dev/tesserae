@@ -1,6 +1,6 @@
 # 02: Hand crafting end to end
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: None (can start immediately)
 
@@ -23,12 +23,12 @@ usable) and its hand Recipe.
 
 ## Acceptance criteria
 
-- [ ] Recipes load from WIT and data-only content; an unknown Item or tag, an
+- [x] Recipes load from WIT and data-only content; an unknown Item or tag, an
       empty or oversized input list, an output over `max-stack` and a Mod over
       its cap are load errors naming the Recipe.
-- [ ] Crafting spends exactly the inputs and gives the output in both Game
+- [x] Crafting spends exactly the inputs and gives the output in both Game
       modes; Craft N is bound by one output Stack.
-- [ ] Output that does not fit drops at the Player and the Client says so.
-- [ ] A craft never enters the undo journal.
-- [ ] The Crafting tab follows the mockup and draws only what the Server sends.
-- [ ] Terra: crafting a Workbench from Wood works in a new World.
+- [x] Output that does not fit drops at the Player and the Client says so.
+- [x] A craft never enters the undo journal.
+- [x] The Crafting tab follows the mockup and draws only what the Server sends.
+- [x] Terra: crafting a Workbench from Wood works in a new World.

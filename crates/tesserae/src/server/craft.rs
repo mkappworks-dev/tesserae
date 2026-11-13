@@ -66,16 +66,19 @@ pub(crate) fn plugin(app: &mut App) {
         );
 }
 
+/// What output with no room needs to drop at the Player.
+type Ground<'w> = (
+    Option<ResMut<'w, EntityStore>>,
+    Option<Res<'w, ChunkStore>>,
+    Option<Res<'w, ContentTables>>,
+    Option<Res<'w, WorldSettings>>,
+);
+
 pub(super) fn craft(
     mut intents: MessageReader<Craft>,
     player: Single<(&mut Inventory, &Player)>,
     (recipes, items): (Res<Recipes>, Option<Res<Items>>),
-    (mut entities, store, tables, world): (
-        Option<ResMut<EntityStore>>,
-        Option<Res<ChunkStore>>,
-        Option<Res<ContentTables>>,
-        Option<Res<WorldSettings>>,
-    ),
+    (mut entities, store, tables, world): Ground,
     (mut refused, mut dropped): (MessageWriter<CraftRefused>, MessageWriter<CraftDropped>),
 ) {
     let (mut inventory, body) = player.into_inner();
