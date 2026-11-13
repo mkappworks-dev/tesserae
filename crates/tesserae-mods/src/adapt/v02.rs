@@ -237,6 +237,7 @@ pub(crate) fn declaration(d: old::Declaration, log: &LogHandle) -> content::Decl
         material_sounds: Vec::new(),
         soundscapes: Vec::new(),
         cause_sounds: Vec::new(),
+        recipes: Vec::new(),
         voxel_uses: Vec::new(),
     }
 }

@@ -266,6 +266,7 @@ pub(super) fn panel(row: &mut ChildSpawnerCommands, query: &str) {
     ))
     .with_children(|panel| {
         panel.spawn(theme::ring(theme::ITEM_RADIUS));
+        super::crafting::tabs(panel, super::crafting::Pane::Catalogue);
         panel
             .spawn(Node {
                 flex_direction: FlexDirection::Column,

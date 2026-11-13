@@ -22,6 +22,7 @@ mod manifest;
 mod package;
 mod prompt;
 mod random;
+mod recipe;
 mod recording;
 mod registry;
 mod sandbox;
@@ -57,6 +58,7 @@ pub use manifest::{
 };
 pub use package::{Staged, stage};
 pub use prompt::{confirm_trust, trust_prompt};
+pub use recipe::{DeclaredRecipes, MAX_RECIPES, MAX_RECIPES_PER_MOD};
 pub use registry::{Kind, Registry, RegistryMismatch};
 pub use sandbox::{ModFault, ModInstance};
 pub use sound::{Sound, Sounds, Soundscape, resolve_sounds};

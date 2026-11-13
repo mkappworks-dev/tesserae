@@ -172,6 +172,13 @@ pub enum ModError {
         field: &'static str,
         reason: String,
     },
+    /// A `recipes` row, named by its output Item.
+    Recipe {
+        id: String,
+        row: usize,
+        output: String,
+        reason: String,
+    },
     /// A second Sound set for one Material; `other` gave it the first.
     SecondSoundSet {
         id: String,
@@ -352,6 +359,12 @@ impl fmt::Display for ModError {
                 field,
                 reason,
             } => write!(f, "mod `{id}`: {list} {row} `{name}`: {field}: {reason}"),
+            ModError::Recipe {
+                id,
+                row,
+                output,
+                reason,
+            } => write!(f, "mod `{id}`: recipe {row} `{output}`: {reason}"),
             ModError::SecondSoundSet {
                 id,
                 other,

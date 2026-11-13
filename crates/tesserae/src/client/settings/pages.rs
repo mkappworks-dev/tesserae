@@ -217,7 +217,7 @@ pub(super) fn page(
         Tab::Bindings => bindings_page(list, settings, bindings, labels, searches),
         Tab::Controller => controller(list, settings, bindings, p, labels),
         Tab::Accessibility => accessibility(list, p),
-        Tab::Catalogue => {}
+        Tab::Catalogue | Tab::Recipes => {}
     }
 }
 

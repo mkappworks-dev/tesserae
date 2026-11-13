@@ -15,6 +15,7 @@
 #[cfg(any(feature = "dev", feature = "profiling"))]
 mod builder;
 mod causal_sound;
+pub mod craft;
 pub mod death;
 pub mod edit;
 pub mod entities;
@@ -129,6 +130,7 @@ pub fn plugin(app: &mut App) {
     app.add_plugins((
         entities::plugin,
         inventory::plugin,
+        craft::plugin,
         game_mode::plugin,
         vitals::plugin,
         death::plugin,

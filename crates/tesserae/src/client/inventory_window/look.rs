@@ -160,6 +160,8 @@ pub(in crate::client) enum Flavour {
     Method,
     /// A quick shape.
     Shape,
+    /// A Shape in the item details, drawn as the Item placed in it.
+    ShapeChip,
     /// The way an axis grows, as text.
     Way,
 }
@@ -195,6 +197,12 @@ fn flat_colours(flat: Flat) -> (Color, Color, Color) {
             theme::PRESET_ON,
             theme::PRESET_ON_EDGE,
             theme::PRESET_ON_GLYPH,
+        ),
+        (Flavour::ShapeChip, false) => (theme::CHIP, theme::CHIP_EDGE, theme::CHIP_INK),
+        (Flavour::ShapeChip, true) => (
+            theme::SHAPE_CHIP_ON,
+            theme::SHAPE_CHIP_ON_EDGE,
+            theme::CHIP_ON,
         ),
         (Flavour::Way, _) => (none, none, theme::AXIS_WAY_INK),
     }

@@ -162,6 +162,18 @@ fn pixel(name: &str, face: usize, x: usize, y: usize, base: [u8; 3]) -> [u8; 3] 
                 tint(base, (n - 128) / 14)
             }
         }
+        "workbench" => {
+            let frame = x == 0 || x == 15 || (face == 0 && (y == 0 || y == 15));
+            if frame {
+                tint(base, -46 + (n - 128) / 20)
+            } else if face == 0 {
+                tint(base, if y % 5 == 0 { -24 } else { 12 } + (n - 128) / 18)
+            } else if y >= 4 && (3..=12).contains(&x) {
+                tint(base, -70 + (n - 128) / 24)
+            } else {
+                tint(base, (n - 128) / 14)
+            }
+        }
         "glass" => {
             if x == 0 || y == 0 || x == 15 || y == 15 {
                 [181, 216, 255]

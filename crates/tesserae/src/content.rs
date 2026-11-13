@@ -33,6 +33,11 @@ impl ItemLook {
     }
 }
 
+/// Every Recipe in the World, in the Server's Recipe order, so a Craft names
+/// one by its index.
+#[derive(Message, Clone, Debug, Default, PartialEq, Eq)]
+pub struct RecipeBook(pub Vec<tesserae_core::craft::Recipe>);
+
 /// Every Sound in the World, indexed by `SoundId`, with its recordings' checked
 /// Ogg Vorbis bytes: what the Client plays a Sound event with.
 #[derive(Message, Clone, Debug, Default, PartialEq)]

@@ -448,6 +448,23 @@ fn component() -> Declaration {
                 sound: "full:crack".into(),
             })
             .into(),
+        recipes: vec![content::RecipeDef {
+            inputs: vec![
+                content::RecipeStack {
+                    item: "full:log".into(),
+                    count: 2,
+                },
+                content::RecipeStack {
+                    item: "full:pebble".into(),
+                    count: 1,
+                },
+            ],
+            output: content::RecipeStack {
+                item: "full:log".into(),
+                count: 16,
+            },
+            station: "hand".into(),
+        }],
         voxel_uses: vec![content::VoxelUse {
             material: "full:wood".into(),
             kind: content::VoxelUseKind::Door("full:ash".into()),
@@ -516,7 +533,7 @@ fn absent_optional_values_stay_absent_rather_than_defaulting() {
     assert!(world.caves.is_none() && world.smoothing.is_none() && world.water.is_none());
     assert!(world.movement.is_none() && world.character.is_none() && world.ground.is_none());
     assert!(d.view.is_none() && d.fluids.is_empty() && d.tools.is_empty());
-    assert!(d.items.is_empty() && d.survival.is_none());
+    assert!(d.items.is_empty() && d.survival.is_none() && d.recipes.is_empty());
     assert!(world.climate.is_none() && d.biomes.is_empty() && d.ores.is_empty());
     assert_eq!(d.materials[0].remove_time_s, None);
     assert_eq!(d.materials[0].contact_damage_per_s, None);

@@ -306,7 +306,7 @@ fn fingerprint(textures: &[(String, Vec<u8>)]) -> u64 {
 #[test]
 fn the_demo_games_textures_are_unchanged() {
     let pinned = [
-        ("terra", 0x04d5_c1db_f406_db57),
+        ("terra", 0x4d45_ba29_80c0_86d8),
         ("meadow", 0x5a2b_6c07_7a9e_ec3d),
         ("ember", 0xf36d_dd1c_3496_4938),
         ("tidewater", 0xb185_0251_6959_e86a),

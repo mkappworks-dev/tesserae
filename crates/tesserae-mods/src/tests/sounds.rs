@@ -30,6 +30,7 @@ pub(super) fn empty() -> Declaration {
         material_sounds: Vec::new(),
         soundscapes: Vec::new(),
         cause_sounds: Vec::new(),
+        recipes: Vec::new(),
         voxel_uses: Vec::new(),
     }
 }

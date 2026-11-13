@@ -260,6 +260,11 @@ sound = "full:crack"
 cause = "use-measured"
 sound = "full:crack"
 
+[[recipes]]
+inputs = [{ item = "full:log", count = 2 }, { item = "full:pebble", count = 1 }]
+output = { item = "full:log", count = 16 }
+station = "hand"
+
 [[voxel-uses]]
 kind = "door"
 material = "full:wood"

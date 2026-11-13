@@ -153,6 +153,7 @@ pub struct Behaviour {
     pub(crate) material_sounds: Vec<content::MaterialSound>,
     pub(crate) soundscapes: Vec<content::SoundscapeDef>,
     pub(crate) cause_sounds: Vec<content::CauseSound>,
+    pub(crate) recipes: Vec<content::RecipeDef>,
     voxel_uses: Vec<content::VoxelUse>,
     lake: Option<content::WaterParams>,
     ground: Option<content::GroundParams>,
@@ -255,6 +256,11 @@ pub fn apply(
             "soundscape",
             declaration.soundscapes.len(),
             MAX_SOUNDSCAPES_PER_MOD,
+        ),
+        (
+            "recipe",
+            declaration.recipes.len(),
+            crate::recipe::MAX_RECIPES_PER_MOD,
         ),
     ] {
         if count > max {
@@ -461,6 +467,7 @@ pub fn apply(
             material_sounds: declaration.material_sounds,
             soundscapes: declaration.soundscapes,
             cause_sounds: declaration.cause_sounds,
+            recipes: declaration.recipes,
             voxel_uses: declaration.voxel_uses,
             lake,
             ground,

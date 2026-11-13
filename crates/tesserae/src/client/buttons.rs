@@ -111,20 +111,12 @@ pub(super) fn button(
 /// Small spaced capitals above a heading.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Eyebrow {
-    Menu,
     Cinematic,
     Inventory,
 }
 
 pub(super) fn eyebrow(parent: &mut ChildSpawnerCommands, label: &str, look: Eyebrow) {
     match look {
-        Eyebrow::Menu => tracked(
-            parent,
-            label,
-            theme::font(theme::TEXT_EYEBROW),
-            theme::SECTION_TRACKING,
-            theme::muted(),
-        ),
         Eyebrow::Cinematic => tracked(
             parent,
             label,

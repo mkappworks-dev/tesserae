@@ -286,9 +286,13 @@ pub(super) fn plugin(app: &mut App) {
         app.insert_resource(super::layout::LayoutMode::turned_on())
             .insert_resource(super::layout_menu::LayoutMenu::opened());
     }
-    // `TESSERAE_SCREENSHOT_INVENTORY` opens the Inventory window with its details.
-    if std::env::var_os("TESSERAE_SCREENSHOT_INVENTORY").is_some() {
+    // `TESSERAE_SCREENSHOT_INVENTORY` opens the Inventory window with its
+    // details; `=crafting` brings the Crafting tab to the front.
+    if let Some(inventory) = std::env::var_os("TESSERAE_SCREENSHOT_INVENTORY") {
         app.insert_resource(super::inventory_window::InventoryWindow::opened());
+        if inventory == "crafting" {
+            super::inventory_window::crafting_in_front(app);
+        }
     }
     app.insert_resource(super::help::Panels {
         debug: std::env::var_os("TESSERAE_SCREENSHOT_DEBUG").is_some(),
