@@ -284,6 +284,8 @@ impl Guest for Terra {
                 solid("chest"),
                 solid("door"),
                 solid("door_open"),
+                solid("gate"),
+                solid("gate_open"),
             ],
             shapes: vec![fence(), panel()],
             appearance: vec![
@@ -307,6 +309,8 @@ impl Guest for Terra {
                 appearance("chest", [107, 68, 35, 255]),
                 appearance("door", [128, 88, 50, 255]),
                 appearance("door_open", [128, 88, 50, 255]),
+                appearance("gate", [140, 97, 55, 255]),
+                appearance("gate_open", [140, 97, 55, 255]),
             ],
             world: Some(world),
             view: Some(ViewParams {
@@ -497,6 +501,19 @@ impl Guest for Terra {
                     max_stack: None,
                     food: None,
                 },
+                ItemDef {
+                    name: "gate".into(),
+                    size_m: 0.25,
+                    color: Srgba {
+                        r: 140,
+                        g: 97,
+                        b: 55,
+                        a: 255,
+                    },
+                    material: Some("terra:gate".into()),
+                    max_stack: None,
+                    food: None,
+                },
             ],
             biomes: vec![
                 BiomeDef {
@@ -639,6 +656,17 @@ impl Guest for Terra {
                 },
                 RecipeDef {
                     inputs: vec![RecipeStack {
+                        item: "terra:wood".into(),
+                        count: 2,
+                    }],
+                    output: RecipeStack {
+                        item: "terra:gate".into(),
+                        count: 1,
+                    },
+                    station: "workbench".into(),
+                },
+                RecipeDef {
+                    inputs: vec![RecipeStack {
                         item: "terra:sand".into(),
                         count: 2,
                     }],
@@ -695,6 +723,15 @@ impl Guest for Terra {
                         open: "terra:door_open".into(),
                         width_m: Some(1.0),
                         height_m: Some(2.0),
+                    }),
+                    shape: Some("terra:panel".into()),
+                },
+                VoxelUse {
+                    material: "terra:gate".into(),
+                    kind: VoxelUseKind::Door(tesserae::mods::content::DoorDef {
+                        open: "terra:gate_open".into(),
+                        width_m: Some(1.0),
+                        height_m: Some(1.0),
                     }),
                     shape: Some("terra:panel".into()),
                 },
