@@ -6,8 +6,8 @@ use bevy::prelude::*;
 use tesserae_core::{MaterialId, Voxel};
 
 use super::death::PlayerIntents;
-use super::edit::EDIT_REACH_M;
 use super::player::Player;
+use super::usable::{Closed, in_reach};
 use super::world_state::ChunkStore;
 use crate::session::SessionApp;
 use crate::world::WorldSettings;
@@ -31,28 +31,11 @@ pub struct StationOpened {
     pub tag: String,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum StationClose {
-    OutOfReach,
-    /// The Voxel was removed or replaced.
-    Changed,
-}
-
-impl StationClose {
-    /// For the Client to put on screen, naming the Station.
-    pub fn message(self, name: &str) -> String {
-        match self {
-            StationClose::OutOfReach => format!("Out of reach of the {name}."),
-            StationClose::Changed => format!("The {name} is gone."),
-        }
-    }
-}
-
 /// The Server closed the session at `at`; the Client closes its pane.
 #[derive(Message, Clone, Copy, PartialEq, Eq, Debug)]
 pub struct StationClosed {
     pub at: [i32; 3],
-    pub why: StationClose,
+    pub why: Closed,
 }
 
 /// The Client closed the Station pane itself.
@@ -103,8 +86,6 @@ pub(super) fn leave(
     }
 }
 
-/// Reach is to the nearest point of the Station, so a session opened at the
-/// edge of reach does not close at once.
 pub(super) fn close_sessions(
     mut commands: Commands,
     sessions: Query<(Entity, &Player, &AtStation)>,
@@ -112,13 +93,10 @@ pub(super) fn close_sessions(
     mut closed: MessageWriter<StationClosed>,
 ) {
     for (entity, player, session) in &sessions {
-        let size = world.voxel_size;
-        let min = Vec3::from_array(session.at.map(|i| i as f32 * size));
-        let nearest = player.eye().clamp(min, min + Vec3::splat(size));
         let why = if store.voxel(session.at) != Some(session.voxel) {
-            StationClose::Changed
-        } else if nearest.distance(player.eye()) > EDIT_REACH_M {
-            StationClose::OutOfReach
+            Closed::Changed
+        } else if !in_reach(player.eye(), session.at, world.voxel_size) {
+            Closed::OutOfReach
         } else {
             continue;
         };
@@ -290,7 +268,7 @@ mod tests {
             closed(&mut app),
             [StationClosed {
                 at: [5, 8, 5],
-                why: StationClose::OutOfReach
+                why: Closed::OutOfReach
             }]
         );
         app.world_mut().run_system_once(close_sessions).unwrap();
@@ -317,7 +295,7 @@ mod tests {
             closed(&mut app),
             [StationClosed {
                 at: [5, 8, 5],
-                why: StationClose::Changed
+                why: Closed::Changed
             }]
         );
     }
@@ -330,17 +308,5 @@ mod tests {
         app.world_mut().run_system_once(leave).unwrap();
         assert_eq!(craft_soil(&mut app), [CraftRefusal::NeedsStation]);
         assert!(closed(&mut app).is_empty());
-    }
-
-    #[test]
-    fn the_notice_names_the_station() {
-        assert_eq!(
-            StationClose::OutOfReach.message("Workbench"),
-            "Out of reach of the Workbench."
-        );
-        assert_eq!(
-            StationClose::Changed.message("Workbench"),
-            "The Workbench is gone."
-        );
     }
 }

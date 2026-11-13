@@ -13,8 +13,9 @@ use crate::client::drops::Looks;
 use crate::client::edit::Catalogue;
 use crate::client::menu_ui as ui;
 use crate::client::theme;
-use crate::server::container::{Closed, ContainerClosed, ContainerShown};
+use crate::server::container::{ContainerClosed, ContainerShown};
 use crate::server::inventory::{InventoryIntent, SlotAddress};
+use crate::server::usable::Closed;
 use crate::session::SessionApp;
 
 /// The Container the Player has open, as the Server last sent it.

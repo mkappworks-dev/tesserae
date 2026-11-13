@@ -20,6 +20,7 @@ use crate::client::theme;
 use crate::content::RecipeBook;
 use crate::server::craft::{Craft, CraftDropped, CraftRefused};
 use crate::server::station::{LeaveStation, StationClosed, StationOpened};
+use crate::server::usable::Closed;
 use crate::session::SessionApp;
 
 const PANEL_PX: f32 = 300.0;
@@ -227,10 +228,21 @@ pub(super) fn stations(
             continue;
         };
         super::close(&mut window, &mut cursor);
-        ui::notify(&mut commands, &why.message(&open.name), ui::Tone::Alert);
+        ui::notify(
+            &mut commands,
+            &closed_notice(*why, &open.name),
+            ui::Tone::Alert,
+        );
     }
     if !window.open && station.0.take().is_some() {
         leave.write(LeaveStation);
+    }
+}
+
+fn closed_notice(why: Closed, station: &str) -> String {
+    match why {
+        Closed::OutOfReach => format!("Out of reach of the {station}."),
+        Closed::Changed => format!("The {station} is gone."),
     }
 }
 
@@ -765,6 +777,18 @@ mod tests {
     use super::super::catalogue::SearchBox;
     use super::super::tests::{app, later, press, server};
     use super::*;
+
+    #[test]
+    fn the_notice_names_the_station() {
+        assert_eq!(
+            closed_notice(Closed::OutOfReach, "Workbench"),
+            "Out of reach of the Workbench."
+        );
+        assert_eq!(
+            closed_notice(Closed::Changed, "Workbench"),
+            "The Workbench is gone."
+        );
+    }
     use crate::server::game_mode::{GameMode, PlayerMode};
     use bevy::ecs::message::Messages;
 
@@ -1020,7 +1044,7 @@ mod tests {
         at_bench(&mut app);
         app.world_mut().write_message(StationClosed {
             at: AT,
-            why: crate::server::station::StationClose::OutOfReach,
+            why: Closed::OutOfReach,
         });
         app.update();
         app.update();

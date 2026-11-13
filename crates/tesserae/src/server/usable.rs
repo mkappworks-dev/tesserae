@@ -23,6 +23,22 @@ const SIGHT_M: f32 = 2.0 * edit::EDIT_REACH_M;
 /// its foot.
 const DOOR_RUN_MAX: i32 = 4;
 
+/// Why the Server closed a Station or Container session.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Closed {
+    OutOfReach,
+    /// The Voxel was removed or replaced.
+    Changed,
+}
+
+/// Whether the Voxel `at` is within Edit reach of `eye`, measured to its
+/// nearest point, so a session opened at the edge of reach does not close at
+/// once.
+pub(super) fn in_reach(eye: Vec3, at: [i32; 3], voxel_size: f32) -> bool {
+    let min = Vec3::from_array(at.map(|i| i as f32 * voxel_size));
+    eye.distance(eye.clamp(min, min + Vec3::splat(voxel_size))) <= edit::EDIT_REACH_M
+}
+
 /// What Use with no Tool would do with this ray: the Usable Voxel it strikes in
 /// reach, `OutOfReach` for one past it, or `None` when nothing usable is
 /// aimed at and Use eats.

@@ -15,11 +15,11 @@ use tesserae_core::save::containers::SavedContainer;
 use tesserae_core::{MaterialId, Voxel};
 
 use super::ContentTables;
-use super::edit::EDIT_REACH_M;
 use super::entities::EntityStore;
 use super::items::Items;
 use super::player::Player;
 use super::sound::Emitter;
+use super::usable::{Closed, in_reach};
 use super::world_state::ChunkStore;
 use crate::session::SessionApp;
 use crate::world::WorldSettings;
@@ -56,13 +56,6 @@ pub struct ContainerShown {
 pub struct ContainerClosed {
     pub at: [i32; 3],
     pub why: Closed,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Closed {
-    OutOfReach,
-    /// The Voxel changed or was removed.
-    Changed,
 }
 
 impl Containers {
@@ -215,13 +208,6 @@ pub(super) fn watch(
             }],
         );
     }
-}
-
-/// Whether the Voxel `at` is within Edit reach of `eye`, measured to its
-/// nearest point.
-fn in_reach(eye: Vec3, at: [i32; 3], voxel_size: f32) -> bool {
-    let min = Vec3::from_array(at.map(|i| i as f32 * voxel_size));
-    eye.distance(eye.clamp(min, min + Vec3::splat(voxel_size))) <= EDIT_REACH_M
 }
 
 pub(super) fn announce(

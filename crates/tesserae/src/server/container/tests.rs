@@ -6,7 +6,7 @@ use tesserae_mods::Intent;
 use super::super::edit::tests::{
     app_with_tables, ground, place_held, rejections, replay, send, set_eye, tick, voxel_at,
 };
-use super::super::edit::{self, EditAction, EditIntent, RejectReason};
+use super::super::edit::{self, EDIT_REACH_M, EditAction, EditIntent, RejectReason};
 use super::super::inventory::{
     self, Inventory, InventoryChanged, InventoryIntent, InventoryRefused, Reason, SlotAddress,
 };
