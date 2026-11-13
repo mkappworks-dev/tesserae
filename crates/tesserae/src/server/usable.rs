@@ -4,7 +4,7 @@
 
 use bevy::prelude::*;
 use tesserae_core::collide::{Aabb, VoxelVolume, overlaps, raycast};
-use tesserae_core::{Occupants, Tables, Voxel, VoxelUse};
+use tesserae_core::{Door, Occupants, Tables, Voxel, VoxelUse};
 use tesserae_mods::{EditEvent, EditKind};
 
 use super::edit::{self, Batch, PlacedOnly, RejectReason};
@@ -78,8 +78,8 @@ pub(super) fn aim(
 
 fn usable(tables: &Tables, voxel: Voxel) -> Option<Usable> {
     match tables.uses.of(voxel.material())? {
-        (_, &VoxelUse::Door { open }) => Some(Usable::Door {
-            open: voxel.material() == open,
+        (closed, &VoxelUse::Door { open }) => Some(Usable::Door {
+            open: Door { closed, open }.is_open(voxel.material()),
         }),
         (_, &VoxelUse::Container { .. }) => Some(Usable::Container),
         (_, VoxelUse::Station { .. }) => Some(Usable::Station),
