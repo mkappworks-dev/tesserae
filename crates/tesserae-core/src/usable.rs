@@ -2,6 +2,7 @@
 //! declared data the Server runs natively
 //! (`docs/adr/0026-usable-voxels-are-declared-kinds-the-server-runs.md`).
 
+use crate::craft::HAND;
 use crate::voxel::MaterialId;
 
 /// A Container's slots when its row names none.
@@ -37,6 +38,8 @@ pub enum VoxelUse {
     Door { open: MaterialId },
     /// Holds Stacks of its own in this many slots.
     Container { slots: u8 },
+    /// Offers the Recipes crafted at its tag. Materials may share a tag.
+    Station { tag: String },
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -50,6 +53,8 @@ pub enum UseError {
     AlreadyUsable(MaterialId),
     /// A Container with no slots or more than [`MAX_CONTAINER_SLOTS`].
     Slots,
+    /// A Station tagged `hand`, which names Recipes crafted anywhere.
+    HandTag,
 }
 
 impl std::fmt::Display for UseError {
@@ -61,6 +66,7 @@ impl std::fmt::Display for UseError {
                 f.write_str("a Door's open Material must not be its closed one")
             }
             UseError::Slots => write!(f, "a Container holds from 1 to {MAX_CONTAINER_SLOTS} slots"),
+            UseError::HandTag => write!(f, "`{HAND}` is reserved and no Station's tag"),
             UseError::AlreadyUsable(id) => write!(
                 f,
                 "Material {id} is already a Usable Voxel or another Door's state"
@@ -80,6 +86,7 @@ fn named(&(material, ref kind): &(MaterialId, VoxelUse)) -> Vec<MaterialId> {
     match *kind {
         VoxelUse::Door { open } => vec![material, open],
         VoxelUse::Container { .. } => vec![material],
+        VoxelUse::Station { .. } => vec![material],
     }
 }
 
@@ -87,13 +94,13 @@ impl VoxelUses {
     /// Adds a row whose Materials no row names yet. The caller vets that they
     /// are solid; see [`crate::Tables::register_use`].
     pub(crate) fn push(&mut self, material: MaterialId, kind: VoxelUse) -> Result<(), UseError> {
-        if kind == (VoxelUse::Door { open: material }) {
-            return Err(UseError::SameMaterial);
-        }
-        if let VoxelUse::Container { slots } = kind
-            && !(1..=MAX_CONTAINER_SLOTS).contains(&slots)
-        {
-            return Err(UseError::Slots);
+        match &kind {
+            VoxelUse::Door { open } if *open == material => return Err(UseError::SameMaterial),
+            VoxelUse::Station { tag } if tag == HAND => return Err(UseError::HandTag),
+            VoxelUse::Container { slots } if !(1..=MAX_CONTAINER_SLOTS).contains(slots) => {
+                return Err(UseError::Slots);
+            }
+            _ => {}
         }
         let row = (material, kind);
         for taken in named(&row) {
@@ -129,6 +136,31 @@ impl VoxelUses {
         }
     }
 
+    /// The tag of the Station `material` is.
+    pub fn station(&self, material: MaterialId) -> Option<&str> {
+        match self.of(material)? {
+            (_, VoxelUse::Station { tag }) => Some(tag),
+            _ => None,
+        }
+    }
+
+    /// Every Station tag, once each, in declared order.
+    pub fn station_tags(&self) -> impl Iterator<Item = &str> + '_ {
+        self.rows
+            .iter()
+            .enumerate()
+            .filter_map(|(at, (_, kind))| match kind {
+                VoxelUse::Station { tag }
+                    if !self.rows[..at]
+                        .iter()
+                        .any(|(_, k)| matches!(k, VoxelUse::Station { tag: t } if t == tag)) =>
+                {
+                    Some(tag.as_str())
+                }
+                _ => None,
+            })
+    }
+
     /// The Material `material` counts as wherever its state does not matter,
     /// as an Item or in history: a Door's closed one, else itself.
     pub fn closed(&self, material: MaterialId) -> MaterialId {
@@ -156,6 +188,10 @@ mod tests {
         VoxelUse::Door { open }
     }
 
+    fn station(tag: &str) -> VoxelUse {
+        VoxelUse::Station { tag: tag.into() }
+    }
+
     #[test]
     fn a_door_answers_for_both_its_states() {
         let mut uses = VoxelUses::default();
@@ -177,5 +213,22 @@ mod tests {
         assert_eq!(uses.push(10, door(12)), Err(UseError::AlreadyUsable(10)));
         assert_eq!(uses.push(12, door(12)), Err(UseError::SameMaterial));
         assert!(uses.push(11, door(12)).is_ok());
+    }
+
+    #[test]
+    fn stations_may_share_a_tag_but_none_takes_hand() {
+        let mut uses = VoxelUses::default();
+        uses.push(9, station("bench")).unwrap();
+        uses.push(10, station("bench")).unwrap();
+        assert_eq!(uses.station(9), Some("bench"));
+        assert_eq!(uses.station(10), Some("bench"));
+        assert_eq!(uses.station(11), None);
+        assert_eq!(uses.push(11, station("hand")), Err(UseError::HandTag));
+        assert_eq!(
+            uses.push(9, station("loom")),
+            Err(UseError::AlreadyUsable(9))
+        );
+        assert_eq!(uses.door(9), None);
+        assert_eq!(uses.station_tags().collect::<Vec<_>>(), ["bench"]);
     }
 }

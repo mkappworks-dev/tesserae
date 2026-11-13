@@ -2051,6 +2051,13 @@ fn door(material: &str, open: &str) -> content::VoxelUse {
     }
 }
 
+fn station(material: &str, tag: &str) -> content::VoxelUse {
+    content::VoxelUse {
+        material: material.into(),
+        kind: content::VoxelUseKind::Station(tag.into()),
+    }
+}
+
 fn resolved_uses(mods: &[(&str, Declaration)]) -> Result<Load, ModError> {
     let mut load = Load::new();
     let behaviours: Vec<_> = mods
@@ -2076,6 +2083,16 @@ fn a_mod_may_make_another_mods_materials_a_door() {
 }
 
 #[test]
+fn two_materials_may_be_stations_of_one_tag() {
+    let mut d = declaring(&["bench", "oak_bench"], &[]);
+    d.voxel_uses = vec![station("m:bench", "bench"), station("m:oak_bench", "bench")];
+    let load = resolved_uses(&[("m", d)]).unwrap();
+    let id = |name| load.registry.id_of(Kind::Material, name).unwrap() as MaterialId;
+    assert_eq!(load.tables.uses.station(id("m:bench")), Some("bench"));
+    assert_eq!(load.tables.uses.station(id("m:oak_bench")), Some("bench"));
+}
+
+#[test]
 fn a_bad_voxel_use_is_a_load_error_naming_the_row() {
     let mut water = material("water");
     water.solid = false;
@@ -2096,6 +2113,8 @@ fn a_bad_voxel_use_is_a_load_error_naming_the_row() {
             vec![door("m:door", "m:door_open"), door("m:gate", "m:door_open")],
             "another Door's state",
         ),
+        (vec![station("m:gate", "hand")], "`hand` is reserved"),
+        (vec![station("m:water", "bench")], "must be solid"),
     ] {
         let mut d = base.clone();
         d.voxel_uses = rows;

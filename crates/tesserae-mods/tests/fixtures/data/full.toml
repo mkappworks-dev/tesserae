@@ -271,5 +271,6 @@ material = "full:wood"
 open = "full:ash"
 
 [[voxel-uses]]
-kind = "container"
+kind = "station"
 material = "full:rock"
+tag = "bench"

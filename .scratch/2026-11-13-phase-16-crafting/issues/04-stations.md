@@ -1,6 +1,6 @@
 # 04: Stations
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 02, 03
 
@@ -21,11 +21,11 @@ ones).
 
 ## Acceptance criteria
 
-- [ ] A Station Recipe is refused without a session and allowed with one at a
+- [x] A Station Recipe is refused without a session and allowed with one at a
       Station of its tag; two Materials sharing a tag both work.
-- [ ] The Station pane lists only its tag's Recipes and follows the mockup.
-- [ ] Walking out of reach or breaking the Station closes the pane with a
+- [x] The Station pane lists only its tag's Recipes and follows the mockup.
+- [x] Walking out of reach or breaking the Station closes the pane with a
       notice.
-- [ ] A Station declaring the tag `hand` is a load error.
-- [ ] Terra: Wood, then a Workbench, then a Chest and a Door works in a new
+- [x] A Station declaring the tag `hand` is a load error.
+- [x] Terra: Wood, then a Workbench, then a Chest and a Door works in a new
       Survival World.

@@ -472,7 +472,7 @@ fn component() -> Declaration {
             },
             content::VoxelUse {
                 material: "full:rock".into(),
-                kind: content::VoxelUseKind::Container(None),
+                kind: content::VoxelUseKind::Station("bench".into()),
             },
         ],
     }
@@ -851,4 +851,21 @@ fn water_motion_causes_parse_from_data() {
 fn burn_cause_parses_from_data() {
     let declaration = parse("[[cause-sounds]]\ncause='burn'\nsound='full:fire'\n").unwrap();
     assert_eq!(declaration.cause_sounds[0].cause, content::SoundCause::Burn);
+}
+
+#[test]
+fn a_container_row_parses_from_data_with_or_without_slots() {
+    let declaration = parse(
+        "[[voxel-uses]]\nkind='container'\nmaterial='full:chest'\n\
+         [[voxel-uses]]\nkind='container'\nmaterial='full:vault'\nslots=54\n",
+    )
+    .unwrap();
+    let kinds: Vec<_> = declaration.voxel_uses.iter().map(|u| &u.kind).collect();
+    assert_eq!(
+        kinds,
+        [
+            &content::VoxelUseKind::Container(None),
+            &content::VoxelUseKind::Container(Some(54))
+        ]
+    );
 }

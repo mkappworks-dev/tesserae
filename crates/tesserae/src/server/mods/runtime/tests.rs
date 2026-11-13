@@ -1187,9 +1187,9 @@ fn terra_contract_content_build_and_scenarios_reach_real_voxels_and_light() {
                 (22, [150, 120, 104, 255]),
                 (23, [84, 150, 56, 255]),
                 (24, [167, 116, 63, 255]),
-                (25, [128, 88, 50, 255]),
+                (25, [107, 68, 35, 255]),
                 (26, [128, 88, 50, 255]),
-                (27, [107, 68, 35, 255])
+                (27, [128, 88, 50, 255])
             ]
         );
         assert_eq!(loaded.tables.materials.def(8).emission, 15);

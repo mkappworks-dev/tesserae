@@ -189,6 +189,7 @@ impl From<Tool> for content::ToolDef {
 pub(super) enum VoxelUse {
     Door { material: String, open: String },
     Container { material: String, slots: Option<u8> },
+    Station { material: String, tag: String },
 }
 
 impl From<VoxelUse> for content::VoxelUse {
@@ -201,6 +202,10 @@ impl From<VoxelUse> for content::VoxelUse {
             VoxelUse::Container { material, slots } => Self {
                 material,
                 kind: content::VoxelUseKind::Container(slots),
+            },
+            VoxelUse::Station { material, tag } => Self {
+                material,
+                kind: content::VoxelUseKind::Station(tag),
             },
         }
     }

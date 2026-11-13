@@ -614,7 +614,10 @@ pub(crate) async fn declare_all(
     let (ground, lake) =
         resolve(behaviours, &mut loaded.tables, &loaded.registry).map_err(|e| e.to_string())?;
     loaded.recipes = recipes
-        .resolve(&loaded.every_item(world.voxel_size).0, &[])
+        .resolve(
+            &loaded.every_item(world.voxel_size).0,
+            &loaded.tables.uses.station_tags().collect::<Vec<_>>(),
+        )
         .map_err(|e| e.to_string())?;
     if let Some(world) = &mut loaded.world {
         world.water = lake;
@@ -2256,6 +2259,74 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
         let held = held.single(app.world()).unwrap();
         assert_eq!(held.count("terra:wood"), 0);
         assert_eq!(held.count("terra:workbench"), 1);
+    }
+
+    #[test]
+    fn a_terra_workbench_is_a_station_that_crafts_a_chest_and_a_door_from_wood() {
+        use super::super::craft::{Craft, CraftRefusal, CraftRefused, craft};
+        use super::super::station::AtStation;
+        use bevy::ecs::system::RunSystemOnce;
+        use tesserae_core::craft::{Count, Station};
+
+        let loaded = super::runtime::tests::terra_loaded(1.0);
+        let workbench = loaded
+            .registry
+            .id_of(Kind::Material, "terra:workbench")
+            .unwrap() as MaterialId;
+        assert_eq!(loaded.tables.uses.station(workbench), Some("workbench"));
+        let mut app = App::new();
+        app.insert_non_send(loaded)
+            .add_plugins((plugin, super::super::craft::plugin));
+        let book = app
+            .world_mut()
+            .resource_mut::<Messages<crate::content::RecipeBook>>()
+            .drain()
+            .next()
+            .unwrap()
+            .0;
+        assert!((10..=15).contains(&book.len()), "{}", book.len());
+        let at = |item: &str| {
+            let at = book.iter().position(|r| r.output.item == item).unwrap();
+            assert_eq!(book[at].station, Station::Tag("workbench".into()));
+            at
+        };
+        let mut inventory = super::super::inventory::Inventory::default();
+        inventory.receive("terra:wood", 11, 64);
+        let player = app
+            .world_mut()
+            .spawn((super::super::player::Player::at(Vec3::ZERO), inventory))
+            .id();
+        let ask = |app: &mut App, recipe| {
+            app.world_mut().write_message(Craft {
+                recipe,
+                count: Count::One,
+            });
+            app.world_mut().run_system_once(craft).unwrap();
+            app.world_mut().resource_mut::<Messages<Craft>>().clear();
+            app.world_mut()
+                .resource_mut::<Messages<CraftRefused>>()
+                .drain()
+                .map(|m| m.0)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            ask(&mut app, at("terra:chest")),
+            [CraftRefusal::NeedsStation]
+        );
+        app.world_mut().entity_mut(player).insert(AtStation {
+            at: [0; 3],
+            voxel: tesserae_core::Voxel::cube(workbench),
+            tag: "workbench".into(),
+        });
+        assert_eq!(ask(&mut app, at("terra:chest")), []);
+        assert_eq!(ask(&mut app, at("terra:door")), []);
+        let mut held = app
+            .world_mut()
+            .query::<&super::super::inventory::Inventory>();
+        let held = held.single(app.world()).unwrap();
+        assert_eq!(held.count("terra:wood"), 0);
+        assert_eq!(held.count("terra:chest"), 1);
+        assert_eq!(held.count("terra:door"), 1);
     }
 
     #[test]

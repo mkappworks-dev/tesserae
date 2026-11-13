@@ -850,6 +850,7 @@ pub fn resolve(
                 content::VoxelUseKind::Container(slots) => VoxelUse::Container {
                     slots: slots.unwrap_or(tesserae_core::CONTAINER_SLOTS),
                 },
+                content::VoxelUseKind::Station(tag) => VoxelUse::Station { tag: tag.clone() },
             };
             tables
                 .register_use(material, kind)

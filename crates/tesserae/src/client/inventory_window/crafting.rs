@@ -1,6 +1,7 @@
 //! The Crafting tab beside the Inventory: the hand Recipes the Server declared,
-//! each drawn against the Inventory it last sent. A Craft is an intent the
-//! Server answers; nothing here spends or gives.
+//! each drawn against the Inventory it last sent, or a Station's Recipes while
+//! the Server holds a session there. A Craft is an intent the Server answers;
+//! nothing here spends or gives.
 
 use crate::client::buttons::{self, Eyebrow};
 use crate::client::cinematic::Kind;
@@ -18,6 +19,7 @@ use crate::client::menu_ui::{self as ui, Searches};
 use crate::client::theme;
 use crate::content::RecipeBook;
 use crate::server::craft::{Craft, CraftDropped, CraftRefused};
+use crate::server::station::{LeaveStation, StationClosed, StationOpened};
 use crate::session::SessionApp;
 
 const PANEL_PX: f32 = 300.0;
@@ -63,6 +65,27 @@ pub(super) struct Crafting {
     last_click: Option<(usize, f64)>,
 }
 
+/// The Station the Server opened a session at, whose Recipes the pane lists.
+#[derive(Resource, Default)]
+pub(super) struct AtStation(pub(super) Option<OpenStation>);
+
+#[derive(Clone, PartialEq, Debug)]
+pub(super) struct OpenStation {
+    at: [i32; 3],
+    tag: String,
+    /// Its Material's, for the title and the notices.
+    name: String,
+}
+
+impl AtStation {
+    /// Where the listed Recipes are crafted.
+    fn place(&self) -> Station {
+        self.0
+            .as_ref()
+            .map_or(Station::Hand, |s| Station::Tag(s.tag.clone()))
+    }
+}
+
 #[derive(Component)]
 pub(super) struct RecipeSearch;
 
@@ -76,6 +99,10 @@ pub(super) fn plugin(app: &mut App) {
     app.init_session_state::<Pane>()
         .init_session_state::<Book>()
         .init_session_state::<Crafting>()
+        .init_session_state::<AtStation>()
+        .add_session_message::<StationOpened>()
+        .add_session_message::<StationClosed>()
+        .add_session_message::<LeaveStation>()
         .add_session_message::<RecipeBook>()
         .add_session_message::<Craft>()
         .add_session_message::<CraftRefused>()
@@ -83,22 +110,27 @@ pub(super) fn plugin(app: &mut App) {
         .add_observer(activate);
 }
 
-/// The hand Recipes whose output's name matches `query`, by their place in
-/// the book.
+/// The Recipes crafted at `place` whose output's name matches `query`, by
+/// their place in the book.
 fn listed<'a>(
     book: &'a [Recipe],
     names: &'a Names,
-    query: &'a str,
+    (query, place): (&'a str, &'a Station),
 ) -> impl Iterator<Item = (usize, &'a Recipe)> + 'a {
     book.iter()
         .enumerate()
-        .filter(|(_, r)| r.station == Station::Hand)
+        .filter(move |(_, r)| r.station == *place)
         .filter(move |(_, r)| ui::matches(query, &names.label(&r.output.item)))
 }
 
 /// The chosen Recipe while it is listed, else the first listed.
-fn shown(crafting: &Crafting, book: &[Recipe], names: &Names, query: &str) -> Option<usize> {
-    let listed: Vec<_> = listed(book, names, query).map(|(at, _)| at).collect();
+fn shown(
+    crafting: &Crafting,
+    book: &[Recipe],
+    names: &Names,
+    listing: (&str, &Station),
+) -> Option<usize> {
+    let listed: Vec<_> = listed(book, names, listing).map(|(at, _)| at).collect();
     crafting
         .chosen
         .filter(|chosen| listed.contains(chosen))
@@ -116,7 +148,7 @@ fn activate(
     (window, mut pane, mut crafting): (Res<InventoryWindow>, ResMut<Pane>, ResMut<Crafting>),
     (keys, time): (Res<ButtonInput<KeyCode>>, Res<Time<Real>>),
     (book, looks, catalogue, searches): (Res<Book>, Res<Looks>, Res<Catalogue>, Res<Searches>),
-    mut intents: MessageWriter<Craft>,
+    (mut intents, station): (MessageWriter<Craft>, Res<AtStation>),
 ) {
     let Ok(&control) = controls.get(event.entity) else {
         return;
@@ -151,7 +183,8 @@ fn activate(
             }
         }
         CraftControl::One | CraftControl::Affordable => {
-            if let Some(recipe) = shown(&crafting, &book.0, &names, &searches.recipes) {
+            let listing = (searches.recipes.as_str(), &station.place());
+            if let Some(recipe) = shown(&crafting, &book.0, &names, listing) {
                 intents.write(Craft {
                     recipe,
                     count: if control == CraftControl::One {
@@ -162,6 +195,42 @@ fn activate(
                 });
             }
         }
+    }
+}
+
+/// Opens the window at the Station the Server opened, and closes it with a
+/// notice when the Server closes the session.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn stations(
+    mut commands: Commands,
+    (mut opened, mut closed): (MessageReader<StationOpened>, MessageReader<StationClosed>),
+    (mut window, mut station, mut searches): (
+        ResMut<InventoryWindow>,
+        ResMut<AtStation>,
+        ResMut<Searches>,
+    ),
+    catalogue: Res<Catalogue>,
+    mut cursor: Single<&mut bevy::window::CursorOptions, With<bevy::window::PrimaryWindow>>,
+    mut leave: MessageWriter<LeaveStation>,
+) {
+    for StationOpened { at, material, tag } in opened.read() {
+        station.0 = Some(OpenStation {
+            at: *at,
+            tag: tag.clone(),
+            name: crate::client::use_prompt::material_title(&catalogue, *material),
+        });
+        searches.recipes.clear();
+        super::open(&mut window, &mut cursor);
+    }
+    for StationClosed { at, why } in closed.read() {
+        let Some(open) = station.0.take_if(|open| open.at == *at) else {
+            continue;
+        };
+        super::close(&mut window, &mut cursor);
+        ui::notify(&mut commands, &why.message(&open.name), ui::Tone::Alert);
+    }
+    if !window.open && station.0.take().is_some() {
+        leave.write(LeaveStation);
     }
 }
 
@@ -247,9 +316,27 @@ pub(super) fn tabs(panel: &mut ChildSpawnerCommands, active: Pane) {
         });
 }
 
-/// The pane's frame. Its search box is built once per opening so typing keeps
-/// its place; the Recipe list and the footer are filled by [`fill`].
-pub(super) fn panel(row: &mut ChildSpawnerCommands, query: &str, with_tabs: bool) {
+/// The pane's frame, for the hand Recipes or a Station's. Its search box is
+/// built once per opening so typing keeps its place; the Recipe list and the
+/// footer are filled by [`fill`].
+pub(super) fn panel(
+    row: &mut ChildSpawnerCommands,
+    query: &str,
+    with_tabs: bool,
+    station: Option<&OpenStation>,
+) {
+    let (eyebrow, title, subtitle) = match station {
+        Some(station) => (
+            "STATION",
+            station.name.clone(),
+            format!("Recipes that need a {}", station.name),
+        ),
+        None => (
+            "BY HAND",
+            "Crafting".to_owned(),
+            "Recipes you can make anywhere".to_owned(),
+        ),
+    };
     row.spawn((
         super::Panel,
         Node {
@@ -267,7 +354,7 @@ pub(super) fn panel(row: &mut ChildSpawnerCommands, query: &str, with_tabs: bool
     ))
     .with_children(|panel| {
         panel.spawn(theme::ring(theme::ITEM_RADIUS));
-        if with_tabs {
+        if with_tabs && station.is_none() {
             tabs(panel, Pane::Crafting);
         }
         panel
@@ -283,15 +370,15 @@ pub(super) fn panel(row: &mut ChildSpawnerCommands, query: &str, with_tabs: bool
                 ..default()
             })
             .with_children(|header| {
-                buttons::eyebrow(header, "BY HAND", Eyebrow::Inventory);
+                buttons::eyebrow(header, eyebrow, Eyebrow::Inventory);
                 header.spawn(look::label(
-                    "Crafting",
+                    title,
                     theme::ITEM_TEXT_HEADING,
                     theme::LABEL,
                     theme::INK,
                 ));
                 header.spawn(look::label(
-                    "Recipes you can make anywhere",
+                    subtitle,
                     theme::TEXT_EYEBROW,
                     theme::REGULAR,
                     theme::CATALOGUE_SUBTITLE,
@@ -347,6 +434,7 @@ pub(super) struct Filled {
     held: tesserae_core::inventory::Inventory,
     query: String,
     chosen: Option<usize>,
+    station: Option<OpenStation>,
 }
 
 type Parts<'w, 's> = (
@@ -361,18 +449,20 @@ pub(super) fn fill(
     (crafting, book, held): (Res<Crafting>, Res<Book>, Res<Held>),
     (looks, catalogue, searches): (Res<Looks>, Res<Catalogue>, Res<Searches>),
     (lists, footers): Parts,
-    mut filled: Local<Option<Filled>>,
+    (station, mut filled): (Res<AtStation>, Local<Option<Filled>>),
 ) {
     let names = Names {
         looks: &looks,
         catalogue: &catalogue,
     };
     let query = &searches.recipes;
-    let chosen = shown(&crafting, &book.0, &names, query);
+    let place = station.place();
+    let chosen = shown(&crafting, &book.0, &names, (query, &place));
     let wanted = Filled {
         held: held.0.clone(),
         query: query.clone(),
         chosen,
+        station: station.0.clone(),
     };
     let added =
         lists.iter().any(|(_, l)| l.is_added()) || footers.iter().any(|(_, f)| f.is_added());
@@ -387,7 +477,7 @@ pub(super) fn fill(
             .despawn_related::<Children>()
             .with_children(|list| {
                 let mut any = false;
-                for (at, recipe) in listed(&book.0, &names, query) {
+                for (at, recipe) in listed(&book.0, &names, (query, &place)) {
                     any = true;
                     recipe_row(list, at, recipe, chosen == Some(at), &held, &names);
                 }
@@ -407,7 +497,11 @@ pub(super) fn fill(
             .despawn_related::<Children>()
             .with_children(|footer| {
                 if let Some(recipe) = chosen.and_then(|at| book.0.get(at)) {
-                    craft_footer(footer, recipe, &held, &names);
+                    let needs = station
+                        .0
+                        .as_ref()
+                        .map_or_else(|| "By hand".to_owned(), |s| format!("Needs a {}", s.name));
+                    craft_footer(footer, recipe, (&held, &names), needs);
                 }
             });
     }
@@ -529,7 +623,13 @@ fn recipe_row(
     });
 }
 
-fn craft_footer(footer: &mut ChildSpawnerCommands, recipe: &Recipe, held: &Held, names: &Names) {
+/// `needs` says where the Recipe is crafted.
+fn craft_footer(
+    footer: &mut ChildSpawnerCommands,
+    recipe: &Recipe,
+    (held, names): (&Held, &Names),
+    needs: String,
+) {
     let can = affordable(recipe, held, names);
     footer
         .spawn(Node {
@@ -551,7 +651,7 @@ fn craft_footer(footer: &mut ChildSpawnerCommands, recipe: &Recipe, held: &Held,
                     theme::INK,
                 ));
                 title.spawn(look::label(
-                    "By hand",
+                    needs,
                     theme::ITEM_TEXT_EYEBROW,
                     theme::REGULAR,
                     theme::CATALOGUE_ID,
@@ -666,6 +766,7 @@ mod tests {
     use super::super::tests::{app, later, press, server};
     use super::*;
     use crate::server::game_mode::{GameMode, PlayerMode};
+    use bevy::ecs::message::Messages;
 
     fn stack(item: &str, count: u32) -> Stack {
         Stack {
@@ -844,6 +945,103 @@ mod tests {
         app.update();
         assert!(rows(&mut app).is_empty());
         assert!(says(&mut app, "No Recipes match."));
+    }
+
+    const BENCH: tesserae_core::MaterialId = 9;
+    const AT: [i32; 3] = [5, 8, 5];
+
+    /// What the Server sends when Use opens a session at a `t:workbench` of
+    /// tag `bench`, with the session it holds.
+    fn at_bench(app: &mut App) {
+        app.world_mut()
+            .resource_mut::<Catalogue>()
+            .0
+            .materials
+            .push(crate::content::CatalogueMaterial {
+                remove_time: tesserae_mods::DEFAULT_REMOVE_TIME,
+                id: BENCH,
+                name: "t:workbench".into(),
+                solid: true,
+                fluid: None,
+                burns: false,
+            });
+        let mut player = app
+            .world_mut()
+            .query_filtered::<Entity, With<crate::server::player::Player>>();
+        let player = player.single(app.world()).unwrap();
+        app.world_mut()
+            .entity_mut(player)
+            .insert(crate::server::station::AtStation {
+                at: AT,
+                voxel: tesserae_core::Voxel::cube(BENCH),
+                tag: "bench".into(),
+            });
+        app.world_mut().write_message(StationOpened {
+            at: AT,
+            material: BENCH,
+            tag: "bench".into(),
+        });
+        app.update();
+        app.update();
+    }
+
+    fn left(app: &mut App) -> usize {
+        app.world_mut()
+            .resource_mut::<Messages<LeaveStation>>()
+            .drain()
+            .count()
+    }
+
+    #[test]
+    fn a_station_opens_its_pane_titled_by_it_with_only_its_tags_recipes() {
+        for survival in [false, true] {
+            let mut app = crafting();
+            if survival {
+                let mut mode = app.world_mut().query::<&mut PlayerMode>();
+                mode.single_mut(app.world_mut()).unwrap().0 = GameMode::Survival;
+                server(&mut app);
+            }
+            at_bench(&mut app);
+            assert!(super::super::tests::shown(&mut app));
+            assert!(says(&mut app, "STATION"));
+            assert!(says(&mut app, "Workbench"));
+            assert!(says(&mut app, "Recipes that need a Workbench"));
+            assert!(says(&mut app, "Needs a Workbench"));
+            assert!(find(&mut app, CraftControl::Pane(Pane::Catalogue)).is_none());
+            assert_eq!(rows(&mut app), [2], "only the bench's lamp");
+            activate(&mut app, CraftControl::One);
+            assert_eq!(held(&mut app, "t:lamp"), 1);
+        }
+    }
+
+    #[test]
+    fn the_server_closing_the_session_closes_the_pane_with_a_notice() {
+        let mut app = crafting();
+        at_bench(&mut app);
+        app.world_mut().write_message(StationClosed {
+            at: AT,
+            why: crate::server::station::StationClose::OutOfReach,
+        });
+        app.update();
+        app.update();
+        assert!(!super::super::tests::shown(&mut app));
+        assert!(says(&mut app, "Out of reach of the Workbench."));
+        assert_eq!(left(&mut app), 0, "the Server closed it already");
+        press(&mut app, KeyCode::KeyI);
+        activate(&mut app, CraftControl::Pane(Pane::Crafting));
+        assert_eq!(rows(&mut app), [0, 1], "back to the hand Recipes");
+    }
+
+    #[test]
+    fn closing_the_station_pane_leaves_the_station() {
+        let mut app = crafting();
+        at_bench(&mut app);
+        left(&mut app);
+        press(&mut app, KeyCode::KeyI);
+        assert!(!super::super::tests::shown(&mut app));
+        assert_eq!(left(&mut app), 1);
+        app.update();
+        assert_eq!(left(&mut app), 0, "told once");
     }
 
     #[test]
