@@ -21,12 +21,12 @@ Container's slots, from declared data and what the Server sends. A Mod supplies
 no UI, so nothing crosses the contract per frame or per click.
 
 A Door's state is its Material: Use swaps the closed and open Materials of the
-vertical run it belongs to, at most 4 Voxels, as an Edit that never enters the
-undo journal. Saving, meshing and light need nothing new. Collision needs one
-rule: `Tables::blocks` lets bodies pass through a Door's open Material, while
-rays still stop on it, so it can be aimed at, used and broken. The open Material
-gets no implicit Item and cannot be placed; removing it drops the closed one's
-Item.
+whole Door, a size in metres (see the amendment below), as an Edit that never
+enters the undo journal. Saving, meshing and light need nothing new. Collision
+needs one rule: `Tables::blocks` lets bodies pass through a Door's open
+Material, while rays still stop on it, so it can be aimed at, used and broken.
+The open Material gets no implicit Item and cannot be placed; removing it drops
+the closed one's Item.
 
 A Container's Stacks live outside the Chunk, keyed by Voxel position, and are
 saved as an additive list in the World commit. A Player's Remove of a Container
@@ -60,3 +60,28 @@ Player's own Remove and history check for a Container and refuse. Spilling is
 polled rather than hooked into each path that removes or replaces a Voxel (edit,
 Mod Commands, burning), so a new path is covered without change, at the cost of
 a lookup per held Container per tick.
+
+## Amendment 2026-11-14: a Door is a size in metres
+
+A Door row declares a width and height in metres, 1 m by 2 m when absent, from
+0.5 to 4 m wide and 1 to 4 m tall, so a Door is taller and wider than the Player
+at every Voxel size ([ADR-0003](0003-voxel-size-is-per-world.md)); the run of at
+most 4 Voxels stood 1 m tall at 0.25 m. One Item places the whole Door, ⌈size ÷
+Voxel⌉ cells one Voxel thick across the Player's facing, as one undo group that
+is refused whole if any cell is blocked. Use toggles every cell, and removing
+any cell removes the whole Door as one undo group that drops one Item.
+
+Which cells are one Door is derived, not stored, as Connections are
+([ADR-0010](0010-connections-are-derived-not-stored.md)): the cells of that
+Door's Materials that touch in its plane are tiled Door-wide from their lowest
+corner, then each column of tiles Door-tall from its own lowest cell. Its plane
+is the horizontal axis the Material runs further along through the aimed cell.
+So Doors placed side by side, even on a step, are two Doors; Doors stacked out
+of line across are not told apart, and a wall of one Door's Material built
+another way is tiled the same way.
+
+Rejected:
+
+- A Door identity stored per Voxel or beside the Chunk, which every save, undo
+  and Mod Command path would have to keep in step for what the cells already
+  show.

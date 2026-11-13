@@ -217,7 +217,7 @@ runs; otherwise a Usable Voxel in Edit reach is used; otherwise the selected
 Stack is eaten; a Usable Voxel just past reach refuses rather than eats. The aim
 answer's `use_aim` previews the Tool's action or the Usable Voxel's verb, or why
 not, so the prompt under the reticle can say it before the press. A Tool changes
-no Voxel; a Door toggles its vertical run, at most 4 Voxels, as an Edit group
+no Voxel; a Door, a size in metres, toggles every Voxel of it as an Edit group
 that never enters the undo journal, and collision (`Tables::blocks`) lets bodies
 through its open Material while rays stop on it; a Station opens a session, held
 while the Player stays in Edit reach, measured to the Voxel's nearest point, and

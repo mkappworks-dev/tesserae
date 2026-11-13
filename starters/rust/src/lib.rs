@@ -4,7 +4,7 @@ use exports::tesserae::mods::guest::{
     Command, Declaration, Guest, Registered, TickContext, WorldInfo,
 };
 use tesserae::mods::content::{
-    Appearance, GroundParams, MaterialDef, MovementPolicy, Occlusion, RecipeDef, RecipeStack,
+    Appearance, DoorDef, GroundParams, MaterialDef, MovementPolicy, Occlusion, RecipeDef, RecipeStack,
     RenderClass, VoxelUse, VoxelUseKind,
 };
 use tesserae::mods::types::Srgba;
@@ -120,7 +120,11 @@ impl Guest for Starter {
                 voxel_use("starter_rust:chest", VoxelUseKind::Container(Some(27))),
                 voxel_use(
                     "starter_rust:door",
-                    VoxelUseKind::Door("starter_rust:door_open".into()),
+                    VoxelUseKind::Door(DoorDef {
+                        open: "starter_rust:door_open".into(),
+                        width_m: None,
+                        height_m: None,
+                    }),
                 ),
             ],
             ores: Vec::new(),

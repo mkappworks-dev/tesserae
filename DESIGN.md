@@ -607,13 +607,13 @@ Notes:
   Usable Voxels as `voxel-uses` rows of a closed kind: a Door (a closed and an
   open Material), a Container (1 to 54 slots) or a Station (a tag). The Server
   runs each kind natively. Use runs a held Tool, else the Usable Voxel aimed at
-  in reach, else eats. A Door toggles its vertical run outside the undo journal;
-  bodies pass through its open Material. A Station session allows its tag's
-  Recipes; a Container's Stacks live outside the Chunk, are saved in the World
-  commit, are refused to the Player's Remove and history while full, and spill
-  when anything else removes them. Crafting is instant and never journalled. The
-  Inventory window gains a Crafting tab and a compact item details panel; Terra
-  ships a Workbench, Chest and Door with CC0 sounds. See
+  in reach, else eats. A Door, a size in metres, toggles whole outside the undo
+  journal; bodies pass through its open Material. A Station session allows its
+  tag's Recipes; a Container's Stacks live outside the Chunk, are saved in the
+  World commit, are refused to the Player's Remove and history while full, and
+  spill when anything else removes them. Crafting is instant and never
+  journalled. The Inventory window gains a Crafting tab and a compact item
+  details panel; Terra ships a Workbench, Chest and Door with CC0 sounds. See
   [ADR-0026](docs/adr/0026-usable-voxels-are-declared-kinds-the-server-runs.md)
   and the 2026-11-13 amendment to
   [ADR-0023](docs/adr/0023-the-inventory-is-server-owned-and-pays-inside-the-undo-journal.md).

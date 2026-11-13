@@ -61,25 +61,26 @@ pub(in crate::server) fn apply_pending(
                 }
             })
             .and_then(|(at, change)| {
-                land(
-                    &mut store,
-                    &mut meshes,
+                let cells = whole(&store, &tables, &world, &p.intent, at, change);
+                land_whole(
+                    (&mut store, &mut meshes),
                     &tables,
                     &world,
                     &mut history,
                     body,
-                    at,
+                    &cells,
                     change,
                     p.intent.action,
                 )
-                .map(|mut entry| {
+                .map(|mut group| {
+                    let entry = &mut group[0];
                     if let Some(item) = &p.pay {
                         inventory
                             .spend(item, 1)
                             .expect("counted before the Voxel changed");
                         entry.cost = Cost::Paid(item.clone());
                     }
-                    if let Some((cause, material)) = heard_as(p.intent.action, &entry) {
+                    if let Some((cause, material)) = heard_as(p.intent.action, entry) {
                         heard.write_batch(sounds.voxel(
                             cause,
                             material,
@@ -91,7 +92,7 @@ pub(in crate::server) fn apply_pending(
                     // Spawned here rather than from a message so the Entry
                     // holds the Dropped item an undo takes back. An open Door
                     // drops what its closed state does.
-                    if let Some(material) = removal(p.intent.action, &entry)
+                    if let Some(material) = removal(p.intent.action, entry)
                         && let Some(item) = items.dropped_by(tables.uses.closed(material))
                     {
                         let id = crate::server::entities::drop_one(
@@ -103,10 +104,10 @@ pub(in crate::server) fn apply_pending(
                         );
                         entry.cost = Cost::Dropped(items.0[item].name.clone(), id);
                     }
-                    if let Some(kind) = applied_kind(p.intent.action, &entry) {
+                    if let Some(kind) = applied_kind(p.intent.action, entry) {
                         applied_edits.write(EditApplied { at: entry.at, kind });
                     }
-                    journal.record(entry)
+                    journal.record_group(group)
                 })
             });
         match outcome {
@@ -142,6 +143,92 @@ pub(in crate::server) fn apply_pending(
     for (at, material) in started {
         heard.write_batch(sounds.voxel(Cause::Place, material, at, world.voxel_size, player.eye()));
     }
+}
+
+/// Where a Player's single Edit landing at `at` lands, `at` first: a whole
+/// Door when it places or removes one, else `at` alone.
+fn whole(
+    store: &ChunkStore,
+    tables: &Tables,
+    world: &WorldSettings,
+    intent: &EditIntent,
+    at: [i32; 3],
+    change: Change,
+) -> Vec<[i32; 3]> {
+    use crate::server::usable::{door_at, door_placed};
+    let cells = match (intent.action, change) {
+        (EditAction::Place(_) | EditAction::PlaceHeld { .. }, Change::Solid(voxel)) => {
+            door_placed(store, tables, world, voxel, at, intent.direction)
+        }
+        (EditAction::Remove | EditAction::RemoveAt(_), Change::Solid(voxel)) if voxel.is_air() => {
+            door_at(store, tables, world, at)
+        }
+        _ => None,
+    };
+    cells.unwrap_or_else(|| vec![at])
+}
+
+/// [`land`] at every one of `cells`, or at none: each is vetted as `cells[0]`
+/// was by `resolve` before the first changes.
+#[allow(clippy::too_many_arguments)]
+fn land_whole(
+    (store, meshes): (&mut ChunkStore, &mut MeshState),
+    tables: &Tables,
+    world: &WorldSettings,
+    history: &mut crate::server::mods::EditHistory,
+    body: Option<Aabb>,
+    cells: &[[i32; 3]],
+    change: Change,
+    action: EditAction,
+) -> Result<Vec<crate::server::undo::Entry>, RejectReason> {
+    for &at in &cells[1..] {
+        let there = store.voxel(at).ok_or(RejectReason::NotLoaded)?;
+        if let Change::Solid(voxel) = change
+            && !voxel.is_air()
+        {
+            if tables.materials.solid(there) {
+                return Err(RejectReason::Occupied);
+            }
+            vet_capacity(store, tables, at, voxel)?;
+        }
+    }
+    for &at in cells {
+        if meshes.is_unlit(VoxelCoord::of(at).chunk) {
+            return Err(RejectReason::Busy);
+        }
+        if let (Change::Solid(voxel), Some(body)) = (change, body)
+            && !voxel.is_air()
+            && overlaps(&PlacedOnly { at, voxel }, tables, world.voxel_size, body)
+        {
+            return Err(RejectReason::InsidePlayer);
+        }
+    }
+    let mut group = Vec::with_capacity(cells.len());
+    for &at in cells {
+        match land(
+            store, meshes, tables, world, history, body, at, change, action,
+        ) {
+            Ok(entry) => group.push(entry),
+            // Only a Chunk's shaped cap, which the cells may pass together
+            // though each passed alone; Mods hear the cells taken back.
+            Err(reason) => {
+                for entry in group.into_iter().rev() {
+                    let _ = set_occupants(store, meshes, tables, entry.at, entry.before);
+                    history.record(tesserae_mods::EditEvent {
+                        before: entry.event.after,
+                        after: entry.event.before,
+                        kind: EditKind::Solid {
+                            before: entry.after.solid,
+                            after: entry.before.solid,
+                        },
+                        ..entry.event
+                    });
+                }
+                return Err(reason);
+            }
+        }
+    }
+    Ok(group)
 }
 
 /// What a Player's own single Place or Remove did, for the Client to show.

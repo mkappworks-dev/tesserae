@@ -269,6 +269,7 @@ station = "hand"
 kind = "door"
 material = "full:wood"
 open = "full:ash"
+width-m = 1.5
 
 [[voxel-uses]]
 kind = "station"

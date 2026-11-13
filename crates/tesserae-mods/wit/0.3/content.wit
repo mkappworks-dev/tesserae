@@ -339,13 +339,23 @@ interface content {
         kind: tool-kind,
     }
 
+    /// A Door: a size in metres, so it stands as large at every Voxel size.
+    /// One Item places the whole Door, Use toggles all of it, and removing any
+    /// Voxel of it removes it all and drops the closed one's Item.
+    record door-def {
+        /// Use swaps it with this solid Material, by full name: the open
+        /// state, which bodies pass through.
+        open: string,
+        /// From 0.5 to 4; 1 when absent.
+        width-m: option<f32>,
+        /// From 1 to 4; 2 when absent.
+        height-m: option<f32>,
+    }
+
     /// What Use does to a Voxel of a Material. Closed: a new kind needs new
     /// engine mechanism, so it arrives with the contract line that adds it.
     variant voxel-use-kind {
-        /// Use swaps it with this solid Material, by full name: the open state,
-        /// which bodies pass through. Removing either drops the closed one's
-        /// Item.
-        door(string),
+        door(door-def),
         /// Holds Stacks of its own, in this many slots from 1 to 54; 27 when
         /// absent. Removing it while it holds any is refused to the Player, and
         /// anything else that removes it spills them as Dropped items.

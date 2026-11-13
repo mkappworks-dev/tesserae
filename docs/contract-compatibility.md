@@ -84,11 +84,13 @@ Mod has declared, implicit Items included. A Mod declares at most 256 and a
 World holds at most 1024. Line 0.3 then gained `voxel-uses` on its
 `declaration`, appended after `recipes` in the same way; a Declaration for 0.1
 or 0.2 loads with none. A `voxel-use` names a solid Material by full name and a
-closed `voxel-use-kind`: `door` with its open Material's full name, through
-which bodies pass but rays do not; `container` with an optional slot count from
-1 to 54, 27 when absent; or `station` with a tag, which Recipes name in
-`station`; Materials may share a tag, and `hand` is reserved. A Material is in
-at most one row, as its `material` or as a Door's open one.
+closed `voxel-use-kind`: `door` with a `door-def`, its open Material's full
+name, through which bodies pass but rays do not, and an optional `width-m` and
+`height-m`, a size in metres from 0.5 to 4 wide and 1 to 4 tall, 1 by 2 when
+absent; `container` with an optional slot count from 1 to 54, 27 when absent; or
+`station` with a tag, which Recipes name in `station`; Materials may share a
+tag, and `hand` is reserved. A Material is in at most one row, as its `material`
+or as a Door's open one.
 
 `sound-cause` then gained `door-open`, `door-close`, `container-open`,
 `container-close` and `craft`, appended after `burn`. A Game binds them in

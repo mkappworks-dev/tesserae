@@ -844,8 +844,10 @@ pub fn resolve(
         for (row, used) in b.voxel_uses.iter().enumerate() {
             let material = lookup(b, registry, "voxel-uses", row, &used.material)?;
             let kind = match &used.kind {
-                content::VoxelUseKind::Door(open) => VoxelUse::Door {
-                    open: lookup(b, registry, "voxel-uses", row, open)?,
+                content::VoxelUseKind::Door(door) => VoxelUse::Door {
+                    open: lookup(b, registry, "voxel-uses", row, &door.open)?,
+                    width_m: door.width_m.unwrap_or(tesserae_core::DOOR_WIDTH_M),
+                    height_m: door.height_m.unwrap_or(tesserae_core::DOOR_HEIGHT_M),
                 },
                 content::VoxelUseKind::Container(slots) => VoxelUse::Container {
                     slots: slots.unwrap_or(tesserae_core::CONTAINER_SLOTS),
