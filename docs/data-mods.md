@@ -337,7 +337,10 @@ omitted is 64), and `food`, the hunger eating one restores.
 A `[[voxel-uses]]` row makes a Material a Usable Voxel, which Use acts on. Its
 `kind` is `door`, with a closed `material` and an `open` one, both solid
 Materials by full name; bodies pass through the open one, and removing it drops
-the closed one's Item. Any Mod may declare them, at most 64 per Mod, and a
+the closed one's Item. Or it is `station`, with a solid `material` and a `tag`:
+Use opens the Recipes whose `station` is that tag, craftable while the Player
+stays in reach. Materials may share a tag, so another Mod's bench opens the same
+Recipes; `hand` is reserved. Any Mod may declare them, at most 64 per Mod, and a
 Material is in at most one row, as either state.
 
 ```toml
@@ -345,6 +348,11 @@ Material is in at most one row, as either state.
 kind = "door"
 material = "plain:door"
 open = "plain:door_open"
+
+[[voxel-uses]]
+kind = "station"
+material = "plain:workbench"
+tag = "workbench"
 ```
 
 ### Non-Voxel Causes and Biome audio

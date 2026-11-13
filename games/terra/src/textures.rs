@@ -79,6 +79,18 @@ fn pixel(name: &str, face: usize, x: usize, y: usize, base: [u8; 3]) -> [u8; 3] 
                 )
             }
         }
+        "chest" => {
+            let rim = x == 0 || x == 15 || y == 0 || y == 15;
+            let lid = face != 0 && y == 5;
+            let latch = face != 0 && (6..=9).contains(&x) && (4..=7).contains(&y);
+            if latch {
+                [190, 170, 120]
+            } else if rim || lid {
+                tint(base, -40 + (n - 128) / 20)
+            } else {
+                tint(base, if y % 4 == 0 { -14 } else { 6 } + (n - 128) / 16)
+            }
+        }
         "door" | "door_open" => {
             let frame = x <= 1 || x >= 14 || y <= 1 || y >= 14;
             let seam = x % 4 == 1;

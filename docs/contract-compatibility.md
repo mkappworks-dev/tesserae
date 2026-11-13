@@ -84,8 +84,9 @@ Mod has declared, implicit Items included. A Mod declares at most 256 and a
 World holds at most 1024. Line 0.3 then gained `voxel-uses` on its
 `declaration`, appended after `recipes` in the same way; a Declaration for 0.1
 or 0.2 loads with none. A `voxel-use` names a solid Material by full name and a
-closed `voxel-use-kind`, `door` with its open Material's full name. Bodies pass
-through the open one.
+closed `voxel-use-kind`: `door` with its open Material's full name, through
+which bodies pass, or `station` with a tag, which Recipes name in `station`;
+Materials may share a tag, and `hand` is reserved.
 
 ## What is not frozen
 

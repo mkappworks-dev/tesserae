@@ -346,6 +346,9 @@ interface content {
         /// which bodies pass through. Removing either drops the closed one's
         /// Item.
         door(string),
+        /// Offers the Recipes whose `station` is this tag. Materials may share
+        /// a tag; `hand` is reserved.
+        station(string),
     }
 
     /// A Material that Use acts on. The engine runs the kind; a Mod is never

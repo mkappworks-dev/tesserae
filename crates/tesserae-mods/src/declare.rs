@@ -847,6 +847,7 @@ pub fn resolve(
                 content::VoxelUseKind::Door(open) => VoxelUse::Door {
                     open: lookup(b, registry, "voxel-uses", row, open)?,
                 },
+                content::VoxelUseKind::Station(tag) => VoxelUse::Station { tag: tag.clone() },
             };
             tables
                 .register_use(material, kind)

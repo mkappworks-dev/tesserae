@@ -170,6 +170,7 @@ pub(super) fn plugin(app: &mut App) {
                     flight::note_takes,
                     receive,
                     crafting::receive,
+                    crafting::stations,
                     render,
                     catalogue::fill,
                     crafting::fill,
@@ -562,6 +563,8 @@ struct Built {
     /// The Catalogue is beside the Inventory only outside Survival.
     survival: bool,
     pane: crafting::Pane,
+    /// A Station's pane stands in for the side pane, tabs and all.
+    station: Option<crafting::OpenStation>,
     /// Too narrow for the details column beside the grid, so it is toggled.
     narrow: bool,
     /// The Player's Shape choice, which any solid stack is placed in.
@@ -595,6 +598,7 @@ fn render(
         Res<super::profile::Preferences>,
         Res<crafting::Pane>,
     ),
+    station: Res<crafting::AtStation>,
     (focus, screen): (
         Option<Res<InputFocus>>,
         Single<&Window, With<PrimaryWindow>>,
@@ -609,6 +613,7 @@ fn render(
         key: bindings.label(Action::Inventory, &labels),
         survival: mode.survival(),
         pane: pane.shown(mode.survival()),
+        station: station.0.clone(),
         narrow: screen.width() < NARROW_PX,
         shape: match hotbar.outside {
             Some(Holding::Solid { shape, .. }) => shape,
@@ -623,7 +628,8 @@ fn render(
         .and_then(|f| f.get())
         .and_then(|entity| controls.get(entity).ok())
         .copied();
-    let was_side = built.as_ref().map(|built| (built.survival, built.pane));
+    let side = |built: &Built| (built.survival, built.pane, built.station.clone());
+    let was_side = built.as_ref().map(side);
     *built = wanted.clone();
     let Some(state) = wanted else {
         for root in &roots {
@@ -633,7 +639,7 @@ fn render(
     };
     // The row is built once per opening, so a mode or tab change while open
     // rebuilds it with the other side pane.
-    let reframe = was_side.is_some_and(|was| was != (state.survival, state.pane));
+    let reframe = was_side.is_some_and(|was| was != side(&state));
     if reframe {
         for root in &roots {
             commands.entity(root).despawn();
@@ -658,10 +664,10 @@ fn render(
                         ..default()
                     },
                 ))
-                .with_children(|row| match state.pane {
-                    crafting::Pane::Catalogue => catalogue::panel(row, &searches.catalogue),
-                    crafting::Pane::Crafting => {
-                        crafting::panel(row, &searches.recipes, !state.survival)
+                .with_children(|row| match (&state.station, state.pane) {
+                    (None, crafting::Pane::Catalogue) => catalogue::panel(row, &searches.catalogue),
+                    (station, _) => {
+                        crafting::panel(row, &searches.recipes, !state.survival, station.as_ref())
                     }
                 })
                 .id();

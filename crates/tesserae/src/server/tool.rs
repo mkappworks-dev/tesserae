@@ -58,14 +58,16 @@ pub struct UseTarget {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Usable {
     Door { open: bool },
+    Station,
 }
 
 impl Usable {
-    /// What Use would do to it, for the prompt.
-    pub fn verb(self) -> &'static str {
+    /// What Use would do to it, for the prompt; `name` is its Item's.
+    pub fn verb(self, name: &str) -> String {
         match self {
-            Usable::Door { open: false } => "Open",
-            Usable::Door { open: true } => "Close",
+            Usable::Door { open: false } => "Open".into(),
+            Usable::Door { open: true } => "Close".into(),
+            Usable::Station => format!("Use {name}"),
         }
     }
 }
@@ -89,7 +91,11 @@ pub struct UseIntent {
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum UseResult {
     Measured(UseTarget),
-    Door { opened: bool },
+    Door {
+        opened: bool,
+    },
+    /// A Station session opened; see `station.rs`.
+    Station,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -147,7 +153,8 @@ impl From<RejectReason> for UseRefusal {
 pub struct UseOutcome(pub Result<UseResult, UseRefusal>);
 
 pub(super) fn plugin(app: &mut App) {
-    app.add_player_intent::<UseIntent>()
+    app.add_plugins(super::station::plugin)
+        .add_player_intent::<UseIntent>()
         .add_session_message::<UseOutcome>()
         .add_session_message::<EatIntent>()
         // Every frame, like an Edit's receive: an answer is never lost to a
@@ -170,8 +177,13 @@ pub(super) fn answer_use(
         ResMut<EditHistory>,
     ),
     (tables, world, tools): (Res<ContentTables>, Res<WorldSettings>, Res<Tools>),
-    (player, status): (Single<&Player>, Option<Res<super::persistence::SaveStatus>>),
+    (player, status): (
+        Single<(Entity, &Player)>,
+        Option<Res<super::persistence::SaveStatus>>,
+    ),
+    (mut commands, mut opened): (Commands, MessageWriter<super::station::StationOpened>),
 ) {
+    let (entity, player) = player.into_inner();
     let playing = super::persistence::playing(status);
     for intent in intents.read() {
         let ray = (intent.origin, intent.direction);
@@ -190,14 +202,25 @@ pub(super) fn answer_use(
                     if !playing {
                         return Err(UseRefusal::Busy);
                     }
-                    super::usable::toggle_door(
-                        (&mut store, &mut meshes),
-                        &tables,
-                        &world,
-                        &mut history,
-                        player.solid_body(),
-                        aimed.at,
-                    )
+                    match aimed.usable {
+                        Some(Usable::Station) => {
+                            let tag = tables
+                                .uses
+                                .station(aimed.voxel.material())
+                                .ok_or(UseRefusal::TargetChanged)?;
+                            let at = (aimed.at, aimed.voxel);
+                            super::station::open(&mut commands, &mut opened, entity, at, tag);
+                            Ok(UseResult::Station)
+                        }
+                        _ => super::usable::toggle_door(
+                            (&mut store, &mut meshes),
+                            &tables,
+                            &world,
+                            &mut history,
+                            player.solid_body(),
+                            aimed.at,
+                        ),
+                    }
                 }),
             },
         };

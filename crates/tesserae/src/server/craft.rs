@@ -10,6 +10,7 @@ use super::entities::EntityStore;
 use super::inventory::{Inventory, MAX_STACK, drop_around};
 use super::items::Items;
 use super::player::Player;
+use super::station::AtStation;
 use super::world_state::ChunkStore;
 use crate::session::SessionApp;
 use crate::world::WorldSettings;
@@ -76,19 +77,22 @@ type Ground<'w> = (
 
 pub(super) fn craft(
     mut intents: MessageReader<Craft>,
-    player: Single<(&mut Inventory, &Player)>,
+    player: Single<(&mut Inventory, &Player, Option<&AtStation>)>,
     (recipes, items): (Res<Recipes>, Option<Res<Items>>),
     (mut entities, store, tables, world): Ground,
     (mut refused, mut dropped): (MessageWriter<CraftRefused>, MessageWriter<CraftDropped>),
 ) {
-    let (mut inventory, body) = player.into_inner();
+    let (mut inventory, body, at) = player.into_inner();
     let limit = |item: &str| items.as_ref().map_or(MAX_STACK, |i| i.stack_limit(item));
     for &Craft { recipe, count } in intents.read() {
         let Some(recipe) = recipes.0.get(recipe) else {
             refused.write(CraftRefused(CraftRefusal::NoSuchRecipe));
             continue;
         };
-        if recipe.station != Station::Hand {
+        let here = |tag: &str| at.is_some_and(|at| at.tag == tag);
+        if let Station::Tag(tag) = &recipe.station
+            && !here(tag)
+        {
             refused.write(CraftRefused(CraftRefusal::NeedsStation));
             continue;
         }

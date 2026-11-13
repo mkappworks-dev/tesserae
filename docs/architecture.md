@@ -217,9 +217,11 @@ runs; otherwise a Usable Voxel in Edit reach is used; otherwise the selected
 Stack is eaten. The aim answer's `use_aim` previews the Tool's action or the
 Usable Voxel's verb, or why not, so the prompt under the reticle can say it
 before the press. A Tool changes no Voxel; a Door toggles its vertical run as an
-Edit group that never enters the undo journal. A target that changed since it
-was shown is refused rather than re-aimed. The Server keeps no measurement: the
-Client holds the corners it was told, so no Client system reads World state.
+Edit group that never enters the undo journal; a Station opens a session, held
+while the Player stays in Edit reach and the Voxel unchanged, that allows Crafts
+of the Recipes at its tag. A target that changed since it was shown is refused
+rather than re-aimed. The Server keeps no measurement: the Client holds the
+corners it was told, so no Client system reads World state.
 
 A Game declares its Tools once, as `tool-def` rows (a name and a closed kind) in
 the Declaration. The Server runs the kind in native code, so no Mod is called

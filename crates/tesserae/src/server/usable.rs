@@ -65,6 +65,7 @@ fn usable(tables: &Tables, voxel: Voxel) -> Option<Usable> {
         (_, &VoxelUse::Door { open }) => Some(Usable::Door {
             open: voxel.material() == open,
         }),
+        (_, VoxelUse::Station { .. }) => Some(Usable::Station),
     }
 }
 
@@ -348,7 +349,7 @@ mod tests {
         assert_eq!(aimed(&app, far), Some(Err(UseRefusal::OutOfReach)));
         let near = aimed(&app, EYE).unwrap().unwrap();
         assert_eq!(near.usable, Some(Usable::Door { open: false }));
-        assert_eq!(near.usable.map(Usable::verb), Some("Open"));
+        assert_eq!(near.usable.map(|u| u.verb("Door")).as_deref(), Some("Open"));
         assert_eq!(near.at, [5, 8, 5]);
         assert_eq!(
             press(&mut app, far, Vec3::NEG_Y, None),

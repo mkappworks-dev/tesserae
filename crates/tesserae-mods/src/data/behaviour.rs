@@ -188,6 +188,7 @@ impl From<Tool> for content::ToolDef {
 #[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
 pub(super) enum VoxelUse {
     Door { material: String, open: String },
+    Station { material: String, tag: String },
 }
 
 impl From<VoxelUse> for content::VoxelUse {
@@ -196,6 +197,10 @@ impl From<VoxelUse> for content::VoxelUse {
             VoxelUse::Door { material, open } => Self {
                 material,
                 kind: content::VoxelUseKind::Door(open),
+            },
+            VoxelUse::Station { material, tag } => Self {
+                material,
+                kind: content::VoxelUseKind::Station(tag),
             },
         }
     }

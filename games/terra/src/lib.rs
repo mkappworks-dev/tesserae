@@ -267,6 +267,7 @@ impl Guest for Terra {
                 solid("iron"),
                 solid("melon"),
                 solid("workbench"),
+                solid("chest"),
                 solid("door"),
                 // Drawn as its frame alone and passed through, as Use opened it.
                 MaterialDef {
@@ -295,6 +296,7 @@ impl Guest for Terra {
                 appearance("iron", [150, 120, 104, 255]),
                 appearance("melon", [84, 150, 56, 255]),
                 appearance("workbench", [167, 116, 63, 255]),
+                appearance("chest", [107, 68, 35, 255]),
                 appearance("door", [128, 88, 50, 255]),
                 appearance("door_open", [128, 88, 50, 255]),
             ],
@@ -462,6 +464,19 @@ impl Guest for Terra {
                     food: None,
                 },
                 ItemDef {
+                    name: "chest".into(),
+                    size_m: 0.25,
+                    color: Srgba {
+                        r: 107,
+                        g: 68,
+                        b: 35,
+                        a: 255,
+                    },
+                    material: Some("terra:chest".into()),
+                    max_stack: None,
+                    food: None,
+                },
+                ItemDef {
                     name: "door".into(),
                     size_m: 0.25,
                     color: Srgba {
@@ -534,21 +549,140 @@ impl Guest for Terra {
             material_sounds: audio::materials(),
             soundscapes: audio::soundscapes(),
             cause_sounds: audio::causes(),
-            recipes: vec![RecipeDef {
-                inputs: vec![RecipeStack {
-                    item: "terra:wood".into(),
-                    count: 4,
-                }],
-                output: RecipeStack {
-                    item: "terra:workbench".into(),
-                    count: 1,
+            recipes: vec![
+                RecipeDef {
+                    inputs: vec![RecipeStack {
+                        item: "terra:wood".into(),
+                        count: 4,
+                    }],
+                    output: RecipeStack {
+                        item: "terra:workbench".into(),
+                        count: 1,
+                    },
+                    station: "hand".into(),
                 },
-                station: "hand".into(),
-            }],
-            voxel_uses: vec![VoxelUse {
-                material: "terra:door".into(),
-                kind: VoxelUseKind::Door("terra:door_open".into()),
-            }],
+                RecipeDef {
+                    inputs: vec![
+                        RecipeStack {
+                            item: "terra:rock".into(),
+                            count: 2,
+                        },
+                        RecipeStack {
+                            item: "terra:dirt".into(),
+                            count: 1,
+                        },
+                    ],
+                    output: RecipeStack {
+                        item: "terra:brick".into(),
+                        count: 2,
+                    },
+                    station: "hand".into(),
+                },
+                RecipeDef {
+                    inputs: vec![RecipeStack {
+                        item: "terra:rock".into(),
+                        count: 1,
+                    }],
+                    output: RecipeStack {
+                        item: "terra:sand".into(),
+                        count: 2,
+                    },
+                    station: "hand".into(),
+                },
+                RecipeDef {
+                    inputs: vec![RecipeStack {
+                        item: "terra:leaves".into(),
+                        count: 4,
+                    }],
+                    output: RecipeStack {
+                        item: "terra:dirt".into(),
+                        count: 1,
+                    },
+                    station: "hand".into(),
+                },
+                RecipeDef {
+                    inputs: vec![RecipeStack {
+                        item: "terra:wood".into(),
+                        count: 8,
+                    }],
+                    output: RecipeStack {
+                        item: "terra:chest".into(),
+                        count: 1,
+                    },
+                    station: "workbench".into(),
+                },
+                RecipeDef {
+                    inputs: vec![RecipeStack {
+                        item: "terra:wood".into(),
+                        count: 3,
+                    }],
+                    output: RecipeStack {
+                        item: "terra:door".into(),
+                        count: 1,
+                    },
+                    station: "workbench".into(),
+                },
+                RecipeDef {
+                    inputs: vec![RecipeStack {
+                        item: "terra:sand".into(),
+                        count: 2,
+                    }],
+                    output: RecipeStack {
+                        item: "terra:glass".into(),
+                        count: 1,
+                    },
+                    station: "workbench".into(),
+                },
+                RecipeDef {
+                    inputs: vec![
+                        RecipeStack {
+                            item: "terra:iron".into(),
+                            count: 1,
+                        },
+                        RecipeStack {
+                            item: "terra:glass".into(),
+                            count: 1,
+                        },
+                    ],
+                    output: RecipeStack {
+                        item: "terra:lamp".into(),
+                        count: 2,
+                    },
+                    station: "workbench".into(),
+                },
+                RecipeDef {
+                    inputs: vec![RecipeStack {
+                        item: "terra:sand".into(),
+                        count: 4,
+                    }],
+                    output: RecipeStack {
+                        item: "terra:rock".into(),
+                        count: 1,
+                    },
+                    station: "workbench".into(),
+                },
+                RecipeDef {
+                    inputs: vec![RecipeStack {
+                        item: "terra:wood".into(),
+                        count: 1,
+                    }],
+                    output: RecipeStack {
+                        item: "terra:ash".into(),
+                        count: 2,
+                    },
+                    station: "workbench".into(),
+                },
+            ],
+            voxel_uses: vec![
+                VoxelUse {
+                    material: "terra:door".into(),
+                    kind: VoxelUseKind::Door("terra:door_open".into()),
+                },
+                VoxelUse {
+                    material: "terra:workbench".into(),
+                    kind: VoxelUseKind::Station("workbench".into()),
+                },
+            ],
             ores: vec![OreDef {
                 material: "terra:iron".into(),
                 min_depth_m: 5.0,

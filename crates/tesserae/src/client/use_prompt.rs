@@ -6,7 +6,7 @@ use bevy::prelude::*;
 
 use super::actions::{Action, Bindings, Labels};
 use super::aim::{Sent, Target};
-use super::edit::{Holding, Hotbar};
+use super::edit::{Catalogue, Holding, Hotbar};
 use super::theme;
 use crate::server::tool::UseRefusal;
 use crate::session::SessionApp;
@@ -34,20 +34,35 @@ pub(super) fn plugin(app: &mut App) {
 }
 
 /// What the prompt says: the verb after the Use key, or a refusal alone.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 enum Wording {
-    Verb(&'static str),
+    Verb(String),
     Refused(&'static str),
+}
+
+/// What the Player calls a Usable Voxel of `material`: its declared name.
+pub(super) fn material_title(catalogue: &Catalogue, material: tesserae_core::MaterialId) -> String {
+    catalogue
+        .0
+        .material(material)
+        .map_or_else(String::new, |m| super::menu_ui::declared_title(&m.name))
 }
 
 /// The prompt for the current aim answer; none with a Tool in hand, whose
 /// preview is its own, or when Use would eat.
-fn wording(target: &Target, sent: &Sent, now: f64, hotbar: &Hotbar) -> Option<Wording> {
+fn wording(
+    target: &Target,
+    sent: &Sent,
+    now: f64,
+    (hotbar, catalogue): (&Hotbar, &Catalogue),
+) -> Option<Wording> {
     if matches!(hotbar.held(), Holding::Tool(_)) || !target.current(sent, now) {
         return None;
     }
     match target.0.use_aim? {
-        Ok(aimed) => aimed.usable.map(|usable| Wording::Verb(usable.verb())),
+        Ok(aimed) => aimed.usable.map(|usable| {
+            Wording::Verb(usable.verb(&material_title(catalogue, aimed.voxel.material())))
+        }),
         Err(UseRefusal::OutOfReach) => Some(Wording::Refused("Out of reach")),
         Err(_) => None,
     }
@@ -125,12 +140,18 @@ type PromptParts<'w, 's> = (
 
 fn show(
     (target, sent, time, hotbar): (Res<Target>, Res<Sent>, Res<Time>, Res<Hotbar>),
+    catalogue: Res<Catalogue>,
     (bindings, labels): (Res<Bindings>, Res<Labels>),
     dead: Option<Res<super::death::Dead>>,
     (mut prompt, mut row, mut key, mut text): PromptParts,
 ) {
-    let wording = wording(&target, &sent, time.elapsed_secs_f64(), &hotbar)
-        .filter(|_| super::death::alive(dead));
+    let wording = wording(
+        &target,
+        &sent,
+        time.elapsed_secs_f64(),
+        (&hotbar, &catalogue),
+    )
+    .filter(|_| super::death::alive(dead));
     for mut visibility in &mut prompt {
         visibility.set_if_neq(if wording.is_some() {
             Visibility::Inherited
@@ -141,9 +162,9 @@ fn show(
     let Some(wording) = wording else {
         return;
     };
-    let (words, refused) = match wording {
-        Wording::Verb(verb) => (verb, false),
-        Wording::Refused(why) => (why, true),
+    let (words, refused) = match &wording {
+        Wording::Verb(verb) => (verb.as_str(), false),
+        Wording::Refused(why) => (*why, true),
     };
     for mut node in &mut row {
         let left = Val::Px(if refused { 8.0 } else { 4.0 });
@@ -185,6 +206,7 @@ mod tests {
             .init_resource::<Hotbar>()
             .init_resource::<Target>()
             .init_resource::<Sent>()
+            .init_resource::<Catalogue>()
             .add_systems(Startup, spawn)
             .add_systems(Update, show);
         app
@@ -246,6 +268,29 @@ mod tests {
         assert_eq!(
             prompt(&mut app, Some(door(true)), None),
             Some((Some("G".into()), "Close".into()))
+        );
+    }
+
+    #[test]
+    fn aimed_at_a_station_the_prompt_names_it() {
+        let mut app = app();
+        app.world_mut().resource_mut::<Catalogue>().0.materials =
+            vec![crate::content::CatalogueMaterial {
+                remove_time: tesserae_mods::DEFAULT_REMOVE_TIME,
+                id: 9,
+                name: "t:workbench".into(),
+                solid: true,
+                fluid: None,
+                burns: false,
+            }];
+        let station = Ok(UseTarget {
+            voxel: tesserae_core::Voxel::cube(9),
+            usable: Some(Usable::Station),
+            ..door(false).unwrap()
+        });
+        assert_eq!(
+            prompt(&mut app, Some(station), None),
+            Some((Some("G".into()), "Use Workbench".into()))
         );
     }
 
