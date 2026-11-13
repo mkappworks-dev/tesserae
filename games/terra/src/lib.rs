@@ -13,8 +13,8 @@ use tesserae::mods::commands::{Fill, Placement, SourceFill};
 use tesserae::mods::content::{
     Appearance, BiomeDef, BurnAfter, BurnEnd, ClimateParams, CombustionDef, FluidDef, FluidState,
     GroundParams, HeatDef, ItemDef, MaterialDef, Occlusion, OreDef, Reactant, ReactionDef,
-    ReactionSide, RenderClass, ShapeDef, SkyFog, SurfaceFeature, ToolDef, ToolKind, ViewParams,
-    WaterParams,
+    ReactionSide, RecipeDef, RecipeStack, RenderClass, ShapeDef, SkyFog, SurfaceFeature, ToolDef,
+    ToolKind, ViewParams, WaterParams,
 };
 use tesserae::mods::types::{
     Arm, BoxM, CollisionBox, ConnectDef, LogLevel, NodeBox, Srgba, Vec3, Voxel,
@@ -266,6 +266,7 @@ impl Guest for Terra {
                 solid("snow"),
                 solid("iron"),
                 solid("melon"),
+                solid("workbench"),
             ],
             shapes: vec![fence()],
             appearance: vec![
@@ -285,6 +286,7 @@ impl Guest for Terra {
                 appearance("snow", [236, 240, 246, 255]),
                 appearance("iron", [150, 120, 104, 255]),
                 appearance("melon", [84, 150, 56, 255]),
+                appearance("workbench", [167, 116, 63, 255]),
             ],
             world: Some(world),
             view: Some(ViewParams {
@@ -436,6 +438,19 @@ impl Guest for Terra {
                     max_stack: None,
                     food: Some(6.0),
                 },
+                ItemDef {
+                    name: "workbench".into(),
+                    size_m: 0.25,
+                    color: Srgba {
+                        r: 167,
+                        g: 116,
+                        b: 63,
+                        a: 255,
+                    },
+                    material: Some("terra:workbench".into()),
+                    max_stack: None,
+                    food: None,
+                },
             ],
             biomes: vec![
                 BiomeDef {
@@ -496,6 +511,17 @@ impl Guest for Terra {
             material_sounds: audio::materials(),
             soundscapes: audio::soundscapes(),
             cause_sounds: audio::causes(),
+            recipes: vec![RecipeDef {
+                inputs: vec![RecipeStack {
+                    item: "terra:wood".into(),
+                    count: 4,
+                }],
+                output: RecipeStack {
+                    item: "terra:workbench".into(),
+                    count: 1,
+                },
+                station: "hand".into(),
+            }],
             ores: vec![OreDef {
                 material: "terra:iron".into(),
                 min_depth_m: 5.0,

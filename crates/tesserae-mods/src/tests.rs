@@ -17,6 +17,7 @@ mod declare;
 mod export_version;
 mod lines;
 mod loading;
+mod recipes;
 mod sandbox;
 mod shared_mods;
 mod sounds;

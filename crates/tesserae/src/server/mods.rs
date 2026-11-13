@@ -122,6 +122,7 @@ pub struct LoadedMods {
     pub survival: Option<tesserae_core::SurvivalRules>,
     pub contact_damage: Vec<(MaterialId, f32)>,
     pub sounds: tesserae_mods::Sounds,
+    pub recipes: Vec<tesserae_core::craft::Recipe>,
 }
 
 impl Default for LoadedMods {
@@ -144,6 +145,7 @@ impl Default for LoadedMods {
             survival: None,
             contact_damage: Vec::new(),
             sounds: tesserae_mods::Sounds::default(),
+            recipes: Vec::new(),
         }
     }
 }
@@ -602,8 +604,12 @@ pub(crate) async fn declare_all(
         // A Mod's Biomes need a World to live in even when the Game sets no terrain.
         loaded.world.get_or_insert_with(WorldgenParams::default);
     }
+    let recipes = tesserae_mods::DeclaredRecipes::take(&mut behaviours);
     let (ground, lake) =
         resolve(behaviours, &mut loaded.tables, &loaded.registry).map_err(|e| e.to_string())?;
+    loaded.recipes = recipes
+        .resolve(&loaded.every_item(world.voxel_size).0, &[])
+        .map_err(|e| e.to_string())?;
     if let Some(world) = &mut loaded.world {
         world.water = lake;
         world.ground = ground;
@@ -717,6 +723,7 @@ pub(super) fn plugin(app: &mut App) {
         .add_session_message::<crate::content::WorldFacts>()
         .add_session_message::<crate::content::SoundLibrary>()
         .add_session_message::<crate::content::SoundscapeLibrary>()
+        .add_session_message::<crate::content::RecipeBook>()
         .on_session_start(install)
         .add_session_systems(SessionTeardown, release_mods);
 }
@@ -808,6 +815,8 @@ fn install(world: &mut World) {
             })
             .collect(),
     ));
+    world.write_message(crate::content::RecipeBook(loaded.recipes.clone()));
+    world.insert_resource(super::craft::Recipes(loaded.recipes));
     world.insert_resource(super::items::PlacingItems::new(
         catalogue
             .materials
@@ -2181,7 +2190,47 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
         );
         assert!(!turnable.iter().any(|(name, _)| name.starts_with("dev:")));
         let ids: Vec<_> = catalogue.materials.iter().map(|m| m.id).collect();
-        assert_eq!(ids, std::iter::once(0).chain(8..24).collect::<Vec<_>>());
+        assert_eq!(ids, std::iter::once(0).chain(8..25).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn a_new_terra_world_crafts_a_workbench_from_four_wood_by_hand() {
+        use bevy::ecs::system::RunSystemOnce;
+        use tesserae_core::craft::{Count, Station};
+
+        let loaded = super::runtime::tests::terra_loaded(1.0);
+        let mut app = App::new();
+        app.insert_non_send(loaded)
+            .add_plugins((plugin, super::super::craft::plugin));
+        let book = app
+            .world_mut()
+            .resource_mut::<Messages<crate::content::RecipeBook>>()
+            .drain()
+            .next()
+            .unwrap();
+        let at = book
+            .0
+            .iter()
+            .position(|r| r.output.item == "terra:workbench")
+            .expect("Terra declares the Workbench Recipe");
+        assert_eq!(book.0[at].station, Station::Hand);
+        let mut inventory = super::super::inventory::Inventory::default();
+        inventory.receive("terra:wood", 4, 64);
+        app.world_mut()
+            .spawn((super::super::player::Player::at(Vec3::ZERO), inventory));
+        app.world_mut().write_message(super::super::craft::Craft {
+            recipe: at,
+            count: Count::One,
+        });
+        app.world_mut()
+            .run_system_once(super::super::craft::craft)
+            .unwrap();
+        let mut held = app
+            .world_mut()
+            .query::<&super::super::inventory::Inventory>();
+        let held = held.single(app.world()).unwrap();
+        assert_eq!(held.count("terra:wood"), 0);
+        assert_eq!(held.count("terra:workbench"), 1);
     }
 
     #[test]
@@ -2201,7 +2250,7 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
             .drain()
             .next()
             .unwrap();
-        assert_eq!(textures.0.len(), 16);
+        assert_eq!(textures.0.len(), 17);
         for material in catalogue.materials.iter().filter(|m| m.id != 0) {
             let (_, pixels) = textures
                 .0

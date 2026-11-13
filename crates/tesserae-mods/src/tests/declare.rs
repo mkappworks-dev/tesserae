@@ -40,7 +40,7 @@ fn slab(name: &str) -> content::ShapeDef {
     }
 }
 
-fn declaring(materials: &[&str], shapes: &[&str]) -> Declaration {
+pub(super) fn declaring(materials: &[&str], shapes: &[&str]) -> Declaration {
     Declaration {
         materials: materials.iter().map(|n| material(n)).collect(),
         shapes: shapes.iter().map(|n| slab(n)).collect(),
@@ -60,6 +60,7 @@ fn declaring(materials: &[&str], shapes: &[&str]) -> Declaration {
         material_sounds: Vec::new(),
         soundscapes: Vec::new(),
         cause_sounds: Vec::new(),
+        recipes: Vec::new(),
     }
 }
 

@@ -357,6 +357,24 @@ interface content {
         food: option<f32>,
     }
 
+    /// An Item, `<mod id>:<name>`, and how many.
+    record recipe-stack {
+        item: string,
+        count: u32,
+    }
+
+    /// What one Craft spends from the Inventory and gives to it. Item names
+    /// resolve after every Mod's Declaration, the implicit Item of each
+    /// placeable Material included.
+    record recipe-def {
+        /// 1 to 9 rows, each a different Item and a count of at least 1.
+        inputs: list<recipe-stack>,
+        /// A count from 1 to the Item's `max-stack`.
+        output: recipe-stack,
+        /// `hand`, craftable anywhere, or the tag of the Station it needs.
+        station: string,
+    }
+
     /// The rules of Survival, from the Game only. Every field is optional and
     /// an absent one takes the engine's default, shown in brackets. Health and
     /// hunger are points, distances metres and times seconds.
@@ -645,5 +663,8 @@ interface content {
         soundscapes: list<soundscape-def>,
         /// From the Game only, like `tools`; each Cause at most once.
         cause-sounds: list<cause-sound>,
+        /// At most 256 rows per Mod and 1024 in a World, from any Mod. Names
+        /// resolve after every Mod has declared.
+        recipes: list<recipe-def>,
     }
 }
