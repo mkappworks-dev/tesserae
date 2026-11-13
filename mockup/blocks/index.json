@@ -444,6 +444,116 @@
           "width-m": 1.0
         }
       }
+    },
+    {
+      "color": [
+        140,
+        97,
+        55,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "gate.bottom.png",
+        "side": "gate.side.png",
+        "top": "gate.top.png"
+      },
+      "name": "terra:gate",
+      "render": "cutout",
+      "solid": true,
+      "use": {
+        "door": {
+          "boxes": {
+            "closed": [
+              [
+                [
+                  0,
+                  0,
+                  13
+                ],
+                [
+                  16,
+                  16,
+                  16
+                ]
+              ]
+            ],
+            "open": [
+              [
+                [
+                  13,
+                  0,
+                  0
+                ],
+                [
+                  16,
+                  16,
+                  16
+                ]
+              ]
+            ]
+          },
+          "closed": "terra:gate",
+          "height-m": 1.0,
+          "open": "terra:gate_open",
+          "width-m": 1.0
+        }
+      }
+    },
+    {
+      "color": [
+        140,
+        97,
+        55,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "gate_open.bottom.png",
+        "side": "gate_open.side.png",
+        "top": "gate_open.top.png"
+      },
+      "name": "terra:gate_open",
+      "render": "cutout",
+      "solid": true,
+      "use": {
+        "door": {
+          "boxes": {
+            "closed": [
+              [
+                [
+                  0,
+                  0,
+                  13
+                ],
+                [
+                  16,
+                  16,
+                  16
+                ]
+              ]
+            ],
+            "open": [
+              [
+                [
+                  13,
+                  0,
+                  0
+                ],
+                [
+                  16,
+                  16,
+                  16
+                ]
+              ]
+            ]
+          },
+          "closed": "terra:gate",
+          "height-m": 1.0,
+          "open": "terra:gate_open",
+          "width-m": 1.0
+        }
+      }
     }
   ],
   "shapes": [

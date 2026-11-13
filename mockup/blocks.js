@@ -202,17 +202,32 @@ function drawPlayer(g, at, s, origin, ratio) {
   g.restore();
 }
 
+/** `joined` fence boxes with only the arms along x, and none out past either end of a run. */
+function fenceRun(joined, first, last) {
+  return joined.filter(
+    ([min, max]) =>
+      min[2] >= 6 &&
+      max[2] <= 10 &&
+      !(first && max[0] <= 6) &&
+      !(last && min[0] >= 10),
+  );
+}
+
 /**
  * A Door of `m` sized by `door`, standing on the grid, its cells `voxel` m each and each
  * drawn as the exported `boxes`: the thin panel closed, or turned onto its hinge side open.
+ * With `fence`, a Door shorter than the Player stands in 2 m of fence either side, as
+ * tall as it, in the cell row its panel stands in.
  */
-async function drawDoor(canvas, m, door, boxes, voxel) {
+async function drawDoor(canvas, m, door, boxes, voxel, fence) {
   const faces = await materialFaces(m);
+  const fenceFaces = fence && (await materialFaces(fence.material));
   const { g, w, h, ratio } = setupCanvas(canvas);
-  const scene = [3, 2];
+  const run = fence ? 2 : 0;
+  const scene = [Math.ceil(door["width-m"] + 2 * run + 1.6), 2];
   const s = Math.min(w / ((scene[0] + scene[1]) * COS), h / 3.4) * ratio;
   const origin = [
-    (w / 2) * ratio,
+    (w / 2) * ratio - ((scene[0] - scene[1]) / 2) * COS * s,
     h * 0.78 * ratio - (scene[0] + scene[1]) * 0.25 * s,
   ];
   g.setTransform(1, 0, 0, 1, 0, 0);
@@ -221,20 +236,35 @@ async function drawDoor(canvas, m, door, boxes, voxel) {
   drawGround(g, s, origin, scene, ratio);
   const across = Math.ceil(door["width-m"] / voxel);
   const up = Math.ceil(door["height-m"] / voxel);
+  const runCells = Math.ceil(run / voxel);
   const z = 1;
-  const cells = [];
-  for (let i = 0; i < across; i++)
-    for (let j = 0; j < up; j++) cells.push([i, j]);
-  cells.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
   const left = 0.5;
-  for (const [i, j] of cells) {
-    const cell = [left / voxel + i, j, z / voxel];
-    for (const b of byDepth(boxes))
-      drawBox(g, faces, cell, b, s * voxel, origin);
+  const cells = [];
+  for (let i = -runCells; i < across + runCells; i++)
+    for (let j = 0; j < up; j++) {
+      const inFence = i < 0 || i >= across;
+      if (!inFence) cells.push({ i, j, faces, boxes });
+      else {
+        const first = i === -runCells || i === across;
+        const last = i === -1 || i === across + runCells - 1;
+        cells.push({
+          i,
+          j,
+          faces: fenceFaces,
+          boxes: fenceRun(fence.shape.joined, first, last),
+        });
+      }
+    }
+  cells.sort((a, b) => a.i - b.i || a.j - b.j);
+  const start = left + run;
+  for (const c of cells) {
+    const cell = [start / voxel + c.i, c.j, z / voxel];
+    for (const b of byDepth(c.boxes))
+      drawBox(g, c.faces, cell, b, s * voxel, origin);
   }
   drawPlayer(
     g,
-    [left + door["width-m"] + 0.7, 0, z + voxel / 2],
+    [start + door["width-m"] + run + 0.7, 0, z + voxel / 2],
     s,
     origin,
     ratio,
@@ -245,9 +275,7 @@ function blockCard(m, i) {
   const short = m.name.split(":")[1];
   const use = m.use
     ? m.use.door
-      ? m.name === m.use.door.open
-        ? "Door, open"
-        : "Door, closed"
+      ? `${m.use.door["height-m"] < PLAYER_HEIGHT_M ? "Gate" : "Door"}, ${m.name === m.use.door.open ? "open" : "closed"}`
       : m.use.container
         ? `Container · ${m.use.container} slots`
         : `Station · ${m.use.station}`
@@ -275,6 +303,30 @@ function blocksPage() {
   });
 }
 
+/** A Door at Player scale; one shorter than the Player is a Gate, shown in a fence run. */
+function doorSection(door, at) {
+  const use = door.use.door;
+  const gate = use["height-m"] < PLAYER_HEIGHT_M;
+  const voxel = Number(state.blocksVoxel);
+  const cells = `${Math.ceil(use["width-m"] / voxel)} × ${Math.ceil(use["height-m"] / voxel)} cells`;
+  const about = gate
+    ? `${use["width-m"]} m wide, ${use["height-m"]} m tall: ${cells}, the same thin panel as the Door, in 2 m of wooden fence either side. Grid squares are 1 m.`
+    : `${use["width-m"]} m wide, ${use["height-m"]} m tall: ${cells}, each a thin panel that Use turns about its hinge edge, so it swings at 1 m and turns as slats at finer sizes. Grid squares are 1 m.`;
+  const control =
+    at === 0
+      ? `<label class="blocks-control">Voxel size ${customSelect(
+          "Voxel size",
+          "blocksVoxel",
+          state.blocksVoxel,
+          ["1", "0.5", "0.25"].map((v) => ({ value: v, label: `${v} m` })),
+          "blocks-voxel",
+        )}</label>`
+      : "";
+  const scene = (shown, name) =>
+    `<figure><canvas class="door-scene" data-door="${shown}" data-door-at="${at}" width="420" height="320"></canvas><figcaption>${shown === "open" ? "Open" : "Closed"} · ${esc(name)}</figcaption></figure>`;
+  return `<section><header class="blocks-heading"><div><p class="item-eyebrow">${gate ? "GATE" : "DOOR"}</p><h3>${gate ? "Gate in a fence" : "Door at Player scale"}</h3><p class="muted">${about}</p></div>${control}</header><div class="door-grid">${scene("closed", door.name)}${scene("open", use.open)}</div></section>`;
+}
+
 async function drawBlocks() {
   const root = document.querySelector("#blocks-root");
   if (!root) return;
@@ -288,9 +340,13 @@ async function drawBlocks() {
   if (!document.body.contains(root)) return;
   const textured = index.materials.filter((m) => m.faces.top);
   const named = (name) => textured.find((m) => m.name === name);
-  const door = textured.find(
+  const doors = textured.filter(
     (m) => m.use?.door && m.name === m.use.door.closed,
   );
+  const fence = {
+    material: named("terra:wood"),
+    shape: index.shapes.find((s) => s.name === "terra:fence"),
+  };
   const shapeMaterial = named(state.blocksShapeMaterial) || textured[0];
   const shapeCards = index.shapes
     .flatMap((shape) => [
@@ -315,17 +371,7 @@ async function drawBlocks() {
     textured.map((m) => ({ value: m.name, label: m.name.split(":")[1] })),
     "blocks-shape-material",
   )}</label></header><div class="shape-grid">${shapeCards.join("")}</div></section>
-${
-  door
-    ? `<section><header class="blocks-heading"><div><p class="item-eyebrow">DOOR</p><h3>Door at Player scale</h3><p class="muted">${door.use.door["width-m"]} m wide, ${door.use.door["height-m"]} m tall: ${Math.ceil(door.use.door["width-m"] / Number(state.blocksVoxel))} × ${Math.ceil(door.use.door["height-m"] / Number(state.blocksVoxel))} cells, each a thin panel that Use turns about its hinge edge, so it swings at 1 m and turns as slats at finer sizes. Grid squares are 1 m.</p></div><label class="blocks-control">Voxel size ${customSelect(
-        "Voxel size",
-        "blocksVoxel",
-        state.blocksVoxel,
-        ["1", "0.5", "0.25"].map((v) => ({ value: v, label: `${v} m` })),
-        "blocks-voxel",
-      )}</label></header><div class="door-grid"><figure><canvas class="door-scene" data-door="closed" width="420" height="320"></canvas><figcaption>Closed · ${esc(door.name)}</figcaption></figure><figure><canvas class="door-scene" data-door="open" width="420" height="320"></canvas><figcaption>Open · ${esc(door.use.door.open)}</figcaption></figure></div></section>`
-    : ""
-}`;
+${doors.map(doorSection).join("\n")}`;
   root.querySelector("#blocks-shape-material").onchange = (e) => {
     state.blocksShapeMaterial = e.target.value;
     savePrototype();
@@ -351,14 +397,21 @@ ${
     ...[...root.querySelectorAll("[data-shape]")].map((c) =>
       drawVoxel(c, shapeMaterial, shapes[Number(c.dataset.shape)]),
     ),
-    ...[...root.querySelectorAll("[data-door]")].map((c) =>
-      drawDoor(
+    ...[...root.querySelectorAll("[data-door]")].map((c) => {
+      const door = doors[Number(c.dataset.doorAt)];
+      const use = door.use.door;
+      return drawDoor(
         c,
-        c.dataset.door === "open" ? named(door.use.door.open) : door,
-        door.use.door,
-        door.use.door.boxes[c.dataset.door],
+        c.dataset.door === "open" ? named(use.open) : door,
+        use,
+        use.boxes[c.dataset.door],
         Number(state.blocksVoxel),
-      ),
-    ),
+        use["height-m"] < PLAYER_HEIGHT_M &&
+          fence.shape?.joined &&
+          fence.material
+          ? fence
+          : null,
+      );
+    }),
   ]);
 }
