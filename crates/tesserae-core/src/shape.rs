@@ -487,7 +487,7 @@ impl Void {
             out.extend_from_slice(&self.full);
             return;
         }
-        for face in 0..6 {
+        for (face, open) in self.open.iter().enumerate() {
             let below = |u: usize, v: usize| match face / 2 {
                 // An x face's u is y, a z face's v is y, and a y face has none.
                 0 => u < s,
@@ -497,7 +497,7 @@ impl Void {
             let mut mask = [false; SUBDIV * SUBDIV];
             for v in 0..SUBDIV {
                 for u in 0..SUBDIV {
-                    mask[v * SUBDIV + u] = self.open[face].get(u, v) && below(u, v);
+                    mask[v * SUBDIV + u] = open.get(u, v) && below(u, v);
                 }
             }
             let plane = if face % 2 == 1 { SUBDIV as u8 } else { 0 };
@@ -2048,8 +2048,8 @@ mod tests {
 
     fn mask(rows: impl Fn(usize) -> u16) -> FaceMask {
         let mut m = FaceMask::EMPTY;
-        for v in 0..SUBDIV {
-            m.0[v] = rows(v);
+        for (v, row) in m.0.iter_mut().enumerate() {
+            *row = rows(v);
         }
         m
     }
@@ -2183,8 +2183,7 @@ mod tests {
                         }
                     }
                 }
-                for face in 0..6 {
-                    let open = voids[0].open[face];
+                for (face, &open) in voids[0].open.iter().enumerate() {
                     let cover = t.coverage(v, face);
                     assert!(!open.intersects(cover), "{shape} {o:?} {face}");
                     assert!(open.union(cover).is_full(), "{shape} {o:?} {face}");
