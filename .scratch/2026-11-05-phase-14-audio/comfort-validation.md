@@ -93,3 +93,8 @@ busy actions under music, Biome crossings, and applying controls to playing
 sounds. Record the actual output mix and inspect device playback memory during
 transitions. Keep ticket 09 and these listening criteria in ticket 13 open
 until accepted. No sound has been marked listened-to on the user's behalf.
+
+## Human acceptance
+
+2026-11-13: the owner listened in the running game and accepted the audio as
+working.
