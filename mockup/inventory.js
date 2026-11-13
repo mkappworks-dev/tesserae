@@ -91,6 +91,19 @@ function creativeAccess() {
 function stackItem(stack) {
   return stack ? carriedItems.find((x) => x.id === stack.id) : null;
 }
+function slotList(area) {
+  return area === "bag"
+    ? state.bag
+    : area === "chest"
+      ? state.chest
+      : state.bagHotbar;
+}
+const slotPlace = { bag: "Inventory", bar: "Hotbar", chest: "Chest" };
+/* With a Container open, quick transfer crosses to it instead of between backpack and hotbar. */
+function quickTarget(area) {
+  if (state.useTarget === "chest") return area === "chest" ? "bag" : "chest";
+  return area === "bag" ? "bar" : "bag";
+}
 function stackKey(stack) {
   return stack.id + ":" + (stack.shape || "Cube");
 }
@@ -167,13 +180,13 @@ function itemShell(content, footer) {
   return `<section class="item-window" data-details="${!!state.showItemDetails}" aria-label="Player inventory"><header class="item-window-header">${inventoryTabs()}<div class="item-window-context"><button class="item-details-toggle" data-action="item-details" aria-label="Toggle item details" aria-expanded="${!!state.showItemDetails}" aria-controls="item-inspector">${icon("info")}</button>${creativeAccess() ? '<span class="access-badge">Creative access</span>' : ""}<button class="item-close" data-action="inventory-close" aria-label="Close and return to game">${icon("close")}</button></div></header>${content}<footer class="item-window-footer">${footer}</footer></section>`;
 }
 function renderCarriedSlot(area, index, play = false) {
-  const stack = (area === "bag" ? state.bag : state.bagHotbar)[index],
+  const stack = slotList(area)[index],
     item = stackItem(stack);
   const picked =
     state.carriedFrom?.area === area && state.carriedFrom?.index === index;
   const inspected =
     state.inspected?.area === area && state.inspected?.index === index;
-  return `<button class="item-slot ${picked ? "picked-up" : ""} ${!play && inspected ? "inspected" : ""} ${area === "bar" && index === state.quickSlot ? "active" : ""}" data-action="${play ? "play-slot" : "storage-slot"}" data-value="${play ? index : area + ":" + index}" aria-label="${area === "bag" ? "Inventory" : "Hotbar"} slot ${index + 1}${stack ? ": " + item?.name + ", " + stack.count + ", " + (stack.shape || "Cube") : " empty"}" ${play ? "" : `draggable="${!!stack}" data-drag-area="${area}" data-drag-index="${index}"`}>${voxelIcon(item, stack?.shape)}${stack ? `<span class="stack-count">${stack.count}</span>` : ""}${area === "bar" ? `<span class="slot-number">${index + 1}</span>` : ""}</button>`;
+  return `<button class="item-slot ${picked ? "picked-up" : ""} ${!play && inspected ? "inspected" : ""} ${area === "bar" && index === state.quickSlot ? "active" : ""}" data-action="${play ? "play-slot" : "storage-slot"}" data-value="${play ? index : area + ":" + index}" aria-label="${slotPlace[area]} slot ${index + 1}${stack ? ": " + item?.name + ", " + stack.count + ", " + (stack.shape || "Cube") : " empty"}" ${play ? "" : `draggable="${!!stack}" data-drag-area="${area}" data-drag-index="${index}"`}>${voxelIcon(item, stack?.shape)}${stack ? `<span class="stack-count">${stack.count}</span>` : ""}${area === "bar" ? `<span class="slot-number">${index + 1}</span>` : ""}</button>`;
 }
 function creativeBar() {
   return state.bagHotbar
@@ -185,20 +198,18 @@ function itemHotbar() {
 }
 function storageInspector() {
   const from = state.carriedFrom || state.inspected;
-  const stack = from
-      ? (from.area === "bag" ? state.bag : state.bagHotbar)[from.index]
-      : null,
+  const stack = from ? slotList(from.area)[from.index] : null,
     item = stackItem(stack);
-  return `<aside class="item-inspector" id="item-inspector"><button class="item-inspector-close" data-action="item-details" data-value="close" aria-label="Close item details">${icon("close")}</button><p class="item-eyebrow">${state.carriedFrom ? "MOVING STACK" : "ITEM DETAILS"}</p>${item ? `${voxelIcon(item, stack.shape)}<h2>${item.name}</h2><p class="item-source">terra:${item.id}${item.materialId !== item.id ? ` · places ${item.material}` : ""}</p><dl><div><dt>Count</dt><dd>${stack.count}</dd></div><div><dt>Shape</dt><dd>${stack.shape || "Cube"}</dd></div><div><dt>Stack limit</dt><dd>${item.maxStack}</dd></div></dl><p class="section-label">Shape · ${esc(item.name)}</p><div class="row wrap">${["Cube", "Post", "Slab", "Stair", "Fence"].map((s) => button(s, "inventory-shape", { value: s, small: true, ghost: (state.placeShape || "Cube") !== s })).join("")}</div><div class="spacer"></div><div class="inspector-actions">${button("Move to " + (from.area === "bag" ? "hotbar" : "backpack"), "storage-quick", { value: from.area + ":" + from.index })}${button("Split stack", "storage-split", { value: from.area + ":" + from.index, disabled: stack.count < 2 })}${button("Drop 1", "storage-drop-one", { value: from.area + ":" + from.index })}${button("Drop stack", "storage-drop-all", { value: from.area + ":" + from.index })}${state.carriedFrom ? button("Cancel move", "storage-cancel", { ghost: true }) : ""}</div>` : `<div class="empty-item">${icon("storage", 40)}</div><h2>Choose an item</h2><p>Select a carried stack to inspect or move it.</p>`}<div class="inspector-note">${state.carriedFrom ? "Choose another slot to move, merge or swap this stack." : "Shift-click moves a stack between your backpack and hotbar."}</div></aside>`;
+  return `<aside class="item-inspector" id="item-inspector"><button class="item-inspector-close" data-action="item-details" data-value="close" aria-label="Close item details">${icon("close")}</button><p class="item-eyebrow">${state.carriedFrom ? "MOVING STACK" : "ITEM DETAILS"}</p>${item ? `${voxelIcon(item, stack.shape)}<h2>${item.name}</h2><p class="item-source">terra:${item.id}${item.materialId !== item.id ? ` · places ${item.material}` : ""}</p><dl><div><dt>Count</dt><dd>${stack.count}</dd></div><div><dt>Shape</dt><dd>${stack.shape || "Cube"}</dd></div><div><dt>Stack limit</dt><dd>${item.maxStack}</dd></div></dl><p class="section-label">Shape · ${esc(item.name)}</p><div class="row wrap">${["Cube", "Post", "Slab", "Stair", "Fence"].map((s) => button(s, "inventory-shape", { value: s, small: true, ghost: (state.placeShape || "Cube") !== s })).join("")}</div><div class="spacer"></div><div class="inspector-actions">${button("Move to " + { bar: "hotbar", bag: "backpack", chest: "Chest" }[quickTarget(from.area)], "storage-quick", { value: from.area + ":" + from.index })}${button("Split stack", "storage-split", { value: from.area + ":" + from.index, disabled: stack.count < 2 })}${button("Drop 1", "storage-drop-one", { value: from.area + ":" + from.index })}${button("Drop stack", "storage-drop-all", { value: from.area + ":" + from.index })}${state.carriedFrom ? button("Cancel move", "storage-cancel", { ghost: true }) : ""}</div>` : `<div class="empty-item">${icon("storage", 40)}</div><h2>Choose an item</h2><p>Select a carried stack to inspect or move it.</p>`}<div class="inspector-note">${state.carriedFrom ? "Choose another slot to move, merge or swap this stack." : "Shift-click moves a stack between your backpack and hotbar."}</div></aside>`;
 }
 function storagePage() {
   ensureInventory();
   const main = `<div class="item-main"><div class="item-browser inventory-browser"><div class="inventory-heading"><div><p class="item-eyebrow">YOUR ITEMS</p><h1>Backpack</h1></div><div class="row"><span class="item-capacity ${state.bag.every(Boolean) ? "full" : ""}">${state.bag.every(Boolean) ? "Full · " : ""}${state.bag.filter(Boolean).length} / ${state.bag.length} slots</span>${button("Sort", "storage-sort", { small: true, ghost: true })}</div></div><div class="item-grid-scroll"><div class="storage-grid backpack-grid">${state.bag.map((_, i) => renderCarriedSlot("bag", i)).join("")}</div><div class="inventory-inline-hint" role="status">${state.carriedFrom ? "Stack selected. Choose a destination, or select the source again to cancel." : "Click to move · Shift-click for quick transfer · Drag and drop supported · Drag out to drop"}</div></div></div>${storageInspector()}</div>`;
   const win = itemShell(
     main,
-    `${itemHotbar()}<div class="item-footer-actions"><small>${creativeAccess() ? "Drag from the Catalogue into any slot, or set a count and transfer." : "Item counts stay intact when switching screens."}</small>${button("Back to game", "inventory-close", { ghost: true })}</div>`,
+    `${itemHotbar()}<div class="item-footer-actions"><small>${state.useTarget === "chest" ? "Shift-click moves a stack between the Chest and your Inventory." : state.useTarget || state.sidePane === "crafting" || !creativeAccess() ? "Crafted Items go to your Inventory; what does not fit drops at your feet." : creativeAccess() ? "Drag from the Catalogue into any slot, or set a count and transfer." : "Item counts stay intact when switching screens."}</small>${button("Back to game", "inventory-close", { ghost: true })}</div>`,
   );
-  return `<div class="inventory-overlay ${creativeAccess() ? "with-catalogue" : ""}">${creativeAccess() ? catalogueSide() : ""}${win}</div>`;
+  return `<div class="inventory-overlay with-catalogue">${sidePane()}${win}</div>`;
 }
 const catalogueGroups = ["All", "Solids", "Fluids"];
 function sideItems() {
@@ -238,7 +249,7 @@ function giveToBag(id, count) {
 }
 function giveToSlot(area, index, id, count) {
   const item = catalogueItems.find((x) => x.id === id),
-    list = area === "bag" ? state.bag : state.bagHotbar,
+    list = slotList(area),
     stack = { id: item.itemId, count, shape: "Cube" },
     here = list[index];
   if (here && stackKey(here) === stackKey(stack)) {
@@ -371,7 +382,7 @@ function stashStack(list, stack) {
 }
 function storageMove(area, index) {
   ensureInventory();
-  const target = area === "bag" ? state.bag : state.bagHotbar;
+  const target = slotList(area);
   state.inspected = { area, index };
   if (area !== "bag") state.quickSlot = index;
   if (!state.carriedFrom) {
@@ -379,7 +390,7 @@ function storageMove(area, index) {
     refreshInventory();
     return;
   }
-  const source = state.carriedFrom.area === "bag" ? state.bag : state.bagHotbar,
+  const source = slotList(state.carriedFrom.area),
     from = state.carriedFrom.index;
   if (source === target && from === index) {
     state.carriedFrom = null;
@@ -408,16 +419,18 @@ function storageMove(area, index) {
   savePrototype();
 }
 function quickTransfer(area, index) {
-  const source = area === "bag" ? state.bag : state.bagHotbar,
+  const source = slotList(area),
     stack = source[index];
   if (!stack) return;
-  const moved = stashStack(area === "bag" ? state.bagHotbar : state.bag, stack);
+  const to = quickTarget(area),
+    moved = stashStack(slotList(to), stack);
   if (!moved) {
     toast("Not enough room for this stack.");
     return;
   }
-  if (area === "bag") state.bagHotbar = moved;
-  else state.bag = moved;
+  if (to === "bag") state.bag = moved;
+  else if (to === "chest") state.chest = moved;
+  else state.bagHotbar = moved;
   source[index] = null;
   state.carriedFrom = null;
   refreshInventory();
@@ -434,6 +447,7 @@ function inventoryAction(name, value) {
     return true;
   }
   if (name === "inventory-open") {
+    state.useTarget = null;
     ensureInventory();
     state.carriedFrom = null;
     navigate("storage");
@@ -448,6 +462,7 @@ function inventoryAction(name, value) {
     return true;
   }
   if (name === "inventory-close") {
+    state.useTarget = null;
     state.carriedFrom = null;
     navigate("play");
     return true;
@@ -474,7 +489,7 @@ function inventoryAction(name, value) {
   }
   if (name === "storage-split") {
     const [area, index] = value.split(":"),
-      source = area === "bag" ? state.bag : state.bagHotbar,
+      source = slotList(area),
       stack = source[Number(index)],
       empty = state.bag.findIndex((x) => !x);
     if (!stack || stack.count < 2) return true;
@@ -707,7 +722,7 @@ document.addEventListener("drop", (e) => {
 });
 /* Throws Items onto the ground, in either mode: the Server takes them out of the Stack and a toast says what went. */
 function dropFrom(area, index, all) {
-  const source = area === "bag" ? state.bag : state.bagHotbar,
+  const source = slotList(area),
     stack = source[index];
   if (!stack) return;
   const n = all ? stack.count : 1,

@@ -283,6 +283,7 @@ function render() {
   closeSelect();
   ensureInventory();
   ensureSurvival();
+  ensureCrafting();
   syncRoute();
   applyComfort();
   savePrototype();
@@ -494,7 +495,7 @@ function play() {
     name = held ? stackItem(held)?.name : "",
     hud = survivalHud();
   const aid = state.aimHelper;
-  return `<div class="reticle" aria-hidden="true">+</div>${handMarkup(held)}${aid === "breaking" ? '<div class="layout-status" style="position:absolute;left:50%;top:calc(50% - 46px);transform:translateX(-50%);width:100px;height:12px;padding:1px"><div style="width:62%;height:100%;background:var(--leaf)"></div></div>' : aid === "place" ? '<small style="position:absolute;left:50%;top:calc(50% + 24px);transform:translateX(-50%)">Right Click to place</small>' : aid === "measure" ? '<aside class="layout-status" style="left:34px;right:auto;top:auto;bottom:60px"><small>Distance 3.00 m<br>X 3.00 m · 6.00 voxels<br>Y 0.00 m · 0.00 voxels<br>Z 0.00 m · 0.00 voxels</small></aside>' : ""}${hud.overlay}${state.quickLayout?.active ? layoutStatus() : ""}<div class="hud-bottom"><div class="hud-item-name" aria-live="polite">${esc(name || "")}</div>${hud.above}<div class="row" style="align-items:flex-end;gap:12px"><div class="hotbar storage-grid" role="toolbar" aria-label="Hotbar">${creativeBar()}</div>${state.heldTool ? `<div class="hotbar storage-grid" style="grid-template-columns:44px" aria-label="In hand"><div class="item-slot active" style="display:grid;place-items:center;font-size:11px">${esc(state.heldTool)}</div></div>` : ""}</div></div>${simPanel()}`;
+  return `<div class="reticle" aria-hidden="true">+</div>${useHint()}${handMarkup(held)}${aid === "breaking" ? '<div class="layout-status" style="position:absolute;left:50%;top:calc(50% - 46px);transform:translateX(-50%);width:100px;height:12px;padding:1px"><div style="width:62%;height:100%;background:var(--leaf)"></div></div>' : aid === "place" ? '<small style="position:absolute;left:50%;top:calc(50% + 24px);transform:translateX(-50%)">Right Click to place</small>' : aid === "measure" ? '<aside class="layout-status" style="left:34px;right:auto;top:auto;bottom:60px"><small>Distance 3.00 m<br>X 3.00 m · 6.00 voxels<br>Y 0.00 m · 0.00 voxels<br>Z 0.00 m · 0.00 voxels</small></aside>' : ""}${hud.overlay}${state.quickLayout?.active ? layoutStatus() : ""}<div class="hud-bottom"><div class="hud-item-name" aria-live="polite">${esc(name || "")}</div>${hud.above}<div class="row" style="align-items:flex-end;gap:12px"><div class="hotbar storage-grid" role="toolbar" aria-label="Hotbar">${creativeBar()}</div>${state.heldTool ? `<div class="hotbar storage-grid" style="grid-template-columns:44px" aria-label="In hand"><div class="item-slot active" style="display:grid;place-items:center;font-size:11px">${esc(state.heldTool)}</div></div>` : ""}</div></div>${simPanel()}`;
 }
 
 function modsLibrary() {
@@ -538,6 +539,7 @@ function closeDialog() {
 function action(name, value) {
   if (survivalAction(name, value)) return;
   if (layoutAction(name, value)) return;
+  if (craftingAction(name, value)) return;
   if (inventoryAction(name, value)) return;
   if (name.startsWith("settings-") && settingsAction(name, value)) return;
   if (name === "scores") {
@@ -844,7 +846,17 @@ document.addEventListener("input", (e) => {
       render();
     } else if (v === "edit") startEdit(worlds[0]?.id || 1);
     else if (v === "settings") action("settings");
-    else navigate(v);
+    else if (v === "crafting") {
+      state.useTarget = null;
+      state.sidePane = "crafting";
+      navigate("storage");
+    } else if (v === "station") openUsable("workbench");
+    else if (v === "container") openUsable("chest");
+    else if (v === "storage") {
+      state.useTarget = null;
+      state.sidePane = "catalogue";
+      navigate("storage");
+    } else navigate(v);
     return;
   }
   if (k === "worldSearch") {

@@ -35,6 +35,8 @@ function icon(name, size = 20) {
     chevron: '<path d="m9 5 7 7-7 7"/>',
     down: '<path d="m6 9 6 6 6-6"/>',
     check: '<path d="m5 12 4 4L19 6"/>',
+    craft:
+      '<path d="m14 4 6 6-3 3-6-6 3-3ZM11 7 3 15v6h6l8-8"/><path d="m7 17 2 2"/>',
   };
   return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${paths[name] || paths.behavior}</svg>`;
 }

@@ -20,6 +20,13 @@ function currentPath() {
   if (state.screen === "edit") return `/worlds/${state.editId}/edit`;
   if (state.screen === "settings")
     return `/settings/${settingsSlugs[state.settingsTab || "Behavior"]}`;
+  if (state.screen === "storage") {
+    const kind = state.useTarget && usables[state.useTarget]?.kind;
+    if (kind === "station") return "/station";
+    if (kind === "container") return "/container";
+    if (state.sidePane === "crafting" || !creativeAccess())
+      return "/inventory/crafting";
+  }
   return (
     {
       worlds: "/worlds",
@@ -56,7 +63,9 @@ function syncRoute() {
                 : state.screen === "play"
                   ? "Play"
                   : state.screen === "storage"
-                    ? "Inventory"
+                    ? state.useTarget
+                      ? usables[state.useTarget].name
+                      : "Inventory"
                     : state.screen === "layout"
                       ? "Quick layout"
                       : state.screen === "death"
@@ -93,6 +102,14 @@ function restoreRoute() {
     state.screen = "settings";
     return;
   }
+  const use = { "/station": "workbench", "/container": "chest" }[path];
+  state.useTarget = use || null;
+  if (use) {
+    state.screen = "storage";
+    return;
+  }
+  if (path === "/inventory/crafting") state.sidePane = "crafting";
+  else if (path === "/inventory") state.sidePane = "catalogue";
   const edit = path.match(/^\/worlds\/(\d+)\/edit$/);
   if (edit) {
     const world = worlds.find((w) => w.id === Number(edit[1]));
@@ -120,6 +137,7 @@ function restoreRoute() {
       "/play": "play",
       "/inventory": "storage",
       "/catalogue": "storage",
+      "/inventory/crafting": "storage",
       "/layout": "layout",
       "/death": "death",
       "/worlds/new/trust": "trust",

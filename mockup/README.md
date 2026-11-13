@@ -167,3 +167,32 @@ reuse the existing components and tokens.
 - Simulate (prototype chrome) gains Starve, Die with items despawned, and an
   "Engine states" group: Hold remove (break progress), Place hint, Measure tool,
   Hold Fire (a hand outside the hotbar) and the four save-status states.
+
+## Crafting, Stations, Containers and Doors (step 16, proposed, awaiting approval)
+
+Illustrates DESIGN.md step 16. Code is in `crafting.js` and `crafting.css`. The
+Wood, Glass, Brick, Workbench, Chest and Door Items and every Recipe are
+illustrative Terra content, not declarations.
+
+- `/inventory/crafting`: the Inventory's side pane gains a Crafting tab beside
+  the Catalogue in Creative, and is Crafting alone in Survival. It lists the
+  Recipes that need no Station. A Recipe you cannot afford is dimmed and its
+  missing inputs are tinted. Click selects; the footer shows what you have
+  against what it needs. Craft 1, or Craft N for as many as you can afford up to
+  one output Stack. Double-click crafts one; Shift-click crafts N. Inputs come
+  from the Inventory only; output goes to it, and what does not fit drops at
+  your feet with a notice.
+- `/station`: Use on a Workbench opens the same pane titled by the Station, with
+  its Recipes first and the hand Recipes below.
+- `/container`: Use on a Chest opens its 27 slots beside the Inventory.
+  Click-to-move, drag and drop and Shift-click quick transfer cross between the
+  Chest and the Inventory; Take all and Sort act on the Chest.
+- `/play`: aimed at a Usable Voxel, a prompt under the reticle names what Use
+  (G) would do: Open or Close a Door, Open Chest, Use Workbench. Out of reach,
+  it says so before the press. Aimed at one, G uses it instead of eating.
+- Refusals use the notice card: "Empty the Chest first." when breaking a Chest
+  that holds Stacks, "Something is in the way." when closing a Door on yourself,
+  "Out of reach of the Chest." when walking away closes it.
+- The **Use on Voxels** group in the Simulate panel aims at each kind, steps out
+  of reach, stands in a doorway and breaks the Chest. The dashed "walk out of
+  reach" button in a Station or Container pane is prototype chrome too.

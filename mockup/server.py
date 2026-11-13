@@ -17,8 +17,8 @@ class PrototypeHandler(SimpleHTTPRequestHandler):
         if "If-Modified-Since" in self.headers:
             del self.headers["If-Modified-Since"]
         route = self.path.split("?", 1)[0].rstrip("/")
-        if route in ("", "/worlds", "/mods", "/menu", "/play", "/settings", "/inventory", "/catalogue", "/layout", "/death", "/opening") or route.startswith(
-            ("/worlds/", "/settings/")
+        if route in ("", "/worlds", "/mods", "/menu", "/play", "/settings", "/inventory", "/catalogue", "/layout", "/death", "/opening", "/station", "/container") or route.startswith(
+            ("/worlds/", "/settings/", "/inventory/")
         ):
             self.path = "/index.html"
         super().do_GET()

@@ -1,0 +1,202 @@
+.side-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 10px 12px 0;
+  border-bottom: 1px solid #34343c;
+}
+.side-tabs button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: #a9adb6;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.side-tabs button:hover {
+  color: #e9eee0;
+}
+.side-tabs button.active {
+  color: #e9eee0;
+  border-bottom-color: var(--leaf);
+}
+
+.recipe-list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 16px;
+  scrollbar-width: thin;
+  scrollbar-color: #77777e #1b1b20;
+}
+.recipe-group {
+  margin: 6px 0 2px;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #8d919a;
+}
+.recipe-group:first-child {
+  margin-top: 0;
+}
+.recipe-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 9px;
+  border: 1px solid #2a2b31;
+  border-radius: 6px;
+  background: #141518;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.recipe-row:hover {
+  border-color: #55575f;
+}
+.recipe-row.selected {
+  border-color: var(--leaf);
+  background: #1a1f1a;
+}
+.recipe-row > .voxel-icon {
+  flex: 0 0 34px;
+  width: 34px;
+  height: 34px;
+}
+.recipe-text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.recipe-text b {
+  font-size: 13px;
+  font-weight: 550;
+}
+.recipe-text b small {
+  color: #a9adb6;
+  font-weight: 400;
+}
+.recipe-inputs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+}
+.recipe-input {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  color: #c4c7cd;
+}
+.recipe-input .voxel-icon {
+  width: 14px;
+  height: 14px;
+}
+.recipe-input.short {
+  color: #d99a83;
+}
+.recipe-row.unaffordable > .voxel-icon,
+.recipe-row.unaffordable .recipe-text b {
+  opacity: 0.45;
+}
+
+.craft-needs {
+  display: grid;
+  gap: 3px;
+  margin: 0;
+  font-size: 12px;
+}
+.craft-needs div {
+  display: flex;
+  justify-content: space-between;
+}
+.craft-needs dt {
+  color: #a9adb6;
+}
+.craft-needs dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+.craft-needs .short dd {
+  color: #d99a83;
+}
+
+.catalogue-side.container-side {
+  width: auto;
+  flex: 0 0 auto;
+  align-self: flex-start;
+}
+.container-side .sim-inline {
+  margin-top: 16px;
+}
+.container-grid {
+  display: grid;
+  grid-template-columns: repeat(9, 52px);
+  gap: 4px;
+  padding: 6px 18px 0;
+}
+.container-grid .item-slot {
+  width: 52px;
+  height: 52px;
+  min-height: 0;
+  padding: 4px;
+}
+.container-grid .item-slot .voxel-icon {
+  width: 32px;
+  height: 32px;
+}
+.container-actions {
+  display: flex;
+  gap: 6px;
+  padding: 12px 18px 0;
+}
+
+/* Prototype chrome, like the Simulate panel: not part of the design. */
+.sim-inline {
+  margin: auto 16px 12px;
+  padding: 6px 8px;
+  border: 1px dashed #6b6d75;
+  border-radius: 4px;
+  background: none;
+  color: #a9adb6;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.crafting-side .sim-inline {
+  margin-top: 8px;
+}
+
+.use-hint {
+  position: absolute;
+  left: 50%;
+  top: calc(50% + 26px);
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px 3px 4px;
+  border-radius: 4px;
+  background: #0b0b0dcc;
+  color: #f1f0ed;
+  font-size: 13px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.use-hint kbd {
+  min-width: 20px;
+  text-align: center;
+}
+.use-hint.refused {
+  padding-left: 8px;
+  color: #a9adb6;
+}
