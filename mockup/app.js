@@ -288,8 +288,7 @@ function render() {
   applyComfort();
   savePrototype();
   $("#game").dataset.view = state.screen;
-  document.querySelector("#item-access-preview").value =
-    state.itemAccess || "creative";
+  setSelectValue($("#item-access-preview"), state.itemAccess || "creative");
   document.querySelector(".game-footer>span:nth-child(2)").innerHTML =
     state.screen === "play"
       ? "<kbd>Tab</kbd> Menu <kbd>I</kbd> Inventory <kbd>C</kbd> Catalogue <kbd>L</kbd> Layout"
@@ -302,8 +301,7 @@ function render() {
     state.screen === "wizard"
       ? ["create", "mods", "biomes", "review"][state.step]
       : state.screen;
-  if ([...$("#screen-picker").options].some((x) => x.value === current))
-    $("#screen-picker").value = current;
+  setSelectValue($("#screen-picker"), current);
   $("#location").textContent = ["play", "pause", "death"].includes(state.screen)
     ? `${activeWorld()?.game.toUpperCase() || "TERRA"} / ${activeWorld()?.name.toUpperCase() || "GREENWOOD"}`
     : "TERRA / THE GREENWOOD";
@@ -1135,6 +1133,42 @@ function fit() {
 }
 window.addEventListener("resize", fit);
 restorePrototype();
+const prototypeScreens = [
+  { value: "home", label: "Title screen" },
+  { value: "worlds", label: "Worlds" },
+  { value: "create", label: "Create World" },
+  { value: "edit", label: "Edit World" },
+  { value: "mods", label: "Mods" },
+  { value: "biomes", label: "Biomes" },
+  { value: "review", label: "Review" },
+  { value: "storage", label: "Inventory · Catalogue" },
+  { value: "crafting", label: "Inventory · Crafting" },
+  { value: "station", label: "Workbench (Station)" },
+  { value: "container", label: "Chest (Container)" },
+  { value: "layout", label: "Quick layout overlay" },
+  { value: "play", label: "Gameplay HUD" },
+  { value: "death", label: "Death screen" },
+  { value: "pause", label: "In-game menu" },
+  { value: "settings", label: "Settings" },
+  { value: "blocks", label: "Block gallery" },
+];
+$("#bar-mode").outerHTML = customSelect(
+  "Your mode",
+  "itemAccess",
+  "creative",
+  [
+    { value: "creative", label: "Creative" },
+    { value: "survival", label: "Survival" },
+  ],
+  "item-access-preview",
+);
+$("#bar-screen").outerHTML = customSelect(
+  "Jump to mockup screen",
+  "prototype-screen",
+  "home",
+  prototypeScreens,
+  "screen-picker",
+);
 restoreRoute();
 render();
 fit();

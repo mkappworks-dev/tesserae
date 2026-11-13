@@ -141,7 +141,9 @@
   flex-shrink: 0;
   opacity: 0.8;
 }
-.game .select-menu {
+.select-menu {
+  --ink: #edf0eb;
+  --text-scale: 1;
   position: absolute;
   z-index: 20;
   overflow: auto;
@@ -152,7 +154,7 @@
   box-shadow: 0 12px 35px #0009;
   scrollbar-color: #777780 #1c1c20;
 }
-.game .select-option {
+.select-option {
   width: 100%;
   min-height: 48px;
   display: flex;
@@ -167,22 +169,22 @@
   font-size: calc(16px * var(--text-scale));
   text-align: left;
 }
-.game .select-option:hover,
-.game .select-option.option-focused {
+.select-option:hover,
+.select-option.option-focused {
   background: #303035;
   border-color: #777780;
 }
-.game .select-option[aria-selected="true"] {
+.select-option[aria-selected="true"] {
   color: #dce6d1;
 }
-.game .option-check {
+.option-check {
   width: 18px;
   flex-shrink: 0;
 }
-.game .select-option:focus {
+.select-option:focus {
   outline: none;
 }
-.game .select-option:focus-visible {
+.select-option:focus-visible {
   outline: 2px solid #e2d5ab;
   outline-offset: -2px;
 }
@@ -265,4 +267,42 @@
   font-weight: 600;
   letter-spacing: 0;
   line-height: 1.1;
+}
+
+.select-menu.page-menu {
+  position: fixed;
+  z-index: 1000;
+}
+.select-menu.page-menu .select-option {
+  min-height: 34px;
+  padding: 6px 10px;
+  font-size: 13px;
+}
+.prototype-bar .select-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 128px;
+  padding: 6px 8px;
+  background: #232528;
+  border: 1px solid #484c51;
+  border-radius: 4px;
+  color: #d0d1d4;
+  font: inherit;
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  text-align: left;
+  cursor: pointer;
+}
+.prototype-bar .select-trigger:hover,
+.prototype-bar .select-trigger[aria-expanded="true"] {
+  border-color: #8b928a;
+  background: #2b2d31;
+}
+.prototype-bar .select-trigger[aria-expanded="true"] > svg {
+  transform: rotate(180deg);
+}
+.prototype-bar #screen-picker {
+  min-width: 170px;
 }

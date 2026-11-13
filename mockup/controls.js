@@ -41,17 +41,21 @@ function icon(name, size = 20) {
   return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${paths[name] || paths.behavior}</svg>`;
 }
 
-function customSelect(label, bind, value, options) {
-  const items = options.map((x) => ({
-    value: String(x),
-    label:
-      bind === "settings.textScale"
-        ? Math.round(Number(x) * 100) + "%"
-        : String(x),
-  }));
+function customSelect(label, bind, value, options, id = "") {
+  const items = options.map((x) =>
+    typeof x === "object"
+      ? { value: String(x.value), label: x.label }
+      : {
+          value: String(x),
+          label:
+            bind === "settings.textScale"
+              ? Math.round(Number(x) * 100) + "%"
+              : String(x),
+        },
+  );
   const selected =
     items.find((x) => x.value === String(value))?.label || String(value);
-  return `<button type="button" class="select-trigger input" data-dropdown="${esc(bind)}" data-bind="${esc(bind)}" data-options="${esc(JSON.stringify(items))}" value="${esc(value)}" aria-label="${esc(label)}" aria-haspopup="listbox" aria-expanded="false"><span class="select-value">${esc(selected)}</span>${icon("down", 16)}</button>`;
+  return `<button type="button" ${id ? `id="${esc(id)}"` : ""} class="select-trigger input" data-dropdown="${esc(bind)}" data-bind="${esc(bind)}" data-options="${esc(JSON.stringify(items))}" value="${esc(value)}" aria-label="${esc(label)}" aria-haspopup="listbox" aria-expanded="false"><span class="select-value">${esc(selected)}</span>${icon("down", 16)}</button>`;
 }
 
 let openSelect = null;
@@ -88,11 +92,16 @@ function openDropdown(trigger, at) {
         `<button type="button" role="option" tabindex="-1" class="select-option" data-option="${i}" aria-selected="${item.value === trigger.value}"><span>${esc(item.label)}</span><span class="option-check">${item.value === trigger.value ? icon("check", 18) : ""}</span></button>`,
     )
     .join("");
-  $("#game").append(popup);
+  /* The prototype bar sits outside #game, so its menus float over the page. */
+  const inGame = !!trigger.closest("#game");
+  if (!inGame) popup.classList.add("page-menu");
+  (inGame ? $("#game") : document.body).append(popup);
   trigger.setAttribute("aria-expanded", "true");
   trigger.setAttribute("aria-controls", popup.id);
   const rect = trigger.getBoundingClientRect(),
-    game = $("#game").getBoundingClientRect();
+    game = inGame
+      ? $("#game").getBoundingClientRect()
+      : { left: 0, top: 0, width: innerWidth, bottom: innerHeight };
   openSelect.anchor = { x: rect.x, y: rect.y };
   const width = Math.min(Math.max(rect.width, 190), game.width - 24);
   popup.style.width = width + "px";
@@ -130,6 +139,17 @@ function focusSelectOption(index) {
   )
     popup.scrollTop =
       option.offsetTop + option.offsetHeight - popup.clientHeight;
+}
+
+function setSelectValue(trigger, value) {
+  if (!trigger) return;
+  const item = JSON.parse(trigger.dataset.options).find(
+    (x) => x.value === String(value),
+  );
+  if (!item) return false;
+  trigger.value = item.value;
+  trigger.querySelector(".select-value").textContent = item.label;
+  return true;
 }
 
 function chooseSelect(index) {
