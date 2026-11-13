@@ -29,7 +29,7 @@ pub(in crate::client) fn action_name(action: Action) -> &'static str {
         Turn => "Turn Shape",
         Flip => "Flip Shape",
         CycleTool => "Take tool",
-        Use => "Use tool",
+        Use => "Use",
         ClearTool => "Clear tool",
         Slot1 => "Quick slot 1",
         Slot2 => "Quick slot 2",

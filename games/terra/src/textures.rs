@@ -79,6 +79,20 @@ fn pixel(name: &str, face: usize, x: usize, y: usize, base: [u8; 3]) -> [u8; 3] 
                 )
             }
         }
+        "door" | "door_open" => {
+            let frame = x <= 1 || x >= 14 || y <= 1 || y >= 14;
+            let seam = x % 4 == 1;
+            tint(
+                base,
+                if frame {
+                    -34
+                } else if seam {
+                    -22
+                } else {
+                    (n - 128) / 14
+                },
+            )
+        }
         "lamp" => {
             if x < 2 || y < 2 || x > 13 || y > 13 {
                 tint([116, 86, 44], (n - 128) / 15)
@@ -167,7 +181,10 @@ pub fn texture(name: &str, [r, g, b, opacity]: [u8; 4]) -> Vec<u8> {
         for face in 0..3 {
             for x in 0..EDGE {
                 let [r, g, b] = pixel(name, face, x, y, [r, g, b]);
-                let alpha = if name != "glass" {
+                let alpha = if name == "door_open" {
+                    // The posts alone, so an open Door reads as a gap.
+                    if x <= 1 || x >= 14 { opacity } else { 0 }
+                } else if name != "glass" {
                     opacity
                 } else if x == 0 || y == 0 || x == 15 || y == 15 {
                     100

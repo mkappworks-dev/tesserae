@@ -339,6 +339,23 @@ interface content {
         kind: tool-kind,
     }
 
+    /// What Use does to a Voxel of a Material. Closed: a new kind needs new
+    /// engine mechanism, so it arrives with the contract line that adds it.
+    variant voxel-use-kind {
+        /// Use swaps it with this solid Material, by full name: the open state,
+        /// which bodies pass through. Removing either drops the closed one's
+        /// Item.
+        door(string),
+    }
+
+    /// A Material that Use acts on. The engine runs the kind; a Mod is never
+    /// called when it is used.
+    record voxel-use {
+        /// A solid Material, by full name: a Door's closed state.
+        material: string,
+        kind: voxel-use-kind,
+    }
+
     /// A thing a Player can carry. A removed Voxel of its `material` drops one;
     /// nothing else makes a drop yet.
     record item-def {
@@ -645,5 +662,9 @@ interface content {
         soundscapes: list<soundscape-def>,
         /// From the Game only, like `tools`; each Cause at most once.
         cause-sounds: list<cause-sound>,
+        /// At most 64 rows per Mod, from any Mod. Names resolve after every Mod
+        /// has declared; a Material is in at most one row, as its `material` or
+        /// as a Door's open one.
+        voxel-uses: list<voxel-use>,
     }
 }

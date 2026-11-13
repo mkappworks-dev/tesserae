@@ -240,6 +240,7 @@ mod tests {
                 at: [0; 3],
                 voxel: tesserae_core::Voxel::AIR,
                 corner: Vec3::ZERO,
+                usable: None,
             }))));
         app.update();
         let events: Vec<_> = app

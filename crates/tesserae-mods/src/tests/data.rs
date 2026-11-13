@@ -448,6 +448,10 @@ fn component() -> Declaration {
                 sound: "full:crack".into(),
             })
             .into(),
+        voxel_uses: vec![content::VoxelUse {
+            material: "full:wood".into(),
+            kind: content::VoxelUseKind::Door("full:ash".into()),
+        }],
     }
 }
 

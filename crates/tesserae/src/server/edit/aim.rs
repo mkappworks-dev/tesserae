@@ -17,7 +17,7 @@ pub(super) fn pick(
         });
     }
 }
-pub(super) fn pick_item(
+pub(in crate::server) fn pick_item(
     store: &ChunkStore,
     tables: &Tables,
     world: &WorldSettings,
@@ -33,7 +33,14 @@ pub(super) fn pick_item(
     let (at, _) = resolve(store, tables, world, &intent, reach).ok()?;
     let here = store.occupants(at, &tables.fluids)?;
     if !here.solid.is_air() {
-        Some(AimItem::Solid(here.solid))
+        // An open Door is taken as the closed one, whose Item places it.
+        let solid = here.solid;
+        let material = tables.uses.closed(solid.material());
+        Some(AimItem::Solid(Voxel::new(
+            material,
+            solid.shape(),
+            solid.orientation(),
+        )))
     } else {
         here.fluid.map(|fluid| AimItem::Fluid(fluid.material))
     }
@@ -132,17 +139,19 @@ pub(super) fn answer_aim(
 ) {
     if let Some((report, reach)) = state.latest {
         let mut target = aim_target(&store, &tables, &world, &meshes, report, reach);
-        target.use_aim = report.tool.map(|tool| {
-            crate::server::tool::aim_use(
+        let ray = (report.origin, report.direction);
+        target.use_aim = match report.tool {
+            Some(tool) => Some(crate::server::tool::aim_use(
                 &store,
                 &tables,
                 &world,
                 &tools,
                 tool,
-                (report.origin, report.direction),
+                ray,
                 player.eye(),
-            )
-        });
+            )),
+            None => crate::server::usable::aim(&store, &tables, &world, ray, player.eye()),
+        };
         targets.write(target);
     }
 }

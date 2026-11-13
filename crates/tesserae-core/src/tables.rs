@@ -7,6 +7,7 @@ use crate::material::MaterialTable;
 use crate::occupants::{Fluid, Level, Occupants};
 use crate::reaction::{ReactionDef, ReactionError, ReactionTable};
 use crate::shape::{Orientation, ShapeTable};
+use crate::usable::{UseError, VoxelUse, VoxelUses};
 use crate::voxel::{MaterialId, Voxel};
 
 /// A Voxel's kind, as the pair of tables that describe it: the [`ShapeTable`]
@@ -22,6 +23,7 @@ pub struct Tables {
     pub fluids: FluidTable,
     pub reactions: ReactionTable,
     pub combustion: CombustionTable,
+    pub uses: VoxelUses,
 }
 
 /// Why [`Tables::vet_placed`] refused a Voxel.
@@ -187,6 +189,27 @@ impl Tables {
             }
         }
         self.combustion.insert(fuel, def)
+    }
+
+    /// Registers what Use does to a solid Material. Every Material the row
+    /// names is solid and in no other row.
+    pub fn register_use(&mut self, material: MaterialId, kind: VoxelUse) -> Result<(), UseError> {
+        let VoxelUse::Door { open } = kind;
+        for m in [material, open] {
+            if !self.materials.contains(m) {
+                return Err(UseError::NotAMaterial);
+            }
+            if !self.is_solid_material(m) {
+                return Err(UseError::NotSolid);
+            }
+        }
+        self.uses.push(material, kind)
+    }
+
+    /// Whether a body collides with `voxel`: a solid, unless it is an open
+    /// Door.
+    pub fn blocks(&self, voxel: Voxel) -> bool {
+        self.materials.solid(voxel) && !self.uses.passable(voxel.material())
     }
 
     fn is_solid_material(&self, material: MaterialId) -> bool {

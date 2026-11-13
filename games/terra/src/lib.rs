@@ -14,7 +14,7 @@ use tesserae::mods::content::{
     Appearance, BiomeDef, BurnAfter, BurnEnd, ClimateParams, CombustionDef, FluidDef, FluidState,
     GroundParams, HeatDef, ItemDef, MaterialDef, Occlusion, OreDef, Reactant, ReactionDef,
     ReactionSide, RenderClass, ShapeDef, SkyFog, SurfaceFeature, ToolDef, ToolKind, ViewParams,
-    WaterParams,
+    VoxelUse, VoxelUseKind, WaterParams,
 };
 use tesserae::mods::types::{
     Arm, BoxM, CollisionBox, ConnectDef, LogLevel, NodeBox, Srgba, Vec3, Voxel,
@@ -266,6 +266,14 @@ impl Guest for Terra {
                 solid("snow"),
                 solid("iron"),
                 solid("melon"),
+                solid("door"),
+                // Drawn as its frame alone and passed through, as Use opened it.
+                MaterialDef {
+                    dimming: 0,
+                    occlusion: Occlusion::Never,
+                    render: RenderClass::Cutout,
+                    ..solid("door_open")
+                },
             ],
             shapes: vec![fence()],
             appearance: vec![
@@ -285,6 +293,8 @@ impl Guest for Terra {
                 appearance("snow", [236, 240, 246, 255]),
                 appearance("iron", [150, 120, 104, 255]),
                 appearance("melon", [84, 150, 56, 255]),
+                appearance("door", [128, 88, 50, 255]),
+                appearance("door_open", [128, 88, 50, 255]),
             ],
             world: Some(world),
             view: Some(ViewParams {
@@ -436,6 +446,19 @@ impl Guest for Terra {
                     max_stack: None,
                     food: Some(6.0),
                 },
+                ItemDef {
+                    name: "door".into(),
+                    size_m: 0.25,
+                    color: Srgba {
+                        r: 128,
+                        g: 88,
+                        b: 50,
+                        a: 255,
+                    },
+                    material: Some("terra:door".into()),
+                    max_stack: None,
+                    food: None,
+                },
             ],
             biomes: vec![
                 BiomeDef {
@@ -496,6 +519,10 @@ impl Guest for Terra {
             material_sounds: audio::materials(),
             soundscapes: audio::soundscapes(),
             cause_sounds: audio::causes(),
+            voxel_uses: vec![VoxelUse {
+                material: "terra:door".into(),
+                kind: VoxelUseKind::Door("terra:door_open".into()),
+            }],
             ores: vec![OreDef {
                 material: "terra:iron".into(),
                 min_depth_m: 5.0,

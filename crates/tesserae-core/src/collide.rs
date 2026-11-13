@@ -5,6 +5,7 @@
 //! terrain collision, and a physics engine is its rejected alternative. What a
 //! Voxel contributes is its Shape's collision boxes, and nothing at all if its
 //! Material is not solid: a body sinks through water and a ray aims past it.
+//! An open Door is solid to a ray and passed through by a body.
 //!
 //! **Everything here is in metres**, and `voxel_size` is the only conversion to
 //! a Voxel index. A half-height slab is 0.5 m at 1 m Voxels and 0.125 m at
@@ -240,7 +241,7 @@ const WHOLE_CELL: [CollisionBox; 1] = [CollisionBox::new([0; 3], [SUBDIV as i8; 
 /// nothing.
 fn obstacles<'a>(vol: &impl VoxelVolume, tables: &'a Tables, cell: [i32; 3]) -> &'a [CollisionBox] {
     match vol.voxel(cell) {
-        Some(voxel) if !tables.materials.solid(voxel) => &[],
+        Some(voxel) if !tables.blocks(voxel) => &[],
         Some(voxel) => tables
             .shapes
             .collision(voxel, connections_at(vol, &tables.shapes, cell, voxel)),
@@ -597,6 +598,33 @@ mod tests {
             "rests at {}",
             fall.aabb.min[1]
         );
+    }
+
+    #[test]
+    fn a_body_falls_through_an_open_door_and_a_ray_still_strikes_it() {
+        let mut tables = fixtures().tables.clone();
+        let [closed, open] = [(); 2].map(|_| {
+            tables
+                .materials
+                .register(crate::MaterialDef::OPAQUE)
+                .unwrap()
+        });
+        tables
+            .register_use(closed, crate::VoxelUse::Door { open })
+            .unwrap();
+        for (door, floor) in [(closed, 1.0), (open, 0.0)] {
+            let mut g = Grid::new();
+            g.floor(-1, Voxel::cube(fixtures().ground.rock))
+                .put([0, 0, 0], Voxel::cube(door));
+            let fall = super::sweep(&g, &tables, 1.0, body(0.5, 3.0, 0.5, 1.8), [0.0, -5.0, 0.0]);
+            assert!(
+                close(fall.aabb.min[1], floor),
+                "rests at {}",
+                fall.aabb.min[1]
+            );
+            let hit = super::raycast(&g, &tables, 1.0, [0.5, 4.0, 0.5], [0.0, -1.0, 0.0], 10.0);
+            assert_eq!(hit.map(|h| h.at), Some([0, 0, 0]));
+        }
     }
 
     fn cube() -> Voxel {

@@ -183,6 +183,24 @@ impl From<Tool> for content::ToolDef {
     }
 }
 
+/// Tagged by `kind`, so each kind's fields sit beside `material` in one row.
+#[derive(Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
+pub(super) enum VoxelUse {
+    Door { material: String, open: String },
+}
+
+impl From<VoxelUse> for content::VoxelUse {
+    fn from(row: VoxelUse) -> Self {
+        match row {
+            VoxelUse::Door { material, open } => Self {
+                material,
+                kind: content::VoxelUseKind::Door(open),
+            },
+        }
+    }
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub(super) struct Item {

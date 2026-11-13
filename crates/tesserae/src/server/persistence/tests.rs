@@ -306,6 +306,32 @@ fn edits_removals_fluid_fire_and_paused_timers_survive_eviction_and_restart() {
 }
 
 #[test]
+fn an_open_door_survives_save_and_reopen() {
+    let dir = Directory::new();
+    let mut rig = Rig::new(&dir);
+    let door = rig
+        .app
+        .world()
+        .resource::<ContentTables>()
+        .0
+        .uses
+        .doors()
+        .next()
+        .expect("Terra declares a Door");
+    rig.insert();
+    rig.solid([4, 1, 4], door.open);
+    rig.solid([4, 2, 4], door.open);
+    rig.settled_save();
+    drop(rig);
+    let mut reopened = Rig::new(&dir);
+    reopened.insert();
+    let store = reopened.app.world().resource::<ChunkStore>();
+    let chunk = store.get(coord([0; 3])).unwrap();
+    assert_eq!(chunk.get(4, 1, 4), Voxel::cube(door.open));
+    assert_eq!(chunk.get(4, 2, 4), Voxel::cube(door.open));
+}
+
+#[test]
 fn save_snapshot_cannot_authorize_eviction_after_a_later_edit() {
     let dir = Directory::new();
     let mut rig = Rig::new(&dir);

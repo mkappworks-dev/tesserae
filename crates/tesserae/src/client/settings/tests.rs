@@ -580,7 +580,7 @@ fn the_tool_actions_take_part_in_conflict_warnings_and_are_listed() {
         );
     }
     assert_eq!(action_name(Action::CycleTool), "Take tool");
-    assert_eq!(action_name(Action::Use), "Use tool");
+    assert_eq!(action_name(Action::Use), "Use");
     assert_eq!(action_name(Action::ClearTool), "Clear tool");
 }
 

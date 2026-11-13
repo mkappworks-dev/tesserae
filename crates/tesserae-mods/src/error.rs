@@ -2,7 +2,7 @@ use std::fmt;
 use std::path::PathBuf;
 
 use tesserae_core::{
-    CombustionError, FluidError, MaterialError, ParamError, ReactionError, ShapeError,
+    CombustionError, FluidError, MaterialError, ParamError, ReactionError, ShapeError, UseError,
 };
 
 use crate::registry::Kind;
@@ -149,6 +149,12 @@ pub enum ModError {
         row: usize,
         name: String,
         source: CombustionError,
+    },
+    VoxelUse {
+        id: String,
+        row: usize,
+        name: String,
+        source: UseError,
     },
     /// The Game's lake names a fluid that cannot fill one.
     Lake {
@@ -327,6 +333,12 @@ impl fmt::Display for ModError {
                 name,
                 source,
             } => write!(f, "mod `{id}`: combustion {row} `{name}`: {source}"),
+            ModError::VoxelUse {
+                id,
+                row,
+                name,
+                source,
+            } => write!(f, "mod `{id}`: voxel-uses {row} `{name}`: {source}"),
             ModError::Lake { id, name, source } => write!(
                 f,
                 "mod `{id}`: world: {} `{name}` {}",

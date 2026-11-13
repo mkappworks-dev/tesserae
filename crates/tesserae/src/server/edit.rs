@@ -139,7 +139,7 @@ pub struct AimReport {
     pub origin: Vec3,
     pub direction: Vec3,
     pub held: Option<AimItem>,
-    /// The tool in hand, which makes the answer carry a `use_aim`.
+    /// The tool in hand, whose action the answer's `use_aim` previews.
     pub tool: Option<super::tool::ToolId>,
     /// Remove is held on the target, so the Server strikes it with `hit`
     /// Sounds. It grants nothing: removal progress stays the Client's.
@@ -177,7 +177,8 @@ pub struct AimTarget {
     pub removal: Option<AimRemoval>,
     /// The camera sees a target the Eye cannot: nothing above is offered.
     pub blocked: bool,
-    /// What Use would do with the tool in hand, or why not; `None` with none.
+    /// What Use would do with the tool in hand or to the Usable Voxel aimed
+    /// at, or why not; `None` when Use would eat.
     pub use_aim: Option<super::tool::UseAim>,
 }
 #[derive(Resource, Default)]

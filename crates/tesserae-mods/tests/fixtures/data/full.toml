@@ -259,3 +259,8 @@ sound = "full:crack"
 [[cause-sounds]]
 cause = "use-measured"
 sound = "full:crack"
+
+[[voxel-uses]]
+kind = "door"
+material = "full:wood"
+open = "full:ash"

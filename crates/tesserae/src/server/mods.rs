@@ -162,12 +162,17 @@ impl LoadedMods {
             .registry
             .names(Kind::Material)
             .map(|(id, name)| (id as MaterialId, name))
-            .filter(|&(id, _)| {
-                self.tables.materials.def(id).solid || self.tables.fluids.rank(id).is_some()
-            })
+            .filter(|&(id, _)| placeable(&self.tables, id))
             .map(|(id, name)| (id, name, colour(id)));
         super::items::Items::with_implicit(self.items.clone(), placeable, voxel_size)
     }
+}
+
+/// Whether a Player can hold and place `material`: a solid or a fluid, but not
+/// an open Door, which only Use makes and which drops the closed one's Item.
+fn placeable(tables: &Tables, material: MaterialId) -> bool {
+    (tables.materials.def(material).solid || tables.fluids.rank(material).is_some())
+        && !tables.uses.passable(material)
 }
 
 #[derive(Resource)]
@@ -779,6 +784,13 @@ fn install(world: &mut World) {
             }),
         });
     }
+    let placing = super::items::PlacingItems::new(
+        catalogue
+            .materials
+            .iter()
+            .map(|m| (m.id, m.name.as_str(), placeable(&tables.0, m.id))),
+        &items,
+    );
     world.insert_resource(tables);
     world.insert_resource(super::tool::Tools(loaded.tools));
     world.insert_resource(super::sound::SoundTable::new(&loaded.sounds));
@@ -808,13 +820,7 @@ fn install(world: &mut World) {
             })
             .collect(),
     ));
-    world.insert_resource(super::items::PlacingItems::new(
-        catalogue
-            .materials
-            .iter()
-            .map(|m| (m.id, m.name.as_str(), m.fluid.is_some() || m.solid)),
-        &items,
-    ));
+    world.insert_resource(placing);
     world.insert_resource(items);
     world.insert_resource(WorldParameters(params));
     world.insert_resource(super::streaming::streaming_settings(loaded.view));
@@ -1254,6 +1260,23 @@ surface = "plain:rock"
         let material = |m: MaterialId| catalogue.materials.iter().find(|c| c.id == m).unwrap();
         assert!(material(lava).fluid.is_some() && !material(lava).solid);
         assert!(material(wood).burns && material(wood).solid);
+    }
+
+    #[test]
+    fn a_doors_open_material_has_no_item_of_its_own() {
+        let s = Scratch::new();
+        data(&s, "full", true, "", &full_game());
+        let loaded = s.load(TrustMode::All).unwrap();
+        let id = |name| loaded.registry.id_of(Kind::Material, name).unwrap() as MaterialId;
+        let (wood, ash) = (id("full:wood"), id("full:ash"));
+        assert_eq!(loaded.tables.uses.door(ash).map(|d| d.closed), Some(wood));
+        let mut app = App::new();
+        app.insert_non_send(loaded).add_plugins(plugin);
+        let items = app.world().resource::<super::super::items::Items>();
+        assert!(items.0.iter().all(|item| item.material != Some(ash)));
+        let placing = app.world().resource::<super::super::items::PlacingItems>();
+        assert_eq!(placing.item(ash), None);
+        assert_eq!(placing.material("full:log"), Some(wood));
     }
 
     const WET: &str = r#"
@@ -2181,7 +2204,7 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
         );
         assert!(!turnable.iter().any(|(name, _)| name.starts_with("dev:")));
         let ids: Vec<_> = catalogue.materials.iter().map(|m| m.id).collect();
-        assert_eq!(ids, std::iter::once(0).chain(8..24).collect::<Vec<_>>());
+        assert_eq!(ids, std::iter::once(0).chain(8..26).collect::<Vec<_>>());
     }
 
     #[test]
@@ -2201,7 +2224,7 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
             .drain()
             .next()
             .unwrap();
-        assert_eq!(textures.0.len(), 16);
+        assert_eq!(textures.0.len(), 18);
         for material in catalogue.materials.iter().filter(|m| m.id != 0) {
             let (_, pixels) = textures
                 .0
@@ -2212,7 +2235,7 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
             assert!(pixels.as_chunks::<4>().0.iter().any(|p| p != &pixels[..4]));
             if matches!(
                 material.name.as_str(),
-                "terra:glass" | "terra:water" | "terra:mud"
+                "terra:glass" | "terra:water" | "terra:mud" | "terra:door_open"
             ) {
                 assert!(pixels.as_chunks::<4>().0.iter().any(|p| p[3] < 255));
             } else {

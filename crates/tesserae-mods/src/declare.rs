@@ -11,7 +11,7 @@ use tesserae_core::{
     AIR, Biome, BiomeId, BiomeName, BiomeSet, BiomeTable, Burn, CombustionDef, FluidDef,
     GroundParams, Heat, MAX_BIOMES, MAX_CAVE_SCALE, MAX_ORES, MaterialId, Ore, OreTable,
     ParamError, Phase, Reactant, ReactionDef, Side, SkyFog, SurfaceFeature, SurfaceFeatures,
-    SurvivalRules, Tables, Voxel, WaterParams, WorldgenParams,
+    SurvivalRules, Tables, Voxel, VoxelUse, WaterParams, WorldgenParams,
 };
 
 use crate::bindings::tesserae::mods::content::{self, Declaration};
@@ -33,6 +33,7 @@ pub const MATERIAL_TEXTURE_BYTES: usize = MATERIAL_TEXTURE_EDGE * MATERIAL_TEXTU
 
 pub const MAX_TOOLS_PER_MOD: usize = 8;
 pub const MAX_ITEMS_PER_MOD: usize = 64;
+pub const MAX_VOXEL_USES_PER_MOD: usize = 64;
 pub const MAX_ITEMS: usize = 256;
 pub const MAX_BIOMES_PER_MOD: usize = MAX_BIOMES;
 /// Half the World's table, so no one Mod can fill it.
@@ -152,6 +153,7 @@ pub struct Behaviour {
     pub(crate) material_sounds: Vec<content::MaterialSound>,
     pub(crate) soundscapes: Vec<content::SoundscapeDef>,
     pub(crate) cause_sounds: Vec<content::CauseSound>,
+    voxel_uses: Vec<content::VoxelUse>,
     lake: Option<content::WaterParams>,
     ground: Option<content::GroundParams>,
 }
@@ -238,6 +240,11 @@ pub fn apply(
         ("item", declaration.items.len(), MAX_ITEMS_PER_MOD),
         ("biome", declaration.biomes.len(), MAX_BIOMES_PER_MOD),
         ("ore", declaration.ores.len(), MAX_ORES_PER_MOD),
+        (
+            "voxel-use",
+            declaration.voxel_uses.len(),
+            MAX_VOXEL_USES_PER_MOD,
+        ),
         ("sound", declaration.sounds.len(), MAX_SOUNDS_PER_MOD),
         (
             "sound-set",
@@ -454,6 +461,7 @@ pub fn apply(
             material_sounds: declaration.material_sounds,
             soundscapes: declaration.soundscapes,
             cause_sounds: declaration.cause_sounds,
+            voxel_uses: declaration.voxel_uses,
             lake,
             ground,
         },
@@ -729,8 +737,8 @@ pub fn resolve_items(
     Ok(items)
 }
 
-/// Registers every Mod's fluids, then reactions, then fires, in load order,
-/// once every Declaration is in: a row may name any Mod's Material. Fluids
+/// Registers every Mod's fluids, then reactions, fires and Usable Voxels, in
+/// load order, once every Declaration is in: a row may name any Mod's Material. Fluids
 /// come first because a reaction is between fluids. Returns the Game's lake,
 /// last because any declared fluid may fill it. The tables are complete and
 /// immutable when this returns; the World opens after it.
@@ -821,6 +829,24 @@ pub fn resolve(
                     id: b.mod_id.clone(),
                     row,
                     name: fire.fuel.clone(),
+                    source,
+                })?;
+        }
+    }
+    for b in &behaviours {
+        for (row, used) in b.voxel_uses.iter().enumerate() {
+            let material = lookup(b, registry, "voxel-uses", row, &used.material)?;
+            let kind = match &used.kind {
+                content::VoxelUseKind::Door(open) => VoxelUse::Door {
+                    open: lookup(b, registry, "voxel-uses", row, open)?,
+                },
+            };
+            tables
+                .register_use(material, kind)
+                .map_err(|source| ModError::VoxelUse {
+                    id: b.mod_id.clone(),
+                    row,
+                    name: used.material.clone(),
                     source,
                 })?;
         }

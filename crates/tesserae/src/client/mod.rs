@@ -65,6 +65,7 @@ mod tile_preview;
 mod tool;
 mod touch;
 mod underwater;
+mod use_prompt;
 mod view;
 mod viewmodel;
 mod vitals;
@@ -117,6 +118,7 @@ pub fn plugin(app: &mut App) {
         view::plugin,
         loading::plugin,
         tool::plugin,
+        use_prompt::plugin,
         underwater::plugin,
         sky::plugin,
         layout::plugin,

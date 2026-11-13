@@ -211,19 +211,22 @@ WIT contract, as the movement policy did.
 ### Use and tools
 
 Use is a separate Server intent, not an Edit. A Client sends `UseIntent` (the
-crosshair ray, the Tool held and the target it was shown) and the Server answers
-with `UseOutcome`; the aim answer carries a `use_aim` while a Tool is held, so
-the preview can say before the press that it would be refused. Use changes no
-Voxel and never enters the undo journal, and a target that changed since it was
-shown is refused rather than re-aimed. The Server keeps no measurement: the
+crosshair ray, the Tool held, if any, and the target it was shown) and the
+Server answers with `UseOutcome`. The Server resolves it in order: a held Tool
+runs; otherwise a Usable Voxel in Edit reach is used; otherwise the selected
+Stack is eaten. The aim answer's `use_aim` previews the Tool's action or the
+Usable Voxel's verb, or why not, so the prompt under the reticle can say it
+before the press. A Tool changes no Voxel; a Door toggles its vertical run as an
+Edit group that never enters the undo journal. A target that changed since it
+was shown is refused rather than re-aimed. The Server keeps no measurement: the
 Client holds the corners it was told, so no Client system reads World state.
 
 A Game declares its Tools once, as `tool-def` rows (a name and a closed kind) in
 the Declaration. The Server runs the kind in native code, so no Mod is called
 when a Tool is used and nothing crosses the contract per Use or per Voxel
-([ADR-0001](adr/0001-wasm-mod-boundary.md)). A later use of a Voxel, such as a
-door or a container, must also be declared data or a batched event, never a
-per-use Mod callback.
+([ADR-0001](adr/0001-wasm-mod-boundary.md)). Usable Voxels are declared the same
+way, as `voxel-uses` rows
+([ADR-0026](adr/0026-usable-voxels-are-declared-kinds-the-server-runs.md)).
 
 ### What the Server confirms, and what the Client animates
 

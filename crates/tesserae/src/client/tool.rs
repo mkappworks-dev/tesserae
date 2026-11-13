@@ -16,7 +16,6 @@ use super::aim::{Sent, Target};
 use super::camera::FlyCamera;
 use super::edit::{Catalogue, Holding, Hotbar};
 use crate::server::tool::{ToolKind, UseIntent, UseOutcome, UseResult, UseTarget};
-use crate::server::vitals::EatIntent;
 use crate::world::WorldSettings;
 
 /// The corners the Server resolved: one being placed and one finished.
@@ -108,20 +107,16 @@ fn measuring(hotbar: &Hotbar, catalogue: &Catalogue) -> bool {
 }
 
 /// Remove uses the held tool and Place clears it; the keys that mean the same
-/// do too. Use with a hotbar stack in hand asks to eat it, and the Server
-/// judges whether it is food. Like an Edit, nothing is sent by the click that
-/// grabs the cursor.
+/// do too. Use with no tool in hand asks the Server to use what is aimed at,
+/// or else to eat from the selected slot; the Server judges which. Like an
+/// Edit, nothing is sent by the click that grabs the cursor.
 pub(super) fn use_tool(
     (ownership, actions): (Res<super::input::Ownership>, Res<super::actions::Actions>),
     cursor: Single<&CursorOptions, With<PrimaryWindow>>,
     camera: Single<&GlobalTransform, With<FlyCamera>>,
     hotbar: Res<Hotbar>,
     (target, sent, time): (Res<Target>, Res<Sent>, Res<Time>),
-    (mut measurement, mut intents, mut eat): (
-        ResMut<Measurement>,
-        MessageWriter<UseIntent>,
-        MessageWriter<EatIntent>,
-    ),
+    (mut measurement, mut intents): (ResMut<Measurement>, MessageWriter<UseIntent>),
     mut was_grabbed: Local<bool>,
 ) {
     use super::actions::Action;
@@ -130,12 +125,17 @@ pub(super) fn use_tool(
     if !ready || !ownership.gameplay() {
         return;
     }
+    let current = target.current(&sent, time.elapsed_secs_f64());
+    let expected = target.0.use_aim.and_then(Result::ok).filter(|_| current);
     let Holding::Tool(tool) = hotbar.held() else {
-        if actions.started(Action::Use)
-            && hotbar.outside.is_none()
-            && hotbar.stacks[hotbar.selected].is_some()
-        {
-            eat.write(EatIntent);
+        if actions.started(Action::Use) {
+            intents.write(UseIntent {
+                tool: None,
+                eat: hotbar.outside.is_none() && hotbar.stacks[hotbar.selected].is_some(),
+                origin: camera.translation(),
+                direction: *camera.forward(),
+                expected,
+            });
         }
         return;
     };
@@ -143,12 +143,10 @@ pub(super) fn use_tool(
         measurement.clear();
     }
     // A press on an answer too old to trust is dropped, as a removal's is.
-    if (actions.started(Action::Use) || actions.started(Action::Remove))
-        && target.current(&sent, time.elapsed_secs_f64())
-    {
-        let expected = target.0.use_aim.and_then(Result::ok);
+    if (actions.started(Action::Use) || actions.started(Action::Remove)) && current {
         intents.write(UseIntent {
-            tool,
+            tool: Some(tool),
+            eat: false,
             origin: camera.translation(),
             direction: *camera.forward(),
             expected,
@@ -164,6 +162,7 @@ fn accept(
     for UseOutcome(outcome) in outcomes.read() {
         match outcome {
             Ok(UseResult::Measured(corner)) => measurement.accept(*corner),
+            Ok(UseResult::Door { .. }) => {}
             Err(refusal) => super::menu_ui::notify(
                 &mut commands,
                 refusal.message(),
@@ -299,6 +298,7 @@ mod tests {
             at: [0, 0, 0],
             voxel: tesserae_core::Voxel::AIR,
             corner: Vec3::new(x, y, z),
+            usable: None,
         }
     }
 
@@ -377,7 +377,6 @@ mod tests {
             .init_resource::<Measurement>()
             .add_message::<UseIntent>()
             .add_message::<UseOutcome>()
-            .add_message::<EatIntent>()
             .add_systems(Update, (use_tool, accept).chain());
         app.insert_resource(Catalogue(catalogue()));
         app.world_mut().resource_mut::<Hotbar>().outside = Some(held);
@@ -443,7 +442,7 @@ mod tests {
             frame(&mut app, None, Some(MouseButton::Left)),
         ] {
             assert_eq!(sent.len(), 1);
-            assert_eq!(sent[0].tool, ToolId(0));
+            assert_eq!(sent[0].tool, Some(ToolId(0)));
             assert_eq!(sent[0].origin, Vec3::new(1.0, 2.0, 3.0));
             assert_eq!(sent[0].direction, Vec3::NEG_Z);
             assert_eq!(sent[0].expected, None, "a refused aim vouches for nothing");
@@ -512,7 +511,7 @@ mod tests {
     }
 
     #[test]
-    fn any_other_hand_sends_no_use() {
+    fn any_other_hand_uses_with_no_tool_and_its_clicks_send_no_use() {
         for held in [
             Holding::Empty,
             Holding::Fire,
@@ -520,26 +519,24 @@ mod tests {
             Holding::solid(1, 0),
         ] {
             let mut app = app(held);
-            for (key, button) in [
-                (Some(KeyCode::KeyG), None),
-                (None, Some(MouseButton::Left)),
-                (None, Some(MouseButton::Right)),
-            ] {
-                assert!(frame(&mut app, key, button).is_empty(), "{held:?}");
+            let sent = frame(&mut app, Some(KeyCode::KeyG), None);
+            assert_eq!(sent.len(), 1, "{held:?}");
+            assert_eq!(sent[0].tool, None, "{held:?}");
+            for button in [MouseButton::Left, MouseButton::Right] {
+                assert!(frame(&mut app, None, Some(button)).is_empty(), "{held:?}");
             }
         }
     }
 
-    fn eats(app: &mut App, key: Option<KeyCode>, button: Option<MouseButton>) -> usize {
-        frame(app, key, button);
-        app.world_mut()
-            .resource_mut::<Messages<EatIntent>>()
-            .drain()
-            .count()
+    /// Whether the Use one frame sends may eat, if it sends one.
+    fn eats(app: &mut App, key: Option<KeyCode>, button: Option<MouseButton>) -> Option<bool> {
+        let sent = frame(app, key, button);
+        assert!(sent.len() <= 1);
+        sent.first().map(|intent| intent.eat)
     }
 
     #[test]
-    fn use_with_an_item_from_the_hotbar_in_hand_asks_to_eat_it() {
+    fn use_with_an_item_from_the_hotbar_in_hand_may_eat_it() {
         let mut app = app(Holding::Empty);
         let mut hotbar = app.world_mut().resource_mut::<Hotbar>();
         hotbar.outside = None;
@@ -547,13 +544,13 @@ mod tests {
             item: "m:bread".into(),
             count: 1,
         });
-        assert_eq!(eats(&mut app, Some(KeyCode::KeyG), None), 1);
-        assert_eq!(eats(&mut app, None, Some(MouseButton::Left)), 0);
+        assert_eq!(eats(&mut app, Some(KeyCode::KeyG), None), Some(true));
+        assert_eq!(eats(&mut app, None, Some(MouseButton::Left)), None);
 
         app.world_mut().resource_mut::<Hotbar>().outside = Some(Holding::Empty);
         assert_eq!(
             eats(&mut app, Some(KeyCode::KeyG), None),
-            0,
+            Some(false),
             "hand put aside"
         );
         let mut hotbar = app.world_mut().resource_mut::<Hotbar>();
@@ -561,9 +558,28 @@ mod tests {
         hotbar.selected = 1;
         assert_eq!(
             eats(&mut app, Some(KeyCode::KeyG), None),
-            0,
+            Some(false),
             "an empty slot"
         );
+    }
+
+    #[test]
+    fn use_with_no_tool_vouches_for_the_usable_voxel_it_was_shown() {
+        let mut app = app(Holding::Empty);
+        let door = UseTarget {
+            usable: Some(crate::server::tool::Usable::Door { open: false }),
+            ..corner(1.0, 2.0, 3.0)
+        };
+        let view = (Vec3::new(1.0, 2.0, 3.0), Vec3::NEG_Z, None, None);
+        app.world_mut().resource_mut::<Sent>().last = Some(view);
+        let mut target = app.world_mut().resource_mut::<Target>();
+        target.1 = Some(view);
+        target.0.use_aim = Some(Ok(door));
+        let sent = frame(&mut app, Some(KeyCode::KeyG), None);
+        assert_eq!(sent[0].expected, Some(door));
+        app.world_mut().resource_mut::<Target>().2 = -10.0;
+        let stale = frame(&mut app, Some(KeyCode::KeyG), None);
+        assert_eq!(stale[0].expected, None, "a stale aim vouches for nothing");
     }
 
     #[test]

@@ -75,6 +75,11 @@ once each, up to 8 `ambient-bed`s (an `ambient` Sound by full name and a volume
 from 0 to 1), up to 8 `music` Sounds by full name, and an optional `silence-s`
 `sound-range` from 0 to 3600 seconds, 60 to 180 when absent.
 
+Line 0.3 then gained `voxel-uses` on its `declaration`, appended after
+`cause-sounds` in the same way; a Declaration for 0.1 or 0.2 loads with none. A
+`voxel-use` names a solid Material by full name and a closed `voxel-use-kind`,
+`door` with its open Material's full name. Bodies pass through the open one.
+
 ## What is not frozen
 
 Line `0.x` is pre-release. Later gameplay steps may add new lines, and

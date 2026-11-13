@@ -74,9 +74,10 @@ pub(in crate::server) fn apply_pending(
                         ));
                     }
                     // Spawned here rather than from a message so the Entry
-                    // holds the Dropped item an undo takes back.
+                    // holds the Dropped item an undo takes back. An open Door
+                    // drops what its closed state does.
                     if let Some(material) = removal(p.intent.action, &entry)
-                        && let Some(item) = items.dropped_by(material)
+                        && let Some(item) = items.dropped_by(tables.uses.closed(material))
                     {
                         let id = crate::server::entities::drop_one(
                             &mut entities,
@@ -574,9 +575,9 @@ pub(in crate::server) fn set_voxel(
 
 /// Air everywhere but one placed Voxel, so an overlap with it alone is asked of
 /// the body and terrain it already stands in does not count.
-pub(super) struct PlacedOnly {
-    pub(super) at: [i32; 3],
-    pub(super) voxel: Voxel,
+pub(in crate::server) struct PlacedOnly {
+    pub(in crate::server) at: [i32; 3],
+    pub(in crate::server) voxel: Voxel,
 }
 impl VoxelVolume for PlacedOnly {
     fn voxel(&self, at: [i32; 3]) -> Option<Voxel> {

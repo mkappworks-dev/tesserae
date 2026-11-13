@@ -1,7 +1,9 @@
-//! The Server's Use verb: what a held tool does, answered and never applied.
+//! The Server's Use verb: a held tool's action, a Usable Voxel's, or a meal.
 //!
-//! Use is its own intent, not an Edit: it changes no Voxel and enters no
-//! history, so it has its own outcome and refusals. Like an Edit it carries a
+//! Use is its own intent, not an Edit: a Tool changes no Voxel, and nothing a
+//! Use does enters the undo journal, so it has its own outcome and refusals.
+//! Without a Tool it acts on a Usable Voxel in reach (see `usable.rs`) or, with
+//! none aimed at, eats from the selected slot. Like an Edit it carries a
 //! ray in metres, judged against the Player's Eye, and a target the Client
 //! saw; a target that has changed since is refused rather than re-aimed. The
 //! Server holds no measurement: it answers each Use with the corner struck and
@@ -11,6 +13,9 @@
 use bevy::prelude::*;
 
 use super::death::PlayerIntents;
+use super::mods::EditHistory;
+use super::streaming::MeshState;
+use super::vitals::EatIntent;
 use crate::session::SessionApp;
 use tesserae_core::collide::{RayHit, VoxelVolume};
 use tesserae_core::{NodeBox, Tables, Voxel};
@@ -42,8 +47,27 @@ pub struct UseTarget {
     pub at: [i32; 3],
     /// What stood there, so a changed Voxel is a stale target.
     pub voxel: Voxel,
-    /// Metres, on the struck face of the Voxel's drawn Shape.
+    /// Metres: for a Tool, on the struck face of the Voxel's drawn Shape; for a
+    /// Usable Voxel, where the ray struck it.
     pub corner: Vec3,
+    /// What it is to Use with no Tool in hand; `None` for a Tool's target.
+    pub usable: Option<Usable>,
+}
+
+/// A Usable Voxel as the prompt names it.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Usable {
+    Door { open: bool },
+}
+
+impl Usable {
+    /// What Use would do to it, for the prompt.
+    pub fn verb(self) -> &'static str {
+        match self {
+            Usable::Door { open: false } => "Open",
+            Usable::Door { open: true } => "Close",
+        }
+    }
 }
 
 /// What Use would do, or why not, for the preview before the press.
@@ -51,7 +75,11 @@ pub type UseAim = Result<UseTarget, UseRefusal>;
 
 #[derive(Message, Clone, Copy, Debug)]
 pub struct UseIntent {
-    pub tool: ToolId,
+    /// The Tool in hand, which runs whatever is aimed at.
+    pub tool: Option<ToolId>,
+    /// Whether a Use that finds nothing usable eats from the selected slot:
+    /// not while the hand holds something from outside the hotbar.
+    pub eat: bool,
     pub origin: Vec3,
     pub direction: Vec3,
     /// What the Client was shown; `None` takes whatever the ray strikes.
@@ -61,6 +89,7 @@ pub struct UseIntent {
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum UseResult {
     Measured(UseTarget),
+    Door { opened: bool },
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -78,6 +107,10 @@ pub enum UseRefusal {
     NotHungry,
     /// Eating with no food in the selected slot.
     NotFood,
+    /// Closing a Door into the Player's body.
+    InsidePlayer,
+    /// The Voxel's Chunk is still being lit.
+    Busy,
 }
 
 impl UseRefusal {
@@ -91,6 +124,8 @@ impl UseRefusal {
             UseRefusal::UnknownTool => "That Tool is not available.",
             UseRefusal::NotHungry => "You aren’t hungry.",
             UseRefusal::NotFood => "Hold food in the selected hotbar slot to eat.",
+            UseRefusal::InsidePlayer => RejectReason::InsidePlayer.message(),
+            UseRefusal::Busy => RejectReason::Busy.message(),
         }
     }
 }
@@ -101,6 +136,8 @@ impl From<RejectReason> for UseRefusal {
             RejectReason::OriginTooFar => UseRefusal::OriginTooFar,
             RejectReason::Blocked => UseRefusal::Blocked,
             RejectReason::NotLoaded => UseRefusal::NotLoaded,
+            RejectReason::InsidePlayer => UseRefusal::InsidePlayer,
+            RejectReason::Busy => UseRefusal::Busy,
             _ => UseRefusal::OutOfReach,
         }
     }
@@ -112,8 +149,10 @@ pub struct UseOutcome(pub Result<UseResult, UseRefusal>);
 pub(super) fn plugin(app: &mut App) {
     app.add_player_intent::<UseIntent>()
         .add_session_message::<UseOutcome>()
+        .add_session_message::<EatIntent>()
         // Every frame, like an Edit's receive: an answer is never lost to a
-        // frame that runs no tick, and it touches no World state.
+        // frame that runs no tick. A Door toggles here, before the tick reads
+        // the World.
         .add_session_systems(
             RunFixedMainLoop,
             answer_use
@@ -122,20 +161,57 @@ pub(super) fn plugin(app: &mut App) {
         );
 }
 
-fn answer_use(
+pub(super) fn answer_use(
     mut intents: MessageReader<UseIntent>,
-    mut outcomes: MessageWriter<UseOutcome>,
-    (store, tables, world, tools): (
-        Res<ChunkStore>,
-        Res<ContentTables>,
-        Res<WorldSettings>,
-        Res<Tools>,
+    (mut outcomes, mut eat): (MessageWriter<UseOutcome>, MessageWriter<EatIntent>),
+    (mut store, mut meshes, mut history): (
+        ResMut<ChunkStore>,
+        ResMut<MeshState>,
+        ResMut<EditHistory>,
     ),
-    player: Single<&Player>,
+    (tables, world, tools): (Res<ContentTables>, Res<WorldSettings>, Res<Tools>),
+    (player, status): (Single<&Player>, Option<Res<super::persistence::SaveStatus>>),
 ) {
+    let playing = super::persistence::playing(status);
     for intent in intents.read() {
-        let result = run_tool(&store, &tables, &world, &tools, intent, player.eye());
+        let ray = (intent.origin, intent.direction);
+        let result = match intent.tool {
+            Some(tool) => run_tool(&store, &tables, &world, &tools, tool, intent, player.eye()),
+            None => match super::usable::aim(&store, &tables, &world, ray, player.eye()) {
+                None if intent.expected.is_some() => Err(UseRefusal::TargetChanged),
+                None => {
+                    if intent.eat {
+                        eat.write(EatIntent);
+                    }
+                    continue;
+                }
+                Some(aimed) => aimed.and_then(|aimed| {
+                    unchanged(intent, aimed)?;
+                    if !playing {
+                        return Err(UseRefusal::Busy);
+                    }
+                    super::usable::toggle_door(
+                        (&mut store, &mut meshes),
+                        &tables,
+                        &world,
+                        &mut history,
+                        player.solid_body(),
+                        aimed.at,
+                    )
+                }),
+            },
+        };
         outcomes.write(UseOutcome(result));
+    }
+}
+
+/// A target that changed since it was shown is refused rather than re-aimed.
+fn unchanged(intent: &UseIntent, aimed: UseTarget) -> Result<(), UseRefusal> {
+    match intent.expected {
+        Some(seen) if (seen.at, seen.voxel) != (aimed.at, aimed.voxel) => {
+            Err(UseRefusal::TargetChanged)
+        }
+        _ => Ok(()),
     }
 }
 
@@ -144,19 +220,15 @@ fn run_tool(
     tables: &Tables,
     world: &WorldSettings,
     tools: &Tools,
+    tool: ToolId,
     intent: &UseIntent,
     eye: Vec3,
 ) -> Result<UseResult, UseRefusal> {
-    match tools.kind(intent.tool).ok_or(UseRefusal::UnknownTool)? {
+    match tools.kind(tool).ok_or(UseRefusal::UnknownTool)? {
         ToolKind::Measure => {
             let aimed =
                 measure_target(store, tables, world, (intent.origin, intent.direction), eye)?;
-            if intent
-                .expected
-                .is_some_and(|seen| (seen.at, seen.voxel) != (aimed.at, aimed.voxel))
-            {
-                return Err(UseRefusal::TargetChanged);
-            }
+            unchanged(intent, aimed)?;
             Ok(UseResult::Measured(aimed))
         }
     }
@@ -195,6 +267,7 @@ fn measure_target(
         at: hit.at,
         voxel,
         corner: origin + corner * sixteenth,
+        usable: None,
     })
 }
 
@@ -299,7 +372,8 @@ mod tests {
         let mut players = app.world_mut().query::<&mut Player>();
         players.single_mut(app.world_mut()).unwrap().set_eye(eye);
         app.world_mut().write_message(UseIntent {
-            tool: ToolId(0),
+            tool: Some(ToolId(0)),
+            eat: false,
             origin: eye,
             direction,
             expected,
@@ -432,7 +506,8 @@ mod tests {
         let mut far = EYE;
         far.x += 100.0;
         app.world_mut().write_message(UseIntent {
-            tool: ToolId(0),
+            tool: Some(ToolId(0)),
+            eat: false,
             origin: far,
             direction: Vec3::NEG_Y,
             expected: None,
@@ -493,7 +568,8 @@ mod tests {
         for (walled, expected) in [(false, Ok(())), (true, Err(UseRefusal::Blocked))] {
             let (mut app, camera) = camera_over_the_shoulder(walled);
             app.world_mut().write_message(UseIntent {
-                tool: ToolId(0),
+                tool: Some(ToolId(0)),
+                eat: false,
                 origin: camera,
                 direction: Vec3::NEG_Y,
                 expected: None,
@@ -535,7 +611,8 @@ mod tests {
             .unwrap()
             .set_eye(Vec3::new(2.5, 12.0, 2.5));
         app.world_mut().write_message(UseIntent {
-            tool: ToolId(0),
+            tool: Some(ToolId(0)),
+            eat: false,
             origin: Vec3::new(28.5, 12.0, 2.5),
             direction: Vec3::NEG_Y,
             expected: None,
@@ -563,7 +640,8 @@ mod tests {
         let mut players = third.world_mut().query::<&mut Player>();
         players.single_mut(third.world_mut()).unwrap().set_eye(eye);
         third.world_mut().write_message(UseIntent {
-            tool: ToolId(0),
+            tool: Some(ToolId(0)),
+            eat: false,
             origin: camera,
             direction: (seen - camera).normalize(),
             expected: None,

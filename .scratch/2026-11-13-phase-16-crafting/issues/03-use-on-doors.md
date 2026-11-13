@@ -1,6 +1,6 @@
 # 03: Use on Doors
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: None (can start immediately)
 
@@ -23,14 +23,14 @@ is renamed "Use". Terra declares a wooden Door.
 
 ## Acceptance criteria
 
-- [ ] Use priority holds: Tool, then Usable Voxel, then eating; eating with
+- [x] Use priority holds: Tool, then Usable Voxel, then eating; eating with
       nothing usable aimed at still works.
-- [ ] A one-Voxel and a two-Voxel Door open and close as one; a run longer than
+- [x] A one-Voxel and a two-Voxel Door open and close as one; a run longer than
       4 toggles 4.
-- [ ] Shape and Orientation survive a toggle; a toggle adds no journal entry.
-- [ ] Closing on the Player is refused; out of reach is shown before the press
+- [x] Shape and Orientation survive a toggle; a toggle adds no journal entry.
+- [x] Closing on the Player is refused; out of reach is shown before the press
       and refused after it.
-- [ ] Breaking an open Door drops the closed Material's Item; undo of a Door's
+- [x] Breaking an open Door drops the closed Material's Item; undo of a Door's
       placement works open or closed.
-- [ ] A Material declared as two kinds, or in two Doors, is a load error.
-- [ ] An open Door survives reopening the World.
+- [x] A Material declared as two kinds, or in two Doors, is a load error.
+- [x] An open Door survives reopening the World.

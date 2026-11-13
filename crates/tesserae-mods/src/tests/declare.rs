@@ -10,8 +10,9 @@ use tesserae_core::{
 use crate::bindings::tesserae::mods::content::{self, Declaration};
 use crate::bindings::tesserae::mods::types;
 use crate::{
-    Applied, Kind, MAX_ITEMS, MAX_ITEMS_PER_MOD, MAX_TOOLS_PER_MOD, ModError, Registry,
-    RegistryMismatch, ToolDef, ToolKind, ViewParams, apply, resolve_biomes, resolve_items,
+    Applied, Kind, MAX_ITEMS, MAX_ITEMS_PER_MOD, MAX_TOOLS_PER_MOD, MAX_VOXEL_USES_PER_MOD,
+    ModError, Registry, RegistryMismatch, ToolDef, ToolKind, ViewParams, apply, resolve,
+    resolve_biomes, resolve_items,
 };
 use tesserae_core::SurvivalRules;
 
@@ -60,6 +61,7 @@ fn declaring(materials: &[&str], shapes: &[&str]) -> Declaration {
         material_sounds: Vec::new(),
         soundscapes: Vec::new(),
         cause_sounds: Vec::new(),
+        voxel_uses: Vec::new(),
     }
 }
 
@@ -2039,4 +2041,79 @@ fn only_the_game_declares_climate() {
             humidity_size_m: 100.0
         }
     );
+}
+
+fn door(material: &str, open: &str) -> content::VoxelUse {
+    content::VoxelUse {
+        material: material.into(),
+        kind: content::VoxelUseKind::Door(open.into()),
+    }
+}
+
+fn resolved_uses(mods: &[(&str, Declaration)]) -> Result<Load, ModError> {
+    let mut load = Load::new();
+    let behaviours: Vec<_> = mods
+        .iter()
+        .map(|(id, d)| load.apply(id, d.clone()).unwrap().behaviour)
+        .collect();
+    resolve(behaviours, &mut load.tables, &load.registry)?;
+    Ok(load)
+}
+
+#[test]
+fn a_mod_may_make_another_mods_materials_a_door() {
+    let mut uses = declaring(&[], &[]);
+    uses.voxel_uses = vec![door("a:door", "a:door_open")];
+    let load =
+        resolved_uses(&[("a", declaring(&["door", "door_open"], &[])), ("b", uses)]).unwrap();
+    let id = |name| load.registry.id_of(Kind::Material, name).unwrap() as MaterialId;
+    let found = load.tables.uses.door(id("a:door_open")).unwrap();
+    assert_eq!(
+        (found.closed, found.open),
+        (id("a:door"), id("a:door_open"))
+    );
+}
+
+#[test]
+fn a_bad_voxel_use_is_a_load_error_naming_the_row() {
+    let mut water = material("water");
+    water.solid = false;
+    let mut base = declaring(&["door", "door_open", "gate"], &[]);
+    base.materials.push(water);
+    for (rows, expected) in [
+        (
+            vec![door("m:door", "m:nowhere")],
+            "names Material `m:nowhere`",
+        ),
+        (vec![door("m:door", "m:water")], "must be solid"),
+        (vec![door("m:door", "m:door")], "must not be its closed one"),
+        (
+            vec![door("m:door", "m:door_open"), door("m:door", "m:gate")],
+            "voxel-uses 1 `m:door`",
+        ),
+        (
+            vec![door("m:door", "m:door_open"), door("m:gate", "m:door_open")],
+            "another Door's state",
+        ),
+    ] {
+        let mut d = base.clone();
+        d.voxel_uses = rows;
+        let error = resolved_uses(&[("m", d)]).err().unwrap().to_string();
+        assert!(error.contains(expected), "{error}");
+        assert!(error.contains("`m`"), "{error}");
+    }
+}
+
+#[test]
+fn no_mod_declares_more_than_64_voxel_uses() {
+    let mut d = declaring(&[], &[]);
+    d.voxel_uses = vec![door("m:a", "m:b"); MAX_VOXEL_USES_PER_MOD + 1];
+    assert!(matches!(
+        Load::new().apply("m", d).unwrap_err(),
+        ModError::TooManyRows {
+            what: "voxel-use",
+            max: 64,
+            ..
+        }
+    ));
 }

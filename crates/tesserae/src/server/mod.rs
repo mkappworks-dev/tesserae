@@ -45,6 +45,7 @@ pub mod streaming;
 pub mod survival;
 pub mod tool;
 pub mod undo;
+mod usable;
 pub mod vitals;
 pub mod world_state;
 

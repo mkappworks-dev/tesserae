@@ -334,6 +334,19 @@ a World; two items may not name one Material. Lines 0.1 and 0.2 declare none. An
 item may also set `max-stack`, the most one Inventory slot holds (1 to 64,
 omitted is 64), and `food`, the hunger eating one restores.
 
+A `[[voxel-uses]]` row makes a Material a Usable Voxel, which Use acts on. Its
+`kind` is `door`, with a closed `material` and an `open` one, both solid
+Materials by full name; bodies pass through the open one, and removing it drops
+the closed one's Item. Any Mod may declare them, at most 64 per Mod, and a
+Material is in at most one row, as either state.
+
+```toml
+[[voxel-uses]]
+kind = "door"
+material = "plain:door"
+open = "plain:door_open"
+```
+
 ### Non-Voxel Causes and Biome audio
 
 Only the Game declares `cause-sounds`: each row binds `cause` to a Sound's full

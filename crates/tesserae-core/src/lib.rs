@@ -33,6 +33,7 @@ pub mod shape;
 pub mod survival;
 pub mod tables;
 pub mod testgen;
+pub mod usable;
 pub mod visibility;
 pub mod voxel;
 pub mod worldgen;
@@ -70,6 +71,7 @@ pub use shape::{
 };
 pub use survival::SurvivalRules;
 pub use tables::{PlaceFault, Tables};
+pub use usable::{Door, UseError, VoxelUse, VoxelUses};
 pub use voxel::{AIR, MaterialId, SHAPE_FULL_CUBE, ShapeId, Voxel};
 pub use worldgen::{
     CaveParams, GroundParams, MAX_HEIGHT_M, MAX_OCTAVES, MAX_SMOOTHED_PER_CHUNK, ParamError,
