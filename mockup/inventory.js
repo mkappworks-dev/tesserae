@@ -161,8 +161,46 @@ function ensureInventory() {
   state.transferCount ??= 64;
   state.inspected ||= { area: "bag", index: 0 };
 }
+/* Boxes in unit-cube coordinates [x0, x1, y0, y1, z0, z1], drawn far to near. */
+const shapeBoxes = {
+  Post: [[0.3, 0.7, 0.3, 0.7, 0, 1]],
+  Stair: [
+    [0, 1, 0, 1, 0, 0.5],
+    [0, 1, 0, 0.5, 0.5, 1],
+  ],
+  Fence: [
+    [0, 0.22, 0.39, 0.61, 0, 1],
+    [0.22, 0.78, 0.45, 0.55, 0.58, 0.78],
+    [0.22, 0.78, 0.45, 0.55, 0.2, 0.4],
+    [0.78, 1, 0.39, 0.61, 0, 1],
+  ],
+};
+function isoBoxes(item, boxes) {
+  const pt = (x, y, z) =>
+    `${(24 + (x - y) * 19).toFixed(1)} ${(3 + (x + y) * 11 + (1 - z) * 20).toFixed(1)}`;
+  const face = (pts, shade) =>
+    `<path d="M${pts.join("L")}Z" fill="${item.color}"/>${shade ? `<path d="M${pts.join("L")}Z" fill="#000" opacity="${shade}"/>` : ""}`;
+  return `<svg class="voxel-icon" viewBox="0 0 48 48" aria-hidden="true">${boxes
+    .map(
+      ([x0, x1, y0, y1, z0, z1]) =>
+        face(
+          [pt(x0, y1, z1), pt(x1, y1, z1), pt(x1, y1, z0), pt(x0, y1, z0)],
+          0.16,
+        ) +
+        face(
+          [pt(x1, y0, z1), pt(x1, y1, z1), pt(x1, y1, z0), pt(x1, y0, z0)],
+          0.32,
+        ) +
+        face(
+          [pt(x0, y0, z1), pt(x1, y0, z1), pt(x1, y1, z1), pt(x0, y1, z1)],
+          0,
+        ),
+    )
+    .join("")}</svg>`;
+}
 function voxelIcon(item, shape = "Cube") {
   if (!item) return "";
+  if (shapeBoxes[shape]) return isoBoxes(item, shapeBoxes[shape]);
   const top =
     shape === "Slab" ? "m24 14 19 11-19 11L5 25Z" : "m24 3 19 11-19 11L5 14Z";
   const left =
@@ -210,7 +248,7 @@ function storageInspector() {
     ];
   const stat = (label, value) =>
     `<div><dd>${value}</dd><dt>${label}</dt></div>`;
-  return `<aside class="item-inspector" id="item-inspector">${close}<p class="item-eyebrow">${state.carriedFrom ? "MOVING STACK" : "ITEM DETAILS"}</p><div class="inspector-head">${voxelIcon(item, stack.shape)}<div><h2>${item.name}</h2><p class="item-source">terra:${item.id}${item.materialId !== item.id ? ` · places ${item.material}` : ""}</p></div></div><dl class="inspector-stats">${stat("Count", stack.count)}${stat("Shape", stack.shape || "Cube")}${stat("Max", item.maxStack)}</dl><p class="inspector-label">Shape</p><div class="shape-chips" role="group" aria-label="Shape for ${esc(item.name)}">${["Cube", "Post", "Slab", "Stair", "Fence"].map((s) => `<button data-action="inventory-shape" data-value="${s}" aria-pressed="${shape === s}" class="${shape === s ? "active" : ""}">${s}</button>`).join("")}</div><div class="inspector-actions">${button("To " + to, "storage-quick", { value: at, small: true })}${button("Split", "storage-split", { value: at, small: true, ghost: true, disabled: stack.count < 2 })}${button("Drop 1", "storage-drop-one", { value: at, small: true, ghost: true })}${button("Drop stack", "storage-drop-all", { value: at, small: true, ghost: true })}${state.carriedFrom ? button("Cancel move", "storage-cancel", { small: true, ghost: true }) : ""}</div></aside>`;
+  return `<aside class="item-inspector" id="item-inspector">${close}<p class="item-eyebrow">${state.carriedFrom ? "MOVING STACK" : "ITEM DETAILS"}</p><div class="inspector-head">${voxelIcon(item, shape)}<div><h2>${item.name}</h2><p class="item-source">terra:${item.id}${item.materialId !== item.id ? ` · places ${item.material}` : ""}</p></div></div><dl class="inspector-stats">${stat("Count", stack.count)}${stat("Max", item.maxStack)}</dl><p class="inspector-label">Shape</p><div class="shape-chips" role="group" aria-label="Shape for ${esc(item.name)}">${["Cube", "Post", "Slab", "Stair", "Fence"].map((s) => `<button data-action="inventory-shape" data-value="${s}" aria-pressed="${shape === s}" class="${shape === s ? "active" : ""}" title="${s}">${voxelIcon(item, s)}<span>${s}</span></button>`).join("")}</div><div class="inspector-actions">${button("To " + to, "storage-quick", { value: at, small: true })}${button("Split", "storage-split", { value: at, small: true, ghost: true, disabled: stack.count < 2 })}${button("Drop 1", "storage-drop-one", { value: at, small: true, ghost: true })}${button("Drop stack", "storage-drop-all", { value: at, small: true, ghost: true })}${state.carriedFrom ? button("Cancel move", "storage-cancel", { small: true, ghost: true }) : ""}</div></aside>`;
 }
 function storagePage() {
   ensureInventory();
