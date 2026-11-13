@@ -174,16 +174,31 @@ Illustrates DESIGN.md step 16. Code is in `crafting.js` and `crafting.css`. The
 Wood, Glass, Brick, Workbench, Chest and Door Items and every Recipe are
 illustrative Terra content, not declarations.
 
-- `/inventory/crafting`: the Inventory's side pane gains a Crafting tab beside
-  the Catalogue in Creative, and is Crafting alone in Survival. It lists the
-  Recipes that need no Station. A Recipe you cannot afford is dimmed and its
-  missing inputs are tinted. Click selects; the footer shows what you have
-  against what it needs. Craft 1, or Craft N for as many as you can afford up to
-  one output Stack. Double-click crafts one; Shift-click crafts N. Inputs come
-  from the Inventory only; output goes to it, and what does not fit drops at
-  your feet with a notice.
-- `/station`: Use on a Workbench opens the same pane titled by the Station, with
-  its Recipes first and the hand Recipes below.
+Every Recipe names where it is crafted: `station = "hand"` or a Station's tag.
+The field is required, and `hand` is reserved, so no Station may declare it.
+
+|                  | Hand Recipe                                      | Station Recipe                                   |
+| ---------------- | ------------------------------------------------ | ------------------------------------------------ |
+| Example (mock)   | Workbench, Brick                                 | Chest, Door, Lamp                                |
+| Declared as      | `station = "hand"`                               | `station = "workbench"`                          |
+| Block needed     | None: craftable anywhere, any time               | A Workbench placed in the World                  |
+| Opened by        | I, then the Crafting tab (`/inventory/crafting`) | Aim at the Workbench and press G (`/station`)    |
+| Where you can be | Anywhere                                         | Within reach of it; walking away closes the pane |
+| Lists            | Hand Recipes only                                | That Station's Recipes only                      |
+
+Crafting works the same in both panes:
+
+- Inputs come from the Inventory only, never from an open Container; output goes
+  to the Inventory, and what does not fit drops at your feet with a notice.
+- One craft makes at most one output Stack. It is instant: no time, fuel or
+  progress. It is not an Edit, so undo (Z) does not reverse it.
+- A Recipe you cannot afford is dimmed and its missing inputs are tinted. Click
+  selects; the footer shows what you have against what it needs. Craft 1, or
+  Craft N for as many as you can afford. Double-click crafts one; Shift-click
+  crafts N.
+- In Creative the Crafting tab sits beside the Catalogue; in Survival the side
+  pane is Crafting alone.
+
 - `/container`: Use on a Chest opens its 27 slots beside the Inventory.
   Click-to-move, drag and drop and Shift-click quick transfer cross between the
   Chest and the Inventory; Take all and Sort act on the Chest.

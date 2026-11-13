@@ -17,7 +17,7 @@ for (const x of craftedItems) {
   });
 }
 const recipes = [
-  { out: "workbench", n: 1, in: [["wood", 4]] },
+  { out: "workbench", n: 1, in: [["wood", 4]], station: "hand" },
   {
     out: "brick",
     n: 2,
@@ -25,6 +25,7 @@ const recipes = [
       ["rock", 2],
       ["dirt", 1],
     ],
+    station: "hand",
   },
   { out: "chest", n: 1, in: [["wood", 8]], station: "workbench" },
   { out: "door", n: 1, in: [["wood", 3]], station: "workbench" },
@@ -71,7 +72,7 @@ function affordable(r) {
 function recipesFor(station) {
   return recipes
     .map((r, i) => ({ ...r, i }))
-    .filter((r) => !r.station || r.station === station)
+    .filter((r) => r.station === station)
     .filter((r) =>
       itemName(r.out)
         .toLowerCase()
@@ -110,26 +111,20 @@ function recipeRow(r) {
   return `<button class="recipe-row ${r.i === state.recipe ? "selected" : ""} ${can ? "" : "unaffordable"}" data-action="recipe-pick" data-value="${r.i}" aria-pressed="${r.i === state.recipe}" aria-label="${esc(out.name)} × ${r.n}, needs ${r.in.map(([id, n]) => n + " " + itemName(id)).join(" and ")}${can ? "" : ", missing items"}" title="Click to select · Double-click crafts 1 · Shift-click crafts ${can || "as many as you can"}">${voxelIcon(out)}<span class="recipe-text"><b>${esc(out.name)}${r.n > 1 ? ` <small>× ${r.n}</small>` : ""}</b><span class="recipe-inputs">${inputs}</span></span></button>`;
 }
 function craftingSide(station, strip = "") {
-  const list = recipesFor(station?.tag),
-    own = list.filter((r) => r.station),
-    hand = list.filter((r) => !r.station),
-    r = recipes[state.recipe] || recipes[0];
-  const selectable = list.some((x) => x.i === state.recipe);
+  const list = recipesFor(station?.tag || "hand");
+  if (!list.some((x) => x.i === state.recipe) && list.length)
+    state.recipe = list[0].i;
+  const r = recipes[state.recipe],
+    selectable = list.some((x) => x.i === state.recipe);
   const can = selectable ? affordable(r) : 0;
-  const group = (label, rows) =>
-    rows.length
-      ? `<p class="recipe-group">${label}</p>${rows.map(recipeRow).join("")}`
-      : "";
-  const rows = station
-    ? group(station.name, own) + group("By hand", hand)
-    : hand.map(recipeRow).join("");
+  const rows = list.map(recipeRow).join("");
   const footer = selectable
-    ? `<footer class="transfer craft-footer"><div class="transfer-item">${voxelIcon(stackItem({ id: r.out }))}<span><b>${esc(itemName(r.out))} × ${r.n}</b><small>${r.station ? "Needs a " + esc(usables[r.station].name) : "By hand"}</small></span></div><dl class="craft-needs">${r.in.map(([id, n]) => `<div class="${holding(id) < n ? "short" : ""}"><dt>${esc(itemName(id))}</dt><dd>${holding(id)} / ${n}</dd></div>`).join("")}</dl><div class="transfer-actions">${button(can > 1 ? `Craft ${can}` : "Craft all", "craft", { value: "max", ghost: true, disabled: can < 2 })}${button("Craft 1", "craft", { value: 1, primary: true, disabled: !can })}</div></footer>`
+    ? `<footer class="transfer craft-footer"><div class="transfer-item">${voxelIcon(stackItem({ id: r.out }))}<span><b>${esc(itemName(r.out))} × ${r.n}</b><small>${r.station === "hand" ? "By hand" : "Needs a " + esc(usables[r.station].name)}</small></span></div><dl class="craft-needs">${r.in.map(([id, n]) => `<div class="${holding(id) < n ? "short" : ""}"><dt>${esc(itemName(id))}</dt><dd>${holding(id)} / ${n}</dd></div>`).join("")}</dl><div class="transfer-actions">${button(can > 1 ? `Craft ${can}` : "Craft all", "craft", { value: "max", ghost: true, disabled: can < 2 })}${button("Craft 1", "craft", { value: 1, primary: true, disabled: !can })}</div></footer>`
     : "";
   const reach = station
     ? `<button class="sim-inline" data-action="use-walk-away">Simulate: walk out of reach</button>`
     : "";
-  return `<aside class="catalogue-side crafting-side" aria-label="${station ? esc(station.name) : "Crafting"}">${strip}<header><p class="item-eyebrow">${station ? "STATION" : "BY HAND"}</p><h2>${station ? esc(station.name) : "Crafting"}</h2><small>${station ? `${esc(station.name)} Recipes, then the ones you can make by hand` : "Recipes that need no Station"}</small></header><div class="catalogue-search side-search">${icon("search", 16)}<input class="input" data-bind="craftQuery" value="${esc(state.craftQuery || "")}" placeholder="Search Recipes…" aria-label="Search Recipes"></div><div class="recipe-list" id="recipe-list">${rows || '<p class="quick-add-empty">No Recipes match.</p>'}</div>${reach}${footer}</aside>`;
+  return `<aside class="catalogue-side crafting-side" aria-label="${station ? esc(station.name) : "Crafting"}">${strip}<header><p class="item-eyebrow">${station ? "STATION" : "BY HAND"}</p><h2>${station ? esc(station.name) : "Crafting"}</h2><small>${station ? `Recipes that need a ${esc(station.name)}` : "Recipes you can make anywhere"}</small></header><div class="catalogue-search side-search">${icon("search", 16)}<input class="input" data-bind="craftQuery" value="${esc(state.craftQuery || "")}" placeholder="Search Recipes…" aria-label="Search Recipes"></div><div class="recipe-list" id="recipe-list">${rows || '<p class="quick-add-empty">No Recipes match.</p>'}</div>${reach}${footer}</aside>`;
 }
 
 function containerSide(use) {

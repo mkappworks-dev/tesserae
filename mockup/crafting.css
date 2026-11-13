@@ -36,16 +36,6 @@
   scrollbar-width: thin;
   scrollbar-color: #77777e #1b1b20;
 }
-.recipe-group {
-  margin: 6px 0 2px;
-  font-size: 11px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: #8d919a;
-}
-.recipe-group:first-child {
-  margin-top: 0;
-}
 .recipe-row {
   display: flex;
   align-items: center;
