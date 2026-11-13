@@ -254,14 +254,16 @@ A hand Recipe needs no Station and is crafted from the Inventory anywhere.
 Player's Inventory. A Player cannot remove one that holds Stacks; anything else
 that removes it spills them as Dropped items.
 
-**Door** — two Materials, closed and open, that Use toggles between. Bodies pass
-through the open one; aim still stops on it, and removing it drops the closed
-one's Item.
+**Door** — two Materials, closed and open, that Use toggles between, and a size
+in metres, 1 m by 2 m unless declared, so it is as large at every Voxel size.
+One Item places the whole Door, Use toggles all of it, and removing any Voxel of
+it removes it all and drops the closed one's Item. Bodies pass through the open
+one; aim still stops on it.
 
 **Game mode** — Creative or Survival. A World has a default; each Player has
-their own. Both spend an Item per placed Voxel and drop one per removed Voxel;
-Creative's Catalogue gives Items, and only Survival has damage, hunger and
-death.
+their own. Both spend an Item per placed Voxel and drop one per removed Voxel, a
+whole Door counting as one; Creative's Catalogue gives Items, and only Survival
+has damage, hunger and death.
 
 **Vitals** — a Player's health, hunger and air.
 

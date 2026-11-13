@@ -683,7 +683,11 @@ impl Guest for Terra {
             voxel_uses: vec![
                 VoxelUse {
                     material: "terra:door".into(),
-                    kind: VoxelUseKind::Door("terra:door_open".into()),
+                    kind: VoxelUseKind::Door(tesserae::mods::content::DoorDef {
+                        open: "terra:door_open".into(),
+                        width_m: Some(1.0),
+                        height_m: Some(2.0),
+                    }),
                 },
                 VoxelUse {
                     material: "terra:chest".into(),

@@ -2045,9 +2045,22 @@ fn only_the_game_declares_climate() {
 }
 
 fn door(material: &str, open: &str) -> content::VoxelUse {
+    sized_door(material, open, None, None)
+}
+
+fn sized_door(
+    material: &str,
+    open: &str,
+    width_m: Option<f32>,
+    height_m: Option<f32>,
+) -> content::VoxelUse {
     content::VoxelUse {
         material: material.into(),
-        kind: content::VoxelUseKind::Door(open.into()),
+        kind: content::VoxelUseKind::Door(content::DoorDef {
+            open: open.into(),
+            width_m,
+            height_m,
+        }),
     }
 }
 
@@ -2080,6 +2093,21 @@ fn a_mod_may_make_another_mods_materials_a_door() {
         (found.closed, found.open),
         (id("a:door"), id("a:door_open"))
     );
+    assert_eq!(
+        (found.width_m, found.height_m),
+        (1.0, 2.0),
+        "absent is 1 m by 2 m"
+    );
+}
+
+#[test]
+fn a_door_declares_its_size_in_metres() {
+    let mut d = declaring(&["door", "door_open"], &[]);
+    d.voxel_uses = vec![sized_door("m:door", "m:door_open", Some(1.5), Some(3.0))];
+    let load = resolved_uses(&[("m", d)]).unwrap();
+    let id = load.registry.id_of(Kind::Material, "m:door").unwrap() as MaterialId;
+    let found = load.tables.uses.door(id).unwrap();
+    assert_eq!((found.width_m, found.height_m), (1.5, 3.0));
 }
 
 #[test]
@@ -2114,6 +2142,14 @@ fn a_bad_voxel_use_is_a_load_error_naming_the_row() {
             "another Door's state",
         ),
         (vec![station("m:gate", "hand")], "`hand` is reserved"),
+        (
+            vec![sized_door("m:door", "m:door_open", Some(0.25), None)],
+            "from 0.5 to 4 m wide",
+        ),
+        (
+            vec![sized_door("m:door", "m:door_open", None, Some(5.0))],
+            "from 1 to 4 m tall",
+        ),
         (vec![station("m:water", "bench")], "must be solid"),
     ] {
         let mut d = base.clone();

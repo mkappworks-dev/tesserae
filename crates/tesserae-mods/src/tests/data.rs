@@ -468,7 +468,11 @@ fn component() -> Declaration {
         voxel_uses: vec![
             content::VoxelUse {
                 material: "full:wood".into(),
-                kind: content::VoxelUseKind::Door("full:ash".into()),
+                kind: content::VoxelUseKind::Door(content::DoorDef {
+                    open: "full:ash".into(),
+                    width_m: Some(1.5),
+                    height_m: None,
+                }),
             },
             content::VoxelUse {
                 material: "full:rock".into(),

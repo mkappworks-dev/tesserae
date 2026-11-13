@@ -610,7 +610,7 @@ mod tests {
                 .unwrap()
         });
         tables
-            .register_use(closed, crate::VoxelUse::Door { open })
+            .register_use(closed, crate::VoxelUse::door(open))
             .unwrap();
         for (door, floor) in [(closed, 1.0), (open, 0.0)] {
             let mut g = Grid::new();

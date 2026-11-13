@@ -106,6 +106,7 @@ impl Journal {
         *self = Self::default();
     }
 
+    #[cfg(test)]
     pub(super) fn record(&mut self, entry: Entry) {
         self.record_group(vec![entry]);
     }

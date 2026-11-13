@@ -1,6 +1,6 @@
 # 09: Doors in metres
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: None (can start immediately)
 
@@ -26,13 +26,26 @@ declares 1 m by 2 m.
 
 ## Acceptance criteria
 
-- [ ] At 1 m and at 0.25 m Voxels, one Door Item places a Door at least 2 m tall
+- [x] At 1 m and at 0.25 m Voxels, one Door Item places a Door at least 2 m tall
       and 1 m wide, and a Survival Player walks through it open.
-- [ ] Placement is refused whole when any cell is blocked, and spends exactly
+- [x] Placement is refused whole when any cell is blocked, and spends exactly
       one Item.
-- [ ] Use toggles every cell; breaking any cell removes all and drops one Item;
+- [x] Use toggles every cell; breaking any cell removes all and drops one Item;
       undo and redo restore or remove the whole Door in either state.
-- [ ] Two Doors side by side toggle and break independently.
-- [ ] An out-of-range size is a load error; an absent size is 1 m by 2 m.
-- [ ] Docs (authoring guide, data-mods, contract-compatibility, ADR-0026,
+- [x] Two Doors side by side toggle and break independently.
+- [x] An out-of-range size is a load error; an absent size is 1 m by 2 m.
+- [x] Docs (authoring guide, data-mods, contract-compatibility, ADR-0026,
       GLOSSARY Door) say a Door is a size in metres.
+
+## Decisions
+
+- Which cells are one Door is derived, not stored: the cells of that Door's
+  Materials touching in its plane are tiled Door-wide from their lowest corner,
+  then each column of tiles Door-tall from its own lowest cell. The plane is the
+  horizontal axis the Material runs further along through the aimed cell. Doors
+  side by side, even on a step, stay two; Doors stacked out of line are not told
+  apart. Recorded in the ADR-0026 amendment.
+- A Door placed against a ceiling (solid above its foot, none below) hangs
+  down; otherwise it stands up from its foot, centred across the facing.
+- Deferred: the Client's ghost still previews one Voxel, and Layouts and Mod
+  Commands of a Door's Material still place single Voxels.
