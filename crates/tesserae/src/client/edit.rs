@@ -696,6 +696,7 @@ fn show_rejections(
     mut rejected: MessageReader<EditRejected>,
     mut notice: ResMut<Notice>,
     (quiet, hotbar): (Res<QuietUntil>, Res<Hotbar>),
+    (looks, catalogue): (Res<super::drops::Looks>, Res<Catalogue>),
     time: Res<Time>,
 ) {
     for message in rejected.read() {
@@ -707,6 +708,13 @@ fn show_rejections(
             RejectReason::ItemNeeded => continue,
             RejectReason::NothingHeld => {
                 format!("Nothing to place in hotbar slot {}.", hotbar.selected + 1)
+            }
+            RejectReason::ContainerNotEmpty(material) => {
+                let names = super::inventory_window::Names {
+                    looks: &looks,
+                    catalogue: &catalogue,
+                };
+                format!("Empty the {} first.", names.material_label(material))
             }
             reason => reason.message().to_owned(),
         };
@@ -1500,6 +1508,29 @@ mod tests {
         });
         held_frame(&mut app);
         assert_eq!(app.world().resource::<Notice>().text(), "");
+    }
+
+    #[test]
+    fn a_full_container_s_refusal_names_its_material() {
+        let mut app = app(CursorGrabMode::Locked);
+        app.world_mut()
+            .resource_mut::<super::super::drops::Looks>()
+            .0
+            .push(ItemLook {
+                name: "t:pouch".into(),
+                size_m: 0.25,
+                color: [0; 4],
+                material: Some(wood()),
+                max_stack: 64,
+            });
+        app.world_mut().write_message(EditRejected {
+            reason: RejectReason::ContainerNotEmpty(wood()),
+        });
+        frame(&mut app);
+        assert_eq!(
+            app.world().resource::<Notice>().text(),
+            "Empty the Pouch first."
+        );
     }
 
     #[test]

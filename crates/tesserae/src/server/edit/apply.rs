@@ -54,7 +54,8 @@ pub(in crate::server) fn apply_pending(
                         .as_ref()
                         .is_some_and(|c| c.holds_stacks(landing.0)) =>
                     {
-                        Err(RejectReason::ContainerNotEmpty)
+                        let held = store.voxel(landing.0).expect("struck, so loaded");
+                        Err(RejectReason::ContainerNotEmpty(held.material()))
                     }
                     _ => Ok(landing),
                 }

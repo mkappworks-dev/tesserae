@@ -288,7 +288,7 @@ fn restore(
                 .container(step(entry).1.solid.material())
                 .is_none()
         {
-            return Err(RejectReason::ContainerNotEmpty.into());
+            return Err(RejectReason::ContainerNotEmpty(step(entry).0.solid.material()).into());
         }
     }
     let owed = owed(group, action, settle.entities);

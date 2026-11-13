@@ -321,10 +321,10 @@ fn remove_down(app: &mut App) {
 fn removing_a_chest_that_holds_stacks_is_refused_and_an_empty_one_breaks() {
     let mut app = stocked();
     remove_down(&mut app);
-    assert_eq!(rejections(&mut app), [RejectReason::ContainerNotEmpty]);
+    let chest = voxel_at(&app, CHEST).material();
     assert_eq!(
-        RejectReason::ContainerNotEmpty.message(),
-        "Empty the Chest first."
+        rejections(&mut app),
+        [RejectReason::ContainerNotEmpty(chest)]
     );
     assert!(!voxel_at(&app, CHEST).is_air());
     ask(&mut app, InventoryIntent::TakeAll);
@@ -388,7 +388,10 @@ fn undo_and_redo_that_would_remove_a_full_chest_are_refused() {
     };
     fill(&mut app);
     replay(&mut app, Undo);
-    assert_eq!(rejections(&mut app), [RejectReason::ContainerNotEmpty]);
+    assert_eq!(
+        rejections(&mut app),
+        [RejectReason::ContainerNotEmpty(chest)]
+    );
     assert_eq!(voxel_at(&app, placed).material(), chest);
     app.world_mut()
         .resource_mut::<Containers>()
@@ -418,7 +421,10 @@ fn undo_and_redo_that_would_remove_a_full_chest_are_refused() {
     assert!(rejections(&mut app).is_empty());
     fill(&mut app);
     replay(&mut app, Redo);
-    assert_eq!(rejections(&mut app), [RejectReason::ContainerNotEmpty]);
+    assert_eq!(
+        rejections(&mut app),
+        [RejectReason::ContainerNotEmpty(chest)]
+    );
     assert_eq!(voxel_at(&app, placed).material(), chest);
 }
 

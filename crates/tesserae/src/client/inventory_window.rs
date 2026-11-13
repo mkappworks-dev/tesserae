@@ -863,7 +863,7 @@ impl Names<'_> {
 
     /// What the Player calls a Material: the title of the Item that places
     /// it, else its declared name.
-    fn material_label(&self, material: MaterialId) -> String {
+    pub(super) fn material_label(&self, material: MaterialId) -> String {
         match self
             .looks
             .0
