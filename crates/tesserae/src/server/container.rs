@@ -98,8 +98,14 @@ impl Containers {
         self.sessions.remove(&viewer).map(|s| s.at)
     }
 
-    /// The slots of the Container `viewer` has open, to change; a change is
-    /// sent to its viewers and saved.
+    /// The slots of the Container `viewer` has open.
+    pub(super) fn viewed(&self, viewer: Entity) -> Option<&[Option<Stack>]> {
+        let at = self.sessions.get(&viewer)?.at;
+        self.held.get(&at).map(Vec::as_slice)
+    }
+
+    /// The slots of the Container `viewer` has open, to change; taking them
+    /// sends them to its viewers and saves them.
     pub(super) fn viewing_mut(&mut self, viewer: Entity) -> Option<&mut Vec<Option<Stack>>> {
         let at = self.sessions.get(&viewer)?.at;
         self.unsent.insert(at);

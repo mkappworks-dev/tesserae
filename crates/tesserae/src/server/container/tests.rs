@@ -266,6 +266,23 @@ fn a_container_slot_with_none_open_or_past_its_end_is_refused() {
 }
 
 #[test]
+fn a_refused_move_neither_resends_nor_saves_the_chest() {
+    let mut app = stocked();
+    shown(&mut app);
+    let revision = app.world().resource::<Containers>().revision();
+    let past_its_end = InventoryIntent::Move {
+        from: mine(Slot::Hotbar(2)),
+        to: SlotAddress::Container(4),
+    };
+    assert_eq!(
+        ask(&mut app, past_its_end),
+        [Reason::Rule(Refusal::NoSuchSlot)]
+    );
+    assert!(shown(&mut app).is_empty());
+    assert_eq!(app.world().resource::<Containers>().revision(), revision);
+}
+
+#[test]
 fn two_sessions_on_one_chest_share_its_stacks() {
     let mut app = stocked();
     shown(&mut app);

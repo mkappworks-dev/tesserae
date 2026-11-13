@@ -239,17 +239,21 @@ pub(super) fn arrange(
         }
         let open = containers.as_deref().is_some_and(|c| c.viewing(viewer));
         if let Some(rule) = beside(*intent, open) {
-            let Some(slots) = containers
-                .as_deref_mut()
+            let Some(mut stacks) = containers
+                .as_deref()
                 .filter(|_| open)
-                .and_then(|c| c.viewing_mut(viewer))
+                .and_then(|c| c.viewed(viewer))
+                .map(<[_]>::to_vec)
             else {
                 refused.write(InventoryRefused(Reason::NoContainer));
                 continue;
             };
-            let mut stacks = slots.clone();
             match rule(&mut next.beside(&mut stacks), &limit) {
                 Ok(()) => {
+                    let slots = containers
+                        .as_deref_mut()
+                        .and_then(|c| c.viewing_mut(viewer))
+                        .expect("viewed above");
                     *slots = stacks;
                     inventory.set_if_neq(Inventory(next));
                 }
