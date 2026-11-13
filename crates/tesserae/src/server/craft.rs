@@ -47,12 +47,14 @@ pub struct CraftDropped {
     pub count: u32,
 }
 
-/// For the Client to put on screen.
-pub fn message(refusal: CraftRefusal) -> &'static str {
-    match refusal {
-        CraftRefusal::MissingItems => "Missing items.",
-        CraftRefusal::NeedsStation => "That Recipe needs a Station.",
-        CraftRefusal::NoSuchRecipe => "That Recipe does not exist.",
+impl CraftRefusal {
+    /// For the Client to put on screen.
+    pub fn message(self) -> &'static str {
+        match self {
+            CraftRefusal::MissingItems => "Missing items.",
+            CraftRefusal::NeedsStation => "That Recipe needs a Station.",
+            CraftRefusal::NoSuchRecipe => "That Recipe does not exist.",
+        }
     }
 }
 
@@ -231,7 +233,7 @@ mod tests {
             assert_eq!(held(&mut app, "t:stone"), 1);
             assert_eq!(held(&mut app, "t:dust"), 0);
         }
-        assert_eq!(message(CraftRefusal::MissingItems), "Missing items.");
+        assert_eq!(CraftRefusal::MissingItems.message(), "Missing items.");
         assert_eq!(ask(&mut app, 9, Count::One), [CraftRefusal::NoSuchRecipe]);
     }
 

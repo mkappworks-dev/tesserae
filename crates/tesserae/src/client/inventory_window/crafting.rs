@@ -258,11 +258,7 @@ pub(super) fn receive(
         book.0 = recipes.clone();
     }
     for CraftRefused(refusal) in refused.read() {
-        ui::notify(
-            &mut commands,
-            crate::server::craft::message(*refusal),
-            ui::Tone::Alert,
-        );
+        ui::notify(&mut commands, refusal.message(), ui::Tone::Alert);
     }
     let names = Names {
         looks: &looks,
