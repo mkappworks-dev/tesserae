@@ -368,9 +368,11 @@ tag = "workbench"
 ### Non-Voxel Causes and Biome audio
 
 Only the Game declares `cause-sounds`: each row binds `cause` to a Sound's full
-name in `sound`. The closed Causes are `splash`, `pickup`, `use-measured`,
-`use-refused`, `eat`, `hurt` and `death`. Unbound Causes are silent; duplicate
-bindings and non-Effects Sounds are refused. The Server emits these events.
+name in `sound`. The closed Causes are `splash`, `burn`, `swimming`, `floating`,
+`pickup`, `use-measured`, `use-refused`, `eat`, `hurt`, `death`, `door-open`,
+`door-close`, `container-open`, `container-close` and `craft`. Unbound Causes
+are silent; duplicate bindings and non-Effects Sounds are refused. The Server
+emits these events.
 
 A Biome may set `soundscape` to a loaded Soundscape's full name, including one
 from a data-only Mod without a context. Unknown names are refused. The Eye

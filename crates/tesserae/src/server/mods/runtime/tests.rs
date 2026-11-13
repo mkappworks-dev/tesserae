@@ -1104,6 +1104,31 @@ pub(in crate::server) fn terra_loaded(size: f32) -> LoadedMods {
     loaded
 }
 
+#[test]
+fn terra_voices_doors_containers_and_crafting() {
+    use tesserae_core::audio::{Cause, SoundCategory};
+    let sounds = terra_loaded(1.0).sounds;
+    for cause in [
+        Cause::DoorOpen,
+        Cause::DoorClose,
+        Cause::ContainerOpen,
+        Cause::ContainerClose,
+        Cause::Craft,
+    ] {
+        let &(_, id) = sounds
+            .cause_sounds
+            .iter()
+            .find(|(bound, _)| *bound == cause)
+            .unwrap_or_else(|| panic!("Terra leaves {cause:?} silent"));
+        let sound = &sounds.sounds[usize::from(id.0)];
+        assert_eq!(sound.def.category, SoundCategory::Effects, "{cause:?}");
+        assert!(
+            sound.def.falloff.is_some(),
+            "{cause:?} is heard where it lands"
+        );
+    }
+}
+
 /// Every fluid the loaded reactions and the lake name.
 fn fluids_named(loaded: &LoadedMods, params: WorldgenParams) -> Vec<u16> {
     let rules = loaded.tables.reactions.rules().iter();

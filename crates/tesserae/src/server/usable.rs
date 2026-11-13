@@ -282,6 +282,23 @@ mod tests {
     }
 
     #[test]
+    fn a_door_sounds_once_where_it_stands_each_time_it_toggles() {
+        use super::super::sound::heard;
+        use tesserae_core::audio::Cause::{DoorClose, DoorOpen};
+        let (mut app, d) = app(2, false);
+        heard::voice(&mut app, &[DoorOpen, DoorClose]);
+        let top = [5.5, 9.5, 5.5];
+        use_down(&mut app);
+        assert_eq!(heard::causes(&mut app), [(DoorOpen, top)]);
+        use_down(&mut app);
+        assert_eq!(heard::causes(&mut app), [(DoorClose, top)]);
+        heard::voice(&mut app, &[]);
+        use_down(&mut app);
+        assert_eq!(heard::causes(&mut app), [], "a Game that binds neither");
+        assert_eq!(materials(&app, 2), [d.open; 2], "still opens, silently");
+    }
+
+    #[test]
     fn a_door_of_two_opens_as_one_and_a_taller_run_toggles_four() {
         let (mut two, d) = app(2, false);
         use_down(&mut two);
@@ -317,7 +334,10 @@ mod tests {
 
     #[test]
     fn closing_a_door_on_the_player_is_refused_as_place_is() {
+        use super::super::sound::heard;
+        use tesserae_core::audio::Cause::DoorClose;
         let (mut app, d) = app(2, true);
+        heard::voice(&mut app, &[DoorClose]);
         // Feet on the ground beside the Door, the body's edge inside it.
         let eye = Vec3::new(4.9, 8.0 + crate::server::player::EYE_HEIGHT, 5.5);
         let mut players = app
@@ -327,6 +347,7 @@ mod tests {
             crate::server::player::Player::physics_at(eye);
         let refused = press(&mut app, eye, Vec3::X, None);
         assert_eq!(refused, [UseOutcome(Err(UseRefusal::InsidePlayer))]);
+        assert_eq!(heard::causes(&mut app), [], "a refusal is not a close");
         assert_eq!(
             UseRefusal::InsidePlayer.message(),
             RejectReason::InsidePlayer.message()

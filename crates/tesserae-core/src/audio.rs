@@ -40,6 +40,11 @@ pub enum Cause {
     Eat,
     Hurt,
     Death,
+    DoorOpen,
+    DoorClose,
+    ContainerOpen,
+    ContainerClose,
+    Craft,
 }
 
 /// A registered Sound: its index in the World's Sound table.
@@ -73,7 +78,12 @@ impl SoundSet {
             | Cause::UseRefused
             | Cause::Eat
             | Cause::Hurt
-            | Cause::Death => None,
+            | Cause::Death
+            | Cause::DoorOpen
+            | Cause::DoorClose
+            | Cause::ContainerOpen
+            | Cause::ContainerClose
+            | Cause::Craft => None,
         }
     }
 }
@@ -311,7 +321,13 @@ impl EffectVolumes {
             Cause::Swimming => Swimming,
             Cause::Floating => Floating,
             Cause::Pickup => Pickups,
-            Cause::UseMeasured | Cause::UseRefused => Tools,
+            Cause::UseMeasured
+            | Cause::UseRefused
+            | Cause::DoorOpen
+            | Cause::DoorClose
+            | Cause::ContainerOpen
+            | Cause::ContainerClose
+            | Cause::Craft => Tools,
             Cause::Hurt | Cause::Death | Cause::Burn => Vitals,
             Cause::Splash => return 1.0,
         };

@@ -17,6 +17,7 @@ use super::mods::EditHistory;
 use super::streaming::MeshState;
 use super::vitals::EatIntent;
 use crate::session::SessionApp;
+use tesserae_core::audio::Cause;
 use tesserae_core::collide::{RayHit, VoxelVolume};
 use tesserae_core::{NodeBox, Tables, Voxel};
 pub use tesserae_mods::ToolKind;
@@ -186,7 +187,10 @@ pub(super) fn answer_use(
         Option<Res<super::persistence::SaveStatus>>,
     ),
     (mut commands, mut opened): (Commands, MessageWriter<super::station::StationOpened>),
-    mut containers: Option<ResMut<super::container::Containers>>,
+    (mut containers, mut audio): (
+        Option<ResMut<super::container::Containers>>,
+        super::sound::Emitter,
+    ),
 ) {
     let (entity, player) = player.into_inner();
     let playing = super::persistence::playing(status);
@@ -225,16 +229,28 @@ pub(super) fn answer_use(
                                 return Err(UseRefusal::TargetChanged);
                             };
                             containers.open(entity, aimed.at, aimed.voxel, slots);
+                            audio.emit_at(Cause::ContainerOpen, aimed.at);
                             Ok(UseResult::Container(aimed.at))
                         }
-                        _ => super::usable::toggle_door(
-                            (&mut store, &mut meshes),
-                            &tables,
-                            &world,
-                            &mut history,
-                            player.solid_body(),
-                            aimed.at,
-                        ),
+                        _ => {
+                            let toggled = super::usable::toggle_door(
+                                (&mut store, &mut meshes),
+                                &tables,
+                                &world,
+                                &mut history,
+                                player.solid_body(),
+                                aimed.at,
+                            );
+                            if let Ok(UseResult::Door { opened }) = toggled {
+                                let cause = if opened {
+                                    Cause::DoorOpen
+                                } else {
+                                    Cause::DoorClose
+                                };
+                                audio.emit_at(cause, aimed.at);
+                            }
+                            toggled
+                        }
                     }
                 }),
             },

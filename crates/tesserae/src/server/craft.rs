@@ -2,6 +2,7 @@
 //! it never enters the undo journal.
 
 use bevy::prelude::*;
+use tesserae_core::audio::Cause;
 use tesserae_core::craft::{self, Count, Recipe, Station};
 
 use super::ContentTables;
@@ -10,6 +11,7 @@ use super::entities::EntityStore;
 use super::inventory::{Inventory, MAX_STACK, drop_around};
 use super::items::Items;
 use super::player::Player;
+use super::sound::Emitter;
 use super::station::AtStation;
 use super::world_state::ChunkStore;
 use crate::session::SessionApp;
@@ -80,7 +82,11 @@ pub(super) fn craft(
     player: Single<(&mut Inventory, &Player, Option<&AtStation>)>,
     (recipes, items): (Res<Recipes>, Option<Res<Items>>),
     (mut entities, store, tables, world): Ground,
-    (mut refused, mut dropped): (MessageWriter<CraftRefused>, MessageWriter<CraftDropped>),
+    (mut refused, mut dropped, mut audio): (
+        MessageWriter<CraftRefused>,
+        MessageWriter<CraftDropped>,
+        Emitter,
+    ),
 ) {
     let (mut inventory, body, at) = player.into_inner();
     let limit = |item: &str| items.as_ref().map_or(MAX_STACK, |i| i.stack_limit(item));
@@ -102,6 +108,7 @@ pub(super) fn craft(
             continue;
         };
         inventory.0 = next;
+        audio.emit(Cause::Craft, body.eye());
         let (Some(left), Some(items)) = (left, items.as_deref()) else {
             continue;
         };
@@ -259,6 +266,23 @@ mod tests {
             .map(|e| (e.as_dropped().item, e.as_dropped().count))
             .collect();
         assert_eq!(drops, [(0, 1)], "Item 0 is `t:dust`");
+    }
+
+    #[test]
+    fn a_landed_craft_sounds_once_at_the_player_and_a_refused_one_is_silent() {
+        use super::super::sound::heard;
+        use tesserae_core::audio::Cause;
+        let mut app = game();
+        heard::voice(&mut app, &[Cause::Craft]);
+        let mut players = app.world_mut().query::<&Player>();
+        let eye = players.single(app.world()).unwrap().eye().to_array();
+        set_inventory(&mut app, &[("t:stone", 64)]);
+        assert_eq!(ask(&mut app, 0, Count::Affordable), []);
+        assert_eq!(held(&mut app, "t:dust"), 32);
+        assert_eq!(heard::causes(&mut app), [(Cause::Craft, eye)], "one batch");
+        assert_eq!(ask(&mut app, 0, Count::One), [CraftRefusal::MissingItems]);
+        assert_eq!(ask(&mut app, 1, Count::One), [CraftRefusal::NeedsStation]);
+        assert_eq!(heard::causes(&mut app), []);
     }
 
     #[test]

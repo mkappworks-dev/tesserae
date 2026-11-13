@@ -848,6 +848,25 @@ fn water_motion_causes_parse_from_data() {
 }
 
 #[test]
+fn use_and_craft_causes_parse_from_data() {
+    use content::SoundCause as C;
+    let names = [
+        ("door-open", C::DoorOpen),
+        ("door-close", C::DoorClose),
+        ("container-open", C::ContainerOpen),
+        ("container-close", C::ContainerClose),
+        ("craft", C::Craft),
+    ];
+    let rows: String = names
+        .iter()
+        .map(|(name, _)| format!("[[cause-sounds]]\ncause='{name}'\nsound='full:thud'\n"))
+        .collect();
+    let declaration = parse(&rows).unwrap();
+    let parsed: Vec<_> = declaration.cause_sounds.iter().map(|c| c.cause).collect();
+    assert_eq!(parsed, names.map(|(_, cause)| cause));
+}
+
+#[test]
 fn burn_cause_parses_from_data() {
     let declaration = parse("[[cause-sounds]]\ncause='burn'\nsound='full:fire'\n").unwrap();
     assert_eq!(declaration.cause_sounds[0].cause, content::SoundCause::Burn);

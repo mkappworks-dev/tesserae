@@ -427,3 +427,39 @@ fn walking_out_of_reach_closes_the_session() {
         "the Stacks stay"
     );
 }
+
+#[test]
+fn a_chest_sounds_at_itself_when_opened_and_closed_but_not_when_broken() {
+    use super::super::sound::heard;
+    use tesserae_core::audio::Cause::{ContainerClose, ContainerOpen};
+    let centre = [5.5, 8.5, 5.5];
+    let (mut app, _) = app();
+    heard::voice(&mut app, &[ContainerOpen, ContainerClose]);
+    ask(&mut app, InventoryIntent::CloseContainer);
+    assert_eq!(heard::causes(&mut app), [], "nothing was open");
+    use_down(&mut app);
+    assert_eq!(heard::causes(&mut app), [(ContainerOpen, centre)]);
+    ask(&mut app, InventoryIntent::CloseContainer);
+    assert_eq!(heard::causes(&mut app), [(ContainerClose, centre)]);
+    use_down(&mut app);
+    set_eye(&mut app, Vec3::new(5.5, 9.0 + EDIT_REACH_M + 1.0, 5.5));
+    settle(&mut app);
+    assert_eq!(
+        heard::causes(&mut app),
+        [(ContainerOpen, centre), (ContainerClose, centre)],
+        "walking away closes it"
+    );
+    assert_eq!(closed(&mut app), [Closed::OutOfReach]);
+    set_eye(&mut app, EYE);
+    use_down(&mut app);
+    heard::causes(&mut app);
+    remove_down(&mut app);
+    settle(&mut app);
+    assert_eq!(closed(&mut app), [Closed::Changed]);
+    assert!(
+        !heard::causes(&mut app)
+            .iter()
+            .any(|&(cause, _)| cause == ContainerClose),
+        "a broken Chest is heard breaking, not closing"
+    );
+}

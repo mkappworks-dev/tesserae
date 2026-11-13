@@ -7,6 +7,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use bevy::prelude::*;
+use tesserae_core::audio::Cause;
 use tesserae_core::collide::VoxelVolume;
 use tesserae_core::entity::DropSpec;
 use tesserae_core::inventory::Stack;
@@ -18,6 +19,7 @@ use super::edit::EDIT_REACH_M;
 use super::entities::EntityStore;
 use super::items::Items;
 use super::player::Player;
+use super::sound::Emitter;
 use super::world_state::ChunkStore;
 use crate::session::SessionApp;
 use crate::world::WorldSettings;
@@ -91,8 +93,9 @@ impl Containers {
         self.sessions.contains_key(&viewer)
     }
 
-    pub(super) fn close(&mut self, viewer: Entity) {
-        self.sessions.remove(&viewer);
+    /// Ends `viewer`'s session, returning where its Container is.
+    pub(super) fn close(&mut self, viewer: Entity) -> Option<[i32; 3]> {
+        self.sessions.remove(&viewer).map(|s| s.at)
     }
 
     /// The slots of the Container `viewer` has open, to change; a change is
@@ -150,7 +153,7 @@ pub(super) fn watch(
     (store, tables, world): (Res<ChunkStore>, Res<ContentTables>, Res<WorldSettings>),
     players: Query<&Player>,
     (mut entities, items): (ResMut<EntityStore>, Res<Items>),
-    mut closed: MessageWriter<ContainerClosed>,
+    (mut closed, mut audio): (MessageWriter<ContainerClosed>, Emitter),
 ) {
     let containers = &mut *containers;
     containers.sessions.retain(|&viewer, session| {
@@ -162,6 +165,7 @@ pub(super) fn watch(
         {
             return true;
         } else {
+            audio.emit_at(Cause::ContainerClose, session.at);
             Closed::OutOfReach
         };
         closed.write(ContainerClosed {

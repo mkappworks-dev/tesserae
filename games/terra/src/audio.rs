@@ -58,6 +58,31 @@ pub fn sounds() -> Vec<SoundDef> {
             0.35,
         ),
         sound("eat", Effects, include_bytes!("../audio/eat.ogg"), 0.4),
+        sound(
+            "door_open",
+            Effects,
+            include_bytes!("../audio/door-open.ogg"),
+            0.45,
+        ),
+        sound(
+            "door_close",
+            Effects,
+            include_bytes!("../audio/door-close.ogg"),
+            0.45,
+        ),
+        sound(
+            "container_open",
+            Effects,
+            include_bytes!("../audio/container-open.ogg"),
+            0.4,
+        ),
+        sound(
+            "container_close",
+            Effects,
+            include_bytes!("../audio/container-close.ogg"),
+            0.4,
+        ),
+        sound("craft", Effects, include_bytes!("../audio/craft.ogg"), 0.4),
         sound("hurt", Effects, include_bytes!("../audio/hurt.ogg"), 0.5),
         sound("death", Effects, include_bytes!("../audio/death.ogg"), 0.5),
         sound("open", Ambient, include_bytes!("../audio/open.ogg"), 0.35),
@@ -263,6 +288,11 @@ pub fn causes() -> Vec<CauseSound> {
         (Eat, "eat"),
         (Hurt, "hurt"),
         (Death, "death"),
+        (DoorOpen, "door_open"),
+        (DoorClose, "door_close"),
+        (ContainerOpen, "container_open"),
+        (ContainerClose, "container_close"),
+        (Craft, "craft"),
     ]
     .into_iter()
     .map(|(cause, sound)| CauseSound {

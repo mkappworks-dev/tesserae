@@ -636,6 +636,17 @@ interface content {
         floating,
         /// The body enters a heat-emitting fluid.
         burn,
+        /// A Door opens, heard at the Door.
+        door-open,
+        /// A Door closes, heard at the Door.
+        door-close,
+        /// A Player opens a Container, heard at the Container.
+        container-open,
+        /// A Player's Container session ends with the Container still there,
+        /// heard at the Container.
+        container-close,
+        /// A Craft lands, heard at the Player.
+        craft,
     }
 
     /// Binds a non-Voxel Cause to an `effects` Sound. A Cause left unbound is

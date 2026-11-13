@@ -682,6 +682,11 @@ fn every_cause_binds_from_a_component() {
         (C::Death, Cause::Death),
         (C::Swimming, Cause::Swimming),
         (C::Floating, Cause::Floating),
+        (C::DoorOpen, Cause::DoorOpen),
+        (C::DoorClose, Cause::DoorClose),
+        (C::ContainerOpen, Cause::ContainerOpen),
+        (C::ContainerClose, Cause::ContainerClose),
+        (C::Craft, Cause::Craft),
     ];
     let game = Declaration {
         sounds: vec![effect("thud")],

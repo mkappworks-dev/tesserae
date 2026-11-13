@@ -1,6 +1,6 @@
 # 07: Sounds for Use and Craft
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 02, 03, 05
 
@@ -16,7 +16,7 @@ refusal. Terra ships CC0 sounds for all five, credited.
 
 ## Acceptance criteria
 
-- [ ] Each Cause is emitted once per landed action at the right position, and
+- [x] Each Cause is emitted once per landed action at the right position, and
       not for a refusal.
-- [ ] A Game that maps none of them still loads and plays silently.
-- [ ] Terra's five sounds are CC0, credited, and play in game.
+- [x] A Game that maps none of them still loads and plays silently.
+- [x] Terra's five sounds are CC0, credited, and play in game.

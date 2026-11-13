@@ -531,6 +531,11 @@ fn cause(cause: content::SoundCause) -> (Cause, &'static str) {
         C::Eat => (Cause::Eat, "eat"),
         C::Hurt => (Cause::Hurt, "hurt"),
         C::Death => (Cause::Death, "death"),
+        C::DoorOpen => (Cause::DoorOpen, "door-open"),
+        C::DoorClose => (Cause::DoorClose, "door-close"),
+        C::ContainerOpen => (Cause::ContainerOpen, "container-open"),
+        C::ContainerClose => (Cause::ContainerClose, "container-close"),
+        C::Craft => (Cause::Craft, "craft"),
     }
 }
 

@@ -219,9 +219,10 @@ const TOSS_AHEAD_M: f32 = 0.5;
 pub(super) fn arrange(
     mut intents: MessageReader<InventoryIntent>,
     player: Single<(Entity, &mut Inventory, &PlayerMode, &Player)>,
-    (placing, mut containers): (
+    (placing, mut containers, mut audio): (
         Option<Res<PlacingItems>>,
         Option<ResMut<super::container::Containers>>,
+        super::sound::Emitter,
     ),
     items: Option<Res<Items>>,
     (mut refused, mut ground): (MessageWriter<InventoryRefused>, Ground),
@@ -231,8 +232,8 @@ pub(super) fn arrange(
     for intent in intents.read() {
         let mut next = inventory.0.clone();
         if *intent == InventoryIntent::CloseContainer {
-            if let Some(containers) = containers.as_deref_mut() {
-                containers.close(viewer);
+            if let Some(at) = containers.as_deref_mut().and_then(|c| c.close(viewer)) {
+                audio.emit_at(tesserae_core::audio::Cause::ContainerClose, at);
             }
             continue;
         }
