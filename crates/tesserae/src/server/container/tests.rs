@@ -59,6 +59,19 @@ fn chest_material(tables: &mut Tables) -> MaterialId {
     tables
         .register_use(chest, VoxelUse::Container { slots: 4 })
         .unwrap();
+    // Fuel that never burns out, so a fire on it stays until put out.
+    tables
+        .register_combustion(
+            chest,
+            tesserae_core::CombustionDef {
+                threshold: 6,
+                ignition_delay_s: 2.0,
+                emission: 0,
+                heat: None,
+                burn: tesserae_core::Burn::Permanent,
+            },
+        )
+        .unwrap();
     chest
 }
 
@@ -303,6 +316,26 @@ fn removing_a_chest_that_holds_stacks_is_refused_and_an_empty_one_breaks() {
     assert!(voxel_at(&app, CHEST).is_air());
     settle(&mut app);
     assert_eq!(closed(&mut app), [Closed::Changed]);
+}
+
+#[test]
+fn a_burning_full_chest_is_put_out_rather_than_refused() {
+    let mut app = stocked();
+    let tables = app.world().resource::<ContentTables>().0.clone();
+    let mut store = app.world_mut().resource_mut::<ChunkStore>();
+    let here = store.occupants(CHEST, &tables.fluids).unwrap();
+    let lit = tesserae_core::Occupants {
+        burning: Some(tesserae_core::Burning { fuel: 64 }),
+        ..here
+    };
+    edit::set_occupants(&mut store, &mut MeshState::default(), &tables, CHEST, lit).unwrap();
+    remove_down(&mut app);
+    assert!(rejections(&mut app).is_empty());
+    let store = app.world().resource::<ChunkStore>();
+    let now = store.occupants(CHEST, &tables.fluids).unwrap();
+    assert_eq!(now.burning, None);
+    assert!(!now.solid.is_air(), "only the fire went");
+    assert!(app.world().resource::<Containers>().holds_stacks(CHEST));
 }
 
 #[test]

@@ -43,9 +43,13 @@ pub(in crate::server) fn apply_pending(
                 // Checked before the Voxel changes, so nothing lands unpaid.
                 match &p.pay {
                     Some(item) if inventory.count(item) == 0 => Err(RejectReason::NothingHeld),
+                    // A Remove that only puts out a fire leaves the Container.
                     _ if matches!(
-                        p.intent.action,
-                        EditAction::Remove | EditAction::RemoveAt(_)
+                        (p.intent.action, landing.1),
+                        (
+                            EditAction::Remove | EditAction::RemoveAt(_),
+                            Change::Solid(_)
+                        )
                     ) && containers
                         .as_ref()
                         .is_some_and(|c| c.holds_stacks(landing.0)) =>
