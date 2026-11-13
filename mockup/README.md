@@ -212,3 +212,24 @@ Crafting works the same in both panes:
 - The **Use on Voxels** group in the Simulate panel aims at each kind, steps out
   of reach, stands in a doorway and breaks the Chest. The dashed "walk out of
   reach" button in a Station or Container pane is prototype chrome too.
+
+## Block gallery
+
+`/blocks` previews every Terra Material as a textured block, drawn from Terra's
+own textures, so a look can be judged before it ships. It shows each Material's
+cube and its top, side and bottom faces, every placeable Shape in a chosen
+Material, and the Door closed and open beside a 1.8 m Player silhouette, at 1,
+0.5 or 0.25 m Voxels. Code is in `blocks.js` and `blocks.css`.
+
+The textures under `blocks/` are generated; do not edit them by hand. After
+changing Terra's textures, regenerate them from the repository root:
+
+```sh
+scripts/build-guests && cargo run -p tesserae-mods --example export-blocks
+```
+
+The example loads the built Terra component through the Mod loader and writes
+each Material's faces as PNG, plus `blocks/index.json`, which lists the
+Materials, their render class and Use, and the Shapes' boxes. Lighting in the
+gallery is illustrative: sides are darkened by a fixed amount, and a translucent
+block shows only its three near faces.

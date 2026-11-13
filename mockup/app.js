@@ -320,6 +320,10 @@ function render() {
   else if (state.screen === "death") screen.innerHTML = deathScreen();
   else if (state.screen === "trust") screen.innerHTML = trustScreen();
   else if (state.screen === "opening") screen.innerHTML = opening();
+  else if (state.screen === "blocks") {
+    screen.innerHTML = blocksPage();
+    drawBlocks();
+  }
   placeToast();
   screen.querySelector(".body")?.setAttribute("tabindex", "0");
   if (hadFocus) {
