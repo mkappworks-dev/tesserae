@@ -1,8 +1,6 @@
 /* /blocks: every Terra Material drawn from Terra's own textures, written by the export-blocks example. */
 const PLAYER_HEIGHT_M = 1.8;
 const PLAYER_WIDTH_M = 0.6;
-// The engine's default Door, which Terra declares.
-const DOOR_M = { width: 1, height: 2 };
 const SHADE = { top: 0, left: 0.18, right: 0.34 };
 const COS = Math.cos(Math.PI / 6);
 let blockIndex = null;
@@ -204,8 +202,11 @@ function drawPlayer(g, at, s, origin, ratio) {
   g.restore();
 }
 
-/** A Door of `m`, one Voxel thick, standing on the grid, its cells `voxel` m each. */
-async function drawDoor(canvas, m, voxel) {
+/**
+ * A Door of `m` sized by `door`, standing on the grid, its cells `voxel` m each and each
+ * drawn as the exported `boxes`: the thin panel closed, or turned onto its hinge side open.
+ */
+async function drawDoor(canvas, m, door, boxes, voxel) {
   const faces = await materialFaces(m);
   const { g, w, h, ratio } = setupCanvas(canvas);
   const scene = [3, 2];
@@ -218,8 +219,8 @@ async function drawDoor(canvas, m, voxel) {
   g.clearRect(0, 0, canvas.width, canvas.height);
   g.imageSmoothingEnabled = false;
   drawGround(g, s, origin, scene, ratio);
-  const across = Math.ceil(DOOR_M.width / voxel);
-  const up = Math.ceil(DOOR_M.height / voxel);
+  const across = Math.ceil(door["width-m"] / voxel);
+  const up = Math.ceil(door["height-m"] / voxel);
   const z = 1;
   const cells = [];
   for (let i = 0; i < across; i++)
@@ -228,21 +229,12 @@ async function drawDoor(canvas, m, voxel) {
   const left = 0.5;
   for (const [i, j] of cells) {
     const cell = [left / voxel + i, j, z / voxel];
-    drawBox(
-      g,
-      faces,
-      cell,
-      [
-        [0, 0, 0],
-        [16, 16, 16],
-      ],
-      s * voxel,
-      origin,
-    );
+    for (const b of byDepth(boxes))
+      drawBox(g, faces, cell, b, s * voxel, origin);
   }
   drawPlayer(
     g,
-    [left + DOOR_M.width + 0.7, 0, z + voxel / 2],
+    [left + door["width-m"] + 0.7, 0, z + voxel / 2],
     s,
     origin,
     ratio,
@@ -321,7 +313,7 @@ async function drawBlocks() {
 <section><header class="blocks-heading"><div><p class="item-eyebrow">SHAPES</p><h3>Placeable Shapes</h3></div><label class="blocks-control">Material <select id="blocks-shape-material">${textured.map((m) => option(m.name, m.name.split(":")[1], shapeMaterial.name)).join("")}</select></label></header><div class="shape-grid">${shapeCards.join("")}</div></section>
 ${
   door
-    ? `<section><header class="blocks-heading"><div><p class="item-eyebrow">DOOR</p><h3>Door at Player scale</h3><p class="muted">${DOOR_M.width} m wide, ${DOOR_M.height} m tall, one Voxel thick: ${Math.ceil(DOOR_M.width / Number(state.blocksVoxel))} × ${Math.ceil(DOOR_M.height / Number(state.blocksVoxel))} cells, each drawn with the whole texture. Grid squares are 1 m.</p></div><label class="blocks-control">Voxel size <select id="blocks-voxel">${["1", "0.5", "0.25"].map((v) => option(v, `${v} m`, state.blocksVoxel)).join("")}</select></label></header><div class="door-grid"><figure><canvas class="door-scene" data-door="closed" width="420" height="320"></canvas><figcaption>Closed · ${esc(door.name)}</figcaption></figure><figure><canvas class="door-scene" data-door="open" width="420" height="320"></canvas><figcaption>Open · ${esc(door.use.door.open)}</figcaption></figure></div></section>`
+    ? `<section><header class="blocks-heading"><div><p class="item-eyebrow">DOOR</p><h3>Door at Player scale</h3><p class="muted">${door.use.door["width-m"]} m wide, ${door.use.door["height-m"]} m tall: ${Math.ceil(door.use.door["width-m"] / Number(state.blocksVoxel))} × ${Math.ceil(door.use.door["height-m"] / Number(state.blocksVoxel))} cells, each a thin panel that Use turns about its hinge edge, so it swings at 1 m and turns as slats at finer sizes. Grid squares are 1 m.</p></div><label class="blocks-control">Voxel size <select id="blocks-voxel">${["1", "0.5", "0.25"].map((v) => option(v, `${v} m`, state.blocksVoxel)).join("")}</select></label></header><div class="door-grid"><figure><canvas class="door-scene" data-door="closed" width="420" height="320"></canvas><figcaption>Closed · ${esc(door.name)}</figcaption></figure><figure><canvas class="door-scene" data-door="open" width="420" height="320"></canvas><figcaption>Open · ${esc(door.use.door.open)}</figcaption></figure></div></section>`
     : ""
 }`;
   root.querySelector("#blocks-shape-material").onchange = (e) => {
@@ -353,6 +345,8 @@ ${
       drawDoor(
         c,
         c.dataset.door === "open" ? named(door.use.door.open) : door,
+        door.use.door,
+        door.use.door.boxes[c.dataset.door],
         Number(state.blocksVoxel),
       ),
     ),

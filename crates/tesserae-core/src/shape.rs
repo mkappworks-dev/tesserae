@@ -301,6 +301,15 @@ impl Orientation {
         (0..ORIENTATIONS as u8).map(Orientation)
     }
 
+    /// The face constant the Shape's own face `face` points to.
+    pub fn face_of(self, face: usize) -> usize {
+        let to = apply(&self.matrix(), crate::mesh::FACE_STEPS[face]);
+        crate::mesh::FACE_STEPS
+            .iter()
+            .position(|&step| step == to)
+            .expect("a rotation maps a face onto a face")
+    }
+
     pub(crate) fn matrix(self) -> Matrix {
         mul(&TILT[(self.0 / 4) as usize], &TURN[self.turn() as usize])
     }

@@ -7,6 +7,7 @@ use std::path::Path;
 
 use futures_lite::future::block_on;
 use serde_json::{Value, json};
+use tesserae_core::mesh::{POS_X, POS_Z};
 use tesserae_core::{Connections, MaterialId, Tables, Voxel};
 use tesserae_mods::{Found, Kind, MATERIAL_TEXTURE_EDGE, ModHost, Registry, Trust, apply, resolve};
 
@@ -57,7 +58,23 @@ fn main() {
         let cube = Voxel::cube(id);
         let def = tables.materials.def(id);
         let usable = if let Some(door) = tables.uses.door(id) {
-            json!({ "door": { "closed": registry_name(&registry, door.closed), "open": registry_name(&registry, door.open) } })
+            // As placed by a Player looking along -Z who aimed at the +X half.
+            let shut = tables.uses.placed(Voxel::cube(door.closed), POS_Z, POS_X);
+            let boxes = |voxel| {
+                tables
+                    .shapes
+                    .selection(voxel, Connections::NONE)
+                    .iter()
+                    .map(|b| json!([b.min, b.max]))
+                    .collect::<Vec<_>>()
+            };
+            json!({ "door": {
+                "closed": registry_name(&registry, door.closed),
+                "open": registry_name(&registry, door.open),
+                "width-m": door.width_m,
+                "height-m": door.height_m,
+                "boxes": { "closed": boxes(shut), "open": boxes(door.toggle(shut)) },
+            } })
         } else if let Some(slots) = tables.uses.container(id) {
             json!({ "container": slots })
         } else if let Some(tag) = tables.uses.station(id) {

@@ -74,7 +74,7 @@ pub(super) fn aim(
 fn usable(tables: &Tables, voxel: Voxel) -> Option<Usable> {
     match tables.uses.of(voxel.material())? {
         (_, VoxelUse::Door { .. }) => Some(Usable::Door {
-            open: tables.uses.passable(voxel.material()),
+            open: tables.uses.is_open(voxel.material()),
         }),
         (_, &VoxelUse::Container { .. }) => Some(Usable::Container),
         (_, VoxelUse::Station { .. }) => Some(Usable::Station),
@@ -128,13 +128,39 @@ pub(super) fn door_placed(
     Some(first(cells, foot))
 }
 
+/// The face of a Door's cell toward a Player looking along `direction`, and
+/// the side across the facing that `struck`, a point on the Voxel at `at`,
+/// lies in: where the panel stands closed, and where its hinge is.
+pub(super) fn door_faces(
+    direction: Vec3,
+    struck: Vec3,
+    at: [i32; 3],
+    voxel_size: f32,
+) -> (usize, usize) {
+    use tesserae_core::mesh::{NEG_X, NEG_Z, POS_X, POS_Z};
+    let half = |axis: usize, low, high| {
+        if struck[axis] / voxel_size - at[axis] as f32 >= 0.5 {
+            high
+        } else {
+            low
+        }
+    };
+    if direction.x.abs() > direction.z.abs() {
+        let near = if direction.x > 0.0 { NEG_X } else { POS_X };
+        (near, half(2, NEG_Z, POS_Z))
+    } else {
+        let near = if direction.z > 0.0 { NEG_Z } else { POS_Z };
+        (near, half(0, NEG_X, POS_X))
+    }
+}
+
 fn first(mut cells: Vec<[i32; 3]>, at: [i32; 3]) -> Vec<[i32; 3]> {
     cells.sort_by_key(|&c| c != at);
     cells
 }
 
-/// Toggles the whole Door at `at`, keeping each Voxel's Shape, Orientation,
-/// fluid and fire. Mods hear it as the Player's Edits; the undo journal never
+/// Toggles the whole Door at `at`, keeping each Voxel's Shape, fluid and
+/// fire, and turning each about its hinge if the Door fixes its Shape. Mods hear it as the Player's Edits; the undo journal never
 /// records it (ADR-0023).
 pub(super) fn toggle_door(
     (store, meshes): (&mut ChunkStore, &mut MeshState),
@@ -149,14 +175,13 @@ pub(super) fn toggle_door(
         .uses
         .door(aimed.material())
         .ok_or(UseRefusal::TargetChanged)?;
-    let to = door.toggled(aimed.material());
+    let opening = !door.is_open(aimed.material());
     let run: Vec<([i32; 3], Occupants)> = door_at(store, tables, world, at)
         .expect("a Door is aimed at")
         .into_iter()
         .map(|p| {
             let here = store.occupants(p, &tables.fluids).expect("found loaded");
-            let v = here.solid;
-            let solid = Voxel::new(to, v.shape(), v.orientation());
+            let solid = door.toggle(here.solid);
             (p, Occupants { solid, ..here })
         })
         .collect();
@@ -166,7 +191,7 @@ pub(super) fn toggle_door(
     {
         return Err(UseRefusal::Busy);
     }
-    if !door.is_open(to)
+    if !opening
         && let Some(body) = body
         && run.iter().any(|&(p, next)| {
             let placed = PlacedOnly {
@@ -189,7 +214,7 @@ pub(super) fn toggle_door(
         let before = store.voxel(p).expect("the run is held");
         let was = store.occupants(p, &tables.fluids).expect("the run is held");
         let written = batch.set_occupants(store, meshes, tables, p, next);
-        written.expect("vetted, and the same Shape takes the same room");
+        written.expect("vetted, and the same Shape turned takes as much room");
         history.record(EditEvent {
             at: p.map(|i| i as f32 * world.voxel_size),
             kind: EditKind::Solid {
@@ -201,15 +226,16 @@ pub(super) fn toggle_door(
         });
     }
     batch.finish(store, meshes, tables);
-    Ok(UseResult::Door {
-        opened: door.is_open(to),
-    })
+    Ok(UseResult::Door { opened: opening })
 }
 
 #[cfg(test)]
 mod tests {
     use bevy::ecs::system::RunSystemOnce;
-    use tesserae_core::{MaterialDef, MaterialId, Orientation, SHAPE_STAIR, VoxelUse};
+    use tesserae_core::{
+        Connections, MaterialDef, MaterialId, NodeBox, Orientation, SHAPE_STAIR, ShapeDef, ShapeId,
+        VoxelUse,
+    };
 
     use super::super::edit::tests::{
         app_with_tables, ground, held, place_held, rejections, replay, send, tick, voxel_at,
@@ -232,18 +258,35 @@ mod tests {
         open: MaterialId,
     }
 
-    fn doors(tables: &mut Tables) -> Doors {
+    /// A 3/16 panel against its own +Z, as Terra's Door declares.
+    const PANEL: NodeBox = NodeBox::new([0, 0, 13], [16, 16, 16]);
+
+    fn doors(tables: &mut Tables, panelled: bool) -> Doors {
         let [closed, open] =
             [(); 2].map(|_| tables.materials.register(MaterialDef::OPAQUE).unwrap());
-        tables.register_use(closed, VoxelUse::door(open)).unwrap();
+        let shape = panelled.then(|| {
+            let def = ShapeDef {
+                connect: None,
+                boxes: vec![PANEL],
+                collision: None,
+            };
+            tables.shapes.register(def).unwrap()
+        });
+        tables
+            .register_use(closed, VoxelUse::door(open), shape)
+            .unwrap();
         Doors { closed, open }
     }
 
     /// The ground with a Door of `height` Voxels standing at (5, 8, 5), and a
     /// Player looking down at it, holding `t:door` and `t:bread`.
     fn app(height: i32, open: bool) -> (App, Doors) {
+        app_with(height, open, false)
+    }
+
+    fn app_with(height: i32, open: bool, panelled: bool) -> (App, Doors) {
         let mut tables = crate::server::fixture_tables();
-        let doors = doors(&mut tables);
+        let doors = doors(&mut tables, panelled);
         let mut chunk = ground();
         let material = if open { doors.open } else { doors.closed };
         for y in 8..8 + height as usize {
@@ -517,17 +560,24 @@ mod tests {
         }
     }
 
-    /// Where a Player 4 m above the ground over column `x` looks down at it.
+    /// Where a Player 4 m above the ground over column `x` looks down at it,
+    /// at the closed panel of a Door hinged on +X, and its open one too.
     fn eye(size: f32, x: i32) -> Vec3 {
-        Vec3::new((x as f32 + 0.5) * size, 8.0 * size + 4.0, 5.5 * size)
+        eye_at(size, x, 0.9)
+    }
+
+    /// [`eye`], aimed `across` the column's width from its -X side.
+    fn eye_at(size: f32, x: i32, across: f32) -> Vec3 {
+        Vec3::new((x as f32 + across) * size, 8.0 * size + 4.0, 5.09 * size)
     }
 
     /// Almost straight down, facing +Z, so a Door placed is wide along X.
     const AIM: Vec3 = Vec3::new(0.0, -1.0, 0.01);
 
-    /// [`app`] with no Door yet, at `size` Voxels, in Survival.
+    /// [`app`] with no Door yet, at `size` Voxels, in Survival, its Door fixed
+    /// to [`PANEL`].
     fn sized(size: f32) -> (App, Doors) {
-        let (mut app, d) = app(0, false);
+        let (mut app, d) = app_with(0, false, true);
         app.insert_resource(WorldSettings {
             voxel_size: size,
             ..default()
@@ -537,8 +587,12 @@ mod tests {
     }
 
     fn place_door(app: &mut App, size: f32, x: i32) {
-        let mut intent = place_held(SHAPE_FULL_CUBE, Orientation::IDENTITY);
-        intent.origin = eye(size, x);
+        place_door_at(app, size, x, 0.9, SHAPE_FULL_CUBE);
+    }
+
+    fn place_door_at(app: &mut App, size: f32, x: i32, across: f32, chosen: ShapeId) {
+        let mut intent = place_held(chosen, Orientation::IDENTITY.flipped());
+        intent.origin = eye_at(size, x, across);
         intent.direction = AIM;
         send(app, intent);
         tick(app);
@@ -718,5 +772,49 @@ mod tests {
         replay(&mut app, Undo);
         assert!(rejections(&mut app).is_empty());
         assert_eq!(materials(&app, 1), [d.open]);
+    }
+
+    fn boxes(app: &App, at: [i32; 3]) -> Vec<([i8; 3], [i8; 3])> {
+        let tables = &app.world().resource::<super::super::ContentTables>().0;
+        tables
+            .shapes
+            .collision(voxel_at(app, at), Connections::NONE)
+            .iter()
+            .map(|b| (b.min, b.max))
+            .collect()
+    }
+
+    #[test]
+    fn a_placed_door_is_a_thin_panel_whatever_shape_the_player_chose() {
+        for size in [1.0, 0.25] {
+            let (mut app, d) = sized(size);
+            place_door_at(&mut app, size, 5, 0.9, SHAPE_STAIR);
+            let cells = door_cells(&app, &d);
+            assert_eq!(cells.len() as f32, 2.0 / (size * size), "at {size}");
+            for &c in &cells {
+                assert_eq!(boxes(&app, c), [([0, 0, 0], [16, 16, 3])], "{c:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn the_hinge_follows_the_aimed_half_and_two_toggles_restore_the_door() {
+        for (across, open) in [
+            (0.9, ([13, 0, 0], [16, 16, 16])),
+            (0.1, ([0, 0, 0], [3, 16, 16])),
+        ] {
+            let (mut app, d) = sized(1.0);
+            place_door_at(&mut app, 1.0, 5, across, SHAPE_FULL_CUBE);
+            let cells = door_cells(&app, &d);
+            let placed: Vec<Voxel> = cells.iter().map(|&c| voxel_at(&app, c)).collect();
+            press(&mut app, eye_at(1.0, 5, across), AIM, None);
+            assert!(all(&app, &cells, d.open), "aimed at {across}");
+            for &c in &cells {
+                assert_eq!(boxes(&app, c), [open], "aimed at {across}");
+            }
+            press(&mut app, eye_at(1.0, 5, across), AIM, None);
+            let again: Vec<Voxel> = cells.iter().map(|&c| voxel_at(&app, c)).collect();
+            assert_eq!(again, placed, "aimed at {across}");
+        }
     }
 }

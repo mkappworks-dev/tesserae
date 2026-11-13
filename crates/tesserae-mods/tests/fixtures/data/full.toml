@@ -275,3 +275,4 @@ width-m = 1.5
 kind = "station"
 material = "full:rock"
 tag = "bench"
+shape = "core:slab"

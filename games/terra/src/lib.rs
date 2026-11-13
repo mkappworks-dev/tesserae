@@ -166,6 +166,20 @@ fn fence() -> ShapeDef {
     }
 }
 
+/// A Door's panel, 3/16 thick against its own +Z, which the engine turns to
+/// face the Player and Use turns about its hinge.
+fn panel() -> ShapeDef {
+    ShapeDef {
+        name: "panel".into(),
+        boxes: vec![NodeBox {
+            min: (0, 0, 13),
+            max: (16, 16, 16),
+        }],
+        collision: None,
+        connect: None,
+    }
+}
+
 fn appearance(material: &str, [r, g, b, a]: [u8; 4]) -> Appearance {
     Appearance {
         material: material.into(),
@@ -269,15 +283,9 @@ impl Guest for Terra {
                 solid("workbench"),
                 solid("chest"),
                 solid("door"),
-                // Drawn as its frame alone and passed through, as Use opened it.
-                MaterialDef {
-                    dimming: 0,
-                    occlusion: Occlusion::Never,
-                    render: RenderClass::Cutout,
-                    ..solid("door_open")
-                },
+                solid("door_open"),
             ],
-            shapes: vec![fence()],
+            shapes: vec![fence(), panel()],
             appearance: vec![
                 appearance("lamp", [245, 227, 184, 255]),
                 appearance("lava", [230, 72, 16, 255]),
@@ -688,14 +696,17 @@ impl Guest for Terra {
                         width_m: Some(1.0),
                         height_m: Some(2.0),
                     }),
+                    shape: Some("terra:panel".into()),
                 },
                 VoxelUse {
                     material: "terra:chest".into(),
                     kind: VoxelUseKind::Container(None),
+                    shape: None,
                 },
                 VoxelUse {
                     material: "terra:workbench".into(),
                     kind: VoxelUseKind::Station("workbench".into()),
+                    shape: None,
                 },
             ],
             ores: vec![OreDef {

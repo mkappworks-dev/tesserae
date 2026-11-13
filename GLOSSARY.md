@@ -257,8 +257,13 @@ that removes it spills them as Dropped items.
 **Door** — two Materials, closed and open, that Use toggles between, and a size
 in metres, 1 m by 2 m unless declared, so it is as large at every Voxel size.
 One Item places the whole Door, Use toggles all of it, and removing any Voxel of
-it removes it all and drops the closed one's Item. Bodies pass through the open
-one; aim still stops on it.
+it removes it all and drops the closed one's Item. Its row may fix a Shape, as
+Terra's fixes a thin panel: placing turns the panel to face the Player, hinged
+on the half of the cell aimed at, and Use turns each Voxel of it a quarter about
+that hinge edge, so it swings aside at 1 m and turns as slats at finer sizes.
+Bodies collide with the panel as drawn, except that an open Door with no fixed
+Shape, or wider than one Voxel so that its slats stand too close for a body,
+lets them through. Aim still stops on it.
 
 **Game mode** — Creative or Survival. A World has a default; each Player has
 their own. Both spend an Item per placed Voxel and drop one per removed Voxel, a

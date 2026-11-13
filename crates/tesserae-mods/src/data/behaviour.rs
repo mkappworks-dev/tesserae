@@ -197,14 +197,17 @@ pub(super) enum VoxelUse {
         open: String,
         width_m: Option<f32>,
         height_m: Option<f32>,
+        shape: Option<String>,
     },
     Container {
         material: String,
         slots: Option<u8>,
+        shape: Option<String>,
     },
     Station {
         material: String,
         tag: String,
+        shape: Option<String>,
     },
 }
 
@@ -216,6 +219,7 @@ impl From<VoxelUse> for content::VoxelUse {
                 open,
                 width_m,
                 height_m,
+                shape,
             } => Self {
                 material,
                 kind: content::VoxelUseKind::Door(content::DoorDef {
@@ -223,14 +227,25 @@ impl From<VoxelUse> for content::VoxelUse {
                     width_m,
                     height_m,
                 }),
+                shape,
             },
-            VoxelUse::Container { material, slots } => Self {
+            VoxelUse::Container {
+                material,
+                slots,
+                shape,
+            } => Self {
                 material,
                 kind: content::VoxelUseKind::Container(slots),
+                shape,
             },
-            VoxelUse::Station { material, tag } => Self {
+            VoxelUse::Station {
+                material,
+                tag,
+                shape,
+            } => Self {
                 material,
                 kind: content::VoxelUseKind::Station(tag),
+                shape,
             },
         }
     }

@@ -404,10 +404,8 @@ fn short_item(
 /// `occupants` with a Door's open state read as its closed one, so an entry
 /// still matches a Door toggled since it was made (ADR-0023).
 fn as_closed(tables: &tesserae_core::Tables, occupants: Occupants) -> Occupants {
-    let solid = occupants.solid;
-    let material = tables.uses.closed(solid.material());
     Occupants {
-        solid: tesserae_core::Voxel::new(material, solid.shape(), solid.orientation()),
+        solid: tables.uses.as_closed(occupants.solid),
         ..occupants
     }
 }

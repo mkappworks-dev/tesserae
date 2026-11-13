@@ -137,7 +137,7 @@ mod tests {
             [(); 3].map(|_| tables.materials.register(MaterialDef::OPAQUE).unwrap());
         for (material, tag) in [(bench, "bench"), (oak, "bench"), (loom, "loom")] {
             tables
-                .register_use(material, VoxelUse::Station { tag: tag.into() })
+                .register_use(material, VoxelUse::Station { tag: tag.into() }, None)
                 .unwrap();
         }
         let mut chunk = ground();

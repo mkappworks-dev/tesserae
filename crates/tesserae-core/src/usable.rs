@@ -6,7 +6,9 @@ use std::collections::BTreeSet;
 use std::ops::RangeInclusive;
 
 use crate::craft::HAND;
-use crate::voxel::MaterialId;
+use crate::mesh::{NEG_Y, POS_Y, POS_Z};
+use crate::shape::Orientation;
+use crate::voxel::{MaterialId, ShapeId, Voxel};
 
 /// A Container's slots when its row names none.
 pub const CONTAINER_SLOTS: u8 = 27;
@@ -47,13 +49,14 @@ pub enum Rise {
 }
 
 /// Two solid Materials Use toggles between, over a whole Door of this size.
-/// Bodies pass through the open one.
+/// With a fixed Shape, Use also turns each cell a quarter about its hinge.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct Door {
     pub closed: MaterialId,
     pub open: MaterialId,
     pub width_m: f32,
     pub height_m: f32,
+    pub shape: Option<ShapeId>,
 }
 
 impl Door {
@@ -148,13 +151,37 @@ impl Door {
         material == self.open
     }
 
-    /// The other state's Material.
-    pub fn toggled(self, material: MaterialId) -> MaterialId {
-        if self.is_open(material) {
-            self.closed
-        } else {
-            self.open
+    /// `voxel` in the other state: the other Material and, with a fixed
+    /// Shape, a quarter-turn about its up, onto the hinge side to open and
+    /// back to close.
+    pub fn toggle(self, voxel: Voxel) -> Voxel {
+        let opening = !self.is_open(voxel.material());
+        let material = if opening { self.open } else { self.closed };
+        let mut orientation = Orientation::from_bits(voxel.orientation()).unwrap_or_default();
+        if self.shape.is_some() {
+            let turns = if opening { 1 } else { 3 };
+            orientation = (0..turns).fold(orientation, |o, _| o.turned());
         }
+        Voxel::new(material, voxel.shape(), orientation.bits())
+    }
+
+    /// A Voxel of this Door placed closed: its fixed Shape's own +Z on the
+    /// face `near`, upright or upside down so that opening lays it on the
+    /// adjacent face `hinge`. A Door with no fixed Shape keeps `voxel`.
+    fn placed(self, voxel: Voxel, near: usize, hinge: usize) -> Voxel {
+        let Some(shape) = self.shape else {
+            return voxel;
+        };
+        // Upside down is the only way to turn the other sense about +Y, so a
+        // Door hinged on either side keeps its panel on the near face.
+        let orientation = Orientation::all()
+            .find(|o| {
+                [POS_Y, NEG_Y].contains(&o.up())
+                    && o.face_of(POS_Z) == near
+                    && o.turned().face_of(POS_Z) == hinge
+            })
+            .unwrap_or_default();
+        Voxel::shaped(self.closed, shape, orientation)
     }
 }
 
@@ -209,12 +236,15 @@ pub enum UseError {
     /// A Door's width outside [`DOOR_WIDTHS_M`] or height outside
     /// [`DOOR_HEIGHTS_M`].
     DoorSize,
+    /// A fixed Shape no Shape is registered under.
+    NotAShape,
 }
 
 impl std::fmt::Display for UseError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             UseError::NotAMaterial => f.write_str("no Material is registered under that id"),
+            UseError::NotAShape => f.write_str("no Shape is registered under that id"),
             UseError::NotSolid => f.write_str("a Usable Voxel's Materials must be solid"),
             UseError::SameMaterial => {
                 f.write_str("a Door's open Material must not be its closed one")
@@ -240,13 +270,18 @@ impl std::fmt::Display for UseError {
 /// Every declared Usable Voxel, by Material.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct VoxelUses {
-    rows: Vec<(MaterialId, VoxelUse)>,
+    rows: Vec<(MaterialId, VoxelUse, Option<ShapeId>)>,
 }
 
 impl VoxelUses {
     /// Adds a row whose Materials no row names yet. The caller vets that they
     /// are solid; see [`crate::Tables::register_use`].
-    pub(crate) fn push(&mut self, material: MaterialId, kind: VoxelUse) -> Result<(), UseError> {
+    pub(crate) fn push(
+        &mut self,
+        material: MaterialId,
+        kind: VoxelUse,
+        shape: Option<ShapeId>,
+    ) -> Result<(), UseError> {
         match &kind {
             VoxelUse::Door { open, .. } if *open == material => return Err(UseError::SameMaterial),
             VoxelUse::Door {
@@ -264,38 +299,63 @@ impl VoxelUses {
             if self
                 .rows
                 .iter()
-                .any(|(m, used)| used.materials(*m).contains(&taken))
+                .any(|(m, used, _)| used.materials(*m).contains(&taken))
             {
                 return Err(UseError::AlreadyUsable(taken));
             }
         }
-        self.rows.push((material, kind));
+        self.rows.push((material, kind, shape));
         Ok(())
     }
 
     /// What Use does to a Voxel of `material`, and the row's own Material: a
     /// Door answers for both its states with its closed one.
     pub fn of(&self, material: MaterialId) -> Option<(MaterialId, &VoxelUse)> {
+        self.row(material).map(|(row, kind, _)| (*row, kind))
+    }
+
+    fn row(&self, material: MaterialId) -> Option<&(MaterialId, VoxelUse, Option<ShapeId>)> {
         self.rows
             .iter()
-            .find(|(row, kind)| kind.materials(*row).contains(&material))
-            .map(|(row, kind)| (*row, kind))
+            .find(|(row, kind, _)| kind.materials(*row).contains(&material))
+    }
+
+    /// The Shape a Voxel of `material`'s row is always placed in, if it fixes
+    /// one.
+    pub fn shape(&self, material: MaterialId) -> Option<ShapeId> {
+        self.row(material)?.2
+    }
+
+    /// What a Player's Place of `voxel` puts down, facing away from the face
+    /// `near` with the hinge side `hinge` aimed at: a Door in its fixed Shape
+    /// turned by [`Door::placed`]'s rule, another fixed Shape in the
+    /// Player's Orientation, or `voxel` itself.
+    pub fn placed(&self, voxel: Voxel, near: usize, hinge: usize) -> Voxel {
+        if let Some(door) = self.door(voxel.material()) {
+            return door.placed(voxel, near, hinge);
+        }
+        match self.shape(voxel.material()) {
+            Some(shape) => Voxel::new(voxel.material(), shape, voxel.orientation()),
+            None => voxel,
+        }
     }
 
     pub fn door(&self, material: MaterialId) -> Option<Door> {
-        match self.of(material)? {
+        match *self.row(material)? {
             (
                 closed,
-                &VoxelUse::Door {
+                VoxelUse::Door {
                     open,
                     width_m,
                     height_m,
                 },
+                shape,
             ) => Some(Door {
                 closed,
                 open,
                 width_m,
                 height_m,
+                shape,
             }),
             _ => None,
         }
@@ -322,11 +382,11 @@ impl VoxelUses {
         self.rows
             .iter()
             .enumerate()
-            .filter_map(|(at, (_, kind))| match kind {
+            .filter_map(|(at, (_, kind, _))| match kind {
                 VoxelUse::Station { tag }
                     if !self.rows[..at]
                         .iter()
-                        .any(|(_, k)| matches!(k, VoxelUse::Station { tag: t } if t == tag)) =>
+                        .any(|(_, k, _)| matches!(k, VoxelUse::Station { tag: t } if t == tag)) =>
                 {
                     Some(tag.as_str())
                 }
@@ -340,16 +400,33 @@ impl VoxelUses {
         self.door(material).map_or(material, |door| door.closed)
     }
 
-    /// A Material bodies pass through though it is solid: an open Door.
-    pub fn passable(&self, material: MaterialId) -> bool {
+    /// `voxel` read in its closed state, so a Door matches either.
+    pub fn as_closed(&self, voxel: Voxel) -> Voxel {
+        match self.door(voxel.material()) {
+            Some(door) if door.is_open(voxel.material()) => door.toggle(voxel),
+            _ => voxel,
+        }
+    }
+
+    /// Whether `material` is a Door's open state.
+    pub fn is_open(&self, material: MaterialId) -> bool {
         self.door(material)
             .is_some_and(|door| door.is_open(material))
+    }
+
+    /// A Material bodies pass through though it is solid: an open Door whose
+    /// cells do not turn aside, having no fixed Shape, or turn into slats
+    /// too close together for a body, being more than one Voxel wide.
+    pub fn passes_bodies(&self, material: MaterialId, voxel_size: f32) -> bool {
+        self.door(material).is_some_and(|door| {
+            door.is_open(material) && (door.shape.is_none() || door.cells(voxel_size)[0] > 1)
+        })
     }
 
     pub fn doors(&self) -> impl Iterator<Item = Door> + '_ {
         self.rows
             .iter()
-            .filter_map(|&(material, _)| self.door(material))
+            .filter_map(|&(material, _, _)| self.door(material))
     }
 }
 
@@ -376,37 +453,47 @@ mod tests {
     #[test]
     fn a_door_answers_for_both_its_states() {
         let mut uses = VoxelUses::default();
-        uses.push(9, door(10)).unwrap();
+        uses.push(9, door(10), None).unwrap();
         assert_eq!(uses.of(10), uses.of(9));
         assert_eq!(uses.closed(10), 9);
         assert_eq!(uses.closed(11), 11);
-        assert!(uses.passable(10) && !uses.passable(9));
-        assert_eq!(uses.door(9).unwrap().toggled(9), 10);
-        assert_eq!(uses.door(9).unwrap().toggled(10), 9);
+        assert!(uses.is_open(10) && !uses.is_open(9));
+        let door = uses.door(9).unwrap();
+        assert_eq!(door.toggle(Voxel::cube(9)), Voxel::cube(10));
+        assert_eq!(door.toggle(Voxel::cube(10)), Voxel::cube(9));
     }
 
     #[test]
     fn a_material_is_in_at_most_one_row_in_either_state() {
         let mut uses = VoxelUses::default();
-        uses.push(9, door(10)).unwrap();
-        assert_eq!(uses.push(9, door(11)), Err(UseError::AlreadyUsable(9)));
-        assert_eq!(uses.push(11, door(10)), Err(UseError::AlreadyUsable(10)));
-        assert_eq!(uses.push(10, door(12)), Err(UseError::AlreadyUsable(10)));
-        assert_eq!(uses.push(12, door(12)), Err(UseError::SameMaterial));
-        assert!(uses.push(11, door(12)).is_ok());
+        uses.push(9, door(10), None).unwrap();
+        assert_eq!(
+            uses.push(9, door(11), None),
+            Err(UseError::AlreadyUsable(9))
+        );
+        assert_eq!(
+            uses.push(11, door(10), None),
+            Err(UseError::AlreadyUsable(10))
+        );
+        assert_eq!(
+            uses.push(10, door(12), None),
+            Err(UseError::AlreadyUsable(10))
+        );
+        assert_eq!(uses.push(12, door(12), None), Err(UseError::SameMaterial));
+        assert!(uses.push(11, door(12), None).is_ok());
     }
 
     #[test]
     fn a_door_is_a_size_in_metres_in_cells_of_any_voxel_size() {
         let mut uses = VoxelUses::default();
-        uses.push(9, door(10)).unwrap();
+        uses.push(9, door(10), None).unwrap();
         let door = uses.door(9).unwrap();
         assert_eq!((door.width_m, door.height_m), (1.0, 2.0), "the default");
         assert_eq!(door.cells(1.0), [1, 2]);
         assert_eq!(door.cells(0.5), [2, 4]);
         assert_eq!(door.cells(0.25), [4, 8]);
         let mut narrow = VoxelUses::default();
-        narrow.push(9, sized(0.6, 2.1)).unwrap();
+        narrow.push(9, sized(0.6, 2.1), None).unwrap();
         assert_eq!(narrow.door(9).unwrap().cells(0.25), [3, 9], "rounded up");
         assert_eq!(narrow.door(9).unwrap().cells(1.0), [1, 3]);
     }
@@ -423,19 +510,19 @@ mod tests {
         ] {
             let mut uses = VoxelUses::default();
             assert_eq!(
-                uses.push(9, sized(w, h)),
+                uses.push(9, sized(w, h), None),
                 Err(UseError::DoorSize),
                 "{w} by {h}"
             );
         }
         let mut uses = VoxelUses::default();
-        assert!(uses.push(9, sized(0.5, 1.0)).is_ok());
-        assert!(uses.push(11, sized(4.0, 4.0)).is_err(), "10 is taken");
+        assert!(uses.push(9, sized(0.5, 1.0), None).is_ok());
+        assert!(uses.push(11, sized(4.0, 4.0), None).is_err(), "10 is taken");
     }
 
     fn quarter_door() -> Door {
         let mut uses = VoxelUses::default();
-        uses.push(9, door(10)).unwrap();
+        uses.push(9, door(10), None).unwrap();
         uses.door(9).unwrap()
     }
 
@@ -502,17 +589,107 @@ mod tests {
         );
     }
 
+    use crate::mesh::{NEG_X, NEG_Z, POS_X, POS_Z};
+    use crate::shape::{Connections, NodeBox, Orientation, SHAPE_STAIR, ShapeDef};
+    use crate::{MaterialDef, Tables, Voxel};
+
+    /// Tables with a 3/16 panel against its own +Z, and a Door and a Station
+    /// fixed to it.
+    fn panelled() -> (Tables, Door, MaterialId) {
+        let mut tables = Tables::builtin();
+        let panel = tables
+            .shapes
+            .register(ShapeDef {
+                connect: None,
+                boxes: vec![NodeBox::new([0, 0, 13], [16, 16, 16])],
+                collision: None,
+            })
+            .unwrap();
+        let [closed, open, bench] =
+            [(); 3].map(|_| tables.materials.register(MaterialDef::OPAQUE).unwrap());
+        tables
+            .register_use(closed, door(open), Some(panel))
+            .unwrap();
+        tables
+            .register_use(bench, station("bench"), Some(panel))
+            .unwrap();
+        let door = tables.uses.door(closed).unwrap();
+        (tables, door, bench)
+    }
+
+    fn boxes(tables: &Tables, voxel: Voxel) -> Vec<([i8; 3], [i8; 3])> {
+        tables
+            .shapes
+            .collision(voxel, Connections::NONE)
+            .iter()
+            .map(|b| (b.min, b.max))
+            .collect()
+    }
+
+    #[test]
+    fn a_placed_door_is_a_panel_on_the_near_face_that_turns_onto_its_hinge_side() {
+        let (tables, door, _) = panelled();
+        let chosen = Voxel::shaped(door.closed, SHAPE_STAIR, Orientation::IDENTITY.flipped());
+        for (hinge, open_box) in [
+            (POS_X, ([13, 0, 0], [16, 16, 16])),
+            (NEG_X, ([0, 0, 0], [3, 16, 16])),
+        ] {
+            let closed = tables.uses.placed(chosen, NEG_Z, hinge);
+            assert_eq!(closed.material(), door.closed);
+            assert_eq!(boxes(&tables, closed), [([0, 0, 0], [16, 16, 3])], "near");
+            let open = door.toggle(closed);
+            assert_eq!(open.material(), door.open);
+            assert_eq!(boxes(&tables, open), [open_box], "hinged {hinge}");
+            assert_eq!(door.toggle(open), closed, "twice is where it was");
+            assert_eq!(tables.uses.as_closed(open), closed);
+            assert_eq!(tables.uses.as_closed(closed), closed);
+        }
+        let facing_x = tables.uses.placed(chosen, POS_X, POS_Z);
+        assert_eq!(boxes(&tables, facing_x), [([13, 0, 0], [16, 16, 16])]);
+        assert_eq!(
+            boxes(&tables, door.toggle(facing_x)),
+            [([0, 0, 13], [16, 16, 16])]
+        );
+    }
+
+    #[test]
+    fn any_row_may_fix_the_shape_its_material_places_in() {
+        let (tables, _, bench) = panelled();
+        let turned = Orientation::IDENTITY.turned();
+        let placed = tables
+            .uses
+            .placed(Voxel::shaped(bench, SHAPE_STAIR, turned), NEG_Z, POS_X);
+        assert_eq!(placed.shape(), tables.uses.shape(bench).unwrap());
+        assert_eq!(placed.orientation(), turned.bits(), "the Player's turn");
+        let mut plain = VoxelUses::default();
+        plain.push(9, door(10), None).unwrap();
+        let stair = Voxel::shaped(9, SHAPE_STAIR, turned);
+        assert_eq!(plain.placed(stair, NEG_Z, POS_X), stair, "nothing fixed");
+        let open = plain.door(9).unwrap().toggle(stair);
+        assert_eq!(open, Voxel::shaped(10, SHAPE_STAIR, turned), "nor turned");
+    }
+
+    #[test]
+    fn a_fixed_shape_must_be_registered() {
+        let mut tables = Tables::builtin();
+        let m = tables.materials.register(MaterialDef::OPAQUE).unwrap();
+        assert_eq!(
+            tables.register_use(m, station("bench"), Some(200)),
+            Err(UseError::NotAShape)
+        );
+    }
+
     #[test]
     fn stations_may_share_a_tag_but_none_takes_hand() {
         let mut uses = VoxelUses::default();
-        uses.push(9, station("bench")).unwrap();
-        uses.push(10, station("bench")).unwrap();
+        uses.push(9, station("bench"), None).unwrap();
+        uses.push(10, station("bench"), None).unwrap();
         assert_eq!(uses.station(9), Some("bench"));
         assert_eq!(uses.station(10), Some("bench"));
         assert_eq!(uses.station(11), None);
-        assert_eq!(uses.push(11, station("hand")), Err(UseError::HandTag));
+        assert_eq!(uses.push(11, station("hand"), None), Err(UseError::HandTag));
         assert_eq!(
-            uses.push(9, station("loom")),
+            uses.push(9, station("loom"), None),
             Err(UseError::AlreadyUsable(9))
         );
         assert_eq!(uses.door(9), None);

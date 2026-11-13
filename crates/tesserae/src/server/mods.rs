@@ -174,7 +174,7 @@ impl LoadedMods {
 /// an open Door, which only Use makes and which drops the closed one's Item.
 fn placeable(tables: &Tables, material: MaterialId) -> bool {
     (tables.materials.def(material).solid || tables.fluids.rank(material).is_some())
-        && !tables.uses.passable(material)
+        && !tables.uses.is_open(material)
 }
 
 #[derive(Resource)]
@@ -2357,7 +2357,7 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
             assert!(pixels.as_chunks::<4>().0.iter().any(|p| p != &pixels[..4]));
             if matches!(
                 material.name.as_str(),
-                "terra:glass" | "terra:water" | "terra:mud" | "terra:door_open"
+                "terra:glass" | "terra:water" | "terra:mud"
             ) {
                 assert!(pixels.as_chunks::<4>().0.iter().any(|p| p[3] < 255));
             } else {
@@ -2369,7 +2369,12 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
                     .iter()
                     .filter(|(_, other)| other == pixels)
                     .count(),
-                1,
+                // An open Door is the same panel turned.
+                if material.name.starts_with("terra:door") {
+                    2
+                } else {
+                    1
+                },
                 "{} has distinct artwork",
                 material.name
             );

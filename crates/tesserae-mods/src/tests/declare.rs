@@ -2061,6 +2061,7 @@ fn sized_door(
             width_m,
             height_m,
         }),
+        shape: None,
     }
 }
 
@@ -2068,6 +2069,7 @@ fn station(material: &str, tag: &str) -> content::VoxelUse {
     content::VoxelUse {
         material: material.into(),
         kind: content::VoxelUseKind::Station(tag.into()),
+        shape: None,
     }
 }
 
@@ -2108,6 +2110,37 @@ fn a_door_declares_its_size_in_metres() {
     let id = load.registry.id_of(Kind::Material, "m:door").unwrap() as MaterialId;
     let found = load.tables.uses.door(id).unwrap();
     assert_eq!((found.width_m, found.height_m), (1.5, 3.0));
+}
+
+#[test]
+fn any_voxel_use_may_fix_a_shape_by_full_name() {
+    let mut d = declaring(&["door", "door_open", "bench"], &[]);
+    d.voxel_uses = vec![
+        content::VoxelUse {
+            shape: Some("core:slab".into()),
+            ..door("m:door", "m:door_open")
+        },
+        content::VoxelUse {
+            shape: Some("core:post".into()),
+            ..station("m:bench", "bench")
+        },
+    ];
+    let load = resolved_uses(&[("m", d.clone())]).unwrap();
+    let id = |name| load.registry.id_of(Kind::Material, name).unwrap() as MaterialId;
+    assert_eq!(
+        load.tables.uses.shape(id("m:door_open")),
+        Some(tesserae_core::SHAPE_SLAB)
+    );
+    assert_eq!(
+        load.tables.uses.shape(id("m:bench")),
+        Some(tesserae_core::SHAPE_POST)
+    );
+    d.voxel_uses[1].shape = Some("m:table".into());
+    let refused = resolved_uses(&[("m", d)]).err().unwrap();
+    assert!(
+        matches!(&refused, ModError::UnknownName { what: "voxel-uses", row: 1, name, .. } if name == "m:table"),
+        "{refused}"
+    );
 }
 
 #[test]
@@ -2178,6 +2211,7 @@ fn container(material: &str, slots: Option<u8>) -> content::VoxelUse {
     content::VoxelUse {
         material: material.into(),
         kind: content::VoxelUseKind::Container(slots),
+        shape: None,
     }
 }
 

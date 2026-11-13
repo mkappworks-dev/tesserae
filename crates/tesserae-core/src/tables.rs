@@ -8,7 +8,7 @@ use crate::occupants::{Fluid, Level, Occupants};
 use crate::reaction::{ReactionDef, ReactionError, ReactionTable};
 use crate::shape::{Orientation, ShapeTable};
 use crate::usable::{UseError, VoxelUse, VoxelUses};
-use crate::voxel::{MaterialId, Voxel};
+use crate::voxel::{MaterialId, ShapeId, Voxel};
 
 /// A Voxel's kind, as the pair of tables that describe it: the [`ShapeTable`]
 /// for geometry and the [`MaterialTable`] for the rest.
@@ -193,7 +193,15 @@ impl Tables {
 
     /// Registers what Use does to a solid Material. Every Material the row
     /// names is solid and in no other row.
-    pub fn register_use(&mut self, material: MaterialId, kind: VoxelUse) -> Result<(), UseError> {
+    pub fn register_use(
+        &mut self,
+        material: MaterialId,
+        kind: VoxelUse,
+        shape: Option<ShapeId>,
+    ) -> Result<(), UseError> {
+        if shape.is_some_and(|s| !self.shapes.contains(s)) {
+            return Err(UseError::NotAShape);
+        }
         for m in kind.materials(material) {
             if !self.materials.contains(m) {
                 return Err(UseError::NotAMaterial);
@@ -202,13 +210,13 @@ impl Tables {
                 return Err(UseError::NotSolid);
             }
         }
-        self.uses.push(material, kind)
+        self.uses.push(material, kind, shape)
     }
 
-    /// Whether a body collides with `voxel`: a solid, unless it is an open
-    /// Door.
-    pub fn blocks(&self, voxel: Voxel) -> bool {
-        self.materials.solid(voxel) && !self.uses.passable(voxel.material())
+    /// Whether a body collides with `voxel` at Voxels of `voxel_size`: a
+    /// solid, unless [`VoxelUses::passes_bodies`].
+    pub fn blocks(&self, voxel: Voxel, voxel_size: f32) -> bool {
+        self.materials.solid(voxel) && !self.uses.passes_bodies(voxel.material(), voxel_size)
     }
 
     fn is_solid_material(&self, material: MaterialId) -> bool {

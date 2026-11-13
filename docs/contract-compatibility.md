@@ -90,7 +90,9 @@ name, through which bodies pass but rays do not, and an optional `width-m` and
 absent; `container` with an optional slot count from 1 to 54, 27 when absent; or
 `station` with a tag, which Recipes name in `station`; Materials may share a
 tag, and `hand` is reserved. A Material is in at most one row, as its `material`
-or as a Door's open one.
+or as a Door's open one. A `voxel-use` then gained an optional `shape`, a Shape
+by full name that a Player's Place of its Material always uses; a Door's is
+drawn closed against its own +Z and turned a quarter about its hinge by Use.
 
 `sound-cause` then gained `door-open`, `door-close`, `container-open`,
 `container-close` and `craft`, appended after `burn`. A Game binds them in

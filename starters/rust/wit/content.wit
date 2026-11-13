@@ -372,6 +372,12 @@ interface content {
         /// Container.
         material: string,
         kind: voxel-use-kind,
+        /// A Shape, by full name, that a Player's Place of the Material always
+        /// uses whatever Shape they chose; none keeps their choice. A Door's
+        /// Shape is drawn closed against its own +Z: the engine turns that to
+        /// face the Player, and Use turns it a quarter about its hinge edge,
+        /// the side of the cell the Player aimed at.
+        shape: option<string>,
     }
 
     /// A thing a Player can carry. A removed Voxel of its `material` drops one;

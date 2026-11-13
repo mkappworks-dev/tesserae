@@ -184,7 +184,7 @@ underwater (see [Data Mods](data-mods.md)).
 | `[[sound-sets]]`            | `name`, optional `break`, `place`, `hit`, `step`, `land`: each an `effects` Sound by full name                                                                                                                                                                                                                                                                |
 | `[[material-sounds]]`       | `material`, `sound-set`: both by full name; at most one Sound set per Material in a World                                                                                                                                                                                                                                                                     |
 | `[[recipes]]`               | `inputs` (1 to 9 different Items, each `item`: by full name, `count`: at least 1), `output` (`item`, `count`: 1 to the Item's `max-stack`), `station` (`"hand"` or a Station's tag); 256 per Mod, 1024 in a World                                                                                                                                             |
-| `[[voxel-uses]]`            | `kind`, `material` (solid, by full name), then by kind: `open` for a `door` (solid, by full name) and optional `width-m` (0.5 to 4; omitted is 1) and `height-m` (1 to 4; omitted is 2), optional `slots` for a `container` (1 to 54; omitted is 27), `tag` for a `station`; 64 per Mod                                                                       |
+| `[[voxel-uses]]`            | `kind`, `material` (solid, by full name), then by kind: `open` for a `door` (solid, by full name) and optional `width-m` (0.5 to 4; omitted is 1) and `height-m` (1 to 4; omitted is 2), optional `slots` for a `container` (1 to 54; omitted is 27), `tag` for a `station`; optional `shape` for any kind (a Shape by full name); 64 per Mod                 |
 | `[[cause-sounds]]` (Game)   | `cause`, `sound` (an `effects` Sound by full name); each Cause at most once                                                                                                                                                                                                                                                                                   |
 | `[[soundscapes]]`           | `name`, optional `context` (Game only, at most one each), `beds` (at most 8, each `sound`: an `ambient` Sound by full name, `volume`: 0 to 1), `music` (at most 8 `music` Sounds by full name), optional `silence-s` (`min`, `max`: 0 to 3600 s, default 60 to 180); 16 per Mod                                                                               |
 
@@ -551,19 +551,28 @@ natively; no Mod is called when a Voxel is used
   is as large at every Voxel size: one Voxel thick and as many Voxels wide and
   tall as that size needs. One Item places the whole Door across the Player's
   facing, as one undo step, refused if any of it is blocked. Use swaps
-  `material` and `open`, two solid Materials, over all of it, keeping Shape and
-  Orientation. Bodies pass through the open one; aim, Use and Remove still stop
-  on it. Removing any Voxel of a Door removes it all and drops one of the closed
-  one's Item; the open Material gets no implicit Item and cannot be placed.
-  Doors side by side stay two Doors. Draw it open yourself, for example with
-  `render = "blend"` or a cutout texture. Toggling never enters the undo
-  journal.
+  `material` and `open`, two solid Materials, over all of it. With a fixed
+  `shape` (below) each Voxel is that Shape drawn closed against its own +Z:
+  placing turns it to face the Player, hinged on the half of the cell they aimed
+  at, and Use turns it a quarter about that hinge edge, a swing at 1 m Voxels
+  and turning slats at finer sizes. Bodies collide with what is drawn, except
+  that an open Door with no fixed Shape, which keeps the Player's Shape and
+  Orientation, or one wider than a Voxel, whose slats stand too close for a
+  body, lets them through. Aim, Use and Remove stop on it either way. Removing
+  any Voxel of a Door removes it all and drops one of the closed one's Item; the
+  open Material gets no implicit Item and cannot be placed. Doors side by side
+  stay two Doors. Toggling never enters the undo journal.
 - `container`: the Voxel holds `slots` Stacks of its own, shown beside the
   Inventory. A Player cannot break one that holds Stacks; anything else that
   removes it spills them as Dropped items.
 - `station`: Use opens the Recipes whose `station` is its `tag`. Materials may
   share a tag, so another Mod's bench opens the same Recipes. `hand` is
   reserved.
+
+Any row may set `shape`, a Shape by full name (`core:slab`, or a Mod's own),
+which a Player's Place of its Material always uses whatever Shape they chose:
+Terra's Door is a thin `terra:panel`, and a Workbench could be table-shaped. A
+Station or Container keeps the Player's Orientation; a Door is turned as above.
 
 A Material is in at most one row, as its `material` or as a Door's open one. Any
 Mod may add Recipes for another Mod's Items and Stations; names resolve after

@@ -205,10 +205,7 @@ pub fn texture(name: &str, [r, g, b, opacity]: [u8; 4]) -> Vec<u8> {
         for face in 0..3 {
             for x in 0..EDGE {
                 let [r, g, b] = pixel(name, face, x, y, [r, g, b]);
-                let alpha = if name == "door_open" {
-                    // The posts alone, so an open Door reads as a gap.
-                    if x <= 1 || x >= 14 { opacity } else { 0 }
-                } else if name != "glass" {
+                let alpha = if name != "glass" {
                     opacity
                 } else if x == 0 || y == 0 || x == 15 || y == 15 {
                     100

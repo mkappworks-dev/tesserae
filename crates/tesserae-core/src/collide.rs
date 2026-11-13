@@ -107,7 +107,7 @@ pub fn overlaps(vol: &impl VoxelVolume, tables: &Tables, size: f32, body: Aabb) 
         for y in cells(1) {
             for x in cells(0) {
                 let cell = [x, y, z];
-                for b in obstacles(vol, tables, cell) {
+                for b in obstacles(vol, tables, size, cell) {
                     let (min, max) = in_metres(b, cell, size);
                     if (0..3).all(|a| body.min[a] < max[a] - EPS && body.max[a] > min[a] + EPS) {
                         return true;
@@ -194,7 +194,7 @@ fn clip(
         for y in cells(1) {
             for x in cells(0) {
                 let cell = [x, y, z];
-                for b in obstacles(vol, tables, cell) {
+                for b in obstacles(vol, tables, voxel_size, cell) {
                     let (min, max) = in_metres(b, cell, voxel_size);
                     let overlaps =
                         |a: usize| aabb.min[a] < max[a] - EPS && aabb.max[a] > min[a] + EPS;
@@ -239,9 +239,14 @@ const WHOLE_CELL: [CollisionBox; 1] = [CollisionBox::new([0; 3], [SUBDIV as i8; 
 /// The collision boxes of the Voxel at `cell`, or the whole cell if the volume
 /// does not hold it. Borrowed from the table, so visiting a cell allocates
 /// nothing.
-fn obstacles<'a>(vol: &impl VoxelVolume, tables: &'a Tables, cell: [i32; 3]) -> &'a [CollisionBox] {
+fn obstacles<'a>(
+    vol: &impl VoxelVolume,
+    tables: &'a Tables,
+    voxel_size: f32,
+    cell: [i32; 3],
+) -> &'a [CollisionBox] {
     match vol.voxel(cell) {
-        Some(voxel) if !tables.blocks(voxel) => &[],
+        Some(voxel) if !tables.blocks(voxel, voxel_size) => &[],
         Some(voxel) => tables
             .shapes
             .collision(voxel, connections_at(vol, &tables.shapes, cell, voxel)),
@@ -610,7 +615,7 @@ mod tests {
                 .unwrap()
         });
         tables
-            .register_use(closed, crate::VoxelUse::door(open))
+            .register_use(closed, crate::VoxelUse::door(open), None)
             .unwrap();
         for (door, floor) in [(closed, 1.0), (open, 0.0)] {
             let mut g = Grid::new();
@@ -625,6 +630,49 @@ mod tests {
             let hit = super::raycast(&g, &tables, 1.0, [0.5, 4.0, 0.5], [0.0, -1.0, 0.0], 10.0);
             assert_eq!(hit.map(|h| h.at), Some([0, 0, 0]));
         }
+    }
+
+    #[test]
+    fn an_open_panel_door_collides_as_drawn_and_slats_let_bodies_through() {
+        let mut tables = fixtures().tables.clone();
+        let panel = tables
+            .shapes
+            .register(ShapeDef {
+                connect: None,
+                boxes: vec![crate::shape::NodeBox::new([0, 0, 13], [16, 16, 16])],
+                collision: None,
+            })
+            .unwrap();
+        let [closed, open] = [(); 2].map(|_| {
+            tables
+                .materials
+                .register(crate::MaterialDef::OPAQUE)
+                .unwrap()
+        });
+        tables
+            .register_use(closed, crate::VoxelUse::door(open), Some(panel))
+            .unwrap();
+        let door = tables.uses.door(closed).unwrap();
+        let shut = tables.uses.placed(Voxel::cube(closed), NEG_Z, POS_X);
+        let walked = |size: f32, voxel: Voxel, x: f32| {
+            let mut g = Grid::new();
+            let cells = (1.0 / size) as i32;
+            for i in 0..cells {
+                for j in 0..2 * cells {
+                    g.put([i, j, 0], voxel);
+                }
+            }
+            let from = body(x, 0.01, -0.5, 1.8);
+            super::sweep(&g, &tables, size, from, [0.0, 0.0, 2.0]).moved[2]
+        };
+        assert!(walked(1.0, shut, 0.5) < 1.0, "closed");
+        assert_eq!(walked(1.0, door.toggle(shut), 0.5), 2.0, "beside the panel");
+        assert!(
+            walked(1.0, door.toggle(shut), 0.75) < 1.0,
+            "into the open panel on the hinge side"
+        );
+        assert!(walked(0.25, shut, 0.5) < 1.0, "closed slats");
+        assert_eq!(walked(0.25, door.toggle(shut), 0.5), 2.0, "open slats");
     }
 
     fn cube() -> Voxel {

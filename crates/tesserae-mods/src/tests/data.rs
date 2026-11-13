@@ -473,10 +473,12 @@ fn component() -> Declaration {
                     width_m: Some(1.5),
                     height_m: None,
                 }),
+                shape: None,
             },
             content::VoxelUse {
                 material: "full:rock".into(),
                 kind: content::VoxelUseKind::Station("bench".into()),
+                shape: Some("core:slab".into()),
             },
         ],
     }

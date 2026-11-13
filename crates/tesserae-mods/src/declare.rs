@@ -854,8 +854,22 @@ pub fn resolve(
                 },
                 content::VoxelUseKind::Station(tag) => VoxelUse::Station { tag: tag.clone() },
             };
+            let shape = match &used.shape {
+                Some(name) => Some(
+                    registry
+                        .id_of(Kind::Shape, name)
+                        .map(|id| id as tesserae_core::ShapeId)
+                        .ok_or_else(|| ModError::UnknownName {
+                            id: b.mod_id.clone(),
+                            what: "voxel-uses",
+                            row,
+                            name: name.clone(),
+                        })?,
+                ),
+                None => None,
+            };
             tables
-                .register_use(material, kind)
+                .register_use(material, kind, shape)
                 .map_err(|source| ModError::VoxelUse {
                     id: b.mod_id.clone(),
                     row,

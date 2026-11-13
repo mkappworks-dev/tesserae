@@ -353,8 +353,40 @@
       "solid": true,
       "use": {
         "door": {
+          "boxes": {
+            "closed": [
+              [
+                [
+                  0,
+                  0,
+                  13
+                ],
+                [
+                  16,
+                  16,
+                  16
+                ]
+              ]
+            ],
+            "open": [
+              [
+                [
+                  13,
+                  0,
+                  0
+                ],
+                [
+                  16,
+                  16,
+                  16
+                ]
+              ]
+            ]
+          },
           "closed": "terra:door",
-          "open": "terra:door_open"
+          "height-m": 2.0,
+          "open": "terra:door_open",
+          "width-m": 1.0
         }
       }
     },
@@ -372,12 +404,44 @@
         "top": "door_open.top.png"
       },
       "name": "terra:door_open",
-      "render": "cutout",
+      "render": "opaque",
       "solid": true,
       "use": {
         "door": {
+          "boxes": {
+            "closed": [
+              [
+                [
+                  0,
+                  0,
+                  13
+                ],
+                [
+                  16,
+                  16,
+                  16
+                ]
+              ]
+            ],
+            "open": [
+              [
+                [
+                  13,
+                  0,
+                  0
+                ],
+                [
+                  16,
+                  16,
+                  16
+                ]
+              ]
+            ]
+          },
           "closed": "terra:door",
-          "open": "terra:door_open"
+          "height-m": 2.0,
+          "open": "terra:door_open",
+          "width-m": 1.0
         }
       }
     }
@@ -541,6 +605,23 @@
         ]
       ],
       "name": "terra:fence"
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            13
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "name": "terra:panel"
     }
   ]
 }

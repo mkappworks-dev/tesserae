@@ -339,14 +339,19 @@ A `[[voxel-uses]]` row makes a Material a Usable Voxel, which Use acts on. Its
 Materials by full name, and an optional `width-m` (0.5 to 4, 1 when omitted) and
 `height-m` (1 to 4, 2 when omitted): a Door is a size in metres, as many Voxels
 as that takes at the World's Voxel size, one Voxel thick. One Item places the
-whole Door across the Player's facing, refused if any of it is blocked; bodies
-pass through the open one while aim still stops on it, Use toggles all of it,
-and removing any Voxel of it removes it all and drops one closed Item. The open
-Material gets no implicit Item and cannot be placed. Or it is `station`, with a
-solid `material` and a `tag`: Use opens the Recipes whose `station` is that tag,
-craftable while the Player stays in reach. Materials may share a tag, so another
-Mod's bench opens the same Recipes; `hand` is reserved. Any Mod may declare
-them, at most 64 per Mod, and a Material is in at most one row, as either state.
+whole Door across the Player's facing, refused if any of it is blocked; Use
+toggles all of it, and removing any Voxel of it removes it all and drops one
+closed Item. Any row may also set `shape`, a Shape by full name that placing its
+Material always uses. A Door's Shape is drawn closed against its own +Z; placing
+turns it to face the Player, hinged on the half of the cell aimed at, and Use
+turns it a quarter about that hinge edge. Bodies collide with what is drawn,
+except that an open Door with no `shape`, or wider than one Voxel, lets them
+through; aim stops on it either way. The open Material gets no implicit Item and
+cannot be placed. Or it is `station`, with a solid `material` and a `tag`: Use
+opens the Recipes whose `station` is that tag, craftable while the Player stays
+in reach. Materials may share a tag, so another Mod's bench opens the same
+Recipes; `hand` is reserved. Any Mod may declare them, at most 64 per Mod, and a
+Material is in at most one row, as either state.
 
 A `container` row gives its `material` Stacks of its own in `slots` slots, from
 1 to 54, 27 when omitted. Use opens it beside the Inventory. A Player cannot

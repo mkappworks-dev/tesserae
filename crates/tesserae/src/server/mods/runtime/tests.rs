@@ -1331,7 +1331,7 @@ fn terra_contract_content_build_and_scenarios_reach_real_voxels_and_light() {
             .init_resource::<MeshState>()
             .init_resource::<crate::server::fluids::FluidSim>()
             .add_plugins(super::super::plugin);
-        assert_eq!(h.app.world().resource::<ContentTables>().shapes.len(), 5);
+        assert_eq!(h.app.world().resource::<ContentTables>().shapes.len(), 6);
         h.app
             .insert_resource(crate::server::world_state::SpawnPoint::for_tests(
                 Vec3::new(0.0, 28.0, 0.0),

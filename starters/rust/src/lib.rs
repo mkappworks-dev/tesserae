@@ -43,6 +43,7 @@ fn voxel_use(material: &str, kind: VoxelUseKind) -> VoxelUse {
     VoxelUse {
         material: material.into(),
         kind,
+        shape: None,
     }
 }
 

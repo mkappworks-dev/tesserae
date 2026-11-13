@@ -57,7 +57,7 @@ fn app() -> (App, MaterialId) {
 fn chest_material(tables: &mut Tables) -> MaterialId {
     let chest = tables.materials.register(MaterialDef::OPAQUE).unwrap();
     tables
-        .register_use(chest, VoxelUse::Container { slots: 4 })
+        .register_use(chest, VoxelUse::Container { slots: 4 }, None)
         .unwrap();
     // Fuel that never burns out, so a fire on it stays until put out.
     tables

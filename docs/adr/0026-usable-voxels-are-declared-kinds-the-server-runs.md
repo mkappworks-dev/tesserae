@@ -85,3 +85,36 @@ Rejected:
 - A Door identity stored per Voxel or beside the Chunk, which every save, undo
   and Mod Command path would have to keep in step for what the cells already
   show.
+
+## Amendment 2026-11-14: a Door is a thin panel
+
+Any `voxel-uses` row may fix a Shape, by full name, that a Player's Place of its
+Material always uses, so a Workbench can be table-shaped and a Chest an inset
+box. A Station or Container keeps the Player's Orientation. A Door's Shape is
+drawn closed against its own +Z: placing turns that to the face of the cell
+toward the Player, hinged on the half of the cell they aimed at, and Use turns
+each Voxel a quarter about its up, which lays the panel along the hinge side of
+its cell. At 1 m Voxels that is a Door swinging on its hinge; at finer sizes
+each cell's panel turns in place, as slats. Which cells are one Door is
+unchanged, since no cell moves.
+
+The hinge side is kept in the Orientation, not beside it: a Door hinged on the
+other side is placed upside down, the only way to turn the other sense about the
+vertical, so Use always turns the same way, two toggles restore the exact
+Voxels, and the panel stands on the near face whichever side its hinge is, so a
+pair of Doors hinged apart closes flush. Undo reads an open Door turned back and
+closed, so an entry still matches either state.
+
+Collision follows the panel. Bodies still pass through an open Door that has no
+fixed Shape, which stays the Shape the Player chose, and through one wider than
+a Voxel, whose slats stand too close together for a body; a Door one Voxel wide
+collides as drawn.
+
+Rejected:
+
+- Hinge side as per-Voxel state, which the Orientation already has room for.
+- The panel on the far or near face by hinge side, always turning one way
+  upright: Doors hinged apart would close a Voxel's thickness out of line.
+- Retiring the pass-through rule outright: at 0.25 m an open 1 m Door is four
+  slats about 0.2 m apart, and no Player walks through it until a whole-panel
+  swing.
