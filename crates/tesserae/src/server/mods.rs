@@ -2218,7 +2218,7 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
         );
         assert!(!turnable.iter().any(|(name, _)| name.starts_with("dev:")));
         let ids: Vec<_> = catalogue.materials.iter().map(|m| m.id).collect();
-        assert_eq!(ids, std::iter::once(0).chain(8..28).collect::<Vec<_>>());
+        assert_eq!(ids, std::iter::once(0).chain(8..30).collect::<Vec<_>>());
     }
 
     #[test]
@@ -2262,7 +2262,7 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
     }
 
     #[test]
-    fn a_terra_workbench_is_a_station_that_crafts_a_chest_and_a_door_from_wood() {
+    fn a_terra_workbench_is_a_station_that_crafts_a_chest_a_door_and_a_gate_from_wood() {
         use super::super::craft::{Craft, CraftRefusal, CraftRefused, craft};
         use super::super::station::AtStation;
         use bevy::ecs::system::RunSystemOnce;
@@ -2291,7 +2291,7 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
             at
         };
         let mut inventory = super::super::inventory::Inventory::default();
-        inventory.receive("terra:wood", 11, 64);
+        inventory.receive("terra:wood", 13, 64);
         let player = app
             .world_mut()
             .spawn((super::super::player::Player::at(Vec3::ZERO), inventory))
@@ -2320,6 +2320,7 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
         });
         assert_eq!(ask(&mut app, at("terra:chest")), []);
         assert_eq!(ask(&mut app, at("terra:door")), []);
+        assert_eq!(ask(&mut app, at("terra:gate")), []);
         let mut held = app
             .world_mut()
             .query::<&super::super::inventory::Inventory>();
@@ -2327,6 +2328,26 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
         assert_eq!(held.count("terra:wood"), 0);
         assert_eq!(held.count("terra:chest"), 1);
         assert_eq!(held.count("terra:door"), 1);
+        assert_eq!(held.count("terra:gate"), 1);
+    }
+
+    #[test]
+    fn a_terra_gate_is_a_one_metre_panel_door_at_every_voxel_size() {
+        for (size, cells) in [(1.0, [1, 1]), (0.25, [4, 4])] {
+            let loaded = super::runtime::tests::terra_loaded(size);
+            let id = |kind, name| loaded.registry.id_of(kind, name).unwrap();
+            let gate = loaded
+                .tables
+                .uses
+                .door(id(Kind::Material, "terra:gate") as MaterialId)
+                .expect("the Gate is a Door");
+            assert_eq!(
+                gate.open,
+                id(Kind::Material, "terra:gate_open") as MaterialId
+            );
+            assert_eq!(gate.shape, Some(id(Kind::Shape, "terra:panel") as u8));
+            assert_eq!(gate.cells(size), cells, "{size} m");
+        }
     }
 
     #[test]
@@ -2346,7 +2367,7 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
             .drain()
             .next()
             .unwrap();
-        assert_eq!(textures.0.len(), 20);
+        assert_eq!(textures.0.len(), 22);
         for material in catalogue.materials.iter().filter(|m| m.id != 0) {
             let (_, pixels) = textures
                 .0
@@ -2369,8 +2390,10 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
                     .iter()
                     .filter(|(_, other)| other == pixels)
                     .count(),
-                // An open Door is the same panel turned.
-                if material.name.starts_with("terra:door") {
+                // An open Door or Gate is the same panel turned.
+                if material.name.starts_with("terra:door")
+                    || material.name.starts_with("terra:gate")
+                {
                     2
                 } else {
                     1

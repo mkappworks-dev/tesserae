@@ -571,8 +571,9 @@ natively; no Mod is called when a Voxel is used
 
 Any row may set `shape`, a Shape by full name (`core:slab`, or a Mod's own),
 which a Player's Place of its Material always uses whatever Shape they chose:
-Terra's Door is a thin `terra:panel`, and a Workbench could be table-shaped. A
-Station or Container keeps the Player's Orientation; a Door is turned as above.
+Terra's Door and its 1 m Gate are a thin `terra:panel`, and a Workbench could be
+table-shaped. A Station or Container keeps the Player's Orientation; a Door is
+turned as above.
 
 A Material is in at most one row, as its `material` or as a Door's open one. Any
 Mod may add Recipes for another Mod's Items and Stations; names resolve after
