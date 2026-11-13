@@ -23,9 +23,17 @@ committed.
 
 ## Acceptance criteria
 
-- [ ] One documented command regenerates the gallery's textures from Terra.
-- [ ] `/blocks` shows every Terra Material, its Shapes, and the Door closed and
+- [x] One documented command regenerates the gallery's textures from Terra.
+- [x] `/blocks` shows every Terra Material, its Shapes, and the Door closed and
       open at Player scale.
 - [ ] The new Workbench, Chest and Door looks are approved in the gallery by the
       user before their Terra commit.
-- [ ] Terra's texture fingerprint and appearance pins are updated.
+- [x] Terra's texture fingerprint and appearance pins are updated.
+
+## Comments
+
+2026-11-14: the gallery and the new Workbench, Chest and Door looks are on
+`feat/phase-16-10-11-wood-and-looks`, the looks alone in its last commit. They
+await the user's approval in `/blocks` before merging. A texture covers one
+Voxel, so a Door's handle repeats on every cell: twice at 1 m, 32 times at
+0.25 m; the gallery's Voxel size control shows it.

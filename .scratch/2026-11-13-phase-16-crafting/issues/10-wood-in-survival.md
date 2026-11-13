@@ -1,6 +1,6 @@
 # 10: Wood in Survival
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: None (can start immediately)
 
@@ -14,8 +14,8 @@ a Door. Terra's temperate Biome gains a Wood surface feature beside its melons.
 
 ## Acceptance criteria
 
-- [ ] A new Terra World has Wood on temperate grass near spawn; breaking one
+- [x] A new Terra World has Wood on temperate grass near spawn; breaking one
       gives one Wood.
-- [ ] A Terra test shows a Survival Player can gather enough Wood within a short
+- [x] A Terra test shows a Survival Player can gather enough Wood within a short
       walk of spawn for a Workbench, a Chest and a Door (15 Wood).
-- [ ] Existing Terra pins (surface features, Biome tables) are updated.
+- [x] Existing Terra pins (surface features, Biome tables) are updated.

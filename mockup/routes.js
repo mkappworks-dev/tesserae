@@ -38,6 +38,7 @@ function currentPath() {
       death: "/death",
       trust: "/worlds/new/trust",
       opening: "/opening",
+      blocks: "/blocks",
     }[state.screen] || "/"
   );
 }
@@ -74,7 +75,9 @@ function syncRoute() {
                           ? "Trust"
                           : state.screen === "opening"
                             ? "Opening"
-                            : "Worlds";
+                            : state.screen === "blocks"
+                              ? "Block gallery"
+                              : "Worlds";
   document.title = `${title} — Tesserae prototype`;
 }
 
@@ -142,6 +145,7 @@ function restoreRoute() {
       "/death": "death",
       "/worlds/new/trust": "trust",
       "/opening": "opening",
+      "/blocks": "blocks",
     }[path] || "home";
 }
 

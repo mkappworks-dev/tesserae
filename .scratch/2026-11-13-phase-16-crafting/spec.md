@@ -372,3 +372,8 @@ Terra had no Wood in Survival, so its Recipes were unreachable.
 - The mockup gains a `/blocks` gallery of every Terra Material, exported from
   Terra's own textures, and the Workbench, Chest and Door get new looks there
   before they are committed. (Ticket 11.)
+- A Door is a thin panel, not a block: placing forces a thin panel Shape across
+  the Player's facing, the hinge on the aimed half, and Use turns each cell's
+  panel 90° about its hinge. Collision follows the panel. (Ticket 13; a
+  whole-panel swing is later work.) Fences get Gates, smaller Doors of 1 m by 1
+  m. (Ticket 12.)

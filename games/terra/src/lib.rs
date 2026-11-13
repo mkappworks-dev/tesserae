@@ -502,11 +502,18 @@ impl Guest for Terra {
                         fog: (136, 160, 190),
                     }),
                     cave_scale: None,
-                    // One in every 16 by 16 m of grass: found while exploring, not a carpet.
-                    surface_features: vec![SurfaceFeature {
-                        material: "terra:melon".into(),
-                        spacing_m: 16.0,
-                    }],
+                    // A melon in every 16 by 16 m of grass is found while exploring, not a
+                    // carpet; Wood every 6 m gathers a Workbench, Chest and Door in a short walk.
+                    surface_features: vec![
+                        SurfaceFeature {
+                            material: "terra:melon".into(),
+                            spacing_m: 16.0,
+                        },
+                        SurfaceFeature {
+                            material: "terra:wood".into(),
+                            spacing_m: 6.0,
+                        },
+                    ],
                 },
                 BiomeDef {
                     soundscape: Some("terra:dry".into()),
