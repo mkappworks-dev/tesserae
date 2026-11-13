@@ -2,7 +2,7 @@
 
 Status: ready-for-agent
 
-Blocked by: 09, 11
+Blocked by: 09, 11, 13
 
 Spec: [Phase 16](../spec.md), amendment 2026-11-14.
 
