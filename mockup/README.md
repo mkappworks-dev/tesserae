@@ -206,7 +206,7 @@ Crafting works the same in both panes:
   (G) would do: Open or Close a Door, Open Chest, Use Workbench. Out of reach,
   it says so before the press. Aimed at one, G uses it instead of eating.
 - Refusals use the notice card: "Empty the Chest first." when breaking a Chest
-  that holds Stacks, "Something is in the way." when closing a Door on yourself,
+  that holds Stacks, "You are standing there." when closing a Door on yourself,
   "Out of reach of the Chest." when walking away closes it.
 - The **Use on Voxels** group in the Simulate panel aims at each kind, steps out
   of reach, stands in a doorway and breaks the Chest. The dashed "walk out of

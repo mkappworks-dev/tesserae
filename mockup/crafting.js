@@ -59,6 +59,12 @@ function ensureCrafting() {
         : null,
   );
   state.sidePane ||= "catalogue";
+  for (const prefs of [state.settings, state.settingsDraft].filter(Boolean))
+    for (const map of [prefs.bindings, prefs.altBindings, prefs.padBindings])
+      if (map?.["Use tool"]) {
+        map.Use = map["Use tool"];
+        delete map["Use tool"];
+      }
   state.recipe ??= 0;
   state.craftQuery ??= "";
 }
@@ -189,12 +195,12 @@ function pressUse() {
     use = key && usables[key];
   if (!use) return false;
   if (state.useFar) {
-    notice("Too far away to reach.", "warn");
+    notice("Nothing in reach.", "warn");
     return true;
   }
   if (use.kind === "door") {
     if (state.doorOpen && state.inDoorway) {
-      notice("Something is in the way.", "warn");
+      notice("You are standing there.", "warn");
       return true;
     }
     state.doorOpen = !state.doorOpen;
