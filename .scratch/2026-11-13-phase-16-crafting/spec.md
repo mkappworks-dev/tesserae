@@ -1,4 +1,4 @@
-Status: done
+Status: ready-for-agent
 
 # Phase 16: Crafting, Stations, Containers and Doors
 
@@ -197,8 +197,8 @@ gains two lists, and the `sound-cause` enum grows.
   closed kind:
   - `door`, with an `open` Material. Both are solid Materials. The open one is
     the passable state the Game draws open: collision asks `Tables::blocks`,
-    which lets bodies through it, while rays still stop on it. It gets no implicit Item
-    of its own and cannot be placed.
+    which lets bodies through it, while rays still stop on it. It gets no
+    implicit Item of its own and cannot be placed.
   - `container`, with `slots` from 1 to 54 (27 when absent).
   - `station`, with a tag. The tag `hand` is reserved and a load error.
 - A Material is at most one kind, and a Material is the closed or open state of
@@ -243,8 +243,9 @@ gains two lists, and the `sound-cause` enum grows.
   Container. Moves are not Edits and never enter the journal.
 - Sessions close when the Player leaves Edit reach of the Voxel, measured from
   the Eye to the Voxel's nearest point so a session opened at the edge of reach
-  does not close at once, or the Voxel changes or is removed; the Server tells the Client, which closes the pane with
-  a notice ("Out of reach of the Chest.").
+  does not close at once, or the Voxel changes or is removed; the Server tells
+  the Client, which closes the pane with a notice ("Out of reach of the
+  Chest.").
 - A Player's Remove of a Container that holds Stacks is refused ("Empty the
   Chest first."), and so is an undo or redo that would remove one. Anything else
   that removes or replaces it (a Mod Command, burning) spills its Stacks as
@@ -353,3 +354,21 @@ committed, deleted after review) check the look against the mockup.
   per-Voxel Server state outside the Chunk; the removal paths that must spill
   are spread across edit, Mod Commands and combustion.
 - The mockup is not copied into the engine.
+
+## Amendment 2026-11-14: Doors in metres, Wood in Survival, new looks
+
+Found while testing: a Door was a run of up to 4 Voxels, so at 0.25 m it stood 1
+m tall and 0.25 m wide, shorter and narrower than the 1.8 m Player body; and
+Terra had no Wood in Survival, so its Recipes were unreachable.
+
+- A Door row declares its size in metres, width and height, defaulting to 1 m by
+  2 m. One Door Item places the whole Door: ⌈size ÷ Voxel⌉ cells, one Voxel
+  thick, across the Player's facing, as one undo group, refused if any cell is
+  blocked. Use toggles the whole Door; breaking any cell removes it all and
+  drops one Item. The 4-Voxel run limit is retired. (Ticket 09.)
+- Terra scatters single Wood Voxels as a surface feature of its temperate Biome,
+  every 6 m, so a Survival player can gather the Wood its Recipes need. (Ticket
+  10.)
+- The mockup gains a `/blocks` gallery of every Terra Material, exported from
+  Terra's own textures, and the Workbench, Chest and Door get new looks there
+  before they are committed. (Ticket 11.)
