@@ -194,11 +194,7 @@ impl Tables {
     /// Registers what Use does to a solid Material. Every Material the row
     /// names is solid and in no other row.
     pub fn register_use(&mut self, material: MaterialId, kind: VoxelUse) -> Result<(), UseError> {
-        let named = match kind {
-            VoxelUse::Door { open } => vec![material, open],
-            VoxelUse::Container { .. } | VoxelUse::Station { .. } => vec![material],
-        };
-        for m in named {
+        for m in kind.materials(material) {
             if !self.materials.contains(m) {
                 return Err(UseError::NotAMaterial);
             }

@@ -42,6 +42,16 @@ pub enum VoxelUse {
     Station { tag: String },
 }
 
+impl VoxelUse {
+    /// Every Material the row for `material` is the use of.
+    pub fn materials(&self, material: MaterialId) -> Vec<MaterialId> {
+        match *self {
+            VoxelUse::Door { open } => vec![material, open],
+            VoxelUse::Container { .. } | VoxelUse::Station { .. } => vec![material],
+        }
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum UseError {
     NotAMaterial,
@@ -81,15 +91,6 @@ pub struct VoxelUses {
     rows: Vec<(MaterialId, VoxelUse)>,
 }
 
-/// Every Material a row is the use of.
-fn named(&(material, ref kind): &(MaterialId, VoxelUse)) -> Vec<MaterialId> {
-    match *kind {
-        VoxelUse::Door { open } => vec![material, open],
-        VoxelUse::Container { .. } => vec![material],
-        VoxelUse::Station { .. } => vec![material],
-    }
-}
-
 impl VoxelUses {
     /// Adds a row whose Materials no row names yet. The caller vets that they
     /// are solid; see [`crate::Tables::register_use`].
@@ -102,13 +103,16 @@ impl VoxelUses {
             }
             _ => {}
         }
-        let row = (material, kind);
-        for taken in named(&row) {
-            if self.rows.iter().any(|used| named(used).contains(&taken)) {
+        for taken in kind.materials(material) {
+            if self
+                .rows
+                .iter()
+                .any(|(m, used)| used.materials(*m).contains(&taken))
+            {
                 return Err(UseError::AlreadyUsable(taken));
             }
         }
-        self.rows.push(row);
+        self.rows.push((material, kind));
         Ok(())
     }
 
@@ -117,7 +121,7 @@ impl VoxelUses {
     pub fn of(&self, material: MaterialId) -> Option<(MaterialId, &VoxelUse)> {
         self.rows
             .iter()
-            .find(|row| named(row).contains(&material))
+            .find(|(row, kind)| kind.materials(*row).contains(&material))
             .map(|(row, kind)| (*row, kind))
     }
 
