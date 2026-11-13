@@ -21,7 +21,17 @@ shaped Voxel; undo still matches either state. Ticket 12's Gate gets the same
 panel. The look goes through the `/blocks` gallery (ticket 11) for the user's
 approval.
 
+The mechanism is general: any `voxel-uses` row (Door, Station or Container) may
+declare a fixed Shape that placing its Material always uses, so a Workbench can
+later be table-shaped and a Chest an inset box (the user is choosing those looks
+in `/blocks`). Terra's Door uses it for the panel; Terra's Workbench and Chest
+stay cubes in this ticket.
+
 ## Acceptance criteria
+
+- [ ] A `voxel-uses` row of any kind may declare a fixed Shape, in WIT and
+      data-only content; placing that Material ignores the Player's Shape and
+      uses it.
 
 - [ ] A placed Door is a thin panel in every cell, whatever Shape the Player had
       selected.
