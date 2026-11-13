@@ -1,0 +1,546 @@
+{
+  "edge": 16,
+  "faces": [
+    "top",
+    "side",
+    "bottom"
+  ],
+  "game": "terra",
+  "materials": [
+    {
+      "color": [
+        245,
+        227,
+        184,
+        255
+      ],
+      "emission": 15,
+      "faces": {
+        "bottom": "lamp.bottom.png",
+        "side": "lamp.side.png",
+        "top": "lamp.top.png"
+      },
+      "name": "terra:lamp",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "color": [
+        230,
+        72,
+        16,
+        255
+      ],
+      "emission": 15,
+      "faces": {
+        "bottom": "lava.bottom.png",
+        "side": "lava.side.png",
+        "top": "lava.top.png"
+      },
+      "name": "terra:lava",
+      "render": "opaque",
+      "solid": false,
+      "use": null
+    },
+    {
+      "color": [
+        150,
+        104,
+        60,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "wood.bottom.png",
+        "side": "wood.side.png",
+        "top": "wood.top.png"
+      },
+      "name": "terra:wood",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "color": [
+        70,
+        66,
+        62,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "ash.bottom.png",
+        "side": "ash.side.png",
+        "top": "ash.top.png"
+      },
+      "name": "terra:ash",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "color": [
+        92,
+        70,
+        44,
+        224
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "mud.bottom.png",
+        "side": "mud.side.png",
+        "top": "mud.top.png"
+      },
+      "name": "terra:mud",
+      "render": "blend",
+      "solid": false,
+      "use": null
+    },
+    {
+      "color": [
+        168,
+        74,
+        52,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "brick.bottom.png",
+        "side": "brick.side.png",
+        "top": "brick.top.png"
+      },
+      "name": "terra:brick",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "color": [
+        26,
+        82,
+        158,
+        166
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "water.bottom.png",
+        "side": "water.side.png",
+        "top": "water.top.png"
+      },
+      "name": "terra:water",
+      "render": "blend",
+      "solid": false,
+      "use": null
+    },
+    {
+      "color": [
+        133,
+        133,
+        140,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "stone.bottom.png",
+        "side": "stone.side.png",
+        "top": "stone.top.png"
+      },
+      "name": "terra:stone",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "color": [
+        107,
+        74,
+        46,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "dirt.bottom.png",
+        "side": "dirt.side.png",
+        "top": "dirt.top.png"
+      },
+      "name": "terra:dirt",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "color": [
+        84,
+        143,
+        61,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "grass.bottom.png",
+        "side": "grass.side.png",
+        "top": "grass.top.png"
+      },
+      "name": "terra:grass",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "color": [
+        164,
+        210,
+        250,
+        89
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "glass.bottom.png",
+        "side": "glass.side.png",
+        "top": "glass.top.png"
+      },
+      "name": "terra:glass",
+      "render": "blend",
+      "solid": true,
+      "use": null
+    },
+    {
+      "color": [
+        41,
+        107,
+        36,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "leaves.bottom.png",
+        "side": "leaves.side.png",
+        "top": "leaves.top.png"
+      },
+      "name": "terra:leaves",
+      "render": "cutout",
+      "solid": true,
+      "use": null
+    },
+    {
+      "color": [
+        214,
+        196,
+        140,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "sand.bottom.png",
+        "side": "sand.side.png",
+        "top": "sand.top.png"
+      },
+      "name": "terra:sand",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "color": [
+        236,
+        240,
+        246,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "snow.bottom.png",
+        "side": "snow.side.png",
+        "top": "snow.top.png"
+      },
+      "name": "terra:snow",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "color": [
+        150,
+        120,
+        104,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "iron.bottom.png",
+        "side": "iron.side.png",
+        "top": "iron.top.png"
+      },
+      "name": "terra:iron",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "color": [
+        84,
+        150,
+        56,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "melon.bottom.png",
+        "side": "melon.side.png",
+        "top": "melon.top.png"
+      },
+      "name": "terra:melon",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "color": [
+        167,
+        116,
+        63,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "workbench.bottom.png",
+        "side": "workbench.side.png",
+        "top": "workbench.top.png"
+      },
+      "name": "terra:workbench",
+      "render": "opaque",
+      "solid": true,
+      "use": {
+        "station": "workbench"
+      }
+    },
+    {
+      "color": [
+        107,
+        68,
+        35,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "chest.bottom.png",
+        "side": "chest.side.png",
+        "top": "chest.top.png"
+      },
+      "name": "terra:chest",
+      "render": "opaque",
+      "solid": true,
+      "use": {
+        "container": 27
+      }
+    },
+    {
+      "color": [
+        128,
+        88,
+        50,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "door.bottom.png",
+        "side": "door.side.png",
+        "top": "door.top.png"
+      },
+      "name": "terra:door",
+      "render": "opaque",
+      "solid": true,
+      "use": {
+        "door": {
+          "closed": "terra:door",
+          "open": "terra:door_open"
+        }
+      }
+    },
+    {
+      "color": [
+        128,
+        88,
+        50,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "door_open.bottom.png",
+        "side": "door_open.side.png",
+        "top": "door_open.top.png"
+      },
+      "name": "terra:door_open",
+      "render": "cutout",
+      "solid": true,
+      "use": {
+        "door": {
+          "closed": "terra:door",
+          "open": "terra:door_open"
+        }
+      }
+    }
+  ],
+  "shapes": [
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "name": "core:cube"
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            8,
+            16
+          ]
+        ]
+      ],
+      "name": "core:slab"
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            8,
+            16
+          ]
+        ],
+        [
+          [
+            0,
+            8,
+            8
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "name": "core:stair"
+    },
+    {
+      "boxes": [
+        [
+          [
+            6,
+            0,
+            6
+          ],
+          [
+            10,
+            16,
+            10
+          ]
+        ]
+      ],
+      "name": "core:post"
+    },
+    {
+      "boxes": [
+        [
+          [
+            6,
+            0,
+            6
+          ],
+          [
+            10,
+            16,
+            10
+          ]
+        ]
+      ],
+      "joined": [
+        [
+          [
+            6,
+            0,
+            6
+          ],
+          [
+            10,
+            16,
+            10
+          ]
+        ],
+        [
+          [
+            0,
+            7,
+            7
+          ],
+          [
+            6,
+            13,
+            9
+          ]
+        ],
+        [
+          [
+            10,
+            7,
+            7
+          ],
+          [
+            16,
+            13,
+            9
+          ]
+        ],
+        [
+          [
+            7,
+            7,
+            0
+          ],
+          [
+            9,
+            13,
+            6
+          ]
+        ],
+        [
+          [
+            7,
+            7,
+            10
+          ],
+          [
+            9,
+            13,
+            16
+          ]
+        ]
+      ],
+      "name": "terra:fence"
+    }
+  ]
+}

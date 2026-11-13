@@ -17,14 +17,19 @@ class PrototypeHandler(SimpleHTTPRequestHandler):
         if "If-Modified-Since" in self.headers:
             del self.headers["If-Modified-Since"]
         route = self.path.split("?", 1)[0].rstrip("/")
-        if route in ("", "/worlds", "/mods", "/menu", "/play", "/settings", "/inventory", "/catalogue", "/layout", "/death", "/opening", "/station", "/container") or route.startswith(
+        if route in ("", "/worlds", "/mods", "/menu", "/play", "/settings", "/inventory", "/catalogue", "/layout", "/death", "/opening", "/station", "/container", "/blocks") or route.startswith(
             ("/worlds/", "/settings/", "/inventory/")
         ):
             self.path = "/index.html"
         super().do_GET()
 
 
+class PrototypeServer(ThreadingHTTPServer):
+    # The default backlog of 5 resets connections when /blocks requests its textures at once.
+    request_queue_size = 128
+
+
 handler = partial(PrototypeHandler, directory=str(Path(__file__).parent))
-server = ThreadingHTTPServer(("127.0.0.1", args.port), handler)
+server = PrototypeServer(("127.0.0.1", args.port), handler)
 print(f"Tesserae prototype: http://127.0.0.1:{args.port}", flush=True)
 server.serve_forever()
