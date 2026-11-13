@@ -140,31 +140,31 @@ without a Game it is empty air, with no ground, lakes or fuel. See
 
 **Controls:**
 
-| key                                  | does                                                                        |
-| ------------------------------------ | --------------------------------------------------------------------------- |
-| click, cursor free                   | grab the cursor — mouse look does nothing until you do; it edits nothing    |
-| `Esc`                                | close the open overlay, otherwise open the Menu                             |
-| mouse                                | look                                                                        |
-| `W` `A` `S` `D`                      | move; `W`/`S` are how you get closer and further away                       |
-| `Space` / `Left Ctrl`                | up and down                                                                 |
-| `Shift`                              | sprint, 5x                                                                  |
-| `-` / `=`                            | movement speed down / up, 0.5 to 64 m/s                                     |
-| `R`                                  | back to the spawn point                                                     |
-| `1` to `9`, scroll                   | choose a hotbar slot; scrolling (or a two-finger swipe) moves one and wraps |
-| hold left                            | remove fire first, then solid, then source                                  |
-| `Ctrl`/`Cmd`+`Z`                     | undo the last direct player edit                                            |
-| `Ctrl`/`Cmd`+`Shift`+`Z`, `Ctrl`+`Y` | redo an undone edit                                                         |
-| right click                          | place from the selected slot, or fire on fuel; Survival spends one Item     |
-| `F`                                  | cycle the held solid through its Shapes                                     |
-| `Q` / `E`                            | turn the held shape a quarter / flip which way is up                        |
-| `Tab`                                | open the Menu: Resume, Inventory, Settings, World details, Return to Worlds |
-| `I`                                  | open or close the Inventory                                                 |
-| `C`                                  | open the Inventory with the Catalogue search focused (Creative only)        |
-| `G`                                  | use the held tool, or eat the selected food                                 |
-| `X`                                  | empty the hand without changing any slot                                    |
-| middle click / `P`                   | sample the aimed Voxel into the hand without removing it                    |
-| `F10` / `F1`                         | open Settings at the last category / at the last controls page              |
-| `F3`                                 | show or hide diagnostics in a dev build                                     |
+| key                                  | does                                                                                       |
+| ------------------------------------ | ------------------------------------------------------------------------------------------ |
+| click, cursor free                   | grab the cursor — mouse look does nothing until you do; it edits nothing                   |
+| `Esc`                                | close the open overlay, otherwise open the Menu                                            |
+| mouse                                | look                                                                                       |
+| `W` `A` `S` `D`                      | move; `W`/`S` are how you get closer and further away                                      |
+| `Space` / `Left Ctrl`                | up and down                                                                                |
+| `Shift`                              | sprint, 5x                                                                                 |
+| `-` / `=`                            | movement speed down / up, 0.5 to 64 m/s                                                    |
+| `R`                                  | back to the spawn point                                                                    |
+| `1` to `9`, scroll                   | choose a hotbar slot; scrolling (or a two-finger swipe) moves one and wraps                |
+| hold left                            | remove fire first, then solid, then source                                                 |
+| `Ctrl`/`Cmd`+`Z`                     | undo the last direct player edit                                                           |
+| `Ctrl`/`Cmd`+`Shift`+`Z`, `Ctrl`+`Y` | redo an undone edit                                                                        |
+| right click                          | place from the selected slot, or fire on fuel; Survival spends one Item                    |
+| `F`                                  | cycle the held solid through its Shapes                                                    |
+| `Q` / `E`                            | turn the held shape a quarter / flip which way is up                                       |
+| `Tab`                                | open the Menu: Resume, Inventory, Settings, World details, Return to Worlds                |
+| `I`                                  | open or close the Inventory                                                                |
+| `C`                                  | open the Inventory with the Catalogue search focused (Creative only)                       |
+| `G`                                  | Use: the held Tool, else a Door, Container or Station in reach, else eat the selected food |
+| `X`                                  | empty the hand without changing any slot                                                   |
+| middle click / `P`                   | sample the aimed Voxel into the hand without removing it                                   |
+| `F10` / `F1`                         | open Settings at the last category / at the last controls page                             |
+| `F3`                                 | show or hide diagnostics in a dev build                                                    |
 
 The hotbar is the nine Hotbar slots of the Player's Inventory, which the Server
 holds and saves with the World. It starts empty; in Creative the Catalogue
