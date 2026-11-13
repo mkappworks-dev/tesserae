@@ -100,7 +100,7 @@ no menu header inside the game.
 ## Survival extension (proposed, awaiting approval)
 
 Added after the menus were approved, for DESIGN.md steps 15 and 21. The
-decisions it illustrates are in [../decisions.md](../decisions.md). Code is in
+decisions it illustrates are in [decisions.md](../.scratch/2026-11-05-phase-15-menus-and-inventory-ui/decisions.md). Code is in
 `survival.js` and `survival.css`, and is throwaway.
 
 - `/play` in Survival shows health and hunger as mosaic tiles over the hotbar,

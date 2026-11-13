@@ -8,7 +8,7 @@ step 21 (Survival loop), built together on one branch. Stacked on phase 13
 (ADR-0022).
 
 Source material beside this spec: [decisions.md](decisions.md) records every
-decision taken before it, and [prototype/](prototype/) is the approved browser
+decision taken before it, and [mockup/](../../mockup/) is the approved browser
 mockup (`python3 server.py` there; its README lists every screen). Vocabulary
 is in [GLOSSARY.md](../../GLOSSARY.md); new terms are listed under
 Implementation Decisions and land in the glossary with the docs ticket.
