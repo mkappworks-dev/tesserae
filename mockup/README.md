@@ -218,8 +218,9 @@ Crafting works the same in both panes:
 `/blocks` previews every Terra Material as a textured block, drawn from Terra's
 own textures, so a look can be judged before it ships. It shows each Material's
 cube and its top, side and bottom faces, every placeable Shape in a chosen
-Material, and the Door closed and open beside a 1.8 m Player silhouette, at 1,
-0.5 or 0.25 m Voxels. Code is in `blocks.js` and `blocks.css`.
+Material, the Door closed and open beside a 1.8 m Player silhouette, and the
+Gate the same in a fence run, at 1, 0.5 or 0.25 m Voxels. Code is in `blocks.js`
+and `blocks.css`.
 
 The textures under `blocks/` are generated; do not edit them by hand. After
 changing Terra's textures, regenerate them from the repository root:

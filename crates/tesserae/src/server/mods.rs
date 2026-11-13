@@ -2378,7 +2378,7 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
             assert!(pixels.as_chunks::<4>().0.iter().any(|p| p != &pixels[..4]));
             if matches!(
                 material.name.as_str(),
-                "terra:glass" | "terra:water" | "terra:mud"
+                "terra:glass" | "terra:water" | "terra:mud" | "terra:gate" | "terra:gate_open"
             ) {
                 assert!(pixels.as_chunks::<4>().0.iter().any(|p| p[3] < 255));
             } else {

@@ -21,6 +21,20 @@ fn dirt(x: usize, y: usize, salt: usize) -> [u8; 3] {
     }
 }
 
+const GATE_STILE: [usize; 2] = [2, 13];
+
+/// A Gate's side is two stiles with three rails across them, the upper two at
+/// the edges of a fence's rail; the rest is open. Its top and bottom show only
+/// the stiles' ends, in a corner whichever edge of the cell the panel is on.
+fn gate_gap(face: usize, x: usize, y: usize) -> bool {
+    let stile = |c: usize| c <= GATE_STILE[0] || c >= GATE_STILE[1];
+    if face == 1 {
+        !stile(x) && !matches!(y, 3 | 4 | 7 | 8 | 11 | 12)
+    } else {
+        !(stile(x) && stile(y))
+    }
+}
+
 fn pixel(name: &str, face: usize, x: usize, y: usize, base: [u8; 3]) -> [u8; 3] {
     let n = noise(x, y, face + 3);
     match name {
@@ -100,6 +114,21 @@ fn pixel(name: &str, face: usize, x: usize, y: usize, base: [u8; 3]) -> [u8; 3] 
                     -34
                 } else if seam {
                     -22
+                } else {
+                    (n - 128) / 14
+                },
+            )
+        }
+        "gate" | "gate_open" => {
+            let stile = x <= GATE_STILE[0] || x >= GATE_STILE[1];
+            let shadow = face == 1 && if stile { x == 0 || x == 15 } else { y % 4 == 0 };
+            let grain = if stile || face != 1 { x % 3 } else { y % 3 } == 1;
+            tint(
+                base,
+                if shadow {
+                    -36
+                } else if grain {
+                    -14
                 } else {
                     (n - 128) / 14
                 },
@@ -205,7 +234,9 @@ pub fn texture(name: &str, [r, g, b, opacity]: [u8; 4]) -> Vec<u8> {
         for face in 0..3 {
             for x in 0..EDGE {
                 let [r, g, b] = pixel(name, face, x, y, [r, g, b]);
-                let alpha = if name != "glass" {
+                let alpha = if name.starts_with("gate") {
+                    if gate_gap(face, x, y) { 0 } else { opacity }
+                } else if name != "glass" {
                     opacity
                 } else if x == 0 || y == 0 || x == 15 || y == 15 {
                     100

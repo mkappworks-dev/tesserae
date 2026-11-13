@@ -180,6 +180,16 @@ fn panel() -> ShapeDef {
     }
 }
 
+/// Cut out between its rails, so what stands behind a Gate shows through.
+fn gate(name: &str) -> MaterialDef {
+    MaterialDef {
+        dimming: 0,
+        occlusion: Occlusion::Never,
+        render: RenderClass::Cutout,
+        ..solid(name)
+    }
+}
+
 fn appearance(material: &str, [r, g, b, a]: [u8; 4]) -> Appearance {
     Appearance {
         material: material.into(),
@@ -284,8 +294,8 @@ impl Guest for Terra {
                 solid("chest"),
                 solid("door"),
                 solid("door_open"),
-                solid("gate"),
-                solid("gate_open"),
+                gate("gate"),
+                gate("gate_open"),
             ],
             shapes: vec![fence(), panel()],
             appearance: vec![
