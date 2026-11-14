@@ -424,10 +424,10 @@ mod tests {
             ground: None,
             sky_fog: None,
             cave_scale: None,
-            surface_features: SurfaceFeatures::new(&[SurfaceFeature {
-                material: tesserae_core::testgen::fixtures().lantern,
-                spacing_m: 4.0,
-            }])
+            surface_features: SurfaceFeatures::new(&[SurfaceFeature::cube(
+                tesserae_core::testgen::fixtures().lantern,
+                4.0,
+            )])
             .unwrap(),
         };
         let mut featured = 0;

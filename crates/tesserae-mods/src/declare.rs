@@ -11,8 +11,11 @@ use tesserae_core::{
     AIR, Biome, BiomeId, BiomeName, BiomeSet, BiomeTable, Burn, CombustionDef, FluidDef,
     GroundParams, Heat, MAX_BIOMES, MAX_CAVE_SCALE, MAX_ORES, MaterialId, Ore, OreTable,
     ParamError, Phase, Reactant, ReactionDef, Side, SkyFog, SurfaceFeature, SurfaceFeatures,
-    SurvivalRules, Tables, Voxel, VoxelUse, WaterParams, WorldgenParams,
+    SurfaceFruit, SurfacePlant, SurfacePlantKind, SurfaceTree, SurvivalRules, Tables, Voxel,
+    VoxelUse, WaterParams, WorldgenParams,
 };
+
+use tesserae_core::plant::{Direction as PlantDirection, Kind as PlantKind};
 
 use crate::bindings::tesserae::mods::content::{self, Declaration};
 use crate::convert::world_params;
@@ -565,8 +568,168 @@ fn check_biomes(mod_id: &str, biomes: &[content::BiomeDef]) -> Result<(), ModErr
     Ok(())
 }
 
+/// The rows of `behaviours` that [`resolve_biomes`] reads, apart from what [`resolve`] consumes, so
+/// Biomes can resolve after the Plant table they may name.
+pub fn biome_rows(behaviours: &[Behaviour]) -> Vec<Behaviour> {
+    behaviours
+        .iter()
+        .map(|b| Behaviour {
+            mod_id: b.mod_id.clone(),
+            biomes: b.biomes.clone(),
+            ores: b.ores.clone(),
+            ..Behaviour::default()
+        })
+        .collect()
+}
+
+fn surface_feature(
+    b: &Behaviour,
+    row: usize,
+    f: &content::SurfaceFeature,
+    tables: &Tables,
+    registry: &Registry,
+) -> Result<SurfaceFeature, ModError> {
+    let bad = |field, rule| ModError::Params {
+        id: b.mod_id.clone(),
+        what: "biome",
+        source: ParamError { field, rule },
+    };
+    let unknown = |name: &str| ModError::UnknownName {
+        id: b.mod_id.clone(),
+        what: "biome",
+        row,
+        name: name.to_owned(),
+    };
+    let plant = match (&f.material, &f.plant) {
+        (Some(_), Some(_)) => {
+            return Err(bad(
+                "biomes.surface_features",
+                "must name a Material or a Plant, not both",
+            ));
+        }
+        (None, None) => {
+            return Err(bad(
+                "biomes.surface_features",
+                "must name a Material or a Plant",
+            ));
+        }
+        (Some(name), None) => {
+            if f.shape.is_some() {
+                return Err(bad(
+                    "biomes.surface_features.shape",
+                    "is for a Plant, not a Material",
+                ));
+            }
+            let material = lookup(b, registry, "biome", row, name)?;
+            if !tables.materials.solid(Voxel::cube(material)) || tables.fluids.contains(material) {
+                return Err(bad(
+                    "biomes.surface_features.material",
+                    "must be a solid Material",
+                ));
+            }
+            return Ok(SurfaceFeature::cube(material, f.spacing_m));
+        }
+        (None, Some(name)) => tables
+            .plants
+            .plants()
+            .iter()
+            .find(|p| p.name == *name)
+            .ok_or_else(|| unknown(name))?,
+    };
+    let shape = f
+        .shape
+        .as_deref()
+        .map(|name| {
+            registry
+                .id_of(Kind::Shape, name)
+                .map(|id| id as tesserae_core::ShapeId)
+                .ok_or_else(|| unknown(name))
+        })
+        .transpose()?;
+    let pad = |found: &[MaterialId]| {
+        let mut all = [AIR; tesserae_core::MAX_SURFACE_STAGES];
+        all[..found.len()].copy_from_slice(found);
+        all
+    };
+    let kind = match &plant.kind {
+        PlantKind::Crop { stages, .. } => {
+            let found: Vec<MaterialId> = stages.iter().map(|s| s.material).collect();
+            SurfacePlantKind::Stages {
+                materials: pad(&found),
+                len: found.len() as u8,
+            }
+        }
+        PlantKind::Spreader { .. } => SurfacePlantKind::Stages {
+            materials: pad(&[plant.first]),
+            len: 1,
+        },
+        PlantKind::Column {
+            max_height_m,
+            direction,
+            stands_in,
+            ..
+        } => {
+            if *direction == PlantDirection::Down {
+                return Err(bad(
+                    "biomes.surface_features.plant",
+                    "a column growing down has no ground to stand on",
+                ));
+            }
+            SurfacePlantKind::Column {
+                material: plant.first,
+                max_height_m: *max_height_m,
+                stands_in: *stands_in,
+            }
+        }
+        PlantKind::Climber { .. } => {
+            return Err(bad(
+                "biomes.surface_features.plant",
+                "a climber needs a wall, which a Biome does not place",
+            ));
+        }
+        PlantKind::Tree(tree) => {
+            if shape.is_some() {
+                return Err(bad(
+                    "biomes.surface_features.shape",
+                    "a tree is always cubes",
+                ));
+            }
+            let fruit = tree.fruit.as_ref().map(|fruit| {
+                let mut stages = [AIR; tesserae_core::MAX_SURFACE_FRUIT_STAGES];
+                for (slot, stage) in stages.iter_mut().zip(&fruit.stages) {
+                    *slot = stage.material;
+                }
+                SurfaceFruit {
+                    stages,
+                    len: fruit.stages.len() as u8,
+                    density: fruit.density,
+                }
+            });
+            SurfacePlantKind::Tree(SurfaceTree {
+                trunk: tree.trunk,
+                canopy: tree.canopy,
+                trunk_height_m: tree.trunk_height_m,
+                canopy_radius_m: tree.canopy_radius_m,
+                fruit,
+            })
+        }
+    };
+    let first = match &kind {
+        SurfacePlantKind::Tree(t) => t.trunk,
+        _ => plant.first,
+    };
+    Ok(SurfaceFeature {
+        material: first,
+        spacing_m: f.spacing_m,
+        plant: Some(SurfacePlant {
+            shape: shape.unwrap_or(tesserae_core::SHAPE_FULL_CUBE),
+            kind,
+        }),
+    })
+}
+
 /// An ore may name a Material or Biome of any Mod, so this runs once every Declaration is in, like
-/// [`resolve_items`].
+/// [`resolve_items`]. A Biome's feature may name a Plant, so the Plant table is resolved first.
 pub fn resolve_biomes(
     behaviours: &[Behaviour],
     tables: &Tables,
@@ -619,21 +782,7 @@ pub fn resolve_biomes(
             let features = def
                 .surface_features
                 .iter()
-                .map(|f| {
-                    let material = lookup(b, registry, "biome", row, &f.material)?;
-                    if !tables.materials.solid(Voxel::cube(material))
-                        || tables.fluids.contains(material)
-                    {
-                        return Err(bad(ParamError {
-                            field: "biomes.surface_features.material",
-                            rule: "must be a solid Material",
-                        }));
-                    }
-                    Ok(SurfaceFeature {
-                        material,
-                        spacing_m: f.spacing_m,
-                    })
-                })
+                .map(|f| surface_feature(b, row, f, tables, registry))
                 .collect::<Result<Vec<_>, _>>()?;
             biomes.push(Biome {
                 name: BiomeName::new(&format!("{}:{}", b.mod_id, def.name)).map_err(bad)?,

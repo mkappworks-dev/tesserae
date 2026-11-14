@@ -1685,7 +1685,9 @@ fn a_bad_cave_scale_names_the_mod_that_declared_it() {
 
 fn feature(material: &str, spacing_m: f32) -> content::SurfaceFeature {
     content::SurfaceFeature {
-        material: material.into(),
+        material: Some(material.into()),
+        plant: None,
+        shape: None,
         spacing_m,
     }
 }
@@ -1722,14 +1724,8 @@ fn a_biomes_surface_features_resolve_to_any_mods_solid_in_order() {
     assert_eq!(
         biomes.as_slice()[0].surface_features.as_slice(),
         [
-            SurfaceFeature {
-                material: id("b:gourd"),
-                spacing_m: 24.0
-            },
-            SurfaceFeature {
-                material: id("a:melon"),
-                spacing_m: 16.0
-            },
+            SurfaceFeature::cube(id("b:gourd"), 24.0),
+            SurfaceFeature::cube(id("a:melon"), 16.0),
         ]
     );
     assert!(biomes.as_slice()[1].surface_features.is_empty());

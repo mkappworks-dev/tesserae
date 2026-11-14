@@ -333,7 +333,9 @@ fn component() -> Declaration {
                 sky_fog: None,
                 cave_scale: Some(1.5),
                 surface_features: vec![content::SurfaceFeature {
-                    material: "full:wood".into(),
+                    material: Some("full:wood".into()),
+                    plant: None,
+                    shape: None,
                     spacing_m: 24.0,
                 }],
             },

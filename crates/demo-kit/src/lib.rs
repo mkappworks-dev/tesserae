@@ -108,7 +108,9 @@ macro_rules! food {
 
         pub fn feature() -> crate::tesserae::mods::content::SurfaceFeature {
             crate::tesserae::mods::content::SurfaceFeature {
-                material: $food.qualified(),
+                material: Some($food.qualified()),
+                plant: None,
+                shape: None,
                 spacing_m: $food.spacing_m,
             }
         }

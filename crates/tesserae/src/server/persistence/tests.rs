@@ -1571,6 +1571,89 @@ fn a_reopened_world_keeps_its_own_biomes_whatever_the_game_declares_now() {
     assert_eq!(biome_names(&without), ["terra:dry", "terra:wet"]);
 }
 
+/// A crop of two Stages and an oak in the first Biome, from Materials Terra already has.
+fn declares_plants() -> impl FnOnce(&mut crate::server::mods::LoadedMods) {
+    use tesserae_core::{
+        MAX_SURFACE_STAGES, SurfaceFeature, SurfaceFeatures, SurfacePlant, SurfacePlantKind,
+        SurfaceTree,
+    };
+    move |loaded| {
+        declares_biomes(["terra:dry", "terra:wet"])(loaded);
+        let id = |n| loaded.registry.id_of(Kind::Material, n).unwrap() as u16;
+        let mut stages = [0; MAX_SURFACE_STAGES];
+        stages[..2].copy_from_slice(&[id("terra:dirt"), id("terra:grass")]);
+        let feature = |kind| SurfaceFeature {
+            material: id("terra:dirt"),
+            spacing_m: 8.0,
+            plant: Some(SurfacePlant { shape: 0, kind }),
+        };
+        let world = loaded.world.as_mut().unwrap();
+        let mut biomes = world.biomes.as_slice().to_vec();
+        biomes[0].surface_features = SurfaceFeatures::new(&[
+            feature(SurfacePlantKind::Stages {
+                materials: stages,
+                len: 2,
+            }),
+            feature(SurfacePlantKind::Tree(SurfaceTree {
+                trunk: id("terra:wood"),
+                canopy: id("terra:leaves"),
+                trunk_height_m: (3.0, 5.0),
+                canopy_radius_m: 2.5,
+                fruit: None,
+            })),
+        ])
+        .unwrap();
+        world.biomes = tesserae_core::BiomeTable::new(&biomes).unwrap();
+    }
+}
+
+#[test]
+fn plants_a_biome_names_are_frozen_into_the_world_and_survive_the_game_dropping_them() {
+    let dir = Directory::new();
+    Rig::open_with(dir.opening(), WorldSettings::default(), declares_plants()).settled_save();
+    let saved = save::inspect(&dir.0).unwrap().unwrap().commit.parameters;
+    let features = &saved.biomes.unwrap()[0].surface_features;
+    assert_eq!(features.len(), 2);
+    assert!(features.iter().all(|f| f.plant.is_some()));
+    assert_eq!(features[0].spacing_m, 8.0);
+
+    // The Game now declares no Plant, or another: the World's snapshot wins.
+    let declared = prepared_world(&dir, declares_plants());
+    for game in [
+        Box::new(declares_biomes(["terra:hot", "terra:cold"]))
+            as Box<dyn FnOnce(&mut crate::server::mods::LoadedMods)>,
+        Box::new(|l: &mut crate::server::mods::LoadedMods| l.world = None),
+    ] {
+        let reopened = prepared_world(&dir, game);
+        assert_eq!(
+            reopened.biomes.as_slice()[0].surface_features,
+            declared.biomes.as_slice()[0].surface_features
+        );
+        assert_eq!(
+            reopened.biomes.as_slice()[0]
+                .surface_features
+                .as_slice()
+                .len(),
+            2
+        );
+    }
+}
+
+#[test]
+fn a_world_saved_before_plants_keeps_its_bare_ground_when_the_game_gains_them() {
+    let dir = Directory::new();
+    Rig::open_with(
+        dir.opening(),
+        WorldSettings::default(),
+        declares_biomes(["terra:dry", "terra:wet"]),
+    )
+    .settled_save();
+    let saved = save::inspect(&dir.0).unwrap().unwrap().commit.parameters;
+    assert!(saved.biomes.unwrap()[0].surface_features.is_empty());
+    let reopened = prepared_world(&dir, declares_plants());
+    assert!(reopened.biomes.as_slice()[0].surface_features.is_empty());
+}
+
 /// `None` leaves the first Biome the World's ground.
 fn declares_ground(ground: Option<[&str; 3]>) -> impl FnOnce(&mut crate::server::mods::LoadedMods) {
     move |loaded| {

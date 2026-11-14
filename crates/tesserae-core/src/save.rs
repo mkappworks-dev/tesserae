@@ -599,6 +599,48 @@ pub struct SavedBiome {
 pub struct SavedSurfaceFeature {
     pub material: String,
     pub spacing_m: f32,
+    /// What generation needs of the Plant this names, frozen so a Game that later changes or
+    /// drops it never reshapes the World. Absent is a Material, as every feature was before Plants.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plant: Option<SavedPlant>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SavedPlant {
+    /// Absent is a cube.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shape: Option<String>,
+    pub form: SavedPlantKind,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum SavedPlantKind {
+    Stages {
+        materials: Vec<String>,
+    },
+    Column {
+        material: String,
+        max_height_m: f32,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        stands_in: Option<String>,
+    },
+    Tree {
+        trunk: String,
+        canopy: String,
+        trunk_height_m: [f32; 2],
+        canopy_radius_m: f32,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        fruit: Option<SavedFruit>,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SavedFruit {
+    pub stages: Vec<String>,
+    pub density: f32,
 }
 
 /// Material and Biomes by name, since ids are only meaningful beside the tables that made them.
@@ -729,6 +771,7 @@ fn saved_biome(b: &crate::Biome, mapping: &Mapping) -> Result<SavedBiome, Error>
                 Ok(SavedSurfaceFeature {
                     material: mapping.material_name(f.material)?,
                     spacing_m: f.spacing_m,
+                    plant: f.plant.map(|p| saved_plant(&p, mapping)).transpose()?,
                 })
             })
             .collect::<Result<_, Error>>()?,
@@ -783,10 +826,122 @@ fn restored_features(
             Ok(crate::SurfaceFeature {
                 material: mapping.material_id(&f.material)?,
                 spacing_m: f.spacing_m,
+                plant: f
+                    .plant
+                    .as_ref()
+                    .map(|p| restored_plant(p, mapping))
+                    .transpose()?,
             })
         })
         .collect::<Result<Vec<_>, Error>>()?;
     crate::SurfaceFeatures::new(&features).map_err(|e| Error::Corrupt(e.to_string()))
+}
+
+fn saved_plant(p: &crate::SurfacePlant, mapping: &Mapping) -> Result<SavedPlant, Error> {
+    use crate::SurfacePlantKind as K;
+    let name = |m| mapping.material_name(m);
+    let names = |ms: &[crate::MaterialId]| ms.iter().map(|&m| name(m)).collect::<Result<_, _>>();
+    Ok(SavedPlant {
+        shape: (p.shape != crate::SHAPE_FULL_CUBE)
+            .then(|| {
+                mapping.shapes.get(&p.shape).cloned().ok_or_else(|| {
+                    Error::Incompatible(format!("unregistered Shape id {}", p.shape))
+                })
+            })
+            .transpose()?,
+        form: match p.kind {
+            K::Stages { materials, len } => SavedPlantKind::Stages {
+                materials: names(&materials[..len as usize])?,
+            },
+            K::Column {
+                material,
+                max_height_m,
+                stands_in,
+            } => SavedPlantKind::Column {
+                material: name(material)?,
+                max_height_m,
+                stands_in: stands_in.map(name).transpose()?,
+            },
+            K::Tree(t) => SavedPlantKind::Tree {
+                trunk: name(t.trunk)?,
+                canopy: name(t.canopy)?,
+                trunk_height_m: [t.trunk_height_m.0, t.trunk_height_m.1],
+                canopy_radius_m: t.canopy_radius_m,
+                fruit: t
+                    .fruit
+                    .map(|f| {
+                        Ok::<_, Error>(SavedFruit {
+                            stages: names(&f.stages[..f.len as usize])?,
+                            density: f.density,
+                        })
+                    })
+                    .transpose()?,
+            },
+        },
+    })
+}
+
+fn restored_plant(p: &SavedPlant, mapping: &Mapping) -> Result<crate::SurfacePlant, Error> {
+    use crate::SurfacePlantKind as K;
+    let id = |n: &String| mapping.material_id(n);
+    let ids = |ns: &[String], most: usize| -> Result<Vec<crate::MaterialId>, Error> {
+        if ns.is_empty() || ns.len() > most {
+            return Err(Error::Corrupt("a saved Plant has a bad Stage count".into()));
+        }
+        ns.iter().map(id).collect()
+    };
+    let shape = p
+        .shape
+        .as_ref()
+        .map(|n| mapping.shape_id(n))
+        .transpose()?
+        .unwrap_or(crate::SHAPE_FULL_CUBE);
+    let kind = match &p.form {
+        SavedPlantKind::Stages { materials } => {
+            let found = ids(materials, crate::MAX_SURFACE_STAGES)?;
+            let mut stages = [crate::voxel::AIR; crate::MAX_SURFACE_STAGES];
+            stages[..found.len()].copy_from_slice(&found);
+            K::Stages {
+                materials: stages,
+                len: found.len() as u8,
+            }
+        }
+        SavedPlantKind::Column {
+            material,
+            max_height_m,
+            stands_in,
+        } => K::Column {
+            material: id(material)?,
+            max_height_m: *max_height_m,
+            stands_in: stands_in.as_ref().map(id).transpose()?,
+        },
+        SavedPlantKind::Tree {
+            trunk,
+            canopy,
+            trunk_height_m,
+            canopy_radius_m,
+            fruit,
+        } => K::Tree(crate::SurfaceTree {
+            trunk: id(trunk)?,
+            canopy: id(canopy)?,
+            trunk_height_m: (trunk_height_m[0], trunk_height_m[1]),
+            canopy_radius_m: *canopy_radius_m,
+            fruit: fruit
+                .as_ref()
+                .map(|f| {
+                    let found = ids(&f.stages, crate::MAX_SURFACE_FRUIT_STAGES)?;
+                    let mut stages = [crate::voxel::AIR; crate::MAX_SURFACE_FRUIT_STAGES];
+                    stages[..found.len()].copy_from_slice(&found);
+                    Ok::<_, Error>(crate::SurfaceFruit {
+                        stages,
+                        len: found.len() as u8,
+                        density: f.density,
+                    })
+                })
+                .transpose()?,
+        }),
+    };
+    Ok(crate::SurfacePlant { shape, kind })
 }
 
 fn saved_ore(

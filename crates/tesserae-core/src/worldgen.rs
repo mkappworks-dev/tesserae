@@ -12,11 +12,13 @@
 use crate::chunk::{CHUNK_SIZE, Chunk, ChunkBuilder};
 use crate::climate::{
     BIOMES_SINCE, Biome, BiomeId, BiomeTable, Climate, ClimateField, ClimateParams, MAX_BIOMES,
-    SkyFogBlend, SurfaceFeatures,
+    SkyFogBlend, SurfaceFeature, SurfaceFeatures, SurfacePlant, SurfacePlantKind, SurfaceTree,
 };
 use crate::mesh::POS_Y;
 use crate::noise::{Fbm3Cache, fbm2, fbm3_cached, fbm3_range};
 use crate::ore::{OreField, OreMask, OreTable};
+use crate::plant::tree::{Part, fruit_stage, tree_voxels};
+use crate::plant::{CountRange, Fruit, Stage, Tree};
 use crate::shape::{MAX_SHAPED_PER_CHUNK, Orientation, SHAPE_SLAB, SHAPE_STAIR};
 use crate::tables::Tables;
 use crate::voxel::{MaterialId, Voxel};
@@ -334,6 +336,16 @@ impl WorldgenParams {
             .iter()
             .flat_map(|b| b.surface_features.as_slice())
         {
+            if let Some(plant) = feature.plant {
+                for m in plant.materials() {
+                    require(
+                        tables.materials.contains(m),
+                        "biomes.surface_features.plant",
+                        "names no registered Material",
+                    )?;
+                }
+                continue;
+            }
             let m = feature.material;
             require(
                 tables.materials.contains(m),
@@ -536,6 +548,21 @@ pub struct Worldgen {
     ores: Option<OreField>,
     cave_tuning: Option<CaveTuning>,
     scatter: Option<SurfaceScatter>,
+    /// How far Plants raise [`Self::surface_bounds_m`] above the terrain band; 0 without any.
+    plant_rise_m: f32,
+}
+
+/// Voxels of slack over a Plant's declared rise, for the base's own cell and rounding up.
+const PLANT_RISE_SLACK_VOXELS: f32 = 3.0;
+
+/// Salts the draw that varies a Plant's Stage and run, apart from the one that picks it.
+const PLANT_VARY_SALT: u64 = 0x91a7_0000_5eed_0001;
+
+/// A Plant a Biome stands on one column: where, and the draw that varies its Stage and height.
+struct Standing {
+    plant: SurfacePlant,
+    base: [i32; 3],
+    vary: f64,
 }
 
 /// Keeps the feature draw apart from every noise field, which hash the folded seed directly.
@@ -550,6 +577,12 @@ struct SurfaceScatter {
     unit_chance: f64,
     /// No draw at or above this picks a feature in any Biome, so most columns never ask their Biome.
     most: f64,
+    /// Whether any Biome's feature is a Plant.
+    plants: bool,
+    /// The tallest a Plant feature stands above its base, in metres; 0 with none.
+    rise_m: f32,
+    /// The widest a tree feature reaches from its trunk, in metres; 0 with none.
+    tree_reach_m: f32,
 }
 
 impl SurfaceScatter {
@@ -564,7 +597,28 @@ impl SurfaceScatter {
             .iter()
             .map(|b| Self::total(unit_chance, &b.surface_features))
             .fold(0.0, f64::max);
-        (most > 0.0).then_some(SurfaceScatter { unit_chance, most })
+        let plants = || {
+            params
+                .biomes
+                .as_slice()
+                .iter()
+                .flat_map(|b| b.surface_features.as_slice())
+                .filter_map(|f| f.plant)
+        };
+        let rise_m = plants().map(|p| p.rise_m()).fold(0.0, f32::max);
+        let tree_reach_m = plants()
+            .filter_map(|p| match p.kind {
+                SurfacePlantKind::Tree(t) => Some(t.canopy_radius_m),
+                _ => None,
+            })
+            .fold(0.0, f32::max);
+        (most > 0.0).then_some(SurfaceScatter {
+            unit_chance,
+            most,
+            plants: plants().next().is_some(),
+            rise_m,
+            tree_reach_m,
+        })
     }
 
     fn chance(unit_chance: f64, spacing_m: f32) -> f64 {
@@ -580,16 +634,21 @@ impl SurfaceScatter {
     }
 
     /// One draw against the features' chances laid end to end, so each keeps its own density.
-    fn pick(&self, features: &SurfaceFeatures, draw: f64) -> Option<MaterialId> {
+    fn pick<'a>(&self, features: &'a SurfaceFeatures, draw: f64) -> Option<&'a SurfaceFeature> {
         let mut reach = 0.0;
-        features.as_slice().iter().find_map(|f| {
+        features.as_slice().iter().find(|f| {
             reach += Self::chance(self.unit_chance, f.spacing_m);
-            (draw < reach).then_some(f.material)
+            draw < reach
         })
     }
 
     /// Uniform in `[0, 1)`, from the seed and the column's metre position alone.
     fn draw(seed: u32, x_m: f32, z_m: f32) -> f64 {
+        Self::draw_salted(seed, x_m, z_m, 0)
+    }
+
+    /// A second draw for the same column, independent of the first, for what a Plant varies.
+    fn draw_salted(seed: u32, x_m: f32, z_m: f32, salt: u64) -> f64 {
         let mix = |mut z: u64| {
             z = z.wrapping_add(0x9e37_79b9_7f4a_7c15);
             z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
@@ -597,7 +656,7 @@ impl SurfaceScatter {
             z ^ (z >> 31)
         };
         let column = u64::from(x_m.to_bits()) << 32 | u64::from(z_m.to_bits());
-        let h = mix(mix(SCATTER_SEED ^ u64::from(seed)) ^ column);
+        let h = mix(mix(SCATTER_SEED ^ u64::from(seed) ^ salt) ^ column);
         (h >> 11) as f64 / (1u64 << 53) as f64
     }
 }
@@ -675,6 +734,7 @@ impl Worldgen {
         debug_assert!(voxel_size > 0.0, "a Voxel has an edge length");
         debug_assert!(params.feature_size_m > 0.0, "features have a size");
         let folded = (seed ^ (seed >> 32)) as u32;
+        let scatter = SurfaceScatter::new(&params, voxel_size);
         Worldgen {
             voxel_size,
             params,
@@ -692,7 +752,10 @@ impl Worldgen {
             biome_grounds: BiomeGrounds::new(&params),
             ores: OreField::new(folded, &params.ores).filter(|_| params.generator >= BIOMES_SINCE),
             cave_tuning: CaveTuning::new(&params),
-            scatter: SurfaceScatter::new(&params, voxel_size),
+            plant_rise_m: scatter
+                .filter(|s| s.rise_m > 0.0)
+                .map_or(0.0, |s| s.rise_m + PLANT_RISE_SLACK_VOXELS * voxel_size),
+            scatter,
         }
     }
 
@@ -803,11 +866,14 @@ impl Worldgen {
                             .biome_at(x_m, z_m)
                             .and_then(|id| self.params.biomes.get(id))
                             .and_then(|biome| scatter.pick(&biome.surface_features, draw))
-                            .is_some()
+                            .is_some_and(|f| f.plant.is_none())
                 });
                 let voxels = top + 1 + i32::from(featured);
                 clear_m = clear_m.max(voxels as f32 * size);
             }
+        }
+        if let Some(scatter) = &self.scatter {
+            clear_m = clear_m.max(self.plants_clear_m(scatter, min_m, max_m));
         }
         clear_m
     }
@@ -821,8 +887,16 @@ impl Worldgen {
     /// above the band is ever solid, which `streaming::relight`'s open-sky
     /// boundary relies on. Neither does smoothing: a stair needs a cube beside it
     /// in the same cell, so it sits no higher than the ground it eases. Nor does a
-    /// surface feature: one stands only where its Voxel's floor is in the band.
+    /// surface feature: one stands only where its Voxel's floor is in the band. A Plant is the
+    /// exception: a tree or a column stands above it, so the upper bound rises by the tallest
+    /// one a Biome declares, and a World with none is bounded as before.
     pub fn surface_bounds_m(&self) -> (f32, f32) {
+        let (lowest, highest) = self.terrain_band_m();
+        (lowest, highest + self.plant_rise_m)
+    }
+
+    /// The band the ground itself is in, below anything a Plant stands up to.
+    fn terrain_band_m(&self) -> (f32, f32) {
         (
             self.params.sea_level_m,
             self.params.sea_level_m + self.params.relief_m,
@@ -997,6 +1071,9 @@ impl Worldgen {
         }
         if let Some(scatter) = &self.scatter {
             self.scatter(&mut chunk, scatter, &surface_m, [cx, cy, cz], floor_m);
+            if scatter.plants {
+                self.plants(&mut chunk, scatter, [cx, cy, cz]);
+            }
         }
         chunk
     }
@@ -1030,7 +1107,7 @@ impl Worldgen {
     /// reaching.
     fn ores_reaching(&self, floor_m: f32, ceiling_m: f32) -> Option<(&OreField, OreMask)> {
         let field = self.ores.as_ref()?;
-        let (lowest, highest) = self.surface_bounds_m();
+        let (lowest, highest) = self.terrain_band_m();
         let mask = field.reaching((lowest - ceiling_m).max(0.0), highest - floor_m);
         (!mask.is_empty()).then_some((field, mask))
     }
@@ -1145,7 +1222,7 @@ impl Worldgen {
         let Some(world) = self.params.ground else {
             return;
         };
-        let (_, highest) = self.surface_bounds_m();
+        let (_, highest) = self.terrain_band_m();
         let size = CHUNK_SIZE as i32;
         for z in 0..size {
             for x in 0..size {
@@ -1168,9 +1245,14 @@ impl Worldgen {
                 else {
                     continue;
                 };
-                let Some(material) = scatter.pick(&biome.surface_features, draw) else {
+                let Some(feature) = scatter.pick(&biome.surface_features, draw) else {
                     continue;
                 };
+                // A Plant is stood by `plants`, which reads no neighbour Chunk's cells.
+                if feature.plant.is_some() {
+                    continue;
+                }
+                let material = feature.material;
                 let surface = biome.ground.unwrap_or(world).surface;
                 let on_surface = if top >= 0 {
                     chunk.get(x as usize, top as usize, z as usize) == Voxel::cube(surface)
@@ -1182,6 +1264,276 @@ impl Worldgen {
                 }
             }
         }
+    }
+
+    /// The metre position of the column or layer at global Voxel index `g`, as its owning Chunk
+    /// computes it.
+    fn global_m(&self, g: i32) -> f32 {
+        let size = CHUNK_SIZE as i32;
+        self.axis_m(g.div_euclid(size), g.rem_euclid(size))
+    }
+
+    /// Whether the ground cell at global Voxel `at` is carved away: what the Chunk holding it
+    /// asks, so any Chunk can answer for it.
+    fn carved(&self, at: [i32; 3]) -> bool {
+        self.caves.as_ref().is_some_and(|caves| {
+            let (x_m, z_m) = (self.global_m(at[0]), self.global_m(at[2]));
+            caves.carves(x_m, self.global_m(at[1]), z_m, self.cave_scale_at(x_m, z_m))
+        })
+    }
+
+    /// The Plant a Biome stands on the column at global Voxel `(gx, gz)`, if any: a pure function
+    /// of the seed and the position, so every Chunk that reaches the column decides alike. It
+    /// reads no Chunk, so a tree is the same from any Chunk's viewpoint.
+    fn plant_at(&self, scatter: &SurfaceScatter, gx: i32, gz: i32) -> Option<Standing> {
+        self.params.ground?;
+        let (x_m, z_m) = (self.global_m(gx), self.global_m(gz));
+        let draw = SurfaceScatter::draw(self.seed, x_m, z_m);
+        if draw >= scatter.most {
+            return None;
+        }
+        let biome = self
+            .biome_at(x_m, z_m)
+            .and_then(|id| self.params.biomes.get(id))?;
+        let plant = scatter.pick(&biome.surface_features, draw)?.plant?;
+        let size = self.voxel_size;
+        let top = top_index(self.surface_height_m(x_m, z_m), 0.0, size);
+        let base = [gx, top + 1, gz];
+        let (_, highest) = self.terrain_band_m();
+        let y_m = self.global_m(base[1]);
+        if y_m > highest || self.carved([gx, top, gz]) {
+            return None;
+        }
+        let under_lake = self.water.filter(|w| y_m < w.level_m);
+        match (plant.kind, under_lake) {
+            (
+                SurfacePlantKind::Column {
+                    stands_in: Some(fluid),
+                    ..
+                },
+                Some(w),
+            ) if w.material == fluid => {}
+            (
+                SurfacePlantKind::Column {
+                    stands_in: Some(_), ..
+                },
+                _,
+            )
+            | (_, Some(_)) => return None,
+            _ => {}
+        }
+        if self.smoothing && self.eased(top, [gx, gz], base[1]) {
+            return None;
+        }
+        Some(Standing {
+            plant,
+            base,
+            vary: SurfaceScatter::draw_salted(self.seed, x_m, z_m, PLANT_VARY_SALT),
+        })
+    }
+
+    /// Whether smoothing would put a stair or slab in the cell over the column's top, as `smooth`
+    /// decides it for the Chunk that holds the cell.
+    fn eased(&self, top: i32, [gx, gz]: [i32; 2], y: i32) -> bool {
+        CARDINALS.iter().any(|&(dx, dz, _)| {
+            let (nx, nz) = (gx + dx, gz + dz);
+            let neighbour = top_index(
+                self.surface_height_m(self.global_m(nx), self.global_m(nz)),
+                0.0,
+                self.voxel_size,
+            );
+            neighbour == top + EASED_RISE_VOXELS && !self.carved([nx, y, nz])
+        })
+    }
+
+    /// Voxels in a column Plant's run at this column, from its base up.
+    fn run_voxels(&self, standing: &Standing) -> i32 {
+        let SurfacePlantKind::Column {
+            max_height_m,
+            stands_in,
+            ..
+        } = standing.plant.kind
+        else {
+            return 1;
+        };
+        let most = ((max_height_m / self.voxel_size + 1e-3).floor() as i32).max(1);
+        let mut run = 1 + (standing.vary * f64::from(most)) as i32;
+        if stands_in.is_some()
+            && let Some(w) = self.water
+        {
+            let room = ((w.level_m - self.global_m(standing.base[1])) / self.voxel_size).ceil();
+            run = run.min((room as i32).max(1));
+        }
+        run
+    }
+
+    /// The Plant's tree as the generator grows it: a Tree row holding only what shape needs.
+    fn tree_of(tree: &SurfaceTree) -> Tree {
+        Tree {
+            trunk: tree.trunk,
+            canopy: tree.canopy,
+            trunk_height_m: tree.trunk_height_m,
+            canopy_radius_m: tree.canopy_radius_m,
+            mean_seconds: 0.0,
+            trunk_yield: Vec::new(),
+            canopy_yield: Vec::new(),
+            sapling_yield: CountRange { min: 1, max: 1 },
+            fruit: tree.fruit.map(|f| Fruit {
+                stages: f.stages[..f.len as usize]
+                    .iter()
+                    .map(|&material| Stage {
+                        material,
+                        mean_seconds: None,
+                        yields: Vec::new(),
+                    })
+                    .collect(),
+                density: f.density,
+                harvest_to: 0,
+            }),
+        }
+    }
+
+    /// Every Voxel of the tree standing at `base`, fully grown, with the fruit at hash-drawn
+    /// Stages. Grown from the ground's height 0 and shifted up, so the tree is a function of its
+    /// column in metres and not of which Voxel the ground rounds to at this Voxel size.
+    fn tree_cells(&self, tree: &SurfaceTree, base: [i32; 3]) -> Vec<([i32; 3], Voxel)> {
+        let row = Self::tree_of(tree);
+        let seed = u64::from(self.seed);
+        tree_voxels(&row, seed, [base[0], 0, base[2]], self.voxel_size)
+            .into_iter()
+            .map(|v| {
+                let material = match (v.part, tree.fruit) {
+                    (Part::Fruit, Some(f)) => {
+                        f.stages[fruit_stage(seed, v.at, self.voxel_size, f.len as usize)]
+                    }
+                    _ => v.material,
+                };
+                ([v.at[0], v.at[1] + base[1], v.at[2]], Voxel::cube(material))
+            })
+            .collect()
+    }
+
+    /// Stands the Plants whose Voxels fall in this Chunk. Trees reach over a Chunk's border, so
+    /// every column within the widest canopy is asked, in one fixed order, and a Voxel goes only
+    /// into an empty cell: the first tree to claim it wins from every Chunk's viewpoint.
+    fn plants(&self, chunk: &mut Chunk, scatter: &SurfaceScatter, coord: [i32; 3]) {
+        let size = CHUNK_SIZE as i32;
+        let origin = [coord[0] * size, coord[1] * size, coord[2] * size];
+        let (lowest, _) = self.terrain_band_m();
+        let (_, highest) = self.surface_bounds_m();
+        let floor_m = self.global_m(origin[1]);
+        let ceiling_m = self.global_m(origin[1] + size - 1);
+        if floor_m > highest || ceiling_m < lowest - self.voxel_size {
+            return;
+        }
+        let margin = if scatter.tree_reach_m > 0.0 {
+            (scatter.tree_reach_m / self.voxel_size).ceil() as i32 + 1
+        } else {
+            0
+        };
+        let inside = |c: [i32; 3]| -> Option<[usize; 3]> {
+            let local = [c[0] - origin[0], c[1] - origin[1], c[2] - origin[2]];
+            local
+                .iter()
+                .all(|v| (0..size).contains(v))
+                .then(|| local.map(|v| v as usize))
+        };
+        let put = |chunk: &mut Chunk, at: [i32; 3], voxel: Voxel, into: Option<MaterialId>| {
+            if let Some([x, y, z]) = inside(at) {
+                let here = chunk.get(x, y, z);
+                if here.is_air() || into.is_some_and(|fluid| here == Voxel::cube(fluid)) {
+                    chunk.set(x, y, z, voxel);
+                }
+            }
+        };
+        let mut trees = Vec::new();
+        for gz in origin[2] - margin..origin[2] + size + margin {
+            for gx in origin[0] - margin..origin[0] + size + margin {
+                let own = (origin[0]..origin[0] + size).contains(&gx)
+                    && (origin[2]..origin[2] + size).contains(&gz);
+                let Some(standing) = self.plant_at(scatter, gx, gz) else {
+                    continue;
+                };
+                let base = standing.base;
+                match standing.plant.kind {
+                    SurfacePlantKind::Stages { materials, len } if own => {
+                        let stage = (standing.vary * f64::from(len)) as usize;
+                        let voxel = Voxel::new(materials[stage], standing.plant.shape, 0);
+                        put(chunk, base, voxel, None);
+                    }
+                    SurfacePlantKind::Column {
+                        material,
+                        stands_in,
+                        ..
+                    } if own => {
+                        let voxel = Voxel::new(material, standing.plant.shape, 0);
+                        for dy in 0..self.run_voxels(&standing) {
+                            put(chunk, [base[0], base[1] + dy, base[2]], voxel, stands_in);
+                        }
+                    }
+                    SurfacePlantKind::Tree(tree) => {
+                        let reach = (tree.canopy_radius_m / self.voxel_size).ceil() as i32 + 1;
+                        let outside = |g: i32, lo: i32| (lo - g).max(g - (lo + size - 1)).max(0);
+                        if outside(gx, origin[0]) > reach
+                            || outside(gz, origin[2]) > reach
+                            || base[1] > origin[1] + size - 1
+                        {
+                            continue;
+                        }
+                        let rise = (scatter.rise_m / self.voxel_size).ceil() as i32 + 2;
+                        if base[1] + rise < origin[1] {
+                            continue;
+                        }
+                        trees.push((tree.trunk, self.tree_cells(&tree, base)));
+                    }
+                    _ => {}
+                }
+            }
+        }
+        // A trunk is never left with a hole where a neighbour's canopy got there first.
+        for trunks in [true, false] {
+            for (trunk, cells) in &trees {
+                for &(at, voxel) in cells {
+                    if (voxel.material() == *trunk) == trunks {
+                        put(chunk, at, voxel, None);
+                    }
+                }
+            }
+        }
+    }
+
+    /// The height, in metres, of the tallest Plant Voxel in a footprint's columns, for spawning
+    /// clear of them.
+    fn plants_clear_m(&self, scatter: &SurfaceScatter, min_m: [f32; 2], max_m: [f32; 2]) -> f32 {
+        let size = self.voxel_size;
+        let columns =
+            |a: usize| (min_m[a] / size).floor() as i32..=(max_m[a] / size).floor() as i32;
+        let (xs, zs) = (columns(0), columns(1));
+        let margin = (scatter.tree_reach_m / size).ceil() as i32 + 1;
+        let mut clear_m = f32::MIN;
+        for gz in *zs.start() - margin..=*zs.end() + margin {
+            for gx in *xs.start() - margin..=*xs.end() + margin {
+                let Some(standing) = self.plant_at(scatter, gx, gz) else {
+                    continue;
+                };
+                let base = standing.base;
+                let own = xs.contains(&gx) && zs.contains(&gz);
+                let top = match standing.plant.kind {
+                    SurfacePlantKind::Tree(tree) => self
+                        .tree_cells(&tree, base)
+                        .into_iter()
+                        .filter(|(at, _)| xs.contains(&at[0]) && zs.contains(&at[2]))
+                        .map(|(at, _)| at[1] + 1)
+                        .max(),
+                    _ if own => Some(base[1] + self.run_voxels(&standing)),
+                    _ => None,
+                };
+                if let Some(top) = top {
+                    clear_m = clear_m.max(self.global_m(top));
+                }
+            }
+        }
+        clear_m
     }
 
     /// The metre position of Voxel `local` (possibly one outside) along an axis

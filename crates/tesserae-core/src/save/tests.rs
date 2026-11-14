@@ -686,10 +686,7 @@ fn a_biomes_cave_scale_is_saved_only_when_set_and_restored_as_it_was() {
 fn a_biomes_surface_features_are_saved_by_name_and_omitted_when_there_are_none() {
     let mut params = biome_params(2);
     let table = params.biomes.as_slice().to_vec();
-    let melon = |material| crate::SurfaceFeature {
-        material,
-        spacing_m: 16.0,
-    };
+    let melon = |material| crate::SurfaceFeature::cube(material, 16.0);
     params.biomes = crate::BiomeTable::new(&[
         table[0],
         crate::Biome {
@@ -725,6 +722,7 @@ fn a_saved_surface_feature_with_a_bad_spacing_or_an_unknown_material_is_refused(
         saved.biomes.as_mut().unwrap()[0].surface_features = vec![SavedSurfaceFeature {
             material: material.into(),
             spacing_m,
+            plant: None,
         }];
         saved.restore(&mapping(8, 9, 4), 2)
     };

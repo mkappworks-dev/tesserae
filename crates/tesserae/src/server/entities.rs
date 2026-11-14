@@ -300,11 +300,7 @@ mod tests {
             ground: None,
             sky_fog: None,
             cave_scale: None,
-            surface_features: SurfaceFeatures::new(&[SurfaceFeature {
-                material: lantern,
-                spacing_m: 4.0,
-            }])
-            .unwrap(),
+            surface_features: SurfaceFeatures::new(&[SurfaceFeature::cube(lantern, 4.0)]).unwrap(),
         };
         let params = WorldgenParams {
             caves: None,

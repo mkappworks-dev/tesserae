@@ -297,7 +297,9 @@ pub(super) struct Biome {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
 struct SurfaceFeature {
-    material: String,
+    material: Option<String>,
+    plant: Option<String>,
+    shape: Option<String>,
     spacing_m: f32,
 }
 
@@ -347,6 +349,8 @@ impl From<Biome> for content::BiomeDef {
                 .into_iter()
                 .map(|f| content::SurfaceFeature {
                     material: f.material,
+                    plant: f.plant,
+                    shape: f.shape,
                     spacing_m: f.spacing_m,
                 })
                 .collect(),

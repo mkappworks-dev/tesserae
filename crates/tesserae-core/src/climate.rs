@@ -7,7 +7,7 @@
 //! `docs/adr/0011-coarse-levels-are-derived.md`).
 
 use crate::noise::fbm2;
-use crate::voxel::{AIR, MaterialId};
+use crate::voxel::{AIR, MaterialId, ShapeId};
 use crate::worldgen::{GroundParams, ParamError};
 
 /// Fixed, not a parameter: a declaration sizes the regions, the border warp adds detail.
@@ -327,11 +327,143 @@ impl Biome {
 }
 
 /// A Material standing one Voxel above a Biome's surface, about one in every `spacing_m` by
-/// `spacing_m` metres of it.
+/// `spacing_m` metres of it. With `plant` set it is that Plant instead, generated from the data the
+/// World froze, and `material` is only its first Material.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct SurfaceFeature {
     pub material: MaterialId,
     pub spacing_m: f32,
+    pub plant: Option<SurfacePlant>,
+}
+
+impl SurfaceFeature {
+    pub const fn cube(material: MaterialId, spacing_m: f32) -> Self {
+        SurfaceFeature {
+            material,
+            spacing_m,
+            plant: None,
+        }
+    }
+}
+
+/// Most Stages a generated crop draws from.
+pub const MAX_SURFACE_STAGES: usize = 8;
+/// Most fruit Stages a generated tree draws from.
+pub const MAX_SURFACE_FRUIT_STAGES: usize = 4;
+
+/// What generation needs of one Plant, owned by the Biome so [`crate::WorldgenParams`] stays `Copy`
+/// and a Game that later changes the Plant cannot reshape a saved World.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct SurfacePlant {
+    /// The Shape every generated Voxel but a tree's takes, as a Player's Place of the seed would
+    /// have chosen it.
+    pub shape: ShapeId,
+    pub kind: SurfacePlantKind,
+}
+
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum SurfacePlantKind {
+    /// A crop's Stages in order, or the one Material of a spreader. One Voxel at a hash-drawn Stage.
+    Stages {
+        materials: [MaterialId; MAX_SURFACE_STAGES],
+        len: u8,
+    },
+    /// A run standing on the ground, or in the lake when `stands_in` names its fluid.
+    Column {
+        material: MaterialId,
+        max_height_m: f32,
+        stands_in: Option<MaterialId>,
+    },
+    Tree(SurfaceTree),
+}
+
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct SurfaceTree {
+    pub trunk: MaterialId,
+    pub canopy: MaterialId,
+    pub trunk_height_m: (f32, f32),
+    pub canopy_radius_m: f32,
+    pub fruit: Option<SurfaceFruit>,
+}
+
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct SurfaceFruit {
+    pub stages: [MaterialId; MAX_SURFACE_FRUIT_STAGES],
+    pub len: u8,
+    pub density: f32,
+}
+
+impl SurfacePlant {
+    /// Every Material it generates, first one first.
+    pub fn materials(&self) -> Vec<MaterialId> {
+        match self.kind {
+            SurfacePlantKind::Stages { materials, len } => materials[..len as usize].to_vec(),
+            SurfacePlantKind::Column {
+                material,
+                stands_in,
+                ..
+            } => [Some(material), stands_in].into_iter().flatten().collect(),
+            SurfacePlantKind::Tree(t) => {
+                let mut all = vec![t.trunk, t.canopy];
+                if let Some(f) = t.fruit {
+                    all.extend_from_slice(&f.stages[..f.len as usize]);
+                }
+                all
+            }
+        }
+    }
+
+    /// How far above its base it can stand, in metres, before rounding to Voxels.
+    pub fn rise_m(&self) -> f32 {
+        match self.kind {
+            SurfacePlantKind::Stages { .. } => 0.0,
+            SurfacePlantKind::Column { max_height_m, .. } => max_height_m,
+            SurfacePlantKind::Tree(t) => t.trunk_height_m.1 + t.canopy_radius_m,
+        }
+    }
+
+    fn validate(&self) -> Result<(), ParamError> {
+        let bad = |rule| ParamError {
+            field: "biomes.surface_features.plant",
+            rule,
+        };
+        let finite_pos = |v: f32| v.is_finite() && v > 0.0;
+        match self.kind {
+            SurfacePlantKind::Stages { materials, len } => {
+                if !(1..=MAX_SURFACE_STAGES as u8).contains(&len)
+                    || materials[..len as usize].contains(&AIR)
+                {
+                    return Err(bad("must hold 1 to 8 Stages, none Air"));
+                }
+            }
+            SurfacePlantKind::Column {
+                material,
+                max_height_m,
+                stands_in,
+            } => {
+                if material == AIR || stands_in == Some(AIR) || !finite_pos(max_height_m) {
+                    return Err(bad("a column needs a Material and a height"));
+                }
+            }
+            SurfacePlantKind::Tree(t) => {
+                let (low, high) = t.trunk_height_m;
+                let fruit = t.fruit.is_none_or(|f| {
+                    (1..=MAX_SURFACE_FRUIT_STAGES as u8).contains(&f.len)
+                        && (0.0..=1.0).contains(&f.density)
+                });
+                if t.trunk == AIR
+                    || t.canopy == AIR
+                    || !finite_pos(low)
+                    || !(low <= high)
+                    || !finite_pos(t.canopy_radius_m)
+                    || !fruit
+                {
+                    return Err(bad("a tree needs a trunk, canopy, height and radius"));
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 /// At most [`MAX_SURFACE_FEATURES`], in declaration order.
@@ -350,10 +482,7 @@ impl Default for SurfaceFeatures {
 impl SurfaceFeatures {
     pub const NONE: SurfaceFeatures = SurfaceFeatures {
         len: 0,
-        features: [SurfaceFeature {
-            material: AIR,
-            spacing_m: 0.0,
-        }; MAX_SURFACE_FEATURES],
+        features: [SurfaceFeature::cube(AIR, 0.0); MAX_SURFACE_FEATURES],
     };
 
     pub fn new(features: &[SurfaceFeature]) -> Result<Self, ParamError> {
@@ -368,6 +497,9 @@ impl SurfaceFeatures {
                 field: "biomes.surface_features.material",
                 rule: "must not be Air",
             });
+        }
+        for plant in features.iter().filter_map(|f| f.plant) {
+            plant.validate()?;
         }
         if !features
             .iter()

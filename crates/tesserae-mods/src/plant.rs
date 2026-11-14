@@ -57,7 +57,8 @@ impl DeclaredPlants {
                 name: def.name.clone(),
                 reason,
             };
-            let plant = plant(def, registry, tables).map_err(&fail)?;
+            let mut plant = plant(def, registry, tables).map_err(&fail)?;
+            plant.name = format!("{mod_id}:{}", def.name);
             table.push(plant).map_err(|e| fail(e.to_string()))?;
         }
         Ok(table)

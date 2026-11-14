@@ -15,10 +15,7 @@ const MELON: MaterialId = 200;
 const GOURD: MaterialId = 201;
 
 fn feature(material: MaterialId, spacing_m: f32) -> SurfaceFeature {
-    SurfaceFeature {
-        material,
-        spacing_m,
-    }
+    SurfaceFeature::cube(material, spacing_m)
 }
 
 fn featured(biome: Biome, features: &[SurfaceFeature]) -> Biome {

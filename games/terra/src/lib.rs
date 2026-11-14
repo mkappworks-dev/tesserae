@@ -571,11 +571,15 @@ impl Guest for Terra {
                     // carpet; Wood every 6 m gathers a Workbench, Chest and Door in a short walk.
                     surface_features: vec![
                         SurfaceFeature {
-                            material: "terra:melon".into(),
+                            material: Some("terra:melon".into()),
+                            plant: None,
+                            shape: None,
                             spacing_m: 16.0,
                         },
                         SurfaceFeature {
-                            material: "terra:wood".into(),
+                            material: Some("terra:wood".into()),
+                            plant: None,
+                            shape: None,
                             spacing_m: 6.0,
                         },
                     ],

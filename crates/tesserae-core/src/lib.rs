@@ -43,8 +43,9 @@ pub mod worldgen;
 pub use chunk::{CHUNK_SIZE, CHUNK_VOLUME, Chunk};
 pub use climate::{
     Biome, BiomeId, BiomeName, BiomeTable, Climate, ClimateParams, MAX_BIOME_NAME_BYTES,
-    MAX_BIOMES, MAX_CAVE_SCALE, MAX_SURFACE_FEATURES, SURFACE_FEATURE_SPACING_M, SkyFog,
-    SkyFogBlend, SurfaceFeature, SurfaceFeatures,
+    MAX_BIOMES, MAX_CAVE_SCALE, MAX_SURFACE_FEATURES, MAX_SURFACE_FRUIT_STAGES, MAX_SURFACE_STAGES,
+    SURFACE_FEATURE_SPACING_M, SkyFog, SkyFogBlend, SurfaceFeature, SurfaceFeatures, SurfaceFruit,
+    SurfacePlant, SurfacePlantKind, SurfaceTree,
 };
 pub use combustion::{Burn, CombustionDef, CombustionError, CombustionTable, Heat, MAX_HEAT};
 pub use fluid::{FluidDef, FluidError, FluidTable};

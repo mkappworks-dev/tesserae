@@ -634,21 +634,34 @@ interface content {
         /// blends smoothly across the Biome's border, unlike `ground`.
         cave-scale: option<f32>,
 
-        /// At most 4 Materials the engine stands one Voxel above this Biome's
-        /// surface Material, where the column's top is a full Voxel of it with
-        /// air above: never under a fluid, on a smoothed step or in a cave
+        /// At most 4 Materials or Plants the engine stands one Voxel above this
+        /// Biome's surface Material, where the column's top is a full Voxel of it
+        /// with air above: never under a fluid, on a smoothed step or in a cave
         /// mouth. Distance levels leave them out.
         surface-features: list<surface-feature>,
         /// Optional Soundscape full name, resolved across loaded Mods.
         soundscape: option<string>,
     }
 
-    /// A Material scattered over a Biome's surface, deterministically from the
-    /// World seed. Removing one drops its Item as any Voxel does.
+    /// A Material or a Plant scattered over a Biome's surface, deterministically
+    /// from the World seed. Removing a Material feature drops its Item as any
+    /// Voxel does. Exactly one of `material` and `plant` is set.
     record surface-feature {
         /// A solid Material, `<mod id>:<name>`, resolved after every Mod's
         /// Declaration.
-        material: string,
+        material: option<string>,
+        /// A Plant, `<mod id>:<name>`, from any loaded Mod. A `crop` or
+        /// `spreader` stands at a Stage drawn by hash; a `column` stands on the
+        /// ground, or in the lake when it declares `stands-in`; a `tree` stands
+        /// fully grown, and its trunk and canopy may reach into neighbouring
+        /// Chunks. A `climber` is refused, and so is a column growing down. The
+        /// World freezes what generation needs of the Plant when it is made, so
+        /// a later change to the Plant never reshapes it.
+        plant: option<string>,
+        /// With `plant`: the Shape, `<mod id>:<name>`, of a crop's, spreader's
+        /// or column's Voxels, as a Player's Place would have chosen it; none
+        /// is a cube. A tree is always cubes.
+        shape: option<string>,
         /// About one in every `spacing-m` by `spacing-m` metres of the Biome's
         /// surface, at any Voxel size; from 4 to 1024.
         spacing-m: f32,

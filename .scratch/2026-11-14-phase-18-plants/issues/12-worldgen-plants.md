@@ -19,14 +19,51 @@ columns that fall inside it, scanning the Chunks within `canopy-radius-m`. Level
 
 ## Acceptance criteria
 
-- [ ] A tree across a Chunk border is whole, and equal at 1.0, 0.5 and 0.25 m
+- [x] A tree across a Chunk border is whole, and equal at 1.0, 0.5 and 0.25 m
       in metres, in a test that generates both neighbours in either order.
-- [ ] A generated fruit tree has fruit at hash-drawn Stages inside its density,
+- [x] A generated fruit tree has fruit at hash-drawn Stages inside its density,
       the same whichever Chunk generates a Voxel of it.
-- [ ] A version 2 World whose Biomes name no Plant generates the digests
+- [x] A version 2 World whose Biomes name no Plant generates the digests
       recorded before Plants existed.
-- [ ] Plant rows ride in the World's Biome snapshot; a World saved before
+- [x] Plant rows ride in the World's Biome snapshot; a World saved before
       Plants keeps its bare ground.
-- [ ] Coarse levels generate without Plants and do not vote on them.
+- [x] Coarse levels generate without Plants and do not vote on them.
 - [ ] A Chunk's generation time with trees does not exceed `main`'s by more
       than the bench's agreed margin.
+
+## Comments
+
+- A feature is now `material` or `plant` (WIT `option`s), plus `shape`: a
+  Plant's Material carries no Shape (a Player's Place chose it), so a Biome
+  names the Shape its crop, spreader or column Voxels are generated with; none
+  is a cube, a tree is always cubes. Load errors: both or neither set, an
+  unknown Plant or Shape, a `climber` (needs a wall, not generated), a column
+  growing `down`, a `shape` on a tree or a Material.
+- `SurfaceFeature` gains `plant: Option<SurfacePlant>`, an owned `Copy` copy of
+  what generation reads (Stages, a column's Material, height and fluid, a
+  tree's Materials, height, radius and fruit), so `WorldgenParams` stays
+  `Copy`. The snapshot writes it by Material and Shape name under
+  `plant: {shape?, form: {kind, ..}}`, absent for a Material feature; no Plant
+  name is frozen, nothing reads it. Formats and Generator versions are
+  unchanged.
+- A Plant column is decided by `Worldgen::plant_at`, a pure function of the
+  seed and the column in metres that reads no Chunk (cave carving and smoothing
+  are asked by metre position, as `still_solid` does), so every Chunk within
+  `canopy-radius-m` agrees. The tree is grown at height 0 and shifted onto the
+  ground, so it is the same in metres whichever Voxel the ground rounds to.
+  Trunks claim their cells before any canopy; otherwise the first column in
+  scan order wins, and only Air is replaced.
+- `surface_bounds_m().1` rises by the tallest tree or column a Biome declares,
+  so streaming extent and the open-sky shortcut stay sound; a World with no
+  Plant feature is bounded and generated exactly as before. Ores and ground
+  features keep the unraised band.
+- Kelp replaces the lake's water cube with its shaped Voxel; whether the Server
+  refills the cell as waterlogged is not exercised here.
+- Climbers are not generated. A crop is placed at a hash-drawn Stage of any
+  index, ripe included.
+- `resolve_biomes` now runs after the Plant table (loader reordered through
+  `biome_rows`), and `Plant::name` is the full `<mod id>:<name>`.
+- Not met: the generation-time margin. There is no agreed margin or bench yet;
+  an ad-hoc, load-affected probe on a bare-cube World measured 0.08 to 0.10 ms
+  per Chunk with trees against 0.06 to 0.08 bare (1.0, 0.5, 0.25 m). Status
+  stays until ticket 04's bench covers worldgen.

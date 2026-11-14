@@ -67,6 +67,12 @@ pub fn bears_fruit(seed: u64, density: f32, at: [i32; 3], voxel_size: f32) -> bo
     share < f64::from(density)
 }
 
+/// Which of `stages` fruit Stage the fruit Voxel at `at` is generated at, by hash of seed and
+/// position.
+pub fn fruit_stage(seed: u64, at: [i32; 3], voxel_size: f32, stages: usize) -> usize {
+    (hash(seed, at, voxel_size, 3) % stages.max(1) as u64) as usize
+}
+
 /// Every Voxel of the tree whose sapling stands at `base`: the trunk from the
 /// sapling's own cell upward, then the ellipsoidal canopy centred on the
 /// trunk's top, some of it fruit. A pure function of the row, the position and

@@ -310,11 +310,8 @@ mod tests {
     fn an_edited_biome_keeps_its_surface_features() {
         let mut declared = params();
         let table = declared.biomes.as_slice().to_vec();
-        let features = crate::SurfaceFeatures::new(&[crate::SurfaceFeature {
-            material: SAND,
-            spacing_m: 16.0,
-        }])
-        .unwrap();
+        let features =
+            crate::SurfaceFeatures::new(&[crate::SurfaceFeature::cube(SAND, 16.0)]).unwrap();
         declared.biomes = BiomeTable::new(&[
             Biome {
                 surface_features: features,

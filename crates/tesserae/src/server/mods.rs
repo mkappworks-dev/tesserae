@@ -15,8 +15,8 @@ use bevy::prelude::*;
 use tesserae_core::{MaterialId, SHAPE_FULL_CUBE, ShapeId, Tables, WorldgenParams};
 use tesserae_mods::{
     Kind, ModHost, ModInstance, Registered, Registry, Scan, Trust, Verdict, ViewParams, WorldInfo,
-    apply, games_dir, migrate_legacy_games, plan, resolve, resolve_biomes, resolve_items,
-    resolve_sounds, scan,
+    apply, biome_rows, games_dir, migrate_legacy_games, plan, resolve, resolve_biomes,
+    resolve_items, resolve_sounds, scan,
 };
 
 use crate::content::{
@@ -605,12 +605,7 @@ pub(crate) async fn declare_all(
     loaded.items =
         resolve_items(&behaviours, &loaded.tables, &loaded.registry).map_err(|e| e.to_string())?;
     loaded.sounds = resolve_sounds(&behaviours, &loaded.registry).map_err(|e| e.to_string())?;
-    let (biomes, ores) =
-        resolve_biomes(&behaviours, &loaded.tables, &loaded.registry).map_err(|e| e.to_string())?;
-    if !biomes.is_empty() || !ores.is_empty() {
-        // A Mod's Biomes need a World to live in even when the Game sets no terrain.
-        loaded.world.get_or_insert_with(WorldgenParams::default);
-    }
+    let biome_rows = biome_rows(&behaviours);
     let recipes = tesserae_mods::DeclaredRecipes::take(&mut behaviours);
     let plants = tesserae_mods::DeclaredPlants::take(&mut behaviours);
     let (ground, lake) =
@@ -626,6 +621,13 @@ pub(crate) async fn declare_all(
             &loaded.every_item(world.voxel_size).0,
         )
         .map_err(|e| e.to_string())?;
+    // After the Plant table, because a surface feature may name a Plant.
+    let (biomes, ores) =
+        resolve_biomes(&biome_rows, &loaded.tables, &loaded.registry).map_err(|e| e.to_string())?;
+    if !biomes.is_empty() || !ores.is_empty() {
+        // A Mod's Biomes need a World to live in even when the Game sets no terrain.
+        loaded.world.get_or_insert_with(WorldgenParams::default);
+    }
     loaded.recipes = recipes
         .resolve(
             &loaded.every_item(world.voxel_size).0,
