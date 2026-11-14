@@ -6,10 +6,16 @@
 //! the step's own fluid landings, so nothing they read can be stale; only a
 //! change deferred past [`PLANTS_LANDED_PER_STEP`] is read again next step.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::cmp::Reverse;
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use tesserae_core::CHUNK_SIZE;
-use tesserae_core::plant::{GrowEnv, Growth, PLANTS_LANDED_PER_STEP, Surroundings, grow, samples};
+use tesserae_core::collide::VoxelVolume;
+use tesserae_core::plant::tree::felling_region;
+use tesserae_core::plant::{
+    Change, FELLED_PER_STEP, GrowEnv, Growth, Kind, PLANTS_LANDED_PER_STEP, Surroundings,
+    TREES_PER_STEP, drop_count, grow, samples,
+};
 use tesserae_core::{
     Chunk, Climate, FluidTable, Light, MaterialId, Occupants, Tables, Voxel, Worldgen,
 };
@@ -44,8 +50,32 @@ pub(in crate::server) struct Broken {
     pub material: MaterialId,
 }
 
+/// What a Felling gives up for the Server to drop: a Voxel that broke, or the
+/// saplings of the tree, once.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::server) enum Felled {
+    Voxel(Broken),
+    Saplings { at: Cell, plant: usize, count: u32 },
+}
+
+/// A pending Felling Voxel, ordered highest first.
+type Top = (Reverse<i32>, i32, i32);
+
+fn top_down(at: Cell) -> Top {
+    (Reverse(at[1]), at[0], at[2])
+}
+
+fn cell_of((Reverse(y), x, z): Top) -> Cell {
+    [x, y, z]
+}
+
 pub(super) struct PlantSim {
     landed_per_step: usize,
+    trees_per_step: usize,
+    felled_per_step: usize,
+    /// Grown Voxels of felled trees still to break, highest first.
+    felling: BTreeSet<Top>,
+    pub felled: Vec<Felled>,
     deferred: BTreeMap<Cell, Pending>,
     /// Voxels whose support is to be read again once their Chunk is lit.
     recheck: BTreeSet<Cell>,
@@ -62,6 +92,10 @@ impl Default for PlantSim {
     fn default() -> Self {
         PlantSim {
             landed_per_step: PLANTS_LANDED_PER_STEP,
+            trees_per_step: TREES_PER_STEP,
+            felled_per_step: FELLED_PER_STEP,
+            felling: BTreeSet::new(),
+            felled: Vec::new(),
             deferred: BTreeMap::new(),
             recheck: BTreeSet::new(),
             broken: Vec::new(),
@@ -76,6 +110,21 @@ impl PlantSim {
     #[cfg(test)]
     pub fn set_bound(&mut self, landed_per_step: usize) {
         self.landed_per_step = landed_per_step;
+    }
+
+    #[cfg(test)]
+    pub fn set_tree_bound(&mut self, trees_per_step: usize) {
+        self.trees_per_step = trees_per_step;
+    }
+
+    #[cfg(test)]
+    pub fn set_felled_bound(&mut self, felled_per_step: usize) {
+        self.felled_per_step = felled_per_step;
+    }
+
+    #[cfg(test)]
+    pub fn felling_left(&self) -> usize {
+        self.felling.len()
     }
 
     #[cfg(test)]
@@ -195,11 +244,16 @@ pub(super) fn sample_step(
         }
     }
     let mut batch = edit::Batch::default();
-    let mut landed = 0;
+    let (mut landed, mut trees) = (0, 0);
     // Two growths that write one Voxel in a step: the later Samples again.
     let mut touched: BTreeSet<Cell> = BTreeSet::new();
     for (at, (pending, growth)) in grown {
-        if landed >= sim.plants.landed_per_step {
+        let (done, bound) = if growth.tree {
+            (trees, sim.plants.trees_per_step)
+        } else {
+            (landed, sim.plants.landed_per_step)
+        };
+        if done >= bound {
             sim.plants.late += 1;
             if sim.plants.deferred.len() < DEFERRED_CAP {
                 sim.plants.deferred.insert(at, pending);
@@ -210,39 +264,61 @@ pub(super) fn sample_step(
             sim.plants.stale += 1;
             continue;
         }
-        let mut refused = false;
-        for change in &growth.changes {
-            let Some(here) = store.occupants(change.at, &tables.fluids) else {
-                refused = true;
-                break;
-            };
-            // A new Voxel in Air keeps the fluid it is waterlogged in; a Stage
-            // swap keeps what the old Voxel carried.
-            let next = if here.solid.is_air() {
-                here.place_solid(change.voxel, tables)
-            } else {
-                Occupants {
-                    solid: change.voxel,
-                    ..here
-                }
-            };
-            if batch
-                .set_occupants(store, meshes, tables, change.at, next)
-                .is_err()
-            {
-                refused = true;
-                break;
-            }
-            touched.insert(change.at);
-        }
-        if refused {
-            sim.plants.stale += 1;
-        } else {
+        if land(&mut batch, store, meshes, tables, &growth.changes) {
+            touched.extend(growth.changes.iter().map(|c| c.at));
             sim.plants.landed += 1;
-            landed += 1;
+            if growth.tree {
+                trees += 1;
+            } else {
+                landed += 1;
+            }
+        } else {
+            sim.plants.stale += 1;
         }
     }
     batch.finish(store, meshes, tables);
+}
+
+/// Lands every change of a growth or none: one that fails puts back what the
+/// ones before it wrote, so a tree is never left partly grown.
+fn land(
+    batch: &mut edit::Batch,
+    store: &mut ChunkStore,
+    meshes: &mut MeshState,
+    tables: &Tables,
+    changes: &[Change],
+) -> bool {
+    let mut written: Vec<(Cell, Occupants)> = Vec::with_capacity(changes.len());
+    for change in changes {
+        let Some(here) = store.occupants(change.at, &tables.fluids) else {
+            break;
+        };
+        // A new Voxel in Air keeps the fluid it is waterlogged in; a Stage
+        // swap keeps what the old Voxel carried.
+        let next = if here.solid.is_air() {
+            here.place_solid(change.voxel, tables)
+        } else {
+            Occupants {
+                solid: change.voxel,
+                ..here
+            }
+        };
+        if batch
+            .set_occupants(store, meshes, tables, change.at, next)
+            .is_err()
+        {
+            break;
+        }
+        written.push((change.at, here));
+    }
+    if written.len() == changes.len() {
+        return true;
+    }
+    for (at, here) in written.into_iter().rev() {
+        let restored = batch.set_occupants(store, meshes, tables, at, here);
+        debug_assert!(restored.is_ok(), "putting back what was just there");
+    }
+    false
 }
 
 const FACES: [[i32; 3]; 6] = [
@@ -310,6 +386,114 @@ pub(super) fn break_unsupported(
     }
     batch.finish(store, meshes, tables);
     broke
+}
+
+/// Finds the trees a change cut loose and queues their Voxels to break. Each
+/// cell beside a change is asked, and a tree already queued or known to be
+/// grounded is asked once. The sapling drop is made here, once for the tree,
+/// at the cut.
+pub(super) fn mark_felled(
+    sim: &mut FluidSim,
+    store: &ChunkStore,
+    tables: &Tables,
+    env: &Env,
+    changed: &[Cell],
+) {
+    if changed.is_empty() || !tables.plants.has_trees() {
+        return;
+    }
+    let material_at = |at: Cell| store.voxel(at).map(|v| v.material());
+    let mut settled: HashSet<Cell> = HashSet::new();
+    for &cut in changed {
+        let around = std::iter::once(cut)
+            .chain(FACES.map(|d| [cut[0] + d[0], cut[1] + d[1], cut[2] + d[2]]));
+        for from in around {
+            if !material_at(from).is_some_and(|m| tables.plants.is_tree_part(m)) {
+                continue;
+            }
+            let Some(region) = felling_region(
+                &tables.plants,
+                env.voxel_size,
+                from,
+                &material_at,
+                &mut settled,
+            ) else {
+                continue;
+            };
+            let fresh: Vec<Top> = region
+                .cells
+                .iter()
+                .map(|&c| top_down(c))
+                .filter(|t| !sim.plants.felling.contains(t))
+                .collect();
+            if fresh.is_empty() {
+                continue;
+            }
+            // A region already part queued is the rest of a tree being felled.
+            if fresh.len() == region.cells.len()
+                && let Some(plant) = tables.plants.plant(region.plant)
+                && let Kind::Tree(tree) = &plant.kind
+            {
+                let count = drop_count(env.seed, cut, plant.first, 0, tree.sapling_yield);
+                sim.plants.felled.push(Felled::Saplings {
+                    at: cut,
+                    plant: region.plant,
+                    count: count.max(1),
+                });
+            }
+            sim.plants.felling.extend(fresh);
+        }
+    }
+}
+
+/// Breaks up to `FELLED_PER_STEP` of the queued Voxels, highest first. The
+/// writes are not Edits: nothing enters the undo journal, so undo restores
+/// only the Voxel the Player cut.
+pub(super) fn fell_step(
+    sim: &mut FluidSim,
+    store: &mut ChunkStore,
+    meshes: &mut MeshState,
+    tables: &Tables,
+) {
+    if sim.plants.felling.is_empty() {
+        return;
+    }
+    let mut batch = edit::Batch::default();
+    let mut broken = 0;
+    let mut done: Vec<Top> = Vec::new();
+    for &key in &sim.plants.felling {
+        if broken >= sim.plants.felled_per_step {
+            break;
+        }
+        let at = cell_of(key);
+        // An unheld or unlit Chunk keeps its Voxels queued until it is back.
+        let Some(here) = store.occupants(at, &tables.fluids) else {
+            continue;
+        };
+        let material = here.solid.material();
+        if !tables.plants.is_tree_part(material) {
+            done.push(key);
+            continue;
+        }
+        if meshes.is_unlit(VoxelCoord::of(at).chunk) {
+            continue;
+        }
+        let next = Occupants {
+            solid: Voxel::AIR,
+            ..here
+        };
+        if batch.set_occupants(store, meshes, tables, at, next).is_ok() {
+            sim.plants
+                .felled
+                .push(Felled::Voxel(Broken { at, material }));
+            done.push(key);
+            broken += 1;
+        }
+    }
+    for key in done {
+        sim.plants.felling.remove(&key);
+    }
+    batch.finish(store, meshes, tables);
 }
 
 #[cfg(test)]

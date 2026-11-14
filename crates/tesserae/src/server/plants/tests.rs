@@ -4,6 +4,7 @@ use bevy::ecs::system::RunSystemOnce;
 use tesserae_core::SHAPE_FULL_CUBE;
 use tesserae_core::inventory::{Destination, Slot};
 use tesserae_core::layout::{Dim, LayoutAxis};
+use tesserae_core::plant::tree::{Part, TreeVoxel, tree_voxels};
 use tesserae_core::plant::{CountRange, Fruit, Kind, Needs, Plant, Stage, Tree, Yield};
 use tesserae_core::{MaterialDef, MaterialId, Occlusion, Orientation, RenderClass};
 use tesserae_mods::{Intent, ItemDef};
@@ -33,6 +34,7 @@ struct Content {
     canopy: MaterialId,
     fruit: [MaterialId; 2],
     cane: MaterialId,
+    placed: MaterialId,
 }
 
 fn soil() -> MaterialId {
@@ -75,6 +77,7 @@ fn content() -> Content {
     let [sapling, trunk, canopy] = [(); 3].map(|_| material());
     let fruit = [(); 2].map(|_| material());
     let cane = material();
+    let placed = material();
     let needs = || Needs {
         soil: vec![soil()],
         light_max: 15,
@@ -138,9 +141,9 @@ fn content() -> Content {
                 trunk_height_m: (2.0, 3.0),
                 canopy_radius_m: 2.0,
                 mean_seconds: 60.0,
-                trunk_yield: Vec::new(),
-                canopy_yield: Vec::new(),
-                sapling_yield: CountRange { min: 1, max: 1 },
+                trunk_yield: yields(&[("t:log", 1, 1)]),
+                canopy_yield: yields(&[("t:leaf", 1, 1)]),
+                sapling_yield: CountRange { min: 1, max: 2 },
                 fruit: Some(Fruit {
                     stages: vec![
                         stage(fruit[0], grow, &[]),
@@ -163,6 +166,7 @@ fn content() -> Content {
         canopy,
         fruit,
         cane,
+        placed,
     }
 }
 
@@ -198,6 +202,8 @@ fn farm() -> (App, Content) {
             item("t:berry", None, Some(2.0)),
             item("t:apple", None, Some(2.0)),
             item("t:cane", None, None),
+            item("t:log", None, None),
+            item("t:leaf", None, None),
             item("t:junk", None, None),
         ],
         [(rock(), "t:stone", [0; 4]), (soil(), "t:soil", [0; 4])],
@@ -280,6 +286,7 @@ fn settle(app: &mut App) {
         .run_system_once(crate::server::fluids::simulate)
         .unwrap();
     app.world_mut().run_system_once(drop_seeds).unwrap();
+    app.world_mut().run_system_once(drop_felled).unwrap();
 }
 
 /// The Dropped items lying in the World, by Item name, sorted.
@@ -758,4 +765,334 @@ fn undoing_a_sapling_placement_after_it_grew_is_refused() {
     replay(&mut app, Undo);
     assert_eq!(rejections(&mut app), [RejectReason::HistoryChanged]);
     assert_eq!(voxel_at(&app, CROP), Voxel::cube(c.trunk));
+}
+
+const BASE: [i32; 3] = [6, 8, 5];
+
+fn the_tree(app: &App) -> Tree {
+    let tables = &app.world().resource::<ContentTables>().0;
+    match &tables
+        .plants
+        .plants()
+        .iter()
+        .find(|p| p.name == "t:apple")
+        .unwrap()
+        .kind
+    {
+        Kind::Tree(tree) => tree.clone(),
+        _ => unreachable!(),
+    }
+}
+
+/// Grows the apple tree whose sapling would stand at `base`, as worldgen or a
+/// Sample would, and returns its Voxels.
+fn grow_tree(app: &mut App, base: [i32; 3]) -> Vec<TreeVoxel> {
+    let (tree, seed) = (the_tree(app), app.world().resource::<WorldSettings>().seed);
+    let voxels = tree_voxels(&tree, seed, base, 1.0);
+    for v in &voxels {
+        set(app, v.at, Voxel::cube(v.material));
+    }
+    voxels
+}
+
+fn grown_left(app: &App, voxels: &[TreeVoxel]) -> usize {
+    voxels
+        .iter()
+        .filter(|v| !voxel_at(app, v.at).is_air())
+        .count()
+}
+
+/// Settles until the Felling queue is empty, returning how many tree Voxels
+/// broke in each Logical step that broke any.
+fn settle_felling(app: &mut App, voxels: &[TreeVoxel]) -> Vec<Vec<[i32; 3]>> {
+    let mut steps = Vec::new();
+    let mut standing: Vec<[i32; 3]> = voxels
+        .iter()
+        .map(|v| v.at)
+        .filter(|&c| !voxel_at(app, c).is_air())
+        .collect();
+    for _ in 0..400 {
+        settle(app);
+        std::thread::sleep(std::time::Duration::from_micros(50));
+        let now: Vec<[i32; 3]> = standing
+            .iter()
+            .copied()
+            .filter(|&c| !voxel_at(app, c).is_air())
+            .collect();
+        if now.len() != standing.len() {
+            steps.push(
+                standing
+                    .iter()
+                    .copied()
+                    .filter(|c| !now.contains(c))
+                    .collect(),
+            );
+            standing = now;
+        }
+        if app.world().resource::<FluidSim>().felling_left() == 0 && !steps.is_empty() {
+            break;
+        }
+    }
+    steps
+}
+
+fn lying_of(app: &mut App, item: &str) -> (usize, u32) {
+    let all = lying(app);
+    let of: Vec<_> = all.iter().filter(|(n, _)| n == item).collect();
+    (of.len(), of.iter().map(|(_, c)| c).sum())
+}
+
+fn cut_the_foot(app: &mut App) {
+    send(
+        app,
+        EditIntent {
+            action: EditAction::Remove,
+            origin: Vec3::new(4.5, 8.5, 5.5),
+            direction: Vec3::X,
+        },
+    );
+    tick(app);
+    assert!(rejections(app).is_empty());
+    assert!(voxel_at(app, BASE).is_air());
+}
+
+#[test]
+fn cutting_the_trunk_breaks_the_part_above_top_down_under_its_bound_and_drops_items() {
+    let (mut app, c) = farm();
+    let voxels = grow_tree(&mut app, BASE);
+    let ripe = voxels
+        .iter()
+        .find(|v| v.part == Part::Fruit)
+        .map(|v| v.at)
+        .expect("the apple tree bears fruit");
+    set(&mut app, ripe, Voxel::cube(c.fruit[1]));
+    app.world_mut()
+        .resource_mut::<FluidSim>()
+        .set_felled_bound(6);
+    let trunk = voxels.iter().filter(|v| v.part == Part::Trunk).count() as u32;
+    let leaves = voxels.iter().filter(|v| v.part == Part::Canopy).count() as u32;
+    assert!(voxels.len() > 12, "enough Voxels to take several steps");
+
+    cut_the_foot(&mut app);
+    let steps = settle_felling(&mut app, &voxels);
+    assert!(steps.len() >= 3, "{} steps", steps.len());
+    assert!(
+        steps.iter().all(|s| s.len() <= 6),
+        "a step broke past its bound"
+    );
+    for pair in steps.windows(2) {
+        let lowest = pair[0].iter().map(|c| c[1]).min().unwrap();
+        let highest = pair[1].iter().map(|c| c[1]).max().unwrap();
+        assert!(lowest >= highest, "top-down: {lowest} then {highest}");
+    }
+    assert_eq!(grown_left(&app, &voxels), 0);
+    assert_eq!(lying_of(&mut app, "t:log"), (trunk as usize, trunk));
+    let fallen = leaves as usize;
+    assert_eq!(lying_of(&mut app, "t:leaf").1, fallen as u32);
+    assert_eq!(
+        lying_of(&mut app, "t:apple"),
+        (1, 1),
+        "only the ripe fruit gives"
+    );
+    let (stacks, saplings) = lying_of(&mut app, "t:sapling");
+    assert_eq!(stacks, 1, "one drop for the whole tree");
+    assert!((1..=2).contains(&saplings));
+}
+
+#[test]
+fn undo_after_a_felling_restores_only_the_cut_voxel_and_the_journal_holds_one_group() {
+    let (mut app, c) = farm();
+    let voxels = grow_tree(&mut app, BASE);
+    cut_the_foot(&mut app);
+    settle_felling(&mut app, &voxels);
+    assert_eq!(grown_left(&app, &voxels), 0);
+    assert_eq!(
+        app.world()
+            .resource::<super::super::undo::Journal>()
+            .groups(),
+        1
+    );
+    replay(&mut app, Undo);
+    assert!(rejections(&mut app).is_empty());
+    assert_eq!(voxel_at(&app, BASE), Voxel::cube(c.trunk));
+    assert_eq!(grown_left(&app, &voxels), 1, "the cut Voxel and no more");
+    settle(&mut app);
+    assert_eq!(
+        voxel_at(&app, BASE),
+        Voxel::cube(c.trunk),
+        "a stump is grounded"
+    );
+}
+
+#[test]
+fn a_cut_that_leaves_the_tree_grounded_breaks_nothing_and_a_leaf_drops_only_its_yield() {
+    let (mut app, _) = farm();
+    let voxels = grow_tree(&mut app, BASE);
+    let top = (0..20)
+        .rev()
+        .map(|y| [6, y, 5])
+        .find(|&c| !voxel_at(&app, c).is_air())
+        .unwrap();
+    let leaf = voxel_at(&app, top).material();
+    send(
+        &mut app,
+        EditIntent {
+            action: EditAction::Remove,
+            origin: Vec3::new(6.5, 18.5, 5.5),
+            direction: Vec3::NEG_Y,
+        },
+    );
+    tick(&mut app);
+    assert!(rejections(&mut app).is_empty());
+    assert!(voxel_at(&app, top).is_air());
+    let before = grown_left(&app, &voxels);
+    for _ in 0..30 {
+        settle(&mut app);
+    }
+    assert_eq!(grown_left(&app, &voxels), before, "nothing else broke");
+    assert_eq!(lying_of(&mut app, "t:sapling"), (0, 0));
+    let tables = app.world().resource::<ContentTables>().0.clone();
+    let expected: u32 = tables.plants.yields(leaf).iter().map(|y| y.count.min).sum();
+    let dropped: u32 = lying(&mut app).iter().map(|(_, c)| c).sum();
+    assert_eq!(dropped, expected, "only the leaf's own declared yield");
+}
+
+#[test]
+fn placed_voxels_of_any_look_are_never_felled_a_cabin_stays_and_a_touching_one_stays() {
+    let (mut app, c) = farm();
+    let voxels = grow_tree(&mut app, BASE);
+    let beside = [BASE[0] + 1, BASE[1], BASE[2]];
+    assert!(voxel_at(&app, beside).is_air());
+    set(&mut app, beside, Voxel::cube(c.placed));
+    let cabin: Vec<[i32; 3]> = (0..3)
+        .flat_map(|x| (0..3).flat_map(move |y| (0..3).map(move |z| [14 + x, 8 + y, 14 + z])))
+        .collect();
+    for &cell in &cabin {
+        set(&mut app, cell, Voxel::cube(c.placed));
+    }
+    cut_the_foot(&mut app);
+    settle_felling(&mut app, &voxels);
+    assert_eq!(grown_left(&app, &voxels), 0, "the tree fell");
+    assert_eq!(voxel_at(&app, beside), Voxel::cube(c.placed));
+    assert!(
+        cabin
+            .iter()
+            .all(|&cell| voxel_at(&app, cell) == Voxel::cube(c.placed))
+    );
+
+    command(&mut app, [14, 9, 14], Voxel::AIR);
+    for _ in 0..30 {
+        settle(&mut app);
+    }
+    assert!(
+        cabin
+            .iter()
+            .filter(|&&cell| cell != [14, 9, 14])
+            .all(|&cell| { voxel_at(&app, cell) == Voxel::cube(c.placed) })
+    );
+    assert_eq!(
+        lying_of(&mut app, "t:sapling").0,
+        1,
+        "the cabin dropped none"
+    );
+}
+
+#[test]
+fn a_mod_command_and_a_burn_out_fell_by_the_same_rule() {
+    let (mut app, _) = farm();
+    let voxels = grow_tree(&mut app, BASE);
+    command(&mut app, [6, 9, 5], Voxel::AIR);
+    let steps = settle_felling(&mut app, &voxels);
+    assert!(!steps.is_empty());
+    assert_eq!(
+        grown_left(&app, &voxels),
+        1,
+        "the foot below the cut stands"
+    );
+    assert_eq!(lying_of(&mut app, "t:sapling").0, 1);
+
+    let (mut app, _) = farm();
+    let voxels = grow_tree(&mut app, BASE);
+    app.world_mut()
+        .run_system_once(
+            |mut store: ResMut<ChunkStore>,
+             mut meshes: ResMut<MeshState>,
+             tables: Res<ContentTables>| {
+                let at = [6, 9, 5];
+                let here = store.occupants(at, &tables.fluids).unwrap();
+                let gone = Occupants {
+                    solid: Voxel::AIR,
+                    ..here
+                };
+                edit::set_occupants(&mut store, &mut meshes, &tables, at, gone).unwrap();
+            },
+        )
+        .unwrap();
+    settle_felling(&mut app, &voxels);
+    assert_eq!(grown_left(&app, &voxels), 1);
+}
+
+#[test]
+fn a_region_over_the_plants_size_in_metres_does_not_break_and_a_small_one_does() {
+    let (mut app, c) = farm();
+    let big: Vec<[i32; 3]> = (0..14).map(|x| [2 + x, 16, 20]).collect();
+    for &cell in &big {
+        set(&mut app, cell, Voxel::cube(c.canopy));
+    }
+    set(&mut app, [1, 16, 20], Voxel::cube(c.placed));
+    command(&mut app, [1, 16, 20], Voxel::AIR);
+    for _ in 0..30 {
+        settle(&mut app);
+    }
+    assert!(big.iter().all(|&cell| !voxel_at(&app, cell).is_air()));
+
+    let small: Vec<[i32; 3]> = (0..3).map(|x| [2 + x, 16, 26]).collect();
+    for &cell in &small {
+        set(&mut app, cell, Voxel::cube(c.canopy));
+    }
+    set(&mut app, [1, 16, 26], Voxel::cube(c.placed));
+    command(&mut app, [1, 16, 26], Voxel::AIR);
+    for _ in 0..30 {
+        settle(&mut app);
+    }
+    assert!(small.iter().all(|&cell| voxel_at(&app, cell).is_air()));
+}
+
+#[test]
+fn a_felled_trees_sapling_is_the_plants_seed_item_and_plants_to_grow_another() {
+    let (mut app, c) = farm();
+    let voxels = grow_tree(&mut app, BASE);
+    command(&mut app, [6, 9, 5], Voxel::AIR);
+    settle_felling(&mut app, &voxels);
+    let items = app.world().resource::<Items>().0.clone();
+    let sapling = app
+        .world()
+        .resource::<EntityStore>()
+        .iter()
+        .map(|e| e.as_dropped())
+        .find(|d| items[d.item as usize].name == "t:sapling")
+        .expect("a sapling lies where it was cut");
+    assert_eq!(items[sapling.item as usize].material, Some(c.sapling));
+}
+
+#[test]
+fn removing_a_sapling_drops_its_item_and_a_grown_trunk_drops_the_log_never_a_grown_material() {
+    let (mut app, c) = farm();
+    set(&mut app, CROP, Voxel::cube(c.sapling));
+    send(&mut app, remove_crop());
+    tick(&mut app);
+    assert_eq!(lying(&mut app), [("t:sapling".to_owned(), 1)]);
+
+    let (mut app, c) = farm();
+    set(&mut app, [6, 8, 5], Voxel::cube(c.trunk));
+    send(
+        &mut app,
+        EditIntent {
+            action: EditAction::Remove,
+            origin: Vec3::new(4.5, 8.5, 5.5),
+            direction: Vec3::X,
+        },
+    );
+    tick(&mut app);
+    assert_eq!(lying(&mut app), [("t:log".to_owned(), 1)]);
 }

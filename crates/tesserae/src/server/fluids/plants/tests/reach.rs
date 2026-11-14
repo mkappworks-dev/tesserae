@@ -249,20 +249,18 @@ fn kelp_grows_through_its_water_waterlogged_and_stops_at_the_surface() {
     let depth = 4;
     let mut farm = pool(&wild, depth, &bases);
     run_until(&mut farm, 40_000, |f| {
-        bases
-            .iter()
-            .any(|&b| run_up(f, b, wild.plant) == depth as i32)
+        bases.iter().any(|&b| run_up(f, b, wild.plant) == depth)
     });
     let tallest = bases
         .iter()
         .map(|&b| run_up(&farm, b, wild.plant))
         .max()
         .unwrap();
-    assert_eq!(tallest, depth as i32, "kelp did not climb the whole pool");
+    assert_eq!(tallest, depth, "kelp did not climb the whole pool");
     farm.run(3000);
     for &b in &bases {
         let run = run_up(&farm, b, wild.plant);
-        assert!(run <= depth as i32, "kelp left the water: {run}");
+        assert!(run <= depth, "kelp left the water: {run}");
         for dy in 0..run {
             let at = [b[0], b[1] + dy, b[2]];
             let here = farm

@@ -225,6 +225,7 @@ const SIZES: [f32; 3] = [1.0, 0.5, 0.25];
 const ENOUGH: u64 = 3000;
 
 mod reach;
+mod tree;
 
 #[test]
 fn a_crop_advances_stage_by_stage_to_ripe_and_stays_ripe() {

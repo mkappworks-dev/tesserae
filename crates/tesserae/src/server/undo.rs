@@ -108,6 +108,11 @@ impl Journal {
         self.undo.is_empty() && self.redo.is_empty()
     }
 
+    #[cfg(test)]
+    pub(super) fn groups(&self) -> usize {
+        self.undo.len()
+    }
+
     pub(super) fn cancel_requests(&mut self) {
         self.requests.clear();
     }

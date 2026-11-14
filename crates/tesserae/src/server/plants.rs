@@ -15,7 +15,7 @@ use tesserae_mods::{EditEvent, EditKind};
 use super::ContentTables;
 use super::edit;
 use super::entities::{self, EntityStore};
-use super::fluids::FluidSim;
+use super::fluids::{Felled, FluidSim};
 use super::inventory::{self, Inventory};
 use super::items::Items;
 use super::mods::EditHistory;
@@ -33,7 +33,10 @@ pub struct PlantNeedsSoil {
 }
 
 pub(super) fn plugin(app: &mut App) {
-    app.add_session_systems(FixedPreUpdate, drop_seeds.after(super::fluids::simulate));
+    app.add_session_systems(
+        FixedPreUpdate,
+        (drop_seeds, drop_felled).after(super::fluids::simulate),
+    );
 }
 
 /// The Items and counts removing a Voxel of `material` at `at` drops: each
@@ -144,6 +147,44 @@ fn drop_seeds(
                 b.at,
                 seed,
             );
+        }
+    }
+}
+
+/// Drops what a Felling gave up: each broken Voxel's declared yield, and the
+/// tree's saplings once, at the cut.
+fn drop_felled(
+    mut sim: ResMut<FluidSim>,
+    (tables, world): (Res<ContentTables>, Res<WorldSettings>),
+    (store, mut entities, items): (
+        Res<ChunkStore>,
+        Option<ResMut<EntityStore>>,
+        Option<Res<Items>>,
+    ),
+) {
+    let felled = sim.take_felled();
+    let (Some(mut entities), Some(items)) = (entities.take(), items) else {
+        return;
+    };
+    let terrain = tables.terrain(&store, world.voxel_size);
+    for f in felled {
+        match f {
+            Felled::Voxel(b) => {
+                for (item, count) in
+                    drops(&tables, &items, world.seed, b.at, b.material).unwrap_or_default()
+                {
+                    entities::drop_many(&mut entities, &terrain, &items, b.at, item, count);
+                }
+            }
+            Felled::Saplings { at, plant, count } => {
+                let seed = tables
+                    .plants
+                    .plant(plant)
+                    .and_then(|p| items.named(&p.seed));
+                if let Some(seed) = seed {
+                    entities::drop_many(&mut entities, &terrain, &items, at, seed, count);
+                }
+            }
         }
     }
 }

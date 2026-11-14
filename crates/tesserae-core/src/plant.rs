@@ -6,6 +6,7 @@
 //! Material?" for growth, harvest, support and the undo journal.
 
 mod reach;
+pub mod tree;
 
 use std::collections::HashMap;
 
@@ -26,6 +27,11 @@ pub const SAMPLE_INTERVAL_S: f32 = CHUNK_VOLUME as f32 / (PLANT_SAMPLES * STEPS_
 
 /// Plant changes one Logical step lands; past it they wait for the next step.
 pub const PLANTS_LANDED_PER_STEP: usize = 64;
+/// Whole trees one Logical step lands, apart from the bound above: a tree is
+/// hundreds of Voxels and relights once.
+pub const TREES_PER_STEP: usize = 2;
+/// Voxels of a felled tree one Logical step breaks, top-down.
+pub const FELLED_PER_STEP: usize = 32;
 
 pub const MAX_STAGES: usize = 8;
 pub const MAX_FRUIT_STAGES: usize = 4;
@@ -755,12 +761,16 @@ pub struct Change {
 #[derive(Clone, PartialEq, Debug)]
 pub struct Growth {
     pub changes: Vec<Change>,
+    /// A whole tree, which lands under [`TREES_PER_STEP`] rather than
+    /// [`PLANTS_LANDED_PER_STEP`].
+    pub tree: bool,
 }
 
 impl Growth {
     pub fn one(at: [i32; 3], voxel: Voxel) -> Self {
         Growth {
             changes: vec![Change { at, voxel }],
+            tree: false,
         }
     }
 }
@@ -779,13 +789,20 @@ pub fn grow(
     roll: f32,
 ) -> Option<Growth> {
     let material = voxel.material();
-    let PlantRef { plant, role } = env.plants.of(material)?;
-    let plant = env.plants.plant(plant)?;
+    let PlantRef { plant: index, role } = env.plants.of(material)?;
+    let plant = env.plants.plant(index)?;
     let mean = match (&plant.kind, role) {
         (Kind::Crop { stages, .. }, Role::Stage(n)) => stages.get(n)?.mean_seconds?,
         (Kind::Column { mean_seconds, .. }, Role::Single)
         | (Kind::Spreader { mean_seconds, .. }, Role::Single)
         | (Kind::Climber { mean_seconds, .. }, Role::Single) => *mean_seconds,
+        (Kind::Tree(tree), Role::Sapling) => tree.mean_seconds,
+        (
+            Kind::Tree(Tree {
+                fruit: Some(fruit), ..
+            }),
+            Role::Fruit(n),
+        ) => fruit.stages.get(n)?.mean_seconds?,
         _ => return None,
     };
     if roll >= roll_chance(mean) {
@@ -821,7 +838,10 @@ pub fn grow(
         Kind::Climber { length_m, .. } => {
             reach::climb(env, plant, view, step, at, voxel, *length_m)
         }
-        Kind::Tree(_) => None,
+        Kind::Tree(tree) => match role {
+            Role::Fruit(n) => tree::ripen(env, plant, tree, view, at, voxel, n),
+            _ => tree::sprout(env, index, plant, tree, view, at),
+        },
     }
 }
 
