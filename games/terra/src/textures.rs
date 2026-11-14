@@ -123,7 +123,13 @@ fn pixel(name: &str, face: usize, x: usize, y: usize, base: [u8; 3]) -> [u8; 3] 
             } else if face == 1 && y == 6 {
                 tint(base, -46)
             } else {
-                grain(tint(base, if y % 4 == 0 { -18 } else { 0 }), x, y, 72 + 2 * face, 14)
+                grain(
+                    tint(base, if y % 4 == 0 { -18 } else { 0 }),
+                    x,
+                    y,
+                    72 + 2 * face,
+                    14,
+                )
             }
         }
         "door" | "door_open" => {
