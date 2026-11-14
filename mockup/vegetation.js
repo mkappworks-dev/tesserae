@@ -201,24 +201,45 @@ function vegPotato(n) {
 }
 function vegBerry(n) {
   const a = blank();
-  const r = [2, 3, 4, 5][n - 1];
-  const cy = 15 - r;
-  vegEllipse(a, 8, cy, r + 2, r, (x, y) =>
-    y < cy ? "l" : y > cy + 1 ? "g" : "G",
-  );
-  for (let y = 0; y < GRID; y++)
-    for (let x = 0; x < GRID; x++) {
-      if (a[y][x] === "." || vegHash(x, y) % 6) continue;
-      if (n === 3) put(a, x, y, "w");
-      if (n === 4) put(a, x, y, "r");
-    }
+  const rows = (y0, y1, x0, x1) => {
+    for (let y = y0; y <= y1; y++)
+      for (let x = x0; x <= x1; x++)
+        put(a, x, y, y === y0 ? "l" : y === y1 ? "g" : "G");
+  };
+  if (n === 1) {
+    line(a, 8, 15, 8, 11, "G");
+    for (const [x, y] of [
+      [7, 12],
+      [9, 11],
+      [6, 11],
+    ])
+      put(a, x, y, "l");
+  } else if (n === 2) {
+    rows(11, 15, 3, 12);
+    rows(8, 10, 5, 10);
+    rows(6, 7, 6, 9);
+  } else {
+    rows(10, 15, 2, 13);
+    rows(7, 9, 4, 11);
+    rows(5, 6, 6, 9);
+    for (const [x, y] of [
+      [3, 12],
+      [6, 13],
+      [12, 11],
+      [10, 14],
+      [5, 8],
+      [10, 8],
+      [8, 5],
+    ])
+      put(a, x, y, "r");
+  }
   return a;
 }
 for (let n = 1; n <= 4; n++) {
   SPRITES[`carrot${n}`] = vegCarrot(n);
   SPRITES[`potato${n}`] = vegPotato(n);
-  SPRITES[`berry${n}`] = vegBerry(n);
 }
+for (let n = 1; n <= 3; n++) SPRITES[`berry${n}`] = vegBerry(n);
 
 /* Tree and cactus icons for the Biome matrix, 16 px. */
 function vegTreeIcon(kind) {
@@ -414,8 +435,9 @@ const FRUITS = {
 function vegFruit(s, kind, cx, y, cz, ripe, k = 1.4) {
   if (kind === "apple") return apple3d(s, cx, y, cz, ripe);
   const [low, mid, top] = FRUITS[kind][ripe ? "ripe" : "unripe"];
+  const kk = ripe ? k : k * UNRIPE_SCALE;
   const at = (dy, size, h, color) =>
-    s.box(cx, y + dy * k, cz, size * k, h * k, 0, color);
+    s.box(cx, y + dy * kk, cz, size * kk, h * kk, 0, color);
   at(0, 0.26, 0.1, low);
   at(0.1, 0.38, 0.17, mid);
   at(0.27, 0.32, 0.09, top);
@@ -423,10 +445,132 @@ function vegFruit(s, kind, cx, y, cz, ripe, k = 1.4) {
 }
 
 function vegFruitPair(kind) {
-  return scene(92, 52, 60, [46, 38], (s) => {
+  return scene(110, 84, kind === "cherry" ? 60 : 38, [55, 66], (s) => {
     vegFruit(s, kind, -0.38, 0, 0, true, kind === "cherry" ? 1.1 : 1.5);
     vegFruit(s, kind, 0.38, 0, 0, false, kind === "cherry" ? 1.1 : 1.5);
   });
+}
+
+/* Berry bush: a rounded mound of leaf boxes, one Shape per Stage ------------------------------ */
+
+const BUSH_LEAF = ["#2f6a22", "#3d7d2c", "#52a038"];
+const BERRY_RED = "#c0392b";
+
+/** The shipped look: three Stages sharing one box Shape, drawn as a thin ring and then a tiered stack. */
+function bushBefore(s, stage) {
+  if (stage === 1) {
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2;
+      s.box(
+        Math.cos(a) * 0.36,
+        0,
+        Math.sin(a) * 0.36,
+        0.16,
+        0.16,
+        0,
+        BUSH_LEAF[1],
+      );
+    }
+    return;
+  }
+  const tiers = [
+    [0.9, 0.22],
+    [0.72, 0.2],
+    [0.54, 0.2],
+    [0.36, 0.18],
+  ].slice(0, stage === 2 ? 3 : 4);
+  let y = 0;
+  tiers.forEach(([w, h], i) => {
+    s.box(0, y, 0, w, h, 0, BUSH_LEAF[i % 2 ? 2 : 1]);
+    y += h;
+  });
+  if (stage === 3)
+    for (const [x, yy, z] of [
+      [0.45, 0.1, 0.2],
+      [0.36, 0.34, -0.15],
+      [0.27, 0.55, 0.12],
+      [-0.1, 0.3, 0.36],
+      [0.1, 0.78, 0.1],
+    ])
+      s.box(x, yy, z, 0.16, 0.16, 0, BERRY_RED);
+}
+
+/** The redesign: a sprout, a round mound, and the mound fuller with berries standing proud of the leaves. */
+function bushAfter(scn, stage, ox = 0, oz = 0) {
+  const s = { box: (x, y, z, ...r) => scn.box(x + ox, y, z + oz, ...r) };
+  if (stage === 1) {
+    s.box(0, 0, 0, 0.09, 0.2, 0, BUSH_LEAF[0]);
+    for (const [x, y, z, yaw] of [
+      [0.1, 0.12, 0.02, 0.4],
+      [-0.09, 0.17, -0.03, -0.5],
+      [0.02, 0.22, 0.1, 0.1],
+    ])
+      s.box(x, y, z, 0.2, 0.05, yaw, BUSH_LEAF[2]);
+    return;
+  }
+  const ripe = stage === 3;
+  const g = ripe ? 1.1 : 1;
+  const tiers = [
+    [0.7 * g, 0.2, BUSH_LEAF[1]],
+    [0.5 * g, 0.17, BUSH_LEAF[2]],
+    [0.3 * g, 0.13, BUSH_LEAF[2]],
+  ];
+  let y = 0;
+  const lo = [];
+  for (const [w, h, c] of tiers) {
+    s.box(0, y, 0, w, h, 0, c);
+    lo.push([w / 2, y]);
+    y += h;
+  }
+  if (!ripe) return;
+  for (const [x, z, yy] of [
+    [0.3, -0.22, 0.12],
+    [-0.22, 0.3, 0.06],
+  ])
+    s.box(x, yy, z, 0.2, 0.15, 0, BUSH_LEAF[0]);
+  const berry = (x, yy, z) =>
+    s.box(x, yy, z, 0.1, 0.1, 0, BERRY_RED, { bias: 40 });
+  const [[h0], [h1, y1], [h2, y2]] = lo;
+  berry(h0, 0.05, -0.16);
+  berry(h0, 0.12, 0.14);
+  berry(-0.18, 0.06, h0);
+  berry(0.15, 0.13, h0);
+  berry(h1, y1 + 0.07, -0.1);
+  berry(h1, y1 + 0.1, 0.12);
+  berry(-0.12, y1 + 0.09, h1);
+  berry(0.1, y1 + 0.05, h1);
+  berry(h2, y2 + 0.05, 0.02);
+  berry(0.03, y2 + 0.07, h2);
+}
+
+function bushScene(draw, stage) {
+  return scene(150, 118, 46, [70, 52], (s) => {
+    s.box(0, -0.5, 0, 1, 0.5, 0, "#86a35a");
+    draw(s, stage);
+  });
+}
+
+const BUSH_STAGES = ["sprout", "young bush", "ripe"];
+
+function bushStrip(label, draw) {
+  return `<div class="plants-surface"><h4>${label}</h4><div class="plants-stages">${[
+    1, 2, 3,
+  ]
+    .map(
+      (n) =>
+        `<figure class="plants-frame">${bushScene(draw, n)}<figcaption><b>Stage ${n}</b><small>${BUSH_STAGES[n - 1]}</small></figcaption></figure>`,
+    )
+    .join("")}</div></div>`;
+}
+
+function berrySection(heading) {
+  const fruitCard = (kind, name) =>
+    `<figure class="plants-frame veg-card">${vegFruitPair(kind)}<figcaption><b>${name}</b><small>ripe, then unripe at 70%</small></figcaption></figure>`;
+  return `<section>${heading("BERRY BUSH", "Berry bush, by Stage", "The bush was three Stages sharing one box Shape, so the seedling was a ring and the ripe bush a tiered stack with box berries. Each Stage now has its own Shape: a stem, a round mound, and the mound with small berry voxels.")}
+${bushStrip("Before: one shared box Shape", bushBefore)}
+${bushStrip("After: a Shape per Stage", bushAfter)}
+<div class="plants-surface"><h4>Unripe fruit is a smaller Shape, since a Stage can have its own</h4><div class="veg-gallery">${fruitCard("apple", "Apple")}${fruitCard("orange", "Orange")}${fruitCard("cherry", "Cherry")}</div></div>
+</section>`;
 }
 
 const vegTree = (ground, build, wet) =>
@@ -491,13 +635,15 @@ function vegPatch() {
       [0, -1, "tuft"],
       [1, -1, "carrot4"],
       [-1, 0, "tuft"],
-      [0, 0, "berry4"],
+      [0, 0, "berry"],
       [1, 0, "potato4"],
       [-1, 1, "carrot4"],
       [1, 1, "tuft"],
       [0, 1, "wheat4"],
     ];
-    for (const [x, z, name] of wild) s.cross(name, x, 0, z);
+    for (const [x, z, name] of wild)
+      if (name === "berry") bushAfter(s, 3, x, z);
+      else s.cross(name, x, 0, z);
   });
 }
 
@@ -711,7 +857,7 @@ const VEG_ITEMS = {
   wheat: ["crop", "Wheat", "wheat4"],
   carrot: ["crop", "Carrot", "carrot4"],
   potato: ["crop", "Potato", "potato4"],
-  berry: ["crop", "Berry bush", "berry4"],
+  berry: ["crop", "Berry bush", "berry3"],
   tuft: ["ground", "Tall grass", "tuft"],
   dry: ["ground", "Dry grass", "tuftDry"],
   fern: ["ground", "Fern", "fern"],
@@ -964,11 +1110,11 @@ function vegetationPage() {
 <div class="veg-gallery">${TREE_CARDS.map(treeCard).join("")}</div></section>
 ${branchingSection(heading)}
 ${densitySection(heading)}
+${berrySection(heading)}
 <section>${heading("VEGETABLES AND CROPS", "Four Stages, the last ripe", "Crossed quads on farmland, as wheat already is. The same Plants are scattered wild in grass, ripe, so a walker finds them.")}
 ${strip("wheat", "Wheat", FARMLAND, "Harvested ripe; regrows to an earlier Stage.")}
 ${strip("carrot", "Carrot", FARMLAND, "Orange shoulders show at the last Stage.")}
 ${strip("potato", "Potato", FARMLAND, "The leaves yellow when the tubers are ready.")}
-${strip("berry", "Berry bush", "#4f7f35", "Grows on plain grass; white blossom at Stage 3, red berries at Stage 4.")}
 <div class="veg-gallery">${card("Wild patch in grass", "ripe crops among tall grass, no farmland", vegPatch())}</div>
 </section>
 <section>${heading("GROUND AND WATER PLANTS", "Crossed quads, boxes and columns", "Small plants are crossed quads. A cactus is a column of boxes with spines. Cane and kelp stack one cell per Voxel of height.")}

@@ -327,12 +327,15 @@ function ghostScene(count) {
   });
 }
 
+/** An unripe fruit is a smaller per-Stage Shape, about 70% of the ripe one. */
+const UNRIPE_SCALE = 0.7;
+
 /** The hanging fruit: a shaped Voxel of stacked boxes, drawn as a 3D apple and never a flat quad. */
 function apple3d(s, cx, y, cz, ripe = true, opts = {}) {
   const [low, mid, top] = ripe
     ? ["#a3201c", "#c8322a", "#d9473b"]
     : ["#5f8d36", "#76a443", "#86b551"];
-  const k = ripe ? 1.7 : 1.35;
+  const k = ripe ? 1.7 : 1.7 * UNRIPE_SCALE;
   const at = (dy, size, h, color) =>
     s.box(cx, y + dy * k, cz, size * k, h * k, 0, color, { bias: 40, ...opts });
   at(0, 0.26, 0.1, low);
@@ -517,6 +520,7 @@ function plantsPage() {
 <div class="plants-surface"><h4>Wheat, four Stages, over farmland</h4><div class="plants-stages">${[1, 2, 3, 4].map((n) => `<figure class="plants-frame">${stageScene(n)}<figcaption><b>Stage ${n}</b><small>${["sprout", "growing", "heading", "ripe"][n - 1]}</small></figcaption></figure>`).join("")}</div></div>
 <div class="plants-row"><div class="plants-surface"><h4>Apple tree: cubes, with each apple a small 3D voxel (green when unripe)</h4>${treeScene()}</div><div class="plants-surface"><h4>Vine: one flat quad on the wall face</h4>${vineScene()}</div></div>
 </section>
+${berrySection(heading)}
 <section>${heading("BREAKING FRUIT", "Break fruit to harvest it", "Break fruit to harvest it; the tree grows new fruit elsewhere on its canopy while it stands.")}
 <div class="plants-row">${breakView("A ripe apple", "On a branch lobe", 0)}${breakView("Break it", "A leaf is left; the apple drops", 1)}${breakView("Later", "A new unripe apple, on the other lobe", 2)}</div>
 </section>
