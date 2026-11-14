@@ -60,18 +60,15 @@ fn a_columns_stands_in_resolves_to_the_fluid_material() {
     let [Kind::Column { stands_in, .. }] = &kinds[..] else {
         panic!("one column");
     };
-    assert_eq!(*stands_in, Some(id(&registry, "t:sea")));
+    assert_eq!(*stands_in, [id(&registry, "t:sea")]);
 }
 
 #[test]
 fn a_column_that_stands_in_nothing_grows_in_air() {
     let (_, _, kinds) = resolved(None).unwrap();
     assert!(matches!(
-        kinds[..],
-        [Kind::Column {
-            stands_in: None,
-            ..
-        }]
+        &kinds[..],
+        [Kind::Column { stands_in, .. }] if stands_in.is_empty()
     ));
 }
 
@@ -84,6 +81,77 @@ fn stands_in_must_name_a_fluid_material_that_exists() {
     );
     let err = resolved(Some("t:nothing")).unwrap_err().to_string();
     assert!(err.contains("kelp") && err.contains("t:nothing"), "{err}");
+}
+
+fn tagged(name: &str, solid: bool, tags: &[&str]) -> content::MaterialDef {
+    content::MaterialDef {
+        tags: tags.iter().map(|t| (*t).into()).collect(),
+        ..material(name, solid)
+    }
+}
+
+/// Two Mods tag their own soil and water; the kelp names only the tags.
+fn resolved_by_tag(
+    soil: &str,
+    stands_in: &str,
+) -> Result<(Registry, Vec<tesserae_core::plant::Plant>), ModError> {
+    let mut game = empty();
+    game.materials = vec![
+        tagged("sand", true, &["soil", "sand"]),
+        tagged("kelp", true, &[]),
+        tagged("sea", false, &["water"]),
+    ];
+    game.fluids = vec![fluid("g:sea")];
+    let mut plant = column(Some(stands_in));
+    plant.seed = "g:kelp".into();
+    plant.needs.soil = vec![soil.into()];
+    plant.kind = match plant.kind {
+        content::PlantKind::Column(c) => content::PlantKind::Column(content::ColumnDef {
+            material: "g:kelp".into(),
+            ..c
+        }),
+        other => other,
+    };
+    game.plants = vec![plant];
+    let mut other = empty();
+    other.materials = vec![tagged("loam", true, &["soil"])];
+    let (mut tables, mut registry) = (Tables::builtin(), Registry::builtin());
+    let mut behaviours: Vec<Behaviour> = vec![
+        apply(other, "o", &mut tables, &mut registry, false)?.behaviour,
+        apply(game, "g", &mut tables, &mut registry, false)?.behaviour,
+    ];
+    let declared = DeclaredPlants::take(&mut behaviours);
+    resolve(behaviours, &mut tables, &registry)?;
+    let plants = declared.resolve(&registry, &tables)?;
+    Ok((registry, plants.plants().to_vec()))
+}
+
+#[test]
+fn a_tag_expands_to_every_material_of_any_mod_that_carries_it() {
+    let (registry, plants) = resolved_by_tag("#soil", "#water").unwrap();
+    let plant = &plants[0];
+    assert_eq!(
+        plant.needs.soil,
+        [id(&registry, "o:loam"), id(&registry, "g:sand")]
+    );
+    let Kind::Column { stands_in, .. } = &plant.kind else {
+        panic!("a column")
+    };
+    assert_eq!(*stands_in, [id(&registry, "g:sea")]);
+    let (registry, plants) = resolved_by_tag("g:sand", "g:sea").unwrap();
+    assert_eq!(plants[0].needs.soil, [id(&registry, "g:sand")]);
+}
+
+#[test]
+fn a_tag_that_matches_nothing_or_the_wrong_kind_fails_the_load_naming_the_plant() {
+    for (soil, water) in [
+        ("#nothing", "#water"),
+        ("#soil", "#soil"),
+        ("#water", "#water"),
+    ] {
+        let err = resolved_by_tag(soil, water).unwrap_err().to_string();
+        assert!(err.contains("kelp") && err.contains("tag `#"), "{err}");
+    }
 }
 
 #[test]
@@ -325,7 +393,7 @@ mod surface_features {
         let rows = crate::biome_rows(&behaviours);
         resolve(behaviours, &mut tables, &registry)?;
         tables.plants = declared.resolve(&registry, &tables)?;
-        let (biomes, _) = resolve_biomes(&rows, &tables, &registry)?;
+        let (biomes, _) = resolve_biomes(&rows, &tables, &registry, None)?;
         Ok((biomes, tables, registry))
     }
 

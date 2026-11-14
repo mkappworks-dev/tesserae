@@ -38,6 +38,10 @@ Line 0.3 gained `biomes` and `ores` on its `declaration`, and `climate` on its
 and an optional `sky-fog`, a `sky-fog` record of two sRGB colours, and an
 optional `cave-scale`, a multiplier from 0 to 4 on the World's cave radius.
 
+Line 0.3 also gained an optional-in-effect `tags` list on `material-def` (an
+adapted 0.1 or 0.2 Declaration has none), so Plants can name `#soil` or `#water`
+instead of a Material.
+
 Line 0.3 gained what Survival needs in the same way: an optional
 `contact-damage-per-s` on `material-def`, from 0 to 1000 health per second; an
 optional `max-stack` on `item-def`, from 1 to 64 and 64 when absent, and an

@@ -99,6 +99,7 @@ pub(crate) fn solid(name: &str) -> MaterialDef {
         render: RenderClass::Opaque,
         remove_time_s: Some(0.35),
         contact_damage_per_s: None,
+        tags: Vec::new(),
         solid: true,
     }
 }
@@ -264,6 +265,7 @@ impl Guest for Terra {
                     render: RenderClass::Opaque,
                     remove_time_s: None,
                     contact_damage_per_s: None,
+                    tags: Vec::new(),
                     solid: true,
                 },
                 MaterialDef {
@@ -274,6 +276,7 @@ impl Guest for Terra {
                     render: RenderClass::Opaque,
                     remove_time_s: None,
                     contact_damage_per_s: Some(4.0),
+                    tags: Vec::new(),
                     solid: false,
                 },
                 solid("wood"),
@@ -289,6 +292,7 @@ impl Guest for Terra {
                     render: RenderClass::Blend,
                     remove_time_s: None,
                     contact_damage_per_s: None,
+                    tags: Vec::new(),
                     solid: false,
                 },
                 solid("brick"),
@@ -300,6 +304,7 @@ impl Guest for Terra {
                     render: RenderClass::Blend,
                     remove_time_s: None,
                     contact_damage_per_s: None,
+                    tags: Vec::new(),
                     solid: false,
                 },
                 solid("stone"),

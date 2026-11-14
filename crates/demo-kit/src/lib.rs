@@ -81,6 +81,7 @@ macro_rules! food {
                 render: crate::tesserae::mods::content::RenderClass::Opaque,
                 remove_time_s: Some(0.35),
                 contact_damage_per_s: None,
+                tags: Vec::new(),
                 solid: true,
             }
         }

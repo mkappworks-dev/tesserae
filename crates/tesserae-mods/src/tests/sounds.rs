@@ -46,6 +46,7 @@ fn stone() -> content::MaterialDef {
         solid: true,
         remove_time_s: None,
         contact_damage_per_s: None,
+        tags: Vec::new(),
     }
 }
 

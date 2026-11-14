@@ -36,6 +36,7 @@ impl Guest for Lake {
                     render: RenderClass::Blend,
                     remove_time_s: None,
                     contact_damage_per_s: None,
+                    tags: Vec::new(),
                     solid: false,
                 },
                 MaterialDef {
@@ -46,6 +47,7 @@ impl Guest for Lake {
                     render: RenderClass::Opaque,
                     remove_time_s: None,
                     contact_damage_per_s: None,
+                    tags: Vec::new(),
                     solid: true,
                 },
             ],

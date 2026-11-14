@@ -74,7 +74,7 @@ fn column(direction: Direction, stands_in: Option<MaterialId>, height_m: f32) ->
         max_height_m: height_m,
         direction,
         mean_seconds: tesserae_core::plant::SAMPLE_INTERVAL_S,
-        stands_in,
+        stands_in: stands_in.into_iter().collect(),
         yields: Vec::new(),
     }
 }

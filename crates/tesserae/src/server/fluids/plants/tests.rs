@@ -373,7 +373,7 @@ fn a_crop_that_needs_water_grows_only_within_its_reach_in_metres() {
     for size in SIZES {
         let needs = |n: &mut Needs| {
             n.water = Some(Water {
-                fluid,
+                fluids: vec![fluid],
                 reach_m: 2.0,
             });
         };

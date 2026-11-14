@@ -41,6 +41,10 @@ interface content {
         /// Health a Player in Survival loses per second while their body
         /// overlaps the Material, from 0 to 1000; none is harmless.
         contact-damage-per-s: option<f32>,
+        /// At most 8 labels, each `[a-z][a-z0-9-]{0,31}`. A Plant's `soil`,
+        /// `stands-in` and water `fluid` may name `#<tag>` for every Material
+        /// of any Mod that carries it.
+        tags: list<string>,
     }
 
     /// One Shape. The engine registers it under `<mod id>:<name>`, derives its

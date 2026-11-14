@@ -20,6 +20,7 @@ fn solid(name: &str) -> MaterialDef {
         render: RenderClass::Opaque,
         remove_time_s: Some(0.35),
         contact_damage_per_s: None,
+        tags: Vec::new(),
         solid: true,
     }
 }
@@ -75,6 +76,7 @@ impl Guest for Starter {
                     render: RenderClass::Blend,
                     remove_time_s: Some(0.35),
                     contact_damage_per_s: None,
+                    tags: Vec::new(),
                     solid: true,
                 },
             ],

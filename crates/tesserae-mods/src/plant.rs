@@ -19,20 +19,28 @@ pub const MAX_PLANTS: usize = 512;
 /// Materials are grown decides which implicit Items exist; Items are checked
 /// once those are known.
 #[derive(Clone, PartialEq, Debug, Default)]
-pub struct DeclaredPlants(Vec<(String, Vec<content::PlantDef>)>);
+pub struct DeclaredPlants {
+    rows: Vec<(String, Vec<content::PlantDef>)>,
+    /// Every tagged Material of every Mod, by full name.
+    tags: Vec<(String, Vec<String>)>,
+}
 
 impl DeclaredPlants {
     pub fn take(behaviours: &mut [Behaviour]) -> Self {
-        Self(
-            behaviours
+        Self {
+            rows: behaviours
                 .iter_mut()
                 .map(|b| (b.mod_id.clone(), std::mem::take(&mut b.plants)))
                 .collect(),
-        )
+            tags: behaviours
+                .iter()
+                .flat_map(|b| b.material_tags.iter().cloned())
+                .collect(),
+        }
     }
 
     fn rows(&self) -> impl Iterator<Item = (&str, usize, &content::PlantDef)> {
-        self.0.iter().flat_map(|(id, rows)| {
+        self.rows.iter().flat_map(|(id, rows)| {
             rows.iter()
                 .enumerate()
                 .map(move |(row, def)| (id.as_str(), row, def))
@@ -58,7 +66,7 @@ impl DeclaredPlants {
                 name: def.name.clone(),
                 reason,
             };
-            let mut plant = plant(def, registry, tables).map_err(&fail)?;
+            let mut plant = plant(def, registry, tables, &self.tags).map_err(&fail)?;
             plant.name = format!("{mod_id}:{}", def.name);
             table.push(plant).map_err(|e| fail(e.to_string()))?;
         }
@@ -196,9 +204,44 @@ fn resolve_shape(registry: &Registry, name: &Option<String>) -> Result<Option<Sh
         .transpose()
 }
 
-fn plant(def: &content::PlantDef, registry: &Registry, tables: &Tables) -> Result<Plant, String> {
+/// What `entry` names: one Material, or with a leading `#` every Material of any Mod carrying that
+/// tag. `keep` filters the tagged ones (solid soil, fluids); a tag left with none is an error.
+fn expand(
+    registry: &Registry,
+    tags: &[(String, Vec<String>)],
+    entry: &str,
+    kind: &str,
+    keep: impl Fn(MaterialId) -> bool,
+) -> Result<Vec<MaterialId>, String> {
+    let Some(tag) = entry.strip_prefix('#') else {
+        let id = material(registry, entry)?;
+        return if keep(id) {
+            Ok(vec![id])
+        } else {
+            Err(format!("`{entry}` must be a {kind} Material"))
+        };
+    };
+    let found: Vec<MaterialId> = tags
+        .iter()
+        .filter(|(_, own)| own.iter().any(|t| t == tag))
+        .filter_map(|(name, _)| registry.id_of(NameKind::Material, name))
+        .map(|id| id as MaterialId)
+        .filter(|&id| keep(id))
+        .collect();
+    if found.is_empty() {
+        return Err(format!("tag `{entry}` matches no {kind} Material"));
+    }
+    Ok(found)
+}
+
+fn plant(
+    def: &content::PlantDef,
+    registry: &Registry,
+    tables: &Tables,
+    tags: &[(String, Vec<String>)],
+) -> Result<Plant, String> {
     let shape = resolve_shape(registry, &def.shape)?;
-    let needs = needs(&def.needs, registry, tables)?;
+    let needs = needs(&def.needs, registry, tables, tags)?;
     let mut sapling_yields = Vec::new();
     let (first, kind) = match &def.kind {
         content::PlantKind::Crop(crop) => {
@@ -254,13 +297,12 @@ fn plant(def: &content::PlantDef, registry: &Registry, tables: &Tables) -> Resul
                 .stands_in
                 .as_ref()
                 .map(|name| {
-                    let fluid = material(registry, name)?;
-                    if tables.fluids.rank(fluid).is_none() {
-                        return Err(format!("stands-in `{name}` must be a fluid Material"));
-                    }
-                    Ok(fluid)
+                    expand(registry, tags, name, "fluid", |m| {
+                        tables.fluids.rank(m).is_some()
+                    })
                 })
-                .transpose()?;
+                .transpose()?
+                .unwrap_or_default();
             (
                 solid(registry, tables, &column.material)?,
                 Kind::Column {
@@ -308,27 +350,32 @@ fn needs(
     needs: &content::PlantNeeds,
     registry: &Registry,
     tables: &Tables,
+    tags: &[(String, Vec<String>)],
 ) -> Result<Needs, String> {
     let water = needs
         .water
         .as_ref()
         .map(|w| {
-            let fluid = material(registry, &w.fluid)?;
-            if tables.fluids.rank(fluid).is_none() {
-                return Err(format!("`{}` must be a fluid Material", w.fluid));
-            }
-            Ok(Water {
-                fluid,
+            Ok::<_, String>(Water {
+                fluids: expand(registry, tags, &w.fluid, "fluid", |m| {
+                    tables.fluids.rank(m).is_some()
+                })?,
                 reach_m: w.reach_m,
             })
         })
         .transpose()?;
+    let mut soil: Vec<MaterialId> = Vec::new();
+    for name in &needs.soil {
+        for id in expand(registry, tags, name, "solid", |m| {
+            tables.materials.solid(Voxel::cube(m))
+        })? {
+            if !soil.contains(&id) {
+                soil.push(id);
+            }
+        }
+    }
     Ok(Needs {
-        soil: needs
-            .soil
-            .iter()
-            .map(|name| solid(registry, tables, name))
-            .collect::<Result<_, _>>()?,
+        soil,
         light_min: needs.light_min.unwrap_or(0),
         light_max: needs.light_max.unwrap_or(tesserae_core::light::MAX_LIGHT),
         temperature: needs.temperature,

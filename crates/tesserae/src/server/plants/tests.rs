@@ -138,7 +138,7 @@ fn content_with(shaped: bool) -> Content {
                 max_height_m: 4.0,
                 direction: tesserae_core::plant::Direction::Up,
                 mean_seconds: 60.0,
-                stands_in: None,
+                stands_in: Vec::new(),
                 yields: yields(&[("t:cane", 1, 2)]),
             },
         ),

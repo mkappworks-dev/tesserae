@@ -38,10 +38,17 @@ surface = "plain:rock"
 ```
 
 Material rows require the six fields above and accept optional `remove-time-s`
-and `contact-damage-per-s`. `occlusion` is `opaque`, `same-material` or `never`;
-`render` is `opaque`, `blend` or `cutout`. Appearance colours are four RGBA
-bytes; Material names in appearance are local, while ground names include the
-Mod id. Both formats use the same content bounds and validation.
+`contact-damage-per-s` and `tags`. `occlusion` is `opaque`, `same-material` or
+`never`; `render` is `opaque`, `blend` or `cutout`. Appearance colours are four
+RGBA bytes; Material names in appearance are local, while ground names include
+the Mod id. Both formats use the same content bounds and validation.
+
+`tags` is a list of at most 8 labels, each `[a-z][a-z0-9-]{0,31}`, such as
+`soil`, `sand` or `water`. A Plant's `needs.soil`, a column's `stands-in` and a
+`needs.water.fluid` take either a Material's full name or `#<tag>`, which means
+every Material of every loaded Mod that carries the tag, solid ones for soil and
+fluids for water. A tag that matches none is a load error naming the Plant, so a
+shared Mod can say `#soil` and grow in any Game whose ground carries it.
 
 An appearance row may add `texture = "art/rock.png"`: a PNG inside the Mod
 directory, exactly 48 by 16 pixels (three 16 by 16 faces), used for Material

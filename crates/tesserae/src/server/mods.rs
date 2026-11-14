@@ -622,8 +622,13 @@ pub(crate) async fn declare_all(
         )
         .map_err(|e| e.to_string())?;
     // After the Plant table, because a surface feature may name a Plant.
-    let (biomes, ores) =
-        resolve_biomes(&biome_rows, &loaded.tables, &loaded.registry).map_err(|e| e.to_string())?;
+    let (biomes, ores) = resolve_biomes(
+        &biome_rows,
+        &loaded.tables,
+        &loaded.registry,
+        lake.map(|l| l.material),
+    )
+    .map_err(|e| e.to_string())?;
     if !biomes.is_empty() || !ores.is_empty() {
         // A Mod's Biomes need a World to live in even when the Game sets no terrain.
         loaded.world.get_or_insert_with(WorldgenParams::default);

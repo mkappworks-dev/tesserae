@@ -25,6 +25,7 @@ pub(super) fn material(name: &str, solid: bool) -> MaterialDef {
         render: RenderClass::Blend,
         remove_time_s: None,
         contact_damage_per_s: None,
+        tags: Vec::new(),
         solid,
     }
 }
@@ -667,6 +668,7 @@ fn a_games_ground_resolves_after_all_declarations_and_generates_its_materials() 
             render: content::RenderClass::Opaque,
             remove_time_s: None,
             contact_damage_per_s: None,
+            tags: Vec::new(),
             solid: true,
         });
     }

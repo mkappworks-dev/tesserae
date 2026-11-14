@@ -67,6 +67,8 @@ struct Material {
     solid: bool,
     remove_time_s: Option<f32>,
     contact_damage_per_s: Option<f32>,
+    #[serde(default)]
+    tags: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -220,6 +222,7 @@ pub(crate) fn parse(id: &str, payload: &CheckedPayload) -> Result<Declaration, M
                 solid: m.solid,
                 remove_time_s: m.remove_time_s,
                 contact_damage_per_s: m.contact_damage_per_s,
+                tags: m.tags,
             })
             .collect(),
         appearance: data

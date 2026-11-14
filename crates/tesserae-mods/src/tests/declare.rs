@@ -26,6 +26,7 @@ fn material(name: &str) -> content::MaterialDef {
         remove_time_s: None,
         solid: true,
         contact_damage_per_s: None,
+        tags: Vec::new(),
     }
 }
 
@@ -1501,7 +1502,7 @@ fn resolved_biomes(
         .iter()
         .map(|(id, d)| load.apply(id, d.clone()).unwrap().behaviour)
         .collect();
-    resolve_biomes(&behaviours, &load.tables, &load.registry)
+    resolve_biomes(&behaviours, &load.tables, &load.registry, None)
 }
 
 #[test]
@@ -1696,7 +1697,7 @@ fn a_bad_cave_scale_names_the_mod_that_declared_it() {
             .apply("n", with_biomes(&[], vec![biome("fine", 0.1, 0.1)], vec![]))
             .unwrap()
             .behaviour;
-        match resolve_biomes(&[bad, later], &load.tables, &load.registry).unwrap_err() {
+        match resolve_biomes(&[bad, later], &load.tables, &load.registry, None).unwrap_err() {
             ModError::Params { id, what, source } => {
                 assert_eq!((id.as_str(), what), ("m", "biome"), "{scale}");
                 assert_eq!(source.field, "biomes.cave_scale", "{scale}");
@@ -1773,7 +1774,7 @@ fn a_bad_surface_feature_names_the_mod_and_the_field() {
         });
         let mut load = Load::new();
         let applied = load.apply("m", d).unwrap();
-        resolve_biomes(&[applied.behaviour], &load.tables, &load.registry).unwrap_err()
+        resolve_biomes(&[applied.behaviour], &load.tables, &load.registry, None).unwrap_err()
     };
     for (bad, field) in [
         (
@@ -1845,7 +1846,7 @@ fn a_bad_biome_ground_names_the_mod_and_the_field() {
         });
         let mut load = Load::new();
         let applied = load.apply("m", d).unwrap();
-        resolve_biomes(&[applied.behaviour], &load.tables, &load.registry).unwrap_err()
+        resolve_biomes(&[applied.behaviour], &load.tables, &load.registry, None).unwrap_err()
     };
     for (bad, field) in [
         (ground("m:rock", "m:rock", "m:glass"), "ground.surface"),
@@ -1892,7 +1893,7 @@ fn refused_biome_rows(d: Declaration, field: &str) {
     let error = match load.apply("m", d.clone()) {
         Err(e) => e,
         Ok(applied) => {
-            resolve_biomes(&[applied.behaviour], &load.tables, &load.registry).unwrap_err()
+            resolve_biomes(&[applied.behaviour], &load.tables, &load.registry, None).unwrap_err()
         }
     };
     match error {
@@ -1936,7 +1937,8 @@ fn a_biome_whose_full_name_outgrows_the_table_is_refused() {
     let mut load = Load::new();
     let d = with_biomes(&[], vec![biome("a_rather_long_biome", 0.5, 0.5)], vec![]);
     let applied = load.apply(&long_mod, d).unwrap();
-    let error = resolve_biomes(&[applied.behaviour], &load.tables, &load.registry).unwrap_err();
+    let error =
+        resolve_biomes(&[applied.behaviour], &load.tables, &load.registry, None).unwrap_err();
     assert!(error.to_string().contains(&long_mod), "{error}");
 }
 
@@ -2283,4 +2285,19 @@ fn a_material_is_not_both_a_door_and_a_container() {
     ];
     let error = resolved_uses(&[("m", d)]).err().unwrap().to_string();
     assert!(error.contains("already a Usable Voxel"), "{error}");
+}
+
+#[test]
+fn a_materials_tags_are_kebab_case_labels_and_at_most_eight() {
+    let with = |tags: &[&str]| {
+        let mut d = declaring(&["rock"], &[]);
+        d.materials[0].tags = tags.iter().map(|t| (*t).into()).collect();
+        Load::new().apply("m", d)
+    };
+    assert!(with(&["soil", "tall-grass", "a1"]).is_ok());
+    assert!(with(&["a", "b", "c", "d", "e", "f", "g", "h"]).is_ok());
+    assert!(with(&["a", "b", "c", "d", "e", "f", "g", "h", "i"]).is_err());
+    for bad in ["", "Soil", "1soil", "so_il", "#soil", &"x".repeat(33)] {
+        assert!(with(&[bad]).is_err(), "{bad:?}");
+    }
 }

@@ -97,6 +97,7 @@ fn material(m: old::MaterialDef) -> content::MaterialDef {
         remove_time_s: None,
         solid: m.solid,
         contact_damage_per_s: None,
+        tags: Vec::new(),
     }
 }
 

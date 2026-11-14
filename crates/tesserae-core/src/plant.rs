@@ -64,9 +64,10 @@ pub struct Stage {
     pub yields: Vec<Yield>,
 }
 
-#[derive(Clone, Copy, PartialEq, Debug)]
+/// Standing water within reach; any of `fluids` counts.
+#[derive(Clone, PartialEq, Debug)]
 pub struct Water {
-    pub fluid: MaterialId,
+    pub fluids: Vec<MaterialId>,
     pub reach_m: f32,
 }
 
@@ -136,7 +137,8 @@ pub enum Kind {
         mean_seconds: f32,
         /// The fluid it grows through and stands waterlogged in; `None` grows
         /// in Air.
-        stands_in: Option<MaterialId>,
+        /// The fluids it stands in; empty stands on the ground.
+        stands_in: Vec<MaterialId>,
         yields: Vec<Yield>,
     },
     Spreader {
@@ -627,7 +629,7 @@ fn check(plant: &Plant) -> Result<(), PlantError> {
             return Err(PlantError::Range(what));
         }
     }
-    if let Some(water) = needs.water
+    if let Some(water) = &needs.water
         && !(water.reach_m.is_finite()
             && water.reach_m > 0.0
             && water.reach_m <= MAX_SPREAD_REACH_M)
@@ -926,7 +928,7 @@ pub fn grow(
             reach::Column {
                 max_height_m: *max_height_m,
                 direction: *direction,
-                stands_in: *stands_in,
+                stands_in,
             },
         ),
         Kind::Spreader {
@@ -981,12 +983,13 @@ pub fn conditions_met(
     }
     needs
         .water
+        .as_ref()
         .is_none_or(|w| water_within(w, view, voxel_size, at))
 }
 
 /// Whether the fluid lies within `reach_m` of `at`, measured between Voxel
 /// centres.
-fn water_within(water: Water, view: &impl Surroundings, voxel_size: f32, at: [i32; 3]) -> bool {
+fn water_within(water: &Water, view: &impl Surroundings, voxel_size: f32, at: [i32; 3]) -> bool {
     let reach = (water.reach_m / voxel_size).floor() as i32;
     let limit = (water.reach_m / voxel_size).powi(2);
     for dy in -reach..=reach {
@@ -998,7 +1001,7 @@ fn water_within(water: Water, view: &impl Surroundings, voxel_size: f32, at: [i3
                 let here = [at[0] + dx, at[1] + dy, at[2] + dz];
                 if view
                     .occupants(here)
-                    .is_some_and(|o| o.fluid.is_some_and(|f| f.material == water.fluid))
+                    .is_some_and(|o| o.fluid.is_some_and(|f| water.fluids.contains(&f.material)))
                 {
                     return true;
                 }
@@ -1109,7 +1112,7 @@ mod tests {
                     max_height_m: 4.0,
                     direction,
                     mean_seconds: 60.0,
-                    stands_in: None,
+                    stands_in: Vec::new(),
                     yields: Vec::new(),
                 },
                 10,
@@ -1479,7 +1482,7 @@ mod tests {
     fn water_reach_is_in_metres_at_every_voxel_size() {
         let table = wheat_table(Needs {
             water: Some(Water {
-                fluid: WATER,
+                fluids: vec![WATER],
                 reach_m: 2.0,
             }),
             ..needs()

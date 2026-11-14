@@ -163,6 +163,8 @@ pub struct Behaviour {
     pub(crate) recipes: Vec<content::RecipeDef>,
     voxel_uses: Vec<content::VoxelUse>,
     pub(crate) plants: Vec<content::PlantDef>,
+    /// Each Material's tags, by full name, for the Plants that name a `#tag`.
+    pub(crate) material_tags: Vec<(String, Vec<String>)>,
     lake: Option<content::WaterParams>,
     ground: Option<content::GroundParams>,
 }
@@ -416,9 +418,14 @@ pub fn apply(
 
     let mut remove_times = Vec::new();
     let mut contact_damage = Vec::new();
+    let mut material_tags = Vec::new();
     for (row, material) in declaration.materials.into_iter().enumerate() {
         let name = qualified(mod_id, Kind::Material, row, &material.name)?;
         let damage = material.contact_damage_per_s;
+        check_tags(mod_id, &material.tags)?;
+        if !material.tags.is_empty() {
+            material_tags.push((name.clone(), material.tags.clone()));
+        }
         if damage.is_some_and(|d| !(0.0..=MAX_SURVIVAL_VALUE).contains(&d)) {
             return Err(ModError::Params {
                 id: id(),
@@ -495,6 +502,7 @@ pub fn apply(
             recipes: declaration.recipes,
             voxel_uses: declaration.voxel_uses,
             plants: declaration.plants,
+            material_tags,
             lake,
             ground,
         },
@@ -604,6 +612,7 @@ fn surface_feature(
     f: &content::SurfaceFeature,
     tables: &Tables,
     registry: &Registry,
+    lake: Option<MaterialId>,
 ) -> Result<SurfaceFeature, ModError> {
     let bad = |field, rule| ModError::Params {
         id: b.mod_id.clone(),
@@ -694,7 +703,10 @@ fn surface_feature(
             SurfacePlantKind::Column {
                 material: plant.first,
                 max_height_m: *max_height_m,
-                stands_in: *stands_in,
+                // A tag may name several fluids; worldgen compares one, the lake the World has.
+                stands_in: lake
+                    .filter(|l| stands_in.contains(l))
+                    .or_else(|| stands_in.first().copied()),
             }
         }
         PlantKind::Climber { .. } => {
@@ -767,6 +779,7 @@ pub fn resolve_biomes(
     behaviours: &[Behaviour],
     tables: &Tables,
     registry: &Registry,
+    lake: Option<MaterialId>,
 ) -> Result<(BiomeTable, OreTable), ModError> {
     let mut biomes: Vec<Biome> = Vec::new();
     for b in behaviours {
@@ -823,7 +836,7 @@ pub fn resolve_biomes(
             let features = def
                 .surface_features
                 .iter()
-                .map(|f| surface_feature(b, row, f, tables, registry))
+                .map(|f| surface_feature(b, row, f, tables, registry, lake))
                 .collect::<Result<Vec<_>, _>>()?;
             biomes.push(Biome {
                 name: BiomeName::new(&format!("{}:{}", b.mod_id, def.name)).map_err(bad)?,
@@ -1189,6 +1202,33 @@ fn lookup(
 }
 
 const CORE: &str = "core";
+
+pub const MAX_TAGS_PER_MATERIAL: usize = 8;
+
+/// A tag is a kebab-case label of at most 32 bytes, so `#<tag>` never reads as a Material name.
+fn check_tags(mod_id: &str, tags: &[String]) -> Result<(), ModError> {
+    let bad = |rule: &'static str| ModError::Params {
+        id: mod_id.to_owned(),
+        what: "material",
+        source: ParamError {
+            field: "tags",
+            rule,
+        },
+    };
+    if tags.len() > MAX_TAGS_PER_MATERIAL {
+        return Err(bad("holds at most 8 tags per Material"));
+    }
+    for tag in tags {
+        let mut bytes = tag.bytes();
+        let ok = tag.len() <= MAX_NAME_BYTES
+            && bytes.next().is_some_and(|b| b.is_ascii_lowercase())
+            && bytes.all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-');
+        if !ok {
+            return Err(bad("must each match [a-z][a-z0-9-]{0,31}"));
+        }
+    }
+    Ok(())
+}
 
 /// Every name in one pass, before anything is registered, so a bad name in the
 /// last row costs the Mod no table rows.

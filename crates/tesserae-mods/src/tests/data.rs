@@ -65,6 +65,7 @@ fn material(
         solid,
         remove_time_s: remove,
         contact_damage_per_s: None,
+        tags: Vec::new(),
     }
 }
 
@@ -96,6 +97,7 @@ fn component() -> Declaration {
             material("water", 2, O::SameMaterial, R::Blend, false, 0, Some(0.5)),
             content::MaterialDef {
                 contact_damage_per_s: Some(4.0),
+                tags: Vec::new(),
                 ..material("lava", 2, O::Never, R::Blend, false, 12, None)
             },
             material("wood", 15, O::SameMaterial, R::Cutout, true, 0, None),

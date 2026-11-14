@@ -39,10 +39,10 @@ fn empty(view: &impl Surroundings, at: [i32; 3]) -> Option<bool> {
         .map(|o| o.solid.is_air() && o.fluid.is_none() && o.burning.is_none())
 }
 
-pub(super) struct Column {
+pub(super) struct Column<'a> {
     pub max_height_m: f32,
     pub direction: Direction,
-    pub stands_in: Option<MaterialId>,
+    pub stands_in: &'a [MaterialId],
 }
 
 /// The Voxel a column adds beyond its end. Only the end Voxel grows, so the
@@ -53,7 +53,7 @@ pub(super) fn column(
     voxel_size: f32,
     at: [i32; 3],
     voxel: Voxel,
-    rule: Column,
+    rule: Column<'_>,
 ) -> Option<Growth> {
     let cap = voxels_in(rule.max_height_m, voxel_size);
     let along = match rule.direction {
@@ -80,8 +80,8 @@ pub(super) fn column(
     let room = here.solid.is_air()
         && here.burning.is_none()
         && match (rule.stands_in, here.fluid) {
-            (None, None) => true,
-            (Some(fluid), Some(f)) => f.material == fluid,
+            ([], None) => true,
+            (fluids, Some(f)) => fluids.contains(&f.material),
             _ => false,
         };
     (room && conditions_met(&plant.needs, view, voxel_size, target)).then(|| {
@@ -376,7 +376,7 @@ mod tests {
             max_height_m: height,
             direction,
             mean_seconds: 16.0,
-            stands_in,
+            stands_in: stands_in.into_iter().collect(),
             yields: Vec::new(),
         }
     }
