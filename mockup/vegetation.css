@@ -1,0 +1,113 @@
+/* /vegetation: step 18b species gallery and Biome matrix. */
+.veg-gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 12px;
+}
+.veg-card {
+  padding: 10px;
+  background: var(--panel-raised);
+  border: 1px solid var(--edge);
+  border-radius: var(--radius);
+  align-content: start;
+}
+.veg-card .plants-scene {
+  width: 100%;
+}
+.veg-card.veg-dark .plants-scene {
+  background: #0d1210;
+}
+.veg-fruit {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.veg-fruit .plants-scene {
+  width: 92px;
+  height: 52px;
+  background: none;
+  border: 0;
+}
+.veg-note {
+  margin: 0;
+  font-size: 12px;
+}
+.veg-matrix-wrap {
+  overflow-x: auto;
+}
+.veg-matrix {
+  display: grid;
+  grid-template-columns: 96px repeat(3, minmax(190px, 1fr));
+  gap: 8px;
+  min-width: 740px;
+  align-items: stretch;
+}
+.veg-game {
+  display: grid;
+  align-items: center;
+  font-size: 14px;
+  text-transform: capitalize;
+}
+.veg-cell {
+  display: grid;
+  gap: 4px;
+  align-content: start;
+  padding: 10px;
+  background: var(--panel-raised);
+  border: 1px solid var(--edge);
+  border-radius: var(--radius);
+}
+.veg-cell h5 {
+  margin: 0;
+  font-size: 13px;
+}
+.veg-cell small,
+.veg-cell p {
+  margin: 0;
+  font-size: 11px;
+  color: var(--muted);
+}
+.veg-cell.bare {
+  border-style: dashed;
+}
+.veg-cell ul {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.veg-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px 2px 2px;
+  font-size: 12px;
+  border: 1px solid var(--edge);
+  border-left-width: 3px;
+  border-radius: 4px;
+}
+.veg-chip.veg-tree {
+  border-left-color: #62a043;
+}
+.veg-chip.veg-crop {
+  border-left-color: #d9bd57;
+}
+.veg-chip.veg-ground {
+  border-left-color: #7f8de0;
+}
+.veg-icon {
+  width: 22px;
+  height: 22px;
+}
+.veg-legend {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+}
+.veg-legend p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+}

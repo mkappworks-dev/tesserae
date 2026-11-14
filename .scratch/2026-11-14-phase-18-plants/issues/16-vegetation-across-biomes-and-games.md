@@ -49,3 +49,11 @@ worldgen, which needs one engine addition.
       generation test asserts it.
 - [ ] Digests of Worlds that declare no Plant features are unchanged.
 - [ ] `tesserae validate` passes for `flora` and every Game.
+
+## Comments
+
+The mockup page `/vegetation` ("Vegetation (step 18b)") awaits maintainer
+approval before the Client draws any of it. Open it with
+`python3 mockup/server.py`, then visit `/vegetation` or pick it from the
+**Jump to mockup screen** menu. A server started before the page was added needs
+a restart.

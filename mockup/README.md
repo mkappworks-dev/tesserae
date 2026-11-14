@@ -245,3 +245,15 @@ quad; and the `G Harvest` Use prompt on a ripe crop and a ripe apple. Code is in
 grids and are throwaway; the engine's Stage art comes from
 `scripts/generate-mod-art`. Reach it from the **Jump to mockup screen** picker
 ("Plants (step 18)").
+
+## Vegetation (step 18b, proposed, awaiting approval)
+
+`/vegetation` extends the step 18 look to every Biome of every Game: nine tree
+species (oak, birch, snowy pine, palm with flat fronds and 3D coconuts, jungle
+and swamp trees with hanging vines, and apple, orange and cherry with ripe and
+unripe 3D voxel fruit), four crops as four-Stage crossed-quad strips, ground and
+water plants (tall grass, flowers, mushrooms, cane, a boxed cactus, kelp, a
+pad), a vine curtain and a vine-covered ruin wall, a Game by Biome matrix of
+what each Biome grows, and a legend. Code is in `vegetation.js` and
+`vegetation.css`, reusing `scene()` and `apple3d` from `plants.js`. Reach it
+from the picker ("Vegetation (step 18b)").

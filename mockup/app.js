@@ -322,6 +322,7 @@ function render() {
     screen.innerHTML = blocksPage();
     drawBlocks();
   } else if (state.screen === "plants") screen.innerHTML = plantsPage();
+  else if (state.screen === "vegetation") screen.innerHTML = vegetationPage();
   placeToast();
   screen.querySelector(".body")?.setAttribute("tabindex", "0");
   if (hadFocus) {
@@ -1148,6 +1149,7 @@ const prototypeScreens = [
   { value: "settings", label: "Settings" },
   { value: "blocks", label: "Block gallery" },
   { value: "plants", label: "Plants (step 18)" },
+  { value: "vegetation", label: "Vegetation (step 18b)" },
 ];
 $("#bar-mode").outerHTML = customSelect(
   "Your mode",
