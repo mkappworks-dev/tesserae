@@ -1275,6 +1275,9 @@ fn push_flat(
 ) {
     const UNIT: f32 = 1.0 / SUBDIV as f32;
     let [cx, cy, cz] = cell.map(|c| c as f32);
+    // The renderer reads a Voxel's face from the normal's axis, so it must be axis-aligned: Z
+    // picks the Material's SIDE tile, upright, for a Cross whose diagonals have no axis of their own.
+    let mut axis = 2;
     let quads: Vec<[[f32; 3]; 4]> = match form {
         Form::Cross => vec![
             [
@@ -1296,6 +1299,7 @@ fn push_flat(
             let extent = |a: usize| b.max[a] as i32 - b.min[a] as i32;
             // The thin axis is the box's shortest; the quad spans the other two.
             let d = (0..3).min_by_key(|&a| extent(a)).unwrap_or(2);
+            axis = d;
             let (u, v) = ((d + 1) % 3, (d + 2) % 3);
             let plane = origin[d] + (b.min[d] as f32 + b.max[d] as f32) * 0.5 * UNIT;
             let corner = |cu: f32, cv: f32| {
@@ -1321,12 +1325,12 @@ fn push_flat(
         for reversed in [false, true] {
             let base = layer.positions.len() as u32;
             let order: [usize; 4] = if reversed { [3, 2, 1, 0] } else { [0, 1, 2, 3] };
-            for (k, &i) in order.iter().enumerate() {
+            for &i in &order {
                 layer.positions.push(corners[i]);
-                layer
-                    .normals
-                    .push([0.0, if reversed { -1.0 } else { 1.0 }, 0.0]);
-                layer.uvs.push(match k {
+                let mut normal = [0.0; 3];
+                normal[axis] = if reversed { -1.0 } else { 1.0 };
+                layer.normals.push(normal);
+                layer.uvs.push(match i {
                     0 => [0.0, 0.0],
                     1 => [1.0, 0.0],
                     2 => [1.0, 1.0],

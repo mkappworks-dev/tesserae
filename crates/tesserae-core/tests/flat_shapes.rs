@@ -148,3 +148,64 @@ fn a_plane_draws_one_double_sided_quad_in_every_orientation() {
     }
     assert_eq!(faces.len(), 6, "every face is reachable");
 }
+
+fn assert_upright(m: &tesserae_core::ChunkMesh, y0: f32, y1: f32) {
+    let l = &m.cutout;
+    for (i, p) in l.positions.iter().enumerate() {
+        assert_eq!(
+            l.uvs[i][1],
+            if p[1] == y0 { 0.0 } else { 1.0 },
+            "v is 0 at the foot"
+        );
+        assert!(p[1] == y0 || p[1] == y1);
+    }
+}
+
+#[test]
+fn a_cross_faces_sideways_with_its_sprite_upright() {
+    let f = flats();
+    let mut c = Chunk::air();
+    put(
+        &mut c,
+        [3, 4, 5],
+        Voxel::shaped(f.grass, f.cross, Orientation::default()),
+    );
+    let m = mesh(&f, &c);
+    assert_upright(&m, 4.0, 5.0);
+    let n = &m.cutout.normals;
+    assert_eq!(n.len(), 16);
+    assert!(
+        n.iter()
+            .all(|n| n[1] == 0.0 && n.iter().map(|c| c * c).sum::<f32>() == 1.0)
+    );
+    assert!(n.contains(&[0.0, 0.0, 1.0]) && n.contains(&[0.0, 0.0, -1.0]));
+}
+
+#[test]
+fn a_plane_faces_along_its_thin_axis_with_its_sprite_upright() {
+    let f = flats();
+    for orientation in Orientation::all() {
+        let v = Voxel::shaped(f.grass, f.plane, orientation);
+        let mut c = Chunk::air();
+        put(&mut c, [3, 4, 5], v);
+        let l = mesh(&f, &c).cutout;
+        let axis = l.normals[0].iter().position(|&c| c != 0.0).unwrap();
+        for (i, n) in l.normals.iter().enumerate() {
+            assert_eq!(
+                n.iter().filter(|&&c| c != 0.0).count(),
+                1,
+                "{orientation:?}"
+            );
+            assert!(n[axis].abs() == 1.0);
+            // Only wall faces have a vertical axis to check; a ceiling or floor Plane lies flat.
+            if axis != 1 {
+                let p = l.positions[i];
+                assert_eq!(
+                    l.uvs[i][usize::from(axis == 2)] == 0.0,
+                    p[1] < 4.5,
+                    "{orientation:?}"
+                );
+            }
+        }
+    }
+}
