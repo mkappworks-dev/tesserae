@@ -3,6 +3,6 @@ version = "0.1.0"
 description = "Ashlands & molten earth"
 api = "0.3"
 root = true
-depends = ["strata", "waters", "flora", "hearth"]
+depends = ["strata", "waters", "flora", "crops", "hearth"]
 suggests = ["golem"]
 wasm = "ember.wasm"

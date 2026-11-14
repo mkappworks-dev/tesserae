@@ -28,18 +28,22 @@ G to eat it.
 
 ## Biomes
 
-Three Biomes, each with a sky and fog pair that eases as the Player walks
-between them. The climate regions are 320 m across.
+Four Biomes, each with a sky and fog pair that eases as the Player walks between
+them. The ash grows hardy plants (birch, berries, poppies, dry grass), the
+highland pine and fern, and `cinder_bog` swamp trees, cane, ferns and mushrooms
+round the hot springs; `scorched` is bare on purpose. The climate regions are
+320 m across.
 
-| Biome       | Ground (rock, soil, surface)                | Caves  | Sky and fog         |
-| ----------- | ------------------------------------------- | ------ | ------------------- |
-| `ash_flats` | the Game's own: basalt, stone, `hearth:ash` | as set | grey, a little warm |
-| `scorched`  | basalt, basalt, `strata:clay`               | 1.5 x  | rust red            |
-| `highland`  | stone, soil, `flora:grass`                  | 0.5 x  | cool blue-grey      |
+| Biome        | Ground (rock, soil, surface)                | Caves  | Sky and fog         |
+| ------------ | ------------------------------------------- | ------ | ------------------- |
+| `ash_flats`  | the Game's own: basalt, stone, `hearth:ash` | as set | grey, a little warm |
+| `scorched`   | basalt, basalt, `strata:clay`               | 1.5 x  | rust red            |
+| `highland`   | stone, soil, `flora:grass`                  | 0.5 x  | cool blue-grey      |
+| `cinder_bog` | basalt, soil, soil                          | 0.5 x  | murky ember grey    |
 
 `waters:obsidian` also forms veins in the rock of the ash flats and the scorched
 ground, 6 to 48 m down, and nowhere in the highland. Every name is from a Mod
-the Game already depends on.
+the Game already depends on (strata, waters, flora, crops, hearth).
 
 ## Behaviour
 
@@ -53,8 +57,8 @@ burns under `hearth`'s rules. The third has a standing water source on its cap,
 The timer is in simulation seconds, so eruptions are the same at any Voxel size.
 The tests observe each vent start and stop on that schedule, and check that the
 loaded tables hold the lava and water fluids, the obsidian reaction and the
-wood-to-ash fire. Others check the three Biomes' sky and fog and ground, and
-that the ore lies in rock within its band and Biomes.
+wood-to-ash fire. Others check the Biomes' sky and fog and ground, and that the
+ore lies in rock within its band and Biomes.
 
 ## Run it
 

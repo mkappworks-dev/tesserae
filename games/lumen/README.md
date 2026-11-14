@@ -28,16 +28,19 @@ to pick it up and press G to eat it.
 
 ## Biomes
 
-Three Biomes, each with a sky and fog pair that eases as the Player walks
-between them. The climate regions are 480 m across, far larger than the garden,
-so the garden seldom straddles a border. The World has no caves, so no Biome
-tunes them.
+Five Biomes, each with a sky and fog pair that eases as the Player walks between
+them, and each with its own trees and plants from `flora` and `crops`
+(`conservatory` jungle trees, `lily_pond` swamp trees). The climate regions are
+480 m across, far larger than the garden, so the garden seldom straddles a
+border. The World has no caves, so no Biome tunes them.
 
-| Biome         | Ground (rock, soil, surface)      | Sky and fog |
-| ------------- | --------------------------------- | ----------- |
-| `garden`      | the Game's own: stone, soil, turf | soft green  |
-| `arid_court`  | stone, sand, sand                 | warm sand   |
-| `frost_court` | stone, soil, `frost:snow`         | cold blue   |
+| Biome          | Ground (rock, soil, surface)      | Sky and fog |
+| -------------- | --------------------------------- | ----------- |
+| `garden`       | the Game's own: stone, soil, turf | soft green  |
+| `arid_court`   | stone, sand, sand                 | warm sand   |
+| `frost_court`  | stone, soil, `frost:snow`         | cold blue   |
+| `conservatory` | the Game's own: stone, soil, turf | humid teal  |
+| `lily_pond`    | stone, soil, soil                 | pale blue   |
 
 `crystals:amethyst` forms veins in the rock of every court, 8 to 40 m down.
 
@@ -53,8 +56,8 @@ starts again.
 The tests check that the build holds blended glass, an emitting Material and all
 three Shapes, that no lantern is lit by the build itself, and that lanterns are
 lit in order on the 2 s timer and put out together after the 6 s hold. Others
-check the three Biomes' sky and fog and ground, and that the amethyst lies in
-rock within its band.
+check the Biomes' sky and fog and ground, and that the amethyst lies in rock
+within its band.
 
 ## Run it
 

@@ -1,10 +1,12 @@
 //! Islands and shallow seas whose sea level rises and falls slowly. The tide is a layer of water
 //! sources added or taken away above the sea, a step at a time; the water itself, the ground and
-//! the kelp and the ore come from the Mods this Game depends on (strata, waters, flora, crystals).
+//! the plants and the ore come from the Mods this Game depends on (strata, waters, flora, crops,
+//! aquatic, crystals).
 
 wit_bindgen::generate!({ path: "../../crates/tesserae-mods/wit/0.3", world: "mod" });
 
 mod food;
+mod plants;
 
 use std::cell::RefCell;
 use std::collections::VecDeque;
@@ -14,8 +16,8 @@ use exports::tesserae::mods::guest::{
 };
 use tesserae::mods::commands::{Fill, SourceFill};
 use tesserae::mods::content::{
-    BiomeDef, CaveParams, ClimateParams, ColumnDef, ColumnDirection, GroundParams, MovementPolicy,
-    OreDef, PlantDef, PlantKind, PlantNeeds, SkyFog, SmoothingParams, SurfaceFeature, WaterParams,
+    BiomeDef, CaveParams, ClimateParams, GroundParams, MovementPolicy, OreDef, SkyFog,
+    SmoothingParams, WaterParams,
 };
 use tesserae::mods::types::{BoxM, Vec3, Voxel};
 
@@ -209,42 +211,6 @@ fn plant(state: &State) -> Vec<Command> {
         .collect()
 }
 
-/// Declared here, not in `flora`: a column that stands in a fluid names it, and `flora` has none.
-fn kelp_plant() -> PlantDef {
-    PlantDef {
-        name: "kelp".into(),
-        seed: "flora:frond".into(),
-        shape: Some("flora:cross".into()),
-        needs: PlantNeeds {
-            soil: ["sand", "soil", "clay", "turf"]
-                .map(|m| format!("strata:{m}"))
-                .into(),
-            light_min: None,
-            light_max: None,
-            temperature: None,
-            humidity: None,
-            water: None,
-        },
-        kind: PlantKind::Column(ColumnDef {
-            material: "flora:frond".into(),
-            max_height_m: 5.0,
-            direction: ColumnDirection::Up,
-            mean_seconds: 90.0,
-            stands_in: Some("waters:water".into()),
-            yields: Vec::new(),
-        }),
-    }
-}
-
-fn kelp_bed() -> SurfaceFeature {
-    SurfaceFeature {
-        material: None,
-        plant: Some("tidewater:kelp".into()),
-        shape: None,
-        spacing_m: 7.0,
-    }
-}
-
 impl Guest for Tidewater {
     fn declare() -> Declaration {
         let mut world = tesserae::mods::host::default_world_params();
@@ -300,7 +266,10 @@ impl Guest for Tidewater {
                         fog: (132, 172, 192),
                     }),
                     cave_scale: Some(1.4),
-                    surface_features: vec![food::feature(), kelp_bed()],
+                    surface_features: [food::feature()]
+                        .into_iter()
+                        .chain(plants::lagoon())
+                        .collect(),
                 },
                 BiomeDef {
                     soundscape: None,
@@ -317,7 +286,10 @@ impl Guest for Tidewater {
                         fog: (190, 184, 166),
                     }),
                     cave_scale: Some(0.0),
-                    surface_features: vec![food::feature()],
+                    surface_features: [food::feature()]
+                        .into_iter()
+                        .chain(plants::salt_flats())
+                        .collect(),
                 },
                 BiomeDef {
                     soundscape: None,
@@ -334,7 +306,37 @@ impl Guest for Tidewater {
                         fog: (168, 186, 206),
                     }),
                     cave_scale: None,
-                    surface_features: Vec::new(),
+                    surface_features: plants::cold_shallows(),
+                },
+                BiomeDef {
+                    soundscape: None,
+                    name: "rainforest".into(),
+                    temperature: 0.72,
+                    humidity: 0.7,
+                    ground: None,
+                    sky_fog: Some(SkyFog {
+                        sky: (110, 152, 150),
+                        fog: (124, 172, 168),
+                    }),
+                    cave_scale: Some(1.4),
+                    surface_features: plants::rainforest(),
+                },
+                BiomeDef {
+                    soundscape: None,
+                    name: "tidal_marsh".into(),
+                    temperature: 0.55,
+                    humidity: 0.78,
+                    ground: Some(GroundParams {
+                        rock: "strata:stone".into(),
+                        soil: "strata:clay".into(),
+                        surface: "strata:soil".into(),
+                    }),
+                    sky_fog: Some(SkyFog {
+                        sky: (126, 144, 146),
+                        fog: (146, 164, 164),
+                    }),
+                    cave_scale: Some(0.7),
+                    surface_features: plants::tidal_marsh(),
                 },
             ],
             survival: None,
@@ -344,7 +346,7 @@ impl Guest for Tidewater {
             soundscapes: Vec::new(),
             cause_sounds: Vec::new(),
             recipes: Vec::new(),
-            plants: vec![kelp_plant()],
+            plants: Vec::new(),
             voxel_uses: Vec::new(),
             ores: vec![OreDef {
                 material: "crystals:aquamarine".into(),
