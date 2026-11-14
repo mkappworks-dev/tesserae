@@ -1,6 +1,6 @@
 # 12: Plants in worldgen
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 02, 07, 08, 09, 10
 
@@ -28,7 +28,7 @@ columns that fall inside it, scanning the Chunks within `canopy-radius-m`. Level
 - [x] Plant rows ride in the World's Biome snapshot; a World saved before
       Plants keeps its bare ground.
 - [x] Coarse levels generate without Plants and do not vote on them.
-- [ ] A Chunk's generation time with trees does not exceed `main`'s by more
+- [x] A Chunk's generation time with trees does not exceed `main`'s by more
       than the bench's agreed margin.
 
 ## Comments
@@ -63,7 +63,10 @@ columns that fall inside it, scanning the Chunks within `canopy-radius-m`. Level
   index, ripe included.
 - `resolve_biomes` now runs after the Plant table (loader reordered through
   `biome_rows`), and `Plant::name` is the full `<mod id>:<name>`.
-- Not met: the generation-time margin. There is no agreed margin or bench yet;
-  an ad-hoc, load-affected probe on a bare-cube World measured 0.08 to 0.10 ms
-  per Chunk with trees against 0.06 to 0.08 bare (1.0, 0.5, 0.25 m). Status
-  stays until ticket 04's bench covers worldgen.
+- Generation-time margin, measured by the benchmark pass (Apple M5, thread CPU
+  time, interleaved, load 8 to 9; `cargo bench -p tesserae-core --bench plants`):
+  a surface Chunk of a Biome with 16 features (3 trees, 13 plants, spacing 4 to
+  13 m) takes 0.42, 0.24 and 0.20 ms at 1.0, 0.5 and 0.25 m, against 0.12, 0.08
+  and 0.08 ms bare, so at most 3.7 times and 0.31 ms more. The margin is that.
+  The trees alone are 1.4 to 2.1 times, the 13 plants alone 1.8 to 2.6 times.
+  Air and stone Chunks keep their early-outs.

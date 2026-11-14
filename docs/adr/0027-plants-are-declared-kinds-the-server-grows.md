@@ -62,8 +62,12 @@ fluid landings and before the step advances, so what it reads cannot be stale
 within the step. The spec had it read a worker Snapshot; the code reads the live
 store, which makes the stale-read rule above a rule about deferred changes only.
 
-The four numeric constants are starting values until the benchmark pass has
-measured them.
+The benchmark pass measured the four numeric constants and kept three:
+`PLANT_SAMPLES` 32, `PLANTS_LANDED_PER_STEP` 64 and `FELLED_PER_STEP` 32.
+`TREES_PER_STEP` is 1, because an oak at 0.25 m is 3341 Voxels and 6.1 ms of CPU
+to land, 40% of a 15.6 ms step. A bound counted in trees is a blunt one when a
+tree's cost grows with the cube of the Voxel size's inverse; a bound in Voxels
+would fit better, and waits for a World that needs it.
 
 **Kinds.** A `crop` is one Voxel through 2 to 8 ordered Stages, the last ripe,
 with an optional `harvest-to` Stage a Use on the ripe one resets to. A `tree` is

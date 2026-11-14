@@ -57,4 +57,9 @@ Falling as a body, in a direction, is step 24's.
 - A pending Felling is not saved: a World closed mid-fall leaves what was
   queued standing until a neighbouring change asks again.
 - Burn-out is tested through the `set_occupants` it lands by, not through the
-  fire simulation. `FELLED_PER_STEP` is unmeasured.
+  fire simulation. `FELLED_PER_STEP` was measured by the
+  benchmark pass and stays 32: a step costs 0.11 ms at 1.0 and 0.5 m and 0.38 ms
+  at 0.25 m (a 3340-Voxel oak). The relight and the wake are paid once a step,
+  so a Voxel costs 13 us at 32 a step and 3.3 us at 512; 128 a step would be
+  0.54 ms at 0.25 m, so there is headroom.
+

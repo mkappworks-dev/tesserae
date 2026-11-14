@@ -623,27 +623,35 @@ Notes:
   and the 2026-11-13 amendment to
   [ADR-0023](docs/adr/0023-the-inventory-is-server-owned-and-pays-inside-the-undo-journal.md).
   Spec and tickets: `.scratch/2026-11-13-phase-16-crafting/`.
-- **Step 18** has shipped but is not marked Done: the benchmark pass and the
-  maintainer's final review are still to come. A Game or Mod declares Plants as
-  data, of five kinds the Server runs natively: `crop`, `tree`, `column`,
-  `spreader` and `climber`. A Plant's state is its Material, so nothing is
-  stored per plant and the save, the Overlay and the Agenda are unchanged.
-  Growth is a Chunk-sampled tick on the Logical step: each held Chunk that holds
-  a Plant Material draws `PLANT_SAMPLES` positions, a Sampled Voxel rolls
-  against its Stage's `mean-seconds` (no faster than the 16 s Sample interval),
-  and a passing roll grows it if light, Climate, water and soil hold, otherwise
-  it waits and never dies. Trees are parametric, grow whole from a sapling and
-  fell top-down when a trunk is cut, where only grown Materials take part, so a
-  cabin of placed logs stays. Plants carry flat `cross` and `plane` Shapes,
-  fruit is a small box Shape that Use picks, soil and water are Material tags,
-  and a Biome may list 16 surface features, Plants included, with vines hung
-  from trees by worldgen only. The shared Mods `flora`, `crops` and `aquatic`
-  declare the vegetation every Game places. Not shipped: falling trees as bodies
-  (step 24), tree templates (step 20), leaf decay and weather inputs (step 17).
-  Measured numbers, to be filled in by the benchmark pass: `PLANT_SAMPLES` TBD
-  by the benchmark pass, `PLANTS_LANDED_PER_STEP` TBD by the benchmark pass,
-  `TREES_PER_STEP` TBD by the benchmark pass, `FELLED_PER_STEP` TBD by the
-  benchmark pass. See
+- **Step 18** has shipped but is not marked Done: the maintainer's final review
+  is still to come. A Game or Mod declares Plants as data, of five kinds the
+  Server runs natively: `crop`, `tree`, `column`, `spreader` and `climber`. A
+  Plant's state is its Material, so nothing is stored per plant and the save,
+  the Overlay and the Agenda are unchanged. Growth is a Chunk-sampled tick on
+  the Logical step: each held Chunk that holds a Plant Material draws
+  `PLANT_SAMPLES` positions, a Sampled Voxel rolls against its Stage's
+  `mean-seconds` (no faster than the 16 s Sample interval), and a passing roll
+  grows it if light, Climate, water and soil hold, otherwise it waits and never
+  dies. Trees are parametric, grow whole from a sapling and fell top-down when a
+  trunk is cut, where only grown Materials take part, so a cabin of placed logs
+  stays. Plants carry flat `cross` and `plane` Shapes, fruit is a small box
+  Shape that Use picks, soil and water are Material tags, and a Biome may list
+  16 surface features, Plants included, with vines hung from trees by worldgen
+  only. The shared Mods `flora`, `crops` and `aquatic` declare the vegetation
+  every Game places. Not shipped: falling trees as bodies (step 24), tree
+  templates (step 20), leaf decay and weather inputs (step 17). Measured by the
+  benchmark pass (Apple M5, thread CPU time, interleaved rounds, load average 8
+  to 9, `cargo bench -p tesserae-core --bench plants` and the `--ignored` rig in
+  `server/fluids/plants/tests/bench.rs`): `PLANT_SAMPLES` stays 32, so a Sample
+  tick costs 0.01 us a Chunk with no Plant Material, 0.56 us a crop-meadow Chunk
+  and 0.34 us a forest Chunk, and `PLANTS_LANDED_PER_STEP` stays 64 (288 us a
+  step when saturated, 4.5 us a landing). `TREES_PER_STEP` is 1: an oak of 4 to
+  6 m lands whole in 0.16, 0.86 and 6.1 ms at 1.0, 0.5 and 0.25 m, so two a step
+  would be 80% of a 15.6 ms step at 0.25 m. `FELLED_PER_STEP` stays 32 (0.11,
+  0.11 and 0.38 ms a step). Meshing 1024 `cross` Voxels costs 350 us against 209
+  us for the bare terrain, below the 478 us of 1024 stairs, so flat Shapes stay
+  uncapped; 4096 cost 541 us. A surface Chunk of a 16-feature Biome generates in
+  0.42, 0.24 and 0.20 ms against 0.12, 0.08 and 0.08 bare. See
   [ADR-0027](docs/adr/0027-plants-are-declared-kinds-the-server-grows.md) and
   the 2026-11-14 amendments to
   [ADR-0006](docs/adr/0006-shapes-are-table-data.md),

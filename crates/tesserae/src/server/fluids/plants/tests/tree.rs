@@ -5,19 +5,28 @@ use super::*;
 use tesserae_core::plant::tree::{Part, tree_voxels};
 use tesserae_core::plant::{CountRange, Fruit, Tree, Yield};
 
-const BASE: [i32; 3] = [16, CROP_Y, 16];
+pub(super) const BASE: [i32; 3] = [16, CROP_Y, 16];
 
-struct Orchard {
-    tables: Tables,
-    sapling: MaterialId,
+pub(super) struct Orchard {
+    pub(super) tables: Tables,
+    pub(super) sapling: MaterialId,
     trunk: MaterialId,
     fruit: [MaterialId; 2],
     placed: MaterialId,
-    tree: Tree,
+    pub(super) tree: Tree,
     apple: tesserae_core::ShapeId,
 }
 
 fn orchard(fruit: Option<f32>) -> Orchard {
+    let radius = if fruit.is_some() { 2.0 } else { 1.0 };
+    orchard_of(fruit, (1.0, 2.0), radius)
+}
+
+pub(super) fn orchard_of(
+    fruit: Option<f32>,
+    trunk_height_m: (f32, f32),
+    canopy_radius_m: f32,
+) -> Orchard {
     let mut tables = crate::server::fixture_tables();
     let apple = tables
         .shapes
@@ -42,8 +51,8 @@ fn orchard(fruit: Option<f32>) -> Orchard {
         vines: None,
         trunk,
         canopy,
-        trunk_height_m: (1.0, 2.0),
-        canopy_radius_m: if fruit.is_some() { 2.0 } else { 1.0 },
+        trunk_height_m,
+        canopy_radius_m,
         mean_seconds: tesserae_core::plant::SAMPLE_INTERVAL_S,
         trunk_yield: vec![Yield {
             item: "t:log".into(),
@@ -104,7 +113,7 @@ fn ground() -> Chunk {
     chunk
 }
 
-fn planted(size: f32, o: &Orchard, bases: &[[i32; 3]]) -> Farm {
+pub(super) fn planted(size: f32, o: &Orchard, bases: &[[i32; 3]]) -> Farm {
     let mut chunk = ground();
     for b in bases {
         chunk.set(

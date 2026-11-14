@@ -334,6 +334,52 @@ fn an_open_door_survives_save_and_reopen() {
 }
 
 #[test]
+fn a_grown_crop_and_tree_reopen_as_the_materials_they_grew_to() {
+    use tesserae_core::plant::{Kind as PlantKind, Role};
+    let dir = Directory::new();
+    let mut rig = Rig::new(&dir);
+    let tables = Arc::clone(&rig.app.world().resource::<ContentTables>().0);
+    let (crop, soil) = tables
+        .plants
+        .plants()
+        .iter()
+        .find_map(|p| match &p.kind {
+            PlantKind::Crop { stages, .. } if stages.len() >= 3 => {
+                Some((stages[1].material, p.needs.soil[0]))
+            }
+            _ => None,
+        })
+        .expect("Terra's shared Mods declare a crop");
+    let (trunk, canopy) = tables
+        .plants
+        .plants()
+        .iter()
+        .find_map(|p| match &p.kind {
+            PlantKind::Tree(t) => Some((t.trunk, t.canopy)),
+            _ => None,
+        })
+        .expect("Terra's shared Mods declare a tree");
+    rig.insert();
+    rig.solid([3, 0, 3], soil);
+    rig.solid([3, 1, 3], crop);
+    rig.solid([6, 1, 6], trunk);
+    rig.solid([6, 2, 6], canopy);
+    rig.settled_save();
+    drop(rig);
+    let mut reopened = Rig::new(&dir);
+    reopened.insert();
+    let store = reopened.app.world().resource::<ChunkStore>();
+    let chunk = store.get(coord([0; 3])).unwrap();
+    assert_eq!(chunk.get(3, 1, 3), Voxel::cube(crop));
+    assert_eq!(chunk.get(6, 1, 6), Voxel::cube(trunk));
+    assert_eq!(chunk.get(6, 2, 6), Voxel::cube(canopy));
+    let reopened_tables = &reopened.app.world().resource::<ContentTables>().0;
+    let at = reopened_tables.plants.of(crop).expect("a Stage");
+    assert_eq!(at.role, Role::Stage(1));
+    assert!(reopened_tables.plants.next_stage(crop).is_some());
+}
+
+#[test]
 fn save_snapshot_cannot_authorize_eviction_after_a_later_edit() {
     let dir = Directory::new();
     let mut rig = Rig::new(&dir);

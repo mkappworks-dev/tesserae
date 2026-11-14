@@ -35,6 +35,10 @@ struct Content {
 /// A crop that rolls every Sample (`mean-seconds` at the interval), so a Stage
 /// is a matter of which Voxels the draw lands on and the needs alone.
 fn content(needs: impl FnOnce(&mut Needs)) -> Content {
+    content_every(tesserae_core::plant::SAMPLE_INTERVAL_S, needs)
+}
+
+fn content_every(mean_seconds: f32, needs: impl FnOnce(&mut Needs)) -> Content {
     let mut tables = crate::server::fixture_tables();
     let def = MaterialDef {
         emission: 0,
@@ -56,7 +60,7 @@ fn content(needs: impl FnOnce(&mut Needs)) -> Content {
         mean_seconds: mean,
         yields: Vec::new(),
     };
-    let every = Some(tesserae_core::plant::SAMPLE_INTERVAL_S);
+    let every = Some(mean_seconds);
     tables
         .plants
         .push(Plant {
@@ -225,6 +229,7 @@ impl Farm {
 const SIZES: [f32; 3] = [1.0, 0.5, 0.25];
 const ENOUGH: u64 = 3000;
 
+mod bench;
 mod reach;
 mod tree;
 

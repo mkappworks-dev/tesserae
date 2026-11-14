@@ -52,5 +52,7 @@ function is shared with worldgen (ticket 12).
   sits inside canopy. Picks reset through the existing harvest path.
 - Undo of the seed after growth was already refused by the mismatch rule
   (`undoing_a_sapling_placement_after_it_grew_is_refused`).
-- `TREES_PER_STEP` is a starting value; the bench of ticket 04 has not measured
-  it.
+- `TREES_PER_STEP` was measured by the benchmark pass: an oak of 4 to 6 m with
+  a 2.5 m canopy lands in 0.16 ms at 1.0 m (52 Voxels), 0.86 ms at 0.5 m (420)
+  and 6.1 ms at 0.25 m (3341), whole group and relight. At 2 a step the last is
+  12 ms of a 15.6 ms step, so the bound is now 1.

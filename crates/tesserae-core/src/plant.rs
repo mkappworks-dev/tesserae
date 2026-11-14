@@ -28,8 +28,9 @@ pub const SAMPLE_INTERVAL_S: f32 = CHUNK_VOLUME as f32 / (PLANT_SAMPLES * STEPS_
 /// Plant changes one Logical step lands; past it they wait for the next step.
 pub const PLANTS_LANDED_PER_STEP: usize = 64;
 /// Whole trees one Logical step lands, apart from the bound above: a tree is
-/// hundreds of Voxels and relights once.
-pub const TREES_PER_STEP: usize = 2;
+/// hundreds of Voxels and relights once. One, because an oak at 0.25 m is 3341
+/// Voxels and 6.2 ms of CPU, 40% of a 15.6 ms step, and two would be 80%.
+pub const TREES_PER_STEP: usize = 1;
 /// Voxels of a felled tree one Logical step breaks, top-down.
 pub const FELLED_PER_STEP: usize = 32;
 
