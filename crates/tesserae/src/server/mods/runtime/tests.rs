@@ -1211,8 +1211,8 @@ fn terra_contract_content_build_and_scenarios_reach_real_voxels_and_light() {
                 (21, [236, 240, 246, 255]),
                 (22, [150, 120, 104, 255]),
                 (23, [84, 150, 56, 255]),
-                (24, [167, 116, 63, 255]),
-                (25, [107, 68, 35, 255]),
+                (24, [214, 190, 140, 255]),
+                (25, [128, 62, 40, 255]),
                 (26, [128, 88, 50, 255]),
                 (27, [128, 88, 50, 255]),
                 (28, [140, 97, 55, 255]),
@@ -1333,7 +1333,7 @@ fn terra_contract_content_build_and_scenarios_reach_real_voxels_and_light() {
             .init_resource::<MeshState>()
             .init_resource::<crate::server::fluids::FluidSim>()
             .add_plugins(super::super::plugin);
-        assert_eq!(h.app.world().resource::<ContentTables>().shapes.len(), 6);
+        assert_eq!(h.app.world().resource::<ContentTables>().shapes.len(), 7);
         h.app
             .insert_resource(crate::server::world_state::SpawnPoint::for_tests(
                 Vec3::new(0.0, 28.0, 0.0),

@@ -57,17 +57,18 @@ fn main() {
         }
         let cube = Voxel::cube(id);
         let def = tables.materials.def(id);
+        let boxes = |voxel| {
+            tables
+                .shapes
+                .selection(voxel, Connections::NONE)
+                .iter()
+                .map(|b| json!([b.min, b.max]))
+                .collect::<Vec<_>>()
+        };
+        // As placed by a Player looking along -Z who aimed at the +X half.
+        let placed = tables.uses.placed(cube, POS_Z, POS_X);
         let usable = if let Some(door) = tables.uses.door(id) {
-            // As placed by a Player looking along -Z who aimed at the +X half.
             let shut = tables.uses.placed(Voxel::cube(door.closed), POS_Z, POS_X);
-            let boxes = |voxel| {
-                tables
-                    .shapes
-                    .selection(voxel, Connections::NONE)
-                    .iter()
-                    .map(|b| json!([b.min, b.max]))
-                    .collect::<Vec<_>>()
-            };
             json!({ "door": {
                 "closed": registry_name(&registry, door.closed),
                 "open": registry_name(&registry, door.open),
@@ -89,6 +90,7 @@ fn main() {
             "solid": def.solid,
             "emission": def.emission,
             "use": usable,
+            "boxes": boxes(placed),
             "faces": faces,
         }));
     }

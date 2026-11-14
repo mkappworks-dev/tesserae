@@ -551,15 +551,12 @@ pub(super) fn select_held(
         return;
     };
     let mut chosen = (shape, orientation);
-    if actions.started(super::actions::Action::Shape) && !catalogue.0.shapes.is_empty() {
-        let next = catalogue
-            .0
-            .shapes
-            .iter()
-            .filter(|s| s.id > shape)
-            .map(|s| s.id)
+    if actions.started(super::actions::Action::Shape) {
+        let offered = || catalogue.0.shapes.iter().filter(|s| !s.fixed).map(|s| s.id);
+        let next = offered()
+            .filter(|&id| id > shape)
             .min()
-            .or_else(|| catalogue.0.shapes.iter().map(|s| s.id).min());
+            .or_else(|| offered().min());
         if let Some(next) = next {
             chosen.0 = next;
         }
@@ -985,6 +982,7 @@ mod tests {
             id,
             name: name.to_owned(),
             turnable,
+            fixed: false,
             geometry: crate::server::fixture_tables().shapes.preview_geometry(id),
         })
         .collect();
@@ -1856,6 +1854,18 @@ mod tests {
             assert_eq!(*app.world().resource::<Hotbar>(), before, "{hand:?}");
         }
         assert_eq!(app.world().resource::<Hotbar>().stacks, stacks);
+    }
+
+    #[test]
+    fn f_skips_a_shape_a_usable_voxel_fixes() {
+        let mut app = app(CursorGrabMode::Locked);
+        app.world_mut().resource_mut::<Catalogue>().0.shapes[4].fixed = true;
+        frame(&mut app);
+        key(&mut app, KeyCode::Digit1);
+        for shape in [SHAPE_SLAB, SHAPE_STAIR, SHAPE_POST, SHAPE_FULL_CUBE] {
+            key(&mut app, KeyCode::KeyF);
+            assert!(matches!(held(&app), Holding::Solid { shape: s, .. } if s == shape));
+        }
     }
 
     #[test]

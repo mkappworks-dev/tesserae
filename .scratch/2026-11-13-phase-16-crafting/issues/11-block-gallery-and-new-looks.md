@@ -1,6 +1,6 @@
 # 11: Block gallery and new looks
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: None (can start immediately)
 
@@ -26,7 +26,7 @@ committed.
 - [x] One documented command regenerates the gallery's textures from Terra.
 - [x] `/blocks` shows every Terra Material, its Shapes, and the Door closed and
       open at Player scale.
-- [ ] The new Workbench, Chest and Door looks are approved in the gallery by the
+- [x] The new Workbench, Chest and Door looks are approved in the gallery by the
       user before their Terra commit.
 - [x] Terra's texture fingerprint and appearance pins are updated.
 
@@ -37,3 +37,13 @@ committed.
 await the user's approval in `/blocks` before merging. A texture covers one
 Voxel, so a Door's handle repeats on every cell: twice at 1 m, 32 times at
 0.25 m; the gallery's Voxel size control shows it.
+
+2026-11-14: the user picked W4 for the Workbench and C6 for the Chest. The
+Workbench is a birch top with a saw and hammer over walnut sides with pale legs,
+always placed as `terra:table`: four legs under a thick top, open beneath, which
+collides as a whole cell so nothing snags between the legs. The Chest stays a
+cube of framed red-brown planks with a rope-loop handle; Terra has one side
+texture, so the handle shows on all four sides. The gallery draws each Material
+in the Shape it places in. A Shape a `voxel-uses` row fixes (`terra:panel`,
+`terra:table`) is no longer offered as a Shape chip or by the Shape key,
+superseding ticket 13's sixth chip.

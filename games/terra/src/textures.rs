@@ -21,6 +21,23 @@ fn dirt(x: usize, y: usize, salt: usize) -> [u8; 3] {
     }
 }
 
+/// Noise of a step of one in `k`, rounded to nearest.
+fn grain(base: [u8; 3], x: usize, y: usize, salt: usize, k: i16) -> [u8; 3] {
+    tint(base, (2 * (noise(x, y, salt) - 128) + k).div_euclid(2 * k))
+}
+
+const INK: [u8; 3] = [52, 38, 26];
+const WALNUT: [u8; 3] = [92, 62, 38];
+
+/// A saw laid diagonally across a Workbench's top and a hammer above it.
+fn saw_and_hammer(x: usize, y: usize) -> bool {
+    let blade = |x: usize| 12 - (x - 3) * 3 / 5;
+    ((3..=11).contains(&x) && y == blade(x))
+        || ((4..=10).contains(&x) && x % 2 == 0 && y == blade(x) + 1)
+        || (x == 12 && (3..=10).contains(&y))
+        || (y == 3 && (10..=14).contains(&x))
+}
+
 const GATE_STILE: [usize; 2] = [2, 13];
 
 /// A Gate's side is two stiles with three rails across them, the upper two at
@@ -94,15 +111,19 @@ fn pixel(name: &str, face: usize, x: usize, y: usize, base: [u8; 3]) -> [u8; 3] 
             }
         }
         "chest" => {
-            let rim = x == 0 || x == 15 || y == 0 || y == 15;
-            let lid = face != 0 && y == 5;
-            let latch = face != 0 && (6..=9).contains(&x) && (4..=7).contains(&y);
-            if latch {
-                [190, 170, 120]
-            } else if rim || lid {
-                tint(base, -40 + (n - 128) / 20)
+            let frame = x < 2 || x > 13 || y < 2 || y > 13;
+            let rope = face == 1
+                && ((y == 8 && (6..=9).contains(&x))
+                    || ((x == 5 || x == 10) && (8..=10).contains(&y))
+                    || (y == 10 && (5..=10).contains(&x)));
+            if rope {
+                grain([196, 168, 112], x, y, 75, 16)
+            } else if frame {
+                grain(tint(base, -48), x, y, 71 + 2 * face, 18)
+            } else if face == 1 && y == 6 {
+                tint(base, -46)
             } else {
-                tint(base, if y % 4 == 0 { -14 } else { 6 } + (n - 128) / 16)
+                grain(tint(base, if y % 4 == 0 { -18 } else { 0 }), x, y, 72 + 2 * face, 14)
             }
         }
         "door" | "door_open" => {
@@ -204,15 +225,22 @@ fn pixel(name: &str, face: usize, x: usize, y: usize, base: [u8; 3]) -> [u8; 3] 
             }
         }
         "workbench" => {
-            let frame = x == 0 || x == 15 || (face == 0 && (y == 0 || y == 15));
-            if frame {
-                tint(base, -46 + (n - 128) / 20)
-            } else if face == 0 {
-                tint(base, if y % 5 == 0 { -24 } else { 12 } + (n - 128) / 18)
-            } else if y >= 4 && (3..=12).contains(&x) {
-                tint(base, -70 + (n - 128) / 24)
+            if face != 1 {
+                if x == 0 || y == 0 || x == 15 || y == 15 {
+                    WALNUT
+                } else if face == 0 && saw_and_hammer(x, y) {
+                    INK
+                } else {
+                    grain(tint(base, if y % 5 == 0 { -16 } else { 0 }), x, y, 11, 14)
+                }
+            } else if y < 3 {
+                grain(base, x, y, 12, 14)
+            } else if (1..=3).contains(&x) || (12..=14).contains(&x) {
+                grain(tint(base, -18), x, y, 13, 14)
+            } else if (6..=9).contains(&y) && (x + y) % 3 == 0 {
+                [176, 150, 108]
             } else {
-                tint(base, (n - 128) / 14)
+                grain(WALNUT, x, y, 14, 14)
             }
         }
         "glass" => {

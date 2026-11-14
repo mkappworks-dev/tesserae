@@ -133,6 +133,9 @@ pub struct CatalogueShape {
     /// Whether turning it changes anything: a cube looks the same however it
     /// is turned and a connected Shape ignores its orientation.
     pub turnable: bool,
+    /// A Usable Voxel's row places its Material in it, so it is that row's
+    /// alone and the Player is not offered it.
+    pub fixed: bool,
     pub geometry: Vec<Vec<tesserae_core::shape::ShapeQuad>>,
 }
 

@@ -326,6 +326,10 @@ impl VoxelUses {
         self.row(material)?.2
     }
 
+    pub fn fixes(&self, shape: ShapeId) -> bool {
+        self.rows.iter().any(|(_, _, fixed)| *fixed == Some(shape))
+    }
+
     /// What a Player's Place of `voxel` puts down, facing away from the face
     /// `near` with the hinge side `hinge` aimed at: a Door in its fixed Shape
     /// turned by [`Door::placed`]'s rule, another fixed Shape in the

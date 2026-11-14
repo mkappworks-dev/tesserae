@@ -392,7 +392,11 @@ ${doors.map(doorSection).join("\n")}`;
   ];
   await Promise.all([
     ...[...root.querySelectorAll("[data-block]")].map((c) =>
-      drawVoxel(c, textured[Number(c.dataset.block)], cube),
+      drawVoxel(
+        c,
+        textured[Number(c.dataset.block)],
+        textured[Number(c.dataset.block)].boxes || cube,
+      ),
     ),
     ...[...root.querySelectorAll("[data-shape]")].map((c) =>
       drawVoxel(c, shapeMaterial, shapes[Number(c.dataset.shape)]),

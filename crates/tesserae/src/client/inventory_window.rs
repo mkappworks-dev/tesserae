@@ -1442,7 +1442,13 @@ fn shape_chips(
     chosen: ShapeId,
     names: &Names,
 ) {
-    let shapes = &names.catalogue.0.shapes;
+    let shapes: Vec<_> = names
+        .catalogue
+        .0
+        .shapes
+        .iter()
+        .filter(|s| !s.fixed)
+        .collect();
     if shapes.len() < 2 {
         return;
     }
@@ -1457,7 +1463,7 @@ fn shape_chips(
             ..default()
         })
         .with_children(|chips| {
-            for shape in shapes {
+            for shape in &shapes {
                 look::flat(
                     chips,
                     Control::Shape(shape.id),
@@ -1809,6 +1815,7 @@ mod tests {
             id,
             name: name.into(),
             turnable,
+            fixed: false,
             geometry: Vec::new(),
         }
     }

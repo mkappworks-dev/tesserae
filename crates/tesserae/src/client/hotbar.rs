@@ -406,6 +406,7 @@ mod tests {
                     id: SHAPE_STAIR,
                     name: "core:stair".into(),
                     turnable: true,
+                    fixed: false,
                     geometry: Vec::new(),
                 }],
                 ..default()

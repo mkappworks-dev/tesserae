@@ -908,6 +908,7 @@ pub(in crate::server) fn catalogue(
                     .expect("registered Shape name"),
                 geometry: tables.shapes.preview_geometry(id),
                 turnable: id != SHAPE_FULL_CUBE && !tables.shapes.is_connected_shape(id),
+                fixed: tables.uses.fixes(id),
             }
         })
         .collect();
@@ -2158,6 +2159,28 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
         assert_eq!(library.len(), 1);
         assert_eq!(library[0].0[0].def, def);
         assert_eq!(*library[0].0[0].recordings[1], [3]);
+    }
+
+    #[test]
+    fn a_terra_workbench_is_always_a_table_and_the_player_is_offered_neither_fixed_shape() {
+        let loaded = super::runtime::tests::terra_loaded(1.0);
+        let id = |kind, name| loaded.registry.id_of(kind, name).unwrap();
+        let table = id(Kind::Shape, "terra:table") as u8;
+        assert_eq!(
+            loaded
+                .tables
+                .uses
+                .shape(id(Kind::Material, "terra:workbench") as MaterialId),
+            Some(table)
+        );
+        let chest = id(Kind::Material, "terra:chest") as MaterialId;
+        assert_eq!(loaded.tables.uses.shape(chest), None);
+        let catalogue = published_catalogue(loaded);
+        let fixed: Vec<_> = catalogue.shapes.iter().filter(|s| s.fixed).collect();
+        assert_eq!(
+            fixed.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(),
+            ["terra:panel", "terra:table"]
+        );
     }
 
     #[test]

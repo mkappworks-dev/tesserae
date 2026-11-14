@@ -180,6 +180,33 @@ fn panel() -> ShapeDef {
     }
 }
 
+/// A Workbench's: four legs under a thick top. A body collides with the whole
+/// cell, so nothing snags between the legs.
+fn table() -> ShapeDef {
+    let leg = |x, z| NodeBox {
+        min: (x, 0, z),
+        max: (x + 3, 12, z + 3),
+    };
+    ShapeDef {
+        name: "table".into(),
+        boxes: vec![
+            leg(1, 1),
+            leg(12, 1),
+            leg(1, 12),
+            leg(12, 12),
+            NodeBox {
+                min: (0, 12, 0),
+                max: (16, 16, 16),
+            },
+        ],
+        collision: Some(vec![CollisionBox {
+            min: (0, 0, 0),
+            max: (16, 16, 16),
+        }]),
+        connect: None,
+    }
+}
+
 /// Cut out between its rails, so what stands behind a Gate shows through.
 fn gate(name: &str) -> MaterialDef {
     MaterialDef {
@@ -297,7 +324,7 @@ impl Guest for Terra {
                 gate("gate"),
                 gate("gate_open"),
             ],
-            shapes: vec![fence(), panel()],
+            shapes: vec![fence(), panel(), table()],
             appearance: vec![
                 appearance("lamp", [245, 227, 184, 255]),
                 appearance("lava", [230, 72, 16, 255]),
@@ -315,8 +342,8 @@ impl Guest for Terra {
                 appearance("snow", [236, 240, 246, 255]),
                 appearance("iron", [150, 120, 104, 255]),
                 appearance("melon", [84, 150, 56, 255]),
-                appearance("workbench", [167, 116, 63, 255]),
-                appearance("chest", [107, 68, 35, 255]),
+                appearance("workbench", [214, 190, 140, 255]),
+                appearance("chest", [128, 62, 40, 255]),
                 appearance("door", [128, 88, 50, 255]),
                 appearance("door_open", [128, 88, 50, 255]),
                 appearance("gate", [140, 97, 55, 255]),
@@ -753,7 +780,7 @@ impl Guest for Terra {
                 VoxelUse {
                     material: "terra:workbench".into(),
                     kind: VoxelUseKind::Station("workbench".into()),
-                    shape: None,
+                    shape: Some("terra:table".into()),
                 },
             ],
             ores: vec![OreDef {
