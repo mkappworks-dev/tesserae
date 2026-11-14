@@ -131,8 +131,15 @@ ellipsoid of `canopy-radius-m` centred on the trunk top. A tree is a pure
 function of the seed and a column in metres, so a Chunk generates the trunk and
 canopy Voxels of every neighbouring column that fall inside it, and a tree
 crosses Chunk borders whole and is the same at every Voxel size. A sapling grows
-only if every cell of the group is Air or the tree's own Material, and otherwise
-stays a sapling and Samples again.
+only if every cell of the group is Air or foliage, and otherwise stays a sapling
+and Samples again. Foliage is what the tree overwrites: its own grown Materials,
+ground cover and small plants (a spreader, climber or column), any tree's leaves
+and fruit, and a sapling. A trunk of another tree, a crop, a placed Voxel,
+terrain, a fluid and fire block. A dense understory and a neighbour's crown
+would otherwise hold a large tree's sapling for ever, since a jungle's vines and
+ferns fill its cells at generation. A species' Climate band must cover its
+Biome's whole region, not only the Biome's point, because Climate is a
+continuous field and a Biome is the nearest point.
 
 Fruit replaces canopy Voxels chosen by a hash of seed, position and `density`
 (at most 0.3). A fruit Voxel ripens through its grown Stages like a crop, with

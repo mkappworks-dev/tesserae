@@ -6,8 +6,8 @@ use std::collections::HashSet;
 
 use super::reach::voxels_in;
 use super::{
-    Branching, Change, FORK_SPREAD, GrowEnv, Growth, Kind, MAX_CANOPY_RADIUS_M, Plant, PlantTable,
-    Role, Surroundings, Tree, conditions_met, mix,
+    Branching, Change, FORK_SPREAD, GrowEnv, Growth, Kind, MAX_CANOPY_RADIUS_M, Plant, PlantRef,
+    PlantTable, Role, Surroundings, Tree, conditions_met, mix,
 };
 use crate::climate::{SurfaceVines, VINE_FACES};
 use crate::light::Light;
@@ -467,9 +467,10 @@ fn beside(cell: [i32; 3], face: usize) -> [i32; 3] {
 }
 
 /// The Voxel a sapling that has passed its roll grows into: the whole tree as
-/// one group, or `None` when any cell is not Air or the tree's own Materials,
-/// is unknown, or its Chunk's light is pending. A blocked sapling stays and
-/// Samples again.
+/// one group, or `None` when any cell holds a solid the tree may not replace,
+/// fluid or fire, is unknown, or its Chunk's light is pending. A blocked
+/// sapling stays and Samples again. Foliage gives way ([`replaces`]); terrain,
+/// placed Voxels, crops and another tree's trunk do not.
 pub(super) fn sprout(
     env: &GrowEnv,
     index: usize,
@@ -481,17 +482,12 @@ pub(super) fn sprout(
     if !conditions_met(&plant.needs, view, env.voxel_size, at) {
         return None;
     }
-    let own = |material| {
-        env.plants
-            .of(material)
-            .is_some_and(|r| r.plant == index && is_part(r.role))
-    };
     let mut changes = Vec::new();
     for v in tree_voxels(tree, env.seed, at, env.voxel_size) {
         let here = view.occupants(v.at)?;
         view.light(v.at)?;
         let clear = here.solid.is_air() && here.fluid.is_none() && here.burning.is_none();
-        if !(clear || v.at == at || own(here.solid.material())) {
+        if !(clear || v.at == at || replaces(env.plants, index, here.solid.material())) {
             return None;
         }
         changes.push(Change {
@@ -503,6 +499,28 @@ pub(super) fn sprout(
         changes,
         tree: true,
     })
+}
+
+/// Whether the tree `index` grows over a Voxel of `material`: its own grown
+/// Materials, ground cover and small plants, any tree's leaves and fruit, and
+/// a sapling. A crop, which is a Player's work, and a trunk, which holds a
+/// tree up, stay. Dense understory and a neighbour's crown would otherwise
+/// block a jungle sapling for ever.
+fn replaces(plants: &PlantTable, index: usize, material: MaterialId) -> bool {
+    let Some(PlantRef { plant, role }) = plants.of(material) else {
+        return false;
+    };
+    match role {
+        Role::Trunk => plant == index,
+        Role::Canopy | Role::Fruit(_) | Role::Sapling => true,
+        Role::Single => plants.plant(plant).is_some_and(|p| {
+            matches!(
+                p.kind,
+                Kind::Column { .. } | Kind::Spreader { .. } | Kind::Climber { .. }
+            )
+        }),
+        Role::Stage(_) => false,
+    }
 }
 
 /// A fruit Voxel that has passed its roll moves to its next Stage when the
@@ -917,6 +935,93 @@ mod tests {
         assert!(sprout_at(&table, &scene, 1.0, at).is_some());
         scene.cells.insert(cells[1].at, PLACED_LOG);
         assert_eq!(sprout_at(&table, &scene, 1.0, at), None);
+    }
+
+    const FERN: MaterialId = 50;
+    const WHEAT: MaterialId = 51;
+    const OTHER_SAPLING: MaterialId = 60;
+    const OTHER_TRUNK: MaterialId = 61;
+    const OTHER_CANOPY: MaterialId = 62;
+
+    /// The oak, plus a fern that spreads, a wheat crop and a second tree.
+    fn crowded() -> PlantTable {
+        let mut table = plants(None);
+        let needs = Needs {
+            soil: vec![SOIL],
+            light_max: 15,
+            ..Needs::default()
+        };
+        let mut other = tree(None);
+        (other.trunk, other.canopy) = (OTHER_TRUNK, OTHER_CANOPY);
+        let rows = [
+            (
+                "fern",
+                FERN,
+                Kind::Spreader {
+                    reach_m: 1.0,
+                    mean_seconds: 60.0,
+                    density: 1,
+                    yields: Vec::new(),
+                },
+            ),
+            (
+                "wheat",
+                WHEAT,
+                Kind::Crop {
+                    stages: [(WHEAT, Some(60.0)), (WHEAT + 1, None)]
+                        .map(|(material, mean_seconds)| Stage {
+                            material,
+                            mean_seconds,
+                            yields: Vec::new(),
+                        })
+                        .to_vec(),
+                    harvest_to: None,
+                },
+            ),
+            ("pine", OTHER_SAPLING, Kind::Tree(other)),
+        ];
+        for (name, first, kind) in rows {
+            table
+                .push(Plant {
+                    name: name.into(),
+                    seed: format!("t:{name}"),
+                    first,
+                    shape: None,
+                    needs: needs.clone(),
+                    kind,
+                    sapling_yields: Vec::new(),
+                })
+                .unwrap();
+        }
+        table
+    }
+
+    #[test]
+    fn ground_cover_and_another_trees_crown_give_way_but_its_trunk_and_a_crop_do_not() {
+        let table = crowded();
+        let Kind::Tree(row) = &table.plants()[0].kind else {
+            unreachable!()
+        };
+        let at = [0, 4, 0];
+        let cells = tree_voxels(row, SEED, at, 1.0);
+        let (trunk, crown) = (cells[1].at, cells.last().unwrap().at);
+        for cell in [trunk, crown] {
+            for foliage in [FERN, OTHER_CANOPY, OTHER_SAPLING] {
+                let mut scene = Scene::default();
+                scene.cells.insert([0, 3, 0], SOIL);
+                scene.cells.insert(at, SAPLING);
+                scene.cells.insert(cell, foliage);
+                let growth = sprout_at(&table, &scene, 1.0, at).expect("foliage gives way");
+                assert!(growth.changes.iter().any(|c| c.at == cell), "{cell:?}");
+            }
+            for held in [OTHER_TRUNK, WHEAT, ROCK] {
+                let mut scene = Scene::default();
+                scene.cells.insert([0, 3, 0], SOIL);
+                scene.cells.insert(at, SAPLING);
+                scene.cells.insert(cell, held);
+                assert_eq!(sprout_at(&table, &scene, 1.0, at), None, "{held} {cell:?}");
+            }
+        }
     }
 
     #[test]

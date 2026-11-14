@@ -1033,7 +1033,7 @@ branching = { limbs = [0, 0], start = 0.0, reach-m = 0.0, rise = 0.0, lean-m = 2
 [plants.needs]
 soil = ["#soil", "#sand"]
 light-min = 8
-temperature = [0.5, 1.0]
+temperature = [0.4, 1.0]
 
 [[plants.sapling-yields]]
 item = "flora:palm_sapling"
@@ -1104,9 +1104,9 @@ branching = { limbs = [3, 4], start = 0.55, reach-m = 4.5, rise = 0.2, lean-m = 
 
 [plants.needs]
 soil = ["#soil"]
-light-min = 8
-temperature = [0.6, 1.0]
-humidity = [0.6, 1.0]
+light-min = 4
+temperature = [0.5, 1.0]
+humidity = [0.5, 1.0]
 
 [[plants.sapling-yields]]
 item = "flora:jungle_sapling"
@@ -1141,9 +1141,9 @@ branching = { limbs = [3, 4], start = 0.3, reach-m = 3.5, rise = -0.3, lean-m = 
 
 [plants.needs]
 soil = ["#soil"]
-light-min = 8
-temperature = [0.4, 1.0]
-humidity = [0.7, 1.0]
+light-min = 4
+temperature = [0.15, 1.0]
+humidity = [0.55, 1.0]
 
 [[plants.sapling-yields]]
 item = "flora:swamp_sapling"
@@ -1212,9 +1212,9 @@ fruit = { stages = [{ material = "flora:orange_unripe", mean-seconds = 40.0 }, {
 branching = { limbs = [3, 4], start = 0.3, reach-m = 2.0, rise = 0.2, lean-m = 0.0, lobe-radius-m = 1.1 }
 
 [plants.needs]
-soil = ["#soil"]
+soil = ["#soil", "#sand"]
 light-min = 8
-temperature = [0.5, 1.0]
+temperature = [0.4, 1.0]
 
 [[plants.sapling-yields]]
 item = "flora:orange_sapling"

@@ -784,3 +784,65 @@ fn jungle_and_swamp_are_denser_than_savanna_prairie_and_desert_in_every_game_tha
     }
     assert_eq!(compared, 5);
 }
+
+/// Climate is a continuous field and a Biome is the nearest point, so a tree's band must hold
+/// across the Biome's region and not only at its point.
+#[test]
+fn terra_trees_find_their_climate_across_their_whole_biome() {
+    const NATIVE: [(&str, &str); 11] = [
+        ("oak", "temperate"),
+        ("birch", "temperate"),
+        ("apple", "temperate"),
+        ("cherry", "temperate"),
+        ("pine", "cold"),
+        ("palm", "dry"),
+        ("orange", "dry"),
+        ("jungle", "jungle"),
+        ("palm", "jungle"),
+        ("swamp", "swamp"),
+        ("acacia", "savanna"),
+    ];
+    let (_install, loaded) = loaded("terra", 1.0);
+    let world = loaded.world.unwrap();
+    let biomes: Vec<String> = world
+        .biomes
+        .as_slice()
+        .iter()
+        .map(|b| b.name.as_str().to_owned())
+        .collect();
+    let generator = Worldgen::new(7, 1.0, world);
+    for (tree, biome) in NATIVE {
+        let sapling = material(&loaded, &format!("flora:{tree}_sapling"));
+        let needs = &loaded
+            .tables
+            .plants
+            .plant(loaded.tables.plants.of(sapling).unwrap().plant)
+            .unwrap()
+            .needs;
+        let index = biomes
+            .iter()
+            .position(|b| *b == format!("terra:{biome}"))
+            .unwrap();
+        let (mut inside, mut fit) = (0, 0);
+        for z in (-4000..4000).step_by(32) {
+            for x in (-4000..4000).step_by(32) {
+                let (x, z) = (x as f32, z as f32);
+                if generator.biome_at(x, z).map(|b| b.index()) != Some(index) {
+                    continue;
+                }
+                let climate = generator.climate_at(x, z);
+                let within = |range: Option<(f32, f32)>, v: f32| {
+                    range.is_none_or(|(low, high)| (low..=high).contains(&v))
+                };
+                inside += 1;
+                fit += (within(needs.temperature, climate.temperature)
+                    && within(needs.humidity, climate.humidity)) as u32;
+            }
+        }
+        assert!(inside > 500, "{tree}: {biome} is sampled");
+        assert!(
+            fit as f32 >= 0.95 * inside as f32,
+            "{tree} fits only {fit} of {inside} columns of {biome}"
+        );
+    }
+}
