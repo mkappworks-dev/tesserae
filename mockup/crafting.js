@@ -6,6 +6,7 @@ const craftedItems = [
   { id: "workbench", name: "Workbench", color: "#a7743f" },
   { id: "chest", name: "Chest", color: "#6b4423" },
   { id: "door", name: "Door", color: "#93714a" },
+  { id: "gate", name: "Gate", color: "#93714a" },
 ];
 for (const x of craftedItems) {
   catalogueItems.push({ ...x, itemId: x.id, group: "Solids" });
@@ -29,6 +30,7 @@ const recipes = [
   },
   { out: "chest", n: 1, in: [["wood", 8]], station: "workbench" },
   { out: "door", n: 1, in: [["wood", 3]], station: "workbench" },
+  { out: "gate", n: 1, in: [["wood", 2]], station: "workbench" },
   {
     out: "lamp",
     n: 2,
@@ -105,16 +107,47 @@ function sidePane() {
     : craftingSide(null, strip);
 }
 
+/* An Item's icon drawn from Terra's exported textures, in the Shape it places, when /blocks has its Material. */
+function blockIcon(id) {
+  const item = stackItem({ id });
+  return `<span class="block-thumb" data-block="terra:${esc(item?.materialId || id)}">${voxelIcon(item)}</span>`;
+}
+async function hydrateBlockIcons(root) {
+  const thumbs = [...root.querySelectorAll(".block-thumb:not([data-drawn])")];
+  if (!thumbs.length) return;
+  let index;
+  try {
+    index = await loadBlocks();
+  } catch {
+    return;
+  }
+  for (const el of thumbs) {
+    el.dataset.drawn = "";
+    const m = index.materials.find((x) => x.name === el.dataset.block);
+    if (!m) continue;
+    const canvas = document.createElement("canvas");
+    canvas.className = "voxel-icon block-thumb-canvas";
+    const size = el.firstElementChild?.getBoundingClientRect().width || 32;
+    canvas.width = canvas.height = size;
+    canvas.style.width = canvas.style.height = size + "px";
+    el.replaceChildren(canvas);
+    drawVoxel(canvas, m, m.boxes).catch(() => {});
+  }
+}
+new MutationObserver(() => hydrateBlockIcons(document)).observe(document.body, {
+  childList: true,
+  subtree: true,
+});
 function recipeRow(r) {
   const can = affordable(r),
     out = stackItem({ id: r.out });
   const inputs = r.in
     .map(([id, n]) => {
       const have = holding(id);
-      return `<span class="recipe-input ${have < n ? "short" : ""}">${voxelIcon(stackItem({ id }))}${n} ${esc(itemName(id))}</span>`;
+      return `<span class="recipe-input ${have < n ? "short" : ""}">${blockIcon(id)}${n} ${esc(itemName(id))}</span>`;
     })
     .join("");
-  return `<button class="recipe-row ${r.i === state.recipe ? "selected" : ""} ${can ? "" : "unaffordable"}" data-action="recipe-pick" data-value="${r.i}" aria-pressed="${r.i === state.recipe}" aria-label="${esc(out.name)} × ${r.n}, needs ${r.in.map(([id, n]) => n + " " + itemName(id)).join(" and ")}${can ? "" : ", missing items"}" title="Click to select · Double-click crafts 1 · Shift-click crafts ${can || "as many as you can"}">${voxelIcon(out)}<span class="recipe-text"><b>${esc(out.name)}${r.n > 1 ? ` <small>× ${r.n}</small>` : ""}</b><span class="recipe-inputs">${inputs}</span></span></button>`;
+  return `<button class="recipe-row ${r.i === state.recipe ? "selected" : ""} ${can ? "" : "unaffordable"}" data-action="recipe-pick" data-value="${r.i}" aria-pressed="${r.i === state.recipe}" aria-label="${esc(out.name)} × ${r.n}, needs ${r.in.map(([id, n]) => n + " " + itemName(id)).join(" and ")}${can ? "" : ", missing items"}" title="Click to select · Double-click crafts 1 · Shift-click crafts ${can || "as many as you can"}">${blockIcon(r.out)}<span class="recipe-text"><b>${esc(out.name)}${r.n > 1 ? ` <small>× ${r.n}</small>` : ""}</b><span class="recipe-inputs">${inputs}</span></span></button>`;
 }
 function craftingSide(station, strip = "") {
   const list = recipesFor(station?.tag || "hand");
@@ -125,7 +158,7 @@ function craftingSide(station, strip = "") {
   const can = selectable ? affordable(r) : 0;
   const rows = list.map(recipeRow).join("");
   const footer = selectable
-    ? `<footer class="transfer craft-footer"><div class="transfer-item">${voxelIcon(stackItem({ id: r.out }))}<span><b>${esc(itemName(r.out))} × ${r.n}</b><small>${r.station === "hand" ? "By hand" : "Needs a " + esc(usables[r.station].name)}</small></span></div><dl class="craft-needs">${r.in.map(([id, n]) => `<div class="${holding(id) < n ? "short" : ""}"><dt>${esc(itemName(id))}</dt><dd>${holding(id)} / ${n}</dd></div>`).join("")}</dl><div class="transfer-actions">${button(can > 1 ? `Craft ${can}` : "Craft all", "craft", { value: "max", ghost: true, disabled: can < 2 })}${button("Craft 1", "craft", { value: 1, primary: true, disabled: !can })}</div></footer>`
+    ? `<footer class="transfer craft-footer"><div class="transfer-item">${blockIcon(r.out)}<span><b>${esc(itemName(r.out))} × ${r.n}</b><small>${r.station === "hand" ? "By hand" : "Needs a " + esc(usables[r.station].name)}</small></span></div><dl class="craft-needs">${r.in.map(([id, n]) => `<div class="${holding(id) < n ? "short" : ""}"><dt>${esc(itemName(id))}</dt><dd>${holding(id)} / ${n}</dd></div>`).join("")}</dl><div class="transfer-actions">${button(can > 1 ? `Craft ${can}` : "Craft all", "craft", { value: "max", ghost: true, disabled: can < 2 })}${button("Craft 1", "craft", { value: 1, primary: true, disabled: !can })}</div></footer>`
     : "";
   const reach = station
     ? `<button class="sim-inline" data-action="use-walk-away">Simulate: walk out of reach</button>`

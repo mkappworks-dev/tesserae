@@ -301,3 +301,22 @@
 .inventory-overlay .inspector-actions .btn:nth-child(5) {
   grid-column: 1 / -1;
 }
+.block-thumb {
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+.recipe-row > .block-thumb .voxel-icon {
+  width: 34px;
+  height: 34px;
+}
+.recipe-input .block-thumb .voxel-icon {
+  width: 14px;
+  height: 14px;
+}
+.recipe-row.unaffordable > .block-thumb {
+  opacity: 0.45;
+}
+.transfer-item .block-thumb .voxel-icon {
+  width: 40px;
+  height: 40px;
+}
