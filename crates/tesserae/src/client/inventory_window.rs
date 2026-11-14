@@ -95,6 +95,12 @@ pub(super) fn crafting_in_front(app: &mut App) {
     app.insert_resource(crafting::Pane::Crafting);
 }
 
+/// The Workbench's pane beside the Inventory, for a capture of it.
+#[cfg(any(feature = "dev", feature = "profiling"))]
+pub(super) fn station_in_front(app: &mut App) {
+    crafting::workbench_in_front(app);
+}
+
 /// A Chest's slots beside the Inventory, for a capture of them.
 #[cfg(any(feature = "dev", feature = "profiling"))]
 pub(super) fn container_in_front(app: &mut App) {

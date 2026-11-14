@@ -1,6 +1,6 @@
 # 14: The Client draws fixed Shapes
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: None (can start immediately)
 
@@ -35,22 +35,43 @@ cube is, not as a cube.
 
 ## Acceptance criteria
 
-- [ ] Icons for the Workbench, Door and Gate show the table and the panel face,
+- [x] Icons for the Workbench, Door and Gate show the table and the panel face,
       matching the mockup.
-- [ ] Holding one, the hand and the placement preview show the fixed Shape
+- [x] Holding one, the hand and the placement preview show the fixed Shape
       whatever Shape the Player had selected.
-- [ ] Materials without a fixed Shape draw as before.
-- [ ] The Workbench's icon is the table wherever it is listed, the Crafting tab
+- [x] Materials without a fixed Shape draw as before.
+- [x] The Workbench's icon is the table wherever it is listed, the Crafting tab
       included, and the Workbench pane's Door and Gate icons show the panel's
       face, matching the mockup's `/station`.
-- [ ] The placement ghost of a Door or Gate shows every cell in the panel
+- [x] The placement ghost of a Door or Gate shows every cell in the panel
       Shape, turned to the facing and hinge side the Server will place, at any
       Voxel size; a Workbench's ghost is the table. The rule is
       `tesserae-core`'s, shared with the Server, not a copy.
-- [ ] A Dropped Workbench, Door or Gate draws in its fixed Shape, scaled down
+- [x] A Dropped Workbench, Door or Gate draws in its fixed Shape, scaled down
       as a Dropped cube is.
-- [ ] A Client test covers the icon and hand Shape, the ghost's cells and
+- [x] A Client test covers the icon and hand Shape, the ghost's cells and
       Orientation, and the Dropped item's Shape; review-only offscreen
       screenshots compare with the mockup, including the Workbench's icon in the
       Crafting tab, a Door ghost at 1 m and 0.25 m Voxels, a Gate ghost, a
       Workbench ghost, and a Dropped Door, Gate and Workbench.
+
+## Decisions
+
+- `CatalogueMaterial` carries its row's fixed `shape` and `door`, so the Client
+  draws from content alone. `ContentCatalogue` is no longer `Eq`, as a Door's
+  size is in `f32` metres.
+- The aim answer's ghost is an `AimGhost`: the cell, plus for a Door the near
+  face, hinge side and rise, which depend on the World. The Client applies
+  `tesserae_core::placed_in` and `Door::footprint` to them; the Server places
+  by the same two, and `door_faces`, `facing` and `Across::of` moved to
+  `tesserae-core`.
+- The hand and icons draw a fixed Shape unturned; the ghost turns a Workbench
+  by the Player's Orientation, as the Server places it. The Shape key does
+  nothing while a fixed Shape is held, so it cannot change the Shape chosen
+  for other Items.
+- Deferred: the ghost of a Door is vetted at its foot only, as before; a Door
+  whose upper cells are blocked still shows and is refused on Place. A solid
+  held outside the hotbar (a capture fixture, Layout) keeps the chosen Shape.
+- Dev captures: `TESSERAE_SCREENSHOT_INVENTORY=station` opens the Workbench's
+  pane, `TESSERAE_SCREENSHOT_HELD` takes a comma list, and
+  `TESSERAE_SCREENSHOT_DROPS=<items>` shows resting drops ahead of the Eye.

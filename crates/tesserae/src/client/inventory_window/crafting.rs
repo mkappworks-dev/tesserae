@@ -78,6 +78,17 @@ pub(super) struct OpenStation {
     name: String,
 }
 
+/// Terra's Workbench open, for a capture of its pane.
+#[cfg(any(feature = "dev", feature = "profiling"))]
+pub(super) fn workbench_in_front(app: &mut App) {
+    app.insert_resource(Pane::Crafting)
+        .insert_resource(AtStation(Some(OpenStation {
+            at: [0; 3],
+            tag: "workbench".into(),
+            name: "Workbench".into(),
+        })));
+}
+
 impl AtStation {
     /// Where the listed Recipes are crafted.
     fn place(&self) -> Station {

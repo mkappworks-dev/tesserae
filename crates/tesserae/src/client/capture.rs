@@ -287,12 +287,14 @@ pub(super) fn plugin(app: &mut App) {
             .insert_resource(super::layout_menu::LayoutMenu::opened());
     }
     // `TESSERAE_SCREENSHOT_INVENTORY` opens the Inventory window with its
-    // details; `=crafting` brings the Crafting tab to the front, and
-    // `=container` a Chest's slots holding Wood.
+    // details; `=crafting` brings the Crafting tab to the front, `=station`
+    // the Workbench's pane, and `=container` a Chest's slots holding Wood.
     if let Some(inventory) = std::env::var_os("TESSERAE_SCREENSHOT_INVENTORY") {
         app.insert_resource(super::inventory_window::InventoryWindow::opened());
         if inventory == "crafting" {
             super::inventory_window::crafting_in_front(app);
+        } else if inventory == "station" {
+            super::inventory_window::station_in_front(app);
         } else if inventory == "container" {
             super::inventory_window::container_in_front(app);
         }
@@ -307,7 +309,7 @@ pub(super) fn plugin(app: &mut App) {
             .before(super::removal::bar),
     );
     app.add_session_systems(PreUpdate, save_preview)
-        .add_session_systems(Update, (hud_fixture, action_fixture));
+        .add_session_systems(Update, (hud_fixture, action_fixture, drops_fixture));
     if let Ok(size) = std::env::var("TESSERAE_SCREENSHOT_TOUCH") {
         app.insert_resource(TouchCapture(match size.as_str() {
             "small" => super::profile::TouchSize::Small,
@@ -384,6 +386,47 @@ fn action_fixture(
     }
 }
 
+/// `TESSERAE_SCREENSHOT_DROPS=<item name>[,<item name>...]` tells the Client
+/// of a resting drop of each, in a row ahead of the Eye, as the Server would
+/// once they were broken: messages only, the World is untouched.
+fn drops_fixture(
+    time: Res<Time<Real>>,
+    capture: Res<Capture>,
+    looks: Res<super::drops::Looks>,
+    camera: Single<(&FlyCamera, &Transform), With<MainCamera>>,
+    mut deltas: MessageWriter<crate::server::entities::EntityDelta>,
+    mut sent: Local<bool>,
+) {
+    let Ok(items) = std::env::var("TESSERAE_SCREENSHOT_DROPS") else {
+        return;
+    };
+    if *sent || looks.0.is_empty() || !capture.before_shutter(capture.elapsed_s(&time), 1.0) {
+        return;
+    }
+    *sent = true;
+    let (fly, transform) = *camera;
+    let ahead = (transform.forward().as_vec3() * Vec3::new(1.0, 0.0, 1.0)).normalize_or_zero();
+    let right = ahead.cross(Vec3::Y);
+    let names: Vec<&str> = items.split(',').collect();
+    for (at, name) in names.iter().enumerate() {
+        let Some(item) = looks.0.iter().position(|look| look.name == *name) else {
+            panic!("Unknown fixture drop: {name}");
+        };
+        let across = at as f32 - (names.len() - 1) as f32 * 0.5;
+        let pos = fly.eye + ahead * 1.6 + right * across * 0.6 - Vec3::Y * 0.9;
+        deltas.write(crate::server::entities::EntityDelta::Spawned(
+            crate::server::entities::EntityView {
+                id: tesserae_core::entity::EntityId(u64::MAX - at as u64),
+                item: item as u32,
+                count: 1,
+                size_m: looks.0[item].size_m,
+                pos_m: pos.to_array(),
+                resting: true,
+            },
+        ));
+    }
+}
+
 /// `TESSERAE_SCREENSHOT_VIEW=third` and `TESSERAE_SCREENSHOT_ZOOM_M` choose the
 /// view for this run only: nothing is written to the user profile.
 fn view_fixture(mut preferences: ResMut<super::profile::Preferences>) {
@@ -439,7 +482,8 @@ type HudWriters<'w> = (
 /// Tells the Client what the Server would in a Survival state that is slow to
 /// play into, shortly before the shutter so the pickup feed has not faded:
 /// `TESSERAE_SCREENSHOT_SURVIVAL` (with sample stacks),
-/// `TESSERAE_SCREENSHOT_HELD=<item name>` (that Item alone, selected),
+/// `TESSERAE_SCREENSHOT_HELD=<item name>[,<item name>...]` (those Items
+/// alone, the first selected),
 /// `TESSERAE_SCREENSHOT_VITALS=<health>,<hunger>,<air s>`,
 /// `TESSERAE_SCREENSHOT_DEATH=fall|drowning|lava|starvation[,kept]`,
 /// `TESSERAE_SCREENSHOT_PICKUP=<taken>[,<left>]` and
@@ -494,10 +538,12 @@ fn hud_fixture(
             held.receive(sample(at), count, 64);
         }
         let _ = held.select(2);
-        // One stack of the named Item in the selected slot, for the hand's picture.
-        if let Some(item) = &held_item {
+        // A stack of each named Item, the first selected, for the hand's picture.
+        if let Some(items) = &held_item {
             held = tesserae_core::inventory::Inventory::default();
-            held.receive(item, 5, 64);
+            for item in items.split(',') {
+                held.receive(item, 5, 64);
+            }
             let _ = held.select(0);
         }
         inventory.write(crate::server::inventory::InventoryChanged(held));
