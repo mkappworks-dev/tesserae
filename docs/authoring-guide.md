@@ -705,12 +705,16 @@ count = [0, 1]
 
 A tree may bear `fruit`: 2 to 4 grown `stages` (the last ripe), a `density` of
 canopy Voxels from 0 to 0.3 that carry it, `harvest-to` and a `shape` for every
-fruit Voxel, so fruit can be a small model of boxes. Use picks a ripe one, gives
-its yield and resets it; the tree stands and fruits again. It may also hang
-`vines = { plant, density, length-m }` from its outer canopy, only when a World
-is generated, never when a sapling grows. The vine is a `climber` with a `plane`
-Shape whose `soil` names the tree's trunk or canopy Material. From `flora`'s
-apple and jungle trees:
+fruit Voxel, so fruit can be a small model of boxes. A box face samples its
+Material's tile at the face's own place in the Voxel (the side tile by
+horizontal position and height, the top and bottom tiles by x and z), so one
+tile can paint a model's body, stem and leaf each in its own colour; a berry
+bush and a mushroom are such box Shapes with empty `collision`. Use or Remove
+picks a ripe one, gives its yield and resets it; the tree stands and fruits
+again. It may also hang `vines = { plant, density, length-m }` from its outer
+canopy, only when a World is generated, never when a sapling grows. The vine is
+a `climber` with a `plane` Shape whose `soil` names the tree's trunk or canopy
+Material. From `flora`'s apple and jungle trees:
 
 ```toml
 fruit = { stages = [{ material = "flora:apple_unripe", mean-seconds = 40.0 }, { material = "flora:apple_ripe", yields = [{ item = "flora:apple", count = [1, 2] }] }], density = 0.12, harvest-to = 0, shape = "flora:apple" }

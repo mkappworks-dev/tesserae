@@ -326,7 +326,7 @@ temperature = [0.1, 0.85]
 name = "berry"
 kind = "crop"
 seed = "crops:berry_cutting"
-shape = "flora:cross"
+shape = "flora:berry_bush"
 harvest-to = 1
 stages = [
     { material = "crops:berry_sprout", mean-seconds = 40.0, yields = [{ item = "crops:berry_cutting", count = [1, 1] }] },

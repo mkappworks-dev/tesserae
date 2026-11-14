@@ -147,6 +147,13 @@ the tree's light and Climate, light read as the brightest of the Voxel and its
 six neighbours since fruit sits in canopy. Use or Remove on a ripe one harvests
 it and resets it to `harvest-to`; the tree is untouched.
 
+A small plant model (fruit, a berry bush, a mushroom) is a `boxes` Shape whose
+Material's tile is painted by position: a box face samples the tile at the
+face's own place in the Voxel, so one tile gives each box its colour. Such a
+Shape costs one against the Chunk's shaped-Voxel cap, which generated Terra
+stays far under (at most 292 of 1024 in a 9,000 Chunk sample, 106 of them
+berries and mushrooms).
+
 **Branching** is an optional record on a `tree` row, all in metres or fractions
 of the trunk height so a tree is the same at every Voxel size: `limbs` (a count
 range), `start` (the fraction of the height where limbs begin), `reach-m` (a

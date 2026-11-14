@@ -411,11 +411,11 @@ fn fingerprint(textures: &[(String, Vec<u8>)]) -> u64 {
 #[test]
 fn the_demo_games_textures_are_unchanged() {
     let pinned = [
-        ("terra", 0x083e816a20176578),
-        ("meadow", 0x58f5fc6c20224660),
-        ("ember", 0x1e0fb54bc8df361f),
-        ("tidewater", 0xc10b5aed5c34a37c),
-        ("lumen", 0xcb87_7a15_a3cc_14c7),
+        ("terra", 0xd7cf18f45badd63e),
+        ("meadow", 0xf6a1ae241ca81332),
+        ("ember", 0xbede642825c767fd),
+        ("tidewater", 0x33c7e1ea685e819a),
+        ("lumen", 0x37a3510be68b9b49),
     ];
     for (game, expected) in pinned {
         let (_install, loaded) = loaded(game, 1.0);

@@ -109,11 +109,11 @@ fn terras_plants_name_their_shapes_and_a_generated_apple_is_the_box_apple() {
     let plants = &loaded.tables.plants;
     for (name, want) in [
         ("crops:wheat_sprout", "flora:cross"),
-        ("crops:berry_sprout", "flora:cross"),
+        ("crops:berry_sprout", "flora:berry_bush"),
         ("flora:oak_sapling", "flora:cross"),
         ("flora:cane", "flora:cross"),
         ("aquatic:kelp", "flora:cross"),
-        ("flora:mushroom_red", "flora:cross"),
+        ("flora:mushroom_red", "flora:mushroom"),
         ("flora:vine", "flora:plane"),
     ] {
         assert_eq!(
