@@ -17,7 +17,8 @@ light 9 or more. Every Stage and Item has artwork drawn by
 Recipes, both by hand: three `wheat` make a `bread`; two `berries` and a `wheat`
 make a `berry_pie`.
 
-**Used by:** `terra`.
+**Used by:** `terra`, `meadow`, `ember`, `tidewater` and `lumen`, which scatter
+them in Biomes.
 
 ## Licence and artwork
 

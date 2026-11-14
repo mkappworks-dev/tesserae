@@ -60,8 +60,8 @@ jungle and swamp trees, whose worldgen hangs it.
 `frond` is a kelp Material only; the Plants that stand in water are in
 [`aquatic`](../aquatic/).
 
-**Used by:** `meadow`, `ember`, `tidewater`, `terra` and `crops`, and `hearth`
-(fuel).
+**Used by:** `meadow`, `ember`, `tidewater`, `lumen`, `terra` and `crops`, and
+`hearth` (fuel).
 
 ## Licence and artwork
 

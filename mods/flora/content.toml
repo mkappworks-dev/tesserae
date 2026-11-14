@@ -24,6 +24,7 @@ occlusion = "never"
 render = "cutout"
 solid = true
 remove-time-s = 0.05
+tags = ["soil"]
 
 [[materials]]
 name = "kelp"

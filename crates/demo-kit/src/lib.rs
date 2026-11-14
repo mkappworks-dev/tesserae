@@ -118,3 +118,25 @@ macro_rules! food {
         }
     };
 }
+
+/// Writes `plants(&[(plant, spacing_m)])`, the surface features that scatter each named Plant of a
+/// shared Mod. Expanded inside the Game, where `crate::tesserae::mods` is its WIT binding.
+#[macro_export]
+macro_rules! plants {
+    () => {
+        pub fn plants(
+            list: &[(&str, f32)],
+        ) -> Vec<crate::tesserae::mods::content::SurfaceFeature> {
+            list.iter()
+                .map(
+                    |&(plant, spacing_m)| crate::tesserae::mods::content::SurfaceFeature {
+                        material: None,
+                        plant: Some(plant.into()),
+                        shape: None,
+                        spacing_m,
+                    },
+                )
+                .collect()
+        }
+    };
+}
