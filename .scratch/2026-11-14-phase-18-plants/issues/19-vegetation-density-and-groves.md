@@ -71,3 +71,39 @@ rather than "by water only": a feature cannot ask for water nearby. The mockup's
 Poisson-disc gap is the engine's mean spacing, so hash-scattered trees can
 overlap and the combined tree spacing runs below a headline figure (dense 3.6 to
 4.7 m, moderate 5.7 to 8 m, sparse 15 to 67 m). Clump cost is in DESIGN step 18.
+
+### Follow-up: spacing tuned after a play report
+
+Playing Terra: "too much flowers and grass everywhere", wanted patches with real
+gaps. Measured over 12 blocks of 64 m a Biome (seed 7), the ground-cover share
+of the surface was temperate 23%, cold 17%, meadow 33%, garden 42%, savanna 15%,
+jungle 54%, and the Biomes read as an even speckle, since a clump never
+concentrated a feature past 2 times its mean (tuft 14% over a whole Biome).
+Spreaders then filled the rest: a 16 tuft patch grew to 64% of a Chunk in 4
+hours (`mean-seconds` 120, `density` 6), because a `density` cap bounds the
+neighbours within `reach-m` of a new Voxel and never how far the field creeps.
+
+- **Engine.** `Clump` concentrates: the factor is
+  `1 - strength + strength * w / m`, a ramp `w` of value noise past a cut that
+  leaves `0.85 * strength` of the ground bare, `m` its mean (the cut and `m` are
+  read off the noise's own distribution once). 0.6 is groves at up to 1.6
+  times; 0.95 patches over a fifth of the ground at up to 5 times. The mean is
+  still 1 (tested within 5%), the digests of Biomes without a clump and the
+  WIT record are unchanged. A new test holds that a 0.95 clump leaves over 30%
+  of 8 m blocks bare and puts half the cover in its densest tenth.
+- **Content.** Ground cover is cut to 10 to 15% of a grassy Biome (temperate
+  14%, cold 15%, meadow 15%, garden 15%), under 8% of a sparse one (savanna 7%,
+  dry 5%) and kept 25 to 45% in a jungle or swamp, in patches 4 to 10 m across
+  (`scale-m` 12 to 16, `strength` 0.9 to 0.95), crops and mushrooms at 16 to
+  22 m. Flowers are the rarest cover. Trees keep their classes, clump softer
+  (0.5 at 56 m) and the oak and birch stand a metre further apart, so the
+  nearest-neighbour gap in a temperate forest goes from 4.2 to 5.0 m.
+- **Spreaders.** Grass and fern spread every 900 s at a cap of 3 within 2 m,
+  flowers every 1800 s at 3 within 3 m, orchids every 3600 s, mushrooms every
+  600 s at 3. A 16 Voxel patch grows by about 14 in an hour and covers a third
+  of a Chunk after 12 to 16 hours.
+
+Left for the maintainer: that last number. A cap cannot stop a field's extent,
+only a requirement of company could (a spreader seeds only where it already
+sees `min-neighbours` of its kind), which is a new field on the Plant row and
+so a guest ABI change. Slow `mean-seconds` is what keeps a patch a patch.

@@ -693,3 +693,80 @@ fn a_body_walks_through_a_vine_and_a_ray_stops_on_it() {
         );
     }
 }
+
+/// The `(reach-m, mean-seconds, density)` of each spreader the shared `flora` Mod declares.
+fn flora_spreaders() -> Vec<(String, f32, f32, u32)> {
+    let path =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../mods/flora/content.toml");
+    let table: toml::Table = std::fs::read_to_string(path).unwrap().parse().unwrap();
+    table["plants"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|p| p["kind"].as_str() == Some("spreader"))
+        .map(|p| {
+            (
+                p["name"].as_str().unwrap().to_owned(),
+                p["reach-m"].as_float().unwrap() as f32,
+                p["mean-seconds"].as_float().unwrap() as f32,
+                p["density"].as_integer().unwrap() as u32,
+            )
+        })
+        .collect()
+}
+
+const HOUR_STEPS: u64 = 3600 * 64;
+
+/// A generated patch of ground cover: a third of an 8 by 8 m square, in the middle of the Chunk.
+fn patch(chunk: &mut Chunk, voxel: Voxel) -> usize {
+    let mut planted = 0;
+    for i in 0..64usize {
+        let (x, z) = (12 + i % 8, 12 + i / 8);
+        if (x * 7 + z * 13 + x * z) % 3 == 0 {
+            chunk.set(x, CROP_Y as usize, z, voxel);
+            planted += 1;
+        }
+    }
+    planted
+}
+
+/// A spreader's field is a few Voxels past its patch after an hour and covers well under half the
+/// ground after twelve. The cap bounds a neighbourhood and never the field's extent, so the long
+/// run fills the Biome thinly rather than stopping; slow `mean-seconds` is what keeps a patch a
+/// patch through a session.
+#[test]
+fn the_shared_spreaders_grow_a_patch_a_little_in_an_hour_and_never_fill_the_ground() {
+    let rows = flora_spreaders();
+    assert!(rows.len() >= 9, "{rows:?}");
+    for (name, reach, mean, density) in rows {
+        let wild = wild(
+            Form::Cross,
+            Kind::Spreader {
+                reach_m: reach,
+                mean_seconds: mean,
+                density,
+                yields: Vec::new(),
+            },
+            |n| n.light_min = 0,
+        );
+        let mut chunk = ground();
+        let planted = patch(&mut chunk, wild.voxel());
+        let mut farm = farm(1.0, &wild, chunk);
+        let count = |farm: &Farm| {
+            tufts(farm, wild.plant, CROP_Y)
+                .iter()
+                .filter(|c| (0..32).contains(&c[0]))
+                .count()
+        };
+        farm.run(HOUR_STEPS);
+        let hour = count(&farm);
+        farm.run(11 * HOUR_STEPS);
+        let long = count(&farm);
+        println!("{name}: {planted} planted, {hour} after 1 h, {long} after 12 h of 1024");
+        assert!(
+            hour <= planted + planted / 2 + 10,
+            "{name}: {planted} grew to {hour} in an hour"
+        );
+        assert!(long < 1024 * 45 / 100, "{name}: {long} of 1024 after 12 h");
+    }
+}

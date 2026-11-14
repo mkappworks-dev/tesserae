@@ -1304,8 +1304,8 @@ seed = "flora:tuft"
 shape = "flora:cross"
 material = "flora:tuft"
 reach-m = 2.0
-mean-seconds = 120.0
-density = 6
+mean-seconds = 900.0
+density = 3
 
 [plants.needs]
 soil = ["#soil"]
@@ -1318,7 +1318,7 @@ seed = "flora:poppy"
 shape = "flora:cross"
 material = "flora:poppy"
 reach-m = 3.0
-mean-seconds = 300.0
+mean-seconds = 1800.0
 density = 3
 
 [plants.needs]
@@ -1332,7 +1332,7 @@ seed = "flora:daisy"
 shape = "flora:cross"
 material = "flora:daisy"
 reach-m = 3.0
-mean-seconds = 300.0
+mean-seconds = 1800.0
 density = 3
 
 [plants.needs]
@@ -1346,7 +1346,7 @@ seed = "flora:dandelion"
 shape = "flora:cross"
 material = "flora:dandelion"
 reach-m = 3.0
-mean-seconds = 300.0
+mean-seconds = 1800.0
 density = 3
 
 [plants.needs]
@@ -1360,8 +1360,8 @@ seed = "flora:tall_grass"
 shape = "flora:cross"
 material = "flora:tall_grass"
 reach-m = 2.0
-mean-seconds = 140.0
-density = 5
+mean-seconds = 900.0
+density = 3
 
 [plants.needs]
 soil = ["#soil"]
@@ -1374,8 +1374,8 @@ seed = "flora:dry_grass"
 shape = "flora:cross"
 material = "flora:dry_grass"
 reach-m = 2.0
-mean-seconds = 140.0
-density = 5
+mean-seconds = 900.0
+density = 3
 
 [plants.needs]
 soil = ["#soil", "#sand"]
@@ -1389,8 +1389,8 @@ seed = "flora:fern"
 shape = "flora:cross"
 material = "flora:fern"
 reach-m = 2.0
-mean-seconds = 160.0
-density = 4
+mean-seconds = 900.0
+density = 3
 
 [plants.needs]
 soil = ["#soil"]
@@ -1404,7 +1404,7 @@ seed = "flora:orchid"
 shape = "flora:cross"
 material = "flora:orchid"
 reach-m = 3.0
-mean-seconds = 360.0
+mean-seconds = 3600.0
 density = 2
 
 [plants.needs]
@@ -1420,8 +1420,8 @@ seed = "flora:mushroom_red"
 shape = "flora:mushroom"
 material = "flora:mushroom_red"
 reach-m = 2.0
-mean-seconds = 120.0
-density = 4
+mean-seconds = 600.0
+density = 3
 
 [plants.needs]
 soil = ["#soil", "#rock"]
@@ -1434,8 +1434,8 @@ seed = "flora:mushroom_brown"
 shape = "flora:mushroom"
 material = "flora:mushroom_brown"
 reach-m = 2.0
-mean-seconds = 120.0
-density = 4
+mean-seconds = 600.0
+density = 3
 
 [plants.needs]
 soil = ["#soil", "#rock"]

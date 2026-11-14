@@ -104,14 +104,18 @@ Without one a feature scatters evenly, as before. The spacing range widens from
 4 m to 1 m, since a jungle's ferns stand a metre or two apart.
 
 - **A density field of position.** With a clump the column's chance is
-  multiplied by `1 + strength * (2t - 1)`, where `t` is value noise over a
-  lattice `scale-m` metres apart, seeded by the World seed and the feature's
-  place in its Biome, pushed away from its middle by a gain of
-  `1 + 4 * strength` and clamped to `[0, 1]`. Value noise is symmetric about
-  0.5, so is the clamped curve, and the factor's mean over the plane is exactly
-  1: the declared spacing is still the mean spacing, and a test holds it to 5%.
-  The factor lies in `[1 - strength, 1 + strength]`; at strength 1 a clearing
-  has nothing in it.
+  multiplied by `1 - strength + strength * w / m`, where `w` is a smooth ramp of
+  value noise over a lattice `scale-m` metres apart (seeded by the World seed
+  and the feature's place in its Biome) past a cut, and `m` the ramp's mean over
+  the plane. The cut leaves `0.85 * strength` of the ground bare, read off the
+  noise's own distribution, so a strength of 0.95 packs the feature into patches
+  over a fifth of the ground at up to 5 times its chance and 0.6 gives groves at
+  up to 1.6 times with thin clearings. The factor's mean over the plane is 1:
+  the declared spacing is still the mean spacing, and a test holds it to 5%.
+  Amended 2026-11-14 (ticket 19 follow-up, a maintainer report of too much grass
+  and flowers everywhere): the first field, `1 + strength * (2t - 1)`, never
+  concentrated a feature past twice its mean, so no patch could be denser than 2
+  times the cover and ground cover read as an even speckle.
 - **Same everywhere.** The field reads only the seed and a position in metres,
   so it is the same at every Voxel size and from every Chunk, and a tree's
   candidate scan evaluates it for the candidate column, so a tree across a Chunk

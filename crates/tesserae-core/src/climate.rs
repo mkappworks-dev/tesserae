@@ -342,7 +342,7 @@ pub struct SurfaceFeature {
 }
 
 /// A low-frequency density field over the ground plane that multiplies a feature's chance, so it
-/// stands in groves with clearings between instead of evenly.
+/// stands in patches with bare ground between instead of evenly.
 ///
 /// The field is value noise over a lattice `scale_m` metres apart, a pure function of the seed, the
 /// feature's place in its Biome and a position in metres, so it holds across Chunk borders and at
@@ -350,32 +350,98 @@ pub struct SurfaceFeature {
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct Clump {
     pub scale_m: f32,
-    /// 0 is no clump; 1 leaves clearings with nothing in them and groves at twice the chance.
+    /// 0 is no clump. 0.6 is groves at up to 1.6 times the chance with thin clearings; 0.95 packs
+    /// the feature into patches over a fifth of the ground at up to 5 times the chance, with bare
+    /// ground between; 1 leaves nothing between patches at 6.6 times.
     pub strength: f32,
 }
 
+/// Where patches start and how much ground they hold, per strength in hundredths.
+const CLUMP_STEPS: usize = 100;
+/// The share of the ground a full-strength clump leaves bare.
+const CLUMP_BARE_AT_FULL: f64 = 0.85;
+/// Half the width of the ramp from clearing to patch, in noise units.
+const CLUMP_RAMP: f32 = 0.05;
+
+struct ClumpShape {
+    /// The noise value a patch starts at.
+    cut: [f32; CLUMP_STEPS + 1],
+    /// The mean of the patch ramp over the plane, which the ramp is divided by so the factor
+    /// averages 1.
+    mean: [f32; CLUMP_STEPS + 1],
+}
+
+fn ramp(n: f32, cut: f32) -> f32 {
+    let t = ((n - (cut - CLUMP_RAMP)) / (2.0 * CLUMP_RAMP)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+/// Value noise is not uniform, so the cut that leaves a share of the ground bare is read off the
+/// noise's own distribution, measured once over a few thousand lattice cells.
+fn clump_shape() -> &'static ClumpShape {
+    static SHAPE: std::sync::OnceLock<ClumpShape> = std::sync::OnceLock::new();
+    SHAPE.get_or_init(|| {
+        const CELLS: usize = 192;
+        const PER_CELL: usize = 4;
+        let side = CELLS * PER_CELL;
+        let mut values: Vec<f32> = (0..side * side)
+            .map(|i| {
+                let (x, z) = (i % side, i / side);
+                let at = |c: usize| (c as f32 + 0.5) / PER_CELL as f32;
+                crate::noise::noise2(at(x), at(z), 0x5eed_c1a9)
+            })
+            .collect();
+        values.sort_by(f32::total_cmp);
+        let mut shape = ClumpShape {
+            cut: [0.0; CLUMP_STEPS + 1],
+            mean: [1.0; CLUMP_STEPS + 1],
+        };
+        for step in 0..=CLUMP_STEPS {
+            let bare = CLUMP_BARE_AT_FULL * step as f64 / CLUMP_STEPS as f64;
+            let cut = values[((bare * (values.len() - 1) as f64) as usize).min(values.len() - 1)];
+            let first = values.partition_point(|&v| v < cut - CLUMP_RAMP);
+            let last = values.partition_point(|&v| v < cut + CLUMP_RAMP);
+            let sum: f64 = values[first..last]
+                .iter()
+                .map(|&v| f64::from(ramp(v, cut)))
+                .sum::<f64>()
+                + (values.len() - last) as f64;
+            shape.cut[step] = cut;
+            shape.mean[step] = (sum / values.len() as f64) as f32;
+        }
+        shape
+    })
+}
+
 impl Clump {
-    /// The factor on a column's chance, in `[1 - strength, 1 + strength]` with a mean of 1 over the
-    /// plane, so the declared spacing stays the mean spacing.
+    /// `(cut, mean)` at this strength, interpolated between hundredths.
+    fn shape(&self) -> (f32, f32) {
+        let shape = clump_shape();
+        let at = self.strength.clamp(0.0, 1.0) * CLUMP_STEPS as f32;
+        let low = (at.floor() as usize).min(CLUMP_STEPS - 1);
+        let t = at - low as f32;
+        let lerp = |v: &[f32; CLUMP_STEPS + 1]| v[low] + (v[low + 1] - v[low]) * t;
+        (lerp(&shape.cut), lerp(&shape.mean))
+    }
+
+    /// The factor on a column's chance, from `1 - strength` in a clearing to [`Self::max_factor`] in
+    /// a patch, with a mean of 1 over the plane, so the declared spacing stays the mean spacing.
     ///
-    /// Value noise `n` is symmetric about 0.5, and so is `0.5 + (n - 0.5) * gain` clamped to
-    /// `[0, 1]`; the mean of `t` is therefore 0.5 and of `1 + strength * (2t - 1)` exactly 1. The
-    /// gain steepens the curve with strength, since plain value noise sits near its middle and would
-    /// never make a clearing.
+    /// A patch is where the noise passes a cut chosen to leave `0.85 * strength` of the ground bare,
+    /// ramped over a short distance; its factor is divided by the ramp's mean over the plane. A
+    /// strength below 1 lets `1 - strength` of the chance fall evenly on the clearings.
     pub fn factor(&self, seed: u32, x_m: f32, z_m: f32) -> f64 {
-        let n = f64::from(crate::noise::noise2(
-            x_m / self.scale_m,
-            z_m / self.scale_m,
-            seed,
-        ));
-        let gain = 1.0 + 4.0 * f64::from(self.strength);
-        let t = (0.5 + (n - 0.5) * gain).clamp(0.0, 1.0);
-        1.0 + f64::from(self.strength) * (2.0 * t - 1.0)
+        let n = crate::noise::noise2(x_m / self.scale_m, z_m / self.scale_m, seed);
+        let (cut, mean) = self.shape();
+        let strength = f64::from(self.strength);
+        1.0 - strength + strength * f64::from(ramp(n, cut) / mean)
     }
 
     /// The most [`Self::factor`] reaches.
     pub fn max_factor(&self) -> f64 {
-        1.0 + f64::from(self.strength)
+        let (_, mean) = self.shape();
+        let strength = f64::from(self.strength);
+        1.0 - strength + strength / f64::from(mean)
     }
 
     pub fn validate(&self) -> Result<(), ParamError> {

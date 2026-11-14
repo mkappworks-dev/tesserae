@@ -748,8 +748,9 @@ interface content {
         /// The distance over which the density varies, from 4 to 1024 m: a
         /// grove's width.
         scale-m: f32,
-        /// From 0 (even) to 1 (clearings with nothing in them, groves at twice
-        /// the density).
+        /// From 0 (even) to 1: 0.6 is groves at up to 1.6 times the density
+        /// with thin clearings, 0.95 patches over a fifth of the ground at up
+        /// to 5 times with bare ground between, and 1 nothing between patches.
         strength: f32,
     }
 

@@ -921,3 +921,267 @@ fn terra_pines_find_soil_on_the_cold_biomes_snow() {
         "only {soiled} of {columns} cold columns are soil to a pine"
     );
 }
+
+/// Plants that cover the ground, as opposed to trees, cacti and water plants.
+const GROUND_COVER: [&str; 15] = [
+    "flora:tuft",
+    "flora:tall_grass",
+    "flora:dry_grass",
+    "flora:poppy",
+    "flora:daisy",
+    "flora:dandelion",
+    "flora:fern",
+    "flora:orchid",
+    "flora:mushroom_red",
+    "flora:mushroom_brown",
+    "flora:cane",
+    "crops:potato",
+    "crops:carrot",
+    "crops:wheat",
+    "crops:berry",
+];
+const FLOWERS: [&str; 4] = [
+    "flora:poppy",
+    "flora:daisy",
+    "flora:dandelion",
+    "flora:orchid",
+];
+const GRASSES: [&str; 4] = [
+    "flora:tuft",
+    "flora:tall_grass",
+    "flora:dry_grass",
+    "flora:fern",
+];
+
+/// Side of a measured block, in columns at a 1 m Voxel: two Chunks.
+const BLOCK: usize = 2 * CHUNK_SIZE;
+/// Blocks measured per Biome.
+const BLOCKS: usize = 12;
+
+/// Blocks of two by two Chunks lying wholly in one Biome, by Biome index: each block's columns, the
+/// [`GROUND_COVER`] Plant standing in each if any.
+fn ground_of(game: &Game, seed: u64) -> Vec<Vec<Vec<Option<u8>>>> {
+    let (_install, loaded) = loaded(game.name, 1.0);
+    let world = loaded.world.unwrap();
+    let cover: HashMap<u16, u8> = GROUND_COVER
+        .iter()
+        .enumerate()
+        .flat_map(|(i, plant)| {
+            materials_of(plant)
+                .into_iter()
+                .filter_map(|m| loaded.registry.id_of(Kind::Material, &m))
+                .map(move |id| (id as u16, i as u8))
+        })
+        .collect();
+    let mut out = vec![Vec::new(); world.biomes.as_slice().len()];
+    let generator = Worldgen::new(seed, 1.0, world);
+    let chunk_m = CHUNK_SIZE as f32;
+    let (low, high) = generator.surface_bounds_m();
+    let rows = (low / chunk_m).floor() as i32..=(high / chunk_m).ceil() as i32;
+    let biome_of = |c: i32, d: i32| {
+        let centre = |c: i32| (c as f32 + 0.5) * chunk_m;
+        generator.biome_at(centre(c), centre(d)).unwrap().index()
+    };
+    for cz in (-120..120).step_by(4) {
+        for cx in (-120..120).step_by(4) {
+            let biome = biome_of(cx, cz);
+            let whole = [(0, 1), (1, 0), (1, 1)]
+                .iter()
+                .all(|&(dx, dz)| biome_of(cx + dx, cz + dz) == biome);
+            if out[biome].len() >= BLOCKS || !whole {
+                continue;
+            }
+            let mut columns = vec![None; BLOCK * BLOCK];
+            for (dx, dz, cy) in block_chunks(rows.clone()) {
+                let chunk = generator.chunk(cx + dx, cy, cz + dz);
+                if chunk.uniform().is_some() {
+                    continue;
+                }
+                for z in 0..CHUNK_SIZE {
+                    for y in 0..CHUNK_SIZE {
+                        for x in 0..CHUNK_SIZE {
+                            if let Some(&plant) = cover.get(&chunk.get(x, y, z).material()) {
+                                let column = (dz as usize * CHUNK_SIZE + z) * BLOCK
+                                    + dx as usize * CHUNK_SIZE
+                                    + x;
+                                columns[column] = Some(plant);
+                            }
+                        }
+                    }
+                }
+            }
+            out[biome].push(columns);
+        }
+    }
+    out
+}
+
+/// Every `(dx, dz, cy)` of a block's four Chunk columns over the surface rows.
+fn block_chunks(rows: std::ops::RangeInclusive<i32>) -> Vec<(i32, i32, i32)> {
+    rows.flat_map(|cy| [(0, 0), (1, 0), (0, 1), (1, 1)].map(|(dx, dz)| (dx, dz, cy)))
+        .collect()
+}
+
+/// What a Biome's ground cover looks like over its measured blocks.
+struct Cover {
+    /// Share of columns with any ground cover.
+    total: f64,
+    /// Share of columns by [`GROUND_COVER`] index.
+    by_plant: Vec<f64>,
+    /// Share of all columns with no ground cover within 2 m.
+    bare: f64,
+    /// Share of ground-cover columns in a patch of at least 12, cover within 2 m joined.
+    clustered: f64,
+}
+
+fn measure(blocks: &[Vec<Option<u8>>]) -> Cover {
+    let n = BLOCK as i32;
+    let (mut columns, mut covered, mut bare, mut clustered) = (0usize, 0usize, 0usize, 0usize);
+    let mut by_plant = vec![0usize; GROUND_COVER.len()];
+    for block in blocks {
+        let at = |x: i32, z: i32| {
+            (0..n).contains(&x) && (0..n).contains(&z) && block[(z * n + x) as usize].is_some()
+        };
+        let near = |x: i32, z: i32| {
+            (-2..=2).any(|dz| (-2..=2).any(|dx| dx * dx + dz * dz <= 4 && at(x + dx, z + dz)))
+        };
+        let mut seen = vec![false; BLOCK * BLOCK];
+        for z in 0..n {
+            for x in 0..n {
+                columns += 1;
+                if let Some(plant) = block[(z * n + x) as usize] {
+                    covered += 1;
+                    by_plant[plant as usize] += 1;
+                } else {
+                    bare += !near(x, z) as usize;
+                }
+                if !at(x, z) || seen[(z * n + x) as usize] {
+                    continue;
+                }
+                let mut stack = vec![(x, z)];
+                seen[(z * n + x) as usize] = true;
+                let mut patch = 0;
+                while let Some((px, pz)) = stack.pop() {
+                    patch += 1;
+                    for dz in -2..=2 {
+                        for dx in -2..=2 {
+                            let (qx, qz) = (px + dx, pz + dz);
+                            if dx * dx + dz * dz <= 4 && at(qx, qz) && !seen[(qz * n + qx) as usize]
+                            {
+                                seen[(qz * n + qx) as usize] = true;
+                                stack.push((qx, qz));
+                            }
+                        }
+                    }
+                }
+                if patch >= 12 {
+                    clustered += patch;
+                }
+            }
+        }
+    }
+    let share = |count: usize| count as f64 / columns as f64;
+    Cover {
+        total: share(covered),
+        by_plant: by_plant.into_iter().map(share).collect(),
+        bare: share(bare),
+        clustered: clustered as f64 / covered.max(1) as f64,
+    }
+}
+
+/// Ground cover by Biome class, as a share of the surface: understory a dense Biome keeps, cover a
+/// grassy or moderate one grows in patches, and what a sparse or arid Biome allows.
+const COVER_DENSE: std::ops::RangeInclusive<f64> = 0.20..=0.55;
+const COVER_GRASSY: std::ops::RangeInclusive<f64> = 0.09..=0.23;
+const COVER_SPARSE: std::ops::RangeInclusive<f64> = 0.015..=0.10;
+const GRASSY: [&str; 8] = [
+    "temperate",
+    "cold",
+    "meadow",
+    "garden",
+    "heath",
+    "highland",
+    "cold_shallows",
+    "prairie",
+];
+const ARID: [&str; 8] = [
+    "dry",
+    "savanna",
+    "dunes",
+    "salt_flats",
+    "arid_court",
+    "frost_court",
+    "ash_flats",
+    "lagoon",
+];
+
+/// A Biome's ground cover is patches with bare ground between, never an even carpet, and a flower
+/// is rarer than the grass it grows among.
+#[test]
+fn ground_cover_grows_in_patches_at_each_biomes_class_and_flowers_stay_rare() {
+    for game in &GAMES {
+        let grounds = ground_of(game, 7);
+        for (index, (name, _)) in game.biomes.iter().enumerate() {
+            let full = format!("{}:{name}", game.name);
+            let name = *name;
+            let cover = measure(&grounds[index]);
+            println!(
+                "{full}: cover {:.1}% bare {:.1}% clustered {:.0}%",
+                cover.total * 100.0,
+                cover.bare * 100.0,
+                cover.clustered * 100.0
+            );
+            let share = |list: &[&str]| -> f64 {
+                list.iter()
+                    .map(|p| cover.by_plant[GROUND_COVER.iter().position(|c| c == p).unwrap()])
+                    .sum()
+            };
+            if game.bare.contains(&name) {
+                assert!(
+                    cover.total < 0.02,
+                    "{full}: bare on purpose, {:.3}",
+                    cover.total
+                );
+                continue;
+            }
+            let (range, bare_floor, clustered_floor) = if DENSE.contains(&name) {
+                (COVER_DENSE, 0.08, 0.75)
+            } else if GRASSY.contains(&name) {
+                (COVER_GRASSY, 0.28, 0.55)
+            } else {
+                assert!(ARID.contains(&name), "{full}: unclassed");
+                (COVER_SPARSE, 0.45, 0.0)
+            };
+            assert!(
+                range.contains(&cover.total),
+                "{full}: {:.1}% covered, wanted {range:?}",
+                cover.total * 100.0
+            );
+            assert!(
+                cover.bare >= bare_floor,
+                "{full}: only {:.1}% of the ground is more than 2 m from cover",
+                cover.bare * 100.0
+            );
+            assert!(
+                cover.clustered >= clustered_floor,
+                "{full}: {:.0}% of the cover is in patches",
+                cover.clustered * 100.0
+            );
+            if !DENSE.contains(&name) {
+                for flower in FLOWERS {
+                    assert!(
+                        share(&[flower]) <= 0.03,
+                        "{full}: {flower} covers {:.1}%",
+                        share(&[flower]) * 100.0
+                    );
+                }
+                assert!(
+                    share(&FLOWERS) <= 0.5 * share(&GRASSES),
+                    "{full}: flowers {:.1}% against grass {:.1}%",
+                    share(&FLOWERS) * 100.0,
+                    share(&GRASSES) * 100.0
+                );
+            }
+        }
+    }
+}

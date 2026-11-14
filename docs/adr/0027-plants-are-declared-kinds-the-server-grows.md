@@ -298,6 +298,10 @@ refusing whole without it.
   measurable.
 - A spreader's density cap counts what is held and bounds the neighbourhood of a
   Voxel only when it lands, so beside an unheld Chunk a field may overshoot it.
+  It bounds a neighbourhood and never a field's extent: a 16 Voxel patch of the
+  shared tuft at `mean-seconds` 120 and `density` 6 grew to 64% of a Chunk in 4
+  hours. Ground cover therefore spreads slowly (900 s and up) and patches come
+  from the Biome's clump.
 - One Shape serves both of a fruit's Stages, so unripe and ripe differ in
   Material colour alone.
 - A Biome's frozen Plant form (stages, column, tree, fruit, vines and branching,

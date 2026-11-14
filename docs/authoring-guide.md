@@ -786,8 +786,8 @@ seed = "flora:tuft"
 shape = "flora:cross"
 material = "flora:tuft"
 reach-m = 2.0
-mean-seconds = 120.0
-density = 6
+mean-seconds = 900.0
+density = 3
 
 [plants.needs]
 soil = ["#soil"]
@@ -870,10 +870,20 @@ spacing:
 surface-features = [{ plant = "flora:oak", spacing-m = 9.0, clump = { scale-m = 48.0, strength = 0.8 } }]
 ```
 
-`scale-m` (4 to 1024) is how far the density varies, a grove's width, and
-`strength` (0 to 1) how hard: at 1 a clearing has nothing in it and a grove
-twice the density. The field is a function of the seed and the position in
+`scale-m` (4 to 1024) is how far the density varies, a patch's spacing, and
+`strength` (0 to 1) how hard: 0.6 gives groves at up to 1.6 times the density
+with thin clearings, 0.95 patches over about a fifth of the ground at up to 5
+times the density with bare ground between, and 1 patches at 6.6 times with
+nothing between them. The field is a function of the seed and the position in
 metres, so it is the same at every Voxel size.
+
+Ground cover reads best as patches 4 to 10 m across with bare ground between
+them: a `scale-m` of 12 to 16 and a `strength` of 0.9 to 0.95, at a mean spacing
+that keeps it 10 to 15% of a grassy Biome and under 8% of a sparse one. The
+clump places the patches at generation; a spreader's `density` caps the
+neighbours within its `reach-m` and not how far its field creeps, so give ground
+cover a `mean-seconds` of 15 minutes or more and it grows a patch a few Voxels
+in an hour and takes many hours to thin out over the Biome.
 
 ### Grown against placed
 

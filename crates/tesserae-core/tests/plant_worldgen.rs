@@ -1011,7 +1011,13 @@ fn mean_and_variance(v: &[f64]) -> (f64, f64) {
 
 #[test]
 fn a_clumps_factor_has_a_mean_of_one_over_the_plane() {
-    for (scale_m, strength) in [(16.0, 0.3), (16.0, 1.0), (48.0, 0.8), (64.0, 0.5)] {
+    for (scale_m, strength) in [
+        (16.0, 0.3),
+        (16.0, 1.0),
+        (48.0, 0.8),
+        (64.0, 0.5),
+        (12.0, 0.95),
+    ] {
         let clump = Clump { scale_m, strength };
         let (mut sum, mut n) = (0.0, 0.0);
         for seed in 0..8u32 {
@@ -1022,7 +1028,11 @@ fn a_clumps_factor_has_a_mean_of_one_over_the_plane() {
                         i as f32 * 7.3,
                         j as f32 * 7.3,
                     );
-                    assert!((1.0 - f64::from(strength)..=1.0 + f64::from(strength)).contains(&f));
+                    assert!(
+                        (1.0 - f64::from(strength) - 1e-6..=clump.max_factor() + 1e-6).contains(&f),
+                        "{scale_m} {strength}: {f} past {}",
+                        clump.max_factor()
+                    );
                     sum += f;
                     n += 1.0;
                 }
@@ -1094,6 +1104,37 @@ fn a_clumped_feature_keeps_its_mean_spacing_and_gathers_into_groves() {
             empty > empty_even + 3,
             "{size} m: {empty} clearings against {empty_even}"
         );
+    }
+}
+
+#[test]
+fn a_strong_clump_packs_cover_into_patches_with_bare_ground_between() {
+    let plain = SurfaceFeature::cube(FEATURE_BASE, 4.0);
+    let patchy = clumped(SurfaceFeature::cube(FEATURE_BASE + 1, 4.0), 14.0, 0.95);
+    for size in SIZES {
+        let half_m = if size < 0.5 { 48.0 } else { 96.0 };
+        let found = feature_columns(flat(&[plain, patchy]), size, half_m, 2);
+        let blocks = |columns: &[[f32; 2]]| {
+            let mut counts = block_counts(columns, half_m, 8.0);
+            counts.sort_by(f64::total_cmp);
+            counts
+        };
+        let (even, gathered) = (blocks(&found[0]), blocks(&found[1]));
+        let mean = gathered.iter().sum::<f64>() / gathered.len() as f64;
+        let bare = gathered.iter().filter(|c| **c < 0.25 * mean).count();
+        let dense = gathered[gathered.len() * 9 / 10..].iter().sum::<f64>();
+        let share = dense / gathered.iter().sum::<f64>();
+        let bare_even = even.iter().filter(|c| **c < 0.25 * mean).count();
+        println!(
+            "{size}: {bare} of {} blocks bare against {bare_even}, densest tenth holds {share:.2}",
+            gathered.len()
+        );
+        assert!(
+            bare * 100 >= gathered.len() * 30 && bare > 3 * bare_even,
+            "{size} m: {bare} of {} blocks bare",
+            gathered.len()
+        );
+        assert!(share > 0.3, "{size} m: the densest tenth holds {share:.2}");
     }
 }
 
