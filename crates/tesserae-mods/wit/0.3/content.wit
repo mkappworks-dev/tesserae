@@ -531,6 +531,9 @@ interface content {
         max-height-m: f32,
         direction: column-direction,
         mean-seconds: f32,
+        /// A fluid Material, `<mod id>:<name>`, the column grows through and
+        /// stands waterlogged in (kelp); `none` grows in Air (cane).
+        stands-in: option<string>,
         yields: list<plant-yield>,
     }
 

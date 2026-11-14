@@ -197,18 +197,32 @@ fn plant(def: &content::PlantDef, registry: &Registry, tables: &Tables) -> Resul
                 }),
             )
         }
-        content::PlantKind::Column(column) => (
-            solid(registry, tables, &column.material)?,
-            Kind::Column {
-                max_height_m: column.max_height_m,
-                direction: match column.direction {
-                    content::ColumnDirection::Up => Direction::Up,
-                    content::ColumnDirection::Down => Direction::Down,
+        content::PlantKind::Column(column) => {
+            let stands_in = column
+                .stands_in
+                .as_ref()
+                .map(|name| {
+                    let fluid = material(registry, name)?;
+                    if tables.fluids.rank(fluid).is_none() {
+                        return Err(format!("stands-in `{name}` must be a fluid Material"));
+                    }
+                    Ok(fluid)
+                })
+                .transpose()?;
+            (
+                solid(registry, tables, &column.material)?,
+                Kind::Column {
+                    max_height_m: column.max_height_m,
+                    direction: match column.direction {
+                        content::ColumnDirection::Up => Direction::Up,
+                        content::ColumnDirection::Down => Direction::Down,
+                    },
+                    mean_seconds: column.mean_seconds,
+                    stands_in,
+                    yields: yields(&column.yields),
                 },
-                mean_seconds: column.mean_seconds,
-                yields: yields(&column.yields),
-            },
-        ),
+            )
+        }
         content::PlantKind::Spreader(spreader) => (
             solid(registry, tables, &spreader.material)?,
             Kind::Spreader {

@@ -9,7 +9,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use tesserae_core::CHUNK_SIZE;
-use tesserae_core::plant::{PLANTS_LANDED_PER_STEP, Surroundings, grow, samples};
+use tesserae_core::plant::{GrowEnv, Growth, PLANTS_LANDED_PER_STEP, Surroundings, grow, samples};
 use tesserae_core::{
     Chunk, Climate, FluidTable, Light, MaterialId, Occupants, Tables, Voxel, Worldgen,
 };
@@ -134,7 +134,7 @@ pub(super) fn sample_step(
         return;
     }
     let waiting = std::mem::take(&mut sim.plants.deferred);
-    let mut grown: BTreeMap<Cell, (Pending, MaterialId)> = BTreeMap::new();
+    let mut grown: BTreeMap<Cell, (Pending, Growth)> = BTreeMap::new();
     {
         let reads = Reads {
             sim,
@@ -143,17 +143,23 @@ pub(super) fn sample_step(
             env,
             fluids: &tables.fluids,
         };
+        let rules = GrowEnv {
+            plants: &tables.plants,
+            shapes: &tables.shapes,
+            seed: env.seed,
+            voxel_size: env.voxel_size,
+        };
         let reread = |at: Cell, from: MaterialId, roll: f32| {
             let here = VoxelCoord::of(at);
             let voxel = store.get(here.chunk)?.get(here.x, here.y, here.z);
             if voxel.material() != from {
                 return None;
             }
-            grow(&tables.plants, &reads, env.voxel_size, at, from, roll).map(|next| (from, next))
+            grow(&rules, &reads, step, at, voxel, roll).map(|growth| (from, growth))
         };
         for (&at, p) in &waiting {
-            if let Some((from, next)) = reread(at, p.from, p.roll) {
-                grown.insert(at, (Pending { from, roll: p.roll }, next));
+            if let Some((from, growth)) = reread(at, p.from, p.roll) {
+                grown.insert(at, (Pending { from, roll: p.roll }, growth));
             }
         }
         for &chunk in sim.simulated.keys() {
@@ -182,15 +188,17 @@ pub(super) fn sample_step(
                 if grown.contains_key(&at) || tables.plants.of(from).is_none() {
                     continue;
                 }
-                if let Some((from, next)) = reread(at, from, s.roll) {
-                    grown.insert(at, (Pending { from, roll: s.roll }, next));
+                if let Some((from, growth)) = reread(at, from, s.roll) {
+                    grown.insert(at, (Pending { from, roll: s.roll }, growth));
                 }
             }
         }
     }
     let mut batch = edit::Batch::default();
     let mut landed = 0;
-    for (at, (pending, next)) in grown {
+    // Two growths that write one Voxel in a step: the later Samples again.
+    let mut touched: BTreeSet<Cell> = BTreeSet::new();
+    for (at, (pending, growth)) in grown {
         if landed >= sim.plants.landed_per_step {
             sim.plants.late += 1;
             if sim.plants.deferred.len() < DEFERRED_CAP {
@@ -198,16 +206,40 @@ pub(super) fn sample_step(
             }
             continue;
         }
-        let Some(here) = store.occupants(at, &tables.fluids) else {
+        if growth.changes.iter().any(|c| touched.contains(&c.at)) {
+            sim.plants.stale += 1;
             continue;
-        };
-        let solid = Voxel::new(next, here.solid.shape(), here.solid.orientation());
-        match batch.set_occupants(store, meshes, tables, at, Occupants { solid, ..here }) {
-            Ok(_) => {
-                sim.plants.landed += 1;
-                landed += 1;
+        }
+        let mut refused = false;
+        for change in &growth.changes {
+            let Some(here) = store.occupants(change.at, &tables.fluids) else {
+                refused = true;
+                break;
+            };
+            // A new Voxel in Air keeps the fluid it is waterlogged in; a Stage
+            // swap keeps what the old Voxel carried.
+            let next = if here.solid.is_air() {
+                here.place_solid(change.voxel, tables)
+            } else {
+                Occupants {
+                    solid: change.voxel,
+                    ..here
+                }
+            };
+            if batch
+                .set_occupants(store, meshes, tables, change.at, next)
+                .is_err()
+            {
+                refused = true;
+                break;
             }
-            Err(_) => sim.plants.stale += 1,
+            touched.insert(change.at);
+        }
+        if refused {
+            sim.plants.stale += 1;
+        } else {
+            sim.plants.landed += 1;
+            landed += 1;
         }
     }
     batch.finish(store, meshes, tables);
@@ -255,7 +287,10 @@ pub(super) fn break_unsupported(
         }
         let lacks = {
             let held = |c: Cell| store.occupants(c, &tables.fluids);
-            tables.plants.lacks_soil(material, at, &held).is_some()
+            tables
+                .plants
+                .lacks_support(&tables.shapes, here.solid, at, &held)
+                .is_some()
         };
         if !lacks {
             continue;

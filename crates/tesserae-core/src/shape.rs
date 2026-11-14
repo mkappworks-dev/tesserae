@@ -15,7 +15,7 @@
 pub mod examples;
 
 use crate::mesh::{NEG_X, NEG_Y, NEG_Z, POS_X, POS_Y, POS_Z};
-use crate::voxel::{SHAPE_FULL_CUBE, ShapeId, Voxel};
+use crate::voxel::{MaterialId, SHAPE_FULL_CUBE, ShapeId, Voxel};
 
 /// Sub-cells along a Voxel's edge. Sixteenths because they are exact: every
 /// coverage test is an integer comparison, so no float epsilon decides whether
@@ -1072,6 +1072,35 @@ impl ShapeTable {
             .get(voxel.shape() as usize)
             .copied()
             .unwrap_or_default()
+    }
+
+    /// The face a `plane` Voxel's quad lies against, after its Orientation: the
+    /// side of the thin axis its first box sits nearer. `None` for any other
+    /// form, or a plane centred in the Voxel.
+    pub fn plane_face(&self, voxel: Voxel) -> Option<usize> {
+        if self.form_of(voxel) != Form::Plane {
+            return None;
+        }
+        let b = self.selection(voxel, Connections::NONE).first()?;
+        let extent = |a: usize| b.max[a] - b.min[a];
+        let axis = (0..3).min_by_key(|&a| extent(a))?;
+        match (b.min[axis] + b.max[axis]).cmp(&(SUBDIV as u8)) {
+            std::cmp::Ordering::Less => Some(axis * 2),
+            std::cmp::Ordering::Greater => Some(axis * 2 + 1),
+            std::cmp::Ordering::Equal => None,
+        }
+    }
+
+    /// The Orientation that lays a `plane` Voxel of `material` and `shape`
+    /// against `face`, the first of the 24 that does.
+    pub fn orientation_holding(
+        &self,
+        material: MaterialId,
+        shape: ShapeId,
+        face: usize,
+    ) -> Option<Orientation> {
+        Orientation::all()
+            .find(|&o| self.plane_face(Voxel::shaped(material, shape, o)) == Some(face))
     }
 
     /// Whether any registered Shape is connected. False for the builtin table, so

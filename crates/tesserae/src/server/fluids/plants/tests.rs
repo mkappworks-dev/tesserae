@@ -86,7 +86,6 @@ struct Farm {
 
 impl Farm {
     fn new(voxel_m: f32, content: Content) -> Self {
-        AsyncComputeTaskPool::get_or_init(|| TaskPoolBuilder::new().num_threads(4).build());
         let Content { tables, stages } = content;
         let mut chunk = Chunk::air();
         for z in 0..CHUNK_SIZE {
@@ -99,6 +98,12 @@ impl Farm {
                 chunk.set(x, CROP_Y as usize, z, Voxel::cube(stages[0]));
             }
         }
+        Self::open(voxel_m, tables, stages, chunk)
+    }
+
+    /// A World of one lit Chunk at the origin.
+    fn open(voxel_m: f32, tables: Tables, stages: [MaterialId; 3], chunk: Chunk) -> Self {
+        AsyncComputeTaskPool::get_or_init(|| TaskPoolBuilder::new().num_threads(4).build());
         let mut app = App::new();
         app.insert_resource(WorldSettings {
             voxel_size: voxel_m,
@@ -218,6 +223,8 @@ impl Farm {
 
 const SIZES: [f32; 3] = [1.0, 0.5, 0.25];
 const ENOUGH: u64 = 3000;
+
+mod reach;
 
 #[test]
 fn a_crop_advances_stage_by_stage_to_ripe_and_stays_ripe() {

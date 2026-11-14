@@ -46,6 +46,7 @@ pub(super) enum Plant {
         max_height_m: f32,
         direction: Direction,
         mean_seconds: f32,
+        stands_in: Option<String>,
         #[serde(default)]
         yields: Vec<Yield>,
     },
@@ -221,6 +222,7 @@ impl From<Plant> for content::PlantDef {
                 max_height_m,
                 direction,
                 mean_seconds,
+                stands_in,
                 yields: rows,
             } => Self {
                 name,
@@ -234,6 +236,7 @@ impl From<Plant> for content::PlantDef {
                         Direction::Down => content::ColumnDirection::Down,
                     },
                     mean_seconds,
+                    stands_in,
                     yields: yields(rows),
                 }),
             },

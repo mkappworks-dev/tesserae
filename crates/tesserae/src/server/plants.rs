@@ -93,7 +93,9 @@ pub(super) fn soil_refusal(
             })
             .or_else(|| store.occupants(cell, &tables.fluids))
     };
-    let plant = tables.plants.lacks_soil(voxel.material(), at, &held)?;
+    let plant = tables
+        .plants
+        .lacks_support(&tables.shapes, voxel, at, &held)?;
     let bare = |name: &str| name.rsplit(':').next().unwrap_or(name).to_owned();
     let mut name = bare(&plant.name);
     name[..1].make_ascii_uppercase();

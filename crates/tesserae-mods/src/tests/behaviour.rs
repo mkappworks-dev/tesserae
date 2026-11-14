@@ -16,7 +16,7 @@ use crate::{
     Behaviour, Kind, MAX_BEHAVIOURS_PER_MOD, ModError, ModLimits, Registry, apply, resolve,
 };
 
-fn material(name: &str, solid: bool) -> MaterialDef {
+pub(super) fn material(name: &str, solid: bool) -> MaterialDef {
     MaterialDef {
         name: name.into(),
         emission: 0,
@@ -29,7 +29,7 @@ fn material(name: &str, solid: bool) -> MaterialDef {
     }
 }
 
-fn fluid(material: &str) -> content::FluidDef {
+pub(super) fn fluid(material: &str) -> content::FluidDef {
     content::FluidDef {
         material: material.into(),
         reach_m: 3.0,
@@ -77,7 +77,7 @@ fn fire(fuel: &str, residue: Option<&str>) -> CombustionDef {
     }
 }
 
-fn empty() -> Declaration {
+pub(super) fn empty() -> Declaration {
     Declaration {
         materials: vec![],
         shapes: vec![],

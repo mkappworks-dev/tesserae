@@ -5,13 +5,16 @@
 //! stored per plant. The table answers "which Plant, and what role, is this
 //! Material?" for growth, harvest, support and the undo journal.
 
+mod reach;
+
 use std::collections::HashMap;
 
 use crate::chunk::{CHUNK_SIZE, CHUNK_VOLUME};
 use crate::climate::Climate;
 use crate::light::{Light, MAX_LIGHT};
 use crate::occupants::Occupants;
-use crate::voxel::MaterialId;
+use crate::shape::ShapeTable;
+use crate::voxel::{MaterialId, Voxel};
 
 /// Samples a held Chunk that holds a Plant Material draws each Logical step.
 pub const PLANT_SAMPLES: u32 = 32;
@@ -111,6 +114,9 @@ pub enum Kind {
         max_height_m: f32,
         direction: Direction,
         mean_seconds: f32,
+        /// The fluid it grows through and stands waterlogged in; `None` grows
+        /// in Air.
+        stands_in: Option<MaterialId>,
         yields: Vec<Yield>,
     },
     Spreader {
@@ -353,13 +359,11 @@ impl PlantTable {
             (_, Role::Trunk | Role::Canopy | Role::Fruit(_)) => return None,
             (Kind::Climber { .. }, _) => {
                 let sides = FACES.map(|d| on([at[0] + d[0], at[1] + d[1], at[2] + d[2]], false));
-                if sides.contains(&Some(true)) {
-                    Some(true)
-                } else if sides.contains(&None) {
-                    None
-                } else {
-                    Some(false)
-                }
+                held_any(
+                    sides
+                        .into_iter()
+                        .chain([on([at[0], at[1] + 1, at[2]], true)]),
+                )
             }
             (
                 Kind::Column {
@@ -372,6 +376,39 @@ impl PlantTable {
             _ => on([at[0], at[1] - 1, at[2]], false),
         };
         (held == Some(false)).then_some(plant)
+    }
+
+    /// [`PlantTable::lacks_soil`] for the Voxel as it stands: a climber whose
+    /// Shape is a `plane` needs soil on the one face its Orientation names, or
+    /// another of its Material above it to hang from.
+    pub fn lacks_support(
+        &self,
+        shapes: &ShapeTable,
+        voxel: Voxel,
+        at: [i32; 3],
+        occupants: &dyn Fn([i32; 3]) -> Option<Occupants>,
+    ) -> Option<&Plant> {
+        let material = voxel.material();
+        let PlantRef { plant, role } = self.of(material)?;
+        let plant = self.plants.get(plant)?;
+        if let (Kind::Climber { .. }, Role::Single, Some(face)) =
+            (&plant.kind, role, shapes.plane_face(voxel))
+        {
+            let step = crate::mesh::FACE_STEPS[face];
+            let held = |cell: [i32; 3], own: bool| {
+                occupants(cell).map(|o| {
+                    let m = o.solid.material();
+                    (!own && plant.needs.soil.contains(&m)) || (own && m == material)
+                })
+            };
+            let face_cell = [at[0] + step[0], at[1] + step[1], at[2] + step[2]];
+            let held = held_any([
+                held(face_cell, false),
+                held([at[0], at[1] + 1, at[2]], true),
+            ]);
+            return (held == Some(false)).then_some(plant);
+        }
+        self.lacks_soil(material, at, occupants)
     }
 
     /// Registers a Plant, checking every rule that needs no name lookup.
@@ -420,6 +457,20 @@ impl PlantTable {
         self.plants.push(plant);
         Ok(())
     }
+}
+
+/// Whether any of several supports holds: true if one does, unknown if none does
+/// and one is unknown, false when every one is known not to.
+fn held_any(held: impl IntoIterator<Item = Option<bool>>) -> Option<bool> {
+    let mut unknown = false;
+    for h in held {
+        match h {
+            Some(true) => return Some(true),
+            None => unknown = true,
+            Some(false) => {}
+        }
+    }
+    (!unknown).then_some(false)
 }
 
 const FACES: [[i32; 3]; 6] = [
@@ -683,28 +734,95 @@ pub fn roll_chance(mean_seconds: f32) -> f32 {
     (SAMPLE_INTERVAL_S / mean_seconds).min(1.0)
 }
 
-/// The Material a crop Voxel advances to if this Sample's roll passes and every
-/// need holds at `at`; `None` holds the Stage. `voxel_size` converts the water
-/// reach and the Climate column to Voxels and metres.
+/// What a growth rule reads besides the World's cells.
+pub struct GrowEnv<'a> {
+    pub plants: &'a PlantTable,
+    pub shapes: &'a ShapeTable,
+    pub seed: u64,
+    /// Converts every metre a Plant declares to Voxels.
+    pub voxel_size: f32,
+}
+
+/// One Voxel a growth sets.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct Change {
+    pub at: [i32; 3],
+    pub voxel: Voxel,
+}
+
+/// What one passing Sample does to the World: every change lands together or
+/// not at all.
+#[derive(Clone, PartialEq, Debug)]
+pub struct Growth {
+    pub changes: Vec<Change>,
+}
+
+impl Growth {
+    pub fn one(at: [i32; 3], voxel: Voxel) -> Self {
+        Growth {
+            changes: vec![Change { at, voxel }],
+        }
+    }
+}
+
+/// What the Plant Voxel `voxel` at `at` does if this Sample's `roll` passes at
+/// Logical `step` and every need holds; `None` holds it as it is. A crop swaps
+/// its own Voxel for the next Stage. A column, spreader or climber leaves its
+/// own Voxel and adds one beside it, with the same Shape, so the Mod's Shape
+/// for the Plant is kept; `step` only varies which target a Sample picks.
 pub fn grow(
-    table: &PlantTable,
+    env: &GrowEnv,
     view: &impl Surroundings,
-    voxel_size: f32,
+    step: u64,
     at: [i32; 3],
-    material: MaterialId,
+    voxel: Voxel,
     roll: f32,
-) -> Option<MaterialId> {
-    let PlantRef { plant, role } = table.of(material)?;
-    let plant = table.plant(plant)?;
-    let (Kind::Crop { stages, .. }, Role::Stage(n)) = (&plant.kind, role) else {
-        return None;
+) -> Option<Growth> {
+    let material = voxel.material();
+    let PlantRef { plant, role } = env.plants.of(material)?;
+    let plant = env.plants.plant(plant)?;
+    let mean = match (&plant.kind, role) {
+        (Kind::Crop { stages, .. }, Role::Stage(n)) => stages.get(n)?.mean_seconds?,
+        (Kind::Column { mean_seconds, .. }, Role::Single)
+        | (Kind::Spreader { mean_seconds, .. }, Role::Single)
+        | (Kind::Climber { mean_seconds, .. }, Role::Single) => *mean_seconds,
+        _ => return None,
     };
-    let mean = stages.get(n)?.mean_seconds?;
     if roll >= roll_chance(mean) {
         return None;
     }
-    let next = table.next_stage(material)?;
-    needs_met(&plant.needs, view, voxel_size, at).then_some(next)
+    let size = env.voxel_size;
+    match &plant.kind {
+        Kind::Crop { .. } => {
+            let next = env.plants.next_stage(material)?;
+            needs_met(&plant.needs, view, size, at)
+                .then(|| Growth::one(at, Voxel::new(next, voxel.shape(), voxel.orientation())))
+        }
+        Kind::Column {
+            max_height_m,
+            direction,
+            stands_in,
+            ..
+        } => reach::column(
+            plant,
+            view,
+            size,
+            at,
+            voxel,
+            reach::Column {
+                max_height_m: *max_height_m,
+                direction: *direction,
+                stands_in: *stands_in,
+            },
+        ),
+        Kind::Spreader {
+            reach_m, density, ..
+        } => reach::spread(env, plant, view, step, at, voxel, *reach_m, *density),
+        Kind::Climber { length_m, .. } => {
+            reach::climb(env, plant, view, step, at, voxel, *length_m)
+        }
+        Kind::Tree(_) => None,
+    }
 }
 
 /// Whether soil, light, Climate and water all hold for a Plant at `at`.
@@ -712,9 +830,17 @@ pub fn needs_met(needs: &Needs, view: &impl Surroundings, voxel_size: f32, at: [
     let Some(below) = view.occupants([at[0], at[1] - 1, at[2]]) else {
         return false;
     };
-    if !needs.soil.contains(&below.solid.material()) {
-        return false;
-    }
+    needs.soil.contains(&below.solid.material()) && conditions_met(needs, view, voxel_size, at)
+}
+
+/// [`needs_met`] without the soil: light, Climate and water, for a Plant that
+/// stands on something other than the ground below its Voxel.
+pub fn conditions_met(
+    needs: &Needs,
+    view: &impl Surroundings,
+    voxel_size: f32,
+    at: [i32; 3],
+) -> bool {
     let Some(light) = view.light(at) else {
         return false;
     };
@@ -864,6 +990,7 @@ mod tests {
                     max_height_m: 4.0,
                     direction,
                     mean_seconds: 60.0,
+                    stands_in: None,
                     yields: Vec::new(),
                 },
                 10,
@@ -1098,6 +1225,25 @@ mod tests {
     }
 
     const ABOVE: [i32; 3] = [0, 1, 0];
+
+    /// The Stage a crop of `material` advances to.
+    fn grow(
+        table: &PlantTable,
+        view: &impl Surroundings,
+        voxel_size: f32,
+        at: [i32; 3],
+        material: MaterialId,
+        roll: f32,
+    ) -> Option<MaterialId> {
+        let env = GrowEnv {
+            plants: table,
+            shapes: &ShapeTable::builtin(),
+            seed: 1,
+            voxel_size,
+        };
+        super::grow(&env, view, 0, at, Voxel::cube(material), roll)
+            .map(|g| g.changes[0].voxel.material())
+    }
 
     #[test]
     fn samples_are_a_pure_function_of_their_inputs() {

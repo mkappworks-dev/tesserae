@@ -32,6 +32,7 @@ struct Content {
     trunk: MaterialId,
     canopy: MaterialId,
     fruit: [MaterialId; 2],
+    cane: MaterialId,
 }
 
 fn soil() -> MaterialId {
@@ -73,6 +74,7 @@ fn content() -> Content {
     let bush = [(); 3].map(|_| material());
     let [sapling, trunk, canopy] = [(); 3].map(|_| material());
     let fruit = [(); 2].map(|_| material());
+    let cane = material();
     let needs = || Needs {
         soil: vec![soil()],
         light_max: 15,
@@ -115,6 +117,18 @@ fn content() -> Content {
             },
         ),
         plant(
+            "t:cane",
+            "t:cane_seed",
+            cane,
+            Kind::Column {
+                max_height_m: 4.0,
+                direction: tesserae_core::plant::Direction::Up,
+                mean_seconds: 60.0,
+                stands_in: None,
+                yields: yields(&[("t:cane", 1, 2)]),
+            },
+        ),
+        plant(
             "t:apple",
             "t:sapling",
             sapling,
@@ -148,6 +162,7 @@ fn content() -> Content {
         trunk,
         canopy,
         fruit,
+        cane,
     }
 }
 
@@ -182,6 +197,7 @@ fn farm() -> (App, Content) {
             item("t:wheat", None, None),
             item("t:berry", None, Some(2.0)),
             item("t:apple", None, Some(2.0)),
+            item("t:cane", None, None),
             item("t:junk", None, None),
         ],
         [(rock(), "t:stone", [0; 4]), (soil(), "t:soil", [0; 4])],
@@ -394,6 +410,20 @@ fn removing_each_stage_drops_its_yield_the_same_in_both_modes() {
     let of = |name: &str| ripe.iter().find(|(n, _)| n == name).map(|(_, c)| *c);
     assert!((2..=4).contains(&of("t:wheat").unwrap()));
     assert!((1..=3).contains(&of("t:seed").unwrap()));
+}
+
+#[test]
+fn cutting_a_column_voxel_drops_its_yield_and_nothing_else() {
+    let (mut app, c) = farm();
+    set(&mut app, CROP, Voxel::cube(c.cane));
+    send(&mut app, remove_crop());
+    tick(&mut app);
+    assert!(voxel_at(&app, CROP).is_air());
+    let lying = lying(&mut app);
+    assert!(
+        matches!(&lying[..], [(name, n)] if name == "t:cane" && (1..=2).contains(n)),
+        "{lying:?}"
+    );
 }
 
 #[test]
