@@ -66,6 +66,15 @@ pub(super) fn drops(
     )
 }
 
+/// Whether `at` holds a ripe fruit or a ripe crop that declares `harvest-to`: a
+/// Player's Remove of it is a harvest, not a break.
+pub(super) fn is_ripe(store: &ChunkStore, tables: &Tables, at: [i32; 3]) -> bool {
+    store
+        .voxel(at)
+        .and_then(|v| tables.plants.harvest(v.material()))
+        .is_some_and(|h| h.ripe)
+}
+
 /// What a removed Voxel at `at` leaves when it is not air: a picked fruit
 /// leaves its tree's canopy.
 pub(super) fn left_by_removal(store: &ChunkStore, tables: &Tables, at: [i32; 3]) -> Option<Voxel> {

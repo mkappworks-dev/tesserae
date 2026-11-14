@@ -622,11 +622,39 @@ fn ripe_fruit_is_picked_by_use_without_touching_the_tree_and_removed_for_its_yie
     set(&mut app, CROP, Voxel::cube(c.fruit[1]));
     send(&mut app, remove_crop());
     tick(&mut app);
-    assert_eq!(voxel_at(&app, CROP), Voxel::cube(c.canopy), "canopy stays");
-    assert_eq!(lying(&mut app), [("t:apple".to_owned(), 1)]);
-    replay(&mut app, Undo);
     assert!(rejections(&mut app).is_empty());
-    assert_eq!(voxel_at(&app, CROP), Voxel::cube(c.fruit[1]));
+    assert_eq!(voxel_at(&app, CROP), Voxel::cube(c.fruit[0]), "regrows");
+    assert_eq!(count(&mut app, "t:apple"), 2, "Remove harvests like Use");
+    assert!(lying(&mut app).is_empty());
+    assert!(journal_is_empty(&app), "nothing for Undo to re-place");
+
+    set(&mut app, CROP, Voxel::cube(c.fruit[0]));
+    send(&mut app, remove_crop());
+    tick(&mut app);
+    assert_eq!(
+        voxel_at(&app, CROP),
+        Voxel::cube(c.canopy),
+        "unripe: canopy"
+    );
+}
+
+#[test]
+fn removing_a_ripe_berry_bush_harvests_it_and_the_unripe_bush_breaks() {
+    for survival_mode in [false, true] {
+        let (mut app, c) = farm();
+        if survival_mode {
+            survival(&mut app);
+        }
+        set(&mut app, CROP, Voxel::cube(c.bush[2]));
+        send(&mut app, remove_crop());
+        tick(&mut app);
+        assert_eq!(voxel_at(&app, CROP), Voxel::cube(c.bush[1]));
+        assert_eq!(count(&mut app, "t:berry"), 2);
+        assert!(journal_is_empty(&app));
+        send(&mut app, remove_crop());
+        tick(&mut app);
+        assert!(voxel_at(&app, CROP).is_air(), "the reset Stage is broken");
+    }
 }
 
 #[test]

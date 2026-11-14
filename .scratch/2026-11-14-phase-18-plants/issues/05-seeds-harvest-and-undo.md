@@ -42,8 +42,11 @@ Boxes ticked after review against `server/plants/tests.rs`: seed placement and s
 - `UseResult::Harvest` plays the existing `use-measured` Cause (the "Use
   answered" Sound); an unripe Voxel refuses as `UseRefusal::NotRipe`, which
   also stops Use falling through to eat.
-- A picked or removed fruit leaves its tree's canopy; its undo entry restores
-  the fruit Stage.
+- Superseded: Remove of a ripe fruit or a ripe `harvest-to` crop is a harvest,
+  the code path of Use (`plants::harvest`, reached from `apply_pending`): yield
+  into the Inventory, Voxel reset to `harvest-to`, no journal entry. Remove of
+  an unripe fruit still leaves canopy (its undo entry restores the fruit Stage);
+  an unripe crop Stage breaks as before, which is how a berry bush is removed.
 - A harvest's yield goes into the Inventory and what does not fit drops at the
   Player; a Remove's drops pop out of the Voxel as any removal's do.
 

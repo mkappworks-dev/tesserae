@@ -62,6 +62,26 @@ pub(in crate::server) fn apply_pending(
                 }
             })
             .and_then(|(at, change)| {
+                if matches!(change, Change::Solid(voxel) if voxel.is_air())
+                    && crate::server::plants::is_ripe(&store, &tables, at)
+                {
+                    // A harvest, so no journal entry: undo has no removal to take back.
+                    return crate::server::plants::harvest(
+                        (&mut store, &mut meshes),
+                        &tables,
+                        &world,
+                        &mut history,
+                        (&items, &mut entities, &mut inventory),
+                        player.body(),
+                        at,
+                    )
+                    .map(drop)
+                    .map_err(|refusal| match refusal {
+                        crate::server::tool::UseRefusal::NotLoaded => RejectReason::NotLoaded,
+                        crate::server::tool::UseRefusal::Busy => RejectReason::Busy,
+                        _ => RejectReason::OutOfReach,
+                    });
+                }
                 let change = match change {
                     Change::Solid(voxel) if voxel.is_air() => {
                         crate::server::plants::left_by_removal(&store, &tables, at)

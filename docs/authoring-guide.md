@@ -636,8 +636,12 @@ whose ground carries it.
 
 A `crop` is one Voxel through 2 to 8 `stages`, each a Material with
 `mean-seconds` to reach the next; the last is ripe. Breaking it at any Stage
-drops that Stage's yield. `harvest-to`, an earlier Stage by index, makes Use on
-the ripe Stage give its yield and reset to that Stage. From `crops`:
+drops that Stage's yield. `harvest-to`, an earlier Stage by index, makes Use or
+Remove on the ripe Stage give its yield and reset to that Stage, so the crop
+regrows; to remove it whole, break it at the reset Stage or earlier. A crop
+without `harvest-to` is uprooted. A tree's ripe fruit is harvested the same way,
+an unripe fruit breaks to canopy, and a `spreader` such as a mushroom is picked
+and regrows only by spreading from a neighbour. From `crops`:
 
 ```toml
 [[plants]]

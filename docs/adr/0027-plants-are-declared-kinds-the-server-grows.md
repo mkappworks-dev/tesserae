@@ -144,8 +144,8 @@ continuous field and a Biome is the nearest point.
 Fruit replaces canopy Voxels chosen by a hash of seed, position and `density`
 (at most 0.3). A fruit Voxel ripens through its grown Stages like a crop, with
 the tree's light and Climate, light read as the brightest of the Voxel and its
-six neighbours since fruit sits in canopy. Use picks a ripe one and resets it to
-`harvest-to`; the tree is untouched.
+six neighbours since fruit sits in canopy. Use or Remove on a ripe one harvests
+it and resets it to `harvest-to`; the tree is untouched.
 
 **Branching** is an optional record on a `tree` row, all in metres or fractions
 of the trunk height so a tree is the same at every Voxel size: `limbs` (a count
@@ -179,10 +179,11 @@ sapling never does. Once placed, vines live by the climber's rules.
 
 ## Harvest, undo and what is not journalled
 
-Remove of a plant Voxel drops that Stage's declared yield, with each count a
-hash of seed, position and Stage inside its range, never a draw from a
-generator. A Stage that declares none drops the Item that places it. Creative
-drops the same. A removal's drops ride the undo entry as `Cost::Yielded`
+Remove of a plant Voxel drops that Stage's declared yield (but see the harvest
+rule below), with each count a hash of seed, position and Stage inside its
+range, never a draw from a generator. A Stage that declares none drops the Item
+that places it. Creative drops the same. A removal's drops ride the undo entry
+as `Cost::Yielded`
 ([ADR-0023](0023-the-inventory-is-server-owned-and-pays-inside-the-undo-journal.md)):
 undo takes back what still lies there and spends the rest from the Inventory,
 refusing whole without it.
@@ -192,6 +193,15 @@ refusing whole without it.
 - **A tree is the exception.** A trunk is not in the sapling's chain, so undoing
   the Seed's placement after the tree grew is refused by the journal's ordinary
   mismatch rule and never half-removes a tree.
+- **Remove of a ripe fruit or of a ripe crop that declares `harvest-to` is a
+  harvest**: the same code path as Use, in both modes. It gives the yield to the
+  Inventory, resets the Voxel to `harvest-to` and never enters the journal, so a
+  fruit site or a berry bush is never destroyed by a left click and regrows.
+  Remove of an unripe fruit takes it to canopy as before, and of an unripe Stage
+  of a crop breaks it, so a whole berry bush is removed by breaking it at the
+  reset Stage. A crop without `harvest-to` (wheat, carrot) is uprooted at any
+  Stage. A mushroom or other spreader is picked and removed; it returns only by
+  spreading from a neighbour.
 - **Use harvests, picking fruit and a Felling's cascade are Edits that never
   enter the journal**, like a Door toggle. Undo after cutting a trunk restores
   the Voxel the Player cut and no more.
