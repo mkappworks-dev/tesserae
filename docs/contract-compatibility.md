@@ -54,9 +54,15 @@ default Survival rules.
 
 `biome-def` then gained `surface-features`, appended in the same way: a list of
 at most 16 `surface-feature` records (four before the Plant phase raised it),
-each a solid Material by full name and a mean `spacing-m` from 4 to 1024 metres,
-that the Engine stands one Voxel above the Biome's surface. A Biome with none
-generates exactly as before.
+each a solid Material by full name and a mean `spacing-m` from 1 to 1024 metres
+(4 before ticket 19), that the Engine stands one Voxel above the Biome's
+surface. A Biome with none generates exactly as before.
+
+`surface-feature` then gained `clump`, an optional `{ scale-m, strength }`
+record, appended in the same way, that gathers the feature into groves with
+clearings while `spacing-m` stays its mean spacing. A Declaration without it
+loads and generates as before. A guest built against the earlier record must be
+rebuilt, since a record's field count is part of its type.
 
 `survival-params` then gained `regeneration-per-s`, appended in the same way:
 the health a Player regains per second while hunger is at or above

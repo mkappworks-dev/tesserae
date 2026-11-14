@@ -566,6 +566,9 @@ struct Standing {
     vary: f64,
 }
 
+/// Per feature index, so two clumped features of a Biome gather in different places.
+const CLUMP_SALT: u32 = 0x9e37_79b9;
+
 /// Keeps the feature draw apart from every noise field, which hash the folded seed directly.
 const SCATTER_SEED: u64 = 0x5ca7_7e12_f00d_0001;
 
@@ -625,11 +628,16 @@ impl SurfaceScatter {
         (unit_chance / f64::from(spacing_m).powi(2)).min(1.0)
     }
 
+    /// The most a Biome's chances sum to, each feature at its clump's densest, so `most` bounds
+    /// every column's draw.
     fn total(unit_chance: f64, features: &SurfaceFeatures) -> f64 {
         features
             .as_slice()
             .iter()
-            .map(|f| Self::chance(unit_chance, f.spacing_m))
+            .map(|f| {
+                let densest = f.clump.map_or(1.0, |c| c.max_factor());
+                (Self::chance(unit_chance, f.spacing_m) * densest).min(1.0)
+            })
             .sum()
     }
 
@@ -638,11 +646,26 @@ impl SurfaceScatter {
     /// A Biome whose chances sum past 1 (16 features at 4 m spacing and 1 m Voxels reach exactly 1)
     /// leaves the last ones no draw to win: the earlier declaration takes the column, the same on
     /// every Chunk and Voxel size, and a World recorded that way keeps its digests.
-    fn pick<'a>(&self, features: &'a SurfaceFeatures, draw: f64) -> Option<&'a SurfaceFeature> {
+    ///
+    /// A clump multiplies its feature's chance by its field at the column, which is evaluated here
+    /// and only for columns whose draw passed `most`, once per clumped feature.
+    fn pick<'a>(
+        &self,
+        features: &'a SurfaceFeatures,
+        draw: f64,
+        seed: u32,
+        x_m: f32,
+        z_m: f32,
+    ) -> Option<&'a SurfaceFeature> {
         let mut reach = 0.0;
-        features.as_slice().iter().find(|f| {
-            reach += Self::chance(self.unit_chance, f.spacing_m);
-            draw < reach
+        features.as_slice().iter().enumerate().find_map(|(i, f)| {
+            let mut chance = Self::chance(self.unit_chance, f.spacing_m);
+            if let Some(clump) = f.clump {
+                let salt = CLUMP_SALT.wrapping_mul(i as u32 + 1);
+                chance = (chance * clump.factor(seed.wrapping_add(salt), x_m, z_m)).min(1.0);
+            }
+            reach += chance;
+            (draw < reach).then_some(f)
         })
     }
 
@@ -874,7 +897,9 @@ impl Worldgen {
                         && self
                             .biome_at(x_m, z_m)
                             .and_then(|id| self.params.biomes.get(id))
-                            .and_then(|biome| scatter.pick(&biome.surface_features, draw))
+                            .and_then(|biome| {
+                                scatter.pick(&biome.surface_features, draw, self.seed, x_m, z_m)
+                            })
                             .is_some_and(|f| f.plant.is_none())
                 });
                 let voxels = top + 1 + i32::from(featured);
@@ -1254,7 +1279,9 @@ impl Worldgen {
                 else {
                     continue;
                 };
-                let Some(feature) = scatter.pick(&biome.surface_features, draw) else {
+                let Some(feature) =
+                    scatter.pick(&biome.surface_features, draw, self.seed, x_m, z_m)
+                else {
                     continue;
                 };
                 // A Plant is stood by `plants`, which reads no neighbour Chunk's cells.
@@ -1304,7 +1331,9 @@ impl Worldgen {
         let biome = self
             .biome_at(x_m, z_m)
             .and_then(|id| self.params.biomes.get(id))?;
-        let plant = scatter.pick(&biome.surface_features, draw)?.plant?;
+        let plant = scatter
+            .pick(&biome.surface_features, draw, self.seed, x_m, z_m)?
+            .plant?;
         let size = self.voxel_size;
         let top = top_index(self.surface_height_m(x_m, z_m), 0.0, size);
         let base = [gx, top + 1, gz];

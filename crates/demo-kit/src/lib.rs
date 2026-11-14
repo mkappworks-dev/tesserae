@@ -114,28 +114,34 @@ macro_rules! food {
                 plant: None,
                 shape: None,
                 spacing_m: $food.spacing_m,
+                clump: None,
             }
         }
     };
 }
 
-/// Writes `plants(&[(plant, spacing_m)])`, the surface features that scatter each named Plant of a
-/// shared Mod. Expanded inside the Game, where `crate::tesserae::mods` is its WIT binding.
+/// Writes `plants(&[(plant, spacing_m, clump_scale_m, clump_strength)])`, the surface features that
+/// scatter each named Plant of a shared Mod; a strength of 0 scatters it evenly. Expanded inside the
+/// Game, where `crate::tesserae::mods` is its WIT binding.
 #[macro_export]
 macro_rules! plants {
     () => {
         pub fn plants(
-            list: &[(&str, f32)],
+            list: &[(&str, f32, f32, f32)],
         ) -> Vec<crate::tesserae::mods::content::SurfaceFeature> {
             list.iter()
-                .map(
-                    |&(plant, spacing_m)| crate::tesserae::mods::content::SurfaceFeature {
+                .map(|&(plant, spacing_m, scale_m, strength)| {
+                    crate::tesserae::mods::content::SurfaceFeature {
                         material: None,
                         plant: Some(plant.into()),
                         shape: None,
                         spacing_m,
-                    },
-                )
+                        clump: (strength > 0.0).then_some(crate::tesserae::mods::content::Clump {
+                            scale_m,
+                            strength,
+                        }),
+                    }
+                })
                 .collect()
         }
     };

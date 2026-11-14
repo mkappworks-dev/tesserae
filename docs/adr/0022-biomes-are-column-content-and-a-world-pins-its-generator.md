@@ -95,6 +95,39 @@ Vines are the one addition to a tree's frozen form: worldgen hangs a climber
 from the outer canopy by a pure function of the tree, seed and Voxel size, whole
 across Chunk borders, and only worldgen does (a growing sapling never does).
 
+## Surface features may clump
+
+Amended 2026-11-14, from the phase 18 spec's ticket 19. A surface feature may
+declare a `clump`, a scale in metres (4 to 1024) and a strength (0 to 1), so
+trees gather in groves with clearings between and ground cover grows in patches.
+Without one a feature scatters evenly, as before. The spacing range widens from
+4 m to 1 m, since a jungle's ferns stand a metre or two apart.
+
+- **A density field of position.** With a clump the column's chance is
+  multiplied by `1 + strength * (2t - 1)`, where `t` is value noise over a
+  lattice `scale-m` metres apart, seeded by the World seed and the feature's
+  place in its Biome, pushed away from its middle by a gain of
+  `1 + 4 * strength` and clamped to `[0, 1]`. Value noise is symmetric about
+  0.5, so is the clamped curve, and the factor's mean over the plane is exactly
+  1: the declared spacing is still the mean spacing, and a test holds it to 5%.
+  The factor lies in `[1 - strength, 1 + strength]`; at strength 1 a clearing
+  has nothing in it.
+- **Same everywhere.** The field reads only the seed and a position in metres,
+  so it is the same at every Voxel size and from every Chunk, and a tree's
+  candidate scan evaluates it for the candidate column, so a tree across a Chunk
+  border stays whole.
+- **Chances still add up.** The early-out bound `most` sums each feature at its
+  densest, and the earlier declaration still takes a column when the chances
+  pass 1; a clump that raises a ground cover's chance never costs a tree its
+  column, because trees are declared first.
+- **Digests unchanged.** A feature with no clump runs the same arithmetic and a
+  clump of strength 0 multiplies by exactly 1. The snapshot carries the clump as
+  an optional field, absent in an older save, so neither the save format nor the
+  Generator version changes.
+- **Cost.** The noise runs once per clumped feature for a column whose draw
+  passed `most`, with no allocation. DESIGN.md step 18 records the measured
+  cost.
+
 A surface feature names a Material or a Plant, exactly one, and a Plant feature
 may name the Shape of its Voxels, overriding the Plant's own
 ([ADR-0027](0027-plants-are-declared-kinds-the-server-grows.md)). The snapshot

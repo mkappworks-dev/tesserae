@@ -625,6 +625,10 @@ fn surface_feature(
         row,
         name: name.to_owned(),
     };
+    let clump = f.clump.as_ref().map(|c| tesserae_core::Clump {
+        scale_m: c.scale_m,
+        strength: c.strength,
+    });
     let plant = match (&f.material, &f.plant) {
         (Some(_), Some(_)) => {
             return Err(bad(
@@ -652,7 +656,10 @@ fn surface_feature(
                     "must be a solid Material",
                 ));
             }
-            return Ok(SurfaceFeature::cube(material, f.spacing_m));
+            return Ok(SurfaceFeature {
+                clump,
+                ..SurfaceFeature::cube(material, f.spacing_m)
+            });
         }
         (None, Some(name)) => tables
             .plants
@@ -771,6 +778,7 @@ fn surface_feature(
         material: first,
         spacing_m: f.spacing_m,
         plant: Some(SurfacePlant { shape, kind }),
+        clump,
     })
 }
 
@@ -833,6 +841,25 @@ pub fn resolve_biomes(
                     count: def.surface_features.len(),
                     max: tesserae_core::MAX_SURFACE_FEATURES,
                 });
+            }
+            for (feature, clump) in def
+                .surface_features
+                .iter()
+                .enumerate()
+                .filter_map(|(i, f)| Some((i, f.clump.as_ref()?)))
+            {
+                tesserae_core::Clump {
+                    scale_m: clump.scale_m,
+                    strength: clump.strength,
+                }
+                .validate()
+                .map_err(|e| ModError::BadClump {
+                    id: b.mod_id.clone(),
+                    biome: def.name.clone(),
+                    feature,
+                    field: e.field,
+                    rule: e.rule,
+                })?;
             }
             let features = def
                 .surface_features

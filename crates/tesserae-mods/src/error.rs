@@ -139,6 +139,15 @@ pub enum ModError {
         count: usize,
         max: usize,
     },
+    /// A surface feature's clump is out of range; names the Biome, since a Biome holds up to 16
+    /// features.
+    BadClump {
+        id: String,
+        biome: String,
+        feature: usize,
+        field: &'static str,
+        rule: &'static str,
+    },
     /// A fluid, reaction or fire row names a Material no loaded Mod registered.
     UnknownName {
         id: String,
@@ -345,6 +354,16 @@ impl fmt::Display for ModError {
             } => write!(
                 f,
                 "mod `{id}` declares {count} {what} rows, but at most {max} are allowed"
+            ),
+            ModError::BadClump {
+                id,
+                biome,
+                feature,
+                field,
+                rule,
+            } => write!(
+                f,
+                "mod `{id}`: biome `{biome}` surface feature {feature}: {field} {rule}"
             ),
             ModError::TooManyFeatures {
                 id,

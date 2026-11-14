@@ -1713,6 +1713,7 @@ fn feature(material: &str, spacing_m: f32) -> content::SurfaceFeature {
         plant: None,
         shape: None,
         spacing_m,
+        clump: None,
     }
 }
 
@@ -1778,7 +1779,7 @@ fn a_bad_surface_feature_names_the_mod_and_the_field() {
     };
     for (bad, field) in [
         (
-            vec![feature("m:melon", 3.0)],
+            vec![feature("m:melon", 0.5)],
             "biomes.surface_features.spacing_m",
         ),
         (
@@ -1818,6 +1819,61 @@ fn a_bad_surface_feature_names_the_mod_and_the_field() {
         ),
         other => panic!("{other:?}"),
     }
+    for (scale_m, strength) in [
+        (3.0, 0.5),
+        (2048.0, 0.5),
+        (32.0, -0.1),
+        (32.0, 1.5),
+        (32.0, f32::NAN),
+    ] {
+        let mut f = feature("m:melon", 16.0);
+        f.clump = Some(content::Clump { scale_m, strength });
+        match refused(vec![feature("m:melon", 16.0), f]) {
+            ModError::BadClump {
+                id,
+                biome,
+                feature,
+                field,
+                ..
+            } => {
+                assert_eq!((id.as_str(), biome.as_str(), feature), ("m", "field", 1));
+                assert!(
+                    field.starts_with("biomes.surface_features.clump"),
+                    "{field}"
+                );
+            }
+            other => panic!("{scale_m} {strength}: {other:?}"),
+        }
+    }
+    let mut ok = feature("m:melon", 16.0);
+    ok.clump = Some(content::Clump {
+        scale_m: 32.0,
+        strength: 1.0,
+    });
+    let mut load = Load::new();
+    let (biomes, _) = resolved_biomes(
+        &mut load,
+        &[(
+            "m",
+            with_biomes(
+                &["melon"],
+                vec![content::BiomeDef {
+                    soundscape: None,
+                    surface_features: vec![ok],
+                    ..biome("field", 0.5, 0.5)
+                }],
+                vec![],
+            ),
+        )],
+    )
+    .unwrap();
+    assert_eq!(
+        biomes.as_slice()[0].surface_features.as_slice()[0].clump,
+        Some(tesserae_core::Clump {
+            scale_m: 32.0,
+            strength: 1.0
+        })
+    );
     match refused(vec![feature("m:nothing", 16.0)]) {
         ModError::UnknownName { id, what, name, .. } => assert_eq!(
             (id.as_str(), what, name.as_str()),

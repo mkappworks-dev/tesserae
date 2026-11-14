@@ -341,6 +341,10 @@ fn component() -> Declaration {
                     plant: None,
                     shape: None,
                     spacing_m: 24.0,
+                    clump: Some(content::Clump {
+                        scale_m: 48.0,
+                        strength: 0.5,
+                    }),
                 }],
             },
         ],

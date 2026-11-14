@@ -428,6 +428,7 @@ mod surface_features {
             plant: plant.map(Into::into),
             shape: shape.map(Into::into),
             spacing_m: 8.0,
+            clump: None,
         }
     }
 

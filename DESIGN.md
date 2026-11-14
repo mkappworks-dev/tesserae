@@ -658,7 +658,15 @@ Notes:
   0.86 and 6.1, 65% of a 15.6 ms step, so `TREES_PER_STEP` stays 1 (it cannot go
   lower); a felled step of 32 Voxels costs 0.12, 0.14 and 0.74 ms; a surface
   Chunk of the 16-feature Biome with three branching trees generates in 0.73,
-  0.41 and 0.54 ms against 0.43, 0.25 and 0.20 with plain trees. See
+  0.41 and 0.54 ms against 0.43, 0.25 and 0.20 with plain trees. Density and
+  groves (ticket 19): a feature may declare a `clump`, a scale in metres and a
+  strength whose low-frequency field multiplies its chance at a mean of 1, and
+  the shipped Games tune every Biome to the approved classes (dense trees 3.6 to
+  4.7 m apart, moderate 5.7 to 8 m, sparse 15 to 67 m, measured over a sample of
+  Chunks). Clumping every feature of the worst-case 16-feature Biome costs a
+  surface Chunk 0.61, 0.31 and 0.22 ms at 1.0, 0.5 and 0.25 m against 0.43, 0.25
+  and 0.20 without (interleaved thread CPU time, load average 7 to 8): one noise
+  evaluation per clumped feature per column that can hold a feature. See
   [ADR-0027](docs/adr/0027-plants-are-declared-kinds-the-server-grows.md) and
   the 2026-11-14 amendments to
   [ADR-0006](docs/adr/0006-shapes-are-table-data.md),

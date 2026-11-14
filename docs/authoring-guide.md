@@ -178,7 +178,7 @@ underwater (see [Data Mods](data-mods.md)).
 | `[[tools]]` (Game)          | `name`, `kind`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `[[items]]`                 | `name`, `size-m` (0.05 to 0.5 m), `color`, optional `material` (solid; at most one item per Material; removing a Voxel of it drops the item), optional `max-stack` (1 to 64; omitted is 64), optional `food` (hunger restored, above 0 and at most 1000), optional `texture` (a 16 by 16 PNG path: a flat sprite)                                                                                                                                                                                                            |
 | `[[plants]]`                | `name`, `kind`, `seed` (an Item), optional `shape`, `[plants.needs]`, then by kind: `stages` and optional `harvest-to` (`crop`); `sapling`, `trunk`, `canopy`, `trunk-height-m`, `canopy-radius-m`, `mean-seconds`, the yields, optional `fruit`, `vines` and `branching` (`tree`); `material`, `max-height-m`, `direction`, `mean-seconds`, optional `stands-in` (`column`); `material`, `reach-m`, `mean-seconds`, `density` (`spreader`); `material`, `mean-seconds`, `length-m` (`climber`); 128 per Mod, 512 in a World |
-| `[[biomes]]`                | `name`, `temperature`, `humidity` (both 0 to 1), optional `ground` (`rock`, `soil`, `surface`: solid Materials by full name), optional `sky-fog` (`sky`, `fog`: sRGB `[r, g, b]`), optional `cave-scale` (0 to 4), optional `surface-features` (at most 16, each `material`: a solid by full name, or `plant`: a Plant by full name, optional `shape`, `spacing-m`: 4 to 1024); at most 16 per Mod and in a World                                                                                                            |
+| `[[biomes]]`                | `name`, `temperature`, `humidity` (both 0 to 1), optional `ground` (`rock`, `soil`, `surface`: solid Materials by full name), optional `sky-fog` (`sky`, `fog`: sRGB `[r, g, b]`), optional `cave-scale` (0 to 4), optional `surface-features` (at most 16, each `material`: a solid by full name, or `plant`: a Plant by full name, optional `shape`, `spacing-m`: 1 to 1024, optional `clump`: `{ scale-m, strength }`); at most 16 per Mod and in a World                                                                 |
 | `[survival]` (Game)         | each optional, omitted keeps the engine's default: `max-health` (20), `max-hunger` (20), `max-air-s` (10), `safe-fall-m` (3), `fall-damage-per-m` (1), `drowning-damage-per-s` (2), `hunger-per-min` (1), `sprinting-hunger-per-min` (2), `regeneration-hunger` (18), `regeneration-per-s` (0.25), `starvation-damage-per-s` (0.25), `keep-inventory` (false)                                                                                                                                                                |
 | `[[ores]]`                  | `material` (solid), `min-depth-m`, `max-depth-m`, `vein-size-m`, `rarity`, optional `biomes`; 16 per Mod, 32 in a World                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `[[sounds]]`                | `name`, `category`, `recordings` (at least one, each `file`: an Ogg Vorbis path, `weight`), `volume` and `pitch` (each `min`, `max`), optional `distance` (`reference-m`, `max-m`: required for `effects`, refused for the others)                                                                                                                                                                                                                                                                                           |
@@ -848,6 +848,21 @@ ground cover last. A `crop` or `spreader` stands at a Stage drawn by hash, a
 `column` on the ground or, with `stands-in`, in the lake, and a `tree` fully
 grown, whole across Chunk borders. A `climber` and a column growing down are
 refused.
+
+Tune a Biome by density class: trees 3 to 5 m apart with a 1 to 2 m understory
+for a jungle or swamp, 7 to 10 m for a temperate or cold forest, 20 to 40 m for
+a savanna, prairie, desert or frost Biome, with ground cover finer than trees. A
+`clump` gathers a feature into groves and clearings without changing its mean
+spacing:
+
+```toml
+surface-features = [{ plant = "flora:oak", spacing-m = 9.0, clump = { scale-m = 48.0, strength = 0.8 } }]
+```
+
+`scale-m` (4 to 1024) is how far the density varies, a grove's width, and
+`strength` (0 to 1) how hard: at 1 a clearing has nothing in it and a grove
+twice the density. The field is a function of the seed and the position in
+metres, so it is the same at every Voxel size.
 
 ### Grown against placed
 

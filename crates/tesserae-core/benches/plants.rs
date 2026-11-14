@@ -11,7 +11,7 @@ use tesserae_core::light::{Light, MAX_LIGHT};
 use tesserae_core::plant::{Branching, CountRange};
 use tesserae_core::testgen::{self, fixtures};
 use tesserae_core::{
-    AIR, Biome, BiomeName, BiomeTable, CHUNK_SIZE, Chunk, ChunkLight, ClimateParams, Form,
+    AIR, Biome, BiomeName, BiomeTable, CHUNK_SIZE, Chunk, ChunkLight, ClimateParams, Clump, Form,
     LitChunk, MAX_SHAPED_PER_CHUNK, MAX_SURFACE_STAGES, MaterialId, Neighborhood, NodeBox,
     Orientation, SHAPE_STAIR, ShapeDef, SurfaceFeature, SurfaceFeatures, SurfacePlant,
     SurfacePlantKind, SurfacePlantKind as Kind, SurfaceTree, Tables, Voxel, Worldgen,
@@ -276,6 +276,7 @@ fn sixteen(cross: u8, branched: bool) -> Vec<SurfaceFeature> {
         material: first,
         spacing_m,
         plant: Some(SurfacePlant { shape: cross, kind }),
+        clump: None,
     };
     let mut f = vec![
         plant(TRUNK, 7.0, Kind::Tree(tree((3.0, 5.0), 2.5, 0))),
@@ -329,6 +330,16 @@ fn params(features: &[SurfaceFeature]) -> WorldgenParams {
 fn generation() {
     let features = sixteen(cross(), false);
     let branched = sixteen(cross(), true);
+    let grouped: Vec<SurfaceFeature> = features
+        .iter()
+        .map(|f| SurfaceFeature {
+            clump: Some(Clump {
+                scale_m: 32.0,
+                strength: 0.7,
+            }),
+            ..*f
+        })
+        .collect();
     for size in [1.0f32, 0.5, 0.25] {
         let with = Worldgen::new(0x7e55_e2ae, size, params(&features));
         let bare = Worldgen::new(
@@ -336,6 +347,7 @@ fn generation() {
             size,
             params(&features).without_surface_features(),
         );
+        let clumped = Worldgen::new(0x7e55_e2ae, size, params(&grouped));
         let trees = Worldgen::new(0x7e55_e2ae, size, params(&features[..3]));
         let flora = Worldgen::new(0x7e55_e2ae, size, params(&features[3..]));
         let branching = Worldgen::new(0x7e55_e2ae, size, params(&branched[..3]));
@@ -388,6 +400,14 @@ fn generation() {
                     Box::new(|| {
                         for &(x, y, z) in &ring {
                             black_box(with.chunk(x, y, z));
+                        }
+                    }),
+                ),
+                (
+                    "16 features, every one clumped",
+                    Box::new(|| {
+                        for &(x, y, z) in &ring {
+                            black_box(clumped.chunk(x, y, z));
                         }
                     }),
                 ),

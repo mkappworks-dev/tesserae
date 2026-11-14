@@ -603,6 +603,16 @@ pub struct SavedSurfaceFeature {
     /// drops it never reshapes the World. Absent is a Material, as every feature was before Plants.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plant: Option<SavedPlant>,
+    /// Absent scatters evenly, as every feature did before groves.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clump: Option<SavedClump>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SavedClump {
+    pub scale_m: f32,
+    pub strength: f32,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -807,6 +817,10 @@ fn saved_biome(b: &crate::Biome, mapping: &Mapping) -> Result<SavedBiome, Error>
                     material: mapping.material_name(f.material)?,
                     spacing_m: f.spacing_m,
                     plant: f.plant.map(|p| saved_plant(&p, mapping)).transpose()?,
+                    clump: f.clump.map(|c| SavedClump {
+                        scale_m: c.scale_m,
+                        strength: c.strength,
+                    }),
                 })
             })
             .collect::<Result<_, Error>>()?,
@@ -866,6 +880,10 @@ fn restored_features(
                     .as_ref()
                     .map(|p| restored_plant(p, mapping))
                     .transpose()?,
+                clump: f.clump.map(|c| crate::Clump {
+                    scale_m: c.scale_m,
+                    strength: c.strength,
+                }),
             })
         })
         .collect::<Result<Vec<_>, Error>>()?;

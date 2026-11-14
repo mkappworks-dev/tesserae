@@ -304,6 +304,14 @@ struct SurfaceFeature {
     plant: Option<String>,
     shape: Option<String>,
     spacing_m: f32,
+    clump: Option<Clump>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+struct Clump {
+    scale_m: f32,
+    strength: f32,
 }
 
 #[derive(Deserialize)]
@@ -355,6 +363,10 @@ impl From<Biome> for content::BiomeDef {
                     plant: f.plant,
                     shape: f.shape,
                     spacing_m: f.spacing_m,
+                    clump: f.clump.map(|c| content::Clump {
+                        scale_m: c.scale_m,
+                        strength: c.strength,
+                    }),
                 })
                 .collect(),
         }

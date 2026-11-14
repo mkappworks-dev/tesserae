@@ -1656,6 +1656,7 @@ fn declares_plants() -> impl FnOnce(&mut crate::server::mods::LoadedMods) {
             material: id("terra:dirt"),
             spacing_m: 8.0,
             plant: Some(SurfacePlant { shape: 0, kind }),
+            clump: None,
         };
         let world = loaded.world.as_mut().unwrap();
         let mut biomes = world.biomes.as_slice().to_vec();

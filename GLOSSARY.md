@@ -178,6 +178,11 @@ colours of the columns it covers.
 one Voxel above that Biome's full surface Voxels, from the seed, at a mean
 spacing in metres. Level 0 only; a Mod still places no terrain.
 
+**Clump** — an optional scale in metres and strength on a surface feature: a
+low-frequency density field of position that multiplies the feature's chance, so
+it stands in groves with clearings between while its declared spacing stays the
+mean spacing.
+
 **Generator version** — the revision of the world generation algorithm a World
 was created under. A World keeps it for life, so a later revision never changes
 its terrain for the same seed.

@@ -613,3 +613,174 @@ fn every_fruit_is_a_box_shape_that_use_picks_and_that_grows_back() {
         }
     }
 }
+
+/// Trees per hectare in each Biome, by trunk feet found in a sample of Chunks and the ground those
+/// Chunks' columns of the Biome cover.
+fn trees_per_hectare(game: &Game) -> Vec<(String, f64)> {
+    let (_install, loaded) = loaded(game.name, 1.0);
+    let world = loaded.world.unwrap();
+    let biomes: Vec<String> = world
+        .biomes
+        .as_slice()
+        .iter()
+        .map(|b| b.name.as_str().rsplit(':').next().unwrap().to_owned())
+        .collect();
+    let logs: BTreeSet<u16> = loaded
+        .registry
+        .names(Kind::Material)
+        .filter(|(_, name)| name.starts_with("flora:") && name.ends_with("_log"))
+        .map(|(id, _)| id as u16)
+        .collect();
+    let plant_made: BTreeSet<u16> = loaded
+        .registry
+        .names(Kind::Material)
+        .filter(|(_, name)| {
+            // Ember and the other Games with their own ground stand on `flora:grass`.
+            *name != "flora:grass"
+                && ["flora:", "crops:", "aquatic:"]
+                    .iter()
+                    .any(|owner| name.starts_with(owner))
+        })
+        .map(|(id, _)| id as u16)
+        .collect();
+    let generator = Worldgen::new(7, 1.0, world);
+    let chunk_m = CHUNK_SIZE as f32;
+    let (low, high) = generator.surface_bounds_m();
+    let rows = (low / chunk_m).floor() as i32..=(high / chunk_m).ceil() as i32;
+    let mut taken = vec![0usize; biomes.len()];
+    let mut area_m2 = vec![0.0f64; biomes.len()];
+    let mut feet = vec![0u64; biomes.len()];
+    let at = |c: i32, n: usize| (c * CHUNK_SIZE as i32 + n as i32) as f32;
+    for cz in (-120..120).step_by(3) {
+        for cx in (-120..120).step_by(3) {
+            let centre = ((cx as f32 + 0.5) * chunk_m, (cz as f32 + 0.5) * chunk_m);
+            let biome = generator.biome_at(centre.0, centre.1).unwrap().index();
+            if taken[biome] >= SAMPLES {
+                continue;
+            }
+            taken[biome] += 1;
+            for z in 0..CHUNK_SIZE {
+                for x in 0..CHUNK_SIZE {
+                    let here = generator.biome_at(at(cx, x), at(cz, z)).unwrap().index();
+                    area_m2[here] += 1.0;
+                }
+            }
+            for cy in rows.clone() {
+                let chunk = generator.chunk(cx, cy, cz);
+                if chunk.uniform().is_some() {
+                    continue;
+                }
+                for z in 0..CHUNK_SIZE {
+                    for y in 1..CHUNK_SIZE {
+                        for x in 0..CHUNK_SIZE {
+                            let voxel = chunk.get(x, y, z);
+                            let below = chunk.get(x, y - 1, z);
+                            if logs.contains(&voxel.material())
+                                && !plant_made.contains(&below.material())
+                                && !below.is_air()
+                            {
+                                let here = generator.biome_at(at(cx, x), at(cz, z)).unwrap();
+                                feet[here.index()] += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    biomes
+        .into_iter()
+        .zip(feet.into_iter().zip(area_m2))
+        .map(|(name, (feet, area))| (name, feet as f64 / (area / 10_000.0).max(1e-9)))
+        .collect()
+}
+
+fn mean_spacing_m(per_hectare: f64) -> f64 {
+    100.0 / per_hectare.max(1e-9).sqrt()
+}
+
+/// The approved mockup's density classes, by Biome name across the Games: a jungle or swamp packs
+/// trees about 4 m apart, a temperate or cold forest 6 to 10 m, a savanna, prairie, desert or
+/// frost Biome 12 m or more.
+const DENSE: [&str; 9] = [
+    "jungle",
+    "swamp",
+    "thicket",
+    "fen",
+    "cinder_bog",
+    "rainforest",
+    "tidal_marsh",
+    "conservatory",
+    "lily_pond",
+];
+const MODERATE: [&str; 4] = ["temperate", "cold", "heath", "cold_shallows"];
+const SPARSE: [&str; 12] = [
+    "savanna",
+    "dry",
+    "prairie",
+    "dunes",
+    "salt_flats",
+    "arid_court",
+    "meadow",
+    "garden",
+    "highland",
+    "frost_court",
+    "ash_flats",
+    "lagoon",
+];
+
+#[test]
+fn each_biome_scatters_its_trees_at_its_density_class() {
+    for game in &GAMES {
+        for (name, per_ha) in trees_per_hectare(game) {
+            let spacing = mean_spacing_m(per_ha);
+            let full = format!("{}:{name}", game.name);
+            if DENSE.contains(&name.as_str()) {
+                assert!(
+                    (2.5..=6.0).contains(&spacing),
+                    "{full}: dense, {spacing:.1} m"
+                );
+            } else if MODERATE.contains(&name.as_str()) {
+                assert!(
+                    (5.5..=11.0).contains(&spacing),
+                    "{full}: moderate, {spacing:.1} m"
+                );
+            } else if SPARSE.contains(&name.as_str()) {
+                assert!(spacing >= 12.0, "{full}: sparse, {spacing:.1} m");
+            } else {
+                assert!(
+                    game.bare.contains(&name.as_str()) || name == "scorched",
+                    "{full}: unclassed"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn jungle_and_swamp_are_denser_than_savanna_prairie_and_desert_in_every_game_that_has_both() {
+    let mut compared = 0;
+    for game in &GAMES {
+        let density = trees_per_hectare(game);
+        let of = |class: &[&str]| -> Vec<(String, f64)> {
+            density
+                .iter()
+                .filter(|(n, _)| class.contains(&n.as_str()))
+                .cloned()
+                .collect()
+        };
+        let (dense, sparse) = (of(&DENSE), of(&SPARSE));
+        if dense.is_empty() || sparse.is_empty() {
+            continue;
+        }
+        compared += 1;
+        let thinnest = dense.iter().map(|d| d.1).fold(f64::MAX, f64::min);
+        let thickest = sparse.iter().map(|d| d.1).fold(0.0, f64::max);
+        assert!(
+            thinnest > 2.0 * thickest,
+            "{}: dense {dense:?} is not clearly past sparse {sparse:?}",
+            game.name
+        );
+    }
+    assert_eq!(compared, 5);
+}

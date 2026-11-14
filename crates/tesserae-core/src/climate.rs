@@ -45,8 +45,11 @@ pub const MAX_CAVE_SCALE: f32 = 4.0;
 /// Bounded so a [`Biome`] stays inline and `Copy`.
 pub const MAX_SURFACE_FEATURES: usize = 16;
 
-/// From one in every 4 by 4 m of ground, already a carpet, to one in a square kilometre.
-pub const SURFACE_FEATURE_SPACING_M: std::ops::RangeInclusive<f32> = 4.0..=1024.0;
+/// From one in every metre of ground, a carpet of ground cover, to one in a square kilometre.
+pub const SURFACE_FEATURE_SPACING_M: std::ops::RangeInclusive<f32> = 1.0..=1024.0;
+
+/// A clump's field varies over this many metres: a thicket's width to a region's.
+pub const CLUMP_SCALE_M: std::ops::RangeInclusive<f32> = 4.0..=1024.0;
 
 /// Each field in `[0, 1)`.
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -334,6 +337,62 @@ pub struct SurfaceFeature {
     pub material: MaterialId,
     pub spacing_m: f32,
     pub plant: Option<SurfacePlant>,
+    /// Absent scatters evenly, as every feature did before groves.
+    pub clump: Option<Clump>,
+}
+
+/// A low-frequency density field over the ground plane that multiplies a feature's chance, so it
+/// stands in groves with clearings between instead of evenly.
+///
+/// The field is value noise over a lattice `scale_m` metres apart, a pure function of the seed, the
+/// feature's place in its Biome and a position in metres, so it holds across Chunk borders and at
+/// every Voxel size.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct Clump {
+    pub scale_m: f32,
+    /// 0 is no clump; 1 leaves clearings with nothing in them and groves at twice the chance.
+    pub strength: f32,
+}
+
+impl Clump {
+    /// The factor on a column's chance, in `[1 - strength, 1 + strength]` with a mean of 1 over the
+    /// plane, so the declared spacing stays the mean spacing.
+    ///
+    /// Value noise `n` is symmetric about 0.5, and so is `0.5 + (n - 0.5) * gain` clamped to
+    /// `[0, 1]`; the mean of `t` is therefore 0.5 and of `1 + strength * (2t - 1)` exactly 1. The
+    /// gain steepens the curve with strength, since plain value noise sits near its middle and would
+    /// never make a clearing.
+    pub fn factor(&self, seed: u32, x_m: f32, z_m: f32) -> f64 {
+        let n = f64::from(crate::noise::noise2(
+            x_m / self.scale_m,
+            z_m / self.scale_m,
+            seed,
+        ));
+        let gain = 1.0 + 4.0 * f64::from(self.strength);
+        let t = (0.5 + (n - 0.5) * gain).clamp(0.0, 1.0);
+        1.0 + f64::from(self.strength) * (2.0 * t - 1.0)
+    }
+
+    /// The most [`Self::factor`] reaches.
+    pub fn max_factor(&self) -> f64 {
+        1.0 + f64::from(self.strength)
+    }
+
+    pub fn validate(&self) -> Result<(), ParamError> {
+        if !CLUMP_SCALE_M.contains(&self.scale_m) {
+            return Err(ParamError {
+                field: "biomes.surface_features.clump.scale_m",
+                rule: "must be from 4 to 1024 m",
+            });
+        }
+        if !(0.0..=1.0).contains(&self.strength) {
+            return Err(ParamError {
+                field: "biomes.surface_features.clump.strength",
+                rule: "must be from 0 to 1",
+            });
+        }
+        Ok(())
+    }
 }
 
 impl SurfaceFeature {
@@ -342,6 +401,7 @@ impl SurfaceFeature {
             material,
             spacing_m,
             plant: None,
+            clump: None,
         }
     }
 }
@@ -573,13 +633,16 @@ impl SurfaceFeatures {
         for plant in features.iter().filter_map(|f| f.plant) {
             plant.validate()?;
         }
+        for clump in features.iter().filter_map(|f| f.clump) {
+            clump.validate()?;
+        }
         if !features
             .iter()
             .all(|f| SURFACE_FEATURE_SPACING_M.contains(&f.spacing_m))
         {
             return Err(ParamError {
                 field: "biomes.surface_features.spacing_m",
-                rule: "must be from 4 to 1024 m",
+                rule: "must be from 1 to 1024 m",
             });
         }
         let mut table = Self::NONE;

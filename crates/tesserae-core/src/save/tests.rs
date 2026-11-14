@@ -737,11 +737,12 @@ fn a_saved_surface_feature_with_a_bad_spacing_or_an_unknown_material_is_refused(
             material: material.into(),
             spacing_m,
             plant: None,
+            clump: None,
         }];
         saved.restore(&mapping(8, 9, 4), 2)
     };
     assert!(with("terra:stone", 16.0).is_ok());
-    assert!(with("terra:stone", 2.0).is_err());
+    assert!(with("terra:stone", 0.5).is_err());
     assert!(with("terra:melon", 16.0).is_err());
 }
 

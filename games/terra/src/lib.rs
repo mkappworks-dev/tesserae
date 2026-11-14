@@ -600,6 +600,7 @@ impl Guest for Terra {
                         plant: None,
                         shape: None,
                         spacing_m: 16.0,
+                        clump: None,
                     }]
                     .into_iter()
                     .chain(plants::temperate())

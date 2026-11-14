@@ -10,7 +10,7 @@ use tesserae_core::save::{Generation, Mapping};
 use tesserae_core::testgen::fixtures;
 use tesserae_core::worldgen::WaterParams;
 use tesserae_core::{
-    AIR, Biome, BiomeName, BiomeTable, CHUNK_SIZE, Chunk, ClimateParams, MAX_SURFACE_STAGES,
+    AIR, Biome, BiomeName, BiomeTable, CHUNK_SIZE, Chunk, ClimateParams, Clump, MAX_SURFACE_STAGES,
     MaterialId, SurfaceFeature, SurfaceFeatures, SurfaceFruit, SurfacePlant, SurfacePlantKind,
     SurfaceTree, SurfaceVines, Voxel, Worldgen, WorldgenParams,
 };
@@ -73,6 +73,7 @@ fn plant(kind: SurfacePlantKind, first: MaterialId, spacing_m: f32) -> SurfaceFe
             shape: CROSS_SHAPE,
             kind,
         }),
+        clump: None,
     }
 }
 
@@ -962,4 +963,215 @@ fn a_snapshot_keeps_a_trees_branching_and_a_tree_without_it_saves_none() {
     assert_eq!(form["branching"]["fork"], 0.3f32);
     let (_, plain) = capture(None);
     assert!(!plain.contains("branching"), "an old tree saves as it did");
+}
+
+const FEATURE_BASE: MaterialId = 230;
+
+fn clumped(mut f: SurfaceFeature, scale_m: f32, strength: f32) -> SurfaceFeature {
+    f.clump = Some(Clump { scale_m, strength });
+    f
+}
+
+/// Where each of `count` cube features, from material 230 on, stands over `half_m` of the origin.
+fn feature_columns(
+    params: WorldgenParams,
+    size: f32,
+    half_m: f32,
+    count: usize,
+) -> Vec<Vec<[f32; 2]>> {
+    let probe = Probe::new(SEED, size, params);
+    let mut found = vec![Vec::new(); count];
+    for (at, (with, _)) in probe.changed(half_m, false) {
+        let n = with.material().wrapping_sub(FEATURE_BASE) as usize;
+        if n < count {
+            found[n].push([at[0] as f32 * size, at[2] as f32 * size]);
+        }
+    }
+    found
+}
+
+/// The sides of the square a feature's columns fall in, counted per `cell_m` block.
+fn block_counts(columns: &[[f32; 2]], half_m: f32, cell_m: f32) -> Vec<f64> {
+    let across = (2.0 * half_m / cell_m) as usize;
+    let mut counts = vec![0.0; across * across];
+    for c in columns {
+        let at = |v: f32| (((v + half_m) / cell_m) as usize).min(across - 1);
+        counts[at(c[1]) * across + at(c[0])] += 1.0;
+    }
+    counts
+}
+
+fn mean_and_variance(v: &[f64]) -> (f64, f64) {
+    let mean = v.iter().sum::<f64>() / v.len() as f64;
+    (
+        mean,
+        v.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / v.len() as f64,
+    )
+}
+
+#[test]
+fn a_clumps_factor_has_a_mean_of_one_over_the_plane() {
+    for (scale_m, strength) in [(16.0, 0.3), (16.0, 1.0), (48.0, 0.8), (64.0, 0.5)] {
+        let clump = Clump { scale_m, strength };
+        let (mut sum, mut n) = (0.0, 0.0);
+        for seed in 0..8u32 {
+            for i in 0..300 {
+                for j in 0..300 {
+                    let f = clump.factor(
+                        seed.wrapping_mul(0x9e37_79b9),
+                        i as f32 * 7.3,
+                        j as f32 * 7.3,
+                    );
+                    assert!((1.0 - f64::from(strength)..=1.0 + f64::from(strength)).contains(&f));
+                    sum += f;
+                    n += 1.0;
+                }
+            }
+        }
+        let mean = sum / n;
+        assert!(
+            (mean - 1.0).abs() < 0.05,
+            "{scale_m} m, {strength}: mean {mean}"
+        );
+    }
+}
+
+#[test]
+fn an_ungrouped_features_mean_spacing_is_its_declared_spacing_at_every_voxel_size() {
+    let spacings = [4.0, 5.0, 6.0, 8.0, 10.0];
+    let features: Vec<_> = spacings
+        .iter()
+        .enumerate()
+        .map(|(n, &sp)| SurfaceFeature::cube(FEATURE_BASE + n as MaterialId, sp))
+        .collect();
+    for size in SIZES {
+        let half_m = if size < 0.5 { 48.0 } else { 96.0 };
+        let found = feature_columns(flat(&features), size, half_m, spacings.len());
+        for (columns, sp) in found.iter().zip(spacings) {
+            let spacing = (f64::from(2.0 * half_m).powi(2) / columns.len() as f64).sqrt();
+            assert!(
+                (spacing / f64::from(sp) - 1.0).abs() < 0.15,
+                "{size} m Voxels: declared {sp} m, measured {spacing:.2} m over {} columns",
+                columns.len()
+            );
+        }
+    }
+}
+
+#[test]
+fn a_clumped_feature_keeps_its_mean_spacing_and_gathers_into_groves() {
+    let plain = SurfaceFeature::cube(FEATURE_BASE, 5.0);
+    let grove = clumped(SurfaceFeature::cube(FEATURE_BASE + 1, 5.0), 16.0, 0.9);
+    for size in SIZES {
+        let half_m = if size < 0.5 { 48.0 } else { 96.0 };
+        let found = feature_columns(flat(&[plain, grove]), size, half_m, 2);
+        let [even, gathered] = [&found[0], &found[1]];
+        let expected = f64::from(2.0 * half_m).powi(2) / 25.0;
+        assert!(
+            (gathered.len() as f64 / expected - 1.0).abs() < 0.15,
+            "{size} m: {} grove columns, expected {expected}",
+            gathered.len()
+        );
+        let (mean_even, var_even) = mean_and_variance(&block_counts(even, half_m, 8.0));
+        let (mean_grove, var_grove) = mean_and_variance(&block_counts(gathered, half_m, 8.0));
+        assert!(
+            (mean_grove / mean_even - 1.0).abs() < 0.2,
+            "{size} m: {mean_grove} against {mean_even} a block"
+        );
+        assert!(
+            var_grove > 2.0 * var_even,
+            "{size} m: variance {var_grove} is not clearly past {var_even}"
+        );
+        let empty = block_counts(gathered, half_m, 8.0)
+            .iter()
+            .filter(|c| **c == 0.0)
+            .count();
+        let empty_even = block_counts(even, half_m, 8.0)
+            .iter()
+            .filter(|c| **c == 0.0)
+            .count();
+        assert!(
+            empty > empty_even + 3,
+            "{size} m: {empty} clearings against {empty_even}"
+        );
+    }
+}
+
+#[test]
+fn a_clump_without_strength_generates_exactly_what_no_clump_does() {
+    let plain = flat(&[tree_feature(10.0, true), crop_feature(6.0)]);
+    let inert = flat(&[
+        clumped(tree_feature(10.0, true), 32.0, 0.0),
+        clumped(crop_feature(6.0), 32.0, 0.0),
+    ]);
+    let (a, b) = (
+        Worldgen::new(SEED, 1.0, plain),
+        Worldgen::new(SEED, 1.0, inert),
+    );
+    for cy in 0..3 {
+        for cz in -2..2 {
+            for cx in -2..2 {
+                let (x, y) = (a.chunk(cx, cy, cz), b.chunk(cx, cy, cz));
+                for i in 0..CHUNK_SIZE.pow(3) {
+                    let at = (
+                        i % CHUNK_SIZE,
+                        i / CHUNK_SIZE % CHUNK_SIZE,
+                        i / CHUNK_SIZE.pow(2),
+                    );
+                    assert_eq!(x.get(at.0, at.1, at.2), y.get(at.0, at.1, at.2));
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn a_clump_is_the_same_field_at_every_voxel_size() {
+    let params = flat(&[clumped(SurfaceFeature::cube(FEATURE_BASE, 4.0), 24.0, 0.9)]);
+    let counts: Vec<Vec<f64>> = [1.0, 0.5]
+        .map(|size| {
+            let found = feature_columns(params, size, 64.0, 1);
+            block_counts(&found[0], 64.0, 32.0)
+        })
+        .into();
+    // Groves sit in the same blocks whatever the Voxel size, so the two grids track each other.
+    let (a, b) = (&counts[0], &counts[1]);
+    let n = a.len() as f64;
+    let (ma, mb) = (a.iter().sum::<f64>() / n, b.iter().sum::<f64>() / n);
+    let cov: f64 = a.iter().zip(b).map(|(x, y)| (x - ma) * (y - mb)).sum();
+    let var = |v: &[f64], m: f64| v.iter().map(|x| (x - m).powi(2)).sum::<f64>();
+    let r = cov / (var(a, ma) * var(b, mb)).sqrt();
+    assert!(r > 0.8, "block counts correlate {r}");
+}
+
+#[test]
+fn a_clumped_tree_across_a_chunk_border_is_whole_at_every_voxel_size() {
+    let params = flat(&[clumped(tree_feature(9.0, false), 24.0, 0.8)]);
+    assert_whole(params, false, &SIZES);
+}
+
+#[test]
+fn a_snapshot_carries_the_clump_and_an_older_one_loads_without() {
+    let grove = clumped(crop_feature(16.0), 48.0, 0.7);
+    let params = flat(&[grove, crop_feature(20.0)]);
+    let saved = Generation::capture(params, &mapping()).unwrap();
+    let json = serde_json::to_string(&saved).unwrap();
+    let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+    let features = &value["biomes"][0]["surface_features"];
+    assert_eq!(features[0]["clump"]["scale_m"], 48.0);
+    assert!(features[1].get("clump").is_none(), "{features}");
+    let restored = serde_json::from_str::<Generation>(&json)
+        .unwrap()
+        .restore(&mapping(), 2)
+        .unwrap();
+    assert_eq!(restored.biomes, params.biomes);
+    let older = json.replace(r#","clump":{"scale_m":48.0,"strength":0.7}"#, "");
+    assert_ne!(older, json);
+    let older: Generation = serde_json::from_str(&older).unwrap();
+    let loaded = older.restore(&mapping(), 2).unwrap();
+    assert!(
+        loaded.biomes.as_slice()[0].surface_features.as_slice()[0]
+            .clump
+            .is_none()
+    );
 }

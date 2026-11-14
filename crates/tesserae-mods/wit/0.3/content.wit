@@ -731,8 +731,23 @@ interface content {
         /// is a cube. A tree is always cubes.
         shape: option<string>,
         /// About one in every `spacing-m` by `spacing-m` metres of the Biome's
-        /// surface, at any Voxel size; from 4 to 1024.
+        /// surface, at any Voxel size; from 1 to 1024.
         spacing-m: f32,
+        /// Gathers the feature into groves with clearings between, still `spacing-m`
+        /// apart on average; none scatters it evenly.
+        clump: option<clump>,
+    }
+
+    /// A low-frequency density field over the ground, in metres, that multiplies
+    /// a feature's chance. A pure function of the World seed and a position, so
+    /// it holds across Chunk borders and at every Voxel size.
+    record clump {
+        /// The distance over which the density varies, from 4 to 1024 m: a
+        /// grove's width.
+        scale-m: f32,
+        /// From 0 (even) to 1 (clearings with nothing in them, groves at twice
+        /// the density).
+        strength: f32,
     }
 
     /// A sky colour and the fog that matches it, as sRGB bytes. A pair, so a

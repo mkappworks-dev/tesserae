@@ -127,16 +127,17 @@ A Biome row may also add `surface-features`, at most 16
 of `material`, a solid Material by full name from any Mod, and `plant`, a
 [Plant](authoring-guide.md#plants) by full name, with an optional `shape` that
 overrides the Plant's own, and the mean distance between two of them in metres,
-from 4 to 1024. The Engine stands one, deterministically from the World seed,
-about once in every `spacing-m` by `spacing-m` metres of the Biome's surface at
-any Voxel size, one Voxel above a column whose top is a full Voxel of the
-Biome's surface Material with air above it: never under water or another fluid
-(a column Plant that declares `stands-in` stands in the lake), on a smoothed
-stair or slab, or in a cave mouth. Chances add up; past a sum of 1 the earlier
-entries take the column, so list rare features first. Removing one drops its
-Item like any Voxel. The coarse LOD levels leave them out. The World's saved
-Biome table carries them, so a World saved before a Game added features keeps
-its bare ground.
+from 1 to 1024. An optional `clump = { scale-m, strength }` (4 to 1024 m, 0
+to 1) gathers a feature into groves and clearings, at the same mean spacing. The
+Engine stands one, deterministically from the World seed, about once in every
+`spacing-m` by `spacing-m` metres of the Biome's surface at any Voxel size, one
+Voxel above a column whose top is a full Voxel of the Biome's surface Material
+with air above it: never under water or another fluid (a column Plant that
+declares `stands-in` stands in the lake), on a smoothed stair or slab, or in a
+cave mouth. Chances add up; past a sum of 1 the earlier entries take the column,
+so list rare features first. Removing one drops its Item like any Voxel. The
+coarse LOD levels leave them out. The World's saved Biome table carries them, so
+a World saved before a Game added features keeps its bare ground.
 
 Tables that are absent change nothing: a World with no Biomes generates as it
 always did.
