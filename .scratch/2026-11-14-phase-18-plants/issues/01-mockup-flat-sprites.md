@@ -1,6 +1,6 @@
 # 01: Mockup: flat Plant sprites
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: None (can start immediately)
 
@@ -22,7 +22,7 @@ crop in the World as crossed quads.
 - [x] The mockup shows every surface in the spec's Client section, in the
       existing visual language.
 - [x] `python3 mockup/server.py` serves the new section.
-- [ ] The maintainer has approved it; the approval is noted under Comments.
+- [x] The maintainer has approved it; the approval is noted under Comments.
 - [x] `npm run fmt:check` passes.
 
 ## Comments
@@ -30,3 +30,7 @@ crop in the World as crossed quads.
 Open the section with `python3 mockup/server.py`, then
 <http://127.0.0.1:8133/plants> (or the "Plants (step 18)" entry in the
 mockup's screen picker). Awaiting the maintainer's approval.
+
+Maintainer approved the mockup on 2026-11-14 after hanging apples were changed
+to 3D voxel apples (a fruit Voxel replaces a canopy cell). Ticket 13 is
+unblocked.
