@@ -7,8 +7,10 @@
 
 use std::collections::HashMap;
 
-use crate::chunk::CHUNK_VOLUME;
-use crate::light::MAX_LIGHT;
+use crate::chunk::{CHUNK_SIZE, CHUNK_VOLUME};
+use crate::climate::Climate;
+use crate::light::{Light, MAX_LIGHT};
+use crate::occupants::Occupants;
 use crate::voxel::MaterialId;
 
 /// Samples a held Chunk that holds a Plant Material draws each Logical step.
@@ -18,6 +20,9 @@ pub const STEPS_PER_S: u32 = 64;
 /// Mean seconds between Samples of one Voxel: the fastest a Plant can roll, so
 /// the floor of every `mean-seconds`.
 pub const SAMPLE_INTERVAL_S: f32 = CHUNK_VOLUME as f32 / (PLANT_SAMPLES * STEPS_PER_S) as f32;
+
+/// Plant changes one Logical step lands; past it they wait for the next step.
+pub const PLANTS_LANDED_PER_STEP: usize = 64;
 
 pub const MAX_STAGES: usize = 8;
 pub const MAX_FRUIT_STAGES: usize = 4;
@@ -446,6 +451,146 @@ fn check_count(count: CountRange) -> Result<(), PlantError> {
     Ok(())
 }
 
+/// One position a Chunk's Sample drew, and the roll its Voxel makes if it holds
+/// a Plant.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct Sample {
+    /// The Voxel's offset from the Chunk's corner.
+    pub local: [usize; 3],
+    /// Uniform in `[0, 1)`; a roll passes when it is below the Voxel's chance.
+    pub roll: f32,
+}
+
+fn mix(mut z: u64) -> u64 {
+    z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    z ^ (z >> 31)
+}
+
+/// The positions and rolls a Chunk draws at one Logical step: a pure function of
+/// the World seed, the Chunk, the step and the index, so equal inputs give equal
+/// draws however the work is divided. It never reads the World.
+pub fn samples(seed: u64, chunk: [i32; 3], step: u64) -> impl Iterator<Item = Sample> {
+    let key = [
+        chunk[0] as u32 as u64,
+        chunk[1] as u32 as u64,
+        chunk[2] as u32 as u64,
+        step,
+    ]
+    .into_iter()
+    .fold(mix(seed ^ 0x91a7_7e5a_3b1d_0001), |h, v| {
+        mix(h ^ v.wrapping_mul(0x9e37_79b9_7f4a_7c15))
+    });
+    (0..PLANT_SAMPLES as u64).map(move |i| {
+        let h = mix(key ^ i.wrapping_mul(0x9e37_79b9_7f4a_7c15));
+        let p = (h as usize) % CHUNK_VOLUME;
+        Sample {
+            local: [
+                p % CHUNK_SIZE,
+                (p / CHUNK_SIZE) % CHUNK_SIZE,
+                p / (CHUNK_SIZE * CHUNK_SIZE),
+            ],
+            roll: (h >> 40) as f32 / (1u64 << 24) as f32,
+        }
+    })
+}
+
+/// What a growth rule reads, as the Server holds it. `None` is terrain that is
+/// not held or not lit yet: never read as Air, so the Voxel holds its Stage.
+pub trait Surroundings {
+    fn occupants(&self, at: [i32; 3]) -> Option<Occupants>;
+    fn light(&self, at: [i32; 3]) -> Option<Light>;
+    /// The World's Climate at a column, in metres.
+    fn climate_at(&self, x_m: f32, z_m: f32) -> Option<Climate>;
+}
+
+/// The chance one Sample of a Voxel advances a Stage that takes `mean_seconds`.
+pub fn roll_chance(mean_seconds: f32) -> f32 {
+    (SAMPLE_INTERVAL_S / mean_seconds).min(1.0)
+}
+
+/// The Material a crop Voxel advances to if this Sample's roll passes and every
+/// need holds at `at`; `None` holds the Stage. `voxel_size` converts the water
+/// reach and the Climate column to Voxels and metres.
+pub fn grow(
+    table: &PlantTable,
+    view: &impl Surroundings,
+    voxel_size: f32,
+    at: [i32; 3],
+    material: MaterialId,
+    roll: f32,
+) -> Option<MaterialId> {
+    let PlantRef { plant, role } = table.of(material)?;
+    let plant = table.plant(plant)?;
+    let (Kind::Crop { stages, .. }, Role::Stage(n)) = (&plant.kind, role) else {
+        return None;
+    };
+    let mean = stages.get(n)?.mean_seconds?;
+    if roll >= roll_chance(mean) {
+        return None;
+    }
+    let next = table.next_stage(material)?;
+    needs_met(&plant.needs, view, voxel_size, at).then_some(next)
+}
+
+/// Whether soil, light, Climate and water all hold for a Plant at `at`.
+pub fn needs_met(needs: &Needs, view: &impl Surroundings, voxel_size: f32, at: [i32; 3]) -> bool {
+    let Some(below) = view.occupants([at[0], at[1] - 1, at[2]]) else {
+        return false;
+    };
+    if !needs.soil.contains(&below.solid.material()) {
+        return false;
+    }
+    let Some(light) = view.light(at) else {
+        return false;
+    };
+    let level = light.sky().max(light.block());
+    if level < needs.light_min || level > needs.light_max {
+        return false;
+    }
+    if needs.temperature.is_some() || needs.humidity.is_some() {
+        let Some(climate) = view.climate_at(at[0] as f32 * voxel_size, at[2] as f32 * voxel_size)
+        else {
+            return false;
+        };
+        let within = |range: Option<(f32, f32)>, v: f32| {
+            range.is_none_or(|(low, high)| (low..=high).contains(&v))
+        };
+        if !within(needs.temperature, climate.temperature)
+            || !within(needs.humidity, climate.humidity)
+        {
+            return false;
+        }
+    }
+    needs
+        .water
+        .is_none_or(|w| water_within(w, view, voxel_size, at))
+}
+
+/// Whether the fluid lies within `reach_m` of `at`, measured between Voxel
+/// centres.
+fn water_within(water: Water, view: &impl Surroundings, voxel_size: f32, at: [i32; 3]) -> bool {
+    let reach = (water.reach_m / voxel_size).floor() as i32;
+    let limit = (water.reach_m / voxel_size).powi(2);
+    for dy in -reach..=reach {
+        for dz in -reach..=reach {
+            for dx in -reach..=reach {
+                if ((dx * dx + dy * dy + dz * dz) as f32) > limit {
+                    continue;
+                }
+                let here = [at[0] + dx, at[1] + dy, at[2] + dz];
+                if view
+                    .occupants(here)
+                    .is_some_and(|o| o.fluid.is_some_and(|f| f.material == water.fluid))
+                {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -540,5 +685,195 @@ mod tests {
     #[test]
     fn the_sample_interval_is_sixteen_seconds() {
         assert_eq!(SAMPLE_INTERVAL_S, 16.0);
+    }
+
+    use crate::occupants::Fluid;
+    use crate::voxel::Voxel;
+
+    const SOIL: MaterialId = 1;
+    const WATER: MaterialId = 2;
+
+    struct Scene {
+        solids: HashMap<[i32; 3], MaterialId>,
+        water: Vec<[i32; 3]>,
+        light: Option<u8>,
+        climate: Option<Climate>,
+    }
+
+    impl Scene {
+        fn on_soil() -> Self {
+            Scene {
+                solids: HashMap::from([([0, 0, 0], SOIL)]),
+                water: Vec::new(),
+                light: Some(10),
+                climate: Some(Climate {
+                    temperature: 0.5,
+                    humidity: 0.5,
+                }),
+            }
+        }
+    }
+
+    impl Surroundings for Scene {
+        fn occupants(&self, at: [i32; 3]) -> Option<Occupants> {
+            Some(Occupants {
+                solid: self.solids.get(&at).map_or(Voxel::AIR, |&m| Voxel::cube(m)),
+                fluid: self.water.contains(&at).then(|| Fluid::source(WATER)),
+                burning: None,
+            })
+        }
+
+        fn light(&self, _: [i32; 3]) -> Option<Light> {
+            self.light.map(|l| Light::new(l, 0))
+        }
+
+        fn climate_at(&self, _: f32, _: f32) -> Option<Climate> {
+            self.climate
+        }
+    }
+
+    fn wheat_table(needs: Needs) -> PlantTable {
+        let mut table = PlantTable::default();
+        let mut plant = crop(
+            vec![
+                stage(10, Some(32.0)),
+                stage(11, Some(32.0)),
+                stage(12, None),
+            ],
+            None,
+        );
+        plant.needs = needs;
+        table.push(plant).unwrap();
+        table
+    }
+
+    fn needs() -> Needs {
+        Needs {
+            soil: vec![SOIL],
+            light_min: 8,
+            light_max: 15,
+            ..Needs::default()
+        }
+    }
+
+    const ABOVE: [i32; 3] = [0, 1, 0];
+
+    #[test]
+    fn samples_are_a_pure_function_of_their_inputs() {
+        let draw = |seed, chunk, step| samples(seed, chunk, step).collect::<Vec<_>>();
+        let a = draw(7, [1, -2, 3], 100);
+        assert_eq!(a.len(), PLANT_SAMPLES as usize);
+        assert_eq!(a, draw(7, [1, -2, 3], 100));
+        for other in [
+            draw(8, [1, -2, 3], 100),
+            draw(7, [1, -2, 4], 100),
+            draw(7, [1, -2, 3], 101),
+        ] {
+            assert_ne!(a, other);
+        }
+        assert!(a.iter().all(|s| s.local.iter().all(|&c| c < CHUNK_SIZE)));
+        assert!(a.iter().all(|s| (0.0..1.0).contains(&s.roll)));
+    }
+
+    #[test]
+    fn samples_spread_over_the_chunk_and_the_rolls_over_the_unit_interval() {
+        let drawn: Vec<Sample> = (0..2000).flat_map(|t| samples(3, [0, 0, 0], t)).collect();
+        let mean = drawn.iter().map(|s| s.roll).sum::<f32>() / drawn.len() as f32;
+        assert!((mean - 0.5).abs() < 0.02, "mean roll {mean}");
+        for axis in 0..3 {
+            let high = drawn
+                .iter()
+                .filter(|s| s.local[axis] >= CHUNK_SIZE / 2)
+                .count();
+            let share = high as f32 / drawn.len() as f32;
+            assert!((share - 0.5).abs() < 0.02, "axis {axis} share {share}");
+        }
+    }
+
+    #[test]
+    fn a_roll_below_the_chance_advances_the_stage() {
+        let table = wheat_table(needs());
+        let scene = Scene::on_soil();
+        let chance = roll_chance(32.0);
+        assert_eq!(chance, 0.5);
+        assert_eq!(
+            grow(&table, &scene, 1.0, ABOVE, 10, chance - 0.01),
+            Some(11)
+        );
+        assert_eq!(grow(&table, &scene, 1.0, ABOVE, 10, chance), None);
+        assert_eq!(grow(&table, &scene, 1.0, ABOVE, 11, 0.0), Some(12));
+        assert_eq!(grow(&table, &scene, 1.0, ABOVE, 12, 0.0), None);
+        assert_eq!(grow(&table, &scene, 1.0, ABOVE, 99, 0.0), None);
+    }
+
+    #[test]
+    fn a_mean_at_the_interval_always_rolls_through() {
+        assert_eq!(roll_chance(SAMPLE_INTERVAL_S), 1.0);
+        assert_eq!(roll_chance(SAMPLE_INTERVAL_S * 4.0), 0.25);
+    }
+
+    #[test]
+    fn wrong_soil_or_none_holds_the_stage() {
+        let table = wheat_table(needs());
+        let mut scene = Scene::on_soil();
+        scene.solids.insert([0, 0, 0], 5);
+        assert_eq!(grow(&table, &scene, 1.0, ABOVE, 10, 0.0), None);
+        scene.solids.clear();
+        assert_eq!(grow(&table, &scene, 1.0, ABOVE, 10, 0.0), None);
+    }
+
+    #[test]
+    fn light_outside_its_band_holds_the_stage() {
+        let table = wheat_table(needs());
+        for (level, grows) in [(7, false), (8, true), (15, true)] {
+            let mut scene = Scene::on_soil();
+            scene.light = Some(level);
+            assert_eq!(grow(&table, &scene, 1.0, ABOVE, 10, 0.0).is_some(), grows);
+        }
+        let mut scene = Scene::on_soil();
+        scene.light = None;
+        assert_eq!(grow(&table, &scene, 1.0, ABOVE, 10, 0.0), None);
+    }
+
+    #[test]
+    fn climate_outside_its_range_holds_the_stage() {
+        let table = wheat_table(Needs {
+            temperature: Some((0.4, 0.6)),
+            humidity: Some((0.0, 0.3)),
+            ..needs()
+        });
+        let mut scene = Scene::on_soil();
+        assert_eq!(grow(&table, &scene, 1.0, ABOVE, 10, 0.0), None);
+        scene.climate = Some(Climate {
+            temperature: 0.5,
+            humidity: 0.2,
+        });
+        assert_eq!(grow(&table, &scene, 1.0, ABOVE, 10, 0.0), Some(11));
+        scene.climate = None;
+        assert_eq!(grow(&table, &scene, 1.0, ABOVE, 10, 0.0), None);
+    }
+
+    #[test]
+    fn water_reach_is_in_metres_at_every_voxel_size() {
+        let table = wheat_table(Needs {
+            water: Some(Water {
+                fluid: WATER,
+                reach_m: 2.0,
+            }),
+            ..needs()
+        });
+        for size in [1.0f32, 0.5, 0.25] {
+            let voxels = (2.0 / size) as i32;
+            let mut scene = Scene::on_soil();
+            assert_eq!(grow(&table, &scene, size, ABOVE, 10, 0.0), None);
+            scene.water = vec![[ABOVE[0] + voxels, ABOVE[1], ABOVE[2]]];
+            assert_eq!(
+                grow(&table, &scene, size, ABOVE, 10, 0.0),
+                Some(11),
+                "{size}"
+            );
+            scene.water = vec![[ABOVE[0] + voxels + 1, ABOVE[1], ABOVE[2]]];
+            assert_eq!(grow(&table, &scene, size, ABOVE, 10, 0.0), None, "{size}");
+        }
     }
 }

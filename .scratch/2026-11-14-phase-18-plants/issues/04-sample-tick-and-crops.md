@@ -29,3 +29,21 @@ fixes the constants.
 - [ ] A Chunk with no Plant Material costs nothing measurable; the bench
       numbers are recorded in the PR and in DESIGN.md's step 18 notes.
 - [ ] No new save record: a reopened World continues from the Stage Material.
+
+## Comments
+
+Left `ready-for-agent`: the bench numbers (and the DESIGN.md step 18 note) are
+not done, so `PLANTS_LANDED_PER_STEP = 64` is a starting value, not a measured
+one. The "no new save record" criterion holds by construction (nothing is
+stored) but has no reopen test yet.
+
+- The Sample tick runs inline on the tick, at the end of each Logical step
+  (after the step's fluid landings, before `next_step`), in `FluidSim`'s clock
+  and through the same `edit::Batch::set_occupants`. It reads the live store
+  rather than a worker Snapshot, so nothing it reads can be stale within the
+  step; only a change deferred past the bound is read again next step (roll
+  kept, dropped if its Voxel or needs changed).
+- Reads go only to Chunks the simulation has admitted; an unadmitted Chunk or
+  one with a light solve pending is skipped, and a read into one fails the
+  need, so the Voxel holds.
+- Climate is read at the Voxel's corner in metres, as generation reads Biomes.

@@ -81,6 +81,8 @@ use super::streaming::MeshState;
 use super::world_state::{ChunkStore, Lifetime, VoxelCoord};
 use crate::world::{ChunkCoord, WorldSettings};
 
+mod plants;
+
 /// Evaluations one worker call may make before it hands back a continuation.
 const EVALUATIONS_PER_JOB: usize = 1024;
 
@@ -138,6 +140,7 @@ pub(in crate::server) struct FluidSim {
     jobs_in_flight: usize,
     landed_per_step: usize,
     emitters_per_step: usize,
+    plants: plants::PlantSim,
     pub work: Work,
     pub landed: usize,
     /// Changes dropped because what they read had changed.
@@ -198,6 +201,7 @@ impl Default for FluidSim {
             jobs_in_flight: JOBS_IN_FLIGHT,
             landed_per_step: LANDED_PER_STEP,
             emitters_per_step: EMITTERS_PER_STEP,
+            plants: plants::PlantSim::default(),
             work: Work::default(),
             landed: 0,
             stale: 0,
@@ -577,8 +581,14 @@ pub(in crate::server) fn simulate(
     tables: Res<ContentTables>,
     world: Res<WorldSettings>,
     persistence: Option<Res<super::persistence::Persistence>>,
+    generator: Option<Res<super::WorldGenerator>>,
 ) {
     let sim = &mut *sim;
+    let env = plants::Env {
+        seed: world.seed,
+        voxel_size: world.voxel_size,
+        generator: generator.as_deref().map(|g| &g.0),
+    };
     sim.reach = Reach::of(&tables);
     let scale = Arc::clone(
         sim.scale
@@ -617,8 +627,9 @@ pub(in crate::server) fn simulate(
         if !collect(sim, &tables.0, &scale) {
             return;
         }
-        land_step(sim, &mut store, &mut meshes, &tables.0, &scale.heat);
+        land_step(sim, &mut store, &mut meshes, &tables.0, &scale.heat, &env);
     } else if !sim.boundary_held {
+        sample_plants(sim, &mut store, &mut meshes, &tables.0, &scale.heat, &env);
         sim.next_step();
     }
     sim.boundary_held = false;
@@ -906,6 +917,7 @@ fn land_step(
     meshes: &mut MeshState,
     tables: &Tables,
     heat: &HeatScale,
+    env: &plants::Env,
 ) {
     let Running {
         step, read, slices, ..
@@ -974,6 +986,20 @@ fn land_step(
         }
     }
     batch.finish(store, meshes, tables);
+    wake_landed(sim, store, tables, heat, next);
+    sample_plants(sim, store, meshes, tables, heat, env);
+    sim.agenda.end_step();
+    sim.next_step();
+}
+
+/// Wakes the Voxels around what the step just landed.
+fn wake_landed(
+    sim: &mut FluidSim,
+    store: &mut ChunkStore,
+    tables: &Tables,
+    heat: &HeatScale,
+    next: Step,
+) {
     let changed = store.take_changed();
     debug_assert!(changed.chunks.is_empty(), "a step outgrew the journal");
     for at in changed.cells {
@@ -985,8 +1011,20 @@ fn land_step(
     for at in changed.heated {
         sim.wake_fuel_around(store, tables, heat, at, next);
     }
-    sim.agenda.end_step();
-    sim.next_step();
+}
+
+/// Runs the Plant Sample tick of the step that is ending, after its fluid has
+/// landed, and wakes what its changes touched.
+fn sample_plants(
+    sim: &mut FluidSim,
+    store: &mut ChunkStore,
+    meshes: &mut MeshState,
+    tables: &Tables,
+    heat: &HeatScale,
+    env: &plants::Env,
+) {
+    plants::sample_step(sim, store, meshes, tables, env, sim.now);
+    wake_landed(sim, store, tables, heat, sim.now + 1);
 }
 
 /// The store as the simulation reads it: Chunks it has not admitted are
