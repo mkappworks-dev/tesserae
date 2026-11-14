@@ -641,6 +641,9 @@ pub enum SavedPlantKind {
 pub struct SavedFruit {
     pub stages: Vec<String>,
     pub density: f32,
+    /// Absent is a cube.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shape: Option<String>,
 }
 
 /// Material and Biomes by name, since ids are only meaningful beside the tables that made them.
@@ -841,14 +844,18 @@ fn saved_plant(p: &crate::SurfacePlant, mapping: &Mapping) -> Result<SavedPlant,
     use crate::SurfacePlantKind as K;
     let name = |m| mapping.material_name(m);
     let names = |ms: &[crate::MaterialId]| ms.iter().map(|&m| name(m)).collect::<Result<_, _>>();
-    Ok(SavedPlant {
-        shape: (p.shape != crate::SHAPE_FULL_CUBE)
-            .then(|| {
-                mapping.shapes.get(&p.shape).cloned().ok_or_else(|| {
-                    Error::Incompatible(format!("unregistered Shape id {}", p.shape))
+    let shape_name =
+        |shape: crate::ShapeId| {
+            (shape != crate::SHAPE_FULL_CUBE)
+                .then(|| {
+                    mapping.shapes.get(&shape).cloned().ok_or_else(|| {
+                        Error::Incompatible(format!("unregistered Shape id {shape}"))
+                    })
                 })
-            })
-            .transpose()?,
+                .transpose()
+        };
+    Ok(SavedPlant {
+        shape: shape_name(p.shape)?,
         form: match p.kind {
             K::Stages { materials, len } => SavedPlantKind::Stages {
                 materials: names(&materials[..len as usize])?,
@@ -873,6 +880,7 @@ fn saved_plant(p: &crate::SurfacePlant, mapping: &Mapping) -> Result<SavedPlant,
                         Ok::<_, Error>(SavedFruit {
                             stages: names(&f.stages[..f.len as usize])?,
                             density: f.density,
+                            shape: shape_name(f.shape)?,
                         })
                     })
                     .transpose()?,
@@ -936,6 +944,12 @@ fn restored_plant(p: &SavedPlant, mapping: &Mapping) -> Result<crate::SurfacePla
                         stages,
                         len: found.len() as u8,
                         density: f.density,
+                        shape: f
+                            .shape
+                            .as_ref()
+                            .map(|n| mapping.shape_id(n))
+                            .transpose()?
+                            .unwrap_or(crate::SHAPE_FULL_CUBE),
                     })
                 })
                 .transpose()?,

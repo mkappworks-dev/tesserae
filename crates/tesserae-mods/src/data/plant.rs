@@ -15,6 +15,7 @@ pub(super) enum Plant {
     Crop {
         name: String,
         seed: String,
+        shape: Option<String>,
         needs: Needs,
         stages: Vec<Stage>,
         harvest_to: Option<u32>,
@@ -22,6 +23,7 @@ pub(super) enum Plant {
     Tree {
         name: String,
         seed: String,
+        shape: Option<String>,
         needs: Needs,
         sapling: String,
         #[serde(default)]
@@ -41,6 +43,7 @@ pub(super) enum Plant {
     Column {
         name: String,
         seed: String,
+        shape: Option<String>,
         needs: Needs,
         material: String,
         max_height_m: f32,
@@ -53,6 +56,7 @@ pub(super) enum Plant {
     Spreader {
         name: String,
         seed: String,
+        shape: Option<String>,
         needs: Needs,
         material: String,
         reach_m: f32,
@@ -64,6 +68,7 @@ pub(super) enum Plant {
     Climber {
         name: String,
         seed: String,
+        shape: Option<String>,
         needs: Needs,
         material: String,
         mean_seconds: f32,
@@ -106,6 +111,7 @@ pub(super) struct Fruit {
     stages: Vec<Stage>,
     density: f32,
     harvest_to: u32,
+    shape: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -165,12 +171,14 @@ impl From<Plant> for content::PlantDef {
             Plant::Crop {
                 name,
                 seed,
+                shape,
                 needs: n,
                 stages: rows,
                 harvest_to,
             } => Self {
                 name,
                 seed,
+                shape,
                 needs: needs(n),
                 kind: content::PlantKind::Crop(content::CropDef {
                     stages: stages(rows),
@@ -180,6 +188,7 @@ impl From<Plant> for content::PlantDef {
             Plant::Tree {
                 name,
                 seed,
+                shape,
                 needs: n,
                 sapling,
                 sapling_yields,
@@ -195,6 +204,7 @@ impl From<Plant> for content::PlantDef {
             } => Self {
                 name,
                 seed,
+                shape,
                 needs: needs(n),
                 kind: content::PlantKind::Tree(content::TreeDef {
                     sapling,
@@ -211,12 +221,14 @@ impl From<Plant> for content::PlantDef {
                         stages: stages(f.stages),
                         density: f.density,
                         harvest_to: f.harvest_to,
+                        shape: f.shape,
                     }),
                 }),
             },
             Plant::Column {
                 name,
                 seed,
+                shape,
                 needs: n,
                 material,
                 max_height_m,
@@ -227,6 +239,7 @@ impl From<Plant> for content::PlantDef {
             } => Self {
                 name,
                 seed,
+                shape,
                 needs: needs(n),
                 kind: content::PlantKind::Column(content::ColumnDef {
                     material,
@@ -243,6 +256,7 @@ impl From<Plant> for content::PlantDef {
             Plant::Spreader {
                 name,
                 seed,
+                shape,
                 needs: n,
                 material,
                 reach_m,
@@ -252,6 +266,7 @@ impl From<Plant> for content::PlantDef {
             } => Self {
                 name,
                 seed,
+                shape,
                 needs: needs(n),
                 kind: content::PlantKind::Spreader(content::SpreaderDef {
                     material,
@@ -264,6 +279,7 @@ impl From<Plant> for content::PlantDef {
             Plant::Climber {
                 name,
                 seed,
+                shape,
                 needs: n,
                 material,
                 mean_seconds,
@@ -272,6 +288,7 @@ impl From<Plant> for content::PlantDef {
             } => Self {
                 name,
                 seed,
+                shape,
                 needs: needs(n),
                 kind: content::PlantKind::Climber(content::ClimberDef {
                     material,

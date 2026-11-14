@@ -636,7 +636,7 @@ fn surface_feature(
             .find(|p| p.name == *name)
             .ok_or_else(|| unknown(name))?,
     };
-    let shape = f
+    let chosen = f
         .shape
         .as_deref()
         .map(|name| {
@@ -688,7 +688,7 @@ fn surface_feature(
             ));
         }
         PlantKind::Tree(tree) => {
-            if shape.is_some() {
+            if chosen.is_some() {
                 return Err(bad(
                     "biomes.surface_features.shape",
                     "a tree is always cubes",
@@ -703,6 +703,7 @@ fn surface_feature(
                     stages,
                     len: fruit.stages.len() as u8,
                     density: fruit.density,
+                    shape: fruit.shape.unwrap_or(tesserae_core::SHAPE_FULL_CUBE),
                 }
             });
             SurfacePlantKind::Tree(SurfaceTree {
@@ -714,6 +715,12 @@ fn surface_feature(
             })
         }
     };
+    let shape = match &kind {
+        SurfacePlantKind::Tree(_) => tesserae_core::SHAPE_FULL_CUBE,
+        _ => chosen
+            .or(plant.shape)
+            .unwrap_or(tesserae_core::SHAPE_FULL_CUBE),
+    };
     let first = match &kind {
         SurfacePlantKind::Tree(t) => t.trunk,
         _ => plant.first,
@@ -721,10 +728,7 @@ fn surface_feature(
     Ok(SurfaceFeature {
         material: first,
         spacing_m: f.spacing_m,
-        plant: Some(SurfacePlant {
-            shape: shape.unwrap_or(tesserae_core::SHAPE_FULL_CUBE),
-            kind,
-        }),
+        plant: Some(SurfacePlant { shape, kind }),
     })
 }
 

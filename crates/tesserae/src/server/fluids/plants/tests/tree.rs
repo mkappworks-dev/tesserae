@@ -14,10 +14,18 @@ struct Orchard {
     fruit: [MaterialId; 2],
     placed: MaterialId,
     tree: Tree,
+    apple: tesserae_core::ShapeId,
 }
 
 fn orchard(fruit: Option<f32>) -> Orchard {
     let mut tables = crate::server::fixture_tables();
+    let apple = tables
+        .shapes
+        .register(tesserae_core::ShapeDef {
+            boxes: vec![tesserae_core::NodeBox::new([4, 2, 4], [12, 12, 12])],
+            ..tesserae_core::ShapeDef::default()
+        })
+        .unwrap();
     let def = |occlusion| MaterialDef {
         emission: 0,
         dimming: 4,
@@ -54,6 +62,7 @@ fn orchard(fruit: Option<f32>) -> Orchard {
                 .collect(),
             density,
             harvest_to: 0,
+            shape: Some(apple),
         }),
     };
     tables
@@ -62,6 +71,7 @@ fn orchard(fruit: Option<f32>) -> Orchard {
             name: "oak".into(),
             seed: "t:sapling".into(),
             first: sapling,
+            shape: None,
             needs: Needs {
                 soil: vec![soil()],
                 light_min: 8,
@@ -79,6 +89,7 @@ fn orchard(fruit: Option<f32>) -> Orchard {
         fruit: fruit_materials,
         placed,
         tree,
+        apple,
     }
 }
 
@@ -355,4 +366,34 @@ fn a_grown_tree_is_relit_as_a_whole_the_way_a_fresh_solve_lights_it() {
         }
     }
     assert!(shaded > 0, "the canopy shades something");
+}
+
+fn voxel_at(farm: &Farm, cell: [i32; 3]) -> Voxel {
+    let v = VoxelCoord::of(cell);
+    farm.store().get(v.chunk).unwrap().get(v.x, v.y, v.z)
+}
+
+#[test]
+fn fruit_is_the_boxes_of_its_shape_grown_and_ripened_trunk_and_canopy_stay_cubes() {
+    for size in SIZES {
+        let o = orchard(Some(0.3));
+        let mut farm = planted(size, &o, &[BASE]);
+        assert!(until(&mut farm, 40_000, |f| at(f, BASE) == o.trunk));
+        let cells = tree_voxels(&o.tree, SEED, BASE, size);
+        for v in &cells {
+            let got = voxel_at(&farm, v.at);
+            let want = if v.part == Part::Fruit { o.apple } else { 0 };
+            assert_eq!(got.shape(), want, "{size}: {:?} grown", v.part);
+        }
+        let ripe = |f: &Farm| {
+            cells
+                .iter()
+                .filter(|v| voxel_at(f, v.at).material() == o.fruit[1])
+                .count()
+        };
+        assert!(until(&mut farm, 60_000, |f| ripe(f) > 0), "{size}: no ripe");
+        for v in cells.iter().filter(|v| v.part == Part::Fruit) {
+            assert_eq!(voxel_at(&farm, v.at).shape(), o.apple, "{size}: ripened");
+        }
+    }
 }

@@ -22,6 +22,7 @@ const CROP: [MaterialId; 3] = [220, 221, 222];
 const CANE: MaterialId = 223;
 const KELP: MaterialId = 224;
 const CROSS_SHAPE: u8 = 5;
+const FRUIT_SHAPE: u8 = 6;
 
 const SEED: u64 = 0x7e55_e2ae_0000_0001;
 const SIZES: [f32; 3] = [1.0, 0.5, 0.25];
@@ -41,6 +42,7 @@ fn oak(fruit: bool) -> SurfaceTree {
             stages: [FRUIT[0], FRUIT[1], FRUIT[2], AIR],
             len: 3,
             density: 0.2,
+            shape: FRUIT_SHAPE,
         }),
     }
 }
@@ -192,6 +194,7 @@ fn row_of(fruit: bool) -> Tree {
                 .collect(),
             density: f.density,
             harvest_to: 0,
+            shape: Some(f.shape),
         }),
     }
 }
@@ -243,6 +246,7 @@ fn metres(cell: [i32; 3], size: f32) -> [f32; 3] {
 /// Air before, at every Voxel size, and generating the Chunks in the other order changes nothing.
 fn assert_whole(params: WorldgenParams, fruit: bool, sizes: &[f32]) {
     let mut crossings = 0;
+    let mut fruit_cells = 0;
     for &size in sizes {
         let probe = Probe::new(SEED, size, params);
         let half_m = 64.0;
@@ -266,6 +270,13 @@ fn assert_whole(params: WorldgenParams, fruit: bool, sizes: &[f32]) {
                     );
                     // A neighbouring tree may hold the cell first.
                     let _ = material;
+                    let fruit_here = FRUIT.contains(&with.material());
+                    assert_eq!(
+                        with.shape(),
+                        if fruit_here { FRUIT_SHAPE } else { 0 },
+                        "{size} m: tree at {base:?} has the wrong Shape at {at:?}"
+                    );
+                    fruit_cells += usize::from(fruit_here);
                 } else {
                     assert_eq!(with, bare, "{size} m: a tree replaced terrain at {at:?}");
                 }
@@ -291,6 +302,7 @@ fn assert_whole(params: WorldgenParams, fruit: bool, sizes: &[f32]) {
         }
     }
     assert!(crossings > 5, "{crossings} trees crossed a Chunk border");
+    assert_eq!(fruit_cells > 0, fruit, "fruit voxels drawn: {fruit_cells}");
 }
 
 #[test]
@@ -325,6 +337,11 @@ fn fruit_is_drawn_at_hash_stages_inside_its_density_whichever_chunk_makes_it() {
     for stage in FRUIT {
         assert!(canopy.contains(&stage), "no fruit at {stage}");
     }
+}
+
+#[test]
+fn fruit_is_its_box_shape_whole_across_chunk_borders_at_every_voxel_size() {
+    assert_whole(flat(&[tree_feature(12.0, true)]), true, &SIZES);
 }
 
 #[test]
@@ -524,6 +541,7 @@ fn mapping() -> Mapping {
         shapes: [
             (0, "core:cube".to_owned()),
             (CROSS_SHAPE, "t:cross".to_owned()),
+            (FRUIT_SHAPE, "t:apple".to_owned()),
         ]
         .into(),
     }
@@ -572,6 +590,15 @@ fn a_snapshot_freezes_what_generation_needs_of_each_plant() {
     let features = &value["biomes"][0]["surface_features"];
     assert_eq!(features[0]["plant"]["form"]["kind"], "tree");
     assert_eq!(features[0]["plant"]["form"]["trunk"], "t:trunk");
+    assert_eq!(features[0]["plant"]["form"]["fruit"]["shape"], "t:apple");
+}
+
+#[test]
+fn a_snapshot_without_a_fruit_shape_restores_cubes() {
+    let saved = r#"{"stages":["t:apple0"],"density":0.1}"#;
+    let fruit: tesserae_core::save::SavedFruit = serde_json::from_str(saved).unwrap();
+    assert_eq!(fruit.shape, None);
+    assert!(!serde_json::to_string(&fruit).unwrap().contains("shape"));
 }
 
 #[test]

@@ -107,7 +107,26 @@ pub fn shapes() -> Vec<ShapeDef> {
     vec![
         flat_shape("cross", ShapeForm::Cross, (3, 0, 3), (13, 14, 13)),
         flat_shape("plane", ShapeForm::Plane, (1, 1, 14), (15, 15, 16)),
+        apple_shape(),
     ]
+}
+
+/// Hanging fruit as stacked boxes, body about 0.6 of a cell: the mockup's apple in sixteenths. It
+/// seals no face and is walked through, so canopy fruit never blocks a Player or light.
+fn apple_shape() -> ShapeDef {
+    let boxes = [
+        ((4, 1, 4), (12, 3, 12)),
+        ((3, 3, 3), (13, 8, 13)),
+        ((4, 8, 4), (12, 11, 12)),
+        ((7, 11, 7), (9, 14, 9)),
+    ];
+    ShapeDef {
+        form: None,
+        name: "apple".into(),
+        boxes: boxes.map(|(min, max)| NodeBox { min, max }).into(),
+        collision: Some(Vec::new()),
+        connect: None,
+    }
 }
 
 fn color([r, g, b]: [u8; 3]) -> Srgba {
@@ -200,6 +219,7 @@ fn tree(name: &str, fruit: Option<FruitDef>) -> PlantDef {
     PlantDef {
         name: name.into(),
         seed: sapling.clone(),
+        shape: Some(CROSS.into()),
         needs: PlantNeeds {
             light_min: Some(8),
             ..needs(&["grass", "dirt"])
@@ -220,10 +240,14 @@ fn tree(name: &str, fruit: Option<FruitDef>) -> PlantDef {
     }
 }
 
+const CROSS: &str = "terra:cross";
+const PLANE: &str = "terra:plane";
+
 pub fn plants() -> Vec<PlantDef> {
     let wheat = PlantDef {
         name: "wheat".into(),
         seed: "terra:wheat_seeds".into(),
+        shape: Some(CROSS.into()),
         needs: PlantNeeds {
             light_min: Some(9),
             ..needs(&["grass", "dirt"])
@@ -245,6 +269,7 @@ pub fn plants() -> Vec<PlantDef> {
     let berry = PlantDef {
         name: "berry".into(),
         seed: "terra:berry_cutting".into(),
+        shape: Some(CROSS.into()),
         needs: PlantNeeds {
             light_min: Some(9),
             ..needs(&["grass", "dirt", "sand"])
@@ -269,10 +294,12 @@ pub fn plants() -> Vec<PlantDef> {
         ],
         density: 0.12,
         harvest_to: 0,
+        shape: Some("terra:apple".into()),
     };
     let cane = PlantDef {
         name: "cane".into(),
         seed: "terra:cane".into(),
+        shape: Some(CROSS.into()),
         needs: PlantNeeds {
             water: Some(PlantWater {
                 fluid: "terra:water".into(),
@@ -292,6 +319,7 @@ pub fn plants() -> Vec<PlantDef> {
     let kelp = PlantDef {
         name: "kelp".into(),
         seed: "terra:kelp".into(),
+        shape: Some(CROSS.into()),
         needs: needs(&["sand", "dirt", "grass", "stone"]),
         kind: PlantKind::Column(ColumnDef {
             material: "terra:kelp".into(),
@@ -305,6 +333,7 @@ pub fn plants() -> Vec<PlantDef> {
     let mushroom = PlantDef {
         name: "mushroom".into(),
         seed: "terra:mushroom".into(),
+        shape: Some(CROSS.into()),
         needs: PlantNeeds {
             light_max: Some(7),
             ..needs(&["dirt", "grass", "stone", "snow"])
@@ -320,6 +349,7 @@ pub fn plants() -> Vec<PlantDef> {
     let vine = PlantDef {
         name: "vine".into(),
         seed: "terra:vine".into(),
+        shape: Some(PLANE.into()),
         needs: needs(&["stone", "dirt", "brick", "wood", "grass"]),
         kind: PlantKind::Climber(ClimberDef {
             material: "terra:vine".into(),
@@ -344,7 +374,7 @@ fn feature(plant: &str, spacing_m: f32) -> SurfaceFeature {
     SurfaceFeature {
         material: None,
         plant: Some(format!("terra:{plant}")),
-        shape: (!matches!(plant, "oak" | "apple")).then(|| "terra:cross".into()),
+        shape: None,
         spacing_m,
     }
 }

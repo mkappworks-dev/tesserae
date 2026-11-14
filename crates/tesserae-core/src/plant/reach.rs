@@ -335,12 +335,17 @@ mod tests {
     }
 
     fn table(needs: Needs, kind: Kind) -> PlantTable {
+        shaped_table(needs, kind, None)
+    }
+
+    fn shaped_table(needs: Needs, kind: Kind, shape: Option<crate::voxel::ShapeId>) -> PlantTable {
         let mut table = PlantTable::default();
         table
             .push(Plant {
                 name: "p".into(),
                 seed: "t:seed".into(),
                 first: PLANT,
+                shape,
                 needs,
                 kind,
                 sapling_yields: Vec::new(),
@@ -731,6 +736,73 @@ mod tests {
         );
         assert_eq!(shapes.plane_face(Voxel::cube(PLANT)), None);
         assert_eq!(shapes.orientation_holding(PLANT, 0, 0), None);
+    }
+
+    #[test]
+    fn a_column_and_a_spreader_grow_in_the_shape_they_were_placed_in() {
+        const SHAPE: crate::voxel::ShapeId = 9;
+        let shapes = ShapeTable::builtin();
+        let cane = Voxel::new(PLANT, SHAPE, 0);
+        let column = table(needs(), column_kind(Direction::Up, None, 4.0));
+        let mut scene = Scene::lit(15);
+        scene.solids.insert([0, -1, 0], Voxel::cube(SOIL));
+        scene.solids.insert([0, 0, 0], cane);
+        let g = grow(&env(&column, &shapes, 1.0), &scene, 0, [0, 0, 0], cane, 0.0).unwrap();
+        assert_eq!(g.changes[0].voxel, cane);
+        let grass = spreader(2.0, 1000, (0, 15));
+        let mut scene = meadow(1.0, 2.0);
+        scene.solids.insert([0, 0, 0], cane);
+        let env = env(&grass, &shapes, 1.0);
+        let spread: Vec<_> = (0..200)
+            .filter_map(|step| grow(&env, &scene, step, [0, 0, 0], cane, 0.0))
+            .collect();
+        assert!(!spread.is_empty());
+        assert!(spread.iter().all(|g| g.changes[0].voxel == cane));
+    }
+
+    #[test]
+    fn placing_a_seed_uses_the_plants_shape_and_ignores_the_players() {
+        let (mut shapes, vine) = vines();
+        let cross = shapes
+            .register(ShapeDef {
+                form: Form::Cross,
+                boxes: vec![NodeBox::new([4, 0, 4], [12, 12, 12])],
+                ..ShapeDef::default()
+            })
+            .unwrap();
+        let chosen = Voxel::shaped(PLANT, 1, Orientation::all().nth(5).unwrap());
+        let wheat = shaped_table(needs(), column_kind(Direction::Up, None, 1.0), Some(cross));
+        for face in 0..6 {
+            assert_eq!(
+                wheat.placed(&shapes, chosen, face),
+                Voxel::new(PLANT, cross, 0),
+                "face {face}"
+            );
+        }
+        let bare = table(needs(), column_kind(Direction::Up, None, 1.0));
+        assert_eq!(bare.placed(&shapes, chosen, 3), chosen);
+        let other = Voxel::shaped(ROCK, 1, Orientation::IDENTITY);
+        assert_eq!(wheat.placed(&shapes, other, 3), other);
+        assert_eq!(wheat.fixed_shape(PLANT), Some(cross));
+        assert_eq!(bare.fixed_shape(PLANT), None);
+        let ivy = shaped_table(
+            needs(),
+            Kind::Climber {
+                mean_seconds: 16.0,
+                length_m: 4.0,
+                yields: Vec::new(),
+            },
+            Some(vine),
+        );
+        for face in 0..6 {
+            let put = ivy.placed(&shapes, chosen, face);
+            assert_eq!(put.shape(), vine);
+            assert_eq!(
+                shapes.plane_face(put),
+                Some(face ^ 1),
+                "struck face {face} holds the Voxel struck"
+            );
+        }
     }
 
     fn climber(length_m: f32) -> PlantTable {

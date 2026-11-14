@@ -63,6 +63,7 @@ fn content(needs: impl FnOnce(&mut Needs)) -> Content {
             name: "wheat".into(),
             seed: "t:seed".into(),
             first: stages[0],
+            shape: None,
             needs: n,
             kind: Kind::Crop {
                 stages: vec![
@@ -226,6 +227,37 @@ const ENOUGH: u64 = 3000;
 
 mod reach;
 mod tree;
+
+#[test]
+fn a_stage_change_keeps_the_plants_shape() {
+    for size in SIZES {
+        let mut content = content(|_| {});
+        let cross = content
+            .tables
+            .shapes
+            .register(tesserae_core::ShapeDef {
+                form: tesserae_core::Form::Cross,
+                boxes: vec![tesserae_core::NodeBox::new([4, 0, 4], [12, 12, 12])],
+                ..tesserae_core::ShapeDef::default()
+            })
+            .unwrap();
+        let stages = content.stages;
+        let mut farm = Farm::new(size, content);
+        for z in 0..FIELD {
+            for x in 0..FIELD {
+                farm.solid([x, CROP_Y, z], Voxel::new(stages[0], cross, 0));
+            }
+        }
+        farm.run(ENOUGH);
+        assert!(farm.advanced() > 0, "{size}: nothing grew");
+        let chunk = farm.store().get(ChunkCoord::new(0, 0, 0)).unwrap();
+        for z in 0..FIELD as usize {
+            for x in 0..FIELD as usize {
+                assert_eq!(chunk.get(x, CROP_Y as usize, z).shape(), cross, "{size}");
+            }
+        }
+    }
+}
 
 #[test]
 fn a_crop_advances_stage_by_stage_to_ripe_and_stays_ripe() {

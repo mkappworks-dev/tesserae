@@ -10,7 +10,7 @@ use super::{
     Tree, conditions_met, mix,
 };
 use crate::light::Light;
-use crate::voxel::{AIR, MaterialId, Voxel};
+use crate::voxel::{AIR, MaterialId, SHAPE_FULL_CUBE, ShapeId, Voxel};
 
 /// Which of a tree's grown Materials a Voxel is.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -26,6 +26,16 @@ pub struct TreeVoxel {
     pub at: [i32; 3],
     pub material: MaterialId,
     pub part: Part,
+    /// Fruit takes the fruit's Shape; trunk and canopy are cubes.
+    pub shape: ShapeId,
+    pub orientation: u8,
+}
+
+impl TreeVoxel {
+    /// The Voxel this cell holds.
+    pub fn voxel(&self) -> Voxel {
+        Voxel::new(self.material, self.shape, self.orientation)
+    }
 }
 
 const FACES: [[i32; 3]; 6] = [
@@ -84,6 +94,8 @@ pub fn tree_voxels(tree: &Tree, seed: u64, base: [i32; 3], voxel_size: f32) -> V
             at: [base[0], base[1] + dy, base[2]],
             material: tree.trunk,
             part: Part::Trunk,
+            shape: SHAPE_FULL_CUBE,
+            orientation: 0,
         })
         .collect();
     let top = [base[0], base[1] + height - 1, base[2]];
@@ -110,11 +122,15 @@ pub fn tree_voxels(tree: &Tree, seed: u64, base: [i32; 3], voxel_size: f32) -> V
                         at,
                         material: f.stages[0].material,
                         part: Part::Fruit,
+                        shape: f.shape.unwrap_or(SHAPE_FULL_CUBE),
+                        orientation: 0,
                     },
                     None => TreeVoxel {
                         at,
                         material: tree.canopy,
                         part: Part::Canopy,
+                        shape: SHAPE_FULL_CUBE,
+                        orientation: 0,
                     },
                 });
             }
@@ -153,7 +169,7 @@ pub(super) fn sprout(
         }
         changes.push(Change {
             at: v.at,
-            voxel: Voxel::cube(v.material),
+            voxel: v.voxel(),
         });
     }
     Some(Growth {
@@ -323,6 +339,7 @@ mod tests {
     const CANOPY: MaterialId = 21;
     const FRUIT: [MaterialId; 2] = [22, 23];
     const PLACED_LOG: MaterialId = 30;
+    const APPLE: ShapeId = 7;
     const SIZES: [f32; 3] = [1.0, 0.5, 0.25];
     const SEED: u64 = 0xfeed;
 
@@ -351,6 +368,7 @@ mod tests {
                     .collect(),
                 density,
                 harvest_to: 0,
+                shape: Some(APPLE),
             }),
         }
     }
@@ -362,6 +380,7 @@ mod tests {
                 name: "oak".into(),
                 seed: "t:sapling".into(),
                 first: SAPLING,
+                shape: None,
                 needs: Needs {
                     soil: vec![SOIL],
                     light_max: 15,
@@ -508,14 +527,21 @@ mod tests {
             assert!(growth.tree);
             let want: Vec<_> = tree_voxels(row, SEED, at, size)
                 .into_iter()
-                .map(|v| (v.at, v.material))
+                .map(|v| (v.at, v.voxel()))
                 .collect();
-            let got: Vec<_> = growth
-                .changes
-                .iter()
-                .map(|c| (c.at, c.voxel.material()))
-                .collect();
+            let got: Vec<_> = growth.changes.iter().map(|c| (c.at, c.voxel)).collect();
             assert_eq!(got, want, "{size}");
+            assert!(
+                got.iter()
+                    .any(|(_, v)| v.shape() == APPLE && v.material() == FRUIT[0]),
+                "{size}: no apple"
+            );
+            assert!(
+                got.iter()
+                    .filter(|(_, v)| v.material() == TRUNK || v.material() == CANOPY)
+                    .all(|(_, v)| v.shape() == 0),
+                "{size}: trunk and canopy stay cubes"
+            );
             assert!(growth.changes.len() > 3);
         }
     }
@@ -576,8 +602,9 @@ mod tests {
             seed: SEED,
             voxel_size: 1.0,
         };
-        let g = crate::plant::grow(&env, &scene, 0, at, Voxel::cube(FRUIT[0]), 0.0).unwrap();
-        assert_eq!(g.changes[0].voxel.material(), FRUIT[1]);
+        let apple = Voxel::new(FRUIT[0], APPLE, 0);
+        let g = crate::plant::grow(&env, &scene, 0, at, apple, 0.0).unwrap();
+        assert_eq!(g.changes[0].voxel, Voxel::new(FRUIT[1], APPLE, 0));
         assert!(!g.tree);
         assert_eq!(
             crate::plant::grow(&env, &scene, 0, at, Voxel::cube(FRUIT[1]), 0.0),

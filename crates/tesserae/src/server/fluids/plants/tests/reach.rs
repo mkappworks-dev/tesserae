@@ -56,6 +56,7 @@ fn wild(form: Form, kind: Kind, needs: impl FnOnce(&mut Needs)) -> Wild {
             name: "wild".into(),
             seed: "t:seed".into(),
             first: plant,
+            shape: None,
             needs: n,
             kind,
             sapling_yields: Vec::new(),

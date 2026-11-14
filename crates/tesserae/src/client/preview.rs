@@ -305,7 +305,9 @@ pub(super) fn ghost_voxels(
     let drawn = Holding::Solid {
         material,
         shape: voxel.shape(),
-        orientation: tesserae_core::Orientation::from_bits(voxel.orientation()).unwrap_or_default(),
+        orientation: ghost.plant_orientation.unwrap_or_else(|| {
+            tesserae_core::Orientation::from_bits(voxel.orientation()).unwrap_or_default()
+        }),
     };
     let Some((door, aim)) = door else {
         return (drawn, vec![ghost.at]);
@@ -497,6 +499,7 @@ mod tests {
             target.0.ghost = Some(AimGhost {
                 at: Vec3::new(3.0, 4.0, 5.0),
                 door: None,
+                plant_orientation: None,
             });
             target.1 = Some(view);
         }
@@ -574,6 +577,7 @@ mod tests {
         let ghost = |door| AimGhost {
             at: Vec3::new(5.0, 8.0, 5.0) * 0.25,
             door,
+            plant_orientation: None,
         };
         let aim = DoorAim {
             near: NEG_Z,
@@ -621,6 +625,47 @@ mod tests {
             ghost_voxels(held(rock, SHAPE_STAIR), ghost(None), &catalogue, 0.25),
             (held(rock, SHAPE_STAIR), one)
         );
+    }
+
+    #[test]
+    fn a_plants_seed_ghost_is_the_plants_shape_and_the_orientation_the_server_derives() {
+        use crate::content::CatalogueMaterial;
+        use tesserae_core::SHAPE_SLAB;
+        let seed = 40;
+        let catalogue = ContentCatalogue {
+            materials: vec![CatalogueMaterial {
+                remove_time: tesserae_mods::DEFAULT_REMOVE_TIME,
+                id: seed,
+                name: "m:vine".into(),
+                solid: true,
+                fluid: None,
+                burns: false,
+                shape: Some(SHAPE_SLAB),
+                door: None,
+            }],
+            ..catalogue()
+        };
+        let held = Holding::Solid {
+            material: seed,
+            shape: SHAPE_STAIR,
+            orientation: Orientation::IDENTITY.turned(),
+        };
+        let on_wall = Orientation::IDENTITY.turned().turned();
+        let ghost = AimGhost {
+            at: Vec3::new(5.0, 8.0, 5.0) * 0.25,
+            door: None,
+            plant_orientation: Some(on_wall),
+        };
+        let (drawn, cells) = ghost_voxels(held, ghost, &catalogue, 0.25);
+        assert_eq!(
+            drawn,
+            Holding::Solid {
+                material: seed,
+                shape: SHAPE_SLAB,
+                orientation: on_wall,
+            }
+        );
+        assert_eq!(cells, vec![ghost.at]);
     }
 
     #[test]

@@ -199,9 +199,16 @@ pub(super) fn aim_target(
             };
             tables.vet_occupants(next).ok()?;
             vet_capacity(store, tables, at, next.solid).ok()?;
+            let plant_orientation = match change {
+                Change::Solid(voxel) if tables.plants.fixed_shape(voxel.material()).is_some() => {
+                    tesserae_core::Orientation::from_bits(voxel.orientation())
+                }
+                _ => None,
+            };
             Some(AimGhost {
                 at: Vec3::from_array(at.map(|i| i as f32 * world.voxel_size)),
                 door: door_aim(store, tables, world, report, reach, at),
+                plant_orientation,
             })
         });
     AimTarget {

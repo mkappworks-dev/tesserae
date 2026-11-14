@@ -178,6 +178,9 @@ pub struct AimRemoval {
 pub struct AimGhost {
     pub at: Vec3,
     pub door: Option<DoorAim>,
+    /// The Orientation a Plant's seed is placed in, which depends on the face
+    /// aimed at and not on the Player's choice; `None` for any other Voxel.
+    pub plant_orientation: Option<tesserae_core::Orientation>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]

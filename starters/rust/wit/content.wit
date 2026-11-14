@@ -493,6 +493,9 @@ interface content {
         density: f32,
         /// An earlier Stage, by index, that Use on ripe fruit resets to.
         harvest-to: u32,
+        /// The Shape of every fruit Voxel, by full name, so fruit can be a box
+        /// model; `none` keeps cubes.
+        shape: option<string>,
     }
 
     /// A sapling that grows a parametric tree, sized in metres.
@@ -574,6 +577,11 @@ interface content {
         /// An Item, `<mod id>:<name>`, whose Material is the Plant's first
         /// Stage, a tree's sapling, or the one Material of any other kind.
         seed: string,
+        /// The Shape of every single-Voxel Stage (crop Stages, a sapling, a
+        /// column, spreader or climber Voxel), by full name. Placing the seed,
+        /// growth and generation all use it, whatever the Player chose; `none`
+        /// keeps the Player's choice and cubes.
+        shape: option<string>,
         needs: plant-needs,
         kind: plant-kind,
     }

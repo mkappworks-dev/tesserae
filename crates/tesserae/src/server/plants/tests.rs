@@ -35,6 +35,7 @@ struct Content {
     fruit: [MaterialId; 2],
     cane: MaterialId,
     placed: MaterialId,
+    cross: tesserae_core::ShapeId,
 }
 
 fn soil() -> MaterialId {
@@ -62,8 +63,17 @@ fn stage(material: MaterialId, mean: Option<f32>, rows: &[(&str, u32, u32)]) -> 
     }
 }
 
-fn content() -> Content {
+/// `shaped` gives the wheat Plant the `cross` Shape the Content registers.
+fn content_with(shaped: bool) -> Content {
     let mut tables = crate::server::fixture_tables();
+    let cross = tables
+        .shapes
+        .register(tesserae_core::ShapeDef {
+            form: tesserae_core::Form::Cross,
+            boxes: vec![tesserae_core::NodeBox::new([4, 0, 4], [12, 12, 12])],
+            ..tesserae_core::ShapeDef::default()
+        })
+        .unwrap();
     let def = MaterialDef {
         emission: 0,
         dimming: 0,
@@ -88,6 +98,7 @@ fn content() -> Content {
         name: name.into(),
         seed: seed.into(),
         first,
+        shape: None,
         needs: needs(),
         kind,
         sapling_yields: Vec::new(),
@@ -151,10 +162,15 @@ fn content() -> Content {
                     ],
                     density: 0.1,
                     harvest_to: 0,
+                    shape: None,
                 }),
             }),
         ),
     ] {
+        let mut p = p;
+        if shaped && p.name == "t:wheat" {
+            p.shape = Some(cross);
+        }
         tables.plants.push(p).unwrap();
     }
     Content {
@@ -167,6 +183,7 @@ fn content() -> Content {
         fruit,
         cane,
         placed,
+        cross,
     }
 }
 
@@ -184,10 +201,14 @@ fn item(name: &str, material: Option<MaterialId>, food: Option<f32>) -> ItemDef 
 /// Soil at (5, 7, 5) and (6, 7, 5) in rock, with the Player holding three each of
 /// the Seeds in hotbar slots 0 to 2 and the wheat Seed selected.
 fn farm() -> (App, Content) {
+    farm_with(false)
+}
+
+fn farm_with(shaped: bool) -> (App, Content) {
     bevy::tasks::AsyncComputeTaskPool::get_or_init(|| {
         bevy::tasks::TaskPoolBuilder::new().num_threads(2).build()
     });
-    let c = content();
+    let c = content_with(shaped);
     let mut chunk = ground();
     for x in [5, 6] {
         chunk.set(x, 7, 5, Voxel::cube(soil()));
@@ -617,6 +638,94 @@ fn a_seed_in_the_dark_is_accepted_and_waits() {
     tick(&mut app);
     assert!(rejections(&mut app).is_empty());
     assert_eq!(voxel_at(&app, CROP), Voxel::cube(c.wheat[0]));
+}
+
+fn chosen() -> (tesserae_core::ShapeId, Orientation) {
+    (tesserae_core::SHAPE_STAIR, Orientation::IDENTITY.turned())
+}
+
+#[test]
+fn a_seed_is_the_plants_shape_whatever_shape_and_orientation_the_player_chose() {
+    for survival_mode in [false, true] {
+        let (mut app, c) = farm_with(true);
+        if survival_mode {
+            survival(&mut app);
+        }
+        let (shape, orientation) = chosen();
+        let mut intent = plant_at(5, 5);
+        intent.action = EditAction::PlaceHeld { shape, orientation };
+        send(&mut app, intent);
+        tick(&mut app);
+        assert!(rejections(&mut app).is_empty());
+        assert_eq!(voxel_at(&app, CROP), Voxel::new(c.wheat[0], c.cross, 0));
+        assert_eq!(count(&mut app, "t:seed"), 2, "survival: {survival_mode}");
+    }
+}
+
+#[test]
+fn a_plant_that_names_no_shape_keeps_the_players_choice() {
+    let (mut app, c) = farm();
+    let (shape, orientation) = chosen();
+    let mut intent = plant_at(5, 5);
+    intent.action = EditAction::PlaceHeld { shape, orientation };
+    send(&mut app, intent);
+    tick(&mut app);
+    assert!(rejections(&mut app).is_empty());
+    assert_eq!(
+        voxel_at(&app, CROP),
+        Voxel::shaped(c.wheat[0], shape, orientation)
+    );
+}
+
+#[test]
+fn a_layout_of_seeds_is_the_plants_shape_in_every_cell() {
+    for survival_mode in [false, true] {
+        let (mut app, c) = farm_with(true);
+        if survival_mode {
+            survival(&mut app);
+        }
+        set(&mut app, [7, 7, 5], Voxel::cube(soil()));
+        let (shape, orientation) = chosen();
+        let mut intent = row(3);
+        intent.voxel = Voxel::shaped(rock(), shape, orientation);
+        send_layout(&mut app, intent);
+        tick(&mut app);
+        assert!(rejections(&mut app).is_empty());
+        for x in 5..8 {
+            assert_eq!(
+                voxel_at(&app, [x, 8, 5]),
+                Voxel::new(c.wheat[0], c.cross, 0),
+                "x {x}, survival: {survival_mode}"
+            );
+        }
+    }
+}
+
+#[test]
+fn undo_and_redo_of_a_seed_keep_the_plants_shape() {
+    let (mut app, c) = farm_with(true);
+    send(&mut app, plant_at(5, 5));
+    tick(&mut app);
+    replay(&mut app, Undo);
+    assert!(voxel_at(&app, CROP).is_air());
+    replay(&mut app, Redo);
+    assert!(rejections(&mut app).is_empty());
+    assert_eq!(voxel_at(&app, CROP), Voxel::new(c.wheat[0], c.cross, 0));
+}
+
+#[test]
+fn the_catalogue_reports_the_plants_shape_as_the_materials_fixed_shape() {
+    let c = content_with(true);
+    assert_eq!(c.tables.plants.fixed_shape(c.wheat[0]), Some(c.cross));
+    assert_eq!(
+        c.tables.plants.fixed_shape(c.wheat[1]),
+        None,
+        "a later Stage is never placed"
+    );
+    assert_eq!(
+        content_with(false).tables.plants.fixed_shape(c.wheat[0]),
+        None
+    );
 }
 
 fn row(count: u32) -> LayoutIntent {

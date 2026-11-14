@@ -21,6 +21,7 @@ use crate::plant::tree::{Part, fruit_stage, tree_voxels};
 use crate::plant::{CountRange, Fruit, Stage, Tree};
 use crate::shape::{MAX_SHAPED_PER_CHUNK, Orientation, SHAPE_SLAB, SHAPE_STAIR};
 use crate::tables::Tables;
+use crate::voxel::SHAPE_FULL_CUBE;
 use crate::voxel::{MaterialId, Voxel};
 
 /// What a Mod parameterises. Plain `Copy` data with no callbacks, because
@@ -1389,6 +1390,7 @@ impl Worldgen {
                     .collect(),
                 density: f.density,
                 harvest_to: 0,
+                shape: (f.shape != SHAPE_FULL_CUBE).then_some(f.shape),
             }),
         }
     }
@@ -1408,7 +1410,10 @@ impl Worldgen {
                     }
                     _ => v.material,
                 };
-                ([v.at[0], v.at[1] + base[1], v.at[2]], Voxel::cube(material))
+                (
+                    [v.at[0], v.at[1] + base[1], v.at[2]],
+                    Voxel::new(material, v.shape, v.orientation),
+                )
             })
             .collect()
     }

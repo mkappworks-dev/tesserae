@@ -391,6 +391,8 @@ pub struct SurfaceFruit {
     pub stages: [MaterialId; MAX_SURFACE_FRUIT_STAGES],
     pub len: u8,
     pub density: f32,
+    /// The Shape of every fruit Voxel; the cube is `SHAPE_FULL_CUBE`.
+    pub shape: ShapeId,
 }
 
 impl SurfacePlant {

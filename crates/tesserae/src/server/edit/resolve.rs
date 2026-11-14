@@ -119,6 +119,7 @@ pub(super) fn resolve(
                 world.voxel_size,
             );
             let voxel = tables.uses.placed(voxel, near, hinge);
+            let voxel = tables.plants.placed(&tables.shapes, voxel, hit.face);
             tables.vet_placed(voxel)?;
             match store.voxel(in_front) {
                 None => Err(RejectReason::NotLoaded),

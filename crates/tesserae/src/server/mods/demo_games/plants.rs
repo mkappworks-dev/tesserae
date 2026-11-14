@@ -1,7 +1,8 @@
 //! Terra's farm: what a crop, a bush and an apple tree yield and how they reset, and the food
 //! Recipes that use the produce.
 
-use super::{loaded, material};
+use super::{loaded, material, shape};
+use tesserae_core::plant::Kind;
 
 fn yields_of(loaded: &super::LoadedMods, name: &str) -> Vec<(String, u32)> {
     let id = material(loaded, name);
@@ -98,4 +99,75 @@ fn a_new_terra_world_grows_oaks_apples_and_wheat_within_a_short_walk() {
             .sum();
         assert!(found > 0, "{names:?} within {SHORT_WALK_M} m");
     }
+}
+
+#[test]
+fn terras_plants_name_their_shapes_and_a_generated_apple_is_the_box_apple() {
+    use super::food::SHORT_WALK_M;
+    use tesserae_core::CHUNK_SIZE;
+    let (_install, loaded) = loaded("terra", 0.5);
+    let plants = &loaded.tables.plants;
+    for (name, want) in [
+        ("terra:wheat_sprout", "terra:cross"),
+        ("terra:berry_sprout", "terra:cross"),
+        ("terra:oak_sapling", "terra:cross"),
+        ("terra:cane", "terra:cross"),
+        ("terra:kelp", "terra:cross"),
+        ("terra:mushroom", "terra:cross"),
+        ("terra:vine", "terra:plane"),
+    ] {
+        assert_eq!(
+            plants.fixed_shape(material(&loaded, name)),
+            Some(shape(&loaded, want)),
+            "{name}"
+        );
+    }
+    let apple = shape(&loaded, "terra:apple");
+    let Kind::Tree(tree) = &plants
+        .plants()
+        .iter()
+        .find(|p| p.name == "terra:apple")
+        .unwrap()
+        .kind
+    else {
+        panic!("a tree")
+    };
+    assert_eq!(tree.fruit.as_ref().unwrap().shape, Some(apple));
+    for face in 0..6 {
+        let voxel = tesserae_core::Voxel::new(material(&loaded, "terra:apple_ripe"), apple, 0);
+        assert!(!loaded.tables.shapes.seals(voxel, face), "face {face}");
+    }
+
+    let generator = tesserae_core::Worldgen::new(7, 0.5, loaded.world.unwrap());
+    let ripe = [
+        material(&loaded, "terra:apple_unripe"),
+        material(&loaded, "terra:apple_ripe"),
+    ];
+    let chunk_m = CHUNK_SIZE as f32 * 0.5;
+    let (lowest, highest) = generator.surface_bounds_m();
+    let reach = (SHORT_WALK_M / chunk_m).ceil() as i32;
+    let mut found = 0;
+    for cz in -reach..reach {
+        for cx in -reach..reach {
+            for cy in (lowest / chunk_m).floor() as i32..=(highest / chunk_m).ceil() as i32 {
+                let chunk = generator.chunk(cx, cy, cz);
+                if chunk.uniform().is_some() {
+                    continue;
+                }
+                for i in 0..CHUNK_SIZE.pow(3) {
+                    let at = (
+                        i % CHUNK_SIZE,
+                        i / CHUNK_SIZE % CHUNK_SIZE,
+                        i / CHUNK_SIZE.pow(2),
+                    );
+                    let voxel = chunk.get(at.0, at.1, at.2);
+                    if ripe.contains(&voxel.material()) {
+                        assert_eq!(voxel.shape(), apple, "a generated apple is the box apple");
+                        found += 1;
+                    }
+                }
+            }
+        }
+    }
+    assert!(found > 0, "no apple generated near the spawn");
 }

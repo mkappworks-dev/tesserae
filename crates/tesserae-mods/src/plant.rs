@@ -3,7 +3,7 @@
 use tesserae_core::plant::{
     CountRange, Direction, Fruit, Kind, Needs, Plant, PlantTable, Stage, Tree, Water, Yield,
 };
-use tesserae_core::{MaterialId, Tables, Voxel};
+use tesserae_core::{MaterialId, ShapeId, Tables, Voxel};
 
 use crate::bindings::tesserae::mods::content;
 use crate::declare::{Behaviour, ItemDef};
@@ -152,7 +152,19 @@ fn solid(registry: &Registry, tables: &Tables, name: &str) -> Result<MaterialId,
     }
 }
 
+fn resolve_shape(registry: &Registry, name: &Option<String>) -> Result<Option<ShapeId>, String> {
+    name.as_deref()
+        .map(|name| {
+            registry
+                .id_of(NameKind::Shape, name)
+                .map(|id| id as ShapeId)
+                .ok_or_else(|| format!("names Shape `{name}`, which no loaded Mod declares"))
+        })
+        .transpose()
+}
+
 fn plant(def: &content::PlantDef, registry: &Registry, tables: &Tables) -> Result<Plant, String> {
+    let shape = resolve_shape(registry, &def.shape)?;
     let needs = needs(&def.needs, registry, tables)?;
     let mut sapling_yields = Vec::new();
     let (first, kind) = match &def.kind {
@@ -180,6 +192,7 @@ fn plant(def: &content::PlantDef, registry: &Registry, tables: &Tables) -> Resul
                         stages: stages(&fruit.stages, registry, tables)?,
                         density: fruit.density,
                         harvest_to: fruit.harvest_to as usize,
+                        shape: resolve_shape(registry, &fruit.shape)?,
                     })
                 })
                 .transpose()?;
@@ -246,6 +259,7 @@ fn plant(def: &content::PlantDef, registry: &Registry, tables: &Tables) -> Resul
         name: def.name.clone(),
         seed: def.seed.clone(),
         first,
+        shape,
         needs,
         kind,
         sapling_yields,

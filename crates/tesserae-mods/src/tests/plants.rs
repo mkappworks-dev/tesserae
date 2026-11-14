@@ -11,6 +11,7 @@ fn column(stands_in: Option<&str>) -> content::PlantDef {
     content::PlantDef {
         name: "kelp".into(),
         seed: "t:kelp".into(),
+        shape: None,
         needs: content::PlantNeeds {
             soil: vec!["t:sand".into()],
             light_min: None,
@@ -113,6 +114,31 @@ fn a_data_mod_declares_stands_in_in_its_column_row() {
     assert_eq!(c.stands_in, None);
 }
 
+#[test]
+fn a_data_mod_names_a_plants_and_a_fruits_shape_in_its_rows() {
+    let toml = "[[plants]]\nname = \"oak\"\nkind = \"tree\"\nseed = \"t:sapling\"\n\
+         shape = \"t:cross\"\nsapling = \"t:sapling\"\ntrunk = \"t:log\"\n\
+         canopy = \"t:leaf\"\ntrunk-height-m = [3.0, 5.0]\ncanopy-radius-m = 2.5\n\
+         mean-seconds = 60.0\nsapling-yield = [1, 1]\n\
+         [plants.fruit]\nstages = [{ material = \"t:a\", mean-seconds = 20.0 }, \
+         { material = \"t:b\" }]\ndensity = 0.2\nharvest-to = 0\nshape = \"t:apple\"\n\
+         [plants.needs]\nsoil = [\"t:sand\"]\n";
+    let payload = crate::trust::CheckedPayload::for_test(
+        "content.toml",
+        [("content.toml", toml.as_bytes().to_vec())],
+    );
+    let declared = crate::data::parse("t", &payload).unwrap();
+    let row = &declared.plants[0];
+    assert_eq!(row.shape.as_deref(), Some("t:cross"));
+    let content::PlantKind::Tree(tree) = &row.kind else {
+        panic!("a tree");
+    };
+    assert_eq!(
+        tree.fruit.as_ref().unwrap().shape.as_deref(),
+        Some("t:apple")
+    );
+}
+
 mod surface_features {
     use tesserae_core::{SurfacePlantKind, Tables};
 
@@ -142,6 +168,7 @@ mod surface_features {
         content::PlantDef {
             name: name.into(),
             seed: "t:seed".into(),
+            shape: None,
             needs: needs(),
             kind,
         }
@@ -178,6 +205,7 @@ mod surface_features {
                         stages: vec![stage("t:apple0", Some(20.0)), stage("t:apple1", None)],
                         density: 0.2,
                         harvest_to: 0,
+                        shape: None,
                     }),
                 }),
             ),
@@ -241,6 +269,13 @@ mod surface_features {
     fn resolved(
         features: Vec<content::SurfaceFeature>,
     ) -> Result<(tesserae_core::BiomeTable, Tables, Registry), ModError> {
+        resolved_with(features, plants())
+    }
+
+    fn resolved_with(
+        features: Vec<content::SurfaceFeature>,
+        plants: Vec<content::PlantDef>,
+    ) -> Result<(tesserae_core::BiomeTable, Tables, Registry), ModError> {
         let mut d = empty();
         d.materials = [
             "sand", "wheat0", "wheat1", "wheat2", "sapling", "log", "leaf", "apple0", "apple1",
@@ -250,17 +285,21 @@ mod surface_features {
         .into();
         d.materials.push(material("sea", false));
         d.fluids = vec![fluid("t:sea")];
-        d.shapes = vec![content::ShapeDef {
-            name: "cross".into(),
+        let shape = |name: &str, form| content::ShapeDef {
+            name: name.into(),
             boxes: vec![crate::bindings::tesserae::mods::types::NodeBox {
                 min: (4, 0, 4),
                 max: (12, 16, 12),
             }],
-            form: Some(content::ShapeForm::Cross),
+            form,
             collision: None,
             connect: None,
-        }];
-        d.plants = plants();
+        };
+        d.shapes = vec![
+            shape("cross", Some(content::ShapeForm::Cross)),
+            shape("apple", None),
+        ];
+        d.plants = plants;
         d.biomes = vec![content::BiomeDef {
             soundscape: None,
             name: "field".into(),
@@ -284,6 +323,74 @@ mod surface_features {
 
     fn refused(features: Vec<content::SurfaceFeature>) -> String {
         resolved(features).unwrap_err().to_string()
+    }
+
+    fn with_shapes(plant_shape: Option<&str>, fruit_shape: Option<&str>) -> Vec<content::PlantDef> {
+        let mut rows = plants();
+        for row in &mut rows {
+            match (row.name.as_str(), &mut row.kind) {
+                ("wheat", _) => row.shape = plant_shape.map(Into::into),
+                ("oak", content::PlantKind::Tree(tree)) => {
+                    tree.fruit.as_mut().unwrap().shape = fruit_shape.map(Into::into);
+                }
+                _ => {}
+            }
+        }
+        rows
+    }
+
+    #[test]
+    fn a_plants_shape_and_its_fruits_resolve_to_registered_shapes_and_freeze_into_the_biome() {
+        let (biomes, tables, registry) = resolved_with(
+            vec![
+                feature(None, Some("t:wheat"), None),
+                feature(None, Some("t:oak"), None),
+            ],
+            with_shapes(Some("t:cross"), Some("t:apple")),
+        )
+        .unwrap();
+        let shape = |n: &str| registry.id_of(NameKind::Shape, n).unwrap() as u8;
+        let wheat = &tables.plants.plants()[0];
+        assert_eq!(wheat.shape, Some(shape("t:cross")));
+        let Kind::Tree(tree) = &tables.plants.plants()[1].kind else {
+            panic!("a tree");
+        };
+        assert_eq!(tree.fruit.as_ref().unwrap().shape, Some(shape("t:apple")));
+        let features = biomes.as_slice()[0].surface_features.as_slice();
+        assert_eq!(features[0].plant.unwrap().shape, shape("t:cross"));
+        let SurfacePlantKind::Tree(frozen) = features[1].plant.unwrap().kind else {
+            panic!("a tree");
+        };
+        assert_eq!(frozen.fruit.unwrap().shape, shape("t:apple"));
+    }
+
+    #[test]
+    fn a_feature_shape_overrides_the_plants_and_a_plant_naming_none_is_a_cube_as_before() {
+        let (biomes, _, registry) = resolved_with(
+            vec![feature(None, Some("t:wheat"), Some("t:apple"))],
+            with_shapes(Some("t:cross"), None),
+        )
+        .unwrap();
+        let apple = registry.id_of(NameKind::Shape, "t:apple").unwrap() as u8;
+        let features = biomes.as_slice()[0].surface_features.as_slice();
+        assert_eq!(features[0].plant.unwrap().shape, apple);
+        let (biomes, tables, _) = resolved(vec![feature(None, Some("t:wheat"), None)]).unwrap();
+        assert_eq!(tables.plants.plants()[0].shape, None);
+        let features = biomes.as_slice()[0].surface_features.as_slice();
+        assert_eq!(features[0].plant.unwrap().shape, 0);
+    }
+
+    #[test]
+    fn an_unknown_plant_or_fruit_shape_is_a_load_error_naming_the_plant() {
+        for (plant, fruit, who) in [
+            (Some("t:nope"), None, "wheat"),
+            (None, Some("t:nope"), "oak"),
+        ] {
+            let err = resolved_with(vec![], with_shapes(plant, fruit))
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains(who) && err.contains("t:nope"), "{err}");
+        }
     }
 
     #[test]

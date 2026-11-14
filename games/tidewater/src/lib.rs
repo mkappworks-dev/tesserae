@@ -214,6 +214,7 @@ fn kelp_plant() -> PlantDef {
     PlantDef {
         name: "kelp".into(),
         seed: "flora:frond".into(),
+        shape: Some("flora:cross".into()),
         needs: PlantNeeds {
             soil: ["sand", "soil", "clay", "turf"]
                 .map(|m| format!("strata:{m}"))
@@ -239,7 +240,7 @@ fn kelp_bed() -> SurfaceFeature {
     SurfaceFeature {
         material: None,
         plant: Some("tidewater:kelp".into()),
-        shape: Some("flora:cross".into()),
+        shape: None,
         spacing_m: 7.0,
     }
 }

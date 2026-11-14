@@ -15,7 +15,7 @@ use crate::climate::Climate;
 use crate::light::{Light, MAX_LIGHT};
 use crate::occupants::Occupants;
 use crate::shape::ShapeTable;
-use crate::voxel::{MaterialId, Voxel};
+use crate::voxel::{MaterialId, ShapeId, Voxel};
 
 /// Samples a held Chunk that holds a Plant Material draws each Logical step.
 pub const PLANT_SAMPLES: u32 = 32;
@@ -86,6 +86,8 @@ pub struct Fruit {
     pub stages: Vec<Stage>,
     pub density: f32,
     pub harvest_to: usize,
+    /// The Shape of every fruit Voxel; `None` is a cube.
+    pub shape: Option<ShapeId>,
 }
 
 #[derive(Clone, PartialEq, Debug)]
@@ -146,6 +148,9 @@ pub struct Plant {
     /// The Material the seed places: a crop's first Stage, a tree's sapling,
     /// or the one Material of any other kind.
     pub first: MaterialId,
+    /// The Shape of every single-Voxel Stage the Plant places, grows and
+    /// generates, whatever the Player chose; `None` keeps the Player's choice.
+    pub shape: Option<ShapeId>,
     pub needs: Needs,
     pub kind: Kind,
     /// A tree's sapling yields; empty for other kinds, whose yields live in
@@ -317,6 +322,36 @@ impl PlantTable {
             (Kind::Tree(tree), Role::Fruit(_)) => Some(tree.canopy),
             _ => None,
         }
+    }
+
+    /// What a Player's Place of `voxel` puts down when it is a Plant's seed
+    /// with a declared Shape, struck on `struck_face` of the Voxel it grows
+    /// from; any other Voxel comes back as it is. The Player's Shape and
+    /// Orientation are ignored. A `plane` Shape is laid against that Voxel, so
+    /// a climber holds the face it was placed on.
+    pub fn placed(&self, shapes: &ShapeTable, voxel: Voxel, struck_face: usize) -> Voxel {
+        let material = voxel.material();
+        let Some(PlantRef { plant, role }) = self.of(material) else {
+            return voxel;
+        };
+        let Some(shape) = self.plants.get(plant).and_then(|p| p.shape) else {
+            return voxel;
+        };
+        if !matches!(role, Role::Stage(0) | Role::Single | Role::Sapling) {
+            return voxel;
+        }
+        let orientation = shapes
+            .orientation_holding(material, shape, struck_face ^ 1)
+            .unwrap_or_default();
+        Voxel::shaped(material, shape, orientation)
+    }
+
+    /// The Shape a Player's Place of `material`, a Plant's seed, always uses.
+    pub fn fixed_shape(&self, material: MaterialId) -> Option<ShapeId> {
+        let PlantRef { plant, role } = self.of(material)?;
+        matches!(role, Role::Stage(0) | Role::Single | Role::Sapling)
+            .then(|| self.plants.get(plant)?.shape)
+            .flatten()
     }
 
     /// The first Stage of the chain `material` is in, so undo and redo read
@@ -928,6 +963,7 @@ mod tests {
             name: "wheat".into(),
             seed: "t:seed".into(),
             first: stages[0].material,
+            shape: None,
             needs: Needs {
                 soil: vec![1],
                 light_min: 8,
@@ -962,6 +998,7 @@ mod tests {
                 name: "p".into(),
                 seed: "t:seed".into(),
                 first,
+                shape: None,
                 needs: Needs {
                     soil: vec![1],
                     light_max: 15,
@@ -1263,6 +1300,22 @@ mod tests {
         };
         super::grow(&env, view, 0, at, Voxel::cube(material), roll)
             .map(|g| g.changes[0].voxel.material())
+    }
+
+    #[test]
+    fn a_crop_stage_change_keeps_the_plants_shape() {
+        let table = wheat_table(needs());
+        let scene = Scene::on_soil();
+        let shapes = ShapeTable::builtin();
+        let env = GrowEnv {
+            plants: &table,
+            shapes: &shapes,
+            seed: 1,
+            voxel_size: 1.0,
+        };
+        let cross = Voxel::new(10, 5, 0);
+        let grown = super::grow(&env, &scene, 0, ABOVE, cross, 0.0).unwrap();
+        assert_eq!(grown.changes[0].voxel, Voxel::new(11, 5, 0));
     }
 
     #[test]
