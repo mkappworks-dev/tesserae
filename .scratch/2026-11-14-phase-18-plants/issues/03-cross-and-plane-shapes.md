@@ -1,6 +1,6 @@
 # 03: `cross` and `plane` Shape forms
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: None (can start immediately)
 
@@ -21,13 +21,13 @@ attaches to the face its Orientation names.
 
 ## Acceptance criteria
 
-- [ ] A Mod declares a `cross` and a `plane` Shape and places a Voxel of each;
+- [x] A Mod declares a `cross` and a `plane` Shape and places a Voxel of each;
       a body walks through it and a ray stops on it.
-- [ ] It dims no light and hides no neighbour face; a stone cube beside one
+- [x] It dims no light and hides no neighbour face; a stone cube beside one
       still draws its face.
-- [ ] The mesher draws it without merging quads across it, in all 24
+- [x] The mesher draws it without merging quads across it, in all 24
       Orientations for `plane`.
-- [ ] A flat Shape that seals a face, or connects, is a load error; its boxes
+- [x] A flat Shape that seals a face, or connects, is a load error; its boxes
       still give waterlogging, and it costs nothing against the shaped cap.
-- [ ] Voxel size does not change its drawn extent in metres.
-- [ ] A World with only box Shapes meshes and lights identically to `main`.
+- [x] Voxel size does not change its drawn extent in metres.
+- [x] A World with only box Shapes meshes and lights identically to `main`.

@@ -714,6 +714,20 @@ fn a_biomes_surface_features_are_saved_by_name_and_omitted_when_there_are_none()
 }
 
 #[test]
+fn a_snapshot_written_before_plants_restores_its_features_as_cubes() {
+    let saved = Generation::capture(biome_params(2), &mapping(8, 9, 4)).unwrap();
+    let mut json = serde_json::to_value(&saved).unwrap();
+    json["biomes"][1]["surface_features"] =
+        serde_json::json!([{ "material": "terra:stone", "spacing_m": 16.0 }]);
+    let old: Generation = serde_json::from_value(json).unwrap();
+    let restored = old.restore(&mapping(8, 9, 4), 2).unwrap();
+    assert_eq!(
+        restored.biomes.as_slice()[1].surface_features.as_slice(),
+        [crate::SurfaceFeature::cube(8, 16.0)]
+    );
+}
+
+#[test]
 fn a_saved_surface_feature_with_a_bad_spacing_or_an_unknown_material_is_refused() {
     let params = biome_params(2);
     let saved = Generation::capture(params, &mapping(8, 9, 4)).unwrap();

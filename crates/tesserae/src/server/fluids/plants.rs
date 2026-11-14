@@ -293,8 +293,6 @@ fn land(
         let Some(here) = store.occupants(change.at, &tables.fluids) else {
             break;
         };
-        // A new Voxel in Air keeps the fluid it is waterlogged in; a Stage
-        // swap keeps what the old Voxel carried.
         let next = if here.solid.is_air() {
             here.place_solid(change.voxel, tables)
         } else {

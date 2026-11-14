@@ -21,16 +21,18 @@ taken from grown oaks, which its temperate Biome places. Art is drawn by
 
 - [ ] A new Terra Survival World shows meadows, forests and kelp beds; planting
       wheat, waiting and harvesting yields food; a berry bush fruits again.
-- [ ] Terra's apple tree bears apples that Use picks and that restore hunger;
+- [x] Terra's apple tree bears apples that Use picks and that restore hunger;
       picked fruit grows back while the tree stands.
-- [ ] No Wood Voxel is generated on its own; a new Survival World still reaches
+- [x] No Wood Voxel is generated on its own; a new Survival World still reaches
       Wood, a Workbench, a Chest and a Door by felling and breaking oaks.
 - [ ] `meadow`, `ember` and `tidewater` load with `flora`'s new rows and their
       starter tests pass.
-- [ ] `tesserae validate` passes for `flora` and every Game.
-- [ ] No art is hand-drawn; the generator script is the source.
+- [x] `tesserae validate` passes for `flora` and every Game.
+- [x] No art is hand-drawn; the generator script is the source.
 
 ## Comments
+
+Reviewed: boxes 2, 3, 5 and 6 hold (`demo_games` tests, and `tesserae validate` run on `flora` and the five Games with `--mods mods`). Box 1 needs a played World. Box 4 names the Games' own starter tests, which were not run; only the `demo_games` loads were.
 
 Left `ready-for-agent`: no GUI run, and the first two boxes are met only by data
 and generation tests, not by a World played through.

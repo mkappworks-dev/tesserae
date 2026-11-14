@@ -154,6 +154,101 @@ fn a_tag_that_matches_nothing_or_the_wrong_kind_fails_the_load_naming_the_plant(
     }
 }
 
+mod references {
+    use super::*;
+    use crate::declare::ItemDef;
+    use tesserae_core::plant::PlantTable;
+
+    fn wheat(soil: &str) -> content::PlantDef {
+        let stage = |material: &str, mean_seconds| content::PlantStage {
+            material: material.into(),
+            mean_seconds,
+            yields: vec![content::PlantYield {
+                item: "t:grain".into(),
+                count: content::CountRange { min: 1, max: 1 },
+            }],
+        };
+        content::PlantDef {
+            name: "wheat".into(),
+            seed: "t:seed".into(),
+            shape: None,
+            needs: content::PlantNeeds {
+                soil: vec![soil.into()],
+                light_min: None,
+                light_max: None,
+                temperature: None,
+                humidity: None,
+                water: None,
+            },
+            kind: content::PlantKind::Crop(content::CropDef {
+                stages: vec![stage("t:w0", Some(32.0)), stage("t:w1", None)],
+                harvest_to: None,
+            }),
+        }
+    }
+
+    fn load(soil: &str) -> Result<(PlantTable, DeclaredPlants, Registry), ModError> {
+        let mut d = empty();
+        d.materials = ["sand", "w0", "w1"].map(|n| material(n, true)).into();
+        d.plants = vec![wheat(soil)];
+        let (mut tables, mut registry) = (Tables::builtin(), Registry::builtin());
+        let mut behaviours: Vec<Behaviour> =
+            vec![apply(d, "t", &mut tables, &mut registry, false)?.behaviour];
+        let declared = DeclaredPlants::take(&mut behaviours);
+        resolve(behaviours, &mut tables, &registry)?;
+        let table = declared.resolve(&registry, &tables)?;
+        Ok((table, declared, registry))
+    }
+
+    fn item(name: &str, material: Option<MaterialId>) -> ItemDef {
+        ItemDef {
+            name: name.into(),
+            size_m: 0.25,
+            color: [0; 4],
+            material,
+            max_stack: 64,
+            food: None,
+            texture: None,
+        }
+    }
+
+    #[test]
+    fn the_engine_ships_no_plant() {
+        assert!(Tables::builtin().plants.is_empty());
+    }
+
+    #[test]
+    fn an_unknown_soil_material_fails_the_load_naming_the_plant() {
+        let err = load("t:ghost").unwrap_err().to_string();
+        assert!(err.contains("wheat") && err.contains("t:ghost"), "{err}");
+    }
+
+    #[test]
+    fn a_seed_a_yield_and_a_grown_material_are_checked_against_the_items() {
+        let (table, declared, registry) = load("t:sand").unwrap();
+        let first = id(&registry, "t:w0");
+        let grown = id(&registry, "t:w1");
+        let items = |extra: Option<ItemDef>| {
+            let mut items = vec![item("t:seed", Some(first)), item("t:grain", None)];
+            items.extend(extra);
+            items
+        };
+        assert!(declared.check_items(&table, &items(None)).is_ok());
+
+        let err = declared.check_items(&table, &[item("t:grain", None)]);
+        assert!(err.unwrap_err().to_string().contains("seed `t:seed`"));
+        let wrong = [item("t:seed", Some(grown)), item("t:grain", None)];
+        let err = declared.check_items(&table, &wrong).unwrap_err();
+        assert!(err.to_string().contains("first Stage"), "{err}");
+        let err = declared.check_items(&table, &[item("t:seed", Some(first))]);
+        assert!(err.unwrap_err().to_string().contains("t:grain"));
+        let err = declared
+            .check_items(&table, &items(Some(item("t:placed", Some(grown)))))
+            .unwrap_err();
+        assert!(err.to_string().contains("grown Material"), "{err}");
+    }
+}
+
 #[test]
 fn a_data_mod_declares_stands_in_in_its_column_row() {
     let toml = |extra: &str| {

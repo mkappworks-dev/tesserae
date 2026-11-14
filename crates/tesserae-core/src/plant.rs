@@ -19,11 +19,10 @@ use crate::voxel::{MaterialId, ShapeId, Voxel};
 
 /// Samples a held Chunk that holds a Plant Material draws each Logical step.
 pub const PLANT_SAMPLES: u32 = 32;
-/// Logical steps in one second.
-pub const STEPS_PER_S: u32 = 64;
 /// Mean seconds between Samples of one Voxel: the fastest a Plant can roll, so
 /// the floor of every `mean-seconds`.
-pub const SAMPLE_INTERVAL_S: f32 = CHUNK_VOLUME as f32 / (PLANT_SAMPLES * STEPS_PER_S) as f32;
+pub const SAMPLE_INTERVAL_S: f32 =
+    (CHUNK_VOLUME as f64 * crate::flow::STEP_S / PLANT_SAMPLES as f64) as f32;
 
 /// Plant changes one Logical step lands; past it they wait for the next step.
 pub const PLANTS_LANDED_PER_STEP: usize = 64;
@@ -945,7 +944,6 @@ pub fn grow(
     }
 }
 
-/// Whether soil, light, Climate and water all hold for a Plant at `at`.
 pub fn needs_met(needs: &Needs, view: &impl Surroundings, voxel_size: f32, at: [i32; 3]) -> bool {
     let Some(below) = view.occupants([at[0], at[1] - 1, at[2]]) else {
         return false;

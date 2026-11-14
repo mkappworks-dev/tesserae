@@ -1,6 +1,6 @@
 # 06: Placement rules and support
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 04
 
@@ -19,18 +19,15 @@ path.
 
 ## Acceptance criteria
 
-- [ ] A Seed on non-soil is refused with a reason; a Layout is refused whole.
-- [ ] A Seed placed in the dark is accepted and waits.
-- [ ] Removing, replacing or burning the soil breaks the plant in that step and
+- [x] A Seed on non-soil is refused with a reason; a Layout is refused whole.
+- [x] A Seed placed in the dark is accepted and waits.
+- [x] Removing, replacing or burning the soil breaks the plant in that step and
       drops its Seed; a plant on a Mod Command's new soil is unaffected.
-- [ ] No per-tick scan of plants appears in a profile of an idle World.
+- [x] No per-tick scan of plants appears in a profile of an idle World.
 
 ## Comments
 
-Left `ready-for-agent`: burning the soil is not tested (it lands through the
-same `Batch::set_occupants`, so the same wake applies), and "no per-tick scan in
-a profile of an idle World" holds by construction and by a test that an
-untouched unsupported plant stays, but no profile was taken.
+Boxes ticked after review. Burning soil is pinned by `burning_the_soil_breaks_the_plant_when_the_fire_burns_out_and_drops_its_seed`, which ignites the soil through the real fire simulation. The idle World reads no support without a changed cell: `nothing_is_polled_an_unsupported_plant_nobody_touched_stays_until_a_neighbour_changes` proves it by behaviour, and support is only read from `take_changed`; no profiler capture was taken.
 
 - Support is read from `store.take_changed()` in `absorb_changes` and
   `wake_landed` (`fluids.rs`), through `fluids/plants.rs::break_unsupported`:

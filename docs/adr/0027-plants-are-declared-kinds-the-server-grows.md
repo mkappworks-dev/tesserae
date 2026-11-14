@@ -109,11 +109,12 @@ build by identity-free Voxels: no Voxel records which tree it belongs to. When a
 grown trunk Voxel changes, the Server evaluates the **Felling** region: the
 grown Voxels of that Plant's trunk, canopy and fruit Materials, connected
 through faces, that no longer reach a trunk Voxel standing on something that is
-neither Air nor any Plant's. Only grown Materials take part, so a cabin of
-placed logs and leaves, however alike in look, is never in a region and never
-falls. A region wider than `2 × canopy-radius + 3` Voxels or taller than the
-tallest trunk plus `canopy-radius + 3`, or one beside a Voxel the Server does
-not hold, does not break.
+neither Air nor a grown Material, so a placed Voxel, a sapling or a crop below
+holds the tree up. Only grown Materials take part, so a cabin of placed logs and
+leaves, however alike in look, is never in a region and never falls. A region
+wider than `2 × canopy-radius + 3` Voxels or taller than the tallest trunk plus
+`canopy-radius + 3`, or one beside a Voxel the Server does not hold, does not
+break.
 
 A region breaks top-down over successive steps, `FELLED_PER_STEP` (32) Voxels a
 step, each dropping its declared yield. A Felling also drops `sapling-yield`
@@ -188,6 +189,11 @@ refusing whole without it.
 
 - A pending Felling is not saved. A World closed mid-fall leaves what was queued
   standing until a neighbouring change asks again.
+- A Felling region beside a Voxel the Server does not hold waits: it is neither
+  broken nor dropped from the next ask, and it breaks once the Chunk is held.
+- The Felling size bound is `2 × canopy-radius + 3` Voxels wide and
+  `trunk-height-max + canopy-radius + 3` Voxels tall. A region past it does not
+  break.
 - Canopies are parametric ellipsoids of 0.8 vertical ratio, so a pine cannot be
   a cone and an acacia cannot be an umbrella until Structures give trees
   templates.

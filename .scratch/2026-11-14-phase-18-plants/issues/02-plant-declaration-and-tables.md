@@ -1,6 +1,6 @@
 # 02: Plant declaration and tables
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: None (can start immediately)
 
@@ -18,21 +18,21 @@ and voxel-use tables in `tesserae-core`. Nothing grows yet.
 
 ## Acceptance criteria
 
-- [ ] `plants` appears in the 0.3 WIT, the host bindings,
+- [x] `plants` appears in the 0.3 WIT, the host bindings,
       the data-only TOML and the validator; older lines are unchanged and a
       0.1 or 0.2 component still loads.
-- [ ] A load error names the Plant for an unknown Material, Item, tag or fluid,
+- [x] A load error names the Plant for an unknown Material, Item, tag or fluid,
       a Material in two Plants or as two Stages, a `harvest-to` that is not an
       earlier Stage, a Stage chain of one, a `mean-seconds` under the Sample
       interval, a size or limit out of range.
-- [ ] A later Stage Material and a tree's grown Materials get no implicit Item,
+- [x] A later Stage Material and a tree's grown Materials get no implicit Item,
       and a load error names a grown Material that an Item or another Plant
       names. The seed Item places Stage 0.
-- [ ] A tree's `fruit` loads with 2 to 4 grown Stage Materials, a density from 0 to
+- [x] A tree's `fruit` loads with 2 to 4 grown Stage Materials, a density from 0 to
       0.3 and a `harvest-to` that is an earlier Stage; fruit Materials are grown
       Materials and share none with another Plant.
-- [ ] A `tree` row's `sapling-yield` has a minimum of at least 1, else a load
+- [x] A `tree` row's `sapling-yield` has a minimum of at least 1, else a load
       error.
-- [ ] Lookup by Material returns the Plant and Stage, and the next Stage.
-- [ ] The Engine ships no Plant: a World with no Game has none.
-- [ ] Unit tests beside the code cover every limit and error above.
+- [x] Lookup by Material returns the Plant and Stage, and the next Stage.
+- [x] The Engine ships no Plant: a World with no Game has none.
+- [x] Unit tests beside the code cover every limit and error above.

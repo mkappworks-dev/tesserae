@@ -578,7 +578,6 @@ struct SurfaceScatter {
     unit_chance: f64,
     /// No draw at or above this picks a feature in any Biome, so most columns never ask their Biome.
     most: f64,
-    /// Whether any Biome's feature is a Plant.
     plants: bool,
     /// The tallest a Plant feature stands above its base, in metres; 0 with none.
     rise_m: f32,

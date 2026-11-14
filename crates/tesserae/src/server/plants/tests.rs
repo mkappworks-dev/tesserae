@@ -207,10 +207,13 @@ fn farm() -> (App, Content) {
 }
 
 fn farm_with(shaped: bool) -> (App, Content) {
+    farm_of(content_with(shaped))
+}
+
+fn farm_of(c: Content) -> (App, Content) {
     bevy::tasks::AsyncComputeTaskPool::get_or_init(|| {
         bevy::tasks::TaskPoolBuilder::new().num_threads(2).build()
     });
-    let c = content_with(shaped);
     let mut chunk = ground();
     for x in [5, 6] {
         chunk.set(x, 7, 5, Voxel::cube(soil()));
@@ -810,6 +813,56 @@ fn digging_away_the_soil_breaks_the_plant_in_that_step_and_drops_its_seed() {
 }
 
 #[test]
+fn burning_the_soil_breaks_the_plant_when_the_fire_burns_out_and_drops_its_seed() {
+    let mut c = content_with(false);
+    c.tables
+        .register_combustion(
+            soil(),
+            tesserae_core::CombustionDef {
+                threshold: 6,
+                ignition_delay_s: 1.0,
+                emission: 0,
+                heat: None,
+                burn: tesserae_core::Burn::For {
+                    seconds: 0.5,
+                    residue: rock(),
+                },
+            },
+        )
+        .unwrap();
+    let (mut app, c) = farm_of(c);
+    send(&mut app, plant_at(5, 5));
+    tick(&mut app);
+    assert_eq!(voxel_at(&app, CROP), Voxel::cube(c.wheat[0]));
+    app.world_mut()
+        .run_system_once(
+            |mut store: ResMut<ChunkStore>,
+             mut meshes: ResMut<MeshState>,
+             tables: Res<ContentTables>| {
+                edit::apply_intent(&mut store, &mut meshes, &tables, [5, 7, 5], Intent::Ignite)
+                    .unwrap();
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        voxel_at(&app, CROP),
+        Voxel::cube(c.wheat[0]),
+        "burning holds"
+    );
+    for _ in 0..400 {
+        settle(&mut app);
+        std::thread::sleep(std::time::Duration::from_micros(200));
+        if voxel_at(&app, CROP).is_air() {
+            break;
+        }
+    }
+    assert_eq!(voxel_at(&app, [5, 7, 5]), Voxel::cube(rock()));
+    assert!(voxel_at(&app, CROP).is_air());
+    let seeds = lying(&mut app).into_iter().find(|(n, _)| n == "t:seed");
+    assert_eq!(seeds, Some(("t:seed".to_owned(), 1)));
+}
+
+#[test]
 fn a_mod_command_replacing_the_soil_breaks_the_plant_and_new_soil_holds_one_up() {
     let (mut app, c) = farm();
     set(&mut app, CROP, Voxel::cube(c.wheat[1]));
@@ -1141,6 +1194,19 @@ fn a_mod_command_and_a_burn_out_fell_by_the_same_rule() {
         .unwrap();
     settle_felling(&mut app, &voxels);
     assert_eq!(grown_left(&app, &voxels), 1);
+}
+
+#[test]
+fn a_trunk_standing_on_a_crop_is_grounded_by_it() {
+    let (mut app, c) = farm();
+    let foot = [BASE[0], BASE[1] + 1, BASE[2]];
+    set(&mut app, BASE, Voxel::cube(c.wheat[0]));
+    let voxels = grow_tree(&mut app, foot);
+    command(&mut app, [foot[0], foot[1] + 1, foot[2]], Voxel::AIR);
+    let steps = settle_felling(&mut app, &voxels);
+    assert!(!steps.is_empty());
+    assert_eq!(grown_left(&app, &voxels), 1, "the foot stays on the crop");
+    assert_eq!(voxel_at(&app, BASE), Voxel::cube(c.wheat[0]));
 }
 
 #[test]

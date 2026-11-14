@@ -289,7 +289,6 @@ fn is_part(role: Role) -> bool {
 }
 
 impl PlantTable {
-    /// Whether a Material is a trunk, canopy or fruit Voxel of some tree.
     pub fn is_tree_part(&self, material: MaterialId) -> bool {
         self.of(material).is_some_and(|r| is_part(r.role))
     }
@@ -314,7 +313,7 @@ pub struct Region {
 
 /// The Felling region holding `from`, a grown Voxel of a tree: the grown
 /// Voxels of that tree face-connected to it, if none of them is a trunk Voxel
-/// standing on a Voxel that is neither Air nor a Plant's. `None` when `from`
+/// standing on a Voxel that is neither Air nor grown. `None` when `from`
 /// is no tree Voxel, the region reaches the ground, it is wider or taller than
 /// the Plant's size in metres allows, or any cell it needs is unknown.
 ///
@@ -360,7 +359,7 @@ pub fn felling_region(
         if plants.of(material).is_some_and(|r| r.role == Role::Trunk) {
             has_trunk = true;
             let below = material_at([at[0], at[1] - 1, at[2]])?;
-            if below != AIR && plants.of(below).is_none() {
+            if below != AIR && !plants.is_grown(below) {
                 settled.extend(seen);
                 return None;
             }
@@ -729,6 +728,65 @@ mod tests {
     }
 
     #[test]
+    fn a_tree_row_outside_its_limits_is_refused_and_one_inside_loads() {
+        let load = |edit: &dyn Fn(&mut Tree)| {
+            let mut tree = tree(Some(0.2));
+            edit(&mut tree);
+            PlantTable::default().push(Plant {
+                name: "oak".into(),
+                seed: "t:sapling".into(),
+                first: SAPLING,
+                shape: None,
+                needs: Needs {
+                    soil: vec![SOIL],
+                    light_max: 15,
+                    ..Needs::default()
+                },
+                kind: Kind::Tree(tree),
+                sapling_yields: Vec::new(),
+            })
+        };
+        assert!(load(&|_| {}).is_ok());
+        assert!(load(&|t| t.sapling_yield.min = 0).is_err());
+        assert!(load(&|t| t.canopy_radius_m = 0.0).is_err());
+        assert!(load(&|t| t.canopy_radius_m = MAX_CANOPY_RADIUS_M + 1.0).is_err());
+        assert!(load(&|t| t.trunk_height_m = (0.0, 2.0)).is_err());
+        assert!(load(&|t| t.trunk_height_m = (3.0, 2.0)).is_err());
+        assert!(load(&|t| t.trunk_height_m.1 = crate::plant::MAX_PLANT_HEIGHT_M + 1.0).is_err());
+        assert!(load(&|t| t.mean_seconds = crate::plant::SAMPLE_INTERVAL_S - 1.0).is_err());
+        assert!(load(&|t| t.fruit.as_mut().unwrap().density = 0.31).is_err());
+        assert!(load(&|t| t.fruit.as_mut().unwrap().density = -0.1).is_err());
+        assert!(load(&|t| t.fruit.as_mut().unwrap().stages.truncate(1)).is_err());
+        assert!(load(&|t| t.fruit.as_mut().unwrap().harvest_to = 1).is_err());
+        assert!(
+            load(&|t| {
+                let fruit = t.fruit.as_mut().unwrap();
+                fruit.stages.truncate(1);
+                fruit.stages.extend((0..3).map(|n| Stage {
+                    material: 40 + n,
+                    mean_seconds: Some(60.0),
+                    yields: Vec::new(),
+                }));
+                fruit.stages.last_mut().unwrap().mean_seconds = None;
+            })
+            .is_ok()
+        );
+        assert!(
+            load(&|t| {
+                let fruit = t.fruit.as_mut().unwrap();
+                fruit.stages.extend((0..3).map(|n| Stage {
+                    material: 40 + n,
+                    mean_seconds: None,
+                    yields: Vec::new(),
+                }));
+            })
+            .is_err(),
+            "five fruit Stages are past the limit of four"
+        );
+        assert!(load(&|t| t.canopy = TRUNK).is_err(), "a Material twice");
+    }
+
+    #[test]
     fn a_cut_that_leaves_the_tree_grounded_breaks_nothing() {
         let table = plants(None);
         let Kind::Tree(row) = &table.plants()[0].kind else {
@@ -764,6 +822,12 @@ mod tests {
             felling(&table, &scene, 1.0, [0, 5, 0]),
             None,
             "a placed Voxel holds it up"
+        );
+        scene.cells.insert(base, SAPLING);
+        assert_eq!(
+            felling(&table, &scene, 1.0, [0, 5, 0]),
+            None,
+            "a Voxel that is not grown holds it up even when it is a Plant's"
         );
     }
 

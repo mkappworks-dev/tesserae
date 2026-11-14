@@ -119,7 +119,7 @@ has declared; an unknown or unmatched one is a load error naming the Plant.
 Four more appended fields go with them, each absent in an adapted 0.1 or 0.2
 Declaration. `shape-def` gained `form`, a closed `shape-form` of `boxes`,
 `cross` or `plane`, and none is `boxes`. `item-def` gained an optional
-`texture`, one 16 by 16 RGBA tile of 1024 bytes, that draws an Item as a flat
+`texture`, one 16 by 16 RGBA texture of 1024 bytes, that draws an Item as a flat
 sprite. `material-def` gained `tags`, above. `surface-feature` now takes an
 optional `material` and an optional `plant`, exactly one set, and an optional
 `shape`; the 0.1 and 0.2 adapters set `material` and neither of the others. A

@@ -156,7 +156,7 @@ fn update(
                     content.swatches.rgba(holding),
                     false,
                 ));
-                // A sprite faces the camera and fills its tile; a block is turned to show three faces.
+                // A sprite faces the camera and fills its tile; a Voxel is turned to show three faces.
                 let (rotation, scale) = if matches!(holding, Holding::Sprite(_)) {
                     (Quat::IDENTITY, SPRITE_SCALE)
                 } else {

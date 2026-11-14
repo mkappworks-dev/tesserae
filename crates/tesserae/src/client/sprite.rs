@@ -18,7 +18,6 @@ pub(super) enum Sprite {
     Item(u16),
 }
 
-/// Whether `holding` is a Material in a flat Shape.
 pub(super) fn flat_material(holding: Holding, catalogue: &ContentCatalogue) -> Option<MaterialId> {
     match holding {
         Holding::Solid {

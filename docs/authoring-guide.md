@@ -797,10 +797,10 @@ boxes = [{ min = [1, 1, 14], max = [15, 15, 16] }]
 ```
 
 An Item whose Material's Shape is flat is drawn as a flat sprite from that
-Material's tile in the hand, the hotbar, the Inventory and on the ground. An
-Item with no placeable Material, such as wheat or berries, sets `texture`, a 16
-by 16 PNG: it is drawn flat from that sprite, and without one it is a cube of
-`color`.
+Material's side texture in the hand, the hotbar, the Inventory and on the
+ground. An Item with no placeable Material, such as wheat or berries, sets
+`texture`, a 16 by 16 PNG: it is drawn flat from that sprite, and without one it
+is a cube of `color`.
 
 ### Biomes place Plants
 
@@ -837,7 +837,7 @@ and `world.character.skin`:
 | Use                | Dimensions       | Notes                             |
 | ------------------ | ---------------- | --------------------------------- |
 | Material `texture` | exactly 48 by 16 | Three 16 by 16 faces side by side |
-| Item `texture`     | exactly 16 by 16 | One tile, drawn as a flat sprite  |
+| Item `texture`     | exactly 16 by 16 | One face, drawn as a flat sprite  |
 | Character `skin`   | exactly 64 by 64 | Laid out by the bones' `uv` boxes |
 
 Any PNG colour type decodes to straight-alpha RGBA. A missing, undecodable or

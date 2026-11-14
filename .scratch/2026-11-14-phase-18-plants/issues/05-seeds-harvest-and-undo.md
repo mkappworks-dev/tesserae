@@ -18,19 +18,21 @@ redo treat all Stages of one crop as the same Voxel.
 
 ## Acceptance criteria
 
-- [ ] A Seed places Stage 0, is spent, and cannot place a later Stage; later
+- [x] A Seed places Stage 0, is spent, and cannot place a later Stage; later
       Stages are not in the Catalogue.
-- [ ] Remove at a young, mid and ripe Stage drops each Stage's yield; Creative
+- [x] Remove at a young, mid and ripe Stage drops each Stage's yield; Creative
       drops the same.
-- [ ] Use on a ripe `harvest-to` crop yields and resets, writes no journal
+- [x] Use on a ripe `harvest-to` crop yields and resets, writes no journal
       entry, and refuses on an unripe one.
-- [ ] Use on a ripe fruit Voxel of a tree yields the Item (food) and resets the
+- [x] Use on a ripe fruit Voxel of a tree yields the Item (food) and resets the
       fruit without touching the tree; Remove of fruit drops its Stage's yield.
-- [ ] Undo of a Seed placement and of a removal still applies after the crop
+- [x] Undo of a Seed placement and of a removal still applies after the crop
       advanced a Stage; redo likewise, with Items paid and refunded.
-- [ ] A drop that does not fit the Inventory drops at the Player.
+- [x] A drop that does not fit the Inventory drops at the Player.
 
 ## Comments
+
+Boxes ticked after review against `server/plants/tests.rs`: seed placement and spend in both modes, Remove at each Stage, Use harvest and fruit pick, Undo and Redo after growth, and a drop that does not fit.
 
 - A removal's drops ride the entry as `Cost::Yielded(Vec<Drop>)` (item, count,
   Dropped item id). Undo takes back what still lies there and spends the rest

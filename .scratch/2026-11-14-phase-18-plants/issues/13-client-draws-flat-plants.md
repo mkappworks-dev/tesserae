@@ -18,15 +18,17 @@ ripe crop. Everything else is unchanged.
 ## Acceptance criteria
 
 - [ ] Matches the mockup for each surface, in review-only offscreen screenshots.
-- [ ] A produce Item with a `texture` is flat; one without is the cube of its
+- [x] A produce Item with a `texture` is flat; one without is the cube of its
       `color`.
-- [ ] A solid Material's Items are unchanged.
-- [ ] The Client reads no World storage; Stage changes arrive as ordinary Chunk
+- [x] A solid Material's Items are unchanged.
+- [x] The Client reads no World storage; Stage changes arrive as ordinary Chunk
       edits.
 - [ ] Client tests driven by key presses cover icon, hand, ghost, dropped sprite
       and the prompt.
 
 ## Comments
+
+Reviewed: boxes 2 to 4 are pinned by the sprite and drop tests. Box 1 stays open: the offscreen route needs a full dev build of the app and a played World holding a held sapling, a planted crop and an apple tree, which was not attempted. Box 5 stays open: the Client rigs are driven by Server messages, not key presses.
 
 Left `ready-for-agent`: the first box is unmet (no offscreen screenshots were
 taken; a full dev build of the app was not run), and the tests drive the Client

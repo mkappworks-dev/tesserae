@@ -19,12 +19,14 @@ numbers.
 
 ## Acceptance criteria
 
-- [ ] Every new row, field and form is documented where Mod authors look.
-- [ ] The Example Game loads, and its starter test passes.
-- [ ] ADR-0027, the ADR-0006 amendment and GLOSSARY.md match the code.
+- [x] Every new row, field and form is documented where Mod authors look.
+- [x] The Example Game loads, and its starter test passes.
+- [x] ADR-0027, the ADR-0006 amendment and GLOSSARY.md match the code.
 - [ ] DESIGN.md step 18 is Done; `npm run fmt:check` passes.
 
 ## Comments
+
+Reviewed: boxes 1 to 3 hold (both starter loads pass; ADR-0027 now states the grounding rule and the known limits). Box 4 is the maintainer's call.
 
 Left `ready-for-agent`: the last box is unmet on purpose. DESIGN.md has the step
 18 notes paragraph, but the row stays Not started and the four constants read

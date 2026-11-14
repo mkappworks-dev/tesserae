@@ -23,7 +23,6 @@ struct Game {
     biomes: &'static [(&'static str, &'static [&'static str])],
     /// Biomes declared bare on purpose.
     bare: &'static [&'static str],
-    /// Whether the World has a lake for water plants to stand in.
     lake: bool,
 }
 
