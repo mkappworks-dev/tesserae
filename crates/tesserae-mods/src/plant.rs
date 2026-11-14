@@ -400,11 +400,14 @@ fn stages(
     tables: &Tables,
 ) -> Result<Vec<Stage>, String> {
     rows.iter()
-        .map(|stage| {
+        .enumerate()
+        .map(|(n, stage)| {
             Ok(Stage {
                 material: solid(registry, tables, &stage.material)?,
                 mean_seconds: stage.mean_seconds,
                 yields: yields(&stage.yields),
+                shape: resolve_shape(registry, &stage.shape)
+                    .map_err(|e| format!("Stage {n} {e}"))?,
             })
         })
         .collect()

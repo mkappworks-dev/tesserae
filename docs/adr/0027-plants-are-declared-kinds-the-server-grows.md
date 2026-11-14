@@ -100,6 +100,19 @@ grew it. For a `plane` the Orientation is the one that holds the face the Player
 struck. Fruit carries its own Shape, so fruit is a small 3D model of boxes
 rather than a cube or a flat quad.
 
+**A Stage may carry its own Shape.** A `stage` has an optional `shape`; none
+keeps the Plant's (or the fruit's). When a crop or fruit advances, or a ripe
+`harvest-to` crop resets, the Voxel takes the new Stage's Shape and keeps its
+Orientation, so a berry bush is a stem, a young mound and a mound with berries,
+and unripe fruit is a smaller Shape than ripe fruit. A seed places its first
+Stage's Shape, a fruit that re-bears is Stage 0 in Stage 0's Shape, and worldgen
+draws fruit at its hash-drawn Stage in that Stage's Shape, so no Voxel is
+generated in a Shape its Stage would not grow into. A Biome freezes the Shapes
+by Stage and name as an optional field, absent in every snapshot written before
+it. Undo and redo still read every Stage as one Voxel, Shape included: the
+journal compares a Voxel with its chain's first Stage in that Stage's Shape.
+Spreaders, columns and climbers are one Material each and need none.
+
 ## Trees: grown Materials against placed look-alikes
 
 A tree's trunk and canopy are **grown Materials**, made only by growth and

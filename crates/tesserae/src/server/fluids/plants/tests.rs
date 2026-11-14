@@ -39,7 +39,17 @@ fn content(needs: impl FnOnce(&mut Needs)) -> Content {
 }
 
 fn content_every(mean_seconds: f32, needs: impl FnOnce(&mut Needs)) -> Content {
+    content_shaped(mean_seconds, needs, |_| [None; 3])
+}
+
+/// As [`content_every`], each Stage drawn in the Shape `shapes` registers for it.
+fn content_shaped(
+    mean_seconds: f32,
+    needs: impl FnOnce(&mut Needs),
+    shapes: impl FnOnce(&mut Tables) -> [Option<tesserae_core::ShapeId>; 3],
+) -> Content {
     let mut tables = crate::server::fixture_tables();
+    let shapes = shapes(&mut tables);
     let def = MaterialDef {
         emission: 0,
         dimming: 0,
@@ -55,10 +65,11 @@ fn content_every(mean_seconds: f32, needs: impl FnOnce(&mut Needs)) -> Content {
         ..Needs::default()
     };
     needs(&mut n);
-    let stage = |m, mean| Stage {
-        material: m,
+    let stage = |n: usize, mean| Stage {
+        material: stages[n],
         mean_seconds: mean,
         yields: Vec::new(),
+        shape: shapes[n],
     };
     let every = Some(mean_seconds);
     tables
@@ -70,11 +81,7 @@ fn content_every(mean_seconds: f32, needs: impl FnOnce(&mut Needs)) -> Content {
             shape: None,
             needs: n,
             kind: Kind::Crop {
-                stages: vec![
-                    stage(stages[0], every),
-                    stage(stages[1], every),
-                    stage(stages[2], None),
-                ],
+                stages: vec![stage(0, every), stage(1, every), stage(2, None)],
                 harvest_to: None,
             },
             sapling_yields: Vec::new(),
@@ -261,6 +268,51 @@ fn a_stage_change_keeps_the_plants_shape() {
                 assert_eq!(chunk.get(x, CROP_Y as usize, z).shape(), cross, "{size}");
             }
         }
+    }
+}
+
+#[test]
+fn a_crop_takes_each_stages_own_shape_as_it_advances_and_keeps_the_orientation() {
+    let boxed = |tables: &mut Tables, top: u8| {
+        tables
+            .shapes
+            .register(tesserae_core::ShapeDef {
+                boxes: vec![tesserae_core::NodeBox::new([4, 0, 4], [12, top, 12])],
+                collision: Some(Vec::new()),
+                ..tesserae_core::ShapeDef::default()
+            })
+            .unwrap()
+    };
+    for size in SIZES {
+        let mut drawn = [0; 3];
+        let content = content_shaped(
+            tesserae_core::plant::SAMPLE_INTERVAL_S,
+            |_| {},
+            |tables| {
+                drawn = [boxed(tables, 3), boxed(tables, 8), boxed(tables, 12)];
+                drawn.map(Some)
+            },
+        );
+        let stages = content.stages;
+        let mut farm = Farm::new(size, content);
+        for z in 0..FIELD {
+            for x in 0..FIELD {
+                farm.solid([x, CROP_Y, z], Voxel::new(stages[0], drawn[0], 5));
+            }
+        }
+        farm.run(ENOUGH);
+        let chunk = farm.store().get(ChunkCoord::new(0, 0, 0)).unwrap();
+        let mut seen = [false; 3];
+        for z in 0..FIELD as usize {
+            for x in 0..FIELD as usize {
+                let voxel = chunk.get(x, CROP_Y as usize, z);
+                let stage = stages.iter().position(|&s| s == voxel.material()).unwrap();
+                assert_eq!(voxel.shape(), drawn[stage], "{size}: Stage {stage}");
+                assert_eq!(voxel.orientation(), 5, "{size}");
+                seen[stage] = true;
+            }
+        }
+        assert!(seen[1] || seen[2], "{size}: nothing advanced");
     }
 }
 

@@ -373,22 +373,33 @@ def stacked_fruit(palette, rows, ring, stem, leaf=None):
     return positional(top, side, lambda x, z: grain(low, x, z, salt + 9, 30))
 
 
-def cherry_pair(palette, stem_colour):
-    """Two cherries on stems joined by a bar, as the `cherry` Shape lays them out."""
+CHERRY_RIPE = dict(
+    a=(3, 7, 0, 5), b=(9, 13, 0, 6), low=3, stems=(4, 10), bar=(4, 11, 13), feet=((4, 4), (10, 10)), bar_z=4
+)
+CHERRY_UNRIPE = dict(
+    a=(4, 7, 5, 8), b=(9, 12, 6, 9), low=6, stems=(5, 9), bar=(5, 10, 13), feet=((5, 5), (9, 9)), bar_z=5
+)
+
+
+def cherry_pair(palette, stem_colour, geo):
+    """Two cherries on stems joined by a bar, as the `cherry` Shapes lay them out; `geo` holds the
+    boxes of the ripe or the smaller unripe one."""
     low, high = palette
-    cherry = lambda x, h: (3 <= x < 7 and h < 5) or (9 <= x < 13 and h < 6)
+    (ax0, ax1, ay0, ay1), (bx0, bx1, by0, by1) = geo["a"], geo["b"]
+    bar0, bar1, bar_h = geo["bar"]
+    cherry = lambda x, h: (ax0 <= x < ax1 and ay0 <= h < ay1) or (bx0 <= x < bx1 and by0 <= h < by1)
 
     def side(x, h):
         if cherry(x, h):
-            return grain(low if h < 3 else high, x, h, 91, 30)
-        if h < 14 and (x in (4, 10) or (4 <= x < 11 and h == 13)):
+            return grain(low if h < geo["low"] else high, x, h, 91, 30)
+        if h < 14 and (x in geo["stems"] or (bar0 <= x < bar1 and h == bar_h)):
             return grain(stem_colour, x, h, 93, 24)
         return None
 
     def top(x, z):
-        if (4 <= x < 5 and 4 <= z < 5) or (10 <= x < 11 and 10 <= z < 11) or (4 <= x < 11 and 4 <= z < 5):
+        if (x, z) in geo["feet"] or (bar0 <= x < bar1 and z == geo["bar_z"]):
             return grain(stem_colour, x, z, 95, 24)
-        if (3 <= x < 7 and 3 <= z < 7) or (9 <= x < 13 and 9 <= z < 13):
+        if (ax0 <= x < ax1 and ax0 <= z < ax1) or (bx0 <= x < bx1 and bx0 <= z < bx1):
             return grain(high, x, z, 97, 30)
         return None
 
@@ -400,25 +411,39 @@ APPLE_STEM = (11, 14, 7, 9, (90, 61, 34))
 APPLE_LEAF = (9, 13, 12, 13, (63, 122, 42))
 ORANGE_ROWS = ((2, 4), (4, 10), (10, 12))
 COCONUT_ROWS = ((2, 4), (4, 10), (10, 12))
+# The unripe fruit is the ripe Shape at 70% about its stem, so these are the ripe rows scaled.
+APPLE_SMALL = dict(rows=((5, 6), (6, 10), (10, 12)), ring=5, stem=(12, 14, 7, 9, (90, 61, 34)), leaf=(9, 12, 13, 14, (63, 122, 42)))
+ORANGE_SMALL = dict(rows=((5, 7), (7, 11), (11, 12)), ring=5, stem=(12, 13, 7, 9, (74, 122, 42)), leaf=None)
+COCONUT_SMALL = dict(rows=((5, 6), (6, 11), (11, 12)), ring=6, stem=(99, 99, 0, 0, (0, 0, 0)), leaf=None)
 
 
 def apple(ripe):
     palette = ((163, 32, 28), (200, 50, 42), (217, 71, 59)) if ripe else ((95, 141, 54), (118, 164, 67), (134, 181, 81))
+    if not ripe:
+        small = APPLE_SMALL
+        return stacked_fruit(palette, small["rows"], small["ring"], small["stem"], small["leaf"])
     return stacked_fruit(palette, APPLE_ROWS, 4, APPLE_STEM, APPLE_LEAF)
 
 
 def orange(ripe):
     palette = ((196, 98, 26), (232, 130, 31), (240, 154, 53)) if ripe else ((96, 140, 44), (120, 168, 52), (140, 184, 66))
+    if not ripe:
+        small = ORANGE_SMALL
+        return stacked_fruit(palette, small["rows"], small["ring"], small["stem"])
     return stacked_fruit(palette, ORANGE_ROWS, 4, (12, 13, 7, 9, (74, 122, 42)))
 
 
 def coconut(ripe):
     palette = ((78, 54, 32), (112, 78, 48), (132, 94, 60)) if ripe else ((68, 118, 46), (92, 150, 60), (110, 168, 74))
+    if not ripe:
+        small = COCONUT_SMALL
+        return stacked_fruit(palette, small["rows"], small["ring"], small["stem"])
     return stacked_fruit(palette, COCONUT_ROWS, 5, (99, 99, 0, 0, (0, 0, 0)))
 
 
 def cherries(ripe):
-    return cherry_pair(((96, 12, 30), (150, 24, 48)) if ripe else ((80, 124, 44), (112, 160, 56)), (74, 110, 40))
+    palette = ((96, 12, 30), (150, 24, 48)) if ripe else ((80, 124, 44), (112, 160, 56))
+    return cherry_pair(palette, (74, 110, 40), CHERRY_RIPE if ripe else CHERRY_UNRIPE)
 
 
 def mushroom_cap(cap, rim, dots):
@@ -449,72 +474,83 @@ def mushroom_cap(cap, rim, dots):
     return positional(top, side, lambda x, z: grain(rim, x, z, 111, 28) if top(x, z) else None)
 
 
-BERRY_SPOTS = ((4, 6, 2, 4), (9, 11, 3, 5))
-BERRY_EDGE = (2, 3, 12, 13)
+BERRY_LEAF = (52, 112, 44)
+BERRY_RED = (186, 36, 62)
+# Each Stage's boxes, as in `mods/crops/content.toml`: a tile samples by place in the Voxel, so a
+# region painted for one box also colours any other face at the same (x or z, height) or (x, z).
+SPROUT_LEAVES = ((9, 2, 7, 12, 3, 10), (4, 3, 6, 8, 4, 9), (7, 3, 9, 10, 4, 12))
+SPROUT_STEM = (7, 0, 7, 9, 4, 9)
+BUSH_TIERS = ((2, 0, 2, 14, 3, 14), (4, 3, 4, 12, 6, 12), (6, 6, 6, 10, 8, 10))
+RIPE_TIERS = ((2, 0, 2, 14, 3, 14), (3, 3, 3, 13, 6, 13), (5, 6, 5, 11, 8, 11))
+RIPE_DARK = ((11, 2, 3, 14, 4, 6), (3, 1, 11, 6, 3, 14))
+RIPE_BERRIES = (
+    (13, 1, 5, 15, 3, 7), (1, 2, 10, 3, 4, 12), (4, 1, 13, 6, 3, 15), (9, 2, 1, 11, 4, 3),
+    (12, 4, 5, 14, 6, 7), (2, 5, 9, 4, 7, 11), (5, 4, 12, 7, 6, 14), (9, 5, 2, 11, 7, 4),
+    (10, 6, 7, 12, 8, 9), (7, 6, 10, 9, 8, 12),
+)
 
 
-def berry_bush(stage, leaf=(52, 112, 44), berry=(186, 36, 62)):
-    """The `berry_bush` Shape: a flat disc of leaves, a tier on it and a smaller one on that, with
-    a berry box on each of the tier's four sides at the BERRY_SPOTS. The Stages share one Shape,
-    so a seedling (1) draws only the disc and its rim, which no higher tier covers; 2 is a bush
-    whose berry boxes show leaves; 3 bears the berries."""
-    fruit = berry if stage == 3 else leaf
-
-    def shade(x, h, salt):
-        return tint(leaf, (noise(x, h, salt) - 128) // 9 + (12 if (x // 2 + h // 2) % 2 else -8))
-
-    def side(x, h):
-        if x in BERRY_EDGE and stage > 1 and any(c <= h < d for *_, c, d in BERRY_SPOTS):
-            return grain(fruit, x, h, 389, 24)
-        if stage > 1 and any(a <= x < b and c <= h < d for a, b, c, d in BERRY_SPOTS):
-            return grain(fruit, x, h, 387, 24)
-        if h < 2 and 3 <= x < 13 or stage > 1 and (2 <= h < 5 and 4 <= x < 12 or 5 <= h < 8 and 5 <= x < 11):
-            return shade(x, h, 385)
-        return None
-
-    def top(x, z):
-        spot = lambda a, b, edge: any(a <= edge[0] < b for a, b, *_ in BERRY_SPOTS) and edge[1] in BERRY_EDGE
-        if stage > 1 and (spot(0, 0, (x, z)) or spot(0, 0, (z, x))):
-            return grain(fruit, x, z, 391, 24)
-        if 3 <= x < 13 and 3 <= z < 13 and (stage > 1 or x in (3, 12) or z in (3, 12)):
-            return tint(leaf, (noise(x, z, 393) - 128) // 9 + (22 if (x // 2 + z // 2) % 2 else 4))
-        return None
-
-    return positional(top, side, lambda x, z: tint(leaf, -30) if top(x, z) else None)
+def sides_of(boxes):
+    """The side-tile regions (coordinate, height) the boxes' faces sample: x for the faces turned
+    along z and z for the faces turned along x."""
+    return [(x0, x1, y0, y1) for x0, y0, z0, x1, y1, z1 in boxes] + [(z0, z1, y0, y1) for x0, y0, z0, x1, y1, z1 in boxes]
 
 
-def berry_bush(stage, leaf=(52, 112, 44), berry=(186, 36, 62)):
-    """The `berry_bush` Shape: a leafy body with a berry box on each of its four sides at the spots
-    in BERRY_SPOTS, and a berry's own sides reach to the Voxel's edge. Stage 1 is a seedling, only
-    the lowest leaves; 2 a bush without berries, whose berry boxes are left clear; 3 bears them."""
+def within(regions, a, b):
+    return any(x0 <= a < x1 and y0 <= b < y1 for x0, x1, y0, y1 in regions)
 
-    def leafy(x, h):
-        if stage == 1 and h >= 3:
+
+def berry_bush(stage):
+    """A berry bush Stage's own Shape: 1 a stem with three small leaves, 2 a low mound of three
+    leaf tiers, 3 a fuller mound with darker leaves and red berry boxes pushed out of it."""
+    stem_colour = (70, 104, 44)
+
+    def leafy(x, h, shift=0):
+        return tint(BERRY_LEAF, (noise(x, h, 385) - 128) // 9 + (12 if (x // 2 + h // 2) % 2 else -8) + shift)
+
+    if stage == 1:
+        leaves, stem = sides_of(SPROUT_LEAVES), sides_of([SPROUT_STEM])
+
+        def side(x, h):
+            if within(stem, x, h) and h < 2:
+                return grain(stem_colour, x, h, 387, 24)
+            if within(leaves, x, h):
+                return leafy(x, h, 14)
+            if within(stem, x, h):
+                return grain(stem_colour, x, h, 387, 24)
             return None
-        return tint(leaf, (noise(x, h, 385) - 128) // 9 + (12 if (x // 2 + h // 2) % 2 else -8))
+
+        def top(x, z):
+            if 7 <= x < 9 and 7 <= z < 9:
+                return grain(stem_colour, x, z, 389, 24)
+            if any(x0 <= x < x1 and z0 <= z < z1 for x0, _, z0, x1, _, z1 in SPROUT_LEAVES):
+                return leafy(x, z, 18)
+            return None
+
+        return positional(top, side, lambda x, z: tint(BERRY_LEAF, -30) if top(x, z) else None)
+
+    tiers = BUSH_TIERS if stage == 2 else RIPE_TIERS
+    mound, dark = sides_of(tiers), sides_of(RIPE_DARK) if stage == 3 else []
+    red = sides_of(RIPE_BERRIES) if stage == 3 else []
 
     def side(x, h):
-        if any(a <= x < b and c <= h < d for a, b, c, d in BERRY_SPOTS) and stage > 1:
-            return grain(berry if stage == 3 else leaf, x, h, 387, 24)
-        if x in (1, 2, 13, 14) and stage > 1 and any(c <= h < d for *_, c, d in BERRY_SPOTS):
-            return grain(berry if stage == 3 else leaf, x, h, 389, 24)
-        if 3 <= x < 13 and h < 5 or 5 <= x < 11 and 5 <= h < 8:
-            return leafy(x, h)
+        if within(red, x, h):
+            return grain(BERRY_RED, x, h, 391, 24)
+        if within(dark, x, h):
+            return leafy(x, h, -26)
+        if within(mound, x, h):
+            return leafy(x, h, -22 if h < 1 else 0)
         return None
 
     def top(x, z):
-        if stage > 1 and (
-            any(a <= x < b for a, b, *_ in BERRY_SPOTS) and (z in (1, 2, 13, 14))
-            or any(a <= z < b for a, b, *_ in BERRY_SPOTS) and (x in (1, 2, 13, 14))
-        ):
-            return grain(berry if stage == 3 else leaf, x, z, 391, 24)
-        if 5 <= x < 11 and 5 <= z < 11 or 3 <= x < 13 and 3 <= z < 13:
-            if stage == 1:
-                return None
-            return tint(leaf, (noise(x, z, 393) - 128) // 9 + (22 if (x // 2 + z // 2) % 2 else 4))
+        if stage == 3 and any(x0 <= x < x1 and z0 <= z < z1 for x0, _, z0, x1, _, z1 in RIPE_BERRIES):
+            return grain(BERRY_RED, x, z, 393, 24)
+        for x0, _, z0, x1, _, z1 in reversed(tiers):
+            if x0 <= x < x1 and z0 <= z < z1:
+                return tint(BERRY_LEAF, (noise(x, z, 395) - 128) // 9 + (22 if (x // 2 + z // 2) % 2 else 4))
         return None
 
-    return positional(top, side, lambda x, z: tint(leaf, -30) if top(x, z) and stage > 1 else None)
+    return positional(top, side, lambda x, z: tint(BERRY_LEAF, -30) if top(x, z) else None)
 
 
 def sapling(leaf, form="round"):

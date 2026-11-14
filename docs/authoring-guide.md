@@ -618,6 +618,12 @@ every Voxel size.
   `{ item, count = [min, max] }` a Voxel drops when removed or picked. Counts
   are a hash of seed and position, the same in Creative. A Stage with none drops
   its Seed.
+- **`shape`** on a crop or fruit Stage is that Stage's own Shape, by full name;
+  omitted, the Plant's (or the fruit's). A Voxel takes it when it advances or a
+  ripe `harvest-to` crop resets, keeping its Orientation, so the berry bush is a
+  stem, a mound and a mound with berries, and unripe fruit is a smaller Shape
+  than ripe. A seed places the first Stage's Shape. A Stage's tile paints each
+  of its boxes by position, as for any small model.
 - **`mean-seconds`** is the average time a Stage takes to reach the next, at
   least 16, the Sample interval. A Stage takes about that long on average, not
   exactly.
@@ -720,7 +726,7 @@ vine is a `climber` with a `plane` Shape whose `soil` names the tree's trunk or
 canopy Material. From `flora`'s apple and jungle trees:
 
 ```toml
-fruit = { stages = [{ material = "flora:apple_unripe", mean-seconds = 40.0 }, { material = "flora:apple_ripe", yields = [{ item = "flora:apple", count = [1, 2] }] }], density = 0.12, regrow-seconds = 120.0, shape = "flora:apple" }
+fruit = { stages = [{ material = "flora:apple_unripe", shape = "flora:apple_unripe", mean-seconds = 40.0 }, { material = "flora:apple_ripe", yields = [{ item = "flora:apple", count = [1, 2] }] }], density = 0.12, regrow-seconds = 120.0, shape = "flora:apple" }
 vines = { plant = "flora:vine", density = 0.12, length-m = 6.0 }
 ```
 

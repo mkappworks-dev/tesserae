@@ -604,16 +604,23 @@ fn every_fruit_is_a_box_shape_that_breaking_picks_and_the_tree_grows_again() {
         let bears = row.fruit.as_ref().unwrap();
         assert_eq!(bears.shape, Some(boxed), "{fruit}");
         assert!(bears.regrow_seconds >= 16.0, "{fruit} regrows");
-        for face in 0..6 {
-            let voxel = tesserae_core::Voxel::new(
-                material(&loaded, &format!("flora:{fruit}_ripe")),
-                boxed,
-                0,
-            );
-            assert!(
-                !loaded.tables.shapes.seals(voxel, face),
-                "{fruit} face {face}"
-            );
+        let small = shape(&loaded, &format!("flora:{fruit}_unripe"));
+        let unripe = material(&loaded, &format!("flora:{fruit}_unripe"));
+        assert_eq!(plants.stage_shape(unripe), Some(small), "{fruit} unripe");
+        assert_eq!(plants.stage_shape(ripe), Some(boxed), "{fruit} ripe");
+        let volume = |shape| {
+            let voxel = tesserae_core::Voxel::new(ripe, shape, 0);
+            loaded.tables.shapes.volume(voxel)
+        };
+        assert!(volume(small) < volume(boxed), "{fruit} unripe is smaller");
+        for (stage, shape) in [(ripe, boxed), (unripe, small)] {
+            for face in 0..6 {
+                let voxel = tesserae_core::Voxel::new(stage, shape, 0);
+                assert!(
+                    !loaded.tables.shapes.seals(voxel, face),
+                    "{fruit} face {face}"
+                );
+            }
         }
     }
 }

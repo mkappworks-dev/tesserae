@@ -492,13 +492,8 @@ fn lying(entities: &EntityStore, drop: &Drop) -> u32 {
 /// still matches a Door toggled since it was made (ADR-0023).
 fn as_closed(tables: &tesserae_core::Tables, occupants: Occupants) -> Occupants {
     let solid = tables.uses.as_closed(occupants.solid);
-    // Every Stage of one crop, and of a tree's fruit, is the same Voxel.
-    let first = tables.plants.canonical(solid.material());
-    let solid = if first == solid.material() {
-        solid
-    } else {
-        tesserae_core::Voxel::new(first, solid.shape(), solid.orientation())
-    };
+    // Every Stage of one crop, and of a tree's fruit, is the same Voxel, in whatever Shape.
+    let solid = tables.plants.canonical_voxel(solid);
     Occupants { solid, ..occupants }
 }
 

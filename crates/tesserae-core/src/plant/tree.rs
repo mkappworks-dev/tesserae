@@ -129,7 +129,7 @@ fn leaf(tree: &Tree, seed: u64, at: [i32; 3], voxel_size: f32) -> TreeVoxel {
             at,
             material: f.stages[0].material,
             part: Part::Fruit,
-            shape: f.shape.unwrap_or(SHAPE_FULL_CUBE),
+            shape: f.stages[0].shape.or(f.shape).unwrap_or(SHAPE_FULL_CUBE),
             orientation: 0,
         },
         None => TreeVoxel {
@@ -584,7 +584,10 @@ pub(super) fn rebear(
         }
     }
     let first = fruit.stages[0].material;
-    let shape = fruit.shape.unwrap_or(SHAPE_FULL_CUBE);
+    let shape = fruit.stages[0]
+        .shape
+        .or(fruit.shape)
+        .unwrap_or(SHAPE_FULL_CUBE);
     Some(Growth::one(at, Voxel::new(first, shape, 0)))
 }
 
@@ -624,7 +627,7 @@ pub(super) fn ripen(
 ) -> Option<Growth> {
     let next = tree.fruit.as_ref()?.stages.get(stage + 1)?.material;
     conditions_met(&plant.needs, &Open(view), env.voxel_size, at)
-        .then(|| Growth::one(at, Voxel::new(next, voxel.shape(), voxel.orientation())))
+        .then(|| Growth::one(at, env.plants.staged(voxel, next)))
 }
 
 struct Open<'a, V>(&'a V);
@@ -799,6 +802,7 @@ mod tests {
                         material,
                         mean_seconds: (n == 0).then_some(60.0),
                         yields: Vec::new(),
+                        shape: None,
                     })
                     .collect(),
                 density,
@@ -1060,6 +1064,7 @@ mod tests {
                             material,
                             mean_seconds,
                             yields: Vec::new(),
+                            shape: None,
                         })
                         .to_vec(),
                     harvest_to: None,
@@ -1137,6 +1142,67 @@ mod tests {
             None,
             "a roll above the chance holds"
         );
+    }
+
+    const SMALL_APPLE: ShapeId = 8;
+
+    fn plants_with_unripe_shape() -> PlantTable {
+        let mut row = tree(Some(0.2));
+        row.fruit.as_mut().unwrap().stages[0].shape = Some(SMALL_APPLE);
+        let mut table = PlantTable::default();
+        table
+            .push(Plant {
+                name: "oak".into(),
+                seed: "t:sapling".into(),
+                first: SAPLING,
+                shape: None,
+                needs: Needs {
+                    soil: vec![SOIL],
+                    light_max: 15,
+                    ..Needs::default()
+                },
+                kind: Kind::Tree(row),
+                sapling_yields: Vec::new(),
+            })
+            .unwrap();
+        table
+    }
+
+    #[test]
+    fn fruit_ripens_from_its_small_shape_to_the_full_one_and_rebears_small() {
+        let table = plants_with_unripe_shape();
+        let mut scene = Scene::default();
+        let at = [0, 8, 0];
+        scene.cells.insert(at, FRUIT[0]);
+        let shapes = ShapeTable::builtin();
+        let env = GrowEnv {
+            plants: &table,
+            shapes: &shapes,
+            seed: SEED,
+            voxel_size: 1.0,
+        };
+        let unripe = Voxel::new(FRUIT[0], SMALL_APPLE, 2);
+        let ripe = crate::plant::grow(&env, &scene, 0, at, unripe, 0.0).unwrap();
+        assert_eq!(
+            ripe.changes[0].voxel,
+            Voxel::new(FRUIT[1], APPLE, 2),
+            "the ripe Stage has none of its own, so it takes the fruit's Shape"
+        );
+        assert_eq!(table.stage_shape(FRUIT[0]), Some(SMALL_APPLE));
+        assert_eq!(
+            table.canonical_voxel(ripe.changes[0].voxel),
+            Voxel::new(FRUIT[0], SMALL_APPLE, 2)
+        );
+
+        let size = 1.0;
+        let Kind::Tree(row) = &table.plants()[0].kind else {
+            unreachable!()
+        };
+        let env = rebear_env(&table, &shapes, size);
+        let (scene, leaves) = bare(row, [0, 4, 0], size);
+        let at = leaves[leaves.len() / 2];
+        let g = crate::plant::grow(&env, &scene, 0, at, Voxel::cube(CANOPY), 0.0).unwrap();
+        assert_eq!(g.changes[0].voxel, Voxel::new(FRUIT[0], SMALL_APPLE, 0));
     }
 
     fn rebear_env<'a>(table: &'a PlantTable, shapes: &'a ShapeTable, size: f32) -> GrowEnv<'a> {
@@ -1372,6 +1438,7 @@ mod tests {
                     material: 40 + n,
                     mean_seconds: Some(60.0),
                     yields: Vec::new(),
+                    shape: None,
                 }));
                 fruit.stages.last_mut().unwrap().mean_seconds = None;
             })
@@ -1384,6 +1451,7 @@ mod tests {
                     material: 40 + n,
                     mean_seconds: None,
                     yields: Vec::new(),
+                    shape: None,
                 }));
             })
             .is_err(),
@@ -1975,10 +2043,8 @@ mod tests {
                         "{name} {size}: {rise_m} m tall"
                     );
                     let wood = voxels.iter().filter(|v| v.part == Part::Trunk);
-                    let reach = wood
-                        .map(|v| horizontal_m(v.at, base, size))
-                        .fold(0.0, f32::max);
-                    reach
+                    wood.map(|v| horizontal_m(v.at, base, size))
+                        .fold(0.0, f32::max)
                 };
                 let fine = measure(0.25);
                 for size in [0.5, 1.0] {

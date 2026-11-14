@@ -731,14 +731,19 @@ fn surface_feature(
             }
             let fruit = tree.fruit.as_ref().map(|fruit| {
                 let mut stages = [AIR; tesserae_core::MAX_SURFACE_FRUIT_STAGES];
-                for (slot, stage) in stages.iter_mut().zip(&fruit.stages) {
+                let mut stage_shapes = [None; tesserae_core::MAX_SURFACE_FRUIT_STAGES];
+                for ((slot, shape), stage) in
+                    stages.iter_mut().zip(&mut stage_shapes).zip(&fruit.stages)
+                {
                     *slot = stage.material;
+                    *shape = stage.shape;
                 }
                 SurfaceFruit {
                     stages,
                     len: fruit.stages.len() as u8,
                     density: fruit.density,
                     shape: fruit.shape.unwrap_or(tesserae_core::SHAPE_FULL_CUBE),
+                    stage_shapes,
                 }
             });
             let vines = tree

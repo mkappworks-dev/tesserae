@@ -62,6 +62,8 @@ pub struct Stage {
     /// Mean seconds to reach the next Stage; `None` on the last.
     pub mean_seconds: Option<f32>,
     pub yields: Vec<Yield>,
+    /// The Shape the Stage's Voxels take; `None` keeps the Plant's (or fruit's).
+    pub shape: Option<ShapeId>,
 }
 
 /// Standing water within reach; any of `fluids` counts.
@@ -359,6 +361,16 @@ impl std::fmt::Debug for CanopyCells {
     }
 }
 
+impl Plant {
+    /// The Shape its seed places: the first crop Stage's own, else the Plant's.
+    fn first_shape(&self) -> Option<ShapeId> {
+        match &self.kind {
+            Kind::Crop { stages, .. } => stages.first().and_then(|s| s.shape).or(self.shape),
+            _ => self.shape,
+        }
+    }
+}
+
 impl PlantTable {
     pub fn is_empty(&self) -> bool {
         self.plants.is_empty()
@@ -486,12 +498,12 @@ impl PlantTable {
         let Some(PlantRef { plant, role }) = self.of(material) else {
             return voxel;
         };
-        let Some(shape) = self.plants.get(plant).and_then(|p| p.shape) else {
-            return voxel;
-        };
         if !matches!(role, Role::Stage(0) | Role::Single | Role::Sapling) {
             return voxel;
         }
+        let Some(shape) = self.plants.get(plant).and_then(Plant::first_shape) else {
+            return voxel;
+        };
         let orientation = shapes
             .orientation_holding(material, shape, struck_face ^ 1)
             .unwrap_or_default();
@@ -543,8 +555,41 @@ impl PlantTable {
     pub fn fixed_shape(&self, material: MaterialId) -> Option<ShapeId> {
         let PlantRef { plant, role } = self.of(material)?;
         matches!(role, Role::Stage(0) | Role::Single | Role::Sapling)
-            .then(|| self.plants.get(plant)?.shape)
+            .then(|| self.plants.get(plant)?.first_shape())
             .flatten()
+    }
+
+    /// The Shape the crop or fruit Stage `material` is drawn in, if it declares one.
+    pub fn stage_shape(&self, material: MaterialId) -> Option<ShapeId> {
+        let PlantRef { plant, role } = self.of(material)?;
+        let plant = self.plants.get(plant)?;
+        match (&plant.kind, role) {
+            (Kind::Crop { stages, .. }, Role::Stage(n)) => stages.get(n)?.shape.or(plant.shape),
+            (
+                Kind::Tree(Tree {
+                    fruit: Some(fruit), ..
+                }),
+                Role::Fruit(n),
+            ) => fruit.stages.get(n)?.shape.or(fruit.shape),
+            _ => None,
+        }
+    }
+
+    /// `voxel` advanced to Stage `to`: that Stage's Shape where it has one, the Orientation kept.
+    pub fn staged(&self, voxel: Voxel, to: MaterialId) -> Voxel {
+        let shape = self.stage_shape(to).unwrap_or_else(|| voxel.shape());
+        Voxel::new(to, shape, voxel.orientation())
+    }
+
+    /// `voxel` with the Shape of the first Stage of its chain, so undo and redo read every Stage
+    /// of one crop, or of one tree's fruit, as the same Voxel whatever Shape each is drawn in.
+    pub fn canonical_voxel(&self, voxel: Voxel) -> Voxel {
+        let first = self.canonical(voxel.material());
+        if first == voxel.material() && self.stage_shape(first).is_none() {
+            return voxel;
+        }
+        let shape = self.stage_shape(first).unwrap_or_else(|| voxel.shape());
+        Voxel::new(first, shape, voxel.orientation())
     }
 
     /// The first Stage of the chain `material` is in, so undo and redo read
@@ -1053,7 +1098,7 @@ pub fn grow(
         Kind::Crop { .. } => {
             let next = env.plants.next_stage(material)?;
             needs_met(&plant.needs, view, size, at)
-                .then(|| Growth::one(at, Voxel::new(next, voxel.shape(), voxel.orientation())))
+                .then(|| Growth::one(at, env.plants.staged(voxel, next)))
         }
         Kind::Column {
             max_height_m,
@@ -1161,6 +1206,7 @@ mod tests {
             material,
             mean_seconds: mean,
             yields: Vec::new(),
+            shape: None,
         }
     }
 
@@ -1336,6 +1382,7 @@ mod tests {
                             item: "t:wheat".into(),
                             count: CountRange { min: 1, max: 1 },
                         }],
+                        shape: None,
                     },
                 ],
                 Some(1),
@@ -1522,6 +1569,75 @@ mod tests {
         let cross = Voxel::new(10, 5, 0);
         let grown = super::grow(&env, &scene, 0, ABOVE, cross, 0.0).unwrap();
         assert_eq!(grown.changes[0].voxel, Voxel::new(11, 5, 0));
+    }
+
+    #[test]
+    fn a_crop_stage_that_declares_a_shape_takes_it_and_keeps_the_orientation() {
+        let mut table = PlantTable::default();
+        let mut plant = crop(
+            vec![
+                stage(10, Some(32.0)),
+                stage(11, Some(32.0)),
+                stage(12, None),
+            ],
+            Some(1),
+        );
+        plant.shape = Some(5);
+        plant.kind = match plant.kind {
+            Kind::Crop {
+                mut stages,
+                harvest_to,
+            } => {
+                stages[0].shape = Some(6);
+                stages[1].shape = Some(7);
+                stages[2].shape = Some(8);
+                Kind::Crop { stages, harvest_to }
+            }
+            other => other,
+        };
+        plant.needs = needs();
+        table.push(plant).unwrap();
+        let scene = Scene::on_soil();
+        let shapes = ShapeTable::builtin();
+        let env = GrowEnv {
+            plants: &table,
+            shapes: &shapes,
+            seed: 1,
+            voxel_size: 1.0,
+        };
+        let sprout = Voxel::new(10, 6, 3);
+        let young = super::grow(&env, &scene, 0, ABOVE, sprout, 0.0).unwrap();
+        assert_eq!(young.changes[0].voxel, Voxel::new(11, 7, 3));
+        let ripe = super::grow(&env, &scene, 0, ABOVE, young.changes[0].voxel, 0.0).unwrap();
+        assert_eq!(ripe.changes[0].voxel, Voxel::new(12, 8, 3));
+        assert_eq!(table.stage_shape(10), Some(6));
+        assert_eq!(
+            table.fixed_shape(10),
+            Some(6),
+            "the seed places Stage 0's Shape"
+        );
+        assert_eq!(table.harvest(12).unwrap().to, 11);
+        assert_eq!(
+            table.staged(ripe.changes[0].voxel, 11),
+            Voxel::new(11, 7, 3),
+            "a reset takes the young Stage's Shape"
+        );
+        assert_eq!(
+            table.canonical_voxel(Voxel::new(12, 8, 3)),
+            Voxel::new(10, 6, 3),
+            "every Stage is one Voxel to undo, in whatever Shape"
+        );
+    }
+
+    #[test]
+    fn a_stage_with_no_shape_keeps_the_plants_shape() {
+        let table = wheat_table(needs());
+        assert_eq!(table.stage_shape(11), None);
+        assert_eq!(
+            table.staged(Voxel::new(10, 9, 2), 11),
+            Voxel::new(11, 9, 2),
+            "no Plant Shape and no Stage Shape keeps the Voxel's own"
+        );
     }
 
     #[test]

@@ -222,7 +222,7 @@ pub(super) fn harvest(
     }
     let was = store.occupants(at, &tables.fluids).expect("loaded above");
     let next = Occupants {
-        solid: Voxel::new(ripening.to, voxel.shape(), voxel.orientation()),
+        solid: tables.plants.staged(voxel, ripening.to),
         ..was
     };
     let mut batch = edit::Batch::default();

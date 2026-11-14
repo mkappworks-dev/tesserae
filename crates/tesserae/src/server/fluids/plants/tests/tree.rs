@@ -15,6 +15,8 @@ pub(super) struct Orchard {
     placed: MaterialId,
     pub(super) tree: Tree,
     apple: tesserae_core::ShapeId,
+    /// The unripe Stage's own, smaller Shape.
+    small: tesserae_core::ShapeId,
 }
 
 fn orchard(fruit: Option<f32>) -> Orchard {
@@ -43,6 +45,13 @@ pub(super) fn regrowing(
         .shapes
         .register(tesserae_core::ShapeDef {
             boxes: vec![tesserae_core::NodeBox::new([4, 2, 4], [12, 12, 12])],
+            ..tesserae_core::ShapeDef::default()
+        })
+        .unwrap();
+    let small = tables
+        .shapes
+        .register(tesserae_core::ShapeDef {
+            boxes: vec![tesserae_core::NodeBox::new([5, 5, 5], [11, 12, 11])],
             ..tesserae_core::ShapeDef::default()
         })
         .unwrap();
@@ -76,10 +85,12 @@ pub(super) fn regrowing(
             stages: [every, None]
                 .into_iter()
                 .zip(fruit_materials)
-                .map(|(mean_seconds, material)| Stage {
+                .enumerate()
+                .map(|(n, (mean_seconds, material))| Stage {
                     material,
                     mean_seconds,
                     yields: Vec::new(),
+                    shape: (n == 0).then_some(small),
                 })
                 .collect(),
             density,
@@ -112,6 +123,7 @@ pub(super) fn regrowing(
         placed,
         tree,
         apple,
+        small,
     }
 }
 
@@ -396,7 +408,7 @@ fn voxel_at(farm: &Farm, cell: [i32; 3]) -> Voxel {
 }
 
 #[test]
-fn fruit_is_the_boxes_of_its_shape_grown_and_ripened_trunk_and_canopy_stay_cubes() {
+fn unripe_fruit_is_its_small_shape_ripe_fruit_the_full_one_and_trunk_and_canopy_stay_cubes() {
     for size in SIZES {
         let o = orchard(Some(0.3));
         let mut farm = planted(size, &o, &[BASE]);
@@ -404,7 +416,11 @@ fn fruit_is_the_boxes_of_its_shape_grown_and_ripened_trunk_and_canopy_stay_cubes
         let cells = tree_voxels(&o.tree, SEED, BASE, size);
         for v in &cells {
             let got = voxel_at(&farm, v.at);
-            let want = if v.part == Part::Fruit { o.apple } else { 0 };
+            let want = match (v.part, got.material() == o.fruit[1]) {
+                (Part::Fruit, true) => o.apple,
+                (Part::Fruit, false) => o.small,
+                _ => 0,
+            };
             assert_eq!(got.shape(), want, "{size}: {:?} grown", v.part);
         }
         let ripe = |f: &Farm| {
@@ -415,7 +431,13 @@ fn fruit_is_the_boxes_of_its_shape_grown_and_ripened_trunk_and_canopy_stay_cubes
         };
         assert!(until(&mut farm, 60_000, |f| ripe(f) > 0), "{size}: no ripe");
         for v in cells.iter().filter(|v| v.part == Part::Fruit) {
-            assert_eq!(voxel_at(&farm, v.at).shape(), o.apple, "{size}: ripened");
+            let held = voxel_at(&farm, v.at);
+            let want = if held.material() == o.fruit[1] {
+                o.apple
+            } else {
+                o.small
+            };
+            assert_eq!(held.shape(), want, "{size}: a Stage keeps its own Shape");
         }
     }
 }

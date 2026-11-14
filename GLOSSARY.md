@@ -423,7 +423,8 @@ onto a neighbouring Voxel (grass, mushrooms); a **climber** grows along the
 faces of solids (a vine).
 
 **Stage** — one Material a Plant passes through. A Plant's state is its current
-Stage, so nothing is stored per plant. The last Stage of a crop is ripe.
+Stage, so nothing is stored per plant. The last Stage of a crop is ripe. A Stage
+may name a Shape of its own, which its Voxels take.
 
 **Grown Material** — a Material only growth and generation make: a tree's trunk,
 canopy and fruit, and a Plant's later Stages. It has no Item and cannot be

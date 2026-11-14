@@ -27,6 +27,8 @@ const VINE_LENGTH_M: f32 = 6.0;
 const VINE_FACE_BITS: [u8; 4] = [2, 7, 11, 18];
 const CROSS_SHAPE: u8 = 5;
 const FRUIT_SHAPE: u8 = 6;
+const SMALL_FRUIT_SHAPE: u8 = 9;
+const STAGE_SHAPES: [Option<u8>; 4] = [Some(SMALL_FRUIT_SHAPE), None, Some(FRUIT_SHAPE), None];
 
 const SEED: u64 = 0x7e55_e2ae_0000_0001;
 const SIZES: [f32; 3] = [1.0, 0.5, 0.25];
@@ -61,6 +63,7 @@ fn oak_with(fruit: bool, branching: Option<Branching>) -> SurfaceTree {
             len: 3,
             density: 0.2,
             shape: FRUIT_SHAPE,
+            stage_shapes: [None; 4],
         }),
     }
 }
@@ -219,6 +222,7 @@ fn row_of(fruit: bool, branching: Option<Branching>) -> Tree {
                     material,
                     mean_seconds: None,
                     yields: Vec::new(),
+                    shape: None,
                 })
                 .collect(),
             density: f.density,
@@ -387,12 +391,7 @@ fn assert_whole_with(
                 (2.999..=5.001).contains(&trunk),
                 "{size} m: trunk {trunk} m"
             );
-            let top = cells
-                .iter()
-                .filter(|c| c.2 == Part::Trunk)
-                .last()
-                .unwrap()
-                .0;
+            let top = cells.iter().rfind(|c| c.2 == Part::Trunk).unwrap().0;
             for (at, _, part) in &cells {
                 if *part != Part::Trunk {
                     let across = ((at[0] - top[0]).pow(2) + (at[2] - top[2]).pow(2)) as f32;
@@ -663,6 +662,7 @@ fn mapping() -> Mapping {
             (0, "core:cube".to_owned()),
             (CROSS_SHAPE, "t:cross".to_owned()),
             (FRUIT_SHAPE, "t:apple".to_owned()),
+            (SMALL_FRUIT_SHAPE, "t:apple_small".to_owned()),
         ]
         .into(),
     }
@@ -1215,4 +1215,65 @@ fn a_snapshot_carries_the_clump_and_an_older_one_loads_without() {
             .clump
             .is_none()
     );
+}
+
+fn staged_fruit_feature(spacing_m: f32) -> SurfaceFeature {
+    let mut f = tree_feature(spacing_m, true);
+    let Some(SurfacePlantKind::Tree(tree)) = f.plant.as_mut().map(|p| &mut p.kind) else {
+        unreachable!()
+    };
+    tree.fruit.as_mut().unwrap().stage_shapes = STAGE_SHAPES;
+    f
+}
+
+#[test]
+fn generated_fruit_takes_the_shape_of_the_stage_it_is_drawn_at() {
+    let params = flat(&[staged_fruit_feature(12.0)]);
+    for size in [1.0, 0.5] {
+        let probe = Probe::new(SEED, size, params);
+        let mut shapes = [HashSet::new(), HashSet::new(), HashSet::new()];
+        for (voxel, _) in probe.changed(64.0, false).values() {
+            if let Some(stage) = FRUIT.iter().position(|&m| m == voxel.material()) {
+                shapes[stage].insert(voxel.shape());
+            }
+        }
+        let [small, plain, full] = shapes;
+        assert_eq!(
+            small,
+            HashSet::from([SMALL_FRUIT_SHAPE]),
+            "{size} m: stage 0"
+        );
+        assert_eq!(
+            plain,
+            HashSet::from([FRUIT_SHAPE]),
+            "{size} m: a Stage with none takes the fruit's"
+        );
+        assert_eq!(full, HashSet::from([FRUIT_SHAPE]), "{size} m: stage 2");
+    }
+}
+
+#[test]
+fn a_snapshot_keeps_each_fruit_stages_shape_and_an_older_one_loads_without() {
+    let params = flat(&[staged_fruit_feature(16.0)]);
+    let saved = Generation::capture(params, &mapping()).unwrap();
+    let json = serde_json::to_string(&saved).unwrap();
+    let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+    let fruit = &value["biomes"][0]["surface_features"][0]["plant"]["form"]["fruit"];
+    assert_eq!(
+        fruit["stage_shapes"],
+        serde_json::json!(["t:apple_small", null, "t:apple"])
+    );
+    let reopened: Generation = serde_json::from_str(&json).unwrap();
+    let restored = reopened.restore(&mapping(), 2).unwrap();
+    assert_eq!(restored.biomes, params.biomes);
+
+    let plain = Generation::capture(flat(&[tree_feature(16.0, true)]), &mapping()).unwrap();
+    let json = serde_json::to_string(&plain).unwrap();
+    assert!(
+        !json.contains("stage_shapes"),
+        "none saved when no Stage declares one"
+    );
+    let older: tesserae_core::save::SavedFruit =
+        serde_json::from_str(r#"{"stages":["t:apple0"],"density":0.1,"shape":"t:apple"}"#).unwrap();
+    assert!(older.stage_shapes.is_empty());
 }

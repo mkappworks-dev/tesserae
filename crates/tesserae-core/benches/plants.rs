@@ -43,14 +43,11 @@ fn load() -> String {
         .unwrap_or_default()
 }
 
+type Variant<'a> = (&'a str, Box<dyn FnMut() + 'a>);
+
 /// Runs every variant `reps` times per round for `rounds` rounds, interleaved,
 /// and prints each one's median CPU time per call.
-fn compare(
-    title: &str,
-    rounds: usize,
-    reps: usize,
-    variants: &mut [(&str, Box<dyn FnMut() + '_>)],
-) {
+fn compare(title: &str, rounds: usize, reps: usize, variants: &mut [Variant]) {
     let mut samples: Vec<Vec<f64>> = vec![Vec::new(); variants.len()];
     for (_, f) in variants.iter_mut() {
         for _ in 0..reps {
@@ -444,11 +441,13 @@ fn rebearing() {
                     material: 3,
                     mean_seconds: Some(40.0),
                     yields: Vec::new(),
+                    shape: None,
                 },
                 Stage {
                     material: 4,
                     mean_seconds: None,
                     yields: Vec::new(),
+                    shape: None,
                 },
             ],
             density: 0.12,

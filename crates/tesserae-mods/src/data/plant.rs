@@ -105,6 +105,7 @@ pub(super) struct Stage {
     mean_seconds: Option<f32>,
     #[serde(default)]
     yields: Vec<Yield>,
+    shape: Option<String>,
 }
 
 /// Seconds between a tree's new fruit when a row names none.
@@ -176,6 +177,7 @@ fn stages(rows: Vec<Stage>) -> Vec<content::PlantStage> {
             material: s.material,
             mean_seconds: s.mean_seconds,
             yields: yields(s.yields),
+            shape: s.shape,
         })
         .collect()
 }

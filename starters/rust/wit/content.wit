@@ -461,6 +461,9 @@ interface content {
         material: string,
         mean-seconds: option<f32>,
         yields: list<plant-yield>,
+        /// The Shape this Stage's Voxels take, by full name; `none` keeps the
+        /// Plant's (or a fruit's) Shape.
+        shape: option<string>,
     }
 
     /// Fluid a Plant must have within reach to grow.

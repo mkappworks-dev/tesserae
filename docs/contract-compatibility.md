@@ -126,6 +126,12 @@ and absent in every earlier tree), and a `column-def` may name the fluid it
 stands in. Names and `#tag` references resolve after every Mod has declared; an
 unknown or unmatched one is a load error naming the Plant.
 
+A `plant-stage` of line 0.3 gained an optional `shape` as its last field (a
+Shape by full name the Stage's Voxels take; none keeps the Plant's or the
+fruit's), so a Declaration built against the earlier 0.3 text no longer lines up
+and needs a rebuild; an unknown name is a load error naming the Plant and the
+Stage.
+
 Four more appended fields go with them, each absent in an adapted 0.1 or 0.2
 Declaration. `shape-def` gained `form`, a closed `shape-form` of `boxes`,
 `cross` or `plane`, and none is `boxes`. `item-def` gained an optional

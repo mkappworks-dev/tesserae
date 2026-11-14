@@ -167,6 +167,7 @@ mod references {
                 item: "t:grain".into(),
                 count: content::CountRange { min: 1, max: 1 },
             }],
+            shape: None,
         };
         content::PlantDef {
             name: "wheat".into(),
@@ -324,6 +325,7 @@ mod surface_features {
             material: material.into(),
             mean_seconds,
             yields: Vec::new(),
+            shape: None,
         }
     }
 
@@ -563,6 +565,68 @@ mod surface_features {
                 .unwrap_err()
                 .to_string();
             assert!(err.contains(who) && err.contains("t:nope"), "{err}");
+        }
+    }
+
+    fn with_stage_shapes(crop: Option<&str>, fruit: Option<&str>) -> Vec<content::PlantDef> {
+        let mut rows = plants();
+        for row in &mut rows {
+            match (row.name.as_str(), &mut row.kind) {
+                ("wheat", content::PlantKind::Crop(crop_def)) => {
+                    crop_def.stages[1].shape = crop.map(Into::into);
+                }
+                ("oak", content::PlantKind::Tree(tree)) => {
+                    tree.fruit.as_mut().unwrap().stages[0].shape = fruit.map(Into::into);
+                }
+                _ => {}
+            }
+        }
+        rows
+    }
+
+    #[test]
+    fn a_stage_shape_resolves_and_freezes_by_stage_into_the_biome() {
+        let (biomes, tables, registry) = resolved_with(
+            vec![feature(None, Some("t:oak"), None)],
+            with_stage_shapes(Some("t:cross"), Some("t:apple")),
+        )
+        .unwrap();
+        let shape = |n: &str| registry.id_of(NameKind::Shape, n).unwrap() as u8;
+        let Kind::Crop { stages, .. } = &tables.plants.plants()[0].kind else {
+            panic!("a crop");
+        };
+        assert_eq!(stages[0].shape, None);
+        assert_eq!(stages[1].shape, Some(shape("t:cross")));
+        let Kind::Tree(tree) = &tables.plants.plants()[1].kind else {
+            panic!("a tree");
+        };
+        assert_eq!(
+            tree.fruit.as_ref().unwrap().stages[0].shape,
+            Some(shape("t:apple"))
+        );
+        let features = biomes.as_slice()[0].surface_features.as_slice();
+        let SurfacePlantKind::Tree(frozen) = features[0].plant.unwrap().kind else {
+            panic!("a tree");
+        };
+        assert_eq!(
+            frozen.fruit.unwrap().stage_shapes,
+            [Some(shape("t:apple")), None, None, None]
+        );
+    }
+
+    #[test]
+    fn an_unknown_stage_shape_is_a_load_error_naming_the_plant_and_stage() {
+        for (crop, fruit, who, stage) in [
+            (Some("t:nope"), None, "wheat", "Stage 1"),
+            (None, Some("t:nope"), "oak", "Stage 0"),
+        ] {
+            let err = resolved_with(vec![], with_stage_shapes(crop, fruit))
+                .unwrap_err()
+                .to_string();
+            assert!(
+                err.contains(who) && err.contains(stage) && err.contains("t:nope"),
+                "{err}"
+            );
         }
     }
 

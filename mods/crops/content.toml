@@ -273,6 +273,46 @@ color = [150, 60, 80, 255]
 food = 9.0
 texture = "art/item-berry_pie.png"
 
+[[shapes]]
+name = "berry_sprout"
+boxes = [
+    { min = [7, 0, 7], max = [9, 4, 9] },
+    { min = [9, 2, 7], max = [12, 3, 10] },
+    { min = [4, 3, 6], max = [8, 4, 9] },
+    { min = [7, 3, 9], max = [10, 4, 12] },
+]
+collision = []
+
+[[shapes]]
+name = "berry_young"
+boxes = [
+    { min = [2, 0, 2], max = [14, 3, 14] },
+    { min = [4, 3, 4], max = [12, 6, 12] },
+    { min = [6, 6, 6], max = [10, 8, 10] },
+]
+collision = []
+
+[[shapes]]
+name = "berry_ripe"
+boxes = [
+    { min = [2, 0, 2], max = [14, 3, 14] },
+    { min = [3, 3, 3], max = [13, 6, 13] },
+    { min = [5, 6, 5], max = [11, 8, 11] },
+    { min = [11, 2, 3], max = [14, 4, 6] },
+    { min = [3, 1, 11], max = [6, 3, 14] },
+    { min = [13, 1, 5], max = [15, 3, 7] },
+    { min = [1, 2, 10], max = [3, 4, 12] },
+    { min = [4, 1, 13], max = [6, 3, 15] },
+    { min = [9, 2, 1], max = [11, 4, 3] },
+    { min = [12, 4, 5], max = [14, 6, 7] },
+    { min = [2, 5, 9], max = [4, 7, 11] },
+    { min = [5, 4, 12], max = [7, 6, 14] },
+    { min = [9, 5, 2], max = [11, 7, 4] },
+    { min = [10, 6, 7], max = [12, 8, 9] },
+    { min = [7, 6, 10], max = [9, 8, 12] },
+]
+collision = []
+
 [[plants]]
 name = "wheat"
 kind = "crop"
@@ -326,12 +366,11 @@ temperature = [0.1, 0.85]
 name = "berry"
 kind = "crop"
 seed = "crops:berry_cutting"
-shape = "flora:berry_bush"
 harvest-to = 1
 stages = [
-    { material = "crops:berry_sprout", mean-seconds = 40.0, yields = [{ item = "crops:berry_cutting", count = [1, 1] }] },
-    { material = "crops:berry_bush", mean-seconds = 50.0, yields = [{ item = "crops:berry_cutting", count = [1, 1] }] },
-    { material = "crops:berry_ripe", yields = [{ item = "crops:berries", count = [2, 3] }] },
+    { material = "crops:berry_sprout", shape = "crops:berry_sprout", mean-seconds = 40.0, yields = [{ item = "crops:berry_cutting", count = [1, 1] }] },
+    { material = "crops:berry_bush", shape = "crops:berry_young", mean-seconds = 50.0, yields = [{ item = "crops:berry_cutting", count = [1, 1] }] },
+    { material = "crops:berry_ripe", shape = "crops:berry_ripe", yields = [{ item = "crops:berries", count = [2, 3] }] },
 ]
 
 [plants.needs]

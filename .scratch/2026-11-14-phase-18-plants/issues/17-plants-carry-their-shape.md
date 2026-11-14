@@ -67,6 +67,16 @@ apple cannot be expressed in data.
   walked through, seals no face). One Shape serves both fruit Stages, so the
   unripe apple is the same size as the ripe one and the underside is not darker:
   a Shape has no colour, only the Material has.
+- Per-Stage Shapes (later change): `plant-stage.shape` is optional; `none` keeps
+  the Plant's or fruit's. `PlantTable::staged` gives the Voxel for a Stage
+  change (growth, ripening, harvest reset), `stage_shape` a Stage's Shape,
+  `placed` and `fixed_shape` use Stage 0's, and `canonical_voxel` maps every
+  Stage of a chain to Stage 0's Material and Shape for undo. Worldgen freezes
+  `SurfaceFruit.stage_shapes` as `SavedFruit.stage_shapes` (serde default, empty
+  is none). The berry bush has `berry_sprout`, `berry_young` and `berry_ripe`
+  Shapes and unripe fruit `*_unripe` at about 70% scaled about its stem.
+  Spreaders, columns and climbers declare no Stage Shape. Crops a Biome
+  generates still use the one Plant Shape.
 - `server::plants::a_region_over_the_plants_size_in_metres_does_not_break_and_a_small_one_does`
   fails about one run in eight when the module runs in parallel, with or without
   these changes; it passes alone.

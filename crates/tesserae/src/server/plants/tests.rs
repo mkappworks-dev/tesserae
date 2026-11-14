@@ -36,6 +36,8 @@ struct Content {
     cane: MaterialId,
     placed: MaterialId,
     cross: tesserae_core::ShapeId,
+    /// The Shapes the berry bush's three Stages and the unripe fruit take when `staged`.
+    stage_shapes: [tesserae_core::ShapeId; 4],
 }
 
 fn soil() -> MaterialId {
@@ -60,6 +62,7 @@ fn stage(material: MaterialId, mean: Option<f32>, rows: &[(&str, u32, u32)]) -> 
         material,
         mean_seconds: mean,
         yields: yields(rows),
+        shape: None,
     }
 }
 
@@ -70,6 +73,11 @@ fn content_with(shaped: bool) -> Content {
 
 /// As [`content_with`], the apple tree branching as given and tall enough to show it.
 fn content_of(shaped: bool, branching: Option<Branching>) -> Content {
+    content_full(shaped, branching, false)
+}
+
+/// As [`content_of`]; `staged` gives each berry bush Stage and the unripe fruit a Shape of its own.
+fn content_full(shaped: bool, branching: Option<Branching>, staged: bool) -> Content {
     let mut tables = crate::server::fixture_tables();
     let cross = tables
         .shapes
@@ -79,6 +87,21 @@ fn content_of(shaped: bool, branching: Option<Branching>) -> Content {
             ..tesserae_core::ShapeDef::default()
         })
         .unwrap();
+    let mut boxed = |top: u8| {
+        tables
+            .shapes
+            .register(tesserae_core::ShapeDef {
+                boxes: vec![tesserae_core::NodeBox::new([4, 0, 4], [12, top, 12])],
+                collision: Some(Vec::new()),
+                ..tesserae_core::ShapeDef::default()
+            })
+            .unwrap()
+    };
+    let stage_shapes = [boxed(3), boxed(8), boxed(12), boxed(6)];
+    let own = |mut stage: Stage, n: usize| {
+        stage.shape = staged.then_some(stage_shapes[n]);
+        stage
+    };
     let def = MaterialDef {
         emission: 0,
         dimming: 0,
@@ -128,9 +151,9 @@ fn content_of(shaped: bool, branching: Option<Branching>) -> Content {
             bush[0],
             Kind::Crop {
                 stages: vec![
-                    stage(bush[0], grow, &[]),
-                    stage(bush[1], grow, &[]),
-                    stage(bush[2], None, &[("t:berry", 2, 2)]),
+                    own(stage(bush[0], grow, &[]), 0),
+                    own(stage(bush[1], grow, &[]), 1),
+                    own(stage(bush[2], None, &[("t:berry", 2, 2)]), 2),
                 ],
                 harvest_to: Some(1),
             },
@@ -168,12 +191,12 @@ fn content_of(shaped: bool, branching: Option<Branching>) -> Content {
                 sapling_yield: CountRange { min: 1, max: 2 },
                 fruit: Some(Fruit {
                     stages: vec![
-                        stage(fruit[0], grow, &[]),
+                        own(stage(fruit[0], grow, &[]), 3),
                         stage(fruit[1], None, &[("t:apple", 1, 1)]),
                     ],
                     density: 0.1,
                     regrow_seconds: 120.0,
-                    shape: None,
+                    shape: staged.then_some(stage_shapes[2]),
                 }),
             }),
         ),
@@ -195,6 +218,7 @@ fn content_of(shaped: bool, branching: Option<Branching>) -> Content {
         cane,
         placed,
         cross,
+        stage_shapes,
     }
 }
 
@@ -1401,4 +1425,42 @@ fn cutting_a_limb_drops_its_end_and_what_hung_on_it_and_leaves_the_trunk_standin
             .any(|v| !voxel_at(&app, v.at).is_air()),
         "the crown stays"
     );
+}
+
+fn staged_farm() -> (App, Content) {
+    farm_of(content_full(false, None, true))
+}
+
+#[test]
+fn a_berry_seed_places_stage_zeros_shape_and_a_ripe_break_resets_to_the_young_shape() {
+    let (mut app, c) = staged_farm();
+    let [sprout, young, ripe, _] = c.stage_shapes;
+    assert_eq!(c.tables.plants.fixed_shape(c.bush[0]), Some(sprout));
+    assert_eq!(c.tables.plants.fixed_shape(c.bush[1]), None);
+    inventory(&mut app, |i| i.select(1).unwrap());
+    send(&mut app, plant_at(5, 5));
+    tick(&mut app);
+    assert_eq!(voxel_at(&app, CROP), Voxel::new(c.bush[0], sprout, 0));
+    set(&mut app, CROP, Voxel::new(c.bush[2], ripe, 0));
+    send(&mut app, remove_crop());
+    tick(&mut app);
+    assert_eq!(voxel_at(&app, CROP), Voxel::new(c.bush[1], young, 0));
+    assert_eq!(count(&mut app, "t:berry"), 2);
+}
+
+#[test]
+fn undo_and_redo_of_a_seed_hold_after_its_stages_changed_shape() {
+    let (mut app, c) = staged_farm();
+    let [sprout, young, ..] = c.stage_shapes;
+    survival(&mut app);
+    inventory(&mut app, |i| i.select(1).unwrap());
+    send(&mut app, plant_at(5, 5));
+    tick(&mut app);
+    set(&mut app, CROP, Voxel::new(c.bush[1], young, 0));
+    replay(&mut app, Undo);
+    assert!(rejections(&mut app).is_empty());
+    assert!(voxel_at(&app, CROP).is_air());
+    replay(&mut app, Redo);
+    assert!(rejections(&mut app).is_empty());
+    assert_eq!(voxel_at(&app, CROP), Voxel::new(c.bush[0], sprout, 0));
 }

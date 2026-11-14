@@ -564,6 +564,8 @@ pub struct SurfaceFruit {
     pub density: f32,
     /// The Shape of every fruit Voxel; the cube is `SHAPE_FULL_CUBE`.
     pub shape: ShapeId,
+    /// The Shape of each Stage that declares its own, over `shape`.
+    pub stage_shapes: [Option<ShapeId>; MAX_SURFACE_FRUIT_STAGES],
 }
 
 impl SurfacePlant {
@@ -649,7 +651,10 @@ impl SurfacePlant {
                 if t.trunk == AIR
                     || t.canopy == AIR
                     || !finite_pos(low)
-                    || !(low <= high)
+                    || !matches!(
+                        low.partial_cmp(&high),
+                        Some(std::cmp::Ordering::Less | std::cmp::Ordering::Equal)
+                    )
                     || !finite_pos(t.canopy_radius_m)
                     || !fruit
                 {

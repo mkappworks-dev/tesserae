@@ -686,6 +686,9 @@ pub struct SavedFruit {
     /// Absent is a cube.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shape: Option<String>,
+    /// The Shape of each Stage that declares one, by Stage; absent or shorter is none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub stage_shapes: Vec<Option<String>>,
 }
 
 /// Material and Biomes by name, since ids are only meaningful beside the tables that made them.
@@ -941,6 +944,14 @@ fn saved_plant(p: &crate::SurfacePlant, mapping: &Mapping) -> Result<SavedPlant,
                             stages: names(&f.stages[..f.len as usize])?,
                             density: f.density,
                             shape: shape_name(f.shape)?,
+                            stage_shapes: if f.stage_shapes.iter().any(Option::is_some) {
+                                f.stage_shapes[..f.len as usize]
+                                    .iter()
+                                    .map(|s| s.map(&shape_name).transpose().map(Option::flatten))
+                                    .collect::<Result<_, _>>()?
+                            } else {
+                                Vec::new()
+                            },
                         })
                     })
                     .transpose()?,
@@ -1051,6 +1062,13 @@ fn restored_plant(p: &SavedPlant, mapping: &Mapping) -> Result<crate::SurfacePla
                             .map(|n| mapping.shape_id(n))
                             .transpose()?
                             .unwrap_or(crate::SHAPE_FULL_CUBE),
+                        stage_shapes: {
+                            let mut shapes = [None; crate::MAX_SURFACE_FRUIT_STAGES];
+                            for (slot, name) in shapes.iter_mut().zip(&f.stage_shapes) {
+                                *slot = name.as_ref().map(|n| mapping.shape_id(n)).transpose()?;
+                            }
+                            shapes
+                        },
                     })
                 })
                 .transpose()?,

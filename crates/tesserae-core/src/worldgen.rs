@@ -1421,10 +1421,12 @@ impl Worldgen {
             fruit: tree.fruit.map(|f| Fruit {
                 stages: f.stages[..f.len as usize]
                     .iter()
-                    .map(|&material| Stage {
+                    .zip(f.stage_shapes)
+                    .map(|(&material, shape)| Stage {
                         material,
                         mean_seconds: None,
                         yields: Vec::new(),
+                        shape,
                     })
                     .collect(),
                 density: f.density,
@@ -1443,15 +1445,16 @@ impl Worldgen {
         tree_voxels(&row, seed, [base[0], 0, base[2]], self.voxel_size)
             .into_iter()
             .map(|v| {
-                let material = match (v.part, tree.fruit) {
+                let (material, shape) = match (v.part, tree.fruit) {
                     (Part::Fruit, Some(f)) => {
-                        f.stages[fruit_stage(seed, v.at, self.voxel_size, f.len as usize)]
+                        let stage = fruit_stage(seed, v.at, self.voxel_size, f.len as usize);
+                        (f.stages[stage], f.stage_shapes[stage].unwrap_or(f.shape))
                     }
-                    _ => v.material,
+                    _ => (v.material, v.shape),
                 };
                 (
                     [v.at[0], v.at[1] + base[1], v.at[2]],
-                    Voxel::new(material, v.shape, v.orientation),
+                    Voxel::new(material, shape, v.orientation),
                 )
             })
             .collect()
