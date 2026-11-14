@@ -138,3 +138,36 @@
   font-size: 13px;
   line-height: 1.45;
 }
+.veg-branches,
+.veg-densities {
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+}
+.veg-before .plants-scene {
+  width: 100%;
+}
+.veg-density-map {
+  width: 100%;
+  height: auto;
+  border-radius: 4px;
+}
+.veg-density {
+  margin-left: 6px;
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  border-radius: 8px;
+  color: #10240c;
+}
+.veg-dense {
+  background: #5fb04a;
+}
+.veg-moderate {
+  background: #c9d86a;
+}
+.veg-sparse {
+  background: #e6d6a0;
+}
+.veg-cell .veg-spacing {
+  color: var(--ink);
+}

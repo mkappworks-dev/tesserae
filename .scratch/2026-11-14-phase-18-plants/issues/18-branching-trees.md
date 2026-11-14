@@ -43,3 +43,11 @@ into a flat crown and a jungle tree buttresses and spreads.
 - [ ] The landing and generation cost of a branching tree is benchmarked and
       `TREES_PER_STEP` rechecked.
 - [ ] ADR-0027 and the authoring guide describe `branching`.
+
+## Comments
+
+Mockup drawn at `/vegetation` (sections "Branching trees" and "Density and
+spacing", Biome matrix density tags), awaiting the maintainer's approval. The
+`branching` declaration it shows: fork height, leader count, limb heights,
+directions and reach, lobe size, all in metres. Spacing per Biome type is also
+in metres. Code is in `mockup/branching.js` and `mockup/density.js`.

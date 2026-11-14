@@ -435,32 +435,9 @@ const vegTree = (ground, build, wet) =>
     build(s);
   });
 
-const FRUIT_CELLS = {
-  apple: [
-    [2, 1, true],
-    [1, 2, true],
-    [-1, 2, false],
-    [2, -1, true],
-    [-2, 1, false],
-  ],
-  orange: [
-    [2, 0, true],
-    [1, 2, false],
-    [0, 2, true],
-    [2, -1, false],
-    [-2, 1, true],
-  ],
-  cherry: [
-    [2, 1, true],
-    [1, 2, false],
-    [-1, 2, true],
-    [2, -1, false],
-  ],
-};
-
-function vegFruitTree(kind, ramp, ground) {
-  return vegTree(ground, (s) => {
-    const fruit = FRUIT_CELLS[kind];
+/** The pre-branching oak, kept only for the before and after panel. */
+const vegStraightOak = () =>
+  vegTree("grass", (s) => {
     vegTrunk(s, TRUNK, [
       [0, 0, 0],
       [0, 1, 0],
@@ -469,171 +446,18 @@ function vegFruitTree(kind, ramp, ground) {
     ]);
     vegCanopy(
       s,
-      kind === "cherry"
-        ? [
-            [3, 2],
-            [4, 1],
-            [5, 1],
-          ]
-        : [
-            [3, 2],
-            [4, 2],
-            [5, 1],
-          ],
-      ramp,
-      {
-        skip: (x, y, z) =>
-          (x === 0 && z === 0 && y === 3) ||
-          (y === 3 && fruit.some(([fx, fz]) => fx === x && fz === z)),
-      },
+      [
+        [3, 2],
+        [4, 2],
+        [5, 1],
+      ],
+      RAMPS.oak,
+      { skip: (x, y, z) => x === 0 && z === 0 && y === 3 },
     );
-    /* A fruit Voxel replaces a canopy Voxel, so its cell holds the fruit and no leaves. */
-    for (const [x, z, ripe] of fruit) {
-      if (kind === "cherry") {
-        vegFruit(s, kind, x - 0.2, 3.1, z, ripe, 1.0);
-        vegFruit(s, kind, x + 0.2, 3.1, z + 0.1, !ripe, 1.0);
-      } else vegFruit(s, kind, x, 3.1, z, ripe);
-    }
   });
-}
 
-const TREE_SCENES = {
-  oak: () =>
-    vegTree("grass", (s) => {
-      vegTrunk(s, TRUNK, [
-        [0, 0, 0],
-        [0, 1, 0],
-        [0, 2, 0],
-        [0, 3, 0],
-      ]);
-      vegCanopy(
-        s,
-        [
-          [3, 2],
-          [4, 2],
-          [5, 1],
-        ],
-        RAMPS.oak,
-        { skip: (x, y, z) => x === 0 && z === 0 && y === 3 },
-      );
-    }),
-  birch: () =>
-    vegTree("grass", (s) => {
-      vegTrunk(
-        s,
-        "#d9d6cc",
-        [0, 1, 2, 3, 4, 5].map((y) => [0, y, 0]),
-      );
-      s.box(0.01, 2, 0.51, 0.3, 0.12, 0, "#3a342c");
-      s.box(0.51, 4, 0.01, 0.12, 0.12, 0, "#3a342c");
-      vegCanopy(
-        s,
-        [
-          [5, 1],
-          [6, 1],
-          [7, 0],
-        ],
-        RAMPS.birch,
-        { skip: (x, y, z) => x === 0 && z === 0 && y === 5 },
-      );
-    }),
-  pine: () =>
-    vegTree("snow", (s) => {
-      vegTrunk(s, "#5a4026", [
-        [0, 0, 0],
-        [0, 1, 0],
-        [0, 2, 0],
-      ]);
-      const cells = vegCanopy(
-        s,
-        [
-          [2, 2],
-          [3, 1],
-          [4, 2],
-          [5, 1],
-          [6, 1],
-          [7, 0],
-        ],
-        RAMPS.pine,
-        { skip: (x, y, z) => x === 0 && z === 0 && y === 2 },
-      );
-      vegSnow(s, cells);
-    }),
-  palm: () =>
-    vegTree(
-      "sand",
-      (s) => {
-        [
-          [0, 0],
-          [0, 1],
-          [0.2, 2],
-          [0.5, 3],
-          [0.9, 4],
-          [1.3, 5],
-          [1.7, 6],
-        ].forEach(([x, y]) => s.box(x, y, 0, 0.7, 1, 0, "#a07d4e"));
-        for (const a of [0, Math.PI / 4, Math.PI / 2, (3 * Math.PI) / 4])
-          s.quad("frond", 1.7, 7, 0, a, 4.4, 1.8, { bias: 30 });
-        vegFruit(s, "coconut", 2.2, 5.9, 0.1, true, 1.1);
-        vegFruit(s, "coconut", 1.7, 5.95, 0.5, false, 1.1);
-        vegFruit(s, "coconut", 2.1, 5.8, -0.4, true, 1.1);
-      },
-      [
-        [2, 2],
-        [3, 2],
-        [3, 1],
-      ],
-    ),
-  jungle: () =>
-    vegTree("grass", (s) => {
-      vegTrunk(
-        s,
-        "#6b4f31",
-        [0, 1, 2, 3, 4, 5, 6].map((y) => [0, y, 0]),
-      );
-      const cells = vegCanopy(
-        s,
-        [
-          [6, 3],
-          [7, 2],
-        ],
-        RAMPS.jungle,
-        { skip: (x, y, z) => x === 0 && z === 0 && y === 6 },
-      );
-      vegVines(s, cells, 6, 3);
-    }),
-  swamp: () =>
-    vegTree(
-      "swamp",
-      (s) => {
-        vegTrunk(s, "#4e4a35", [
-          [0, 0, 0],
-          [0, 1, 0],
-          [0, 2, 0],
-          [0, 3, 0],
-        ]);
-        const cells = vegCanopy(
-          s,
-          [
-            [4, 3],
-            [5, 2],
-          ],
-          RAMPS.swamp,
-          { skip: (x, y, z) => x === 0 && z === 0 && y === 4 },
-        );
-        vegVines(s, cells, 4, 3);
-      },
-      [
-        [2, 2],
-        [3, 2],
-        [2, 3],
-        [-2, 2],
-      ],
-    ),
-  apple: () => vegFruitTree("apple", RAMPS.oak, "grass"),
-  orange: () => vegFruitTree("orange", RAMPS.orange, "grass"),
-  cherry: () => vegFruitTree("cherry", RAMPS.cherry, "grass"),
-};
+/** Filled by branching.js, which loads after this file. */
+const TREE_SCENES = {};
 
 const TREE_CARDS = [
   ["oak", "Oak", "temperate: terra, meadow", null],
@@ -642,6 +466,7 @@ const TREE_CARDS = [
   ["palm", "Palm", "dry coast: terra, meadow, tidewater", "coconut"],
   ["jungle", "Jungle tree", "wet coast: tidewater lagoon", null],
   ["swamp", "Swamp tree", "wet and cool: meadow heath", null],
+  ["acacia", "Acacia", "hot and dry: terra savanna, meadow prairie", null],
   ["apple", "Apple", "temperate: terra", "apple"],
   ["orange", "Orange", "warm and dry: terra, lumen", "orange"],
   ["cherry", "Cherry", "garden: lumen", "cherry"],
@@ -869,119 +694,6 @@ function vegRuin() {
   });
 }
 
-/* Jungle and swamp scenes -------------------------------------------------------------------- */
-
-/** One tall tree with a vine curtain; `layers` and `trunkY` set its height. */
-function vegBigTree(s, cx, cz, trunkY, layers, ramp, trunk, vineLen) {
-  vegTrunk(
-    s,
-    trunk,
-    Array.from({ length: trunkY + 1 }, (_, y) => [cx, y, cz]),
-  );
-  const cells = vegCanopy(s, layers, ramp, {
-    cx,
-    cz,
-    skip: (x, y, z) => x === cx && z === cz && y === trunkY,
-  });
-  vegVines(s, cells, layers[0][0], vineLen);
-}
-
-function vegJungleScene() {
-  return scene(300, 340, 26, [150, 258], (s) => {
-    vegGround(s, "grass");
-    vegBigTree(
-      s,
-      -2,
-      -1,
-      6,
-      [
-        [6, 2],
-        [7, 1],
-      ],
-      RAMPS.jungle,
-      "#6b4f31",
-      4,
-    );
-    vegBigTree(
-      s,
-      2,
-      1,
-      4,
-      [
-        [4, 2],
-        [5, 1],
-      ],
-      RAMPS.jungle,
-      "#6b4f31",
-      3,
-    );
-    for (const [name, x, z] of [
-      ["fern", 0, 0],
-      ["fern", -1, 2],
-      ["fern", 1, -2],
-      ["mushRed", 0, 1.4],
-      ["flowerV", -0.6, -1.6],
-      ["tuft", 2, -1],
-    ])
-      s.cross(name, x, 0, z);
-  });
-}
-
-function vegSwampScene() {
-  const water = [
-    [0, 0],
-    [1, 0],
-    [0, 1],
-    [1, 1],
-    [-1, 1],
-    [0, 2],
-    [-2, 2],
-  ];
-  return scene(300, 300, 26, [150, 218], (s) => {
-    vegGround(s, "swamp", water);
-    vegBigTree(
-      s,
-      -2,
-      -1,
-      3,
-      [
-        [4, 2],
-        [5, 1],
-      ],
-      RAMPS.swamp,
-      "#4e4a35",
-      3,
-    );
-    vegBigTree(
-      s,
-      2,
-      2,
-      3,
-      [
-        [4, 2],
-        [5, 1],
-      ],
-      RAMPS.swamp,
-      "#4e4a35",
-      3,
-    );
-    for (const [x, z] of [
-      [0, 0],
-      [1, 1],
-      [-1, 1],
-    ])
-      s.box(x, 0, z, 0.8, 0.05, 0, "#3f8a3a");
-    s.quad("flowerW", 0, 0.05, 0, 0, 0.5, 0.5);
-    for (const [name, x, z] of [
-      ["mushBrown", -1, -1.2],
-      ["mushRed", 2, -1],
-      ["cane", -2, 0],
-      ["fern", 1.2, -2],
-    ])
-      s.cross(name, x, 0, z);
-  });
-}
-
 /* Biome x Game matrix ------------------------------------------------------------------------ */
 
 const VEG_KIND = { tree: "Tree", crop: "Crop", ground: "Ground" };
@@ -1181,9 +893,20 @@ function vegChip(id) {
   return `<li class="veg-chip veg-${kind}" title="${VEG_KIND[kind]}, from ${vegModOf(id)}, used by ${games.length} Games">${spriteIcon(sprite, "veg-icon plant-sprite")}<span>${label}</span></li>`;
 }
 
+/** The density tag and the headline spacing of a Biome's first tree; a desert palm stands by water only. */
+function vegDensityTag(name, climate, items) {
+  const cls = DENSITY[densityOf(name, climate)];
+  const tree = items.split(" ").find((id) => VEG_ITEMS[id][0] === "tree");
+  const spacing =
+    tree === "palm" && cls === DENSITY.desert
+      ? "palms by water only, cactus 15-30 m"
+      : `${VEG_ITEMS[tree][1]} every ${cls.tree} m`;
+  return `<span class="veg-density veg-${cls.tag}">${cls.tag}</span><small class="veg-spacing">${spacing}</small>`;
+}
+
 function vegMatrix() {
   const cell = ([name, climate, items, isNew]) =>
-    `<div class="veg-cell${items ? "" : " bare"}"><h5>${name}${isNew ? '<span class="veg-new">new</span>' : ""}</h5><small>${climate}</small>${
+    `<div class="veg-cell${items ? "" : " bare"}"><h5>${name}${isNew ? '<span class="veg-new">new</span>' : ""}${items ? vegDensityTag(name, climate, items) : ""}</h5><small>${climate}</small>${
       items
         ? `<ul>${items.split(" ").map(vegChip).join("")}</ul>`
         : `<p>Bare on purpose: basalt and lava. Proposed, not in the Game today.</p>`
@@ -1237,8 +960,10 @@ function vegetationPage() {
       )
       .join("")}</div><p class="muted veg-note">${note}</p></div>`;
   const body = `${spriteDefs()}<div id="vegetation-root" class="blocks plants vegetation">
-<section>${heading("TREE SPECIES", "Nine trees, each from grown Materials", "Each is a `tree` Plant: a grown trunk and canopy, a size in metres, a sapling. Fruit replaces a canopy Voxel with a small 3D Shape of stacked boxes. The palm's fronds are flat crossed quads; vines are flat quads on faces.")}
+<section>${heading("TREE SPECIES", "Ten trees, each from grown Materials", "Each is a `tree` Plant: a grown trunk and canopy, a size in metres, a sapling. Fruit replaces a canopy Voxel with a small 3D Shape of stacked boxes. The palm's fronds are flat crossed quads; vines are flat quads on faces.")}
 <div class="veg-gallery">${TREE_CARDS.map(treeCard).join("")}</div></section>
+${branchingSection(heading)}
+${densitySection(heading)}
 <section>${heading("VEGETABLES AND CROPS", "Four Stages, the last ripe", "Crossed quads on farmland, as wheat already is. The same Plants are scattered wild in grass, ripe, so a walker finds them.")}
 ${strip("wheat", "Wheat", FARMLAND, "Harvested ripe; regrows to an earlier Stage.")}
 ${strip("carrot", "Carrot", FARMLAND, "Orange shoulders show at the last Stage.")}
@@ -1251,7 +976,7 @@ ${strip("berry", "Berry bush", "#4f7f35", "Grows on plain grass; white blossom a
 <section>${heading("VINES", "Flat quads on faces", "A vine is one flat quad on the face it clings to. Worldgen hangs them from the outer canopy of jungle and swamp trees; after that they grow by the climber rule.")}
 <div class="plants-row"><div class="plants-surface"><h4>A curtain from a jungle canopy</h4>${vegCurtain()}</div><div class="plants-surface"><h4>Climbing a ruin wall</h4>${vegRuin()}</div></div></section>
 <section>${heading("JUNGLE AND SWAMP", "Two new Biomes, wet and hot", "A jungle is hot and very wet: tall trees with vine curtains, ferns, orchids. A swamp is warm and wetter still: low trees hung with vines, mud and standing water, lily pads, cane, mushrooms.")}
-<div class="plants-row"><div class="plants-surface"><h4>Jungle, 0.8 warm, 0.85 wet</h4>${vegJungleScene()}</div><div class="plants-surface"><h4>Swamp, 0.6 warm, 0.95 wet</h4>${vegSwampScene()}</div></div></section>
+<div class="plants-row"><div class="plants-surface"><h4>Jungle, 0.8 warm, 0.85 wet</h4>${branchJungleScene()}</div><div class="plants-surface"><h4>Swamp, 0.6 warm, 0.95 wet</h4>${branchSwampScene()}</div></div></section>
 <section>${heading("SHARED PLANT LIBRARY", "Declared once, placed by any Game", "Plants live in three shared Mods. A Game only picks which Biome grows which plant, so the same oak, wheat or cactus turns up in several Games. The count is how many Games use it below.")}
 ${vegLibrary()}</section>
 <section>${heading("BIOMES BY GAME", "What each Biome grows", "Each Biome lists up to 16 features, so these hold eight to twelve species without trimming. Biomes tagged new are added at step 18b so no hot or wet region is empty. Icons are the Plant's own sprite; trees are drawn small.")}

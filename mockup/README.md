@@ -248,7 +248,7 @@ grids and are throwaway; the engine's Stage art comes from
 
 ## Vegetation (step 18b, proposed, awaiting approval)
 
-`/vegetation` extends the step 18 look to every Biome of every Game: nine tree
+`/vegetation` extends the step 18 look to every Biome of every Game: ten tree
 species (oak, birch, snowy pine, palm with flat fronds and 3D coconuts, jungle
 and swamp trees with hanging vines, and apple, orange and cherry with ripe and
 unripe 3D voxel fruit), four crops as four-Stage crossed-quad strips, ground and
@@ -259,3 +259,10 @@ what each Biome grows (eight to twelve species each, new jungle, swamp and
 savanna Biomes tagged), and a legend. Code is in `vegetation.js` and
 `vegetation.css`, reusing `scene()` and `apple3d` from `plants.js`. Reach it
 from the picker ("Vegetation (step 18b)").
+
+Step 18c adds two sections. **Branching trees** (`branching.js`) redraws every
+tree as an isometric voxel scene with forking leaders, limbs and leaf lobes at
+the tips, a before and after oak, and a label of each tree's branching in
+metres. **Density and spacing** (`density.js`) is a 48 m plan view per Biome
+type at one scale, with grove clumping from a low-frequency field, and the Biome
+matrix cells carry a dense, moderate or sparse tag with the main tree's spacing.
