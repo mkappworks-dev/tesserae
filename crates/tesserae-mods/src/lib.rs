@@ -20,6 +20,7 @@ mod loader;
 mod log;
 mod manifest;
 mod package;
+mod plant;
 mod prompt;
 mod random;
 mod recipe;
@@ -57,6 +58,7 @@ pub use manifest::{
     games_dir, migrate_legacy_games, plan, scan, with_dependencies,
 };
 pub use package::{Staged, stage};
+pub use plant::{DeclaredPlants, MAX_PLANTS, MAX_PLANTS_PER_MOD};
 pub use prompt::{confirm_trust, trust_prompt};
 pub use recipe::{DeclaredRecipes, MAX_RECIPES, MAX_RECIPES_PER_MOD};
 pub use registry::{Kind, Registry, RegistryMismatch};

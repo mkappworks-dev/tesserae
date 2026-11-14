@@ -27,6 +27,7 @@ pub mod mesh;
 pub mod noise;
 pub mod occupants;
 pub mod ore;
+pub mod plant;
 pub mod reaction;
 pub mod save;
 pub mod seed;
@@ -63,6 +64,7 @@ pub use occupants::{
     Burning, ChunkOverlay, Fluid, Level, Occupants, Overlay, optical, optical_chunk,
 };
 pub use ore::{BiomeSet, MAX_ORES, Ore, OreTable};
+pub use plant::{PlantError, PlantRef, PlantTable, Role as PlantRole};
 pub use reaction::{
     Outcome, Participant, Phase, Reactant, ReactionDef, ReactionError, ReactionTable, Side,
 };

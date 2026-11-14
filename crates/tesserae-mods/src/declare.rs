@@ -155,6 +155,7 @@ pub struct Behaviour {
     pub(crate) cause_sounds: Vec<content::CauseSound>,
     pub(crate) recipes: Vec<content::RecipeDef>,
     voxel_uses: Vec<content::VoxelUse>,
+    pub(crate) plants: Vec<content::PlantDef>,
     lake: Option<content::WaterParams>,
     ground: Option<content::GroundParams>,
 }
@@ -261,6 +262,11 @@ pub fn apply(
             "recipe",
             declaration.recipes.len(),
             crate::recipe::MAX_RECIPES_PER_MOD,
+        ),
+        (
+            "plant",
+            declaration.plants.len(),
+            crate::plant::MAX_PLANTS_PER_MOD,
         ),
     ] {
         if count > max {
@@ -469,6 +475,7 @@ pub fn apply(
             cause_sounds: declaration.cause_sounds,
             recipes: declaration.recipes,
             voxel_uses: declaration.voxel_uses,
+            plants: declaration.plants,
             lake,
             ground,
         },

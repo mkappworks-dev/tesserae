@@ -175,6 +175,7 @@ impl LoadedMods {
 fn placeable(tables: &Tables, material: MaterialId) -> bool {
     (tables.materials.def(material).solid || tables.fluids.rank(material).is_some())
         && !tables.uses.is_open(material)
+        && !tables.plants.is_grown(material)
 }
 
 #[derive(Resource)]
@@ -611,8 +612,20 @@ pub(crate) async fn declare_all(
         loaded.world.get_or_insert_with(WorldgenParams::default);
     }
     let recipes = tesserae_mods::DeclaredRecipes::take(&mut behaviours);
+    let plants = tesserae_mods::DeclaredPlants::take(&mut behaviours);
     let (ground, lake) =
         resolve(behaviours, &mut loaded.tables, &loaded.registry).map_err(|e| e.to_string())?;
+    // Grown Materials decide which implicit Items exist, so Plants resolve
+    // before the Items and are checked against them after.
+    loaded.tables.plants = plants
+        .resolve(&loaded.registry, &loaded.tables)
+        .map_err(|e| e.to_string())?;
+    plants
+        .check_items(
+            &loaded.tables.plants,
+            &loaded.every_item(world.voxel_size).0,
+        )
+        .map_err(|e| e.to_string())?;
     loaded.recipes = recipes
         .resolve(
             &loaded.every_item(world.voxel_size).0,

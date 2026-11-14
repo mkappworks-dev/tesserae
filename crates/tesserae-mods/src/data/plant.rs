@@ -1,0 +1,282 @@
+use serde::Deserialize;
+
+use crate::bindings::tesserae::mods::content;
+
+/// Tagged by `kind`. The common fields repeat in each kind so that unknown
+/// fields are still refused, which a flattened struct would not allow.
+#[derive(Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "kebab-case",
+    rename_all_fields = "kebab-case",
+    deny_unknown_fields
+)]
+pub(super) enum Plant {
+    Crop {
+        name: String,
+        seed: String,
+        needs: Needs,
+        stages: Vec<Stage>,
+        harvest_to: Option<u32>,
+    },
+    Tree {
+        name: String,
+        seed: String,
+        needs: Needs,
+        sapling: String,
+        #[serde(default)]
+        sapling_yields: Vec<Yield>,
+        trunk: String,
+        canopy: String,
+        trunk_height_m: [f32; 2],
+        canopy_radius_m: f32,
+        mean_seconds: f32,
+        #[serde(default)]
+        trunk_yield: Vec<Yield>,
+        #[serde(default)]
+        canopy_yield: Vec<Yield>,
+        sapling_yield: [u32; 2],
+        fruit: Option<Fruit>,
+    },
+    Column {
+        name: String,
+        seed: String,
+        needs: Needs,
+        material: String,
+        max_height_m: f32,
+        direction: Direction,
+        mean_seconds: f32,
+        #[serde(default)]
+        yields: Vec<Yield>,
+    },
+    Spreader {
+        name: String,
+        seed: String,
+        needs: Needs,
+        material: String,
+        reach_m: f32,
+        mean_seconds: f32,
+        density: u32,
+        #[serde(default)]
+        yields: Vec<Yield>,
+    },
+    Climber {
+        name: String,
+        seed: String,
+        needs: Needs,
+        material: String,
+        mean_seconds: f32,
+        length_m: f32,
+        #[serde(default)]
+        yields: Vec<Yield>,
+    },
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+pub(super) struct Needs {
+    soil: Vec<String>,
+    light_min: Option<u8>,
+    light_max: Option<u8>,
+    temperature: Option<[f32; 2]>,
+    humidity: Option<[f32; 2]>,
+    water: Option<Water>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+pub(super) struct Water {
+    fluid: String,
+    reach_m: f32,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+pub(super) struct Stage {
+    material: String,
+    mean_seconds: Option<f32>,
+    #[serde(default)]
+    yields: Vec<Yield>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+pub(super) struct Fruit {
+    stages: Vec<Stage>,
+    density: f32,
+    harvest_to: u32,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+pub(super) struct Yield {
+    item: String,
+    count: [u32; 2],
+}
+
+#[derive(Deserialize, Clone, Copy)]
+#[serde(rename_all = "kebab-case")]
+pub(super) enum Direction {
+    Up,
+    Down,
+}
+
+fn count([min, max]: [u32; 2]) -> content::CountRange {
+    content::CountRange { min, max }
+}
+
+fn yields(rows: Vec<Yield>) -> Vec<content::PlantYield> {
+    rows.into_iter()
+        .map(|y| content::PlantYield {
+            item: y.item,
+            count: count(y.count),
+        })
+        .collect()
+}
+
+fn stages(rows: Vec<Stage>) -> Vec<content::PlantStage> {
+    rows.into_iter()
+        .map(|s| content::PlantStage {
+            material: s.material,
+            mean_seconds: s.mean_seconds,
+            yields: yields(s.yields),
+        })
+        .collect()
+}
+
+fn needs(n: Needs) -> content::PlantNeeds {
+    content::PlantNeeds {
+        soil: n.soil,
+        light_min: n.light_min,
+        light_max: n.light_max,
+        temperature: n.temperature.map(|[a, b]| (a, b)),
+        humidity: n.humidity.map(|[a, b]| (a, b)),
+        water: n.water.map(|w| content::PlantWater {
+            fluid: w.fluid,
+            reach_m: w.reach_m,
+        }),
+    }
+}
+
+impl From<Plant> for content::PlantDef {
+    fn from(plant: Plant) -> Self {
+        match plant {
+            Plant::Crop {
+                name,
+                seed,
+                needs: n,
+                stages: rows,
+                harvest_to,
+            } => Self {
+                name,
+                seed,
+                needs: needs(n),
+                kind: content::PlantKind::Crop(content::CropDef {
+                    stages: stages(rows),
+                    harvest_to,
+                }),
+            },
+            Plant::Tree {
+                name,
+                seed,
+                needs: n,
+                sapling,
+                sapling_yields,
+                trunk,
+                canopy,
+                trunk_height_m: [low, high],
+                canopy_radius_m,
+                mean_seconds,
+                trunk_yield,
+                canopy_yield,
+                sapling_yield,
+                fruit,
+            } => Self {
+                name,
+                seed,
+                needs: needs(n),
+                kind: content::PlantKind::Tree(content::TreeDef {
+                    sapling,
+                    sapling_yields: yields(sapling_yields),
+                    trunk,
+                    canopy,
+                    trunk_height_m: (low, high),
+                    canopy_radius_m,
+                    mean_seconds,
+                    trunk_yield: yields(trunk_yield),
+                    canopy_yield: yields(canopy_yield),
+                    sapling_yield: count(sapling_yield),
+                    fruit: fruit.map(|f| content::FruitDef {
+                        stages: stages(f.stages),
+                        density: f.density,
+                        harvest_to: f.harvest_to,
+                    }),
+                }),
+            },
+            Plant::Column {
+                name,
+                seed,
+                needs: n,
+                material,
+                max_height_m,
+                direction,
+                mean_seconds,
+                yields: rows,
+            } => Self {
+                name,
+                seed,
+                needs: needs(n),
+                kind: content::PlantKind::Column(content::ColumnDef {
+                    material,
+                    max_height_m,
+                    direction: match direction {
+                        Direction::Up => content::ColumnDirection::Up,
+                        Direction::Down => content::ColumnDirection::Down,
+                    },
+                    mean_seconds,
+                    yields: yields(rows),
+                }),
+            },
+            Plant::Spreader {
+                name,
+                seed,
+                needs: n,
+                material,
+                reach_m,
+                mean_seconds,
+                density,
+                yields: rows,
+            } => Self {
+                name,
+                seed,
+                needs: needs(n),
+                kind: content::PlantKind::Spreader(content::SpreaderDef {
+                    material,
+                    reach_m,
+                    mean_seconds,
+                    density,
+                    yields: yields(rows),
+                }),
+            },
+            Plant::Climber {
+                name,
+                seed,
+                needs: n,
+                material,
+                mean_seconds,
+                length_m,
+                yields: rows,
+            } => Self {
+                name,
+                seed,
+                needs: needs(n),
+                kind: content::PlantKind::Climber(content::ClimberDef {
+                    material,
+                    mean_seconds,
+                    length_m,
+                    yields: yields(rows),
+                }),
+            },
+        }
+    }
+}

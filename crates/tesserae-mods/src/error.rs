@@ -172,6 +172,13 @@ pub enum ModError {
         field: &'static str,
         reason: String,
     },
+    /// A `plants` row, named by its name.
+    Plant {
+        id: String,
+        row: usize,
+        name: String,
+        reason: String,
+    },
     /// A `recipes` row, named by its output Item.
     Recipe {
         id: String,
@@ -359,6 +366,12 @@ impl fmt::Display for ModError {
                 field,
                 reason,
             } => write!(f, "mod `{id}`: {list} {row} `{name}`: {field}: {reason}"),
+            ModError::Plant {
+                id,
+                row,
+                name,
+                reason,
+            } => write!(f, "mod `{id}`: plant {row} `{name}`: {reason}"),
             ModError::Recipe {
                 id,
                 row,

@@ -753,6 +753,7 @@ impl Guest for Terra {
                     station: "workbench".into(),
                 },
             ],
+            plants: Vec::new(),
             voxel_uses: vec![
                 VoxelUse {
                     material: "terra:door".into(),

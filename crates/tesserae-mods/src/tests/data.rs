@@ -465,6 +465,7 @@ fn component() -> Declaration {
             },
             station: "hand".into(),
         }],
+        plants: Vec::new(),
         voxel_uses: vec![
             content::VoxelUse {
                 material: "full:wood".into(),

@@ -373,6 +373,7 @@ impl Guest for Meadow {
             soundscapes: Vec::new(),
             cause_sounds: Vec::new(),
             recipes: Vec::new(),
+            plants: Vec::new(),
             voxel_uses: Vec::new(),
             ores: vec![OreDef {
                 material: "strata:basalt".into(),

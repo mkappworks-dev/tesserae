@@ -416,6 +416,150 @@ interface content {
         station: string,
     }
 
+    /// A count from `min` to `max` inclusive, with `min` at most `max`.
+    record count-range {
+        min: u32,
+        max: u32,
+    }
+
+    /// An Item, `<mod id>:<name>`, a removed or picked Plant Voxel gives, and
+    /// how many.
+    record plant-yield {
+        item: string,
+        count: count-range,
+    }
+
+    /// A Material one Plant passes through. Every Stage but the last has
+    /// `mean-seconds`, how long it takes on average to reach the next, at least
+    /// 16, in seconds at any Voxel size.
+    record plant-stage {
+        /// A solid Material, `<mod id>:<name>`.
+        material: string,
+        mean-seconds: option<f32>,
+        yields: list<plant-yield>,
+    }
+
+    /// Fluid a Plant must have within reach to grow.
+    record plant-water {
+        /// A fluid Material, `<mod id>:<name>`.
+        fluid: string,
+        reach-m: f32,
+    }
+
+    /// What a Plant needs to grow. A Plant that fails any of it holds its Stage;
+    /// none of it is ever a placement rule except `soil`.
+    record plant-needs {
+        /// Solid Materials, `<mod id>:<name>`, at least one: what the Plant
+        /// stands on, or for a climber what it holds to.
+        soil: list<string>,
+        /// Light levels at the Plant's Voxel, 0 to 15; none is 0 and 15.
+        light-min: option<u8>,
+        light-max: option<u8>,
+        /// A low and high between 0 and 1 against the Biome's Climate.
+        temperature: option<tuple<f32, f32>>,
+        humidity: option<tuple<f32, f32>>,
+        water: option<plant-water>,
+    }
+
+    /// A Plant that advances through Materials in place.
+    record crop-def {
+        /// 2 to 8 Stages in order; the last is ripe.
+        stages: list<plant-stage>,
+        /// An earlier Stage, by index, that Use on the ripe one resets to.
+        harvest-to: option<u32>,
+    }
+
+    /// Fruit some canopy Voxels of a tree carry, grown Materials like the
+    /// canopy.
+    record fruit-def {
+        /// 2 to 4 Stages in order; the last is ripe.
+        stages: list<plant-stage>,
+        /// The share of canopy Voxels that carry fruit, from 0 to 0.3.
+        density: f32,
+        /// An earlier Stage, by index, that Use on ripe fruit resets to.
+        harvest-to: u32,
+    }
+
+    /// A sapling that grows a parametric tree, sized in metres.
+    record tree-def {
+        /// The sapling's solid Material, `<mod id>:<name>`: the seed Item places
+        /// it and it grows into the tree.
+        sapling: string,
+        /// What removing the sapling gives.
+        sapling-yields: list<plant-yield>,
+        /// The tree's grown Materials, solid and `<mod id>:<name>`: made only
+        /// by growth and worldgen, never placeable and named by no Item.
+        trunk: string,
+        canopy: string,
+        /// A low and high, above 0 and at most 32, chosen per tree.
+        trunk-height-m: tuple<f32, f32>,
+        /// Above 0 and at most 8.
+        canopy-radius-m: f32,
+        /// Seconds for the sapling to grow, at least 16.
+        mean-seconds: f32,
+        trunk-yield: list<plant-yield>,
+        canopy-yield: list<plant-yield>,
+        /// Saplings given once for every tree cut down; `min` at least 1.
+        sapling-yield: count-range,
+        fruit: option<fruit-def>,
+    }
+
+    enum column-direction {
+        up,
+        down,
+    }
+
+    /// A Plant that grows one Voxel at a time up or down: cane, cactus, kelp.
+    record column-def {
+        material: string,
+        /// Above 0 and at most 32.
+        max-height-m: f32,
+        direction: column-direction,
+        mean-seconds: f32,
+        yields: list<plant-yield>,
+    }
+
+    /// A Plant that copies itself onto a neighbouring Voxel: grass, moss,
+    /// mushrooms, flowers.
+    record spreader-def {
+        material: string,
+        /// From 1 to 8.
+        reach-m: f32,
+        mean-seconds: f32,
+        /// At most this many of its Voxels within `reach-m`, at least 1.
+        density: u32,
+        yields: list<plant-yield>,
+    }
+
+    /// A Plant that grows along the faces of solids: vines.
+    record climber-def {
+        material: string,
+        mean-seconds: f32,
+        /// Above 0 and at most 32.
+        length-m: f32,
+        yields: list<plant-yield>,
+    }
+
+    variant plant-kind {
+        crop(crop-def),
+        tree(tree-def),
+        column(column-def),
+        spreader(spreader-def),
+        climber(climber-def),
+    }
+
+    /// A Plant the Server grows. Names resolve after every Mod has declared;
+    /// the Seed Item places the first Stage.
+    record plant-def {
+        /// Local to the Mod, like a Material's; the engine adds `<mod id>:`.
+        name: string,
+        /// An Item, `<mod id>:<name>`, whose Material is the Plant's first
+        /// Stage, a tree's sapling, or the one Material of any other kind.
+        seed: string,
+        needs: plant-needs,
+        kind: plant-kind,
+    }
+
     /// The rules of Survival, from the Game only. Every field is optional and
     /// an absent one takes the engine's default, shown in brackets. Health and
     /// hunger are points, distances metres and times seconds.
@@ -722,5 +866,8 @@ interface content {
         /// has declared; a Material is in at most one row, as its `material` or
         /// as a Door's open one.
         voxel-uses: list<voxel-use>,
+        /// At most 128 rows per Mod and 512 in a World, from any Mod. A Material
+        /// is in at most one Plant, once.
+        plants: list<plant-def>,
     }
 }

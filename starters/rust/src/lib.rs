@@ -113,6 +113,7 @@ impl Guest for Starter {
                     station: "workbench".into(),
                 },
             ],
+            plants: Vec::new(),
             voxel_uses: vec![
                 voxel_use(
                     "starter_rust:workbench",

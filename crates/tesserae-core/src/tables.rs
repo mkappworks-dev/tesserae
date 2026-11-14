@@ -5,6 +5,7 @@ use crate::fluid::{FluidDef, FluidError, FluidTable};
 use crate::light::MAX_LIGHT;
 use crate::material::MaterialTable;
 use crate::occupants::{Fluid, Level, Occupants};
+use crate::plant::PlantTable;
 use crate::reaction::{ReactionDef, ReactionError, ReactionTable};
 use crate::shape::{Orientation, ShapeTable};
 use crate::usable::{UseError, VoxelUse, VoxelUses};
@@ -24,6 +25,7 @@ pub struct Tables {
     pub reactions: ReactionTable,
     pub combustion: CombustionTable,
     pub uses: VoxelUses,
+    pub plants: PlantTable,
 }
 
 /// Why [`Tables::vet_placed`] refused a Voxel.
