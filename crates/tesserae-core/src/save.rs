@@ -633,7 +633,21 @@ pub enum SavedPlantKind {
         canopy_radius_m: f32,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         fruit: Option<SavedFruit>,
+        /// Absent is a tree that hangs no vines, as every tree saved before them.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        vines: Option<SavedVines>,
     },
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SavedVines {
+    pub material: String,
+    pub shape: String,
+    /// The Orientation against each horizontal face, in `VINE_FACES` order.
+    pub orientations: [u8; 4],
+    pub density: f32,
+    pub length_m: f32,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -884,6 +898,20 @@ fn saved_plant(p: &crate::SurfacePlant, mapping: &Mapping) -> Result<SavedPlant,
                         })
                     })
                     .transpose()?,
+                vines: t
+                    .vines
+                    .map(|v| {
+                        Ok::<_, Error>(SavedVines {
+                            material: name(v.material)?,
+                            shape: mapping.shapes.get(&v.shape).cloned().ok_or_else(|| {
+                                Error::Incompatible(format!("unregistered Shape id {}", v.shape))
+                            })?,
+                            orientations: v.orientations,
+                            density: v.density,
+                            length_m: v.length_m,
+                        })
+                    })
+                    .transpose()?,
             },
         },
     })
@@ -929,7 +957,20 @@ fn restored_plant(p: &SavedPlant, mapping: &Mapping) -> Result<crate::SurfacePla
             trunk_height_m,
             canopy_radius_m,
             fruit,
+            vines,
         } => K::Tree(crate::SurfaceTree {
+            vines: vines
+                .as_ref()
+                .map(|v| {
+                    Ok::<_, Error>(crate::SurfaceVines {
+                        material: id(&v.material)?,
+                        shape: mapping.shape_id(&v.shape)?,
+                        orientations: v.orientations,
+                        density: v.density,
+                        length_m: v.length_m,
+                    })
+                })
+                .transpose()?,
             trunk: id(trunk)?,
             canopy: id(canopy)?,
             trunk_height_m: (trunk_height_m[0], trunk_height_m[1]),

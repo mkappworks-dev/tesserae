@@ -132,6 +132,13 @@ pub enum ModError {
         count: usize,
         max: usize,
     },
+    /// A Biome row with more surface features than the engine stands.
+    TooManyFeatures {
+        id: String,
+        biome: String,
+        count: usize,
+        max: usize,
+    },
     /// A fluid, reaction or fire row names a Material no loaded Mod registered.
     UnknownName {
         id: String,
@@ -338,6 +345,15 @@ impl fmt::Display for ModError {
             } => write!(
                 f,
                 "mod `{id}` declares {count} {what} rows, but at most {max} are allowed"
+            ),
+            ModError::TooManyFeatures {
+                id,
+                biome,
+                count,
+                max,
+            } => write!(
+                f,
+                "mod `{id}`: biome `{biome}` declares {count} surface features, but at most {max} are allowed"
             ),
             ModError::UnknownName {
                 id,

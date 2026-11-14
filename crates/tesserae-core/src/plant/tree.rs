@@ -9,7 +9,9 @@ use super::{
     Change, GrowEnv, Growth, Kind, MAX_CANOPY_RADIUS_M, Plant, PlantTable, Role, Surroundings,
     Tree, conditions_met, mix,
 };
+use crate::climate::{SurfaceVines, VINE_FACES};
 use crate::light::Light;
+use crate::mesh::FACE_STEPS;
 use crate::voxel::{AIR, MaterialId, SHAPE_FULL_CUBE, ShapeId, Voxel};
 
 /// Which of a tree's grown Materials a Voxel is.
@@ -137,6 +139,71 @@ pub fn tree_voxels(tree: &Tree, seed: u64, base: [i32; 3], voxel_size: f32) -> V
         }
     }
     voxels
+}
+
+/// One vine as generation hangs it: `length` Voxels straight down from `top`, in the one
+/// Orientation that lays its plane against the canopy or trunk beside `top`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Vine {
+    pub top: [i32; 3],
+    pub length: i32,
+    pub orientation: u8,
+}
+
+impl Vine {
+    pub fn cells(&self) -> impl Iterator<Item = [i32; 3]> + use<> {
+        let top = self.top;
+        (0..self.length).map(move |dy| [top[0], top[1] - dy, top[2]])
+    }
+}
+
+/// The vines of the tree whose Voxels are `cells`, standing at `base`: each outer canopy cell
+/// (one with a side open to the air) hangs one with probability `vines.density`, by hash of seed
+/// and position. The vine takes the open cell beside it, lies against the canopy cell, and hangs
+/// down a hash-chosen run of up to `vines.length_m` that stops at the tree's own Voxels. A pure
+/// function of the tree, seed, base and Voxel size, so every Chunk sees the same vines; the
+/// caller still owns what is under a vine (ground, other trees).
+pub fn vine_voxels(
+    cells: &[TreeVoxel],
+    vines: &SurfaceVines,
+    seed: u64,
+    voxel_size: f32,
+) -> Vec<Vine> {
+    let own: HashSet<[i32; 3]> = cells.iter().map(|v| v.at).collect();
+    let longest = voxels_in(vines.length_m, voxel_size);
+    let mut hung = Vec::new();
+    for cell in cells.iter().filter(|c| c.part != Part::Trunk) {
+        let share = (hash(seed, cell.at, voxel_size, 4) >> 11) as f64 / (1u64 << 53) as f64;
+        if share >= f64::from(vines.density) {
+            continue;
+        }
+        let open: Vec<usize> = (0..VINE_FACES.len())
+            .filter(|&i| !own.contains(&beside(cell.at, VINE_FACES[i])))
+            .collect();
+        if open.is_empty() {
+            continue;
+        }
+        let face = open[(hash(seed, cell.at, voxel_size, 5) % open.len() as u64) as usize];
+        let top = beside(cell.at, VINE_FACES[face]);
+        let length = 1 + (hash(seed, cell.at, voxel_size, 6) % longest as u64) as i32;
+        let run = (0..length)
+            .take_while(|&dy| !own.contains(&[top[0], top[1] - dy, top[2]]))
+            .count() as i32;
+        if run > 0 {
+            hung.push(Vine {
+                top,
+                length: run,
+                orientation: vines.orientations[face],
+            });
+        }
+    }
+    hung
+}
+
+/// The cell a vine takes to lie against `cell` with `face`: across the face's opposite side.
+fn beside(cell: [i32; 3], face: usize) -> [i32; 3] {
+    let step = FACE_STEPS[face];
+    [cell[0] - step[0], cell[1] - step[1], cell[2] - step[2]]
 }
 
 /// The Voxel a sapling that has passed its roll grows into: the whole tree as
@@ -328,8 +395,9 @@ mod tests {
     use super::*;
     use crate::climate::Climate;
     use crate::occupants::Occupants;
+    use crate::plant::TreeVines;
     use crate::plant::{CountRange, Fruit, Needs, Stage, Yield};
-    use crate::shape::ShapeTable;
+    use crate::shape::{Orientation, ShapeTable};
     use std::collections::HashMap;
 
     const SOIL: MaterialId = 1;
@@ -345,6 +413,7 @@ mod tests {
 
     fn tree(fruit: Option<f32>) -> Tree {
         Tree {
+            vines: None,
             trunk: TRUNK,
             canopy: CANOPY,
             trunk_height_m: (3.0, 5.0),
@@ -775,5 +844,169 @@ mod tests {
         );
         assert!(settled.contains(&[0, 6, 0]));
         assert!(settled.contains(&[0, 4, 0]) || settled.len() > 1);
+    }
+
+    const VINE: MaterialId = 40;
+
+    fn vine_shapes() -> (ShapeTable, ShapeId) {
+        use crate::shape::{Form, NodeBox, ShapeDef};
+        let mut shapes = ShapeTable::builtin();
+        let id = shapes
+            .register(ShapeDef {
+                form: Form::Plane,
+                boxes: vec![NodeBox::new([1, 1, 0], [15, 15, 2])],
+                ..ShapeDef::default()
+            })
+            .unwrap();
+        (shapes, id)
+    }
+
+    /// A jungle tree whose vines are the climber `t:vine`, held by canopy and trunk.
+    fn jungle(density: f32, length_m: f32) -> (PlantTable, ShapeTable, SurfaceVines) {
+        let (shapes, id) = vine_shapes();
+        let mut table = plants(None);
+        table
+            .push(Plant {
+                name: "t:vine".into(),
+                seed: "t:vine_seed".into(),
+                first: VINE,
+                shape: Some(id),
+                needs: Needs {
+                    soil: vec![SOIL, CANOPY, TRUNK],
+                    light_max: 15,
+                    ..Needs::default()
+                },
+                kind: Kind::Climber {
+                    mean_seconds: 20.0,
+                    length_m: 4.0,
+                    yields: Vec::new(),
+                },
+                sapling_yields: Vec::new(),
+            })
+            .unwrap();
+        let vines = table
+            .vines(
+                &shapes,
+                &TreeVines {
+                    plant: "t:vine".into(),
+                    density,
+                    length_m,
+                },
+            )
+            .unwrap();
+        (table, shapes, vines)
+    }
+
+    #[test]
+    fn vines_hang_from_the_outer_canopy_in_metres_at_every_voxel_size() {
+        let (_, _, vines) = jungle(0.4, 6.0);
+        for size in SIZES {
+            let cells = tree_voxels(&tree(None), SEED, [0, 0, 0], size);
+            let hung = vine_voxels(&cells, &vines, SEED, size);
+            assert_eq!(hung, vine_voxels(&cells, &vines, SEED, size), "pure");
+            assert!(hung.len() > 5, "{size} m: {} vines", hung.len());
+            let own: HashSet<_> = cells.iter().map(|c| c.at).collect();
+            let canopy_low = cells
+                .iter()
+                .filter(|c| c.part != Part::Trunk)
+                .map(|c| c.at[1]);
+            let lowest_canopy = canopy_low.min().unwrap();
+            for vine in &hung {
+                assert!(
+                    vine.length as f32 * size <= 6.0 + 1e-3,
+                    "{size} m: {vine:?}"
+                );
+                assert!(
+                    vine.cells().all(|c| !own.contains(&c)),
+                    "{size} m: {vine:?}"
+                );
+                assert!(vine.top[1] >= lowest_canopy, "hangs from the canopy");
+                let held: Vec<usize> = VINE_FACES
+                    .iter()
+                    .enumerate()
+                    .filter(|&(_, &f)| {
+                        let n = FACE_STEPS[f];
+                        let at = [vine.top[0] + n[0], vine.top[1] + n[1], vine.top[2] + n[2]];
+                        own.contains(&at)
+                    })
+                    .map(|(i, _)| i)
+                    .collect();
+                assert!(
+                    held.iter()
+                        .any(|&i| vines.orientations[i] == vine.orientation),
+                    "{size} m: {vine:?} lies against a face it touches"
+                );
+            }
+            let longest = hung.iter().map(|v| v.length).max().unwrap();
+            assert!(longest as f32 * size > 3.0, "{size} m: longest {longest}");
+        }
+    }
+
+    #[test]
+    fn a_generated_vine_breaks_when_its_anchor_is_removed() {
+        let (table, shapes, vines) = jungle(0.4, 6.0);
+        let cells = tree_voxels(&tree(None), SEED, [0, 0, 0], 1.0);
+        let hung = vine_voxels(&cells, &vines, SEED, 1.0);
+        let vine = hung.first().expect("a vine");
+        let mut world: HashMap<[i32; 3], Voxel> = cells.iter().map(|c| (c.at, c.voxel())).collect();
+        for hung in &hung {
+            for at in hung.cells() {
+                world.entry(at).or_insert(Voxel::shaped(
+                    VINE,
+                    vines.shape,
+                    Orientation::from_bits(hung.orientation).unwrap(),
+                ));
+            }
+        }
+        let lacks = |world: &HashMap<[i32; 3], Voxel>, at: [i32; 3]| {
+            let occupants = |c: [i32; 3]| {
+                Some(Occupants {
+                    solid: world.get(&c).copied().unwrap_or(Voxel::AIR),
+                    fluid: None,
+                    burning: None,
+                })
+            };
+            table
+                .lacks_support(&shapes, world[&at], at, &occupants)
+                .is_some()
+        };
+        for at in vine.cells() {
+            assert!(!lacks(&world, at), "a generated vine holds at {at:?}");
+        }
+        let face = shapes.plane_face(world[&vine.top]).expect("a plane");
+        let step = FACE_STEPS[face];
+        let held = [
+            vine.top[0] + step[0],
+            vine.top[1] + step[1],
+            vine.top[2] + step[2],
+        ];
+        assert!(cells.iter().any(|c| c.at == held), "anchored to the tree");
+        world.remove(&held);
+        assert!(
+            lacks(&world, vine.top),
+            "the top vine falls with its anchor"
+        );
+    }
+
+    #[test]
+    fn vines_must_name_a_climber_with_a_plane_shape() {
+        let (table, shapes, _) = jungle(0.2, 4.0);
+        let vines = |plant: &str| TreeVines {
+            plant: plant.into(),
+            density: 0.2,
+            length_m: 4.0,
+        };
+        assert!(
+            table
+                .vines(&shapes, &vines("t:nope"))
+                .unwrap_err()
+                .contains("not declared")
+        );
+        assert!(
+            table
+                .vines(&shapes, &vines("oak"))
+                .unwrap_err()
+                .contains("not a climber")
+        );
     }
 }

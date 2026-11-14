@@ -101,6 +101,18 @@ pub struct Tree {
     pub canopy_yield: Vec<Yield>,
     pub sapling_yield: CountRange,
     pub fruit: Option<Fruit>,
+    /// Climbers worldgen hangs from the canopy; a growing sapling never makes them.
+    pub vines: Option<TreeVines>,
+}
+
+/// A tree's vines as declared: the climber by full name, not yet resolved.
+#[derive(Clone, PartialEq, Debug)]
+pub struct TreeVines {
+    /// The climber Plant's `<mod id>:<name>`.
+    pub plant: String,
+    /// Share of the outer canopy cells that hang one, from 0 to 0.5.
+    pub density: f32,
+    pub length_m: f32,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -344,6 +356,47 @@ impl PlantTable {
             .orientation_holding(material, shape, struck_face ^ 1)
             .unwrap_or_default();
         Voxel::shaped(material, shape, orientation)
+    }
+
+    /// What worldgen hangs for `vines`: the named climber's Material and its `plane` Shape, with
+    /// the Orientation that lays it against each side. The reason is an error message naming what
+    /// is wrong with the climber.
+    pub fn vines(
+        &self,
+        shapes: &ShapeTable,
+        vines: &TreeVines,
+    ) -> Result<crate::SurfaceVines, String> {
+        let plant = self
+            .plants
+            .iter()
+            .find(|p| p.name == vines.plant)
+            .ok_or_else(|| format!("vines name Plant `{}`, which is not declared", vines.plant))?;
+        if !matches!(plant.kind, Kind::Climber { .. }) {
+            return Err(format!(
+                "vines name `{}`, which is not a climber",
+                vines.plant
+            ));
+        }
+        let shape = plant.shape.ok_or_else(|| {
+            format!(
+                "vines name `{}`, which has no plane Shape to hang by",
+                vines.plant
+            )
+        })?;
+        let mut orientations = [0u8; 4];
+        for (slot, face) in orientations.iter_mut().zip(crate::VINE_FACES) {
+            let held = shapes.orientation_holding(plant.first, shape, face);
+            *slot = held
+                .ok_or_else(|| format!("vines name `{}`, whose Shape is not a plane", vines.plant))?
+                .bits();
+        }
+        Ok(crate::SurfaceVines {
+            material: plant.first,
+            shape,
+            orientations,
+            density: vines.density,
+            length_m: vines.length_m,
+        })
     }
 
     /// The Shape a Player's Place of `material`, a Plant's seed, always uses.
@@ -617,6 +670,15 @@ fn check(plant: &Plant) -> Result<(), PlantError> {
                 ));
             }
             floor(tree.mean_seconds)?;
+            if let Some(vines) = &tree.vines
+                && !((0.0..=crate::MAX_VINE_DENSITY).contains(&vines.density)
+                    && vines.length_m > 0.0
+                    && vines.length_m <= crate::MAX_VINE_LENGTH_M)
+            {
+                return Err(PlantError::Size(
+                    "vines density is from 0 to 0.5 and length-m above 0 and at most 8",
+                ));
+            }
             if let Some(fruit) = &tree.fruit {
                 check_stages(&fruit.stages, MAX_FRUIT_STAGES, 2)?;
                 if !(0.0..=MAX_FRUIT_DENSITY).contains(&fruit.density) {

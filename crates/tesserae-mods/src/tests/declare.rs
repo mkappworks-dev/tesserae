@@ -1803,7 +1803,6 @@ fn a_bad_surface_feature_names_the_mod_and_the_field() {
             vec![feature("core:air", 16.0)],
             "biomes.surface_features.material",
         ),
-        (vec![feature("m:melon", 16.0); 5], "biomes.surface_features"),
     ] {
         match refused(bad) {
             ModError::Params { id, what, source } => {
@@ -1812,6 +1811,18 @@ fn a_bad_surface_feature_names_the_mod_and_the_field() {
             }
             other => panic!("{field}: {other:?}"),
         }
+    }
+    match refused(vec![feature("m:melon", 16.0); 17]) {
+        ModError::TooManyFeatures {
+            id,
+            biome,
+            count,
+            max,
+        } => assert_eq!(
+            (id.as_str(), biome.as_str(), count, max),
+            ("m", "field", 17, 16)
+        ),
+        other => panic!("{other:?}"),
     }
     match refused(vec![feature("m:nothing", 16.0)]) {
         ModError::UnknownName { id, what, name, .. } => assert_eq!(

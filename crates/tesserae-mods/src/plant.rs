@@ -1,7 +1,8 @@
 //! Every Mod's `plants`, resolved against the World's Materials and Items.
 
 use tesserae_core::plant::{
-    CountRange, Direction, Fruit, Kind, Needs, Plant, PlantTable, Stage, Tree, Water, Yield,
+    CountRange, Direction, Fruit, Kind, Needs, Plant, PlantTable, Stage, Tree, TreeVines, Water,
+    Yield,
 };
 use tesserae_core::{MaterialId, ShapeId, Tables, Voxel};
 
@@ -60,6 +61,38 @@ impl DeclaredPlants {
             let mut plant = plant(def, registry, tables).map_err(&fail)?;
             plant.name = format!("{mod_id}:{}", def.name);
             table.push(plant).map_err(|e| fail(e.to_string()))?;
+        }
+        // Vines name a Plant of any Mod, declared before or after the tree.
+        for (index, (mod_id, row, def)) in self.rows().enumerate() {
+            let Some(Kind::Tree(tree)) = table.plant(index).map(|p| &p.kind) else {
+                continue;
+            };
+            let Some(vines) = &tree.vines else {
+                continue;
+            };
+            let fail = |reason: String| ModError::Plant {
+                id: mod_id.to_owned(),
+                row,
+                name: def.name.clone(),
+                reason,
+            };
+            table.vines(&tables.shapes, vines).map_err(&fail)?;
+            let holds = |plant: &Plant| {
+                [tree.trunk, tree.canopy]
+                    .iter()
+                    .any(|m| plant.needs.soil.contains(m))
+            };
+            if !table
+                .plants()
+                .iter()
+                .any(|p| p.name == vines.plant && holds(p))
+            {
+                return Err(fail(format!(
+                    "vines name `{}`, whose soil lists neither this tree's trunk nor its canopy, \
+                     so they would fall at once",
+                    vines.plant
+                )));
+            }
         }
         Ok(table)
     }
@@ -208,6 +241,11 @@ fn plant(def: &content::PlantDef, registry: &Registry, tables: &Tables) -> Resul
                     canopy_yield: yields(&tree.canopy_yield),
                     sapling_yield: count(tree.sapling_yield),
                     fruit,
+                    vines: tree.vines.as_ref().map(|v| TreeVines {
+                        plant: v.plant.clone(),
+                        density: v.density,
+                        length_m: v.length_m,
+                    }),
                 }),
             )
         }

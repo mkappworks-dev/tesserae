@@ -43,7 +43,7 @@ const BLEND_RANGE: f32 = 0.15;
 pub const MAX_CAVE_SCALE: f32 = 4.0;
 
 /// Bounded so a [`Biome`] stays inline and `Copy`.
-pub const MAX_SURFACE_FEATURES: usize = 4;
+pub const MAX_SURFACE_FEATURES: usize = 16;
 
 /// From one in every 4 by 4 m of ground, already a carpet, to one in a square kilometre.
 pub const SURFACE_FEATURE_SPACING_M: std::ops::RangeInclusive<f32> = 4.0..=1024.0;
@@ -384,7 +384,31 @@ pub struct SurfaceTree {
     pub trunk_height_m: (f32, f32),
     pub canopy_radius_m: f32,
     pub fruit: Option<SurfaceFruit>,
+    pub vines: Option<SurfaceVines>,
 }
+
+/// The vines worldgen hangs from a tree's outer canopy, frozen with the climber they are made of
+/// so a Game that later changes it cannot reshape a saved World.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct SurfaceVines {
+    pub material: MaterialId,
+    /// The climber's `plane` Shape.
+    pub shape: ShapeId,
+    /// The Orientation that lays the plane against each horizontal face, in the order of
+    /// [`VINE_FACES`]; resolved when the World is made because worldgen holds no Shape table.
+    pub orientations: [u8; 4],
+    /// Share of the outer canopy cells that hang a vine, from 0 to 0.5.
+    pub density: f32,
+    /// The longest a vine hangs, above 0 and at most 8.
+    pub length_m: f32,
+}
+
+/// Most vines per outer canopy cell, and longest hang in metres.
+pub const MAX_VINE_DENSITY: f32 = 0.5;
+pub const MAX_VINE_LENGTH_M: f32 = 8.0;
+
+/// The faces a vine can lie against, as [`crate::mesh::FACE_STEPS`] indices: the four sides.
+pub const VINE_FACES: [usize; 4] = [0, 1, 4, 5];
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct SurfaceFruit {
@@ -410,6 +434,7 @@ impl SurfacePlant {
                 if let Some(f) = t.fruit {
                     all.extend_from_slice(&f.stages[..f.len as usize]);
                 }
+                all.extend(t.vines.map(|v| v.material));
                 all
             }
         }
@@ -453,6 +478,18 @@ impl SurfacePlant {
                     (1..=MAX_SURFACE_FRUIT_STAGES as u8).contains(&f.len)
                         && (0.0..=1.0).contains(&f.density)
                 });
+                let vines = t.vines.is_none_or(|v| {
+                    v.material != AIR
+                        && v.orientations.iter().all(|&o| o < 24)
+                        && (0.0..=MAX_VINE_DENSITY).contains(&v.density)
+                        && v.length_m > 0.0
+                        && v.length_m <= MAX_VINE_LENGTH_M
+                });
+                if !vines {
+                    return Err(bad(
+                        "vines need a climber, a density to 0.5 and a length to 8 m",
+                    ));
+                }
                 if t.trunk == AIR
                     || t.canopy == AIR
                     || !finite_pos(low)
@@ -469,6 +506,9 @@ impl SurfacePlant {
 }
 
 /// At most [`MAX_SURFACE_FEATURES`], in declaration order.
+///
+/// Held inline so a Biome stays `Copy`: 16 features measure a Biome at under 1 KiB, and generation
+/// reads them by reference, so the size is paid only when a table is copied, never per column.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct SurfaceFeatures {
     len: u8,
@@ -491,7 +531,7 @@ impl SurfaceFeatures {
         if features.len() > MAX_SURFACE_FEATURES {
             return Err(ParamError {
                 field: "biomes.surface_features",
-                rule: "holds at most 4 features",
+                rule: "holds at most 16 features",
             });
         }
         if features.iter().any(|f| f.material == AIR) {

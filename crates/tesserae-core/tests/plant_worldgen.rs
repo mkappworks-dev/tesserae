@@ -4,7 +4,7 @@
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 
-use tesserae_core::plant::tree::{Part, fruit_stage, tree_voxels};
+use tesserae_core::plant::tree::{Part, fruit_stage, tree_voxels, vine_voxels};
 use tesserae_core::plant::{CountRange, Fruit, Stage, Tree};
 use tesserae_core::save::{Generation, Mapping};
 use tesserae_core::testgen::fixtures;
@@ -12,7 +12,7 @@ use tesserae_core::worldgen::WaterParams;
 use tesserae_core::{
     AIR, Biome, BiomeName, BiomeTable, CHUNK_SIZE, Chunk, ClimateParams, MAX_SURFACE_STAGES,
     MaterialId, SurfaceFeature, SurfaceFeatures, SurfaceFruit, SurfacePlant, SurfacePlantKind,
-    SurfaceTree, Voxel, Worldgen, WorldgenParams,
+    SurfaceTree, SurfaceVines, Voxel, Worldgen, WorldgenParams,
 };
 
 const TRUNK: MaterialId = 210;
@@ -21,6 +21,10 @@ const FRUIT: [MaterialId; 3] = [212, 213, 214];
 const CROP: [MaterialId; 3] = [220, 221, 222];
 const CANE: MaterialId = 223;
 const KELP: MaterialId = 224;
+const VINE: MaterialId = 225;
+const VINE_SHAPE: u8 = 8;
+const VINE_LENGTH_M: f32 = 6.0;
+const VINE_FACE_BITS: [u8; 4] = [2, 7, 11, 18];
 const CROSS_SHAPE: u8 = 5;
 const FRUIT_SHAPE: u8 = 6;
 
@@ -38,6 +42,7 @@ fn oak(fruit: bool) -> SurfaceTree {
         canopy: CANOPY,
         trunk_height_m: (3.0, 5.0),
         canopy_radius_m: 2.5,
+        vines: None,
         fruit: fruit.then_some(SurfaceFruit {
             stages: [FRUIT[0], FRUIT[1], FRUIT[2], AIR],
             len: 3,
@@ -175,6 +180,7 @@ impl Probe {
 fn row_of(fruit: bool) -> Tree {
     let o = oak(fruit);
     Tree {
+        vines: None,
         trunk: o.trunk,
         canopy: o.canopy,
         trunk_height_m: o.trunk_height_m,
@@ -613,4 +619,208 @@ fn mapping_with_leaves() -> Mapping {
     let mut m = mapping();
     m.materials.insert(fixtures().leaves, "t:leaves".into());
     m
+}
+
+fn vines() -> SurfaceVines {
+    SurfaceVines {
+        material: VINE,
+        shape: VINE_SHAPE,
+        orientations: VINE_FACE_BITS,
+        density: 0.3,
+        length_m: VINE_LENGTH_M,
+    }
+}
+
+fn jungle_feature(spacing_m: f32) -> SurfaceFeature {
+    let mut tree = tree_feature(spacing_m, false);
+    let Some(SurfacePlant {
+        kind: SurfacePlantKind::Tree(t),
+        ..
+    }) = tree.plant.as_mut()
+    else {
+        unreachable!()
+    };
+    t.vines = Some(vines());
+    tree
+}
+
+fn is_vine(v: Voxel) -> bool {
+    v.material() == VINE
+}
+
+/// Every vine the pure function hangs from each tree is there, from whichever Chunk is made first,
+/// at three Voxel sizes, and no longer in metres than declared.
+#[test]
+fn vines_are_whole_across_chunk_borders_at_every_voxel_size() {
+    let params = flat(&[jungle_feature(14.0)]);
+    let mut crossings = 0;
+    for size in SIZES {
+        let probe = Probe::new(SEED, size, params);
+        let changed = probe.changed(64.0, false);
+        assert_eq!(changed, probe.changed(64.0, true), "{size} m: order");
+        let (mut hung, mut total_m, mut runs) = (0, 0.0, 0);
+        for base in bases(&changed, TRUNK) {
+            let unshifted = tree_voxels(&row_of(false), folded(SEED), [base[0], 0, base[2]], size);
+            for vine in vine_voxels(&unshifted, &vines(), folded(SEED), size) {
+                let cells: Vec<[i32; 3]> =
+                    vine.cells().map(|c| [c[0], c[1] + base[1], c[2]]).collect();
+                let chunks: HashSet<_> = cells
+                    .iter()
+                    .map(|c| c.map(|v| v.div_euclid(SIZE_I)))
+                    .collect();
+                crossings += usize::from(chunks.len() > 1);
+                let mut standing = 0;
+                for at in cells {
+                    let (with, bare) = probe.at(at);
+                    if !bare.is_air() {
+                        break;
+                    }
+                    if is_tree_material(with.material()) {
+                        continue;
+                    }
+                    assert!(
+                        is_vine(with),
+                        "{size} m: vine at {at:?} missing, found {with:?}"
+                    );
+                    assert_eq!(with.shape(), VINE_SHAPE);
+                    assert!(VINE_FACE_BITS.contains(&with.orientation()), "{with:?}");
+                    standing += 1;
+                }
+                hung += usize::from(standing > 0);
+                total_m += standing as f32 * size;
+                runs += 1;
+                assert!(
+                    standing as f32 * size <= VINE_LENGTH_M + 1e-3,
+                    "{size} m: too long"
+                );
+            }
+        }
+        assert!(hung > 20, "{size} m: only {hung} vines");
+        let mean = total_m / runs as f32;
+        assert!((1.0..5.0).contains(&mean), "{size} m: mean vine {mean} m");
+        let in_world = changed.values().filter(|(w, _)| is_vine(*w)).count();
+        assert!(in_world > 0, "{size} m");
+    }
+    assert!(crossings > 2, "{crossings} vines crossed a Chunk border");
+}
+
+#[test]
+fn a_world_without_vines_generates_exactly_the_trees_it_did() {
+    let with = flat(&[tree_feature(14.0, true)]);
+    let probe = Probe::new(SEED, 1.0, with);
+    let changed = probe.changed(64.0, false);
+    assert!(changed.values().all(|(w, _)| !is_vine(*w)));
+    assert!(!changed.is_empty());
+}
+
+fn cube_features(spacing_m: f32, count: usize) -> Vec<SurfaceFeature> {
+    (0..count as MaterialId)
+        .map(|n| SurfaceFeature::cube(230 + n, spacing_m))
+        .collect()
+}
+
+#[test]
+fn a_biome_declares_sixteen_features_and_seventeen_is_refused() {
+    assert!(SurfaceFeatures::new(&cube_features(8.0, 16)).is_ok());
+    let err = SurfaceFeatures::new(&cube_features(8.0, 17)).unwrap_err();
+    assert!(err.to_string().contains("at most 16"), "{err}");
+    assert_eq!(tesserae_core::MAX_SURFACE_FEATURES, 16);
+}
+
+#[test]
+fn sixteen_features_each_stand_in_proportion_to_their_spacing() {
+    let params = flat(&cube_features(8.0, 16));
+    let probe = Probe::new(SEED, 1.0, params);
+    let changed = probe.changed(96.0, false);
+    assert_eq!(changed, probe.changed(96.0, true));
+    let mut counts = [0usize; 16];
+    for (with, _) in changed.values() {
+        if (230..246).contains(&with.material()) {
+            counts[(with.material() - 230) as usize] += 1;
+        }
+    }
+    let mean = counts.iter().sum::<usize>() as f32 / 16.0;
+    for (n, c) in counts.iter().enumerate() {
+        assert!(
+            (*c as f32 - mean).abs() < mean * 0.35,
+            "feature {n} stands {c} times, mean {mean}"
+        );
+    }
+}
+
+/// Chances laid end to end past 1 leave the last features no draw: the earlier declaration takes
+/// the column, the same from every Chunk.
+#[test]
+fn chances_past_one_column_favour_the_earlier_features_deterministically() {
+    let params = flat(&cube_features(4.0, 16));
+    let probe = Probe::new(SEED, 2.0, params);
+    let changed = probe.changed(96.0, false);
+    assert_eq!(changed, probe.changed(96.0, true));
+    let kinds: HashSet<_> = changed
+        .values()
+        .map(|(w, _)| w.material())
+        .filter(|m| (230..246).contains(m))
+        .collect();
+    assert_eq!(kinds, (230..234).collect::<HashSet<_>>());
+}
+
+#[test]
+fn a_snapshot_keeps_sixteen_features_and_a_trees_vines() {
+    let mut features = cube_features(24.0, 13);
+    features.extend([
+        jungle_feature(16.0),
+        tree_feature(20.0, true),
+        crop_feature(18.0),
+    ]);
+    let params = flat(&features);
+    let mut mapping = mapping();
+    for n in 0..13 {
+        mapping.materials.insert(230 + n, format!("t:feature{n}"));
+    }
+    mapping.materials.insert(VINE, "t:vine".into());
+    mapping.shapes.insert(VINE_SHAPE, "t:vine_plane".into());
+    let saved = Generation::capture(params, &mapping).unwrap();
+    let json = serde_json::to_string(&saved).unwrap();
+    let restored = serde_json::from_str::<Generation>(&json)
+        .unwrap()
+        .restore(&mapping, 2)
+        .unwrap();
+    assert_eq!(restored.biomes, params.biomes);
+    assert_eq!(
+        restored.biomes.as_slice()[0]
+            .surface_features
+            .as_slice()
+            .len(),
+        16
+    );
+    let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+    let vines = &value["biomes"][0]["surface_features"][13]["plant"]["form"]["vines"];
+    assert_eq!(vines["material"], "t:vine");
+    assert_eq!(vines["shape"], "t:vine_plane");
+    assert_eq!(vines["orientations"], serde_json::json!(VINE_FACE_BITS));
+    assert!(
+        value["biomes"][0]["surface_features"][14]["plant"]["form"]
+            .get("vines")
+            .is_none(),
+        "a tree without vines writes none"
+    );
+    let (a, b) = (
+        Worldgen::new(SEED, 1.0, params),
+        Worldgen::new(SEED, 1.0, restored),
+    );
+    for cz in -1..1 {
+        for cx in -1..1 {
+            for cy in 0..3 {
+                let (x, y) = (a.chunk(cx, cy, cz), b.chunk(cx, cy, cz));
+                for i in 0..CHUNK_SIZE.pow(3) {
+                    let at = (
+                        i % CHUNK_SIZE,
+                        i / CHUNK_SIZE % CHUNK_SIZE,
+                        i / CHUNK_SIZE.pow(2),
+                    );
+                    assert_eq!(x.get(at.0, at.1, at.2), y.get(at.0, at.1, at.2));
+                }
+            }
+        }
+    }
 }

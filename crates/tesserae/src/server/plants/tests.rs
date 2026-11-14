@@ -147,6 +147,7 @@ fn content_with(shaped: bool) -> Content {
             "t:sapling",
             sapling,
             Kind::Tree(Tree {
+                vines: None,
                 trunk,
                 canopy,
                 trunk_height_m: (2.0, 3.0),

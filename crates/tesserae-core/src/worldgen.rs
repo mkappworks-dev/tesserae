@@ -17,7 +17,7 @@ use crate::climate::{
 use crate::mesh::POS_Y;
 use crate::noise::{Fbm3Cache, fbm2, fbm3_cached, fbm3_range};
 use crate::ore::{OreField, OreMask, OreTable};
-use crate::plant::tree::{Part, fruit_stage, tree_voxels};
+use crate::plant::tree::{Part, fruit_stage, tree_voxels, vine_voxels};
 use crate::plant::{CountRange, Fruit, Stage, Tree};
 use crate::shape::{MAX_SHAPED_PER_CHUNK, Orientation, SHAPE_SLAB, SHAPE_STAIR};
 use crate::tables::Tables;
@@ -635,6 +635,10 @@ impl SurfaceScatter {
     }
 
     /// One draw against the features' chances laid end to end, so each keeps its own density.
+    ///
+    /// A Biome whose chances sum past 1 (16 features at 4 m spacing and 1 m Voxels reach exactly 1)
+    /// leaves the last ones no draw to win: the earlier declaration takes the column, the same on
+    /// every Chunk and Voxel size, and a World recorded that way keeps its digests.
     fn pick<'a>(&self, features: &'a SurfaceFeatures, draw: f64) -> Option<&'a SurfaceFeature> {
         let mut reach = 0.0;
         features.as_slice().iter().find(|f| {
@@ -762,6 +766,11 @@ impl Worldgen {
 
     pub fn params(&self) -> WorldgenParams {
         self.params
+    }
+
+    /// The Biomes by reference: [`Self::params`] copies every Biome and their features.
+    pub fn biomes(&self) -> &BiomeTable {
+        &self.params.biomes
     }
 
     /// The edge of the Voxels this generator makes, in metres.
@@ -1379,6 +1388,7 @@ impl Worldgen {
             trunk_yield: Vec::new(),
             canopy_yield: Vec::new(),
             sapling_yield: CountRange { min: 1, max: 1 },
+            vines: None,
             fruit: tree.fruit.map(|f| Fruit {
                 stages: f.stages[..f.len as usize]
                     .iter()
@@ -1418,6 +1428,38 @@ impl Worldgen {
             .collect()
     }
 
+    /// The vines hanging from the tree standing at `base`, one list of cells per vine, each ending
+    /// above the ground of its own column. A function of the tree and its column in metres alone,
+    /// like [`Self::tree_cells`].
+    fn vine_cells(&self, tree: &SurfaceTree, base: [i32; 3]) -> Vec<Vec<([i32; 3], Voxel)>> {
+        let Some(vines) = tree.vines else {
+            return Vec::new();
+        };
+        let seed = u64::from(self.seed);
+        let grown = tree_voxels(
+            &Self::tree_of(tree),
+            seed,
+            [base[0], 0, base[2]],
+            self.voxel_size,
+        );
+        vine_voxels(&grown, &vines, seed, self.voxel_size)
+            .into_iter()
+            .map(|vine| {
+                let voxel = Voxel::new(vines.material, vines.shape, vine.orientation);
+                let ground = top_index(
+                    self.surface_height_m(self.global_m(vine.top[0]), self.global_m(vine.top[2])),
+                    0.0,
+                    self.voxel_size,
+                );
+                vine.cells()
+                    .map(|at| [at[0], at[1] + base[1], at[2]])
+                    .take_while(|at| at[1] > ground)
+                    .map(|at| (at, voxel))
+                    .collect()
+            })
+            .collect()
+    }
+
     /// Stands the Plants whose Voxels fall in this Chunk. Trees reach over a Chunk's border, so
     /// every column within the widest canopy is asked, in one fixed order, and a Voxel goes only
     /// into an empty cell: the first tree to claim it wins from every Chunk's viewpoint.
@@ -1452,6 +1494,7 @@ impl Worldgen {
             }
         };
         let mut trees = Vec::new();
+        let mut hung: Vec<Vec<([i32; 3], Voxel)>> = Vec::new();
         for gz in origin[2] - margin..origin[2] + size + margin {
             for gx in origin[0] - margin..origin[0] + size + margin {
                 let own = (origin[0]..origin[0] + size).contains(&gx)
@@ -1479,9 +1522,13 @@ impl Worldgen {
                     SurfacePlantKind::Tree(tree) => {
                         let reach = (tree.canopy_radius_m / self.voxel_size).ceil() as i32 + 1;
                         let outside = |g: i32, lo: i32| (lo - g).max(g - (lo + size - 1)).max(0);
+                        // A vine hangs from the canopy, so it can reach below the base on a slope.
+                        let hang = tree
+                            .vines
+                            .map_or(0, |v| (v.length_m / self.voxel_size).ceil() as i32 + 1);
                         if outside(gx, origin[0]) > reach
                             || outside(gz, origin[2]) > reach
-                            || base[1] > origin[1] + size - 1
+                            || base[1] - hang > origin[1] + size - 1
                         {
                             continue;
                         }
@@ -1490,6 +1537,7 @@ impl Worldgen {
                             continue;
                         }
                         trees.push((tree.trunk, self.tree_cells(&tree, base)));
+                        hung.extend(self.vine_cells(&tree, base));
                     }
                     _ => {}
                 }
@@ -1504,6 +1552,10 @@ impl Worldgen {
                     }
                 }
             }
+        }
+        // Vines hang last, so they never take a cell any tree's own Voxel needs.
+        for &(at, voxel) in hung.iter().flatten() {
+            put(chunk, at, voxel, None);
         }
     }
 

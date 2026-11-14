@@ -115,7 +115,7 @@ Unlike `ground`, it blends smoothly across a Biome's border, so there is no wall
 where a cave field meets a solid one. It does nothing in a World without
 `[world.caves]`, and caves still only turn solid into air.
 
-A Biome row may also add `surface-features`, at most four
+A Biome row may also add `surface-features`, at most 16
 `{ material, spacing-m }` entries: a solid Material by full name from any Mod,
 and the mean distance between two of them in metres, from 4 to 1024. The Engine
 stands one, deterministically from the World seed, about once in every

@@ -39,6 +39,7 @@ fn orchard(fruit: Option<f32>) -> Orchard {
     let placed = material(Occlusion::Never);
     let every = Some(tesserae_core::plant::SAMPLE_INTERVAL_S);
     let tree = Tree {
+        vines: None,
         trunk,
         canopy,
         trunk_height_m: (1.0, 2.0),

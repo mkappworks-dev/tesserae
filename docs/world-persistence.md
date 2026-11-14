@@ -83,8 +83,10 @@ with none. Ores name their Material and Biomes, and a Biome names its ground
 Materials, all through the Mapping like the World's own ground. A Biome's
 optional sky and fog colours, cave scale and surface features ride in its
 snapshot, absent when it has none, so a World saved before a Biome gained
-features keeps its bare ground. The snapshot is separate from `entities` and
-changes neither the format nor the generator version.
+features keeps its bare ground. A tree Plant's frozen form carries its `vines`
+(the climber's Material and `plane` Shape by name, the Orientation against each
+side, density and length), absent when it hangs none. The snapshot is separate
+from `entities` and changes neither the format nor the generator version.
 
 Simulation checkpoints contain the logical step, count bounds, flow deadlines
 and desired changes, running and frozen fire clocks, ignition/burn-out changes,

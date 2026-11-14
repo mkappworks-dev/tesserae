@@ -237,6 +237,7 @@ fn tree(name: &str, fruit: Option<FruitDef>) -> PlantDef {
             canopy_yield: vec![give("leaves", 0, 1), give(&format!("{name}_sapling"), 0, 1)],
             sapling_yield: CountRange { min: 1, max: 2 },
             fruit,
+            vines: None,
         }),
     }
 }

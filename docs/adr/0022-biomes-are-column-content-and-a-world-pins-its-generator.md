@@ -66,3 +66,31 @@ moves the surface the streaming band and open-sky relight depend on.
   keeps the features it held and downsamples like any other Edit.
 - **Mods still place no terrain.** The Engine places what the declaration says;
   removing a feature drops its Item like any Voxel.
+
+## Surface feature limit raised to 16
+
+Amended 2026-11-14, from the phase 18 spec's ticket 16. A Biome may declare at
+most 16 surface features, up from four; a 17th is a load error that names the
+Biome. Four was a placeholder from when a feature was one Material. With Plants
+a Biome wants a dozen species, and the other voxel games set no small cap:
+Minecraft gives a Biome whole lists of features and Luanti lets a Biome name any
+number of decorations.
+
+- **Still inline.** `SurfaceFeatures` stays a fixed `Copy` array. At 16 a
+  `Biome` measures 1156 bytes (260 at four) and `WorldgenParams` 19 KiB (4.8 KiB
+  at four), vines included, copied only when a table is built or `params()` is
+  called, never per column: generation reads features through `&Biome`. A shared
+  table behind the Biomes would only be needed past roughly 64.
+- **Chances still add up.** A feature's chance is still the square of Voxel size
+  over spacing, laid end to end on one draw. If a Biome's chances sum past 1 (16
+  features at 4 m spacing and 2 m Voxels do), the earlier declarations take the
+  column and the later ones never stand there, identically from every Chunk, so
+  the density of a late feature is capped by what the earlier ones leave. A
+  Biome that wants all of them keeps its spacings wide enough to sum below 1.
+- **Digests unchanged.** The snapshot field is the same list, and a World with
+  no Plant feature runs the same passes, so recorded digests hold; neither the
+  save format nor the Generator version changes.
+
+Vines are the one addition to a tree's frozen form: worldgen hangs a climber
+from the outer canopy by a pure function of the tree, seed and Voxel size, whole
+across Chunk borders, and only worldgen does (a growing sapling never does).

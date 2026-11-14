@@ -191,6 +191,7 @@ mod surface_features {
             row(
                 "oak",
                 content::PlantKind::Tree(content::TreeDef {
+                    vines: None,
                     sapling: "t:sapling".into(),
                     sapling_yields: Vec::new(),
                     trunk: "t:log".into(),
@@ -298,6 +299,13 @@ mod surface_features {
         d.shapes = vec![
             shape("cross", Some(content::ShapeForm::Cross)),
             shape("apple", None),
+            content::ShapeDef {
+                boxes: vec![crate::bindings::tesserae::mods::types::NodeBox {
+                    min: (1, 1, 0),
+                    max: (15, 15, 2),
+                }],
+                ..shape("plane", Some(content::ShapeForm::Plane))
+            },
         ];
         d.plants = plants;
         d.biomes = vec![content::BiomeDef {
@@ -455,6 +463,134 @@ mod surface_features {
         assert!(err.contains("t:nothing") && err.contains("`t`"), "{err}");
     }
 
+    /// The oak hangs `t:vine`, whose Shape and soil are as given.
+    fn hung(
+        vines: content::TreeVines,
+        vine_shape: Option<&str>,
+        vine_soil: &[&str],
+    ) -> Vec<content::PlantDef> {
+        let mut rows = plants();
+        for row in &mut rows {
+            match (row.name.as_str(), &mut row.kind) {
+                ("oak", content::PlantKind::Tree(tree)) => tree.vines = Some(vines.clone()),
+                ("vine", _) => {
+                    row.shape = vine_shape.map(Into::into);
+                    row.needs.soil = vine_soil.iter().map(|s| (*s).into()).collect();
+                }
+                _ => {}
+            }
+        }
+        rows
+    }
+
+    fn vines(plant: &str, density: f32, length_m: f32) -> content::TreeVines {
+        content::TreeVines {
+            plant: plant.into(),
+            density,
+            length_m,
+        }
+    }
+
+    #[test]
+    fn a_trees_vines_resolve_to_the_climber_and_freeze_into_the_biome() {
+        let (biomes, tables, registry) = resolved_with(
+            vec![feature(None, Some("t:oak"), None)],
+            hung(
+                vines("t:vine", 0.3, 6.0),
+                Some("t:plane"),
+                &["t:sand", "t:leaf"],
+            ),
+        )
+        .unwrap();
+        let Kind::Tree(tree) = &tables.plants.plants()[1].kind else {
+            panic!("a tree");
+        };
+        assert_eq!(tree.vines.as_ref().unwrap().plant, "t:vine");
+        let SurfacePlantKind::Tree(frozen) = biomes.as_slice()[0].surface_features.as_slice()[0]
+            .plant
+            .unwrap()
+            .kind
+        else {
+            panic!("a tree");
+        };
+        let frozen = frozen.vines.unwrap();
+        let plane = registry.id_of(NameKind::Shape, "t:plane").unwrap() as u8;
+        assert_eq!(
+            (
+                frozen.material,
+                frozen.shape,
+                frozen.density,
+                frozen.length_m
+            ),
+            (id(&registry, "t:vine"), plane, 0.3, 6.0)
+        );
+        let faces: Vec<_> = frozen.orientations.to_vec();
+        assert!(faces.iter().all(|&o| o < 24), "{faces:?}");
+        let mut distinct = faces.clone();
+        distinct.sort();
+        distinct.dedup();
+        assert_eq!(distinct.len(), 4, "four faces, four Orientations");
+    }
+
+    #[test]
+    fn vines_that_name_no_climber_or_cannot_hold_are_a_load_error_naming_the_tree() {
+        let both = ["t:sand", "t:leaf"];
+        let refused = |vines, shape, soil: &[&str]| {
+            resolved_with(vec![], hung(vines, shape, soil))
+                .unwrap_err()
+                .to_string()
+        };
+        for (what, err) in [
+            (
+                "no Plant",
+                refused(vines("t:nothing", 0.3, 6.0), Some("t:plane"), &both),
+            ),
+            (
+                "a crop",
+                refused(vines("t:wheat", 0.3, 6.0), Some("t:plane"), &both),
+            ),
+            ("no shape", refused(vines("t:vine", 0.3, 6.0), None, &both)),
+            (
+                "a cross",
+                refused(vines("t:vine", 0.3, 6.0), Some("t:cross"), &both),
+            ),
+            (
+                "no soil",
+                refused(vines("t:vine", 0.3, 6.0), Some("t:plane"), &["t:sand"]),
+            ),
+            (
+                "density",
+                refused(vines("t:vine", 0.6, 6.0), Some("t:plane"), &both),
+            ),
+            (
+                "length",
+                refused(vines("t:vine", 0.3, 9.0), Some("t:plane"), &both),
+            ),
+            (
+                "no length",
+                refused(vines("t:vine", 0.3, 0.0), Some("t:plane"), &both),
+            ),
+        ] {
+            assert!(err.contains("oak"), "{what}: {err}");
+        }
+    }
+
+    #[test]
+    fn a_biome_names_sixteen_features_and_seventeen_is_refused_naming_it() {
+        let many = |n: usize| -> Vec<_> {
+            (0..n)
+                .map(|_| feature(Some("t:sand"), None, None))
+                .collect()
+        };
+        let (biomes, ..) = resolved(many(16)).unwrap();
+        assert_eq!(biomes.as_slice()[0].surface_features.as_slice().len(), 16);
+        let err = refused(many(17));
+        assert!(
+            err.contains("field") && err.contains("17") && err.contains("16"),
+            "{err}"
+        );
+    }
+
     #[test]
     fn a_climber_a_downward_column_and_a_misplaced_shape_are_refused() {
         let climber = refused(vec![feature(None, Some("t:vine"), None)]);
@@ -468,6 +604,28 @@ mod surface_features {
         let shape = refused(vec![feature(None, Some("t:wheat"), Some("t:missing"))]);
         assert!(shape.contains("t:missing"), "{shape}");
     }
+}
+
+#[test]
+fn a_data_mod_declares_vines_in_its_tree_row() {
+    let toml = "[[plants]]\nname = \"jungle\"\nkind = \"tree\"\nseed = \"t:sapling\"\n\
+         sapling = \"t:sapling\"\ntrunk = \"t:log\"\ncanopy = \"t:leaf\"\n\
+         trunk-height-m = [3.0, 5.0]\ncanopy-radius-m = 2.5\nmean-seconds = 60.0\n\
+         sapling-yield = [1, 1]\nvines = { plant = \"t:vine\", density = 0.3, length-m = 6.0 }\n\
+         [plants.needs]\nsoil = [\"t:sand\"]\n";
+    let payload = crate::trust::CheckedPayload::for_test(
+        "content.toml",
+        [("content.toml", toml.as_bytes().to_vec())],
+    );
+    let declared = crate::data::parse("t", &payload).unwrap();
+    let content::PlantKind::Tree(tree) = &declared.plants[0].kind else {
+        panic!("a tree");
+    };
+    let vines = tree.vines.as_ref().unwrap();
+    assert_eq!(
+        (vines.plant.as_str(), vines.density, vines.length_m),
+        ("t:vine", 0.3, 6.0)
+    );
 }
 
 #[test]

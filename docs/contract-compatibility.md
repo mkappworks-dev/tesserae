@@ -49,9 +49,10 @@ them: harmless Materials, Items that stack to 64 and are not food, and the
 default Survival rules.
 
 `biome-def` then gained `surface-features`, appended in the same way: a list of
-at most four `surface-feature` records, each a solid Material by full name and a
-mean `spacing-m` from 4 to 1024 metres, that the Engine stands one Voxel above
-the Biome's surface. A Biome with none generates exactly as before.
+at most 16 `surface-feature` records (four before the Plant phase raised it),
+each a solid Material by full name and a mean `spacing-m` from 4 to 1024 metres,
+that the Engine stands one Voxel above the Biome's surface. A Biome with none
+generates exactly as before.
 
 `survival-params` then gained `regeneration-per-s`, appended in the same way:
 the health a Player regains per second while hunger is at or above

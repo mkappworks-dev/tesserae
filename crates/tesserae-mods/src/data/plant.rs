@@ -39,6 +39,7 @@ pub(super) enum Plant {
         canopy_yield: Vec<Yield>,
         sapling_yield: [u32; 2],
         fruit: Option<Fruit>,
+        vines: Option<Vines>,
     },
     Column {
         name: String,
@@ -112,6 +113,14 @@ pub(super) struct Fruit {
     density: f32,
     harvest_to: u32,
     shape: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+pub(super) struct Vines {
+    plant: String,
+    density: f32,
+    length_m: f32,
 }
 
 #[derive(Deserialize)]
@@ -201,6 +210,7 @@ impl From<Plant> for content::PlantDef {
                 canopy_yield,
                 sapling_yield,
                 fruit,
+                vines,
             } => Self {
                 name,
                 seed,
@@ -222,6 +232,11 @@ impl From<Plant> for content::PlantDef {
                         density: f.density,
                         harvest_to: f.harvest_to,
                         shape: f.shape,
+                    }),
+                    vines: vines.map(|v| content::TreeVines {
+                        plant: v.plant,
+                        density: v.density,
+                        length_m: v.length_m,
                     }),
                 }),
             },

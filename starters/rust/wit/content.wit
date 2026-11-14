@@ -525,6 +525,23 @@ interface content {
         /// Saplings given once for every tree cut down; `min` at least 1.
         sapling-yield: count-range,
         fruit: option<fruit-def>,
+        /// Climbers worldgen hangs from the outer canopy; a growing sapling
+        /// never makes them. `none` hangs none.
+        vines: option<tree-vines>,
+    }
+
+    /// The vines worldgen hangs from a tree, by a pure function of the tree and
+    /// the World seed, so they are whole across Chunk borders and equal in
+    /// metres at any Voxel size. Once placed they live by the climber's rules.
+    record tree-vines {
+        /// A `climber` Plant's full name, `<mod id>:<name>`, declared with a
+        /// `plane` Shape and a soil list that holds this tree's canopy or trunk
+        /// Material, or its vines fall at once.
+        plant: string,
+        /// The share of the outer canopy cells that hang one, from 0 to 0.5.
+        density: f32,
+        /// The longest a vine hangs, above 0 and at most 8.
+        length-m: f32,
     }
 
     enum column-direction {
@@ -647,7 +664,7 @@ interface content {
         /// blends smoothly across the Biome's border, unlike `ground`.
         cave-scale: option<f32>,
 
-        /// At most 4 Materials or Plants the engine stands one Voxel above this
+        /// At most 16 Materials or Plants the engine stands one Voxel above this
         /// Biome's surface Material, where the column's top is a full Voxel of it
         /// with air above: never under a fluid, on a smoothed step or in a cave
         /// mouth. Distance levels leave them out.

@@ -90,3 +90,23 @@ Added acceptance criteria:
 - [ ] Jungle and swamp Biomes exist in the Games that can have them, with their
       trees and vines.
 - [ ] A Biome can declare 16 features; 17 is a load error naming the Biome.
+
+## Engine note, 2026-11-14
+
+The engine half is in; content is still to do.
+
+- **Cap 16.** `MAX_SURFACE_FEATURES` is 16, held inline: `Biome` is 1156 bytes and
+  `WorldgenParams` 19 KiB (260 B and 4.8 KiB at four), copied only at table
+  construction; the per-frame soundscape copy of the params now reads
+  `Worldgen::biomes()`. A 17th feature is a load error naming the Biome
+  (`ModError::TooManyFeatures`). Chances still sum as `(voxel_size/spacing)^2`
+  on one draw; past a sum of 1 the earlier declarations win the column
+  deterministically (ADR-0022 amendment). Digests of Worlds without Plant
+  features are unchanged.
+- **Vines.** A tree row takes
+  `vines = { plant = "<mod>:<climber>", density = 0..0.5, length-m = 0..8 }`
+  (WIT `tree-def.vines: option<tree-vines>`, Rust `vines: Some(TreeVines { plant, density, length_m })`).
+  The climber must declare a `plane` Shape and list the tree's trunk or canopy
+  Material in `needs.soil`, or the load fails naming the tree. Worldgen only,
+  never a sapling.
+

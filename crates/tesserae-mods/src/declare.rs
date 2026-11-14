@@ -722,7 +722,20 @@ fn surface_feature(
                     shape: fruit.shape.unwrap_or(tesserae_core::SHAPE_FULL_CUBE),
                 }
             });
+            let vines = tree
+                .vines
+                .as_ref()
+                .map(|v| {
+                    tables.plants.vines(&tables.shapes, v).map_err(|_| {
+                        bad(
+                            "biomes.surface_features.plant",
+                            "its vines name a climber that is no longer a plane",
+                        )
+                    })
+                })
+                .transpose()?;
             SurfacePlantKind::Tree(SurfaceTree {
+                vines,
                 trunk: tree.trunk,
                 canopy: tree.canopy,
                 trunk_height_m: tree.trunk_height_m,
@@ -798,6 +811,14 @@ pub fn resolve_biomes(
                     field: "biomes.cave_scale",
                     rule: RULE.get_or_init(|| format!("must be from 0 to {MAX_CAVE_SCALE}")),
                 }));
+            }
+            if def.surface_features.len() > tesserae_core::MAX_SURFACE_FEATURES {
+                return Err(ModError::TooManyFeatures {
+                    id: b.mod_id.clone(),
+                    biome: def.name.clone(),
+                    count: def.surface_features.len(),
+                    max: tesserae_core::MAX_SURFACE_FEATURES,
+                });
             }
             let features = def
                 .surface_features
