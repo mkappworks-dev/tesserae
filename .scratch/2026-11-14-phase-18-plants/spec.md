@@ -490,3 +490,13 @@ committed, deleted after review) check the flat sprites against the mockup.
   the classic place for a seam; a dense meadow's Sample cost is the number to
   watch.
 - The mockup is not copied into the engine.
+
+## Amendment 2026-11-14: more vegetation, vines in worldgen
+
+The maintainer asked for many tree species, fruit and vegetable plants and
+vines across every Biome of every in-repo Game. Ticket 16 adds them: birch, pine,
+palm and a second fruit tree beside the oak and apple, wild vegetables, and
+vegetation for `meadow`, `ember`, `tidewater` and `lumen`. Vines are generated
+by worldgen only, hung from the canopy of trees that declare `vines` in their
+row, so "climbers in worldgen" is no longer a gap; a growing sapling never makes
+them. Everything else is content on the existing contract.
