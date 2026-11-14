@@ -6,7 +6,7 @@ use super::{
 };
 use crate::content::{ItemLooks, MaterialTextures};
 use crate::render::{
-    chunk_material::{ChunkMaterialExtension, FLAME_SLOT},
+    chunk_material::{ChunkMaterialExtension, FLAME_SLOT, TEXTURED_VECS},
     texture_atlas::{EDGE, HEIGHT, ROWS, WIDTH},
 };
 use crate::session::SessionApp;
@@ -75,10 +75,10 @@ impl Textures {
 
     pub(super) fn apply(&self, extension: &mut ChunkMaterialExtension) {
         extension.texture = self.atlas.clone();
-        extension.textured = UVec4::ZERO;
+        extension.textured = [UVec4::ZERO; TEXTURED_VECS];
         for (slot, &present) in self.present.iter().enumerate() {
             if present {
-                extension.textured[slot / 32] |= 1 << (slot % 32);
+                extension.textured[slot / 128][slot / 32 % 4] |= 1 << (slot % 32);
             }
         }
     }

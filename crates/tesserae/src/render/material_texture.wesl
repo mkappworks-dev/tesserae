@@ -4,7 +4,7 @@ var artwork: texture_2d<f32>;
 @group(constants::MATERIAL_BIND_GROUP) @binding(104)
 var artwork_sampler: sampler;
 @group(constants::MATERIAL_BIND_GROUP) @binding(105)
-var<uniform> textured: vec4<u32>;
+var<uniform> textured: array<vec4<u32>, (constants::CHUNK_PALETTE_SLOTS + 127u) / 128u>;
 
 fn material_slot(material: u32) -> u32 {
     return select(
@@ -15,7 +15,7 @@ fn material_slot(material: u32) -> u32 {
 }
 
 fn has_texture(slot: u32) -> bool {
-    return (textured[slot / 32u] & (1u << (slot % 32u))) != 0u;
+    return (textured[slot / 128u][(slot / 32u) % 4u] & (1u << (slot % 32u))) != 0u;
 }
 
 fn sample_texture(slot: u32, uv: vec2<f32>, normal: vec3<f32>) -> vec4<f32> {
