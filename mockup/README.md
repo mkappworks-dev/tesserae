@@ -253,7 +253,9 @@ species (oak, birch, snowy pine, palm with flat fronds and 3D coconuts, jungle
 and swamp trees with hanging vines, and apple, orange and cherry with ripe and
 unripe 3D voxel fruit), four crops as four-Stage crossed-quad strips, ground and
 water plants (tall grass, flowers, mushrooms, cane, a boxed cactus, kelp, a
-pad), a vine curtain and a vine-covered ruin wall, a Game by Biome matrix of
-what each Biome grows, and a legend. Code is in `vegetation.js` and
+pad), a vine curtain and a vine-covered ruin wall, jungle and swamp scenes, the
+shared plant library (`flora`, `crops`, `aquatic`), a Game by Biome matrix of
+what each Biome grows (eight to twelve species each, new jungle, swamp and
+savanna Biomes tagged), and a legend. Code is in `vegetation.js` and
 `vegetation.css`, reusing `scene()` and `apple3d` from `plants.js`. Reach it
 from the picker ("Vegetation (step 18b)").

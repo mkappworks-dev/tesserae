@@ -126,12 +126,44 @@ SPRITES.frond = (() => {
   return a;
 })();
 
+SPRITES.fern = (() => {
+  const a = blank();
+  for (const [tx, ty] of [
+    [2, 5],
+    [8, 1],
+    [14, 5],
+    [5, 3],
+    [11, 3],
+  ]) {
+    line(a, 8, 15, tx, ty, "G");
+    for (let i = 3; i < 15 - ty; i += 3) {
+      const x = Math.round(8 + ((tx - 8) * i) / (15 - ty));
+      put(a, x - 1, 15 - i, "l");
+      put(a, x + 1, 15 - i, "g");
+    }
+  }
+  return a;
+})();
+
 function vegEllipse(a, cx, cy, rx, ry, color) {
   for (let y = 0; y < GRID; y++)
     for (let x = 0; x < GRID; x++)
       if (((x - cx) / rx) ** 2 + ((y - cy) / ry) ** 2 <= 1)
         put(a, x, y, typeof color === "function" ? color(x, y) : color);
 }
+SPRITES.lily = (() => {
+  const a = blank();
+  vegEllipse(a, 6, 12, 5, 2, "g");
+  vegEllipse(a, 12, 14, 3, 1, "G");
+  for (const [x, y] of [
+    [6, 9],
+    [7, 9],
+    [6, 8],
+  ])
+    put(a, x, y, "w");
+  put(a, 6, 7, "y");
+  return a;
+})();
 function vegCarrot(n) {
   const a = blank();
   const h = [3, 6, 9, 11][n - 1];
@@ -230,6 +262,11 @@ function vegTreeIcon(kind) {
       line(a, 9, 6, x, y, "G");
       put(a, x, y, "l");
     }
+  } else if (kind === "acacia") {
+    vegEllipse(a, 8, 4, 8, 2, (x, y) => (y < 4 ? "y" : "g"));
+    trunk("b", 6);
+    put(a, 6, 5, "b");
+    put(a, 10, 5, "b");
   } else if (kind === "jungle" || kind === "swamp") {
     const c = kind === "jungle" ? "G" : "g";
     vegEllipse(a, 8, 4, 8, 3, c);
@@ -258,6 +295,7 @@ for (const k of [
   "apple",
   "orange",
   "cherry",
+  "acacia",
 ])
   SPRITES[`ico-${k}`] = vegTreeIcon(k);
 SPRITES["ico-cactus"] = (() => {
@@ -831,6 +869,119 @@ function vegRuin() {
   });
 }
 
+/* Jungle and swamp scenes -------------------------------------------------------------------- */
+
+/** One tall tree with a vine curtain; `layers` and `trunkY` set its height. */
+function vegBigTree(s, cx, cz, trunkY, layers, ramp, trunk, vineLen) {
+  vegTrunk(
+    s,
+    trunk,
+    Array.from({ length: trunkY + 1 }, (_, y) => [cx, y, cz]),
+  );
+  const cells = vegCanopy(s, layers, ramp, {
+    cx,
+    cz,
+    skip: (x, y, z) => x === cx && z === cz && y === trunkY,
+  });
+  vegVines(s, cells, layers[0][0], vineLen);
+}
+
+function vegJungleScene() {
+  return scene(300, 340, 26, [150, 258], (s) => {
+    vegGround(s, "grass");
+    vegBigTree(
+      s,
+      -2,
+      -1,
+      6,
+      [
+        [6, 2],
+        [7, 1],
+      ],
+      RAMPS.jungle,
+      "#6b4f31",
+      4,
+    );
+    vegBigTree(
+      s,
+      2,
+      1,
+      4,
+      [
+        [4, 2],
+        [5, 1],
+      ],
+      RAMPS.jungle,
+      "#6b4f31",
+      3,
+    );
+    for (const [name, x, z] of [
+      ["fern", 0, 0],
+      ["fern", -1, 2],
+      ["fern", 1, -2],
+      ["mushRed", 0, 1.4],
+      ["flowerV", -0.6, -1.6],
+      ["tuft", 2, -1],
+    ])
+      s.cross(name, x, 0, z);
+  });
+}
+
+function vegSwampScene() {
+  const water = [
+    [0, 0],
+    [1, 0],
+    [0, 1],
+    [1, 1],
+    [-1, 1],
+    [0, 2],
+    [-2, 2],
+  ];
+  return scene(300, 300, 26, [150, 218], (s) => {
+    vegGround(s, "swamp", water);
+    vegBigTree(
+      s,
+      -2,
+      -1,
+      3,
+      [
+        [4, 2],
+        [5, 1],
+      ],
+      RAMPS.swamp,
+      "#4e4a35",
+      3,
+    );
+    vegBigTree(
+      s,
+      2,
+      2,
+      3,
+      [
+        [4, 2],
+        [5, 1],
+      ],
+      RAMPS.swamp,
+      "#4e4a35",
+      3,
+    );
+    for (const [x, z] of [
+      [0, 0],
+      [1, 1],
+      [-1, 1],
+    ])
+      s.box(x, 0, z, 0.8, 0.05, 0, "#3f8a3a");
+    s.quad("flowerW", 0, 0.05, 0, 0, 0.5, 0.5);
+    for (const [name, x, z] of [
+      ["mushBrown", -1, -1.2],
+      ["mushRed", 2, -1],
+      ["cane", -2, 0],
+      ["fern", 1.2, -2],
+    ])
+      s.cross(name, x, 0, z);
+  });
+}
+
 /* Biome x Game matrix ------------------------------------------------------------------------ */
 
 const VEG_KIND = { tree: "Tree", crop: "Crop", ground: "Ground" };
@@ -841,6 +992,7 @@ const VEG_ITEMS = {
   palm: ["tree", "Palm", "ico-palm"],
   jungle: ["tree", "Jungle tree", "ico-jungle"],
   swamp: ["tree", "Swamp tree", "ico-swamp"],
+  acacia: ["tree", "Acacia", "ico-acacia"],
   apple: ["tree", "Apple", "ico-apple"],
   orange: ["tree", "Orange", "ico-orange"],
   cherry: ["tree", "Cherry", "ico-cherry"],
@@ -850,78 +1002,216 @@ const VEG_ITEMS = {
   berry: ["crop", "Berry bush", "berry4"],
   tuft: ["ground", "Tall grass", "tuft"],
   dry: ["ground", "Dry grass", "tuftDry"],
+  fern: ["ground", "Fern", "fern"],
   poppy: ["ground", "Poppy", "flowerR"],
   daisy: ["ground", "Daisy", "flowerW"],
+  sunflower: ["ground", "Dandelion", "flowerY"],
+  orchid: ["ground", "Orchid", "flowerV"],
   mushroom: ["ground", "Mushroom", "mushRed"],
+  vine: ["ground", "Vine", "vine"],
   cane: ["ground", "Cane", "cane"],
-  kelp: ["ground", "Kelp", "kelp"],
   cactus: ["ground", "Cactus", "ico-cactus"],
+  kelp: ["ground", "Kelp", "kelp"],
+  lily: ["ground", "Lily pad", "lily"],
 };
 
-/* A Biome holds at most four surface features, so a cell lists at most four. */
+/** Each plant is declared once, in one shared Mod, and any Game places it in any Biome. */
+const VEG_MODS = [
+  [
+    "flora",
+    "Trees, ground cover, flowers and vines.",
+    "oak birch pine palm jungle swamp acacia apple orange cherry tuft dry fern poppy daisy sunflower orchid mushroom vine cane cactus",
+  ],
+  [
+    "crops",
+    "Farmed vegetables, fruit and the food Items and Recipes they give.",
+    "wheat carrot potato berry",
+  ],
+  [
+    "aquatic",
+    "Kelp and water plants. Depends on `waters`, so it needs standing water to place into.",
+    "kelp lily",
+  ],
+];
+const vegModOf = (id) =>
+  VEG_MODS.find(([, , ids]) => ids.split(" ").includes(id))[0];
+
+/** A Biome lists up to 16 surface features; a `true` third field marks a Biome added at step 18b. */
 const VEG_GAMES = [
   [
     "terra",
     [
-      ["temperate", "0.5 warm, 0.5 wet", ["oak", "apple", "wheat", "carrot"]],
-      ["dry", "0.7 warm, 0.3 wet", ["palm", "cactus", "orange", "cane"]],
-      ["cold", "0.3 warm, 0.55 wet", ["pine", "birch", "mushroom", "tuft"]],
+      [
+        "temperate",
+        "0.5 warm, 0.5 wet",
+        "oak birch apple cherry wheat carrot potato berry tuft poppy daisy mushroom",
+      ],
+      [
+        "dry",
+        "0.7 warm, 0.3 wet",
+        "palm cactus orange cane dry sunflower berry",
+      ],
+      [
+        "cold",
+        "0.3 warm, 0.55 wet",
+        "pine birch berry mushroom tuft daisy fern",
+      ],
+      [
+        "jungle",
+        "0.8 warm, 0.85 wet",
+        "jungle palm vine fern orchid mushroom cane berry tuft",
+        true,
+      ],
+      [
+        "swamp",
+        "0.6 warm, 0.95 wet",
+        "swamp vine mushroom cane lily kelp fern orchid tuft berry",
+        true,
+      ],
+      [
+        "savanna",
+        "0.8 warm, 0.55 wet",
+        "acacia dry tuft sunflower wheat cactus poppy",
+        true,
+      ],
     ],
   ],
   [
     "meadow",
     [
-      ["meadow", "0.5 warm, 0.5 wet", ["oak", "potato", "poppy", "tuft"]],
-      ["heath", "0.3 warm, 0.7 wet", ["swamp", "berry", "mushroom", "tuft"]],
-      ["dunes", "0.75 warm, 0.25 wet", ["palm", "cactus", "dry"]],
+      [
+        "meadow",
+        "0.5 warm, 0.5 wet",
+        "oak apple cherry potato wheat carrot poppy daisy sunflower tuft",
+      ],
+      ["heath", "0.3 warm, 0.7 wet", "swamp birch berry mushroom tuft fern"],
+      ["dunes", "0.75 warm, 0.25 wet", "palm cactus dry cane"],
+      [
+        "thicket",
+        "0.8 warm, 0.85 wet",
+        "jungle vine fern orchid mushroom berry tuft",
+        true,
+      ],
+      [
+        "fen",
+        "0.6 warm, 0.95 wet",
+        "swamp vine lily cane mushroom fern kelp tuft",
+        true,
+      ],
+      [
+        "prairie",
+        "0.8 warm, 0.55 wet",
+        "acacia dry tuft sunflower wheat poppy",
+        true,
+      ],
     ],
   ],
   [
     "ember",
     [
-      ["ash_flats", "0.5 warm, 0.5 wet", ["birch", "berry", "poppy", "dry"]],
+      ["ash_flats", "0.5 warm, 0.5 wet", "birch berry poppy dry"],
       ["scorched", "0.75 warm, 0.3 wet", null],
-      ["highland", "0.25 warm, 0.7 wet", ["pine", "birch", "mushroom", "tuft"]],
+      ["highland", "0.25 warm, 0.7 wet", "pine birch mushroom tuft fern"],
+      [
+        "cinder_bog",
+        "0.6 warm, 0.95 wet",
+        "swamp mushroom cane fern lily vine tuft",
+        true,
+      ],
     ],
   ],
   [
     "tidewater",
     [
-      ["lagoon", "0.5 warm, 0.5 wet", ["jungle", "palm", "kelp", "cane"]],
-      ["salt_flats", "0.7 warm, 0.3 wet", ["cactus", "palm", "dry"]],
-      ["cold_shallows", "0.3 warm, 0.55 wet", ["kelp", "pine"]],
+      [
+        "lagoon",
+        "0.5 warm, 0.5 wet",
+        "jungle palm kelp cane vine fern lily berry",
+      ],
+      ["salt_flats", "0.7 warm, 0.3 wet", "cactus palm dry cane"],
+      ["cold_shallows", "0.3 warm, 0.55 wet", "kelp pine berry tuft"],
+      [
+        "rainforest",
+        "0.8 warm, 0.85 wet",
+        "jungle palm vine fern orchid kelp cane lily mushroom",
+        true,
+      ],
+      [
+        "tidal_marsh",
+        "0.6 warm, 0.95 wet",
+        "swamp vine cane lily kelp fern mushroom",
+        true,
+      ],
     ],
   ],
   [
     "lumen",
     [
-      ["garden", "0.5 warm, 0.5 wet", ["cherry", "daisy", "poppy", "carrot"]],
-      ["arid_court", "0.78 warm, 0.25 wet", ["cactus", "orange", "dry"]],
       [
-        "frost_court",
-        "0.22 warm, 0.65 wet",
-        ["pine", "berry", "mushroom", "tuft"],
+        "garden",
+        "0.5 warm, 0.5 wet",
+        "cherry apple daisy poppy carrot wheat tuft fern sunflower",
+      ],
+      ["arid_court", "0.78 warm, 0.25 wet", "cactus orange dry palm"],
+      ["frost_court", "0.22 warm, 0.65 wet", "pine birch berry mushroom tuft"],
+      [
+        "conservatory",
+        "0.8 warm, 0.85 wet",
+        "jungle orange cherry palm vine fern orchid lily",
+        true,
+      ],
+      [
+        "lily_pond",
+        "0.6 warm, 0.95 wet",
+        "swamp lily cane kelp orchid fern vine cherry",
+        true,
       ],
     ],
   ],
 ];
 
+const vegGamesUsing = (id) =>
+  VEG_GAMES.filter(([, biomes]) =>
+    biomes.some(([, , items]) => items && items.split(" ").includes(id)),
+  ).map(([game]) => game);
+
 function vegChip(id) {
   const [kind, label, sprite] = VEG_ITEMS[id];
-  return `<li class="veg-chip veg-${kind}" title="${VEG_KIND[kind]}">${spriteIcon(sprite, "veg-icon plant-sprite")}<span>${label}</span></li>`;
+  const games = vegGamesUsing(id);
+  return `<li class="veg-chip veg-${kind}" title="${VEG_KIND[kind]}, from ${vegModOf(id)}, used by ${games.length} Games">${spriteIcon(sprite, "veg-icon plant-sprite")}<span>${label}</span></li>`;
 }
 
 function vegMatrix() {
-  const cell = ([name, climate, items]) =>
-    `<div class="veg-cell${items ? "" : " bare"}"><h5>${name}</h5><small>${climate}</small>${
+  const cell = ([name, climate, items, isNew]) =>
+    `<div class="veg-cell${items ? "" : " bare"}"><h5>${name}${isNew ? '<span class="veg-new">new</span>' : ""}</h5><small>${climate}</small>${
       items
-        ? `<ul>${items.map(vegChip).join("")}</ul>`
+        ? `<ul>${items.split(" ").map(vegChip).join("")}</ul>`
         : `<p>Bare on purpose: basalt and lava. Proposed, not in the Game today.</p>`
     }</div>`;
-  return `<div class="veg-matrix-wrap"><div class="veg-matrix">${VEG_GAMES.map(
+  return `<div class="veg-matrix">${VEG_GAMES.map(
     ([game, biomes]) =>
-      `<div class="veg-game"><b>${game}</b></div>${biomes.map(cell).join("")}`,
-  ).join("")}</div></div>`;
+      `<div class="veg-game"><h4>${game}</h4><div class="veg-biomes">${biomes.map(cell).join("")}</div></div>`,
+  ).join("")}</div>`;
+}
+
+function vegLibrary() {
+  const specific = Object.keys(VEG_ITEMS).filter(
+    (id) => vegGamesUsing(id).length < 2,
+  );
+  const mod = ([name, text, ids]) =>
+    `<div class="plants-surface"><h4><code>${name}</code></h4><p class="muted veg-note">${text}</p><ul class="veg-lib">${ids
+      .split(" ")
+      .map(
+        (id) =>
+          `<li class="veg-libitem">${vegChip(id)}<small>${vegGamesUsing(id).length} Games</small></li>`,
+      )
+      .join("")}</ul></div>`;
+  return `<div class="veg-legend">${VEG_MODS.map(mod).join("")}</div>
+<p class="muted veg-note veg-specific">Game-specific plants: ${
+    specific.length
+      ? specific.map((id) => VEG_ITEMS[id][1]).join(", ")
+      : "none. Every plant is used by at least two Games."
+  }</p>`;
 }
 
 /* Page ------------------------------------------------------------------------------------- */
@@ -960,8 +1250,13 @@ ${strip("berry", "Berry bush", "#4f7f35", "Grows on plain grass; white blossom a
 <div class="veg-gallery">${GROUND_CARDS.map(([name, sub, svg, cls]) => card(name, sub, svg(), cls)).join("")}</div></section>
 <section>${heading("VINES", "Flat quads on faces", "A vine is one flat quad on the face it clings to. Worldgen hangs them from the outer canopy of jungle and swamp trees; after that they grow by the climber rule.")}
 <div class="plants-row"><div class="plants-surface"><h4>A curtain from a jungle canopy</h4>${vegCurtain()}</div><div class="plants-surface"><h4>Climbing a ruin wall</h4>${vegRuin()}</div></div></section>
-<section>${heading("BIOMES BY GAME", "What each Biome grows", "Read from each Game's own Biomes. Proposed species per Biome, at most four features each, as the contract allows. Icons are the Plant's own sprite; trees are drawn small.")}
-${vegMatrix()}</section>
+<section>${heading("JUNGLE AND SWAMP", "Two new Biomes, wet and hot", "A jungle is hot and very wet: tall trees with vine curtains, ferns, orchids. A swamp is warm and wetter still: low trees hung with vines, mud and standing water, lily pads, cane, mushrooms.")}
+<div class="plants-row"><div class="plants-surface"><h4>Jungle, 0.8 warm, 0.85 wet</h4>${vegJungleScene()}</div><div class="plants-surface"><h4>Swamp, 0.6 warm, 0.95 wet</h4>${vegSwampScene()}</div></div></section>
+<section>${heading("SHARED PLANT LIBRARY", "Declared once, placed by any Game", "Plants live in three shared Mods. A Game only picks which Biome grows which plant, so the same oak, wheat or cactus turns up in several Games. The count is how many Games use it below.")}
+${vegLibrary()}</section>
+<section>${heading("BIOMES BY GAME", "What each Biome grows", "Each Biome lists up to 16 features, so these hold eight to twelve species without trimming. Biomes tagged new are added at step 18b so no hot or wet region is empty. Icons are the Plant's own sprite; trees are drawn small.")}
+${vegMatrix()}
+<p class="muted veg-note veg-specific">Ember has no jungle: ash soil and a dead sky grow no canopy, so its wet and hot corner is a cinder bog fed by hot springs. Ember <code>scorched</code> stays bare on purpose (dashed).</p></section>
 <section>${heading("LEGEND", "Rules the page assumes", "")}
 <div class="veg-legend">
 <div class="plants-surface"><h4>Grown and placed</h4><p>A tree grows its own trunk and canopy Materials, which no Item names, so nobody places them. Builders use placed Wood and Leaves, which look alike. No standalone Wood anywhere: it comes only from trees.</p></div>

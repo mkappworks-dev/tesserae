@@ -58,6 +58,13 @@ approval before the Client draws any of it. Open it with
 **Jump to mockup screen** menu. A server started before the page was added needs
 a restart.
 
+Update for the maintainer decisions below: the page now shows jungle and swamp
+scenes, the shared plant library (`flora`, `crops`, `aquatic`) and a Biome
+matrix with eight to twelve species per Biome. New Biomes (tagged `new`): terra
+jungle, swamp and savanna; meadow thicket, fen and prairie; ember cinder_bog;
+tidewater rainforest and tidal_marsh; lumen conservatory and lily_pond. Ember
+has no jungle (ash soil grows no canopy); `scorched` stays bare.
+
 ## Maintainer decisions, 2026-11-14
 
 - **Jungle and swamp Biomes are added**, and any other Biome a Game needs so that

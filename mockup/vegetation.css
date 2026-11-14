@@ -32,21 +32,48 @@
   margin: 0;
   font-size: 12px;
 }
-.veg-matrix-wrap {
-  overflow-x: auto;
-}
 .veg-matrix {
   display: grid;
-  grid-template-columns: 96px repeat(3, minmax(190px, 1fr));
-  gap: 8px;
-  min-width: 740px;
-  align-items: stretch;
+  gap: 16px;
 }
-.veg-game {
-  display: grid;
-  align-items: center;
+.veg-game h4 {
+  margin: 0 0 6px;
   font-size: 14px;
   text-transform: capitalize;
+}
+.veg-biomes {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 8px;
+}
+.veg-new {
+  margin-left: 6px;
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: #10240c;
+  background: #8fd36a;
+  border-radius: 8px;
+}
+.veg-lib {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+}
+.veg-libitem {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.veg-libitem .veg-chip {
+  display: inline-flex;
+}
+.veg-specific {
+  margin-top: 10px;
 }
 .veg-cell {
   display: grid;
