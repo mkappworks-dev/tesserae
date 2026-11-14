@@ -1,4 +1,4 @@
-Status: ready-for-agent
+Status: done
 
 # Phase 16: Crafting, Stations, Containers and Doors
 
