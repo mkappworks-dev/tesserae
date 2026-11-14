@@ -4,6 +4,9 @@ use crate::bindings::tesserae::mods::content;
 
 /// Tagged by `kind`. The common fields repeat in each kind so that unknown
 /// fields are still refused, which a flattened struct would not allow.
+// Rows are parsed once at load and converted at once, so boxing the large
+// variant would only add an indirection to serde's tagged layout.
+#[allow(clippy::large_enum_variant)]
 #[derive(Deserialize)]
 #[serde(
     tag = "kind",
