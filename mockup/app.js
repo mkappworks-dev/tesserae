@@ -544,10 +544,6 @@ function action(name, value) {
   if (craftingAction(name, value)) return;
   if (inventoryAction(name, value)) return;
   if (name.startsWith("settings-") && settingsAction(name, value)) return;
-  if (name === "scores") {
-    $("#assessment").scrollIntoView({ behavior: "smooth" });
-    return;
-  }
   if (name === "close-dialog") {
     closeDialog();
     return;

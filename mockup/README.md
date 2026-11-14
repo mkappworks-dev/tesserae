@@ -13,10 +13,8 @@ Drafts, created Worlds and preferences survive reload in this browser tab
 through session storage. They are not real game saves. Clear this site's session
 storage or open a fresh browser session to reset the samples.
 
-The live scorecard covers 16 UI/UX areas. Read
-[menu-research.md](menu-research.md) for sources, decisions, measured contrast
-samples and the remaining 9.5+ criteria. Scores are provisional design
-judgments, not player-test results.
+Read [menu-research.md](menu-research.md) for sources, decisions and measured
+contrast samples.
 
 New biome names, the expanded Terra set and other Games' names are design
 proposals. Material pickers, package availability and dependencies are
@@ -95,9 +93,8 @@ Slots use a recessed bevel, a bright inner rim on hover and a lit frame for the
 selected slot, in Inventory and in the in-game hotbar. The hotbar shows the held
 item's name above it.
 
-The Scores page also rates each screen. Shared fixes live in `polish.css`:
-themed checkboxes, locked-field styling, range sliders, game-style frames, and
-no menu header inside the game.
+Shared fixes live in `polish.css`: themed checkboxes, locked-field styling,
+range sliders, game-style frames, and no menu header inside the game.
 
 ## Survival extension (proposed, awaiting approval)
 

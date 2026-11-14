@@ -925,61 +925,6 @@ summary {
 #toast.show {
   opacity: 1;
 }
-.assessment {
-  max-width: 1140px;
-  margin: auto;
-  padding: 45px 30px;
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 25px;
-  color: #e4eae1;
-}
-.assessment > div:first-child {
-  grid-column: span 2;
-}
-.assessment h2 {
-  font-size: 28px;
-  letter-spacing: -0.03em;
-  font-weight: 450;
-  margin: 0 0 15px;
-}
-.assessment p {
-  font-size: 12px;
-  color: #a1afa3;
-  line-height: 1.8;
-}
-.score-bars {
-  padding-top: 10px;
-}
-.score-bars > div {
-  margin-bottom: 17px;
-}
-.score-bars span {
-  display: flex;
-  justify-content: space-between;
-  font-size: 11px;
-}
-.score-bars i {
-  display: block;
-  height: 6px;
-  background: #29332b;
-  margin-top: 8px;
-}
-.score-bars em {
-  display: block;
-  height: 6px;
-  background: #8dc488;
-}
-.assessment-detail {
-  border-top: 1px solid #344137;
-  padding-top: 17px;
-}
-.assessment-detail b {
-  font-size: 12px;
-}
-.assessment-footnote {
-  grid-column: 1/-1;
-}
 .empty-state {
   padding: 35px 10px;
   text-align: center;
@@ -1189,19 +1134,6 @@ summary {
   .mod-card .pill {
     display: none;
   }
-  .assessment {
-    padding: 30px 18px;
-    grid-template-columns: 1fr;
-  }
-  .assessment > div:first-child {
-    grid-column: auto;
-  }
-  .assessment-footnote {
-    grid-column: auto;
-  }
-  .score-bars {
-    padding: 0;
-  }
 }
 #screen-picker {
   background: #1a251c;
@@ -1215,21 +1147,6 @@ summary {
 html[data-embed] body {
   background: transparent;
   color: var(--foreground);
-}
-html[data-embed] .assessment {
-  color: var(--foreground);
-}
-html[data-embed] .assessment p {
-  color: var(--muted-foreground);
-}
-html[data-embed] .assessment-detail {
-  border-color: var(--border);
-}
-html[data-embed] .score-bars i {
-  background: var(--secondary);
-}
-html[data-embed] .score-bars em {
-  background: var(--chart-1);
 }
 .home {
   overflow-y: auto;
@@ -1335,18 +1252,6 @@ html[data-embed] .score-bars em {
   background: #232528;
   border-color: #484c51;
   color: #d0d1d4;
-}
-.assessment {
-  color: #edeeef;
-}
-.assessment p {
-  color: #a9abb0;
-}
-.assessment-detail {
-  border-color: #383b3f;
-}
-.score-bars i {
-  background: #303236;
 }
 
 .rail {
