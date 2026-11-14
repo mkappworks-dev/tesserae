@@ -321,7 +321,7 @@ function render() {
   else if (state.screen === "blocks") {
     screen.innerHTML = blocksPage();
     drawBlocks();
-  }
+  } else if (state.screen === "plants") screen.innerHTML = plantsPage();
   placeToast();
   screen.querySelector(".body")?.setAttribute("tabindex", "0");
   if (hadFocus) {
@@ -1147,6 +1147,7 @@ const prototypeScreens = [
   { value: "pause", label: "In-game menu" },
   { value: "settings", label: "Settings" },
   { value: "blocks", label: "Block gallery" },
+  { value: "plants", label: "Plants (step 18)" },
 ];
 $("#bar-mode").outerHTML = customSelect(
   "Your mode",

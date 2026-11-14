@@ -231,3 +231,17 @@ each Material's faces as PNG, plus `blocks/index.json`, which lists the
 Materials, their render class and Use, and the Shapes' boxes. Lighting in the
 gallery is illustrative: sides are darkened by a fixed amount, and a translucent
 block shows only its three near faces.
+
+## Plants and flat sprites (step 18, proposed, awaiting approval)
+
+`/plants` shows the Client's look for DESIGN.md step 18: a Seed, a sapling and
+produce as flat sprites (one upright textured quad) in the hotbar, Inventory
+grid, item details, Crafting and the hand, beside a solid Material's cube; a
+Dropped item as an upright turning sprite beside a dropped cube; the placement
+ghost of a `cross` Plant and of a Layout of Seeds; one crop's four Stages as
+crossed quads over farmland, an apple tree and a vine on a wall as one flat
+quad; and the `G Harvest` Use prompt on a ripe crop and a ripe apple. Code is in
+`plants.js` and `plants.css`. The sprites are drawn in the page from small pixel
+grids and are throwaway; the engine's Stage art comes from
+`scripts/generate-mod-art`. Reach it from the **Jump to mockup screen** picker
+("Plants (step 18)").

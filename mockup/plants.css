@@ -1,0 +1,208 @@
+/* /plants: step 18 flat Plant sprites. */
+.plants .plants-surface {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+  padding: 14px;
+  background: var(--panel-raised);
+  border: 1px solid var(--edge);
+  border-radius: var(--radius);
+}
+.plants .plants-surface h4 {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 550;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.plants-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 12px;
+}
+.plant-sprite {
+  image-rendering: pixelated;
+}
+.plants .hotbar.storage-grid {
+  justify-self: start;
+  max-width: 100%;
+  overflow-x: auto;
+}
+.plants-held {
+  justify-self: start;
+  min-height: 0;
+}
+.plants-inventory {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(200px, 250px);
+  gap: 14px;
+  align-items: start;
+}
+.plants-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 56px);
+  gap: 4px;
+}
+.plants-grid .item-slot {
+  height: 56px;
+}
+.plants-inspector {
+  background: #17171b;
+  border: 1px solid #45454c;
+  border-radius: 6px;
+  padding: 14px;
+}
+.plants-inspector h2 {
+  margin: 6px 0;
+  font-size: 19px;
+}
+.plants-inspector dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
+  margin: 8px 0 0;
+  font-size: 12px;
+}
+.plants-inspector dt {
+  color: var(--muted);
+}
+.plants-inspector dd {
+  margin: 0;
+}
+.plants-recipes {
+  padding: 0;
+  max-width: 460px;
+}
+.plants-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.plants-view {
+  margin: 0;
+  display: grid;
+  gap: 8px;
+}
+.plants-view-frame {
+  position: relative;
+  min-height: 220px;
+  overflow: hidden;
+  border: 1px solid var(--edge);
+  border-radius: 6px;
+  background: linear-gradient(#6f8f77, #8fa68b 55%, #55703f 55%, #3f5a2e);
+}
+.plants-view-frame > .plants-scene {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+}
+.plants-view-frame .reticle {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 20px;
+  color: #fff;
+  text-shadow: 0 0 3px #000;
+}
+.plants-hand-frame .hand {
+  right: 20%;
+  bottom: 8%;
+}
+.plants-view figcaption,
+.plants-frame figcaption {
+  display: grid;
+  gap: 2px;
+  font-size: 12px;
+}
+.plants-view figcaption small,
+.plants-frame figcaption small {
+  color: var(--muted);
+}
+.plants-frames,
+.plants-stages {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: end;
+}
+.plants-frame {
+  margin: 0;
+  display: grid;
+  gap: 4px;
+  justify-items: center;
+}
+.plants-frame .plants-scene {
+  background: #1a221d;
+  border: 1px solid var(--edge);
+  border-radius: 6px;
+}
+.plants-frames .plants-scene {
+  width: 96px;
+  height: 94px;
+}
+.plants-stages .plants-scene {
+  width: 150px;
+  height: 118px;
+}
+.plants-scene {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+.plants-scene text {
+  fill: var(--ink);
+  font-size: 11px;
+}
+.plants-live {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.plants-spin {
+  width: 64px;
+  height: 64px;
+  display: grid;
+  place-items: center;
+  perspective: 240px;
+  background: #1a221d;
+  border: 1px solid var(--edge);
+  border-radius: 6px;
+}
+.plants-spin-body {
+  width: 26px;
+  height: 26px;
+  transform-style: preserve-3d;
+  animation: plants-turn 3s linear infinite;
+}
+.plants-live-sprite,
+.plants-live-cube .voxel-icon {
+  width: 100%;
+  height: 100%;
+  backface-visibility: visible;
+}
+.plants-live-cube {
+  width: 100%;
+  height: 100%;
+}
+@keyframes plants-turn {
+  to {
+    transform: rotateY(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .plants-spin-body {
+    animation: none;
+    transform: rotateY(40deg);
+  }
+}
+@media (max-width: 720px) {
+  .plants-inventory {
+    grid-template-columns: 1fr;
+  }
+}

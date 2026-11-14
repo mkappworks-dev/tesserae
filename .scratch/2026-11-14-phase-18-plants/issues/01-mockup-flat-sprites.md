@@ -19,8 +19,14 @@ crop in the World as crossed quads.
 
 ## Acceptance criteria
 
-- [ ] The mockup shows every surface in the spec's Client section, in the
+- [x] The mockup shows every surface in the spec's Client section, in the
       existing visual language.
-- [ ] `python3 mockup/server.py` serves the new section.
+- [x] `python3 mockup/server.py` serves the new section.
 - [ ] The maintainer has approved it; the approval is noted under Comments.
-- [ ] `npm run fmt:check` passes.
+- [x] `npm run fmt:check` passes.
+
+## Comments
+
+Open the section with `python3 mockup/server.py`, then
+<http://127.0.0.1:8133/plants> (or the "Plants (step 18)" entry in the
+mockup's screen picker). Awaiting the maintainer's approval.
