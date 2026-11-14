@@ -8,7 +8,7 @@ Mod is a folder of TOML and PNG files. Only a Game declares `world`, `view` and
 | ------------------------- | --------------------------------------------------------- | --------------------- |
 | [strata](strata/)         | Stone, basalt, clay, sand, soil, turf                     | -                     |
 | [waters](waters/)         | Water fluid, steam, obsidian                              | -                     |
-| [flora](flora/)           | Wood, leaves, grass, kelp                                 | -                     |
+| [flora](flora/)           | Wood, leaves, grass, kelp; the oak, grass and flowers     | strata                |
 | [hearth](hearth/)         | Lava, ash; lava and water reactions; wood and leaves burn | strata, waters, flora |
 | [glassworks](glassworks/) | Glass, frosted glass, lantern; slab, stair, fence         | -                     |
 | [timber](timber/)         | Planks, thatch; beam and panel Shapes                     | -                     |

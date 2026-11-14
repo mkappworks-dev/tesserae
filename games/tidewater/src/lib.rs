@@ -14,8 +14,8 @@ use exports::tesserae::mods::guest::{
 };
 use tesserae::mods::commands::{Fill, SourceFill};
 use tesserae::mods::content::{
-    BiomeDef, CaveParams, ClimateParams, GroundParams, MovementPolicy, OreDef, SkyFog,
-    SmoothingParams, WaterParams,
+    BiomeDef, CaveParams, ClimateParams, ColumnDef, ColumnDirection, GroundParams, MovementPolicy,
+    OreDef, PlantDef, PlantKind, PlantNeeds, SkyFog, SmoothingParams, SurfaceFeature, WaterParams,
 };
 use tesserae::mods::types::{BoxM, Vec3, Voxel};
 
@@ -209,6 +209,41 @@ fn plant(state: &State) -> Vec<Command> {
         .collect()
 }
 
+/// Declared here, not in `flora`: a column that stands in a fluid names it, and `flora` has none.
+fn kelp_plant() -> PlantDef {
+    PlantDef {
+        name: "kelp".into(),
+        seed: "flora:frond".into(),
+        needs: PlantNeeds {
+            soil: ["sand", "soil", "clay", "turf"]
+                .map(|m| format!("strata:{m}"))
+                .into(),
+            light_min: None,
+            light_max: None,
+            temperature: None,
+            humidity: None,
+            water: None,
+        },
+        kind: PlantKind::Column(ColumnDef {
+            material: "flora:frond".into(),
+            max_height_m: 5.0,
+            direction: ColumnDirection::Up,
+            mean_seconds: 90.0,
+            stands_in: Some("waters:water".into()),
+            yields: Vec::new(),
+        }),
+    }
+}
+
+fn kelp_bed() -> SurfaceFeature {
+    SurfaceFeature {
+        material: None,
+        plant: Some("tidewater:kelp".into()),
+        shape: Some("flora:cross".into()),
+        spacing_m: 7.0,
+    }
+}
+
 impl Guest for Tidewater {
     fn declare() -> Declaration {
         let mut world = tesserae::mods::host::default_world_params();
@@ -264,7 +299,7 @@ impl Guest for Tidewater {
                         fog: (132, 172, 192),
                     }),
                     cave_scale: Some(1.4),
-                    surface_features: vec![food::feature()],
+                    surface_features: vec![food::feature(), kelp_bed()],
                 },
                 BiomeDef {
                     soundscape: None,
@@ -308,7 +343,7 @@ impl Guest for Tidewater {
             soundscapes: Vec::new(),
             cause_sounds: Vec::new(),
             recipes: Vec::new(),
-            plants: Vec::new(),
+            plants: vec![kelp_plant()],
             voxel_uses: Vec::new(),
             ores: vec![OreDef {
                 material: "crystals:aquamarine".into(),

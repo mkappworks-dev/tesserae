@@ -34,6 +34,69 @@ render = "cutout"
 solid = true
 remove-time-s = 0.05
 
+[[materials]]
+name = "oak_log"
+emission = 0
+dimming = 15
+occlusion = "opaque"
+render = "opaque"
+solid = true
+remove-time-s = 0.35
+
+[[materials]]
+name = "oak_leaves"
+emission = 0
+dimming = 1
+occlusion = "never"
+render = "cutout"
+solid = true
+remove-time-s = 0.1
+
+[[materials]]
+name = "oak_sapling"
+emission = 0
+dimming = 0
+occlusion = "never"
+render = "cutout"
+solid = true
+remove-time-s = 0.05
+
+[[materials]]
+name = "tuft"
+emission = 0
+dimming = 0
+occlusion = "never"
+render = "cutout"
+solid = true
+remove-time-s = 0.05
+
+[[materials]]
+name = "poppy"
+emission = 0
+dimming = 0
+occlusion = "never"
+render = "cutout"
+solid = true
+remove-time-s = 0.05
+
+[[materials]]
+name = "daisy"
+emission = 0
+dimming = 0
+occlusion = "never"
+render = "cutout"
+solid = true
+remove-time-s = 0.05
+
+[[materials]]
+name = "frond"
+emission = 0
+dimming = 1
+occlusion = "never"
+render = "cutout"
+solid = true
+remove-time-s = 0.05
+
 [[appearance]]
 material = "wood"
 color = [150, 104, 60, 255]
@@ -53,6 +116,118 @@ texture = "art/grass.png"
 material = "kelp"
 color = [44, 110, 70, 255]
 texture = "art/kelp.png"
+
+[[appearance]]
+material = "oak_log"
+color = [150, 104, 60, 255]
+texture = "art/wood.png"
+
+[[appearance]]
+material = "oak_leaves"
+color = [41, 107, 36, 255]
+texture = "art/leaves.png"
+
+[[appearance]]
+material = "oak_sapling"
+color = [70, 130, 48, 255]
+texture = "art/oak_sapling.png"
+
+[[appearance]]
+material = "tuft"
+color = [88, 160, 56, 255]
+texture = "art/tuft.png"
+
+[[appearance]]
+material = "poppy"
+color = [206, 48, 40, 255]
+texture = "art/poppy.png"
+
+[[appearance]]
+material = "daisy"
+color = [240, 238, 226, 255]
+texture = "art/daisy.png"
+
+[[appearance]]
+material = "frond"
+color = [44, 110, 70, 255]
+texture = "art/frond.png"
+
+[[shapes]]
+name = "cross"
+form = "cross"
+boxes = [{ min = [3, 0, 3], max = [13, 14, 13] }]
+
+[[plants]]
+name = "oak"
+kind = "tree"
+seed = "flora:oak_sapling"
+sapling = "flora:oak_sapling"
+trunk = "flora:oak_log"
+canopy = "flora:oak_leaves"
+trunk-height-m = [4.0, 6.0]
+canopy-radius-m = 2.5
+mean-seconds = 90.0
+sapling-yield = [1, 2]
+
+[plants.needs]
+soil = ["strata:turf", "strata:soil", "strata:clay"]
+light-min = 8
+temperature = [0.2, 0.9]
+
+[[plants.sapling-yields]]
+item = "flora:oak_sapling"
+count = [1, 1]
+
+[[plants.trunk-yield]]
+item = "flora:log"
+count = [1, 1]
+
+[[plants.canopy-yield]]
+item = "flora:leaves"
+count = [0, 1]
+
+[[plants.canopy-yield]]
+item = "flora:oak_sapling"
+count = [0, 1]
+
+[[plants]]
+name = "tuft"
+kind = "spreader"
+seed = "flora:tuft"
+material = "flora:tuft"
+reach-m = 2.0
+mean-seconds = 120.0
+density = 6
+
+[plants.needs]
+soil = ["strata:turf", "strata:soil", "strata:clay"]
+light-min = 9
+
+[[plants]]
+name = "poppy"
+kind = "spreader"
+seed = "flora:poppy"
+material = "flora:poppy"
+reach-m = 3.0
+mean-seconds = 300.0
+density = 3
+
+[plants.needs]
+soil = ["strata:turf", "strata:soil", "strata:clay"]
+light-min = 9
+
+[[plants]]
+name = "daisy"
+kind = "spreader"
+seed = "flora:daisy"
+material = "flora:daisy"
+reach-m = 3.0
+mean-seconds = 300.0
+density = 3
+
+[plants.needs]
+soil = ["strata:turf", "strata:soil", "strata:clay"]
+light-min = 9
 
 [[items]]
 name = "log"

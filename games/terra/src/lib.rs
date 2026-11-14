@@ -5,6 +5,7 @@ use exports::tesserae::mods::guest::{
 };
 mod audio;
 mod character;
+mod plants;
 mod textures;
 
 use std::cell::RefCell;
@@ -89,7 +90,7 @@ thread_local! {
 
 struct Terra;
 
-fn solid(name: &str) -> MaterialDef {
+pub(crate) fn solid(name: &str) -> MaterialDef {
     MaterialDef {
         name: name.into(),
         emission: 0,
@@ -220,7 +221,7 @@ fn gate(name: &str) -> MaterialDef {
     }
 }
 
-fn appearance(material: &str, [r, g, b, a]: [u8; 4]) -> Appearance {
+pub(crate) fn appearance(material: &str, [r, g, b, a]: [u8; 4]) -> Appearance {
     Appearance {
         material: material.into(),
         color: Srgba { r, g, b, a },
@@ -326,8 +327,14 @@ impl Guest for Terra {
                 solid("door_open"),
                 gate("gate"),
                 gate("gate_open"),
-            ],
-            shapes: vec![fence(), panel(), table()],
+            ]
+            .into_iter()
+            .chain(plants::materials())
+            .collect(),
+            shapes: [fence(), panel(), table()]
+                .into_iter()
+                .chain(plants::shapes())
+                .collect(),
             appearance: vec![
                 appearance("lamp", [245, 227, 184, 255]),
                 appearance("lava", [230, 72, 16, 255]),
@@ -351,7 +358,10 @@ impl Guest for Terra {
                 appearance("door_open", [128, 88, 50, 255]),
                 appearance("gate", [140, 97, 55, 255]),
                 appearance("gate_open", [140, 97, 55, 255]),
-            ],
+            ]
+            .into_iter()
+            .chain(plants::appearances())
+            .collect(),
             world: Some(world),
             view: Some(ViewParams {
                 view_distance_m: 160.0,
@@ -554,7 +564,10 @@ impl Guest for Terra {
                     max_stack: None,
                     food: None,
                 },
-            ],
+            ]
+            .into_iter()
+            .chain(plants::items())
+            .collect(),
             biomes: vec![
                 BiomeDef {
                     soundscape: Some("terra:temperate".into()),
@@ -568,21 +581,17 @@ impl Guest for Terra {
                     }),
                     cave_scale: None,
                     // A melon in every 16 by 16 m of grass is found while exploring, not a
-                    // carpet; Wood every 6 m gathers a Workbench, Chest and Door in a short walk.
-                    surface_features: vec![
-                        SurfaceFeature {
-                            material: Some("terra:melon".into()),
-                            plant: None,
-                            shape: None,
-                            spacing_m: 16.0,
-                        },
-                        SurfaceFeature {
-                            material: Some("terra:wood".into()),
-                            plant: None,
-                            shape: None,
-                            spacing_m: 6.0,
-                        },
-                    ],
+                    // carpet; the oaks every 9 m give Wood for a Workbench, Chest and Door in a
+                    // short walk, and no Wood lies about on its own.
+                    surface_features: [SurfaceFeature {
+                        material: Some("terra:melon".into()),
+                        plant: None,
+                        shape: None,
+                        spacing_m: 16.0,
+                    }]
+                    .into_iter()
+                    .chain(plants::temperate())
+                    .collect(),
                 },
                 BiomeDef {
                     soundscape: Some("terra:dry".into()),
@@ -599,7 +608,7 @@ impl Guest for Terra {
                         fog: (196, 178, 142),
                     }),
                     cave_scale: Some(1.5),
-                    surface_features: Vec::new(),
+                    surface_features: plants::dry(),
                 },
                 BiomeDef {
                     soundscape: Some("terra:cold".into()),
@@ -616,7 +625,7 @@ impl Guest for Terra {
                         fog: (176, 190, 208),
                     }),
                     cave_scale: Some(0.0),
-                    surface_features: Vec::new(),
+                    surface_features: plants::cold(),
                 },
             ],
             survival: None,
@@ -759,8 +768,11 @@ impl Guest for Terra {
                     },
                     station: "workbench".into(),
                 },
-            ],
-            plants: Vec::new(),
+            ]
+            .into_iter()
+            .chain(plants::recipes())
+            .collect(),
+            plants: plants::plants(),
             voxel_uses: vec![
                 VoxelUse {
                     material: "terra:door".into(),

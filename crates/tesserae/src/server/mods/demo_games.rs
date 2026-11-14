@@ -17,6 +17,7 @@ use crate::world::WorldSettings;
 
 mod biomes;
 mod food;
+mod plants;
 
 fn checkout() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
@@ -242,7 +243,7 @@ fn meadow_declares_only_its_pumpkin_and_takes_its_ground_from_strata() {
     assert!(loaded.game);
     assert_eq!(
         ids(&loaded),
-        ["flora", "glassworks", "strata", "meadow", "wanderer"]
+        ["glassworks", "strata", "flora", "meadow", "wanderer"]
     );
     let own: Vec<_> = loaded
         .registry
@@ -316,7 +317,7 @@ fn ember_gets_lava_reactions_and_burning_wood_from_hearth() {
     let (_install, loaded) = loaded("ember", 0.5);
     assert_eq!(
         ids(&loaded),
-        ["flora", "golem", "strata", "waters", "hearth", "ember"]
+        ["golem", "strata", "flora", "waters", "hearth", "ember"]
     );
     let tables = &loaded.tables;
     let (lava, water) = (
@@ -412,9 +413,9 @@ fn tidewater_exercises_sea_level_caves_and_smoothing() {
         ids(&loaded),
         [
             "crystals",
-            "flora",
             "sprite",
             "strata",
+            "flora",
             "waters",
             "tidewater"
         ]

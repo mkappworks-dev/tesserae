@@ -268,7 +268,9 @@ pub fn materials() -> Vec<MaterialSound> {
         ("iron", "metal"),
         ("melon", "soft"),
     ]
+    .map(|(material, set)| (material.to_owned(), set))
     .into_iter()
+    .chain(crate::plants::sounds())
     .map(|(material, set)| MaterialSound {
         material: format!("terra:{material}"),
         sound_set: format!("terra:{set}"),

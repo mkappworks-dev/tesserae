@@ -29,3 +29,34 @@ taken from grown oaks, which its temperate Biome places. Art is drawn by
       starter tests pass.
 - [ ] `tesserae validate` passes for `flora` and every Game.
 - [ ] No art is hand-drawn; the generator script is the source.
+
+## Comments
+
+Left `ready-for-agent`: no GUI run, and the first two boxes are met only by data
+and generation tests, not by a World played through.
+
+- `flora` now `depends = ["strata"]` (its Plants name strata soils), so the
+  load order of `ember`, `meadow` and `tidewater` puts `flora` after `strata`.
+  Their tests and the texture pins moved with it.
+- `flora` declares `cross`, grown `oak_log`/`oak_leaves`, `oak_sapling`, the oak
+  `tree`, `tuft`/`poppy`/`daisy` `spreader`s and a `frond` Material. Kelp's
+  `column` is declared by `tidewater` (it names `waters:water` in `stands-in`,
+  which `flora` cannot) with seed `flora:frond`; `meadow` places the oak, tuft
+  and poppy; `tidewater`'s lagoon places kelp.
+- Terra declares its own `cross`/`plane` Shapes and Plants (oak, apple, wheat,
+  berry, cane, kelp, mushroom, vine), bread and berry pie, and drops
+  `terra:wood` from the temperate Biome. A Biome holds at most four features, so
+  they are shared: temperate oak, apple, wheat; dry cane, berry, kelp; cold
+  mushroom, kelp. A feature cannot say "near water", so cane stands anywhere in
+  the dry Biome and only grows by water. Vines are found by planting only.
+- Apple fruit Materials are cutout cubes drawn as a small apple on clear
+  ground. The maintainer asked for a registered box Shape, but a tree's Voxels,
+  fruit included, are always placed as cubes by growth and generation
+  (`Voxel::cube` in `plant/tree.rs`), so a Shape needs a `fruit` field in the
+  contract first.
+- A Seed places with the Shape the Player selected: nothing gives a Seed a
+  default `cross`. Ticket 13 should make a Seed of a plant Material place its
+  flat Shape, or the contract needs a field for it.
+- `scripts/build-guests` stops at the `catalog` test guest (`ShapeDef` has no
+  field `form`), so the `server::mods` tests that read `target/guests` fail
+  here; Terra and the demo Games were built by its last block alone.

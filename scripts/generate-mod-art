@@ -228,6 +228,56 @@ def peat(face, x, y):
     return tint((70, 52, 36), (24 if fibre else 0) + (n - 128) // 10)
 
 
+CLEAR = (0, 0, 0, 0)
+
+
+def sprite(draw):
+    """A flat plant drawn on all three tiles, so a cross shows it from any side."""
+    return lambda face, x, y: draw(x, y) or CLEAR
+
+
+def tuft(x, y):
+    height = 5 + noise(x, 0, 131) % 8
+    taper = abs(x % 4 - 1)
+    if y < EDGE - height + taper or noise(x, 3, 133) % 5 == 0:
+        return None
+    return tint((88, 160, 56), (noise(x, y, 135) - 128) // 10 + (EDGE - y) * 2)
+
+
+def flower(petal, centre):
+    def draw(x, y):
+        if x in (7, 8) and 8 <= y < EDGE:
+            return tint((60, 124, 44), (noise(x, y, 137) - 128) // 14)
+        if x in (5, 10) and y in (11, 12):
+            return tint((60, 124, 44), -10)
+        dx, dy = abs(x - 7.5), abs(y - 5.5)
+        if dx + dy < 1.5:
+            return (*centre, 255)
+        if dx + dy < 4:
+            return tint(petal, (noise(x, y, 139) - 128) // 12)
+        return None
+
+    return draw
+
+
+def oak_sapling(x, y):
+    if x in (7, 8) and 9 <= y < EDGE:
+        return tint((110, 78, 44), (noise(x, y, 141) - 128) // 14)
+    dx, dy = abs(x - 7.5), abs(y - 5.5)
+    if dx + dy * 1.2 < 5 and noise(x, y, 143) > 60:
+        return tint((62, 138, 44), (noise(x, y, 145) - 128) // 10 - (14 if y > 6 else 0))
+    return None
+
+
+def frond(x, y):
+    sway = 2 * ((y // 3) % 2) - 1
+    if x in (7 + sway, 8 + sway):
+        return tint((44, 110, 70), (noise(x, y, 147) - 128) // 12)
+    if y % 4 == 1 and x in (5 + sway, 10 + sway):
+        return tint((60, 140, 84), (noise(x, y, 149) - 128) // 14)
+    return None
+
+
 TEXTURES = {
     "strata": {
         "stone": stone,
@@ -237,7 +287,17 @@ TEXTURES = {
         "soil": soil,
         "turf": turf,
     },
-    "flora": {"wood": wood, "leaves": leaves, "grass": grass, "kelp": kelp},
+    "flora": {
+        "wood": wood,
+        "leaves": leaves,
+        "grass": grass,
+        "kelp": kelp,
+        "tuft": sprite(tuft),
+        "poppy": sprite(flower((206, 48, 40), (250, 214, 60))),
+        "daisy": sprite(flower((240, 238, 226), (236, 190, 40))),
+        "oak_sapling": sprite(oak_sapling),
+        "frond": sprite(frond),
+    },
     "waters": {"obsidian": obsidian},
     "hearth": {"ash": ash, "lava": lava},
     "glassworks": {

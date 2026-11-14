@@ -101,7 +101,7 @@ fn nearest_m(generator: &Worldgen, food: MaterialId, within_m: f32) -> Option<f3
 }
 
 /// Horizontal metres from the spawn to every Voxel of `material` within `within_m`.
-fn distances_m(generator: &Worldgen, material: MaterialId, within_m: f32) -> Vec<f32> {
+pub(super) fn distances_m(generator: &Worldgen, material: MaterialId, within_m: f32) -> Vec<f32> {
     let size = generator.voxel_size();
     let chunk_m = CHUNK_SIZE as f32 * size;
     let (lowest, highest) = generator.surface_bounds_m();
@@ -137,7 +137,7 @@ fn distances_m(generator: &Worldgen, material: MaterialId, within_m: f32) -> Vec
 
 /// Half a minute's walk. A spawn in a Biome without the food, such as Terra's snow, is the far case
 /// at about 80 m.
-const SHORT_WALK_M: f32 = 96.0;
+pub(super) const SHORT_WALK_M: f32 = 96.0;
 
 #[test]
 fn a_new_world_of_every_demo_game_has_its_food_within_a_short_walk_of_the_spawn() {
@@ -166,13 +166,22 @@ fn a_new_world_of_every_demo_game_has_its_food_within_a_short_walk_of_the_spawn(
 }
 
 /// A Workbench, then a Chest and a Door: 4 + 8 + 3.
-const WOOD_FOR_A_HOME: usize = 15;
+const WOOD_FOR_A_HOME: u32 = 15;
 
+/// Wood comes only from oaks: none lies about on its own, and the trunks within a short walk of
+/// the spawn drop enough of the placed Wood Item for a Workbench, a Chest and a Door.
 #[test]
-fn a_survival_player_finds_wood_for_a_workbench_a_chest_and_a_door_near_the_spawn() {
+fn a_survival_player_finds_wood_for_a_workbench_a_chest_and_a_door_in_the_oaks_near_the_spawn() {
     let (_install, loaded) = loaded("terra", 0.5);
     let world = loaded.world.unwrap();
     let wood = material(&loaded, "terra:wood");
+    let trunk = material(&loaded, "terra:oak_log");
+    let yields = loaded.tables.plants.yields(trunk);
+    assert!(
+        matches!(yields, [y] if y.item == "terra:wood" && y.count.min >= 1),
+        "{yields:?}"
+    );
+    let per_trunk = yields[0].count.min;
     for seed in [
         crate::world::WorldSettings::default().seed,
         1,
@@ -182,12 +191,51 @@ fn a_survival_player_finds_wood_for_a_workbench_a_chest_and_a_door_near_the_spaw
         2024,
     ] {
         let generator = Worldgen::new(seed, 0.5, world);
-        let found = distances_m(&generator, wood, SHORT_WALK_M).len();
+        assert!(
+            distances_m(&generator, wood, SHORT_WALK_M).is_empty(),
+            "seed {seed}: Wood lies about on its own"
+        );
+        let found = distances_m(&generator, trunk, SHORT_WALK_M).len() as u32 * per_trunk;
         assert!(
             found >= WOOD_FOR_A_HOME,
             "seed {seed}: {found} Wood within {SHORT_WALK_M} m"
         );
     }
+}
+
+/// What a grown oak gives is the placed Wood Item, and nothing grown can be placed.
+#[test]
+fn a_grown_oak_drops_placed_items_and_its_grown_materials_have_none() {
+    let (_install, loaded) = loaded("terra", 0.5);
+    let items = loaded.every_item(0.5);
+    for name in [
+        "oak_log",
+        "oak_leaves",
+        "apple_log",
+        "apple_leaves",
+        "apple_ripe",
+    ] {
+        let id = material(&loaded, &format!("terra:{name}"));
+        assert!(loaded.tables.plants.is_grown(id), "{name}");
+        assert!(
+            !loaded.items.iter().any(|i| i.material == Some(id)),
+            "{name} has an Item"
+        );
+    }
+    for item in ["terra:wood", "terra:leaves", "terra:oak_sapling"] {
+        assert!(items.named(item).is_some(), "{item}");
+    }
+    let sapling = loaded
+        .tables
+        .plants
+        .plants()
+        .iter()
+        .find(|p| p.name == "terra:oak")
+        .expect("terra declares an oak");
+    let tesserae_core::plant::Kind::Tree(tree) = &sapling.kind else {
+        panic!("the oak is a tree");
+    };
+    assert!(tree.sapling_yield.min >= 1);
 }
 
 #[test]
@@ -363,10 +411,10 @@ fn fingerprint(textures: &[(String, Vec<u8>)]) -> u64 {
 #[test]
 fn the_demo_games_textures_are_unchanged() {
     let pinned = [
-        ("terra", 0x4ac0_7d21_685a_633c),
-        ("meadow", 0x5a2b_6c07_7a9e_ec3d),
-        ("ember", 0xf36d_dd1c_3496_4938),
-        ("tidewater", 0xb185_0251_6959_e86a),
+        ("terra", 0x4e81_0511_6a25_1062),
+        ("meadow", 0xe69a_bae3_9cf9_0e22),
+        ("ember", 0x06a2_5950_7f3d_83ed),
+        ("tidewater", 0x259c_d7c9_7428_19d7),
         ("lumen", 0xc983_25a8_ef29_a087),
     ];
     for (game, expected) in pinned {

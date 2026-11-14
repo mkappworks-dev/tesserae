@@ -1,6 +1,6 @@
 # flora
 
-Plants: four Materials. Data only; no code.
+Plants: placed Materials, and Plants the Server grows. Data only; no code.
 
 | Material | Render | Notes                                      |
 | -------- | ------ | ------------------------------------------ |
@@ -11,7 +11,14 @@ Plants: four Materials. Data only; no code.
 
 Fuel is declared by whoever knows how it burns: `flora` names no combustion
 rows, so a Game without `hearth` has plants that do not burn. Depends on
-nothing.
+`strata`, whose soils its Plants grow on.
+
+The oak is a `tree` of the grown Materials `oak_log` and `oak_leaves`, which
+look like `wood` and `leaves` but have no Item, so they cannot be placed:
+breaking a trunk drops the placed `log`. `tuft`, `poppy` and `daisy` are
+`spreader`s drawn with the `cross` Shape. `frond` is a kelp Material only: a
+column that stands in water must name a fluid `flora` does not declare, so the
+Game that has one, such as `tidewater`, declares the Plant.
 
 **Used by:** `meadow`, `ember`, `tidewater`, and `hearth` (fuel).
 

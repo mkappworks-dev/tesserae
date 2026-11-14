@@ -14,7 +14,7 @@ use exports::tesserae::mods::guest::{
 };
 use tesserae::mods::commands::Fill;
 use tesserae::mods::content::{
-    BiomeDef, ClimateParams, GroundParams, MovementPolicy, OreDef, SkyFog,
+    BiomeDef, ClimateParams, GroundParams, MovementPolicy, OreDef, SkyFog, SurfaceFeature,
 };
 use tesserae::mods::types::{BoxM, Vec3, Voxel};
 
@@ -47,6 +47,16 @@ const MAX_BATCH_VOXELS: u64 = 65_536;
 
 /// Climate clusters near the middle of its square: points outside 0.2 to 0.8 seldom win.
 /// The World has no caves, so no Biome sets a `cave_scale`.
+/// A `flora` Plant scattered over the meadow; the oak stands as cubes, the rest as crosses.
+fn flora(plant: &str, spacing_m: f32) -> SurfaceFeature {
+    SurfaceFeature {
+        material: None,
+        plant: Some(format!("flora:{plant}")),
+        shape: (plant != "oak").then(|| "flora:cross".into()),
+        spacing_m,
+    }
+}
+
 fn biomes() -> Vec<BiomeDef> {
     let ground = |rock: &str, soil: &str, surface: &str| {
         Some(GroundParams {
@@ -67,7 +77,12 @@ fn biomes() -> Vec<BiomeDef> {
                 fog: (142, 168, 192),
             }),
             cave_scale: None,
-            surface_features: vec![food::feature()],
+            surface_features: vec![
+                food::feature(),
+                flora("oak", 11.0),
+                flora("tuft", 5.0),
+                flora("poppy", 9.0),
+            ],
         },
         BiomeDef {
             soundscape: None,
