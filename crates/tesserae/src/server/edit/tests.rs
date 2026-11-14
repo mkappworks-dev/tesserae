@@ -129,6 +129,20 @@ fn send_from_afar(app: &mut App, intent: EditIntent) {
         .clear();
 }
 
+/// The Server's answer to `report`, from a Player at its origin.
+pub(in crate::server) fn aim(app: &mut App, report: AimReport) -> AimTarget {
+    set_eye(app, report.origin);
+    app.world_mut().write_message(report);
+    app.world_mut().run_system_once(receive_aim).unwrap();
+    app.world_mut().run_system_once(answer_aim).unwrap();
+    let target = app
+        .world_mut()
+        .resource_mut::<bevy::ecs::message::Messages<AimTarget>>()
+        .drain()
+        .last();
+    target.expect("an answer")
+}
+
 pub(in crate::server) fn tick(app: &mut App) {
     app.world_mut().run_system_once(apply_pending).unwrap();
 }
@@ -1965,7 +1979,7 @@ fn aim_bounds_follow_shapes_and_the_ghost_matches_the_edit() {
         let bounds = target.outline.unwrap();
         assert_eq!(bounds.min, Vec3::new(5.0, 7.0, 5.0));
         assert_eq!(bounds.max, Vec3::new(6.0, top, 6.0));
-        let ghost = target.ghost.unwrap();
+        let ghost = target.ghost.unwrap().at;
         assert_eq!(ghost, Vec3::new(5.0, 8.0, 5.0));
         send(&mut app, down(EditAction::Place(stone())));
         tick(&mut app);

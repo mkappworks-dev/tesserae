@@ -282,6 +282,8 @@ mod tests {
                 solid: true,
                 fluid: None,
                 burns: false,
+                shape: None,
+                door: None,
             }];
         let chest = Ok(UseTarget {
             voxel: tesserae_core::Voxel::cube(7),
@@ -305,6 +307,8 @@ mod tests {
                 solid: true,
                 fluid: None,
                 burns: false,
+                shape: None,
+                door: None,
             }];
         let station = Ok(UseTarget {
             voxel: tesserae_core::Voxel::cube(9),

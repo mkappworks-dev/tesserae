@@ -9,7 +9,7 @@ use tesserae_core::{MaterialId, SHAPE_FULL_CUBE};
 
 use super::catalogue::CatalogueControl;
 use super::{Control, InventoryWindow};
-use crate::client::edit::{Catalogue, Holding};
+use crate::client::edit::{Catalogue, Holding, material_holding};
 use crate::client::profile::Preferences;
 use crate::client::tile_preview::TilePreview;
 use crate::server::inventory::InventoryIntent;
@@ -98,16 +98,10 @@ pub(super) fn note_takes(
 }
 
 pub(super) fn holding(catalogue: &Catalogue, material: MaterialId) -> Holding {
-    let fluid = catalogue
+    catalogue
         .0
-        .materials
-        .iter()
-        .any(|m| m.id == material && m.fluid.is_some());
-    if fluid {
-        Holding::Fluid(material)
-    } else {
-        Holding::solid(material, SHAPE_FULL_CUBE)
-    }
+        .material(material)
+        .map_or(Holding::solid(material, SHAPE_FULL_CUBE), material_holding)
 }
 
 /// Starts the flight for the oldest take once the Server's Inventory changes.

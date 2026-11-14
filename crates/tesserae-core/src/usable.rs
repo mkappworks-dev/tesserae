@@ -6,7 +6,7 @@ use std::collections::BTreeSet;
 use std::ops::RangeInclusive;
 
 use crate::craft::HAND;
-use crate::mesh::{NEG_Y, POS_Y, POS_Z};
+use crate::mesh::{NEG_X, NEG_Y, NEG_Z, POS_X, POS_Y, POS_Z};
 use crate::shape::Orientation;
 use crate::voxel::{MaterialId, ShapeId, Voxel};
 
@@ -32,11 +32,75 @@ pub enum Across {
 }
 
 impl Across {
+    /// The axis across a Door whose cells face `near`.
+    pub fn of(near: usize) -> Self {
+        if matches!(near, NEG_X | POS_X) {
+            Across::Z
+        } else {
+            Across::X
+        }
+    }
+
     fn axis(self) -> usize {
         match self {
             Across::X => 0,
             Across::Z => 2,
         }
+    }
+}
+
+/// The face of a cell toward a Player looking along `direction`, on whichever
+/// of X and Z it runs further along.
+pub fn facing(direction: [f32; 3]) -> usize {
+    if direction[0].abs() > direction[2].abs() {
+        if direction[0] > 0.0 { NEG_X } else { POS_X }
+    } else if direction[2] > 0.0 {
+        NEG_Z
+    } else {
+        POS_Z
+    }
+}
+
+/// [`facing`], and the side across it that `struck`, a point in metres on the
+/// Voxel at `at`, lies in: where a Door's panel stands closed, and where its
+/// hinge is.
+pub fn door_faces(
+    direction: [f32; 3],
+    struck: [f32; 3],
+    at: [i32; 3],
+    voxel_size: f32,
+) -> (usize, usize) {
+    let near = facing(direction);
+    let (axis, low, high) = match Across::of(near) {
+        Across::X => (0, NEG_X, POS_X),
+        Across::Z => (2, NEG_Z, POS_Z),
+    };
+    let hinge = if struck[axis] / voxel_size - at[axis] as f32 >= 0.5 {
+        high
+    } else {
+        low
+    };
+    (near, hinge)
+}
+
+/// What a Player's Place of `voxel` puts down by its Material's row alone,
+/// facing away from the face `near` with the hinge side `hinge` aimed at: a
+/// Door in its fixed Shape turned to that face and hinge, another fixed Shape
+/// in the Player's Orientation, or `voxel` itself. The Client draws its
+/// ghost by it from content.
+pub fn placed_in(
+    door: Option<Door>,
+    shape: Option<ShapeId>,
+    voxel: Voxel,
+    near: usize,
+    hinge: usize,
+) -> Voxel {
+    if let Some(door) = door {
+        return door.placed(voxel, near, hinge);
+    }
+    match shape {
+        Some(shape) => Voxel::new(voxel.material(), shape, voxel.orientation()),
+        None => voxel,
     }
 }
 
@@ -335,13 +399,14 @@ impl VoxelUses {
     /// turned to that face and hinge, another fixed Shape in the Player's
     /// Orientation, or `voxel` itself.
     pub fn placed(&self, voxel: Voxel, near: usize, hinge: usize) -> Voxel {
-        if let Some(door) = self.door(voxel.material()) {
-            return door.placed(voxel, near, hinge);
-        }
-        match self.shape(voxel.material()) {
-            Some(shape) => Voxel::new(voxel.material(), shape, voxel.orientation()),
-            None => voxel,
-        }
+        let material = voxel.material();
+        placed_in(
+            self.door(material),
+            self.shape(material),
+            voxel,
+            near,
+            hinge,
+        )
     }
 
     pub fn door(&self, material: MaterialId) -> Option<Door> {
@@ -653,6 +718,32 @@ mod tests {
         assert_eq!(
             boxes(&tables, door.toggle(facing_x)),
             [([0, 0, 13], [16, 16, 16])]
+        );
+    }
+
+    #[test]
+    fn a_door_aimed_along_a_ray_faces_it_and_hinges_on_the_struck_half() {
+        // Along -Z at the +X half of the Voxel at the origin, then along -X.
+        let faces = door_faces([0.2, -0.3, -1.0], [0.8, 0.5, 1.0], [0, 0, 0], 1.0);
+        assert_eq!(faces, (POS_Z, POS_X));
+        let faces = door_faces([-1.0, 0.0, 0.3], [1.0, 0.5, 0.2], [0, 0, 0], 1.0);
+        assert_eq!(faces, (POS_X, NEG_Z));
+        assert_eq!(Across::of(POS_Z), Across::X);
+        assert_eq!(Across::of(NEG_X), Across::Z);
+    }
+
+    #[test]
+    fn a_rows_door_and_shape_alone_place_what_the_tables_do() {
+        let (tables, door, bench) = panelled();
+        let chosen = Voxel::shaped(door.closed, SHAPE_STAIR, Orientation::IDENTITY.flipped());
+        let placed = placed_in(Some(door), door.shape, chosen, NEG_Z, POS_X);
+        assert_eq!(boxes(&tables, placed), [([0, 0, 0], [16, 16, 3])]);
+        let panel = tables.uses.shape(bench).unwrap();
+        let turned = Orientation::IDENTITY.turned();
+        let chosen = Voxel::shaped(bench, SHAPE_STAIR, turned);
+        assert_eq!(
+            placed_in(None, Some(panel), chosen, NEG_Z, POS_X),
+            Voxel::shaped(bench, panel, turned)
         );
     }
 

@@ -74,7 +74,7 @@ pub use survival::SurvivalRules;
 pub use tables::{PlaceFault, Tables};
 pub use usable::{
     Across, CONTAINER_SLOTS, DOOR_HEIGHT_M, DOOR_HEIGHTS_M, DOOR_WIDTH_M, DOOR_WIDTHS_M, Door,
-    MAX_CONTAINER_SLOTS, Rise, UseError, VoxelUse, VoxelUses,
+    MAX_CONTAINER_SLOTS, Rise, UseError, VoxelUse, VoxelUses, door_faces, facing, placed_in,
 };
 pub use voxel::{AIR, MaterialId, SHAPE_FULL_CUBE, ShapeId, Voxel};
 pub use worldgen::{

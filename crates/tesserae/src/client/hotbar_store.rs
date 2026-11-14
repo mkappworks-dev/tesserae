@@ -295,6 +295,8 @@ mod tests {
                     solid: true,
                     fluid: None,
                     burns: true,
+                    shape: None,
+                    door: None,
                     remove_time: std::time::Duration::from_secs(1),
                 },
                 CatalogueMaterial {
@@ -303,6 +305,8 @@ mod tests {
                     solid: false,
                     fluid: Some(0),
                     burns: false,
+                    shape: None,
+                    door: None,
                     remove_time: std::time::Duration::from_secs(1),
                 },
             ],

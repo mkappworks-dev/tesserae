@@ -1667,6 +1667,8 @@ mod tests {
             solid: !fluid,
             fluid: fluid.then_some(0),
             burns: false,
+            shape: None,
+            door: None,
             remove_time: std::time::Duration::from_secs(1),
         }
     }

@@ -108,49 +108,28 @@ pub(super) fn door_placed(
     direction: Vec3,
 ) -> Option<Vec<[i32; 3]>> {
     let door = tables.uses.door(voxel.material())?;
-    let across = if direction.x.abs() > direction.z.abs() {
-        Across::Z
-    } else {
-        Across::X
-    };
-    // Struck from below, it hangs from the ceiling; otherwise it stands.
+    let across = Across::of(tesserae_core::facing(direction.to_array()));
+    let cells = door.footprint(
+        world.voxel_size,
+        foot,
+        across,
+        door_rise(store, tables, foot),
+    );
+    Some(first(cells, foot))
+}
+
+/// Which way a Door placed at `foot` stands: struck from below, it hangs from
+/// the ceiling; otherwise it stands.
+pub(super) fn door_rise(store: &ChunkStore, tables: &Tables, foot: [i32; 3]) -> Rise {
     let solid = |dy: i32| {
         store
             .voxel([foot[0], foot[1] + dy, foot[2]])
             .is_some_and(|v| tables.materials.solid(v))
     };
-    let rise = if solid(1) && !solid(-1) {
+    if solid(1) && !solid(-1) {
         Rise::Down
     } else {
         Rise::Up
-    };
-    let cells = door.footprint(world.voxel_size, foot, across, rise);
-    Some(first(cells, foot))
-}
-
-/// The face of a Door's cell toward a Player looking along `direction`, and
-/// the side across the facing that `struck`, a point on the Voxel at `at`,
-/// lies in: where the panel stands closed, and where its hinge is.
-pub(super) fn door_faces(
-    direction: Vec3,
-    struck: Vec3,
-    at: [i32; 3],
-    voxel_size: f32,
-) -> (usize, usize) {
-    use tesserae_core::mesh::{NEG_X, NEG_Z, POS_X, POS_Z};
-    let half = |axis: usize, low, high| {
-        if struck[axis] / voxel_size - at[axis] as f32 >= 0.5 {
-            high
-        } else {
-            low
-        }
-    };
-    if direction.x.abs() > direction.z.abs() {
-        let near = if direction.x > 0.0 { NEG_X } else { POS_X };
-        (near, half(2, NEG_Z, POS_Z))
-    } else {
-        let near = if direction.z > 0.0 { NEG_Z } else { POS_Z };
-        (near, half(0, NEG_X, POS_X))
     }
 }
 
@@ -815,6 +794,51 @@ mod tests {
             press(&mut app, eye_at(1.0, 5, across), AIM, None);
             let again: Vec<Voxel> = cells.iter().map(|&c| voxel_at(&app, c)).collect();
             assert_eq!(again, placed, "aimed at {across}");
+        }
+    }
+
+    #[test]
+    fn the_aims_ghost_rebuilds_from_content_the_door_its_place_puts_down() {
+        use super::super::edit::{AimItem, AimReport};
+        for size in [1.0, 0.25] {
+            for across in [0.9, 0.1] {
+                let (mut app, d) = sized(size);
+                let eye = eye_at(size, 5, across);
+                let chosen = Voxel::shaped(d.closed, SHAPE_STAIR, Orientation::IDENTITY.flipped());
+                let report = AimReport {
+                    seq: 1,
+                    origin: eye,
+                    direction: AIM,
+                    held: Some(AimItem::Solid(chosen)),
+                    tool: None,
+                    remove_held: false,
+                };
+                let target = super::super::edit::tests::aim(&mut app, report);
+                let ghost = target.ghost.expect("a ghost");
+                let aim = ghost.door.expect("a Door's aim");
+                let door = app
+                    .world()
+                    .resource::<super::super::ContentTables>()
+                    .uses
+                    .door(d.closed)
+                    .unwrap();
+                let voxel =
+                    tesserae_core::placed_in(Some(door), door.shape, chosen, aim.near, aim.hinge);
+                let foot = (ghost.at / size).round().as_ivec3().to_array();
+                let mut drawn: Vec<_> = door
+                    .footprint(size, foot, Across::of(aim.near), aim.rise)
+                    .into_iter()
+                    .map(|c| (c, voxel))
+                    .collect();
+                place_door_at(&mut app, size, 5, across, SHAPE_STAIR);
+                let mut placed: Vec<_> = door_cells(&app, &d)
+                    .into_iter()
+                    .map(|c| (c, voxel_at(&app, c)))
+                    .collect();
+                drawn.sort_by_key(|&(c, _)| c);
+                placed.sort_by_key(|&(c, _)| c);
+                assert_eq!(drawn, placed, "{size} m, aimed at {across}");
+            }
         }
     }
 }

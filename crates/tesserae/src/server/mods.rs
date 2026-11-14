@@ -893,6 +893,8 @@ pub(in crate::server) fn catalogue(
                 solid: tables.materials.def(id).solid,
                 fluid: tables.fluids.rank(id),
                 burns: tables.combustion.contains(id),
+                shape: tables.uses.shape(id),
+                door: tables.uses.door(id),
             }
         })
         .collect();

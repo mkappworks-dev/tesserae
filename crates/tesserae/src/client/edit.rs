@@ -108,7 +108,7 @@ impl Holding {
                 let material = catalogue
                     .material(material)
                     .map_or("unknown", |m| m.name.as_str());
-                if shape == SHAPE_FULL_CUBE {
+                if shape == SHAPE_FULL_CUBE || catalogue.shape(shape).is_some_and(|s| s.fixed) {
                     material.into()
                 } else {
                     format!(
@@ -141,7 +141,10 @@ impl Holding {
                 shape,
                 orientation,
             } => {
-                let Some(shape) = catalogue.shape(shape).filter(|s| s.id != SHAPE_FULL_CUBE) else {
+                let Some(shape) = catalogue
+                    .shape(shape)
+                    .filter(|s| s.id != SHAPE_FULL_CUBE && !s.fixed)
+                else {
                     return material(id).to_string();
                 };
                 if !shape.turnable {
@@ -170,9 +173,10 @@ impl Holding {
     }
 }
 
-/// What a stack of `item` places, as a full cube, by the Server's rule: the
-/// Material a declared Item names, else the solid or fluid named like it that
-/// no declared Item places. `Empty` when it places nothing.
+/// What a stack of `item` places, as a full cube or the Shape its Material's
+/// row fixes, by the Server's rule: the Material a declared Item names, else
+/// the solid or fluid named like it that no declared Item places. `Empty` when
+/// it places nothing.
 pub(super) fn item_holding(
     item: &str,
     looks: &[ItemLook],
@@ -186,10 +190,15 @@ pub(super) fn item_holding(
                 && !looks.iter().any(|look| look.material == Some(m.id))
         }),
     };
-    match placed {
-        Some(m) if m.fluid.is_some() => Holding::Fluid(m.id),
-        Some(m) => Holding::solid(m.id, SHAPE_FULL_CUBE),
-        None => Holding::Empty,
+    placed.map_or(Holding::Empty, material_holding)
+}
+
+/// A Material as it is drawn on its own: a fluid's source, or a solid as a
+/// cube or in the Shape its row fixes.
+pub(super) fn material_holding(material: &crate::content::CatalogueMaterial) -> Holding {
+    match material.fluid {
+        Some(_) => Holding::Fluid(material.id),
+        None => Holding::solid(material.id, material.shape.unwrap_or(SHAPE_FULL_CUBE)),
     }
 }
 
@@ -199,8 +208,8 @@ pub(super) fn item_holding(
 #[derive(Resource, Clone, PartialEq, Debug)]
 pub(super) struct Hotbar {
     pub(super) stacks: [Option<Stack>; HOTBAR_SLOTS],
-    /// What each stack places, as a full cube; `Empty` for an Item that
-    /// places nothing.
+    /// What each stack places, as [`item_holding`] gives it; `Empty` for an
+    /// Item that places nothing.
     places: [Holding; HOTBAR_SLOTS],
     pub(super) selected: usize,
     pub(super) shape: ShapeId,
@@ -227,10 +236,15 @@ impl Default for Hotbar {
 }
 
 impl Hotbar {
-    /// What slot `at` places, in the chosen Shape and Orientation.
+    /// What slot `at` places, in the chosen Shape and Orientation unless its
+    /// Material fixes a Shape.
     pub(super) fn slot(&self, at: usize) -> Holding {
         match self.places[at] {
-            Holding::Solid { material, .. } => Holding::Solid {
+            Holding::Solid {
+                material,
+                shape: SHAPE_FULL_CUBE,
+                ..
+            } => Holding::Solid {
                 material,
                 shape: self.shape,
                 orientation: self.orientation,
@@ -550,8 +564,9 @@ pub(super) fn select_held(
     else {
         return;
     };
+    let fixed = catalogue.0.shape(shape).is_some_and(|s| s.fixed);
     let mut chosen = (shape, orientation);
-    if actions.started(super::actions::Action::Shape) {
+    if actions.started(super::actions::Action::Shape) && !fixed {
         let offered = || catalogue.0.shapes.iter().filter(|s| !s.fixed).map(|s| s.id);
         let next = offered()
             .filter(|&id| id > shape)
@@ -577,6 +592,8 @@ pub(super) fn select_held(
     }) = &mut hotbar.outside
     {
         (*shape, *orientation) = chosen;
+    } else if fixed {
+        hotbar.orientation = chosen.1;
     } else {
         (hotbar.shape, hotbar.orientation) = chosen;
     }
@@ -953,6 +970,8 @@ mod tests {
             solid,
             fluid: None,
             burns: false,
+            shape: None,
+            door: None,
         }
     }
 
@@ -1854,6 +1873,37 @@ mod tests {
             assert_eq!(*app.world().resource::<Hotbar>(), before, "{hand:?}");
         }
         assert_eq!(app.world().resource::<Hotbar>().stacks, stacks);
+    }
+
+    #[test]
+    fn an_item_whose_material_fixes_a_shape_is_drawn_and_held_in_it_whatever_shape_was_chosen() {
+        let f = tesserae_core::testgen::fixtures();
+        let mut catalogue = dry();
+        catalogue
+            .materials
+            .iter_mut()
+            .find(|m| m.id == f.leaves)
+            .unwrap()
+            .shape = Some(SHAPE_POST);
+        let leaves = item_holding("test:leaves", &[], &catalogue);
+        assert_eq!(leaves, Holding::solid(f.leaves, SHAPE_POST));
+        let stone = item_holding("test:stone", &[], &catalogue);
+        assert_eq!(stone, Holding::solid(f.ground.rock, SHAPE_FULL_CUBE));
+        let mut hotbar = Hotbar {
+            shape: SHAPE_STAIR,
+            orientation: Orientation::IDENTITY.turned(),
+            ..default()
+        };
+        hotbar.places[..2].copy_from_slice(&[leaves, stone]);
+        assert_eq!(hotbar.slot(0), Holding::solid(f.leaves, SHAPE_POST));
+        assert_eq!(
+            hotbar.slot(1),
+            Holding::Solid {
+                material: f.ground.rock,
+                shape: SHAPE_STAIR,
+                orientation: Orientation::IDENTITY.turned(),
+            }
+        );
     }
 
     #[test]

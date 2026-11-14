@@ -169,11 +169,28 @@ pub struct AimRemoval {
     pub material: MaterialId,
     pub burning: bool,
 }
+/// Where Place would put the held solid: its cell's corner in metres, and
+/// for a Door what of the World its placement depends on. The rest is content
+/// the Client holds (`tesserae_core::placed_in`, `Door::footprint`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct AimGhost {
+    pub at: Vec3,
+    pub door: Option<DoorAim>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DoorAim {
+    /// The face its panel stands closed on, and the side it hinges on.
+    pub near: usize,
+    pub hinge: usize,
+    pub rise: tesserae_core::Rise,
+}
+
 #[derive(Message, Clone, Copy, Debug, Default, PartialEq)]
 pub struct AimTarget {
     pub seq: u32,
     pub outline: Option<AimBounds>,
-    pub ghost: Option<Vec3>,
+    pub ghost: Option<AimGhost>,
     pub removal: Option<AimRemoval>,
     /// The camera sees a target the Eye cannot: nothing above is offered.
     pub blocked: bool,

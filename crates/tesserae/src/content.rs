@@ -82,7 +82,7 @@ pub struct CharacterModel(pub Option<std::sync::Arc<tesserae_mods::Character>>);
 /// What the registered content is called and what a player can do with it.
 /// Content only: it holds no Voxel, Chunk or Occupants, so a Client reading it
 /// reads nothing of the World (ADR-0002).
-#[derive(Message, Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Message, Clone, Debug, Default, PartialEq)]
 pub struct ContentCatalogue {
     /// Stable root Game id, supplied by the Server.
     pub game: Option<String>,
@@ -114,7 +114,7 @@ pub struct CatalogueTool {
     pub kind: tesserae_mods::ToolKind,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct CatalogueMaterial {
     pub remove_time: std::time::Duration,
     pub id: MaterialId,
@@ -124,6 +124,9 @@ pub struct CatalogueMaterial {
     pub fluid: Option<u16>,
     /// Whether a combustion row makes it fuel.
     pub burns: bool,
+    /// The Shape its `voxel-uses` row always places it in.
+    pub shape: Option<ShapeId>,
+    pub door: Option<tesserae_core::Door>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

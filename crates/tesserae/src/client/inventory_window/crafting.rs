@@ -984,6 +984,8 @@ mod tests {
                 solid: true,
                 fluid: None,
                 burns: false,
+                shape: None,
+                door: None,
             });
         let mut player = app
             .world_mut()

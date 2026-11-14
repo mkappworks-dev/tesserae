@@ -112,9 +112,9 @@ pub(super) fn resolve(
             }
         }
         EditAction::Place(voxel) => {
-            let (near, hinge) = crate::server::usable::door_faces(
-                intent.direction,
-                struck_at,
+            let (near, hinge) = tesserae_core::door_faces(
+                intent.direction.to_array(),
+                struck_at.to_array(),
                 hit.at,
                 world.voxel_size,
             );
