@@ -332,8 +332,8 @@ impl VoxelUses {
 
     /// What a Player's Place of `voxel` puts down, facing away from the face
     /// `near` with the hinge side `hinge` aimed at: a Door in its fixed Shape
-    /// turned by [`Door::placed`]'s rule, another fixed Shape in the
-    /// Player's Orientation, or `voxel` itself.
+    /// turned to that face and hinge, another fixed Shape in the Player's
+    /// Orientation, or `voxel` itself.
     pub fn placed(&self, voxel: Voxel, near: usize, hinge: usize) -> Voxel {
         if let Some(door) = self.door(voxel.material()) {
             return door.placed(voxel, near, hinge);
