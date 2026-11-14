@@ -15,7 +15,7 @@ struct Approved {
     ground: Option<[&'static str; 3]>,
 }
 
-const EMBER: [Approved; 3] = [
+const EMBER: [Approved; 4] = [
     Approved {
         name: "ash_flats",
         sky: [112, 106, 106],
@@ -34,9 +34,15 @@ const EMBER: [Approved; 3] = [
         fog: [138, 152, 172],
         ground: Some(["strata:stone", "strata:soil", "flora:grass"]),
     },
+    Approved {
+        name: "cinder_bog",
+        sky: [118, 112, 108],
+        fog: [138, 128, 120],
+        ground: Some(["strata:basalt", "strata:soil", "strata:soil"]),
+    },
 ];
 
-const LUMEN: [Approved; 3] = [
+const LUMEN: [Approved; 5] = [
     Approved {
         name: "garden",
         sky: [130, 150, 160],
@@ -55,9 +61,21 @@ const LUMEN: [Approved; 3] = [
         fog: [178, 192, 212],
         ground: Some(["strata:stone", "strata:soil", "frost:snow"]),
     },
+    Approved {
+        name: "conservatory",
+        sky: [122, 156, 150],
+        fog: [138, 174, 166],
+        ground: None,
+    },
+    Approved {
+        name: "lily_pond",
+        sky: [132, 152, 162],
+        fog: [150, 172, 182],
+        ground: Some(["strata:stone", "strata:soil", "strata:soil"]),
+    },
 ];
 
-const MEADOW: [Approved; 3] = [
+const MEADOW: [Approved; 6] = [
     Approved {
         name: "meadow",
         sky: [128, 152, 172],
@@ -76,17 +94,35 @@ const MEADOW: [Approved; 3] = [
         fog: [194, 178, 150],
         ground: Some(["strata:stone", "strata:sand", "strata:sand"]),
     },
+    Approved {
+        name: "thicket",
+        sky: [116, 148, 134],
+        fog: [132, 166, 148],
+        ground: None,
+    },
+    Approved {
+        name: "fen",
+        sky: [130, 138, 134],
+        fog: [148, 158, 150],
+        ground: Some(["strata:stone", "strata:clay", "strata:clay"]),
+    },
+    Approved {
+        name: "prairie",
+        sky: [158, 156, 140],
+        fog: [180, 176, 154],
+        ground: Some(["strata:stone", "strata:soil", "strata:soil"]),
+    },
 ];
 
 fn declared(game: &str) -> (super::Install, super::LoadedMods) {
     loaded(game, 0.5)
 }
 
-fn check_biomes(game: &str, approved: &[Approved; 3]) {
+fn check_biomes(game: &str, approved: &[Approved]) {
     let (_install, loaded) = declared(game);
     let world = loaded.world.expect("the Game declares a World");
     let biomes = world.biomes.as_slice();
-    assert_eq!(biomes.len(), 3, "{game} declares three Biomes");
+    assert_eq!(biomes.len(), approved.len(), "{game} declares its Biomes");
     for (biome, approved) in biomes.iter().zip(approved) {
         let name = biome.name.as_str();
         assert_eq!(name, format!("{game}:{}", approved.name));
@@ -103,6 +139,11 @@ fn check_biomes(game: &str, approved: &[Approved; 3]) {
         for axis in [biome.temperature, biome.humidity] {
             assert!((0.2..=0.8).contains(&axis), "{name} at {axis}");
         }
+        assert!(
+            !biomes.iter().any(|o| o.name != biome.name
+                && (o.temperature, o.humidity) == (biome.temperature, biome.humidity)),
+            "{name} shares a Climate point"
+        );
         let ground = approved
             .ground
             .map(|[rock, soil, surface]| tesserae_core::GroundParams {
@@ -208,17 +249,17 @@ fn check_ore(game: &str, material_name: &str, only: &[&str]) {
 }
 
 #[test]
-fn ember_declares_its_three_biomes_with_the_approved_palette() {
+fn ember_declares_its_biomes_with_the_approved_palette() {
     check_biomes("ember", &EMBER);
 }
 
 #[test]
-fn lumen_declares_its_three_biomes_with_the_approved_palette() {
+fn lumen_declares_its_biomes_with_the_approved_palette() {
     check_biomes("lumen", &LUMEN);
 }
 
 #[test]
-fn meadow_declares_its_three_biomes_with_the_approved_palette() {
+fn meadow_declares_its_biomes_with_the_approved_palette() {
     check_biomes("meadow", &MEADOW);
 }
 
@@ -240,9 +281,22 @@ fn meadow_basalt_veins_lie_in_the_rock_of_every_biome() {
 #[test]
 fn the_biome_content_adds_only_the_dependencies_a_biome_needs() {
     for (game, depends) in [
-        ("ember", vec!["flora", "hearth", "strata", "waters"]),
-        ("lumen", vec!["crystals", "frost", "glassworks", "strata"]),
-        ("meadow", vec!["flora", "glassworks", "strata"]),
+        (
+            "ember",
+            vec!["crops", "flora", "hearth", "strata", "waters"],
+        ),
+        (
+            "lumen",
+            vec![
+                "crops",
+                "crystals",
+                "flora",
+                "frost",
+                "glassworks",
+                "strata",
+            ],
+        ),
+        ("meadow", vec!["crops", "flora", "glassworks", "strata"]),
     ] {
         let (_install, loaded) = declared(game);
         let mut found: Vec<_> = loaded.required.iter().map(|m| m.id.as_str()).collect();

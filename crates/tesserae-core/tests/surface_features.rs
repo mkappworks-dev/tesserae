@@ -186,7 +186,7 @@ fn a_snapshot_whose_biomes_have_no_features_restores_to_the_recorded_chunks() {
 }
 
 #[test]
-fn a_biome_holds_up_to_four_features_spaced_4_to_1024_m_apart() {
+fn a_biome_holds_up_to_sixteen_features_spaced_4_to_1024_m_apart() {
     let at = |spacing_m| SurfaceFeatures::new(&[feature(MELON, spacing_m)]);
     assert!(at(4.0).is_ok());
     assert!(at(1024.0).is_ok());
@@ -203,10 +203,10 @@ fn a_biome_holds_up_to_four_features_spaced_4_to_1024_m_apart() {
             .field,
         "biomes.surface_features.material"
     );
-    let four = [feature(MELON, 16.0); 4];
-    assert_eq!(SurfaceFeatures::new(&four).unwrap().as_slice(), four);
+    let sixteen = [feature(MELON, 16.0); 16];
+    assert_eq!(SurfaceFeatures::new(&sixteen).unwrap().as_slice(), sixteen);
     assert_eq!(
-        SurfaceFeatures::new(&[feature(MELON, 16.0); 5])
+        SurfaceFeatures::new(&[feature(MELON, 16.0); 17])
             .unwrap_err()
             .field,
         "biomes.surface_features"

@@ -18,6 +18,7 @@ use crate::world::WorldSettings;
 mod biomes;
 mod food;
 mod plants;
+mod vegetation;
 
 fn checkout() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
@@ -243,7 +244,14 @@ fn meadow_declares_only_its_pumpkin_and_takes_its_ground_from_strata() {
     assert!(loaded.game);
     assert_eq!(
         ids(&loaded),
-        ["glassworks", "strata", "flora", "meadow", "wanderer"]
+        [
+            "glassworks",
+            "strata",
+            "flora",
+            "crops",
+            "meadow",
+            "wanderer"
+        ]
     );
     let own: Vec<_> = loaded
         .registry
@@ -317,7 +325,9 @@ fn ember_gets_lava_reactions_and_burning_wood_from_hearth() {
     let (_install, loaded) = loaded("ember", 0.5);
     assert_eq!(
         ids(&loaded),
-        ["golem", "strata", "flora", "waters", "hearth", "ember"]
+        [
+            "golem", "strata", "flora", "crops", "waters", "hearth", "ember"
+        ]
     );
     let tables = &loaded.tables;
     let (lava, water) = (
@@ -416,7 +426,9 @@ fn tidewater_exercises_sea_level_caves_and_smoothing() {
             "sprite",
             "strata",
             "flora",
+            "crops",
             "waters",
+            "aquatic",
             "tidewater"
         ]
     );
@@ -510,6 +522,8 @@ fn lumen_builds_blended_glass_light_and_all_three_shapes() {
             "frost",
             "glassworks",
             "strata",
+            "flora",
+            "crops",
             "lumen",
             "wanderer"
         ]
@@ -779,7 +793,7 @@ fn lava_hurts_on_contact_in_every_demo_game_that_has_it() {
 }
 
 #[test]
-fn terra_shows_a_temperate_a_dry_and_a_cold_biome_with_the_approved_sky_and_fog() {
+fn terra_shows_its_six_biomes_with_the_approved_sky_and_fog() {
     let (_install, loaded) = loaded("terra", 0.5);
     let world = loaded.world.unwrap();
     assert_eq!(
@@ -788,6 +802,9 @@ fn terra_shows_a_temperate_a_dry_and_a_cold_biome_with_the_approved_sky_and_fog(
             ("terra:temperate", [126, 146, 168], [136, 160, 190]),
             ("terra:dry", [176, 160, 128], [196, 178, 142]),
             ("terra:cold", [150, 164, 184], [176, 190, 208]),
+            ("terra:jungle", [112, 148, 128], [126, 166, 140]),
+            ("terra:swamp", [108, 126, 114], [124, 142, 126]),
+            ("terra:savanna", [170, 160, 124], [192, 178, 136]),
         ]
     );
     for b in world.biomes.as_slice() {
@@ -827,7 +844,7 @@ fn terra_biomes_all_cover_ground_and_the_temperate_one_most() {
     for seed in [7, 1, 2024] {
         let shares = shares(world, seed, 4000.0, 50.0);
         assert!(
-            shares.iter().all(|&s| s > 0.08) && shares[0] > shares[1] && shares[0] > shares[2],
+            shares.iter().all(|&s| s > 0.04) && shares[0] > shares[1] && shares[0] > shares[2],
             "seed {seed}: {shares:?}"
         );
     }
@@ -839,7 +856,7 @@ fn terra_iron_appears_in_rock_within_its_band() {
 }
 
 #[test]
-fn tidewater_shows_a_lagoon_salt_flats_and_cold_shallows_with_the_approved_sky_and_fog() {
+fn tidewater_shows_its_five_biomes_with_the_approved_sky_and_fog() {
     let (_install, loaded) = loaded("tidewater", 0.5);
     let world = loaded.world.unwrap();
     assert_eq!(
@@ -848,6 +865,8 @@ fn tidewater_shows_a_lagoon_salt_flats_and_cold_shallows_with_the_approved_sky_a
             ("tidewater:lagoon", [118, 150, 170], [132, 172, 192]),
             ("tidewater:salt_flats", [170, 164, 150], [190, 184, 166]),
             ("tidewater:cold_shallows", [144, 160, 180], [168, 186, 206]),
+            ("tidewater:rainforest", [110, 152, 150], [124, 172, 168]),
+            ("tidewater:tidal_marsh", [126, 144, 146], [146, 164, 164]),
         ]
     );
     for b in world.biomes.as_slice() {
@@ -886,7 +905,7 @@ fn tidewater_biomes_all_cover_ground_and_the_lagoon_most() {
     for seed in [7, 1, 2024] {
         let shares = shares(world, seed, 4000.0, 50.0);
         assert!(
-            shares.iter().all(|&s| s > 0.08) && shares[0] > shares[1] && shares[0] > shares[2],
+            shares.iter().all(|&s| s > 0.04) && shares[0] > shares[1] && shares[0] > shares[2],
             "seed {seed}: {shares:?}"
         );
     }

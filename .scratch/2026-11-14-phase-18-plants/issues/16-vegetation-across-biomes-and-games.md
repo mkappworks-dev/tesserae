@@ -1,6 +1,6 @@
 # 16: Vegetation across every Biome and Game
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 12, 14, 17
 
@@ -35,20 +35,20 @@ worldgen, which needs one engine addition.
 
 ## Acceptance criteria
 
-- [ ] Terra generates, in the matching Biomes, oak, birch, pine, palm, apple and
+- [x] Terra generates, in the matching Biomes, oak, birch, pine, palm, apple and
       orange trees, wild vegetables and berries, flowers, mushrooms, cane, kelp
       and cacti, in a headless generation test that counts each by name.
-- [ ] A fruit tree's fruit ripens, is picked with Use and regrows; every new
+- [x] A fruit tree's fruit ripens, is picked with Use and regrows; every new
       fruit is a 3D box Shape as the approved mockup shows.
-- [ ] A jungle or swamp tree generates vines hanging from its canopy, whole
+- [x] A jungle or swamp tree generates vines hanging from its canopy, whole
       across Chunk borders and equal at 1.0, 0.5 and 0.25 m; a vine whose
       anchor is removed breaks by the support rule.
-- [ ] `meadow`, `ember`, `tidewater` and `lumen` each generate vegetation that
+- [x] `meadow`, `ember`, `tidewater` and `lumen` each generate vegetation that
       fits their Biomes, and their starter and load tests pass.
-- [ ] No Biome of a shipped Game is bare unless it is declared so, and a
+- [x] No Biome of a shipped Game is bare unless it is declared so, and a
       generation test asserts it.
-- [ ] Digests of Worlds that declare no Plant features are unchanged.
-- [ ] `tesserae validate` passes for `flora` and every Game.
+- [x] Digests of Worlds that declare no Plant features are unchanged.
+- [x] `tesserae validate` passes for `flora` and every Game.
 
 ## Comments
 
@@ -86,10 +86,10 @@ has no jungle (ash soil grows no canopy); `scorched` stays bare.
 
 Added acceptance criteria:
 
-- [ ] Every plant is declared once in a shared Mod and used by at least two Games.
-- [ ] Jungle and swamp Biomes exist in the Games that can have them, with their
+- [x] Every plant is declared once in a shared Mod and used by at least two Games.
+- [x] Jungle and swamp Biomes exist in the Games that can have them, with their
       trees and vines.
-- [ ] A Biome can declare 16 features; 17 is a load error naming the Biome.
+- [x] A Biome can declare 16 features; 17 is a load error naming the Biome.
 
 ## Engine note, 2026-11-14
 
@@ -153,3 +153,39 @@ do, so the Status is unchanged.
   so a body touches the Voxel. A cold Biome whose surface is snow grows the
   pine only by worldgen: soil is the Voxel below, so a Game that wants them
   replanted on snow tags its snow `soil`.
+
+## Comments (content part 2, 2026-11-14)
+
+Every Game now places the shared library; every box is met by a test that ran.
+`demo_games::vegetation` samples 32 Chunk columns of each Biome at a 1 m Voxel
+and counts by Plant and Material name: each Biome grows each declared species, a
+Biome is bare only if declared so (`ember:scorched`, which also holds no plant
+Voxel), jungle and swamp Biomes have vines, no standalone Wood is generated, each
+shared Plant is placed by two Games or more, and every fruit is a box Shape that
+Use picks and that grows back. Vines at 1.0, 0.5 and 0.25 m and the 16-feature
+cap are covered by `plant_worldgen` and `tesserae-mods`' declare tests.
+
+- **Biomes** (new ones in bold). terra: **jungle**, **swamp**, **savanna**.
+  meadow: **thicket**, **fen**, **prairie**. ember: **cinder_bog**, with
+  `scorched` bare. tidewater: **rainforest**, **tidal_marsh**. lumen:
+  **conservatory**, **lily_pond**. Each Game's table is in its `plants.rs` (terra
+  too), rare trees first and ground cover last, trees 8 to 16 m apart, ground
+  cover 4 to 12 m, crops 18 to 24 m.
+- **Climate points moved inward** from the mockup (jungle 0.72 warm, 0.7 wet;
+  swamp 0.55, 0.78; savanna 0.78, 0.5). At the mockup's 0.85 and 0.95 wet a
+  Biome holds 2 percent of Terra, because Climate clusters near the middle; these
+  give 5 to 10 percent. Two Biomes of a Game never share a point.
+- **Added beyond the mockup matrix**, so every shared Plant has two Games:
+  `tall_grass` and `mushroom_brown` stand for `tuft` and `mushroom` in some
+  Biomes, and `seagrass` and `red_weed` join the kelp in Terra's swamp and
+  tidewater's lagoon and marsh.
+- **Not placed:** the `lily_pad` (a Material feature is always a cube and
+  generation puts none on a lake) and the kelp and lily of meadow and lumen,
+  whose Worlds have no lake. Both are engine work, not needed by a box.
+- Tidewater's own `tidewater:kelp` Plant is gone in favour of `aquatic:kelp`;
+  its hand-built stalks stay. `hearth:ash` and `flora:grass` are tagged `soil`,
+  since ember's ash flats and highland stand on them. Meadow, ember, tidewater
+  and lumen depend on `crops` (tidewater also `aquatic`, lumen `flora`); their
+  texture pins in `food.rs` changed with the Mods they load, terra's did not.
+- Engine change: none. A stale core test (`surface_features`) still held the
+  four-feature cap and now checks 16 and 17.
