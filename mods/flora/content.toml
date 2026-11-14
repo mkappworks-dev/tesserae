@@ -91,11 +91,462 @@ remove-time-s = 0.05
 [[materials]]
 name = "frond"
 emission = 0
-dimming = 1
+dimming = 2
 occlusion = "never"
 render = "cutout"
 solid = true
 remove-time-s = 0.05
+
+[[materials]]
+name = "birch_log"
+emission = 0
+dimming = 15
+occlusion = "opaque"
+render = "opaque"
+solid = true
+remove-time-s = 0.35
+
+[[materials]]
+name = "birch_leaves"
+emission = 0
+dimming = 1
+occlusion = "never"
+render = "cutout"
+solid = true
+remove-time-s = 0.1
+
+[[materials]]
+name = "birch_sapling"
+emission = 0
+dimming = 0
+occlusion = "never"
+render = "cutout"
+solid = true
+remove-time-s = 0.05
+
+[[materials]]
+name = "pine_log"
+emission = 0
+dimming = 15
+occlusion = "opaque"
+render = "opaque"
+solid = true
+remove-time-s = 0.35
+
+[[materials]]
+name = "pine_leaves"
+emission = 0
+dimming = 1
+occlusion = "never"
+render = "cutout"
+solid = true
+remove-time-s = 0.1
+
+[[materials]]
+name = "pine_sapling"
+emission = 0
+dimming = 0
+occlusion = "never"
+render = "cutout"
+solid = true
+remove-time-s = 0.05
+
+[[materials]]
+name = "palm_log"
+emission = 0
+dimming = 15
+occlusion = "opaque"
+render = "opaque"
+solid = true
+remove-time-s = 0.35
+
+[[materials]]
+name = "palm_leaves"
+emission = 0
+dimming = 1
+occlusion = "never"
+render = "cutout"
+solid = true
+remove-time-s = 0.1
+
+[[materials]]
+name = "palm_sapling"
+emission = 0
+dimming = 0
+occlusion = "never"
+render = "cutout"
+solid = true
+remove-time-s = 0.05
+
+[[materials]]
+name = "acacia_log"
+emission = 0
+dimming = 15
+occlusion = "opaque"
+render = "opaque"
+solid = true
+remove-time-s = 0.35
+
+[[materials]]
+name = "acacia_leaves"
+emission = 0
+dimming = 1
+occlusion = "never"
+render = "cutout"
+solid = true
+remove-time-s = 0.1
+
+[[materials]]
+name = "acacia_sapling"
+emission = 0
+dimming = 0
+occlusion = "never"
+render = "cutout"
+solid = true
+remove-time-s = 0.05
+
+[[materials]]
+name = "jungle_log"
+emission = 0
+dimming = 15
+occlusion = "opaque"
+render = "opaque"
+solid = true
+remove-time-s = 0.35
+
+[[materials]]
+name = "jungle_leaves"
+emission = 0
+dimming = 1
+occlusion = "never"
+render = "cutout"
+solid = true
+remove-time-s = 0.1
+
+[[materials]]
+name = "jungle_sapling"
+emission = 0
+dimming = 0
+occlusion = "never"
+render = "cutout"
+solid = true
+remove-time-s = 0.05
+
+[[materials]]
+name = "swamp_log"
+emission = 0
+dimming = 15
+occlusion = "opaque"
+render = "opaque"
+solid = true
+remove-time-s = 0.35
+
+[[materials]]
+name = "swamp_leaves"
+emission = 0
+dimming = 1
+occlusion = "never"
+render = "cutout"
+solid = true
+remove-time-s = 0.1
+
+[[materials]]
+name = "swamp_sapling"
+emission = 0
+dimming = 0
+occlusion = "never"
+render = "cutout"
+solid = true
+remove-time-s = 0.05
+
+[[materials]]
+name = "apple_log"
+emission = 0
+dimming = 15
+occlusion = "opaque"
+render = "opaque"
+solid = true
+remove-time-s = 0.35
+
+[[materials]]
+name = "apple_leaves"
+emission = 0
+dimming = 1
+occlusion = "never"
+render = "cutout"
+solid = true
+remove-time-s = 0.1
+
+[[materials]]
+name = "apple_sapling"
+emission = 0
+dimming = 0
+occlusion = "never"
+render = "cutout"
+solid = true
+remove-time-s = 0.05
+
+[[materials]]
+name = "orange_log"
+emission = 0
+dimming = 15
+occlusion = "opaque"
+render = "opaque"
+solid = true
+remove-time-s = 0.35
+
+[[materials]]
+name = "orange_leaves"
+emission = 0
+dimming = 1
+occlusion = "never"
+render = "cutout"
+solid = true
+remove-time-s = 0.1
+
+[[materials]]
+name = "orange_sapling"
+emission = 0
+dimming = 0
+occlusion = "never"
+render = "cutout"
+solid = true
+remove-time-s = 0.05
+
+[[materials]]
+name = "cherry_log"
+emission = 0
+dimming = 15
+occlusion = "opaque"
+render = "opaque"
+solid = true
+remove-time-s = 0.35
+
+[[materials]]
+name = "cherry_leaves"
+emission = 0
+dimming = 1
+occlusion = "never"
+render = "cutout"
+solid = true
+remove-time-s = 0.1
+
+[[materials]]
+name = "cherry_sapling"
+emission = 0
+dimming = 0
+occlusion = "never"
+render = "cutout"
+solid = true
+remove-time-s = 0.05
+
+[[materials]]
+name = "apple_unripe"
+emission = 0
+dimming = 0
+occlusion = "never"
+render = "cutout"
+solid = true
+remove-time-s = 0.05
+
+[[materials]]
+name = "apple_ripe"
+emission = 0
+dimming = 0
+occlusion = "never"
+render = "cutout"
+solid = true
+remove-time-s = 0.05
+
+[[materials]]
+name = "orange_unripe"
+emission = 0
+dimming = 0
+occlusion = "never"
+render = "cutout"
+solid = true
+remove-time-s = 0.05
+
+[[materials]]
+name = "orange_ripe"
+emission = 0
+dimming = 0
+occlusion = "never"
+render = "cutout"
+solid = true
+remove-time-s = 0.05
+
+[[materials]]
+name = "cherry_unripe"
+emission = 0
+dimming = 0
+occlusion = "never"
+render = "cutout"
+solid = true
+remove-time-s = 0.05
+
+[[materials]]
+name = "cherry_ripe"
+emission = 0
+dimming = 0
+occlusion = "never"
+render = "cutout"
+solid = true
+remove-time-s = 0.05
+
+[[materials]]
+name = "coconut_unripe"
+emission = 0
+dimming = 0
+occlusion = "never"
+render = "cutout"
+solid = true
+remove-time-s = 0.05
+
+[[materials]]
+name = "coconut_ripe"
+emission = 0
+dimming = 0
+occlusion = "never"
+render = "cutout"
+solid = true
+remove-time-s = 0.05
+
+[[materials]]
+name = "birch_wood"
+emission = 0
+dimming = 15
+occlusion = "opaque"
+render = "opaque"
+solid = true
+remove-time-s = 0.35
+
+[[materials]]
+name = "pine_wood"
+emission = 0
+dimming = 15
+occlusion = "opaque"
+render = "opaque"
+solid = true
+remove-time-s = 0.35
+
+[[materials]]
+name = "palm_wood"
+emission = 0
+dimming = 15
+occlusion = "opaque"
+render = "opaque"
+solid = true
+remove-time-s = 0.35
+
+[[materials]]
+name = "acacia_wood"
+emission = 0
+dimming = 15
+occlusion = "opaque"
+render = "opaque"
+solid = true
+remove-time-s = 0.35
+
+[[materials]]
+name = "jungle_wood"
+emission = 0
+dimming = 15
+occlusion = "opaque"
+render = "opaque"
+solid = true
+remove-time-s = 0.35
+
+[[materials]]
+name = "dandelion"
+emission = 0
+dimming = 0
+occlusion = "never"
+render = "cutout"
+solid = true
+remove-time-s = 0.05
+
+[[materials]]
+name = "orchid"
+emission = 0
+dimming = 0
+occlusion = "never"
+render = "cutout"
+solid = true
+remove-time-s = 0.05
+
+[[materials]]
+name = "tall_grass"
+emission = 0
+dimming = 0
+occlusion = "never"
+render = "cutout"
+solid = true
+remove-time-s = 0.05
+
+[[materials]]
+name = "dry_grass"
+emission = 0
+dimming = 0
+occlusion = "never"
+render = "cutout"
+solid = true
+remove-time-s = 0.05
+
+[[materials]]
+name = "fern"
+emission = 0
+dimming = 0
+occlusion = "never"
+render = "cutout"
+solid = true
+remove-time-s = 0.05
+
+[[materials]]
+name = "mushroom_red"
+emission = 0
+dimming = 0
+occlusion = "never"
+render = "cutout"
+solid = true
+remove-time-s = 0.05
+
+[[materials]]
+name = "mushroom_brown"
+emission = 0
+dimming = 0
+occlusion = "never"
+render = "cutout"
+solid = true
+remove-time-s = 0.05
+
+[[materials]]
+name = "cane"
+emission = 0
+dimming = 0
+occlusion = "never"
+render = "cutout"
+solid = true
+remove-time-s = 0.05
+
+[[materials]]
+name = "vine"
+emission = 0
+dimming = 0
+occlusion = "never"
+render = "cutout"
+solid = true
+remove-time-s = 0.05
+
+[[materials]]
+name = "cactus"
+emission = 0
+dimming = 2
+occlusion = "never"
+render = "opaque"
+solid = true
+remove-time-s = 0.4
+contact-damage-per-s = 1.0
 
 [[appearance]]
 material = "wood"
@@ -152,15 +603,317 @@ material = "frond"
 color = [44, 110, 70, 255]
 texture = "art/frond.png"
 
+[[appearance]]
+material = "birch_log"
+color = [226, 224, 212, 255]
+texture = "art/birch_log.png"
+
+[[appearance]]
+material = "birch_leaves"
+color = [124, 176, 60, 255]
+texture = "art/birch_leaves.png"
+
+[[appearance]]
+material = "birch_sapling"
+color = [124, 176, 60, 255]
+texture = "art/birch_sapling.png"
+
+[[appearance]]
+material = "pine_log"
+color = [92, 62, 40, 255]
+texture = "art/pine_log.png"
+
+[[appearance]]
+material = "pine_leaves"
+color = [34, 92, 56, 255]
+texture = "art/pine_leaves.png"
+
+[[appearance]]
+material = "pine_sapling"
+color = [34, 92, 56, 255]
+texture = "art/pine_sapling.png"
+
+[[appearance]]
+material = "palm_log"
+color = [158, 128, 84, 255]
+texture = "art/palm_log.png"
+
+[[appearance]]
+material = "palm_leaves"
+color = [76, 160, 58, 255]
+texture = "art/palm_leaves.png"
+
+[[appearance]]
+material = "palm_sapling"
+color = [76, 160, 58, 255]
+texture = "art/palm_sapling.png"
+
+[[appearance]]
+material = "acacia_log"
+color = [128, 100, 76, 255]
+texture = "art/acacia_log.png"
+
+[[appearance]]
+material = "acacia_leaves"
+color = [140, 160, 56, 255]
+texture = "art/acacia_leaves.png"
+
+[[appearance]]
+material = "acacia_sapling"
+color = [140, 160, 56, 255]
+texture = "art/acacia_sapling.png"
+
+[[appearance]]
+material = "jungle_log"
+color = [104, 84, 52, 255]
+texture = "art/jungle_log.png"
+
+[[appearance]]
+material = "jungle_leaves"
+color = [38, 150, 56, 255]
+texture = "art/jungle_leaves.png"
+
+[[appearance]]
+material = "jungle_sapling"
+color = [38, 150, 56, 255]
+texture = "art/jungle_sapling.png"
+
+[[appearance]]
+material = "swamp_log"
+color = [74, 66, 50, 255]
+texture = "art/swamp_log.png"
+
+[[appearance]]
+material = "swamp_leaves"
+color = [84, 120, 52, 255]
+texture = "art/swamp_leaves.png"
+
+[[appearance]]
+material = "swamp_sapling"
+color = [84, 120, 52, 255]
+texture = "art/swamp_sapling.png"
+
+[[appearance]]
+material = "apple_log"
+color = [150, 104, 60, 255]
+texture = "art/apple_log.png"
+
+[[appearance]]
+material = "apple_leaves"
+color = [41, 107, 36, 255]
+texture = "art/apple_leaves.png"
+
+[[appearance]]
+material = "apple_sapling"
+color = [90, 140, 56, 255]
+texture = "art/apple_sapling.png"
+
+[[appearance]]
+material = "orange_log"
+color = [138, 98, 60, 255]
+texture = "art/orange_log.png"
+
+[[appearance]]
+material = "orange_leaves"
+color = [52, 128, 48, 255]
+texture = "art/orange_leaves.png"
+
+[[appearance]]
+material = "orange_sapling"
+color = [70, 140, 52, 255]
+texture = "art/orange_sapling.png"
+
+[[appearance]]
+material = "cherry_log"
+color = [120, 76, 62, 255]
+texture = "art/cherry_log.png"
+
+[[appearance]]
+material = "cherry_leaves"
+color = [86, 150, 56, 255]
+texture = "art/cherry_leaves.png"
+
+[[appearance]]
+material = "cherry_sapling"
+color = [100, 156, 64, 255]
+texture = "art/cherry_sapling.png"
+
+[[appearance]]
+material = "apple_unripe"
+color = [128, 168, 58, 255]
+texture = "art/apple_unripe.png"
+
+[[appearance]]
+material = "apple_ripe"
+color = [196, 44, 40, 255]
+texture = "art/apple_ripe.png"
+
+[[appearance]]
+material = "orange_unripe"
+color = [120, 168, 52, 255]
+texture = "art/orange_unripe.png"
+
+[[appearance]]
+material = "orange_ripe"
+color = [234, 130, 24, 255]
+texture = "art/orange_ripe.png"
+
+[[appearance]]
+material = "cherry_unripe"
+color = [110, 160, 56, 255]
+texture = "art/cherry_unripe.png"
+
+[[appearance]]
+material = "cherry_ripe"
+color = [130, 18, 40, 255]
+texture = "art/cherry_ripe.png"
+
+[[appearance]]
+material = "coconut_unripe"
+color = [92, 150, 60, 255]
+texture = "art/coconut_unripe.png"
+
+[[appearance]]
+material = "coconut_ripe"
+color = [112, 78, 48, 255]
+texture = "art/coconut_ripe.png"
+
+[[appearance]]
+material = "birch_wood"
+color = [226, 224, 212, 255]
+texture = "art/birch_wood.png"
+
+[[appearance]]
+material = "pine_wood"
+color = [92, 62, 40, 255]
+texture = "art/pine_wood.png"
+
+[[appearance]]
+material = "palm_wood"
+color = [158, 128, 84, 255]
+texture = "art/palm_wood.png"
+
+[[appearance]]
+material = "acacia_wood"
+color = [128, 100, 76, 255]
+texture = "art/acacia_wood.png"
+
+[[appearance]]
+material = "jungle_wood"
+color = [104, 84, 52, 255]
+texture = "art/jungle_wood.png"
+
+[[appearance]]
+material = "dandelion"
+color = [244, 204, 40, 255]
+texture = "art/dandelion.png"
+
+[[appearance]]
+material = "orchid"
+color = [156, 92, 206, 255]
+texture = "art/orchid.png"
+
+[[appearance]]
+material = "tall_grass"
+color = [72, 150, 52, 255]
+texture = "art/tall_grass.png"
+
+[[appearance]]
+material = "dry_grass"
+color = [196, 170, 90, 255]
+texture = "art/dry_grass.png"
+
+[[appearance]]
+material = "fern"
+color = [58, 140, 64, 255]
+texture = "art/fern.png"
+
+[[appearance]]
+material = "mushroom_red"
+color = [200, 44, 40, 255]
+texture = "art/mushroom_red.png"
+
+[[appearance]]
+material = "mushroom_brown"
+color = [142, 98, 64, 255]
+texture = "art/mushroom_brown.png"
+
+[[appearance]]
+material = "cane"
+color = [140, 190, 90, 255]
+texture = "art/cane.png"
+
+[[appearance]]
+material = "vine"
+color = [56, 118, 44, 255]
+texture = "art/vine.png"
+
+[[appearance]]
+material = "cactus"
+color = [60, 128, 52, 255]
+texture = "art/cactus.png"
+
+
 [[shapes]]
 name = "cross"
 form = "cross"
 boxes = [{ min = [3, 0, 3], max = [13, 14, 13] }]
 
+[[shapes]]
+name = "plane"
+form = "plane"
+boxes = [{ min = [1, 1, 14], max = [15, 15, 16] }]
+
+[[shapes]]
+name = "apple"
+boxes = [
+    { min = [4, 1, 4], max = [12, 3, 12] },
+    { min = [3, 3, 3], max = [13, 8, 13] },
+    { min = [4, 8, 4], max = [12, 11, 12] },
+    { min = [7, 11, 7], max = [9, 14, 9] },
+]
+collision = []
+
+[[shapes]]
+name = "orange"
+boxes = [
+    { min = [4, 2, 4], max = [12, 4, 12] },
+    { min = [3, 4, 3], max = [13, 10, 13] },
+    { min = [4, 10, 4], max = [12, 12, 12] },
+    { min = [7, 12, 7], max = [9, 13, 9] },
+]
+collision = []
+
+[[shapes]]
+name = "cherry"
+boxes = [
+    { min = [3, 1, 3], max = [7, 5, 7] },
+    { min = [9, 2, 8], max = [13, 6, 12] },
+    { min = [4, 5, 4], max = [5, 13, 5] },
+    { min = [10, 6, 9], max = [11, 13, 10] },
+    { min = [4, 13, 4], max = [11, 14, 5] },
+]
+collision = []
+
+[[shapes]]
+name = "coconut"
+boxes = [
+    { min = [5, 2, 5], max = [11, 4, 11] },
+    { min = [4, 4, 4], max = [12, 10, 12] },
+    { min = [5, 10, 5], max = [11, 12, 11] },
+]
+collision = []
+
+[[shapes]]
+name = "cactus"
+boxes = [{ min = [3, 0, 3], max = [13, 16, 13] }]
+collision = [{ min = [3, 0, 3], max = [13, 16, 13] }]
+
 [[plants]]
 name = "oak"
 kind = "tree"
 seed = "flora:oak_sapling"
+shape = "flora:cross"
 sapling = "flora:oak_sapling"
 trunk = "flora:oak_log"
 canopy = "flora:oak_leaves"
@@ -170,7 +923,7 @@ mean-seconds = 90.0
 sapling-yield = [1, 2]
 
 [plants.needs]
-soil = ["strata:turf", "strata:soil", "strata:clay"]
+soil = ["#soil"]
 light-min = 8
 temperature = [0.2, 0.9]
 
@@ -191,6 +944,320 @@ item = "flora:oak_sapling"
 count = [0, 1]
 
 [[plants]]
+name = "birch"
+kind = "tree"
+seed = "flora:birch_sapling"
+shape = "flora:cross"
+sapling = "flora:birch_sapling"
+trunk = "flora:birch_log"
+canopy = "flora:birch_leaves"
+trunk-height-m = [5.0, 7.5]
+canopy-radius-m = 1.5
+mean-seconds = 80.0
+sapling-yield = [1, 2]
+
+[plants.needs]
+soil = ["#soil"]
+light-min = 8
+temperature = [0.1, 0.7]
+
+[[plants.sapling-yields]]
+item = "flora:birch_sapling"
+count = [1, 1]
+
+[[plants.trunk-yield]]
+item = "flora:log"
+count = [1, 1]
+
+[[plants.canopy-yield]]
+item = "flora:leaves"
+count = [0, 1]
+
+[[plants.canopy-yield]]
+item = "flora:birch_sapling"
+count = [0, 1]
+
+[[plants]]
+name = "pine"
+kind = "tree"
+seed = "flora:pine_sapling"
+shape = "flora:cross"
+sapling = "flora:pine_sapling"
+trunk = "flora:pine_log"
+canopy = "flora:pine_leaves"
+trunk-height-m = [7.0, 10.0]
+canopy-radius-m = 1.2
+mean-seconds = 110.0
+sapling-yield = [1, 2]
+
+[plants.needs]
+soil = ["#soil"]
+light-min = 8
+temperature = [0.0, 0.6]
+
+[[plants.sapling-yields]]
+item = "flora:pine_sapling"
+count = [1, 1]
+
+[[plants.trunk-yield]]
+item = "flora:log"
+count = [1, 1]
+
+[[plants.canopy-yield]]
+item = "flora:leaves"
+count = [0, 1]
+
+[[plants.canopy-yield]]
+item = "flora:pine_sapling"
+count = [0, 1]
+
+[[plants]]
+name = "palm"
+kind = "tree"
+seed = "flora:palm_sapling"
+shape = "flora:cross"
+sapling = "flora:palm_sapling"
+trunk = "flora:palm_log"
+canopy = "flora:palm_leaves"
+trunk-height-m = [6.0, 9.0]
+canopy-radius-m = 1.8
+mean-seconds = 100.0
+sapling-yield = [1, 2]
+fruit = { stages = [{ material = "flora:coconut_unripe", mean-seconds = 40.0 }, { material = "flora:coconut_ripe", yields = [{ item = "flora:coconut", count = [1, 2] }] }], density = 0.08, harvest-to = 0, shape = "flora:coconut" }
+
+[plants.needs]
+soil = ["#soil", "#sand"]
+light-min = 8
+temperature = [0.5, 1.0]
+
+[[plants.sapling-yields]]
+item = "flora:palm_sapling"
+count = [1, 1]
+
+[[plants.trunk-yield]]
+item = "flora:log"
+count = [1, 1]
+
+[[plants.canopy-yield]]
+item = "flora:leaves"
+count = [0, 1]
+
+[[plants.canopy-yield]]
+item = "flora:palm_sapling"
+count = [0, 1]
+
+[[plants]]
+name = "acacia"
+kind = "tree"
+seed = "flora:acacia_sapling"
+shape = "flora:cross"
+sapling = "flora:acacia_sapling"
+trunk = "flora:acacia_log"
+canopy = "flora:acacia_leaves"
+trunk-height-m = [3.5, 5.5]
+canopy-radius-m = 3.5
+mean-seconds = 100.0
+sapling-yield = [1, 2]
+
+[plants.needs]
+soil = ["#soil", "#sand"]
+light-min = 8
+temperature = [0.5, 1.0]
+humidity = [0.0, 0.7]
+
+[[plants.sapling-yields]]
+item = "flora:acacia_sapling"
+count = [1, 1]
+
+[[plants.trunk-yield]]
+item = "flora:log"
+count = [1, 1]
+
+[[plants.canopy-yield]]
+item = "flora:leaves"
+count = [0, 1]
+
+[[plants.canopy-yield]]
+item = "flora:acacia_sapling"
+count = [0, 1]
+
+[[plants]]
+name = "jungle"
+kind = "tree"
+seed = "flora:jungle_sapling"
+shape = "flora:cross"
+sapling = "flora:jungle_sapling"
+trunk = "flora:jungle_log"
+canopy = "flora:jungle_leaves"
+trunk-height-m = [10.0, 16.0]
+canopy-radius-m = 5.0
+mean-seconds = 140.0
+sapling-yield = [1, 2]
+vines = { plant = "flora:vine", density = 0.12, length-m = 6.0 }
+
+[plants.needs]
+soil = ["#soil"]
+light-min = 8
+temperature = [0.6, 1.0]
+humidity = [0.6, 1.0]
+
+[[plants.sapling-yields]]
+item = "flora:jungle_sapling"
+count = [1, 1]
+
+[[plants.trunk-yield]]
+item = "flora:log"
+count = [1, 1]
+
+[[plants.canopy-yield]]
+item = "flora:leaves"
+count = [0, 1]
+
+[[plants.canopy-yield]]
+item = "flora:jungle_sapling"
+count = [0, 1]
+
+[[plants]]
+name = "swamp"
+kind = "tree"
+seed = "flora:swamp_sapling"
+shape = "flora:cross"
+sapling = "flora:swamp_sapling"
+trunk = "flora:swamp_log"
+canopy = "flora:swamp_leaves"
+trunk-height-m = [3.0, 4.5]
+canopy-radius-m = 3.5
+mean-seconds = 110.0
+sapling-yield = [1, 2]
+vines = { plant = "flora:vine", density = 0.2, length-m = 4.0 }
+
+[plants.needs]
+soil = ["#soil"]
+light-min = 8
+temperature = [0.4, 1.0]
+humidity = [0.7, 1.0]
+
+[[plants.sapling-yields]]
+item = "flora:swamp_sapling"
+count = [1, 1]
+
+[[plants.trunk-yield]]
+item = "flora:log"
+count = [1, 1]
+
+[[plants.canopy-yield]]
+item = "flora:leaves"
+count = [0, 1]
+
+[[plants.canopy-yield]]
+item = "flora:swamp_sapling"
+count = [0, 1]
+
+[[plants]]
+name = "apple"
+kind = "tree"
+seed = "flora:apple_sapling"
+shape = "flora:cross"
+sapling = "flora:apple_sapling"
+trunk = "flora:apple_log"
+canopy = "flora:apple_leaves"
+trunk-height-m = [4.0, 6.0]
+canopy-radius-m = 2.5
+mean-seconds = 90.0
+sapling-yield = [1, 2]
+fruit = { stages = [{ material = "flora:apple_unripe", mean-seconds = 40.0 }, { material = "flora:apple_ripe", yields = [{ item = "flora:apple", count = [1, 2] }] }], density = 0.12, harvest-to = 0, shape = "flora:apple" }
+
+[plants.needs]
+soil = ["#soil"]
+light-min = 8
+
+[[plants.sapling-yields]]
+item = "flora:apple_sapling"
+count = [1, 1]
+
+[[plants.trunk-yield]]
+item = "flora:log"
+count = [1, 1]
+
+[[plants.canopy-yield]]
+item = "flora:leaves"
+count = [0, 1]
+
+[[plants.canopy-yield]]
+item = "flora:apple_sapling"
+count = [0, 1]
+
+[[plants]]
+name = "orange"
+kind = "tree"
+seed = "flora:orange_sapling"
+shape = "flora:cross"
+sapling = "flora:orange_sapling"
+trunk = "flora:orange_log"
+canopy = "flora:orange_leaves"
+trunk-height-m = [3.0, 4.5]
+canopy-radius-m = 2.2
+mean-seconds = 90.0
+sapling-yield = [1, 2]
+fruit = { stages = [{ material = "flora:orange_unripe", mean-seconds = 40.0 }, { material = "flora:orange_ripe", yields = [{ item = "flora:orange", count = [1, 2] }] }], density = 0.12, harvest-to = 0, shape = "flora:orange" }
+
+[plants.needs]
+soil = ["#soil"]
+light-min = 8
+temperature = [0.5, 1.0]
+
+[[plants.sapling-yields]]
+item = "flora:orange_sapling"
+count = [1, 1]
+
+[[plants.trunk-yield]]
+item = "flora:log"
+count = [1, 1]
+
+[[plants.canopy-yield]]
+item = "flora:leaves"
+count = [0, 1]
+
+[[plants.canopy-yield]]
+item = "flora:orange_sapling"
+count = [0, 1]
+
+[[plants]]
+name = "cherry"
+kind = "tree"
+seed = "flora:cherry_sapling"
+shape = "flora:cross"
+sapling = "flora:cherry_sapling"
+trunk = "flora:cherry_log"
+canopy = "flora:cherry_leaves"
+trunk-height-m = [4.0, 6.0]
+canopy-radius-m = 2.5
+mean-seconds = 90.0
+sapling-yield = [1, 2]
+fruit = { stages = [{ material = "flora:cherry_unripe", mean-seconds = 40.0 }, { material = "flora:cherry_ripe", yields = [{ item = "flora:cherries", count = [1, 2] }] }], density = 0.14, harvest-to = 0, shape = "flora:cherry" }
+
+[plants.needs]
+soil = ["#soil"]
+light-min = 8
+temperature = [0.2, 0.7]
+
+[[plants.sapling-yields]]
+item = "flora:cherry_sapling"
+count = [1, 1]
+
+[[plants.trunk-yield]]
+item = "flora:log"
+count = [1, 1]
+
+[[plants.canopy-yield]]
+item = "flora:leaves"
+count = [0, 1]
+
+[[plants.canopy-yield]]
+item = "flora:cherry_sapling"
+count = [0, 1]
+
+[[plants]]
 name = "tuft"
 kind = "spreader"
 seed = "flora:tuft"
@@ -201,7 +1268,7 @@ mean-seconds = 120.0
 density = 6
 
 [plants.needs]
-soil = ["strata:turf", "strata:soil", "strata:clay"]
+soil = ["#soil"]
 light-min = 9
 
 [[plants]]
@@ -215,7 +1282,7 @@ mean-seconds = 300.0
 density = 3
 
 [plants.needs]
-soil = ["strata:turf", "strata:soil", "strata:clay"]
+soil = ["#soil"]
 light-min = 9
 
 [[plants]]
@@ -229,11 +1296,208 @@ mean-seconds = 300.0
 density = 3
 
 [plants.needs]
-soil = ["strata:turf", "strata:soil", "strata:clay"]
+soil = ["#soil"]
 light-min = 9
+
+[[plants]]
+name = "dandelion"
+kind = "spreader"
+seed = "flora:dandelion"
+shape = "flora:cross"
+material = "flora:dandelion"
+reach-m = 3.0
+mean-seconds = 300.0
+density = 3
+
+[plants.needs]
+soil = ["#soil"]
+light-min = 9
+
+[[plants]]
+name = "tall_grass"
+kind = "spreader"
+seed = "flora:tall_grass"
+shape = "flora:cross"
+material = "flora:tall_grass"
+reach-m = 2.0
+mean-seconds = 140.0
+density = 5
+
+[plants.needs]
+soil = ["#soil"]
+light-min = 9
+
+[[plants]]
+name = "dry_grass"
+kind = "spreader"
+seed = "flora:dry_grass"
+shape = "flora:cross"
+material = "flora:dry_grass"
+reach-m = 2.0
+mean-seconds = 140.0
+density = 5
+
+[plants.needs]
+soil = ["#soil", "#sand"]
+light-min = 9
+humidity = [0.0, 0.6]
+
+[[plants]]
+name = "fern"
+kind = "spreader"
+seed = "flora:fern"
+shape = "flora:cross"
+material = "flora:fern"
+reach-m = 2.0
+mean-seconds = 160.0
+density = 4
+
+[plants.needs]
+soil = ["#soil"]
+light-min = 5
+humidity = [0.4, 1.0]
+
+[[plants]]
+name = "orchid"
+kind = "spreader"
+seed = "flora:orchid"
+shape = "flora:cross"
+material = "flora:orchid"
+reach-m = 3.0
+mean-seconds = 360.0
+density = 2
+
+[plants.needs]
+soil = ["#soil"]
+light-min = 7
+temperature = [0.5, 1.0]
+humidity = [0.5, 1.0]
+
+[[plants]]
+name = "mushroom_red"
+kind = "spreader"
+seed = "flora:mushroom_red"
+shape = "flora:cross"
+material = "flora:mushroom_red"
+reach-m = 2.0
+mean-seconds = 120.0
+density = 4
+
+[plants.needs]
+soil = ["#soil", "#rock"]
+light-max = 7
+
+[[plants]]
+name = "mushroom_brown"
+kind = "spreader"
+seed = "flora:mushroom_brown"
+shape = "flora:cross"
+material = "flora:mushroom_brown"
+reach-m = 2.0
+mean-seconds = 120.0
+density = 4
+
+[plants.needs]
+soil = ["#soil", "#rock"]
+light-max = 8
+
+[[plants]]
+name = "cane"
+kind = "column"
+seed = "flora:cane"
+shape = "flora:cross"
+material = "flora:cane"
+max-height-m = 3.0
+direction = "up"
+mean-seconds = 60.0
+
+[plants.needs]
+soil = ["#soil", "#sand"]
+light-min = 8
+
+[[plants]]
+name = "cactus"
+kind = "column"
+seed = "flora:cactus"
+shape = "flora:cactus"
+material = "flora:cactus"
+max-height-m = 3.0
+direction = "up"
+mean-seconds = 80.0
+
+[plants.needs]
+soil = ["#sand"]
+light-min = 9
+temperature = [0.5, 1.0]
+humidity = [0.0, 0.5]
+
+[[plants]]
+name = "vine"
+kind = "climber"
+seed = "flora:vine"
+shape = "flora:plane"
+material = "flora:vine"
+mean-seconds = 90.0
+length-m = 6.0
+
+[plants.needs]
+soil = ["#rock", "#soil", "flora:wood", "flora:leaves", "flora:jungle_log", "flora:jungle_leaves", "flora:swamp_log", "flora:swamp_leaves"]
 
 [[items]]
 name = "log"
 size-m = 0.3
 color = [120, 82, 46, 255]
 material = "flora:wood"
+
+[[items]]
+name = "apple"
+size-m = 0.2
+color = [196, 44, 40, 255]
+food = 5.0
+texture = "art/item-apple.png"
+
+[[items]]
+name = "orange"
+size-m = 0.2
+color = [234, 130, 24, 255]
+food = 4.0
+texture = "art/item-orange.png"
+
+[[items]]
+name = "cherries"
+size-m = 0.2
+color = [130, 18, 40, 255]
+food = 3.0
+texture = "art/item-cherries.png"
+
+[[items]]
+name = "coconut"
+size-m = 0.2
+color = [112, 78, 48, 255]
+food = 4.0
+texture = "art/item-coconut.png"
+
+[[recipes]]
+inputs = [{ item = "flora:log", count = 1 }]
+output = { item = "flora:birch_wood", count = 1 }
+station = "hand"
+
+[[recipes]]
+inputs = [{ item = "flora:log", count = 1 }]
+output = { item = "flora:pine_wood", count = 1 }
+station = "hand"
+
+[[recipes]]
+inputs = [{ item = "flora:log", count = 1 }]
+output = { item = "flora:palm_wood", count = 1 }
+station = "hand"
+
+[[recipes]]
+inputs = [{ item = "flora:log", count = 1 }]
+output = { item = "flora:acacia_wood", count = 1 }
+station = "hand"
+
+[[recipes]]
+inputs = [{ item = "flora:log", count = 1 }]
+output = { item = "flora:jungle_wood", count = 1 }
+station = "hand"

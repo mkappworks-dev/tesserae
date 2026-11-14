@@ -99,9 +99,20 @@ pub(crate) fn solid(name: &str) -> MaterialDef {
         render: RenderClass::Opaque,
         remove_time_s: Some(0.35),
         contact_damage_per_s: None,
-        tags: Vec::new(),
+        tags: tags_of(name),
         solid: true,
     }
+}
+
+/// What the shared Plants name instead of Terra's own ground and water.
+fn tags_of(name: &str) -> Vec<String> {
+    let tags: &[&str] = match name {
+        "dirt" | "grass" => &["soil"],
+        "sand" => &["sand"],
+        "stone" => &["rock"],
+        _ => &[],
+    };
+    tags.iter().map(|t| (*t).to_owned()).collect()
 }
 
 fn point(x: f32, y: f32, z: f32) -> Vec3 {
@@ -304,7 +315,7 @@ impl Guest for Terra {
                     render: RenderClass::Blend,
                     remove_time_s: None,
                     contact_damage_per_s: None,
-                    tags: Vec::new(),
+                    tags: vec!["water".into()],
                     solid: false,
                 },
                 solid("stone"),
@@ -332,14 +343,8 @@ impl Guest for Terra {
                 solid("door_open"),
                 gate("gate"),
                 gate("gate_open"),
-            ]
-            .into_iter()
-            .chain(plants::materials())
-            .collect(),
-            shapes: [fence(), panel(), table()]
-                .into_iter()
-                .chain(plants::shapes())
-                .collect(),
+            ],
+            shapes: vec![fence(), panel(), table()],
             appearance: vec![
                 appearance("lamp", [245, 227, 184, 255]),
                 appearance("lava", [230, 72, 16, 255]),
@@ -363,10 +368,7 @@ impl Guest for Terra {
                 appearance("door_open", [128, 88, 50, 255]),
                 appearance("gate", [140, 97, 55, 255]),
                 appearance("gate_open", [140, 97, 55, 255]),
-            ]
-            .into_iter()
-            .chain(plants::appearances())
-            .collect(),
+            ],
             world: Some(world),
             view: Some(ViewParams {
                 view_distance_m: 160.0,
@@ -577,10 +579,7 @@ impl Guest for Terra {
                     food: None,
                     texture: None,
                 },
-            ]
-            .into_iter()
-            .chain(plants::items())
-            .collect(),
+            ],
             biomes: vec![
                 BiomeDef {
                     soundscape: Some("terra:temperate".into()),
@@ -650,7 +649,7 @@ impl Guest for Terra {
             recipes: vec![
                 RecipeDef {
                     inputs: vec![RecipeStack {
-                        item: "terra:wood".into(),
+                        item: "flora:log".into(),
                         count: 4,
                     }],
                     output: RecipeStack {
@@ -689,7 +688,7 @@ impl Guest for Terra {
                 },
                 RecipeDef {
                     inputs: vec![RecipeStack {
-                        item: "terra:leaves".into(),
+                        item: "flora:leaves".into(),
                         count: 4,
                     }],
                     output: RecipeStack {
@@ -700,7 +699,7 @@ impl Guest for Terra {
                 },
                 RecipeDef {
                     inputs: vec![RecipeStack {
-                        item: "terra:wood".into(),
+                        item: "flora:log".into(),
                         count: 8,
                     }],
                     output: RecipeStack {
@@ -711,7 +710,7 @@ impl Guest for Terra {
                 },
                 RecipeDef {
                     inputs: vec![RecipeStack {
-                        item: "terra:wood".into(),
+                        item: "flora:log".into(),
                         count: 3,
                     }],
                     output: RecipeStack {
@@ -722,7 +721,7 @@ impl Guest for Terra {
                 },
                 RecipeDef {
                     inputs: vec![RecipeStack {
-                        item: "terra:wood".into(),
+                        item: "flora:log".into(),
                         count: 2,
                     }],
                     output: RecipeStack {
@@ -772,7 +771,7 @@ impl Guest for Terra {
                 },
                 RecipeDef {
                     inputs: vec![RecipeStack {
-                        item: "terra:wood".into(),
+                        item: "flora:log".into(),
                         count: 1,
                     }],
                     output: RecipeStack {
@@ -781,11 +780,8 @@ impl Guest for Terra {
                     },
                     station: "workbench".into(),
                 },
-            ]
-            .into_iter()
-            .chain(plants::recipes())
-            .collect(),
-            plants: plants::plants(),
+            ],
+            plants: Vec::new(),
             voxel_uses: vec![
                 VoxelUse {
                     material: "terra:door".into(),

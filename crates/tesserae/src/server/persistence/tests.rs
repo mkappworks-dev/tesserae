@@ -687,7 +687,18 @@ fn details(name: &str, seed: u64, voxel_size_m: f32) -> library::Sidecar {
             id: "terra".into(),
             version: "0.1.0".into(),
         }),
-        mods: Vec::new(),
+        mods: [
+            ("strata", "0.1.0"),
+            ("waters", "0.1.0"),
+            ("flora", "0.2.0"),
+            ("crops", "0.1.0"),
+            ("aquatic", "0.1.0"),
+        ]
+        .map(|(id, version)| library::ModRef {
+            id: id.into(),
+            version: version.into(),
+        })
+        .into(),
         seed,
         voxel_size_m,
         created_unix_s: 1,
@@ -812,11 +823,22 @@ fn a_new_world_takes_its_identity_and_settings_from_its_details() {
     assert_eq!(opening.id, created.world);
     assert_eq!(
         opening.selection(),
-        crate::server::mods::Selection::Named(vec![crate::server::mods::Wanted {
-            id: "terra".into(),
-            version: "0.1.0".into(),
-            game: true,
-        }])
+        crate::server::mods::Selection::Named(
+            [
+                ("terra", "0.1.0", true),
+                ("strata", "0.1.0", false),
+                ("waters", "0.1.0", false),
+                ("flora", "0.2.0", false),
+                ("crops", "0.1.0", false),
+                ("aquatic", "0.1.0", false),
+            ]
+            .map(|(id, version, game)| crate::server::mods::Wanted {
+                id: id.into(),
+                version: version.into(),
+                game,
+            })
+            .into()
+        )
     );
     let settings = opening.settings(WorldSettings::default());
     assert_eq!((settings.seed, settings.voxel_size), (99, 0.5));
@@ -940,6 +962,7 @@ fn an_empty_world_loads_no_mods() {
     let worlds = Directory::new();
     let mut empty = details("Empty", 4, 1.0);
     empty.game = None;
+    empty.mods.clear();
     let path = library::create(&worlds.0, &empty).unwrap();
     let opening = Opening::from_folder(&path).unwrap();
     assert_eq!(opening.selection(), crate::server::mods::Selection::Nothing);

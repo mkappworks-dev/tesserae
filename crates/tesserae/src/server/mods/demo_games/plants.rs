@@ -19,10 +19,10 @@ fn yields_of(loaded: &super::LoadedMods, name: &str) -> Vec<(String, u32)> {
 fn ripe_wheat_gives_wheat_and_seeds_and_a_berry_bush_fruits_again() {
     let (_install, loaded) = loaded("terra", 0.5);
     let plants = &loaded.tables.plants;
-    let ripe = material(&loaded, "terra:wheat_ripe");
+    let ripe = material(&loaded, "crops:wheat_ripe");
     assert_eq!(
-        yields_of(&loaded, "terra:wheat_ripe"),
-        [("terra:wheat".into(), 1), ("terra:wheat_seeds".into(), 1)]
+        yields_of(&loaded, "crops:wheat_ripe"),
+        [("crops:wheat".into(), 1), ("crops:wheat_seeds".into(), 1)]
     );
     assert_eq!(
         plants.harvest(ripe).map(|h| h.ripe),
@@ -31,11 +31,11 @@ fn ripe_wheat_gives_wheat_and_seeds_and_a_berry_bush_fruits_again() {
     );
 
     let berries = plants
-        .harvest(material(&loaded, "terra:berry_ripe"))
+        .harvest(material(&loaded, "crops:berry_ripe"))
         .unwrap();
     assert!(berries.ripe);
-    assert_eq!(berries.to, material(&loaded, "terra:berry_bush"));
-    assert_eq!(berries.yields[0].item, "terra:berries");
+    assert_eq!(berries.to, material(&loaded, "crops:berry_bush"));
+    assert_eq!(berries.yields[0].item, "crops:berries");
 }
 
 #[test]
@@ -43,20 +43,20 @@ fn an_apple_tree_bears_apples_that_use_picks_and_that_grow_back() {
     let (_install, loaded) = loaded("terra", 0.5);
     let plants = &loaded.tables.plants;
     let ripe = plants
-        .harvest(material(&loaded, "terra:apple_ripe"))
+        .harvest(material(&loaded, "flora:apple_ripe"))
         .unwrap();
     assert!(ripe.ripe);
-    assert_eq!(ripe.to, material(&loaded, "terra:apple_unripe"));
-    assert_eq!(ripe.yields[0].item, "terra:apple");
+    assert_eq!(ripe.to, material(&loaded, "flora:apple_unripe"));
+    assert_eq!(ripe.yields[0].item, "flora:apple");
     let apple = loaded
         .items
         .iter()
-        .find(|i| i.name == "terra:apple")
+        .find(|i| i.name == "flora:apple")
         .unwrap();
     assert!(apple.food.is_some_and(|f| f > 0.0));
     assert_eq!(
-        plants.canopy_of_fruit(material(&loaded, "terra:apple_ripe")),
-        Some(material(&loaded, "terra:apple_leaves"))
+        plants.canopy_of_fruit(material(&loaded, "flora:apple_ripe")),
+        Some(material(&loaded, "flora:apple_leaves"))
     );
 }
 
@@ -64,7 +64,7 @@ fn an_apple_tree_bears_apples_that_use_picks_and_that_grow_back() {
 fn bread_and_pie_are_made_from_the_produce() {
     let (_install, loaded) = loaded("terra", 0.5);
     let items = loaded.every_item(0.5);
-    for food in ["terra:bread", "terra:berry_pie"] {
+    for food in ["crops:bread", "crops:berry_pie"] {
         items.named(food).expect(food);
         assert!(
             loaded.recipes.iter().any(|r| r.output.item == food),
@@ -84,13 +84,13 @@ fn a_new_terra_world_grows_oaks_apples_and_wheat_within_a_short_walk() {
     let world = loaded.world.unwrap();
     let generator = tesserae_core::Worldgen::new(7, 0.5, world);
     for names in [
-        &["terra:oak_leaves"][..],
-        &["terra:apple_unripe", "terra:apple_ripe"],
+        &["flora:oak_leaves"][..],
+        &["flora:apple_unripe", "flora:apple_ripe"],
         &[
-            "terra:wheat_sprout",
-            "terra:wheat_young",
-            "terra:wheat_green",
-            "terra:wheat_ripe",
+            "crops:wheat_sprout",
+            "crops:wheat_young",
+            "crops:wheat_green",
+            "crops:wheat_ripe",
         ],
     ] {
         let found: usize = names
@@ -108,13 +108,13 @@ fn terras_plants_name_their_shapes_and_a_generated_apple_is_the_box_apple() {
     let (_install, loaded) = loaded("terra", 0.5);
     let plants = &loaded.tables.plants;
     for (name, want) in [
-        ("terra:wheat_sprout", "terra:cross"),
-        ("terra:berry_sprout", "terra:cross"),
-        ("terra:oak_sapling", "terra:cross"),
-        ("terra:cane", "terra:cross"),
-        ("terra:kelp", "terra:cross"),
-        ("terra:mushroom", "terra:cross"),
-        ("terra:vine", "terra:plane"),
+        ("crops:wheat_sprout", "flora:cross"),
+        ("crops:berry_sprout", "flora:cross"),
+        ("flora:oak_sapling", "flora:cross"),
+        ("flora:cane", "flora:cross"),
+        ("aquatic:kelp", "flora:cross"),
+        ("flora:mushroom_red", "flora:cross"),
+        ("flora:vine", "flora:plane"),
     ] {
         assert_eq!(
             plants.fixed_shape(material(&loaded, name)),
@@ -122,11 +122,11 @@ fn terras_plants_name_their_shapes_and_a_generated_apple_is_the_box_apple() {
             "{name}"
         );
     }
-    let apple = shape(&loaded, "terra:apple");
+    let apple = shape(&loaded, "flora:apple");
     let Kind::Tree(tree) = &plants
         .plants()
         .iter()
-        .find(|p| p.name == "terra:apple")
+        .find(|p| p.name == "flora:apple")
         .unwrap()
         .kind
     else {
@@ -134,14 +134,14 @@ fn terras_plants_name_their_shapes_and_a_generated_apple_is_the_box_apple() {
     };
     assert_eq!(tree.fruit.as_ref().unwrap().shape, Some(apple));
     for face in 0..6 {
-        let voxel = tesserae_core::Voxel::new(material(&loaded, "terra:apple_ripe"), apple, 0);
+        let voxel = tesserae_core::Voxel::new(material(&loaded, "flora:apple_ripe"), apple, 0);
         assert!(!loaded.tables.shapes.seals(voxel, face), "face {face}");
     }
 
     let generator = tesserae_core::Worldgen::new(7, 0.5, loaded.world.unwrap());
     let ripe = [
-        material(&loaded, "terra:apple_unripe"),
-        material(&loaded, "terra:apple_ripe"),
+        material(&loaded, "flora:apple_unripe"),
+        material(&loaded, "flora:apple_ripe"),
     ];
     let chunk_m = CHUNK_SIZE as f32 * 0.5;
     let (lowest, highest) = generator.surface_bounds_m();

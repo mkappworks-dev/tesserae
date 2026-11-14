@@ -5,6 +5,7 @@ dimming = 2
 occlusion = "same-material"
 render = "blend"
 solid = false
+tags = ["water"]
 
 [[materials]]
 name = "steam"

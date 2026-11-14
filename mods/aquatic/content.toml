@@ -1,0 +1,102 @@
+[[materials]]
+name = "kelp"
+emission = 0
+dimming = 2
+occlusion = "never"
+render = "cutout"
+solid = true
+remove-time-s = 0.05
+
+[[materials]]
+name = "seagrass"
+emission = 0
+dimming = 2
+occlusion = "never"
+render = "cutout"
+solid = true
+remove-time-s = 0.05
+
+[[materials]]
+name = "red_weed"
+emission = 0
+dimming = 2
+occlusion = "never"
+render = "cutout"
+solid = true
+remove-time-s = 0.05
+
+[[materials]]
+name = "lily_pad"
+emission = 0
+dimming = 2
+occlusion = "never"
+render = "cutout"
+solid = true
+remove-time-s = 0.05
+
+[[appearance]]
+material = "kelp"
+color = [44, 110, 70, 255]
+texture = "art/kelp.png"
+
+[[appearance]]
+material = "seagrass"
+color = [72, 150, 84, 255]
+texture = "art/seagrass.png"
+
+[[appearance]]
+material = "red_weed"
+color = [170, 62, 74, 255]
+texture = "art/red_weed.png"
+
+[[appearance]]
+material = "lily_pad"
+color = [56, 142, 64, 255]
+texture = "art/lily_pad.png"
+
+[[shapes]]
+name = "pad"
+boxes = [{ min = [1, 0, 1], max = [15, 1, 15] }]
+collision = []
+
+[[plants]]
+name = "kelp"
+kind = "column"
+seed = "aquatic:kelp"
+shape = "flora:cross"
+material = "aquatic:kelp"
+max-height-m = 5.0
+direction = "up"
+mean-seconds = 90.0
+stands-in = "#water"
+
+[plants.needs]
+soil = ["#sand", "#soil", "#rock"]
+
+[[plants]]
+name = "seagrass"
+kind = "column"
+seed = "aquatic:seagrass"
+shape = "flora:cross"
+material = "aquatic:seagrass"
+max-height-m = 1.0
+direction = "up"
+mean-seconds = 70.0
+stands-in = "#water"
+
+[plants.needs]
+soil = ["#sand", "#soil", "#rock"]
+
+[[plants]]
+name = "red_weed"
+kind = "column"
+seed = "aquatic:red_weed"
+shape = "flora:cross"
+material = "aquatic:red_weed"
+max-height-m = 2.0
+direction = "up"
+mean-seconds = 80.0
+stands-in = "#water"
+
+[plants.needs]
+soil = ["#sand", "#soil", "#rock"]

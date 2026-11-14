@@ -174,11 +174,11 @@ const WOOD_FOR_A_HOME: u32 = 15;
 fn a_survival_player_finds_wood_for_a_workbench_a_chest_and_a_door_in_the_oaks_near_the_spawn() {
     let (_install, loaded) = loaded("terra", 0.5);
     let world = loaded.world.unwrap();
-    let wood = material(&loaded, "terra:wood");
-    let trunk = material(&loaded, "terra:oak_log");
+    let wood = material(&loaded, "flora:wood");
+    let trunk = material(&loaded, "flora:oak_log");
     let yields = loaded.tables.plants.yields(trunk);
     assert!(
-        matches!(yields, [y] if y.item == "terra:wood" && y.count.min >= 1),
+        matches!(yields, [y] if y.item == "flora:log" && y.count.min >= 1),
         "{yields:?}"
     );
     let per_trunk = yields[0].count.min;
@@ -215,14 +215,14 @@ fn a_grown_oak_drops_placed_items_and_its_grown_materials_have_none() {
         "apple_leaves",
         "apple_ripe",
     ] {
-        let id = material(&loaded, &format!("terra:{name}"));
+        let id = material(&loaded, &format!("flora:{name}"));
         assert!(loaded.tables.plants.is_grown(id), "{name}");
         assert!(
             !loaded.items.iter().any(|i| i.material == Some(id)),
             "{name} has an Item"
         );
     }
-    for item in ["terra:wood", "terra:leaves", "terra:oak_sapling"] {
+    for item in ["flora:log", "flora:leaves", "flora:oak_sapling"] {
         assert!(items.named(item).is_some(), "{item}");
     }
     let sapling = loaded
@@ -230,8 +230,8 @@ fn a_grown_oak_drops_placed_items_and_its_grown_materials_have_none() {
         .plants
         .plants()
         .iter()
-        .find(|p| p.name == "terra:oak")
-        .expect("terra declares an oak");
+        .find(|p| p.name == "flora:oak")
+        .expect("flora declares an oak");
     let tesserae_core::plant::Kind::Tree(tree) = &sapling.kind else {
         panic!("the oak is a tree");
     };
@@ -411,10 +411,10 @@ fn fingerprint(textures: &[(String, Vec<u8>)]) -> u64 {
 #[test]
 fn the_demo_games_textures_are_unchanged() {
     let pinned = [
-        ("terra", 0x4e81_0511_6a25_1062),
-        ("meadow", 0xe69a_bae3_9cf9_0e22),
-        ("ember", 0x06a2_5950_7f3d_83ed),
-        ("tidewater", 0x259c_d7c9_7428_19d7),
+        ("terra", 0x083e816a20176578),
+        ("meadow", 0x82a0d4c75dc04395),
+        ("ember", 0x4458e5d59f6e614a),
+        ("tidewater", 0x2ff907eccd315994),
         ("lumen", 0xc983_25a8_ef29_a087),
     ];
     for (game, expected) in pinned {

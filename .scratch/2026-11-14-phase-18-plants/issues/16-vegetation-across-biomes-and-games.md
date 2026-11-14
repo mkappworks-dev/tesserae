@@ -110,3 +110,46 @@ The engine half is in; content is still to do.
   Material in `needs.soil`, or the load fails naming the tree. Worldgen only,
   never a sapling.
 
+
+## Comments (content part 1, 2026-11-14)
+
+The shared plant library is in; Biomes and placement in the Games are still to
+do, so the Status is unchanged.
+
+- Two engine changes were needed first, both approved by the maintainer. **Caps:**
+  a tree is three Materials and each Material belongs to one Plant, so the old
+  56-Material World overran at once. A World now holds 248 Materials (palette and
+  atlas 256 slots, the texture bit set widened to three `UVec4`), and one Mod 128
+  Materials, Shapes or appearance rows (ADR-0009 amendment). **Tags:** a Material
+  may carry up to 8 `tags`, and a Plant's `soil`, a column's `stands-in` and a
+  water `fluid` may name `#tag`, expanded after every Mod has declared to each
+  Material (solid ones for soil, fluids for water) that carries it; a tag with no
+  match is a load error naming the Plant. `strata` tags `turf`, `soil` and `clay`
+  `soil`, `sand` `sand`, `stone` and `basalt` `rock`; `waters` tags `water`;
+  Terra tags its own grass and dirt `soil`, sand `sand`, stone `rock` and water
+  `water`. Worldgen still freezes one fluid per column: the World's lake when the
+  tag includes it, else the first.
+- `flora` (v0.2): trees `oak`, `birch`, `pine`, `palm`, `acacia`, `jungle`,
+  `swamp`, `apple`, `orange`, `cherry`; spreaders `tuft`, `tall_grass`,
+  `dry_grass`, `fern`, `poppy`, `daisy`, `dandelion`, `orchid`, `mushroom_red`,
+  `mushroom_brown`; columns `cane`, `cactus`; climber `vine`. `crops`: `wheat`,
+  `carrot`, `potato`, `berry`, with bread and berry pie. `aquatic`: `kelp`,
+  `seagrass`, `red_weed` and the `lily_pad` Material.
+- The pine is a narrow, tall ellipsoid and the acacia as flat as the 0.8 height
+  ratio allows: the parametric canopy cannot make a cone or an umbrella, and the
+  engine was not changed to approximate one.
+- Terra no longer declares plants. It depends on `strata`, `waters`, `flora`,
+  `crops` and `aquatic`, keeps its own ground Materials (tagged) and its melon,
+  and its Recipes take `flora:log` and `flora:leaves`. Its Biome features name
+  `flora:oak`, `flora:apple`, `crops:wheat`, `flora:cane`, `crops:berry`,
+  `aquatic:kelp` and `flora:mushroom_red`. Because `aquatic` loads `waters`, Terra
+  carries a second, unused water fluid. `scripts/build-guests` now copies those
+  Mods into `games/terra/dist/mods`.
+- Deviations: `cane` needs no water, since `flora` cannot name a fluid and a
+  `#water` need would fail in a Game with none. Berry pie is crafted by hand, not
+  at Terra's Workbench, which a shared Mod cannot name. The `lily_pad` is placed
+  by a Biome feature: a Plant's soil must be solid and nothing grows on a fluid.
+  `cactus` hurts on contact (1 health per second) and its collision box is inset
+  so a body touches the Voxel. A cold Biome whose surface is snow grows the
+  pine only by worldgen: soil is the Voxel below, so a Game that wants them
+  replanted on snow tags its snow `soil`.

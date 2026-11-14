@@ -1,0 +1,349 @@
+[[materials]]
+name = "wheat_sprout"
+emission = 0
+dimming = 0
+occlusion = "never"
+render = "cutout"
+solid = true
+remove-time-s = 0.05
+
+[[materials]]
+name = "wheat_young"
+emission = 0
+dimming = 0
+occlusion = "never"
+render = "cutout"
+solid = true
+remove-time-s = 0.05
+
+[[materials]]
+name = "wheat_green"
+emission = 0
+dimming = 0
+occlusion = "never"
+render = "cutout"
+solid = true
+remove-time-s = 0.05
+
+[[materials]]
+name = "wheat_ripe"
+emission = 0
+dimming = 0
+occlusion = "never"
+render = "cutout"
+solid = true
+remove-time-s = 0.05
+
+[[materials]]
+name = "carrot_sprout"
+emission = 0
+dimming = 0
+occlusion = "never"
+render = "cutout"
+solid = true
+remove-time-s = 0.05
+
+[[materials]]
+name = "carrot_young"
+emission = 0
+dimming = 0
+occlusion = "never"
+render = "cutout"
+solid = true
+remove-time-s = 0.05
+
+[[materials]]
+name = "carrot_green"
+emission = 0
+dimming = 0
+occlusion = "never"
+render = "cutout"
+solid = true
+remove-time-s = 0.05
+
+[[materials]]
+name = "carrot_ripe"
+emission = 0
+dimming = 0
+occlusion = "never"
+render = "cutout"
+solid = true
+remove-time-s = 0.05
+
+[[materials]]
+name = "potato_sprout"
+emission = 0
+dimming = 0
+occlusion = "never"
+render = "cutout"
+solid = true
+remove-time-s = 0.05
+
+[[materials]]
+name = "potato_young"
+emission = 0
+dimming = 0
+occlusion = "never"
+render = "cutout"
+solid = true
+remove-time-s = 0.05
+
+[[materials]]
+name = "potato_green"
+emission = 0
+dimming = 0
+occlusion = "never"
+render = "cutout"
+solid = true
+remove-time-s = 0.05
+
+[[materials]]
+name = "potato_ripe"
+emission = 0
+dimming = 0
+occlusion = "never"
+render = "cutout"
+solid = true
+remove-time-s = 0.05
+
+[[materials]]
+name = "berry_sprout"
+emission = 0
+dimming = 0
+occlusion = "never"
+render = "cutout"
+solid = true
+remove-time-s = 0.05
+
+[[materials]]
+name = "berry_bush"
+emission = 0
+dimming = 0
+occlusion = "never"
+render = "cutout"
+solid = true
+remove-time-s = 0.05
+
+[[materials]]
+name = "berry_ripe"
+emission = 0
+dimming = 0
+occlusion = "never"
+render = "cutout"
+solid = true
+remove-time-s = 0.05
+
+[[appearance]]
+material = "wheat_sprout"
+color = [110, 170, 60, 255]
+texture = "art/wheat_sprout.png"
+
+[[appearance]]
+material = "wheat_young"
+color = [128, 170, 56, 255]
+texture = "art/wheat_young.png"
+
+[[appearance]]
+material = "wheat_green"
+color = [146, 170, 52, 255]
+texture = "art/wheat_green.png"
+
+[[appearance]]
+material = "wheat_ripe"
+color = [214, 178, 70, 255]
+texture = "art/wheat_ripe.png"
+
+[[appearance]]
+material = "carrot_sprout"
+color = [96, 168, 64, 255]
+texture = "art/carrot_sprout.png"
+
+[[appearance]]
+material = "carrot_young"
+color = [84, 164, 60, 255]
+texture = "art/carrot_young.png"
+
+[[appearance]]
+material = "carrot_green"
+color = [74, 156, 56, 255]
+texture = "art/carrot_green.png"
+
+[[appearance]]
+material = "carrot_ripe"
+color = [66, 148, 52, 255]
+texture = "art/carrot_ripe.png"
+
+[[appearance]]
+material = "potato_sprout"
+color = [92, 160, 62, 255]
+texture = "art/potato_sprout.png"
+
+[[appearance]]
+material = "potato_young"
+color = [82, 152, 58, 255]
+texture = "art/potato_young.png"
+
+[[appearance]]
+material = "potato_green"
+color = [70, 140, 54, 255]
+texture = "art/potato_green.png"
+
+[[appearance]]
+material = "potato_ripe"
+color = [88, 120, 48, 255]
+texture = "art/potato_ripe.png"
+
+[[appearance]]
+material = "berry_sprout"
+color = [52, 112, 44, 255]
+texture = "art/berry_sprout.png"
+
+[[appearance]]
+material = "berry_bush"
+color = [52, 112, 44, 255]
+texture = "art/berry_bush.png"
+
+[[appearance]]
+material = "berry_ripe"
+color = [186, 36, 62, 255]
+texture = "art/berry_ripe.png"
+
+[[items]]
+name = "wheat_seeds"
+size-m = 0.2
+color = [150, 140, 70, 255]
+material = "crops:wheat_sprout"
+
+[[items]]
+name = "wheat"
+size-m = 0.2
+color = [214, 178, 70, 255]
+texture = "art/item-wheat.png"
+
+[[items]]
+name = "carrot_seeds"
+size-m = 0.2
+color = [196, 150, 90, 255]
+material = "crops:carrot_sprout"
+
+[[items]]
+name = "carrot"
+size-m = 0.2
+color = [236, 124, 28, 255]
+food = 3.0
+texture = "art/item-carrot.png"
+
+[[items]]
+name = "potato_seeds"
+size-m = 0.2
+color = [150, 120, 80, 255]
+material = "crops:potato_sprout"
+
+[[items]]
+name = "potato"
+size-m = 0.2
+color = [178, 140, 88, 255]
+food = 2.0
+texture = "art/item-potato.png"
+
+[[items]]
+name = "berry_cutting"
+size-m = 0.2
+color = [70, 120, 50, 255]
+material = "crops:berry_sprout"
+
+[[items]]
+name = "berries"
+size-m = 0.2
+color = [186, 36, 62, 255]
+food = 3.0
+texture = "art/item-berries.png"
+
+[[items]]
+name = "bread"
+size-m = 0.2
+color = [190, 130, 68, 255]
+food = 7.0
+texture = "art/item-bread.png"
+
+[[items]]
+name = "berry_pie"
+size-m = 0.2
+color = [150, 60, 80, 255]
+food = 9.0
+texture = "art/item-berry_pie.png"
+
+[[plants]]
+name = "wheat"
+kind = "crop"
+seed = "crops:wheat_seeds"
+shape = "flora:cross"
+stages = [
+    { material = "crops:wheat_sprout", mean-seconds = 45.0, yields = [{ item = "crops:wheat_seeds", count = [1, 1] }] },
+    { material = "crops:wheat_young", mean-seconds = 45.0, yields = [{ item = "crops:wheat_seeds", count = [1, 1] }] },
+    { material = "crops:wheat_green", mean-seconds = 45.0, yields = [{ item = "crops:wheat_seeds", count = [1, 1] }] },
+    { material = "crops:wheat_ripe", yields = [{ item = "crops:wheat", count = [1, 2] }, { item = "crops:wheat_seeds", count = [1, 2] }] },
+]
+
+[plants.needs]
+soil = ["#soil"]
+light-min = 9
+
+[[plants]]
+name = "carrot"
+kind = "crop"
+seed = "crops:carrot_seeds"
+shape = "flora:cross"
+stages = [
+    { material = "crops:carrot_sprout", mean-seconds = 50.0, yields = [{ item = "crops:carrot_seeds", count = [1, 1] }] },
+    { material = "crops:carrot_young", mean-seconds = 50.0, yields = [{ item = "crops:carrot_seeds", count = [1, 1] }] },
+    { material = "crops:carrot_green", mean-seconds = 50.0, yields = [{ item = "crops:carrot_seeds", count = [1, 1] }] },
+    { material = "crops:carrot_ripe", yields = [{ item = "crops:carrot", count = [1, 2] }, { item = "crops:carrot_seeds", count = [0, 1] }] },
+]
+
+[plants.needs]
+soil = ["#soil"]
+light-min = 9
+
+[[plants]]
+name = "potato"
+kind = "crop"
+seed = "crops:potato_seeds"
+shape = "flora:cross"
+stages = [
+    { material = "crops:potato_sprout", mean-seconds = 55.0, yields = [{ item = "crops:potato_seeds", count = [1, 1] }] },
+    { material = "crops:potato_young", mean-seconds = 55.0, yields = [{ item = "crops:potato_seeds", count = [1, 1] }] },
+    { material = "crops:potato_green", mean-seconds = 55.0, yields = [{ item = "crops:potato_seeds", count = [1, 1] }] },
+    { material = "crops:potato_ripe", yields = [{ item = "crops:potato", count = [1, 3] }, { item = "crops:potato_seeds", count = [0, 1] }] },
+]
+
+[plants.needs]
+soil = ["#soil"]
+light-min = 9
+temperature = [0.1, 0.85]
+
+[[plants]]
+name = "berry"
+kind = "crop"
+seed = "crops:berry_cutting"
+shape = "flora:cross"
+harvest-to = 1
+stages = [
+    { material = "crops:berry_sprout", mean-seconds = 40.0, yields = [{ item = "crops:berry_cutting", count = [1, 1] }] },
+    { material = "crops:berry_bush", mean-seconds = 50.0, yields = [{ item = "crops:berry_cutting", count = [1, 1] }] },
+    { material = "crops:berry_ripe", yields = [{ item = "crops:berries", count = [2, 3] }] },
+]
+
+[plants.needs]
+soil = ["#soil", "#sand"]
+light-min = 9
+
+[[recipes]]
+inputs = [{ item = "crops:wheat", count = 3 }]
+output = { item = "crops:bread", count = 1 }
+station = "hand"
+
+[[recipes]]
+inputs = [{ item = "crops:berries", count = 2 }, { item = "crops:wheat", count = 1 }]
+output = { item = "crops:berry_pie", count = 1 }
+station = "hand"

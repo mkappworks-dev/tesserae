@@ -1,0 +1,7 @@
+id = "crops"
+version = "0.1.0"
+api = "0.3"
+depends = ["strata", "flora"]
+declaration = "content.toml"
+category = "Plants"
+description = "Wheat, carrots, potatoes and berries, with bread and berry pie"

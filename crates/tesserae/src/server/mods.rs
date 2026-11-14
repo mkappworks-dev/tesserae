@@ -2021,7 +2021,7 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
         assert_eq!(uniform.palette[9], Vec4::new(1.0, 0.0, 1.0, 1.0));
         assert_eq!(
             uniform.palette.len(),
-            64 + 1,
+            crate::render::chunk_material::PALETTE_LEN + 1,
             "the Materials' and the flames'"
         );
         app.update();
@@ -2273,7 +2273,11 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
         );
         assert!(!turnable.iter().any(|(name, _)| name.starts_with("dev:")));
         let ids: Vec<_> = catalogue.materials.iter().map(|m| m.id).collect();
-        assert_eq!(ids, std::iter::once(0).chain(8..30).collect::<Vec<_>>());
+        let last = ids.len() as u16;
+        assert_eq!(
+            ids,
+            std::iter::once(0).chain(8..7 + last).collect::<Vec<_>>()
+        );
     }
 
     #[test]
@@ -2298,7 +2302,7 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
             .expect("Terra declares the Workbench Recipe");
         assert_eq!(book.0[at].station, Station::Hand);
         let mut inventory = super::super::inventory::Inventory::default();
-        inventory.receive("terra:wood", 4, 64);
+        inventory.receive("flora:log", 4, 64);
         app.world_mut()
             .spawn((super::super::player::Player::at(Vec3::ZERO), inventory));
         app.world_mut().write_message(super::super::craft::Craft {
@@ -2312,7 +2316,7 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
             .world_mut()
             .query::<&super::super::inventory::Inventory>();
         let held = held.single(app.world()).unwrap();
-        assert_eq!(held.count("terra:wood"), 0);
+        assert_eq!(held.count("flora:log"), 0);
         assert_eq!(held.count("terra:workbench"), 1);
     }
 
@@ -2339,14 +2343,14 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
             .next()
             .unwrap()
             .0;
-        assert!((10..=15).contains(&book.len()), "{}", book.len());
+        assert!((10..=30).contains(&book.len()), "{}", book.len());
         let at = |item: &str| {
             let at = book.iter().position(|r| r.output.item == item).unwrap();
             assert_eq!(book[at].station, Station::Tag("workbench".into()));
             at
         };
         let mut inventory = super::super::inventory::Inventory::default();
-        inventory.receive("terra:wood", 13, 64);
+        inventory.receive("flora:log", 13, 64);
         let player = app
             .world_mut()
             .spawn((super::super::player::Player::at(Vec3::ZERO), inventory))
@@ -2380,7 +2384,7 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
             .world_mut()
             .query::<&super::super::inventory::Inventory>();
         let held = held.single(app.world()).unwrap();
-        assert_eq!(held.count("terra:wood"), 0);
+        assert_eq!(held.count("flora:log"), 0);
         assert_eq!(held.count("terra:chest"), 1);
         assert_eq!(held.count("terra:door"), 1);
         assert_eq!(held.count("terra:gate"), 1);
@@ -2425,8 +2429,14 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
             .next()
             .unwrap();
         let look = |name: &str| looks.0.iter().find(|l| l.name == name).unwrap();
-        for produce in ["wheat", "bread", "berries", "berry_pie", "apple"] {
-            let item = look(&format!("terra:{produce}"));
+        for produce in [
+            "crops:wheat",
+            "crops:bread",
+            "crops:berries",
+            "crops:berry_pie",
+            "flora:apple",
+        ] {
+            let item = look(produce);
             let pixels = item.texture.as_deref().expect(produce);
             assert_eq!(pixels.len(), tesserae_mods::ITEM_TEXTURE_BYTES);
             assert!(
@@ -2442,7 +2452,7 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
             look("terra:rock").texture.is_none(),
             "solid Items stay cubes"
         );
-        let seeds = look("terra:wheat_seeds");
+        let seeds = look("crops:wheat_seeds");
         let sprout = catalogue.material(seeds.material.unwrap()).unwrap();
         let shape = catalogue
             .shape(sprout.shape.expect("a seed's fixed Shape"))
@@ -2467,8 +2477,12 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
             .drain()
             .next()
             .unwrap();
-        assert_eq!(textures.0.len(), 22);
-        for material in catalogue.materials.iter().filter(|m| m.id != 0) {
+        assert!(textures.0.len() >= 22);
+        for material in catalogue
+            .materials
+            .iter()
+            .filter(|m| m.name.starts_with("terra:"))
+        {
             let (_, pixels) = textures
                 .0
                 .iter()

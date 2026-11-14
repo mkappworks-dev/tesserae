@@ -278,6 +278,312 @@ def frond(x, y):
     return None
 
 
+def bark(side, end, mark=None):
+    """A trunk: rings on the cut ends, streaks (and optional dark scars) on the sides."""
+
+    def paint(face, x, y):
+        n = noise(x, y, face + 17)
+        if face != 1:
+            ring = max(abs(x - 7), abs(y - 7))
+            return tint(end, (-37 if ring % 3 == 0 else 16) + (n - 128) // 18)
+        if mark and noise(x, y // 2, 307) > 214:
+            return tint(mark, (n - 128) // 20)
+        return tint(side, (-24 if (x + noise(0, y // 4, 23)) % 4 == 0 else 8) + (n - 128) // 20)
+
+    return paint
+
+
+def foliage(light, shadow, salt=29):
+    """Leaves as a cutout lattice of light blobs on clear ground."""
+
+    def paint(face, x, y):
+        n = noise(x, y, face + salt)
+        dx, dy = abs(x % 5 - 2), abs(y % 5 - 2)
+        if dx + dy <= 2:
+            return tint(light, (n - 128) // 12 - (19 if dx == 0 else 0))
+        return tint(shadow, (n - 128) // 14, 0 if n > 150 else 255)
+
+    return paint
+
+
+def needles(light, shadow):
+    """Conifer needles: short diagonal strokes."""
+
+    def paint(face, x, y):
+        n = noise(x, y, face + 313)
+        if (x + y) % 3 != 0 or n > 225:
+            return tint(light, (n - 128) // 14 - (12 if y % 4 == 0 else 0))
+        return tint(shadow, (n - 128) // 14, 0 if n > 120 else 255)
+
+    return paint
+
+
+def disc(x, y, cx, cy, rx, ry=None):
+    return ((x - cx) / rx) ** 2 + ((y - cy) / (ry or rx)) ** 2 <= 1.0
+
+
+def fruit(base, shine=(255, 255, 255)):
+    """A fruit Voxel's tile: speckled colour with a glint, mapped onto its box Shape."""
+
+    def paint(face, x, y):
+        n = noise(x, y, face + 317)
+        if face == 0 and (x, y) in ((5, 5), (6, 5), (5, 6)):
+            return (*shine, 255)
+        return tint(base, (n - 128) // 10 - (18 if face == 2 else 0))
+
+    return paint
+
+
+def sapling(leaf, form="round"):
+    def draw(x, y):
+        trunk = (110, 78, 44)
+        n = noise(x, y, 321)
+        if form == "cone":
+            half = (y - 1) * 0.42
+            if 1 <= y < 12 and abs(x - 7.5) <= half and n > 50:
+                return tint(leaf, (n - 128) // 10 - (12 if y % 3 == 0 else 0))
+            if x in (7, 8) and 12 <= y < EDGE:
+                return tint(trunk, (n - 128) // 14)
+            return None
+        if form == "palm":
+            if x in (7, 8) and 6 <= y < EDGE:
+                return tint(trunk, (n - 128) // 14)
+            for tx, ty in ((2, 6), (13, 6), (4, 3), (11, 3), (7, 1)):
+                if abs((x - 7.5) * (ty - 6) - (y - 6) * (tx - 7.5)) < 0.9 * max(1, abs(tx - 7.5)) and (
+                    min(tx, 7.5) - 1 <= x <= max(tx, 7.5) + 1 and ty - 1 <= y <= 7
+                ):
+                    return tint(leaf, (n - 128) // 12)
+            return None
+        if x in (7, 8) and 9 <= y < EDGE:
+            return tint(trunk, (n - 128) // 14)
+        dx, dy = abs(x - 7.5), abs(y - 5.5)
+        if form == "flat":
+            dx, dy = dx / 1.6, dy * 1.8
+        if dx + dy * 1.2 < 5 and n > 60:
+            return tint(leaf, (noise(x, y, 145) - 128) // 10 - (14 if y > 6 else 0))
+        return None
+
+    return sprite(draw)
+
+
+def blades(base, tall, salt=331, gap=5):
+    def draw(x, y):
+        height = tall - 3 + noise(x, 1, salt + 2) % 7
+        taper = abs(x % 4 - 1)
+        if y < EDGE - height + taper or noise(x, 3, salt + 4) % gap == 0:
+            return None
+        return tint(base, (noise(x, y, salt + 6) - 128) // 10 + (EDGE - y) * 2)
+
+    return sprite(draw)
+
+
+def fern(x, y):
+    if x == 7 and y >= 8:
+        return tint((44, 110, 50), (noise(x, y, 341) - 128) // 14)
+    for tx, ty in ((1, 5), (7, 1), (14, 5), (4, 3), (11, 3)):
+        t = (EDGE - 1 - y) / max(1, EDGE - 1 - ty)
+        if 0 <= t <= 1 and abs(7.5 + (tx - 7.5) * t - x) < 0.8:
+            return tint((58, 140, 64), (noise(x, y, 343) - 128) // 12 + int(t * 10))
+        if 0.25 < t < 0.95 and y % 3 == 0 and abs(7.5 + (tx - 7.5) * t - x) < 2.2:
+            return tint((78, 160, 78), (noise(x, y, 345) - 128) // 14)
+    return None
+
+
+def mushroom(cap, dark, dots):
+    def draw(x, y):
+        for cx, top, rx in ((5, 7, 4), (11, 9, 3)):
+            if top <= y <= top + 2 and abs(x - cx) <= rx - (1 if y == top else 0):
+                if dots and (x - cx, y - top) in ((-1, 0), (2, 1)):
+                    return (240, 238, 226, 255)
+                return tint(dark if y == top + 2 else cap, (noise(x, y, 347) - 128) // 14)
+            if y > top + 2 and x in (cx, cx + 1):
+                return tint((222, 214, 190), (noise(x, y, 349) - 128) // 14)
+        return None
+
+    return sprite(draw)
+
+
+def cane(x, y):
+    for cx, top in ((4, 4), (8, 1), (12, 5)):
+        if x == cx and y >= top:
+            return tint((140, 190, 90), -26 if y % 4 == 0 else (noise(x, y, 351) - 128) // 14)
+        if y in (top + 1, top + 2) and abs(x - cx) in (1, 2) and y >= top:
+            return tint((92, 150, 64), (noise(x, y, 353) - 128) // 14)
+    return None
+
+
+def vine(x, y):
+    if x in (3, 8, 12) and noise(x, y // 4, 357) > 40:
+        return tint((56, 118, 44), (noise(x, y, 359) - 128) // 12)
+    if (x + y) % 3 == 0 and abs(x % 5 - 2) + abs(y % 4 - 1) <= 2 and noise(x, y, 361) > 90:
+        return tint((72, 146, 56), (noise(x, y, 363) - 128) // 12)
+    return None
+
+
+def cactus(face, x, y):
+    n = noise(x, y, face + 367)
+    if face == 0:
+        return tint((86, 150, 62), (n - 128) // 14)
+    rib = x % 4 == 0
+    if face == 1 and (x % 4 == 2 and y % 3 == 1):
+        return (232, 226, 190, 255)
+    return tint((60, 128, 52), (-20 if rib else 6) + (n - 128) // 14)
+
+
+def kelp_like(base, tall, salt):
+    def draw(x, y):
+        height = tall - 2 + noise(x // 3, 0, salt) % 3
+        if y < EDGE - height:
+            return None
+        sway = (y // 3 + noise(x // 4, 0, salt + 1)) % 2
+        if (x + sway) % 4 not in (0, 1) or noise(x, y, salt + 2) > 232:
+            return None
+        return tint(base, (noise(x, y, salt + 3) - 128) // 12)
+
+    return sprite(draw)
+
+
+def lily_pad(face, x, y):
+    n = noise(x, y, face + 371)
+    if face != 0:
+        return (*tint((42, 112, 52), (n - 128) // 12)[:3], 255) if y < 2 else CLEAR
+    if abs(x - 7.5) < 1 and y < 7:
+        return CLEAR
+    if abs(x - 7.5) ** 2 + abs(y - 7.5) ** 2 > 56:
+        return CLEAR
+    if (x, y) == (10, 5) or (x, y) == (10, 6):
+        return (244, 168, 190, 255)
+    return tint((56, 142, 64), (n - 128) // 12)
+
+
+def crop_stage(n, leaf, ripe, head=None, root=None):
+    """Four growth Stages of a field plant: a seedling, then taller, then ripe."""
+
+    def draw(x, y):
+        rise = (3, 6, 9, 12)[n - 1]
+        h = noise(x, 0, 373) % 3
+        if x % 3 == 2 or y < EDGE - rise + h:
+            return None
+        shade = (noise(x, y, 375) - 128) // 12 + (EDGE - y) * 2
+        if n == 4 and head and y < EDGE - rise + 4 + h:
+            return tint(head, shade // 2)
+        if n == 4 and root and y > EDGE - 3:
+            return tint(root, shade // 2)
+        return tint(ripe if n == 4 and not head and not root else leaf, shade)
+
+    return sprite(draw)
+
+
+def bush(n, leaf, berry=None):
+    def draw(x, y):
+        r = (2, 3, 4, 5)[n - 1]
+        cy = EDGE - 1 - r
+        if not disc(x, y, 7.5, cy, r + 2, r):
+            return None
+        if berry and n == 3 and noise(x, y, 379) % 6 == 0:
+            return (*berry, 255)
+        return tint(leaf, (noise(x, y, 381) - 128) // 10 - (10 if y > cy else 0))
+
+    return sprite(draw)
+
+
+def item_icon(draw):
+    return lambda x, y: draw(x, y) or CLEAR
+
+
+def apple_item(x, y):
+    if x == 8 and 2 <= y <= 4:
+        return (96, 66, 38, 255)
+    if (x, y) in ((9, 3), (10, 3), (10, 2)):
+        return (70, 140, 52, 255)
+    if disc(x, y, 8, 9, 5, 5):
+        return tint((196, 44, 40), (noise(x, y, 383) - 128) // 14 + (14 if x < 7 and y < 9 else -8))
+    return None
+
+
+def orange_item(x, y):
+    if (x, y) in ((8, 3), (9, 3), (7, 4), (8, 4)):
+        return (70, 140, 52, 255)
+    if disc(x, y, 8, 9, 5.5, 5.5):
+        dot = noise(x, y, 385) % 9 == 0
+        return tint((234, 130, 24), (noise(x, y, 387) - 128) // 12 + (14 if x < 7 and y < 9 else -8) - (22 if dot else 0))
+    return None
+
+
+def cherries_item(x, y):
+    for cx, cy in ((5, 11), (11, 10)):
+        if disc(x, y, cx, cy, 3, 3):
+            if (x, y) == (cx - 1, cy - 1):
+                return (255, 200, 200, 255)
+            return tint((140, 20, 44), (noise(x, y, 389) - 128) // 14)
+    if 2 <= y <= 8 and (x == 8 - (8 - y) // 2 - 1 and y > 6 or x == 9 + (y - 2) // 4):
+        return (90, 120, 50, 255)
+    return None
+
+
+def coconut_item(x, y):
+    if disc(x, y, 8, 9, 5.5, 5.5):
+        if (x, y) in ((6, 8), (9, 8), (7, 11)):
+            return (40, 26, 16, 255)
+        return tint((112, 78, 48), (noise(x, y, 391) - 128) // 8 - (14 if x > 9 else 0))
+    return None
+
+
+def wheat_item(x, y):
+    for cx in (4, 8, 12):
+        tilt = (cx - 8) // 4
+        sx = cx + (15 - y) * tilt // 8
+        if x == sx and y >= 7:
+            return tint((200, 170, 70), -(y % 3) * 6)
+        if y < 8 and abs(x - (cx + (15 - 7) * tilt // 8)) + (y % 2) <= 1 and y >= 1:
+            return tint((226, 190, 76), (noise(x, y, 393) - 128) // 14)
+    return None
+
+
+def bread_item(x, y):
+    if disc(x, y, 8, 10, 6.5, 4.2):
+        if y == 7 and x in (5, 8, 11) or y == 8 and x in (6, 9):
+            return (244, 214, 150, 255)
+        return tint((190, 130, 68), (noise(x, y, 395) - 128) // 12 + (12 if y < 9 else -10))
+    return None
+
+
+def berries_item(x, y):
+    for cx, cy in ((5, 10), (10, 10), (7, 6)):
+        if disc(x, y, cx, cy, 3, 3):
+            return (255, 190, 200, 255) if (x, y) == (cx - 1, cy - 1) else tint((176, 36, 70), (noise(x, y, 397) - 128) // 14)
+    if (x, y) in ((7, 2), (8, 2), (8, 3), (6, 3)):
+        return (70, 140, 52, 255)
+    return None
+
+
+def berry_pie_item(x, y):
+    if disc(x, y, 8, 10, 7, 4):
+        if disc(x, y, 8, 9, 5, 2.4):
+            lattice = (x + y) % 4 in (0, 1)
+            return tint((150, 60, 80) if not lattice else (214, 160, 92), (noise(x, y, 399) - 128) // 14)
+        return tint((200, 140, 76), (noise(x, y, 401) - 128) // 14 + (8 if y < 10 else -14))
+    return None
+
+
+def carrot_item(x, y):
+    t = (x + y - 3) / 18
+    centre = 3 + t * 12
+    if 0 <= t <= 1 and abs((x - y + 2) / 2 - (centre - 8) * 0) < 3.2 * (1 - t) + 0.4 and x + y > 8:
+        return tint((236, 124, 28), (noise(x, y, 403) - 128) // 12 - (14 if (x + y) % 4 == 0 else 0))
+    if x + y <= 8 and 2 <= x <= 7 and 2 <= y <= 7 and abs(x - y) <= 2:
+        return tint((64, 140, 52), (noise(x, y, 405) - 128) // 12)
+    return None
+
+
+def potato_item(x, y):
+    if disc(x, y, 8, 9, 6, 4.5):
+        if (x, y) in ((5, 8), (9, 7), (11, 10)):
+            return (96, 70, 40, 255)
+        return tint((178, 140, 88), (noise(x, y, 407) - 128) // 12 + (10 if y < 8 else -8))
+    return None
+
+
 TEXTURES = {
     "strata": {
         "stone": stone,
@@ -297,6 +603,79 @@ TEXTURES = {
         "daisy": sprite(flower((240, 238, 226), (236, 190, 40))),
         "oak_sapling": sprite(oak_sapling),
         "frond": sprite(frond),
+        "birch_log": bark((226, 224, 212), (196, 172, 120), (46, 46, 50)),
+        "birch_leaves": foliage((124, 176, 60), (60, 104, 36), 401),
+        "birch_sapling": sapling((124, 176, 60)),
+        "pine_log": bark((92, 62, 40), (150, 110, 70)),
+        "pine_leaves": needles((34, 92, 56), (16, 56, 36)),
+        "pine_sapling": sapling((34, 92, 56), "cone"),
+        "palm_log": bark((158, 128, 84), (182, 150, 100), (112, 84, 52)),
+        "palm_leaves": foliage((76, 160, 58), (30, 86, 40), 403),
+        "palm_sapling": sapling((76, 160, 58), "palm"),
+        "acacia_log": bark((128, 100, 76), (160, 126, 92)),
+        "acacia_leaves": foliage((140, 160, 56), (70, 92, 32), 405),
+        "acacia_sapling": sapling((140, 160, 56), "flat"),
+        "jungle_log": bark((104, 84, 52), (140, 112, 70), (60, 94, 44)),
+        "jungle_leaves": foliage((38, 150, 56), (14, 82, 36), 407),
+        "jungle_sapling": sapling((38, 150, 56)),
+        "swamp_log": bark((74, 66, 50), (112, 98, 70), (54, 84, 52)),
+        "swamp_leaves": foliage((84, 120, 52), (40, 64, 34), 409),
+        "swamp_sapling": sapling((84, 120, 52), "flat"),
+        "apple_log": bark((150, 104, 60), (150, 104, 60)),
+        "apple_leaves": foliage((60, 136, 44), (25, 75, 29), 411),
+        "apple_sapling": sapling((90, 140, 56)),
+        "orange_log": bark((138, 98, 60), (150, 108, 66)),
+        "orange_leaves": foliage((52, 128, 48), (22, 72, 32), 413),
+        "orange_sapling": sapling((70, 140, 52)),
+        "cherry_log": bark((120, 76, 62), (150, 104, 84), (74, 44, 36)),
+        "cherry_leaves": foliage((86, 150, 56), (40, 86, 36), 415),
+        "cherry_sapling": sapling((100, 156, 64)),
+        "apple_unripe": fruit((128, 168, 58)),
+        "apple_ripe": fruit((196, 44, 40)),
+        "orange_unripe": fruit((120, 168, 52)),
+        "orange_ripe": fruit((234, 130, 24)),
+        "cherry_unripe": fruit((110, 160, 56)),
+        "cherry_ripe": fruit((130, 18, 40)),
+        "coconut_unripe": fruit((92, 150, 60)),
+        "coconut_ripe": fruit((112, 78, 48)),
+        "birch_wood": bark((226, 224, 212), (196, 172, 120), (46, 46, 50)),
+        "pine_wood": bark((92, 62, 40), (150, 110, 70)),
+        "palm_wood": bark((158, 128, 84), (182, 150, 100), (112, 84, 52)),
+        "acacia_wood": bark((128, 100, 76), (160, 126, 92)),
+        "jungle_wood": bark((104, 84, 52), (140, 112, 70), (60, 94, 44)),
+        "dandelion": sprite(flower((244, 204, 40), (252, 236, 130))),
+        "orchid": sprite(flower((156, 92, 206), (246, 240, 250))),
+        "tall_grass": blades((72, 150, 52), 14, 331, 6),
+        "dry_grass": blades((196, 170, 90), 9, 337, 4),
+        "fern": sprite(fern),
+        "mushroom_red": mushroom((200, 44, 40), (140, 28, 30), True),
+        "mushroom_brown": mushroom((142, 98, 64), (100, 66, 42), False),
+        "cactus": cactus,
+        "cane": sprite(cane),
+        "vine": sprite(vine),
+    },
+    "crops": {
+        "wheat_sprout": crop_stage(1, (110, 170, 60), (110, 170, 60)),
+        "wheat_young": crop_stage(2, (128, 170, 56), (128, 170, 56)),
+        "wheat_green": crop_stage(3, (146, 170, 52), (146, 170, 52)),
+        "wheat_ripe": crop_stage(4, (146, 170, 52), (214, 178, 70), head=(226, 190, 76)),
+        "carrot_sprout": crop_stage(1, (96, 168, 64), (96, 168, 64)),
+        "carrot_young": crop_stage(2, (84, 164, 60), (84, 164, 60)),
+        "carrot_green": crop_stage(3, (74, 156, 56), (74, 156, 56)),
+        "carrot_ripe": crop_stage(4, (66, 148, 52), (66, 148, 52), root=(236, 124, 28)),
+        "potato_sprout": crop_stage(1, (92, 160, 62), (92, 160, 62)),
+        "potato_young": crop_stage(2, (82, 152, 58), (82, 152, 58)),
+        "potato_green": crop_stage(3, (70, 140, 54), (70, 140, 54)),
+        "potato_ripe": crop_stage(4, (88, 120, 48), (178, 140, 88), root=(178, 140, 88)),
+        "berry_sprout": bush(1, (52, 112, 44)),
+        "berry_bush": bush(2, (52, 112, 44)),
+        "berry_ripe": bush(4, (52, 112, 44), (186, 36, 62)),
+    },
+    "aquatic": {
+        "kelp": kelp_like((44, 110, 70), 16, 421),
+        "seagrass": kelp_like((72, 150, 84), 6, 423),
+        "red_weed": kelp_like((170, 62, 74), 11, 425),
+        "lily_pad": lily_pad,
     },
     "waters": {"obsidian": obsidian},
     "hearth": {"ash": ash, "lava": lava},
@@ -331,6 +710,24 @@ TEXTURES = {
         "aquamarine": gem((70, 200, 200), 200),
     },
     "bog": {"peat": peat},
+}
+
+
+ITEM_TEXTURES = {
+    "flora": {
+        "apple": item_icon(apple_item),
+        "orange": item_icon(orange_item),
+        "cherries": item_icon(cherries_item),
+        "coconut": item_icon(coconut_item),
+    },
+    "crops": {
+        "wheat": item_icon(wheat_item),
+        "bread": item_icon(bread_item),
+        "berries": item_icon(berries_item),
+        "berry_pie": item_icon(berry_pie_item),
+        "carrot": item_icon(carrot_item),
+        "potato": item_icon(potato_item),
+    },
 }
 
 
@@ -425,6 +822,13 @@ for mod, textures in TEXTURES.items():
             [paint(face, x, y) for face in range(3) for x in range(EDGE)] for y in range(EDGE)
         ]
         (art / f"{name}.png").write_bytes(png(rows))
+
+for mod, icons in ITEM_TEXTURES.items():
+    art = root / mod / "art"
+    art.mkdir(parents=True, exist_ok=True)
+    for name, paint in icons.items():
+        rows = [[paint(x, y) for x in range(EDGE)] for y in range(EDGE)]
+        (art / f"item-{name}.png").write_bytes(png(rows))
 
 for name, skin in CHARACTERS.items():
     folder = root / name

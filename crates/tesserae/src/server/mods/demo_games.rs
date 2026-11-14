@@ -729,10 +729,16 @@ fn assert_ore_in_band(game: &str, material_name: &str) {
 }
 
 #[test]
-fn terra_has_no_dependencies_and_declares_its_own_sand_snow_and_ore() {
-    assert!(depends("terra").is_empty());
+fn terra_declares_its_own_sand_snow_and_ore_and_takes_its_plants_from_shared_mods() {
+    assert_eq!(
+        depends("terra"),
+        ["strata", "waters", "flora", "crops", "aquatic"]
+    );
     let (_install, loaded) = loaded("terra", 0.5);
-    assert_eq!(ids(&loaded), ["terra"]);
+    assert_eq!(
+        ids(&loaded),
+        ["strata", "flora", "crops", "waters", "aquatic", "terra"]
+    );
     for name in ["terra:sand", "terra:snow", "terra:iron"] {
         material(&loaded, name);
     }

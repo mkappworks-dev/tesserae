@@ -3,4 +3,5 @@ version = "0.1.0"
 description = "Earth, stone & open skies"
 api = "0.3"
 root = true
+depends = ["strata", "waters", "flora", "crops", "aquatic"]
 wasm = "terra.wasm"

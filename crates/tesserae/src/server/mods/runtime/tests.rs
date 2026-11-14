@@ -1169,6 +1169,16 @@ fn assert_lakes_in_valleys(params: WorldgenParams, size: f32, water: u16) {
 fn terra_contract_content_build_and_scenarios_reach_real_voxels_and_light() {
     for size in [1.0, 0.5, 0.25] {
         let loaded = terra_loaded(size);
+        // Terra loads after the shared Mods it depends on, so its ids start after theirs.
+        let count = |kind| {
+            loaded
+                .registry
+                .names(kind)
+                .filter(|(_, name)| !name.starts_with("terra:") && !name.starts_with("core:"))
+                .count() as u16
+        };
+        let base = 8 + count(tesserae_mods::Kind::Material);
+        let shape_base = 4 + count(tesserae_mods::Kind::Shape) as u8;
         let stone = loaded
             .registry
             .id_of(tesserae_mods::Kind::Material, "terra:stone")
@@ -1177,13 +1187,13 @@ fn terra_contract_content_build_and_scenarios_reach_real_voxels_and_light() {
             loaded
                 .registry
                 .id_of(tesserae_mods::Kind::Material, "terra:lamp"),
-            Some(8)
+            Some(usize::from(base))
         );
         assert_eq!(
             loaded
                 .registry
                 .id_of(tesserae_mods::Kind::Shape, "terra:fence"),
-            Some(4)
+            Some(usize::from(shape_base))
         );
         let params = loaded.world.unwrap();
         assert_eq!(params.relief_m, 24.0);
@@ -1192,8 +1202,14 @@ fn terra_contract_content_build_and_scenarios_reach_real_voxels_and_light() {
         assert_eq!(params.water.unwrap().level_m, 34.0);
         assert_eq!(loaded.view.unwrap().view_distance_m, 160.0);
         assert_eq!(loaded.view.unwrap().lod_distance_m, 3000.0);
+        let own: Vec<_> = loaded
+            .appearance
+            .iter()
+            .filter(|(id, _)| *id >= base)
+            .map(|&(id, colour)| (id - base + 8, colour))
+            .collect();
         assert_eq!(
-            loaded.appearance,
+            own,
             [
                 (8, [245, 227, 184, 255]),
                 (9, [230, 72, 16, 255]),
@@ -1219,13 +1235,13 @@ fn terra_contract_content_build_and_scenarios_reach_real_voxels_and_light() {
                 (29, [140, 97, 55, 255])
             ]
         );
-        assert_eq!(loaded.tables.materials.def(8).emission, 15);
+        assert_eq!(loaded.tables.materials.def(base).emission, 15);
         // Lava is Terra's own Material after its lamp; no built-in moved.
         let lava = loaded
             .registry
             .id_of(tesserae_mods::Kind::Material, "terra:lava")
             .unwrap() as u16;
-        assert_eq!(lava, 9);
+        assert_eq!(lava, base + 1);
         assert_eq!(loaded.tables.materials.def(lava).emission, 15);
         let flow = loaded.tables.fluids.get(lava).unwrap();
         // Its own water, with the fixture water's Material and fluid row.
@@ -1233,7 +1249,7 @@ fn terra_contract_content_build_and_scenarios_reach_real_voxels_and_light() {
             .registry
             .id_of(tesserae_mods::Kind::Material, "terra:water")
             .unwrap() as u16;
-        assert_eq!(terra_water, 14);
+        assert_eq!(terra_water, base + 6);
         let grass = loaded
             .registry
             .id_of(tesserae_mods::Kind::Material, "terra:grass")
@@ -1278,7 +1294,7 @@ fn terra_contract_content_build_and_scenarios_reach_real_voxels_and_light() {
             material("terra:wood"),
             material("terra:brick"),
         );
-        assert_eq!((mud, brick), (12, 13));
+        assert_eq!((mud, brick), (base + 4, base + 5));
         let mud_flow = loaded.tables.fluids.get(mud).unwrap();
         assert!(mud_flow.waterlogs && mud_flow.extinguishes && mud_flow.heat.is_none());
         assert!(
@@ -1311,12 +1327,12 @@ fn terra_contract_content_build_and_scenarios_reach_real_voxels_and_light() {
             );
         }
         let mut neighbors = [Voxel::AIR; 6];
-        neighbors[0] = Voxel::new(stone, 4, 0);
+        neighbors[0] = Voxel::new(stone, shape_base, 0);
         assert!(
             loaded
                 .tables
                 .shapes
-                .connections(Voxel::new(stone, 4, 0), neighbors)
+                .connections(Voxel::new(stone, shape_base, 0), neighbors)
                 .has(0)
         );
         let mut h = Harness::new(&[]);
@@ -1333,7 +1349,10 @@ fn terra_contract_content_build_and_scenarios_reach_real_voxels_and_light() {
             .init_resource::<MeshState>()
             .init_resource::<crate::server::fluids::FluidSim>()
             .add_plugins(super::super::plugin);
-        assert_eq!(h.app.world().resource::<ContentTables>().shapes.len(), 7);
+        assert_eq!(
+            h.app.world().resource::<ContentTables>().shapes.len(),
+            usize::from(shape_base) + 3
+        );
         h.app
             .insert_resource(crate::server::world_state::SpawnPoint::for_tests(
                 Vec3::new(0.0, 28.0, 0.0),
@@ -1415,8 +1434,11 @@ fn terra_contract_content_build_and_scenarios_reach_real_voxels_and_light() {
                 );
             }
         }
-        assert_eq!(h.voxel(lifted([3.0, 30.0, -7.0])), Voxel::new(stone, 4, 0));
-        assert_eq!(h.voxel(lifted([3.0, 31.0, -7.0])), Voxel::cube(8));
+        assert_eq!(
+            h.voxel(lifted([3.0, 30.0, -7.0])),
+            Voxel::new(stone, shape_base, 0)
+        );
+        assert_eq!(h.voxel(lifted([3.0, 31.0, -7.0])), Voxel::cube(base));
         assert_eq!(h.voxel(lifted([15.0, 29.0, -7.0])), Voxel::new(stone, 1, 4));
         assert_eq!(h.voxel(lifted([-13.0, 30.0, -5.0])), Voxel::cube(stone));
         assert_eq!(h.voxel(lifted([-12.0, 29.0, -7.0])), Voxel::cube(wood));
