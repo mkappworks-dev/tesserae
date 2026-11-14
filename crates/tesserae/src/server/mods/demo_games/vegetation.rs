@@ -846,3 +846,74 @@ fn terra_trees_find_their_climate_across_their_whole_biome() {
         );
     }
 }
+
+/// How many of a Biome's dry ground columns have a top ground Voxel that is soil to `plant`,
+/// out of the columns counted. Plants and trees standing on the ground are looked through; a
+/// lake is not ground.
+fn soil_share(game: &str, biome: &str, plant: &str) -> (u32, u32) {
+    let (_install, loaded) = loaded(game, 1.0);
+    let world = loaded.world.unwrap();
+    let index = world
+        .biomes
+        .as_slice()
+        .iter()
+        .position(|b| b.name.as_str() == format!("{game}:{biome}"))
+        .unwrap();
+    let sapling = material(&loaded, &format!("flora:{plant}_sapling"));
+    let soil = loaded
+        .tables
+        .plants
+        .plant(loaded.tables.plants.of(sapling).unwrap().plant)
+        .unwrap()
+        .needs
+        .soil
+        .clone();
+    let ground: HashMap<u16, String> = loaded
+        .registry
+        .names(Kind::Material)
+        .filter(|(_, name)| name.starts_with(&format!("{game}:")))
+        .map(|(id, name)| (id as u16, name.to_owned()))
+        .collect();
+    let generator = Worldgen::new(7, 1.0, world);
+    let n = CHUNK_SIZE as i32;
+    let mut chunks = HashMap::new();
+    let (mut columns, mut soiled) = (0, 0);
+    for z in (-4000..4000_i32).step_by(64) {
+        for x in (-4000..4000_i32).step_by(64) {
+            if generator.biome_at(x as f32, z as f32).map(|b| b.index()) != Some(index) {
+                continue;
+            }
+            let top = generator.surface_height_m(x as f32, z as f32).ceil() as i32 + 14;
+            let found = (top - 20..=top).rev().find_map(|y| {
+                let key = (x.div_euclid(n), y.div_euclid(n), z.div_euclid(n));
+                let chunk = chunks
+                    .entry(key)
+                    .or_insert_with(|| generator.chunk(key.0, key.1, key.2));
+                let v = chunk.get(
+                    x.rem_euclid(n) as usize,
+                    y.rem_euclid(n) as usize,
+                    z.rem_euclid(n) as usize,
+                );
+                ground.contains_key(&v.material()).then(|| v.material())
+            });
+            let Some(found) = found else { continue };
+            if ground[&found].ends_with(":water") {
+                continue;
+            }
+            columns += 1;
+            soiled += soil.contains(&found) as u32;
+        }
+    }
+    (soiled, columns)
+}
+
+#[test]
+fn terra_pines_find_soil_on_the_cold_biomes_snow() {
+    let (soiled, columns) = soil_share("terra", "cold", "pine");
+    println!("pine on cold: {soiled}/{columns}");
+    assert!(columns > 500);
+    assert!(
+        soiled as f32 >= 0.95 * columns as f32,
+        "only {soiled} of {columns} cold columns are soil to a pine"
+    );
+}

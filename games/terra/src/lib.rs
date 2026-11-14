@@ -107,7 +107,7 @@ pub(crate) fn solid(name: &str) -> MaterialDef {
 /// What the shared Plants name instead of Terra's own ground and water.
 fn tags_of(name: &str) -> Vec<String> {
     let tags: &[&str] = match name {
-        "dirt" | "grass" => &["soil"],
+        "dirt" | "grass" | "snow" => &["soil"],
         "sand" => &["sand"],
         "stone" => &["rock"],
         _ => &[],
