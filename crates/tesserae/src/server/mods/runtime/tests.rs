@@ -1867,6 +1867,19 @@ fn a_mismatched_line_or_an_unknown_name_fails_the_load() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
+fn copy_tree(from: &Path, to: &Path) {
+    std::fs::create_dir_all(to).unwrap();
+    for entry in std::fs::read_dir(from).unwrap() {
+        let entry = entry.unwrap();
+        let target = to.join(entry.file_name());
+        if entry.file_type().unwrap().is_dir() {
+            copy_tree(&entry.path(), &target);
+        } else {
+            std::fs::copy(entry.path(), target).unwrap();
+        }
+    }
+}
+
 /// the Terra Game and the `fluids` guest loaded together, so lava, slime and
 /// water share one set of tables.
 pub(in crate::server) fn terra_and_fluids(size: f32) -> LoadedMods {
@@ -1889,6 +1902,7 @@ pub(in crate::server) fn terra_and_fluids(size: f32) -> LoadedMods {
         )
         .unwrap();
     }
+    copy_tree(&root.join("games/terra/dist/mods"), &dir.join("mods"));
     std::fs::write(
         fluids.join("mod.toml"),
         "id = \"fluids\"\nversion = \"0.1.0\"\napi = \"0.2\"\nwasm = \"fluids.wasm\"\n",
