@@ -345,7 +345,9 @@ fn a_mod_declares_a_bounded_number_of_rows() {
         ..empty()
     };
     let error = load(vec![("many", d)]).err().unwrap();
-    assert!(matches!(error, ModError::TooManyRows { count: 65, .. }));
+    assert!(
+        matches!(error, ModError::TooManyRows { count, .. } if count == MAX_BEHAVIOURS_PER_MOD + 1)
+    );
     let mut tables = Tables::builtin();
     let d = Declaration {
         combustion: (0..=MAX_BEHAVIOURS_PER_MOD)

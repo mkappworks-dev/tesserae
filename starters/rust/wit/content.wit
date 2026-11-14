@@ -889,7 +889,7 @@ interface content {
     record declaration {
         materials: list<material-def>,
         shapes: list<shape-def>,
-        /// At most 64 rows; texture pixel lengths are validated before use.
+        /// At most 128 rows; texture pixel lengths are validated before use.
         appearance: list<appearance>,
         /// `none` keeps the engine's default; `some` replaces it whole.
         %world: option<world-params>,

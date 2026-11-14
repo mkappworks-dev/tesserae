@@ -762,7 +762,7 @@ fn a_mod_that_is_not_the_game_may_not_declare_game_only_fields() {
 #[test]
 fn per_mod_row_limits_apply_to_data() {
     let rows = |table: &str, row: &str| {
-        (0..65)
+        (0..129)
             .map(|_| format!("[[{table}]]\n{row}\n"))
             .collect::<String>()
     };

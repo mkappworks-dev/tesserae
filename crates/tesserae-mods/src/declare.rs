@@ -23,13 +23,13 @@ use crate::error::ModError;
 use crate::registry::{Kind, Registry};
 use crate::sound::{MAX_SOUND_SETS_PER_MOD, MAX_SOUNDS_PER_MOD, MAX_SOUNDSCAPES_PER_MOD};
 
-/// The palette has 64 slots; ids 0 through 7 are reserved (`PALETTE_LEN`).
-pub const MAX_MATERIALS: usize = 56;
+/// The palette has 256 slots; ids 0 through 7 are reserved (`PALETTE_LEN`).
+pub const MAX_MATERIALS: usize = 248;
 /// A `ShapeId` is a `u8` and 4 are built in.
 pub const MAX_SHAPES: usize = 252;
-pub const MAX_PER_MOD: usize = 64;
+pub const MAX_PER_MOD: usize = 128;
 /// Appearance, fluid, reaction and fire rows one Mod may declare, each.
-pub const MAX_BEHAVIOURS_PER_MOD: usize = 64;
+pub const MAX_BEHAVIOURS_PER_MOD: usize = 128;
 pub const MAX_NAME_BYTES: usize = 32;
 pub const MATERIAL_TEXTURE_EDGE: usize = 16;
 pub const MATERIAL_TEXTURE_BYTES: usize = MATERIAL_TEXTURE_EDGE * MATERIAL_TEXTURE_EDGE * 3 * 4;

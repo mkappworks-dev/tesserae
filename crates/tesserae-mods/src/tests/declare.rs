@@ -266,52 +266,45 @@ fn a_bad_shape_names_the_mod_and_the_row() {
 }
 
 #[test]
-fn the_palette_holds_56_materials_in_total_across_mods() {
+fn the_palette_holds_248_materials_in_total_across_mods() {
     let many =
         |from: usize, to: usize| -> Vec<String> { (from..to).map(|i| format!("m{i}")).collect() };
     let decl =
         |names: &[String]| declaring(&names.iter().map(String::as_str).collect::<Vec<_>>(), &[]);
 
     let mut load = Load::new();
-    load.apply("a", decl(&many(0, 40))).unwrap();
-    load.apply("b", decl(&many(0, 16))).unwrap();
-    assert_eq!(load.tables.materials.len(), 8 + 56);
+    load.apply("a", decl(&many(0, 128))).unwrap();
+    load.apply("b", decl(&many(0, 120))).unwrap();
+    assert_eq!(load.tables.materials.len(), 8 + 248);
 
     let mut load = Load::new();
-    load.apply("a", decl(&many(0, 40))).unwrap();
-    match load.apply("b", decl(&many(0, 17))).unwrap_err() {
+    load.apply("a", decl(&many(0, 128))).unwrap();
+    match load.apply("b", decl(&many(0, 121))).unwrap_err() {
         ModError::PaletteFull { id, count, max } => {
-            assert_eq!((id.as_str(), count, max), ("b", 57, 56))
+            assert_eq!((id.as_str(), count, max), ("b", 249, 248))
         }
         other => panic!("{other:?}"),
     }
-    let mut load = Load::new();
-    assert!(matches!(
-        load.apply("solo", decl(&many(0, 57))).unwrap_err(),
-        ModError::PaletteFull { .. }
-    ));
 }
 
 #[test]
-fn no_mod_brings_more_than_64_of_either_and_shapes_stop_at_252() {
+fn no_mod_brings_more_than_128_of_either_and_shapes_stop_at_252() {
     let shapes = |n: usize| -> Vec<String> { (0..n).map(|i| format!("s{i}")).collect() };
     let decl =
         |names: &[String]| declaring(&[], &names.iter().map(String::as_str).collect::<Vec<_>>());
 
     let mut load = Load::new();
     assert!(matches!(
-        load.apply("big", decl(&shapes(65))).unwrap_err(),
+        load.apply("big", decl(&shapes(129))).unwrap_err(),
         ModError::TooMany {
             kind: Kind::Shape,
-            max: 64,
+            max: 128,
             ..
         }
     ));
     let mut load = Load::new();
-    for id in ["a", "b", "c"] {
-        load.apply(id, decl(&shapes(64))).unwrap();
-    }
-    load.apply("d", decl(&shapes(60))).unwrap();
+    load.apply("a", decl(&shapes(128))).unwrap();
+    load.apply("b", decl(&shapes(124))).unwrap();
     assert_eq!(load.tables.shapes.len(), 256);
     assert!(matches!(
         load.apply("e", decl(&shapes(1))).unwrap_err(),
@@ -693,12 +686,12 @@ fn preview_texture_payloads_are_bounded_and_name_the_invalid_appearance_row() {
         assert!(Load::new().apply("skin", d).is_ok());
     }
     let mut d = declaring(&["rock"], &[]);
-    d.appearance = (0..65).map(|_| row(None)).collect();
+    d.appearance = (0..129).map(|_| row(None)).collect();
     assert!(matches!(
         Load::new().apply("skin", d),
         Err(ModError::TooManyRows {
             what: "appearance",
-            max: 64,
+            max: 128,
             ..
         })
     ));

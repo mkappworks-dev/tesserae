@@ -278,7 +278,7 @@ A Mod never hardcodes an id. `start(world, ids)` passes it the name-to-id map of
 everything registered, built-ins included, and its Commands carry those ids. The
 host re-checks them anyway (decision 8), because the table is the registry.
 
-Limits at registration, constants in `ModLimits`: at most 56 Materials in total
+Limits at registration, constants in `ModLimits`: at most 56 Materials in total (raised to 248, see ADR-0009)
 across all Mods (the palette, decision 6) and at most 252 Shapes in total (the
 `ShapeId` space after the built-ins), at most 64 of either per Mod, names at
 most 32 bytes.

@@ -25,7 +25,7 @@ use crate::client::chunk_mesh::{
 pub type ChunkMaterial = ExtendedMaterial<StandardMaterial, ChunkMaterialExtension>;
 
 /// Material ids with a colour of their own.
-pub const PALETTE_LEN: usize = 64;
+pub const PALETTE_LEN: usize = 256;
 
 /// The palette slot after the Materials': what a [`tesserae_core::mesh::FLAME`]
 /// quad is drawn in, so no Material's appearance row can recolour flames.
@@ -210,7 +210,11 @@ mod tests {
     #[test]
     fn every_material_id_the_shader_can_index_has_a_colour() {
         let palette = ChunkMaterialExtension::default().palette;
-        assert_eq!(palette.len(), 64 + 1, "the Materials' and the flames'");
+        assert_eq!(
+            palette.len(),
+            PALETTE_LEN + 1,
+            "the Materials' and the flames'"
+        );
         assert_ne!(palette[FLAME_SLOT], palette[0], "flames unset");
         assert!((tesserae_core::mesh::FLAME as usize) >= PALETTE_LEN);
     }

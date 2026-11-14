@@ -737,14 +737,14 @@ Not blocking 1.0, in rough order of value:
   full-detail radius, not beyond default LOD reach.
 - **Mod host follow-ups are explicit.** No World read until a batched Snapshot
   API; no save-time tombstones or missing-Mod migration; no compile cache;
-  terminal-only Trust until a pre-World window state; a 64-entry flat appearance
-  palette until step 9; disabled Mods recover only on reopen. Distant Mod
-  Materials retain dominant-volume LOD and no emission. Closed `command` and
-  `occlusion` variants require a 0.2 line to grow. The patch export-lookup
-  question is resolved by the compatibility fixture, with no fallback. The
-  per-call deadline thread is a future optimization; generated bindings still
-  lift before the bounded post-lift check. The pre-existing `fbm2` debug
-  overflow for seeds within eight of `u32::MAX` is out of scope.
+  terminal-only Trust until a pre-World window state; a flat appearance palette
+  until step 9; disabled Mods recover only on reopen. Distant Mod Materials
+  retain dominant-volume LOD and no emission. Closed `command` and `occlusion`
+  variants require a 0.2 line to grow. The patch export-lookup question is
+  resolved by the compatibility fixture, with no fallback. The per-call deadline
+  thread is a future optimization; generated bindings still lift before the
+  bounded post-lift check. The pre-existing `fbm2` debug overflow for seeds
+  within eight of `u32::MAX` is out of scope.
 - **Fluid and fire have known limits, each a later decision.** A fluid that is
   opaque and emits nothing draws its partial surfaces, and the Shapes it fills,
   unlit, because light is one value per Voxel; lava emits, and water and the
