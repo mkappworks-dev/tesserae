@@ -215,7 +215,7 @@ pub(super) fn aim_target(
 }
 
 /// What of the World a Door held and placed at `at` stands by, as
-/// [`resolve`] and `usable::door_placed` read it; `None` for anything else.
+/// [`resolve()`] and `usable::door_placed` read it; `None` for anything else.
 fn door_aim(
     store: &ChunkStore,
     tables: &Tables,

@@ -320,6 +320,7 @@ pub(super) fn ghost_voxels(
     (drawn, cells)
 }
 
+type GhostMesh = (Holding, AssetId<StandardMaterial>, Handle<Mesh>);
 type Ghosts<'w, 's> = Query<
     'w,
     's,
@@ -349,7 +350,7 @@ pub(super) fn position(
     (target, sent, time): (Res<Target>, Res<Sent>, Res<Time>),
     mut meshes: ResMut<Assets<Mesh>>,
     // The ghost's own mesh: a Door's turn is not the hand's.
-    mut drawn: Local<Option<(Holding, AssetId<StandardMaterial>, Handle<Mesh>)>>,
+    mut drawn: Local<Option<GhostMesh>>,
     mut ghosts: Ghosts,
 ) {
     let menu_open = super::menu::covered(&covers) || !super::death::alive(dead);
