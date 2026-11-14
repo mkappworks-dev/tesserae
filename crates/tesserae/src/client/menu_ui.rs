@@ -14,6 +14,8 @@ use super::theme;
 #[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
 pub(super) enum Tab {
     Catalogue,
+    /// The Crafting tab's search, which, like the Catalogue's, is no Settings page.
+    Recipes,
     #[default]
     Behavior,
     Bindings,
@@ -35,6 +37,7 @@ impl Tab {
     pub fn label(self) -> &'static str {
         match self {
             Self::Catalogue => "Catalogue",
+            Self::Recipes => "Recipes",
             Self::Behavior => "Behavior",
             Self::Bindings => "Key bindings",
             Self::Controller => "Controller",
@@ -45,7 +48,7 @@ impl Tab {
     }
     fn icon(self) -> IconKind {
         match self {
-            Self::Catalogue | Self::Behavior => IconKind::Behavior,
+            Self::Catalogue | Self::Recipes | Self::Behavior => IconKind::Behavior,
             Self::Bindings => IconKind::Keyboard,
             Self::Controller => IconKind::Controller,
             Self::Display => IconKind::Display,
@@ -58,6 +61,7 @@ impl Tab {
 pub(super) struct Searches {
     pub catalogue: String,
     pub bindings: String,
+    pub recipes: String,
 }
 pub(super) fn title(name: &str) -> String {
     let name = name.rsplit(':').next().unwrap_or(name);
@@ -285,6 +289,8 @@ fn sync_search(
             }
         } else if field.0 == Tab::Catalogue && searches.catalogue != value {
             searches.catalogue = value;
+        } else if field.0 == Tab::Recipes && searches.recipes != value {
+            searches.recipes = value;
         }
     }
 }
@@ -692,10 +698,10 @@ pub(super) fn search_frame(
                         .id();
                     input.spawn((
                         SearchPlaceholder,
-                        Text::new(if tab == Tab::Catalogue {
-                            "Search Materials…"
-                        } else {
-                            "Search actions or keys…"
+                        Text::new(match tab {
+                            Tab::Catalogue => "Search Materials…",
+                            Tab::Recipes => "Search Recipes…",
+                            _ => "Search actions or keys…",
                         }),
                         font(theme::TEXT_SMALL),
                         TextColor(theme::placeholder()),

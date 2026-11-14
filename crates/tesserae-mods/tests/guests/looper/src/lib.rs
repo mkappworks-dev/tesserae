@@ -43,7 +43,11 @@ impl Guest for Fixture {
 
 fn churn(iterations: u64) -> Vec<Command> {
     // Zero runs until the host cuts it off.
-    let iterations = if iterations == 0 { u64::from(u32::MAX) } else { iterations };
+    let iterations = if iterations == 0 {
+        u64::from(u32::MAX)
+    } else {
+        iterations
+    };
     let mut map = std::collections::HashMap::new();
     let mut names: Vec<String> = Vec::new();
     for i in 0..iterations as u32 {

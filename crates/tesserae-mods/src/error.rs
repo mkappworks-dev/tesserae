@@ -2,7 +2,7 @@ use std::fmt;
 use std::path::PathBuf;
 
 use tesserae_core::{
-    CombustionError, FluidError, MaterialError, ParamError, ReactionError, ShapeError,
+    CombustionError, FluidError, MaterialError, ParamError, ReactionError, ShapeError, UseError,
 };
 
 use crate::registry::Kind;
@@ -150,6 +150,12 @@ pub enum ModError {
         name: String,
         source: CombustionError,
     },
+    VoxelUse {
+        id: String,
+        row: usize,
+        name: String,
+        source: UseError,
+    },
     /// The Game's lake names a fluid that cannot fill one.
     Lake {
         id: String,
@@ -164,6 +170,13 @@ pub enum ModError {
         row: usize,
         name: String,
         field: &'static str,
+        reason: String,
+    },
+    /// A `recipes` row, named by its output Item.
+    Recipe {
+        id: String,
+        row: usize,
+        output: String,
         reason: String,
     },
     /// A second Sound set for one Material; `other` gave it the first.
@@ -327,6 +340,12 @@ impl fmt::Display for ModError {
                 name,
                 source,
             } => write!(f, "mod `{id}`: combustion {row} `{name}`: {source}"),
+            ModError::VoxelUse {
+                id,
+                row,
+                name,
+                source,
+            } => write!(f, "mod `{id}`: voxel-uses {row} `{name}`: {source}"),
             ModError::Lake { id, name, source } => write!(
                 f,
                 "mod `{id}`: world: {} `{name}` {}",
@@ -340,6 +359,12 @@ impl fmt::Display for ModError {
                 field,
                 reason,
             } => write!(f, "mod `{id}`: {list} {row} `{name}`: {field}: {reason}"),
+            ModError::Recipe {
+                id,
+                row,
+                output,
+                reason,
+            } => write!(f, "mod `{id}`: recipe {row} `{output}`: {reason}"),
             ModError::SecondSoundSet {
                 id,
                 other,

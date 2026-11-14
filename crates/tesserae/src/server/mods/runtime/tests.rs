@@ -1104,6 +1104,31 @@ pub(in crate::server) fn terra_loaded(size: f32) -> LoadedMods {
     loaded
 }
 
+#[test]
+fn terra_voices_doors_containers_and_crafting() {
+    use tesserae_core::audio::{Cause, SoundCategory};
+    let sounds = terra_loaded(1.0).sounds;
+    for cause in [
+        Cause::DoorOpen,
+        Cause::DoorClose,
+        Cause::ContainerOpen,
+        Cause::ContainerClose,
+        Cause::Craft,
+    ] {
+        let &(_, id) = sounds
+            .cause_sounds
+            .iter()
+            .find(|(bound, _)| *bound == cause)
+            .unwrap_or_else(|| panic!("Terra leaves {cause:?} silent"));
+        let sound = &sounds.sounds[usize::from(id.0)];
+        assert_eq!(sound.def.category, SoundCategory::Effects, "{cause:?}");
+        assert!(
+            sound.def.falloff.is_some(),
+            "{cause:?} is heard where it lands"
+        );
+    }
+}
+
 /// Every fluid the loaded reactions and the lake name.
 fn fluids_named(loaded: &LoadedMods, params: WorldgenParams) -> Vec<u16> {
     let rules = loaded.tables.reactions.rules().iter();
@@ -1185,7 +1210,13 @@ fn terra_contract_content_build_and_scenarios_reach_real_voxels_and_light() {
                 (20, [214, 196, 140, 255]),
                 (21, [236, 240, 246, 255]),
                 (22, [150, 120, 104, 255]),
-                (23, [84, 150, 56, 255])
+                (23, [84, 150, 56, 255]),
+                (24, [214, 190, 140, 255]),
+                (25, [128, 62, 40, 255]),
+                (26, [128, 88, 50, 255]),
+                (27, [128, 88, 50, 255]),
+                (28, [140, 97, 55, 255]),
+                (29, [140, 97, 55, 255])
             ]
         );
         assert_eq!(loaded.tables.materials.def(8).emission, 15);
@@ -1302,7 +1333,7 @@ fn terra_contract_content_build_and_scenarios_reach_real_voxels_and_light() {
             .init_resource::<MeshState>()
             .init_resource::<crate::server::fluids::FluidSim>()
             .add_plugins(super::super::plugin);
-        assert_eq!(h.app.world().resource::<ContentTables>().shapes.len(), 5);
+        assert_eq!(h.app.world().resource::<ContentTables>().shapes.len(), 7);
         h.app
             .insert_resource(crate::server::world_state::SpawnPoint::for_tests(
                 Vec3::new(0.0, 28.0, 0.0),

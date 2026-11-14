@@ -1,5 +1,11 @@
 //! Non-Voxel Sounds follow authoritative Server outcomes.
-use super::{ContentTables, entities::Pickup, player::Player, sound::Emitter, tool::UseOutcome};
+use super::{
+    ContentTables,
+    entities::Pickup,
+    player::Player,
+    sound::Emitter,
+    tool::{UseOutcome, UseResult},
+};
 use crate::session::SessionApp;
 use bevy::prelude::*;
 use tesserae_core::audio::{Cause, SoundRng, Span};
@@ -144,14 +150,13 @@ fn outcomes(
         }
     }
     for outcome in uses.read() {
-        audio.emit(
-            if outcome.0.is_ok() {
-                Cause::UseMeasured
-            } else {
-                Cause::UseRefused
-            },
-            player.eye(),
-        );
+        let cause = match outcome.0 {
+            Ok(UseResult::Measured(_)) => Cause::UseMeasured,
+            // Heard where they land, by their own Causes.
+            Ok(UseResult::Door { .. } | UseResult::Container(_) | UseResult::Station) => continue,
+            Err(_) => Cause::UseRefused,
+        };
+        audio.emit(cause, player.eye());
     }
 }
 fn splash(
@@ -178,7 +183,7 @@ fn splash(
 mod tests {
     use super::super::{
         sound::{SoundEvent, SoundTable},
-        tool::{UseRefusal, UseResult, UseTarget},
+        tool::{UseRefusal, UseTarget},
     };
     use super::*;
     use tesserae_core::audio::SoundId;
@@ -236,10 +241,13 @@ mod tests {
         app.world_mut()
             .write_message(UseOutcome(Err(UseRefusal::NotFood)));
         app.world_mut()
+            .write_message(UseOutcome(Ok(UseResult::Door { opened: true })));
+        app.world_mut()
             .write_message(UseOutcome(Ok(UseResult::Measured(UseTarget {
                 at: [0; 3],
                 voxel: tesserae_core::Voxel::AIR,
                 corner: Vec3::ZERO,
+                usable: None,
             }))));
         app.update();
         let events: Vec<_> = app

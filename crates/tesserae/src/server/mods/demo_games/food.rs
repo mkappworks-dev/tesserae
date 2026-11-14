@@ -13,7 +13,7 @@ use crate::server::edit::tests::{
 };
 use crate::server::entities::{EntityStore, Pickup, Refused, pick_up, step_entities};
 use crate::server::inventory::Inventory;
-use crate::server::items::{Items, PlacingItems};
+use crate::server::items::PlacingItems;
 use crate::server::survival::Survival;
 use crate::server::tool::UseOutcome;
 use crate::server::vitals::{EatIntent, Vitals, eat};
@@ -95,12 +95,19 @@ fn every_demo_game_declares_a_food_of_its_own_that_grows_on_its_biomes() {
 
 /// Horizontal metres from the spawn, over the origin, to the nearest Voxel of `food`.
 fn nearest_m(generator: &Worldgen, food: MaterialId, within_m: f32) -> Option<f32> {
+    distances_m(generator, food, within_m)
+        .into_iter()
+        .reduce(f32::min)
+}
+
+/// Horizontal metres from the spawn to every Voxel of `material` within `within_m`.
+fn distances_m(generator: &Worldgen, material: MaterialId, within_m: f32) -> Vec<f32> {
     let size = generator.voxel_size();
     let chunk_m = CHUNK_SIZE as f32 * size;
     let (lowest, highest) = generator.surface_bounds_m();
     let rows = (lowest / chunk_m).floor() as i32..=(highest / chunk_m).ceil() as i32;
     let reach = (within_m / chunk_m).ceil() as i32;
-    let mut nearest = None::<f32>;
+    let mut found = Vec::new();
     for cz in -reach..reach {
         for cx in -reach..reach {
             for cy in rows.clone() {
@@ -111,19 +118,21 @@ fn nearest_m(generator: &Worldgen, food: MaterialId, within_m: f32) -> Option<f3
                 for z in 0..CHUNK_SIZE {
                     for y in 0..CHUNK_SIZE {
                         for x in 0..CHUNK_SIZE {
-                            if chunk.get(x, y, z).material() != food {
+                            if chunk.get(x, y, z).material() != material {
                                 continue;
                             }
                             let at = |c: i32, n: usize| (c * CHUNK_SIZE as i32 + n as i32) as f32;
                             let d = (at(cx, x) * size).hypot(at(cz, z) * size);
-                            nearest = Some(nearest.map_or(d, |n| n.min(d)));
+                            if d <= within_m {
+                                found.push(d);
+                            }
                         }
                     }
                 }
             }
         }
     }
-    nearest.filter(|&d| d <= within_m)
+    found
 }
 
 /// Half a minute's walk. A spawn in a Biome without the food, such as Terra's snow, is the far case
@@ -156,6 +165,54 @@ fn a_new_world_of_every_demo_game_has_its_food_within_a_short_walk_of_the_spawn(
     }
 }
 
+/// A Workbench, then a Chest and a Door: 4 + 8 + 3.
+const WOOD_FOR_A_HOME: usize = 15;
+
+#[test]
+fn a_survival_player_finds_wood_for_a_workbench_a_chest_and_a_door_near_the_spawn() {
+    let (_install, loaded) = loaded("terra", 0.5);
+    let world = loaded.world.unwrap();
+    let wood = material(&loaded, "terra:wood");
+    for seed in [
+        crate::world::WorldSettings::default().seed,
+        1,
+        3,
+        4,
+        7,
+        2024,
+    ] {
+        let generator = Worldgen::new(seed, 0.5, world);
+        let found = distances_m(&generator, wood, SHORT_WALK_M).len();
+        assert!(
+            found >= WOOD_FOR_A_HOME,
+            "seed {seed}: {found} Wood within {SHORT_WALK_M} m"
+        );
+    }
+}
+
+#[test]
+fn terra_wood_breaks_into_one_wood_item() {
+    let (_install, mut app, loaded) = kitchen("terra");
+    let cell = [5, 8, 5];
+    give(&mut app, "terra:wood");
+    send(&mut app, place_held(SHAPE_FULL_CUBE, Orientation::IDENTITY));
+    tick(&mut app);
+    assert_eq!(
+        voxel_at(&app, cell),
+        Voxel::cube(material(&loaded, "terra:wood"))
+    );
+
+    send(&mut app, down(EditAction::Remove));
+    tick(&mut app);
+    assert!(voxel_at(&app, cell).is_air());
+    for _ in 0..40 {
+        app.world_mut().run_system_once(step_entities).unwrap();
+    }
+    set_eye(&mut app, Vec3::new(5.5, 9.0, 5.5));
+    app.world_mut().run_system_once(pick_up).unwrap();
+    assert_eq!(held(&mut app, "terra:wood"), 1);
+}
+
 /// Stone below 8 m, as the edit tests' ground, with the Game's own Items and placing rules.
 fn kitchen(game: &str) -> (super::Install, App, super::LoadedMods) {
     kitchen_in(game, true)
@@ -176,7 +233,7 @@ fn kitchen_in(game: &str, survival_mode: bool) -> (super::Install, App, super::L
     if survival_mode {
         survival(&mut app);
     }
-    let items = Items(loaded.items.clone());
+    let items = loaded.every_item(1.0);
     let solid = |id| loaded.tables.materials.solid(Voxel::cube(id));
     app.insert_resource(PlacingItems::new(
         loaded
@@ -306,7 +363,7 @@ fn fingerprint(textures: &[(String, Vec<u8>)]) -> u64 {
 #[test]
 fn the_demo_games_textures_are_unchanged() {
     let pinned = [
-        ("terra", 0x8315_f438_70b3_1396),
+        ("terra", 0x4ac0_7d21_685a_633c),
         ("meadow", 0x5a2b_6c07_7a9e_ec3d),
         ("ember", 0xf36d_dd1c_3496_4938),
         ("tidewater", 0xb185_0251_6959_e86a),

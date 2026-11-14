@@ -33,6 +33,11 @@ impl ItemLook {
     }
 }
 
+/// Every Recipe in the World, in the Server's Recipe order, so a Craft names
+/// one by its index.
+#[derive(Message, Clone, Debug, Default, PartialEq, Eq)]
+pub struct RecipeBook(pub Vec<tesserae_core::craft::Recipe>);
+
 /// Every Sound in the World, indexed by `SoundId`, with its recordings' checked
 /// Ogg Vorbis bytes: what the Client plays a Sound event with.
 #[derive(Message, Clone, Debug, Default, PartialEq)]
@@ -77,7 +82,7 @@ pub struct CharacterModel(pub Option<std::sync::Arc<tesserae_mods::Character>>);
 /// What the registered content is called and what a player can do with it.
 /// Content only: it holds no Voxel, Chunk or Occupants, so a Client reading it
 /// reads nothing of the World (ADR-0002).
-#[derive(Message, Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Message, Clone, Debug, Default, PartialEq)]
 pub struct ContentCatalogue {
     /// Stable root Game id, supplied by the Server.
     pub game: Option<String>,
@@ -109,7 +114,7 @@ pub struct CatalogueTool {
     pub kind: tesserae_mods::ToolKind,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct CatalogueMaterial {
     pub remove_time: std::time::Duration,
     pub id: MaterialId,
@@ -119,6 +124,9 @@ pub struct CatalogueMaterial {
     pub fluid: Option<u16>,
     /// Whether a combustion row makes it fuel.
     pub burns: bool,
+    /// The Shape its `voxel-uses` row always places it in.
+    pub shape: Option<ShapeId>,
+    pub door: Option<tesserae_core::Door>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -128,6 +136,9 @@ pub struct CatalogueShape {
     /// Whether turning it changes anything: a cube looks the same however it
     /// is turned and a connected Shape ignores its orientation.
     pub turnable: bool,
+    /// A Usable Voxel's row places its Material in it, so it is that row's
+    /// alone and the Player is not offered it.
+    pub fixed: bool,
     pub geometry: Vec<Vec<tesserae_core::shape::ShapeQuad>>,
 }
 

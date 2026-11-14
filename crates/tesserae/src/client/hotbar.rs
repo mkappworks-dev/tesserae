@@ -155,7 +155,9 @@ fn held_name(hotbar: &Hotbar, catalogue: &Catalogue) -> String {
     };
     let name = title(&stack.item);
     match hotbar.slot(hotbar.selected) {
-        Holding::Solid { shape, .. } if shape != SHAPE_FULL_CUBE => {
+        Holding::Solid { shape, .. }
+            if shape != SHAPE_FULL_CUBE && !catalogue.0.shape(shape).is_some_and(|s| s.fixed) =>
+        {
             let shape = catalogue.0.shape(shape).map_or("unknown", |s| &s.name);
             format!("{name} · {}", title(shape))
         }
@@ -400,12 +402,15 @@ mod tests {
                     solid: true,
                     fluid: None,
                     burns: false,
+                    shape: None,
+                    door: None,
                     remove_time: tesserae_mods::DEFAULT_REMOVE_TIME,
                 }],
                 shapes: vec![CatalogueShape {
                     id: SHAPE_STAIR,
                     name: "core:stair".into(),
                     turnable: true,
+                    fixed: false,
                     geometry: Vec::new(),
                 }],
                 ..default()

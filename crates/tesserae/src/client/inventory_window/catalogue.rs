@@ -9,12 +9,12 @@ use bevy::picking::hover::Hovered;
 use bevy::picking::pointer::PointerButton;
 use bevy::prelude::*;
 use bevy::ui_widgets::{Activate, ScrollArea};
+use tesserae_core::MaterialId;
 use tesserae_core::inventory::{Destination, Slot};
-use tesserae_core::{MaterialId, SHAPE_FULL_CUBE};
 
 use super::look::{self, Flat, Flavour};
 use super::{InventoryWindow, item_shadow};
-use crate::client::edit::{Catalogue, Holding, Hotbar};
+use crate::client::edit::{Catalogue, Holding, Hotbar, material_holding};
 use crate::client::menu_ui::{self as ui, Searches};
 use crate::client::theme;
 use crate::content::ContentCatalogue;
@@ -135,7 +135,7 @@ fn materials<'a>(
         .materials
         .iter()
         .filter(|m| m.solid && m.fluid.is_none())
-        .map(|m| (m.id, m.name.as_str(), Holding::solid(m.id, SHAPE_FULL_CUBE)));
+        .map(|m| (m.id, m.name.as_str(), material_holding(m)));
     let mut fluids: Vec<_> = catalogue
         .materials
         .iter()
@@ -266,6 +266,7 @@ pub(super) fn panel(row: &mut ChildSpawnerCommands, query: &str) {
     ))
     .with_children(|panel| {
         panel.spawn(theme::ring(theme::ITEM_RADIUS));
+        super::crafting::tabs(panel, super::crafting::Pane::Catalogue);
         panel
             .spawn(Node {
                 flex_direction: FlexDirection::Column,
@@ -512,11 +513,7 @@ fn transfer_rows(
         ));
         return;
     };
-    let holding = if chosen.fluid.is_some() {
-        Holding::Fluid(chosen.id)
-    } else {
-        Holding::solid(chosen.id, SHAPE_FULL_CUBE)
-    };
+    let holding = material_holding(chosen);
     footer
         .spawn(Node {
             align_items: AlignItems::Center,

@@ -1,5 +1,6 @@
 //! Dropped items as the Client sees them: a view-only mirror of what the
-//! Server announces, drawn as small spinning cubes.
+//! Server announces, drawn as small spinning cubes, or in the Shape their
+//! Material's row fixes.
 //!
 //! Nothing here writes entity state. The spin and bob are cosmetic and never
 //! feed back (`docs/adr/0002-client-server-from-day-one.md`).
@@ -10,10 +11,10 @@ use bevy::prelude::*;
 use tesserae_core::entity::EntityId;
 use tesserae_core::{Orientation, SHAPE_FULL_CUBE};
 
-use super::edit::Holding;
+use super::edit::{Catalogue, Holding};
 use super::material_textures::Textures;
 use super::menu::Swatches;
-use crate::content::{ItemLook, ItemLooks};
+use crate::content::{ContentCatalogue, ItemLook, ItemLooks};
 use crate::render::texture_atlas;
 use crate::server::entities::{EntityDelta, EntityView};
 use crate::session::SessionApp;
@@ -95,7 +96,7 @@ fn drawn(
     item: u32,
     looks: &Looks,
     views: &mut Views,
-    (textures, swatches): (&Textures, &Swatches),
+    (textures, swatches, catalogue): (&Textures, &Swatches, &ContentCatalogue),
     (meshes, materials): (&mut Assets<Mesh>, &mut Assets<StandardMaterial>),
 ) -> Option<(Handle<Mesh>, Handle<StandardMaterial>)> {
     if let Some(found) = views.drawn.get(&item) {
@@ -104,13 +105,19 @@ fn drawn(
     let look = looks.0.get(item as usize)?;
     let made = match look.material {
         Some(material) => {
+            let fixed = catalogue.material(material).and_then(|m| m.shape);
             let held = Holding::Solid {
                 material,
-                shape: SHAPE_FULL_CUBE,
+                shape: fixed.unwrap_or(SHAPE_FULL_CUBE),
                 orientation: Orientation::IDENTITY,
             };
+            // Shaped like the cube it replaces: centred on the drop.
+            let mesh = fixed
+                .and_then(|_| super::preview::item_mesh(held, catalogue))
+                .map(|mesh| mesh.translated_by(Vec3::splat(-0.5)))
+                .unwrap_or_else(|| atlas_cube(material as usize));
             (
-                meshes.add(atlas_cube(material as usize)),
+                meshes.add(mesh),
                 materials.add(textures.material(held, swatches.rgba(held), false)),
             )
         }
@@ -136,11 +143,12 @@ fn apply_deltas(
     mut deltas: MessageReader<EntityDelta>,
     looks: Res<Looks>,
     mut views: ResMut<Views>,
-    (textures, swatches): (Res<Textures>, Res<Swatches>),
+    (textures, swatches, catalogue): (Res<Textures>, Res<Swatches>, Res<Catalogue>),
     (mut meshes, mut materials): (ResMut<Assets<Mesh>>, ResMut<Assets<StandardMaterial>>),
 ) {
-    // A cube built before the atlas arrived would keep its flat swatch.
-    if textures.is_changed() {
+    // A cube built before the atlas or the catalogue arrived would keep its
+    // flat swatch or its cube.
+    if textures.is_changed() || catalogue.is_changed() {
         views.drawn.clear();
     }
     for delta in deltas.read() {
@@ -165,7 +173,7 @@ fn apply_deltas(
                     view.item,
                     &looks,
                     &mut views,
-                    (&textures, &swatches),
+                    (&textures, &swatches, &catalogue.0),
                     (&mut meshes, &mut materials),
                 ) else {
                     continue;
@@ -233,6 +241,7 @@ mod tests {
             .init_resource::<Swatches>()
             .init_resource::<Looks>()
             .init_resource::<Views>()
+            .insert_resource(fixed_slab())
             .add_message::<ItemLooks>()
             .add_message::<EntityDelta>()
             .add_systems(Update, (receive_looks, apply_deltas, animate).chain());
@@ -251,8 +260,44 @@ mod tests {
                 material: None,
                 max_stack: 64,
             },
+            ItemLook {
+                name: "t:bench".into(),
+                size_m: 0.25,
+                color: [9, 9, 9, 255],
+                material: Some(BENCH),
+                max_stack: 64,
+            },
         ]));
         app
+    }
+
+    const BENCH: tesserae_core::MaterialId = 3;
+
+    /// A Material its row always places as a slab.
+    fn fixed_slab() -> super::super::edit::Catalogue {
+        let tables = crate::server::fixture_tables();
+        super::super::edit::Catalogue(crate::content::ContentCatalogue {
+            materials: vec![crate::content::CatalogueMaterial {
+                remove_time: tesserae_mods::DEFAULT_REMOVE_TIME,
+                id: BENCH,
+                name: "t:bench".into(),
+                solid: true,
+                fluid: None,
+                burns: false,
+                shape: Some(tesserae_core::SHAPE_SLAB),
+                door: None,
+            }],
+            shapes: (0..tables.shapes.len())
+                .map(|id| crate::content::CatalogueShape {
+                    id: id as u8,
+                    name: format!("shape{id}"),
+                    turnable: id != 0,
+                    fixed: false,
+                    geometry: tables.shapes.preview_geometry(id as u8),
+                })
+                .collect(),
+            ..default()
+        })
     }
 
     fn view(id: u64, pos: [f32; 3], resting: bool) -> EntityView {
@@ -329,6 +374,34 @@ mod tests {
                 assert_eq!(t.scale, Vec3::splat(size));
             }
         }
+    }
+
+    #[test]
+    fn a_drop_of_a_material_that_fixes_a_shape_is_drawn_small_in_it() {
+        let mut app = app();
+        let mut bench = view(1, [0.0, 4.0, 0.0], true);
+        bench.item = 2;
+        app.world_mut().write_message(EntityDelta::Spawned(bench));
+        app.update();
+        let mut q = app.world_mut().query::<(&Mesh3d, &Transform)>();
+        let (mesh, transform) = q.single(app.world()).unwrap();
+        assert_eq!(transform.scale, Vec3::splat(0.25));
+        let meshes = app.world().resource::<Assets<Mesh>>();
+        let Some(bevy::mesh::VertexAttributeValues::Float32x3(positions)) = meshes
+            .get(&mesh.0)
+            .unwrap()
+            .attribute(Mesh::ATTRIBUTE_POSITION)
+        else {
+            panic!("positions")
+        };
+        let corners = positions.iter().map(|&p| Vec3::from(p));
+        let min = corners.clone().fold(Vec3::MAX, Vec3::min);
+        let max = corners.fold(Vec3::MIN, Vec3::max);
+        assert_eq!(
+            (min, max),
+            (Vec3::splat(-0.5), Vec3::new(0.5, 0.0, 0.5)),
+            "a slab, centred"
+        );
     }
 
     #[test]

@@ -205,6 +205,11 @@ enum Cause {
     Eat,
     Hurt,
     Death,
+    DoorOpen,
+    DoorClose,
+    ContainerOpen,
+    ContainerClose,
+    Craft,
 }
 
 #[derive(Deserialize)]
@@ -228,6 +233,11 @@ impl From<CauseSound> for content::CauseSound {
                 Cause::Eat => content::SoundCause::Eat,
                 Cause::Hurt => content::SoundCause::Hurt,
                 Cause::Death => content::SoundCause::Death,
+                Cause::DoorOpen => content::SoundCause::DoorOpen,
+                Cause::DoorClose => content::SoundCause::DoorClose,
+                Cause::ContainerOpen => content::SoundCause::ContainerOpen,
+                Cause::ContainerClose => content::SoundCause::ContainerClose,
+                Cause::Craft => content::SoundCause::Craft,
             },
             sound: c.sound,
         }

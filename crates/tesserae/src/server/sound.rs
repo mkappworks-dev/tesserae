@@ -65,8 +65,16 @@ impl SoundTable {
 pub(super) struct Emitter<'w> {
     table: Option<Res<'w, SoundTable>>,
     events: Option<ResMut<'w, Messages<SoundEvent>>>,
+    world: Option<Res<'w, crate::world::WorldSettings>>,
 }
 impl Emitter<'_> {
+    /// Emits `cause` at the centre of Voxel `at`.
+    pub fn emit_at(&mut self, cause: Cause, at: [i32; 3]) {
+        if let Some(size) = self.world.as_ref().map(|w| w.voxel_size) {
+            self.emit(cause, Vec3::from_array(at.map(|i| (i as f32 + 0.5) * size)));
+        }
+    }
+
     pub fn emit(&mut self, cause: Cause, pos: Vec3) {
         if let (Some(table), Some(events)) = (&self.table, &mut self.events)
             && let Some(&sound) = table.causes.get(&cause)
@@ -77,5 +85,27 @@ impl Emitter<'_> {
                 cause,
             });
         }
+    }
+}
+
+#[cfg(test)]
+pub(super) mod heard {
+    use super::*;
+
+    /// Gives every Cause in `causes` a Sound, so each is heard when emitted.
+    pub fn voice(app: &mut App, causes: &[Cause]) {
+        app.insert_resource(SoundTable::new(&tesserae_mods::Sounds {
+            cause_sounds: causes.iter().map(|&c| (c, SoundId(0))).collect(),
+            ..default()
+        }));
+    }
+
+    /// The Causes heard since last asked, with where.
+    pub fn causes(app: &mut App) -> Vec<(Cause, [f32; 3])> {
+        app.world_mut()
+            .resource_mut::<Messages<SoundEvent>>()
+            .drain()
+            .map(|e| (e.cause, e.pos_m))
+            .collect()
     }
 }

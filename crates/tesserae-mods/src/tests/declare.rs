@@ -10,8 +10,9 @@ use tesserae_core::{
 use crate::bindings::tesserae::mods::content::{self, Declaration};
 use crate::bindings::tesserae::mods::types;
 use crate::{
-    Applied, Kind, MAX_ITEMS, MAX_ITEMS_PER_MOD, MAX_TOOLS_PER_MOD, ModError, Registry,
-    RegistryMismatch, ToolDef, ToolKind, ViewParams, apply, resolve_biomes, resolve_items,
+    Applied, Kind, MAX_ITEMS, MAX_ITEMS_PER_MOD, MAX_TOOLS_PER_MOD, MAX_VOXEL_USES_PER_MOD,
+    ModError, Registry, RegistryMismatch, ToolDef, ToolKind, ViewParams, apply, resolve,
+    resolve_biomes, resolve_items,
 };
 use tesserae_core::SurvivalRules;
 
@@ -40,7 +41,7 @@ fn slab(name: &str) -> content::ShapeDef {
     }
 }
 
-fn declaring(materials: &[&str], shapes: &[&str]) -> Declaration {
+pub(super) fn declaring(materials: &[&str], shapes: &[&str]) -> Declaration {
     Declaration {
         materials: materials.iter().map(|n| material(n)).collect(),
         shapes: shapes.iter().map(|n| slab(n)).collect(),
@@ -60,6 +61,8 @@ fn declaring(materials: &[&str], shapes: &[&str]) -> Declaration {
         material_sounds: Vec::new(),
         soundscapes: Vec::new(),
         cause_sounds: Vec::new(),
+        recipes: Vec::new(),
+        voxel_uses: Vec::new(),
     }
 }
 
@@ -2039,4 +2042,210 @@ fn only_the_game_declares_climate() {
             humidity_size_m: 100.0
         }
     );
+}
+
+fn door(material: &str, open: &str) -> content::VoxelUse {
+    sized_door(material, open, None, None)
+}
+
+fn sized_door(
+    material: &str,
+    open: &str,
+    width_m: Option<f32>,
+    height_m: Option<f32>,
+) -> content::VoxelUse {
+    content::VoxelUse {
+        material: material.into(),
+        kind: content::VoxelUseKind::Door(content::DoorDef {
+            open: open.into(),
+            width_m,
+            height_m,
+        }),
+        shape: None,
+    }
+}
+
+fn station(material: &str, tag: &str) -> content::VoxelUse {
+    content::VoxelUse {
+        material: material.into(),
+        kind: content::VoxelUseKind::Station(tag.into()),
+        shape: None,
+    }
+}
+
+fn resolved_uses(mods: &[(&str, Declaration)]) -> Result<Load, ModError> {
+    let mut load = Load::new();
+    let behaviours: Vec<_> = mods
+        .iter()
+        .map(|(id, d)| load.apply(id, d.clone()).unwrap().behaviour)
+        .collect();
+    resolve(behaviours, &mut load.tables, &load.registry)?;
+    Ok(load)
+}
+
+#[test]
+fn a_mod_may_make_another_mods_materials_a_door() {
+    let mut uses = declaring(&[], &[]);
+    uses.voxel_uses = vec![door("a:door", "a:door_open")];
+    let load =
+        resolved_uses(&[("a", declaring(&["door", "door_open"], &[])), ("b", uses)]).unwrap();
+    let id = |name| load.registry.id_of(Kind::Material, name).unwrap() as MaterialId;
+    let found = load.tables.uses.door(id("a:door_open")).unwrap();
+    assert_eq!(
+        (found.closed, found.open),
+        (id("a:door"), id("a:door_open"))
+    );
+    assert_eq!(
+        (found.width_m, found.height_m),
+        (1.0, 2.0),
+        "absent is 1 m by 2 m"
+    );
+}
+
+#[test]
+fn a_door_declares_its_size_in_metres() {
+    let mut d = declaring(&["door", "door_open"], &[]);
+    d.voxel_uses = vec![sized_door("m:door", "m:door_open", Some(1.5), Some(3.0))];
+    let load = resolved_uses(&[("m", d)]).unwrap();
+    let id = load.registry.id_of(Kind::Material, "m:door").unwrap() as MaterialId;
+    let found = load.tables.uses.door(id).unwrap();
+    assert_eq!((found.width_m, found.height_m), (1.5, 3.0));
+}
+
+#[test]
+fn any_voxel_use_may_fix_a_shape_by_full_name() {
+    let mut d = declaring(&["door", "door_open", "bench"], &[]);
+    d.voxel_uses = vec![
+        content::VoxelUse {
+            shape: Some("core:slab".into()),
+            ..door("m:door", "m:door_open")
+        },
+        content::VoxelUse {
+            shape: Some("core:post".into()),
+            ..station("m:bench", "bench")
+        },
+    ];
+    let load = resolved_uses(&[("m", d.clone())]).unwrap();
+    let id = |name| load.registry.id_of(Kind::Material, name).unwrap() as MaterialId;
+    assert_eq!(
+        load.tables.uses.shape(id("m:door_open")),
+        Some(tesserae_core::SHAPE_SLAB)
+    );
+    assert_eq!(
+        load.tables.uses.shape(id("m:bench")),
+        Some(tesserae_core::SHAPE_POST)
+    );
+    d.voxel_uses[1].shape = Some("m:table".into());
+    let refused = resolved_uses(&[("m", d)]).err().unwrap();
+    assert!(
+        matches!(&refused, ModError::UnknownName { what: "voxel-uses", row: 1, name, .. } if name == "m:table"),
+        "{refused}"
+    );
+}
+
+#[test]
+fn two_materials_may_be_stations_of_one_tag() {
+    let mut d = declaring(&["bench", "oak_bench"], &[]);
+    d.voxel_uses = vec![station("m:bench", "bench"), station("m:oak_bench", "bench")];
+    let load = resolved_uses(&[("m", d)]).unwrap();
+    let id = |name| load.registry.id_of(Kind::Material, name).unwrap() as MaterialId;
+    assert_eq!(load.tables.uses.station(id("m:bench")), Some("bench"));
+    assert_eq!(load.tables.uses.station(id("m:oak_bench")), Some("bench"));
+}
+
+#[test]
+fn a_bad_voxel_use_is_a_load_error_naming_the_row() {
+    let mut water = material("water");
+    water.solid = false;
+    let mut base = declaring(&["door", "door_open", "gate"], &[]);
+    base.materials.push(water);
+    for (rows, expected) in [
+        (
+            vec![door("m:door", "m:nowhere")],
+            "names Material `m:nowhere`",
+        ),
+        (vec![door("m:door", "m:water")], "must be solid"),
+        (vec![door("m:door", "m:door")], "must not be its closed one"),
+        (
+            vec![door("m:door", "m:door_open"), door("m:door", "m:gate")],
+            "voxel-uses 1 `m:door`",
+        ),
+        (
+            vec![door("m:door", "m:door_open"), door("m:gate", "m:door_open")],
+            "another Door's state",
+        ),
+        (vec![station("m:gate", "hand")], "`hand` is reserved"),
+        (
+            vec![sized_door("m:door", "m:door_open", Some(0.25), None)],
+            "from 0.5 to 4 m wide",
+        ),
+        (
+            vec![sized_door("m:door", "m:door_open", None, Some(5.0))],
+            "from 1 to 4 m tall",
+        ),
+        (vec![station("m:water", "bench")], "must be solid"),
+    ] {
+        let mut d = base.clone();
+        d.voxel_uses = rows;
+        let error = resolved_uses(&[("m", d)]).err().unwrap().to_string();
+        assert!(error.contains(expected), "{error}");
+        assert!(error.contains("`m`"), "{error}");
+    }
+}
+
+#[test]
+fn no_mod_declares_more_than_64_voxel_uses() {
+    let mut d = declaring(&[], &[]);
+    d.voxel_uses = vec![door("m:a", "m:b"); MAX_VOXEL_USES_PER_MOD + 1];
+    assert!(matches!(
+        Load::new().apply("m", d).unwrap_err(),
+        ModError::TooManyRows {
+            what: "voxel-use",
+            max: 64,
+            ..
+        }
+    ));
+}
+
+fn container(material: &str, slots: Option<u8>) -> content::VoxelUse {
+    content::VoxelUse {
+        material: material.into(),
+        kind: content::VoxelUseKind::Container(slots),
+        shape: None,
+    }
+}
+
+#[test]
+fn a_container_holds_27_slots_unless_it_declares_from_1_to_54() {
+    let mut d = declaring(&["chest", "pouch", "vault"], &[]);
+    d.voxel_uses = vec![
+        container("m:chest", None),
+        container("m:pouch", Some(1)),
+        container("m:vault", Some(54)),
+    ];
+    let load = resolved_uses(&[("m", d)]).unwrap();
+    let id = |name| load.registry.id_of(Kind::Material, name).unwrap() as MaterialId;
+    let slots = |name| load.tables.uses.container(id(name));
+    assert_eq!(
+        [slots("m:chest"), slots("m:pouch"), slots("m:vault")],
+        [Some(27), Some(1), Some(54)]
+    );
+    for bad in [0, 55] {
+        let mut d = declaring(&["chest"], &[]);
+        d.voxel_uses = vec![container("m:chest", Some(bad))];
+        let error = resolved_uses(&[("m", d)]).err().unwrap().to_string();
+        assert!(error.contains("voxel-uses 0 `m:chest`"), "{error}");
+        assert!(error.contains("from 1 to 54 slots"), "{error}");
+    }
+}
+
+#[test]
+fn a_material_is_not_both_a_door_and_a_container() {
+    let mut d = declaring(&["door", "door_open"], &[]);
+    d.voxel_uses = vec![
+        door("m:door", "m:door_open"),
+        container("m:door_open", None),
+    ];
+    let error = resolved_uses(&[("m", d)]).err().unwrap().to_string();
+    assert!(error.contains("already a Usable Voxel"), "{error}");
 }

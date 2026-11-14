@@ -203,6 +203,7 @@ mod tests {
                     id,
                     name: format!("shape{id}"),
                     turnable: id != 0,
+                    fixed: false,
                     geometry: tables.tables.shapes.preview_geometry(id),
                 })
                 .collect(),

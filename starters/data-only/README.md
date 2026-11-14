@@ -1,7 +1,8 @@
 # Data-only starter
 
 A Game made of text and PNG files: two Materials with artwork, ground built from
-them, and flight and physics enabled. No Rust, no WebAssembly toolchain.
+them, flight and physics enabled, and a Workbench, a Chest and a Door with two
+Recipes. No Rust, no WebAssembly toolchain.
 
 **Supported contract line:** 0.3 (`api = "0.3"` in `mod.toml`). The field
 reference is [`docs/data-mods.md`](../../docs/data-mods.md) in the Engine
@@ -9,11 +10,11 @@ repository.
 
 ## Layout
 
-| File                            | Purpose                                                    |
-| ------------------------------- | ---------------------------------------------------------- |
-| `mod.toml`                      | Manifest: id, version, contract line, `declaration` source |
-| `content.toml`                  | The Declaration: Materials, appearance, ground, movement   |
-| `art/stone.png`, `art/turf.png` | 48 by 16 pixel textures: three 16 by 16 faces side by side |
+| File                            | Purpose                                                                             |
+| ------------------------------- | ----------------------------------------------------------------------------------- |
+| `mod.toml`                      | Manifest: id, version, contract line, `declaration` source                          |
+| `content.toml`                  | The Declaration: Materials, appearance, ground, movement, Usable Voxels and Recipes |
+| `art/stone.png`, `art/turf.png` | 48 by 16 pixel textures: three 16 by 16 faces side by side                          |
 
 Rename the `id` in `mod.toml` (`[a-z][a-z0-9_]{0,31}`) and replace every
 `starter_data:` in `content.toml` with it.

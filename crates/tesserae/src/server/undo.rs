@@ -106,6 +106,7 @@ impl Journal {
         *self = Self::default();
     }
 
+    #[cfg(test)]
     pub(super) fn record(&mut self, entry: Entry) {
         self.record_group(vec![entry]);
     }
@@ -159,7 +160,10 @@ pub(super) fn apply(
         ResMut<EntityStore>,
     ),
     (tables, items, world): (Res<ContentTables>, Res<Items>, Res<WorldSettings>),
-    mut history: ResMut<EditHistory>,
+    (mut history, containers): (
+        ResMut<EditHistory>,
+        Option<Res<super::container::Containers>>,
+    ),
     mut players: Query<(&Player, &mut Inventory)>,
     (mut rejected, mut needs, mut dropped): (
         MessageWriter<EditRejected>,
@@ -205,6 +209,7 @@ pub(super) fn apply(
             &mut settle,
             &mut group,
             action,
+            &|at| containers.as_ref().is_some_and(|c| c.holds_stacks(at)),
         )
     };
     match result {
@@ -255,6 +260,7 @@ fn restore(
     settle: &mut Settle,
     group: &mut [Entry],
     action: HistoryAction,
+    holds_stacks: &dyn Fn([i32; 3]) -> bool,
 ) -> Result<Vec<Stack>, Refused> {
     let undoing = action == HistoryAction::Undo;
     let step = |entry: &Entry| {
@@ -273,8 +279,17 @@ fn restore(
         if meshes.is_unlit(chunk) {
             return Err(RejectReason::Busy.into());
         }
-        if store.occupants(entry.at, &tables.fluids) != Some(step(entry).0) {
+        let here = store.occupants(entry.at, &tables.fluids);
+        if here.map(|o| as_closed(tables, o)) != Some(as_closed(tables, step(entry).0)) {
             return Err(RejectReason::HistoryChanged.into());
+        }
+        if holds_stacks(entry.at)
+            && tables
+                .uses
+                .container(step(entry).1.solid.material())
+                .is_none()
+        {
+            return Err(RejectReason::ContainerNotEmpty(step(entry).0.solid.material()).into());
         }
     }
     let owed = owed(group, action, settle.entities);
@@ -289,10 +304,19 @@ fn restore(
     } else {
         group.iter().collect()
     };
+    // What is there, not what the entry saw: a Door may have toggled since.
+    let found: Vec<Occupants> = order
+        .iter()
+        .map(|entry| {
+            store
+                .occupants(entry.at, &tables.fluids)
+                .expect("checked above")
+        })
+        .collect();
     for (done, entry) in order.iter().enumerate() {
         if let Err(reason) = edit::set_occupants(store, meshes, tables, entry.at, step(entry).1) {
-            for undone in order[..done].iter().rev() {
-                let _ = edit::set_occupants(store, meshes, tables, undone.at, step(undone).0);
+            for (undone, was) in order[..done].iter().zip(&found).rev() {
+                let _ = edit::set_occupants(store, meshes, tables, undone.at, *was);
             }
             return Err(reason.into());
         }
@@ -375,6 +399,15 @@ fn short_item(
         item: item.clone(),
         count,
     })
+}
+
+/// `occupants` with a Door's open state read as its closed one, so an entry
+/// still matches a Door toggled since it was made (ADR-0023).
+fn as_closed(tables: &tesserae_core::Tables, occupants: Occupants) -> Occupants {
+    Occupants {
+        solid: tables.uses.as_closed(occupants.solid),
+        ..occupants
+    }
 }
 
 /// The Material a Player sees at a position: the solid's, else the fluid's.

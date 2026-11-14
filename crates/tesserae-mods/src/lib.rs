@@ -22,6 +22,7 @@ mod manifest;
 mod package;
 mod prompt;
 mod random;
+mod recipe;
 mod recording;
 mod registry;
 mod sandbox;
@@ -44,8 +45,8 @@ pub use declare::{
     Applied, Behaviour, DEFAULT_REMOVE_TIME, ITEM_SIZE_M, ItemDef, MATERIAL_TEXTURE_BYTES,
     MATERIAL_TEXTURE_EDGE, MAX_BEHAVIOURS_PER_MOD, MAX_BIOMES_PER_MOD, MAX_ITEMS,
     MAX_ITEMS_PER_MOD, MAX_MATERIALS, MAX_NAME_BYTES, MAX_ORES_PER_MOD, MAX_PER_MOD, MAX_SHAPES,
-    MAX_STACK, MAX_TOOLS_PER_MOD, ToolDef, ToolKind, ViewParams, apply, resolve, resolve_biomes,
-    resolve_items,
+    MAX_STACK, MAX_TOOLS_PER_MOD, MAX_VOXEL_USES_PER_MOD, ToolDef, ToolKind, ViewParams, apply,
+    resolve, resolve_biomes, resolve_items,
 };
 pub use error::ModError;
 pub use limits::{MAX_COMMANDS, ManifestLimits, ModLimits};
@@ -57,6 +58,7 @@ pub use manifest::{
 };
 pub use package::{Staged, stage};
 pub use prompt::{confirm_trust, trust_prompt};
+pub use recipe::{DeclaredRecipes, MAX_RECIPES, MAX_RECIPES_PER_MOD};
 pub use registry::{Kind, Registry, RegistryMismatch};
 pub use sandbox::{ModFault, ModInstance};
 pub use sound::{Sound, Sounds, Soundscape, resolve_sounds};

@@ -30,6 +30,8 @@ pub(super) fn empty() -> Declaration {
         material_sounds: Vec::new(),
         soundscapes: Vec::new(),
         cause_sounds: Vec::new(),
+        recipes: Vec::new(),
+        voxel_uses: Vec::new(),
     }
 }
 
@@ -680,6 +682,11 @@ fn every_cause_binds_from_a_component() {
         (C::Death, Cause::Death),
         (C::Swimming, Cause::Swimming),
         (C::Floating, Cause::Floating),
+        (C::DoorOpen, Cause::DoorOpen),
+        (C::DoorClose, Cause::DoorClose),
+        (C::ContainerOpen, Cause::ContainerOpen),
+        (C::ContainerClose, Cause::ContainerClose),
+        (C::Craft, Cause::Craft),
     ];
     let game = Declaration {
         sounds: vec![effect("thud")],

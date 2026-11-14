@@ -448,6 +448,39 @@ fn component() -> Declaration {
                 sound: "full:crack".into(),
             })
             .into(),
+        recipes: vec![content::RecipeDef {
+            inputs: vec![
+                content::RecipeStack {
+                    item: "full:log".into(),
+                    count: 2,
+                },
+                content::RecipeStack {
+                    item: "full:pebble".into(),
+                    count: 1,
+                },
+            ],
+            output: content::RecipeStack {
+                item: "full:log".into(),
+                count: 16,
+            },
+            station: "hand".into(),
+        }],
+        voxel_uses: vec![
+            content::VoxelUse {
+                material: "full:wood".into(),
+                kind: content::VoxelUseKind::Door(content::DoorDef {
+                    open: "full:ash".into(),
+                    width_m: Some(1.5),
+                    height_m: None,
+                }),
+                shape: None,
+            },
+            content::VoxelUse {
+                material: "full:rock".into(),
+                kind: content::VoxelUseKind::Station("bench".into()),
+                shape: Some("core:slab".into()),
+            },
+        ],
     }
 }
 
@@ -512,7 +545,7 @@ fn absent_optional_values_stay_absent_rather_than_defaulting() {
     assert!(world.caves.is_none() && world.smoothing.is_none() && world.water.is_none());
     assert!(world.movement.is_none() && world.character.is_none() && world.ground.is_none());
     assert!(d.view.is_none() && d.fluids.is_empty() && d.tools.is_empty());
-    assert!(d.items.is_empty() && d.survival.is_none());
+    assert!(d.items.is_empty() && d.survival.is_none() && d.recipes.is_empty());
     assert!(world.climate.is_none() && d.biomes.is_empty() && d.ores.is_empty());
     assert_eq!(d.materials[0].remove_time_s, None);
     assert_eq!(d.materials[0].contact_damage_per_s, None);
@@ -821,7 +854,43 @@ fn water_motion_causes_parse_from_data() {
 }
 
 #[test]
+fn use_and_craft_causes_parse_from_data() {
+    use content::SoundCause as C;
+    let names = [
+        ("door-open", C::DoorOpen),
+        ("door-close", C::DoorClose),
+        ("container-open", C::ContainerOpen),
+        ("container-close", C::ContainerClose),
+        ("craft", C::Craft),
+    ];
+    let rows: String = names
+        .iter()
+        .map(|(name, _)| format!("[[cause-sounds]]\ncause='{name}'\nsound='full:thud'\n"))
+        .collect();
+    let declaration = parse(&rows).unwrap();
+    let parsed: Vec<_> = declaration.cause_sounds.iter().map(|c| c.cause).collect();
+    assert_eq!(parsed, names.map(|(_, cause)| cause));
+}
+
+#[test]
 fn burn_cause_parses_from_data() {
     let declaration = parse("[[cause-sounds]]\ncause='burn'\nsound='full:fire'\n").unwrap();
     assert_eq!(declaration.cause_sounds[0].cause, content::SoundCause::Burn);
+}
+
+#[test]
+fn a_container_row_parses_from_data_with_or_without_slots() {
+    let declaration = parse(
+        "[[voxel-uses]]\nkind='container'\nmaterial='full:chest'\n\
+         [[voxel-uses]]\nkind='container'\nmaterial='full:vault'\nslots=54\n",
+    )
+    .unwrap();
+    let kinds: Vec<_> = declaration.voxel_uses.iter().map(|u| &u.kind).collect();
+    assert_eq!(
+        kinds,
+        [
+            &content::VoxelUseKind::Container(None),
+            &content::VoxelUseKind::Container(Some(54))
+        ]
+    );
 }

@@ -75,6 +75,29 @@ once each, up to 8 `ambient-bed`s (an `ambient` Sound by full name and a volume
 from 0 to 1), up to 8 `music` Sounds by full name, and an optional `silence-s`
 `sound-range` from 0 to 3600 seconds, 60 to 180 when absent.
 
+Line 0.3 then gained `recipes` on its `declaration`, appended after
+`cause-sounds` in the same way; a Declaration for 0.1 or 0.2 loads with none. A
+`recipe-def` carries 1 to 9 `inputs` and one `output`, each a `recipe-stack` of
+an Item by full name and a count, the output's at most its Item's `max-stack`,
+and a required `station`: `hand` or a Station's tag. Names resolve after every
+Mod has declared, implicit Items included. A Mod declares at most 256 and a
+World holds at most 1024. Line 0.3 then gained `voxel-uses` on its
+`declaration`, appended after `recipes` in the same way; a Declaration for 0.1
+or 0.2 loads with none. A `voxel-use` names a solid Material by full name and a
+closed `voxel-use-kind`: `door` with a `door-def`, its open Material's full
+name, through which bodies pass but rays do not, and an optional `width-m` and
+`height-m`, a size in metres from 0.5 to 4 wide and 1 to 4 tall, 1 by 2 when
+absent; `container` with an optional slot count from 1 to 54, 27 when absent; or
+`station` with a tag, which Recipes name in `station`; Materials may share a
+tag, and `hand` is reserved. A Material is in at most one row, as its `material`
+or as a Door's open one. A `voxel-use` then gained an optional `shape`, a Shape
+by full name that a Player's Place of its Material always uses; a Door's is
+drawn closed against its own +Z and turned a quarter about its hinge by Use.
+
+`sound-cause` then gained `door-open`, `door-close`, `container-open`,
+`container-close` and `craft`, appended after `burn`. A Game binds them in
+`cause-sounds` like any Cause; one that binds none plays them silent.
+
 ## What is not frozen
 
 Line `0.x` is pre-release. Later gameplay steps may add new lines, and

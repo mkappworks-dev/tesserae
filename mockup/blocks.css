@@ -1,0 +1,131 @@
+/* /blocks: the Terra block gallery. */
+.blocks {
+  display: grid;
+  gap: 34px;
+}
+.blocks section {
+  display: grid;
+  gap: 14px;
+}
+.blocks-heading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 18px;
+}
+.blocks-heading h3 {
+  margin: 0;
+  font-size: 18px;
+}
+.blocks-heading .muted {
+  margin: 6px 0 0;
+  max-width: 62ch;
+}
+.blocks-heading .item-eyebrow {
+  margin: 0 0 5px;
+}
+.blocks-control {
+  display: grid;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.blocks-control .select-trigger {
+  min-width: 140px;
+  padding: 7px 10px;
+  background: var(--panel-raised);
+  color: var(--ink);
+  border: 1px solid var(--edge);
+  border-radius: 6px;
+}
+.block-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 12px;
+}
+.block-card {
+  display: grid;
+  grid-template-columns: 96px 1fr;
+  gap: 12px;
+  align-items: center;
+  padding: 12px;
+  background: var(--panel-raised);
+  border: 1px solid var(--edge);
+  border-radius: var(--radius);
+}
+.block-cube {
+  width: 96px;
+  height: 96px;
+}
+.block-meta {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.block-meta small {
+  color: var(--muted);
+}
+.block-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.block-tags span {
+  font-size: 11px;
+  padding: 1px 6px;
+  border: 1px solid var(--edge);
+  border-radius: 999px;
+  color: var(--muted);
+}
+.block-faces {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+}
+.block-faces figure,
+.shape-card,
+.door-grid figure {
+  margin: 0;
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+}
+.block-faces img {
+  image-rendering: pixelated;
+  border: 1px solid var(--edge);
+  background: repeating-conic-gradient(#2a312c 0% 25%, #1c221e 0% 50%) 0 0 / 8px
+    8px;
+}
+.block-faces figcaption,
+.shape-card figcaption,
+.door-grid figcaption {
+  font-size: 11px;
+  color: var(--muted);
+}
+.shape-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 12px;
+}
+.shape-card {
+  padding: 12px;
+  background: var(--panel-raised);
+  border: 1px solid var(--edge);
+  border-radius: var(--radius);
+}
+.door-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 12px;
+}
+.door-grid figure {
+  padding: 12px;
+  background: var(--panel-raised);
+  border: 1px solid var(--edge);
+  border-radius: var(--radius);
+}
+.door-scene {
+  width: 100%;
+  max-width: 420px;
+  aspect-ratio: 21 / 16;
+}

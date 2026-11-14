@@ -3,10 +3,12 @@
 use super::{
     aim::{Sent, Target},
     camera::FlyCamera,
-    edit::{Holding, Hotbar},
+    edit::{Catalogue, Holding, Hotbar},
     material_textures::{PreviewContent, Textures},
 };
+use crate::content::ContentCatalogue;
 use crate::render::{chunk_material::FLAME_SLOT, texture_atlas};
+use crate::server::edit::AimGhost;
 use crate::world::WorldSettings;
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::visibility::RenderLayers;
@@ -56,7 +58,8 @@ pub(super) struct HandCamera;
 pub(super) struct Model {
     pub(super) held: Option<HandModel>,
     pub(super) mesh: Handle<Mesh>,
-    ghost: Handle<StandardMaterial>,
+    /// `None` for what Place puts nothing down with.
+    ghost: Option<Handle<StandardMaterial>>,
     pub(super) hand: Handle<StandardMaterial>,
 }
 pub(super) fn plugin(app: &mut App) {
@@ -207,27 +210,26 @@ fn fire_mesh() -> Mesh {
 }
 
 pub(super) fn model(
-    mut commands: Commands,
     (hotbar, content, looks): (Res<Hotbar>, PreviewContent, Res<super::drops::Looks>),
     mut model: ResMut<Model>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    old: Query<Entity, With<Ghost>>,
 ) {
     let wanted = hand_model(&hotbar, &looks.0);
     if model.held == Some(wanted) && !content.changed() && !looks.is_changed() {
         return;
     }
-    for entity in &old {
-        commands.entity(entity).despawn();
-    }
     // The old mesh and materials go with their last handle, which the viewmodel
     // may still hold while a slot switch lowers it.
     model.held = Some(wanted);
     let (mesh, hand, ghost) = match wanted {
-        HandModel::Nothing => return,
+        HandModel::Nothing => {
+            model.ghost = None;
+            return;
+        }
         HandModel::Block(held) => {
             let Some(mesh) = item_mesh(held, &content.catalogue.0) else {
+                model.ghost = None;
                 return;
             };
             let rgba = content.swatches.rgba(held);
@@ -249,17 +251,7 @@ pub(super) fn model(
     };
     model.mesh = meshes.add(mesh);
     model.hand = materials.add(hand);
-    if let Some(ghost) = ghost {
-        model.ghost = materials.add(ghost);
-        commands.spawn((
-            Ghost,
-            bevy::light::NotShadowCaster,
-            Mesh3d(model.mesh.clone()),
-            MeshMaterial3d(model.ghost.clone()),
-            Transform::default(),
-            Visibility::Hidden,
-        ));
-    }
+    model.ghost = ghost.map(|ghost| materials.add(ghost));
 }
 fn item_cube_mesh() -> Mesh {
     let mut mesh = Mesh::from(Cuboid::new(0.8, 0.8, 0.8)).translated_by(Vec3::splat(0.5));
@@ -267,38 +259,158 @@ fn item_cube_mesh() -> Mesh {
     mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, vec![[1.0f32; 4]; count]);
     mesh
 }
+/// What Place puts down with this hand: the held Item's Material in the
+/// Shape and Orientation sent with it.
+fn placing(hotbar: &Hotbar) -> Holding {
+    match hotbar.held() {
+        Holding::Solid {
+            material, shape, ..
+        } if hotbar.outside.is_none() => Holding::Solid {
+            material,
+            shape,
+            orientation: hotbar.orientation,
+        },
+        held => held,
+    }
+}
+
+/// What Place of `held` at the Server's `ghost` puts down, and each cell's
+/// corner in metres, by the rule the Server places by: a Door whole, turned
+/// to its facing and hinge, and any other fixed Shape in the Player's
+/// Orientation.
+pub(super) fn ghost_voxels(
+    held: Holding,
+    ghost: AimGhost,
+    catalogue: &ContentCatalogue,
+    voxel_size: f32,
+) -> (Holding, Vec<Vec3>) {
+    let Holding::Solid {
+        material,
+        shape,
+        orientation,
+    } = held
+    else {
+        return (held, vec![ghost.at]);
+    };
+    let row = catalogue.material(material);
+    let door = row.and_then(|m| m.door).zip(ghost.door);
+    let (near, hinge) = door.map_or((0, 0), |(_, aim)| (aim.near, aim.hinge));
+    let voxel = tesserae_core::placed_in(
+        door.map(|(door, _)| door),
+        row.and_then(|m| m.shape),
+        tesserae_core::Voxel::shaped(material, shape, orientation),
+        near,
+        hinge,
+    );
+    let drawn = Holding::Solid {
+        material,
+        shape: voxel.shape(),
+        orientation: tesserae_core::Orientation::from_bits(voxel.orientation()).unwrap_or_default(),
+    };
+    let Some((door, aim)) = door else {
+        return (drawn, vec![ghost.at]);
+    };
+    let foot = (ghost.at / voxel_size).round().as_ivec3().to_array();
+    let across = tesserae_core::Across::of(aim.near);
+    let cells = door
+        .footprint(voxel_size, foot, across, aim.rise)
+        .into_iter()
+        .map(|cell| Vec3::from_array(cell.map(|i| i as f32 * voxel_size)))
+        .collect();
+    (drawn, cells)
+}
+
+type GhostMesh = (Holding, AssetId<StandardMaterial>, Handle<Mesh>);
+type Ghosts<'w, 's> = Query<
+    'w,
+    's,
+    (
+        &'static mut Transform,
+        &'static mut Visibility,
+        &'static mut Mesh3d,
+        &'static mut MeshMaterial3d<StandardMaterial>,
+    ),
+    With<Ghost>,
+>;
+
+#[allow(clippy::too_many_arguments)]
 pub(super) fn position(
+    mut commands: Commands,
     (removal, dead): (
         Option<Res<super::removal::Progress>>,
         Option<Res<super::death::Dead>>,
     ),
     (covers, layout): (super::menu::Covers, Option<Res<super::layout::LayoutMode>>),
-    world: Res<WorldSettings>,
-    hotbar: Res<Hotbar>,
+    (world, hotbar, catalogue, model): (
+        Res<WorldSettings>,
+        Res<Hotbar>,
+        Res<Catalogue>,
+        Res<Model>,
+    ),
     (target, sent, time): (Res<Target>, Res<Sent>, Res<Time>),
-    mut ghost: Query<(&mut Transform, &mut Visibility), With<Ghost>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    // The ghost's own mesh: a Door's turn is not the hand's.
+    mut drawn: Local<Option<GhostMesh>>,
+    mut ghosts: Ghosts,
 ) {
     let menu_open = super::menu::covered(&covers) || !super::death::alive(dead);
-    let cell = (!removal.is_some_and(|r| r.active())
+    let shown = (!removal.is_some_and(|r| r.active())
         && !menu_open
         && !layout.is_some_and(|layout| layout.on)
         && target.current(&sent, time.elapsed_secs_f64())
         && hotbar.held() != Holding::Fire)
         .then_some(target.0.ghost)
-        .flatten();
-    for (mut transform, mut visibility) in &mut ghost {
-        *visibility = if cell.is_some() {
-            Visibility::Visible
-        } else {
-            Visibility::Hidden
+        .flatten()
+        .zip(model.ghost.clone());
+    let Some((ghost, material)) = shown else {
+        for (_, mut visibility, _, _) in &mut ghosts {
+            visibility.set_if_neq(Visibility::Hidden);
+        }
+        return;
+    };
+    let (holding, cells) = ghost_voxels(placing(&hotbar), ghost, &catalogue.0, world.voxel_size);
+    if drawn
+        .as_ref()
+        .is_none_or(|(h, m, _)| *h != holding || *m != material.id())
+    {
+        if let Some((_, _, old)) = drawn.take() {
+            meshes.remove(old.id());
+        }
+        let Some(mesh) = item_mesh(holding, &catalogue.0) else {
+            return;
         };
-        if let Some(cell) = cell {
-            transform.translation = cell;
-            transform.scale = Vec3::splat(world.voxel_size);
+        *drawn = Some((holding, material.id(), meshes.add(mesh)));
+    }
+    let Some((_, _, mesh)) = drawn.as_ref() else {
+        return;
+    };
+    let scale = Vec3::splat(world.voxel_size);
+    let mut cells = cells.into_iter();
+    for (mut transform, mut visibility, mut mesh3d, mut tint) in &mut ghosts {
+        let Some(cell) = cells.next() else {
+            visibility.set_if_neq(Visibility::Hidden);
+            continue;
+        };
+        *transform = Transform::from_translation(cell).with_scale(scale);
+        visibility.set_if_neq(Visibility::Visible);
+        if mesh3d.0 != *mesh {
+            mesh3d.0 = mesh.clone();
+        }
+        if tint.0 != material {
+            tint.0 = material.clone();
         }
     }
+    for cell in cells {
+        commands.spawn((
+            Ghost,
+            bevy::light::NotShadowCaster,
+            Mesh3d(mesh.clone()),
+            MeshMaterial3d(material.clone()),
+            Transform::from_translation(cell).with_scale(scale),
+            Visibility::Visible,
+        ));
+    }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -308,7 +420,7 @@ mod tests {
     };
     use crate::content::{CatalogueShape, ContentCatalogue};
     use crate::server::tool::ToolId;
-    use tesserae_core::{Orientation, SHAPE_STAIR};
+    use tesserae_core::{Orientation, SHAPE_FULL_CUBE, SHAPE_STAIR};
     fn catalogue() -> ContentCatalogue {
         let tables = crate::server::fixture_tables();
         ContentCatalogue {
@@ -317,6 +429,7 @@ mod tests {
                     id: id as u8,
                     name: format!("shape{id}"),
                     turnable: id != 0,
+                    fixed: false,
                     geometry: tables.shapes.preview_geometry(id as u8),
                 })
                 .collect(),
@@ -381,7 +494,10 @@ mod tests {
         app.world_mut().resource_mut::<Sent>().last = Some(view);
         {
             let mut target = app.world_mut().resource_mut::<Target>();
-            target.0.ghost = Some(Vec3::new(3.0, 4.0, 5.0));
+            target.0.ghost = Some(AimGhost {
+                at: Vec3::new(3.0, 4.0, 5.0),
+                door: None,
+            });
             target.1 = Some(view);
         }
         app.update();
@@ -423,6 +539,90 @@ mod tests {
                 .all(|v| *v == Visibility::Hidden)
         );
     }
+    #[test]
+    fn a_ghost_shows_every_cell_and_the_turn_the_server_places_a_fixed_shape_in() {
+        use crate::content::CatalogueMaterial;
+        use crate::server::edit::DoorAim;
+        use tesserae_core::mesh::{NEG_Z, POS_X, POS_Z};
+        use tesserae_core::{Door, Rise, SHAPE_POST, SHAPE_SLAB};
+        let (door, bench, rock) = (40, 42, tesserae_core::testgen::fixtures().ground.rock);
+        let material = |id, shape, door| CatalogueMaterial {
+            remove_time: tesserae_mods::DEFAULT_REMOVE_TIME,
+            id,
+            name: format!("m:{id}"),
+            solid: true,
+            fluid: None,
+            burns: false,
+            shape,
+            door,
+        };
+        let panel = Door {
+            closed: door,
+            open: door + 1,
+            width_m: 1.0,
+            height_m: 2.0,
+            shape: Some(SHAPE_SLAB),
+        };
+        let catalogue = ContentCatalogue {
+            materials: vec![
+                material(door, Some(SHAPE_SLAB), Some(panel)),
+                material(bench, Some(SHAPE_POST), None),
+                material(rock, None, None),
+            ],
+            ..catalogue()
+        };
+        let ghost = |door| AimGhost {
+            at: Vec3::new(5.0, 8.0, 5.0) * 0.25,
+            door,
+        };
+        let aim = DoorAim {
+            near: NEG_Z,
+            hinge: POS_X,
+            rise: Rise::Up,
+        };
+        let turned = Orientation::IDENTITY.turned();
+        let held = |material, shape| Holding::Solid {
+            material,
+            shape,
+            orientation: turned,
+        };
+
+        let (drawn, cells) =
+            ghost_voxels(held(door, SHAPE_SLAB), ghost(Some(aim)), &catalogue, 0.25);
+        let Holding::Solid {
+            shape, orientation, ..
+        } = drawn
+        else {
+            panic!("{drawn:?}")
+        };
+        assert_eq!(shape, SHAPE_SLAB);
+        assert_eq!(orientation.face_of(POS_Z), NEG_Z, "closed on the near face");
+        assert_eq!(
+            orientation.turned().face_of(POS_Z),
+            POS_X,
+            "opens onto the hinge"
+        );
+        let mut expected: Vec<_> = (8..16)
+            .flat_map(|y| (4..8).map(move |x| Vec3::new(x as f32, y as f32, 5.0) * 0.25))
+            .collect();
+        let mut cells = cells;
+        let order = |a: &Vec3, b: &Vec3| a.to_array().partial_cmp(&b.to_array()).unwrap();
+        expected.sort_by(order);
+        cells.sort_by(order);
+        assert_eq!(cells, expected, "1 m by 2 m in 0.25 m Voxels");
+
+        let one = vec![ghost(None).at];
+        assert_eq!(
+            ghost_voxels(held(bench, SHAPE_FULL_CUBE), ghost(None), &catalogue, 0.25),
+            (held(bench, SHAPE_POST), one.clone()),
+            "a table in the Player's Orientation"
+        );
+        assert_eq!(
+            ghost_voxels(held(rock, SHAPE_STAIR), ghost(None), &catalogue, 0.25),
+            (held(rock, SHAPE_STAIR), one)
+        );
+    }
+
     #[test]
     fn the_hand_picks_a_model_per_held_kind() {
         use crate::content::ItemLook;

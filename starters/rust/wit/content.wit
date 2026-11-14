@@ -339,6 +339,47 @@ interface content {
         kind: tool-kind,
     }
 
+    /// A Door: a size in metres, so it stands as large at every Voxel size.
+    /// One Item places the whole Door, Use toggles all of it, and removing any
+    /// Voxel of it removes it all and drops the closed one's Item.
+    record door-def {
+        /// Use swaps it with this solid Material, by full name: the open
+        /// state, which bodies pass through.
+        open: string,
+        /// From 0.5 to 4; 1 when absent.
+        width-m: option<f32>,
+        /// From 1 to 4; 2 when absent.
+        height-m: option<f32>,
+    }
+
+    /// What Use does to a Voxel of a Material. Closed: a new kind needs new
+    /// engine mechanism, so it arrives with the contract line that adds it.
+    variant voxel-use-kind {
+        door(door-def),
+        /// Holds Stacks of its own, in this many slots from 1 to 54; 27 when
+        /// absent. Removing it while it holds any is refused to the Player, and
+        /// anything else that removes it spills them as Dropped items.
+        container(option<u8>),
+        /// Offers the Recipes whose `station` is this tag. Materials may share
+        /// a tag; `hand` is reserved.
+        station(string),
+    }
+
+    /// A Material that Use acts on. The engine runs the kind; a Mod is never
+    /// called when it is used.
+    record voxel-use {
+        /// A solid Material, by full name: a Door's closed state, or the
+        /// Container.
+        material: string,
+        kind: voxel-use-kind,
+        /// A Shape, by full name, that a Player's Place of the Material always
+        /// uses whatever Shape they chose; none keeps their choice. A Door's
+        /// Shape is drawn closed against its own +Z: the engine turns that to
+        /// face the Player, and Use turns it a quarter about its hinge edge,
+        /// the side of the cell the Player aimed at.
+        shape: option<string>,
+    }
+
     /// A thing a Player can carry. A removed Voxel of its `material` drops one;
     /// nothing else makes a drop yet.
     record item-def {
@@ -355,6 +396,24 @@ interface content {
         /// Hunger eating one restores, greater than 0 and at most 1000; none
         /// is not food.
         food: option<f32>,
+    }
+
+    /// An Item, `<mod id>:<name>`, and how many.
+    record recipe-stack {
+        item: string,
+        count: u32,
+    }
+
+    /// What one Craft spends from the Inventory and gives to it. Item names
+    /// resolve after every Mod's Declaration, the implicit Item of each
+    /// placeable Material included.
+    record recipe-def {
+        /// 1 to 9 rows, each a different Item and a count of at least 1.
+        inputs: list<recipe-stack>,
+        /// A count from 1 to the Item's `max-stack`.
+        output: recipe-stack,
+        /// `hand`, craftable anywhere, or the tag of the Station it needs.
+        station: string,
     }
 
     /// The rules of Survival, from the Game only. Every field is optional and
@@ -593,6 +652,17 @@ interface content {
         floating,
         /// The body enters a heat-emitting fluid.
         burn,
+        /// A Door opens, heard at the Door.
+        door-open,
+        /// A Door closes, heard at the Door.
+        door-close,
+        /// A Player opens a Container, heard at the Container.
+        container-open,
+        /// A Player's Container session ends with the Container still there,
+        /// heard at the Container.
+        container-close,
+        /// A Craft lands, heard at the Player.
+        craft,
     }
 
     /// Binds a non-Voxel Cause to an `effects` Sound. A Cause left unbound is
@@ -645,5 +715,12 @@ interface content {
         soundscapes: list<soundscape-def>,
         /// From the Game only, like `tools`; each Cause at most once.
         cause-sounds: list<cause-sound>,
+        /// At most 256 rows per Mod and 1024 in a World, from any Mod. Names
+        /// resolve after every Mod has declared.
+        recipes: list<recipe-def>,
+        /// At most 64 rows per Mod, from any Mod. Names resolve after every Mod
+        /// has declared; a Material is in at most one row, as its `material` or
+        /// as a Door's open one.
+        voxel-uses: list<voxel-use>,
     }
 }

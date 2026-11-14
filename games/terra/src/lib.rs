@@ -13,8 +13,8 @@ use tesserae::mods::commands::{Fill, Placement, SourceFill};
 use tesserae::mods::content::{
     Appearance, BiomeDef, BurnAfter, BurnEnd, ClimateParams, CombustionDef, FluidDef, FluidState,
     GroundParams, HeatDef, ItemDef, MaterialDef, Occlusion, OreDef, Reactant, ReactionDef,
-    ReactionSide, RenderClass, ShapeDef, SkyFog, SurfaceFeature, ToolDef, ToolKind, ViewParams,
-    WaterParams,
+    ReactionSide, RecipeDef, RecipeStack, RenderClass, ShapeDef, SkyFog, SurfaceFeature, ToolDef,
+    ToolKind, ViewParams, VoxelUse, VoxelUseKind, WaterParams,
 };
 use tesserae::mods::types::{
     Arm, BoxM, CollisionBox, ConnectDef, LogLevel, NodeBox, Srgba, Vec3, Voxel,
@@ -166,6 +166,57 @@ fn fence() -> ShapeDef {
     }
 }
 
+/// A Door's panel, 3/16 thick against its own +Z, which the engine turns to
+/// face the Player and Use turns about its hinge.
+fn panel() -> ShapeDef {
+    ShapeDef {
+        name: "panel".into(),
+        boxes: vec![NodeBox {
+            min: (0, 0, 13),
+            max: (16, 16, 16),
+        }],
+        collision: None,
+        connect: None,
+    }
+}
+
+/// A Workbench's: four legs under a thick top. A body collides with the whole
+/// cell, so nothing snags between the legs.
+fn table() -> ShapeDef {
+    let leg = |x, z| NodeBox {
+        min: (x, 0, z),
+        max: (x + 3, 12, z + 3),
+    };
+    ShapeDef {
+        name: "table".into(),
+        boxes: vec![
+            leg(1, 1),
+            leg(12, 1),
+            leg(1, 12),
+            leg(12, 12),
+            NodeBox {
+                min: (0, 12, 0),
+                max: (16, 16, 16),
+            },
+        ],
+        collision: Some(vec![CollisionBox {
+            min: (0, 0, 0),
+            max: (16, 16, 16),
+        }]),
+        connect: None,
+    }
+}
+
+/// Cut out between its rails, so what stands behind a Gate shows through.
+fn gate(name: &str) -> MaterialDef {
+    MaterialDef {
+        dimming: 0,
+        occlusion: Occlusion::Never,
+        render: RenderClass::Cutout,
+        ..solid(name)
+    }
+}
+
 fn appearance(material: &str, [r, g, b, a]: [u8; 4]) -> Appearance {
     Appearance {
         material: material.into(),
@@ -266,8 +317,14 @@ impl Guest for Terra {
                 solid("snow"),
                 solid("iron"),
                 solid("melon"),
+                solid("workbench"),
+                solid("chest"),
+                solid("door"),
+                solid("door_open"),
+                gate("gate"),
+                gate("gate_open"),
             ],
-            shapes: vec![fence()],
+            shapes: vec![fence(), panel(), table()],
             appearance: vec![
                 appearance("lamp", [245, 227, 184, 255]),
                 appearance("lava", [230, 72, 16, 255]),
@@ -285,6 +342,12 @@ impl Guest for Terra {
                 appearance("snow", [236, 240, 246, 255]),
                 appearance("iron", [150, 120, 104, 255]),
                 appearance("melon", [84, 150, 56, 255]),
+                appearance("workbench", [214, 190, 140, 255]),
+                appearance("chest", [128, 62, 40, 255]),
+                appearance("door", [128, 88, 50, 255]),
+                appearance("door_open", [128, 88, 50, 255]),
+                appearance("gate", [140, 97, 55, 255]),
+                appearance("gate_open", [140, 97, 55, 255]),
             ],
             world: Some(world),
             view: Some(ViewParams {
@@ -436,6 +499,58 @@ impl Guest for Terra {
                     max_stack: None,
                     food: Some(6.0),
                 },
+                ItemDef {
+                    name: "workbench".into(),
+                    size_m: 0.25,
+                    color: Srgba {
+                        r: 167,
+                        g: 116,
+                        b: 63,
+                        a: 255,
+                    },
+                    material: Some("terra:workbench".into()),
+                    max_stack: None,
+                    food: None,
+                },
+                ItemDef {
+                    name: "chest".into(),
+                    size_m: 0.25,
+                    color: Srgba {
+                        r: 107,
+                        g: 68,
+                        b: 35,
+                        a: 255,
+                    },
+                    material: Some("terra:chest".into()),
+                    max_stack: None,
+                    food: None,
+                },
+                ItemDef {
+                    name: "door".into(),
+                    size_m: 0.25,
+                    color: Srgba {
+                        r: 128,
+                        g: 88,
+                        b: 50,
+                        a: 255,
+                    },
+                    material: Some("terra:door".into()),
+                    max_stack: None,
+                    food: None,
+                },
+                ItemDef {
+                    name: "gate".into(),
+                    size_m: 0.25,
+                    color: Srgba {
+                        r: 140,
+                        g: 97,
+                        b: 55,
+                        a: 255,
+                    },
+                    material: Some("terra:gate".into()),
+                    max_stack: None,
+                    food: None,
+                },
             ],
             biomes: vec![
                 BiomeDef {
@@ -449,11 +564,18 @@ impl Guest for Terra {
                         fog: (136, 160, 190),
                     }),
                     cave_scale: None,
-                    // One in every 16 by 16 m of grass: found while exploring, not a carpet.
-                    surface_features: vec![SurfaceFeature {
-                        material: "terra:melon".into(),
-                        spacing_m: 16.0,
-                    }],
+                    // A melon in every 16 by 16 m of grass is found while exploring, not a
+                    // carpet; Wood every 6 m gathers a Workbench, Chest and Door in a short walk.
+                    surface_features: vec![
+                        SurfaceFeature {
+                            material: "terra:melon".into(),
+                            spacing_m: 16.0,
+                        },
+                        SurfaceFeature {
+                            material: "terra:wood".into(),
+                            spacing_m: 6.0,
+                        },
+                    ],
                 },
                 BiomeDef {
                     soundscape: Some("terra:dry".into()),
@@ -496,6 +618,171 @@ impl Guest for Terra {
             material_sounds: audio::materials(),
             soundscapes: audio::soundscapes(),
             cause_sounds: audio::causes(),
+            recipes: vec![
+                RecipeDef {
+                    inputs: vec![RecipeStack {
+                        item: "terra:wood".into(),
+                        count: 4,
+                    }],
+                    output: RecipeStack {
+                        item: "terra:workbench".into(),
+                        count: 1,
+                    },
+                    station: "hand".into(),
+                },
+                RecipeDef {
+                    inputs: vec![
+                        RecipeStack {
+                            item: "terra:rock".into(),
+                            count: 2,
+                        },
+                        RecipeStack {
+                            item: "terra:dirt".into(),
+                            count: 1,
+                        },
+                    ],
+                    output: RecipeStack {
+                        item: "terra:brick".into(),
+                        count: 2,
+                    },
+                    station: "hand".into(),
+                },
+                RecipeDef {
+                    inputs: vec![RecipeStack {
+                        item: "terra:rock".into(),
+                        count: 1,
+                    }],
+                    output: RecipeStack {
+                        item: "terra:sand".into(),
+                        count: 2,
+                    },
+                    station: "hand".into(),
+                },
+                RecipeDef {
+                    inputs: vec![RecipeStack {
+                        item: "terra:leaves".into(),
+                        count: 4,
+                    }],
+                    output: RecipeStack {
+                        item: "terra:dirt".into(),
+                        count: 1,
+                    },
+                    station: "hand".into(),
+                },
+                RecipeDef {
+                    inputs: vec![RecipeStack {
+                        item: "terra:wood".into(),
+                        count: 8,
+                    }],
+                    output: RecipeStack {
+                        item: "terra:chest".into(),
+                        count: 1,
+                    },
+                    station: "workbench".into(),
+                },
+                RecipeDef {
+                    inputs: vec![RecipeStack {
+                        item: "terra:wood".into(),
+                        count: 3,
+                    }],
+                    output: RecipeStack {
+                        item: "terra:door".into(),
+                        count: 1,
+                    },
+                    station: "workbench".into(),
+                },
+                RecipeDef {
+                    inputs: vec![RecipeStack {
+                        item: "terra:wood".into(),
+                        count: 2,
+                    }],
+                    output: RecipeStack {
+                        item: "terra:gate".into(),
+                        count: 1,
+                    },
+                    station: "workbench".into(),
+                },
+                RecipeDef {
+                    inputs: vec![RecipeStack {
+                        item: "terra:sand".into(),
+                        count: 2,
+                    }],
+                    output: RecipeStack {
+                        item: "terra:glass".into(),
+                        count: 1,
+                    },
+                    station: "workbench".into(),
+                },
+                RecipeDef {
+                    inputs: vec![
+                        RecipeStack {
+                            item: "terra:iron".into(),
+                            count: 1,
+                        },
+                        RecipeStack {
+                            item: "terra:glass".into(),
+                            count: 1,
+                        },
+                    ],
+                    output: RecipeStack {
+                        item: "terra:lamp".into(),
+                        count: 2,
+                    },
+                    station: "workbench".into(),
+                },
+                RecipeDef {
+                    inputs: vec![RecipeStack {
+                        item: "terra:sand".into(),
+                        count: 4,
+                    }],
+                    output: RecipeStack {
+                        item: "terra:rock".into(),
+                        count: 1,
+                    },
+                    station: "workbench".into(),
+                },
+                RecipeDef {
+                    inputs: vec![RecipeStack {
+                        item: "terra:wood".into(),
+                        count: 1,
+                    }],
+                    output: RecipeStack {
+                        item: "terra:ash".into(),
+                        count: 2,
+                    },
+                    station: "workbench".into(),
+                },
+            ],
+            voxel_uses: vec![
+                VoxelUse {
+                    material: "terra:door".into(),
+                    kind: VoxelUseKind::Door(tesserae::mods::content::DoorDef {
+                        open: "terra:door_open".into(),
+                        width_m: Some(1.0),
+                        height_m: Some(2.0),
+                    }),
+                    shape: Some("terra:panel".into()),
+                },
+                VoxelUse {
+                    material: "terra:gate".into(),
+                    kind: VoxelUseKind::Door(tesserae::mods::content::DoorDef {
+                        open: "terra:gate_open".into(),
+                        width_m: Some(1.0),
+                        height_m: Some(1.0),
+                    }),
+                    shape: Some("terra:panel".into()),
+                },
+                VoxelUse {
+                    material: "terra:chest".into(),
+                    kind: VoxelUseKind::Container(None),
+                    shape: None,
+                },
+                VoxelUse {
+                    material: "terra:workbench".into(),
+                    kind: VoxelUseKind::Station("workbench".into()),
+                    shape: Some("terra:table".into()),
+                },
+            ],
             ores: vec![OreDef {
                 material: "terra:iron".into(),
                 min_depth_m: 5.0,

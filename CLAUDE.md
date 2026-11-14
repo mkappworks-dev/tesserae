@@ -31,7 +31,9 @@ a diff look smaller. YAML and JSON use `printWidth: 100` and preserve their own
 line breaks.
 
 `package.json` exists only to pin Prettier's version. Tesserae is a Rust
-workspace; there is no JavaScript in it.
+workspace; the only JavaScript is [`mockup/`](./mockup/), the browser mock of
+the game's UI, which is never shipped. A UI change lands there and is approved
+before the Client implements it.
 
 ## Branches
 

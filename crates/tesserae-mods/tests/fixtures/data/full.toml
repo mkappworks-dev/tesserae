@@ -259,3 +259,20 @@ sound = "full:crack"
 [[cause-sounds]]
 cause = "use-measured"
 sound = "full:crack"
+
+[[recipes]]
+inputs = [{ item = "full:log", count = 2 }, { item = "full:pebble", count = 1 }]
+output = { item = "full:log", count = 16 }
+station = "hand"
+
+[[voxel-uses]]
+kind = "door"
+material = "full:wood"
+open = "full:ash"
+width-m = 1.5
+
+[[voxel-uses]]
+kind = "station"
+material = "full:rock"
+tag = "bench"
+shape = "core:slab"

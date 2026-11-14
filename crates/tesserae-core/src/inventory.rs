@@ -35,6 +35,43 @@ pub enum Slot {
     Backpack(usize),
 }
 
+impl Slot {
+    fn at(self) -> At {
+        match self {
+            Slot::Hotbar(index) => At {
+                side: Side::First,
+                index,
+            },
+            Slot::Backpack(index) => At {
+                side: Side::Second,
+                index,
+            },
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
+pub enum Side {
+    First,
+    Second,
+}
+
+impl Side {
+    fn other(self) -> Self {
+        match self {
+            Side::First => Side::Second,
+            Side::Second => Side::First,
+        }
+    }
+}
+
+/// A slot of a [`SlotSets`], counted across its side's runs in order.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
+pub struct At {
+    pub side: Side,
+    pub index: usize,
+}
+
 /// Why a change was refused. A refused change leaves the Inventory as it was.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Refusal {
@@ -43,9 +80,9 @@ pub enum Refusal {
     /// A merge into a stack already at its limit.
     StackFull,
     TooFewToSplit,
-    /// A split needs an empty backpack slot.
+    /// A split needs an empty slot in the set it splits into.
     NoEmptySlot,
-    /// The other area cannot take the whole stack.
+    /// The other slot set cannot take the whole stack.
     NoRoom,
     /// A take, or the stack it displaces, does not fit in the backpack whole.
     BackpackFull,
@@ -95,20 +132,41 @@ fn stash(areas: &mut [&mut [Option<Stack>]], item: &str, count: u32, max_stack: 
     left
 }
 
-impl Inventory {
-    pub fn get(&self, slot: Slot) -> Option<&Stack> {
-        match slot {
-            Slot::Hotbar(at) => self.hotbar.get(at)?.as_ref(),
-            Slot::Backpack(at) => self.backpack.get(at)?.as_ref(),
+/// How many of `item` `runs` can take, topping up matching stacks and filling
+/// empty slots.
+fn room(runs: &[&mut [Option<Stack>]], item: &str, max_stack: u32) -> u32 {
+    runs.iter()
+        .flat_map(|run| run.iter())
+        .map(|slot| match slot {
+            None => max_stack,
+            Some(stack) if stack.item == item => max_stack.saturating_sub(stack.count),
+            Some(_) => 0,
+        })
+        .fold(0, u32::saturating_add)
+}
+
+/// Two slot sets the slot rules move Stacks between, each one or more runs of
+/// slots filled in order: an Inventory's hotbar and its backpack, or a whole
+/// Inventory and a Container.
+pub struct SlotSets<'a> {
+    first: Vec<&'a mut [Option<Stack>]>,
+    second: Vec<&'a mut [Option<Stack>]>,
+}
+
+impl<'a> SlotSets<'a> {
+    fn set_mut(&mut self, side: Side) -> &mut [&'a mut [Option<Stack>]] {
+        match side {
+            Side::First => &mut self.first,
+            Side::Second => &mut self.second,
         }
     }
 
-    fn slot_mut(&mut self, slot: Slot) -> Result<&mut Option<Stack>, Refusal> {
-        match slot {
-            Slot::Hotbar(at) => self.hotbar.get_mut(at),
-            Slot::Backpack(at) => self.backpack.get_mut(at),
-        }
-        .ok_or(Refusal::NoSuchSlot)
+    fn slot_mut(&mut self, at: At) -> Result<&mut Option<Stack>, Refusal> {
+        self.set_mut(at.side)
+            .iter_mut()
+            .flat_map(|run| run.iter_mut())
+            .nth(at.index)
+            .ok_or(Refusal::NoSuchSlot)
     }
 
     /// Moves the stack in `from` onto `to`: into an empty slot whole, into the
@@ -116,8 +174,8 @@ impl Inventory {
     /// swapping the two.
     pub fn move_stack(
         &mut self,
-        from: Slot,
-        to: Slot,
+        from: At,
+        to: At,
         limit: impl Fn(&str) -> u32,
     ) -> Result<(), Refusal> {
         let target = self.slot_mut(to)?.clone();
@@ -152,15 +210,16 @@ impl Inventory {
         Ok(())
     }
 
-    /// Moves the smaller half of a stack into the first empty backpack slot.
-    pub fn split(&mut self, from: Slot) -> Result<(), Refusal> {
+    /// Moves the smaller half of a stack into the first empty slot of `into`.
+    pub fn split(&mut self, from: At, into: Side) -> Result<(), Refusal> {
         let count = self.slot_mut(from)?.as_ref().ok_or(Refusal::Empty)?.count;
         if count < 2 {
             return Err(Refusal::TooFewToSplit);
         }
         let empty = self
-            .backpack
+            .set_mut(into)
             .iter()
+            .flat_map(|run| run.iter())
             .position(Option::is_none)
             .ok_or(Refusal::NoEmptySlot)?;
         let source = self.slot_mut(from)?.as_mut().ok_or(Refusal::Empty)?;
@@ -169,50 +228,39 @@ impl Inventory {
             count: count / 2,
         };
         source.count -= half.count;
-        self.backpack[empty] = Some(half);
+        *self.slot_mut(At {
+            side: into,
+            index: empty,
+        })? = Some(half);
         Ok(())
     }
 
-    /// Moves a whole stack between the backpack and the hotbar, into matching
-    /// stacks first and then empty slots, or not at all.
-    pub fn quick_transfer(
-        &mut self,
-        from: Slot,
-        limit: impl Fn(&str) -> u32,
-    ) -> Result<(), Refusal> {
+    /// Moves a whole stack into the other set, into matching stacks first and
+    /// then empty slots, or not at all.
+    pub fn quick_transfer(&mut self, from: At, limit: impl Fn(&str) -> u32) -> Result<(), Refusal> {
         let moving = self.slot_mut(from)?.clone().ok_or(Refusal::Empty)?;
         let max = limit(&moving.item);
-        let left = match from {
-            Slot::Hotbar(_) => {
-                let mut backpack = self.backpack.clone();
-                let left = stash(&mut [&mut backpack], &moving.item, moving.count, max);
-                if left == 0 {
-                    self.backpack = backpack;
-                }
-                left
-            }
-            Slot::Backpack(_) => {
-                let mut hotbar = self.hotbar.clone();
-                let left = stash(&mut [&mut hotbar], &moving.item, moving.count, max);
-                if left == 0 {
-                    self.hotbar = hotbar;
-                }
-                left
-            }
-        };
-        if left > 0 {
+        let into = self.set_mut(from.side.other());
+        if room(into, &moving.item, max) < moving.count {
             return Err(Refusal::NoRoom);
         }
+        stash(into, &moving.item, moving.count, max);
         *self.slot_mut(from)? = None;
         Ok(())
     }
 
-    /// Merges the backpack's stacks of each Item and orders them by Item name
-    /// from the first slot.
-    pub fn sort(&mut self, limit: impl Fn(&str) -> u32) -> Result<(), Refusal> {
-        let mut stacks: Vec<_> = self.backpack.iter().flatten().collect();
+    /// Merges the stacks of each Item in `side` and orders them by Item name
+    /// from its first slot.
+    pub fn sort(&mut self, side: Side, limit: impl Fn(&str) -> u32) -> Result<(), Refusal> {
+        let set = self.set_mut(side);
+        let mut stacks: Vec<Stack> = set
+            .iter()
+            .flat_map(|run| run.iter())
+            .flatten()
+            .cloned()
+            .collect();
         stacks.sort_by(|a, b| a.item.cmp(&b.item));
-        let mut sorted: [Option<Stack>; BACKPACK_SLOTS] = Default::default();
+        let mut sorted = vec![None; set.iter().map(|run| run.len()).sum()];
         for stack in stacks {
             if stash(
                 &mut [&mut sorted],
@@ -224,8 +272,102 @@ impl Inventory {
                 return Err(Refusal::NoRoom);
             }
         }
-        self.backpack = sorted;
+        for (slot, stack) in set.iter_mut().flat_map(|run| run.iter_mut()).zip(sorted) {
+            *slot = stack;
+        }
         Ok(())
+    }
+
+    /// Moves as much of each stack in `from` as the other set takes, into
+    /// matching stacks first and then empty slots; what does not fit stays.
+    /// Refused only when nothing moves.
+    pub fn take_all(&mut self, from: Side, limit: impl Fn(&str) -> u32) -> Result<(), Refusal> {
+        let len = self.set_mut(from).iter().map(|run| run.len()).sum();
+        let (mut held, mut moved) = (false, false);
+        for index in 0..len {
+            let at = At { side: from, index };
+            let Some(stack) = self.slot_mut(at)?.clone() else {
+                continue;
+            };
+            held = true;
+            let left = stash(
+                self.set_mut(from.other()),
+                &stack.item,
+                stack.count,
+                limit(&stack.item),
+            );
+            moved |= left < stack.count;
+            *self.slot_mut(at)? = (left > 0).then_some(Stack {
+                count: left,
+                ..stack
+            });
+        }
+        match (held, moved) {
+            (false, _) => Err(Refusal::Empty),
+            (true, false) => Err(Refusal::NoRoom),
+            (true, true) => Ok(()),
+        }
+    }
+}
+
+impl Inventory {
+    pub fn get(&self, slot: Slot) -> Option<&Stack> {
+        match slot {
+            Slot::Hotbar(at) => self.hotbar.get(at)?.as_ref(),
+            Slot::Backpack(at) => self.backpack.get(at)?.as_ref(),
+        }
+    }
+
+    fn slot_mut(&mut self, slot: Slot) -> Result<&mut Option<Stack>, Refusal> {
+        match slot {
+            Slot::Hotbar(at) => self.hotbar.get_mut(at),
+            Slot::Backpack(at) => self.backpack.get_mut(at),
+        }
+        .ok_or(Refusal::NoSuchSlot)
+    }
+
+    fn sets(&mut self) -> SlotSets<'_> {
+        SlotSets {
+            first: vec![&mut self.hotbar[..]],
+            second: vec![&mut self.backpack[..]],
+        }
+    }
+
+    /// This Inventory, hotbar then backpack, as the first set and `other` as
+    /// the second.
+    pub fn beside<'a>(&'a mut self, other: &'a mut [Option<Stack>]) -> SlotSets<'a> {
+        SlotSets {
+            first: vec![&mut self.hotbar[..], &mut self.backpack[..]],
+            second: vec![other],
+        }
+    }
+
+    pub fn move_stack(
+        &mut self,
+        from: Slot,
+        to: Slot,
+        limit: impl Fn(&str) -> u32,
+    ) -> Result<(), Refusal> {
+        self.sets().move_stack(from.at(), to.at(), limit)
+    }
+
+    /// Moves the smaller half of a stack into the first empty backpack slot.
+    pub fn split(&mut self, from: Slot) -> Result<(), Refusal> {
+        self.sets().split(from.at(), Side::Second)
+    }
+
+    /// Moves a whole stack between the backpack and the hotbar.
+    pub fn quick_transfer(
+        &mut self,
+        from: Slot,
+        limit: impl Fn(&str) -> u32,
+    ) -> Result<(), Refusal> {
+        self.sets().quick_transfer(from.at(), limit)
+    }
+
+    /// Sorts the backpack and leaves the hotbar.
+    pub fn sort(&mut self, limit: impl Fn(&str) -> u32) -> Result<(), Refusal> {
+        self.sets().sort(Side::Second, limit)
     }
 
     /// Adds a new stack of 1 to the limit of `item`, whole or not at all. Onto
@@ -814,6 +956,104 @@ mod tests {
         assert_eq!(inventory, before);
         assert_eq!(inventory.spend("t:rock", 0), Ok(()));
         assert_eq!(inventory, before);
+    }
+
+    fn mine(index: usize) -> At {
+        At {
+            side: Side::First,
+            index,
+        }
+    }
+
+    fn theirs(index: usize) -> At {
+        At {
+            side: Side::Second,
+            index,
+        }
+    }
+
+    #[test]
+    fn stacks_move_merge_and_quick_transfer_between_an_inventory_and_a_shorter_slot_set() {
+        let mut inventory = Inventory::default();
+        inventory.hotbar[0] = stack("t:rock", 10);
+        inventory.backpack[0] = stack("t:dust", 5);
+        let mut chest = vec![None; 5];
+        chest[1] = stack("t:rock", 60);
+        let mut sets = inventory.beside(&mut chest);
+        assert_eq!(
+            sets.move_stack(mine(HOTBAR_SLOTS), theirs(0), limit),
+            Ok(()),
+            "the Inventory's slots run hotbar then backpack"
+        );
+        assert_eq!(sets.move_stack(mine(0), theirs(1), limit), Ok(()));
+        assert_eq!(sets.move_stack(theirs(0), mine(0), limit), Ok(()));
+        assert_eq!(
+            sets.move_stack(mine(0), theirs(5), limit),
+            Err(Refusal::NoSuchSlot)
+        );
+        assert_eq!(sets.quick_transfer(theirs(1), limit), Ok(()));
+        assert_eq!(sets.quick_transfer(mine(1), limit), Ok(()));
+        drop(sets);
+        assert_eq!(inventory.hotbar[0], stack("t:dust", 5), "swapped");
+        assert_eq!(inventory.hotbar[1], None);
+        assert_eq!(inventory.backpack[0], None);
+        assert_eq!(
+            chest,
+            [stack("t:rock", 64), stack("t:rock", 6), None, None, None],
+            "the rest of the merge swapped back, then the quick transfers \
+             topped it up and spilled into the first empty slot"
+        );
+    }
+
+    #[test]
+    fn quick_transfer_into_a_full_slot_set_is_refused_and_split_and_sort_stay_in_their_set() {
+        let mut inventory = Inventory::default();
+        inventory.hotbar[0] = stack("t:rock", 8);
+        let mut chest = vec![stack("t:dust", 60), stack("t:zinc", 3), stack("t:dust", 4)];
+        let mut sets = inventory.beside(&mut chest);
+        assert_eq!(sets.quick_transfer(mine(0), limit), Err(Refusal::NoRoom));
+        assert_eq!(
+            sets.split(theirs(1), Side::Second),
+            Err(Refusal::NoEmptySlot)
+        );
+        assert_eq!(sets.sort(Side::Second, limit), Ok(()));
+        assert_eq!(sets.split(theirs(1), Side::Second), Ok(()));
+        assert_eq!(sets.split(mine(0), Side::First), Ok(()));
+        drop(sets);
+        assert_eq!(inventory.hotbar[0], stack("t:rock", 4));
+        assert_eq!(inventory.hotbar[1], stack("t:rock", 4));
+        assert_eq!(
+            chest,
+            [stack("t:dust", 64), stack("t:zinc", 2), stack("t:zinc", 1)]
+        );
+    }
+
+    #[test]
+    fn take_all_moves_what_fits_and_leaves_the_rest() {
+        let mut inventory = Inventory::default();
+        for slot in inventory.backpack.iter_mut() {
+            *slot = stack("t:dust", 64);
+        }
+        inventory.hotbar[0] = stack("t:rock", 60);
+        for slot in &mut inventory.hotbar[1..] {
+            *slot = stack("t:dust", 64);
+        }
+        let mut chest = vec![stack("t:rock", 10), None, stack("t:zinc", 2)];
+        let mut sets = inventory.beside(&mut chest);
+        assert_eq!(sets.take_all(Side::Second, limit), Ok(()));
+        assert_eq!(
+            sets.take_all(Side::Second, limit),
+            Err(Refusal::NoRoom),
+            "nothing more fits"
+        );
+        drop(sets);
+        assert_eq!(inventory.hotbar[0], stack("t:rock", 64));
+        assert_eq!(chest, [stack("t:rock", 6), None, stack("t:zinc", 2)]);
+        let mut empty = vec![None; 2];
+        assert_eq!(
+            inventory.beside(&mut empty).take_all(Side::Second, limit),
+            Err(Refusal::Empty)
+        );
     }
 
     #[test]

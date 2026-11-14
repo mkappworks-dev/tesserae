@@ -82,7 +82,7 @@ pub(super) fn resolve(
     {
         return Err(RejectReason::NotAFluid);
     }
-    let (hit, _) = trace(store, tables, world, intent.direction, reach, fluid_tool)?;
+    let (hit, struck_at) = trace(store, tables, world, intent.direction, reach, fluid_tool)?;
     if let EditAction::RemoveAt(expected) = intent.action
         && removal_target(store, tables, world, hit.at) != Some(expected)
     {
@@ -112,6 +112,13 @@ pub(super) fn resolve(
             }
         }
         EditAction::Place(voxel) => {
+            let (near, hinge) = tesserae_core::door_faces(
+                intent.direction.to_array(),
+                struck_at.to_array(),
+                hit.at,
+                world.voxel_size,
+            );
+            let voxel = tables.uses.placed(voxel, near, hinge);
             tables.vet_placed(voxel)?;
             match store.voxel(in_front) {
                 None => Err(RejectReason::NotLoaded),

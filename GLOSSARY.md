@@ -199,10 +199,11 @@ metres. Drawn terrain shortens it; nothing lengthens an Edit's reach along it.
 **Edit** — a change to one Voxel, its solid or its source, applied by the
 Server. A Client sends an intent; it never makes an Edit.
 
-**Use** — a Player pressing a held Tool's action, or, with no Tool in hand,
-eating the food in the selected Hotbar slot. Answered by the Server, never
-applied: it changes no Voxel and enters no history. Not an Edit, not Sample, and
-not Pickup.
+**Use** — a Player pressing Use: a held Tool's action; with no Tool in hand,
+using the Usable Voxel aimed at within Edit reach; otherwise eating the food in
+the selected Hotbar slot. Answered by the Server, never applied: it enters no
+history, and changes no Voxel except a Door it toggles. Not an Edit, not Sample,
+and not Pickup.
 
 **Tool** — a thing a Player holds whose Use the Server runs, declared by the
 Game by name and kind. A hand state taken with its own key, not from the
@@ -236,10 +237,38 @@ Inventory.
 **Pickup** — a Dropped item entering a Player's Inventory, by nearness. Distinct
 from Use and from Sample, which copies what is aimed at into the hand.
 
+**Recipe** — the Items spent and the Item made by one Craft, and where it is
+crafted: by hand or at a Station. Declared by a Game or Mod.
+
+**Craft** — a Player making a Recipe's Item: the Server spends the inputs and
+gives the output together. Not an Edit.
+
+**Usable Voxel** — a Voxel whose Material is declared a Door, a Container or a
+Station, so Use acts on it.
+
+**Station** — a Material whose Use opens the Recipes that name its tag, crafted
+only while the Player stays within Edit reach of it. Materials may share a tag.
+A hand Recipe needs no Station and is crafted from the Inventory anywhere.
+
+**Container** — a Material whose Voxel holds Stacks of its own, apart from any
+Player's Inventory. A Player cannot remove one that holds Stacks; anything else
+that removes it spills them as Dropped items.
+
+**Door** — two Materials, closed and open, that Use toggles between, and a size
+in metres, 1 m by 2 m unless declared, so it is as large at every Voxel size.
+One Item places the whole Door, Use toggles all of it, and removing any Voxel of
+it removes it all and drops the closed one's Item. Its row may fix a Shape, as
+Terra's fixes a thin panel: placing turns the panel to face the Player, hinged
+on the half of the cell aimed at, and Use turns each Voxel of it a quarter about
+that hinge edge, so it swings aside at 1 m and turns as slats at finer sizes.
+Bodies collide with the panel as drawn, except that an open Door with no fixed
+Shape, or wider than one Voxel so that its slats stand too close for a body,
+lets them through. Aim still stops on it.
+
 **Game mode** — Creative or Survival. A World has a default; each Player has
-their own. Both spend an Item per placed Voxel and drop one per removed Voxel;
-Creative's Catalogue gives Items, and only Survival has damage, hunger and
-death.
+their own. Both spend an Item per placed Voxel and drop one per removed Voxel, a
+whole Door counting as one; Creative's Catalogue gives Items, and only Survival
+has damage, hunger and death.
 
 **Vitals** — a Player's health, hunger and air.
 

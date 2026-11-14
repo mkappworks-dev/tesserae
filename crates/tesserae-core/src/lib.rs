@@ -12,6 +12,7 @@ pub mod chunk;
 pub mod climate;
 pub mod collide;
 pub mod combustion;
+pub mod craft;
 pub mod entity;
 pub mod fire;
 pub mod flow;
@@ -33,6 +34,7 @@ pub mod shape;
 pub mod survival;
 pub mod tables;
 pub mod testgen;
+pub mod usable;
 pub mod visibility;
 pub mod voxel;
 pub mod worldgen;
@@ -70,6 +72,10 @@ pub use shape::{
 };
 pub use survival::SurvivalRules;
 pub use tables::{PlaceFault, Tables};
+pub use usable::{
+    Across, CONTAINER_SLOTS, DOOR_HEIGHT_M, DOOR_HEIGHTS_M, DOOR_WIDTH_M, DOOR_WIDTHS_M, Door,
+    MAX_CONTAINER_SLOTS, Rise, UseError, VoxelUse, VoxelUses, door_faces, facing, placed_in,
+};
 pub use voxel::{AIR, MaterialId, SHAPE_FULL_CUBE, ShapeId, Voxel};
 pub use worldgen::{
     CaveParams, GroundParams, MAX_HEIGHT_M, MAX_OCTAVES, MAX_SMOOTHED_PER_CHUNK, ParamError,

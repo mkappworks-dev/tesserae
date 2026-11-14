@@ -17,7 +17,7 @@ pub(super) fn pick(
         });
     }
 }
-pub(super) fn pick_item(
+pub(in crate::server) fn pick_item(
     store: &ChunkStore,
     tables: &Tables,
     world: &WorldSettings,
@@ -33,7 +33,14 @@ pub(super) fn pick_item(
     let (at, _) = resolve(store, tables, world, &intent, reach).ok()?;
     let here = store.occupants(at, &tables.fluids)?;
     if !here.solid.is_air() {
-        Some(AimItem::Solid(here.solid))
+        // An open Door is taken as the closed one, whose Item places it.
+        let solid = here.solid;
+        let material = tables.uses.closed(solid.material());
+        Some(AimItem::Solid(Voxel::new(
+            material,
+            solid.shape(),
+            solid.orientation(),
+        )))
     } else {
         here.fluid.map(|fluid| AimItem::Fluid(fluid.material))
     }
@@ -132,17 +139,19 @@ pub(super) fn answer_aim(
 ) {
     if let Some((report, reach)) = state.latest {
         let mut target = aim_target(&store, &tables, &world, &meshes, report, reach);
-        target.use_aim = report.tool.map(|tool| {
-            crate::server::tool::aim_use(
+        let ray = (report.origin, report.direction);
+        target.use_aim = match report.tool {
+            Some(tool) => Some(crate::server::tool::aim_use(
                 &store,
                 &tables,
                 &world,
                 &tools,
                 tool,
-                (report.origin, report.direction),
+                ray,
                 player.eye(),
-            )
-        });
+            )),
+            None => crate::server::usable::aim(&store, &tables, &world, ray, player.eye()),
+        };
         targets.write(target);
     }
 }
@@ -190,7 +199,10 @@ pub(super) fn aim_target(
             };
             tables.vet_occupants(next).ok()?;
             vet_capacity(store, tables, at, next.solid).ok()?;
-            Some(Vec3::from_array(at.map(|i| i as f32 * world.voxel_size)))
+            Some(AimGhost {
+                at: Vec3::from_array(at.map(|i| i as f32 * world.voxel_size)),
+                door: door_aim(store, tables, world, report, reach, at),
+            })
         });
     AimTarget {
         seq: report.seq,
@@ -200,6 +212,34 @@ pub(super) fn aim_target(
         blocked,
         use_aim: None,
     }
+}
+
+/// What of the World a Door held and placed at `at` stands by, as
+/// [`resolve()`] and `usable::door_placed` read it; `None` for anything else.
+fn door_aim(
+    store: &ChunkStore,
+    tables: &Tables,
+    world: &WorldSettings,
+    report: AimReport,
+    reach: Reach,
+    at: [i32; 3],
+) -> Option<DoorAim> {
+    let Some(AimItem::Solid(held)) = report.held else {
+        return None;
+    };
+    tables.uses.door(held.material())?;
+    let (hit, struck) = trace(store, tables, world, report.direction, reach, false).ok()?;
+    let (near, hinge) = tesserae_core::door_faces(
+        report.direction.to_array(),
+        struck.to_array(),
+        hit.at,
+        world.voxel_size,
+    );
+    Some(DoorAim {
+        near,
+        hinge,
+        rise: crate::server::usable::door_rise(store, tables, at),
+    })
 }
 
 /// The boxes a ray can strike in `voxel` at `at`, with its neighbours' arms.

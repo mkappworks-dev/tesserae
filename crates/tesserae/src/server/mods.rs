@@ -122,6 +122,7 @@ pub struct LoadedMods {
     pub survival: Option<tesserae_core::SurvivalRules>,
     pub contact_damage: Vec<(MaterialId, f32)>,
     pub sounds: tesserae_mods::Sounds,
+    pub recipes: Vec<tesserae_core::craft::Recipe>,
 }
 
 impl Default for LoadedMods {
@@ -144,6 +145,7 @@ impl Default for LoadedMods {
             survival: None,
             contact_damage: Vec::new(),
             sounds: tesserae_mods::Sounds::default(),
+            recipes: Vec::new(),
         }
     }
 }
@@ -162,12 +164,17 @@ impl LoadedMods {
             .registry
             .names(Kind::Material)
             .map(|(id, name)| (id as MaterialId, name))
-            .filter(|&(id, _)| {
-                self.tables.materials.def(id).solid || self.tables.fluids.rank(id).is_some()
-            })
+            .filter(|&(id, _)| placeable(&self.tables, id))
             .map(|(id, name)| (id, name, colour(id)));
         super::items::Items::with_implicit(self.items.clone(), placeable, voxel_size)
     }
+}
+
+/// Whether a Player can hold and place `material`: a solid or a fluid, but not
+/// an open Door, which only Use makes and which drops the closed one's Item.
+fn placeable(tables: &Tables, material: MaterialId) -> bool {
+    (tables.materials.def(material).solid || tables.fluids.rank(material).is_some())
+        && !tables.uses.is_open(material)
 }
 
 #[derive(Resource)]
@@ -465,6 +472,7 @@ pub(crate) fn save_world(loaded: &LoadedMods, path: &Path) {
             .0,
         paused: vec![],
         entities: Default::default(),
+        containers: Vec::new(),
         game_mode: Default::default(),
     };
     Writer::acquire(path, &id, &content)
@@ -602,8 +610,15 @@ pub(crate) async fn declare_all(
         // A Mod's Biomes need a World to live in even when the Game sets no terrain.
         loaded.world.get_or_insert_with(WorldgenParams::default);
     }
+    let recipes = tesserae_mods::DeclaredRecipes::take(&mut behaviours);
     let (ground, lake) =
         resolve(behaviours, &mut loaded.tables, &loaded.registry).map_err(|e| e.to_string())?;
+    loaded.recipes = recipes
+        .resolve(
+            &loaded.every_item(world.voxel_size).0,
+            &loaded.tables.uses.station_tags().collect::<Vec<_>>(),
+        )
+        .map_err(|e| e.to_string())?;
     if let Some(world) = &mut loaded.world {
         world.water = lake;
         world.ground = ground;
@@ -717,6 +732,7 @@ pub(super) fn plugin(app: &mut App) {
         .add_session_message::<crate::content::WorldFacts>()
         .add_session_message::<crate::content::SoundLibrary>()
         .add_session_message::<crate::content::SoundscapeLibrary>()
+        .add_session_message::<crate::content::RecipeBook>()
         .on_session_start(install)
         .add_session_systems(SessionTeardown, release_mods);
 }
@@ -779,6 +795,13 @@ fn install(world: &mut World) {
             }),
         });
     }
+    let placing = super::items::PlacingItems::new(
+        catalogue
+            .materials
+            .iter()
+            .map(|m| (m.id, m.name.as_str(), placeable(&tables.0, m.id))),
+        &items,
+    );
     world.insert_resource(tables);
     world.insert_resource(super::tool::Tools(loaded.tools));
     world.insert_resource(super::sound::SoundTable::new(&loaded.sounds));
@@ -808,13 +831,9 @@ fn install(world: &mut World) {
             })
             .collect(),
     ));
-    world.insert_resource(super::items::PlacingItems::new(
-        catalogue
-            .materials
-            .iter()
-            .map(|m| (m.id, m.name.as_str(), m.fluid.is_some() || m.solid)),
-        &items,
-    ));
+    world.write_message(crate::content::RecipeBook(loaded.recipes.clone()));
+    world.insert_resource(super::craft::Recipes(loaded.recipes));
+    world.insert_resource(placing);
     world.insert_resource(items);
     world.insert_resource(WorldParameters(params));
     world.insert_resource(super::streaming::streaming_settings(loaded.view));
@@ -874,6 +893,8 @@ pub(in crate::server) fn catalogue(
                 solid: tables.materials.def(id).solid,
                 fluid: tables.fluids.rank(id),
                 burns: tables.combustion.contains(id),
+                shape: tables.uses.shape(id),
+                door: tables.uses.door(id),
             }
         })
         .collect();
@@ -889,6 +910,7 @@ pub(in crate::server) fn catalogue(
                     .expect("registered Shape name"),
                 geometry: tables.shapes.preview_geometry(id),
                 turnable: id != SHAPE_FULL_CUBE && !tables.shapes.is_connected_shape(id),
+                fixed: tables.uses.fixes(id),
             }
         })
         .collect();
@@ -1256,6 +1278,23 @@ surface = "plain:rock"
         assert!(material(wood).burns && material(wood).solid);
     }
 
+    #[test]
+    fn a_doors_open_material_has_no_item_of_its_own() {
+        let s = Scratch::new();
+        data(&s, "full", true, "", &full_game());
+        let loaded = s.load(TrustMode::All).unwrap();
+        let id = |name| loaded.registry.id_of(Kind::Material, name).unwrap() as MaterialId;
+        let (wood, ash) = (id("full:wood"), id("full:ash"));
+        assert_eq!(loaded.tables.uses.door(ash).map(|d| d.closed), Some(wood));
+        let mut app = App::new();
+        app.insert_non_send(loaded).add_plugins(plugin);
+        let items = app.world().resource::<super::super::items::Items>();
+        assert!(items.0.iter().all(|item| item.material != Some(ash)));
+        let placing = app.world().resource::<super::super::items::PlacingItems>();
+        assert_eq!(placing.item(ash), None);
+        assert_eq!(placing.material("full:log"), Some(wood));
+    }
+
     const WET: &str = r#"
 [[materials]]
 name = "gem"
@@ -1528,6 +1567,7 @@ biomes = ["plain:dry"]
                     .0,
                 paused: vec![],
                 entities: Default::default(),
+                containers: Vec::new(),
                 game_mode: Default::default(),
             };
             Writer::acquire(&path, &id, &content)
@@ -2124,6 +2164,28 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
     }
 
     #[test]
+    fn a_terra_workbench_is_always_a_table_and_the_player_is_offered_neither_fixed_shape() {
+        let loaded = super::runtime::tests::terra_loaded(1.0);
+        let id = |kind, name| loaded.registry.id_of(kind, name).unwrap();
+        let table = id(Kind::Shape, "terra:table") as u8;
+        assert_eq!(
+            loaded
+                .tables
+                .uses
+                .shape(id(Kind::Material, "terra:workbench") as MaterialId),
+            Some(table)
+        );
+        let chest = id(Kind::Material, "terra:chest") as MaterialId;
+        assert_eq!(loaded.tables.uses.shape(chest), None);
+        let catalogue = published_catalogue(loaded);
+        let fixed: Vec<_> = catalogue.shapes.iter().filter(|s| s.fixed).collect();
+        assert_eq!(
+            fixed.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(),
+            ["terra:panel", "terra:table"]
+        );
+    }
+
+    #[test]
     fn the_catalogue_lists_the_games_tools_in_declared_order() {
         let catalogue = published_catalogue(super::runtime::tests::terra_loaded(1.0));
         assert_eq!(
@@ -2181,7 +2243,136 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
         );
         assert!(!turnable.iter().any(|(name, _)| name.starts_with("dev:")));
         let ids: Vec<_> = catalogue.materials.iter().map(|m| m.id).collect();
-        assert_eq!(ids, std::iter::once(0).chain(8..24).collect::<Vec<_>>());
+        assert_eq!(ids, std::iter::once(0).chain(8..30).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn a_new_terra_world_crafts_a_workbench_from_four_wood_by_hand() {
+        use bevy::ecs::system::RunSystemOnce;
+        use tesserae_core::craft::{Count, Station};
+
+        let loaded = super::runtime::tests::terra_loaded(1.0);
+        let mut app = App::new();
+        app.insert_non_send(loaded)
+            .add_plugins((plugin, super::super::craft::plugin));
+        let book = app
+            .world_mut()
+            .resource_mut::<Messages<crate::content::RecipeBook>>()
+            .drain()
+            .next()
+            .unwrap();
+        let at = book
+            .0
+            .iter()
+            .position(|r| r.output.item == "terra:workbench")
+            .expect("Terra declares the Workbench Recipe");
+        assert_eq!(book.0[at].station, Station::Hand);
+        let mut inventory = super::super::inventory::Inventory::default();
+        inventory.receive("terra:wood", 4, 64);
+        app.world_mut()
+            .spawn((super::super::player::Player::at(Vec3::ZERO), inventory));
+        app.world_mut().write_message(super::super::craft::Craft {
+            recipe: at,
+            count: Count::One,
+        });
+        app.world_mut()
+            .run_system_once(super::super::craft::craft)
+            .unwrap();
+        let mut held = app
+            .world_mut()
+            .query::<&super::super::inventory::Inventory>();
+        let held = held.single(app.world()).unwrap();
+        assert_eq!(held.count("terra:wood"), 0);
+        assert_eq!(held.count("terra:workbench"), 1);
+    }
+
+    #[test]
+    fn a_terra_workbench_is_a_station_that_crafts_a_chest_a_door_and_a_gate_from_wood() {
+        use super::super::craft::{Craft, CraftRefusal, CraftRefused, craft};
+        use super::super::station::AtStation;
+        use bevy::ecs::system::RunSystemOnce;
+        use tesserae_core::craft::{Count, Station};
+
+        let loaded = super::runtime::tests::terra_loaded(1.0);
+        let workbench = loaded
+            .registry
+            .id_of(Kind::Material, "terra:workbench")
+            .unwrap() as MaterialId;
+        assert_eq!(loaded.tables.uses.station(workbench), Some("workbench"));
+        let mut app = App::new();
+        app.insert_non_send(loaded)
+            .add_plugins((plugin, super::super::craft::plugin));
+        let book = app
+            .world_mut()
+            .resource_mut::<Messages<crate::content::RecipeBook>>()
+            .drain()
+            .next()
+            .unwrap()
+            .0;
+        assert!((10..=15).contains(&book.len()), "{}", book.len());
+        let at = |item: &str| {
+            let at = book.iter().position(|r| r.output.item == item).unwrap();
+            assert_eq!(book[at].station, Station::Tag("workbench".into()));
+            at
+        };
+        let mut inventory = super::super::inventory::Inventory::default();
+        inventory.receive("terra:wood", 13, 64);
+        let player = app
+            .world_mut()
+            .spawn((super::super::player::Player::at(Vec3::ZERO), inventory))
+            .id();
+        let ask = |app: &mut App, recipe| {
+            app.world_mut().write_message(Craft {
+                recipe,
+                count: Count::One,
+            });
+            app.world_mut().run_system_once(craft).unwrap();
+            app.world_mut().resource_mut::<Messages<Craft>>().clear();
+            app.world_mut()
+                .resource_mut::<Messages<CraftRefused>>()
+                .drain()
+                .map(|m| m.0)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            ask(&mut app, at("terra:chest")),
+            [CraftRefusal::NeedsStation]
+        );
+        app.world_mut().entity_mut(player).insert(AtStation {
+            at: [0; 3],
+            voxel: tesserae_core::Voxel::cube(workbench),
+            tag: "workbench".into(),
+        });
+        assert_eq!(ask(&mut app, at("terra:chest")), []);
+        assert_eq!(ask(&mut app, at("terra:door")), []);
+        assert_eq!(ask(&mut app, at("terra:gate")), []);
+        let mut held = app
+            .world_mut()
+            .query::<&super::super::inventory::Inventory>();
+        let held = held.single(app.world()).unwrap();
+        assert_eq!(held.count("terra:wood"), 0);
+        assert_eq!(held.count("terra:chest"), 1);
+        assert_eq!(held.count("terra:door"), 1);
+        assert_eq!(held.count("terra:gate"), 1);
+    }
+
+    #[test]
+    fn a_terra_gate_is_a_one_metre_panel_door_at_every_voxel_size() {
+        for (size, cells) in [(1.0, [1, 1]), (0.25, [4, 4])] {
+            let loaded = super::runtime::tests::terra_loaded(size);
+            let id = |kind, name| loaded.registry.id_of(kind, name).unwrap();
+            let gate = loaded
+                .tables
+                .uses
+                .door(id(Kind::Material, "terra:gate") as MaterialId)
+                .expect("the Gate is a Door");
+            assert_eq!(
+                gate.open,
+                id(Kind::Material, "terra:gate_open") as MaterialId
+            );
+            assert_eq!(gate.shape, Some(id(Kind::Shape, "terra:panel") as u8));
+            assert_eq!(gate.cells(size), cells, "{size} m");
+        }
     }
 
     #[test]
@@ -2201,7 +2392,7 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
             .drain()
             .next()
             .unwrap();
-        assert_eq!(textures.0.len(), 16);
+        assert_eq!(textures.0.len(), 22);
         for material in catalogue.materials.iter().filter(|m| m.id != 0) {
             let (_, pixels) = textures
                 .0
@@ -2212,7 +2403,7 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
             assert!(pixels.as_chunks::<4>().0.iter().any(|p| p != &pixels[..4]));
             if matches!(
                 material.name.as_str(),
-                "terra:glass" | "terra:water" | "terra:mud"
+                "terra:glass" | "terra:water" | "terra:mud" | "terra:gate" | "terra:gate_open"
             ) {
                 assert!(pixels.as_chunks::<4>().0.iter().any(|p| p[3] < 255));
             } else {
@@ -2224,7 +2415,14 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
                     .iter()
                     .filter(|(_, other)| other == pixels)
                     .count(),
-                1,
+                // An open Door or Gate is the same panel turned.
+                if material.name.starts_with("terra:door")
+                    || material.name.starts_with("terra:gate")
+                {
+                    2
+                } else {
+                    1
+                },
                 "{} has distinct artwork",
                 material.name
             );

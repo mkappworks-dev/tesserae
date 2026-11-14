@@ -119,3 +119,18 @@ still never collects it, and walking to it after the delay does. A drop is not
 an Edit and never enters the undo journal: nothing can be undone into the
 Inventory by it, which is the rule that an entry pays and refunds only what its
 own Edit did.
+
+## Amendment 2026-11-13: Craft, Container moves and Door toggles
+
+Step 16 adds three ways to change what a Player holds or what a Voxel is, and
+none of them enters the undo journal, by the rule that an entry pays and refunds
+only what its own Edit did. A Craft spends inputs and gives its output in one
+Server step; what does not fit drops at the Player as an undo refund with no
+room does. Moving Stacks between the Inventory and a Container is not an Edit.
+Toggling a Door is an Edit group that the journal never records, so undo and
+redo treat a Door's closed and open Materials as the same Voxel: an entry made
+while the Door was closed still undoes after it is opened.
+
+Undo and redo are refused when they would remove a Container that holds Stacks,
+as the Player's own Remove is
+([ADR-0026](0026-usable-voxels-are-declared-kinds-the-server-runs.md)).

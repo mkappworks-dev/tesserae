@@ -92,6 +92,7 @@ impl Rig {
                 plugin,
                 super::super::entities::plugin,
                 super::super::inventory::plugin,
+                super::super::container::plugin,
             ))
             .add_systems(FixedPreUpdate, super::super::fluids::simulate);
         app.world_mut().spawn((restored_player, mode));
@@ -306,6 +307,32 @@ fn edits_removals_fluid_fire_and_paused_timers_survive_eviction_and_restart() {
 }
 
 #[test]
+fn an_open_door_survives_save_and_reopen() {
+    let dir = Directory::new();
+    let mut rig = Rig::new(&dir);
+    let door = rig
+        .app
+        .world()
+        .resource::<ContentTables>()
+        .0
+        .uses
+        .doors()
+        .next()
+        .expect("Terra declares a Door");
+    rig.insert();
+    rig.solid([4, 1, 4], door.open);
+    rig.solid([4, 2, 4], door.open);
+    rig.settled_save();
+    drop(rig);
+    let mut reopened = Rig::new(&dir);
+    reopened.insert();
+    let store = reopened.app.world().resource::<ChunkStore>();
+    let chunk = store.get(coord([0; 3])).unwrap();
+    assert_eq!(chunk.get(4, 1, 4), Voxel::cube(door.open));
+    assert_eq!(chunk.get(4, 2, 4), Voxel::cube(door.open));
+}
+
+#[test]
 fn save_snapshot_cannot_authorize_eviction_after_a_later_edit() {
     let dir = Directory::new();
     let mut rig = Rig::new(&dir);
@@ -472,6 +499,7 @@ fn real_terra_new_builds_but_reopened_guest_never_replays_construction() {
         simulation,
         paused: paused.into_iter().map(|(h, s)| (h, (*s).clone())).collect(),
         entities: Default::default(),
+        containers: Vec::new(),
         game_mode: Default::default(),
     };
     Writer::acquire(&dir.0, &opening.id, &content)
@@ -1047,11 +1075,11 @@ fn an_inventory_arranged_by_intents_survives_save_and_reopen() {
     player.receive("terra:dirt", 3, 64);
     for intent in [
         InventoryIntent::Move {
-            from: Slot::Hotbar(0),
-            to: Slot::Backpack(4),
+            from: Slot::Hotbar(0).into(),
+            to: Slot::Backpack(4).into(),
         },
-        InventoryIntent::Split(Slot::Hotbar(1)),
-        InventoryIntent::QuickTransfer(Slot::Hotbar(2)),
+        InventoryIntent::Split(Slot::Hotbar(1).into()),
+        InventoryIntent::QuickTransfer(Slot::Hotbar(2).into()),
         InventoryIntent::Sort,
     ] {
         rig.app.world_mut().write_message(intent);
@@ -1909,4 +1937,73 @@ fn mode_changes_from_edit_world_apply_at_the_next_open_and_not_before() {
     assert!(details.mode_changes.is_empty(), "applied once");
     assert_eq!(details.game_mode, GameMode::Survival);
     assert_eq!(details.player_mode, Some(GameMode::Survival));
+}
+
+fn chest(rig: &Rig) -> u16 {
+    let tables = &rig.app.world().resource::<ContentTables>().0;
+    (0..u16::MAX)
+        .find(|&m| tables.uses.container(m).is_some())
+        .expect("Terra declares a Chest")
+}
+
+/// A Chest at (4, 1, 4) holding 7 rock in its slot 2.
+fn stocked_chest(rig: &mut Rig) -> Vec<save::containers::SavedContainer> {
+    use crate::server::container::Containers;
+    let chest = chest(rig);
+    rig.insert();
+    rig.solid([4, 1, 4], chest);
+    let mut containers = rig.app.world_mut().resource_mut::<Containers>();
+    containers.open(Entity::PLACEHOLDER, [4, 1, 4], Voxel::cube(chest), 27);
+    containers.viewing_mut(Entity::PLACEHOLDER).unwrap()[2] =
+        Some(tesserae_core::inventory::Stack {
+            item: "terra:rock".into(),
+            count: 7,
+        });
+    containers.capture()
+}
+
+#[test]
+fn a_chests_stacks_survive_save_and_reopen() {
+    use crate::server::container::Containers;
+    let dir = Directory::new();
+    let mut rig = Rig::new(&dir);
+    let saved = stocked_chest(&mut rig);
+    assert_eq!(saved.len(), 1);
+    rig.settled_save();
+    drop(rig);
+    let commit = save::inspect(&dir.0).unwrap().unwrap().commit;
+    assert_eq!(commit.containers, saved);
+    let mut reopened = Rig::new(&dir);
+    reopened.insert();
+    reopened.tick();
+    let containers = reopened.app.world().resource::<Containers>();
+    assert_eq!(containers.capture(), saved);
+    assert!(containers.holds_stacks([4, 1, 4]));
+    assert!(reopened.app.world().resource::<EntityStore>().is_empty());
+}
+
+#[test]
+fn a_saved_container_whose_voxel_is_no_longer_one_spills_when_it_opens() {
+    use crate::server::container::Containers;
+    let dir = Directory::new();
+    let mut rig = Rig::new(&dir);
+    stocked_chest(&mut rig);
+    rig.settled_save();
+    drop(rig);
+    // The Game no longer declares the Chest a Container.
+    let mut reopened = Rig::open_with(dir.opening(), WorldSettings::default(), |loaded| {
+        loaded.tables.uses = Default::default();
+    });
+    reopened.insert();
+    reopened.tick();
+    let containers = reopened.app.world().resource::<Containers>();
+    assert!(containers.capture().is_empty());
+    let dropped: Vec<_> = reopened
+        .app
+        .world()
+        .resource::<EntityStore>()
+        .iter()
+        .map(|e| e.as_dropped().count)
+        .collect();
+    assert_eq!(dropped, [7]);
 }

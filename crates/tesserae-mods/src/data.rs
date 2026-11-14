@@ -6,6 +6,7 @@ use crate::{Declaration, ModError};
 
 mod behaviour;
 mod character;
+mod recipe;
 mod shape;
 mod sound;
 mod world;
@@ -46,6 +47,10 @@ struct Data {
     soundscapes: Vec<sound::Soundscape>,
     #[serde(default, rename = "cause-sounds")]
     cause_sounds: Vec<sound::CauseSound>,
+    #[serde(default)]
+    recipes: Vec<recipe::Recipe>,
+    #[serde(default, rename = "voxel-uses")]
+    voxel_uses: Vec<behaviour::VoxelUse>,
 }
 
 #[derive(Deserialize)]
@@ -289,5 +294,7 @@ pub(crate) fn parse(id: &str, payload: &CheckedPayload) -> Result<Declaration, M
         material_sounds: data.material_sounds.into_iter().map(Into::into).collect(),
         soundscapes: data.soundscapes.into_iter().map(Into::into).collect(),
         cause_sounds: data.cause_sounds.into_iter().map(Into::into).collect(),
+        recipes: data.recipes.into_iter().map(Into::into).collect(),
+        voxel_uses: data.voxel_uses.into_iter().map(Into::into).collect(),
     })
 }

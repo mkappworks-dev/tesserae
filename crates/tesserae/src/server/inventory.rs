@@ -10,7 +10,7 @@ use bevy::prelude::*;
 use tesserae_core::MaterialId;
 use tesserae_core::collide::Terrain;
 use tesserae_core::entity::{DropSpec, EntityId};
-use tesserae_core::inventory::{self, Destination, Refusal, Slot, Stack};
+use tesserae_core::inventory::{self, At, Destination, Refusal, Side, Slot, Stack};
 use tesserae_core::save::{CarriedV1, InventoryV1};
 
 use super::ContentTables;
@@ -33,19 +33,66 @@ pub struct Inventory(pub inventory::Inventory);
 #[derive(Message, Clone, PartialEq, Debug)]
 pub struct InventoryChanged(pub inventory::Inventory);
 
-/// A Client's request to arrange the Inventory.
+/// A slot of the Player's Inventory or of the Container they have open.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
+pub enum SlotAddress {
+    Inventory(Slot),
+    Container(usize),
+}
+
+impl From<Slot> for SlotAddress {
+    fn from(slot: Slot) -> Self {
+        SlotAddress::Inventory(slot)
+    }
+}
+
+impl SlotAddress {
+    pub fn inventory(self) -> Option<Slot> {
+        match self {
+            SlotAddress::Inventory(slot) => Some(slot),
+            SlotAddress::Container(_) => None,
+        }
+    }
+
+    /// Where it is in the Inventory beside a Container.
+    fn at(self) -> At {
+        match self {
+            SlotAddress::Inventory(Slot::Hotbar(index)) => At {
+                side: Side::First,
+                index,
+            },
+            SlotAddress::Inventory(Slot::Backpack(index)) => At {
+                side: Side::First,
+                index: inventory::HOTBAR_SLOTS + index,
+            },
+            SlotAddress::Container(index) => At {
+                side: Side::Second,
+                index,
+            },
+        }
+    }
+}
+
+/// A Client's request to arrange the Inventory and the Container it has open.
+/// None of it is an Edit or enters the undo journal.
 #[derive(Message, Clone, Copy, PartialEq, Eq, Debug)]
 pub enum InventoryIntent {
     /// Into an empty slot, onto the same Item, or swapping with another.
-    Move {
-        from: Slot,
-        to: Slot,
-    },
-    /// Between the backpack and the hotbar.
-    QuickTransfer(Slot),
-    Split(Slot),
+    Move { from: SlotAddress, to: SlotAddress },
+    /// Between the backpack and the hotbar, or between the Inventory and the
+    /// open Container.
+    QuickTransfer(SlotAddress),
+    /// Into the first empty slot of the backpack, or of the Container for one
+    /// of its own.
+    Split(SlotAddress),
     /// Merges and orders the backpack.
     Sort,
+    /// Merges and orders the open Container.
+    SortContainer,
+    /// Moves what fits of the open Container into the Inventory.
+    TakeAll,
+    /// Closes the Player's session on the open Container.
+    CloseContainer,
     /// Puts this hotbar slot in hand.
     Select(usize),
     /// From the Catalogue: a new stack of the Item that places `material`.
@@ -56,10 +103,7 @@ pub enum InventoryIntent {
     },
     /// Throws `count` of the Stack in `slot` onto the ground ahead of the
     /// Player, in either mode. Not an Edit: it never enters the undo journal.
-    Drop {
-        slot: Slot,
-        count: u32,
-    },
+    Drop { slot: Slot, count: u32 },
 }
 
 /// Why the Server declined an intent.
@@ -72,6 +116,8 @@ pub enum Reason {
     CreativeOnly,
     /// A drop of an Item the World's content has no drop for.
     CannotDrop,
+    /// A Container slot with no Container open.
+    NoContainer,
 }
 
 /// An intent the Server declined; the Inventory is as it was.
@@ -88,6 +134,7 @@ pub fn message(reason: Reason) -> &'static str {
         Reason::NotInCatalogue => return "That Material is not in the Catalogue.",
         Reason::CreativeOnly => return CREATIVE_ONLY,
         Reason::CannotDrop => return "That Item cannot be dropped.",
+        Reason::NoContainer => return "Open a Container first.",
     };
     match refusal {
         Refusal::NoSuchSlot => "That slot does not exist.",
@@ -171,19 +218,60 @@ const TOSS_AHEAD_M: f32 = 0.5;
 
 pub(super) fn arrange(
     mut intents: MessageReader<InventoryIntent>,
-    player: Single<(&mut Inventory, &PlayerMode, &Player)>,
-    placing: Option<Res<PlacingItems>>,
+    player: Single<(Entity, &mut Inventory, &PlayerMode, &Player)>,
+    (placing, mut containers, mut audio): (
+        Option<Res<PlacingItems>>,
+        Option<ResMut<super::container::Containers>>,
+        super::sound::Emitter,
+    ),
     items: Option<Res<Items>>,
     (mut refused, mut ground): (MessageWriter<InventoryRefused>, Ground),
 ) {
-    let (mut inventory, mode, body) = player.into_inner();
+    let (viewer, mut inventory, mode, body) = player.into_inner();
     let limit = |item: &str| items.as_ref().map_or(MAX_STACK, |i| i.stack_limit(item));
     for intent in intents.read() {
         let mut next = inventory.0.clone();
+        if *intent == InventoryIntent::CloseContainer {
+            if let Some(at) = containers.as_deref_mut().and_then(|c| c.close(viewer)) {
+                audio.emit_at(tesserae_core::audio::Cause::ContainerClose, at);
+            }
+            continue;
+        }
+        let open = containers.as_deref().is_some_and(|c| c.viewing(viewer));
+        if let Some(rule) = beside(*intent, open) {
+            let Some(mut stacks) = containers
+                .as_deref()
+                .filter(|_| open)
+                .and_then(|c| c.viewed(viewer))
+                .map(<[_]>::to_vec)
+            else {
+                refused.write(InventoryRefused(Reason::NoContainer));
+                continue;
+            };
+            match rule(&mut next.beside(&mut stacks), &limit) {
+                Ok(()) => {
+                    let slots = containers
+                        .as_deref_mut()
+                        .and_then(|c| c.viewing_mut(viewer))
+                        .expect("viewed above");
+                    *slots = stacks;
+                    inventory.set_if_neq(Inventory(next));
+                }
+                Err(refusal) => {
+                    refused.write(InventoryRefused(Reason::Rule(refusal)));
+                }
+            }
+            continue;
+        }
         let result = match *intent {
-            InventoryIntent::Move { from, to } => next.move_stack(from, to, limit),
-            InventoryIntent::QuickTransfer(from) => next.quick_transfer(from, limit),
-            InventoryIntent::Split(from) => next.split(from),
+            InventoryIntent::Move {
+                from: SlotAddress::Inventory(from),
+                to: SlotAddress::Inventory(to),
+            } => next.move_stack(from, to, limit),
+            InventoryIntent::QuickTransfer(SlotAddress::Inventory(from)) => {
+                next.quick_transfer(from, limit)
+            }
+            InventoryIntent::Split(SlotAddress::Inventory(from)) => next.split(from),
             InventoryIntent::Sort => next.sort(limit),
             InventoryIntent::Select(at) => next.select(at),
             InventoryIntent::Take {
@@ -223,6 +311,7 @@ pub(super) fn arrange(
                     Err(refusal) => Err(refusal),
                 }
             }
+            _ => unreachable!("a Container's intents are answered above"),
         };
         match result {
             Ok(()) => {
@@ -233,6 +322,30 @@ pub(super) fn arrange(
             }
         }
     }
+}
+
+/// A rule acting on the Inventory beside the open Container.
+type Rule = Box<dyn Fn(&mut inventory::SlotSets, &dyn Fn(&str) -> u32) -> Result<(), Refusal>>;
+
+/// What `intent` does to the Inventory beside the open Container, or `None`
+/// when it is the Inventory's alone. Quick transfer crosses to the Container
+/// while one is `open`.
+fn beside(intent: InventoryIntent, open: bool) -> Option<Rule> {
+    let container = |a: SlotAddress| matches!(a, SlotAddress::Container(_));
+    Some(match intent {
+        InventoryIntent::Move { from, to } if container(from) || container(to) => {
+            Box::new(move |sets, limit| sets.move_stack(from.at(), to.at(), limit))
+        }
+        InventoryIntent::QuickTransfer(from) if open || container(from) => {
+            Box::new(move |sets, limit| sets.quick_transfer(from.at(), limit))
+        }
+        InventoryIntent::Split(from) if container(from) => {
+            Box::new(move |sets, _| sets.split(from.at(), Side::Second))
+        }
+        InventoryIntent::SortContainer => Box::new(|sets, limit| sets.sort(Side::Second, limit)),
+        InventoryIntent::TakeAll => Box::new(|sets, limit| sets.take_all(Side::Second, limit)),
+        _ => return None,
+    })
 }
 
 pub(super) fn announce_inventory(
@@ -434,8 +547,8 @@ mod tests {
         let (sent, refused) = ask(
             &mut app,
             InventoryIntent::Move {
-                from: Slot::Backpack(0),
-                to: Slot::Backpack(1),
+                from: Slot::Backpack(0).into(),
+                to: Slot::Backpack(1).into(),
             },
         );
         assert!(refused.is_empty());
@@ -447,8 +560,8 @@ mod tests {
         let (sent, _) = ask(
             &mut app,
             InventoryIntent::Move {
-                from: Slot::Hotbar(4),
-                to: Slot::Backpack(0),
+                from: Slot::Hotbar(4).into(),
+                to: Slot::Backpack(0).into(),
             },
         );
         assert_eq!(sent[0].get(Slot::Backpack(0)).cloned(), stack("t:dust", 3));
@@ -465,7 +578,7 @@ mod tests {
                 (Slot::Backpack(2), "t:dust", 4),
             ],
         );
-        let (sent, _) = ask(&mut app, InventoryIntent::Split(Slot::Backpack(5)));
+        let (sent, _) = ask(&mut app, InventoryIntent::Split(Slot::Backpack(5).into()));
         assert_eq!(sent[0].get(Slot::Backpack(5)).cloned(), stack("t:rock", 5));
         assert_eq!(sent[0].get(Slot::Backpack(0)).cloned(), stack("t:rock", 4));
         let (sent, _) = ask(&mut app, InventoryIntent::Sort);
@@ -473,7 +586,10 @@ mod tests {
             [0, 1, 2].map(|at| sent[0].get(Slot::Backpack(at)).cloned()),
             [stack("t:dust", 4), stack("t:rock", 9), None]
         );
-        let (sent, _) = ask(&mut app, InventoryIntent::QuickTransfer(Slot::Backpack(1)));
+        let (sent, _) = ask(
+            &mut app,
+            InventoryIntent::QuickTransfer(Slot::Backpack(1).into()),
+        );
         assert_eq!(sent[0].get(Slot::Hotbar(0)).cloned(), stack("t:rock", 9));
         assert_eq!(sent[0].get(Slot::Backpack(1)).cloned(), None);
     }
@@ -498,17 +614,20 @@ mod tests {
             .clone();
         for (intent, refusal) in [
             (
-                InventoryIntent::Split(Slot::Hotbar(0)),
+                InventoryIntent::Split(Slot::Hotbar(0).into()),
                 Refusal::NoEmptySlot,
             ),
             (
                 InventoryIntent::Move {
-                    from: Slot::Backpack(0),
-                    to: Slot::Hotbar(1),
+                    from: Slot::Backpack(0).into(),
+                    to: Slot::Hotbar(1).into(),
                 },
                 Refusal::StackFull,
             ),
-            (InventoryIntent::Split(Slot::Hotbar(7)), Refusal::Empty),
+            (
+                InventoryIntent::Split(Slot::Hotbar(7).into()),
+                Refusal::Empty,
+            ),
         ] {
             let (sent, refused) = ask(&mut app, intent);
             assert!(sent.is_empty(), "{intent:?} sent {sent:?}");
@@ -610,8 +729,8 @@ mod tests {
         let (_, refused) = ask(
             &mut app,
             InventoryIntent::Move {
-                from: Slot::Backpack(0),
-                to: Slot::Backpack(1),
+                from: Slot::Backpack(0).into(),
+                to: Slot::Backpack(1).into(),
             },
         );
         assert_eq!(refused, [Reason::Rule(Refusal::StackFull)]);
@@ -625,7 +744,10 @@ mod tests {
                 stack("t:sand", 4)
             ]
         );
-        let (sent, _) = ask(&mut app, InventoryIntent::QuickTransfer(Slot::Backpack(2)));
+        let (sent, _) = ask(
+            &mut app,
+            InventoryIntent::QuickTransfer(Slot::Backpack(2).into()),
+        );
         assert_eq!(sent[0].get(Slot::Hotbar(0)).cloned(), stack("t:sand", 16));
     }
 
