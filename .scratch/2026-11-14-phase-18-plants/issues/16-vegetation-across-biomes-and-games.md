@@ -2,7 +2,7 @@
 
 Status: ready-for-agent
 
-Blocked by: 12, 14
+Blocked by: 12, 14, 17
 
 Spec: [Phase 18](../spec.md), amendment 2026-11-14.
 
@@ -57,3 +57,29 @@ approval before the Client draws any of it. Open it with
 `python3 mockup/server.py`, then visit `/vegetation` or pick it from the
 **Jump to mockup screen** menu. A server started before the page was added needs
 a restart.
+
+## Maintainer decisions, 2026-11-14
+
+- **Jungle and swamp Biomes are added**, and any other Biome a Game needs so that
+  no wet or hot region is missing. Climate stays two axes: a hot, wet jungle and
+  a warm, very wet swamp are new points in the square, not new fields.
+- **Plants are not limited to one World.** Every plant lives in a shared Mod
+  (`flora` for trees, ground cover and flowers, a new crops Mod for farmed
+  vegetables, fruit and their Items and Recipes, an aquatic Mod that depends on
+  `waters` for kelp and water plants) and any Game places any of them in any
+  Biome. Terra's current plants move out of Terra into those Mods; Terra and the
+  other Games only choose where they grow.
+- **The four-feature cap per Biome is raised** after checking other voxel games:
+  Minecraft gives a Biome whole lists of features and Luanti lets a Biome name
+  any number of decorations, with no small fixed cap. Raise it to 16 if the
+  measured size of `Biome`, which is `Copy` and holds each feature inline, stays
+  small; otherwise move features behind a shared table and raise it further. The
+  limit and its reason are documented in ADR-0022's amendment.
+- Ember `scorched` stays bare on purpose.
+
+Added acceptance criteria:
+
+- [ ] Every plant is declared once in a shared Mod and used by at least two Games.
+- [ ] Jungle and swamp Biomes exist in the Games that can have them, with their
+      trees and vines.
+- [ ] A Biome can declare 16 features; 17 is a load error naming the Biome.
