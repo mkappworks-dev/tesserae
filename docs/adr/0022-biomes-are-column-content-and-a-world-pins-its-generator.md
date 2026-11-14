@@ -94,3 +94,11 @@ number of decorations.
 Vines are the one addition to a tree's frozen form: worldgen hangs a climber
 from the outer canopy by a pure function of the tree, seed and Voxel size, whole
 across Chunk borders, and only worldgen does (a growing sapling never does).
+
+A surface feature names a Material or a Plant, exactly one, and a Plant feature
+may name the Shape of its Voxels, overriding the Plant's own
+([ADR-0027](0027-plants-are-declared-kinds-the-server-grows.md)). The snapshot
+freezes what generation reads of the Plant, by Material and Shape name: its
+Stages, a column's Material, height and fluid, a tree's Materials, size, fruit
+and vines. A World therefore never changes when a Game later edits or drops the
+Plant. A `climber` and a column growing down cannot be a feature.

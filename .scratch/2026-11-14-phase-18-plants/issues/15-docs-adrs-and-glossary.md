@@ -23,3 +23,21 @@ numbers.
 - [ ] The Example Game loads, and its starter test passes.
 - [ ] ADR-0027, the ADR-0006 amendment and GLOSSARY.md match the code.
 - [ ] DESIGN.md step 18 is Done; `npm run fmt:check` passes.
+
+## Comments
+
+Left `ready-for-agent`: the last box is unmet on purpose. DESIGN.md has the step
+18 notes paragraph, but the row stays Not started and the four constants read
+"TBD by the benchmark pass" until the maintainer's final pass.
+
+- ADR-0027 is new; ADR-0006 (flat forms) and ADR-0022 (a feature names a Plant)
+  are amended; ADR-0009 and ADR-0022's cap amendment were checked against
+  `MAX_MATERIALS` 248, `PALETTE_LEN` 256 and `MAX_SURFACE_FEATURES` 16 and stand.
+- The Example Game is the data-only starter: a `crop` with a seed Item and a
+  `cross` Shape, colour only so its install list is unchanged. The Rust starter
+  declares none.
+- Where the spec and the code differ, the docs follow the code: the Sample tick
+  reads the live store inline, not a worker Snapshot; a column's fluid is
+  `stands-in`, not `water`; needs are `[plants.needs]`; the refusal reads "needs
+  soil"; a Plant names its Shape; a Player's Remove is journalled with its yield
+  and only Use harvests, picking fruit and Felling are not.

@@ -103,6 +103,29 @@ drawn closed against its own +Z and turned a quarter about its hinge by Use.
 `container-close` and `craft`, appended after `burn`. A Game binds them in
 `cause-sounds` like any Cause; one that binds none plays them silent.
 
+Line 0.3 then gained `plants` on its `declaration`, appended after `voxel-uses`
+in the same way; a Declaration for 0.1 or 0.2 loads with none. A `plant-def`
+carries a `name` (local to the Mod), a `seed` Item by full name, an optional
+`shape` (a Shape by full name for its single-Voxel Stages), a `plant-needs`
+record (`soil`, optional `light-min` and `light-max`, `temperature` and
+`humidity` ranges and a `water` reach) and a closed `plant-kind`: `crop`,
+`tree`, `column`, `spreader` or `climber`, each with its own record. A Mod
+declares at most 128 and a World holds at most 512. A `plant-yield` is an Item
+and a `count-range`. A `tree-def` may carry a `fruit-def` and `vines`, a
+`tree-vines` naming a `climber` that only worldgen hangs, and a `column-def` may
+name the fluid it stands in. Names and `#tag` references resolve after every Mod
+has declared; an unknown or unmatched one is a load error naming the Plant.
+
+Four more appended fields go with them, each absent in an adapted 0.1 or 0.2
+Declaration. `shape-def` gained `form`, a closed `shape-form` of `boxes`,
+`cross` or `plane`, and none is `boxes`. `item-def` gained an optional
+`texture`, one 16 by 16 RGBA tile of 1024 bytes, that draws an Item as a flat
+sprite. `material-def` gained `tags`, above. `surface-feature` now takes an
+optional `material` and an optional `plant`, exactly one set, and an optional
+`shape`; the 0.1 and 0.2 adapters set `material` and neither of the others. A
+`biome-def` may list 16 `surface-features`, and a Mod 128 Materials, Shapes or
+appearance rows.
+
 ## What is not frozen
 
 Line `0.x` is pre-release. Later gameplay steps may add new lines, and

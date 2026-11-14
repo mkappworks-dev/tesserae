@@ -237,6 +237,35 @@ when a Tool is used and nothing crosses the contract per Use or per Voxel
 way, as `voxel-uses` rows
 ([ADR-0026](adr/0026-usable-voxels-are-declared-kinds-the-server-runs.md)).
 
+### Plants and growth
+
+A Plant is a `plants` row the Server grows
+([ADR-0027](adr/0027-plants-are-declared-kinds-the-server-grows.md)). Its state
+is its Material, so the Chunk, the Overlay, the Agenda and the save are
+unchanged, and the Client draws a Stage change as an ordinary Chunk edit. Three
+places hold the work, each on its own side of the invariants:
+
+- `tesserae-mods` (`plant.rs`) resolves every Mod's rows once, after all have
+  declared: names, `#tag`s, the Stage chain and the implicit Items a grown
+  Material does not get, into the `PlantTable`.
+- `tesserae-core` (`plant.rs`, `plant/tree.rs`, `plant/reach.rs`) holds the pure
+  rules, with no Bevy: the table, the Sample kernel (positions and rolls from
+  the World seed, a Chunk, a step and an index), the growth, support and Felling
+  rules, and the parametric tree and spread, column and vine placement as
+  functions of a row, a position in metres and the Voxel size. Worldgen calls
+  the same tree and column functions, so generation and growth agree.
+- `tesserae` runs them. The Sample tick is `server/fluids/plants.rs`, inline at
+  the end of each Logical step of the fluid simulation, after its landings, and
+  lands through the same `set_occupants` batch as flow and fire, under
+  `PLANTS_LANDED_PER_STEP`, `TREES_PER_STEP` and `FELLED_PER_STEP`. Support and
+  Felling are read from the changes a step absorbs, so an idle World reads
+  nothing. `server/plants.rs` is the Server's edge: the soil refusal, what a
+  removal drops, and the Use that harvests.
+
+Only held Chunks Sample and nothing catches up, so growth is deterministic from
+equal state and events. A Mod Command, burn-out and a Player's Remove all reach
+plant Voxels through the one write path, so each starts a Felling the same way.
+
 ### What the Server confirms, and what the Client animates
 
 The Client never guesses an outcome. A Place or Remove that landed is announced
@@ -301,6 +330,7 @@ tesserae/
 │                               0016 only Air is built in
 │                               0017 Worlds open in-process as sessions
 │                               0018 Games and Mods install side by side
+│                               0027 plants are declared kinds
 ├── crates/
 │   ├── tesserae-core/          NO Bevy, NO wgpu — headless + benchmarkable
 │   │   ├── src/
@@ -318,6 +348,8 @@ tesserae/
 │   │   │   ├── agenda.rs       bounded wakes; overflow rescans each Chunk  ▸ 8
 │   │   │   ├── reaction.rs     fluid contact rules, canonical, as data      ▸ 8
 │   │   │   ├── combustion.rs   heat, fuel and residue, as data              ▸ 8
+│   │   │   ├── plant.rs        Plant table, Sample kernel, growth rules      ▸ 18
+│   │   │   ├── plant/          tree and Felling region; spread, column, vine ▸ 18
 │   │   │   ├── fire.rs         exposure, ignition, burning and residue      ▸ 8
 │   │   │   ├── collide.rs      AABB sweep and ray vs grid, in metres        ▸ 5
 │   │   │   ├── inventory.rs    Hotbar and backpack: fit, merge, spend, sort ▸ 15
@@ -331,6 +363,7 @@ tesserae/
 │   │   ├── wit/0.2/            tesserae:mods@0.2.0: fluids, sources, fire  ▸ 8
 │   │   ├── wit/0.3/            tesserae:mods@0.3.0: named lakes, fire Edits ▸ 8.1
 │   │   ├── src/                loader, Trust, Registry, async calls, limits
+│   │   │   ├── plant.rs        resolves every Mod's Plants against the tables ▸ 18
 │   │   │   ├── adapt/          each older line carried one line up and back ▸ 8.1
 │   │   │   └── command.rs      pure batch validation, VoxelBox + BoxCursor
 │   │   ├── tests/guests/       independent WASI sandbox fixtures
@@ -346,6 +379,8 @@ tesserae/
 │           │   ├── jobs.rs         jobs on the async compute pool           ▸ 3
 │           │   ├── mods.rs         Mod Jobs, fair queues and tick drain      ▸ 7
 │           │   ├── fluids.rs       flow on workers, one step at a time      ▸ 8
+│           │   ├── fluids/plants.rs  Sample tick, support and Felling      ▸ 18
+│           │   ├── plants.rs       soil refusal, plant drops, harvest Use   ▸ 18
 │           │   ├── edit.rs         the Voxel-edit path, queued intents      ▸ 5
 │           │   ├── undo.rs         the undo journal, paying in Items        ▸ 15
 │           │   ├── inventory.rs    the Player's Inventory and its intents   ▸ 15

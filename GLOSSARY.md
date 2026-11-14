@@ -63,6 +63,10 @@ separate Declaration data, shared by World surfaces and item previews until a
 Look pack supplies appearance. Bevy's `Material` and `MaterialExtension`, which
 shade a surface, are a different thing.
 
+**Tag** (of a Material) — a label a Material carries, such as `soil`, `sand` or
+`water`, that a Plant's rows can name as `#tag` in place of one Material. Not a
+Station's tag, which a Recipe names.
+
 **Shape** — a Voxel's geometry. A full cube, a stair, a slab, a fence. "A stone
 voxel" and "a stone stair" share a Material and differ in Shape, so neither word
 alone identifies a Voxel.
@@ -72,6 +76,13 @@ Meaningless for a full cube, which looks the same under all of them.
 
 **Nodebox** — an axis-aligned box inside one Voxel, in sixteenths of its edge. A
 Shape is a union of them.
+
+**Flat form** — how a Shape is drawn when it is a plant: **Cross**, two diagonal
+quads through the Voxel's centre, or **Plane**, one quad against a face. Its
+Nodeboxes still decide selection and where fluid can stand. It is walked through
+unless the Shape declares collision, seals no face, cannot connect and does not
+count against a Chunk's shaped Voxels. Every other Shape is drawn from its
+Nodeboxes.
 
 **Connection** — an arm a connected Shape grows towards a face-neighbour because
 of what that neighbour is. Derived from the six Voxels around, never stored in a
@@ -393,6 +404,46 @@ generation could have made; any other fluid there is dynamic.
 **Emitter bound** — how many changes that start or stop block light, such as
 lava arriving or fuel catching, one Logical step may land (`EMITTERS_PER_STEP`).
 Each relights the whole reach of its light.
+
+## Plants
+
+**Plant** — a row of data that the Server grows: one of five Kinds, a Seed, what
+it needs and what it gives. The Engine ships none; a Game or Mod declares them.
+
+**Kind** (of a Plant) — the closed set of behaviours a Plant row names: `crop`,
+`tree`, `column`, `spreader` or `climber`. A **crop** passes through Stages in
+one Voxel; a **tree** grows from a sapling into a trunk and canopy; a **column**
+adds one Voxel at a time up or down (cane, kelp); a **spreader** copies itself
+onto a neighbouring Voxel (grass, mushrooms); a **climber** grows along the
+faces of solids (a vine).
+
+**Stage** — one Material a Plant passes through. A Plant's state is its current
+Stage, so nothing is stored per plant. The last Stage of a crop is ripe.
+
+**Grown Material** — a Material only growth and generation make: a tree's trunk,
+canopy and fruit, and a Plant's later Stages. It has no Item and cannot be
+placed. What a Player places, however alike in look, is not one.
+
+**Seed** — the Item that places a Plant's first Stage: a seed, a sapling or a
+cutting.
+
+**Fruit** — the grown Materials some canopy Voxels of a tree ripen through. Use
+picks a ripe one without cutting the tree, and it ripens again.
+
+**Vines** (generated) — climbers that worldgen hangs from a tree's canopy. A
+growing sapling never makes them.
+
+**Sample** — the positions a held Chunk draws each Logical step, and the roll
+each makes, from the World seed. A Plant Voxel that is Sampled and passes its
+roll may grow.
+
+**Growth** — a Plant Voxel changing Material, or a tree, column, spread or vine
+adding Voxels, because a Sample's roll passed and the Plant's needs held. A
+Plant that fails a need holds its Stage and never dies of it.
+
+**Felling** — the breaking of the grown Voxels of one tree that no longer reach
+a grounded trunk, top-down over several Logical steps, after a trunk Voxel is
+cut. Placed Voxels are never part of one.
 
 ## Audio
 

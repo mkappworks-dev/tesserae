@@ -1,8 +1,9 @@
 # Data-only starter
 
 A Game made of text and PNG files: two Materials with artwork, ground built from
-them, flight and physics enabled, and a Workbench, a Chest and a Door with two
-Recipes. No Rust, no WebAssembly toolchain.
+them, flight and physics enabled, a Workbench, a Chest and a Door with two
+Recipes, and one growable crop with a seed Item and a `cross` Shape. No Rust, no
+WebAssembly toolchain.
 
 **Supported contract line:** 0.3 (`api = "0.3"` in `mod.toml`). The field
 reference is [`docs/data-mods.md`](../../docs/data-mods.md) in the Engine
@@ -10,14 +11,25 @@ repository.
 
 ## Layout
 
-| File                            | Purpose                                                                             |
-| ------------------------------- | ----------------------------------------------------------------------------------- |
-| `mod.toml`                      | Manifest: id, version, contract line, `declaration` source                          |
-| `content.toml`                  | The Declaration: Materials, appearance, ground, movement, Usable Voxels and Recipes |
-| `art/stone.png`, `art/turf.png` | 48 by 16 pixel textures: three 16 by 16 faces side by side                          |
+| File                            | Purpose                                                                                     |
+| ------------------------------- | ------------------------------------------------------------------------------------------- |
+| `mod.toml`                      | Manifest: id, version, contract line, `declaration` source                                  |
+| `content.toml`                  | The Declaration: Materials, appearance, ground, movement, Usable Voxels, Recipes and a crop |
+| `art/stone.png`, `art/turf.png` | 48 by 16 pixel textures: three 16 by 16 faces side by side                                  |
 
 Rename the `id` in `mod.toml` (`[a-z][a-z0-9_]{0,31}`) and replace every
 `starter_data:` in `content.toml` with it.
+
+## The crop
+
+`content.toml` ends with a `crop`: the `grain` Plant passes through the
+Materials `sprout`, `young` and `ripe`, drawn with the `cross` Shape and planted
+on `turf` from the `seeds` Item. Place a seed on turf in light and it ripens
+over about a minute; breaking it ripe drops `grain` and more seeds. Its
+Materials have colour only: give each an `appearance` `texture` (a 48 by 16 PNG)
+and the `grain` Item a `texture` (a 16 by 16 PNG) to draw them from artwork. The
+field reference is the authoring guide's
+[Plants](../../docs/authoring-guide.md#plants).
 
 ## Validate
 

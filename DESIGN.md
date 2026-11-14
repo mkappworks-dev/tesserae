@@ -623,6 +623,33 @@ Notes:
   and the 2026-11-13 amendment to
   [ADR-0023](docs/adr/0023-the-inventory-is-server-owned-and-pays-inside-the-undo-journal.md).
   Spec and tickets: `.scratch/2026-11-13-phase-16-crafting/`.
+- **Step 18** has shipped but is not marked Done: the benchmark pass and the
+  maintainer's final review are still to come. A Game or Mod declares Plants as
+  data, of five kinds the Server runs natively: `crop`, `tree`, `column`,
+  `spreader` and `climber`. A Plant's state is its Material, so nothing is
+  stored per plant and the save, the Overlay and the Agenda are unchanged.
+  Growth is a Chunk-sampled tick on the Logical step: each held Chunk that holds
+  a Plant Material draws `PLANT_SAMPLES` positions, a Sampled Voxel rolls
+  against its Stage's `mean-seconds` (no faster than the 16 s Sample interval),
+  and a passing roll grows it if light, Climate, water and soil hold, otherwise
+  it waits and never dies. Trees are parametric, grow whole from a sapling and
+  fell top-down when a trunk is cut, where only grown Materials take part, so a
+  cabin of placed logs stays. Plants carry flat `cross` and `plane` Shapes,
+  fruit is a small box Shape that Use picks, soil and water are Material tags,
+  and a Biome may list 16 surface features, Plants included, with vines hung
+  from trees by worldgen only. The shared Mods `flora`, `crops` and `aquatic`
+  declare the vegetation every Game places. Not shipped: falling trees as bodies
+  (step 24), tree templates (step 20), leaf decay and weather inputs (step 17).
+  Measured numbers, to be filled in by the benchmark pass: `PLANT_SAMPLES` TBD
+  by the benchmark pass, `PLANTS_LANDED_PER_STEP` TBD by the benchmark pass,
+  `TREES_PER_STEP` TBD by the benchmark pass, `FELLED_PER_STEP` TBD by the
+  benchmark pass. See
+  [ADR-0027](docs/adr/0027-plants-are-declared-kinds-the-server-grows.md) and
+  the 2026-11-14 amendments to
+  [ADR-0006](docs/adr/0006-shapes-are-table-data.md),
+  [ADR-0009](docs/adr/0009-materials-are-table-data.md) and
+  [ADR-0022](docs/adr/0022-biomes-are-column-content-and-a-world-pins-its-generator.md).
+  Spec and tickets: `.scratch/2026-11-14-phase-18-plants/`.
 - **Step 21** is done. A World has a default game mode and each Player their
   own, Creative or Survival; Edit World's changes wait in the sidecar until the
   Server applies them at the next open
