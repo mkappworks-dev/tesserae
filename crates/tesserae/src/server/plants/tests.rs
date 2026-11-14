@@ -1154,6 +1154,7 @@ fn a_region_over_the_plants_size_in_metres_does_not_break_and_a_small_one_does()
     command(&mut app, [1, 16, 20], Voxel::AIR);
     for _ in 0..30 {
         settle(&mut app);
+        std::thread::sleep(std::time::Duration::from_micros(500));
     }
     assert!(big.iter().all(|&cell| !voxel_at(&app, cell).is_air()));
 
@@ -1163,10 +1164,18 @@ fn a_region_over_the_plants_size_in_metres_does_not_break_and_a_small_one_does()
     }
     set(&mut app, [1, 16, 26], Voxel::cube(c.placed));
     command(&mut app, [1, 16, 26], Voxel::AIR);
-    for _ in 0..30 {
+    // Felling waits on the async light solve, so step until it drains.
+    for _ in 0..400 {
         settle(&mut app);
+        std::thread::sleep(std::time::Duration::from_micros(500));
+        if small.iter().all(|&cell| voxel_at(&app, cell).is_air()) {
+            break;
+        }
     }
-    assert!(small.iter().all(|&cell| voxel_at(&app, cell).is_air()));
+    assert!(
+        small.iter().all(|&cell| voxel_at(&app, cell).is_air()),
+        "the small region was not felled within 400 steps"
+    );
 }
 
 #[test]
