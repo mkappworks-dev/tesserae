@@ -1056,7 +1056,7 @@ trunk-height-m = [6.0, 9.0]
 canopy-radius-m = 1.8
 mean-seconds = 100.0
 sapling-yield = [1, 2]
-fruit = { stages = [{ material = "flora:coconut_unripe", mean-seconds = 40.0 }, { material = "flora:coconut_ripe", yields = [{ item = "flora:coconut", count = [1, 2] }] }], density = 0.08, harvest-to = 0, shape = "flora:coconut" }
+fruit = { stages = [{ material = "flora:coconut_unripe", mean-seconds = 40.0 }, { material = "flora:coconut_ripe", yields = [{ item = "flora:coconut", count = [1, 2] }] }], density = 0.08, regrow-seconds = 180.0, shape = "flora:coconut" }
 branching = { limbs = [0, 0], start = 0.0, reach-m = 0.0, rise = 0.0, lean-m = 2.0, lobe-radius-m = 1.0 }
 
 [plants.needs]
@@ -1202,7 +1202,7 @@ trunk-height-m = [4.0, 6.0]
 canopy-radius-m = 2.5
 mean-seconds = 90.0
 sapling-yield = [1, 2]
-fruit = { stages = [{ material = "flora:apple_unripe", mean-seconds = 40.0 }, { material = "flora:apple_ripe", yields = [{ item = "flora:apple", count = [1, 2] }] }], density = 0.12, harvest-to = 0, shape = "flora:apple" }
+fruit = { stages = [{ material = "flora:apple_unripe", mean-seconds = 40.0 }, { material = "flora:apple_ripe", yields = [{ item = "flora:apple", count = [1, 2] }] }], density = 0.12, regrow-seconds = 120.0, shape = "flora:apple" }
 branching = { limbs = [3, 4], start = 0.3, reach-m = 2.5, rise = 0.2, lean-m = 0.0, lobe-radius-m = 1.2 }
 
 [plants.needs]
@@ -1237,7 +1237,7 @@ trunk-height-m = [3.0, 4.5]
 canopy-radius-m = 2.2
 mean-seconds = 90.0
 sapling-yield = [1, 2]
-fruit = { stages = [{ material = "flora:orange_unripe", mean-seconds = 40.0 }, { material = "flora:orange_ripe", yields = [{ item = "flora:orange", count = [1, 2] }] }], density = 0.12, harvest-to = 0, shape = "flora:orange" }
+fruit = { stages = [{ material = "flora:orange_unripe", mean-seconds = 40.0 }, { material = "flora:orange_ripe", yields = [{ item = "flora:orange", count = [1, 2] }] }], density = 0.12, regrow-seconds = 120.0, shape = "flora:orange" }
 branching = { limbs = [3, 4], start = 0.3, reach-m = 2.0, rise = 0.2, lean-m = 0.0, lobe-radius-m = 1.1 }
 
 [plants.needs]
@@ -1273,7 +1273,7 @@ trunk-height-m = [4.0, 6.0]
 canopy-radius-m = 2.5
 mean-seconds = 90.0
 sapling-yield = [1, 2]
-fruit = { stages = [{ material = "flora:cherry_unripe", mean-seconds = 40.0 }, { material = "flora:cherry_ripe", yields = [{ item = "flora:cherries", count = [1, 2] }] }], density = 0.14, harvest-to = 0, shape = "flora:cherry" }
+fruit = { stages = [{ material = "flora:cherry_unripe", mean-seconds = 40.0 }, { material = "flora:cherry_ripe", yields = [{ item = "flora:cherries", count = [1, 2] }] }], density = 0.14, regrow-seconds = 120.0, shape = "flora:cherry" }
 branching = { limbs = [3, 4], start = 0.3, reach-m = 2.5, rise = 0.2, lean-m = 0.0, lobe-radius-m = 1.2 }
 
 [plants.needs]

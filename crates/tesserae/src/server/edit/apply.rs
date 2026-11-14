@@ -74,13 +74,7 @@ pub(in crate::server) fn apply_pending(
                         (&items, &mut entities, &mut inventory),
                         player.body(),
                         at,
-                    )
-                    .map(drop)
-                    .map_err(|refusal| match refusal {
-                        crate::server::tool::UseRefusal::NotLoaded => RejectReason::NotLoaded,
-                        crate::server::tool::UseRefusal::Busy => RejectReason::Busy,
-                        _ => RejectReason::OutOfReach,
-                    });
+                    );
                 }
                 let change = match change {
                     Change::Solid(voxel) if voxel.is_air() => {

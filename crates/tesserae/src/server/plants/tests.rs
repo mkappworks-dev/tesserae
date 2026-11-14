@@ -17,7 +17,7 @@ use super::super::edit::{
 };
 use super::super::inventory::Inventory as InventoryComponent;
 use super::super::items::PlacingItems;
-use super::super::tool::{self, Usable, UseIntent, UseOutcome, UseWith, answer_use};
+use super::super::tool::{self, UseIntent, UseOutcome, UseWith, answer_use};
 use super::super::undo::HistoryAction::{Redo, Undo};
 use super::super::vitals::EatIntent;
 use crate::world::ChunkCoord;
@@ -172,7 +172,7 @@ fn content_of(shaped: bool, branching: Option<Branching>) -> Content {
                         stage(fruit[1], None, &[("t:apple", 1, 1)]),
                     ],
                     density: 0.1,
-                    harvest_to: 0,
+                    regrow_seconds: 120.0,
                     shape: None,
                 }),
             }),
@@ -538,30 +538,23 @@ fn undoing_a_removal_whose_drops_were_picked_up_spends_them_or_is_refused() {
 }
 
 #[test]
-fn use_on_a_ripe_crop_with_harvest_to_yields_and_resets_without_a_journal_entry() {
+fn use_no_longer_harvests_a_ripe_crop_or_fruit_it_eats() {
     let (mut app, c) = farm();
     set(&mut app, CROP, Voxel::cube(c.bush[2]));
-    assert_eq!(
-        use_down(&mut app),
-        [UseOutcome(Ok(tool::UseResult::Harvest))]
-    );
-    assert_eq!(voxel_at(&app, CROP), Voxel::cube(c.bush[1]));
-    assert_eq!(count(&mut app, "t:berry"), 2);
+    assert!(use_down(&mut app).is_empty());
+    assert_eq!(eaten(&mut app), 1);
+    assert_eq!(voxel_at(&app, CROP), Voxel::cube(c.bush[2]));
+    assert_eq!(count(&mut app, "t:berry"), 0);
+    set(&mut app, CROP, Voxel::cube(c.fruit[1]));
+    assert!(use_down(&mut app).is_empty());
+    assert_eq!(eaten(&mut app), 1);
+    assert_eq!(voxel_at(&app, CROP), Voxel::cube(c.fruit[1]));
+    assert_eq!(count(&mut app, "t:apple"), 0);
     assert!(journal_is_empty(&app));
-    assert_eq!(eaten(&mut app), 0);
-
-    assert_eq!(
-        use_down(&mut app),
-        [UseOutcome(Err(tool::UseRefusal::NotRipe))],
-        "now unripe"
-    );
-    assert_eq!(voxel_at(&app, CROP), Voxel::cube(c.bush[1]));
-    assert_eq!(count(&mut app, "t:berry"), 2);
-    assert_eq!(eaten(&mut app), 0, "a refusal does not fall through to eat");
 }
 
 #[test]
-fn the_aim_names_the_verb_harvest_for_a_ripe_crop_and_refuses_an_unripe_one() {
+fn the_aim_offers_no_use_on_a_plant_ripe_or_not() {
     let (mut app, c) = farm();
     let report = AimReport {
         seq: 1,
@@ -571,16 +564,11 @@ fn the_aim_names_the_verb_harvest_for_a_ripe_crop_and_refuses_an_unripe_one() {
         tool: None,
         remove_held: false,
     };
-    set(&mut app, CROP, Voxel::cube(c.bush[2]));
-    let aimed = super::super::edit::tests::aim(&mut app, report).use_aim;
-    let Some(Ok(target)) = aimed else {
-        panic!("{aimed:?}")
-    };
-    assert_eq!(target.usable, Some(Usable::Harvest));
-    assert_eq!(Usable::Harvest.verb("Berry bush"), "Harvest");
-    set(&mut app, CROP, Voxel::cube(c.bush[1]));
-    let aimed = super::super::edit::tests::aim(&mut app, report).use_aim;
-    assert_eq!(aimed, Some(Err(tool::UseRefusal::NotRipe)));
+    for material in [c.bush[1], c.bush[2], c.fruit[0], c.fruit[1]] {
+        set(&mut app, CROP, Voxel::cube(material));
+        let aimed = super::super::edit::tests::aim(&mut app, report).use_aim;
+        assert_eq!(aimed, None, "{material}");
+    }
 }
 
 #[test]
@@ -597,45 +585,66 @@ fn a_harvest_that_does_not_fit_the_inventory_drops_at_the_player() {
     let (mut app, c) = farm();
     inventory(&mut app, |i| i.receive("t:junk", 36 * 64, 64));
     set(&mut app, CROP, Voxel::cube(c.bush[2]));
-    use_down(&mut app);
+    send(&mut app, remove_crop());
+    tick(&mut app);
     assert_eq!(count(&mut app, "t:berry"), 0);
     assert_eq!(lying(&mut app), [("t:berry".to_owned(), 2)]);
     assert_eq!(voxel_at(&app, CROP), Voxel::cube(c.bush[1]));
 }
 
-#[test]
-fn ripe_fruit_is_picked_by_use_without_touching_the_tree_and_removed_for_its_yield() {
-    let (mut app, c) = farm();
-    set(&mut app, [6, 7, 5], Voxel::cube(c.trunk));
-    set(&mut app, [6, 8, 5], Voxel::cube(c.canopy));
-    set(&mut app, CROP, Voxel::cube(c.fruit[1]));
-    assert_eq!(
-        use_down(&mut app),
-        [UseOutcome(Ok(tool::UseResult::Harvest))]
-    );
-    assert_eq!(voxel_at(&app, CROP), Voxel::cube(c.fruit[0]));
-    assert_eq!(count(&mut app, "t:apple"), 1);
-    assert_eq!(voxel_at(&app, [6, 8, 5]), Voxel::cube(c.canopy));
-    assert_eq!(voxel_at(&app, [6, 7, 5]), Voxel::cube(c.trunk));
-    assert!(journal_is_empty(&app));
+fn tree_with_fruit(app: &mut App, c: &Content, fruit: MaterialId) {
+    set(app, [6, 7, 5], Voxel::cube(c.trunk));
+    set(app, [6, 8, 5], Voxel::cube(c.canopy));
+    set(app, CROP, Voxel::cube(fruit));
+}
 
-    set(&mut app, CROP, Voxel::cube(c.fruit[1]));
+#[test]
+fn breaking_ripe_fruit_drops_its_yield_leaves_canopy_and_the_tree_stands() {
+    for survival_mode in [false, true] {
+        let (mut app, c) = farm();
+        if survival_mode {
+            survival(&mut app);
+        }
+        tree_with_fruit(&mut app, &c, c.fruit[1]);
+        send(&mut app, remove_crop());
+        tick(&mut app);
+        assert!(rejections(&mut app).is_empty());
+        assert_eq!(voxel_at(&app, CROP), Voxel::cube(c.canopy));
+        assert_eq!(lying(&mut app), [("t:apple".to_owned(), 1)]);
+        assert_eq!(count(&mut app, "t:apple"), 0, "an ordinary removal drop");
+        assert_eq!(voxel_at(&app, [6, 8, 5]), Voxel::cube(c.canopy));
+        assert_eq!(voxel_at(&app, [6, 7, 5]), Voxel::cube(c.trunk));
+        assert!(!journal_is_empty(&app));
+    }
+}
+
+#[test]
+fn breaking_unripe_fruit_drops_nothing_and_leaves_canopy() {
+    let (mut app, c) = farm();
+    tree_with_fruit(&mut app, &c, c.fruit[0]);
     send(&mut app, remove_crop());
     tick(&mut app);
     assert!(rejections(&mut app).is_empty());
-    assert_eq!(voxel_at(&app, CROP), Voxel::cube(c.fruit[0]), "regrows");
-    assert_eq!(count(&mut app, "t:apple"), 2, "Remove harvests like Use");
+    assert_eq!(voxel_at(&app, CROP), Voxel::cube(c.canopy));
     assert!(lying(&mut app).is_empty());
-    assert!(journal_is_empty(&app), "nothing for Undo to re-place");
+}
 
-    set(&mut app, CROP, Voxel::cube(c.fruit[0]));
+#[test]
+fn undo_and_redo_of_a_fruit_break_restore_the_fruit_and_take_the_drops_back() {
+    let (mut app, c) = farm();
+    tree_with_fruit(&mut app, &c, c.fruit[1]);
     send(&mut app, remove_crop());
     tick(&mut app);
-    assert_eq!(
-        voxel_at(&app, CROP),
-        Voxel::cube(c.canopy),
-        "unripe: canopy"
-    );
+    let first = lying(&mut app);
+    assert_eq!(first, [("t:apple".to_owned(), 1)]);
+    replay(&mut app, Undo);
+    assert!(rejections(&mut app).is_empty());
+    assert_eq!(voxel_at(&app, CROP), Voxel::cube(c.fruit[1]));
+    assert!(lying(&mut app).is_empty(), "taken back off the ground");
+    replay(&mut app, Redo);
+    assert!(rejections(&mut app).is_empty());
+    assert_eq!(voxel_at(&app, CROP), Voxel::cube(c.canopy));
+    assert_eq!(lying(&mut app), first, "dropped again");
 }
 
 #[test]

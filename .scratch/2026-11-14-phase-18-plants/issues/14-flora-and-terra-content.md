@@ -21,8 +21,8 @@ taken from grown oaks, which its temperate Biome places. Art is drawn by
 
 - [ ] A new Terra Survival World shows meadows, forests and kelp beds; planting
       wheat, waiting and harvesting yields food; a berry bush fruits again.
-- [x] Terra's apple tree bears apples that Use picks and that restore hunger;
-      picked fruit grows back while the tree stands.
+- [x] Terra's apple tree bears apples that are broken to collect and restore hunger;
+      the standing tree grows new fruit elsewhere.
 - [x] No Wood Voxel is generated on its own; a new Survival World still reaches
       Wood, a Workbench, a Chest and a Door by felling and breaking oaks.
 - [ ] `meadow`, `ember` and `tidewater` load with `flora`'s new rows and their

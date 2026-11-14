@@ -39,15 +39,17 @@ fn ripe_wheat_gives_wheat_and_seeds_and_a_berry_bush_fruits_again() {
 }
 
 #[test]
-fn an_apple_tree_bears_apples_that_use_picks_and_that_grow_back() {
+fn an_apple_tree_bears_apples_that_breaking_picks_and_that_the_tree_grows_again() {
     let (_install, loaded) = loaded("terra", 0.5);
     let plants = &loaded.tables.plants;
-    let ripe = plants
-        .harvest(material(&loaded, "flora:apple_ripe"))
-        .unwrap();
-    assert!(ripe.ripe);
-    assert_eq!(ripe.to, material(&loaded, "flora:apple_unripe"));
-    assert_eq!(ripe.yields[0].item, "flora:apple");
+    let ripe = material(&loaded, "flora:apple_ripe");
+    assert!(plants.harvest(ripe).is_none(), "fruit is broken, not reset");
+    assert_eq!(plants.yields(ripe)[0].item, "flora:apple");
+    assert!(
+        plants
+            .yields(material(&loaded, "flora:apple_unripe"))
+            .is_empty()
+    );
     let apple = loaded
         .items
         .iter()

@@ -54,6 +54,8 @@ Falling as a body, in a direction, is step 24's.
   drop once, when a region is first queued, whenever the region is not empty.
   That includes a region with no trunk Voxel (the canopy above a cut at the
   trunk's top); a leaf cut that leaves the tree grounded drops none.
+- A Voxel queued for Felling is not Sampled for re-bearing, so a falling tree
+  grows no fruit.
 - A pending Felling is not saved: a World closed mid-fall leaves what was
   queued standing until a neighbouring change asks again.
 - Burn-out is tested through the `set_occupants` it lands by, not through the

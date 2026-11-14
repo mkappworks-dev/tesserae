@@ -86,7 +86,9 @@ pub struct Needs {
 pub struct Fruit {
     pub stages: Vec<Stage>,
     pub density: f32,
-    pub harvest_to: usize,
+    /// Mean seconds between new fruit on a standing tree with room; see
+    /// [`tree::canopy_mean_seconds`].
+    pub regrow_seconds: f32,
     /// The Shape of every fruit Voxel; `None` is a cube.
     pub shape: Option<ShapeId>,
 }
@@ -330,6 +332,31 @@ impl std::error::Error for PlantError {}
 pub struct PlantTable {
     plants: Vec<Plant>,
     by_material: HashMap<MaterialId, PlantRef>,
+    canopy_cells: CanopyCells,
+}
+
+/// [`tree::expected_canopy_cells`] per Plant and Voxel size, built on first ask:
+/// it generates sample trees, which a Sample must not do each time it lands on a
+/// leaf. A cache, so a table equals a clone of it and a new one starts empty.
+#[derive(Default)]
+struct CanopyCells(std::sync::Mutex<HashMap<(usize, u32), u32>>);
+
+impl Clone for CanopyCells {
+    fn clone(&self) -> Self {
+        Self::default()
+    }
+}
+
+impl PartialEq for CanopyCells {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+impl std::fmt::Debug for CanopyCells {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("CanopyCells")
+    }
 }
 
 impl PlantTable {
@@ -375,8 +402,27 @@ impl PlantTable {
         }
     }
 
-    /// What Use on a plant Voxel of `material` does, if it is a crop Stage with a
-    /// `harvest-to` or a tree's fruit Stage.
+    /// Leaf and fruit cells of the Plant `index` tree at `voxel_size`, as
+    /// [`tree::expected_canopy_cells`], cached.
+    pub fn canopy_cells(&self, index: usize, voxel_size: f32) -> Option<u32> {
+        let Some(Plant {
+            kind: Kind::Tree(tree),
+            ..
+        }) = self.plants.get(index)
+        else {
+            return None;
+        };
+        let key = (index, voxel_size.to_bits());
+        let mut cached = self.canopy_cells.0.lock().ok()?;
+        Some(
+            *cached
+                .entry(key)
+                .or_insert_with(|| tree::expected_canopy_cells(tree, voxel_size)),
+        )
+    }
+
+    /// What a Player's Remove does to a plant Voxel of `material`, if it is a crop Stage
+    /// with a `harvest-to`: when ripe it resets instead of breaking.
     pub fn harvest(&self, material: MaterialId) -> Option<Harvest<'_>> {
         let PlantRef { plant, role } = self.of(material)?;
         match (&self.plants.get(plant)?.kind, role) {
@@ -390,16 +436,6 @@ impl PlantTable {
                 to: stages[*to].material,
                 ripe: n + 1 == stages.len(),
                 yields: &stages[n].yields,
-            }),
-            (
-                Kind::Tree(Tree {
-                    fruit: Some(fruit), ..
-                }),
-                Role::Fruit(n),
-            ) => Some(Harvest {
-                to: fruit.stages[fruit.harvest_to].material,
-                ripe: n + 1 == fruit.stages.len(),
-                yields: &fruit.stages[n].yields,
             }),
             _ => None,
         }
@@ -680,8 +716,8 @@ const FACES: [[i32; 3]; 6] = [
     [0, 0, -1],
 ];
 
-/// What Use does to a ripening Voxel: where it resets, whether it is ripe, and
-/// what the pick gives.
+/// What a Remove does to a ripening crop Voxel: where it resets, whether it is
+/// ripe, and what the harvest gives.
 #[derive(Clone, Copy, Debug)]
 pub struct Harvest<'a> {
     pub to: MaterialId,
@@ -792,9 +828,7 @@ fn check(plant: &Plant) -> Result<(), PlantError> {
                 if !(0.0..=MAX_FRUIT_DENSITY).contains(&fruit.density) {
                     return Err(PlantError::Size("fruit density is from 0 to 0.3"));
                 }
-                if fruit.harvest_to + 1 >= fruit.stages.len() {
-                    return Err(PlantError::HarvestTo);
-                }
+                floor(fruit.regrow_seconds)?;
             }
         }
         Kind::Column {
@@ -1002,6 +1036,7 @@ pub fn grow(
         | (Kind::Spreader { mean_seconds, .. }, Role::Single)
         | (Kind::Climber { mean_seconds, .. }, Role::Single) => *mean_seconds,
         (Kind::Tree(tree), Role::Sapling) => tree.mean_seconds,
+        (Kind::Tree(tree), Role::Canopy) => tree::canopy_mean_seconds(env, index, tree)?,
         (
             Kind::Tree(Tree {
                 fruit: Some(fruit), ..
@@ -1045,6 +1080,7 @@ pub fn grow(
         }
         Kind::Tree(tree) => match role {
             Role::Fruit(n) => tree::ripen(env, plant, tree, view, at, voxel, n),
+            Role::Canopy => tree::rebear(env, index, plant, tree, view, at),
             _ => tree::sprout(env, index, plant, tree, view, at),
         },
     }

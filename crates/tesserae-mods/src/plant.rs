@@ -267,7 +267,7 @@ fn plant(
                     Ok::<_, String>(Fruit {
                         stages: stages(&fruit.stages, registry, tables)?,
                         density: fruit.density,
-                        harvest_to: fruit.harvest_to as usize,
+                        regrow_seconds: fruit.regrow_seconds,
                         shape: resolve_shape(registry, &fruit.shape)?,
                     })
                 })

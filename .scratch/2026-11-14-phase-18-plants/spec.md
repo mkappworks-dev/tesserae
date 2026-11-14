@@ -42,8 +42,8 @@ runs natively:
   resetting to an earlier Stage when harvested.
 - `tree`: a sapling that grows a parametric tree, trunk and canopy sized in
   metres, as one all-or-nothing group. A tree may bear fruit: some canopy Voxels
-  ripen through grown fruit Stages, can be picked with Use without cutting the
-  tree, and fruit again.
+  ripen through grown fruit Stages, are broken to harvest without cutting the
+  tree, and the standing tree grows new fruit elsewhere on its canopy.
 - `column`: grows up or down one Voxel at a time to a height in metres (sugar
   cane, cactus, bamboo, kelp).
 - `spreader`: copies itself onto a neighbouring Voxel that meets its rules
@@ -57,8 +57,9 @@ Voxel's Material through the one World change. Nothing is stored per plant.
 
 Growth is a Chunk-sampled tick on the Server's Logical step, deterministic from
 the World seed. Planting needs a **Seed** Item and soil; growth needs light,
-Climate and, where declared, water. Harvest is Remove at any Stage, which drops
-that Stage's yield, or Use on a regrowing crop, which yields and resets it. A
+Climate and, where declared, water. Harvest is breaking (Remove) at any Stage, which drops
+that Stage's yield; Use harvests nothing. Breaking a ripe crop with `harvest-to`
+yields and resets it. A
 plant loses its support, a trunk is cut, and what depended on it breaks and
 drops.
 
@@ -122,13 +123,13 @@ Harvest and drops
     that I can replant.
 21. As a player, I want breaking a young crop to give back at most its Seed, so
     that I do not farm unripe plants.
-21b. As a player, I want some trees to bear fruit I can pick with Use and eat,
-    leaving the tree standing and fruiting again, so that an orchard is a
-    renewable food source.
-22. As a player, I want Use on a ripe berry bush to give berries and leave the
+21b. As a player, I want some trees to bear fruit I break to collect and eat,
+    leaving the tree standing and growing new fruit elsewhere on its canopy, so
+    that an orchard is a renewable food source.
+22. As a player, I want breaking a ripe berry bush to give berries and leave the
     bush at an earlier Stage, so that it keeps fruiting.
-23. As a player, I want the prompt under the reticle to read Harvest on a ripe
-    regrowing crop, so that I know Use will pick it.
+23. As a player, I want one way to harvest, breaking, with no separate Use
+    prompt, so that nothing is confusing.
 24. As a player, I want the same yield in Creative as in Survival, so that
     Creative can test a farm.
 25. As a player, I want undo to give back a Seed I planted and re-place a plant
@@ -207,7 +208,7 @@ gains one list, `item-def` an optional field and `shape-def` a new form.
   for none).
 - `crop`: `stages`, 2 to 8 Materials in order, each with `mean-seconds` to reach
   the next; the last Stage is ripe. `harvest-to`: an optional earlier Stage a
-  Use on the ripe Stage resets to.
+  Remove of the ripe Stage resets to.
 - `tree`: `trunk` and `canopy`, the tree's **grown Materials**,
   `trunk-height-m` as a range up to 32 m, `canopy-radius-m` up to 8 m, and
   `mean-seconds` for the sapling to grow. The sapling Material is the seed's. A
@@ -222,8 +223,8 @@ gains one list, `item-def` an optional field and `shape-def` a new form.
   A tree may declare `fruit`: `stages`, 2 to 4 grown Materials in order, each
   with `mean-seconds` to reach the next; `density`, the share of canopy Voxels
   from 0 to 0.3 that carry fruit, chosen by hash of seed and position when the
-  tree grows or is generated; `harvest-to`, the earlier Stage a pick resets to;
-  and `yields` per Stage (the ripe one gives the Game's food Item). Fruit Stages
+  tree grows or is generated; `regrow-seconds`, at least 16, the mean time
+  between new fruit on a standing tree; and `yields` per Stage (the ripe one gives the Game's food Item). Fruit Stages
   are grown Materials like the canopy, drawn as a small 3D apple Shape of boxes
   (red when ripe, green when unripe) and never as a flat quad or a cube: they replace canopy Voxels, are part of
   the tree, have no implicit Item and cannot be placed.
@@ -308,14 +309,19 @@ gains one list, `item-def` an optional field and `shape-def` a new form.
   from a generator. The Stage's yield and its Dropped item ids ride in the
   undo entry like any removal's ([ADR-0023](../../docs/adr/0023-the-inventory-is-server-owned-and-pays-inside-the-undo-journal.md)).
   Creative drops the same.
-- Use on a ripe crop with `harvest-to`, or on a ripe fruit Voxel of a tree, gives
-  its yield and sets the Voxel to the `harvest-to` Stage; the tree is untouched.
-  A fruit Voxel ripens through its Stages by the Sample tick like a crop, with
-  the tree's light and Climate conditions. Remove of a fruit Voxel drops its
-  Stage's yield and leaves canopy in its place, and a Felling drops the yield of
-  every fruit Voxel it breaks. It is an Edit that never enters the undo journal, like a
-  Door toggle. The aim answer's `use_aim` reports the verb Harvest. It reuses
-  the existing "Use answered" Sound Cause: no new Cause.
+- Remove of a ripe crop with `harvest-to` gives its yield and sets the Voxel to
+  the `harvest-to` Stage; it is an Edit that never enters the undo journal, like
+  a Door toggle. Use harvests nothing: its order is a Tool, a Usable Voxel, then
+  eating, and the aim answer's `use_aim` names no Harvest verb.
+- A fruit Voxel ripens through its Stages by the Sample tick like a crop, with
+  the tree's light and Climate conditions. Remove of a fruit Voxel is an
+  ordinary journalled removal: it drops its Stage's yield (none unripe) and
+  leaves the tree's canopy Material in its place, and a Felling drops the yield
+  of every fruit Voxel it breaks. A standing tree re-bears: each of its canopy
+  Voxels Samples at a mean of `regrow-seconds` times the tree's expected canopy
+  cell count and, passing, becomes unripe fruit when its light and Climate hold
+  and the tree's fruit is below `density` times that count. A felled tree grows
+  none.
 - Undo and redo treat every Stage of one crop as the same Voxel, as a Door's two
   Materials are. A `tree` is the exception: a trunk is not in the sapling's
   chain, so undoing the seed's placement after the tree grew is refused by the
@@ -387,7 +393,7 @@ gains one list, `item-def` an optional field and `shape-def` a new form.
   the Item's declared size. Others are unchanged.
 - The placement ghost is the Shape at the target; a Layout of Seeds shows each
   cell.
-- The Use prompt reads Harvest on a ripe crop with `harvest-to`. No new pane.
+- There is no Harvest prompt: harvest is breaking. No new pane.
 - The Client reads no World storage and decides no growth: it draws what the
   Server sent, and Stage changes arrive as ordinary Chunk edits.
 
@@ -402,7 +408,7 @@ Logical steps when the World opens ([ADR-0003](../../docs/adr/0003-voxel-size-is
   textures; `meadow`, `ember` and `tidewater` gain them, and need new Seeds
   only if they want to plant them.
 - Terra also declares an apple tree: the oak's shape with apples ripening in its
-  canopy that Use picks, and apples that restore hunger.
+  canopy that is broken to collect them, and apples that restore hunger.
 - Terra declares wheat (`crop`, with Seeds and produce), a berry bush (`crop`
   with `harvest-to`), sugar cane (`column`), mushrooms (`spreader`) and vines
   (`climber`); the Biome features place them; the Recipes make food from them.
@@ -431,8 +437,9 @@ Four seams, all existing:
 2. **The Server headless App.** Prior art: the Inventory, drops, Use and fluid
    tests. Covers: a crop advances only when its conditions hold and holds when
    they fail; Seeds place, spend and refuse by soil, in both modes, for a
-   Layout; Remove yields per Stage, Creative included; Use harvests and resets;
-   undo and redo across a Stage change, across a harvest and across a tree
+   Layout; Remove yields per Stage, Creative included; Remove harvests a ripe
+   `harvest-to` crop and breaks fruit to canopy; a standing fruit tree re-bears
+   to its cap; undo and redo across a Stage change, across a harvest and across a tree
    growth (refused); growth deferred past the landing bounds and applied the
    next step; a tree that does not fit stays a sapling; support loss breaks and
    drops; Felling breaks top-down under its bound and never touches a cabin;
@@ -446,7 +453,7 @@ Four seams, all existing:
 4. **The Client App driven by key presses.** Prior art: the Inventory window,
    hotbar and Door preview tests. Covers: a Seed's icon, hand, ghost and
    dropped sprite are flat; produce with a `texture` is flat and without one is
-   the cube; the Harvest prompt.
+   the cube; Use offers no Harvest prompt.
 
 Declaration parsing and validation (limits, unknown names, a Material in two
 Plants, a `mean-seconds` under the Sample interval, a Stage chain of one) gets

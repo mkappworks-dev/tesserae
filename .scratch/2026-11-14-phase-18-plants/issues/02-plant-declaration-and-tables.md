@@ -29,7 +29,7 @@ and voxel-use tables in `tesserae-core`. Nothing grows yet.
       and a load error names a grown Material that an Item or another Plant
       names. The seed Item places Stage 0.
 - [x] A tree's `fruit` loads with 2 to 4 grown Stage Materials, a density from 0 to
-      0.3 and a `harvest-to` that is an earlier Stage; fruit Materials are grown
+      0.3 and a `regrow-seconds` of at least the Sample interval; fruit Materials are grown
       Materials and share none with another Plant.
 - [x] A `tree` row's `sapling-yield` has a minimum of at least 1, else a load
       error.

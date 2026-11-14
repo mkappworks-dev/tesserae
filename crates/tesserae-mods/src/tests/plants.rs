@@ -284,7 +284,7 @@ fn a_data_mod_names_a_plants_and_a_fruits_shape_in_its_rows() {
          canopy = \"t:leaf\"\ntrunk-height-m = [3.0, 5.0]\ncanopy-radius-m = 2.5\n\
          mean-seconds = 60.0\nsapling-yield = [1, 1]\n\
          [plants.fruit]\nstages = [{ material = \"t:a\", mean-seconds = 20.0 }, \
-         { material = \"t:b\" }]\ndensity = 0.2\nharvest-to = 0\nshape = \"t:apple\"\n\
+         { material = \"t:b\" }]\ndensity = 0.2\nregrow-seconds = 90.0\nshape = \"t:apple\"\n\
          [plants.needs]\nsoil = [\"t:sand\"]\n";
     let payload = crate::trust::CheckedPayload::for_test(
         "content.toml",
@@ -369,7 +369,7 @@ mod surface_features {
                     fruit: Some(content::FruitDef {
                         stages: vec![stage("t:apple0", Some(20.0)), stage("t:apple1", None)],
                         density: 0.2,
-                        harvest_to: 0,
+                        regrow_seconds: 90.0,
                         shape: None,
                     }),
                 }),

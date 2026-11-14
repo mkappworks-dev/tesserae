@@ -501,6 +501,93 @@ pub(super) fn sprout(
     })
 }
 
+/// Fixed bases whose trees [`expected_canopy_cells`] averages, so limb counts and lean, which
+/// hash from the base, are averaged rather than one tree's.
+const REFERENCE_BASES: [[i32; 3]; 4] = [[0, 0, 0], [3, 0, 1], [-5, 0, 7], [11, 0, -2]];
+
+/// Leaf and fruit cells of a typical `tree` at `voxel_size`: the mean over [`REFERENCE_BASES`]
+/// of the Voxels `tree_voxels` makes that are not trunk. A pure function of the row and the size,
+/// so every canopy Voxel of a species agrees on it without knowing its own tree.
+pub fn expected_canopy_cells(tree: &Tree, voxel_size: f32) -> u32 {
+    let total: usize = REFERENCE_BASES
+        .iter()
+        .map(|&base| {
+            tree_voxels(tree, 0, base, voxel_size)
+                .iter()
+                .filter(|v| v.part != Part::Trunk)
+                .count()
+        })
+        .sum();
+    ((total as f32 / REFERENCE_BASES.len() as f32).round() as u32).max(1)
+}
+
+/// How many fruit a tree with `cells` canopy cells holds at most when it re-bears: the density
+/// its fruit is generated at, times the cells.
+pub fn fruit_cap(density: f32, cells: u32) -> f32 {
+    density * cells as f32
+}
+
+/// Mean seconds between two Samples of one canopy Voxel's re-bearing roll, `None` for a tree
+/// that bears no fruit. Each of a tree's `cells` canopy Voxels is Sampled at the same rate, so
+/// giving each a mean of `cells * regrow-seconds` makes the tree as a whole roll one passing
+/// Sample about every `regrow-seconds`, whatever the Voxel size.
+pub(super) fn canopy_mean_seconds(env: &GrowEnv, index: usize, tree: &Tree) -> Option<f32> {
+    let fruit = tree.fruit.as_ref()?;
+    let cells = env.plants.canopy_cells(index, env.voxel_size)?;
+    Some(fruit.regrow_seconds * cells as f32)
+}
+
+/// A canopy Voxel that has passed its roll becomes unripe fruit when the tree's light and Climate
+/// hold and the fruit within a tree's span of it is below [`fruit_cap`]. A span is twice the
+/// tree's reach, since any two cells of a tree are that near; a same-species tree closer than
+/// that shares the cap, which only holds fruit back.
+pub(super) fn rebear(
+    env: &GrowEnv,
+    index: usize,
+    plant: &Plant,
+    tree: &Tree,
+    view: &impl Surroundings,
+    at: [i32; 3],
+) -> Option<Growth> {
+    let fruit = tree.fruit.as_ref()?;
+    let size = env.voxel_size;
+    if !conditions_met(&plant.needs, &Open(view), size, at) {
+        return None;
+    }
+    let cap = fruit_cap(fruit.density, env.plants.canopy_cells(index, size)?);
+    if cap <= 0.0 {
+        return None;
+    }
+    let span = voxels_in(2.0 * tree.reach_m(), size);
+    let mut bearing = 0usize;
+    for dy in -span..=span {
+        for dz in -span..=span {
+            for dx in -span..=span {
+                if dx * dx + dy * dy + dz * dz > span * span {
+                    continue;
+                }
+                let cell = [at[0] + dx, at[1] + dy, at[2] + dz];
+                let Some(held) = view.occupants(cell) else {
+                    continue;
+                };
+                let is_fruit = env
+                    .plants
+                    .of(held.solid.material())
+                    .is_some_and(|r| r.plant == index && matches!(r.role, Role::Fruit(_)));
+                if is_fruit {
+                    bearing += 1;
+                    if bearing as f32 >= cap {
+                        return None;
+                    }
+                }
+            }
+        }
+    }
+    let first = fruit.stages[0].material;
+    let shape = fruit.shape.unwrap_or(SHAPE_FULL_CUBE);
+    Some(Growth::one(at, Voxel::new(first, shape, 0)))
+}
+
 /// Whether the tree `index` grows over a Voxel of `material`: its own grown
 /// Materials, ground cover and small plants, any tree's leaves and fruit, and
 /// a sapling. A crop, which is a Player's work, and a trunk, which holds a
@@ -715,7 +802,7 @@ mod tests {
                     })
                     .collect(),
                 density,
-                harvest_to: 0,
+                regrow_seconds: 120.0,
                 shape: Some(APPLE),
             }),
         }
@@ -1052,6 +1139,158 @@ mod tests {
         );
     }
 
+    fn rebear_env<'a>(table: &'a PlantTable, shapes: &'a ShapeTable, size: f32) -> GrowEnv<'a> {
+        GrowEnv {
+            plants: table,
+            shapes,
+            seed: SEED,
+            voxel_size: size,
+        }
+    }
+
+    /// The tree grown at `base` with every fruit Voxel turned back into canopy.
+    fn bare(tree: &Tree, base: [i32; 3], size: f32) -> (Scene, Vec<[i32; 3]>) {
+        let mut scene = Scene::grown(tree, base, size);
+        let leaves: Vec<_> = tree_voxels(tree, SEED, base, size)
+            .into_iter()
+            .filter(|v| v.part != Part::Trunk)
+            .map(|v| v.at)
+            .collect();
+        for &at in &leaves {
+            scene.cells.insert(at, CANOPY);
+        }
+        (scene, leaves)
+    }
+
+    #[test]
+    fn the_expected_canopy_is_the_same_tree_in_metres_at_every_size() {
+        let table = plants(Some(0.1));
+        let Kind::Tree(row) = &table.plants()[0].kind else {
+            unreachable!()
+        };
+        let cubic_metres: Vec<f32> = SIZES
+            .iter()
+            .map(|&size| expected_canopy_cells(row, size) as f32 * size.powi(3))
+            .collect();
+        for v in &cubic_metres[1..] {
+            assert!((v / cubic_metres[0] - 1.0).abs() < 0.25, "{cubic_metres:?}");
+        }
+        assert_eq!(
+            table.canopy_cells(0, 0.5),
+            Some(expected_canopy_cells(row, 0.5)),
+            "cached"
+        );
+    }
+
+    #[test]
+    fn a_canopy_voxels_roll_makes_the_tree_grow_one_fruit_per_regrow_seconds() {
+        let table = plants(Some(0.1));
+        let shapes = ShapeTable::builtin();
+        let Kind::Tree(row) = &table.plants()[0].kind else {
+            unreachable!()
+        };
+        for size in SIZES {
+            let env = rebear_env(&table, &shapes, size);
+            let cells = expected_canopy_cells(row, size) as f32;
+            let mean = canopy_mean_seconds(&env, 0, row).unwrap();
+            assert_eq!(mean, 120.0 * cells, "{size}");
+            let tree_rate =
+                cells * crate::plant::roll_chance(mean) / crate::plant::SAMPLE_INTERVAL_S;
+            assert!((tree_rate * 120.0 - 1.0).abs() < 1e-3, "{size}");
+        }
+        let mut barren = tree(None);
+        barren.fruit = None;
+        assert_eq!(
+            canopy_mean_seconds(&rebear_env(&table, &shapes, 1.0), 0, &barren),
+            None
+        );
+    }
+
+    #[test]
+    fn a_bare_canopy_voxel_that_passes_its_roll_becomes_unripe_fruit_in_the_fruits_shape() {
+        let table = plants(Some(0.1));
+        let shapes = ShapeTable::builtin();
+        let Kind::Tree(row) = &table.plants()[0].kind else {
+            unreachable!()
+        };
+        for size in SIZES {
+            let env = rebear_env(&table, &shapes, size);
+            let (scene, leaves) = bare(row, [0, 4, 0], size);
+            let at = leaves[leaves.len() / 2];
+            let canopy = Voxel::cube(CANOPY);
+            let g = crate::plant::grow(&env, &scene, 0, at, canopy, 0.0).expect("room");
+            assert_eq!(
+                g.changes,
+                [Change {
+                    at,
+                    voxel: Voxel::new(FRUIT[0], APPLE, 0)
+                }]
+            );
+            assert!(!g.tree);
+            assert_eq!(
+                crate::plant::grow(&env, &scene, 0, at, canopy, 0.999_999),
+                None,
+                "{size}: a roll above the chance holds"
+            );
+        }
+    }
+
+    #[test]
+    fn a_tree_holds_no_more_fruit_than_its_density_of_its_canopy_at_any_size() {
+        let table = plants(Some(0.1));
+        let shapes = ShapeTable::builtin();
+        let Kind::Tree(row) = &table.plants()[0].kind else {
+            unreachable!()
+        };
+        let mut grown = Vec::new();
+        for size in SIZES {
+            let env = rebear_env(&table, &shapes, size);
+            let cap = fruit_cap(0.1, expected_canopy_cells(row, size));
+            let (mut scene, leaves) = bare(row, [0, 4, 0], size);
+            let (at, rest) = leaves.split_last().unwrap();
+            let mut fruit = 0;
+            for &cell in rest {
+                if crate::plant::grow(&env, &scene, 0, *at, Voxel::cube(CANOPY), 0.0).is_none() {
+                    break;
+                }
+                scene.cells.insert(cell, FRUIT[0]);
+                fruit += 1;
+            }
+            assert!(
+                fruit as f32 >= cap && (fruit - 1) as f32 <= cap,
+                "{size}: {fruit} of {cap}"
+            );
+            grown.push(fruit as f32 * size.powi(3));
+        }
+        for v in &grown[1..] {
+            assert!((v / grown[0] - 1.0).abs() < 0.3, "{grown:?}");
+        }
+    }
+
+    #[test]
+    fn a_canopy_voxel_holds_when_the_light_is_unknown_and_a_fruitless_tree_never_bears() {
+        let shapes = ShapeTable::builtin();
+        let table = plants(Some(0.1));
+        let Kind::Tree(row) = &table.plants()[0].kind else {
+            unreachable!()
+        };
+        let env = rebear_env(&table, &shapes, 1.0);
+        let (mut scene, leaves) = bare(row, [0, 4, 0], 1.0);
+        let at = leaves[0];
+        scene.unknown.insert(at);
+        assert_eq!(
+            crate::plant::grow(&env, &scene, 0, at, Voxel::cube(CANOPY), 0.0),
+            None
+        );
+        let plain = plants(None);
+        let env = rebear_env(&plain, &shapes, 1.0);
+        let (scene, leaves) = bare(row, [0, 4, 0], 1.0);
+        assert_eq!(
+            crate::plant::grow(&env, &scene, 0, leaves[0], Voxel::cube(CANOPY), 0.0),
+            None
+        );
+    }
+
     fn cut(scene: &mut Scene, at: [i32; 3]) {
         scene.cells.remove(&at);
     }
@@ -1124,7 +1363,7 @@ mod tests {
         assert!(load(&|t| t.fruit.as_mut().unwrap().density = 0.31).is_err());
         assert!(load(&|t| t.fruit.as_mut().unwrap().density = -0.1).is_err());
         assert!(load(&|t| t.fruit.as_mut().unwrap().stages.truncate(1)).is_err());
-        assert!(load(&|t| t.fruit.as_mut().unwrap().harvest_to = 1).is_err());
+        assert!(load(&|t| t.fruit.as_mut().unwrap().regrow_seconds = 15.0).is_err());
         assert!(
             load(&|t| {
                 let fruit = t.fruit.as_mut().unwrap();

@@ -20,8 +20,8 @@ function is shared with worldgen (ticket 12).
 - [x] A sapling with room grows a tree of the declared metres at 1.0, 0.5 and
       0.25 m; with any cell blocked it stays a sapling and tries again.
 - [x] A tree with `fruit` places fruit Voxels at hash-chosen canopy positions
-      within its density; they ripen by the Sample tick and are picked again
-      after `harvest-to`.
+      within its density; they ripen by the Sample tick, are broken to canopy, and
+      the standing tree grows new unripe fruit elsewhere on its canopy.
 - [x] The group lands whole or not at all, relit once, under the per-step bound.
 - [x] Undo of the seed's placement after the tree grew is refused by the
       journal's mismatch rule; redo and a pre-growth undo are unaffected.
@@ -49,7 +49,16 @@ function is shared with worldgen (ticket 12).
   written, so a tree is whole or absent. One `Batch` relights the group once.
 - Fruit ripens through `Role::Fruit(n)` on the tree's light and Climate, with
   light read as the brightest of the Voxel and its six neighbours, since fruit
-  sits inside canopy. Picks reset through the existing harvest path.
+  sits inside canopy. Breaking fruit is an ordinary Remove (canopy is left; a ripe one drops its
+  yield).
+- Re-bearing: each canopy Voxel of a fruit tree Samples at a mean of
+  `regrow-seconds * N`, with `N` the expected canopy cell count
+  (`tree::expected_canopy_cells`, the mean over four reference trees, cached per
+  Plant and Voxel size), so the tree rolls one passing Sample every
+  `regrow-seconds`. A pass becomes unripe fruit if light and Climate hold and
+  the fruit within twice `reach_m` (spherical, `voxels_in`) is below `density *
+  N`; it lands as a plain growth under `PLANTS_LANDED_PER_STEP`. A Voxel queued
+  for Felling is skipped, and a felled tree has no canopy left.
 - Undo of the seed after growth was already refused by the mismatch rule
   (`undoing_a_sapling_placement_after_it_grew_is_refused`).
 - `TREES_PER_STEP` was measured by the benchmark pass: an oak of 4 to 6 m with

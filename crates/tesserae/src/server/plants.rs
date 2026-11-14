@@ -1,6 +1,6 @@
-//! Plants on the Server: what removing a plant Voxel drops, the Use that
-//! harvests a ripe one, the soil rule's refusal, and the Seed a plant drops
-//! when its support goes.
+//! Plants on the Server: what removing a plant Voxel drops, the Remove that
+//! harvests a ripe `harvest-to` crop, the soil rule's refusal, and the Seed a
+//! plant drops when its support goes.
 //!
 //! Growth is `fluids/plants.rs`; the Plant rows are `tesserae_core::plant`.
 //! Nothing here is stored per plant: a plant's state is its Material.
@@ -14,13 +14,13 @@ use tesserae_mods::{EditEvent, EditKind};
 
 use super::ContentTables;
 use super::edit;
+use super::edit::RejectReason;
 use super::entities::{self, EntityStore};
 use super::fluids::{Felled, FluidSim};
 use super::inventory::{self, Inventory};
 use super::items::Items;
 use super::mods::EditHistory;
 use super::streaming::MeshState;
-use super::tool::{UseRefusal, UseResult};
 use super::world_state::{ChunkStore, VoxelCoord};
 use crate::session::SessionApp;
 use crate::world::WorldSettings;
@@ -66,8 +66,8 @@ pub(super) fn drops(
     )
 }
 
-/// Whether `at` holds a ripe fruit or a ripe crop that declares `harvest-to`: a
-/// Player's Remove of it is a harvest, not a break.
+/// Whether `at` holds a ripe crop that declares `harvest-to`: a Player's Remove
+/// of it is a harvest, not an uproot.
 pub(super) fn is_ripe(store: &ChunkStore, tables: &Tables, at: [i32; 3]) -> bool {
     store
         .voxel(at)
@@ -198,9 +198,9 @@ fn drop_felled(
     }
 }
 
-/// Use on a ripe crop or fruit Voxel: resets it to its `harvest-to` Stage and
-/// gives its yield, what does not fit the Inventory dropping at the Player.
-/// The Edit is heard by Mods and never enters the undo journal.
+/// A Player's Remove of a ripe `harvest-to` crop: resets it to its `harvest-to`
+/// Stage and gives its yield, what does not fit the Inventory dropping at the
+/// Player. The Edit is heard by Mods and never enters the undo journal.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn harvest(
     (store, meshes): (&mut ChunkStore, &mut MeshState),
@@ -210,17 +210,15 @@ pub(super) fn harvest(
     (items, entities, inventory): (&Items, &mut EntityStore, &mut Inventory),
     body: Aabb,
     at: [i32; 3],
-) -> Result<UseResult, UseRefusal> {
-    let voxel = store.voxel(at).ok_or(UseRefusal::NotLoaded)?;
+) -> Result<(), RejectReason> {
+    let voxel = store.voxel(at).ok_or(RejectReason::NotLoaded)?;
     let ripening = tables
         .plants
         .harvest(voxel.material())
-        .ok_or(UseRefusal::TargetChanged)?;
-    if !ripening.ripe {
-        return Err(UseRefusal::NotRipe);
-    }
+        .filter(|h| h.ripe)
+        .ok_or(RejectReason::OutOfReach)?;
     if meshes.is_unlit(VoxelCoord::of(at).chunk) {
-        return Err(UseRefusal::Busy);
+        return Err(RejectReason::Busy);
     }
     let was = store.occupants(at, &tables.fluids).expect("loaded above");
     let next = Occupants {
@@ -228,9 +226,7 @@ pub(super) fn harvest(
         ..was
     };
     let mut batch = edit::Batch::default();
-    batch
-        .set_occupants(store, meshes, tables, at, next)
-        .map_err(UseRefusal::from)?;
+    batch.set_occupants(store, meshes, tables, at, next)?;
     batch.finish(store, meshes, tables);
     history.record(EditEvent {
         at: at.map(|i| i as f32 * world.voxel_size),
@@ -266,7 +262,7 @@ pub(super) fn harvest(
         &body,
         overflow,
     );
-    Ok(UseResult::Harvest)
+    Ok(())
 }
 
 #[cfg(test)]

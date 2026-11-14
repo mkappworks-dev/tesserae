@@ -222,7 +222,7 @@ fn row_of(fruit: bool, branching: Option<Branching>) -> Tree {
                 })
                 .collect(),
             density: f.density,
-            harvest_to: 0,
+            regrow_seconds: 120.0,
             shape: Some(f.shape),
         }),
     }

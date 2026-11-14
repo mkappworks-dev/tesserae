@@ -234,7 +234,11 @@ pub(super) fn sample_step(
                     corner[1] + y as i32,
                     corner[2] + z as i32,
                 ];
-                if grown.contains_key(&at) || tables.plants.of(from).is_none() {
+                // A cut tree's leaves are about to break, so none of them bears.
+                if grown.contains_key(&at)
+                    || tables.plants.of(from).is_none()
+                    || sim.plants.felling.contains(&top_down(at))
+                {
                     continue;
                 }
                 if let Some((from, growth)) = reread(at, from, s.roll) {

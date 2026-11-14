@@ -240,7 +240,9 @@ grid, item details, Crafting and the hand, beside a solid Material's cube; a
 Dropped item as an upright turning sprite beside a dropped cube; the placement
 ghost of a `cross` Plant and of a Layout of Seeds; one crop's four Stages as
 crossed quads over farmland, an apple tree and a vine on a wall as one flat
-quad; and the `G Harvest` Use prompt on a ripe crop and a ripe apple. Code is in
+quad; and a Breaking fruit panel: a ripe apple on a branch lobe, the break (a
+leaf left and the apple dropping) and a new unripe apple on the tree's other
+lobe later, since harvest is breaking and Use harvests nothing. Code is in
 `plants.js` and `plants.css`. The sprites are drawn in the page from small pixel
 grids and are throwaway; the engine's Stage art comes from
 `scripts/generate-mod-art`. Reach it from the **Jump to mockup screen** picker

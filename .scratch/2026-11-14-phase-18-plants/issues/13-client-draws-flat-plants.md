@@ -12,8 +12,7 @@ What the approved mockup shows. An Item of a `cross` or `plane` Shape, and any
 Item with a `texture`, is a flat sprite of its texture in the Inventory, hotbar,
 Catalogue and Crafting icons, the hand, and as a Dropped item (upright and
 turning at the Item's declared size). The placement ghost is the Shape at the
-target, with each cell of a Layout of Seeds. The Use prompt reads Harvest on a
-ripe crop. Everything else is unchanged.
+target, with each cell of a Layout of Seeds. Everything else is unchanged.
 
 ## Acceptance criteria
 
@@ -57,7 +56,7 @@ rather than key presses.
 - Ghost: a `cross` Shape's ghost, and so a Layout's cells, is two crossed
   quads (both ways round) of the Material's texture; a `plane` ghost is still
   its thin box. `AimGhost.plant_orientation` is kept.
-- The Use prompt already read `Usable::Harvest`; a test pins `G Harvest`.
+- The `G Harvest` Use prompt and `Usable::Harvest` were removed: harvest is breaking.
 - Terra: `wheat`, `bread`, `berries`, `berry_pie` and `apple` carry a texture
   from `textures::item_texture`. Terra's Seeds, saplings and cuttings have
   Materials with flat Shapes and use those.

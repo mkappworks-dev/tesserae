@@ -107,12 +107,18 @@ pub(super) struct Stage {
     yields: Vec<Yield>,
 }
 
+/// Seconds between a tree's new fruit when a row names none.
+fn default_regrow_seconds() -> f32 {
+    120.0
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub(super) struct Fruit {
     stages: Vec<Stage>,
     density: f32,
-    harvest_to: u32,
+    #[serde(default = "default_regrow_seconds")]
+    regrow_seconds: f32,
     shape: Option<String>,
 }
 
@@ -245,7 +251,7 @@ impl From<Plant> for content::PlantDef {
                     fruit: fruit.map(|f| content::FruitDef {
                         stages: stages(f.stages),
                         density: f.density,
-                        harvest_to: f.harvest_to,
+                        regrow_seconds: f.regrow_seconds,
                         shape: f.shape,
                     }),
                     vines: vines.map(|v| content::TreeVines {

@@ -162,12 +162,7 @@ fn accept(
     for UseOutcome(outcome) in outcomes.read() {
         match outcome {
             Ok(UseResult::Measured(corner)) => measurement.accept(*corner),
-            Ok(
-                UseResult::Door { .. }
-                | UseResult::Station
-                | UseResult::Container(_)
-                | UseResult::Harvest,
-            ) => {}
+            Ok(UseResult::Door { .. } | UseResult::Station | UseResult::Container(_)) => {}
             Err(refusal) => super::menu_ui::notify(
                 &mut commands,
                 refusal.message(),

@@ -1428,7 +1428,7 @@ impl Worldgen {
                     })
                     .collect(),
                 density: f.density,
-                harvest_to: 0,
+                regrow_seconds: crate::plant::SAMPLE_INTERVAL_S,
                 shape: (f.shape != SHAPE_FULL_CUBE).then_some(f.shape),
             }),
         }

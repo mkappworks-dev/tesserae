@@ -328,19 +328,20 @@ function ghostScene(count) {
 }
 
 /** The hanging fruit: a shaped Voxel of stacked boxes, drawn as a 3D apple and never a flat quad. */
-function apple3d(s, cx, y, cz, ripe = true) {
+function apple3d(s, cx, y, cz, ripe = true, opts = {}) {
   const [low, mid, top] = ripe
     ? ["#a3201c", "#c8322a", "#d9473b"]
     : ["#5f8d36", "#76a443", "#86b551"];
   const k = ripe ? 1.7 : 1.35;
   const at = (dy, size, h, color) =>
-    s.box(cx, y + dy * k, cz, size * k, h * k, 0, color, { bias: 40 });
+    s.box(cx, y + dy * k, cz, size * k, h * k, 0, color, { bias: 40, ...opts });
   at(0, 0.26, 0.1, low);
   at(0.1, 0.38, 0.17, mid);
   at(0.27, 0.32, 0.09, top);
   at(0.36, 0.06, 0.1, "#5a3d22");
   s.box(cx + 0.1 * k, y + 0.4 * k, cz, 0.16 * k, 0.03 * k, 0, "#3f7a2a", {
     bias: 40,
+    ...opts,
   });
 }
 
@@ -390,22 +391,40 @@ function vineScene() {
   });
 }
 
-function reticleView(name, scene, caption) {
-  return `<figure class="plants-view"><div class="plants-view-frame">${scene}<div class="reticle" aria-hidden="true">+</div><div class="use-hint"><kbd>G</kbd>Harvest</div></div><figcaption><b>${name}</b><small>${caption}</small></figcaption></figure>`;
+/** One tree with a lobe of leaves on each side; `step` is 0 ripe, 1 broken, 2 a new fruit later. */
+function breakScene(step) {
+  const ripeAt = [-1, 3, 1];
+  const newAt = [3, 3, 1];
+  return scene(300, 300, 40, [150, 215], (s) => {
+    for (let x = -4; x <= 4; x++)
+      for (let z = -3; z <= 3; z++)
+        s.box(x, -0.5, z, 1, 0.5, 0, (x + z) % 2 ? "#4f7f35" : "#58893b");
+    for (let y = 0; y < 3; y++) s.box(0, y, 0, 1, 1, 0, TRUNK);
+    for (const x of [-1, 1]) s.box(x, 2, 0, 1, 1, 0, TRUNK);
+    const same = (a, b) => a[0] === b[0] && a[1] === b[1] && a[2] === b[2];
+    for (const cx of [-2, 2])
+      for (let y = 3; y <= 4; y++)
+        for (let x = cx - 1; x <= cx + 1; x++)
+          for (let z = -1; z <= 1; z++) {
+            const cell = [x, y, z];
+            const fruitCell =
+              (step === 0 && same(cell, ripeAt)) ||
+              (step === 2 && same(cell, newAt));
+            /* A fruit Voxel replaces a canopy Voxel, so its cell holds the apple and no leaf. */
+            if (!fruitCell) s.box(x, y, z, 1, 1, 0, LEAVES);
+          }
+    if (step === 0) apple3d(s, ripeAt[0], 3.1, ripeAt[2], true);
+    if (step === 1) {
+      apple3d(s, ripeAt[0], 1.6, ripeAt[2] + 1.1, true, { opacity: 0.45 });
+      s.box(ripeAt[0], 0, ripeAt[2] + 2, 1, 0.02, 0, "#000", { opacity: 0.25 });
+      apple3d(s, ripeAt[0], 0.05, ripeAt[2] + 2, true);
+    }
+    if (step === 2) apple3d(s, newAt[0], 3.1, newAt[2], false);
+  });
 }
 
-function aimScene(kind) {
-  return scene(360, 220, 80, [180, 150], (s) => {
-    if (kind === "crop") {
-      s.box(0, -0.5, 0, 1, 0.5, 0, FARMLAND);
-      s.cross("wheat4", 0, 0, 0);
-    } else {
-      s.box(-1, 0, 0, 1, 1, 0, LEAVES);
-      s.box(0, 0, -1, 1, 1, 0, LEAVES);
-      s.box(0, 1, 0, 1, 1, 0, LEAVES);
-      apple3d(s, 0, 0.1, 0, true);
-    }
-  });
+function breakView(name, caption, step) {
+  return `<figure class="plants-view"><div class="plants-view-frame">${breakScene(step)}</div><figcaption><b>${name}</b><small>${caption}</small></figcaption></figure>`;
 }
 
 function slot(inner, { n, count, active, name } = {}) {
@@ -498,8 +517,8 @@ function plantsPage() {
 <div class="plants-surface"><h4>Wheat, four Stages, over farmland</h4><div class="plants-stages">${[1, 2, 3, 4].map((n) => `<figure class="plants-frame">${stageScene(n)}<figcaption><b>Stage ${n}</b><small>${["sprout", "growing", "heading", "ripe"][n - 1]}</small></figcaption></figure>`).join("")}</div></div>
 <div class="plants-row"><div class="plants-surface"><h4>Apple tree: cubes, with each apple a small 3D voxel (green when unripe)</h4>${treeScene()}</div><div class="plants-surface"><h4>Vine: one flat quad on the wall face</h4>${vineScene()}</div></div>
 </section>
-<section>${heading("USE PROMPT", "G Harvest", "Aimed at a ripe crop with harvest-to, or a ripe apple, the prompt under the reticle names the action before the press. No new pane opens.")}
-<div class="plants-row">${reticleView("Ripe wheat", aimScene("crop"), "Regrows to an earlier Stage")}${reticleView("Ripe apple", aimScene("apple"), "Picked; the tree keeps its leaves")}</div>
+<section>${heading("BREAKING FRUIT", "Break fruit to harvest it", "Break fruit to harvest it; the tree grows new fruit elsewhere on its canopy while it stands.")}
+<div class="plants-row">${breakView("A ripe apple", "On a branch lobe", 0)}${breakView("Break it", "A leaf is left; the apple drops", 1)}${breakView("Later", "A new unripe apple, on the other lobe", 2)}</div>
 </section>
 </div>`;
   return frame({

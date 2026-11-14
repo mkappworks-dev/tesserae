@@ -260,7 +260,7 @@ places hold the work, each on its own side of the invariants:
   `PLANTS_LANDED_PER_STEP`, `TREES_PER_STEP` and `FELLED_PER_STEP`. Support and
   Felling are read from the changes a step absorbs, so an idle World reads
   nothing. `server/plants.rs` is the Server's edge: the soil refusal, what a
-  removal drops, and the Use that harvests.
+  removal drops, and the Remove that harvests a ripe crop.
 
 Only held Chunks Sample and nothing catches up, so growth is deterministic from
 equal state and events. A Mod Command, burn-out and a Player's Remove all reach
@@ -380,7 +380,7 @@ tesserae/
 │           │   ├── mods.rs         Mod Jobs, fair queues and tick drain      ▸ 7
 │           │   ├── fluids.rs       flow on workers, one step at a time      ▸ 8
 │           │   ├── fluids/plants.rs  Sample tick, support and Felling      ▸ 18
-│           │   ├── plants.rs       soil refusal, plant drops, harvest Use   ▸ 18
+│           │   ├── plants.rs       soil refusal, plant drops, crop harvest   ▸ 18
 │           │   ├── edit.rs         the Voxel-edit path, queued intents      ▸ 5
 │           │   ├── undo.rs         the undo journal, paying in Items        ▸ 15
 │           │   ├── inventory.rs    the Player's Inventory and its intents   ▸ 15

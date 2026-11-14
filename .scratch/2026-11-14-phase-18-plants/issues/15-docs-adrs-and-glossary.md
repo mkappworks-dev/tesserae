@@ -42,4 +42,4 @@ Left `ready-for-agent`: the last box is unmet on purpose. DESIGN.md has the step
   reads the live store inline, not a worker Snapshot; a column's fluid is
   `stands-in`, not `water`; needs are `[plants.needs]`; the refusal reads "needs
   soil"; a Plant names its Shape; a Player's Remove is journalled with its yield
-  and only Use harvests, picking fruit and Felling are not.
+  and only a crop's harvest and Felling are not; Use harvests nothing.

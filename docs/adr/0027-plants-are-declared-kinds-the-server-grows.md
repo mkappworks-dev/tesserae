@@ -5,7 +5,7 @@ Status: accepted.
 Step 18 makes vegetation live. A Game or Mod declares **Plants** as data, each
 with a closed kind (`crop`, `tree`, `column`, `spreader` or `climber`), and the
 Server grows, harvests and fells them in native code. No Mod is called when a
-Plant grows or is picked ([ADR-0001](0001-wasm-mod-boundary.md)); a new kind
+Plant grows or is broken ([ADR-0001](0001-wasm-mod-boundary.md)); a new kind
 needs new engine mechanism and arrives with the contract line that adds it. The
 Engine ships no Plant, so a World with no Game has none
 ([ADR-0016](0016-only-air-is-built-in.md)).
@@ -70,10 +70,10 @@ tree's cost grows with the cube of the Voxel size's inverse; a bound in Voxels
 would fit better, and waits for a World that needs it.
 
 **Kinds.** A `crop` is one Voxel through 2 to 8 ordered Stages, the last ripe,
-with an optional `harvest-to` Stage a Use on the ripe one resets to. A `tree` is
-a sapling that grows a parametric tree as one all-or-nothing group. A `column`
-adds one Voxel at the end of its run, up or down, to a height in metres,
-optionally standing in a fluid (kelp). A `spreader` copies itself onto a
+with an optional `harvest-to` Stage a Remove of the ripe one resets to. A `tree`
+is a sapling that grows a parametric tree as one all-or-nothing group. A
+`column` adds one Voxel at the end of its run, up or down, to a height in
+metres, optionally standing in a fluid (kelp). A `spreader` copies itself onto a
 hash-picked Voxel within `reach-m` that meets its needs, while a `density` cap
 holds. A `climber` adds a Voxel on an adjacent face of a solid or hangs below an
 overhang, up to `length-m`. Every size and rate is in metres and seconds and is
@@ -144,8 +144,25 @@ continuous field and a Biome is the nearest point.
 Fruit replaces canopy Voxels chosen by a hash of seed, position and `density`
 (at most 0.3). A fruit Voxel ripens through its grown Stages like a crop, with
 the tree's light and Climate, light read as the brightest of the Voxel and its
-six neighbours since fruit sits in canopy. Use or Remove on a ripe one harvests
-it and resets it to `harvest-to`; the tree is untouched.
+six neighbours since fruit sits in canopy. Fruit is harvested by breaking it
+(below), never by Use, and a standing tree grows new fruit elsewhere on its
+canopy.
+
+**Re-bearing.** A canopy Voxel of a tree that declares `fruit` is a re-bearing
+site, a Sample of it rolling like any other Stage. Nothing is stored per tree. A
+tree's expected canopy cell count `N` is the mean number of leaf and fruit cells
+of four reference trees (`tree_voxels` at fixed bases) at the World's Voxel
+size, a pure function of the row cached per Plant. Each of its `N` canopy Voxels
+has a mean of `N * regrow-seconds`, so the tree as a whole rolls one passing
+Sample about every `regrow-seconds` whatever the Voxel size. A passing roll
+turns the Voxel into the fruit's first Stage, with the fruit's Shape, when the
+tree's light and Climate hold (its `needs` minus soil) and the fruit within
+twice `reach-m` of it, which is a tree's span, is below `density * N`, the share
+the tree is generated with. A felled tree has no canopy left to Sample, and a
+Voxel queued for Felling never bears. A tree of the same species closer than
+that span shares the cap, which only holds fruit back. A `regrow-seconds` is at
+least the 16 s Sample interval; a Sample costs nothing on a Chunk with no Plant
+Material.
 
 A small plant model (fruit, a berry bush, a mushroom) is a `boxes` Shape whose
 Material's tile is painted by position: a box face samples the tile at the
@@ -200,18 +217,28 @@ refusing whole without it.
 - **A tree is the exception.** A trunk is not in the sapling's chain, so undoing
   the Seed's placement after the tree grew is refused by the journal's ordinary
   mismatch rule and never half-removes a tree.
-- **Remove of a ripe fruit or of a ripe crop that declares `harvest-to` is a
-  harvest**: the same code path as Use, in both modes. It gives the yield to the
-  Inventory, resets the Voxel to `harvest-to` and never enters the journal, so a
-  fruit site or a berry bush is never destroyed by a left click and regrows.
-  Remove of an unripe fruit takes it to canopy as before, and of an unripe Stage
-  of a crop breaks it, so a whole berry bush is removed by breaking it at the
-  reset Stage. A crop without `harvest-to` (wheat, carrot) is uprooted at any
-  Stage. A mushroom or other spreader is picked and removed; it returns only by
-  spreading from a neighbour.
-- **Use harvests, picking fruit and a Felling's cascade are Edits that never
-  enter the journal**, like a Door toggle. Undo after cutting a trunk restores
-  the Voxel the Player cut and no more.
+- **Harvest is breaking, never Use.** Use does not harvest anything: its order
+  is a Tool, a Usable Voxel, then eating.
+- **Breaking a fruit is an ordinary Remove.** A ripe one drops its yield as
+  Dropped items, as any removal does, and an unripe one, which declares none,
+  drops nothing; either leaves the tree's canopy Material in its place and the
+  tree untouched. It is journalled like any removal, with `Cost::Yielded`, and
+  undo restores the fruit Voxel and takes the Dropped items back. Every Stage of
+  a tree's fruit is one Voxel to the journal (`canonical`), so undo holds after
+  the fruit ripened; it is refused once the tree has grown new fruit in that
+  cell, by the ordinary mismatch rule. The tree then grows new fruit elsewhere
+  on its canopy (re-bearing above) while it stands.
+- **Remove of a ripe crop that declares `harvest-to` is a harvest**: it gives
+  the yield to the Inventory (what does not fit dropping at the Player), resets
+  the Voxel to `harvest-to` and never enters the journal, so a berry bush is
+  never destroyed by a left click and fruits again. Remove of an unripe Stage
+  breaks it, so a whole berry bush is removed by breaking it at the reset Stage.
+  A crop without `harvest-to` (wheat, carrot) is uprooted at any Stage. A
+  mushroom or other spreader is picked and removed; it returns only by spreading
+  from a neighbour.
+- **A crop harvest and a Felling's cascade are Edits that never enter the
+  journal**, like a Door toggle. Undo after cutting a trunk restores the Voxel
+  the Player cut and no more.
 
 ## Rejected
 
@@ -230,6 +257,11 @@ refusing whole without it.
   what the Voxels already show. Grown Materials and connectivity derive it, as
   Connections and Doors are derived
   ([ADR-0010](0010-connections-are-derived-not-stored.md)).
+- **Harvest by Use** (a `G Harvest` prompt on ripe fruit), which a Player found
+  confusing beside breaking, the one way every other Voxel is taken.
+- **A fruit that resets to an earlier Stage** (`harvest-to` on fruit), which
+  kept a fruit site fixed for ever instead of the tree bearing where it has
+  room.
 - **A Mod callback on growth or harvest**, which is the per-use host call
   ADR-0001 forbids.
 - **Pausing the clock for evicted Chunks, or catching up on return**, which

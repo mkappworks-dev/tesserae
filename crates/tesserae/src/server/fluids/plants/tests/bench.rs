@@ -148,6 +148,34 @@ fn sample_tick_cost_per_logical_step() {
         }
         many(o.tables.clone(), [o.sapling; 3], c, CHUNKS)
     };
+    // Every canopy Voxel of these is a re-bearing site: `bare` has none of its fruit, so each
+    // passing roll lands; the other starts at generation's density.
+    let fruit_forest = |bare: bool| {
+        move || {
+            let o = orchard_of(Some(0.12), (4.0, 6.0), 2.5, None);
+            let mut c = ground();
+            for gz in 0..4 {
+                for gx in 0..4 {
+                    let base = [4 + gx * 8, CROP_Y, 4 + gz * 8];
+                    for v in tree_voxels(&o.tree, SEED, base, 1.0) {
+                        let material = if bare && v.part == tesserae_core::plant::tree::Part::Fruit
+                        {
+                            o.tree.canopy
+                        } else {
+                            v.material
+                        };
+                        c.set(
+                            v.at[0] as usize,
+                            v.at[1] as usize,
+                            v.at[2] as usize,
+                            Voxel::cube(material),
+                        );
+                    }
+                }
+            }
+            many(o.tables.clone(), [o.sapling; 3], c, CHUNKS)
+        }
+    };
     let variants = [
         Variant {
             name: "no plant table",
@@ -175,6 +203,16 @@ fn sample_tick_cost_per_logical_step() {
         Variant {
             name: "forest (16 grown trees)",
             build: Box::new(forest),
+            steps: 200,
+        },
+        Variant {
+            name: "fruit forest (16 trees, 0.12)",
+            build: Box::new(fruit_forest(false)),
+            steps: 200,
+        },
+        Variant {
+            name: "fruit forest, no fruit (bare)",
+            build: Box::new(fruit_forest(true)),
             steps: 200,
         },
         Variant {

@@ -424,9 +424,83 @@ fn generation() {
     }
 }
 
+/// What a fruit tree's first re-bearing Sample pays: the expected canopy size, built once per
+/// Plant and Voxel size from four reference trees and cached after.
+fn rebearing() {
+    use tesserae_core::plant::tree::expected_canopy_cells;
+    use tesserae_core::plant::{Fruit, Stage, Tree};
+    let oak = |branching| Tree {
+        trunk: 1,
+        canopy: 2,
+        trunk_height_m: (4.0, 6.0),
+        canopy_radius_m: 2.5,
+        mean_seconds: 60.0,
+        trunk_yield: Vec::new(),
+        canopy_yield: Vec::new(),
+        sapling_yield: CountRange { min: 1, max: 1 },
+        fruit: Some(Fruit {
+            stages: vec![
+                Stage {
+                    material: 3,
+                    mean_seconds: Some(40.0),
+                    yields: Vec::new(),
+                },
+                Stage {
+                    material: 4,
+                    mean_seconds: None,
+                    yields: Vec::new(),
+                },
+            ],
+            density: 0.12,
+            regrow_seconds: 120.0,
+            shape: None,
+        }),
+        vines: None,
+        branching,
+    };
+    let branching = Branching {
+        limbs: CountRange { min: 3, max: 4 },
+        start: 0.25,
+        reach_m: 3.5,
+        rise: 0.3,
+        fork: Some(0.3),
+        lean_m: 0.0,
+        tiers: false,
+        lobe_radius_m: 1.5,
+    };
+    for size in [1.0, 0.5, 0.25] {
+        let (plain, branched) = (oak(None), oak(Some(branching)));
+        println!(
+            "{size} m: {} / {} expected canopy cells (plain / branched)",
+            expected_canopy_cells(&plain, size),
+            expected_canopy_cells(&branched, size)
+        );
+        compare(
+            &format!("expected canopy cells at {size} m"),
+            9,
+            3,
+            &mut [
+                (
+                    "plain oak",
+                    Box::new(|| {
+                        black_box(expected_canopy_cells(&plain, size));
+                    }),
+                ),
+                (
+                    "branching oak",
+                    Box::new(|| {
+                        black_box(expected_canopy_cells(&branched, size));
+                    }),
+                ),
+            ],
+        );
+    }
+}
+
 fn main() {
     println!("{}", load());
     meshing();
     generation();
+    rebearing();
     println!("{}", load());
 }

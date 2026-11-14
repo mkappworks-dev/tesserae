@@ -635,38 +635,50 @@ Notes:
   dies. Trees are parametric, grow whole from a sapling and fell top-down when a
   trunk is cut, where only grown Materials take part, so a cabin of placed logs
   stays. Plants carry flat `cross` and `plane` Shapes, fruit is a small box
-  Shape that Use picks, soil and water are Material tags, and a Biome may list
-  16 surface features, Plants included, with vines hung from trees by worldgen
-  only. The shared Mods `flora`, `crops` and `aquatic` declare the vegetation
-  every Game places. Not shipped: falling trees as bodies (step 24), tree
-  templates (step 20), leaf decay and weather inputs (step 17). Measured by the
-  benchmark pass (Apple M5, thread CPU time, interleaved rounds, load average 8
-  to 9, `cargo bench -p tesserae-core --bench plants` and the `--ignored` rig in
-  `server/fluids/plants/tests/bench.rs`): `PLANT_SAMPLES` stays 32, so a Sample
-  tick costs 0.01 us a Chunk with no Plant Material, 0.56 us a crop-meadow Chunk
-  and 0.34 us a forest Chunk, and `PLANTS_LANDED_PER_STEP` stays 64 (288 us a
-  step when saturated, 4.5 us a landing). `TREES_PER_STEP` is 1: an oak of 4 to
-  6 m lands whole in 0.16, 0.86 and 6.1 ms at 1.0, 0.5 and 0.25 m, so two a step
-  would be 80% of a 15.6 ms step at 0.25 m. `FELLED_PER_STEP` stays 32 (0.11,
-  0.11 and 0.38 ms a step). Meshing 1024 `cross` Voxels costs 350 us against 209
-  us for the bare terrain, below the 478 us of 1024 stairs, so flat Shapes stay
-  uncapped; 4096 cost 541 us. A surface Chunk of a 16-feature Biome generates in
-  0.42, 0.24 and 0.20 ms against 0.12, 0.08 and 0.08 bare. Branching trees
-  (ticket 18; limbs, forks, lean and lobes in metres, the shared species of
-  `flora` all branch) cost more: the shared oak is 6590 Voxels at 0.25 m against
-  3341 and lands in 0.29, 1.58 and 10.2 ms at 1.0, 0.5 and 0.25 m against 0.17,
-  0.86 and 6.1, 65% of a 15.6 ms step, so `TREES_PER_STEP` stays 1 (it cannot go
-  lower); a felled step of 32 Voxels costs 0.12, 0.14 and 0.74 ms; a surface
-  Chunk of the 16-feature Biome with three branching trees generates in 0.73,
-  0.41 and 0.54 ms against 0.43, 0.25 and 0.20 with plain trees. Density and
-  groves (ticket 19): a feature may declare a `clump`, a scale in metres and a
-  strength whose low-frequency field multiplies its chance at a mean of 1, and
-  the shipped Games tune every Biome to the approved classes (dense trees 3.6 to
-  4.7 m apart, moderate 5.7 to 8 m, sparse 15 to 67 m, measured over a sample of
-  Chunks). Clumping every feature of the worst-case 16-feature Biome costs a
-  surface Chunk 0.61, 0.31 and 0.22 ms at 1.0, 0.5 and 0.25 m against 0.43, 0.25
-  and 0.20 without (interleaved thread CPU time, load average 7 to 8): one noise
-  evaluation per clumped feature per column that can hold a feature. See
+  Shape that is broken to harvest (the tree grows new fruit elsewhere on its
+  canopy while it stands), soil and water are Material tags, and a Biome may
+  list 16 surface features, Plants included, with vines hung from trees by
+  worldgen only. The shared Mods `flora`, `crops` and `aquatic` declare the
+  vegetation every Game places. Not shipped: falling trees as bodies (step 24),
+  tree templates (step 20), leaf decay and weather inputs (step 17). Measured by
+  the benchmark pass (Apple M5, thread CPU time, interleaved rounds, load
+  average 8 to 9, `cargo bench -p tesserae-core --bench plants` and the
+  `--ignored` rig in `server/fluids/plants/tests/bench.rs`): `PLANT_SAMPLES`
+  stays 32, so a Sample tick costs 0.01 us a Chunk with no Plant Material, 0.56
+  us a crop-meadow Chunk and 0.34 us a forest Chunk, and
+  `PLANTS_LANDED_PER_STEP` stays 64 (288 us a step when saturated, 4.5 us a
+  landing). `TREES_PER_STEP` is 1: an oak of 4 to 6 m lands whole in 0.16, 0.86
+  and 6.1 ms at 1.0, 0.5 and 0.25 m, so two a step would be 80% of a 15.6 ms
+  step at 0.25 m. `FELLED_PER_STEP` stays 32 (0.11, 0.11 and 0.38 ms a step).
+  Meshing 1024 `cross` Voxels costs 350 us against 209 us for the bare terrain,
+  below the 478 us of 1024 stairs, so flat Shapes stay uncapped; 4096 cost 541
+  us. A surface Chunk of a 16-feature Biome generates in 0.42, 0.24 and 0.20 ms
+  against 0.12, 0.08 and 0.08 bare. Branching trees (ticket 18; limbs, forks,
+  lean and lobes in metres, the shared species of `flora` all branch) cost more:
+  the shared oak is 6590 Voxels at 0.25 m against 3341 and lands in 0.29, 1.58
+  and 10.2 ms at 1.0, 0.5 and 0.25 m against 0.17, 0.86 and 6.1, 65% of a 15.6
+  ms step, so `TREES_PER_STEP` stays 1 (it cannot go lower); a felled step of 32
+  Voxels costs 0.12, 0.14 and 0.74 ms; a surface Chunk of the 16-feature Biome
+  with three branching trees generates in 0.73, 0.41 and 0.54 ms against 0.43,
+  0.25 and 0.20 with plain trees. Density and groves (ticket 19): a feature may
+  declare a `clump`, a scale in metres and a strength whose low-frequency field
+  multiplies its chance at a mean of 1, and the shipped Games tune every Biome
+  to the approved classes (dense trees 3.6 to 4.7 m apart, moderate 5.7 to 8 m,
+  sparse 15 to 67 m, measured over a sample of Chunks). Clumping every feature
+  of the worst-case 16-feature Biome costs a surface Chunk 0.61, 0.31 and 0.22
+  ms at 1.0, 0.5 and 0.25 m against 0.43, 0.25 and 0.20 without (interleaved
+  thread CPU time, load average 7 to 8): one noise evaluation per clumped
+  feature per column that can hold a feature. Harvest is breaking (Use harvests
+  nothing) and a standing fruit tree re-bears: each of its canopy Voxels Samples
+  at a mean of `regrow-seconds` times the tree's expected canopy cells, so the
+  tree grows one unripe fruit about every `regrow-seconds`, up to `density` of
+  its canopy. Measured (load average 8 to 12, the `--ignored` rig, 64 held
+  Chunks of 16 trees): a bare fruit forest costs 32.8 us a step against 23.6 for
+  a forest of fruitless trees, so the re-bearing site is about 0.14 us a Chunk,
+  and at generation's density it is 87.9 us with 4.7 ripenings landing a step;
+  the expected canopy count costs 8, 26 and 176 us once per Plant and Voxel size
+  for the branching oak at 1.0, 0.5 and 0.25 m (1.7, 7.9 and 55 us plain), then
+  is cached. See
   [ADR-0027](docs/adr/0027-plants-are-declared-kinds-the-server-grows.md) and
   the 2026-11-14 amendments to
   [ADR-0006](docs/adr/0006-shapes-are-table-data.md),

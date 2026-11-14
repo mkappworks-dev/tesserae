@@ -38,7 +38,7 @@ worldgen, which needs one engine addition.
 - [x] Terra generates, in the matching Biomes, oak, birch, pine, palm, apple and
       orange trees, wild vegetables and berries, flowers, mushrooms, cane, kelp
       and cacti, in a headless generation test that counts each by name.
-- [x] A fruit tree's fruit ripens, is picked with Use and regrows; every new
+- [x] A fruit tree's fruit ripens, is broken to collect and the tree grows new fruit; every new
       fruit is a 3D box Shape as the approved mockup shows.
 - [x] A jungle or swamp tree generates vines hanging from its canopy, whole
       across Chunk borders and equal at 1.0, 0.5 and 0.25 m; a vine whose
@@ -162,7 +162,7 @@ and counts by Plant and Material name: each Biome grows each declared species, a
 Biome is bare only if declared so (`ember:scorched`, which also holds no plant
 Voxel), jungle and swamp Biomes have vines, no standalone Wood is generated, each
 shared Plant is placed by two Games or more, and every fruit is a box Shape that
-Use picks and that grows back. Vines at 1.0, 0.5 and 0.25 m and the 16-feature
+breaking collects and that the tree grows again. Vines at 1.0, 0.5 and 0.25 m and the 16-feature
 cap are covered by `plant_worldgen` and `tesserae-mods`' declare tests.
 
 - **Biomes** (new ones in bold). terra: **jungle**, **swamp**, **savanna**.

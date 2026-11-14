@@ -489,7 +489,7 @@ interface content {
     record crop-def {
         /// 2 to 8 Stages in order; the last is ripe.
         stages: list<plant-stage>,
-        /// An earlier Stage, by index, that Use on the ripe one resets to.
+        /// An earlier Stage, by index, that a Remove of the ripe one resets to.
         harvest-to: option<u32>,
     }
 
@@ -500,8 +500,11 @@ interface content {
         stages: list<plant-stage>,
         /// The share of canopy Voxels that carry fruit, from 0 to 0.3.
         density: f32,
-        /// An earlier Stage, by index, that Use on ripe fruit resets to.
-        harvest-to: u32,
+        /// Mean seconds between new fruit on a standing tree with room, at
+        /// least 16. A canopy Voxel Samples at a mean of this times the tree's
+        /// canopy Voxel count, so the tree as a whole grows one unripe fruit
+        /// about this often, up to `density` of its canopy.
+        regrow-seconds: f32,
         /// The Shape of every fruit Voxel, by full name, so fruit can be a box
         /// model; `none` keeps cubes.
         shape: option<string>,

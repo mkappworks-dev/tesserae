@@ -28,6 +28,16 @@ pub(super) fn orchard_of(
     canopy_radius_m: f32,
     branching: Option<Branching>,
 ) -> Orchard {
+    regrowing(fruit, trunk_height_m, canopy_radius_m, branching, 120.0)
+}
+
+pub(super) fn regrowing(
+    fruit: Option<f32>,
+    trunk_height_m: (f32, f32),
+    canopy_radius_m: f32,
+    branching: Option<Branching>,
+    regrow_seconds: f32,
+) -> Orchard {
     let mut tables = crate::server::fixture_tables();
     let apple = tables
         .shapes
@@ -73,7 +83,7 @@ pub(super) fn orchard_of(
                 })
                 .collect(),
             density,
-            harvest_to: 0,
+            regrow_seconds,
             shape: Some(apple),
         }),
     };
@@ -509,4 +519,132 @@ fn a_grown_branching_tree_is_relit_as_a_whole_the_way_a_fresh_solve_lights_it() 
         }
     }
     assert!(shaded > 0, "the limbs and lobes shade something");
+}
+
+/// A grown tree at `BASE`, its fruit all canopy again, standing on a Farm.
+fn bare_tree(size: f32, o: &Orchard) -> (Farm, Vec<[i32; 3]>) {
+    let mut chunk = ground();
+    let mut leaves = Vec::new();
+    for v in tree_voxels(&o.tree, SEED, BASE, size) {
+        let material = if v.part == Part::Trunk {
+            v.material
+        } else {
+            o.tree.canopy
+        };
+        if v.part != Part::Trunk {
+            leaves.push(v.at);
+        }
+        let [x, y, z] = v.at.map(|c| c as usize);
+        chunk.set(x, y, z, Voxel::cube(material));
+    }
+    (
+        Farm::open(size, o.tables.clone(), [o.sapling; 3], chunk),
+        leaves,
+    )
+}
+
+fn fruit_on(farm: &Farm, o: &Orchard, leaves: &[[i32; 3]]) -> usize {
+    leaves
+        .iter()
+        .filter(|&&c| o.fruit.contains(&at(farm, c)))
+        .count()
+}
+
+/// The most fruit a re-bearing tree holds: the cap, rounded up.
+fn cap_of(o: &Orchard, size: f32) -> usize {
+    use tesserae_core::plant::tree::{expected_canopy_cells, fruit_cap};
+    let density = o.tree.fruit.as_ref().unwrap().density;
+    fruit_cap(density, expected_canopy_cells(&o.tree, size)).ceil() as usize
+}
+
+#[test]
+fn a_standing_fruit_tree_grows_new_fruit_over_time_and_stops_at_its_density_cap() {
+    for size in [1.0, 0.5] {
+        let o = regrowing(Some(0.1), (3.0, 4.0), 3.0, None, 16.0);
+        let (mut farm, leaves) = bare_tree(size, &o);
+        let cap = cap_of(&o, size);
+        assert_eq!(fruit_on(&farm, &o, &leaves), 0);
+        assert!(
+            until(&mut farm, 300_000, |f| fruit_on(f, &o, &leaves) >= cap),
+            "{size}: {} of {cap}",
+            fruit_on(&farm, &o, &leaves)
+        );
+        farm.run(20_000);
+        assert_eq!(fruit_on(&farm, &o, &leaves), cap, "{size}: held at the cap");
+        assert_eq!(at(&farm, BASE), o.trunk, "the tree stands");
+    }
+}
+
+#[test]
+fn fruit_picked_from_a_full_tree_grows_back_elsewhere() {
+    let o = regrowing(Some(0.1), (3.0, 4.0), 3.0, None, 16.0);
+    let (mut farm, leaves) = bare_tree(1.0, &o);
+    let cap = cap_of(&o, 1.0);
+    assert!(until(&mut farm, 300_000, |f| fruit_on(f, &o, &leaves) >= cap));
+    let picked = *leaves
+        .iter()
+        .find(|&&c| o.fruit.contains(&at(&farm, c)))
+        .unwrap();
+    farm.solid(picked, Voxel::cube(o.tree.canopy));
+    assert_eq!(fruit_on(&farm, &o, &leaves), cap - 1);
+    assert!(until(&mut farm, 300_000, |f| fruit_on(f, &o, &leaves) >= cap));
+}
+
+#[test]
+fn a_tree_with_part_of_its_canopy_cut_still_bears_on_what_remains() {
+    let o = regrowing(Some(0.1), (3.0, 4.0), 3.0, None, 16.0);
+    let (mut farm, leaves) = bare_tree(1.0, &o);
+    let top = leaves.iter().map(|c| c[1]).max().unwrap();
+    for &cut in leaves.iter().filter(|c| c[1] == top) {
+        farm.solid(cut, Voxel::AIR);
+    }
+    let remains: Vec<_> = leaves.iter().copied().filter(|c| c[1] != top).collect();
+    assert!(until(&mut farm, 300_000, |f| fruit_on(f, &o, &remains) > 0));
+    assert!(fruit_on(&farm, &o, &leaves) > 0);
+}
+
+#[test]
+fn a_felled_tree_grows_no_fruit() {
+    let o = regrowing(Some(0.1), (3.0, 4.0), 3.0, None, 16.0);
+    let (mut farm, leaves) = bare_tree(1.0, &o);
+    farm.solid(BASE, Voxel::AIR);
+    assert!(until(&mut farm, 20_000, |f| {
+        leaves.iter().all(|&c| at(f, c) == 0)
+    }));
+    farm.run(20_000);
+    assert_eq!(fruit_on(&farm, &o, &leaves), 0);
+}
+
+#[test]
+fn a_tree_in_the_dark_grows_no_fruit_until_light_reaches_it() {
+    let o = regrowing(Some(0.1), (3.0, 4.0), 3.0, None, 16.0);
+    let mut chunk = ground();
+    let roof_y = 20usize;
+    let mut leaves = Vec::new();
+    for v in tree_voxels(&o.tree, SEED, BASE, 1.0) {
+        let material = if v.part == Part::Trunk {
+            v.material
+        } else {
+            o.tree.canopy
+        };
+        if v.part != Part::Trunk {
+            leaves.push(v.at);
+        }
+        let [x, y, z] = v.at.map(|c| c as usize);
+        chunk.set(x, y, z, Voxel::cube(material));
+    }
+    for z in 0..CHUNK_SIZE {
+        for x in 0..CHUNK_SIZE {
+            chunk.set(x, roof_y, z, Voxel::cube(rock()));
+        }
+    }
+    let mut farm = Farm::open(1.0, o.tables.clone(), [o.sapling; 3], chunk);
+    farm.run(30_000);
+    assert_eq!(fruit_on(&farm, &o, &leaves), 0, "held in the dark");
+    for z in 0..CHUNK_SIZE as i32 {
+        for x in 0..CHUNK_SIZE as i32 {
+            farm.solid([x, roof_y as i32, z], Voxel::AIR);
+        }
+    }
+    assert!(until(&mut farm, 300_000, |f| fruit_on(f, &o, &leaves) > 0));
 }

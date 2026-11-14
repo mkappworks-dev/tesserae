@@ -564,10 +564,11 @@ fn every_shared_plant_is_placed_by_at_least_two_games() {
     }
 }
 
-/// Every fruit tree's fruit ripens through its Stages, is picked with Use into food and falls back
-/// to its unripe Stage, and is drawn as its own 3D box Shape that no face of seals.
+/// Every fruit tree's fruit ripens through its Stages, is broken for food and left as canopy, the
+/// tree growing new fruit after `regrow-seconds`, and is drawn as its own 3D box Shape that no face
+/// of seals.
 #[test]
-fn every_fruit_is_a_box_shape_that_use_picks_and_that_grows_back() {
+fn every_fruit_is_a_box_shape_that_breaking_picks_and_the_tree_grows_again() {
     let (_install, loaded) = loaded("terra", 0.5);
     let plants = &loaded.tables.plants;
     for (tree, fruit, item) in [
@@ -576,16 +577,17 @@ fn every_fruit_is_a_box_shape_that_use_picks_and_that_grows_back() {
         ("cherry", "cherry", "flora:cherries"),
         ("palm", "coconut", "flora:coconut"),
     ] {
-        let ripe = plants
-            .harvest(material(&loaded, &format!("flora:{fruit}_ripe")))
-            .unwrap_or_else(|| panic!("{fruit} is picked with Use"));
-        assert!(ripe.ripe, "{fruit}");
-        assert_eq!(
-            ripe.to,
-            material(&loaded, &format!("flora:{fruit}_unripe")),
-            "{fruit} grows back"
+        let ripe = material(&loaded, &format!("flora:{fruit}_ripe"));
+        assert!(
+            plants.harvest(ripe).is_none(),
+            "{fruit} is broken, not reset"
         );
-        assert_eq!(ripe.yields[0].item, item);
+        assert_eq!(
+            plants.canopy_of_fruit(ripe),
+            Some(material(&loaded, &format!("flora:{tree}_leaves"))),
+            "{fruit} leaves its canopy"
+        );
+        assert_eq!(plants.yields(ripe)[0].item, item);
         let food = loaded.items.iter().find(|i| i.name == item).unwrap();
         assert!(food.food.is_some_and(|f| f > 0.0), "{item} feeds");
 
@@ -599,7 +601,9 @@ fn every_fruit_is_a_box_shape_that_use_picks_and_that_grows_back() {
         else {
             panic!("{tree} is a tree")
         };
-        assert_eq!(row.fruit.as_ref().unwrap().shape, Some(boxed), "{fruit}");
+        let bears = row.fruit.as_ref().unwrap();
+        assert_eq!(bears.shape, Some(boxed), "{fruit}");
+        assert!(bears.regrow_seconds >= 16.0, "{fruit} regrows");
         for face in 0..6 {
             let voxel = tesserae_core::Voxel::new(
                 material(&loaded, &format!("flora:{fruit}_ripe")),

@@ -151,7 +151,7 @@ fn outcomes(
     }
     for outcome in uses.read() {
         let cause = match outcome.0 {
-            Ok(UseResult::Measured(_) | UseResult::Harvest) => Cause::UseMeasured,
+            Ok(UseResult::Measured(_)) => Cause::UseMeasured,
             // Heard where they land, by their own Causes.
             Ok(UseResult::Door { .. } | UseResult::Container(_) | UseResult::Station) => continue,
             Err(_) => Cause::UseRefused,
@@ -243,8 +243,6 @@ mod tests {
         app.world_mut()
             .write_message(UseOutcome(Ok(UseResult::Door { opened: true })));
         app.world_mut()
-            .write_message(UseOutcome(Ok(UseResult::Harvest)));
-        app.world_mut()
             .write_message(UseOutcome(Ok(UseResult::Measured(UseTarget {
                 at: [0; 3],
                 voxel: tesserae_core::Voxel::AIR,
@@ -259,12 +257,7 @@ mod tests {
             .collect();
         assert_eq!(
             events.iter().map(|s| s.cause).collect::<Vec<_>>(),
-            [
-                Cause::Pickup,
-                Cause::UseRefused,
-                Cause::UseMeasured,
-                Cause::UseMeasured
-            ]
+            [Cause::Pickup, Cause::UseRefused, Cause::UseMeasured]
         );
         assert!(events.iter().all(|s| s.pos_m == [2.0, 3.0, 4.0]));
         app.update();

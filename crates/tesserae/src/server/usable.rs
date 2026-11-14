@@ -72,17 +72,9 @@ pub(super) fn aim(
 }
 
 /// What Use does to a Voxel with no Tool, if anything: a Usable Voxel's kind,
-/// else a plant's harvest, which is refused while it is unripe. A Usable Voxel
-/// comes first, then Harvest, then eating.
+/// else eating.
 fn usable(tables: &Tables, voxel: Voxel) -> Option<Result<Usable, UseRefusal>> {
-    let Some((_, kind)) = tables.uses.of(voxel.material()) else {
-        let ripening = tables.plants.harvest(voxel.material())?;
-        return Some(if ripening.ripe {
-            Ok(Usable::Harvest)
-        } else {
-            Err(UseRefusal::NotRipe)
-        });
-    };
+    let (_, kind) = tables.uses.of(voxel.material())?;
     Some(Ok(match kind {
         VoxelUse::Door { .. } => Usable::Door {
             open: tables.uses.is_open(voxel.material()),

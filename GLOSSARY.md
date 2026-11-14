@@ -432,8 +432,9 @@ placed. What a Player places, however alike in look, is not one.
 **Seed** — the Item that places a Plant's first Stage: a seed, a sapling or a
 cutting.
 
-**Fruit** — the grown Materials some canopy Voxels of a tree ripen through. Use
-picks a ripe one without cutting the tree, and it ripens again.
+**Fruit** — the grown Materials some canopy Voxels of a tree ripen through.
+Breaking one drops its yield (a ripe one) and leaves canopy; a standing tree
+grows new fruit elsewhere on its canopy over time.
 
 **Branching** — the optional record on a tree row that gives it a lean, a fork
 into leaders, limbs and lobes, in metres and fractions of its height. A tree
