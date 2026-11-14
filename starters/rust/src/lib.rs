@@ -4,8 +4,8 @@ use exports::tesserae::mods::guest::{
     Command, Declaration, Guest, Registered, TickContext, WorldInfo,
 };
 use tesserae::mods::content::{
-    Appearance, DoorDef, GroundParams, MaterialDef, MovementPolicy, Occlusion, RecipeDef, RecipeStack,
-    RenderClass, VoxelUse, VoxelUseKind,
+    Appearance, DoorDef, GroundParams, MaterialDef, MovementPolicy, Occlusion, RecipeDef,
+    RecipeStack, RenderClass, VoxelUse, VoxelUseKind,
 };
 use tesserae::mods::types::Srgba;
 
