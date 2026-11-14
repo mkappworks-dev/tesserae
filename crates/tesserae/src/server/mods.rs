@@ -843,6 +843,7 @@ fn install(world: &mut World) {
                 color: item.color,
                 material: item.material,
                 max_stack: item.max_stack,
+                texture: item.texture.as_deref().map(Into::into),
             })
             .collect(),
     ));
@@ -929,6 +930,12 @@ pub(in crate::server) fn catalogue(
                 geometry: tables.shapes.preview_geometry(id),
                 turnable: id != SHAPE_FULL_CUBE && !tables.shapes.is_connected_shape(id),
                 fixed: tables.uses.fixes(id),
+                // Any non-air Material: air has no Shape.
+                form: tables.shapes.form_of(tesserae_core::Voxel::shaped(
+                    1,
+                    id,
+                    tesserae_core::Orientation::IDENTITY,
+                )),
             }
         })
         .collect();
@@ -2391,6 +2398,51 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
             assert_eq!(gate.shape, Some(id(Kind::Shape, "terra:panel") as u8));
             assert_eq!(gate.cells(size), cells, "{size} m");
         }
+    }
+
+    #[test]
+    fn terra_produce_carries_its_texture_to_the_client_and_its_seeds_name_a_flat_shape() {
+        let loaded = super::runtime::tests::terra_loaded(1.0);
+        let mut app = App::new();
+        app.add_message::<crate::content::ItemLooks>()
+            .insert_non_send(loaded)
+            .add_plugins(plugin);
+        let looks = app
+            .world_mut()
+            .resource_mut::<Messages<crate::content::ItemLooks>>()
+            .drain()
+            .next()
+            .unwrap();
+        let catalogue = app
+            .world_mut()
+            .resource_mut::<Messages<ContentCatalogue>>()
+            .drain()
+            .next()
+            .unwrap();
+        let look = |name: &str| looks.0.iter().find(|l| l.name == name).unwrap();
+        for produce in ["wheat", "bread", "berries", "berry_pie", "apple"] {
+            let item = look(&format!("terra:{produce}"));
+            let pixels = item.texture.as_deref().expect(produce);
+            assert_eq!(pixels.len(), tesserae_mods::ITEM_TEXTURE_BYTES);
+            assert!(
+                pixels.as_chunks::<4>().0.iter().any(|p| p[3] == 0),
+                "{produce} has clear ground"
+            );
+            assert!(
+                pixels.as_chunks::<4>().0.iter().any(|p| p[3] == 255),
+                "{produce} is drawn"
+            );
+        }
+        assert!(
+            look("terra:rock").texture.is_none(),
+            "solid Items stay cubes"
+        );
+        let seeds = look("terra:wheat_seeds");
+        let sprout = catalogue.material(seeds.material.unwrap()).unwrap();
+        let shape = catalogue
+            .shape(sprout.shape.expect("a seed's fixed Shape"))
+            .unwrap();
+        assert!(shape.form.is_flat());
     }
 
     #[test]

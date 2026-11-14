@@ -120,6 +120,12 @@ pub enum ModError {
         name: String,
         bytes: usize,
     },
+    ItemTexture {
+        id: String,
+        row: usize,
+        name: String,
+        bytes: usize,
+    },
     TooManyRows {
         id: String,
         what: &'static str,
@@ -313,6 +319,16 @@ impl fmt::Display for ModError {
                 f,
                 "mod `{id}`: appearance {row} `{name}`: texture has {bytes} bytes; expected {} RGBA bytes (top, side, bottom)",
                 crate::declare::MATERIAL_TEXTURE_BYTES,
+            ),
+            ModError::ItemTexture {
+                id,
+                row,
+                name,
+                bytes,
+            } => write!(
+                f,
+                "mod `{id}`: item {row} `{name}`: texture has {bytes} bytes; expected {} RGBA bytes",
+                crate::declare::ITEM_TEXTURE_BYTES,
             ),
             ModError::TooManyRows {
                 id,

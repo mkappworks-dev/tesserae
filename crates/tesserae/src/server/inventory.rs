@@ -708,6 +708,7 @@ mod tests {
             material: None,
             max_stack,
             food: None,
+            texture: None,
         };
         app.insert_resource(Items(vec![item("t:rock", 1), item("t:sand", 16)]));
         let (sent, refused) = ask(&mut app, take(SAND, 64, Destination::Backpack));

@@ -846,6 +846,55 @@ fn invalid_artwork_names_the_mod_and_field() {
     }
 }
 
+const ITEM_CONTENT: &str = r#"
+[[items]]
+name = "wheat"
+size-m = 0.2
+color = [214, 178, 70, 255]
+texture = "art/wheat.png"
+"#;
+
+#[test]
+fn an_item_texture_is_one_tile_decoded_from_the_mods_art() {
+    let s = Scratch::new("item-art");
+    s.write_mod("art", ART_MANIFEST, None);
+    let dir = s.mod_dir("art");
+    fs::create_dir_all(dir.join("art")).unwrap();
+    fs::write(dir.join("content.toml"), ITEM_CONTENT).unwrap();
+    fs::write(dir.join("art/wheat.png"), png_bytes(16, 16, 9)).unwrap();
+    let found = only(discover(&s.mods()).unwrap());
+    let loaded = load_art(&found, &s).unwrap();
+    let items = &loaded[0].declaration().unwrap().items;
+    let texture = items[0].texture.as_ref().unwrap();
+    assert_eq!(texture.len(), crate::ITEM_TEXTURE_BYTES);
+    assert_eq!(texture[..4], [0, 0, 9, 0]);
+
+    let original = loaded[0].build_sha256.clone();
+    fs::write(dir.join("art/wheat.png"), png_bytes(16, 16, 10)).unwrap();
+    assert_ne!(
+        Trust::hash_of(&found).unwrap(),
+        original,
+        "art joins build identity"
+    );
+
+    for (png, expect) in [
+        (png_bytes(48, 16, 0), "16 by 16"),
+        (b"not a png".to_vec(), "PNG"),
+    ] {
+        fs::write(dir.join("art/wheat.png"), png).unwrap();
+        let error = load_art(&found, &s).err().unwrap().to_string();
+        assert!(
+            error.contains("items[0].texture")
+                && error.contains("art/wheat.png")
+                && error.contains(expect),
+            "{error}"
+        );
+    }
+    fs::remove_file(dir.join("art/wheat.png")).unwrap();
+    let error = load_art(&found, &s).err().unwrap().to_string();
+    assert!(error.contains("items[0].texture"), "{error}");
+}
+
 #[cfg(unix)]
 #[test]
 fn artwork_escaping_the_mod_directory_is_refused() {

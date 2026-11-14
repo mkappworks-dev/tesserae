@@ -291,6 +291,7 @@ fn component() -> Declaration {
                 material: Some("full:wood".into()),
                 max_stack: Some(16),
                 food: None,
+                texture: None,
             },
             content::ItemDef {
                 name: "pebble".into(),
@@ -304,6 +305,7 @@ fn component() -> Declaration {
                 material: None,
                 max_stack: None,
                 food: Some(2.5),
+                texture: None,
             },
         ],
         biomes: vec![

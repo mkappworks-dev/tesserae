@@ -291,6 +291,7 @@ mod tests {
             material,
             max_stack: 64,
             food,
+            texture: None,
         };
         let items = Items(vec![
             item("t:door", Some(doors.closed), None),

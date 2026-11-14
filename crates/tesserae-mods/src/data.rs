@@ -152,6 +152,11 @@ pub(crate) fn references(id: &str, bytes: &[u8]) -> Result<Vec<Reference>, ModEr
             found.push(artwork(format!("appearance[{row}].texture"), path));
         }
     }
+    for (row, item) in data.items.iter().enumerate() {
+        if let Some(path) = &item.texture {
+            found.push(artwork(format!("items[{row}].texture"), path));
+        }
+    }
     if let Some(character) = data.world.and_then(|w| w.character) {
         found.push(artwork("world.character.skin".into(), character.skin()));
     }
@@ -274,7 +279,20 @@ pub(crate) fn parse(id: &str, payload: &CheckedPayload) -> Result<Declaration, M
         reactions: data.reactions.into_iter().map(Into::into).collect(),
         combustion: data.combustion.into_iter().map(Into::into).collect(),
         tools: data.tools.into_iter().map(Into::into).collect(),
-        items: data.items.into_iter().map(Into::into).collect(),
+        items: data
+            .items
+            .into_iter()
+            .enumerate()
+            .map(|(row, item)| {
+                let edge = crate::MATERIAL_TEXTURE_EDGE as u32;
+                let texture = item
+                    .texture
+                    .as_deref()
+                    .map(|path| artwork(format!("items[{row}].texture"), path, edge, edge))
+                    .transpose()?;
+                Ok(item.into_def(texture))
+            })
+            .collect::<Result<_, ModError>>()?,
         biomes: data.biomes.into_iter().map(Into::into).collect(),
         ores: data.ores.into_iter().map(Into::into).collect(),
         survival: data.survival.map(Into::into),

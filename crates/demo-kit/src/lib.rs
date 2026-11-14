@@ -103,6 +103,7 @@ macro_rules! food {
                 material: Some($food.qualified()),
                 max_stack: None,
                 food: Some($food.food),
+                texture: None,
             }
         }
 

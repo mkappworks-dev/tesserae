@@ -35,6 +35,7 @@ fn app() -> (App, MaterialId) {
         material,
         max_stack: 64,
         food: None,
+        texture: None,
     };
     let items = Items(vec![
         item("t:chest", Some(chest)),

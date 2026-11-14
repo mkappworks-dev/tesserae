@@ -3,6 +3,7 @@ use super::{
     edit::Holding,
     material_textures::{PreviewContent, Textures},
     preview::item_mesh,
+    sprite::Sprite,
 };
 use crate::render::tile_icon::TileIcon;
 use crate::session::SessionApp;
@@ -16,6 +17,7 @@ use bevy::{
 const ICON_PX: u32 = 128;
 const ICON_LAYER: usize = 30;
 const CELL: f32 = 2.0;
+const SPRITE_SCALE: f32 = 1.5;
 
 #[derive(Component)]
 pub(super) struct TilePreview(pub(super) Holding);
@@ -49,6 +51,8 @@ fn key(holding: Holding) -> (u8, u16, u8, u8) {
         Holding::Fire => (2, 0, 0, 0),
         Holding::Tool(tool) => (4, tool.0, 0, 0),
         Holding::Empty => (3, 0, 0, 0),
+        Holding::Sprite(Sprite::Material(material)) => (5, material, 0, 0),
+        Holding::Sprite(Sprite::Item(at)) => (6, at, 0, 0),
     }
 }
 
@@ -152,7 +156,15 @@ fn update(
                     content.swatches.rgba(holding),
                     false,
                 ));
-                let rotation = Quat::from_rotation_x(0.45) * Quat::from_rotation_y(-0.6);
+                // A sprite faces the camera and fills its tile; a block is turned to show three faces.
+                let (rotation, scale) = if matches!(holding, Holding::Sprite(_)) {
+                    (Quat::IDENTITY, SPRITE_SCALE)
+                } else {
+                    (
+                        Quat::from_rotation_x(0.45) * Quat::from_rotation_y(-0.6),
+                        1.0,
+                    )
+                };
                 let center = Vec3::new(
                     (col as f32 + 0.5) * CELL - span * 0.5,
                     span * 0.5 - (row as f32 + 0.5) * CELL,
@@ -162,8 +174,9 @@ fn update(
                     Mesh3d(mesh.clone()),
                     MeshMaterial3d(material.clone()),
                     bevy::light::NotShadowCaster,
-                    Transform::from_translation(center - rotation * Vec3::splat(0.5))
-                        .with_rotation(rotation),
+                    Transform::from_translation(center - rotation * Vec3::splat(0.5 * scale))
+                        .with_rotation(rotation)
+                        .with_scale(Vec3::splat(scale)),
                     RenderLayers::layer(ICON_LAYER),
                     ChildOf(root),
                 ));
@@ -205,6 +218,7 @@ mod tests {
                     turnable: id != 0,
                     fixed: false,
                     geometry: tables.tables.shapes.preview_geometry(id),
+                    form: tesserae_core::Form::Box,
                 })
                 .collect(),
             ..default()

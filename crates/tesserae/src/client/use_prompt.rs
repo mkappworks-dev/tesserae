@@ -272,6 +272,21 @@ mod tests {
     }
 
     #[test]
+    fn aimed_at_a_ripe_crop_the_prompt_reads_harvest() {
+        let mut app = app();
+        let ripe: UseAim = Ok(UseTarget {
+            at: [5, 8, 5],
+            voxel: tesserae_core::Voxel::AIR,
+            corner: Vec3::ZERO,
+            usable: Some(Usable::Harvest),
+        });
+        assert_eq!(
+            prompt(&mut app, Some(ripe), None),
+            Some((Some("G".into()), "Harvest".into()))
+        );
+    }
+
+    #[test]
     fn aimed_at_a_container_the_prompt_names_it() {
         let mut app = app();
         app.world_mut().resource_mut::<Catalogue>().0.materials =

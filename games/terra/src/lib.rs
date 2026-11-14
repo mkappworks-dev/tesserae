@@ -472,6 +472,7 @@ impl Guest for Terra {
                     material: Some("terra:stone".into()),
                     max_stack: None,
                     food: None,
+                    texture: None,
                 },
                 ItemDef {
                     name: "dirt".into(),
@@ -485,6 +486,7 @@ impl Guest for Terra {
                     material: Some("terra:dirt".into()),
                     max_stack: None,
                     food: None,
+                    texture: None,
                 },
                 ItemDef {
                     name: "grass".into(),
@@ -498,6 +500,7 @@ impl Guest for Terra {
                     material: Some("terra:grass".into()),
                     max_stack: None,
                     food: None,
+                    texture: None,
                 },
                 ItemDef {
                     name: "melon".into(),
@@ -511,6 +514,7 @@ impl Guest for Terra {
                     material: Some("terra:melon".into()),
                     max_stack: None,
                     food: Some(6.0),
+                    texture: None,
                 },
                 ItemDef {
                     name: "workbench".into(),
@@ -524,6 +528,7 @@ impl Guest for Terra {
                     material: Some("terra:workbench".into()),
                     max_stack: None,
                     food: None,
+                    texture: None,
                 },
                 ItemDef {
                     name: "chest".into(),
@@ -537,6 +542,7 @@ impl Guest for Terra {
                     material: Some("terra:chest".into()),
                     max_stack: None,
                     food: None,
+                    texture: None,
                 },
                 ItemDef {
                     name: "door".into(),
@@ -550,6 +556,7 @@ impl Guest for Terra {
                     material: Some("terra:door".into()),
                     max_stack: None,
                     food: None,
+                    texture: None,
                 },
                 ItemDef {
                     name: "gate".into(),
@@ -563,6 +570,7 @@ impl Guest for Terra {
                     material: Some("terra:gate".into()),
                     max_stack: None,
                     food: None,
+                    texture: None,
                 },
             ]
             .into_iter()

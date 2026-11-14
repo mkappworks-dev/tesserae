@@ -411,6 +411,11 @@ interface content {
         /// Hunger eating one restores, greater than 0 and at most 1000; none
         /// is not food.
         food: option<f32>,
+        /// Optional RGBA sprite, one 16 by 16 tile: exactly 1024 bytes, sRGB
+        /// colour with straight alpha. An Item with one, or one whose
+        /// Material's Shape is flat, is drawn as a flat sprite; none keeps the
+        /// cube of `color`.
+        texture: option<list<u8>>,
     }
 
     /// An Item, `<mod id>:<name>`, and how many.

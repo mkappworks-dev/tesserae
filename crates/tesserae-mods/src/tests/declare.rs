@@ -962,7 +962,37 @@ fn item(name: &str, material: Option<&str>) -> content::ItemDef {
         material: material.map(Into::into),
         max_stack: None,
         food: None,
+        texture: None,
     }
+}
+
+#[test]
+fn an_item_texture_is_exactly_one_tile_and_an_item_may_have_none() {
+    for len in [
+        0,
+        1,
+        crate::ITEM_TEXTURE_BYTES - 1,
+        crate::MATERIAL_TEXTURE_BYTES,
+    ] {
+        let mut wheat = item("wheat", None);
+        wheat.texture = Some(vec![0; len]);
+        let error = Load::new()
+            .apply("farm", with_items(&[], vec![wheat]))
+            .unwrap_err();
+        assert!(matches!(error, ModError::ItemTexture { row: 0, bytes, .. } if bytes == len));
+        let message = error.to_string();
+        assert!(message.contains("item 0 `wheat`"), "{message}");
+        assert!(message.contains("1024"), "{message}");
+    }
+    let mut wheat = item("wheat", None);
+    wheat.texture = Some(vec![255; crate::ITEM_TEXTURE_BYTES]);
+    let items = resolved(
+        &mut Load::new(),
+        &[("farm", with_items(&[], vec![wheat, item("bread", None)]))],
+    )
+    .unwrap();
+    assert_eq!(items[0].texture.as_deref().map(<[u8]>::len), Some(1024));
+    assert_eq!(items[1].texture, None);
 }
 
 fn with_items(materials: &[&str], items: Vec<content::ItemDef>) -> Declaration {

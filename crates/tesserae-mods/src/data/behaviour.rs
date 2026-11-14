@@ -260,18 +260,21 @@ pub(super) struct Item {
     material: Option<String>,
     max_stack: Option<u32>,
     food: Option<f32>,
+    pub(super) texture: Option<String>,
 }
 
-impl From<Item> for content::ItemDef {
-    fn from(i: Item) -> Self {
+impl Item {
+    pub(super) fn into_def(self, texture: Option<Vec<u8>>) -> content::ItemDef {
+        let i = self;
         let [r, g, b, a] = i.color;
-        Self {
+        content::ItemDef {
             name: i.name,
             size_m: i.size_m,
             color: crate::bindings::tesserae::mods::types::Srgba { r, g, b, a },
             material: i.material,
             max_stack: i.max_stack,
             food: i.food,
+            texture,
         }
     }
 }

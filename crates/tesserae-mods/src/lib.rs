@@ -43,11 +43,11 @@ pub use command::{
 };
 pub use context::{EditEvent, EditKind, TickContext};
 pub use declare::{
-    Applied, Behaviour, DEFAULT_REMOVE_TIME, ITEM_SIZE_M, ItemDef, MATERIAL_TEXTURE_BYTES,
-    MATERIAL_TEXTURE_EDGE, MAX_BEHAVIOURS_PER_MOD, MAX_BIOMES_PER_MOD, MAX_ITEMS,
-    MAX_ITEMS_PER_MOD, MAX_MATERIALS, MAX_NAME_BYTES, MAX_ORES_PER_MOD, MAX_PER_MOD, MAX_SHAPES,
-    MAX_STACK, MAX_TOOLS_PER_MOD, MAX_VOXEL_USES_PER_MOD, ToolDef, ToolKind, ViewParams, apply,
-    biome_rows, resolve, resolve_biomes, resolve_items,
+    Applied, Behaviour, DEFAULT_REMOVE_TIME, ITEM_SIZE_M, ITEM_TEXTURE_BYTES, ItemDef,
+    MATERIAL_TEXTURE_BYTES, MATERIAL_TEXTURE_EDGE, MAX_BEHAVIOURS_PER_MOD, MAX_BIOMES_PER_MOD,
+    MAX_ITEMS, MAX_ITEMS_PER_MOD, MAX_MATERIALS, MAX_NAME_BYTES, MAX_ORES_PER_MOD, MAX_PER_MOD,
+    MAX_SHAPES, MAX_STACK, MAX_TOOLS_PER_MOD, MAX_VOXEL_USES_PER_MOD, ToolDef, ToolKind,
+    ViewParams, apply, biome_rows, resolve, resolve_biomes, resolve_items,
 };
 pub use error::ModError;
 pub use limits::{MAX_COMMANDS, ManifestLimits, ModLimits};

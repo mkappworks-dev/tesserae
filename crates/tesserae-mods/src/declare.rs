@@ -33,6 +33,8 @@ pub const MAX_BEHAVIOURS_PER_MOD: usize = 64;
 pub const MAX_NAME_BYTES: usize = 32;
 pub const MATERIAL_TEXTURE_EDGE: usize = 16;
 pub const MATERIAL_TEXTURE_BYTES: usize = MATERIAL_TEXTURE_EDGE * MATERIAL_TEXTURE_EDGE * 3 * 4;
+/// One tile of a Material's atlas, the size of an Item's sprite.
+pub const ITEM_TEXTURE_BYTES: usize = MATERIAL_TEXTURE_EDGE * MATERIAL_TEXTURE_EDGE * 4;
 
 pub const MAX_TOOLS_PER_MOD: usize = 8;
 pub const MAX_ITEMS_PER_MOD: usize = 64;
@@ -58,6 +60,8 @@ pub struct ItemDef {
     pub max_stack: u32,
     /// Hunger eating one restores; `None` is not food.
     pub food: Option<f32>,
+    /// RGBA pixels of a flat sprite, [`ITEM_TEXTURE_BYTES`] long.
+    pub texture: Option<Vec<u8>>,
 }
 
 /// What a tool does when used; mirrors the contract's closed `tool-kind`.
@@ -289,6 +293,18 @@ pub fn apply(
                 id: id(),
                 row,
                 name: appearance.material.clone(),
+                bytes: pixels.len(),
+            });
+        }
+    }
+    for (row, item) in declaration.items.iter().enumerate() {
+        if let Some(pixels) = &item.texture
+            && pixels.len() != ITEM_TEXTURE_BYTES
+        {
+            return Err(ModError::ItemTexture {
+                id: id(),
+                row,
+                name: item.name.clone(),
                 bytes: pixels.len(),
             });
         }
@@ -898,6 +914,7 @@ pub fn resolve_items(
                 material,
                 max_stack: item.max_stack.unwrap_or(MAX_STACK),
                 food: item.food,
+                texture: item.texture.clone(),
             });
         }
     }

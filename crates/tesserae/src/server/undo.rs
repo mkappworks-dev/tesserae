@@ -655,6 +655,7 @@ mod tests {
                 material: Some(stone().material()),
                 max_stack: 64,
                 food: None,
+                texture: None,
             }]));
             if survival_mode {
                 survival(&mut app);

@@ -581,6 +581,7 @@ fn stocked_in(chunks: &[(ChunkCoord, Chunk)], stacks: &[(usize, &str)], selected
             material: None,
             max_stack: 64,
             food: None,
+            texture: None,
         }],
         materials.map(|(id, name)| (id, name, [0; 4])),
         1.0,

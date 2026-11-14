@@ -254,6 +254,7 @@ mod tests {
             material: Some(stone().material()),
             max_stack: 64,
             food: None,
+            texture: None,
         }])
     }
 
@@ -335,6 +336,7 @@ mod tests {
             material: Some(lantern),
             max_stack: 64,
             food: None,
+            texture: None,
         }]));
         app.init_resource::<EntityStore>()
             .init_resource::<Refused>()

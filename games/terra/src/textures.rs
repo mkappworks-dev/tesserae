@@ -193,6 +193,93 @@ fn sprite(name: &str, x: usize, y: usize) -> Option<[u8; 3]> {
     }
 }
 
+/// An Item's flat sprite is one tile, drawn upright with clear ground around it.
+fn item_sprite(name: &str, x: usize, y: usize) -> Option<[u8; 3]> {
+    let n = noise(x, y, 11);
+    let (xi, yi) = (x as i16, y as i16);
+    match name {
+        "wheat" => {
+            if yi == 11 && (5..=9).contains(&xi) {
+                return Some(tint([150, 70, 52], (n - 128) / 16));
+            }
+            let fan = |c: i16| 7 + (c - 7) * (15 - yi) / 14;
+            let on_stalk = [2, 7, 12].iter().any(|&c| (xi - fan(c)).abs() == 0);
+            let ear = yi < 7 && [2, 7, 12].iter().any(|&c| (xi - fan(c)).abs() <= 1);
+            if ear {
+                Some(tint([214, 178, 70], (n - 128) / 14))
+            } else if on_stalk {
+                Some(tint([160, 150, 60], (n - 128) / 14))
+            } else {
+                None
+            }
+        }
+        "bread" => {
+            let (dx, dy) = (xi * 2 - 15, (yi - 9) * 2);
+            if dx * dx + dy * dy * 4 > 13 * 13 {
+                return None;
+            }
+            let score = (xi + yi) % 5 == 0 && dy < 3;
+            Some(tint(
+                if score {
+                    [232, 190, 120]
+                } else {
+                    [190, 130, 68]
+                },
+                (n - 128) / 16 - if dy > 4 { 22 } else { 0 },
+            ))
+        }
+        "berries" => {
+            let berries = [(5, 10), (10, 10), (8, 6)];
+            if berries
+                .iter()
+                .any(|&(cx, cy)| (xi - cx) * (xi - cx) + (yi - cy) * (yi - cy) <= 7)
+            {
+                return Some(tint([186, 36, 62], (n - 128) / 18));
+            }
+            if (7..=8).contains(&xi) && (2..=4).contains(&yi) {
+                return Some([70, 140, 48]);
+            }
+            None
+        }
+        "berry_pie" => {
+            let (dx, dy) = (xi * 2 - 15, (yi - 10) * 2);
+            let d = dx * dx + dy * dy * 3;
+            if d > 14 * 14 {
+                return None;
+            }
+            if d > 11 * 11 {
+                return Some(tint([190, 130, 68], (n - 128) / 16));
+            }
+            let lattice = (xi + yi) % 4 == 0 || (xi - yi).rem_euclid(4) == 0;
+            Some(tint(
+                if lattice {
+                    [214, 160, 92]
+                } else {
+                    [150, 60, 80]
+                },
+                (n - 128) / 18,
+            ))
+        }
+        "apple" => sprite("apple_ripe", x, y),
+        _ => None,
+    }
+}
+
+/// One RGBA tile for an Item with no Material of its own.
+pub fn item_texture(name: &str) -> Vec<u8> {
+    let mut pixels = Vec::with_capacity(EDGE * EDGE * 4);
+    for y in 0..EDGE {
+        for x in 0..EDGE {
+            let [r, g, b, a] = match item_sprite(name, x, y) {
+                Some([r, g, b]) => [r, g, b, 255],
+                None => [0, 0, 0, 0],
+            };
+            pixels.extend_from_slice(&[r, g, b, a]);
+        }
+    }
+    pixels
+}
+
 fn pixel(name: &str, face: usize, x: usize, y: usize, base: [u8; 3]) -> [u8; 3] {
     let n = noise(x, y, face + 3);
     let name = match name {

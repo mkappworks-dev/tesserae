@@ -205,6 +205,7 @@ mod tests {
             color: [0; 4],
             material: Some(CHEST),
             max_stack: 64,
+            texture: None,
         }]));
         let rock = Some(Stack {
             item: "t:rock".into(),

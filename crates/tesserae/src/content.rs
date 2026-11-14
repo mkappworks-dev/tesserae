@@ -24,6 +24,8 @@ pub struct ItemLook {
     /// Its Material's appearance is drawn when set.
     pub material: Option<MaterialId>,
     pub max_stack: u32,
+    /// RGBA pixels of one `MATERIAL_TEXTURE_EDGE` tile: the Item is a flat sprite of it.
+    pub texture: Option<std::sync::Arc<[u8]>>,
 }
 
 impl ItemLook {
@@ -139,6 +141,9 @@ pub struct CatalogueShape {
     /// A Usable Voxel's row places its Material in it, so it is that row's
     /// alone and the Player is not offered it.
     pub fixed: bool,
+    /// How it is drawn: an Item of a flat form is a sprite, and its ghost is
+    /// the form's quads.
+    pub form: tesserae_core::Form,
     pub geometry: Vec<Vec<tesserae_core::shape::ShapeQuad>>,
 }
 

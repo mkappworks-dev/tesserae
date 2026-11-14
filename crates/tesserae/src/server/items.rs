@@ -34,6 +34,7 @@ impl Items {
                 material: Some(id),
                 max_stack: MAX_STACK,
                 food: None,
+                texture: None,
             })
             .collect();
         declared.extend(implicit);
@@ -113,6 +114,7 @@ mod tests {
             material,
             max_stack: 64,
             food: None,
+            texture: None,
         }
     }
 

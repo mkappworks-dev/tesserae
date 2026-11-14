@@ -60,6 +60,7 @@ mod sky;
 mod soak;
 mod sound;
 mod soundscape;
+mod sprite;
 mod theme;
 mod tile_preview;
 mod tool;

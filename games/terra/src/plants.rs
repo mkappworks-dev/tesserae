@@ -141,6 +141,7 @@ fn item(name: &str, material: Option<&str>, rgb: [u8; 3], food: Option<f32>) -> 
         material: material.map(Into::into),
         max_stack: None,
         food,
+        texture: (material.is_none()).then(|| crate::textures::item_texture(name)),
     }
 }
 

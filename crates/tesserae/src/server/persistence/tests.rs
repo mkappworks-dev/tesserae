@@ -68,6 +68,7 @@ impl Rig {
             material: None,
             max_stack: 64,
             food: None,
+            texture: None,
         }];
         let items = loaded.every_item(settings.voxel_size);
         let p = Persistence::prepare(opening, &mut loaded, settings).unwrap();
