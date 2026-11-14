@@ -224,7 +224,8 @@ gains one list, `item-def` an optional field and `shape-def` a new form.
   from 0 to 0.3 that carry fruit, chosen by hash of seed and position when the
   tree grows or is generated; `harvest-to`, the earlier Stage a pick resets to;
   and `yields` per Stage (the ripe one gives the Game's food Item). Fruit Stages
-  are grown Materials like the canopy: they replace canopy Voxels, are part of
+  are grown Materials like the canopy, drawn as a small 3D apple Shape of boxes
+  (red when ripe, green when unripe) and never as a flat quad or a cube: they replace canopy Voxels, are part of
   the tree, have no implicit Item and cannot be placed.
 - `column`: one Material, `max-height-m` up to 32 m, `direction` up or down,
   `mean-seconds` per added Voxel. Water-standing kinds name the fluid in

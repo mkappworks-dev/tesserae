@@ -327,32 +327,51 @@ function ghostScene(count) {
   });
 }
 
+/** The hanging fruit: a shaped Voxel of stacked boxes, drawn as a 3D apple and never a flat quad. */
+function apple3d(s, cx, y, cz, ripe = true) {
+  const [low, mid, top] = ripe
+    ? ["#a3201c", "#c8322a", "#d9473b"]
+    : ["#5f8d36", "#76a443", "#86b551"];
+  const k = ripe ? 1.7 : 1.35;
+  const at = (dy, size, h, color) =>
+    s.box(cx, y + dy * k, cz, size * k, h * k, 0, color, { bias: 40 });
+  at(0, 0.26, 0.1, low);
+  at(0.1, 0.38, 0.17, mid);
+  at(0.27, 0.32, 0.09, top);
+  at(0.36, 0.06, 0.1, "#5a3d22");
+  s.box(cx + 0.1 * k, y + 0.4 * k, cz, 0.16 * k, 0.03 * k, 0, "#3f7a2a", {
+    bias: 40,
+  });
+}
+
 function treeScene() {
-  return scene(300, 290, 42, [150, 190], (s) => {
+  return scene(300, 320, 42, [150, 222], (s) => {
     for (let x = -3; x <= 3; x++)
       for (let z = -3; z <= 3; z++)
         s.box(x, -0.5, z, 1, 0.5, 0, (x + z) % 2 ? "#4f7f35" : "#58893b");
     for (let y = 0; y < 3; y++) s.box(0, y, 0, 1, 1, 0, TRUNK);
-    const canopy = [];
+    /* A fruit Voxel replaces a canopy Voxel, so its cell holds the apple and no leaves. */
+    const fruit = [
+      [2, 1, true],
+      [1, 2, true],
+      [-1, 2, false],
+      [2, -1, true],
+      [-2, 1, false],
+    ];
+    const isFruit = (x, y, z) =>
+      y === 3 && fruit.some(([fx, fz]) => fx === x && fz === z);
     for (let y = 3; y <= 4; y++)
       for (let x = -2; x <= 2; x++)
         for (let z = -2; z <= 2; z++)
           if (
             Math.abs(x) + Math.abs(z) <= 3 &&
-            !(y === 4 && Math.abs(x) + Math.abs(z) > 2)
+            !(y === 4 && Math.abs(x) + Math.abs(z) > 2) &&
+            !(x === 0 && z === 0 && y === 3) &&
+            !isFruit(x, y, z)
           )
-            canopy.push([x, y, z]);
-    for (const [x, y, z] of canopy)
-      if (!(x === 0 && z === 0 && y === 3)) s.box(x, y, z, 1, 1, 0, LEAVES);
+            s.box(x, y, z, 1, 1, 0, LEAVES);
     s.box(0, 3, 0, 1, 1, 0, TRUNK);
-    for (const [x, z] of [
-      [-1, 2],
-      [2, 1],
-      [0, 2],
-      [1, 2],
-      [-2, 0],
-    ])
-      s.cross("apple", x, 2.55, z, { bias: 40 });
+    for (const [x, z, ripe] of fruit) apple3d(s, x, 3.1, z, ripe);
   });
 }
 
@@ -381,8 +400,10 @@ function aimScene(kind) {
       s.box(0, -0.5, 0, 1, 0.5, 0, FARMLAND);
       s.cross("wheat4", 0, 0, 0);
     } else {
-      s.box(0, 0, 0, 1, 1, 0, LEAVES);
-      s.cross("apple", 0, 0.45, 0.4, { bias: 40 });
+      s.box(-1, 0, 0, 1, 1, 0, LEAVES);
+      s.box(0, 0, -1, 1, 1, 0, LEAVES);
+      s.box(0, 1, 0, 1, 1, 0, LEAVES);
+      apple3d(s, 0, 0.1, 0, true);
     }
   });
 }
@@ -475,7 +496,7 @@ function plantsPage() {
 </section>
 <section>${heading("IN THE WORLD", "Stages, a tree, a vine", "The Client draws what the Server sent. A Stage change arrives as an ordinary Chunk edit, so the quads swap in place.")}
 <div class="plants-surface"><h4>Wheat, four Stages, over farmland</h4><div class="plants-stages">${[1, 2, 3, 4].map((n) => `<figure class="plants-frame">${stageScene(n)}<figcaption><b>Stage ${n}</b><small>${["sprout", "growing", "heading", "ripe"][n - 1]}</small></figcaption></figure>`).join("")}</div></div>
-<div class="plants-row"><div class="plants-surface"><h4>Apple tree: cubes, with apples as crossed quads</h4>${treeScene()}</div><div class="plants-surface"><h4>Vine: one flat quad on the wall face</h4>${vineScene()}</div></div>
+<div class="plants-row"><div class="plants-surface"><h4>Apple tree: cubes, with each apple a small 3D voxel (green when unripe)</h4>${treeScene()}</div><div class="plants-surface"><h4>Vine: one flat quad on the wall face</h4>${vineScene()}</div></div>
 </section>
 <section>${heading("USE PROMPT", "G Harvest", "Aimed at a ripe crop with harvest-to, or a ripe apple, the prompt under the reticle names the action before the press. No new pane opens.")}
 <div class="plants-row">${reticleView("Ripe wheat", aimScene("crop"), "Regrows to an earlier Stage")}${reticleView("Ripe apple", aimScene("apple"), "Picked; the tree keeps its leaves")}</div>
