@@ -608,7 +608,7 @@ impl SurfaceScatter {
         let rise_m = plants().map(|p| p.rise_m()).fold(0.0, f32::max);
         let tree_reach_m = plants()
             .filter_map(|p| match p.kind {
-                SurfacePlantKind::Tree(t) => Some(t.canopy_radius_m),
+                SurfacePlantKind::Tree(t) => Some(t.reach_m() + t.rounding_slack_m(voxel_size)),
                 _ => None,
             })
             .fold(0.0, f32::max);
@@ -1383,6 +1383,7 @@ impl Worldgen {
             canopy: tree.canopy,
             trunk_height_m: tree.trunk_height_m,
             canopy_radius_m: tree.canopy_radius_m,
+            branching: tree.branching,
             mean_seconds: 0.0,
             trunk_yield: Vec::new(),
             canopy_yield: Vec::new(),
@@ -1519,7 +1520,9 @@ impl Worldgen {
                         }
                     }
                     SurfacePlantKind::Tree(tree) => {
-                        let reach = (tree.canopy_radius_m / self.voxel_size).ceil() as i32 + 1;
+                        let reach = (tree.reach_m() / self.voxel_size).ceil() as i32
+                            + 1
+                            + tree.rounding_slack_voxels();
                         let outside = |g: i32, lo: i32| (lo - g).max(g - (lo + size - 1)).max(0);
                         // A vine hangs from the canopy, so it can reach below the base on a slope.
                         let hang = tree

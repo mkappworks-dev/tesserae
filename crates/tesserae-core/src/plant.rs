@@ -104,6 +104,108 @@ pub struct Tree {
     pub fruit: Option<Fruit>,
     /// Climbers worldgen hangs from the canopy; a growing sapling never makes them.
     pub vines: Option<TreeVines>,
+    /// `None` is the straight trunk under one ellipsoidal crown.
+    pub branching: Option<Branching>,
+}
+
+/// Most limbs, or tiers when `tiers` is set (each tier is a ring of four limbs).
+pub const MAX_LIMBS: u32 = 16;
+pub const MAX_TIERS: u32 = 8;
+
+/// How a tree's trunk and limbs branch, in metres and fractions of its height so the tree is the
+/// same at every Voxel size. Held `Copy` because a Biome freezes it inline.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct Branching {
+    /// Limbs per tree, or tiers when `tiers`.
+    pub limbs: CountRange,
+    /// Fraction of the trunk height where limbs begin, from 0 to 0.8.
+    pub start: f32,
+    /// Horizontal length of the longest limb; a fork's leaders spread half of it.
+    pub reach_m: f32,
+    /// From -1 (drooping) to 1 (ascending); a limb's tip is `rise * reach / 2` above its root.
+    pub rise: f32,
+    /// Fraction of the trunk height where it splits into 2-3 leaders, from 0.1 to 0.8.
+    pub fork: Option<f32>,
+    /// Horizontal distance the trunk's top stands from its foot.
+    pub lean_m: f32,
+    /// Limbs in rings of four that shorten towards the top, a cone.
+    pub tiers: bool,
+    /// Radius of the foliage lobe at each limb and leader tip; the crown keeps `canopy-radius-m`.
+    pub lobe_radius_m: f32,
+}
+
+impl Branching {
+    /// The widest this tree reaches from the sapling's column, in metres: the lean, then the
+    /// larger of the crown and a fork's spread plus a limb plus a lobe.
+    pub fn extent_m(&self, canopy_radius_m: f32) -> f32 {
+        let spread = if self.fork.is_some() {
+            self.reach_m * FORK_SPREAD
+        } else {
+            0.0
+        };
+        let limb = if self.limbs.max > 0 {
+            self.reach_m
+        } else {
+            0.0
+        };
+        self.lean_m + canopy_radius_m.max(spread + limb + self.lobe_radius_m)
+    }
+
+    /// Why this is not a shape the generator can draw, if it is not.
+    pub fn check(&self, canopy_radius_m: f32, trunk_low_m: f32) -> Result<(), &'static str> {
+        let finite = |v: f32| v.is_finite();
+        let most = if self.tiers { MAX_TIERS } else { MAX_LIMBS };
+        if self.limbs.min > self.limbs.max || self.limbs.max > most {
+            return Err("branching limbs is a range of at most 16 (8 tiers)");
+        }
+        if !(finite(self.start) && (0.0..=0.8).contains(&self.start)) {
+            return Err("branching start is from 0 to 0.8");
+        }
+        if !(finite(self.reach_m) && self.reach_m >= 0.0) {
+            return Err("branching reach-m must not be negative");
+        }
+        if (self.limbs.max > 0 || self.fork.is_some()) && self.reach_m <= 0.0 {
+            return Err("branching reach-m must be above 0 when there are limbs or a fork");
+        }
+        if !(finite(self.rise) && (-1.0..=1.0).contains(&self.rise)) {
+            return Err("branching rise is from -1 to 1");
+        }
+        if self.fork.is_some_and(|f| !(0.1..=0.8).contains(&f)) {
+            return Err("branching fork is from 0.1 to 0.8");
+        }
+        if !(finite(self.lean_m) && self.lean_m >= 0.0 && self.lean_m <= trunk_low_m) {
+            return Err("branching lean-m is from 0 to the lowest trunk-height-m");
+        }
+        if !(finite(self.lobe_radius_m) && self.lobe_radius_m > 0.0) {
+            return Err("branching lobe-radius-m must be above 0");
+        }
+        if self.fork.is_some()
+            && self.reach_m * FORK_SPREAD > 0.75 * (canopy_radius_m + self.lobe_radius_m)
+        {
+            return Err("branching fork spreads the leaders past the crown and lobes");
+        }
+        if self.extent_m(canopy_radius_m) > MAX_CANOPY_RADIUS_M {
+            return Err("branching lean, reach and lobe together must stay within 8 m");
+        }
+        Ok(())
+    }
+}
+
+/// The share of `reach_m` a fork's leaders spread over their length.
+pub const FORK_SPREAD: f32 = 0.5;
+
+impl Tree {
+    /// How far the tree reaches from its column, in metres; at most [`MAX_CANOPY_RADIUS_M`].
+    pub fn reach_m(&self) -> f32 {
+        self.branching
+            .map_or(self.canopy_radius_m, |b| b.extent_m(self.canopy_radius_m))
+    }
+
+    /// How far the tree rises above its trunk's top, in metres.
+    pub fn crown_rise_m(&self) -> f32 {
+        self.canopy_radius_m
+            .max(self.branching.map_or(0.0, |b| b.lobe_radius_m))
+    }
 }
 
 /// A tree's vines as declared: the climber by full name, not yet resolved.
@@ -670,6 +772,10 @@ fn check(plant: &Plant) -> Result<(), PlantError> {
                 return Err(PlantError::Size(
                     "canopy-radius-m must be above 0 and at most 8",
                 ));
+            }
+            if let Some(b) = &tree.branching {
+                b.check(tree.canopy_radius_m, low)
+                    .map_err(PlantError::Size)?;
             }
             floor(tree.mean_seconds)?;
             if let Some(vines) = &tree.vines

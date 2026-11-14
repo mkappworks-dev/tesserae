@@ -651,7 +651,14 @@ Notes:
   0.11 and 0.38 ms a step). Meshing 1024 `cross` Voxels costs 350 us against 209
   us for the bare terrain, below the 478 us of 1024 stairs, so flat Shapes stay
   uncapped; 4096 cost 541 us. A surface Chunk of a 16-feature Biome generates in
-  0.42, 0.24 and 0.20 ms against 0.12, 0.08 and 0.08 bare. See
+  0.42, 0.24 and 0.20 ms against 0.12, 0.08 and 0.08 bare. Branching trees
+  (ticket 18; limbs, forks, lean and lobes in metres, the shared species of
+  `flora` all branch) cost more: the shared oak is 6590 Voxels at 0.25 m against
+  3341 and lands in 0.29, 1.58 and 10.2 ms at 1.0, 0.5 and 0.25 m against 0.17,
+  0.86 and 6.1, 65% of a 15.6 ms step, so `TREES_PER_STEP` stays 1 (it cannot go
+  lower); a felled step of 32 Voxels costs 0.12, 0.14 and 0.74 ms; a surface
+  Chunk of the 16-feature Biome with three branching trees generates in 0.73,
+  0.41 and 0.54 ms against 0.43, 0.25 and 0.20 with plain trees. See
   [ADR-0027](docs/adr/0027-plants-are-declared-kinds-the-server-grows.md) and
   the 2026-11-14 amendments to
   [ADR-0006](docs/adr/0006-shapes-are-table-data.md),

@@ -507,6 +507,38 @@ interface content {
         shape: option<string>,
     }
 
+    /// How a tree's trunk and limbs branch, in metres and fractions of its
+    /// height so the tree is the same at every Voxel size. Limbs, leaders and
+    /// the trunk are the tree's trunk Material, one Voxel thick; foliage grows
+    /// as lobes of the canopy Material at each limb and leader tip, and the
+    /// crown on top keeps `canopy-radius-m`.
+    record branching-def {
+        /// Limbs per tree, at most 16; with `tiers`, rings of four limbs, at
+        /// most 8 tiers. `[0, 0]` is no limbs.
+        limbs: count-range,
+        /// The fraction of the trunk height where limbs begin, from 0 to 0.8.
+        start: f32,
+        /// The horizontal length of the longest limb; a fork's leaders spread
+        /// half of it. Above 0 when there are limbs or a fork.
+        reach-m: f32,
+        /// From -1 (drooping) to 1 (ascending): a limb's tip stands
+        /// `rise * reach-m / 2` above its root.
+        rise: f32,
+        /// The fraction of the trunk height where it splits into two or three
+        /// leaders, from 0.1 to 0.8; `none` is one trunk.
+        fork: option<f32>,
+        /// How far the trunk's top stands from its foot, from 0 to the lowest
+        /// `trunk-height-m`.
+        lean-m: f32,
+        /// `some(true)` puts the limbs in rings of four that shorten towards
+        /// the top, a cone.
+        tiers: option<bool>,
+        /// The radius of the foliage lobe at each limb and leader tip, above
+        /// 0. The lean, the reach (with a fork's spread) and the lobe together
+        /// stay within 8 m, and a fork's spread within the crown and lobes.
+        lobe-radius-m: f32,
+    }
+
     /// A sapling that grows a parametric tree, sized in metres.
     record tree-def {
         /// The sapling's solid Material, `<mod id>:<name>`: the seed Item places
@@ -532,6 +564,8 @@ interface content {
         /// Climbers worldgen hangs from the outer canopy; a growing sapling
         /// never makes them. `none` hangs none.
         vines: option<tree-vines>,
+        /// `none` is a straight trunk under one ellipsoidal crown.
+        branching: option<branching-def>,
     }
 
     /// The vines worldgen hangs from a tree, by a pure function of the tree and

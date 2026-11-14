@@ -430,6 +430,17 @@ cutting.
 **Fruit** — the grown Materials some canopy Voxels of a tree ripen through. Use
 picks a ripe one without cutting the tree, and it ripens again.
 
+**Branching** — the optional record on a tree row that gives it a lean, a fork
+into leaders, limbs and lobes, in metres and fractions of its height. A tree
+with none is a straight trunk under one crown.
+
+**Limb** — a stepped one-Voxel line of a tree's trunk Material running out from
+the trunk or a leader, so it is felled and cut like any trunk Voxel. A
+**leader** is one of the two or three limbs a fork splits the trunk into.
+
+**Lobe** — an ellipsoid of a tree's canopy Material around a limb or leader tip;
+the crown on the trunk's top is the largest lobe.
+
 **Vines** (generated) — climbers that worldgen hangs from a tree's canopy. A
 growing sapling never makes them.
 

@@ -3,7 +3,7 @@
 
 use super::*;
 use tesserae_core::plant::tree::{Part, tree_voxels};
-use tesserae_core::plant::{CountRange, Fruit, Tree, Yield};
+use tesserae_core::plant::{Branching, CountRange, Fruit, Tree, Yield};
 
 pub(super) const BASE: [i32; 3] = [16, CROP_Y, 16];
 
@@ -19,13 +19,14 @@ pub(super) struct Orchard {
 
 fn orchard(fruit: Option<f32>) -> Orchard {
     let radius = if fruit.is_some() { 2.0 } else { 1.0 };
-    orchard_of(fruit, (1.0, 2.0), radius)
+    orchard_of(fruit, (1.0, 2.0), radius, None)
 }
 
 pub(super) fn orchard_of(
     fruit: Option<f32>,
     trunk_height_m: (f32, f32),
     canopy_radius_m: f32,
+    branching: Option<Branching>,
 ) -> Orchard {
     let mut tables = crate::server::fixture_tables();
     let apple = tables
@@ -49,6 +50,7 @@ pub(super) fn orchard_of(
     let every = Some(tesserae_core::plant::SAMPLE_INTERVAL_S);
     let tree = Tree {
         vines: None,
+        branching,
         trunk,
         canopy,
         trunk_height_m,
@@ -406,4 +408,105 @@ fn fruit_is_the_boxes_of_its_shape_grown_and_ripened_trunk_and_canopy_stay_cubes
             assert_eq!(voxel_at(&farm, v.at).shape(), o.apple, "{size}: ripened");
         }
     }
+}
+
+/// A short tree that leans, forks and carries limbs, small enough for one Chunk at 0.25 m.
+fn branched() -> Orchard {
+    orchard_of(
+        Some(0.2),
+        (2.0, 3.0),
+        1.0,
+        Some(Branching {
+            limbs: CountRange { min: 2, max: 3 },
+            start: 0.3,
+            reach_m: 1.6,
+            rise: 0.2,
+            fork: Some(0.4),
+            lean_m: 0.5,
+            tiers: false,
+            lobe_radius_m: 0.6,
+        }),
+    )
+}
+
+#[test]
+fn a_branching_sapling_grows_its_limbs_and_lobes_whole_at_every_voxel_size() {
+    for size in SIZES {
+        let o = branched();
+        let mut farm = planted(size, &o, &[BASE]);
+        assert!(
+            until(&mut farm, 60_000, |f| at(f, BASE) == o.trunk),
+            "{size}: the sapling never grew"
+        );
+        assert!(is_whole(&farm, &o, BASE), "{size}: not the whole tree");
+        let voxels = tree_voxels(&o.tree, SEED, BASE, size);
+        let off_axis = voxels
+            .iter()
+            .filter(|v| v.part == Part::Trunk && (v.at[0], v.at[2]) != (BASE[0], BASE[2]))
+            .count();
+        assert!(off_axis > 3, "{size}: no limbs");
+        assert!(
+            voxels.iter().any(|v| v.part == Part::Fruit),
+            "{size}: fruit on the lobes"
+        );
+        assert_eq!(farm.sim().plants.landed, 1, "{size}: one landing");
+    }
+}
+
+#[test]
+fn a_branching_tree_with_a_blocked_limb_cell_grows_nothing_and_grows_when_it_clears() {
+    let o = branched();
+    let voxels = tree_voxels(&o.tree, SEED, BASE, 0.5);
+    let limb_tip = voxels
+        .iter()
+        .filter(|v| v.part == Part::Trunk)
+        .max_by_key(|v| (v.at[0] - BASE[0]).abs() + (v.at[2] - BASE[2]).abs())
+        .unwrap()
+        .at;
+    let mut farm = planted(0.5, &o, &[BASE]);
+    farm.solid(limb_tip, Voxel::cube(rock()));
+    farm.run(8000);
+    assert_eq!(at(&farm, BASE), o.sapling, "stays a sapling");
+    assert_eq!(
+        voxels
+            .iter()
+            .filter(|v| v.at != limb_tip && at(&farm, v.at) != 0)
+            .count(),
+        1,
+        "nothing but the sapling's own cell"
+    );
+    farm.solid(limb_tip, Voxel::AIR);
+    assert!(until(&mut farm, 60_000, |f| at(f, BASE) == o.trunk));
+    assert!(is_whole(&farm, &o, BASE));
+}
+
+#[test]
+fn a_grown_branching_tree_is_relit_as_a_whole_the_way_a_fresh_solve_lights_it() {
+    let o = branched();
+    let mut farm = planted(0.5, &o, &[BASE]);
+    assert!(until(&mut farm, 60_000, |f| at(f, BASE) == o.trunk));
+    let mut chunk = ground();
+    for v in tree_voxels(&o.tree, SEED, BASE, 0.5) {
+        chunk.set(
+            v.at[0] as usize,
+            v.at[1] as usize,
+            v.at[2] as usize,
+            Voxel::cube(v.material),
+        );
+    }
+    let fresh = Farm::open(0.5, o.tables.clone(), [o.sapling; 3], chunk);
+    let mut shaded = 0;
+    for x in 0..CHUNK_SIZE as i32 {
+        for y in 0..CHUNK_SIZE as i32 {
+            for z in 0..CHUNK_SIZE as i32 {
+                let (a, b) = (
+                    farm.store().light_at([x, y, z]),
+                    fresh.store().light_at([x, y, z]),
+                );
+                assert_eq!(a, b, "light at {:?}", [x, y, z]);
+                shaded += usize::from(a.sky() < 15);
+            }
+        }
+    }
+    assert!(shaded > 0, "the limbs and lobes shade something");
 }

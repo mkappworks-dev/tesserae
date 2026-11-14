@@ -385,6 +385,27 @@ pub struct SurfaceTree {
     pub canopy_radius_m: f32,
     pub fruit: Option<SurfaceFruit>,
     pub vines: Option<SurfaceVines>,
+    /// Frozen with the tree, like the vines, so a Game that later edits its row cannot reshape
+    /// a saved World.
+    pub branching: Option<crate::plant::Branching>,
+}
+
+impl SurfaceTree {
+    /// How far the tree reaches from its column, in metres.
+    pub fn reach_m(&self) -> f32 {
+        self.branching
+            .map_or(self.canopy_radius_m, |b| b.extent_m(self.canopy_radius_m))
+    }
+
+    /// Voxels a branched tree's cells can stand past its extent in metres: the lean, spread, limb
+    /// and lobe each round on their own.
+    pub fn rounding_slack_voxels(&self) -> i32 {
+        if self.branching.is_some() { 4 } else { 0 }
+    }
+
+    pub fn rounding_slack_m(&self, voxel_size: f32) -> f32 {
+        self.rounding_slack_voxels() as f32 * voxel_size
+    }
 }
 
 /// The vines worldgen hangs from a tree's outer canopy, frozen with the climber they are made of
@@ -445,7 +466,11 @@ impl SurfacePlant {
         match self.kind {
             SurfacePlantKind::Stages { .. } => 0.0,
             SurfacePlantKind::Column { max_height_m, .. } => max_height_m,
-            SurfacePlantKind::Tree(t) => t.trunk_height_m.1 + t.canopy_radius_m,
+            SurfacePlantKind::Tree(t) => {
+                t.trunk_height_m.1
+                    + t.canopy_radius_m
+                        .max(t.branching.map_or(0.0, |b| b.lobe_radius_m))
+            }
         }
     }
 
@@ -489,6 +514,11 @@ impl SurfacePlant {
                     return Err(bad(
                         "vines need a climber, a density to 0.5 and a length to 8 m",
                     ));
+                }
+                if let Some(b) = t.branching
+                    && b.check(t.canopy_radius_m, low).is_err()
+                {
+                    return Err(bad("a tree's branching must be one the generator can draw"));
                 }
                 if t.trunk == AIR
                     || t.canopy == AIR

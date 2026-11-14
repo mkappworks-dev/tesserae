@@ -112,9 +112,10 @@ through faces, that no longer reach a trunk Voxel standing on something that is
 neither Air nor a grown Material, so a placed Voxel, a sapling or a crop below
 holds the tree up. Only grown Materials take part, so a cabin of placed logs and
 leaves, however alike in look, is never in a region and never falls. A region
-wider than `2 × canopy-radius + 3` Voxels or taller than the tallest trunk plus
-`canopy-radius + 3`, or one beside a Voxel the Server does not hold, does not
-break.
+wider than `2 × reach + 3` Voxels (the tree's reach, below, plus a few Voxels of
+rounding) or taller than the tallest trunk plus the larger of `canopy-radius`
+and the lobe radius, `+ 3`, or one beside a Voxel the Server does not hold, does
+not break.
 
 A region breaks top-down over successive steps, `FELLED_PER_STEP` (32) Voxels a
 step, each dropping its declared yield. A Felling also drops `sapling-yield`
@@ -138,6 +139,31 @@ Fruit replaces canopy Voxels chosen by a hash of seed, position and `density`
 the tree's light and Climate, light read as the brightest of the Voxel and its
 six neighbours since fruit sits in canopy. Use picks a ripe one and resets it to
 `harvest-to`; the tree is untouched.
+
+**Branching** is an optional record on a `tree` row, all in metres or fractions
+of the trunk height so a tree is the same at every Voxel size: `limbs` (a count
+range), `start` (the fraction of the height where limbs begin), `reach-m` (a
+limb's horizontal length), `rise` (-1 drooping to 1 ascending), an optional
+`fork` (the height fraction where the trunk splits into two or three leaders),
+`lean-m` (how far the top stands from the foot), `tiers` (limbs in rings of four
+that shorten towards the top, a cone) and `lobe-radius-m`. Limbs, leaders and a
+leaning trunk are **trunk Voxels** of the tree's grown trunk Material, a
+face-connected stepped line one Voxel thick, so Felling needs no new rule: a cut
+trunk fells everything that no longer reaches the ground, limbs and lobes
+included, and a cut limb drops its end and what hung on it while the trunk
+stands. Foliage is a **lobe**, an ellipsoid of the canopy Material, at every
+limb and leader tip (and along a tier's limb), besides the crown of
+`canopy-radius-m` on the trunk's top; fruit and worldgen vines treat lobes as
+canopy. Every draw is a hash of seed, base position in millimetres and the row;
+directions are one of sixteen literal compass vectors, so no platform's
+trigonometry moves a limb. A tree with no `branching` generates exactly as
+before. Its **reach** is the lean plus the larger of the crown radius and a
+fork's spread (half of `reach-m`) plus the limb plus the lobe, and must stay
+within the 8 m `canopy-radius-m` bound, so worldgen's per-Chunk scan bound does
+not grow; the fork's spread must also stay inside the crown and lobes, so the
+tree is one piece. A branched Biome tree freezes its record in the saved
+generation data as an optional field, so a Game that later edits its row cannot
+reshape a saved World.
 
 **Vines are generated only in worldgen.** A tree row may name a `climber` and a
 density and length. Worldgen hangs it from the outer canopy by a pure function
@@ -191,12 +217,25 @@ refusing whole without it.
   standing until a neighbouring change asks again.
 - A Felling region beside a Voxel the Server does not hold waits: it is neither
   broken nor dropped from the next ask, and it breaks once the Chunk is held.
-- The Felling size bound is `2 × canopy-radius + 3` Voxels wide and
-  `trunk-height-max + canopy-radius + 3` Voxels tall. A region past it does not
-  break.
-- Canopies are parametric ellipsoids of 0.8 vertical ratio, so a pine cannot be
-  a cone and an acacia cannot be an umbrella until Structures give trees
-  templates.
+- The Felling size bound is `2 × reach + 3` Voxels wide (plus rounding slack for
+  a branched tree) and `trunk-height-max + max(canopy-radius, lobe-radius) + 3`
+  Voxels tall. A region past it does not break.
+- Crowns and lobes are parametric ellipsoids of 0.8 vertical ratio and limbs are
+  stepped lines, so a pine is a cone of tiers and an acacia an umbrella of
+  lobes; anything more particular (buttresses, curved limbs, a drooping tip)
+  waits for Structures to give trees templates.
+- A limb resting on rising ground holds the tree up like any trunk Voxel that
+  stands on something neither Air nor grown, and lobes touching another part's
+  lobes keep a cut part up, because Felling joins grown Voxels through faces. A
+  cut limb drops a sapling like any region, once.
+- Branching costs Voxels: at 0.25 m the shared oak is 6590 Voxels against 3341,
+  and lands in 10.2 ms of CPU against 6.1 (0.29 against 0.17 ms at 1.0 m and
+  1.58 against 0.86 ms at 0.5 m), 65% of a 15.6 ms step, so `TREES_PER_STEP`
+  stays 1. A felled step breaks the same 32 Voxels and costs 0.12, 0.14 and 0.74
+  ms. Generating a surface Chunk of a 16-feature Biome whose three trees branch
+  costs 0.73, 0.41 and 0.54 ms against 0.43, 0.25 and 0.20 with plain trees
+  (0.12, 0.08 and 0.08 bare); a tree's cells are deduplicated in a flat box,
+  since hashing each lobe cell cost four times as much.
 - A flat Shape costs nothing against the Chunk's shaped-Voxel cap, so a dense
   meadow is bounded only by the Chunk's own Voxels. The Sample cost of a dense
   meadow is the number to watch, and a Chunk with no Plant must cost nothing
@@ -205,8 +244,8 @@ refusing whole without it.
   Voxel only when it lands, so beside an unheld Chunk a field may overshoot it.
 - One Shape serves both of a fruit's Stages, so unripe and ripe differ in
   Material colour alone.
-- A Biome's frozen Plant form (stages, column, tree, fruit and vines, by name)
-  pins what generation reads, not growth: growth reads the Game's Plant rows,
-  which the World already freezes with its exact builds.
+- A Biome's frozen Plant form (stages, column, tree, fruit, vines and branching,
+  by name) pins what generation reads, not growth: growth reads the Game's Plant
+  rows, which the World already freezes with its exact builds.
 - Plants are Server state replicated as Chunk edits; a Client draws what it is
   sent and decides no growth ([ADR-0002](0002-client-server-from-day-one.md)).

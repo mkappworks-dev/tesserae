@@ -8,6 +8,7 @@
 use std::hint::black_box;
 use std::sync::OnceLock;
 use tesserae_core::light::{Light, MAX_LIGHT};
+use tesserae_core::plant::{Branching, CountRange};
 use tesserae_core::testgen::{self, fixtures};
 use tesserae_core::{
     AIR, Biome, BiomeName, BiomeTable, CHUNK_SIZE, Chunk, ChunkLight, ClimateParams, Form,
@@ -226,14 +227,50 @@ fn stages(first: MaterialId, len: u8) -> SurfacePlantKind {
 
 /// Sixteen features as a Terra-like Biome lists them: three kinds of tree, a
 /// run of crops and flowers, two columns and two spreaders.
-fn sixteen(cross: u8) -> Vec<SurfaceFeature> {
-    let tree = |trunk_m: (f32, f32), radius| SurfaceTree {
+///
+/// With `branched` the three trees take the shared oak's, jungle's and birch's branching.
+fn sixteen(cross: u8, branched: bool) -> Vec<SurfaceFeature> {
+    let limbs = |min, max| CountRange { min, max };
+    let shapes = [
+        Branching {
+            limbs: limbs(3, 4),
+            start: 0.25,
+            reach_m: 3.5,
+            rise: 0.3,
+            fork: Some(0.3),
+            lean_m: 0.0,
+            tiers: false,
+            lobe_radius_m: 1.5,
+        },
+        Branching {
+            limbs: limbs(3, 4),
+            start: 0.55,
+            reach_m: 4.5,
+            rise: 0.2,
+            fork: None,
+            lean_m: 0.0,
+            tiers: false,
+            lobe_radius_m: 1.8,
+        },
+        Branching {
+            limbs: limbs(2, 3),
+            start: 0.5,
+            reach_m: 1.5,
+            rise: 0.6,
+            fork: None,
+            lean_m: 1.0,
+            tiers: false,
+            lobe_radius_m: 0.8,
+        },
+    ];
+    let tree = |trunk_m: (f32, f32), radius, shape: usize| SurfaceTree {
         trunk: TRUNK,
         canopy: CANOPY,
         trunk_height_m: trunk_m,
         canopy_radius_m: radius,
         fruit: None,
         vines: None,
+        branching: branched.then_some(shapes[shape]),
     };
     let plant = |first, spacing_m, kind| SurfaceFeature {
         material: first,
@@ -241,9 +278,9 @@ fn sixteen(cross: u8) -> Vec<SurfaceFeature> {
         plant: Some(SurfacePlant { shape: cross, kind }),
     };
     let mut f = vec![
-        plant(TRUNK, 7.0, Kind::Tree(tree((3.0, 5.0), 2.5))),
-        plant(TRUNK, 11.0, Kind::Tree(tree((5.0, 8.0), 3.5))),
-        plant(TRUNK, 13.0, Kind::Tree(tree((2.0, 3.0), 1.5))),
+        plant(TRUNK, 7.0, Kind::Tree(tree((3.0, 5.0), 2.5, 0))),
+        plant(TRUNK, 11.0, Kind::Tree(tree((5.0, 8.0), 3.5, 1))),
+        plant(TRUNK, 13.0, Kind::Tree(tree((2.0, 3.0), 1.5, 2))),
     ];
     for i in 0..4 {
         f.push(plant(220 + i * 3, 4.0, stages(220 + i * 3, 3)));
@@ -290,7 +327,8 @@ fn params(features: &[SurfaceFeature]) -> WorldgenParams {
 }
 
 fn generation() {
-    let features = sixteen(cross());
+    let features = sixteen(cross(), false);
+    let branched = sixteen(cross(), true);
     for size in [1.0f32, 0.5, 0.25] {
         let with = Worldgen::new(0x7e55_e2ae, size, params(&features));
         let bare = Worldgen::new(
@@ -300,6 +338,8 @@ fn generation() {
         );
         let trees = Worldgen::new(0x7e55_e2ae, size, params(&features[..3]));
         let flora = Worldgen::new(0x7e55_e2ae, size, params(&features[3..]));
+        let branching = Worldgen::new(0x7e55_e2ae, size, params(&branched[..3]));
+        let all_branching = Worldgen::new(0x7e55_e2ae, size, params(&branched));
         let cell = CHUNK_SIZE as f32 * size;
         let y = (with.surface_height_m(0.0, 0.0) / cell).floor() as i32;
         // The nine Chunks around the surface Chunk: trees come in from neighbours.
@@ -328,6 +368,14 @@ fn generation() {
                     }),
                 ),
                 (
+                    "3 branching trees only",
+                    Box::new(|| {
+                        for &(x, y, z) in &ring {
+                            black_box(branching.chunk(x, y, z));
+                        }
+                    }),
+                ),
+                (
                     "13 plants, no trees",
                     Box::new(|| {
                         for &(x, y, z) in &ring {
@@ -340,6 +388,14 @@ fn generation() {
                     Box::new(|| {
                         for &(x, y, z) in &ring {
                             black_box(with.chunk(x, y, z));
+                        }
+                    }),
+                ),
+                (
+                    "16 features, trees branching",
+                    Box::new(|| {
+                        for &(x, y, z) in &ring {
+                            black_box(all_branching.chunk(x, y, z));
                         }
                     }),
                 ),

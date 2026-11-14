@@ -40,9 +40,12 @@ A tree's fruit ripens through two Stages (green, then red, orange, dark red or
 brown), is picked with Use and regrows. The food Items are `apple`, `orange`,
 `cherries` and `coconut`.
 
-The canopy is the engine's ellipsoid, so a pine is a narrow, tall one rather
-than a cone, and an acacia is as flat as the ellipsoid's 0.8 height ratio
-allows.
+Every species branches: the oak forks into leaders and spreads limbs, the birch
+and swamp tree lean, the pine has tiers of drooping limbs that shorten upward (a
+cone), the palm leans under its crown, the acacia forks low into a flat crown of
+lobes, the jungle tree spreads wide limbs, and the apple, orange and cherry have
+low spreading limbs with fruit on the lobes. The crown keeps `canopy-radius-m`;
+buttresses and curved limbs wait for Structures.
 
 `birch_wood`, `pine_wood`, `palm_wood`, `acacia_wood` and `jungle_wood` are
 placed look-alikes for builders, made from a `log` by hand.

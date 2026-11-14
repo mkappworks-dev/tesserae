@@ -40,6 +40,7 @@ pub(super) enum Plant {
         sapling_yield: [u32; 2],
         fruit: Option<Fruit>,
         vines: Option<Vines>,
+        branching: Option<Branching>,
     },
     Column {
         name: String,
@@ -113,6 +114,19 @@ pub(super) struct Fruit {
     density: f32,
     harvest_to: u32,
     shape: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+pub(super) struct Branching {
+    limbs: [u32; 2],
+    start: f32,
+    reach_m: f32,
+    rise: f32,
+    fork: Option<f32>,
+    lean_m: f32,
+    tiers: Option<bool>,
+    lobe_radius_m: f32,
 }
 
 #[derive(Deserialize)]
@@ -211,6 +225,7 @@ impl From<Plant> for content::PlantDef {
                 sapling_yield,
                 fruit,
                 vines,
+                branching,
             } => Self {
                 name,
                 seed,
@@ -237,6 +252,16 @@ impl From<Plant> for content::PlantDef {
                         plant: v.plant,
                         density: v.density,
                         length_m: v.length_m,
+                    }),
+                    branching: branching.map(|b| content::BranchingDef {
+                        limbs: count(b.limbs),
+                        start: b.start,
+                        reach_m: b.reach_m,
+                        rise: b.rise,
+                        fork: b.fork,
+                        lean_m: b.lean_m,
+                        tiers: b.tiers,
+                        lobe_radius_m: b.lobe_radius_m,
                     }),
                 }),
             },

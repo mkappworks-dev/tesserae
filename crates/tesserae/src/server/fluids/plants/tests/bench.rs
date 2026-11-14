@@ -4,8 +4,10 @@
 //!
 //! `cargo test --release -p tesserae --bin tesserae plants::tests::bench -- --ignored --nocapture --test-threads=1`
 
-use super::tree::{BASE, orchard_of, planted};
+use super::tree::{BASE, Orchard, orchard_of, planted};
 use super::*;
+use tesserae_core::plant::Branching;
+use tesserae_core::plant::CountRange;
 use tesserae_core::plant::tree::tree_voxels;
 
 #[cfg(target_os = "macos")]
@@ -129,7 +131,7 @@ struct Variant {
 #[ignore = "bench"]
 fn sample_tick_cost_per_logical_step() {
     let forest = || {
-        let o = orchard_of(None, (4.0, 6.0), 2.5);
+        let o = orchard_of(None, (4.0, 6.0), 2.5, None);
         let mut c = ground();
         for gz in 0..4 {
             for gx in 0..4 {
@@ -218,82 +220,114 @@ fn sample_tick_cost_per_logical_step() {
     println!("{}", uptime());
 }
 
+/// The shared oak's branching, in metres.
+const OAK_BRANCHING: Branching = Branching {
+    limbs: CountRange { min: 3, max: 4 },
+    start: 0.25,
+    reach_m: 3.5,
+    rise: 0.3,
+    fork: Some(0.3),
+    lean_m: 0.0,
+    tiers: false,
+    lobe_radius_m: 1.5,
+};
+
+/// A sapling at the middle of the ground Chunk, and what a tree of 7 m across needs held around
+/// it: the nine columns of Chunks two high when `wide`, else one air Chunk above.
+fn grove(size: f32, o: &Orchard, wide: bool) -> Farm {
+    let mut farm = planted(size, o, &[BASE]);
+    let mut chunks = 1;
+    for y in 0..2 {
+        for z in -1..=1 {
+            for x in -1..=1 {
+                let at = ChunkCoord::new(x, y, z);
+                let ring = wide || (x, z) == (0, 0);
+                if ring && (x, y, z) != (0, 0, 0) {
+                    farm.hold(at, if y == 0 { ground() } else { Chunk::air() });
+                    chunks += 1;
+                }
+            }
+        }
+    }
+    admit(&mut farm, chunks);
+    farm
+}
+
 /// A sapling grown to the declared tree at one Voxel size, and then felled.
 #[test]
 #[ignore = "bench"]
 fn tree_growth_and_felling_cost() {
     println!("{}", uptime());
     for size in SIZES {
-        let (mut landing, mut felling) = (Vec::new(), Vec::new());
-        let mut voxels = 0;
-        let mut per_bound: Vec<(usize, Vec<f64>, Vec<f64>)> = [4, 8, 32, 128, 512]
-            .into_iter()
-            .map(|b| (b, vec![], vec![]))
-            .collect();
-        for _ in 0..9 {
-            let o = orchard_of(None, (4.0, 6.0), 2.5);
-            let mut farm = planted(size, &o, &[BASE]);
-            farm.hold(ChunkCoord::new(0, 1, 0), Chunk::air());
-            admit(&mut farm, 2);
-            let mut grown = None;
-            for _ in 0..200_000 {
-                let before = farm.sim().plants.landed;
-                let dt = tick(&mut farm);
-                if farm.sim().plants.landed > before {
-                    grown = Some(dt);
-                    break;
+        for (label, branching) in [("oak", None), ("branching oak", Some(OAK_BRANCHING))] {
+            let (mut landing, mut felling) = (Vec::new(), Vec::new());
+            let mut voxels = 0;
+            let mut per_bound: Vec<(usize, Vec<f64>, Vec<f64>)> = [4, 8, 32, 128, 512]
+                .into_iter()
+                .map(|b| (b, vec![], vec![]))
+                .collect();
+            for _ in 0..9 {
+                let wide = branching.is_some();
+                let o = orchard_of(None, (4.0, 6.0), 2.5, branching);
+                let mut farm = grove(size, &o, wide);
+                let mut grown = None;
+                for _ in 0..200_000 {
+                    let before = farm.sim().plants.landed;
+                    let dt = tick(&mut farm);
+                    if farm.sim().plants.landed > before {
+                        grown = Some(dt);
+                        break;
+                    }
+                }
+                landing.push(grown.expect("the sapling grew") / 1e3);
+                voxels = tree_voxels(&o.tree, SEED, BASE, size).len();
+                for (bound, step_us, voxel_us) in &mut per_bound {
+                    // Fell the tree one trunk Voxel above its foot, at each bound.
+                    let mut farm2 = grove(size, &o, wide);
+                    for v in tree_voxels(&o.tree, SEED, BASE, size) {
+                        farm2.solid(v.at, Voxel::cube(v.material));
+                    }
+                    let cut = BASE;
+                    with_world(&mut farm2, |sim, store, meshes, tables, env, _| {
+                        sim.plants.set_felled_bound(*bound);
+                        let mut batch = edit::Batch::default();
+                        let here = store.occupants(cut, &tables.fluids).unwrap();
+                        let air = Occupants {
+                            solid: Voxel::AIR,
+                            ..here
+                        };
+                        batch
+                            .set_occupants(store, meshes, tables, cut, air)
+                            .unwrap();
+                        batch.finish(store, meshes, tables);
+                        plants::mark_felled(sim, store, tables, env, &[cut]);
+                    });
+                    let queued = farm2.sim().plants.felling_left();
+                    assert!(queued > 0, "{size}: nothing queued");
+                    let mut steps = Vec::new();
+                    while farm2.sim().plants.felling_left() > 0 {
+                        steps.push(tick(&mut farm2));
+                    }
+                    let total: f64 = steps.iter().sum();
+                    step_us.push(median(steps) / 1e3);
+                    voxel_us.push(total / queued as f64 / 1e3);
+                    if *bound == 32 {
+                        felling.push(queued);
+                    }
                 }
             }
-            landing.push(grown.expect("the sapling grew") / 1e3);
-            voxels = tree_voxels(&o.tree, SEED, BASE, size).len();
-            for (bound, step_us, voxel_us) in &mut per_bound {
-                // Fell the tree one trunk Voxel above its foot, at each bound.
-                let mut farm2 = planted(size, &o, &[BASE]);
-                farm2.hold(ChunkCoord::new(0, 1, 0), Chunk::air());
-                admit(&mut farm2, 2);
-                for v in tree_voxels(&o.tree, SEED, BASE, size) {
-                    farm2.solid(v.at, Voxel::cube(v.material));
-                }
-                let cut = BASE;
-                with_world(&mut farm2, |sim, store, meshes, tables, env, _| {
-                    sim.plants.set_felled_bound(*bound);
-                    let mut batch = edit::Batch::default();
-                    let here = store.occupants(cut, &tables.fluids).unwrap();
-                    let air = Occupants {
-                        solid: Voxel::AIR,
-                        ..here
-                    };
-                    batch
-                        .set_occupants(store, meshes, tables, cut, air)
-                        .unwrap();
-                    batch.finish(store, meshes, tables);
-                    plants::mark_felled(sim, store, tables, env, &[cut]);
-                });
-                let queued = farm2.sim().plants.felling_left();
-                assert!(queued > 0, "{size}: nothing queued");
-                let mut steps = Vec::new();
-                while farm2.sim().plants.felling_left() > 0 {
-                    steps.push(tick(&mut farm2));
-                }
-                let total: f64 = steps.iter().sum();
-                step_us.push(median(steps) / 1e3);
-                voxel_us.push(total / queued as f64 / 1e3);
-                if *bound == 32 {
-                    felling.push(queued);
-                }
-            }
-        }
-        println!(
-            "{size} m: tree of {voxels} Voxels lands in {:.1} us (median CPU, whole group + relight)",
-            median(landing)
-        );
-        println!("  felling {} Voxels queued", felling[0]);
-        for (bound, step_us, voxel_us) in per_bound {
             println!(
-                "  FELLED_PER_STEP {bound:>3}: median step {:>8.1} us, {:>6.2} us per Voxel (whole region)",
-                median(step_us),
-                median(voxel_us)
+                "{size} m {label}: {voxels} Voxels land in {:.1} us (median CPU, whole group + relight)",
+                median(landing)
             );
+            println!("  felling {} Voxels queued", felling[0]);
+            for (bound, step_us, voxel_us) in per_bound {
+                println!(
+                    "  FELLED_PER_STEP {bound:>3}: median step {:>8.1} us, {:>6.2} us per Voxel (whole region)",
+                    median(step_us),
+                    median(voxel_us)
+                );
+            }
         }
     }
     println!("{}", uptime());

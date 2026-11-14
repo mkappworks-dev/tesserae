@@ -441,6 +441,9 @@ fn found(counts: &BTreeMap<(usize, String), u64>, biome: usize, name: &str) -> u
     counts.get(&(biome, name.to_owned())).copied().unwrap_or(0)
 }
 
+/// Trunk Voxels a bare Biome may hold from the limbs of a neighbour's trees.
+const OVERHANG_LIMIT: u64 = 100;
+
 #[test]
 fn every_biome_of_every_demo_game_grows_its_declared_species_and_none_is_bare_by_accident() {
     for game in &GAMES {
@@ -474,10 +477,15 @@ fn every_biome_of_every_demo_game_grows_its_declared_species_and_none_is_bare_by
                 assert!(total > 0, "{full} grows no {plant}");
             }
             if species.is_empty() {
-                // A neighbour's vines hang across the border, so they are the one thing allowed.
+                // A neighbour's vines hang across the border, and its limbs reach a few Voxels
+                // over it; a tree standing here would be hundreds.
                 let plants: Vec<_> = counts
                     .iter()
-                    .filter(|((b, name), _)| *b == index && name != "flora:vine")
+                    .filter(|((b, name), n)| {
+                        *b == index
+                            && name != "flora:vine"
+                            && !(name.ends_with("_log") && **n < OVERHANG_LIMIT)
+                    })
                     .collect();
                 assert!(plants.is_empty(), "{full} is bare on purpose: {plants:?}");
             }

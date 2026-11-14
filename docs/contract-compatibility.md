@@ -112,9 +112,12 @@ record (`soil`, optional `light-min` and `light-max`, `temperature` and
 `tree`, `column`, `spreader` or `climber`, each with its own record. A Mod
 declares at most 128 and a World holds at most 512. A `plant-yield` is an Item
 and a `count-range`. A `tree-def` may carry a `fruit-def` and `vines`, a
-`tree-vines` naming a `climber` that only worldgen hangs, and a `column-def` may
-name the fluid it stands in. Names and `#tag` references resolve after every Mod
-has declared; an unknown or unmatched one is a load error naming the Plant.
+`tree-vines` naming a `climber` that only worldgen hangs, an optional
+`branching-def` (limbs, start, reach, rise, fork, lean, tiers and lobe radius,
+in metres and fractions, appended last and absent in every earlier tree), and a
+`column-def` may name the fluid it stands in. Names and `#tag` references
+resolve after every Mod has declared; an unknown or unmatched one is a load
+error naming the Plant.
 
 Four more appended fields go with them, each absent in an adapted 0.1 or 0.2
 Declaration. `shape-def` gained `form`, a closed `shape-form` of `boxes`,

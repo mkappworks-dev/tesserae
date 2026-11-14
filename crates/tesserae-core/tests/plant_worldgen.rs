@@ -5,7 +5,7 @@ use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 
 use tesserae_core::plant::tree::{Part, fruit_stage, tree_voxels, vine_voxels};
-use tesserae_core::plant::{CountRange, Fruit, Stage, Tree};
+use tesserae_core::plant::{Branching, CountRange, Fruit, Stage, Tree};
 use tesserae_core::save::{Generation, Mapping};
 use tesserae_core::testgen::fixtures;
 use tesserae_core::worldgen::WaterParams;
@@ -36,8 +36,21 @@ fn folded(seed: u64) -> u64 {
     u64::from((seed ^ (seed >> 32)) as u32)
 }
 
-fn oak(fruit: bool) -> SurfaceTree {
+/// Forks, leans and carries limbs: every part of the shape, 6.7 m from the foot at most.
+const BRANCHING: Branching = Branching {
+    limbs: CountRange { min: 3, max: 4 },
+    start: 0.3,
+    reach_m: 3.0,
+    rise: 0.2,
+    fork: Some(0.3),
+    lean_m: 1.0,
+    tiers: false,
+    lobe_radius_m: 1.2,
+};
+
+fn oak_with(fruit: bool, branching: Option<Branching>) -> SurfaceTree {
     SurfaceTree {
+        branching,
         trunk: TRUNK,
         canopy: CANOPY,
         trunk_height_m: (3.0, 5.0),
@@ -64,7 +77,15 @@ fn plant(kind: SurfacePlantKind, first: MaterialId, spacing_m: f32) -> SurfaceFe
 }
 
 fn tree_feature(spacing_m: f32, fruit: bool) -> SurfaceFeature {
-    let mut f = plant(SurfacePlantKind::Tree(oak(fruit)), TRUNK, spacing_m);
+    branching_feature(spacing_m, fruit, None)
+}
+
+fn branching_feature(spacing_m: f32, fruit: bool, branching: Option<Branching>) -> SurfaceFeature {
+    let mut f = plant(
+        SurfacePlantKind::Tree(oak_with(fruit, branching)),
+        TRUNK,
+        spacing_m,
+    );
     f.plant.as_mut().unwrap().shape = 0;
     f
 }
@@ -177,10 +198,11 @@ impl Probe {
     }
 }
 
-fn row_of(fruit: bool) -> Tree {
-    let o = oak(fruit);
+fn row_of(fruit: bool, branching: Option<Branching>) -> Tree {
+    let o = oak_with(fruit, branching);
     Tree {
         vines: None,
+        branching,
         trunk: o.trunk,
         canopy: o.canopy,
         trunk_height_m: o.trunk_height_m,
@@ -210,19 +232,25 @@ fn expected(
     seed: u64,
     size: f32,
     fruit: bool,
+    branching: Option<Branching>,
     base: [i32; 3],
 ) -> Vec<([i32; 3], MaterialId, Part)> {
-    tree_voxels(&row_of(fruit), folded(seed), [base[0], 0, base[2]], size)
-        .into_iter()
-        .map(|v| {
-            let material = if v.part == Part::Fruit {
-                FRUIT[fruit_stage(folded(seed), v.at, size, 3)]
-            } else {
-                v.material
-            };
-            ([v.at[0], v.at[1] + base[1], v.at[2]], material, v.part)
-        })
-        .collect()
+    tree_voxels(
+        &row_of(fruit, branching),
+        folded(seed),
+        [base[0], 0, base[2]],
+        size,
+    )
+    .into_iter()
+    .map(|v| {
+        let material = if v.part == Part::Fruit {
+            FRUIT[fruit_stage(folded(seed), v.at, size, 3)]
+        } else {
+            v.material
+        };
+        ([v.at[0], v.at[1] + base[1], v.at[2]], material, v.part)
+    })
+    .collect()
 }
 
 fn is_tree_material(m: MaterialId) -> bool {
@@ -244,6 +272,48 @@ fn bases(changed: &HashMap<[i32; 3], (Voxel, Voxel)>, material: MaterialId) -> V
     found
 }
 
+/// The feet among the trunk cells with ground under them: a limb tip can rest on rising ground
+/// and look like one, but its tree's own cells never all stand there. Each other candidate must
+/// be a cell of a tree that does.
+fn feet(
+    probe: &Probe,
+    changed: &HashMap<[i32; 3], (Voxel, Voxel)>,
+    fruit: bool,
+    branching: Option<Branching>,
+    size: f32,
+    candidates: Vec<[i32; 3]>,
+) -> Vec<[i32; 3]> {
+    let whole = |base: [i32; 3]| {
+        expected(SEED, size, fruit, branching, base)
+            .iter()
+            .all(|&(at, ..)| {
+                let (with, bare) = probe.at(at);
+                !bare.is_air() || is_tree_material(with.material())
+            })
+    };
+    let candidates: Vec<_> = candidates
+        .into_iter()
+        .filter(|b| !probe.at([b[0], b[1] - 1, b[2]]).1.is_air())
+        .collect();
+    let feet: Vec<_> = candidates.iter().copied().filter(|&b| whole(b)).collect();
+    let owned: HashSet<_> = feet
+        .iter()
+        .flat_map(|&b| expected(SEED, size, fruit, branching, b))
+        .map(|c| c.0)
+        .collect();
+    for c in &candidates {
+        assert!(
+            feet.contains(c)
+                || owned.contains(c)
+                || !changed.contains_key(c)
+                // The scan stops at 64 m, so a limb there may belong to a foot beyond it.
+                || [c[0], c[2]].iter().any(|&a| (a.abs() as f32 * size) > 64.0 - 9.0),
+            "{size} m: trunk Voxel {c:?} belongs to no whole tree"
+        );
+    }
+    feet
+}
+
 fn metres(cell: [i32; 3], size: f32) -> [f32; 3] {
     cell.map(|c| c as f32 * size)
 }
@@ -251,6 +321,15 @@ fn metres(cell: [i32; 3], size: f32) -> [f32; 3] {
 /// Every tree, however many Chunks it spans, has every cell the pure function says and that was
 /// Air before, at every Voxel size, and generating the Chunks in the other order changes nothing.
 fn assert_whole(params: WorldgenParams, fruit: bool, sizes: &[f32]) {
+    assert_whole_with(params, fruit, None, sizes);
+}
+
+fn assert_whole_with(
+    params: WorldgenParams,
+    fruit: bool,
+    branching: Option<Branching>,
+    sizes: &[f32],
+) {
     let mut crossings = 0;
     let mut fruit_cells = 0;
     for &size in sizes {
@@ -258,10 +337,13 @@ fn assert_whole(params: WorldgenParams, fruit: bool, sizes: &[f32]) {
         let half_m = 64.0;
         let changed = probe.changed(half_m, false);
         assert_eq!(changed, probe.changed(half_m, true), "{size} m: order");
-        let trunks = bases(&changed, TRUNK);
+        let mut trunks = bases(&changed, TRUNK);
+        if branching.is_some() {
+            trunks = feet(&probe, &changed, fruit, branching, size, trunks);
+        }
         assert!(trunks.len() > 20, "{size} m: only {} trees", trunks.len());
         for base in trunks {
-            let cells = expected(SEED, size, fruit, base);
+            let cells = expected(SEED, size, fruit, branching, base);
             let chunks: HashSet<_> = cells
                 .iter()
                 .map(|(at, ..)| at.map(|c| c.div_euclid(SIZE_I)))
@@ -286,6 +368,18 @@ fn assert_whole(params: WorldgenParams, fruit: bool, sizes: &[f32]) {
                 } else {
                     assert_eq!(with, bare, "{size} m: a tree replaced terrain at {at:?}");
                 }
+            }
+            if let Some(b) = branching {
+                let far = cells
+                    .iter()
+                    .map(|(at, ..)| {
+                        let across = [at[0] - base[0], at[2] - base[2]];
+                        ((across[0].pow(2) + across[1].pow(2)) as f32).sqrt() * size
+                    })
+                    .fold(0.0, f32::max);
+                let reach = b.extent_m(2.5) + 4.0 * size;
+                assert!(far <= reach, "{size} m: {far} m is past {reach} m");
+                continue;
             }
             let trunk = cells.iter().filter(|c| c.2 == Part::Trunk).count() as f32 * size;
             assert!(
@@ -348,6 +442,26 @@ fn fruit_is_drawn_at_hash_stages_inside_its_density_whichever_chunk_makes_it() {
 #[test]
 fn fruit_is_its_box_shape_whole_across_chunk_borders_at_every_voxel_size() {
     assert_whole(flat(&[tree_feature(12.0, true)]), true, &SIZES);
+}
+
+#[test]
+fn a_branching_tree_across_a_chunk_border_is_whole_at_every_voxel_size() {
+    assert_whole_with(
+        flat(&[branching_feature(14.0, false, Some(BRANCHING))]),
+        false,
+        Some(BRANCHING),
+        &SIZES,
+    );
+}
+
+#[test]
+fn a_branching_fruit_tree_is_whole_over_caves_and_smoothed_ground() {
+    let params = WorldgenParams {
+        caves: Some(Default::default()),
+        smoothing: Some(Default::default()),
+        ..flat(&[branching_feature(14.0, true, Some(BRANCHING))])
+    };
+    assert_whole_with(params, true, Some(BRANCHING), &[1.0, 0.5]);
 }
 
 #[test]
@@ -660,7 +774,12 @@ fn vines_are_whole_across_chunk_borders_at_every_voxel_size() {
         assert_eq!(changed, probe.changed(64.0, true), "{size} m: order");
         let (mut hung, mut total_m, mut runs) = (0, 0.0, 0);
         for base in bases(&changed, TRUNK) {
-            let unshifted = tree_voxels(&row_of(false), folded(SEED), [base[0], 0, base[2]], size);
+            let unshifted = tree_voxels(
+                &row_of(false, None),
+                folded(SEED),
+                [base[0], 0, base[2]],
+                size,
+            );
             for vine in vine_voxels(&unshifted, &vines(), folded(SEED), size) {
                 let cells: Vec<[i32; 3]> =
                     vine.cells().map(|c| [c[0], c[1] + base[1], c[2]]).collect();
@@ -823,4 +942,24 @@ fn a_snapshot_keeps_sixteen_features_and_a_trees_vines() {
             }
         }
     }
+}
+
+#[test]
+fn a_snapshot_keeps_a_trees_branching_and_a_tree_without_it_saves_none() {
+    let capture = |branching| {
+        let params = flat(&[branching_feature(16.0, true, branching)]);
+        let json =
+            serde_json::to_string(&Generation::capture(params, &mapping()).unwrap()).unwrap();
+        (params, json)
+    };
+    let (params, json) = capture(Some(BRANCHING));
+    let reopened: Generation = serde_json::from_str(&json).unwrap();
+    let restored = reopened.restore(&mapping(), 2).unwrap();
+    assert_eq!(restored.biomes, params.biomes);
+    let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+    let form = &value["biomes"][0]["surface_features"][0]["plant"]["form"];
+    assert_eq!(form["branching"]["limbs"], serde_json::json!([3, 4]));
+    assert_eq!(form["branching"]["fork"], 0.3f32);
+    let (_, plain) = capture(None);
+    assert!(!plain.contains("branching"), "an old tree saves as it did");
 }

@@ -1,8 +1,8 @@
 //! Every Mod's `plants`, resolved against the World's Materials and Items.
 
 use tesserae_core::plant::{
-    CountRange, Direction, Fruit, Kind, Needs, Plant, PlantTable, Stage, Tree, TreeVines, Water,
-    Yield,
+    Branching, CountRange, Direction, Fruit, Kind, Needs, Plant, PlantTable, Stage, Tree,
+    TreeVines, Water, Yield,
 };
 use tesserae_core::{MaterialId, ShapeId, Tables, Voxel};
 
@@ -288,6 +288,16 @@ fn plant(
                         plant: v.plant.clone(),
                         density: v.density,
                         length_m: v.length_m,
+                    }),
+                    branching: tree.branching.as_ref().map(|b| Branching {
+                        limbs: count(b.limbs),
+                        start: b.start,
+                        reach_m: b.reach_m,
+                        rise: b.rise,
+                        fork: b.fork,
+                        lean_m: b.lean_m,
+                        tiers: b.tiers.unwrap_or(false),
+                        lobe_radius_m: b.lobe_radius_m,
                     }),
                 }),
             )

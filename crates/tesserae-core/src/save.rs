@@ -636,7 +636,25 @@ pub enum SavedPlantKind {
         /// Absent is a tree that hangs no vines, as every tree saved before them.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         vines: Option<SavedVines>,
+        /// Absent is a straight trunk under one crown, as every tree saved before branching.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        branching: Option<SavedBranching>,
     },
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SavedBranching {
+    pub limbs: [u32; 2],
+    pub start: f32,
+    pub reach_m: f32,
+    pub rise: f32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fork: Option<f32>,
+    pub lean_m: f32,
+    #[serde(default)]
+    pub tiers: bool,
+    pub lobe_radius_m: f32,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -888,6 +906,16 @@ fn saved_plant(p: &crate::SurfacePlant, mapping: &Mapping) -> Result<SavedPlant,
                 canopy: name(t.canopy)?,
                 trunk_height_m: [t.trunk_height_m.0, t.trunk_height_m.1],
                 canopy_radius_m: t.canopy_radius_m,
+                branching: t.branching.map(|b| SavedBranching {
+                    limbs: [b.limbs.min, b.limbs.max],
+                    start: b.start,
+                    reach_m: b.reach_m,
+                    rise: b.rise,
+                    fork: b.fork,
+                    lean_m: b.lean_m,
+                    tiers: b.tiers,
+                    lobe_radius_m: b.lobe_radius_m,
+                }),
                 fruit: t
                     .fruit
                     .map(|f| {
@@ -958,7 +986,21 @@ fn restored_plant(p: &SavedPlant, mapping: &Mapping) -> Result<crate::SurfacePla
             canopy_radius_m,
             fruit,
             vines,
+            branching,
         } => K::Tree(crate::SurfaceTree {
+            branching: branching.as_ref().map(|b| crate::plant::Branching {
+                limbs: crate::plant::CountRange {
+                    min: b.limbs[0],
+                    max: b.limbs[1],
+                },
+                start: b.start,
+                reach_m: b.reach_m,
+                rise: b.rise,
+                fork: b.fork,
+                lean_m: b.lean_m,
+                tiers: b.tiers,
+                lobe_radius_m: b.lobe_radius_m,
+            }),
             vines: vines
                 .as_ref()
                 .map(|v| {

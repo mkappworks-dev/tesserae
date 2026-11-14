@@ -355,6 +355,7 @@ mod surface_features {
                 "oak",
                 content::PlantKind::Tree(content::TreeDef {
                     vines: None,
+                    branching: None,
                     sapling: "t:sapling".into(),
                     sapling_yields: Vec::new(),
                     trunk: "t:log".into(),
@@ -738,6 +739,89 @@ mod surface_features {
         }
     }
 
+    fn branched(edit: impl Fn(&mut content::BranchingDef)) -> Vec<content::PlantDef> {
+        let mut rows = plants();
+        for row in &mut rows {
+            if let content::PlantKind::Tree(tree) = &mut row.kind {
+                let mut b = content::BranchingDef {
+                    limbs: content::CountRange { min: 3, max: 4 },
+                    start: 0.25,
+                    reach_m: 3.0,
+                    rise: 0.2,
+                    fork: Some(0.3),
+                    lean_m: 1.0,
+                    tiers: None,
+                    lobe_radius_m: 1.2,
+                };
+                edit(&mut b);
+                tree.branching = Some(b);
+            }
+        }
+        rows
+    }
+
+    #[test]
+    fn a_trees_branching_resolves_and_freezes_into_the_biome_and_a_tree_without_it_has_none() {
+        let (biomes, tables, _) = resolved_with(
+            vec![feature(None, Some("t:oak"), None)],
+            branched(|b| b.tiers = Some(true)),
+        )
+        .unwrap();
+        let Kind::Tree(tree) = &tables.plants.plants()[1].kind else {
+            panic!("a tree");
+        };
+        let b = tree.branching.unwrap();
+        assert_eq!(
+            (b.limbs.min, b.limbs.max, b.fork, b.tiers),
+            (3, 4, Some(0.3), true)
+        );
+        let SurfacePlantKind::Tree(frozen) = biomes.as_slice()[0].surface_features.as_slice()[0]
+            .plant
+            .unwrap()
+            .kind
+        else {
+            panic!("a tree");
+        };
+        assert_eq!(frozen.branching, Some(b));
+        let (plain, tables, _) =
+            resolved_with(vec![feature(None, Some("t:oak"), None)], plants()).unwrap();
+        let Kind::Tree(tree) = &tables.plants.plants()[1].kind else {
+            panic!("a tree");
+        };
+        assert_eq!(tree.branching, None);
+        let SurfacePlantKind::Tree(frozen) = plain.as_slice()[0].surface_features.as_slice()[0]
+            .plant
+            .unwrap()
+            .kind
+        else {
+            panic!("a tree");
+        };
+        assert_eq!(frozen.branching, None);
+    }
+
+    #[test]
+    fn branching_that_cannot_be_drawn_is_a_load_error_naming_the_tree() {
+        let refused = |edit: &dyn Fn(&mut content::BranchingDef)| {
+            resolved_with(vec![], branched(edit))
+                .unwrap_err()
+                .to_string()
+        };
+        for (what, err) in [
+            ("too many limbs", refused(&|b| b.limbs.max = 17)),
+            ("a start", refused(&|b| b.start = 0.95)),
+            ("a rise", refused(&|b| b.rise = 2.0)),
+            ("a fork", refused(&|b| b.fork = Some(0.9))),
+            ("past 8 m", refused(&|b| b.reach_m = 7.0)),
+            ("no lobe", refused(&|b| b.lobe_radius_m = 0.0)),
+            ("a lean past the trunk", refused(&|b| b.lean_m = 9.0)),
+        ] {
+            assert!(
+                err.contains("oak") && err.contains("branching"),
+                "{what}: {err}"
+            );
+        }
+    }
+
     #[test]
     fn a_biome_names_sixteen_features_and_seventeen_is_refused_naming_it() {
         let many = |n: usize| -> Vec<_> {
@@ -809,4 +893,43 @@ fn a_data_mod_names_a_plant_in_a_biomes_surface_feature() {
     assert_eq!(plant.material, None);
     assert_eq!(plant.plant.as_deref(), Some("t:wheat"));
     assert_eq!(plant.shape.as_deref(), Some("t:cross"));
+}
+
+#[test]
+fn a_data_mod_declares_branching_in_its_tree_row() {
+    let toml = "[[plants]]\nname = \"pine\"\nkind = \"tree\"\nseed = \"t:sapling\"\n\
+         sapling = \"t:sapling\"\ntrunk = \"t:log\"\ncanopy = \"t:leaf\"\n\
+         trunk-height-m = [7.0, 10.0]\ncanopy-radius-m = 1.2\nmean-seconds = 60.0\n\
+         sapling-yield = [1, 1]\nbranching = { limbs = [3, 5], start = 0.25, reach-m = 3.0, \
+         rise = -0.5, lean-m = 0.0, tiers = true, lobe-radius-m = 0.9 }\n\
+         [plants.needs]\nsoil = [\"t:sand\"]\n";
+    let payload = crate::trust::CheckedPayload::for_test(
+        "content.toml",
+        [("content.toml", toml.as_bytes().to_vec())],
+    );
+    let declared = crate::data::parse("t", &payload).unwrap();
+    let content::PlantKind::Tree(tree) = &declared.plants[0].kind else {
+        panic!("a tree");
+    };
+    let b = tree.branching.as_ref().unwrap();
+    assert_eq!(
+        (
+            b.limbs.min,
+            b.limbs.max,
+            b.rise,
+            b.fork,
+            b.tiers,
+            b.lobe_radius_m
+        ),
+        (3, 5, -0.5, None, Some(true), 0.9)
+    );
+    let bare = toml.replace("branching", "branchin");
+    let payload = crate::trust::CheckedPayload::for_test(
+        "content.toml",
+        [("content.toml", bare.as_bytes().to_vec())],
+    );
+    assert!(
+        crate::data::parse("t", &payload).is_err(),
+        "unknown fields are refused"
+    );
 }

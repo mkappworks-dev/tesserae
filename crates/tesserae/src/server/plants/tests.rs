@@ -5,7 +5,7 @@ use tesserae_core::SHAPE_FULL_CUBE;
 use tesserae_core::inventory::{Destination, Slot};
 use tesserae_core::layout::{Dim, LayoutAxis};
 use tesserae_core::plant::tree::{Part, TreeVoxel, tree_voxels};
-use tesserae_core::plant::{CountRange, Fruit, Kind, Needs, Plant, Stage, Tree, Yield};
+use tesserae_core::plant::{Branching, CountRange, Fruit, Kind, Needs, Plant, Stage, Tree, Yield};
 use tesserae_core::{MaterialDef, MaterialId, Occlusion, Orientation, RenderClass};
 use tesserae_mods::{Intent, ItemDef};
 
@@ -65,6 +65,11 @@ fn stage(material: MaterialId, mean: Option<f32>, rows: &[(&str, u32, u32)]) -> 
 
 /// `shaped` gives the wheat Plant the `cross` Shape the Content registers.
 fn content_with(shaped: bool) -> Content {
+    content_of(shaped, None)
+}
+
+/// As [`content_with`], the apple tree branching as given and tall enough to show it.
+fn content_of(shaped: bool, branching: Option<Branching>) -> Content {
     let mut tables = crate::server::fixture_tables();
     let cross = tables
         .shapes
@@ -148,9 +153,14 @@ fn content_with(shaped: bool) -> Content {
             sapling,
             Kind::Tree(Tree {
                 vines: None,
+                branching,
                 trunk,
                 canopy,
-                trunk_height_m: (2.0, 3.0),
+                trunk_height_m: if branching.is_some() {
+                    (4.0, 5.0)
+                } else {
+                    (2.0, 3.0)
+                },
                 canopy_radius_m: 2.0,
                 mean_seconds: 60.0,
                 trunk_yield: yields(&[("t:log", 1, 1)]),
@@ -1281,4 +1291,77 @@ fn removing_a_sapling_drops_its_item_and_a_grown_trunk_drops_the_log_never_a_gro
     );
     tick(&mut app);
     assert_eq!(lying(&mut app), [("t:log".to_owned(), 1)]);
+}
+
+fn branching() -> Branching {
+    Branching {
+        limbs: CountRange { min: 2, max: 3 },
+        start: 0.2,
+        reach_m: 3.0,
+        rise: 0.0,
+        fork: None,
+        lean_m: 0.0,
+        tiers: false,
+        lobe_radius_m: 0.6,
+    }
+}
+
+#[test]
+fn cutting_a_branched_trunk_fells_its_limbs_and_lobes_and_drops_one_sapling() {
+    let (mut app, _) = farm_of(content_of(false, Some(branching())));
+    let voxels = grow_tree(&mut app, BASE);
+    let wood = voxels.iter().filter(|v| v.part == Part::Trunk).count();
+    let off_axis = voxels
+        .iter()
+        .filter(|v| v.part == Part::Trunk && (v.at[0] != BASE[0] || v.at[2] != BASE[2]))
+        .count();
+    assert!(off_axis > 3, "limbs and leaders stand off the trunk");
+    cut_the_foot(&mut app);
+    settle_felling(&mut app, &voxels);
+    assert_eq!(grown_left(&app, &voxels), 0, "the limbs and lobes fell too");
+    assert_eq!(lying_of(&mut app, "t:log"), (wood, wood as u32));
+    let (stacks, saplings) = lying_of(&mut app, "t:sapling");
+    assert_eq!(stacks, 1, "one drop for the whole tree");
+    assert!((1..=2).contains(&saplings));
+}
+
+#[test]
+fn cutting_a_limb_drops_its_end_and_what_hung_on_it_and_leaves_the_trunk_standing() {
+    let (mut app, _) = farm_of(content_of(false, Some(branching())));
+    let voxels = grow_tree(&mut app, BASE);
+    let across = |at: [i32; 3]| (at[0] - BASE[0]).abs().max((at[2] - BASE[2]).abs());
+    let limbs: Vec<_> = voxels
+        .iter()
+        .filter(|v| v.part == Part::Trunk && across(v.at) >= 1)
+        .collect();
+    // The lowest limb hangs clear of the crown, so nothing else holds its end up.
+    let low = limbs.iter().map(|v| v.at[1]).min().unwrap();
+    let lowest: Vec<_> = limbs.iter().filter(|v| v.at[1] == low).collect();
+    let cut = lowest.iter().find(|v| across(v.at) >= 2).unwrap().at;
+    let tip = lowest.iter().max_by_key(|v| across(v.at)).unwrap().at;
+    let lobe = voxels
+        .iter()
+        .find(|v| v.part != Part::Trunk && v.at[1] <= low + 1 && across(v.at) >= 3)
+        .expect("a lobe at the limb's tip")
+        .at;
+    command(&mut app, cut, Voxel::AIR);
+    settle_felling(&mut app, &voxels);
+    assert!(!voxel_at(&app, BASE).is_air(), "the foot stands");
+    let axis: Vec<_> = voxels
+        .iter()
+        .filter(|v| v.part == Part::Trunk && across(v.at) == 0)
+        .collect();
+    assert!(
+        axis.iter().all(|v| !voxel_at(&app, v.at).is_air()),
+        "the trunk stands"
+    );
+    assert!(voxel_at(&app, tip).is_air(), "the end of the limb fell");
+    assert!(voxel_at(&app, lobe).is_air(), "what hung on it fell");
+    assert!(
+        voxels
+            .iter()
+            .filter(|v| v.part == Part::Canopy)
+            .any(|v| !voxel_at(&app, v.at).is_air()),
+        "the crown stays"
+    );
 }

@@ -6,8 +6,8 @@ use std::collections::HashSet;
 
 use super::reach::voxels_in;
 use super::{
-    Change, GrowEnv, Growth, Kind, MAX_CANOPY_RADIUS_M, Plant, PlantTable, Role, Surroundings,
-    Tree, conditions_met, mix,
+    Branching, Change, FORK_SPREAD, GrowEnv, Growth, Kind, MAX_CANOPY_RADIUS_M, Plant, PlantTable,
+    Role, Surroundings, Tree, conditions_met, mix,
 };
 use crate::climate::{SurfaceVines, VINE_FACES};
 use crate::light::Light;
@@ -86,58 +86,318 @@ pub fn fruit_stage(seed: u64, at: [i32; 3], voxel_size: f32, stages: usize) -> u
 }
 
 /// Every Voxel of the tree whose sapling stands at `base`: the trunk from the
-/// sapling's own cell upward, then the ellipsoidal canopy centred on the
-/// trunk's top, some of it fruit. A pure function of the row, the position and
-/// the Voxel size.
+/// sapling's own cell upward, then the canopy, some of it fruit. A tree with no `branching` is a
+/// straight trunk under one ellipsoid centred on its top; one with it grows limbs, leaders and
+/// lobes too. A pure function of the row, the position and the Voxel size.
 pub fn tree_voxels(tree: &Tree, seed: u64, base: [i32; 3], voxel_size: f32) -> Vec<TreeVoxel> {
     let height = trunk_height(tree, seed, base, voxel_size);
+    if let Some(b) = &tree.branching {
+        return branched(tree, b, seed, base, voxel_size, height);
+    }
     let mut voxels: Vec<TreeVoxel> = (0..height)
-        .map(|dy| TreeVoxel {
-            at: [base[0], base[1] + dy, base[2]],
-            material: tree.trunk,
-            part: Part::Trunk,
-            shape: SHAPE_FULL_CUBE,
-            orientation: 0,
-        })
+        .map(|dy| wood([base[0], base[1] + dy, base[2]], tree.trunk))
         .collect();
     let top = [base[0], base[1] + height - 1, base[2]];
-    let wide = (tree.canopy_radius_m / voxel_size).max(1.0);
-    let tall = (tree.canopy_radius_m * CANOPY_HEIGHT_RATIO / voxel_size).max(1.0);
     // The canopy leaves the lower trunk bare, and never reaches the ground.
     let lowest = base[1] + (height / 2).max(1);
+    ellipsoid(top, tree.canopy_radius_m, voxel_size, |at, [dx, dy, dz]| {
+        if at[1] >= lowest && !(dx == 0 && dz == 0 && dy <= 0) {
+            voxels.push(leaf(tree, seed, at, voxel_size));
+        }
+    });
+    voxels
+}
+
+fn wood(at: [i32; 3], material: MaterialId) -> TreeVoxel {
+    TreeVoxel {
+        at,
+        material,
+        part: Part::Trunk,
+        shape: SHAPE_FULL_CUBE,
+        orientation: 0,
+    }
+}
+
+/// The canopy Voxel at `at`, or the fruit that replaces it.
+fn leaf(tree: &Tree, seed: u64, at: [i32; 3], voxel_size: f32) -> TreeVoxel {
+    let fruit = tree
+        .fruit
+        .as_ref()
+        .filter(|f| bears_fruit(seed, f.density, at, voxel_size));
+    match fruit {
+        Some(f) => TreeVoxel {
+            at,
+            material: f.stages[0].material,
+            part: Part::Fruit,
+            shape: f.shape.unwrap_or(SHAPE_FULL_CUBE),
+            orientation: 0,
+        },
+        None => TreeVoxel {
+            at,
+            material: tree.canopy,
+            part: Part::Canopy,
+            shape: SHAPE_FULL_CUBE,
+            orientation: 0,
+        },
+    }
+}
+
+/// Calls `f` with each cell inside the ellipsoid of horizontal radius `radius_m` centred on
+/// `centre`, and its offset from the centre, x then z then y. It is flatter than it is wide.
+fn ellipsoid(
+    centre: [i32; 3],
+    radius_m: f32,
+    voxel_size: f32,
+    mut f: impl FnMut([i32; 3], [i32; 3]),
+) {
+    let wide = (radius_m / voxel_size).max(1.0);
+    let tall = (radius_m * CANOPY_HEIGHT_RATIO / voxel_size).max(1.0);
     let (rx, ry) = (wide.ceil() as i32, tall.ceil() as i32);
     for dx in -rx..=rx {
         for dz in -rx..=rx {
             for dy in -ry..=ry {
                 let inside =
                     (dx * dx + dz * dz) as f32 / (wide * wide) + (dy * dy) as f32 / (tall * tall);
-                let at = [top[0] + dx, top[1] + dy, top[2] + dz];
-                if inside > 1.0 + 1e-4 || at[1] < lowest || (dx == 0 && dz == 0 && dy <= 0) {
-                    continue;
+                if inside <= 1.0 + 1e-4 {
+                    f(
+                        [centre[0] + dx, centre[1] + dy, centre[2] + dz],
+                        [dx, dy, dz],
+                    );
                 }
-                let fruit = tree
-                    .fruit
-                    .as_ref()
-                    .filter(|f| bears_fruit(seed, f.density, at, voxel_size));
-                voxels.push(match fruit {
-                    Some(f) => TreeVoxel {
-                        at,
-                        material: f.stages[0].material,
-                        part: Part::Fruit,
-                        shape: f.shape.unwrap_or(SHAPE_FULL_CUBE),
-                        orientation: 0,
-                    },
-                    None => TreeVoxel {
-                        at,
-                        material: tree.canopy,
-                        part: Part::Canopy,
-                        shape: SHAPE_FULL_CUBE,
-                        orientation: 0,
-                    },
-                });
             }
         }
     }
+}
+
+/// Sixteen horizontal directions as literals: a trigonometric call may differ in its last bit
+/// between platforms, and one bit can move a limb's tip a Voxel.
+const COMPASS: [[f32; 2]; 16] = [
+    [1.0, 0.0],
+    [0.923_879_5, 0.382_683_43],
+    [0.707_106_77, 0.707_106_77],
+    [0.382_683_43, 0.923_879_5],
+    [0.0, 1.0],
+    [-0.382_683_43, 0.923_879_5],
+    [-0.707_106_77, 0.707_106_77],
+    [-0.923_879_5, 0.382_683_43],
+    [-1.0, 0.0],
+    [-0.923_879_5, -0.382_683_43],
+    [-0.707_106_77, -0.707_106_77],
+    [-0.382_683_43, -0.923_879_5],
+    [0.0, -1.0],
+    [0.382_683_43, -0.923_879_5],
+    [0.707_106_77, -0.707_106_77],
+    [0.923_879_5, -0.382_683_43],
+];
+
+/// Where the limbs stop short of the trunk's top, as a fraction of its height.
+const LIMBS_END: f32 = 0.9;
+/// A tier's reach at the top of the tree, as a fraction of the bottom tier's.
+const TIER_TOP_REACH: f32 = 0.25;
+const TIER_LIMBS: u32 = 4;
+/// A leaders' count is two or three.
+const LEADERS: u64 = 2;
+
+/// The cells of a face-connected line from `a` to `b`, both included: each step moves one axis,
+/// the one whose next cell boundary the straight line crosses first, so no two cells touch only
+/// along an edge and a limb is one piece for Felling.
+fn line(a: [i32; 3], b: [i32; 3]) -> Vec<[i32; 3]> {
+    let d = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+    let len = d.map(|v| i64::from(v.abs()));
+    let mut moved = [0i64; 3];
+    let mut at = a;
+    let mut cells = vec![a];
+    for _ in 0..len.iter().sum::<i64>() {
+        let mut axis = None;
+        for i in 0..3 {
+            if len[i] == 0 {
+                continue;
+            }
+            let sooner = axis
+                .is_none_or(|j: usize| (2 * moved[i] + 1) * len[j] < (2 * moved[j] + 1) * len[i]);
+            if sooner {
+                axis = Some(i);
+            }
+        }
+        let i = axis.expect("a step remains");
+        moved[i] += 1;
+        at[i] += d[i].signum();
+        cells.push(at);
+    }
+    cells
+}
+
+/// The cells a tree has taken, as a flat box over where it can stand: a lobe is hundreds of
+/// cells and a tree has several, so a hashed set costs more than the cells themselves.
+/// A cell outside the box goes to a set, so a wrong bound is slow and never wrong.
+struct Taken {
+    low: [i32; 3],
+    size: [i32; 3],
+    cells: Vec<bool>,
+    outside: HashSet<[i32; 3]>,
+}
+
+impl Taken {
+    fn new(low: [i32; 3], size: [i32; 3]) -> Self {
+        Self {
+            low,
+            size,
+            cells: vec![false; size.iter().product::<i32>() as usize],
+            outside: HashSet::new(),
+        }
+    }
+
+    /// Whether `at` was free.
+    fn insert(&mut self, at: [i32; 3]) -> bool {
+        let d = [
+            at[0] - self.low[0],
+            at[1] - self.low[1],
+            at[2] - self.low[2],
+        ];
+        if (0..3).any(|i| !(0..self.size[i]).contains(&d[i])) {
+            return self.outside.insert(at);
+        }
+        let slot = &mut self.cells[((d[1] * self.size[2] + d[2]) * self.size[0] + d[0]) as usize];
+        !std::mem::replace(slot, true)
+    }
+}
+
+/// A trunk that leans, forks and carries limbs, with a foliage lobe on every tip and the crown
+/// on top. Each draw is a hash of the seed and the base in millimetres, each length is metres
+/// over the Voxel size, so the tree is the same shape at every size.
+fn branched(
+    tree: &Tree,
+    b: &Branching,
+    seed: u64,
+    base: [i32; 3],
+    size: f32,
+    height: i32,
+) -> Vec<TreeVoxel> {
+    let roll = |salt: u64| hash(seed, base, size, salt);
+    let top_y = height - 1;
+    let lean = COMPASS[(roll(7) % 16) as usize];
+    let lean_voxels = b.lean_m / size;
+    let axis = |dy: i32| -> [i32; 3] {
+        let t = if top_y > 0 {
+            dy as f32 / top_y as f32
+        } else {
+            0.0
+        };
+        [
+            base[0] + (lean[0] * lean_voxels * t).round() as i32,
+            base[1] + dy,
+            base[2] + (lean[1] * lean_voxels * t).round() as i32,
+        ]
+    };
+    let fork_y = b
+        .fork
+        .filter(|_| top_y >= 3)
+        .map(|f| ((f * top_y as f32).round() as i32).clamp(1, top_y - 1));
+
+    let trunk = line(axis(0), axis(fork_y.unwrap_or(top_y)));
+    let mut leaders: Vec<Vec<[i32; 3]>> = Vec::new();
+    if let Some(fy) = fork_y {
+        let count = LEADERS + roll(8) % 2;
+        let spread = b.reach_m * FORK_SPREAD / size;
+        let first = roll(9) % 16;
+        let crown = axis(top_y);
+        for k in 0..count {
+            let dir = COMPASS[((first + k * 16 / count) % 16) as usize];
+            let tip = [
+                crown[0] + (dir[0] * spread).round() as i32,
+                crown[1],
+                crown[2] + (dir[1] * spread).round() as i32,
+            ];
+            leaders.push(line(axis(fy), tip));
+        }
+    }
+
+    let mut limbs: Vec<Vec<[i32; 3]>> = Vec::new();
+    let span = b.limbs.max - b.limbs.min + 1;
+    let count = b.limbs.min + (roll(10) % u64::from(span)) as u32;
+    let lowest = 1.max((b.start * top_y as f32).round() as i32);
+    let highest = lowest.max((LIMBS_END * top_y as f32).round() as i32);
+    let facing = (roll(11) % 16) as u32;
+    let anchor = |y: i32, n: u32| -> [i32; 3] {
+        let along = match fork_y {
+            Some(fy) if y > fy => &leaders[n as usize % leaders.len()],
+            _ => &trunk,
+        };
+        *along
+            .iter()
+            .find(|c| c[1] == base[1] + y)
+            .unwrap_or_else(|| along.last().expect("a line holds its ends"))
+    };
+    for i in 0..count {
+        let up = if count > 1 {
+            i as f32 / (count - 1) as f32
+        } else {
+            0.5
+        };
+        let y = lowest + (up * (highest - lowest) as f32).round() as i32;
+        let rings = if b.tiers { TIER_LIMBS } else { 1 };
+        for j in 0..rings {
+            let (dir, reach) = if b.tiers {
+                let turn = facing + j * 4 + (i % 2) * 2;
+                (turn % 16, b.reach_m * (1.0 - (1.0 - TIER_TOP_REACH) * up))
+            } else {
+                let jitter = (roll(16 + u64::from(i) * 2) % 2) as u32;
+                let long = (roll(17 + u64::from(i) * 2) % 4) as f32 / 3.0;
+                (
+                    (facing + i * 6 + jitter) % 16,
+                    b.reach_m * (0.7 + 0.3 * long),
+                )
+            };
+            let root = anchor(y, i);
+            let out = COMPASS[dir as usize];
+            let tip_y = (root[1] + (b.rise * reach * 0.5 / size).round() as i32)
+                .clamp(base[1] + 1, base[1] + top_y);
+            let tip = [
+                root[0] + (out[0] * reach / size).round() as i32,
+                tip_y,
+                root[2] + (out[1] * reach / size).round() as i32,
+            ];
+            limbs.push(line(root, tip));
+        }
+    }
+
+    let mut voxels: Vec<TreeVoxel> = Vec::new();
+    let around = (tree.reach_m() / size).ceil() as i32 + 5;
+    let rise = top_y + (tree.crown_rise_m() / size).ceil() as i32 + 3;
+    let mut taken = Taken::new(
+        [base[0] - around, base[1], base[2] - around],
+        [2 * around + 1, rise + 1, 2 * around + 1],
+    );
+    for at in trunk
+        .iter()
+        .chain(leaders.iter().flatten())
+        .chain(limbs.iter().flatten())
+    {
+        if taken.insert(*at) {
+            voxels.push(wood(*at, tree.trunk));
+        }
+    }
+    let mut foliage = |centre: [i32; 3], radius_m: f32, lowest: i32| {
+        ellipsoid(centre, radius_m, size, |at, _| {
+            if at[1] >= lowest && taken.insert(at) {
+                voxels.push(leaf(tree, seed, at, size));
+            }
+        });
+    };
+    let ground = base[1] + 1;
+    for tip in leaders.iter().chain(&limbs).filter_map(|l| l.last()) {
+        foliage(*tip, b.lobe_radius_m, ground);
+    }
+    if b.tiers {
+        for limb in &limbs {
+            foliage(limb[limb.len() / 2], b.lobe_radius_m, ground);
+        }
+    }
+    foliage(
+        axis(top_y),
+        tree.canopy_radius_m,
+        base[1] + (height / 2).max(1),
+    );
     voxels
 }
 
@@ -339,8 +599,9 @@ pub fn felling_region(
     if !is_part(start.role) || settled.contains(&from) {
         return None;
     }
-    let wide = 2 * voxels_in(tree.canopy_radius_m.min(MAX_CANOPY_RADIUS_M), voxel_size) + 3;
-    let tall = voxels_in(tree.trunk_height_m.1 + tree.canopy_radius_m, voxel_size) + 3;
+    let slack = if tree.branching.is_some() { 4 } else { 0 };
+    let wide = 2 * (voxels_in(tree.reach_m().min(MAX_CANOPY_RADIUS_M), voxel_size) + slack) + 3;
+    let tall = voxels_in(tree.trunk_height_m.1 + tree.crown_rise_m(), voxel_size) + 3;
     let mut seen: HashSet<[i32; 3]> = HashSet::from([from]);
     let mut stack = vec![from];
     let (mut low, mut high) = (from, from);
@@ -413,6 +674,7 @@ mod tests {
     fn tree(fruit: Option<f32>) -> Tree {
         Tree {
             vines: None,
+            branching: None,
             trunk: TRUNK,
             canopy: CANOPY,
             trunk_height_m: (3.0, 5.0),
@@ -908,6 +1170,641 @@ mod tests {
         );
         assert!(settled.contains(&[0, 6, 0]));
         assert!(settled.contains(&[0, 4, 0]) || settled.len() > 1);
+    }
+
+    /// The tree as it was generated before `branching` existed, kept to prove a row without it
+    /// still generates exactly so.
+    fn before_branching(tree: &Tree, seed: u64, base: [i32; 3], size: f32) -> Vec<TreeVoxel> {
+        let height = trunk_height(tree, seed, base, size);
+        let mut voxels: Vec<TreeVoxel> = (0..height)
+            .map(|dy| wood([base[0], base[1] + dy, base[2]], tree.trunk))
+            .collect();
+        let top = [base[0], base[1] + height - 1, base[2]];
+        let wide = (tree.canopy_radius_m / size).max(1.0);
+        let tall = (tree.canopy_radius_m * 0.8 / size).max(1.0);
+        let lowest = base[1] + (height / 2).max(1);
+        let (rx, ry) = (wide.ceil() as i32, tall.ceil() as i32);
+        for dx in -rx..=rx {
+            for dz in -rx..=rx {
+                for dy in -ry..=ry {
+                    let inside = (dx * dx + dz * dz) as f32 / (wide * wide)
+                        + (dy * dy) as f32 / (tall * tall);
+                    let at = [top[0] + dx, top[1] + dy, top[2] + dz];
+                    if inside > 1.0 + 1e-4 || at[1] < lowest || (dx == 0 && dz == 0 && dy <= 0) {
+                        continue;
+                    }
+                    voxels.push(leaf(tree, seed, at, size));
+                }
+            }
+        }
+        voxels
+    }
+
+    #[test]
+    fn a_tree_row_without_branching_generates_exactly_as_it_did() {
+        for fruit in [None, Some(0.2)] {
+            let row = tree(fruit);
+            assert!(row.branching.is_none());
+            for size in SIZES {
+                for n in 0..40 {
+                    let base = [n * 7, 4, -n * 3];
+                    assert_eq!(
+                        tree_voxels(&row, SEED, base, size),
+                        before_branching(&row, SEED, base, size),
+                        "{size} at {base:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// The flora species' branching, in metres, as `mods/flora/content.toml` declares them.
+    fn species() -> Vec<(&'static str, Tree)> {
+        let row = |name, trunk: (f32, f32), canopy, b: Branching| {
+            let mut t = tree(None);
+            t.trunk_height_m = trunk;
+            t.canopy_radius_m = canopy;
+            t.branching = Some(b);
+            (name, t)
+        };
+        let limbs = |min, max| CountRange { min, max };
+        let plain = Branching {
+            limbs: limbs(0, 0),
+            start: 0.0,
+            reach_m: 0.0,
+            rise: 0.0,
+            fork: None,
+            lean_m: 0.0,
+            tiers: false,
+            lobe_radius_m: 1.0,
+        };
+        vec![
+            row(
+                "oak",
+                (4.0, 6.0),
+                2.5,
+                Branching {
+                    limbs: limbs(3, 4),
+                    start: 0.25,
+                    reach_m: 3.5,
+                    rise: 0.3,
+                    fork: Some(0.3),
+                    lobe_radius_m: 1.5,
+                    ..plain
+                },
+            ),
+            row(
+                "birch",
+                (5.0, 7.5),
+                1.5,
+                Branching {
+                    limbs: limbs(2, 3),
+                    start: 0.5,
+                    reach_m: 2.0,
+                    rise: 0.6,
+                    lean_m: 1.0,
+                    lobe_radius_m: 0.9,
+                    ..plain
+                },
+            ),
+            row(
+                "pine",
+                (7.0, 10.0),
+                1.2,
+                Branching {
+                    limbs: limbs(3, 5),
+                    start: 0.25,
+                    reach_m: 3.0,
+                    rise: -0.5,
+                    tiers: true,
+                    lobe_radius_m: 0.9,
+                    ..plain
+                },
+            ),
+            row(
+                "palm",
+                (6.0, 9.0),
+                2.2,
+                Branching {
+                    lean_m: 2.0,
+                    ..plain
+                },
+            ),
+            row(
+                "acacia",
+                (3.5, 5.5),
+                3.5,
+                Branching {
+                    reach_m: 3.0,
+                    fork: Some(0.25),
+                    lean_m: 0.5,
+                    lobe_radius_m: 2.0,
+                    ..plain
+                },
+            ),
+            row(
+                "jungle",
+                (10.0, 16.0),
+                5.0,
+                Branching {
+                    limbs: limbs(3, 4),
+                    start: 0.55,
+                    reach_m: 4.5,
+                    rise: 0.2,
+                    lobe_radius_m: 1.8,
+                    ..plain
+                },
+            ),
+            row(
+                "swamp",
+                (3.0, 4.5),
+                3.5,
+                Branching {
+                    limbs: limbs(3, 4),
+                    start: 0.3,
+                    reach_m: 3.5,
+                    rise: -0.3,
+                    lean_m: 1.0,
+                    lobe_radius_m: 1.5,
+                    ..plain
+                },
+            ),
+            row(
+                "apple",
+                (4.0, 6.0),
+                2.5,
+                Branching {
+                    limbs: limbs(3, 4),
+                    start: 0.3,
+                    reach_m: 2.5,
+                    rise: 0.2,
+                    lobe_radius_m: 1.2,
+                    ..plain
+                },
+            ),
+        ]
+    }
+
+    fn horizontal_m(at: [i32; 3], from: [i32; 3], size: f32) -> f32 {
+        (((at[0] - from[0]).pow(2) + (at[2] - from[2]).pow(2)) as f32).sqrt() * size
+    }
+
+    /// Whether the cells are one piece through shared faces.
+    fn one_piece(cells: &[[i32; 3]]) -> bool {
+        let all: HashSet<_> = cells.iter().copied().collect();
+        let mut seen = HashSet::from([cells[0]]);
+        let mut stack = vec![cells[0]];
+        while let Some(c) = stack.pop() {
+            for d in FACES {
+                let n = [c[0] + d[0], c[1] + d[1], c[2] + d[2]];
+                if all.contains(&n) && seen.insert(n) {
+                    stack.push(n);
+                }
+            }
+        }
+        seen.len() == all.len()
+    }
+
+    #[test]
+    fn a_stepped_line_is_face_connected_between_its_ends_and_symmetric_in_length() {
+        for (a, b) in [
+            ([0, 0, 0], [0, 7, 0]),
+            ([0, 0, 0], [5, 2, -3]),
+            ([2, 3, 4], [-6, 3, 4]),
+            ([0, 0, 0], [3, 3, 3]),
+            ([1, 1, 1], [1, 1, 1]),
+        ] {
+            let cells = line(a, b);
+            let steps: i32 = (0..3).map(|i| (b[i] - a[i]).abs()).sum();
+            assert_eq!(cells.len() as i32, steps + 1);
+            assert_eq!((cells[0], *cells.last().unwrap()), (a, b));
+            for w in cells.windows(2) {
+                let moved: i32 = (0..3).map(|i| (w[1][i] - w[0][i]).abs()).sum();
+                assert_eq!(moved, 1, "{a:?} to {b:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn every_species_is_one_piece_inside_its_extent_at_every_voxel_size() {
+        for (name, row) in species() {
+            let b = row.branching.unwrap();
+            assert!(
+                b.check(row.canopy_radius_m, row.trunk_height_m.0).is_ok(),
+                "{name}"
+            );
+            for size in SIZES {
+                for n in 0..12 {
+                    let base = [n * 31, 4, -n * 17];
+                    let voxels = tree_voxels(&row, SEED, base, size);
+                    assert_eq!(voxels, tree_voxels(&row, SEED, base, size), "{name}: pure");
+                    let cells: Vec<_> = voxels.iter().map(|v| v.at).collect();
+                    let unique: HashSet<_> = cells.iter().collect();
+                    assert_eq!(unique.len(), cells.len(), "{name} {size}: a cell twice");
+                    assert_eq!(voxels[0].at, base, "{name}: the sapling's cell is the foot");
+                    assert!(one_piece(&cells), "{name} {size} m at {base:?}: in pieces");
+                    for v in &voxels {
+                        assert!(v.at[1] >= base[1], "{name}: below the ground");
+                        let across = horizontal_m(v.at, base, size);
+                        assert!(
+                            across <= row.reach_m() + 4.0 * size + 1e-3,
+                            "{name} {size}: {across} m is past {} m",
+                            row.reach_m()
+                        );
+                        if v.part != Part::Trunk {
+                            assert!(v.at[1] > base[1], "{name}: foliage on the ground");
+                        }
+                    }
+                    let top = voxels.iter().map(|v| v.at[1]).max().unwrap();
+                    let rise_m = (top - base[1] + 1) as f32 * size;
+                    assert!(
+                        rise_m <= row.trunk_height_m.1 + row.crown_rise_m() + size + 1e-3,
+                        "{name} {size}: {rise_m} m tall"
+                    );
+                }
+            }
+        }
+    }
+
+    fn wood_of(row: &Tree, base: [i32; 3], size: f32) -> Vec<[i32; 3]> {
+        tree_voxels(row, SEED, base, size)
+            .into_iter()
+            .filter(|v| v.part == Part::Trunk)
+            .map(|v| v.at)
+            .collect()
+    }
+
+    #[test]
+    fn limbs_begin_at_their_declared_height_and_reach_as_far_as_declared() {
+        for (name, row) in species() {
+            let b = row.branching.unwrap();
+            if b.limbs.max == 0 {
+                continue;
+            }
+            for size in SIZES {
+                let mut longest: f32 = 0.0;
+                for n in 0..12 {
+                    let base = [n * 29, 4, n * 13];
+                    let wood = wood_of(&row, base, size);
+                    let top = wood.iter().map(|c| c[1]).max().unwrap() - base[1];
+                    let height_m = (top + 1) as f32 * size;
+                    // A limb droops below its root by half its reach times the droop.
+                    let droop = (-b.rise).max(0.0) * b.reach_m / 2.0;
+                    let lowest_m = b.start * height_m - droop - 2.0 * size;
+                    let spread = b.fork.map_or(0.0, |_| b.reach_m * FORK_SPREAD);
+                    for c in &wood {
+                        let across = horizontal_m(*c, base, size);
+                        if across > b.lean_m + spread + 2.0 * size {
+                            longest = longest.max(across);
+                            assert!(
+                                ((c[1] - base[1]) as f32 * size) >= lowest_m,
+                                "{name} {size}: wood {across} m out at {} m, below limbs' start",
+                                (c[1] - base[1]) as f32 * size
+                            );
+                        }
+                    }
+                }
+                assert!(
+                    longest >= b.reach_m * 0.65,
+                    "{name} {size}: longest limb {longest} m of {} m",
+                    b.reach_m
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_leaning_trunk_stands_its_declared_lean_over_and_a_straight_one_stays_over_its_foot() {
+        for (name, row) in species() {
+            let b = row.branching.unwrap();
+            if b.limbs.max > 0 || b.fork.is_some() {
+                continue;
+            }
+            for size in SIZES {
+                for n in 0..8 {
+                    let base = [n * 11, 4, n * 5];
+                    let wood = wood_of(&row, base, size);
+                    let top = *wood.last().unwrap();
+                    let leant = horizontal_m(top, base, size);
+                    assert!(
+                        (leant - b.lean_m).abs() <= 1.5 * size,
+                        "{name} {size}: top {leant} m over, wanted {} m",
+                        b.lean_m
+                    );
+                    assert!(one_piece(&wood), "{name} {size}: the trunk is broken");
+                    assert!(
+                        wood.len() as f32 * size >= row.trunk_height_m.0,
+                        "{name} {size}: short"
+                    );
+                }
+            }
+        }
+        let mut straight = tree(None);
+        straight.branching = Some(Branching {
+            limbs: CountRange { min: 0, max: 0 },
+            start: 0.0,
+            reach_m: 0.0,
+            rise: 0.0,
+            fork: None,
+            lean_m: 0.0,
+            tiers: false,
+            lobe_radius_m: 1.0,
+        });
+        for size in SIZES {
+            let wood = wood_of(&straight, [0, 4, 0], size);
+            assert!(wood.iter().all(|c| c[0] == 0 && c[2] == 0), "{size}");
+        }
+    }
+
+    #[test]
+    fn a_fork_splits_the_trunk_into_two_or_three_leaders_at_its_height() {
+        for name in ["oak", "acacia"] {
+            let (_, mut row) = species().into_iter().find(|s| s.0 == name).unwrap();
+            let b = row.branching.as_mut().unwrap();
+            // Limbs would reach the top row too; the leaders alone are under test.
+            b.limbs = CountRange { min: 0, max: 0 };
+            let b = *b;
+            for size in SIZES {
+                for n in 0..8 {
+                    let base = [n * 23, 4, -n * 7];
+                    let wood = wood_of(&row, base, size);
+                    let top = wood.iter().map(|c| c[1]).max().unwrap();
+                    let height_m = (top - base[1] + 1) as f32 * size;
+                    let columns = |y: i32| -> Vec<[i32; 2]> {
+                        wood.iter()
+                            .filter(|c| c[1] == y)
+                            .map(|c| [c[0], c[2]])
+                            .collect()
+                    };
+                    let leaders = columns(top);
+                    let fork_y = base[1] + (b.fork.unwrap() * height_m / size) as i32;
+                    // At a coarse size the leaders touch near the fork, so only the tips count.
+                    let above: Vec<_> = wood
+                        .iter()
+                        .copied()
+                        .filter(|c| c[1] > (fork_y + top) / 2)
+                        .collect();
+                    let mut pieces = 0;
+                    let mut left: HashSet<_> = above.iter().copied().collect();
+                    while let Some(&start) = left.iter().next() {
+                        pieces += 1;
+                        let mut stack = vec![start];
+                        left.remove(&start);
+                        while let Some(c) = stack.pop() {
+                            for d in FACES {
+                                let n = [c[0] + d[0], c[1] + d[1], c[2] + d[2]];
+                                if left.remove(&n) {
+                                    stack.push(n);
+                                }
+                            }
+                        }
+                    }
+                    if size <= 0.5 {
+                        assert!((2..=3).contains(&pieces), "{name} {size}: {pieces} leaders");
+                    }
+                    assert!(leaders.len() >= 2, "{name} {size}: one tip");
+                    // A leaning trunk may take one sideways step in a row.
+                    assert!(
+                        columns(fork_y - 1).len() <= 2,
+                        "{name} {size}: one trunk below the fork"
+                    );
+                    let apart = (0..leaders.len())
+                        .flat_map(|i| (0..i).map(move |j| (i, j)))
+                        .map(|(i, j)| {
+                            let d = [leaders[i][0] - leaders[j][0], leaders[i][1] - leaders[j][1]];
+                            ((d[0] * d[0] + d[1] * d[1]) as f32).sqrt() * size
+                        })
+                        .fold(f32::MAX, f32::min);
+                    assert!(
+                        apart >= b.reach_m * FORK_SPREAD * 0.5 - size,
+                        "{name} {size}: leaders {apart} m apart"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_pine_is_a_cone_of_tiers_that_shorten_towards_the_top() {
+        let (_, row) = species().into_iter().find(|s| s.0 == "pine").unwrap();
+        for size in SIZES {
+            let (mut limbs, mut needles) = ([0.0f32; 2], [0.0f32; 2]);
+            for n in 0..8 {
+                let base = [n * 19, 4, n * 3];
+                let voxels = tree_voxels(&row, SEED, base, size);
+                let top = voxels.iter().map(|v| v.at[1]).max().unwrap();
+                let third = (top - base[1]) / 3;
+                let widest = |from: i32, to: i32, wood: bool| {
+                    voxels
+                        .iter()
+                        .filter(|v| (v.part == Part::Trunk) == wood)
+                        .filter(|v| (from..to).contains(&(v.at[1] - base[1])))
+                        .map(|v| horizontal_m(v.at, base, size))
+                        .fold(0.0, f32::max)
+                };
+                limbs[0] += widest(third, 2 * third, true);
+                limbs[1] += widest(2 * third, top, true);
+                needles[0] += widest(1, 2 * third, false);
+                needles[1] += widest(2 * third, top + 1, false);
+            }
+            assert!(limbs[0] > limbs[1] * 1.15, "{size}: limbs {limbs:?}");
+            assert!(
+                needles[0] > needles[1] * 1.15,
+                "{size}: needles {needles:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_tree_is_equal_in_metres_at_every_voxel_size() {
+        for (name, row) in species() {
+            for n in 0..8 {
+                let base_m = [n as f32 * 8.0, 0.0, -n as f32 * 4.0];
+                let measure = |size: f32| {
+                    let base = base_m.map(|m| (m / size).round() as i32);
+                    let voxels = tree_voxels(&row, SEED, base, size);
+                    let rise = voxels.iter().map(|v| v.at[1] - base[1] + 1).max().unwrap();
+                    let rise_m = rise as f32 * size;
+                    assert!(
+                        (row.trunk_height_m.0..=row.trunk_height_m.1 + row.crown_rise_m() + size)
+                            .contains(&rise_m),
+                        "{name} {size}: {rise_m} m tall"
+                    );
+                    let wood = voxels.iter().filter(|v| v.part == Part::Trunk);
+                    let reach = wood
+                        .map(|v| horizontal_m(v.at, base, size))
+                        .fold(0.0, f32::max);
+                    reach
+                };
+                let fine = measure(0.25);
+                for size in [0.5, 1.0] {
+                    let got = measure(size);
+                    assert!(
+                        (got - fine).abs() <= 1.5 * size + 1e-3,
+                        "{name} {size}: {got:?} against {fine:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_tree_row_whose_branching_cannot_be_drawn_is_refused() {
+        let (_, oak) = species().into_iter().find(|s| s.0 == "oak").unwrap();
+        let load = |edit: &dyn Fn(&mut Branching)| {
+            let mut t = oak.clone();
+            edit(t.branching.as_mut().unwrap());
+            PlantTable::default().push(Plant {
+                name: "oak".into(),
+                seed: "t:sapling".into(),
+                first: SAPLING,
+                shape: None,
+                needs: Needs {
+                    soil: vec![SOIL],
+                    light_max: 15,
+                    ..Needs::default()
+                },
+                kind: Kind::Tree(t),
+                sapling_yields: Vec::new(),
+            })
+        };
+        assert!(load(&|_| {}).is_ok());
+        assert!(load(&|b| b.limbs.max = 17).is_err());
+        assert!(load(&|b| b.limbs = CountRange { min: 4, max: 3 }).is_err());
+        assert!(load(&|b| b.start = 0.9).is_err());
+        assert!(load(&|b| b.reach_m = 0.0).is_err());
+        assert!(load(&|b| b.rise = 1.1).is_err());
+        assert!(load(&|b| b.fork = Some(0.05)).is_err());
+        assert!(
+            load(&|b| b.lean_m = 4.1).is_err(),
+            "more than the lowest trunk"
+        );
+        assert!(load(&|b| b.lobe_radius_m = 0.0).is_err());
+        assert!(
+            load(&|b| b.reach_m = 5.0).is_err(),
+            "past 8 m with the fork and the lobe"
+        );
+        assert!(
+            load(&|b| b.lean_m = 3.0).is_err(),
+            "lean, reach and lobe past 8 m"
+        );
+        assert!(load(&|b| b.fork = Some(0.3)).is_ok());
+        assert!(
+            load(&|b| {
+                b.tiers = true;
+                b.limbs = CountRange { min: 9, max: 9 };
+            })
+            .is_err()
+        );
+    }
+
+    fn table_of(row: &Tree) -> PlantTable {
+        let mut table = PlantTable::default();
+        table
+            .push(Plant {
+                kind: Kind::Tree(row.clone()),
+                ..plants(None).plants()[0].clone()
+            })
+            .unwrap();
+        table
+    }
+
+    #[test]
+    fn cutting_a_branched_trunk_fells_the_limbs_and_lobes_above_it_and_leaves_the_stump() {
+        for (name, row) in species()
+            .into_iter()
+            .filter(|s| ["oak", "pine", "apple", "jungle"].contains(&s.0))
+        {
+            let table = table_of(&row);
+            let b = row.branching.unwrap();
+            for size in SIZES {
+                let base = [0, 4, 0];
+                let all = tree_voxels(&row, SEED, base, size);
+                let top = all.iter().map(|v| v.at[1]).max().unwrap();
+                let trunk_top = all
+                    .iter()
+                    .filter(|v| v.part == Part::Trunk)
+                    .map(|v| v.at[1])
+                    .max()
+                    .unwrap();
+                // Just under the lowest limb, so the cut is on the trunk and not in a limb's root.
+                let cut_y =
+                    base[1] + 1.max((b.start * (trunk_top - base[1]) as f32).round() as i32) - 1;
+                let cut_at = [0, cut_y, 0];
+                assert!(
+                    all.iter().any(|v| v.at == cut_at),
+                    "{name} {size}: no trunk there"
+                );
+                let mut scene = Scene::grown(&row, base, size);
+                cut(&mut scene, cut_at);
+                let region = felling(&table, &scene, size, [0, cut_y + 1, 0])
+                    .unwrap_or_else(|| panic!("{name} {size}: the part above the cut stands"));
+                assert!(region.has_trunk);
+                let broken: HashSet<_> = region.cells.iter().copied().collect();
+                for v in all.iter().filter(|v| v.at[1] > cut_y) {
+                    assert!(broken.contains(&v.at), "{name} {size}: {:?} stays", v.at);
+                }
+                assert!(
+                    broken.iter().any(|c| c[1] == top),
+                    "{name} {size}: the crown stays"
+                );
+                assert!(
+                    all.iter()
+                        .any(|v| v.part == Part::Canopy && broken.contains(&v.at)),
+                    "{name} {size}: no lobe falls"
+                );
+                for v in all
+                    .iter()
+                    .filter(|v| v.part == Part::Trunk && v.at[0] == 0 && v.at[2] == 0)
+                {
+                    if v.at[1] < cut_y {
+                        assert!(!broken.contains(&v.at), "{name} {size}: the stump falls");
+                    }
+                }
+                assert_eq!(felling(&table, &scene, size, [0, cut_y - 1, 0]), None);
+                assert!(
+                    region.cells.windows(2).all(|w| w[0][1] >= w[1][1]),
+                    "{name} {size}: top-down"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_limb_cut_through_drops_its_end_and_what_hung_on_it_and_the_trunk_stands() {
+        for (name, row) in species()
+            .into_iter()
+            .filter(|s| ["apple", "jungle", "swamp"].contains(&s.0))
+        {
+            let table = table_of(&row);
+            for size in SIZES {
+                let base = [0, 4, 0];
+                let all = tree_voxels(&row, SEED, base, size);
+                let wood: Vec<_> = all.iter().filter(|v| v.part == Part::Trunk).collect();
+                let limb: Vec<_> = wood
+                    .iter()
+                    .filter(|v| horizontal_m(v.at, base, size) > 1.5)
+                    .collect();
+                let cut_at = limb[limb.len() / 3].at;
+                let mut scene = Scene::grown(&row, base, size);
+                cut(&mut scene, cut_at);
+                let trunk = wood[wood.len() / 2].at;
+                assert_eq!(
+                    felling(&table, &scene, size, trunk),
+                    None,
+                    "{name} {size}: the trunk stands"
+                );
+                let beyond = limb.last().unwrap().at;
+                if let Some(fell) = felling(&table, &scene, size, beyond) {
+                    assert!(!fell.cells.contains(&base), "{name} {size}: the foot falls");
+                    assert!(
+                        !fell.cells.contains(&trunk),
+                        "{name} {size}: the trunk falls"
+                    );
+                    assert!(fell.cells.contains(&beyond), "{name} {size}: the tip stays");
+                }
+            }
+        }
     }
 
     const VINE: MaterialId = 40;

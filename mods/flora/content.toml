@@ -922,6 +922,7 @@ trunk-height-m = [4.0, 6.0]
 canopy-radius-m = 2.5
 mean-seconds = 90.0
 sapling-yield = [1, 2]
+branching = { limbs = [3, 4], start = 0.25, reach-m = 3.5, rise = 0.3, fork = 0.3, lean-m = 0.0, lobe-radius-m = 1.5 }
 
 [plants.needs]
 soil = ["#soil"]
@@ -956,6 +957,7 @@ trunk-height-m = [5.0, 7.5]
 canopy-radius-m = 1.5
 mean-seconds = 80.0
 sapling-yield = [1, 2]
+branching = { limbs = [2, 3], start = 0.5, reach-m = 2.0, rise = 0.6, lean-m = 1.0, lobe-radius-m = 0.9 }
 
 [plants.needs]
 soil = ["#soil"]
@@ -990,6 +992,7 @@ trunk-height-m = [7.0, 10.0]
 canopy-radius-m = 1.2
 mean-seconds = 110.0
 sapling-yield = [1, 2]
+branching = { limbs = [3, 5], start = 0.25, reach-m = 3.0, rise = -0.5, lean-m = 0.0, tiers = true, lobe-radius-m = 0.9 }
 
 [plants.needs]
 soil = ["#soil"]
@@ -1025,6 +1028,7 @@ canopy-radius-m = 1.8
 mean-seconds = 100.0
 sapling-yield = [1, 2]
 fruit = { stages = [{ material = "flora:coconut_unripe", mean-seconds = 40.0 }, { material = "flora:coconut_ripe", yields = [{ item = "flora:coconut", count = [1, 2] }] }], density = 0.08, harvest-to = 0, shape = "flora:coconut" }
+branching = { limbs = [0, 0], start = 0.0, reach-m = 0.0, rise = 0.0, lean-m = 2.0, lobe-radius-m = 1.0 }
 
 [plants.needs]
 soil = ["#soil", "#sand"]
@@ -1059,6 +1063,7 @@ trunk-height-m = [3.5, 5.5]
 canopy-radius-m = 3.5
 mean-seconds = 100.0
 sapling-yield = [1, 2]
+branching = { limbs = [0, 0], start = 0.0, reach-m = 3.0, rise = 0.0, fork = 0.25, lean-m = 0.5, lobe-radius-m = 2.0 }
 
 [plants.needs]
 soil = ["#soil", "#sand"]
@@ -1095,6 +1100,7 @@ canopy-radius-m = 5.0
 mean-seconds = 140.0
 sapling-yield = [1, 2]
 vines = { plant = "flora:vine", density = 0.12, length-m = 6.0 }
+branching = { limbs = [3, 4], start = 0.55, reach-m = 4.5, rise = 0.2, lean-m = 0.0, lobe-radius-m = 1.8 }
 
 [plants.needs]
 soil = ["#soil"]
@@ -1131,6 +1137,7 @@ canopy-radius-m = 3.5
 mean-seconds = 110.0
 sapling-yield = [1, 2]
 vines = { plant = "flora:vine", density = 0.2, length-m = 4.0 }
+branching = { limbs = [3, 4], start = 0.3, reach-m = 3.5, rise = -0.3, lean-m = 1.0, lobe-radius-m = 1.5 }
 
 [plants.needs]
 soil = ["#soil"]
@@ -1167,6 +1174,7 @@ canopy-radius-m = 2.5
 mean-seconds = 90.0
 sapling-yield = [1, 2]
 fruit = { stages = [{ material = "flora:apple_unripe", mean-seconds = 40.0 }, { material = "flora:apple_ripe", yields = [{ item = "flora:apple", count = [1, 2] }] }], density = 0.12, harvest-to = 0, shape = "flora:apple" }
+branching = { limbs = [3, 4], start = 0.3, reach-m = 2.5, rise = 0.2, lean-m = 0.0, lobe-radius-m = 1.2 }
 
 [plants.needs]
 soil = ["#soil"]
@@ -1201,6 +1209,7 @@ canopy-radius-m = 2.2
 mean-seconds = 90.0
 sapling-yield = [1, 2]
 fruit = { stages = [{ material = "flora:orange_unripe", mean-seconds = 40.0 }, { material = "flora:orange_ripe", yields = [{ item = "flora:orange", count = [1, 2] }] }], density = 0.12, harvest-to = 0, shape = "flora:orange" }
+branching = { limbs = [3, 4], start = 0.3, reach-m = 2.0, rise = 0.2, lean-m = 0.0, lobe-radius-m = 1.1 }
 
 [plants.needs]
 soil = ["#soil"]
@@ -1236,6 +1245,7 @@ canopy-radius-m = 2.5
 mean-seconds = 90.0
 sapling-yield = [1, 2]
 fruit = { stages = [{ material = "flora:cherry_unripe", mean-seconds = 40.0 }, { material = "flora:cherry_ripe", yields = [{ item = "flora:cherries", count = [1, 2] }] }], density = 0.14, harvest-to = 0, shape = "flora:cherry" }
+branching = { limbs = [3, 4], start = 0.3, reach-m = 2.5, rise = 0.2, lean-m = 0.0, lobe-radius-m = 1.2 }
 
 [plants.needs]
 soil = ["#soil"]
