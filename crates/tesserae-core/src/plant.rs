@@ -242,6 +242,138 @@ impl PlantTable {
         }
     }
 
+    /// What Use on a plant Voxel of `material` does, if it is a crop Stage with a
+    /// `harvest-to` or a tree's fruit Stage.
+    pub fn harvest(&self, material: MaterialId) -> Option<Harvest<'_>> {
+        let PlantRef { plant, role } = self.of(material)?;
+        match (&self.plants.get(plant)?.kind, role) {
+            (
+                Kind::Crop {
+                    stages,
+                    harvest_to: Some(to),
+                },
+                Role::Stage(n),
+            ) => Some(Harvest {
+                to: stages[*to].material,
+                ripe: n + 1 == stages.len(),
+                yields: &stages[n].yields,
+            }),
+            (
+                Kind::Tree(Tree {
+                    fruit: Some(fruit), ..
+                }),
+                Role::Fruit(n),
+            ) => Some(Harvest {
+                to: fruit.stages[fruit.harvest_to].material,
+                ripe: n + 1 == fruit.stages.len(),
+                yields: &fruit.stages[n].yields,
+            }),
+            _ => None,
+        }
+    }
+
+    /// What removing a Voxel of `material` drops, or nothing.
+    pub fn yields(&self, material: MaterialId) -> &[Yield] {
+        let Some(PlantRef { plant, role }) = self.of(material) else {
+            return &[];
+        };
+        let Some(plant) = self.plants.get(plant) else {
+            return &[];
+        };
+        match (&plant.kind, role) {
+            (Kind::Crop { stages, .. }, Role::Stage(n)) => &stages[n].yields,
+            (Kind::Tree(_), Role::Sapling) => &plant.sapling_yields,
+            (Kind::Tree(tree), Role::Trunk) => &tree.trunk_yield,
+            (Kind::Tree(tree), Role::Canopy) => &tree.canopy_yield,
+            (
+                Kind::Tree(Tree {
+                    fruit: Some(fruit), ..
+                }),
+                Role::Fruit(n),
+            ) => &fruit.stages[n].yields,
+            (Kind::Column { yields, .. }, _)
+            | (Kind::Spreader { yields, .. }, _)
+            | (Kind::Climber { yields, .. }, _) => yields,
+            _ => &[],
+        }
+    }
+
+    /// The canopy a removed fruit Voxel leaves in its place.
+    pub fn canopy_of_fruit(&self, material: MaterialId) -> Option<MaterialId> {
+        let PlantRef { plant, role } = self.of(material)?;
+        match (&self.plants.get(plant)?.kind, role) {
+            (Kind::Tree(tree), Role::Fruit(_)) => Some(tree.canopy),
+            _ => None,
+        }
+    }
+
+    /// The first Stage of the chain `material` is in, so undo and redo read
+    /// every Stage of one crop, or of one tree's fruit, as the same Voxel. A
+    /// tree's trunk is not in its sapling's chain.
+    pub fn canonical(&self, material: MaterialId) -> MaterialId {
+        let Some(PlantRef { plant, role }) = self.of(material) else {
+            return material;
+        };
+        match (self.plants.get(plant).map(|p| &p.kind), role) {
+            (Some(Kind::Crop { stages, .. }), Role::Stage(_)) => stages[0].material,
+            (
+                Some(Kind::Tree(Tree {
+                    fruit: Some(fruit), ..
+                })),
+                Role::Fruit(_),
+            ) => fruit.stages[0].material,
+            _ => material,
+        }
+    }
+
+    /// The Plant whose soil rule a Voxel of `material` at `at` fails, or `None`
+    /// when it holds, needs none, or rests on terrain `occupants` does not know:
+    /// an unheld Chunk is never read as Air.
+    ///
+    /// A crop, sapling or spreader needs soil in the Voxel below, a downward
+    /// column in the Voxel above, and a column also stands on its own Material
+    /// across that face. A climber needs soil in any one of its six
+    /// neighbours. Light, Climate and water are growth needs, never this.
+    pub fn lacks_soil(
+        &self,
+        material: MaterialId,
+        at: [i32; 3],
+        occupants: &dyn Fn([i32; 3]) -> Option<Occupants>,
+    ) -> Option<&Plant> {
+        let PlantRef { plant, role } = self.of(material)?;
+        let plant = self.plants.get(plant)?;
+        let soil = &plant.needs.soil;
+        let on = |cell: [i32; 3], own: bool| {
+            occupants(cell).map(|o| {
+                let m = o.solid.material();
+                soil.contains(&m) || (own && m == material)
+            })
+        };
+        let held = match (&plant.kind, role) {
+            (_, Role::Trunk | Role::Canopy | Role::Fruit(_)) => return None,
+            (Kind::Climber { .. }, _) => {
+                let sides = FACES.map(|d| on([at[0] + d[0], at[1] + d[1], at[2] + d[2]], false));
+                if sides.contains(&Some(true)) {
+                    Some(true)
+                } else if sides.contains(&None) {
+                    None
+                } else {
+                    Some(false)
+                }
+            }
+            (
+                Kind::Column {
+                    direction: Direction::Down,
+                    ..
+                },
+                _,
+            ) => on([at[0], at[1] + 1, at[2]], true),
+            (Kind::Column { .. }, _) => on([at[0], at[1] - 1, at[2]], true),
+            _ => on([at[0], at[1] - 1, at[2]], false),
+        };
+        (held == Some(false)).then_some(plant)
+    }
+
     /// Registers a Plant, checking every rule that needs no name lookup.
     pub fn push(&mut self, plant: Plant) -> Result<(), PlantError> {
         check(&plant)?;
@@ -288,6 +420,48 @@ impl PlantTable {
         self.plants.push(plant);
         Ok(())
     }
+}
+
+const FACES: [[i32; 3]; 6] = [
+    [1, 0, 0],
+    [-1, 0, 0],
+    [0, 1, 0],
+    [0, -1, 0],
+    [0, 0, 1],
+    [0, 0, -1],
+];
+
+/// What Use does to a ripening Voxel: where it resets, whether it is ripe, and
+/// what the pick gives.
+#[derive(Clone, Copy, Debug)]
+pub struct Harvest<'a> {
+    pub to: MaterialId,
+    pub ripe: bool,
+    pub yields: &'a [Yield],
+}
+
+/// How many of a yield one Voxel gives: a hash of the World seed, the Voxel's
+/// position, its Material (the Stage) and the yield's place in the list, so a
+/// drop never advances a generator and a replay agrees.
+pub fn drop_count(
+    seed: u64,
+    at: [i32; 3],
+    material: MaterialId,
+    slot: usize,
+    count: CountRange,
+) -> u32 {
+    let h = [
+        at[0] as u32 as u64,
+        at[1] as u32 as u64,
+        at[2] as u32 as u64,
+        u64::from(material),
+        slot as u64,
+    ]
+    .into_iter()
+    .fold(mix(seed ^ 0x6a09_e667_f3bc_c908), |h, v| {
+        mix(h ^ v.wrapping_mul(0x9e37_79b9_7f4a_7c15))
+    });
+    count.min + (h % (u64::from(count.max) - u64::from(count.min) + 1)) as u32
 }
 
 fn check(plant: &Plant) -> Result<(), PlantError> {
@@ -617,6 +791,173 @@ mod tests {
             kind: Kind::Crop { stages, harvest_to },
             sapling_yields: Vec::new(),
         }
+    }
+
+    fn solid_at(cells: &[([i32; 3], MaterialId)]) -> impl Fn([i32; 3]) -> Option<Occupants> {
+        let cells = cells.to_vec();
+        move |at| {
+            Some(Occupants {
+                solid: cells
+                    .iter()
+                    .find(|(c, _)| *c == at)
+                    .map_or(crate::voxel::Voxel::AIR, |&(_, m)| {
+                        crate::voxel::Voxel::cube(m)
+                    }),
+                fluid: None,
+                burning: None,
+            })
+        }
+    }
+
+    fn one(kind: Kind, first: MaterialId) -> PlantTable {
+        let mut table = PlantTable::default();
+        table
+            .push(Plant {
+                name: "p".into(),
+                seed: "t:seed".into(),
+                first,
+                needs: Needs {
+                    soil: vec![1],
+                    light_max: 15,
+                    ..Needs::default()
+                },
+                kind,
+                sapling_yields: Vec::new(),
+            })
+            .unwrap();
+        table
+    }
+
+    #[test]
+    fn a_crop_needs_soil_below_and_an_unheld_voxel_is_never_read_as_air() {
+        let table = one(
+            Kind::Crop {
+                stages: vec![stage(10, Some(60.0)), stage(11, None)],
+                harvest_to: None,
+            },
+            10,
+        );
+        let at = [4, 4, 4];
+        assert!(table.lacks_soil(10, at, &solid_at(&[])).is_some());
+        assert!(
+            table
+                .lacks_soil(11, at, &solid_at(&[([4, 3, 4], 2)]))
+                .is_some()
+        );
+        assert!(
+            table
+                .lacks_soil(10, at, &solid_at(&[([4, 3, 4], 1)]))
+                .is_none()
+        );
+        assert!(table.lacks_soil(10, at, &|_| None).is_none());
+        assert!(
+            table.lacks_soil(1, at, &solid_at(&[])).is_none(),
+            "no plant"
+        );
+    }
+
+    #[test]
+    fn a_column_stands_on_soil_or_itself_and_a_downward_one_hangs_from_above() {
+        let up = |direction| {
+            one(
+                Kind::Column {
+                    max_height_m: 4.0,
+                    direction,
+                    mean_seconds: 60.0,
+                    yields: Vec::new(),
+                },
+                10,
+            )
+        };
+        let table = up(Direction::Up);
+        let at = [4, 4, 4];
+        assert!(
+            table
+                .lacks_soil(10, at, &solid_at(&[([4, 3, 4], 10)]))
+                .is_none()
+        );
+        assert!(
+            table
+                .lacks_soil(10, at, &solid_at(&[([4, 5, 4], 1)]))
+                .is_some()
+        );
+        let table = up(Direction::Down);
+        assert!(
+            table
+                .lacks_soil(10, at, &solid_at(&[([4, 5, 4], 1)]))
+                .is_none()
+        );
+        assert!(
+            table
+                .lacks_soil(10, at, &solid_at(&[([4, 3, 4], 1)]))
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn a_climber_needs_soil_in_any_one_neighbour() {
+        let table = one(
+            Kind::Climber {
+                mean_seconds: 60.0,
+                length_m: 4.0,
+                yields: Vec::new(),
+            },
+            10,
+        );
+        let at = [4, 4, 4];
+        for side in FACES {
+            let cell = [at[0] + side[0], at[1] + side[1], at[2] + side[2]];
+            assert!(table.lacks_soil(10, at, &solid_at(&[(cell, 1)])).is_none());
+        }
+        assert!(
+            table
+                .lacks_soil(10, at, &solid_at(&[([4, 3, 4], 2)]))
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn a_drop_count_is_a_stable_hash_inside_its_range() {
+        let range = CountRange { min: 2, max: 5 };
+        let at = [3, -7, 11];
+        let first = drop_count(9, at, 12, 0, range);
+        assert_eq!(first, drop_count(9, at, 12, 0, range));
+        assert!((2..=5).contains(&first));
+        let seen: std::collections::HashSet<_> = (0..64)
+            .map(|x| drop_count(9, [x, 0, 0], 12, 0, range))
+            .collect();
+        assert!(seen.iter().all(|c| (2..=5).contains(c)));
+        assert!(seen.len() > 1, "varies with the position");
+        assert_eq!(drop_count(9, at, 12, 0, CountRange { min: 3, max: 3 }), 3);
+    }
+
+    #[test]
+    fn harvest_and_yields_follow_the_stage() {
+        let mut table = PlantTable::default();
+        table
+            .push(crop(
+                vec![
+                    stage(10, Some(60.0)),
+                    stage(11, Some(60.0)),
+                    Stage {
+                        material: 12,
+                        mean_seconds: None,
+                        yields: vec![Yield {
+                            item: "t:wheat".into(),
+                            count: CountRange { min: 1, max: 1 },
+                        }],
+                    },
+                ],
+                Some(1),
+            ))
+            .unwrap();
+        assert!(!table.harvest(11).unwrap().ripe);
+        let ripe = table.harvest(12).unwrap();
+        assert_eq!((ripe.ripe, ripe.to, ripe.yields.len()), (true, 11, 1));
+        assert!(table.harvest(99).is_none());
+        assert_eq!(table.yields(12).len(), 1);
+        assert!(table.yields(10).is_empty());
+        assert_eq!(table.canonical(12), 10);
     }
 
     #[test]

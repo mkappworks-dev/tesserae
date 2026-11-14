@@ -50,6 +50,16 @@ pub(super) enum Cost {
     Paid(String),
     /// Removing dropped one of this Item as this Dropped item.
     Dropped(String, EntityId),
+    /// Removing a plant dropped these stacks, each as its own Dropped item.
+    Yielded(Vec<Drop>),
+}
+
+/// One stack a removal dropped, and the Dropped item it became.
+#[derive(Clone, PartialEq, Debug)]
+pub(super) struct Drop {
+    pub item: String,
+    pub count: u32,
+    pub id: EntityId,
 }
 /// An undo or redo refused because the Player lacks the Items it takes, sent
 /// beside the [`RejectReason::ItemNeeded`] refusal so the Client can name them.
@@ -344,6 +354,47 @@ fn restore(
                     settle.inventory.spend(item, 1).expect("owed and counted");
                 }
             }
+            (Cost::Yielded(drops), true) => {
+                for d in drops.iter() {
+                    let taken = lying(settle.entities, d);
+                    if taken > 0 {
+                        settle.entities.take(d.id, taken);
+                    }
+                    if d.count > taken {
+                        settle
+                            .inventory
+                            .spend(&d.item, d.count - taken)
+                            .expect("owed and counted");
+                    }
+                }
+            }
+            (Cost::Yielded(drops), false) => {
+                let terrain = Terrain {
+                    voxels: &*store,
+                    tables,
+                    voxel_size: settle.voxel_size,
+                };
+                let again: Vec<Drop> = drops
+                    .iter()
+                    .filter_map(|d| {
+                        let at = settle.items.named(&d.item)?;
+                        let id = entities::drop_many(
+                            settle.entities,
+                            &terrain,
+                            settle.items,
+                            entry.at,
+                            at,
+                            d.count,
+                        );
+                        Some(Drop {
+                            id,
+                            item: d.item.clone(),
+                            count: d.count,
+                        })
+                    })
+                    .collect();
+                entry.cost = Cost::Yielded(again);
+            }
             (Cost::Dropped(item, _), false) => {
                 let item = item.clone();
                 if let Some(at) = settle.items.named(&item) {
@@ -385,29 +436,65 @@ fn short_item(
     owed: &BTreeMap<&str, u32>,
     settle: &Settle,
 ) -> Option<HistoryNeedsItems> {
-    let (item, shown) = match (&entry.cost, action) {
-        (Cost::Paid(item), HistoryAction::Redo) => (item, entry.after),
-        (Cost::Dropped(item, id), HistoryAction::Undo) if settle.entities.get(*id).is_none() => {
-            (item, entry.before)
-        }
-        _ => return None,
+    let shown = if action == HistoryAction::Redo {
+        entry.after
+    } else {
+        entry.before
     };
-    let count = *owed.get(item.as_str())?;
-    (settle.inventory.count(item) < count).then(|| HistoryNeedsItems {
-        action,
-        material: material_of(shown),
-        item: item.clone(),
-        count,
-    })
+    takes(entry, action, settle.entities)
+        .into_iter()
+        .find_map(|(item, _)| {
+            let count = *owed.get(item)?;
+            (settle.inventory.count(item) < count).then(|| HistoryNeedsItems {
+                action,
+                material: material_of(shown),
+                item: item.to_owned(),
+                count,
+            })
+        })
+}
+
+/// The Items restoring `entry` takes from the Inventory, by count: a
+/// placement a redo lays again, and the part of a removal's drop an undo finds
+/// gone from the ground.
+fn takes<'a>(
+    entry: &'a Entry,
+    action: HistoryAction,
+    entities: &EntityStore,
+) -> Vec<(&'a str, u32)> {
+    match (&entry.cost, action) {
+        (Cost::Paid(item), HistoryAction::Redo) => vec![(item.as_str(), 1)],
+        (Cost::Dropped(item, id), HistoryAction::Undo) if entities.get(*id).is_none() => {
+            vec![(item.as_str(), 1)]
+        }
+        (Cost::Yielded(drops), HistoryAction::Undo) => drops
+            .iter()
+            .map(|d| (d.item.as_str(), d.count - lying(entities, d)))
+            .filter(|&(_, short)| short > 0)
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// How much of a drop still lies where it fell.
+fn lying(entities: &EntityStore, drop: &Drop) -> u32 {
+    entities
+        .get(drop.id)
+        .map_or(0, |e| e.as_dropped().count.min(drop.count))
 }
 
 /// `occupants` with a Door's open state read as its closed one, so an entry
 /// still matches a Door toggled since it was made (ADR-0023).
 fn as_closed(tables: &tesserae_core::Tables, occupants: Occupants) -> Occupants {
-    Occupants {
-        solid: tables.uses.as_closed(occupants.solid),
-        ..occupants
-    }
+    let solid = tables.uses.as_closed(occupants.solid);
+    // Every Stage of one crop, and of a tree's fruit, is the same Voxel.
+    let first = tables.plants.canonical(solid.material());
+    let solid = if first == solid.material() {
+        solid
+    } else {
+        tesserae_core::Voxel::new(first, solid.shape(), solid.orientation())
+    };
+    Occupants { solid, ..occupants }
 }
 
 /// The Material a Player sees at a position: the solid's, else the fluid's.
@@ -420,8 +507,7 @@ fn material_of(occupants: Occupants) -> MaterialId {
         occupants.solid.material()
     }
 }
-/// The Items restoring `group` takes from the Inventory: each placement a redo
-/// lays again, and each removal an undo puts back whose Dropped item is gone.
+/// The Items restoring `group` takes from the Inventory, in all.
 fn owed<'a>(
     group: &'a [Entry],
     action: HistoryAction,
@@ -429,12 +515,9 @@ fn owed<'a>(
 ) -> BTreeMap<&'a str, u32> {
     let mut owed = BTreeMap::new();
     for entry in group {
-        let item = match (&entry.cost, action) {
-            (Cost::Paid(item), HistoryAction::Redo) => item,
-            (Cost::Dropped(item, id), HistoryAction::Undo) if entities.get(*id).is_none() => item,
-            _ => continue,
-        };
-        *owed.entry(item.as_str()).or_insert(0) += 1;
+        for (item, count) in takes(entry, action, entities) {
+            *owed.entry(item).or_insert(0) += count;
+        }
     }
     owed
 }

@@ -38,6 +38,7 @@ mod lod;
 mod lod_rings;
 pub mod mods;
 pub mod persistence;
+pub mod plants;
 pub mod player;
 mod priority;
 mod sky;
@@ -124,6 +125,7 @@ pub fn plugin(app: &mut App) {
             edit::plugin,
             tool::plugin,
             fluids::plugin,
+            plants::plugin,
             player::plugin,
             sky::plugin,
             soundscape::plugin,

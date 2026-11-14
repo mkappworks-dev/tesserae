@@ -47,11 +47,11 @@ pub(super) fn aim(
     match edit::solid_hit(store, tables, world, ray, eye) {
         Ok((hit, struck)) => {
             let voxel = store.voxel(hit.at)?;
-            Some(Ok(UseTarget {
+            Some(usable(tables, voxel)?.map(|usable| UseTarget {
                 at: hit.at,
                 voxel,
                 corner: struck,
-                usable: Some(usable(tables, voxel)?),
+                usable: Some(usable),
             }))
         }
         Err(RejectReason::OutOfReach) => {
@@ -64,21 +64,32 @@ pub(super) fn aim(
                 direction.to_array(),
                 SIGHT_M,
             )?;
-            usable(tables, store.voxel(hit.at)?)?;
+            usable(tables, store.voxel(hit.at)?)?.ok()?;
             Some(Err(UseRefusal::OutOfReach))
         }
         Err(_) => None,
     }
 }
 
-fn usable(tables: &Tables, voxel: Voxel) -> Option<Usable> {
-    match tables.uses.of(voxel.material())? {
-        (_, VoxelUse::Door { .. }) => Some(Usable::Door {
+/// What Use does to a Voxel with no Tool, if anything: a Usable Voxel's kind,
+/// else a plant's harvest, which is refused while it is unripe. A Usable Voxel
+/// comes first, then Harvest, then eating.
+fn usable(tables: &Tables, voxel: Voxel) -> Option<Result<Usable, UseRefusal>> {
+    let Some((_, kind)) = tables.uses.of(voxel.material()) else {
+        let ripening = tables.plants.harvest(voxel.material())?;
+        return Some(if ripening.ripe {
+            Ok(Usable::Harvest)
+        } else {
+            Err(UseRefusal::NotRipe)
+        });
+    };
+    Some(Ok(match kind {
+        VoxelUse::Door { .. } => Usable::Door {
             open: tables.uses.is_open(voxel.material()),
-        }),
-        (_, &VoxelUse::Container { .. }) => Some(Usable::Container),
-        (_, VoxelUse::Station { .. }) => Some(Usable::Station),
-    }
+        },
+        &VoxelUse::Container { .. } => Usable::Container,
+        VoxelUse::Station { .. } => Usable::Station,
+    }))
 }
 
 /// The cells of the Door a Voxel of it at `at` belongs to, `at` first.

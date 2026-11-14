@@ -104,6 +104,10 @@ const LANDED_PER_STEP: usize = 256;
 /// hundred times an ordinary change, so they have a bound of their own.
 const EMITTERS_PER_STEP: usize = 4;
 
+/// Rounds of breaking plants that lost their support per look at what changed;
+/// a longer chain finishes on the next look.
+const SUPPORT_PASSES: usize = 8;
+
 /// Edited positions a step's landing checks one by one before it treats their
 /// whole Chunks as edited.
 const EDITED_CAP: usize = 4096;
@@ -419,6 +423,11 @@ impl FluidSim {
         &mut self.job
     }
 
+    /// The plant Voxels that broke for want of support since the last call.
+    pub(in crate::server) fn take_broken(&mut self) -> Vec<plants::Broken> {
+        std::mem::take(&mut self.plants.broken)
+    }
+
     fn simulates(&self, at: Cell) -> bool {
         self.simulated.contains_key(&VoxelCoord::of(at).chunk)
     }
@@ -600,7 +609,7 @@ pub(in crate::server) fn simulate(
         sim.resume_ready(&store, &meshes, &tables, &scale.heat, &p.mapping);
     }
     absorb_chunks(sim, &mut store, &meshes, &tables, &scale.heat);
-    absorb_changes(sim, &mut store, &tables.0, &scale.heat);
+    absorb_changes(sim, &mut store, &mut meshes, &tables.0, &scale.heat);
     if store.persistent {
         store.simulation_chunks = sim
             .agenda
@@ -765,27 +774,42 @@ fn evict(sim: &mut FluidSim, store: &ChunkStore, coord: ChunkCoord, fluids: &Flu
 
 /// Wakes the Voxels around every World change since the last look, which the
 /// running step's proposals must also not overwrite.
-fn absorb_changes(sim: &mut FluidSim, store: &mut ChunkStore, tables: &Tables, heat: &HeatScale) {
-    let next = sim.now + 1;
-    let changed = store.take_changed();
-    for at in changed.cells {
-        if sim.edited.len() < EDITED_CAP {
-            sim.edited.insert(at);
-        } else {
-            sim.edited_chunks.insert(VoxelCoord::of(at).chunk);
+fn absorb_changes(
+    sim: &mut FluidSim,
+    store: &mut ChunkStore,
+    meshes: &mut MeshState,
+    tables: &Tables,
+    heat: &HeatScale,
+) {
+    // A broken plant is one more change, which may unsupport what rests on it.
+    for _ in 0..SUPPORT_PASSES {
+        let next = sim.now + 1;
+        let changed = store.take_changed();
+        let cells = (!tables.plants.is_empty()).then(|| changed.cells.clone());
+        for at in changed.cells {
+            if sim.edited.len() < EDITED_CAP {
+                sim.edited.insert(at);
+            } else {
+                sim.edited_chunks.insert(VoxelCoord::of(at).chunk);
+            }
+            sim.wake_around(at, next);
         }
-        sim.wake_around(at, next);
-    }
-    for at in changed.solids {
-        sim.wake_around_solid(store, tables, at, next);
-    }
-    for at in changed.heated {
-        sim.wake_fuel_around(store, tables, heat, at, next);
-    }
-    for chunk in changed.chunks {
-        sim.edited_chunks.insert(chunk);
-        sim.rescan_around(chunk);
-        sim.rescan_fuel_around(store, tables, heat, chunk);
+        for at in changed.solids {
+            sim.wake_around_solid(store, tables, at, next);
+        }
+        for at in changed.heated {
+            sim.wake_fuel_around(store, tables, heat, at, next);
+        }
+        for chunk in changed.chunks {
+            sim.edited_chunks.insert(chunk);
+            sim.rescan_around(chunk);
+            sim.rescan_fuel_around(store, tables, heat, chunk);
+        }
+        let broke = cells
+            .is_some_and(|cells| plants::break_unsupported(sim, store, meshes, tables, &cells));
+        if !broke {
+            break;
+        }
     }
 }
 
@@ -986,30 +1010,40 @@ fn land_step(
         }
     }
     batch.finish(store, meshes, tables);
-    wake_landed(sim, store, tables, heat, next);
+    wake_landed(sim, store, meshes, tables, heat, next);
     sample_plants(sim, store, meshes, tables, heat, env);
     sim.agenda.end_step();
     sim.next_step();
 }
 
-/// Wakes the Voxels around what the step just landed.
+/// Wakes the Voxels around what the step just landed, and breaks plants that
+/// lost their support to it.
 fn wake_landed(
     sim: &mut FluidSim,
     store: &mut ChunkStore,
+    meshes: &mut MeshState,
     tables: &Tables,
     heat: &HeatScale,
     next: Step,
 ) {
-    let changed = store.take_changed();
-    debug_assert!(changed.chunks.is_empty(), "a step outgrew the journal");
-    for at in changed.cells {
-        sim.wake_around(at, next);
-    }
-    for at in changed.solids {
-        sim.wake_around_solid(store, tables, at, next);
-    }
-    for at in changed.heated {
-        sim.wake_fuel_around(store, tables, heat, at, next);
+    for _ in 0..SUPPORT_PASSES {
+        let changed = store.take_changed();
+        debug_assert!(changed.chunks.is_empty(), "a step outgrew the journal");
+        let cells = (!tables.plants.is_empty()).then(|| changed.cells.clone());
+        for at in changed.cells {
+            sim.wake_around(at, next);
+        }
+        for at in changed.solids {
+            sim.wake_around_solid(store, tables, at, next);
+        }
+        for at in changed.heated {
+            sim.wake_fuel_around(store, tables, heat, at, next);
+        }
+        let broke = cells
+            .is_some_and(|cells| plants::break_unsupported(sim, store, meshes, tables, &cells));
+        if !broke {
+            break;
+        }
     }
 }
 
@@ -1024,7 +1058,7 @@ fn sample_plants(
     env: &plants::Env,
 ) {
     plants::sample_step(sim, store, meshes, tables, env, sim.now);
-    wake_landed(sim, store, tables, heat, sim.now + 1);
+    wake_landed(sim, store, meshes, tables, heat, sim.now + 1);
 }
 
 /// The store as the simulation reads it: Chunks it has not admitted are

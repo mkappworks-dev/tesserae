@@ -1,6 +1,6 @@
 # 05: Seeds, harvest and undo
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 04
 
@@ -29,3 +29,19 @@ redo treat all Stages of one crop as the same Voxel.
 - [ ] Undo of a Seed placement and of a removal still applies after the crop
       advanced a Stage; redo likewise, with Items paid and refunded.
 - [ ] A drop that does not fit the Inventory drops at the Player.
+
+## Comments
+
+- A removal's drops ride the entry as `Cost::Yielded(Vec<Drop>)` (item, count,
+  Dropped item id). Undo takes back what still lies there and spends the rest
+  from the Inventory, refusing whole without it; redo drops again. A plant
+  Material that declares yields drops those and nothing else; one that declares
+  none drops the Item that places it (a Seed at Stage 0), as before.
+- `UseResult::Harvest` plays the existing `use-measured` Cause (the "Use
+  answered" Sound); an unripe Voxel refuses as `UseRefusal::NotRipe`, which
+  also stops Use falling through to eat.
+- A picked or removed fruit leaves its tree's canopy; its undo entry restores
+  the fruit Stage.
+- A harvest's yield goes into the Inventory and what does not fit drops at the
+  Player; a Remove's drops pop out of the Voxel as any removal's do.
+

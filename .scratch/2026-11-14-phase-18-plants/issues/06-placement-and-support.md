@@ -24,3 +24,25 @@ path.
 - [ ] Removing, replacing or burning the soil breaks the plant in that step and
       drops its Seed; a plant on a Mod Command's new soil is unaffected.
 - [ ] No per-tick scan of plants appears in a profile of an idle World.
+
+## Comments
+
+Left `ready-for-agent`: burning the soil is not tested (it lands through the
+same `Batch::set_occupants`, so the same wake applies), and "no per-tick scan in
+a profile of an idle World" holds by construction and by a test that an
+untouched unsupported plant stays, but no profile was taken.
+
+- Support is read from `store.take_changed()` in `absorb_changes` and
+  `wake_landed` (`fluids.rs`), through `fluids/plants.rs::break_unsupported`:
+  each changed cell and its six neighbours, so a World with no change reads
+  nothing. A broken plant is one more change, so a chain settles within
+  `SUPPORT_PASSES`.
+- The rule is `PlantTable::lacks_soil`: soil in the Voxel below (above for a
+  downward column, which may also stand on its own Material across that face);
+  a climber needs soil in any one of its six neighbours. Standing in a fluid is
+  not a placement or support rule: the row has no field to tell kelp from cane,
+  whose `water` is a growth reach, so a column stands on soil like the rest.
+- The refusal is `RejectReason::NeedsSoil` plus a `PlantNeedsSoil { text }`
+  message ("Wheat needs soil."), as `HistoryNeedsItems` rides beside
+  `ItemNeeded`; the soil is named by its Item.
+

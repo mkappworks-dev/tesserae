@@ -58,9 +58,13 @@ pub struct UseTarget {
 /// A Usable Voxel as the prompt names it.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Usable {
-    Door { open: bool },
+    Door {
+        open: bool,
+    },
     Container,
     Station,
+    /// A ripe crop or fruit that Use picks.
+    Harvest,
 }
 
 impl Usable {
@@ -71,6 +75,7 @@ impl Usable {
             Usable::Door { open: true } => "Close".into(),
             Usable::Container => format!("Open {name}"),
             Usable::Station => format!("Use {name}"),
+            Usable::Harvest => "Harvest".into(),
         }
     }
 }
@@ -108,6 +113,8 @@ pub enum UseResult {
     Container([i32; 3]),
     /// A Station session opened; see `station.rs`.
     Station,
+    /// A ripe crop or fruit picked and reset; see `plants.rs`.
+    Harvest,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -125,6 +132,8 @@ pub enum UseRefusal {
     NotHungry,
     /// Eating with no food in the selected slot.
     NotFood,
+    /// Harvesting what is not ripe yet.
+    NotRipe,
     /// Closing a Door into the Player's body.
     InsidePlayer,
     /// The Voxel's Chunk is still being lit.
@@ -142,6 +151,7 @@ impl UseRefusal {
             UseRefusal::UnknownTool => "That Tool is not available.",
             UseRefusal::NotHungry => "You aren’t hungry.",
             UseRefusal::NotFood => "Hold food in the selected hotbar slot to eat.",
+            UseRefusal::NotRipe => "It is not ripe yet.",
             UseRefusal::InsidePlayer => RejectReason::InsidePlayer.message(),
             UseRefusal::Busy => RejectReason::Busy.message(),
         }
@@ -180,6 +190,23 @@ pub(super) fn plugin(app: &mut App) {
         );
 }
 
+/// The Player and what a Use can hand them or spill.
+#[derive(bevy::ecs::system::SystemParam)]
+pub(super) struct Hand<'w, 's> {
+    player: Single<
+        'w,
+        's,
+        (
+            Entity,
+            &'static Player,
+            &'static mut super::inventory::Inventory,
+        ),
+    >,
+    status: Option<Res<'w, super::persistence::SaveStatus>>,
+    items: Res<'w, super::items::Items>,
+    entities: ResMut<'w, super::entities::EntityStore>,
+}
+
 pub(super) fn answer_use(
     mut intents: MessageReader<UseIntent>,
     (mut outcomes, mut eat): (MessageWriter<UseOutcome>, MessageWriter<EatIntent>),
@@ -189,17 +216,20 @@ pub(super) fn answer_use(
         ResMut<EditHistory>,
     ),
     (tables, world, tools): (Res<ContentTables>, Res<WorldSettings>, Res<Tools>),
-    (player, status): (
-        Single<(Entity, &Player)>,
-        Option<Res<super::persistence::SaveStatus>>,
-    ),
+    hand: Hand,
     (mut commands, mut opened): (Commands, MessageWriter<super::station::StationOpened>),
     (mut containers, mut audio): (
         Option<ResMut<super::container::Containers>>,
         super::sound::Emitter,
     ),
 ) {
-    let (entity, player) = player.into_inner();
+    let Hand {
+        player,
+        status,
+        items,
+        mut entities,
+    } = hand;
+    let (entity, player, mut inventory) = player.into_inner();
     let playing = super::persistence::playing(status);
     for intent in intents.read() {
         let ray = (intent.origin, intent.direction);
@@ -242,6 +272,15 @@ pub(super) fn answer_use(
                                 audio.emit_at(Cause::ContainerOpen, aimed.at);
                                 Ok(UseResult::Container(aimed.at))
                             }
+                            Some(Usable::Harvest) => super::plants::harvest(
+                                (&mut store, &mut meshes),
+                                &tables,
+                                &world,
+                                &mut history,
+                                (&items, &mut entities, &mut inventory),
+                                player.body(),
+                                aimed.at,
+                            ),
                             _ => {
                                 let toggled = super::usable::toggle_door(
                                     (&mut store, &mut meshes),

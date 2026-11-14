@@ -105,12 +105,25 @@ pub(super) fn drop_one(
     at: [i32; 3],
     item: usize,
 ) -> EntityId {
+    drop_many(entities, terrain, items, at, item, 1)
+}
+
+/// Spawns `count` of the Item at `item` as one Dropped item popping out of the
+/// Voxel `at`.
+pub(super) fn drop_many(
+    entities: &mut Entities,
+    terrain: &Terrain<ChunkStore>,
+    items: &Items,
+    at: [i32; 3],
+    item: usize,
+    count: u32,
+) -> EntityId {
     entities.spawn_drop(
         terrain,
         at,
         DropSpec {
             item: item as u32,
-            count: 1,
+            count,
             size_m: items.0[item].size_m,
         },
     )

@@ -6,7 +6,7 @@
 //! the step's own fluid landings, so nothing they read can be stale; only a
 //! change deferred past [`PLANTS_LANDED_PER_STEP`] is read again next step.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use tesserae_core::CHUNK_SIZE;
 use tesserae_core::plant::{PLANTS_LANDED_PER_STEP, Surroundings, grow, samples};
@@ -36,9 +36,20 @@ struct Pending {
     roll: f32,
 }
 
+/// A plant Voxel that lost its support and broke, for the Server to drop its
+/// Seed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::server) struct Broken {
+    pub at: Cell,
+    pub material: MaterialId,
+}
+
 pub(super) struct PlantSim {
     landed_per_step: usize,
     deferred: BTreeMap<Cell, Pending>,
+    /// Voxels whose support is to be read again once their Chunk is lit.
+    recheck: BTreeSet<Cell>,
+    pub broken: Vec<Broken>,
     pub landed: usize,
     /// Changes past the landing bound, evaluated again next step.
     pub late: usize,
@@ -52,6 +63,8 @@ impl Default for PlantSim {
         PlantSim {
             landed_per_step: PLANTS_LANDED_PER_STEP,
             deferred: BTreeMap::new(),
+            recheck: BTreeSet::new(),
+            broken: Vec::new(),
             landed: 0,
             late: 0,
             stale: 0,
@@ -143,7 +156,7 @@ pub(super) fn sample_step(
                 grown.insert(at, (Pending { from, roll: p.roll }, next));
             }
         }
-        for (&chunk, _) in &sim.simulated {
+        for &chunk in sim.simulated.keys() {
             if meshes.is_unlit(chunk) {
                 continue;
             }
@@ -198,6 +211,70 @@ pub(super) fn sample_step(
         }
     }
     batch.finish(store, meshes, tables);
+}
+
+const FACES: [[i32; 3]; 6] = [
+    [1, 0, 0],
+    [-1, 0, 0],
+    [0, 1, 0],
+    [0, -1, 0],
+    [0, 0, 1],
+    [0, 0, -1],
+];
+
+/// Reads the support of every plant Voxel on or beside a changed cell and
+/// breaks the ones whose soil or attachment is gone, in the step that changed
+/// it. Only what changed is read, so a World with no change reads nothing.
+/// Returns whether a Voxel broke: its own change may unsupport another.
+pub(super) fn break_unsupported(
+    sim: &mut FluidSim,
+    store: &mut ChunkStore,
+    meshes: &mut MeshState,
+    tables: &Tables,
+    changed: &[Cell],
+) -> bool {
+    if tables.plants.is_empty() || (changed.is_empty() && sim.plants.recheck.is_empty()) {
+        return false;
+    }
+    let mut candidates = std::mem::take(&mut sim.plants.recheck);
+    for &at in changed {
+        candidates.insert(at);
+        for d in FACES {
+            candidates.insert([at[0] + d[0], at[1] + d[1], at[2] + d[2]]);
+        }
+    }
+    let mut batch = edit::Batch::default();
+    let mut broke = false;
+    for at in candidates {
+        let Some(here) = store.occupants(at, &tables.fluids) else {
+            continue;
+        };
+        let material = here.solid.material();
+        if here.solid.is_air() || tables.plants.of(material).is_none() {
+            continue;
+        }
+        let lacks = {
+            let held = |c: Cell| store.occupants(c, &tables.fluids);
+            tables.plants.lacks_soil(material, at, &held).is_some()
+        };
+        if !lacks {
+            continue;
+        }
+        if meshes.is_unlit(VoxelCoord::of(at).chunk) {
+            sim.plants.recheck.insert(at);
+            continue;
+        }
+        let next = Occupants {
+            solid: Voxel::AIR,
+            ..here
+        };
+        if batch.set_occupants(store, meshes, tables, at, next).is_ok() {
+            sim.plants.broken.push(Broken { at, material });
+            broke = true;
+        }
+    }
+    batch.finish(store, meshes, tables);
+    broke
 }
 
 #[cfg(test)]

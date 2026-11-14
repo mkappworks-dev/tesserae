@@ -1,0 +1,731 @@
+use super::*;
+use bevy::ecs::message::Messages;
+use bevy::ecs::system::RunSystemOnce;
+use tesserae_core::SHAPE_FULL_CUBE;
+use tesserae_core::inventory::{Destination, Slot};
+use tesserae_core::layout::{Dim, LayoutAxis};
+use tesserae_core::plant::{CountRange, Fruit, Kind, Needs, Plant, Stage, Tree, Yield};
+use tesserae_core::{MaterialDef, MaterialId, Occlusion, Orientation, RenderClass};
+use tesserae_mods::{Intent, ItemDef};
+
+use super::super::edit::tests::{
+    app_with_tables, ground, rejections, replay, send, set_eye, survival, tick, voxel_at,
+};
+use super::super::edit::{
+    AimReport, EditAction, EditIntent, LayoutIntent, LayoutParams, RejectReason, send_layout,
+};
+use super::super::inventory::Inventory as InventoryComponent;
+use super::super::items::PlacingItems;
+use super::super::tool::{self, Usable, UseIntent, UseOutcome, UseWith, answer_use};
+use super::super::undo::HistoryAction::{Redo, Undo};
+use super::super::vitals::EatIntent;
+use crate::world::ChunkCoord;
+
+const EYE: Vec3 = Vec3::new(5.5, 12.0, 5.5);
+const CROP: [i32; 3] = [5, 8, 5];
+
+struct Content {
+    tables: Tables,
+    wheat: [MaterialId; 3],
+    bush: [MaterialId; 3],
+    sapling: MaterialId,
+    trunk: MaterialId,
+    canopy: MaterialId,
+    fruit: [MaterialId; 2],
+}
+
+fn soil() -> MaterialId {
+    tesserae_core::testgen::fixtures().ground.soil
+}
+
+fn rock() -> MaterialId {
+    tesserae_core::testgen::fixtures().ground.rock
+}
+
+fn yields(rows: &[(&str, u32, u32)]) -> Vec<Yield> {
+    rows.iter()
+        .map(|&(item, min, max)| Yield {
+            item: item.into(),
+            count: CountRange { min, max },
+        })
+        .collect()
+}
+
+fn stage(material: MaterialId, mean: Option<f32>, rows: &[(&str, u32, u32)]) -> Stage {
+    Stage {
+        material,
+        mean_seconds: mean,
+        yields: yields(rows),
+    }
+}
+
+fn content() -> Content {
+    let mut tables = crate::server::fixture_tables();
+    let def = MaterialDef {
+        emission: 0,
+        dimming: 0,
+        occlusion: Occlusion::Never,
+        render: RenderClass::Cutout,
+        solid: true,
+    };
+    let mut material = || tables.materials.register(def).unwrap();
+    let wheat = [(); 3].map(|_| material());
+    let bush = [(); 3].map(|_| material());
+    let [sapling, trunk, canopy] = [(); 3].map(|_| material());
+    let fruit = [(); 2].map(|_| material());
+    let needs = || Needs {
+        soil: vec![soil()],
+        light_max: 15,
+        ..Needs::default()
+    };
+    let grow = Some(60.0);
+    let plant = |name: &str, seed: &str, first, kind| Plant {
+        name: name.into(),
+        seed: seed.into(),
+        first,
+        needs: needs(),
+        kind,
+        sapling_yields: Vec::new(),
+    };
+    for p in [
+        plant(
+            "t:wheat",
+            "t:seed",
+            wheat[0],
+            Kind::Crop {
+                stages: vec![
+                    stage(wheat[0], grow, &[]),
+                    stage(wheat[1], grow, &[("t:seed", 0, 1)]),
+                    stage(wheat[2], None, &[("t:wheat", 2, 4), ("t:seed", 1, 3)]),
+                ],
+                harvest_to: None,
+            },
+        ),
+        plant(
+            "t:bush",
+            "t:bush_seed",
+            bush[0],
+            Kind::Crop {
+                stages: vec![
+                    stage(bush[0], grow, &[]),
+                    stage(bush[1], grow, &[]),
+                    stage(bush[2], None, &[("t:berry", 2, 2)]),
+                ],
+                harvest_to: Some(1),
+            },
+        ),
+        plant(
+            "t:apple",
+            "t:sapling",
+            sapling,
+            Kind::Tree(Tree {
+                trunk,
+                canopy,
+                trunk_height_m: (2.0, 3.0),
+                canopy_radius_m: 2.0,
+                mean_seconds: 60.0,
+                trunk_yield: Vec::new(),
+                canopy_yield: Vec::new(),
+                sapling_yield: CountRange { min: 1, max: 1 },
+                fruit: Some(Fruit {
+                    stages: vec![
+                        stage(fruit[0], grow, &[]),
+                        stage(fruit[1], None, &[("t:apple", 1, 1)]),
+                    ],
+                    density: 0.1,
+                    harvest_to: 0,
+                }),
+            }),
+        ),
+    ] {
+        tables.plants.push(p).unwrap();
+    }
+    Content {
+        tables,
+        wheat,
+        bush,
+        sapling,
+        trunk,
+        canopy,
+        fruit,
+    }
+}
+
+fn item(name: &str, material: Option<MaterialId>, food: Option<f32>) -> ItemDef {
+    ItemDef {
+        name: name.into(),
+        size_m: 0.25,
+        color: [0; 4],
+        material,
+        max_stack: 64,
+        food,
+    }
+}
+
+/// Soil at (5, 7, 5) and (6, 7, 5) in rock, with the Player holding three each of
+/// the Seeds in hotbar slots 0 to 2 and the wheat Seed selected.
+fn farm() -> (App, Content) {
+    bevy::tasks::AsyncComputeTaskPool::get_or_init(|| {
+        bevy::tasks::TaskPoolBuilder::new().num_threads(2).build()
+    });
+    let c = content();
+    let mut chunk = ground();
+    for x in [5, 6] {
+        chunk.set(x, 7, 5, Voxel::cube(soil()));
+    }
+    let mut app = app_with_tables(&[(ChunkCoord::new(0, 0, 0), chunk)], c.tables.clone());
+    let items = Items::with_implicit(
+        vec![
+            item("t:seed", Some(c.wheat[0]), None),
+            item("t:bush_seed", Some(c.bush[0]), None),
+            item("t:sapling", Some(c.sapling), None),
+            item("t:wheat", None, None),
+            item("t:berry", None, Some(2.0)),
+            item("t:apple", None, Some(2.0)),
+            item("t:junk", None, None),
+        ],
+        [(rock(), "t:stone", [0; 4]), (soil(), "t:soil", [0; 4])],
+        1.0,
+    );
+    let placeable = |id, name, yes| (id, name, yes);
+    app.insert_resource(PlacingItems::new(
+        [
+            placeable(rock(), "t:stone", true),
+            placeable(soil(), "t:soil", true),
+            placeable(c.wheat[0], "t:wheat_0", true),
+            placeable(c.wheat[1], "t:wheat_1", false),
+            placeable(c.wheat[2], "t:wheat_2", false),
+            placeable(c.bush[0], "t:bush_0", true),
+            placeable(c.sapling, "t:sapling_m", true),
+            placeable(c.fruit[0], "t:fruit_0", false),
+        ],
+        &items,
+    ))
+    .insert_resource(items)
+    .init_resource::<FluidSim>()
+    .add_plugins(tool::plugin)
+    .add_plugins(plugin);
+    let mut inventory = tesserae_core::inventory::Inventory::default();
+    for (at, name) in ["t:seed", "t:bush_seed", "t:sapling"]
+        .into_iter()
+        .enumerate()
+    {
+        inventory
+            .take(name, 3, Destination::Slot(Slot::Hotbar(at)), |_| 64)
+            .unwrap();
+    }
+    inventory.select(0).unwrap();
+    app.world_mut()
+        .query::<&mut InventoryComponent>()
+        .single_mut(app.world_mut())
+        .unwrap()
+        .0 = inventory;
+    (app, c)
+}
+
+fn inventory<R>(app: &mut App, f: impl FnOnce(&mut tesserae_core::inventory::Inventory) -> R) -> R {
+    let mut q = app.world_mut().query::<&mut InventoryComponent>();
+    f(&mut q.single_mut(app.world_mut()).unwrap().0)
+}
+
+fn count(app: &mut App, item: &str) -> u32 {
+    inventory(app, |i| i.count(item))
+}
+
+fn set(app: &mut App, at: [i32; 3], voxel: Voxel) {
+    app.world_mut()
+        .run_system_once(
+            move |mut store: ResMut<ChunkStore>,
+                  mut meshes: ResMut<MeshState>,
+                  tables: Res<ContentTables>| {
+                edit::set_voxel(&mut store, &mut meshes, &tables, at, voxel).unwrap();
+            },
+        )
+        .unwrap();
+}
+
+/// A Mod's Command, through the one World change.
+fn command(app: &mut App, at: [i32; 3], voxel: Voxel) {
+    app.world_mut()
+        .run_system_once(
+            move |mut store: ResMut<ChunkStore>,
+                  mut meshes: ResMut<MeshState>,
+                  tables: Res<ContentTables>| {
+                edit::apply_intent(&mut store, &mut meshes, &tables, at, Intent::Voxel(voxel))
+                    .unwrap();
+            },
+        )
+        .unwrap();
+}
+
+/// One Logical step's look at what changed, and the Seeds that dropped.
+fn settle(app: &mut App) {
+    app.world_mut()
+        .run_system_once(crate::server::fluids::simulate)
+        .unwrap();
+    app.world_mut().run_system_once(drop_seeds).unwrap();
+}
+
+/// The Dropped items lying in the World, by Item name, sorted.
+fn lying(app: &mut App) -> Vec<(String, u32)> {
+    let items = app.world().resource::<Items>().0.clone();
+    let mut all: Vec<_> = app
+        .world()
+        .resource::<EntityStore>()
+        .iter()
+        .map(|e| {
+            let d = e.as_dropped();
+            (items[d.item as usize].name.clone(), d.count)
+        })
+        .collect();
+    all.sort();
+    all
+}
+
+fn plant_at(x: i32, z: i32) -> EditIntent {
+    EditIntent {
+        action: EditAction::PlaceHeld {
+            shape: SHAPE_FULL_CUBE,
+            orientation: Orientation::IDENTITY,
+        },
+        origin: Vec3::new(x as f32 + 0.5, 12.0, z as f32 + 0.5),
+        direction: Vec3::NEG_Y,
+    }
+}
+
+fn remove_crop() -> EditIntent {
+    EditIntent {
+        action: EditAction::Remove,
+        origin: EYE,
+        direction: Vec3::NEG_Y,
+    }
+}
+
+fn use_down(app: &mut App) -> Vec<UseOutcome> {
+    set_eye(app, EYE);
+    app.world_mut().write_message(UseIntent {
+        with: UseWith::Hand { eat: true },
+        origin: EYE,
+        direction: Vec3::NEG_Y,
+        expected: None,
+    });
+    app.world_mut().run_system_once(answer_use).unwrap();
+    app.world_mut()
+        .resource_mut::<Messages<UseIntent>>()
+        .clear();
+    app.world_mut()
+        .resource_mut::<Messages<UseOutcome>>()
+        .drain()
+        .collect()
+}
+
+fn eaten(app: &mut App) -> usize {
+    app.world_mut()
+        .resource_mut::<Messages<EatIntent>>()
+        .drain()
+        .count()
+}
+
+fn journal_is_empty(app: &App) -> bool {
+    app.world()
+        .resource::<super::super::undo::Journal>()
+        .is_empty()
+}
+
+fn needs_text(app: &mut App) -> Vec<String> {
+    app.world_mut()
+        .resource_mut::<Messages<PlantNeedsSoil>>()
+        .drain()
+        .map(|m| m.text)
+        .collect()
+}
+
+#[test]
+fn a_seed_places_its_first_stage_and_is_spent_in_both_modes() {
+    for survival_mode in [false, true] {
+        let (mut app, c) = farm();
+        if survival_mode {
+            survival(&mut app);
+        }
+        send(&mut app, plant_at(5, 5));
+        tick(&mut app);
+        assert!(rejections(&mut app).is_empty());
+        assert_eq!(voxel_at(&app, CROP), Voxel::cube(c.wheat[0]));
+        assert_eq!(count(&mut app, "t:seed"), 2, "survival: {survival_mode}");
+    }
+}
+
+#[test]
+fn a_later_stage_is_no_item_and_not_in_the_catalogue() {
+    let (app, c) = farm();
+    let placing = app.world().resource::<PlacingItems>();
+    for later in [c.wheat[1], c.wheat[2], c.fruit[0], c.trunk, c.canopy] {
+        assert_eq!(placing.item(later), None);
+    }
+    assert_eq!(placing.item(c.wheat[0]), Some("t:seed"));
+    assert_eq!(placing.material("t:wheat"), None);
+}
+
+#[test]
+fn removing_each_stage_drops_its_yield_the_same_in_both_modes() {
+    let mut by_mode = Vec::new();
+    for survival_mode in [false, true] {
+        let mut per_stage = Vec::new();
+        for n in 0..3 {
+            let (mut app, c) = farm();
+            if survival_mode {
+                survival(&mut app);
+            }
+            set(&mut app, CROP, Voxel::cube(c.wheat[n]));
+            send(&mut app, remove_crop());
+            tick(&mut app);
+            assert!(rejections(&mut app).is_empty());
+            assert!(voxel_at(&app, CROP).is_air());
+            per_stage.push(lying(&mut app));
+        }
+        by_mode.push(per_stage);
+    }
+    assert_eq!(by_mode[0], by_mode[1], "Creative drops what Survival does");
+    let [young, mid, ripe] = &by_mode[0][..] else {
+        unreachable!()
+    };
+    assert_eq!(young, &[("t:seed".to_owned(), 1)], "no yield: its Seed");
+    assert!(mid.iter().all(|(n, c)| n == "t:seed" && *c <= 1));
+    let of = |name: &str| ripe.iter().find(|(n, _)| n == name).map(|(_, c)| *c);
+    assert!((2..=4).contains(&of("t:wheat").unwrap()));
+    assert!((1..=3).contains(&of("t:seed").unwrap()));
+}
+
+#[test]
+fn undo_of_a_seed_placement_and_redo_hold_after_the_crop_grew() {
+    let (mut app, c) = farm();
+    survival(&mut app);
+    send(&mut app, plant_at(5, 5));
+    tick(&mut app);
+    set(&mut app, CROP, Voxel::cube(c.wheat[1]));
+    replay(&mut app, Undo);
+    assert!(rejections(&mut app).is_empty());
+    assert!(voxel_at(&app, CROP).is_air());
+    assert_eq!(count(&mut app, "t:seed"), 3, "refunded");
+    replay(&mut app, Redo);
+    assert!(rejections(&mut app).is_empty());
+    assert_eq!(voxel_at(&app, CROP), Voxel::cube(c.wheat[0]));
+    assert_eq!(count(&mut app, "t:seed"), 2, "spent again");
+}
+
+#[test]
+fn undo_and_redo_of_a_removal_take_the_drops_back_and_drop_them_again() {
+    let (mut app, c) = farm();
+    set(&mut app, CROP, Voxel::cube(c.wheat[1]));
+    send(&mut app, remove_crop());
+    tick(&mut app);
+    let first = lying(&mut app);
+    replay(&mut app, Undo);
+    assert!(rejections(&mut app).is_empty());
+    assert_eq!(voxel_at(&app, CROP), Voxel::cube(c.wheat[1]));
+    assert!(lying(&mut app).is_empty(), "taken back off the ground");
+    set(&mut app, CROP, Voxel::cube(c.wheat[2]));
+    replay(&mut app, Redo);
+    assert!(rejections(&mut app).is_empty(), "the crop advanced a Stage");
+    assert!(voxel_at(&app, CROP).is_air());
+    assert_eq!(lying(&mut app), first, "dropped again");
+}
+
+#[test]
+fn undoing_a_removal_whose_drops_were_picked_up_spends_them_or_is_refused() {
+    let (mut app, c) = farm();
+    set(&mut app, CROP, Voxel::cube(c.wheat[2]));
+    send(&mut app, remove_crop());
+    tick(&mut app);
+    let dropped = lying(&mut app);
+    let ids: Vec<_> = app
+        .world()
+        .resource::<EntityStore>()
+        .iter()
+        .map(|e| (e.id, e.as_dropped().count))
+        .collect();
+    app.world_mut()
+        .resource_scope(|_, mut entities: Mut<EntityStore>| {
+            for (id, n) in ids {
+                entities.take(id, n);
+            }
+        });
+    replay(&mut app, Undo);
+    assert_eq!(rejections(&mut app), [RejectReason::ItemNeeded]);
+    assert!(voxel_at(&app, CROP).is_air(), "refused whole");
+    for (name, n) in &dropped {
+        inventory(&mut app, |i| i.receive(name, *n, 64));
+    }
+    replay(&mut app, Undo);
+    assert!(rejections(&mut app).is_empty());
+    assert_eq!(voxel_at(&app, CROP), Voxel::cube(c.wheat[2]));
+    for (name, _) in &dropped {
+        assert_eq!(count(&mut app, name), if name == "t:seed" { 3 } else { 0 });
+    }
+}
+
+#[test]
+fn use_on_a_ripe_crop_with_harvest_to_yields_and_resets_without_a_journal_entry() {
+    let (mut app, c) = farm();
+    set(&mut app, CROP, Voxel::cube(c.bush[2]));
+    assert_eq!(
+        use_down(&mut app),
+        [UseOutcome(Ok(tool::UseResult::Harvest))]
+    );
+    assert_eq!(voxel_at(&app, CROP), Voxel::cube(c.bush[1]));
+    assert_eq!(count(&mut app, "t:berry"), 2);
+    assert!(journal_is_empty(&app));
+    assert_eq!(eaten(&mut app), 0);
+
+    assert_eq!(
+        use_down(&mut app),
+        [UseOutcome(Err(tool::UseRefusal::NotRipe))],
+        "now unripe"
+    );
+    assert_eq!(voxel_at(&app, CROP), Voxel::cube(c.bush[1]));
+    assert_eq!(count(&mut app, "t:berry"), 2);
+    assert_eq!(eaten(&mut app), 0, "a refusal does not fall through to eat");
+}
+
+#[test]
+fn the_aim_names_the_verb_harvest_for_a_ripe_crop_and_refuses_an_unripe_one() {
+    let (mut app, c) = farm();
+    let report = AimReport {
+        seq: 1,
+        origin: EYE,
+        direction: Vec3::NEG_Y,
+        held: None,
+        tool: None,
+        remove_held: false,
+    };
+    set(&mut app, CROP, Voxel::cube(c.bush[2]));
+    let aimed = super::super::edit::tests::aim(&mut app, report).use_aim;
+    let Some(Ok(target)) = aimed else {
+        panic!("{aimed:?}")
+    };
+    assert_eq!(target.usable, Some(Usable::Harvest));
+    assert_eq!(Usable::Harvest.verb("Berry bush"), "Harvest");
+    set(&mut app, CROP, Voxel::cube(c.bush[1]));
+    let aimed = super::super::edit::tests::aim(&mut app, report).use_aim;
+    assert_eq!(aimed, Some(Err(tool::UseRefusal::NotRipe)));
+}
+
+#[test]
+fn use_on_a_plant_with_nothing_to_harvest_eats() {
+    let (mut app, c) = farm();
+    set(&mut app, CROP, Voxel::cube(c.wheat[2]));
+    assert!(use_down(&mut app).is_empty());
+    assert_eq!(eaten(&mut app), 1);
+    assert_eq!(voxel_at(&app, CROP), Voxel::cube(c.wheat[2]));
+}
+
+#[test]
+fn a_harvest_that_does_not_fit_the_inventory_drops_at_the_player() {
+    let (mut app, c) = farm();
+    inventory(&mut app, |i| i.receive("t:junk", 36 * 64, 64));
+    set(&mut app, CROP, Voxel::cube(c.bush[2]));
+    use_down(&mut app);
+    assert_eq!(count(&mut app, "t:berry"), 0);
+    assert_eq!(lying(&mut app), [("t:berry".to_owned(), 2)]);
+    assert_eq!(voxel_at(&app, CROP), Voxel::cube(c.bush[1]));
+}
+
+#[test]
+fn ripe_fruit_is_picked_by_use_without_touching_the_tree_and_removed_for_its_yield() {
+    let (mut app, c) = farm();
+    set(&mut app, [6, 7, 5], Voxel::cube(c.trunk));
+    set(&mut app, [6, 8, 5], Voxel::cube(c.canopy));
+    set(&mut app, CROP, Voxel::cube(c.fruit[1]));
+    assert_eq!(
+        use_down(&mut app),
+        [UseOutcome(Ok(tool::UseResult::Harvest))]
+    );
+    assert_eq!(voxel_at(&app, CROP), Voxel::cube(c.fruit[0]));
+    assert_eq!(count(&mut app, "t:apple"), 1);
+    assert_eq!(voxel_at(&app, [6, 8, 5]), Voxel::cube(c.canopy));
+    assert_eq!(voxel_at(&app, [6, 7, 5]), Voxel::cube(c.trunk));
+    assert!(journal_is_empty(&app));
+
+    set(&mut app, CROP, Voxel::cube(c.fruit[1]));
+    send(&mut app, remove_crop());
+    tick(&mut app);
+    assert_eq!(voxel_at(&app, CROP), Voxel::cube(c.canopy), "canopy stays");
+    assert_eq!(lying(&mut app), [("t:apple".to_owned(), 1)]);
+    replay(&mut app, Undo);
+    assert!(rejections(&mut app).is_empty());
+    assert_eq!(voxel_at(&app, CROP), Voxel::cube(c.fruit[1]));
+}
+
+#[test]
+fn a_seed_on_the_wrong_ground_is_refused_naming_the_need_in_both_modes() {
+    for survival_mode in [false, true] {
+        let (mut app, _) = farm();
+        if survival_mode {
+            survival(&mut app);
+        }
+        send(&mut app, plant_at(9, 5));
+        tick(&mut app);
+        assert_eq!(rejections(&mut app), [RejectReason::NeedsSoil]);
+        assert_eq!(needs_text(&mut app), ["Wheat needs soil."]);
+        assert!(voxel_at(&app, [9, 8, 5]).is_air());
+        assert_eq!(count(&mut app, "t:seed"), 3, "nothing spent");
+    }
+}
+
+#[test]
+fn a_seed_in_the_dark_is_accepted_and_waits() {
+    let (mut app, c) = farm();
+    // No light was ever solved for this Chunk: light is never a placement rule.
+    send(&mut app, plant_at(5, 5));
+    tick(&mut app);
+    assert!(rejections(&mut app).is_empty());
+    assert_eq!(voxel_at(&app, CROP), Voxel::cube(c.wheat[0]));
+}
+
+fn row(count: u32) -> LayoutIntent {
+    LayoutIntent {
+        origin: EYE,
+        direction: Vec3::NEG_Y,
+        voxel: Voxel::cube(rock()),
+        layout: LayoutParams {
+            axes: [
+                Some(LayoutAxis {
+                    dim: Dim::X,
+                    positive: true,
+                    count,
+                }),
+                None,
+                None,
+            ],
+            gap: 0,
+            span: None,
+        },
+    }
+}
+
+#[test]
+fn a_layout_of_seeds_is_refused_whole_when_one_cell_has_no_soil() {
+    for survival_mode in [false, true] {
+        let (mut app, c) = farm();
+        if survival_mode {
+            survival(&mut app);
+        }
+        send_layout(&mut app, row(3));
+        tick(&mut app);
+        assert_eq!(rejections(&mut app), [RejectReason::NeedsSoil]);
+        assert_eq!(needs_text(&mut app), ["Wheat needs soil."]);
+        for x in 5..8 {
+            assert!(voxel_at(&app, [x, 8, 5]).is_air(), "x {x}");
+        }
+        assert_eq!(count(&mut app, "t:seed"), 3);
+
+        set(&mut app, [7, 7, 5], Voxel::cube(soil()));
+        send_layout(&mut app, row(3));
+        tick(&mut app);
+        assert!(rejections(&mut app).is_empty());
+        for x in 5..8 {
+            assert_eq!(voxel_at(&app, [x, 8, 5]), Voxel::cube(c.wheat[0]));
+        }
+        assert_eq!(count(&mut app, "t:seed"), 0);
+    }
+}
+
+/// A Player's Remove from a trench beside the soil.
+fn dig_out_the_soil(app: &mut App) {
+    for x in [3, 4] {
+        set(app, [x, 7, 5], Voxel::AIR);
+    }
+    send(
+        app,
+        EditIntent {
+            action: EditAction::Remove,
+            origin: Vec3::new(4.5, 7.5, 5.5),
+            direction: Vec3::X,
+        },
+    );
+    tick(app);
+    assert!(rejections(app).is_empty());
+    assert!(voxel_at(app, [5, 7, 5]).is_air());
+}
+
+#[test]
+fn digging_away_the_soil_breaks_the_plant_in_that_step_and_drops_its_seed() {
+    let (mut app, c) = farm();
+    send(&mut app, plant_at(5, 5));
+    tick(&mut app);
+    assert_eq!(voxel_at(&app, CROP), Voxel::cube(c.wheat[0]));
+    dig_out_the_soil(&mut app);
+    settle(&mut app);
+    assert!(voxel_at(&app, CROP).is_air());
+    let seeds = lying(&mut app).into_iter().find(|(n, _)| n == "t:seed");
+    assert_eq!(seeds, Some(("t:seed".to_owned(), 1)));
+}
+
+#[test]
+fn a_mod_command_replacing_the_soil_breaks_the_plant_and_new_soil_holds_one_up() {
+    let (mut app, c) = farm();
+    set(&mut app, CROP, Voxel::cube(c.wheat[1]));
+    command(&mut app, [5, 7, 5], Voxel::cube(rock()));
+    settle(&mut app);
+    assert!(voxel_at(&app, CROP).is_air());
+    assert!(lying(&mut app).iter().any(|(n, _)| n == "t:seed"));
+
+    let (mut app, c) = farm();
+    command(&mut app, [9, 8, 9], Voxel::cube(soil()));
+    command(&mut app, [9, 9, 9], Voxel::cube(c.wheat[0]));
+    settle(&mut app);
+    assert_eq!(voxel_at(&app, [9, 9, 9]), Voxel::cube(c.wheat[0]));
+    assert!(lying(&mut app).is_empty());
+}
+
+#[test]
+fn nothing_is_polled_an_unsupported_plant_nobody_touched_stays_until_a_neighbour_changes() {
+    let (mut app, c) = farm();
+    let at = [11, 8, 5];
+    app.world_mut()
+        .resource_mut::<ChunkStore>()
+        .set_voxel(VoxelCoord::of(at), Voxel::cube(c.wheat[0]));
+    for _ in 0..6 {
+        settle(&mut app);
+    }
+    assert_eq!(voxel_at(&app, at), Voxel::cube(c.wheat[0]), "never scanned");
+    set(&mut app, [12, 8, 5], Voxel::cube(rock()));
+    settle(&mut app);
+    assert!(voxel_at(&app, at).is_air(), "woken by the change beside it");
+}
+
+#[test]
+fn a_broken_plant_unsupports_what_rests_on_it_in_the_same_step() {
+    let (mut app, c) = farm();
+    // A column of rock under one spot stands in for a chain: break the soil and
+    // the crop goes, then a crop-on-crop (itself unsoiled) goes with it.
+    set(&mut app, CROP, Voxel::cube(c.wheat[0]));
+    set(&mut app, [5, 9, 5], Voxel::cube(c.wheat[0]));
+    command(&mut app, [5, 7, 5], Voxel::cube(rock()));
+    settle(&mut app);
+    assert!(voxel_at(&app, CROP).is_air());
+    assert!(voxel_at(&app, [5, 9, 5]).is_air());
+}
+
+#[test]
+fn a_run_of_stages_is_the_same_voxel_to_the_journal_but_a_trunk_is_not_a_sapling() {
+    let (app, c) = farm();
+    let tables = &app.world().resource::<ContentTables>().0;
+    assert_eq!(tables.plants.canonical(c.wheat[2]), c.wheat[0]);
+    assert_eq!(tables.plants.canonical(c.fruit[1]), c.fruit[0]);
+    assert_ne!(tables.plants.canonical(c.trunk), c.sapling);
+    assert_eq!(tables.plants.canonical(rock()), rock());
+}
+
+#[test]
+fn undoing_a_sapling_placement_after_it_grew_is_refused() {
+    let (mut app, c) = farm();
+    inventory(&mut app, |i| i.select(2).unwrap());
+    send(&mut app, plant_at(5, 5));
+    tick(&mut app);
+    assert_eq!(voxel_at(&app, CROP), Voxel::cube(c.sapling));
+    set(&mut app, CROP, Voxel::cube(c.trunk));
+    replay(&mut app, Undo);
+    assert_eq!(rejections(&mut app), [RejectReason::HistoryChanged]);
+    assert_eq!(voxel_at(&app, CROP), Voxel::cube(c.trunk));
+}

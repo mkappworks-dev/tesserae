@@ -379,6 +379,8 @@ pub(super) fn drain(
     body: Option<Aabb>,
     // Not `&mut Inventory`: that would mark it changed, and so sent, every tick.
     inventory: &mut Mut<Inventory>,
+    items: &crate::server::items::Items,
+    needs: &mut MessageWriter<crate::server::plants::PlantNeedsSoil>,
 ) -> Vec<([i32; 3], MaterialId)> {
     let mut started = Vec::new();
     while budget > 0 {
@@ -399,8 +401,28 @@ pub(super) fn drain(
                             }
                         }
                     }
+                    // A Plant's soil rule refuses the whole Layout, not the cell:
+                    // a row of Seeds either takes root or none does. The cells
+                    // count as ground for one another, as a column's are.
+                    let voxel = layout.intent.voxel;
+                    let laid: std::collections::HashSet<[i32; 3]> = kept
+                        .iter()
+                        .copied()
+                        .filter(|&at| free(store, tables, voxel, at).is_ok())
+                        .collect();
+                    let lacking = laid.iter().find_map(|&at| {
+                        crate::server::plants::soil_refusal(store, tables, items, voxel, at, &|c| {
+                            laid.contains(&c).then_some(voxel)
+                        })
+                    });
+                    if let Some(text) = lacking {
+                        needs.write(crate::server::plants::PlantNeedsSoil { text });
+                        rejected.write(EditRejected {
+                            reason: RejectReason::NeedsSoil,
+                        });
+                        continue;
+                    }
                     if let Some(item) = &layout.pay {
-                        let voxel = layout.intent.voxel;
                         let cost = kept
                             .iter()
                             .filter(|&&at| {
@@ -495,6 +517,18 @@ pub(super) fn drain(
         }
     }
     started
+}
+
+/// Delivers one Layout intent as if the Player stood at its origin.
+#[cfg(test)]
+pub(in crate::server) fn send_layout(app: &mut App, intent: LayoutIntent) {
+    use bevy::ecs::system::RunSystemOnce;
+    super::tests::set_eye(app, intent.origin);
+    app.world_mut().write_message(intent);
+    app.world_mut().run_system_once(receive).unwrap();
+    app.world_mut()
+        .resource_mut::<bevy::ecs::message::Messages<LayoutIntent>>()
+        .clear();
 }
 
 #[cfg(test)]
