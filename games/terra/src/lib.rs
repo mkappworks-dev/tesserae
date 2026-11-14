@@ -143,6 +143,7 @@ fn fence() -> ShapeDef {
         }]),
     };
     ShapeDef {
+        form: Default::default(),
         name: "fence".into(),
         boxes: vec![NodeBox {
             min: (6, 0, 6),
@@ -170,6 +171,7 @@ fn fence() -> ShapeDef {
 /// face the Player and Use turns about its hinge.
 fn panel() -> ShapeDef {
     ShapeDef {
+        form: Default::default(),
         name: "panel".into(),
         boxes: vec![NodeBox {
             min: (0, 0, 13),
@@ -188,6 +190,7 @@ fn table() -> ShapeDef {
         max: (x + 3, 12, z + 3),
     };
     ShapeDef {
+        form: Default::default(),
         name: "table".into(),
         boxes: vec![
             leg(1, 1),

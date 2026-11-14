@@ -31,6 +31,7 @@ fn material(name: &str) -> content::MaterialDef {
 
 fn slab(name: &str) -> content::ShapeDef {
     content::ShapeDef {
+        form: Default::default(),
         name: name.into(),
         boxes: vec![types::NodeBox {
             min: (0, 0, 0),
@@ -222,10 +223,12 @@ fn a_bad_material_names_the_mod_and_the_row() {
 #[test]
 fn a_bad_shape_names_the_mod_and_the_row() {
     let no_boxes = content::ShapeDef {
+        form: Default::default(),
         boxes: Vec::new(),
         ..slab("flat")
     };
     let no_arms = content::ShapeDef {
+        form: Default::default(),
         connect: Some(types::ConnectDef {
             group: 1,
             connects_to: 1,
@@ -582,6 +585,7 @@ fn connect_to_wit(c: ConnectDef) -> types::ConnectDef {
 
 fn shape_to_wit(name: &str, def: ShapeDef) -> content::ShapeDef {
     content::ShapeDef {
+        form: Default::default(),
         name: name.into(),
         boxes: def.boxes.into_iter().map(Into::into).collect(),
         collision: def

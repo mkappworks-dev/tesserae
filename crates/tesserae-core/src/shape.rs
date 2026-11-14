@@ -156,9 +156,31 @@ impl Connections {
     }
 }
 
+/// How a Shape is drawn. Collision, selection, light and fluid read its boxes
+/// whatever the form.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum Form {
+    /// The boxes' faces.
+    #[default]
+    Box,
+    /// Two diagonal quads through the Voxel's centre, as a plant: bodies pass
+    /// through and nothing is sealed.
+    Cross,
+    /// One quad along the first box's thin axis, against a face, as a vine.
+    Plane,
+}
+
+impl Form {
+    /// Whether a body passes through it unless the Shape declares collision.
+    pub fn is_flat(self) -> bool {
+        self != Form::Box
+    }
+}
+
 /// What a Mod declares for one Shape.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct ShapeDef {
+    pub form: Form,
     pub connect: Option<ConnectDef>,
     /// The geometry. Boxes may overlap.
     pub boxes: Vec<NodeBox>,
@@ -183,6 +205,10 @@ pub enum ShapeError {
     ConnectedSeals,
     /// An arm reaches a boundary plane other than its own face's.
     ArmTouchesOtherFace,
+    /// A `cross` or `plane` Shape seals a face, which would hide a neighbour's.
+    FormSeals,
+    /// Only a Shape of boxes can connect.
+    FormConnected,
 }
 
 impl std::fmt::Display for ShapeError {
@@ -195,6 +221,8 @@ impl std::fmt::Display for ShapeError {
             ShapeError::BadArm => "a connected Shape's arms are missing, repeated or empty",
             ShapeError::ConnectedSeals => "a connected Shape seals a face under some arms",
             ShapeError::ArmTouchesOtherFace => "an arm reaches a face other than its own",
+            ShapeError::FormSeals => "a cross or plane Shape seals a face of the Voxel",
+            ShapeError::FormConnected => "only a Shape of boxes can connect",
         })
     }
 }
@@ -666,6 +694,8 @@ const NOTHING: Variant = Variant {
 #[derive(Clone, Debug)]
 pub struct ShapeTable {
     shapes: usize,
+    /// Per Shape id: how it is drawn.
+    forms: Vec<Form>,
     variants: Vec<Variant>,
     quads: Vec<ShapeQuad>,
     boxes: Vec<CollisionBox>,
@@ -706,6 +736,7 @@ impl ShapeTable {
     pub fn builtin() -> Self {
         let mut table = ShapeTable {
             shapes: 0,
+            forms: Vec::new(),
             variants: Vec::new(),
             quads: Vec::new(),
             boxes: Vec::new(),
@@ -729,6 +760,7 @@ impl ShapeTable {
                     connect: None,
                     boxes,
                     collision: None,
+                    form: Form::Box,
                 })
                 .expect("the built-in Shapes are valid");
         }
@@ -743,12 +775,24 @@ impl ShapeTable {
             return Err(ShapeError::TableFull);
         }
         validate(&def.boxes)?;
-        let base_collision = resolve(def.collision.as_deref(), &def.boxes)?;
+        // A flat Shape is walked through unless it declares collision.
+        let no_collision = [];
+        let declared = match (def.collision.as_deref(), def.form.is_flat()) {
+            (None, true) => Some(&no_collision[..]),
+            (declared, _) => declared,
+        };
+        let base_collision = resolve(declared, &def.boxes)?;
         if let Some(connect) = &def.connect {
+            if def.form.is_flat() {
+                return Err(ShapeError::FormConnected);
+            }
             return self.register_connected(&def, &base_collision, connect);
         }
 
         let grid = rasterise(&def.boxes);
+        if def.form.is_flat() && (0..6).any(|f| face_coverage(&grid, f).is_full()) {
+            return Err(ShapeError::FormSeals);
+        }
         for orientation in Orientation::all() {
             let mut variant =
                 self.derive(&grid, &base_collision, &def.boxes, &orientation.matrix());
@@ -759,6 +803,7 @@ impl ShapeTable {
             self.variants.push(variant);
         }
         self.groups.push(0);
+        self.forms.push(def.form);
         self.shapes += 1;
         Ok((self.shapes - 1) as ShapeId)
     }
@@ -868,6 +913,7 @@ impl ShapeTable {
         self.variants
             .extend(std::iter::repeat_n(bare, ORIENTATIONS));
         self.groups.push(connect.group);
+        self.forms.push(Form::Box);
         self.shapes += 1;
         Ok((self.shapes - 1) as ShapeId)
     }
@@ -1007,13 +1053,25 @@ impl ShapeTable {
     /// cubes, one for a Shape, and for a connected Shape as many as it has times
     /// a stair's quads, at its most armed.
     pub fn cap_units(&self, voxel: Voxel) -> u32 {
-        if !voxel.is_shaped() {
+        if !voxel.is_shaped() || self.form_of(voxel).is_flat() {
             return 0;
         }
         match self.variant(voxel).connect {
             NO_CONNECT => 1,
             i => self.connects[i as usize].weight,
         }
+    }
+
+    /// How `voxel`'s Shape is drawn; a cube and air are boxes.
+    #[inline]
+    pub fn form_of(&self, voxel: Voxel) -> Form {
+        if !voxel.is_shaped() {
+            return Form::Box;
+        }
+        self.forms
+            .get(voxel.shape() as usize)
+            .copied()
+            .unwrap_or_default()
     }
 
     /// Whether any registered Shape is connected. False for the builtin table, so
@@ -1637,6 +1695,7 @@ mod tests {
     fn collision_may_stand_one_voxel_outside_the_cell_and_no_further() {
         let mut t = ShapeTable::builtin();
         let tall = |min, max| ShapeDef {
+            form: Default::default(),
             connect: None,
             boxes: vec![NodeBox::new([6, 0, 6], [10, 16, 10])],
             collision: Some(vec![CollisionBox::new(min, max)]),
@@ -1949,6 +2008,7 @@ mod tests {
         let mut t = ShapeTable::builtin();
         let plate = t
             .register(ShapeDef {
+                form: Default::default(),
                 connect: None,
                 boxes: vec![NodeBox::new([1, 0, 1], [15, 1, 15])],
                 collision: Some(vec![]),
@@ -1969,6 +2029,7 @@ mod tests {
         let mut t = ShapeTable::builtin();
         let tee = t
             .register(ShapeDef {
+                form: Default::default(),
                 connect: None,
                 boxes: vec![
                     NodeBox::new([0, 0, 0], [16, 8, 16]),
@@ -1994,6 +2055,7 @@ mod tests {
         let mut t = ShapeTable::builtin();
         let ok = || NodeBox::new([0, 0, 0], [4, 4, 4]);
         let def = |boxes| ShapeDef {
+            form: Default::default(),
             connect: None,
             boxes,
             collision: None,
@@ -2154,6 +2216,7 @@ mod tests {
     fn register(t: &mut ShapeTable, boxes: Vec<NodeBox>) -> Voxel {
         let id = t
             .register(ShapeDef {
+                form: Default::default(),
                 connect: None,
                 boxes,
                 collision: None,

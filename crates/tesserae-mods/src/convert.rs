@@ -3,8 +3,8 @@
 //! the registration's, so a bad row is reported by the table that owns the rule.
 
 use tesserae_core::{
-    Arm, CaveParams, ClimateParams, CollisionBox, ConnectDef, MaterialDef, NodeBox, Occlusion,
-    RenderClass, ShapeDef, SmoothingParams, Voxel, WorldgenParams,
+    Arm, CaveParams, ClimateParams, CollisionBox, ConnectDef, Form, MaterialDef, NodeBox,
+    Occlusion, RenderClass, ShapeDef, SmoothingParams, Voxel, WorldgenParams,
 };
 
 use crate::bindings::exports::tesserae::mods::guest;
@@ -85,6 +85,11 @@ impl From<content::ShapeDef> for ShapeDef {
             connect: s.connect.map(Into::into),
             boxes: s.boxes.into_iter().map(Into::into).collect(),
             collision: s.collision.map(|c| c.into_iter().map(Into::into).collect()),
+            form: match s.form {
+                None | Some(content::ShapeForm::Boxes) => Form::Box,
+                Some(content::ShapeForm::Cross) => Form::Cross,
+                Some(content::ShapeForm::Plane) => Form::Plane,
+            },
         }
     }
 }

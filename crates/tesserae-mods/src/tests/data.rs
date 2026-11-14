@@ -103,6 +103,7 @@ fn component() -> Declaration {
         ],
         shapes: vec![
             content::ShapeDef {
+                form: Default::default(),
                 name: "slab".into(),
                 boxes: vec![node((0, 0, 0), (16, 8, 16))],
                 collision: Some(vec![types::CollisionBox {
@@ -112,6 +113,7 @@ fn component() -> Declaration {
                 connect: None,
             },
             content::ShapeDef {
+                form: Default::default(),
                 name: "fence".into(),
                 boxes: vec![node((6, 0, 6), (10, 16, 10))],
                 collision: None,

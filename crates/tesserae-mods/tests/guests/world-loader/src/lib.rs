@@ -25,6 +25,7 @@ impl Guest for WorldLoader {
                 solid: true,
             }],
             shapes: vec![ShapeDef {
+                form: Default::default(),
                 name: "half".into(),
                 boxes: vec![NodeBox {
                     min: (0, 0, 0),

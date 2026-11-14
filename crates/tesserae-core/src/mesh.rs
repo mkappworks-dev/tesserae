@@ -10,7 +10,7 @@ use crate::chunk::{CHUNK_SIZE, Chunk};
 use crate::light::{ChunkLight, Light};
 use crate::material::{MaterialTable, Occlusion, RenderClass};
 use crate::occupants::{ChunkOverlay, Fluid};
-use crate::shape::{Connections, FaceMask, SUBDIV, ShapeQuad};
+use crate::shape::{Connections, FaceMask, Form, NodeBox, SUBDIV, ShapeQuad};
 use crate::tables::Tables;
 use crate::voxel::{MaterialId, Voxel};
 
@@ -1205,6 +1205,20 @@ fn mesh_shaped(n: &Neighborhood, tables: &Tables, mesh: &mut ChunkMesh) {
                 }
                 mesh.shaped_voxels += 1;
                 let own = n.light_at(x, y, z);
+                let form = shapes.form_of(voxel);
+                if form.is_flat() {
+                    let class = tables.materials.render(voxel);
+                    let thin = shapes.selection(voxel, Connections::NONE).first();
+                    push_flat(
+                        mesh.layer(class),
+                        [x, y, z],
+                        form,
+                        thin,
+                        voxel.material(),
+                        own,
+                    );
+                    continue;
+                }
                 // Read from the shell this job was handed, never the live store:
                 // the six face-neighbours of a centre Voxel are all inside it.
                 let connections = if any_connected && shapes.is_connected(voxel) {
@@ -1247,6 +1261,85 @@ fn mesh_shaped(n: &Neighborhood, tables: &Tables, mesh: &mut ChunkMesh) {
         }
     }
     merge_shaped(&mut pending, mesh);
+}
+
+/// A `cross` or `plane` Shape's quads, each both ways round so no pass has to
+/// draw back faces. Not merged and never culled: nothing hides them.
+fn push_flat(
+    layer: &mut MeshLayer,
+    cell: [i32; 3],
+    form: Form,
+    thin: Option<&NodeBox>,
+    material: MaterialId,
+    lit: Light,
+) {
+    const UNIT: f32 = 1.0 / SUBDIV as f32;
+    let [cx, cy, cz] = cell.map(|c| c as f32);
+    let quads: Vec<[[f32; 3]; 4]> = match form {
+        Form::Cross => vec![
+            [
+                [cx, cy, cz],
+                [cx + 1.0, cy, cz + 1.0],
+                [cx + 1.0, cy + 1.0, cz + 1.0],
+                [cx, cy + 1.0, cz],
+            ],
+            [
+                [cx + 1.0, cy, cz],
+                [cx, cy, cz + 1.0],
+                [cx, cy + 1.0, cz + 1.0],
+                [cx + 1.0, cy + 1.0, cz],
+            ],
+        ],
+        Form::Plane => {
+            let Some(b) = thin else { return };
+            let origin = [cx, cy, cz];
+            let extent = |a: usize| b.max[a] as i32 - b.min[a] as i32;
+            // The thin axis is the box's shortest; the quad spans the other two.
+            let d = (0..3).min_by_key(|&a| extent(a)).unwrap_or(2);
+            let (u, v) = ((d + 1) % 3, (d + 2) % 3);
+            let plane = origin[d] + (b.min[d] as f32 + b.max[d] as f32) * 0.5 * UNIT;
+            let corner = |cu: f32, cv: f32| {
+                let mut c = [0.0f32; 3];
+                c[d] = plane;
+                c[u] = origin[u] + cu * UNIT;
+                c[v] = origin[v] + cv * UNIT;
+                c
+            };
+            let (u0, u1) = (b.min[u] as f32, b.max[u] as f32);
+            let (v0, v1) = (b.min[v] as f32, b.max[v] as f32);
+            vec![[
+                corner(u0, v0),
+                corner(u1, v0),
+                corner(u1, v1),
+                corner(u0, v1),
+            ]]
+        }
+        Form::Box => return,
+    };
+    let light = lit.packed() as u32;
+    for corners in quads {
+        for reversed in [false, true] {
+            let base = layer.positions.len() as u32;
+            let order: [usize; 4] = if reversed { [3, 2, 1, 0] } else { [0, 1, 2, 3] };
+            for (k, &i) in order.iter().enumerate() {
+                layer.positions.push(corners[i]);
+                layer
+                    .normals
+                    .push([0.0, if reversed { -1.0 } else { 1.0 }, 0.0]);
+                layer.uvs.push(match k {
+                    0 => [0.0, 0.0],
+                    1 => [1.0, 0.0],
+                    2 => [1.0, 1.0],
+                    _ => [0.0, 1.0],
+                });
+                layer.materials.push(material as u32);
+                layer.light.push(light);
+            }
+            layer
+                .indices
+                .extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+        }
+    }
 }
 
 /// A [`RenderClass`] in the two bits of a pass-2 group key.

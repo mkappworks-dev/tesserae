@@ -52,6 +52,21 @@ interface content {
         /// What bodies collide with when it differs from what is drawn.
         collision: option<list<collision-box>>,
         connect: option<connect-def>,
+        /// How it is drawn; none is `boxes`. `cross` and `plane` Shapes seal no
+        /// face of the Voxel, are walked through unless `collision` says
+        /// otherwise, cannot connect, and cost nothing against the Chunk's
+        /// shaped-Voxel cap. Their boxes still decide selection and fluid.
+        form: option<shape-form>,
+    }
+
+    /// How a Shape is drawn.
+    enum shape-form {
+        /// The boxes' faces.
+        boxes,
+        /// Two diagonal quads through the Voxel's centre, as a plant.
+        cross,
+        /// One quad along the first box's thin axis, against a face, as a vine.
+        plane,
     }
 
     /// A placeholder colour for one of this Mod's Materials, read by the

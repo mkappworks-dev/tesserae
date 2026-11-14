@@ -245,6 +245,7 @@ mod tests {
             [(); 2].map(|_| tables.materials.register(MaterialDef::OPAQUE).unwrap());
         let shape = panelled.then(|| {
             let def = ShapeDef {
+                form: Default::default(),
                 connect: None,
                 boxes: vec![PANEL],
                 collision: None,

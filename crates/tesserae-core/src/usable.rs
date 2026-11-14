@@ -669,6 +669,7 @@ mod tests {
         let panel = tables
             .shapes
             .register(ShapeDef {
+                form: Default::default(),
                 connect: None,
                 boxes: vec![NodeBox::new([0, 0, 13], [16, 16, 16])],
                 collision: None,

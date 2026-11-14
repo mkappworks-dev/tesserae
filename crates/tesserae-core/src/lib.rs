@@ -69,7 +69,7 @@ pub use reaction::{
     Outcome, Participant, Phase, Reactant, ReactionDef, ReactionError, ReactionTable, Side,
 };
 pub use shape::{
-    Arm, CollisionBox, ConnectDef, Connections, MAX_SHAPED_PER_CHUNK, NodeBox, Orientation,
+    Arm, CollisionBox, ConnectDef, Connections, Form, MAX_SHAPED_PER_CHUNK, NodeBox, Orientation,
     SHAPE_POST, SHAPE_SLAB, SHAPE_STAIR, ShapeDef, ShapeError, ShapeTable,
 };
 pub use survival::SurvivalRules;

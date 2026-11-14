@@ -238,9 +238,11 @@ gains one list, `item-def` an optional field and `shape-def` a new form.
   keeps the cube of `color`.
 - `shape-def` gains a `form`: `box` (today's nodeboxes), `cross` (two diagonal
   quads through the Voxel's centre) or `plane` (one quad against a face, for
-  climbers). `cross` and `plane` carry no nodeboxes. Both are non-solid for
-  bodies (collision passes, as through an open Door), seal no face, dim light by
-  0, hold no Void, and stay selectable so rays stop on them. Data-only Mods get
+  climbers). A flat form still declares boxes, which decide selection and where fluid
+  can stand, so kelp is waterlogged where it grows. Both forms are walked
+  through unless the Shape declares collision, may seal no face, cannot
+  connect, and cost nothing against the Chunk's shaped-Voxel cap; light
+  passes by the Material's own dimming, so a plant's Material is translucent. Data-only Mods get
   the same rows as `[[plants]]` in their content file.
 - A Material is at most one Stage of one Plant; a later Stage gets no implicit
   Item and cannot be placed or taken from the Catalogue, as a Door's open

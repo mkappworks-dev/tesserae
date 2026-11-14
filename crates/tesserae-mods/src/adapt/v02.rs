@@ -58,6 +58,7 @@ fn collisions(c: Option<Vec<ot::CollisionBox>>) -> Option<Vec<types::CollisionBo
 
 fn shape(s: old::ShapeDef) -> content::ShapeDef {
     content::ShapeDef {
+        form: Default::default(),
         name: s.name,
         boxes: node_boxes(s.boxes),
         collision: collisions(s.collision),
