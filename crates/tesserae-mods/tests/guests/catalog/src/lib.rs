@@ -22,7 +22,6 @@ impl Guest for Catalog {
             .collect();
         let shapes = (0..8)
             .map(|i| ShapeDef {
-                form: Default::default(),
                 name: format!("s{i}"),
                 boxes: vec![NodeBox {
                     min: (0, 0, 0),
