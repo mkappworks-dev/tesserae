@@ -58,6 +58,40 @@ impl DeclaredTemplates {
         }
         Ok(templates)
     }
+
+    /// Refuses the first Material a resolved Template names that `refuse`
+    /// gives a reason against, naming the Template and its palette character.
+    pub fn check(
+        &self,
+        registry: &Registry,
+        refuse: impl Fn(MaterialId) -> Option<String>,
+    ) -> Result<(), ModError> {
+        for (mod_id, rows) in &self.rows {
+            for (row, def) in rows.iter().enumerate() {
+                let palette = def.palette.iter().filter_map(|entry| match &entry.cell {
+                    content::TemplateCell::Voxel(v) => {
+                        Some((format!("palette `{}`", entry.symbol), &v.material))
+                    }
+                    _ => None,
+                });
+                let foundation = def.foundation.iter().map(|m| ("foundation".to_owned(), m));
+                for (at, material) in palette.chain(foundation) {
+                    let Some(id) = registry.id_of(Kind::Material, material) else {
+                        continue;
+                    };
+                    if let Some(reason) = refuse(id as MaterialId) {
+                        return Err(ModError::Template {
+                            id: mod_id.clone(),
+                            row,
+                            name: def.name.clone(),
+                            reason: format!("{at}: Material `{material}` {reason}"),
+                        });
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 fn template(
@@ -155,6 +189,16 @@ fn solid(name: &str, registry: &Registry, tables: &Tables) -> Result<MaterialId,
     if tables.fluids.contains(id) {
         return Err(format!(
             "Material `{name}` is a fluid, which a Template does not carry"
+        ));
+    }
+    if tables.plants.is_grown(id) {
+        return Err(format!(
+            "Material `{name}` is a Grown Material, which only a Plant's growth makes"
+        ));
+    }
+    if tables.uses.is_open(id) {
+        return Err(format!(
+            "Material `{name}` is a Door's open form; a Template holds the Door closed"
         ));
     }
     Ok(id)
