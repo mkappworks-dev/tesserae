@@ -72,6 +72,13 @@ impl Marks {
             .filter(|(i, _)| self.kinds.death != Some(*i))
     }
 
+    /// Moves the form's kind to the first choosable one when it is not itself choosable.
+    pub(super) fn settle(&self, draft: &mut Draft) {
+        if !self.choosable().any(|(i, _)| i == draft.kind) {
+            draft.kind = self.choosable().next().map_or(0, |(i, _)| i);
+        }
+    }
+
     fn set_list(&mut self, list: Waypoints) {
         if self.selected.is_some_and(|id| list.get(id).is_none()) {
             self.selected = None;
@@ -115,9 +122,7 @@ fn receive(
     if let Some(content::MarkerKinds(now)) = kinds.read().last() {
         marks.kinds = now.clone();
         marks.revision += 1;
-        if draft.kind >= marks.kinds.kinds.len() {
-            draft.kind = 0;
-        }
+        marks.settle(&mut draft);
     }
     if let Some(WaypointsChanged(now)) = lists.read().last() {
         grew.0 = now.list().len() > marks.list.list().len();

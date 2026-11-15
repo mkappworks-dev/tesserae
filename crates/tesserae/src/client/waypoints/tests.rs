@@ -98,3 +98,26 @@ fn the_bearing_runs_clockwise_from_north() {
     assert_eq!((d, north), (30.0, 0.0));
     assert_eq!(from_player(&w(10.0, 0.0), Vec2::ZERO).1, 90.0);
 }
+
+#[test]
+fn the_form_never_rests_on_the_death_kind() {
+    let mut marks = marks_with(&[]);
+    marks.kinds = MarkerKinds {
+        kinds: vec![
+            MarkerKind {
+                name: "t:grave".into(),
+                icon: Icon::Death,
+                color: [1, 1, 1, 255],
+            },
+            MarkerKind {
+                name: "t:home".into(),
+                icon: Icon::Home,
+                color: [2, 2, 2, 255],
+            },
+        ],
+        death: Some(0),
+    };
+    let mut draft = Draft::default();
+    marks.settle(&mut draft);
+    assert_eq!(draft.kind, 1);
+}
