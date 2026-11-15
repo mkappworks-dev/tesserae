@@ -25,7 +25,7 @@ use crate::server::mods::EditHistory;
 use crate::server::mods::runtime::{DrainBudget, EMITTER_WRITES, MOD_VOXELS_PER_TICK};
 use crate::server::player::Player;
 use crate::server::streaming::MeshState;
-use crate::server::undo::{Entry, Journal};
+use crate::server::undo::{Entry, Journal, RECORDED_LIMIT};
 use crate::server::world_state::{ChunkStore, VoxelCoord};
 use crate::server::{ContentTables, WorldGenerator};
 use crate::world::{ChunkCoord, WorldSettings};
@@ -197,6 +197,8 @@ pub(in crate::server) struct PendingStructure {
     landing: bool,
     /// Shaped units each Chunk would gain, judged against its cap at the end.
     shaped: HashMap<ChunkCoord, i64>,
+    /// Cells judged to change, each one undo journal entry.
+    changes: usize,
     applied: Vec<Entry>,
     /// Ticks spent waiting for Chunks, over the whole placement.
     waited: u32,
@@ -235,6 +237,7 @@ pub(super) fn receive(
                 next: 0,
                 landing: false,
                 shaped: HashMap::new(),
+                changes: 0,
                 applied: Vec::new(),
                 waited: 0,
             })
@@ -364,6 +367,10 @@ fn step(
                 StructureCell::Refused(reason) => return Progress::Refused(reason),
                 StructureCell::Unchanged => {}
                 _ => {
+                    structure.changes += 1;
+                    if structure.changes > RECORDED_LIMIT {
+                        return Progress::Refused(RejectReason::TooBigToUndo);
+                    }
                     let there = store.voxel(at).expect("judged, so loaded");
                     let units = |v| i64::from(tables.shapes.cap_units(v));
                     *structure
@@ -456,6 +463,8 @@ pub(in crate::server) fn send_structure(app: &mut App, intent: StructureIntent) 
 
 #[cfg(test)]
 mod tests {
+    mod undo;
+
     use super::super::tests::{
         app_with_tables, ground, held, origin, rejections, replay, set_eye, survival, voxel_at,
     };
