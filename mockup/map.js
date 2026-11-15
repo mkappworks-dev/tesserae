@@ -384,21 +384,34 @@ function mapPage() {
 ${m.placing ? mapBannerHtml() : ""}
 <footer class="map-foot"><output id="map-readout">X ${mapFmt(m.pos.x)} · Z ${mapFmt(m.pos.z)} · ${m.pos.y} m · You are here</output><div class="map-scale" id="map-scale"></div></footer>
 </section>
-<aside class="map-side" aria-label="Waypoints">
-<section><h3>Waypoints <span>${m.wps.length}</span></h3><ul class="wp-list">${rows}</ul></section>
-<section class="wp-new"><h3>New Waypoint</h3><label class="field-label">Name<input class="input" id="wp-name" maxlength="32" value="${esc(m.draft)}" placeholder="${esc(mapDraftName())}"></label><label class="field-label">Marker kind<div class="kind-pick" role="radiogroup" aria-label="Marker kind">${Object.entries(
-    MAP_KINDS,
-  )
-    .filter(([n]) => n !== "Death")
+<aside class="map-side" aria-label="Map panel">
+<div class="map-tabs" role="tablist" aria-label="Panel">${[
+    ["waypoints", "Waypoints"],
+    ["explore", "Explore"],
+  ]
     .map(
-      ([n, k]) =>
-        `<button class="kind ${(m.kind || "Home") === n ? "on" : ""}" role="radio" aria-checked="${(m.kind || "Home") === n}" data-action="map-kind" data-value="${n}" style="--wp:${k.color}"><span>${k.icon}</span>${n}</button>`,
+      ([id, label]) =>
+        `<button role="tab" aria-selected="${m.tab === id}" class="${m.tab === id ? "on" : ""}" data-action="map-tab" data-value="${id}">${label}</button>`,
     )
-    .join(
-      "",
-    )}</div></label><div class="row">${button("At my position", "map-add-here", { small: true, primary: true })}</div><small class="muted">Type a name, then click the map to place it.</small></section>
-${sel ? `<section class="wp-sel"><h3>${esc(sel.name)}</h3><small>X ${mapFmt(sel.x)} · Z ${mapFmt(sel.z)} · bearing ${Math.round(mapWrap(mapBearing(sel.x - m.pos.x, sel.z - m.pos.z)))}° ${mapCardinal(mapBearing(sel.x - m.pos.x, sel.z - m.pos.z))}</small>${button("Centre", "map-centre-wp", { small: true })}</section>` : ""}
-<section><h3>Explored</h3><p class="muted">${mapSeenAreaKm2.toFixed(2)} km² · seen with the ground loaded. Fogged ground is not guessed at.</p><ul class="legend">${legend}<li><i class="fog"></i>Not explored</li><li><i class="lake"></i>Lake</li></ul></section>
+    .join("")}</div>
+${
+  m.tab === "explore"
+    ? ""
+    : `<section><h3>Waypoints <span>${m.wps.length}</span></h3><ul class="wp-list">${rows}</ul></section>
+<section class="wp-new"><h3>New Waypoint</h3><label class="field-label">Name<input class="input" id="wp-name" maxlength="32" value="${esc(m.draft)}" placeholder="${esc(mapDraftName())}"></label><label class="field-label">Marker kind<div class="kind-pick" role="radiogroup" aria-label="Marker kind">${Object.entries(
+        MAP_KINDS,
+      )
+        .filter(([n]) => n !== "Death")
+        .map(
+          ([n, k]) =>
+            `<button class="kind ${(m.kind || "Home") === n ? "on" : ""}" role="radio" aria-checked="${(m.kind || "Home") === n}" data-action="map-kind" data-value="${n}" style="--wp:${k.color}"><span>${k.icon}</span>${n}</button>`,
+        )
+        .join(
+          "",
+        )}</div></label><div class="row">${button("At my position", "map-add-here", { small: true, primary: true })}</div><small class="muted">Type a name, then click the map to place it.</small></section>
+${sel ? `<section class="wp-sel"><h3>${esc(sel.name)}</h3><small>X ${mapFmt(sel.x)} · Z ${mapFmt(sel.z)} · bearing ${Math.round(mapWrap(mapBearing(sel.x - m.pos.x, sel.z - m.pos.z)))}° ${mapCardinal(mapBearing(sel.x - m.pos.x, sel.z - m.pos.z))}</small>${button("Centre", "map-centre-wp", { small: true })}</section>` : ""}`
+}
+${m.tab === "explore" ? `<section><h3>Explored</h3><p class="muted">${mapSeenAreaKm2.toFixed(2)} km² · seen with the ground loaded. Fogged ground is not guessed at.</p><ul class="legend">${legend}<li><i class="fog"></i>Not explored</li><li><i class="lake"></i>Lake</li></ul></section>` : ""}
 </aside></div>`;
 }
 function mapDraftName() {
@@ -412,6 +425,7 @@ function mapSyncPlacing(arm) {
   const m = ensureMap(),
     view = document.querySelector(".map-view");
   m.placing = arm;
+  m.tab = arm ? "waypoints" : m.tab;
   view?.querySelector(".map-banner")?.remove();
   if (arm) view?.insertAdjacentHTML("beforeend", mapBannerHtml());
   document.getElementById("map-canvas")?.classList.toggle("placing", arm);
@@ -535,6 +549,7 @@ function mapMount() {
       return;
     }
     m.sel = pick(e)?.id ?? null;
+    if (m.sel !== null) m.tab = "waypoints";
     render();
   };
   c.onwheel = (e) => {
@@ -556,6 +571,7 @@ function mapAddWaypoint(x, z) {
     z: Math.round(z),
   });
   m.sel = m.next++;
+  m.tab = "waypoints";
   m.placing = false;
   m.draft = "";
   toast(`Waypoint “${name}” added.`);
@@ -590,6 +606,10 @@ function mapAction(name, value) {
       render();
       return true;
     }
+    case "map-tab":
+      m.tab = value;
+      render();
+      return true;
     case "map-select":
       m.sel = Number(value);
       render();
