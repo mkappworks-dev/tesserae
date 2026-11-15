@@ -114,6 +114,7 @@ pub(super) enum Operation {
     Sprint(crate::server::player::SpeedLevel),
     Removal(bool),
     Repeat,
+    Ghost,
     Invert,
     PadInvert,
     PadCrouch(bool),

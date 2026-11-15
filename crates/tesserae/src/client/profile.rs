@@ -17,6 +17,8 @@ pub(crate) struct Preferences {
     pub speed_level: SpeedLevel,
     pub tap_remove: bool,
     pub repeat_held: bool,
+    /// Absent from a profile saved before it, which reads as off.
+    pub placement_ghost: bool,
     pub sensitivity: f32,
     pub invert_y: bool,
     pub reverse_scroll: bool,
@@ -107,6 +109,7 @@ impl Default for Preferences {
             speed_level: SpeedLevel::Walk,
             tap_remove: false,
             repeat_held: false,
+            placement_ghost: false,
             sensitivity: 0.003,
             invert_y: false,
             reverse_scroll: false,
@@ -536,11 +539,11 @@ mod tests {
 
         // A version-2 choice of I for Help is the player's own now.
         let mut chosen = bindings.clone();
-        chosen.keyboard.insert(Action::Help, key(KeyCode::KeyH));
+        chosen.keyboard.insert(Action::Help, key(KeyCode::KeyU));
         let mut store = store;
         store.save(&chosen, &preferences).unwrap();
         let (_, reloaded, _) = Store::load(path);
-        assert_eq!(reloaded.keyboard[&Action::Help], key(KeyCode::KeyH));
+        assert_eq!(reloaded.keyboard[&Action::Help], key(KeyCode::KeyU));
     }
 
     #[test]
@@ -700,6 +703,7 @@ mod tests {
         let older = br#"{"version":1,"preferences":{"invert_y":true}}"#;
         let (_, older) = decode(older).unwrap();
         assert!(!older.repeat_held, "a profile saved before the option");
+        assert!(!older.placement_ghost, "a profile saved before the option");
         assert_eq!((older.view, older.zoom_m), (View::FirstPerson, 4.0));
         for zoom in ["1.4", "6.1", "-1"] {
             let bytes = format!(r#"{{"version":1,"preferences":{{"zoom_m":{zoom}}}}}"#);

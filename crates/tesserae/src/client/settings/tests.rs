@@ -463,6 +463,22 @@ fn repeat_while_held_is_off_by_default_and_applies_to_every_device() {
     std::fs::remove_file(path).unwrap();
 }
 #[test]
+fn the_placement_ghost_is_off_by_default_and_the_setting_round_trips() {
+    let mut app = app();
+    assert!(!app.world().resource::<Preferences>().placement_ghost);
+    activate_operation(
+        &mut app,
+        Operation::Navigate(super::super::menu_ui::Tab::Behavior),
+    );
+    activate_operation(&mut app, Operation::Ghost);
+    assert!(!app.world().resource::<Preferences>().placement_ghost);
+    activate_operation(&mut app, Operation::Apply);
+    assert!(app.world().resource::<Preferences>().placement_ghost);
+    let path = app.world().resource::<Store>().path.clone();
+    assert!(Store::load(path.clone()).2.placement_ghost);
+    std::fs::remove_file(path).unwrap();
+}
+#[test]
 fn draft_apply_cancel_and_unsaved_exit_are_distinct() {
     let mut app = app();
     activate_operation(

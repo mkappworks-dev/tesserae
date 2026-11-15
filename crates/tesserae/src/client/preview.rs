@@ -12,6 +12,7 @@ use crate::server::edit::AimGhost;
 use crate::world::WorldSettings;
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::visibility::RenderLayers;
+use bevy::ecs::system::SystemParam;
 use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
 
@@ -80,7 +81,7 @@ pub(super) struct Model {
     pub(super) held: Option<HandModel>,
     pub(super) mesh: Handle<Mesh>,
     /// `None` for what Place puts nothing down with.
-    ghost: Option<Handle<StandardMaterial>>,
+    pub(super) ghost: Option<Handle<StandardMaterial>>,
     pub(super) hand: Handle<StandardMaterial>,
 }
 pub(super) fn plugin(app: &mut App) {
@@ -88,7 +89,7 @@ pub(super) fn plugin(app: &mut App) {
         .init_session_state::<Textures>()
         .add_session_systems(
             Update,
-            (camera, model, position)
+            (camera, toggle.after(super::input::resolve), model, position)
                 .chain()
                 .after(super::aim::receive)
                 .after(super::removal::bar)
@@ -383,35 +384,74 @@ type Ghosts<'w, 's> = Query<
     With<Ghost>,
 >;
 
-#[allow(clippy::too_many_arguments)]
+/// Whether Place would put something down at the aim now. The Place hint reads
+/// this, so it holds with the ghost drawing switched off.
+#[derive(SystemParam)]
+pub(super) struct Placement<'w> {
+    removal: Option<Res<'w, super::removal::Progress>>,
+    dead: Option<Res<'w, super::death::Dead>>,
+    covers: super::menu::Covers<'w>,
+    layout: Option<Res<'w, super::layout::LayoutMode>>,
+    hotbar: Res<'w, Hotbar>,
+    model: Res<'w, Model>,
+    target: Res<'w, Target>,
+    sent: Res<'w, Sent>,
+    time: Res<'w, Time>,
+}
+impl Placement<'_> {
+    fn ghost(&self) -> Option<(AimGhost, Handle<StandardMaterial>)> {
+        let menu_open =
+            super::menu::covered(&self.covers) || self.dead.as_ref().is_some_and(|d| d.0.is_some());
+        (!self.removal.as_ref().is_some_and(|r| r.active())
+            && !menu_open
+            && !self.layout.as_ref().is_some_and(|layout| layout.on)
+            && self
+                .target
+                .current(&self.sent, self.time.elapsed_secs_f64())
+            && self.hotbar.held() != Holding::Fire)
+            .then_some(self.target.0.ghost)
+            .flatten()
+            .zip(self.model.ghost.clone())
+    }
+    pub(super) fn offered(&self) -> bool {
+        self.ghost().is_some()
+    }
+}
+
+pub(super) fn toggle(
+    mut commands: Commands,
+    ownership: Res<super::input::Ownership>,
+    actions: Res<super::actions::Actions>,
+    mut preferences: ResMut<super::profile::Preferences>,
+    mut pending: ResMut<super::view::PendingSave>,
+) {
+    if !ownership.gameplay() || !actions.started(super::actions::Action::PlacementGhost) {
+        return;
+    }
+    preferences.placement_ghost = !preferences.placement_ghost;
+    pending.0 = Some(super::view::SAVE_AFTER_S);
+    let text = if preferences.placement_ghost {
+        "Placement ghost on"
+    } else {
+        "Placement ghost off"
+    };
+    super::menu_ui::notify(&mut commands, text, super::menu_ui::Tone::Change);
+}
+
 pub(super) fn position(
     mut commands: Commands,
-    (removal, dead): (
-        Option<Res<super::removal::Progress>>,
-        Option<Res<super::death::Dead>>,
-    ),
-    (covers, layout): (super::menu::Covers, Option<Res<super::layout::LayoutMode>>),
-    (world, hotbar, catalogue, model): (
-        Res<WorldSettings>,
-        Res<Hotbar>,
-        Res<Catalogue>,
-        Res<Model>,
-    ),
-    (target, sent, time): (Res<Target>, Res<Sent>, Res<Time>),
+    (world, hotbar, catalogue): (Res<WorldSettings>, Res<Hotbar>, Res<Catalogue>),
+    preferences: Res<super::profile::Preferences>,
+    placement: Placement,
     mut meshes: ResMut<Assets<Mesh>>,
     // The ghost's own mesh: a Door's turn is not the hand's.
     mut drawn: Local<Option<GhostMesh>>,
     mut ghosts: Ghosts,
 ) {
-    let menu_open = super::menu::covered(&covers) || !super::death::alive(dead);
-    let shown = (!removal.is_some_and(|r| r.active())
-        && !menu_open
-        && !layout.is_some_and(|layout| layout.on)
-        && target.current(&sent, time.elapsed_secs_f64())
-        && hotbar.held() != Holding::Fire)
-        .then_some(target.0.ghost)
-        .flatten()
-        .zip(model.ghost.clone());
+    let shown = preferences
+        .placement_ghost
+        .then(|| placement.ghost())
+        .flatten();
     let Some((ghost, material)) = shown else {
         for (_, mut visibility, _, _) in &mut ghosts {
             visibility.set_if_neq(Visibility::Hidden);
@@ -519,10 +559,8 @@ mod tests {
         assert_eq!(flame.indices().unwrap().len(), 12);
     }
 
-    #[test]
-    fn models_follow_orientation_and_the_ghost_cell_and_hide_for_the_menu() {
+    fn ghost_app() -> App {
         let mut app = App::new();
-        let rock = tesserae_core::testgen::fixtures().ground.rock;
         app.init_resource::<Hotbar>()
             .insert_resource(Catalogue(catalogue()))
             .init_resource::<Swatches>()
@@ -534,13 +572,18 @@ mod tests {
             .init_resource::<Time>()
             .init_resource::<Assets<Mesh>>()
             .init_resource::<Assets<StandardMaterial>>()
+            .insert_resource(super::super::input::Ownership::playing())
+            .add_plugins(super::super::actions::test_plugin)
             .add_plugins(plugin);
         app.world_mut().spawn((
             FlyCamera::default(),
             Camera::default(),
             Transform::default(),
         ));
-        app.world_mut().resource_mut::<Hotbar>().outside = Some(Holding::solid(rock, SHAPE_STAIR));
+        app.world_mut().resource_mut::<Hotbar>().outside = Some(Holding::solid(
+            tesserae_core::testgen::fixtures().ground.rock,
+            SHAPE_STAIR,
+        ));
         let view = (Vec3::ZERO, Vec3::NEG_Z, None, None);
         app.world_mut().resource_mut::<Sent>().last = Some(view);
         {
@@ -552,6 +595,25 @@ mod tests {
             });
             target.1 = Some(view);
         }
+        app
+    }
+    fn ghosts_visible(app: &mut App) -> Vec<Visibility> {
+        app.world_mut()
+            .query_filtered::<&Visibility, With<Ghost>>()
+            .iter(app.world())
+            .copied()
+            .collect()
+    }
+    fn enable(app: &mut App) {
+        app.world_mut()
+            .resource_mut::<super::super::profile::Preferences>()
+            .placement_ghost = true;
+    }
+    #[test]
+    fn models_follow_orientation_and_the_ghost_cell_and_hide_for_the_menu() {
+        let rock = tesserae_core::testgen::fixtures().ground.rock;
+        let mut app = ghost_app();
+        enable(&mut app);
         app.update();
         let first = app.world().resource::<Model>().mesh.clone();
         let (transform, visibility) = app
@@ -590,6 +652,46 @@ mod tests {
                 .iter(app.world())
                 .all(|v| *v == Visibility::Hidden)
         );
+    }
+    #[test]
+    fn the_ghost_is_off_by_default_and_shows_once_the_setting_is_on() {
+        let mut app = ghost_app();
+        app.update();
+        assert!(ghosts_visible(&mut app).is_empty(), "nothing is drawn");
+        enable(&mut app);
+        app.update();
+        assert_eq!(ghosts_visible(&mut app), [Visibility::Visible]);
+        app.world_mut()
+            .resource_mut::<super::super::profile::Preferences>()
+            .placement_ghost = false;
+        app.update();
+        assert_eq!(ghosts_visible(&mut app), [Visibility::Hidden]);
+    }
+    #[test]
+    fn the_key_toggles_the_ghost_and_saves_the_preference() {
+        let mut app = ghost_app();
+        let press = |app: &mut App| {
+            let mut keys = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            keys.release(KeyCode::KeyH);
+            keys.clear();
+            keys.press(KeyCode::KeyH);
+            app.update();
+        };
+        press(&mut app);
+        assert_eq!(ghosts_visible(&mut app), [Visibility::Visible]);
+        assert!(
+            app.world()
+                .resource::<super::super::profile::Preferences>()
+                .placement_ghost
+        );
+        assert!(
+            app.world()
+                .resource::<super::super::view::PendingSave>()
+                .0
+                .is_some()
+        );
+        press(&mut app);
+        assert_eq!(ghosts_visible(&mut app), [Visibility::Hidden]);
     }
     #[test]
     fn a_ghost_shows_every_cell_and_the_turn_the_server_places_a_fixed_shape_in() {
@@ -846,6 +948,8 @@ mod tests {
             .init_resource::<Assets<Mesh>>()
             .init_resource::<Assets<StandardMaterial>>()
             .add_message::<InventoryChanged>()
+            .insert_resource(super::super::input::Ownership::playing())
+            .add_plugins(super::super::actions::test_plugin)
             .add_plugins(plugin)
             .add_systems(Update, super::super::edit::follow_server.before(model));
         app.world_mut().spawn((
@@ -864,6 +968,9 @@ mod tests {
             });
             target.1 = Some(view);
         }
+        app.world_mut()
+            .resource_mut::<super::super::profile::Preferences>()
+            .placement_ghost = true;
         let select = |app: &mut App, item: &str| {
             let mut inventory = Inventory::default();
             inventory

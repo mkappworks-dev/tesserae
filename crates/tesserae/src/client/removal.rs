@@ -303,19 +303,15 @@ pub(super) fn bar(
             Val::Percent((progress.elapsed / progress.duration.max(0.05)).clamp(0.0, 1.0) * 100.0);
     }
 }
-type PlaceHints<'w, 's> = Query<
-    'w,
-    's,
-    (&'static mut Visibility, &'static mut Text),
-    (With<PlaceHint>, Without<super::preview::Ghost>),
->;
+type PlaceHints<'w, 's> =
+    Query<'w, 's, (&'static mut Visibility, &'static mut Text), With<PlaceHint>>;
 fn place_hint(
-    ghosts: Query<&Visibility, With<super::preview::Ghost>>,
+    placement: super::preview::Placement,
     mut hints: PlaceHints,
     bindings: Res<super::actions::Bindings>,
     labels: Res<super::actions::Labels>,
 ) {
-    let shown = ghosts.iter().any(|v| *v == Visibility::Visible);
+    let shown = placement.offered();
     for (mut hint, mut text) in &mut hints {
         text.set_if_neq(Text::new(format!(
             "{} to place",
@@ -701,6 +697,44 @@ mod tests {
         assert_eq!(step(&mut app, 0.1).len(), 1);
     }
 
+    #[test]
+    fn the_place_hint_shows_where_a_ghost_would_without_the_ghost_drawn() {
+        let mut app = app();
+        app.init_resource::<super::super::preview::Model>()
+            .init_resource::<super::super::actions::Labels>()
+            .add_systems(Update, place_hint);
+        let hint = app
+            .world_mut()
+            .spawn((PlaceHint, Visibility::Hidden, Text::new("")))
+            .id();
+        app.world_mut()
+            .resource_mut::<super::super::edit::Hotbar>()
+            .outside = Some(super::super::edit::Holding::solid(1, 0));
+        app.world_mut().resource_mut::<Target>().0.ghost = Some(crate::server::edit::AimGhost {
+            at: Vec3::ZERO,
+            door: None,
+            plant_orientation: None,
+        });
+        app.world_mut()
+            .resource_mut::<super::super::preview::Model>()
+            .ghost = Some(default());
+        app.update();
+        assert!(
+            !app.world()
+                .resource::<super::super::profile::Preferences>()
+                .placement_ghost
+        );
+        assert_eq!(
+            app.world().get::<Visibility>(hint),
+            Some(&Visibility::Visible)
+        );
+        app.world_mut().resource_mut::<Menu>().open = true;
+        app.update();
+        assert_eq!(
+            app.world().get::<Visibility>(hint),
+            Some(&Visibility::Hidden)
+        );
+    }
     #[test]
     fn it_is_off_by_default_and_in_timed_tap_mode() {
         for tap in [false, true] {

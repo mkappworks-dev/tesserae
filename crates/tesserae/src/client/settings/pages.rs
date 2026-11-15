@@ -23,6 +23,7 @@ pub(in crate::client) fn action_name(action: Action) -> &'static str {
         Slower => "Decrease flight speed",
         Remove => "Remove",
         Place => "Place / ignite",
+        PlacementGhost => "Toggle placement ghost",
         Sample => "Sample",
         EmptyHand => "Empty hand",
         Shape => "Next Shape",
@@ -63,8 +64,10 @@ pub(in crate::client) fn category(action: Action) -> &'static str {
     match action {
         Forward | Backward | Left | Right | Ascend | Descend | Sprint | Respawn | Faster
         | Slower | MovementMode | View | ZoomIn | ZoomOut => "Movement",
-        Place | Remove | Sample | EmptyHand | Shape | Turn | Flip | CycleTool | Use | ClearTool
-        | Layout | LayoutMore | LayoutLess | LayoutReverse | LayoutActive => "Building",
+        Place | PlacementGhost | Remove | Sample | EmptyHand | Shape | Turn | Flip | CycleTool
+        | Use | ClearTool | Layout | LayoutMore | LayoutLess | LayoutReverse | LayoutActive => {
+            "Building"
+        }
         _ => "Interface",
     }
 }
@@ -267,6 +270,12 @@ pub(super) fn behavior(
             "Repeat while held",
             "Keep placing or removing while the binding is held.",
             |row| switch(row, p.repeat_held, Operation::Repeat),
+        );
+        setting_row(
+            card,
+            "Placement ghost",
+            "Show a translucent preview of the Voxel where Place would put it.",
+            |row| switch(row, p.placement_ghost, Operation::Ghost),
         );
     });
     group(list, "MOUSE & QUICK SLOTS", |card| {
@@ -796,6 +805,7 @@ pub(super) fn binding_order(action: Action) -> usize {
         ZoomIn,
         ZoomOut,
         Place,
+        PlacementGhost,
         Remove,
         Sample,
         EmptyHand,

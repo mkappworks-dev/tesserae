@@ -803,6 +803,7 @@ fn hints(bindings: &super::actions::Bindings, labels: &super::actions::Labels) -
         (Turn, "turn"),
         (Flip, "flip"),
         (Shape, "Shape"),
+        (PlacementGhost, "placement ghost"),
         (Menu, "menu"),
         (Forward, "forward"),
         (Backward, "backward"),

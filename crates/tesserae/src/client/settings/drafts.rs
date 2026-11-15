@@ -267,6 +267,7 @@ pub(super) fn activate(
                 Operation::Sprint(level) => p.speed_level = level,
                 Operation::Removal(value) => p.tap_remove = value,
                 Operation::Repeat => p.repeat_held = !p.repeat_held,
+                Operation::Ghost => p.placement_ghost = !p.placement_ghost,
                 Operation::Invert => p.invert_y = !p.invert_y,
                 Operation::ScrollDirection(value) => p.reverse_scroll = value,
                 Operation::Sync(value) => p.display_sync = value,
