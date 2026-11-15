@@ -516,6 +516,40 @@ fn history_is_bounded_and_each_mod_counts_only_the_events_it_missed() {
 }
 
 #[test]
+fn a_placed_structures_voxels_reach_a_mod_as_edit_events() {
+    use crate::server::edit::StructureIntent;
+    use crate::server::player::Player;
+    use tesserae_core::template::{Cell, Template, Turn};
+    let mut h = Harness::new(&[9]);
+    let mut tables = (*h.app.world().resource::<ContentTables>().0).clone();
+    let pair = vec![vec![vec![Cell::Voxel(Voxel::cube(h.rock)); 2]]];
+    tables
+        .templates
+        .push(Template::new("t:pair".into(), 1.0, pair, 0, None, 1.0).unwrap());
+    h.app
+        .insert_resource(ContentTables(std::sync::Arc::new(tables)))
+        .insert_resource(WorldSettings::default())
+        .add_plugins(edit::plugin);
+    let eye = Vec3::new(2.5, 6.0, 2.5);
+    h.app.world_mut().spawn(Player::at(eye));
+    h.put([2, 2, 2], Voxel::cube(h.rock));
+    h.app.world_mut().write_message(StructureIntent {
+        origin: eye,
+        direction: Vec3::NEG_Y,
+        template: "t:pair".into(),
+        turn: Turn::NONE,
+    });
+    h.app.world_mut().run_schedule(RunFixedMainLoop);
+    h.app.world_mut().run_schedule(FixedPreUpdate);
+    assert_eq!(h.voxel([1, 3, 2]), Voxel::cube(h.rock));
+    assert_eq!(h.voxel([2, 3, 2]), Voxel::cube(h.rock));
+    h.call();
+    let log = h.log(0);
+    assert!(log.contains("edits=2"), "{log}");
+    assert!(log.contains("x: 1.0, y: 3.0, z: 2.0"), "{log}");
+}
+
+#[test]
 fn only_successful_player_edits_enter_history_and_context_in_metres() {
     use crate::server::edit::{EditAction, EditIntent};
     use crate::server::player::Player;
