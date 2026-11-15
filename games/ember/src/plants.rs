@@ -1,7 +1,7 @@
 //! Where ember's Biomes scatter the Plants of the shared `flora` and `crops` Mods: hardy ones on
 //! the ash, and a fern and mushroom bog round the hot springs. `scorched` is left bare on purpose.
 
-use crate::tesserae::mods::content::SurfaceFeature;
+use crate::tesserae::mods::content::{CropField, SurfaceFeature};
 
 demo_kit::plants!();
 
@@ -19,6 +19,15 @@ pub fn ash_flats() -> Vec<SurfaceFeature> {
         ("flora:poppy", 12.0, 12.0, 0.95),
         ("flora:dry_grass", 3.8, 14.0, 0.9),
     ])
+}
+
+/// Hardy roots on the ash, a ditch of the lake's water where it is near, and basalt for a path.
+pub fn ash_fields() -> Vec<CropField> {
+    let crops = [("crops:potato", 5.0), ("crops:carrot", 3.0), ("crops:wheat", 2.0)];
+    vec![
+        crop_field(&crops, (6.0, 12.0), 72.0, "strata:basalt", Some(("waters:water", 40.0))),
+        crop_field(&crops, (6.0, 12.0), 112.0, "strata:basalt", None),
+    ]
 }
 
 pub fn highland() -> Vec<SurfaceFeature> {

@@ -67,7 +67,7 @@ fn biomes() -> Vec<BiomeDef> {
                 fog: (130, 122, 120),
             }),
             cave_scale: None,
-            crop_fields: Vec::new(),
+            crop_fields: plants::ash_fields(),
             surface_features: [food::feature()]
                 .into_iter()
                 .chain(plants::ash_flats())

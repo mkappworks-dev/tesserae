@@ -106,7 +106,7 @@ Biome with neither generates its recorded digests.
 Content. Terra's temperate Biome (a field by the lake with a ditch of its water,
 and one anywhere), meadow's meadow and prairie, tidewater's lagoon (ditch of the
 sea) and lumen's garden lay wheat, carrot and potato plots at 6, 2 and 2 (prairie
-8, 1 and 1) on a sand path. Ember has none: its ash is not farm land. Flowers and
+8, 1 and 1) on a sand path. Ember's ash flats lay potato, carrot and wheat plots at 5, 3 and 2 on a basalt path, one by the lake with a ditch and one anywhere; its potatoes lead. Flowers and
 vegetables are field groups in Terra's temperate and savanna Biomes, meadow's
 meadow and prairie and lumen's garden. In a 1 km square at 1.0 m the fields change, in Voxels of wheat, carrot and potato:
 Terra 534, 132 and 288, meadow 2226, 881 and 751, tidewater 624, 259 and 185,
