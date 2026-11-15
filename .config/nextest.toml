@@ -1,0 +1,5 @@
+# A test that starts late extends the job by its whole length; these four run for minutes on a
+# 2-core runner, so they take the first slots.
+[[profile.default.overrides]]
+filter = 'test(the_shared_spreaders) | test(every_game_with_planted_fields) | test(a_new_world_of_every_demo_game_has_its_food)'
+priority = 100
