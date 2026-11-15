@@ -117,3 +117,9 @@
   height: 130px;
   filter: drop-shadow(0 4px 10px #000a);
 }
+.structure-games {
+  flex-wrap: wrap;
+}
+.structure-games button {
+  flex: 1 0 30%;
+}

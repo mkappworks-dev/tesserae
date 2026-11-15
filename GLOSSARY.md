@@ -517,10 +517,25 @@ stands in shows through. Air in a Template is not Keep: it carves.
 **Ground layer** — the layer of a Template that sits at the ground's height
 where a Structure is placed. Layers below it are underground, such as a cellar.
 
-**Structure** — a Template placed in a World, by world generation or by a
-Player's Tool. Rotated about the vertical axis in quarter turns, and the same
-size in metres at every Voxel size. Nothing is stored per Structure: once placed
-it is only Voxels.
+**Structure** — a Template placed in a World, by world generation, by a Player's
+Tool or by a Site. Rotated about the vertical axis in quarter turns, and the
+same size in metres at every Voxel size. Nothing is stored per Structure: once
+placed it is only Voxels.
+
+**Settlement** — a group of Structures that world generation lays around a
+centre and joins with paths, from rules a Game or Mod declares: a radius in
+metres, an optional centre Template, the Templates it may hold and a path
+Material. A village and a town are a Game's names for Settlements of different
+rules, not different things.
+
+**Plot** — the ground one Structure of a Settlement stands on. A Plot whose
+ground fails the rules stays empty.
+
+**Blueprint** — an Item that names one Template. Laying it makes a Site.
+
+**Site** — a laid Blueprint: a Structure not yet built, kept by the World until
+its last Voxel is placed from Items brought to it. Once complete it is only
+Voxels, like any Structure.
 
 ## Audio
 
