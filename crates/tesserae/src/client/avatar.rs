@@ -88,7 +88,7 @@ fn swim_limbs(phase: f32, effort: f32) -> Swim {
 
 /// How far the figure tips forward, for a swimmer moving at these speeds.
 fn swim_lean(horizontal_mps: f32, vertical_mps: f32) -> f32 {
-    let full = super::hand_anim::SWIM_FULL_MPS;
+    let full = crate::server::player::SWIM_MPS;
     SWIM_LEAN_RAD * (horizontal_mps / full).clamp(0.0, 1.0)
         + DIVE_LEAN_RAD * (-vertical_mps / full).clamp(-1.0, 1.0)
 }

@@ -34,7 +34,8 @@ const WATER_DRAG_PER_S: f32 = 10.0;
 /// Horizontal speed multiplier of a body wet to its float height or more; the one factor a per-fluid
 /// table field can later feed.
 const WATER_SPEED_FACTOR: f32 = 0.6;
-const SWIM_MPS: f32 = 3.0;
+/// The swim speed the Client reads to scale the stroke.
+pub(crate) const SWIM_MPS: f32 = 3.0;
 const SWIM_RESPONSE_PER_S: f32 = 8.0;
 /// Wet share of the body from which it swims rather than wades.
 const SWIM_FRACTION: f32 = 0.5;

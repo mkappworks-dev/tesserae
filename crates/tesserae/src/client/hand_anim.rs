@@ -6,7 +6,7 @@
 
 use super::{edit::Hotbar, profile::Preferences};
 use crate::server::edit::{AppliedKind, EditApplied};
-use crate::server::player::{BodyState, MovementMode};
+use crate::server::player::{BodyState, MovementMode, SWIM_MPS};
 use crate::server::tool::UseOutcome;
 use crate::server::vitals::{EAT_BITE_S, EAT_BITES, EAT_RISE_S, EAT_S, EatIntent};
 use crate::session::SessionApp;
@@ -38,9 +38,6 @@ const MOUTH_TILT_RAD: f32 = 0.7;
 /// The food left in the hand after the last bite.
 const FOOD_LEFT: f32 = 0.45;
 
-/// The Server's full swim speed (`SWIM_MPS`, private there), where the stroke
-/// reaches its fastest.
-pub(super) const SWIM_FULL_MPS: f32 = 3.0;
 /// Slower than this the swimmer is treading water, not stroking.
 const TREAD_BELOW_MPS: f32 = 0.2;
 /// Strokes per second treading water and at full swim speed.
@@ -277,7 +274,7 @@ pub(super) fn swim_effort(body: BodyState) -> f32 {
     if speed <= TREAD_BELOW_MPS {
         0.0
     } else {
-        (speed / SWIM_FULL_MPS).clamp(0.0, 1.0)
+        (speed / SWIM_MPS).clamp(0.0, 1.0)
     }
 }
 
