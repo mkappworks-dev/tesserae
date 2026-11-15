@@ -274,3 +274,60 @@
 .game.strong-contrast .slot-number {
   color: #fff;
 }
+
+.kebab {
+  position: relative;
+}
+.kebab-btn {
+  min-width: 36px;
+  font-size: 18px;
+  line-height: 1;
+}
+.kebab-menu {
+  display: none;
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 5;
+  min-width: 140px;
+  padding: 4px;
+  background: #1c1d20;
+  border: 1px solid var(--edge);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px #0009;
+}
+.kebab.open .kebab-menu {
+  display: flex;
+  flex-direction: column;
+}
+.menu-item {
+  text-align: left;
+  padding: 8px 12px;
+  font: inherit;
+  font-size: 13px;
+  color: inherit;
+  background: none;
+  border: 0;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.menu-item:hover,
+.menu-item:focus-visible {
+  background: #ffffff14;
+}
+.menu-item.danger {
+  color: #f08a7c;
+}
+.menu-item.danger:hover,
+.menu-item.danger:focus-visible {
+  background: #c8483a33;
+}
+.btn.danger {
+  background: #b83a2e;
+  border-color: #b83a2e;
+  color: #fff;
+}
+.btn.danger:hover:not(:disabled) {
+  background: #cf4538;
+  border-color: #cf4538;
+}

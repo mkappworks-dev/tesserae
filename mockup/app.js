@@ -366,7 +366,7 @@ function worldCards(filtered) {
     ? filtered
         .map(
           (w) =>
-            `<article class="world-card">${mini(w.game)}<div class="world-info"><h3>${esc(w.name)}</h3><span class="pill">${w.game}</span><small> &nbsp; ${w.voxel} m voxels<br>${w.last}</small></div><div class="card-actions">${button("Play →", "open", { value: w.id, primary: true })}${button("Edit", "edit", { value: w.id, small: true, ghost: true })}</div></article>`,
+            `<article class="world-card">${mini(w.game)}<div class="world-info"><h3>${esc(w.name)}</h3><span class="pill">${w.game}</span><small> &nbsp; ${w.voxel} m voxels<br>${w.last}</small></div><div class="card-actions">${button("Play →", "open", { value: w.id, primary: true })}<div class="kebab"><button class="btn small ghost kebab-btn" data-action="card-menu" aria-label="World actions for ${esc(w.name)}" aria-haspopup="menu" aria-expanded="false">⋮</button><div class="kebab-menu" role="menu"><button class="menu-item" role="menuitem" data-action="edit" data-value="${w.id}">Edit</button><button class="menu-item danger" role="menuitem" data-action="delete" data-value="${w.id}">Delete</button></div></div></div></article>`,
         )
         .join("")
     : worlds.length
@@ -449,7 +449,7 @@ function edit() {
     title: "Edit World",
     subtitle: "Keep your place. Make it easier to find.",
     eyebrow: "MAIN MENU / WORLDS / EDIT",
-    body: `${textField("World name", "name", state.name, { hint: "Renaming keeps your terrain and progress." })}<p class="section-label">Generation settings <span class="pill">Locked</span></p><div class="two-col">${textField("Game", "locked", w.game, { disabled: true })}${textField("Voxel size (m)", "locked", w.voxel, { disabled: true })}</div><div class="row between"><div style="flex:1">${textField("World seed", "locked", w.seed, { disabled: true })}</div>${button("Copy", "copy-seed", { small: true, ghost: true })}</div><div class="two-col">${textField("Mods", "locked", (games[w.game]?.required || []).join(" · ") || "None", { disabled: true })}${textField("Biomes", "locked", `${w.biomes.filter((b) => b.enabled).length} changed at creation`, { disabled: true })}</div>${modePicks("mode", state.mode, { legend: "Default game mode", hint: "For Players joining this World for the first time. Changing it moves nobody." })}${modePicks("playerMode", state.playerMode, { legend: "Your game mode", compact: true, hint: "Switching to Survival keeps what you carry. Health and hunger start full." })}${state.mode !== w.mode || state.playerMode !== w.playerMode ? "<small>Mode changes take effect when the World next opens.</small>" : ""}<div class="notice">This World keeps the biomes and generator it was created with. To change its setup, create a new World from these settings.</div>${button("Create from these settings ↗", "duplicate", { value: w.id })}<details><summary>World information</summary><div class="summary-list">Created ${w.created}<br>${w.biomes.filter((b) => b.enabled).length} biomes · Generator version 2<br>Climate size ${w.tempSize} m / ${w.humiditySize} m</div></details><details><summary>Manage World</summary><small>Folder: ${esc(w.name)}</small><div class="spacer"></div>${button("Show folder", "show-folder", { small: true, ghost: true })}<div class="spacer"></div><small>Remove this World from the prototype’s list.</small><div class="spacer"></div>${button("Delete World…", "delete", { value: w.id, danger: true, small: true })}</details>`,
+    body: `${textField("World name", "name", state.name, { hint: "Renaming keeps your terrain and progress." })}<p class="section-label">Generation settings <span class="pill">Locked</span></p><div class="two-col">${textField("Game", "locked", w.game, { disabled: true })}${textField("Voxel size (m)", "locked", w.voxel, { disabled: true })}</div><div class="row between"><div style="flex:1">${textField("World seed", "locked", w.seed, { disabled: true })}</div>${button("Copy", "copy-seed", { small: true, ghost: true })}</div><div class="two-col">${textField("Mods", "locked", (games[w.game]?.required || []).join(" · ") || "None", { disabled: true })}${textField("Biomes", "locked", `${w.biomes.filter((b) => b.enabled).length} changed at creation`, { disabled: true })}</div>${modePicks("mode", state.mode, { legend: "Default game mode", hint: "For Players joining this World for the first time. Changing it moves nobody." })}${modePicks("playerMode", state.playerMode, { legend: "Your game mode", compact: true, hint: "Switching to Survival keeps what you carry. Health and hunger start full." })}${state.mode !== w.mode || state.playerMode !== w.playerMode ? "<small>Mode changes take effect when the World next opens.</small>" : ""}<div class="notice">This World keeps the biomes and generator it was created with. To change its setup, create a new World from these settings.</div>${button("Create from these settings ↗", "duplicate", { value: w.id })}<details><summary>World information</summary><div class="summary-list">Created ${w.created}<br>${w.biomes.filter((b) => b.enabled).length} biomes · Generator version 2<br>Climate size ${w.tempSize} m / ${w.humiditySize} m</div></details><details><summary>Manage World</summary><small>Folder: ${esc(w.name)}</small><div class="spacer"></div>${button("Show folder", "show-folder", { small: true, ghost: true })}<div class="spacer"></div><small>Remove this World from the prototype’s list.</small><div class="spacer"></div>${button("Delete World", "delete", { value: w.id, danger: true, small: true })}</details>`,
     footer: `${button("Cancel", "worlds", { ghost: true })}<span class="footer-hint">Generation is pinned</span>${button("Save changes", "save-edit", { primary: true })}`,
   });
 }
@@ -816,8 +816,22 @@ function action(name, value) {
     return;
   }
 }
+function closeCardMenus(except) {
+  document.querySelectorAll(".kebab.open").forEach((k) => {
+    if (k === except) return;
+    k.classList.remove("open");
+    k.querySelector(".kebab-btn").setAttribute("aria-expanded", "false");
+  });
+}
 document.addEventListener("click", (e) => {
   const b = e.target.closest("[data-action]");
+  const kebab = e.target.closest(".kebab");
+  closeCardMenus(b?.dataset.action === "card-menu" ? kebab : null);
+  if (b?.dataset.action === "card-menu") {
+    const open = kebab.classList.toggle("open");
+    b.setAttribute("aria-expanded", String(open));
+    return;
+  }
   if (b && !b.disabled) action(b.dataset.action, b.dataset.value);
 });
 document.addEventListener("input", (e) => {
