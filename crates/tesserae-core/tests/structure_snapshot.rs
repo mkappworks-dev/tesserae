@@ -161,7 +161,7 @@ fn a_world_saved_before_structures_opens_with_none() {
     let bare = WorldgenParams {
         biomes: BiomeTable::new(&[Biome {
             surface_features: SurfaceFeatures::NONE,
-            ..world().biomes.as_slice()[0].clone()
+            ..world().biomes.as_slice()[0]
         }])
         .unwrap(),
         ..world()
