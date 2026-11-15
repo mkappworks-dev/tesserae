@@ -911,7 +911,13 @@ fn as_the_game(id: &str, d: Declaration) -> Result<Applied, ModError> {
 #[test]
 fn the_game_declares_tools_named_by_its_mod() {
     let mut d = declaring(&[], &[]);
-    d.tools = vec![measure("ruler"), measure("tape")];
+    d.tools = vec![
+        measure("ruler"),
+        content::ToolDef {
+            name: "builder".into(),
+            kind: content::ToolKind::Place,
+        },
+    ];
     let applied = as_the_game("terra", d).unwrap();
     assert_eq!(
         applied.tools,
@@ -921,8 +927,8 @@ fn the_game_declares_tools_named_by_its_mod() {
                 kind: ToolKind::Measure
             },
             ToolDef {
-                name: "terra:tape".into(),
-                kind: ToolKind::Measure
+                name: "terra:builder".into(),
+                kind: ToolKind::Place
             },
         ]
     );

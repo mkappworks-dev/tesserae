@@ -277,10 +277,16 @@ fn component() -> Declaration {
                 end: content::BurnEnd::Permanent,
             },
         ],
-        tools: vec![content::ToolDef {
-            name: "ruler".into(),
-            kind: content::ToolKind::Measure,
-        }],
+        tools: vec![
+            content::ToolDef {
+                name: "ruler".into(),
+                kind: content::ToolKind::Measure,
+            },
+            content::ToolDef {
+                name: "builder".into(),
+                kind: content::ToolKind::Place,
+            },
+        ],
         items: vec![
             content::ItemDef {
                 name: "log".into(),

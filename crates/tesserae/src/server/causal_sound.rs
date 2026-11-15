@@ -154,6 +154,8 @@ fn outcomes(
             Ok(UseResult::Measured(_)) => Cause::UseMeasured,
             // Heard where they land, by their own Causes.
             Ok(UseResult::Door { .. } | UseResult::Container(_) | UseResult::Station) => continue,
+            // The list opening is the Client's to sound.
+            Ok(UseResult::TemplateList) => continue,
             Err(_) => Cause::UseRefused,
         };
         audio.emit(cause, player.eye());
