@@ -54,6 +54,54 @@ struct Data {
     voxel_uses: Vec<behaviour::VoxelUse>,
     #[serde(default)]
     plants: Vec<plant::Plant>,
+    #[serde(default, rename = "marker-kinds")]
+    marker_kinds: Vec<MarkerKind>,
+    #[serde(rename = "death-marker-kind")]
+    death_marker_kind: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MarkerKind {
+    name: String,
+    icon: MarkerIcon,
+    color: [u8; 4],
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum MarkerIcon {
+    Home,
+    Camp,
+    Mine,
+    Farm,
+    Landmark,
+    Death,
+    Flag,
+    Pin,
+    Star,
+}
+
+impl From<MarkerKind> for content::MarkerKindDef {
+    fn from(kind: MarkerKind) -> Self {
+        let icon = match kind.icon {
+            MarkerIcon::Home => content::MarkerIcon::Home,
+            MarkerIcon::Camp => content::MarkerIcon::Camp,
+            MarkerIcon::Mine => content::MarkerIcon::Mine,
+            MarkerIcon::Farm => content::MarkerIcon::Farm,
+            MarkerIcon::Landmark => content::MarkerIcon::Landmark,
+            MarkerIcon::Death => content::MarkerIcon::Death,
+            MarkerIcon::Flag => content::MarkerIcon::Flag,
+            MarkerIcon::Pin => content::MarkerIcon::Pin,
+            MarkerIcon::Star => content::MarkerIcon::Star,
+        };
+        let [r, g, b, a] = kind.color;
+        content::MarkerKindDef {
+            name: kind.name,
+            icon,
+            color: types::Srgba { r, g, b, a },
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -321,5 +369,7 @@ pub(crate) fn parse(id: &str, payload: &CheckedPayload) -> Result<Declaration, M
         recipes: data.recipes.into_iter().map(Into::into).collect(),
         voxel_uses: data.voxel_uses.into_iter().map(Into::into).collect(),
         plants: data.plants.into_iter().map(Into::into).collect(),
+        marker_kinds: data.marker_kinds.into_iter().map(Into::into).collect(),
+        death_marker_kind: data.death_marker_kind,
     })
 }

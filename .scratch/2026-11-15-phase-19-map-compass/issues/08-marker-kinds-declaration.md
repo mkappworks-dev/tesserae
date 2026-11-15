@@ -1,6 +1,6 @@
 # 08: Marker kinds are Declaration data
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 01
 
@@ -23,8 +23,8 @@ the other games compile unchanged. Ticket 11 edits the same contract file and th
 
 ## Acceptance criteria
 
-- [ ] The contract (WIT, core table, Mods crate, host conversion) accepts valid Marker kind rows and rejects each invalid one with an error naming the Mod, the row and the reason.
-- [ ] A death kind that names no declared Marker kind is rejected; older adapters supply none.
-- [ ] Terra declares its Marker kinds; the SDK starter and the other games build.
-- [ ] The Client receives the Marker kinds at session start (a message test).
-- [ ] The contract-compatibility, data-mods and authoring docs describe the table; fmt, clippy, game manifests and tests pass.
+- [x] The contract (WIT, core table, Mods crate, host conversion) accepts valid Marker kind rows and rejects each invalid one with an error naming the Mod, the row and the reason.
+- [x] A death kind that names no declared Marker kind is rejected; older adapters supply none.
+- [x] Terra declares its Marker kinds; the SDK starter and the other games build.
+- [x] The Client receives the Marker kinds at session start (a message test).
+- [x] The contract-compatibility, data-mods and authoring docs describe the table; fmt, clippy, game manifests and tests pass.

@@ -605,6 +605,8 @@ pub(crate) async fn declare_all(
     loaded.items =
         resolve_items(&behaviours, &loaded.tables, &loaded.registry).map_err(|e| e.to_string())?;
     loaded.sounds = resolve_sounds(&behaviours, &loaded.registry).map_err(|e| e.to_string())?;
+    loaded.tables.markers =
+        tesserae_mods::resolve_markers(&behaviours).map_err(|e| e.to_string())?;
     let biome_rows = biome_rows(&behaviours);
     let recipes = tesserae_mods::DeclaredRecipes::take(&mut behaviours);
     let plants = tesserae_mods::DeclaredPlants::take(&mut behaviours);
@@ -751,6 +753,7 @@ pub(super) fn plugin(app: &mut App) {
         .add_session_message::<ContentCatalogue>()
         .add_session_message::<crate::content::WorldFacts>()
         .add_session_message::<crate::content::SoundLibrary>()
+        .add_session_message::<crate::content::MarkerKinds>()
         .add_session_message::<crate::content::SoundscapeLibrary>()
         .add_session_message::<crate::content::RecipeBook>()
         .on_session_start(install)
@@ -769,6 +772,7 @@ fn install(world: &mut World) {
         .get_resource::<WorldSettings>()
         .map_or(WorldSettings::default().voxel_size, |w| w.voxel_size);
     let items = loaded.every_item(voxel_size);
+    let markers = crate::content::MarkerKinds(loaded.tables.markers.clone());
     let tables = super::ContentTables::from_loaded(loaded.tables, loaded.game);
     let reopened = world
         .get_resource::<super::persistence::Persistence>()
@@ -826,6 +830,7 @@ fn install(world: &mut World) {
     world.insert_resource(super::tool::Tools(loaded.tools));
     world.insert_resource(super::sound::SoundTable::new(&loaded.sounds));
     world.insert_resource(super::soundscape::Soundscapes::new(&loaded.sounds));
+    world.write_message(markers);
     world.write_message(crate::content::SoundscapeLibrary::new(&loaded.sounds));
     world.write_message(crate::content::SoundLibrary::new(loaded.sounds));
     world.insert_resource(
@@ -2191,6 +2196,29 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
         assert_eq!(library.len(), 1);
         assert_eq!(library[0].0[0].def, def);
         assert_eq!(*library[0].0[0].recordings[1], [3]);
+    }
+
+    #[test]
+    fn the_worlds_marker_kinds_reach_the_client_at_session_start() {
+        use tesserae_core::marker::{Icon, MarkerKind, MarkerKinds};
+        let markers = MarkerKinds {
+            kinds: vec![MarkerKind {
+                name: "t:grave".into(),
+                icon: Icon::Death,
+                color: [217, 100, 92, 255],
+            }],
+            death: Some(0),
+        };
+        let mut loaded = LoadedMods::default();
+        loaded.tables.markers = markers.clone();
+        let mut app = App::new();
+        app.insert_non_send(loaded).add_plugins(plugin);
+        let sent: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<crate::content::MarkerKinds>>()
+            .drain()
+            .collect();
+        assert_eq!(sent, [crate::content::MarkerKinds(markers)]);
     }
 
     #[test]

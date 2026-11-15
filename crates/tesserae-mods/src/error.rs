@@ -216,6 +216,18 @@ pub enum ModError {
         name: String,
         reason: String,
     },
+    /// A `marker-kinds` row, named by its name.
+    Marker {
+        id: String,
+        row: usize,
+        name: String,
+        reason: String,
+    },
+    /// The Game's `death-marker-kind` names no declared Marker kind.
+    DeathMarker {
+        id: String,
+        name: String,
+    },
     /// A `recipes` row, named by its output Item.
     Recipe {
         id: String,
@@ -454,6 +466,16 @@ impl fmt::Display for ModError {
                 name,
                 reason,
             } => write!(f, "mod `{id}`: plant {row} `{name}`: {reason}"),
+            ModError::Marker {
+                id,
+                row,
+                name,
+                reason,
+            } => write!(f, "mod `{id}`: marker kind {row} `{name}`: {reason}"),
+            ModError::DeathMarker { id, name } => write!(
+                f,
+                "mod `{id}`: death-marker-kind names `{name}`, which is no declared Marker kind"
+            ),
             ModError::Recipe {
                 id,
                 row,

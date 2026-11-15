@@ -65,6 +65,8 @@ pub(super) fn declaring(materials: &[&str], shapes: &[&str]) -> Declaration {
         cause_sounds: Vec::new(),
         recipes: Vec::new(),
         plants: Vec::new(),
+        marker_kinds: Vec::new(),
+        death_marker_kind: None,
         voxel_uses: Vec::new(),
     }
 }

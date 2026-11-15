@@ -435,6 +435,24 @@ through unless it declares `collision`, and it seals no face, cannot `connect`
 and does not count against the Chunk's shaped-Voxel cap. A Material may add
 `tags`, which a Plant's soil and water can name as `#tag`.
 
+A `[[marker-kinds]]` row declares a kind of mark for the Map and the Compass: a
+local `name`, an `icon` and a `color`. The `icon` is one of `home`, `camp`,
+`mine`, `farm`, `landmark`, `death`, `flag`, `pin` or `star`, shapes the Engine
+draws, so no font is needed; the `color` is four RGBA bytes. A Mod may
+declare 16. The Game may also set a top-level
+`death-marker-kind = "<mod id>:<name>"`, which must name a declared Marker kind
+or the load fails, naming the Mod, the row and the reason. No Mod is called and
+no host call is added.
+
+```toml
+death-marker-kind = "plain:grave"
+
+[[marker-kinds]]
+name = "grave"
+icon = "death"
+color = [217, 100, 92, 255]
+```
+
 A `[[plants]]` row declares a Plant the Server grows, of kind `crop`, `tree`,
 `column`, `spreader` or `climber`, with its needs in `[plants.needs]`. A `tree`
 may add a `branching` record (limbs, fork, lean and lobes, in metres). A crop or

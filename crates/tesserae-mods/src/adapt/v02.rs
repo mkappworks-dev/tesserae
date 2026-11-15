@@ -242,6 +242,8 @@ pub(crate) fn declaration(d: old::Declaration, log: &LogHandle) -> content::Decl
         recipes: Vec::new(),
         voxel_uses: Vec::new(),
         plants: Vec::new(),
+        marker_kinds: Vec::new(),
+        death_marker_kind: None,
     }
 }
 

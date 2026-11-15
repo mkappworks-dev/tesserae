@@ -163,6 +163,8 @@ pub struct Behaviour {
     pub(crate) recipes: Vec<content::RecipeDef>,
     voxel_uses: Vec<content::VoxelUse>,
     pub(crate) plants: Vec<content::PlantDef>,
+    pub(crate) marker_kinds: Vec<content::MarkerKindDef>,
+    pub(crate) death_marker_kind: Option<String>,
     /// Each Material's tags, by full name, for the Plants that name a `#tag`.
     pub(crate) material_tags: Vec<(String, Vec<String>)>,
     lake: Option<content::WaterParams>,
@@ -219,6 +221,7 @@ pub fn apply(
             (!declaration.tools.is_empty(), "tools"),
             (declaration.survival.is_some(), "survival"),
             (!declaration.cause_sounds.is_empty(), "cause-sounds"),
+            (declaration.death_marker_kind.is_some(), "death-marker-kind"),
         ] {
             if set {
                 return Err(ModError::NotAGame { id: id(), field });
@@ -276,6 +279,11 @@ pub fn apply(
             "plant",
             declaration.plants.len(),
             crate::plant::MAX_PLANTS_PER_MOD,
+        ),
+        (
+            "marker-kind",
+            declaration.marker_kinds.len(),
+            crate::marker::MAX_MARKER_KINDS_PER_MOD,
         ),
     ] {
         if count > max {
@@ -502,6 +510,8 @@ pub fn apply(
             recipes: declaration.recipes,
             voxel_uses: declaration.voxel_uses,
             plants: declaration.plants,
+            marker_kinds: declaration.marker_kinds,
+            death_marker_kind: declaration.death_marker_kind,
             material_tags,
             lake,
             ground,

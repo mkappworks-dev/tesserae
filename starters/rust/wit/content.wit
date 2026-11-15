@@ -1027,6 +1027,28 @@ interface content {
         sound: string,
     }
 
+    /// What the Engine draws a Marker kind as: a closed set of shapes, so no
+    /// font has to carry an icon.
+    enum marker-icon {
+        home,
+        camp,
+        mine,
+        farm,
+        landmark,
+        death,
+        flag,
+        pin,
+        star,
+    }
+
+    /// A kind of mark a Player can put on the Map and the Compass.
+    record marker-kind-def {
+        /// The kind's local name.
+        name: string,
+        icon: marker-icon,
+        color: srgba,
+    }
+
     /// Everything a Mod adds, in registration order: a name's id is its index
     /// after the engine's built-ins, so Materials start at 8 (7 is retired and
     /// never handed out) and Shapes at 4. A `world` or `view` from a Mod that is
@@ -1079,5 +1101,10 @@ interface content {
         /// At most 128 rows per Mod and 512 in a World, from any Mod. A Material
         /// is in at most one Plant, once.
         plants: list<plant-def>,
+        /// At most 16 rows per Mod, from any Mod, named `<mod id>:<name>`.
+        marker-kinds: list<marker-kind-def>,
+        /// The full name of the Marker kind a death leaves, from the Game only;
+        /// it must name a declared Marker kind. `none` leaves no death mark.
+        death-marker-kind: option<string>,
     }
 }
