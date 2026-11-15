@@ -269,6 +269,12 @@ pub(super) fn place(facts: Option<&WorldFacts>) -> String {
 /// Whether World details show, and whether the background is solid.
 type Shown = (bool, bool, bool);
 
+type Optional<'w> = (
+    Option<Res<'w, super::game_mode::Mode>>,
+    Option<Res<'w, super::profile::Preferences>>,
+    Option<Res<'w, super::map_cache::MapAllowed>>,
+);
+
 fn render(
     mut commands: Commands,
     (menu, facts, here, settings): (
@@ -277,9 +283,7 @@ fn render(
         Res<Here>,
         Option<Res<super::settings::Settings>>,
     ),
-    own: Option<Res<super::game_mode::Mode>>,
-    preferences: Option<Res<super::profile::Preferences>>,
-    allowed: Option<Res<super::map_cache::MapAllowed>>,
+    (own, preferences, allowed): Optional,
     (bindings, labels): (Res<super::actions::Bindings>, Res<super::actions::Labels>),
     roots: Query<Entity, With<MenuRoot>>,
     mut shown: Local<Option<Shown>>,

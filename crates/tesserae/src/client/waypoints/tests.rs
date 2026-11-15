@@ -3,14 +3,16 @@ use tesserae_core::marker::MarkerKind;
 use super::*;
 
 fn marks_with(points: &[(&str, f32, f32)]) -> Marks {
-    let mut marks = Marks::default();
-    marks.kinds = MarkerKinds {
-        kinds: vec![MarkerKind {
-            name: "t:home".into(),
-            icon: Icon::Home,
-            color: [200, 40, 40, 255],
-        }],
-        death: None,
+    let mut marks = Marks {
+        kinds: MarkerKinds {
+            kinds: vec![MarkerKind {
+                name: "t:home".into(),
+                icon: Icon::Home,
+                color: [200, 40, 40, 255],
+            }],
+            death: None,
+        },
+        ..Marks::default()
     };
     let mut list = Waypoints::default();
     for (name, x, z) in points {

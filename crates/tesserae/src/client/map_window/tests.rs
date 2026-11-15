@@ -310,7 +310,7 @@ fn explored_area_is_the_sample_count_times_four_square_metres() {
     let mut app = app();
     explore(&mut app, [0, 0], None, 5);
     explore(&mut app, [1, 0], None, 3);
-    assert_eq!(explored_m2(&app.world().resource::<MapCache>()), 32);
+    assert_eq!(explored_m2(app.world().resource::<MapCache>()), 32);
     press(&mut app, KeyCode::KeyN);
     assert_eq!(text_of::<AreaText>(&mut app), "32 m²");
 }

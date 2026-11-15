@@ -72,7 +72,7 @@ pub(super) fn ground_colour(map: &Map, cell: [i32; 2], palette: &MapPalette) -> 
 
 /// Unexplored ground, hatched so it reads as not-yet-seen rather than empty.
 pub(super) fn fog(x: u32, y: u32) -> [u8; 4] {
-    FOG[usize::from(((x + y) >> 2) % 4 != 0)]
+    FOG[usize::from(!((x + y) >> 2).is_multiple_of(4))]
 }
 
 fn inside(point: Vec2, a: Vec2, b: Vec2, c: Vec2) -> bool {
@@ -198,14 +198,18 @@ struct Shown<'w, 's> {
     roots: Query<'w, 's, Entity, With<MinimapRoot>>,
 }
 
+type Sources<'w> = (
+    Res<'w, Spot>,
+    Res<'w, MapCache>,
+    Res<'w, MapPalette>,
+    Res<'w, super::waypoints::Marks>,
+    Option<Res<'w, Facts>>,
+);
+
 fn sync(
     mut commands: Commands,
     shown: Shown,
-    spot: Res<Spot>,
-    cache: Res<MapCache>,
-    palette: Res<MapPalette>,
-    marks: Res<super::waypoints::Marks>,
-    facts: Option<Res<Facts>>,
+    (spot, cache, palette, marks, facts): Sources,
     mut images: ResMut<Assets<Image>>,
     mut lines: Query<(&Line, &mut Text)>,
     mut drawn: Local<Option<(Drawn, Handle<Image>)>>,

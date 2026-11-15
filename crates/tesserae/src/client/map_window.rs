@@ -391,23 +391,21 @@ fn track_pointer(
     }
 }
 
+// Disjoint filters so the four Text queries in `Lines` do not conflict.
+type AreaOnly = (With<AreaText>, Without<ReadoutText>, Without<ZoomText>);
+type ScaleOnly = (
+    With<ScaleText>,
+    Without<ReadoutText>,
+    Without<ZoomText>,
+    Without<AreaText>,
+);
+
 #[derive(bevy::ecs::system::SystemParam)]
 struct Lines<'w, 's> {
     readout: Query<'w, 's, &'static mut Text, With<ReadoutText>>,
     zoom: Query<'w, 's, &'static mut Text, (With<ZoomText>, Without<ReadoutText>)>,
-    area:
-        Query<'w, 's, &'static mut Text, (With<AreaText>, Without<ReadoutText>, Without<ZoomText>)>,
-    scale_text: Query<
-        'w,
-        's,
-        &'static mut Text,
-        (
-            With<ScaleText>,
-            Without<ReadoutText>,
-            Without<ZoomText>,
-            Without<AreaText>,
-        ),
-    >,
+    area: Query<'w, 's, &'static mut Text, AreaOnly>,
+    scale_text: Query<'w, 's, &'static mut Text, ScaleOnly>,
     scale_bar: Query<'w, 's, &'static mut Node, With<ScaleBar>>,
     legend: Query<'w, 's, Entity, With<LegendList>>,
 }

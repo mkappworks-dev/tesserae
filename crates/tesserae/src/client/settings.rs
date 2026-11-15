@@ -255,16 +255,18 @@ impl Opener<'_, '_> {
     }
 }
 
+type Gates<'w> = (
+    Res<'w, super::input::UiInput>,
+    Res<'w, crate::server::persistence::SaveStatus>,
+    Res<'w, super::input::Ownership>,
+    Option<Res<'w, super::inventory_window::InventoryWindow>>,
+    Option<Res<'w, super::map_window::MapWindow>>,
+);
+
 pub(super) fn open_shortcut(
     actions: Res<super::actions::Actions>,
     mut opener: Opener,
-    (ui, status, ownership, inventory, map): (
-        Res<super::input::UiInput>,
-        Res<crate::server::persistence::SaveStatus>,
-        Res<super::input::Ownership>,
-        Option<Res<super::inventory_window::InventoryWindow>>,
-        Option<Res<super::map_window::MapWindow>>,
-    ),
+    (ui, status, ownership, inventory, map): Gates,
     window: Single<&Window, With<bevy::window::PrimaryWindow>>,
 ) {
     if !window.focused
