@@ -655,6 +655,17 @@ pub(crate) async fn declare_all(
         world.biomes = biomes;
         world.ores = ores;
     }
+    // Every Template the World declares, until Biomes say which they place.
+    let obtainable = super::obtainable::obtainable(&loaded, &loaded.every_item(world.voxel_size));
+    templates
+        .check(&loaded.registry, |m| {
+            (!obtainable.contains(&m)).then(|| {
+                "is not Obtainable: no Biome lays it, no Plant yields it and no Recipe makes it \
+                 from what is"
+                    .to_owned()
+            })
+        })
+        .map_err(|e| e.to_string())?;
     Ok(loaded)
 }
 
@@ -1494,6 +1505,146 @@ biomes = ["plain:dry"]
         let world = s.load(TrustMode::All).unwrap().world.unwrap();
         assert!(world.biomes.is_empty() && world.ores.is_empty());
         assert_eq!(world.climate, tesserae_core::ClimateParams::default());
+    }
+
+    /// A Game whose ground is all rock, with planks and gem nothing lays.
+    fn hut_game(extra: &str) -> String {
+        format!(
+            r#"{DATA_GAME}
+[[materials]]
+name = "planks"
+emission = 0
+dimming = 15
+occlusion = "opaque"
+render = "opaque"
+solid = true
+[[materials]]
+name = "gem"
+emission = 0
+dimming = 15
+occlusion = "opaque"
+render = "opaque"
+solid = true
+[[templates]]
+name = "hut"
+cell-m = 1.0
+ground-layer = 0
+layers = [["rp"]]
+[templates.palette]
+"r" = {{ material = "plain:rock" }}
+"p" = {{ material = "plain:planks" }}
+{extra}
+"#
+        )
+    }
+
+    /// The refusal of Create World, then of opening, for a Game in `s`.
+    fn refusals(s: &Scratch) -> (Result<(), String>, Result<(), String>) {
+        let scan = tesserae_mods::scan(&s.0.join("mods")).unwrap();
+        let found = scan.games.into_iter().chain(scan.mods).collect();
+        let created = preview(found, &s.0.join("trust.json"), false).map(|_| ());
+        (created, s.load(TrustMode::All).map(|_| ()))
+    }
+
+    #[test]
+    fn a_template_material_only_a_recipe_makes_needs_the_recipes_inputs_obtainable() {
+        let from_rock = "[[recipes]]\ninputs = [{ item = \"plain:rock\", count = 1 }]\n\
+                         output = { item = \"plain:planks\", count = 4 }\nstation = \"hand\"\n";
+        let from_gem = from_rock.replace("plain:rock", "plain:gem");
+        let s = Scratch::new();
+        data(&s, "plain", true, "", &hut_game(from_rock));
+        assert_eq!(refusals(&s), (Ok(()), Ok(())));
+        for unmade in ["", from_gem.as_str()] {
+            let s = Scratch::new();
+            data(&s, "plain", true, "", &hut_game(unmade));
+            let want = "mod `plain`: template 0 `hut`: palette `p`: Material `plain:planks` is \
+                        not Obtainable: no Biome lays it, no Plant yields it and no Recipe makes \
+                        it from what is";
+            let (created, opened) = refusals(&s);
+            assert_eq!(created.unwrap_err(), want);
+            assert_eq!(opened.unwrap_err(), want);
+        }
+    }
+
+    #[test]
+    fn what_biomes_lay_plants_yield_and_ores_hold_is_obtainable() {
+        let moss = "[[materials]]\nname = \"moss\"\nemission = 0\ndimming = 15\n\
+                    occlusion = \"opaque\"\nrender = \"opaque\"\nsolid = true\n\
+                    [[items]]\nname = \"board\"\nsize-m = 0.25\ncolor = [1, 2, 3, 255]\n\
+                    material = \"plain:planks\"\n\
+                    [[plants]]\nname = \"moss\"\nkind = \"spreader\"\nseed = \"plain:moss\"\n\
+                    material = \"plain:moss\"\nreach-m = 2.0\nmean-seconds = 60.0\ndensity = 5\n\
+                    yields = [{ item = \"plain:board\", count = [1, 1] }]\n\
+                    [plants.needs]\nsoil = [\"plain:rock\"]\n";
+        let mossy = "[[biomes]]\nname = \"mossy\"\ntemperature = 0.5\nhumidity = 0.5\n\
+                     surface-features = [{ material = \"plain:moss\", spacing-m = 8.0 }]\n";
+        let gem = "[[biomes]]\nname = \"dry\"\ntemperature = 0.5\nhumidity = 0.5\n\
+                   [[ores]]\nmaterial = \"plain:gem\"\nmin-depth-m = 5.0\nmax-depth-m = 50.0\n\
+                   vein-size-m = 2.0\nrarity = 0.1\n\
+                   [[recipes]]\ninputs = [{ item = \"plain:gem\", count = 1 }]\n\
+                   output = { item = \"plain:planks\", count = 4 }\nstation = \"hand\"\n";
+        for (extra, loads) in [
+            (format!("{moss}{mossy}"), true),
+            (moss.to_owned(), false),
+            (gem.to_owned(), true),
+        ] {
+            let s = Scratch::new();
+            data(&s, "plain", true, "", &hut_game(&extra));
+            let (created, opened) = refusals(&s);
+            assert_eq!(
+                (created.is_ok(), opened.is_ok()),
+                (loads, loads),
+                "{extra}: {created:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_grown_material_or_a_doors_open_material_in_a_template_is_refused() {
+        let content = "\"g\" = { material = \"plain:ripe\" }\n\
+                       \"d\" = { material = \"plain:open\" }\n\
+                       [[materials]]\nname = \"sprout\"\nemission = 0\ndimming = 0\n\
+                       occlusion = \"never\"\nrender = \"cutout\"\nsolid = true\n\
+                       [[materials]]\nname = \"ripe\"\nemission = 0\ndimming = 0\n\
+                       occlusion = \"never\"\nrender = \"cutout\"\nsolid = true\n\
+                       [[materials]]\nname = \"open\"\nemission = 0\ndimming = 15\n\
+                       occlusion = \"opaque\"\nrender = \"opaque\"\nsolid = true\n\
+                       [[plants]]\nname = \"wheat\"\nkind = \"crop\"\nseed = \"plain:sprout\"\n\
+                       stages = [{ material = \"plain:sprout\", mean-seconds = 20.0 }, \
+                       { material = \"plain:ripe\" }]\n\
+                       [plants.needs]\nsoil = [\"plain:rock\"]\n\
+                       [[voxel-uses]]\nkind = \"door\"\nmaterial = \"plain:planks\"\n\
+                       open = \"plain:open\"\nwidth-m = 1.0\n";
+        for (drop, want) in [
+            (
+                "\"d\" = { material = \"plain:open\" }\n",
+                "palette `g`: Material `plain:ripe` is a Grown Material, which only a Plant's \
+                 growth makes",
+            ),
+            (
+                "\"g\" = { material = \"plain:ripe\" }\n",
+                "palette `d`: Material `plain:open` is a Door's open form; a Template holds the \
+                 Door closed",
+            ),
+        ] {
+            let s = Scratch::new();
+            data(
+                &s,
+                "plain",
+                true,
+                "",
+                &hut_game(&content.replacen(drop, "", 1)),
+            );
+            let (created, opened) = refusals(&s);
+            for refusal in [created, opened] {
+                let refusal = refusal.unwrap_err();
+                assert!(
+                    refusal.starts_with("mod `plain`: template 0 `hut`: ")
+                        && refusal.ends_with(want),
+                    "{refusal}"
+                );
+            }
+        }
     }
 
     #[test]

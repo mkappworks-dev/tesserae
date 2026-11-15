@@ -38,6 +38,7 @@ mod lod;
 mod lod_rings;
 pub mod map;
 pub mod mods;
+mod obtainable;
 pub mod persistence;
 pub mod plants;
 pub mod player;
