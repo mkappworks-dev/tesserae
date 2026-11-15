@@ -129,6 +129,12 @@ interface content {
         start-in-flight: bool,
     }
 
+    /// Whether the Server keeps a Player's Map and the Client draws the Map, the
+    /// Compass and the minimap. A saved Map is kept while this forbids it.
+    record map-policy {
+        enabled: bool,
+    }
+
     /// How the engine poses a character bone. Closed in 0.3.
     enum bone-role {
         /// Turns with the body and carries what hangs from it.
@@ -200,6 +206,9 @@ interface content {
 
     record world-params {
         movement: option<movement-policy>,
+        /// Whether the Map and the Compass exist in this World. `none` permits them.
+        /// Only the Game may set it.
+        map-policy: option<map-policy>,
         /// `none` draws the engine's plain box.
         character: option<character-def>,
         sea-level-m: f32,

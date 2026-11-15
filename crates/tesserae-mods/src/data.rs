@@ -157,6 +157,7 @@ struct World {
     ground: Option<Ground>,
     climate: Option<world::Climate>,
     movement: Option<world::Movement>,
+    map: Option<world::Map>,
     character: Option<character::Character>,
 }
 
@@ -320,6 +321,7 @@ pub(crate) fn parse(id: &str, payload: &CheckedPayload) -> Result<Declaration, M
                     smoothing: w.smoothing.map(Into::into),
                     water: w.water.map(Into::into),
                     movement: w.movement.map(Into::into),
+                    map_policy: w.map.map(Into::into),
                     character,
                 })
             })

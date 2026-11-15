@@ -137,6 +137,7 @@ pub struct Applied {
     pub world: Option<WorldgenParams>,
     pub view: Option<ViewParams>,
     pub movement: Option<content::MovementPolicy>,
+    pub map: Option<content::MapPolicy>,
     pub character: Option<crate::character::Character>,
     pub tools: Vec<ToolDef>,
     /// The Game's, with its omitted fields at the engine's defaults.
@@ -177,6 +178,7 @@ fn beyond_character(world: &content::WorldParams) -> Option<&'static str> {
     let bare = WorldgenParams::default();
     [
         (world.movement.is_some(), "world.movement"),
+        (world.map_policy.is_some(), "world.map"),
         (world.caves.is_some(), "world.caves"),
         (world.smoothing.is_some(), "world.smoothing"),
         (world.water.is_some(), "world.water"),
@@ -356,6 +358,7 @@ pub fn apply(
             },
         });
     }
+    let map = declaration.world.as_ref().and_then(|p| p.map_policy);
     let ground = declaration.world.as_ref().and_then(|p| p.ground.clone());
     let (world, lake) = declaration.world.map(world_params).unzip();
     let lake = lake.flatten();
@@ -491,6 +494,7 @@ pub fn apply(
         world,
         view,
         movement,
+        map,
         character,
         tools,
         survival,

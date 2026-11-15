@@ -7,7 +7,7 @@ use tesserae_core::marker::{self, WaypointsV1};
 
 use super::ContentTables;
 use super::death::PlayerIntents;
-use super::map::PlayerMap;
+use super::map::{MapPolicy, PlayerMap};
 use super::persistence::extensions::PlayerState;
 use super::player::Player;
 use crate::session::SessionApp;
@@ -42,6 +42,8 @@ pub enum Reason {
     TooMany,
     NoSuchWaypoint,
     DeathMarker,
+    /// The World's Game forbids the Map.
+    MapOff,
 }
 
 #[derive(Message, Clone, Copy, PartialEq, Eq, Debug)]
@@ -60,11 +62,13 @@ pub fn message(reason: Reason) -> &'static str {
         Reason::TooMany => "Too many Waypoints. Remove one first.",
         Reason::NoSuchWaypoint => "That Waypoint no longer exists.",
         Reason::DeathMarker => "The death marker cannot be removed.",
+        Reason::MapOff => "The Map is off in this World.",
     }
 }
 
 pub(super) fn plugin(app: &mut App) {
-    app.add_player_intent::<WaypointIntent>()
+    app.init_session_resource::<MapPolicy>()
+        .add_player_intent::<WaypointIntent>()
         .add_session_message::<WaypointRefused>()
         .add_session_message::<WaypointsChanged>()
         .add_session_systems(
@@ -77,6 +81,7 @@ fn answer(
     mut intents: MessageReader<WaypointIntent>,
     mut players: Query<(&PlayerMap, &mut PlayerWaypoints), With<Player>>,
     tables: Res<ContentTables>,
+    policy: Res<MapPolicy>,
     mut refused: MessageWriter<WaypointRefused>,
 ) {
     let Ok((map, mut waypoints)) = players.single_mut() else {
@@ -85,6 +90,7 @@ fn answer(
     };
     for intent in intents.read() {
         let outcome = match intent {
+            _ if !policy.enabled => Err(Reason::MapOff),
             WaypointIntent::Add {
                 x_m,
                 z_m,
@@ -233,6 +239,21 @@ mod tests {
         assert_eq!(list.list().len(), 1);
         assert_eq!(list.list()[0].name, "Base");
         assert_eq!(list.list()[0].kind, KIND);
+    }
+
+    #[test]
+    fn a_forbidden_map_refuses_every_intent_and_keeps_the_list() {
+        let mut app = game(kinds());
+        let (_, sent) = ask(&mut app, add(10.0, 10.0, "Home", KIND));
+        let id = sent[0].list()[0].id;
+        app.insert_resource(super::super::map::MapPolicy { enabled: false });
+        let (refused, sent) = ask(&mut app, add(10.0, 10.0, "Again", KIND));
+        assert_eq!((refused, sent.len()), (vec![Reason::MapOff], 0));
+        let (refused, _) = ask(&mut app, WaypointIntent::Remove { id });
+        assert_eq!(refused, [Reason::MapOff]);
+        app.insert_resource(super::super::map::MapPolicy { enabled: true });
+        let (refused, _) = ask(&mut app, WaypointIntent::Remove { id });
+        assert!(refused.is_empty());
     }
 
     #[test]

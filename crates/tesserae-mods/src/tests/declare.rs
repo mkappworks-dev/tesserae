@@ -753,6 +753,36 @@ fn game_movement_policy_requires_an_allowed_initial_mode() {
     }
 }
 
+#[test]
+fn a_game_may_forbid_the_map_and_absent_permits_it() {
+    let apply_world = |map: Option<bool>, root: bool| {
+        let mut d = declaring(&[], &[]);
+        let mut world = crate::convert::engine_world_params();
+        world.map_policy = map.map(|enabled| content::MapPolicy { enabled });
+        d.world = Some(world);
+        let mut load = Load::new();
+        apply(d, "game", &mut load.tables, &mut load.registry, root)
+    };
+    assert_eq!(
+        apply_world(Some(false), true).unwrap().map.unwrap().enabled,
+        false
+    );
+    assert!(apply_world(Some(true), true).unwrap().map.unwrap().enabled);
+    assert!(apply_world(None, true).unwrap().map.is_none());
+    assert!(matches!(
+        apply_world(Some(false), false),
+        Err(ModError::NotAGame {
+            field: "world.map",
+            ..
+        })
+    ));
+}
+
+#[test]
+fn a_v02_declaration_carries_no_map_policy() {
+    assert!(crate::convert::engine_world_params().map_policy.is_none());
+}
+
 fn figure() -> content::CharacterDef {
     let still = content::LimbMotion {
         swing_deg: 0.0,

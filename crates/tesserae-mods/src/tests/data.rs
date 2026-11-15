@@ -169,6 +169,7 @@ fn component() -> Declaration {
                 allow_physics: true,
                 start_in_flight: false,
             }),
+            map_policy: Some(content::MapPolicy { enabled: false }),
             character: Some(content::CharacterDef {
                 bones: vec![
                     content::CharacterBone {
@@ -527,6 +528,7 @@ fn equivalent_declarations_register_equivalent_content_and_simulation() {
     assert_eq!(data.tools, native.tools);
     assert_eq!(data.character, native.character);
     assert_eq!(data.movement, native.movement);
+    assert_eq!(data.map, native.map);
     assert_eq!(data.view, native.view);
     assert_eq!(data.survival, native.survival);
     assert_eq!(data.contact_damage, native.contact_damage);
@@ -755,6 +757,7 @@ fn a_mod_that_is_not_the_game_may_not_declare_game_only_fields() {
             "[world.movement]\nallow-flight = true\nallow-physics = true\nstart-in-flight = false",
             "world.movement",
         ),
+        ("[world.map]\nenabled = false", "world.map"),
         ("[world]\nrelief-m = 10.0", "world.relief-m"),
         (
             "[world.climate]\ntemperature-size-m = 100\nhumidity-size-m = 100",

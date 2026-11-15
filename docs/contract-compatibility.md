@@ -52,6 +52,15 @@ a declared Marker kind, resolved after every Mod has declared. It is data only:
 no Mod is called and no host call is added. A Declaration for 0.1 or 0.2 loads
 with none, and a World with no Game has none.
 
+Line 0.3 also gained a `map-policy` record, an optional `map-policy` field of
+`world-params` holding one `enabled` flag, from the Game only: a Mod that is not
+the Game and sets it is refused. Absent permits the Map and the Compass, and so
+does a World with no Game; `enabled = false` forbids them, so the Server stops
+scanning and refuses Waypoint intents, and the Client draws no Compass or
+minimap and opens no Map. A saved Map is kept and returns when a later load
+permits it. A Declaration for 0.1 or 0.2 loads with none. It is data only: no
+Mod is called and no host call is added.
+
 Line 0.3 gained what Survival needs in the same way: an optional
 `contact-damage-per-s` on `material-def`, from 0 to 1000 health per second; an
 optional `max-stack` on `item-def`, from 1 to 64 and 64 when absent, and an

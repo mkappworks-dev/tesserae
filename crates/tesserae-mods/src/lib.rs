@@ -33,7 +33,7 @@ mod trust;
 
 pub use adapt::Line;
 pub use bindings::exports::tesserae::mods::guest::{Registered, RegisteredId, WorldInfo};
-pub use bindings::tesserae::mods::content::{Declaration, MovementPolicy};
+pub use bindings::tesserae::mods::content::{Declaration, MapPolicy, MovementPolicy};
 pub use character::{
     Bone, Character, Cube, MAX_BONES, MAX_CUBES, Motion, Role, SKIN_BYTES, SKIN_EDGE,
 };

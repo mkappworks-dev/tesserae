@@ -169,6 +169,7 @@ fn to_sealed_false_survives() {
 fn world_params_field_for_field_with_the_lake_apart() {
     let wit = WorldParams {
         movement: None,
+        map_policy: None,
         character: None,
         sea_level_m: 1.5,
         relief_m: 2.5,

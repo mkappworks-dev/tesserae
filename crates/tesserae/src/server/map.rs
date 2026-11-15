@@ -27,11 +27,28 @@ const SIDE_CELLS: usize = 2 * REACH_CELLS as usize + 1;
 #[derive(Component, Deref, DerefMut, Default, Debug)]
 pub struct PlayerMap(pub Map);
 
+/// Whether the World's Game lets the Server keep a Map; a forbidden one stops growing and is not
+/// sent, but is never cleared.
+#[derive(Resource, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MapPolicy {
+    pub enabled: bool,
+}
+
+impl Default for MapPolicy {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
+}
+
 pub(super) fn plugin(app: &mut App) {
-    app.add_session_message::<MapTileChanged>()
+    app.init_session_resource::<MapPolicy>()
+        .add_session_message::<MapTileChanged>()
         .add_session_systems(
             FixedUpdate,
-            (capture, announce).chain().after(super::player::simulate),
+            (capture, announce)
+                .chain()
+                .after(super::player::simulate)
+                .run_if(|policy: Res<MapPolicy>| policy.enabled),
         );
 }
 
@@ -317,6 +334,18 @@ mod tests {
         assert_eq!(sent.len(), 2);
         let seen = sent[0].samples.iter().flatten().next().unwrap();
         assert_eq!(seen.material, rock());
+    }
+
+    #[test]
+    fn a_forbidden_map_is_neither_scanned_nor_sent_and_a_saved_one_is_kept() {
+        let mut app = app(1.0);
+        fill(&mut app, 2);
+        app.insert_resource(MapPolicy { enabled: false });
+        let kept = map(&mut app).explored_count();
+        assert!(steps(&mut app, STEPS_FOR_A_PASS).is_empty());
+        assert_eq!(map(&mut app).explored_count(), kept);
+        app.insert_resource(MapPolicy { enabled: true });
+        assert!(!steps(&mut app, STEPS_FOR_A_PASS).is_empty());
     }
 
     #[test]

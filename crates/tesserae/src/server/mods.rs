@@ -115,6 +115,7 @@ pub struct LoadedMods {
     pub mods: Vec<ModInstance>,
     pub game: bool,
     pub movement: Option<tesserae_mods::MovementPolicy>,
+    pub map: Option<tesserae_mods::MapPolicy>,
     pub character: Option<tesserae_mods::Character>,
     pub tools: Vec<tesserae_mods::ToolDef>,
     pub items: Vec<tesserae_mods::ItemDef>,
@@ -138,6 +139,7 @@ impl Default for LoadedMods {
             mods: Vec::new(),
             game: false,
             movement: None,
+            map: None,
             character: None,
             tools: Vec::new(),
             items: Vec::new(),
@@ -587,6 +589,7 @@ pub(crate) async fn declare_all(
             loaded.view = applied.view;
             loaded.game = true;
             loaded.movement = applied.movement;
+            loaded.map = applied.map;
             loaded.tools = applied.tools;
             loaded.survival = applied.survival;
         }
@@ -755,6 +758,7 @@ pub(super) fn plugin(app: &mut App) {
         .add_session_message::<crate::content::WorldFacts>()
         .add_session_message::<crate::content::SoundLibrary>()
         .add_session_message::<crate::content::MarkerKinds>()
+        .add_session_message::<crate::content::MapPermitted>()
         .add_session_message::<crate::content::SoundscapeLibrary>()
         .add_session_message::<crate::content::RecipeBook>()
         .on_session_start(install)
@@ -820,6 +824,11 @@ fn install(world: &mut World) {
             }),
         });
     }
+    let map_permitted = loaded.map.is_none_or(|policy| policy.enabled);
+    world.insert_resource(super::map::MapPolicy {
+        enabled: map_permitted,
+    });
+    world.write_message(crate::content::MapPermitted(map_permitted));
     let placing = super::items::PlacingItems::new(
         catalogue
             .materials
@@ -1235,6 +1244,7 @@ surface = "plain:rock"
                 "world.movement",
             ),
             ("[world.smoothing]\nmin-rise-m = 0.5", "world.smoothing"),
+            ("[world.map]\nenabled = false", "world.map"),
         ] {
             let s = Scratch::new();
             data(&s, "plain", true, "depends = [\"wanderer\"]", DATA_GAME);
@@ -2198,6 +2208,30 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
         assert_eq!(library.len(), 1);
         assert_eq!(library[0].0[0].def, def);
         assert_eq!(*library[0].0[0].recordings[1], [3]);
+    }
+
+    #[test]
+    fn a_games_map_policy_reaches_the_server_and_the_client_at_session_start() {
+        for (map, permitted) in [
+            (None, true),
+            (Some(tesserae_mods::MapPolicy { enabled: true }), true),
+            (Some(tesserae_mods::MapPolicy { enabled: false }), false),
+        ] {
+            let loaded = LoadedMods {
+                map,
+                ..LoadedMods::default()
+            };
+            let mut app = App::new();
+            app.insert_non_send(loaded).add_plugins(plugin);
+            let sent: Vec<_> = app
+                .world_mut()
+                .resource_mut::<Messages<crate::content::MapPermitted>>()
+                .drain()
+                .collect();
+            assert_eq!(sent, [crate::content::MapPermitted(permitted)]);
+            let policy = app.world().resource::<super::super::map::MapPolicy>();
+            assert_eq!(policy.enabled, permitted);
+        }
     }
 
     #[test]
