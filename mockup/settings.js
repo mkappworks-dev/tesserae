@@ -18,6 +18,7 @@ const settingsDefaults = {
   touchLayout: "Normal",
   touchSize: "Normal",
   touchOpacity: 0.7,
+  ghost: false,
   compass: true,
   minimap: false,
   minimapSize: "Medium",
@@ -56,8 +57,9 @@ const settingsDefaults = {
     Remove: "Left mouse",
     "Search the Catalogue": "C",
     "Open Inventory": "I",
-    "Open the Map": "M",
+    "Open the Map": "N",
     "Flip Shape": "E",
+    "Toggle placement ghost": "H",
     "Layout mode and menu": "L",
     "Open the Menu": "Tab",
     "Release cursor": "Escape",
@@ -157,6 +159,7 @@ const bindingGroups = {
     "Empty hand",
     "Turn Shape",
     "Flip Shape",
+    "Toggle placement ghost",
     "Next Shape",
     "Take tool",
     "Use",
@@ -273,6 +276,13 @@ function settingsBody() {
           "toggle",
           [],
           "Keep placing or removing while the binding is held.",
+        ) +
+        row(
+          "Placement ghost",
+          "ghost",
+          "toggle",
+          [],
+          "Show a translucent preview of the Voxel where Place would put it.",
         ) +
         group("Mouse & quick slots") +
         row(

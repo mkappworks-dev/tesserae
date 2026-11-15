@@ -291,7 +291,7 @@ function render() {
   setSelectValue($("#item-access-preview"), state.itemAccess || "creative");
   document.querySelector(".game-footer>span:nth-child(2)").innerHTML =
     state.screen === "play"
-      ? "<kbd>Tab</kbd> Menu <kbd>I</kbd> Inventory <kbd>C</kbd> Catalogue <kbd>M</kbd> Map <kbd>L</kbd> Layout"
+      ? "<kbd>Tab</kbd> Menu <kbd>I</kbd> Inventory <kbd>C</kbd> Catalogue <kbd>N</kbd> Map <kbd>L</kbd> Layout"
       : state.screen === "death"
         ? "<kbd>Enter</kbd> Respawn <kbd>Tab</kbd> Navigate"
         : "<kbd>Tab</kbd> Navigate <kbd>Enter</kbd> Select <kbd>Esc</kbd> Back";
@@ -495,7 +495,7 @@ function opening() {
 }
 function pause() {
   const w = activeWorld();
-  return `<div class="pause-screen"><section class="pause-panel"><p class="eyebrow">TAKE A MOMENT</p><h2>Menu</h2><small>${esc(w?.name || "Your World")} · ${survival() ? "Survival" : "Creative"}</small><div class="pause-actions">${button("Resume <span>Esc</span>", "resume", { primary: true })}${button("Inventory <span>I</span>", "inventory-open")}${button("Map <span>M</span>", "map-open")}${button("Settings <span>⚙</span>", "settings")}${button("World details <span>↗</span>", "world-details")}${button("Return to Worlds <span>→</span>", "leave")}${button("Save &amp; Quit <span>→</span>", "save-quit")}</div><div class="notice">Single-player prototype<br>Your real saves remain untouched.</div></section><div class="world-status"><p class="eyebrow">YOU ARE HERE</p><h3>${esc(w?.biomes.find((b) => b.enabled)?.name || "Greenwood")}</h3><p>${w?.game || "Terra"} &nbsp; / &nbsp; a little further to explore.</p></div></div>`;
+  return `<div class="pause-screen"><section class="pause-panel"><p class="eyebrow">TAKE A MOMENT</p><h2>Menu</h2><small>${esc(w?.name || "Your World")} · ${survival() ? "Survival" : "Creative"}</small><div class="pause-actions">${button("Resume <span>Esc</span>", "resume", { primary: true })}${button("Inventory <span>I</span>", "inventory-open")}${button("Map <span>N</span>", "map-open")}${button("Settings <span>⚙</span>", "settings")}${button("World details <span>↗</span>", "world-details")}${button("Return to Worlds <span>→</span>", "leave")}${button("Save &amp; Quit <span>→</span>", "save-quit")}</div><div class="notice">Single-player prototype<br>Your real saves remain untouched.</div></section><div class="world-status"><p class="eyebrow">YOU ARE HERE</p><h3>${esc(w?.biomes.find((b) => b.enabled)?.name || "Greenwood")}</h3><p>${w?.game || "Terra"} &nbsp; / &nbsp; a little further to explore.</p></div></div>`;
 }
 function play() {
   ensureInventory();

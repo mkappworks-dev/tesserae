@@ -370,7 +370,7 @@ function mapPage() {
 <section class="map-view" aria-label="Map">
 <canvas id="map-canvas" class="${m.placing ? "placing" : ""}" tabindex="0" aria-label="Map of explored ground. Drag to pan, scroll to zoom."></canvas>
 <header class="map-bar"><div><p class="eyebrow">TERRA / THE GREENWOOD</p><h2>Map</h2></div>
-<div class="map-tools"><div class="map-zoom" role="group" aria-label="Zoom"><button class="btn small" data-action="map-zoom" data-value="out" aria-label="Zoom out" ${m.zoom === 3 ? "disabled" : ""}>−</button><output>${mpp} m / px</output><button class="btn small" data-action="map-zoom" data-value="in" aria-label="Zoom in" ${m.zoom === 0 ? "disabled" : ""}>+</button></div>${button("Centre on me", "map-centre", { small: true })}${button("Close <span>M</span>", "map-close", { small: true, ghost: true })}</div></header>
+<div class="map-tools"><div class="map-zoom" role="group" aria-label="Zoom"><button class="btn small" data-action="map-zoom" data-value="out" aria-label="Zoom out" ${m.zoom === 3 ? "disabled" : ""}>−</button><output>${mpp} m / px</output><button class="btn small" data-action="map-zoom" data-value="in" aria-label="Zoom in" ${m.zoom === 0 ? "disabled" : ""}>+</button></div>${button("Centre on me", "map-centre", { small: true })}${button("Close <span>N</span>", "map-close", { small: true, ghost: true })}</div></header>
 <div class="map-rose" aria-label="North is up"><b>N</b><i></i></div>
 ${m.placing ? `<div class="map-banner" role="status">Click the map to place “${esc(mapDraftName())}”. <button class="btn small ghost" data-action="map-place-cancel">Cancel</button></div>` : ""}
 <footer class="map-foot"><output id="map-readout">X ${mapFmt(m.pos.x)} · Z ${mapFmt(m.pos.z)} · ${m.pos.y} m · You are here</output><div class="map-scale" id="map-scale"></div></footer>
@@ -425,7 +425,7 @@ function mapMount() {
   const c = mapSizeCanvas();
   if (!c) return;
   document.querySelector(".game-footer>span:nth-child(2)").innerHTML =
-    "<kbd>M</kbd> Close <kbd>Drag</kbd> Pan <kbd>Wheel</kbd> Zoom <kbd>Esc</kbd> Back";
+    "<kbd>N</kbd> Close <kbd>Drag</kbd> Pan <kbd>Wheel</kbd> Zoom <kbd>Esc</kbd> Back";
   mapRedraw();
   const m = ensureMap(),
     read = document.getElementById("map-readout");
@@ -586,7 +586,7 @@ document.addEventListener(
     )
       return;
     const key = e.key.toLowerCase();
-    if (key === "m") {
+    if (key === "n") {
       e.preventDefault();
       e.stopImmediatePropagation();
       action(state.screen === "map" ? "map-close" : "map-open");
