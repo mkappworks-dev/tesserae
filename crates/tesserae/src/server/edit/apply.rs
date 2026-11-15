@@ -21,11 +21,12 @@ pub(in crate::server) fn apply_pending(
         Res<WorldSettings>,
         Res<crate::server::sound::SoundTable>,
     ),
-    (mut entities, items, containers, mut needs): (
+    (mut entities, items, containers, mut needs, mut picked): (
         ResMut<crate::server::entities::EntityStore>,
         Res<crate::server::items::Items>,
         Option<Res<crate::server::container::Containers>>,
         MessageWriter<crate::server::plants::PlantNeedsSoil>,
+        MessageWriter<crate::server::entities::Pickup>,
     ),
     mut players: Query<(&Player, &mut crate::server::inventory::Inventory)>,
 ) {
@@ -72,6 +73,7 @@ pub(in crate::server) fn apply_pending(
                         &world,
                         &mut history,
                         (&items, &mut entities, &mut inventory),
+                        &mut picked,
                         player.body(),
                         at,
                     );

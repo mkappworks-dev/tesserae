@@ -15,7 +15,7 @@ use tesserae_mods::{EditEvent, EditKind};
 use super::ContentTables;
 use super::edit;
 use super::edit::RejectReason;
-use super::entities::{self, EntityStore};
+use super::entities::{self, EntityStore, Pickup};
 use super::fluids::{Felled, FluidSim};
 use super::inventory::{self, Inventory};
 use super::items::Items;
@@ -200,7 +200,9 @@ fn drop_felled(
 
 /// A Player's Remove of a ripe `harvest-to` crop: resets it to its `harvest-to`
 /// Stage and gives its yield, what does not fit the Inventory dropping at the
-/// Player. The Edit is heard by Mods and never enters the undo journal.
+/// Player. Each yield is told as a `Pickup`, as a drop the Player collects is, so the
+/// feed and the pickup sound answer a harvest too. The Edit is heard by Mods and never
+/// enters the undo journal.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn harvest(
     (store, meshes): (&mut ChunkStore, &mut MeshState),
@@ -208,6 +210,7 @@ pub(super) fn harvest(
     world: &WorldSettings,
     history: &mut EditHistory,
     (items, entities, inventory): (&Items, &mut EntityStore, &mut Inventory),
+    told: &mut MessageWriter<Pickup>,
     body: Aabb,
     at: [i32; 3],
 ) -> Result<(), RejectReason> {
@@ -244,6 +247,13 @@ pub(super) fn harvest(
             continue;
         }
         let left = inventory.receive(&y.item, count, items.stack_limit(&y.item));
+        if left < count {
+            told.write(Pickup {
+                item: y.item.clone(),
+                taken: count - left,
+                left,
+            });
+        }
         if left > 0 {
             overflow.push(Stack {
                 item: y.item.clone(),

@@ -618,6 +618,39 @@ fn a_harvest_that_does_not_fit_the_inventory_drops_at_the_player() {
     assert_eq!(voxel_at(&app, CROP), Voxel::cube(c.bush[1]));
 }
 
+fn pickups(app: &mut App) -> Vec<Pickup> {
+    app.world_mut()
+        .resource_mut::<Messages<Pickup>>()
+        .drain()
+        .collect()
+}
+
+#[test]
+fn a_harvest_tells_each_yield_as_a_pickup_so_the_feed_and_the_sound_answer_it() {
+    let (mut app, c) = farm();
+    set(&mut app, CROP, Voxel::cube(c.bush[2]));
+    send(&mut app, remove_crop());
+    tick(&mut app);
+    assert_eq!(
+        pickups(&mut app),
+        [Pickup {
+            item: "t:berry".into(),
+            taken: 2,
+            left: 0
+        }]
+    );
+
+    let (mut app, c) = farm();
+    inventory(&mut app, |i| i.receive("t:junk", 36 * 64, 64));
+    set(&mut app, CROP, Voxel::cube(c.bush[2]));
+    send(&mut app, remove_crop());
+    tick(&mut app);
+    assert!(
+        pickups(&mut app).is_empty(),
+        "nothing taken, so nothing told; the drop tells when it is collected"
+    );
+}
+
 fn tree_with_fruit(app: &mut App, c: &Content, fruit: MaterialId) {
     set(app, [6, 7, 5], Voxel::cube(c.trunk));
     set(app, [6, 8, 5], Voxel::cube(c.canopy));

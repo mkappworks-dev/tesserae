@@ -428,6 +428,7 @@ pub(super) fn plugin(app: &mut App) {
         .add_session_message::<super::undo::RefundDropped>()
         .add_session_message::<EditApplied>()
         .add_session_message::<super::plants::PlantNeedsSoil>()
+        .add_session_message::<super::entities::Pickup>()
         .init_session_resource::<super::entities::EntityStore>()
         .init_session_resource::<super::items::Items>()
         .init_session_resource::<super::sound::SoundTable>()
