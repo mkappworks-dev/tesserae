@@ -161,6 +161,16 @@ totals pack into slots, any overflow drops at the Player, and it is never
 written again
 ([ADR-0023](adr/0023-the-inventory-is-server-owned-and-pays-inside-the-undo-journal.md)).
 
+A Player's Map is its own commit section, like Containers, not a Player
+extension: `map`, a list of tiles, each a position and its samples as six
+deflated byte planes (heights as the change from the sample before) in base64. A
+Map revision that moves as ground is captured gates re-encoding. The section is
+optional on read, so a save without it opens with an empty Map, and it changes
+neither the format nor the generator version. The Player's Waypoints are the
+`waypoints_v1` extension. Measured on 256 tiles, a Map is about 6 percent of its
+raw size. A World whose Game forbids the Map keeps its saved Map
+([ADR-0028](adr/0028-the-map-is-a-server-held-per-player-capture.md)).
+
 Light, meshes, connections, coarse Chunks, Jobs and Lifetimes are derived and
 must be rebuilt. A saved revision is data identity, not a reusable Lifetime.
 

@@ -1,6 +1,6 @@
 # 12: Docs, ADR amendments and the roadmap row
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 10, 11
 
@@ -20,7 +20,7 @@ tracker's conventions require.
 
 ## Acceptance criteria
 
-- [ ] ADR-0028 is amended; DESIGN.md row 19 reads Done; the architecture, contract, data-mod, authoring and controls docs are current.
-- [ ] GLOSSARY.md terms match the code; no term drifts to a synonym.
-- [ ] Every ticket and the spec read `Status: done`.
-- [ ] `npm run fmt:check` and `cargo fmt --all --check` pass.
+- [x] ADR-0028 is amended; DESIGN.md row 19 reads Done; the architecture, contract, data-mod, authoring and controls docs are current.
+- [x] GLOSSARY.md terms match the code; no term drifts to a synonym.
+- [x] Every ticket and the spec read `Status: done`.
+- [x] `npm run fmt:check` and `cargo fmt --all --check` pass.

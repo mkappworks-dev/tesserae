@@ -556,7 +556,7 @@ controls, movement, save, camera and input work already in flight is tracked in
 | 16  | Crafting                | Recipe schema, station interaction, Use on Voxels (doors, containers), UI host                    | Recipes, stations                  | 15         | Done            |
 | 17  | Weather                 | Weather state and tick, particles, sky hooks                                                      | Weather types, climate rules       | 13         | Not started     |
 | 18  | Plants                  | Growth on the Server tick, placement rules, harvesting                                            | Plant data                         | 13         | Done            |
-| 19  | Map, compass            | Server-provided summaries (the Client never reads World storage), map view                        | Map style, markers                 | 13         | Not started     |
+| 19  | Map, compass            | Server-provided summaries (the Client never reads World storage), map view                        | Map style, markers                 | 13         | Done            |
 | 20  | Structures              | Template format, deterministic placement by worldgen and tools                                    | Templates                          | 13         | Not started     |
 | 21  | Survival loop           | Health, damage, hunger, death, respawn, game modes                                                | Numbers and rules                  | 15         | Done            |
 | 22  | Mobs, animals           | Entity AI hooks, spawning, replication shape designed against transport                           | Behaviours, spawn tables           | 12, 13, 21 | Not started     |
@@ -684,6 +684,21 @@ Notes:
   [ADR-0009](docs/adr/0009-materials-are-table-data.md) and
   [ADR-0022](docs/adr/0022-biomes-are-column-content-and-a-world-pins-its-generator.md).
   Spec and tickets: `.scratch/2026-11-14-phase-18-plants/`.
+- **Step 19** is done. Each Player has a Server-held Map of the surface they
+  have explored: per 2 m column sample, the height, top Material and Biome as
+  they were when seen, captured from loaded, lit ground near the Eye and never
+  regenerated from the seed, so builds and lakes show as of the last visit. The
+  Server sends 128 m tiles under a per-step budget and the Client colours them
+  from the Material palette; the Client never reads World storage. The Compass
+  reads the heading the Server publishes in the pose, North is -Z in every
+  World, and a minimap and a full-screen Map (keys N, O and B) draw from the
+  Client's cache. Waypoints (at most 64 a Player) are placed and removed by
+  intent on Explored ground, and a Game may declare Marker kinds from a closed
+  icon set and the kind a death leaves. A Game may forbid the Map and the
+  Compass with `[world.map]`. The Map saves as its own compact section, about 6
+  percent of its raw size, and a save without it opens empty. See
+  [ADR-0028](docs/adr/0028-the-map-is-a-server-held-per-player-capture.md). Spec
+  and tickets: `.scratch/2026-11-15-phase-19-map-compass/`.
 - **Step 21** is done. A World has a default game mode and each Player their
   own, Creative or Survival; Edit World's changes wait in the sidecar until the
   Server applies them at the next open
