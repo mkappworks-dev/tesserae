@@ -287,6 +287,9 @@ pub enum RejectReason {
     NoUndo,
     NoRedo,
     HistoryChanged,
+    /// A Structure changing more Voxels than the undo journal holds, which
+    /// would make it the one placement that cannot be undone.
+    TooBigToUndo,
     TargetChanged,
     /// A layout the core refuses: no axes, an empty axis, or over its cap.
     BadLayout,
@@ -345,6 +348,7 @@ impl RejectReason {
             RejectReason::HistoryChanged => {
                 "That Voxel changed since, so it cannot be undone or redone."
             }
+            RejectReason::TooBigToUndo => "That Structure is too big to undo at this Voxel size.",
             RejectReason::TargetChanged => "The target changed. Hold again.",
             RejectReason::BadLayout => "That Layout is not allowed.",
             RejectReason::LayoutPartial => "Some Voxels of the Layout were skipped.",

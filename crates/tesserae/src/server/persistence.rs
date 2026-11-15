@@ -424,6 +424,11 @@ impl Persistence {
                         .restore(&mapping, c.generator)
                         .map_err(|e| e.to_string())?,
                 );
+                loaded.world_templates = Some(
+                    c.parameters
+                        .templates(&mapping)
+                        .map_err(|e| e.to_string())?,
+                );
                 let revisions = c
                     .chunks
                     .iter()
@@ -468,7 +473,8 @@ impl Persistence {
                     None,
                     None,
                     vec![],
-                    Generation::capture(params, &mapping).map_err(|e| e.to_string())?,
+                    Generation::capture(params, &loaded.tables.templates, &mapping)
+                        .map_err(|e| e.to_string())?,
                     BTreeMap::new(),
                     "New World - unsaved".into(),
                 )
