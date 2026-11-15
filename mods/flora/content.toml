@@ -1446,6 +1446,7 @@ material = "flora:mushroom_red"
 reach-m = 2.0
 mean-seconds = 600.0
 density = 3
+yields = [{ item = "flora:mushroom_red", count = [1, 1] }, { item = "flora:mushroom", count = [1, 2] }]
 
 [plants.needs]
 soil = ["#soil", "#rock"]
@@ -1460,6 +1461,7 @@ material = "flora:mushroom_brown"
 reach-m = 2.0
 mean-seconds = 600.0
 density = 3
+yields = [{ item = "flora:mushroom_brown", count = [1, 1] }, { item = "flora:mushroom", count = [1, 2] }]
 
 [plants.needs]
 soil = ["#soil", "#rock"]
@@ -1512,6 +1514,12 @@ name = "log"
 size-m = 0.3
 color = [120, 82, 46, 255]
 material = "flora:wood"
+
+[[items]]
+name = "mushroom"
+size-m = 0.2
+color = [196, 170, 140, 255]
+food = 2.0
 
 [[items]]
 name = "apple"
