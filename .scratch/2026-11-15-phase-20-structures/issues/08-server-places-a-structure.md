@@ -10,10 +10,10 @@ Spec: [Phase 20](../spec.md).
 
 A Structure intent names a Template, an anchor from the aim ray and a quarter
 turn. The Server expands the cells, judges them as a whole and lands them
-through the one World change in per-tick batches with one relight per batch. Only the
-anchor must be in reach. It is Creative only and spends no Item. It waits a
-bounded number of ticks for unloaded or unlit Chunks, then refuses with a
-reason, and it lands whole or not at all. Mods hear the Voxels as Edit events.
+through the one World change in per-tick batches with one relight per batch.
+Only the anchor must be in reach. It is Creative only and spends no Item. It
+waits a bounded number of ticks for unloaded or unlit Chunks, then refuses with
+a reason, and it lands whole or not at all. Mods hear the Voxels as Edit events.
 
 ## Acceptance criteria
 
