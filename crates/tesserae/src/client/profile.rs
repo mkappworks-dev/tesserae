@@ -480,6 +480,23 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_saved_cycle_tool_on_m_keeps_it_and_the_map_default_yields() {
+        use super::super::actions::Trigger;
+        let mut document: serde_json::Value =
+            serde_json::from_slice(&encode(&Bindings::default(), &Preferences::default()).unwrap())
+                .unwrap();
+        let bindings = document["bindings"].as_object_mut().unwrap();
+        bindings.remove("map");
+        bindings.get_mut("cycle_tool").unwrap()[0]["trigger"]["key"] = "KeyM".into();
+        let (bindings, _) = decode(&serde_json::to_vec(&document).unwrap()).unwrap();
+        assert_eq!(
+            bindings.keyboard[&Action::CycleTool][0].unwrap().trigger,
+            Trigger::Key(KeyCode::KeyM)
+        );
+        assert!(bindings.keyboard[&Action::Map][0].is_none());
+    }
+
     fn key(code: KeyCode) -> [Option<super::super::actions::Binding>; 2] {
         use super::super::actions::{Binding, Modifier, Trigger};
         [

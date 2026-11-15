@@ -145,15 +145,15 @@ fn compass_shown(app: &mut App) -> bool {
 #[test]
 fn n_and_escape_open_and_close_the_map_and_the_cursor_follows() {
     let mut app = app();
-    press(&mut app, KeyCode::KeyN);
+    press(&mut app, KeyCode::KeyM);
     assert!(is_open(&app));
     assert_eq!(grab(&mut app), CursorGrabMode::None);
 
-    press(&mut app, KeyCode::KeyN);
+    press(&mut app, KeyCode::KeyM);
     assert!(!is_open(&app));
     assert_eq!(grab(&mut app), CursorGrabMode::Locked);
 
-    press(&mut app, KeyCode::KeyN);
+    press(&mut app, KeyCode::KeyM);
     press(&mut app, KeyCode::Escape);
     assert!(!is_open(&app));
     assert_eq!(grab(&mut app), CursorGrabMode::Locked);
@@ -172,7 +172,7 @@ fn a_forbidden_map_draws_no_compass_and_the_key_does_nothing_until_permitted_aga
     assert!(compass_shown(&mut app));
     permit(&mut app, false);
     assert!(!compass_shown(&mut app));
-    press(&mut app, KeyCode::KeyN);
+    press(&mut app, KeyCode::KeyM);
     assert!(!is_open(&app));
     assert_eq!(grab(&mut app), CursorGrabMode::Locked);
     assert!(
@@ -183,7 +183,7 @@ fn a_forbidden_map_draws_no_compass_and_the_key_does_nothing_until_permitted_aga
     );
     permit(&mut app, true);
     assert!(compass_shown(&mut app));
-    press(&mut app, KeyCode::KeyN);
+    press(&mut app, KeyCode::KeyM);
     assert!(is_open(&app));
 }
 
@@ -192,9 +192,9 @@ fn an_open_map_covers_the_world_so_the_compass_hides() {
     let mut app = app();
     pose(&mut app, 0.0, 0.0);
     assert!(compass_shown(&mut app));
-    press(&mut app, KeyCode::KeyN);
+    press(&mut app, KeyCode::KeyM);
     assert!(!compass_shown(&mut app));
-    press(&mut app, KeyCode::KeyN);
+    press(&mut app, KeyCode::KeyM);
     assert!(compass_shown(&mut app));
 }
 
@@ -203,7 +203,7 @@ fn the_readout_says_not_explored_over_fog_and_names_no_biome() {
     let mut app = app();
     pose(&mut app, 0.0, 0.0);
     explore(&mut app, [0, 0], Some(1), 1);
-    press(&mut app, KeyCode::KeyN);
+    press(&mut app, KeyCode::KeyM);
     let centre = view_half();
 
     app.world_mut().resource_mut::<MapWindow>().pointer = Some(centre + Vec2::new(200.0, 0.0));
@@ -220,7 +220,7 @@ fn the_readout_says_not_explored_over_fog_and_names_no_biome() {
 #[test]
 fn zoom_steps_through_two_four_eight_sixteen_metres_a_pixel_and_stops_at_the_ends() {
     let mut app = app();
-    press(&mut app, KeyCode::KeyN);
+    press(&mut app, KeyCode::KeyM);
     let mut seen = vec![];
     for _ in 0..5 {
         seen.push(text_of::<ZoomText>(&mut app));
@@ -240,7 +240,7 @@ fn zoom_steps_through_two_four_eight_sixteen_metres_a_pixel_and_stops_at_the_end
 #[test]
 fn the_wheel_zooms_and_the_buttons_step_the_same_levels() {
     let mut app = app();
-    press(&mut app, KeyCode::KeyN);
+    press(&mut app, KeyCode::KeyM);
     let button = |app: &mut App, control: Control| {
         let entity = app
             .world_mut()
@@ -265,7 +265,7 @@ fn the_wheel_zooms_and_the_buttons_step_the_same_levels() {
 fn centre_on_me_returns_a_panned_view_to_the_player() {
     let mut app = app();
     pose(&mut app, 100.0, 40.0);
-    press(&mut app, KeyCode::KeyN);
+    press(&mut app, KeyCode::KeyM);
     let pan = |app: &mut App| {
         let view = app
             .world_mut()
@@ -311,7 +311,7 @@ fn explored_area_is_the_sample_count_times_four_square_metres() {
     explore(&mut app, [0, 0], None, 5);
     explore(&mut app, [1, 0], None, 3);
     assert_eq!(explored_m2(app.world().resource::<MapCache>()), 32);
-    press(&mut app, KeyCode::KeyN);
+    press(&mut app, KeyCode::KeyM);
     assert_eq!(text_of::<AreaText>(&mut app), "32 m²");
 }
 
@@ -320,7 +320,7 @@ fn the_legend_lists_the_biomes_seen_and_fog() {
     let mut app = app();
     pose(&mut app, 0.0, 0.0);
     explore(&mut app, [0, 0], Some(0), 1);
-    press(&mut app, KeyCode::KeyN);
+    press(&mut app, KeyCode::KeyM);
     app.update();
     let names: Vec<String> = app
         .world_mut()
@@ -436,7 +436,7 @@ mod waypoints {
 
     fn opened(app: &mut App) {
         pose(app, 40.0, -10.0);
-        press(app, KeyCode::KeyN);
+        press(app, KeyCode::KeyM);
         app.update();
     }
 

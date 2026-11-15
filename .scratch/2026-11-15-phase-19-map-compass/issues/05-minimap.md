@@ -15,7 +15,7 @@ as water, the Player's arrow along their heading, and the Biome name (from the
 list the Server already sends at session start) with position and height below
 it, as in the mock. It is a user preference, off by default, with a switch and a
 size choice in Settings under Display (in the "Map and compass" group ticket 02
-adds) and a key that toggles it in play (`O`, free in the engine's defaults),
+adds) and a key that toggles it in play (`N`, free in the engine's defaults),
 persisted like the Compass preference. An old profile loads it as off and
 Medium. Hidden under covering windows and while dead. Waypoints come later
 (ticket 09).
@@ -23,7 +23,7 @@ Medium. Hidden under covering windows and while dead. Waypoints come later
 ## Acceptance criteria
 
 - [x] A Player who walks sees the ground they cross appear on the minimap and nothing they have not seen.
-- [x] Off by default; the setting, the size choice and the `O` key work and persist; an old profile loads as off and Medium.
+- [x] Off by default; the setting, the size choice and the `N` key work and persist; an old profile loads as off and Medium.
 - [x] The Biome name and position follow the Player; hidden under covering windows and while dead.
-- [x] The shared test that no two default bindings collide still passes with `O`.
+- [x] The shared test that no two default bindings collide still passes with `N`.
 - [ ] Client tests inject Server tile messages into a minimal app and assert on the UI; fmt, clippy and tests pass. (Tests pass for this ticket's filters; clippy and the full suite run at the end of the phase.)

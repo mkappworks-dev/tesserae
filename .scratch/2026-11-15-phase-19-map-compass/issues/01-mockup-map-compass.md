@@ -19,5 +19,5 @@ the facing label, the minimap, and the Display settings and key bindings.
 
 - [x] The mockup shows every surface in the spec's Client section, in the existing visual language.
 - [x] `python3 mockup/server.py` serves it at `/map` and in the Gameplay HUD.
-- [x] The maintainer approved it on 2026-11-15 ("lgtm"); the Map key moved from `M` to `N` because `M` cycles Tools, and the Compass is off by default with `B` and `O` toggling the Compass and minimap.
+- [x] The maintainer approved it on 2026-11-15 ("lgtm"); the Map key is `M` (Cycle tool moved to `O`), and the Compass is off by default with `B` and `N` toggling the Compass and minimap.
 - [x] `npm run fmt:check` passes.

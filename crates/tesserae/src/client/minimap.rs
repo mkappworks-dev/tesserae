@@ -522,9 +522,9 @@ mod tests {
         assert!(pixels(&mut app).is_none());
         assert!(app.world().resource::<Preferences>().minimap);
         let mut keys = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
-        keys.release(KeyCode::KeyO);
+        keys.release(KeyCode::KeyN);
         keys.clear();
-        keys.press(KeyCode::KeyO);
+        keys.press(KeyCode::KeyN);
         app.update();
         assert!(app.world().resource::<Preferences>().minimap);
         assert!(pixels(&mut app).is_none());
@@ -629,9 +629,9 @@ mod tests {
         pose(&mut app, Vec3::ZERO, 0.0);
         let press = |app: &mut App| {
             let mut keys = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
-            keys.release(KeyCode::KeyO);
+            keys.release(KeyCode::KeyN);
             keys.clear();
-            keys.press(KeyCode::KeyO);
+            keys.press(KeyCode::KeyN);
             app.update();
         };
         press(&mut app);

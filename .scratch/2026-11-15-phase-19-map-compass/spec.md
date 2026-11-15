@@ -263,11 +263,12 @@ Saving and games
   pointer readout, the zoom levels 2, 4, 8 and 16 m per pixel (downsampling the
   cached tiles on the Client), the scale bar, the legend of Biomes seen, the
   Waypoint list and the new-Waypoint form.
-- The Map key is `N`. `M` already cycles Tools in the engine, and a default
-  binding on an existing key would silently lose to it. The Map is also a
+- The Map key is `M`, so Cycle tool moved to `O` and the minimap is `N`; the
+  Compass is `B`. A profile that saved an explicit Cycle tool binding keeps it,
+  and the Map default yields to it. The Map is also a
   button in the in-game Menu and appears in Key bindings, the help text and the
   controls documentation.
-- Two more actions toggle the Compass (`B`) and the minimap (`O`), both free in
+- Two more actions toggle the Compass (`B`) and the minimap (`N`), both free in
   the engine's defaults. Each flips its preference at once, persists it, and is
   listed in Key bindings, the help text and the controls documentation.
 - The minimap is a small north-up view centred on the Player, at 2 m per pixel,

@@ -607,7 +607,7 @@ fn pad_capture_takes_only_pad_buttons_and_controller_reset_spares_the_keyboard()
 #[test]
 fn the_tool_actions_take_part_in_conflict_warnings_and_are_listed() {
     for (taken, owner) in [
-        (KeyCode::KeyM, Action::CycleTool),
+        (KeyCode::KeyO, Action::CycleTool),
         (KeyCode::KeyG, Action::Use),
         (KeyCode::Backspace, Action::ClearTool),
     ] {

@@ -15,16 +15,16 @@ until turned on, here or under Settings > Display > Map and compass, is saved in
 the user profile, and hides under the Menu, Settings and the Inventory and while
 you are dead.
 
-**N** opens and closes the Map, a full-screen view of the ground you have
+**M** opens and closes the Map, a full-screen view of the ground you have
 explored, also a button in the Menu. Drag to pan, scroll or use the + and -
 buttons to zoom between 2, 4, 8 and 16 m to the pixel, and press Centre on me to
 return to the Player's arrow. A scale bar shows metres, and the readout under
 the pointer gives its position, height, Biome and distance from you; over ground
 you have not seen it says Not explored and names no Biome. The panel lists the
-Biomes seen and the area explored. Escape or N closes it, and the Compass, the
+Biomes seen and the area explored. Escape or M closes it, and the Compass, the
 minimap and the Hotbar hide under it.
 
-**O** shows or hides the minimap, a small north-up view of the ground you have
+**N** shows or hides the minimap, a small north-up view of the ground you have
 explored in the top right corner, centred on you at 2 m to the pixel, with the
 Player's arrow along the heading the Server publishes. Ground you have not seen
 is fog. Beneath it are the Biome name, your X and Z position and your height. It
@@ -132,7 +132,7 @@ lost or changed target, or another selection/edit/history action cancels it
 without restarting.
 
 **Use** (**G**, or D-pad up) asks the Server to use the aimed Voxel with a held
-tool. **M** cycles the declared tools, past the last returns the previous hand,
+tool. **O** cycles the declared tools, past the last returns the previous hand,
 and **Backspace** puts the tool away. While a tool is held, Place and Remove are
 the tool's verbs and Edits are inert; undo and redo stay live. One Use per
 press, never repeated while held, and a Use never enters the undo journal. A

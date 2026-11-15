@@ -691,7 +691,7 @@ Notes:
   Server sends 128 m tiles under a per-step budget and the Client colours them
   from the Material palette; the Client never reads World storage. The Compass
   reads the heading the Server publishes in the pose, North is -Z in every
-  World, and a minimap and a full-screen Map (keys N, O and B) draw from the
+  World, and a minimap and a full-screen Map (keys M, N and B) draw from the
   Client's cache. Waypoints (at most 64 a Player) are placed and removed by
   intent on Explored ground, and a Game may declare Marker kinds from a closed
   icon set and the kind a death leaves. A Game may forbid the Map and the
