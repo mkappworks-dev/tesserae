@@ -721,6 +721,16 @@ def coconut_item(x, y):
     return None
 
 
+def mushroom_item(x, y):
+    if 7 <= x < 10 and 8 <= y < 14:
+        return tint((226, 214, 188), (noise(x, y, 397) - 128) // 14 - (10 if x > 8 else 0))
+    if disc(x, y, 8, 8, 6, 4) and y < 9:
+        if (x, y) in ((6, 6), (9, 5), (11, 7)):
+            return (240, 238, 226, 255)
+        return tint((178, 128, 80), (noise(x, y, 399) - 128) // 12 + (12 if y < 6 else -6))
+    return None
+
+
 def wheat_item(x, y):
     for cx in (4, 8, 12):
         tilt = (cx - 8) // 4
@@ -911,6 +921,7 @@ ITEM_TEXTURES = {
         "orange": item_icon(orange_item),
         "cherries": item_icon(cherries_item),
         "coconut": item_icon(coconut_item),
+        "mushroom": item_icon(mushroom_item),
     },
     "crops": {
         "wheat": item_icon(wheat_item),

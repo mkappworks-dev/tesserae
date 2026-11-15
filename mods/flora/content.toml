@@ -1520,6 +1520,7 @@ name = "mushroom"
 size-m = 0.2
 color = [196, 170, 140, 255]
 food = 2.0
+texture = "art/item-mushroom.png"
 
 [[items]]
 name = "apple"
