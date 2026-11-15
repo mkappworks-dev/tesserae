@@ -273,3 +273,147 @@ fn each_berry_bush_stage_is_its_own_box_shape_that_seals_no_face() {
         Some(shape(&loaded, "crops:berry_young"))
     );
 }
+
+/// A flat floor of solid ground under the fruit that `fruit` names, for walking a body over it.
+struct Patch<'a> {
+    ground: tesserae_core::Voxel,
+    fruit: &'a std::collections::HashMap<[i32; 3], tesserae_core::Voxel>,
+}
+
+impl tesserae_core::collide::VoxelVolume for Patch<'_> {
+    fn voxel(&self, at: [i32; 3]) -> Option<tesserae_core::Voxel> {
+        Some(match at[1] {
+            ..0 => self.ground,
+            0 => self
+                .fruit
+                .get(&at)
+                .copied()
+                .unwrap_or(tesserae_core::Voxel::AIR),
+            _ => tesserae_core::Voxel::AIR,
+        })
+    }
+}
+
+/// The Player's box, 0.4 m wide and 1.8 m tall, standing on the floor at `(x, z)`.
+fn player_at(x: f32, z: f32) -> tesserae_core::collide::Aabb {
+    tesserae_core::collide::Aabb::new([x - 0.2, 0.0, z - 0.2], [x + 0.2, 1.8, z + 0.2])
+}
+
+#[test]
+fn watermelons_and_pumpkins_block_a_walking_body_but_berries_do_not() {
+    use tesserae_core::collide::overlaps;
+    for size in [1.0, 0.5, 0.25] {
+        let (_install, loaded) = loaded("terra", size);
+        let fruit_voxel = |name: &str, shape_name: &str| {
+            tesserae_core::Voxel::new(material(&loaded, name), shape(&loaded, shape_name), 0)
+        };
+        let ground = tesserae_core::Voxel::cube(material(&loaded, "strata:stone"));
+        let cases = [
+            ("crops:watermelon_ripe", "crops:watermelon", true),
+            ("crops:watermelon_unripe", "crops:watermelon_unripe", true),
+            ("crops:pumpkin_ripe", "crops:pumpkin", true),
+            ("crops:pumpkin_unripe", "crops:pumpkin_unripe", true),
+            ("crops:berry_ripe", "crops:berry_ripe", false),
+        ];
+        for (name, shape_name, blocks) in cases {
+            let cells = [([0, 0, 0], fruit_voxel(name, shape_name))].into();
+            let volume = Patch {
+                ground,
+                fruit: &cells,
+            };
+            let centre = size / 2.0;
+            let body = tesserae_core::collide::Aabb::new(
+                [centre - 0.05, 0.0, centre - 0.05],
+                [centre + 0.05, 1.0, centre + 0.05],
+            );
+            assert_eq!(
+                overlaps(&volume, &loaded.tables, size, body),
+                blocks,
+                "{name} at {size} m"
+            );
+        }
+    }
+}
+
+/// A vine's fruit stands a `gap` of bare ground apart: a body fits between two at the default gap
+/// and, at the narrowest gap a Voxel allows, still walks round a whole row of them.
+#[test]
+fn a_body_can_pass_between_fruit_and_walk_round_a_row_of_it_at_every_size() {
+    use std::collections::{HashMap, HashSet, VecDeque};
+    use tesserae_core::collide::overlaps;
+    use tesserae_core::plant::Kind;
+    const UNIT_M: f32 = 0.05;
+    for size in [1.0, 0.5, 0.25] {
+        let (_install, loaded) = loaded("terra", size);
+        let ground = tesserae_core::Voxel::cube(material(&loaded, "strata:stone"));
+        let melon = tesserae_core::Voxel::new(
+            material(&loaded, "crops:watermelon_ripe"),
+            shape(&loaded, "crops:watermelon"),
+            0,
+        );
+        let gap_m = loaded
+            .tables
+            .plants
+            .plants()
+            .iter()
+            .find_map(|p| match &p.kind {
+                Kind::Crop {
+                    fruit_vine: Some(f),
+                    ..
+                } if p.name == "crops:watermelon" => Some(f.gap_m),
+                _ => None,
+            })
+            .unwrap();
+        let row = |gap_voxels: i32| -> (HashMap<[i32; 3], tesserae_core::Voxel>, i32) {
+            let step = gap_voxels + 1;
+            ((0..5).map(|i| ([i * step, 0, 0], melon)).collect(), step)
+        };
+
+        let default_gap = ((gap_m / size).ceil() as i32).max(1);
+        let (cells, step) = row(default_gap);
+        let volume = Patch {
+            ground,
+            fruit: &cells,
+        };
+        let between = player_at((step as f32 + 1.0) / 2.0 * size, 0.5 * size);
+        assert!(
+            !overlaps(&volume, &loaded.tables, size, between),
+            "a body fits between two fruit {default_gap} Voxel(s) apart at {size} m"
+        );
+
+        let (cells, step) = row(1);
+        let volume = Patch {
+            ground,
+            fruit: &cells,
+        };
+        let end_m = (4 * step) as f32 * size;
+        let (low, high) = (-2.0_f32, end_m + 2.0);
+        let side = ((high - low) / UNIT_M) as i32;
+        let index = |m: f32| ((m - low) / UNIT_M).round() as i32;
+        let at = |i: i32, j: i32| player_at(low + i as f32 * UNIT_M, low + j as f32 * UNIT_M);
+        let (start, goal) = (
+            (index(-1.5), index(0.5 * size)),
+            (index(end_m + 1.5), index(0.5 * size)),
+        );
+        let mut seen = HashSet::from([start]);
+        let mut queue = VecDeque::from([start]);
+        let mut crossed = false;
+        while let Some((i, j)) = queue.pop_front() {
+            crossed |= (i, j) == goal;
+            for (di, dj) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
+                let next = (i + di, j + dj);
+                if (0..side).contains(&next.0)
+                    && (0..side).contains(&next.1)
+                    && !overlaps(&volume, &loaded.tables, size, at(next.0, next.1))
+                    && seen.insert(next)
+                {
+                    queue.push_back(next);
+                }
+            }
+        }
+        assert!(
+            crossed,
+            "a body walks round a row of fruit one Voxel apart at {size} m"
+        );
+    }
+}

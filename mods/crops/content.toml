@@ -487,7 +487,7 @@ boxes = [
     { min = [3, 9, 3], max = [13, 11, 13] },
     { min = [7, 11, 7], max = [9, 13, 9] },
 ]
-collision = []
+collision = [{ min = [2, 0, 2], max = [14, 9, 14] }]
 
 [[shapes]]
 name = "watermelon_unripe"
@@ -497,7 +497,7 @@ boxes = [
     { min = [5, 5, 5], max = [11, 6, 11] },
     { min = [7, 6, 7], max = [9, 8, 9] },
 ]
-collision = []
+collision = [{ min = [4, 0, 4], max = [12, 6, 12] }]
 
 [[shapes]]
 name = "pumpkin"
@@ -507,7 +507,7 @@ boxes = [
     { min = [3, 8, 3], max = [13, 10, 13] },
     { min = [7, 10, 7], max = [9, 13, 9] },
 ]
-collision = []
+collision = [{ min = [1, 0, 1], max = [15, 8, 15] }]
 
 [[shapes]]
 name = "pumpkin_unripe"
@@ -517,7 +517,7 @@ boxes = [
     { min = [5, 5, 5], max = [11, 6, 11] },
     { min = [7, 6, 7], max = [9, 8, 9] },
 ]
-collision = []
+collision = [{ min = [3, 0, 3], max = [13, 6, 13] }]
 
 [[plants]]
 name = "wheat"
