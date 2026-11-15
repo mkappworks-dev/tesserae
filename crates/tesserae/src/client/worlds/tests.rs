@@ -54,6 +54,17 @@ fn launcher(app: &App) -> &Launcher {
 }
 
 fn act(app: &mut App, act: Act) {
+    // A card's Edit is in its menu: open it first, as a Player does.
+    if let Act::Edit(path) = &act
+        && app
+            .world_mut()
+            .query::<&Act>()
+            .iter(app.world())
+            .all(|a| *a != act)
+        && launcher(app).screen == Screen::Worlds
+    {
+        self::act(app, Act::Menu(path.clone()));
+    }
     let entity = app
         .world_mut()
         .query::<(Entity, &Act)>()
@@ -284,6 +295,42 @@ fn delete_defaults_to_cancel_refuses_an_open_world_then_removes_it() {
     assert!(!path.exists());
     assert_eq!(launcher(&app).screen, Screen::Worlds);
     assert!(launcher(&app).entries.is_empty());
+}
+
+#[test]
+fn a_cards_menu_opens_and_closes_and_deletes_from_the_list_without_visiting_edit() {
+    let worlds = Directory::new();
+    let path = library::create(&worlds.0, &details("Doomed", true)).unwrap();
+    let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
+    app.update();
+    act(&mut app, Act::Worlds);
+    act(&mut app, Act::Menu(path.clone()));
+    assert_eq!(launcher(&app).menu.as_ref(), Some(&path));
+    act(&mut app, Act::Menu(path.clone()));
+    assert_eq!(launcher(&app).menu, None, "the dots toggle it");
+    act(&mut app, Act::Menu(path.clone()));
+    press(&mut app, KeyCode::Escape);
+    assert_eq!(launcher(&app).menu, None);
+    assert_eq!(
+        launcher(&app).screen,
+        Screen::Worlds,
+        "Escape only closes it"
+    );
+
+    act(&mut app, Act::Menu(path.clone()));
+    act(&mut app, Act::DeleteWorld(path.clone()));
+    app.update();
+    assert_eq!(launcher(&app).menu, None, "an act closes it");
+    assert_eq!(launcher(&app).screen, Screen::Delete(path.clone()));
+    assert!(shown(&mut app, "Your Worlds"), "over the list, not Edit");
+    press(&mut app, KeyCode::Escape);
+    assert_eq!(launcher(&app).screen, Screen::Worlds);
+    assert!(path.exists());
+    act(&mut app, Act::Menu(path.clone()));
+    act(&mut app, Act::DeleteWorld(path.clone()));
+    act(&mut app, Act::ConfirmDelete);
+    assert!(!path.exists());
+    assert_eq!(launcher(&app).screen, Screen::Worlds);
 }
 
 #[test]
@@ -970,7 +1017,7 @@ fn tab_and_shift_tab_reach_every_control_on_each_screen() {
         .flipped
         .insert(Disclosure::ManageWorld);
     let play = format!("{:?}", Act::Play(path.clone()));
-    let edit = format!("{:?}", Act::Edit(path.clone()));
+    let menu = format!("{:?}", Act::Menu(path.clone()));
     let screens: [(&str, Screen, Option<Act>, Vec<&str>); 7] = [
         (
             "title",
@@ -982,7 +1029,7 @@ fn tab_and_shift_tab_reach_every_control_on_each_screen() {
             "worlds",
             Screen::Worlds,
             None,
-            vec!["Search", "New", &play, &edit, "Home"],
+            vec!["Search", "New", &play, &menu, "Home"],
         ),
         (
             "library",
@@ -1547,7 +1594,7 @@ fn search_filters_the_worlds_by_name_or_game() {
     app.update();
     act(&mut app, Act::Worlds);
     fn edits(world: &World, entity: Entity, out: &mut Vec<PathBuf>) {
-        if let Some(Act::Edit(path)) = world.get::<Act>(entity) {
+        if let Some(Act::Menu(path)) = world.get::<Act>(entity) {
             out.push(path.clone());
         }
         for child in world.get::<Children>(entity).into_iter().flatten() {
@@ -1647,11 +1694,7 @@ fn east_is_back_on_each_screen_and_dismisses_on_the_title() {
         (Act::Worlds, Screen::Worlds, Screen::Title),
         (Act::Library, Screen::Library, Screen::Title),
         (Act::New, Screen::Create(Step::World), Screen::Worlds),
-        (
-            Act::Edit(path.clone()),
-            Screen::Edit(path.clone()),
-            Screen::Worlds,
-        ),
+        (Act::Menu(path.clone()), Screen::Worlds, Screen::Worlds),
         (Act::Home, Screen::Title, Screen::Title),
     ] {
         reach(&mut app, pad, opener.clone());
@@ -1665,6 +1708,8 @@ fn east_is_back_on_each_screen_and_dismisses_on_the_title() {
 /// From the title, through Worlds, to one World's Edit page.
 fn pad_to_edit(app: &mut App, pad: Entity, path: &Path) {
     reach(app, pad, Act::Worlds);
+    tap(app, pad, GamepadButton::South);
+    reach(app, pad, Act::Menu(path.to_owned()));
     tap(app, pad, GamepadButton::South);
     reach(app, pad, Act::Edit(path.to_owned()));
     tap(app, pad, GamepadButton::South);

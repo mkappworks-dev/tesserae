@@ -50,8 +50,16 @@ pub(super) fn colours(look: Look, lit: bool, disabled: bool) -> (Color, Color, C
         ),
         _ if look.selected => (theme::CHOSEN, theme::CHOSEN_EDGE, theme::INK),
         Kind::Danger => (
-            if lit { theme::HOVER } else { theme::DANGER },
-            theme::DANGER_EDGE,
+            if lit {
+                theme::DANGER_HOVER
+            } else {
+                theme::DANGER
+            },
+            if lit {
+                theme::DANGER_HOVER
+            } else {
+                theme::DANGER_EDGE
+            },
             theme::DANGER_INK,
         ),
         _ if lit => (theme::HOVER, theme::edge(), theme::INK),
@@ -365,13 +373,19 @@ mod tests {
 
     #[test]
     fn hover_lifts_every_kind_but_selection_holds() {
-        for kind in [Kind::Plain, Kind::Ghost, Kind::Danger] {
+        for kind in [Kind::Plain, Kind::Ghost] {
             let look = Look {
                 kind,
                 selected: false,
             };
             assert_eq!(colours(look, true, false).0, theme::HOVER, "{kind:?}");
         }
+        let danger = Look {
+            kind: Kind::Danger,
+            selected: false,
+        };
+        assert_eq!(colours(danger, false, false).0, theme::DANGER);
+        assert_eq!(colours(danger, true, false).0, theme::DANGER_HOVER);
         let chosen = Look {
             kind: Kind::Plain,
             selected: true,

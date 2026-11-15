@@ -19,8 +19,18 @@ pub(super) fn on_edit_world(l: &mut Launcher, cx: &mut Acting, act: Act) {
         }
         Act::Delete => {
             if let Screen::Edit(path) = l.screen.clone() {
+                l.from_menu = false;
                 l.show(Screen::Delete(path));
             }
+        }
+        Act::Menu(path) => {
+            l.menu = (l.menu.as_ref() != Some(&path)).then_some(path);
+            l.version += 1;
+        }
+        Act::DeleteWorld(path) => {
+            l.selected = Some(path.clone());
+            l.from_menu = true;
+            l.show(Screen::Delete(path));
         }
         Act::ShowFolder => {
             if let Some(path) = l.selected.clone() {
