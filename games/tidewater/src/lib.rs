@@ -361,6 +361,7 @@ impl Guest for Tidewater {
             plants: Vec::new(),
             marker_kinds: Vec::new(),
             death_marker_kind: None,
+            templates: Vec::new(),
             voxel_uses: building::voxel_uses(),
             ores: vec![OreDef {
                 material: "crystals:aquamarine".into(),

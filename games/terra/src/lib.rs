@@ -864,6 +864,7 @@ impl Guest for Terra {
                 marker("death", MarkerIcon::Death, [217, 100, 92]),
             ],
             death_marker_kind: Some("terra:death".into()),
+            templates: Vec::new(),
             voxel_uses: vec![
                 VoxelUse {
                     material: "terra:door".into(),

@@ -118,6 +118,7 @@ impl Guest for Starter {
             plants: Vec::new(),
             marker_kinds: Vec::new(),
             death_marker_kind: None,
+            templates: Vec::new(),
             voxel_uses: vec![
                 voxel_use(
                     "starter_rust:workbench",

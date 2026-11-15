@@ -488,6 +488,32 @@ fn component() -> Declaration {
         plants: Vec::new(),
         marker_kinds: Vec::new(),
         death_marker_kind: None,
+        templates: vec![content::TemplateDef {
+            name: "cairn".into(),
+            cell_m: 0.5,
+            palette: vec![
+                content::TemplatePaletteEntry {
+                    symbol: '.',
+                    cell: content::TemplateCell::Air,
+                },
+                content::TemplatePaletteEntry {
+                    symbol: '_',
+                    cell: content::TemplateCell::Keep,
+                },
+                content::TemplatePaletteEntry {
+                    symbol: 'r',
+                    cell: content::TemplateCell::Voxel(content::TemplateVoxel {
+                        material: "full:rock".into(),
+                        shape: Some("full:slab".into()),
+                        orientation: Some(5),
+                    }),
+                },
+            ],
+            layers: vec![vec!["r.".into(), "_r".into()]],
+            ground_layer: Some(0),
+            foundation: Some("full:rock".into()),
+            level_tolerance_m: Some(2.0),
+        }],
         voxel_uses: vec![
             content::VoxelUse {
                 material: "full:wood".into(),

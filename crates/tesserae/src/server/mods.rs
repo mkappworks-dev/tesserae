@@ -614,6 +614,7 @@ pub(crate) async fn declare_all(
     let biome_rows = biome_rows(&behaviours);
     let recipes = tesserae_mods::DeclaredRecipes::take(&mut behaviours);
     let plants = tesserae_mods::DeclaredPlants::take(&mut behaviours);
+    let templates = tesserae_mods::DeclaredTemplates::take(&mut behaviours);
     let (ground, lake) =
         resolve(behaviours, &mut loaded.tables, &loaded.registry).map_err(|e| e.to_string())?;
     // Grown Materials decide which implicit Items exist, so Plants resolve
@@ -626,6 +627,9 @@ pub(crate) async fn declare_all(
             &loaded.tables.plants,
             &loaded.every_item(world.voxel_size).0,
         )
+        .map_err(|e| e.to_string())?;
+    loaded.tables.templates = templates
+        .resolve(&loaded.registry, &loaded.tables)
         .map_err(|e| e.to_string())?;
     // After the Plant table, because a surface feature may name a Plant.
     let (biomes, ores) = resolve_biomes(

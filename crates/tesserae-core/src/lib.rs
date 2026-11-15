@@ -36,6 +36,7 @@ pub mod seed;
 pub mod shape;
 pub mod survival;
 pub mod tables;
+pub mod template;
 pub mod testgen;
 pub mod usable;
 pub mod visibility;
