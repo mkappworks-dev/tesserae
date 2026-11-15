@@ -27,6 +27,7 @@ mod layout;
 mod resolve;
 #[cfg(test)]
 mod sound_tests;
+mod structure;
 #[cfg(test)]
 pub(in crate::server) mod tests;
 
@@ -49,6 +50,9 @@ pub use layout::LayoutCell;
 #[cfg(test)]
 pub(in crate::server) use layout::send_layout;
 pub use layout::{CellState, LayoutAim, LayoutAnswer, LayoutIntent, LayoutParams, Span};
+pub use structure::StructureIntent;
+#[cfg(test)]
+pub(in crate::server) use structure::send_structure;
 
 use super::ContentTables;
 use super::game_mode::PlayerMode;
@@ -282,6 +286,8 @@ pub enum RejectReason {
     BadLayout,
     /// Some of a layout's Voxels were skipped; the rest were placed.
     LayoutPartial,
+    /// A Structure naming a Template the World does not hold.
+    UnknownTemplate,
     /// A Place with an empty hotbar slot selected.
     NothingHeld,
     /// A Place with an Item that places no Material.
@@ -336,6 +342,7 @@ impl RejectReason {
             RejectReason::TargetChanged => "The target changed. Hold again.",
             RejectReason::BadLayout => "That Layout is not allowed.",
             RejectReason::LayoutPartial => "Some Voxels of the Layout were skipped.",
+            RejectReason::UnknownTemplate => "That Template is unknown.",
             RejectReason::NothingHeld => "Nothing to place in the selected hotbar slot.",
             RejectReason::PlacesNothing => "The held Item places nothing.",
             RejectReason::CreativeOnly => "Only Creative places without an Item.",
@@ -394,15 +401,20 @@ struct Pending {
 /// Intents received and not yet applied. Server-private: nothing outside this
 /// module can push to it, so the Client can only ask by message.
 #[derive(Resource, Default)]
-pub(in crate::server) struct PendingEdits(VecDeque<Pending>, VecDeque<layout::PendingLayout>);
+pub(in crate::server) struct PendingEdits(
+    VecDeque<Pending>,
+    VecDeque<layout::PendingLayout>,
+    VecDeque<structure::PendingStructure>,
+);
 
 impl PendingEdits {
     pub(super) fn clear(&mut self) {
         self.0.clear();
         self.1.clear();
+        self.2.clear();
     }
     pub(in crate::server) fn is_empty(&self) -> bool {
-        self.0.is_empty() && self.1.is_empty()
+        self.0.is_empty() && self.1.is_empty() && self.2.is_empty()
     }
 }
 
@@ -414,6 +426,7 @@ pub(super) fn plugin(app: &mut App) {
         .init_session_resource::<super::tool::Tools>()
         .init_session_resource::<layout::LayoutAimState>()
         .add_player_intent::<LayoutIntent>()
+        .add_player_intent::<StructureIntent>()
         .add_session_message::<LayoutAim>()
         .add_session_message::<LayoutAnswer>()
         .add_session_message::<AimReport>()
@@ -441,6 +454,7 @@ pub(super) fn plugin(app: &mut App) {
                 receive_aim,
                 layout::receive,
                 layout::receive_aim,
+                structure::receive,
                 pick,
                 super::undo::receive,
             )
@@ -453,6 +467,7 @@ pub(super) fn plugin(app: &mut App) {
             FixedPreUpdate,
             (
                 apply_pending.run_if(super::persistence::playing),
+                structure::drain.run_if(super::persistence::playing),
                 super::undo::apply
                     .run_if(super::persistence::playing)
                     .before(super::mods::Drain),

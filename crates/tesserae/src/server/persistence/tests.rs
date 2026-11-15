@@ -380,6 +380,47 @@ fn a_grown_crop_and_tree_reopen_as_the_materials_they_grew_to() {
 }
 
 #[test]
+fn a_placed_structure_is_saved_like_any_build_and_reloads() {
+    use tesserae_core::template::{Cell, Template, Turn};
+    let dir = Directory::new();
+    let with_bar = |loaded: &mut crate::server::mods::LoadedMods| {
+        let wood = loaded.registry.id_of(Kind::Material, "terra:wood").unwrap() as u16;
+        let bar = vec![vec![vec![Cell::Voxel(Voxel::cube(wood)); 3]]];
+        loaded
+            .tables
+            .templates
+            .push(Template::new("t:bar".into(), 1.0, bar, 0, None, 1.0).unwrap());
+    };
+    let mut rig = Rig::open_with(dir.opening(), WorldSettings::default(), with_bar);
+    rig.app.add_plugins(edit::plugin);
+    rig.insert();
+    // From the Player's Eye at (8, 4, 8), down at the floor of the hollow.
+    edit::send_structure(
+        &mut rig.app,
+        edit::StructureIntent {
+            origin: Vec3::new(8.0, 4.0, 8.0),
+            direction: Vec3::NEG_Y,
+            template: "t:bar".into(),
+            turn: Turn::NONE,
+        },
+    );
+    rig.tick();
+    let wood = Voxel::cube(rig.wood);
+    let placed = rig.app.world().resource::<ChunkStore>().get(coord([0; 3]));
+    assert!((7..10).all(|x| placed.unwrap().get(x, 1, 8) == wood));
+    rig.settled_save();
+    drop(rig);
+    let mut reopened = Rig::open_with(dir.opening(), WorldSettings::default(), with_bar);
+    reopened.insert();
+    let store = reopened.app.world().resource::<ChunkStore>();
+    let chunk = store.get(coord([0; 3])).unwrap();
+    for x in 7..10 {
+        assert_eq!(chunk.get(x, 1, 8), wood);
+    }
+    assert!(chunk.get(6, 1, 8).is_air());
+}
+
+#[test]
 fn save_snapshot_cannot_authorize_eviction_after_a_later_edit() {
     let dir = Directory::new();
     let mut rig = Rig::new(&dir);
