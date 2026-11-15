@@ -3,7 +3,7 @@
 
 use bevy::ecs::system::EntityCommands;
 use bevy::prelude::*;
-use tesserae_core::marker::{self, MAX_WAYPOINTS, WaypointsV1};
+use tesserae_core::marker::{self, WaypointsV1};
 
 use super::ContentTables;
 use super::death::PlayerIntents;
@@ -281,7 +281,7 @@ mod tests {
     #[test]
     fn the_cap_refuses_one_more() {
         let mut app = game(kinds());
-        for _ in 0..MAX_WAYPOINTS {
+        for _ in 0..marker::MAX_WAYPOINTS {
             assert!(ask(&mut app, add(10.5, 10.5, "", KIND)).0.is_empty());
         }
         assert_eq!(

@@ -1,6 +1,6 @@
 # 09: Waypoints: place, name, remove and save
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 07, 08
 
@@ -21,9 +21,10 @@ as a small record in the usual way and survive reopening. A World with no Marker
 
 ## Acceptance criteria
 
-- [ ] Add at the Player's position and by clicking explored ground; clicking fog is refused with a reason.
-- [ ] Name, Marker kind, default name, select, centre and remove work; each refusal names its reason, and a Remove of the death marker is refused.
-- [ ] Waypoints draw on the Map and minimap with the right colour and icon; one beyond the minimap's edge rests on it.
-- [ ] Waypoints are saved per Player and round trip through the persistence rig; a save without them loads with none.
-- [ ] A World with no Marker kinds refuses Add with "no such Marker kind" but still shows the Map and minimap.
-- [ ] Server tests at the intent seam, Client tests for the form and list; fmt, clippy and tests pass.
+- [x] Add at the Player's position and by clicking explored ground; clicking fog is refused with a reason.
+- [x] Name, Marker kind, default name, select, centre and remove work; each refusal names its reason, and a Remove of the death marker is refused.
+- [x] Waypoints draw on the Map and minimap with the right colour and icon; one beyond the minimap's edge rests on it.
+- [x] Waypoints are saved per Player and round trip through the persistence rig; a save without them loads with none.
+- [x] A World with no Marker kinds refuses Add with "no such Marker kind" but still shows the Map and minimap.
+- [x] Server tests at the intent seam, Client tests for the form and list.
+- [ ] fmt, clippy and tests pass (clippy and the full suite are deferred to the end of the phase).

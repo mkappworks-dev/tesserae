@@ -22,6 +22,7 @@ use super::menu::Facts;
 use super::menu_ui as ui;
 use super::minimap::{Spot, arrow_at, fog, ground_colour};
 use super::theme;
+use super::waypoints::{Mark, Marks, paint_marks, pick, view_marks};
 use crate::session::SessionApp;
 
 pub(super) const VIEW_W: u32 = 640;
@@ -33,6 +34,8 @@ const SCALE_STEPS_M: [u32; 5] = [50, 100, 200, 500, 1000];
 const SCALE_MIN_PX: f32 = 60.0;
 /// Biome tint's weight over the Material's colour.
 const TINT: f32 = 0.18;
+/// How near the pointer must be to a mark for the readout to name it.
+const HOVER_REACH_PX: f32 = 10.0;
 const NOT_EXPLORED: &str = "Not explored";
 /// Each Map sample stands for this much ground.
 const SAMPLE_AREA_M2: u64 = (SAMPLE_M * SAMPLE_M) as u64;
@@ -45,6 +48,8 @@ pub(super) struct MapWindow {
     pub(super) zoom: usize,
     /// The pointer's pixel within the view.
     pub(super) pointer: Option<Vec2>,
+    /// Set by a drag so the click that ends it does not place or select.
+    pub(super) dragged: bool,
 }
 
 impl MapWindow {
@@ -71,6 +76,10 @@ impl MapWindow {
     pub(super) fn world_at(&self, centre: Vec2, pixel: Vec2) -> Vec2 {
         centre + (pixel - view_half()) * self.metres_per_pixel()
     }
+}
+
+pub(super) fn view_size() -> Vec2 {
+    Vec2::new(VIEW_W as f32, VIEW_H as f32)
 }
 
 fn view_half() -> Vec2 {
@@ -106,6 +115,7 @@ pub(super) fn paint_view(
     centre: Vec2,
     metres_per_pixel: f32,
     you: Option<(Vec2, f32)>,
+    marks: &[Mark],
 ) -> Vec<u8> {
     let half = view_half();
     let offsets: &[f32] = if metres_per_pixel > SAMPLE_M {
@@ -142,6 +152,7 @@ pub(super) fn paint_view(
             pixels.extend_from_slice(&colour);
         }
     }
+    paint_marks(&mut pixels, VIEW_W, VIEW_H, marks);
     pixels
 }
 
@@ -231,6 +242,7 @@ struct Drawn {
     zoom: usize,
     you: Option<(Vec2, i32)>,
     revision: u64,
+    marks: u32,
 }
 
 pub(super) fn plugin(app: &mut App) {
@@ -261,7 +273,7 @@ type Blockers<'w> = (
 
 /// The Map key opens the window and closes it into play; Escape closes it too
 /// and is spent so the cursor stays grabbed.
-fn toggle(
+pub(super) fn toggle(
     mut actions: ResMut<Actions>,
     mut window: ResMut<MapWindow>,
     (menu, layout_menu, settings, ui, inventory): Blockers,
@@ -338,11 +350,13 @@ fn drag(
     }
     let eye = spot.and_then(|s| s.0).map(|(eye, _)| eye);
     let centre = window.centre_m(eye);
+    window.dragged = true;
     window.centre = Some(centre - event.delta * window.metres_per_pixel());
 }
 
 fn zoom_wheel(actions: Res<Actions>, mut window: ResMut<MapWindow>) {
-    if !window.open {
+    // Off the view the wheel scrolls the Waypoint list instead.
+    if !window.open || window.pointer.is_none() {
         return;
     }
     if actions.wheel.up {
@@ -401,7 +415,12 @@ fn sync(
     mut commands: Commands,
     window: Res<MapWindow>,
     spot: Res<Spot>,
-    (cache, palette, facts): (Res<MapCache>, Res<MapPalette>, Option<Res<Facts>>),
+    (cache, palette, facts, marks): (
+        Res<MapCache>,
+        Res<MapPalette>,
+        Option<Res<Facts>>,
+        Res<Marks>,
+    ),
     preferences: Option<Res<super::profile::Preferences>>,
     mut images: ResMut<Assets<Image>>,
     roots: Query<Entity, With<WindowRoot>>,
@@ -427,6 +446,7 @@ fn sync(
         zoom: window.zoom,
         you: pose.map(|(eye, bearing)| (Vec2::new(eye.x, eye.z), bearing.round() as i32)),
         revision: cache.revision(),
+        marks: marks.revision(),
     };
     let biomes: &[String] = facts
         .as_ref()
@@ -440,6 +460,7 @@ fn sync(
             centre,
             mpp,
             wanted.you.map(|(at, bearing)| (at, bearing as f32)),
+            &view_marks(&marks, centre, mpp, view_size()),
         );
         match drawn.as_mut() {
             Some((d, handle)) => {
@@ -471,7 +492,19 @@ fn sync(
     }
 
     let text = match window.pointer {
-        Some(pixel) => readout(&cache, biomes, window.world_at(centre, pixel), eye),
+        Some(pixel) => match pick(&marks, pixel, centre, mpp, view_size(), HOVER_REACH_PX) {
+            Some(w) => format!(
+                "{} \u{b7} {} \u{b7} {} m away",
+                w.name,
+                ui::declared_title(&w.kind),
+                eye.map_or(0, |eye| {
+                    Vec2::new(w.x_m, w.z_m)
+                        .distance(Vec2::new(eye.x, eye.z))
+                        .round() as i32
+                })
+            ),
+            None => readout(&cache, biomes, window.world_at(centre, pixel), eye),
+        },
         None => match eye {
             Some(eye) => format!(
                 "X {} · Z {} · {} m · You are here",
@@ -685,6 +718,7 @@ fn side_panel(card: &mut ChildSpawnerCommands) {
         ..default()
     })
     .with_children(|panel| {
+        super::waypoint_panel::sections(panel);
         ui::text(panel, "Explored", theme::TEXT_HEADING, theme::INK);
         panel.spawn((
             AreaText,

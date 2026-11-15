@@ -74,6 +74,8 @@ mod use_prompt;
 mod view;
 mod viewmodel;
 mod vitals;
+mod waypoint_panel;
+mod waypoints;
 pub mod worlds;
 
 use bevy::prelude::*;
@@ -143,6 +145,7 @@ pub fn plugin(app: &mut App) {
         compass::plugin,
     ));
     app.add_plugins((minimap::plugin, map_window::plugin));
+    app.add_plugins((waypoints::plugin, waypoint_panel::plugin));
     app.add_session_systems(
         Update,
         (|mut commands: Commands| commands.insert_resource(loading::TerrainArrived))

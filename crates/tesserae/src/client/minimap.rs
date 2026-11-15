@@ -115,6 +115,7 @@ pub(super) fn paint(
     palette: &MapPalette,
     centre: [i32; 2],
     bearing_deg: f32,
+    marks: &[super::waypoints::Mark],
 ) -> Vec<u8> {
     let half = (size / 2) as i32;
     let mut pixels = Vec::with_capacity((size * size * 4) as usize);
@@ -128,6 +129,7 @@ pub(super) fn paint(
             pixels.extend_from_slice(&colour);
         }
     }
+    super::waypoints::paint_marks(&mut pixels, size, size, marks);
     pixels
 }
 
@@ -150,6 +152,7 @@ struct Drawn {
     centre: [i32; 2],
     bearing: i32,
     revision: u64,
+    marks: u32,
 }
 
 pub(super) fn plugin(app: &mut App) {
@@ -199,6 +202,7 @@ fn sync(
     spot: Res<Spot>,
     cache: Res<MapCache>,
     palette: Res<MapPalette>,
+    marks: Res<super::waypoints::Marks>,
     facts: Option<Res<Facts>>,
     mut images: ResMut<Assets<Image>>,
     mut lines: Query<(&Line, &mut Text)>,
@@ -227,6 +231,7 @@ fn sync(
         centre: cell,
         bearing: bearing.round() as i32,
         revision: cache.revision(),
+        marks: marks.revision(),
     };
     let stale_size = drawn.as_ref().is_some_and(|(d, _)| d.size != size);
     if stale_size {
@@ -251,7 +256,8 @@ fn sync(
     );
     let repaint = palette.is_changed() || drawn.as_ref().is_none_or(|(d, _)| *d != wanted);
     if repaint {
-        let pixels = paint(size, &cache, &palette, cell, wanted.bearing as f32);
+        let on_map = super::waypoints::minimap_marks(&marks, cell, size);
+        let pixels = paint(size, &cache, &palette, cell, wanted.bearing as f32, &on_map);
         match drawn.as_mut() {
             Some((d, handle)) => {
                 if let Some(mut image) = images.get_mut(handle) {
@@ -392,6 +398,7 @@ mod tests {
             .add_plugins(super::super::actions::test_plugin)
             .init_resource::<MapCache>()
             .init_resource::<MapPalette>()
+            .init_resource::<crate::client::waypoints::Marks>()
             .init_resource::<Facts>()
             .add_systems(
                 Update,
