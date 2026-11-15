@@ -52,6 +52,7 @@ pub mod tool;
 pub mod undo;
 pub mod usable;
 pub mod vitals;
+pub mod waypoint;
 pub mod world_state;
 
 #[cfg(test)]
@@ -128,6 +129,7 @@ pub fn plugin(app: &mut App) {
             fluids::plugin,
             plants::plugin,
             map::plugin,
+            waypoint::plugin,
             player::plugin,
             sky::plugin,
             soundscape::plugin,

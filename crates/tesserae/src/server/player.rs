@@ -197,7 +197,8 @@ pub struct RestoreView(pub f32, pub f32);
     super::game_mode::PlayerMode,
     super::vitals::Vitals,
     super::vitals::LastDamage,
-    super::map::PlayerMap
+    super::map::PlayerMap,
+    super::waypoint::PlayerWaypoints
 )]
 pub struct Player {
     eye: Vec3,

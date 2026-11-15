@@ -1224,6 +1224,62 @@ fn vitals_survive_save_and_reopen() {
     assert_eq!(vitals(&Rig::new(&dir)), hurt);
 }
 
+fn waypoints_of(rig: &Rig) -> Vec<tesserae_core::marker::Waypoint> {
+    let mut q = rig
+        .app
+        .world()
+        .try_query::<&crate::server::waypoint::PlayerWaypoints>()
+        .unwrap();
+    q.single(rig.app.world()).unwrap().list().to_vec()
+}
+
+#[test]
+fn waypoints_survive_save_and_reopen() {
+    use crate::server::waypoint::PlayerWaypoints;
+    let dir = Directory::new();
+    let mut rig = Rig::new(&dir);
+    rig.settled_save();
+    let world = rig.app.world_mut();
+    let mut waypoints = world.query::<&mut PlayerWaypoints>();
+    let mut waypoints = waypoints.single_mut(world).unwrap();
+    waypoints.push("Base", "terra:home", 12.5, -4.0, false);
+    waypoints.push("Died", "terra:grave", 1.0, 2.0, true);
+    rig.tick();
+    assert!(rig.app.world().resource::<SaveStatus>().dirty);
+    let saved = waypoints_of(&rig);
+    rig.settled_save();
+    drop(rig);
+    assert_eq!(
+        save::inspect(&dir.0)
+            .unwrap()
+            .unwrap()
+            .commit
+            .player
+            .get::<tesserae_core::marker::WaypointsV1>()
+            .unwrap()
+            .map(|w| w.0.list().to_vec()),
+        Some(saved.clone())
+    );
+    assert_eq!(waypoints_of(&Rig::new(&dir)), saved);
+}
+
+#[test]
+fn a_save_without_waypoints_loads_none() {
+    let dir = Directory::new();
+    Rig::new(&dir).settled_save();
+    assert!(
+        save::inspect(&dir.0)
+            .unwrap()
+            .unwrap()
+            .commit
+            .player
+            .get::<tesserae_core::marker::WaypointsV1>()
+            .unwrap()
+            .is_none()
+    );
+    assert!(waypoints_of(&Rig::new(&dir)).is_empty());
+}
+
 fn death(rig: &Rig) -> Option<Death> {
     let mut q = rig.app.world().try_query::<&Death>().unwrap();
     q.iter(rig.app.world()).next().cloned()
