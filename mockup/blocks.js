@@ -1,4 +1,4 @@
-/* /blocks: every Terra Material drawn from Terra's own textures, written by the export-blocks example. */
+/* /blocks: every demo Game's own Materials drawn from the textures it ships, written by the export-blocks example. */
 const PLAYER_HEIGHT_M = 1.8;
 const PLAYER_WIDTH_M = 0.6;
 const SHADE = { top: 0, left: 0.18, right: 0.34 };
@@ -292,12 +292,12 @@ function blockCard(m, i) {
 function blocksPage() {
   state.blocksVoxel ||= "1";
   state.blocksShapeMaterial ||= "terra:wood";
-  const body = `<div id="blocks-root" class="blocks"><p class="muted">Loading Terra's textures…</p></div>`;
+  const body = `<div id="blocks-root" class="blocks"><p class="muted">Loading the Games' textures…</p></div>`;
   return frame({
-    eyebrow: "TERRA / LOOKS",
+    eyebrow: "GAMES / LOOKS",
     title: "Block gallery",
     subtitle:
-      "Every Terra Material as a block, drawn from the textures Terra ships. Lighting is illustrative.",
+      "Every Material each Game declares, as a block drawn from the textures the Game ships. Lighting is illustrative.",
     body,
     footer: `<small>Regenerate with <code>cargo run -p tesserae-mods --example export-blocks</code> after <code>scripts/build-guests</code>.</small>`,
   });
@@ -363,7 +363,15 @@ async function drawBlocks() {
     shape.boxes,
     ...(shape.joined ? [shape.joined] : []),
   ]);
-  root.innerHTML = `<section><header class="blocks-heading"><div><p class="item-eyebrow">MATERIALS</p><h3>${textured.length} Materials</h3></div></header><div class="block-grid">${textured.map(blockCard).join("")}</div></section>
+  const gameSections = index.games
+    .map((game) => {
+      const own = textured
+        .map((m, i) => [m, i])
+        .filter(([m]) => m.game === game);
+      return `<section><header class="blocks-heading"><div><p class="item-eyebrow">${esc(game.toUpperCase())} MATERIALS</p><h3>${own.length} Materials</h3></div></header><div class="block-grid">${own.map(([m, i]) => blockCard(m, i)).join("")}</div></section>`;
+    })
+    .join("\n");
+  root.innerHTML = `${gameSections}
 <section><header class="blocks-heading"><div><p class="item-eyebrow">SHAPES</p><h3>Placeable Shapes</h3></div><label class="blocks-control">Material ${customSelect(
     "Material",
     "blocksShapeMaterial",

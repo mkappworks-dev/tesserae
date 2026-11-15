@@ -16,6 +16,7 @@ use super::{LoadedMods, TrustMode, load};
 use crate::world::WorldSettings;
 
 mod biomes;
+mod building;
 mod fields;
 mod food;
 mod plants;
@@ -240,7 +241,7 @@ fn every_demo_game_draws_the_character_of_the_mod_it_suggests() {
 }
 
 #[test]
-fn meadow_declares_only_its_pumpkin_and_takes_its_ground_from_strata() {
+fn meadow_declares_its_pumpkin_and_building_materials_and_takes_its_ground_from_strata() {
     let (_install, loaded) = loaded("meadow", 0.5);
     assert!(loaded.game);
     assert_eq!(
@@ -265,11 +266,13 @@ fn meadow_declares_only_its_pumpkin_and_takes_its_ground_from_strata() {
         .names(Kind::Material)
         .map(|(id, _)| id)
         .max();
+    assert_eq!(own[0].1, "meadow:pumpkin");
     assert_eq!(
-        own,
-        [(last.unwrap(), "meadow:pumpkin".to_owned())],
-        "appended last"
+        own.len(),
+        20,
+        "its pumpkin, 16 building Materials and 3 Stations"
     );
+    assert_eq!(own.last().map(|&(id, _)| id), last, "appended last");
     let ground = loaded.world.unwrap().ground.unwrap();
     assert_eq!(ground.rock, material(&loaded, "strata:stone"));
     assert_eq!(ground.soil, material(&loaded, "strata:clay"));

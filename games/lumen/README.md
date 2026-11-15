@@ -15,10 +15,12 @@ and `crystals` amethyst in the rock below.
 [strata](../../mods/strata/), [glassworks](../../mods/glassworks/),
 [frost](../../mods/frost/) for the snow of the frost court,
 [crystals](../../mods/crystals/) for the amethyst ore, and it suggests
-[wanderer](../../mods/wanderer/) for its character. Its one Material is its
-food, `lumen:glowberry`; every other name it uses is `<mod id>:<name>` from
-those Mods. It declares only its World (ground, sea level, relief, climate and
-the like), its Biomes and ore, its food and one behaviour.
+[wanderer](../../mods/wanderer/) for its character. Its own Materials are its
+food, `lumen:glowberry`, and the building Materials and anvil, forge and oven
+Stations its Templates use (`src/building.rs`); every other name it uses is
+`<mod id>:<name>` from those Mods. It declares only its World (ground, sea
+level, relief, climate and the like), its Biomes and ore, its food, its building
+Materials with their Recipes, and one behaviour.
 
 ## Food
 

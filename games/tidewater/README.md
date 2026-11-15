@@ -19,10 +19,12 @@ not terrain: layers of water sources added and removed above the sea.
 
 [strata](../../mods/strata/), [waters](../../mods/waters/),
 [flora](../../mods/flora/), [crystals](../../mods/crystals/) (for the ore), and
-it suggests [sprite](../../mods/sprite/) for its character. Its one Material is
-its food, `tidewater:coconut`; every other name it uses is `<mod id>:<name>`
-from those Mods. It declares only its World (ground, sea level, relief, Climate
-and Biomes), an ore, its food and one behaviour.
+it suggests [sprite](../../mods/sprite/) for its character. Its own Materials
+are its food, `tidewater:coconut`, and the building Materials and anvil, forge
+and oven Stations its Templates use (`src/building.rs`); every other name it
+uses is `<mod id>:<name>` from those Mods. It declares only its World (ground,
+sea level, relief, Climate and Biomes), an ore, its food, its building Materials
+with their Recipes, and one behaviour.
 
 ## Food
 

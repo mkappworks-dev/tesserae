@@ -4,6 +4,7 @@ use exports::tesserae::mods::guest::{
     Command, Declaration, Guest, Registered, TickContext, WorldInfo,
 };
 mod audio;
+mod building;
 mod character;
 mod plants;
 mod textures;
@@ -351,7 +352,10 @@ impl Guest for Terra {
                 solid("door_open"),
                 gate("gate"),
                 gate("gate_open"),
-            ],
+            ]
+            .into_iter()
+            .chain(building::materials())
+            .collect(),
             shapes: vec![fence(), panel(), table()],
             appearance: vec![
                 appearance("lamp", [245, 227, 184, 255]),
@@ -376,7 +380,10 @@ impl Guest for Terra {
                 appearance("door_open", [128, 88, 50, 255]),
                 appearance("gate", [140, 97, 55, 255]),
                 appearance("gate_open", [140, 97, 55, 255]),
-            ],
+            ]
+            .into_iter()
+            .chain(building::appearance())
+            .collect(),
             world: Some(world),
             view: Some(ViewParams {
                 view_distance_m: 160.0,
@@ -843,7 +850,10 @@ impl Guest for Terra {
                     },
                     station: "workbench".into(),
                 },
-            ],
+            ]
+            .into_iter()
+            .chain(building::recipes())
+            .collect(),
             plants: Vec::new(),
             marker_kinds: vec![
                 marker("home", MarkerIcon::Home, [224, 177, 90]),
@@ -884,7 +894,10 @@ impl Guest for Terra {
                     kind: VoxelUseKind::Station("workbench".into()),
                     shape: Some("terra:table".into()),
                 },
-            ],
+            ]
+            .into_iter()
+            .chain(building::voxel_uses())
+            .collect(),
             ores: vec![OreDef {
                 material: "terra:iron".into(),
                 min_depth_m: 5.0,

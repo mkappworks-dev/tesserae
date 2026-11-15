@@ -15,10 +15,12 @@ sets the scene and starts the eruptions.
 
 [strata](../../mods/strata/), [waters](../../mods/waters/),
 [flora](../../mods/flora/), [hearth](../../mods/hearth/), and it suggests
-[golem](../../mods/golem/) for its character. Its one Material is its food,
-`ember:pepper`; every other name it uses is `<mod id>:<name>` from those Mods.
-It declares only its World (ground, sea level, relief, climate and the like),
-its Biomes and ore, its food and one behaviour.
+[golem](../../mods/golem/) for its character. Its own Materials are its food,
+`ember:pepper`, and the building Materials and anvil, forge and oven Stations
+its Templates use (`src/building.rs`); every other name it uses is
+`<mod id>:<name>` from those Mods. It declares only its World (ground, sea
+level, relief, climate and the like), its Biomes and ore, its food, its building
+Materials with their Recipes, and one behaviour.
 
 ## Food
 
