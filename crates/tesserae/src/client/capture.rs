@@ -583,6 +583,12 @@ fn view_fixture(mut preferences: ResMut<super::profile::Preferences>) {
     use super::view::{View, ZOOM_M};
     preferences.compass |= std::env::var_os("TESSERAE_SCREENSHOT_COMPASS").is_some();
     preferences.minimap |= std::env::var_os("TESSERAE_SCREENSHOT_MINIMAP").is_some();
+    if let Ok(size) = std::env::var("TESSERAE_SCREENSHOT_MINIMAP_SIZE") {
+        preferences.minimap_size = super::minimap::MinimapSize::ALL
+            .into_iter()
+            .find(|s| s.label().eq_ignore_ascii_case(&size))
+            .unwrap_or_else(|| panic!("Unknown minimap size: {size}"));
+    }
     preferences.view = match std::env::var("TESSERAE_SCREENSHOT_VIEW").as_deref() {
         Ok("third") => View::ThirdPerson,
         Ok("first") | Err(_) => View::FirstPerson,

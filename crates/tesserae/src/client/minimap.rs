@@ -29,6 +29,11 @@ const FOG: [[u8; 4]; 2] = [[20, 26, 22, 255], [15, 20, 17, 255]];
 const ARROW: [u8; 4] = [255, 255, 255, 255];
 const ARROW_EDGE: [u8; 4] = [11, 15, 12, 255];
 const UNCHARTED: &str = "Uncharted";
+const BAND_PAD_Y_PX: f32 = 6.0;
+const BAND_PAD_X_PX: f32 = 8.0;
+const BAND_GAP_PX: f32 = 1.0;
+/// `waypoints::MINIMAP_REST_PX`: how far from the image edge an off-Map mark rests.
+const MARK_REST_PX: f32 = 11.0;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -48,6 +53,24 @@ impl MinimapSize {
             Self::Medium => 168,
             Self::Large => 216,
         }
+    }
+
+    /// The biome line's and the coordinate line's (type size, line height) in pixels.
+    fn type_px(self) -> [(f32, f32); 2] {
+        match self {
+            Self::Small => [(12.0, 15.0), (10.0, 12.0)],
+            Self::Medium | Self::Large => [(theme::TEXT_CAPTION, 16.0), (11.0, 14.0)],
+        }
+    }
+
+    /// Height of the dark band along the bottom of the face.
+    pub(super) fn band_px(self) -> f32 {
+        let [(_, biome), (_, position)] = self.type_px();
+        2.0 * BAND_PAD_Y_PX + biome + BAND_GAP_PX + position
+    }
+
+    fn shows_height(self) -> bool {
+        self != Self::Small
     }
 
     pub(crate) fn label(self) -> &'static str {
@@ -159,12 +182,23 @@ pub(super) fn paint(
     pixels
 }
 
+/// Lifts marks the band would hide to rest just above it, dimmed like any mark off the Map.
+fn above_band(marks: &mut [super::waypoints::Mark], size: MinimapSize) {
+    let floor = size.px() as f32 - size.band_px() - MARK_REST_PX;
+    for mark in marks.iter_mut().filter(|m| m.at.y > floor) {
+        mark.at.y = floor;
+        mark.dimmed = true;
+    }
+}
+
 /// The last pose: the Eye and the heading the Server published.
 #[derive(Resource, Default)]
 pub(super) struct Spot(pub(super) Option<(Vec3, f32)>);
 
 #[derive(Component)]
 struct MinimapRoot;
+#[derive(Component)]
+struct Band;
 #[derive(Component, PartialEq)]
 enum Line {
     Biome,
@@ -259,7 +293,8 @@ fn sync(
         }
         return;
     };
-    let size = preferences.minimap_size.px();
+    let size_choice = preferences.minimap_size;
+    let size = size_choice.px();
     let cell = cell_of(eye.x, eye.z);
     let wanted = Drawn {
         size,
@@ -283,15 +318,14 @@ fn sync(
             || UNCHARTED.to_string(),
             |n| super::menu_ui::declared_title(n),
         );
-    let position = format!(
-        "X {} · Z {} · {} m",
-        eye.x.floor() as i32,
-        eye.z.floor() as i32,
-        eye.y.floor() as i32
-    );
+    let mut position = format!("X {} · Z {}", eye.x.floor() as i32, eye.z.floor() as i32);
+    if size_choice.shows_height() {
+        position += &format!(" · {} m", eye.y.floor() as i32);
+    }
     let repaint = palette.is_changed() || drawn.as_ref().is_none_or(|(d, _)| *d != wanted);
     if repaint {
-        let on_map = super::waypoints::minimap_marks(&marks, cell, size);
+        let mut on_map = super::waypoints::minimap_marks(&marks, cell, size);
+        above_band(&mut on_map, size_choice);
         let pixels = paint(size, &cache, &palette, cell, wanted.bearing as f32, &on_map);
         match drawn.as_mut() {
             Some((d, handle)) => {
@@ -314,7 +348,12 @@ fn sync(
                 );
                 image.sampler = ImageSampler::nearest();
                 let handle = images.add(image);
-                spawn(&mut commands, handle.clone(), size, [&biome, &position]);
+                spawn(
+                    &mut commands,
+                    handle.clone(),
+                    size_choice,
+                    [&biome, &position],
+                );
                 *drawn = Some((wanted, handle));
             }
         }
@@ -331,7 +370,13 @@ fn sync(
     }
 }
 
-fn spawn(commands: &mut Commands, image: Handle<Image>, size: u32, texts: [&str; 2]) {
+fn spawn(
+    commands: &mut Commands,
+    image: Handle<Image>,
+    size_choice: MinimapSize,
+    texts: [&str; 2],
+) {
+    let size = size_choice.px();
     commands
         .spawn((
             MinimapRoot,
@@ -387,31 +432,44 @@ fn spawn(commands: &mut Commands, image: Handle<Image>, size: u32, texts: [&str;
                         color: Color::BLACK,
                     },
                 ));
-            });
-            for ((line, size, weight, ink), text) in [
-                (Line::Biome, theme::TEXT_CAPTION, 700, theme::HUD_INK),
-                (
-                    Line::Position,
-                    11.0,
-                    theme::REGULAR,
-                    Color::srgb_u8(0xd3, 0xd9, 0xd0),
-                ),
-            ]
-            .into_iter()
-            .zip(texts)
-            {
-                root.spawn((
-                    line,
+                face.spawn((
                     Pickable::IGNORE,
-                    Text::new(text),
-                    theme::figures(size, weight),
-                    TextColor(ink),
-                    TextShadow {
-                        offset: Vec2::new(0.0, 1.0),
-                        color: Color::BLACK,
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Px(0.0),
+                        right: Val::Px(0.0),
+                        bottom: Val::Px(0.0),
+                        flex_direction: FlexDirection::Column,
+                        row_gap: Val::Px(BAND_GAP_PX),
+                        padding: UiRect::axes(Val::Px(BAND_PAD_X_PX), Val::Px(BAND_PAD_Y_PX)),
+                        overflow: Overflow::clip(),
+                        ..default()
                     },
-                ));
-            }
+                    BackgroundColor(Color::srgba_u8(6, 8, 7, 0xc7)),
+                    Band,
+                ))
+                .with_children(|band| {
+                    let inks = [theme::HUD_INK, Color::srgb_u8(0xd3, 0xd9, 0xd0)];
+                    let weights = [700, theme::REGULAR];
+                    for (((line, (px, height)), (weight, ink)), text) in
+                        [Line::Biome, Line::Position]
+                            .into_iter()
+                            .zip(size_choice.type_px())
+                            .zip(weights.into_iter().zip(inks))
+                            .zip(texts)
+                    {
+                        band.spawn((
+                            line,
+                            Pickable::IGNORE,
+                            Text::new(text),
+                            theme::figures(px, weight),
+                            bevy::text::LineHeight::Px(height),
+                            TextLayout::linebreak(bevy::text::LineBreak::NoWrap),
+                            TextColor(ink),
+                        ));
+                    }
+                });
+            });
         });
 }
 
@@ -608,6 +666,56 @@ mod tests {
         pose(&mut app, Vec3::new(-5.5, 8.0, 3.0), 0.0);
         assert_eq!(line(&mut app, Line::Biome), UNCHARTED);
         assert_eq!(line(&mut app, Line::Position), "X -6 · Z 3 · 8 m");
+    }
+
+    #[test]
+    fn the_band_holds_the_biome_and_position_inside_the_face_at_every_size() {
+        let mut app = app();
+        show(&mut app);
+        pose(&mut app, Vec3::new(20.7, 31.2, 40.1), 0.0);
+        for size in MinimapSize::ALL {
+            app.world_mut().resource_mut::<Preferences>().minimap_size = size;
+            app.update();
+            let world = app.world_mut();
+            let mut bands = world.query_filtered::<(Entity, &ChildOf, &Node), With<Band>>();
+            let (band, face, node) = bands
+                .single(world)
+                .map(|(e, c, n)| (e, c.parent(), n.clone()))
+                .unwrap();
+            let mut faces = world.query::<(&ChildOf, &Node)>();
+            let (root, face_node) = faces.get(world, face).unwrap();
+            assert_eq!(face_node.width, Val::Px(size.px() as f32));
+            assert!(world.get::<MinimapRoot>(root.parent()).is_some());
+            assert_eq!(node.bottom, Val::Px(0.0));
+            let mut texts = world.query::<(&Line, &ChildOf)>();
+            let parents: Vec<_> = texts.iter(world).map(|(_, c)| c.parent()).collect();
+            assert_eq!(parents, [band, band], "{size:?}");
+            let position = line(&mut app, Line::Position);
+            assert_eq!(
+                position.ends_with(" m"),
+                size != MinimapSize::Small,
+                "{position}"
+            );
+            assert!(position.starts_with("X 20 · Z 40"));
+        }
+    }
+
+    #[test]
+    fn a_mark_resting_on_the_bottom_edge_stands_above_the_band() {
+        let mark = |y| super::super::waypoints::Mark {
+            at: Vec2::new(60.0, y),
+            icon: tesserae_core::marker::Icon::Home,
+            colour: [200, 40, 40, 255],
+            selected: false,
+            dimmed: false,
+            scale: 1,
+        };
+        let size = MinimapSize::Medium;
+        let floor = size.px() as f32 - size.band_px() - MARK_REST_PX;
+        let mut marks = [mark(size.px() as f32 - MARK_REST_PX), mark(40.0)];
+        above_band(&mut marks, size);
+        assert_eq!((marks[0].at.y, marks[0].dimmed), (floor, true));
+        assert_eq!((marks[1].at.y, marks[1].dimmed), (40.0, false));
     }
 
     #[test]
