@@ -227,42 +227,109 @@
   position: absolute;
   top: 0;
   left: 0;
-  right: 0;
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 12px;
-  flex-wrap: wrap;
-  padding: 14px 16px 30px;
-  background: linear-gradient(#060807e6, transparent);
+  padding: 14px 16px 18px;
+  background: radial-gradient(
+    120% 100% at 0 0,
+    #060807b3 30%,
+    transparent 100%
+  );
   pointer-events: none;
-}
-.map-bar > * {
-  pointer-events: auto;
 }
 .map-bar h2 {
   margin: 2px 0 0;
   font-size: 24px;
   font-weight: 450;
 }
-.map-tools {
-  display: flex;
+.map-corner {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 3;
+  display: grid;
+  justify-items: end;
   gap: 8px;
-  align-items: center;
-  flex-wrap: wrap;
 }
-.map-zoom {
+.map-controls {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 2px;
+  padding: 3px;
+  background: #060807d9;
+  border: 1px solid #66666d;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px #0006;
 }
-.map-zoom output {
-  min-width: 72px;
+.map-controls output {
+  min-width: 52px;
   text-align: center;
   font-size: 12px;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
+.mc {
+  position: relative;
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  background: none;
+  border: 0;
+  border-radius: 6px;
+  color: var(--ink);
+}
+.mc:hover:not(:disabled) {
+  background: var(--panel-raised);
+}
+.mc:focus-visible {
+  outline: 2px solid var(--leaf);
+  outline-offset: -2px;
+}
+.mc.on {
+  background: #26332a;
+  color: var(--leaf);
+  box-shadow: inset 0 0 0 1px var(--leaf);
+}
+.mc:disabled {
+  opacity: 0.35;
+}
+.mc-sep {
+  width: 1px;
+  height: 18px;
+  margin: 0 3px;
+  background: #45454c;
+}
+.mc::after {
+  content: attr(data-tip);
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 5px 8px;
+  background: #0b0b0d;
+  border: 1px solid #45454c;
+  border-radius: 6px;
+  font-size: 12px;
+  white-space: pre;
+  color: var(--ink);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 150ms 0ms;
+}
+.mc.end::after {
+  left: auto;
+  right: 0;
+  transform: none;
+}
+.mc:hover:not([data-off="1"])::after {
+  opacity: 1;
+  transition-delay: 300ms;
+}
+.mc:focus-visible:not([data-off="1"])::after {
+  opacity: 1;
+  transition-delay: 0ms;
+}
+
 .map-rose {
   position: absolute;
   right: 16px;
@@ -360,10 +427,6 @@
   margin-right: auto;
 }
 .map-banner {
-  position: absolute;
-  top: 74px;
-  left: 50%;
-  transform: translateX(-50%);
   display: flex;
   align-items: center;
   gap: 12px;

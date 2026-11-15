@@ -396,9 +396,9 @@ function mapPage() {
 <section class="map-view" aria-label="Map">
 <canvas id="map-canvas" class="${m.adding ? "placing" : ""}" tabindex="0" aria-label="Map of explored ground. Drag to pan, scroll to zoom."></canvas>
 <header class="map-bar"><div><p class="eyebrow">TERRA / THE GREENWOOD</p><h2>Map</h2></div>
-<div class="map-tools"><div class="map-zoom" role="group" aria-label="Zoom"><button class="btn small" data-action="map-zoom" data-value="out" aria-label="Zoom out" ${m.zoom === 3 ? "disabled" : ""}>−</button><output>${mpp} m / px</output><button class="btn small" data-action="map-zoom" data-value="in" aria-label="Zoom in" ${m.zoom === 0 ? "disabled" : ""}>+</button></div>${button("Centre on me", "map-centre", { small: true })}<button class="btn small ${m.adding ? "primary" : ""}" data-action="map-add-toggle" aria-pressed="${m.adding}">+ Waypoint</button>${button("Close <span>M</span>", "map-close", { small: true, ghost: true })}</div></header>
+</header>
 <div class="map-rose" aria-label="North is up"><b>N</b><i></i></div>
-${m.adding && !m.pop ? mapHintHtml() : ""}
+<div class="map-corner">${mapControlsHtml()}${m.adding && !m.pop ? mapHintHtml() : ""}</div>
 ${mapPopHtml()}
 <footer class="map-foot"><output id="map-readout">X ${mapFmt(m.pos.x)} · Z ${mapFmt(m.pos.z)} · ${m.pos.y} m · You are here</output><div class="map-scale" id="map-scale"></div></footer>
 </section>
@@ -419,6 +419,25 @@ ${
 }
 ${m.tab === "explore" ? `<section><h3>Explored</h3><p class="muted">${mapSeenAreaKm2.toFixed(2)} km² · seen with the ground loaded. Fogged ground is not guessed at.</p><ul class="legend">${legend}<li><i class="fog"></i>Not explored</li><li><i class="lake"></i>Lake</li></ul></section>` : ""}
 </aside></div>`;
+}
+const MC = (d) =>
+  `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+const MAP_ICONS = {
+  out: MC('<path d="M5 12h14"/>'),
+  in: MC('<path d="M5 12h14M12 5v14"/>'),
+  centre: MC(
+    '<circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="1.5"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/>',
+  ),
+  add: MC(
+    '<path d="M12 21s-6-5.4-6-10.5a6 6 0 0 1 11-3.3"/><circle cx="12" cy="10.5" r="2"/><path d="M19 14v6M16 17h6"/>',
+  ),
+  close: MC('<path d="M6 6l12 12M18 6L6 18"/>'),
+};
+function mapControlsHtml() {
+  const m = ensureMap(),
+    btn = (act, icon, tip, extra = "", value = "") =>
+      `<button class="mc ${extra}" data-action="${act}" ${value ? `data-value="${value}"` : ""} data-tip="${tip}" aria-label="${tip.replace("  ", " ")}">${MAP_ICONS[icon]}</button>`;
+  return `<div class="map-controls" role="toolbar" aria-label="Map controls">${btn("map-zoom", "out", "Zoom out", "", "out").replace("<button", m.zoom === 3 ? "<button disabled" : "<button")}<output>${MAP_MPP[m.zoom]} m/px</output>${btn("map-zoom", "in", "Zoom in", "", "in").replace("<button", m.zoom === 0 ? "<button disabled" : "<button")}${btn("map-centre", "centre", "Centre on me")}${btn("map-add-toggle", "add", "Add Waypoint", `end${m.adding ? " on" : ""}`).replace("<button", `<button aria-pressed="${m.adding}"`)}<i class="mc-sep"></i>${btn("map-close", "close", "Close  M", "end")}</div>`;
 }
 function mapDefaultName() {
   return `Waypoint ${ensureMap().next}`;
@@ -779,6 +798,34 @@ function mapAction(name, value) {
   }
   return false;
 }
+document.addEventListener(
+  "keydown",
+  (e) => {
+    const b = e.target.closest?.(".map-controls .mc");
+    if (!b) return;
+    if (e.key === "Escape" && b.dataset.off !== "1") {
+      if (!b.matches(":hover, :focus-visible")) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      b.dataset.off = "1";
+    } else if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+      const all = [...b.parentElement.querySelectorAll(".mc:not(:disabled)")],
+        i = all.indexOf(b) + (e.key === "ArrowRight" ? 1 : -1);
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      all[(i + all.length) % all.length].focus();
+    }
+  },
+  true,
+);
+document.addEventListener(
+  "focusout",
+  (e) => e.target.dataset && delete e.target.dataset.off,
+);
+document.addEventListener(
+  "mouseout",
+  (e) => e.target.dataset && delete e.target.dataset.off,
+);
 document.addEventListener(
   "keydown",
   (e) => {
