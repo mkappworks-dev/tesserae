@@ -39,8 +39,8 @@ Settings marked Not available in this World, with your choices untouched; the
 Map you had is kept and returns when the Game permits it.
 
 **H** shows or hides the placement ghost, the translucent preview of the Voxel
-you are about to place. It is off until turned on, here or under Settings, and
-is saved in the user profile.
+you are about to place. It is off until turned on, here or under Settings,
+Behavior, and is saved in the user profile.
 
 **F3** shows or hides a diagnostics line (the Chunk the Eye is in, how many the
 Server holds and has sent meshes for, how many meshes are drawn, and the frame
