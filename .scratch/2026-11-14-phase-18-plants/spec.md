@@ -507,3 +507,36 @@ vegetation for `meadow`, `ember`, `tidewater` and `lumen`. Vines are generated
 by worldgen only, hung from the canopy of trees that declare `vines` in their
 row, so "climbers in worldgen" is no longer a gap; a growing sapling never makes
 them. Everything else is content on the existing contract.
+
+## Amendment 2026-11-15: bounded spreading, vine crops and fields
+
+The maintainer approved the mockup's "Spreaders and fields" section
+(`/vegetation`). Three changes follow; tickets 20 and 21 are built now, ticket
+22 is specified and left for later.
+
+- **`min-neighbours` on a spreader (ticket 20).** Ground cover still creeps: a
+  `density` cap bounds the crowd around a new Voxel and never how far a field
+  advances. An optional spreader row field, `min-neighbours` (default 0, no
+  rule), makes a Sample seed a target only where at least that many Voxels of
+  the same Plant stand within `reach-m` of it, counting the seeding Voxel. A
+  patch then fills its holes and never advances. A lone placed seed would
+  never grow under a strict count, so the requirement is capped by how crowded
+  the seeding Voxel is itself: the target must be at least as crowded as the
+  source, up to `min-neighbours`. A lone seed grows into a compact clump and
+  stops; a generated patch, whose Voxels all see the full count, only fills.
+- **Vine crops (ticket 21).** A `crop` may declare `fruit-vine`: its ripe Stage
+  bears fruit on the ground around it, as a tree bears fruit on its canopy.
+  Fruit stands within `reach-m` of the vine (1.5 m), never touching another
+  (`gap-m`, 0.5 m, at least a Voxel of ground), up to `max-fruit` (5) per
+  vine. Fruit never seeds, so a cluster does not creep; breaking one lets the
+  vine bear another. Watermelon and pumpkin join the `crops` Mod and the Biome
+  features, and worldgen stands a vine with its first fruit, whole across Chunk
+  borders.
+- **Fields (ticket 22, not built).** Wild fields group ground cover by region
+  so a patch is mostly one species, and planted fields are rows of one crop
+  with paths and a water ditch beside water in meadow Biomes.
+
+The contract changes stay in the unreleased 0.3 WIT, with optional fields only:
+a Mod that sets neither is unchanged. The World's Biome snapshot gains one
+optional kind for a generated vine; a World that has none reads and generates as
+before, so `FORMAT_VERSION` and `GENERATOR_VERSION` stay.
