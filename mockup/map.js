@@ -595,6 +595,12 @@ document.addEventListener(
       e.stopImmediatePropagation();
       if (ensureMap().placing) action("map-place-cancel");
       else action("map-close");
+    } else if (state.screen === "play" && ["b", "o"].includes(key)) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      const flag = key === "b" ? "compass" : "minimap";
+      state.settings[flag] = !state.settings[flag];
+      render();
     } else if (
       state.screen === "play" &&
       ["arrowleft", "arrowright"].includes(key)

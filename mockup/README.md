@@ -271,7 +271,8 @@ matrix cells carry a dense, moderate or sparse tag with the main tree's spacing.
 
 Step 19 adds `/map`: the full-screen Map, with fog of war, Biome tint and height
 shading, 2 to 16 m per pixel zoom, drag to pan, and Waypoints (a Marker kind and
-a name; the death marker is automatic). The gameplay HUD gains the Compass, on
-by default, and an optional minimap; both are Display settings. Press `N` to
-open or close the Map, and Left and Right in play to turn the heading. The
-terrain and the explored route are drawn from noise here, not from the engine.
+a name; the death marker is automatic). The gameplay HUD gains the Compass and a
+minimap, both off by default; both are Display settings and toggle in play with
+`B` and `O`. Press `N` to open or close the Map, and Left and Right in play to
+turn the heading. The terrain and the explored route are drawn from noise here,
+not from the engine.
