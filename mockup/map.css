@@ -160,20 +160,38 @@
     0 1px 2px #000;
 }
 .minimap-loc {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
   display: grid;
-  text-align: right;
-  text-shadow:
-    0 1px 3px #000,
-    0 0 8px #000a;
+  gap: 1px;
+  padding: 6px 8px;
+  background: #060807c7;
+  text-align: left;
 }
 .minimap-loc b {
   font-size: 13px;
-  color: #f6f7f1;
+  line-height: 16px;
+  color: #fff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .minimap-loc small {
   font-size: 11px;
+  line-height: 14px;
   color: #d3d9d0;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.minimap.small .minimap-loc b {
+  font-size: 12px;
+  line-height: 15px;
+}
+.minimap.small .minimap-loc small {
+  font-size: 10px;
+  line-height: 12px;
 }
 
 .map-screen {

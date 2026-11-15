@@ -276,11 +276,12 @@ name, or pressing Enter in the field, arms placement: the Map shows "Click the
 map to place ..." and a click on explored ground places it, while "At my
 position" adds one under the Player. The gameplay HUD gains the Compass and a
 minimap, both off by default; both are Display settings and toggle in play with
-`B` and `N`, each with a brief toast ("Compass on", "Minimap off"). Press `M` to
-open or close the Map, and Left and Right in play to turn the heading. `H`
-toggles the placement ghost (Behavior > Placement ghost; only the setting, the
-key and the toast "Placement ghost on" are mocked), and `O` takes the next tool
-(Cycle tool, "Take tool" in Key bindings). The Simulate panel's Map policy
+`B` and `N` (the minimap carries the Biome name and the coordinates in a strip
+inside its face), each with a brief toast ("Compass on", "Minimap off"). Press
+`M` to open or close the Map, and Left and Right in play to turn the heading.
+`H` toggles the placement ghost (Behavior > Placement ghost; only the setting,
+the key and the toast "Placement ghost on" are mocked), and `O` takes the next
+tool (Cycle tool, "Take tool" in Key bindings). The Simulate panel's Map policy
 checkbox, "Game forbids the Map", shows the engine's state: the Map, Compass and
 minimap keys do nothing, the Compass and minimap are hidden, the Menu has no Map
 button, and the switches and bindings stay in Settings marked "Not available in

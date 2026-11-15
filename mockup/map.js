@@ -13,6 +13,7 @@ const MAP_KINDS = {
   Death: { icon: "✖", color: "#d9645c" },
 };
 const MAP_SIZES = { Small: 128, Medium: 168, Large: 216 };
+const MINIMAP_STRIP_PX = { Small: 39, Medium: 42, Large: 42 };
 const MAP_ROUTE_BASE = [
   [
     [-140, 170],
@@ -262,9 +263,13 @@ function compassHtml() {
 
 function minimapHtml() {
   const m = ensureMap(),
-    size = MAP_SIZES[state.settings.minimapSize] || MAP_SIZES.Medium,
-    biome = mapBiomeName(m.pos.x, m.pos.z);
-  return `<aside class="minimap" aria-label="Minimap"><div class="minimap-face" style="width:${size}px;height:${size}px"><canvas data-minimap width="${size}" height="${size}"></canvas><b class="minimap-n">N</b></div><div class="minimap-loc"><b>${esc(biome)}</b><small>X ${mapFmt(m.pos.x)} · Z ${mapFmt(m.pos.z)} · ${m.pos.y} m</small></div></aside>`;
+    name = MAP_SIZES[state.settings.minimapSize]
+      ? state.settings.minimapSize
+      : "Medium",
+    size = MAP_SIZES[name],
+    biome = mapBiomeName(m.pos.x, m.pos.z),
+    height = name === "Small" ? "" : ` · ${m.pos.y} m`;
+  return `<aside class="minimap ${name.toLowerCase()}" aria-label="Minimap"><div class="minimap-face" style="width:${size}px;height:${size}px"><canvas data-minimap data-strip="${MINIMAP_STRIP_PX[name]}" width="${size}" height="${size}"></canvas><b class="minimap-n">N</b><div class="minimap-loc"><b>${esc(biome)}</b><small>X ${mapFmt(m.pos.x)} · Z ${mapFmt(m.pos.z)}${height}</small></div></div></aside>`;
 }
 function mapBiomeName(x, z) {
   return games.Terra.names[mapBiome(x, z)];
@@ -279,10 +284,11 @@ function mapMarkers(ctx, w, h, cx, cz, mpp, opts = {}) {
     let [x, y] = to(wp.x, wp.z);
     const kind = MAP_KINDS[wp.kind],
       pad = 11,
+      floor = h - pad - (opts.strip || 0),
       inside = x > pad && y > pad && x < w - pad && y < h - pad;
     if (!inside && !opts.clamp) continue;
     x = Math.max(pad, Math.min(w - pad, x));
-    y = Math.max(pad, Math.min(h - pad, y));
+    y = Math.max(pad, Math.min(floor, y));
     ctx.globalAlpha = inside ? 1 : 0.55;
     ctx.fillStyle = "#0b0f0c";
     ctx.beginPath();
@@ -332,6 +338,7 @@ function mapDrawMinimap() {
   mapPaint(ctx, canvas.width, canvas.height, m.pos.x, m.pos.z, 2);
   mapMarkers(ctx, canvas.width, canvas.height, m.pos.x, m.pos.z, 2, {
     clamp: true,
+    strip: Number(canvas.dataset.strip),
   });
 }
 function mapPlayChrome() {
