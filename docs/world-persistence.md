@@ -90,7 +90,11 @@ names a Plant freezes what generation reads of it, by Material and Shape name: a
 crop's or spreader's Stages, a column's Material, height and fluid, a tree's
 Materials, size and fruit, a vine crop's ripe Material, fruit and reach, gap and
 cap (a `vine` form, absent in a World made before vine crops); a feature that
-names a Material has none of it. The snapshot is separate from `entities` and
+names a Material has none of it. A feature's `field` (group number, region scale
+and strays) and a Biome's `crop_fields` (each crop's Stage Materials, Shapes and
+weight, plot range, spacing, path and ditch Materials by name, and distance from
+the lake) ride in the same snapshot, absent when there are none, so a World made
+before fields generates none. The snapshot is separate from `entities` and
 changes neither the format nor the generator version.
 
 Plants add nothing else to the save. A Plant Voxel is a Material and its Stage

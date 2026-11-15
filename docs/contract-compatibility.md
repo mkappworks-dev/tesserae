@@ -133,6 +133,14 @@ in every earlier row. Both are optional fields of the unreleased text, so a
 Declaration built against the earlier 0.3 text no longer lines up and needs a
 rebuild; a row that sets neither behaves as before.
 
+A `surface-feature` of line 0.3 then gained an optional `field` (a `field-def`:
+`group`, `scale-m`, `strays`) and a `biome-def` a `crop-fields` list (a
+`crop-field` record: crops with weights, `plot-m`, `spacing-m`, and optional
+`path`, `ditch` and `near-water-m`), appended in the same way, so a Declaration
+built against the earlier 0.3 text needs a rebuild. A Biome with neither
+generates exactly as before, and the Biome snapshot carries them as optional
+members, so no `FORMAT_VERSION` or generator version changes.
+
 A `plant-stage` of line 0.3 gained an optional `shape` as its last field (a
 Shape by full name the Stage's Voxels take; none keeps the Plant's or the
 fruit's), so a Declaration built against the earlier 0.3 text no longer lines up

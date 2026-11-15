@@ -139,6 +139,14 @@ so list rare features first. Removing one drops its Item like any Voxel. The
 coarse LOD levels leave them out. The World's saved Biome table carries them, so
 a World saved before a Game added features keeps its bare ground.
 
+A feature may add `field = { group, scale-m, strays }` so the features of a
+Biome that share a group hold one species to a region of the ground, with a few
+strays, and a Biome row may add `crop-fields`, at most two entries of
+rectangular plots of one crop in rows, with a path between them, a ditch along
+the low edge and an optional distance from the lake. Both are pure functions of
+the seed and positions in metres. The rules and an example of each are in the
+authoring guide's [Fields](authoring-guide.md#fields).
+
 Tables that are absent change nothing: a World with no Biomes generates as it
 always did.
 

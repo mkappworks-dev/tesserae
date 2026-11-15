@@ -183,6 +183,14 @@ low-frequency density field of position that multiplies the feature's chance, so
 it stands in groves with clearings between while its declared spacing stays the
 mean spacing.
 
+**Field** — an optional group, region scale and strays on a surface feature: the
+ground is cut into regions, each given one member of the group, so a patch is
+mostly one species with a few strays.
+
+**Crop field** — a Biome's planted field: a grid of rectangular plots, each one
+crop in rows, with a path between them and a ditch along the low edge, standing
+on level ground clear of the lake, caves and trees.
+
 **Generator version** — the revision of the world generation algorithm a World
 was created under. A World keeps it for life, so a later revision never changes
 its terrain for the same seed.

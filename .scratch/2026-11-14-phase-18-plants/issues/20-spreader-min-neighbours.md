@@ -76,6 +76,10 @@ naming the Plant, TOML), server (`the_shared_spreaders_keep_a_generated_patch_
 where_worldgen_put_it`: 3 and 2 Voxels past against 12 and 12 free; and the
 existing hour and 12 hour bounds now run on the real rows).
 
+Decided after the build: `min-neighbours` stays in Voxels and a lone seed grows
+exactly one neighbour. A per-metre form, for it and for `density` together, is a
+later and separate contract change.
+
 Re-pinned: `the_demo_games_textures_are_unchanged` (the new crops art), nothing
 else. No `FORMAT_VERSION` or `GENERATOR_VERSION` change: growth rules are not in
 the Biome snapshot.

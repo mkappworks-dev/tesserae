@@ -99,3 +99,15 @@ break, fruit alone ripens and seeds nothing, fruit breaks without ground) and
 
 Re-pinned: `the_demo_games_textures_are_unchanged`; the per-Biome species tables
 of `demo_games::vegetation`. No version change: the snapshot kind is additive.
+
+Fruit blocks movement (added after the build). The four fruit Shapes of `crops`
+(`watermelon`, `watermelon_unripe`, `pumpkin`, `pumpkin_unripe`) carry a
+collision box over the body; berries and apples stay walk-through. The default
+gap leaves 1.25 Voxels between two bodies' boxes at 1.0 and 0.5 m (0.625 m at
+0.5) and 2.25 at 0.25 m (0.56 m), more than the 0.4 m Player; a gap of one Voxel
+at 0.25 m leaves 0.31 m, which a Player does not squeeze through, but fruit
+never forms a wall, so a row of them is walked round. Tests (`demo_games::plants`):
+a 0.1 m body overlaps each melon and pumpkin Shape and not a berry, at three
+sizes; a Player box fits between two fruit at the default gap and walks round a
+row of five a Voxel apart, at three sizes. Not re-pinned: no digest reads
+collision.

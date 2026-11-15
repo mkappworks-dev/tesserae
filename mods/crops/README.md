@@ -16,8 +16,8 @@ Each crop is planted from its seed Item (`berry_cutting` for the bush) and needs
 light 9 or more. A watermelon or pumpkin is a vine crop: its ripe vine bears
 fruit on the ground within 1.5 m, never touching another and at most 5 to a
 vine, and breaking a fruit lets the vine bear another. Fruit never seeds, and a
-watermelon or pumpkin has a collision box, so it blocks a body; berries do not. Every
-Stage and Item has artwork drawn by `scripts/generate-mod-art`.
+watermelon or pumpkin has a collision box, so it blocks a body; berries do not.
+Every Stage and Item has artwork drawn by `scripts/generate-mod-art`.
 
 Recipes, both by hand: three `wheat` make a `bread`; two `berries` and a `wheat`
 make a `berry_pie`.

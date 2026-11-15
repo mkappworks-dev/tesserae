@@ -685,3 +685,9 @@ fn crop_fields_are_checked() {
             .is_err()
     );
 }
+
+#[test]
+fn a_biome_with_sixteen_features_and_two_fields_stays_inline_in_three_kib() {
+    let size = std::mem::size_of::<Biome>();
+    assert!(size < 3072, "{size} bytes");
+}

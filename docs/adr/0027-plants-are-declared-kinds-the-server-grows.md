@@ -349,3 +349,55 @@ Two optional fields on the unreleased 0.3 contract, no version change.
   when broken and is replaced; it only ripens and never seeds. The Biome
   snapshot freezes a generated vine as a new optional `vine` form, so no World
   made before it changes.
+
+## Amendment 2026-11-15: fruit that blocks, and fields
+
+Decisions made when ticket 22 was built.
+
+- **`min-neighbours` stays a count of Voxels**, as it was built, and a lone seed
+  still grows exactly one neighbour. A per-metre form for it and for `density`
+  together is a later, separate contract change.
+- **Melons and pumpkins block movement.** The four fruit Shapes of `crops` carry
+  a collision box over the body, so a body does not walk through one; berries
+  and apples stay walk-through. A body 0.4 m wide fits between two fruit at the
+  default gap at every Voxel size, and walks round a row of them a Voxel apart.
+- **Wild fields.** A surface feature may name a `field` group. A jittered
+  lattice `scale-m` apart cuts the ground into regions; a region is given one
+  member of the group by hash, and a column that draws a member stands it only
+  in a region that holds it or, with chance `strays`, anyway. The filter sits in
+  the one place the feature is picked, so the Chunk pass, the plant pass and the
+  spawn clearance agree. A drawn member that is refused leaves the column bare.
+  The members stand in a share of the ground, so a Game closes their spacings by
+  the root of that share. A feature with no field runs the same arithmetic as
+  before.
+- **Planted fields.** A Biome's `crop-fields` (at most 2, each up to 4 crops) is
+  a pure function of the seed, the Voxel size and metres. A lattice cell
+  `spacing-m` on a side holds a field half the time, and a held cell tries up to
+  36 places, the first few for a grid of up to 3 by 3 plots and the last for
+  one, because ground that is level is rare (Terra's temperate Biome is level
+  within a metre over 12 m about one place in nine, tidewater's lagoon one in
+  sixty-five). A place is taken when its columns, a metre apart, are in the
+  Biome, above the lake and caves, within a metre in height of each other and,
+  if asked, near the lake, and no tree trunk stands on any column. Lanes one
+  Voxel wide ring the field and separate its plots, so a plot is a whole number
+  of Voxels and the lane is exactly one Voxel at every size; the lowest edge is
+  the ditch. Cells are in global Voxel indices, drawn from metres, so any Chunk
+  that reaches a field decides alike, and a field is inset from its cell so two
+  never touch. A later entry of a Biome gives way to an earlier one it would
+  cross.
+- **Deviations from the proposal.** Level is within a metre, not one Voxel,
+  which is a Voxel at the default size and four at 0.25 m, since a plot must fit
+  the same ground at every size. A tree no longer skips the field whole but its
+  place, and the cell looks elsewhere. Wild plants are not stood on a field's
+  lanes or plots (a tree never is, since its place would have been skipped), and
+  a field's crops go in after the Biome's plants, into air only.
+- **Cost.** A chunk with a field near it asks the ground of each place a held
+  cell tries, rejecting an uneven one after a few columns, and scans the columns
+  of the places that pass for trunks. The demo Games measured 0.85 ms a Chunk
+  against 0.73 at 1.0 m in Terra, and 1.94 against 1.89 at 0.25 m, over 160 m
+  round the origin on a loaded host. A Biome's inline size grew by the two
+  fields to about 2.7 KiB.
+- **No version change.** The snapshot carries a feature's `field` and a Biome's
+  `crop_fields` as optional members, written only when present, so a World made
+  before reads and generates as it did, and a Biome with no fields generates its
+  recorded digests.

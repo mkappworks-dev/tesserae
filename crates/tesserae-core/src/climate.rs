@@ -937,7 +937,7 @@ impl CropField {
 /// At most [`MAX_SURFACE_FEATURES`], in declaration order, and at most [`MAX_CROP_FIELDS`] planted
 /// fields.
 ///
-/// Held inline so a Biome stays `Copy`: 16 features and 2 fields measure a Biome at under 2 KiB,
+/// Held inline so a Biome stays `Copy`: 16 features and 2 fields measure a Biome at about 2.7 KiB,
 /// and generation reads them by reference, so the size is paid only when a table is copied, never
 /// per column.
 #[derive(Clone, Copy, PartialEq, Debug)]

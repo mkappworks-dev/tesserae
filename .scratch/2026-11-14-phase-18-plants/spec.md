@@ -511,8 +511,7 @@ them. Everything else is content on the existing contract.
 ## Amendment 2026-11-15: bounded spreading, vine crops and fields
 
 The maintainer approved the mockup's "Spreaders and fields" section
-(`/vegetation`). Three changes follow; tickets 20 and 21 are built now, ticket
-22 is specified and left for later.
+(`/vegetation`). Three changes follow, and tickets 20, 21 and 22 are built.
 
 - **`min-neighbours` on a spreader (ticket 20).** Ground cover still creeps: a
   `density` cap bounds the crowd around a new Voxel and never how far a field
@@ -531,11 +530,15 @@ The maintainer approved the mockup's "Spreaders and fields" section
   vine bear another. Watermelon and pumpkin join the `crops` Mod and the Biome
   features, and worldgen stands a vine with its first fruit, whole across Chunk
   borders.
-- **Fields (ticket 22, not built).** Wild fields group ground cover by region
-  so a patch is mostly one species, and planted fields are rows of one crop
-  with paths and a water ditch beside water in meadow Biomes.
+- **Fields (ticket 22).** Wild fields group ground cover by region so a patch
+  is mostly one species, and planted fields are rows of one crop with paths and
+  a water ditch beside water in meadow Biomes. Both are optional on the 0.3
+  contract (`surface-feature.field` and `biome-def.crop-fields`), pure functions
+  of the seed and metres, and carried in the Biome snapshot as optional members.
+- **Melons and pumpkins block movement**; berries stay walk-through.
 
 The contract changes stay in the unreleased 0.3 WIT, with optional fields only:
-a Mod that sets neither is unchanged. The World's Biome snapshot gains one
-optional kind for a generated vine; a World that has none reads and generates as
-before, so `FORMAT_VERSION` and `GENERATOR_VERSION` stay.
+a Mod that sets none is unchanged. The World's Biome snapshot gains one optional
+kind for a generated vine, an optional field group on a feature and an optional
+list of planted fields; a World that has none reads and generates as before, so
+`FORMAT_VERSION` and `GENERATOR_VERSION` stay.
