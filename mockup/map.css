@@ -419,12 +419,26 @@
   gap: 10px;
 }
 .pop-actions {
-  display: flex;
-  justify-content: flex-end;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
   gap: 8px;
 }
-.pop-actions .btn.danger {
-  margin-right: auto;
+.pop-actions .btn {
+  width: 100%;
+  justify-content: center;
+}
+.pop-actions .btn:only-child {
+  grid-column: 1 / -1;
+}
+.map-pop .input {
+  margin-top: 0;
+  min-height: 32px;
+  padding: 5px 10px;
+}
+.game .map-pop .input:focus-visible {
+  outline: 1px solid #a8b5a2;
+  outline-offset: 0;
+  border-color: #a8b5a2;
 }
 .map-banner {
   display: flex;

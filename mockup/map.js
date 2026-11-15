@@ -461,14 +461,14 @@ function mapPopHtml() {
     pop = m.pop;
   if (!pop) return "";
   if (pop.mode === "add")
-    return `<div class="map-pop" id="map-pop" role="dialog" aria-label="New Waypoint"><i class="pop-arrow"></i><label class="field-label">Name<input class="input" id="wp-name" maxlength="32" autocomplete="off" value="${esc(pop.name)}" placeholder="${esc(mapDefaultName())}"></label>${mapKindChips(pop.kind)}<div class="pop-actions">${button("Cancel", "map-pop-cancel", { small: true, ghost: true })}${button("Add", "map-pop-ok", { small: true, primary: true })}</div></div>`;
+    return `<div class="map-pop" id="map-pop" role="dialog" aria-label="New Waypoint"><i class="pop-arrow"></i><input class="input" id="wp-name" aria-label="Waypoint name" maxlength="32" autocomplete="off" value="${esc(pop.name)}" placeholder="${esc(mapDefaultName())}">${mapKindChips(pop.kind)}<div class="pop-actions">${button("Cancel", "map-pop-cancel", { small: true, ghost: true })}${button("Add", "map-pop-ok", { small: true, primary: true })}</div></div>`;
   const wp = m.wps.find((w) => w.id === pop.id);
   if (!wp) return "";
   const k = MAP_KINDS[wp.kind],
     where = `X ${mapFmt(wp.x)} · Z ${mapFmt(wp.z)}`;
   if (wp.kind === "Death")
-    return `<div class="map-pop" id="map-pop" role="dialog" aria-label="${esc(wp.name)}"><i class="pop-arrow"></i><div class="pop-head"><span class="wp-icon" style="--wp:${k.color}">${k.icon}</span><span class="wp-name"><b>${esc(wp.name)}</b><small>${wp.kind} · ${where}</small></span></div><p class="muted">Left where you died. It is replaced by your next death.</p><div class="pop-actions">${button("Centre", "map-centre-wp", { small: true, ghost: true })}${button("Close", "map-pop-cancel", { small: true })}</div></div>`;
-  return `<div class="map-pop" id="map-pop" role="dialog" aria-label="Edit ${esc(wp.name)}"><i class="pop-arrow"></i><label class="field-label">Name<input class="input" id="wp-name" maxlength="32" autocomplete="off" value="${esc(pop.name)}"></label><small class="muted">${where}</small>${mapKindChips(pop.kind)}<div class="pop-actions">${button("Remove", "map-delete", { small: true, danger: true, value: wp.id })}${button("Centre", "map-centre-wp", { small: true, ghost: true })}${button("Save", "map-pop-ok", { small: true, primary: true })}</div></div>`;
+    return `<div class="map-pop" id="map-pop" role="dialog" aria-label="${esc(wp.name)}"><i class="pop-arrow"></i><div class="pop-head"><span class="wp-icon" style="--wp:${k.color}">${k.icon}</span><span class="wp-name"><b>${esc(wp.name)}</b><small>${wp.kind} · ${where}</small></span></div><p class="muted">Left where you died. It is replaced by your next death.</p><div class="pop-actions">${button("Close", "map-pop-cancel", { small: true })}</div></div>`;
+  return `<div class="map-pop" id="map-pop" role="dialog" aria-label="Edit ${esc(wp.name)}"><i class="pop-arrow"></i><input class="input" id="wp-name" aria-label="Waypoint name" maxlength="32" autocomplete="off" value="${esc(pop.name)}"><small class="muted">${where}</small>${mapKindChips(pop.kind)}<div class="pop-actions">${button("Remove", "map-delete", { small: true, danger: true, value: wp.id })}${button("Save", "map-pop-ok", { small: true, primary: true })}</div></div>`;
 }
 function mapPopAt() {
   const m = ensureMap(),
