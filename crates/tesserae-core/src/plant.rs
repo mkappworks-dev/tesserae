@@ -8,6 +8,8 @@
 mod reach;
 pub mod tree;
 
+pub use reach::first_fruit_offsets;
+
 use std::collections::HashMap;
 
 use crate::chunk::{CHUNK_SIZE, CHUNK_VOLUME};
@@ -40,6 +42,11 @@ pub const MAX_CANOPY_RADIUS_M: f32 = 8.0;
 pub const MAX_PLANT_HEIGHT_M: f32 = 32.0;
 pub const MAX_SPREAD_REACH_M: f32 = 8.0;
 pub const MAX_FRUIT_DENSITY: f32 = 0.3;
+/// Most fruit one vine crop holds, and the defaults a row that names none takes.
+pub const MAX_VINE_FRUIT: u32 = 16;
+pub const DEFAULT_VINE_REACH_M: f32 = 1.5;
+pub const DEFAULT_VINE_GAP_M: f32 = 0.5;
+pub const DEFAULT_VINE_FRUIT: u32 = 5;
 
 /// A count from `min` to `max` inclusive.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -93,6 +100,20 @@ pub struct Fruit {
     pub regrow_seconds: f32,
     /// The Shape of every fruit Voxel; `None` is a cube.
     pub shape: Option<ShapeId>,
+}
+
+/// Fruit a vine crop's ripe Stage bears on the ground around it.
+#[derive(Clone, PartialEq, Debug)]
+pub struct VineFruit {
+    pub stages: Vec<Stage>,
+    /// Mean seconds between new fruit on a vine with room.
+    pub regrow_seconds: f32,
+    /// The Shape of every fruit Voxel; `None` is a cube.
+    pub shape: Option<ShapeId>,
+    pub reach_m: f32,
+    /// Ground, in metres, kept clear between two fruit; at least one Voxel at any size.
+    pub gap_m: f32,
+    pub max_fruit: u32,
 }
 
 #[derive(Clone, PartialEq, Debug)]
@@ -233,6 +254,8 @@ pub enum Kind {
     Crop {
         stages: Vec<Stage>,
         harvest_to: Option<usize>,
+        /// Fruit the last Stage bears; its Materials are this Plant's `Role::Fruit`.
+        fruit_vine: Option<VineFruit>,
     },
     /// `stages` holds the sapling alone: its Material is the seed's and its
     /// `yields` are what removing it gives.
@@ -251,6 +274,8 @@ pub enum Kind {
         reach_m: f32,
         mean_seconds: f32,
         density: u32,
+        /// A target is seeded only where this many of the Plant stand within reach; 0 is no rule.
+        min_neighbours: u32,
         yields: Vec<Yield>,
     },
     Climber {
@@ -442,6 +467,7 @@ impl PlantTable {
                 Kind::Crop {
                     stages,
                     harvest_to: Some(to),
+                    ..
                 },
                 Role::Stage(n),
             ) => Some(Harvest {
@@ -463,6 +489,13 @@ impl PlantTable {
         };
         match (&plant.kind, role) {
             (Kind::Crop { stages, .. }, Role::Stage(n)) => &stages[n].yields,
+            (
+                Kind::Crop {
+                    fruit_vine: Some(fruit),
+                    ..
+                },
+                Role::Fruit(n),
+            ) => &fruit.stages[n].yields,
             (Kind::Tree(_), Role::Sapling) => &plant.sapling_yields,
             (Kind::Tree(tree), Role::Trunk) => &tree.trunk_yield,
             (Kind::Tree(tree), Role::Canopy) => &tree.canopy_yield,
@@ -566,6 +599,13 @@ impl PlantTable {
         match (&plant.kind, role) {
             (Kind::Crop { stages, .. }, Role::Stage(n)) => stages.get(n)?.shape.or(plant.shape),
             (
+                Kind::Crop {
+                    fruit_vine: Some(fruit),
+                    ..
+                },
+                Role::Fruit(n),
+            ) => fruit.stages.get(n)?.shape.or(fruit.shape),
+            (
                 Kind::Tree(Tree {
                     fruit: Some(fruit), ..
                 }),
@@ -602,6 +642,13 @@ impl PlantTable {
         match (self.plants.get(plant).map(|p| &p.kind), role) {
             (Some(Kind::Crop { stages, .. }), Role::Stage(_)) => stages[0].material,
             (
+                Some(Kind::Crop {
+                    fruit_vine: Some(fruit),
+                    ..
+                }),
+                Role::Fruit(_),
+            ) => fruit.stages[0].material,
+            (
                 Some(Kind::Tree(Tree {
                     fruit: Some(fruit), ..
                 })),
@@ -635,7 +682,7 @@ impl PlantTable {
             })
         };
         let held = match (&plant.kind, role) {
-            (_, Role::Trunk | Role::Canopy | Role::Fruit(_)) => return None,
+            (Kind::Tree(_), Role::Trunk | Role::Canopy | Role::Fruit(_)) => return None,
             (Kind::Climber { .. }, _) => {
                 let sides = FACES.map(|d| on([at[0] + d[0], at[1] + d[1], at[2] + d[2]], false));
                 held_any(
@@ -696,13 +743,24 @@ impl PlantTable {
         let index = self.plants.len();
         let mut claimed: Vec<(MaterialId, Role)> = Vec::new();
         match &plant.kind {
-            Kind::Crop { stages, .. } => {
+            Kind::Crop {
+                stages, fruit_vine, ..
+            } => {
                 claimed.extend(
                     stages
                         .iter()
                         .enumerate()
                         .map(|(n, s)| (s.material, Role::Stage(n))),
                 );
+                if let Some(fruit) = fruit_vine {
+                    claimed.extend(
+                        fruit
+                            .stages
+                            .iter()
+                            .enumerate()
+                            .map(|(n, s)| (s.material, Role::Fruit(n))),
+                    );
+                }
             }
             Kind::Tree(tree) => {
                 claimed.push((plant.first, Role::Sapling));
@@ -822,12 +880,35 @@ fn check(plant: &Plant) -> Result<(), PlantError> {
         ));
     }
     match &plant.kind {
-        Kind::Crop { stages, harvest_to } => {
+        Kind::Crop {
+            stages,
+            harvest_to,
+            fruit_vine,
+        } => {
             check_stages(stages, MAX_STAGES, 2)?;
             if let Some(to) = *harvest_to
                 && to + 1 >= stages.len()
             {
                 return Err(PlantError::HarvestTo);
+            }
+            if let Some(fruit) = fruit_vine {
+                if harvest_to.is_some() {
+                    return Err(PlantError::Size("a crop with fruit-vine has no harvest-to"));
+                }
+                check_stages(&fruit.stages, MAX_FRUIT_STAGES, 2)?;
+                floor(fruit.regrow_seconds)?;
+                let reach = fruit.reach_m;
+                if !(reach.is_finite() && reach > 0.0 && reach <= MAX_SPREAD_REACH_M) {
+                    return Err(PlantError::Size(
+                        "fruit-vine reach-m must be above 0 and at most 8",
+                    ));
+                }
+                if !(fruit.gap_m.is_finite() && (0.0..=reach).contains(&fruit.gap_m)) {
+                    return Err(PlantError::Size("fruit-vine gap-m is from 0 to reach-m"));
+                }
+                if !(1..=MAX_VINE_FRUIT).contains(&fruit.max_fruit) {
+                    return Err(PlantError::Size("fruit-vine max-fruit is from 1 to 16"));
+                }
             }
         }
         Kind::Tree(tree) => {
@@ -897,6 +978,7 @@ fn check(plant: &Plant) -> Result<(), PlantError> {
             reach_m,
             mean_seconds,
             density,
+            min_neighbours,
             yields,
         } => {
             check_yields(yields)?;
@@ -906,6 +988,11 @@ fn check(plant: &Plant) -> Result<(), PlantError> {
             }
             if *density == 0 {
                 return Err(PlantError::Size("density must be at least 1"));
+            }
+            if *min_neighbours > 0 && min_neighbours >= density {
+                return Err(PlantError::Size(
+                    "min-neighbours must be below density, or nothing could spread",
+                ));
             }
         }
         Kind::Climber {
@@ -1076,6 +1163,21 @@ pub fn grow(
     let PlantRef { plant: index, role } = env.plants.of(material)?;
     let plant = env.plants.plant(index)?;
     let mean = match (&plant.kind, role) {
+        (
+            Kind::Crop {
+                fruit_vine: Some(fruit),
+                stages,
+                ..
+            },
+            Role::Stage(n),
+        ) if n + 1 == stages.len() => fruit.regrow_seconds,
+        (
+            Kind::Crop {
+                fruit_vine: Some(fruit),
+                ..
+            },
+            Role::Fruit(n),
+        ) => fruit.stages.get(n)?.mean_seconds?,
         (Kind::Crop { stages, .. }, Role::Stage(n)) => stages.get(n)?.mean_seconds?,
         (Kind::Column { mean_seconds, .. }, Role::Single)
         | (Kind::Spreader { mean_seconds, .. }, Role::Single)
@@ -1095,11 +1197,17 @@ pub fn grow(
     }
     let size = env.voxel_size;
     match &plant.kind {
-        Kind::Crop { .. } => {
-            let next = env.plants.next_stage(material)?;
-            needs_met(&plant.needs, view, size, at)
-                .then(|| Growth::one(at, env.plants.staged(voxel, next)))
-        }
+        Kind::Crop {
+            fruit_vine: Some(fruit),
+            ..
+        } => match role {
+            Role::Fruit(n) => reach::ripen_vine_fruit(env, plant, fruit, view, at, voxel, n),
+            _ if env.plants.next_stage(material).is_none() => {
+                reach::bear_vine_fruit(env, index, plant, fruit, view, step, at)
+            }
+            _ => grow_stage(env, plant, view, at, voxel),
+        },
+        Kind::Crop { .. } => grow_stage(env, plant, view, at, voxel),
         Kind::Column {
             max_height_m,
             direction,
@@ -1118,8 +1226,23 @@ pub fn grow(
             },
         ),
         Kind::Spreader {
-            reach_m, density, ..
-        } => reach::spread(env, plant, view, step, at, voxel, *reach_m, *density),
+            reach_m,
+            density,
+            min_neighbours,
+            ..
+        } => reach::spread(
+            env,
+            plant,
+            view,
+            step,
+            at,
+            voxel,
+            reach::Crowd {
+                reach_m: *reach_m,
+                density: *density,
+                min_neighbours: *min_neighbours,
+            },
+        ),
         Kind::Climber { length_m, .. } => {
             reach::climb(env, plant, view, step, at, voxel, *length_m)
         }
@@ -1129,6 +1252,18 @@ pub fn grow(
             _ => tree::sprout(env, index, plant, tree, view, at),
         },
     }
+}
+
+fn grow_stage(
+    env: &GrowEnv,
+    plant: &Plant,
+    view: &impl Surroundings,
+    at: [i32; 3],
+    voxel: Voxel,
+) -> Option<Growth> {
+    let next = env.plants.next_stage(voxel.material())?;
+    needs_met(&plant.needs, view, env.voxel_size, at)
+        .then(|| Growth::one(at, env.plants.staged(voxel, next)))
 }
 
 pub fn needs_met(needs: &Needs, view: &impl Surroundings, voxel_size: f32, at: [i32; 3]) -> bool {
@@ -1222,7 +1357,11 @@ mod tests {
                 light_max: 15,
                 ..Needs::default()
             },
-            kind: Kind::Crop { stages, harvest_to },
+            kind: Kind::Crop {
+                stages,
+                harvest_to,
+                fruit_vine: None,
+            },
             sapling_yields: Vec::new(),
         }
     }
@@ -1269,6 +1408,7 @@ mod tests {
             Kind::Crop {
                 stages: vec![stage(10, Some(60.0)), stage(11, None)],
                 harvest_to: None,
+                fruit_vine: None,
             },
             10,
         );
@@ -1587,11 +1727,16 @@ mod tests {
             Kind::Crop {
                 mut stages,
                 harvest_to,
+                fruit_vine,
             } => {
                 stages[0].shape = Some(6);
                 stages[1].shape = Some(7);
                 stages[2].shape = Some(8);
-                Kind::Crop { stages, harvest_to }
+                Kind::Crop {
+                    stages,
+                    harvest_to,
+                    fruit_vine,
+                }
             }
             other => other,
         };
@@ -1757,5 +1902,110 @@ mod tests {
             scene.water = vec![[ABOVE[0] + voxels + 1, ABOVE[1], ABOVE[2]]];
             assert_eq!(grow(&table, &scene, size, ABOVE, 10, 0.0), None, "{size}");
         }
+    }
+
+    fn vine(
+        harvest_to: Option<usize>,
+        fruit: impl FnOnce(&mut VineFruit),
+    ) -> Result<PlantTable, PlantError> {
+        let mut vine = VineFruit {
+            stages: vec![stage(12, Some(32.0)), stage(13, None)],
+            regrow_seconds: 32.0,
+            shape: None,
+            reach_m: 1.5,
+            gap_m: 0.5,
+            max_fruit: 5,
+        };
+        fruit(&mut vine);
+        vine.stages[1].yields = vec![Yield {
+            item: "t:melon".into(),
+            count: CountRange { min: 1, max: 2 },
+        }];
+        let mut table = PlantTable::default();
+        table.push(Plant {
+            name: "melon".into(),
+            seed: "t:seed".into(),
+            first: 10,
+            shape: None,
+            needs: Needs {
+                soil: vec![1],
+                light_max: 15,
+                ..Needs::default()
+            },
+            kind: Kind::Crop {
+                stages: vec![stage(10, Some(32.0)), stage(11, None)],
+                harvest_to,
+                fruit_vine: Some(vine),
+            },
+            sapling_yields: Vec::new(),
+        })?;
+        Ok(table)
+    }
+
+    #[test]
+    fn a_vine_crops_fruit_is_grown_yields_and_is_held_by_soil_not_a_tree() {
+        let table = vine(None, |_| {}).unwrap();
+        assert!(table.is_grown(12) && table.is_grown(13) && !table.is_grown(10));
+        assert_eq!(table.canonical(13), 12);
+        assert_eq!(table.yields(13).len(), 1);
+        assert!(table.yields(12).is_empty());
+        assert!(
+            !table.is_tree_part(13),
+            "fruit on the ground is no tree part"
+        );
+        assert_eq!(table.canopy_of_fruit(13), None);
+        let at = [4, 4, 4];
+        assert!(table.lacks_soil(13, at, &solid_at(&[])).is_some());
+        assert!(
+            table
+                .lacks_soil(13, at, &solid_at(&[([4, 3, 4], 1)]))
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn a_vine_crops_fruit_rules_are_checked() {
+        let bad: [(Option<usize>, fn(&mut VineFruit)); 6] = [
+            (Some(0), |_| {}),
+            (None, |f| f.reach_m = 9.0),
+            (None, |f| f.gap_m = 2.0),
+            (None, |f| f.max_fruit = 0),
+            (None, |f| f.max_fruit = 17),
+            (None, |f| f.regrow_seconds = 1.0),
+        ];
+        for (n, (harvest_to, edit)) in bad.into_iter().enumerate() {
+            assert!(vine(harvest_to, edit).is_err(), "case {n}");
+        }
+        assert!(vine(None, |f| f.gap_m = 0.0).is_ok());
+    }
+
+    #[test]
+    fn a_spreader_must_leave_room_between_its_minimum_and_its_cap() {
+        let spreader = |density, min_neighbours| {
+            let mut table = PlantTable::default();
+            table.push(Plant {
+                name: "grass".into(),
+                seed: "t:seed".into(),
+                first: 10,
+                shape: None,
+                needs: Needs {
+                    soil: vec![1],
+                    light_max: 15,
+                    ..Needs::default()
+                },
+                kind: Kind::Spreader {
+                    reach_m: 2.0,
+                    mean_seconds: 32.0,
+                    density,
+                    min_neighbours,
+                    yields: Vec::new(),
+                },
+                sapling_yields: Vec::new(),
+            })
+        };
+        assert!(spreader(6, 0).is_ok());
+        assert!(spreader(6, 5).is_ok());
+        assert!(spreader(6, 6).is_err());
+        assert!(spreader(1, 1).is_err());
     }
 }

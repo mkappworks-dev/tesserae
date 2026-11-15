@@ -3,10 +3,11 @@
 //! [`Surroundings`].
 
 use super::{
-    Direction, FACES, GrowEnv, Growth, Plant, Surroundings, conditions_met, mix, needs_met,
+    Direction, FACES, GrowEnv, Growth, Plant, Role, Surroundings, VineFruit, conditions_met, mix,
+    needs_met,
 };
 use crate::mesh::{FACE_STEPS, NEG_Y, POS_Y};
-use crate::voxel::{MaterialId, Voxel};
+use crate::voxel::{MaterialId, SHAPE_FULL_CUBE, Voxel};
 
 /// Voxels that span `metres`, rounded up so a cap in metres is never short.
 pub(super) fn voxels_in(metres: f32, voxel_size: f32) -> i32 {
@@ -117,17 +118,17 @@ pub(super) fn spread_target(
     Some([at[0] + dx, at[1] + dy, at[2] + dz])
 }
 
-/// Whether fewer than `density` Voxels of `material` lie within `reach_m` of
-/// `at`. A cell the view does not know counts as none, so terrain beside an
-/// unheld Chunk may overshoot the cap by what it cannot see.
-fn under_density(
+/// How many Voxels of `material` lie within `reach_m` of `at`, counting `also` once when it lies
+/// beyond the sphere, and stopping at `stop`. A cell the view does not know counts as none, so
+/// terrain beside an unheld Chunk may overshoot a cap by what it cannot see.
+fn neighbours(
     view: &impl Surroundings,
     at: [i32; 3],
     material: MaterialId,
-    density: u32,
     reach_m: f32,
     voxel_size: f32,
-) -> bool {
+    stop: u32,
+) -> u32 {
     let r = (reach_m / voxel_size).max(1.0);
     let span = r.floor() as i32;
     let mut found = 0;
@@ -143,20 +144,32 @@ fn under_density(
                     .is_some_and(|o| o.solid.material() == material)
                 {
                     found += 1;
-                    if found >= density {
-                        return false;
+                    if found >= stop {
+                        return found;
                     }
                 }
             }
         }
     }
-    true
+    found
 }
 
-/// A copy of the Voxel at a Sample-picked target within reach: empty, not under
-/// a fluid, on the Plant's soil, with its light, Climate and water, and under
-/// the density cap.
-#[allow(clippy::too_many_arguments)]
+/// A spreader row's crowd rules: how far it reaches, the most Voxels of it within reach of a new
+/// one, and the fewest it seeds into.
+#[derive(Clone, Copy)]
+pub(super) struct Crowd {
+    pub reach_m: f32,
+    pub density: u32,
+    pub min_neighbours: u32,
+}
+
+/// A copy of the Voxel at a Sample-picked target within reach: empty, not under a fluid, on the
+/// Plant's soil, with its light, Climate and water, under the density cap, and seen by at least
+/// `min_neighbours` of its kind.
+///
+/// A Voxel with none of its kind within its own reach is exempt from the count, so a lone placed
+/// seed grows a neighbour; a generated patch, where every Voxel has company, is held to it and
+/// so fills its holes and never advances.
 pub(super) fn spread(
     env: &GrowEnv,
     plant: &Plant,
@@ -164,26 +177,165 @@ pub(super) fn spread(
     step: u64,
     at: [i32; 3],
     voxel: Voxel,
-    reach_m: f32,
-    density: u32,
+    crowd: Crowd,
 ) -> Option<Growth> {
-    let target = spread_target(env.seed, step, at, reach_m, env.voxel_size)?;
+    let size = env.voxel_size;
+    let target = spread_target(env.seed, step, at, crowd.reach_m, size)?;
     if !empty(view, target)? || view.occupants(offset(target, [0, 1, 0]))?.fluid.is_some() {
         return None;
     }
-    if !needs_met(&plant.needs, view, env.voxel_size, target)
-        || !under_density(
-            view,
-            target,
-            voxel.material(),
-            density,
-            reach_m,
-            env.voxel_size,
-        )
-    {
+    if !needs_met(&plant.needs, view, size, target) {
         return None;
     }
+    let material = voxel.material();
+    let near = |cell, stop| neighbours(view, cell, material, crowd.reach_m, size, stop);
+    if near(target, crowd.density) >= crowd.density {
+        return None;
+    }
+    if crowd.min_neighbours > 1 && near(at, 2) > 1 {
+        // One step in height can put the seeder just outside the sphere about its own target.
+        let (dx, dy, dz) = (
+            (target[0] - at[0]) as f32,
+            (target[1] - at[1]) as f32,
+            (target[2] - at[2]) as f32,
+        );
+        let r = (crowd.reach_m / size).max(1.0);
+        let seeder = u32::from(dx * dx + dy * dy + dz * dz > r * r);
+        if near(target, crowd.min_neighbours) + seeder < crowd.min_neighbours {
+            return None;
+        }
+    }
     Some(Growth::one(target, voxel))
+}
+
+/// Voxels of bare ground kept between two fruit of one vine: `gap_m` rounded up, at least one.
+pub(super) fn gap_voxels(gap_m: f32, voxel_size: f32) -> i32 {
+    voxels_in(gap_m, voxel_size)
+}
+
+/// Fruit of the Plant `index` within `reach_m` of a vine, and whether any stands within `gap`
+/// Voxels of `target` on the ground plane. A cell the view does not know holds none.
+fn fruit_around(
+    env: &GrowEnv,
+    view: &impl Surroundings,
+    index: usize,
+    vine: [i32; 3],
+    target: [i32; 3],
+    fruit: &VineFruit,
+) -> (u32, bool) {
+    let size = env.voxel_size;
+    let r = (fruit.reach_m / size).max(1.0);
+    let span = r.floor() as i32;
+    let gap = gap_voxels(fruit.gap_m, size);
+    let (mut count, mut touching) = (0, false);
+    for dy in -2..=2 {
+        for dz in -span - gap..=span + gap {
+            for dx in -span - gap..=span + gap {
+                let cell = [vine[0] + dx, vine[1] + dy, vine[2] + dz];
+                let Some(held) = view.occupants(cell) else {
+                    continue;
+                };
+                let is_fruit = env
+                    .plants
+                    .of(held.solid.material())
+                    .is_some_and(|r| r.plant == index && matches!(r.role, Role::Fruit(_)));
+                if !is_fruit {
+                    continue;
+                }
+                if ((dx * dx + dz * dz) as f32) <= r * r {
+                    count += 1;
+                }
+                let apart = (cell[0] - target[0]).abs().max((cell[2] - target[2]).abs());
+                touching |= apart <= gap && (cell[1] - target[1]).abs() <= 1;
+            }
+        }
+    }
+    (count, touching)
+}
+
+/// A new unripe fruit near the vine at `at`, which a passing Sample of its ripe Stage bears: on a
+/// hash-picked free cell in reach that has the Plant's soil below and its light and Climate, with
+/// fewer than `max_fruit` fruit about the vine and none within the gap.
+pub(super) fn bear_vine_fruit(
+    env: &GrowEnv,
+    index: usize,
+    plant: &Plant,
+    fruit: &VineFruit,
+    view: &impl Surroundings,
+    step: u64,
+    at: [i32; 3],
+) -> Option<Growth> {
+    let size = env.voxel_size;
+    let target = spread_target(env.seed, step, at, fruit.reach_m, size)?;
+    if !empty(view, target)? || view.occupants(offset(target, [0, 1, 0]))?.fluid.is_some() {
+        return None;
+    }
+    if !needs_met(&plant.needs, view, size, target) {
+        return None;
+    }
+    let (count, touching) = fruit_around(env, view, index, at, target, fruit);
+    if count >= fruit.max_fruit || touching {
+        return None;
+    }
+    let first = &fruit.stages[0];
+    let shape = first.shape.or(fruit.shape).unwrap_or(SHAPE_FULL_CUBE);
+    Some(Growth::one(target, Voxel::new(first.material, shape, 0)))
+}
+
+/// A fruit Voxel that has passed its roll moves to its next Stage while the Plant's soil, light
+/// and Climate hold under it.
+pub(super) fn ripen_vine_fruit(
+    env: &GrowEnv,
+    plant: &Plant,
+    fruit: &VineFruit,
+    view: &impl Surroundings,
+    at: [i32; 3],
+    voxel: Voxel,
+    stage: usize,
+) -> Option<Growth> {
+    let next = fruit.stages.get(stage + 1)?.material;
+    needs_met(&plant.needs, view, env.voxel_size, at)
+        .then(|| Growth::one(at, env.plants.staged(voxel, next)))
+}
+
+/// The columns, as offsets from a vine's own, where worldgen stands its first fruit: up to
+/// `max_fruit` of them, never touching and within `reach_m`, a pure function of the seed and the
+/// vine's column in metres. `ground` says whether a column, by offset, can hold fruit.
+pub fn first_fruit_offsets(
+    seed: u64,
+    column_m: [f32; 2],
+    (reach_m, gap_m, max_fruit): (f32, f32, u32),
+    voxel_size: f32,
+    ground: impl Fn([i32; 2]) -> bool,
+) -> Vec<[i32; 2]> {
+    let r = (reach_m / voxel_size).max(1.0);
+    let span = r.floor() as i32;
+    let gap = gap_voxels(gap_m, voxel_size);
+    let salt = u64::from(column_m[0].to_bits()) << 32 | u64::from(column_m[1].to_bits());
+    let key = mix(mix(seed ^ 0x7b1d_f00d_0c1a_55e5) ^ salt);
+    let mut cells: Vec<([i32; 2], u64)> = (-span..=span)
+        .flat_map(|dz| (-span..=span).map(move |dx| [dx, dz]))
+        .filter(|&[dx, dz]| [dx, dz] != [0, 0] && ((dx * dx + dz * dz) as f32) <= r * r)
+        .map(|c| {
+            let h = mix(key ^ ((c[0] as u32 as u64) << 32 | c[1] as u32 as u64));
+            (c, h)
+        })
+        .collect();
+    cells.sort_by_key(|&(_, h)| h);
+    let wanted = 1 + (mix(key ^ 0x5eed) % u64::from(max_fruit.max(1))) as usize;
+    let mut chosen: Vec<[i32; 2]> = Vec::new();
+    for (c, _) in cells {
+        if chosen.len() >= wanted {
+            break;
+        }
+        let clear = chosen
+            .iter()
+            .all(|o| (o[0] - c[0]).abs().max((o[1] - c[1]).abs()) > gap);
+        if clear && ground(c) {
+            chosen.push(c);
+        }
+    }
+    chosen
 }
 
 /// Vine Voxels face-connected to `at`, counted up to `cap`; `None` when the
@@ -263,7 +415,7 @@ mod tests {
     use crate::climate::Climate;
     use crate::light::Light;
     use crate::occupants::{Fluid, Occupants};
-    use crate::plant::{Kind, Needs, PlantTable, grow};
+    use crate::plant::{Kind, Needs, PlantTable, VineFruit, grow};
     use crate::shape::{Form, NodeBox, Orientation, ShapeDef, ShapeTable};
     use std::collections::{HashMap, HashSet};
 
@@ -273,7 +425,7 @@ mod tests {
     const PLANT: MaterialId = 10;
     const SIZES: [f32; 3] = [1.0, 0.5, 0.25];
 
-    #[derive(Default)]
+    #[derive(Default, Clone)]
     struct Scene {
         solids: HashMap<[i32; 3], Voxel>,
         fluids: HashSet<[i32; 3]>,
@@ -529,6 +681,7 @@ mod tests {
                 reach_m,
                 mean_seconds: 16.0,
                 density,
+                min_neighbours: 0,
                 yields: Vec::new(),
             },
         )
@@ -663,6 +816,163 @@ mod tests {
         }
     }
 
+    fn crowded(reach_m: f32, density: u32, min_neighbours: u32) -> PlantTable {
+        table(
+            needs(),
+            Kind::Spreader {
+                reach_m,
+                mean_seconds: 16.0,
+                density,
+                min_neighbours,
+                yields: Vec::new(),
+            },
+        )
+    }
+
+    /// Plant Voxels within `reach_m` of `at` in `scene`, plus `from` when the sphere misses it.
+    fn crowd_at(scene: &Scene, at: [i32; 3], from: [i32; 3], reach_m: f32, size: f32) -> u32 {
+        let r2 = (reach_m / size).max(1.0).powi(2);
+        let apart = |c: &[i32; 3]| (0..3).map(|i| ((c[i] - at[i]) as f32).powi(2)).sum::<f32>();
+        let held = scene
+            .solids
+            .iter()
+            .filter(|(c, v)| v.material() == PLANT && apart(c) <= r2)
+            .count() as u32;
+        held + u32::from(apart(&from) > r2)
+    }
+
+    /// A flat meadow of soil wide enough for a field of `half_m` metres either way, with `start`
+    /// planted.
+    fn lawn(size: f32, half_m: f32, start: &[[i32; 3]]) -> Scene {
+        let span = (half_m / size) as i32;
+        let mut scene = Scene::lit(10);
+        scene.fill([-span, -1, -span], [span, -1, span], Voxel::cube(SOIL));
+        for &at in start {
+            scene.solids.insert(at, Voxel::cube(PLANT));
+        }
+        scene
+    }
+
+    /// Spreads `scene` for `steps` Samples, each Voxel in turn seeding once, and returns how far
+    /// from the origin, in metres, the farthest Voxel stands.
+    fn creep(plants: &PlantTable, scene: &mut Scene, size: f32, steps: u64) -> f32 {
+        let shapes = ShapeTable::builtin();
+        let env = env(plants, &shapes, size);
+        let mut sources: Vec<[i32; 3]> =
+            scene.solids.keys().copied().filter(|c| c[1] == 0).collect();
+        sources.sort();
+        for step in 0..steps {
+            let from = sources[step as usize % sources.len()];
+            if let Some(g) = grow(&env, scene, step, from, Voxel::cube(PLANT), 0.0) {
+                sources.push(g.changes[0].at);
+                scene.apply(&g);
+            }
+        }
+        sources
+            .iter()
+            .map(|c| ((c[0] * c[0] + c[2] * c[2]) as f32).sqrt() * size)
+            .fold(0.0, f32::max)
+    }
+
+    #[test]
+    fn a_crowded_spreader_seeds_only_where_enough_of_its_kind_stand_in_reach() {
+        for size in SIZES {
+            let at = |x: f32, z: f32| [(x / size).round() as i32, 0, (z / size).round() as i32];
+            let start = [at(0.0, 0.0), at(0.5, 0.0), at(0.0, 0.5), at(0.5, 0.5)];
+            let scene = lawn(size, 4.0, &start);
+            let shapes = ShapeTable::builtin();
+            for min in [2, 3] {
+                let plants = crowded(2.0, 1000, min);
+                let env = env(&plants, &shapes, size);
+                let mut landed = 0;
+                for step in 0..3000 {
+                    let from = start[step as usize % 4];
+                    let Some(g) = grow(&env, &scene, step, from, Voxel::cube(PLANT), 0.0) else {
+                        continue;
+                    };
+                    landed += 1;
+                    let crowd = crowd_at(&scene, g.changes[0].at, from, 2.0, size);
+                    assert!(crowd >= min, "{size}: {crowd} of {min} within reach");
+                }
+                assert!(landed > 100, "{size}: only {landed} landed at min {min}");
+            }
+            let loose = crowded(2.0, 1000, 0);
+            let env = env(&loose, &shapes, size);
+            let thin = (0..3000)
+                .filter_map(|step| grow(&env, &scene, step, start[0], Voxel::cube(PLANT), 0.0))
+                .any(|g| crowd_at(&scene, g.changes[0].at, start[0], 2.0, size) < 3);
+            assert!(
+                thin,
+                "{size}: without the rule every target was crowded anyway"
+            );
+        }
+    }
+
+    #[test]
+    fn a_spreader_that_names_no_minimum_or_one_grows_as_it_always_did() {
+        let scene = lawn(1.0, 4.0, &[[0, 0, 0]]);
+        let hits = |min| targets(&crowded(2.0, 1000, min), &scene, 1.0, 1000);
+        assert_eq!(hits(0), hits(1));
+        assert!(!hits(0).is_empty());
+    }
+
+    #[test]
+    fn a_lone_seed_grows_a_neighbour_and_a_free_one_runs_on() {
+        for size in [1.0, 0.5] {
+            let mut free = lawn(size, 8.0, &[[0, 0, 0]]);
+            let mut bounded = free.clone();
+            let far_free = creep(&crowded(2.0, 9, 0), &mut free, size, 3000);
+            let far_bounded = creep(&crowded(2.0, 9, 3), &mut bounded, size, 3000);
+            let count = |s: &Scene| s.solids.values().filter(|v| v.material() == PLANT).count();
+            assert_eq!(
+                count(&bounded),
+                2,
+                "{size}: a lone seed grows one neighbour"
+            );
+            assert!(far_bounded <= 2.0 + 1e-3, "{size}: spread {far_bounded} m");
+            assert!(
+                far_free > 3.0,
+                "{size}: the free field only reached {far_free} m"
+            );
+        }
+    }
+
+    #[test]
+    fn a_dense_patch_fills_its_holes_and_creeps_far_less_than_a_free_one() {
+        // `min-neighbours` is a count of Voxels like `density`, so each size gets the count that
+        // sits just under its patch's own crowd of 13 within reach.
+        for (size, min) in [(1.0, 10), (0.5, 12)] {
+            // One Voxel a metre apart, so a reach holds the same count at every Voxel size.
+            let step = (1.0 / size) as i32;
+            let patch: Vec<[i32; 3]> = (-3i32..=3)
+                .flat_map(|z| (-3i32..=3).map(move |x| [x, z]))
+                .filter(|c| ((c[0] * c[0] + c[1] * c[1]) as f32).sqrt() <= 3.0)
+                .filter(|c| (c[0] + 2 * c[1]).rem_euclid(7) != 0)
+                .map(|c| [c[0] * step, 0, c[1] * step])
+                .collect();
+            let mut free = lawn(size, 8.0, &patch);
+            let mut bounded = free.clone();
+            let far_free = creep(&crowded(2.0, 14, 0), &mut free, size, 12_000);
+            let far_bounded = creep(&crowded(2.0, 14, min), &mut bounded, size, 12_000);
+            assert!(
+                far_free > 3.0 + 1.5,
+                "{size}: the free patch only reached {far_free} m"
+            );
+            assert!(
+                far_bounded + 1.5 < far_free,
+                "{size}: bounded {far_bounded} m against free {far_free} m"
+            );
+            let held = |s: &Scene| s.solids.values().filter(|v| v.material() == PLANT).count();
+            assert!(held(&bounded) > patch.len(), "{size}: no hole filled");
+            if size == 1.0 {
+                assert!(
+                    far_bounded <= 3.0 + 0.75,
+                    "{size}: advanced to {far_bounded} m"
+                );
+            }
+        }
+    }
+
     #[test]
     fn mushrooms_spread_in_the_dark_and_grass_in_the_light() {
         let mushroom = spreader(2.0, 1000, (0, 4));
@@ -697,6 +1007,145 @@ mod tests {
         }
         for t in targets(&plants, &scene, 1.0, 4000) {
             assert!(t[0] <= 0, "{t:?} is in unknown terrain");
+        }
+    }
+
+    const VINE: MaterialId = PLANT + 1;
+    const UNRIPE: MaterialId = PLANT + 2;
+    const RIPE: MaterialId = PLANT + 3;
+
+    fn vine_crop(max_fruit: u32) -> PlantTable {
+        let stage = |material, mean_seconds| super::super::Stage {
+            material,
+            mean_seconds,
+            yields: Vec::new(),
+            shape: None,
+        };
+        table(
+            needs(),
+            Kind::Crop {
+                stages: vec![stage(PLANT, Some(16.0)), stage(VINE, None)],
+                harvest_to: None,
+                fruit_vine: Some(VineFruit {
+                    stages: vec![stage(UNRIPE, Some(16.0)), stage(RIPE, None)],
+                    regrow_seconds: 16.0,
+                    shape: None,
+                    reach_m: 1.5,
+                    gap_m: 0.5,
+                    max_fruit,
+                }),
+            },
+        )
+    }
+
+    fn fruit_cells(scene: &Scene) -> Vec<[i32; 3]> {
+        scene
+            .solids
+            .iter()
+            .filter(|(_, v)| matches!(v.material(), UNRIPE | RIPE))
+            .map(|(c, _)| *c)
+            .collect()
+    }
+
+    /// Samples the vine and every fruit once per round, for `rounds` rounds.
+    fn tend(plants: &PlantTable, scene: &mut Scene, size: f32, rounds: u64) {
+        let shapes = ShapeTable::builtin();
+        let env = env(plants, &shapes, size);
+        for step in 0..rounds {
+            let mut cells = fruit_cells(scene);
+            cells.sort();
+            cells.push([0, 0, 0]);
+            for at in cells {
+                let voxel = scene.solids[&at];
+                if let Some(g) = grow(&env, scene, step, at, voxel, 0.0) {
+                    scene.apply(&g);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_vine_bears_fruit_in_reach_never_touching_and_up_to_its_cap_at_every_size() {
+        for size in SIZES {
+            let plants = vine_crop(3);
+            let mut scene = meadow(size, 2.0);
+            scene.solids.insert([0, 0, 0], Voxel::cube(VINE));
+            tend(&plants, &mut scene, size, 600);
+            let fruit = fruit_cells(&scene);
+            assert_eq!(fruit.len(), 3, "{size}: {fruit:?}");
+            let gap = (0.5 / size).ceil().max(1.0) as i32;
+            for (i, a) in fruit.iter().enumerate() {
+                let far = ((a[0] * a[0] + a[2] * a[2]) as f32).sqrt() * size;
+                assert!(far <= 1.5 + 1e-4, "{size}: fruit {far} m from the vine");
+                assert!(
+                    scene
+                        .solids
+                        .get(&[a[0], a[1] - 1, a[2]])
+                        .is_some_and(|v| v.material() == SOIL)
+                );
+                for b in &fruit[i + 1..] {
+                    let apart = (a[0] - b[0]).abs().max((a[2] - b[2]).abs());
+                    assert!(apart > gap, "{size}: {a:?} and {b:?} touch");
+                }
+            }
+            assert!(
+                fruit.iter().all(|c| scene.solids[c].material() == RIPE),
+                "{size}: it ripens"
+            );
+        }
+    }
+
+    #[test]
+    fn breaking_a_fruit_lets_the_vine_bear_another_and_fruit_never_seeds() {
+        let plants = vine_crop(3);
+        let mut scene = meadow(1.0, 2.0);
+        scene.solids.insert([0, 0, 0], Voxel::cube(VINE));
+        tend(&plants, &mut scene, 1.0, 400);
+        let fruit = fruit_cells(&scene);
+        assert_eq!(fruit.len(), 3);
+        scene.solids.remove(&fruit[0]);
+        assert_eq!(fruit_cells(&scene).len(), 2);
+        tend(&plants, &mut scene, 1.0, 400);
+        assert_eq!(fruit_cells(&scene).len(), 3, "the vine bears a replacement");
+        // A lone fruit with no vine ripens and never bears or spreads.
+        let mut lone = meadow(1.0, 2.0);
+        lone.solids.clear();
+        lone.fill([-3, -1, -3], [3, -1, 3], Voxel::cube(SOIL));
+        lone.solids.insert([1, 0, 1], Voxel::cube(UNRIPE));
+        tend_fruit_only(&plants, &mut lone);
+        assert_eq!(fruit_cells(&lone), vec![[1, 0, 1]]);
+    }
+
+    fn tend_fruit_only(plants: &PlantTable, scene: &mut Scene) {
+        let shapes = ShapeTable::builtin();
+        let env = env(plants, &shapes, 1.0);
+        for step in 0..300 {
+            for at in fruit_cells(scene) {
+                let voxel = scene.solids[&at];
+                if let Some(g) = grow(&env, scene, step, at, voxel, 0.0) {
+                    assert_eq!(g.changes.len(), 1);
+                    assert_eq!(g.changes[0].at, at, "fruit only changes its own Voxel");
+                    scene.apply(&g);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_first_fruit_of_a_generated_vine_is_deterministic_apart_and_within_reach() {
+        for size in SIZES {
+            let at = |seed| first_fruit_offsets(seed, [3.5, -7.0], (1.5, 0.5, 5), size, |_| true);
+            let a = at(7);
+            assert_eq!(a, at(7));
+            assert_ne!(a, at(8), "{size}");
+            assert!(!a.is_empty() && a.len() <= 5, "{size}: {a:?}");
+            let gap = (0.5 / size).ceil().max(1.0) as i32;
+            for (i, c) in a.iter().enumerate() {
+                assert!(((c[0] * c[0] + c[1] * c[1]) as f32).sqrt() * size <= 1.5 + 1e-4);
+                for d in &a[i + 1..] {
+                    assert!((c[0] - d[0]).abs().max((c[1] - d[1]).abs()) > gap, "{size}");
+                }
+            }
         }
     }
 

@@ -503,6 +503,23 @@ pub enum SurfacePlantKind {
         stands_in: Option<MaterialId>,
     },
     Tree(SurfaceTree),
+    /// A vine crop standing ripe, with its first fruit on the ground round it.
+    Vine(SurfaceVine),
+}
+
+/// A vine crop and the fruit it bears, frozen with the Biome like a tree's.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct SurfaceVine {
+    /// The ripe vine's Material, in the Plant's Shape.
+    pub material: MaterialId,
+    pub fruit: [MaterialId; MAX_SURFACE_FRUIT_STAGES],
+    pub len: u8,
+    /// The Shape of every fruit Voxel; the cube is `SHAPE_FULL_CUBE`.
+    pub fruit_shape: ShapeId,
+    pub stage_shapes: [Option<ShapeId>; MAX_SURFACE_FRUIT_STAGES],
+    pub reach_m: f32,
+    pub gap_m: f32,
+    pub max_fruit: u32,
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -580,6 +597,11 @@ impl SurfacePlant {
                 stands_in,
                 ..
             } => [Some(material), stands_in].into_iter().flatten().collect(),
+            SurfacePlantKind::Vine(v) => {
+                let mut all = vec![v.material];
+                all.extend_from_slice(&v.fruit[..v.len as usize]);
+                all
+            }
             SurfacePlantKind::Tree(t) => {
                 let mut all = vec![t.trunk, t.canopy];
                 if let Some(f) = t.fruit {
@@ -596,6 +618,7 @@ impl SurfacePlant {
         match self.kind {
             SurfacePlantKind::Stages { .. } => 0.0,
             SurfacePlantKind::Column { max_height_m, .. } => max_height_m,
+            SurfacePlantKind::Vine(_) => 0.0,
             SurfacePlantKind::Tree(t) => {
                 t.trunk_height_m.1
                     + t.canopy_radius_m
@@ -625,6 +648,20 @@ impl SurfacePlant {
             } => {
                 if material == AIR || stands_in == Some(AIR) || !finite_pos(max_height_m) {
                     return Err(bad("a column needs a Material and a height"));
+                }
+            }
+            SurfacePlantKind::Vine(v) => {
+                let fruit = &v.fruit[..(v.len as usize).min(MAX_SURFACE_FRUIT_STAGES)];
+                if v.material == AIR
+                    || !(1..=MAX_SURFACE_FRUIT_STAGES as u8).contains(&v.len)
+                    || fruit.contains(&AIR)
+                    || !(v.reach_m.is_finite() && v.reach_m > 0.0 && v.reach_m <= 8.0)
+                    || !(v.gap_m.is_finite() && (0.0..=v.reach_m).contains(&v.gap_m))
+                    || !(1..=crate::plant::MAX_VINE_FRUIT).contains(&v.max_fruit)
+                {
+                    return Err(bad(
+                        "a vine needs a Material, 1 to 4 fruit Stages, a reach to 8 m, a gap within it and 1 to 16 fruit",
+                    ));
                 }
             }
             SurfacePlantKind::Tree(t) => {

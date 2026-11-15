@@ -12,7 +12,7 @@ use tesserae_core::worldgen::WaterParams;
 use tesserae_core::{
     AIR, Biome, BiomeName, BiomeTable, CHUNK_SIZE, Chunk, ClimateParams, Clump, MAX_SURFACE_STAGES,
     MaterialId, SurfaceFeature, SurfaceFeatures, SurfaceFruit, SurfacePlant, SurfacePlantKind,
-    SurfaceTree, SurfaceVines, Voxel, Worldgen, WorldgenParams,
+    SurfaceTree, SurfaceVine, SurfaceVines, Voxel, Worldgen, WorldgenParams,
 };
 
 const TRUNK: MaterialId = 210;
@@ -25,6 +25,8 @@ const VINE: MaterialId = 225;
 const VINE_SHAPE: u8 = 8;
 const VINE_LENGTH_M: f32 = 6.0;
 const VINE_FACE_BITS: [u8; 4] = [2, 7, 11, 18];
+const MELON_VINE: MaterialId = 230;
+const MELON: [MaterialId; 2] = [231, 232];
 const CROSS_SHAPE: u8 = 5;
 const FRUIT_SHAPE: u8 = 6;
 const SMALL_FRUIT_SHAPE: u8 = 9;
@@ -659,6 +661,9 @@ fn mapping() -> Mapping {
         (CROP[2], "t:wheat2"),
         (CANE, "t:cane"),
         (KELP, "t:kelp"),
+        (MELON_VINE, "t:melon_vine"),
+        (MELON[0], "t:melon0"),
+        (MELON[1], "t:melon1"),
     ];
     Mapping {
         materials: named.map(|(id, n)| (id, n.to_owned())).into(),
@@ -1348,4 +1353,132 @@ fn a_snapshot_keeps_each_crop_stages_shape_and_an_older_one_loads_without() {
         older,
         tesserae_core::save::SavedPlantKind::Stages { stage_shapes, .. } if stage_shapes.is_empty()
     ));
+}
+
+const VINE_REACH_M: f32 = 1.5;
+const VINE_GAP_M: f32 = 0.5;
+const VINE_FRUIT: u32 = 4;
+
+fn melon_feature(spacing_m: f32) -> SurfaceFeature {
+    plant(
+        SurfacePlantKind::Vine(SurfaceVine {
+            material: MELON_VINE,
+            fruit: [MELON[0], MELON[1], AIR, AIR],
+            len: 2,
+            fruit_shape: FRUIT_SHAPE,
+            stage_shapes: [Some(SMALL_FRUIT_SHAPE), None, None, None],
+            reach_m: VINE_REACH_M,
+            gap_m: VINE_GAP_M,
+            max_fruit: VINE_FRUIT,
+        }),
+        MELON_VINE,
+        spacing_m,
+    )
+}
+
+fn horizontal_m(a: [i32; 3], b: [i32; 3], size: f32) -> f32 {
+    (((a[0] - b[0]).pow(2) + (a[2] - b[2]).pow(2)) as f32).sqrt() * size
+}
+
+#[test]
+fn a_generated_vine_bears_whole_apart_fruit_across_chunk_borders_at_every_voxel_size() {
+    let mut crossings = 0;
+    let mut bearing = 0;
+    for size in SIZES {
+        let probe = Probe::new(SEED, size, flat(&[melon_feature(24.0)]));
+        let changed = probe.changed(64.0, false);
+        assert_eq!(changed, probe.changed(64.0, true), "{size} m: order");
+        let at_material = |m: &[MaterialId]| -> Vec<[i32; 3]> {
+            let mut found: Vec<_> = changed
+                .iter()
+                .filter(|(_, (w, _))| m.contains(&w.material()))
+                .map(|(at, _)| *at)
+                .collect();
+            found.sort();
+            found
+        };
+        let vines = at_material(&[MELON_VINE]);
+        let fruit = at_material(&MELON);
+        assert!(vines.len() > 10, "{size} m: only {} vines", vines.len());
+        let gap = (VINE_GAP_M / size).ceil().max(1.0) as i32;
+        for &cell in &fruit {
+            let (w, bare) = changed[&cell];
+            assert!(
+                bare.is_air(),
+                "{size} m: fruit replaced terrain at {cell:?}"
+            );
+            let expected = if w.material() == MELON[0] {
+                SMALL_FRUIT_SHAPE
+            } else {
+                FRUIT_SHAPE
+            };
+            assert_eq!(w.shape(), expected, "{size} m: {cell:?}");
+            assert!(
+                !probe.at([cell[0], cell[1] - 1, cell[2]]).1.is_air(),
+                "{size} m: fruit at {cell:?} floats"
+            );
+        }
+        for &vine in &vines {
+            let (w, _) = changed[&vine];
+            assert_eq!(w.shape(), CROSS_SHAPE);
+            // Two vines within a double reach share fruit, so only a lone one is counted.
+            let lone = vines
+                .iter()
+                .all(|&o| o == vine || horizontal_m(o, vine, size) > 2.0 * VINE_REACH_M + 1.0);
+            if !lone {
+                continue;
+            }
+            let mine: Vec<[i32; 3]> = fruit
+                .iter()
+                .copied()
+                .filter(|&f| horizontal_m(f, vine, size) <= VINE_REACH_M + 1e-3)
+                .collect();
+            assert!(
+                mine.len() <= VINE_FRUIT as usize,
+                "{size} m: {} fruit",
+                mine.len()
+            );
+            bearing += usize::from(!mine.is_empty());
+            for (i, a) in mine.iter().enumerate() {
+                crossings += usize::from(
+                    a.map(|c| c.div_euclid(SIZE_I)) != vine.map(|c| c.div_euclid(SIZE_I)),
+                );
+                for b in &mine[i + 1..] {
+                    let apart = (a[0] - b[0]).abs().max((a[2] - b[2]).abs());
+                    assert!(apart > gap, "{size} m: {a:?} and {b:?} touch");
+                }
+            }
+        }
+        for &cell in fruit.iter().filter(|c| {
+            let [x, _, z] = metres(**c, size);
+            x.abs() < 62.0 && z.abs() < 62.0
+        }) {
+            assert!(
+                vines
+                    .iter()
+                    .any(|&v| horizontal_m(cell, v, size) <= VINE_REACH_M + 1e-3),
+                "{size} m: fruit at {cell:?} has no vine"
+            );
+        }
+    }
+    assert!(bearing > 20, "{bearing} vines bore fruit");
+    assert!(
+        crossings > 3,
+        "{crossings} fruit crossed a Chunk border from their vine"
+    );
+}
+
+#[test]
+fn a_snapshot_carries_a_generated_vine() {
+    let params = flat(&[melon_feature(16.0)]);
+    let saved = Generation::capture(params, &mapping()).unwrap();
+    let json = serde_json::to_string(&saved).unwrap();
+    let reopened: Generation = serde_json::from_str(&json).unwrap();
+    let restored = reopened.restore(&mapping(), 2).unwrap();
+    assert_eq!(restored.biomes, params.biomes);
+    let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+    let form = &value["biomes"][0]["surface_features"][0]["plant"]["form"];
+    assert_eq!(form["kind"], "vine");
+    assert_eq!(form["fruit"][0], "t:melon0");
+    assert_eq!(form["max_fruit"], VINE_FRUIT);
 }

@@ -488,12 +488,36 @@ interface content {
         water: option<plant-water>,
     }
 
+    /// Fruit a vine crop's ripe Stage bears on the ground around it, as a tree
+    /// bears fruit on its canopy. Fruit is grown Materials: no implicit Item and
+    /// never placeable. It never seeds, so a cluster does not creep, and
+    /// breaking one lets the vine bear another.
+    record fruit-vine-def {
+        /// 2 to 4 Stages in order; the last is ripe. Each stands on the Plant's
+        /// `soil` and passes its light and Climate.
+        stages: list<plant-stage>,
+        /// Mean seconds between new fruit on a vine with room, at least 16.
+        regrow-seconds: f32,
+        /// The Shape of every fruit Voxel, by full name; `none` keeps cubes.
+        shape: option<string>,
+        /// How far from the vine fruit stands, above 0 and at most 8 [1.5].
+        reach-m: option<f32>,
+        /// Ground kept clear between two fruit, from 0 to `reach-m` [0.5]: at
+        /// least one Voxel at any Voxel size, so fruit never touches.
+        gap-m: option<f32>,
+        /// Most fruit one vine holds within its reach, from 1 to 16 [5].
+        max-fruit: option<u32>,
+    }
+
     /// A Plant that advances through Materials in place.
     record crop-def {
         /// 2 to 8 Stages in order; the last is ripe.
         stages: list<plant-stage>,
         /// An earlier Stage, by index, that a Remove of the ripe one resets to.
+        /// A vine crop has none.
         harvest-to: option<u32>,
+        /// `some` makes the ripe Stage a vine that bears fruit.
+        fruit-vine: option<fruit-vine-def>,
     }
 
     /// Fruit some canopy Voxels of a tree carry, grown Materials like the
@@ -615,6 +639,13 @@ interface content {
         mean-seconds: f32,
         /// At most this many of its Voxels within `reach-m`, at least 1.
         density: u32,
+        /// Seeds a target only where at least this many of its Voxels stand
+        /// within `reach-m` of it, the seeding one included, so a patch fills
+        /// its holes and does not advance. A count of Voxels, like `density`,
+        /// and below it. A Voxel with none of its kind within its own reach is
+        /// exempt, so a lone planted seed still grows a neighbour. `none` and
+        /// 1 set no rule [0].
+        min-neighbours: option<u32>,
         yields: list<plant-yield>,
     }
 

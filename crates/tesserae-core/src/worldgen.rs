@@ -13,12 +13,13 @@ use crate::chunk::{CHUNK_SIZE, Chunk, ChunkBuilder};
 use crate::climate::{
     BIOMES_SINCE, Biome, BiomeId, BiomeTable, Climate, ClimateField, ClimateParams, MAX_BIOMES,
     SkyFogBlend, SurfaceFeature, SurfaceFeatures, SurfacePlant, SurfacePlantKind, SurfaceTree,
+    SurfaceVine,
 };
 use crate::mesh::POS_Y;
 use crate::noise::{Fbm3Cache, fbm2, fbm3_cached, fbm3_range};
 use crate::ore::{OreField, OreMask, OreTable};
 use crate::plant::tree::{Part, fruit_stage, tree_voxels, vine_voxels};
-use crate::plant::{CountRange, Fruit, Stage, Tree};
+use crate::plant::{CountRange, Fruit, Stage, Tree, first_fruit_offsets};
 use crate::shape::{MAX_SHAPED_PER_CHUNK, Orientation, SHAPE_SLAB, SHAPE_STAIR};
 use crate::tables::Tables;
 use crate::voxel::SHAPE_FULL_CUBE;
@@ -584,8 +585,8 @@ struct SurfaceScatter {
     plants: bool,
     /// The tallest a Plant feature stands above its base, in metres; 0 with none.
     rise_m: f32,
-    /// The widest a tree feature reaches from its trunk, in metres; 0 with none.
-    tree_reach_m: f32,
+    /// The widest a tree or vine feature reaches from its column, in metres; 0 with none.
+    reach_m: f32,
 }
 
 impl SurfaceScatter {
@@ -609,9 +610,10 @@ impl SurfaceScatter {
                 .filter_map(|f| f.plant)
         };
         let rise_m = plants().map(|p| p.rise_m()).fold(0.0, f32::max);
-        let tree_reach_m = plants()
+        let reach_m = plants()
             .filter_map(|p| match p.kind {
                 SurfacePlantKind::Tree(t) => Some(t.reach_m() + t.rounding_slack_m(voxel_size)),
+                SurfacePlantKind::Vine(v) => Some(v.reach_m),
                 _ => None,
             })
             .fold(0.0, f32::max);
@@ -620,7 +622,7 @@ impl SurfaceScatter {
             most,
             plants: plants().next().is_some(),
             rise_m,
-            tree_reach_m,
+            reach_m,
         })
     }
 
@@ -1405,6 +1407,53 @@ impl Worldgen {
         run
     }
 
+    /// The cell over the ground of column `(gx, gz)` where a Plant's Voxel stands: `plant_at`'s
+    /// checks without a Biome, a feature or a column's lake, for fruit that stands beside its vine.
+    fn ground_base(&self, gx: i32, gz: i32) -> Option<[i32; 3]> {
+        self.params.ground?;
+        let (x_m, z_m) = (self.global_m(gx), self.global_m(gz));
+        let top = top_index(self.surface_height_m(x_m, z_m), 0.0, self.voxel_size);
+        let base = [gx, top + 1, gz];
+        let (_, highest) = self.terrain_band_m();
+        let y_m = self.global_m(base[1]);
+        if y_m > highest
+            || self.carved([gx, top, gz])
+            || self.water.is_some_and(|w| y_m < w.level_m)
+            || (self.smoothing && self.eased(top, [gx, gz], base[1]))
+        {
+            return None;
+        }
+        Some(base)
+    }
+
+    /// A vine and its first fruit: the ripe vine at `base`, then fruit on the ground within reach,
+    /// never touching. A function of the vine and its column in metres alone, like
+    /// [`Self::tree_cells`], so every Chunk that reaches it agrees.
+    fn crop_cells(
+        &self,
+        plant: &SurfacePlant,
+        vine: &SurfaceVine,
+        base: [i32; 3],
+    ) -> Vec<([i32; 3], Voxel)> {
+        let seed = u64::from(self.seed);
+        let column_m = [self.global_m(base[0]), self.global_m(base[2])];
+        let at = |[dx, dz]: [i32; 2]| self.ground_base(base[0] + dx, base[2] + dz);
+        let offsets = first_fruit_offsets(
+            seed,
+            column_m,
+            (vine.reach_m, vine.gap_m, vine.max_fruit),
+            self.voxel_size,
+            |c| at(c).is_some(),
+        );
+        let mut cells = vec![(base, Voxel::new(vine.material, plant.shape, 0))];
+        for fruit in offsets.into_iter().filter_map(at) {
+            let stage = fruit_stage(seed, fruit, self.voxel_size, vine.len as usize);
+            let shape = vine.stage_shapes[stage].unwrap_or(vine.fruit_shape);
+            cells.push((fruit, Voxel::new(vine.fruit[stage], shape, 0)));
+        }
+        cells
+    }
+
     /// The Plant's tree as the generator grows it: a Tree row holding only what shape needs.
     fn tree_of(tree: &SurfaceTree) -> Tree {
         Tree {
@@ -1505,8 +1554,8 @@ impl Worldgen {
         if floor_m > highest || ceiling_m < lowest - self.voxel_size {
             return;
         }
-        let margin = if scatter.tree_reach_m > 0.0 {
-            (scatter.tree_reach_m / self.voxel_size).ceil() as i32 + 1
+        let margin = if scatter.reach_m > 0.0 {
+            (scatter.reach_m / self.voxel_size).ceil() as i32 + 1
         } else {
             0
         };
@@ -1525,8 +1574,10 @@ impl Worldgen {
                 }
             }
         };
+        let outside = |g: i32, lo: i32| (lo - g).max(g - (lo + size - 1)).max(0);
         let mut trees = Vec::new();
         let mut hung: Vec<Vec<([i32; 3], Voxel)>> = Vec::new();
+        let mut crops: Vec<([i32; 3], Voxel)> = Vec::new();
         for gz in origin[2] - margin..origin[2] + size + margin {
             for gx in origin[0] - margin..origin[0] + size + margin {
                 let own = (origin[0]..origin[0] + size).contains(&gx)
@@ -1560,7 +1611,6 @@ impl Worldgen {
                         let reach = (tree.reach_m() / self.voxel_size).ceil() as i32
                             + 1
                             + tree.rounding_slack_voxels();
-                        let outside = |g: i32, lo: i32| (lo - g).max(g - (lo + size - 1)).max(0);
                         // A vine hangs from the canopy, so it can reach below the base on a slope.
                         let hang = tree
                             .vines
@@ -1577,6 +1627,18 @@ impl Worldgen {
                         }
                         trees.push((tree.trunk, self.tree_cells(&tree, base)));
                         hung.extend(self.vine_cells(&tree, base));
+                    }
+                    SurfacePlantKind::Vine(vine) => {
+                        let reach = (vine.reach_m / self.voxel_size).ceil() as i32 + 1;
+                        let slope = reach + 2;
+                        if outside(gx, origin[0]) > reach
+                            || outside(gz, origin[2]) > reach
+                            || base[1] - slope > origin[1] + size - 1
+                            || base[1] + slope < origin[1]
+                        {
+                            continue;
+                        }
+                        crops.extend(self.crop_cells(&standing.plant, &vine, base));
                     }
                     _ => {}
                 }
@@ -1596,6 +1658,10 @@ impl Worldgen {
         for &(at, voxel) in hung.iter().flatten() {
             put(chunk, at, voxel, None);
         }
+        // Crops with fruit stand after every tree, so a trunk or crown is never cut by one.
+        for &(at, voxel) in &crops {
+            put(chunk, at, voxel, None);
+        }
     }
 
     /// The height, in metres, of the tallest Plant Voxel in a footprint's columns, for spawning
@@ -1605,7 +1671,7 @@ impl Worldgen {
         let columns =
             |a: usize| (min_m[a] / size).floor() as i32..=(max_m[a] / size).floor() as i32;
         let (xs, zs) = (columns(0), columns(1));
-        let margin = (scatter.tree_reach_m / size).ceil() as i32 + 1;
+        let margin = (scatter.reach_m / size).ceil() as i32 + 1;
         let mut clear_m = f32::MIN;
         for gz in *zs.start() - margin..=*zs.end() + margin {
             for gx in *xs.start() - margin..=*xs.end() + margin {
@@ -1617,6 +1683,12 @@ impl Worldgen {
                 let top = match standing.plant.kind {
                     SurfacePlantKind::Tree(tree) => self
                         .tree_cells(&tree, base)
+                        .into_iter()
+                        .filter(|(at, _)| xs.contains(&at[0]) && zs.contains(&at[2]))
+                        .map(|(at, _)| at[1] + 1)
+                        .max(),
+                    SurfacePlantKind::Vine(vine) => self
+                        .crop_cells(&standing.plant, &vine, base)
                         .into_iter()
                         .filter(|(at, _)| xs.contains(&at[0]) && zs.contains(&at[2]))
                         .map(|(at, _)| at[1] + 1)

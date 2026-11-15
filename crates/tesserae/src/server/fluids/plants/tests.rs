@@ -83,6 +83,7 @@ fn content_shaped(
             kind: Kind::Crop {
                 stages: vec![stage(0, every), stage(1, every), stage(2, None)],
                 harvest_to: None,
+                fruit_vine: None,
             },
             sapling_yields: Vec::new(),
         })
@@ -239,6 +240,7 @@ const ENOUGH: u64 = 3000;
 mod bench;
 mod reach;
 mod tree;
+mod vine;
 
 #[test]
 fn a_stage_change_keeps_the_plants_shape() {

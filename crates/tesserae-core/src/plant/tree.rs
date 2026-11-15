@@ -658,7 +658,12 @@ fn is_part(role: Role) -> bool {
 
 impl PlantTable {
     pub fn is_tree_part(&self, material: MaterialId) -> bool {
-        self.of(material).is_some_and(|r| is_part(r.role))
+        self.of(material).is_some_and(|r| {
+            is_part(r.role)
+                && self
+                    .plant(r.plant)
+                    .is_some_and(|p| matches!(p.kind, Kind::Tree(_)))
+        })
     }
 
     /// Whether any Plant is a tree, so a World with none never looks for a
@@ -1052,6 +1057,7 @@ mod tests {
                     reach_m: 1.0,
                     mean_seconds: 60.0,
                     density: 1,
+                    min_neighbours: 0,
                     yields: Vec::new(),
                 },
             ),
@@ -1068,6 +1074,7 @@ mod tests {
                         })
                         .to_vec(),
                     harvest_to: None,
+                    fruit_vine: None,
                 },
             ),
             ("pine", OTHER_SAPLING, Kind::Tree(other)),

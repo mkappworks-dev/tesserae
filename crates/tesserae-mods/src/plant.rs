@@ -1,8 +1,8 @@
 //! Every Mod's `plants`, resolved against the World's Materials and Items.
 
 use tesserae_core::plant::{
-    Branching, CountRange, Direction, Fruit, Kind, Needs, Plant, PlantTable, Stage, Tree,
-    TreeVines, Water, Yield,
+    Branching, CountRange, DEFAULT_VINE_FRUIT, DEFAULT_VINE_GAP_M, DEFAULT_VINE_REACH_M, Direction,
+    Fruit, Kind, Needs, Plant, PlantTable, Stage, Tree, TreeVines, VineFruit, Water, Yield,
 };
 use tesserae_core::{MaterialId, ShapeId, Tables, Voxel};
 
@@ -162,7 +162,14 @@ impl DeclaredPlants {
 fn yield_items(plant: &Plant) -> Vec<&str> {
     let mut all: Vec<&Yield> = plant.sapling_yields.iter().collect();
     match &plant.kind {
-        Kind::Crop { stages, .. } => all.extend(stages.iter().flat_map(|s| &s.yields)),
+        Kind::Crop {
+            stages, fruit_vine, ..
+        } => {
+            all.extend(stages.iter().flat_map(|s| &s.yields));
+            if let Some(fruit) = fruit_vine {
+                all.extend(fruit.stages.iter().flat_map(|s| &s.yields));
+            }
+        }
         Kind::Tree(tree) => {
             all.extend(&tree.trunk_yield);
             all.extend(&tree.canopy_yield);
@@ -255,6 +262,20 @@ fn plant(
                 Kind::Crop {
                     stages,
                     harvest_to: crop.harvest_to.map(|n| n as usize),
+                    fruit_vine: crop
+                        .fruit_vine
+                        .as_ref()
+                        .map(|fruit| {
+                            Ok::<_, String>(VineFruit {
+                                stages: crate::plant::stages(&fruit.stages, registry, tables)?,
+                                regrow_seconds: fruit.regrow_seconds,
+                                shape: resolve_shape(registry, &fruit.shape)?,
+                                reach_m: fruit.reach_m.unwrap_or(DEFAULT_VINE_REACH_M),
+                                gap_m: fruit.gap_m.unwrap_or(DEFAULT_VINE_GAP_M),
+                                max_fruit: fruit.max_fruit.unwrap_or(DEFAULT_VINE_FRUIT),
+                            })
+                        })
+                        .transpose()?,
                 },
             )
         }
@@ -333,6 +354,7 @@ fn plant(
                 reach_m: spreader.reach_m,
                 mean_seconds: spreader.mean_seconds,
                 density: spreader.density,
+                min_neighbours: spreader.min_neighbours.unwrap_or(0),
                 yields: yields(&spreader.yields),
             },
         ),

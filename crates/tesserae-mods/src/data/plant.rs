@@ -22,6 +22,7 @@ pub(super) enum Plant {
         needs: Needs,
         stages: Vec<Stage>,
         harvest_to: Option<u32>,
+        fruit_vine: Option<FruitVine>,
     },
     Tree {
         name: String,
@@ -67,6 +68,7 @@ pub(super) enum Plant {
         reach_m: f32,
         mean_seconds: f32,
         density: u32,
+        min_neighbours: Option<u32>,
         #[serde(default)]
         yields: Vec<Yield>,
     },
@@ -124,6 +126,18 @@ pub(super) struct Fruit {
     #[serde(default = "default_regrow_seconds")]
     regrow_seconds: f32,
     shape: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+pub(super) struct FruitVine {
+    stages: Vec<Stage>,
+    #[serde(default = "default_regrow_seconds")]
+    regrow_seconds: f32,
+    shape: Option<String>,
+    reach_m: Option<f32>,
+    gap_m: Option<f32>,
+    max_fruit: Option<u32>,
 }
 
 #[derive(Deserialize)]
@@ -209,6 +223,7 @@ impl From<Plant> for content::PlantDef {
                 needs: n,
                 stages: rows,
                 harvest_to,
+                fruit_vine,
             } => Self {
                 name,
                 seed,
@@ -217,6 +232,14 @@ impl From<Plant> for content::PlantDef {
                 kind: content::PlantKind::Crop(content::CropDef {
                     stages: stages(rows),
                     harvest_to,
+                    fruit_vine: fruit_vine.map(|f| content::FruitVineDef {
+                        stages: stages(f.stages),
+                        regrow_seconds: f.regrow_seconds,
+                        shape: f.shape,
+                        reach_m: f.reach_m,
+                        gap_m: f.gap_m,
+                        max_fruit: f.max_fruit,
+                    }),
                 }),
             },
             Plant::Tree {
@@ -313,6 +336,7 @@ impl From<Plant> for content::PlantDef {
                 reach_m,
                 mean_seconds,
                 density,
+                min_neighbours,
                 yields: rows,
             } => Self {
                 name,
@@ -324,6 +348,7 @@ impl From<Plant> for content::PlantDef {
                     reach_m,
                     mean_seconds,
                     density,
+                    min_neighbours,
                     yields: yields(rows),
                 }),
             },

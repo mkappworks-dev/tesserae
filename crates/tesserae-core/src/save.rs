@@ -639,6 +639,20 @@ pub enum SavedPlantKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         stands_in: Option<String>,
     },
+    /// A vine crop generated ripe with its first fruit round it. Absent from every World made
+    /// before vine crops.
+    Vine {
+        material: String,
+        fruit: Vec<String>,
+        /// Absent is a cube.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        fruit_shape: Option<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        stage_shapes: Vec<Option<String>>,
+        reach_m: f32,
+        gap_m: f32,
+        max_fruit: u32,
+    },
     Tree {
         trunk: String,
         canopy: String,
@@ -937,6 +951,22 @@ fn saved_plant(p: &crate::SurfacePlant, mapping: &Mapping) -> Result<SavedPlant,
                 max_height_m,
                 stands_in: stands_in.map(name).transpose()?,
             },
+            K::Vine(v) => SavedPlantKind::Vine {
+                material: name(v.material)?,
+                fruit: names(&v.fruit[..v.len as usize])?,
+                fruit_shape: shape_name(v.fruit_shape)?,
+                stage_shapes: if v.stage_shapes.iter().any(Option::is_some) {
+                    v.stage_shapes[..v.len as usize]
+                        .iter()
+                        .map(|s| s.map(&shape_name).transpose().map(Option::flatten))
+                        .collect::<Result<_, _>>()?
+                } else {
+                    Vec::new()
+                },
+                reach_m: v.reach_m,
+                gap_m: v.gap_m,
+                max_fruit: v.max_fruit,
+            },
             K::Tree(t) => SavedPlantKind::Tree {
                 trunk: name(t.trunk)?,
                 canopy: name(t.canopy)?,
@@ -1031,6 +1061,37 @@ fn restored_plant(p: &SavedPlant, mapping: &Mapping) -> Result<crate::SurfacePla
             max_height_m: *max_height_m,
             stands_in: stands_in.as_ref().map(id).transpose()?,
         },
+        SavedPlantKind::Vine {
+            material,
+            fruit,
+            fruit_shape,
+            stage_shapes,
+            reach_m,
+            gap_m,
+            max_fruit,
+        } => {
+            let found = ids(fruit, crate::MAX_SURFACE_FRUIT_STAGES)?;
+            let mut stages = [crate::voxel::AIR; crate::MAX_SURFACE_FRUIT_STAGES];
+            stages[..found.len()].copy_from_slice(&found);
+            let mut shapes = [None; crate::MAX_SURFACE_FRUIT_STAGES];
+            for (slot, name) in shapes.iter_mut().zip(stage_shapes) {
+                *slot = name.as_ref().map(|n| mapping.shape_id(n)).transpose()?;
+            }
+            K::Vine(crate::SurfaceVine {
+                material: id(material)?,
+                fruit: stages,
+                len: found.len() as u8,
+                fruit_shape: fruit_shape
+                    .as_ref()
+                    .map(|n| mapping.shape_id(n))
+                    .transpose()?
+                    .unwrap_or(crate::SHAPE_FULL_CUBE),
+                stage_shapes: shapes,
+                reach_m: *reach_m,
+                gap_m: *gap_m,
+                max_fruit: *max_fruit,
+            })
+        }
         SavedPlantKind::Tree {
             trunk,
             canopy,

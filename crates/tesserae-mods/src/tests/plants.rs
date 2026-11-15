@@ -184,6 +184,7 @@ mod references {
             kind: content::PlantKind::Crop(content::CropDef {
                 stages: vec![stage("t:w0", Some(32.0)), stage("t:w1", None)],
                 harvest_to: None,
+                fruit_vine: None,
             }),
         }
     }
@@ -351,6 +352,7 @@ mod surface_features {
                         stage("t:wheat2", None),
                     ],
                     harvest_to: None,
+                    fruit_vine: None,
                 }),
             ),
             row(
@@ -414,6 +416,7 @@ mod surface_features {
                     reach_m: 2.0,
                     mean_seconds: 32.0,
                     density: 4,
+                    min_neighbours: None,
                     yields: Vec::new(),
                 }),
             ),
@@ -674,6 +677,149 @@ mod surface_features {
             SurfacePlantKind::Stages { len: 1, .. }
         ));
         assert_eq!(features[3].plant.unwrap().shape, 0, "no shape is a cube");
+    }
+
+    /// The wheat row as a vine crop, with its fruit in the apple Materials.
+    fn melon(edit: impl FnOnce(&mut content::FruitVineDef)) -> Vec<content::PlantDef> {
+        let mut fruit = content::FruitVineDef {
+            stages: vec![stage("t:apple0", Some(32.0)), stage("t:apple1", None)],
+            regrow_seconds: 60.0,
+            shape: Some("t:apple".into()),
+            reach_m: None,
+            gap_m: None,
+            max_fruit: None,
+        };
+        edit(&mut fruit);
+        vec![row(
+            "melon",
+            content::PlantKind::Crop(content::CropDef {
+                stages: vec![stage("t:wheat0", Some(32.0)), stage("t:wheat1", None)],
+                harvest_to: None,
+                fruit_vine: Some(fruit),
+            }),
+        )]
+    }
+
+    #[test]
+    fn a_vine_crops_fruit_resolves_with_its_defaults_and_freezes_into_the_biome() {
+        let (biomes, tables, registry) =
+            resolved_with(vec![feature(None, Some("t:melon"), None)], melon(|_| {})).unwrap();
+        let Kind::Crop {
+            fruit_vine: Some(fruit),
+            ..
+        } = &tables.plants.plants()[0].kind
+        else {
+            panic!("a vine crop");
+        };
+        let apple = registry.id_of(NameKind::Shape, "t:apple").unwrap() as u8;
+        assert_eq!(
+            (fruit.reach_m, fruit.gap_m, fruit.max_fruit, fruit.shape),
+            (1.5, 0.5, 5, Some(apple))
+        );
+        assert_eq!(fruit.stages[0].material, id(&registry, "t:apple0"));
+        let plant = biomes.as_slice()[0].surface_features.as_slice()[0]
+            .plant
+            .unwrap();
+        let SurfacePlantKind::Vine(vine) = plant.kind else {
+            panic!("a generated vine");
+        };
+        assert_eq!(vine.material, id(&registry, "t:wheat1"), "stands ripe");
+        assert_eq!(
+            (
+                vine.len,
+                vine.reach_m,
+                vine.gap_m,
+                vine.max_fruit,
+                vine.fruit_shape
+            ),
+            (2, 1.5, 0.5, 5, apple)
+        );
+        assert_eq!(
+            vine.fruit[..2],
+            [id(&registry, "t:apple0"), id(&registry, "t:apple1")]
+        );
+    }
+
+    #[test]
+    fn a_vine_crops_fruit_rules_are_load_errors_naming_the_plant() {
+        let cases: [(&str, fn(&mut content::FruitVineDef)); 5] = [
+            ("reach-m", |f| f.reach_m = Some(9.0)),
+            ("gap-m", |f| f.gap_m = Some(2.0)),
+            ("max-fruit", |f| f.max_fruit = Some(0)),
+            ("16 s", |f| f.regrow_seconds = 2.0),
+            ("another Plant", |f| {
+                f.stages[0].material = "t:wheat0".into()
+            }),
+        ];
+        for (what, edit) in cases {
+            let err = resolved_with(vec![], melon(edit)).unwrap_err().to_string();
+            assert!(err.contains("melon") && err.contains(what), "{what}: {err}");
+        }
+    }
+
+    #[test]
+    fn a_spreaders_min_neighbours_resolves_and_must_stay_below_its_density() {
+        let with = |min: Option<u32>| {
+            let mut rows = plants();
+            for row in &mut rows {
+                if let content::PlantKind::Spreader(s) = &mut row.kind {
+                    s.min_neighbours = min;
+                }
+            }
+            resolved_with(vec![], rows)
+        };
+        let spread = |min| {
+            let (_, tables, _) = with(min).unwrap();
+            tables
+                .plants
+                .plants()
+                .iter()
+                .find_map(|p| match p.kind {
+                    Kind::Spreader { min_neighbours, .. } => Some(min_neighbours),
+                    _ => None,
+                })
+                .expect("a spreader")
+        };
+        assert_eq!((spread(None), spread(Some(3))), (0, 3));
+        let err = with(Some(4)).unwrap_err().to_string();
+        assert!(
+            err.contains("grass") && err.contains("min-neighbours"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn a_data_mod_names_min_neighbours_and_a_fruit_vine_in_its_rows() {
+        let toml = "[[plants]]\nname = \"grass\"\nkind = \"spreader\"\nseed = \"t:g\"\n\
+             material = \"t:g\"\nreach-m = 2.0\nmean-seconds = 60.0\ndensity = 5\n\
+             min-neighbours = 3\n[plants.needs]\nsoil = [\"t:sand\"]\n\
+             [[plants]]\nname = \"melon\"\nkind = \"crop\"\nseed = \"t:m0\"\n\
+             stages = [{ material = \"t:m0\", mean-seconds = 20.0 }, { material = \"t:m1\" }]\n\
+             fruit-vine = { stages = [{ material = \"t:f0\", mean-seconds = 20.0 }, \
+             { material = \"t:f1\" }], reach-m = 2.0, gap-m = 1.0, max-fruit = 3 }\n\
+             [plants.needs]\nsoil = [\"t:sand\"]\n";
+        let payload = crate::trust::CheckedPayload::for_test(
+            "content.toml",
+            [("content.toml", toml.as_bytes().to_vec())],
+        );
+        let declared = crate::data::parse("t", &payload).unwrap();
+        let content::PlantKind::Spreader(grass) = &declared.plants[0].kind else {
+            panic!("a spreader");
+        };
+        assert_eq!(grass.min_neighbours, Some(3));
+        let content::PlantKind::Crop(melon) = &declared.plants[1].kind else {
+            panic!("a crop");
+        };
+        let fruit = melon.fruit_vine.as_ref().unwrap();
+        assert_eq!(
+            (
+                fruit.reach_m,
+                fruit.gap_m,
+                fruit.max_fruit,
+                fruit.regrow_seconds
+            ),
+            (Some(2.0), Some(1.0), Some(3), 120.0)
+        );
     }
 
     #[test]

@@ -84,6 +84,7 @@ fn spreader(reach_m: f32, density: u32) -> Kind {
         reach_m,
         mean_seconds: tesserae_core::plant::SAMPLE_INTERVAL_S,
         density,
+        min_neighbours: 0,
         yields: Vec::new(),
     }
 }
@@ -745,6 +746,7 @@ fn the_shared_spreaders_grow_a_patch_a_little_in_an_hour_and_never_fill_the_grou
                 reach_m: reach,
                 mean_seconds: mean,
                 density,
+                min_neighbours: 0,
                 yields: Vec::new(),
             },
             |n| n.light_min = 0,

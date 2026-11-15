@@ -46,7 +46,7 @@ pub use climate::{
     MAX_BIOME_NAME_BYTES, MAX_BIOMES, MAX_CAVE_SCALE, MAX_SURFACE_FEATURES,
     MAX_SURFACE_FRUIT_STAGES, MAX_SURFACE_STAGES, MAX_VINE_DENSITY, MAX_VINE_LENGTH_M,
     SURFACE_FEATURE_SPACING_M, SkyFog, SkyFogBlend, SurfaceFeature, SurfaceFeatures, SurfaceFruit,
-    SurfacePlant, SurfacePlantKind, SurfaceTree, SurfaceVines, VINE_FACES,
+    SurfacePlant, SurfacePlantKind, SurfaceTree, SurfaceVine, SurfaceVines, VINE_FACES,
 };
 pub use combustion::{Burn, CombustionDef, CombustionError, CombustionTable, Heat, MAX_HEAT};
 pub use fluid::{FluidDef, FluidError, FluidTable};

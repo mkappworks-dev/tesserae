@@ -11,8 +11,8 @@ use tesserae_core::{
     AIR, Biome, BiomeId, BiomeName, BiomeSet, BiomeTable, Burn, CombustionDef, FluidDef,
     GroundParams, Heat, MAX_BIOMES, MAX_CAVE_SCALE, MAX_ORES, MaterialId, Ore, OreTable,
     ParamError, Phase, Reactant, ReactionDef, Side, SkyFog, SurfaceFeature, SurfaceFeatures,
-    SurfaceFruit, SurfacePlant, SurfacePlantKind, SurfaceTree, SurvivalRules, Tables, Voxel,
-    VoxelUse, WaterParams, WorldgenParams,
+    SurfaceFruit, SurfacePlant, SurfacePlantKind, SurfaceTree, SurfaceVine, SurvivalRules, Tables,
+    Voxel, VoxelUse, WaterParams, WorldgenParams,
 };
 
 use tesserae_core::plant::{Direction as PlantDirection, Kind as PlantKind};
@@ -684,6 +684,32 @@ fn surface_feature(
         all
     };
     let kind = match &plant.kind {
+        PlantKind::Crop {
+            stages,
+            fruit_vine: Some(fruit),
+            ..
+        } => {
+            let mut materials = [AIR; tesserae_core::MAX_SURFACE_FRUIT_STAGES];
+            let mut stage_shapes = [None; tesserae_core::MAX_SURFACE_FRUIT_STAGES];
+            for ((slot, shape), stage) in materials
+                .iter_mut()
+                .zip(&mut stage_shapes)
+                .zip(&fruit.stages)
+            {
+                *slot = stage.material;
+                *shape = stage.shape;
+            }
+            SurfacePlantKind::Vine(SurfaceVine {
+                material: stages.last().map_or(plant.first, |s| s.material),
+                fruit: materials,
+                len: fruit.stages.len() as u8,
+                fruit_shape: fruit.shape.unwrap_or(tesserae_core::SHAPE_FULL_CUBE),
+                stage_shapes,
+                reach_m: fruit.reach_m,
+                gap_m: fruit.gap_m,
+                max_fruit: fruit.max_fruit,
+            })
+        }
         PlantKind::Crop { stages, .. } => {
             let found: Vec<MaterialId> = stages.iter().map(|s| s.material).collect();
             let mut stage_shapes = [None; tesserae_core::MAX_SURFACE_STAGES];
@@ -777,6 +803,13 @@ fn surface_feature(
     };
     let shape = match &kind {
         SurfacePlantKind::Tree(_) => tesserae_core::SHAPE_FULL_CUBE,
+        SurfacePlantKind::Vine(_) => chosen
+            .or_else(|| match &plant.kind {
+                PlantKind::Crop { stages, .. } => stages.last().and_then(|s| s.shape),
+                _ => None,
+            })
+            .or(plant.shape)
+            .unwrap_or(tesserae_core::SHAPE_FULL_CUBE),
         _ => chosen
             .or(plant.shape)
             .unwrap_or(tesserae_core::SHAPE_FULL_CUBE),

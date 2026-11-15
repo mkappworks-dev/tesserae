@@ -143,6 +143,7 @@ fn content_full(shaped: bool, branching: Option<Branching>, staged: bool) -> Con
                     stage(wheat[2], None, &[("t:wheat", 2, 4), ("t:seed", 1, 3)]),
                 ],
                 harvest_to: None,
+                fruit_vine: None,
             },
         ),
         plant(
@@ -156,6 +157,7 @@ fn content_full(shaped: bool, branching: Option<Branching>, staged: bool) -> Con
                     own(stage(bush[2], None, &[("t:berry", 2, 2)]), 2),
                 ],
                 harvest_to: Some(1),
+                fruit_vine: None,
             },
         ),
         plant(
