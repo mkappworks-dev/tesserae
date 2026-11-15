@@ -290,3 +290,26 @@ shows the engine's state: the Map, Compass and minimap keys do nothing, the
 Compass and minimap are hidden, the Menu has no Map button, and the switches and
 bindings stay in Settings marked "Not available in this World." The terrain and
 the explored route are drawn from noise here, not from the engine.
+
+## Structures and the Place Tool (step 20, proposed, awaiting approval)
+
+Illustrates step 20; ticket 01 of `.scratch/2026-11-15-phase-20-structures`.
+Code is in `structures.js` and `structures.css`, reusing the Layout workspace.
+The Cabin, Well and Watchtower are illustrative Terra Templates, not
+declarations. Reach the screen at `/structures`, or hold the tool from Simulate
+(Engine states, "Place tool") on `/play`.
+
+- A Tool, not an Item: it takes a hand slot beside the hotbar. Use (G) opens the
+  Template list, R turns the Structure a quarter, and Place (right mouse) lays
+  the whole Structure or nothing. Z removes it in one step.
+- The ghost tints each cell by what placing it does: free, replaces ground,
+  replaces water, or blocked. The Voxel tallies are for this World's Voxel size;
+  a Template is authored on a 1.0 m grid and sampled to it.
+- Air cells that carve ground or water show as outlines, so a cellar reads as
+  cut into the ground. Keep cells are not drawn.
+- Refusals use the existing top-right notice card: "The place Tool is Creative
+  only.", "Out of reach." (only the anchor must be in reach), "You are standing
+  inside it." and "Waiting for Chunks to load…", which then places or refuses.
+- The panel's example aim (Level, Hillside, Shore; In reach, Too far, Inside,
+  Loading) is prototype chrome: in the game the aim decides these. Worldgen's
+  level rule does not apply to a Player's placement.

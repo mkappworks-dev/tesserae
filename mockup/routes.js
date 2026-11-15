@@ -42,6 +42,7 @@ function currentPath() {
       plants: "/plants",
       vegetation: "/vegetation",
       map: "/map",
+      structures: "/structures",
     }[state.screen] || "/"
   );
 }
@@ -86,6 +87,8 @@ function syncRoute() {
                                   ? "Vegetation"
                                   : state.screen === "map"
                                     ? "Map"
+                                  : state.screen === "structures"
+                                    ? "Structures"
                                     : "Worlds";
   document.title = `${title} — Tesserae prototype`;
 }
@@ -158,6 +161,7 @@ function restoreRoute() {
       "/plants": "plants",
       "/vegetation": "vegetation",
       "/map": "map",
+      "/structures": "structures",
     }[path] || "home";
 }
 

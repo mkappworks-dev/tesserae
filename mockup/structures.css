@@ -1,0 +1,119 @@
+/* Step 20: the Place Tool list, the Structure ghost and the HUD readout. Reuses the Layout workspace. */
+.game[data-view="structures"] .game-header {
+  display: none;
+}
+.game[data-view="structures"] #landscape {
+  filter: saturate(0.72) brightness(1.02);
+}
+.structure-list {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-bottom: 20px;
+}
+.structure-pick {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  padding: 10px 12px;
+  background: #1d1d22;
+  border: 1px solid #5c5c65;
+  border-radius: 5px;
+  color: #c3c7cf;
+  text-align: left;
+}
+.structure-pick b {
+  font-size: 14px;
+  font-weight: 500;
+  color: #f1f3ed;
+}
+.structure-pick small {
+  font-size: 12px;
+}
+.structure-pick.active {
+  background: #35392f;
+  border-color: #aab39e;
+}
+.structure-turn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 20px;
+  font-size: 13px;
+  color: #c3c7cf;
+}
+.structure-turn button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 36px;
+  padding: 6px 12px;
+  background: #1d1d22;
+  border: 1px solid #5c5c65;
+  border-radius: 5px;
+  color: #e5e8e0;
+  font-size: 13px;
+}
+.structure-keys {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+.structure-key {
+  display: grid;
+  grid-template-columns: 14px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #c3c7cf;
+}
+.structure-key i {
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+  border: 1px solid #0008;
+}
+.structure-key b {
+  font-weight: 500;
+  color: #f1f3ed;
+}
+.structure-keys.compact {
+  gap: 3px;
+  margin: 0;
+}
+.structure-outcome {
+  padding: 9px 11px;
+  margin-bottom: 18px;
+  border: 1px solid #5c5c65;
+  border-radius: 5px;
+  font-size: 13px;
+  color: #d9ddd2;
+}
+.structure-outcome.refused {
+  border-color: #b05a5a;
+  background: #2a1717;
+}
+.structure-outcome.wait {
+  border-color: #b09a5a;
+  background: #28230f;
+}
+.structure-outcome.ok {
+  border-color: #6c8f6c;
+}
+.layout-panel footer .btn + .btn {
+  margin-left: 4px;
+}
+.structure-hud {
+  left: auto;
+  right: 34px;
+  top: 150px;
+  width: 270px;
+}
+.structure-thumb {
+  width: 100%;
+  height: 130px;
+  filter: drop-shadow(0 4px 10px #000a);
+}
