@@ -269,6 +269,7 @@ type Blockers<'w> = (
     Option<Res<'w, super::settings::Settings>>,
     Option<Res<'w, super::input::UiInput>>,
     Option<Res<'w, super::inventory_window::InventoryWindow>>,
+    Res<'w, super::map_cache::MapAllowed>,
 );
 
 /// The Map key opens the window and closes it into play; Escape closes it too
@@ -276,11 +277,12 @@ type Blockers<'w> = (
 pub(super) fn toggle(
     mut actions: ResMut<Actions>,
     mut window: ResMut<MapWindow>,
-    (menu, layout_menu, settings, ui, inventory): Blockers,
+    (menu, layout_menu, settings, ui, inventory, allowed): Blockers,
     focused: Single<&Window, With<PrimaryWindow>>,
     mut cursor: Single<&mut CursorOptions, With<PrimaryWindow>>,
 ) {
     if !focused.focused
+        || !allowed.0
         || menu.open
         || layout_menu.is_some_and(|m| m.open)
         || settings.is_some_and(|s| s.open)

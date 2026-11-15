@@ -174,8 +174,9 @@ fn toggle(
     actions: Res<super::actions::Actions>,
     mut preferences: ResMut<Preferences>,
     mut pending: ResMut<super::view::PendingSave>,
+    allowed: Res<super::map_cache::MapAllowed>,
 ) {
-    if !ownership.gameplay() || !actions.started(super::actions::Action::Minimap) {
+    if !allowed.0 || !ownership.gameplay() || !actions.started(super::actions::Action::Minimap) {
         return;
     }
     preferences.minimap = !preferences.minimap;
@@ -193,6 +194,7 @@ struct Shown<'w, 's> {
     preferences: Res<'w, Preferences>,
     covers: super::menu::Covers<'w>,
     dead: Option<Res<'w, super::death::Dead>>,
+    allowed: Res<'w, super::map_cache::MapAllowed>,
     roots: Query<'w, 's, Entity, With<MinimapRoot>>,
 }
 
@@ -212,10 +214,13 @@ fn sync(
         preferences,
         covers,
         dead,
+        allowed,
         roots,
     } = shown;
-    let hidden =
-        !preferences.minimap || super::menu::covered(&covers) || !super::death::alive(dead);
+    let hidden = !allowed.0
+        || !preferences.minimap
+        || super::menu::covered(&covers)
+        || !super::death::alive(dead);
     let Some((eye, bearing)) = spot.0.filter(|_| !hidden) else {
         if drawn.take().is_some() {
             for root in &roots {
@@ -398,6 +403,7 @@ mod tests {
             .add_plugins(super::super::actions::test_plugin)
             .init_resource::<MapCache>()
             .init_resource::<MapPalette>()
+            .init_resource::<super::super::map_cache::MapAllowed>()
             .init_resource::<crate::client::waypoints::Marks>()
             .init_resource::<Facts>()
             .add_systems(
@@ -486,6 +492,27 @@ mod tests {
         show(&mut app);
         app.update();
         assert_eq!(pixels(&mut app).unwrap().0, 168);
+    }
+
+    #[test]
+    fn a_forbidden_map_draws_no_minimap_and_the_key_leaves_the_setting_alone() {
+        let mut app = app();
+        show(&mut app);
+        pose(&mut app, Vec3::ZERO, 0.0);
+        assert!(pixels(&mut app).is_some());
+        app.world_mut()
+            .resource_mut::<super::super::map_cache::MapAllowed>()
+            .0 = false;
+        app.update();
+        assert!(pixels(&mut app).is_none());
+        assert!(app.world().resource::<Preferences>().minimap);
+        let mut keys = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+        keys.release(KeyCode::KeyO);
+        keys.clear();
+        keys.press(KeyCode::KeyO);
+        app.update();
+        assert!(app.world().resource::<Preferences>().minimap);
+        assert!(pixels(&mut app).is_none());
     }
 
     #[test]

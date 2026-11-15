@@ -8,7 +8,7 @@ use bevy::prelude::*;
 use tesserae_core::MaterialId;
 use tesserae_core::map::{Map, Sample};
 
-use crate::content::MaterialPalette;
+use crate::content::{MapPermitted, MaterialPalette};
 use crate::server::map::MapTileChanged;
 use crate::session::SessionApp;
 
@@ -35,12 +35,25 @@ pub fn sample_colour(sample: &Sample, palette: &MapPalette) -> [u8; 4] {
     palette.colour(sample.material)
 }
 
+/// Whether the World's Game permits the Map and the Compass; the Client draws and opens neither
+/// while it does not, and the Player's own settings are left as they are.
+#[derive(Resource, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MapAllowed(pub bool);
+
+impl Default for MapAllowed {
+    fn default() -> Self {
+        Self(true)
+    }
+}
+
 pub(super) fn plugin(app: &mut App) {
-    app.init_session_state::<MapCache>()
+    app.init_session_state::<MapAllowed>()
+        .add_session_message::<MapPermitted>()
+        .init_session_state::<MapCache>()
         .init_session_state::<MapPalette>()
         .add_session_message::<MapTileChanged>()
         .add_session_message::<MaterialPalette>()
-        .add_session_systems(Update, (receive_palette, receive_tiles));
+        .add_session_systems(Update, (receive_palette, receive_tiles, receive_permission));
 }
 
 pub(super) fn receive_palette(
@@ -49,6 +62,15 @@ pub(super) fn receive_palette(
 ) {
     for message in messages.read() {
         palette.0.extend(message.0.iter().copied());
+    }
+}
+
+pub(super) fn receive_permission(
+    mut messages: MessageReader<MapPermitted>,
+    mut allowed: ResMut<MapAllowed>,
+) {
+    if let Some(MapPermitted(now)) = messages.read().last() {
+        allowed.0 = *now;
     }
 }
 

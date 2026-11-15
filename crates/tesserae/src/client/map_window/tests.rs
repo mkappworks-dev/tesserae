@@ -18,6 +18,8 @@ fn app() -> App {
         .init_resource::<Assets<Image>>()
         .init_resource::<MapCache>()
         .init_resource::<MapPalette>()
+        .init_resource::<crate::client::map_cache::MapAllowed>()
+        .add_message::<crate::content::MapPermitted>()
         .init_resource::<Spot>()
         .insert_resource(crate::client::input::Ownership::playing())
         .insert_resource(Facts(Some(WorldFacts {
@@ -42,6 +44,7 @@ fn app() -> App {
                 crate::client::minimap::follow,
                 crate::client::map_cache::receive_palette,
                 crate::client::map_cache::receive_tiles,
+                crate::client::map_cache::receive_permission,
             )
                 .before(toggle),
         )
@@ -154,6 +157,34 @@ fn n_and_escape_open_and_close_the_map_and_the_cursor_follows() {
     press(&mut app, KeyCode::Escape);
     assert!(!is_open(&app));
     assert_eq!(grab(&mut app), CursorGrabMode::Locked);
+}
+
+fn permit(app: &mut App, permitted: bool) {
+    app.world_mut()
+        .write_message(crate::content::MapPermitted(permitted));
+    app.update();
+}
+
+#[test]
+fn a_forbidden_map_draws_no_compass_and_the_key_does_nothing_until_permitted_again() {
+    let mut app = app();
+    pose(&mut app, 0.0, 0.0);
+    assert!(compass_shown(&mut app));
+    permit(&mut app, false);
+    assert!(!compass_shown(&mut app));
+    press(&mut app, KeyCode::KeyN);
+    assert!(!is_open(&app));
+    assert_eq!(grab(&mut app), CursorGrabMode::Locked);
+    assert!(
+        app.world()
+            .resource::<crate::client::profile::Preferences>()
+            .compass,
+        "the Player's choice is untouched"
+    );
+    permit(&mut app, true);
+    assert!(compass_shown(&mut app));
+    press(&mut app, KeyCode::KeyN);
+    assert!(is_open(&app));
 }
 
 #[test]

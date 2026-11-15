@@ -124,6 +124,7 @@ type Overlays<'w> = (
     Option<Res<'w, super::inventory_window::InventoryWindow>>,
     Option<Res<'w, super::map_window::MapWindow>>,
     Option<Res<'w, crate::server::persistence::SaveStatus>>,
+    Option<Res<'w, super::map_cache::MapAllowed>>,
 );
 
 /// Runs before the overlays' own toggles: while one is open it takes Escape
@@ -133,7 +134,7 @@ pub(super) fn toggle(
     mut menu: ResMut<Menu>,
     cursor: Single<&mut CursorOptions, With<PrimaryWindow>>,
     window: Single<&Window, With<PrimaryWindow>>,
-    (settings, ui, layout_menu, inventory, map, save): Overlays,
+    (settings, ui, layout_menu, inventory, map, save, allowed): Overlays,
 ) {
     if !window.focused
         || ui.is_some_and(|ui| ui.text_entry)
@@ -154,7 +155,9 @@ pub(super) fn toggle(
             } else {
                 resume(&mut menu, &mut cursor.into_inner());
             }
-        } else if actions.started(Action::Inventory) || actions.started(Action::Map) {
+        } else if actions.started(Action::Inventory)
+            || (actions.started(Action::Map) && allowed.is_none_or(|a| a.0))
+        {
             // The window's own toggle runs next and opens it.
             *menu = Menu::default();
         }
@@ -276,6 +279,7 @@ fn render(
     ),
     own: Option<Res<super::game_mode::Mode>>,
     preferences: Option<Res<super::profile::Preferences>>,
+    allowed: Option<Res<super::map_cache::MapAllowed>>,
     (bindings, labels): (Res<super::actions::Bindings>, Res<super::actions::Labels>),
     roots: Query<Entity, With<MenuRoot>>,
     mut shown: Local<Option<Shown>>,
@@ -288,6 +292,7 @@ fn render(
         && !facts.is_changed()
         && !here.is_changed()
         && !own.as_ref().is_some_and(|o| o.is_changed())
+        && !allowed.as_ref().is_some_and(|a| a.is_changed())
     {
         return;
     }
@@ -345,7 +350,13 @@ fn render(
                         ..default()
                     })
                     .with_children(|pause| {
-                        let resume = panel(pause, facts, own, details, (&bindings, &labels));
+                        let resume = panel(
+                            pause,
+                            facts,
+                            own,
+                            (details, allowed.is_none_or(|a| a.0)),
+                            (&bindings, &labels),
+                        );
                         if !details {
                             focus = Some(resume);
                         }
@@ -377,7 +388,7 @@ fn panel(
     pause: &mut ChildSpawnerCommands,
     facts: Option<&WorldFacts>,
     own: Option<GameMode>,
-    details: bool,
+    (details, map_allowed): (bool, bool),
     (bindings, labels): (&super::actions::Bindings, &super::actions::Labels),
 ) -> Entity {
     let mut resume = Entity::PLACEHOLDER;
@@ -443,12 +454,14 @@ fn panel(
                         Choice::Inventory,
                         glyph(Kind::Plain, &key(Action::Inventory)),
                     );
-                    buttons::button(
-                        list,
-                        "Map",
-                        Choice::Map,
-                        glyph(Kind::Plain, &key(Action::Map)),
-                    );
+                    if map_allowed {
+                        buttons::button(
+                            list,
+                            "Map",
+                            Choice::Map,
+                            glyph(Kind::Plain, &key(Action::Map)),
+                        );
+                    }
                     let settings = buttons::button(
                         list,
                         "Settings",
@@ -777,6 +790,23 @@ mod tests {
         press(&mut app, KeyCode::Escape);
         assert!(!inventory_open(&app));
         assert!(!open(&app), "the overlay took the Escape");
+    }
+
+    #[test]
+    fn a_forbidden_map_leaves_the_menu_without_a_map_button() {
+        let mut app = app();
+        app.insert_resource(super::super::map_cache::MapAllowed(false));
+        press(&mut app, KeyCode::Tab);
+        let has = |app: &mut App, choice| {
+            app.world_mut()
+                .query::<&Choice>()
+                .iter(app.world())
+                .any(|c| *c == choice)
+        };
+        assert!(has(&mut app, Choice::Inventory) && !has(&mut app, Choice::Map));
+        app.insert_resource(super::super::map_cache::MapAllowed(true));
+        app.update();
+        assert!(has(&mut app, Choice::Map));
     }
 
     #[test]

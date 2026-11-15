@@ -1010,3 +1010,24 @@ fn audio_slider_pointer_drag_keeps_the_live_entity_until_release() {
     activate_operation(&mut app, Operation::Apply);
     assert_eq!(app.world().resource::<Preferences>().volumes.music, 70);
 }
+
+#[test]
+fn the_map_and_compass_settings_say_unavailable_while_the_world_forbids_them() {
+    fn hints(allowed: bool) -> Vec<String> {
+        let mut app = App::new();
+        app.add_systems(Startup, move |mut commands: Commands| {
+            commands.spawn(Node::default()).with_children(|list| {
+                display(list, &Preferences::default(), allowed);
+            });
+        });
+        app.update();
+        app.world_mut()
+            .query::<&Text>()
+            .iter(app.world())
+            .map(|t| t.0.clone())
+            .filter(|t| t.contains("Not available in this World"))
+            .collect()
+    }
+    assert!(hints(true).is_empty());
+    assert_eq!(hints(false).len(), 3);
+}

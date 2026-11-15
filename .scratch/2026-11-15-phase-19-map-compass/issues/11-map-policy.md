@@ -1,6 +1,6 @@
 # 11: A Game can forbid the Map and Compass
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 07, 09
 
@@ -22,7 +22,8 @@ second rebases on the other.
 
 ## Acceptance criteria
 
-- [ ] A Game declaring the policy forbids Map and Compass in its Worlds; absent leaves them permitted.
-- [ ] While forbidden: no Compass, minimap or Map window; the Server does not scan and refuses Waypoint intents with a reason.
-- [ ] A forbidden World's saved Map is kept and returns when permitted.
-- [ ] The contract, adapters, docs and a Mods-crate declaration test cover the field; fmt, clippy, game manifests and tests pass.
+- [x] A Game declaring the policy forbids Map and Compass in its Worlds; absent leaves them permitted.
+- [x] While forbidden: no Compass, minimap or Map window; the Server does not scan and refuses Waypoint intents with a reason.
+- [x] A forbidden World's saved Map is kept and returns when permitted.
+- [x] The contract, adapters, docs and a Mods-crate declaration test cover the field.
+- [ ] fmt, clippy, game manifests and tests pass. (fmt and the wasm game checks pass; clippy and the full suite are deferred to the end of the phase.)

@@ -33,6 +33,11 @@ where its size (Small, Medium or Large) is also chosen. Both are saved in the
 user profile, and it hides under the Menu, Settings and the Inventory and while
 you are dead.
 
+A Game may forbid the Map and the Compass. While it does, none of the three is
+drawn or opens, the Menu has no Map button, and their switches and keys stay in
+Settings marked Not available in this World, with your choices untouched; the
+Map you had is kept and returns when the Game permits it.
+
 **F3** shows or hides a diagnostics line (the Chunk the Eye is in, how many the
 Server holds and has sent meshes for, how many meshes are drawn, and the frame
 rate). It works in every build and is hidden until pressed; the Server publishes

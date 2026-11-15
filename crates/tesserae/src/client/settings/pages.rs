@@ -74,10 +74,14 @@ pub(in crate::client) fn category(action: Action) -> &'static str {
         _ => "Interface",
     }
 }
+/// Shown in place of a Map or Compass setting's hint while the World's Game forbids them.
+const UNAVAILABLE: &str = "Not available in this World.";
+
 pub(super) type RenderData<'w> = (
     Res<'w, crate::client::actions::Labels>,
     Res<'w, crate::client::menu_ui::Searches>,
     (Res<'w, Bindings>, Res<'w, Preferences>),
+    Option<Res<'w, crate::client::map_cache::MapAllowed>>,
 );
 pub(super) type RenderContext<'w, 's> = (
     (
@@ -94,7 +98,7 @@ pub(in crate::client) fn render(
         Query<Entity, With<Panel>>,
         Query<Entity, With<crate::client::menu_ui::SettingsBody>>,
     ),
-    (labels, searches, active): RenderData,
+    (labels, searches, active, map_allowed): RenderData,
     scrolls: Query<&ScrollPosition, With<SettingsScroll>>,
     (mut positions, mut previous, mut query): (
         Local<[Vec2; crate::client::menu_ui::Tab::ORDER.len()]>,
@@ -104,7 +108,8 @@ pub(in crate::client) fn render(
     (context, pressed): RenderContext,
 ) {
     use crate::client::menu_ui::{self as ui, Tab};
-    if !pressed.is_empty() || (!settings.dirty && !labels.is_changed()) {
+    let map_changed = map_allowed.as_ref().is_some_and(|a| a.is_changed());
+    if !pressed.is_empty() || (!settings.dirty && !labels.is_changed() && !map_changed) {
         return;
     }
     if let Some(tab) = *previous
@@ -187,6 +192,7 @@ pub(in crate::client) fn render(
                     &settings,
                     &labels,
                     &searches,
+                    map_allowed.is_none_or(|a| a.0),
                     (&context.0, &context.1, &context.2),
                 );
             });
@@ -208,6 +214,7 @@ pub(super) fn page(
     settings: &Settings,
     labels: &crate::client::actions::Labels,
     searches: &crate::client::menu_ui::Searches,
+    map_allowed: bool,
     context: (
         &crate::client::edit::Hotbar,
         &crate::client::edit::Catalogue,
@@ -218,10 +225,10 @@ pub(super) fn page(
     let (bindings, p) = settings.draft.as_ref().unwrap();
     match settings.tab {
         Tab::Behavior => behavior(list, settings, bindings, p, labels, context),
-        Tab::Display => display(list, p),
+        Tab::Display => display(list, p, map_allowed),
         Tab::Audio => audio(list, settings, p),
-        Tab::Bindings => bindings_page(list, settings, bindings, labels, searches),
-        Tab::Controller => controller(list, settings, bindings, p, labels),
+        Tab::Bindings => bindings_page(list, settings, bindings, labels, searches, map_allowed),
+        Tab::Controller => controller(list, settings, bindings, p, labels, map_allowed),
         Tab::Accessibility => accessibility(list, p),
         Tab::Catalogue | Tab::Recipes => {}
     }
@@ -382,7 +389,7 @@ pub(super) fn accessibility(list: &mut ChildSpawnerCommands, p: &Preferences) {
     });
 }
 
-pub(super) fn display(list: &mut ChildSpawnerCommands, p: &Preferences) {
+pub(super) fn display(list: &mut ChildSpawnerCommands, p: &Preferences, map_allowed: bool) {
     use crate::client::cinematic as cine;
     use crate::client::menu_ui as ui;
     group(list, "FRAME PRESENTATION", |card| {
@@ -489,19 +496,31 @@ pub(super) fn display(list: &mut ChildSpawnerCommands, p: &Preferences) {
         setting_row(
             card,
             "Compass",
-            "A strip along the top showing your heading.",
+            if map_allowed {
+                "A strip along the top showing your heading."
+            } else {
+                UNAVAILABLE
+            },
             |row| switch(row, p.compass, Operation::Compass),
         );
         setting_row(
             card,
             "Minimap",
-            "A small map in the corner, north up, centred on you.",
+            if map_allowed {
+                "A small map in the corner, north up, centred on you."
+            } else {
+                UNAVAILABLE
+            },
             |row| switch(row, p.minimap, Operation::Minimap),
         );
         setting_row(
             card,
             "Minimap size",
-            "Shown only while the minimap is on.",
+            if map_allowed {
+                "Shown only while the minimap is on."
+            } else {
+                UNAVAILABLE
+            },
             |row| {
                 segment(row, |buttons| {
                     for size in crate::client::minimap::MinimapSize::ALL {
@@ -530,6 +549,7 @@ pub(super) fn bindings_page(
     bindings: &Bindings,
     labels: &crate::client::actions::Labels,
     searches: &crate::client::menu_ui::Searches,
+    map_allowed: bool,
 ) {
     use crate::client::menu_ui as ui;
     let searching = !searches.bindings.trim().is_empty();
@@ -609,7 +629,13 @@ pub(super) fn bindings_page(
             )
         });
     }
-    binding_rows(list, Device::KeyboardMouse, entries, labels, searching);
+    binding_rows(
+        list,
+        Device::KeyboardMouse,
+        entries,
+        labels,
+        (searching, map_allowed),
+    );
 }
 
 /// One row per action: its name, then a button per binding, and ↺ once it
@@ -620,7 +646,7 @@ pub(super) fn binding_rows(
     device: Device,
     entries: Vec<(&Action, &[Option<Binding>; 2])>,
     labels: &crate::client::actions::Labels,
-    searching: bool,
+    (searching, map_allowed): (bool, bool),
 ) {
     use crate::client::cinematic::Kind;
     use crate::client::menu_ui as ui;
@@ -641,7 +667,10 @@ pub(super) fn binding_rows(
                     theme::LABEL,
                     theme::INK,
                 );
-                if searching && device == Device::KeyboardMouse {
+                if !map_allowed && matches!(action, Action::Map | Action::Compass | Action::Minimap)
+                {
+                    ui::description(name, UNAVAILABLE);
+                } else if searching && device == Device::KeyboardMouse {
                     ui::description(name, category(action));
                 }
             });
@@ -689,6 +718,7 @@ pub(super) fn controller(
     bindings: &Bindings,
     p: &Preferences,
     labels: &crate::client::actions::Labels,
+    map_allowed: bool,
 ) {
     use crate::client::menu_ui as ui;
     let pad = &p.pad;
@@ -797,7 +827,7 @@ pub(super) fn controller(
             .filter(|(action, _)| !matches!(action, Action::ReleaseCursor))
             .collect();
         entries.sort_by_key(|(action, _)| binding_order(**action));
-        binding_rows(buttons, Device::Pad, entries, labels, false);
+        binding_rows(buttons, Device::Pad, entries, labels, (false, map_allowed));
     });
 }
 
