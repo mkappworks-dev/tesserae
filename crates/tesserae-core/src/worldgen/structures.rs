@@ -229,15 +229,34 @@ impl Worldgen {
         standing
     }
 
-    /// Whether a Structure may reach a Chunk whose Voxels span `floor_m..=ceiling_m`, from the
-    /// terrain band and the tallest and deepest listed Template alone.
+    /// The floors, in metres, a Structure's Voxels lie between, from the terrain band and the
+    /// tallest and deepest listed Template alone. `None` where no Structure stands.
+    pub(super) fn structure_band_m(&self) -> Option<(f32, f32)> {
+        let pass = self.structures.as_ref()?;
+        let (lowest, highest) = self.terrain_band_m();
+        let size = self.voxel_size;
+        Some((
+            lowest - (pass.below + 1) as f32 * size,
+            highest + (pass.above + 1) as f32 * size,
+        ))
+    }
+
+    /// Whether a Structure may reach a Chunk whose Voxels span `floor_m..=ceiling_m`.
     pub(super) fn structures_may_reach(&self, floor_m: f32, ceiling_m: f32) -> bool {
-        self.structures.as_ref().is_some_and(|pass| {
-            let (lowest, highest) = self.terrain_band_m();
-            let size = self.voxel_size;
-            floor_m <= highest + (pass.above + 1) as f32 * size
-                && ceiling_m >= lowest - (pass.below + 1) as f32 * size
-        })
+        self.structure_band_m()
+            .is_some_and(|(lowest, highest)| floor_m <= highest && ceiling_m >= lowest)
+    }
+
+    /// The top, in metres, of the highest Structure covering a column of `region`, `[min, max)`.
+    pub(super) fn structures_clear_m(&self, [min, max]: [[i32; 2]; 2]) -> Option<f32> {
+        self.structures_near([min, max])
+            .into_iter()
+            .filter(|s| {
+                let [own_min, own_max] = s.footprint();
+                (0..2).all(|a| own_min[a] < max[a] && min[a] < own_max[a])
+            })
+            .map(|s| self.global_m(s.min[1] + s.size[1]))
+            .reduce(f32::max)
     }
 
     /// Writes every Structure's cells that fall in the Chunk at `coord`: a Keep cell is left,
