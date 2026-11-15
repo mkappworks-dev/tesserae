@@ -18,6 +18,9 @@ const settingsDefaults = {
   touchLayout: "Normal",
   touchSize: "Normal",
   touchOpacity: 0.7,
+  compass: true,
+  minimap: false,
+  minimapSize: "Medium",
   sync: "Display synced",
   aa: "SMAA",
   renderScale: "100%",
@@ -53,6 +56,7 @@ const settingsDefaults = {
     Remove: "Left mouse",
     "Search the Catalogue": "C",
     "Open Inventory": "I",
+    "Open the Map": "M",
     "Flip Shape": "E",
     "Layout mode and menu": "L",
     "Open the Menu": "Tab",
@@ -166,6 +170,7 @@ const bindingGroups = {
   Interface: [
     "Open the Menu",
     "Open Inventory",
+    "Open the Map",
     "Search the Catalogue",
     "Open input settings",
     "Open Settings",
@@ -364,6 +369,28 @@ function settingsBody() {
           "select",
           ["67%", "75%", "85%", "100%"],
           "Lower values reduce rendering work. Menus stay sharp.",
+        ) +
+        group("Map and compass") +
+        row(
+          "Compass",
+          "compass",
+          "toggle",
+          undefined,
+          "A strip along the top showing your heading and Waypoints.",
+        ) +
+        row(
+          "Minimap",
+          "minimap",
+          "toggle",
+          undefined,
+          "A small map in the corner, north up, centred on you.",
+        ) +
+        row(
+          "Minimap size",
+          "minimapSize",
+          "select",
+          ["Small", "Medium", "Large"],
+          "Shown only while the minimap is on.",
         ) +
         `<p class="muted">View distance, textures, shadows, and simulation settings stay unchanged.</p>`
       );
