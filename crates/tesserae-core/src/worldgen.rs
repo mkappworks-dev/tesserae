@@ -968,6 +968,13 @@ impl Worldgen {
         if let Some(scatter) = &self.scatter {
             clear_m = clear_m.max(self.plants_clear_m(scatter, min_m, max_m));
         }
+        let region = [
+            [0, 1].map(|a| *columns(a).start()),
+            [0, 1].map(|a| columns(a).end() + 1),
+        ];
+        if let Some(roof_m) = self.structures_clear_m(region) {
+            clear_m = clear_m.max(roof_m);
+        }
         clear_m
     }
 
@@ -982,8 +989,19 @@ impl Worldgen {
     /// in the same cell, so it sits no higher than the ground it eases. Nor does a
     /// surface feature: one stands only where its Voxel's floor is in the band. A Plant is the
     /// exception: a tree or a column stands above it, so the upper bound rises by the tallest
-    /// one a Biome declares, and a World with none is bounded as before.
+    /// one a Biome declares. So is a Structure, standing above or sunk below it by the tallest and
+    /// deepest Template a Biome lists. A World with neither is bounded as before.
     pub fn surface_bounds_m(&self) -> (f32, f32) {
+        let (lowest, highest) = self.ground_bounds_m();
+        self.structure_band_m()
+            .map_or((lowest, highest), |(low, high)| {
+                (lowest.min(low), highest.max(high))
+            })
+    }
+
+    /// [`Self::surface_bounds_m`] without Structures, which stand themselves in any Chunk they
+    /// may reach: so a sky or deep-rock Chunk beside a tower or a cellar keeps its early-out.
+    fn ground_bounds_m(&self) -> (f32, f32) {
         let (lowest, highest) = self.terrain_band_m();
         (lowest, highest + self.plant_rise_m)
     }
@@ -1002,7 +1020,7 @@ impl Worldgen {
             return Chunk::air();
         };
         let size = CHUNK_SIZE as i32;
-        let (lowest, highest) = self.surface_bounds_m();
+        let (lowest, highest) = self.ground_bounds_m();
 
         // The metre heights of this Chunk's bottom and top Voxels.
         let floor_m = (cy * size) as f32 * self.voxel_size;
@@ -1654,7 +1672,7 @@ impl Worldgen {
         let size = CHUNK_SIZE as i32;
         let origin = [coord[0] * size, coord[1] * size, coord[2] * size];
         let (lowest, _) = self.terrain_band_m();
-        let (_, highest) = self.surface_bounds_m();
+        let (_, highest) = self.ground_bounds_m();
         let floor_m = self.global_m(origin[1]);
         let ceiling_m = self.global_m(origin[1] + size - 1);
         if floor_m > highest || ceiling_m < lowest - self.voxel_size {

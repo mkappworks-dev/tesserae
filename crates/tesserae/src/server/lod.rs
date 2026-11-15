@@ -3741,6 +3741,7 @@ mod tests {
     mod ores;
     mod saved;
     mod seams;
+    mod structures;
 }
 
 #[cfg(test)]
