@@ -61,6 +61,4 @@ rather than key presses.
   from `textures::item_texture`. Terra's Seeds, saplings and cuttings have
   Materials with flat Shapes and use those.
 
-Closed by the maintainer on 2026-11-15, with every box ticked. The boxes that were
-left open were met only by data and generation tests, not by the checks they name,
-and that stays true: no offscreen screenshots were taken and the Client rigs are driven by Server messages, not key presses.
+Closed by the maintainer on 2026-11-15, who tested the surfaces in the running game; every box is ticked. The tests in this repo still drive the Client rigs with Server messages rather than key presses, and no offscreen screenshots were taken.
