@@ -742,7 +742,8 @@ mod surface_features {
 
     #[test]
     fn a_vine_crops_fruit_rules_are_load_errors_naming_the_plant() {
-        let cases: [(&str, fn(&mut content::FruitVineDef)); 5] = [
+        type Edit = fn(&mut content::FruitVineDef);
+        let cases: [(&str, Edit); 5] = [
             ("reach-m", |f| f.reach_m = Some(9.0)),
             ("gap-m", |f| f.gap_m = Some(2.0)),
             ("max-fruit", |f| f.max_fruit = Some(0)),

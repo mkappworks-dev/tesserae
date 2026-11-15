@@ -16,6 +16,7 @@ pub fn lagoon() -> Vec<SurfaceFeature> {
         ("flora:jungle", 26.0, 96.0, 0.6),
         ("flora:palm", 30.0, 96.0, 0.6),
         ("crops:berry", 24.0, 22.0, 0.95),
+        ("crops:watermelon", 34.0, 22.0, 0.95),
         ("flora:cane", 14.0, 16.0, 0.95),
         ("aquatic:seagrass", 9.0, 16.0, 0.9),
         ("aquatic:kelp", 7.0, 16.0, 0.9),

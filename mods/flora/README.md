@@ -54,11 +54,13 @@ placed look-alikes for builders, made from a `log` by hand.
 
 `spreader`s drawn with the `cross` Shape: `tuft`, `tall_grass`, `dry_grass`,
 `fern`, `poppy`, `daisy`, `dandelion`, `orchid` and the mushrooms `mushroom_red`
-and `mushroom_brown`, which need low light. `cane` and `cactus` are `column`s
-up; `cane` needs no water, since `flora` cannot name a fluid. The `cactus` is a
-boxed Shape that blocks and hurts on contact. `vine` is a `climber` drawn with
-the `plane` Shape; it grows on rock, soil, placed wood and leaves, and on the
-jungle and swamp trees, whose worldgen hangs it.
+and `mushroom_brown`, which need low light. Each sets `min-neighbours`, so a
+patch that worldgen placed fills its holes and does not advance, while a single
+planted seed still grows one neighbour; plant a handful to start a patch. `cane`
+and `cactus` are `column`s up; `cane` needs no water, since `flora` cannot name
+a fluid. The `cactus` is a boxed Shape that blocks and hurts on contact. `vine`
+is a `climber` drawn with the `plane` Shape; it grows on rock, soil, placed wood
+and leaves, and on the jungle and swamp trees, whose worldgen hangs it.
 
 `frond` is a kelp Material only; the Plants that stand in water are in
 [`aquatic`](../aquatic/).

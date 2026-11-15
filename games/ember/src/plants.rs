@@ -15,6 +15,7 @@ pub fn ash_flats() -> Vec<SurfaceFeature> {
     plants(&[
         ("flora:birch", 22.0, 96.0, 0.6),
         ("crops:berry", 22.0, 22.0, 0.95),
+        ("crops:pumpkin", 30.0, 22.0, 0.95),
         ("flora:poppy", 12.0, 12.0, 0.95),
         ("flora:dry_grass", 3.8, 14.0, 0.9),
     ])

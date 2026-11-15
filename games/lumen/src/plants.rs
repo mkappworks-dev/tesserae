@@ -17,6 +17,8 @@ pub fn garden() -> Vec<SurfaceFeature> {
         ("flora:apple", 28.0, 96.0, 0.6),
         ("crops:carrot", 13.0, 22.0, 0.95),
         ("crops:wheat", 12.0, 22.0, 0.95),
+        ("crops:pumpkin", 26.0, 22.0, 0.95),
+        ("crops:watermelon", 30.0, 22.0, 0.95),
         ("flora:dandelion", 11.0, 12.0, 0.95),
         ("flora:daisy", 10.0, 12.0, 0.95),
         ("flora:poppy", 12.0, 12.0, 0.95),

@@ -1965,7 +1965,8 @@ mod tests {
 
     #[test]
     fn a_vine_crops_fruit_rules_are_checked() {
-        let bad: [(Option<usize>, fn(&mut VineFruit)); 6] = [
+        type Edit = fn(&mut VineFruit);
+        let bad: [(Option<usize>, Edit); 6] = [
             (Some(0), |_| {}),
             (None, |f| f.reach_m = 9.0),
             (None, |f| f.gap_m = 2.0),

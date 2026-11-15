@@ -695,8 +695,16 @@ fn a_body_walks_through_a_vine_and_a_ray_stops_on_it() {
     }
 }
 
-/// The `(reach-m, mean-seconds, density)` of each spreader the shared `flora` Mod declares.
-fn flora_spreaders() -> Vec<(String, f32, f32, u32)> {
+/// The row of each spreader the shared `flora` Mod declares.
+struct Row {
+    name: String,
+    reach_m: f32,
+    mean_seconds: f32,
+    density: u32,
+    min_neighbours: u32,
+}
+
+fn flora_spreaders() -> Vec<Row> {
     let path =
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../mods/flora/content.toml");
     let table: toml::Table = std::fs::read_to_string(path).unwrap().parse().unwrap();
@@ -705,13 +713,14 @@ fn flora_spreaders() -> Vec<(String, f32, f32, u32)> {
         .unwrap()
         .iter()
         .filter(|p| p["kind"].as_str() == Some("spreader"))
-        .map(|p| {
-            (
-                p["name"].as_str().unwrap().to_owned(),
-                p["reach-m"].as_float().unwrap() as f32,
-                p["mean-seconds"].as_float().unwrap() as f32,
-                p["density"].as_integer().unwrap() as u32,
-            )
+        .map(|p| Row {
+            name: p["name"].as_str().unwrap().to_owned(),
+            reach_m: p["reach-m"].as_float().unwrap() as f32,
+            mean_seconds: p["mean-seconds"].as_float().unwrap() as f32,
+            density: p["density"].as_integer().unwrap() as u32,
+            min_neighbours: p
+                .get("min-neighbours")
+                .map_or(0, |n| n.as_integer().unwrap() as u32),
         })
         .collect()
 }
@@ -731,6 +740,46 @@ fn patch(chunk: &mut Chunk, voxel: Voxel) -> usize {
     planted
 }
 
+/// Grows a row's generated patch for `hours`: how many it planted, how many stand after one hour
+/// and at the end, and how far past the patch's square the farthest one stands.
+fn grown_patch(row: &Row, min_neighbours: u32, hours: u64) -> (usize, usize, usize, i32) {
+    let wild = wild(
+        Form::Cross,
+        Kind::Spreader {
+            reach_m: row.reach_m,
+            mean_seconds: row.mean_seconds,
+            density: row.density,
+            min_neighbours,
+            yields: Vec::new(),
+        },
+        |n| n.light_min = 0,
+    );
+    let mut chunk = ground();
+    let planted = patch(&mut chunk, wild.voxel());
+    let mut farm = farm(1.0, &wild, chunk);
+    let count = |farm: &Farm| {
+        tufts(farm, wild.plant, CROP_Y)
+            .iter()
+            .filter(|c| (0..32).contains(&c[0]))
+            .count()
+    };
+    farm.run(HOUR_STEPS);
+    let hour = count(&farm);
+    farm.run((hours - 1) * HOUR_STEPS);
+    let past = tufts(&farm, wild.plant, CROP_Y)
+        .iter()
+        .map(|c| {
+            (12 - c[0])
+                .max(c[0] - 19)
+                .max(12 - c[2])
+                .max(c[2] - 19)
+                .max(0)
+        })
+        .max()
+        .unwrap_or(0);
+    (planted, hour, count(&farm), past)
+}
+
 /// A spreader's field is a few Voxels past its patch after an hour and covers well under half the
 /// ground after twelve. The cap bounds a neighbourhood and never the field's extent, so the long
 /// run fills the Biome thinly rather than stopping; slow `mean-seconds` is what keeps a patch a
@@ -738,37 +787,44 @@ fn patch(chunk: &mut Chunk, voxel: Voxel) -> usize {
 #[test]
 fn the_shared_spreaders_grow_a_patch_a_little_in_an_hour_and_never_fill_the_ground() {
     let rows = flora_spreaders();
-    assert!(rows.len() >= 9, "{rows:?}");
-    for (name, reach, mean, density) in rows {
-        let wild = wild(
-            Form::Cross,
-            Kind::Spreader {
-                reach_m: reach,
-                mean_seconds: mean,
-                density,
-                min_neighbours: 0,
-                yields: Vec::new(),
-            },
-            |n| n.light_min = 0,
-        );
-        let mut chunk = ground();
-        let planted = patch(&mut chunk, wild.voxel());
-        let mut farm = farm(1.0, &wild, chunk);
-        let count = |farm: &Farm| {
-            tufts(farm, wild.plant, CROP_Y)
-                .iter()
-                .filter(|c| (0..32).contains(&c[0]))
-                .count()
-        };
-        farm.run(HOUR_STEPS);
-        let hour = count(&farm);
-        farm.run(11 * HOUR_STEPS);
-        let long = count(&farm);
+    assert!(rows.len() >= 9, "{rows:?}", rows = rows.len());
+    for row in rows {
+        let (planted, hour, long, _) = grown_patch(&row, row.min_neighbours, 12);
+        let name = &row.name;
         println!("{name}: {planted} planted, {hour} after 1 h, {long} after 12 h of 1024");
         assert!(
             hour <= planted + planted / 2 + 10,
             "{name}: {planted} grew to {hour} in an hour"
         );
         assert!(long < 1024 * 45 / 100, "{name}: {long} of 1024 after 12 h");
+    }
+}
+
+/// With `min-neighbours` a generated patch fills its holes and stays within about twice its reach
+/// of where worldgen put it over a day, where without it the field runs on towards the Chunk's
+/// edge. One row stands for each reach and count the shared Mod uses; they all set one.
+#[test]
+fn the_shared_spreaders_keep_a_generated_patch_where_worldgen_put_it() {
+    let rows = flora_spreaders();
+    for row in &rows {
+        assert!(
+            (2..row.density).contains(&row.min_neighbours),
+            "{} sets no min-neighbours below its density",
+            row.name
+        );
+    }
+    for name in ["tuft", "poppy"] {
+        let row = rows.iter().find(|r| r.name == name).unwrap();
+        let (_, _, held, past) = grown_patch(row, row.min_neighbours, 24);
+        let (_, _, free, far) = grown_patch(row, 0, 24);
+        println!("{name}: {past} Voxels past the patch ({held} stand) against {far} ({free})");
+        assert!(
+            past <= (2.0 * row.reach_m) as i32,
+            "{name}: crept {past} Voxels"
+        );
+        assert!(
+            past < far && held < free,
+            "{name}: the rule held nothing back"
+        );
     }
 }

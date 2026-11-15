@@ -3,16 +3,20 @@
 Farmed vegetables and fruit, with their food Items and Recipes. Data only; no
 code. Depends on `strata` (the `#soil` tag) and `flora` (the `cross` Shape).
 
-| Plant          | Stages                            | Gives                  |
-| -------------- | --------------------------------- | ---------------------- |
-| `crops:wheat`  | sprout, young, green, ripe        | `wheat`, `wheat_seeds` |
-| `crops:carrot` | sprout, young, green, ripe        | `carrot` (food), seeds |
-| `crops:potato` | sprout, young, green, ripe        | `potato` (food), seeds |
-| `crops:berry`  | sprout, bush, ripe (fruits again) | `berries` (food)       |
+| Plant              | Stages                            | Gives                            |
+| ------------------ | --------------------------------- | -------------------------------- |
+| `crops:wheat`      | sprout, young, green, ripe        | `wheat`, `wheat_seeds`           |
+| `crops:carrot`     | sprout, young, green, ripe        | `carrot` (food), seeds           |
+| `crops:potato`     | sprout, young, green, ripe        | `potato` (food), seeds           |
+| `crops:berry`      | sprout, bush, ripe (fruits again) | `berries` (food)                 |
+| `crops:watermelon` | sprout, young, vine (bears fruit) | `watermelon_slice` (food), seeds |
+| `crops:pumpkin`    | sprout, young, vine (bears fruit) | `pumpkin` (food), seeds          |
 
 Each crop is planted from its seed Item (`berry_cutting` for the bush) and needs
-light 9 or more. Every Stage and Item has artwork drawn by
-`scripts/generate-mod-art`.
+light 9 or more. A watermelon or pumpkin is a vine crop: its ripe vine bears
+fruit on the ground within 1.5 m, never touching another and at most 5 to a
+vine, and breaking a fruit lets the vine bear another. Fruit never seeds. Every
+Stage and Item has artwork drawn by `scripts/generate-mod-art`.
 
 Recipes, both by hand: three `wheat` make a `bread`; two `berries` and a `wheat`
 make a `berry_pie`.

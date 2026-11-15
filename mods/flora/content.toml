@@ -1329,7 +1329,8 @@ shape = "flora:cross"
 material = "flora:tuft"
 reach-m = 2.0
 mean-seconds = 900.0
-density = 3
+density = 5
+min-neighbours = 4
 
 [plants.needs]
 soil = ["#soil"]
@@ -1343,7 +1344,8 @@ shape = "flora:cross"
 material = "flora:poppy"
 reach-m = 3.0
 mean-seconds = 1800.0
-density = 3
+density = 9
+min-neighbours = 7
 
 [plants.needs]
 soil = ["#soil"]
@@ -1357,7 +1359,8 @@ shape = "flora:cross"
 material = "flora:daisy"
 reach-m = 3.0
 mean-seconds = 1800.0
-density = 3
+density = 9
+min-neighbours = 7
 
 [plants.needs]
 soil = ["#soil"]
@@ -1371,7 +1374,8 @@ shape = "flora:cross"
 material = "flora:dandelion"
 reach-m = 3.0
 mean-seconds = 1800.0
-density = 3
+density = 9
+min-neighbours = 7
 
 [plants.needs]
 soil = ["#soil"]
@@ -1385,7 +1389,8 @@ shape = "flora:cross"
 material = "flora:tall_grass"
 reach-m = 2.0
 mean-seconds = 900.0
-density = 3
+density = 5
+min-neighbours = 4
 
 [plants.needs]
 soil = ["#soil"]
@@ -1399,7 +1404,8 @@ shape = "flora:cross"
 material = "flora:dry_grass"
 reach-m = 2.0
 mean-seconds = 900.0
-density = 3
+density = 5
+min-neighbours = 4
 
 [plants.needs]
 soil = ["#soil", "#sand"]
@@ -1414,7 +1420,8 @@ shape = "flora:cross"
 material = "flora:fern"
 reach-m = 2.0
 mean-seconds = 900.0
-density = 3
+density = 5
+min-neighbours = 4
 
 [plants.needs]
 soil = ["#soil"]
@@ -1429,7 +1436,8 @@ shape = "flora:cross"
 material = "flora:orchid"
 reach-m = 3.0
 mean-seconds = 3600.0
-density = 2
+density = 9
+min-neighbours = 7
 
 [plants.needs]
 soil = ["#soil"]
@@ -1445,7 +1453,8 @@ shape = "flora:mushroom"
 material = "flora:mushroom_red"
 reach-m = 2.0
 mean-seconds = 600.0
-density = 3
+density = 5
+min-neighbours = 4
 yields = [{ item = "flora:mushroom_red", count = [1, 1] }, { item = "flora:mushroom", count = [1, 2] }]
 
 [plants.needs]
@@ -1460,7 +1469,8 @@ shape = "flora:mushroom"
 material = "flora:mushroom_brown"
 reach-m = 2.0
 mean-seconds = 600.0
-density = 3
+density = 5
+min-neighbours = 4
 yields = [{ item = "flora:mushroom_brown", count = [1, 1] }, { item = "flora:mushroom", count = [1, 2] }]
 
 [plants.needs]

@@ -63,6 +63,49 @@ fn an_apple_tree_bears_apples_that_breaking_picks_and_that_the_tree_grows_again(
 }
 
 #[test]
+fn watermelons_and_pumpkins_bear_grown_fruit_that_breaking_drops_as_food() {
+    let (_install, loaded) = loaded("terra", 0.5);
+    let plants = &loaded.tables.plants;
+    for (crop, ripe_yield, seeds) in [
+        (
+            "watermelon",
+            "crops:watermelon_slice",
+            "crops:watermelon_seeds",
+        ),
+        ("pumpkin", "crops:pumpkin", "crops:pumpkin_seeds"),
+    ] {
+        let plant = plants
+            .plants()
+            .iter()
+            .find(|p| p.name == format!("crops:{crop}"))
+            .unwrap();
+        let Kind::Crop {
+            fruit_vine: Some(fruit),
+            harvest_to: None,
+            ..
+        } = &plant.kind
+        else {
+            panic!("{crop} is a vine crop");
+        };
+        assert_eq!((fruit.reach_m, fruit.gap_m, fruit.max_fruit), (1.5, 0.5, 5));
+        let ripe = material(&loaded, &format!("crops:{crop}_ripe"));
+        let unripe = material(&loaded, &format!("crops:{crop}_unripe"));
+        assert!(plants.is_grown(ripe) && plants.is_grown(unripe), "{crop}");
+        assert!(plants.yields(unripe).is_empty());
+        assert_eq!(plants.yields(ripe)[0].item, ripe_yield);
+        assert_eq!(plants.canopy_of_fruit(ripe), None, "{crop} leaves air");
+        let items = loaded.every_item(0.5);
+        assert!(items.named(seeds).is_some(), "{seeds}");
+        let food = loaded.items.iter().find(|i| i.name == ripe_yield).unwrap();
+        assert!(food.food.is_some_and(|f| f > 0.0), "{ripe_yield} is food");
+        assert!(
+            items.dropped_by(ripe).is_none() && items.dropped_by(unripe).is_none(),
+            "{crop} fruit has no Item that places it"
+        );
+    }
+}
+
+#[test]
 fn bread_and_pie_are_made_from_the_produce() {
     let (_install, loaded) = loaded("terra", 0.5);
     let items = loaded.every_item(0.5);

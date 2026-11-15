@@ -4,4 +4,4 @@ api = "0.3"
 depends = ["strata", "flora"]
 declaration = "content.toml"
 category = "Plants"
-description = "Wheat, carrots, potatoes and berries, with bread and berry pie"
+description = "Wheat, carrots, potatoes, berries, watermelons and pumpkins, with bread and berry pie"

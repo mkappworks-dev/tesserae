@@ -553,6 +553,52 @@ def berry_bush(stage):
     return positional(top, side, lambda x, z: tint(BERRY_LEAF, -30) if top(x, z) else None)
 
 
+# The boxes of the `watermelon` and `pumpkin` Shapes (and their small unripe ones) in
+# `mods/crops/content.toml`, as the heights of underside, body and shoulders.
+WATERMELON_ROWS = ((0, 2), (2, 9), (9, 11))
+WATERMELON_SMALL = dict(rows=((0, 1), (1, 5), (5, 6)), ring=5, stem=(6, 8, 7, 9, (74, 110, 46)))
+PUMPKIN_ROWS = ((0, 2), (2, 8), (8, 10))
+PUMPKIN_SMALL = dict(rows=((0, 1), (1, 5), (5, 6)), ring=5, stem=(6, 8, 7, 9, (90, 110, 44)))
+
+
+def watermelon(ripe):
+    if not ripe:
+        palette = ((70, 120, 50), (96, 150, 64), (120, 170, 80))
+        return stacked_fruit(palette, WATERMELON_SMALL["rows"], WATERMELON_SMALL["ring"], WATERMELON_SMALL["stem"])
+    palette = ((24, 84, 40), (40, 128, 60), (70, 166, 86))
+    return stacked_fruit(palette, WATERMELON_ROWS, 3, (11, 13, 7, 9, (96, 112, 52)))
+
+
+def pumpkin(ripe):
+    if not ripe:
+        palette = ((92, 130, 48), (120, 160, 60), (140, 176, 76))
+        return stacked_fruit(palette, PUMPKIN_SMALL["rows"], PUMPKIN_SMALL["ring"], PUMPKIN_SMALL["stem"])
+    palette = ((196, 86, 18), (232, 122, 28), (246, 150, 48))
+    return stacked_fruit(palette, PUMPKIN_ROWS, 3, (10, 13, 7, 9, (96, 104, 44)))
+
+
+def watermelon_slice_item(x, y):
+    """A half-moon slice: red flesh, a pale band, a green rind, a few seeds."""
+    if y >= 5 and ((x - 8) / 7.5) ** 2 + ((y - 5) / 8.0) ** 2 <= 1.0:
+        if ((x - 8) / 5.6) ** 2 + ((y - 5) / 6.2) ** 2 <= 1.0:
+            if (x, y) in ((6, 8), (9, 7), (8, 10), (11, 9), (5, 11)):
+                return (40, 30, 30, 255)
+            return tint((226, 64, 74), (noise(x, y, 409) - 128) // 14 + (10 if y < 8 else -6))
+        if ((x - 8) / 6.4) ** 2 + ((y - 5) / 7.0) ** 2 <= 1.0:
+            return tint((226, 232, 190), (noise(x, y, 411) - 128) // 18)
+        return tint((40, 120, 60), (noise(x, y, 413) - 128) // 12 + (10 if x < 8 else -8))
+    return None
+
+
+def pumpkin_item(x, y):
+    if x in (7, 8) and 2 <= y <= 4:
+        return (90, 104, 44, 255)
+    if disc(x, y, 8, 10, 6.5, 5):
+        ridge = (x - 8) % 3 == 0
+        return tint((232, 122, 28), (noise(x, y, 415) - 128) // 14 + (14 if x < 7 and y < 10 else -6) - (22 if ridge else 0))
+    return None
+
+
 def sapling(leaf, form="round"):
     def draw(x, y):
         trunk = (110, 78, 44)
@@ -869,6 +915,16 @@ TEXTURES = {
         "potato_young": crop_stage(2, (82, 152, 58), (82, 152, 58)),
         "potato_green": crop_stage(3, (70, 140, 54), (70, 140, 54)),
         "potato_ripe": crop_stage(4, (88, 120, 48), (178, 140, 88), root=(178, 140, 88)),
+        "watermelon_sprout": crop_stage(1, (60, 140, 70), (60, 140, 70)),
+        "watermelon_young": crop_stage(2, (56, 134, 66), (56, 134, 66)),
+        "watermelon_vine": crop_stage(3, (48, 126, 60), (48, 126, 60)),
+        "watermelon_unripe": watermelon(False),
+        "watermelon_ripe": watermelon(True),
+        "pumpkin_sprout": crop_stage(1, (92, 150, 52), (92, 150, 52)),
+        "pumpkin_young": crop_stage(2, (86, 144, 50), (86, 144, 50)),
+        "pumpkin_vine": crop_stage(3, (76, 134, 46), (76, 134, 46)),
+        "pumpkin_unripe": pumpkin(False),
+        "pumpkin_ripe": pumpkin(True),
         "berry_sprout": berry_bush(1),
         "berry_bush": berry_bush(2),
         "berry_ripe": berry_bush(3),
@@ -930,6 +986,8 @@ ITEM_TEXTURES = {
         "berry_pie": item_icon(berry_pie_item),
         "carrot": item_icon(carrot_item),
         "potato": item_icon(potato_item),
+        "watermelon_slice": item_icon(watermelon_slice_item),
+        "pumpkin": item_icon(pumpkin_item),
     },
 }
 
