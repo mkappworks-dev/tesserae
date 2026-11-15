@@ -423,8 +423,10 @@
   grid-template-columns: 1fr 1fr;
   gap: 8px;
 }
-.pop-actions .btn {
+.game .map-pop .pop-actions .btn {
   width: 100%;
+  min-height: 32px;
+  padding-block: 0;
   justify-content: center;
 }
 .pop-actions .btn:only-child {
