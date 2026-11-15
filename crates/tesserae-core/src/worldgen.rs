@@ -1206,7 +1206,6 @@ impl Worldgen {
                 &kept,
                 &surface_m,
                 [cx, cy, cz],
-                floor_m,
             );
             if scatter.plants {
                 self.plants(&mut chunk, scatter, &placed, &kept, [cx, cy, cz]);
@@ -1357,13 +1356,13 @@ impl Worldgen {
         kept: &[Footprint],
         surface_m: &[f32; SURFACE_W * SURFACE_W],
         coord: [i32; 3],
-        floor_m: f32,
     ) {
         let Some(world) = self.params.ground else {
             return;
         };
         let (_, highest) = self.terrain_band_m();
         let size = CHUNK_SIZE as i32;
+        let floor_m = (coord[1] * size) as f32 * self.voxel_size;
         for z in 0..size {
             for x in 0..size {
                 let top = top_index(surface_m[surface_index(x, z)], floor_m, self.voxel_size);
