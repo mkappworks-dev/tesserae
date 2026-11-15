@@ -273,6 +273,13 @@ Step 19 adds `/map`: the full-screen Map, with fog of war, Biome tint and height
 shading, 2 to 16 m per pixel zoom, drag to pan, and Waypoints (a Marker kind and
 a name; the death marker is automatic). The gameplay HUD gains the Compass and a
 minimap, both off by default; both are Display settings and toggle in play with
-`B` and `N`. Press `M` to open or close the Map, and Left and Right in play to
-turn the heading. The terrain and the explored route are drawn from noise here,
-not from the engine.
+`B` and `N`, each with a brief toast ("Compass on", "Minimap off"). Press `M` to
+open or close the Map, and Left and Right in play to turn the heading. `H`
+toggles the placement ghost (Behavior > Placement ghost; only the setting, the
+key and the toast "Placement ghost on" are mocked), and `O` takes the next tool
+(Cycle tool, "Take tool" in Key bindings). The Simulate panel's Map policy
+checkbox, "Game forbids the Map", shows the engine's state: the Map, Compass and
+minimap keys do nothing, the Compass and minimap are hidden, the Menu has no Map
+button, and the switches and bindings stay in Settings marked "Not available in
+this World." The terrain and the explored route are drawn from noise here, not
+from the engine.

@@ -333,8 +333,8 @@ function mapDrawMinimap() {
   });
 }
 function mapPlayChrome() {
-  const on = state.settings.compass !== false;
-  return `${on ? compassHtml() : ""}${state.settings.minimap ? minimapHtml() : ""}`;
+  const on = state.settings.compass === true && !state.mapForbidden;
+  return `${on ? compassHtml() : ""}${state.settings.minimap && !state.mapForbidden ? minimapHtml() : ""}`;
 }
 function mapPlayMount() {
   mapDrawMinimap();
@@ -586,6 +586,7 @@ document.addEventListener(
     )
       return;
     const key = e.key.toLowerCase();
+    if (state.mapForbidden && ["m", "b", "n"].includes(key)) return;
     if (key === "m") {
       e.preventDefault();
       e.stopImmediatePropagation();
@@ -601,12 +602,20 @@ document.addEventListener(
       const flag = key === "b" ? "compass" : "minimap";
       state.settings[flag] = !state.settings[flag];
       render();
+      toast(
+        `${flag === "compass" ? "Compass" : "Minimap"} ${state.settings[flag] ? "on" : "off"}`,
+      );
     } else if (
       state.screen === "play" &&
       ["arrowleft", "arrowright"].includes(key)
     ) {
       e.preventDefault();
       mapTurn(key === "arrowleft" ? -5 : 5);
+    } else if (state.screen === "play" && key === "h") {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      state.settings.ghost = !state.settings.ghost;
+      toast(`Placement ghost ${state.settings.ghost ? "on" : "off"}`);
     }
   },
   true,
