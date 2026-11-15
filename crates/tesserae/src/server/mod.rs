@@ -36,6 +36,7 @@ pub mod items;
 mod jobs;
 mod lod;
 mod lod_rings;
+pub mod map;
 pub mod mods;
 pub mod persistence;
 pub mod plants;
@@ -126,6 +127,7 @@ pub fn plugin(app: &mut App) {
             tool::plugin,
             fluids::plugin,
             plants::plugin,
+            map::plugin,
             player::plugin,
             sky::plugin,
             soundscape::plugin,
