@@ -656,7 +656,11 @@ mod waypoints {
 /// The paint as it was before the tile-local reader: one `Map::sample` lookup per read.
 fn paint_reference(map: &Map, palette: &MapPalette, centre: Vec2, mpp: f32) -> Vec<u8> {
     let half = view_half();
-    let offsets: &[f32] = if mpp > SAMPLE_M { &[-0.25, 0.25] } else { &[0.0] };
+    let offsets: &[f32] = if mpp > SAMPLE_M {
+        &[-0.25, 0.25]
+    } else {
+        &[0.0]
+    };
     let mut pixels = Vec::new();
     for y in 0..VIEW_H {
         for x in 0..VIEW_W {
@@ -667,7 +671,8 @@ fn paint_reference(map: &Map, palette: &MapPalette, centre: Vec2, mpp: f32) -> V
                 for dx in offsets {
                     let at = centre + (here - half + Vec2::new(*dx, *dy)) * mpp;
                     let cell = cell_of(at.x, at.y);
-                    let Some([r, g, b, a]) = crate::client::minimap::ground_colour(map, cell, palette)
+                    let Some([r, g, b, a]) =
+                        crate::client::minimap::ground_colour(map, cell, palette)
                     else {
                         continue;
                     };
@@ -741,7 +746,10 @@ fn the_map_totals_are_not_recomputed_while_its_revision_is_unchanged() {
     let mut stats = MapStats::default();
     stats.refresh(&map, map.revision());
     stats.refresh(&map, map.revision());
-    assert_eq!((stats.computed, stats.seen.clone(), stats.explored_m2), (1, vec![1], 4));
+    assert_eq!(
+        (stats.computed, stats.seen.clone(), stats.explored_m2),
+        (1, vec![1], 4)
+    );
     map.record(
         [2, 1],
         Sample {
@@ -764,7 +772,10 @@ fn a_click_at_the_painted_images_centre_lands_on_the_views_centre() {
     let window = MapWindow::default();
     let here = Vec2::new(30.0, -20.0);
     assert_eq!(window.world_at(here, pixel), here);
-    assert_eq!(view_pixel(top_left + Vec2::splat(1.0), top_left, size, border), None);
+    assert_eq!(
+        view_pixel(top_left + Vec2::splat(1.0), top_left, size, border),
+        None
+    );
     assert_eq!(
         view_pixel(top_left + Vec2::splat(2.0), top_left, size, border),
         Some(Vec2::ZERO)

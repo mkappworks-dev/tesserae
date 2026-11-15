@@ -108,7 +108,9 @@ impl SavedMap {
         let tiles = map
             .tiles_revised()
             .map(|(at, revision, samples)| {
-                let entry = cache.entry(*at).or_insert_with(|| (0, SavedTile::default()));
+                let entry = cache
+                    .entry(*at)
+                    .or_insert_with(|| (0, SavedTile::default()));
                 if entry.0 != revision || entry.1.planes.is_empty() {
                     *entry = (
                         revision,
