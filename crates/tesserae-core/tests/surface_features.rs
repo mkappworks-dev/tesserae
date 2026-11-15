@@ -175,7 +175,7 @@ fn mapping() -> Mapping {
 /// to the terrain it had.
 #[test]
 fn a_snapshot_whose_biomes_have_no_features_restores_to_the_recorded_chunks() {
-    let saved = Generation::capture(biome_world(), &mapping()).unwrap();
+    let saved = Generation::capture(biome_world(), &[], &mapping()).unwrap();
     let json = serde_json::to_value(&saved).unwrap();
     let biomes = json["biomes"].as_array().unwrap();
     assert_eq!(biomes.len(), 3);

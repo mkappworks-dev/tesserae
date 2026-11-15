@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 use crate::launch::Installed;
 use crate::session::{SessionApp, SessionTeardown};
 use bevy::prelude::*;
+use tesserae_core::template::Template;
 use tesserae_core::{MaterialId, SHAPE_FULL_CUBE, ShapeId, Tables, WorldgenParams};
 use tesserae_mods::{
     Kind, ModHost, ModInstance, Registered, Registry, Scan, Trust, Verdict, ViewParams, WorldInfo,
@@ -108,6 +109,9 @@ pub struct LoadedMods {
     pub tables: Tables,
     pub registry: Registry,
     pub world: Option<WorldgenParams>,
+    /// The Templates a reopened World was made with, which its Biomes' Structures index into.
+    /// `None` is a new World, which stands the Game's own.
+    pub world_templates: Option<Vec<Template>>,
     pub view: Option<ViewParams>,
     pub appearance: Vec<(MaterialId, [u8; 4])>,
     pub textures: Vec<(MaterialId, Vec<u8>)>,
@@ -132,6 +136,7 @@ impl Default for LoadedMods {
             tables: Tables::builtin(),
             registry: Registry::builtin(),
             world: None,
+            world_templates: None,
             view: None,
             appearance: Vec::new(),
             textures: Vec::new(),
@@ -181,7 +186,7 @@ fn placeable(tables: &Tables, material: MaterialId) -> bool {
 }
 
 #[derive(Resource)]
-pub(super) struct WorldParameters(pub WorldgenParams);
+pub(super) struct WorldParameters(pub WorldgenParams, pub Vec<Template>);
 
 /// One Game or Mod a World was made with.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -462,7 +467,8 @@ pub(crate) fn save_world(loaded: &LoadedMods, path: &Path) {
         sequence: 1,
         seed: 123,
         voxel_size_m: 0.5,
-        parameters: Generation::capture(loaded.world.unwrap(), &mapping).unwrap(),
+        parameters: Generation::capture(loaded.world.unwrap(), &loaded.tables.templates, &mapping)
+            .unwrap(),
         content: content.clone(),
         player: save::Player {
             eye_m: [1.0, 2.0, 3.0],
@@ -792,6 +798,9 @@ fn install(world: &mut World) {
         .get_resource::<WorldSettings>()
         .map_or(WorldSettings::default().voxel_size, |w| w.voxel_size);
     let items = loaded.every_item(voxel_size);
+    let templates = loaded
+        .world_templates
+        .unwrap_or_else(|| loaded.tables.templates.clone());
     let markers = crate::content::MarkerKinds(loaded.tables.markers.clone());
     let tables = super::ContentTables::from_loaded(loaded.tables, loaded.game);
     let reopened = world
@@ -886,7 +895,7 @@ fn install(world: &mut World) {
     world.insert_resource(super::craft::Recipes(loaded.recipes));
     world.insert_resource(placing);
     world.insert_resource(items);
-    world.insert_resource(WorldParameters(params));
+    world.insert_resource(WorldParameters(params, templates));
     world.insert_resource(super::streaming::streaming_settings(loaded.view));
     world.insert_resource(runtime::ModJobs::new(loaded.registry, loaded.mods));
     let (name, default_mode) = world
@@ -1772,7 +1781,12 @@ layers = [["rp"]]
                 sequence: 1,
                 seed: 123,
                 voxel_size_m: 0.5,
-                parameters: Generation::capture(loaded.world.unwrap(), &mapping).unwrap(),
+                parameters: Generation::capture(
+                    loaded.world.unwrap(),
+                    &loaded.tables.templates,
+                    &mapping,
+                )
+                .unwrap(),
                 content: content.clone(),
                 player: save::Player {
                     eye_m: [1.0, 2.0, 3.0],

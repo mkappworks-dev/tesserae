@@ -38,6 +38,9 @@ Where it lives:
 - Mods: TOML palette word `"ground"` beside `"keep"` and `"air"`; WIT
   `template-cell` gains `ground` (0.3, amended before release; starter WIT
   synced, guests rebuilt).
+- Snapshot (06, merged after this ticket's commit): `SavedCell::Ground`
+  freezes a `ground` cell as the word, so a reopened World resolves it from
+  its own frozen Biomes; `structure_snapshot.rs`'s hut now holds one.
 - Obtainable (12): `DeclaredTemplates::check` only looks at Voxel cells, so
   `ground` passes by definition; the Biome's own ground is laid by worldgen
   anyway. Test `a_ground_cell_is_obtainable_by_definition` in
