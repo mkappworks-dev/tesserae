@@ -2,6 +2,8 @@
 //! Server published with the pose, never the Client's own camera. North is -Z
 //! in every World (`docs/adr/0028-the-map-is-a-server-held-per-player-capture.md`).
 
+use std::collections::HashMap;
+
 use bevy::prelude::*;
 use bevy::text::{Justify, TextLayout};
 
@@ -100,6 +102,43 @@ fn toggle(
     super::menu_ui::notify(&mut commands, text, super::menu_ui::Tone::Change);
 }
 
+/// One tick or label of the strip, which keeps its place in the world and is moved as the heading turns.
+#[derive(Component)]
+struct Tick {
+    deg: i32,
+    /// How far left of the tick's own x the node starts.
+    inset: f32,
+}
+
+#[derive(Component)]
+struct Strip;
+
+/// What the strip was last built for: whole degrees, the Waypoints' revision, whole metres.
+type Shown = (i32, u32, [i32; 2]);
+/// One image per icon shape and colour.
+type Icons = HashMap<(&'static str, [u8; 4]), Handle<Image>>;
+
+/// Where a tick sits for a heading, and whether the strip reaches it.
+fn placed(tick: &Tick, bearing: f32) -> (f32, Display) {
+    let rel = relative_deg(bearing, tick.deg as f32);
+    let shown = rel.abs() <= STRIP_PX / 2.0 / PX_PER_DEG;
+    (
+        STRIP_PX / 2.0 + rel * PX_PER_DEG - tick.inset,
+        if shown { Display::Flex } else { Display::None },
+    )
+}
+
+type Stale = Or<(With<StripMark>, With<Facing>)>;
+
+#[derive(bevy::ecs::system::SystemParam)]
+struct Parts<'w, 's> {
+    roots: Query<'w, 's, Entity, With<CompassRoot>>,
+    strips: Query<'w, 's, Entity, With<Strip>>,
+    ticks: Query<'w, 's, (&'static Tick, &'static mut Node)>,
+    readout: Query<'w, 's, &'static mut Text, With<Readout>>,
+    stale: Query<'w, 's, Entity, Stale>,
+}
+
 fn rebuild(
     mut commands: Commands,
     preferences: Res<Preferences>,
@@ -111,8 +150,8 @@ fn rebuild(
         Res<Marks>,
     ),
     mut images: ResMut<Assets<Image>>,
-    roots: Query<Entity, With<CompassRoot>>,
-    mut shown: Local<Option<(i32, u32, [i32; 2])>>,
+    mut parts: Parts,
+    (mut shown, mut icons): (Local<Option<Shown>>, Local<Icons>),
 ) {
     let hidden = !allowed.0
         || !preferences.compass
@@ -131,14 +170,47 @@ fn rebuild(
         return;
     }
     *shown = wanted;
-    for root in &roots {
-        commands.entity(root).despawn();
-    }
     let Some((whole, ..)) = wanted else {
+        for root in &parts.roots {
+            commands.entity(root).despawn();
+        }
         return;
     };
     let bearing = whole as f32;
     let ahead = ahead_of(&marks, heading.eye, bearing);
+    let mut icon = |kind: &str, images: &mut Assets<Image>| {
+        let (glyph, colour) = marks.look(kind);
+        icons
+            .entry((glyph.name(), colour))
+            .or_insert_with(|| images.add(icon_image(glyph, colour, MARK_SCALE)))
+            .clone()
+    };
+    let facing = ahead.iter().find(|a| a.rel.abs() < FACING_DEG);
+    if let (Some(root), Some(strip)) = (parts.roots.iter().next(), parts.strips.iter().next()) {
+        for (tick, mut node) in &mut parts.ticks {
+            let (left, display) = placed(tick, bearing);
+            node.left = Val::Px(left);
+            node.display = display;
+        }
+        for mut text in &mut parts.readout {
+            text.0 = format!("{whole}° {}", cardinal(bearing));
+        }
+        for old in &parts.stale {
+            commands.entity(old).despawn();
+        }
+        commands.entity(strip).with_children(|strip| {
+            waypoint_marks(strip, &ahead, |kind| icon(kind, &mut images));
+        });
+        if let Some(target) = facing {
+            commands
+                .entity(root)
+                .with_children(|root| facing_label(root, target));
+        }
+        return;
+    }
+    for root in &parts.roots {
+        commands.entity(root).despawn();
+    }
     commands
         .spawn((
             CompassRoot,
@@ -155,6 +227,7 @@ fn rebuild(
         ))
         .with_children(|root| {
             root.spawn((
+                Strip,
                 Pickable::IGNORE,
                 Node {
                     width: Val::Px(STRIP_PX),
@@ -171,7 +244,7 @@ fn rebuild(
             ))
             .with_children(|strip| {
                 strip_marks(strip, bearing);
-                waypoint_marks(strip, &ahead, &marks, &mut images);
+                waypoint_marks(strip, &ahead, |kind| icon(kind, &mut images));
             });
             root.spawn((
                 Readout,
@@ -184,20 +257,24 @@ fn rebuild(
                 },
                 Pickable::IGNORE,
             ));
-            if let Some(target) = ahead.iter().find(|a| a.rel.abs() < FACING_DEG) {
-                root.spawn((
-                    Facing,
-                    Text::new(format!("{} · {} m", target.name, target.metres.round())),
-                    theme::weighted(theme::TEXT_CAPTION, theme::SEMIBOLD),
-                    TextColor(theme::HUD_INK),
-                    TextShadow {
-                        offset: Vec2::new(0.0, 1.0),
-                        color: Color::BLACK,
-                    },
-                    Pickable::IGNORE,
-                ));
+            if let Some(target) = facing {
+                facing_label(root, target);
             }
         });
+}
+
+fn facing_label(root: &mut ChildSpawnerCommands, target: &Ahead) {
+    root.spawn((
+        Facing,
+        Text::new(format!("{} · {} m", target.name, target.metres.round())),
+        theme::weighted(theme::TEXT_CAPTION, theme::SEMIBOLD),
+        TextColor(theme::HUD_INK),
+        TextShadow {
+            offset: Vec2::new(0.0, 1.0),
+            color: Color::BLACK,
+        },
+        Pickable::IGNORE,
+    ));
 }
 
 struct Ahead {
@@ -230,15 +307,13 @@ fn ahead_of(marks: &Marks, eye: Vec2, bearing: f32) -> Vec<Ahead> {
 fn waypoint_marks(
     strip: &mut ChildSpawnerCommands,
     ahead: &[Ahead],
-    marks: &Marks,
-    images: &mut Assets<Image>,
+    mut icon: impl FnMut(&str) -> Handle<Image>,
 ) {
     // Nearest the heading spawns last, so it draws over the ones rested at the edge.
     for waypoint in ahead.iter().rev() {
-        let (icon, colour) = marks.look(&waypoint.kind);
         let at = waypoint.rel.clamp(-EDGE_DEG, EDGE_DEG);
         let dimmed = at != waypoint.rel;
-        let mut image = ImageNode::new(images.add(icon_image(icon, colour, MARK_SCALE)));
+        let mut image = ImageNode::new(icon(&waypoint.kind));
         if dimmed {
             image.color = DIM;
         }
@@ -258,24 +333,24 @@ fn waypoint_marks(
     }
 }
 
+/// Every tick and label of the circle, spawned once; [`placed`] moves them and hides those out of reach.
 fn strip_marks(strip: &mut ChildSpawnerCommands, bearing: f32) {
-    let reach = STRIP_PX / 2.0 / PX_PER_DEG;
-    let step = TICK_STEP_DEG as f32;
-    let first = ((bearing - reach) / step).ceil() as i32;
-    let last = ((bearing + reach) / step).floor() as i32;
-    for index in first..=last {
-        let deg = (index * TICK_STEP_DEG).rem_euclid(360);
-        let x = STRIP_PX / 2.0 + relative_deg(bearing, deg as f32) * PX_PER_DEG;
+    for index in 0..360 / TICK_STEP_DEG {
+        let deg = index * TICK_STEP_DEG;
         let rank = match deg {
             d if d % 45 == 0 => 2,
             d if d % 15 == 0 => 1,
             _ => 0,
         };
+        let tick = Tick { deg, inset: 0.0 };
+        let (left, display) = placed(&tick, bearing);
         strip.spawn((
+            tick,
             Pickable::IGNORE,
             Node {
+                display,
                 position_type: PositionType::Absolute,
-                left: Val::Px(x),
+                left: Val::Px(left),
                 bottom: Val::Px(0.0),
                 width: Val::Px(1.0),
                 height: Val::Px(TICK[rank]),
@@ -290,17 +365,24 @@ fn strip_marks(strip: &mut ChildSpawnerCommands, bearing: f32) {
             (1, d) if d % 30 == 0 => (d.to_string(), 9.0, DIM),
             _ => continue,
         };
+        let label = Tick {
+            deg,
+            inset: LABEL_PX / 2.0,
+        };
+        let (left, display) = placed(&label, bearing);
         strip.spawn((
+            label,
             Pickable::IGNORE,
             Node {
+                display,
                 position_type: PositionType::Absolute,
-                left: Val::Px(x - LABEL_PX / 2.0),
+                left: Val::Px(left),
                 top: Val::Px(if size == 15.0 { 4.0 } else { 8.0 }),
                 width: Val::Px(LABEL_PX),
                 justify_content: JustifyContent::Center,
                 ..default()
             },
-            Text::new(text.clone()),
+            Text::new(text),
             theme::weighted(size, theme::SEMIBOLD),
             TextColor(ink),
             TextLayout::justify(Justify::Center),
@@ -324,7 +406,7 @@ fn strip_marks(strip: &mut ChildSpawnerCommands, bearing: f32) {
 mod tests {
     use super::*;
     use crate::server::player::{BodyState, MovementMode};
-    use std::f32::consts::FRAC_PI_2;
+    use std::f32::consts::{FRAC_PI_2, FRAC_PI_4};
 
     #[test]
     fn a_positive_yaw_turns_left_so_the_bearing_is_its_negative_from_north() {
@@ -409,16 +491,22 @@ mod tests {
     fn north(app: &mut App) -> Vec<Color> {
         let mut letters = app
             .world_mut()
-            .query_filtered::<(&Text, &TextColor), Without<Readout>>();
+            .query_filtered::<(&Text, &TextColor, &Node), Without<Readout>>();
         letters
             .iter(app.world())
-            .filter(|(text, _)| text.0 == "N")
-            .map(|(_, ink)| ink.0)
+            .filter(|(text, _, node)| text.0 == "N" && node.display != Display::None)
+            .map(|(_, ink, _)| ink.0)
             .collect()
     }
     fn letters(app: &mut App) -> Vec<String> {
-        let mut letters = app.world_mut().query_filtered::<&Text, Without<Readout>>();
-        letters.iter(app.world()).map(|t| t.0.clone()).collect()
+        let mut letters = app
+            .world_mut()
+            .query_filtered::<(&Text, &Node), Without<Readout>>();
+        letters
+            .iter(app.world())
+            .filter(|(_, node)| node.display != Display::None)
+            .map(|(t, _)| t.0.clone())
+            .collect()
     }
 
     #[test]
@@ -596,5 +684,37 @@ mod tests {
         assert_eq!(facing(&mut app).as_deref(), Some("Base · 100 m"));
         pose_at(&mut app, 0.0, Vec3::new(0.0, 0.0, -60.0));
         assert_eq!(facing(&mut app).as_deref(), Some("Base · 40 m"));
+    }
+
+    #[test]
+    fn a_turn_moves_the_existing_ticks_instead_of_respawning_the_strip() {
+        let mut app = app();
+        turn_on(&mut app);
+        pose(&mut app, 0.0);
+        let ids = |app: &mut App| {
+            let mut q = app
+                .world_mut()
+                .query_filtered::<Entity, Or<(With<Tick>, With<Readout>, With<Strip>)>>();
+            let mut all: Vec<_> = q.iter(app.world()).collect();
+            all.sort();
+            all
+        };
+        let before = ids(&mut app);
+        assert!(before.len() > 70);
+        pose(&mut app, -FRAC_PI_2);
+        assert_eq!(ids(&mut app), before);
+        assert_eq!(readout(&mut app).as_deref(), Some("90° E"));
+    }
+
+    #[test]
+    fn a_waypoint_icon_is_drawn_once_per_kind_and_reused_across_turns() {
+        let mut app = app();
+        turn_on(&mut app);
+        waypoints_at(&mut app, &[("Base", 100.0, 0.0), ("Also", 0.0, -100.0)]);
+        pose(&mut app, 0.0);
+        let before = app.world().resource::<Assets<Image>>().len();
+        pose(&mut app, -FRAC_PI_2);
+        pose(&mut app, -FRAC_PI_4);
+        assert_eq!(app.world().resource::<Assets<Image>>().len(), before);
     }
 }
