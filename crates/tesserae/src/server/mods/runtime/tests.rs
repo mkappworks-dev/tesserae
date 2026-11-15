@@ -1241,6 +1241,8 @@ fn terra_contract_content_build_and_scenarios_reach_real_voxels_and_light() {
             .iter()
             .filter(|(id, _)| *id >= base)
             .map(|&(id, colour)| (id - base + 8, colour))
+            // Its building Materials follow, covered by the demo Games' building tests.
+            .take(22)
             .collect();
         assert_eq!(
             own,

@@ -4,6 +4,7 @@ use exports::tesserae::mods::guest::{
     Command, Declaration, Guest, Registered, TickContext, WorldInfo,
 };
 mod audio;
+mod building;
 mod character;
 mod plants;
 mod textures;
@@ -351,7 +352,10 @@ impl Guest for Terra {
                 solid("door_open"),
                 gate("gate"),
                 gate("gate_open"),
-            ],
+            ]
+            .into_iter()
+            .chain(building::materials())
+            .collect(),
             shapes: vec![fence(), panel(), table()],
             appearance: vec![
                 appearance("lamp", [245, 227, 184, 255]),
@@ -376,7 +380,10 @@ impl Guest for Terra {
                 appearance("door_open", [128, 88, 50, 255]),
                 appearance("gate", [140, 97, 55, 255]),
                 appearance("gate_open", [140, 97, 55, 255]),
-            ],
+            ]
+            .into_iter()
+            .chain(building::appearance())
+            .collect(),
             world: Some(world),
             view: Some(ViewParams {
                 view_distance_m: 160.0,
@@ -604,6 +611,7 @@ impl Guest for Terra {
                     // carpet; the oaks every 9 m give Wood for a Workbench, Chest and Door in a
                     // short walk, and no Wood lies about on its own.
                     crop_fields: plants::temperate_fields(),
+                    structures: Vec::new(),
                     surface_features: [SurfaceFeature {
                         material: Some("terra:melon".into()),
                         plant: None,
@@ -632,6 +640,7 @@ impl Guest for Terra {
                     }),
                     cave_scale: Some(1.5),
                     crop_fields: Vec::new(),
+                    structures: Vec::new(),
                     surface_features: plants::dry(),
                 },
                 BiomeDef {
@@ -650,6 +659,7 @@ impl Guest for Terra {
                     }),
                     cave_scale: Some(0.0),
                     crop_fields: Vec::new(),
+                    structures: Vec::new(),
                     surface_features: plants::cold(),
                 },
                 BiomeDef {
@@ -664,6 +674,7 @@ impl Guest for Terra {
                     }),
                     cave_scale: None,
                     crop_fields: Vec::new(),
+                    structures: Vec::new(),
                     surface_features: plants::jungle(),
                 },
                 BiomeDef {
@@ -682,6 +693,7 @@ impl Guest for Terra {
                     }),
                     cave_scale: Some(0.5),
                     crop_fields: Vec::new(),
+                    structures: Vec::new(),
                     surface_features: plants::swamp(),
                 },
                 BiomeDef {
@@ -700,6 +712,7 @@ impl Guest for Terra {
                     }),
                     cave_scale: None,
                     crop_fields: Vec::new(),
+                    structures: Vec::new(),
                     surface_features: plants::savanna(),
                 },
             ],
@@ -843,7 +856,10 @@ impl Guest for Terra {
                     },
                     station: "workbench".into(),
                 },
-            ],
+            ]
+            .into_iter()
+            .chain(building::recipes())
+            .collect(),
             plants: Vec::new(),
             marker_kinds: vec![
                 marker("home", MarkerIcon::Home, [224, 177, 90]),
@@ -884,7 +900,10 @@ impl Guest for Terra {
                     kind: VoxelUseKind::Station("workbench".into()),
                     shape: Some("terra:table".into()),
                 },
-            ],
+            ]
+            .into_iter()
+            .chain(building::voxel_uses())
+            .collect(),
             ores: vec![OreDef {
                 material: "terra:iron".into(),
                 min_depth_m: 5.0,

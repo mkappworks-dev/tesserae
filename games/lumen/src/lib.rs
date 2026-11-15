@@ -4,6 +4,7 @@
 
 wit_bindgen::generate!({ path: "../../crates/tesserae-mods/wit/0.3", world: "mod" });
 
+mod building;
 mod food;
 mod plants;
 
@@ -80,6 +81,7 @@ fn biomes() -> Vec<BiomeDef> {
             }),
             cave_scale: None,
             crop_fields: plants::garden_fields(),
+            structures: Vec::new(),
             surface_features: [food::feature()]
                 .into_iter()
                 .chain(plants::garden())
@@ -97,6 +99,7 @@ fn biomes() -> Vec<BiomeDef> {
             }),
             cave_scale: None,
             crop_fields: Vec::new(),
+            structures: Vec::new(),
             surface_features: plants::arid_court(),
         },
         BiomeDef {
@@ -111,6 +114,7 @@ fn biomes() -> Vec<BiomeDef> {
             }),
             cave_scale: None,
             crop_fields: Vec::new(),
+            structures: Vec::new(),
             surface_features: [food::feature()]
                 .into_iter()
                 .chain(plants::frost_court())
@@ -128,6 +132,7 @@ fn biomes() -> Vec<BiomeDef> {
             }),
             cave_scale: None,
             crop_fields: Vec::new(),
+            structures: Vec::new(),
             surface_features: plants::conservatory(),
         },
         BiomeDef {
@@ -142,6 +147,7 @@ fn biomes() -> Vec<BiomeDef> {
             }),
             cave_scale: None,
             crop_fields: Vec::new(),
+            structures: Vec::new(),
             surface_features: plants::lily_pond(),
         },
     ]
@@ -453,9 +459,15 @@ impl Guest for Lumen {
             humidity_size_m: CLIMATE_SIZE_M,
         });
         Declaration {
-            materials: vec![food::material()],
+            materials: [food::material()]
+                .into_iter()
+                .chain(building::materials())
+                .collect(),
             shapes: Vec::new(),
-            appearance: vec![food::appearance()],
+            appearance: [food::appearance()]
+                .into_iter()
+                .chain(building::appearance())
+                .collect(),
             world: Some(world),
             view: None,
             fluids: Vec::new(),
@@ -470,12 +482,12 @@ impl Guest for Lumen {
             material_sounds: Vec::new(),
             soundscapes: Vec::new(),
             cause_sounds: Vec::new(),
-            recipes: Vec::new(),
+            recipes: building::recipes(),
             plants: Vec::new(),
             marker_kinds: Vec::new(),
             death_marker_kind: None,
             templates: Vec::new(),
-            voxel_uses: Vec::new(),
+            voxel_uses: building::voxel_uses(),
             ores: vec![OreDef {
                 material: "crystals:amethyst".into(),
                 min_depth_m: 8.0,

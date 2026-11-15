@@ -757,6 +757,9 @@ interface content {
         /// paths between them and a ditch, over this Biome's ground. Empty
         /// stands none.
         crop-fields: list<crop-field>,
+        /// At most 4 Templates world generation stands in this Biome as
+        /// Structures. Empty stands none.
+        structures: list<biome-structure>,
         /// Optional Soundscape full name, resolved across loaded Mods.
         soundscape: option<string>,
     }
@@ -840,6 +843,21 @@ interface content {
         /// its centre, above 0 and at most `spacing-m`; none is anywhere. A
         /// World without a lake has none.
         near-water-m: option<f32>,
+    }
+
+    /// A Template a Biome stands as a Structure: each square of a lattice
+    /// `spacing-m` on a side holds one with `chance`, turned by quarter turns
+    /// and inset so two never touch. Where, how turned and how high is a pure
+    /// function of the World seed and positions in metres, so a Structure is
+    /// whole across Chunk borders and the same at every Voxel size. Its cells
+    /// overwrite the ground, Air included; `keep` cells leave it.
+    record biome-structure {
+        /// A Template, `<mod id>:<name>`, from any loaded Mod.
+        template: string,
+        /// At least twice the Template's longer side, at most 4096 m.
+        spacing-m: f32,
+        /// Above 0 and at most 1.
+        chance: f32,
     }
 
     /// A low-frequency density field over the ground, in metres, that multiplies

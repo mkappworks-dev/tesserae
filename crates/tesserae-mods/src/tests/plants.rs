@@ -497,6 +497,7 @@ mod surface_features {
             cave_scale: None,
             surface_features: features,
             crop_fields,
+            structures: Vec::new(),
         }];
         let (mut tables, mut registry) = (Tables::builtin(), Registry::builtin());
         let mut behaviours: Vec<Behaviour> =

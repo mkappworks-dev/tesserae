@@ -1492,6 +1492,7 @@ fn biome(name: &str, temperature: f32, humidity: f32) -> content::BiomeDef {
         cave_scale: None,
         surface_features: Vec::new(),
         crop_fields: Vec::new(),
+        structures: Vec::new(),
     }
 }
 

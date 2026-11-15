@@ -1,9 +1,11 @@
 //! A volcanic highland. Basalt chimneys are built on start and erupt on a timer; the lava, the
 //! water it meets and the wood it burns behave by the rules in the Mods this Game depends on
-//! (strata, waters, flora, crops, hearth), so none are declared here; its one Material is its food.
+//! (strata, waters, flora, crops, hearth), so none are declared here;
+//! its own Materials are its food and its building Materials.
 
 wit_bindgen::generate!({ path: "../../crates/tesserae-mods/wit/0.3", world: "mod" });
 
+mod building;
 mod food;
 mod plants;
 
@@ -68,6 +70,7 @@ fn biomes() -> Vec<BiomeDef> {
             }),
             cave_scale: None,
             crop_fields: plants::ash_fields(),
+            structures: Vec::new(),
             surface_features: [food::feature()]
                 .into_iter()
                 .chain(plants::ash_flats())
@@ -85,6 +88,7 @@ fn biomes() -> Vec<BiomeDef> {
             }),
             cave_scale: Some(1.5),
             crop_fields: Vec::new(),
+            structures: Vec::new(),
             surface_features: Vec::new(),
         },
         BiomeDef {
@@ -99,6 +103,7 @@ fn biomes() -> Vec<BiomeDef> {
             }),
             cave_scale: Some(0.5),
             crop_fields: Vec::new(),
+            structures: Vec::new(),
             surface_features: [food::feature()]
                 .into_iter()
                 .chain(plants::highland())
@@ -116,6 +121,7 @@ fn biomes() -> Vec<BiomeDef> {
             }),
             cave_scale: Some(0.5),
             crop_fields: Vec::new(),
+            structures: Vec::new(),
             surface_features: plants::cinder_bog(),
         },
     ]
@@ -346,9 +352,15 @@ impl Guest for Ember {
             humidity_size_m: CLIMATE_SIZE_M,
         });
         Declaration {
-            materials: vec![food::material()],
+            materials: [food::material()]
+                .into_iter()
+                .chain(building::materials())
+                .collect(),
             shapes: Vec::new(),
-            appearance: vec![food::appearance()],
+            appearance: [food::appearance()]
+                .into_iter()
+                .chain(building::appearance())
+                .collect(),
             world: Some(world),
             view: None,
             fluids: Vec::new(),
@@ -363,12 +375,12 @@ impl Guest for Ember {
             material_sounds: Vec::new(),
             soundscapes: Vec::new(),
             cause_sounds: Vec::new(),
-            recipes: Vec::new(),
+            recipes: building::recipes(),
             plants: Vec::new(),
             marker_kinds: Vec::new(),
             death_marker_kind: None,
             templates: Vec::new(),
-            voxel_uses: Vec::new(),
+            voxel_uses: building::voxel_uses(),
             ores: vec![OreDef {
                 material: "waters:obsidian".into(),
                 min_depth_m: 6.0,

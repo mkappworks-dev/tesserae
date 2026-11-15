@@ -163,6 +163,13 @@ pub enum ModError {
         index: usize,
         rule: String,
     },
+    /// A Biome's Structure row names no Template, is one too many, or is out of range.
+    BadStructure {
+        id: String,
+        biome: String,
+        index: usize,
+        rule: String,
+    },
     /// A fluid, reaction or fire row names a Material no loaded Mod registered.
     UnknownName {
         id: String,
@@ -415,6 +422,12 @@ impl fmt::Display for ModError {
                 index,
                 rule,
             } => write!(f, "mod `{id}`: biome `{biome}` crop field {index}: {rule}"),
+            ModError::BadStructure {
+                id,
+                biome,
+                index,
+                rule,
+            } => write!(f, "mod `{id}`: biome `{biome}` structure {index}: {rule}"),
             ModError::TooManyFeatures {
                 id,
                 biome,

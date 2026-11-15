@@ -25,6 +25,7 @@ mod shared_mods;
 mod sounds;
 mod soundscapes;
 mod starters;
+mod structures;
 mod templates;
 
 fn guest(name: &str) -> PathBuf {

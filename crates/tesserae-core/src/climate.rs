@@ -69,6 +69,48 @@ pub const FIELD_PLOT_M: std::ops::RangeInclusive<f32> = 6.0..=24.0;
 /// The mean distance between planted fields, in metres.
 pub const FIELD_SPACING_M: std::ops::RangeInclusive<f32> = 32.0..=256.0;
 
+/// Bounded so a [`Biome`] stays inline and `Copy`.
+pub const MAX_BIOME_STRUCTURES: usize = 4;
+
+/// The widest lattice a Biome's Structures stand on, in metres.
+pub const MAX_STRUCTURE_SPACING_M: f32 = 4096.0;
+
+/// A Template a Biome stands as a Structure: each square lattice cell `spacing_m` on a side holds
+/// one with `chance`.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct BiomeStructure {
+    /// An index into the World's Templates.
+    pub template: u16,
+    pub spacing_m: f32,
+    pub chance: f32,
+}
+
+impl BiomeStructure {
+    const NONE: BiomeStructure = BiomeStructure {
+        template: 0,
+        spacing_m: 0.0,
+        chance: 0.0,
+    };
+
+    /// Checked against the Template it names, since its spacing's floor is that Template's size.
+    pub fn validate(&self, template: &crate::template::Template) -> Result<(), ParamError> {
+        let bad = |rule| ParamError {
+            field: "biomes.structures",
+            rule,
+        };
+        if !(self.chance > 0.0 && self.chance <= 1.0) {
+            return Err(bad("chance must be above 0 and at most 1"));
+        }
+        let [x, _, z] = template.size_m();
+        if !(self.spacing_m >= 2.0 * x.max(z) && self.spacing_m <= MAX_STRUCTURE_SPACING_M) {
+            return Err(bad(
+                "spacing must be at least twice the Template's longer side and at most 4096 m",
+            ));
+        }
+        Ok(())
+    }
+}
+
 /// Each field in `[0, 1)`.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct Climate {
@@ -946,6 +988,8 @@ pub struct SurfaceFeatures {
     features: [SurfaceFeature; MAX_SURFACE_FEATURES],
     crop_len: u8,
     crop_fields: [CropField; MAX_CROP_FIELDS],
+    structure_len: u8,
+    structures: [BiomeStructure; MAX_BIOME_STRUCTURES],
 }
 
 impl Default for SurfaceFeatures {
@@ -960,6 +1004,8 @@ impl SurfaceFeatures {
         features: [SurfaceFeature::cube(AIR, 0.0); MAX_SURFACE_FEATURES],
         crop_len: 0,
         crop_fields: [CropField::NONE; MAX_CROP_FIELDS],
+        structure_len: 0,
+        structures: [BiomeStructure::NONE; MAX_BIOME_STRUCTURES],
     };
 
     pub fn new(features: &[SurfaceFeature]) -> Result<Self, ParamError> {
@@ -1024,8 +1070,26 @@ impl SurfaceFeatures {
         Ok(self)
     }
 
+    /// This table with `structures` as its Structures, each checked against its Template where
+    /// the World's Templates are known.
+    pub fn with_structures(mut self, structures: &[BiomeStructure]) -> Result<Self, ParamError> {
+        if structures.len() > MAX_BIOME_STRUCTURES {
+            return Err(ParamError {
+                field: "biomes.structures",
+                rule: "holds at most 4 Structures",
+            });
+        }
+        self.structures[..structures.len()].copy_from_slice(structures);
+        self.structure_len = structures.len() as u8;
+        Ok(self)
+    }
+
     pub fn as_slice(&self) -> &[SurfaceFeature] {
         &self.features[..self.len as usize]
+    }
+
+    pub fn structures(&self) -> &[BiomeStructure] {
+        &self.structures[..self.structure_len as usize]
     }
 
     pub fn crop_fields(&self) -> &[CropField] {

@@ -17,7 +17,6 @@ const FIXED = {
   lamp: "terra:lamp",
   chest: "terra:chest",
   bench: "terra:workbench",
-  anvil: "terra:iron",
 };
 const ROLE = {
   chest: "Container",
@@ -1094,6 +1093,7 @@ function turned(id, turn) {
   return out;
 }
 function materialOf(t, c) {
+  if (c.m === "anvil") return `${t.game.toLowerCase()}:anvil`;
   if (FIXED[c.m]) return FIXED[c.m];
   const style = STYLES[t.style] || STYLES.wild,
     role =
@@ -1314,11 +1314,7 @@ async function drawStructure() {
     await Promise.all(
       names.map(async (n) => [
         n,
-        TEX[n]
-          ? paintedMaterial(n)
-          : byName.get(n)?.faces.top
-            ? await materialFaces(byName.get(n))
-            : null,
+        byName.get(n)?.faces.top ? await materialFaces(byName.get(n)) : null,
       ]),
     ),
   );
