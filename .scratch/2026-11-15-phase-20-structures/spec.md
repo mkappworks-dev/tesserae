@@ -6,8 +6,8 @@ DESIGN.md roadmap step 20: a Template format, and deterministic placement by
 world generation and by Tools. Depends on step 13 (Biomes, done). The Engine
 adds the mechanism; a Game or Mod supplies Templates.
 
-Vocabulary: **Template**, **Structure**, **Keep** and **Ground layer** are new
-and are in [GLOSSARY.md](../../GLOSSARY.md). The decision record is
+Vocabulary: **Template**, **Structure**, **Keep**, **Ground layer**,
+**Obtainable**, **Settlement** and **Plot** are new and are in [GLOSSARY.md](../../GLOSSARY.md). The decision record is
 [ADR-0028](../../docs/adr/0028-structures-are-declared-templates-placed-as-pure-functions-of-metres.md),
 with an amendment to
 [ADR-0003](../../docs/adr/0003-voxel-size-is-per-world.md). Related decisions:
@@ -55,9 +55,26 @@ aim.
   nothing, as one undo group.
 - Nothing is stored per Structure. A World saved with Structures keeps them as
   Voxels, and a World saved before Structures generates none.
+- Every Material a Template uses is Obtainable in the World: worldgen lays,
+  grows or drops it, or a Recipe makes it from things that are. A building is
+  never the only source of its own Materials.
+- A palette entry may be `ground`, the surface or soil Material of the Biome a
+  Structure stands in, so one house fits grass, sand or snow.
 
-Terra declares three Templates, a cabin, a well and a watchtower with a cellar,
-and the SDK starter declares one, as examples. The Engine ships none.
+A Biome also lists **Settlements**: villages and towns that worldgen lays out
+around a centre. Roads branch from the centre and follow the ground; Plots grow
+beside them, each building turned so its door faces the road; each Plot is cut
+and filled level, blended into the land around it, and a steep road becomes
+stairs and slabs. No two Settlements are alike, and the same seed always gives
+the same one.
+
+Each of the five Games declares fifteen Templates, ten Settlement buildings
+(homes, an inn, a warehouse, a blacksmith, a bakery, a market stall, a barn and
+a well) and five wilderness Structures, and at least one Settlement; the SDK
+starter declares one Template as the documented example. The Engine ships none.
+
+Blueprints, Items that lay a Site which builds itself over time from Items in
+the backpack or a chest, are step 20b, with its own spec.
 
 ## User Stories
 
@@ -162,14 +179,48 @@ Placing with the Tool
 
 Authoring tools and content
 
-45. As a Game author, I want Terra to ship a cabin, a well and a watchtower with
-    a cellar, so that I have working examples.
+45. As a Game author, I want each Game to ship fifteen Templates and a
+    Settlement, so that I have working examples of homes, trades and ruins.
 46. As an SDK user, I want one Template in the starter, so that I see the format
     working.
 47. As a Game author, I want the Engine to ship no Template, so that a World
     with no Game has none.
 48. As a Game author, I want documentation of the format and the Biome row, so
     that I do not read the code.
+
+Obtainable Materials and local ground
+
+49. As a Survival player, I want every Material in a building to be one I can
+    get, so that I can repair or copy what I find.
+50. As a Mod author, I want a refusal naming the Template, the cell and the
+    Material when a Material is not Obtainable, so that I add a Recipe or a
+    dependency.
+51. As a Game author, I want a `ground` palette entry, so that one Template
+    takes the local grass, sand or snow.
+52. As a Mod author, I want a Grown Material or a Door's open form in a Template
+    refused, so that every cell has an Item.
+
+Settlements
+
+53. As a Survival player, I want to find villages and towns, so that the World
+    has places people built together.
+54. As a Game author, I want to declare a Settlement as rules (a radius, a
+    centre, weighted Templates with counts and a path Material), so that every
+    village differs.
+55. As a player, I want roads between a Settlement's buildings, so that it
+    reads as a place.
+56. As a player, I want every house's door to face a road, so that a village
+    looks lived in.
+57. As a player, I want a village on a hillside to sit on levelled Plots
+    blended into the slope, so that it does not float or sink.
+58. As a player, I want steep roads built as steps, so that I can walk them.
+59. As a player, I want no lone cabin at the very edge of a village, so that the
+    two never collide.
+60. As a player, I want a Settlement whole across Chunk borders and the same on
+    reload, so that a village I remember is still there.
+61. As a Game author, I want a Settlement smaller on poor ground rather than
+    missing, and dropped only below its minimum, so that most Biomes still have
+    villages.
 
 ## Implementation Decisions
 
@@ -197,6 +248,16 @@ Template format:
   Templates. All are load errors naming the Template.
 - Both the data path and a component Mod's returned record go through one
   validator.
+- A palette entry may be `ground`, resolved where the Structure stands to the
+  Biome's surface Material at and above the Ground layer and its soil below.
+- Every Material a Template names must be Obtainable in the World it is used
+  in. Obtainable is computed once when a World's Game and Mods are composed:
+  start from what the Biomes lay (ground, soil, ores, surface features), what
+  Plants yield and what breaking any of those drops, then add every Recipe
+  output whose inputs are already Obtainable, until nothing changes. Structures,
+  the Catalogue and Mod Commands are not sources. A breach refuses the World,
+  naming the Template, the palette character and the Material. A Grown Material
+  or a Door's open Material is refused in a Template; a Door is stored closed.
 - Cells carry Material, Shape and Orientation only. Fluids, burning, Container
   contents, entities and loot are out; the format leaves room for them.
 
@@ -217,9 +278,10 @@ Worldgen:
 - A new pass runs after terrain, smoothing and ores and before plants. It exists
   only when a Biome lists a Structure; otherwise nothing runs and a World
   generates what it did, with no new Generator version.
-- A square lattice of the spacing holds a Structure by a salted hash of the seed
-  and the cell. Its position within the cell is inset so two never touch, and up
-  to 36 draws are tried against the rules. The first that passes wins.
+- A square lattice of the spacing holds a Structure by a hash of the seed and
+  the cell, salted per row so rows of one spacing never share cells. Its
+  position within the cell is inset so two never touch, and up to 4 draws are
+  tried against the rules. The first that passes wins.
 - The rules: every sampled footprint column, a metre apart, is in a Biome that
   lists the Template; the ground varies by at most the tolerance; no lake covers
   a sampled column; no cave cuts a sampled column's surface; the Ground layer
@@ -237,9 +299,34 @@ Worldgen:
   tallest and deepest Template any Biome lists; a World with none keeps its
   exact bounds. Spawn clearance counts Structures.
 
+Settlements:
+
+- A Biome gains a `settlements` list of at most 2 rows, each naming a
+  Settlement and a spacing in metres. A Settlement declares a radius of at most
+  64 m, an optional centre Template, up to 24 Plots drawn from a weighted list
+  of Templates each with a minimum and maximum count, an overall minimum, and a
+  path Material and Shape.
+- Settlements have their own salted lattice and run before single Structures.
+  The claim order is Settlements, single Structures, crop fields, trees and
+  scatter, and nothing asks back up the chain. A Settlement's disc keeps single
+  Structures out for a further margin, 16 m by default.
+- A Settlement is accepted when its centre passes the ground rules. Roads
+  branch from the centre along a slope-aware path that avoids water and ground
+  too steep to grade. Plots grow beside roads, each Structure turned so its door
+  faces the road, by weighted draw within the counts; a Plot whose ground fails
+  stays empty, and the Settlement is dropped below its overall minimum.
+- Each Plot is cut and filled level under its footprint and a 2 m apron, by at
+  most 2 m, blended out to the natural ground. Roads are laid in the path
+  Material on the ground, as stairs and slabs where they climb. This edits
+  Voxels in the pass; the heightmap is unchanged, so ADR-0022 holds.
+- The layout is a pure function of the seed and the Settlement's cell, computed
+  once per Settlement per Chunk generation and cheap enough for every Chunk in
+  reach to repeat. Single Structures in the wild keep the strict level rule.
+
 Snapshot:
 
-- A World freezes the Templates its Biomes reference in the generation snapshot,
+- A World freezes the Templates and Settlements its Biomes reference in the
+  generation snapshot,
   by Material and Shape name, in a World-level table the Biome rows index into.
   It is optional on read and absent when empty; an older save loads without it,
   and a Template edited after a World was saved changes nothing in that World.
@@ -265,9 +352,12 @@ Tool placement:
 
 Content:
 
-- Terra declares a cabin, a well and a watchtower with a cellar, from Materials
-  it already has, and lists them in its Biomes at low chance. The SDK starter
-  declares one. Existing trees stay parametric.
+- Each of Terra, Tidewater, Ember, Lumen and Meadow declares fifteen Templates
+  from Materials Obtainable in it: ten Settlement buildings and five wilderness
+  Structures, as the approved mockup shows, and at least one Settlement that
+  uses them; Terra also a town. Stations a building needs (an anvil, a forge, an
+  oven) are declared by the Game with the step 16 machinery. The SDK starter
+  declares one Template. Existing trees stay parametric.
 
 ## Testing Decisions
 
@@ -295,6 +385,18 @@ Worldgen, mirroring the Plants tests:
   three Voxel sizes, interleaved CPU time, with the margin recorded in
   DESIGN.md.
 
+Settlements:
+
+- A Settlement is whole across Chunk borders, the same whichever Chunk is
+  generated first, and equal in metres at all three Voxel sizes.
+- Every Plot's door faces a road, no two Plots overlap, and counts stay within
+  each Template's minimum and maximum.
+- Plots are level within their footprint, the cut and fill never exceeds 2 m,
+  and roads never step more than one Voxel's worth of slab per metre.
+- No single Structure stands within a Settlement's disc and margin.
+- Generating the Chunks of a Settlement costs no more than the agreed margin,
+  in the benchmark.
+
 Server and Declaration:
 
 - The Tool is refused in Survival and spends no Item in Creative.
@@ -303,6 +405,10 @@ Server and Declaration:
 - One undo removes the whole Structure and one redo restores it; a Structure
   fills the journal's budget without evicting the wrong groups.
 - Mods receive the Edit events.
+- A Template using a Material that is not Obtainable, a Grown Material or a
+  Door's open Material refuses the World with the Template, cell and Material
+  named; adding the Recipe that makes it Obtainable lets the World open.
+- A `ground` cell takes grass, sand or snow as the Biome lays.
 - A Template with an unknown Material or Shape, an oversize grid, a spacing
   under its floor, a fifth row or an unknown Template in a Biome is a load error
   that names it, from both the data path and a component.
@@ -319,7 +425,10 @@ the Mod loader's data tests.
 - Capturing a Template from the World, and the structure editor (step 25).
 - Converting trees to Templates; ADR-0027's parametric trees stay.
 - Structures at coarse LOD levels, so a distant landmark is not drawn.
-- Placing in Survival or for an Item cost.
+- Placing in Survival or for an Item cost; Blueprints and Sites are step 20b.
+- Weathering and variants of a Template (mossy, broken), as rules applied while
+  it is placed.
+- Unique landmarks fixed at World creation.
 - A Mod Command that places a Template.
 - Moving or flying bodies built from Templates (step 24).
 

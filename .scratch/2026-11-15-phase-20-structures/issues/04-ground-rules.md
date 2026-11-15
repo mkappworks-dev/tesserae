@@ -11,7 +11,7 @@ Spec: [Phase 20](../spec.md).
 A lattice draw is accepted only where every sampled footprint column, a metre
 apart, is in a Biome that lists the Template, the ground varies by at most the
 Template's tolerance, no lake covers a column and no cave cuts a column's
-surface. Up to 36 draws are tried per lattice cell and the first that passes
+surface. Up to 4 draws are tried per lattice cell and the first that passes
 wins. The Template's Ground layer sits at the footprint's median ground height,
 layers below it overwrite underground, and the foundation Material fills any
 gap beneath the lowest layer down to ground.

@@ -10,10 +10,10 @@ Spec: [Phase 20](../spec.md).
 
 A Biome lists `structures`: a Template, a spacing in metres and a chance, at
 most 4 rows, with spacing no smaller than twice the Template's longer side.
-Worldgen holds a Structure per lattice cell by a salted hash of the seed and
-the cell, with its rotation, inset so two never touch, and writes its cells
-into the Chunks it reaches: every non-Keep cell, Air included, overwrites what
-is there. The pass exists only when a Biome lists a Structure. This ticket
+Worldgen holds a Structure per lattice cell by a hash of the seed and the cell,
+salted per row, with its rotation, inset so two never touch, and writes its
+cells into the Chunks it reaches: every non-Keep cell, Air included, overwrites
+what is there. The pass exists only when a Biome lists a Structure. This ticket
 places on any ground; the ground rules come in ticket 04.
 
 ## Acceptance criteria

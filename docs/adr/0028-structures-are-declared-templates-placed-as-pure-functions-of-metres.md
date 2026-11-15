@@ -23,7 +23,7 @@ World that differs.
 
 A Biome lists `structures` rows outside the 16 surface-feature slots. A square
 lattice of `spacing-m` cells holds a Structure by a hash of the seed and the
-cell, with its rotation, inset so two never touch, and tried up to 36 times
+cell, with its rotation, inset so two never touch, and tried up to 4 times
 against the ground rules, as crop fields are. Each Chunk decides every Structure
 that can reach it and writes only its own Voxels, so one is whole across Chunk
 borders and equal in metres at every size. The pass reads no Chunk, so a
@@ -34,6 +34,27 @@ Biome with no `structures` runs no pass. Trees, scatter and fields skip a
 Structure's footprint, and a Structure never asks about them, which avoids a
 cycle. Coarse levels leave Structures out, as they leave Plants out.
 
+## Every Material is Obtainable
+
+Each Material a Template names must be Obtainable in the World: reachable from
+what the Biomes lay, grow or drop, through Recipes, with Structures and the
+Catalogue not counted. It is checked when a World's Game and Mods are composed,
+and a breach refuses the World, because a building must never be the only source
+of its own Materials. A `ground` palette entry takes the local Biome's surface
+or soil.
+
+## Settlements are rules, laid out along roads
+
+A Settlement is declared as rules (a radius, a centre, weighted Templates with
+counts, a path Material), not drawn as one big Template, so no two are alike and
+each follows the land. Roads branch from the centre on a slope-aware path; Plots
+grow beside them with their doors facing the road, as Veloren lays out its
+towns; pieces joined by connectors were rejected because they need connector
+authoring and still do not fit plots to roads. Settlements claim ground first,
+then single Structures, fields, trees and scatter, and nothing asks back up the
+chain. Plots are cut and filled level in the generation pass, blended into the
+ground around them, without changing the heightmap.
+
 ## A Player's Tool places, and never Uses to apply
 
 The `place` Tool's Use only opens the Template list and answers; its Place verb
@@ -43,6 +64,8 @@ journal's cap counts cells rather than entries.
 
 ## Not decided here
 
-Loot, entities, fluids and mirroring. The format reserves room for them, and
-each needs Server machinery that belongs to a later step. Existing trees stay
-parametric ([ADR-0027](0027-plants-are-declared-kinds-the-server-grows.md)).
+Blueprints and Sites, which build a Structure over time from Items (step 20b),
+and loot, entities, fluids, weathering variants and mirroring. The format
+reserves room for them, and each needs Server machinery that belongs to a later
+step. Existing trees stay parametric
+([ADR-0027](0027-plants-are-declared-kinds-the-server-grows.md)).
