@@ -734,6 +734,22 @@ mod tests {
         assert!(eye(&mut app).x > from.x + 1.0, "moves again");
     }
 
+    #[test]
+    fn dying_far_from_an_unloaded_spawn_still_respawns_there() {
+        let mut app = app(false);
+        app.insert_resource(SpawnPoint::for_tests(Vec3::new(300.5, 8.0, 300.5)));
+        fall_to_death(&mut app);
+        app.world_mut().write_message(RespawnIntent);
+        app.update();
+        let told = &app.world().resource::<Told>().deaths;
+        assert_eq!(told.last(), Some(&DeathChanged(None)), "still dead");
+        let at = eye(&mut app);
+        assert!(
+            (at.with_y(0.0) - Vec3::new(300.5, 0.0, 300.5)).length() < 1e-3,
+            "{at}"
+        );
+    }
+
     /// As a World reopened in Creative after a Survival death holds it.
     #[test]
     fn a_player_dead_in_creative_respawns_with_full_vitals() {

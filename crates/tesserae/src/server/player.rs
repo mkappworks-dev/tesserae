@@ -620,13 +620,22 @@ fn spawn_player(
 }
 /// First standing position over `spawn` whose body is clear, so a Voxel placed
 /// at the spawn lifts the respawn rather than embedding it. `None` when the
-/// column is solid or unloaded up to the cap.
+/// column is solid up to the cap.
+///
+/// A spawn Chunk that is not loaded is not refused: the Server streams around
+/// the Player, so after a death far away it never is, and the respawn is what
+/// moves the stream there. The body stands at the spawn and waits, as unknown
+/// terrain blocks physics, for the ground to arrive.
 fn clear_respawn_eye(
     store: &impl collide::VoxelVolume,
     tables: &tesserae_core::Tables,
     size: f32,
     spawn: Vec3,
 ) -> Option<Vec3> {
+    let cell = spawn.to_array().map(|m| (m / size).floor() as i32);
+    if store.voxel(cell).is_none() {
+        return Some(spawn + Vec3::Y * EYE_HEIGHT);
+    }
     (0..=(RESPAWN_LIFT_MAX_M / RESPAWN_LIFT_STEP_M) as u32).find_map(|step| {
         let eye = spawn + Vec3::Y * (step as f32 * RESPAWN_LIFT_STEP_M + EYE_HEIGHT);
         let feet = eye - Vec3::Y * EYE_HEIGHT;
@@ -1659,12 +1668,36 @@ mod tests {
         }
     }
     #[test]
-    fn a_physics_respawn_with_no_clear_spot_is_refused_and_leaves_the_eye() {
+    fn a_physics_respawn_into_a_solid_loaded_column_is_refused_and_leaves_the_eye() {
+        for size in [1.0, 0.5, 0.25] {
+            let mut app = respawn_app(size, MovementMode::Physics, Some((0.0, 32.0 * size)));
+            let (eye, feedback) = respawn(&mut app);
+            assert_eq!(eye, Vec3::splat(0.5), "{size}: solid column");
+            assert_eq!(feedback, [MovementFeedback::RespawnBlocked], "{size}");
+        }
+    }
+    #[test]
+    fn a_physics_respawn_into_an_unloaded_spawn_stands_at_the_spawn_and_waits_for_ground() {
         for size in [1.0, 0.5, 0.25] {
             let mut app = respawn_app(size, MovementMode::Physics, None);
             let (eye, feedback) = respawn(&mut app);
-            assert_eq!(eye, Vec3::splat(0.5), "{size}: unloaded Chunk");
-            assert_eq!(feedback, [MovementFeedback::RespawnBlocked], "{size}");
+            assert_eq!(
+                eye,
+                Vec3::new(SPAWN_XZ_M, SPAWN_Y_M + EYE_HEIGHT, SPAWN_XZ_M),
+                "{size}"
+            );
+            assert!(feedback.is_empty(), "{size}: {feedback:?}");
+            let mut player = Player::new(eye, MovementMode::Physics);
+            player.intent.jump = true;
+            for _ in 0..64 {
+                player.advance(
+                    app.world().resource::<ChunkStore>(),
+                    &tables(),
+                    size,
+                    1.0 / 64.0,
+                );
+            }
+            assert_eq!(player.eye, eye, "{size}: fell through unknown terrain");
         }
     }
     #[test]
