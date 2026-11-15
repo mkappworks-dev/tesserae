@@ -1110,6 +1110,7 @@ function vegetationPage() {
 <div class="veg-gallery">${TREE_CARDS.map(treeCard).join("")}</div></section>
 ${branchingSection(heading)}
 ${densitySection(heading)}
+${spreadSection(heading)}
 ${berrySection(heading)}
 <section>${heading("VEGETABLES AND CROPS", "Four Stages, the last ripe", "Crossed quads on farmland, as wheat already is. The same Plants are scattered wild in grass, ripe, so a walker finds them.")}
 ${strip("wheat", "Wheat", FARMLAND, "Harvested ripe; regrows to an earlier Stage.")}

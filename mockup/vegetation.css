@@ -171,3 +171,35 @@
 .veg-cell .veg-spacing {
   color: var(--ink);
 }
+.sp-row {
+  margin: 16px 0 24px;
+}
+.sp-row h3 {
+  margin: 0 0 4px;
+}
+.sp-row p {
+  margin: 0 0 8px;
+  max-width: 70ch;
+  font-size: 13px;
+  line-height: 1.45;
+}
+.sp-frames {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+}
+.sp-frame {
+  margin: 0;
+}
+.sp-frame svg {
+  width: 100%;
+  height: auto;
+  border-radius: 4px;
+}
+.sp-frame figcaption {
+  font-size: 12px;
+}
+.sp-frame small {
+  margin-left: 6px;
+  opacity: 0.7;
+}
