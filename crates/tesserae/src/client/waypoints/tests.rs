@@ -51,10 +51,10 @@ fn a_minimap_mark_beyond_the_edge_rests_on_it_dimmed_along_its_bearing() {
     let on = minimap_marks(&marks, [0, 0], 100);
     assert!(on[0].dimmed);
     assert_eq!(on[0].at.y, 50.0, "still level with the Player");
-    assert!(on[0].at.x < 100.0 && on[0].at.x > 90.0, "{:?}", on[0].at);
+    assert_eq!(on[0].at.x, 100.0 - MINIMAP_REST_PX, "{:?}", on[0].at);
     let mut pixels = vec![0u8; 100 * 100 * 4];
     paint_marks(&mut pixels, 100, 100, &on);
-    let ring = pixel(&pixels, 100, on[0].at.x as u32 + 2, on[0].at.y as u32);
+    let ring = pixel(&pixels, 100, on[0].at.x as u32 + 8, on[0].at.y as u32);
     assert!(
         ring[0] > 0 && ring[0] < 200,
         "dimmed, not full colour: {ring:?}"
@@ -75,7 +75,7 @@ fn a_selected_mark_is_ringed_in_white() {
     let on = view_marks(&marks, Vec2::ZERO, 2.0, Vec2::new(100.0, 100.0));
     let mut pixels = vec![0u8; 100 * 100 * 4];
     paint_marks(&mut pixels, 100, 100, &on);
-    assert_eq!(pixel(&pixels, 100, 58, 50), [255, 255, 255]);
+    assert_eq!(pixel(&pixels, 100, 60, 50), [255, 255, 255]);
 }
 
 #[test]

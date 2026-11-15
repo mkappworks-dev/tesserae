@@ -50,6 +50,11 @@ pub(super) enum ButtonStyle<'a> {
     Small {
         kind: Kind,
     },
+    /// [`Small`](Self::Small) with the key that does the same, just after the label.
+    SmallKey {
+        kind: Kind,
+        key: &'a str,
+    },
 }
 
 pub(super) fn button(
@@ -93,6 +98,17 @@ pub(super) fn button(
                 selected,
             },
             false,
+        ),
+        ButtonStyle::SmallKey { kind, key } => cinematic(
+            parent,
+            label,
+            Align::After(key),
+            act,
+            Look {
+                kind,
+                selected: false,
+            },
+            true,
         ),
         ButtonStyle::Small { kind } => cinematic(
             parent,

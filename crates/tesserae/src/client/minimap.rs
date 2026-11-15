@@ -19,8 +19,11 @@ use crate::session::SessionApp;
 
 const TOP_PX: f32 = 14.0;
 const RIGHT_PX: f32 = 18.0;
-const ARROW_PX: f32 = 7.0;
-const ARROW_REACH_PX: f32 = ARROW_PX * 2.0;
+/// The arrow's size on the minimap and on the Map, as the prototype draws it.
+pub(super) const ARROW_PX: f32 = 8.0;
+pub(super) const MAP_ARROW_PX: f32 = 11.0;
+/// How far the dark outline stands out of the arrow, in pixels.
+const OUTLINE_PX: f32 = 1.5;
 const NORTH: Color = Color::srgb_u8(0xe8, 0x70, 0x6a);
 const FOG: [[u8; 4]; 2] = [[20, 26, 22, 255], [15, 20, 17, 255]];
 const ARROW: [u8; 4] = [255, 255, 255, 255];
@@ -74,11 +77,23 @@ pub(super) fn shaded(
     palette: &MapPalette,
 ) -> [u8; 4] {
     let [r, g, b, a] = super::map_cache::sample_colour(sample, palette);
+    lit([r, g, b], light(sample, behind), a)
+}
+
+/// How much brighter or darker a sample is than flat ground: it rises from its north-west
+/// neighbour, and high ground is a little lighter.
+pub(super) fn light(
+    sample: &tesserae_core::map::Sample,
+    behind: Option<tesserae_core::map::Sample>,
+) -> f32 {
     let height = f32::from(sample.height_m);
     let behind = behind.map_or(height, |s| f32::from(s.height_m));
-    let light = (1.0 + (height - behind) * 0.055 + (height - 12.0) * 0.004).clamp(0.62, 1.35);
+    (1.0 + (height - behind) * 0.055 + (height - 12.0) * 0.004).clamp(0.62, 1.35)
+}
+
+pub(super) fn lit([r, g, b]: [u8; 3], light: f32, alpha: u8) -> [u8; 4] {
     let shade = |c: u8| (f32::from(c) * light).round().clamp(0.0, 255.0) as u8;
-    [shade(r), shade(g), shade(b), a]
+    [shade(r), shade(g), shade(b), alpha]
 }
 
 /// Unexplored ground, hatched so it reads as not-yet-seen rather than empty.
@@ -93,9 +108,9 @@ fn inside(point: Vec2, a: Vec2, b: Vec2, c: Vec2) -> bool {
 }
 
 /// Which part of the Player's arrow a pixel offset from the centre falls on,
-/// the arrow turned `bearing_deg` clockwise from straight up.
-pub(super) fn arrow_at(offset: Vec2, bearing_deg: f32) -> Option<[u8; 4]> {
-    if offset.length() > ARROW_REACH_PX {
+/// the arrow of `size` pixels turned `bearing_deg` clockwise from straight up.
+pub(super) fn arrow_at(offset: Vec2, bearing_deg: f32, size: f32) -> Option<[u8; 4]> {
+    if offset.length() > size * 2.0 {
         return None;
     }
     let (sin, cos) = bearing_deg.to_radians().sin_cos();
@@ -104,15 +119,15 @@ pub(super) fn arrow_at(offset: Vec2, bearing_deg: f32) -> Option<[u8; 4]> {
         -offset.x * sin + offset.y * cos,
     );
     let shape = |k: f32| {
-        let tip = Vec2::new(0.0, -1.25) * ARROW_PX * k;
-        let right = Vec2::new(0.85, 1.0) * ARROW_PX * k;
-        let notch = Vec2::new(0.0, 0.45) * ARROW_PX * k;
-        let left = Vec2::new(-0.85, 1.0) * ARROW_PX * k;
+        let tip = Vec2::new(0.0, -1.25) * size * k;
+        let right = Vec2::new(0.85, 1.0) * size * k;
+        let notch = Vec2::new(0.0, 0.45) * size * k;
+        let left = Vec2::new(-0.85, 1.0) * size * k;
         inside(local, tip, right, notch) || inside(local, tip, notch, left)
     };
     if shape(1.0) {
         Some(ARROW)
-    } else if shape(1.25) {
+    } else if shape(1.0 + OUTLINE_PX / size) {
         Some(ARROW_EDGE)
     } else {
         None
@@ -134,7 +149,7 @@ pub(super) fn paint(
         for x in 0..size {
             let offset = Vec2::new(x as f32 + 0.5 - half as f32, y as f32 + 0.5 - half as f32);
             let cell = [centre[0] + x as i32 - half, centre[1] + y as i32 - half];
-            let colour = arrow_at(offset, bearing_deg)
+            let colour = arrow_at(offset, bearing_deg, ARROW_PX)
                 .or_else(|| ground_colour(map, cell, palette))
                 .unwrap_or_else(|| fog(x, y));
             pixels.extend_from_slice(&colour);
@@ -356,6 +371,7 @@ fn spawn(commands: &mut Commands, image: Handle<Image>, size: u32, texts: [&str;
                         ..default()
                     },
                 ));
+                face.spawn(theme::ring(8.0));
                 face.spawn((
                     Pickable::IGNORE,
                     Node {
@@ -364,7 +380,7 @@ fn spawn(commands: &mut Commands, image: Handle<Image>, size: u32, texts: [&str;
                         ..default()
                     },
                     Text::new("N"),
-                    theme::weighted(11.0, theme::SEMIBOLD),
+                    theme::weighted(11.0, 700),
                     TextColor(NORTH),
                     TextShadow {
                         offset: Vec2::new(0.0, 1.0),
@@ -372,9 +388,14 @@ fn spawn(commands: &mut Commands, image: Handle<Image>, size: u32, texts: [&str;
                     },
                 ));
             });
-            for ((line, size, ink), text) in [
-                (Line::Biome, theme::TEXT_CAPTION, theme::HUD_INK),
-                (Line::Position, 11.0, Color::srgb_u8(0xd3, 0xd9, 0xd0)),
+            for ((line, size, weight, ink), text) in [
+                (Line::Biome, theme::TEXT_CAPTION, 700, theme::HUD_INK),
+                (
+                    Line::Position,
+                    11.0,
+                    theme::REGULAR,
+                    Color::srgb_u8(0xd3, 0xd9, 0xd0),
+                ),
             ]
             .into_iter()
             .zip(texts)
@@ -383,7 +404,7 @@ fn spawn(commands: &mut Commands, image: Handle<Image>, size: u32, texts: [&str;
                     line,
                     Pickable::IGNORE,
                     Text::new(text),
-                    theme::weighted(size, theme::SEMIBOLD),
+                    theme::figures(size, weight),
                     TextColor(ink),
                     TextShadow {
                         offset: Vec2::new(0.0, 1.0),

@@ -299,6 +299,11 @@ pub(super) fn plugin(app: &mut App) {
             super::inventory_window::container_in_front(app);
         }
     }
+    // `TESSERAE_SCREENSHOT_MAP` opens the Map window; with it, `_COMPASS` or `_MINIMAP` the
+    // Waypoints are added too, from where the Player has flown.
+    if std::env::var_os("TESSERAE_SCREENSHOT_MAP").is_some() {
+        app.insert_resource(super::map_window::MapWindow::opened());
+    }
     app.insert_resource(super::help::Panels {
         debug: std::env::var_os("TESSERAE_SCREENSHOT_DEBUG").is_some(),
     });
@@ -309,7 +314,16 @@ pub(super) fn plugin(app: &mut App) {
             .before(super::removal::bar),
     );
     app.add_session_systems(PreUpdate, save_preview)
-        .add_session_systems(Update, (hud_fixture, action_fixture, drops_fixture));
+        .add_session_systems(
+            Update,
+            (
+                hud_fixture,
+                action_fixture,
+                drops_fixture,
+                waypoint_fixture,
+                name_field_fixture,
+            ),
+        );
     if let Ok(size) = std::env::var("TESSERAE_SCREENSHOT_TOUCH") {
         app.insert_resource(TouchCapture(match size.as_str() {
             "small" => super::profile::TouchSize::Small,
@@ -427,10 +441,87 @@ fn drops_fixture(
     }
 }
 
+/// `TESSERAE_SCREENSHOT_MAP_FIELD=<text>` focuses the new-Waypoint name field and types the text
+/// into it, as the Player would, so the picture shows the focused field.
+fn name_field_fixture(
+    time: Res<Time<Real>>,
+    capture: Res<Capture>,
+    focus: Option<ResMut<bevy::input_focus::InputFocus>>,
+    mut fields: Query<
+        (Entity, &mut bevy::text::EditableText),
+        With<super::waypoint_panel::NameField>,
+    >,
+    mut sent: Local<bool>,
+) {
+    let (Ok(text), Some(mut focus)) = (std::env::var("TESSERAE_SCREENSHOT_MAP_FIELD"), focus)
+    else {
+        return;
+    };
+    let Ok((field, mut editable)) = fields.single_mut() else {
+        return;
+    };
+    focus.set(field, bevy::input_focus::FocusCause::Pressed);
+    // After the Waypoints are added, which spend a typed name.
+    if capture.before_shutter(capture.elapsed_s(&time), 0.3)
+        && !std::mem::replace(&mut *sent, true)
+        && !text.is_empty()
+    {
+        editable.queue_edit(bevy::text::TextEdit::Insert(text.into()));
+    }
+}
+
+/// Waypoints for a picture of the Map, the Compass or the minimap: one of each kind the Player may
+/// choose, where the Player stood during the flight so the Server holds that ground as explored,
+/// sent as the intents a Player's own clicks would be.
+fn waypoint_fixture(
+    time: Res<Time<Real>>,
+    capture: Res<Capture>,
+    spot: Res<super::minimap::Spot>,
+    marks: Res<super::waypoints::Marks>,
+    mut intents: MessageWriter<crate::server::waypoint::WaypointIntent>,
+    (mut stood, mut last, mut sent): (Local<Vec<Vec2>>, Local<f32>, Local<bool>),
+) {
+    const NAMES: [&str; 5] = ["Home", "Hazel camp", "Iron seam", "Orchard", "Old cairn"];
+    const EVERY_S: f32 = 3.0;
+    let wanted = ["MAP", "COMPASS", "MINIMAP"]
+        .iter()
+        .any(|knob| std::env::var_os(format!("TESSERAE_SCREENSHOT_{knob}")).is_some());
+    let Some((eye, _)) = spot.0 else {
+        return;
+    };
+    let elapsed_s = capture.elapsed_s(&time);
+    if *sent || !wanted || capture.frames.fill_ended_s.is_none() {
+        return;
+    }
+    if elapsed_s - *last >= EVERY_S && !capture.before_shutter(elapsed_s, 2.0) {
+        *last = elapsed_s;
+        stood.push(Vec2::new(eye.x, eye.z));
+    }
+    if !capture.before_shutter(elapsed_s, 2.0) {
+        return;
+    }
+    *sent = true;
+    let step = (stood.len() / NAMES.len()).max(1);
+    for ((name, at), (_, kind)) in NAMES
+        .into_iter()
+        .zip(stood.iter().step_by(step))
+        .zip(marks.choosable())
+    {
+        intents.write(crate::server::waypoint::WaypointIntent::Add {
+            x_m: at.x,
+            z_m: at.y,
+            name: name.into(),
+            kind: kind.name.clone(),
+        });
+    }
+}
+
 /// `TESSERAE_SCREENSHOT_VIEW=third` and `TESSERAE_SCREENSHOT_ZOOM_M` choose the
 /// view for this run only: nothing is written to the user profile.
 fn view_fixture(mut preferences: ResMut<super::profile::Preferences>) {
     use super::view::{View, ZOOM_M};
+    preferences.compass |= std::env::var_os("TESSERAE_SCREENSHOT_COMPASS").is_some();
+    preferences.minimap |= std::env::var_os("TESSERAE_SCREENSHOT_MINIMAP").is_some();
     preferences.view = match std::env::var("TESSERAE_SCREENSHOT_VIEW").as_deref() {
         Ok("third") => View::ThirdPerson,
         Ok("first") | Err(_) => View::FirstPerson,

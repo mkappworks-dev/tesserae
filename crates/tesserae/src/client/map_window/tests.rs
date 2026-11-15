@@ -9,6 +9,16 @@ use crate::server::map::MapTileChanged;
 use crate::server::player::{BodyState, MovementMode, PoseCorrection};
 
 const GRASS: [u8; 4] = [60, 160, 60, 255];
+const VIEW_W: u32 = 640;
+const VIEW_H: u32 = 480;
+
+fn view_half() -> Vec2 {
+    DEFAULT_VIEW / 2.0
+}
+
+fn view() -> UVec2 {
+    UVec2::new(VIEW_W, VIEW_H)
+}
 
 fn app() -> App {
     let mut app = App::new();
@@ -71,6 +81,7 @@ fn app() -> App {
     ));
     app.world_mut()
         .write_message(MaterialPalette(vec![(1, GRASS)]));
+    app.world_mut().resource_mut::<MapWindow>().zoom = 0;
     app
 }
 
@@ -231,6 +242,11 @@ fn zoom_steps_through_two_four_eight_sixteen_metres_a_pixel_and_stops_at_the_end
         seen,
         ["2 m / px", "4 m / px", "8 m / px", "16 m / px", "16 m / px"]
     );
+    assert_eq!(
+        MapWindow::default().metres_per_pixel(),
+        4.0,
+        "a fresh window opens at the prototype's 4 m a pixel"
+    );
     for _ in 0..5 {
         app.world_mut().resource_mut::<MapWindow>().zoom_in();
     }
@@ -312,7 +328,8 @@ fn explored_area_is_the_sample_count_times_four_square_metres() {
     explore(&mut app, [1, 0], None, 3);
     assert_eq!(explored_m2(app.world().resource::<MapCache>()), 32);
     press(&mut app, KeyCode::KeyM);
-    assert_eq!(text_of::<AreaText>(&mut app), "32 m²");
+    assert_eq!(text_of::<AreaText>(&mut app), area_text(32));
+    assert!(area_text(590_000).starts_with("0.59 km² · seen with the ground loaded."));
 }
 
 #[test]
@@ -344,7 +361,16 @@ fn painting_draws_fog_ground_the_arrow_and_averages_when_zoomed_out() {
         [pixels[i], pixels[i + 1], pixels[i + 2], pixels[i + 3]]
     };
     let centre = Vec2::new(60.0, 60.0);
-    let pixels = paint_view(map, palette, centre, 2.0, Some((centre, 0.0)), &[]);
+    let pixels = paint_view(
+        map,
+        palette,
+        &Tints::new(),
+        centre,
+        2.0,
+        view(),
+        Some((centre, 0.0)),
+        &[],
+    );
     let (cx, cy) = (VIEW_W / 2, VIEW_H / 2);
     assert_eq!(at(&pixels, cx, cy), [255, 255, 255, 255], "the arrow");
     assert_eq!(at(&pixels, cx, cy - 100)[3], 255);
@@ -352,7 +378,7 @@ fn painting_draws_fog_ground_the_arrow_and_averages_when_zoomed_out() {
     let ground = at(&pixels, cx - 30, cy - 30);
     assert!(ground[1] > ground[0] && ground[1] > ground[2], "{ground:?}");
 
-    let coarse = paint_view(map, palette, centre, 16.0, None, &[]);
+    let coarse = paint_view(map, palette, &Tints::new(), centre, 16.0, view(), None, &[]);
     assert_eq!(at(&coarse, 0, 0), fog(0, 0), "far from the tile");
     assert_ne!(at(&coarse, cx, cy), fog(cx, cy));
 }
@@ -561,8 +587,11 @@ mod waypoints {
         assert!(!app.world().resource::<Draft>().placing);
         let shown = texts(&mut app);
         assert!(shown.iter().any(|t| t == "Base"), "{shown:?}");
-        assert!(shown.iter().any(|t| t == "20 m \u{b7} S"), "{shown:?}");
-        assert!(shown.iter().any(|t| t == "40 m \u{b7} W"), "{shown:?}");
+        assert!(shown.iter().any(|t| t == "Home \u{b7} 20 m S"), "{shown:?}");
+        assert!(
+            shown.iter().any(|t| t == "Grave \u{b7} 40 m W"),
+            "{shown:?}"
+        );
         let controls: Vec<WpControl> = app
             .world_mut()
             .query::<&WpControl>()
@@ -641,21 +670,112 @@ mod waypoints {
             app.world().resource::<Marks>(),
             Vec2::new(40.0, -10.0),
             2.0,
-            view_size(),
+            DEFAULT_VIEW,
         );
-        let pixels = paint_view(map, palette, Vec2::new(40.0, -10.0), 2.0, None, &marks);
+        let pixels = paint_view(
+            map,
+            palette,
+            &Tints::new(),
+            Vec2::new(40.0, -10.0),
+            2.0,
+            view(),
+            None,
+            &marks,
+        );
         let at = |x: u32, y: u32| {
             let i = ((y * VIEW_W + x) * 4) as usize;
             [pixels[i], pixels[i + 1], pixels[i + 2]]
         };
-        let ring = at(VIEW_W / 2 + 50 + 8, VIEW_H / 2);
+        let ring = at(VIEW_W / 2 + 50 + 11, VIEW_H / 2);
         assert_eq!(ring, [200, 40, 40], "the ring is the kind's colour");
+    }
+
+    #[test]
+    fn the_banner_names_the_typed_name_or_the_next_default() {
+        let mut app = app();
+        declare(&mut app, kinds());
+        opened(&mut app);
+        let banner = |app: &mut App| {
+            texts(app)
+                .into_iter()
+                .find(|t| t.starts_with("Click the map to place"))
+                .unwrap()
+        };
+        assert_eq!(
+            banner(&mut app),
+            "Click the map to place \u{201c}Waypoint 1\u{201d}."
+        );
+        control(&mut app, WpControl::Place);
+        assert!(app.world().resource::<Draft>().placing);
+        name(&mut app, "Camp");
+        app.update();
+        assert_eq!(
+            banner(&mut app),
+            "Click the map to place \u{201c}Camp\u{201d}."
+        );
+        control(&mut app, WpControl::CancelPlace);
+        assert!(!app.world().resource::<Draft>().placing);
+    }
+
+    #[test]
+    fn marks_are_named_in_text_under_the_marks_that_the_view_holds_whole() {
+        let mut app = app();
+        declare(&mut app, kinds());
+        let mut list = Waypoints::default();
+        list.push("Base", "terra:home", 140.0, -10.0, false);
+        list.push("Far", "terra:home", 4000.0, 0.0, false);
+        send_list(&mut app, list);
+        let labels = view_labels(
+            app.world().resource::<Marks>(),
+            Vec2::new(40.0, -10.0),
+            2.0,
+            DEFAULT_VIEW,
+        );
+        assert_eq!(labels.len(), 1);
+        assert_eq!(labels[0].1, "Base");
+        assert_eq!(labels[0].0, view_half() + Vec2::new(50.0, 0.0));
+    }
+
+    #[test]
+    fn focusing_the_name_field_lights_its_frame_and_letting_go_clears_it() {
+        use crate::client::waypoint_panel::NameFrame;
+        use bevy::input_focus::{FocusCause, InputFocus};
+        let mut app = app();
+        declare(&mut app, kinds());
+        opened(&mut app);
+        let field = app
+            .world_mut()
+            .query_filtered::<Entity, With<NameField>>()
+            .single(app.world())
+            .unwrap();
+        let frame = |app: &mut App| {
+            let (border, outline) = app
+                .world_mut()
+                .query_filtered::<(&BorderColor, &Outline), With<NameFrame>>()
+                .single(app.world())
+                .unwrap();
+            (*border, outline.color)
+        };
+        let (rest, ring) = frame(&mut app);
+        assert_eq!(rest, BorderColor::all(theme::field_edge()));
+        assert_eq!(ring, Color::NONE);
+        app.world_mut()
+            .resource_mut::<InputFocus>()
+            .set(field, FocusCause::Pressed);
+        app.update();
+        let (lit, ring) = frame(&mut app);
+        assert_eq!(lit, BorderColor::all(theme::SAGE));
+        assert_eq!(ring, theme::FOCUS);
+        app.world_mut().resource_mut::<InputFocus>().clear();
+        app.update();
+        assert_eq!(frame(&mut app), (rest, Color::NONE));
     }
 }
 
 /// The paint as it was before the tile-local reader: one `Map::sample` lookup per read.
 fn paint_reference(map: &Map, palette: &MapPalette, centre: Vec2, mpp: f32) -> Vec<u8> {
     let half = view_half();
+    let tints = tints_of(map, palette);
     let offsets: &[f32] = if mpp > SAMPLE_M {
         &[-0.25, 0.25]
     } else {
@@ -676,14 +796,29 @@ fn paint_reference(map: &Map, palette: &MapPalette, centre: Vec2, mpp: f32) -> V
                     else {
                         continue;
                     };
-                    let [r, g, b, a] = match map.sample(cell).and_then(|s| s.biome) {
+                    let sample = map.sample(cell).unwrap();
+                    let tint = sample
+                        .biome
+                        .and_then(|b| tints.get(b.index()).copied().flatten());
+                    let [r, g, b, a] = match tint {
                         None => [r, g, b, a],
-                        Some(biome) => {
-                            let t = biome_colour(biome.index());
-                            let mix = |c: u8, t: u8| {
-                                (f32::from(c) * (1.0 - TINT) + f32::from(t) * TINT).round() as u8
-                            };
-                            [mix(r, t[0]), mix(g, t[1]), mix(b, t[2]), a]
+                        Some(t) => {
+                            let own = palette.colour(sample.material);
+                            let distance = (0..3)
+                                .map(|i| (f32::from(own[i]) - f32::from(t[i])).powi(2))
+                                .sum::<f32>()
+                                .sqrt();
+                            let weight = tint_weight(distance);
+                            let behind = map.sample([cell[0] - 1, cell[1] - 1]);
+                            let mixed = [0, 1, 2].map(|i| {
+                                (f32::from(own[i]) * (1.0 - weight) + f32::from(t[i]) * weight)
+                                    .round() as u8
+                            });
+                            crate::client::minimap::lit(
+                                mixed,
+                                crate::client::minimap::light(&sample, behind),
+                                a,
+                            )
                         }
                     };
                     seen += 1;
@@ -725,7 +860,16 @@ fn the_tile_local_paint_matches_a_lookup_per_sample_at_every_zoom() {
     let centre = Vec2::new(-13.0, 7.0);
     for mpp in ZOOMS {
         assert_eq!(
-            paint_view(&map, &palette, centre, mpp, None, &[]),
+            paint_view(
+                &map,
+                &palette,
+                &tints_of(&map, &palette),
+                centre,
+                mpp,
+                view(),
+                None,
+                &[]
+            ),
             paint_reference(&map, &palette, centre, mpp),
             "{mpp} m/px"
         );
@@ -744,8 +888,9 @@ fn the_map_totals_are_not_recomputed_while_its_revision_is_unchanged() {
         },
     );
     let mut stats = MapStats::default();
-    stats.refresh(&map, map.revision());
-    stats.refresh(&map, map.revision());
+    let palette = MapPalette::default();
+    stats.refresh(&map, &palette, map.revision(), false);
+    stats.refresh(&map, &palette, map.revision(), false);
     assert_eq!(
         (stats.computed, stats.seen.clone(), stats.explored_m2),
         (1, vec![1], 4)
@@ -758,7 +903,7 @@ fn the_map_totals_are_not_recomputed_while_its_revision_is_unchanged() {
             biome: None,
         },
     );
-    stats.refresh(&map, map.revision());
+    stats.refresh(&map, &palette, map.revision(), false);
     assert_eq!((stats.computed, stats.explored_m2), (2, 8));
 }
 
@@ -767,17 +912,71 @@ fn a_click_at_the_painted_images_centre_lands_on_the_views_centre() {
     let (top_left, size) = (Vec2::new(100.0, 50.0), Vec2::new(640.0, 480.0));
     let border = (Vec2::splat(2.0), Vec2::splat(2.0));
     let centre = top_left + size / 2.0;
-    let pixel = view_pixel(centre, top_left, size, border).unwrap();
+    let pixel = view_pixel(centre, top_left, size, border, DEFAULT_VIEW).unwrap();
     assert_eq!(pixel, view_half());
     let window = MapWindow::default();
     let here = Vec2::new(30.0, -20.0);
     assert_eq!(window.world_at(here, pixel), here);
     assert_eq!(
-        view_pixel(top_left + Vec2::splat(1.0), top_left, size, border),
+        view_pixel(
+            top_left + Vec2::splat(1.0),
+            top_left,
+            size,
+            border,
+            DEFAULT_VIEW
+        ),
         None
     );
     assert_eq!(
-        view_pixel(top_left + Vec2::splat(2.0), top_left, size, border),
+        view_pixel(
+            top_left + Vec2::splat(2.0),
+            top_left,
+            size,
+            border,
+            DEFAULT_VIEW
+        ),
         Some(Vec2::ZERO)
     );
+}
+
+#[test]
+fn the_painted_image_and_the_pointer_follow_the_views_real_size() {
+    let big = Vec2::new(1000.0, 700.0);
+    let size = big + Vec2::splat(2.0);
+    let border = (Vec2::splat(1.0), Vec2::splat(1.0));
+    let top_left = Vec2::new(16.0, 16.0);
+    let centre = top_left + size / 2.0;
+    assert_eq!(
+        view_pixel(centre, top_left, size, border, big),
+        Some(big / 2.0)
+    );
+    assert_eq!(
+        view_pixel(top_left + Vec2::splat(1.0), top_left, size, border, big),
+        Some(Vec2::ZERO)
+    );
+    let window = MapWindow {
+        view: big,
+        zoom: 0,
+        ..default()
+    };
+    let here = Vec2::new(-30.0, 8.0);
+    assert_eq!(window.world_at(here, big / 2.0), here);
+    assert_eq!(painted_size(big), UVec2::new(1000, 700));
+    assert_eq!(
+        painted_size(Vec2::new(10.0, 10.0)),
+        UVec2::new(200, 200),
+        "a collapsed layout still paints something"
+    );
+    let map = Map::default();
+    let pixels = paint_view(
+        &map,
+        &MapPalette::default(),
+        &Tints::new(),
+        here,
+        2.0,
+        painted_size(big),
+        None,
+        &[],
+    );
+    assert_eq!(pixels.len(), 1000 * 700 * 4);
 }

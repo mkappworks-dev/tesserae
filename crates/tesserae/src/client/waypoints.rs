@@ -16,6 +16,12 @@ const DISC: [u8; 3] = [11, 15, 12];
 const SELECTED_RING: [u8; 3] = [255, 255, 255];
 const DIMMED: f32 = 0.55;
 const ICON_CELLS: usize = 7;
+/// Outer radius of a mark's disc, ring included, at one and at two pixels a bitmap cell.
+const DISC_RADIUS_PX: [f32; 2] = [9.0, 12.0];
+/// How far in from the minimap's edge a mark beyond it rests.
+const MINIMAP_REST_PX: f32 = 11.0;
+const RING_PX: f32 = 2.0;
+const SELECTED_RING_PX: f32 = 3.0;
 
 #[derive(Resource, Default, Debug)]
 pub(super) struct Marks {
@@ -37,6 +43,11 @@ impl Marks {
 
     pub(super) fn kinds(&self) -> &MarkerKinds {
         &self.kinds
+    }
+
+    /// What a blank name becomes when the Server adds the Waypoint.
+    pub(super) fn next_default_name(&self) -> String {
+        self.list.next_default_name()
     }
 
     pub(super) fn selected(&self) -> Option<u32> {
@@ -191,7 +202,7 @@ pub(super) struct Mark {
 
 impl Mark {
     fn radius(&self) -> f32 {
-        ICON_CELLS as f32 * self.scale as f32 / 2.0 + 2.5
+        DISC_RADIUS_PX[usize::from(self.scale > 1)]
     }
 }
 
@@ -212,7 +223,11 @@ pub(super) fn paint_marks(pixels: &mut [u8], width: u32, height: u32, marks: &[M
         } else {
             [mark.colour[0], mark.colour[1], mark.colour[2]]
         };
-        let ring_width = if mark.selected { 2.0 } else { 1.0 };
+        let ring_width = if mark.selected {
+            SELECTED_RING_PX
+        } else {
+            RING_PX
+        };
         let reach = radius.ceil() as i32 + 1;
         let (cx, cy) = (mark.at.x.floor() as i32, mark.at.y.floor() as i32);
         for y in cy - reach..=cy + reach {
@@ -263,10 +278,30 @@ pub(super) fn view_marks(
         .collect()
 }
 
+/// The Waypoints named under their marks on the Map view, at the pixel of each mark; only those the
+/// view holds whole, as `view_marks` does.
+pub(super) fn view_labels(
+    marks: &Marks,
+    centre: Vec2,
+    metres_per_pixel: f32,
+    size: Vec2,
+) -> Vec<(Vec2, String)> {
+    marks
+        .list()
+        .iter()
+        .filter_map(|w| {
+            let at = size / 2.0 + (Vec2::new(w.x_m, w.z_m) - centre) / metres_per_pixel;
+            let pad = Vec2::splat(DISC_RADIUS_PX[1]);
+            (at.cmpge(pad).all() && at.cmple(size - pad).all()).then(|| (at, w.name.clone()))
+        })
+        .collect()
+}
+
 /// Marks for the minimap, whose pixels are Map cells; one beyond the edge rests on it, dimmed.
 pub(super) fn minimap_marks(marks: &Marks, centre_cell: [i32; 2], size: u32) -> Vec<Mark> {
     let half = size as f32 / 2.0;
     let side = Vec2::splat(size as f32);
+    let rest = Vec2::splat(MINIMAP_REST_PX);
     marks
         .list()
         .iter()
@@ -276,8 +311,7 @@ pub(super) fn minimap_marks(marks: &Marks, centre_cell: [i32; 2], size: u32) -> 
                 w.z_m / tesserae_core::map::SAMPLE_M - centre_cell[1] as f32 + half,
             );
             let mark = mark_of(marks, w, at, 1);
-            let pad = Vec2::splat(mark.radius());
-            let rested = at.clamp(pad, side - pad);
+            let rested = at.clamp(rest, side - rest);
             Mark {
                 at: rested,
                 dimmed: rested != at,

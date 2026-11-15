@@ -110,6 +110,11 @@ impl Waypoints {
         self.list.iter().find(|w| w.id == id)
     }
 
+    /// The name a blank one would get if a Waypoint were added now.
+    pub fn next_default_name(&self) -> String {
+        format!("Waypoint {}", self.next_id + 1)
+    }
+
     /// Adds with the next id and returns it. A blank `name` becomes `Waypoint <id>`.
     pub fn push(&mut self, name: &str, kind: &str, x_m: f32, z_m: f32, death: bool) -> u32 {
         self.next_id += 1;
@@ -220,6 +225,7 @@ mod tests {
         assert_eq!((a, b), (1, 2));
         w.push("", "t:home", 0.0, 0.0, false);
         assert_eq!(w.list()[1].name, "Waypoint 3");
+        assert_eq!(w.next_default_name(), "Waypoint 4", "ids are not reused");
     }
 
     #[test]

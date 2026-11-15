@@ -6,13 +6,16 @@ use bevy::input_focus::{InputFocus, tab_navigation::TabIndex};
 use bevy::picking::events::{PointerClick, PointerPress};
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
-use bevy::text::{EditableText, TextEdit};
+use bevy::text::{EditableText, TextEdit, TextLayout};
+use bevy::text::{LetterSpacing, LineHeight};
+use bevy::ui_widgets::Button;
 use bevy::ui_widgets::{Activate, TextInput};
 use tesserae_core::marker::MAX_NAME_CHARS;
 
 use super::actions::Actions;
 use super::buttons::{self, ButtonStyle};
-use super::map_window::{MapView, MapWindow, closed, toggle};
+use super::cinematic::Kind;
+use super::map_window::{MapView, MapWindow, SidePanel, closed, toggle};
 use super::menu_ui as ui;
 use super::minimap::Spot;
 use super::theme;
@@ -20,11 +23,14 @@ use super::waypoints::{Draft, Grew, Marks, from_player, icon_pixels, pick};
 use crate::server::waypoint::WaypointIntent;
 use crate::session::SessionApp;
 
-const LIST_MAX_PX: f32 = 150.0;
 const ROW_STEP_PX: f32 = 40.0;
 const ROW_ICON_SCALE: u32 = 2;
+const ROW_ICON_PX: f32 = 10.0;
 /// How near a click must land to a mark to select it.
 const PICK_REACH_PX: f32 = 12.0;
+const ICON_DISC: Color = Color::srgb_u8(0x0b, 0x0f, 0x0c);
+const KIND_ON: Color = Color::srgb_u8(0x26, 0x33, 0x2a);
+const HEADING_TRACKING_PX: f32 = 0.96;
 
 #[derive(Component, Clone, Copy, PartialEq, Debug)]
 pub(super) enum WpControl {
@@ -34,12 +40,19 @@ pub(super) enum WpControl {
     Kind(usize),
     Here,
     Place,
+    CancelPlace,
 }
 
 #[derive(Component)]
 pub(super) struct NameField;
 #[derive(Component)]
+struct NamePlaceholder;
+#[derive(Component)]
+pub(super) struct NameFrame;
+#[derive(Component)]
 struct ListBox;
+#[derive(Component)]
+struct SelectedBox;
 #[derive(Component)]
 struct KindRow;
 #[derive(Component)]
@@ -47,7 +60,19 @@ struct CountText;
 #[derive(Component)]
 struct HintText;
 #[derive(Component)]
-struct Distance(u32);
+struct BannerBox;
+#[derive(Component)]
+struct BannerText;
+
+/// Which line of a Waypoint a text keeps current as the Player moves.
+#[derive(Clone, Copy, PartialEq)]
+enum Line {
+    Row,
+    Detail,
+}
+
+#[derive(Component)]
+struct Distance(u32, Line);
 
 pub(super) fn plugin(app: &mut App) {
     app.add_observer(activate)
@@ -57,116 +82,282 @@ pub(super) fn plugin(app: &mut App) {
             Update,
             (
                 focus.before(toggle),
-                (rebuild, distances, hint, clear_name, scroll_list).run_if(not(closed)),
+                (
+                    rebuild,
+                    distances,
+                    hint,
+                    clear_name,
+                    placeholder,
+                    name_presentation,
+                    banner_state,
+                    scroll_list,
+                )
+                    .run_if(not(closed)),
             ),
         );
 }
 
-/// Above the Explored section.
-pub(super) fn sections(panel: &mut ChildSpawnerCommands) {
-    panel
-        .spawn(Node {
+/// A panel section; every one after the first is set off by a rule above it.
+pub(super) fn section<'a>(panel: &'a mut ChildSpawnerCommands, first: bool) -> EntityCommands<'a> {
+    panel.spawn((
+        Node {
             flex_direction: FlexDirection::Column,
-            row_gap: Val::Px(6.0),
+            flex_shrink: 0.0,
+            padding: if first {
+                UiRect::ZERO
+            } else {
+                UiRect::top(Val::Px(10.0))
+            },
+            border: if first {
+                UiRect::ZERO
+            } else {
+                UiRect::top(Val::Px(theme::RULE))
+            },
             ..default()
-        })
-        .with_children(|section| {
-            section
-                .spawn(Node {
-                    justify_content: JustifyContent::SpaceBetween,
-                    ..default()
-                })
-                .with_children(|head| {
-                    ui::text(head, "Waypoints", theme::TEXT_HEADING, theme::INK);
-                    head.spawn((
-                        CountText,
-                        Text::new(""),
-                        ui::font(theme::TEXT_SMALL),
-                        TextColor(theme::muted()),
-                        Pickable::IGNORE,
-                    ));
-                });
-            section.spawn((
-                ListBox,
-                ScrollPosition::default(),
-                Node {
-                    flex_direction: FlexDirection::Column,
-                    row_gap: Val::Px(4.0),
-                    max_height: Val::Px(LIST_MAX_PX),
-                    overflow: Overflow::scroll_y(),
-                    ..default()
-                },
+        },
+        BorderColor::all(theme::edge()),
+    ))
+}
+
+/// A section's small spaced capitals, with an optional count at the far end.
+pub(super) fn heading(parent: &mut ChildSpawnerCommands, title: &str, count: bool) {
+    parent
+        .spawn((
+            Pickable::IGNORE,
+            Node {
+                justify_content: JustifyContent::SpaceBetween,
+                margin: UiRect::bottom(Val::Px(8.0)),
+                ..default()
+            },
+        ))
+        .with_children(|head| {
+            head.spawn((
+                Text::new(title.to_uppercase()),
+                theme::weighted(theme::TEXT_EYEBROW, theme::LABEL),
+                LineHeight::Px(14.0),
+                LetterSpacing::Px(HEADING_TRACKING_PX),
+                TextColor(theme::muted()),
+                Pickable::IGNORE,
             ));
+            if count {
+                head.spawn((
+                    CountText,
+                    Text::new(""),
+                    theme::weighted(theme::TEXT_EYEBROW, theme::LABEL),
+                    LineHeight::Px(14.0),
+                    LetterSpacing::Px(HEADING_TRACKING_PX),
+                    TextColor(theme::muted()),
+                    Pickable::IGNORE,
+                ));
+            }
         });
-    panel
-        .spawn(Node {
+}
+
+fn label(parent: &mut ChildSpawnerCommands, value: &str) {
+    parent.spawn((
+        Text::new(value),
+        theme::weighted(theme::TEXT_BODY, theme::LABEL),
+        LineHeight::Px(19.0),
+        TextColor(theme::INK),
+        Pickable::IGNORE,
+    ));
+}
+
+/// The sections above Explored.
+pub(super) fn sections(panel: &mut ChildSpawnerCommands) {
+    section(panel, true).with_children(|section| {
+        heading(section, "Waypoints", true);
+        section.spawn((
+            ListBox,
+            Node {
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(4.0),
+                ..default()
+            },
+        ));
+    });
+    section(panel, false).with_children(|form| {
+        heading(form, "New Waypoint", false);
+        form.spawn(Node {
             flex_direction: FlexDirection::Column,
-            row_gap: Val::Px(6.0),
+            row_gap: Val::Px(10.0),
+            margin: UiRect::top(Val::Px(10.0)),
             ..default()
         })
         .with_children(|form| {
-            ui::text(form, "New Waypoint", theme::TEXT_HEADING, theme::INK);
-            form.spawn((
-                BackgroundColor(theme::FIELD),
-                BorderColor::all(theme::field_edge()),
-                Node {
-                    height: Val::Px(theme::CONTROL_HEIGHT),
-                    border: UiRect::all(Val::Px(theme::RULE)),
-                    border_radius: BorderRadius::all(Val::Px(theme::RADIUS_SMALL)),
-                    padding: UiRect::horizontal(Val::Px(12.0)),
-                    align_items: AlignItems::Center,
-                    ..default()
-                },
-            ))
-            .with_children(|frame| {
-                frame.spawn((
-                    NameField,
-                    TextInput,
-                    EditableText {
-                        max_characters: Some(MAX_NAME_CHARS),
-                        ..EditableText::new("")
-                    },
-                    TabIndex(0),
-                    ui::font(theme::TEXT_BODY),
-                    TextColor(theme::INK),
-                    TextLayout::linebreak(bevy::text::LineBreak::NoWrap),
+            form.spawn(Node {
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(8.0),
+                margin: UiRect::bottom(Val::Px(18.0)),
+                ..default()
+            })
+            .with_children(|field| {
+                label(field, "Name");
+                name_field(field);
+            });
+            form.spawn(Node {
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(6.0),
+                margin: UiRect::bottom(Val::Px(18.0)),
+                ..default()
+            })
+            .with_children(|kinds| {
+                label(kinds, "Marker kind");
+                kinds.spawn((
+                    KindRow,
                     Node {
-                        flex_grow: 1.0,
-                        min_width: Val::Px(0.0),
+                        flex_wrap: FlexWrap::Wrap,
+                        column_gap: Val::Px(6.0),
+                        row_gap: Val::Px(6.0),
                         ..default()
                     },
                 ));
             });
-            form.spawn((
-                KindRow,
-                Node {
-                    flex_wrap: FlexWrap::Wrap,
-                    column_gap: Val::Px(4.0),
-                    row_gap: Val::Px(4.0),
-                    ..default()
-                },
-            ));
             form.spawn(Node {
-                column_gap: Val::Px(8.0),
+                column_gap: Val::Px(10.0),
+                align_items: AlignItems::Center,
                 ..default()
             })
             .with_children(|row| {
-                buttons::button(row, "Here", WpControl::Here, ButtonStyle::Plain);
+                buttons::button(
+                    row,
+                    "Here",
+                    WpControl::Here,
+                    ButtonStyle::Small { kind: Kind::Plain },
+                );
                 buttons::button(
                     row,
                     "Place on map\u{2026}",
                     WpControl::Place,
-                    ButtonStyle::Primary,
+                    ButtonStyle::Small {
+                        kind: Kind::Primary,
+                    },
                 );
             });
             form.spawn((
                 HintText,
+                Node {
+                    display: Display::None,
+                    ..default()
+                },
                 Text::new(""),
                 ui::font(theme::TEXT_SMALL),
                 TextColor(theme::muted()),
                 Pickable::IGNORE,
             ));
         });
+    });
+    section(panel, false).insert((
+        SelectedBox,
+        Node {
+            display: Display::None,
+            flex_direction: FlexDirection::Column,
+            flex_shrink: 0.0,
+            padding: UiRect::top(Val::Px(10.0)),
+            border: UiRect::top(Val::Px(theme::RULE)),
+            ..default()
+        },
+    ));
+}
+
+fn name_field(field: &mut ChildSpawnerCommands) {
+    field
+        .spawn((
+            NameFrame,
+            theme::focus_ring(),
+            BackgroundColor(theme::FIELD),
+            BorderColor::all(theme::field_edge()),
+            Node {
+                height: Val::Px(theme::CONTROL_HEIGHT),
+                border: UiRect::all(Val::Px(theme::RULE)),
+                border_radius: BorderRadius::all(Val::Px(theme::RADIUS_SMALL)),
+                padding: UiRect::horizontal(Val::Px(12.0)),
+                align_items: AlignItems::Center,
+                ..default()
+            },
+        ))
+        .with_children(|frame| {
+            frame.spawn((
+                NameField,
+                TextInput,
+                EditableText {
+                    max_characters: Some(MAX_NAME_CHARS),
+                    ..EditableText::new("")
+                },
+                TabIndex(0),
+                theme::weighted(theme::TEXT_BODY, theme::LABEL),
+                TextColor(theme::INK),
+                bevy::text::TextCursorStyle {
+                    color: theme::SAGE,
+                    selection_color: theme::SAGE.with_alpha(0.3),
+                    ..default()
+                },
+                TextLayout::linebreak(bevy::text::LineBreak::NoWrap),
+                Node {
+                    flex_grow: 1.0,
+                    min_width: Val::Px(0.0),
+                    ..default()
+                },
+            ));
+            frame.spawn((
+                NamePlaceholder,
+                Text::new(""),
+                theme::weighted(theme::TEXT_BODY, theme::LABEL),
+                TextColor(theme::placeholder()),
+                Pickable::IGNORE,
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(12.0),
+                    ..default()
+                },
+            ));
+        });
+}
+
+/// The banner over the Map view while a click is armed to place a Waypoint.
+pub(super) fn banner(view: &mut ChildSpawnerCommands) {
+    view.spawn((
+        BannerBox,
+        Pickable::IGNORE,
+        Node {
+            display: Display::None,
+            position_type: PositionType::Absolute,
+            top: Val::Px(74.0),
+            left: Val::Px(0.0),
+            right: Val::Px(0.0),
+            justify_content: JustifyContent::Center,
+            ..default()
+        },
+    ))
+    .with_children(|wrap| {
+        wrap.spawn((
+            Node {
+                align_items: AlignItems::Center,
+                column_gap: Val::Px(12.0),
+                padding: UiRect::axes(Val::Px(12.0), Val::Px(8.0)),
+                border: UiRect::all(Val::Px(theme::RULE)),
+                border_radius: BorderRadius::all(Val::Px(theme::RADIUS_PANEL)),
+                ..default()
+            },
+            BackgroundColor(theme::panel()),
+            BorderColor::all(theme::SAGE),
+        ))
+        .with_children(|banner| {
+            banner.spawn((
+                BannerText,
+                Text::new(""),
+                ui::font(theme::TEXT_CAPTION),
+                TextColor(theme::INK),
+                Pickable::IGNORE,
+            ));
+            buttons::button(
+                banner,
+                "Cancel",
+                WpControl::CancelPlace,
+                ButtonStyle::Small { kind: Kind::Ghost },
+            );
+        });
+    });
 }
 
 type Fields<'w, 's> = Query<'w, 's, &'static EditableText, With<NameField>>;
@@ -235,6 +426,7 @@ fn activate(
             }
         }
         WpControl::Place => draft.placing = !draft.placing,
+        WpControl::CancelPlace => draft.placing = false,
     }
 }
 
@@ -275,7 +467,7 @@ fn clicked(
         pixel,
         centre,
         window.metres_per_pixel(),
-        super::map_window::view_size(),
+        window.view,
         PICK_REACH_PX,
     )
     .map(|w| w.id);
@@ -319,37 +511,153 @@ fn clear_name(mut grew: ResMut<Grew>, mut fields: Query<&mut EditableText, With<
     }
 }
 
-fn hint(draft: Res<Draft>, marks: Res<Marks>, mut hints: Query<&mut Text, With<HintText>>) {
-    let text = if draft.placing {
-        "Click explored ground on the Map."
-    } else if marks.kinds().kinds.is_empty() {
+fn hint(marks: Res<Marks>, mut hints: Query<(&mut Text, &mut Node), With<HintText>>) {
+    let text = if marks.kinds().kinds.is_empty() {
         "This World declares no Marker kinds."
     } else {
         ""
     };
-    for mut hint in &mut hints {
+    for (mut hint, mut node) in &mut hints {
         if hint.0 != text {
             hint.0 = text.into();
+        }
+        node.display = if text.is_empty() {
+            Display::None
+        } else {
+            Display::Flex
+        };
+    }
+}
+
+/// The name field shows the name a blank one would get until something is typed.
+fn placeholder(
+    marks: Res<Marks>,
+    fields: Query<&EditableText, With<NameField>>,
+    mut placeholders: Query<(&mut Text, &mut Visibility), With<NamePlaceholder>>,
+) {
+    let empty = fields
+        .single()
+        .is_ok_and(|f| f.value().to_string().is_empty());
+    let name = marks.next_default_name();
+    for (mut text, mut visibility) in &mut placeholders {
+        if text.0 != name {
+            text.0.clone_from(&name);
+        }
+        let shown = if empty {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        };
+        visibility.set_if_neq(shown);
+    }
+}
+
+/// The frame takes the leaf edge and the focus ring while the field has the focus; the edge alone
+/// is too near the resting one under stronger contrast.
+fn name_presentation(
+    focus: Option<Res<InputFocus>>,
+    fields: Query<(), With<NameField>>,
+    mut frames: Query<(&mut BorderColor, &mut Outline), With<NameFrame>>,
+) {
+    let on = focus
+        .and_then(|f| f.get())
+        .is_some_and(|e| fields.contains(e));
+    for (mut border, mut outline) in &mut frames {
+        border.set_if_neq(BorderColor::all(if on {
+            theme::SAGE
+        } else {
+            theme::field_edge()
+        }));
+        let ring = if on { theme::FOCUS } else { Color::NONE };
+        if outline.color != ring {
+            outline.color = ring;
         }
     }
 }
 
-fn describe(distance_m: f32, bearing: f32) -> String {
-    format!(
-        "{} m \u{b7} {}",
-        distance_m.round() as i32,
-        super::compass::cardinal(bearing)
-    )
+fn banner_state(
+    draft: Res<Draft>,
+    marks: Res<Marks>,
+    fields: Fields,
+    mut boxes: Query<&mut Node, With<BannerBox>>,
+    mut texts: Query<&mut Text, With<BannerText>>,
+) {
+    let display = if draft.placing {
+        Display::Flex
+    } else {
+        Display::None
+    };
+    for mut node in &mut boxes {
+        node.display = display;
+    }
+    let typed = name_of(&fields);
+    let name = if typed.trim().is_empty() {
+        marks.next_default_name()
+    } else {
+        typed
+    };
+    let now = format!("Click the map to place \u{201c}{name}\u{201d}.");
+    for mut text in &mut texts {
+        if text.0 != now {
+            text.0.clone_from(&now);
+        }
+    }
+}
+
+fn distance_text(distance_m: f32) -> String {
+    if distance_m >= 1000.0 {
+        format!("{:.2} km", distance_m / 1000.0)
+    } else {
+        format!("{} m", distance_m.round() as i32)
+    }
+}
+
+/// `Kind \u{b7} 403 m SW`, or the kind alone while the Player's place is unknown.
+fn describe(kind: &str, from: Option<(f32, f32)>) -> String {
+    match from {
+        Some((metres, bearing)) => format!(
+            "{} \u{b7} {} {}",
+            ui::declared_title(kind),
+            distance_text(metres),
+            super::compass::cardinal(bearing)
+        ),
+        None => ui::declared_title(kind),
+    }
+}
+
+fn signed(n: f32) -> String {
+    let n = n.round() as i32;
+    if n < 0 {
+        format!("\u{2212}{}", n.unsigned_abs())
+    } else {
+        n.to_string()
+    }
+}
+
+/// `X 72 \u{b7} Z 66 \u{b7} bearing 225\u{b0} SW` for the selected Waypoint.
+fn detail(w: &tesserae_core::marker::Waypoint, from: Option<(f32, f32)>) -> String {
+    let place = format!("X {} \u{b7} Z {}", signed(w.x_m), signed(w.z_m));
+    match from {
+        Some((_, bearing)) => format!(
+            "{place} \u{b7} bearing {}\u{b0} {}",
+            bearing.round() as i32 % 360,
+            super::compass::cardinal(bearing)
+        ),
+        None => place,
+    }
 }
 
 fn distances(spot: Res<Spot>, marks: Res<Marks>, mut texts: Query<(&Distance, &mut Text)>) {
     let Some((eye, _)) = spot.0 else {
         return;
     };
-    for (Distance(id), mut text) in &mut texts {
+    for (Distance(id, line), mut text) in &mut texts {
         if let Some(w) = marks.get(*id) {
-            let (metres, bearing) = from_player(w, Vec2::new(eye.x, eye.z));
-            let now = describe(metres, bearing);
+            let from = Some(from_player(w, Vec2::new(eye.x, eye.z)));
+            let now = match line {
+                Line::Row => describe(&w.kind, from),
+                Line::Detail => detail(w, from),
+            };
             if text.0 != now {
                 text.0 = now;
             }
@@ -360,7 +668,7 @@ fn distances(spot: Res<Spot>, marks: Res<Marks>, mut texts: Query<(&Distance, &m
 fn scroll_list(
     actions: Res<Actions>,
     window: Res<MapWindow>,
-    mut lists: Query<&mut ScrollPosition, With<ListBox>>,
+    mut panels: Query<&mut ScrollPosition, With<SidePanel>>,
 ) {
     if window.pointer.is_some() {
         return;
@@ -370,7 +678,7 @@ fn scroll_list(
         (_, true) => ROW_STEP_PX,
         _ => return,
     };
-    for mut scroll in &mut lists {
+    for mut scroll in &mut panels {
         scroll.0.y = (scroll.0.y + step).max(0.0);
     }
 }
@@ -381,6 +689,51 @@ struct Built {
     kind: usize,
 }
 
+type Boxes<'w, 's> = (
+    Query<'w, 's, Entity, With<ListBox>>,
+    Query<'w, 's, Entity, With<KindRow>>,
+    Query<'w, 's, Entity, With<SelectedBox>>,
+);
+
+/// A kind's icon as an image node `side` pixels square.
+fn icon_node(
+    row: &mut ChildSpawnerCommands,
+    images: &mut Assets<Image>,
+    marks: &Marks,
+    kind: &str,
+    scale: u32,
+    side: f32,
+) {
+    let (icon, colour) = marks.look(kind);
+    let (px, pixels) = icon_pixels(icon, colour, scale);
+    let image = images.add(Image::new(
+        Extent3d {
+            width: px,
+            height: px,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D2,
+        pixels,
+        TextureFormat::Rgba8UnormSrgb,
+        RenderAssetUsages::default(),
+    ));
+    row.spawn((
+        Pickable::IGNORE,
+        ImageNode::new(image),
+        Node {
+            width: Val::Px(side),
+            height: Val::Px(side),
+            flex_shrink: 0.0,
+            ..default()
+        },
+    ));
+}
+
+fn colour_of(marks: &Marks, kind: &str) -> Color {
+    let [r, g, b, a] = marks.look(kind).1;
+    Color::srgba_u8(r, g, b, a)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn rebuild(
     mut commands: Commands,
@@ -388,9 +741,8 @@ fn rebuild(
     draft: Res<Draft>,
     spot: Res<Spot>,
     mut images: ResMut<Assets<Image>>,
-    lists: Query<Entity, With<ListBox>>,
+    (lists, kinds, selected_box): Boxes,
     fresh: Query<(), Added<ListBox>>,
-    kinds: Query<Entity, With<KindRow>>,
     mut counts: Query<&mut Text, With<CountText>>,
     mut built: Local<Option<Built>>,
 ) {
@@ -401,7 +753,9 @@ fn rebuild(
     if built.as_ref() == Some(&now) && fresh.is_empty() {
         return;
     }
-    let (Ok(list), Ok(row)) = (lists.single(), kinds.single()) else {
+    let (Ok(list), Ok(row), Ok(detail_box)) =
+        (lists.single(), kinds.single(), selected_box.single())
+    else {
         return;
     };
     let eye = spot.0.map(|(eye, _)| Vec2::new(eye.x, eye.z));
@@ -416,89 +770,104 @@ fn rebuild(
                 ui::text(list, "None yet.", theme::TEXT_SMALL, theme::muted());
             }
             for w in marks.list() {
-                let (icon, colour) = marks.look(&w.kind);
-                let (side, pixels) = icon_pixels(icon, colour, ROW_ICON_SCALE);
-                let image = images.add(Image::new(
-                    Extent3d {
-                        width: side,
-                        height: side,
-                        depth_or_array_layers: 1,
-                    },
-                    TextureDimension::D2,
-                    pixels,
-                    TextureFormat::Rgba8UnormSrgb,
-                    RenderAssetUsages::default(),
-                ));
-                let distance = eye.map_or_else(String::new, |eye| {
-                    let (metres, bearing) = from_player(w, eye);
-                    describe(metres, bearing)
-                });
                 let selected = marks.selected() == Some(w.id);
                 list.spawn((
                     Node {
                         align_items: AlignItems::Center,
-                        column_gap: Val::Px(6.0),
-                        padding: UiRect::all(Val::Px(3.0)),
-                        border_radius: BorderRadius::all(Val::Px(theme::RADIUS_SMALL)),
+                        border: UiRect::all(Val::Px(theme::RULE)),
+                        border_radius: BorderRadius::all(Val::Px(theme::RADIUS_ROW)),
                         ..default()
                     },
-                    BackgroundColor(if selected {
-                        theme::SAGE.with_alpha(0.18)
-                    } else {
-                        Color::NONE
-                    }),
+                    BackgroundColor(if selected { theme::RAISED } else { Color::NONE }),
+                    BorderColor::all(if selected { theme::SAGE } else { Color::NONE }),
                 ))
                 .with_children(|item| {
                     item.spawn((
-                        Pickable::IGNORE,
-                        ImageNode::new(image),
+                        Button,
+                        TabIndex(0),
+                        WpControl::Select(w.id),
                         Node {
-                            width: Val::Px(side as f32),
-                            height: Val::Px(side as f32),
-                            flex_shrink: 0.0,
+                            flex_grow: 1.0,
+                            min_width: Val::Px(0.0),
+                            align_items: AlignItems::Center,
+                            column_gap: Val::Px(10.0),
+                            padding: UiRect::axes(Val::Px(8.0), Val::Px(7.0)),
                             ..default()
                         },
-                    ));
-                    item.spawn(Node {
-                        flex_direction: FlexDirection::Column,
-                        flex_grow: 1.0,
-                        min_width: Val::Px(0.0),
-                        ..default()
-                    })
-                    .with_children(|names| {
-                        buttons::button(
-                            names,
-                            w.name.clone(),
-                            WpControl::Select(w.id),
-                            ButtonStyle::Quiet {
-                                text_px: theme::TEXT_SMALL,
-                            },
-                        );
-                        names.spawn((
-                            Distance(w.id),
-                            Text::new(distance),
-                            ui::font(theme::TEXT_SMALL),
-                            TextColor(theme::muted()),
-                            Pickable::IGNORE,
-                        ));
+                    ))
+                    .with_children(|button| {
+                        button
+                            .spawn((
+                                Pickable::IGNORE,
+                                Node {
+                                    width: Val::Px(26.0),
+                                    height: Val::Px(26.0),
+                                    flex_shrink: 0.0,
+                                    border: UiRect::all(Val::Px(2.0)),
+                                    border_radius: BorderRadius::MAX,
+                                    justify_content: JustifyContent::Center,
+                                    align_items: AlignItems::Center,
+                                    ..default()
+                                },
+                                BackgroundColor(ICON_DISC),
+                                BorderColor::all(colour_of(&marks, &w.kind)),
+                            ))
+                            .with_children(|ring| {
+                                icon_node(
+                                    ring,
+                                    &mut images,
+                                    &marks,
+                                    &w.kind,
+                                    ROW_ICON_SCALE,
+                                    ROW_ICON_PX,
+                                );
+                            });
+                        button
+                            .spawn((
+                                Pickable::IGNORE,
+                                Node {
+                                    flex_direction: FlexDirection::Column,
+                                    min_width: Val::Px(0.0),
+                                    overflow: Overflow::clip(),
+                                    ..default()
+                                },
+                            ))
+                            .with_children(|names| {
+                                names.spawn((
+                                    Text::new(w.name.clone()),
+                                    theme::weighted(theme::TEXT_SMALL, theme::LABEL),
+                                    LineHeight::Px(17.0),
+                                    TextLayout::linebreak(bevy::text::LineBreak::NoWrap),
+                                    TextColor(theme::INK),
+                                    Pickable::IGNORE,
+                                ));
+                                names.spawn((
+                                    Distance(w.id, Line::Row),
+                                    Text::new(describe(
+                                        &w.kind,
+                                        eye.map(|eye| from_player(w, eye)),
+                                    )),
+                                    theme::weighted(theme::TEXT_TAG, theme::REGULAR),
+                                    LineHeight::Px(17.6),
+                                    TextLayout::linebreak(bevy::text::LineBreak::NoWrap),
+                                    TextColor(theme::muted()),
+                                    Pickable::IGNORE,
+                                ));
+                            });
                     });
-                    buttons::button(
-                        item,
-                        "Centre",
-                        WpControl::Centre(w.id),
-                        ButtonStyle::Quiet {
-                            text_px: theme::TEXT_SMALL,
-                        },
-                    );
                     if !w.death {
-                        buttons::button(
-                            item,
-                            "\u{d7}",
+                        item.spawn((
+                            Button,
+                            TabIndex(0),
                             WpControl::Remove(w.id),
-                            ButtonStyle::Quiet {
-                                text_px: theme::TEXT_SMALL,
+                            Node {
+                                padding: UiRect::axes(Val::Px(10.0), Val::Px(8.0)),
+                                ..default()
                             },
-                        );
+                        ))
+                        .with_children(|remove| {
+                            ui::icon(remove, ui::IconKind::Close, theme::muted(), 12.0);
+                        });
                     }
                 });
             }
@@ -508,15 +877,84 @@ fn rebuild(
         .despawn_children()
         .with_children(|row| {
             for (index, kind) in marks.choosable() {
-                buttons::button(
-                    row,
-                    ui::declared_title(&kind.name),
+                let on = draft.kind == index;
+                row.spawn((
+                    Button,
+                    TabIndex(0),
                     WpControl::Kind(index),
-                    ButtonStyle::Tab {
-                        selected: draft.kind == index,
+                    Node {
+                        align_items: AlignItems::Center,
+                        column_gap: Val::Px(6.0),
+                        padding: UiRect::axes(Val::Px(9.0), Val::Px(5.0)),
+                        border: UiRect::all(Val::Px(theme::RULE)),
+                        border_radius: BorderRadius::MAX,
+                        ..default()
                     },
-                );
+                    BackgroundColor(if on { KIND_ON } else { theme::RAISED }),
+                    BorderColor::all(if on { theme::SAGE } else { theme::edge() }),
+                ))
+                .with_children(|pill| {
+                    icon_node(pill, &mut images, &marks, &kind.name, 1, 7.0);
+                    pill.spawn((
+                        Text::new(ui::declared_title(&kind.name)),
+                        theme::weighted(theme::TEXT_EYEBROW, theme::LABEL),
+                        LineHeight::Px(15.0),
+                        TextColor(theme::INK),
+                        Pickable::IGNORE,
+                    ));
+                });
             }
+        });
+    let chosen = marks.selected().and_then(|id| marks.get(id));
+    commands
+        .entity(detail_box)
+        .despawn_children()
+        .insert(Node {
+            display: if chosen.is_some() {
+                Display::Flex
+            } else {
+                Display::None
+            },
+            flex_direction: FlexDirection::Column,
+            flex_shrink: 0.0,
+            padding: UiRect::top(Val::Px(10.0)),
+            border: UiRect::top(Val::Px(theme::RULE)),
+            ..default()
+        })
+        .with_children(|section| {
+            let Some(w) = chosen else {
+                return;
+            };
+            heading(section, &w.name, false);
+            section.spawn((
+                Distance(w.id, Line::Detail),
+                Text::new(detail(w, eye.map(|eye| from_player(w, eye)))),
+                theme::figures(theme::TEXT_EYEBROW, theme::REGULAR),
+                LineHeight::RelativeToFont(theme::LINE_HEIGHT),
+                TextColor(theme::muted()),
+                Pickable::IGNORE,
+                Node {
+                    margin: UiRect::bottom(Val::Px(8.0)),
+                    ..default()
+                },
+            ));
+            let centre = buttons::button(
+                section,
+                "Centre",
+                WpControl::Centre(w.id),
+                ButtonStyle::Small { kind: Kind::Plain },
+            );
+            section.commands().entity(centre).insert(Node {
+                align_self: AlignSelf::FlexStart,
+                min_height: Val::Px(theme::CONTROL_HEIGHT),
+                padding: UiRect::axes(Val::Px(theme::SMALL_PAD_X), Val::Px(theme::SMALL_PAD_Y)),
+                border: UiRect::all(Val::Px(theme::RULE)),
+                border_radius: BorderRadius::all(Val::Px(theme::RADIUS_CONTROL)),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                flex_shrink: 0.0,
+                ..default()
+            });
         });
     *built = Some(now);
 }
