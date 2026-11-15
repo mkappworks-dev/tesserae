@@ -219,7 +219,11 @@ fn stages(first: MaterialId, len: u8) -> SurfacePlantKind {
     for i in 0..len {
         materials[i as usize] = first + i as MaterialId;
     }
-    Kind::Stages { materials, len }
+    Kind::Stages {
+        materials,
+        len,
+        stage_shapes: [None; MAX_SURFACE_STAGES],
+    }
 }
 
 /// Sixteen features as a Terra-like Biome lists them: three kinds of tree, a

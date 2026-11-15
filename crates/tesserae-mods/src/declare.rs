@@ -686,14 +686,20 @@ fn surface_feature(
     let kind = match &plant.kind {
         PlantKind::Crop { stages, .. } => {
             let found: Vec<MaterialId> = stages.iter().map(|s| s.material).collect();
+            let mut stage_shapes = [None; tesserae_core::MAX_SURFACE_STAGES];
+            for (slot, stage) in stage_shapes.iter_mut().zip(stages) {
+                *slot = stage.shape;
+            }
             SurfacePlantKind::Stages {
                 materials: pad(&found),
                 len: found.len() as u8,
+                stage_shapes,
             }
         }
         PlantKind::Spreader { .. } => SurfacePlantKind::Stages {
             materials: pad(&[plant.first]),
             len: 1,
+            stage_shapes: [None; tesserae_core::MAX_SURFACE_STAGES],
         },
         PlantKind::Column {
             max_height_m,

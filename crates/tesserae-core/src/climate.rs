@@ -493,6 +493,8 @@ pub enum SurfacePlantKind {
     Stages {
         materials: [MaterialId; MAX_SURFACE_STAGES],
         len: u8,
+        /// The Shape of each Stage that declares its own, over the Plant's.
+        stage_shapes: [Option<ShapeId>; MAX_SURFACE_STAGES],
     },
     /// A run standing on the ground, or in the lake when `stands_in` names its fluid.
     Column {
@@ -572,7 +574,7 @@ impl SurfacePlant {
     /// Every Material it generates, first one first.
     pub fn materials(&self) -> Vec<MaterialId> {
         match self.kind {
-            SurfacePlantKind::Stages { materials, len } => materials[..len as usize].to_vec(),
+            SurfacePlantKind::Stages { materials, len, .. } => materials[..len as usize].to_vec(),
             SurfacePlantKind::Column {
                 material,
                 stands_in,
@@ -609,7 +611,7 @@ impl SurfacePlant {
         };
         let finite_pos = |v: f32| v.is_finite() && v > 0.0;
         match self.kind {
-            SurfacePlantKind::Stages { materials, len } => {
+            SurfacePlantKind::Stages { materials, len, .. } => {
                 if !(1..=MAX_SURFACE_STAGES as u8).contains(&len)
                     || materials[..len as usize].contains(&AIR)
                 {

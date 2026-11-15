@@ -1536,9 +1536,14 @@ impl Worldgen {
                 };
                 let base = standing.base;
                 match standing.plant.kind {
-                    SurfacePlantKind::Stages { materials, len } if own => {
+                    SurfacePlantKind::Stages {
+                        materials,
+                        len,
+                        stage_shapes,
+                    } if own => {
                         let stage = (standing.vary * f64::from(len)) as usize;
-                        let voxel = Voxel::new(materials[stage], standing.plant.shape, 0);
+                        let shape = stage_shapes[stage].unwrap_or(standing.plant.shape);
+                        let voxel = Voxel::new(materials[stage], shape, 0);
                         put(chunk, base, voxel, None);
                     }
                     SurfacePlantKind::Column {

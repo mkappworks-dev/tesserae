@@ -98,7 +98,11 @@ fn crop_feature(spacing_m: f32) -> SurfaceFeature {
     let mut materials = [AIR; MAX_SURFACE_STAGES];
     materials[..3].copy_from_slice(&CROP);
     plant(
-        SurfacePlantKind::Stages { materials, len: 3 },
+        SurfacePlantKind::Stages {
+            materials,
+            len: 3,
+            stage_shapes: [None; MAX_SURFACE_STAGES],
+        },
         CROP[0],
         spacing_m,
     )
@@ -1276,4 +1280,72 @@ fn a_snapshot_keeps_each_fruit_stages_shape_and_an_older_one_loads_without() {
     let older: tesserae_core::save::SavedFruit =
         serde_json::from_str(r#"{"stages":["t:apple0"],"density":0.1,"shape":"t:apple"}"#).unwrap();
     assert!(older.stage_shapes.is_empty());
+}
+
+fn staged_crop_feature(spacing_m: f32) -> SurfaceFeature {
+    let mut f = crop_feature(spacing_m);
+    let Some(SurfacePlantKind::Stages { stage_shapes, .. }) = f.plant.as_mut().map(|p| &mut p.kind)
+    else {
+        unreachable!()
+    };
+    stage_shapes[..3].copy_from_slice(&[Some(SMALL_FRUIT_SHAPE), None, Some(FRUIT_SHAPE)]);
+    f
+}
+
+#[test]
+fn a_generated_crop_takes_the_shape_of_the_stage_it_is_drawn_at() {
+    let params = flat(&[staged_crop_feature(8.0)]);
+    for size in [1.0, 0.5] {
+        let probe = Probe::new(SEED, size, params);
+        let mut shapes = [HashSet::new(), HashSet::new(), HashSet::new()];
+        for (voxel, _) in probe.changed(64.0, false).values() {
+            if let Some(stage) = CROP.iter().position(|&m| m == voxel.material()) {
+                shapes[stage].insert(voxel.shape());
+            }
+        }
+        let [seed, young, ripe] = shapes;
+        assert_eq!(
+            seed,
+            HashSet::from([SMALL_FRUIT_SHAPE]),
+            "{size} m: stage 0"
+        );
+        assert_eq!(
+            young,
+            HashSet::from([CROSS_SHAPE]),
+            "{size} m: a Stage with none takes the Plant's"
+        );
+        assert_eq!(ripe, HashSet::from([FRUIT_SHAPE]), "{size} m: stage 2");
+    }
+}
+
+#[test]
+fn a_snapshot_keeps_each_crop_stages_shape_and_an_older_one_loads_without() {
+    let params = flat(&[staged_crop_feature(16.0)]);
+    let saved = Generation::capture(params, &mapping()).unwrap();
+    let json = serde_json::to_string(&saved).unwrap();
+    let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+    let form = &value["biomes"][0]["surface_features"][0]["plant"]["form"];
+    assert_eq!(
+        form["stage_shapes"],
+        serde_json::json!(["t:apple_small", null, "t:apple"])
+    );
+    let restored = serde_json::from_str::<Generation>(&json)
+        .unwrap()
+        .restore(&mapping(), 2)
+        .unwrap();
+    assert_eq!(restored.biomes, params.biomes);
+
+    let plain = Generation::capture(flat(&[crop_feature(16.0)]), &mapping()).unwrap();
+    assert!(
+        !serde_json::to_string(&plain)
+            .unwrap()
+            .contains("stage_shapes"),
+        "none saved when no Stage declares one"
+    );
+    let older: tesserae_core::save::SavedPlantKind =
+        serde_json::from_str(r#"{"kind":"stages","materials":["t:wheat0"]}"#).unwrap();
+    assert!(matches!(
+        older,
+        tesserae_core::save::SavedPlantKind::Stages { stage_shapes, .. } if stage_shapes.is_empty()
+    ));
 }

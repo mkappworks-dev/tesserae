@@ -1664,6 +1664,7 @@ fn declares_plants() -> impl FnOnce(&mut crate::server::mods::LoadedMods) {
             feature(SurfacePlantKind::Stages {
                 materials: stages,
                 len: 2,
+                stage_shapes: [None; tesserae_core::MAX_SURFACE_STAGES],
             }),
             feature(SurfacePlantKind::Tree(SurfaceTree {
                 vines: None,

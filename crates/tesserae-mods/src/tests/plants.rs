@@ -642,7 +642,8 @@ mod surface_features {
         let features = biomes.as_slice()[0].surface_features.as_slice();
         let id = |n: &str| id(&registry, n);
         let cross = registry.id_of(NameKind::Shape, "t:cross").unwrap() as u8;
-        let SurfacePlantKind::Stages { materials, len } = features[0].plant.unwrap().kind else {
+        let SurfacePlantKind::Stages { materials, len, .. } = features[0].plant.unwrap().kind
+        else {
             panic!("a crop draws from its Stages");
         };
         assert_eq!(

@@ -629,6 +629,9 @@ pub struct SavedPlant {
 pub enum SavedPlantKind {
     Stages {
         materials: Vec<String>,
+        /// The Shape of each Stage that declares one, by Stage; absent or shorter is none.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        stage_shapes: Vec<Option<String>>,
     },
     Column {
         material: String,
@@ -910,8 +913,20 @@ fn saved_plant(p: &crate::SurfacePlant, mapping: &Mapping) -> Result<SavedPlant,
     Ok(SavedPlant {
         shape: shape_name(p.shape)?,
         form: match p.kind {
-            K::Stages { materials, len } => SavedPlantKind::Stages {
+            K::Stages {
+                materials,
+                len,
+                stage_shapes,
+            } => SavedPlantKind::Stages {
                 materials: names(&materials[..len as usize])?,
+                stage_shapes: if stage_shapes.iter().any(Option::is_some) {
+                    stage_shapes[..len as usize]
+                        .iter()
+                        .map(|s| s.map(&shape_name).transpose().map(Option::flatten))
+                        .collect::<Result<_, _>>()?
+                } else {
+                    Vec::new()
+                },
             },
             K::Column {
                 material,
@@ -990,13 +1005,21 @@ fn restored_plant(p: &SavedPlant, mapping: &Mapping) -> Result<crate::SurfacePla
         .transpose()?
         .unwrap_or(crate::SHAPE_FULL_CUBE);
     let kind = match &p.form {
-        SavedPlantKind::Stages { materials } => {
+        SavedPlantKind::Stages {
+            materials,
+            stage_shapes,
+        } => {
             let found = ids(materials, crate::MAX_SURFACE_STAGES)?;
             let mut stages = [crate::voxel::AIR; crate::MAX_SURFACE_STAGES];
             stages[..found.len()].copy_from_slice(&found);
+            let mut shapes = [None; crate::MAX_SURFACE_STAGES];
+            for (slot, name) in shapes.iter_mut().zip(stage_shapes) {
+                *slot = name.as_ref().map(|n| mapping.shape_id(n)).transpose()?;
+            }
             K::Stages {
                 materials: stages,
                 len: found.len() as u8,
+                stage_shapes: shapes,
             }
         }
         SavedPlantKind::Column {
