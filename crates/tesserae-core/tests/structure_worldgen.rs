@@ -6,8 +6,9 @@ use std::collections::{HashMap, HashSet};
 
 use tesserae_core::template::{Cell, Template, Turn};
 use tesserae_core::{
-    AIR, Biome, BiomeName, BiomeStructure, BiomeTable, CHUNK_SIZE, Chunk, ClimateParams,
-    MaterialId, SurfaceFeatures, Voxel, Worldgen, WorldgenParams,
+    AIR, Biome, BiomeName, BiomeStructure, BiomeTable, CHUNK_SIZE, CaveParams, Chunk,
+    ClimateParams, MaterialId, SmoothingParams, SurfaceFeatures, Voxel, WaterParams, Worldgen,
+    WorldgenParams,
 };
 
 const CELLAR: MaterialId = 240;
@@ -15,6 +16,7 @@ const FLOOR: MaterialId = 241;
 const MARK: MaterialId = 242;
 const WALL: MaterialId = 243;
 const STEP: MaterialId = 244;
+const FOUNDATION: MaterialId = 245;
 const STAIR_SHAPE: u8 = 2;
 const STAIR_FACING: u8 = 2;
 
@@ -25,11 +27,36 @@ const SIZE_I: i32 = CHUNK_SIZE as i32;
 /// 4 m along x, 5 m along z: a cellar, a floor marked at one corner so its turn shows, and walls
 /// with a stair and a doorway. `k` is Keep, `.` Air.
 fn hut() -> Template {
+    hut_level_to(1.0)
+}
+
+fn hut_level_to(tolerance_m: f32) -> Template {
     let layers = [
         ["ccccc", "c..kc", "c...c", "ccccc"],
         ["mffff", "fffff", "fffff", "ffffk"],
         ["wswkw", "w...w", "w...w", "wwwww"],
     ];
+    drawn("t:hut", &layers, 1, None, tolerance_m)
+}
+
+/// 4 m square with no cellar, taking 3 m of rise: a marked floor on the ground and a post at each
+/// corner.
+fn deck(foundation: Option<MaterialId>) -> Template {
+    let layers = [
+        ["mfff", "ffff", "ffff", "ffff"],
+        ["w..w", "....", "....", "w..w"],
+    ];
+    drawn("t:deck", &layers, 0, foundation, 3.0)
+}
+
+/// Layers from the bottom up, each written as rows along x of cells along z.
+fn drawn<const ROWS: usize>(
+    name: &str,
+    layers: &[[&str; ROWS]],
+    ground_layer: usize,
+    foundation: Option<MaterialId>,
+    tolerance_m: f32,
+) -> Template {
     let cell = |c: char| match c {
         'k' => Cell::Keep,
         '.' => Cell::Air,
@@ -44,7 +71,7 @@ fn hut() -> Template {
     let layers = layers
         .iter()
         .map(|rows| {
-            (0..5)
+            (0..rows[0].len())
                 .map(|z| {
                     rows.iter()
                         .map(|row| cell(row.as_bytes()[z] as char))
@@ -53,7 +80,15 @@ fn hut() -> Template {
                 .collect()
         })
         .collect();
-    Template::new("t:hut".to_owned(), 1.0, layers, 1, None, 1.0).unwrap()
+    Template::new(
+        name.to_owned(),
+        1.0,
+        layers,
+        ground_layer,
+        foundation,
+        tolerance_m,
+    )
+    .unwrap()
 }
 
 fn row(spacing_m: f32, chance: f32) -> BiomeStructure {
@@ -65,9 +100,13 @@ fn row(spacing_m: f32, chance: f32) -> BiomeStructure {
 }
 
 fn biome(structures: &[BiomeStructure]) -> Biome {
+    named("t:plain", 0.5, structures)
+}
+
+fn named(name: &str, temperature: f32, structures: &[BiomeStructure]) -> Biome {
     Biome {
-        name: BiomeName::new("t:plain").unwrap(),
-        temperature: 0.5,
+        name: BiomeName::new(name).unwrap(),
+        temperature,
         humidity: 0.5,
         ground: None,
         sky_fog: None,
@@ -76,8 +115,10 @@ fn biome(structures: &[BiomeStructure]) -> Biome {
     }
 }
 
+/// Gentle ground, so most draws stand.
 fn flat(structures: &[BiomeStructure]) -> WorldgenParams {
     WorldgenParams {
+        relief_m: 6.0,
         caves: None,
         smoothing: None,
         climate: ClimateParams {
@@ -92,20 +133,29 @@ fn flat(structures: &[BiomeStructure]) -> WorldgenParams {
 /// A World generated twice, with and without its Structures, read one cell at a time from
 /// whichever Chunk holds it.
 struct Probe {
+    template: Template,
     with: Worldgen,
     bare: Worldgen,
     chunks: RefCell<HashMap<[i32; 3], (Chunk, Chunk)>>,
 }
 
 impl Probe {
-    fn new(size: f32, params: WorldgenParams) -> Self {
-        Self::of(size, params, hut())
+    fn new(size: f32, rows: &[BiomeStructure]) -> Self {
+        Self::of(size, hut(), flat, rows)
     }
 
-    fn of(size: f32, params: WorldgenParams, template: Template) -> Self {
+    /// The World `world` makes with `rows`, against the one it makes with none.
+    fn of(
+        size: f32,
+        template: Template,
+        world: impl Fn(&[BiomeStructure]) -> WorldgenParams,
+        rows: &[BiomeStructure],
+    ) -> Self {
         Probe {
-            with: Worldgen::new(SEED, size, params).with_templates(&[template]),
-            bare: Worldgen::new(SEED, size, flat(&[])),
+            with: Worldgen::new(SEED, size, world(rows))
+                .with_templates(std::slice::from_ref(&template)),
+            bare: Worldgen::new(SEED, size, world(&[])),
+            template,
             chunks: RefCell::default(),
         }
     }
@@ -194,8 +244,7 @@ fn marks(changed: &HashMap<[i32; 3], (Voxel, Voxel)>) -> Vec<[i32; 3]> {
 
 /// What the Structure turned by `turn` with its mark's corner at `mark` holds, cell by cell, by
 /// the Template's own sampling.
-fn expected(size: f32, turn: Turn, mark: [i32; 3]) -> Vec<([i32; 3], Cell)> {
-    let template = hut();
+fn expected(template: &Template, size: f32, turn: Turn, mark: [i32; 3]) -> Vec<([i32; 3], Cell)> {
     let sampled = template.sample(size, turn);
     let [sx, sy, sz] = sampled.size();
     let cells: Vec<_> = (0..sy)
@@ -237,16 +286,23 @@ fn structures(probe: &Probe, size: f32, half_m: f32) -> Vec<Found> {
     let mut found = Vec::new();
     for mark in marks(&changed) {
         let turns: Vec<Turn> = Turn::all()
-            .filter(|&turn| holds(probe, &expected(size, turn, mark)))
+            .filter(|&turn| holds(probe, &expected(&probe.template, size, turn, mark)))
             .collect();
         assert_eq!(
             turns.len(),
             1,
             "{size} m: the Structure at {mark:?} is not whole"
         );
-        let cells = expected(size, turns[0], mark);
+        let cells = expected(&probe.template, size, turns[0], mark);
         owned.extend(cells.iter().map(|c| c.0));
         let corner = [0, 1, 2].map(|a| cells.iter().map(|c| c.0[a]).min().unwrap());
+        let far = [0, 2].map(|a| cells.iter().map(|c| c.0[a]).max().unwrap());
+        owned.extend(changed.iter().filter_map(|(&at, (with, _))| {
+            let under = at[1] < corner[1]
+                && (corner[0]..=far[0]).contains(&at[0])
+                && (corner[2]..=far[1]).contains(&at[2]);
+            (under && Some(with.material()) == probe.template.foundation()).then_some(at)
+        }));
         found.push(Found {
             corner,
             mark,
@@ -272,11 +328,23 @@ fn metres(cells: [i32; 3], size: f32) -> [f32; 3] {
 
 #[test]
 fn a_structure_is_whole_across_chunk_borders_and_equal_in_metres_at_every_voxel_size() {
+    whole_and_equal(flat);
+}
+
+#[test]
+fn over_caves_and_smoothed_ground_a_structure_is_whole_and_equal_at_every_voxel_size() {
+    whole_and_equal(|rows| WorldgenParams {
+        smoothing: Some(SmoothingParams::default()),
+        ..caved(rows)
+    });
+}
+
+fn whole_and_equal(world: impl Fn(&[BiomeStructure]) -> WorldgenParams + Copy) {
     let half_m = 48.0;
     let mut crossings = 0;
     let mut by_size = Vec::new();
     for size in SIZES {
-        let probe = Probe::new(size, flat(&[row(16.0, 0.8)]));
+        let probe = Probe::of(size, hut(), world, &[row(16.0, 0.8)]);
         let found = structures(&probe, size, half_m);
         assert!(
             found.len() > 10,
@@ -320,7 +388,7 @@ fn a_structure_is_whole_across_chunk_borders_and_equal_in_metres_at_every_voxel_
 #[test]
 fn all_four_turns_appear_and_a_turned_footprint_is_the_same_in_metres() {
     let size = 0.5;
-    let probe = Probe::new(size, flat(&[row(16.0, 1.0)]));
+    let probe = Probe::new(size, &[row(16.0, 1.0)]);
     let found = structures(&probe, size, 64.0);
     let turns: HashSet<u8> = found.iter().map(|f| f.turn.quarters()).collect();
     assert_eq!(turns.len(), 4, "turns seen: {turns:?}");
@@ -338,12 +406,12 @@ fn all_four_turns_appear_and_a_turned_footprint_is_the_same_in_metres() {
 #[test]
 fn keep_cells_leave_the_terrain_and_air_cells_carve_it() {
     let size = 1.0;
-    let probe = Probe::new(size, flat(&[row(16.0, 1.0)]));
+    let probe = Probe::new(size, &[row(16.0, 1.0)]);
     let found = structures(&probe, size, 32.0);
     assert!(!found.is_empty());
     let (mut kept_ground, mut carved) = (0, 0);
     for f in found {
-        for (at, cell) in expected(size, f.turn, f.mark) {
+        for (at, cell) in expected(&probe.template, size, f.turn, f.mark) {
             let (with, bare) = probe.at(at);
             match cell {
                 Cell::Keep if !bare.is_air() => {
@@ -390,7 +458,7 @@ fn tower() -> Template {
 #[test]
 fn a_structure_taller_than_the_terrain_band_is_whole_above_it() {
     let size = 0.5;
-    let probe = Probe::of(size, flat(&[row(8.0, 1.0)]), tower());
+    let probe = Probe::of(size, tower(), flat, &[row(8.0, 1.0)]);
     let (_, highest) = probe.with.surface_bounds_m();
     let changed = probe.changed(24.0, false);
     let feet = marks(&changed);
@@ -412,9 +480,9 @@ fn a_structure_taller_than_the_terrain_band_is_whole_above_it() {
 #[test]
 fn two_rows_of_one_spacing_never_stand_structures_that_touch() {
     let size = 1.0;
-    let probe = Probe::new(size, flat(&[row(16.0, 1.0), row(16.0, 1.0)]));
+    let probe = Probe::new(size, &[row(16.0, 1.0), row(16.0, 1.0)]);
     let found = structures(&probe, size, 48.0);
-    let one_row = structures(&Probe::new(size, flat(&[row(16.0, 1.0)])), size, 48.0);
+    let one_row = structures(&Probe::new(size, &[row(16.0, 1.0)]), size, 48.0);
     assert!(found.len() > one_row.len(), "the second row stood nothing");
     let boxes: Vec<_> = found
         .iter()
@@ -486,4 +554,244 @@ fn a_spacing_under_twice_the_longer_side_or_a_chance_outside_one_is_refused() {
 fn a_biome_with_four_structures_sixteen_features_and_two_fields_stays_inline_in_three_kib() {
     let size = std::mem::size_of::<Biome>();
     assert!(size < 3072, "{size} bytes");
+}
+
+/// About half the ground under water.
+fn lake(structures: &[BiomeStructure]) -> WorldgenParams {
+    let params = flat(structures);
+    WorldgenParams {
+        water: Some(WaterParams {
+            level_m: params.sea_level_m + params.relief_m * 0.7,
+            material: tesserae_core::testgen::fixtures().water,
+        }),
+        ..params
+    }
+}
+
+/// Every column under a found Structure, x then z.
+fn columns(probe: &Probe, f: &Found, size: f32) -> Vec<[i32; 2]> {
+    let [sx, _, sz] = probe.template.sample(size, f.turn).size();
+    (f.corner[2]..f.corner[2] + sz)
+        .flat_map(|z| (f.corner[0]..f.corner[0] + sx).map(move |x| [x, z]))
+        .collect()
+}
+
+/// The top Voxel of the bare ground in column `[x, z]`.
+fn top(probe: &Probe, [x, z]: [i32; 2], size: f32) -> i32 {
+    let h = probe
+        .bare
+        .surface_height_m(x as f32 * size, z as f32 * size);
+    (h / size).floor() as i32
+}
+
+fn places(found: &[Found]) -> Vec<([i32; 3], u8)> {
+    let mut places: Vec<_> = found
+        .iter()
+        .map(|f| (f.corner, f.turn.quarters()))
+        .collect();
+    places.sort();
+    places
+}
+
+#[test]
+fn no_structure_stands_in_a_lake() {
+    let size = 1.0;
+    let rows = [row(16.0, 1.0)];
+    let water = tesserae_core::testgen::fixtures().water;
+    let wet = Probe::of(size, hut(), lake, &rows);
+    let found = structures(&wet, size, 64.0);
+    assert!(found.len() > 4, "only {} Structures", found.len());
+    for f in &found {
+        for column in columns(&wet, f, size) {
+            let above = [column[0], top(&wet, column, size) + 1, column[1]];
+            assert_ne!(
+                wet.at(above).1.material(),
+                water,
+                "the Structure at {:?} stands in the lake",
+                f.corner
+            );
+        }
+    }
+    let dry = structures(&Probe::new(size, &rows), size, 64.0);
+    assert_ne!(places(&found), places(&dry), "the lake turned no draw away");
+}
+
+/// A cold Biome listing `structures` beside a warm one listing none.
+fn two_biomes(structures: &[BiomeStructure]) -> WorldgenParams {
+    WorldgenParams {
+        biomes: BiomeTable::new(&[named("t:cold", 0.2, structures), named("t:warm", 0.8, &[])])
+            .unwrap(),
+        ..flat(&[])
+    }
+}
+
+#[test]
+fn a_structure_stands_only_in_a_biome_that_lists_it() {
+    let size = 1.0;
+    let probe = Probe::of(size, hut(), two_biomes, &[row(16.0, 1.0)]);
+    let found = structures(&probe, size, 96.0);
+    assert!(found.len() > 4, "only {} Structures", found.len());
+    let biome = |[x, z]: [i32; 2]| {
+        probe
+            .bare
+            .biome_at(x as f32 * size, z as f32 * size)
+            .map(|b| b.index())
+    };
+    let mut warm = 0;
+    for f in &found {
+        let biomes: HashSet<_> = columns(&probe, f, size).into_iter().map(biome).collect();
+        assert_eq!(
+            biomes,
+            HashSet::from([Some(0)]),
+            "the Structure at {:?} stands outside the cold Biome",
+            f.corner
+        );
+    }
+    for z in (-96..96).step_by(4) {
+        for x in (-96..96).step_by(4) {
+            warm += usize::from(biome([x, z]) == Some(1));
+        }
+    }
+    assert!(warm > 100, "the warm Biome is hardly there: {warm} columns");
+}
+
+/// The default relief: steep hills.
+fn hilly(structures: &[BiomeStructure]) -> WorldgenParams {
+    WorldgenParams {
+        relief_m: tesserae_core::testgen::world_params().relief_m,
+        ..flat(structures)
+    }
+}
+
+#[test]
+fn no_structure_stands_on_ground_steeper_than_its_tolerance() {
+    let size = 1.0;
+    let rows = [row(16.0, 1.0)];
+    let strict = Probe::of(size, hut_level_to(1.0), hilly, &rows);
+    let found = structures(&strict, size, 96.0);
+    assert!(!found.is_empty(), "nothing stood on the hills");
+    for f in &found {
+        let heights: Vec<f32> = columns(&strict, f, size)
+            .into_iter()
+            .map(|[x, z]| {
+                strict
+                    .bare
+                    .surface_height_m(x as f32 * size, z as f32 * size)
+            })
+            .collect();
+        let rise = heights.iter().copied().fold(f32::MIN, f32::max)
+            - heights.iter().copied().fold(f32::MAX, f32::min);
+        assert!(
+            rise <= 1.0,
+            "the Structure at {:?} stands on {rise} m of rise",
+            f.corner
+        );
+    }
+    let lax = structures(
+        &Probe::of(size, hut_level_to(16.0), hilly, &rows),
+        size,
+        96.0,
+    );
+    assert!(
+        lax.len() > found.len(),
+        "a lax tolerance stood {} and a strict one {}",
+        lax.len(),
+        found.len()
+    );
+}
+
+fn caved(structures: &[BiomeStructure]) -> WorldgenParams {
+    WorldgenParams {
+        caves: Some(CaveParams::default()),
+        ..flat(structures)
+    }
+}
+
+#[test]
+fn no_structure_stands_over_a_cave_mouth() {
+    let size = 1.0;
+    let rows = [row(16.0, 1.0)];
+    let probe = Probe::of(size, hut(), caved, &rows);
+    let found = structures(&probe, size, 96.0);
+    assert!(found.len() > 4, "only {} Structures", found.len());
+    for f in &found {
+        for column in columns(&probe, f, size) {
+            let surface = [column[0], top(&probe, column, size), column[1]];
+            assert!(
+                !probe.at(surface).1.is_air(),
+                "the Structure at {:?} stands over a cave mouth at {column:?}",
+                f.corner
+            );
+        }
+    }
+    let solid = structures(&Probe::new(size, &rows), size, 96.0);
+    assert_ne!(
+        places(&found),
+        places(&solid),
+        "the caves turned no draw away"
+    );
+}
+
+#[test]
+fn a_cellar_is_underground_and_the_ground_layer_level_with_the_surface() {
+    for size in SIZES {
+        let probe = Probe::new(size, &[row(16.0, 1.0)]);
+        let found = structures(&probe, size, 48.0);
+        assert!(found.len() > 4, "{size} m: only {} Structures", found.len());
+        let mut cellar = 0;
+        for f in &found {
+            // The columns a metre apart from the corner, which the ground rules ask.
+            let mut tops: Vec<i32> = columns(&probe, f, size)
+                .into_iter()
+                .filter(|c| {
+                    [0, 1].iter().all(|&a| {
+                        ((c[a] - [f.corner[0], f.corner[2]][a]) as f32 * size).fract() == 0.0
+                    })
+                })
+                .map(|c| top(&probe, c, size))
+                .collect();
+            tops.sort();
+            let median = tops[(tops.len() - 1) / 2];
+            assert_eq!(f.mark[1], median, "{size} m: the floor at {:?}", f.mark);
+            for (at, cell) in expected(&probe.template, size, f.turn, f.mark) {
+                if matches!(cell, Cell::Voxel(v) if v.material() == CELLAR) {
+                    let (_, bare) = probe.at(at);
+                    assert!(!bare.is_air(), "{size} m: cellar at {at:?} is above ground");
+                    cellar += 1;
+                }
+            }
+        }
+        assert!(cellar > 0);
+    }
+}
+
+#[test]
+fn a_foundation_fills_the_gap_on_uneven_ground_and_is_absent_without_one() {
+    for size in [1.0, 0.5] {
+        let rows = [row(16.0, 1.0)];
+        let (mut filled, mut open) = (0, 0);
+        for foundation in [Some(FOUNDATION), None] {
+            let probe = Probe::of(size, deck(foundation), hilly, &rows);
+            let found = structures(&probe, size, 96.0);
+            assert!(found.len() > 4, "{size} m: only {} Structures", found.len());
+            for f in &found {
+                for c in columns(&probe, f, size) {
+                    for y in top(&probe, c, size) + 1..f.corner[1] {
+                        let (with, bare) = probe.at([c[0], y, c[1]]);
+                        if foundation.is_some() {
+                            assert_eq!(with, Voxel::cube(FOUNDATION), "{size} m: gap at {c:?}");
+                            filled += 1;
+                        } else {
+                            assert_eq!(with, bare, "{size} m: filled at {c:?}");
+                            open += 1;
+                        }
+                    }
+                }
+            }
+        }
+        assert!(
+            filled > 0 && open > 0,
+            "{size} m: no gap under any Structure"
+        );
+    }
 }

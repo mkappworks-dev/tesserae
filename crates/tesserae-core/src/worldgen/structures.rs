@@ -22,6 +22,8 @@ const STRUCTURE_SALT: u64 = 0x5717_c7e0_0000_0001;
 const ATTEMPTS: u64 = 4;
 /// Kept clear of a lattice cell's border, so Structures in two cells never touch.
 const INSET_M: f32 = 0.5;
+/// How far apart the ground rules ask a footprint's columns.
+const SAMPLE_M: f32 = 1.0;
 
 /// One Biome's row, as generation at this Voxel size reads it.
 #[derive(Clone, Copy, Debug)]
@@ -33,6 +35,7 @@ struct Row {
     sizes: [[i32; 3]; 4],
     /// The lowest Voxel layer of the Ground layer.
     ground: i32,
+    level_tolerance_m: f32,
 }
 
 /// Built only when some Biome lists a Structure whose Template the World has, so a World without
@@ -42,6 +45,8 @@ pub(super) struct StructurePass {
     templates: Arc<[Template]>,
     /// In claim order.
     rows: Vec<Row>,
+    /// By Biome, a bit for each Template it lists; a World holds at most 64.
+    listed: Vec<u64>,
     /// The most Voxels a Structure reaches above and below the ground's top Voxel.
     above: i32,
     below: i32,
@@ -57,11 +62,13 @@ impl StructurePass {
             return None;
         }
         let mut rows = Vec::new();
+        let mut listed = vec![0; params.biomes.as_slice().len()];
         for (b, biome) in params.biomes.as_slice().iter().enumerate() {
             for (row, &entry) in biome.surface_features.structures().iter().enumerate() {
                 let Some(template) = templates.get(usize::from(entry.template)) else {
                     continue;
                 };
+                listed[b] |= 1 << entry.template;
                 let sampled = template.sample(voxel_size, Turn::NONE);
                 rows.push(Row {
                     biome: BiomeId::new(b as u8),
@@ -69,6 +76,7 @@ impl StructurePass {
                     entry,
                     sizes: [0, 1, 2, 3].map(|q| template.sample(voxel_size, Turn::new(q)).size()),
                     ground: sampled.ground(),
+                    level_tolerance_m: template.level_tolerance_m(),
                 });
             }
         }
@@ -80,6 +88,7 @@ impl StructurePass {
         Some(StructurePass {
             templates: templates.into(),
             rows,
+            listed,
             above,
             below,
         })
@@ -163,20 +172,69 @@ impl Worldgen {
     }
 
     /// Whether the ground under a drawn Structure takes it, and how high it then stands: its
-    /// Ground layer on the top Voxel of the ground under its centre, if that column is in the row's
-    /// Biome. The rules of where a Structure may stand belong here alone.
+    /// Ground layer on the top Voxel of the footprint's median ground. The rules of where a
+    /// Structure may stand belong here alone, and ask only metres, so every Voxel size and every
+    /// Chunk decides alike.
     fn structure_accepts(&self, row: &Row, mut s: Structure) -> Option<Structure> {
-        let centre = |a: usize| {
-            let slot = [0, 2][a];
-            self.global_m(s.min[slot]) + s.size[slot] as f32 * self.voxel_size / 2.0
-        };
-        let (x_m, z_m) = (centre(0), centre(1));
-        if self.biome_at(x_m, z_m) != Some(row.biome) {
+        let listed = &self.structures.as_ref()?.listed;
+        let mut columns = Vec::new();
+        let (mut lowest_m, mut highest_m) = (f32::MAX, f32::MIN);
+        for gz in self.sampled(&s, 2) {
+            for gx in self.sampled(&s, 0) {
+                let (x_m, z_m) = (self.global_m(gx), self.global_m(gz));
+                let biome = self.biome_at(x_m, z_m)?;
+                if listed[biome.index()] & 1 << row.entry.template == 0 {
+                    return None;
+                }
+                let height_m = self.surface_height_m(x_m, z_m);
+                // Below the level some Voxel size floods the column, if not this one.
+                if self.water.is_some_and(|w| height_m < w.level_m) {
+                    return None;
+                }
+                (lowest_m, highest_m) = (lowest_m.min(height_m), highest_m.max(height_m));
+                if highest_m - lowest_m > row.level_tolerance_m {
+                    return None;
+                }
+                columns.push([x_m, z_m, height_m]);
+            }
+        }
+        // Last, as the dearest ask.
+        if columns
+            .iter()
+            .any(|&[x_m, z_m, height_m]| self.cave_may_cut(x_m, z_m, height_m))
+        {
             return None;
         }
-        let top = top_index(self.surface_height_m(x_m, z_m), 0.0, self.voxel_size);
-        s.min[1] = top - row.ground;
+        let mut heights: Vec<f32> = columns.iter().map(|c| c[2]).collect();
+        heights.sort_by(f32::total_cmp);
+        let median_m = heights[(heights.len() - 1) / 2];
+        s.min[1] = top_index(median_m, 0.0, self.voxel_size) - row.ground;
         Some(s)
+    }
+
+    /// Whether a cave may cut the surface of the column at `(x_m, z_m)`. Every Voxel size up to
+    /// [`SAMPLE_M`] has its surface Voxel's corner, where caves are asked, in the metre under the
+    /// surface, and `false` is a proof over that metre, so it holds at each of them.
+    fn cave_may_cut(&self, x_m: f32, z_m: f32, height_m: f32) -> bool {
+        self.caves.as_ref().is_some_and(|caves| {
+            let depth_m = self.voxel_size.max(SAMPLE_M);
+            caves.may_carve(
+                [x_m, height_m - depth_m, z_m],
+                [x_m, height_m, z_m],
+                self.cave_scale_at(x_m, z_m),
+            )
+        })
+    }
+
+    /// The columns of a footprint's `slot` axis the ground rules ask: a metre apart from its
+    /// corner, which is on whole metres, so the same metre points at every Voxel size.
+    fn sampled(&self, s: &Structure, slot: usize) -> Vec<i32> {
+        let side_m = s.size[slot] as f32 * self.voxel_size;
+        (0..)
+            .map(|k| k as f32 * SAMPLE_M)
+            .take_while(|&k_m| k_m < side_m)
+            .map(|k_m| s.min[slot] + ((k_m / self.voxel_size).round() as i32).min(s.size[slot] - 1))
+            .collect()
     }
 
     /// The Structures of one row touching columns `region`, each held cell standing at the first
@@ -241,7 +299,8 @@ impl Worldgen {
     }
 
     /// Writes every Structure's cells that fall in the Chunk at `coord`: a Keep cell is left,
-    /// anything else, Air included, overwrites what is there.
+    /// anything else, Air included, overwrites what is there. Under a Voxel in its lowest layer,
+    /// the foundation Material fills down to the ground.
     pub(super) fn stand_structures(&self, chunk: &mut Chunk, coord: [i32; 3]) {
         let Some(pass) = &self.structures else {
             return;
@@ -252,11 +311,15 @@ impl Worldgen {
         for s in self.structures_near(region) {
             let low = [0, 1, 2].map(|a| s.min[a].max(origin[a]));
             let high = [0, 1, 2].map(|a| (s.min[a] + s.size[a]).min(origin[a] + size));
-            if (0..3).any(|a| low[a] >= high[a]) {
+            if low[0] >= high[0] || low[2] >= high[2] {
                 continue;
             }
             let template = &pass.templates[usize::from(pass.rows[s.row].entry.template)];
             let sampled = template.sample(self.voxel_size, s.turn);
+            let mut set = |[x, y, z]: [i32; 3], voxel| {
+                let [lx, ly, lz] = [x, y, z].map(|g| g.rem_euclid(size) as usize);
+                chunk.set(lx, ly, lz, voxel);
+            };
             for y in low[1]..high[1] {
                 for z in low[2]..high[2] {
                     for x in low[0]..high[0] {
@@ -265,8 +328,29 @@ impl Worldgen {
                             Cell::Air => Voxel::AIR,
                             Cell::Voxel(v) => v,
                         };
-                        let [lx, ly, lz] = [x, y, z].map(|g| g.rem_euclid(size) as usize);
-                        chunk.set(lx, ly, lz, voxel);
+                        set([x, y, z], voxel);
+                    }
+                }
+            }
+            let Some(foundation) = template.foundation() else {
+                continue;
+            };
+            if origin[1] >= s.min[1] {
+                continue;
+            }
+            for z in low[2]..high[2] {
+                for x in low[0]..high[0] {
+                    if !matches!(
+                        sampled.cell([x - s.min[0], 0, z - s.min[2]]),
+                        Cell::Voxel(_)
+                    ) {
+                        continue;
+                    }
+                    let height_m = self.surface_height_m(self.global_m(x), self.global_m(z));
+                    let ground = top_index(height_m, 0.0, self.voxel_size);
+                    let from = (ground + 1).max(origin[1]);
+                    for y in from..s.min[1].min(origin[1] + size) {
+                        set([x, y, z], Voxel::cube(foundation));
                     }
                 }
             }
