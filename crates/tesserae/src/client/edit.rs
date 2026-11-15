@@ -805,6 +805,7 @@ fn hints(bindings: &super::actions::Bindings, labels: &super::actions::Labels) -
         (Shape, "Shape"),
         (PlacementGhost, "placement ghost"),
         (Compass, "compass"),
+        (Minimap, "minimap"),
         (Menu, "menu"),
         (Forward, "forward"),
         (Backward, "backward"),

@@ -495,6 +495,27 @@ fn the_compass_is_off_by_default_and_the_display_setting_round_trips() {
     std::fs::remove_file(path).unwrap();
 }
 #[test]
+fn the_minimap_is_off_and_medium_by_default_and_both_settings_round_trip() {
+    use super::super::minimap::MinimapSize;
+    let mut app = app();
+    let p = app.world().resource::<Preferences>().clone();
+    assert!(!p.minimap);
+    assert_eq!(p.minimap_size, MinimapSize::Medium);
+    activate_operation(
+        &mut app,
+        Operation::Navigate(super::super::menu_ui::Tab::Display),
+    );
+    activate_operation(&mut app, Operation::Minimap);
+    activate_operation(&mut app, Operation::MinimapSize(MinimapSize::Large));
+    assert!(!app.world().resource::<Preferences>().minimap);
+    activate_operation(&mut app, Operation::Apply);
+    let path = app.world().resource::<Store>().path.clone();
+    let saved = Store::load(path.clone()).2;
+    assert!(saved.minimap);
+    assert_eq!(saved.minimap_size, MinimapSize::Large);
+    std::fs::remove_file(path).unwrap();
+}
+#[test]
 fn draft_apply_cancel_and_unsaved_exit_are_distinct() {
     let mut app = app();
     activate_operation(

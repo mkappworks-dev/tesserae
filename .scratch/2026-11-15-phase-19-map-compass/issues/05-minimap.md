@@ -1,6 +1,6 @@
 # 05: The minimap
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 02, 04
 
@@ -22,8 +22,8 @@ Medium. Hidden under covering windows and while dead. Waypoints come later
 
 ## Acceptance criteria
 
-- [ ] A Player who walks sees the ground they cross appear on the minimap and nothing they have not seen.
-- [ ] Off by default; the setting, the size choice and the `O` key work and persist; an old profile loads as off and Medium.
-- [ ] The Biome name and position follow the Player; hidden under covering windows and while dead.
-- [ ] The shared test that no two default bindings collide still passes with `O`.
-- [ ] Client tests inject Server tile messages into a minimal app and assert on the UI; fmt, clippy and tests pass.
+- [x] A Player who walks sees the ground they cross appear on the minimap and nothing they have not seen.
+- [x] Off by default; the setting, the size choice and the `O` key work and persist; an old profile loads as off and Medium.
+- [x] The Biome name and position follow the Player; hidden under covering windows and while dead.
+- [x] The shared test that no two default bindings collide still passes with `O`.
+- [ ] Client tests inject Server tile messages into a minimal app and assert on the UI; fmt, clippy and tests pass. (Tests pass for this ticket's filters; clippy and the full suite run at the end of the phase.)

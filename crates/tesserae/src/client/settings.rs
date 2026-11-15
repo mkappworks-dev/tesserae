@@ -116,6 +116,8 @@ pub(super) enum Operation {
     Repeat,
     Ghost,
     Compass,
+    Minimap,
+    MinimapSize(super::minimap::MinimapSize),
     Invert,
     PadInvert,
     PadCrouch(bool),

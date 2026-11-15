@@ -25,6 +25,7 @@ pub(in crate::client) fn action_name(action: Action) -> &'static str {
         Place => "Place / ignite",
         PlacementGhost => "Toggle placement ghost",
         Compass => "Toggle compass",
+        Minimap => "Toggle minimap",
         Sample => "Sample",
         EmptyHand => "Empty hand",
         Shape => "Next Shape",
@@ -490,6 +491,29 @@ pub(super) fn display(list: &mut ChildSpawnerCommands, p: &Preferences) {
             "A strip along the top showing your heading.",
             |row| switch(row, p.compass, Operation::Compass),
         );
+        setting_row(
+            card,
+            "Minimap",
+            "A small map in the corner, north up, centred on you.",
+            |row| switch(row, p.minimap, Operation::Minimap),
+        );
+        setting_row(
+            card,
+            "Minimap size",
+            "Shown only while the minimap is on.",
+            |row| {
+                segment(row, |buttons| {
+                    for size in crate::client::minimap::MinimapSize::ALL {
+                        option(
+                            buttons,
+                            size.label(),
+                            Operation::MinimapSize(size),
+                            p.minimap_size == size,
+                        );
+                    }
+                })
+            },
+        );
     });
     ui::paragraph(
         list,
@@ -816,6 +840,7 @@ pub(super) fn binding_order(action: Action) -> usize {
         Place,
         PlacementGhost,
         Compass,
+        Minimap,
         Remove,
         Sample,
         EmptyHand,

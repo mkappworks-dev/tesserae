@@ -269,6 +269,8 @@ pub(super) fn activate(
                 Operation::Repeat => p.repeat_held = !p.repeat_held,
                 Operation::Ghost => p.placement_ghost = !p.placement_ghost,
                 Operation::Compass => p.compass = !p.compass,
+                Operation::Minimap => p.minimap = !p.minimap,
+                Operation::MinimapSize(value) => p.minimap_size = value,
                 Operation::Invert => p.invert_y = !p.invert_y,
                 Operation::ScrollDirection(value) => p.reverse_scroll = value,
                 Operation::Sync(value) => p.display_sync = value,

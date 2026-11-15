@@ -15,6 +15,15 @@ until turned on, here or under Settings > Display > Map and compass, is saved in
 the user profile, and hides under the Menu, Settings and the Inventory and while
 you are dead.
 
+**O** shows or hides the minimap, a small north-up view of the ground you have
+explored in the top right corner, centred on you at 2 m to the pixel, with the
+Player's arrow along the heading the Server publishes. Ground you have not seen
+is fog. Beneath it are the Biome name, your X and Z position and your height. It
+is off until turned on, here or under Settings > Display > Map and compass,
+where its size (Small, Medium or Large) is also chosen. Both are saved in the
+user profile, and it hides under the Menu, Settings and the Inventory and while
+you are dead.
+
 **F3** shows or hides a diagnostics line (the Chunk the Eye is in, how many the
 Server holds and has sent meshes for, how many meshes are drawn, and the frame
 rate). It works in every build and is hidden until pressed; the Server publishes

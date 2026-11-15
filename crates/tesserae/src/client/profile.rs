@@ -21,6 +21,10 @@ pub(crate) struct Preferences {
     pub placement_ghost: bool,
     /// Absent from a profile saved before it, which reads as off.
     pub compass: bool,
+    /// Absent from a profile saved before it, which reads as off.
+    pub minimap: bool,
+    /// Absent from a profile saved before it, which reads as Medium.
+    pub minimap_size: super::minimap::MinimapSize,
     pub sensitivity: f32,
     pub invert_y: bool,
     pub reverse_scroll: bool,
@@ -113,6 +117,8 @@ impl Default for Preferences {
             repeat_held: false,
             placement_ghost: false,
             compass: false,
+            minimap: false,
+            minimap_size: super::minimap::MinimapSize::Medium,
             sensitivity: 0.003,
             invert_y: false,
             reverse_scroll: false,
@@ -708,6 +714,11 @@ mod tests {
         assert!(!older.repeat_held, "a profile saved before the option");
         assert!(!older.placement_ghost, "a profile saved before the option");
         assert!(!older.compass, "a profile saved before the option");
+        assert!(!older.minimap, "a profile saved before the option");
+        assert_eq!(
+            older.minimap_size,
+            super::super::minimap::MinimapSize::Medium
+        );
         assert_eq!((older.view, older.zoom_m), (View::FirstPerson, 4.0));
         for zoom in ["1.4", "6.1", "-1"] {
             let bytes = format!(r#"{{"version":1,"preferences":{{"zoom_m":{zoom}}}}}"#);

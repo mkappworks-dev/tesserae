@@ -40,6 +40,7 @@ mod material_textures;
 mod menu;
 mod menu_blur;
 mod menu_ui;
+mod minimap;
 mod overlay;
 mod pad;
 mod palette;
@@ -140,6 +141,7 @@ pub fn plugin(app: &mut App) {
         map_cache::plugin,
         compass::plugin,
     ));
+    app.add_plugins(minimap::plugin);
     app.add_session_systems(
         Update,
         (|mut commands: Commands| commands.insert_resource(loading::TerrainArrived))

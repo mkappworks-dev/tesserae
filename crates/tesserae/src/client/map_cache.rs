@@ -13,10 +13,6 @@ use crate::server::map::MapTileChanged;
 use crate::session::SessionApp;
 
 /// Drawn for a Material with no appearance, as the chunk shader does.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "the Map and minimap tickets draw from it")
-)]
 pub const UNPAINTED: [u8; 4] = [255, 0, 255, 255];
 
 /// Holds every tile received: the Server's cap on the Map bounds it, so it
@@ -28,10 +24,6 @@ pub struct MapCache(Map);
 pub struct MapPalette(HashMap<MaterialId, [u8; 4]>);
 
 impl MapPalette {
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the Map and minimap tickets draw from it")
-    )]
     pub fn colour(&self, material: MaterialId) -> [u8; 4] {
         self.0.get(&material).copied().unwrap_or(UNPAINTED)
     }
@@ -39,10 +31,6 @@ impl MapPalette {
 
 /// The colour of a column's top Material, resolved on the Client so a later
 /// Look pack recolours an old Map.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "the Map and minimap tickets draw from it")
-)]
 pub fn sample_colour(sample: &Sample, palette: &MapPalette) -> [u8; 4] {
     palette.colour(sample.material)
 }
@@ -55,13 +43,19 @@ pub(super) fn plugin(app: &mut App) {
         .add_session_systems(Update, (receive_palette, receive_tiles));
 }
 
-fn receive_palette(mut messages: MessageReader<MaterialPalette>, mut palette: ResMut<MapPalette>) {
+pub(super) fn receive_palette(
+    mut messages: MessageReader<MaterialPalette>,
+    mut palette: ResMut<MapPalette>,
+) {
     for message in messages.read() {
         palette.0.extend(message.0.iter().copied());
     }
 }
 
-fn receive_tiles(mut messages: MessageReader<MapTileChanged>, mut cache: ResMut<MapCache>) {
+pub(super) fn receive_tiles(
+    mut messages: MessageReader<MapTileChanged>,
+    mut cache: ResMut<MapCache>,
+) {
     for MapTileChanged(tile) in messages.read() {
         cache.0.load_tile(tile.clone());
     }
