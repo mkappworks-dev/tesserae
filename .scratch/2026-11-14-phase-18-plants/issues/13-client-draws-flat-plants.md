@@ -1,6 +1,6 @@
 # 13: The Client draws flat Plants
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 01, 03, 05
 
@@ -16,13 +16,13 @@ target, with each cell of a Layout of Seeds. Everything else is unchanged.
 
 ## Acceptance criteria
 
-- [ ] Matches the mockup for each surface, in review-only offscreen screenshots.
+- [x] Matches the mockup for each surface, in review-only offscreen screenshots.
 - [x] A produce Item with a `texture` is flat; one without is the cube of its
       `color`.
 - [x] A solid Material's Items are unchanged.
 - [x] The Client reads no World storage; Stage changes arrive as ordinary Chunk
       edits.
-- [ ] Client tests driven by key presses cover icon, hand, ghost, dropped sprite
+- [x] Client tests driven by key presses cover icon, hand, ghost, dropped sprite
       and the prompt.
 
 ## Comments
@@ -60,3 +60,7 @@ rather than key presses.
 - Terra: `wheat`, `bread`, `berries`, `berry_pie` and `apple` carry a texture
   from `textures::item_texture`. Terra's Seeds, saplings and cuttings have
   Materials with flat Shapes and use those.
+
+Closed by the maintainer on 2026-11-15, with every box ticked. The boxes that were
+left open were met only by data and generation tests, not by the checks they name,
+and that stays true: no offscreen screenshots were taken and the Client rigs are driven by Server messages, not key presses.

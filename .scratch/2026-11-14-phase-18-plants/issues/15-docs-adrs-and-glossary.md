@@ -1,6 +1,6 @@
 # 15: Docs, ADRs and GLOSSARY
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 01, 02, 03, 04, 05, 06, 07, 08, 09, 10, 11, 12, 13, 14
 
@@ -22,7 +22,7 @@ numbers.
 - [x] Every new row, field and form is documented where Mod authors look.
 - [x] The Example Game loads, and its starter test passes.
 - [x] ADR-0027, the ADR-0006 amendment and GLOSSARY.md match the code.
-- [ ] DESIGN.md step 18 is Done; `npm run fmt:check` passes.
+- [x] DESIGN.md step 18 is Done; `npm run fmt:check` passes.
 
 ## Comments
 
@@ -43,3 +43,6 @@ Left `ready-for-agent`: the last box is unmet on purpose. DESIGN.md has the step
   `stands-in`, not `water`; needs are `[plants.needs]`; the refusal reads "needs
   soil"; a Plant names its Shape; a Player's Remove is journalled with its yield
   and only a crop's harvest and Felling are not; Use harvests nothing.
+
+Closed by the maintainer on 2026-11-15: DESIGN.md now marks step 18 Done, and
+`npm run fmt:check` passes.

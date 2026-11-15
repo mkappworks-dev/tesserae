@@ -1,6 +1,6 @@
 # 14: `flora` and Terra content
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 05, 06, 11, 12, 13
 
@@ -19,13 +19,13 @@ taken from grown oaks, which its temperate Biome places. Art is drawn by
 
 ## Acceptance criteria
 
-- [ ] A new Terra Survival World shows meadows, forests and kelp beds; planting
+- [x] A new Terra Survival World shows meadows, forests and kelp beds; planting
       wheat, waiting and harvesting yields food; a berry bush fruits again.
 - [x] Terra's apple tree bears apples that are broken to collect and restore hunger;
       the standing tree grows new fruit elsewhere.
 - [x] No Wood Voxel is generated on its own; a new Survival World still reaches
       Wood, a Workbench, a Chest and a Door by felling and breaking oaks.
-- [ ] `meadow`, `ember` and `tidewater` load with `flora`'s new rows and their
+- [x] `meadow`, `ember` and `tidewater` load with `flora`'s new rows and their
       starter tests pass.
 - [x] `tesserae validate` passes for `flora` and every Game.
 - [x] No art is hand-drawn; the generator script is the source.
@@ -62,3 +62,7 @@ and generation tests, not by a World played through.
 - `scripts/build-guests` stops at the `catalog` test guest (`ShapeDef` has no
   field `form`), so the `server::mods` tests that read `target/guests` fail
   here; Terra and the demo Games were built by its last block alone.
+
+Closed by the maintainer on 2026-11-15, with every box ticked. The boxes that were
+left open were met only by data and generation tests, not by the checks they name,
+and that stays true: no new Terra Survival World was played through, and the Games' own starter tests were not run, only the `demo_games` loads.

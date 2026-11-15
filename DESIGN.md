@@ -555,7 +555,7 @@ controls, movement, save, camera and input work already in flight is tracked in
 | 15  | Inventory               | Server-owned transactions that compose with the undo journal, save                                | Stack sizes, item rules            | 11, 12     | Done            |
 | 16  | Crafting                | Recipe schema, station interaction, Use on Voxels (doors, containers), UI host                    | Recipes, stations                  | 15         | Done            |
 | 17  | Weather                 | Weather state and tick, particles, sky hooks                                                      | Weather types, climate rules       | 13         | Not started     |
-| 18  | Plants                  | Growth on the Server tick, placement rules, harvesting                                            | Plant data                         | 13         | Not started     |
+| 18  | Plants                  | Growth on the Server tick, placement rules, harvesting                                            | Plant data                         | 13         | Done            |
 | 19  | Map, compass            | Server-provided summaries (the Client never reads World storage), map view                        | Map style, markers                 | 13         | Not started     |
 | 20  | Structures              | Template format, deterministic placement by worldgen and tools                                    | Templates                          | 13         | Not started     |
 | 21  | Survival loop           | Health, damage, hunger, death, respawn, game modes                                                | Numbers and rules                  | 15         | Done            |
@@ -623,8 +623,7 @@ Notes:
   and the 2026-11-13 amendment to
   [ADR-0023](docs/adr/0023-the-inventory-is-server-owned-and-pays-inside-the-undo-journal.md).
   Spec and tickets: `.scratch/2026-11-13-phase-16-crafting/`.
-- **Step 18** has shipped but is not marked Done: the maintainer's final review
-  is still to come. A Game or Mod declares Plants as data, of five kinds the
+- **Step 18** is Done. A Game or Mod declares Plants as data, of five kinds the
   Server runs natively: `crop`, `tree`, `column`, `spreader` and `climber`. A
   Plant's state is its Material, so nothing is stored per plant and the save,
   the Overlay and the Agenda are unchanged. Growth is a Chunk-sampled tick on
