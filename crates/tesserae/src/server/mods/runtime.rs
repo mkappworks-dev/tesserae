@@ -32,9 +32,9 @@ pub(in crate::server) struct DrainBudget {
 /// Writes an emitter counts as. Its relight floods as far as its light
 /// reaches, so a fill of lanterns at the write rate overruns a tick that a
 /// fill of stone does not.
-const EMITTER_WRITES: usize = 6;
+pub(in crate::server) const EMITTER_WRITES: usize = 6;
 
-const MOD_VOXELS_PER_TICK: DrainBudget = DrainBudget {
+pub(in crate::server) const MOD_VOXELS_PER_TICK: DrainBudget = DrainBudget {
     writes: 96,
     reads: 4096,
 };
