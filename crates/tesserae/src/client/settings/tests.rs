@@ -479,6 +479,22 @@ fn the_placement_ghost_is_off_by_default_and_the_setting_round_trips() {
     std::fs::remove_file(path).unwrap();
 }
 #[test]
+fn the_compass_is_off_by_default_and_the_display_setting_round_trips() {
+    let mut app = app();
+    assert!(!app.world().resource::<Preferences>().compass);
+    activate_operation(
+        &mut app,
+        Operation::Navigate(super::super::menu_ui::Tab::Display),
+    );
+    activate_operation(&mut app, Operation::Compass);
+    assert!(!app.world().resource::<Preferences>().compass);
+    activate_operation(&mut app, Operation::Apply);
+    assert!(app.world().resource::<Preferences>().compass);
+    let path = app.world().resource::<Store>().path.clone();
+    assert!(Store::load(path.clone()).2.compass);
+    std::fs::remove_file(path).unwrap();
+}
+#[test]
 fn draft_apply_cancel_and_unsaved_exit_are_distinct() {
     let mut app = app();
     activate_operation(

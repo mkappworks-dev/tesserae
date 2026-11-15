@@ -115,6 +115,7 @@ pub(super) enum Operation {
     Removal(bool),
     Repeat,
     Ghost,
+    Compass,
     Invert,
     PadInvert,
     PadCrouch(bool),

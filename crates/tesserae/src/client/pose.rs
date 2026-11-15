@@ -110,6 +110,7 @@ mod tests {
             seq: 9,
             eye: Vec3::splat(4.0),
             mode: MovementMode::Physics,
+            yaw: 0.0,
             body: default(),
         });
         app.update();
@@ -124,6 +125,7 @@ mod tests {
             seq: 8,
             eye: Vec3::ZERO,
             mode: MovementMode::Flight,
+            yaw: 0.0,
             body: default(),
         });
         app.update();
@@ -142,6 +144,7 @@ mod tests {
             mode: MovementMode::Physics,
             seq,
             eye: Vec3::new(x, 2.0, 0.0),
+            yaw: 0.0,
             body: BodyState::default(),
         }
     }

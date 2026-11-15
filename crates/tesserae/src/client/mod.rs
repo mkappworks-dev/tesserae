@@ -14,6 +14,7 @@ mod capture;
 pub mod chunk_mesh;
 pub mod chunk_view;
 mod cinematic;
+mod compass;
 mod death;
 pub mod drawn_mask;
 mod drops;
@@ -133,7 +134,12 @@ pub fn plugin(app: &mut App) {
         vitals::plugin,
         death::plugin,
     ));
-    app.add_plugins((sound::plugin, soundscape::plugin, map_cache::plugin));
+    app.add_plugins((
+        sound::plugin,
+        soundscape::plugin,
+        map_cache::plugin,
+        compass::plugin,
+    ));
     app.add_session_systems(
         Update,
         (|mut commands: Commands| commands.insert_resource(loading::TerrainArrived))

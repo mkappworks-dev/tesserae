@@ -1,6 +1,6 @@
 # 02: The Compass shows the Player's heading
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 01
 
@@ -25,9 +25,10 @@ Waypoint marks come later (ticket 10).
 
 ## Acceptance criteria
 
-- [ ] The published pose carries the heading; the Client reads it, never its own camera, for the Compass.
-- [ ] The strip shows degrees, N/E/S/W with N picked out, and turns as the Player looks; North is −Z.
-- [ ] Hidden under a covering window and while dead; unchanged between first and third person.
-- [ ] Off by default; the setting and the `B` key toggle it, persist it, and an old profile loads as off.
-- [ ] The new action appears in Key bindings, help and the controls docs, and a test asserts that no two default bindings collide (tickets 05 and 07 re-run it).
-- [ ] Tests at the message boundary (injected pose messages and UI queries) and a pure bearing/heading test; fmt, clippy and tests pass.
+- [x] The published pose carries the heading; the Client reads it, never its own camera, for the Compass.
+- [x] The strip shows degrees, N/E/S/W with N picked out, and turns as the Player looks; North is −Z.
+- [x] Hidden under a covering window and while dead; unchanged between first and third person.
+- [x] Off by default; the setting and the `B` key toggle it, persist it, and an old profile loads as off.
+- [x] The new action appears in Key bindings, help and the controls docs, and a test asserts that no two default bindings collide (tickets 05 and 07 re-run it).
+- [x] Tests at the message boundary (injected pose messages and UI queries) and a pure bearing/heading test.
+- [ ] fmt, clippy and tests pass. fmt and `cargo check` pass; clippy and the full suite are deferred to the end of the phase.

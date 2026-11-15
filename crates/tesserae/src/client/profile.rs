@@ -19,6 +19,8 @@ pub(crate) struct Preferences {
     pub repeat_held: bool,
     /// Absent from a profile saved before it, which reads as off.
     pub placement_ghost: bool,
+    /// Absent from a profile saved before it, which reads as off.
+    pub compass: bool,
     pub sensitivity: f32,
     pub invert_y: bool,
     pub reverse_scroll: bool,
@@ -110,6 +112,7 @@ impl Default for Preferences {
             tap_remove: false,
             repeat_held: false,
             placement_ghost: false,
+            compass: false,
             sensitivity: 0.003,
             invert_y: false,
             reverse_scroll: false,
@@ -704,6 +707,7 @@ mod tests {
         let (_, older) = decode(older).unwrap();
         assert!(!older.repeat_held, "a profile saved before the option");
         assert!(!older.placement_ghost, "a profile saved before the option");
+        assert!(!older.compass, "a profile saved before the option");
         assert_eq!((older.view, older.zoom_m), (View::FirstPerson, 4.0));
         for zoom in ["1.4", "6.1", "-1"] {
             let bytes = format!(r#"{{"version":1,"preferences":{{"zoom_m":{zoom}}}}}"#);

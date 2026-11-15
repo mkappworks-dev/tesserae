@@ -7,6 +7,14 @@ menu, Tab moves focus. **I** opens and closes the Inventory, and **C** opens it
 with the Catalogue search focused; in Survival the Catalogue is closed and C
 says it is Creative-only.
 
+**B** shows or hides the Compass, a strip across the top of the screen with your
+heading in degrees, the cardinal letters (North picked out in red) and ticks.
+North is the same direction in every World, and the heading is the one the
+Server publishes, so it reads the same in first and third person. It is off
+until turned on, here or under Settings > Display > Map and compass, is saved in
+the user profile, and hides under the Menu, Settings and the Inventory and while
+you are dead.
+
 **F3** shows or hides a diagnostics line (the Chunk the Eye is in, how many the
 Server holds and has sent meshes for, how many meshes are drawn, and the frame
 rate). It works in every build and is hidden until pressed; the Server publishes

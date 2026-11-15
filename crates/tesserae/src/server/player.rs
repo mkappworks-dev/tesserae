@@ -167,6 +167,8 @@ pub struct PoseCorrection {
     pub mode: MovementMode,
     pub seq: u32,
     pub eye: Vec3,
+    /// Where the Player looks, as the Server last had it: positive turns left.
+    pub yaw: f32,
     pub body: BodyState,
 }
 /// What the body did over the last step, for the Client to pose a figure by.
@@ -724,6 +726,7 @@ fn publish(mut player: Single<&mut Player>, mut poses: MessageWriter<PoseCorrect
         mode: player.mode,
         seq: player.seq,
         eye: player.eye,
+        yaw: player.view[0],
         body: player.body_state(),
     });
 }
@@ -817,6 +820,21 @@ mod tests {
                 },
             ))
         }
+    }
+    #[test]
+    fn the_published_pose_carries_the_heading_the_client_last_sent() {
+        let mut app = App::new();
+        app.add_message::<PoseCorrection>()
+            .add_systems(Update, publish);
+        let mut player = Player::at(Vec3::ZERO);
+        player.view = [0.75, 0.2];
+        app.world_mut().spawn(player);
+        app.update();
+        let poses = app.world().resource::<Messages<PoseCorrection>>();
+        assert_eq!(
+            poses.iter_current_update_messages().next().unwrap().yaw,
+            0.75
+        );
     }
     fn tables() -> Tables {
         crate::server::fixture_tables()

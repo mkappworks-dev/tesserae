@@ -28,6 +28,7 @@ pub(super) enum Action {
     Remove,
     Place,
     PlacementGhost,
+    Compass,
     Sample,
     EmptyHand,
     Shape,
@@ -279,6 +280,7 @@ impl Bindings {
             (Faster, KeyCode::Equal),
             (Slower, KeyCode::Minus),
             (PlacementGhost, KeyCode::KeyH),
+            (Compass, KeyCode::KeyB),
             (Sample, KeyCode::KeyP),
             (EmptyHand, KeyCode::KeyX),
             (Shape, KeyCode::KeyF),
@@ -763,6 +765,19 @@ mod tests {
             phase,
         });
         app.update();
+    }
+
+    #[test]
+    fn no_two_default_keyboard_bindings_collide() {
+        let mut owners: Vec<(Binding, Action)> = Vec::new();
+        for (action, alternatives) in Bindings::keyboard_defaults() {
+            for binding in alternatives.into_iter().flatten() {
+                if let Some((_, other)) = owners.iter().find(|(seen, _)| *seen == binding) {
+                    panic!("{other:?} and {action:?} share {binding:?}");
+                }
+                owners.push((binding, action));
+            }
+        }
     }
 
     #[test]

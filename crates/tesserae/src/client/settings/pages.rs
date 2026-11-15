@@ -24,6 +24,7 @@ pub(in crate::client) fn action_name(action: Action) -> &'static str {
         Remove => "Remove",
         Place => "Place / ignite",
         PlacementGhost => "Toggle placement ghost",
+        Compass => "Toggle compass",
         Sample => "Sample",
         EmptyHand => "Empty hand",
         Shape => "Next Shape",
@@ -482,6 +483,14 @@ pub(super) fn display(list: &mut ChildSpawnerCommands, p: &Preferences) {
             },
         );
     });
+    group(list, "MAP AND COMPASS", |card| {
+        setting_row(
+            card,
+            "Compass",
+            "A strip along the top showing your heading.",
+            |row| switch(row, p.compass, Operation::Compass),
+        );
+    });
     ui::paragraph(
         list,
         "View distance, textures, shadows, and simulation settings stay unchanged.",
@@ -806,6 +815,7 @@ pub(super) fn binding_order(action: Action) -> usize {
         ZoomOut,
         Place,
         PlacementGhost,
+        Compass,
         Remove,
         Sample,
         EmptyHand,
