@@ -823,11 +823,71 @@ fn surface_feature(
         spacing_m: f.spacing_m,
         plant: Some(SurfacePlant { shape, kind }),
         clump,
+        field: None,
     })
 }
 
 /// An ore may name a Material or Biome of any Mod, so this runs once every Declaration is in, like
 /// [`resolve_items`]. A Biome's feature may name a Plant, so the Plant table is resolved first.
+/// A Biome's planted field, its crops resolved to the Stages worldgen stands.
+fn crop_field(
+    b: &Behaviour,
+    row: usize,
+    biome: &str,
+    index: usize,
+    f: &content::CropField,
+    tables: &Tables,
+    registry: &Registry,
+) -> Result<tesserae_core::CropField, ModError> {
+    let bad = |rule: String| ModError::BadCropField {
+        id: b.mod_id.clone(),
+        biome: biome.to_owned(),
+        index,
+        rule,
+    };
+    let material = |name: &String| lookup(b, registry, "biome", row, name);
+    let mut field = tesserae_core::CropField::new(
+        f.plot_m,
+        f.spacing_m,
+        f.path.as_ref().map(material).transpose()?,
+        f.ditch.as_ref().map(material).transpose()?,
+        f.near_water_m,
+    );
+    for (name, weight) in &f.crops {
+        let plant = tables
+            .plants
+            .plants()
+            .iter()
+            .find(|p| p.name == *name)
+            .ok_or_else(|| ModError::UnknownName {
+                id: b.mod_id.clone(),
+                what: "biome",
+                row,
+                name: name.clone(),
+            })?;
+        let PlantKind::Crop {
+            stages,
+            fruit_vine: None,
+            ..
+        } = &plant.kind
+        else {
+            return Err(bad(format!("`{name}` is not a crop without fruit-vine")));
+        };
+        let materials: Vec<MaterialId> = stages.iter().map(|s| s.material).collect();
+        let shapes: Vec<Option<tesserae_core::ShapeId>> = stages.iter().map(|s| s.shape).collect();
+        let crop = tesserae_core::FieldCrop::new(
+            plant.shape.unwrap_or(tesserae_core::SHAPE_FULL_CUBE),
+            &materials,
+            &shapes,
+            *weight,
+        )
+        .and_then(|crop| field.push(crop))
+        .map_err(|e| bad(format!("`{name}`: {} {}", e.field, e.rule)));
+        crop?;
+    }
+    Ok(field)
+}
+
 pub fn resolve_biomes(
     behaviours: &[Behaviour],
     tables: &Tables,
@@ -905,10 +965,44 @@ pub fn resolve_biomes(
                     rule: e.rule,
                 })?;
             }
-            let features = def
-                .surface_features
+            let mut groups: Vec<&str> = Vec::new();
+            let mut features = Vec::new();
+            for (feature, f) in def.surface_features.iter().enumerate() {
+                let mut made = surface_feature(b, row, f, tables, registry, lake)?;
+                made.field = f
+                    .field
+                    .as_ref()
+                    .map(|g| {
+                        let field = tesserae_core::Field {
+                            group: match groups.iter().position(|&n| n == g.group) {
+                                Some(at) => at as u8,
+                                None => {
+                                    groups.push(&g.group);
+                                    (groups.len() - 1) as u8
+                                }
+                            },
+                            scale_m: g.scale_m,
+                            strays: g.strays,
+                        };
+                        field
+                            .validate()
+                            .map(|()| field)
+                            .map_err(|e| ModError::BadField {
+                                id: b.mod_id.clone(),
+                                biome: def.name.clone(),
+                                feature,
+                                field: e.field,
+                                rule: e.rule,
+                            })
+                    })
+                    .transpose()?;
+                features.push(made);
+            }
+            let crop_fields = def
+                .crop_fields
                 .iter()
-                .map(|f| surface_feature(b, row, f, tables, registry, lake))
+                .enumerate()
+                .map(|(index, f)| crop_field(b, row, &def.name, index, f, tables, registry))
                 .collect::<Result<Vec<_>, _>>()?;
             biomes.push(Biome {
                 name: BiomeName::new(&format!("{}:{}", b.mod_id, def.name)).map_err(bad)?,
@@ -920,7 +1014,9 @@ pub fn resolve_biomes(
                     fog: c.fog.into(),
                 }),
                 cave_scale: def.cave_scale,
-                surface_features: SurfaceFeatures::new(&features).map_err(bad)?,
+                surface_features: SurfaceFeatures::new(&features)
+                    .and_then(|table| table.with_crop_fields(&crop_fields))
+                    .map_err(bad)?,
             });
         }
     }

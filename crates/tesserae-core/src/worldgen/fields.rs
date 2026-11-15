@@ -87,6 +87,8 @@ const FIELD_CHANCE: f64 = 0.5;
 /// Kept clear of a lattice cell's border, so two cells' fields never touch.
 const INSET_M: f32 = 2.0;
 const MAX_PLOTS_PER_SIDE: u64 = 3;
+/// Places a held cell tries before it holds no field: ground is rarely level, so a cell looks about.
+const ATTEMPTS: u64 = 36;
 /// The most the ground may differ across a field.
 const LEVEL_M: f32 = 1.0;
 /// Columns are asked this far apart when a field is tested for ground, Biome and caves.
@@ -189,17 +191,8 @@ pub(super) fn cell_at(placed: &[Placed], gx: i32, gz: i32) -> Option<(&Placed, C
 }
 
 impl Worldgen {
-    /// A lattice cell's field before the ground is asked: whether it holds one, how big and where
-    /// in the cell, from the seed and the cell alone. `None` too where it would cross an earlier
-    /// field of the Biome, so a column belongs to one field.
-    fn field_draw(
-        &self,
-        biome: BiomeId,
-        entry: usize,
-        field: &CropField,
-        cell: [i32; 2],
-    ) -> Option<Placed> {
-        let size = self.voxel_size;
+    /// Whether the lattice cell holds a field at all, from the seed and the cell alone.
+    fn field_held(&self, biome: BiomeId, entry: usize, cell: [i32; 2]) -> Option<u64> {
         let h = hashed(
             self.seed,
             FIELD_SALT,
@@ -210,9 +203,21 @@ impl Worldgen {
                 cell[1] as u32 as u64,
             ],
         );
-        if unit(mix(h ^ 1)) >= FIELD_CHANCE {
-            return None;
-        }
+        (unit(mix(h ^ 1)) < FIELD_CHANCE).then_some(h)
+    }
+
+    /// The `try`th place a held cell's field may stand: how big and where in the cell, before the
+    /// ground is asked. `None` where it would not fit the cell.
+    fn field_draw(
+        &self,
+        biome: BiomeId,
+        field: &CropField,
+        cell: [i32; 2],
+        held: u64,
+        attempt: u64,
+    ) -> Option<Placed> {
+        let size = self.voxel_size;
+        let h = mix(held ^ attempt.wrapping_mul(0x9e37_79b9_7f4a_7c15));
         let mut min = [0; 2];
         let mut side = [0; 2];
         let mut plots = [0; 2];
@@ -229,12 +234,15 @@ impl Worldgen {
             if fit < 1 {
                 return None;
             }
-            plots[axis] = 1
-                + (mix(h ^ (4 + a)) % u64::from(fit.min(MAX_PLOTS_PER_SIDE as i32) as u32)) as i32;
+            // The first places try the biggest fields and the last just one plot, so level ground
+            // holds a big field and rough ground a small one.
+            let cap = MAX_PLOTS_PER_SIDE.saturating_sub(attempt * MAX_PLOTS_PER_SIDE / ATTEMPTS);
+            let most = fit.min(cap.max(1) as i32) as u64;
+            plots[axis] = 1 + (mix(h ^ (4 + a)) % most) as i32;
             let free = room - (plots[axis] * (side[axis] + 1) + 1);
             min[axis] = low + (mix(h ^ (6 + a)) % (free as u64 + 1)) as i32;
         }
-        let placed = Placed {
+        Some(Placed {
             biome,
             field: *field,
             hash: h,
@@ -243,29 +251,7 @@ impl Worldgen {
             side,
             ditch: None,
             rows_along_x: mix(h ^ 8) & 1 == 1,
-        };
-        let biome_fields = self
-            .params
-            .biomes
-            .get(biome)?
-            .surface_features
-            .crop_fields();
-        let crosses = |earlier: &Placed| {
-            let (a, b) = (placed.footprint(), earlier.footprint());
-            (0..2).all(|axis| a[0][axis] < b[1][axis] && b[0][axis] < a[1][axis])
-        };
-        for (before, other) in biome_fields[..entry].iter().enumerate() {
-            let cells = self.field_cells(other, placed.footprint());
-            for c in cells {
-                if self
-                    .field_draw(biome, before, other, c)
-                    .is_some_and(|earlier| crosses(&earlier))
-                {
-                    return None;
-                }
-            }
-        }
-        Some(placed)
+        })
     }
 
     /// The lattice cells of `field` that the Voxel columns `[min, max)` touch.
@@ -277,7 +263,42 @@ impl Worldgen {
             .collect()
     }
 
-    /// Every planted field that stands on any column of `[min, max)`, in a fixed order.
+    /// The fields of one entry of a Biome that stand on any column of `region`, `[min, max)`: each
+    /// held cell stands at the first of its drawn places the ground takes.
+    fn entry_fields(
+        &self,
+        scatter: &SurfaceScatter,
+        biome: BiomeId,
+        entry: usize,
+        region: [[i32; 2]; 2],
+    ) -> Vec<Placed> {
+        let Some(field) = self
+            .params
+            .biomes
+            .get(biome)
+            .and_then(|b| b.surface_features.crop_fields().get(entry))
+        else {
+            return Vec::new();
+        };
+        let crosses = |p: &Placed| {
+            let [min, max] = p.footprint();
+            (0..2).all(|a| min[a] < region[1][a] && region[0][a] < max[a])
+        };
+        self.field_cells(field, region)
+            .into_iter()
+            .filter_map(|cell| {
+                let held = self.field_held(biome, entry, cell)?;
+                (0..ATTEMPTS)
+                    .filter_map(|attempt| self.field_draw(biome, field, cell, held, attempt))
+                    .find_map(|p| self.field_accepts(scatter, p))
+            })
+            .filter(crosses)
+            .collect()
+    }
+
+    /// Every planted field that stands on any column of `region`, `[min, max)`, in a fixed order.
+    /// A later entry of a Biome gives way to an earlier one it would cross, so a column belongs to
+    /// one field.
     pub(super) fn fields_near(
         &self,
         scatter: &SurfaceScatter,
@@ -289,12 +310,14 @@ impl Worldgen {
         }
         for (b, biome) in self.params.biomes.as_slice().iter().enumerate() {
             let id = BiomeId::new(b as u8);
-            for (entry, field) in biome.surface_features.crop_fields().iter().enumerate() {
-                for cell in self.field_cells(field, region) {
-                    if let Some(p) = self
-                        .field_draw(id, entry, field, cell)
-                        .and_then(|p| self.field_accepts(scatter, p))
-                    {
+            for entry in 0..biome.surface_features.crop_fields().len() {
+                for p in self.entry_fields(scatter, id, entry, region) {
+                    let crossed = (0..entry).any(|before| {
+                        !self
+                            .entry_fields(scatter, id, before, p.footprint())
+                            .is_empty()
+                    });
+                    if !crossed {
                         placed.push(p);
                     }
                 }
@@ -310,48 +333,6 @@ impl Worldgen {
         let size = self.voxel_size;
         let (_, highest) = self.terrain_band_m();
         let [wx, wz] = p.extent();
-        let stride = ((SAMPLE_M / size).round() as usize).max(1);
-        let axis = |w: i32| {
-            let mut all: Vec<i32> = (0..w).step_by(stride).collect();
-            if all.last() != Some(&(w - 1)) {
-                all.push(w - 1);
-            }
-            all
-        };
-        let level = ((LEVEL_M / size).ceil() as i32).max(1);
-        let (mut lowest, mut highest_top) = (i32::MAX, i32::MIN);
-        let mut edges = [(0i64, 0i64); 4];
-        for &dz in &axis(wz) {
-            for &dx in &axis(wx) {
-                let (gx, gz) = (p.min[0] + dx, p.min[1] + dz);
-                let (x_m, z_m) = (self.global_m(gx), self.global_m(gz));
-                if self.biome_at(x_m, z_m) != Some(p.biome) {
-                    return None;
-                }
-                let top = top_index(self.surface_height_m(x_m, z_m), 0.0, size);
-                let y_m = self.global_m(top + 1);
-                if y_m > highest
-                    || self.carved([gx, top, gz])
-                    || self.water.is_some_and(|w| y_m < w.level_m)
-                {
-                    return None;
-                }
-                lowest = lowest.min(top);
-                highest_top = highest_top.max(top);
-                for (edge, on) in [dx == 0, dx == wx - 1, dz == 0, dz == wz - 1]
-                    .into_iter()
-                    .enumerate()
-                {
-                    if on {
-                        edges[edge].0 += i64::from(top);
-                        edges[edge].1 += 1;
-                    }
-                }
-            }
-        }
-        if highest_top - lowest > level {
-            return None;
-        }
         if let Some(reach_m) = p.field.near_water_m {
             let lake = self.water?;
             let [min, max] = p.footprint();
@@ -369,6 +350,54 @@ impl Worldgen {
             });
             if !near {
                 return None;
+            }
+        }
+        let stride = ((SAMPLE_M / size).round() as usize).max(1);
+        let axis = |w: i32| {
+            let mut all: Vec<i32> = (0..w).step_by(stride).collect();
+            if all.last() != Some(&(w - 1)) {
+                all.push(w - 1);
+            }
+            all
+        };
+        let (xs, zs) = (axis(wx), axis(wz));
+        // The corners, middles and centre first, so ground that is not level fails after few asks.
+        let (mx, mz) = (wx / 2, wz / 2);
+        let mut samples: Vec<[i32; 2]> = [0, mx, wx - 1]
+            .into_iter()
+            .flat_map(|x| [0, mz, wz - 1].map(move |z| [x, z]))
+            .collect();
+        samples.extend(zs.iter().flat_map(|&z| xs.iter().map(move |&x| [x, z])));
+        let level = ((LEVEL_M / size).ceil() as i32).max(1);
+        let (mut lowest, mut highest_top) = (i32::MAX, i32::MIN);
+        let mut edges = [(0i64, 0i64); 4];
+        for [dx, dz] in samples {
+            let (gx, gz) = (p.min[0] + dx, p.min[1] + dz);
+            let (x_m, z_m) = (self.global_m(gx), self.global_m(gz));
+            if self.biome_at(x_m, z_m) != Some(p.biome) {
+                return None;
+            }
+            let top = top_index(self.surface_height_m(x_m, z_m), 0.0, size);
+            let y_m = self.global_m(top + 1);
+            if y_m > highest
+                || self.carved([gx, top, gz])
+                || self.water.is_some_and(|w| y_m < w.level_m)
+            {
+                return None;
+            }
+            lowest = lowest.min(top);
+            highest_top = highest_top.max(top);
+            if highest_top - lowest > level {
+                return None;
+            }
+            for (edge, on) in [dx == 0, dx == wx - 1, dz == 0, dz == wz - 1]
+                .into_iter()
+                .enumerate()
+            {
+                if on {
+                    edges[edge].0 += i64::from(top);
+                    edges[edge].1 += 1;
+                }
             }
         }
         for gz in p.min[1]..p.min[1] + wz {

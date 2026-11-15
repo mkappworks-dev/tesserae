@@ -68,6 +68,7 @@ fn biomes() -> Vec<BiomeDef> {
                 fog: (142, 168, 192),
             }),
             cave_scale: None,
+            crop_fields: plants::meadow_fields(),
             surface_features: [food::feature()]
                 .into_iter()
                 .chain(plants::meadow())
@@ -84,6 +85,7 @@ fn biomes() -> Vec<BiomeDef> {
                 fog: (170, 168, 170),
             }),
             cave_scale: None,
+            crop_fields: Vec::new(),
             surface_features: [food::feature()]
                 .into_iter()
                 .chain(plants::heath())
@@ -100,6 +102,7 @@ fn biomes() -> Vec<BiomeDef> {
                 fog: (194, 178, 150),
             }),
             cave_scale: None,
+            crop_fields: Vec::new(),
             surface_features: plants::dunes(),
         },
         BiomeDef {
@@ -113,6 +116,7 @@ fn biomes() -> Vec<BiomeDef> {
                 fog: (132, 166, 148),
             }),
             cave_scale: None,
+            crop_fields: Vec::new(),
             surface_features: plants::thicket(),
         },
         BiomeDef {
@@ -126,6 +130,7 @@ fn biomes() -> Vec<BiomeDef> {
                 fog: (148, 158, 150),
             }),
             cave_scale: None,
+            crop_fields: Vec::new(),
             surface_features: plants::fen(),
         },
         BiomeDef {
@@ -139,6 +144,7 @@ fn biomes() -> Vec<BiomeDef> {
                 fog: (180, 176, 154),
             }),
             cave_scale: None,
+            crop_fields: plants::prairie_fields(),
             surface_features: plants::prairie(),
         },
     ]

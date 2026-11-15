@@ -1,7 +1,7 @@
 //! Where tidewater's Biomes scatter the Plants of the shared `flora`, `crops` and `aquatic` Mods.
 //! A water plant stands only where the sea covers its column.
 
-use crate::tesserae::mods::content::SurfaceFeature;
+use crate::tesserae::mods::content::{CropField, SurfaceFeature};
 
 demo_kit::plants!();
 
@@ -22,6 +22,17 @@ pub fn lagoon() -> Vec<SurfaceFeature> {
         ("aquatic:kelp", 7.0, 16.0, 0.9),
         ("flora:fern", 3.4, 14.0, 0.9),
     ])
+}
+
+/// Wheat fields most often, on the shore: a ditch of the sea's water along the low edge.
+pub fn lagoon_fields() -> Vec<CropField> {
+    vec![crop_field(
+        &[("crops:wheat", 6.0), ("crops:carrot", 2.0), ("crops:potato", 2.0)],
+        (6.0, 8.0),
+        80.0,
+        "strata:sand",
+        Some(("waters:water", 48.0)),
+    )]
 }
 
 pub fn salt_flats() -> Vec<SurfaceFeature> {

@@ -744,6 +744,10 @@ interface content {
         /// with air above: never under a fluid, on a smoothed step or in a cave
         /// mouth. Distance levels leave them out.
         surface-features: list<surface-feature>,
+        /// At most 2 planted fields: rectangular plots of one crop in rows, with
+        /// paths between them and a ditch, over this Biome's ground. Empty
+        /// stands none.
+        crop-fields: list<crop-field>,
         /// Optional Soundscape full name, resolved across loaded Mods.
         soundscape: option<string>,
     }
@@ -773,6 +777,60 @@ interface content {
         /// Gathers the feature into groves with clearings between, still `spacing-m`
         /// apart on average; none scatters it evenly.
         clump: option<clump>,
+        /// Groups the feature with the others of the Biome that share its
+        /// `group`, so a region of ground holds mostly one of them; none stands
+        /// wherever it is drawn.
+        field: option<field-def>,
+    }
+
+    /// Makes a group of a Biome's features compete by region: a lattice
+    /// `scale-m` apart, moved by hash, cuts the ground into regions, each given
+    /// one member of the group by hash. A column that draws a member stands it
+    /// only in a region that holds it, or, with chance `strays`, anywhere. A
+    /// pure function of the World seed and a position in metres, so it holds
+    /// across Chunk borders and at every Voxel size. A member stands in a
+    /// share of the ground, so a group is thinner than its spacings say: tune
+    /// the spacing for the share.
+    record field-def {
+        /// Local to the Biome: features with the same name compete. Every
+        /// member gives the same `scale-m` and `strays`.
+        group: string,
+        /// The width of a region, from 8 to 96 m.
+        scale-m: f32,
+        /// The share of columns that ignore their region, from 0 to 0.5.
+        strays: f32,
+    }
+
+    /// A planted field: a lattice cell `spacing-m` on a side draws whether it
+    /// holds a field, which is a small grid of plots, each one crop planted
+    /// every second row (ripe, or at a hash-drawn Stage), set apart by lanes one
+    /// Voxel wide that also ring the field. The lane along the field's lowest
+    /// edge is the ditch, cut into the ground and filled; the others are the
+    /// path. A field stands only on ground level within a metre and wholly in
+    /// its Biome, clear of the lake, caves and trees: a drawn field that would
+    /// not is skipped whole. A pure function of the World seed, the Voxel size
+    /// and positions in metres, so it holds across Chunk borders. At most 2 per
+    /// Biome; a later one is dropped where it would cross an earlier.
+    record crop-field {
+        /// 1 to 4 crop Plants, `<mod id>:<name>`, with weights above 0 that
+        /// say how often each is drawn for a plot. A `crop` without
+        /// `fruit-vine`, with at most 8 Stages.
+        crops: list<tuple<string, f32>>,
+        /// A plot's side is drawn from this range, each from 6 to 24 m, low
+        /// first.
+        plot-m: tuple<f32, f32>,
+        /// The mean distance between fields, from 32 to 256 m.
+        spacing-m: f32,
+        /// A solid Material, `<mod id>:<name>`, the lanes are laid in; none
+        /// leaves them bare.
+        path: option<string>,
+        /// A fluid Material, `<mod id>:<name>`, the ditch is filled with; none
+        /// cuts no ditch.
+        ditch: option<string>,
+        /// The field stands only where the lake is within this many metres of
+        /// its centre, above 0 and at most `spacing-m`; none is anywhere. A
+        /// World without a lake has none.
+        near-water-m: option<f32>,
     }
 
     /// A low-frequency density field over the ground, in metres, that multiplies

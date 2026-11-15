@@ -323,6 +323,7 @@ fn component() -> Declaration {
                 }),
                 cave_scale: Some(0.0),
                 surface_features: Vec::new(),
+                crop_fields: Vec::new(),
             },
             content::BiomeDef {
                 soundscape: None,
@@ -345,6 +346,19 @@ fn component() -> Declaration {
                         scale_m: 48.0,
                         strength: 0.5,
                     }),
+                    field: Some(content::FieldDef {
+                        group: "beds".into(),
+                        scale_m: 24.0,
+                        strays: 0.1,
+                    }),
+                }],
+                crop_fields: vec![content::CropField {
+                    crops: vec![("full:wheat".into(), 5.0), ("full:rye".into(), 1.0)],
+                    plot_m: (8.0, 14.0),
+                    spacing_m: 64.0,
+                    path: Some("full:wood".into()),
+                    ditch: Some("full:ash".into()),
+                    near_water_m: Some(32.0),
                 }],
             },
         ],

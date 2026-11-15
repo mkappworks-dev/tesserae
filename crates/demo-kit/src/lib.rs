@@ -115,14 +115,16 @@ macro_rules! food {
                 shape: None,
                 spacing_m: $food.spacing_m,
                 clump: None,
+                field: None,
             }
         }
     };
 }
 
 /// Writes `plants(&[(plant, spacing_m, clump_scale_m, clump_strength)])`, the surface features that
-/// scatter each named Plant of a shared Mod; a strength of 0 scatters it evenly. Expanded inside the
-/// Game, where `crate::tesserae::mods` is its WIT binding.
+/// scatter each named Plant of a shared Mod; a strength of 0 scatters it evenly. Also `grouped`,
+/// which makes features compete by region so a patch is mostly one species, and `crop_field`, a
+/// planted field. Expanded inside the Game, where `crate::tesserae::mods` is its WIT binding.
 #[macro_export]
 macro_rules! plants {
     () => {
@@ -140,9 +142,53 @@ macro_rules! plants {
                             scale_m,
                             strength,
                         }),
+                        field: None,
                     }
                 })
                 .collect()
+        }
+
+        /// Puts `features` in one field `group`. A member stands only in the regions that hold it
+        /// and among a share of strays, so its spacing closes by the root of that share to keep the
+        /// group's cover where it was.
+        pub fn grouped(
+            group: &str,
+            scale_m: f32,
+            strays: f32,
+            features: Vec<crate::tesserae::mods::content::SurfaceFeature>,
+        ) -> Vec<crate::tesserae::mods::content::SurfaceFeature> {
+            let members = features.len().max(1) as f32;
+            let share = (1.0 + strays * (members - 1.0)) / members;
+            features
+                .into_iter()
+                .map(|f| crate::tesserae::mods::content::SurfaceFeature {
+                    spacing_m: f.spacing_m * share.sqrt(),
+                    field: Some(crate::tesserae::mods::content::FieldDef {
+                        group: group.into(),
+                        scale_m,
+                        strays,
+                    }),
+                    ..f
+                })
+                .collect()
+        }
+
+        /// A planted field of the named crops with their weights.
+        pub fn crop_field(
+            crops: &[(&str, f32)],
+            plot_m: (f32, f32),
+            spacing_m: f32,
+            path: &str,
+            ditch: Option<(&str, f32)>,
+        ) -> crate::tesserae::mods::content::CropField {
+            crate::tesserae::mods::content::CropField {
+                crops: crops.iter().map(|&(c, w)| (c.to_owned(), w)).collect(),
+                plot_m,
+                spacing_m,
+                path: Some(path.into()),
+                ditch: ditch.map(|(fluid, _)| fluid.into()),
+                near_water_m: ditch.map(|(_, near_m)| near_m),
+            }
         }
     };
 }

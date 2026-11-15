@@ -1,7 +1,7 @@
 //! Where lumen's Biomes scatter the Plants of the shared `flora` and `crops` Mods. The World is a
 //! flat court with no lake, so no water plant is placed.
 
-use crate::tesserae::mods::content::SurfaceFeature;
+use crate::tesserae::mods::content::{CropField, SurfaceFeature};
 
 demo_kit::plants!();
 
@@ -12,19 +12,51 @@ demo_kit::plants!();
 // 4 to 10 m across with bare ground between, 22 m crops, 48 m groves, 96 m sparse trees.
 
 pub fn garden() -> Vec<SurfaceFeature> {
-    plants(&[
-        ("flora:cherry", 24.0, 96.0, 0.6),
-        ("flora:apple", 28.0, 96.0, 0.6),
-        ("crops:carrot", 13.0, 22.0, 0.95),
-        ("crops:wheat", 12.0, 22.0, 0.95),
-        ("crops:pumpkin", 26.0, 22.0, 0.95),
-        ("crops:watermelon", 30.0, 22.0, 0.95),
-        ("flora:dandelion", 11.0, 12.0, 0.95),
-        ("flora:daisy", 10.0, 12.0, 0.95),
-        ("flora:poppy", 12.0, 12.0, 0.95),
-        ("flora:fern", 5.5, 14.0, 0.95),
-        ("flora:tuft", 3.6, 14.0, 0.95),
-    ])
+    [
+        plants(&[
+            ("flora:cherry", 24.0, 96.0, 0.6),
+            ("flora:apple", 28.0, 96.0, 0.6),
+        ]),
+        grouped(
+            "vegetables",
+            28.0,
+            0.12,
+            plants(&[
+                ("crops:carrot", 13.0, 22.0, 0.95),
+                ("crops:wheat", 12.0, 22.0, 0.95),
+            ]),
+        ),
+        plants(&[
+            ("crops:pumpkin", 26.0, 22.0, 0.95),
+            ("crops:watermelon", 30.0, 22.0, 0.95),
+        ]),
+        grouped(
+            "flowers",
+            20.0,
+            0.12,
+            plants(&[
+                ("flora:dandelion", 11.0, 12.0, 0.95),
+                ("flora:daisy", 10.0, 12.0, 0.95),
+                ("flora:poppy", 12.0, 12.0, 0.95),
+            ]),
+        ),
+        plants(&[
+            ("flora:fern", 5.5, 14.0, 0.95),
+            ("flora:tuft", 3.6, 14.0, 0.95),
+        ]),
+    ]
+    .concat()
+}
+
+/// The court is flat, so its fields are many; no lake, so no ditch.
+pub fn garden_fields() -> Vec<CropField> {
+    vec![crop_field(
+        &[("crops:wheat", 6.0), ("crops:carrot", 2.0), ("crops:potato", 2.0)],
+        (8.0, 16.0),
+        64.0,
+        "strata:sand",
+        None,
+    )]
 }
 
 pub fn arid_court() -> Vec<SurfaceFeature> {

@@ -530,7 +530,7 @@ fn a_field_stands_on_no_water_and_near_water_means_near_the_lake() {
 }
 
 #[test]
-fn a_tree_inside_the_ground_a_field_would_take_skips_the_field_whole() {
+fn a_tree_inside_the_ground_a_field_would_take_skips_that_place_whole() {
     let tree = SurfaceFeature {
         plant: Some(tesserae_core::SurfacePlant {
             shape: 0,
@@ -553,11 +553,16 @@ fn a_tree_inside_the_ground_a_field_would_take_skips_the_field_whole() {
     );
     let found = changed(SEED, size, level(fielded(None, &[tree]), None), 150.0);
     let with = fields_in(&found, window(size, 150.0));
-    assert!(
-        with.len() < without.len(),
-        "trees skip some fields: {} against {}",
-        with.len(),
-        without.len()
+    let footprints = |fields: &[Found]| {
+        fields
+            .iter()
+            .map(|f| (f.min, f.max))
+            .collect::<HashSet<_>>()
+    };
+    assert_ne!(
+        footprints(&with),
+        footprints(&without),
+        "trees skip the places they stand in, and the cell looks elsewhere"
     );
     for field in &with {
         let trunk = found.iter().any(|(at, v)| {

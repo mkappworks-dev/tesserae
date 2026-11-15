@@ -148,6 +148,21 @@ pub enum ModError {
         field: &'static str,
         rule: &'static str,
     },
+    /// A surface feature's field is out of range or disagrees with its group; names the Biome.
+    BadField {
+        id: String,
+        biome: String,
+        feature: usize,
+        field: &'static str,
+        rule: &'static str,
+    },
+    /// A Biome's planted field names a Plant that is no plain crop, or is out of range.
+    BadCropField {
+        id: String,
+        biome: String,
+        index: usize,
+        rule: String,
+    },
     /// A fluid, reaction or fire row names a Material no loaded Mod registered.
     UnknownName {
         id: String,
@@ -365,6 +380,22 @@ impl fmt::Display for ModError {
                 f,
                 "mod `{id}`: biome `{biome}` surface feature {feature}: {field} {rule}"
             ),
+            ModError::BadField {
+                id,
+                biome,
+                feature,
+                field,
+                rule,
+            } => write!(
+                f,
+                "mod `{id}`: biome `{biome}` surface feature {feature}: {field} {rule}"
+            ),
+            ModError::BadCropField {
+                id,
+                biome,
+                index,
+                rule,
+            } => write!(f, "mod `{id}`: biome `{biome}` crop field {index}: {rule}"),
             ModError::TooManyFeatures {
                 id,
                 biome,

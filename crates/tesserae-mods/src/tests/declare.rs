@@ -1461,6 +1461,7 @@ fn biome(name: &str, temperature: f32, humidity: f32) -> content::BiomeDef {
         sky_fog: None,
         cave_scale: None,
         surface_features: Vec::new(),
+        crop_fields: Vec::new(),
     }
 }
 
@@ -1714,6 +1715,7 @@ fn feature(material: &str, spacing_m: f32) -> content::SurfaceFeature {
         shape: None,
         spacing_m,
         clump: None,
+        field: None,
     }
 }
 

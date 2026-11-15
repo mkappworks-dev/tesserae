@@ -595,12 +595,14 @@ impl Guest for Terra {
                     // A melon in every 16 by 16 m of grass is found while exploring, not a
                     // carpet; the oaks every 9 m give Wood for a Workbench, Chest and Door in a
                     // short walk, and no Wood lies about on its own.
+                    crop_fields: plants::temperate_fields(),
                     surface_features: [SurfaceFeature {
                         material: Some("terra:melon".into()),
                         plant: None,
                         shape: None,
                         spacing_m: 16.0,
                         clump: None,
+                        field: None,
                     }]
                     .into_iter()
                     .chain(plants::temperate())
@@ -621,6 +623,7 @@ impl Guest for Terra {
                         fog: (196, 178, 142),
                     }),
                     cave_scale: Some(1.5),
+                    crop_fields: Vec::new(),
                     surface_features: plants::dry(),
                 },
                 BiomeDef {
@@ -638,6 +641,7 @@ impl Guest for Terra {
                         fog: (176, 190, 208),
                     }),
                     cave_scale: Some(0.0),
+                    crop_fields: Vec::new(),
                     surface_features: plants::cold(),
                 },
                 BiomeDef {
@@ -651,6 +655,7 @@ impl Guest for Terra {
                         fog: (126, 166, 140),
                     }),
                     cave_scale: None,
+                    crop_fields: Vec::new(),
                     surface_features: plants::jungle(),
                 },
                 BiomeDef {
@@ -668,6 +673,7 @@ impl Guest for Terra {
                         fog: (124, 142, 126),
                     }),
                     cave_scale: Some(0.5),
+                    crop_fields: Vec::new(),
                     surface_features: plants::swamp(),
                 },
                 BiomeDef {
@@ -685,6 +691,7 @@ impl Guest for Terra {
                         fog: (192, 178, 136),
                     }),
                     cave_scale: None,
+                    crop_fields: Vec::new(),
                     surface_features: plants::savanna(),
                 },
             ],

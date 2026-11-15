@@ -434,6 +434,7 @@ mod surface_features {
             shape: shape.map(Into::into),
             spacing_m: 8.0,
             clump: None,
+            field: None,
         }
     }
 
@@ -445,6 +446,14 @@ mod surface_features {
 
     fn resolved_with(
         features: Vec<content::SurfaceFeature>,
+        plants: Vec<content::PlantDef>,
+    ) -> Result<(tesserae_core::BiomeTable, Tables, Registry), ModError> {
+        resolved_in(features, Vec::new(), plants)
+    }
+
+    fn resolved_in(
+        features: Vec<content::SurfaceFeature>,
+        crop_fields: Vec<content::CropField>,
         plants: Vec<content::PlantDef>,
     ) -> Result<(tesserae_core::BiomeTable, Tables, Registry), ModError> {
         let mut d = empty();
@@ -487,6 +496,7 @@ mod surface_features {
             sky_fog: None,
             cave_scale: None,
             surface_features: features,
+            crop_fields,
         }];
         let (mut tables, mut registry) = (Tables::builtin(), Registry::builtin());
         let mut behaviours: Vec<Behaviour> =
@@ -615,6 +625,164 @@ mod surface_features {
             frozen.fruit.unwrap().stage_shapes,
             [Some(shape("t:apple")), None, None, None]
         );
+    }
+
+    fn field(crops: &[(&str, f32)]) -> content::CropField {
+        content::CropField {
+            crops: crops.iter().map(|&(n, w)| (n.to_owned(), w)).collect(),
+            plot_m: (8.0, 12.0),
+            spacing_m: 64.0,
+            path: Some("t:sand".into()),
+            ditch: Some("t:sea".into()),
+            near_water_m: Some(24.0),
+        }
+    }
+
+    #[test]
+    fn a_crop_field_resolves_its_crops_to_the_stages_worldgen_stands_and_freezes_into_the_biome() {
+        let (biomes, tables, registry) = resolved_in(
+            vec![],
+            vec![field(&[("t:wheat", 5.0)])],
+            with_stage_shapes(Some("t:cross"), None),
+        )
+        .unwrap();
+        let id = |n: &str| registry.id_of(NameKind::Material, n).unwrap() as u16;
+        let shape = |n: &str| registry.id_of(NameKind::Shape, n).unwrap() as u8;
+        let [frozen] = biomes.as_slice()[0].surface_features.crop_fields() else {
+            panic!("one field");
+        };
+        let [crop] = frozen.crops() else {
+            panic!("one crop");
+        };
+        assert_eq!(
+            crop.materials[..3],
+            [id("t:wheat0"), id("t:wheat1"), id("t:wheat2")]
+        );
+        assert_eq!((crop.len, crop.weight), (3, 5.0));
+        assert_eq!(crop.stage_shapes[..3], [None, Some(shape("t:cross")), None]);
+        assert_eq!(crop.shape, tables.plants.plants()[0].shape.unwrap_or(0));
+        assert_eq!(
+            (frozen.plot_m, frozen.spacing_m, frozen.near_water_m),
+            ((8.0, 12.0), 64.0, Some(24.0))
+        );
+        assert_eq!(
+            (frozen.path, frozen.ditch),
+            (Some(id("t:sand")), Some(id("t:sea")))
+        );
+    }
+
+    #[test]
+    fn a_bad_crop_field_names_the_biome_and_what_is_wrong() {
+        for (bad, says) in [
+            (field(&[("t:oak", 1.0)]), "is not a crop"),
+            (field(&[("t:nope", 1.0)]), "t:nope"),
+            (field(&[("t:wheat", 0.0)]), "weight"),
+            (field(&[]), "1 to 4 crops"),
+            (
+                content::CropField {
+                    plot_m: (5.0, 12.0),
+                    ..field(&[("t:wheat", 1.0)])
+                },
+                "6 to 24",
+            ),
+            (
+                content::CropField {
+                    path: Some("t:nope".into()),
+                    ..field(&[("t:wheat", 1.0)])
+                },
+                "t:nope",
+            ),
+            (
+                content::CropField {
+                    spacing_m: 20.0,
+                    ..field(&[("t:wheat", 1.0)])
+                },
+                "32 to 256",
+            ),
+        ] {
+            let err = resolved_in(vec![], vec![bad], plants())
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains(says), "{says}: {err}");
+        }
+        let err = resolved_in(vec![], vec![field(&[("t:oak", 1.0)])], plants())
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("`field`") && err.contains("crop field 0"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn more_than_two_crop_fields_are_refused() {
+        let fields = vec![field(&[("t:wheat", 1.0)]); 3];
+        let err = resolved_in(vec![], fields, plants())
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("at most 2"), "{err}");
+    }
+
+    #[test]
+    fn a_feature_group_numbers_in_order_and_freezes_its_region_into_the_biome() {
+        let grouped = |plant: &str, group: &str, scale_m, strays| content::SurfaceFeature {
+            field: Some(content::FieldDef {
+                group: group.into(),
+                scale_m,
+                strays,
+            }),
+            ..feature(None, Some(plant), None)
+        };
+        let (biomes, _, _) = resolved(vec![
+            grouped("t:wheat", "flowers", 24.0, 0.1),
+            feature(None, Some("t:oak"), None),
+            grouped("t:grass", "tufts", 12.0, 0.2),
+            grouped("t:kelp", "flowers", 24.0, 0.1),
+        ])
+        .unwrap();
+        let fields: Vec<_> = biomes.as_slice()[0]
+            .surface_features
+            .as_slice()
+            .iter()
+            .map(|f| f.field.map(|g| (g.group, g.scale_m, g.strays)))
+            .collect();
+        assert_eq!(
+            fields,
+            [
+                Some((0, 24.0, 0.1)),
+                None,
+                Some((1, 12.0, 0.2)),
+                Some((0, 24.0, 0.1))
+            ]
+        );
+    }
+
+    #[test]
+    fn a_bad_field_names_the_biome_and_feature() {
+        let bad = |group: &[(f32, f32)]| {
+            resolved(
+                group
+                    .iter()
+                    .map(|&(scale_m, strays)| content::SurfaceFeature {
+                        field: Some(content::FieldDef {
+                            group: "g".into(),
+                            scale_m,
+                            strays,
+                        }),
+                        ..feature(None, Some("t:wheat"), None)
+                    })
+                    .collect(),
+            )
+            .unwrap_err()
+            .to_string()
+        };
+        let err = bad(&[(24.0, 0.7)]);
+        assert!(
+            err.contains("`field`") && err.contains("feature 0") && err.contains("0 to 0.5"),
+            "{err}"
+        );
+        assert!(bad(&[(4.0, 0.1)]).contains("8 to 96"));
+        assert!(bad(&[(24.0, 0.1), (32.0, 0.1)]).contains("same scale and strays"));
     }
 
     #[test]

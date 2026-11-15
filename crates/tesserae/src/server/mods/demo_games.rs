@@ -16,6 +16,7 @@ use super::{LoadedMods, TrustMode, load};
 use crate::world::WorldSettings;
 
 mod biomes;
+mod fields;
 mod food;
 mod plants;
 mod vegetation;

@@ -266,6 +266,7 @@ impl Guest for Tidewater {
                         fog: (132, 172, 192),
                     }),
                     cave_scale: Some(1.4),
+                    crop_fields: plants::lagoon_fields(),
                     surface_features: [food::feature()]
                         .into_iter()
                         .chain(plants::lagoon())
@@ -286,6 +287,7 @@ impl Guest for Tidewater {
                         fog: (190, 184, 166),
                     }),
                     cave_scale: Some(0.0),
+                    crop_fields: Vec::new(),
                     surface_features: [food::feature()]
                         .into_iter()
                         .chain(plants::salt_flats())
@@ -306,6 +308,7 @@ impl Guest for Tidewater {
                         fog: (168, 186, 206),
                     }),
                     cave_scale: None,
+                    crop_fields: Vec::new(),
                     surface_features: plants::cold_shallows(),
                 },
                 BiomeDef {
@@ -319,6 +322,7 @@ impl Guest for Tidewater {
                         fog: (124, 172, 168),
                     }),
                     cave_scale: Some(1.4),
+                    crop_fields: Vec::new(),
                     surface_features: plants::rainforest(),
                 },
                 BiomeDef {
@@ -336,6 +340,7 @@ impl Guest for Tidewater {
                         fog: (146, 164, 164),
                     }),
                     cave_scale: Some(0.7),
+                    crop_fields: Vec::new(),
                     surface_features: plants::tidal_marsh(),
                 },
             ],

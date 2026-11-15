@@ -1657,6 +1657,11 @@ fn declares_plants() -> impl FnOnce(&mut crate::server::mods::LoadedMods) {
             spacing_m: 8.0,
             plant: Some(SurfacePlant { shape: 0, kind }),
             clump: None,
+            field: Some(tesserae_core::Field {
+                group: 0,
+                scale_m: 24.0,
+                strays: 0.1,
+            }),
         };
         let world = loaded.world.as_mut().unwrap();
         let mut biomes = world.biomes.as_slice().to_vec();
@@ -1677,6 +1682,15 @@ fn declares_plants() -> impl FnOnce(&mut crate::server::mods::LoadedMods) {
             })),
         ])
         .unwrap();
+        let mut field =
+            tesserae_core::CropField::new((8.0, 12.0), 64.0, Some(id("terra:dirt")), None, None);
+        field
+            .push(tesserae_core::FieldCrop::new(0, &stages[..2], &[], 3.0).unwrap())
+            .unwrap();
+        biomes[0].surface_features = biomes[0]
+            .surface_features
+            .with_crop_fields(&[field])
+            .unwrap();
         world.biomes = tesserae_core::BiomeTable::new(&biomes).unwrap();
     }
 }
@@ -1686,10 +1700,18 @@ fn plants_a_biome_names_are_frozen_into_the_world_and_survive_the_game_dropping_
     let dir = Directory::new();
     Rig::open_with(dir.opening(), WorldSettings::default(), declares_plants()).settled_save();
     let saved = save::inspect(&dir.0).unwrap().unwrap().commit.parameters;
-    let features = &saved.biomes.unwrap()[0].surface_features;
+    let saved = saved.biomes.unwrap();
+    let features = &saved[0].surface_features;
     assert_eq!(features.len(), 2);
     assert!(features.iter().all(|f| f.plant.is_some()));
     assert_eq!(features[0].spacing_m, 8.0);
+    assert_eq!(features[0].field.unwrap().scale_m, 24.0);
+    let saved_fields = &saved[0].crop_fields;
+    assert_eq!(saved_fields.len(), 1);
+    assert_eq!(
+        saved_fields[0].crops[0].materials,
+        ["terra:dirt", "terra:grass"]
+    );
 
     // The Game now declares no Plant, or another: the World's snapshot wins.
     let declared = prepared_world(&dir, declares_plants());
@@ -1702,6 +1724,13 @@ fn plants_a_biome_names_are_frozen_into_the_world_and_survive_the_game_dropping_
         assert_eq!(
             reopened.biomes.as_slice()[0].surface_features,
             declared.biomes.as_slice()[0].surface_features
+        );
+        assert_eq!(
+            reopened.biomes.as_slice()[0]
+                .surface_features
+                .crop_fields()
+                .len(),
+            1
         );
         assert_eq!(
             reopened.biomes.as_slice()[0]
