@@ -322,12 +322,14 @@
 .menu-item.danger:focus-visible {
   background: #c8483a33;
 }
-.btn.danger {
+.btn.danger,
+.game .btn.danger {
   background: #b83a2e;
   border-color: #b83a2e;
   color: #fff;
 }
-.btn.danger:hover:not(:disabled) {
+.btn.danger:hover:not(:disabled),
+.game .btn.danger:hover:not(:disabled) {
   background: #cf4538;
   border-color: #cf4538;
 }
