@@ -29,6 +29,12 @@ pub enum WaypointIntent {
     Remove {
         id: u32,
     },
+    /// Renames and re-kinds one; an empty `name` keeps the current one.
+    Edit {
+        id: u32,
+        name: String,
+        kind: String,
+    },
 }
 
 /// Why the Server declined an intent.
@@ -56,12 +62,12 @@ pub struct WaypointsChanged(pub marker::Waypoints);
 /// For the Client to put on screen.
 pub fn message(reason: Reason) -> &'static str {
     match reason {
-        Reason::Fog => "That ground is unexplored.",
+        Reason::Fog => "Only explored ground can hold a Waypoint.",
         Reason::NoSuchKind => "No such Marker kind.",
         Reason::BadName => "Choose a shorter name without control characters.",
         Reason::TooMany => "Too many Waypoints. Remove one first.",
         Reason::NoSuchWaypoint => "That Waypoint no longer exists.",
-        Reason::DeathMarker => "The death marker cannot be removed.",
+        Reason::DeathMarker => "The death marker cannot be changed.",
         Reason::MapOff => "The Map is off in this World.",
     }
 }
@@ -111,6 +117,21 @@ fn answer(
                     Ok(())
                 }
             }
+            WaypointIntent::Edit { id, name, kind } => match waypoints.get(*id) {
+                None => Err(Reason::NoSuchWaypoint),
+                Some(w) if w.death => Err(Reason::DeathMarker),
+                Some(_) => {
+                    let index = tables.markers.index_of(kind);
+                    if index.is_none() || index == tables.markers.death {
+                        Err(Reason::NoSuchKind)
+                    } else if !marker::valid_name(name) {
+                        Err(Reason::BadName)
+                    } else {
+                        waypoints.edit(*id, name, kind);
+                        Ok(())
+                    }
+                }
+            },
             WaypointIntent::Remove { id } => match waypoints.get(*id) {
                 None => Err(Reason::NoSuchWaypoint),
                 Some(w) if w.death => Err(Reason::DeathMarker),
@@ -354,5 +375,86 @@ mod tests {
         assert!(refused.is_empty());
         assert_eq!(sent[0].list().len(), 1);
         assert!(sent[0].list()[0].death);
+    }
+
+    fn two_kinds() -> MarkerKinds {
+        let mut markers = kinds();
+        markers.kinds.push(MarkerKind {
+            name: "t:grave".into(),
+            icon: Icon::Death,
+            color: [9, 9, 9, 255],
+        });
+        markers.kinds.push(MarkerKind {
+            name: "t:camp".into(),
+            icon: Icon::Camp,
+            color: [4, 5, 6, 255],
+        });
+        markers.death = Some(1);
+        markers
+    }
+
+    fn edit(id: u32, name: &str, kind: &str) -> WaypointIntent {
+        WaypointIntent::Edit {
+            id,
+            name: name.into(),
+            kind: kind.into(),
+        }
+    }
+
+    #[test]
+    fn edit_renames_and_re_kinds_and_sends_the_list() {
+        let mut app = game(two_kinds());
+        ask(&mut app, add(10.5, 10.5, "Base", KIND));
+        let (refused, sent) = ask(&mut app, edit(1, " Camp ", "t:camp"));
+        assert!(refused.is_empty());
+        let w = &sent[0].list()[0];
+        assert_eq!((w.name.as_str(), w.kind.as_str()), ("Camp", "t:camp"));
+        assert_eq!((w.x_m, w.z_m), (10.5, 10.5));
+    }
+
+    #[test]
+    fn a_blank_edit_name_keeps_the_old_one() {
+        let mut app = game(two_kinds());
+        ask(&mut app, add(10.5, 10.5, "Base", KIND));
+        let (_, sent) = ask(&mut app, edit(1, "  ", "t:camp"));
+        assert_eq!(sent[0].list()[0].name, "Base");
+    }
+
+    #[test]
+    fn edit_is_refused_like_add_and_changes_nothing() {
+        let mut app = game(two_kinds());
+        ask(&mut app, add(10.5, 10.5, "Base", KIND));
+        let long = "x".repeat(marker::MAX_NAME_CHARS + 1);
+        for (intent, reason) in [
+            (edit(1, &long, KIND), Reason::BadName),
+            (edit(1, "a\tb", KIND), Reason::BadName),
+            (edit(1, "x", "t:nowhere"), Reason::NoSuchKind),
+            (edit(1, "x", "t:grave"), Reason::NoSuchKind),
+            (edit(99, "x", KIND), Reason::NoSuchWaypoint),
+        ] {
+            let (refused, sent) = ask(&mut app, intent);
+            assert_eq!(refused, [reason]);
+            assert!(sent.is_empty());
+        }
+    }
+
+    #[test]
+    fn the_death_marker_cannot_be_edited_and_a_forbidden_map_refuses() {
+        let mut app = game(two_kinds());
+        let death = {
+            let mut q = app.world_mut().query::<&mut PlayerWaypoints>();
+            q.single_mut(app.world_mut())
+                .unwrap()
+                .push("Died", "t:grave", 10.5, 10.5, true)
+        };
+        tick(&mut app);
+        app.world_mut()
+            .resource_mut::<Messages<WaypointsChanged>>()
+            .clear();
+        let (refused, sent) = ask(&mut app, edit(death, "Mine", KIND));
+        assert_eq!(refused, [Reason::DeathMarker]);
+        assert!(sent.is_empty());
+        app.insert_resource(super::super::map::MapPolicy { enabled: false });
+        assert_eq!(ask(&mut app, edit(death, "Mine", KIND)).0, [Reason::MapOff]);
     }
 }

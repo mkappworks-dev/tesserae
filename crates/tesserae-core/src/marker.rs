@@ -139,6 +139,18 @@ impl Waypoints {
         Some(self.list.remove(at))
     }
 
+    /// Renames and re-kinds a Waypoint; a blank `name` keeps the old one.
+    pub fn edit(&mut self, id: u32, name: &str, kind: &str) -> bool {
+        let Some(w) = self.list.iter_mut().find(|w| w.id == id) else {
+            return false;
+        };
+        if !name.trim().is_empty() {
+            w.name = name.trim().to_owned();
+        }
+        w.kind = kind.to_owned();
+        true
+    }
+
     /// Drops the death marker, so a new death replaces the old.
     pub fn clear_death(&mut self) {
         self.list.retain(|w| !w.death);
