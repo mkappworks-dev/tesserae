@@ -8,7 +8,7 @@ adds the mechanism; a Game or Mod supplies Templates.
 
 Vocabulary: **Template**, **Structure**, **Keep**, **Ground layer**,
 **Obtainable**, **Settlement** and **Plot** are new and are in [GLOSSARY.md](../../GLOSSARY.md). The decision record is
-[ADR-0028](../../docs/adr/0028-structures-are-declared-templates-placed-as-pure-functions-of-metres.md),
+[ADR-0029](../../docs/adr/0029-structures-are-declared-templates-placed-as-pure-functions-of-metres.md),
 with an amendment to
 [ADR-0003](../../docs/adr/0003-voxel-size-is-per-world.md). Related decisions:
 [ADR-0001](../../docs/adr/0001-wasm-mod-boundary.md),
@@ -449,6 +449,6 @@ the Mod loader's data tests.
 - The mockup (ticket 01) was approved on 2026-11-15. Its Outside and Inside
   views are review aids; the game shows only the list, the turn, the Placing
   ghost and the HUD.
-- The design was settled by a grilling session; its decisions are in ADR-0028
+- The design was settled by a grilling session; its decisions are in ADR-0029
   and this spec. Where it said Use sends the Structure intent, Place sends it
   and Use only opens the list.

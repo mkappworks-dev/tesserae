@@ -28,4 +28,4 @@ metres, never in the World's Voxels. A Structure takes, for each of the World's
 Voxels, the Template cell its centre falls in, so it has the same footprint in
 metres at 1.0, 0.5 and 0.25 m. A Template finer than the World loses detail; a
 coarser one repeats cells.
-[ADR-0028](0028-structures-are-declared-templates-placed-as-pure-functions-of-metres.md).
+[ADR-0029](0029-structures-are-declared-templates-placed-as-pure-functions-of-metres.md).

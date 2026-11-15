@@ -20,4 +20,4 @@ with its measured numbers and adds step 20b, Blueprints and Sites.
 - [ ] The data-mods and contract-compatibility documents list the new fields.
 - [ ] DESIGN.md's step 20 row says Done, its note records what shipped and what
       did not, and a step 20b row exists.
-- [ ] ADR-0028 is checked against what was built and amended where it differs.
+- [ ] ADR-0029 is checked against what was built and amended where it differs.

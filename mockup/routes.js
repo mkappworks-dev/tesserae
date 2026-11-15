@@ -87,9 +87,9 @@ function syncRoute() {
                                   ? "Vegetation"
                                   : state.screen === "map"
                                     ? "Map"
-                                  : state.screen === "structures"
-                                    ? "Structures"
-                                    : "Worlds";
+                                    : state.screen === "structures"
+                                      ? "Structures"
+                                      : "Worlds";
   document.title = `${title} — Tesserae prototype`;
 }
 
