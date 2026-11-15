@@ -191,7 +191,6 @@ humidity = 0.9
 ground = { rock = "full:rock", soil = "full:ash", surface = "full:wood" }
 cave-scale = 1.5
 surface-features = [{ material = "full:wood", spacing-m = 24.0, clump = { scale-m = 48.0, strength = 0.5 }, field = { group = "beds", scale-m = 24.0, strays = 0.1 } }]
-crop-fields = [{ crops = [["full:wheat", 5.0], ["full:rye", 1.0]], plot-m = [8.0, 14.0], spacing-m = 64.0, path = "full:wood", ditch = "full:ash", near-water-m = 32.0 }]
 
 [[ores]]
 material = "full:ash"

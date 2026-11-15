@@ -352,14 +352,7 @@ fn component() -> Declaration {
                         strays: 0.1,
                     }),
                 }],
-                crop_fields: vec![content::CropField {
-                    crops: vec![("full:wheat".into(), 5.0), ("full:rye".into(), 1.0)],
-                    plot_m: (8.0, 14.0),
-                    spacing_m: 64.0,
-                    path: Some("full:wood".into()),
-                    ditch: Some("full:ash".into()),
-                    near_water_m: Some(32.0),
-                }],
+                crop_fields: Vec::new(),
             },
         ],
         ores: vec![
@@ -864,6 +857,39 @@ fn data_biome_can_name_a_soundscape() {
     assert_eq!(
         declaration.biomes[0].soundscape.as_deref(),
         Some("my-mod:wind")
+    );
+}
+
+#[test]
+fn data_biome_can_declare_crop_fields_and_a_field_group() {
+    let declaration = parse(
+        "[[biomes]]\nname='dry'\ntemperature=0.8\nhumidity=0.2\n\
+         surface-features=[{ plant='a:b', spacing-m=4.0, field={ group='g', scale-m=20.0, strays=0.1 } }]\n\
+         crop-fields=[{ crops=[['a:wheat', 6.0], ['a:rye', 1.0]], plot-m=[8.0, 14.0], spacing-m=64.0, \
+         path='a:sand', ditch='a:water', near-water-m=32.0 }, { crops=[['a:wheat', 1.0]], \
+         plot-m=[6.0, 6.0], spacing-m=32.0 }]\n",
+    )
+    .unwrap();
+    let biome = &declaration.biomes[0];
+    let field = biome.surface_features[0].field.as_ref().unwrap();
+    assert_eq!(
+        (field.group.as_str(), field.scale_m, field.strays),
+        ("g", 20.0, 0.1)
+    );
+    let [first, second] = &biome.crop_fields[..] else {
+        panic!("two crop fields");
+    };
+    assert_eq!(
+        first.crops,
+        [("a:wheat".to_owned(), 6.0), ("a:rye".to_owned(), 1.0)]
+    );
+    assert_eq!((first.plot_m, first.spacing_m), ((8.0, 14.0), 64.0));
+    assert_eq!(first.path.as_deref(), Some("a:sand"));
+    assert_eq!(first.ditch.as_deref(), Some("a:water"));
+    assert_eq!(first.near_water_m, Some(32.0));
+    assert_eq!(
+        (&second.path, &second.ditch, second.near_water_m),
+        (&None, &None, None)
     );
 }
 
