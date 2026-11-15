@@ -317,6 +317,12 @@ glass, doors, chests and lamps are Terra's exported ones. Every Game maps
 Terra's choices to its own Materials, so a Meadow farmhouse is birch, fieldstone
 and moss shingles where Terra's is spruce, cobblestone and shingles.
 
+The bridges each have their own build: Terra's stone bridge humps over a low
+brick-ringed arch between parapets with lamps at the ends; Meadow's footbridge
+steps up onto log trestles with posts and plank rails; Tidewater's rope bridge
+sags between two raised log landings with rope rails and lamp posts. The preview
+runs a stream under every column a bridge spans in the open.
+
 - A Tool, not an Item: it takes a hand slot beside the hotbar. Use (G) opens the
   Template list, R turns the Structure a quarter, and Place (right mouse) lays
   the whole Structure or nothing. Z removes it in one step.

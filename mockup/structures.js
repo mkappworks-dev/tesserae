@@ -535,16 +535,98 @@ const B = {
     g.put(Math.floor(n / 2), h + 1, Math.floor(n / 2), M("lamp"));
     return g.done();
   },
-  bridge: (len, w = 3) => {
-    const g = new Grid();
-    for (let x = 0; x < len; x++)
+  /* A stone bridge: a deck that humps over one round arch, parapets with coping, lamps at the ends. */
+  stoneBridge: (len = 15, w = 5, r = 3.5) => {
+    const g = new Grid(),
+      mid = (len - 1) / 2;
+    for (let x = 0; x < len; x++) {
+      const half = 1 + Math.min(7, Math.floor(mid - Math.abs(x - mid))),
+        full = half >> 1,
+        dx = Math.abs(x - mid),
+        arch = dx < r ? Math.round(2.4 * Math.sqrt(1 - (dx / r) ** 2)) : 0;
       for (let z = 0; z < w; z++) {
-        g.put(x, 0, z, z === 0 || z === w - 1 ? M("base") : M("floor", "slab"));
-        if (z === 0 || z === w - 1)
-          g.put(x, 1, z, x % 3 === 0 ? M("frame", "post") : M("frame", "slab"));
+        const edge = z === 0 || z === w - 1;
+        for (let y = 0; y < full; y++)
+          g.put(
+            x,
+            y,
+            z,
+            y < arch
+              ? "air"
+              : y === arch && edge && arch
+                ? M("accent")
+                : M(edge ? "wall" : "base"),
+          );
+        if (half % 2) g.put(x, full, z, edge ? M("wall") : M("floor", "slab"));
+        else if (!edge && full) g.put(x, full - 1, z, M("floor"));
+        if (edge) {
+          const top = full + (half % 2);
+          g.put(x, top, z, M("wall"));
+          g.put(x, top + 1, z, M("trim", "slab"));
+        }
       }
+      if (x === 0 || x === len - 1)
+        for (let z = 0; z < w; z++) g.fill(x, -2, z, x, -1, z, M("base"));
+    }
     for (const x of [0, len - 1])
-      for (let z = 0; z < w; z++) g.fill(x, -3, z, x, -1, z, M("base"));
+      (g.put(x, 3, 0, M("lamp")), g.put(x, 3, w - 1, M("lamp")));
+    return g.done();
+  },
+  /* A plank footbridge that steps up onto log trestles, with posts and a handrail. */
+  footbridge: (len = 11, w = 3) => {
+    const g = new Grid();
+    for (let x = 0; x < len; x++) {
+      const end = x === 0 || x === len - 1,
+        ramp = x === 1 || x === len - 2,
+        y = end ? 0 : ramp ? 0 : 1;
+      for (let z = 0; z < w; z++) {
+        g.put(x, y, z, end || !ramp ? M("floor", "slab") : M("floor"));
+        if (z === 0 || z === w - 1)
+          g.put(
+            x,
+            y + 1,
+            z,
+            x % 2 === 0
+              ? M("frame", "post")
+              : M("trim", "panel", z === 0 ? 2 : 0),
+          );
+      }
+      if (x === 2 || x === len - 3)
+        for (let z = 0; z < w; z++) g.put(x, 0, z, M("frame"));
+    }
+    for (const x of [0, len - 1])
+      for (let z = 0; z < w; z++) g.put(x, -1, z, M("base"));
+    return g.done();
+  },
+  /* A rope bridge sagging between two raised log landings, rope rails and lamp posts at each end. */
+  ropeBridge: (len = 17, w = 3) => {
+    const g = new Grid(),
+      mid = (len - 1) / 2,
+      span = mid - 2;
+    for (let x = 0; x < len; x++) {
+      const landing = x <= 1 || x >= len - 2,
+        t = (x - mid) / span,
+        y = landing ? 3 : 3 - Math.round(2.4 * (1 - Math.min(1, t * t)));
+      for (let z = 0; z < w; z++) {
+        g.put(x, y, z, M("floor", "slab"));
+        if (landing)
+          g.fill(
+            x,
+            0,
+            z,
+            x,
+            y - 1,
+            z,
+            M(z === 0 || z === w - 1 ? "frame" : "base"),
+          );
+        if (z === 0 || z === w - 1) {
+          if (!landing) g.put(x, y + 1, z, M("trim", "post"));
+          if (x === 1 || x === len - 2)
+            (g.fill(x, y + 1, z, x, y + 3, z, M("frame", "post")),
+              g.put(x, y + 4, z, M("lamp")));
+        }
+      }
+    }
     return g.done();
   },
   dock: (len, w = 3) => {
@@ -769,8 +851,14 @@ const GAME_TEMPLATES = {
       "wild",
       () => B.tower(6, 11, 3),
     ),
-    T("Terra", "stone-bridge", "Stone bridge", "Spans a stream", "wild", () =>
-      B.bridge(11),
+    T(
+      "Terra",
+      "stone-bridge",
+      "Stone bridge",
+      "One arch over a stream",
+      "wild",
+      () => B.stoneBridge(),
+      "stoneBridge",
     ),
     T("Terra", "ruined-keep", "Ruined keep", "Broken walls", "wild", () =>
       B.ruin(9, 9, 6),
@@ -831,9 +919,10 @@ const GAME_TEMPLATES = {
       "Tidewater",
       "rope-bridge",
       "Rope bridge",
-      "Between two islands",
+      "Sags between two landings",
       "wild",
-      () => B.bridge(15, 2),
+      () => B.ropeBridge(),
+      "ropeBridge",
     ),
   ],
   Ember: [
@@ -944,8 +1033,14 @@ const GAME_TEMPLATES = {
       B.stilt(4, 4, 4),
     ),
     T("Meadow", "hive", "Hive", "Stepped mound", "wild", () => B.pyramid(5)),
-    T("Meadow", "footbridge", "Footbridge", "Over a brook", "wild", () =>
-      B.bridge(7, 2),
+    T(
+      "Meadow",
+      "footbridge",
+      "Footbridge",
+      "On log trestles over a brook",
+      "wild",
+      () => B.footbridge(),
+      "woodBridge",
     ),
     T("Meadow", "fairy-ring", "Fairy ring", "Lights in a circle", "wild", () =>
       B.ring(3, 8, 1),
@@ -1209,7 +1304,11 @@ async function drawStructure() {
     byName = new Map(index.materials.map((m) => [m.name, m])),
     shapes = new Map(index.shapes.map((x) => [x.name.split(":")[1], x.boxes])),
     names = [
-      ...new Set(cells.map((c) => materialOf(tpl, c)).concat(["terra:grass"])),
+      ...new Set(
+        cells
+          .map((c) => materialOf(tpl, c))
+          .concat(["terra:grass", "terra:sand", "terra:water"]),
+      ),
     ];
   const faces = new Map(
     await Promise.all(
@@ -1226,7 +1325,7 @@ async function drawStructure() {
   if (!document.body.contains(canvas) || state.structure !== s) return;
   const { g, w, h, ratio } = setupCanvas(canvas);
   const ground =
-    s.view === "inside" && s.floor === "cellar" ? [] : groundCells(t);
+    s.view === "inside" && s.floor === "cellar" ? [] : groundCells(t, tpl);
   const all = [...ground, ...cells];
   const pts = all.flatMap((c) => [
     iso([c.x, c.y, c.z], 1, [0, 0]),
@@ -1304,15 +1403,31 @@ async function drawStructure() {
   }
   g.globalAlpha = 1;
 }
-function groundCells(t) {
+/* Grass round the Structure, and for a bridge a stream through every column it spans in the open. */
+function groundCells(t, tpl) {
   const taken = new Set(
       t.cells.filter((c) => c.y === -1).map((c) => `${c.x},${c.z}`),
     ),
+    long = t.w >= t.d,
+    standing = new Set(
+      t.cells
+        .filter((c) => c.k === "solid" && c.y === 0)
+        .map((c) => (long ? c.x : c.z)),
+    ),
+    stream = (x, z) =>
+      /Bridge$/.test(tpl?.style || "") &&
+      (long
+        ? x >= 0 && x < t.w && !standing.has(x)
+        : z >= 0 && z < t.d && !standing.has(z)),
     out = [];
   for (let x = -2; x <= t.w + 1; x++)
-    for (let z = -2; z <= t.d + 1; z++)
-      if (!taken.has(`${x},${z}`))
-        out.push({ x, y: -1, z, shape: "cube", ground: "terra:grass" });
+    for (let z = -2; z <= t.d + 1; z++) {
+      if (taken.has(`${x},${z}`)) continue;
+      if (stream(x, z)) {
+        out.push({ x, y: -2, z, shape: "cube", ground: "terra:sand" });
+        out.push({ x, y: -1, z, shape: "slab", ground: "terra:water" });
+      } else out.push({ x, y: -1, z, shape: "cube", ground: "terra:grass" });
+    }
   return out;
 }
 
