@@ -763,10 +763,7 @@ fn a_game_may_forbid_the_map_and_absent_permits_it() {
         let mut load = Load::new();
         apply(d, "game", &mut load.tables, &mut load.registry, root)
     };
-    assert_eq!(
-        apply_world(Some(false), true).unwrap().map.unwrap().enabled,
-        false
-    );
+    assert!(!apply_world(Some(false), true).unwrap().map.unwrap().enabled);
     assert!(apply_world(Some(true), true).unwrap().map.unwrap().enabled);
     assert!(apply_world(None, true).unwrap().map.is_none());
     assert!(matches!(
