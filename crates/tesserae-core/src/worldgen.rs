@@ -9,6 +9,8 @@
 //! Contrast `crate::testgen`, which is tuned in Voxel indices on purpose: it
 //! feeds the benches a fixed surface and makes no World.
 
+mod fields;
+
 use crate::chunk::{CHUNK_SIZE, Chunk, ChunkBuilder};
 use crate::climate::{
     BIOMES_SINCE, Biome, BiomeId, BiomeTable, Climate, ClimateField, ClimateParams, MAX_BIOMES,
@@ -361,6 +363,27 @@ impl WorldgenParams {
             )?;
             require(!tables.fluids.contains(m), field, "is a fluid")?;
         }
+        for field in self
+            .biomes
+            .as_slice()
+            .iter()
+            .flat_map(|b| b.surface_features.crop_fields())
+        {
+            for m in field.materials() {
+                require(
+                    tables.materials.contains(m),
+                    "biomes.crop_fields",
+                    "names no registered Material",
+                )?;
+            }
+            if let Some(path) = field.path {
+                require(
+                    tables.materials.solid(Voxel::cube(path)) && !tables.fluids.contains(path),
+                    "biomes.crop_fields.path",
+                    "is not a solid Material",
+                )?;
+            }
+        }
         Ok(())
     }
 
@@ -369,6 +392,19 @@ impl WorldgenParams {
     /// load has only once each Declaration is in.
     pub fn validate_lake(&self, tables: &Tables) -> Result<(), ParamError> {
         self.validate_ground(tables)?;
+        for ditch in self
+            .biomes
+            .as_slice()
+            .iter()
+            .flat_map(|b| b.surface_features.crop_fields())
+            .filter_map(|f| f.ditch)
+        {
+            require(
+                tables.fluids.contains(ditch),
+                "biomes.crop_fields.ditch",
+                "has no fluid row",
+            )?;
+        }
         let Some(water) = self.water else {
             return Ok(());
         };
@@ -587,6 +623,8 @@ struct SurfaceScatter {
     rise_m: f32,
     /// The widest a tree or vine feature reaches from its column, in metres; 0 with none.
     reach_m: f32,
+    /// Whether some Biome declares planted fields.
+    fields: bool,
 }
 
 impl SurfaceScatter {
@@ -617,12 +655,18 @@ impl SurfaceScatter {
                 _ => None,
             })
             .fold(0.0, f32::max);
-        (most > 0.0).then_some(SurfaceScatter {
+        let fields = params
+            .biomes
+            .as_slice()
+            .iter()
+            .any(|b| !b.surface_features.crop_fields().is_empty());
+        (most > 0.0 || fields).then_some(SurfaceScatter {
             unit_chance,
             most,
             plants: plants().next().is_some(),
             rise_m,
             reach_m,
+            fields,
         })
     }
 
@@ -660,15 +704,17 @@ impl SurfaceScatter {
         z_m: f32,
     ) -> Option<&'a SurfaceFeature> {
         let mut reach = 0.0;
-        features.as_slice().iter().enumerate().find_map(|(i, f)| {
+        let (index, feature) = features.as_slice().iter().enumerate().find(|&(i, f)| {
             let mut chance = Self::chance(self.unit_chance, f.spacing_m);
             if let Some(clump) = f.clump {
                 let salt = CLUMP_SALT.wrapping_mul(i as u32 + 1);
                 chance = (chance * clump.factor(seed.wrapping_add(salt), x_m, z_m)).min(1.0);
             }
             reach += chance;
-            (draw < reach).then_some(f)
-        })
+            draw < reach
+        })?;
+        // A drawn member the region does not hold leaves the column bare, not to the next feature.
+        fields::admits(features, index, seed, x_m, z_m).then_some(feature)
     }
 
     /// Uniform in `[0, 1)`, from the seed and the column's metre position alone.
@@ -1106,10 +1152,25 @@ impl Worldgen {
             );
         }
         if let Some(scatter) = &self.scatter {
-            self.scatter(&mut chunk, scatter, &surface_m, [cx, cy, cz], floor_m);
+            let size = CHUNK_SIZE as i32;
+            let margin = (scatter.reach_m / self.voxel_size).ceil() as i32 + 1;
+            let region = [
+                [cx, cz].map(|c| c * size - margin),
+                [cx, cz].map(|c| (c + 1) * size + margin),
+            ];
+            let placed = self.fields_near(scatter, region);
+            self.scatter(
+                &mut chunk,
+                scatter,
+                &placed,
+                &surface_m,
+                [cx, cy, cz],
+                floor_m,
+            );
             if scatter.plants {
-                self.plants(&mut chunk, scatter, [cx, cy, cz]);
+                self.plants(&mut chunk, scatter, &placed, [cx, cy, cz]);
             }
+            self.crop_fields(&mut chunk, &placed, [cx, cy, cz]);
         }
         chunk
     }
@@ -1251,6 +1312,7 @@ impl Worldgen {
         &self,
         chunk: &mut Chunk,
         scatter: &SurfaceScatter,
+        placed: &[fields::Placed],
         surface_m: &[f32; SURFACE_W * SURFACE_W],
         coord: [i32; 3],
         floor_m: f32,
@@ -1272,7 +1334,9 @@ impl Worldgen {
                 }
                 let (x_m, z_m) = (self.axis_m(coord[0], x), self.axis_m(coord[2], z));
                 let draw = SurfaceScatter::draw(self.seed, x_m, z_m);
-                if draw >= scatter.most {
+                if draw >= scatter.most
+                    || fields::cell_at(placed, coord[0] * size + x, coord[2] * size + z).is_some()
+                {
                     continue;
                 }
                 let Some(biome) = self
@@ -1322,8 +1386,23 @@ impl Worldgen {
 
     /// The Plant a Biome stands on the column at global Voxel `(gx, gz)`, if any: a pure function
     /// of the seed and the position, so every Chunk that reaches the column decides alike. It
-    /// reads no Chunk, so a tree is the same from any Chunk's viewpoint.
-    fn plant_at(&self, scatter: &SurfaceScatter, gx: i32, gz: i32) -> Option<Standing> {
+    /// reads no Chunk, so a tree is the same from any Chunk's viewpoint. Nothing stands on a
+    /// planted field's columns.
+    fn plant_at(
+        &self,
+        scatter: &SurfaceScatter,
+        placed: &[fields::Placed],
+        gx: i32,
+        gz: i32,
+    ) -> Option<Standing> {
+        if fields::cell_at(placed, gx, gz).is_some() {
+            return None;
+        }
+        self.plant_raw(scatter, gx, gz)
+    }
+
+    /// [`Self::plant_at`] before a planted field clears the column.
+    fn plant_raw(&self, scatter: &SurfaceScatter, gx: i32, gz: i32) -> Option<Standing> {
         self.params.ground?;
         let (x_m, z_m) = (self.global_m(gx), self.global_m(gz));
         let draw = SurfaceScatter::draw(self.seed, x_m, z_m);
@@ -1544,7 +1623,13 @@ impl Worldgen {
     /// Stands the Plants whose Voxels fall in this Chunk. Trees reach over a Chunk's border, so
     /// every column within the widest canopy is asked, in one fixed order, and a Voxel goes only
     /// into an empty cell: the first tree to claim it wins from every Chunk's viewpoint.
-    fn plants(&self, chunk: &mut Chunk, scatter: &SurfaceScatter, coord: [i32; 3]) {
+    fn plants(
+        &self,
+        chunk: &mut Chunk,
+        scatter: &SurfaceScatter,
+        placed: &[fields::Placed],
+        coord: [i32; 3],
+    ) {
         let size = CHUNK_SIZE as i32;
         let origin = [coord[0] * size, coord[1] * size, coord[2] * size];
         let (lowest, _) = self.terrain_band_m();
@@ -1582,7 +1667,7 @@ impl Worldgen {
             for gx in origin[0] - margin..origin[0] + size + margin {
                 let own = (origin[0]..origin[0] + size).contains(&gx)
                     && (origin[2]..origin[2] + size).contains(&gz);
-                let Some(standing) = self.plant_at(scatter, gx, gz) else {
+                let Some(standing) = self.plant_at(scatter, placed, gx, gz) else {
                     continue;
                 };
                 let base = standing.base;
@@ -1672,10 +1757,32 @@ impl Worldgen {
             |a: usize| (min_m[a] / size).floor() as i32..=(max_m[a] / size).floor() as i32;
         let (xs, zs) = (columns(0), columns(1));
         let margin = (scatter.reach_m / size).ceil() as i32 + 1;
+        let placed = self.fields_near(
+            scatter,
+            [
+                [*xs.start() - margin, *zs.start() - margin],
+                [*xs.end() + margin + 1, *zs.end() + margin + 1],
+            ],
+        );
         let mut clear_m = f32::MIN;
+        for gz in zs.clone() {
+            for gx in xs.clone() {
+                if matches!(
+                    fields::cell_at(&placed, gx, gz),
+                    Some((_, fields::Cell::Plot { planted: true, .. }))
+                ) {
+                    let top = top_index(
+                        self.surface_height_m(self.global_m(gx), self.global_m(gz)),
+                        0.0,
+                        size,
+                    );
+                    clear_m = clear_m.max(self.global_m(top + 2));
+                }
+            }
+        }
         for gz in *zs.start() - margin..=*zs.end() + margin {
             for gx in *xs.start() - margin..=*xs.end() + margin {
-                let Some(standing) = self.plant_at(scatter, gx, gz) else {
+                let Some(standing) = self.plant_at(scatter, &placed, gx, gz) else {
                     continue;
                 };
                 let base = standing.base;

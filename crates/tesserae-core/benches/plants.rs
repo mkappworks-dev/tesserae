@@ -278,6 +278,7 @@ fn sixteen(cross: u8, branched: bool) -> Vec<SurfaceFeature> {
         spacing_m,
         plant: Some(SurfacePlant { shape: cross, kind }),
         clump: None,
+        field: None,
     };
     let mut f = vec![
         plant(TRUNK, 7.0, Kind::Tree(tree((3.0, 5.0), 2.5, 0))),

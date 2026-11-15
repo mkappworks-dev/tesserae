@@ -592,6 +592,9 @@ pub struct SavedBiome {
     /// Absent is bare ground, as every Biome was before it could declare features.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub surface_features: Vec<SavedSurfaceFeature>,
+    /// Absent is a Biome with no planted fields, as every Biome was before them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub crop_fields: Vec<SavedCropField>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -606,6 +609,45 @@ pub struct SavedSurfaceFeature {
     /// Absent scatters evenly, as every feature did before groves.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub clump: Option<SavedClump>,
+    /// Absent stands wherever it is drawn, as every feature did before fields.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub field: Option<SavedField>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SavedField {
+    pub group: u8,
+    pub scale_m: f32,
+    pub strays: f32,
+}
+
+/// A planted field, frozen with the Biome so a Game that later changes the crops never reshapes the
+/// World.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SavedCropField {
+    pub crops: Vec<SavedFieldCrop>,
+    pub plot_m: [f32; 2],
+    pub spacing_m: f32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ditch: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub near_water_m: Option<f32>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SavedFieldCrop {
+    pub materials: Vec<String>,
+    /// Absent is a cube.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shape: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub stage_shapes: Vec<Option<String>>,
+    pub weight: f32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -841,8 +883,19 @@ fn saved_biome(b: &crate::Biome, mapping: &Mapping) -> Result<SavedBiome, Error>
                         scale_m: c.scale_m,
                         strength: c.strength,
                     }),
+                    field: f.field.map(|g| SavedField {
+                        group: g.group,
+                        scale_m: g.scale_m,
+                        strays: g.strays,
+                    }),
                 })
             })
+            .collect::<Result<_, Error>>()?,
+        crop_fields: b
+            .surface_features
+            .crop_fields()
+            .iter()
+            .map(|f| saved_crop_field(f, mapping))
             .collect::<Result<_, Error>>()?,
     })
 }
@@ -878,7 +931,7 @@ fn restored_biomes(saved: &[SavedBiome], mapping: &Mapping) -> Result<crate::Bio
                     .transpose()?,
                 sky_fog: b.sky_fog,
                 cave_scale: b.cave_scale,
-                surface_features: restored_features(&b.surface_features, mapping)?,
+                surface_features: restored_features(&b.surface_features, &b.crop_fields, mapping)?,
             })
         })
         .collect::<Result<Vec<_>, Error>>()?;
@@ -887,6 +940,7 @@ fn restored_biomes(saved: &[SavedBiome], mapping: &Mapping) -> Result<crate::Bio
 
 fn restored_features(
     saved: &[SavedSurfaceFeature],
+    crop_fields: &[SavedCropField],
     mapping: &Mapping,
 ) -> Result<crate::SurfaceFeatures, Error> {
     let features = saved
@@ -904,10 +958,109 @@ fn restored_features(
                     scale_m: c.scale_m,
                     strength: c.strength,
                 }),
+                field: f.field.map(|g| crate::Field {
+                    group: g.group,
+                    scale_m: g.scale_m,
+                    strays: g.strays,
+                }),
             })
         })
         .collect::<Result<Vec<_>, Error>>()?;
-    crate::SurfaceFeatures::new(&features).map_err(|e| Error::Corrupt(e.to_string()))
+    let fields = crop_fields
+        .iter()
+        .map(|f| restored_crop_field(f, mapping))
+        .collect::<Result<Vec<_>, Error>>()?;
+    crate::SurfaceFeatures::new(&features)
+        .and_then(|table| table.with_crop_fields(&fields))
+        .map_err(|e| Error::Corrupt(e.to_string()))
+}
+
+fn saved_crop_field(f: &crate::CropField, mapping: &Mapping) -> Result<SavedCropField, Error> {
+    let shape_name =
+        |shape: crate::ShapeId| {
+            (shape != crate::SHAPE_FULL_CUBE)
+                .then(|| {
+                    mapping.shapes.get(&shape).cloned().ok_or_else(|| {
+                        Error::Incompatible(format!("unregistered Shape id {shape}"))
+                    })
+                })
+                .transpose()
+        };
+    Ok(SavedCropField {
+        crops: f
+            .crops()
+            .iter()
+            .map(|c| {
+                let stages = c.len as usize;
+                Ok(SavedFieldCrop {
+                    materials: c.materials[..stages]
+                        .iter()
+                        .map(|&m| mapping.material_name(m))
+                        .collect::<Result<_, _>>()?,
+                    shape: shape_name(c.shape)?,
+                    stage_shapes: if c.stage_shapes.iter().any(Option::is_some) {
+                        c.stage_shapes[..stages]
+                            .iter()
+                            .map(|s| s.map(&shape_name).transpose().map(Option::flatten))
+                            .collect::<Result<_, _>>()?
+                    } else {
+                        Vec::new()
+                    },
+                    weight: c.weight,
+                })
+            })
+            .collect::<Result<_, Error>>()?,
+        plot_m: [f.plot_m.0, f.plot_m.1],
+        spacing_m: f.spacing_m,
+        path: f.path.map(|m| mapping.material_name(m)).transpose()?,
+        ditch: f.ditch.map(|m| mapping.material_name(m)).transpose()?,
+        near_water_m: f.near_water_m,
+    })
+}
+
+fn restored_crop_field(f: &SavedCropField, mapping: &Mapping) -> Result<crate::CropField, Error> {
+    let mut field = crate::CropField::new(
+        (f.plot_m[0], f.plot_m[1]),
+        f.spacing_m,
+        f.path
+            .as_ref()
+            .map(|n| mapping.material_id(n))
+            .transpose()?,
+        f.ditch
+            .as_ref()
+            .map(|n| mapping.material_id(n))
+            .transpose()?,
+        f.near_water_m,
+    );
+    for c in &f.crops {
+        let found = c
+            .materials
+            .iter()
+            .map(|n| mapping.material_id(n))
+            .collect::<Result<Vec<_>, _>>()?;
+        let shape = |n: &String| mapping.shape_id(n);
+        let stage_shapes = c
+            .stage_shapes
+            .iter()
+            .map(|s| s.as_ref().map(shape).transpose())
+            .collect::<Result<Vec<_>, _>>()?;
+        field
+            .push(
+                crate::FieldCrop::new(
+                    c.shape
+                        .as_ref()
+                        .map(shape)
+                        .transpose()?
+                        .unwrap_or(crate::SHAPE_FULL_CUBE),
+                    &found,
+                    &stage_shapes,
+                    c.weight,
+                )
+                .map_err(|e| Error::Corrupt(e.to_string()))?,
+            )
+            .map_err(|e| Error::Corrupt(e.to_string()))?;
+    }
+    Ok(field)
 }
 
 fn saved_plant(p: &crate::SurfacePlant, mapping: &Mapping) -> Result<SavedPlant, Error> {

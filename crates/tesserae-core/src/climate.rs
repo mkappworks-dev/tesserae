@@ -7,7 +7,7 @@
 //! `docs/adr/0011-coarse-levels-are-derived.md`).
 
 use crate::noise::fbm2;
-use crate::voxel::{AIR, MaterialId, ShapeId};
+use crate::voxel::{AIR, MaterialId, SHAPE_FULL_CUBE, ShapeId};
 use crate::worldgen::{GroundParams, ParamError};
 
 /// Fixed, not a parameter: a declaration sizes the regions, the border warp adds detail.
@@ -50,6 +50,24 @@ pub const SURFACE_FEATURE_SPACING_M: std::ops::RangeInclusive<f32> = 1.0..=1024.
 
 /// A clump's field varies over this many metres: a thicket's width to a region's.
 pub const CLUMP_SCALE_M: std::ops::RangeInclusive<f32> = 4.0..=1024.0;
+
+/// A wild field's regions are this many metres across: a flower bed's width to a meadow's.
+pub const FIELD_SCALE_M: std::ops::RangeInclusive<f32> = 8.0..=96.0;
+
+/// The most of a field's ground that ignores its region's species.
+pub const MAX_FIELD_STRAYS: f32 = 0.5;
+
+/// Bounded so a [`Biome`] stays inline and `Copy`.
+pub const MAX_CROP_FIELDS: usize = 2;
+
+/// Crops one planted field draws a plot's crop from.
+pub const MAX_FIELD_CROPS: usize = 4;
+
+/// A plot's side, from a kitchen garden to a farm field.
+pub const FIELD_PLOT_M: std::ops::RangeInclusive<f32> = 6.0..=24.0;
+
+/// The mean distance between planted fields, in metres.
+pub const FIELD_SPACING_M: std::ops::RangeInclusive<f32> = 32.0..=256.0;
 
 /// Each field in `[0, 1)`.
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -339,6 +357,41 @@ pub struct SurfaceFeature {
     pub plant: Option<SurfacePlant>,
     /// Absent scatters evenly, as every feature did before groves.
     pub clump: Option<Clump>,
+    /// Absent stands wherever it is drawn, as every feature did before fields.
+    pub field: Option<Field>,
+}
+
+/// Groups features of one Biome so a region of the ground holds mostly one of them, as a patch of
+/// flowers is mostly one species.
+///
+/// The ground is cut into regions by the nearest of a jittered lattice `scale_m` apart, a pure
+/// function of the seed and a position in metres, so it holds across Chunk borders and at every
+/// Voxel size. Each region is given one member of the group by hash; a column that draws a member
+/// stands it only if it is the region's, or, with chance `strays`, anyway.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct Field {
+    /// Local to the Biome: features with the same group compete.
+    pub group: u8,
+    pub scale_m: f32,
+    pub strays: f32,
+}
+
+impl Field {
+    pub fn validate(&self) -> Result<(), ParamError> {
+        if !FIELD_SCALE_M.contains(&self.scale_m) {
+            return Err(ParamError {
+                field: "biomes.surface_features.field.scale_m",
+                rule: "must be from 8 to 96 m",
+            });
+        }
+        if !(0.0..=MAX_FIELD_STRAYS).contains(&self.strays) {
+            return Err(ParamError {
+                field: "biomes.surface_features.field.strays",
+                rule: "must be from 0 to 0.5",
+            });
+        }
+        Ok(())
+    }
 }
 
 /// A low-frequency density field over the ground plane that multiplies a feature's chance, so it
@@ -468,6 +521,7 @@ impl SurfaceFeature {
             spacing_m,
             plant: None,
             clump: None,
+            field: None,
         }
     }
 }
@@ -705,14 +759,193 @@ impl SurfacePlant {
     }
 }
 
-/// At most [`MAX_SURFACE_FEATURES`], in declaration order.
+/// A crop a planted field draws a plot's crop from, frozen like a Plant feature's.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct FieldCrop {
+    /// The Shape every Stage takes that declares none, as a Player's Place of the seed would have
+    /// chosen it.
+    pub shape: ShapeId,
+    pub materials: [MaterialId; MAX_SURFACE_STAGES],
+    /// Stages in order; the last is ripe.
+    pub len: u8,
+    pub stage_shapes: [Option<ShapeId>; MAX_SURFACE_STAGES],
+    pub weight: f32,
+}
+
+impl FieldCrop {
+    pub const NONE: FieldCrop = FieldCrop {
+        shape: SHAPE_FULL_CUBE,
+        materials: [AIR; MAX_SURFACE_STAGES],
+        len: 0,
+        stage_shapes: [None; MAX_SURFACE_STAGES],
+        weight: 0.0,
+    };
+
+    /// A crop of the Stages `materials`, in order, each in the Shape `stage_shapes` gives it or
+    /// else `shape`.
+    pub fn new(
+        shape: ShapeId,
+        materials: &[MaterialId],
+        stage_shapes: &[Option<ShapeId>],
+        weight: f32,
+    ) -> Result<Self, ParamError> {
+        if materials.len() > MAX_SURFACE_STAGES || stage_shapes.len() > MAX_SURFACE_STAGES {
+            return Err(ParamError {
+                field: "biomes.crop_fields.crops",
+                rule: "holds at most 8 Stages",
+            });
+        }
+        let mut crop = FieldCrop {
+            shape,
+            len: materials.len() as u8,
+            weight,
+            ..FieldCrop::NONE
+        };
+        crop.materials[..materials.len()].copy_from_slice(materials);
+        crop.stage_shapes[..stage_shapes.len()].copy_from_slice(stage_shapes);
+        Ok(crop)
+    }
+
+    /// The Voxel of Stage `stage`.
+    pub fn voxel(&self, stage: usize) -> crate::Voxel {
+        let shape = self.stage_shapes[stage].unwrap_or(self.shape);
+        crate::Voxel::new(self.materials[stage], shape, 0)
+    }
+
+    fn stages(&self) -> &[MaterialId] {
+        &self.materials[..(self.len as usize).min(MAX_SURFACE_STAGES)]
+    }
+}
+
+/// Rectangular plots of one crop in rows, with paths between them and a ditch along the low edge,
+/// scattered over a Biome as a pure function of the seed and a position in metres.
 ///
-/// Held inline so a Biome stays `Copy`: 16 features measure a Biome at under 1 KiB, and generation
-/// reads them by reference, so the size is paid only when a table is copied, never per column.
+/// A lattice cell `spacing_m` on a side draws whether it holds a field; a field is a small grid of
+/// plots `plot_m` on a side, each one crop planted every second row, set apart by lanes one Voxel
+/// wide. It stands only on level ground that is wholly in its Biome, clear of the lake, caves and
+/// trees.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct CropField {
+    pub crops: [FieldCrop; MAX_FIELD_CROPS],
+    pub len: u8,
+    /// A plot's side is drawn from this range, in metres.
+    pub plot_m: (f32, f32),
+    /// The mean distance between fields, in metres.
+    pub spacing_m: f32,
+    /// A solid Material the lanes are laid in; none leaves the ground bare.
+    pub path: Option<MaterialId>,
+    /// A fluid the lane along the field's low edge is filled with; none cuts no ditch.
+    pub ditch: Option<MaterialId>,
+    /// The field stands only within this distance of the lake; none is anywhere.
+    pub near_water_m: Option<f32>,
+}
+
+impl CropField {
+    const NONE: CropField = CropField {
+        crops: [FieldCrop::NONE; MAX_FIELD_CROPS],
+        len: 0,
+        plot_m: (0.0, 0.0),
+        spacing_m: 0.0,
+        path: None,
+        ditch: None,
+        near_water_m: None,
+    };
+
+    /// An empty field to add crops to with [`Self::push`]; checked by [`SurfaceFeatures::with_crop_fields`].
+    pub fn new(
+        plot_m: (f32, f32),
+        spacing_m: f32,
+        path: Option<MaterialId>,
+        ditch: Option<MaterialId>,
+        near_water_m: Option<f32>,
+    ) -> Self {
+        CropField {
+            plot_m,
+            spacing_m,
+            path,
+            ditch,
+            near_water_m,
+            ..CropField::NONE
+        }
+    }
+
+    pub fn push(&mut self, crop: FieldCrop) -> Result<(), ParamError> {
+        if self.len as usize == MAX_FIELD_CROPS {
+            return Err(ParamError {
+                field: "biomes.crop_fields",
+                rule: "needs 1 to 4 crops",
+            });
+        }
+        self.crops[self.len as usize] = crop;
+        self.len += 1;
+        Ok(())
+    }
+
+    pub fn crops(&self) -> &[FieldCrop] {
+        &self.crops[..(self.len as usize).min(MAX_FIELD_CROPS)]
+    }
+
+    /// Every Material the field puts in the World.
+    pub fn materials(&self) -> Vec<MaterialId> {
+        let mut all: Vec<MaterialId> = self
+            .crops()
+            .iter()
+            .flat_map(|c| c.stages())
+            .copied()
+            .collect();
+        all.extend(self.path);
+        all.extend(self.ditch);
+        all
+    }
+
+    fn validate(&self) -> Result<(), ParamError> {
+        let bad = |rule| ParamError {
+            field: "biomes.crop_fields",
+            rule,
+        };
+        if !(1..=MAX_FIELD_CROPS as u8).contains(&self.len) {
+            return Err(bad("needs 1 to 4 crops"));
+        }
+        for crop in self.crops() {
+            if !(2..=MAX_SURFACE_STAGES as u8).contains(&crop.len)
+                || crop.stages().contains(&AIR)
+                || !(crop.weight.is_finite() && crop.weight > 0.0)
+            {
+                return Err(bad("a crop needs 2 to 8 Stages and a weight above 0"));
+            }
+        }
+        let (low, high) = self.plot_m;
+        if !(FIELD_PLOT_M.contains(&low) && FIELD_PLOT_M.contains(&high) && low <= high) {
+            return Err(bad("a plot side must be from 6 to 24 m, low to high"));
+        }
+        if !FIELD_SPACING_M.contains(&self.spacing_m) {
+            return Err(bad("spacing must be from 32 to 256 m"));
+        }
+        if self.path == Some(AIR) || self.ditch == Some(AIR) {
+            return Err(bad("a path or ditch must not be Air"));
+        }
+        if self
+            .near_water_m
+            .is_some_and(|m| !(m.is_finite() && m > 0.0 && m <= self.spacing_m))
+        {
+            return Err(bad("near water must be above 0 and at most the spacing"));
+        }
+        Ok(())
+    }
+}
+
+/// At most [`MAX_SURFACE_FEATURES`], in declaration order, and at most [`MAX_CROP_FIELDS`] planted
+/// fields.
+///
+/// Held inline so a Biome stays `Copy`: 16 features and 2 fields measure a Biome at under 2 KiB,
+/// and generation reads them by reference, so the size is paid only when a table is copied, never
+/// per column.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct SurfaceFeatures {
     len: u8,
     features: [SurfaceFeature; MAX_SURFACE_FEATURES],
+    crop_len: u8,
+    crop_fields: [CropField; MAX_CROP_FIELDS],
 }
 
 impl Default for SurfaceFeatures {
@@ -725,6 +958,8 @@ impl SurfaceFeatures {
     pub const NONE: SurfaceFeatures = SurfaceFeatures {
         len: 0,
         features: [SurfaceFeature::cube(AIR, 0.0); MAX_SURFACE_FEATURES],
+        crop_len: 0,
+        crop_fields: [CropField::NONE; MAX_CROP_FIELDS],
     };
 
     pub fn new(features: &[SurfaceFeature]) -> Result<Self, ParamError> {
@@ -746,6 +981,18 @@ impl SurfaceFeatures {
         for clump in features.iter().filter_map(|f| f.clump) {
             clump.validate()?;
         }
+        for field in features.iter().filter_map(|f| f.field) {
+            field.validate()?;
+            let mismatched = features.iter().filter_map(|f| f.field).any(|g| {
+                g.group == field.group && (g.scale_m, g.strays) != (field.scale_m, field.strays)
+            });
+            if mismatched {
+                return Err(ParamError {
+                    field: "biomes.surface_features.field",
+                    rule: "must give every member of a group the same scale and strays",
+                });
+            }
+        }
         if !features
             .iter()
             .all(|f| SURFACE_FEATURE_SPACING_M.contains(&f.spacing_m))
@@ -761,12 +1008,32 @@ impl SurfaceFeatures {
         Ok(table)
     }
 
+    /// This table with `fields` as its planted fields.
+    pub fn with_crop_fields(mut self, fields: &[CropField]) -> Result<Self, ParamError> {
+        if fields.len() > MAX_CROP_FIELDS {
+            return Err(ParamError {
+                field: "biomes.crop_fields",
+                rule: "holds at most 2 fields",
+            });
+        }
+        for field in fields {
+            field.validate()?;
+        }
+        self.crop_fields[..fields.len()].copy_from_slice(fields);
+        self.crop_len = fields.len() as u8;
+        Ok(self)
+    }
+
     pub fn as_slice(&self) -> &[SurfaceFeature] {
         &self.features[..self.len as usize]
     }
 
+    pub fn crop_fields(&self) -> &[CropField] {
+        &self.crop_fields[..self.crop_len as usize]
+    }
+
     pub fn is_empty(&self) -> bool {
-        self.len == 0
+        self.len == 0 && self.crop_len == 0
     }
 }
 

@@ -738,6 +738,7 @@ fn a_saved_surface_feature_with_a_bad_spacing_or_an_unknown_material_is_refused(
             spacing_m,
             plant: None,
             clump: None,
+            field: None,
         }];
         saved.restore(&mapping(8, 9, 4), 2)
     };

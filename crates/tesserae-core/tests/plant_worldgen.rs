@@ -79,6 +79,7 @@ fn plant(kind: SurfacePlantKind, first: MaterialId, spacing_m: f32) -> SurfaceFe
             kind,
         }),
         clump: None,
+        field: None,
     }
 }
 
