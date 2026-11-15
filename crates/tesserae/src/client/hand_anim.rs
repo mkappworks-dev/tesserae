@@ -6,6 +6,7 @@
 
 use super::{edit::Hotbar, profile::Preferences};
 use crate::server::edit::{AppliedKind, EditApplied};
+use crate::server::player::{BodyState, MovementMode};
 use crate::server::tool::UseOutcome;
 use crate::server::vitals::{EAT_BITE_S, EAT_BITES, EAT_RISE_S, EAT_S, EatIntent};
 use crate::session::SessionApp;
@@ -36,6 +37,20 @@ const ARM_MOUTH_RAD: f32 = 2.0;
 const MOUTH_TILT_RAD: f32 = 0.7;
 /// The food left in the hand after the last bite.
 const FOOD_LEFT: f32 = 0.45;
+
+/// The Server's full swim speed (`SWIM_MPS`, private there), where the stroke
+/// reaches its fastest.
+pub(super) const SWIM_FULL_MPS: f32 = 3.0;
+/// Slower than this the swimmer is treading water, not stroking.
+const TREAD_BELOW_MPS: f32 = 0.2;
+/// Strokes per second treading water and at full swim speed.
+const TREAD_HZ: f32 = 0.35;
+const STROKE_HZ: f32 = 1.6;
+/// How far the first-person hand travels in a full stroke, in metres, and how
+/// much of that a tread keeps.
+const STROKE_REACH_M: Vec3 = Vec3::new(0.03, 0.05, 0.07);
+const STROKE_PITCH_RAD: f32 = 0.35;
+const TREAD_SHARE: f32 = 0.25;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum Motion {
@@ -247,6 +262,44 @@ pub(super) fn confirm(
         anim.stop_bite();
     }
     anim.set_mining(progress.is_some_and(|p| p.active()));
+}
+
+/// Whether the body swims for the Client's purposes: the Server's verdict, in
+/// Physics mode, unless the Player asked for stillness.
+pub(super) fn swims(body: BodyState, mode: MovementMode, reduced_motion: bool) -> bool {
+    body.swimming && mode == MovementMode::Physics && !reduced_motion
+}
+
+/// How hard the swimmer works, `0..1`: its speed through the water against the
+/// full swim speed; nothing while it hangs still.
+pub(super) fn swim_effort(body: BodyState) -> f32 {
+    let speed = body.horizontal_mps.hypot(body.vertical_mps);
+    if speed <= TREAD_BELOW_MPS {
+        0.0
+    } else {
+        (speed / SWIM_FULL_MPS).clamp(0.0, 1.0)
+    }
+}
+
+/// Strokes per second at `effort`; both views keep this rhythm.
+pub(super) fn stroke_hz(effort: f32) -> f32 {
+    TREAD_HZ + (STROKE_HZ - TREAD_HZ) * effort.clamp(0.0, 1.0)
+}
+
+/// The first-person hand's stroke at `phase` (radians) of a cycle: a push
+/// forward and down, then a recovery. A tread keeps a quarter of the reach.
+pub(super) fn swim_hand(phase: f32, effort: f32) -> Pose {
+    let reach = TREAD_SHARE + (1.0 - TREAD_SHARE) * effort.clamp(0.0, 1.0);
+    let (s, c) = phase.sin_cos();
+    Pose {
+        offset: Vec3::new(
+            s * STROKE_REACH_M.x,
+            -c.abs() * STROKE_REACH_M.y,
+            -s * STROKE_REACH_M.z,
+        ) * reach,
+        pitch: -STROKE_PITCH_RAD * s * reach,
+        ..Pose::REST
+    }
 }
 
 /// Whether the Player asked for stillness; what moves on screen checks this.
@@ -491,6 +544,63 @@ mod tests {
             app.world().resource::<HandAnim>().motion,
             Some(Motion::Swing(_))
         ));
+    }
+
+    fn body(h: f32, v: f32) -> BodyState {
+        BodyState {
+            swimming: true,
+            horizontal_mps: h,
+            vertical_mps: v,
+            ..default()
+        }
+    }
+
+    #[test]
+    fn effort_follows_the_speed_through_the_water_up_to_the_full_swim_speed() {
+        assert_eq!(swim_effort(body(0.0, 0.0)), 0.0);
+        assert_eq!(swim_effort(body(0.1, 0.1)), 0.0, "drifting is not stroking");
+        assert!((swim_effort(body(1.5, 0.0)) - 0.5).abs() < 1e-6);
+        assert!(
+            (swim_effort(body(0.0, -1.5)) - 0.5).abs() < 1e-6,
+            "diving counts"
+        );
+        assert_eq!(swim_effort(body(3.0, 0.0)), 1.0);
+        assert_eq!(swim_effort(body(9.0, 9.0)), 1.0);
+    }
+
+    #[test]
+    fn the_stroke_quickens_with_effort() {
+        assert!(stroke_hz(0.0) > 0.0, "treading still cycles");
+        assert!(stroke_hz(0.5) > stroke_hz(0.0));
+        assert!(stroke_hz(1.0) > stroke_hz(0.5));
+    }
+
+    #[test]
+    fn only_a_swimming_body_in_physics_mode_that_wants_motion_swims() {
+        let wet = body(2.0, 0.0);
+        assert!(swims(wet, MovementMode::Physics, false));
+        assert!(
+            !swims(wet, MovementMode::Flight, false),
+            "flight is not swimming"
+        );
+        assert!(!swims(wet, MovementMode::Physics, true), "reduced motion");
+        assert!(!swims(BodyState::default(), MovementMode::Physics, false));
+    }
+
+    #[test]
+    fn the_swimming_hand_strokes_wider_and_faster_when_moving_than_when_treading() {
+        let reach = |effort: f32| {
+            (0..64)
+                .map(|n| swim_hand(n as f32 * 0.1, effort).offset.length())
+                .fold(0.0, f32::max)
+        };
+        assert!(reach(0.0) > 0.0, "a tread still moves the hand");
+        assert!(reach(1.0) > reach(0.0) * 2.0);
+        assert_eq!(
+            swim_hand(0.0, 1.0).arm_rad,
+            0.0,
+            "the avatar arm has its own stroke"
+        );
     }
 
     #[test]
