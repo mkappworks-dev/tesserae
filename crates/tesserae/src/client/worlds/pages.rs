@@ -992,26 +992,21 @@ fn card_menu(actions: &mut ChildSpawnerCommands, path: &Path, open: bool) {
                     top: Val::Percent(100.0),
                     right: Val::Px(0.0),
                     margin: UiRect::top(Val::Px(4.0)),
-                    padding: UiRect::all(Val::Px(6.0)),
-                    min_width: Val::Px(132.0),
+                    padding: UiRect::all(Val::Px(4.0)),
+                    min_width: Val::Px(140.0),
                     flex_direction: FlexDirection::Column,
-                    row_gap: Val::Px(4.0),
                     border: UiRect::all(Val::Px(theme::RULE)),
-                    border_radius: BorderRadius::all(Val::Px(theme::RADIUS_CONTROL)),
+                    border_radius: BorderRadius::all(Val::Px(8.0)),
                     ..default()
                 },
                 GlobalZIndex(5),
-                BackgroundColor(theme::CARD),
+                BackgroundColor(theme::MENU_POPOVER),
                 BorderColor::all(theme::edge()),
+                theme::shadow(),
             ))
             .with_children(|menu| {
-                // Straight into the column, so both fill its width.
-                for (label, act, kind) in [
-                    ("Edit", Act::Edit(path.to_path_buf()), Kind::Ghost),
-                    ("Delete", Act::DeleteWorld(path.to_path_buf()), Kind::Danger),
-                ] {
-                    buttons::button(menu, label, act, ButtonStyle::Small { kind });
-                }
+                cine::menu_item(menu, "Edit", Act::Edit(path.to_path_buf()), false);
+                cine::menu_item(menu, "Delete", Act::DeleteWorld(path.to_path_buf()), true);
             });
         });
 }
