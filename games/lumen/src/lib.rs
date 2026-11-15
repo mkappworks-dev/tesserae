@@ -80,6 +80,7 @@ fn biomes() -> Vec<BiomeDef> {
             }),
             cave_scale: None,
             crop_fields: plants::garden_fields(),
+            structures: Vec::new(),
             surface_features: [food::feature()]
                 .into_iter()
                 .chain(plants::garden())
@@ -97,6 +98,7 @@ fn biomes() -> Vec<BiomeDef> {
             }),
             cave_scale: None,
             crop_fields: Vec::new(),
+            structures: Vec::new(),
             surface_features: plants::arid_court(),
         },
         BiomeDef {
@@ -111,6 +113,7 @@ fn biomes() -> Vec<BiomeDef> {
             }),
             cave_scale: None,
             crop_fields: Vec::new(),
+            structures: Vec::new(),
             surface_features: [food::feature()]
                 .into_iter()
                 .chain(plants::frost_court())
@@ -128,6 +131,7 @@ fn biomes() -> Vec<BiomeDef> {
             }),
             cave_scale: None,
             crop_fields: Vec::new(),
+            structures: Vec::new(),
             surface_features: plants::conservatory(),
         },
         BiomeDef {
@@ -142,6 +146,7 @@ fn biomes() -> Vec<BiomeDef> {
             }),
             cave_scale: None,
             crop_fields: Vec::new(),
+            structures: Vec::new(),
             surface_features: plants::lily_pond(),
         },
     ]

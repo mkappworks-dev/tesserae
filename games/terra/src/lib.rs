@@ -604,6 +604,7 @@ impl Guest for Terra {
                     // carpet; the oaks every 9 m give Wood for a Workbench, Chest and Door in a
                     // short walk, and no Wood lies about on its own.
                     crop_fields: plants::temperate_fields(),
+                    structures: Vec::new(),
                     surface_features: [SurfaceFeature {
                         material: Some("terra:melon".into()),
                         plant: None,
@@ -632,6 +633,7 @@ impl Guest for Terra {
                     }),
                     cave_scale: Some(1.5),
                     crop_fields: Vec::new(),
+                    structures: Vec::new(),
                     surface_features: plants::dry(),
                 },
                 BiomeDef {
@@ -650,6 +652,7 @@ impl Guest for Terra {
                     }),
                     cave_scale: Some(0.0),
                     crop_fields: Vec::new(),
+                    structures: Vec::new(),
                     surface_features: plants::cold(),
                 },
                 BiomeDef {
@@ -664,6 +667,7 @@ impl Guest for Terra {
                     }),
                     cave_scale: None,
                     crop_fields: Vec::new(),
+                    structures: Vec::new(),
                     surface_features: plants::jungle(),
                 },
                 BiomeDef {
@@ -682,6 +686,7 @@ impl Guest for Terra {
                     }),
                     cave_scale: Some(0.5),
                     crop_fields: Vec::new(),
+                    structures: Vec::new(),
                     surface_features: plants::swamp(),
                 },
                 BiomeDef {
@@ -700,6 +705,7 @@ impl Guest for Terra {
                     }),
                     cave_scale: None,
                     crop_fields: Vec::new(),
+                    structures: Vec::new(),
                     surface_features: plants::savanna(),
                 },
             ],

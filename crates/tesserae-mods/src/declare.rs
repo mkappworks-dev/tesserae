@@ -8,11 +8,11 @@ pub const DEFAULT_REMOVE_TIME: Duration = Duration::from_millis(350);
 
 use tesserae_core::survival::MAX_SURVIVAL_VALUE;
 use tesserae_core::{
-    AIR, Biome, BiomeId, BiomeName, BiomeSet, BiomeTable, Burn, CombustionDef, FluidDef,
-    GroundParams, Heat, MAX_BIOMES, MAX_CAVE_SCALE, MAX_ORES, MaterialId, Ore, OreTable,
-    ParamError, Phase, Reactant, ReactionDef, Side, SkyFog, SurfaceFeature, SurfaceFeatures,
-    SurfaceFruit, SurfacePlant, SurfacePlantKind, SurfaceTree, SurfaceVine, SurvivalRules, Tables,
-    Voxel, VoxelUse, WaterParams, WorldgenParams,
+    AIR, Biome, BiomeId, BiomeName, BiomeSet, BiomeStructure, BiomeTable, Burn, CombustionDef,
+    FluidDef, GroundParams, Heat, MAX_BIOME_STRUCTURES, MAX_BIOMES, MAX_CAVE_SCALE, MAX_ORES,
+    MaterialId, Ore, OreTable, ParamError, Phase, Reactant, ReactionDef, Side, SkyFog,
+    SurfaceFeature, SurfaceFeatures, SurfaceFruit, SurfacePlant, SurfacePlantKind, SurfaceTree,
+    SurfaceVine, SurvivalRules, Tables, Voxel, VoxelUse, WaterParams, WorldgenParams,
 };
 
 use tesserae_core::plant::{Direction as PlantDirection, Kind as PlantKind};
@@ -904,6 +904,46 @@ fn crop_field(
     Ok(field)
 }
 
+/// A Biome's Structure rows, each naming one of the World's Templates, which resolve first.
+fn biome_structures(
+    b: &Behaviour,
+    biome: &str,
+    rows: &[content::BiomeStructure],
+    tables: &Tables,
+) -> Result<Vec<BiomeStructure>, ModError> {
+    let bad = |index, rule: String| ModError::BadStructure {
+        id: b.mod_id.clone(),
+        biome: biome.to_owned(),
+        index,
+        rule,
+    };
+    if rows.len() > MAX_BIOME_STRUCTURES {
+        return Err(bad(
+            MAX_BIOME_STRUCTURES,
+            format!("a Biome lists at most {MAX_BIOME_STRUCTURES} Structures"),
+        ));
+    }
+    rows.iter()
+        .enumerate()
+        .map(|(index, row)| {
+            let at = tables
+                .templates
+                .iter()
+                .position(|t| t.name == row.template)
+                .ok_or_else(|| bad(index, format!("`{}` names no Template", row.template)))?;
+            let structure = BiomeStructure {
+                template: at as u16,
+                spacing_m: row.spacing_m,
+                chance: row.chance,
+            };
+            structure
+                .validate(&tables.templates[at])
+                .map_err(|e| bad(index, format!("`{}`: {}", row.template, e.rule)))?;
+            Ok(structure)
+        })
+        .collect()
+}
+
 pub fn resolve_biomes(
     behaviours: &[Behaviour],
     tables: &Tables,
@@ -1020,6 +1060,7 @@ pub fn resolve_biomes(
                 .enumerate()
                 .map(|(index, f)| crop_field(b, row, &def.name, index, f, tables, registry))
                 .collect::<Result<Vec<_>, _>>()?;
+            let structures = biome_structures(b, &def.name, &def.structures, tables)?;
             biomes.push(Biome {
                 name: BiomeName::new(&format!("{}:{}", b.mod_id, def.name)).map_err(bad)?,
                 temperature: def.temperature,
@@ -1032,6 +1073,7 @@ pub fn resolve_biomes(
                 cave_scale: def.cave_scale,
                 surface_features: SurfaceFeatures::new(&features)
                     .and_then(|table| table.with_crop_fields(&crop_fields))
+                    .and_then(|table| table.with_structures(&structures))
                     .map_err(bad)?,
             });
         }

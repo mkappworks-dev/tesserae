@@ -10,6 +10,7 @@
 //! feeds the benches a fixed surface and makes no World.
 
 mod fields;
+mod structures;
 
 use crate::chunk::{CHUNK_SIZE, Chunk, ChunkBuilder};
 use crate::climate::{
@@ -24,6 +25,7 @@ use crate::plant::tree::{Part, fruit_stage, tree_voxels, vine_voxels};
 use crate::plant::{CountRange, Fruit, Stage, Tree, first_fruit_offsets};
 use crate::shape::{MAX_SHAPED_PER_CHUNK, Orientation, SHAPE_SLAB, SHAPE_STAIR};
 use crate::tables::Tables;
+use crate::template::Template;
 use crate::voxel::SHAPE_FULL_CUBE;
 use crate::voxel::{MaterialId, Voxel};
 
@@ -588,6 +590,7 @@ pub struct Worldgen {
     scatter: Option<SurfaceScatter>,
     /// How far Plants raise [`Self::surface_bounds_m`] above the terrain band; 0 without any.
     plant_rise_m: f32,
+    structures: Option<structures::StructurePass>,
 }
 
 /// Voxels of slack over a Plant's declared rise, for the base's own cell and rounding up.
@@ -831,7 +834,15 @@ impl Worldgen {
                 .filter(|s| s.rise_m > 0.0)
                 .map_or(0.0, |s| s.rise_m + PLANT_RISE_SLACK_VOXELS * voxel_size),
             scatter,
+            structures: None,
         }
+    }
+
+    /// This generator standing the Structures its Biomes list, each row naming one of
+    /// `templates` by index. Rows naming no Template stand nothing.
+    pub fn with_templates(mut self, templates: &[Template]) -> Self {
+        self.structures = structures::StructurePass::new(&self.params, self.voxel_size, templates);
+        self
     }
 
     pub fn params(&self) -> WorldgenParams {
@@ -1007,7 +1018,11 @@ impl Worldgen {
         // all, which is what makes a vertical extent affordable rather than a
         // micro-optimisation: a 3D ring is mostly sky and mostly rock.
         if floor_m > highest {
-            return Chunk::air();
+            let mut chunk = Chunk::air();
+            if self.structures_may_reach(floor_m, ceiling_m) {
+                self.stand_structures(&mut chunk, [cx, cy, cz]);
+            }
+            return chunk;
         }
         if ceiling_m < lowest - self.params.soil_depth_m {
             let mut chunk = self.deep_rock(cx, cz, ground);
@@ -1026,6 +1041,9 @@ impl Worldgen {
             {
                 let columns = self.column_caves(cx, cz);
                 self.carve(&mut chunk, caves, origin_m, ceiling_m, columns.as_ref());
+            }
+            if self.structures_may_reach(floor_m, ceiling_m) {
+                self.stand_structures(&mut chunk, [cx, cy, cz]);
             }
             return chunk;
         }
@@ -1150,6 +1168,9 @@ impl Worldgen {
                 floor_m,
                 columns.as_ref(),
             );
+        }
+        if self.structures_may_reach(floor_m, ceiling_m) {
+            self.stand_structures(&mut chunk, [cx, cy, cz]);
         }
         if let Some(scatter) = &self.scatter {
             let size = CHUNK_SIZE as i32;

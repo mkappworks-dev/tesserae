@@ -192,6 +192,14 @@ Shape, a fluid, a character not in the palette or a grid out of bounds is a load
 error naming the Template. It is data only: no Mod is called and no host call is
 added.
 
+A `biome-def` of line 0.3 then gained a `structures` list before `soundscape`,
+at most 4 `biome-structure` rows of a `template` by full name, a `spacing-m` at
+least twice the Template's longer side and at most 4096 m, and a `chance` above
+0 and at most 1. A Declaration built against the earlier 0.3 text needs a
+rebuild. A fifth row, an unknown Template or a spacing under its floor is a load
+error naming the Biome. A Biome with none generates exactly as before, with no
+generator version change.
+
 ## What is not frozen
 
 Line `0.x` is pre-release. Later gameplay steps may add new lines, and

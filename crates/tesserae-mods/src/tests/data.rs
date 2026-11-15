@@ -325,6 +325,7 @@ fn component() -> Declaration {
                 cave_scale: Some(0.0),
                 surface_features: Vec::new(),
                 crop_fields: Vec::new(),
+                structures: Vec::new(),
             },
             content::BiomeDef {
                 soundscape: None,
@@ -354,6 +355,7 @@ fn component() -> Declaration {
                     }),
                 }],
                 crop_fields: Vec::new(),
+                structures: Vec::new(),
             },
         ],
         ores: vec![

@@ -68,6 +68,7 @@ fn biomes() -> Vec<BiomeDef> {
             }),
             cave_scale: None,
             crop_fields: plants::ash_fields(),
+            structures: Vec::new(),
             surface_features: [food::feature()]
                 .into_iter()
                 .chain(plants::ash_flats())
@@ -85,6 +86,7 @@ fn biomes() -> Vec<BiomeDef> {
             }),
             cave_scale: Some(1.5),
             crop_fields: Vec::new(),
+            structures: Vec::new(),
             surface_features: Vec::new(),
         },
         BiomeDef {
@@ -99,6 +101,7 @@ fn biomes() -> Vec<BiomeDef> {
             }),
             cave_scale: Some(0.5),
             crop_fields: Vec::new(),
+            structures: Vec::new(),
             surface_features: [food::feature()]
                 .into_iter()
                 .chain(plants::highland())
@@ -116,6 +119,7 @@ fn biomes() -> Vec<BiomeDef> {
             }),
             cave_scale: Some(0.5),
             crop_fields: Vec::new(),
+            structures: Vec::new(),
             surface_features: plants::cinder_bog(),
         },
     ]

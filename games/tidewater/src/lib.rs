@@ -267,6 +267,7 @@ impl Guest for Tidewater {
                     }),
                     cave_scale: Some(1.4),
                     crop_fields: plants::lagoon_fields(),
+                    structures: Vec::new(),
                     surface_features: [food::feature()]
                         .into_iter()
                         .chain(plants::lagoon())
@@ -288,6 +289,7 @@ impl Guest for Tidewater {
                     }),
                     cave_scale: Some(0.0),
                     crop_fields: Vec::new(),
+                    structures: Vec::new(),
                     surface_features: [food::feature()]
                         .into_iter()
                         .chain(plants::salt_flats())
@@ -309,6 +311,7 @@ impl Guest for Tidewater {
                     }),
                     cave_scale: None,
                     crop_fields: Vec::new(),
+                    structures: Vec::new(),
                     surface_features: plants::cold_shallows(),
                 },
                 BiomeDef {
@@ -323,6 +326,7 @@ impl Guest for Tidewater {
                     }),
                     cave_scale: Some(1.4),
                     crop_fields: Vec::new(),
+                    structures: Vec::new(),
                     surface_features: plants::rainforest(),
                 },
                 BiomeDef {
@@ -341,6 +345,7 @@ impl Guest for Tidewater {
                     }),
                     cave_scale: Some(0.7),
                     crop_fields: Vec::new(),
+                    structures: Vec::new(),
                     surface_features: plants::tidal_marsh(),
                 },
             ],

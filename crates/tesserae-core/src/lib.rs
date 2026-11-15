@@ -45,13 +45,13 @@ pub mod worldgen;
 
 pub use chunk::{CHUNK_SIZE, CHUNK_VOLUME, Chunk};
 pub use climate::{
-    Biome, BiomeId, BiomeName, BiomeTable, CLUMP_SCALE_M, Climate, ClimateParams, Clump, CropField,
-    FIELD_PLOT_M, FIELD_SCALE_M, FIELD_SPACING_M, Field, FieldCrop, MAX_BIOME_NAME_BYTES,
-    MAX_BIOMES, MAX_CAVE_SCALE, MAX_CROP_FIELDS, MAX_FIELD_CROPS, MAX_FIELD_STRAYS,
-    MAX_SURFACE_FEATURES, MAX_SURFACE_FRUIT_STAGES, MAX_SURFACE_STAGES, MAX_VINE_DENSITY,
-    MAX_VINE_LENGTH_M, SURFACE_FEATURE_SPACING_M, SkyFog, SkyFogBlend, SurfaceFeature,
-    SurfaceFeatures, SurfaceFruit, SurfacePlant, SurfacePlantKind, SurfaceTree, SurfaceVine,
-    SurfaceVines, VINE_FACES,
+    Biome, BiomeId, BiomeName, BiomeStructure, BiomeTable, CLUMP_SCALE_M, Climate, ClimateParams,
+    Clump, CropField, FIELD_PLOT_M, FIELD_SCALE_M, FIELD_SPACING_M, Field, FieldCrop,
+    MAX_BIOME_NAME_BYTES, MAX_BIOME_STRUCTURES, MAX_BIOMES, MAX_CAVE_SCALE, MAX_CROP_FIELDS,
+    MAX_FIELD_CROPS, MAX_FIELD_STRAYS, MAX_STRUCTURE_SPACING_M, MAX_SURFACE_FEATURES,
+    MAX_SURFACE_FRUIT_STAGES, MAX_SURFACE_STAGES, MAX_VINE_DENSITY, MAX_VINE_LENGTH_M,
+    SURFACE_FEATURE_SPACING_M, SkyFog, SkyFogBlend, SurfaceFeature, SurfaceFeatures, SurfaceFruit,
+    SurfacePlant, SurfacePlantKind, SurfaceTree, SurfaceVine, SurfaceVines, VINE_FACES,
 };
 pub use combustion::{Burn, CombustionDef, CombustionError, CombustionTable, Heat, MAX_HEAT};
 pub use fluid::{FluidDef, FluidError, FluidTable};
