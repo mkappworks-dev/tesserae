@@ -505,6 +505,23 @@ directions and the bearing of each Waypoint. Presentation only. Not the Map.
 **North** — the World's −Z axis, in every World at every Voxel size. The
 direction the Player faces at heading zero.
 
+## Structures
+
+**Template** — a named block of Voxels a Game or Mod declares: each Voxel is a
+Material, a Shape and an Orientation, laid out on a grid whose size is given in
+metres. Data, not a place in a World; a World with no Game has none.
+
+**Keep** — a Template cell that is never written, so the ground a Structure
+stands in shows through. Air in a Template is not Keep: it carves.
+
+**Ground layer** — the layer of a Template that sits at the ground's height
+where a Structure is placed. Layers below it are underground, such as a cellar.
+
+**Structure** — a Template placed in a World, by world generation or by a
+Player's Tool. Rotated about the vertical axis in quarter turns, and the same
+size in metres at every Voxel size. Nothing is stored per Structure: once placed
+it is only Voxels.
+
 ## Audio
 
 **Sound** — a thing a Game or Mod declares by name that can be heard: one or
