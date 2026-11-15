@@ -191,6 +191,7 @@ function ensureMap() {
     cz: -174,
     sel: null,
     placing: false,
+    draft: "",
     heading: 38,
     pos: { x: 396, z: -174, y: 14 },
     next: 5,
@@ -201,6 +202,7 @@ function ensureMap() {
       { id: 4, name: "Where you died", kind: "Death", x: -258, z: -420 },
     ],
   };
+  state.map.draft ??= "";
   return state.map;
 }
 function mapFmt(n) {
@@ -347,7 +349,7 @@ function mapTurn(delta) {
   mapDrawMinimap();
 }
 
-/* The full-screen Map. */
+/* The Map window. */
 function mapPage() {
   const m = ensureMap(),
     mpp = MAP_MPP[m.zoom],
@@ -372,12 +374,12 @@ function mapPage() {
 <header class="map-bar"><div><p class="eyebrow">TERRA / THE GREENWOOD</p><h2>Map</h2></div>
 <div class="map-tools"><div class="map-zoom" role="group" aria-label="Zoom"><button class="btn small" data-action="map-zoom" data-value="out" aria-label="Zoom out" ${m.zoom === 3 ? "disabled" : ""}>−</button><output>${mpp} m / px</output><button class="btn small" data-action="map-zoom" data-value="in" aria-label="Zoom in" ${m.zoom === 0 ? "disabled" : ""}>+</button></div>${button("Centre on me", "map-centre", { small: true })}${button("Close <span>M</span>", "map-close", { small: true, ghost: true })}</div></header>
 <div class="map-rose" aria-label="North is up"><b>N</b><i></i></div>
-${m.placing ? `<div class="map-banner" role="status">Click the map to place “${esc(mapDraftName())}”. <button class="btn small ghost" data-action="map-place-cancel">Cancel</button></div>` : ""}
+${m.placing ? mapBannerHtml() : ""}
 <footer class="map-foot"><output id="map-readout">X ${mapFmt(m.pos.x)} · Z ${mapFmt(m.pos.z)} · ${m.pos.y} m · You are here</output><div class="map-scale" id="map-scale"></div></footer>
 </section>
 <aside class="map-side" aria-label="Waypoints">
 <section><h3>Waypoints <span>${m.wps.length}</span></h3><ul class="wp-list">${rows}</ul></section>
-<section class="wp-new"><h3>New Waypoint</h3><label class="field-label">Name<input class="input" id="wp-name" maxlength="32" placeholder="${esc(mapDraftName())}"></label><label class="field-label">Marker kind<div class="kind-pick" role="radiogroup" aria-label="Marker kind">${Object.entries(
+<section class="wp-new"><h3>New Waypoint</h3><label class="field-label">Name<input class="input" id="wp-name" maxlength="32" value="${esc(m.draft)}" placeholder="${esc(mapDraftName())}"></label><label class="field-label">Marker kind<div class="kind-pick" role="radiogroup" aria-label="Marker kind">${Object.entries(
     MAP_KINDS,
   )
     .filter(([n]) => n !== "Death")
@@ -387,15 +389,47 @@ ${m.placing ? `<div class="map-banner" role="status">Click the map to place “$
     )
     .join(
       "",
-    )}</div></label><div class="row">${button("Here", "map-add-here", { small: true })}${button("Place on map…", "map-place", { small: true, primary: true })}</div></section>
+    )}</div></label><div class="row">${button("At my position", "map-add-here", { small: true, primary: true })}</div><small class="muted">Type a name, then click the map to place it.</small></section>
 ${sel ? `<section class="wp-sel"><h3>${esc(sel.name)}</h3><small>X ${mapFmt(sel.x)} · Z ${mapFmt(sel.z)} · bearing ${Math.round(mapWrap(mapBearing(sel.x - m.pos.x, sel.z - m.pos.z)))}° ${mapCardinal(mapBearing(sel.x - m.pos.x, sel.z - m.pos.z))}</small>${button("Centre", "map-centre-wp", { small: true })}</section>` : ""}
 <section><h3>Explored</h3><p class="muted">${mapSeenAreaKm2.toFixed(2)} km² · seen with the ground loaded. Fogged ground is not guessed at.</p><ul class="legend">${legend}<li><i class="fog"></i>Not explored</li><li><i class="lake"></i>Lake</li></ul></section>
 </aside></div>`;
 }
 function mapDraftName() {
   const m = ensureMap();
-  return `Waypoint ${m.next}`;
+  return m.draft.trim() || `Waypoint ${m.next}`;
 }
+function mapBannerHtml() {
+  return `<div class="map-banner" role="status">Click the map to place “${esc(mapDraftName())}”. <button class="btn small ghost" data-action="map-place-cancel">Cancel</button></div>`;
+}
+function mapSyncPlacing(arm) {
+  const m = ensureMap(),
+    view = document.querySelector(".map-view");
+  m.placing = arm;
+  view?.querySelector(".map-banner")?.remove();
+  if (arm) view?.insertAdjacentHTML("beforeend", mapBannerHtml());
+  document.getElementById("map-canvas")?.classList.toggle("placing", arm);
+}
+document.addEventListener("input", (e) => {
+  if (e.target.id !== "wp-name") return;
+  const m = ensureMap();
+  m.draft = e.target.value;
+  mapSyncPlacing(m.draft.trim() !== "");
+});
+document.addEventListener(
+  "keydown",
+  (e) => {
+    if (e.target.id !== "wp-name") return;
+    if (e.key === "Enter") {
+      e.preventDefault();
+      mapSyncPlacing(true);
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      e.target.blur();
+    }
+  },
+  true,
+);
 function mapSizeCanvas() {
   const c = document.getElementById("map-canvas");
   if (!c) return null;
@@ -506,8 +540,7 @@ function mapMount() {
 }
 function mapAddWaypoint(x, z) {
   const m = ensureMap(),
-    input = document.getElementById("wp-name"),
-    name = (input?.value || "").trim() || mapDraftName();
+    name = mapDraftName();
   m.wps.push({
     id: m.next,
     name,
@@ -517,6 +550,7 @@ function mapAddWaypoint(x, z) {
   });
   m.sel = m.next++;
   m.placing = false;
+  m.draft = "";
   toast(`Waypoint “${name}” added.`);
   render();
 }
@@ -564,10 +598,6 @@ function mapAction(name, value) {
       return true;
     case "map-add-here":
       mapAddWaypoint(m.pos.x, m.pos.z);
-      return true;
-    case "map-place":
-      m.placing = true;
-      render();
       return true;
     case "map-place-cancel":
       m.placing = false;

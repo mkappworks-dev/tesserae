@@ -269,9 +269,12 @@ metres. **Density and spacing** (`density.js`) is a 48 m plan view per Biome
 type at one scale, with grove clumping from a low-frequency field, and the Biome
 matrix cells carry a dense, moderate or sparse tag with the main tree's spacing.
 
-Step 19 adds `/map`: the full-screen Map, with fog of war, Biome tint and height
-shading, 2 to 16 m per pixel zoom, drag to pan, and Waypoints (a Marker kind and
-a name; the death marker is automatic). The gameplay HUD gains the Compass and a
+Step 19 adds `/map`: the Map, a centred window over the live scene, with fog of
+war, Biome tint and height shading, 2 to 16 m per pixel zoom, drag to pan, and
+Waypoints (a Marker kind and a name; the death marker is automatic). Typing a
+name, or pressing Enter in the field, arms placement: the Map shows "Click the
+map to place ..." and a click on explored ground places it, while "At my
+position" adds one under the Player. The gameplay HUD gains the Compass and a
 minimap, both off by default; both are Display settings and toggle in play with
 `B` and `N`, each with a brief toast ("Compass on", "Minimap off"). Press `M` to
 open or close the Map, and Left and Right in play to turn the heading. `H`

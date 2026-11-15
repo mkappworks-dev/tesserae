@@ -178,16 +178,19 @@
 
 .map-screen {
   display: flex;
-  gap: 16px;
-  width: 100%;
+  width: min(1000px, 78%);
+  height: min(640px, 76%);
   min-height: 0;
+  background: #0b0b0d;
+  border: 1px solid #66666d;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 16px 50px #0004;
 }
 .map-view {
   position: relative;
   flex: 1;
   min-width: 0;
-  border: 1px solid var(--edge);
-  border-radius: var(--radius);
   overflow: hidden;
   background: #0b0f0c;
 }
@@ -321,8 +324,7 @@
   overflow: auto;
   padding: 16px;
   background: var(--panel);
-  border: 1px solid var(--edge);
-  border-radius: var(--radius);
+  border-left: 1px solid #45454c;
 }
 .map-side h3 {
   margin: 0 0 8px;
@@ -465,14 +467,18 @@
   display: none;
 }
 .game[data-view="map"] #screen {
-  padding: 16px;
+  align-items: center;
+  justify-content: center;
+  background: #03040559;
 }
 .game[data-view="map"] #landscape {
-  filter: saturate(0.5) brightness(0.6);
+  filter: saturate(0.9) brightness(0.9);
 }
 @media (max-width: 900px) {
   .map-screen {
     flex-direction: column;
+    width: calc(100% - 24px);
+    height: calc(100% - 24px);
   }
   .map-side {
     width: auto;
