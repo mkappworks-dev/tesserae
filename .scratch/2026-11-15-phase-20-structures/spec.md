@@ -355,9 +355,19 @@ Content:
 - Each of Terra, Tidewater, Ember, Lumen and Meadow declares fifteen Templates
   from Materials Obtainable in it: ten Settlement buildings and five wilderness
   Structures, as the approved mockup shows, and at least one Settlement that
-  uses them; Terra also a town. Stations a building needs (an anvil, a forge, an
-  oven) are declared by the Game with the step 16 machinery. The SDK starter
-  declares one Template. Existing trees stay parametric.
+  uses them; Terra also a town. The SDK starter declares one Template. Existing
+  trees stay parametric.
+- Each building kind has its own shape and its own Materials: a steep-roofed
+  cottage, a jettied half-timbered family house, an L-shaped farmhouse, a
+  hipped-roof inn, a long warehouse, a lean-to blacksmith, a brick bakery, a
+  market stall with an awning, a two-pitch barn and a well. Bridges are built
+  for their Game: an arched stone bridge, a trestle footbridge, a sagging rope
+  bridge.
+- Each Game declares about sixteen new building Materials with their own
+  textures (planks, logs, plaster, cobble, dressed stone, tiles, thatch, slate,
+  shingles, cloth), each Obtainable by a Recipe or a worldgen source, and the
+  Stations its buildings hold (an anvil, a forge, an oven) with the step 16
+  machinery. The mockup's painted textures are stand-ins for the Games' art.
 
 ## Testing Decisions
 
@@ -436,8 +446,9 @@ the Mod loader's data tests.
 
 - The worktree is `.worktrees/feat+phase-20-structures`, on
   `feat/phase-20-structures`.
-- The first ticket is a mockup of the `place` Tool's list, ghost and HUD, and
-  the Client work waits for its approval.
+- The mockup (ticket 01) was approved on 2026-11-15. Its Outside and Inside
+  views are review aids; the game shows only the list, the turn, the Placing
+  ghost and the HUD.
 - The design was settled by a grilling session; its decisions are in ADR-0028
   and this spec. Where it said Use sends the Structure intent, Place sends it
   and Use only opens the list.
