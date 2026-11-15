@@ -123,9 +123,8 @@ The minimap
 
 27. As a player, I want an optional small map in the corner, centred on me and
     north up, so that I can navigate without opening the Map.
-28. As a player, I want to choose its size, so that it fits my screen.
-28b. As a player, I want a key that toggles the minimap, so that I can show it
-    only while I navigate.
+28. As a player, I want to choose its size and toggle it with a key, so that it fits my screen and I can show it only while I navigate.
+
 29. As a player, I want it to name the Biome I am in and show my position, so
     that I know where I am at a glance.
 30. As a player, I want a Waypoint beyond its edge to rest on the edge, so that
@@ -151,8 +150,7 @@ Waypoints
     reopening, so that my markers are there next session.
 39. As a player, I want a marker where I died, so that I can go back for what I
     dropped.
-40. As a player, I want the death marker to stay until I choose to remove it
-    or die again elsewhere, so that I do not lose it by accident.
+40. As a player, I want the death marker to stay until I die again elsewhere, with no remove control, so that I do not lose it by accident.
 
 Saving and games
 
@@ -202,11 +200,15 @@ Saving and games
   since they were last sent and sends them as a message under a per-step
   budget, in the manner of the Server's other changing datasets. The Client
   keeps a cache and never reads Chunk storage.
-- The Server has no Material colour today: appearance reaches the Client once
-  as a palette. The Server keeps the declared colour of each Material, from the
-  appearance it already loads, so a sample's tile can be sent with a colour. The
-  Map stores the Material id, not a colour, so a later Look pack cannot make a
-  saved Map stale.
+- A tile carries Material ids, not colours, so a later Look pack cannot make a
+  saved Map stale. The Client colours a sample from the palette it already
+  receives; the Server holds no Material colour. The Client's palette, today
+  only a shader uniform, becomes a resource the Map can read.
+- The Client's cache holds the whole Map. The Map has a size cap in tiles
+  (about a 4 km square), past which the Server records no new tile, so the cache
+  needs no eviction and the full-screen Map never loses explored ground. At
+  session start and after a reopen every tile is marked changed and sent under
+  the per-step budget, so a long journey never stalls the first frame.
 - The Server publishes the Player's heading. Today yaw lives in the Client's
   camera and goes up as intent, and the Server keeps it privately. The
   published pose gains the Player's look heading, so the Compass reads a
@@ -339,7 +341,7 @@ of the test suite, formatting and lint checks.
 
 - At 4 bytes a sample and 2 m spacing, a 2 km square is about 4 MB raw. The
   save section must use a compact, tile-granular encoding so a long journey
-  does not slow every save, and the Client cache must be bounded.
+  does not slow every save, and the Map is capped in tiles so the Client cache can hold it whole.
 - The mock draws Marker kind icons as glyphs (⌂ ▲ ◆ ✿ ★ ✖). They stand for the
   closed icon names the Engine draws as shapes.
 - The mock's terrain is noise. The Client draws the Server's tiles.

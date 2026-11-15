@@ -1,8 +1,8 @@
-# 10: A Game can forbid the Map and Compass
+# 11: A Game can forbid the Map and Compass
 
 Status: ready-for-agent
 
-Blocked by: 06
+Blocked by: 07, 09
 
 Spec: [Phase 19](../spec.md).
 
@@ -16,7 +16,9 @@ forbidden, the Client draws no Compass or minimap, the Map key and the Menu
 button do nothing (the Menu button is absent), the settings and key bindings
 stay but are marked unavailable, and the Server stops scanning and refuses
 Waypoint intents. An existing saved Map is kept and returns if the policy later
-permits it. A World with no Game is permitted.
+permits it. A World with no Game is permitted. This ticket and ticket 08 both edit the
+0.3 contract file and its starter copy and the guest crates: whichever lands
+second rebases on the other.
 
 ## Acceptance criteria
 

@@ -1,4 +1,4 @@
-# 06: The full-screen Map
+# 07: The full-screen Map
 
 Status: ready-for-agent
 
@@ -17,14 +17,14 @@ Player's marker is an arrow along their heading; drag pans; zoom steps through 2
 4, 8 and 16 m per pixel by downsampling cached tiles on the Client; a scale bar
 shows metres; "Centre on me" returns to the Player; a readout under the pointer
 gives position, height, Biome and distance, and says "Not explored" over fog
-without naming a Biome; the legend lists the Biomes seen; and the explored area
-is shown. The window is added to the things that cover the World, so the HUD
+without naming a Biome; the legend lists the Biomes seen; and the explored area is shown, computed on the Client from the cached tiles as the Explored sample count times 4 m². The window is added to the things that cover the World, so the HUD
 hides under it.
 
 ## Acceptance criteria
 
-- [ ] `N` and Escape open and close the Map; the Menu has a Map button; the action is in Key bindings, help and the controls docs with no default conflict.
+- [ ] `N` and Escape open and close the Map; the Menu has a Map button; the action is in Key bindings, help and the controls docs and the shared test that no two default bindings collide still passes.
 - [ ] Fog, Biome tint, height shading, lakes, the arrow marker, pan, the four zoom levels and the scale bar behave as in the mock.
 - [ ] The readout over fog says "Not explored" and names no Biome; over explored ground it gives position, height, Biome and distance.
 - [ ] The window covers the World like other windows (HUD hidden, cursor released).
+- [ ] The explored area equals the Explored sample count times 4 m² and a test checks it.
 - [ ] Client tests drive the window with injected tile messages and key presses; fmt, clippy and tests pass.

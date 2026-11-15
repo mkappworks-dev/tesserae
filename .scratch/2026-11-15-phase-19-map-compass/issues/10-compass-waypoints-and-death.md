@@ -1,8 +1,8 @@
-# 09: The Compass shows Waypoints, and a death leaves one
+# 10: The Compass shows Waypoints, and a death leaves one
 
 Status: ready-for-agent
 
-Blocked by: 02, 08
+Blocked by: 02, 09
 
 Spec: [Phase 19](../spec.md).
 

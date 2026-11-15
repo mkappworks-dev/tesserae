@@ -1,4 +1,4 @@
-# 07: Marker kinds are Declaration data
+# 08: Marker kinds are Declaration data
 
 Status: ready-for-agent
 
@@ -19,7 +19,7 @@ declared; a death kind must name a declared Marker kind. Older contract
 adapters supply none and a World with no Game has none (ADR-0016). The Server
 sends the Marker kinds to the Client once at session start, as sounds are.
 Terra declares Home, Camp, Mine, Farm, Landmark and a death kind; the starter and
-the other games compile unchanged.
+the other games compile unchanged. Ticket 11 edits the same contract file and the starter copy: whichever lands second rebases on the other.
 
 ## Acceptance criteria
 
