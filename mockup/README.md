@@ -294,17 +294,28 @@ the explored route are drawn from noise here, not from the engine.
 ## Structures and the Place Tool (step 20, proposed, awaiting approval)
 
 Illustrates step 20; ticket 01 of `.scratch/2026-11-15-phase-20-structures`.
-Code is in `structures.js` and `structures.css`, reusing the Layout workspace.
-Each Game has fifteen illustrative Templates (Terra, Tidewater, Ember, Lumen,
-Meadow), not declarations: ten Settlement buildings (homes, an inn, a warehouse,
-a blacksmith, a bakery, a market stall, a barn and a well) and five wilderness
-Structures. The panel's example Game switch shows each set. The stage switches
-between Outside and Inside, drawn with Terra's exported textures, and Placing,
-the in-game ghost; Inside lifts the roof and near walls and picks a floor
-(Cellar, Ground, Upper). Stations other than the workbench are drawn as their
-nearest Terra block until a Game declares them. Reach the screen at
-`/structures`, or hold the tool from Simulate (Engine states, "Place tool") on
-`/play`.
+Code is in `structures.js`, `structure-materials.js` and `structures.css`,
+reusing the Layout workspace. Each Game has fifteen illustrative Templates
+(Terra, Tidewater, Ember, Lumen, Meadow), not declarations: ten Settlement
+buildings (homes, an inn, a warehouse, a blacksmith, a bakery, a market stall, a
+barn and a well) and five wilderness Structures. The panel's example Game switch
+shows each set. The stage switches between Outside and Inside, drawn with real
+and painted textures, and Placing, the in-game ghost; Inside lifts the roof and
+near walls and picks a floor (Cellar, Ground, Upper). Stations other than the
+workbench are drawn as their nearest Terra block until a Game declares them.
+Reach the screen at `/structures`, or hold the tool from Simulate (Engine
+states, "Place tool") on `/play`.
+
+Each building kind has its own shape: a steep thatched cottage, a jettied
+half-timbered family house, an L-shaped farmhouse with a porch, an inn with a
+hipped roof, a long warehouse, a lean-to smithy with a forge chimney, a brick
+bakery with its oven at the back, a striped market stall and a two-pitch barn.
+Their Materials differ per building and per Game: `structure-materials.js`
+paints about 80 textures in the browser (planks, logs, plaster, cobble, ashlar,
+tiles, thatch, slate, shingles, cloth) as stand-ins for each Game's own art; the
+glass, doors, chests and lamps are Terra's exported ones. Every Game maps
+Terra's choices to its own Materials, so a Meadow farmhouse is birch, fieldstone
+and moss shingles where Terra's is spruce, cobblestone and shingles.
 
 - A Tool, not an Item: it takes a hand slot beside the hotbar. Use (G) opens the
   Template list, R turns the Structure a quarter, and Place (right mouse) lays
