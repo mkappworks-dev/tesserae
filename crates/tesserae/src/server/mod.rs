@@ -242,6 +242,22 @@ fn spawn_eye(generator: &Worldgen) -> Vec3 {
     Vec3::new(0.0, (top_m + SPAWN_CLEARANCE_M).max(clear_m), 0.0)
 }
 
+/// `f` over `items` on one thread each, results in `items` order; a panic is re-raised as it was.
+#[cfg(test)]
+pub(crate) fn in_parallel<T: Sync, R: Send>(items: &[T], f: impl Fn(&T) -> R + Sync) -> Vec<R> {
+    std::thread::scope(|scope| {
+        let f = &f;
+        let threads: Vec<_> = items
+            .iter()
+            .map(|item| scope.spawn(move || f(item)))
+            .collect();
+        threads
+            .into_iter()
+            .map(|t| t.join().unwrap_or_else(|e| std::panic::resume_unwind(e)))
+            .collect()
+    })
+}
+
 #[cfg(test)]
 pub(crate) fn fixture_tables() -> Tables {
     let mut tables = tesserae_core::testgen::fixtures().tables.clone();

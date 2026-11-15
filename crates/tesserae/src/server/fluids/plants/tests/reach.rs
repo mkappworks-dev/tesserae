@@ -788,8 +788,8 @@ fn grown_patch(row: &Row, min_neighbours: u32, hours: u64) -> (usize, usize, usi
 fn the_shared_spreaders_grow_a_patch_a_little_in_an_hour_and_never_fill_the_ground() {
     let rows = flora_spreaders();
     assert!(rows.len() >= 9, "{rows:?}", rows = rows.len());
-    for row in rows {
-        let (planted, hour, long, _) = grown_patch(&row, row.min_neighbours, 12);
+    let grown = crate::server::in_parallel(&rows, |row| grown_patch(row, row.min_neighbours, 12));
+    for (row, (planted, hour, long, _)) in rows.iter().zip(grown) {
         let name = &row.name;
         println!("{name}: {planted} planted, {hour} after 1 h, {long} after 12 h of 1024");
         assert!(
@@ -813,10 +813,15 @@ fn the_shared_spreaders_keep_a_generated_patch_where_worldgen_put_it() {
             row.name
         );
     }
-    for name in ["tuft", "poppy"] {
-        let row = rows.iter().find(|r| r.name == name).unwrap();
-        let (_, _, held, past) = grown_patch(row, row.min_neighbours, 24);
-        let (_, _, free, far) = grown_patch(row, 0, 24);
+    let named = ["tuft", "poppy"].map(|name| (name, rows.iter().find(|r| r.name == name).unwrap()));
+    let runs: Vec<_> = named
+        .iter()
+        .flat_map(|&(_, row)| [(row, row.min_neighbours), (row, 0)])
+        .collect();
+    let grown = crate::server::in_parallel(&runs, |&(row, min)| grown_patch(row, min, 24));
+    for (i, (name, row)) in named.into_iter().enumerate() {
+        let (_, _, held, past) = grown[2 * i];
+        let (_, _, free, far) = grown[2 * i + 1];
         println!("{name}: {past} Voxels past the patch ({held} stand) against {far} ({free})");
         assert!(
             past <= (2.0 * row.reach_m) as i32,

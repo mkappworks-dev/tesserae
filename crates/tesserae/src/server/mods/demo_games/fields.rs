@@ -36,6 +36,9 @@ fn field_cells(game: &str, seed: u64, half_m: f32) -> BTreeMap<String, u64> {
         for cz in -reach..reach {
             for cx in -reach..reach {
                 let (a, b) = (with.chunk(cx, cy, cz), without.chunk(cx, cy, cz));
+                if a.uniform().is_some() && a.uniform() == b.uniform() {
+                    continue;
+                }
                 for i in 0..CHUNK_SIZE.pow(3) {
                     let at = (
                         i % CHUNK_SIZE,
@@ -76,14 +79,16 @@ fn crop_voxels(cells: &BTreeMap<String, u64>, name: &str) -> u64 {
 fn every_game_with_planted_fields_places_its_lead_crop_most_often_beside_paths() {
     // The window each Game needs for a field to stand in it: Terra's and tidewater's ground is
     // rough, so a level place is rarer.
-    for (game, half_m, path, ditch) in [
+    let games = [
         ("terra", 512.0, "terra:sand", Some("terra:water")),
         ("meadow", 256.0, "strata:sand", None),
         ("tidewater", 512.0, "strata:sand", Some("waters:water")),
         ("lumen", 256.0, "strata:sand", None),
         ("ember", 512.0, "strata:basalt", Some("waters:water")),
-    ] {
-        let cells = field_cells(game, 7, half_m);
+    ];
+    let fields =
+        crate::server::in_parallel(&games, |&(game, half_m, ..)| field_cells(game, 7, half_m));
+    for (&(game, _, path, ditch), cells) in games.iter().zip(fields) {
         let [wheat, carrot, potato] = ["wheat", "carrot", "potato"].map(|c| crop_voxels(&cells, c));
         // Ember's ash grows hardy roots, so its potatoes lead.
         let leads = if game == "ember" {
