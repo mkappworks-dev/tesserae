@@ -1,7 +1,7 @@
 //! A Player's Map: the surface they have seen, one sample per column of
 //! [`SAMPLE_M`] metres, kept in fixed square tiles.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
 use crate::{BiomeId, MaterialId};
 
@@ -46,6 +46,13 @@ fn locate(cell: [i32; 2]) -> ([i32; 2], usize) {
 #[derive(Clone, Debug)]
 struct Tile(Vec<Option<Sample>>);
 
+/// One tile as it crosses to the Client: `TILE_SAMPLES` squared samples, row by row.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TileData {
+    pub coord: [i32; 2],
+    pub samples: Vec<Option<Sample>>,
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Recorded {
     Stored,
@@ -57,6 +64,8 @@ pub enum Recorded {
 pub struct Map {
     tiles: HashMap<[i32; 2], Tile>,
     max_tiles: usize,
+    /// Tiles not yet handed out by [`Map::take_changed`].
+    changed: BTreeSet<[i32; 2]>,
 }
 
 impl Default for Map {
@@ -70,6 +79,7 @@ impl Map {
         Map {
             tiles: HashMap::new(),
             max_tiles,
+            changed: BTreeSet::new(),
         }
     }
 
@@ -87,11 +97,48 @@ impl Map {
         if !self.tiles.contains_key(&tile) && self.tiles.len() >= self.max_tiles {
             return Recorded::Full;
         }
-        self.tiles
+        let slot = &mut self
+            .tiles
             .entry(tile)
             .or_insert_with(|| Tile(vec![None; TILE_SAMPLES * TILE_SAMPLES]))
-            .0[at] = Some(sample);
+            .0[at];
+        // A re-scan of unchanged ground must not resend its tile.
+        if *slot != Some(sample) {
+            *slot = Some(sample);
+            self.changed.insert(tile);
+        }
         Recorded::Stored
+    }
+
+    /// Queues every tile again, for a Map loaded from a save or a Client that starts empty.
+    pub fn mark_all_changed(&mut self) {
+        self.changed.extend(self.tiles.keys().copied());
+    }
+
+    pub fn changed_count(&self) -> usize {
+        self.changed.len()
+    }
+
+    /// At most `max` changed tiles, lowest coordinate first, each cleared as it is handed out.
+    pub fn take_changed(&mut self, max: usize) -> Vec<TileData> {
+        let coords: Vec<_> = self.changed.iter().take(max).copied().collect();
+        coords
+            .into_iter()
+            .map(|coord| {
+                self.changed.remove(&coord);
+                TileData {
+                    coord,
+                    samples: self.tiles[&coord].0.clone(),
+                }
+            })
+            .collect()
+    }
+
+    /// Stores a tile as received, past the cap and without queueing it to be sent on.
+    pub fn load_tile(&mut self, tile: TileData) {
+        if tile.samples.len() == TILE_SAMPLES * TILE_SAMPLES {
+            self.tiles.insert(tile.coord, Tile(tile.samples));
+        }
     }
 
     pub fn sample(&self, cell: [i32; 2]) -> Option<Sample> {
@@ -179,5 +226,52 @@ mod tests {
         );
         assert_eq!(map.tile_count(), 1);
         assert!(!map.explored(TILE_M + 1.0, 1.0));
+    }
+
+    #[test]
+    fn only_changed_tiles_are_taken_and_an_identical_rescan_changes_nothing() {
+        let mut map = Map::default();
+        map.record([0, 0], sample(1));
+        map.record([TILE_SAMPLES as i32, 0], sample(2));
+        assert_eq!(map.changed_count(), 2);
+        let first = map.take_changed(1);
+        assert_eq!(first.len(), 1);
+        assert_eq!(map.changed_count(), 1);
+        assert_eq!(map.take_changed(8).len(), 1);
+        map.record([0, 0], sample(1));
+        assert_eq!(map.changed_count(), 0);
+        map.record([0, 0], sample(5));
+        assert_eq!(map.take_changed(8)[0].coord, [0, 0]);
+    }
+
+    #[test]
+    fn marking_all_changed_queues_every_tile_again() {
+        let mut map = Map::default();
+        map.record([0, 0], sample(1));
+        map.record([-1, -1], sample(2));
+        map.take_changed(8);
+        map.mark_all_changed();
+        assert_eq!(map.take_changed(8).len(), 2);
+    }
+
+    #[test]
+    fn a_loaded_tile_is_read_back_past_the_cap_and_is_not_queued() {
+        let mut sender = Map::default();
+        sender.record([3, 4], sample(6));
+        let tile = sender.take_changed(1).remove(0);
+        let mut receiver = Map::with_max_tiles(0);
+        receiver.load_tile(tile);
+        assert_eq!(receiver.sample([3, 4]), Some(sample(6)));
+        assert_eq!(receiver.changed_count(), 0);
+    }
+
+    #[test]
+    fn a_tile_of_the_wrong_length_is_refused() {
+        let mut map = Map::default();
+        map.load_tile(TileData {
+            coord: [0, 0],
+            samples: vec![None; 3],
+        });
+        assert_eq!(map.tile_count(), 0);
     }
 }

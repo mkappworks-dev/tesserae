@@ -1,7 +1,7 @@
 //! The Player's Map, captured from loaded, lit ground near the Eye.
 
 use bevy::prelude::*;
-use tesserae_core::map::{self, Map, Sample};
+use tesserae_core::map::{self, Map, Sample, TileData};
 
 use super::player::Player;
 use super::streaming::MeshState;
@@ -13,6 +13,13 @@ use crate::world::WorldSettings;
 /// a 96 m disc of them.
 pub const SAMPLES_PER_STEP: usize = 64;
 
+/// Tiles sent a step; the cap, 1024 tiles, drains in 256 steps.
+pub const TILES_PER_STEP: usize = 4;
+
+/// One Map tile with its samples as Material and Biome ids, never colours.
+#[derive(Message, Clone, Debug, PartialEq, Eq)]
+pub struct MapTileChanged(pub TileData);
+
 const REACH_CELLS: i32 = (map::REACH_M / map::SAMPLE_M) as i32;
 const SIDE_CELLS: usize = 2 * REACH_CELLS as usize + 1;
 
@@ -21,7 +28,23 @@ const SIDE_CELLS: usize = 2 * REACH_CELLS as usize + 1;
 pub struct PlayerMap(pub Map);
 
 pub(super) fn plugin(app: &mut App) {
-    app.add_session_systems(FixedUpdate, capture.after(super::player::simulate));
+    app.add_session_message::<MapTileChanged>()
+        .add_session_systems(
+            FixedUpdate,
+            (capture, announce).chain().after(super::player::simulate),
+        );
+}
+
+fn announce(mut players: Query<&mut PlayerMap>, mut tiles: MessageWriter<MapTileChanged>) {
+    let Ok(mut map) = players.single_mut() else {
+        return;
+    };
+    if map.changed_count() == 0 {
+        return;
+    }
+    for tile in map.take_changed(TILES_PER_STEP) {
+        tiles.write(MapTileChanged(tile));
+    }
 }
 
 fn capture(
@@ -125,7 +148,7 @@ mod tests {
         tesserae_core::testgen::fixtures().ground.rock
     }
 
-    fn app(voxel_size: f32) -> App {
+    fn bare(voxel_size: f32) -> App {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_nanos(
@@ -142,6 +165,15 @@ mod tests {
             )))
             .add_plugins((super::super::player::plugin, plugin));
         app.update();
+        *app.world_mut()
+            .query::<&mut Player>()
+            .single_mut(app.world_mut())
+            .unwrap() = Player::at(EYE);
+        app
+    }
+
+    fn app(voxel_size: f32) -> App {
+        let mut app = bare(voxel_size);
         let chunk_m = tesserae_core::CHUNK_SIZE as f32 * voxel_size;
         let across = (HELD_M as f32 / chunk_m).ceil() as i32;
         let up = ((EYE.y + map::REACH_M) / chunk_m).floor() as i32;
@@ -191,6 +223,100 @@ mod tests {
     fn cells() -> impl Iterator<Item = [i32; 2]> {
         let n = HELD_M / 2 + 8;
         (-8..n).flat_map(move |x| (-8..n).map(move |z| [x, z]))
+    }
+
+    fn drained(app: &mut App) -> Vec<TileData> {
+        app.world_mut()
+            .resource_mut::<Messages<MapTileChanged>>()
+            .drain()
+            .map(|m| m.0)
+            .collect()
+    }
+
+    /// Drained every step, since a Message lives only two updates.
+    fn steps(app: &mut App, n: usize) -> Vec<TileData> {
+        (0..n)
+            .flat_map(|_| {
+                app.update();
+                drained(app)
+            })
+            .collect()
+    }
+
+    fn fill(app: &mut App, tiles: i32) {
+        let mut map = app
+            .world_mut()
+            .query::<&mut PlayerMap>()
+            .single_mut(app.world_mut())
+            .unwrap();
+        for tile in 0..tiles {
+            map.record([tile * map::TILE_SAMPLES as i32, 0], sample(tile as i16));
+        }
+    }
+
+    fn sample(height_m: i16) -> Sample {
+        Sample {
+            height_m,
+            material: rock(),
+            biome: None,
+        }
+    }
+
+    #[test]
+    fn many_changed_tiles_trickle_out_under_the_budget_and_all_arrive() {
+        let mut app = bare(1.0);
+        app.update();
+        drained(&mut app);
+        fill(&mut app, 10);
+        let mut seen = Vec::new();
+        for _ in 0..4 {
+            let sent = steps(&mut app, 1);
+            assert!(sent.len() <= TILES_PER_STEP);
+            seen.extend(sent);
+        }
+        let mut coords: Vec<_> = seen.iter().map(|t| t.coord).collect();
+        coords.sort();
+        coords.dedup();
+        assert_eq!(coords.len(), 10);
+    }
+
+    #[test]
+    fn a_tile_is_sent_once_until_it_changes_again() {
+        let mut app = bare(1.0);
+        fill(&mut app, 1);
+        assert_eq!(steps(&mut app, 3).len(), 1);
+        fill(&mut app, 1);
+        assert!(steps(&mut app, 3).is_empty());
+    }
+
+    #[test]
+    fn marking_every_tile_changed_resends_the_whole_map_within_a_bounded_number_of_steps() {
+        let mut app = bare(1.0);
+        fill(&mut app, 9);
+        steps(&mut app, 6);
+        app.world_mut()
+            .query::<&mut PlayerMap>()
+            .single_mut(app.world_mut())
+            .unwrap()
+            .mark_all_changed();
+        assert_eq!(
+            steps(&mut app, 9_usize.div_ceil(TILES_PER_STEP) + 1).len(),
+            9
+        );
+    }
+
+    #[test]
+    fn a_tile_carries_ids_and_the_map_stops_at_its_cap() {
+        let mut app = bare(1.0);
+        *app.world_mut()
+            .query::<&mut PlayerMap>()
+            .single_mut(app.world_mut())
+            .unwrap() = PlayerMap(Map::with_max_tiles(2));
+        fill(&mut app, 5);
+        let sent = steps(&mut app, 4);
+        assert_eq!(sent.len(), 2);
+        let seen = sent[0].samples.iter().flatten().next().unwrap();
+        assert_eq!(seen.material, rock());
     }
 
     #[test]

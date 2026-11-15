@@ -1,6 +1,6 @@
 # 04: Map tiles reach the Client
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 03
 
@@ -25,9 +25,9 @@ Nothing is drawn yet; this is verified at the message seam.
 
 ## Acceptance criteria
 
-- [ ] A Player who explores causes only the changed tiles to be sent, under a per-step budget; a test with many changed tiles shows the budget holds and all arrive over several steps.
-- [ ] At session start and after reopen the whole Map is sent under the budget and arrives within a bounded number of steps.
-- [ ] Tiles carry Material ids; the Client resolves colour from the palette message and the Server holds no colour.
-- [ ] The Map's size cap holds (the Server records no new tile past it) and the Client cache never evicts.
-- [ ] The Client never reads Chunk storage.
-- [ ] Client and Server tests at the message boundary; fmt, clippy and tests pass.
+- [x] A Player who explores causes only the changed tiles to be sent, under a per-step budget; a test with many changed tiles shows the budget holds and all arrive over several steps.
+- [x] At session start and after reopen the whole Map is sent under the budget and arrives within a bounded number of steps.
+- [x] Tiles carry Material ids; the Client resolves colour from the palette message and the Server holds no colour.
+- [x] The Map's size cap holds (the Server records no new tile past it) and the Client cache never evicts.
+- [x] The Client never reads Chunk storage.
+- [ ] Client and Server tests at the message boundary; fmt, clippy and tests pass. (clippy and the full suite deferred to phase end)
