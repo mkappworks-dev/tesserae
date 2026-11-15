@@ -527,7 +527,7 @@ fn real_terra_new_builds_but_reopened_guest_never_replays_construction() {
     };
     let (_, commands) = bevy::tasks::block_on(guest.tick(context(0))).unwrap();
     assert!(!commands.is_empty());
-    let generation = Generation::capture(loaded.world.unwrap(), &mapping).unwrap();
+    let generation = Generation::capture(loaded.world.unwrap(), &[], &mapping).unwrap();
     let (simulation, paused) = FluidSim::default().checkpoint(&mapping).unwrap();
     let commit = Commit {
         world: opening.id.clone(),
@@ -2392,4 +2392,69 @@ fn a_corrupt_map_section_is_refused_with_a_clear_error() {
         .write(&commit)
         .unwrap_err();
     assert!(error.to_string().contains("map:"), "{error}");
+}
+
+/// A 2 m square slab of `material`.
+fn slab(
+    loaded: &crate::server::mods::LoadedMods,
+    material: &str,
+) -> tesserae_core::template::Template {
+    use tesserae_core::template::{Cell, Template};
+    let id = loaded.registry.id_of(Kind::Material, material).unwrap() as u16;
+    let layers = vec![vec![vec![Cell::Voxel(Voxel::cube(id)); 2]; 2]];
+    Template::new("terra:slab".into(), 1.0, layers, 0, None, 1.0).unwrap()
+}
+
+/// The first Biome stands a slab of `material` on a 16 m lattice.
+fn declares_slab(material: &'static str) -> impl FnOnce(&mut crate::server::mods::LoadedMods) {
+    use tesserae_core::{BiomeStructure, BiomeTable};
+    move |loaded| {
+        declares_biomes(["terra:dry", "terra:wet"])(loaded);
+        loaded.tables.templates = vec![slab(loaded, material)];
+        let world = loaded.world.as_mut().unwrap();
+        let mut biomes = world.biomes.as_slice().to_vec();
+        biomes[0].surface_features = biomes[0]
+            .surface_features
+            .with_structures(&[BiomeStructure {
+                template: 0,
+                spacing_m: 16.0,
+                chance: 0.5,
+            }])
+            .unwrap();
+        world.biomes = BiomeTable::new(&biomes).unwrap();
+    }
+}
+
+/// The Templates the opened World's generator stands, `None` for the Game's own.
+fn prepared_templates(
+    dir: &Directory,
+    game: impl FnOnce(&mut crate::server::mods::LoadedMods),
+) -> (
+    Option<Vec<tesserae_core::template::Template>>,
+    crate::server::mods::LoadedMods,
+) {
+    let (opening, settings) = (dir.opening(), WorldSettings::default());
+    let mut loaded = crate::server::mods::terra_for_save(&opening, &settings);
+    game(&mut loaded);
+    Persistence::prepare(opening, &mut loaded, settings).unwrap();
+    (loaded.world_templates.take(), loaded)
+}
+
+#[test]
+fn a_reopened_world_stands_the_templates_it_was_saved_with_whatever_the_game_declares_now() {
+    let (fresh, _) = prepared_templates(&Directory::new(), declares_slab("terra:stone"));
+    assert_eq!(fresh, None);
+
+    let dir = Directory::new();
+    Rig::open_with(
+        dir.opening(),
+        WorldSettings::default(),
+        declares_slab("terra:stone"),
+    )
+    .settled_save();
+    let saved = save::inspect(&dir.0).unwrap().unwrap().commit.parameters;
+    assert_eq!(saved.templates.unwrap()[0].name, "terra:slab");
+
+    let (reopened, loaded) = prepared_templates(&dir, declares_slab("terra:wood"));
+    assert_eq!(reopened, Some(vec![slab(&loaded, "terra:stone")]));
 }

@@ -215,17 +215,16 @@ fn open_world(
     mut commands: Commands,
     world: Res<WorldSettings>,
     params: Option<Res<mods::WorldParameters>>,
-    tables: Option<Res<ContentTables>>,
     persistence: Option<Res<persistence::Persistence>>,
 ) {
-    let params = params.map_or_else(|| worldgen_params(None), |params| params.0);
+    let templates = params.as_ref().map_or(&[][..], |p| p.1.as_slice());
+    let params = params
+        .as_ref()
+        .map_or_else(|| worldgen_params(None), |params| params.0);
     if params.ground.is_none() {
         info!("World has no ground: no Game named rock, soil and surface");
     }
-    let mut generator = Worldgen::new(world.seed, world.voxel_size, params);
-    if let Some(tables) = tables {
-        generator = generator.with_templates(&tables.0.templates);
-    }
+    let generator = Worldgen::new(world.seed, world.voxel_size, params).with_templates(templates);
     let mut spawn = SpawnPoint::new(spawn_eye(&generator));
     if let Some(eye) = persistence.and_then(|p| p.reopened_eye) {
         spawn = spawn.with_entry(eye);
