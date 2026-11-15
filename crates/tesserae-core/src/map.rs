@@ -44,7 +44,7 @@ fn locate(cell: [i32; 2]) -> ([i32; 2], usize) {
 }
 
 #[derive(Clone, Debug)]
-struct Tile(Vec<Option<Sample>>);
+struct Tile(Vec<Option<Sample>>, u64);
 
 /// One tile as it crosses to the Client: `TILE_SAMPLES` squared samples, row by row.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -97,6 +97,18 @@ impl Map {
         all.into_iter()
     }
 
+    /// Like [`Map::tiles`], with the Map revision at which each tile last changed, so a save re-encodes
+    /// only the tiles that moved.
+    pub fn tiles_revised(&self) -> impl Iterator<Item = (&[i32; 2], u64, &[Option<Sample>])> {
+        let mut all: Vec<_> = self.tiles.iter().map(|(c, t)| (c, t.1, &t.0[..])).collect();
+        all.sort_unstable_by_key(|(c, _, _)| **c);
+        all.into_iter()
+    }
+
+    pub fn tile_revision(&self, coord: [i32; 2]) -> Option<u64> {
+        self.tiles.get(&coord).map(|t| t.1)
+    }
+
     pub fn max_tiles(&self) -> usize {
         self.max_tiles
     }
@@ -111,16 +123,16 @@ impl Map {
         if !self.tiles.contains_key(&tile) && self.tiles.len() >= self.max_tiles {
             return Recorded::Full;
         }
-        let slot = &mut self
+        let slot = self
             .tiles
             .entry(tile)
-            .or_insert_with(|| Tile(vec![None; TILE_SAMPLES * TILE_SAMPLES]))
-            .0[at];
+            .or_insert_with(|| Tile(vec![None; TILE_SAMPLES * TILE_SAMPLES], 0));
         // A re-scan of unchanged ground must not resend its tile.
-        if *slot != Some(sample) {
-            *slot = Some(sample);
+        if slot.0[at] != Some(sample) {
+            slot.0[at] = Some(sample);
             self.changed.insert(tile);
             self.revision += 1;
+            slot.1 = self.revision;
         }
         Recorded::Stored
     }
@@ -152,8 +164,9 @@ impl Map {
     /// Stores a tile as received, past the cap and without queueing it to be sent on.
     pub fn load_tile(&mut self, tile: TileData) {
         if tile.samples.len() == TILE_SAMPLES * TILE_SAMPLES {
-            self.tiles.insert(tile.coord, Tile(tile.samples));
             self.revision += 1;
+            self.tiles
+                .insert(tile.coord, Tile(tile.samples, self.revision));
         }
     }
 

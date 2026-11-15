@@ -2,7 +2,7 @@
 //! commit without it opens with an empty Map, and nothing here touches the
 //! format or generator version.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 
 use std::io::{Read, Write};
 
@@ -31,7 +31,7 @@ pub struct SavedMap {
 /// One tile as deflated byte planes, base64 in the JSON. Planes, not
 /// interleaved samples, so neighbouring ground makes long runs for deflate;
 /// heights are stored as the change from the sample before, since ground is smooth.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SavedTile {
     pub at: [i32; 2],
@@ -94,16 +94,43 @@ fn decode(planes: &str) -> Option<Vec<Option<Sample>>> {
         .collect()
 }
 
+/// Tiles already encoded, by coordinate, with the Map revision each was encoded at.
+pub type EncodedTiles = HashMap<[i32; 2], (u64, SavedTile)>;
+
 impl SavedMap {
     pub fn capture(map: &Map) -> Self {
-        SavedMap {
-            tiles: map
-                .tiles()
-                .map(|(at, samples)| SavedTile {
-                    at: *at,
-                    planes: encode(samples),
-                })
-                .collect(),
+        Self::capture_cached(map, &mut EncodedTiles::new()).0
+    }
+
+    /// Re-encodes only the tiles whose revision differs from the cache's; returns how many that was.
+    pub fn capture_cached(map: &Map, cache: &mut EncodedTiles) -> (Self, usize) {
+        let mut encoded = 0;
+        let tiles = map
+            .tiles_revised()
+            .map(|(at, revision, samples)| {
+                let entry = cache.entry(*at).or_insert_with(|| (0, SavedTile::default()));
+                if entry.0 != revision || entry.1.planes.is_empty() {
+                    *entry = (
+                        revision,
+                        SavedTile {
+                            at: *at,
+                            planes: encode(samples),
+                        },
+                    );
+                    encoded += 1;
+                }
+                entry.1.clone()
+            })
+            .collect();
+        (SavedMap { tiles }, encoded)
+    }
+
+    /// Seeds `cache` with tiles just restored into `map`, which are already encoded.
+    pub fn seed(&self, map: &Map, cache: &mut EncodedTiles) {
+        for tile in &self.tiles {
+            if let Some(revision) = map.tile_revision(tile.at) {
+                cache.insert(tile.at, (revision, tile.clone()));
+            }
         }
     }
 
@@ -203,6 +230,22 @@ mod tests {
         assert_eq!(map.revision(), before);
         map.record([0, 0], sample(2, None));
         assert_ne!(map.revision(), before);
+    }
+
+    #[test]
+    fn a_cached_capture_re_encodes_only_the_tile_that_changed() {
+        let mut map = Map::default();
+        map.record([0, 0], sample(1, None));
+        map.record([TILE_SAMPLES as i32, 0], sample(2, None));
+        let mut cache = EncodedTiles::new();
+        let (first, encoded) = SavedMap::capture_cached(&map, &mut cache);
+        assert_eq!(encoded, 2);
+        assert_eq!(SavedMap::capture_cached(&map, &mut cache).1, 0);
+        map.record([0, 0], sample(9, None));
+        let (second, encoded) = SavedMap::capture_cached(&map, &mut cache);
+        assert_eq!(encoded, 1);
+        assert_eq!(second, SavedMap::capture(&map));
+        assert_eq!(second.tiles[1], first.tiles[1]);
     }
 
     fn refused(change: impl FnOnce(&mut SavedMap)) -> String {

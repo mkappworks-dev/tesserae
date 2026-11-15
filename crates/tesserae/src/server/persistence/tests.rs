@@ -2361,6 +2361,23 @@ fn a_save_encodes_the_map_only_when_it_has_changed() {
 }
 
 #[test]
+fn a_save_re_encodes_only_the_map_tiles_that_changed() {
+    let dir = Directory::new();
+    let mut rig = Rig::new(&dir);
+    explore(&mut rig, 0..10);
+    explore(&mut rig, 64..70);
+    rig.settled_save();
+    let encodes = |rig: &Rig| rig.app.world().resource::<Persistence>().map_tile_encodes;
+    assert_eq!(encodes(&rig), 2);
+    explore(&mut rig, 64..70);
+    rig.settled_save();
+    assert_eq!(encodes(&rig), 2);
+    explore(&mut rig, 10..20);
+    rig.settled_save();
+    assert_eq!(encodes(&rig), 3);
+}
+
+#[test]
 fn a_corrupt_map_section_is_refused_with_a_clear_error() {
     let dir = Directory::new();
     let mut rig = Rig::new(&dir);

@@ -312,8 +312,12 @@ pub struct Persistence {
     initial_map: Option<save::map::SavedMap>,
     /// The encoding of the Map at the revision it was made, reused while the Map has not moved.
     map_section: Option<(u64, save::map::SavedMap)>,
+    /// Tiles already deflated, so a changed Map re-encodes only the tiles that moved.
+    map_tiles: save::map::EncodedTiles,
     #[cfg(test)]
     map_encodes: u32,
+    #[cfg(test)]
+    map_tile_encodes: usize,
     restored_extensions: extensions::Saved,
     pub(super) reopened_mode: Option<super::player::MovementMode>,
     pub(super) reopened_view: Option<save::MovementV1>,
@@ -518,8 +522,11 @@ impl Persistence {
             saved_map: 0,
             initial_map,
             map_section: None,
+            map_tiles: Default::default(),
             #[cfg(test)]
             map_encodes: 0,
+            #[cfg(test)]
+            map_tile_encodes: 0,
             reopened_mode: restored
                 .map(|s| {
                     if s.flight {
@@ -691,6 +698,7 @@ fn restore_map(mut p: ResMut<Persistence>, mut maps: Query<&mut super::map::Play
     };
     let saved = p.initial_map.take().expect("checked above");
     map.0 = saved.restore();
+    saved.seed(&map.0, &mut p.map_tiles);
     p.saved_map = map.revision();
     p.map_section = Some((map.revision(), saved));
 }
@@ -869,10 +877,13 @@ pub(super) fn drive(
     let (saved_containers, containers_revision) = (containers.capture(), containers.revision());
     let map_revision = map.revision();
     if p.map_section.as_ref().map(|(r, _)| *r) != Some(map_revision) {
-        p.map_section = Some((map_revision, save::map::SavedMap::capture(map)));
+        let p = &mut *p;
+        let (section, _encoded) = save::map::SavedMap::capture_cached(map, &mut p.map_tiles);
+        p.map_section = Some((map_revision, section));
         #[cfg(test)]
         {
             p.map_encodes += 1;
+            p.map_tile_encodes += _encoded;
         }
     }
     let saved_map = p.map_section.as_ref().expect("set above").1.clone();
