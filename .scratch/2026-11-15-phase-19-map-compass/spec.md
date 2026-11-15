@@ -132,20 +132,23 @@ The minimap
 
 Waypoints
 
-31. As a player, I want to place a Waypoint at my own position, so that I can
-    mark where I am standing.
-32. As a player, I want to place a Waypoint by clicking explored ground on the
-    Map, so that I can mark a place I can see.
+31. As a player, I want an Add Waypoint button on the Map that turns on add mode,
+    with a link to add one at my own position, so that I can mark where I am
+    standing.
+32. As a player, I want, in add mode, to click explored ground on the Map and get
+    a popover there, so that I can mark a place I can see.
 33. As a player, I want a refusal when I click fog, so that a Waypoint is never
     set on ground the Map knows nothing about.
-34. As a player, I want to give a Waypoint a name and a Marker kind, so that I
-    can tell my base from my mine.
+34. As a player, I want to give a Waypoint a name and a Marker kind in that
+    popover, and to change either later by clicking its mark or its row, so that
+    I can tell my base from my mine.
 35. As a player, I want a default name if I give none, so that adding one takes
     a single click.
-36. As a player, I want to select a Waypoint in the list or on the Map and
-    centre the Map on it, so that I can find it.
-37. As a player, I want to remove a Waypoint I made, so that the Map stays
-    tidy.
+36. As a player, I want a click on a Waypoint in the list or on the Map to open
+    its popover, panning the Map to it only when it is out of view, so that I
+    can find it.
+37. As a player, I want to remove a Waypoint I made, from its popover or its row,
+    so that the Map stays tidy.
 38. As a player, I want a Waypoint to be mine alone and to survive saving and
     reopening, so that my markers are there next session.
 39. As a player, I want a marker where I died, so that I can go back for what I
@@ -216,9 +219,10 @@ Saving and games
   engine already treats as forward at heading zero. A bearing is measured
   clockwise from North.
 - Waypoints are Server-owned, per Player. The Client sends an add intent
-  (position, name, Marker kind) and a remove intent; the Server answers with a
-  refusal and a reason, as it does for other intents, and a refused add names
-  its reason (fog, no such Marker kind, too many, a bad name). Waypoints are
+  (position, name, Marker kind), an edit intent (name, Marker kind) and a remove
+  intent; the Server answers with a refusal and a reason, as it does for other
+  intents, and a refused add or edit names its reason (fog, no such Marker kind,
+  too many, a bad name, the death marker). Waypoints are
   validated against the Player's own Map: a point must be Explored.
 - The Server adds a Waypoint where a Player dies, of the Marker kind the Game
   names for death. A Game that names none gets no death marker. A new death
@@ -262,7 +266,12 @@ Saving and games
   action. It must be added to the set of things that cover the World. It has the
   pointer readout, the zoom levels 2, 4, 8 and 16 m per pixel (downsampling the
   cached tiles on the Client), the scale bar, the legend of Biomes seen, the
-  Waypoint list and the new-Waypoint form.
+  Waypoint list in a side panel that switches between Waypoints and Explore. An
+  icon toolbar in the view holds zoom, Centre on me, Add Waypoint and close, with
+  tooltips. Add mode shows a crosshair and a hint with an At my position link; a
+  click on explored ground, or on a mark or a list row, opens a popover anchored
+  to the point with a name field, the Marker kinds and its buttons. The death
+  marker's popover is read-only.
 - The Map key is `M`, so Cycle tool moved to `O` and the minimap is `N`; the
   Compass is `B`. A profile that saved an explicit Cycle tool binding keeps it,
   and the Map default yields to it. The Map is also a

@@ -17,10 +17,14 @@ you are dead.
 
 **M** opens and closes the Map, a full-screen view of the ground you have
 explored, also a button in the Menu. Drag to pan, scroll or use the + and -
-buttons to zoom between 2, 4, 8 and 16 m to the pixel, and press Centre on me to
-return to the Player's arrow. A scale bar shows metres, and the readout under
-the pointer gives its position, height, Biome and distance from you; over ground
-you have not seen it says Not explored and names no Biome. The panel lists the
+buttons in the toolbar at the top right to zoom between 2, 4, 8 and 16 m to the
+pixel, and press Centre on me to return to the Player's arrow. The flag button
+turns on add mode: click explored ground to name a Waypoint and choose its
+Marker kind in a popover (Enter adds, Escape cancels), or use At my position;
+click a mark or a list row to rename, change or remove it. A scale bar shows
+metres, and the readout under the pointer gives its position, height, Biome and
+distance from you; over ground you have not seen it says Not explored and names
+no Biome. The panel switches between your Waypoints and Explore, which lists the
 Biomes seen and the area explored. Escape or M closes it, and the Compass, the
 minimap and the Hotbar hide under it.
 

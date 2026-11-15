@@ -68,10 +68,11 @@ Decisions made while building step 19, all on the unreleased 0.3 contract.
   Game's manifest. `enabled = false` forbids the Map and the Compass; absent
   permits them. While forbidden the Server neither scans nor accepts Waypoint
   intents, the Client draws and opens nothing, and the saved Map is kept.
-- **Waypoint intents are Add and Remove,** judged on the Player's own Map: the
-  point must be Explored, the kind declared, the name valid and the list under
-  64 Waypoints. A refusal carries a reason. The death Waypoint is the Server's
-  and cannot be removed by an intent.
+- **Waypoint intents are Add, Edit and Remove,** judged on the Player's own Map:
+  the point must be Explored (Add), the kind declared, the name valid and the
+  list under 64 Waypoints. An Edit renames and re-kinds, and a blank name keeps
+  the old one. A refusal carries a reason. The death Waypoint is the Server's
+  and cannot be edited or removed by an intent.
 - **Known simplifications.** The Map window's Biome tint is derived from the
   Biome's index, not declared by the Game. The Map view draws Waypoint icons
   with no name labels; names show in the Waypoint list.
