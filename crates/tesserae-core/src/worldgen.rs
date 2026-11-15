@@ -877,6 +877,18 @@ impl Worldgen {
         self.climate.biome_at(&self.params.biomes, x_m, z_m)
     }
 
+    /// The ground the column at global Voxel `(gx, gz)` is made of, as the Chunk holding it lays
+    /// it: its Biome's, or the World's. `None` in a World without ground.
+    pub fn column_ground(&self, gx: i32, gz: i32) -> Option<GroundParams> {
+        let Some(grounds) = &self.biome_grounds else {
+            return self.params.ground;
+        };
+        Some(
+            self.biome_at(self.global_m(gx), self.global_m(gz))
+                .map_or(grounds.world, |id| grounds.by_biome[id.index()]),
+        )
+    }
+
     /// `None` where no Biome has colours or the Generator version predates them. Pure like
     /// [`Self::biome_at`].
     pub fn sky_fog_at(&self, x_m: f32, z_m: f32) -> Option<SkyFogBlend> {

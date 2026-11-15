@@ -13,13 +13,12 @@ use std::collections::HashMap;
 use bevy::prelude::*;
 use tesserae_core::collide::{Aabb, VoxelVolume, overlaps};
 use tesserae_core::template::{Cell, Sampled, Template, Turn};
-use tesserae_core::{MAX_SHAPED_PER_CHUNK, Tables, Voxel};
+use tesserae_core::{MAX_SHAPED_PER_CHUNK, Tables, Voxel, Worldgen};
 
 use super::{
     Batch, Change, EditAction, EditIntent, EditRejected, MAX_DEFERRED_TICKS, PendingEdits,
     PlacedOnly, Reach, RejectReason, emission, land_in, reach_from, stored_solid, taken_back,
 };
-use crate::server::ContentTables;
 use crate::server::container::Containers;
 use crate::server::game_mode::PlayerMode;
 use crate::server::mods::EditHistory;
@@ -28,6 +27,7 @@ use crate::server::player::Player;
 use crate::server::streaming::MeshState;
 use crate::server::undo::{Entry, Journal};
 use crate::server::world_state::{ChunkStore, VoxelCoord};
+use crate::server::{ContentTables, WorldGenerator};
 use crate::world::{ChunkCoord, WorldSettings};
 
 /// A Structure landing is the Mod drain's batched writer by another hand: one
@@ -63,6 +63,8 @@ impl StructureIntent {
 pub(in crate::server) struct Placement<'a> {
     sampled: Sampled<'a>,
     corner: [i32; 3],
+    /// Lays a `ground` cell; without it one is left like Keep.
+    generator: Option<&'a Worldgen>,
 }
 
 impl<'a> Placement<'a> {
@@ -73,6 +75,7 @@ impl<'a> Placement<'a> {
         voxel_size: f32,
         turn: Turn,
         anchor: [i32; 3],
+        generator: Option<&'a Worldgen>,
     ) -> Self {
         let sampled = template.sample(voxel_size, turn);
         let size = sampled.size();
@@ -81,15 +84,19 @@ impl<'a> Placement<'a> {
             anchor[1] - sampled.ground(),
             anchor[2] - size[2] / 2,
         ];
-        Placement { sampled, corner }
+        Placement {
+            sampled,
+            corner,
+            generator,
+        }
     }
 
     pub(in crate::server) fn len(&self) -> usize {
         self.sampled.size().iter().map(|&n| n as usize).product()
     }
 
-    /// Where cell `index` lands and what goes there, air for a carving cell;
-    /// `None` for Keep.
+    /// Where cell `index` lands and what goes there, air for a carving cell
+    /// and the column's ground for a `ground` one; `None` for Keep.
     pub(in crate::server) fn get(&self, index: usize) -> Option<([i32; 3], Voxel)> {
         let [w, _, d] = self.sampled.size();
         let index = index as i32;
@@ -99,6 +106,10 @@ impl<'a> Placement<'a> {
             Cell::Keep => None,
             Cell::Air => Some((at, Voxel::AIR)),
             Cell::Voxel(voxel) => Some((at, voxel)),
+            Cell::Ground => {
+                let ground = self.generator?.column_ground(at[0], at[2])?;
+                Some((at, self.sampled.ground_voxel(local[1], ground)))
+            }
         }
     }
 }
@@ -257,11 +268,12 @@ pub(super) fn drain(
     mut pending: ResMut<PendingEdits>,
     (mut history, mut journal): (ResMut<EditHistory>, ResMut<Journal>),
     (mut store, mut meshes): (ResMut<ChunkStore>, ResMut<MeshState>),
-    (tables, world, containers): (
+    (tables, world, generator): (
         Res<ContentTables>,
         Res<WorldSettings>,
-        Option<Res<Containers>>,
+        Option<Res<WorldGenerator>>,
     ),
+    containers: Option<Res<Containers>>,
     mut rejected: MessageWriter<EditRejected>,
     players: Query<&Player>,
 ) {
@@ -275,8 +287,7 @@ pub(super) fn drain(
             &mut structure,
             &mut spend,
             (&mut store, &mut meshes),
-            &tables,
-            &world,
+            (&tables, &world, generator.as_deref().map(|g| &g.0)),
             (body, containers.as_deref()),
             &mut history,
         );
@@ -304,8 +315,7 @@ fn step(
     structure: &mut PendingStructure,
     spend: &mut Spend,
     (store, meshes): (&mut ChunkStore, &mut MeshState),
-    tables: &Tables,
-    world: &WorldSettings,
+    (tables, world, generator): (&Tables, &WorldSettings, Option<&Worldgen>),
     around: (Option<Aabb>, Option<&Containers>),
     history: &mut EditHistory,
 ) -> Progress {
@@ -323,6 +333,7 @@ fn step(
         world.voxel_size,
         structure.turn,
         anchor,
+        generator,
     );
     while !structure.landing {
         if structure.next == placement.len() {
@@ -704,6 +715,32 @@ mod tests {
         assert!(voxel_at(&app, [16, 8, 16]).is_air());
         assert_eq!(voxel_at(&app, [16, 9, 16]), stone());
         assert!(voxel_at(&app, [15, 9, 16]).is_air(), "Keep leaves the air");
+    }
+
+    #[test]
+    fn a_ground_cell_takes_the_soil_below_the_ground_layer_and_the_surface_above() {
+        let g = Cell::Ground;
+        let plot = Template::new(
+            "t:plot".into(),
+            1.0,
+            vec![vec![vec![g]], vec![vec![g]], vec![vec![g]]],
+            1,
+            None,
+            1.0,
+        )
+        .unwrap();
+        let mut app = app_with_tables(&[(origin(), ground())], tables_with(vec![plot]));
+        let params = tesserae_core::testgen::world_params();
+        app.insert_resource(crate::server::WorldGenerator(tesserae_core::Worldgen::new(
+            0, 1.0, params,
+        )));
+        send(&mut app, intent("t:plot"));
+        settle(&mut app);
+        assert!(rejections(&mut app).is_empty());
+        let ground = params.ground.unwrap();
+        assert_eq!(voxel_at(&app, [16, 7, 16]), Voxel::cube(ground.soil));
+        assert_eq!(voxel_at(&app, [16, 8, 16]), Voxel::cube(ground.surface));
+        assert_eq!(voxel_at(&app, [16, 9, 16]), Voxel::cube(ground.surface));
     }
 
     #[test]

@@ -28,6 +28,7 @@ enum Entry {
 enum Word {
     Keep,
     Air,
+    Ground,
 }
 
 #[derive(Deserialize)]
@@ -51,6 +52,7 @@ impl From<Template> for content::TemplateDef {
                     cell: match entry {
                         Entry::Word(Word::Keep) => content::TemplateCell::Keep,
                         Entry::Word(Word::Air) => content::TemplateCell::Air,
+                        Entry::Word(Word::Ground) => content::TemplateCell::Ground,
                         Entry::Voxel(v) => content::TemplateCell::Voxel(content::TemplateVoxel {
                             material: v.material,
                             shape: v.shape,

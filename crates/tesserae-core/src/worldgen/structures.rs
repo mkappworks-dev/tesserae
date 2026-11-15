@@ -320,13 +320,21 @@ impl Worldgen {
                 let [lx, ly, lz] = [x, y, z].map(|g| g.rem_euclid(size) as usize);
                 chunk.set(lx, ly, lz, voxel);
             };
-            for y in low[1]..high[1] {
-                for z in low[2]..high[2] {
-                    for x in low[0]..high[0] {
+            for z in low[2]..high[2] {
+                for x in low[0]..high[0] {
+                    let ground = std::cell::OnceCell::new();
+                    for y in low[1]..high[1] {
                         let voxel = match sampled.cell([x - s.min[0], y - s.min[1], z - s.min[2]]) {
                             Cell::Keep => continue,
                             Cell::Air => Voxel::AIR,
                             Cell::Voxel(v) => v,
+                            Cell::Ground => {
+                                let ground = ground.get_or_init(|| self.column_ground(x, z));
+                                let Some(ground) = *ground else {
+                                    continue;
+                                };
+                                sampled.ground_voxel(y - s.min[1], ground)
+                            }
                         };
                         set([x, y, z], voxel);
                     }
@@ -342,7 +350,7 @@ impl Worldgen {
                 for x in low[0]..high[0] {
                     if !matches!(
                         sampled.cell([x - s.min[0], 0, z - s.min[2]]),
-                        Cell::Voxel(_)
+                        Cell::Voxel(_) | Cell::Ground
                     ) {
                         continue;
                     }

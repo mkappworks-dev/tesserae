@@ -1567,6 +1567,23 @@ layers = [["rp"]]
     }
 
     #[test]
+    fn a_ground_cell_is_obtainable_by_definition() {
+        let from_rock = "[[recipes]]\ninputs = [{ item = \"plain:rock\", count = 1 }]\n\
+                         output = { item = \"plain:planks\", count = 4 }\nstation = \"hand\"\n";
+        let plot = "[[templates]]\nname = \"plot\"\ncell-m = 1.0\nground-layer = 0\n\
+                    layers = [[\"gg\"]]\n[templates.palette]\n\"g\" = \"ground\"\n";
+        let s = Scratch::new();
+        data(
+            &s,
+            "plain",
+            true,
+            "",
+            &hut_game(&format!("{from_rock}{plot}")),
+        );
+        assert_eq!(refusals(&s), (Ok(()), Ok(())));
+    }
+
+    #[test]
     fn what_biomes_lay_plants_yield_and_ores_hold_is_obtainable() {
         let moss = "[[materials]]\nname = \"moss\"\nemission = 0\ndimming = 15\n\
                     occlusion = \"opaque\"\nrender = \"opaque\"\nsolid = true\n\

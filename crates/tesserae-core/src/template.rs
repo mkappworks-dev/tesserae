@@ -3,6 +3,7 @@
 
 use crate::shape::Orientation;
 use crate::voxel::{MaterialId, Voxel};
+use crate::worldgen::GroundParams;
 
 /// The longest side of a Template, in metres.
 pub const MAX_TEMPLATE_SIDE_M: f32 = 64.0;
@@ -24,6 +25,9 @@ pub enum Cell {
     /// Written as air, so it carves.
     Air,
     Voxel(Voxel),
+    /// The ground where it stands: its column's Biome's surface Material at
+    /// and above the Ground layer, its soil below.
+    Ground,
 }
 
 /// Why a Template's grid is refused.
@@ -277,6 +281,16 @@ impl Sampled<'_> {
     /// underground.
     pub fn ground(&self) -> i32 {
         self.ground
+    }
+
+    /// What a [`Cell::Ground`] in Voxel layer `y` is where the column's
+    /// ground is `ground`.
+    pub fn ground_voxel(&self, y: i32, ground: GroundParams) -> Voxel {
+        Voxel::cube(if y < self.ground {
+            ground.soil
+        } else {
+            ground.surface
+        })
     }
 
     /// The cell at `at`, each in `0..size()`, with its Orientation turned.

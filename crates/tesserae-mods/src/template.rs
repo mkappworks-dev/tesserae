@@ -106,6 +106,7 @@ fn template(
         let cell = match &entry.cell {
             content::TemplateCell::Keep => Cell::Keep,
             content::TemplateCell::Air => Cell::Air,
+            content::TemplateCell::Ground => Cell::Ground,
             content::TemplateCell::Voxel(v) => {
                 Cell::Voxel(voxel(v, registry, tables).map_err(|reason| format!("{at}: {reason}"))?)
             }

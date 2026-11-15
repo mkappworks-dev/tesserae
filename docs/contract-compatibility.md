@@ -200,6 +200,11 @@ rebuild. A fifth row, an unknown Template or a spacing under its floor is a load
 error naming the Biome. A Biome with none generates exactly as before, with no
 generator version change.
 
+`template-cell` then gained `ground`, the surface Material of the Biome a
+Structure's column stands in at and above the ground layer and its soil below,
+so one Template fits grass, sand or snow. A Declaration built against the
+earlier 0.3 text needs a rebuild. It is never refused as not Obtainable.
+
 ## What is not frozen
 
 Line `0.x` is pre-release. Later gameplay steps may add new lines, and

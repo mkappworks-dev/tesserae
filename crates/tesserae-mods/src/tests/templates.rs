@@ -140,6 +140,38 @@ fn a_keep_cell_and_an_air_cell_are_different_cells() {
     assert!(matches!(sampled.cell([0, 0, 0]), Cell::Voxel(v) if !v.is_air()));
 }
 
+#[test]
+fn a_ground_cell_loads_from_data_and_a_component() {
+    let toml = format!(
+        "{MATERIALS}
+[[templates]]
+name = \"plot\"
+cell-m = 1.0
+ground-layer = 1
+layers = [[\"gg\"], [\"g#\"]]
+
+[templates.palette]
+\"g\" = \"ground\"
+\"#\" = {{ material = \"t:stone\" }}
+"
+    );
+    let (_, from_data) = load(vec![("t", data(&toml).unwrap())]).unwrap();
+    let mut d = component();
+    d.templates[0].palette.push(content::TemplatePaletteEntry {
+        symbol: 'g',
+        cell: content::TemplateCell::Ground,
+    });
+    d.templates[0].layers = vec![vec!["gg".into()], vec!["g#".into()]];
+    d.templates[0].ground_layer = Some(1);
+    let (_, from_component) = load(vec![("t", d)]).unwrap();
+    for templates in [from_data, from_component] {
+        let sampled = templates[0].sample(1.0, Turn::NONE);
+        assert_eq!(sampled.cell([0, 0, 0]), Cell::Ground);
+        assert_eq!(sampled.cell([0, 1, 0]), Cell::Ground);
+        assert!(matches!(sampled.cell([1, 1, 0]), Cell::Voxel(_)));
+    }
+}
+
 /// Where a face points after `quarters` quarter-turns about +Y, which takes +Z
 /// to +X and +X to -Z.
 fn yawed_face(face: usize, quarters: u8) -> usize {

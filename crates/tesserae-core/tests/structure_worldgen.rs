@@ -7,8 +7,8 @@ use std::collections::{HashMap, HashSet};
 use tesserae_core::template::{Cell, Template, Turn};
 use tesserae_core::{
     AIR, Biome, BiomeName, BiomeStructure, BiomeTable, CHUNK_SIZE, CaveParams, Chunk,
-    ClimateParams, MaterialId, SmoothingParams, SurfaceFeatures, Voxel, WaterParams, Worldgen,
-    WorldgenParams,
+    ClimateParams, GroundParams, MaterialId, SmoothingParams, SurfaceFeatures, Voxel, WaterParams,
+    Worldgen, WorldgenParams,
 };
 
 const CELLAR: MaterialId = 240;
@@ -65,6 +65,7 @@ fn drawn<const ROWS: usize>(
         'm' => Cell::Voxel(Voxel::cube(MARK)),
         'w' => Cell::Voxel(Voxel::cube(WALL)),
         's' => Cell::Voxel(Voxel::new(STEP, STAIR_SHAPE, STAIR_FACING)),
+        'g' => Cell::Ground,
         _ => unreachable!(),
     };
     // Written as rows along x of cells along z, so transpose into rows along z.
@@ -160,6 +161,17 @@ impl Probe {
         }
     }
 
+    /// The ground the Biome of column `[x, z]` lays, as declared.
+    fn ground_of(&self, [x, z]: [i32; 2], size: f32) -> GroundParams {
+        let biomes = self.bare.biomes();
+        self.bare
+            .biome_at(x as f32 * size, z as f32 * size)
+            .and_then(|id| biomes.get(id))
+            .and_then(|b| b.ground)
+            .or(self.bare.params().ground)
+            .unwrap()
+    }
+
     fn at(&self, cell: [i32; 3]) -> (Voxel, Voxel) {
         let chunk = cell.map(|c| c.div_euclid(SIZE_I));
         let local = cell.map(|c| c.rem_euclid(SIZE_I) as usize);
@@ -243,9 +255,9 @@ fn marks(changed: &HashMap<[i32; 3], (Voxel, Voxel)>) -> Vec<[i32; 3]> {
 }
 
 /// What the Structure turned by `turn` with its mark's corner at `mark` holds, cell by cell, by
-/// the Template's own sampling.
-fn expected(template: &Template, size: f32, turn: Turn, mark: [i32; 3]) -> Vec<([i32; 3], Cell)> {
-    let sampled = template.sample(size, turn);
+/// the Template's own sampling, a `ground` cell as the column's Biome lays its ground.
+fn expected(probe: &Probe, size: f32, turn: Turn, mark: [i32; 3]) -> Vec<([i32; 3], Cell)> {
+    let sampled = probe.template.sample(size, turn);
     let [sx, sy, sz] = sampled.size();
     let cells: Vec<_> = (0..sy)
         .flat_map(|y| (0..sz).flat_map(move |z| (0..sx).map(move |x| [x, y, z])))
@@ -260,7 +272,22 @@ fn expected(template: &Template, size: f32, turn: Turn, mark: [i32; 3]) -> Vec<(
     let corner = [0, 1, 2].map(|a| mark[a] - first_mark[a]);
     cells
         .into_iter()
-        .map(|(at, c)| ([0, 1, 2].map(|a| corner[a] + at[a]), c))
+        .map(|(at, c)| {
+            let at = [0, 1, 2].map(|a| corner[a] + at[a]);
+            let c = match c {
+                Cell::Ground => {
+                    let ground = probe.ground_of([at[0], at[2]], size);
+                    let below = at[1] < corner[1] + sampled.ground();
+                    Cell::Voxel(Voxel::cube(if below {
+                        ground.soil
+                    } else {
+                        ground.surface
+                    }))
+                }
+                c => c,
+            };
+            (at, c)
+        })
         .collect()
 }
 
@@ -273,6 +300,7 @@ fn holds(probe: &Probe, cells: &[([i32; 3], Cell)]) -> bool {
             Cell::Keep => with == bare,
             Cell::Air => with.is_air(),
             Cell::Voxel(v) => with == v,
+            Cell::Ground => unreachable!("resolved by `expected`"),
         }
     })
 }
@@ -286,14 +314,14 @@ fn structures(probe: &Probe, size: f32, half_m: f32) -> Vec<Found> {
     let mut found = Vec::new();
     for mark in marks(&changed) {
         let turns: Vec<Turn> = Turn::all()
-            .filter(|&turn| holds(probe, &expected(&probe.template, size, turn, mark)))
+            .filter(|&turn| holds(probe, &expected(probe, size, turn, mark)))
             .collect();
         assert_eq!(
             turns.len(),
             1,
             "{size} m: the Structure at {mark:?} is not whole"
         );
-        let cells = expected(&probe.template, size, turns[0], mark);
+        let cells = expected(probe, size, turns[0], mark);
         owned.extend(cells.iter().map(|c| c.0));
         let corner = [0, 1, 2].map(|a| cells.iter().map(|c| c.0[a]).min().unwrap());
         let far = [0, 2].map(|a| cells.iter().map(|c| c.0[a]).max().unwrap());
@@ -411,7 +439,7 @@ fn keep_cells_leave_the_terrain_and_air_cells_carve_it() {
     assert!(!found.is_empty());
     let (mut kept_ground, mut carved) = (0, 0);
     for f in found {
-        for (at, cell) in expected(&probe.template, size, f.turn, f.mark) {
+        for (at, cell) in expected(&probe, size, f.turn, f.mark) {
             let (with, bare) = probe.at(at);
             match cell {
                 Cell::Keep if !bare.is_air() => {
@@ -753,7 +781,7 @@ fn a_cellar_is_underground_and_the_ground_layer_level_with_the_surface() {
             tops.sort();
             let median = tops[(tops.len() - 1) / 2];
             assert_eq!(f.mark[1], median, "{size} m: the floor at {:?}", f.mark);
-            for (at, cell) in expected(&probe.template, size, f.turn, f.mark) {
+            for (at, cell) in expected(&probe, size, f.turn, f.mark) {
                 if matches!(cell, Cell::Voxel(v) if v.material() == CELLAR) {
                     let (_, bare) = probe.at(at);
                     assert!(!bare.is_air(), "{size} m: cellar at {at:?} is above ground");
@@ -792,6 +820,71 @@ fn a_foundation_fills_the_gap_on_uneven_ground_and_is_absent_without_one() {
         assert!(
             filled > 0 && open > 0,
             "{size} m: no gap under any Structure"
+        );
+    }
+}
+
+const MEADOW: GroundParams = GroundParams {
+    rock: 250,
+    soil: 251,
+    surface: 252,
+};
+const DESERT: GroundParams = GroundParams {
+    rock: 253,
+    soil: 254,
+    surface: 255,
+};
+
+/// A 4 by 5 m plot of the local ground a layer deep, marked at one corner, with a post at each
+/// corner.
+fn plot() -> Template {
+    let layers = [
+        ["ggggg", "ggggg", "ggggg", "ggggg"],
+        ["mgggg", "ggggg", "ggggg", "ggggg"],
+        ["w...w", ".....", ".....", "w...w"],
+    ];
+    drawn("t:plot", &layers, 1, None, 1.0)
+}
+
+/// A meadow and a desert, both listing `structures`.
+fn meadow_and_desert(structures: &[BiomeStructure]) -> WorldgenParams {
+    WorldgenParams {
+        biomes: BiomeTable::new(&[
+            Biome {
+                ground: Some(MEADOW),
+                ..named("t:meadow", 0.2, structures)
+            },
+            Biome {
+                ground: Some(DESERT),
+                ..named("t:desert", 0.8, structures)
+            },
+        ])
+        .unwrap(),
+        ..flat(&[])
+    }
+}
+
+#[test]
+fn a_ground_cell_takes_grass_in_a_meadow_sand_in_a_desert_and_each_columns_own_across_a_border() {
+    for size in [1.0, 0.5] {
+        let probe = Probe::of(size, plot(), meadow_and_desert, &[row(16.0, 1.0)]);
+        // Each found Structure is whole, its ground cells as its columns' own Biomes lay them.
+        let found = structures(&probe, size, 96.0);
+        let (mut meadow, mut desert, mut across) = (0, 0, 0);
+        for f in &found {
+            let grounds: HashSet<_> = columns(&probe, f, size)
+                .into_iter()
+                .map(|c| probe.ground_of(c, size).surface)
+                .collect();
+            match grounds.len() {
+                2 => across += 1,
+                _ if grounds.contains(&MEADOW.surface) => meadow += 1,
+                _ => desert += 1,
+            }
+        }
+        assert!(
+            meadow > 0 && desert > 0 && across > 0,
+            "{size} m: {meadow} on grass, {desert} on sand, {across} across a border"
         );
     }
 }

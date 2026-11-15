@@ -1093,6 +1093,9 @@ interface content {
         /// Written as air, so it carves.
         air,
         voxel(template-voxel),
+        /// The ground where the Structure stands: its column's Biome's surface
+        /// Material at and above the ground layer, its soil below.
+        ground,
     }
 
     record template-palette-entry {
