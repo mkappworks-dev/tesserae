@@ -48,7 +48,9 @@ pub(super) fn plugin(app: &mut App) {
             (capture, announce)
                 .chain()
                 .after(super::player::simulate)
-                .run_if(|policy: Res<MapPolicy>| policy.enabled),
+                // The session's resources are gone between Worlds, and a run condition cannot skip on
+                // a missing one.
+                .run_if(|policy: Option<Res<MapPolicy>>| policy.is_some_and(|p| p.enabled)),
         );
 }
 
