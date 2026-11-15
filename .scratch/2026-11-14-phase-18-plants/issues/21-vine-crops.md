@@ -1,6 +1,6 @@
 # 21: Vine crops: watermelon and pumpkin
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: None (the mockup is approved)
 
@@ -45,16 +45,57 @@ record fruit-vine-def {
 
 ## Acceptance criteria
 
-- [ ] A vine bears fruit up to `max-fruit`, never touching (the gap in Voxels,
+- [x] A vine bears fruit up to `max-fruit`, never touching (the gap in Voxels,
       at least one) and within reach, at 1.0, 0.5 and 0.25 m.
-- [ ] Fruit ripens through its Stages and does not seed.
-- [ ] Breaking a fruit lets the vine bear another (Server test).
-- [ ] Fruit is no Item's Material and cannot be placed; breaking ripe fruit
+- [x] Fruit ripens through its Stages and does not seed.
+- [x] Breaking a fruit lets the vine bear another (Server test).
+- [x] Fruit is no Item's Material and cannot be placed; breaking ripe fruit
       drops its yield.
-- [ ] A vine and its first fruit generate whole across a Chunk border and
+- [x] A vine and its first fruit generate whole across a Chunk border and
       identically for equal seeds; at every Voxel size the count, gap and reach
       hold.
-- [ ] The snapshot round trip carries a generated vine; an older save loads.
-- [ ] Docs and the ADR-0027 amendment record the rules.
+- [x] The snapshot round trip carries a generated vine; an older save loads.
+- [x] Docs and the ADR-0027 amendment record the rules.
 
 ## Comments
+
+Built. `crop-def.fruit-vine: option<fruit-vine-def>` (WIT in both copies). Fruit
+reuses `Role::Fruit` for a crop Plant: grown Materials, no implicit Item, soil
+below like a crop (`lacks_soil` now holds only a tree's own parts back), yields
+by Stage, `canonical` and `stage_shape` for undo and Shapes, and `is_tree_part`
+now asks the Plant's kind so ground fruit is never Felling. The ripe vine Stage
+Samples at `regrow-seconds`; `reach::bear_vine_fruit` picks one hash cell in
+reach (the spread picker), needs it free with `needs_met` (soil, light, Climate),
+fewer than `max-fruit` of the Plant's fruit within reach and none within
+`gap_voxels` (`ceil(gap / size)`, at least 1) on the ground plane; fruit Samples
+to ripen through its Stages and nothing else. A vine crop with `harvest-to` is a
+load error.
+
+Worldgen. A new `SurfacePlantKind::Vine` (frozen in the Biome, `SavedPlantKind::
+Vine`, optional `vine` form) stands the ripe vine and `first_fruit_offsets`
+fruit: candidate columns in reach ranked by a hash of the seed and the vine's
+column in metres, accepted greedily when apart and when `ground_base` (the checks
+of `plant_at` without the Biome: above the terrain band, not carved, not under
+the lake, not eased) holds, one to `max-fruit` of them. Cells are put after every
+tree, so a trunk or crown is never cut, from any Chunk's viewpoint; the feature
+margin is now the widest of tree and vine reach. A first fruit is a function of
+the vine's metres, but which cells are candidates depends on the Voxel size, so
+the cluster is not identical at every size, only whole and within the rules.
+
+Content. `watermelon` and `pumpkin` in `crops` (box Shapes, five tiles and an
+item icon each from `scripts/generate-mod-art`, a seed Item, slices and a pumpkin
+as food), scattered in Terra's temperate and savanna, meadow's meadow, prairie
+and heath, tidewater's lagoon, lumen's garden and ember's ash flats, each under
+the 16-feature cap. The Mod's description stays under 80 characters.
+
+Tests: core `plant::reach` (bears within reach, never touching, to the cap, at
+three sizes; breaking lets it bear another; fruit alone never changes more than
+itself; first fruit offsets deterministic and apart), `plant` (grown, yields,
+soil, load rules), `plant_worldgen` (whole across Chunk borders at three sizes,
+order independent, the snapshot carries it), mods (resolve, defaults, freeze,
+errors, TOML), server (`fluids::plants::tests::vine`: cap, replacement after a
+break, fruit alone ripens and seeds nothing, fruit breaks without ground) and
+`demo_games` (content rows, yields, no Item places fruit).
+
+Re-pinned: `the_demo_games_textures_are_unchanged`; the per-Biome species tables
+of `demo_games::vegetation`. No version change: the snapshot kind is additive.
