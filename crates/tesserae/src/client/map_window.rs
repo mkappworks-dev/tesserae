@@ -33,7 +33,12 @@ use crate::session::SessionApp;
 pub(super) const DEFAULT_VIEW: Vec2 = Vec2::new(640.0, 480.0);
 const MIN_VIEW_PX: f32 = 200.0;
 const PANEL_PX: f32 = 290.0;
-const SCRIM: Color = Color::srgba(0.01, 0.02, 0.02, 0.5);
+const SCRIM: Color = Color::srgba(0.01, 0.02, 0.02, 0.35);
+const CARD_FILL: Color = Color::srgb_u8(0x0b, 0x0b, 0x0d);
+const CARD_EDGE: Color = Color::srgb_u8(0x66, 0x66, 0x6d);
+const CARD_RULE: Color = Color::srgb_u8(0x45, 0x45, 0x4c);
+const CARD_MAX_PX: Vec2 = Vec2::new(1000.0, 640.0);
+const CARD_SHARE: Vec2 = Vec2::new(78.0, 76.0);
 const VIEW_FILL: Color = Color::srgb_u8(0x0b, 0x0f, 0x0c);
 const CHROME_FILL: Color = Color::srgba_u8(0x06, 0x08, 0x07, 0xe6);
 const CHROME_CLEAR: Color = Color::srgba_u8(0x06, 0x08, 0x07, 0);
@@ -906,8 +911,8 @@ fn spawn(commands: &mut Commands, image: Handle<Image>, solid: bool, eyebrow: &s
                 position_type: PositionType::Absolute,
                 width: Val::Percent(100.0),
                 height: Val::Percent(100.0),
-                padding: UiRect::all(Val::Px(16.0)),
-                column_gap: Val::Px(16.0),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
                 ..default()
             },
             BackgroundColor(if solid {
@@ -917,8 +922,31 @@ fn spawn(commands: &mut Commands, image: Handle<Image>, solid: bool, eyebrow: &s
             }),
         ))
         .with_children(|root| {
-            view_box(root, image, eyebrow, key);
-            side_panel(root);
+            root.spawn((
+                Node {
+                    width: Val::Percent(CARD_SHARE.x),
+                    height: Val::Percent(CARD_SHARE.y),
+                    max_width: Val::Px(CARD_MAX_PX.x),
+                    max_height: Val::Px(CARD_MAX_PX.y),
+                    border: UiRect::all(Val::Px(theme::RULE)),
+                    border_radius: BorderRadius::all(Val::Px(theme::RADIUS_PANEL)),
+                    overflow: Overflow::clip(),
+                    ..default()
+                },
+                BackgroundColor(CARD_FILL),
+                BorderColor::all(CARD_EDGE),
+                BoxShadow::new(
+                    Color::srgba(0.0, 0.0, 0.0, 0.27),
+                    Val::Px(0.0),
+                    Val::Px(16.0),
+                    Val::Px(0.0),
+                    Val::Px(50.0),
+                ),
+            ))
+            .with_children(|card| {
+                view_box(card, image, eyebrow, key);
+                side_panel(card);
+            });
         });
 }
 
@@ -937,13 +965,10 @@ fn view_box(root: &mut ChildSpawnerCommands, image: Handle<Image>, eyebrow: &str
         Node {
             flex_grow: 1.0,
             min_width: Val::Px(0.0),
-            border: UiRect::all(Val::Px(theme::RULE)),
-            border_radius: BorderRadius::all(Val::Px(theme::RADIUS_PANEL)),
             overflow: Overflow::clip(),
             ..default()
         },
         BackgroundColor(VIEW_FILL),
-        BorderColor::all(theme::edge()),
     ))
     .with_children(|view| {
         view.spawn((
@@ -1212,13 +1237,12 @@ fn side_panel(root: &mut ChildSpawnerCommands) {
             flex_direction: FlexDirection::Column,
             row_gap: Val::Px(10.0),
             padding: UiRect::all(Val::Px(16.0)),
-            border: UiRect::all(Val::Px(theme::RULE)),
-            border_radius: BorderRadius::all(Val::Px(theme::RADIUS_PANEL)),
+            border: UiRect::left(Val::Px(theme::RULE)),
             overflow: Overflow::scroll_y(),
             ..default()
         },
         BackgroundColor(theme::panel()),
-        BorderColor::all(theme::edge()),
+        BorderColor::all(CARD_RULE),
     ))
     .with_children(|panel| {
         super::waypoint_panel::sections(panel);

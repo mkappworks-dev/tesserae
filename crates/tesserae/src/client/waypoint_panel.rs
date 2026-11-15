@@ -38,8 +38,7 @@ pub(super) enum WpControl {
     Centre(u32),
     Remove(u32),
     Kind(usize),
-    Here,
-    Place,
+    AtMyPosition,
     CancelPlace,
 }
 
@@ -87,6 +86,7 @@ pub(super) fn plugin(app: &mut App) {
                     distances,
                     hint,
                     clear_name,
+                    arm,
                     placeholder,
                     name_presentation,
                     banner_state,
@@ -221,14 +221,8 @@ pub(super) fn sections(panel: &mut ChildSpawnerCommands) {
             .with_children(|row| {
                 buttons::button(
                     row,
-                    "Here",
-                    WpControl::Here,
-                    ButtonStyle::Small { kind: Kind::Plain },
-                );
-                buttons::button(
-                    row,
-                    "Place on map\u{2026}",
-                    WpControl::Place,
+                    "At my position",
+                    WpControl::AtMyPosition,
                     ButtonStyle::Small {
                         kind: Kind::Primary,
                     },
@@ -414,7 +408,7 @@ fn activate(
             intents.write(WaypointIntent::Remove { id });
         }
         WpControl::Kind(index) => draft.kind = index,
-        WpControl::Here => {
+        WpControl::AtMyPosition => {
             if let Some((eye, _)) = spot.0 {
                 add_at(
                     Vec2::new(eye.x, eye.z),
@@ -425,7 +419,6 @@ fn activate(
                 );
             }
         }
-        WpControl::Place => draft.placing = !draft.placing,
         WpControl::CancelPlace => draft.placing = false,
     }
 }
@@ -481,6 +474,7 @@ fn focus(
     ui: Option<ResMut<super::input::UiInput>>,
     keys: Res<ButtonInput<KeyCode>>,
     mut actions: ResMut<Actions>,
+    (window, mut draft): (Res<MapWindow>, ResMut<Draft>),
     mut mine: Local<bool>,
 ) {
     let (Some(mut focus), Some(mut ui)) = (focus, ui) else {
@@ -492,12 +486,38 @@ fn focus(
         focus.clear();
         ui.text_entry = true;
         *mine = true;
+    } else if window.open && draft.placing && actions.cancel_requested() {
+        actions.consume_cancel();
+        draft.placing = false;
     } else if on_field {
         ui.text_entry = true;
         *mine = true;
     } else if *mine {
         ui.text_entry = false;
         *mine = false;
+    }
+}
+
+/// Typing arms placement and clearing the text disarms it; Enter arms it even on a blank name. Only a
+/// change in the text arms, so Cancel keeps the text without it re-arming at once.
+fn arm(
+    fields: Fields,
+    focus: Option<Res<InputFocus>>,
+    entries: Query<(), With<NameField>>,
+    keys: Res<ButtonInput<KeyCode>>,
+    mut draft: ResMut<Draft>,
+    mut seen: Local<String>,
+) {
+    let typed = name_of(&fields);
+    if *seen != typed {
+        draft.placing = !typed.trim().is_empty();
+        seen.clone_from(&typed);
+    }
+    let on_field = focus
+        .and_then(|f| f.get())
+        .is_some_and(|e| entries.contains(e));
+    if on_field && keys.just_pressed(KeyCode::Enter) {
+        draft.placing = true;
     }
 }
 
@@ -515,7 +535,7 @@ fn hint(marks: Res<Marks>, mut hints: Query<(&mut Text, &mut Node), With<HintTex
     let text = if marks.kinds().kinds.is_empty() {
         "This World declares no Marker kinds."
     } else {
-        ""
+        "Type a name, then click the map to place it."
     };
     for (mut hint, mut node) in &mut hints {
         if hint.0 != text {

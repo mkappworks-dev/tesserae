@@ -501,13 +501,13 @@ mod waypoints {
     }
 
     #[test]
-    fn here_adds_at_the_players_position_with_the_typed_name_and_the_chosen_kind() {
+    fn at_my_position_adds_at_the_players_position_with_the_typed_name_and_the_chosen_kind() {
         let mut app = app();
         declare(&mut app, kinds());
         opened(&mut app);
         name(&mut app, "Base");
         control(&mut app, WpControl::Kind(1));
-        control(&mut app, WpControl::Here);
+        control(&mut app, WpControl::AtMyPosition);
         assert_eq!(
             intents(&mut app),
             [WaypointIntent::Add {
@@ -544,7 +544,7 @@ mod waypoints {
                 .iter()
                 .any(|t| t == "This World declares no Marker kinds.")
         );
-        control(&mut app, WpControl::Here);
+        control(&mut app, WpControl::AtMyPosition);
         let [WaypointIntent::Add { kind, .. }] = &intents(&mut app)[..] else {
             panic!("one add")
         };
@@ -552,11 +552,12 @@ mod waypoints {
     }
 
     #[test]
-    fn place_on_map_arms_a_click_that_adds_at_the_pointer_and_a_drag_does_not() {
+    fn an_armed_click_adds_at_the_pointer_and_a_drag_does_not() {
         let mut app = app();
         declare(&mut app, kinds());
         opened(&mut app);
-        control(&mut app, WpControl::Place);
+        name(&mut app, "Base");
+        app.update();
         assert!(app.world().resource::<Draft>().placing);
         app.world_mut().resource_mut::<MapWindow>().pointer =
             Some(view_half() + Vec2::new(10.0, 0.0));
@@ -579,7 +580,9 @@ mod waypoints {
         let mut app = app();
         declare(&mut app, kinds());
         opened(&mut app);
-        control(&mut app, WpControl::Place);
+        name(&mut app, "Base");
+        app.update();
+        assert!(app.world().resource::<Draft>().placing);
         let mut list = Waypoints::default();
         list.push("Base", "terra:home", 40.0, 10.0, false);
         list.push("Died", "terra:grave", 0.0, -10.0, true);
@@ -664,6 +667,7 @@ mod waypoints {
         let mut list = Waypoints::default();
         list.push("Base", "terra:home", 140.0, -10.0, false);
         send_list(&mut app, list);
+        app.world_mut().resource_mut::<Marks>().select(None);
         let map = app.world().resource::<MapCache>();
         let palette = app.world().resource::<MapPalette>();
         let marks = view_marks(
@@ -690,6 +694,135 @@ mod waypoints {
         assert_eq!(ring, [200, 40, 40], "the ring is the kind's colour");
     }
 
+    fn armed(app: &App) -> bool {
+        app.world().resource::<Draft>().placing
+    }
+
+    fn focus_field(app: &mut App) {
+        use bevy::input_focus::{FocusCause, InputFocus};
+        let field = app
+            .world_mut()
+            .query_filtered::<Entity, With<NameField>>()
+            .single(app.world())
+            .unwrap();
+        app.world_mut()
+            .resource_mut::<InputFocus>()
+            .set(field, FocusCause::Pressed);
+        app.update();
+    }
+
+    #[test]
+    fn typing_arms_placement_with_the_banner_and_clearing_disarms_it() {
+        let mut app = app();
+        declare(&mut app, kinds());
+        opened(&mut app);
+        assert!(!armed(&app));
+        name(&mut app, "Camp");
+        app.update();
+        assert!(armed(&app));
+        let shown = texts(&mut app);
+        assert!(
+            shown.contains(&"Click the map to place \u{201c}Camp\u{201d}.".to_string()),
+            "{shown:?}"
+        );
+        name(&mut app, "");
+        app.update();
+        assert!(!armed(&app));
+    }
+
+    #[test]
+    fn enter_on_a_blank_name_arms_with_the_default_name() {
+        let mut app = app();
+        declare(&mut app, kinds());
+        opened(&mut app);
+        focus_field(&mut app);
+        press(&mut app, KeyCode::Enter);
+        assert!(armed(&app));
+        let shown = texts(&mut app);
+        assert!(
+            shown.contains(&"Click the map to place \u{201c}Waypoint 1\u{201d}.".to_string()),
+            "{shown:?}"
+        );
+    }
+
+    #[test]
+    fn a_click_on_explored_ground_places_selects_and_disarms() {
+        let mut app = app();
+        declare(&mut app, kinds());
+        opened(&mut app);
+        name(&mut app, "Base");
+        app.update();
+        app.world_mut().resource_mut::<MapWindow>().pointer = Some(view_half());
+        click_view(&mut app);
+        assert_eq!(intents(&mut app).len(), 1);
+        let mut list = Waypoints::default();
+        list.push("Base", "terra:home", 40.0, -10.0, false);
+        send_list(&mut app, list);
+        assert!(!armed(&app));
+        assert_eq!(app.world().resource::<Marks>().selected(), Some(1));
+        assert!(!app.world().resource::<crate::client::waypoints::Grew>().0);
+    }
+
+    #[test]
+    fn a_click_on_fog_is_refused_and_stays_armed() {
+        let mut app = app();
+        declare(&mut app, kinds());
+        opened(&mut app);
+        name(&mut app, "Base");
+        app.update();
+        app.world_mut().resource_mut::<MapWindow>().pointer = Some(view_half());
+        click_view(&mut app);
+        app.world_mut().write_message(WaypointRefused(Reason::Fog));
+        app.update();
+        app.update();
+        assert!(armed(&app));
+        assert!(
+            texts(&mut app)
+                .iter()
+                .any(|t| t == "That ground is unexplored.")
+        );
+    }
+
+    #[test]
+    fn cancel_and_escape_disarm_but_keep_the_text() {
+        let mut app = app();
+        declare(&mut app, kinds());
+        opened(&mut app);
+        name(&mut app, "Base");
+        app.update();
+        control(&mut app, WpControl::CancelPlace);
+        app.update();
+        assert!(!armed(&app), "the unchanged text does not re-arm");
+        let value = |app: &mut App| {
+            app.world_mut()
+                .query_filtered::<&EditableText, With<NameField>>()
+                .single(app.world())
+                .unwrap()
+                .value()
+                .to_string()
+        };
+        assert_eq!(value(&mut app), "Base");
+        name(&mut app, "Base2");
+        app.update();
+        assert!(armed(&app));
+        press(&mut app, KeyCode::Escape);
+        assert!(!armed(&app));
+        assert!(is_open(&app), "the Escape was spent on the placement");
+        assert_eq!(value(&mut app), "Base2");
+    }
+
+    #[test]
+    fn at_my_position_with_a_blank_name_asks_for_the_default() {
+        let mut app = app();
+        declare(&mut app, kinds());
+        opened(&mut app);
+        control(&mut app, WpControl::AtMyPosition);
+        let [WaypointIntent::Add { name, .. }] = &intents(&mut app)[..] else {
+            panic!("one add")
+        };
+        assert_eq!(name, "");
+    }
+
     #[test]
     fn the_banner_names_the_typed_name_or_the_next_default() {
         let mut app = app();
@@ -705,10 +838,9 @@ mod waypoints {
             banner(&mut app),
             "Click the map to place \u{201c}Waypoint 1\u{201d}."
         );
-        control(&mut app, WpControl::Place);
-        assert!(app.world().resource::<Draft>().placing);
         name(&mut app, "Camp");
         app.update();
+        assert!(app.world().resource::<Draft>().placing);
         assert_eq!(
             banner(&mut app),
             "Click the map to place \u{201c}Camp\u{201d}."

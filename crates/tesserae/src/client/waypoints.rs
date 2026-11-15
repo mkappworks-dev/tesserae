@@ -138,6 +138,10 @@ fn receive(
     if let Some(WaypointsChanged(now)) = lists.read().last() {
         grew.0 = now.list().len() > marks.list.list().len();
         marks.set_list(now.clone());
+        if grew.0 {
+            let newest = marks.list().iter().map(|w| w.id).max();
+            marks.select(newest);
+        }
         draft.placing = false;
     }
     for WaypointRefused(reason) in refusals.read() {
