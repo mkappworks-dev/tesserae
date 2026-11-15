@@ -429,7 +429,7 @@ const MAP_ICONS = {
     '<circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="1.5"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/>',
   ),
   add: MC(
-    '<path d="M12 21s-6-5.4-6-10.5a6 6 0 0 1 11-3.3"/><circle cx="12" cy="10.5" r="2"/><path d="M19 14v6M16 17h6"/>',
+    '<path d="M5 21V4"/><path d="M5 4h10l-1.8 3.5L15 11H5"/><path d="M18 15v6M15 18h6"/>',
   ),
   close: MC('<path d="M6 6l12 12M18 6L6 18"/>'),
 };
