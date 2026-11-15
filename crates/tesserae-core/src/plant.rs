@@ -96,7 +96,7 @@ pub struct Fruit {
     pub stages: Vec<Stage>,
     pub density: f32,
     /// Mean seconds between new fruit on a standing tree with room; see
-    /// [`tree::canopy_mean_seconds`].
+    /// `tree::canopy_mean_seconds`.
     pub regrow_seconds: f32,
     /// The Shape of every fruit Voxel; `None` is a cube.
     pub shape: Option<ShapeId>,

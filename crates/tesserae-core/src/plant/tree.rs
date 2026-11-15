@@ -505,7 +505,7 @@ pub(super) fn sprout(
 /// hash from the base, are averaged rather than one tree's.
 const REFERENCE_BASES: [[i32; 3]; 4] = [[0, 0, 0], [3, 0, 1], [-5, 0, 7], [11, 0, -2]];
 
-/// Leaf and fruit cells of a typical `tree` at `voxel_size`: the mean over [`REFERENCE_BASES`]
+/// Leaf and fruit cells of a typical `tree` at `voxel_size`: the mean over `REFERENCE_BASES`
 /// of the Voxels `tree_voxels` makes that are not trunk. A pure function of the row and the size,
 /// so every canopy Voxel of a species agrees on it without knowing its own tree.
 pub fn expected_canopy_cells(tree: &Tree, voxel_size: f32) -> u32 {
