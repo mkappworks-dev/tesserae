@@ -1,5 +1,5 @@
 use super::super::*;
-use bevy::ecs::system::RunSystemOnce;
+use bevy::ecs::system::SystemId;
 use bevy::tasks::{AsyncComputeTaskPool, TaskPoolBuilder};
 use tesserae_core::light::{MAX_LIGHT, light_cells};
 use tesserae_core::mesh::POS_Y;
@@ -93,6 +93,8 @@ fn content_shaped(
 
 struct Farm {
     app: App,
+    /// `simulate`, registered once: `run_system_once` rebuilds and re-initialises it every step.
+    simulate: SystemId,
     voxel_m: f32,
     stages: [MaterialId; 3],
 }
@@ -126,8 +128,10 @@ impl Farm {
         .init_resource::<ChunkStore>()
         .init_resource::<MeshState>()
         .init_resource::<FluidSim>();
+        let simulate = app.world_mut().register_system(simulate);
         let mut farm = Farm {
             app,
+            simulate,
             voxel_m,
             stages,
         };
@@ -171,7 +175,8 @@ impl Farm {
     }
 
     fn tick(&mut self) {
-        self.app.world_mut().run_system_once(simulate).unwrap();
+        let simulate = self.simulate;
+        self.app.world_mut().run_system(simulate).unwrap();
         if self.sim().job.in_flight() > 0 {
             std::thread::sleep(std::time::Duration::from_micros(50));
         }
