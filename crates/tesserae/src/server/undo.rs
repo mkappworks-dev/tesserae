@@ -21,9 +21,10 @@ use tesserae_mods::{EditEvent, EditKind};
 
 const LIMIT: usize = 128;
 const REQUEST_LIMIT: usize = 16;
-/// Voxels the journal holds across all groups, so layouts cannot make 128
-/// entries cost 128 times 256 records.
-const RECORDED_LIMIT: usize = 1024;
+/// Voxels the journal holds across all groups, so 128 layouts or Structures
+/// cannot cost 128 times their records.
+pub(super) const RECORDED_LIMIT: usize = 131_072;
+const _: () = assert!(RECORDED_LIMIT >= 2 * tesserae_core::template::MAX_TEMPLATE_CELLS);
 
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HistoryAction {
@@ -328,14 +329,19 @@ fn restore(
                 .expect("checked above")
         })
         .collect();
+    // One relight for the group, as a Structure's cells would otherwise each
+    // relight their Chunk.
+    let mut batch = edit::Batch::default();
     for (done, entry) in order.iter().enumerate() {
-        if let Err(reason) = edit::set_occupants(store, meshes, tables, entry.at, step(entry).1) {
+        if let Err(reason) = batch.set_occupants(store, meshes, tables, entry.at, step(entry).1) {
             for (undone, was) in order[..done].iter().zip(&found).rev() {
-                let _ = edit::set_occupants(store, meshes, tables, undone.at, *was);
+                let _ = batch.set_occupants(store, meshes, tables, undone.at, *was);
             }
+            batch.finish(store, meshes, tables);
             return Err(reason.into());
         }
     }
+    batch.finish(store, meshes, tables);
     let mut refused = Vec::new();
     for entry in group.iter_mut() {
         match (&entry.cost, undoing) {
@@ -972,9 +978,73 @@ mod tests {
         let mut journal = Journal::default();
         journal.record_group(vec![entry(Voxel::AIR, Voxel::AIR); 4]);
         assert!(journal.undo.is_empty(), "a group that changed nothing");
-        for _ in 0..RECORDED_LIMIT / 256 + 1 {
-            journal.record_group(vec![entry(Voxel::AIR, Voxel::cube(8)); 256]);
+        for _ in 0..5 {
+            journal.record_group(vec![entry(Voxel::AIR, Voxel::cube(8)); RECORDED_LIMIT / 4]);
         }
-        assert_eq!(journal.undo.len(), RECORDED_LIMIT / 256);
+        assert_eq!(journal.undo.len(), 4);
+    }
+
+    #[test]
+    fn a_template_at_the_cap_fits_twice_and_the_oldest_groups_go_first() {
+        use tesserae_core::template::MAX_TEMPLATE_CELLS;
+        use tesserae_core::{Chunk, Voxel};
+        let mut store = ChunkStore::default();
+        let coord = VoxelCoord::of([0, 0, 0]).chunk;
+        store.insert(coord, Chunk::air());
+        let lifetime = store.lifetime(coord).unwrap();
+        let solid = |voxel| Occupants {
+            solid: voxel,
+            fluid: None,
+            burning: None,
+        };
+        // The Material tells the groups apart.
+        let group = |material: u16, cells: usize| {
+            let after = Voxel::cube(material);
+            let entry = Entry {
+                at: [0, 0, 0],
+                lifetime,
+                before: solid(Voxel::AIR),
+                after: solid(after),
+                event: EditEvent {
+                    at: [0.0; 3],
+                    before: Voxel::AIR,
+                    after,
+                    kind: EditKind::Solid {
+                        before: Voxel::AIR,
+                        after,
+                    },
+                },
+                cost: Cost::Free,
+            };
+            vec![entry; cells]
+        };
+        let kept = |journal: &Journal| -> Vec<(u16, usize)> {
+            journal
+                .undo
+                .iter()
+                .map(|g| (g[0].after.solid.material(), g.len()))
+                .collect()
+        };
+        let mut journal = Journal::default();
+        for material in 1..=3 {
+            journal.record_group(group(material, 1));
+        }
+        journal.record_group(group(10, MAX_TEMPLATE_CELLS));
+        assert_eq!(
+            kept(&journal),
+            [(1, 1), (2, 1), (3, 1), (10, MAX_TEMPLATE_CELLS)]
+        );
+        journal.record_group(group(11, MAX_TEMPLATE_CELLS));
+        assert_eq!(
+            kept(&journal),
+            [(10, MAX_TEMPLATE_CELLS), (11, MAX_TEMPLATE_CELLS)],
+            "the single cells went first, oldest first"
+        );
+        journal.record_group(group(4, 1));
+        assert_eq!(
+            kept(&journal),
+            [(11, MAX_TEMPLATE_CELLS), (4, 1)],
+            "one cell over evicts the older Template whole"
+        );
     }
 }
