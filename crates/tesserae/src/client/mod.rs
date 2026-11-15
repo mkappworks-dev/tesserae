@@ -36,6 +36,8 @@ mod layout;
 mod layout_menu;
 pub(crate) mod loading;
 mod map_cache;
+mod map_pop;
+mod map_tools;
 mod map_window;
 mod material_textures;
 mod menu;

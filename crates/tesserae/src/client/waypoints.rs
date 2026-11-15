@@ -22,12 +22,17 @@ const DISC_RADIUS_PX: [f32; 2] = [9.0, 12.0];
 const MINIMAP_REST_PX: f32 = 11.0;
 const RING_PX: f32 = 2.0;
 const SELECTED_RING_PX: f32 = 3.0;
+const DASH_PX: f32 = 4.0;
+const GAP_PX: f32 = 3.0;
+const PENDING_DISC: f32 = 0.75;
 
 #[derive(Resource, Default, Debug)]
 pub(super) struct Marks {
     kinds: MarkerKinds,
     list: Waypoints,
     selected: Option<u32>,
+    /// Where an add popover points, drawn as a dashed temporary marker of the kind chosen.
+    pending: Option<(Vec2, usize)>,
     revision: u32,
 }
 
@@ -39,6 +44,11 @@ impl Marks {
 
     pub(super) fn list(&self) -> &[Waypoint] {
         self.list.list()
+    }
+
+    #[cfg(any(feature = "dev", feature = "profiling"))]
+    pub(super) fn list_clone(&self) -> Waypoints {
+        self.list.clone()
     }
 
     pub(super) fn kinds(&self) -> &MarkerKinds {
@@ -57,6 +67,13 @@ impl Marks {
     pub(super) fn select(&mut self, id: Option<u32>) {
         if self.selected != id {
             self.selected = id;
+            self.revision += 1;
+        }
+    }
+
+    pub(super) fn set_pending(&mut self, pending: Option<(Vec2, usize)>) {
+        if self.pending != pending {
+            self.pending = pending;
             self.revision += 1;
         }
     }
@@ -99,16 +116,14 @@ impl Marks {
     }
 }
 
-/// The new-Waypoint form's state beside its name field.
+/// The Marker kind the popover has chosen.
 #[derive(Resource, Default, Debug)]
 pub(super) struct Draft {
     /// An index into the Marker kinds.
     pub(super) kind: usize,
-    /// Armed: the next click on explored ground adds a Waypoint there.
-    pub(super) placing: bool,
 }
 
-/// The Server's list changed; the form's name is spent when it grew.
+/// The Server's list grew; the Map window settles its popover on it.
 #[derive(Resource, Default)]
 pub(super) struct Grew(pub(super) bool);
 
@@ -142,7 +157,6 @@ fn receive(
             let newest = marks.list().iter().map(|w| w.id).max();
             marks.select(newest);
         }
-        draft.placing = false;
     }
     for WaypointRefused(reason) in refusals.read() {
         ui::notify(&mut commands, message(*reason), ui::Tone::Alert);
@@ -280,6 +294,65 @@ pub(super) fn view_marks(
             (at.cmpge(pad).all() && at.cmple(size - pad).all()).then_some(mark)
         })
         .collect()
+}
+
+/// A temporary marker where an add popover points: a dashed white ring over a see-through disc.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct Pending {
+    pub(super) at: Vec2,
+    pub(super) icon: Icon,
+    pub(super) colour: [u8; 4],
+}
+
+/// The temporary marker as the view draws it, when the view holds it whole.
+pub(super) fn view_pending(
+    marks: &Marks,
+    centre: Vec2,
+    metres_per_pixel: f32,
+    size: Vec2,
+) -> Option<Pending> {
+    let (at_m, kind) = marks.pending?;
+    let (icon, colour) = marks
+        .kinds
+        .kinds
+        .get(kind)
+        .map_or(UNKNOWN_KIND, |k| (k.icon, k.color));
+    let at = size / 2.0 + (at_m - centre) / metres_per_pixel;
+    let pad = Vec2::splat(DISC_RADIUS_PX[1]);
+    (at.cmpge(pad).all() && at.cmple(size - pad).all()).then_some(Pending { at, icon, colour })
+}
+
+/// Draws the temporary marker over RGBA `pixels`.
+pub(super) fn paint_pending(pixels: &mut [u8], width: u32, height: u32, pending: &Pending) {
+    let radius = DISC_RADIUS_PX[1];
+    let reach = radius.ceil() as i32 + 1;
+    let (cx, cy) = (pending.at.x.floor() as i32, pending.at.y.floor() as i32);
+    for y in cy - reach..=cy + reach {
+        for x in cx - reach..=cx + reach {
+            if x < 0 || y < 0 || x >= width as i32 || y >= height as i32 {
+                continue;
+            }
+            let offset = Vec2::new(x as f32 + 0.5, y as f32 + 0.5) - pending.at;
+            let d = offset.length();
+            if d > radius {
+                continue;
+            }
+            let colour = [pending.colour[0], pending.colour[1], pending.colour[2]];
+            let (rgb, alpha) = if d > radius - RING_PX {
+                let along = offset.y.atan2(offset.x).rem_euclid(std::f32::consts::TAU) * radius;
+                if along % (DASH_PX + GAP_PX) < DASH_PX {
+                    (SELECTED_RING, 1.0)
+                } else {
+                    (DISC, PENDING_DISC)
+                }
+            } else if icon_covers(pending.icon, offset, 2.0) {
+                (colour, 1.0)
+            } else {
+                (DISC, PENDING_DISC)
+            };
+            blend(pixels, width, x, y, rgb, alpha);
+        }
+    }
 }
 
 /// The Waypoints named under their marks on the Map view, at the pixel of each mark; only those the

@@ -321,7 +321,7 @@ pub(super) fn plugin(app: &mut App) {
                 action_fixture,
                 drops_fixture,
                 waypoint_fixture,
-                name_field_fixture,
+                map_state_fixture,
             ),
         );
     if let Ok(size) = std::env::var("TESSERAE_SCREENSHOT_TOUCH") {
@@ -441,33 +441,94 @@ fn drops_fixture(
     }
 }
 
-/// `TESSERAE_SCREENSHOT_MAP_FIELD=<text>` focuses the new-Waypoint name field and types the text
-/// into it, as the Player would, so the picture shows the focused field.
-fn name_field_fixture(
+/// `TESSERAE_SCREENSHOT_MAP_STATE` drives the Map window into one state before the shutter:
+/// `default`, `add` (add mode), `add-popover`, `edit`, `death`, `explore` or `tooltip` (the add
+/// button focused). `TESSERAE_SCREENSHOT_MAP_FIELD=<text>` types into the popover's name field.
+/// The Waypoints come from `waypoint_fixture`; `death` adds a death marker to the list shown.
+#[allow(clippy::too_many_arguments)]
+fn map_state_fixture(
     time: Res<Time<Real>>,
     capture: Res<Capture>,
-    focus: Option<ResMut<bevy::input_focus::InputFocus>>,
-    mut fields: Query<
-        (Entity, &mut bevy::text::EditableText),
-        With<super::waypoint_panel::NameField>,
-    >,
-    mut sent: Local<bool>,
+    spot: Res<super::minimap::Spot>,
+    mut window: ResMut<super::map_window::MapWindow>,
+    (mut marks, mut draft): (
+        ResMut<super::waypoints::Marks>,
+        ResMut<super::waypoints::Draft>,
+    ),
+    mut lists: MessageWriter<crate::server::waypoint::WaypointsChanged>,
+    (mut focus, mut visible): (
+        Option<ResMut<bevy::input_focus::InputFocus>>,
+        Option<ResMut<bevy::input_focus::InputFocusVisible>>,
+    ),
+    adds: Query<(Entity, &super::map_window::Control)>,
+    mut fields: Query<&mut bevy::text::EditableText, With<super::map_pop::NameField>>,
+    mut step: Local<u8>,
 ) {
-    let (Ok(text), Some(mut focus)) = (std::env::var("TESSERAE_SCREENSHOT_MAP_FIELD"), focus)
-    else {
+    let Ok(state) = std::env::var("TESSERAE_SCREENSHOT_MAP_STATE") else {
         return;
     };
-    let Ok((field, mut editable)) = fields.single_mut() else {
-        return;
-    };
-    focus.set(field, bevy::input_focus::FocusCause::Pressed);
-    // After the Waypoints are added, which spend a typed name.
-    if capture.before_shutter(capture.elapsed_s(&time), 0.3)
-        && !std::mem::replace(&mut *sent, true)
+    let eye = spot.0.map(|(eye, _)| eye);
+    if let (Ok(text), Ok(mut field)) = (
+        std::env::var("TESSERAE_SCREENSHOT_MAP_FIELD"),
+        fields.single_mut(),
+    ) && *step == 3
         && !text.is_empty()
     {
-        editable.queue_edit(bevy::text::TextEdit::Insert(text.into()));
+        field.queue_edit(bevy::text::TextEdit::Insert(text.into()));
+        *step = 4;
     }
+    if *step >= 3 || !capture.before_shutter(capture.elapsed_s(&time), 1.0) {
+        return;
+    }
+    let first = marks.list().iter().find(|w| !w.death).cloned();
+    let Some(first) = first else {
+        return;
+    };
+    let point = Vec2::new(first.x_m + 24.0, first.z_m + 16.0);
+    match (state.as_str(), *step) {
+        ("add", 0) => window.adding = true,
+        ("add-popover", 0) => {
+            window.adding = true;
+            window.pop = Some(super::map_pop::Pop::Add(point));
+        }
+        ("edit", 0) => {
+            super::map_pop::open_edit(&mut window, &mut marks, &mut draft, first.id, eye)
+        }
+        ("explore", 0) => window.tab = super::waypoint_panel::PanelTab::Explore,
+        ("tooltip", 0) => {
+            if let (Some(focus), Some(visible)) = (focus.as_mut(), visible.as_mut())
+                && let Some((button, _)) = adds
+                    .iter()
+                    .find(|(_, c)| **c == super::map_window::Control::AddMode)
+            {
+                focus.set(button, bevy::input_focus::FocusCause::Navigated);
+                visible.0 = true;
+            }
+        }
+        ("death", 0) => {
+            let kinds = marks.kinds();
+            let Some(kind) = kinds
+                .death
+                .and_then(|i| kinds.kinds.get(i))
+                .map(|k| k.name.clone())
+            else {
+                return;
+            };
+            let mut list = marks.list_clone();
+            let at = eye.map_or(Vec2::ZERO, |e| Vec2::new(e.x, e.z));
+            list.push("Where you died", &kind, at.x, at.y, true);
+            lists.write(crate::server::waypoint::WaypointsChanged(list));
+            *step = 1;
+            return;
+        }
+        ("death", 1) => {
+            if let Some(death) = marks.list().iter().find(|w| w.death).map(|w| w.id) {
+                super::map_pop::open_edit(&mut window, &mut marks, &mut draft, death, eye);
+            }
+        }
+        _ => {}
+    }
+    *step = 3;
 }
 
 /// Waypoints for a picture of the Map, the Compass or the minimap: one of each kind the Player may

@@ -238,10 +238,7 @@ fn zoom_steps_through_two_four_eight_sixteen_metres_a_pixel_and_stops_at_the_end
         app.world_mut().resource_mut::<MapWindow>().zoom_out();
         app.update();
     }
-    assert_eq!(
-        seen,
-        ["2 m / px", "4 m / px", "8 m / px", "16 m / px", "16 m / px"]
-    );
+    assert_eq!(seen, ["2 m/px", "4 m/px", "8 m/px", "16 m/px", "16 m/px"]);
     assert_eq!(
         MapWindow::default().metres_per_pixel(),
         4.0,
@@ -269,9 +266,9 @@ fn the_wheel_zooms_and_the_buttons_step_the_same_levels() {
     };
     button(&mut app, Control::ZoomOut);
     button(&mut app, Control::ZoomOut);
-    assert_eq!(text_of::<ZoomText>(&mut app), "8 m / px");
+    assert_eq!(text_of::<ZoomText>(&mut app), "8 m/px");
     button(&mut app, Control::ZoomIn);
-    assert_eq!(text_of::<ZoomText>(&mut app), "4 m / px");
+    assert_eq!(text_of::<ZoomText>(&mut app), "4 m/px");
     button(&mut app, Control::Close);
     assert!(!is_open(&app));
     assert_eq!(grab(&mut app), CursorGrabMode::Locked);
@@ -370,6 +367,7 @@ fn painting_draws_fog_ground_the_arrow_and_averages_when_zoomed_out() {
         view(),
         Some((centre, 0.0)),
         &[],
+        None,
     );
     let (cx, cy) = (VIEW_W / 2, VIEW_H / 2);
     assert_eq!(at(&pixels, cx, cy), [255, 255, 255, 255], "the arrow");
@@ -378,7 +376,17 @@ fn painting_draws_fog_ground_the_arrow_and_averages_when_zoomed_out() {
     let ground = at(&pixels, cx - 30, cy - 30);
     assert!(ground[1] > ground[0] && ground[1] > ground[2], "{ground:?}");
 
-    let coarse = paint_view(map, palette, &Tints::new(), centre, 16.0, view(), None, &[]);
+    let coarse = paint_view(
+        map,
+        palette,
+        &Tints::new(),
+        centre,
+        16.0,
+        view(),
+        None,
+        &[],
+        None,
+    );
     assert_eq!(at(&coarse, 0, 0), fog(0, 0), "far from the tile");
     assert_ne!(at(&coarse, cx, cy), fog(cx, cy));
 }
@@ -392,16 +400,22 @@ fn the_scale_bar_picks_the_longest_round_length_that_stays_readable() {
 
 mod waypoints {
     use bevy::ecs::message::Messages;
+    use bevy::input_focus::{FocusCause, InputFocus, InputFocusVisible};
     use bevy::picking::backend::HitData;
     use bevy::picking::events::PointerClick;
+    use bevy::picking::hover::Hovered;
     use bevy::picking::pointer::PointerId;
     use bevy::text::EditableText;
     use tesserae_core::marker::{Icon, MarkerKind, MarkerKinds, Waypoints};
 
     use super::*;
-    use crate::client::waypoint_panel::{NameField, WpControl};
-    use crate::client::waypoints::{Draft, Marks};
+    use crate::client::map_pop::{NameField, NameFrame, Pop, PopControl, Side, anchor_px, place};
+    use crate::client::map_tools::HintBox;
+    use crate::client::waypoint_panel::{PanelTab, WpControl};
+    use crate::client::waypoints::Marks;
     use crate::server::waypoint::{Reason, WaypointIntent, WaypointRefused, WaypointsChanged};
+
+    const FOG_TOAST: &str = "Only explored ground can hold a Waypoint.";
 
     fn kinds() -> MarkerKinds {
         let kind = |name: &str, icon, color| MarkerKind {
@@ -438,15 +452,27 @@ mod waypoints {
             .collect()
     }
 
-    fn control(app: &mut App, control: WpControl) {
+    fn activate_where<C: Component + PartialEq + std::fmt::Debug>(app: &mut App, wanted: C) {
         let entity = app
             .world_mut()
-            .query::<(Entity, &WpControl)>()
+            .query::<(Entity, &C)>()
             .iter(app.world())
-            .find_map(|(e, c)| (*c == control).then_some(e))
-            .unwrap_or_else(|| panic!("no {control:?}"));
+            .find_map(|(e, c)| (*c == wanted).then_some(e))
+            .unwrap_or_else(|| panic!("no {wanted:?}"));
         app.world_mut().trigger(Activate { entity });
         app.update();
+    }
+
+    fn control(app: &mut App, control: WpControl) {
+        activate_where(app, control);
+    }
+
+    fn pop_control(app: &mut App, control: PopControl) {
+        activate_where(app, control);
+    }
+
+    fn tool(app: &mut App, control: Control) {
+        activate_where(app, control);
     }
 
     fn name(app: &mut App, value: &str) {
@@ -460,8 +486,19 @@ mod waypoints {
             .insert(EditableText::new(value));
     }
 
+    fn field_value(app: &mut App) -> String {
+        app.world_mut()
+            .query_filtered::<&EditableText, With<NameField>>()
+            .single(app.world())
+            .unwrap()
+            .value()
+            .to_string()
+    }
+
+    /// Open at the origin, which holds one explored sample, with the Player standing on it.
     fn opened(app: &mut App) {
-        pose(app, 40.0, -10.0);
+        pose(app, 0.0, 0.0);
+        explore(app, [0, 0], None, 1);
         press(app, KeyCode::KeyM);
         app.update();
     }
@@ -472,6 +509,10 @@ mod waypoints {
             .iter(app.world())
             .map(|t| t.0.clone())
             .collect()
+    }
+
+    fn shows(app: &mut App, wanted: &str) -> bool {
+        texts(app).iter().any(|t| t == wanted)
     }
 
     fn click_view(app: &mut App) {
@@ -500,30 +541,121 @@ mod waypoints {
         app.update();
     }
 
-    #[test]
-    fn at_my_position_adds_at_the_players_position_with_the_typed_name_and_the_chosen_kind() {
-        let mut app = app();
-        declare(&mut app, kinds());
-        opened(&mut app);
-        name(&mut app, "Base");
-        control(&mut app, WpControl::Kind(1));
-        control(&mut app, WpControl::AtMyPosition);
-        assert_eq!(
-            intents(&mut app),
-            [WaypointIntent::Add {
-                x_m: 40.0,
-                z_m: -10.0,
-                name: "Base".into(),
-                kind: "terra:camp".into(),
-            }]
-        );
+    fn click_at(app: &mut App, offset: Vec2) {
+        app.world_mut().resource_mut::<MapWindow>().pointer = Some(view_half() + offset);
+        click_view(app);
+    }
+
+    fn window(app: &App) -> &MapWindow {
+        app.world().resource::<MapWindow>()
+    }
+
+    fn base_list() -> Waypoints {
+        let mut list = Waypoints::default();
+        list.push("Base", "terra:home", 40.0, 10.0, false);
+        list.push("Died", "terra:grave", 0.0, -10.0, true);
+        list
+    }
+
+    fn hint_shown(app: &mut App) -> bool {
+        app.world_mut()
+            .query_filtered::<&Node, With<HintBox>>()
+            .single(app.world())
+            .unwrap()
+            .display
+            == Display::Flex
+    }
+
+    fn adding_popover(app: &mut App) {
+        tool(app, Control::AddMode);
+        click_at(app, Vec2::ZERO);
+        app.update();
     }
 
     #[test]
-    fn the_death_kind_is_not_offered_in_the_form() {
+    fn the_add_button_toggles_add_mode_and_its_hint() {
         let mut app = app();
         declare(&mut app, kinds());
         opened(&mut app);
+        assert!(!window(&app).adding && !hint_shown(&mut app));
+        tool(&mut app, Control::AddMode);
+        assert!(window(&app).adding && hint_shown(&mut app));
+        assert!(shows(&mut app, "Click the map to add a Waypoint \u{b7}"));
+        assert!(shows(&mut app, "At my position"));
+        tool(&mut app, Control::AddMode);
+        assert!(!window(&app).adding && !hint_shown(&mut app));
+    }
+
+    #[test]
+    fn escape_leaves_add_mode_before_it_closes_the_window() {
+        let mut app = app();
+        declare(&mut app, kinds());
+        opened(&mut app);
+        tool(&mut app, Control::AddMode);
+        press(&mut app, KeyCode::Escape);
+        assert!(is_open(&app) && !window(&app).adding);
+        press(&mut app, KeyCode::Escape);
+        assert!(!is_open(&app));
+    }
+
+    #[test]
+    fn a_click_on_explored_ground_in_add_mode_opens_the_add_popover_there() {
+        let mut app = app();
+        declare(&mut app, kinds());
+        opened(&mut app);
+        tool(&mut app, Control::AddMode);
+        click_at(&mut app, Vec2::ZERO);
+        assert_eq!(window(&app).pop, Some(Pop::Add(Vec2::ZERO)));
+        assert!(
+            window(&app).adding,
+            "add mode waits for the popover's answer"
+        );
+        assert!(!hint_shown(&mut app), "the hint gives way to the popover");
+        assert!(intents(&mut app).is_empty());
+        let marks = app.world().resource::<Marks>();
+        let pending = crate::client::waypoints::view_pending(marks, Vec2::ZERO, 4.0, DEFAULT_VIEW);
+        assert!(pending.is_some(), "a temporary marker stands at the point");
+    }
+
+    #[test]
+    fn a_click_on_fog_in_add_mode_is_refused_with_the_toast() {
+        let mut app = app();
+        declare(&mut app, kinds());
+        opened(&mut app);
+        tool(&mut app, Control::AddMode);
+        click_at(&mut app, Vec2::new(200.0, 0.0));
+        app.update();
+        assert!(shows(&mut app, FOG_TOAST));
+        assert_eq!(window(&app).pop, None);
+        assert!(window(&app).adding, "still waiting for a click on ground");
+    }
+
+    #[test]
+    fn a_drag_that_ends_over_the_view_is_not_a_click() {
+        let mut app = app();
+        declare(&mut app, kinds());
+        opened(&mut app);
+        tool(&mut app, Control::AddMode);
+        app.world_mut().resource_mut::<MapWindow>().dragged = true;
+        click_at(&mut app, Vec2::ZERO);
+        assert_eq!(window(&app).pop, None);
+    }
+
+    #[test]
+    fn the_add_popover_has_a_labelled_free_name_field_the_default_as_hint_and_two_buttons() {
+        let mut app = app();
+        declare(&mut app, kinds());
+        opened(&mut app);
+        adding_popover(&mut app);
+        assert!(
+            shows(&mut app, "Waypoint 1"),
+            "the placeholder is the default name"
+        );
+        assert!(shows(&mut app, "Cancel") && shows(&mut app, "Add"));
+        assert!(
+            !shows(&mut app, "Name") && !shows(&mut app, "New Waypoint"),
+            "no visible label"
+        );
         let chips: Vec<WpControl> = app
             .world_mut()
             .query::<&WpControl>()
@@ -531,7 +663,117 @@ mod waypoints {
             .copied()
             .filter(|c| matches!(c, WpControl::Kind(_)))
             .collect();
-        assert_eq!(chips, [WpControl::Kind(0), WpControl::Kind(1)]);
+        assert_eq!(
+            chips,
+            [WpControl::Kind(0), WpControl::Kind(1)],
+            "no death kind"
+        );
+        let field = app
+            .world_mut()
+            .query_filtered::<Entity, With<NameField>>()
+            .single(app.world())
+            .unwrap();
+        assert_eq!(
+            app.world().resource::<InputFocus>().get(),
+            Some(field),
+            "the field is focused as it opens"
+        );
+    }
+
+    #[test]
+    fn enter_adds_with_the_typed_name_and_the_chosen_kind() {
+        let mut app = app();
+        declare(&mut app, kinds());
+        opened(&mut app);
+        adding_popover(&mut app);
+        name(&mut app, "Base");
+        control(&mut app, WpControl::Kind(1));
+        press(&mut app, KeyCode::Enter);
+        assert_eq!(
+            intents(&mut app),
+            [WaypointIntent::Add {
+                x_m: 0.0,
+                z_m: 0.0,
+                name: "Base".into(),
+                kind: "terra:camp".into(),
+            }]
+        );
+    }
+
+    #[test]
+    fn the_add_button_sends_the_same_and_an_added_waypoint_closes_the_popover_and_add_mode() {
+        let mut app = app();
+        declare(&mut app, kinds());
+        opened(&mut app);
+        adding_popover(&mut app);
+        pop_control(&mut app, PopControl::Ok);
+        let [WaypointIntent::Add { name, kind, .. }] = &intents(&mut app)[..] else {
+            panic!("one add")
+        };
+        assert_eq!((name.as_str(), kind.as_str()), ("", "terra:home"));
+        assert!(
+            window(&app).pop.is_some(),
+            "it waits for the Server to accept"
+        );
+        let mut list = Waypoints::default();
+        list.push("", "terra:home", 0.0, 0.0, false);
+        send_list(&mut app, list);
+        assert_eq!(window(&app).pop, None);
+        assert!(!window(&app).adding);
+        assert_eq!(app.world().resource::<Marks>().selected(), Some(1));
+        assert_eq!(window(&app).tab, PanelTab::Waypoints);
+    }
+
+    #[test]
+    fn escape_cancels_the_popover_once_and_then_leaves_add_mode() {
+        let mut app = app();
+        declare(&mut app, kinds());
+        opened(&mut app);
+        adding_popover(&mut app);
+        press(&mut app, KeyCode::Escape);
+        assert_eq!(window(&app).pop, None);
+        assert!(window(&app).adding && is_open(&app));
+        press(&mut app, KeyCode::Escape);
+        assert!(!window(&app).adding && is_open(&app));
+        press(&mut app, KeyCode::Escape);
+        assert!(!is_open(&app));
+    }
+
+    #[test]
+    fn cancel_closes_the_popover_and_keeps_add_mode() {
+        let mut app = app();
+        declare(&mut app, kinds());
+        opened(&mut app);
+        adding_popover(&mut app);
+        pop_control(&mut app, PopControl::Cancel);
+        assert_eq!(window(&app).pop, None);
+        assert!(window(&app).adding);
+        assert!(intents(&mut app).is_empty());
+    }
+
+    #[test]
+    fn at_my_position_adds_at_the_player_with_the_default_name_then_opens_its_edit_popover() {
+        let mut app = app();
+        declare(&mut app, kinds());
+        pose(&mut app, 40.0, -10.0);
+        press(&mut app, KeyCode::KeyM);
+        tool(&mut app, Control::AddMode);
+        pop_control(&mut app, PopControl::AtMyPosition);
+        assert_eq!(
+            intents(&mut app),
+            [WaypointIntent::Add {
+                x_m: 40.0,
+                z_m: -10.0,
+                name: String::new(),
+                kind: "terra:home".into(),
+            }]
+        );
+        assert!(!window(&app).adding);
+        let mut list = Waypoints::default();
+        list.push("", "terra:home", 40.0, -10.0, false);
+        send_list(&mut app, list);
+        assert_eq!(window(&app).pop, Some(Pop::Edit(1)));
+        assert_eq!(field_value(&mut app), "Waypoint 1");
     }
 
     #[test]
@@ -539,12 +781,8 @@ mod waypoints {
         let mut app = app();
         opened(&mut app);
         assert!(is_open(&app));
-        assert!(
-            texts(&mut app)
-                .iter()
-                .any(|t| t == "This World declares no Marker kinds.")
-        );
-        control(&mut app, WpControl::AtMyPosition);
+        tool(&mut app, Control::AddMode);
+        pop_control(&mut app, PopControl::AtMyPosition);
         let [WaypointIntent::Add { kind, .. }] = &intents(&mut app)[..] else {
             panic!("one add")
         };
@@ -552,48 +790,358 @@ mod waypoints {
     }
 
     #[test]
-    fn an_armed_click_adds_at_the_pointer_and_a_drag_does_not() {
+    fn a_list_row_opens_the_edit_popover_prefilled_with_its_coordinates_and_no_pan_when_in_view() {
         let mut app = app();
         declare(&mut app, kinds());
         opened(&mut app);
-        name(&mut app, "Base");
-        app.update();
-        assert!(app.world().resource::<Draft>().placing);
-        app.world_mut().resource_mut::<MapWindow>().pointer =
-            Some(view_half() + Vec2::new(10.0, 0.0));
-        app.world_mut().resource_mut::<MapWindow>().dragged = true;
-        click_view(&mut app);
-        assert!(
-            intents(&mut app).is_empty(),
-            "a drag's release is not a click"
-        );
-        app.world_mut().resource_mut::<MapWindow>().dragged = false;
-        click_view(&mut app);
-        let [WaypointIntent::Add { x_m, z_m, .. }] = &intents(&mut app)[..] else {
-            panic!("one add")
-        };
-        assert_eq!((*x_m, *z_m), (60.0, -10.0));
+        send_list(&mut app, base_list());
+        control(&mut app, WpControl::Select(1));
+        assert_eq!(window(&app).pop, Some(Pop::Edit(1)));
+        assert_eq!(app.world().resource::<Marks>().selected(), Some(1));
+        assert_eq!(field_value(&mut app), "Base");
+        assert!(shows(&mut app, "X 40 \u{b7} Z 10"));
+        assert!(shows(&mut app, "Remove") && shows(&mut app, "Save"));
+        assert_eq!(window(&app).centre, None, "the marker is inside the view");
     }
 
     #[test]
-    fn the_server_list_fills_the_panel_and_clears_the_armed_placing() {
+    fn a_row_pans_the_view_only_when_its_marker_is_outside() {
         let mut app = app();
         declare(&mut app, kinds());
         opened(&mut app);
-        name(&mut app, "Base");
-        app.update();
-        assert!(app.world().resource::<Draft>().placing);
         let mut list = Waypoints::default();
-        list.push("Base", "terra:home", 40.0, 10.0, false);
-        list.push("Died", "terra:grave", 0.0, -10.0, true);
+        list.push("Far", "terra:home", 4000.0, 0.0, false);
         send_list(&mut app, list);
-        assert!(!app.world().resource::<Draft>().placing);
-        let shown = texts(&mut app);
-        assert!(shown.iter().any(|t| t == "Base"), "{shown:?}");
-        assert!(shown.iter().any(|t| t == "Home \u{b7} 20 m S"), "{shown:?}");
+        control(&mut app, WpControl::Select(1));
+        assert_eq!(window(&app).centre, Some(Vec2::new(4000.0, 0.0)));
+    }
+
+    #[test]
+    fn save_sends_the_rename_and_kind_change_and_remove_sends_the_remove() {
+        let mut app = app();
+        declare(&mut app, kinds());
+        opened(&mut app);
+        send_list(&mut app, base_list());
+        control(&mut app, WpControl::Select(1));
+        name(&mut app, "Camp");
+        control(&mut app, WpControl::Kind(1));
+        pop_control(&mut app, PopControl::Ok);
+        assert_eq!(
+            intents(&mut app),
+            [WaypointIntent::Edit {
+                id: 1,
+                name: "Camp".into(),
+                kind: "terra:camp".into(),
+            }]
+        );
+        assert_eq!(window(&app).pop, None);
+        control(&mut app, WpControl::Select(1));
+        control(&mut app, WpControl::Remove(1));
+        assert_eq!(intents(&mut app), [WaypointIntent::Remove { id: 1 }]);
+        assert_eq!(window(&app).pop, None);
+    }
+
+    #[test]
+    fn enter_in_an_edit_popover_saves_and_escape_cancels_without_an_intent() {
+        let mut app = app();
+        declare(&mut app, kinds());
+        opened(&mut app);
+        send_list(&mut app, base_list());
+        control(&mut app, WpControl::Select(1));
+        press(&mut app, KeyCode::Escape);
+        assert!(intents(&mut app).is_empty());
+        assert_eq!((window(&app).pop, is_open(&app)), (None, true));
+        control(&mut app, WpControl::Select(1));
+        press(&mut app, KeyCode::Enter);
+        assert!(matches!(
+            &intents(&mut app)[..],
+            [WaypointIntent::Edit { id: 1, .. }]
+        ));
+    }
+
+    #[test]
+    fn the_death_marker_opens_a_read_only_popover_with_a_single_close() {
+        let mut app = app();
+        declare(&mut app, kinds());
+        opened(&mut app);
+        send_list(&mut app, base_list());
+        control(&mut app, WpControl::Select(2));
+        assert_eq!(window(&app).pop, Some(Pop::Edit(2)));
         assert!(
-            shown.iter().any(|t| t == "Grave \u{b7} 40 m W"),
-            "{shown:?}"
+            app.world_mut()
+                .query_filtered::<Entity, With<NameField>>()
+                .single(app.world())
+                .is_err()
+        );
+        assert!(shows(&mut app, "Died"));
+        assert!(shows(
+            &mut app,
+            "Left where you died. It is replaced by your next death."
+        ));
+        let pops: Vec<PopControl> = app
+            .world_mut()
+            .query::<&PopControl>()
+            .iter(app.world())
+            .copied()
+            .collect();
+        assert!(pops.contains(&PopControl::Cancel) && !pops.contains(&PopControl::Ok));
+        assert!(!shows(&mut app, "Remove") && !shows(&mut app, "Save"));
+        pop_control(&mut app, PopControl::Cancel);
+        assert_eq!(window(&app).pop, None);
+        assert!(intents(&mut app).is_empty());
+    }
+
+    #[test]
+    fn a_click_on_a_mark_opens_its_popover_and_on_empty_ground_closes_it_and_deselects() {
+        let mut app = app();
+        declare(&mut app, kinds());
+        opened(&mut app);
+        let mut list = Waypoints::default();
+        list.push("Base", "terra:home", 20.0, 0.0, false);
+        send_list(&mut app, list);
+        click_at(&mut app, Vec2::new(5.0, 0.0));
+        assert_eq!(window(&app).pop, Some(Pop::Edit(1)));
+        assert_eq!(app.world().resource::<Marks>().selected(), Some(1));
+        click_at(&mut app, Vec2::new(100.0, 0.0));
+        assert_eq!(window(&app).pop, None);
+        assert_eq!(app.world().resource::<Marks>().selected(), None);
+    }
+
+    #[test]
+    fn a_removed_waypoint_takes_its_popover_with_it() {
+        let mut app = app();
+        declare(&mut app, kinds());
+        opened(&mut app);
+        send_list(&mut app, base_list());
+        control(&mut app, WpControl::Select(1));
+        send_list(&mut app, Waypoints::default());
+        assert_eq!(window(&app).pop, None);
+    }
+
+    #[test]
+    fn the_panel_switches_between_waypoints_and_explore_and_remembers_it() {
+        let mut app = app();
+        declare(&mut app, kinds());
+        opened(&mut app);
+        assert_eq!(window(&app).tab, PanelTab::Waypoints);
+        control(&mut app, WpControl::Tab(PanelTab::Explore));
+        assert_eq!(window(&app).tab, PanelTab::Explore);
+        press(&mut app, KeyCode::KeyM);
+        press(&mut app, KeyCode::KeyM);
+        assert_eq!(
+            window(&app).tab,
+            PanelTab::Explore,
+            "kept across close and reopen"
+        );
+        send_list(&mut app, base_list());
+        control(&mut app, WpControl::Select(1));
+        assert_eq!(
+            window(&app).tab,
+            PanelTab::Waypoints,
+            "a selection brings the list"
+        );
+    }
+
+    #[test]
+    fn the_panes_follow_the_tab_and_the_segments_are_keyboard_buttons() {
+        use bevy::input_focus::tab_navigation::TabIndex;
+        let mut app = app();
+        declare(&mut app, kinds());
+        opened(&mut app);
+        let displays = |app: &mut App| {
+            app.world_mut()
+                .query::<(&crate::client::waypoint_panel::Pane, &Node)>()
+                .iter(app.world())
+                .map(|(pane, node)| (pane.0, node.display))
+                .collect::<Vec<_>>()
+        };
+        let before = displays(&mut app);
+        assert!(before.contains(&(PanelTab::Waypoints, Display::Flex)));
+        assert!(before.contains(&(PanelTab::Explore, Display::None)));
+        control(&mut app, WpControl::Tab(PanelTab::Explore));
+        let after = displays(&mut app);
+        assert!(after.contains(&(PanelTab::Waypoints, Display::None)));
+        assert!(after.contains(&(PanelTab::Explore, Display::Flex)));
+        let segments = app
+            .world_mut()
+            .query::<(&WpControl, &TabIndex, &bevy::ui_widgets::Button)>()
+            .iter(app.world())
+            .filter(|(c, ..)| matches!(c, WpControl::Tab(_)))
+            .count();
+        assert_eq!(segments, 2);
+        assert!(shows(&mut app, "Explore") && shows(&mut app, "Waypoints"));
+        assert!(
+            !shows(&mut app, "New Waypoint") && !shows(&mut app, "Marker kind"),
+            "no form in the panel"
+        );
+    }
+
+    fn tip_of(app: &mut App, control: Control) -> (Entity, Visibility, String) {
+        let button = app
+            .world_mut()
+            .query::<(Entity, &Control)>()
+            .iter(app.world())
+            .find_map(|(e, c)| (*c == control).then_some(e))
+            .unwrap();
+        let children = app.world().get::<Children>(button).unwrap().to_vec();
+        children
+            .into_iter()
+            .find_map(|child| {
+                let visibility = *app.world().get::<Visibility>(child)?;
+                let label = app.world().get::<Children>(child)?[0];
+                let text = app.world().get::<Text>(label)?.0.clone();
+                Some((button, visibility, text))
+            })
+            .unwrap()
+    }
+
+    #[test]
+    fn a_tooltip_shows_after_the_hover_delay_or_at_once_under_keyboard_focus() {
+        let mut app = app();
+        app.init_resource::<InputFocusVisible>();
+        declare(&mut app, kinds());
+        opened(&mut app);
+        let (button, hidden, text) = tip_of(&mut app, Control::ZoomOut);
+        assert_eq!((hidden, text.as_str()), (Visibility::Hidden, "Zoom out"));
+        app.world_mut().entity_mut(button).insert(Hovered(true));
+        app.update();
+        assert_eq!(tip_of(&mut app, Control::ZoomOut).1, Visibility::Hidden);
+        std::thread::sleep(std::time::Duration::from_millis(350));
+        app.update();
+        assert_eq!(tip_of(&mut app, Control::ZoomOut).1, Visibility::Inherited);
+        app.world_mut().entity_mut(button).insert(Hovered(false));
+        app.update();
+        assert_eq!(tip_of(&mut app, Control::ZoomOut).1, Visibility::Hidden);
+
+        let (add, ..) = tip_of(&mut app, Control::AddMode);
+        app.world_mut().resource_mut::<InputFocusVisible>().0 = true;
+        app.world_mut()
+            .resource_mut::<InputFocus>()
+            .set(add, FocusCause::Navigated);
+        app.update();
+        let (_, visible, text) = tip_of(&mut app, Control::AddMode);
+        assert_eq!(
+            (visible, text.as_str()),
+            (Visibility::Inherited, "Add Waypoint")
+        );
+        assert!(tip_of(&mut app, Control::Close).2.starts_with("Close"));
+    }
+
+    #[test]
+    fn escape_hides_a_visible_tooltip_before_anything_else() {
+        let mut app = app();
+        app.init_resource::<InputFocusVisible>();
+        declare(&mut app, kinds());
+        opened(&mut app);
+        tool(&mut app, Control::AddMode);
+        let (add, ..) = tip_of(&mut app, Control::AddMode);
+        app.world_mut().resource_mut::<InputFocusVisible>().0 = true;
+        app.world_mut()
+            .resource_mut::<InputFocus>()
+            .set(add, FocusCause::Navigated);
+        app.update();
+        assert_eq!(tip_of(&mut app, Control::AddMode).1, Visibility::Inherited);
+        press(&mut app, KeyCode::Escape);
+        assert_eq!(tip_of(&mut app, Control::AddMode).1, Visibility::Hidden);
+        assert!(
+            window(&app).adding && is_open(&app),
+            "the Escape was spent on the tooltip"
+        );
+        press(&mut app, KeyCode::Escape);
+        assert!(!window(&app).adding, "the next one leaves add mode");
+    }
+
+    #[test]
+    fn zoom_buttons_dim_and_ignore_clicks_at_the_limits() {
+        let mut app = app();
+        declare(&mut app, kinds());
+        opened(&mut app);
+        let disabled = |app: &mut App, control: Control| {
+            app.world_mut()
+                .query::<(&Control, Has<InteractionDisabled>)>()
+                .iter(app.world())
+                .find_map(|(c, d)| (*c == control).then_some(d))
+                .unwrap()
+        };
+        assert!(
+            disabled(&mut app, Control::ZoomIn),
+            "the test starts at 2 m a pixel"
+        );
+        assert!(!disabled(&mut app, Control::ZoomOut));
+        app.world_mut().resource_mut::<MapWindow>().zoom = 3;
+        app.update();
+        assert!(disabled(&mut app, Control::ZoomOut));
+    }
+
+    #[test]
+    fn the_popover_takes_the_first_side_that_fits_and_stays_inside_the_view() {
+        let view = Vec2::new(640.0, 480.0);
+        let pop = Vec2::new(240.0, 200.0);
+        let (side, at) = place(Vec2::new(320.0, 100.0), pop, view);
+        assert_eq!((side, at), (Side::Below, Vec2::new(200.0, 120.0)));
+        let (side, at) = place(Vec2::new(320.0, 400.0), pop, view);
+        assert_eq!((side, at), (Side::Above, Vec2::new(200.0, 180.0)));
+        let tall = Vec2::new(240.0, 440.0);
+        let (side, at) = place(Vec2::new(100.0, 240.0), tall, view);
+        assert_eq!((side, at), (Side::Right, Vec2::new(120.0, 20.0)));
+        let (side, at) = place(Vec2::new(560.0, 240.0), tall, view);
+        assert_eq!((side, at), (Side::Left, Vec2::new(300.0, 20.0)));
+        let (_, at) = place(Vec2::new(10.0, 100.0), pop, view);
+        assert_eq!(at.x, 8.0, "kept off the left edge");
+        let (_, at) = place(Vec2::new(630.0, 100.0), pop, view);
+        assert_eq!(at.x, 640.0 - 240.0 - 8.0, "kept off the right edge");
+    }
+
+    #[test]
+    fn the_popovers_point_follows_a_pan_and_a_zoom_and_it_closes_when_the_point_leaves() {
+        let mut app = app();
+        declare(&mut app, kinds());
+        opened(&mut app);
+        adding_popover(&mut app);
+        assert!(window(&app).pop.is_some());
+        let at = Vec2::new(40.0, 0.0);
+        let anchor = |app: &App| anchor_px(window(app), at, Some(Vec3::ZERO));
+        assert_eq!(anchor(&app), view_half() + Vec2::new(20.0, 0.0));
+        app.world_mut().resource_mut::<MapWindow>().centre = Some(Vec2::new(20.0, 0.0));
+        assert_eq!(
+            anchor(&app),
+            view_half() + Vec2::new(10.0, 0.0),
+            "a pan moves it"
+        );
+        app.world_mut().resource_mut::<MapWindow>().zoom_out();
+        assert_eq!(
+            anchor(&app),
+            view_half() + Vec2::new(5.0, 0.0),
+            "so does a zoom"
+        );
+
+        app.world_mut().resource_mut::<MapWindow>().centre = Some(Vec2::new(5000.0, 0.0));
+        app.update();
+        assert_eq!(window(&app).pop, None, "the point left the view");
+    }
+
+    #[test]
+    fn closing_the_window_drops_add_mode_and_the_popover() {
+        let mut app = app();
+        declare(&mut app, kinds());
+        opened(&mut app);
+        adding_popover(&mut app);
+        tool(&mut app, Control::Close);
+        assert!(!is_open(&app));
+        assert_eq!((window(&app).adding, window(&app).pop), (false, None));
+    }
+
+    #[test]
+    fn the_server_list_fills_the_panel_without_a_remove_for_the_death_marker() {
+        let mut app = app();
+        declare(&mut app, kinds());
+        opened(&mut app);
+        send_list(&mut app, base_list());
+        assert!(shows(&mut app, "Base"));
+        assert!(
+            shows(&mut app, "Home \u{b7} 41 m E"),
+            "{:?}",
+            texts(&mut app)
         );
         let controls: Vec<WpControl> = app
             .world_mut()
@@ -602,47 +1150,7 @@ mod waypoints {
             .copied()
             .collect();
         assert!(controls.contains(&WpControl::Remove(1)));
-        assert!(
-            !controls.contains(&WpControl::Remove(2)),
-            "the death marker has no remove"
-        );
-    }
-
-    #[test]
-    fn select_centres_and_remove_ask_the_server() {
-        let mut app = app();
-        declare(&mut app, kinds());
-        opened(&mut app);
-        let mut list = Waypoints::default();
-        list.push("Base", "terra:home", 300.0, 200.0, false);
-        send_list(&mut app, list);
-        control(&mut app, WpControl::Select(1));
-        assert_eq!(app.world().resource::<Marks>().selected(), Some(1));
-        control(&mut app, WpControl::Centre(1));
-        assert_eq!(
-            app.world().resource::<MapWindow>().centre,
-            Some(Vec2::new(300.0, 200.0))
-        );
-        control(&mut app, WpControl::Remove(1));
-        assert_eq!(intents(&mut app), [WaypointIntent::Remove { id: 1 }]);
-    }
-
-    #[test]
-    fn a_click_on_a_mark_selects_it_and_on_empty_ground_deselects() {
-        let mut app = app();
-        declare(&mut app, kinds());
-        opened(&mut app);
-        let mut list = Waypoints::default();
-        list.push("Base", "terra:home", 50.0, -10.0, false);
-        send_list(&mut app, list);
-        app.world_mut().resource_mut::<MapWindow>().pointer =
-            Some(view_half() + Vec2::new(5.0, 0.0));
-        click_view(&mut app);
-        assert_eq!(app.world().resource::<Marks>().selected(), Some(1));
-        app.world_mut().resource_mut::<MapWindow>().pointer =
-            Some(view_half() + Vec2::new(100.0, 0.0));
-        click_view(&mut app);
-        assert_eq!(app.world().resource::<Marks>().selected(), None);
+        assert!(!controls.contains(&WpControl::Remove(2)));
     }
 
     #[test]
@@ -652,11 +1160,7 @@ mod waypoints {
         app.world_mut().write_message(WaypointRefused(Reason::Fog));
         app.update();
         app.update();
-        assert!(
-            texts(&mut app)
-                .iter()
-                .any(|t| t == "That ground is unexplored.")
-        );
+        assert!(shows(&mut app, FOG_TOAST));
     }
 
     #[test]
@@ -665,14 +1169,14 @@ mod waypoints {
         declare(&mut app, kinds());
         opened(&mut app);
         let mut list = Waypoints::default();
-        list.push("Base", "terra:home", 140.0, -10.0, false);
+        list.push("Base", "terra:home", 100.0, 0.0, false);
         send_list(&mut app, list);
         app.world_mut().resource_mut::<Marks>().select(None);
         let map = app.world().resource::<MapCache>();
         let palette = app.world().resource::<MapPalette>();
         let marks = view_marks(
             app.world().resource::<Marks>(),
-            Vec2::new(40.0, -10.0),
+            Vec2::ZERO,
             2.0,
             DEFAULT_VIEW,
         );
@@ -680,11 +1184,12 @@ mod waypoints {
             map,
             palette,
             &Tints::new(),
-            Vec2::new(40.0, -10.0),
+            Vec2::ZERO,
             2.0,
             view(),
             None,
             &marks,
+            None,
         );
         let at = |x: u32, y: u32| {
             let i = ((y * VIEW_W + x) * 4) as usize;
@@ -692,161 +1197,6 @@ mod waypoints {
         };
         let ring = at(VIEW_W / 2 + 50 + 11, VIEW_H / 2);
         assert_eq!(ring, [200, 40, 40], "the ring is the kind's colour");
-    }
-
-    fn armed(app: &App) -> bool {
-        app.world().resource::<Draft>().placing
-    }
-
-    fn focus_field(app: &mut App) {
-        use bevy::input_focus::{FocusCause, InputFocus};
-        let field = app
-            .world_mut()
-            .query_filtered::<Entity, With<NameField>>()
-            .single(app.world())
-            .unwrap();
-        app.world_mut()
-            .resource_mut::<InputFocus>()
-            .set(field, FocusCause::Pressed);
-        app.update();
-    }
-
-    #[test]
-    fn typing_arms_placement_with_the_banner_and_clearing_disarms_it() {
-        let mut app = app();
-        declare(&mut app, kinds());
-        opened(&mut app);
-        assert!(!armed(&app));
-        name(&mut app, "Camp");
-        app.update();
-        assert!(armed(&app));
-        let shown = texts(&mut app);
-        assert!(
-            shown.contains(&"Click the map to place \u{201c}Camp\u{201d}.".to_string()),
-            "{shown:?}"
-        );
-        name(&mut app, "");
-        app.update();
-        assert!(!armed(&app));
-    }
-
-    #[test]
-    fn enter_on_a_blank_name_arms_with_the_default_name() {
-        let mut app = app();
-        declare(&mut app, kinds());
-        opened(&mut app);
-        focus_field(&mut app);
-        press(&mut app, KeyCode::Enter);
-        assert!(armed(&app));
-        let shown = texts(&mut app);
-        assert!(
-            shown.contains(&"Click the map to place \u{201c}Waypoint 1\u{201d}.".to_string()),
-            "{shown:?}"
-        );
-    }
-
-    #[test]
-    fn a_click_on_explored_ground_places_selects_and_disarms() {
-        let mut app = app();
-        declare(&mut app, kinds());
-        opened(&mut app);
-        name(&mut app, "Base");
-        app.update();
-        app.world_mut().resource_mut::<MapWindow>().pointer = Some(view_half());
-        click_view(&mut app);
-        assert_eq!(intents(&mut app).len(), 1);
-        let mut list = Waypoints::default();
-        list.push("Base", "terra:home", 40.0, -10.0, false);
-        send_list(&mut app, list);
-        assert!(!armed(&app));
-        assert_eq!(app.world().resource::<Marks>().selected(), Some(1));
-        assert!(!app.world().resource::<crate::client::waypoints::Grew>().0);
-    }
-
-    #[test]
-    fn a_click_on_fog_is_refused_and_stays_armed() {
-        let mut app = app();
-        declare(&mut app, kinds());
-        opened(&mut app);
-        name(&mut app, "Base");
-        app.update();
-        app.world_mut().resource_mut::<MapWindow>().pointer = Some(view_half());
-        click_view(&mut app);
-        app.world_mut().write_message(WaypointRefused(Reason::Fog));
-        app.update();
-        app.update();
-        assert!(armed(&app));
-        assert!(
-            texts(&mut app)
-                .iter()
-                .any(|t| t == "That ground is unexplored.")
-        );
-    }
-
-    #[test]
-    fn cancel_and_escape_disarm_but_keep_the_text() {
-        let mut app = app();
-        declare(&mut app, kinds());
-        opened(&mut app);
-        name(&mut app, "Base");
-        app.update();
-        control(&mut app, WpControl::CancelPlace);
-        app.update();
-        assert!(!armed(&app), "the unchanged text does not re-arm");
-        let value = |app: &mut App| {
-            app.world_mut()
-                .query_filtered::<&EditableText, With<NameField>>()
-                .single(app.world())
-                .unwrap()
-                .value()
-                .to_string()
-        };
-        assert_eq!(value(&mut app), "Base");
-        name(&mut app, "Base2");
-        app.update();
-        assert!(armed(&app));
-        press(&mut app, KeyCode::Escape);
-        assert!(!armed(&app));
-        assert!(is_open(&app), "the Escape was spent on the placement");
-        assert_eq!(value(&mut app), "Base2");
-    }
-
-    #[test]
-    fn at_my_position_with_a_blank_name_asks_for_the_default() {
-        let mut app = app();
-        declare(&mut app, kinds());
-        opened(&mut app);
-        control(&mut app, WpControl::AtMyPosition);
-        let [WaypointIntent::Add { name, .. }] = &intents(&mut app)[..] else {
-            panic!("one add")
-        };
-        assert_eq!(name, "");
-    }
-
-    #[test]
-    fn the_banner_names_the_typed_name_or_the_next_default() {
-        let mut app = app();
-        declare(&mut app, kinds());
-        opened(&mut app);
-        let banner = |app: &mut App| {
-            texts(app)
-                .into_iter()
-                .find(|t| t.starts_with("Click the map to place"))
-                .unwrap()
-        };
-        assert_eq!(
-            banner(&mut app),
-            "Click the map to place \u{201c}Waypoint 1\u{201d}."
-        );
-        name(&mut app, "Camp");
-        app.update();
-        assert!(app.world().resource::<Draft>().placing);
-        assert_eq!(
-            banner(&mut app),
-            "Click the map to place \u{201c}Camp\u{201d}."
-        );
-        control(&mut app, WpControl::CancelPlace);
-        assert!(!app.world().resource::<Draft>().placing);
     }
 
     #[test]
@@ -869,38 +1219,27 @@ mod waypoints {
     }
 
     #[test]
-    fn focusing_the_name_field_lights_its_frame_and_letting_go_clears_it() {
-        use crate::client::waypoint_panel::NameFrame;
-        use bevy::input_focus::{FocusCause, InputFocus};
+    fn focusing_the_name_field_gives_one_thin_sage_line_and_no_ring() {
         let mut app = app();
         declare(&mut app, kinds());
         opened(&mut app);
-        let field = app
-            .world_mut()
-            .query_filtered::<Entity, With<NameField>>()
-            .single(app.world())
-            .unwrap();
+        adding_popover(&mut app);
         let frame = |app: &mut App| {
             let (border, outline) = app
                 .world_mut()
                 .query_filtered::<(&BorderColor, &Outline), With<NameFrame>>()
                 .single(app.world())
                 .unwrap();
-            (*border, outline.color)
+            (*border, outline.color, outline.width)
         };
-        let (rest, ring) = frame(&mut app);
-        assert_eq!(rest, BorderColor::all(theme::field_edge()));
-        assert_eq!(ring, Color::NONE);
-        app.world_mut()
-            .resource_mut::<InputFocus>()
-            .set(field, FocusCause::Pressed);
-        app.update();
-        let (lit, ring) = frame(&mut app);
-        assert_eq!(lit, BorderColor::all(theme::SAGE));
-        assert_eq!(ring, theme::FOCUS);
+        let (lit, line, width) = frame(&mut app);
+        assert_eq!(lit, BorderColor::all(theme::ACCENT), "focused as it opens");
+        assert_eq!((line, width), (theme::ACCENT, Val::Px(1.0)));
         app.world_mut().resource_mut::<InputFocus>().clear();
         app.update();
-        assert_eq!(frame(&mut app), (rest, Color::NONE));
+        let (rest, line, _) = frame(&mut app);
+        assert_eq!(rest, BorderColor::all(theme::field_edge()));
+        assert_eq!(line, Color::NONE);
     }
 }
 
@@ -1000,7 +1339,8 @@ fn the_tile_local_paint_matches_a_lookup_per_sample_at_every_zoom() {
                 mpp,
                 view(),
                 None,
-                &[]
+                &[],
+                None
             ),
             paint_reference(&map, &palette, centre, mpp),
             "{mpp} m/px"
@@ -1109,6 +1449,7 @@ fn the_painted_image_and_the_pointer_follow_the_views_real_size() {
         painted_size(big),
         None,
         &[],
+        None,
     );
     assert_eq!(pixels.len(), 1000 * 700 * 4);
 }

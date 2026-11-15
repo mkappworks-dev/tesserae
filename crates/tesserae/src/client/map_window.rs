@@ -20,13 +20,16 @@ use tesserae_core::MaterialId;
 use tesserae_core::map::{Map, SAMPLE_M, Sample, cell_of, locate};
 
 use super::actions::{Action, Actions};
-use super::buttons::{self, ButtonStyle};
 use super::map_cache::{MapCache, MapPalette};
+use super::map_pop::Pop;
 use super::menu::Facts;
 use super::menu_ui as ui;
 use super::minimap::{MAP_ARROW_PX, Spot, arrow_at, fog, light, lit};
 use super::theme;
-use super::waypoints::{Mark, Marks, paint_marks, pick, view_labels, view_marks};
+use super::waypoint_panel::PanelTab;
+use super::waypoints::{
+    Mark, Marks, Pending, paint_marks, paint_pending, pick, view_labels, view_marks, view_pending,
+};
 use crate::session::SessionApp;
 
 /// The view's size until the window has laid it out, and the least it is ever painted at.
@@ -41,6 +44,7 @@ const CARD_MAX_PX: Vec2 = Vec2::new(1000.0, 640.0);
 const CARD_SHARE: Vec2 = Vec2::new(78.0, 76.0);
 const VIEW_FILL: Color = Color::srgb_u8(0x0b, 0x0f, 0x0c);
 const CHROME_FILL: Color = Color::srgba_u8(0x06, 0x08, 0x07, 0xe6);
+const CHROME_FILL_SOFT: Color = Color::srgba_u8(0x06, 0x08, 0x07, 0xb3);
 const CHROME_CLEAR: Color = Color::srgba_u8(0x06, 0x08, 0x07, 0);
 const ROSE_FILL: Color = Color::srgba_u8(0x06, 0x08, 0x07, 0xcc);
 const NORTH: Color = Color::srgb_u8(0xe8, 0x70, 0x6a);
@@ -83,6 +87,13 @@ pub(super) struct MapWindow {
     pub(super) dragged: bool,
     /// The view's size in logical pixels, which the painted image is made to match.
     pub(super) view: Vec2,
+    /// The side panel's tab, kept while the window is closed.
+    pub(super) tab: PanelTab,
+    /// Add mode: the next click on explored ground opens the add popover there.
+    pub(super) adding: bool,
+    pub(super) pop: Option<Pop>,
+    /// The Waypoint about to be added at the Player's position opens its popover when it arrives.
+    pub(super) then_edit: bool,
 }
 
 impl Default for MapWindow {
@@ -94,6 +105,10 @@ impl Default for MapWindow {
             pointer: None,
             dragged: false,
             view: DEFAULT_VIEW,
+            tab: PanelTab::default(),
+            adding: false,
+            pop: None,
+            then_edit: false,
         }
     }
 }
@@ -271,6 +286,7 @@ pub(super) fn paint_view(
     size: UVec2,
     you: Option<(Vec2, f32)>,
     marks: &[Mark],
+    pending: Option<Pending>,
 ) -> Vec<u8> {
     let half = size.as_vec2() / 2.0;
     let offsets: &[f32] = if metres_per_pixel > SAMPLE_M {
@@ -310,6 +326,9 @@ pub(super) fn paint_view(
         }
     }
     paint_marks(&mut pixels, size.x, size.y, marks);
+    if let Some(pending) = pending {
+        paint_pending(&mut pixels, size.x, size.y, &pending);
+    }
     pixels
 }
 
@@ -415,13 +434,15 @@ pub(super) struct MapView;
 #[derive(Component)]
 struct ReadoutText;
 #[derive(Component)]
-struct ZoomText;
+pub(super) struct ZoomText;
 #[derive(Component)]
 struct ScaleBar;
 #[derive(Component)]
 struct ScaleText;
 #[derive(Component)]
 struct AreaText;
+#[derive(Component)]
+pub(super) struct ViewBox;
 #[derive(Component)]
 struct LegendList;
 #[derive(Component)]
@@ -430,10 +451,11 @@ struct LabelLayer;
 pub(super) struct SidePanel;
 
 #[derive(Component, Clone, Copy, PartialEq, Eq, Debug)]
-enum Control {
+pub(super) enum Control {
     ZoomIn,
     ZoomOut,
     Centre,
+    AddMode,
     Close,
 }
 
@@ -449,7 +471,8 @@ struct Drawn {
 }
 
 pub(super) fn plugin(app: &mut App) {
-    app.init_session_state::<MapWindow>()
+    app.add_plugins((super::map_tools::plugin, super::map_pop::plugin))
+        .init_session_state::<MapWindow>()
         .add_observer(activate)
         .add_observer(drag)
         .add_session_systems(
@@ -519,6 +542,9 @@ fn open(window: &mut MapWindow, cursor: &mut CursorOptions) {
 fn close(window: &mut MapWindow, cursor: &mut CursorOptions) {
     window.open = false;
     window.pointer = None;
+    window.adding = false;
+    window.pop = None;
+    window.then_edit = false;
     cursor.grab_mode = CursorGrabMode::Locked;
     cursor.visible = false;
 }
@@ -536,6 +562,10 @@ fn activate(
         Control::ZoomIn => window.zoom_in(),
         Control::ZoomOut => window.zoom_out(),
         Control::Centre => window.centre = None,
+        Control::AddMode => {
+            window.adding = !window.adding;
+            window.pop = None;
+        }
         Control::Close => {
             if let Ok(mut cursor) = cursor.single_mut() {
                 close(&mut window, &mut cursor);
@@ -751,6 +781,7 @@ fn sync(
             size,
             wanted.you.map(|(at, bearing)| (at, bearing as f32)),
             &view_marks(&marks, centre, mpp, view),
+            view_pending(&marks, centre, mpp, view),
         );
         for layer in &lines.labels {
             commands
@@ -812,7 +843,7 @@ fn sync(
         },
     };
     set(lines.readout.iter_mut(), &text);
-    set(lines.zoom.iter_mut(), &format!("{mpp} m / px"));
+    set(lines.zoom.iter_mut(), &format!("{mpp} m/px"));
     set(lines.area.iter_mut(), &area_text(stats.explored_m2));
     let (metres, px) = scale_bar(mpp);
     set(lines.scale_text.iter_mut(), &format!("{metres} m"));
@@ -950,18 +981,9 @@ fn spawn(commands: &mut Commands, image: Handle<Image>, solid: bool, eyebrow: &s
         });
 }
 
-fn small_button(
-    parent: &mut ChildSpawnerCommands,
-    label: &str,
-    act: impl Bundle,
-    kind: super::cinematic::Kind,
-) {
-    buttons::button(parent, label, act, ButtonStyle::Small { kind });
-}
-
 fn view_box(root: &mut ChildSpawnerCommands, image: Handle<Image>, eyebrow: &str, key: &str) {
-    use super::cinematic::Kind;
     root.spawn((
+        ViewBox,
         Node {
             flex_grow: 1.0,
             min_width: Val::Px(0.0),
@@ -997,107 +1019,49 @@ fn view_box(root: &mut ChildSpawnerCommands, image: Handle<Image>, eyebrow: &str
             Node {
                 position_type: PositionType::Absolute,
                 left: Val::Px(0.0),
-                right: Val::Px(0.0),
                 top: Val::Px(0.0),
                 padding: UiRect {
                     left: Val::Px(16.0),
-                    right: Val::Px(16.0),
+                    right: Val::Px(40.0),
                     top: Val::Px(14.0),
-                    bottom: Val::Px(30.0),
+                    bottom: Val::Px(18.0),
                 },
-                column_gap: Val::Px(12.0),
-                justify_content: JustifyContent::SpaceBetween,
-                align_items: AlignItems::FlexStart,
+                flex_direction: FlexDirection::Column,
                 ..default()
             },
-            BackgroundGradient::from(LinearGradient::to_bottom(vec![
-                ColorStop::percent(CHROME_FILL, 0.0),
-                ColorStop::percent(CHROME_CLEAR, 100.0),
-            ])),
+            BackgroundGradient::from(RadialGradient::new(
+                UiPosition::TOP_LEFT,
+                RadialGradientShape::Ellipse(Val::Percent(120.0), Val::Percent(100.0)),
+                vec![
+                    ColorStop::percent(CHROME_FILL_SOFT, 30.0),
+                    ColorStop::percent(CHROME_CLEAR, 100.0),
+                ],
+            )),
         ))
-        .with_children(|bar| {
-            bar.spawn((
+        .with_children(|title| {
+            title.spawn((
+                Text::new(eyebrow),
+                theme::weighted(theme::TEXT_EYEBROW, theme::STRONG),
+                bevy::text::LineHeight::Px(15.0),
+                bevy::text::LetterSpacing::Px(theme::EYEBROW_TRACKING),
+                TextColor(theme::EYEBROW),
                 Pickable::IGNORE,
                 Node {
-                    flex_direction: FlexDirection::Column,
+                    margin: UiRect::bottom(Val::Px(12.0)),
                     ..default()
                 },
-            ))
-            .with_children(|title| {
-                title.spawn((
-                    Text::new(eyebrow),
-                    theme::weighted(theme::TEXT_EYEBROW, theme::STRONG),
-                    bevy::text::LineHeight::Px(15.0),
-                    bevy::text::LetterSpacing::Px(theme::EYEBROW_TRACKING),
-                    TextColor(theme::EYEBROW),
-                    Pickable::IGNORE,
-                    Node {
-                        margin: UiRect::bottom(Val::Px(12.0)),
-                        ..default()
-                    },
-                ));
-                title.spawn((
-                    Text::new("Map"),
-                    theme::weighted(24.0, theme::BOOK),
-                    bevy::text::LineHeight::Px(28.0),
-                    TextColor(theme::INK),
-                    Pickable::IGNORE,
-                ));
-            });
-            bar.spawn((
+            ));
+            title.spawn((
+                Text::new("Map"),
+                theme::weighted(24.0, theme::BOOK),
+                bevy::text::LineHeight::Px(28.0),
+                TextColor(theme::INK),
                 Pickable::IGNORE,
-                Node {
-                    align_items: AlignItems::Center,
-                    column_gap: Val::Px(8.0),
-                    ..default()
-                },
-            ))
-            .with_children(|tools| {
-                tools
-                    .spawn((
-                        Pickable::IGNORE,
-                        Node {
-                            align_items: AlignItems::Center,
-                            column_gap: Val::Px(6.0),
-                            ..default()
-                        },
-                    ))
-                    .with_children(|zoom| {
-                        small_button(zoom, "\u{2212}", Control::ZoomOut, Kind::Plain);
-                        zoom.spawn((
-                            Pickable::IGNORE,
-                            Node {
-                                width: Val::Px(72.0),
-                                justify_content: JustifyContent::Center,
-                                ..default()
-                            },
-                        ))
-                        .with_children(|output| {
-                            output.spawn((
-                                ZoomText,
-                                Text::new(""),
-                                theme::figures(theme::TEXT_EYEBROW, theme::REGULAR),
-                                TextColor(theme::muted()),
-                                Pickable::IGNORE,
-                            ));
-                        });
-                        small_button(zoom, "+", Control::ZoomIn, Kind::Plain);
-                    });
-                small_button(tools, "Centre on me", Control::Centre, Kind::Plain);
-                buttons::button(
-                    tools,
-                    "Close",
-                    Control::Close,
-                    ButtonStyle::SmallKey {
-                        kind: Kind::Ghost,
-                        key,
-                    },
-                );
-            });
+            ));
         });
         rose(view);
-        super::waypoint_panel::banner(view);
         foot(view);
+        super::map_tools::corner(view, key);
     });
 }
 
@@ -1246,7 +1210,7 @@ fn side_panel(root: &mut ChildSpawnerCommands) {
     ))
     .with_children(|panel| {
         super::waypoint_panel::sections(panel);
-        super::waypoint_panel::section(panel, false).with_children(|section| {
+        super::waypoint_panel::section(panel, PanelTab::Explore).with_children(|section| {
             super::waypoint_panel::heading(section, "Explored", false);
             section.spawn((
                 AreaText,
