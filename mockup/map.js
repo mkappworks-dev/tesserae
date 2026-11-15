@@ -191,8 +191,9 @@ function ensureMap() {
     cx: 396,
     cz: -174,
     sel: null,
-    placing: false,
-    draft: "",
+    adding: false,
+    pop: null,
+    tab: "waypoints",
     heading: 38,
     pos: { x: 396, z: -174, y: 14 },
     next: 5,
@@ -203,7 +204,9 @@ function ensureMap() {
       { id: 4, name: "Where you died", kind: "Death", x: -258, z: -420 },
     ],
   };
-  state.map.draft ??= "";
+  state.map.tab ??= "waypoints";
+  state.map.adding ??= false;
+  state.map.pop ??= null;
   return state.map;
 }
 function mapFmt(n) {
@@ -310,6 +313,21 @@ function mapMarkers(ctx, w, h, cx, cz, mpp, opts = {}) {
       ctx.fillText(wp.name, x, y + 21);
     }
   }
+  if (big && m.pop?.mode === "add") {
+    const [tx, ty] = to(m.pop.x, m.pop.z);
+    ctx.beginPath();
+    ctx.arc(tx, ty, 11, 0, 7);
+    ctx.fillStyle = "#0b0f0cc0";
+    ctx.fill();
+    ctx.setLineDash([4, 3]);
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = "#fff";
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = MAP_KINDS[m.pop.kind].color;
+    ctx.font = "12px system-ui,sans-serif";
+    ctx.fillText(MAP_KINDS[m.pop.kind].icon, tx, ty + 0.5);
+  }
   const [px, py] = to(m.pos.x, m.pos.z);
   if (px > -20 && py > -20 && px < w + 20 && py < h + 20) {
     ctx.save();
@@ -359,8 +377,7 @@ function mapTurn(delta) {
 /* The Map window. */
 function mapPage() {
   const m = ensureMap(),
-    mpp = MAP_MPP[m.zoom],
-    sel = m.wps.find((w) => w.id === m.sel);
+    mpp = MAP_MPP[m.zoom];
   const rows = m.wps
     .map((wp) => {
       const k = MAP_KINDS[wp.kind],
@@ -377,11 +394,12 @@ function mapPage() {
     .join("");
   return `<div class="map-screen">
 <section class="map-view" aria-label="Map">
-<canvas id="map-canvas" class="${m.placing ? "placing" : ""}" tabindex="0" aria-label="Map of explored ground. Drag to pan, scroll to zoom."></canvas>
+<canvas id="map-canvas" class="${m.adding ? "placing" : ""}" tabindex="0" aria-label="Map of explored ground. Drag to pan, scroll to zoom."></canvas>
 <header class="map-bar"><div><p class="eyebrow">TERRA / THE GREENWOOD</p><h2>Map</h2></div>
-<div class="map-tools"><div class="map-zoom" role="group" aria-label="Zoom"><button class="btn small" data-action="map-zoom" data-value="out" aria-label="Zoom out" ${m.zoom === 3 ? "disabled" : ""}>−</button><output>${mpp} m / px</output><button class="btn small" data-action="map-zoom" data-value="in" aria-label="Zoom in" ${m.zoom === 0 ? "disabled" : ""}>+</button></div>${button("Centre on me", "map-centre", { small: true })}${button("Close <span>M</span>", "map-close", { small: true, ghost: true })}</div></header>
+<div class="map-tools"><div class="map-zoom" role="group" aria-label="Zoom"><button class="btn small" data-action="map-zoom" data-value="out" aria-label="Zoom out" ${m.zoom === 3 ? "disabled" : ""}>−</button><output>${mpp} m / px</output><button class="btn small" data-action="map-zoom" data-value="in" aria-label="Zoom in" ${m.zoom === 0 ? "disabled" : ""}>+</button></div>${button("Centre on me", "map-centre", { small: true })}<button class="btn small ${m.adding ? "primary" : ""}" data-action="map-add-toggle" aria-pressed="${m.adding}">+ Waypoint</button>${button("Close <span>M</span>", "map-close", { small: true, ghost: true })}</div></header>
 <div class="map-rose" aria-label="North is up"><b>N</b><i></i></div>
-${m.placing ? mapBannerHtml() : ""}
+${m.adding && !m.pop ? mapHintHtml() : ""}
+${mapPopHtml()}
 <footer class="map-foot"><output id="map-readout">X ${mapFmt(m.pos.x)} · Z ${mapFmt(m.pos.z)} · ${m.pos.y} m · You are here</output><div class="map-scale" id="map-scale"></div></footer>
 </section>
 <aside class="map-side" aria-label="Map panel">
@@ -397,44 +415,139 @@ ${m.placing ? mapBannerHtml() : ""}
 ${
   m.tab === "explore"
     ? ""
-    : `<section><h3>Waypoints <span>${m.wps.length}</span></h3><ul class="wp-list">${rows}</ul></section>
-<section class="wp-new"><h3>New Waypoint</h3><label class="field-label">Name<input class="input" id="wp-name" maxlength="32" value="${esc(m.draft)}" placeholder="${esc(mapDraftName())}"></label><label class="field-label">Marker kind<div class="kind-pick" role="radiogroup" aria-label="Marker kind">${Object.entries(
-        MAP_KINDS,
-      )
-        .filter(([n]) => n !== "Death")
-        .map(
-          ([n, k]) =>
-            `<button class="kind ${(m.kind || "Home") === n ? "on" : ""}" role="radio" aria-checked="${(m.kind || "Home") === n}" data-action="map-kind" data-value="${n}" style="--wp:${k.color}"><span>${k.icon}</span>${n}</button>`,
-        )
-        .join(
-          "",
-        )}</div></label><div class="row">${button("At my position", "map-add-here", { small: true, primary: true })}</div><small class="muted">Type a name, then click the map to place it.</small></section>
-${sel ? `<section class="wp-sel"><h3>${esc(sel.name)}</h3><small>X ${mapFmt(sel.x)} · Z ${mapFmt(sel.z)} · bearing ${Math.round(mapWrap(mapBearing(sel.x - m.pos.x, sel.z - m.pos.z)))}° ${mapCardinal(mapBearing(sel.x - m.pos.x, sel.z - m.pos.z))}</small>${button("Centre", "map-centre-wp", { small: true })}</section>` : ""}`
+    : `<section><h3>Waypoints <span>${m.wps.length}</span></h3><ul class="wp-list">${rows}</ul></section>`
 }
 ${m.tab === "explore" ? `<section><h3>Explored</h3><p class="muted">${mapSeenAreaKm2.toFixed(2)} km² · seen with the ground loaded. Fogged ground is not guessed at.</p><ul class="legend">${legend}<li><i class="fog"></i>Not explored</li><li><i class="lake"></i>Lake</li></ul></section>` : ""}
 </aside></div>`;
 }
-function mapDraftName() {
-  const m = ensureMap();
-  return m.draft.trim() || `Waypoint ${m.next}`;
+function mapDefaultName() {
+  return `Waypoint ${ensureMap().next}`;
 }
-function mapBannerHtml() {
-  return `<div class="map-banner" role="status">Click the map to place “${esc(mapDraftName())}”. <button class="btn small ghost" data-action="map-place-cancel">Cancel</button></div>`;
+function mapHintHtml() {
+  return `<div class="map-banner" role="status">Click the map to add a Waypoint · <button class="link" data-action="map-add-here">At my position</button></div>`;
 }
-function mapSyncPlacing(arm) {
+function mapKindChips(on) {
+  return `<div class="kind-pick" role="radiogroup" aria-label="Marker kind">${Object.entries(
+    MAP_KINDS,
+  )
+    .filter(([n]) => n !== "Death")
+    .map(
+      ([n, k]) =>
+        `<button class="kind ${on === n ? "on" : ""}" role="radio" aria-checked="${on === n}" data-action="map-kind" data-value="${n}" style="--wp:${k.color}"><span>${k.icon}</span>${n}</button>`,
+    )
+    .join("")}</div>`;
+}
+function mapPopHtml() {
   const m = ensureMap(),
-    view = document.querySelector(".map-view");
-  m.placing = arm;
-  m.tab = arm ? "waypoints" : m.tab;
-  view?.querySelector(".map-banner")?.remove();
-  if (arm) view?.insertAdjacentHTML("beforeend", mapBannerHtml());
-  document.getElementById("map-canvas")?.classList.toggle("placing", arm);
+    pop = m.pop;
+  if (!pop) return "";
+  if (pop.mode === "add")
+    return `<div class="map-pop" id="map-pop" role="dialog" aria-label="New Waypoint"><i class="pop-arrow"></i><label class="field-label">Name<input class="input" id="wp-name" maxlength="32" autocomplete="off" value="${esc(pop.name)}" placeholder="${esc(mapDefaultName())}"></label>${mapKindChips(pop.kind)}<div class="pop-actions">${button("Cancel", "map-pop-cancel", { small: true, ghost: true })}${button("Add", "map-pop-ok", { small: true, primary: true })}</div></div>`;
+  const wp = m.wps.find((w) => w.id === pop.id);
+  if (!wp) return "";
+  const k = MAP_KINDS[wp.kind],
+    where = `X ${mapFmt(wp.x)} · Z ${mapFmt(wp.z)}`;
+  if (wp.kind === "Death")
+    return `<div class="map-pop" id="map-pop" role="dialog" aria-label="${esc(wp.name)}"><i class="pop-arrow"></i><div class="pop-head"><span class="wp-icon" style="--wp:${k.color}">${k.icon}</span><span class="wp-name"><b>${esc(wp.name)}</b><small>${wp.kind} · ${where}</small></span></div><p class="muted">Left where you died. It is replaced by your next death.</p><div class="pop-actions">${button("Centre", "map-centre-wp", { small: true, ghost: true })}${button("Close", "map-pop-cancel", { small: true })}</div></div>`;
+  return `<div class="map-pop" id="map-pop" role="dialog" aria-label="Edit ${esc(wp.name)}"><i class="pop-arrow"></i><label class="field-label">Name<input class="input" id="wp-name" maxlength="32" autocomplete="off" value="${esc(pop.name)}"></label><small class="muted">${where}</small>${mapKindChips(pop.kind)}<div class="pop-actions">${button("Remove", "map-delete", { small: true, danger: true, value: wp.id })}${button("Centre", "map-centre-wp", { small: true, ghost: true })}${button("Save", "map-pop-ok", { small: true, primary: true })}</div></div>`;
+}
+function mapPopAt() {
+  const m = ensureMap(),
+    pop = m.pop;
+  if (!pop) return null;
+  if (pop.mode === "add") return [pop.x, pop.z];
+  const wp = m.wps.find((w) => w.id === pop.id);
+  return wp ? [wp.x, wp.z] : null;
+}
+function mapPlacePop() {
+  const m = ensureMap(),
+    el = document.getElementById("map-pop"),
+    c = document.getElementById("map-canvas");
+  if (!el || !c) return;
+  const at = mapPopAt(),
+    mpp = MAP_MPP[m.zoom],
+    x = at ? c.width / 2 + (at[0] - m.cx) / mpp : -1,
+    y = at ? c.height / 2 + (at[1] - m.cz) / mpp : -1;
+  if (!at || x < 0 || y < 0 || x > c.width || y > c.height) {
+    m.pop = null;
+    el.remove();
+    return;
+  }
+  const w = el.offsetWidth,
+    h = el.offsetHeight,
+    gap = 20,
+    W = c.width,
+    H = c.height,
+    fits = {
+      below: y + gap + h <= H - 8,
+      above: y - gap - h >= 8,
+      right: x + gap + w <= W - 8,
+      left: x - gap - w >= 8,
+    },
+    side =
+      ["below", "above", "right", "left"].find((k) => fits[k]) ||
+      (H - y > y ? "below" : "above"),
+    clampX = (v) => Math.max(8, Math.min(W - w - 8, v)),
+    clampY = (v) => Math.max(8, Math.min(H - h - 8, v));
+  let left, top;
+  if (side === "right" || side === "left") {
+    left = side === "right" ? x + gap : x - gap - w;
+    top = clampY(y - h / 2);
+  } else {
+    left = clampX(x - w / 2);
+    top = clampY(side === "below" ? y + gap : y - gap - h);
+  }
+  el.style.left = `${left}px`;
+  el.style.top = `${top}px`;
+  el.className = `map-pop ${side}`;
+  const along = side === "right" || side === "left" ? y - top : x - left;
+  el.style.setProperty(
+    "--arrow",
+    `${Math.max(16, Math.min((side === "right" || side === "left" ? h : w) - 16, along))}px`,
+  );
+}
+function mapOpenEdit(id) {
+  const m = ensureMap(),
+    wp = m.wps.find((w) => w.id === id),
+    c = document.getElementById("map-canvas"),
+    mpp = MAP_MPP[m.zoom];
+  m.sel = id;
+  m.tab = "waypoints";
+  m.adding = false;
+  m.pop = wp ? { mode: "edit", id, name: wp.name, kind: wp.kind } : null;
+  if (
+    wp &&
+    c &&
+    (Math.abs(wp.x - m.cx) / mpp > c.width / 2 - 12 ||
+      Math.abs(wp.z - m.cz) / mpp > c.height / 2 - 12)
+  ) {
+    m.cx = wp.x;
+    m.cz = wp.z;
+  }
+}
+function mapPopOk() {
+  const m = ensureMap(),
+    pop = m.pop;
+  if (!pop) return;
+  const name = pop.name.trim();
+  if (pop.mode === "add") return mapAddWaypoint(pop.x, pop.z, name, pop.kind);
+  const wp = m.wps.find((w) => w.id === pop.id);
+  if (wp && wp.kind !== "Death") {
+    wp.name = name || wp.name;
+    wp.kind = pop.kind;
+  }
+  m.pop = null;
+  render();
+}
+function mapPopCancel() {
+  const m = ensureMap();
+  if (m.pop) m.pop = null;
+  else m.adding = false;
+  render();
 }
 document.addEventListener("input", (e) => {
-  if (e.target.id !== "wp-name") return;
   const m = ensureMap();
-  m.draft = e.target.value;
-  mapSyncPlacing(m.draft.trim() !== "");
+  if (e.target.id === "wp-name" && m.pop) m.pop.name = e.target.value;
 });
 document.addEventListener(
   "keydown",
@@ -442,11 +555,12 @@ document.addEventListener(
     if (e.target.id !== "wp-name") return;
     if (e.key === "Enter") {
       e.preventDefault();
-      mapSyncPlacing(true);
+      e.stopImmediatePropagation();
+      mapPopOk();
     } else if (e.key === "Escape") {
       e.preventDefault();
       e.stopImmediatePropagation();
-      e.target.blur();
+      mapPopCancel();
     }
   },
   true,
@@ -470,6 +584,7 @@ function mapRedraw() {
     big: true,
     labels: true,
   });
+  mapPlacePop();
   const bar = document.getElementById("map-scale");
   if (bar) {
     const metres = [50, 100, 200, 500, 1000].find((n) => n / mpp >= 60) || 1000;
@@ -482,6 +597,12 @@ function mapMount() {
   document.querySelector(".game-footer>span:nth-child(2)").innerHTML =
     "<kbd>M</kbd> Close <kbd>Drag</kbd> Pan <kbd>Wheel</kbd> Zoom <kbd>Esc</kbd> Back";
   mapRedraw();
+  const input = document.getElementById("wp-name");
+  if (input)
+    setTimeout(() => {
+      input.focus();
+      input.setSelectionRange(input.value.length, input.value.length);
+    }, 0);
   const m = ensureMap(),
     read = document.getElementById("map-readout");
   const at = (e) => {
@@ -519,7 +640,7 @@ function mapMount() {
       mapRedraw();
     }
     const wp = pick(e);
-    c.style.cursor = m.placing
+    c.style.cursor = m.adding
       ? "crosshair"
       : wp
         ? "pointer"
@@ -540,16 +661,27 @@ function mapMount() {
     drag = null;
     if (moved) return;
     const [x, z] = at(e);
-    if (m.placing) {
+    if (m.adding) {
       if (!mapSeen(x, z)) {
         toast("Only explored ground can hold a Waypoint.");
         return;
       }
-      mapAddWaypoint(x, z);
+      m.pop = {
+        mode: "add",
+        x: Math.round(x),
+        z: Math.round(z),
+        name: m.pop?.name || "",
+        kind: m.pop?.kind || "Home",
+      };
+      render();
       return;
     }
-    m.sel = pick(e)?.id ?? null;
-    if (m.sel !== null) m.tab = "waypoints";
+    const wp = pick(e);
+    if (wp) mapOpenEdit(wp.id);
+    else {
+      m.sel = null;
+      m.pop = null;
+    }
     render();
   };
   c.onwheel = (e) => {
@@ -560,20 +692,20 @@ function mapMount() {
     render();
   };
 }
-function mapAddWaypoint(x, z) {
+function mapAddWaypoint(x, z, typed = "", kind = "Home") {
   const m = ensureMap(),
-    name = mapDraftName();
+    name = typed || mapDefaultName();
   m.wps.push({
     id: m.next,
     name,
-    kind: m.kind || "Home",
+    kind,
     x: Math.round(x),
     z: Math.round(z),
   });
   m.sel = m.next++;
   m.tab = "waypoints";
-  m.placing = false;
-  m.draft = "";
+  m.adding = false;
+  m.pop = null;
   toast(`Waypoint “${name}” added.`);
   render();
 }
@@ -586,6 +718,8 @@ function mapAction(name, value) {
       navigate("map");
       return true;
     case "map-close":
+      m.pop = null;
+      m.adding = false;
       navigate("play");
       return true;
     case "map-zoom":
@@ -611,24 +745,36 @@ function mapAction(name, value) {
       render();
       return true;
     case "map-select":
-      m.sel = Number(value);
+      mapOpenEdit(Number(value));
       render();
       return true;
     case "map-delete":
       m.wps = m.wps.filter((w) => w.id !== Number(value));
       if (m.sel === Number(value)) m.sel = null;
+      m.pop = null;
       render();
       return true;
     case "map-kind":
-      m.kind = value;
+      if (m.pop) m.pop.kind = value;
+      render();
+      return true;
+    case "map-add-toggle":
+      m.adding = !m.adding;
+      m.pop = null;
       render();
       return true;
     case "map-add-here":
+      m.cx = m.pos.x;
+      m.cz = m.pos.z;
       mapAddWaypoint(m.pos.x, m.pos.z);
-      return true;
-    case "map-place-cancel":
-      m.placing = false;
+      mapOpenEdit(m.next - 1);
       render();
+      return true;
+    case "map-pop-ok":
+      mapPopOk();
+      return true;
+    case "map-pop-cancel":
+      mapPopCancel();
       return true;
   }
   return false;
@@ -651,7 +797,8 @@ document.addEventListener(
     } else if (state.screen === "map" && e.key === "Escape") {
       e.preventDefault();
       e.stopImmediatePropagation();
-      if (ensureMap().placing) action("map-place-cancel");
+      const m = ensureMap();
+      if (m.pop || m.adding) mapPopCancel();
       else action("map-close");
     } else if (state.screen === "play" && ["b", "n"].includes(key)) {
       e.preventDefault();

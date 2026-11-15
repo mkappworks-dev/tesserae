@@ -288,6 +288,77 @@
   margin-top: 8px;
   background: linear-gradient(#e8706a 50%, #f2f4ee 50%);
 }
+.map-banner .link {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--leaf);
+  font: inherit;
+  text-decoration: underline;
+}
+.map-pop {
+  position: absolute;
+  z-index: 4;
+  width: 240px;
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  background: var(--panel);
+  border: 1px solid #66666d;
+  border-radius: 8px;
+  box-shadow: 0 16px 50px #0006;
+}
+.map-pop .pop-arrow {
+  position: absolute;
+  left: var(--arrow, 50%);
+  top: -6px;
+  width: 10px;
+  height: 10px;
+  margin-left: -5px;
+  background: var(--panel);
+  border-left: 1px solid #66666d;
+  border-top: 1px solid #66666d;
+  transform: rotate(45deg);
+}
+.map-pop.above .pop-arrow {
+  top: auto;
+  bottom: -6px;
+  transform: rotate(225deg);
+}
+.map-pop.right .pop-arrow,
+.map-pop.left .pop-arrow {
+  left: -6px;
+  top: var(--arrow, 50%);
+  margin: -5px 0 0;
+  transform: rotate(-45deg);
+}
+.map-pop.left .pop-arrow {
+  left: auto;
+  right: -6px;
+  transform: rotate(135deg);
+}
+.map-pop .kind-pick {
+  margin-top: 0;
+}
+.map-pop .muted,
+.map-pop p {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+.pop-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.pop-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.pop-actions .btn.danger {
+  margin-right: auto;
+}
 .map-banner {
   position: absolute;
   top: 74px;
