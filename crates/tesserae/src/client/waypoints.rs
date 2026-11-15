@@ -331,5 +331,21 @@ pub(super) fn icon_pixels(icon: Icon, colour: [u8; 4], scale: u32) -> (u32, Vec<
     (side, pixels)
 }
 
+/// `icon_pixels` as an image.
+pub(super) fn icon_image(icon: Icon, colour: [u8; 4], scale: u32) -> Image {
+    let (side, pixels) = icon_pixels(icon, colour, scale);
+    Image::new(
+        bevy::render::render_resource::Extent3d {
+            width: side,
+            height: side,
+            depth_or_array_layers: 1,
+        },
+        bevy::render::render_resource::TextureDimension::D2,
+        pixels,
+        bevy::render::render_resource::TextureFormat::Rgba8UnormSrgb,
+        bevy::asset::RenderAssetUsages::default(),
+    )
+}
+
 #[cfg(test)]
 mod tests;

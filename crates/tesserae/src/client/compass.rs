@@ -7,6 +7,7 @@ use bevy::text::{Justify, TextLayout};
 
 use super::profile::Preferences;
 use super::theme;
+use super::waypoints::{Marks, from_player, icon_image};
 use crate::server::player::PoseCorrection;
 use crate::session::SessionApp;
 
@@ -21,6 +22,12 @@ const NORTH: Color = Color::srgb_u8(0xe8, 0x70, 0x6a);
 const STRIP: Color = Color::srgba_u8(6, 7, 8, 190);
 const DIM: Color = Color::srgba(1.0, 1.0, 1.0, 0.55);
 const TICK: [f32; 3] = [5.0, 9.0, 13.0];
+const MARK_SCALE: u32 = 2;
+const MARK_PX: f32 = 14.0;
+/// A mark's resting place: the strip's reach less room for the icon.
+const EDGE_DEG: f32 = STRIP_PX / 2.0 / PX_PER_DEG - 6.0;
+/// How near the heading a Waypoint must be to be named under the readout.
+const FACING_DEG: f32 = 7.0;
 
 /// The compass bearing, clockwise from North in `[0, 360)`, of a Server yaw. A
 /// positive yaw turns left, so the bearing is its negative.
@@ -42,14 +49,21 @@ pub(super) fn relative_deg(from: f32, to: f32) -> f32 {
     (to - from + 180.0).rem_euclid(360.0) - 180.0
 }
 
-/// The last pose's heading, as a bearing.
+/// The last pose: its heading as a bearing, and where the eye is on the ground.
 #[derive(Resource, Default)]
-struct Heading(Option<f32>);
+struct Heading {
+    bearing: Option<f32>,
+    eye: Vec2,
+}
 
 #[derive(Component)]
 pub(super) struct CompassRoot;
 #[derive(Component)]
 struct Readout;
+#[derive(Component)]
+struct StripMark;
+#[derive(Component)]
+struct Facing;
 
 pub(super) fn plugin(app: &mut App) {
     app.init_session_state::<Heading>().add_session_systems(
@@ -60,7 +74,8 @@ pub(super) fn plugin(app: &mut App) {
 
 fn follow(mut poses: MessageReader<PoseCorrection>, mut heading: ResMut<Heading>) {
     if let Some(pose) = poses.read().last() {
-        heading.0 = Some(bearing_deg(pose.yaw));
+        heading.bearing = Some(bearing_deg(pose.yaw));
+        heading.eye = Vec2::new(pose.eye.x, pose.eye.z);
     }
 }
 
@@ -90,16 +105,22 @@ fn rebuild(
     heading: Res<Heading>,
     covers: super::menu::Covers,
     dead: Option<Res<super::death::Dead>>,
+    marks: Res<Marks>,
+    mut images: ResMut<Assets<Image>>,
     roots: Query<Entity, With<CompassRoot>>,
-    mut shown: Local<Option<i32>>,
+    mut shown: Local<Option<(i32, u32, [i32; 2])>>,
 ) {
     let hidden =
         !preferences.compass || super::menu::covered(&covers) || !super::death::alive(dead);
     // Whole degrees: the strip moves 3.4 px a degree, so a finer rebuild is not seen.
-    let wanted = heading
-        .0
-        .filter(|_| !hidden)
-        .map(|bearing| bearing.round() as i32 % 360);
+    let wanted = heading.bearing.filter(|_| !hidden).map(|bearing| {
+        let whole_metres = heading.eye.round();
+        (
+            bearing.round() as i32 % 360,
+            marks.revision(),
+            [whole_metres.x as i32, whole_metres.y as i32],
+        )
+    });
     if *shown == wanted {
         return;
     }
@@ -107,10 +128,11 @@ fn rebuild(
     for root in &roots {
         commands.entity(root).despawn();
     }
-    let Some(whole) = wanted else {
+    let Some((whole, ..)) = wanted else {
         return;
     };
     let bearing = whole as f32;
+    let ahead = ahead_of(&marks, heading.eye, bearing);
     commands
         .spawn((
             CompassRoot,
@@ -141,7 +163,10 @@ fn rebuild(
                 BackgroundColor(STRIP),
                 BorderColor::all(Color::BLACK),
             ))
-            .with_children(|strip| strip_marks(strip, bearing));
+            .with_children(|strip| {
+                strip_marks(strip, bearing);
+                waypoint_marks(strip, &ahead, &marks, &mut images);
+            });
             root.spawn((
                 Readout,
                 Text::new(format!("{whole}° {}", cardinal(bearing))),
@@ -153,7 +178,78 @@ fn rebuild(
                 },
                 Pickable::IGNORE,
             ));
+            if let Some(target) = ahead.iter().find(|a| a.rel.abs() < FACING_DEG) {
+                root.spawn((
+                    Facing,
+                    Text::new(format!("{} · {} m", target.name, target.metres.round())),
+                    theme::weighted(theme::TEXT_CAPTION, theme::SEMIBOLD),
+                    TextColor(theme::HUD_INK),
+                    TextShadow {
+                        offset: Vec2::new(0.0, 1.0),
+                        color: Color::BLACK,
+                    },
+                    Pickable::IGNORE,
+                ));
+            }
         });
+}
+
+struct Ahead {
+    name: String,
+    kind: String,
+    metres: f32,
+    /// Clockwise degrees from the heading.
+    rel: f32,
+}
+
+/// Every Waypoint relative to the heading, the one nearest dead ahead first.
+fn ahead_of(marks: &Marks, eye: Vec2, bearing: f32) -> Vec<Ahead> {
+    let mut ahead: Vec<_> = marks
+        .list()
+        .iter()
+        .map(|w| {
+            let (metres, to) = from_player(w, eye);
+            Ahead {
+                name: w.name.clone(),
+                kind: w.kind.clone(),
+                metres,
+                rel: relative_deg(bearing, to),
+            }
+        })
+        .collect();
+    ahead.sort_by(|a, b| a.rel.abs().total_cmp(&b.rel.abs()));
+    ahead
+}
+
+fn waypoint_marks(
+    strip: &mut ChildSpawnerCommands,
+    ahead: &[Ahead],
+    marks: &Marks,
+    images: &mut Assets<Image>,
+) {
+    // Nearest the heading spawns last, so it draws over the ones rested at the edge.
+    for waypoint in ahead.iter().rev() {
+        let (icon, colour) = marks.look(&waypoint.kind);
+        let at = waypoint.rel.clamp(-EDGE_DEG, EDGE_DEG);
+        let dimmed = at != waypoint.rel;
+        let mut image = ImageNode::new(images.add(icon_image(icon, colour, MARK_SCALE)));
+        if dimmed {
+            image.color = DIM;
+        }
+        strip.spawn((
+            StripMark,
+            Pickable::IGNORE,
+            image,
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(STRIP_PX / 2.0 + at * PX_PER_DEG - MARK_PX / 2.0),
+                top: Val::Px(STRIP_HEIGHT_PX / 2.0 - MARK_PX / 2.0),
+                width: Val::Px(MARK_PX),
+                height: Val::Px(MARK_PX),
+                ..default()
+            },
+        ));
+    }
 }
 
 fn strip_marks(strip: &mut ChildSpawnerCommands, bearing: f32) {
@@ -277,14 +373,20 @@ mod tests {
             .insert_resource(super::super::input::Ownership::playing())
             .add_message::<PoseCorrection>()
             .add_plugins(super::super::actions::test_plugin)
+            .add_plugins(bevy::asset::AssetPlugin::default())
+            .init_asset::<Image>()
+            .add_plugins(super::super::waypoints::plugin)
             .add_plugins(plugin);
         app
     }
     fn pose(app: &mut App, yaw: f32) {
+        pose_at(app, yaw, Vec3::ZERO);
+    }
+    fn pose_at(app: &mut App, yaw: f32, eye: Vec3) {
         app.world_mut().write_message(PoseCorrection {
             mode: MovementMode::Physics,
             seq: 1,
-            eye: Vec3::ZERO,
+            eye,
             yaw,
             body: BodyState::default(),
         });
@@ -389,5 +491,103 @@ mod tests {
         press(&mut app);
         assert!(!app.world().resource::<Preferences>().compass);
         assert_eq!(readout(&mut app), None);
+    }
+
+    fn waypoints_at(app: &mut App, points: &[(&str, f32, f32)]) {
+        use tesserae_core::marker::{Icon, MarkerKind, MarkerKinds, Waypoints};
+        let mut list = Waypoints::default();
+        for (name, x, z) in points {
+            list.push(name, "t:home", *x, *z, false);
+        }
+        app.world_mut()
+            .write_message(crate::content::MarkerKinds(MarkerKinds {
+                kinds: vec![MarkerKind {
+                    name: "t:home".into(),
+                    icon: Icon::Home,
+                    color: [200, 40, 40, 255],
+                }],
+                death: None,
+            }));
+        app.world_mut()
+            .write_message(crate::server::waypoint::WaypointsChanged(list));
+        app.update();
+    }
+    fn strip_marks_of(app: &mut App) -> Vec<(f32, bool)> {
+        let mut marks = app.world_mut().query::<(&StripMark, &Node, &ImageNode)>();
+        marks
+            .iter(app.world())
+            .map(|(_, node, image)| {
+                let Val::Px(left) = node.left else {
+                    panic!("positioned in pixels")
+                };
+                (left + MARK_PX / 2.0, image.color == DIM)
+            })
+            .collect()
+    }
+    fn facing(app: &mut App) -> Option<String> {
+        let mut labels = app.world_mut().query_filtered::<&Text, With<Facing>>();
+        labels.iter(app.world()).next().map(|t| t.0.clone())
+    }
+
+    #[test]
+    fn a_waypoint_sits_at_its_bearing_relative_to_the_heading() {
+        let mut app = app();
+        turn_on(&mut app);
+        waypoints_at(&mut app, &[("Base", 100.0, 0.0)]);
+        pose(&mut app, -FRAC_PI_2);
+        let marks = strip_marks_of(&mut app);
+        assert_eq!(marks.len(), 1);
+        assert!((marks[0].0 - STRIP_PX / 2.0).abs() < 0.01, "dead ahead");
+        assert!(!marks[0].1);
+        pose(&mut app, -FRAC_PI_2 + 10.0_f32.to_radians());
+        let marks = strip_marks_of(&mut app);
+        assert!(
+            (marks[0].0 - (STRIP_PX / 2.0 + 10.0 * PX_PER_DEG)).abs() < 0.5,
+            "heading 80 puts east 10 degrees to the right"
+        );
+    }
+
+    #[test]
+    fn a_waypoint_off_to_the_side_rests_dimmed_at_the_edge() {
+        let mut app = app();
+        turn_on(&mut app);
+        waypoints_at(&mut app, &[("East", 100.0, 0.0), ("West", -100.0, 0.0)]);
+        pose(&mut app, 0.0);
+        let mut at: Vec<_> = strip_marks_of(&mut app);
+        at.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let rest = EDGE_DEG * PX_PER_DEG;
+        assert!((at[0].0 - (STRIP_PX / 2.0 - rest)).abs() < 0.01, "{at:?}");
+        assert!((at[1].0 - (STRIP_PX / 2.0 + rest)).abs() < 0.01, "{at:?}");
+        assert!(at.iter().all(|m| m.1), "both dimmed");
+        assert_eq!(facing(&mut app), None);
+    }
+
+    #[test]
+    fn the_label_names_the_waypoint_faced_within_a_few_degrees_nearest_first() {
+        let mut app = app();
+        turn_on(&mut app);
+        waypoints_at(
+            &mut app,
+            &[
+                ("Far off", 40.0, -100.0),
+                ("Near", 2.0, -50.0),
+                ("Side", 30.0, -50.0),
+            ],
+        );
+        pose(&mut app, 0.0);
+        assert_eq!(facing(&mut app).as_deref(), Some("Near · 50 m"));
+        pose(&mut app, -FRAC_PI_2);
+        assert_eq!(facing(&mut app), None, "none within a few degrees");
+    }
+
+    #[test]
+    fn moving_updates_the_distance_in_the_label() {
+        let mut app = app();
+        turn_on(&mut app);
+        waypoints_at(&mut app, &[("Base", 0.0, -100.0)]);
+        pose(&mut app, 0.0);
+        assert_eq!(facing(&mut app).as_deref(), Some("Base · 100 m"));
+        pose_at(&mut app, 0.0, Vec3::new(0.0, 0.0, -60.0));
+        assert_eq!(facing(&mut app).as_deref(), Some("Base · 40 m"));
     }
 }

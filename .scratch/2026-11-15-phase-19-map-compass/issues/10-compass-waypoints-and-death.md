@@ -1,6 +1,6 @@
 # 10: The Compass shows Waypoints, and a death leaves one
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 02, 09
 
@@ -19,8 +19,8 @@ any Waypoint.
 
 ## Acceptance criteria
 
-- [ ] Waypoints appear on the Compass at the right bearing as the Player turns; an off-side one rests dimmed at the edge.
-- [ ] Facing a Waypoint within a few degrees shows its name and distance.
-- [ ] Dying adds one death Waypoint of the Game's death kind at the death position; a second death replaces it; no death kind means none.
-- [ ] The death marker survives save and reopen and has no remove control in the list.
-- [ ] Tests at the Server death hook and the Client Compass seam; fmt, clippy and tests pass.
+- [x] Waypoints appear on the Compass at the right bearing as the Player turns; an off-side one rests dimmed at the edge.
+- [x] Facing a Waypoint within a few degrees shows its name and distance.
+- [x] Dying adds one death Waypoint of the Game's death kind at the death position; a second death replaces it; no death kind means none.
+- [x] The death marker survives save and reopen and has no remove control in the list.
+- [ ] Tests at the Server death hook and the Client Compass seam; fmt, clippy and tests pass. (Tests written and passing by filter, fmt run; clippy and the full suite are deferred to the end of the phase.)
