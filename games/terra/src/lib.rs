@@ -5,6 +5,7 @@ use exports::tesserae::mods::guest::{
 };
 mod audio;
 mod character;
+mod plants;
 mod textures;
 
 use std::cell::RefCell;
@@ -89,7 +90,7 @@ thread_local! {
 
 struct Terra;
 
-fn solid(name: &str) -> MaterialDef {
+pub(crate) fn solid(name: &str) -> MaterialDef {
     MaterialDef {
         name: name.into(),
         emission: 0,
@@ -98,8 +99,20 @@ fn solid(name: &str) -> MaterialDef {
         render: RenderClass::Opaque,
         remove_time_s: Some(0.35),
         contact_damage_per_s: None,
+        tags: tags_of(name),
         solid: true,
     }
+}
+
+/// What the shared Plants name instead of Terra's own ground and water.
+fn tags_of(name: &str) -> Vec<String> {
+    let tags: &[&str] = match name {
+        "dirt" | "grass" | "snow" => &["soil"],
+        "sand" => &["sand"],
+        "stone" => &["rock"],
+        _ => &[],
+    };
+    tags.iter().map(|t| (*t).to_owned()).collect()
 }
 
 fn point(x: f32, y: f32, z: f32) -> Vec3 {
@@ -143,6 +156,7 @@ fn fence() -> ShapeDef {
         }]),
     };
     ShapeDef {
+        form: Default::default(),
         name: "fence".into(),
         boxes: vec![NodeBox {
             min: (6, 0, 6),
@@ -170,6 +184,7 @@ fn fence() -> ShapeDef {
 /// face the Player and Use turns about its hinge.
 fn panel() -> ShapeDef {
     ShapeDef {
+        form: Default::default(),
         name: "panel".into(),
         boxes: vec![NodeBox {
             min: (0, 0, 13),
@@ -188,6 +203,7 @@ fn table() -> ShapeDef {
         max: (x + 3, 12, z + 3),
     };
     ShapeDef {
+        form: Default::default(),
         name: "table".into(),
         boxes: vec![
             leg(1, 1),
@@ -217,7 +233,7 @@ fn gate(name: &str) -> MaterialDef {
     }
 }
 
-fn appearance(material: &str, [r, g, b, a]: [u8; 4]) -> Appearance {
+pub(crate) fn appearance(material: &str, [r, g, b, a]: [u8; 4]) -> Appearance {
     Appearance {
         material: material.into(),
         color: Srgba { r, g, b, a },
@@ -260,6 +276,7 @@ impl Guest for Terra {
                     render: RenderClass::Opaque,
                     remove_time_s: None,
                     contact_damage_per_s: None,
+                    tags: Vec::new(),
                     solid: true,
                 },
                 MaterialDef {
@@ -270,6 +287,7 @@ impl Guest for Terra {
                     render: RenderClass::Opaque,
                     remove_time_s: None,
                     contact_damage_per_s: Some(4.0),
+                    tags: Vec::new(),
                     solid: false,
                 },
                 solid("wood"),
@@ -285,6 +303,7 @@ impl Guest for Terra {
                     render: RenderClass::Blend,
                     remove_time_s: None,
                     contact_damage_per_s: None,
+                    tags: Vec::new(),
                     solid: false,
                 },
                 solid("brick"),
@@ -296,6 +315,7 @@ impl Guest for Terra {
                     render: RenderClass::Blend,
                     remove_time_s: None,
                     contact_damage_per_s: None,
+                    tags: vec!["water".into()],
                     solid: false,
                 },
                 solid("stone"),
@@ -459,6 +479,7 @@ impl Guest for Terra {
                     material: Some("terra:stone".into()),
                     max_stack: None,
                     food: None,
+                    texture: None,
                 },
                 ItemDef {
                     name: "dirt".into(),
@@ -472,6 +493,7 @@ impl Guest for Terra {
                     material: Some("terra:dirt".into()),
                     max_stack: None,
                     food: None,
+                    texture: None,
                 },
                 ItemDef {
                     name: "grass".into(),
@@ -485,6 +507,7 @@ impl Guest for Terra {
                     material: Some("terra:grass".into()),
                     max_stack: None,
                     food: None,
+                    texture: None,
                 },
                 ItemDef {
                     name: "melon".into(),
@@ -498,6 +521,7 @@ impl Guest for Terra {
                     material: Some("terra:melon".into()),
                     max_stack: None,
                     food: Some(6.0),
+                    texture: None,
                 },
                 ItemDef {
                     name: "workbench".into(),
@@ -511,6 +535,7 @@ impl Guest for Terra {
                     material: Some("terra:workbench".into()),
                     max_stack: None,
                     food: None,
+                    texture: None,
                 },
                 ItemDef {
                     name: "chest".into(),
@@ -524,6 +549,7 @@ impl Guest for Terra {
                     material: Some("terra:chest".into()),
                     max_stack: None,
                     food: None,
+                    texture: None,
                 },
                 ItemDef {
                     name: "door".into(),
@@ -537,6 +563,7 @@ impl Guest for Terra {
                     material: Some("terra:door".into()),
                     max_stack: None,
                     food: None,
+                    texture: None,
                 },
                 ItemDef {
                     name: "gate".into(),
@@ -550,6 +577,7 @@ impl Guest for Terra {
                     material: Some("terra:gate".into()),
                     max_stack: None,
                     food: None,
+                    texture: None,
                 },
             ],
             biomes: vec![
@@ -565,17 +593,20 @@ impl Guest for Terra {
                     }),
                     cave_scale: None,
                     // A melon in every 16 by 16 m of grass is found while exploring, not a
-                    // carpet; Wood every 6 m gathers a Workbench, Chest and Door in a short walk.
-                    surface_features: vec![
-                        SurfaceFeature {
-                            material: "terra:melon".into(),
-                            spacing_m: 16.0,
-                        },
-                        SurfaceFeature {
-                            material: "terra:wood".into(),
-                            spacing_m: 6.0,
-                        },
-                    ],
+                    // carpet; the oaks every 9 m give Wood for a Workbench, Chest and Door in a
+                    // short walk, and no Wood lies about on its own.
+                    crop_fields: plants::temperate_fields(),
+                    surface_features: [SurfaceFeature {
+                        material: Some("terra:melon".into()),
+                        plant: None,
+                        shape: None,
+                        spacing_m: 16.0,
+                        clump: None,
+                        field: None,
+                    }]
+                    .into_iter()
+                    .chain(plants::temperate())
+                    .collect(),
                 },
                 BiomeDef {
                     soundscape: Some("terra:dry".into()),
@@ -592,7 +623,8 @@ impl Guest for Terra {
                         fog: (196, 178, 142),
                     }),
                     cave_scale: Some(1.5),
-                    surface_features: Vec::new(),
+                    crop_fields: Vec::new(),
+                    surface_features: plants::dry(),
                 },
                 BiomeDef {
                     soundscape: Some("terra:cold".into()),
@@ -609,7 +641,58 @@ impl Guest for Terra {
                         fog: (176, 190, 208),
                     }),
                     cave_scale: Some(0.0),
-                    surface_features: Vec::new(),
+                    crop_fields: Vec::new(),
+                    surface_features: plants::cold(),
+                },
+                BiomeDef {
+                    soundscape: None,
+                    name: "jungle".into(),
+                    temperature: 0.72,
+                    humidity: 0.7,
+                    ground: None,
+                    sky_fog: Some(SkyFog {
+                        sky: (112, 148, 128),
+                        fog: (126, 166, 140),
+                    }),
+                    cave_scale: None,
+                    crop_fields: Vec::new(),
+                    surface_features: plants::jungle(),
+                },
+                BiomeDef {
+                    soundscape: None,
+                    name: "swamp".into(),
+                    temperature: 0.55,
+                    humidity: 0.78,
+                    ground: Some(GroundParams {
+                        rock: "terra:stone".into(),
+                        soil: "terra:dirt".into(),
+                        surface: "terra:dirt".into(),
+                    }),
+                    sky_fog: Some(SkyFog {
+                        sky: (108, 126, 114),
+                        fog: (124, 142, 126),
+                    }),
+                    cave_scale: Some(0.5),
+                    crop_fields: Vec::new(),
+                    surface_features: plants::swamp(),
+                },
+                BiomeDef {
+                    soundscape: Some("terra:dry".into()),
+                    name: "savanna".into(),
+                    temperature: 0.78,
+                    humidity: 0.5,
+                    ground: Some(GroundParams {
+                        rock: "terra:stone".into(),
+                        soil: "terra:dirt".into(),
+                        surface: "terra:dirt".into(),
+                    }),
+                    sky_fog: Some(SkyFog {
+                        sky: (170, 160, 124),
+                        fog: (192, 178, 136),
+                    }),
+                    cave_scale: None,
+                    crop_fields: Vec::new(),
+                    surface_features: plants::savanna(),
                 },
             ],
             survival: None,
@@ -621,7 +704,7 @@ impl Guest for Terra {
             recipes: vec![
                 RecipeDef {
                     inputs: vec![RecipeStack {
-                        item: "terra:wood".into(),
+                        item: "flora:log".into(),
                         count: 4,
                     }],
                     output: RecipeStack {
@@ -660,7 +743,7 @@ impl Guest for Terra {
                 },
                 RecipeDef {
                     inputs: vec![RecipeStack {
-                        item: "terra:leaves".into(),
+                        item: "flora:leaves".into(),
                         count: 4,
                     }],
                     output: RecipeStack {
@@ -671,7 +754,7 @@ impl Guest for Terra {
                 },
                 RecipeDef {
                     inputs: vec![RecipeStack {
-                        item: "terra:wood".into(),
+                        item: "flora:log".into(),
                         count: 8,
                     }],
                     output: RecipeStack {
@@ -682,7 +765,7 @@ impl Guest for Terra {
                 },
                 RecipeDef {
                     inputs: vec![RecipeStack {
-                        item: "terra:wood".into(),
+                        item: "flora:log".into(),
                         count: 3,
                     }],
                     output: RecipeStack {
@@ -693,7 +776,7 @@ impl Guest for Terra {
                 },
                 RecipeDef {
                     inputs: vec![RecipeStack {
-                        item: "terra:wood".into(),
+                        item: "flora:log".into(),
                         count: 2,
                     }],
                     output: RecipeStack {
@@ -743,7 +826,7 @@ impl Guest for Terra {
                 },
                 RecipeDef {
                     inputs: vec![RecipeStack {
-                        item: "terra:wood".into(),
+                        item: "flora:log".into(),
                         count: 1,
                     }],
                     output: RecipeStack {
@@ -753,6 +836,7 @@ impl Guest for Terra {
                     station: "workbench".into(),
                 },
             ],
+            plants: Vec::new(),
             voxel_uses: vec![
                 VoxelUse {
                     material: "terra:door".into(),

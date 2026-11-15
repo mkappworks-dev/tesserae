@@ -1,11 +1,12 @@
 //! Game artwork uploaded once for terrain, tiles and held models.
+use super::sprite::Sprite;
 use super::{
     edit::{Catalogue, Holding},
     menu::Swatches,
 };
-use crate::content::MaterialTextures;
+use crate::content::{ItemLooks, MaterialTextures};
 use crate::render::{
-    chunk_material::{ChunkMaterialExtension, FLAME_SLOT},
+    chunk_material::{ChunkMaterialExtension, FLAME_SLOT, TEXTURED_VECS},
     texture_atlas::{EDGE, HEIGHT, ROWS, WIDTH},
 };
 use crate::session::SessionApp;
@@ -16,6 +17,7 @@ use bevy::{
     prelude::*,
     render::render_resource::{Extent3d, TextureDimension, TextureFormat},
 };
+use std::collections::HashMap;
 
 const GHOST_OPACITY: f32 = 0.75;
 
@@ -24,6 +26,8 @@ pub(super) struct Textures {
     atlas: Option<Handle<Image>>,
     present: [bool; ROWS],
     alpha: [AlphaMode; ROWS],
+    /// Each Item's own sprite, by its place in the Server's item order.
+    sprites: HashMap<u16, (Handle<Image>, AlphaMode)>,
 }
 
 impl Default for Textures {
@@ -32,6 +36,7 @@ impl Default for Textures {
             atlas: None,
             present: [false; ROWS],
             alpha: [AlphaMode::Opaque; ROWS],
+            sprites: HashMap::new(),
         }
     }
 }
@@ -53,12 +58,16 @@ impl Textures {
     fn slot(held: Holding) -> Option<usize> {
         match held {
             Holding::Solid { material, .. } | Holding::Fluid(material) => Some(material as usize),
+            Holding::Sprite(Sprite::Material(material)) => Some(material as usize),
             Holding::Fire => Some(FLAME_SLOT),
-            Holding::Tool(_) | Holding::Empty => None,
+            Holding::Sprite(Sprite::Item(_)) | Holding::Tool(_) | Holding::Empty => None,
         }
     }
 
     pub(super) fn texture(&self, held: Holding) -> Option<Handle<Image>> {
+        if let Holding::Sprite(Sprite::Item(at)) = held {
+            return self.sprites.get(&at).map(|(image, _)| image.clone());
+        }
         Self::slot(held)
             .filter(|&slot| self.present.get(slot) == Some(&true))
             .and(self.atlas.clone())
@@ -66,20 +75,23 @@ impl Textures {
 
     pub(super) fn apply(&self, extension: &mut ChunkMaterialExtension) {
         extension.texture = self.atlas.clone();
-        extension.textured = UVec4::ZERO;
+        extension.textured = [UVec4::ZERO; TEXTURED_VECS];
         for (slot, &present) in self.present.iter().enumerate() {
             if present {
-                extension.textured[slot / 32] |= 1 << (slot % 32);
+                extension.textured[slot / 128][slot / 32 % 4] |= 1 << (slot % 32);
             }
         }
     }
 
     pub(super) fn material(&self, held: Holding, rgba: Vec4, ghost: bool) -> StandardMaterial {
         let texture = self.texture(held);
-        let alpha = Self::slot(held)
-            .and_then(|slot| self.alpha.get(slot))
-            .copied()
-            .unwrap_or(AlphaMode::Opaque);
+        let alpha = match held {
+            Holding::Sprite(Sprite::Item(at)) => self.sprites.get(&at).map(|(_, alpha)| *alpha),
+            _ => Self::slot(held)
+                .and_then(|slot| self.alpha.get(slot))
+                .copied(),
+        }
+        .unwrap_or(AlphaMode::Opaque);
         let rgb = if texture.is_some() {
             Vec3::ONE
         } else {
@@ -108,7 +120,11 @@ impl Textures {
 pub(super) fn plugin(app: &mut App) {
     app.init_session_state::<Textures>()
         .add_session_message::<MaterialTextures>()
-        .add_session_systems(Update, receive.after(super::menu::receive_palette));
+        .add_session_message::<ItemLooks>()
+        .add_session_systems(
+            Update,
+            (receive.after(super::menu::receive_palette), receive_sprites),
+        );
 }
 
 fn image(pixels: Vec<u8>) -> Image {
@@ -147,22 +163,57 @@ pub(super) fn receive(
             let slot = *material as usize;
             pixels[slot * row_bytes..(slot + 1) * row_bytes].copy_from_slice(row);
             textures.present[slot] = true;
-            textures.alpha[slot] = if row
-                .as_chunks::<4>()
-                .0
-                .iter()
-                .any(|p| p[3] > 0 && p[3] < 255)
-            {
-                AlphaMode::Blend
-            } else if row.as_chunks::<4>().0.iter().any(|p| p[3] == 0) {
-                AlphaMode::Mask(0.5)
-            } else {
-                AlphaMode::Opaque
-            };
+            textures.alpha[slot] = alpha_of(row);
         }
     }
     if let Some(old) = textures.atlas.replace(images.add(image(pixels))) {
         images.remove(old.id());
+    }
+}
+
+fn alpha_of(pixels: &[u8]) -> AlphaMode {
+    let pixels = pixels.as_chunks::<4>().0;
+    if pixels.iter().any(|p| p[3] > 0 && p[3] < 255) {
+        AlphaMode::Blend
+    } else if pixels.iter().any(|p| p[3] == 0) {
+        AlphaMode::Mask(0.5)
+    } else {
+        AlphaMode::Opaque
+    }
+}
+
+/// One image a sprite of an Item's `texture` samples whole.
+pub(super) fn receive_sprites(
+    mut messages: MessageReader<ItemLooks>,
+    mut textures: ResMut<Textures>,
+    mut images: ResMut<Assets<Image>>,
+) {
+    let Some(message) = messages.read().last() else {
+        return;
+    };
+    for (_, (old, _)) in textures.sprites.drain() {
+        images.remove(old.id());
+    }
+    for (at, look) in message.0.iter().enumerate() {
+        let Some(pixels) = look.texture.as_deref() else {
+            continue;
+        };
+        let mut image = Image::new(
+            Extent3d {
+                width: EDGE as u32,
+                height: EDGE as u32,
+                depth_or_array_layers: 1,
+            },
+            TextureDimension::D2,
+            pixels.to_vec(),
+            TextureFormat::Rgba8UnormSrgb,
+            RenderAssetUsages::default(),
+        );
+        image.sampler = ImageSampler::nearest();
+        let alpha = alpha_of(pixels);
+        textures
+            .sprites
+            .insert(at as u16, (images.add(image), alpha));
     }
 }
 

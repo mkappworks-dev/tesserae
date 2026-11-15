@@ -260,18 +260,21 @@ pub(super) struct Item {
     material: Option<String>,
     max_stack: Option<u32>,
     food: Option<f32>,
+    pub(super) texture: Option<String>,
 }
 
-impl From<Item> for content::ItemDef {
-    fn from(i: Item) -> Self {
+impl Item {
+    pub(super) fn into_def(self, texture: Option<Vec<u8>>) -> content::ItemDef {
+        let i = self;
         let [r, g, b, a] = i.color;
-        Self {
+        content::ItemDef {
             name: i.name,
             size_m: i.size_m,
             color: crate::bindings::tesserae::mods::types::Srgba { r, g, b, a },
             material: i.material,
             max_stack: i.max_stack,
             food: i.food,
+            texture,
         }
     }
 }
@@ -291,14 +294,46 @@ pub(super) struct Biome {
 
     #[serde(default)]
     surface_features: Vec<SurfaceFeature>,
+    #[serde(default)]
+    crop_fields: Vec<CropField>,
     soundscape: Option<String>,
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
 struct SurfaceFeature {
-    material: String,
+    material: Option<String>,
+    plant: Option<String>,
+    shape: Option<String>,
     spacing_m: f32,
+    clump: Option<Clump>,
+    field: Option<Field>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+struct Field {
+    group: String,
+    scale_m: f32,
+    strays: f32,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+struct CropField {
+    crops: Vec<(String, f32)>,
+    plot_m: (f32, f32),
+    spacing_m: f32,
+    path: Option<String>,
+    ditch: Option<String>,
+    near_water_m: Option<f32>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+struct Clump {
+    scale_m: f32,
+    strength: f32,
 }
 
 #[derive(Deserialize)]
@@ -347,7 +382,30 @@ impl From<Biome> for content::BiomeDef {
                 .into_iter()
                 .map(|f| content::SurfaceFeature {
                     material: f.material,
+                    plant: f.plant,
+                    shape: f.shape,
                     spacing_m: f.spacing_m,
+                    clump: f.clump.map(|c| content::Clump {
+                        scale_m: c.scale_m,
+                        strength: c.strength,
+                    }),
+                    field: f.field.map(|g| content::FieldDef {
+                        group: g.group,
+                        scale_m: g.scale_m,
+                        strays: g.strays,
+                    }),
+                })
+                .collect(),
+            crop_fields: b
+                .crop_fields
+                .into_iter()
+                .map(|f| content::CropField {
+                    crops: f.crops,
+                    plot_m: f.plot_m,
+                    spacing_m: f.spacing_m,
+                    path: f.path,
+                    ditch: f.ditch,
+                    near_water_m: f.near_water_m,
                 })
                 .collect(),
         }

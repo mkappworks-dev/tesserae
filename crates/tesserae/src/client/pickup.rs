@@ -336,6 +336,7 @@ mod tests {
                 color: [1, 2, 3, 255],
                 material: None,
                 max_stack: 64,
+                texture: None,
             }]))
             .init_resource::<Menu>()
             .init_resource::<Catalogue>()

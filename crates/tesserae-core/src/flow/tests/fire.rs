@@ -430,6 +430,7 @@ fn walls_partitions_and_joint_seals_block_heat_and_an_open_route_admits_it() {
         let wall = tables
             .shapes
             .register(ShapeDef {
+                form: Default::default(),
                 connect: None,
                 boxes: vec![NodeBox::new([7, 0, 0], [9, 16, 16])],
                 collision: None,
@@ -491,6 +492,7 @@ fn a_wet_part_of_a_shape_protects_its_dry_part_and_puts_it_out() {
         let wall = tables
             .shapes
             .register(ShapeDef {
+                form: Default::default(),
                 connect: None,
                 boxes: vec![NodeBox::new([7, 0, 0], [9, 16, 16])],
                 collision: None,
@@ -600,6 +602,7 @@ fn water_behind_a_sealed_face_or_a_partition_does_not_wet_the_cube() {
         let wall = tables
             .shapes
             .register(ShapeDef {
+                form: Default::default(),
                 connect: None,
                 boxes: vec![NodeBox::new([7, 0, 0], [9, 16, 16])],
                 collision: None,

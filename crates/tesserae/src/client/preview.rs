@@ -15,6 +15,7 @@ use bevy::camera::visibility::RenderLayers;
 use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
 
+use super::sprite::{self, Sprite};
 use crate::session::SessionApp;
 
 /// What only the viewmodel's camera draws.
@@ -28,12 +29,32 @@ const PLAIN_ITEM: [u8; 4] = [190, 190, 190, 255];
 pub(super) enum HandModel {
     /// A placeable Material, fire or a Tool, each with its own look.
     Block(Holding),
+    /// A flat picture of the Item; `places` is what Place puts down with it, drawn as the ghost, or
+    /// `Empty`.
+    Sprite {
+        sprite: Sprite,
+        places: Holding,
+    },
     /// An Item that places nothing, such as food, drawn in its colour.
     Item([u8; 4]),
     Nothing,
 }
-pub(super) fn hand_model(hotbar: &Hotbar, looks: &[crate::content::ItemLook]) -> HandModel {
+pub(super) fn hand_model(
+    hotbar: &Hotbar,
+    looks: &[crate::content::ItemLook],
+    catalogue: &ContentCatalogue,
+) -> HandModel {
     let held = hotbar.held();
+    let sprite = match &hotbar.stacks[hotbar.selected] {
+        Some(stack) if hotbar.outside.is_none() => sprite::of_item(&stack.item, looks, catalogue),
+        _ => sprite::flat_material(held, catalogue).map(Sprite::Material),
+    };
+    if let Some(sprite) = sprite {
+        return HandModel::Sprite {
+            sprite,
+            places: held,
+        };
+    }
     if held != Holding::Empty {
         return HandModel::Block(held);
     }
@@ -110,7 +131,7 @@ fn geometry(
             orientation,
         } => (material, shape, orientation.bits() as usize),
         Holding::Fluid(material) => (material, 0, 0),
-        Holding::Fire | Holding::Tool(_) | Holding::Empty => return None,
+        Holding::Fire | Holding::Tool(_) | Holding::Sprite(_) | Holding::Empty => return None,
     };
     let quads = catalogue.shape(shape)?.geometry.get(orientation)?;
     Some(tesserae_core::mesh::mesh_shape(quads, material))
@@ -124,6 +145,18 @@ pub(super) fn item_mesh(
     }
     if held.tool().is_some() {
         return Some(tool_mesh());
+    }
+    if let Holding::Sprite(sprite) = held {
+        return Some(sprite::sprite_mesh(sprite));
+    }
+    if let Holding::Solid {
+        material, shape, ..
+    } = held
+        && catalogue
+            .shape(shape)
+            .is_some_and(|shape| shape.form == tesserae_core::Form::Cross)
+    {
+        return Some(sprite::cross_mesh(material));
     }
     let layer = geometry(held, catalogue)?;
     let mut mesh = Mesh::new(
@@ -215,7 +248,7 @@ pub(super) fn model(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    let wanted = hand_model(&hotbar, &looks.0);
+    let wanted = hand_model(&hotbar, &looks.0, &content.catalogue.0);
     if model.held == Some(wanted) && !content.changed() && !looks.is_changed() {
         return;
     }
@@ -237,6 +270,21 @@ pub(super) fn model(
                 mesh,
                 content.textures.material(held, rgba, false),
                 Some(content.textures.material(held, rgba, true)),
+            )
+        }
+        HandModel::Sprite { sprite, places } => {
+            let held = Holding::Sprite(sprite);
+            let ghost = (places != Holding::Empty).then(|| {
+                content
+                    .textures
+                    .material(places, content.swatches.rgba(places), true)
+            });
+            (
+                sprite::sprite_mesh(sprite),
+                content
+                    .textures
+                    .material(held, content.swatches.rgba(held), false),
+                ghost,
             )
         }
         HandModel::Item([r, g, b, a]) => (
@@ -305,7 +353,9 @@ pub(super) fn ghost_voxels(
     let drawn = Holding::Solid {
         material,
         shape: voxel.shape(),
-        orientation: tesserae_core::Orientation::from_bits(voxel.orientation()).unwrap_or_default(),
+        orientation: ghost.plant_orientation.unwrap_or_else(|| {
+            tesserae_core::Orientation::from_bits(voxel.orientation()).unwrap_or_default()
+        }),
     };
     let Some((door, aim)) = door else {
         return (drawn, vec![ghost.at]);
@@ -431,6 +481,7 @@ mod tests {
                     turnable: id != 0,
                     fixed: false,
                     geometry: tables.shapes.preview_geometry(id as u8),
+                    form: tesserae_core::Form::Box,
                 })
                 .collect(),
             ..default()
@@ -497,6 +548,7 @@ mod tests {
             target.0.ghost = Some(AimGhost {
                 at: Vec3::new(3.0, 4.0, 5.0),
                 door: None,
+                plant_orientation: None,
             });
             target.1 = Some(view);
         }
@@ -574,6 +626,7 @@ mod tests {
         let ghost = |door| AimGhost {
             at: Vec3::new(5.0, 8.0, 5.0) * 0.25,
             door,
+            plant_orientation: None,
         };
         let aim = DoorAim {
             near: NEG_Z,
@@ -624,6 +677,47 @@ mod tests {
     }
 
     #[test]
+    fn a_plants_seed_ghost_is_the_plants_shape_and_the_orientation_the_server_derives() {
+        use crate::content::CatalogueMaterial;
+        use tesserae_core::SHAPE_SLAB;
+        let seed = 40;
+        let catalogue = ContentCatalogue {
+            materials: vec![CatalogueMaterial {
+                remove_time: tesserae_mods::DEFAULT_REMOVE_TIME,
+                id: seed,
+                name: "m:vine".into(),
+                solid: true,
+                fluid: None,
+                burns: false,
+                shape: Some(SHAPE_SLAB),
+                door: None,
+            }],
+            ..catalogue()
+        };
+        let held = Holding::Solid {
+            material: seed,
+            shape: SHAPE_STAIR,
+            orientation: Orientation::IDENTITY.turned(),
+        };
+        let on_wall = Orientation::IDENTITY.turned().turned();
+        let ghost = AimGhost {
+            at: Vec3::new(5.0, 8.0, 5.0) * 0.25,
+            door: None,
+            plant_orientation: Some(on_wall),
+        };
+        let (drawn, cells) = ghost_voxels(held, ghost, &catalogue, 0.25);
+        assert_eq!(
+            drawn,
+            Holding::Solid {
+                material: seed,
+                shape: SHAPE_SLAB,
+                orientation: on_wall,
+            }
+        );
+        assert_eq!(cells, vec![ghost.at]);
+    }
+
+    #[test]
     fn the_hand_picks_a_model_per_held_kind() {
         use crate::content::ItemLook;
         use tesserae_core::inventory::Stack;
@@ -633,6 +727,7 @@ mod tests {
             color,
             material: None,
             max_stack: 64,
+            texture: None,
         };
         let looks = [look("m:melon", [20, 200, 40, 255])];
         let stack = |item: &str| {
@@ -643,37 +738,203 @@ mod tests {
         };
         let mut hotbar = Hotbar::default();
         assert_eq!(
-            hand_model(&hotbar, &looks),
+            hand_model(&hotbar, &looks, &catalogue()),
             HandModel::Nothing,
             "empty slot"
         );
 
         hotbar.stacks[0] = stack("m:melon");
         assert_eq!(
-            hand_model(&hotbar, &looks),
+            hand_model(&hotbar, &looks, &catalogue()),
             HandModel::Item([20, 200, 40, 255]),
             "food draws as its Item"
         );
         hotbar.stacks[0] = stack("m:unlisted");
-        assert_eq!(hand_model(&hotbar, &looks), HandModel::Item(PLAIN_ITEM));
+        assert_eq!(
+            hand_model(&hotbar, &looks, &catalogue()),
+            HandModel::Item(PLAIN_ITEM)
+        );
 
         hotbar.outside = Some(Holding::Empty);
         assert_eq!(
-            hand_model(&hotbar, &looks),
+            hand_model(&hotbar, &looks, &catalogue()),
             HandModel::Nothing,
             "empty hand"
         );
 
         let rock = Holding::solid(3, 0);
         hotbar.outside = Some(rock);
-        assert_eq!(hand_model(&hotbar, &looks), HandModel::Block(rock));
+        assert_eq!(
+            hand_model(&hotbar, &looks, &catalogue()),
+            HandModel::Block(rock)
+        );
         hotbar.outside = Some(Holding::Tool(ToolId(1)));
         assert_eq!(
-            hand_model(&hotbar, &looks),
+            hand_model(&hotbar, &looks, &catalogue()),
             HandModel::Block(Holding::Tool(ToolId(1))),
             "a tool keeps its own look"
         );
     }
+    const CROSS: u8 = 200;
+    const SPROUT: tesserae_core::MaterialId = 50;
+
+    /// A flat-Shaped plant Material and a solid one beside the fixture Shapes.
+    fn plant_catalogue() -> ContentCatalogue {
+        use crate::content::CatalogueMaterial;
+        let material = |id, shape| CatalogueMaterial {
+            remove_time: tesserae_mods::DEFAULT_REMOVE_TIME,
+            id,
+            name: format!("t:m{id}"),
+            solid: true,
+            fluid: None,
+            burns: false,
+            shape,
+            door: None,
+        };
+        let mut catalogue = catalogue();
+        catalogue.shapes.push(CatalogueShape {
+            id: CROSS,
+            name: "t:cross".into(),
+            turnable: false,
+            fixed: true,
+            form: tesserae_core::Form::Cross,
+            geometry: Vec::new(),
+        });
+        catalogue.materials = vec![material(SPROUT, Some(CROSS)), material(3, None)];
+        catalogue
+    }
+
+    fn item_looks() -> Vec<crate::content::ItemLook> {
+        let look = |name: &str, material, texture: Option<Vec<u8>>| crate::content::ItemLook {
+            name: name.into(),
+            size_m: 0.2,
+            color: [200, 40, 40, 255],
+            material,
+            max_stack: 64,
+            texture: texture.map(Into::into),
+        };
+        vec![
+            look("t:seed", Some(SPROUT), None),
+            look("t:wheat", None, Some(vec![255; 16 * 16 * 4])),
+            look("t:dust", None, None),
+            look("t:pebble", Some(3), None),
+        ]
+    }
+
+    fn vertices(app: &App, mesh: &Handle<Mesh>) -> usize {
+        app.world()
+            .resource::<Assets<Mesh>>()
+            .get(mesh)
+            .unwrap()
+            .count_vertices()
+    }
+
+    #[test]
+    fn a_seed_and_textured_produce_are_flat_in_the_hand_and_a_seeds_ghost_is_its_shape() {
+        use crate::server::inventory::InventoryChanged;
+        use tesserae_core::inventory::{Destination, Inventory, Slot};
+        let mut app = App::new();
+        app.init_resource::<Hotbar>()
+            .insert_resource(Catalogue(plant_catalogue()))
+            .insert_resource(super::super::drops::Looks(item_looks()))
+            .init_resource::<Swatches>()
+            .init_resource::<Menu>()
+            .init_resource::<WorldSettings>()
+            .init_resource::<Sent>()
+            .init_resource::<Target>()
+            .init_resource::<Time>()
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<StandardMaterial>>()
+            .add_message::<InventoryChanged>()
+            .add_plugins(plugin)
+            .add_systems(Update, super::super::edit::follow_server.before(model));
+        app.world_mut().spawn((
+            FlyCamera::default(),
+            Camera::default(),
+            Transform::default(),
+        ));
+        let view = (Vec3::ZERO, Vec3::NEG_Z, None, None);
+        app.world_mut().resource_mut::<Sent>().last = Some(view);
+        {
+            let mut target = app.world_mut().resource_mut::<Target>();
+            target.0.ghost = Some(AimGhost {
+                at: Vec3::new(3.0, 4.0, 5.0),
+                door: None,
+                plant_orientation: None,
+            });
+            target.1 = Some(view);
+        }
+        let select = |app: &mut App, item: &str| {
+            let mut inventory = Inventory::default();
+            inventory
+                .take(item, 3, Destination::Slot(Slot::Hotbar(0)), |_| 64)
+                .unwrap();
+            app.world_mut().write_message(InventoryChanged(inventory));
+            app.update();
+            app.update();
+        };
+        let ghosts = |app: &mut App| {
+            app.world_mut()
+                .query_filtered::<(&Visibility, &Mesh3d), With<Ghost>>()
+                .iter(app.world())
+                .filter(|(visibility, _)| **visibility == Visibility::Visible)
+                .map(|(_, mesh)| mesh.0.clone())
+                .collect::<Vec<_>>()
+        };
+
+        select(&mut app, "t:seed");
+        let model = app.world().resource::<Model>();
+        assert_eq!(
+            model.held,
+            Some(HandModel::Sprite {
+                sprite: Sprite::Material(SPROUT),
+                places: Holding::solid(SPROUT, CROSS),
+            })
+        );
+        let (hand, flat) = (model.mesh.clone(), ghosts(&mut app));
+        assert_eq!(
+            vertices(&app, &hand),
+            8,
+            "one upright quad, both ways round"
+        );
+        assert_eq!(flat.len(), 1, "the seed's ghost shows at the target");
+        assert_eq!(vertices(&app, &flat[0]), 16, "the Shape's crossed quads");
+
+        select(&mut app, "t:wheat");
+        let model = app.world().resource::<Model>();
+        assert_eq!(
+            model.held,
+            Some(HandModel::Sprite {
+                sprite: Sprite::Item(1),
+                places: Holding::Empty,
+            })
+        );
+        assert_eq!(vertices(&app, &model.mesh.clone()), 8);
+        assert!(ghosts(&mut app).is_empty(), "produce places nothing");
+
+        select(&mut app, "t:dust");
+        let model = app.world().resource::<Model>();
+        assert_eq!(model.held, Some(HandModel::Item([200, 40, 40, 255])));
+        assert_eq!(
+            vertices(&app, &model.mesh.clone()),
+            24,
+            "the cube of its colour"
+        );
+
+        select(&mut app, "t:pebble");
+        let model = app.world().resource::<Model>();
+        assert!(matches!(
+            model.held,
+            Some(HandModel::Block(Holding::Solid { .. }))
+        ));
+        assert_eq!(
+            vertices(&app, &model.mesh.clone()),
+            24,
+            "a solid Material's Item is its cube"
+        );
+        assert_eq!(ghosts(&mut app).len(), 1);
+    }
+
     #[test]
     fn the_hand_camera_takes_the_player_cameras_sample_count() {
         use bevy::ecs::system::RunSystemOnce;

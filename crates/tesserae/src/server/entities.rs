@@ -105,12 +105,25 @@ pub(super) fn drop_one(
     at: [i32; 3],
     item: usize,
 ) -> EntityId {
+    drop_many(entities, terrain, items, at, item, 1)
+}
+
+/// Spawns `count` of the Item at `item` as one Dropped item popping out of the
+/// Voxel `at`.
+pub(super) fn drop_many(
+    entities: &mut Entities,
+    terrain: &Terrain<ChunkStore>,
+    items: &Items,
+    at: [i32; 3],
+    item: usize,
+    count: u32,
+) -> EntityId {
     entities.spawn_drop(
         terrain,
         at,
         DropSpec {
             item: item as u32,
-            count: 1,
+            count,
             size_m: items.0[item].size_m,
         },
     )
@@ -241,6 +254,7 @@ mod tests {
             material: Some(stone().material()),
             max_stack: 64,
             food: None,
+            texture: None,
         }])
     }
 
@@ -287,11 +301,7 @@ mod tests {
             ground: None,
             sky_fog: None,
             cave_scale: None,
-            surface_features: SurfaceFeatures::new(&[SurfaceFeature {
-                material: lantern,
-                spacing_m: 4.0,
-            }])
-            .unwrap(),
+            surface_features: SurfaceFeatures::new(&[SurfaceFeature::cube(lantern, 4.0)]).unwrap(),
         };
         let params = WorldgenParams {
             caves: None,
@@ -326,6 +336,7 @@ mod tests {
             material: Some(lantern),
             max_stack: 64,
             food: None,
+            texture: None,
         }]));
         app.init_resource::<EntityStore>()
             .init_resource::<Refused>()

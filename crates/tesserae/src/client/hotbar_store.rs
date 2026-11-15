@@ -317,6 +317,7 @@ mod tests {
                     turnable: false,
                     fixed: false,
                     geometry: vec![],
+                    form: tesserae_core::Form::Box,
                 },
                 CatalogueShape {
                     id: shape,
@@ -324,6 +325,7 @@ mod tests {
                     turnable: true,
                     fixed: false,
                     geometry: vec![],
+                    form: tesserae_core::Form::Box,
                 },
             ],
             ..default()

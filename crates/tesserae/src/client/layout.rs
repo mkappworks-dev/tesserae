@@ -1635,6 +1635,7 @@ mod tests {
                     turnable: id != 0,
                     fixed: false,
                     geometry: tables.shapes.preview_geometry(id as u8),
+                    form: tesserae_core::Form::Box,
                 })
                 .collect(),
             ..default()

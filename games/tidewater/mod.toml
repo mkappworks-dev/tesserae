@@ -3,6 +3,6 @@ version = "0.1.0"
 description = "Islands & quiet lagoons"
 api = "0.3"
 root = true
-depends = ["strata", "waters", "flora", "crystals"]
+depends = ["strata", "waters", "flora", "crops", "aquatic", "crystals"]
 suggests = ["sprite"]
 wasm = "tidewater.wasm"

@@ -1,10 +1,11 @@
 //! A volcanic highland. Basalt chimneys are built on start and erupt on a timer; the lava, the
 //! water it meets and the wood it burns behave by the rules in the Mods this Game depends on
-//! (strata, waters, flora, hearth), so none are declared here; its one Material is its food.
+//! (strata, waters, flora, crops, hearth), so none are declared here; its one Material is its food.
 
 wit_bindgen::generate!({ path: "../../crates/tesserae-mods/wit/0.3", world: "mod" });
 
 mod food;
+mod plants;
 
 use std::cell::RefCell;
 use std::collections::VecDeque;
@@ -45,7 +46,7 @@ const ERUPTION_S: f32 = 8.0;
 const MAX_FILL_VOXELS: u64 = 32_768;
 const MAX_BATCH_VOXELS: u64 = 65_536;
 
-/// Climate clusters near the middle of its square: points outside 0.2 to 0.8 seldom win.
+/// Climate clusters near the middle of its square, so the wettest Biomes are the smallest.
 fn biomes() -> Vec<BiomeDef> {
     let ground = |rock: &str, soil: &str, surface: &str| {
         Some(GroundParams {
@@ -66,7 +67,11 @@ fn biomes() -> Vec<BiomeDef> {
                 fog: (130, 122, 120),
             }),
             cave_scale: None,
-            surface_features: vec![food::feature()],
+            crop_fields: plants::ash_fields(),
+            surface_features: [food::feature()]
+                .into_iter()
+                .chain(plants::ash_flats())
+                .collect(),
         },
         BiomeDef {
             soundscape: None,
@@ -79,6 +84,7 @@ fn biomes() -> Vec<BiomeDef> {
                 fog: (176, 120, 90),
             }),
             cave_scale: Some(1.5),
+            crop_fields: Vec::new(),
             surface_features: Vec::new(),
         },
         BiomeDef {
@@ -92,7 +98,25 @@ fn biomes() -> Vec<BiomeDef> {
                 fog: (138, 152, 172),
             }),
             cave_scale: Some(0.5),
-            surface_features: vec![food::feature()],
+            crop_fields: Vec::new(),
+            surface_features: [food::feature()]
+                .into_iter()
+                .chain(plants::highland())
+                .collect(),
+        },
+        BiomeDef {
+            soundscape: None,
+            name: "cinder_bog".into(),
+            temperature: 0.55,
+            humidity: 0.78,
+            ground: ground("strata:basalt", "strata:soil", "strata:soil"),
+            sky_fog: Some(SkyFog {
+                sky: (118, 112, 108),
+                fog: (138, 128, 120),
+            }),
+            cave_scale: Some(0.5),
+            crop_fields: Vec::new(),
+            surface_features: plants::cinder_bog(),
         },
     ]
 }
@@ -340,6 +364,7 @@ impl Guest for Ember {
             soundscapes: Vec::new(),
             cause_sounds: Vec::new(),
             recipes: Vec::new(),
+            plants: Vec::new(),
             voxel_uses: Vec::new(),
             ores: vec![OreDef {
                 material: "waters:obsidian".into(),

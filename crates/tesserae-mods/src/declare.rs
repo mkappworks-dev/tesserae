@@ -11,8 +11,11 @@ use tesserae_core::{
     AIR, Biome, BiomeId, BiomeName, BiomeSet, BiomeTable, Burn, CombustionDef, FluidDef,
     GroundParams, Heat, MAX_BIOMES, MAX_CAVE_SCALE, MAX_ORES, MaterialId, Ore, OreTable,
     ParamError, Phase, Reactant, ReactionDef, Side, SkyFog, SurfaceFeature, SurfaceFeatures,
-    SurvivalRules, Tables, Voxel, VoxelUse, WaterParams, WorldgenParams,
+    SurfaceFruit, SurfacePlant, SurfacePlantKind, SurfaceTree, SurfaceVine, SurvivalRules, Tables,
+    Voxel, VoxelUse, WaterParams, WorldgenParams,
 };
+
+use tesserae_core::plant::{Direction as PlantDirection, Kind as PlantKind};
 
 use crate::bindings::tesserae::mods::content::{self, Declaration};
 use crate::convert::world_params;
@@ -20,16 +23,18 @@ use crate::error::ModError;
 use crate::registry::{Kind, Registry};
 use crate::sound::{MAX_SOUND_SETS_PER_MOD, MAX_SOUNDS_PER_MOD, MAX_SOUNDSCAPES_PER_MOD};
 
-/// The palette has 64 slots; ids 0 through 7 are reserved (`PALETTE_LEN`).
-pub const MAX_MATERIALS: usize = 56;
+/// The palette has 256 slots; ids 0 through 7 are reserved (`PALETTE_LEN`).
+pub const MAX_MATERIALS: usize = 248;
 /// A `ShapeId` is a `u8` and 4 are built in.
 pub const MAX_SHAPES: usize = 252;
-pub const MAX_PER_MOD: usize = 64;
+pub const MAX_PER_MOD: usize = 128;
 /// Appearance, fluid, reaction and fire rows one Mod may declare, each.
-pub const MAX_BEHAVIOURS_PER_MOD: usize = 64;
+pub const MAX_BEHAVIOURS_PER_MOD: usize = 128;
 pub const MAX_NAME_BYTES: usize = 32;
 pub const MATERIAL_TEXTURE_EDGE: usize = 16;
 pub const MATERIAL_TEXTURE_BYTES: usize = MATERIAL_TEXTURE_EDGE * MATERIAL_TEXTURE_EDGE * 3 * 4;
+/// One tile of a Material's atlas, the size of an Item's sprite.
+pub const ITEM_TEXTURE_BYTES: usize = MATERIAL_TEXTURE_EDGE * MATERIAL_TEXTURE_EDGE * 4;
 
 pub const MAX_TOOLS_PER_MOD: usize = 8;
 pub const MAX_ITEMS_PER_MOD: usize = 64;
@@ -55,6 +60,8 @@ pub struct ItemDef {
     pub max_stack: u32,
     /// Hunger eating one restores; `None` is not food.
     pub food: Option<f32>,
+    /// RGBA pixels of a flat sprite, [`ITEM_TEXTURE_BYTES`] long.
+    pub texture: Option<Vec<u8>>,
 }
 
 /// What a tool does when used; mirrors the contract's closed `tool-kind`.
@@ -155,6 +162,9 @@ pub struct Behaviour {
     pub(crate) cause_sounds: Vec<content::CauseSound>,
     pub(crate) recipes: Vec<content::RecipeDef>,
     voxel_uses: Vec<content::VoxelUse>,
+    pub(crate) plants: Vec<content::PlantDef>,
+    /// Each Material's tags, by full name, for the Plants that name a `#tag`.
+    pub(crate) material_tags: Vec<(String, Vec<String>)>,
     lake: Option<content::WaterParams>,
     ground: Option<content::GroundParams>,
 }
@@ -262,6 +272,11 @@ pub fn apply(
             declaration.recipes.len(),
             crate::recipe::MAX_RECIPES_PER_MOD,
         ),
+        (
+            "plant",
+            declaration.plants.len(),
+            crate::plant::MAX_PLANTS_PER_MOD,
+        ),
     ] {
         if count > max {
             return Err(ModError::TooManyRows {
@@ -280,6 +295,18 @@ pub fn apply(
                 id: id(),
                 row,
                 name: appearance.material.clone(),
+                bytes: pixels.len(),
+            });
+        }
+    }
+    for (row, item) in declaration.items.iter().enumerate() {
+        if let Some(pixels) = &item.texture
+            && pixels.len() != ITEM_TEXTURE_BYTES
+        {
+            return Err(ModError::ItemTexture {
+                id: id(),
+                row,
+                name: item.name.clone(),
                 bytes: pixels.len(),
             });
         }
@@ -391,9 +418,14 @@ pub fn apply(
 
     let mut remove_times = Vec::new();
     let mut contact_damage = Vec::new();
+    let mut material_tags = Vec::new();
     for (row, material) in declaration.materials.into_iter().enumerate() {
         let name = qualified(mod_id, Kind::Material, row, &material.name)?;
         let damage = material.contact_damage_per_s;
+        check_tags(mod_id, &material.tags)?;
+        if !material.tags.is_empty() {
+            material_tags.push((name.clone(), material.tags.clone()));
+        }
         if damage.is_some_and(|d| !(0.0..=MAX_SURVIVAL_VALUE).contains(&d)) {
             return Err(ModError::Params {
                 id: id(),
@@ -469,6 +501,8 @@ pub fn apply(
             cause_sounds: declaration.cause_sounds,
             recipes: declaration.recipes,
             voxel_uses: declaration.voxel_uses,
+            plants: declaration.plants,
+            material_tags,
             lake,
             ground,
         },
@@ -558,12 +592,307 @@ fn check_biomes(mod_id: &str, biomes: &[content::BiomeDef]) -> Result<(), ModErr
     Ok(())
 }
 
+/// The rows of `behaviours` that [`resolve_biomes`] reads, apart from what [`resolve`] consumes, so
+/// Biomes can resolve after the Plant table they may name.
+pub fn biome_rows(behaviours: &[Behaviour]) -> Vec<Behaviour> {
+    behaviours
+        .iter()
+        .map(|b| Behaviour {
+            mod_id: b.mod_id.clone(),
+            biomes: b.biomes.clone(),
+            ores: b.ores.clone(),
+            ..Behaviour::default()
+        })
+        .collect()
+}
+
+fn surface_feature(
+    b: &Behaviour,
+    row: usize,
+    f: &content::SurfaceFeature,
+    tables: &Tables,
+    registry: &Registry,
+    lake: Option<MaterialId>,
+) -> Result<SurfaceFeature, ModError> {
+    let bad = |field, rule| ModError::Params {
+        id: b.mod_id.clone(),
+        what: "biome",
+        source: ParamError { field, rule },
+    };
+    let unknown = |name: &str| ModError::UnknownName {
+        id: b.mod_id.clone(),
+        what: "biome",
+        row,
+        name: name.to_owned(),
+    };
+    let clump = f.clump.as_ref().map(|c| tesserae_core::Clump {
+        scale_m: c.scale_m,
+        strength: c.strength,
+    });
+    let plant = match (&f.material, &f.plant) {
+        (Some(_), Some(_)) => {
+            return Err(bad(
+                "biomes.surface_features",
+                "must name a Material or a Plant, not both",
+            ));
+        }
+        (None, None) => {
+            return Err(bad(
+                "biomes.surface_features",
+                "must name a Material or a Plant",
+            ));
+        }
+        (Some(name), None) => {
+            if f.shape.is_some() {
+                return Err(bad(
+                    "biomes.surface_features.shape",
+                    "is for a Plant, not a Material",
+                ));
+            }
+            let material = lookup(b, registry, "biome", row, name)?;
+            if !tables.materials.solid(Voxel::cube(material)) || tables.fluids.contains(material) {
+                return Err(bad(
+                    "biomes.surface_features.material",
+                    "must be a solid Material",
+                ));
+            }
+            return Ok(SurfaceFeature {
+                clump,
+                ..SurfaceFeature::cube(material, f.spacing_m)
+            });
+        }
+        (None, Some(name)) => tables
+            .plants
+            .plants()
+            .iter()
+            .find(|p| p.name == *name)
+            .ok_or_else(|| unknown(name))?,
+    };
+    let chosen = f
+        .shape
+        .as_deref()
+        .map(|name| {
+            registry
+                .id_of(Kind::Shape, name)
+                .map(|id| id as tesserae_core::ShapeId)
+                .ok_or_else(|| unknown(name))
+        })
+        .transpose()?;
+    let pad = |found: &[MaterialId]| {
+        let mut all = [AIR; tesserae_core::MAX_SURFACE_STAGES];
+        all[..found.len()].copy_from_slice(found);
+        all
+    };
+    let kind = match &plant.kind {
+        PlantKind::Crop {
+            stages,
+            fruit_vine: Some(fruit),
+            ..
+        } => {
+            let mut materials = [AIR; tesserae_core::MAX_SURFACE_FRUIT_STAGES];
+            let mut stage_shapes = [None; tesserae_core::MAX_SURFACE_FRUIT_STAGES];
+            for ((slot, shape), stage) in materials
+                .iter_mut()
+                .zip(&mut stage_shapes)
+                .zip(&fruit.stages)
+            {
+                *slot = stage.material;
+                *shape = stage.shape;
+            }
+            SurfacePlantKind::Vine(SurfaceVine {
+                material: stages.last().map_or(plant.first, |s| s.material),
+                fruit: materials,
+                len: fruit.stages.len() as u8,
+                fruit_shape: fruit.shape.unwrap_or(tesserae_core::SHAPE_FULL_CUBE),
+                stage_shapes,
+                reach_m: fruit.reach_m,
+                gap_m: fruit.gap_m,
+                max_fruit: fruit.max_fruit,
+            })
+        }
+        PlantKind::Crop { stages, .. } => {
+            let found: Vec<MaterialId> = stages.iter().map(|s| s.material).collect();
+            let mut stage_shapes = [None; tesserae_core::MAX_SURFACE_STAGES];
+            for (slot, stage) in stage_shapes.iter_mut().zip(stages) {
+                *slot = stage.shape;
+            }
+            SurfacePlantKind::Stages {
+                materials: pad(&found),
+                len: found.len() as u8,
+                stage_shapes,
+            }
+        }
+        PlantKind::Spreader { .. } => SurfacePlantKind::Stages {
+            materials: pad(&[plant.first]),
+            len: 1,
+            stage_shapes: [None; tesserae_core::MAX_SURFACE_STAGES],
+        },
+        PlantKind::Column {
+            max_height_m,
+            direction,
+            stands_in,
+            ..
+        } => {
+            if *direction == PlantDirection::Down {
+                return Err(bad(
+                    "biomes.surface_features.plant",
+                    "a column growing down has no ground to stand on",
+                ));
+            }
+            SurfacePlantKind::Column {
+                material: plant.first,
+                max_height_m: *max_height_m,
+                // A tag may name several fluids; worldgen compares one, the lake the World has.
+                stands_in: lake
+                    .filter(|l| stands_in.contains(l))
+                    .or_else(|| stands_in.first().copied()),
+            }
+        }
+        PlantKind::Climber { .. } => {
+            return Err(bad(
+                "biomes.surface_features.plant",
+                "a climber needs a wall, which a Biome does not place",
+            ));
+        }
+        PlantKind::Tree(tree) => {
+            if chosen.is_some() {
+                return Err(bad(
+                    "biomes.surface_features.shape",
+                    "a tree is always cubes",
+                ));
+            }
+            let fruit = tree.fruit.as_ref().map(|fruit| {
+                let mut stages = [AIR; tesserae_core::MAX_SURFACE_FRUIT_STAGES];
+                let mut stage_shapes = [None; tesserae_core::MAX_SURFACE_FRUIT_STAGES];
+                for ((slot, shape), stage) in
+                    stages.iter_mut().zip(&mut stage_shapes).zip(&fruit.stages)
+                {
+                    *slot = stage.material;
+                    *shape = stage.shape;
+                }
+                SurfaceFruit {
+                    stages,
+                    len: fruit.stages.len() as u8,
+                    density: fruit.density,
+                    shape: fruit.shape.unwrap_or(tesserae_core::SHAPE_FULL_CUBE),
+                    stage_shapes,
+                }
+            });
+            let vines = tree
+                .vines
+                .as_ref()
+                .map(|v| {
+                    tables.plants.vines(&tables.shapes, v).map_err(|_| {
+                        bad(
+                            "biomes.surface_features.plant",
+                            "its vines name a climber that is no longer a plane",
+                        )
+                    })
+                })
+                .transpose()?;
+            SurfacePlantKind::Tree(SurfaceTree {
+                vines,
+                trunk: tree.trunk,
+                canopy: tree.canopy,
+                trunk_height_m: tree.trunk_height_m,
+                canopy_radius_m: tree.canopy_radius_m,
+                branching: tree.branching,
+                fruit,
+            })
+        }
+    };
+    let shape = match &kind {
+        SurfacePlantKind::Tree(_) => tesserae_core::SHAPE_FULL_CUBE,
+        SurfacePlantKind::Vine(_) => chosen
+            .or_else(|| match &plant.kind {
+                PlantKind::Crop { stages, .. } => stages.last().and_then(|s| s.shape),
+                _ => None,
+            })
+            .or(plant.shape)
+            .unwrap_or(tesserae_core::SHAPE_FULL_CUBE),
+        _ => chosen
+            .or(plant.shape)
+            .unwrap_or(tesserae_core::SHAPE_FULL_CUBE),
+    };
+    let first = match &kind {
+        SurfacePlantKind::Tree(t) => t.trunk,
+        _ => plant.first,
+    };
+    Ok(SurfaceFeature {
+        material: first,
+        spacing_m: f.spacing_m,
+        plant: Some(SurfacePlant { shape, kind }),
+        clump,
+        field: None,
+    })
+}
+
 /// An ore may name a Material or Biome of any Mod, so this runs once every Declaration is in, like
-/// [`resolve_items`].
+/// [`resolve_items`]. A Biome's feature may name a Plant, so the Plant table is resolved first.
+/// A Biome's planted field, its crops resolved to the Stages worldgen stands.
+fn crop_field(
+    b: &Behaviour,
+    row: usize,
+    biome: &str,
+    index: usize,
+    f: &content::CropField,
+    tables: &Tables,
+    registry: &Registry,
+) -> Result<tesserae_core::CropField, ModError> {
+    let bad = |rule: String| ModError::BadCropField {
+        id: b.mod_id.clone(),
+        biome: biome.to_owned(),
+        index,
+        rule,
+    };
+    let material = |name: &String| lookup(b, registry, "biome", row, name);
+    let mut field = tesserae_core::CropField::new(
+        f.plot_m,
+        f.spacing_m,
+        f.path.as_ref().map(material).transpose()?,
+        f.ditch.as_ref().map(material).transpose()?,
+        f.near_water_m,
+    );
+    for (name, weight) in &f.crops {
+        let plant = tables
+            .plants
+            .plants()
+            .iter()
+            .find(|p| p.name == *name)
+            .ok_or_else(|| ModError::UnknownName {
+                id: b.mod_id.clone(),
+                what: "biome",
+                row,
+                name: name.clone(),
+            })?;
+        let PlantKind::Crop {
+            stages,
+            fruit_vine: None,
+            ..
+        } = &plant.kind
+        else {
+            return Err(bad(format!("`{name}` is not a crop without fruit-vine")));
+        };
+        let materials: Vec<MaterialId> = stages.iter().map(|s| s.material).collect();
+        let shapes: Vec<Option<tesserae_core::ShapeId>> = stages.iter().map(|s| s.shape).collect();
+        let crop = tesserae_core::FieldCrop::new(
+            plant.shape.unwrap_or(tesserae_core::SHAPE_FULL_CUBE),
+            &materials,
+            &shapes,
+            *weight,
+        )
+        .and_then(|crop| field.push(crop))
+        .map_err(|e| bad(format!("`{name}`: {} {}", e.field, e.rule)));
+        crop?;
+    }
+    Ok(field)
+}
+
 pub fn resolve_biomes(
     behaviours: &[Behaviour],
     tables: &Tables,
     registry: &Registry,
+    lake: Option<MaterialId>,
 ) -> Result<(BiomeTable, OreTable), ModError> {
     let mut biomes: Vec<Biome> = Vec::new();
     for b in behaviours {
@@ -609,24 +938,71 @@ pub fn resolve_biomes(
                     rule: RULE.get_or_init(|| format!("must be from 0 to {MAX_CAVE_SCALE}")),
                 }));
             }
-            let features = def
+            if def.surface_features.len() > tesserae_core::MAX_SURFACE_FEATURES {
+                return Err(ModError::TooManyFeatures {
+                    id: b.mod_id.clone(),
+                    biome: def.name.clone(),
+                    count: def.surface_features.len(),
+                    max: tesserae_core::MAX_SURFACE_FEATURES,
+                });
+            }
+            for (feature, clump) in def
                 .surface_features
                 .iter()
-                .map(|f| {
-                    let material = lookup(b, registry, "biome", row, &f.material)?;
-                    if !tables.materials.solid(Voxel::cube(material))
-                        || tables.fluids.contains(material)
-                    {
-                        return Err(bad(ParamError {
-                            field: "biomes.surface_features.material",
-                            rule: "must be a solid Material",
-                        }));
-                    }
-                    Ok(SurfaceFeature {
-                        material,
-                        spacing_m: f.spacing_m,
+                .enumerate()
+                .filter_map(|(i, f)| Some((i, f.clump.as_ref()?)))
+            {
+                tesserae_core::Clump {
+                    scale_m: clump.scale_m,
+                    strength: clump.strength,
+                }
+                .validate()
+                .map_err(|e| ModError::BadClump {
+                    id: b.mod_id.clone(),
+                    biome: def.name.clone(),
+                    feature,
+                    field: e.field,
+                    rule: e.rule,
+                })?;
+            }
+            let mut groups: Vec<&str> = Vec::new();
+            let mut features = Vec::new();
+            for (feature, f) in def.surface_features.iter().enumerate() {
+                let mut made = surface_feature(b, row, f, tables, registry, lake)?;
+                made.field = f
+                    .field
+                    .as_ref()
+                    .map(|g| {
+                        let field = tesserae_core::Field {
+                            group: match groups.iter().position(|&n| n == g.group) {
+                                Some(at) => at as u8,
+                                None => {
+                                    groups.push(&g.group);
+                                    (groups.len() - 1) as u8
+                                }
+                            },
+                            scale_m: g.scale_m,
+                            strays: g.strays,
+                        };
+                        field
+                            .validate()
+                            .map(|()| field)
+                            .map_err(|e| ModError::BadField {
+                                id: b.mod_id.clone(),
+                                biome: def.name.clone(),
+                                feature,
+                                field: e.field,
+                                rule: e.rule,
+                            })
                     })
-                })
+                    .transpose()?;
+                features.push(made);
+            }
+            let crop_fields = def
+                .crop_fields
+                .iter()
+                .enumerate()
+                .map(|(index, f)| crop_field(b, row, &def.name, index, f, tables, registry))
                 .collect::<Result<Vec<_>, _>>()?;
             biomes.push(Biome {
                 name: BiomeName::new(&format!("{}:{}", b.mod_id, def.name)).map_err(bad)?,
@@ -638,7 +1014,9 @@ pub fn resolve_biomes(
                     fog: c.fog.into(),
                 }),
                 cave_scale: def.cave_scale,
-                surface_features: SurfaceFeatures::new(&features).map_err(bad)?,
+                surface_features: SurfaceFeatures::new(&features)
+                    .and_then(|table| table.with_crop_fields(&crop_fields))
+                    .map_err(bad)?,
             });
         }
     }
@@ -738,6 +1116,7 @@ pub fn resolve_items(
                 material,
                 max_stack: item.max_stack.unwrap_or(MAX_STACK),
                 food: item.food,
+                texture: item.texture.clone(),
             });
         }
     }
@@ -991,6 +1370,33 @@ fn lookup(
 }
 
 const CORE: &str = "core";
+
+pub const MAX_TAGS_PER_MATERIAL: usize = 8;
+
+/// A tag is a kebab-case label of at most 32 bytes, so `#<tag>` never reads as a Material name.
+fn check_tags(mod_id: &str, tags: &[String]) -> Result<(), ModError> {
+    let bad = |rule: &'static str| ModError::Params {
+        id: mod_id.to_owned(),
+        what: "material",
+        source: ParamError {
+            field: "tags",
+            rule,
+        },
+    };
+    if tags.len() > MAX_TAGS_PER_MATERIAL {
+        return Err(bad("holds at most 8 tags per Material"));
+    }
+    for tag in tags {
+        let mut bytes = tag.bytes();
+        let ok = tag.len() <= MAX_NAME_BYTES
+            && bytes.next().is_some_and(|b| b.is_ascii_lowercase())
+            && bytes.all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-');
+        if !ok {
+            return Err(bad("must each match [a-z][a-z0-9-]{0,31}"));
+        }
+    }
+    Ok(())
+}
 
 /// Every name in one pass, before anything is registered, so a bad name in the
 /// last row costs the Mod no table rows.

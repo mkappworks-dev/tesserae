@@ -120,11 +120,48 @@ pub enum ModError {
         name: String,
         bytes: usize,
     },
+    ItemTexture {
+        id: String,
+        row: usize,
+        name: String,
+        bytes: usize,
+    },
     TooManyRows {
         id: String,
         what: &'static str,
         count: usize,
         max: usize,
+    },
+    /// A Biome row with more surface features than the engine stands.
+    TooManyFeatures {
+        id: String,
+        biome: String,
+        count: usize,
+        max: usize,
+    },
+    /// A surface feature's clump is out of range; names the Biome, since a Biome holds up to 16
+    /// features.
+    BadClump {
+        id: String,
+        biome: String,
+        feature: usize,
+        field: &'static str,
+        rule: &'static str,
+    },
+    /// A surface feature's field is out of range or disagrees with its group; names the Biome.
+    BadField {
+        id: String,
+        biome: String,
+        feature: usize,
+        field: &'static str,
+        rule: &'static str,
+    },
+    /// A Biome's planted field names a Plant that is no plain crop, or is out of range.
+    BadCropField {
+        id: String,
+        biome: String,
+        index: usize,
+        rule: String,
     },
     /// A fluid, reaction or fire row names a Material no loaded Mod registered.
     UnknownName {
@@ -170,6 +207,13 @@ pub enum ModError {
         row: usize,
         name: String,
         field: &'static str,
+        reason: String,
+    },
+    /// A `plants` row, named by its name.
+    Plant {
+        id: String,
+        row: usize,
+        name: String,
         reason: String,
     },
     /// A `recipes` row, named by its output Item.
@@ -307,6 +351,16 @@ impl fmt::Display for ModError {
                 "mod `{id}`: appearance {row} `{name}`: texture has {bytes} bytes; expected {} RGBA bytes (top, side, bottom)",
                 crate::declare::MATERIAL_TEXTURE_BYTES,
             ),
+            ModError::ItemTexture {
+                id,
+                row,
+                name,
+                bytes,
+            } => write!(
+                f,
+                "mod `{id}`: item {row} `{name}`: texture has {bytes} bytes; expected {} RGBA bytes",
+                crate::declare::ITEM_TEXTURE_BYTES,
+            ),
             ModError::TooManyRows {
                 id,
                 what,
@@ -315,6 +369,41 @@ impl fmt::Display for ModError {
             } => write!(
                 f,
                 "mod `{id}` declares {count} {what} rows, but at most {max} are allowed"
+            ),
+            ModError::BadClump {
+                id,
+                biome,
+                feature,
+                field,
+                rule,
+            } => write!(
+                f,
+                "mod `{id}`: biome `{biome}` surface feature {feature}: {field} {rule}"
+            ),
+            ModError::BadField {
+                id,
+                biome,
+                feature,
+                field,
+                rule,
+            } => write!(
+                f,
+                "mod `{id}`: biome `{biome}` surface feature {feature}: {field} {rule}"
+            ),
+            ModError::BadCropField {
+                id,
+                biome,
+                index,
+                rule,
+            } => write!(f, "mod `{id}`: biome `{biome}` crop field {index}: {rule}"),
+            ModError::TooManyFeatures {
+                id,
+                biome,
+                count,
+                max,
+            } => write!(
+                f,
+                "mod `{id}`: biome `{biome}` declares {count} surface features, but at most {max} are allowed"
             ),
             ModError::UnknownName {
                 id,
@@ -359,6 +448,12 @@ impl fmt::Display for ModError {
                 field,
                 reason,
             } => write!(f, "mod `{id}`: {list} {row} `{name}`: {field}: {reason}"),
+            ModError::Plant {
+                id,
+                row,
+                name,
+                reason,
+            } => write!(f, "mod `{id}`: plant {row} `{name}`: {reason}"),
             ModError::Recipe {
                 id,
                 row,

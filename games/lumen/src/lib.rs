@@ -1,10 +1,11 @@
 //! An enclosed garden of glass and light. The garden is built on start; its lanterns then light
 //! up one after another on a timer. Glass, lanterns and the slab, stair and fence Shapes come from
-//! the Mods this Game depends on (strata, glassworks).
+//! the Mods this Game depends on (strata, flora, crops, glassworks).
 
 wit_bindgen::generate!({ path: "../../crates/tesserae-mods/wit/0.3", world: "mod" });
 
 mod food;
+mod plants;
 
 use std::cell::RefCell;
 use std::collections::VecDeque;
@@ -56,7 +57,7 @@ const HOLD_S: f32 = 6.0;
 const MAX_FILL_VOXELS: u64 = 32_768;
 const MAX_BATCH_VOXELS: u64 = 65_536;
 
-/// Climate clusters near the middle of its square: points outside 0.2 to 0.8 seldom win.
+/// Climate clusters near the middle of its square, so the wettest Biomes are the smallest.
 /// The World has no caves, so no Biome sets a `cave_scale`.
 fn biomes() -> Vec<BiomeDef> {
     let ground = |rock: &str, soil: &str, surface: &str| {
@@ -78,7 +79,11 @@ fn biomes() -> Vec<BiomeDef> {
                 fog: (146, 168, 180),
             }),
             cave_scale: None,
-            surface_features: vec![food::feature()],
+            crop_fields: plants::garden_fields(),
+            surface_features: [food::feature()]
+                .into_iter()
+                .chain(plants::garden())
+                .collect(),
         },
         BiomeDef {
             soundscape: None,
@@ -91,7 +96,8 @@ fn biomes() -> Vec<BiomeDef> {
                 fog: (192, 176, 146),
             }),
             cave_scale: None,
-            surface_features: Vec::new(),
+            crop_fields: Vec::new(),
+            surface_features: plants::arid_court(),
         },
         BiomeDef {
             soundscape: None,
@@ -104,7 +110,39 @@ fn biomes() -> Vec<BiomeDef> {
                 fog: (178, 192, 212),
             }),
             cave_scale: None,
-            surface_features: vec![food::feature()],
+            crop_fields: Vec::new(),
+            surface_features: [food::feature()]
+                .into_iter()
+                .chain(plants::frost_court())
+                .collect(),
+        },
+        BiomeDef {
+            soundscape: None,
+            name: "conservatory".into(),
+            temperature: 0.72,
+            humidity: 0.7,
+            ground: None,
+            sky_fog: Some(SkyFog {
+                sky: (122, 156, 150),
+                fog: (138, 174, 166),
+            }),
+            cave_scale: None,
+            crop_fields: Vec::new(),
+            surface_features: plants::conservatory(),
+        },
+        BiomeDef {
+            soundscape: None,
+            name: "lily_pond".into(),
+            temperature: 0.55,
+            humidity: 0.78,
+            ground: ground("strata:stone", "strata:soil", "strata:soil"),
+            sky_fog: Some(SkyFog {
+                sky: (132, 152, 162),
+                fog: (150, 172, 182),
+            }),
+            cave_scale: None,
+            crop_fields: Vec::new(),
+            surface_features: plants::lily_pond(),
         },
     ]
 }
@@ -433,6 +471,7 @@ impl Guest for Lumen {
             soundscapes: Vec::new(),
             cause_sounds: Vec::new(),
             recipes: Vec::new(),
+            plants: Vec::new(),
             voxel_uses: Vec::new(),
             ores: vec![OreDef {
                 material: "crystals:amethyst".into(),

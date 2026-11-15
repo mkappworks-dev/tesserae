@@ -9,10 +9,12 @@ use tesserae_core::{Burn, Tables};
 
 use crate::{Behaviour, Kind, ModHost, Registry, Trust, apply, plan, resolve, scan};
 
-const SHARED: [&str; 15] = [
+const SHARED: [&str; 17] = [
     "strata",
     "waters",
     "flora",
+    "crops",
+    "aquatic",
     "hearth",
     "glassworks",
     "timber",
@@ -100,7 +102,9 @@ fn load_all() -> (Vec<String>, Tables, Registry, Vec<String>) {
         behaviours.push(applied.behaviour);
         ids.push(id);
     }
+    let plants = crate::DeclaredPlants::take(&mut behaviours);
     resolve(behaviours, &mut tables, &registry).unwrap();
+    tables.plants = plants.resolve(&registry, &tables).unwrap();
     (ids, tables, registry, characters)
 }
 
@@ -221,4 +225,45 @@ fn the_character_mods_each_supply_a_six_bone_figure() {
     let (_, _, _, mut characters) = load_all();
     characters.sort_unstable();
     assert_eq!(characters, ["golem", "sprite", "wanderer"]);
+}
+
+#[test]
+fn every_shared_plant_resolves_against_the_tags_of_the_mods_loaded_with_it() {
+    use tesserae_core::plant::Kind as PlantKind;
+
+    let (_, tables, registry, _) = load_all();
+    let plants = tables.plants.plants();
+    let named = |name: &str| {
+        plants
+            .iter()
+            .find(|p| p.name == name)
+            .unwrap_or_else(|| panic!("{name} is declared"))
+    };
+    for tree in [
+        "oak", "birch", "pine", "palm", "acacia", "jungle", "swamp", "apple", "orange", "cherry",
+    ] {
+        assert!(matches!(
+            named(&format!("flora:{tree}")).kind,
+            PlantKind::Tree(_)
+        ));
+    }
+    for crop in ["wheat", "carrot", "potato", "berry"] {
+        assert!(matches!(
+            named(&format!("crops:{crop}")).kind,
+            PlantKind::Crop { .. }
+        ));
+    }
+    let turf = material(&registry, "strata:turf");
+    assert!(named("flora:oak").needs.soil.contains(&turf));
+    let water = material(&registry, "waters:water");
+    let PlantKind::Column { stands_in, .. } = &named("aquatic:kelp").kind else {
+        panic!("kelp is a column")
+    };
+    assert_eq!(*stands_in, [water]);
+    for tree in ["jungle", "swamp"] {
+        let PlantKind::Tree(t) = &named(&format!("flora:{tree}")).kind else {
+            panic!("a tree")
+        };
+        assert_eq!(t.vines.as_ref().unwrap().plant, "flora:vine");
+    }
 }

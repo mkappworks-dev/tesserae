@@ -26,11 +26,13 @@ fn material(name: &str) -> content::MaterialDef {
         remove_time_s: None,
         solid: true,
         contact_damage_per_s: None,
+        tags: Vec::new(),
     }
 }
 
 fn slab(name: &str) -> content::ShapeDef {
     content::ShapeDef {
+        form: Default::default(),
         name: name.into(),
         boxes: vec![types::NodeBox {
             min: (0, 0, 0),
@@ -62,6 +64,7 @@ pub(super) fn declaring(materials: &[&str], shapes: &[&str]) -> Declaration {
         soundscapes: Vec::new(),
         cause_sounds: Vec::new(),
         recipes: Vec::new(),
+        plants: Vec::new(),
         voxel_uses: Vec::new(),
     }
 }
@@ -221,10 +224,12 @@ fn a_bad_material_names_the_mod_and_the_row() {
 #[test]
 fn a_bad_shape_names_the_mod_and_the_row() {
     let no_boxes = content::ShapeDef {
+        form: Default::default(),
         boxes: Vec::new(),
         ..slab("flat")
     };
     let no_arms = content::ShapeDef {
+        form: Default::default(),
         connect: Some(types::ConnectDef {
             group: 1,
             connects_to: 1,
@@ -262,52 +267,45 @@ fn a_bad_shape_names_the_mod_and_the_row() {
 }
 
 #[test]
-fn the_palette_holds_56_materials_in_total_across_mods() {
+fn the_palette_holds_248_materials_in_total_across_mods() {
     let many =
         |from: usize, to: usize| -> Vec<String> { (from..to).map(|i| format!("m{i}")).collect() };
     let decl =
         |names: &[String]| declaring(&names.iter().map(String::as_str).collect::<Vec<_>>(), &[]);
 
     let mut load = Load::new();
-    load.apply("a", decl(&many(0, 40))).unwrap();
-    load.apply("b", decl(&many(0, 16))).unwrap();
-    assert_eq!(load.tables.materials.len(), 8 + 56);
+    load.apply("a", decl(&many(0, 128))).unwrap();
+    load.apply("b", decl(&many(0, 120))).unwrap();
+    assert_eq!(load.tables.materials.len(), 8 + 248);
 
     let mut load = Load::new();
-    load.apply("a", decl(&many(0, 40))).unwrap();
-    match load.apply("b", decl(&many(0, 17))).unwrap_err() {
+    load.apply("a", decl(&many(0, 128))).unwrap();
+    match load.apply("b", decl(&many(0, 121))).unwrap_err() {
         ModError::PaletteFull { id, count, max } => {
-            assert_eq!((id.as_str(), count, max), ("b", 57, 56))
+            assert_eq!((id.as_str(), count, max), ("b", 249, 248))
         }
         other => panic!("{other:?}"),
     }
-    let mut load = Load::new();
-    assert!(matches!(
-        load.apply("solo", decl(&many(0, 57))).unwrap_err(),
-        ModError::PaletteFull { .. }
-    ));
 }
 
 #[test]
-fn no_mod_brings_more_than_64_of_either_and_shapes_stop_at_252() {
+fn no_mod_brings_more_than_128_of_either_and_shapes_stop_at_252() {
     let shapes = |n: usize| -> Vec<String> { (0..n).map(|i| format!("s{i}")).collect() };
     let decl =
         |names: &[String]| declaring(&[], &names.iter().map(String::as_str).collect::<Vec<_>>());
 
     let mut load = Load::new();
     assert!(matches!(
-        load.apply("big", decl(&shapes(65))).unwrap_err(),
+        load.apply("big", decl(&shapes(129))).unwrap_err(),
         ModError::TooMany {
             kind: Kind::Shape,
-            max: 64,
+            max: 128,
             ..
         }
     ));
     let mut load = Load::new();
-    for id in ["a", "b", "c"] {
-        load.apply(id, decl(&shapes(64))).unwrap();
-    }
-    load.apply("d", decl(&shapes(60))).unwrap();
+    load.apply("a", decl(&shapes(128))).unwrap();
+    load.apply("b", decl(&shapes(124))).unwrap();
     assert_eq!(load.tables.shapes.len(), 256);
     assert!(matches!(
         load.apply("e", decl(&shapes(1))).unwrap_err(),
@@ -581,6 +579,7 @@ fn connect_to_wit(c: ConnectDef) -> types::ConnectDef {
 
 fn shape_to_wit(name: &str, def: ShapeDef) -> content::ShapeDef {
     content::ShapeDef {
+        form: Default::default(),
         name: name.into(),
         boxes: def.boxes.into_iter().map(Into::into).collect(),
         collision: def
@@ -688,12 +687,12 @@ fn preview_texture_payloads_are_bounded_and_name_the_invalid_appearance_row() {
         assert!(Load::new().apply("skin", d).is_ok());
     }
     let mut d = declaring(&["rock"], &[]);
-    d.appearance = (0..65).map(|_| row(None)).collect();
+    d.appearance = (0..129).map(|_| row(None)).collect();
     assert!(matches!(
         Load::new().apply("skin", d),
         Err(ModError::TooManyRows {
             what: "appearance",
-            max: 64,
+            max: 128,
             ..
         })
     ));
@@ -957,7 +956,37 @@ fn item(name: &str, material: Option<&str>) -> content::ItemDef {
         material: material.map(Into::into),
         max_stack: None,
         food: None,
+        texture: None,
     }
+}
+
+#[test]
+fn an_item_texture_is_exactly_one_tile_and_an_item_may_have_none() {
+    for len in [
+        0,
+        1,
+        crate::ITEM_TEXTURE_BYTES - 1,
+        crate::MATERIAL_TEXTURE_BYTES,
+    ] {
+        let mut wheat = item("wheat", None);
+        wheat.texture = Some(vec![0; len]);
+        let error = Load::new()
+            .apply("farm", with_items(&[], vec![wheat]))
+            .unwrap_err();
+        assert!(matches!(error, ModError::ItemTexture { row: 0, bytes, .. } if bytes == len));
+        let message = error.to_string();
+        assert!(message.contains("item 0 `wheat`"), "{message}");
+        assert!(message.contains("1024"), "{message}");
+    }
+    let mut wheat = item("wheat", None);
+    wheat.texture = Some(vec![255; crate::ITEM_TEXTURE_BYTES]);
+    let items = resolved(
+        &mut Load::new(),
+        &[("farm", with_items(&[], vec![wheat, item("bread", None)]))],
+    )
+    .unwrap();
+    assert_eq!(items[0].texture.as_deref().map(<[u8]>::len), Some(1024));
+    assert_eq!(items[1].texture, None);
 }
 
 fn with_items(materials: &[&str], items: Vec<content::ItemDef>) -> Declaration {
@@ -1432,6 +1461,7 @@ fn biome(name: &str, temperature: f32, humidity: f32) -> content::BiomeDef {
         sky_fog: None,
         cave_scale: None,
         surface_features: Vec::new(),
+        crop_fields: Vec::new(),
     }
 }
 
@@ -1473,7 +1503,7 @@ fn resolved_biomes(
         .iter()
         .map(|(id, d)| load.apply(id, d.clone()).unwrap().behaviour)
         .collect();
-    resolve_biomes(&behaviours, &load.tables, &load.registry)
+    resolve_biomes(&behaviours, &load.tables, &load.registry, None)
 }
 
 #[test]
@@ -1668,7 +1698,7 @@ fn a_bad_cave_scale_names_the_mod_that_declared_it() {
             .apply("n", with_biomes(&[], vec![biome("fine", 0.1, 0.1)], vec![]))
             .unwrap()
             .behaviour;
-        match resolve_biomes(&[bad, later], &load.tables, &load.registry).unwrap_err() {
+        match resolve_biomes(&[bad, later], &load.tables, &load.registry, None).unwrap_err() {
             ModError::Params { id, what, source } => {
                 assert_eq!((id.as_str(), what), ("m", "biome"), "{scale}");
                 assert_eq!(source.field, "biomes.cave_scale", "{scale}");
@@ -1680,8 +1710,12 @@ fn a_bad_cave_scale_names_the_mod_that_declared_it() {
 
 fn feature(material: &str, spacing_m: f32) -> content::SurfaceFeature {
     content::SurfaceFeature {
-        material: material.into(),
+        material: Some(material.into()),
+        plant: None,
+        shape: None,
         spacing_m,
+        clump: None,
+        field: None,
     }
 }
 
@@ -1717,14 +1751,8 @@ fn a_biomes_surface_features_resolve_to_any_mods_solid_in_order() {
     assert_eq!(
         biomes.as_slice()[0].surface_features.as_slice(),
         [
-            SurfaceFeature {
-                material: id("b:gourd"),
-                spacing_m: 24.0
-            },
-            SurfaceFeature {
-                material: id("a:melon"),
-                spacing_m: 16.0
-            },
+            SurfaceFeature::cube(id("b:gourd"), 24.0),
+            SurfaceFeature::cube(id("a:melon"), 16.0),
         ]
     );
     assert!(biomes.as_slice()[1].surface_features.is_empty());
@@ -1749,11 +1777,11 @@ fn a_bad_surface_feature_names_the_mod_and_the_field() {
         });
         let mut load = Load::new();
         let applied = load.apply("m", d).unwrap();
-        resolve_biomes(&[applied.behaviour], &load.tables, &load.registry).unwrap_err()
+        resolve_biomes(&[applied.behaviour], &load.tables, &load.registry, None).unwrap_err()
     };
     for (bad, field) in [
         (
-            vec![feature("m:melon", 3.0)],
+            vec![feature("m:melon", 0.5)],
             "biomes.surface_features.spacing_m",
         ),
         (
@@ -1772,7 +1800,6 @@ fn a_bad_surface_feature_names_the_mod_and_the_field() {
             vec![feature("core:air", 16.0)],
             "biomes.surface_features.material",
         ),
-        (vec![feature("m:melon", 16.0); 5], "biomes.surface_features"),
     ] {
         match refused(bad) {
             ModError::Params { id, what, source } => {
@@ -1782,6 +1809,73 @@ fn a_bad_surface_feature_names_the_mod_and_the_field() {
             other => panic!("{field}: {other:?}"),
         }
     }
+    match refused(vec![feature("m:melon", 16.0); 17]) {
+        ModError::TooManyFeatures {
+            id,
+            biome,
+            count,
+            max,
+        } => assert_eq!(
+            (id.as_str(), biome.as_str(), count, max),
+            ("m", "field", 17, 16)
+        ),
+        other => panic!("{other:?}"),
+    }
+    for (scale_m, strength) in [
+        (3.0, 0.5),
+        (2048.0, 0.5),
+        (32.0, -0.1),
+        (32.0, 1.5),
+        (32.0, f32::NAN),
+    ] {
+        let mut f = feature("m:melon", 16.0);
+        f.clump = Some(content::Clump { scale_m, strength });
+        match refused(vec![feature("m:melon", 16.0), f]) {
+            ModError::BadClump {
+                id,
+                biome,
+                feature,
+                field,
+                ..
+            } => {
+                assert_eq!((id.as_str(), biome.as_str(), feature), ("m", "field", 1));
+                assert!(
+                    field.starts_with("biomes.surface_features.clump"),
+                    "{field}"
+                );
+            }
+            other => panic!("{scale_m} {strength}: {other:?}"),
+        }
+    }
+    let mut ok = feature("m:melon", 16.0);
+    ok.clump = Some(content::Clump {
+        scale_m: 32.0,
+        strength: 1.0,
+    });
+    let mut load = Load::new();
+    let (biomes, _) = resolved_biomes(
+        &mut load,
+        &[(
+            "m",
+            with_biomes(
+                &["melon"],
+                vec![content::BiomeDef {
+                    soundscape: None,
+                    surface_features: vec![ok],
+                    ..biome("field", 0.5, 0.5)
+                }],
+                vec![],
+            ),
+        )],
+    )
+    .unwrap();
+    assert_eq!(
+        biomes.as_slice()[0].surface_features.as_slice()[0].clump,
+        Some(tesserae_core::Clump {
+            scale_m: 32.0,
+            strength: 1.0
+        })
+    );
     match refused(vec![feature("m:nothing", 16.0)]) {
         ModError::UnknownName { id, what, name, .. } => assert_eq!(
             (id.as_str(), what, name.as_str()),
@@ -1810,7 +1904,7 @@ fn a_bad_biome_ground_names_the_mod_and_the_field() {
         });
         let mut load = Load::new();
         let applied = load.apply("m", d).unwrap();
-        resolve_biomes(&[applied.behaviour], &load.tables, &load.registry).unwrap_err()
+        resolve_biomes(&[applied.behaviour], &load.tables, &load.registry, None).unwrap_err()
     };
     for (bad, field) in [
         (ground("m:rock", "m:rock", "m:glass"), "ground.surface"),
@@ -1857,7 +1951,7 @@ fn refused_biome_rows(d: Declaration, field: &str) {
     let error = match load.apply("m", d.clone()) {
         Err(e) => e,
         Ok(applied) => {
-            resolve_biomes(&[applied.behaviour], &load.tables, &load.registry).unwrap_err()
+            resolve_biomes(&[applied.behaviour], &load.tables, &load.registry, None).unwrap_err()
         }
     };
     match error {
@@ -1901,7 +1995,8 @@ fn a_biome_whose_full_name_outgrows_the_table_is_refused() {
     let mut load = Load::new();
     let d = with_biomes(&[], vec![biome("a_rather_long_biome", 0.5, 0.5)], vec![]);
     let applied = load.apply(&long_mod, d).unwrap();
-    let error = resolve_biomes(&[applied.behaviour], &load.tables, &load.registry).unwrap_err();
+    let error =
+        resolve_biomes(&[applied.behaviour], &load.tables, &load.registry, None).unwrap_err();
     assert!(error.to_string().contains(&long_mod), "{error}");
 }
 
@@ -2248,4 +2343,19 @@ fn a_material_is_not_both_a_door_and_a_container() {
     ];
     let error = resolved_uses(&[("m", d)]).err().unwrap().to_string();
     assert!(error.contains("already a Usable Voxel"), "{error}");
+}
+
+#[test]
+fn a_materials_tags_are_kebab_case_labels_and_at_most_eight() {
+    let with = |tags: &[&str]| {
+        let mut d = declaring(&["rock"], &[]);
+        d.materials[0].tags = tags.iter().map(|t| (*t).into()).collect();
+        Load::new().apply("m", d)
+    };
+    assert!(with(&["soil", "tall-grass", "a1"]).is_ok());
+    assert!(with(&["a", "b", "c", "d", "e", "f", "g", "h"]).is_ok());
+    assert!(with(&["a", "b", "c", "d", "e", "f", "g", "h", "i"]).is_err());
+    for bad in ["", "Soil", "1soil", "so_il", "#soil", &"x".repeat(33)] {
+        assert!(with(&[bad]).is_err(), "{bad:?}");
+    }
 }

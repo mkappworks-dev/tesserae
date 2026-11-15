@@ -46,6 +46,33 @@ occlusion = "never"
 render = "blend"
 solid = true
 
+[[materials]]
+name = "sprout"
+emission = 0
+dimming = 0
+occlusion = "never"
+render = "cutout"
+solid = true
+remove-time-s = 0.05
+
+[[materials]]
+name = "young"
+emission = 0
+dimming = 0
+occlusion = "never"
+render = "cutout"
+solid = true
+remove-time-s = 0.05
+
+[[materials]]
+name = "ripe"
+emission = 0
+dimming = 0
+occlusion = "never"
+render = "cutout"
+solid = true
+remove-time-s = 0.05
+
 [[appearance]]
 material = "stone"
 color = [110, 115, 125, 255]
@@ -71,6 +98,23 @@ color = [128, 88, 50, 255]
 [[appearance]]
 material = "door_open"
 color = [128, 88, 50, 90]
+
+[[appearance]]
+material = "sprout"
+color = [110, 170, 60, 255]
+
+[[appearance]]
+material = "young"
+color = [80, 150, 50, 255]
+
+[[appearance]]
+material = "ripe"
+color = [214, 178, 70, 255]
+
+[[shapes]]
+name = "cross"
+form = "cross"
+boxes = [{ min = [3, 0, 3], max = [13, 14, 13] }]
 
 [world]
 relief-m = 12.0
@@ -109,3 +153,30 @@ station = "hand"
 inputs = [{ item = "starter_data:stone", count = 8 }]
 output = { item = "starter_data:chest", count = 1 }
 station = "workbench"
+
+[[items]]
+name = "seeds"
+size-m = 0.2
+color = [150, 140, 70, 255]
+material = "starter_data:sprout"
+
+[[items]]
+name = "grain"
+size-m = 0.2
+color = [214, 178, 70, 255]
+food = 2.0
+
+[[plants]]
+name = "grain"
+kind = "crop"
+seed = "starter_data:seeds"
+shape = "starter_data:cross"
+stages = [
+    { material = "starter_data:sprout", mean-seconds = 30.0, yields = [{ item = "starter_data:seeds", count = [1, 1] }] },
+    { material = "starter_data:young", mean-seconds = 30.0, yields = [{ item = "starter_data:seeds", count = [1, 1] }] },
+    { material = "starter_data:ripe", yields = [{ item = "starter_data:grain", count = [1, 2] }, { item = "starter_data:seeds", count = [1, 2] }] },
+]
+
+[plants.needs]
+soil = ["starter_data:turf"]
+light-min = 9

@@ -22,6 +22,7 @@ fn wit_material(
         render,
         remove_time_s: None,
         contact_damage_per_s: None,
+        tags: Vec::new(),
         solid,
     }
 }
@@ -116,6 +117,7 @@ fn every_shape_field() {
     for with_collision in [false, true] {
         for with_connect in [false, true] {
             let wit = content::ShapeDef {
+                form: Default::default(),
                 name: "s".into(),
                 boxes: boxes.clone(),
                 collision: with_collision.then(|| wit_collision.clone()),

@@ -41,6 +41,10 @@ interface content {
         /// Health a Player in Survival loses per second while their body
         /// overlaps the Material, from 0 to 1000; none is harmless.
         contact-damage-per-s: option<f32>,
+        /// At most 8 labels, each `[a-z][a-z0-9-]{0,31}`. A Plant's `soil`,
+        /// `stands-in` and water `fluid` may name `#<tag>` for every Material
+        /// of any Mod that carries it.
+        tags: list<string>,
     }
 
     /// One Shape. The engine registers it under `<mod id>:<name>`, derives its
@@ -52,6 +56,21 @@ interface content {
         /// What bodies collide with when it differs from what is drawn.
         collision: option<list<collision-box>>,
         connect: option<connect-def>,
+        /// How it is drawn; none is `boxes`. `cross` and `plane` Shapes seal no
+        /// face of the Voxel, are walked through unless `collision` says
+        /// otherwise, cannot connect, and cost nothing against the Chunk's
+        /// shaped-Voxel cap. Their boxes still decide selection and fluid.
+        form: option<shape-form>,
+    }
+
+    /// How a Shape is drawn.
+    enum shape-form {
+        /// The boxes' faces.
+        boxes,
+        /// Two diagonal quads through the Voxel's centre, as a plant.
+        cross,
+        /// One quad along the first box's thin axis, against a face, as a vine.
+        plane,
     }
 
     /// A placeholder colour for one of this Mod's Materials, read by the
@@ -396,6 +415,11 @@ interface content {
         /// Hunger eating one restores, greater than 0 and at most 1000; none
         /// is not food.
         food: option<f32>,
+        /// Optional RGBA sprite, one 16 by 16 tile: exactly 1024 bytes, sRGB
+        /// colour with straight alpha. An Item with one, or one whose
+        /// Material's Shape is flat, is drawn as a flat sprite; none keeps the
+        /// cube of `color`.
+        texture: option<list<u8>>,
     }
 
     /// An Item, `<mod id>:<name>`, and how many.
@@ -414,6 +438,249 @@ interface content {
         output: recipe-stack,
         /// `hand`, craftable anywhere, or the tag of the Station it needs.
         station: string,
+    }
+
+    /// A count from `min` to `max` inclusive, with `min` at most `max`.
+    record count-range {
+        min: u32,
+        max: u32,
+    }
+
+    /// An Item, `<mod id>:<name>`, a removed or picked Plant Voxel gives, and
+    /// how many.
+    record plant-yield {
+        item: string,
+        count: count-range,
+    }
+
+    /// A Material one Plant passes through. Every Stage but the last has
+    /// `mean-seconds`, how long it takes on average to reach the next, at least
+    /// 16, in seconds at any Voxel size.
+    record plant-stage {
+        /// A solid Material, `<mod id>:<name>`.
+        material: string,
+        mean-seconds: option<f32>,
+        yields: list<plant-yield>,
+        /// The Shape this Stage's Voxels take, by full name; `none` keeps the
+        /// Plant's (or a fruit's) Shape.
+        shape: option<string>,
+    }
+
+    /// Fluid a Plant must have within reach to grow.
+    record plant-water {
+        /// A fluid Material, `<mod id>:<name>`.
+        fluid: string,
+        reach-m: f32,
+    }
+
+    /// What a Plant needs to grow. A Plant that fails any of it holds its Stage;
+    /// none of it is ever a placement rule except `soil`.
+    record plant-needs {
+        /// Solid Materials, `<mod id>:<name>`, at least one: what the Plant
+        /// stands on, or for a climber what it holds to.
+        soil: list<string>,
+        /// Light levels at the Plant's Voxel, 0 to 15; none is 0 and 15.
+        light-min: option<u8>,
+        light-max: option<u8>,
+        /// A low and high between 0 and 1 against the Biome's Climate.
+        temperature: option<tuple<f32, f32>>,
+        humidity: option<tuple<f32, f32>>,
+        water: option<plant-water>,
+    }
+
+    /// Fruit a vine crop's ripe Stage bears on the ground around it, as a tree
+    /// bears fruit on its canopy. Fruit is grown Materials: no implicit Item and
+    /// never placeable. It never seeds, so a cluster does not creep, and
+    /// breaking one lets the vine bear another.
+    record fruit-vine-def {
+        /// 2 to 4 Stages in order; the last is ripe. Each stands on the Plant's
+        /// `soil` and passes its light and Climate.
+        stages: list<plant-stage>,
+        /// Mean seconds between new fruit on a vine with room, at least 16.
+        regrow-seconds: f32,
+        /// The Shape of every fruit Voxel, by full name; `none` keeps cubes.
+        shape: option<string>,
+        /// How far from the vine fruit stands, above 0 and at most 8 [1.5].
+        reach-m: option<f32>,
+        /// Ground kept clear between two fruit, from 0 to `reach-m` [0.5]: at
+        /// least one Voxel at any Voxel size, so fruit never touches.
+        gap-m: option<f32>,
+        /// Most fruit one vine holds within its reach, from 1 to 16 [5].
+        max-fruit: option<u32>,
+    }
+
+    /// A Plant that advances through Materials in place.
+    record crop-def {
+        /// 2 to 8 Stages in order; the last is ripe.
+        stages: list<plant-stage>,
+        /// An earlier Stage, by index, that a Remove of the ripe one resets to.
+        /// A vine crop has none.
+        harvest-to: option<u32>,
+        /// `some` makes the ripe Stage a vine that bears fruit.
+        fruit-vine: option<fruit-vine-def>,
+    }
+
+    /// Fruit some canopy Voxels of a tree carry, grown Materials like the
+    /// canopy.
+    record fruit-def {
+        /// 2 to 4 Stages in order; the last is ripe.
+        stages: list<plant-stage>,
+        /// The share of canopy Voxels that carry fruit, from 0 to 0.3.
+        density: f32,
+        /// Mean seconds between new fruit on a standing tree with room, at
+        /// least 16. A canopy Voxel Samples at a mean of this times the tree's
+        /// canopy Voxel count, so the tree as a whole grows one unripe fruit
+        /// about this often, up to `density` of its canopy.
+        regrow-seconds: f32,
+        /// The Shape of every fruit Voxel, by full name, so fruit can be a box
+        /// model; `none` keeps cubes.
+        shape: option<string>,
+    }
+
+    /// How a tree's trunk and limbs branch, in metres and fractions of its
+    /// height so the tree is the same at every Voxel size. Limbs, leaders and
+    /// the trunk are the tree's trunk Material, one Voxel thick; foliage grows
+    /// as lobes of the canopy Material at each limb and leader tip, and the
+    /// crown on top keeps `canopy-radius-m`.
+    record branching-def {
+        /// Limbs per tree, at most 16; with `tiers`, rings of four limbs, at
+        /// most 8 tiers. `[0, 0]` is no limbs.
+        limbs: count-range,
+        /// The fraction of the trunk height where limbs begin, from 0 to 0.8.
+        start: f32,
+        /// The horizontal length of the longest limb; a fork's leaders spread
+        /// half of it. Above 0 when there are limbs or a fork.
+        reach-m: f32,
+        /// From -1 (drooping) to 1 (ascending): a limb's tip stands
+        /// `rise * reach-m / 2` above its root.
+        rise: f32,
+        /// The fraction of the trunk height where it splits into two or three
+        /// leaders, from 0.1 to 0.8; `none` is one trunk.
+        fork: option<f32>,
+        /// How far the trunk's top stands from its foot, from 0 to the lowest
+        /// `trunk-height-m`.
+        lean-m: f32,
+        /// `some(true)` puts the limbs in rings of four that shorten towards
+        /// the top, a cone.
+        tiers: option<bool>,
+        /// The radius of the foliage lobe at each limb and leader tip, above
+        /// 0. The lean, the reach (with a fork's spread) and the lobe together
+        /// stay within 8 m, and a fork's spread within the crown and lobes.
+        lobe-radius-m: f32,
+    }
+
+    /// A sapling that grows a parametric tree, sized in metres.
+    record tree-def {
+        /// The sapling's solid Material, `<mod id>:<name>`: the seed Item places
+        /// it and it grows into the tree.
+        sapling: string,
+        /// What removing the sapling gives.
+        sapling-yields: list<plant-yield>,
+        /// The tree's grown Materials, solid and `<mod id>:<name>`: made only
+        /// by growth and worldgen, never placeable and named by no Item.
+        trunk: string,
+        canopy: string,
+        /// A low and high, above 0 and at most 32, chosen per tree.
+        trunk-height-m: tuple<f32, f32>,
+        /// Above 0 and at most 8.
+        canopy-radius-m: f32,
+        /// Seconds for the sapling to grow, at least 16.
+        mean-seconds: f32,
+        trunk-yield: list<plant-yield>,
+        canopy-yield: list<plant-yield>,
+        /// Saplings given once for every tree cut down; `min` at least 1.
+        sapling-yield: count-range,
+        fruit: option<fruit-def>,
+        /// Climbers worldgen hangs from the outer canopy; a growing sapling
+        /// never makes them. `none` hangs none.
+        vines: option<tree-vines>,
+        /// `none` is a straight trunk under one ellipsoidal crown.
+        branching: option<branching-def>,
+    }
+
+    /// The vines worldgen hangs from a tree, by a pure function of the tree and
+    /// the World seed, so they are whole across Chunk borders and equal in
+    /// metres at any Voxel size. Once placed they live by the climber's rules.
+    record tree-vines {
+        /// A `climber` Plant's full name, `<mod id>:<name>`, declared with a
+        /// `plane` Shape and a soil list that holds this tree's canopy or trunk
+        /// Material, or its vines fall at once.
+        plant: string,
+        /// The share of the outer canopy cells that hang one, from 0 to 0.5.
+        density: f32,
+        /// The longest a vine hangs, above 0 and at most 8.
+        length-m: f32,
+    }
+
+    enum column-direction {
+        up,
+        down,
+    }
+
+    /// A Plant that grows one Voxel at a time up or down: cane, cactus, kelp.
+    record column-def {
+        material: string,
+        /// Above 0 and at most 32.
+        max-height-m: f32,
+        direction: column-direction,
+        mean-seconds: f32,
+        /// A fluid Material, `<mod id>:<name>`, the column grows through and
+        /// stands waterlogged in (kelp); `none` grows in Air (cane).
+        stands-in: option<string>,
+        yields: list<plant-yield>,
+    }
+
+    /// A Plant that copies itself onto a neighbouring Voxel: grass, moss,
+    /// mushrooms, flowers.
+    record spreader-def {
+        material: string,
+        /// From 1 to 8.
+        reach-m: f32,
+        mean-seconds: f32,
+        /// At most this many of its Voxels within `reach-m`, at least 1.
+        density: u32,
+        /// Seeds a target only where at least this many of its Voxels stand
+        /// within `reach-m` of it, the seeding one included, so a patch fills
+        /// its holes and does not advance. A count of Voxels, like `density`,
+        /// and below it. A Voxel with none of its kind within its own reach is
+        /// exempt, so a lone planted seed still grows a neighbour. `none` and
+        /// 1 set no rule [0].
+        min-neighbours: option<u32>,
+        yields: list<plant-yield>,
+    }
+
+    /// A Plant that grows along the faces of solids: vines.
+    record climber-def {
+        material: string,
+        mean-seconds: f32,
+        /// Above 0 and at most 32.
+        length-m: f32,
+        yields: list<plant-yield>,
+    }
+
+    variant plant-kind {
+        crop(crop-def),
+        tree(tree-def),
+        column(column-def),
+        spreader(spreader-def),
+        climber(climber-def),
+    }
+
+    /// A Plant the Server grows. Names resolve after every Mod has declared;
+    /// the Seed Item places the first Stage.
+    record plant-def {
+        /// Local to the Mod, like a Material's; the engine adds `<mod id>:`.
+        name: string,
+        /// An Item, `<mod id>:<name>`, whose Material is the Plant's first
+        /// Stage, a tree's sapling, or the one Material of any other kind.
+        seed: string,
+        /// The Shape of every single-Voxel Stage (crop Stages, a sapling, a
+        /// column, spreader or climber Voxel), by full name. Placing the seed,
+        /// growth and generation all use it, whatever the Player chose; `none`
+        /// keeps the Player's choice and cubes.
+        shape: option<string>,
+        needs: plant-needs,
+        kind: plant-kind,
     }
 
     /// The rules of Survival, from the Game only. Every field is optional and
@@ -472,24 +739,111 @@ interface content {
         /// blends smoothly across the Biome's border, unlike `ground`.
         cave-scale: option<f32>,
 
-        /// At most 4 Materials the engine stands one Voxel above this Biome's
-        /// surface Material, where the column's top is a full Voxel of it with
-        /// air above: never under a fluid, on a smoothed step or in a cave
+        /// At most 16 Materials or Plants the engine stands one Voxel above this
+        /// Biome's surface Material, where the column's top is a full Voxel of it
+        /// with air above: never under a fluid, on a smoothed step or in a cave
         /// mouth. Distance levels leave them out.
         surface-features: list<surface-feature>,
+        /// At most 2 planted fields: rectangular plots of one crop in rows, with
+        /// paths between them and a ditch, over this Biome's ground. Empty
+        /// stands none.
+        crop-fields: list<crop-field>,
         /// Optional Soundscape full name, resolved across loaded Mods.
         soundscape: option<string>,
     }
 
-    /// A Material scattered over a Biome's surface, deterministically from the
-    /// World seed. Removing one drops its Item as any Voxel does.
+    /// A Material or a Plant scattered over a Biome's surface, deterministically
+    /// from the World seed. Removing a Material feature drops its Item as any
+    /// Voxel does. Exactly one of `material` and `plant` is set.
     record surface-feature {
         /// A solid Material, `<mod id>:<name>`, resolved after every Mod's
         /// Declaration.
-        material: string,
+        material: option<string>,
+        /// A Plant, `<mod id>:<name>`, from any loaded Mod. A `crop` or
+        /// `spreader` stands at a Stage drawn by hash; a `column` stands on the
+        /// ground, or in the lake when it declares `stands-in`; a `tree` stands
+        /// fully grown, and its trunk and canopy may reach into neighbouring
+        /// Chunks. A `climber` is refused, and so is a column growing down. The
+        /// World freezes what generation needs of the Plant when it is made, so
+        /// a later change to the Plant never reshapes it.
+        plant: option<string>,
+        /// With `plant`: the Shape, `<mod id>:<name>`, of a crop's, spreader's
+        /// or column's Voxels, as a Player's Place would have chosen it; none
+        /// is a cube. A tree is always cubes.
+        shape: option<string>,
         /// About one in every `spacing-m` by `spacing-m` metres of the Biome's
-        /// surface, at any Voxel size; from 4 to 1024.
+        /// surface, at any Voxel size; from 1 to 1024.
         spacing-m: f32,
+        /// Gathers the feature into groves with clearings between, still `spacing-m`
+        /// apart on average; none scatters it evenly.
+        clump: option<clump>,
+        /// Groups the feature with the others of the Biome that share its
+        /// `group`, so a region of ground holds mostly one of them; none stands
+        /// wherever it is drawn.
+        field: option<field-def>,
+    }
+
+    /// Makes a group of a Biome's features compete by region: a lattice
+    /// `scale-m` apart, moved by hash, cuts the ground into regions, each given
+    /// one member of the group by hash. A column that draws a member stands it
+    /// only in a region that holds it, or, with chance `strays`, anywhere. A
+    /// pure function of the World seed and a position in metres, so it holds
+    /// across Chunk borders and at every Voxel size. A member stands in a
+    /// share of the ground, so a group is thinner than its spacings say: tune
+    /// the spacing for the share.
+    record field-def {
+        /// Local to the Biome: features with the same name compete. Every
+        /// member gives the same `scale-m` and `strays`.
+        group: string,
+        /// The width of a region, from 8 to 96 m.
+        scale-m: f32,
+        /// The share of columns that ignore their region, from 0 to 0.5.
+        strays: f32,
+    }
+
+    /// A planted field: a lattice cell `spacing-m` on a side draws whether it
+    /// holds a field, which is a small grid of plots, each one crop planted
+    /// every second row (ripe, or at a hash-drawn Stage), set apart by lanes one
+    /// Voxel wide that also ring the field. The lane along the field's lowest
+    /// edge is the ditch, cut into the ground and filled; the others are the
+    /// path. A field stands only on ground level within a metre and wholly in
+    /// its Biome, clear of the lake, caves and trees: a drawn field that would
+    /// not is skipped whole. A pure function of the World seed, the Voxel size
+    /// and positions in metres, so it holds across Chunk borders. At most 2 per
+    /// Biome; a later one is dropped where it would cross an earlier.
+    record crop-field {
+        /// 1 to 4 crop Plants, `<mod id>:<name>`, with weights above 0 that
+        /// say how often each is drawn for a plot. A `crop` without
+        /// `fruit-vine`, with at most 8 Stages.
+        crops: list<tuple<string, f32>>,
+        /// A plot's side is drawn from this range, each from 6 to 24 m, low
+        /// first.
+        plot-m: tuple<f32, f32>,
+        /// The mean distance between fields, from 32 to 256 m.
+        spacing-m: f32,
+        /// A solid Material, `<mod id>:<name>`, the lanes are laid in; none
+        /// leaves them bare.
+        path: option<string>,
+        /// A fluid Material, `<mod id>:<name>`, the ditch is filled with; none
+        /// cuts no ditch.
+        ditch: option<string>,
+        /// The field stands only where the lake is within this many metres of
+        /// its centre, above 0 and at most `spacing-m`; none is anywhere. A
+        /// World without a lake has none.
+        near-water-m: option<f32>,
+    }
+
+    /// A low-frequency density field over the ground, in metres, that multiplies
+    /// a feature's chance. A pure function of the World seed and a position, so
+    /// it holds across Chunk borders and at every Voxel size.
+    record clump {
+        /// The distance over which the density varies, from 4 to 1024 m: a
+        /// grove's width.
+        scale-m: f32,
+        /// From 0 (even) to 1: 0.6 is groves at up to 1.6 times the density
+        /// with thin clearings, 0.95 patches over a fifth of the ground at up
+        /// to 5 times with bare ground between, and 1 nothing between patches.
+        strength: f32,
     }
 
     /// A sky colour and the fog that matches it, as sRGB bytes. A pair, so a
@@ -684,7 +1038,7 @@ interface content {
     record declaration {
         materials: list<material-def>,
         shapes: list<shape-def>,
-        /// At most 64 rows; texture pixel lengths are validated before use.
+        /// At most 128 rows; texture pixel lengths are validated before use.
         appearance: list<appearance>,
         /// `none` keeps the engine's default; `some` replaces it whole.
         %world: option<world-params>,
@@ -722,5 +1076,8 @@ interface content {
         /// has declared; a Material is in at most one row, as its `material` or
         /// as a Door's open one.
         voxel-uses: list<voxel-use>,
+        /// At most 128 rows per Mod and 512 in a World, from any Mod. A Material
+        /// is in at most one Plant, once.
+        plants: list<plant-def>,
     }
 }

@@ -16,7 +16,7 @@ use crate::{
     Behaviour, Kind, MAX_BEHAVIOURS_PER_MOD, ModError, ModLimits, Registry, apply, resolve,
 };
 
-fn material(name: &str, solid: bool) -> MaterialDef {
+pub(super) fn material(name: &str, solid: bool) -> MaterialDef {
     MaterialDef {
         name: name.into(),
         emission: 0,
@@ -25,11 +25,12 @@ fn material(name: &str, solid: bool) -> MaterialDef {
         render: RenderClass::Blend,
         remove_time_s: None,
         contact_damage_per_s: None,
+        tags: Vec::new(),
         solid,
     }
 }
 
-fn fluid(material: &str) -> content::FluidDef {
+pub(super) fn fluid(material: &str) -> content::FluidDef {
     content::FluidDef {
         material: material.into(),
         reach_m: 3.0,
@@ -77,7 +78,7 @@ fn fire(fuel: &str, residue: Option<&str>) -> CombustionDef {
     }
 }
 
-fn empty() -> Declaration {
+pub(super) fn empty() -> Declaration {
     Declaration {
         materials: vec![],
         shapes: vec![],
@@ -98,6 +99,7 @@ fn empty() -> Declaration {
         soundscapes: Vec::new(),
         cause_sounds: Vec::new(),
         recipes: Vec::new(),
+        plants: Vec::new(),
         voxel_uses: Vec::new(),
     }
 }
@@ -344,7 +346,9 @@ fn a_mod_declares_a_bounded_number_of_rows() {
         ..empty()
     };
     let error = load(vec![("many", d)]).err().unwrap();
-    assert!(matches!(error, ModError::TooManyRows { count: 65, .. }));
+    assert!(
+        matches!(error, ModError::TooManyRows { count, .. } if count == MAX_BEHAVIOURS_PER_MOD + 1)
+    );
     let mut tables = Tables::builtin();
     let d = Declaration {
         combustion: (0..=MAX_BEHAVIOURS_PER_MOD)
@@ -664,6 +668,7 @@ fn a_games_ground_resolves_after_all_declarations_and_generates_its_materials() 
             render: content::RenderClass::Opaque,
             remove_time_s: None,
             contact_damage_per_s: None,
+            tags: Vec::new(),
             solid: true,
         });
     }

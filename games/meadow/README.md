@@ -25,14 +25,20 @@ about one in every 20 by 20 m. Break it to pick it up and press G to eat it.
 
 ## Biomes
 
-Three Biomes, each with a sky and fog pair that eases as the Player walks
-between them. The climate regions are 400 m across.
+Six Biomes, each with a sky and fog pair that eases as the Player walks between
+them, and each with its own trees and plants from `flora` and `crops` (`meadow`
+oaks and fruit, `thicket` jungle trees, `fen` swamp trees, `prairie` acacias).
+The climate regions are 400 m across; the wettest Biomes are the smallest. The
+World has no lake, so no water plant is placed.
 
-| Biome    | Ground (rock, soil, surface)      | Sky and fog   |
-| -------- | --------------------------------- | ------------- |
-| `meadow` | the Game's own: stone, clay, turf | clear blue    |
-| `heath`  | stone, clay, `strata:soil`        | overcast grey |
-| `dunes`  | stone, sand, sand                 | warm sand     |
+| Biome     | Ground (rock, soil, surface)      | Sky and fog   |
+| --------- | --------------------------------- | ------------- |
+| `meadow`  | the Game's own: stone, clay, turf | clear blue    |
+| `heath`   | stone, clay, `strata:soil`        | overcast grey |
+| `dunes`   | stone, sand, sand                 | warm sand     |
+| `thicket` | the Game's own: stone, clay, turf | humid green   |
+| `fen`     | stone, clay, clay                 | murky grey    |
+| `prairie` | stone, soil, soil                 | dry gold      |
 
 `strata:basalt` forms dark veins in the rock of every Biome, 6 to 36 m down. The
 World has no caves, so no Biome tunes them.

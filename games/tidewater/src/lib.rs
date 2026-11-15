@@ -1,10 +1,12 @@
 //! Islands and shallow seas whose sea level rises and falls slowly. The tide is a layer of water
 //! sources added or taken away above the sea, a step at a time; the water itself, the ground and
-//! the kelp and the ore come from the Mods this Game depends on (strata, waters, flora, crystals).
+//! the plants and the ore come from the Mods this Game depends on (strata, waters, flora, crops,
+//! aquatic, crystals).
 
 wit_bindgen::generate!({ path: "../../crates/tesserae-mods/wit/0.3", world: "mod" });
 
 mod food;
+mod plants;
 
 use std::cell::RefCell;
 use std::collections::VecDeque;
@@ -264,7 +266,11 @@ impl Guest for Tidewater {
                         fog: (132, 172, 192),
                     }),
                     cave_scale: Some(1.4),
-                    surface_features: vec![food::feature()],
+                    crop_fields: plants::lagoon_fields(),
+                    surface_features: [food::feature()]
+                        .into_iter()
+                        .chain(plants::lagoon())
+                        .collect(),
                 },
                 BiomeDef {
                     soundscape: None,
@@ -281,7 +287,11 @@ impl Guest for Tidewater {
                         fog: (190, 184, 166),
                     }),
                     cave_scale: Some(0.0),
-                    surface_features: vec![food::feature()],
+                    crop_fields: Vec::new(),
+                    surface_features: [food::feature()]
+                        .into_iter()
+                        .chain(plants::salt_flats())
+                        .collect(),
                 },
                 BiomeDef {
                     soundscape: None,
@@ -298,7 +308,40 @@ impl Guest for Tidewater {
                         fog: (168, 186, 206),
                     }),
                     cave_scale: None,
-                    surface_features: Vec::new(),
+                    crop_fields: Vec::new(),
+                    surface_features: plants::cold_shallows(),
+                },
+                BiomeDef {
+                    soundscape: None,
+                    name: "rainforest".into(),
+                    temperature: 0.72,
+                    humidity: 0.7,
+                    ground: None,
+                    sky_fog: Some(SkyFog {
+                        sky: (110, 152, 150),
+                        fog: (124, 172, 168),
+                    }),
+                    cave_scale: Some(1.4),
+                    crop_fields: Vec::new(),
+                    surface_features: plants::rainforest(),
+                },
+                BiomeDef {
+                    soundscape: None,
+                    name: "tidal_marsh".into(),
+                    temperature: 0.55,
+                    humidity: 0.78,
+                    ground: Some(GroundParams {
+                        rock: "strata:stone".into(),
+                        soil: "strata:clay".into(),
+                        surface: "strata:soil".into(),
+                    }),
+                    sky_fog: Some(SkyFog {
+                        sky: (126, 144, 146),
+                        fog: (146, 164, 164),
+                    }),
+                    cave_scale: Some(0.7),
+                    crop_fields: Vec::new(),
+                    surface_features: plants::tidal_marsh(),
                 },
             ],
             survival: None,
@@ -308,6 +351,7 @@ impl Guest for Tidewater {
             soundscapes: Vec::new(),
             cause_sounds: Vec::new(),
             recipes: Vec::new(),
+            plants: Vec::new(),
             voxel_uses: Vec::new(),
             ores: vec![OreDef {
                 material: "crystals:aquamarine".into(),

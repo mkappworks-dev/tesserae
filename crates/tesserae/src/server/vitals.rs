@@ -841,6 +841,7 @@ mod tests {
             material: None,
             max_stack: 64,
             food,
+            texture: None,
         };
         app.insert_resource(super::super::items::Items(vec![
             def("m:bread", Some(6.0)),

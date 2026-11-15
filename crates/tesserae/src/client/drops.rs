@@ -103,34 +103,44 @@ fn drawn(
         return Some(found.clone());
     }
     let look = looks.0.get(item as usize)?;
-    let made = match look.material {
-        Some(material) => {
-            let fixed = catalogue.material(material).and_then(|m| m.shape);
-            let held = Holding::Solid {
-                material,
-                shape: fixed.unwrap_or(SHAPE_FULL_CUBE),
-                orientation: Orientation::IDENTITY,
-            };
-            // Shaped like the cube it replaces: centred on the drop.
-            let mesh = fixed
-                .and_then(|_| super::preview::item_mesh(held, catalogue))
-                .map(|mesh| mesh.translated_by(Vec3::splat(-0.5)))
-                .unwrap_or_else(|| atlas_cube(material as usize));
-            (
-                meshes.add(mesh),
-                materials.add(textures.material(held, swatches.rgba(held), false)),
-            )
-        }
-        None => {
-            let [r, g, b, a] = look.color;
-            (
-                meshes.add(Cuboid::new(1.0, 1.0, 1.0)),
-                materials.add(StandardMaterial {
-                    base_color: Color::srgba_u8(r, g, b, a),
-                    perceptual_roughness: 0.9,
-                    ..default()
-                }),
-            )
+    let made = if let Some(sprite) = super::sprite::of_item(&look.name, &looks.0, catalogue) {
+        // Upright and centred on the drop, so it turns about its own vertical axis.
+        let held = Holding::Sprite(sprite);
+        let mesh = super::sprite::sprite_mesh(sprite).translated_by(Vec3::splat(-0.5));
+        (
+            meshes.add(mesh),
+            materials.add(textures.material(held, swatches.rgba(held), false)),
+        )
+    } else {
+        match look.material {
+            Some(material) => {
+                let fixed = catalogue.material(material).and_then(|m| m.shape);
+                let held = Holding::Solid {
+                    material,
+                    shape: fixed.unwrap_or(SHAPE_FULL_CUBE),
+                    orientation: Orientation::IDENTITY,
+                };
+                // Shaped like the cube it replaces: centred on the drop.
+                let mesh = fixed
+                    .and_then(|_| super::preview::item_mesh(held, catalogue))
+                    .map(|mesh| mesh.translated_by(Vec3::splat(-0.5)))
+                    .unwrap_or_else(|| atlas_cube(material as usize));
+                (
+                    meshes.add(mesh),
+                    materials.add(textures.material(held, swatches.rgba(held), false)),
+                )
+            }
+            None => {
+                let [r, g, b, a] = look.color;
+                (
+                    meshes.add(Cuboid::new(1.0, 1.0, 1.0)),
+                    materials.add(StandardMaterial {
+                        base_color: Color::srgba_u8(r, g, b, a),
+                        perceptual_roughness: 0.9,
+                        ..default()
+                    }),
+                )
+            }
         }
     };
     views.drawn.insert(item, made.clone());
@@ -252,6 +262,7 @@ mod tests {
                 color: [1, 2, 3, 255],
                 material: None,
                 max_stack: 64,
+                texture: None,
             },
             ItemLook {
                 name: "t:dust".into(),
@@ -259,6 +270,7 @@ mod tests {
                 color: [9, 9, 9, 255],
                 material: None,
                 max_stack: 64,
+                texture: None,
             },
             ItemLook {
                 name: "t:bench".into(),
@@ -266,27 +278,58 @@ mod tests {
                 color: [9, 9, 9, 255],
                 material: Some(BENCH),
                 max_stack: 64,
+                texture: None,
+            },
+            ItemLook {
+                name: "t:wheat".into(),
+                size_m: 0.2,
+                color: [9, 9, 9, 255],
+                material: None,
+                max_stack: 64,
+                texture: Some(vec![255; 16 * 16 * 4].into()),
+            },
+            ItemLook {
+                name: "t:seed".into(),
+                size_m: 0.2,
+                color: [9, 9, 9, 255],
+                material: Some(SPROUT),
+                max_stack: 64,
+                texture: None,
             },
         ]));
         app
     }
 
     const BENCH: tesserae_core::MaterialId = 3;
+    const SPROUT: tesserae_core::MaterialId = 4;
+    const CROSS: u8 = 200;
 
     /// A Material its row always places as a slab.
     fn fixed_slab() -> super::super::edit::Catalogue {
         let tables = crate::server::fixture_tables();
         super::super::edit::Catalogue(crate::content::ContentCatalogue {
-            materials: vec![crate::content::CatalogueMaterial {
-                remove_time: tesserae_mods::DEFAULT_REMOVE_TIME,
-                id: BENCH,
-                name: "t:bench".into(),
-                solid: true,
-                fluid: None,
-                burns: false,
-                shape: Some(tesserae_core::SHAPE_SLAB),
-                door: None,
-            }],
+            materials: vec![
+                crate::content::CatalogueMaterial {
+                    remove_time: tesserae_mods::DEFAULT_REMOVE_TIME,
+                    id: BENCH,
+                    name: "t:bench".into(),
+                    solid: true,
+                    fluid: None,
+                    burns: false,
+                    shape: Some(tesserae_core::SHAPE_SLAB),
+                    door: None,
+                },
+                crate::content::CatalogueMaterial {
+                    remove_time: tesserae_mods::DEFAULT_REMOVE_TIME,
+                    id: SPROUT,
+                    name: "t:sprout".into(),
+                    solid: true,
+                    fluid: None,
+                    burns: false,
+                    shape: Some(CROSS),
+                    door: None,
+                },
+            ],
             shapes: (0..tables.shapes.len())
                 .map(|id| crate::content::CatalogueShape {
                     id: id as u8,
@@ -294,7 +337,16 @@ mod tests {
                     turnable: id != 0,
                     fixed: false,
                     geometry: tables.shapes.preview_geometry(id as u8),
+                    form: tesserae_core::Form::Box,
                 })
+                .chain([crate::content::CatalogueShape {
+                    id: CROSS,
+                    name: "t:cross".into(),
+                    turnable: false,
+                    fixed: true,
+                    geometry: Vec::new(),
+                    form: tesserae_core::Form::Cross,
+                }])
                 .collect(),
             ..default()
         })
@@ -416,6 +468,43 @@ mod tests {
         for uv in uvs {
             assert!(uv[1] > row && uv[1] < row + 1.0 / texture_atlas::ROWS as f32);
             assert!((0.0..1.0).contains(&uv[0]));
+        }
+    }
+
+    #[test]
+    fn a_seed_and_textured_produce_drop_as_upright_sprites_and_plain_items_stay_cubes() {
+        let mut app = app();
+        for (id, item) in [(1, 3), (2, 4), (3, 1)] {
+            let mut v = view(id, [id as f32, 4.0, 0.0], true);
+            v.item = item;
+            v.size_m = 0.2;
+            app.world_mut().write_message(EntityDelta::Spawned(v));
+        }
+        app.update();
+        app.update();
+        let mut q = app.world_mut().query::<(&DropCube, &Mesh3d, &Transform)>();
+        let mut drawn: Vec<_> = q
+            .iter(app.world())
+            .map(|(cube, mesh, transform)| (cube.centre.x, mesh.0.clone(), *transform))
+            .collect();
+        drawn.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let meshes = app.world().resource::<Assets<Mesh>>();
+        let counts: Vec<_> = drawn
+            .iter()
+            .map(|(_, mesh, _)| meshes.get(mesh).unwrap().count_vertices())
+            .collect();
+        assert_eq!(
+            counts,
+            [8, 8, 24],
+            "wheat and the seed are quads; dust is a cube"
+        );
+        for (_, _, transform) in &drawn {
+            assert_eq!(transform.scale, Vec3::splat(0.2), "at its declared size");
+            let (axis, _) = transform.rotation.to_axis_angle();
+            assert!(
+                axis.x.abs() < 1e-5 && axis.z.abs() < 1e-5,
+                "it turns about the vertical"
+            );
         }
     }
 }

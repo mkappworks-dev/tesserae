@@ -227,6 +227,13 @@ pub(super) fn answer_aim(
     let Some((aim, reach, eye)) = state.latest else {
         return;
     };
+    let aim = LayoutAim {
+        intent: LayoutIntent {
+            voxel: placed_voxel(&store, &tables, &world, &aim.intent, reach),
+            ..aim.intent
+        },
+        ..aim
+    };
     let picked = anchor(&store, &tables, &world, &aim.intent, reach);
     let refused = |reason| LayoutAnswer {
         seq: aim.seq,
@@ -257,6 +264,26 @@ pub(super) fn answer_aim(
             anchor: picked.ok(),
         },
     });
+}
+
+/// The Voxel every cell of `intent` is placed as: a Plant's seed in the Plant's
+/// Shape, whatever the Player chose, a climber laid against the face the aim
+/// struck. A layout between corners strikes no face, so a climber keeps the
+/// Shape's own Orientation there.
+fn placed_voxel(
+    store: &ChunkStore,
+    tables: &Tables,
+    world: &WorldSettings,
+    intent: &LayoutIntent,
+    reach: Reach,
+) -> Voxel {
+    let face = intent
+        .layout
+        .needs_anchor()
+        .then(|| super::resolve::trace(store, tables, world, intent.direction, reach, false))
+        .and_then(Result::ok)
+        .map_or(tesserae_core::mesh::POS_Y, |(hit, _)| hit.face);
+    tables.plants.placed(&tables.shapes, intent.voxel, face)
 }
 
 /// The cells a layout covers: from the aim, or between its corners.
@@ -379,6 +406,8 @@ pub(super) fn drain(
     body: Option<Aabb>,
     // Not `&mut Inventory`: that would mark it changed, and so sent, every tick.
     inventory: &mut Mut<Inventory>,
+    items: &crate::server::items::Items,
+    needs: &mut MessageWriter<crate::server::plants::PlantNeedsSoil>,
 ) -> Vec<([i32; 3], MaterialId)> {
     let mut started = Vec::new();
     while budget > 0 {
@@ -386,6 +415,7 @@ pub(super) fn drain(
             break;
         };
         if layout.cells.is_none() {
+            layout.intent.voxel = placed_voxel(store, tables, world, &layout.intent, layout.reach);
             let started = expand(store, tables, world, &layout.intent, layout.reach);
             match started {
                 Ok(cells) => {
@@ -399,8 +429,28 @@ pub(super) fn drain(
                             }
                         }
                     }
+                    // A Plant's soil rule refuses the whole Layout, not the cell:
+                    // a row of Seeds either takes root or none does. The cells
+                    // count as ground for one another, as a column's are.
+                    let voxel = layout.intent.voxel;
+                    let laid: std::collections::HashSet<[i32; 3]> = kept
+                        .iter()
+                        .copied()
+                        .filter(|&at| free(store, tables, voxel, at).is_ok())
+                        .collect();
+                    let lacking = laid.iter().find_map(|&at| {
+                        crate::server::plants::soil_refusal(store, tables, items, voxel, at, &|c| {
+                            laid.contains(&c).then_some(voxel)
+                        })
+                    });
+                    if let Some(text) = lacking {
+                        needs.write(crate::server::plants::PlantNeedsSoil { text });
+                        rejected.write(EditRejected {
+                            reason: RejectReason::NeedsSoil,
+                        });
+                        continue;
+                    }
                     if let Some(item) = &layout.pay {
-                        let voxel = layout.intent.voxel;
                         let cost = kept
                             .iter()
                             .filter(|&&at| {
@@ -495,6 +545,18 @@ pub(super) fn drain(
         }
     }
     started
+}
+
+/// Delivers one Layout intent as if the Player stood at its origin.
+#[cfg(test)]
+pub(in crate::server) fn send_layout(app: &mut App, intent: LayoutIntent) {
+    use bevy::ecs::system::RunSystemOnce;
+    super::tests::set_eye(app, intent.origin);
+    app.world_mut().write_message(intent);
+    app.world_mut().run_system_once(receive).unwrap();
+    app.world_mut()
+        .resource_mut::<bevy::ecs::message::Messages<LayoutIntent>>()
+        .clear();
 }
 
 #[cfg(test)]

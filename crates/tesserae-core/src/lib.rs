@@ -27,6 +27,7 @@ pub mod mesh;
 pub mod noise;
 pub mod occupants;
 pub mod ore;
+pub mod plant;
 pub mod reaction;
 pub mod save;
 pub mod seed;
@@ -41,9 +42,13 @@ pub mod worldgen;
 
 pub use chunk::{CHUNK_SIZE, CHUNK_VOLUME, Chunk};
 pub use climate::{
-    Biome, BiomeId, BiomeName, BiomeTable, Climate, ClimateParams, MAX_BIOME_NAME_BYTES,
-    MAX_BIOMES, MAX_CAVE_SCALE, MAX_SURFACE_FEATURES, SURFACE_FEATURE_SPACING_M, SkyFog,
-    SkyFogBlend, SurfaceFeature, SurfaceFeatures,
+    Biome, BiomeId, BiomeName, BiomeTable, CLUMP_SCALE_M, Climate, ClimateParams, Clump, CropField,
+    FIELD_PLOT_M, FIELD_SCALE_M, FIELD_SPACING_M, Field, FieldCrop, MAX_BIOME_NAME_BYTES,
+    MAX_BIOMES, MAX_CAVE_SCALE, MAX_CROP_FIELDS, MAX_FIELD_CROPS, MAX_FIELD_STRAYS,
+    MAX_SURFACE_FEATURES, MAX_SURFACE_FRUIT_STAGES, MAX_SURFACE_STAGES, MAX_VINE_DENSITY,
+    MAX_VINE_LENGTH_M, SURFACE_FEATURE_SPACING_M, SkyFog, SkyFogBlend, SurfaceFeature,
+    SurfaceFeatures, SurfaceFruit, SurfacePlant, SurfacePlantKind, SurfaceTree, SurfaceVine,
+    SurfaceVines, VINE_FACES,
 };
 pub use combustion::{Burn, CombustionDef, CombustionError, CombustionTable, Heat, MAX_HEAT};
 pub use fluid::{FluidDef, FluidError, FluidTable};
@@ -63,11 +68,12 @@ pub use occupants::{
     Burning, ChunkOverlay, Fluid, Level, Occupants, Overlay, optical, optical_chunk,
 };
 pub use ore::{BiomeSet, MAX_ORES, Ore, OreTable};
+pub use plant::{PlantError, PlantRef, PlantTable, Role as PlantRole};
 pub use reaction::{
     Outcome, Participant, Phase, Reactant, ReactionDef, ReactionError, ReactionTable, Side,
 };
 pub use shape::{
-    Arm, CollisionBox, ConnectDef, Connections, MAX_SHAPED_PER_CHUNK, NodeBox, Orientation,
+    Arm, CollisionBox, ConnectDef, Connections, Form, MAX_SHAPED_PER_CHUNK, NodeBox, Orientation,
     SHAPE_POST, SHAPE_SLAB, SHAPE_STAIR, ShapeDef, ShapeError, ShapeTable,
 };
 pub use survival::SurvivalRules;

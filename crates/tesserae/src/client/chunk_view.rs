@@ -987,7 +987,14 @@ mod tests {
         for handle in terrain.all() {
             let extension = &materials.get(handle).unwrap().extension;
             assert_eq!(extension.texture.as_ref(), Some(&first));
-            assert_eq!(extension.textured, UVec4::new(1 << 23, 1 << 31, 1, 0));
+            assert_eq!(
+                extension.textured,
+                [
+                    UVec4::new(1 << 23, 1 << 31, 0, 0),
+                    UVec4::ZERO,
+                    UVec4::new(1, 0, 0, 0)
+                ]
+            );
         }
         let item = app
             .world()
@@ -1009,7 +1016,7 @@ mod tests {
         for handle in terrain.all() {
             assert_eq!(
                 materials.get(handle).unwrap().extension.textured,
-                UVec4::new(0, 0, 1, 0)
+                [UVec4::ZERO, UVec4::ZERO, UVec4::new(1, 0, 0, 0)]
             );
         }
     }

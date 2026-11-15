@@ -38,6 +38,10 @@ Line 0.3 gained `biomes` and `ores` on its `declaration`, and `climate` on its
 and an optional `sky-fog`, a `sky-fog` record of two sRGB colours, and an
 optional `cave-scale`, a multiplier from 0 to 4 on the World's cave radius.
 
+Line 0.3 also gained an optional-in-effect `tags` list on `material-def` (an
+adapted 0.1 or 0.2 Declaration has none), so Plants can name `#soil` or `#water`
+instead of a Material.
+
 Line 0.3 gained what Survival needs in the same way: an optional
 `contact-damage-per-s` on `material-def`, from 0 to 1000 health per second; an
 optional `max-stack` on `item-def`, from 1 to 64 and 64 when absent, and an
@@ -49,9 +53,16 @@ them: harmless Materials, Items that stack to 64 and are not food, and the
 default Survival rules.
 
 `biome-def` then gained `surface-features`, appended in the same way: a list of
-at most four `surface-feature` records, each a solid Material by full name and a
-mean `spacing-m` from 4 to 1024 metres, that the Engine stands one Voxel above
-the Biome's surface. A Biome with none generates exactly as before.
+at most 16 `surface-feature` records (four before the Plant phase raised it),
+each a solid Material by full name and a mean `spacing-m` from 1 to 1024 metres
+(4 before ticket 19), that the Engine stands one Voxel above the Biome's
+surface. A Biome with none generates exactly as before.
+
+`surface-feature` then gained `clump`, an optional `{ scale-m, strength }`
+record, appended in the same way, that gathers the feature into groves with
+clearings while `spacing-m` stays its mean spacing. A Declaration without it
+loads and generates as before. A guest built against the earlier record must be
+rebuilt, since a record's field count is part of its type.
 
 `survival-params` then gained `regeneration-per-s`, appended in the same way:
 the health a Player regains per second while hunger is at or above
@@ -97,6 +108,54 @@ drawn closed against its own +Z and turned a quarter about its hinge by Use.
 `sound-cause` then gained `door-open`, `door-close`, `container-open`,
 `container-close` and `craft`, appended after `burn`. A Game binds them in
 `cause-sounds` like any Cause; one that binds none plays them silent.
+
+Line 0.3 then gained `plants` on its `declaration`, appended after `voxel-uses`
+in the same way; a Declaration for 0.1 or 0.2 loads with none. A `plant-def`
+carries a `name` (local to the Mod), a `seed` Item by full name, an optional
+`shape` (a Shape by full name for its single-Voxel Stages), a `plant-needs`
+record (`soil`, optional `light-min` and `light-max`, `temperature` and
+`humidity` ranges and a `water` reach) and a closed `plant-kind`: `crop`,
+`tree`, `column`, `spreader` or `climber`, each with its own record. A Mod
+declares at most 128 and a World holds at most 512. A `plant-yield` is an Item
+and a `count-range`. A `tree-def` may carry a `fruit-def` (stages, density,
+`regrow-seconds`, shape; fruit is broken to harvest and the tree grows new
+fruit, so it has no `harvest-to`) and `vines`, a `tree-vines` naming a `climber`
+that only worldgen hangs, an optional `branching-def` (limbs, start, reach,
+rise, fork, lean, tiers and lobe radius, in metres and fractions, appended last
+and absent in every earlier tree), and a `column-def` may name the fluid it
+stands in. Names and `#tag` references resolve after every Mod has declared; an
+unknown or unmatched one is a load error naming the Plant.
+
+A `crop-def` of line 0.3 gained an optional `fruit-vine` (a `fruit-vine-def`:
+stages, `regrow-seconds`, shape and optional `reach-m`, `gap-m` and `max-fruit`)
+and a `spreader-def` an optional `min-neighbours`, both appended last and absent
+in every earlier row. Both are optional fields of the unreleased text, so a
+Declaration built against the earlier 0.3 text no longer lines up and needs a
+rebuild; a row that sets neither behaves as before.
+
+A `surface-feature` of line 0.3 then gained an optional `field` (a `field-def`:
+`group`, `scale-m`, `strays`) and a `biome-def` a `crop-fields` list (a
+`crop-field` record: crops with weights, `plot-m`, `spacing-m`, and optional
+`path`, `ditch` and `near-water-m`), appended in the same way, so a Declaration
+built against the earlier 0.3 text needs a rebuild. A Biome with neither
+generates exactly as before, and the Biome snapshot carries them as optional
+members, so no `FORMAT_VERSION` or generator version changes.
+
+A `plant-stage` of line 0.3 gained an optional `shape` as its last field (a
+Shape by full name the Stage's Voxels take; none keeps the Plant's or the
+fruit's), so a Declaration built against the earlier 0.3 text no longer lines up
+and needs a rebuild; an unknown name is a load error naming the Plant and the
+Stage.
+
+Four more appended fields go with them, each absent in an adapted 0.1 or 0.2
+Declaration. `shape-def` gained `form`, a closed `shape-form` of `boxes`,
+`cross` or `plane`, and none is `boxes`. `item-def` gained an optional
+`texture`, one 16 by 16 RGBA texture of 1024 bytes, that draws an Item as a flat
+sprite. `material-def` gained `tags`, above. `surface-feature` now takes an
+optional `material` and an optional `plant`, exactly one set, and an optional
+`shape`; the 0.1 and 0.2 adapters set `material` and neither of the others. A
+`biome-def` may list 16 `surface-features`, and a Mod 128 Materials, Shapes or
+appearance rows.
 
 ## What is not frozen
 

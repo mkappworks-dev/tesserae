@@ -180,6 +180,13 @@ pub(super) fn plugin(app: &mut App) {
         );
 }
 
+/// The Player a Use acts for.
+#[derive(bevy::ecs::system::SystemParam)]
+pub(super) struct Hand<'w, 's> {
+    player: Single<'w, 's, (Entity, &'static Player)>,
+    status: Option<Res<'w, super::persistence::SaveStatus>>,
+}
+
 pub(super) fn answer_use(
     mut intents: MessageReader<UseIntent>,
     (mut outcomes, mut eat): (MessageWriter<UseOutcome>, MessageWriter<EatIntent>),
@@ -189,16 +196,14 @@ pub(super) fn answer_use(
         ResMut<EditHistory>,
     ),
     (tables, world, tools): (Res<ContentTables>, Res<WorldSettings>, Res<Tools>),
-    (player, status): (
-        Single<(Entity, &Player)>,
-        Option<Res<super::persistence::SaveStatus>>,
-    ),
+    hand: Hand,
     (mut commands, mut opened): (Commands, MessageWriter<super::station::StationOpened>),
     (mut containers, mut audio): (
         Option<ResMut<super::container::Containers>>,
         super::sound::Emitter,
     ),
 ) {
+    let Hand { player, status } = hand;
     let (entity, player) = player.into_inner();
     let playing = super::persistence::playing(status);
     for intent in intents.read() {

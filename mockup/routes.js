@@ -39,6 +39,8 @@ function currentPath() {
       trust: "/worlds/new/trust",
       opening: "/opening",
       blocks: "/blocks",
+      plants: "/plants",
+      vegetation: "/vegetation",
     }[state.screen] || "/"
   );
 }
@@ -77,7 +79,11 @@ function syncRoute() {
                             ? "Opening"
                             : state.screen === "blocks"
                               ? "Block gallery"
-                              : "Worlds";
+                              : state.screen === "plants"
+                                ? "Plants"
+                                : state.screen === "vegetation"
+                                  ? "Vegetation"
+                                  : "Worlds";
   document.title = `${title} — Tesserae prototype`;
 }
 
@@ -146,6 +152,8 @@ function restoreRoute() {
       "/worlds/new/trust": "trust",
       "/opening": "opening",
       "/blocks": "blocks",
+      "/plants": "plants",
+      "/vegetation": "vegetation",
     }[path] || "home";
 }
 

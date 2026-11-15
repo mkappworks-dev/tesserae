@@ -33,6 +33,7 @@ pub fn fence() -> ShapeDef {
         }
     };
     ShapeDef {
+        form: Default::default(),
         boxes: vec![NodeBox::new([6, 0, 6], [10, 16, 10])],
         collision: Some(vec![CollisionBox::new([6, 0, 6], [10, 24, 10])]),
         connect: Some(ConnectDef {
@@ -58,6 +59,7 @@ pub fn pipe() -> ShapeDef {
         collision: None,
     };
     ShapeDef {
+        form: Default::default(),
         boxes: vec![NodeBox::new([6, 6, 6], [10, 10, 10])],
         collision: None,
         connect: Some(ConnectDef {

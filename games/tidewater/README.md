@@ -7,12 +7,13 @@ Islands and shallow seas whose sea level rises and falls, slowly.
 World parameters: `sea-level-m`, `relief-m`, a `caves` table for sea caves, a
 `smoothing` table that eases one-Voxel steps into stairs and slabs, and a
 standing `water` level of `waters:water` that makes islands of the high ground.
-It also declares `world.climate`, three Biomes and an ore: `lagoon` (the main
+It also declares `world.climate`, five Biomes and an ore: `lagoon` (the main
 one, with the Game's own ground and wider sea caves), `salt_flats` (sand over
-clay, with no caves) and `cold_shallows` (basalt and stone). Each carries its
-own sky and fog pair, and `crystals:aquamarine` grows in veins in the rock. The
-tide itself is Commands, not terrain: layers of water sources added and removed
-above the sea.
+clay, with no caves), `cold_shallows` (basalt and stone), `rainforest` and
+`tidal_marsh`, each with kelp, jungle or swamp trees and other plants from
+`flora`, `crops` and `aquatic`. Each carries its own sky and fog pair, and
+`crystals:aquamarine` grows in veins in the rock. The tide itself is Commands,
+not terrain: layers of water sources added and removed above the sea.
 
 ## Dependencies
 

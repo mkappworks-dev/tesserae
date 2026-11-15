@@ -319,6 +319,7 @@ mod tests {
             material: None,
             max_stack: 64,
             food,
+            texture: None,
         }
     }
 

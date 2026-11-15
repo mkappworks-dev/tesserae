@@ -1,0 +1,205 @@
+/* /vegetation: step 18b species gallery and Biome matrix. */
+.veg-gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 12px;
+}
+.veg-card {
+  padding: 10px;
+  background: var(--panel-raised);
+  border: 1px solid var(--edge);
+  border-radius: var(--radius);
+  align-content: start;
+}
+.veg-card .plants-scene {
+  width: 100%;
+}
+.veg-card.veg-dark .plants-scene {
+  background: #0d1210;
+}
+.veg-fruit {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.veg-fruit .plants-scene {
+  width: 92px;
+  height: 52px;
+  background: none;
+  border: 0;
+}
+.veg-note {
+  margin: 0;
+  font-size: 12px;
+}
+.veg-matrix {
+  display: grid;
+  gap: 16px;
+}
+.veg-game h4 {
+  margin: 0 0 6px;
+  font-size: 14px;
+  text-transform: capitalize;
+}
+.veg-biomes {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 8px;
+}
+.veg-new {
+  margin-left: 6px;
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: #10240c;
+  background: #8fd36a;
+  border-radius: 8px;
+}
+.veg-lib {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+}
+.veg-libitem {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.veg-libitem .veg-chip {
+  display: inline-flex;
+}
+.veg-specific {
+  margin-top: 10px;
+}
+.veg-cell {
+  display: grid;
+  gap: 4px;
+  align-content: start;
+  padding: 10px;
+  background: var(--panel-raised);
+  border: 1px solid var(--edge);
+  border-radius: var(--radius);
+}
+.veg-cell h5 {
+  margin: 0;
+  font-size: 13px;
+}
+.veg-cell small,
+.veg-cell p {
+  margin: 0;
+  font-size: 11px;
+  color: var(--muted);
+}
+.veg-cell.bare {
+  border-style: dashed;
+}
+.veg-cell ul {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.veg-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px 2px 2px;
+  font-size: 12px;
+  border: 1px solid var(--edge);
+  border-left-width: 3px;
+  border-radius: 4px;
+}
+.veg-chip.veg-tree {
+  border-left-color: #62a043;
+}
+.veg-chip.veg-crop {
+  border-left-color: #d9bd57;
+}
+.veg-chip.veg-ground {
+  border-left-color: #7f8de0;
+}
+.veg-icon {
+  width: 22px;
+  height: 22px;
+}
+.veg-legend {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+}
+.veg-legend p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+}
+.veg-branches,
+.veg-densities {
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+}
+.veg-before .plants-scene {
+  width: 100%;
+}
+.veg-density-map {
+  width: 100%;
+  height: auto;
+  border-radius: 4px;
+}
+.veg-density {
+  margin-left: 6px;
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  border-radius: 8px;
+  color: #10240c;
+}
+.veg-dense {
+  background: #5fb04a;
+}
+.veg-moderate {
+  background: #c9d86a;
+}
+.veg-sparse {
+  background: #e6d6a0;
+}
+.veg-cell .veg-spacing {
+  color: var(--ink);
+}
+.sp-row {
+  margin: 16px 0 24px;
+}
+.sp-row h3 {
+  margin: 0 0 4px;
+}
+.sp-row p {
+  margin: 0 0 8px;
+  max-width: 70ch;
+  font-size: 13px;
+  line-height: 1.45;
+}
+.sp-frames {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+}
+.sp-frame {
+  margin: 0;
+}
+.sp-frame svg {
+  width: 100%;
+  height: auto;
+  border-radius: 4px;
+}
+.sp-frame figcaption {
+  font-size: 12px;
+}
+.sp-frame small {
+  margin-left: 6px;
+  opacity: 0.7;
+}

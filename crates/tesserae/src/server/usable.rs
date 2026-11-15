@@ -47,11 +47,11 @@ pub(super) fn aim(
     match edit::solid_hit(store, tables, world, ray, eye) {
         Ok((hit, struck)) => {
             let voxel = store.voxel(hit.at)?;
-            Some(Ok(UseTarget {
+            Some(usable(tables, voxel)?.map(|usable| UseTarget {
                 at: hit.at,
                 voxel,
                 corner: struck,
-                usable: Some(usable(tables, voxel)?),
+                usable: Some(usable),
             }))
         }
         Err(RejectReason::OutOfReach) => {
@@ -64,21 +64,24 @@ pub(super) fn aim(
                 direction.to_array(),
                 SIGHT_M,
             )?;
-            usable(tables, store.voxel(hit.at)?)?;
+            usable(tables, store.voxel(hit.at)?)?.ok()?;
             Some(Err(UseRefusal::OutOfReach))
         }
         Err(_) => None,
     }
 }
 
-fn usable(tables: &Tables, voxel: Voxel) -> Option<Usable> {
-    match tables.uses.of(voxel.material())? {
-        (_, VoxelUse::Door { .. }) => Some(Usable::Door {
+/// What Use does to a Voxel with no Tool, if anything: a Usable Voxel's kind,
+/// else eating.
+fn usable(tables: &Tables, voxel: Voxel) -> Option<Result<Usable, UseRefusal>> {
+    let (_, kind) = tables.uses.of(voxel.material())?;
+    Some(Ok(match kind {
+        VoxelUse::Door { .. } => Usable::Door {
             open: tables.uses.is_open(voxel.material()),
-        }),
-        (_, &VoxelUse::Container { .. }) => Some(Usable::Container),
-        (_, VoxelUse::Station { .. }) => Some(Usable::Station),
-    }
+        },
+        &VoxelUse::Container { .. } => Usable::Container,
+        VoxelUse::Station { .. } => Usable::Station,
+    }))
 }
 
 /// The cells of the Door a Voxel of it at `at` belongs to, `at` first.
@@ -245,6 +248,7 @@ mod tests {
             [(); 2].map(|_| tables.materials.register(MaterialDef::OPAQUE).unwrap());
         let shape = panelled.then(|| {
             let def = ShapeDef {
+                form: Default::default(),
                 connect: None,
                 boxes: vec![PANEL],
                 collision: None,
@@ -279,6 +283,7 @@ mod tests {
             material,
             max_stack: 64,
             food,
+            texture: None,
         };
         let items = Items(vec![
             item("t:door", Some(doors.closed), None),

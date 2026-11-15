@@ -847,7 +847,12 @@ impl Names<'_> {
     }
 
     /// An Item that places a Material is drawn as it; any other in its colour.
+    /// A sprite, whether of its own `texture` or a flat Material's, is drawn
+    /// whole instead.
     pub(super) fn icon(&self, item: &str) -> Result<Holding, Color> {
+        if let Some(sprite) = super::sprite::of_item(item, &self.looks.0, &self.catalogue.0) {
+            return Ok(Holding::Sprite(sprite));
+        }
         match super::edit::item_holding(item, &self.looks.0, &self.catalogue.0) {
             Holding::Empty => Err(self.look(item).map_or(Color::WHITE, |look| {
                 let [r, g, b, a] = look.color;
@@ -1825,6 +1830,7 @@ mod tests {
             turnable,
             fixed: false,
             geometry: Vec::new(),
+            form: tesserae_core::Form::Box,
         }
     }
 

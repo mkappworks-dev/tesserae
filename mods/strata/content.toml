@@ -6,6 +6,7 @@ occlusion = "opaque"
 render = "opaque"
 solid = true
 remove-time-s = 0.35
+tags = ["rock"]
 
 [[materials]]
 name = "basalt"
@@ -15,6 +16,7 @@ occlusion = "opaque"
 render = "opaque"
 solid = true
 remove-time-s = 0.35
+tags = ["rock"]
 
 [[materials]]
 name = "clay"
@@ -24,6 +26,7 @@ occlusion = "opaque"
 render = "opaque"
 solid = true
 remove-time-s = 0.35
+tags = ["soil"]
 
 [[materials]]
 name = "sand"
@@ -33,6 +36,7 @@ occlusion = "opaque"
 render = "opaque"
 solid = true
 remove-time-s = 0.35
+tags = ["sand"]
 
 [[materials]]
 name = "soil"
@@ -42,6 +46,7 @@ occlusion = "opaque"
 render = "opaque"
 solid = true
 remove-time-s = 0.35
+tags = ["soil"]
 
 [[materials]]
 name = "turf"
@@ -51,6 +56,7 @@ occlusion = "opaque"
 render = "opaque"
 solid = true
 remove-time-s = 0.35
+tags = ["soil"]
 
 [[appearance]]
 material = "stone"

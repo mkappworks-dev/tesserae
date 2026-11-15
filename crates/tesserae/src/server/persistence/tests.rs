@@ -68,6 +68,7 @@ impl Rig {
             material: None,
             max_stack: 64,
             food: None,
+            texture: None,
         }];
         let items = loaded.every_item(settings.voxel_size);
         let p = Persistence::prepare(opening, &mut loaded, settings).unwrap();
@@ -330,6 +331,52 @@ fn an_open_door_survives_save_and_reopen() {
     let chunk = store.get(coord([0; 3])).unwrap();
     assert_eq!(chunk.get(4, 1, 4), Voxel::cube(door.open));
     assert_eq!(chunk.get(4, 2, 4), Voxel::cube(door.open));
+}
+
+#[test]
+fn a_grown_crop_and_tree_reopen_as_the_materials_they_grew_to() {
+    use tesserae_core::plant::{Kind as PlantKind, Role};
+    let dir = Directory::new();
+    let mut rig = Rig::new(&dir);
+    let tables = Arc::clone(&rig.app.world().resource::<ContentTables>().0);
+    let (crop, soil) = tables
+        .plants
+        .plants()
+        .iter()
+        .find_map(|p| match &p.kind {
+            PlantKind::Crop { stages, .. } if stages.len() >= 3 => {
+                Some((stages[1].material, p.needs.soil[0]))
+            }
+            _ => None,
+        })
+        .expect("Terra's shared Mods declare a crop");
+    let (trunk, canopy) = tables
+        .plants
+        .plants()
+        .iter()
+        .find_map(|p| match &p.kind {
+            PlantKind::Tree(t) => Some((t.trunk, t.canopy)),
+            _ => None,
+        })
+        .expect("Terra's shared Mods declare a tree");
+    rig.insert();
+    rig.solid([3, 0, 3], soil);
+    rig.solid([3, 1, 3], crop);
+    rig.solid([6, 1, 6], trunk);
+    rig.solid([6, 2, 6], canopy);
+    rig.settled_save();
+    drop(rig);
+    let mut reopened = Rig::new(&dir);
+    reopened.insert();
+    let store = reopened.app.world().resource::<ChunkStore>();
+    let chunk = store.get(coord([0; 3])).unwrap();
+    assert_eq!(chunk.get(3, 1, 3), Voxel::cube(crop));
+    assert_eq!(chunk.get(6, 1, 6), Voxel::cube(trunk));
+    assert_eq!(chunk.get(6, 2, 6), Voxel::cube(canopy));
+    let reopened_tables = &reopened.app.world().resource::<ContentTables>().0;
+    let at = reopened_tables.plants.of(crop).expect("a Stage");
+    assert_eq!(at.role, Role::Stage(1));
+    assert!(reopened_tables.plants.next_stage(crop).is_some());
 }
 
 #[test]
@@ -686,7 +733,18 @@ fn details(name: &str, seed: u64, voxel_size_m: f32) -> library::Sidecar {
             id: "terra".into(),
             version: "0.1.0".into(),
         }),
-        mods: Vec::new(),
+        mods: [
+            ("strata", "0.1.0"),
+            ("waters", "0.1.0"),
+            ("flora", "0.2.0"),
+            ("crops", "0.1.0"),
+            ("aquatic", "0.1.0"),
+        ]
+        .map(|(id, version)| library::ModRef {
+            id: id.into(),
+            version: version.into(),
+        })
+        .into(),
         seed,
         voxel_size_m,
         created_unix_s: 1,
@@ -811,11 +869,22 @@ fn a_new_world_takes_its_identity_and_settings_from_its_details() {
     assert_eq!(opening.id, created.world);
     assert_eq!(
         opening.selection(),
-        crate::server::mods::Selection::Named(vec![crate::server::mods::Wanted {
-            id: "terra".into(),
-            version: "0.1.0".into(),
-            game: true,
-        }])
+        crate::server::mods::Selection::Named(
+            [
+                ("terra", "0.1.0", true),
+                ("strata", "0.1.0", false),
+                ("waters", "0.1.0", false),
+                ("flora", "0.2.0", false),
+                ("crops", "0.1.0", false),
+                ("aquatic", "0.1.0", false),
+            ]
+            .map(|(id, version, game)| crate::server::mods::Wanted {
+                id: id.into(),
+                version: version.into(),
+                game,
+            })
+            .into()
+        )
     );
     let settings = opening.settings(WorldSettings::default());
     assert_eq!((settings.seed, settings.voxel_size), (99, 0.5));
@@ -939,6 +1008,7 @@ fn an_empty_world_loads_no_mods() {
     let worlds = Directory::new();
     let mut empty = details("Empty", 4, 1.0);
     empty.game = None;
+    empty.mods.clear();
     let path = library::create(&worlds.0, &empty).unwrap();
     let opening = Opening::from_folder(&path).unwrap();
     assert_eq!(opening.selection(), crate::server::mods::Selection::Nothing);
@@ -1569,6 +1639,122 @@ fn a_reopened_world_keeps_its_own_biomes_whatever_the_game_declares_now() {
     assert_eq!(reopened.ores.len(), 1);
     let without = prepared_world(&dir, |l| l.world = None);
     assert_eq!(biome_names(&without), ["terra:dry", "terra:wet"]);
+}
+
+/// A crop of two Stages and an oak in the first Biome, from Materials Terra already has.
+fn declares_plants() -> impl FnOnce(&mut crate::server::mods::LoadedMods) {
+    use tesserae_core::{
+        MAX_SURFACE_STAGES, SurfaceFeature, SurfaceFeatures, SurfacePlant, SurfacePlantKind,
+        SurfaceTree,
+    };
+    move |loaded| {
+        declares_biomes(["terra:dry", "terra:wet"])(loaded);
+        let id = |n| loaded.registry.id_of(Kind::Material, n).unwrap() as u16;
+        let mut stages = [0; MAX_SURFACE_STAGES];
+        stages[..2].copy_from_slice(&[id("terra:dirt"), id("terra:grass")]);
+        let feature = |kind| SurfaceFeature {
+            material: id("terra:dirt"),
+            spacing_m: 8.0,
+            plant: Some(SurfacePlant { shape: 0, kind }),
+            clump: None,
+            field: Some(tesserae_core::Field {
+                group: 0,
+                scale_m: 24.0,
+                strays: 0.1,
+            }),
+        };
+        let world = loaded.world.as_mut().unwrap();
+        let mut biomes = world.biomes.as_slice().to_vec();
+        biomes[0].surface_features = SurfaceFeatures::new(&[
+            feature(SurfacePlantKind::Stages {
+                materials: stages,
+                len: 2,
+                stage_shapes: [None; tesserae_core::MAX_SURFACE_STAGES],
+            }),
+            feature(SurfacePlantKind::Tree(SurfaceTree {
+                vines: None,
+                branching: None,
+                trunk: id("terra:wood"),
+                canopy: id("terra:leaves"),
+                trunk_height_m: (3.0, 5.0),
+                canopy_radius_m: 2.5,
+                fruit: None,
+            })),
+        ])
+        .unwrap();
+        let mut field =
+            tesserae_core::CropField::new((8.0, 12.0), 64.0, Some(id("terra:dirt")), None, None);
+        field
+            .push(tesserae_core::FieldCrop::new(0, &stages[..2], &[], 3.0).unwrap())
+            .unwrap();
+        biomes[0].surface_features = biomes[0]
+            .surface_features
+            .with_crop_fields(&[field])
+            .unwrap();
+        world.biomes = tesserae_core::BiomeTable::new(&biomes).unwrap();
+    }
+}
+
+#[test]
+fn plants_a_biome_names_are_frozen_into_the_world_and_survive_the_game_dropping_them() {
+    let dir = Directory::new();
+    Rig::open_with(dir.opening(), WorldSettings::default(), declares_plants()).settled_save();
+    let saved = save::inspect(&dir.0).unwrap().unwrap().commit.parameters;
+    let saved = saved.biomes.unwrap();
+    let features = &saved[0].surface_features;
+    assert_eq!(features.len(), 2);
+    assert!(features.iter().all(|f| f.plant.is_some()));
+    assert_eq!(features[0].spacing_m, 8.0);
+    assert_eq!(features[0].field.unwrap().scale_m, 24.0);
+    let saved_fields = &saved[0].crop_fields;
+    assert_eq!(saved_fields.len(), 1);
+    assert_eq!(
+        saved_fields[0].crops[0].materials,
+        ["terra:dirt", "terra:grass"]
+    );
+
+    // The Game now declares no Plant, or another: the World's snapshot wins.
+    let declared = prepared_world(&dir, declares_plants());
+    for game in [
+        Box::new(declares_biomes(["terra:hot", "terra:cold"]))
+            as Box<dyn FnOnce(&mut crate::server::mods::LoadedMods)>,
+        Box::new(|l: &mut crate::server::mods::LoadedMods| l.world = None),
+    ] {
+        let reopened = prepared_world(&dir, game);
+        assert_eq!(
+            reopened.biomes.as_slice()[0].surface_features,
+            declared.biomes.as_slice()[0].surface_features
+        );
+        assert_eq!(
+            reopened.biomes.as_slice()[0]
+                .surface_features
+                .crop_fields()
+                .len(),
+            1
+        );
+        assert_eq!(
+            reopened.biomes.as_slice()[0]
+                .surface_features
+                .as_slice()
+                .len(),
+            2
+        );
+    }
+}
+
+#[test]
+fn a_world_saved_before_plants_keeps_its_bare_ground_when_the_game_gains_them() {
+    let dir = Directory::new();
+    Rig::open_with(
+        dir.opening(),
+        WorldSettings::default(),
+        declares_biomes(["terra:dry", "terra:wet"]),
+    )
+    .settled_save();
+    let saved = save::inspect(&dir.0).unwrap().unwrap().commit.parameters;
+    assert!(saved.biomes.unwrap()[0].surface_features.is_empty());
+    let reopened = prepared_world(&dir, declares_plants());
+    assert!(reopened.biomes.as_slice()[0].surface_features.is_empty());
 }
 
 /// `None` leaves the first Biome the World's ground.

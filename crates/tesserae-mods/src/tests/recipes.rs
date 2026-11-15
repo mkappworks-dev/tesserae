@@ -19,6 +19,7 @@ fn item(name: &str, max_stack: u32) -> ItemDef {
         material: None,
         max_stack,
         food: None,
+        texture: None,
     }
 }
 

@@ -52,3 +52,14 @@ table existed.
 
 A dimming is a count of attenuation steps and does not scale with Voxel size
 ([ADR-0003](0003-voxel-size-is-per-world.md)).
+
+## Amendment: the palette holds 248 Materials
+
+Vegetation made 56 Materials in a World too few: a tree is a sapling, a trunk
+and a canopy, each its own Material because a Material belongs to one Plant, and
+fruit, crop Stages and ground cover add more. A World now holds 248 Materials
+beyond the 8 reserved ids (`MAX_MATERIALS`), the render palette and texture
+atlas have 256 slots (`PALETTE_LEN`), and one Mod may declare 128 Materials,
+Shapes or appearance rows. The vertex packs the Material id in 24 bits and the
+shader reads the length from a def, so the cost is a 4 KiB uniform array and a
+4112-pixel-tall atlas, both far inside the device limits.

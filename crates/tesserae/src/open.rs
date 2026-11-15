@@ -38,7 +38,6 @@ pub struct OpenRequest {
 /// World was opened.
 #[derive(Resource, Clone, Debug)]
 pub struct Opened {
-    pub from_list: bool,
     pub name: Option<String>,
     folder: Option<PathBuf>,
     direct: bool,
@@ -158,7 +157,6 @@ fn begin(mut commands: Commands, request: Res<OpenRequest>, args: Res<UserArgs>)
     let reported = Arc::clone(&stage);
     let task = AsyncComputeTaskPool::get().spawn(async move { load(&what, &user, &reported) });
     commands.insert_resource(Opened {
-        from_list: request.from_list,
         name: request.name.clone(),
         folder: match &request.what {
             What::Folder(path) => Some(path.clone()),
@@ -192,7 +190,6 @@ pub(crate) fn begin_prepared(commands: &mut Commands, parts: Parts) {
     let stage = Arc::new(AtomicU8::new(Stage::PreparingWorld as u8));
     let task = AsyncComputeTaskPool::get().spawn(async move { Ok(parts) });
     commands.insert_resource(Opened {
-        from_list: false,
         name: None,
         folder: None,
         direct: false,
@@ -429,7 +426,6 @@ mod tests {
         let task = AsyncComputeTaskPool::get_or_init(Default::default)
             .spawn(async { Err::<Parts, _>("no such World".to_owned()) });
         app.insert_resource(Opened {
-            from_list: false,
             name: None,
             folder: None,
             direct: true,
@@ -557,7 +553,6 @@ mod tests {
         });
         crate::session::testing::loading(&mut app);
         app.insert_resource(Opened {
-            from_list: false,
             name: None,
             folder: Some("/worlds/Trapped".into()),
             direct: false,

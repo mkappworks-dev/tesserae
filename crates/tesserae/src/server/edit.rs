@@ -46,6 +46,8 @@ use tesserae_mods::{EditKind, Intent};
 
 #[cfg(test)]
 pub use layout::LayoutCell;
+#[cfg(test)]
+pub(in crate::server) use layout::send_layout;
 pub use layout::{CellState, LayoutAim, LayoutAnswer, LayoutIntent, LayoutParams, Span};
 
 use super::ContentTables;
@@ -176,6 +178,9 @@ pub struct AimRemoval {
 pub struct AimGhost {
     pub at: Vec3,
     pub door: Option<DoorAim>,
+    /// The Orientation a Plant's seed is placed in, which depends on the face
+    /// aimed at and not on the Player's choice; `None` for any other Voxel.
+    pub plant_orientation: Option<tesserae_core::Orientation>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -291,6 +296,9 @@ pub enum RejectReason {
     /// A Player's Remove, undo or redo that would take away a Container, of
     /// this Material, holding Stacks.
     ContainerNotEmpty(MaterialId),
+    /// A Plant's Seed placed where its soil rule fails; the words arrive as a
+    /// [`super::plants::PlantNeedsSoil`].
+    NeedsSoil,
 }
 
 impl RejectReason {
@@ -333,6 +341,7 @@ impl RejectReason {
             RejectReason::CreativeOnly => "Only Creative places without an Item.",
             RejectReason::TooFewItems => "Not enough Items for this Layout.",
             RejectReason::ItemNeeded => "Putting that back needs an Item you don’t hold.",
+            RejectReason::NeedsSoil => "That cannot be planted there.",
         }
     }
 }
@@ -418,6 +427,8 @@ pub(super) fn plugin(app: &mut App) {
         .add_session_message::<super::undo::HistoryNeedsItems>()
         .add_session_message::<super::undo::RefundDropped>()
         .add_session_message::<EditApplied>()
+        .add_session_message::<super::plants::PlantNeedsSoil>()
+        .add_session_message::<super::entities::Pickup>()
         .init_session_resource::<super::entities::EntityStore>()
         .init_session_resource::<super::items::Items>()
         .init_session_resource::<super::sound::SoundTable>()

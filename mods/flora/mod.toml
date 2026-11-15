@@ -1,6 +1,7 @@
 id = "flora"
-version = "0.1.0"
+version = "0.2.0"
 api = "0.3"
+depends = ["strata"]
 declaration = "content.toml"
 category = "Plants"
-description = "Wood, leaves, grass and kelp"
+description = "Trees, fruit, ground cover, flowers, mushrooms, cacti and vines"

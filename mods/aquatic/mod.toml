@@ -1,0 +1,7 @@
+id = "aquatic"
+version = "0.1.0"
+api = "0.3"
+depends = ["strata", "waters", "flora"]
+declaration = "content.toml"
+category = "Plants"
+description = "Kelp, seagrass, red weed and the lily pad"

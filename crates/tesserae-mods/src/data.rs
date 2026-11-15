@@ -6,6 +6,7 @@ use crate::{Declaration, ModError};
 
 mod behaviour;
 mod character;
+mod plant;
 mod recipe;
 mod shape;
 mod sound;
@@ -51,6 +52,8 @@ struct Data {
     recipes: Vec<recipe::Recipe>,
     #[serde(default, rename = "voxel-uses")]
     voxel_uses: Vec<behaviour::VoxelUse>,
+    #[serde(default)]
+    plants: Vec<plant::Plant>,
 }
 
 #[derive(Deserialize)]
@@ -64,6 +67,8 @@ struct Material {
     solid: bool,
     remove_time_s: Option<f32>,
     contact_damage_per_s: Option<f32>,
+    #[serde(default)]
+    tags: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -149,6 +154,11 @@ pub(crate) fn references(id: &str, bytes: &[u8]) -> Result<Vec<Reference>, ModEr
             found.push(artwork(format!("appearance[{row}].texture"), path));
         }
     }
+    for (row, item) in data.items.iter().enumerate() {
+        if let Some(path) = &item.texture {
+            found.push(artwork(format!("items[{row}].texture"), path));
+        }
+    }
     if let Some(character) = data.world.and_then(|w| w.character) {
         found.push(artwork("world.character.skin".into(), character.skin()));
     }
@@ -212,6 +222,7 @@ pub(crate) fn parse(id: &str, payload: &CheckedPayload) -> Result<Declaration, M
                 solid: m.solid,
                 remove_time_s: m.remove_time_s,
                 contact_damage_per_s: m.contact_damage_per_s,
+                tags: m.tags,
             })
             .collect(),
         appearance: data
@@ -271,7 +282,20 @@ pub(crate) fn parse(id: &str, payload: &CheckedPayload) -> Result<Declaration, M
         reactions: data.reactions.into_iter().map(Into::into).collect(),
         combustion: data.combustion.into_iter().map(Into::into).collect(),
         tools: data.tools.into_iter().map(Into::into).collect(),
-        items: data.items.into_iter().map(Into::into).collect(),
+        items: data
+            .items
+            .into_iter()
+            .enumerate()
+            .map(|(row, item)| {
+                let edge = crate::MATERIAL_TEXTURE_EDGE as u32;
+                let texture = item
+                    .texture
+                    .as_deref()
+                    .map(|path| artwork(format!("items[{row}].texture"), path, edge, edge))
+                    .transpose()?;
+                Ok(item.into_def(texture))
+            })
+            .collect::<Result<_, ModError>>()?,
         biomes: data.biomes.into_iter().map(Into::into).collect(),
         ores: data.ores.into_iter().map(Into::into).collect(),
         survival: data.survival.map(Into::into),
@@ -296,5 +320,6 @@ pub(crate) fn parse(id: &str, payload: &CheckedPayload) -> Result<Declaration, M
         cause_sounds: data.cause_sounds.into_iter().map(Into::into).collect(),
         recipes: data.recipes.into_iter().map(Into::into).collect(),
         voxel_uses: data.voxel_uses.into_iter().map(Into::into).collect(),
+        plants: data.plants.into_iter().map(Into::into).collect(),
     })
 }

@@ -39,3 +39,30 @@ changing the Voxel's layout.
 Anything physical derived from a Shape is a fraction of a Voxel and becomes a
 distance only by multiplying by the World's Voxel size
 ([ADR-0003](0003-voxel-size-is-per-world.md)).
+
+## Amendment 2026-11-14: flat forms for plants
+
+A `ShapeDef` gains an optional `form`: `box`, the default and every Shape above,
+`cross` or `plane`. A flat form is how a plant is drawn: `cross` is two diagonal
+quads through the Voxel's centre, `plane` one quad along the first box's thin
+axis, against a face, which a vine's Orientation turns to the wall that holds
+it. The quads take the Material's own texture in the cutout pass, and the mesher
+merges nothing across them and hides no neighbour's face behind them.
+
+A flat Shape still declares boxes, derived once like any other, so the same grid
+answers every other question:
+
+- Its boxes decide selection, so a Player can aim at and break a plant they walk
+  through, and where fluid can stand, so kelp is waterlogged where it grows
+  ([ADR-0013](0013-fluid-and-fire-live-beside-the-voxel.md)).
+- It is walked through unless it declares `collision`, which a cactus does.
+- It seals no face: a box that covers one is refused at registration, so light
+  and neighbours see past it, and a plant's Material is translucent to carry the
+  dimming.
+- It cannot connect: a `connect` on a flat form is refused
+  ([ADR-0010](0010-connections-are-derived-not-stored.md)).
+- It costs nothing against the Chunk's shaped-Voxel cap.
+
+The ids and the registry are unchanged, and a Shape with no `form` is a `box`,
+so a World saved before the forms has the Shapes it had. Plants are the reason
+([ADR-0027](0027-plants-are-declared-kinds-the-server-grows.md)).

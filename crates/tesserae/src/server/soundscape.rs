@@ -90,8 +90,7 @@ fn publish(
     let underground = store.light_at(at).sky() == 0;
     let biome = generator.as_ref().and_then(|g| {
         let id = g.biome_at(player.eye().x, player.eye().z)?;
-        let params = g.params();
-        let name = params.biomes.as_slice().get(id.index())?.name.as_str();
+        let name = g.biomes().as_slice().get(id.index())?.name.as_str();
         soundscapes.biomes.get(name).copied().flatten()
     });
     let underwater = player.eye_submerged()

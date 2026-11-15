@@ -57,11 +57,13 @@ impl Default for Swatches {
 
 impl Swatches {
     pub(super) fn rgba(&self, holding: super::edit::Holding) -> Vec4 {
-        use super::edit::Holding;
+        use super::{edit::Holding, sprite::Sprite};
         let slot = match holding {
             Holding::Solid { material, .. } | Holding::Fluid(material) => material as usize,
             Holding::Fire => FLAME_SLOT,
             Holding::Tool(_) => return TOOL_RGBA,
+            Holding::Sprite(Sprite::Material(material)) => material as usize,
+            Holding::Sprite(Sprite::Item(_)) => return Vec4::ONE,
             Holding::Empty => return Vec4::ZERO,
         };
         self.0.get(slot).copied().unwrap_or(Vec4::ONE)

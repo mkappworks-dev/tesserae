@@ -63,6 +63,9 @@ pub(super) enum Holding {
     Fire,
     /// Edits are inert; Place and Remove are the tool's verbs (`tool.rs`).
     Tool(ToolId),
+    /// A flat picture of an Item. Only icons and models draw it; it places
+    /// nothing, as the Item's own `places` entry says.
+    Sprite(super::sprite::Sprite),
     Empty,
 }
 
@@ -96,7 +99,7 @@ impl Holding {
             Holding::Fluid(_) => ("place source", "remove"),
             Holding::Fire => ("ignite", "remove"),
             Holding::Tool(_) => ("clear point", "use tool"),
-            Holding::Empty => ("nothing", "remove"),
+            Holding::Sprite(_) | Holding::Empty => ("nothing", "remove"),
         }
     }
 
@@ -125,7 +128,7 @@ impl Holding {
                 .into(),
             Holding::Fire => "fire".into(),
             Holding::Tool(tool) => catalogue.tool_label(tool).into(),
-            Holding::Empty => "empty".into(),
+            Holding::Sprite(_) | Holding::Empty => "empty".into(),
         }
     }
 
@@ -168,7 +171,7 @@ impl Holding {
             Holding::Fluid(id) => format!("{} source", material(id)),
             Holding::Fire => "fire".to_string(),
             Holding::Tool(tool) => catalogue.tool_label(tool).to_string(),
-            Holding::Empty => "empty".to_string(),
+            Holding::Sprite(_) | Holding::Empty => "empty".to_string(),
         }
     }
 }
@@ -1003,6 +1006,7 @@ mod tests {
             turnable,
             fixed: false,
             geometry: crate::server::fixture_tables().shapes.preview_geometry(id),
+            form: tesserae_core::Form::Box,
         })
         .collect();
         ContentCatalogue {
@@ -1539,6 +1543,7 @@ mod tests {
                 color: [0; 4],
                 material: Some(wood()),
                 max_stack: 64,
+                texture: None,
             });
         app.world_mut().write_message(EditRejected {
             reason: RejectReason::ContainerNotEmpty(wood()),

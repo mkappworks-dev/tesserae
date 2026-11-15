@@ -843,6 +843,7 @@ mod tests {
         let b = NodeBox::new;
         let id = t
             .register(ShapeDef {
+                form: Default::default(),
                 connect: None,
                 boxes: vec![
                     b([0, 0, 0], [16, 7, 16]),

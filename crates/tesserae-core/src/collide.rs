@@ -638,6 +638,7 @@ mod tests {
         let panel = tables
             .shapes
             .register(ShapeDef {
+                form: Default::default(),
                 connect: None,
                 boxes: vec![crate::shape::NodeBox::new([0, 0, 13], [16, 16, 16])],
                 collision: None,
@@ -839,6 +840,7 @@ mod tests {
         let mut t = table();
         let plate = t
             .register(ShapeDef {
+                form: Default::default(),
                 connect: None,
                 boxes: vec![NodeBox::new([1, 0, 1], [15, 1, 15])],
                 collision: Some(vec![]),
@@ -856,6 +858,7 @@ mod tests {
         let mut t = table();
         let plate = t
             .register(ShapeDef {
+                form: Default::default(),
                 connect: None,
                 boxes: vec![NodeBox::new([1, 0, 1], [15, 1, 15])],
                 collision: Some(vec![]),
@@ -878,6 +881,7 @@ mod tests {
         // A thin sign drawn on the cell's back wall, with a whole cell to bump into.
         let sign = t
             .register(ShapeDef {
+                form: Default::default(),
                 connect: None,
                 boxes: vec![NodeBox::new([0, 0, 14], [16, 16, 16])],
                 collision: Some(vec![NodeBox::new([0; 3], [16; 3]).into()]),
@@ -901,6 +905,7 @@ mod tests {
     fn fence_post(t: &mut ShapeTable) -> Voxel {
         let id = t
             .register(ShapeDef {
+                form: Default::default(),
                 connect: None,
                 boxes: vec![NodeBox::new([6, 0, 6], [10, 16, 10])],
                 collision: Some(vec![CollisionBox::new([6, 0, 6], [10, 24, 10])]),
@@ -957,6 +962,7 @@ mod tests {
         let mut t = table();
         let id = t
             .register(ShapeDef {
+                form: Default::default(),
                 connect: None,
                 boxes: vec![NodeBox::new([6, 0, 6], [10, 16, 10])],
                 collision: Some(vec![CollisionBox::new([6, -8, 6], [10, 16, 10])]),

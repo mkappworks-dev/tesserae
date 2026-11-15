@@ -334,6 +334,10 @@ struct Launcher {
     entries: Vec<Entry>,
     /// The World being edited, deleted or opened.
     selected: Option<PathBuf>,
+    /// The World whose card menu is open.
+    menu: Option<PathBuf>,
+    /// The Delete prompt came from a card's menu, so it answers back to the list.
+    from_menu: bool,
     card: Option<Card>,
     form: Form,
     /// The form as Create World opened it, to tell whether leaving loses anything.
@@ -438,6 +442,10 @@ pub(super) enum Act {
     New,
     ReCreate,
     Delete,
+    /// Opens or closes the menu on a World's card.
+    Menu(PathBuf),
+    /// Delete from a card's menu, without going through Edit.
+    DeleteWorld(PathBuf),
     ShowFolder,
     CopySeed,
     Quit,
@@ -803,6 +811,8 @@ fn start(
         clashes: Default::default(),
         version: 0,
         trust_asked: false,
+        menu: None,
+        from_menu: false,
         opening_frames: 0,
     };
     launcher.refresh(&worlds.0);
@@ -1046,10 +1056,16 @@ fn handle(
     };
     for act in std::mem::take(&mut queue.0) {
         let l = &mut *l;
+        // Any act but the menu's own answers it; Back closes it itself.
+        if !matches!(act, Act::Menu(..) | Act::Back) && l.menu.take().is_some() {
+            l.version += 1;
+        }
         match act {
             Act::Continue | Act::Play(..) | Act::Trust => on_open(l, &mut cx, act),
             Act::Edit(..)
             | Act::Delete
+            | Act::Menu(..)
+            | Act::DeleteWorld(..)
             | Act::ShowFolder
             | Act::CopySeed
             | Act::DefaultMode(..)
@@ -1133,6 +1149,12 @@ fn navigate(l: &mut Launcher, cx: &mut Acting, act: Act) {
             }
             l.version += 1;
         }
+        // Escape closes a card's menu rather than leaving the list under it.
+        Act::Back if l.menu.is_some() => {
+            l.menu = None;
+            l.version += 1;
+        }
+        Act::Back if matches!(l.screen, Screen::Delete(_)) && l.from_menu => l.show(Screen::Worlds),
         Act::Back => match l.screen.clone() {
             Screen::Trust(Next::Create) => l.show(Screen::Create(Step::Review)),
             Screen::Create(step) => match step.previous() {

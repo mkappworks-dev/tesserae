@@ -103,7 +103,7 @@ pub(super) fn report(
         ))),
         Holding::Fluid(id) => Some(AimItem::Fluid(id)),
         Holding::Fire => Some(AimItem::Fire),
-        Holding::Tool(_) | Holding::Empty => None,
+        Holding::Tool(_) | Holding::Sprite(_) | Holding::Empty => None,
     };
     let tool = hotbar.held().tool();
     let current = (camera.translation(), *camera.forward(), held, tool);

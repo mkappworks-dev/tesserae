@@ -1142,6 +1142,7 @@ mod waterlogging {
         let wall = tables
             .shapes
             .register(ShapeDef {
+                form: Default::default(),
                 connect: None,
                 boxes: vec![NodeBox::new([7, 0, 0], [9, 16, 16])],
                 collision: None,
@@ -1165,6 +1166,7 @@ mod waterlogging {
         let shelf = tables
             .shapes
             .register(ShapeDef {
+                form: Default::default(),
                 connect: None,
                 boxes: vec![NodeBox::new([0, 6, 0], [16, 8, 16])],
                 collision: None,
@@ -1265,6 +1267,7 @@ mod waterlogging {
         let window = tables
             .shapes
             .register(ShapeDef {
+                form: Default::default(),
                 connect: Some(ConnectDef {
                     group: 1 << 5,
                     connects_to: 1 << 5,
@@ -1836,6 +1839,7 @@ mod reactions {
             let wall = tables
                 .shapes
                 .register(ShapeDef {
+                    form: Default::default(),
                     connect: None,
                     boxes: vec![NodeBox::new([7, 0, 0], [9, 16, 16])],
                     collision: None,

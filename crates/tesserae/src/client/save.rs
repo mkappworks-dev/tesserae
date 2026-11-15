@@ -17,12 +17,7 @@ struct Action(SaveAction);
 #[derive(Component)]
 pub(super) struct ToList;
 
-/// Quits to the desktop; only a World opened without the list offers it.
-#[derive(Component)]
-struct DirectQuit;
-
-/// The Menu's way out: back to the Worlds, or for a World opened directly,
-/// which has no list to return to, Save & Quit.
+/// The Menu's two ways out: back to the Worlds, or Save & Quit to the desktop.
 pub(super) fn return_buttons(parent: &mut ChildSpawnerCommands) {
     return_buttons_as(parent, Kind::Plain);
 }
@@ -37,7 +32,7 @@ pub(super) fn return_buttons_as(parent: &mut ChildSpawnerCommands, kind: Kind) {
             align: Align::Glyph("→"),
         },
     );
-    let quit = buttons::button(
+    buttons::button(
         parent,
         "Save & Quit",
         Action(SaveAction::SaveQuit),
@@ -46,7 +41,6 @@ pub(super) fn return_buttons_as(parent: &mut ChildSpawnerCommands, kind: Kind) {
             align: Align::Glyph("→"),
         },
     );
-    parent.commands().entity(quit).insert(DirectQuit);
 }
 
 #[derive(Clone, PartialEq)]
@@ -75,7 +69,7 @@ fn view(status: &SaveStatus) -> View {
 pub(super) fn plugin(app: &mut App) {
     app.add_observer(activate)
         .add_session_systems(PreUpdate, close_request)
-        .add_session_systems(Update, (show, notice, hide_list_return));
+        .add_session_systems(Update, (show, notice));
 }
 
 fn close_request(
@@ -123,23 +117,6 @@ fn activate(
     };
     if let Some(relaunch) = relaunch.as_mut() {
         relaunch.0 = target;
-    }
-}
-
-/// Only a World opened from the list has a list to return to.
-fn hide_list_return(
-    launched: Option<Res<crate::open::Opened>>,
-    mut to_list: Query<&mut Node, (Added<ToList>, Without<DirectQuit>)>,
-    mut direct: Query<&mut Node, Added<DirectQuit>>,
-) {
-    let from_list = launched.is_some_and(|l| l.from_list);
-    let hidden = if from_list {
-        direct.iter_mut().next()
-    } else {
-        to_list.iter_mut().next()
-    };
-    if let Some(mut node) = hidden {
-        node.display = Display::None;
     }
 }
 

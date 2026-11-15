@@ -32,9 +32,14 @@ pub(super) const GHOST: Color = Color::srgba_u8(40, 48, 55, 82);
 /// Hover on a borderless glyph or icon button.
 pub(super) const QUIET_HOVER: Color = Color::srgba_u8(0xff, 0xff, 0xff, 0x14);
 pub(super) const QUIET_HOVER_EDGE: Color = Color::srgba_u8(0xff, 0xff, 0xff, 0x70);
-pub(super) const DANGER: Color = Color::srgb_u8(0x30, 0x24, 0x26);
-pub(super) const DANGER_EDGE: Color = Color::srgb_u8(0xbc, 0x8e, 0x86);
-pub(super) const DANGER_INK: Color = Color::srgb_u8(0xf4, 0xc3, 0xba);
+pub(super) const MENU_POPOVER: Color = Color::srgb_u8(0x1c, 0x1d, 0x20);
+pub(super) const MENU_HOVER: Color = Color::srgba_u8(255, 255, 255, 20);
+pub(super) const MENU_DANGER_INK: Color = Color::srgb_u8(0xf0, 0x8a, 0x7c);
+pub(super) const MENU_DANGER_HOVER: Color = Color::srgba_u8(0xc8, 0x48, 0x3a, 0x33);
+pub(super) const DANGER: Color = Color::srgb_u8(0xb8, 0x3a, 0x2e);
+pub(super) const DANGER_HOVER: Color = Color::srgb_u8(0xcf, 0x45, 0x38);
+pub(super) const DANGER_EDGE: Color = Color::srgb_u8(0xb8, 0x3a, 0x2e);
+pub(super) const DANGER_INK: Color = Color::WHITE;
 pub(super) const DISABLED: Color = Color::srgb_u8(0x29, 0x2c, 0x30);
 pub(super) const DISABLED_EDGE: Color = Color::srgb_u8(0x62, 0x66, 0x6c);
 pub(super) const DISABLED_INK: Color = Color::srgb_u8(0xb2, 0xb6, 0xbc);

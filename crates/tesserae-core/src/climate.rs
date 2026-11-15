@@ -7,7 +7,7 @@
 //! `docs/adr/0011-coarse-levels-are-derived.md`).
 
 use crate::noise::fbm2;
-use crate::voxel::{AIR, MaterialId};
+use crate::voxel::{AIR, MaterialId, SHAPE_FULL_CUBE, ShapeId};
 use crate::worldgen::{GroundParams, ParamError};
 
 /// Fixed, not a parameter: a declaration sizes the regions, the border warp adds detail.
@@ -43,10 +43,31 @@ const BLEND_RANGE: f32 = 0.15;
 pub const MAX_CAVE_SCALE: f32 = 4.0;
 
 /// Bounded so a [`Biome`] stays inline and `Copy`.
-pub const MAX_SURFACE_FEATURES: usize = 4;
+pub const MAX_SURFACE_FEATURES: usize = 16;
 
-/// From one in every 4 by 4 m of ground, already a carpet, to one in a square kilometre.
-pub const SURFACE_FEATURE_SPACING_M: std::ops::RangeInclusive<f32> = 4.0..=1024.0;
+/// From one in every metre of ground, a carpet of ground cover, to one in a square kilometre.
+pub const SURFACE_FEATURE_SPACING_M: std::ops::RangeInclusive<f32> = 1.0..=1024.0;
+
+/// A clump's field varies over this many metres: a thicket's width to a region's.
+pub const CLUMP_SCALE_M: std::ops::RangeInclusive<f32> = 4.0..=1024.0;
+
+/// A wild field's regions are this many metres across: a flower bed's width to a meadow's.
+pub const FIELD_SCALE_M: std::ops::RangeInclusive<f32> = 8.0..=96.0;
+
+/// The most of a field's ground that ignores its region's species.
+pub const MAX_FIELD_STRAYS: f32 = 0.5;
+
+/// Bounded so a [`Biome`] stays inline and `Copy`.
+pub const MAX_CROP_FIELDS: usize = 2;
+
+/// Crops one planted field draws a plot's crop from.
+pub const MAX_FIELD_CROPS: usize = 4;
+
+/// A plot's side, from a kitchen garden to a farm field.
+pub const FIELD_PLOT_M: std::ops::RangeInclusive<f32> = 6.0..=24.0;
+
+/// The mean distance between planted fields, in metres.
+pub const FIELD_SPACING_M: std::ops::RangeInclusive<f32> = 32.0..=256.0;
 
 /// Each field in `[0, 1)`.
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -327,18 +348,604 @@ impl Biome {
 }
 
 /// A Material standing one Voxel above a Biome's surface, about one in every `spacing_m` by
-/// `spacing_m` metres of it.
+/// `spacing_m` metres of it. With `plant` set it is that Plant instead, generated from the data the
+/// World froze, and `material` is only its first Material.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct SurfaceFeature {
     pub material: MaterialId,
     pub spacing_m: f32,
+    pub plant: Option<SurfacePlant>,
+    /// Absent scatters evenly, as every feature did before groves.
+    pub clump: Option<Clump>,
+    /// Absent stands wherever it is drawn, as every feature did before fields.
+    pub field: Option<Field>,
 }
 
-/// At most [`MAX_SURFACE_FEATURES`], in declaration order.
+/// Groups features of one Biome so a region of the ground holds mostly one of them, as a patch of
+/// flowers is mostly one species.
+///
+/// The ground is cut into regions by the nearest of a jittered lattice `scale_m` apart, a pure
+/// function of the seed and a position in metres, so it holds across Chunk borders and at every
+/// Voxel size. Each region is given one member of the group by hash; a column that draws a member
+/// stands it only if it is the region's, or, with chance `strays`, anyway.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct Field {
+    /// Local to the Biome: features with the same group compete.
+    pub group: u8,
+    pub scale_m: f32,
+    pub strays: f32,
+}
+
+impl Field {
+    pub fn validate(&self) -> Result<(), ParamError> {
+        if !FIELD_SCALE_M.contains(&self.scale_m) {
+            return Err(ParamError {
+                field: "biomes.surface_features.field.scale_m",
+                rule: "must be from 8 to 96 m",
+            });
+        }
+        if !(0.0..=MAX_FIELD_STRAYS).contains(&self.strays) {
+            return Err(ParamError {
+                field: "biomes.surface_features.field.strays",
+                rule: "must be from 0 to 0.5",
+            });
+        }
+        Ok(())
+    }
+}
+
+/// A low-frequency density field over the ground plane that multiplies a feature's chance, so it
+/// stands in patches with bare ground between instead of evenly.
+///
+/// The field is value noise over a lattice `scale_m` metres apart, a pure function of the seed, the
+/// feature's place in its Biome and a position in metres, so it holds across Chunk borders and at
+/// every Voxel size.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct Clump {
+    pub scale_m: f32,
+    /// 0 is no clump. 0.6 is groves at up to 1.6 times the chance with thin clearings; 0.95 packs
+    /// the feature into patches over a fifth of the ground at up to 5 times the chance, with bare
+    /// ground between; 1 leaves nothing between patches at 6.6 times.
+    pub strength: f32,
+}
+
+/// Where patches start and how much ground they hold, per strength in hundredths.
+const CLUMP_STEPS: usize = 100;
+/// The share of the ground a full-strength clump leaves bare.
+const CLUMP_BARE_AT_FULL: f64 = 0.85;
+/// Half the width of the ramp from clearing to patch, in noise units.
+const CLUMP_RAMP: f32 = 0.05;
+
+struct ClumpShape {
+    /// The noise value a patch starts at.
+    cut: [f32; CLUMP_STEPS + 1],
+    /// The mean of the patch ramp over the plane, which the ramp is divided by so the factor
+    /// averages 1.
+    mean: [f32; CLUMP_STEPS + 1],
+}
+
+fn ramp(n: f32, cut: f32) -> f32 {
+    let t = ((n - (cut - CLUMP_RAMP)) / (2.0 * CLUMP_RAMP)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+/// Value noise is not uniform, so the cut that leaves a share of the ground bare is read off the
+/// noise's own distribution, measured once over a few thousand lattice cells.
+fn clump_shape() -> &'static ClumpShape {
+    static SHAPE: std::sync::OnceLock<ClumpShape> = std::sync::OnceLock::new();
+    SHAPE.get_or_init(|| {
+        const CELLS: usize = 192;
+        const PER_CELL: usize = 4;
+        let side = CELLS * PER_CELL;
+        let mut values: Vec<f32> = (0..side * side)
+            .map(|i| {
+                let (x, z) = (i % side, i / side);
+                let at = |c: usize| (c as f32 + 0.5) / PER_CELL as f32;
+                crate::noise::noise2(at(x), at(z), 0x5eed_c1a9)
+            })
+            .collect();
+        values.sort_by(f32::total_cmp);
+        let mut shape = ClumpShape {
+            cut: [0.0; CLUMP_STEPS + 1],
+            mean: [1.0; CLUMP_STEPS + 1],
+        };
+        for step in 0..=CLUMP_STEPS {
+            let bare = CLUMP_BARE_AT_FULL * step as f64 / CLUMP_STEPS as f64;
+            let cut = values[((bare * (values.len() - 1) as f64) as usize).min(values.len() - 1)];
+            let first = values.partition_point(|&v| v < cut - CLUMP_RAMP);
+            let last = values.partition_point(|&v| v < cut + CLUMP_RAMP);
+            let sum: f64 = values[first..last]
+                .iter()
+                .map(|&v| f64::from(ramp(v, cut)))
+                .sum::<f64>()
+                + (values.len() - last) as f64;
+            shape.cut[step] = cut;
+            shape.mean[step] = (sum / values.len() as f64) as f32;
+        }
+        shape
+    })
+}
+
+impl Clump {
+    /// `(cut, mean)` at this strength, interpolated between hundredths.
+    fn shape(&self) -> (f32, f32) {
+        let shape = clump_shape();
+        let at = self.strength.clamp(0.0, 1.0) * CLUMP_STEPS as f32;
+        let low = (at.floor() as usize).min(CLUMP_STEPS - 1);
+        let t = at - low as f32;
+        let lerp = |v: &[f32; CLUMP_STEPS + 1]| v[low] + (v[low + 1] - v[low]) * t;
+        (lerp(&shape.cut), lerp(&shape.mean))
+    }
+
+    /// The factor on a column's chance, from `1 - strength` in a clearing to [`Self::max_factor`] in
+    /// a patch, with a mean of 1 over the plane, so the declared spacing stays the mean spacing.
+    ///
+    /// A patch is where the noise passes a cut chosen to leave `0.85 * strength` of the ground bare,
+    /// ramped over a short distance; its factor is divided by the ramp's mean over the plane. A
+    /// strength below 1 lets `1 - strength` of the chance fall evenly on the clearings.
+    pub fn factor(&self, seed: u32, x_m: f32, z_m: f32) -> f64 {
+        let n = crate::noise::noise2(x_m / self.scale_m, z_m / self.scale_m, seed);
+        let (cut, mean) = self.shape();
+        let strength = f64::from(self.strength);
+        1.0 - strength + strength * f64::from(ramp(n, cut) / mean)
+    }
+
+    /// The most [`Self::factor`] reaches.
+    pub fn max_factor(&self) -> f64 {
+        let (_, mean) = self.shape();
+        let strength = f64::from(self.strength);
+        1.0 - strength + strength / f64::from(mean)
+    }
+
+    pub fn validate(&self) -> Result<(), ParamError> {
+        if !CLUMP_SCALE_M.contains(&self.scale_m) {
+            return Err(ParamError {
+                field: "biomes.surface_features.clump.scale_m",
+                rule: "must be from 4 to 1024 m",
+            });
+        }
+        if !(0.0..=1.0).contains(&self.strength) {
+            return Err(ParamError {
+                field: "biomes.surface_features.clump.strength",
+                rule: "must be from 0 to 1",
+            });
+        }
+        Ok(())
+    }
+}
+
+impl SurfaceFeature {
+    pub const fn cube(material: MaterialId, spacing_m: f32) -> Self {
+        SurfaceFeature {
+            material,
+            spacing_m,
+            plant: None,
+            clump: None,
+            field: None,
+        }
+    }
+}
+
+/// Most Stages a generated crop draws from.
+pub const MAX_SURFACE_STAGES: usize = 8;
+/// Most fruit Stages a generated tree draws from.
+pub const MAX_SURFACE_FRUIT_STAGES: usize = 4;
+
+/// What generation needs of one Plant, owned by the Biome so [`crate::WorldgenParams`] stays `Copy`
+/// and a Game that later changes the Plant cannot reshape a saved World.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct SurfacePlant {
+    /// The Shape every generated Voxel but a tree's takes, as a Player's Place of the seed would
+    /// have chosen it.
+    pub shape: ShapeId,
+    pub kind: SurfacePlantKind,
+}
+
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum SurfacePlantKind {
+    /// A crop's Stages in order, or the one Material of a spreader. One Voxel at a hash-drawn Stage.
+    Stages {
+        materials: [MaterialId; MAX_SURFACE_STAGES],
+        len: u8,
+        /// The Shape of each Stage that declares its own, over the Plant's.
+        stage_shapes: [Option<ShapeId>; MAX_SURFACE_STAGES],
+    },
+    /// A run standing on the ground, or in the lake when `stands_in` names its fluid.
+    Column {
+        material: MaterialId,
+        max_height_m: f32,
+        stands_in: Option<MaterialId>,
+    },
+    Tree(SurfaceTree),
+    /// A vine crop standing ripe, with its first fruit on the ground round it.
+    Vine(SurfaceVine),
+}
+
+/// A vine crop and the fruit it bears, frozen with the Biome like a tree's.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct SurfaceVine {
+    /// The ripe vine's Material, in the Plant's Shape.
+    pub material: MaterialId,
+    pub fruit: [MaterialId; MAX_SURFACE_FRUIT_STAGES],
+    pub len: u8,
+    /// The Shape of every fruit Voxel; the cube is `SHAPE_FULL_CUBE`.
+    pub fruit_shape: ShapeId,
+    pub stage_shapes: [Option<ShapeId>; MAX_SURFACE_FRUIT_STAGES],
+    pub reach_m: f32,
+    pub gap_m: f32,
+    pub max_fruit: u32,
+}
+
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct SurfaceTree {
+    pub trunk: MaterialId,
+    pub canopy: MaterialId,
+    pub trunk_height_m: (f32, f32),
+    pub canopy_radius_m: f32,
+    pub fruit: Option<SurfaceFruit>,
+    pub vines: Option<SurfaceVines>,
+    /// Frozen with the tree, like the vines, so a Game that later edits its row cannot reshape
+    /// a saved World.
+    pub branching: Option<crate::plant::Branching>,
+}
+
+impl SurfaceTree {
+    /// How far the tree reaches from its column, in metres.
+    pub fn reach_m(&self) -> f32 {
+        self.branching
+            .map_or(self.canopy_radius_m, |b| b.extent_m(self.canopy_radius_m))
+    }
+
+    /// Voxels a branched tree's cells can stand past its extent in metres: the lean, spread, limb
+    /// and lobe each round on their own.
+    pub fn rounding_slack_voxels(&self) -> i32 {
+        if self.branching.is_some() { 4 } else { 0 }
+    }
+
+    pub fn rounding_slack_m(&self, voxel_size: f32) -> f32 {
+        self.rounding_slack_voxels() as f32 * voxel_size
+    }
+}
+
+/// The vines worldgen hangs from a tree's outer canopy, frozen with the climber they are made of
+/// so a Game that later changes it cannot reshape a saved World.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct SurfaceVines {
+    pub material: MaterialId,
+    /// The climber's `plane` Shape.
+    pub shape: ShapeId,
+    /// The Orientation that lays the plane against each horizontal face, in the order of
+    /// [`VINE_FACES`]; resolved when the World is made because worldgen holds no Shape table.
+    pub orientations: [u8; 4],
+    /// Share of the outer canopy cells that hang a vine, from 0 to 0.5.
+    pub density: f32,
+    /// The longest a vine hangs, above 0 and at most 8.
+    pub length_m: f32,
+}
+
+/// Most vines per outer canopy cell, and longest hang in metres.
+pub const MAX_VINE_DENSITY: f32 = 0.5;
+pub const MAX_VINE_LENGTH_M: f32 = 8.0;
+
+/// The faces a vine can lie against, as [`crate::mesh::FACE_STEPS`] indices: the four sides.
+pub const VINE_FACES: [usize; 4] = [0, 1, 4, 5];
+
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct SurfaceFruit {
+    pub stages: [MaterialId; MAX_SURFACE_FRUIT_STAGES],
+    pub len: u8,
+    pub density: f32,
+    /// The Shape of every fruit Voxel; the cube is `SHAPE_FULL_CUBE`.
+    pub shape: ShapeId,
+    /// The Shape of each Stage that declares its own, over `shape`.
+    pub stage_shapes: [Option<ShapeId>; MAX_SURFACE_FRUIT_STAGES],
+}
+
+impl SurfacePlant {
+    /// Every Material it generates, first one first.
+    pub fn materials(&self) -> Vec<MaterialId> {
+        match self.kind {
+            SurfacePlantKind::Stages { materials, len, .. } => materials[..len as usize].to_vec(),
+            SurfacePlantKind::Column {
+                material,
+                stands_in,
+                ..
+            } => [Some(material), stands_in].into_iter().flatten().collect(),
+            SurfacePlantKind::Vine(v) => {
+                let mut all = vec![v.material];
+                all.extend_from_slice(&v.fruit[..v.len as usize]);
+                all
+            }
+            SurfacePlantKind::Tree(t) => {
+                let mut all = vec![t.trunk, t.canopy];
+                if let Some(f) = t.fruit {
+                    all.extend_from_slice(&f.stages[..f.len as usize]);
+                }
+                all.extend(t.vines.map(|v| v.material));
+                all
+            }
+        }
+    }
+
+    /// How far above its base it can stand, in metres, before rounding to Voxels.
+    pub fn rise_m(&self) -> f32 {
+        match self.kind {
+            SurfacePlantKind::Stages { .. } => 0.0,
+            SurfacePlantKind::Column { max_height_m, .. } => max_height_m,
+            SurfacePlantKind::Vine(_) => 0.0,
+            SurfacePlantKind::Tree(t) => {
+                t.trunk_height_m.1
+                    + t.canopy_radius_m
+                        .max(t.branching.map_or(0.0, |b| b.lobe_radius_m))
+            }
+        }
+    }
+
+    fn validate(&self) -> Result<(), ParamError> {
+        let bad = |rule| ParamError {
+            field: "biomes.surface_features.plant",
+            rule,
+        };
+        let finite_pos = |v: f32| v.is_finite() && v > 0.0;
+        match self.kind {
+            SurfacePlantKind::Stages { materials, len, .. } => {
+                if !(1..=MAX_SURFACE_STAGES as u8).contains(&len)
+                    || materials[..len as usize].contains(&AIR)
+                {
+                    return Err(bad("must hold 1 to 8 Stages, none Air"));
+                }
+            }
+            SurfacePlantKind::Column {
+                material,
+                max_height_m,
+                stands_in,
+            } => {
+                if material == AIR || stands_in == Some(AIR) || !finite_pos(max_height_m) {
+                    return Err(bad("a column needs a Material and a height"));
+                }
+            }
+            SurfacePlantKind::Vine(v) => {
+                let fruit = &v.fruit[..(v.len as usize).min(MAX_SURFACE_FRUIT_STAGES)];
+                if v.material == AIR
+                    || !(1..=MAX_SURFACE_FRUIT_STAGES as u8).contains(&v.len)
+                    || fruit.contains(&AIR)
+                    || !(v.reach_m.is_finite() && v.reach_m > 0.0 && v.reach_m <= 8.0)
+                    || !(v.gap_m.is_finite() && (0.0..=v.reach_m).contains(&v.gap_m))
+                    || !(1..=crate::plant::MAX_VINE_FRUIT).contains(&v.max_fruit)
+                {
+                    return Err(bad(
+                        "a vine needs a Material, 1 to 4 fruit Stages, a reach to 8 m, a gap within it and 1 to 16 fruit",
+                    ));
+                }
+            }
+            SurfacePlantKind::Tree(t) => {
+                let (low, high) = t.trunk_height_m;
+                let fruit = t.fruit.is_none_or(|f| {
+                    (1..=MAX_SURFACE_FRUIT_STAGES as u8).contains(&f.len)
+                        && (0.0..=1.0).contains(&f.density)
+                });
+                let vines = t.vines.is_none_or(|v| {
+                    v.material != AIR
+                        && v.orientations.iter().all(|&o| o < 24)
+                        && (0.0..=MAX_VINE_DENSITY).contains(&v.density)
+                        && v.length_m > 0.0
+                        && v.length_m <= MAX_VINE_LENGTH_M
+                });
+                if !vines {
+                    return Err(bad(
+                        "vines need a climber, a density to 0.5 and a length to 8 m",
+                    ));
+                }
+                if let Some(b) = t.branching
+                    && b.check(t.canopy_radius_m, low).is_err()
+                {
+                    return Err(bad("a tree's branching must be one the generator can draw"));
+                }
+                if t.trunk == AIR
+                    || t.canopy == AIR
+                    || !finite_pos(low)
+                    || !matches!(
+                        low.partial_cmp(&high),
+                        Some(std::cmp::Ordering::Less | std::cmp::Ordering::Equal)
+                    )
+                    || !finite_pos(t.canopy_radius_m)
+                    || !fruit
+                {
+                    return Err(bad("a tree needs a trunk, canopy, height and radius"));
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+/// A crop a planted field draws a plot's crop from, frozen like a Plant feature's.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct FieldCrop {
+    /// The Shape every Stage takes that declares none, as a Player's Place of the seed would have
+    /// chosen it.
+    pub shape: ShapeId,
+    pub materials: [MaterialId; MAX_SURFACE_STAGES],
+    /// Stages in order; the last is ripe.
+    pub len: u8,
+    pub stage_shapes: [Option<ShapeId>; MAX_SURFACE_STAGES],
+    pub weight: f32,
+}
+
+impl FieldCrop {
+    pub const NONE: FieldCrop = FieldCrop {
+        shape: SHAPE_FULL_CUBE,
+        materials: [AIR; MAX_SURFACE_STAGES],
+        len: 0,
+        stage_shapes: [None; MAX_SURFACE_STAGES],
+        weight: 0.0,
+    };
+
+    /// A crop of the Stages `materials`, in order, each in the Shape `stage_shapes` gives it or
+    /// else `shape`.
+    pub fn new(
+        shape: ShapeId,
+        materials: &[MaterialId],
+        stage_shapes: &[Option<ShapeId>],
+        weight: f32,
+    ) -> Result<Self, ParamError> {
+        if materials.len() > MAX_SURFACE_STAGES || stage_shapes.len() > MAX_SURFACE_STAGES {
+            return Err(ParamError {
+                field: "biomes.crop_fields.crops",
+                rule: "holds at most 8 Stages",
+            });
+        }
+        let mut crop = FieldCrop {
+            shape,
+            len: materials.len() as u8,
+            weight,
+            ..FieldCrop::NONE
+        };
+        crop.materials[..materials.len()].copy_from_slice(materials);
+        crop.stage_shapes[..stage_shapes.len()].copy_from_slice(stage_shapes);
+        Ok(crop)
+    }
+
+    /// The Voxel of Stage `stage`.
+    pub fn voxel(&self, stage: usize) -> crate::Voxel {
+        let shape = self.stage_shapes[stage].unwrap_or(self.shape);
+        crate::Voxel::new(self.materials[stage], shape, 0)
+    }
+
+    fn stages(&self) -> &[MaterialId] {
+        &self.materials[..(self.len as usize).min(MAX_SURFACE_STAGES)]
+    }
+}
+
+/// Rectangular plots of one crop in rows, with paths between them and a ditch along the low edge,
+/// scattered over a Biome as a pure function of the seed and a position in metres.
+///
+/// A lattice cell `spacing_m` on a side draws whether it holds a field; a field is a small grid of
+/// plots `plot_m` on a side, each one crop planted every second row, set apart by lanes one Voxel
+/// wide. It stands only on level ground that is wholly in its Biome, clear of the lake, caves and
+/// trees.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct CropField {
+    pub crops: [FieldCrop; MAX_FIELD_CROPS],
+    pub len: u8,
+    /// A plot's side is drawn from this range, in metres.
+    pub plot_m: (f32, f32),
+    /// The mean distance between fields, in metres.
+    pub spacing_m: f32,
+    /// A solid Material the lanes are laid in; none leaves the ground bare.
+    pub path: Option<MaterialId>,
+    /// A fluid the lane along the field's low edge is filled with; none cuts no ditch.
+    pub ditch: Option<MaterialId>,
+    /// The field stands only within this distance of the lake; none is anywhere.
+    pub near_water_m: Option<f32>,
+}
+
+impl CropField {
+    const NONE: CropField = CropField {
+        crops: [FieldCrop::NONE; MAX_FIELD_CROPS],
+        len: 0,
+        plot_m: (0.0, 0.0),
+        spacing_m: 0.0,
+        path: None,
+        ditch: None,
+        near_water_m: None,
+    };
+
+    /// An empty field to add crops to with [`Self::push`]; checked by [`SurfaceFeatures::with_crop_fields`].
+    pub fn new(
+        plot_m: (f32, f32),
+        spacing_m: f32,
+        path: Option<MaterialId>,
+        ditch: Option<MaterialId>,
+        near_water_m: Option<f32>,
+    ) -> Self {
+        CropField {
+            plot_m,
+            spacing_m,
+            path,
+            ditch,
+            near_water_m,
+            ..CropField::NONE
+        }
+    }
+
+    pub fn push(&mut self, crop: FieldCrop) -> Result<(), ParamError> {
+        if self.len as usize == MAX_FIELD_CROPS {
+            return Err(ParamError {
+                field: "biomes.crop_fields",
+                rule: "needs 1 to 4 crops",
+            });
+        }
+        self.crops[self.len as usize] = crop;
+        self.len += 1;
+        Ok(())
+    }
+
+    pub fn crops(&self) -> &[FieldCrop] {
+        &self.crops[..(self.len as usize).min(MAX_FIELD_CROPS)]
+    }
+
+    /// Every Material the field puts in the World.
+    pub fn materials(&self) -> Vec<MaterialId> {
+        let mut all: Vec<MaterialId> = self
+            .crops()
+            .iter()
+            .flat_map(|c| c.stages())
+            .copied()
+            .collect();
+        all.extend(self.path);
+        all.extend(self.ditch);
+        all
+    }
+
+    fn validate(&self) -> Result<(), ParamError> {
+        let bad = |rule| ParamError {
+            field: "biomes.crop_fields",
+            rule,
+        };
+        if !(1..=MAX_FIELD_CROPS as u8).contains(&self.len) {
+            return Err(bad("needs 1 to 4 crops"));
+        }
+        for crop in self.crops() {
+            if !(2..=MAX_SURFACE_STAGES as u8).contains(&crop.len)
+                || crop.stages().contains(&AIR)
+                || !(crop.weight.is_finite() && crop.weight > 0.0)
+            {
+                return Err(bad("a crop needs 2 to 8 Stages and a weight above 0"));
+            }
+        }
+        let (low, high) = self.plot_m;
+        if !(FIELD_PLOT_M.contains(&low) && FIELD_PLOT_M.contains(&high) && low <= high) {
+            return Err(bad("a plot side must be from 6 to 24 m, low to high"));
+        }
+        if !FIELD_SPACING_M.contains(&self.spacing_m) {
+            return Err(bad("spacing must be from 32 to 256 m"));
+        }
+        if self.path == Some(AIR) || self.ditch == Some(AIR) {
+            return Err(bad("a path or ditch must not be Air"));
+        }
+        if self
+            .near_water_m
+            .is_some_and(|m| !(m.is_finite() && m > 0.0 && m <= self.spacing_m))
+        {
+            return Err(bad("near water must be above 0 and at most the spacing"));
+        }
+        Ok(())
+    }
+}
+
+/// At most [`MAX_SURFACE_FEATURES`], in declaration order, and at most [`MAX_CROP_FIELDS`] planted
+/// fields.
+///
+/// Held inline so a Biome stays `Copy`: 16 features and 2 fields measure a Biome at about 2.7 KiB,
+/// and generation reads them by reference, so the size is paid only when a table is copied, never
+/// per column.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct SurfaceFeatures {
     len: u8,
     features: [SurfaceFeature; MAX_SURFACE_FEATURES],
+    crop_len: u8,
+    crop_fields: [CropField; MAX_CROP_FIELDS],
 }
 
 impl Default for SurfaceFeatures {
@@ -350,17 +957,16 @@ impl Default for SurfaceFeatures {
 impl SurfaceFeatures {
     pub const NONE: SurfaceFeatures = SurfaceFeatures {
         len: 0,
-        features: [SurfaceFeature {
-            material: AIR,
-            spacing_m: 0.0,
-        }; MAX_SURFACE_FEATURES],
+        features: [SurfaceFeature::cube(AIR, 0.0); MAX_SURFACE_FEATURES],
+        crop_len: 0,
+        crop_fields: [CropField::NONE; MAX_CROP_FIELDS],
     };
 
     pub fn new(features: &[SurfaceFeature]) -> Result<Self, ParamError> {
         if features.len() > MAX_SURFACE_FEATURES {
             return Err(ParamError {
                 field: "biomes.surface_features",
-                rule: "holds at most 4 features",
+                rule: "holds at most 16 features",
             });
         }
         if features.iter().any(|f| f.material == AIR) {
@@ -369,13 +975,31 @@ impl SurfaceFeatures {
                 rule: "must not be Air",
             });
         }
+        for plant in features.iter().filter_map(|f| f.plant) {
+            plant.validate()?;
+        }
+        for clump in features.iter().filter_map(|f| f.clump) {
+            clump.validate()?;
+        }
+        for field in features.iter().filter_map(|f| f.field) {
+            field.validate()?;
+            let mismatched = features.iter().filter_map(|f| f.field).any(|g| {
+                g.group == field.group && (g.scale_m, g.strays) != (field.scale_m, field.strays)
+            });
+            if mismatched {
+                return Err(ParamError {
+                    field: "biomes.surface_features.field",
+                    rule: "must give every member of a group the same scale and strays",
+                });
+            }
+        }
         if !features
             .iter()
             .all(|f| SURFACE_FEATURE_SPACING_M.contains(&f.spacing_m))
         {
             return Err(ParamError {
                 field: "biomes.surface_features.spacing_m",
-                rule: "must be from 4 to 1024 m",
+                rule: "must be from 1 to 1024 m",
             });
         }
         let mut table = Self::NONE;
@@ -384,12 +1008,32 @@ impl SurfaceFeatures {
         Ok(table)
     }
 
+    /// This table with `fields` as its planted fields.
+    pub fn with_crop_fields(mut self, fields: &[CropField]) -> Result<Self, ParamError> {
+        if fields.len() > MAX_CROP_FIELDS {
+            return Err(ParamError {
+                field: "biomes.crop_fields",
+                rule: "holds at most 2 fields",
+            });
+        }
+        for field in fields {
+            field.validate()?;
+        }
+        self.crop_fields[..fields.len()].copy_from_slice(fields);
+        self.crop_len = fields.len() as u8;
+        Ok(self)
+    }
+
     pub fn as_slice(&self) -> &[SurfaceFeature] {
         &self.features[..self.len as usize]
     }
 
+    pub fn crop_fields(&self) -> &[CropField] {
+        &self.crop_fields[..self.crop_len as usize]
+    }
+
     pub fn is_empty(&self) -> bool {
-        self.len == 0
+        self.len == 0 && self.crop_len == 0
     }
 }
 

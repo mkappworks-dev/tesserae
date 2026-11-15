@@ -15,8 +15,8 @@ use bevy::prelude::*;
 use tesserae_core::{MaterialId, SHAPE_FULL_CUBE, ShapeId, Tables, WorldgenParams};
 use tesserae_mods::{
     Kind, ModHost, ModInstance, Registered, Registry, Scan, Trust, Verdict, ViewParams, WorldInfo,
-    apply, games_dir, migrate_legacy_games, plan, resolve, resolve_biomes, resolve_items,
-    resolve_sounds, scan,
+    apply, biome_rows, games_dir, migrate_legacy_games, plan, resolve, resolve_biomes,
+    resolve_items, resolve_sounds, scan,
 };
 
 use crate::content::{
@@ -175,6 +175,7 @@ impl LoadedMods {
 fn placeable(tables: &Tables, material: MaterialId) -> bool {
     (tables.materials.def(material).solid || tables.fluids.rank(material).is_some())
         && !tables.uses.is_open(material)
+        && !tables.plants.is_grown(material)
 }
 
 #[derive(Resource)]
@@ -604,15 +605,34 @@ pub(crate) async fn declare_all(
     loaded.items =
         resolve_items(&behaviours, &loaded.tables, &loaded.registry).map_err(|e| e.to_string())?;
     loaded.sounds = resolve_sounds(&behaviours, &loaded.registry).map_err(|e| e.to_string())?;
-    let (biomes, ores) =
-        resolve_biomes(&behaviours, &loaded.tables, &loaded.registry).map_err(|e| e.to_string())?;
+    let biome_rows = biome_rows(&behaviours);
+    let recipes = tesserae_mods::DeclaredRecipes::take(&mut behaviours);
+    let plants = tesserae_mods::DeclaredPlants::take(&mut behaviours);
+    let (ground, lake) =
+        resolve(behaviours, &mut loaded.tables, &loaded.registry).map_err(|e| e.to_string())?;
+    // Grown Materials decide which implicit Items exist, so Plants resolve
+    // before the Items and are checked against them after.
+    loaded.tables.plants = plants
+        .resolve(&loaded.registry, &loaded.tables)
+        .map_err(|e| e.to_string())?;
+    plants
+        .check_items(
+            &loaded.tables.plants,
+            &loaded.every_item(world.voxel_size).0,
+        )
+        .map_err(|e| e.to_string())?;
+    // After the Plant table, because a surface feature may name a Plant.
+    let (biomes, ores) = resolve_biomes(
+        &biome_rows,
+        &loaded.tables,
+        &loaded.registry,
+        lake.map(|l| l.material),
+    )
+    .map_err(|e| e.to_string())?;
     if !biomes.is_empty() || !ores.is_empty() {
         // A Mod's Biomes need a World to live in even when the Game sets no terrain.
         loaded.world.get_or_insert_with(WorldgenParams::default);
     }
-    let recipes = tesserae_mods::DeclaredRecipes::take(&mut behaviours);
-    let (ground, lake) =
-        resolve(behaviours, &mut loaded.tables, &loaded.registry).map_err(|e| e.to_string())?;
     loaded.recipes = recipes
         .resolve(
             &loaded.every_item(world.voxel_size).0,
@@ -828,6 +848,7 @@ fn install(world: &mut World) {
                 color: item.color,
                 material: item.material,
                 max_stack: item.max_stack,
+                texture: item.texture.as_deref().map(Into::into),
             })
             .collect(),
     ));
@@ -893,7 +914,10 @@ pub(in crate::server) fn catalogue(
                 solid: tables.materials.def(id).solid,
                 fluid: tables.fluids.rank(id),
                 burns: tables.combustion.contains(id),
-                shape: tables.uses.shape(id),
+                shape: tables
+                    .uses
+                    .shape(id)
+                    .or_else(|| tables.plants.fixed_shape(id)),
                 door: tables.uses.door(id),
             }
         })
@@ -911,6 +935,12 @@ pub(in crate::server) fn catalogue(
                 geometry: tables.shapes.preview_geometry(id),
                 turnable: id != SHAPE_FULL_CUBE && !tables.shapes.is_connected_shape(id),
                 fixed: tables.uses.fixes(id),
+                // Any non-air Material: air has no Shape.
+                form: tables.shapes.form_of(tesserae_core::Voxel::shaped(
+                    1,
+                    id,
+                    tesserae_core::Orientation::IDENTITY,
+                )),
             }
         })
         .collect();
@@ -945,7 +975,7 @@ pub(super) fn terra_for_save(
 }
 
 #[cfg(test)]
-mod demo_games;
+pub(in crate::server) mod demo_games;
 
 #[cfg(test)]
 mod tests {
@@ -1991,7 +2021,7 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
         assert_eq!(uniform.palette[9], Vec4::new(1.0, 0.0, 1.0, 1.0));
         assert_eq!(
             uniform.palette.len(),
-            64 + 1,
+            crate::render::chunk_material::PALETTE_LEN + 1,
             "the Materials' and the flames'"
         );
         app.update();
@@ -2243,7 +2273,11 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
         );
         assert!(!turnable.iter().any(|(name, _)| name.starts_with("dev:")));
         let ids: Vec<_> = catalogue.materials.iter().map(|m| m.id).collect();
-        assert_eq!(ids, std::iter::once(0).chain(8..30).collect::<Vec<_>>());
+        let last = ids.len() as u16;
+        assert_eq!(
+            ids,
+            std::iter::once(0).chain(8..7 + last).collect::<Vec<_>>()
+        );
     }
 
     #[test]
@@ -2268,7 +2302,7 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
             .expect("Terra declares the Workbench Recipe");
         assert_eq!(book.0[at].station, Station::Hand);
         let mut inventory = super::super::inventory::Inventory::default();
-        inventory.receive("terra:wood", 4, 64);
+        inventory.receive("flora:log", 4, 64);
         app.world_mut()
             .spawn((super::super::player::Player::at(Vec3::ZERO), inventory));
         app.world_mut().write_message(super::super::craft::Craft {
@@ -2282,7 +2316,7 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
             .world_mut()
             .query::<&super::super::inventory::Inventory>();
         let held = held.single(app.world()).unwrap();
-        assert_eq!(held.count("terra:wood"), 0);
+        assert_eq!(held.count("flora:log"), 0);
         assert_eq!(held.count("terra:workbench"), 1);
     }
 
@@ -2309,14 +2343,14 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
             .next()
             .unwrap()
             .0;
-        assert!((10..=15).contains(&book.len()), "{}", book.len());
+        assert!((10..=30).contains(&book.len()), "{}", book.len());
         let at = |item: &str| {
             let at = book.iter().position(|r| r.output.item == item).unwrap();
             assert_eq!(book[at].station, Station::Tag("workbench".into()));
             at
         };
         let mut inventory = super::super::inventory::Inventory::default();
-        inventory.receive("terra:wood", 13, 64);
+        inventory.receive("flora:log", 13, 64);
         let player = app
             .world_mut()
             .spawn((super::super::player::Player::at(Vec3::ZERO), inventory))
@@ -2350,7 +2384,7 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
             .world_mut()
             .query::<&super::super::inventory::Inventory>();
         let held = held.single(app.world()).unwrap();
-        assert_eq!(held.count("terra:wood"), 0);
+        assert_eq!(held.count("flora:log"), 0);
         assert_eq!(held.count("terra:chest"), 1);
         assert_eq!(held.count("terra:door"), 1);
         assert_eq!(held.count("terra:gate"), 1);
@@ -2376,6 +2410,57 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
     }
 
     #[test]
+    fn terra_produce_carries_its_texture_to_the_client_and_its_seeds_name_a_flat_shape() {
+        let loaded = super::runtime::tests::terra_loaded(1.0);
+        let mut app = App::new();
+        app.add_message::<crate::content::ItemLooks>()
+            .insert_non_send(loaded)
+            .add_plugins(plugin);
+        let looks = app
+            .world_mut()
+            .resource_mut::<Messages<crate::content::ItemLooks>>()
+            .drain()
+            .next()
+            .unwrap();
+        let catalogue = app
+            .world_mut()
+            .resource_mut::<Messages<ContentCatalogue>>()
+            .drain()
+            .next()
+            .unwrap();
+        let look = |name: &str| looks.0.iter().find(|l| l.name == name).unwrap();
+        for produce in [
+            "crops:wheat",
+            "crops:bread",
+            "crops:berries",
+            "crops:berry_pie",
+            "flora:apple",
+        ] {
+            let item = look(produce);
+            let pixels = item.texture.as_deref().expect(produce);
+            assert_eq!(pixels.len(), tesserae_mods::ITEM_TEXTURE_BYTES);
+            assert!(
+                pixels.as_chunks::<4>().0.iter().any(|p| p[3] == 0),
+                "{produce} has clear ground"
+            );
+            assert!(
+                pixels.as_chunks::<4>().0.iter().any(|p| p[3] == 255),
+                "{produce} is drawn"
+            );
+        }
+        assert!(
+            look("terra:rock").texture.is_none(),
+            "solid Items stay cubes"
+        );
+        let seeds = look("crops:wheat_seeds");
+        let sprout = catalogue.material(seeds.material.unwrap()).unwrap();
+        let shape = catalogue
+            .shape(sprout.shape.expect("a seed's fixed Shape"))
+            .unwrap();
+        assert!(shape.form.is_flat());
+    }
+
+    #[test]
     fn terra_preview_textures_reach_the_client_under_the_registered_material_ids() {
         let loaded = super::runtime::tests::terra_loaded(1.0);
         let mut app = App::new();
@@ -2392,8 +2477,12 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
             .drain()
             .next()
             .unwrap();
-        assert_eq!(textures.0.len(), 22);
-        for material in catalogue.materials.iter().filter(|m| m.id != 0) {
+        assert!(textures.0.len() >= 22);
+        for material in catalogue
+            .materials
+            .iter()
+            .filter(|m| m.name.starts_with("terra:"))
+        {
             let (_, pixels) = textures
                 .0
                 .iter()

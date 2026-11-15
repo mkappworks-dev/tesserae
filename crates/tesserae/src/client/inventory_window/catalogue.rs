@@ -125,6 +125,14 @@ pub(super) fn plugin(app: &mut App) {
         .add_observer(drag_start);
 }
 
+/// What a tile shows of `material`: a flat Shape's Material as its sprite.
+fn drawn(material: &crate::content::CatalogueMaterial, catalogue: &ContentCatalogue) -> Holding {
+    let held = material_holding(material);
+    crate::client::sprite::flat_material(held, catalogue).map_or(held, |id| {
+        Holding::Sprite(crate::client::sprite::Sprite::Material(id))
+    })
+}
+
 /// Placeable Materials in Catalogue order: solids, then fluids by rank.
 fn materials<'a>(
     catalogue: &'a ContentCatalogue,
@@ -135,7 +143,7 @@ fn materials<'a>(
         .materials
         .iter()
         .filter(|m| m.solid && m.fluid.is_none())
-        .map(|m| (m.id, m.name.as_str(), material_holding(m)));
+        .map(|m| (m.id, m.name.as_str(), drawn(m, catalogue)));
     let mut fluids: Vec<_> = catalogue
         .materials
         .iter()
@@ -513,7 +521,7 @@ fn transfer_rows(
         ));
         return;
     };
-    let holding = material_holding(chosen);
+    let holding = drawn(chosen, catalogue);
     footer
         .spawn(Node {
             align_items: AlignItems::Center,

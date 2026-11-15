@@ -58,6 +58,7 @@ fn collisions(c: Option<Vec<ot::CollisionBox>>) -> Option<Vec<types::CollisionBo
 
 fn shape(s: old::ShapeDef) -> content::ShapeDef {
     content::ShapeDef {
+        form: Default::default(),
         name: s.name,
         boxes: node_boxes(s.boxes),
         collision: collisions(s.collision),
@@ -96,6 +97,7 @@ fn material(m: old::MaterialDef) -> content::MaterialDef {
         remove_time_s: None,
         solid: m.solid,
         contact_damage_per_s: None,
+        tags: Vec::new(),
     }
 }
 
@@ -239,6 +241,7 @@ pub(crate) fn declaration(d: old::Declaration, log: &LogHandle) -> content::Decl
         cause_sounds: Vec::new(),
         recipes: Vec::new(),
         voxel_uses: Vec::new(),
+        plants: Vec::new(),
     }
 }
 

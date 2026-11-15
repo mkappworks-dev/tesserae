@@ -11,20 +11,22 @@ pub(in crate::server) fn apply_pending(
         ResMut<crate::server::undo::Journal>,
     ),
     (mut store, mut meshes): (ResMut<ChunkStore>, ResMut<MeshState>),
-    (mut rejected, mut applied_edits, mut heard): (
+    (mut rejected, mut applied_edits, mut heard, mut picked): (
         MessageWriter<EditRejected>,
         MessageWriter<EditApplied>,
         MessageWriter<crate::server::sound::SoundEvent>,
+        MessageWriter<crate::server::entities::Pickup>,
     ),
     (tables, world, sounds): (
         Res<ContentTables>,
         Res<WorldSettings>,
         Res<crate::server::sound::SoundTable>,
     ),
-    (mut entities, items, containers): (
+    (mut entities, items, containers, mut needs): (
         ResMut<crate::server::entities::EntityStore>,
         Res<crate::server::items::Items>,
         Option<Res<crate::server::container::Containers>>,
+        MessageWriter<crate::server::plants::PlantNeedsSoil>,
     ),
     mut players: Query<(&Player, &mut crate::server::inventory::Inventory)>,
 ) {
@@ -61,6 +63,41 @@ pub(in crate::server) fn apply_pending(
                 }
             })
             .and_then(|(at, change)| {
+                if matches!(change, Change::Solid(voxel) if voxel.is_air())
+                    && crate::server::plants::is_ripe(&store, &tables, at)
+                {
+                    // A harvest, so no journal entry: undo has no removal to take back.
+                    return crate::server::plants::harvest(
+                        (&mut store, &mut meshes),
+                        &tables,
+                        &world,
+                        &mut history,
+                        (&items, &mut entities, &mut inventory),
+                        &mut picked,
+                        player.body(),
+                        at,
+                    );
+                }
+                let change = match change {
+                    Change::Solid(voxel) if voxel.is_air() => {
+                        crate::server::plants::left_by_removal(&store, &tables, at)
+                            .map_or(change, Change::Solid)
+                    }
+                    _ => change,
+                };
+                if let Change::Solid(voxel) = change
+                    && let Some(text) = crate::server::plants::soil_refusal(
+                        &store,
+                        &tables,
+                        &items,
+                        voxel,
+                        at,
+                        &|_| None,
+                    )
+                {
+                    needs.write(crate::server::plants::PlantNeedsSoil { text });
+                    return Err(RejectReason::NeedsSoil);
+                }
                 let cells = whole(&store, &tables, &world, &p.intent, at, change);
                 land_whole(
                     (&mut store, &mut meshes),
@@ -80,7 +117,7 @@ pub(in crate::server) fn apply_pending(
                             .expect("counted before the Voxel changed");
                         entry.cost = Cost::Paid(item.clone());
                     }
-                    if let Some((cause, material)) = heard_as(p.intent.action, entry) {
+                    if let Some((cause, material)) = heard_as(p.intent.action, entry, &tables) {
                         heard.write_batch(sounds.voxel(
                             cause,
                             material,
@@ -92,19 +129,41 @@ pub(in crate::server) fn apply_pending(
                     // Spawned here rather than from a message so the Entry
                     // holds the Dropped item an undo takes back. An open Door
                     // drops what its closed state does.
-                    if let Some(material) = removal(p.intent.action, entry)
-                        && let Some(item) = items.dropped_by(tables.uses.closed(material))
-                    {
-                        let id = crate::server::entities::drop_one(
-                            &mut entities,
-                            &tables.terrain(&store, world.voxel_size),
-                            &items,
-                            entry.at,
-                            item,
-                        );
-                        entry.cost = Cost::Dropped(items.0[item].name.clone(), id);
+                    if let Some(material) = removal(p.intent.action, entry, &tables) {
+                        if let Some(yielded) = crate::server::plants::drops(
+                            &tables, &items, world.seed, entry.at, material,
+                        ) {
+                            let terrain = tables.terrain(&store, world.voxel_size);
+                            let drops: Vec<_> = yielded
+                                .into_iter()
+                                .map(|(item, count)| crate::server::undo::Drop {
+                                    item: items.0[item].name.clone(),
+                                    count,
+                                    id: crate::server::entities::drop_many(
+                                        &mut entities,
+                                        &terrain,
+                                        &items,
+                                        entry.at,
+                                        item,
+                                        count,
+                                    ),
+                                })
+                                .collect();
+                            if !drops.is_empty() {
+                                entry.cost = Cost::Yielded(drops);
+                            }
+                        } else if let Some(item) = items.dropped_by(tables.uses.closed(material)) {
+                            let id = crate::server::entities::drop_one(
+                                &mut entities,
+                                &tables.terrain(&store, world.voxel_size),
+                                &items,
+                                entry.at,
+                                item,
+                            );
+                            entry.cost = Cost::Dropped(items.0[item].name.clone(), id);
+                        }
                     }
-                    if let Some(kind) = applied_kind(p.intent.action, entry) {
+                    if let Some(kind) = applied_kind(p.intent.action, entry, &tables) {
                         applied_edits.write(EditApplied { at: entry.at, kind });
                     }
                     journal.record_group(group)
@@ -139,6 +198,8 @@ pub(in crate::server) fn apply_pending(
         &world,
         body,
         &mut inventory,
+        &items,
+        &mut needs,
     );
     for (at, material) in started {
         heard.write_batch(sounds.voxel(Cause::Place, material, at, world.voxel_size, player.eye()));
@@ -232,8 +293,12 @@ fn land_whole(
 }
 
 /// What a Player's own single Place or Remove did, for the Client to show.
-fn applied_kind(action: EditAction, entry: &crate::server::undo::Entry) -> Option<AppliedKind> {
-    if let Some(material) = removal(action, entry) {
+fn applied_kind(
+    action: EditAction,
+    entry: &crate::server::undo::Entry,
+    tables: &Tables,
+) -> Option<AppliedKind> {
+    if let Some(material) = removal(action, entry, tables) {
         return Some(AppliedKind::Removed(material));
     }
     match (action, entry.event.kind) {
@@ -250,8 +315,12 @@ fn applied_kind(action: EditAction, entry: &crate::server::undo::Entry) -> Optio
 
 /// The Voxel Cause a Player's own single Edit is heard with, and the Material
 /// whose Sound set voices it. A held fluid arrives here as `PlaceSource`.
-fn heard_as(action: EditAction, entry: &crate::server::undo::Entry) -> Option<(Cause, MaterialId)> {
-    if let Some(material) = removal(action, entry) {
+fn heard_as(
+    action: EditAction,
+    entry: &crate::server::undo::Entry,
+    tables: &Tables,
+) -> Option<(Cause, MaterialId)> {
+    if let Some(material) = removal(action, entry, tables) {
         return Some((Cause::Break, material));
     }
     match (action, entry.event.kind) {
@@ -342,10 +411,17 @@ pub(super) fn land(
 pub(super) fn removal(
     action: EditAction,
     entry: &crate::server::undo::Entry,
+    tables: &Tables,
 ) -> Option<MaterialId> {
     match (action, entry.event.kind) {
         (EditAction::Remove | EditAction::RemoveAt(_), EditKind::Solid { before, after })
             if after.is_air() && !before.is_air() =>
+        {
+            Some(before.material())
+        }
+        // A picked fruit leaves canopy, which is a removal all the same.
+        (EditAction::Remove | EditAction::RemoveAt(_), EditKind::Solid { before, after })
+            if tables.plants.canopy_of_fruit(before.material()) == Some(after.material()) =>
         {
             Some(before.material())
         }

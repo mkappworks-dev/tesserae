@@ -45,6 +45,7 @@ pub(super) fn spawn(
     let mut focus = None;
     // A dialog draws over the page it asks about.
     let page = match &l.screen {
+        Screen::Delete(_) if l.from_menu => Screen::Worlds,
         Screen::Delete(path) => Screen::Edit(path.clone()),
         Screen::Discard(step) => Screen::Create(*step),
         screen => screen.clone(),
@@ -596,7 +597,8 @@ fn worlds(
                 }
                 gap(body, 10.0);
                 for entry in &l.entries {
-                    let play = world_card(body, entry, installed);
+                    let open = l.menu.as_deref() == Some(entry.path.as_path());
+                    let play = world_card(body, entry, installed, open);
                     if focus.is_none() || l.selected.as_deref() == Some(entry.path.as_path()) {
                         focus = play.or(focus);
                     }
@@ -788,11 +790,12 @@ fn thumbnail(parent: &mut ChildSpawnerCommands, node: Node) {
 #[derive(Component)]
 pub(super) struct HalfTree(pub(super) f32);
 
-/// One World with Play and Edit side by side; returns Play when it can open.
+/// One World with Play and a menu of Edit and Delete; returns Play when it can open.
 fn world_card(
     body: &mut ChildSpawnerCommands,
     entry: &Entry,
     installed: &Installed,
+    menu_open: bool,
 ) -> Option<Entity> {
     let name = entry.name().unwrap_or(UNNAMED);
     let unmet = entry
@@ -933,15 +936,79 @@ fn world_card(
                 });
                 play = Some(button);
             }
-            buttons::button(
-                actions,
-                "Edit",
-                Act::Edit(entry.path.clone()),
-                ButtonStyle::Small { kind: Kind::Ghost },
-            );
+            card_menu(actions, &entry.path, menu_open);
         });
     });
     play
+}
+
+/// The three dots at the end of a card, and under them, when open, Edit and Delete.
+fn card_menu(actions: &mut ChildSpawnerCommands, path: &Path, open: bool) {
+    actions
+        .spawn(Node {
+            position_type: PositionType::Relative,
+            ..default()
+        })
+        .with_children(|wrap| {
+            let dots = buttons::button(
+                wrap,
+                "",
+                Act::Menu(path.to_path_buf()),
+                ButtonStyle::Small { kind: Kind::Ghost },
+            );
+            wrap.commands()
+                .entity(dots)
+                .insert(Node {
+                    min_width: Val::Px(36.0),
+                    min_height: Val::Px(40.0),
+                    border: UiRect::all(Val::Px(theme::RULE)),
+                    border_radius: BorderRadius::all(Val::Px(theme::RADIUS_CONTROL)),
+                    flex_direction: FlexDirection::Column,
+                    align_items: AlignItems::Center,
+                    justify_content: JustifyContent::Center,
+                    row_gap: Val::Px(3.0),
+                    ..default()
+                })
+                .with_children(|d| {
+                    for _ in 0..3 {
+                        d.spawn((
+                            Node {
+                                width: Val::Px(4.0),
+                                height: Val::Px(4.0),
+                                border_radius: BorderRadius::MAX,
+                                ..default()
+                            },
+                            BackgroundColor(theme::INK),
+                            Pickable::IGNORE,
+                        ));
+                    }
+                });
+            if !open {
+                return;
+            }
+            wrap.spawn((
+                Node {
+                    position_type: PositionType::Absolute,
+                    top: Val::Percent(100.0),
+                    right: Val::Px(0.0),
+                    margin: UiRect::top(Val::Px(4.0)),
+                    padding: UiRect::all(Val::Px(4.0)),
+                    min_width: Val::Px(140.0),
+                    flex_direction: FlexDirection::Column,
+                    border: UiRect::all(Val::Px(theme::RULE)),
+                    border_radius: BorderRadius::all(Val::Px(8.0)),
+                    ..default()
+                },
+                GlobalZIndex(5),
+                BackgroundColor(theme::MENU_POPOVER),
+                BorderColor::all(theme::edge()),
+                theme::shadow(),
+            ))
+            .with_children(|menu| {
+                cine::menu_item(menu, "Edit", Act::Edit(path.to_path_buf()), false);
+                cine::menu_item(menu, "Delete", Act::DeleteWorld(path.to_path_buf()), true);
+            });
+        });
 }
 
 fn library_page(
@@ -1224,7 +1291,7 @@ fn edit(
                             theme::muted(),
                         );
                         gap(c, 8.0);
-                        small_button(c, "Delete World\u{2026}", Act::Delete, Kind::Danger);
+                        small_button(c, "Delete World", Act::Delete, Kind::Danger);
                     },
                 );
             },

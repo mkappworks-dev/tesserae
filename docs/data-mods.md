@@ -38,10 +38,17 @@ surface = "plain:rock"
 ```
 
 Material rows require the six fields above and accept optional `remove-time-s`
-and `contact-damage-per-s`. `occlusion` is `opaque`, `same-material` or `never`;
-`render` is `opaque`, `blend` or `cutout`. Appearance colours are four RGBA
-bytes; Material names in appearance are local, while ground names include the
-Mod id. Both formats use the same content bounds and validation.
+`contact-damage-per-s` and `tags`. `occlusion` is `opaque`, `same-material` or
+`never`; `render` is `opaque`, `blend` or `cutout`. Appearance colours are four
+RGBA bytes; Material names in appearance are local, while ground names include
+the Mod id. Both formats use the same content bounds and validation.
+
+`tags` is a list of at most 8 labels, each `[a-z][a-z0-9-]{0,31}`, such as
+`soil`, `sand` or `water`. A Plant's `needs.soil`, a column's `stands-in` and a
+`needs.water.fluid` take either a Material's full name or `#<tag>`, which means
+every Material of every loaded Mod that carries the tag, solid ones for soil and
+fluids for water. A tag that matches none is a load error naming the Plant, so a
+shared Mod can say `#soil` and grow in any Game whose ground carries it.
 
 An appearance row may add `texture = "art/rock.png"`: a PNG inside the Mod
 directory, exactly 48 by 16 pixels (three 16 by 16 faces), used for Material
@@ -115,16 +122,30 @@ Unlike `ground`, it blends smoothly across a Biome's border, so there is no wall
 where a cave field meets a solid one. It does nothing in a World without
 `[world.caves]`, and caves still only turn solid into air.
 
-A Biome row may also add `surface-features`, at most four
-`{ material, spacing-m }` entries: a solid Material by full name from any Mod,
-and the mean distance between two of them in metres, from 4 to 1024. The Engine
-stands one, deterministically from the World seed, about once in every
+A Biome row may also add `surface-features`, at most 16
+`{ material, spacing-m }` or `{ plant, shape, spacing-m }` entries: exactly one
+of `material`, a solid Material by full name from any Mod, and `plant`, a
+[Plant](authoring-guide.md#plants) by full name, with an optional `shape` that
+overrides the Plant's own, and the mean distance between two of them in metres,
+from 1 to 1024. An optional `clump = { scale-m, strength }` (4 to 1024 m, 0
+to 1) gathers a feature into groves and clearings, at the same mean spacing. The
+Engine stands one, deterministically from the World seed, about once in every
 `spacing-m` by `spacing-m` metres of the Biome's surface at any Voxel size, one
 Voxel above a column whose top is a full Voxel of the Biome's surface Material
-with air above it: never under water or another fluid, on a smoothed stair or
-slab, or in a cave mouth. Removing one drops its Item like any Voxel. The coarse
-LOD levels leave them out. The World's saved Biome table carries them, so a
-World saved before a Game added features keeps its bare ground.
+with air above it: never under water or another fluid (a column Plant that
+declares `stands-in` stands in the lake), on a smoothed stair or slab, or in a
+cave mouth. Chances add up; past a sum of 1 the earlier entries take the column,
+so list rare features first. Removing one drops its Item like any Voxel. The
+coarse LOD levels leave them out. The World's saved Biome table carries them, so
+a World saved before a Game added features keeps its bare ground.
+
+A feature may add `field = { group, scale-m, strays }` so the features of a
+Biome that share a group hold one species to a region of the ground, with a few
+strays, and a Biome row may add `crop-fields`, at most two entries of
+rectangular plots of one crop in rows, with a path between them, a ditch along
+the low edge and an optional distance from the lake. Both are pure functions of
+the seed and positions in metres. The rules and an example of each are in the
+authoring guide's [Fields](authoring-guide.md#fields).
 
 Tables that are absent change nothing: a World with no Biomes generates as it
 always did.
@@ -332,7 +353,11 @@ An item row is `name`, `size-m` (the dropped cube's edge, 0.05 to 0.5 m),
 removed Voxels drop it. Any Mod may declare items, at most 64 per Mod and 256 in
 a World; two items may not name one Material. Lines 0.1 and 0.2 declare none. An
 item may also set `max-stack`, the most one Inventory slot holds (1 to 64,
-omitted is 64), and `food`, the hunger eating one restores.
+omitted is 64), and `food`, the hunger eating one restores. A `texture`, a path
+to a 16 by 16 PNG in the Mod directory, draws the Item as a flat sprite in the
+hand, the hotbar, the Inventory and on the ground; without one an Item with no
+placeable Material is a cube of `color`. A wrong size is a load error naming
+`items[n].texture`, and the PNG joins build identity like any artwork.
 
 A `[[voxel-uses]]` row makes a Material a Usable Voxel, which Use acts on. Its
 `kind` is `door`, with a closed `material` and an `open` one, both solid
@@ -403,6 +428,51 @@ A Craft is instant, takes its inputs from the Inventory and gives to it, drops
 what does not fit at the Player, and never enters the undo journal. The
 [authoring guide](authoring-guide.md#recipes-and-usable-voxels) sets hand and
 Station Recipes side by side.
+
+A `[[shapes]]` row may add `form = "cross"` or `"plane"`, flat forms for plants:
+its `boxes` still decide selection and where fluid can stand, it is walked
+through unless it declares `collision`, and it seals no face, cannot `connect`
+and does not count against the Chunk's shaped-Voxel cap. A Material may add
+`tags`, which a Plant's soil and water can name as `#tag`.
+
+A `[[plants]]` row declares a Plant the Server grows, of kind `crop`, `tree`,
+`column`, `spreader` or `climber`, with its needs in `[plants.needs]`. A `tree`
+may add a `branching` record (limbs, fork, lean and lobes, in metres). A crop or
+fruit Stage may add a `shape` of its own, a crop may add a `fruit-vine` that its
+ripe Stage bears on the ground, and a `spreader` may add `min-neighbours`. Every
+field, an example of each kind and the rules for grown Materials, tags and Biome
+placement are in the authoring guide's [Plants](authoring-guide.md#plants). A
+crop in full, which any Game can copy (the data-only starter declares one like
+it):
+
+```toml
+[[items]]
+name = "seeds"
+size-m = 0.2
+color = [150, 140, 70, 255]
+material = "plain:sprout"
+
+[[items]]
+name = "grain"
+size-m = 0.2
+color = [214, 178, 70, 255]
+food = 2.0
+
+[[plants]]
+name = "grain"
+kind = "crop"
+seed = "plain:seeds"
+shape = "plain:cross"
+stages = [
+    { material = "plain:sprout", mean-seconds = 30.0 },
+    { material = "plain:young", mean-seconds = 30.0 },
+    { material = "plain:ripe", yields = [{ item = "plain:grain", count = [1, 2] }] },
+]
+
+[plants.needs]
+soil = ["plain:turf"]
+light-min = 9
+```
 
 ### Non-Voxel Causes and Biome audio
 

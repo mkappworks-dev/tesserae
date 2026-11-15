@@ -198,11 +198,9 @@ const MELON: tesserae_core::MaterialId = 200;
 
 #[test]
 fn coarse_levels_leave_surface_features_out() {
-    let melons = tesserae_core::SurfaceFeatures::new(&[tesserae_core::SurfaceFeature {
-        material: MELON,
-        spacing_m: 4.0,
-    }])
-    .unwrap();
+    let melons =
+        tesserae_core::SurfaceFeatures::new(&[tesserae_core::SurfaceFeature::cube(MELON, 4.0)])
+            .unwrap();
     let mut params = params();
     let featured: Vec<Biome> = params
         .biomes

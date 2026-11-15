@@ -38,6 +38,7 @@ mod lod;
 mod lod_rings;
 pub mod mods;
 pub mod persistence;
+pub mod plants;
 pub mod player;
 mod priority;
 mod sky;
@@ -124,6 +125,7 @@ pub fn plugin(app: &mut App) {
             edit::plugin,
             tool::plugin,
             fluids::plugin,
+            plants::plugin,
             player::plugin,
             sky::plugin,
             soundscape::plugin,
@@ -422,10 +424,10 @@ mod tests {
             ground: None,
             sky_fog: None,
             cave_scale: None,
-            surface_features: SurfaceFeatures::new(&[SurfaceFeature {
-                material: tesserae_core::testgen::fixtures().lantern,
-                spacing_m: 4.0,
-            }])
+            surface_features: SurfaceFeatures::new(&[SurfaceFeature::cube(
+                tesserae_core::testgen::fixtures().lantern,
+                4.0,
+            )])
             .unwrap(),
         };
         let mut featured = 0;

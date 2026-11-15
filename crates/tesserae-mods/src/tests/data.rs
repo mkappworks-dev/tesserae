@@ -65,6 +65,7 @@ fn material(
         solid,
         remove_time_s: remove,
         contact_damage_per_s: None,
+        tags: Vec::new(),
     }
 }
 
@@ -96,6 +97,7 @@ fn component() -> Declaration {
             material("water", 2, O::SameMaterial, R::Blend, false, 0, Some(0.5)),
             content::MaterialDef {
                 contact_damage_per_s: Some(4.0),
+                tags: Vec::new(),
                 ..material("lava", 2, O::Never, R::Blend, false, 12, None)
             },
             material("wood", 15, O::SameMaterial, R::Cutout, true, 0, None),
@@ -103,6 +105,7 @@ fn component() -> Declaration {
         ],
         shapes: vec![
             content::ShapeDef {
+                form: Default::default(),
                 name: "slab".into(),
                 boxes: vec![node((0, 0, 0), (16, 8, 16))],
                 collision: Some(vec![types::CollisionBox {
@@ -112,6 +115,7 @@ fn component() -> Declaration {
                 connect: None,
             },
             content::ShapeDef {
+                form: Default::default(),
                 name: "fence".into(),
                 boxes: vec![node((6, 0, 6), (10, 16, 10))],
                 collision: None,
@@ -289,6 +293,7 @@ fn component() -> Declaration {
                 material: Some("full:wood".into()),
                 max_stack: Some(16),
                 food: None,
+                texture: None,
             },
             content::ItemDef {
                 name: "pebble".into(),
@@ -302,6 +307,7 @@ fn component() -> Declaration {
                 material: None,
                 max_stack: None,
                 food: Some(2.5),
+                texture: None,
             },
         ],
         biomes: vec![
@@ -317,6 +323,7 @@ fn component() -> Declaration {
                 }),
                 cave_scale: Some(0.0),
                 surface_features: Vec::new(),
+                crop_fields: Vec::new(),
             },
             content::BiomeDef {
                 soundscape: None,
@@ -331,9 +338,21 @@ fn component() -> Declaration {
                 sky_fog: None,
                 cave_scale: Some(1.5),
                 surface_features: vec![content::SurfaceFeature {
-                    material: "full:wood".into(),
+                    material: Some("full:wood".into()),
+                    plant: None,
+                    shape: None,
                     spacing_m: 24.0,
+                    clump: Some(content::Clump {
+                        scale_m: 48.0,
+                        strength: 0.5,
+                    }),
+                    field: Some(content::FieldDef {
+                        group: "beds".into(),
+                        scale_m: 24.0,
+                        strays: 0.1,
+                    }),
                 }],
+                crop_fields: Vec::new(),
             },
         ],
         ores: vec![
@@ -465,6 +484,7 @@ fn component() -> Declaration {
             },
             station: "hand".into(),
         }],
+        plants: Vec::new(),
         voxel_uses: vec![
             content::VoxelUse {
                 material: "full:wood".into(),
@@ -755,7 +775,7 @@ fn a_mod_that_is_not_the_game_may_not_declare_game_only_fields() {
 #[test]
 fn per_mod_row_limits_apply_to_data() {
     let rows = |table: &str, row: &str| {
-        (0..65)
+        (0..129)
             .map(|_| format!("[[{table}]]\n{row}\n"))
             .collect::<String>()
     };
@@ -837,6 +857,39 @@ fn data_biome_can_name_a_soundscape() {
     assert_eq!(
         declaration.biomes[0].soundscape.as_deref(),
         Some("my-mod:wind")
+    );
+}
+
+#[test]
+fn data_biome_can_declare_crop_fields_and_a_field_group() {
+    let declaration = parse(
+        "[[biomes]]\nname='dry'\ntemperature=0.8\nhumidity=0.2\n\
+         surface-features=[{ plant='a:b', spacing-m=4.0, field={ group='g', scale-m=20.0, strays=0.1 } }]\n\
+         crop-fields=[{ crops=[['a:wheat', 6.0], ['a:rye', 1.0]], plot-m=[8.0, 14.0], spacing-m=64.0, \
+         path='a:sand', ditch='a:water', near-water-m=32.0 }, { crops=[['a:wheat', 1.0]], \
+         plot-m=[6.0, 6.0], spacing-m=32.0 }]\n",
+    )
+    .unwrap();
+    let biome = &declaration.biomes[0];
+    let field = biome.surface_features[0].field.as_ref().unwrap();
+    assert_eq!(
+        (field.group.as_str(), field.scale_m, field.strays),
+        ("g", 20.0, 0.1)
+    );
+    let [first, second] = &biome.crop_fields[..] else {
+        panic!("two crop fields");
+    };
+    assert_eq!(
+        first.crops,
+        [("a:wheat".to_owned(), 6.0), ("a:rye".to_owned(), 1.0)]
+    );
+    assert_eq!((first.plot_m, first.spacing_m), ((8.0, 14.0), 64.0));
+    assert_eq!(first.path.as_deref(), Some("a:sand"));
+    assert_eq!(first.ditch.as_deref(), Some("a:water"));
+    assert_eq!(first.near_water_m, Some(32.0));
+    assert_eq!(
+        (&second.path, &second.ditch, second.near_water_m),
+        (&None, &None, None)
     );
 }
 

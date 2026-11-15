@@ -1073,6 +1073,7 @@ mod tests {
             let id = tables
                 .shapes
                 .register(ShapeDef {
+                    form: Default::default(),
                     connect: None,
                     boxes: vec![
                         NodeBox::new([0, 0, 0], [8, 8, 16]),

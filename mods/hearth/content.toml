@@ -15,6 +15,7 @@ occlusion = "opaque"
 render = "opaque"
 solid = true
 remove-time-s = 0.2
+tags = ["soil"]
 
 [[appearance]]
 material = "lava"

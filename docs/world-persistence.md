@@ -83,8 +83,36 @@ with none. Ores name their Material and Biomes, and a Biome names its ground
 Materials, all through the Mapping like the World's own ground. A Biome's
 optional sky and fog colours, cave scale and surface features ride in its
 snapshot, absent when it has none, so a World saved before a Biome gained
-features keeps its bare ground. The snapshot is separate from `entities` and
+features keeps its bare ground. A tree Plant's frozen form carries its `vines`
+(the climber's Material and `plane` Shape by name, the Orientation against each
+side, density and length), absent when it hangs none. A surface feature that
+names a Plant freezes what generation reads of it, by Material and Shape name: a
+crop's or spreader's Stages, a column's Material, height and fluid, a tree's
+Materials, size and fruit, a vine crop's ripe Material, fruit and reach, gap and
+cap (a `vine` form, absent in a World made before vine crops); a feature that
+names a Material has none of it. A feature's `field` (group number, region scale
+and strays) and a Biome's `crop_fields` (each crop's Stage Materials, Shapes and
+weight, plot range, spacing, path and ditch Materials by name, and distance from
+the lake) ride in the same snapshot, absent when there are none, so a World made
+before fields generates none. The snapshot is separate from `entities` and
 changes neither the format nor the generator version.
+
+Plants add nothing else to the save. A Plant Voxel is a Material and its Stage
+is that Material, a tree is Voxels, and the Overlay, the Agenda and the
+simulation checkpoints carry no per-plant record, so a grown crop and a grown
+tree reopen as the Chunk saved them. Growth state beyond the Voxels is not
+saved:
+
+- A Sample draws from the World seed, the Chunk and the Logical step, so nothing
+  is owed on reopen and no wall time is credited for a Chunk that was away.
+- A change deferred past the per-step landing bound waits in memory and is not
+  saved; its Voxel Samples again.
+- A pending Felling queue is not saved. A World closed mid-fall leaves what was
+  queued standing until a neighbouring change asks the Server again.
+- A World saved with a Plant that its Game has since dropped still opens: its
+  Voxels are Materials and stop growing. The snapshot of a Biome's Plant
+  features pins generation only; growth reads the Game's Plant rows, which the
+  World already freezes with its exact builds.
 
 Simulation checkpoints contain the logical step, count bounds, flow deadlines
 and desired changes, running and frozen fire clocks, ignition/burn-out changes,

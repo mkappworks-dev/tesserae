@@ -9,6 +9,15 @@ pub(super) struct Shape {
     boxes: Vec<NodeBox>,
     collision: Option<Vec<CollisionBox>>,
     connect: Option<Connect>,
+    form: Option<Form>,
+}
+
+#[derive(Deserialize, Clone, Copy)]
+#[serde(rename_all = "kebab-case")]
+enum Form {
+    Boxes,
+    Cross,
+    Plane,
 }
 
 #[derive(Deserialize)]
@@ -67,6 +76,11 @@ fn collision_boxes(boxes: Option<Vec<CollisionBox>>) -> Option<Vec<types::Collis
 impl From<Shape> for content::ShapeDef {
     fn from(s: Shape) -> Self {
         content::ShapeDef {
+            form: s.form.map(|f| match f {
+                Form::Boxes => content::ShapeForm::Boxes,
+                Form::Cross => content::ShapeForm::Cross,
+                Form::Plane => content::ShapeForm::Plane,
+            }),
             name: s.name,
             boxes: node_boxes(s.boxes),
             collision: collision_boxes(s.collision),

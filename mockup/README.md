@@ -231,3 +231,40 @@ each Material's faces as PNG, plus `blocks/index.json`, which lists the
 Materials, their render class and Use, and the Shapes' boxes. Lighting in the
 gallery is illustrative: sides are darkened by a fixed amount, and a translucent
 block shows only its three near faces.
+
+## Plants and flat sprites (step 18, proposed, awaiting approval)
+
+`/plants` shows the Client's look for DESIGN.md step 18: a Seed, a sapling and
+produce as flat sprites (one upright textured quad) in the hotbar, Inventory
+grid, item details, Crafting and the hand, beside a solid Material's cube; a
+Dropped item as an upright turning sprite beside a dropped cube; the placement
+ghost of a `cross` Plant and of a Layout of Seeds; one crop's four Stages as
+crossed quads over farmland, an apple tree and a vine on a wall as one flat
+quad; and a Breaking fruit panel: a ripe apple on a branch lobe, the break (a
+leaf left and the apple dropping) and a new unripe apple on the tree's other
+lobe later, since harvest is breaking and Use harvests nothing. Code is in
+`plants.js` and `plants.css`. The sprites are drawn in the page from small pixel
+grids and are throwaway; the engine's Stage art comes from
+`scripts/generate-mod-art`. Reach it from the **Jump to mockup screen** picker
+("Plants (step 18)").
+
+## Vegetation (step 18b, proposed, awaiting approval)
+
+`/vegetation` extends the step 18 look to every Biome of every Game: ten tree
+species (oak, birch, snowy pine, palm with flat fronds and 3D coconuts, jungle
+and swamp trees with hanging vines, and apple, orange and cherry with ripe and
+unripe 3D voxel fruit), four crops as four-Stage crossed-quad strips, ground and
+water plants (tall grass, flowers, mushrooms, cane, a boxed cactus, kelp, a
+pad), a vine curtain and a vine-covered ruin wall, jungle and swamp scenes, the
+shared plant library (`flora`, `crops`, `aquatic`), a Game by Biome matrix of
+what each Biome grows (eight to twelve species each, new jungle, swamp and
+savanna Biomes tagged), and a legend. Code is in `vegetation.js` and
+`vegetation.css`, reusing `scene()` and `apple3d` from `plants.js`. Reach it
+from the picker ("Vegetation (step 18b)").
+
+Step 18c adds two sections. **Branching trees** (`branching.js`) redraws every
+tree as an isometric voxel scene with forking leaders, limbs and leaf lobes at
+the tips, a before and after oak, and a label of each tree's branching in
+metres. **Density and spacing** (`density.js`) is a 48 m plan view per Biome
+type at one scale, with grove clumping from a low-frequency field, and the Biome
+matrix cells carry a dense, moderate or sparse tag with the main tree's spacing.

@@ -228,6 +228,610 @@ def peat(face, x, y):
     return tint((70, 52, 36), (24 if fibre else 0) + (n - 128) // 10)
 
 
+CLEAR = (0, 0, 0, 0)
+
+
+def sprite(draw):
+    """A flat plant drawn on all three tiles, so a cross shows it from any side."""
+    return lambda face, x, y: draw(x, y) or CLEAR
+
+
+def tuft(x, y):
+    height = 5 + noise(x, 0, 131) % 8
+    taper = abs(x % 4 - 1)
+    if y < EDGE - height + taper or noise(x, 3, 133) % 5 == 0:
+        return None
+    return tint((88, 160, 56), (noise(x, y, 135) - 128) // 10 + (EDGE - y) * 2)
+
+
+def flower(petal, centre):
+    def draw(x, y):
+        if x in (7, 8) and 8 <= y < EDGE:
+            return tint((60, 124, 44), (noise(x, y, 137) - 128) // 14)
+        if x in (5, 10) and y in (11, 12):
+            return tint((60, 124, 44), -10)
+        dx, dy = abs(x - 7.5), abs(y - 5.5)
+        if dx + dy < 1.5:
+            return (*centre, 255)
+        if dx + dy < 4:
+            return tint(petal, (noise(x, y, 139) - 128) // 12)
+        return None
+
+    return draw
+
+
+def oak_sapling(x, y):
+    if x in (7, 8) and 9 <= y < EDGE:
+        return tint((110, 78, 44), (noise(x, y, 141) - 128) // 14)
+    dx, dy = abs(x - 7.5), abs(y - 5.5)
+    if dx + dy * 1.2 < 5 and noise(x, y, 143) > 60:
+        return tint((62, 138, 44), (noise(x, y, 145) - 128) // 10 - (14 if y > 6 else 0))
+    return None
+
+
+def frond(x, y):
+    sway = 2 * ((y // 3) % 2) - 1
+    if x in (7 + sway, 8 + sway):
+        return tint((44, 110, 70), (noise(x, y, 147) - 128) // 12)
+    if y % 4 == 1 and x in (5 + sway, 10 + sway):
+        return tint((60, 140, 84), (noise(x, y, 149) - 128) // 14)
+    return None
+
+
+def bark(side, end, mark=None):
+    """A trunk: rings on the cut ends, streaks (and optional dark scars) on the sides."""
+
+    def paint(face, x, y):
+        n = noise(x, y, face + 17)
+        if face != 1:
+            ring = max(abs(x - 7), abs(y - 7))
+            return tint(end, (-37 if ring % 3 == 0 else 16) + (n - 128) // 18)
+        if mark and noise(x, y // 2, 307) > 214:
+            return tint(mark, (n - 128) // 20)
+        return tint(side, (-24 if (x + noise(0, y // 4, 23)) % 4 == 0 else 8) + (n - 128) // 20)
+
+    return paint
+
+
+def foliage(light, shadow, salt=29):
+    """Leaves as a cutout lattice of light blobs on clear ground."""
+
+    def paint(face, x, y):
+        n = noise(x, y, face + salt)
+        dx, dy = abs(x % 5 - 2), abs(y % 5 - 2)
+        if dx + dy <= 2:
+            return tint(light, (n - 128) // 12 - (19 if dx == 0 else 0))
+        return tint(shadow, (n - 128) // 14, 0 if n > 150 else 255)
+
+    return paint
+
+
+def needles(light, shadow):
+    """Conifer needles: short diagonal strokes."""
+
+    def paint(face, x, y):
+        n = noise(x, y, face + 313)
+        if (x + y) % 3 != 0 or n > 225:
+            return tint(light, (n - 128) // 14 - (12 if y % 4 == 0 else 0))
+        return tint(shadow, (n - 128) // 14, 0 if n > 120 else 255)
+
+    return paint
+
+
+def disc(x, y, cx, cy, rx, ry=None):
+    return ((x - cx) / rx) ** 2 + ((y - cy) / (ry or rx)) ** 2 <= 1.0
+
+
+def grain(colour, x, y, salt, spread=40):
+    return tint(colour, (noise(x, y, salt) - 128) // spread)
+
+
+def positional(top, side, bottom):
+    """A Shape's own painting. A box face samples its Material's tile at the face's place inside
+    the Voxel: the side tile by (x or z, height) and the top and bottom tiles by (x, z), so each box
+    of a small Shape can have its own colour, stem and leaf, by painting that spot. `side` takes the
+    height up from the Voxel's floor, so its row is flipped from the image's."""
+
+    def paint(face, x, y):
+        if face == 1:
+            return side(x, EDGE - 1 - y) or CLEAR
+        return (top if face == 0 else bottom)(x, y) or CLEAR
+
+    return paint
+
+
+def stacked_fruit(palette, rows, ring, stem, leaf=None):
+    """A round fruit of stacked boxes: a dark underside, the body, lighter shoulders, a stem and
+    optionally a leaf. `rows` is the height ranges of the underside, body and shoulders; `ring` the
+    inset of the shoulders from the body; `stem` is `(low, high, x0, x1, colour)`."""
+    (low, mid, high), salt = palette, sum(palette[0])
+    (u0, u1), (b0, b1), (t0, t1) = rows
+    s0, s1, sx0, sx1, stem_colour = stem
+
+    def side(x, h):
+        if leaf and leaf[0] <= x < leaf[1] and leaf[2] <= h < leaf[3]:
+            return grain(leaf[4], x, h, salt + 5, 20)
+        if s0 <= h < s1 and sx0 <= x < sx1:
+            return grain(stem_colour, x, h, salt + 3, 24)
+        if u0 <= h < u1:
+            return grain(low, x, h, salt, 30)
+        if b0 <= h < b1:
+            return grain(mid, x, h, salt + 1, 40)
+        if t0 <= h < t1:
+            return grain(high, x, h, salt + 2, 40)
+        return None
+
+    def top(x, z):
+        if leaf and leaf[0] <= x < leaf[1] and sx0 <= z < sx1:
+            return grain(leaf[4], x, z, salt + 6, 20)
+        if sx0 <= x < sx1 and sx0 <= z < sx1:
+            return grain(stem_colour, x, z, salt + 4, 24)
+        if ring <= x < EDGE - ring and ring <= z < EDGE - ring:
+            return grain(high, x, z, salt + 7, 40)
+        return grain(mid, x, z, salt + 8, 40)
+
+    return positional(top, side, lambda x, z: grain(low, x, z, salt + 9, 30))
+
+
+CHERRY_RIPE = dict(
+    a=(3, 7, 0, 5), b=(9, 13, 0, 6), low=3, stems=(4, 10), bar=(4, 11, 13), feet=((4, 4), (10, 10)), bar_z=4
+)
+CHERRY_UNRIPE = dict(
+    a=(4, 7, 5, 8), b=(9, 12, 6, 9), low=6, stems=(5, 9), bar=(5, 10, 13), feet=((5, 5), (9, 9)), bar_z=5
+)
+
+
+def cherry_pair(palette, stem_colour, geo):
+    """Two cherries on stems joined by a bar, as the `cherry` Shapes lay them out; `geo` holds the
+    boxes of the ripe or the smaller unripe one."""
+    low, high = palette
+    (ax0, ax1, ay0, ay1), (bx0, bx1, by0, by1) = geo["a"], geo["b"]
+    bar0, bar1, bar_h = geo["bar"]
+    cherry = lambda x, h: (ax0 <= x < ax1 and ay0 <= h < ay1) or (bx0 <= x < bx1 and by0 <= h < by1)
+
+    def side(x, h):
+        if cherry(x, h):
+            return grain(low if h < geo["low"] else high, x, h, 91, 30)
+        if h < 14 and (x in geo["stems"] or (bar0 <= x < bar1 and h == bar_h)):
+            return grain(stem_colour, x, h, 93, 24)
+        return None
+
+    def top(x, z):
+        if (x, z) in geo["feet"] or (bar0 <= x < bar1 and z == geo["bar_z"]):
+            return grain(stem_colour, x, z, 95, 24)
+        if (ax0 <= x < ax1 and ax0 <= z < ax1) or (bx0 <= x < bx1 and bx0 <= z < bx1):
+            return grain(high, x, z, 97, 30)
+        return None
+
+    return positional(top, side, lambda x, z: grain(low, x, z, 99, 30) if top(x, z) else None)
+
+
+APPLE_ROWS = ((1, 3), (3, 8), (8, 11))
+APPLE_STEM = (11, 14, 7, 9, (90, 61, 34))
+APPLE_LEAF = (9, 13, 12, 13, (63, 122, 42))
+ORANGE_ROWS = ((2, 4), (4, 10), (10, 12))
+COCONUT_ROWS = ((2, 4), (4, 10), (10, 12))
+# The unripe fruit is the ripe Shape at 70% about its stem, so these are the ripe rows scaled.
+APPLE_SMALL = dict(rows=((5, 6), (6, 10), (10, 12)), ring=5, stem=(12, 14, 7, 9, (90, 61, 34)), leaf=(9, 12, 13, 14, (63, 122, 42)))
+ORANGE_SMALL = dict(rows=((5, 7), (7, 11), (11, 12)), ring=5, stem=(12, 13, 7, 9, (74, 122, 42)), leaf=None)
+COCONUT_SMALL = dict(rows=((5, 6), (6, 11), (11, 12)), ring=6, stem=(99, 99, 0, 0, (0, 0, 0)), leaf=None)
+
+
+def apple(ripe):
+    palette = ((163, 32, 28), (200, 50, 42), (217, 71, 59)) if ripe else ((95, 141, 54), (118, 164, 67), (134, 181, 81))
+    if not ripe:
+        small = APPLE_SMALL
+        return stacked_fruit(palette, small["rows"], small["ring"], small["stem"], small["leaf"])
+    return stacked_fruit(palette, APPLE_ROWS, 4, APPLE_STEM, APPLE_LEAF)
+
+
+def orange(ripe):
+    palette = ((196, 98, 26), (232, 130, 31), (240, 154, 53)) if ripe else ((96, 140, 44), (120, 168, 52), (140, 184, 66))
+    if not ripe:
+        small = ORANGE_SMALL
+        return stacked_fruit(palette, small["rows"], small["ring"], small["stem"])
+    return stacked_fruit(palette, ORANGE_ROWS, 4, (12, 13, 7, 9, (74, 122, 42)))
+
+
+def coconut(ripe):
+    palette = ((78, 54, 32), (112, 78, 48), (132, 94, 60)) if ripe else ((68, 118, 46), (92, 150, 60), (110, 168, 74))
+    if not ripe:
+        small = COCONUT_SMALL
+        return stacked_fruit(palette, small["rows"], small["ring"], small["stem"])
+    return stacked_fruit(palette, COCONUT_ROWS, 5, (99, 99, 0, 0, (0, 0, 0)))
+
+
+def cherries(ripe):
+    palette = ((96, 12, 30), (150, 24, 48)) if ripe else ((80, 124, 44), (112, 160, 56))
+    return cherry_pair(palette, (74, 110, 40), CHERRY_RIPE if ripe else CHERRY_UNRIPE)
+
+
+def mushroom_cap(cap, rim, dots):
+    """The `mushroom` Shape: a stem under a two-step cap, and a small one beside it on the diagonal,
+    so the same painting reads from the front and from the side."""
+    stem = (222, 214, 190)
+
+    def side(x, h):
+        if (7 <= x < 9 and h < 5) or (11 <= x < 12 and h < 3):
+            return grain(stem, x, h, 101, 28)
+        if (4 <= x < 12 and 5 <= h < 7) or (10 <= x < 13 and 3 <= h < 5):
+            return grain(rim, x, h, 103, 28)
+        if 5 <= x < 11 and 7 <= h < 9:
+            if dots and (x, h) in ((6, 8), (9, 7)):
+                return (240, 238, 226, 255)
+            return grain(cap, x, h, 105, 40)
+        return None
+
+    def top(x, z):
+        if 5 <= x < 11 and 5 <= z < 11:
+            if dots and (x, z) in ((6, 6), (9, 7), (7, 9)):
+                return (240, 238, 226, 255)
+            return grain(cap, x, z, 107, 40)
+        if 4 <= x < 12 and 4 <= z < 12 or (10 <= x < 13 and 10 <= z < 13):
+            return grain(rim, x, z, 109, 28)
+        return None
+
+    return positional(top, side, lambda x, z: grain(rim, x, z, 111, 28) if top(x, z) else None)
+
+
+BERRY_LEAF = (52, 112, 44)
+BERRY_RED = (186, 36, 62)
+# Each Stage's boxes, as in `mods/crops/content.toml`: a tile samples by place in the Voxel, so a
+# region painted for one box also colours any other face at the same (x or z, height) or (x, z).
+SPROUT_LEAVES = ((9, 2, 7, 12, 3, 10), (4, 3, 6, 8, 4, 9), (7, 3, 9, 10, 4, 12))
+SPROUT_STEM = (7, 0, 7, 9, 4, 9)
+BUSH_TIERS = ((2, 0, 2, 14, 3, 14), (4, 3, 4, 12, 6, 12), (6, 6, 6, 10, 8, 10))
+RIPE_TIERS = ((2, 0, 2, 14, 3, 14), (3, 3, 3, 13, 6, 13), (5, 6, 5, 11, 8, 11))
+RIPE_DARK = ((11, 2, 3, 14, 4, 6), (3, 1, 11, 6, 3, 14))
+RIPE_BERRIES = (
+    (13, 1, 5, 15, 3, 7), (1, 2, 10, 3, 4, 12), (4, 1, 13, 6, 3, 15), (9, 2, 1, 11, 4, 3),
+    (12, 4, 5, 14, 6, 7), (2, 5, 9, 4, 7, 11), (5, 4, 12, 7, 6, 14), (9, 5, 2, 11, 7, 4),
+    (10, 6, 7, 12, 8, 9), (7, 6, 10, 9, 8, 12),
+)
+
+
+def sides_of(boxes):
+    """The side-tile regions (coordinate, height) the boxes' faces sample: x for the faces turned
+    along z and z for the faces turned along x."""
+    return [(x0, x1, y0, y1) for x0, y0, z0, x1, y1, z1 in boxes] + [(z0, z1, y0, y1) for x0, y0, z0, x1, y1, z1 in boxes]
+
+
+def within(regions, a, b):
+    return any(x0 <= a < x1 and y0 <= b < y1 for x0, x1, y0, y1 in regions)
+
+
+def berry_bush(stage):
+    """A berry bush Stage's own Shape: 1 a stem with three small leaves, 2 a low mound of three
+    leaf tiers, 3 a fuller mound with darker leaves and red berry boxes pushed out of it."""
+    stem_colour = (70, 104, 44)
+
+    def leafy(x, h, shift=0):
+        return tint(BERRY_LEAF, (noise(x, h, 385) - 128) // 9 + (12 if (x // 2 + h // 2) % 2 else -8) + shift)
+
+    if stage == 1:
+        leaves, stem = sides_of(SPROUT_LEAVES), sides_of([SPROUT_STEM])
+
+        def side(x, h):
+            if within(stem, x, h) and h < 2:
+                return grain(stem_colour, x, h, 387, 24)
+            if within(leaves, x, h):
+                return leafy(x, h, 14)
+            if within(stem, x, h):
+                return grain(stem_colour, x, h, 387, 24)
+            return None
+
+        def top(x, z):
+            if 7 <= x < 9 and 7 <= z < 9:
+                return grain(stem_colour, x, z, 389, 24)
+            if any(x0 <= x < x1 and z0 <= z < z1 for x0, _, z0, x1, _, z1 in SPROUT_LEAVES):
+                return leafy(x, z, 18)
+            return None
+
+        return positional(top, side, lambda x, z: tint(BERRY_LEAF, -30) if top(x, z) else None)
+
+    tiers = BUSH_TIERS if stage == 2 else RIPE_TIERS
+    mound, dark = sides_of(tiers), sides_of(RIPE_DARK) if stage == 3 else []
+    red = sides_of(RIPE_BERRIES) if stage == 3 else []
+
+    def side(x, h):
+        if within(red, x, h):
+            return grain(BERRY_RED, x, h, 391, 24)
+        if within(dark, x, h):
+            return leafy(x, h, -26)
+        if within(mound, x, h):
+            return leafy(x, h, -22 if h < 1 else 0)
+        return None
+
+    def top(x, z):
+        if stage == 3 and any(x0 <= x < x1 and z0 <= z < z1 for x0, _, z0, x1, _, z1 in RIPE_BERRIES):
+            return grain(BERRY_RED, x, z, 393, 24)
+        for x0, _, z0, x1, _, z1 in reversed(tiers):
+            if x0 <= x < x1 and z0 <= z < z1:
+                return tint(BERRY_LEAF, (noise(x, z, 395) - 128) // 9 + (22 if (x // 2 + z // 2) % 2 else 4))
+        return None
+
+    return positional(top, side, lambda x, z: tint(BERRY_LEAF, -30) if top(x, z) else None)
+
+
+# The boxes of the `watermelon` and `pumpkin` Shapes (and their small unripe ones) in
+# `mods/crops/content.toml`, as the heights of underside, body and shoulders.
+WATERMELON_ROWS = ((0, 2), (2, 9), (9, 11))
+WATERMELON_SMALL = dict(rows=((0, 1), (1, 5), (5, 6)), ring=5, stem=(6, 8, 7, 9, (74, 110, 46)))
+PUMPKIN_ROWS = ((0, 2), (2, 8), (8, 10))
+PUMPKIN_SMALL = dict(rows=((0, 1), (1, 5), (5, 6)), ring=5, stem=(6, 8, 7, 9, (90, 110, 44)))
+
+
+def watermelon(ripe):
+    if not ripe:
+        palette = ((70, 120, 50), (96, 150, 64), (120, 170, 80))
+        return stacked_fruit(palette, WATERMELON_SMALL["rows"], WATERMELON_SMALL["ring"], WATERMELON_SMALL["stem"])
+    palette = ((24, 84, 40), (40, 128, 60), (70, 166, 86))
+    return stacked_fruit(palette, WATERMELON_ROWS, 3, (11, 13, 7, 9, (96, 112, 52)))
+
+
+def pumpkin(ripe):
+    if not ripe:
+        palette = ((92, 130, 48), (120, 160, 60), (140, 176, 76))
+        return stacked_fruit(palette, PUMPKIN_SMALL["rows"], PUMPKIN_SMALL["ring"], PUMPKIN_SMALL["stem"])
+    palette = ((196, 86, 18), (232, 122, 28), (246, 150, 48))
+    return stacked_fruit(palette, PUMPKIN_ROWS, 3, (10, 13, 7, 9, (96, 104, 44)))
+
+
+def watermelon_slice_item(x, y):
+    """A half-moon slice: red flesh, a pale band, a green rind, a few seeds."""
+    if y >= 5 and ((x - 8) / 7.5) ** 2 + ((y - 5) / 8.0) ** 2 <= 1.0:
+        if ((x - 8) / 5.6) ** 2 + ((y - 5) / 6.2) ** 2 <= 1.0:
+            if (x, y) in ((6, 8), (9, 7), (8, 10), (11, 9), (5, 11)):
+                return (40, 30, 30, 255)
+            return tint((226, 64, 74), (noise(x, y, 409) - 128) // 14 + (10 if y < 8 else -6))
+        if ((x - 8) / 6.4) ** 2 + ((y - 5) / 7.0) ** 2 <= 1.0:
+            return tint((226, 232, 190), (noise(x, y, 411) - 128) // 18)
+        return tint((40, 120, 60), (noise(x, y, 413) - 128) // 12 + (10 if x < 8 else -8))
+    return None
+
+
+def pumpkin_item(x, y):
+    if x in (7, 8) and 2 <= y <= 4:
+        return (90, 104, 44, 255)
+    if disc(x, y, 8, 10, 6.5, 5):
+        ridge = (x - 8) % 3 == 0
+        return tint((232, 122, 28), (noise(x, y, 415) - 128) // 14 + (14 if x < 7 and y < 10 else -6) - (22 if ridge else 0))
+    return None
+
+
+def sapling(leaf, form="round"):
+    def draw(x, y):
+        trunk = (110, 78, 44)
+        n = noise(x, y, 321)
+        if form == "cone":
+            half = (y - 1) * 0.42
+            if 1 <= y < 12 and abs(x - 7.5) <= half and n > 50:
+                return tint(leaf, (n - 128) // 10 - (12 if y % 3 == 0 else 0))
+            if x in (7, 8) and 12 <= y < EDGE:
+                return tint(trunk, (n - 128) // 14)
+            return None
+        if form == "palm":
+            if x in (7, 8) and 6 <= y < EDGE:
+                return tint(trunk, (n - 128) // 14)
+            for tx, ty in ((2, 6), (13, 6), (4, 3), (11, 3), (7, 1)):
+                if abs((x - 7.5) * (ty - 6) - (y - 6) * (tx - 7.5)) < 0.9 * max(1, abs(tx - 7.5)) and (
+                    min(tx, 7.5) - 1 <= x <= max(tx, 7.5) + 1 and ty - 1 <= y <= 7
+                ):
+                    return tint(leaf, (n - 128) // 12)
+            return None
+        if x in (7, 8) and 9 <= y < EDGE:
+            return tint(trunk, (n - 128) // 14)
+        dx, dy = abs(x - 7.5), abs(y - 5.5)
+        if form == "flat":
+            dx, dy = dx / 1.6, dy * 1.8
+        if dx + dy * 1.2 < 5 and n > 60:
+            return tint(leaf, (noise(x, y, 145) - 128) // 10 - (14 if y > 6 else 0))
+        return None
+
+    return sprite(draw)
+
+
+def blades(base, tall, salt=331, gap=5):
+    def draw(x, y):
+        height = tall - 3 + noise(x, 1, salt + 2) % 7
+        taper = abs(x % 4 - 1)
+        if y < EDGE - height + taper or noise(x, 3, salt + 4) % gap == 0:
+            return None
+        return tint(base, (noise(x, y, salt + 6) - 128) // 10 + (EDGE - y) * 2)
+
+    return sprite(draw)
+
+
+def fern(x, y):
+    if x == 7 and y >= 8:
+        return tint((44, 110, 50), (noise(x, y, 341) - 128) // 14)
+    for tx, ty in ((1, 5), (7, 1), (14, 5), (4, 3), (11, 3)):
+        t = (EDGE - 1 - y) / max(1, EDGE - 1 - ty)
+        if 0 <= t <= 1 and abs(7.5 + (tx - 7.5) * t - x) < 0.8:
+            return tint((58, 140, 64), (noise(x, y, 343) - 128) // 12 + int(t * 10))
+        if 0.25 < t < 0.95 and y % 3 == 0 and abs(7.5 + (tx - 7.5) * t - x) < 2.2:
+            return tint((78, 160, 78), (noise(x, y, 345) - 128) // 14)
+    return None
+
+
+def cane(x, y):
+    for cx, top in ((4, 4), (8, 1), (12, 5)):
+        if x == cx and y >= top:
+            return tint((140, 190, 90), -26 if y % 4 == 0 else (noise(x, y, 351) - 128) // 14)
+        if y in (top + 1, top + 2) and abs(x - cx) in (1, 2) and y >= top:
+            return tint((92, 150, 64), (noise(x, y, 353) - 128) // 14)
+    return None
+
+
+def vine(x, y):
+    if x in (3, 8, 12) and noise(x, y // 4, 357) > 40:
+        return tint((56, 118, 44), (noise(x, y, 359) - 128) // 12)
+    if (x + y) % 3 == 0 and abs(x % 5 - 2) + abs(y % 4 - 1) <= 2 and noise(x, y, 361) > 90:
+        return tint((72, 146, 56), (noise(x, y, 363) - 128) // 12)
+    return None
+
+
+def cactus(face, x, y):
+    n = noise(x, y, face + 367)
+    if face == 0:
+        return tint((86, 150, 62), (n - 128) // 14)
+    rib = x % 4 == 0
+    if face == 1 and (x % 4 == 2 and y % 3 == 1):
+        return (232, 226, 190, 255)
+    return tint((60, 128, 52), (-20 if rib else 6) + (n - 128) // 14)
+
+
+def kelp_like(base, tall, salt):
+    def draw(x, y):
+        height = tall - 2 + noise(x // 3, 0, salt) % 3
+        if y < EDGE - height:
+            return None
+        sway = (y // 3 + noise(x // 4, 0, salt + 1)) % 2
+        if (x + sway) % 4 not in (0, 1) or noise(x, y, salt + 2) > 232:
+            return None
+        return tint(base, (noise(x, y, salt + 3) - 128) // 12)
+
+    return sprite(draw)
+
+
+def lily_pad(face, x, y):
+    n = noise(x, y, face + 371)
+    if face != 0:
+        return (*tint((42, 112, 52), (n - 128) // 12)[:3], 255) if y < 2 else CLEAR
+    if abs(x - 7.5) < 1 and y < 7:
+        return CLEAR
+    if abs(x - 7.5) ** 2 + abs(y - 7.5) ** 2 > 56:
+        return CLEAR
+    if (x, y) == (10, 5) or (x, y) == (10, 6):
+        return (244, 168, 190, 255)
+    return tint((56, 142, 64), (n - 128) // 12)
+
+
+def crop_stage(n, leaf, ripe, head=None, root=None):
+    """Four growth Stages of a field plant: a seedling, then taller, then ripe."""
+
+    def draw(x, y):
+        rise = (3, 6, 9, 12)[n - 1]
+        h = noise(x, 0, 373) % 3
+        if x % 3 == 2 or y < EDGE - rise + h:
+            return None
+        shade = (noise(x, y, 375) - 128) // 12 + (EDGE - y) * 2
+        if n == 4 and head and y < EDGE - rise + 4 + h:
+            return tint(head, shade // 2)
+        if n == 4 and root and y > EDGE - 3:
+            return tint(root, shade // 2)
+        return tint(ripe if n == 4 and not head and not root else leaf, shade)
+
+    return sprite(draw)
+
+
+def item_icon(draw):
+    return lambda x, y: draw(x, y) or CLEAR
+
+
+def apple_item(x, y):
+    if x == 8 and 2 <= y <= 4:
+        return (96, 66, 38, 255)
+    if (x, y) in ((9, 3), (10, 3), (10, 2)):
+        return (70, 140, 52, 255)
+    if disc(x, y, 8, 9, 5, 5):
+        return tint((196, 44, 40), (noise(x, y, 383) - 128) // 14 + (14 if x < 7 and y < 9 else -8))
+    return None
+
+
+def orange_item(x, y):
+    if (x, y) in ((8, 3), (9, 3), (7, 4), (8, 4)):
+        return (70, 140, 52, 255)
+    if disc(x, y, 8, 9, 5.5, 5.5):
+        dot = noise(x, y, 385) % 9 == 0
+        return tint((234, 130, 24), (noise(x, y, 387) - 128) // 12 + (14 if x < 7 and y < 9 else -8) - (22 if dot else 0))
+    return None
+
+
+def cherries_item(x, y):
+    for cx, cy in ((5, 11), (11, 10)):
+        if disc(x, y, cx, cy, 3, 3):
+            if (x, y) == (cx - 1, cy - 1):
+                return (255, 200, 200, 255)
+            return tint((140, 20, 44), (noise(x, y, 389) - 128) // 14)
+    if 2 <= y <= 8 and (x == 8 - (8 - y) // 2 - 1 and y > 6 or x == 9 + (y - 2) // 4):
+        return (90, 120, 50, 255)
+    return None
+
+
+def coconut_item(x, y):
+    if disc(x, y, 8, 9, 5.5, 5.5):
+        if (x, y) in ((6, 8), (9, 8), (7, 11)):
+            return (40, 26, 16, 255)
+        return tint((112, 78, 48), (noise(x, y, 391) - 128) // 8 - (14 if x > 9 else 0))
+    return None
+
+
+def mushroom_item(x, y):
+    if 7 <= x < 10 and 8 <= y < 14:
+        return tint((226, 214, 188), (noise(x, y, 397) - 128) // 14 - (10 if x > 8 else 0))
+    if disc(x, y, 8, 8, 6, 4) and y < 9:
+        if (x, y) in ((6, 6), (9, 5), (11, 7)):
+            return (240, 238, 226, 255)
+        return tint((178, 128, 80), (noise(x, y, 399) - 128) // 12 + (12 if y < 6 else -6))
+    return None
+
+
+def wheat_item(x, y):
+    for cx in (4, 8, 12):
+        tilt = (cx - 8) // 4
+        sx = cx + (15 - y) * tilt // 8
+        if x == sx and y >= 7:
+            return tint((200, 170, 70), -(y % 3) * 6)
+        if y < 8 and abs(x - (cx + (15 - 7) * tilt // 8)) + (y % 2) <= 1 and y >= 1:
+            return tint((226, 190, 76), (noise(x, y, 393) - 128) // 14)
+    return None
+
+
+def bread_item(x, y):
+    if disc(x, y, 8, 10, 6.5, 4.2):
+        if y == 7 and x in (5, 8, 11) or y == 8 and x in (6, 9):
+            return (244, 214, 150, 255)
+        return tint((190, 130, 68), (noise(x, y, 395) - 128) // 12 + (12 if y < 9 else -10))
+    return None
+
+
+def berries_item(x, y):
+    for cx, cy in ((5, 10), (10, 10), (7, 6)):
+        if disc(x, y, cx, cy, 3, 3):
+            return (255, 190, 200, 255) if (x, y) == (cx - 1, cy - 1) else tint((176, 36, 70), (noise(x, y, 397) - 128) // 14)
+    if (x, y) in ((7, 2), (8, 2), (8, 3), (6, 3)):
+        return (70, 140, 52, 255)
+    return None
+
+
+def berry_pie_item(x, y):
+    if disc(x, y, 8, 10, 7, 4):
+        if disc(x, y, 8, 9, 5, 2.4):
+            lattice = (x + y) % 4 in (0, 1)
+            return tint((150, 60, 80) if not lattice else (214, 160, 92), (noise(x, y, 399) - 128) // 14)
+        return tint((200, 140, 76), (noise(x, y, 401) - 128) // 14 + (8 if y < 10 else -14))
+    return None
+
+
+def carrot_item(x, y):
+    t = (x + y - 3) / 18
+    centre = 3 + t * 12
+    if 0 <= t <= 1 and abs((x - y + 2) / 2 - (centre - 8) * 0) < 3.2 * (1 - t) + 0.4 and x + y > 8:
+        return tint((236, 124, 28), (noise(x, y, 403) - 128) // 12 - (14 if (x + y) % 4 == 0 else 0))
+    if x + y <= 8 and 2 <= x <= 7 and 2 <= y <= 7 and abs(x - y) <= 2:
+        return tint((64, 140, 52), (noise(x, y, 405) - 128) // 12)
+    return None
+
+
+def potato_item(x, y):
+    if disc(x, y, 8, 9, 6, 4.5):
+        if (x, y) in ((5, 8), (9, 7), (11, 10)):
+            return (96, 70, 40, 255)
+        return tint((178, 140, 88), (noise(x, y, 407) - 128) // 12 + (10 if y < 8 else -8))
+    return None
+
+
 TEXTURES = {
     "strata": {
         "stone": stone,
@@ -237,7 +841,100 @@ TEXTURES = {
         "soil": soil,
         "turf": turf,
     },
-    "flora": {"wood": wood, "leaves": leaves, "grass": grass, "kelp": kelp},
+    "flora": {
+        "wood": wood,
+        "leaves": leaves,
+        "grass": grass,
+        "kelp": kelp,
+        "tuft": sprite(tuft),
+        "poppy": sprite(flower((206, 48, 40), (250, 214, 60))),
+        "daisy": sprite(flower((240, 238, 226), (236, 190, 40))),
+        "oak_sapling": sprite(oak_sapling),
+        "frond": sprite(frond),
+        "birch_log": bark((226, 224, 212), (196, 172, 120), (46, 46, 50)),
+        "birch_leaves": foliage((124, 176, 60), (60, 104, 36), 401),
+        "birch_sapling": sapling((124, 176, 60)),
+        "pine_log": bark((92, 62, 40), (150, 110, 70)),
+        "pine_leaves": needles((34, 92, 56), (16, 56, 36)),
+        "pine_sapling": sapling((34, 92, 56), "cone"),
+        "palm_log": bark((158, 128, 84), (182, 150, 100), (112, 84, 52)),
+        "palm_leaves": foliage((76, 160, 58), (30, 86, 40), 403),
+        "palm_sapling": sapling((76, 160, 58), "palm"),
+        "acacia_log": bark((128, 100, 76), (160, 126, 92)),
+        "acacia_leaves": foliage((140, 160, 56), (70, 92, 32), 405),
+        "acacia_sapling": sapling((140, 160, 56), "flat"),
+        "jungle_log": bark((104, 84, 52), (140, 112, 70), (60, 94, 44)),
+        "jungle_leaves": foliage((38, 150, 56), (14, 82, 36), 407),
+        "jungle_sapling": sapling((38, 150, 56)),
+        "swamp_log": bark((74, 66, 50), (112, 98, 70), (54, 84, 52)),
+        "swamp_leaves": foliage((84, 120, 52), (40, 64, 34), 409),
+        "swamp_sapling": sapling((84, 120, 52), "flat"),
+        "apple_log": bark((150, 104, 60), (150, 104, 60)),
+        "apple_leaves": foliage((60, 136, 44), (25, 75, 29), 411),
+        "apple_sapling": sapling((90, 140, 56)),
+        "orange_log": bark((138, 98, 60), (150, 108, 66)),
+        "orange_leaves": foliage((52, 128, 48), (22, 72, 32), 413),
+        "orange_sapling": sapling((70, 140, 52)),
+        "cherry_log": bark((120, 76, 62), (150, 104, 84), (74, 44, 36)),
+        "cherry_leaves": foliage((86, 150, 56), (40, 86, 36), 415),
+        "cherry_sapling": sapling((100, 156, 64)),
+        "apple_unripe": apple(False),
+        "apple_ripe": apple(True),
+        "orange_unripe": orange(False),
+        "orange_ripe": orange(True),
+        "cherry_unripe": cherries(False),
+        "cherry_ripe": cherries(True),
+        "coconut_unripe": coconut(False),
+        "coconut_ripe": coconut(True),
+        "birch_wood": bark((226, 224, 212), (196, 172, 120), (46, 46, 50)),
+        "pine_wood": bark((92, 62, 40), (150, 110, 70)),
+        "palm_wood": bark((158, 128, 84), (182, 150, 100), (112, 84, 52)),
+        "acacia_wood": bark((128, 100, 76), (160, 126, 92)),
+        "jungle_wood": bark((104, 84, 52), (140, 112, 70), (60, 94, 44)),
+        "dandelion": sprite(flower((244, 204, 40), (252, 236, 130))),
+        "orchid": sprite(flower((156, 92, 206), (246, 240, 250))),
+        "tall_grass": blades((72, 150, 52), 14, 331, 6),
+        "dry_grass": blades((196, 170, 90), 9, 337, 4),
+        "fern": sprite(fern),
+        "mushroom_red": mushroom_cap((200, 44, 40), (140, 28, 30), True),
+        "mushroom_brown": mushroom_cap((142, 98, 64), (100, 66, 42), False),
+        "cactus": cactus,
+        "cane": sprite(cane),
+        "vine": sprite(vine),
+    },
+    "crops": {
+        "wheat_sprout": crop_stage(1, (110, 170, 60), (110, 170, 60)),
+        "wheat_young": crop_stage(2, (128, 170, 56), (128, 170, 56)),
+        "wheat_green": crop_stage(3, (146, 170, 52), (146, 170, 52)),
+        "wheat_ripe": crop_stage(4, (146, 170, 52), (214, 178, 70), head=(226, 190, 76)),
+        "carrot_sprout": crop_stage(1, (96, 168, 64), (96, 168, 64)),
+        "carrot_young": crop_stage(2, (84, 164, 60), (84, 164, 60)),
+        "carrot_green": crop_stage(3, (74, 156, 56), (74, 156, 56)),
+        "carrot_ripe": crop_stage(4, (66, 148, 52), (66, 148, 52), root=(236, 124, 28)),
+        "potato_sprout": crop_stage(1, (92, 160, 62), (92, 160, 62)),
+        "potato_young": crop_stage(2, (82, 152, 58), (82, 152, 58)),
+        "potato_green": crop_stage(3, (70, 140, 54), (70, 140, 54)),
+        "potato_ripe": crop_stage(4, (88, 120, 48), (178, 140, 88), root=(178, 140, 88)),
+        "watermelon_sprout": crop_stage(1, (60, 140, 70), (60, 140, 70)),
+        "watermelon_young": crop_stage(2, (56, 134, 66), (56, 134, 66)),
+        "watermelon_vine": crop_stage(3, (48, 126, 60), (48, 126, 60)),
+        "watermelon_unripe": watermelon(False),
+        "watermelon_ripe": watermelon(True),
+        "pumpkin_sprout": crop_stage(1, (92, 150, 52), (92, 150, 52)),
+        "pumpkin_young": crop_stage(2, (86, 144, 50), (86, 144, 50)),
+        "pumpkin_vine": crop_stage(3, (76, 134, 46), (76, 134, 46)),
+        "pumpkin_unripe": pumpkin(False),
+        "pumpkin_ripe": pumpkin(True),
+        "berry_sprout": berry_bush(1),
+        "berry_bush": berry_bush(2),
+        "berry_ripe": berry_bush(3),
+    },
+    "aquatic": {
+        "kelp": kelp_like((44, 110, 70), 16, 421),
+        "seagrass": kelp_like((72, 150, 84), 6, 423),
+        "red_weed": kelp_like((170, 62, 74), 11, 425),
+        "lily_pad": lily_pad,
+    },
     "waters": {"obsidian": obsidian},
     "hearth": {"ash": ash, "lava": lava},
     "glassworks": {
@@ -271,6 +968,27 @@ TEXTURES = {
         "aquamarine": gem((70, 200, 200), 200),
     },
     "bog": {"peat": peat},
+}
+
+
+ITEM_TEXTURES = {
+    "flora": {
+        "apple": item_icon(apple_item),
+        "orange": item_icon(orange_item),
+        "cherries": item_icon(cherries_item),
+        "coconut": item_icon(coconut_item),
+        "mushroom": item_icon(mushroom_item),
+    },
+    "crops": {
+        "wheat": item_icon(wheat_item),
+        "bread": item_icon(bread_item),
+        "berries": item_icon(berries_item),
+        "berry_pie": item_icon(berry_pie_item),
+        "carrot": item_icon(carrot_item),
+        "potato": item_icon(potato_item),
+        "watermelon_slice": item_icon(watermelon_slice_item),
+        "pumpkin": item_icon(pumpkin_item),
+    },
 }
 
 
@@ -365,6 +1083,13 @@ for mod, textures in TEXTURES.items():
             [paint(face, x, y) for face in range(3) for x in range(EDGE)] for y in range(EDGE)
         ]
         (art / f"{name}.png").write_bytes(png(rows))
+
+for mod, icons in ITEM_TEXTURES.items():
+    art = root / mod / "art"
+    art.mkdir(parents=True, exist_ok=True)
+    for name, paint in icons.items():
+        rows = [[paint(x, y) for x in range(EDGE)] for y in range(EDGE)]
+        (art / f"item-{name}.png").write_bytes(png(rows))
 
 for name, skin in CHARACTERS.items():
     folder = root / name

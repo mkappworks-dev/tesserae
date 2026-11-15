@@ -390,38 +390,81 @@ mod tests {
     use super::super::tile_preview::TilePreview;
 
     const ROCK: tesserae_core::MaterialId = 3;
+    const SPROUT: tesserae_core::MaterialId = 4;
+    const CROSS: tesserae_core::ShapeId = 9;
+
+    fn look(
+        name: &str,
+        material: Option<tesserae_core::MaterialId>,
+        texture: Option<Vec<u8>>,
+    ) -> ItemLook {
+        ItemLook {
+            name: name.into(),
+            size_m: 0.25,
+            color: [200, 180, 90, 255],
+            material,
+            max_stack: 64,
+            texture: texture.map(Into::into),
+        }
+    }
 
     fn app() -> App {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .init_resource::<Hotbar>()
             .insert_resource(Catalogue(ContentCatalogue {
-                materials: vec![CatalogueMaterial {
-                    id: ROCK,
-                    name: "t:rock".into(),
-                    solid: true,
-                    fluid: None,
-                    burns: false,
-                    shape: None,
-                    door: None,
-                    remove_time: tesserae_mods::DEFAULT_REMOVE_TIME,
-                }],
-                shapes: vec![CatalogueShape {
-                    id: SHAPE_STAIR,
-                    name: "core:stair".into(),
-                    turnable: true,
-                    fixed: false,
-                    geometry: Vec::new(),
-                }],
+                materials: vec![
+                    CatalogueMaterial {
+                        id: ROCK,
+                        name: "t:rock".into(),
+                        solid: true,
+                        fluid: None,
+                        burns: false,
+                        shape: None,
+                        door: None,
+                        remove_time: tesserae_mods::DEFAULT_REMOVE_TIME,
+                    },
+                    CatalogueMaterial {
+                        id: SPROUT,
+                        name: "t:sprout".into(),
+                        shape: Some(CROSS),
+                        ..CatalogueMaterial {
+                            id: ROCK,
+                            name: String::new(),
+                            solid: true,
+                            fluid: None,
+                            burns: false,
+                            shape: None,
+                            door: None,
+                            remove_time: tesserae_mods::DEFAULT_REMOVE_TIME,
+                        }
+                    },
+                ],
+                shapes: vec![
+                    CatalogueShape {
+                        id: SHAPE_STAIR,
+                        name: "core:stair".into(),
+                        turnable: true,
+                        fixed: false,
+                        geometry: Vec::new(),
+                        form: tesserae_core::Form::Box,
+                    },
+                    CatalogueShape {
+                        id: CROSS,
+                        name: "t:cross".into(),
+                        turnable: false,
+                        fixed: true,
+                        geometry: Vec::new(),
+                        form: tesserae_core::Form::Cross,
+                    },
+                ],
                 ..default()
             }))
-            .insert_resource(Looks(vec![ItemLook {
-                name: "t:dust".into(),
-                size_m: 0.25,
-                color: [200, 180, 90, 255],
-                material: None,
-                max_stack: 64,
-            }]))
+            .insert_resource(Looks(vec![
+                look("t:dust", None, None),
+                look("t:seed", Some(SPROUT), None),
+                look("t:wheat", None, Some(vec![255; 16 * 16 * 4])),
+            ]))
             .init_resource::<super::super::menu::Menu>()
             .add_message::<InventoryChanged>()
             .add_systems(
@@ -537,5 +580,40 @@ mod tests {
             .open = false;
         app.update();
         assert_eq!(count(&mut app), 1);
+    }
+
+    #[test]
+    fn a_seed_and_textured_produce_draw_as_sprites_and_plain_items_and_solids_do_not() {
+        use super::super::sprite::Sprite;
+        let mut app = app();
+        send(
+            &mut app,
+            &[
+                (0, "t:seed", 4),
+                (1, "t:wheat", 2),
+                (2, "t:dust", 3),
+                (4, "t:rock", 1),
+            ],
+            0,
+        );
+        assert_eq!(
+            tile(&mut app, 0),
+            Some(Holding::Sprite(Sprite::Material(SPROUT)))
+        );
+        assert_eq!(tile(&mut app, 1), Some(Holding::Sprite(Sprite::Item(2))));
+        assert_eq!(
+            tile(&mut app, 2),
+            None,
+            "no texture keeps its colour swatch"
+        );
+        assert_eq!(
+            tile(&mut app, 4),
+            Some(Holding::solid(ROCK, SHAPE_FULL_CUBE))
+        );
+        assert_eq!(
+            app.world().resource::<Hotbar>().held(),
+            Holding::solid(SPROUT, CROSS),
+            "it still places its fixed Shape"
+        );
     }
 }
