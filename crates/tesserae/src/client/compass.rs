@@ -85,8 +85,9 @@ fn toggle(
     actions: Res<super::actions::Actions>,
     mut preferences: ResMut<Preferences>,
     mut pending: ResMut<super::view::PendingSave>,
+    allowed: Res<super::map_cache::MapAllowed>,
 ) {
-    if !ownership.gameplay() || !actions.started(super::actions::Action::Compass) {
+    if !allowed.0 || !ownership.gameplay() || !actions.started(super::actions::Action::Compass) {
         return;
     }
     preferences.compass = !preferences.compass;
@@ -105,13 +106,16 @@ fn rebuild(
     heading: Res<Heading>,
     covers: super::menu::Covers,
     dead: Option<Res<super::death::Dead>>,
+    allowed: Res<super::map_cache::MapAllowed>,
     marks: Res<Marks>,
     mut images: ResMut<Assets<Image>>,
     roots: Query<Entity, With<CompassRoot>>,
     mut shown: Local<Option<(i32, u32, [i32; 2])>>,
 ) {
-    let hidden =
-        !preferences.compass || super::menu::covered(&covers) || !super::death::alive(dead);
+    let hidden = !allowed.0
+        || !preferences.compass
+        || super::menu::covered(&covers)
+        || !super::death::alive(dead);
     // Whole degrees: the strip moves 3.4 px a degree, so a finer rebuild is not seen.
     let wanted = heading.bearing.filter(|_| !hidden).map(|bearing| {
         let whole_metres = heading.eye.round();
@@ -371,6 +375,7 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .init_resource::<super::super::menu::Menu>()
             .insert_resource(super::super::input::Ownership::playing())
+            .init_resource::<super::super::map_cache::MapAllowed>()
             .add_message::<PoseCorrection>()
             .add_plugins(super::super::actions::test_plugin)
             .add_plugins(bevy::asset::AssetPlugin::default())
