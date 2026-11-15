@@ -352,6 +352,8 @@ impl Guest for Tidewater {
             cause_sounds: Vec::new(),
             recipes: Vec::new(),
             plants: Vec::new(),
+            marker_kinds: Vec::new(),
+            death_marker_kind: None,
             voxel_uses: Vec::new(),
             ores: vec![OreDef {
                 material: "crystals:aquamarine".into(),

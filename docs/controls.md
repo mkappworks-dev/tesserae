@@ -7,6 +7,45 @@ menu, Tab moves focus. **I** opens and closes the Inventory, and **C** opens it
 with the Catalogue search focused; in Survival the Catalogue is closed and C
 says it is Creative-only.
 
+**B** shows or hides the Compass, a strip across the top of the screen with your
+heading in degrees, the cardinal letters (North picked out in red) and ticks.
+North is the same direction in every World, and the heading is the one the
+Server publishes, so it reads the same in first and third person. It is off
+until turned on, here or under Settings > Display > Map and compass, is saved in
+the user profile, and hides under the Menu, Settings and the Inventory and while
+you are dead.
+
+**M** opens and closes the Map, a full-screen view of the ground you have
+explored, also a button in the Menu. Drag to pan, scroll or use the + and -
+buttons in the toolbar at the top right to zoom between 2, 4, 8 and 16 m to the
+pixel, and press Centre on me to return to the Player's arrow. The flag button
+turns on add mode: click explored ground to name a Waypoint and choose its
+Marker kind in a popover (Enter adds, Escape cancels), or use At my position;
+click a mark or a list row to rename, change or remove it. A scale bar shows
+metres, and the readout under the pointer gives its position, height, Biome and
+distance from you; over ground you have not seen it says Not explored and names
+no Biome. The panel switches between your Waypoints and Explore, which lists the
+Biomes seen and the area explored. Escape or M closes it, and the Compass, the
+minimap and the Hotbar hide under it.
+
+**N** shows or hides the minimap, a small north-up view of the ground you have
+explored in the top right corner, centred on you at 2 m to the pixel, with the
+Player's arrow along the heading the Server publishes. Ground you have not seen
+is fog. Beneath it are the Biome name, your X and Z position and your height. It
+is off until turned on, here or under Settings > Display > Map and compass,
+where its size (Small, Medium or Large) is also chosen. Both are saved in the
+user profile, and it hides under the Menu, Settings and the Inventory and while
+you are dead.
+
+A Game may forbid the Map and the Compass. While it does, none of the three is
+drawn or opens, the Menu has no Map button, and their switches and keys stay in
+Settings marked Not available in this World, with your choices untouched; the
+Map you had is kept and returns when the Game permits it.
+
+**H** shows or hides the placement ghost, the translucent preview of the Voxel
+you are about to place. It is off until turned on, here or under Settings,
+Behavior, and is saved in the user profile.
+
 **F3** shows or hides a diagnostics line (the Chunk the Eye is in, how many the
 Server holds and has sent meshes for, how many meshes are drawn, and the frame
 rate). It works in every build and is hidden until pressed; the Server publishes
@@ -97,7 +136,7 @@ lost or changed target, or another selection/edit/history action cancels it
 without restarting.
 
 **Use** (**G**, or D-pad up) asks the Server to use the aimed Voxel with a held
-tool. **M** cycles the declared tools, past the last returns the previous hand,
+tool. **O** cycles the declared tools, past the last returns the previous hand,
 and **Backspace** puts the tool away. While a tool is held, Place and Remove are
 the tool's verbs and Edits are inert; undo and redo stay live. One Use per
 press, never repeated while held, and a Use never enters the undo journal. A

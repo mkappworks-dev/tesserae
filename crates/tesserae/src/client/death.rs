@@ -29,7 +29,7 @@ const DEAD_SATURATION: f32 = 0.25;
 
 /// The Server's last word on the Player's death; `None` while alive.
 #[derive(Resource, Default)]
-pub(super) struct Dead(Option<DeathReport>);
+pub(super) struct Dead(pub(super) Option<DeathReport>);
 
 #[cfg(test)]
 impl Dead {

@@ -1,0 +1,98 @@
+# Cargo profile for the Test job, passed as `--config .github/test-profile.toml`.
+# Everything is opt-level 0 except what the tests spend their time in; the workflow
+# explains why.
+
+# Line tables for the workspace crates cost about an eighth of the build and nothing a CI log reads.
+[profile.dev]
+debug = 0
+
+[profile.dev.package."*"]
+opt-level = 0
+
+# The Mod engine: every demo Game test compiles a WASM component.
+[profile.dev.package.wasmtime]
+opt-level = 3
+[profile.dev.package.wasmtime-environ]
+opt-level = 3
+[profile.dev.package.wasmtime-internal-cranelift]
+opt-level = 3
+[profile.dev.package.wasmtime-internal-core]
+opt-level = 3
+[profile.dev.package.wasmtime-internal-fiber]
+opt-level = 3
+[profile.dev.package.wasmtime-internal-unwinder]
+opt-level = 3
+[profile.dev.package.wasmtime-wasi]
+opt-level = 3
+[profile.dev.package.wasmtime-wasi-io]
+opt-level = 3
+[profile.dev.package.cranelift-assembler-x64]
+opt-level = 3
+[profile.dev.package.cranelift-bforest]
+opt-level = 3
+[profile.dev.package.cranelift-bitset]
+opt-level = 3
+[profile.dev.package.cranelift-codegen]
+opt-level = 3
+[profile.dev.package.cranelift-codegen-shared]
+opt-level = 3
+[profile.dev.package.cranelift-control]
+opt-level = 3
+[profile.dev.package.cranelift-entity]
+opt-level = 3
+[profile.dev.package.cranelift-frontend]
+opt-level = 3
+[profile.dev.package.cranelift-native]
+opt-level = 3
+[profile.dev.package.regalloc2]
+opt-level = 3
+[profile.dev.package.wasmparser]
+opt-level = 3
+[profile.dev.package.wasm-encoder]
+opt-level = 3
+[profile.dev.package.wasm-metadata]
+opt-level = 3
+[profile.dev.package.wasmprinter]
+opt-level = 3
+[profile.dev.package.wit-component]
+opt-level = 3
+[profile.dev.package.wit-parser]
+opt-level = 3
+[profile.dev.package.object]
+opt-level = 3
+[profile.dev.package.gimli]
+opt-level = 3
+[profile.dev.package.target-lexicon]
+opt-level = 3
+[profile.dev.package.postcard]
+opt-level = 3
+[profile.dev.package.bumpalo]
+opt-level = 3
+
+# The ECS and the hashing under it: the plant tests tick a bevy App millions of times.
+[profile.dev.package.bevy_ecs]
+opt-level = 3
+[profile.dev.package.bevy_tasks]
+opt-level = 3
+[profile.dev.package.bevy_app]
+opt-level = 3
+[profile.dev.package.bevy_platform]
+opt-level = 3
+[profile.dev.package.bevy_ptr]
+opt-level = 3
+[profile.dev.package.bevy_utils]
+opt-level = 3
+[profile.dev.package.fixedbitset]
+opt-level = 3
+[profile.dev.package.hashbrown]
+opt-level = 3
+[profile.dev.package.foldhash]
+opt-level = 3
+[profile.dev.package.rustc-hash]
+opt-level = 3
+
+# Tesserae's own simulation (plants, fluids) is the rest of those ticks.
+[profile.dev.package.tesserae]
+opt-level = 3
+[profile.dev.package.tesserae-core]
+opt-level = 3

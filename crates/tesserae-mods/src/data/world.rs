@@ -41,6 +41,12 @@ pub(super) struct Movement {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
+pub(super) struct Map {
+    enabled: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub(super) struct View {
     view_distance_m: f32,
     lod_distance_m: f32,
@@ -116,6 +122,12 @@ impl From<Water> for content::WaterParams {
             level_m: w.level_m,
             material: w.material,
         }
+    }
+}
+
+impl From<Map> for content::MapPolicy {
+    fn from(m: Map) -> Self {
+        Self { enabled: m.enabled }
     }
 }
 

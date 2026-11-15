@@ -266,6 +266,29 @@ Only held Chunks Sample and nothing catches up, so growth is deterministic from
 equal state and events. A Mod Command, burn-out and a Player's Remove all reach
 plant Voxels through the one write path, so each starts a Felling the same way.
 
+### The Map and the Compass
+
+The Map is what the Server holds of the ground a Player has explored
+([ADR-0028](adr/0028-the-map-is-a-server-held-per-player-capture.md)), never
+regenerated from the seed and never read from World storage by the Client. Three
+places hold the work:
+
+- `tesserae-core` (`map.rs`, `marker.rs`, `save/map.rs`) holds the pure Map of
+  tiles of samples (height, Material id, Biome id), the Marker kinds, the
+  Waypoint list and the Map's save section. No Bevy.
+- `tesserae` Server (`server/map.rs`, `server/waypoint.rs`) scans loaded, lit
+  columns near the Eye under a per-step budget, sends changed tiles under
+  another, judges Waypoint intents on the Player's Map and leaves a Waypoint
+  where a Player died. The heading is published in the pose.
+- `tesserae` Client (`client/map_cache.rs`, `compass.rs`, `minimap.rs`,
+  `map_window.rs`, `waypoints.rs`, `waypoint_panel.rs`) keeps every received
+  tile, colours it from the Material palette and draws the Compass, the minimap
+  and the full-screen Map. It sends only Waypoint intents.
+
+The Map saves as its own commit section, so a save without it opens empty. A
+Game may forbid the Map and the Compass; the Server then neither scans nor
+accepts intents and the Client draws nothing.
+
 ### What the Server confirms, and what the Client animates
 
 The Client never guesses an outcome. A Place or Remove that landed is announced
@@ -331,6 +354,7 @@ tesserae/
 │                               0017 Worlds open in-process as sessions
 │                               0018 Games and Mods install side by side
 │                               0027 plants are declared kinds
+│                               0028 the Map is a Server-held capture
 ├── crates/
 │   ├── tesserae-core/          NO Bevy, NO wgpu — headless + benchmarkable
 │   │   ├── src/

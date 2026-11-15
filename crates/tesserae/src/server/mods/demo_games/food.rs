@@ -149,11 +149,11 @@ fn a_new_world_of_every_demo_game_has_its_food_within_a_short_walk_of_the_spawn(
         7,
         2024,
     ];
-    for food in &FOODS {
+    crate::server::in_parallel(&FOODS, |food| {
         let (_install, loaded) = loaded(food.game, 0.5);
         let world = loaded.world.unwrap();
         let id = material(&loaded, food.item);
-        for seed in seeds {
+        crate::server::in_parallel(&seeds, |&seed| {
             let generator = Worldgen::new(seed, 0.5, world);
             assert!(
                 nearest_m(&generator, id, SHORT_WALK_M).is_some(),
@@ -161,8 +161,8 @@ fn a_new_world_of_every_demo_game_has_its_food_within_a_short_walk_of_the_spawn(
                 food.game,
                 food.item
             );
-        }
-    }
+        });
+    });
 }
 
 /// A Workbench, then a Chest and a Door: 4 + 8 + 3.

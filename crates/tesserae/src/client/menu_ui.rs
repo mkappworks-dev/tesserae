@@ -950,10 +950,16 @@ pub(super) enum IconKind {
     Display,
     Audio,
     Accessibility,
+    /// The Map window's toolbar.
+    ZoomOut,
+    ZoomIn,
+    Target,
+    FlagPlus,
+    Dismiss,
 }
-const ICONS: usize = 18;
+const ICONS: usize = 23;
 /// The icons drawn from the prototype's 24-unit outlines, in atlas order.
-const DRAWN: [IconKind; 15] = [
+const DRAWN: [IconKind; 20] = [
     IconKind::Settings,
     IconKind::Mods,
     IconKind::Check,
@@ -969,6 +975,11 @@ const DRAWN: [IconKind; 15] = [
     IconKind::Display,
     IconKind::Audio,
     IconKind::Accessibility,
+    IconKind::ZoomOut,
+    IconKind::ZoomIn,
+    IconKind::Target,
+    IconKind::FlagPlus,
+    IconKind::Dismiss,
 ];
 #[derive(Component)]
 pub(super) struct Icon(pub IconKind, pub Color);
@@ -1234,6 +1245,33 @@ fn drawn(kind: IconKind, p: Vec2) -> f32 {
                     ]))
                     .min(path(&[v(9.0, 13.0), v(11.0, 15.0), v(15.0, 11.0)])),
             )
+        }
+        IconKind::ZoomOut => stroke(segment(v(5.0, 12.0), v(19.0, 12.0))),
+        IconKind::ZoomIn => {
+            stroke(segment(v(5.0, 12.0), v(19.0, 12.0)).min(segment(v(12.0, 5.0), v(12.0, 19.0))))
+        }
+        IconKind::Target => stroke(
+            ring(v(12.0, 12.0), 7.0)
+                .min(ring(v(12.0, 12.0), 1.5))
+                .min(segment(v(12.0, 2.0), v(12.0, 5.0)))
+                .min(segment(v(12.0, 19.0), v(12.0, 22.0)))
+                .min(segment(v(2.0, 12.0), v(5.0, 12.0)))
+                .min(segment(v(19.0, 12.0), v(22.0, 12.0))),
+        ),
+        IconKind::FlagPlus => stroke(
+            segment(v(5.0, 21.0), v(5.0, 4.0))
+                .min(path(&[
+                    v(5.0, 4.0),
+                    v(15.0, 4.0),
+                    v(13.2, 7.5),
+                    v(15.0, 11.0),
+                    v(5.0, 11.0),
+                ]))
+                .min(segment(v(18.0, 15.0), v(18.0, 21.0)))
+                .min(segment(v(15.0, 18.0), v(21.0, 18.0))),
+        ),
+        IconKind::Dismiss => {
+            stroke(segment(v(6.0, 6.0), v(18.0, 18.0)).min(segment(v(18.0, 6.0), v(6.0, 18.0))))
         }
         IconKind::Chevron => stroke(path(&[v(9.0, 5.0), v(16.0, 12.0), v(9.0, 19.0)])),
         IconKind::Collapsed => fill(convex(&[v(8.0, 6.0), v(17.0, 12.0), v(8.0, 18.0)])),

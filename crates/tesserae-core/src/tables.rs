@@ -3,6 +3,7 @@
 use crate::combustion::{Burn, CombustionDef, CombustionError, CombustionTable};
 use crate::fluid::{FluidDef, FluidError, FluidTable};
 use crate::light::MAX_LIGHT;
+use crate::marker::MarkerKinds;
 use crate::material::MaterialTable;
 use crate::occupants::{Fluid, Level, Occupants};
 use crate::plant::PlantTable;
@@ -26,6 +27,7 @@ pub struct Tables {
     pub combustion: CombustionTable,
     pub uses: VoxelUses,
     pub plants: PlantTable,
+    pub markers: MarkerKinds,
 }
 
 /// Why [`Tables::vet_placed`] refused a Voxel.

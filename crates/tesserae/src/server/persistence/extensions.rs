@@ -28,6 +28,7 @@ const REGISTERED: &[Extension] = &[
     Extension::of::<save::GameModeV1>(),
     Extension::of::<save::VitalsV1>(),
     Extension::of::<save::DeathV1>(),
+    Extension::of::<tesserae_core::marker::WaypointsV1>(),
     #[cfg(test)]
     Extension::of::<super::tests::Probe>(),
 ];

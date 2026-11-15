@@ -29,6 +29,8 @@ jobs:
 
       - name: Cache
         uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       # bevy links alsa, udev, wayland and xkbcommon on Linux. Wayland is a
       # default bevy feature and wayland-sys resolves wayland-client through
@@ -91,6 +93,8 @@ jobs:
 
       - name: Cache
         uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Terra uses only the WIT contract
         run: ./scripts/check-terra-boundary
@@ -151,6 +155,8 @@ jobs:
 
       - name: Cache
         uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install Linux build deps
         run: |
@@ -169,15 +175,16 @@ jobs:
 
       # The workspace manifest builds dependencies at opt-level 3 so a local
       # debug run of a Bevy app is not an order of magnitude too slow. CI never
-      # runs the app — it runs about 1,300 unit tests — so that setting buys
-      # nothing here and costs a full LLVM pass over ~600 crates. The glob
-      # matches dependencies only, so our own crates keep [profile.dev]'s
-      # opt-level 1.
+      # runs the app, so most of that is a full LLVM pass over ~600 crates for
+      # nothing; .github/test-profile.toml puts every dependency at opt-level 0
+      # and raises only what the slow tests spend their time in: the Mod engine
+      # (every demo Game test compiles a WASM component), bevy's ECS and the
+      # hashing under it (the plant tests tick an App millions of times), and
+      # tesserae itself. That cut the suite on 4 threads from 344 s to 177 s
+      # for about a minute of cold build. Measure before adding a crate.
       #
       # Flags must match across the build, run and doctest steps so they share
-      # one set of fingerprints. tesserae-core is the one workspace crate whose
-      # tests are CPU-bound (property and brute-force meshing and LOD checks),
-      # so it alone is optimised.
+      # one set of fingerprints.
       - name: Install nextest
         uses: taiki-e/install-action@v2
         with:
@@ -186,21 +193,18 @@ jobs:
       - name: Build tests
         run: |
           cargo nextest run --workspace --locked --features tesserae/dev \
-            --config 'profile.dev.package."*".opt-level=0' \
-            --config 'profile.dev.package.tesserae-core.opt-level=3' --no-run
+            --config .github/test-profile.toml --no-run
 
       - name: Run tests
         run: |
           cargo nextest run --workspace --locked --features tesserae/dev \
-            --config 'profile.dev.package."*".opt-level=0' \
-            --config 'profile.dev.package.tesserae-core.opt-level=3'
+            --config .github/test-profile.toml
 
       # nextest does not run doctests.
       - name: Run doctests
         run: |
           cargo test --doc --workspace --locked --features tesserae/dev \
-            --config 'profile.dev.package."*".opt-level=0' \
-            --config 'profile.dev.package.tesserae-core.opt-level=3'
+            --config .github/test-profile.toml
 
   benches:
     name: Benches
@@ -217,6 +221,8 @@ jobs:
 
       - name: Cache
         uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       # The mesher is the hot path; a bench that no longer compiles is a bench
       # nobody runs. This does not measure, it only builds.
@@ -248,6 +254,8 @@ jobs:
 
       - name: Cache
         uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install Linux build deps
         run: |

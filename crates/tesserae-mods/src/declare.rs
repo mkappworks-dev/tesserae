@@ -137,6 +137,7 @@ pub struct Applied {
     pub world: Option<WorldgenParams>,
     pub view: Option<ViewParams>,
     pub movement: Option<content::MovementPolicy>,
+    pub map: Option<content::MapPolicy>,
     pub character: Option<crate::character::Character>,
     pub tools: Vec<ToolDef>,
     /// The Game's, with its omitted fields at the engine's defaults.
@@ -163,6 +164,8 @@ pub struct Behaviour {
     pub(crate) recipes: Vec<content::RecipeDef>,
     voxel_uses: Vec<content::VoxelUse>,
     pub(crate) plants: Vec<content::PlantDef>,
+    pub(crate) marker_kinds: Vec<content::MarkerKindDef>,
+    pub(crate) death_marker_kind: Option<String>,
     /// Each Material's tags, by full name, for the Plants that name a `#tag`.
     pub(crate) material_tags: Vec<(String, Vec<String>)>,
     lake: Option<content::WaterParams>,
@@ -175,6 +178,7 @@ fn beyond_character(world: &content::WorldParams) -> Option<&'static str> {
     let bare = WorldgenParams::default();
     [
         (world.movement.is_some(), "world.movement"),
+        (world.map_policy.is_some(), "world.map"),
         (world.caves.is_some(), "world.caves"),
         (world.smoothing.is_some(), "world.smoothing"),
         (world.water.is_some(), "world.water"),
@@ -219,6 +223,7 @@ pub fn apply(
             (!declaration.tools.is_empty(), "tools"),
             (declaration.survival.is_some(), "survival"),
             (!declaration.cause_sounds.is_empty(), "cause-sounds"),
+            (declaration.death_marker_kind.is_some(), "death-marker-kind"),
         ] {
             if set {
                 return Err(ModError::NotAGame { id: id(), field });
@@ -276,6 +281,11 @@ pub fn apply(
             "plant",
             declaration.plants.len(),
             crate::plant::MAX_PLANTS_PER_MOD,
+        ),
+        (
+            "marker-kind",
+            declaration.marker_kinds.len(),
+            crate::marker::MAX_MARKER_KINDS_PER_MOD,
         ),
     ] {
         if count > max {
@@ -348,6 +358,7 @@ pub fn apply(
             },
         });
     }
+    let map = declaration.world.as_ref().and_then(|p| p.map_policy);
     let ground = declaration.world.as_ref().and_then(|p| p.ground.clone());
     let (world, lake) = declaration.world.map(world_params).unzip();
     let lake = lake.flatten();
@@ -483,6 +494,7 @@ pub fn apply(
         world,
         view,
         movement,
+        map,
         character,
         tools,
         survival,
@@ -502,6 +514,8 @@ pub fn apply(
             recipes: declaration.recipes,
             voxel_uses: declaration.voxel_uses,
             plants: declaration.plants,
+            marker_kinds: declaration.marker_kinds,
+            death_marker_kind: declaration.death_marker_kind,
             material_tags,
             lake,
             ground,

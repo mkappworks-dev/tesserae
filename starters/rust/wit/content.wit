@@ -129,6 +129,12 @@ interface content {
         start-in-flight: bool,
     }
 
+    /// Whether the Server keeps a Player's Map and the Client draws the Map, the
+    /// Compass and the minimap. A saved Map is kept while this forbids it.
+    record map-policy {
+        enabled: bool,
+    }
+
     /// How the engine poses a character bone. Closed in 0.3.
     enum bone-role {
         /// Turns with the body and carries what hangs from it.
@@ -200,6 +206,9 @@ interface content {
 
     record world-params {
         movement: option<movement-policy>,
+        /// Whether the Map and the Compass exist in this World. `none` permits them.
+        /// Only the Game may set it.
+        map-policy: option<map-policy>,
         /// `none` draws the engine's plain box.
         character: option<character-def>,
         sea-level-m: f32,
@@ -1027,6 +1036,28 @@ interface content {
         sound: string,
     }
 
+    /// What the Engine draws a Marker kind as: a closed set of shapes, so no
+    /// font has to carry an icon.
+    enum marker-icon {
+        home,
+        camp,
+        mine,
+        farm,
+        landmark,
+        death,
+        flag,
+        pin,
+        star,
+    }
+
+    /// A kind of mark a Player can put on the Map and the Compass.
+    record marker-kind-def {
+        /// The kind's local name.
+        name: string,
+        icon: marker-icon,
+        color: srgba,
+    }
+
     /// Everything a Mod adds, in registration order: a name's id is its index
     /// after the engine's built-ins, so Materials start at 8 (7 is retired and
     /// never handed out) and Shapes at 4. A `world` or `view` from a Mod that is
@@ -1079,5 +1110,10 @@ interface content {
         /// At most 128 rows per Mod and 512 in a World, from any Mod. A Material
         /// is in at most one Plant, once.
         plants: list<plant-def>,
+        /// At most 16 rows per Mod, from any Mod, named `<mod id>:<name>`.
+        marker-kinds: list<marker-kind-def>,
+        /// The full name of the Marker kind a death leaves, from the Game only;
+        /// it must name a declared Marker kind. `none` leaves no death mark.
+        death-marker-kind: option<string>,
     }
 }

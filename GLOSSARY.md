@@ -478,6 +478,33 @@ Plant that fails a need holds its Stage and never dies of it.
 a grounded trunk, top-down over several Logical steps, after a trunk Voxel is
 cut. Placed Voxels are never part of one.
 
+## Map
+
+**Map** — what the Server holds for each Player of the surface they have
+explored: per column sample, the surface height, the top Material and the Biome
+as they were when seen. Not a view of the World and never regenerated from the
+seed, so it shows a Player's builds and lakes as of their last visit.
+
+**Map tile** — a fixed square of a Map, in metres, the unit the Server sends the
+Client and the Client caches. Not a Chunk, which is data of Voxels, and not a
+Cell.
+
+**Explored** — a column sample a Player has been near enough to see while its
+Chunk was held and lit. Terrain that was not loaded is never Explored, so a Map
+never guesses at it.
+
+**Waypoint** — a named, coloured point a Player places on their own Map. The
+Server also adds one where a Player died.
+
+**Marker kind** — the name, icon and colour a Game declares for a Waypoint. A
+World with no Game has none.
+
+**Compass** — the Client's strip showing the Player's heading, the four cardinal
+directions and the bearing of each Waypoint. Presentation only. Not the Map.
+
+**North** — the World's −Z axis, in every World at every Voxel size. The
+direction the Player faces at heading zero.
+
 ## Audio
 
 **Sound** — a thing a Game or Mod declares by name that can be heard: one or

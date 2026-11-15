@@ -35,11 +35,15 @@ within `EDIT_REACH_M` of the Eye is traced (see Third-person view below). A
 queued Edit keeps its arrival decision. Respawn is a Server request that clears
 movement, vertical velocity and grounded state. A physics respawn lifts the body
 in 0.25 m steps, up to 16 m, to the first clear standing position over the spawn
-point; with none (solid or unloaded terrain) it is refused with feedback and the
-Eye stays. That is a placement the Server chooses on request, not relocation of
-a body already embedded. A solid Voxel an Edit would place inside a physics body
-is rejected when the Edit is applied, because an embedded body freezes; a flying
-body is noclip and unaffected. Changing view cannot move the body.
+point; with none (solid terrain) it is refused with feedback and the Eye stays.
+An unloaded spawn is not refused: the Server streams around the Player, so after
+a death far away the spawn is never loaded, and the respawn stands the body at
+the spawn and moves the stream there, where unknown terrain blocks physics until
+the ground arrives. That is a placement the Server chooses on request, not
+relocation of a body already embedded. A solid Voxel an Edit would place inside
+a physics body is rejected when the Edit is applied, because an embedded body
+freezes; a flying body is noclip and unaffected. Changing view cannot move the
+body.
 
 ## Persistence and presentation
 

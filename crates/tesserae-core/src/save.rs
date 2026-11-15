@@ -1387,6 +1387,10 @@ pub struct Commit {
     /// Stacks: opens with none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub containers: Vec<containers::SavedContainer>,
+    /// Absent in commits written before Maps, or with nothing explored: opens
+    /// with an empty Map.
+    #[serde(default, skip_serializing_if = "map::SavedMap::is_empty")]
+    pub map: map::SavedMap,
     /// The mode a new Player starts in. Absent in commits written before game
     /// modes: those Worlds were Creative.
     #[serde(default)]
@@ -1412,6 +1416,7 @@ impl Commit {
         }
         self.entities.validate()?;
         containers::validate(&self.containers)?;
+        self.map.validate()?;
         self.content.require(installed)?;
         let mapping = self.content.validation_mapping()?;
         self.parameters.restore(&mapping, self.generator)?;
@@ -1791,6 +1796,7 @@ impl DirtyState {
 pub mod containers;
 pub mod entities;
 pub mod library;
+pub mod map;
 #[cfg(test)]
 mod tests;
 

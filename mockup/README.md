@@ -268,3 +268,25 @@ the tips, a before and after oak, and a label of each tree's branching in
 metres. **Density and spacing** (`density.js`) is a 48 m plan view per Biome
 type at one scale, with grove clumping from a low-frequency field, and the Biome
 matrix cells carry a dense, moderate or sparse tag with the main tree's spacing.
+
+Step 19 adds `/map`: the Map, a centred window over the live scene, with fog of
+war, Biome tint and height shading, 2 to 16 m per pixel zoom, drag to pan, and
+Waypoints (a Marker kind and a name; the death marker is automatic). The side
+panel switches between Waypoints (the list) and Explore (area and legend). The
+icon toolbar in the view's top-right corner (zoom, centre, add Waypoint, close;
+each with a tooltip) holds the controls, and its add Waypoint button arms add
+mode: click explored ground to open a small popover (Name, Marker kind, Cancel
+and Add; Enter adds, Esc cancels), or use "At my position" in the hint pill.
+Clicking a Waypoint on the map or in the list opens the same popover to edit or
+remove it, and the death marker's is read-only. The gameplay HUD gains the
+Compass and a minimap, both off by default; both are Display settings and toggle
+in play with `B` and `N` (the minimap carries the Biome name and the coordinates
+in a strip inside its face), with no toast. Press `M` to open or close the Map,
+and Left and Right in play to turn the heading. `H` toggles the placement ghost
+(Behavior > Placement ghost; only the setting, the key and the toast "Placement
+ghost on" are mocked), and `O` takes the next tool (Cycle tool, "Take tool" in
+Key bindings). The Simulate panel's Map policy checkbox, "Game forbids the Map",
+shows the engine's state: the Map, Compass and minimap keys do nothing, the
+Compass and minimap are hidden, the Menu has no Map button, and the switches and
+bindings stay in Settings marked "Not available in this World." The terrain and
+the explored route are drawn from noise here, not from the engine.

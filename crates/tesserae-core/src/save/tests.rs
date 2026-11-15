@@ -79,6 +79,7 @@ pub(super) fn fixture() -> Commit {
         },
         entities: Default::default(),
         containers: Vec::new(),
+        map: Default::default(),
         game_mode: GameMode::Creative,
     }
 }

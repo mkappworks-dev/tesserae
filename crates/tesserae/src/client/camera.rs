@@ -95,6 +95,7 @@ pub(super) fn plugin(app: &mut App) {
             .run_if(crate::server::persistence::playing)
             .run_if(super::menu::closed)
             .run_if(super::inventory_window::closed)
+            .run_if(super::map_window::closed)
             .run_if(super::death::alive)
             .after(super::menu::toggle),
     );

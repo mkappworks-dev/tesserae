@@ -100,6 +100,8 @@ pub(super) fn empty() -> Declaration {
         cause_sounds: Vec::new(),
         recipes: Vec::new(),
         plants: Vec::new(),
+        marker_kinds: Vec::new(),
+        death_marker_kind: None,
         voxel_uses: Vec::new(),
     }
 }
@@ -420,6 +422,7 @@ fn a_0_1_declaration_comes_through_the_adapter_unchanged() {
 fn lake(level_m: f32, material: &str) -> content::WorldParams {
     content::WorldParams {
         movement: None,
+        map_policy: None,
         character: None,
         water: Some(content::WaterParams {
             level_m,

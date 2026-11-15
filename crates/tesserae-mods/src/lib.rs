@@ -19,6 +19,7 @@ mod limits;
 mod loader;
 mod log;
 mod manifest;
+mod marker;
 mod package;
 mod plant;
 mod prompt;
@@ -32,7 +33,7 @@ mod trust;
 
 pub use adapt::Line;
 pub use bindings::exports::tesserae::mods::guest::{Registered, RegisteredId, WorldInfo};
-pub use bindings::tesserae::mods::content::{Declaration, MovementPolicy};
+pub use bindings::tesserae::mods::content::{Declaration, MapPolicy, MovementPolicy};
 pub use character::{
     Bone, Character, Cube, MAX_BONES, MAX_CUBES, Motion, Role, SKIN_BYTES, SKIN_EDGE,
 };
@@ -57,6 +58,7 @@ pub use manifest::{
     DEFAULT_GAME, Found, MAX_SCAN_ENTRIES, Manifest, Migration, Rejected, SUPPORTED_API, Scan,
     games_dir, migrate_legacy_games, plan, scan, with_dependencies,
 };
+pub use marker::{MAX_MARKER_KINDS_PER_MOD, resolve_markers};
 pub use package::{Staged, stage};
 pub use plant::{DeclaredPlants, MAX_PLANTS, MAX_PLANTS_PER_MOD};
 pub use prompt::{confirm_trust, trust_prompt};

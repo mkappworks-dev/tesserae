@@ -36,6 +36,7 @@ pub mod items;
 mod jobs;
 mod lod;
 mod lod_rings;
+pub mod map;
 pub mod mods;
 pub mod persistence;
 pub mod plants;
@@ -51,6 +52,7 @@ pub mod tool;
 pub mod undo;
 pub mod usable;
 pub mod vitals;
+pub mod waypoint;
 pub mod world_state;
 
 #[cfg(test)]
@@ -126,6 +128,8 @@ pub fn plugin(app: &mut App) {
             tool::plugin,
             fluids::plugin,
             plants::plugin,
+            map::plugin,
+            waypoint::plugin,
             player::plugin,
             sky::plugin,
             soundscape::plugin,
@@ -236,6 +240,22 @@ fn spawn_eye(generator: &Worldgen) -> Vec3 {
     let half = player::BODY_HALF_WIDTH_M;
     let clear_m = generator.clear_height_m([-half; 2], [half; 2]);
     Vec3::new(0.0, (top_m + SPAWN_CLEARANCE_M).max(clear_m), 0.0)
+}
+
+/// `f` over `items` on one thread each, results in `items` order; a panic is re-raised as it was.
+#[cfg(test)]
+pub(crate) fn in_parallel<T: Sync, R: Send>(items: &[T], f: impl Fn(&T) -> R + Sync) -> Vec<R> {
+    std::thread::scope(|scope| {
+        let f = &f;
+        let threads: Vec<_> = items
+            .iter()
+            .map(|item| scope.spawn(move || f(item)))
+            .collect();
+        threads
+            .into_iter()
+            .map(|t| t.join().unwrap_or_else(|e| std::panic::resume_unwind(e)))
+            .collect()
+    })
 }
 
 #[cfg(test)]

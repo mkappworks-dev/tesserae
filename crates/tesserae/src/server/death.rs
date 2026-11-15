@@ -19,6 +19,7 @@ use super::player::{Player, PlayerInput, Respawned};
 use super::survival::Survival;
 use super::undo::Journal;
 use super::vitals::{DamageCause, LastDamage, Vitals};
+use super::waypoint::PlayerWaypoints;
 use super::world_state::{ChunkStore, SpawnPoint};
 use crate::session::SessionApp;
 use crate::world::WorldSettings;
@@ -115,12 +116,15 @@ fn discard<M: Message>(messages: Option<ResMut<Messages<M>>>) {
     }
 }
 
+const DEATH_MARKER_NAME: &str = "Where you died";
+
 type Dying<'a> = (
     Entity,
     &'a mut Player,
     &'a Vitals,
     &'a LastDamage,
     &'a mut Inventory,
+    &'a mut PlayerWaypoints,
 );
 
 fn die(
@@ -136,7 +140,7 @@ fn die(
     ),
     (mut journal, mut pending): (ResMut<Journal>, ResMut<PendingEdits>),
 ) {
-    let (id, mut player, vitals, last, mut inventory) = player.into_inner();
+    let (id, mut player, vitals, last, mut inventory, mut waypoints) = player.into_inner();
     if vitals.health > 0.0 {
         return;
     }
@@ -159,6 +163,7 @@ fn die(
     journal.clear();
     pending.clear();
     player.stop();
+    leave_death_marker(&mut waypoints, &tables, body.feet());
     commands.entity(id).insert(Death {
         cause: last.0.map(|cause| saved_cause(cause, &survival)),
         at_m: Vec3::from_array(body.feet()),
@@ -166,6 +171,17 @@ fn die(
         drops,
         kept_inventory,
     });
+}
+
+fn leave_death_marker(waypoints: &mut PlayerWaypoints, tables: &ContentTables, feet: [f32; 3]) {
+    let Some(kind) = tables.markers.death.map(|i| &tables.markers.kinds[i]) else {
+        return;
+    };
+    waypoints.clear_death();
+    if waypoints.is_full() {
+        waypoints.drop_oldest_ordinary();
+    }
+    waypoints.push(DEATH_MARKER_NAME, &kind.name, feet[0], feet[2], true);
 }
 
 fn saved_cause(cause: DamageCause, survival: &Survival) -> DeathCause {
@@ -284,6 +300,7 @@ mod tests {
     use crate::server::undo::HistoryAction;
     use crate::server::vitals::EatIntent;
     use crate::world::ChunkCoord;
+    use tesserae_core::marker::{Icon, MarkerKind, MarkerKinds};
 
     const SPAWN: Vec3 = Vec3::new(20.5, 8.0, 20.5);
     /// On the ground's surface, 8 m up.
@@ -444,6 +461,78 @@ mod tests {
             .query::<&Vitals>()
             .single(app.world())
             .unwrap()
+    }
+
+    fn declare_death_kind(app: &mut App, named: bool) {
+        let mut tables = crate::server::fixture_tables();
+        tables.markers = MarkerKinds {
+            kinds: vec![MarkerKind {
+                name: "t:grave".into(),
+                icon: Icon::Death,
+                color: [200, 40, 40, 255],
+            }],
+            death: named.then_some(0),
+        };
+        app.insert_resource(ContentTables(Arc::new(tables)));
+    }
+
+    fn waypoints(app: &mut App) -> Vec<tesserae_core::marker::Waypoint> {
+        app.world_mut()
+            .query::<&PlayerWaypoints>()
+            .single(app.world())
+            .unwrap()
+            .list()
+            .to_vec()
+    }
+
+    #[test]
+    fn dying_leaves_one_death_waypoint_of_the_games_death_kind_and_a_second_replaces_it() {
+        let mut app = app(false);
+        declare_death_kind(&mut app, true);
+        fall_to_death(&mut app);
+        let first = waypoints(&mut app);
+        assert_eq!(first.len(), 1);
+        assert_eq!((first[0].kind.as_str(), first[0].death), ("t:grave", true));
+        assert_eq!((first[0].x_m, first[0].z_m), (FEET.x, FEET.z));
+
+        app.world_mut().write_message(RespawnIntent);
+        seconds(&mut app, 1.0);
+        let mut player = app.world_mut().query::<&mut Player>();
+        let mut player = player.single_mut(app.world_mut()).unwrap();
+        *player = Player::physics_at(Vec3::new(9.5, 28.0 + EYE_HEIGHT, 9.5));
+        seconds(&mut app, 3.0);
+        let second = waypoints(&mut app);
+        assert_eq!(second.len(), 1, "{second:?}");
+        assert_ne!(second[0].id, first[0].id);
+        assert_eq!((second[0].x_m, second[0].z_m), (9.5, 9.5));
+    }
+
+    #[test]
+    fn dying_with_a_full_list_drops_the_oldest_waypoint_so_the_list_still_validates() {
+        let mut app = app(false);
+        declare_death_kind(&mut app, true);
+        {
+            let mut q = app.world_mut().query::<&mut PlayerWaypoints>();
+            let mut w = q.single_mut(app.world_mut()).unwrap();
+            for i in 0..tesserae_core::marker::MAX_WAYPOINTS {
+                w.push(&format!("W{i}"), "t:grave", 0.0, 0.0, false);
+            }
+        }
+        fall_to_death(&mut app);
+        let list = waypoints(&mut app);
+        assert_eq!(list.len(), tesserae_core::marker::MAX_WAYPOINTS);
+        assert!(list.iter().any(|w| w.death));
+        assert!(list.iter().all(|w| w.name != "W0"));
+        let mut q = app.world_mut().query::<&PlayerWaypoints>();
+        assert!(q.single(app.world()).unwrap().validate().is_ok());
+    }
+
+    #[test]
+    fn a_game_with_no_death_kind_leaves_no_death_waypoint() {
+        let mut app = app(false);
+        declare_death_kind(&mut app, false);
+        fall_to_death(&mut app);
+        assert!(waypoints(&mut app).is_empty());
     }
 
     #[test]
@@ -643,6 +732,22 @@ mod tests {
             app.update();
         }
         assert!(eye(&mut app).x > from.x + 1.0, "moves again");
+    }
+
+    #[test]
+    fn dying_far_from_an_unloaded_spawn_still_respawns_there() {
+        let mut app = app(false);
+        app.insert_resource(SpawnPoint::for_tests(Vec3::new(300.5, 8.0, 300.5)));
+        fall_to_death(&mut app);
+        app.world_mut().write_message(RespawnIntent);
+        app.update();
+        let told = &app.world().resource::<Told>().deaths;
+        assert_eq!(told.last(), Some(&DeathChanged(None)), "still dead");
+        let at = eye(&mut app);
+        assert!(
+            (at.with_y(0.0) - Vec3::new(300.5, 0.0, 300.5)).length() < 1e-3,
+            "{at}"
+        );
     }
 
     /// As a World reopened in Creative after a Survival death holds it.

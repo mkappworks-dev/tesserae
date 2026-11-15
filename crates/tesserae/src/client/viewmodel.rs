@@ -4,19 +4,22 @@
 //! a cleared depth, so it never clips into a wall. The hand animation
 //! (`hand_anim.rs`) poses it: a swing for a Place, a repeating one while a
 //! removal runs, a raise to the mouth with bites for eating, a lower-and-raise
-//! on a slot change. Walking adds a small bob; reduced motion holds it still.
+//! on a slot change. Walking adds a small bob and swimming a stroke that gives
+//! way to any of those; reduced motion holds it still.
 
 use super::{
-    hand_anim::{HandAnim, Pose, still},
+    hand_anim::{HandAnim, Pose, still, stroke_hz, swim_effort, swim_hand, swims},
     menu::Covers,
     pose::PublishedBody,
     preview::{HAND_LAYER, HandModel, Model},
     profile::Preferences,
     theme,
 };
+use crate::server::player::{BodyState, MovementMode};
 use crate::session::SessionApp;
 use bevy::camera::visibility::RenderLayers;
 use bevy::prelude::*;
+use std::f32::consts::TAU;
 
 use super::camera::FlyCamera;
 
@@ -182,13 +185,21 @@ type Inputs<'w> = (
     Option<Res<'w, PublishedBody>>,
 );
 
+#[derive(Default)]
+struct Swim {
+    phase: f32,
+    amount: f32,
+    effort: f32,
+}
+
 fn animate(
     time: Res<Time>,
     (anim, preferences, body): Inputs,
     (covers, dead): (Covers, Option<Res<super::death::Dead>>),
     mut root: Query<(&mut Transform, &mut Visibility), With<Viewmodel>>,
     mut item: Query<&mut Transform, (With<Held>, Without<Viewmodel>)>,
-    mut walk: Local<(f32, f32)>,
+    mode: Query<&FlyCamera>,
+    (mut walk, mut swim): (Local<(f32, f32)>, Local<Swim>),
 ) {
     let Ok((mut transform, mut visibility)) = root.single_mut() else {
         return;
@@ -203,7 +214,9 @@ fn animate(
     let still = still(&preferences);
     let pose = anim.map_or(Pose::REST, |anim| anim.pose(still));
     let dt = time.delta_secs();
-    let (speed, grounded) = body.map_or((0.0, false), |b| (b.0.horizontal_mps, b.0.grounded));
+    let (speed, grounded) = body
+        .as_ref()
+        .map_or((0.0, false), |b| (b.0.horizontal_mps, b.0.grounded));
     let target = if still || !grounded {
         0.0
     } else {
@@ -212,6 +225,28 @@ fn animate(
     let (phase, amount) = &mut *walk;
     *phase = (*phase + speed * BOB_PER_M * dt).rem_euclid(std::f32::consts::TAU);
     *amount += (target - *amount) * (1.0 - (-BOB_EASE * dt).exp());
+    let stroke = body.as_ref().map_or(BodyState::default(), |b| b.0);
+    let wet = swims(
+        stroke,
+        mode.single()
+            .map_or(MovementMode::Flight, |c| c.movement_mode),
+        still,
+    );
+    let ease = 1.0 - (-BOB_EASE * dt).exp();
+    swim.effort += (if wet { swim_effort(stroke) } else { 0.0 } - swim.effort) * ease;
+    swim.amount += (if wet { 1.0 } else { 0.0 } - swim.amount) * ease;
+    swim.phase = (swim.phase + TAU * stroke_hz(swim.effort) * dt).rem_euclid(TAU);
+    // An action in progress owns the hand, as it does without a swim.
+    let pose = if pose == Pose::REST {
+        let s = swim_hand(swim.phase, swim.effort);
+        Pose {
+            offset: s.offset * swim.amount,
+            pitch: s.pitch * swim.amount,
+            ..pose
+        }
+    } else {
+        pose
+    };
     let next = root_at(pose, bob_offset(*phase, *amount));
     if *transform != next {
         *transform = next;
@@ -478,6 +513,81 @@ mod tests {
         assert!(
             root(&mut app).0.translation.abs_diff_eq(rest, 1e-3),
             "no bob when still"
+        );
+    }
+
+    fn swim_in(app: &mut App, mode: MovementMode, h: f32) {
+        app.world_mut()
+            .query::<&mut FlyCamera>()
+            .single_mut(app.world_mut())
+            .unwrap()
+            .movement_mode = mode;
+        app.insert_resource(PublishedBody(BodyState {
+            swimming: true,
+            horizontal_mps: h,
+            ..default()
+        }));
+    }
+
+    fn travel(app: &mut App, frames: usize) -> f32 {
+        let mut widest = 0f32;
+        for _ in 0..frames {
+            app.update();
+            widest = widest.max(root(app).0.translation.distance(FIST));
+        }
+        widest
+    }
+
+    #[test]
+    fn a_swimming_hand_strokes_further_moving_than_treading_and_rests_in_flight_or_reduced_motion()
+    {
+        let mut app = app();
+        app.update();
+        swim_in(&mut app, MovementMode::Physics, 0.0);
+        let tread = travel(&mut app, 120);
+        swim_in(&mut app, MovementMode::Physics, 3.0);
+        let stroke = travel(&mut app, 120);
+        assert!(tread > 1e-3, "treading moves the hand: {tread}");
+        assert!(stroke > tread * 1.5, "{stroke} vs {tread}");
+
+        swim_in(&mut app, MovementMode::Flight, 3.0);
+        travel(&mut app, 120);
+        assert!(
+            root(&mut app).0.translation.abs_diff_eq(FIST, 1e-3),
+            "flight"
+        );
+
+        swim_in(&mut app, MovementMode::Physics, 3.0);
+        app.insert_resource(Preferences {
+            reduced_motion: true,
+            ..default()
+        });
+        travel(&mut app, 120);
+        assert!(
+            root(&mut app).0.translation.abs_diff_eq(FIST, 1e-3),
+            "still"
+        );
+    }
+
+    #[test]
+    fn a_place_swing_in_the_water_is_the_swing_alone() {
+        let mut dry = app();
+        let mut wet = app();
+        dry.update();
+        wet.update();
+        swim_in(&mut wet, MovementMode::Physics, 3.0);
+        for _ in 0..30 {
+            wet.update();
+        }
+        for app in [&mut dry, &mut wet] {
+            app.world_mut().resource_mut::<HandAnim>().swing();
+            app.world_mut().resource_mut::<HandAnim>().tick(0.1);
+            app.update();
+        }
+        assert_eq!(
+            root(&mut dry).0.translation,
+            root(&mut wet).0.translation,
+            "the action keeps priority"
         );
     }
 }

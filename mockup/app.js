@@ -291,7 +291,7 @@ function render() {
   setSelectValue($("#item-access-preview"), state.itemAccess || "creative");
   document.querySelector(".game-footer>span:nth-child(2)").innerHTML =
     state.screen === "play"
-      ? "<kbd>Tab</kbd> Menu <kbd>I</kbd> Inventory <kbd>C</kbd> Catalogue <kbd>L</kbd> Layout"
+      ? `<kbd>Tab</kbd> Menu <kbd>I</kbd> Inventory <kbd>C</kbd> Catalogue ${state.mapForbidden ? "" : "<kbd>M</kbd> Map "}<kbd>L</kbd> Layout`
       : state.screen === "death"
         ? "<kbd>Enter</kbd> Respawn <kbd>Tab</kbd> Navigate"
         : "<kbd>Tab</kbd> Navigate <kbd>Enter</kbd> Select <kbd>Esc</kbd> Back";
@@ -323,6 +323,11 @@ function render() {
     drawBlocks();
   } else if (state.screen === "plants") screen.innerHTML = plantsPage();
   else if (state.screen === "vegetation") screen.innerHTML = vegetationPage();
+  else if (state.screen === "map") {
+    screen.innerHTML = mapPage();
+    mapMount();
+  }
+  if (state.screen === "play") mapPlayMount();
   placeToast();
   screen.querySelector(".body")?.setAttribute("tabindex", "0");
   if (hadFocus) {
@@ -490,7 +495,7 @@ function opening() {
 }
 function pause() {
   const w = activeWorld();
-  return `<div class="pause-screen"><section class="pause-panel"><p class="eyebrow">TAKE A MOMENT</p><h2>Menu</h2><small>${esc(w?.name || "Your World")} · ${survival() ? "Survival" : "Creative"}</small><div class="pause-actions">${button("Resume <span>Esc</span>", "resume", { primary: true })}${button("Inventory <span>I</span>", "inventory-open")}${button("Settings <span>⚙</span>", "settings")}${button("World details <span>↗</span>", "world-details")}${button("Return to Worlds <span>→</span>", "leave")}${button("Save &amp; Quit <span>→</span>", "save-quit")}</div><div class="notice">Single-player prototype<br>Your real saves remain untouched.</div></section><div class="world-status"><p class="eyebrow">YOU ARE HERE</p><h3>${esc(w?.biomes.find((b) => b.enabled)?.name || "Greenwood")}</h3><p>${w?.game || "Terra"} &nbsp; / &nbsp; a little further to explore.</p></div></div>`;
+  return `<div class="pause-screen"><section class="pause-panel"><p class="eyebrow">TAKE A MOMENT</p><h2>Menu</h2><small>${esc(w?.name || "Your World")} · ${survival() ? "Survival" : "Creative"}</small><div class="pause-actions">${button("Resume <span>Esc</span>", "resume", { primary: true })}${button("Inventory <span>I</span>", "inventory-open")}${state.mapForbidden ? "" : button("Map <span>M</span>", "map-open")}${button("Settings <span>⚙</span>", "settings")}${button("World details <span>↗</span>", "world-details")}${button("Return to Worlds <span>→</span>", "leave")}${button("Save &amp; Quit <span>→</span>", "save-quit")}</div><div class="notice">Single-player prototype<br>Your real saves remain untouched.</div></section><div class="world-status"><p class="eyebrow">YOU ARE HERE</p><h3>${esc(w?.biomes.find((b) => b.enabled)?.name || "Greenwood")}</h3><p>${w?.game || "Terra"} &nbsp; / &nbsp; a little further to explore.</p></div></div>`;
 }
 function play() {
   ensureInventory();
@@ -498,7 +503,7 @@ function play() {
     name = held ? stackItem(held)?.name : "",
     hud = survivalHud();
   const aid = state.aimHelper;
-  return `<div class="reticle" aria-hidden="true">+</div>${useHint()}${handMarkup(held)}${aid === "breaking" ? '<div class="layout-status" style="position:absolute;left:50%;top:calc(50% - 46px);transform:translateX(-50%);width:100px;height:12px;padding:1px"><div style="width:62%;height:100%;background:var(--leaf)"></div></div>' : aid === "place" ? '<small style="position:absolute;left:50%;top:calc(50% + 24px);transform:translateX(-50%)">Right Click to place</small>' : aid === "measure" ? '<aside class="layout-status" style="left:34px;right:auto;top:auto;bottom:60px"><small>Distance 3.00 m<br>X 3.00 m · 6.00 voxels<br>Y 0.00 m · 0.00 voxels<br>Z 0.00 m · 0.00 voxels</small></aside>' : ""}${hud.overlay}${state.quickLayout?.active ? layoutStatus() : ""}<div class="hud-bottom"><div class="hud-item-name" aria-live="polite">${esc(name || "")}</div>${hud.above}<div class="row" style="align-items:flex-end;gap:12px"><div class="hotbar storage-grid" role="toolbar" aria-label="Hotbar">${creativeBar()}</div>${state.heldTool ? `<div class="hotbar storage-grid" style="grid-template-columns:44px" aria-label="In hand"><div class="item-slot active" style="display:grid;place-items:center;font-size:11px">${esc(state.heldTool)}</div></div>` : ""}</div></div>${simPanel()}`;
+  return `<div class="reticle" aria-hidden="true">+</div>${useHint()}${handMarkup(held)}${aid === "breaking" ? '<div class="layout-status" style="position:absolute;left:50%;top:calc(50% - 46px);transform:translateX(-50%);width:100px;height:12px;padding:1px"><div style="width:62%;height:100%;background:var(--leaf)"></div></div>' : aid === "place" ? '<small style="position:absolute;left:50%;top:calc(50% + 24px);transform:translateX(-50%)">Right Click to place</small>' : aid === "measure" ? '<aside class="layout-status" style="left:34px;right:auto;top:auto;bottom:60px"><small>Distance 3.00 m<br>X 3.00 m · 6.00 voxels<br>Y 0.00 m · 0.00 voxels<br>Z 0.00 m · 0.00 voxels</small></aside>' : ""}${hud.overlay}${mapPlayChrome()}${state.quickLayout?.active ? layoutStatus() : ""}<div class="hud-bottom"><div class="hud-item-name" aria-live="polite">${esc(name || "")}</div>${hud.above}<div class="row" style="align-items:flex-end;gap:12px"><div class="hotbar storage-grid" role="toolbar" aria-label="Hotbar">${creativeBar()}</div>${state.heldTool ? `<div class="hotbar storage-grid" style="grid-template-columns:44px" aria-label="In hand"><div class="item-slot active" style="display:grid;place-items:center;font-size:11px">${esc(state.heldTool)}</div></div>` : ""}</div></div>${simPanel()}`;
 }
 
 function modsLibrary() {
@@ -541,6 +546,7 @@ function closeDialog() {
 }
 function action(name, value) {
   if (survivalAction(name, value)) return;
+  if (mapAction(name, value)) return;
   if (layoutAction(name, value)) return;
   if (craftingAction(name, value)) return;
   if (inventoryAction(name, value)) return;
@@ -1169,6 +1175,7 @@ const prototypeScreens = [
   { value: "blocks", label: "Block gallery" },
   { value: "plants", label: "Plants (step 18)" },
   { value: "vegetation", label: "Vegetation (step 18b)" },
+  { value: "map", label: "Map (step 19)" },
 ];
 $("#bar-mode").outerHTML = customSelect(
   "Your mode",

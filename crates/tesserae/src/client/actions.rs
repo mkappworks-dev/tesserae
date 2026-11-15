@@ -27,6 +27,9 @@ pub(super) enum Action {
     Slower,
     Remove,
     Place,
+    PlacementGhost,
+    Compass,
+    Minimap,
     Sample,
     EmptyHand,
     Shape,
@@ -57,6 +60,7 @@ pub(super) enum Action {
     #[serde(alias = "catalogue")]
     Menu,
     Inventory,
+    Map,
     SearchCatalogue,
     ReleaseCursor,
     Help,
@@ -277,17 +281,21 @@ impl Bindings {
             (View, KeyCode::F5),
             (Faster, KeyCode::Equal),
             (Slower, KeyCode::Minus),
+            (PlacementGhost, KeyCode::KeyH),
+            (Compass, KeyCode::KeyB),
+            (Minimap, KeyCode::KeyN),
             (Sample, KeyCode::KeyP),
             (EmptyHand, KeyCode::KeyX),
             (Shape, KeyCode::KeyF),
             (Turn, KeyCode::KeyQ),
             (Flip, KeyCode::KeyE),
-            (CycleTool, KeyCode::KeyM),
+            (CycleTool, KeyCode::KeyO),
             (Use, KeyCode::KeyG),
             (ClearTool, KeyCode::Backspace),
             (Menu, KeyCode::Tab),
             (ReleaseCursor, KeyCode::Escape),
             (Inventory, KeyCode::KeyI),
+            (Map, KeyCode::KeyM),
             (SearchCatalogue, KeyCode::KeyC),
             (Help, KeyCode::F1),
             (Settings, KeyCode::F10),
@@ -761,6 +769,19 @@ mod tests {
             phase,
         });
         app.update();
+    }
+
+    #[test]
+    fn no_two_default_keyboard_bindings_collide() {
+        let mut owners: Vec<(Binding, Action)> = Vec::new();
+        for (action, alternatives) in Bindings::keyboard_defaults() {
+            for binding in alternatives.into_iter().flatten() {
+                if let Some((_, other)) = owners.iter().find(|(seen, _)| *seen == binding) {
+                    panic!("{other:?} and {action:?} share {binding:?}");
+                }
+                owners.push((binding, action));
+            }
+        }
     }
 
     #[test]

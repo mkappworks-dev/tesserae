@@ -803,6 +803,9 @@ fn hints(bindings: &super::actions::Bindings, labels: &super::actions::Labels) -
         (Turn, "turn"),
         (Flip, "flip"),
         (Shape, "Shape"),
+        (PlacementGhost, "placement ghost"),
+        (Compass, "compass"),
+        (Minimap, "minimap"),
         (Menu, "menu"),
         (Forward, "forward"),
         (Backward, "backward"),
@@ -1350,7 +1353,7 @@ mod tests {
             "a fluid source's Item, resolved by the Server too"
         );
         assert_eq!(
-            both_buttons(&mut app, &[KeyCode::KeyM]),
+            both_buttons(&mut app, &[KeyCode::KeyO]),
             [Some(EditAction::Ignite), None],
             "fire is a hand state"
         );
@@ -1446,7 +1449,7 @@ mod tests {
     fn fluids_and_fire_and_a_disabled_preference_place_once_per_press() {
         for (hand, repeat) in [
             (KeyCode::Digit8, true),
-            (KeyCode::KeyM, true),
+            (KeyCode::KeyO, true),
             (KeyCode::Digit1, false),
         ] {
             let mut app = at_100hz(CursorGrabMode::Locked, repeat);
@@ -1871,7 +1874,7 @@ mod tests {
                 }
             );
         }
-        for hand in [KeyCode::Digit8, KeyCode::KeyM, KeyCode::KeyX] {
+        for hand in [KeyCode::Digit8, KeyCode::KeyO, KeyCode::KeyX] {
             key(&mut app, hand);
             let before = app.world().resource::<Hotbar>().clone();
             key(&mut app, KeyCode::KeyF);
@@ -1930,7 +1933,7 @@ mod tests {
         for (keycode, expected, verb) in [
             (KeyCode::Digit1, "1: test:stone", "place"),
             (KeyCode::Digit8, "8: terra:water source", "place source"),
-            (KeyCode::KeyM, "held: fire", "ignite"),
+            (KeyCode::KeyO, "held: fire", "ignite"),
         ] {
             key(&mut app, keycode);
             let text = hud(&app);
@@ -1955,11 +1958,11 @@ mod tests {
         frame(&mut app);
         key(&mut app, KeyCode::Digit3);
         let before = held(&app);
-        key(&mut app, KeyCode::KeyM);
+        key(&mut app, KeyCode::KeyO);
         assert_eq!(held(&app), Holding::Fire);
-        key(&mut app, KeyCode::KeyM);
+        key(&mut app, KeyCode::KeyO);
         assert_eq!(held(&app), Holding::Tool(ToolId(0)));
-        key(&mut app, KeyCode::KeyM);
+        key(&mut app, KeyCode::KeyO);
         assert_eq!(held(&app), before);
         assert_eq!(app.world().resource::<Hotbar>().selected, 2);
     }
@@ -1970,7 +1973,7 @@ mod tests {
         frame(&mut app);
         key(&mut app, KeyCode::KeyX);
         for _ in 0..3 {
-            key(&mut app, KeyCode::KeyM);
+            key(&mut app, KeyCode::KeyO);
         }
         assert_eq!(held(&app), Holding::Empty);
     }
@@ -1980,7 +1983,7 @@ mod tests {
         let mut app = app_with(CursorGrabMode::Locked, dry());
         frame(&mut app);
         let before = app.world().resource::<Hotbar>().clone();
-        key(&mut app, KeyCode::KeyM);
+        key(&mut app, KeyCode::KeyO);
         assert_eq!(*app.world().resource::<Hotbar>(), before);
     }
 
@@ -1988,10 +1991,10 @@ mod tests {
     fn choosing_a_slot_or_the_empty_hand_puts_a_held_tool_away() {
         let mut app = app_with(CursorGrabMode::Locked, with_measure(terra()));
         frame(&mut app);
-        key(&mut app, KeyCode::KeyM);
+        key(&mut app, KeyCode::KeyO);
         key(&mut app, KeyCode::Digit3);
         assert_eq!(app.world().resource::<Hotbar>().outside, None);
-        key(&mut app, KeyCode::KeyM);
+        key(&mut app, KeyCode::KeyO);
         key(&mut app, KeyCode::KeyX);
         assert_eq!(held(&app), Holding::Empty);
     }

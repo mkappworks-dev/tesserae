@@ -463,6 +463,59 @@ fn repeat_while_held_is_off_by_default_and_applies_to_every_device() {
     std::fs::remove_file(path).unwrap();
 }
 #[test]
+fn the_placement_ghost_is_off_by_default_and_the_setting_round_trips() {
+    let mut app = app();
+    assert!(!app.world().resource::<Preferences>().placement_ghost);
+    activate_operation(
+        &mut app,
+        Operation::Navigate(super::super::menu_ui::Tab::Behavior),
+    );
+    activate_operation(&mut app, Operation::Ghost);
+    assert!(!app.world().resource::<Preferences>().placement_ghost);
+    activate_operation(&mut app, Operation::Apply);
+    assert!(app.world().resource::<Preferences>().placement_ghost);
+    let path = app.world().resource::<Store>().path.clone();
+    assert!(Store::load(path.clone()).2.placement_ghost);
+    std::fs::remove_file(path).unwrap();
+}
+#[test]
+fn the_compass_is_off_by_default_and_the_display_setting_round_trips() {
+    let mut app = app();
+    assert!(!app.world().resource::<Preferences>().compass);
+    activate_operation(
+        &mut app,
+        Operation::Navigate(super::super::menu_ui::Tab::Display),
+    );
+    activate_operation(&mut app, Operation::Compass);
+    assert!(!app.world().resource::<Preferences>().compass);
+    activate_operation(&mut app, Operation::Apply);
+    assert!(app.world().resource::<Preferences>().compass);
+    let path = app.world().resource::<Store>().path.clone();
+    assert!(Store::load(path.clone()).2.compass);
+    std::fs::remove_file(path).unwrap();
+}
+#[test]
+fn the_minimap_is_off_and_medium_by_default_and_both_settings_round_trip() {
+    use super::super::minimap::MinimapSize;
+    let mut app = app();
+    let p = app.world().resource::<Preferences>().clone();
+    assert!(!p.minimap);
+    assert_eq!(p.minimap_size, MinimapSize::Medium);
+    activate_operation(
+        &mut app,
+        Operation::Navigate(super::super::menu_ui::Tab::Display),
+    );
+    activate_operation(&mut app, Operation::Minimap);
+    activate_operation(&mut app, Operation::MinimapSize(MinimapSize::Large));
+    assert!(!app.world().resource::<Preferences>().minimap);
+    activate_operation(&mut app, Operation::Apply);
+    let path = app.world().resource::<Store>().path.clone();
+    let saved = Store::load(path.clone()).2;
+    assert!(saved.minimap);
+    assert_eq!(saved.minimap_size, MinimapSize::Large);
+    std::fs::remove_file(path).unwrap();
+}
+#[test]
 fn draft_apply_cancel_and_unsaved_exit_are_distinct() {
     let mut app = app();
     activate_operation(
@@ -554,7 +607,7 @@ fn pad_capture_takes_only_pad_buttons_and_controller_reset_spares_the_keyboard()
 #[test]
 fn the_tool_actions_take_part_in_conflict_warnings_and_are_listed() {
     for (taken, owner) in [
-        (KeyCode::KeyM, Action::CycleTool),
+        (KeyCode::KeyO, Action::CycleTool),
         (KeyCode::KeyG, Action::Use),
         (KeyCode::Backspace, Action::ClearTool),
     ] {
@@ -956,4 +1009,25 @@ fn audio_slider_pointer_drag_keeps_the_live_entity_until_release() {
     );
     activate_operation(&mut app, Operation::Apply);
     assert_eq!(app.world().resource::<Preferences>().volumes.music, 70);
+}
+
+#[test]
+fn the_map_and_compass_settings_say_unavailable_while_the_world_forbids_them() {
+    fn hints(allowed: bool) -> Vec<String> {
+        let mut app = App::new();
+        app.add_systems(Startup, move |mut commands: Commands| {
+            commands.spawn(Node::default()).with_children(|list| {
+                display(list, &Preferences::default(), allowed);
+            });
+        });
+        app.update();
+        app.world_mut()
+            .query::<&Text>()
+            .iter(app.world())
+            .map(|t| t.0.clone())
+            .filter(|t| t.contains("Not available in this World"))
+            .collect()
+    }
+    assert!(hints(true).is_empty());
+    assert_eq!(hints(false).len(), 3);
 }

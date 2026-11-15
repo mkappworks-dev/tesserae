@@ -42,6 +42,25 @@ Line 0.3 also gained an optional-in-effect `tags` list on `material-def` (an
 adapted 0.1 or 0.2 Declaration has none), so Plants can name `#soil` or `#water`
 instead of a Material.
 
+Line 0.3 also gained Marker kinds: a `marker-kinds` list on `declaration`, from
+any Mod and at most 16 rows per Mod, each a `name`, an `icon` and a `color`. The
+`icon` is one of the closed `marker-icon` names the Engine draws as shapes
+(`home`, `camp`, `mine`, `farm`, `landmark`, `death`, `flag`, `pin`, `star`),
+not a glyph. An optional `death-marker-kind` on `declaration`, from the Game
+only, names the full `<mod id>:<name>` of the kind a death leaves; it must name
+a declared Marker kind, resolved after every Mod has declared. It is data only:
+no Mod is called and no host call is added. A Declaration for 0.1 or 0.2 loads
+with none, and a World with no Game has none.
+
+Line 0.3 also gained a `map-policy` record, an optional `map-policy` field of
+`world-params` holding one `enabled` flag, from the Game only: a Mod that is not
+the Game and sets it is refused. Absent permits the Map and the Compass, and so
+does a World with no Game; `enabled = false` forbids them, so the Server stops
+scanning and refuses Waypoint intents, and the Client draws no Compass or
+minimap and opens no Map. A saved Map is kept and returns when a later load
+permits it. A Declaration for 0.1 or 0.2 loads with none. It is data only: no
+Mod is called and no host call is added.
+
 Line 0.3 gained what Survival needs in the same way: an optional
 `contact-damage-per-s` on `material-def`, from 0 to 1000 health per second; an
 optional `max-stack` on `item-def`, from 1 to 64 and 64 when absent, and an

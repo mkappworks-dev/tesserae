@@ -14,6 +14,7 @@ mod capture;
 pub mod chunk_mesh;
 pub mod chunk_view;
 mod cinematic;
+mod compass;
 mod death;
 pub mod drawn_mask;
 mod drops;
@@ -34,10 +35,15 @@ mod inventory_window;
 mod layout;
 mod layout_menu;
 pub(crate) mod loading;
+mod map_cache;
+mod map_pop;
+mod map_tools;
+mod map_window;
 mod material_textures;
 mod menu;
 mod menu_blur;
 mod menu_ui;
+mod minimap;
 mod overlay;
 mod pad;
 mod palette;
@@ -70,6 +76,8 @@ mod use_prompt;
 mod view;
 mod viewmodel;
 mod vitals;
+mod waypoint_panel;
+mod waypoints;
 pub mod worlds;
 
 use bevy::prelude::*;
@@ -132,7 +140,14 @@ pub fn plugin(app: &mut App) {
         vitals::plugin,
         death::plugin,
     ));
-    app.add_plugins((sound::plugin, soundscape::plugin));
+    app.add_plugins((
+        sound::plugin,
+        soundscape::plugin,
+        map_cache::plugin,
+        compass::plugin,
+    ));
+    app.add_plugins((minimap::plugin, map_window::plugin));
+    app.add_plugins((waypoints::plugin, waypoint_panel::plugin));
     app.add_session_systems(
         Update,
         (|mut commands: Commands| commands.insert_resource(loading::TerrainArrived))

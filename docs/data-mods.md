@@ -67,7 +67,7 @@ needs Trust again and breaks exact-build reopening of saved Worlds; unreferenced
 PNGs and editor files do not.
 
 Absent optional values are absent, as in the contract: an omitted `caves`,
-`smoothing`, `water`, `ground`, `movement`, `character`, `view`, `heat`,
+`smoothing`, `water`, `ground`, `movement`, `map`, `character`, `view`, `heat`,
 `collision`, `connect`, `product`, `receiving` or `residue` means none, never a
 default. The one exception is a present `world` table's numeric fields
 (`sea-level-m`, `relief-m`, `feature-size-m`, `soil-depth-m`, `octaves`), which
@@ -434,6 +434,31 @@ its `boxes` still decide selection and where fluid can stand, it is walked
 through unless it declares `collision`, and it seals no face, cannot `connect`
 and does not count against the Chunk's shaped-Voxel cap. A Material may add
 `tags`, which a Plant's soil and water can name as `#tag`.
+
+A `[[marker-kinds]]` row declares a kind of mark for the Map and the Compass: a
+local `name`, an `icon` and a `color`. The `icon` is one of `home`, `camp`,
+`mine`, `farm`, `landmark`, `death`, `flag`, `pin` or `star`, shapes the Engine
+draws, so no font is needed; the `color` is four RGBA bytes. A Mod may
+declare 16. The Game may also set a top-level
+`death-marker-kind = "<mod id>:<name>"`, which must name a declared Marker kind
+or the load fails, naming the Mod, the row and the reason. No Mod is called and
+no host call is added.
+
+```toml
+death-marker-kind = "plain:grave"
+
+[[marker-kinds]]
+name = "grave"
+icon = "death"
+color = [217, 100, 92, 255]
+```
+
+The Game may add a `[world.map]` table with `enabled = false` to forbid the Map
+and the Compass in its Worlds; absent, they are permitted. While forbidden the
+Server neither scans nor accepts Waypoints, the Client draws no Compass or
+minimap and opens no Map, and Settings list their switches and keys as not
+available in this World. A saved Map is kept and returns when the Game permits
+it. A Mod that is not the Game cannot set it.
 
 A `[[plants]]` row declares a Plant the Server grows, of kind `crop`, `tree`,
 `column`, `spreader` or `climber`, with its needs in `[plants.needs]`. A `tree`

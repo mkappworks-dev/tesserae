@@ -23,6 +23,17 @@ const HEAD_LEAD: f32 = 50.0 * PI / 180.0;
 const MOVING_MPS: f32 = 0.2;
 /// Per second; how fast a limb's swing settles into a new state's.
 const SETTLE_RATE: f32 = 10.0;
+/// How far the swimmer tips forward at full speed, and how much a dive adds.
+const SWIM_LEAN_RAD: f32 = 0.35;
+const DIVE_LEAN_RAD: f32 = 0.2;
+/// Arm and leg sweep, in radians, treading water and at a full stroke.
+const TREAD_ARM_RAD: f32 = 0.25;
+const STROKE_ARM_RAD: f32 = 1.5;
+const TREAD_LEG_RAD: f32 = 0.1;
+const STROKE_LEG_RAD: f32 = 0.45;
+/// Where the arms reach forward from the side, treading and at a full stroke.
+const TREAD_REACH_RAD: f32 = 0.15;
+const STROKE_REACH_RAD: f32 = 0.9;
 
 /// Whether the figure is drawn. The view decides; the figure only obeys.
 #[derive(Resource, Default)]
@@ -35,6 +46,51 @@ pub(super) struct Avatar {
     phase: f32,
     swing: f32,
     raise: f32,
+    swim: SwimState,
+}
+
+/// What the swim has eased to; all of it settles to zero out of the water.
+#[derive(Default)]
+struct SwimState {
+    phase: f32,
+    /// Of a full swim: how far the stroke has taken over from the walk.
+    blend: f32,
+    effort: f32,
+    lean: f32,
+}
+
+/// The limbs' angles forward in a swim at `phase` of a cycle and `effort`: arms
+/// alternate in an overhand stroke, legs flutter twice as fast.
+#[derive(Clone, Copy, PartialEq, Debug)]
+struct Swim {
+    arm_right: f32,
+    arm_left: f32,
+    leg_right: f32,
+    leg_left: f32,
+}
+
+fn lerp(from: f32, to: f32, t: f32) -> f32 {
+    from + (to - from) * t
+}
+
+fn swim_limbs(phase: f32, effort: f32) -> Swim {
+    let effort = effort.clamp(0.0, 1.0);
+    let reach = lerp(TREAD_REACH_RAD, STROKE_REACH_RAD, effort);
+    let arm = lerp(TREAD_ARM_RAD, STROKE_ARM_RAD, effort) * phase.sin();
+    let kick = lerp(TREAD_LEG_RAD, STROKE_LEG_RAD, effort) * (2.0 * phase).sin();
+    Swim {
+        arm_right: reach + arm,
+        arm_left: reach - arm,
+        leg_right: kick,
+        leg_left: -kick,
+    }
+}
+
+/// How far the figure tips forward, for a swimmer moving at these speeds.
+fn swim_lean(horizontal_mps: f32, vertical_mps: f32) -> f32 {
+    let full = crate::server::player::SWIM_MPS;
+    SWIM_LEAN_RAD * (horizontal_mps / full).clamp(0.0, 1.0)
+        + DIVE_LEAN_RAD * (-vertical_mps / full).clamp(-1.0, 1.0)
 }
 
 #[derive(Component)]
@@ -132,6 +188,7 @@ pub(super) fn rebuild(
                 phase: 0.0,
                 swing: 0.0,
                 raise: 0.0,
+                swim: SwimState::default(),
             },
             Transform::default(),
             Visibility::Hidden,
@@ -243,7 +300,7 @@ fn wrap(angle: f32) -> f32 {
 
 /// What the body's state calls for. Flight never looks like a fall.
 fn motion(character: &Character, mode: MovementMode, body: BodyState) -> Motion {
-    // A swimming body is not walking or falling; the figure holds its rest pose.
+    // A swimming body is not walking or falling; the stroke is laid over this rest.
     if mode == MovementMode::Flight || body.swimming {
         character.idle
     } else if !body.grounded {
@@ -297,6 +354,37 @@ fn pose(
     }
     root.translation = fly.eye - Vec3::Y * eye_height;
     root.rotation = Quat::from_rotation_y(avatar.body_yaw);
+    let reduced = preferences.as_ref().is_some_and(|p| p.reduced_motion);
+    let wet = super::hand_anim::swims(b, fly.movement_mode, reduced);
+    let dt = time.delta_secs();
+    let ease = 1.0 - (-SETTLE_RATE * dt).exp();
+    let swim = &mut avatar.swim;
+    let (blend, effort, lean) = if wet {
+        (
+            1.0,
+            super::hand_anim::swim_effort(b),
+            swim_lean(b.horizontal_mps, b.vertical_mps),
+        )
+    } else {
+        (0.0, 0.0, 0.0)
+    };
+    swim.blend += (blend - swim.blend) * ease;
+    swim.effort += (effort - swim.effort) * ease;
+    swim.lean += (lean - swim.lean) * ease;
+    swim.phase = (swim.phase + TAU * super::hand_anim::stroke_hz(swim.effort) * dt).rem_euclid(TAU);
+    let lean_now = swim.lean;
+    let stroke = swim_limbs(swim.phase, swim.effort);
+    let stroke = Swim {
+        arm_right: stroke.arm_right * swim.blend,
+        arm_left: stroke.arm_left * swim.blend,
+        leg_right: stroke.leg_right * swim.blend,
+        leg_left: stroke.leg_left * swim.blend,
+    };
+    // Tipped about the hips, not the feet, so the head stays over the body.
+    let hips = Vec3::Y * BODY_HEIGHT_M / 2.0;
+    let tip = Quat::from_rotation_x(-lean_now);
+    root.translation += hips - tip * hips;
+    root.rotation *= tip;
     // A box limb cannot bend, so a crouch lowers the whole figure to fit the
     // crouched body rather than kneeling through the floor.
     root.scale = Vec3::new(
@@ -310,16 +398,12 @@ fn pose(
     );
 
     let wanted = motion(&avatar.character, fly.movement_mode, b);
-    let dt = time.delta_secs();
-    let settle = 1.0 - (-SETTLE_RATE * dt).exp();
+    let settle = ease;
     avatar.phase = (avatar.phase + TAU * wanted.rate_hz * dt).rem_euclid(TAU);
     avatar.swing += (wanted.swing_deg.to_radians() - avatar.swing) * settle;
     avatar.raise += (wanted.arm_raise_deg.to_radians() - avatar.raise) * settle;
     let swing = avatar.swing * avatar.phase.sin();
-    let action = anim.map_or(0.0, |anim| {
-        anim.pose(preferences.is_some_and(|p| p.reduced_motion))
-            .arm_rad
-    });
+    let action = anim.map_or(0.0, |anim| anim.pose(reduced).arm_rad);
     let head = Quat::from_euler(
         EulerRot::YXZ,
         wrap(fly.yaw - avatar.body_yaw),
@@ -329,10 +413,12 @@ fn pose(
     for (limb, mut transform) in &mut limbs {
         transform.rotation = match limb.0 {
             Role::Head => head,
-            Role::ArmRight => Quat::from_rotation_x(right_arm(avatar.raise, swing, action)),
-            Role::ArmLeft => Quat::from_rotation_x(avatar.raise - swing),
-            Role::LegRight => Quat::from_rotation_x(-swing),
-            Role::LegLeft => Quat::from_rotation_x(swing),
+            Role::ArmRight => {
+                Quat::from_rotation_x(right_arm(avatar.raise, swing + stroke.arm_right, action))
+            }
+            Role::ArmLeft => Quat::from_rotation_x(avatar.raise - swing + stroke.arm_left),
+            Role::LegRight => Quat::from_rotation_x(-swing + stroke.leg_right),
+            Role::LegLeft => Quat::from_rotation_x(swing + stroke.leg_left),
             Role::Body | Role::Fixed => Quat::IDENTITY,
         };
     }
@@ -600,26 +686,180 @@ mod tests {
         assert!((transform.scale.y * BODY_HEIGHT_M - CROUCH_BODY_HEIGHT_M).abs() < 1e-4);
     }
 
-    #[test]
-    fn a_swimming_body_rests_instead_of_walking_or_falling() {
+    fn swimming(horizontal_mps: f32) -> BodyState {
+        BodyState {
+            horizontal_mps,
+            swimming: true,
+            ..default()
+        }
+    }
+
+    /// The right arm's angle forward over a second of frames.
+    fn arm_over_a_second(app: &mut App) -> Vec<f32> {
+        (0..60)
+            .map(|_| {
+                app.update();
+                limb(app, Role::ArmRight).to_euler(EulerRot::XYZ).0
+            })
+            .collect()
+    }
+
+    fn range(angles: &[f32]) -> f32 {
+        angles.iter().cloned().fold(f32::MIN, f32::max)
+            - angles.iter().cloned().fold(f32::MAX, f32::min)
+    }
+
+    fn physics_app(body: BodyState) -> App {
         let mut app = app();
         app.world_mut()
+            .query::<&mut FlyCamera>()
+            .single_mut(app.world_mut())
+            .unwrap()
+            .movement_mode = MovementMode::Physics;
+        app.world_mut()
             .write_message(CharacterModel(Some(Arc::new(figure()))));
+        set_body(&mut app, body);
+        settle(&mut app);
+        app
+    }
+
+    #[test]
+    fn a_moving_swimmer_strokes_further_than_one_treading_water() {
+        let mut still = physics_app(swimming(0.0));
+        let mut moving = physics_app(swimming(3.0));
+        let tread = range(&arm_over_a_second(&mut still));
+        let stroke = range(&arm_over_a_second(&mut moving));
+        assert!(tread > 0.05, "treading water sways: {tread}");
+        assert!(stroke > tread * 3.0, "{stroke} vs {tread}");
+        assert!(stroke > 1.5, "an overhand stroke is a wide arc: {stroke}");
+    }
+
+    #[test]
+    fn the_arms_alternate_and_the_legs_flutter_twice_as_fast() {
+        let mut app = physics_app(swimming(3.0));
+        let mut kicks = 0;
+        let mut was = 0f32;
+        for _ in 0..120 {
+            app.update();
+            let right = limb(&mut app, Role::ArmRight).to_euler(EulerRot::XYZ).0;
+            let left = limb(&mut app, Role::ArmLeft).to_euler(EulerRot::XYZ).0;
+            let reach = STROKE_REACH_RAD;
+            assert!(
+                ((right - reach) + (left - reach)).abs() < 1e-3,
+                "opposite arms"
+            );
+            let leg = limb(&mut app, Role::LegRight).to_euler(EulerRot::XYZ).0;
+            if was <= 0.0 && leg > 0.0 {
+                kicks += 1;
+            }
+            was = leg;
+        }
+        // Two seconds at the full stroke rate: a kick cycle per half stroke.
+        let strokes = 2.0 * super::super::hand_anim::stroke_hz(1.0);
+        assert!(
+            (kicks as f32 - 2.0 * strokes).abs() <= 1.0,
+            "{kicks} kicks in {strokes} strokes"
+        );
+    }
+
+    #[test]
+    fn the_stroke_cadence_scales_with_swim_speed() {
+        let cycles = |mps: f32| {
+            let mut app = physics_app(swimming(mps));
+            let mut crossings = 0;
+            let mut was = 0f32;
+            for _ in 0..240 {
+                app.update();
+                let arm = limb(&mut app, Role::ArmRight).to_euler(EulerRot::XYZ).0;
+                let centre = lerp(TREAD_REACH_RAD, STROKE_REACH_RAD, (mps / 3.0).min(1.0));
+                if was < centre && arm >= centre {
+                    crossings += 1;
+                }
+                was = arm;
+            }
+            crossings
+        };
+        assert!(cycles(3.0) > cycles(1.5), "faster swimming strokes faster");
+        assert!(cycles(1.5) > cycles(0.0));
+    }
+
+    #[test]
+    fn a_swimmer_leans_into_the_travel_and_a_still_one_stays_upright() {
+        let tilt = |mps| {
+            let mut app = physics_app(swimming(mps));
+            app.world_mut()
+                .query_filtered::<&Transform, With<Avatar>>()
+                .single(app.world())
+                .unwrap()
+                .rotation
+                .to_euler(EulerRot::YXZ)
+                .1
+        };
+        assert!(tilt(0.0).abs() < 1e-3);
+        assert!(
+            tilt(3.0) < -0.2,
+            "head forward is a negative pitch: {}",
+            tilt(3.0)
+        );
+    }
+
+    #[test]
+    fn flight_and_reduced_motion_keep_the_rest_pose_in_the_water() {
+        let mut flying = physics_app(swimming(3.0));
+        flying
+            .world_mut()
+            .query::<&mut FlyCamera>()
+            .single_mut(flying.world_mut())
+            .unwrap()
+            .movement_mode = MovementMode::Flight;
+        settle(&mut flying);
+        assert!(range(&arm_over_a_second(&mut flying)) < 1e-3, "flight");
+
+        let mut calm = physics_app(swimming(3.0));
+        calm.insert_resource(super::super::profile::Preferences {
+            reduced_motion: true,
+            ..default()
+        });
+        settle(&mut calm);
+        assert!(
+            range(&arm_over_a_second(&mut calm)) < 1e-3,
+            "reduced motion"
+        );
+        let (rest, _) = root(&mut calm);
+        assert!(rest.rotation.angle_between(Quat::from_rotation_y(0.0)) < 1e-3);
+    }
+
+    #[test]
+    fn leaving_the_water_eases_back_to_walking_without_a_pop() {
+        let mut app = physics_app(swimming(3.0));
+        let wet = limb(&mut app, Role::ArmRight).to_euler(EulerRot::XYZ).0;
         set_body(
             &mut app,
             BodyState {
-                horizontal_mps: 2.7,
-                swimming: true,
+                grounded: true,
                 ..default()
             },
         );
+        app.update();
+        let next = limb(&mut app, Role::ArmRight).to_euler(EulerRot::XYZ).0;
+        assert!((next - wet).abs() < 0.8, "one frame moves part of the way");
         settle(&mut app);
-        for _ in 0..30 {
-            app.update();
-            let (_, angle) = limb(&mut app, Role::ArmRight).to_axis_angle();
-            assert!(angle < 1e-3, "no walking swing or airborne raise: {angle}");
-        }
+        assert!(limb(&mut app, Role::ArmRight).angle_between(Quat::IDENTITY) < 0.02);
     }
+
+    #[test]
+    fn walking_is_unchanged_by_the_swim() {
+        let mut app = physics_app(BodyState {
+            grounded: true,
+            horizontal_mps: 4.5,
+            ..default()
+        });
+        let widest = arm_over_a_second(&mut app)
+            .iter()
+            .fold(0f32, |a, b| a.max(b.abs()));
+        assert!((widest - 40f32.to_radians()).abs() < 0.05, "{widest}");
+    }
+
     #[test]
     fn limbs_swing_walking_hold_in_the_air_and_rest_in_flight() {
         let mut app = app();

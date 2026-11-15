@@ -17,6 +17,14 @@ pub(crate) struct Preferences {
     pub speed_level: SpeedLevel,
     pub tap_remove: bool,
     pub repeat_held: bool,
+    /// Absent from a profile saved before it, which reads as off.
+    pub placement_ghost: bool,
+    /// Absent from a profile saved before it, which reads as off.
+    pub compass: bool,
+    /// Absent from a profile saved before it, which reads as off.
+    pub minimap: bool,
+    /// Absent from a profile saved before it, which reads as Medium.
+    pub minimap_size: super::minimap::MinimapSize,
     pub sensitivity: f32,
     pub invert_y: bool,
     pub reverse_scroll: bool,
@@ -107,6 +115,10 @@ impl Default for Preferences {
             speed_level: SpeedLevel::Walk,
             tap_remove: false,
             repeat_held: false,
+            placement_ghost: false,
+            compass: false,
+            minimap: false,
+            minimap_size: super::minimap::MinimapSize::Medium,
             sensitivity: 0.003,
             invert_y: false,
             reverse_scroll: false,
@@ -468,6 +480,23 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_saved_cycle_tool_on_m_keeps_it_and_the_map_default_yields() {
+        use super::super::actions::Trigger;
+        let mut document: serde_json::Value =
+            serde_json::from_slice(&encode(&Bindings::default(), &Preferences::default()).unwrap())
+                .unwrap();
+        let bindings = document["bindings"].as_object_mut().unwrap();
+        bindings.remove("map");
+        bindings.get_mut("cycle_tool").unwrap()[0]["trigger"]["key"] = "KeyM".into();
+        let (bindings, _) = decode(&serde_json::to_vec(&document).unwrap()).unwrap();
+        assert_eq!(
+            bindings.keyboard[&Action::CycleTool][0].unwrap().trigger,
+            Trigger::Key(KeyCode::KeyM)
+        );
+        assert!(bindings.keyboard[&Action::Map][0].is_none());
+    }
+
     fn key(code: KeyCode) -> [Option<super::super::actions::Binding>; 2] {
         use super::super::actions::{Binding, Modifier, Trigger};
         [
@@ -536,11 +565,11 @@ mod tests {
 
         // A version-2 choice of I for Help is the player's own now.
         let mut chosen = bindings.clone();
-        chosen.keyboard.insert(Action::Help, key(KeyCode::KeyH));
+        chosen.keyboard.insert(Action::Help, key(KeyCode::KeyU));
         let mut store = store;
         store.save(&chosen, &preferences).unwrap();
         let (_, reloaded, _) = Store::load(path);
-        assert_eq!(reloaded.keyboard[&Action::Help], key(KeyCode::KeyH));
+        assert_eq!(reloaded.keyboard[&Action::Help], key(KeyCode::KeyU));
     }
 
     #[test]
@@ -700,6 +729,13 @@ mod tests {
         let older = br#"{"version":1,"preferences":{"invert_y":true}}"#;
         let (_, older) = decode(older).unwrap();
         assert!(!older.repeat_held, "a profile saved before the option");
+        assert!(!older.placement_ghost, "a profile saved before the option");
+        assert!(!older.compass, "a profile saved before the option");
+        assert!(!older.minimap, "a profile saved before the option");
+        assert_eq!(
+            older.minimap_size,
+            super::super::minimap::MinimapSize::Medium
+        );
         assert_eq!((older.view, older.zoom_m), (View::FirstPerson, 4.0));
         for zoom in ["1.4", "6.1", "-1"] {
             let bytes = format!(r#"{{"version":1,"preferences":{{"zoom_m":{zoom}}}}}"#);

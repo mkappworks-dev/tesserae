@@ -115,6 +115,7 @@ fn world(p: old::WorldParams, log: &LogHandle) -> content::WorldParams {
     }
     content::WorldParams {
         movement: None,
+        map_policy: None,
         character: None,
         sea_level_m: p.sea_level_m,
         relief_m: p.relief_m,
@@ -242,6 +243,8 @@ pub(crate) fn declaration(d: old::Declaration, log: &LogHandle) -> content::Decl
         recipes: Vec::new(),
         voxel_uses: Vec::new(),
         plants: Vec::new(),
+        marker_kinds: Vec::new(),
+        death_marker_kind: None,
     }
 }
 

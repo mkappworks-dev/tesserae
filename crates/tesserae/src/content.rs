@@ -183,6 +183,16 @@ pub struct SkyFogTarget {
 #[derive(Message, Clone, Copy, Debug, PartialEq)]
 pub struct HereBiome(pub Option<usize>);
 
+/// Every Marker kind of the World and which one marks a death: what the Client names and draws
+/// the Map's and the Compass's marks from, sent once at session start.
+#[derive(Message, Clone, Debug, Default, PartialEq)]
+pub struct MarkerKinds(pub tesserae_core::marker::MarkerKinds);
+
+/// Whether the World's Game permits the Map and the Compass, sent once at session start; the Client
+/// draws neither while it is `false`.
+#[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MapPermitted(pub bool);
+
 /// What the Server says about the open World when a session starts, for the
 /// Menu's World details.
 #[derive(Message, Clone, Debug, PartialEq)]

@@ -113,6 +113,9 @@ allow-flight = true
 allow-physics = true
 start-in-flight = false
 
+[world.map]
+enabled = false
+
 [[fluids]]
 material = "full:water"
 reach-m = 7.0

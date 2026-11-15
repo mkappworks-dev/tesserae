@@ -299,6 +299,11 @@ pub(super) fn plugin(app: &mut App) {
             super::inventory_window::container_in_front(app);
         }
     }
+    // `TESSERAE_SCREENSHOT_MAP` opens the Map window; with it, `_COMPASS` or `_MINIMAP` the
+    // Waypoints are added too, from where the Player has flown.
+    if std::env::var_os("TESSERAE_SCREENSHOT_MAP").is_some() {
+        app.insert_resource(super::map_window::MapWindow::opened());
+    }
     app.insert_resource(super::help::Panels {
         debug: std::env::var_os("TESSERAE_SCREENSHOT_DEBUG").is_some(),
     });
@@ -309,7 +314,16 @@ pub(super) fn plugin(app: &mut App) {
             .before(super::removal::bar),
     );
     app.add_session_systems(PreUpdate, save_preview)
-        .add_session_systems(Update, (hud_fixture, action_fixture, drops_fixture));
+        .add_session_systems(
+            Update,
+            (
+                hud_fixture,
+                action_fixture,
+                drops_fixture,
+                waypoint_fixture,
+                map_state_fixture,
+            ),
+        );
     if let Ok(size) = std::env::var("TESSERAE_SCREENSHOT_TOUCH") {
         app.insert_resource(TouchCapture(match size.as_str() {
             "small" => super::profile::TouchSize::Small,
@@ -427,10 +441,154 @@ fn drops_fixture(
     }
 }
 
+/// `TESSERAE_SCREENSHOT_MAP_STATE` drives the Map window into one state before the shutter:
+/// `default`, `add` (add mode), `add-popover`, `edit`, `death`, `explore` or `tooltip` (the add
+/// button focused). `TESSERAE_SCREENSHOT_MAP_FIELD=<text>` types into the popover's name field.
+/// The Waypoints come from `waypoint_fixture`; `death` adds a death marker to the list shown.
+#[allow(clippy::too_many_arguments)]
+fn map_state_fixture(
+    time: Res<Time<Real>>,
+    capture: Res<Capture>,
+    spot: Res<super::minimap::Spot>,
+    mut window: ResMut<super::map_window::MapWindow>,
+    (mut marks, mut draft): (
+        ResMut<super::waypoints::Marks>,
+        ResMut<super::waypoints::Draft>,
+    ),
+    mut lists: MessageWriter<crate::server::waypoint::WaypointsChanged>,
+    (mut focus, mut visible): (
+        Option<ResMut<bevy::input_focus::InputFocus>>,
+        Option<ResMut<bevy::input_focus::InputFocusVisible>>,
+    ),
+    adds: Query<(Entity, &super::map_window::Control)>,
+    mut fields: Query<&mut bevy::text::EditableText, With<super::map_pop::NameField>>,
+    mut step: Local<u8>,
+) {
+    let Ok(state) = std::env::var("TESSERAE_SCREENSHOT_MAP_STATE") else {
+        return;
+    };
+    let eye = spot.0.map(|(eye, _)| eye);
+    if let (Ok(text), Ok(mut field)) = (
+        std::env::var("TESSERAE_SCREENSHOT_MAP_FIELD"),
+        fields.single_mut(),
+    ) && *step == 3
+        && !text.is_empty()
+    {
+        field.queue_edit(bevy::text::TextEdit::Insert(text.into()));
+        *step = 4;
+    }
+    if *step >= 3 || !capture.before_shutter(capture.elapsed_s(&time), 1.0) {
+        return;
+    }
+    let first = marks.list().iter().find(|w| !w.death).cloned();
+    let Some(first) = first else {
+        return;
+    };
+    let point = Vec2::new(first.x_m + 24.0, first.z_m + 16.0);
+    match (state.as_str(), *step) {
+        ("add", 0) => window.adding = true,
+        ("add-popover", 0) => {
+            window.adding = true;
+            window.pop = Some(super::map_pop::Pop::Add(point));
+        }
+        ("edit", 0) => {
+            super::map_pop::open_edit(&mut window, &mut marks, &mut draft, first.id, eye)
+        }
+        ("explore", 0) => window.tab = super::waypoint_panel::PanelTab::Explore,
+        ("tooltip", 0) => {
+            if let (Some(focus), Some(visible)) = (focus.as_mut(), visible.as_mut())
+                && let Some((button, _)) = adds
+                    .iter()
+                    .find(|(_, c)| **c == super::map_window::Control::AddMode)
+            {
+                focus.set(button, bevy::input_focus::FocusCause::Navigated);
+                visible.0 = true;
+            }
+        }
+        ("death", 0) => {
+            let kinds = marks.kinds();
+            let Some(kind) = kinds
+                .death
+                .and_then(|i| kinds.kinds.get(i))
+                .map(|k| k.name.clone())
+            else {
+                return;
+            };
+            let mut list = marks.list_clone();
+            let at = eye.map_or(Vec2::ZERO, |e| Vec2::new(e.x, e.z));
+            list.push("Where you died", &kind, at.x, at.y, true);
+            lists.write(crate::server::waypoint::WaypointsChanged(list));
+            *step = 1;
+            return;
+        }
+        ("death", 1) => {
+            if let Some(death) = marks.list().iter().find(|w| w.death).map(|w| w.id) {
+                super::map_pop::open_edit(&mut window, &mut marks, &mut draft, death, eye);
+            }
+        }
+        _ => {}
+    }
+    *step = 3;
+}
+
+/// Waypoints for a picture of the Map, the Compass or the minimap: one of each kind the Player may
+/// choose, where the Player stood during the flight so the Server holds that ground as explored,
+/// sent as the intents a Player's own clicks would be.
+fn waypoint_fixture(
+    time: Res<Time<Real>>,
+    capture: Res<Capture>,
+    spot: Res<super::minimap::Spot>,
+    marks: Res<super::waypoints::Marks>,
+    mut intents: MessageWriter<crate::server::waypoint::WaypointIntent>,
+    (mut stood, mut last, mut sent): (Local<Vec<Vec2>>, Local<f32>, Local<bool>),
+) {
+    const NAMES: [&str; 5] = ["Home", "Hazel camp", "Iron seam", "Orchard", "Old cairn"];
+    const EVERY_S: f32 = 3.0;
+    let wanted = ["MAP", "COMPASS", "MINIMAP"]
+        .iter()
+        .any(|knob| std::env::var_os(format!("TESSERAE_SCREENSHOT_{knob}")).is_some());
+    let Some((eye, _)) = spot.0 else {
+        return;
+    };
+    let elapsed_s = capture.elapsed_s(&time);
+    if *sent || !wanted || capture.frames.fill_ended_s.is_none() {
+        return;
+    }
+    if elapsed_s - *last >= EVERY_S && !capture.before_shutter(elapsed_s, 2.0) {
+        *last = elapsed_s;
+        stood.push(Vec2::new(eye.x, eye.z));
+    }
+    if !capture.before_shutter(elapsed_s, 2.0) {
+        return;
+    }
+    *sent = true;
+    let step = (stood.len() / NAMES.len()).max(1);
+    for ((name, at), (_, kind)) in NAMES
+        .into_iter()
+        .zip(stood.iter().step_by(step))
+        .zip(marks.choosable())
+    {
+        intents.write(crate::server::waypoint::WaypointIntent::Add {
+            x_m: at.x,
+            z_m: at.y,
+            name: name.into(),
+            kind: kind.name.clone(),
+        });
+    }
+}
+
 /// `TESSERAE_SCREENSHOT_VIEW=third` and `TESSERAE_SCREENSHOT_ZOOM_M` choose the
 /// view for this run only: nothing is written to the user profile.
 fn view_fixture(mut preferences: ResMut<super::profile::Preferences>) {
     use super::view::{View, ZOOM_M};
+    preferences.compass |= std::env::var_os("TESSERAE_SCREENSHOT_COMPASS").is_some();
+    preferences.minimap |= std::env::var_os("TESSERAE_SCREENSHOT_MINIMAP").is_some();
+    if let Ok(size) = std::env::var("TESSERAE_SCREENSHOT_MINIMAP_SIZE") {
+        preferences.minimap_size = super::minimap::MinimapSize::ALL
+            .into_iter()
+            .find(|s| s.label().eq_ignore_ascii_case(&size))
+            .unwrap_or_else(|| panic!("Unknown minimap size: {size}"));
+    }
     preferences.view = match std::env::var("TESSERAE_SCREENSHOT_VIEW").as_deref() {
         Ok("third") => View::ThirdPerson,
         Ok("first") | Err(_) => View::FirstPerson,

@@ -18,6 +18,10 @@ const settingsDefaults = {
   touchLayout: "Normal",
   touchSize: "Normal",
   touchOpacity: 0.7,
+  ghost: false,
+  compass: false,
+  minimap: false,
+  minimapSize: "Medium",
   sync: "Display synced",
   aa: "SMAA",
   renderScale: "100%",
@@ -53,7 +57,11 @@ const settingsDefaults = {
     Remove: "Left mouse",
     "Search the Catalogue": "C",
     "Open Inventory": "I",
+    "Open the Map": "M",
+    "Toggle compass": "B",
+    "Toggle minimap": "N",
     "Flip Shape": "E",
+    "Toggle placement ghost": "H",
     "Layout mode and menu": "L",
     "Open the Menu": "Tab",
     "Release cursor": "Escape",
@@ -69,7 +77,7 @@ const settingsDefaults = {
     "Empty hand": "X",
     "Next Shape": "F",
     "Turn Shape": "Q",
-    "Take tool": "M",
+    "Take tool": "O",
     Use: "G",
     "Clear tool": "Backspace",
     "Layout: more Voxels": "Shift+Wheel up",
@@ -148,6 +156,7 @@ const bindingGroups = {
   ],
   Building: [
     "Place / ignite",
+    "Toggle placement ghost",
     "Remove",
     "Sample",
     "Empty hand",
@@ -163,9 +172,13 @@ const bindingGroups = {
     "Layout: reverse the axis",
     "Layout: next axis",
   ],
+  // Compass and Minimap sort ahead of the Menu: binding_order lists them before Remove.
   Interface: [
+    "Toggle compass",
+    "Toggle minimap",
     "Open the Menu",
     "Open Inventory",
+    "Open the Map",
     "Search the Catalogue",
     "Open input settings",
     "Open Settings",
@@ -214,7 +227,7 @@ function bindingRows() {
       const changed =
         primary !== settingsDefaults.bindings[n] ||
         (alt || "") !== (settingsDefaults.altBindings[n] || "");
-      return `<div class="setting-row binding-row"><div class="setting-copy"><b>${esc(n)}</b>${query ? `<small>${bindingGroup(n)}</small>` : ""}</div><div class="row">${primary ? button(esc(primary), "settings-rebind", { value: n }) : button("Add binding", "settings-rebind", { value: n, ghost: true })}${alt ? button(esc(alt), "settings-rebind-alt", { value: n }) : button("Add binding", "settings-rebind-alt", { value: n, ghost: true })}${changed ? button("↺", "settings-binding-reset", { value: n, ghost: true, small: true }) : ""}</div></div>`;
+      return `<div class="setting-row binding-row"><div class="setting-copy"><b>${esc(n)}</b>${state.mapForbidden && MAP_BINDINGS.includes(n) ? `<small>${MAP_UNAVAILABLE}</small>` : query ? `<small>${bindingGroup(n)}</small>` : ""}</div><div class="row">${primary ? button(esc(primary), "settings-rebind", { value: n }) : button("Add binding", "settings-rebind", { value: n, ghost: true })}${alt ? button(esc(alt), "settings-rebind-alt", { value: n }) : button("Add binding", "settings-rebind-alt", { value: n, ghost: true })}${changed ? button("↺", "settings-binding-reset", { value: n, ghost: true, small: true }) : ""}</div></div>`;
     });
   return (
     rows.join("") ||
@@ -247,6 +260,34 @@ function settingsControl(label, key, kind, options = [], hint = "") {
   return `<div class="setting-row"><div class="setting-copy"><b>${label}</b>${hint ? `<small>${hint}</small>` : ""}</div>${control}</div>`;
 }
 
+const MAP_UNAVAILABLE = "Not available in this World.";
+const mapHint = (text) => (state.mapForbidden ? MAP_UNAVAILABLE : text);
+const MAP_BINDINGS = ["Open the Map", "Toggle compass", "Toggle minimap"];
+// The engine's hints() lines, in its order (edit.rs), shown under Show quick reference.
+const QUICK_REFERENCE = [
+  ["Open input settings", "controls"],
+  ["Open Inventory", "inventory"],
+  ["Empty hand", "empty hand"],
+  ["Take tool", "tool"],
+  ["Undo", "undo"],
+  ["Redo", "redo"],
+  ["Sample", "pick block"],
+  ["Turn Shape", "turn"],
+  ["Flip Shape", "flip"],
+  ["Next Shape", "Shape"],
+  ["Toggle placement ghost", "placement ghost"],
+  ["Toggle compass", "compass"],
+  ["Toggle minimap", "minimap"],
+  ["Open the Menu", "menu"],
+];
+
+function quickReference() {
+  const d = state.settingsDraft;
+  return QUICK_REFERENCE.map(
+    ([n, verb]) => `[${d.bindings[n] || "unbound"}] ${verb}`,
+  ).join("<br>");
+}
+
 function settingsBody() {
   const row = settingsControl;
   const group = (name) => `<p class="section-label">${name}</p>`;
@@ -269,6 +310,13 @@ function settingsBody() {
           [],
           "Keep placing or removing while the binding is held.",
         ) +
+        row(
+          "Placement ghost",
+          "ghost",
+          "toggle",
+          [],
+          "Show a translucent preview of the Voxel where Place would put it.",
+        ) +
         group("Mouse & quick slots") +
         row(
           "Mouse sensitivity",
@@ -280,7 +328,10 @@ function settingsBody() {
         row("Invert vertical look", "invert", "toggle") +
         row("Scroll direction", "scroll", "select", ["Standard", "Reversed"]) +
         row("Scroll sensitivity", "scrollSpeed", "range", [0.25, 3, 0.05]) +
-        row("Show quick reference", "reference", "toggle")
+        row("Show quick reference", "reference", "toggle") +
+        (state.settingsDraft.reference
+          ? `<p class="muted">${quickReference()}</p>`
+          : "")
       );
     case "Key bindings":
       return (
@@ -364,6 +415,28 @@ function settingsBody() {
           "select",
           ["67%", "75%", "85%", "100%"],
           "Lower values reduce rendering work. Menus stay sharp.",
+        ) +
+        group("Map and compass") +
+        row(
+          "Compass",
+          "compass",
+          "toggle",
+          undefined,
+          mapHint("A strip along the top showing your heading."),
+        ) +
+        row(
+          "Minimap",
+          "minimap",
+          "toggle",
+          undefined,
+          mapHint("A small map in the corner, north up, centred on you."),
+        ) +
+        row(
+          "Minimap size",
+          "minimapSize",
+          "select",
+          ["Small", "Medium", "Large"],
+          mapHint("Shown only while the minimap is on."),
         ) +
         `<p class="muted">View distance, textures, shadows, and simulation settings stay unchanged.</p>`
       );

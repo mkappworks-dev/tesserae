@@ -114,6 +114,10 @@ pub(super) enum Operation {
     Sprint(crate::server::player::SpeedLevel),
     Removal(bool),
     Repeat,
+    Ghost,
+    Compass,
+    Minimap,
+    MinimapSize(super::minimap::MinimapSize),
     Invert,
     PadInvert,
     PadCrouch(bool),
@@ -251,15 +255,18 @@ impl Opener<'_, '_> {
     }
 }
 
+type Gates<'w> = (
+    Res<'w, super::input::UiInput>,
+    Res<'w, crate::server::persistence::SaveStatus>,
+    Res<'w, super::input::Ownership>,
+    Option<Res<'w, super::inventory_window::InventoryWindow>>,
+    Option<Res<'w, super::map_window::MapWindow>>,
+);
+
 pub(super) fn open_shortcut(
     actions: Res<super::actions::Actions>,
     mut opener: Opener,
-    (ui, status, ownership, inventory): (
-        Res<super::input::UiInput>,
-        Res<crate::server::persistence::SaveStatus>,
-        Res<super::input::Ownership>,
-        Option<Res<super::inventory_window::InventoryWindow>>,
-    ),
+    (ui, status, ownership, inventory, map): Gates,
     window: Single<&Window, With<bevy::window::PrimaryWindow>>,
 ) {
     if !window.focused
@@ -273,6 +280,7 @@ pub(super) fn open_shortcut(
         || status.modal()
         || opener.settings.open
         || inventory.is_some_and(|window| window.open)
+        || map.is_some_and(|window| window.open)
     {
         return;
     }

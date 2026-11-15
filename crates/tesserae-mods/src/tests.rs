@@ -17,6 +17,7 @@ mod declare;
 mod export_version;
 mod lines;
 mod loading;
+mod markers;
 mod plants;
 mod recipes;
 mod sandbox;

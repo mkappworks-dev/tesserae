@@ -13,6 +13,7 @@ pub(super) enum Owner {
     Menu,
     LayoutMenu,
     Inventory,
+    Map,
     Settings,
     BindingCapture,
     TextEntry,
@@ -94,13 +95,14 @@ type Contexts<'w> = (
     Option<Res<'w, crate::server::persistence::SaveStatus>>,
     Option<Res<'w, super::layout_menu::LayoutMenu>>,
     Option<Res<'w, super::inventory_window::InventoryWindow>>,
+    Option<Res<'w, super::map_window::MapWindow>>,
     Option<Res<'w, super::death::Dead>>,
 );
 
 pub(super) fn resolve(
     (keys, mouse, pad): super::actions::Devices,
     touch: Res<super::touch::TouchFrame>,
-    (menu, settings, ui, save, layout_menu, inventory, dead): Contexts,
+    (menu, settings, ui, save, layout_menu, inventory, map, dead): Contexts,
     window: Single<(&Window, &CursorOptions), With<PrimaryWindow>>,
     mut ownership: ResMut<Ownership>,
     bindings: Res<super::actions::Bindings>,
@@ -128,6 +130,8 @@ pub(super) fn resolve(
         Owner::LayoutMenu
     } else if inventory.is_some_and(|window| window.open) {
         Owner::Inventory
+    } else if map.is_some_and(|window| window.open) {
+        Owner::Map
     } else if cursor.grab_mode == CursorGrabMode::Locked {
         Owner::Gameplay
     } else {
@@ -169,6 +173,7 @@ pub(super) fn resolve(
             action,
             Action::Menu
                 | Action::Inventory
+                | Action::Map
                 | Action::SearchCatalogue
                 | Action::ReleaseCursor
                 | Action::Help

@@ -13,9 +13,9 @@ use std::collections::VecDeque;
 use tesserae::mods::commands::{Fill, Placement, SourceFill};
 use tesserae::mods::content::{
     Appearance, BiomeDef, BurnAfter, BurnEnd, ClimateParams, CombustionDef, FluidDef, FluidState,
-    GroundParams, HeatDef, ItemDef, MaterialDef, Occlusion, OreDef, Reactant, ReactionDef,
-    ReactionSide, RecipeDef, RecipeStack, RenderClass, ShapeDef, SkyFog, SurfaceFeature, ToolDef,
-    ToolKind, ViewParams, VoxelUse, VoxelUseKind, WaterParams,
+    GroundParams, HeatDef, ItemDef, MarkerIcon, MarkerKindDef, MaterialDef, Occlusion, OreDef,
+    Reactant, ReactionDef, ReactionSide, RecipeDef, RecipeStack, RenderClass, ShapeDef, SkyFog,
+    SurfaceFeature, ToolDef, ToolKind, ViewParams, VoxelUse, VoxelUseKind, WaterParams,
 };
 use tesserae::mods::types::{
     Arm, BoxM, CollisionBox, ConnectDef, LogLevel, NodeBox, Srgba, Vec3, Voxel,
@@ -230,6 +230,14 @@ fn gate(name: &str) -> MaterialDef {
         occlusion: Occlusion::Never,
         render: RenderClass::Cutout,
         ..solid(name)
+    }
+}
+
+fn marker(name: &str, icon: MarkerIcon, [r, g, b]: [u8; 3]) -> MarkerKindDef {
+    MarkerKindDef {
+        name: name.into(),
+        icon,
+        color: Srgba { r, g, b, a: 255 },
     }
 }
 
@@ -837,6 +845,15 @@ impl Guest for Terra {
                 },
             ],
             plants: Vec::new(),
+            marker_kinds: vec![
+                marker("home", MarkerIcon::Home, [224, 177, 90]),
+                marker("camp", MarkerIcon::Camp, [217, 130, 74]),
+                marker("mine", MarkerIcon::Mine, [157, 180, 204]),
+                marker("farm", MarkerIcon::Farm, [147, 199, 101]),
+                marker("landmark", MarkerIcon::Landmark, [207, 154, 216]),
+                marker("death", MarkerIcon::Death, [217, 100, 92]),
+            ],
+            death_marker_kind: Some("terra:death".into()),
             voxel_uses: vec![
                 VoxelUse {
                     material: "terra:door".into(),
