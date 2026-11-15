@@ -1005,13 +1005,13 @@ fn card_menu(actions: &mut ChildSpawnerCommands, path: &Path, open: bool) {
                 BorderColor::all(theme::edge()),
             ))
             .with_children(|menu| {
-                small_button(menu, "Edit", Act::Edit(path.to_path_buf()), Kind::Ghost);
-                small_button(
-                    menu,
-                    "Delete",
-                    Act::DeleteWorld(path.to_path_buf()),
-                    Kind::Danger,
-                );
+                // Straight into the column, so both fill its width.
+                for (label, act, kind) in [
+                    ("Edit", Act::Edit(path.to_path_buf()), Kind::Ghost),
+                    ("Delete", Act::DeleteWorld(path.to_path_buf()), Kind::Danger),
+                ] {
+                    buttons::button(menu, label, act, ButtonStyle::Small { kind });
+                }
             });
         });
 }
