@@ -53,7 +53,11 @@ pub fn meadow() -> Vec<SurfaceFeature> {
 /// Wheat fields most often, with carrots and potatoes; no lake, so no ditch.
 pub fn meadow_fields() -> Vec<CropField> {
     vec![crop_field(
-        &[("crops:wheat", 6.0), ("crops:carrot", 2.0), ("crops:potato", 2.0)],
+        &[
+            ("crops:wheat", 6.0),
+            ("crops:carrot", 2.0),
+            ("crops:potato", 2.0),
+        ],
         (8.0, 16.0),
         96.0,
         "strata:sand",
@@ -63,7 +67,11 @@ pub fn meadow_fields() -> Vec<CropField> {
 
 pub fn prairie_fields() -> Vec<CropField> {
     vec![crop_field(
-        &[("crops:wheat", 8.0), ("crops:carrot", 1.0), ("crops:potato", 1.0)],
+        &[
+            ("crops:wheat", 8.0),
+            ("crops:carrot", 1.0),
+            ("crops:potato", 1.0),
+        ],
         (10.0, 20.0),
         128.0,
         "strata:sand",

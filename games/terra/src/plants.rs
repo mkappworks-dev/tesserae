@@ -106,7 +106,11 @@ pub fn temperate() -> Vec<SurfaceFeature> {
 /// Wheat fields most often. The first stand by the lake with a ditch of its water, the second
 /// anywhere on the meadow.
 pub fn temperate_fields() -> Vec<CropField> {
-    let crops = [("crops:wheat", 6.0), ("crops:carrot", 2.0), ("crops:potato", 2.0)];
+    let crops = [
+        ("crops:wheat", 6.0),
+        ("crops:carrot", 2.0),
+        ("crops:potato", 2.0),
+    ];
     vec![
         crop_field(&crops, (6.0, 12.0), 72.0, Some(40.0)),
         crop_field(&crops, (6.0, 12.0), 112.0, None),

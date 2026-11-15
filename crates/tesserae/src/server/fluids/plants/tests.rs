@@ -239,6 +239,7 @@ const ENOUGH: u64 = 3000;
 
 mod bench;
 mod reach;
+mod terra;
 mod tree;
 mod vine;
 

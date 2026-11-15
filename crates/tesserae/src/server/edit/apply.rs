@@ -11,22 +11,22 @@ pub(in crate::server) fn apply_pending(
         ResMut<crate::server::undo::Journal>,
     ),
     (mut store, mut meshes): (ResMut<ChunkStore>, ResMut<MeshState>),
-    (mut rejected, mut applied_edits, mut heard): (
+    (mut rejected, mut applied_edits, mut heard, mut picked): (
         MessageWriter<EditRejected>,
         MessageWriter<EditApplied>,
         MessageWriter<crate::server::sound::SoundEvent>,
+        MessageWriter<crate::server::entities::Pickup>,
     ),
     (tables, world, sounds): (
         Res<ContentTables>,
         Res<WorldSettings>,
         Res<crate::server::sound::SoundTable>,
     ),
-    (mut entities, items, containers, mut needs, mut picked): (
+    (mut entities, items, containers, mut needs): (
         ResMut<crate::server::entities::EntityStore>,
         Res<crate::server::items::Items>,
         Option<Res<crate::server::container::Containers>>,
         MessageWriter<crate::server::plants::PlantNeedsSoil>,
-        MessageWriter<crate::server::entities::Pickup>,
     ),
     mut players: Query<(&Player, &mut crate::server::inventory::Inventory)>,
 ) {

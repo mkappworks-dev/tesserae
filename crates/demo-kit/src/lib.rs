@@ -138,10 +138,8 @@ macro_rules! plants {
                         plant: Some(plant.into()),
                         shape: None,
                         spacing_m,
-                        clump: (strength > 0.0).then_some(crate::tesserae::mods::content::Clump {
-                            scale_m,
-                            strength,
-                        }),
+                        clump: (strength > 0.0)
+                            .then_some(crate::tesserae::mods::content::Clump { scale_m, strength }),
                         field: None,
                     }
                 })

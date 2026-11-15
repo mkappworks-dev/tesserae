@@ -51,7 +51,11 @@ pub fn garden() -> Vec<SurfaceFeature> {
 /// The court is flat, so its fields are many; no lake, so no ditch.
 pub fn garden_fields() -> Vec<CropField> {
     vec![crop_field(
-        &[("crops:wheat", 6.0), ("crops:carrot", 2.0), ("crops:potato", 2.0)],
+        &[
+            ("crops:wheat", 6.0),
+            ("crops:carrot", 2.0),
+            ("crops:potato", 2.0),
+        ],
         (8.0, 16.0),
         64.0,
         "strata:sand",

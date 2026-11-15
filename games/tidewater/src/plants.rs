@@ -27,7 +27,11 @@ pub fn lagoon() -> Vec<SurfaceFeature> {
 /// Wheat fields most often, on the shore: a ditch of the sea's water along the low edge.
 pub fn lagoon_fields() -> Vec<CropField> {
     vec![crop_field(
-        &[("crops:wheat", 6.0), ("crops:carrot", 2.0), ("crops:potato", 2.0)],
+        &[
+            ("crops:wheat", 6.0),
+            ("crops:carrot", 2.0),
+            ("crops:potato", 2.0),
+        ],
         (6.0, 8.0),
         80.0,
         "strata:sand",

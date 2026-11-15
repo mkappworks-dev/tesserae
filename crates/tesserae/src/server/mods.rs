@@ -975,7 +975,7 @@ pub(super) fn terra_for_save(
 }
 
 #[cfg(test)]
-mod demo_games;
+pub(in crate::server) mod demo_games;
 
 #[cfg(test)]
 mod tests {

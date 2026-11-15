@@ -23,9 +23,19 @@ pub fn ash_flats() -> Vec<SurfaceFeature> {
 
 /// Hardy roots on the ash, a ditch of the lake's water where it is near, and basalt for a path.
 pub fn ash_fields() -> Vec<CropField> {
-    let crops = [("crops:potato", 5.0), ("crops:carrot", 3.0), ("crops:wheat", 2.0)];
+    let crops = [
+        ("crops:potato", 5.0),
+        ("crops:carrot", 3.0),
+        ("crops:wheat", 2.0),
+    ];
     vec![
-        crop_field(&crops, (6.0, 12.0), 72.0, "strata:basalt", Some(("waters:water", 40.0))),
+        crop_field(
+            &crops,
+            (6.0, 12.0),
+            72.0,
+            "strata:basalt",
+            Some(("waters:water", 40.0)),
+        ),
         crop_field(&crops, (6.0, 12.0), 112.0, "strata:basalt", None),
     ]
 }
