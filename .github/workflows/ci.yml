@@ -29,6 +29,8 @@ jobs:
 
       - name: Cache
         uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       # bevy links alsa, udev, wayland and xkbcommon on Linux. Wayland is a
       # default bevy feature and wayland-sys resolves wayland-client through
@@ -91,6 +93,8 @@ jobs:
 
       - name: Cache
         uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Terra uses only the WIT contract
         run: ./scripts/check-terra-boundary
@@ -151,6 +155,8 @@ jobs:
 
       - name: Cache
         uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install Linux build deps
         run: |
@@ -215,6 +221,8 @@ jobs:
 
       - name: Cache
         uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       # The mesher is the hot path; a bench that no longer compiles is a bench
       # nobody runs. This does not measure, it only builds.
@@ -246,6 +254,8 @@ jobs:
 
       - name: Cache
         uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install Linux build deps
         run: |

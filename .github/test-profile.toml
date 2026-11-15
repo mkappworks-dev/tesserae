@@ -2,6 +2,10 @@
 # Everything is opt-level 0 except what the tests spend their time in; the workflow
 # explains why.
 
+# Line tables for the workspace crates cost about an eighth of the build and nothing a CI log reads.
+[profile.dev]
+debug = 0
+
 [profile.dev.package."*"]
 opt-level = 0
 
