@@ -391,7 +391,7 @@ fn tower() -> Template {
 fn a_structure_taller_than_the_terrain_band_is_whole_above_it() {
     let size = 0.5;
     let probe = Probe::of(size, flat(&[row(8.0, 1.0)]), tower());
-    let (_, highest) = probe.with.surface_bounds_m();
+    let (_, highest) = probe.bare.surface_bounds_m();
     let changed = probe.changed(24.0, false);
     let feet = marks(&changed);
     assert!(feet.len() > 4, "only {} towers", feet.len());
@@ -486,4 +486,131 @@ fn a_spacing_under_twice_the_longer_side_or_a_chance_outside_one_is_refused() {
 fn a_biome_with_four_structures_sixteen_features_and_two_fields_stays_inline_in_three_kib() {
     let size = std::mem::size_of::<Biome>();
     assert!(size < 3072, "{size} bytes");
+}
+
+/// 3 m square, its Ground layer on top of a shaft 39 m deep: a cellar open to the sky, floored
+/// and marked at its foot.
+fn well() -> Template {
+    let layer = |y: usize| {
+        (0..3)
+            .map(|z| {
+                (0..3)
+                    .map(|x| match (x, y, z) {
+                        (0, 0, 0) => Cell::Voxel(Voxel::cube(MARK)),
+                        (_, 0, _) => Cell::Voxel(Voxel::cube(CELLAR)),
+                        (1, _, 1) => Cell::Air,
+                        _ => Cell::Voxel(Voxel::cube(WALL)),
+                    })
+                    .collect()
+            })
+            .collect()
+    };
+    Template::new(
+        "t:well".to_owned(),
+        1.0,
+        (0..40).map(layer).collect(),
+        39,
+        None,
+        1.0,
+    )
+    .unwrap()
+}
+
+#[test]
+fn the_bounds_hold_every_structure_voxel_and_only_air_lies_above_them() {
+    let size = 0.5;
+    let wells = BiomeStructure {
+        template: 1,
+        ..row(12.0, 1.0)
+    };
+    let probe = Probe {
+        with: Worldgen::new(SEED, size, flat(&[row(8.0, 0.5), wells]))
+            .with_templates(&[tower(), well()]),
+        bare: Worldgen::new(SEED, size, flat(&[])),
+        chunks: RefCell::default(),
+    };
+    let (lowest, highest) = probe.with.surface_bounds_m();
+    let (band_low, band_high) = probe.bare.surface_bounds_m();
+    let chunk_m = SIZE_I as f32 * size;
+    let deep_rock_m = band_low - probe.bare.params().soil_depth_m;
+    let changed = probe.changed(24.0, false);
+    let floors = || changed.keys().map(|c| c[1] as f32 * size);
+    assert!(
+        floors().any(|f| f > band_high),
+        "no tower rose above the band"
+    );
+    let in_deep_rock = |y: i32| (y.div_euclid(SIZE_I) * SIZE_I + SIZE_I - 1) as f32 * size;
+    assert!(
+        changed.keys().any(|c| in_deep_rock(c[1]) < deep_rock_m),
+        "no well reached a deep-rock Chunk"
+    );
+    for floor in floors() {
+        assert!(
+            (lowest..=highest).contains(&floor),
+            "{floor} m is out of bounds"
+        );
+    }
+    let sky = (highest / chunk_m).floor() as i32 + 1;
+    for cz in -2..2 {
+        for cx in -2..2 {
+            assert_eq!(
+                probe.with.chunk(cx, sky, cz).uniform(),
+                Some(Voxel::AIR),
+                "({cx}, {sky}, {cz}) is above the bounds but not open sky"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_world_without_a_listed_structure_keeps_its_exact_bounds_and_clearance() {
+    let dangling = BiomeStructure {
+        template: 7,
+        ..row(16.0, 1.0)
+    };
+    for size in SIZES {
+        let plain = Worldgen::new(SEED, size, flat(&[]));
+        let p = plain.params();
+        assert_eq!(
+            plain.surface_bounds_m(),
+            (p.sea_level_m, p.sea_level_m + p.relief_m)
+        );
+        let unlisted = Worldgen::new(SEED, size, flat(&[])).with_templates(&[hut(), tower()]);
+        let missing = Worldgen::new(SEED, size, flat(&[dangling])).with_templates(&[hut()]);
+        for other in [unlisted, missing] {
+            assert_eq!(other.surface_bounds_m(), plain.surface_bounds_m());
+            for i in -8..8 {
+                let min = [i as f32 * 3.7, i as f32 * -2.3];
+                let max = min.map(|m| m + 0.6);
+                assert_eq!(
+                    other.clear_height_m(min, max),
+                    plain.clear_height_m(min, max)
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn no_body_clears_below_the_top_of_a_structure_it_stands_over() {
+    for size in [1.0, 0.5] {
+        let probe = Probe::new(size, flat(&[row(16.0, 1.0)]));
+        let found = structures(&probe, size, 48.0);
+        assert!(!found.is_empty(), "{size} m: nothing stood");
+        for f in found {
+            let [sx, sy, sz] = hut().sample(size, f.turn).size();
+            let top_m = (f.corner[1] + sy) as f32 * size;
+            let [x_m, _, z_m] = metres(f.corner, size);
+            let [far_x, _, far_z] = metres([f.corner[0] + sx, 0, f.corner[2] + sz], size);
+            // A body's width just inside each corner of the footprint.
+            for min in [[x_m, z_m], [far_x - 0.6, far_z - 0.6]] {
+                let min = min.map(|m| m + 0.1);
+                let clear_m = probe.with.clear_height_m(min, min.map(|m| m + 0.4));
+                assert!(
+                    clear_m >= top_m,
+                    "{size} m: {clear_m} under a roof at {top_m}"
+                );
+            }
+        }
+    }
 }
