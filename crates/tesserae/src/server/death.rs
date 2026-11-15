@@ -178,6 +178,9 @@ fn leave_death_marker(waypoints: &mut PlayerWaypoints, tables: &ContentTables, f
         return;
     };
     waypoints.clear_death();
+    if waypoints.is_full() {
+        waypoints.drop_oldest_ordinary();
+    }
     waypoints.push(DEATH_MARKER_NAME, &kind.name, feet[0], feet[2], true);
 }
 
@@ -502,6 +505,26 @@ mod tests {
         assert_eq!(second.len(), 1, "{second:?}");
         assert_ne!(second[0].id, first[0].id);
         assert_eq!((second[0].x_m, second[0].z_m), (9.5, 9.5));
+    }
+
+    #[test]
+    fn dying_with_a_full_list_drops_the_oldest_waypoint_so_the_list_still_validates() {
+        let mut app = app(false);
+        declare_death_kind(&mut app, true);
+        {
+            let mut q = app.world_mut().query::<&mut PlayerWaypoints>();
+            let mut w = q.single_mut(app.world_mut()).unwrap();
+            for i in 0..tesserae_core::marker::MAX_WAYPOINTS {
+                w.push(&format!("W{i}"), "t:grave", 0.0, 0.0, false);
+            }
+        }
+        fall_to_death(&mut app);
+        let list = waypoints(&mut app);
+        assert_eq!(list.len(), tesserae_core::marker::MAX_WAYPOINTS);
+        assert!(list.iter().any(|w| w.death));
+        assert!(list.iter().all(|w| w.name != "W0"));
+        let mut q = app.world_mut().query::<&PlayerWaypoints>();
+        assert!(q.single(app.world()).unwrap().validate().is_ok());
     }
 
     #[test]

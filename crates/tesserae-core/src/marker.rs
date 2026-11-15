@@ -139,12 +139,24 @@ impl Waypoints {
         self.list.retain(|w| !w.death);
     }
 
+    /// Drops the oldest ordinary Waypoint; the death marker must always fit, so it never meets the cap.
+    pub fn drop_oldest_ordinary(&mut self) {
+        if let Some(at) = self.list.iter().position(|w| !w.death) {
+            self.list.remove(at);
+        }
+    }
+
     pub fn is_full(&self) -> bool {
         self.list.len() >= MAX_WAYPOINTS
     }
 
     pub fn is_empty(&self) -> bool {
         self.list.is_empty()
+    }
+
+    /// Whether no Waypoint was ever made, so there is nothing to save.
+    pub fn is_pristine(&self) -> bool {
+        self.list.is_empty() && self.next_id == 0
     }
 
     pub fn validate(&self) -> Result<(), crate::save::Error> {

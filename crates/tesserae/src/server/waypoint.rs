@@ -97,7 +97,8 @@ fn answer(
                 name,
                 kind,
             } => {
-                if tables.markers.index_of(kind).is_none() {
+                let index = tables.markers.index_of(kind);
+                if index.is_none() || index == tables.markers.death {
                     Err(Reason::NoSuchKind)
                 } else if !marker::valid_name(name) {
                     Err(Reason::BadName)
@@ -140,7 +141,7 @@ impl PlayerState for WaypointsV1 {
     fn capture(player: EntityRef) -> Option<Self> {
         player
             .get::<PlayerWaypoints>()
-            .filter(|w| !w.is_empty())
+            .filter(|w| !w.is_pristine())
             .map(|w| WaypointsV1(w.0.clone()))
     }
 
@@ -283,6 +284,23 @@ mod tests {
             ask(&mut bare, add(10.5, 10.5, "x", KIND)).0,
             [Reason::NoSuchKind]
         );
+    }
+
+    #[test]
+    fn the_death_kind_is_not_one_a_player_may_add() {
+        let mut markers = kinds();
+        markers.kinds.push(MarkerKind {
+            name: "t:grave".into(),
+            icon: Icon::Death,
+            color: [9, 9, 9, 255],
+        });
+        markers.death = Some(1);
+        let mut app = game(markers);
+        assert_eq!(
+            ask(&mut app, add(10.5, 10.5, "x", "t:grave")).0,
+            [Reason::NoSuchKind]
+        );
+        assert!(ask(&mut app, add(10.5, 10.5, "x", KIND)).0.is_empty());
     }
 
     #[test]

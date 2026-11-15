@@ -1265,6 +1265,29 @@ fn waypoints_survive_save_and_reopen() {
 }
 
 #[test]
+fn an_emptied_list_keeps_its_counter_across_save_and_reopen() {
+    use crate::server::waypoint::PlayerWaypoints;
+    let dir = Directory::new();
+    let mut rig = Rig::new(&dir);
+    rig.settled_save();
+    let world = rig.app.world_mut();
+    let mut waypoints = world.query::<&mut PlayerWaypoints>();
+    let mut waypoints = waypoints.single_mut(world).unwrap();
+    for _ in 0..3 {
+        let id = waypoints.push("W", "terra:home", 0.0, 0.0, false);
+        waypoints.remove(id);
+    }
+    rig.tick();
+    rig.settled_save();
+    drop(rig);
+    let mut rig = Rig::new(&dir);
+    let world = rig.app.world_mut();
+    let mut waypoints = world.query::<&mut PlayerWaypoints>();
+    let mut waypoints = waypoints.single_mut(world).unwrap();
+    assert_eq!(waypoints.push("W", "terra:home", 0.0, 0.0, false), 4);
+}
+
+#[test]
 fn a_save_without_waypoints_loads_none() {
     let dir = Directory::new();
     Rig::new(&dir).settled_save();
