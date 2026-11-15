@@ -326,8 +326,10 @@ function render() {
   else if (state.screen === "map") {
     screen.innerHTML = mapPage();
     mapMount();
+  } else if (state.screen === "structures") {
+    screen.innerHTML = structuresPage();
+    drawStructure();
   }
-  else if (state.screen === "structures") screen.innerHTML = structuresPage();
   if (state.screen === "play") mapPlayMount();
   placeToast();
   screen.querySelector(".body")?.setAttribute("tabindex", "0");

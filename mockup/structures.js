@@ -7,338 +7,831 @@ const CASES = {
   inside: "You are standing inside it.",
   loading: "Waiting for Chunks to load…",
 };
+const VIEWS = { outside: "Outside", inside: "Inside", placing: "Placing" };
+const STOREY = 4;
 
-function box(w, d, y0, y1, fn) {
-  const cells = [];
-  for (let y = y0; y <= y1; y++)
-    for (let x = 0; x < w; x++)
-      for (let z = 0; z < d; z++) {
-        const k = fn(x, y, z);
-        if (k && k !== "keep") cells.push({ x, y, z, k });
-      }
-  return { w, d, cells };
+/* Each Game's look drawn with Terra's exported textures; a Game's own art replaces them. */
+const PALETTES = {
+  Terra: {
+    base: "stone",
+    wall: "wood",
+    frame: "stone",
+    roof: "brick",
+    floor: "wood",
+    chimney: "brick",
+    accent: "brick",
+  },
+  Tidewater: {
+    base: "sand",
+    wall: "wood",
+    frame: "wood",
+    roof: "wood",
+    floor: "wood",
+    chimney: "stone",
+    accent: "sand",
+  },
+  Ember: {
+    base: "ash",
+    wall: "brick",
+    frame: "stone",
+    roof: "stone",
+    floor: "stone",
+    chimney: "brick",
+    accent: "iron",
+  },
+  Lumen: {
+    base: "stone",
+    wall: "glass",
+    frame: "iron",
+    roof: "iron",
+    floor: "stone",
+    chimney: "iron",
+    accent: "lamp",
+  },
+  Meadow: {
+    base: "stone",
+    wall: "wood",
+    frame: "wood",
+    roof: "leaves",
+    floor: "wood",
+    chimney: "brick",
+    accent: "leaves",
+  },
+};
+const FIXED = {
+  glass: "glass",
+  door: "door",
+  lamp: "lamp",
+  chest: "chest",
+  bench: "workbench",
+  anvil: "iron",
+  oven: "brick",
+  table: "wood",
+  fence: "wood",
+  post: "wood",
+  stone: "stone",
+  sand: "sand",
+};
+const ROLE = {
+  chest: "Container",
+  bench: "Station",
+  anvil: "Station (anvil)",
+  oven: "Station (oven)",
+  door: "Door",
+};
+
+class Grid {
+  constructor() {
+    this.map = new Map();
+  }
+  put(x, y, z, cell) {
+    const key = `${x},${y},${z}`;
+    if (cell === null) this.map.delete(key);
+    else
+      this.map.set(
+        key,
+        cell === "air"
+          ? { k: "air" }
+          : { k: "solid", shape: "cube", turn: 0, ...cell },
+      );
+  }
+  fill(x0, y0, z0, x1, y1, z1, cell) {
+    for (let y = y0; y <= y1; y++)
+      for (let x = x0; x <= x1; x++)
+        for (let z = z0; z <= z1; z++) this.put(x, y, z, cell);
+  }
+  done() {
+    const cells = [...this.map].map(([key, c]) => {
+      const [x, y, z] = key.split(",").map(Number);
+      return { ...c, x, y, z };
+    });
+    const mx = Math.min(...cells.map((c) => c.x)),
+      mz = Math.min(...cells.map((c) => c.z));
+    for (const c of cells) ((c.x -= mx), (c.z -= mz));
+    return {
+      w: Math.max(...cells.map((c) => c.x)) + 1,
+      d: Math.max(...cells.map((c) => c.z)) + 1,
+      cells,
+    };
+  }
 }
-const edge = (x, z, w, d) => x === 0 || z === 0 || x === w - 1 || z === d - 1;
-const mid = (n) => Math.floor(n / 2);
-const hash3 = (x, y, z) =>
-  (((x * 73856093) ^ (y * 19349663) ^ (z * 83492791)) >>> 0) % 7;
+const M = (m, shape = "cube", turn = 0) => ({ m, shape, turn });
 
-/* A few shapes stand in for the Templates a Game would draw cell by cell. */
-const SHAPES = {
-  house: (w, d, h, { gable = false, cellar = 0 } = {}) => {
-    const roof = gable ? Math.ceil(d / 2) : 1;
-    return box(w, d, -cellar, h + roof, (x, y, z) => {
-      if (y < 0)
-        return edge(x, z, w, d) ? "solid" : y === -cellar ? "solid" : "air";
-      if (y === 0) return "solid";
-      if (y <= h) {
-        if (z === d - 1 && x === mid(w) && y <= 2) return "air";
-        if (x === 0 && z === mid(d) && y === 2) return "air";
-        return edge(x, z, w, d) ? "solid" : "air";
+/* A timber-and-stone house: foundation, framed walls, windows, a door, storeys and an overhanging roof. */
+function house(g, o) {
+  const {
+    w,
+    d,
+    storeys = 1,
+    roof = "gable",
+    chimney = false,
+    cellar = 0,
+    wide = 0,
+    open = false,
+    hall = false,
+  } = o;
+  const x0 = 1,
+    z0 = 1,
+    x1 = x0 + w - 1,
+    z1 = z0 + d - 1,
+    cx = x0 + Math.floor(w / 2),
+    top = storeys * STOREY - 1;
+  const rim = (x, z) => x === x0 || x === x1 || z === z0 || z === z1;
+  const corner = (x, z) => (x === x0 || x === x1) && (z === z0 || z === z1);
+  for (let y = -cellar; y < 0; y++)
+    for (let x = x0; x <= x1; x++)
+      for (let z = z0; z <= z1; z++)
+        g.put(x, y, z, rim(x, z) || y === -cellar ? M("base") : "air");
+  for (let x = x0; x <= x1; x++)
+    for (let z = z0; z <= z1; z++)
+      g.put(x, 0, z, M(rim(x, z) ? "base" : "floor"));
+  for (let y = 1; y <= top; y++) {
+    const floorRow = !hall && y % STOREY === 0;
+    for (let x = x0; x <= x1; x++)
+      for (let z = z0; z <= z1; z++) {
+        if (floorRow) {
+          g.put(x, y, z, M(rim(x, z) ? "frame" : "floor"));
+          continue;
+        }
+        if (!rim(x, z)) {
+          g.put(x, y, z, "air");
+          continue;
+        }
+        const along = z === z0 || z === z1 ? x - x0 : z - z0,
+          windowRow = y % STOREY === 2;
+        if (corner(x, z)) g.put(x, y, z, M("frame"));
+        else if (windowRow && along % 3 === 2) g.put(x, y, z, M("glass"));
+        else g.put(x, y, z, M("wall"));
       }
-      const r = y - h - 1;
-      if (!gable) return "solid";
-      return z >= r && z <= d - 1 - r
-        ? z === r || z === d - 1 - r
-          ? "solid"
-          : x === 0 || x === w - 1
-            ? "solid"
-            : "air"
-        : "keep";
-    });
+  }
+  if (open)
+    for (let x = x0 + 1; x < x1; x++)
+      for (let y = 1; y <= 3; y++)
+        g.put(
+          x,
+          y,
+          z1,
+          (x - x0) % 3 === 0 ? M("frame") : y === 3 ? M("frame") : "air",
+        );
+  else if (wide)
+    for (let x = cx - wide; x <= cx + wide; x++)
+      for (let y = 1; y <= 3; y++)
+        g.put(x, y, z1, y === 3 ? M("frame") : "air");
+  else {
+    g.put(cx, 1, z1, M("door", "panel"));
+    g.put(cx, 2, z1, M("door", "panel"));
+  }
+  const W = w + 2,
+    D = d + 2,
+    base = top + 1;
+  if (roof === "flat") {
+    for (let x = 0; x < W; x++)
+      for (let z = 0; z < D; z++) g.put(x, base, z, M("roof", "slab"));
+  } else
+    for (let r = 0; ; r++) {
+      const y = base + r,
+        za = r,
+        zb = D - 1 - r;
+      if (za > zb) break;
+      for (let x = 0; x < W; x++) {
+        if (za === zb) {
+          g.put(x, y, za, M("roof", "slab"));
+          continue;
+        }
+        g.put(x, y, za, M("roof", "stair", 0));
+        g.put(x, y, zb, M("roof", "stair", 2));
+        for (let z = za + 1; z < zb; z++)
+          g.put(
+            x,
+            y,
+            z,
+            x === x0 || x === x1 ? M("wall") : x > x0 && x < x1 ? "air" : null,
+          );
+      }
+    }
+  if (chimney) {
+    const peak = base + Math.ceil(D / 2) + 1;
+    for (let y = 1; y <= peak; y++) g.put(x1, y, z0 + 1, M("chimney"));
+  }
+  return { at: (x, y, z, cell) => g.put(x0 + x, y, z0 + z, cell), x1, z1 };
+}
+
+const B = {
+  smallHouse: () => {
+    const g = new Grid(),
+      h = house(g, { w: 5, d: 5, chimney: true });
+    h.at(1, 1, 1, M("table", "table"));
+    h.at(3, 1, 1, M("chest"));
+    h.at(1, 3, 3, M("lamp"));
+    return g.done();
   },
-  tower: (n, h, { cellar = 0 } = {}) =>
-    box(n, n, -cellar, h + 2, (x, y, z) => {
-      const rim = edge(x, z, n, n);
-      if (y < 0) {
-        const inner = x > 0 && z > 0 && x < n - 1 && z < n - 1;
-        if (!inner) return "keep";
-        return edge(x - 1, z - 1, n - 2, n - 2) || y === -cellar
-          ? "solid"
-          : "air";
+  familyHouse: () => {
+    const g = new Grid(),
+      h = house(g, { w: 7, d: 6, storeys: 2, chimney: true });
+    h.at(2, 1, 2, M("table", "table"));
+    h.at(5, 1, 1, M("bench"));
+    h.at(1, 1, 1, M("chest"));
+    h.at(1, 5, 1, M("chest"));
+    h.at(4, 5, 3, M("table", "table"));
+    h.at(3, 3, 3, M("lamp"));
+    h.at(3, 7, 3, M("lamp"));
+    return g.done();
+  },
+  farmhouse: () => {
+    const g = new Grid(),
+      h = house(g, { w: 9, d: 7, chimney: true, cellar: 3 });
+    h.at(3, 1, 3, M("table", "table"));
+    h.at(4, 1, 3, M("table", "table"));
+    h.at(1, 1, 1, M("bench"));
+    h.at(7, 1, 1, M("chest"));
+    h.at(1, -2, 1, M("chest"));
+    h.at(2, -2, 1, M("chest"));
+    h.at(4, 3, 3, M("lamp"));
+    return g.done();
+  },
+  inn: () => {
+    const g = new Grid(),
+      h = house(g, { w: 11, d: 9, storeys: 2, chimney: true, cellar: 3 });
+    for (const [x, z] of [
+      [2, 2],
+      [2, 5],
+      [6, 2],
+      [6, 5],
+    ])
+      h.at(x, 1, z, M("table", "table"));
+    for (let x = 1; x <= 8; x++) h.at(x, 1, 7, M("floor", "slab"));
+    for (const x of [1, 3, 5, 7, 9]) h.at(x, 5, 1, M("chest"));
+    for (const x of [1, 2, 3]) h.at(x, -2, 1, M("chest"));
+    h.at(5, 3, 4, M("lamp"));
+    h.at(5, 7, 4, M("lamp"));
+    return g.done();
+  },
+  warehouse: () => {
+    const g = new Grid(),
+      h = house(g, { w: 13, d: 9, storeys: 2, hall: true, wide: 1 });
+    for (let x = 1; x <= 11; x++)
+      for (const y of [1, 2, 3]) h.at(x, y, 1, M("chest"));
+    for (let z = 2; z <= 6; z++)
+      for (const y of [1, 2])
+        (h.at(1, y, z, M("chest")), h.at(11, y, z, M("chest")));
+    for (let x = 4; x <= 8; x++) h.at(x, 1, 4, M("chest"));
+    h.at(6, 6, 4, M("lamp"));
+    return g.done();
+  },
+  blacksmith: () => {
+    const g = new Grid(),
+      h = house(g, { w: 9, d: 7, chimney: true, open: true });
+    for (const [x, z] of [
+      [6, 1],
+      [7, 1],
+      [6, 2],
+      [7, 2],
+    ])
+      h.at(x, 1, z, M("oven"));
+    h.at(6, 2, 1, M("oven"));
+    h.at(7, 2, 2, M("lamp"));
+    h.at(4, 1, 3, M("anvil", "slab"));
+    h.at(1, 1, 1, M("bench"));
+    h.at(2, 1, 1, M("chest"));
+    h.at(1, 1, 3, M("chest"));
+    return g.done();
+  },
+  bakery: () => {
+    const g = new Grid(),
+      h = house(g, { w: 7, d: 7, chimney: true });
+    for (let x = 3; x <= 5; x++)
+      for (const z of [1, 2]) for (const y of [1, 2]) h.at(x, y, z, M("oven"));
+    h.at(4, 1, 2, M("lamp"));
+    for (let x = 1; x <= 5; x++) h.at(x, 1, 4, M("floor", "slab"));
+    h.at(1, 1, 1, M("bench"));
+    h.at(1, 1, 2, M("chest"));
+    h.at(3, 3, 3, M("lamp"));
+    return g.done();
+  },
+  barn: () => {
+    const g = new Grid(),
+      h = house(g, { w: 11, d: 9, storeys: 2, hall: true, wide: 1 });
+    for (let z = 1; z <= 5; z++)
+      for (const x of [3, 7]) h.at(x, 1, z, M("fence", "post"));
+    for (const x of [1, 2, 9]) h.at(x, 1, 1, M("chest"));
+    return g.done();
+  },
+  stall: () => {
+    const g = new Grid();
+    for (const [x, z] of [
+      [0, 0],
+      [4, 0],
+      [0, 2],
+      [4, 2],
+    ])
+      g.fill(x, 0, z, x, 2, z, M("post", "post"));
+    for (let x = 0; x <= 4; x++) {
+      for (let z = 0; z <= 2; z++) g.put(x, 3, z, M("roof", "slab"));
+      g.put(x, 0, 3, M("floor", "slab"));
+    }
+    g.put(1, 0, 0, M("chest"));
+    g.put(3, 0, 0, M("chest"));
+    return g.done();
+  },
+  well: () => {
+    const g = new Grid();
+    for (let x = 0; x < 3; x++)
+      for (let z = 0; z < 3; z++) {
+        const c = x === 1 && z === 1;
+        g.fill(x, -3, z, x, 0, z, c ? "air" : M("base"));
+        if (!c) g.put(x, 1, z, M("base", "slab"));
       }
-      if (y === 0 || y === h) return "solid";
-      if (y > h) return rim && (x + z) % 2 === 0 ? "solid" : "keep";
-      if (z === n - 1 && x === mid(n) && y <= 2) return "air";
-      return rim ? "solid" : "air";
-    }),
-  well: (n, depth) =>
-    box(n, n, -depth, 4, (x, y, z) => {
-      const corner = (x === 0 || x === n - 1) && (z === 0 || z === n - 1),
-        inside = !edge(x, z, n, n);
-      if (y <= 1) return inside ? "air" : "solid";
-      if (y === 4) return "solid";
-      return corner ? "solid" : "keep";
-    }),
-  ruin: (w, d, h) =>
-    box(w, d, 0, h, (x, y, z) => {
-      if (y === 0) return hash3(x, y, z) < 2 ? "keep" : "solid";
-      if (!edge(x, z, w, d)) return "keep";
-      return hash3(x, y, z) < 1 + Math.floor((y * 4) / h) ? "keep" : "solid";
-    }),
-  wall: (len, h) =>
-    box(len, 2, 0, h, (x, y, z) =>
-      Math.abs(x - mid(len)) <= 1 && y <= 3 && y > 0
-        ? "air"
-        : y === h && x % 2
-          ? "keep"
-          : "solid",
-    ),
-  bridge: (len, w = 3) =>
-    box(len, w, -3, 1, (x, y, z) => {
-      if (y === 0) return "solid";
-      if (y === 1) return z === 0 || z === w - 1 ? "solid" : "keep";
-      return (x === 0 || x === len - 1) && z !== mid(w) ? "solid" : "keep";
-    }),
-  dock: (len, w = 3) =>
-    box(len, w, -3, 0, (x, y, z) =>
-      y === 0
-        ? "solid"
-        : x % 3 === 0 && (z === 0 || z === w - 1)
-          ? "solid"
-          : "keep",
-    ),
-  arch: (w, h, d = 2) =>
-    box(w, d, 0, h, (x, y, z) =>
-      x <= 1 || x >= w - 2 || y >= h - 1 ? "solid" : "air",
-    ),
+    for (const [x, z] of [
+      [0, 0],
+      [2, 0],
+      [0, 2],
+      [2, 2],
+    ])
+      g.fill(x, 2, z, x, 3, z, M("post", "post"));
+    for (let x = -1; x <= 3; x++) {
+      g.put(x, 4, -1, M("roof", "stair", 0));
+      g.put(x, 4, 3, M("roof", "stair", 2));
+      for (let z = 0; z <= 2; z++)
+        g.put(x, 4, z, M("roof", z === 1 ? "slab" : "cube"));
+    }
+    g.put(1, 1, 1, "air");
+    return g.done();
+  },
+  tower: (n, h, cellar = 0) => {
+    const g = new Grid(),
+      edge = (x, z) => x === 0 || z === 0 || x === n - 1 || z === n - 1;
+    for (let y = -cellar; y < 0; y++)
+      for (let x = 1; x < n - 1; x++)
+        for (let z = 1; z < n - 1; z++)
+          g.put(
+            x,
+            y,
+            z,
+            x === 1 || z === 1 || x === n - 2 || z === n - 2 || y === -cellar
+              ? M("base")
+              : "air",
+          );
+    for (let y = 0; y <= h + 1; y++)
+      for (let x = 0; x < n; x++)
+        for (let z = 0; z < n; z++) {
+          if (y === 0 || y === h)
+            g.put(x, y, z, M(edge(x, z) ? "base" : "floor"));
+          else if (y > h) {
+            if (edge(x, z) && (x + z) % 2 === 0) g.put(x, y, z, M("base"));
+          } else if (edge(x, z))
+            g.put(
+              x,
+              y,
+              z,
+              z === n - 1 && x === Math.floor(n / 2) && y <= 2
+                ? M("door", "panel")
+                : y % 4 === 2 && (x + z) % 3 === 0
+                  ? M("glass")
+                  : M(x === 0 || x === n - 1 ? "base" : "wall"),
+            );
+          else g.put(x, y, z, "air");
+        }
+    g.put(Math.floor(n / 2), h + 1, Math.floor(n / 2), M("lamp"));
+    return g.done();
+  },
+  bridge: (len, w = 3) => {
+    const g = new Grid();
+    for (let x = 0; x < len; x++)
+      for (let z = 0; z < w; z++) {
+        g.put(x, 0, z, M("base", z === 0 || z === w - 1 ? "cube" : "slab"));
+        if (z === 0 || z === w - 1) g.put(x, 1, z, M("fence", "post"));
+      }
+    for (const x of [0, len - 1])
+      for (let z = 0; z < w; z++) g.fill(x, -3, z, x, -1, z, M("base"));
+    return g.done();
+  },
+  dock: (len, w = 3) => {
+    const g = new Grid();
+    for (let x = 0; x < len; x++)
+      for (let z = 0; z < w; z++) {
+        g.put(x, 0, z, M("floor", "slab"));
+        if (x % 3 === 0 && (z === 0 || z === w - 1))
+          g.fill(x, -3, z, x, -1, z, M("post", "post"));
+      }
+    g.put(len - 1, 1, 0, M("lamp"));
+    return g.done();
+  },
+  ruin: (w, d, h) => {
+    const g = new Grid(),
+      hash = (x, y, z) =>
+        (((x * 73856093) ^ (y * 19349663) ^ (z * 83492791)) >>> 0) % 7;
+    for (let y = 0; y <= h; y++)
+      for (let x = 0; x < w; x++)
+        for (let z = 0; z < d; z++) {
+          const rim = x === 0 || z === 0 || x === w - 1 || z === d - 1;
+          if (y === 0) {
+            if (hash(x, y, z) >= 2) g.put(x, y, z, M("base"));
+          } else if (rim && hash(x, y, z) >= 1 + Math.floor((y * 4) / h))
+            g.put(x, y, z, M(y % 3 ? "base" : "wall"));
+        }
+    return g.done();
+  },
   ring: (r, pillars, h = 3) => {
-    const n = 2 * r + 1;
-    return box(n, n, 0, h, (x, y, z) => {
-      const dx = x - r,
-        dz = z - r,
-        dist = Math.hypot(dx, dz);
-      if (dx === 0 && dz === 0 && y <= 1) return "solid";
-      const a = (Math.atan2(dz, dx) + Math.PI) / (2 * Math.PI);
-      const on =
-        Math.abs(dist - r) < 0.6 &&
-        Math.abs(a * pillars - Math.round(a * pillars)) < 0.08;
-      return on ? "solid" : "keep";
-    });
+    const g = new Grid();
+    for (let i = 0; i < pillars; i++) {
+      const a = (i / pillars) * Math.PI * 2,
+        x = Math.round(r + r * Math.cos(a)),
+        z = Math.round(r + r * Math.sin(a));
+      g.fill(x, 0, z, x, h - 1, z, M("base"));
+      g.put(x, h, z, M("base", "slab"));
+    }
+    g.put(r, 0, r, M("accent"));
+    g.put(r, 1, r, M("lamp"));
+    return g.done();
   },
-  dome: (r, { under = false } = {}) => {
-    const n = 2 * r + 1,
-      y0 = under ? -r : 0;
-    return box(n, n, y0, under ? 0 : r, (x, y, z) => {
-      const d = Math.hypot(x - r, (under ? y + r : y) - 0, z - r);
-      if (!under && y === 0) return d <= r ? "solid" : "keep";
-      if (!under && z === n - 1 - 0 && x === r && y <= 2) return "air";
-      if (d > r + 0.5) return "keep";
-      return d > r - 0.6 ? "solid" : "air";
-    });
+  arch: (w, h, d = 2) => {
+    const g = new Grid();
+    for (let x = 0; x < w; x++)
+      for (let z = 0; z < d; z++)
+        for (let y = 0; y <= h; y++)
+          if (x <= 1 || x >= w - 2 || y >= h - 1)
+            g.put(x, y, z, M(y === h ? "accent" : "base"));
+    return g.done();
   },
-  pyramid: (n) =>
-    box(n, n, 0, mid(n), (x, y, z) =>
-      x >= y && z >= y && x < n - y && z < n - y ? "solid" : "keep",
-    ),
-  stilt: (w, d, lift = 3) =>
-    box(w, d, 0, lift + 4, (x, y, z) => {
-      const corner = (x === 0 || x === w - 1) && (z === 0 || z === d - 1);
-      if (y < lift) return corner ? "solid" : "keep";
-      if (y === lift || y === lift + 4) return "solid";
-      if (z === d - 1 && x === mid(w) && y <= lift + 2) return "air";
-      return edge(x, z, w, d) ? "solid" : "air";
-    }),
   spire: (r, h) => {
-    const n = 2 * r + 1;
-    return box(n, n, -2, h, (x, y, z) => {
-      const rad = y < 0 ? r : r * (1 - y / (h + 1));
-      return Math.hypot(x - r, z - r) <= rad + 0.3 ? "solid" : "keep";
-    });
+    const g = new Grid(),
+      n = 2 * r + 1;
+    for (let y = -2; y <= h; y++)
+      for (let x = 0; x < n; x++)
+        for (let z = 0; z < n; z++) {
+          const rad = y < 0 ? r : r * (1 - y / (h + 1));
+          if (Math.hypot(x - r, z - r) <= rad + 0.3)
+            g.put(x, y, z, M(y > h - 3 ? "lamp" : "accent"));
+        }
+    return g.done();
+  },
+  dome: (r, under = false) => {
+    const g = new Grid(),
+      n = 2 * r + 1;
+    for (let y = under ? -r : 0; y <= (under ? 0 : r); y++)
+      for (let x = 0; x < n; x++)
+        for (let z = 0; z < n; z++) {
+          const d = Math.hypot(x - r, under ? y + r - r : y, z - r);
+          if (!under && y === 0 && d <= r) g.put(x, y, z, M("floor"));
+          else if (d <= r + 0.5)
+            g.put(x, y, z, d > r - 0.6 ? M(under ? "accent" : "wall") : "air");
+        }
+    if (!under)
+      (g.put(r, 1, n - 1, M("door", "panel")),
+        g.put(r, 2, n - 1, M("door", "panel")));
+    g.put(r, under ? -r + 1 : 1, r, M("lamp"));
+    return g.done();
   },
   mound: (r, h) => {
-    const n = 2 * r + 1;
-    return box(n, n, -3, h, (x, y, z) => {
-      if (y < 0) {
-        const room = Math.abs(x - r) <= 2 && Math.abs(z - r) <= 2;
-        return room
-          ? Math.abs(x - r) === 2 || Math.abs(z - r) === 2 || y === -3
-            ? "solid"
-            : "air"
-          : "keep";
-      }
-      if (x === r && z > r && y <= 1) return "air";
-      return Math.hypot((x - r) / r, y / (h + 0.5), (z - r) / r) <= 1
-        ? "solid"
-        : "keep";
-    });
+    const g = new Grid(),
+      n = 2 * r + 1;
+    for (let y = -3; y <= h; y++)
+      for (let x = 0; x < n; x++)
+        for (let z = 0; z < n; z++) {
+          if (y < 0) {
+            if (Math.abs(x - r) <= 2 && Math.abs(z - r) <= 2)
+              g.put(
+                x,
+                y,
+                z,
+                Math.abs(x - r) === 2 || Math.abs(z - r) === 2 || y === -3
+                  ? M("base")
+                  : "air",
+              );
+          } else if (x === r && z > r && y <= 1) g.put(x, y, z, "air");
+          else if (Math.hypot((x - r) / r, y / (h + 0.5), (z - r) / r) <= 1)
+            g.put(x, y, z, M(y === 0 ? "base" : "roof"));
+        }
+    g.put(r, -2, r, M("chest"));
+    return g.done();
   },
   pit: (r, depth) => {
-    const n = 2 * r + 1;
-    return box(n, n, -depth, 0, (x, y, z) => {
-      const d = Math.hypot(x - r, z - r);
-      if (d > r + 0.4) return "keep";
-      if (y === 0) return d > r - 0.6 ? "solid" : "air";
-      return d <= r - 0.6 - (depth + y) * 0.5 ? "air" : "keep";
-    });
+    const g = new Grid(),
+      n = 2 * r + 1;
+    for (let y = -depth; y <= 0; y++)
+      for (let x = 0; x < n; x++)
+        for (let z = 0; z < n; z++) {
+          const d = Math.hypot(x - r, z - r);
+          if (d > r + 0.4) continue;
+          if (y === 0) g.put(x, y, z, d > r - 0.6 ? M("base") : "air");
+          else if (d <= r - 0.6 - (depth + y) * 0.5) g.put(x, y, z, "air");
+        }
+    return g.done();
   },
-  forge: (n, h) =>
-    box(n, n, 0, h + 4, (x, y, z) => {
-      if (y > h) return x === n - 1 && z === 0 ? "solid" : "keep";
-      if (y === 0 || y === h) return "solid";
-      if (z === n - 1 && x === mid(n) && y <= 2) return "air";
-      return edge(x, z, n, n) ? "solid" : "air";
-    }),
+  stilt: (w, d, lift = 3) => {
+    const g = new Grid();
+    for (const [x, z] of [
+      [1, 1],
+      [w, 1],
+      [1, d],
+      [w, d],
+    ])
+      g.fill(x, 0, z, x, lift - 1, z, M("post", "post"));
+    const h = house(g, { w, d });
+    const out = g.done();
+    for (const c of out.cells) if (c.m !== "post") c.y += lift;
+    return out;
+  },
+  pyramid: (n) => {
+    const g = new Grid();
+    for (let y = 0; y < Math.ceil(n / 2); y++)
+      for (let x = y; x < n - y; x++)
+        for (let z = y; z < n - y; z++)
+          g.put(x, y, z, M(y === Math.ceil(n / 2) - 1 ? "accent" : "base"));
+    return g.done();
+  },
+  wall: (len, h) => {
+    const g = new Grid(),
+      mid = Math.floor(len / 2);
+    for (let x = 0; x < len; x++)
+      for (let z = 0; z < 2; z++)
+        for (let y = 0; y <= h; y++) {
+          if (Math.abs(x - mid) <= 1 && y > 0 && y <= 3) continue;
+          if (y === h && x % 2) continue;
+          g.put(x, y, z, M("base"));
+        }
+    return g.done();
+  },
 };
-const T = (id, name, note, build) => ({ id, name, note, build });
+
+const T = (game, slug, name, note, kind, build) => ({
+  id: `${game.toLowerCase()}:${slug}`,
+  game,
+  name,
+  note,
+  kind,
+  build,
+});
+const SET = (game, names) => [
+  T(
+    game,
+    names[0][0],
+    names[0][1],
+    "One room, a table and a chest",
+    "home",
+    B.smallHouse,
+  ),
+  T(
+    game,
+    names[1][0],
+    names[1][1],
+    "Two storeys, chimney",
+    "home",
+    B.familyHouse,
+  ),
+  T(game, names[2][0], names[2][1], "Cellar for stores", "home", B.farmhouse),
+  T(
+    game,
+    names[3][0],
+    names[3][1],
+    "Tables below, rooms above, cellar",
+    "trade",
+    B.inn,
+  ),
+  T(
+    game,
+    names[4][0],
+    names[4][1],
+    "Rows of chests, wide door",
+    "trade",
+    B.warehouse,
+  ),
+  T(
+    game,
+    names[5][0],
+    names[5][1],
+    "Open front, forge and anvil",
+    "trade",
+    B.blacksmith,
+  ),
+  T(
+    game,
+    names[6][0],
+    names[6][1],
+    "Oven, counter and chimney",
+    "trade",
+    B.bakery,
+  ),
+  T(
+    game,
+    names[7][0],
+    names[7][1],
+    "Posts, counter and awning",
+    "trade",
+    B.stall,
+  ),
+  T(game, names[8][0], names[8][1], "Tall hall with stalls", "farm", B.barn),
+  T(
+    game,
+    names[9][0],
+    names[9][1],
+    "The centre of a Settlement",
+    "centre",
+    B.well,
+  ),
+];
 const GAME_TEMPLATES = {
   Terra: [
-    T("terra:cabin", "Cabin", "Door on the south wall", () =>
-      SHAPES.house(7, 5, 3),
+    ...SET("Terra", [
+      ["cottage", "Cottage"],
+      ["family-house", "Family house"],
+      ["farmhouse", "Farmhouse"],
+      ["inn", "Inn"],
+      ["warehouse", "Warehouse"],
+      ["blacksmith", "Blacksmith"],
+      ["bakery", "Bakery"],
+      ["market-stall", "Market stall"],
+      ["barn", "Barn"],
+      ["well", "Well"],
+    ]),
+    T(
+      "Terra",
+      "watchtower",
+      "Watchtower",
+      "Cellar below the Ground layer",
+      "wild",
+      () => B.tower(6, 11, 3),
     ),
-    T("terra:farmhouse", "Farmhouse", "Gabled roof", () =>
-      SHAPES.house(9, 7, 3, { gable: true }),
+    T("Terra", "stone-bridge", "Stone bridge", "Spans a stream", "wild", () =>
+      B.bridge(11),
     ),
-    T("terra:barn", "Barn", "Tall gabled hall", () =>
-      SHAPES.house(11, 9, 5, { gable: true }),
-    ),
-    T("terra:field-shed", "Field shed", "One room", () =>
-      SHAPES.house(4, 3, 2),
-    ),
-    T("terra:well", "Well", "Shaft dug two metres down", () =>
-      SHAPES.well(3, 2),
-    ),
-    T("terra:watchtower", "Watchtower", "Cellar below the Ground layer", () =>
-      SHAPES.tower(6, 11, { cellar: 3 }),
-    ),
-    T("terra:stone-bridge", "Stone bridge", "Spans a stream", () =>
-      SHAPES.bridge(11),
-    ),
-    T("terra:ruined-keep", "Ruined keep", "Mostly Keep cells", () =>
-      SHAPES.ruin(9, 9, 6),
+    T("Terra", "ruined-keep", "Ruined keep", "Broken walls", "wild", () =>
+      B.ruin(9, 9, 6),
     ),
     T(
-      "terra:standing-stones",
+      "Terra",
+      "standing-stones",
       "Standing stones",
-      "Eight stones and an altar",
-      () => SHAPES.ring(5, 8),
+      "Eight stones and a light",
+      "wild",
+      () => B.ring(5, 8),
     ),
-    T("terra:waystone", "Waystone arch", "Marks a road", () =>
-      SHAPES.arch(5, 5),
+    T("Terra", "waystone", "Waystone arch", "Marks a road", "wild", () =>
+      B.arch(5, 5),
     ),
   ],
   Tidewater: [
-    T("tidewater:dock", "Dock", "Posts reach into the water", () =>
-      SHAPES.dock(9),
+    ...SET("Tidewater", [
+      ["fisher-cottage", "Fisher's cottage"],
+      ["harbour-house", "Harbour house"],
+      ["shore-farm", "Shore farm"],
+      ["harbour-inn", "Harbour inn"],
+      ["net-loft", "Net loft"],
+      ["boatwright", "Boatwright"],
+      ["smokehouse", "Smokehouse"],
+      ["fish-market", "Fish market"],
+      ["boathouse", "Boathouse"],
+      ["tide-well", "Tide well"],
+    ]),
+    T(
+      "Tidewater",
+      "lighthouse",
+      "Lighthouse",
+      "A tall lamp tower",
+      "wild",
+      () => B.tower(5, 17),
     ),
-    T("tidewater:lagoon-pier", "Lagoon pier", "A long walk out", () =>
-      SHAPES.dock(16),
+    T("Tidewater", "dock", "Dock", "Posts into the water", "wild", () =>
+      B.dock(9),
     ),
-    T("tidewater:stilt-house", "Stilt house", "Raised over the tide", () =>
-      SHAPES.stilt(6, 5),
+    T(
+      "Tidewater",
+      "stilt-house",
+      "Stilt house",
+      "Raised over the tide",
+      "wild",
+      () => B.stilt(5, 4),
     ),
-    T("tidewater:fishing-hut", "Fishing hut", "One room by the shore", () =>
-      SHAPES.house(5, 4, 2),
+    T(
+      "Tidewater",
+      "sea-arch",
+      "Sea arch",
+      "Stands in the shallows",
+      "wild",
+      () => B.arch(9, 8, 3),
     ),
-    T("tidewater:boathouse", "Boathouse", "Gabled, open to the water", () =>
-      SHAPES.house(8, 6, 3, { gable: true }),
-    ),
-    T("tidewater:lighthouse", "Lighthouse", "A tall lamp tower", () =>
-      SHAPES.tower(5, 17),
-    ),
-    T("tidewater:sea-arch", "Sea arch", "Stands in the shallows", () =>
-      SHAPES.arch(9, 8, 3),
-    ),
-    T("tidewater:rope-bridge", "Rope bridge", "Between two islands", () =>
-      SHAPES.bridge(15, 2),
-    ),
-    T("tidewater:tide-shrine", "Tide shrine", "Six posts round a stone", () =>
-      SHAPES.ring(4, 6),
-    ),
-    T("tidewater:shell-mound", "Shell mound", "A chamber beneath", () =>
-      SHAPES.mound(5, 3),
+    T(
+      "Tidewater",
+      "rope-bridge",
+      "Rope bridge",
+      "Between two islands",
+      "wild",
+      () => B.bridge(15, 2),
     ),
   ],
   Ember: [
-    T("ember:forge", "Forge", "Chimney at the corner", () =>
-      SHAPES.forge(5, 3),
+    ...SET("Ember", [
+      ["ash-hut", "Ash hut"],
+      ["forge-hall", "Forge hall"],
+      ["cinder-farm", "Cinder farm"],
+      ["ember-inn", "Ember inn"],
+      ["ore-store", "Ore store"],
+      ["smelter", "Smelter"],
+      ["charcoal-kiln", "Charcoal kiln"],
+      ["ore-stall", "Ore stall"],
+      ["basalt-hall", "Basalt hall"],
+      ["cistern", "Cistern"],
+    ]),
+    T(
+      "Ember",
+      "obsidian-spire",
+      "Obsidian spire",
+      "Roots below the ground",
+      "wild",
+      () => B.spire(3, 14),
     ),
-    T("ember:ash-pit", "Ash pit", "Carved into the ground", () =>
-      SHAPES.pit(4, 3),
+    T("Ember", "ash-pit", "Ash pit", "Carved into the ground", "wild", () =>
+      B.pit(4, 3),
     ),
-    T("ember:obsidian-spire", "Obsidian spire", "Roots below the ground", () =>
-      SHAPES.spire(3, 14),
+    T(
+      "Ember",
+      "basalt-wall",
+      "Basalt wall",
+      "A gate in the middle",
+      "wild",
+      () => B.wall(13, 5),
     ),
-    T("ember:basalt-wall", "Basalt wall", "A gate in the middle", () =>
-      SHAPES.wall(13, 5),
+    T("Ember", "stepped-altar", "Stepped altar", "Five steps", "wild", () =>
+      B.pyramid(9),
     ),
-    T("ember:watch-post", "Watch post", "Small tower", () =>
-      SHAPES.tower(4, 7),
-    ),
-    T("ember:lava-bridge", "Lava bridge", "Crosses a molten channel", () =>
-      SHAPES.bridge(9),
-    ),
-    T("ember:stepped-altar", "Stepped altar", "Five steps", () =>
-      SHAPES.pyramid(9),
-    ),
-    T("ember:ruined-foundry", "Ruined foundry", "Broken walls", () =>
-      SHAPES.ruin(10, 8, 5),
-    ),
-    T("ember:ember-shrine", "Ember shrine", "Five pillars", () =>
-      SHAPES.ring(4, 5, 4),
-    ),
-    T("ember:barrow", "Buried barrow", "Tomb under a mound", () =>
-      SHAPES.mound(6, 3),
+    T("Ember", "barrow", "Buried barrow", "Tomb under a mound", "wild", () =>
+      B.mound(6, 3),
     ),
   ],
   Lumen: [
-    T("lumen:crystal-spire", "Crystal spire", "Tapers to a point", () =>
-      SHAPES.spire(2, 12),
+    ...SET("Lumen", [
+      ["lantern-cottage", "Lantern cottage"],
+      ["twilight-house", "Twilight house"],
+      ["glow-farm", "Glow farm"],
+      ["starlight-inn", "Starlight inn"],
+      ["crystal-vault", "Crystal vault"],
+      ["glassworks", "Glassworks"],
+      ["lens-kiln", "Lens kiln"],
+      ["glass-stall", "Glass stall"],
+      ["glass-hall", "Glass hall"],
+      ["moon-well", "Moon well"],
+    ]),
+    T(
+      "Lumen",
+      "crystal-spire",
+      "Crystal spire",
+      "Tapers to a light",
+      "wild",
+      () => B.spire(2, 12),
     ),
-    T("lumen:glass-dome", "Glass dome", "Door on the south side", () =>
-      SHAPES.dome(4),
+    T(
+      "Lumen",
+      "observatory",
+      "Observatory",
+      "Cellar for the lens",
+      "wild",
+      () => B.tower(7, 9, 3),
     ),
-    T("lumen:lantern-tower", "Lantern tower", "Lit from the top", () =>
-      SHAPES.tower(5, 12),
+    T(
+      "Lumen",
+      "glass-dome",
+      "Glass dome",
+      "Door on the south side",
+      "wild",
+      () => B.dome(4),
     ),
-    T("lumen:observatory", "Observatory", "Cellar for the lens", () =>
-      SHAPES.tower(7, 9, { cellar: 3 }),
+    T("Lumen", "star-ring", "Star ring", "Twelve stones", "wild", () =>
+      B.ring(7, 12, 2),
     ),
-    T("lumen:moon-arch", "Moon arch", "Tall and thin", () => SHAPES.arch(7, 9)),
-    T("lumen:prism-shrine", "Prism shrine", "Seven pillars", () =>
-      SHAPES.ring(4, 7),
-    ),
-    T("lumen:star-ring", "Star ring", "Twelve stones, wide", () =>
-      SHAPES.ring(7, 12, 2),
-    ),
-    T("lumen:geode-hollow", "Geode hollow", "A dome beneath the ground", () =>
-      SHAPES.dome(4, { under: true }),
-    ),
-    T("lumen:glass-bridge", "Glass bridge", "Light and narrow", () =>
-      SHAPES.bridge(13, 2),
-    ),
-    T("lumen:crystal-ruin", "Crystal ruin", "Broken walls", () =>
-      SHAPES.ruin(8, 8, 5),
+    T(
+      "Lumen",
+      "geode-hollow",
+      "Geode hollow",
+      "A dome under the ground",
+      "wild",
+      () => B.dome(4, true),
     ),
   ],
   Meadow: [
-    T("meadow:cottage", "Cottage", "Gabled roof", () =>
-      SHAPES.house(7, 5, 2, { gable: true }),
+    ...SET("Meadow", [
+      ["cottage", "Cottage"],
+      ["family-house", "Family house"],
+      ["farmhouse", "Farmhouse"],
+      ["tavern", "Tavern"],
+      ["granary", "Granary"],
+      ["tinker", "Tinker's workshop"],
+      ["bakery", "Bakery"],
+      ["honey-stall", "Honey stall"],
+      ["mill-barn", "Mill barn"],
+      ["pond-well", "Pond well"],
+    ]),
+    T("Meadow", "burrow", "Burrow", "Home under a mound", "wild", () =>
+      B.mound(4, 2),
     ),
-    T("meadow:mushroom-hut", "Mushroom hut", "A round room", () =>
-      SHAPES.dome(3),
+    T("Meadow", "treehouse", "Treehouse", "On stilts", "wild", () =>
+      B.stilt(4, 4, 4),
     ),
-    T("meadow:burrow", "Burrow", "Home under a mound", () =>
-      SHAPES.mound(4, 2),
+    T("Meadow", "hive", "Hive", "Stepped mound", "wild", () => B.pyramid(5)),
+    T("Meadow", "footbridge", "Footbridge", "Over a brook", "wild", () =>
+      B.bridge(7, 2),
     ),
-    T("meadow:treehouse", "Treehouse", "On stilts", () =>
-      SHAPES.stilt(5, 5, 4),
-    ),
-    T("meadow:pond-well", "Pond well", "A wide shallow well", () =>
-      SHAPES.well(5, 1),
-    ),
-    T("meadow:garden-wall", "Garden wall", "Low, with a gate", () =>
-      SHAPES.wall(11, 2),
-    ),
-    T("meadow:hive", "Hive", "Stepped mound", () => SHAPES.pyramid(5)),
-    T("meadow:footbridge", "Footbridge", "Over a brook", () =>
-      SHAPES.bridge(7, 2),
-    ),
-    T("meadow:fairy-ring", "Fairy ring", "Mushrooms in a circle", () =>
-      SHAPES.ring(3, 10, 1),
-    ),
-    T("meadow:picnic-arch", "Picnic arch", "Small and green", () =>
-      SHAPES.arch(5, 4),
+    T("Meadow", "fairy-ring", "Fairy ring", "Lights in a circle", "wild", () =>
+      B.ring(3, 8, 1),
     ),
   ],
 };
@@ -347,27 +840,49 @@ const TEMPLATES = Object.fromEntries(
     .flat()
     .map((t) => [t.id, t]),
 );
+const KINDS = {
+  home: "Homes",
+  trade: "Trades and stores",
+  farm: "Farm",
+  centre: "Centre",
+  wild: "Wilderness",
+};
 
 function structureGame() {
   return state.structureGame || activeWorld()?.game || "Terra";
 }
 function ensureStructure() {
   state.structure ||= {
-    template: "terra:cabin",
+    template: "terra:cottage",
     turn: 0,
     ground: "level",
     case: "ok",
   };
+  state.structure.view ||= "outside";
+  state.structure.floor ||= "ground";
   if (!TEMPLATES[state.structure.template])
     state.structure.template = GAME_TEMPLATES[structureGame()][0].id;
 }
-function turned(t, turn) {
-  let { w, d, cells } = TEMPLATES[t].build();
+const built = new Map();
+function turned(id, turn) {
+  const key = `${id}|${turn}`;
+  if (built.has(key)) return built.get(key);
+  let { w, d, cells } = TEMPLATES[id].build();
   for (let i = 0; i < turn; i++) {
-    cells = cells.map((c) => ({ ...c, x: d - 1 - c.z, z: c.x }));
+    cells = cells.map((c) => ({
+      ...c,
+      x: d - 1 - c.z,
+      z: c.x,
+      turn: ((c.turn || 0) + 1) % 4,
+    }));
     [w, d] = [d, w];
   }
-  return { w, d, cells };
+  const out = { w, d, cells };
+  built.set(key, out);
+  return out;
+}
+function materialOf(t, c) {
+  return `terra:${FIXED[c.m] || PALETTES[t.game][c.m] || c.m}`;
 }
 /* The terrain the aim finds, as the height of solid ground in rows below the Ground layer. */
 function groundAt(kind, x, z, w) {
@@ -406,6 +921,7 @@ const TINT = {
   water: ["#6fb3e8", 0.55],
   blocked: ["#ec7070", 0.85],
 };
+/* The in-game ghost: what placing each cell does, never what it looks like. */
 function structureSvg(small) {
   const s = state.structure,
     t = turned(s.template, s.turn),
@@ -498,6 +1014,177 @@ function structureSvg(small) {
   return `<svg class="${small ? "structure-thumb" : "layout-world-grid"}" viewBox="${minX} ${minY} ${Math.max(...xs) - minX + 10} ${Math.max(...ys) - minY + 10}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Ghost of the ${TEMPLATES[s.template].name}, facing ${FACING[s.turn]}">${out.join("")}</svg>`;
 }
 
+function rotateBox([[x0, y0, z0], [x1, y1, z1]], turn) {
+  let a = [x0, z0],
+    b = [x1, z1];
+  for (let i = 0; i < turn; i++)
+    ((a = [16 - a[1], a[0]]), (b = [16 - b[1], b[0]]));
+  return [
+    [Math.min(a[0], b[0]), y0, Math.min(a[1], b[1])],
+    [Math.max(a[0], b[0]), y1, Math.max(a[1], b[1])],
+  ];
+}
+/* Which cells the chosen view shows: Outside hides the underground, Inside lifts the roof and the near walls. */
+function visibleCells(t, s) {
+  const solid = t.cells.filter((c) => c.k === "solid");
+  if (s.view === "outside") return solid.filter((c) => c.y >= 0);
+  const floors = {
+    cellar: [-99, -1],
+    ground: [0, STOREY - 1],
+    upper: [STOREY, 2 * STOREY - 1],
+  }[s.floor];
+  const inBand = solid.filter(
+    (c) => c.y >= floors[0] && c.y <= floors[1] && c.m !== "roof",
+  );
+  const maxX = new Map(),
+    maxZ = new Map();
+  for (const c of inBand) {
+    if (c.y === floors[0] && s.floor !== "cellar") continue;
+    const kx = `${c.y},${c.z}`,
+      kz = `${c.y},${c.x}`;
+    maxX.set(kx, Math.max(maxX.get(kx) ?? -1, c.x));
+    maxZ.set(kz, Math.max(maxZ.get(kz) ?? -1, c.z));
+  }
+  return inBand.filter(
+    (c) =>
+      (c.y === floors[0] && s.floor !== "cellar") ||
+      ["chest", "bench", "anvil", "oven", "lamp", "table", "fence"].includes(
+        c.m,
+      ) ||
+      (c.x !== maxX.get(`${c.y},${c.z}`) && c.z !== maxZ.get(`${c.y},${c.x}`)),
+  );
+}
+function storeysOf(t) {
+  const solid = t.cells.filter((c) => c.k === "solid");
+  return {
+    cellar: solid.some((c) => c.y < 0),
+    upper: solid.some((c) => c.y === STOREY && c.m === "floor"),
+  };
+}
+async function drawStructure() {
+  const canvas = $("#structure-canvas");
+  if (!canvas) return;
+  let index;
+  try {
+    index = await loadBlocks();
+  } catch (e) {
+    canvas.replaceWith(
+      Object.assign(document.createElement("div"), {
+        className: "layout-error",
+        textContent: `No exported textures (${e.message}). See the Block gallery section of the README.`,
+      }),
+    );
+    return;
+  }
+  const s = state.structure,
+    tpl = TEMPLATES[s.template],
+    t = turned(s.template, s.turn),
+    cells = visibleCells(t, s),
+    byName = new Map(index.materials.map((m) => [m.name, m])),
+    shapes = new Map(index.shapes.map((x) => [x.name.split(":")[1], x.boxes])),
+    names = [
+      ...new Set(cells.map((c) => materialOf(tpl, c)).concat(["terra:grass"])),
+    ];
+  const faces = new Map(
+    await Promise.all(
+      names
+        .filter((n) => byName.get(n)?.faces.top)
+        .map(async (n) => [n, await materialFaces(byName.get(n))]),
+    ),
+  );
+  if (!document.body.contains(canvas) || state.structure !== s) return;
+  const { g, w, h, ratio } = setupCanvas(canvas);
+  const ground =
+    s.view === "inside" && s.floor === "cellar" ? [] : groundCells(t);
+  const all = [...ground, ...cells];
+  const pts = all.flatMap((c) => [
+    iso([c.x, c.y, c.z], 1, [0, 0]),
+    iso([c.x + 1, c.y + 1, c.z + 1], 1, [0, 0]),
+    iso([c.x + 1, c.y, c.z], 1, [0, 0]),
+    iso([c.x, c.y + 1, c.z + 1], 1, [0, 0]),
+  ]);
+  const minX = Math.min(...pts.map((p) => p[0])),
+    maxX = Math.max(...pts.map((p) => p[0])),
+    minY = Math.min(...pts.map((p) => p[1])),
+    maxY = Math.max(...pts.map((p) => p[1]));
+  const scale =
+      Math.min((w * 0.92) / (maxX - minX), (h * 0.9) / (maxY - minY)) * ratio,
+    origin = [
+      (w * ratio - (maxX - minX) * scale) / 2 - minX * scale,
+      (h * ratio - (maxY - minY) * scale) / 2 - minY * scale,
+    ];
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  g.clearRect(0, 0, canvas.width, canvas.height);
+  g.imageSmoothingEnabled = false;
+  const occupied = new Set(
+    all
+      .filter((c) => (c.shape || "cube") === "cube" && c.m !== "glass")
+      .map((c) => `${c.x},${c.y},${c.z}`),
+  );
+  const order = all.sort(
+    (a, b) => a.x + a.y + a.z - (b.x + b.y + b.z) || a.y - b.y,
+  );
+  for (const c of order) {
+    const name = c.ground || materialOf(tpl, c),
+      f = faces.get(name);
+    if (!f) continue;
+    const boxes = (shapes.get(c.shape || "cube") || shapes.get("cube")).map(
+      (b) => rotateBox(b, c.turn || 0),
+    );
+    g.globalAlpha = byName.get(name)?.class === "blend" ? 0.6 : 1;
+    const cube = (c.shape || "cube") === "cube";
+    for (const b of byDepth(boxes)) {
+      if (!cube) {
+        drawBox(g, f, [c.x, c.y, c.z], b, scale, origin);
+        continue;
+      }
+      const open = (dx, dy, dz) =>
+        !occupied.has(`${c.x + dx},${c.y + dy},${c.z + dz}`);
+      const at = (x, y, z) =>
+        iso([c.x + x / 16, c.y + y / 16, c.z + z / 16], scale, origin);
+      if (open(0, 1, 0))
+        face(
+          g,
+          f.top,
+          [0, 0, 16, 16],
+          at(0, 16, 0),
+          at(16, 16, 0),
+          at(0, 16, 16),
+        );
+      if (open(0, 0, 1))
+        face(
+          g,
+          f.left,
+          [0, 0, 16, 16],
+          at(0, 16, 16),
+          at(16, 16, 16),
+          at(0, 0, 16),
+        );
+      if (open(1, 0, 0))
+        face(
+          g,
+          f.right,
+          [0, 0, 16, 16],
+          at(16, 16, 16),
+          at(16, 16, 0),
+          at(16, 0, 16),
+        );
+    }
+  }
+  g.globalAlpha = 1;
+}
+function groundCells(t) {
+  const taken = new Set(
+      t.cells.filter((c) => c.y === -1).map((c) => `${c.x},${c.z}`),
+    ),
+    out = [];
+  for (let x = -2; x <= t.w + 1; x++)
+    for (let z = -2; z <= t.d + 1; z++)
+      if (!taken.has(`${x},${z}`))
+        out.push({ x, y: -1, z, shape: "cube", ground: "terra:grass" });
+  return out;
+}
+
 function structureNumber(n) {
   return n.toLocaleString("en-GB");
 }
@@ -521,12 +1208,38 @@ function structureLegend(tally) {
     row("blocked", "Blocked")
   );
 }
+function structureMaterials() {
+  const s = state.structure,
+    tpl = TEMPLATES[s.template],
+    counts = new Map();
+  for (const c of turned(s.template, 0).cells)
+    if (c.k === "solid") {
+      const name = materialOf(tpl, c),
+        key = `${name}|${ROLE[c.m] || ""}`;
+      counts.set(key, (counts.get(key) || 0) + 1);
+    }
+  return [...counts]
+    .sort((a, b) => b[1] - a[1])
+    .map(([key, n]) => {
+      const [name, role] = key.split("|"),
+        short = name.split(":")[1];
+      return `<div class="structure-key"><i style="background-image:url(/blocks/${short}.side.png)"></i><span>${short[0].toUpperCase() + short.slice(1)}${role ? ` <small class="quiet">${role}</small>` : ""}</span><b>${n}</b></div>`;
+    })
+    .join("");
+}
 function structureList() {
-  return GAME_TEMPLATES[structureGame()]
-    .map((t) => {
-      const b = t.build(),
-        ys = b.cells.filter((c) => c.k !== "keep").map((c) => c.y);
-      return `<button class="structure-pick ${state.structure.template === t.id ? "active" : ""}" data-action="structure-pick" data-value="${t.id}" aria-pressed="${state.structure.template === t.id}"><b>${t.name}</b><small>${b.w}.0 × ${Math.max(...ys) - Math.min(...ys) + 1}.0 × ${b.d}.0 m · ${t.note}</small><small class="quiet">${t.id}</small></button>`;
+  const list = GAME_TEMPLATES[structureGame()];
+  return Object.entries(KINDS)
+    .map(([kind, label]) => {
+      const items = list.filter((t) => t.kind === kind);
+      if (!items.length) return "";
+      return `<p class="structure-group">${label}</p>${items
+        .map((t) => {
+          const b = turned(t.id, 0),
+            ys = b.cells.map((c) => c.y);
+          return `<button class="structure-pick ${state.structure.template === t.id ? "active" : ""}" data-action="structure-pick" data-value="${t.id}" aria-pressed="${state.structure.template === t.id}"><b>${t.name}</b><small>${b.w}.0 × ${Math.max(...ys) - Math.min(...ys) + 1}.0 × ${b.d}.0 m · ${t.note}</small><small class="quiet">${t.id}</small></button>`;
+        })
+        .join("")}`;
     })
     .join("");
 }
@@ -534,24 +1247,39 @@ function structuresPage() {
   ensureStructure();
   const s = state.structure,
     tally = structureTally(),
+    tpl = TEMPLATES[s.template],
     [tone, text] = structureOutcome(),
-    seg = (items, key, action) =>
-      `<div class="layout-method" aria-label="${key}">${Object.entries(items)
+    has = storeysOf(tally.t),
+    seg = (items, key, action, cls = "") =>
+      `<div class="layout-method ${cls}" aria-label="${key}">${Object.entries(
+        items,
+      )
         .map(
           ([v, label]) =>
-            `<button class="${s[key] === v ? "active" : ""}" data-action="${action}" data-value="${v}">${label}</button>`,
+            `<button class="${s[key] === v ? "active" : ""}" data-action="${action}" data-value="${v}" aria-pressed="${s[key] === v}">${label}</button>`,
         )
         .join("")}</div>`;
-  return `<div class="layout-workspace"><div class="layout-stage"><div class="layout-stage-label"><span class="item-eyebrow">WORLD PREVIEW</span><h1>${TEMPLATES[s.template].name}</h1><p>${tally.size.map((n) => n.toFixed(1)).join(" × ")} metres · facing ${FACING[s.turn]} · ${structureNumber(tally.total)} Voxels</p></div><div class="layout-ghost">${structureSvg(false)}</div><div class="layout-preview-caption">Illustrative preview · no terrain is edited</div></div><section class="layout-panel" aria-label="Place Tool"><header><div><p class="item-eyebrow">PLACE TOOL</p><h2>Structures</h2></div><button class="item-close" data-action="structure-close" aria-label="Close Structures">${icon("close")}</button></header><div class="layout-scroll" tabindex="0"><p class="item-eyebrow">TEMPLATES · ${structureGame().toUpperCase()} · ${GAME_TEMPLATES[structureGame()].length}</p><div class="structure-list">${structureList()}</div><p class="item-eyebrow">TURN</p><div class="structure-turn"><button data-action="structure-turn" aria-label="Turn a quarter">${icon("reverse", 16)} Turn · R</button><span>Facing <b>${FACING[s.turn]}</b></span></div><p class="item-eyebrow">WHAT PLACING DOES</p><div class="structure-keys">${structureLegend(tally)}</div><div class="layout-totals"><div><span>Authored</span><b>1.0 m <small>grid</small></b></div><div><span>This World</span><b>${tally.voxel} m <small>Voxels</small></b></div></div><div class="structure-outcome ${tone}" role="status">${text}</div><p class="item-eyebrow">EXAMPLE GAME</p><div class="layout-method structure-games" aria-label="Game">${Object.keys(
-    GAME_TEMPLATES,
-  )
-    .map(
-      (g) =>
-        `<button class="${structureGame() === g ? "active" : ""}" data-action="structure-game" data-value="${g}">${g}</button>`,
-    )
-    .join(
-      "",
-    )}</div><p class="item-eyebrow">EXAMPLE AIM</p>${seg(GROUNDS, "ground", "structure-ground")}${seg({ ok: "In reach", far: "Too far", inside: "Inside", loading: "Loading" }, "case", "structure-case")}<small>In the game the aim decides these. The browser uses examples. Worldgen's level rule does not apply to a Player's placement.</small></div><footer><small>Use opens this list · R turns · Right mouse places the whole Structure or nothing · Z removes it in one step · Left mouse cancels</small>${button("Place here", "structure-place", { primary: true })}${button("Put the Tool away", "structure-exit", { ghost: true })}</footer></section></div>`;
+  s.game = structureGame();
+  if (s.floor === "cellar" && !has.cellar) s.floor = "ground";
+  if (s.floor === "upper" && !has.upper) s.floor = "ground";
+  const floors = {
+    ...(has.cellar ? { cellar: "Cellar" } : {}),
+    ground: "Ground",
+    ...(has.upper ? { upper: "Upper" } : {}),
+  };
+  const stage =
+    s.view === "placing"
+      ? `<div class="layout-ghost">${structureSvg(false)}</div>`
+      : `<div class="layout-ghost"><canvas id="structure-canvas" class="structure-canvas" role="img" aria-label="${tpl.name} from ${s.view}, facing ${FACING[s.turn]}"></canvas></div>`;
+  const games = Object.keys(GAME_TEMPLATES).reduce(
+    (o, g) => ({ ...o, [g]: g }),
+    {},
+  );
+  return `<div class="layout-workspace"><div class="layout-stage"><div class="layout-stage-label"><span class="item-eyebrow">${s.view === "placing" ? "WORLD PREVIEW" : `${tpl.game.toUpperCase()} TEMPLATE`}</span><h1>${tpl.name}</h1><p>${tally.size.map((n) => n.toFixed(1)).join(" × ")} metres · facing ${FACING[s.turn]} · ${structureNumber(tally.total)} Voxels</p>${seg(VIEWS, "view", "structure-view", "structure-views")}${s.view === "inside" ? seg(floors, "floor", "structure-floor", "structure-views") : ""}</div>${stage}<div class="layout-preview-caption">${s.view === "placing" ? "Illustrative preview · no terrain is edited" : `Drawn with Terra's textures${tpl.game === "Terra" ? "" : `; ${tpl.game}'s own art replaces them`} · Stations are drawn as their nearest Terra block`}</div></div><section class="layout-panel" aria-label="Place Tool"><header><div><p class="item-eyebrow">PLACE TOOL</p><h2>Structures</h2></div><button class="item-close" data-action="structure-close" aria-label="Close Structures">${icon("close")}</button></header><div class="layout-scroll" tabindex="0"><p class="item-eyebrow">EXAMPLE GAME</p>${seg(games, "game", "structure-game", "structure-games")}<p class="item-eyebrow">TEMPLATES · ${structureGame().toUpperCase()} · ${GAME_TEMPLATES[structureGame()].length}</p><div class="structure-list">${structureList()}</div><p class="item-eyebrow">TURN</p><div class="structure-turn"><button data-action="structure-turn" aria-label="Turn a quarter">${icon("reverse", 16)} Turn · R</button><span>Facing <b>${FACING[s.turn]}</b></span></div>${
+    s.view === "placing"
+      ? `<p class="item-eyebrow">WHAT PLACING DOES</p><div class="structure-keys">${structureLegend(tally)}</div>`
+      : `<p class="item-eyebrow">MATERIALS · ALL OBTAINABLE IN ${tpl.game.toUpperCase()}</p><div class="structure-keys">${structureMaterials()}</div>`
+  }<div class="layout-totals"><div><span>Authored</span><b>1.0 m <small>grid</small></b></div><div><span>This World</span><b>${tally.voxel} m <small>Voxels</small></b></div></div><div class="structure-outcome ${tone}" role="status">${text}</div><p class="item-eyebrow">EXAMPLE AIM</p>${seg(GROUNDS, "ground", "structure-ground")}${seg({ ok: "In reach", far: "Too far", inside: "Inside", loading: "Loading" }, "case", "structure-case")}<small>In the game the aim decides these. The browser uses examples. Worldgen's level rule does not apply to a Player's placement.</small></div><footer><small>Use opens this list · R turns · Right mouse places the whole Structure or nothing · Z removes it in one step · Left mouse cancels</small>${button("Place here", "structure-place", { primary: true })}${button("Put the Tool away", "structure-exit", { ghost: true })}</footer></section></div>`;
 }
 function structureHud() {
   if (state.heldTool !== "Place" || state.screen !== "play") return "";
@@ -596,6 +1324,8 @@ function structuresAction(name, value) {
     s.template = GAME_TEMPLATES[value][0].id;
     again();
   } else if (name === "structure-turn") ((s.turn = (s.turn + 1) % 4), again());
+  else if (name === "structure-view") ((s.view = value), again());
+  else if (name === "structure-floor") ((s.floor = value), again());
   else if (name === "structure-ground") ((s.ground = value), again());
   else if (name === "structure-case") ((s.case = value), again());
   else if (name === "structure-place") structuresPlace();

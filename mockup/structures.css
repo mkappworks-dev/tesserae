@@ -123,3 +123,26 @@
 .structure-games button {
   flex: 1 0 30%;
 }
+.structure-canvas {
+  width: 100%;
+  height: 100%;
+  min-height: 360px;
+  filter: drop-shadow(0 6px 16px #000a);
+}
+.structure-views {
+  margin: 12px 0 0;
+}
+.structure-views button {
+  min-height: 32px;
+}
+.structure-group {
+  margin: 10px 0 2px;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #9aa094;
+}
+.structure-key i {
+  background-size: cover;
+  image-rendering: pixelated;
+}
