@@ -200,6 +200,11 @@ rebuild. A fifth row, an unknown Template or a spacing under its floor is a load
 error naming the Biome. A Biome with none generates exactly as before, with no
 generator version change.
 
+The closed `tool-kind` of line 0.3 then gained `place`, after `measure`. A Game
+declares a `place` Tool by name and kind like any Tool; its Use edits nothing
+and enters no history, and only a Creative Player may place a Structure with it.
+A Declaration built against the earlier 0.3 text needs a rebuild.
+
 ## What is not frozen
 
 Line `0.x` is pre-release. Later gameplay steps may add new lines, and

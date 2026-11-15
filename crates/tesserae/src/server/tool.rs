@@ -24,6 +24,7 @@ pub use tesserae_mods::ToolKind;
 
 use super::ContentTables;
 use super::edit::{self, RejectReason};
+use super::game_mode::PlayerMode;
 use super::player::{self, Player};
 use super::world_state::ChunkStore;
 use crate::world::WorldSettings;
@@ -108,6 +109,9 @@ pub enum UseResult {
     Container([i32; 3]),
     /// A Station session opened; see `station.rs`.
     Station,
+    /// The `place` Tool's Use: the Client opens the list of Templates, from
+    /// its Catalogue. Placing is the Structure intent, never a Use.
+    TemplateList,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -129,6 +133,8 @@ pub enum UseRefusal {
     InsidePlayer,
     /// The Voxel's Chunk is still being lit.
     Busy,
+    /// The `place` Tool outside Creative.
+    CreativeOnly,
 }
 
 impl UseRefusal {
@@ -144,6 +150,7 @@ impl UseRefusal {
             UseRefusal::NotFood => "Hold food in the selected hotbar slot to eat.",
             UseRefusal::InsidePlayer => RejectReason::InsidePlayer.message(),
             UseRefusal::Busy => RejectReason::Busy.message(),
+            UseRefusal::CreativeOnly => "Only Creative places Structures.",
         }
     }
 }
@@ -156,6 +163,7 @@ impl From<RejectReason> for UseRefusal {
             RejectReason::NotLoaded => UseRefusal::NotLoaded,
             RejectReason::InsidePlayer => UseRefusal::InsidePlayer,
             RejectReason::Busy => UseRefusal::Busy,
+            RejectReason::CreativeOnly => UseRefusal::CreativeOnly,
             _ => UseRefusal::OutOfReach,
         }
     }
@@ -183,7 +191,7 @@ pub(super) fn plugin(app: &mut App) {
 /// The Player a Use acts for.
 #[derive(bevy::ecs::system::SystemParam)]
 pub(super) struct Hand<'w, 's> {
-    player: Single<'w, 's, (Entity, &'static Player)>,
+    player: Single<'w, 's, (Entity, &'static Player, &'static PlayerMode)>,
     status: Option<Res<'w, super::persistence::SaveStatus>>,
 }
 
@@ -204,14 +212,19 @@ pub(super) fn answer_use(
     ),
 ) {
     let Hand { player, status } = hand;
-    let (entity, player) = player.into_inner();
+    let (entity, player, mode) = player.into_inner();
     let playing = super::persistence::playing(status);
     for intent in intents.read() {
         let ray = (intent.origin, intent.direction);
         let result = match intent.with {
-            UseWith::Tool(tool) => {
-                run_tool(&store, &tables, &world, &tools, tool, intent, player.eye())
-            }
+            UseWith::Tool(tool) => run_tool(
+                &store,
+                &tables,
+                &world,
+                (&tools, tool),
+                intent,
+                (player.eye(), *mode),
+            ),
             UseWith::Hand { eat: may_eat } => {
                 match super::usable::aim(&store, &tables, &world, ray, player.eye()) {
                     None if intent.expected.is_some() => Err(UseRefusal::TargetChanged),
@@ -289,10 +302,9 @@ fn run_tool(
     store: &ChunkStore,
     tables: &Tables,
     world: &WorldSettings,
-    tools: &Tools,
-    tool: ToolId,
+    (tools, tool): (&Tools, ToolId),
     intent: &UseIntent,
-    eye: Vec3,
+    (eye, mode): (Vec3, PlayerMode),
 ) -> Result<UseResult, UseRefusal> {
     match tools.kind(tool).ok_or(UseRefusal::UnknownTool)? {
         ToolKind::Measure => {
@@ -301,10 +313,13 @@ fn run_tool(
             unchanged(intent, aimed)?;
             Ok(UseResult::Measured(aimed))
         }
+        ToolKind::Place if mode.survival() => Err(UseRefusal::CreativeOnly),
+        ToolKind::Place => Ok(UseResult::TemplateList),
     }
 }
 
-/// What a held tool would do with this ray, for the preview.
+/// What a held tool would do with this ray, for the preview; `None` for a
+/// Tool whose Use aims at nothing.
 pub(super) fn aim_use(
     store: &ChunkStore,
     tables: &Tables,
@@ -313,9 +328,11 @@ pub(super) fn aim_use(
     tool: ToolId,
     ray: (Vec3, Vec3),
     eye: Vec3,
-) -> UseAim {
-    match tools.kind(tool).ok_or(UseRefusal::UnknownTool)? {
-        ToolKind::Measure => measure_target(store, tables, world, ray, eye),
+) -> Option<UseAim> {
+    match tools.kind(tool) {
+        None => Some(Err(UseRefusal::UnknownTool)),
+        Some(ToolKind::Measure) => Some(measure_target(store, tables, world, ray, eye)),
+        Some(ToolKind::Place) => None,
     }
 }
 
@@ -658,7 +675,7 @@ mod tests {
                 (camera, Vec3::NEG_Y),
                 EYE,
             );
-            assert_eq!(preview.map(|_| ()), expected, "walled {walled}");
+            assert_eq!(preview.unwrap().map(|_| ()), expected, "walled {walled}");
         }
     }
 
@@ -734,11 +751,72 @@ mod tests {
                 ray,
                 EYE,
             )
+            .unwrap()
         };
         let aimed = preview((EYE, Vec3::NEG_Y), 0).unwrap();
         assert_eq!(aimed.at, [5, 7, 5]);
         assert_eq!(preview((EYE, Vec3::Y), 0), Err(UseRefusal::OutOfReach));
         assert_eq!(preview((EYE, Vec3::NEG_Y), 9), Err(UseRefusal::UnknownTool));
+    }
+
+    fn placing(app: &mut App) {
+        app.world_mut()
+            .insert_resource(Tools(vec![tesserae_mods::ToolDef {
+                name: "terra:place".into(),
+                kind: ToolKind::Place,
+            }]));
+    }
+
+    #[test]
+    fn using_the_place_tool_opens_the_template_list_aimed_anywhere_and_changes_nothing() {
+        let mut app = app_with(&[([5, 7, 5], Voxel::cube(rock()))], 1.0);
+        placing(&mut app);
+        for direction in [Vec3::NEG_Y, Vec3::Y] {
+            assert_eq!(
+                use_from(&mut app, EYE, direction, None).0,
+                Ok(UseResult::TemplateList)
+            );
+        }
+        let store = app.world().resource::<ChunkStore>();
+        assert_eq!(store.voxel([5, 7, 5]), Some(Voxel::cube(rock())));
+        assert!(app.world().resource::<edit::PendingEdits>().is_empty());
+        assert!(
+            app.world()
+                .resource::<super::super::undo::Journal>()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn the_place_tool_is_refused_in_survival() {
+        let mut app = app_with(&[([5, 7, 5], Voxel::cube(rock()))], 1.0);
+        placing(&mut app);
+        let mut modes = app
+            .world_mut()
+            .query::<&mut super::super::game_mode::PlayerMode>();
+        modes.single_mut(app.world_mut()).unwrap().0 = super::super::game_mode::GameMode::Survival;
+        assert_eq!(
+            use_from(&mut app, EYE, Vec3::NEG_Y, None).0,
+            Err(UseRefusal::CreativeOnly)
+        );
+    }
+
+    #[test]
+    fn the_place_tools_preview_has_no_target() {
+        let app = app_with(&[([5, 7, 5], Voxel::cube(rock()))], 1.0);
+        let preview = aim_use(
+            app.world().resource::<ChunkStore>(),
+            &crate::server::fixture_tables(),
+            app.world().resource::<WorldSettings>(),
+            &Tools(vec![tesserae_mods::ToolDef {
+                name: "terra:place".into(),
+                kind: ToolKind::Place,
+            }]),
+            ToolId(0),
+            (EYE, Vec3::NEG_Y),
+            EYE,
+        );
+        assert_eq!(preview, None);
     }
 
     #[test]

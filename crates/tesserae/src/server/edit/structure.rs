@@ -49,7 +49,7 @@ pub struct StructureIntent {
 }
 
 impl StructureIntent {
-    fn ray(&self) -> EditIntent {
+    pub(super) fn ray(&self) -> EditIntent {
         EditIntent {
             action: EditAction::Place(Voxel::AIR),
             origin: self.origin,
@@ -84,6 +84,16 @@ impl<'a> Placement<'a> {
         Placement { sampled, corner }
     }
 
+    /// The lowest corner of the turned Template's box, in Voxels.
+    pub(in crate::server) fn corner(&self) -> [i32; 3] {
+        self.corner
+    }
+
+    /// Voxels along x, y and z after the turn.
+    pub(in crate::server) fn size(&self) -> [i32; 3] {
+        self.sampled.size()
+    }
+
     pub(in crate::server) fn len(&self) -> usize {
         self.sampled.size().iter().map(|&n| n as usize).product()
     }
@@ -106,8 +116,10 @@ impl<'a> Placement<'a> {
 /// What placing a Structure would do at one cell.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum StructureCell {
-    /// A Voxel where there is no solid.
+    /// A Voxel where there is neither solid nor fluid.
     Places,
+    /// A Voxel where a fluid stands with no solid.
+    ReplacesFluid,
     /// A Voxel over another solid.
     Replaces,
     /// Air over a solid.
@@ -155,6 +167,7 @@ pub(in crate::server) fn judge_cell(
     }
     match (here.solid.is_air(), voxel.is_air()) {
         (_, true) => StructureCell::Carves,
+        (true, false) if here.fluid.is_some() => StructureCell::ReplacesFluid,
         (true, false) => StructureCell::Places,
         (false, false) => StructureCell::Replaces,
     }
