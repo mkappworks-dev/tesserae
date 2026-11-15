@@ -281,13 +281,12 @@ Clicking a Waypoint on the map or in the list opens the same popover to edit or
 remove it, and the death marker's is read-only. The gameplay HUD gains the
 Compass and a minimap, both off by default; both are Display settings and toggle
 in play with `B` and `N` (the minimap carries the Biome name and the coordinates
-in a strip inside its face), each with a brief toast ("Compass on", "Minimap
-off"). Press `M` to open or close the Map, and Left and Right in play to turn
-the heading. `H` toggles the placement ghost (Behavior > Placement ghost; only
-the setting, the key and the toast "Placement ghost on" are mocked), and `O`
-takes the next tool (Cycle tool, "Take tool" in Key bindings). The Simulate
-panel's Map policy checkbox, "Game forbids the Map", shows the engine's state:
-the Map, Compass and minimap keys do nothing, the Compass and minimap are
-hidden, the Menu has no Map button, and the switches and bindings stay in
-Settings marked "Not available in this World." The terrain and the explored
-route are drawn from noise here, not from the engine.
+in a strip inside its face), with no toast. Press `M` to open or close the Map,
+and Left and Right in play to turn the heading. `H` toggles the placement ghost
+(Behavior > Placement ghost; only the setting, the key and the toast "Placement
+ghost on" are mocked), and `O` takes the next tool (Cycle tool, "Take tool" in
+Key bindings). The Simulate panel's Map policy checkbox, "Game forbids the Map",
+shows the engine's state: the Map, Compass and minimap keys do nothing, the
+Compass and minimap are hidden, the Menu has no Map button, and the switches and
+bindings stay in Settings marked "Not available in this World." The terrain and
+the explored route are drawn from noise here, not from the engine.

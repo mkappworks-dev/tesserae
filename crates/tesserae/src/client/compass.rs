@@ -106,7 +106,6 @@ fn follow(mut poses: MessageReader<PoseCorrection>, mut heading: ResMut<Heading>
 }
 
 fn toggle(
-    mut commands: Commands,
     ownership: Res<super::input::Ownership>,
     actions: Res<super::actions::Actions>,
     mut preferences: ResMut<Preferences>,
@@ -118,12 +117,6 @@ fn toggle(
     }
     preferences.compass = !preferences.compass;
     pending.0 = Some(super::view::SAVE_AFTER_S);
-    let text = if preferences.compass {
-        "Compass on"
-    } else {
-        "Compass off"
-    };
-    super::menu_ui::notify(&mut commands, text, super::menu_ui::Tone::Change);
 }
 
 /// One tick or label of the strip, which keeps its place in the world and is moved as the heading turns.

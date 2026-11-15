@@ -229,7 +229,6 @@ pub(super) fn follow(mut poses: MessageReader<PoseCorrection>, mut spot: ResMut<
 }
 
 fn toggle(
-    mut commands: Commands,
     ownership: Res<super::input::Ownership>,
     actions: Res<super::actions::Actions>,
     mut preferences: ResMut<Preferences>,
@@ -241,12 +240,6 @@ fn toggle(
     }
     preferences.minimap = !preferences.minimap;
     pending.0 = Some(super::view::SAVE_AFTER_S);
-    let text = if preferences.minimap {
-        "Minimap on"
-    } else {
-        "Minimap off"
-    };
-    super::menu_ui::notify(&mut commands, text, super::menu_ui::Tone::Change);
 }
 
 #[derive(bevy::ecs::system::SystemParam)]

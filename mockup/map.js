@@ -853,9 +853,6 @@ document.addEventListener(
       const flag = key === "b" ? "compass" : "minimap";
       state.settings[flag] = !state.settings[flag];
       render();
-      toast(
-        `${flag === "compass" ? "Compass" : "Minimap"} ${state.settings[flag] ? "on" : "off"}`,
-      );
     } else if (
       state.screen === "play" &&
       ["arrowleft", "arrowright"].includes(key)
