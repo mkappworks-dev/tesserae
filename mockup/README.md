@@ -212,25 +212,26 @@ Crafting works the same in both panes:
 
 ## Block gallery
 
-`/blocks` previews every Terra Material as a textured block, drawn from Terra's
-own textures, so a look can be judged before it ships. It shows each Material's
-cube and its top, side and bottom faces, every placeable Shape in a chosen
-Material, the Door closed and open beside a 1.8 m Player silhouette, and the
-Gate the same in a fence run, at 1, 0.5 or 0.25 m Voxels. Code is in `blocks.js`
-and `blocks.css`.
+`/blocks` previews every Material each demo Game declares as a textured block,
+drawn from the Game's own textures and grouped by Game, so a look can be judged
+before it ships. It shows each Material's cube and its top, side and bottom
+faces, every placeable Shape in a chosen Material, the Door closed and open
+beside a 1.8 m Player silhouette, and the Gate the same in a fence run, at 1,
+0.5 or 0.25 m Voxels. Code is in `blocks.js` and `blocks.css`.
 
 The textures under `blocks/` are generated; do not edit them by hand. After
-changing Terra's textures, regenerate them from the repository root:
+changing a Game's textures, regenerate them from the repository root:
 
 ```sh
 scripts/build-guests && cargo run -p tesserae-mods --example export-blocks
 ```
 
-The example loads the built Terra component through the Mod loader and writes
-each Material's faces as PNG, plus `blocks/index.json`, which lists the
-Materials, their render class and Use, and the Shapes' boxes. Lighting in the
-gallery is illustrative: sides are darkened by a fixed amount, and a translucent
-block shows only its three near faces.
+The example loads each built Game component through the Mod loader and writes
+each of its own Materials' faces as PNG under `blocks/<game>/`, plus
+`blocks/index.json`, which lists the Games, the Materials, their render class
+and Use, and Terra's Shapes' boxes. Lighting in the gallery is illustrative:
+sides are darkened by a fixed amount, and a translucent block shows only its
+three near faces.
 
 ## Plants and flat sprites (step 18, proposed, awaiting approval)
 
@@ -299,23 +300,23 @@ reusing the Layout workspace. Each Game has fifteen illustrative Templates
 (Terra, Tidewater, Ember, Lumen, Meadow), not declarations: ten Settlement
 buildings (homes, an inn, a warehouse, a blacksmith, a bakery, a market stall, a
 barn and a well) and five wilderness Structures. The panel's example Game switch
-shows each set. The stage switches between Outside and Inside, drawn with real
-and painted textures, and Placing, the in-game ghost; Inside lifts the roof and
-near walls and picks a floor (Cellar, Ground, Upper). Stations other than the
-workbench are drawn as their nearest Terra block until a Game declares them.
-Reach the screen at `/structures`, or hold the tool from Simulate (Engine
-states, "Place tool") on `/play`.
+shows each set. The stage switches between Outside and Inside, drawn with the
+textures each Game exports, and Placing, the in-game ghost; Inside lifts the
+roof and near walls and picks a floor (Cellar, Ground, Upper). The smithy's
+anvil is the Game's own anvil Station. Reach the screen at `/structures`, or
+hold the tool from Simulate (Engine states, "Place tool") on `/play`.
 
 Each building kind has its own shape: a steep thatched cottage, a jettied
 half-timbered family house, an L-shaped farmhouse with a porch, an inn with a
 hipped roof, a long warehouse, a lean-to smithy with a forge chimney, a brick
 bakery with its oven at the back, a striped market stall and a two-pitch barn.
-Their Materials differ per building and per Game: `structure-materials.js`
-paints about 80 textures in the browser (planks, logs, plaster, cobble, ashlar,
-tiles, thatch, slate, shingles, cloth) as stand-ins for each Game's own art; the
-glass, doors, chests and lamps are Terra's exported ones. Every Game maps
-Terra's choices to its own Materials, so a Meadow farmhouse is birch, fieldstone
-and moss shingles where Terra's is spruce, cobblestone and shingles.
+Their Materials differ per building and per Game: each Game declares about
+sixteen building Materials (planks, logs, plaster, cobble, ashlar, tiles,
+thatch, slate, shingles, cloth) and its anvil, forge and oven, and
+`structure-materials.js` draws them from the Block gallery's exported textures;
+the glass, doors, chests and lamps are Terra's. Every Game maps Terra's choices
+to its own Materials, so a Meadow farmhouse is birch, fieldstone and moss
+shingles where Terra's is spruce, cobblestone and shingles.
 
 The bridges each have their own build: Terra's stone bridge humps over a low
 brick-ringed arch between parapets with lamps at the ends; Meadow's footbridge

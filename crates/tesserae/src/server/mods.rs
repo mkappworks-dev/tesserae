@@ -2407,7 +2407,7 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
             .next()
             .unwrap()
             .0;
-        assert!((10..=30).contains(&book.len()), "{}", book.len());
+        assert!((10..=40).contains(&book.len()), "{}", book.len());
         let at = |item: &str| {
             let at = book.iter().position(|r| r.output.item == item).unwrap();
             assert_eq!(book[at].station, Station::Tag("workbench".into()));
