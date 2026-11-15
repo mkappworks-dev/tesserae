@@ -238,6 +238,7 @@ type Blockers<'w> = (
     Option<Res<'w, super::layout_menu::LayoutMenu>>,
     Option<Res<'w, super::settings::Settings>>,
     Option<Res<'w, super::input::UiInput>>,
+    Option<Res<'w, super::map_window::MapWindow>>,
 );
 
 /// The Inventory key opens the window and closes it into play; Escape closes
@@ -246,7 +247,7 @@ type Blockers<'w> = (
 fn toggle(
     mut actions: ResMut<Actions>,
     (mut window, mut side): (ResMut<InventoryWindow>, ResMut<catalogue::Side>),
-    (menu, layout_menu, settings, ui): Blockers,
+    (menu, layout_menu, settings, ui, map): Blockers,
     (focused, mode): (
         Single<&Window, With<PrimaryWindow>>,
         Res<super::game_mode::Mode>,
@@ -259,6 +260,7 @@ fn toggle(
         || layout_menu.is_some_and(|m| m.open)
         || settings.is_some_and(|s| s.open)
         || ui.is_some_and(|ui| ui.text_entry)
+        || map.is_some_and(|m| m.open)
     {
         return;
     }

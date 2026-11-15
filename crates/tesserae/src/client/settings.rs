@@ -258,11 +258,12 @@ impl Opener<'_, '_> {
 pub(super) fn open_shortcut(
     actions: Res<super::actions::Actions>,
     mut opener: Opener,
-    (ui, status, ownership, inventory): (
+    (ui, status, ownership, inventory, map): (
         Res<super::input::UiInput>,
         Res<crate::server::persistence::SaveStatus>,
         Res<super::input::Ownership>,
         Option<Res<super::inventory_window::InventoryWindow>>,
+        Option<Res<super::map_window::MapWindow>>,
     ),
     window: Single<&Window, With<bevy::window::PrimaryWindow>>,
 ) {
@@ -277,6 +278,7 @@ pub(super) fn open_shortcut(
         || status.modal()
         || opener.settings.open
         || inventory.is_some_and(|window| window.open)
+        || map.is_some_and(|window| window.open)
     {
         return;
     }

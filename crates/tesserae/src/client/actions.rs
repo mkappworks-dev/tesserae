@@ -60,6 +60,7 @@ pub(super) enum Action {
     #[serde(alias = "catalogue")]
     Menu,
     Inventory,
+    Map,
     SearchCatalogue,
     ReleaseCursor,
     Help,
@@ -294,6 +295,7 @@ impl Bindings {
             (Menu, KeyCode::Tab),
             (ReleaseCursor, KeyCode::Escape),
             (Inventory, KeyCode::KeyI),
+            (Map, KeyCode::KeyN),
             (SearchCatalogue, KeyCode::KeyC),
             (Help, KeyCode::F1),
             (Settings, KeyCode::F10),

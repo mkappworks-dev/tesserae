@@ -83,7 +83,7 @@ fn inside(point: Vec2, a: Vec2, b: Vec2, c: Vec2) -> bool {
 
 /// Which part of the Player's arrow a pixel offset from the centre falls on,
 /// the arrow turned `bearing_deg` clockwise from straight up.
-fn arrow_at(offset: Vec2, bearing_deg: f32) -> Option<[u8; 4]> {
+pub(super) fn arrow_at(offset: Vec2, bearing_deg: f32) -> Option<[u8; 4]> {
     if offset.length() > ARROW_REACH_PX {
         return None;
     }
@@ -133,7 +133,7 @@ pub(super) fn paint(
 
 /// The last pose: the Eye and the heading the Server published.
 #[derive(Resource, Default)]
-struct Spot(Option<(Vec3, f32)>);
+pub(super) struct Spot(pub(super) Option<(Vec3, f32)>);
 
 #[derive(Component)]
 struct MinimapRoot;
@@ -159,7 +159,7 @@ pub(super) fn plugin(app: &mut App) {
     );
 }
 
-fn follow(mut poses: MessageReader<PoseCorrection>, mut spot: ResMut<Spot>) {
+pub(super) fn follow(mut poses: MessageReader<PoseCorrection>, mut spot: ResMut<Spot>) {
     if let Some(pose) = poses.read().last() {
         spot.0 = Some((pose.eye, super::compass::bearing_deg(pose.yaw)));
     }

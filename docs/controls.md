@@ -15,6 +15,15 @@ until turned on, here or under Settings > Display > Map and compass, is saved in
 the user profile, and hides under the Menu, Settings and the Inventory and while
 you are dead.
 
+**N** opens and closes the Map, a full-screen view of the ground you have
+explored, also a button in the Menu. Drag to pan, scroll or use the + and -
+buttons to zoom between 2, 4, 8 and 16 m to the pixel, and press Centre on me to
+return to the Player's arrow. A scale bar shows metres, and the readout under
+the pointer gives its position, height, Biome and distance from you; over ground
+you have not seen it says Not explored and names no Biome. The panel lists the
+Biomes seen and the area explored. Escape or N closes it, and the Compass, the
+minimap and the Hotbar hide under it.
+
 **O** shows or hides the minimap, a small north-up view of the ground you have
 explored in the top right corner, centred on you at 2 m to the pixel, with the
 Player's arrow along the heading the Server publishes. Ground you have not seen

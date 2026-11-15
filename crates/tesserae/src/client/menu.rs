@@ -82,6 +82,7 @@ struct Here(Option<usize>);
 pub(super) enum Choice {
     Resume,
     Inventory,
+    Map,
     Settings,
     Details,
     CloseDetails,
@@ -121,6 +122,7 @@ type Overlays<'w> = (
     Option<Res<'w, super::input::UiInput>>,
     Option<Res<'w, super::layout_menu::LayoutMenu>>,
     Option<Res<'w, super::inventory_window::InventoryWindow>>,
+    Option<Res<'w, super::map_window::MapWindow>>,
     Option<Res<'w, crate::server::persistence::SaveStatus>>,
 );
 
@@ -131,7 +133,7 @@ pub(super) fn toggle(
     mut menu: ResMut<Menu>,
     cursor: Single<&mut CursorOptions, With<PrimaryWindow>>,
     window: Single<&Window, With<PrimaryWindow>>,
-    (settings, ui, layout_menu, inventory, save): Overlays,
+    (settings, ui, layout_menu, inventory, map, save): Overlays,
 ) {
     if !window.focused
         || ui.is_some_and(|ui| ui.text_entry)
@@ -139,6 +141,7 @@ pub(super) fn toggle(
         || save.is_some_and(|save| save.modal())
         || layout_menu.is_some_and(|menu| menu.open)
         || inventory.is_some_and(|window| window.open)
+        || map.is_some_and(|window| window.open)
     {
         return;
     }
@@ -151,8 +154,8 @@ pub(super) fn toggle(
             } else {
                 resume(&mut menu, &mut cursor.into_inner());
             }
-        } else if actions.started(Action::Inventory) {
-            // The Inventory's own toggle runs next and opens it.
+        } else if actions.started(Action::Inventory) || actions.started(Action::Map) {
+            // The window's own toggle runs next and opens it.
             *menu = Menu::default();
         }
         return;
@@ -181,6 +184,7 @@ fn choose(
     mut menu: ResMut<Menu>,
     mut cursor: Query<&mut CursorOptions, With<PrimaryWindow>>,
     mut inventory: Option<ResMut<super::inventory_window::InventoryWindow>>,
+    mut map: Option<ResMut<super::map_window::MapWindow>>,
 ) {
     let Ok(choice) = choices.get(event.entity) else {
         return;
@@ -194,6 +198,12 @@ fn choose(
         Choice::Inventory => {
             *menu = Menu::default();
             if let Some(window) = inventory.as_mut() {
+                window.open = true;
+            }
+        }
+        Choice::Map => {
+            *menu = Menu::default();
+            if let Some(window) = map.as_mut() {
                 window.open = true;
             }
         }
@@ -433,6 +443,12 @@ fn panel(
                         Choice::Inventory,
                         glyph(Kind::Plain, &key(Action::Inventory)),
                     );
+                    buttons::button(
+                        list,
+                        "Map",
+                        Choice::Map,
+                        glyph(Kind::Plain, &key(Action::Map)),
+                    );
                     let settings = buttons::button(
                         list,
                         "Settings",
@@ -624,12 +640,14 @@ pub(super) type Covers<'w> = (
     Option<Res<'w, Menu>>,
     Option<Res<'w, super::settings::Settings>>,
     Option<Res<'w, super::inventory_window::InventoryWindow>>,
+    Option<Res<'w, super::map_window::MapWindow>>,
 );
 
-pub(super) fn covered((menu, settings, inventory): &Covers) -> bool {
+pub(super) fn covered((menu, settings, inventory, map): &Covers) -> bool {
     menu.as_ref().is_some_and(|m| m.open)
         || settings.as_ref().is_some_and(|s| s.open)
         || inventory.as_ref().is_some_and(|i| i.open)
+        || map.as_ref().is_some_and(|m| m.open)
 }
 
 #[cfg(test)]
@@ -655,6 +673,7 @@ mod tests {
             .init_resource::<super::super::edit::Catalogue>()
             .init_resource::<super::super::edit::Hotbar>()
             .init_resource::<super::super::settings::Settings>()
+            .init_resource::<super::super::map_window::MapWindow>()
             .insert_resource(super::super::profile::Store {
                 path: profile,
                 error: None,
@@ -771,6 +790,19 @@ mod tests {
         choose(&mut app, Choice::Inventory);
         assert!(!open(&app) && inventory_open(&app));
         press(&mut app, KeyCode::Escape);
+
+        press(&mut app, KeyCode::Tab);
+        choose(&mut app, Choice::Map);
+        assert!(
+            !open(&app)
+                && app
+                    .world()
+                    .resource::<super::super::map_window::MapWindow>()
+                    .open
+        );
+        app.world_mut()
+            .resource_mut::<super::super::map_window::MapWindow>()
+            .open = false;
 
         press(&mut app, KeyCode::Tab);
         choose(&mut app, Choice::Settings);

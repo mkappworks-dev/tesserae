@@ -124,6 +124,7 @@ type Blockers<'w> = (
     Option<Res<'w, super::input::UiInput>>,
     Option<Res<'w, crate::server::persistence::SaveStatus>>,
     Option<Res<'w, super::inventory_window::InventoryWindow>>,
+    Option<Res<'w, super::map_window::MapWindow>>,
 );
 
 /// The Layout key opens the menu, turning the mode on, and closes it again into
@@ -134,7 +135,7 @@ pub(super) fn toggle(
     mut menu: ResMut<LayoutMenu>,
     mut mode: ResMut<LayoutMode>,
     preferences: Res<Preferences>,
-    (catalogue, settings, ui, save, inventory): Blockers,
+    (catalogue, settings, ui, save, inventory, map): Blockers,
     window: Single<&Window, With<PrimaryWindow>>,
     mut cursor: Single<&mut CursorOptions, With<PrimaryWindow>>,
 ) {
@@ -144,6 +145,7 @@ pub(super) fn toggle(
         || ui.is_some_and(|ui| ui.text_entry)
         || save.is_some_and(|save| save.modal())
         || inventory.is_some_and(|window| window.open)
+        || map.is_some_and(|window| window.open)
     {
         return;
     }

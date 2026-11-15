@@ -36,6 +36,7 @@ mod layout;
 mod layout_menu;
 pub(crate) mod loading;
 mod map_cache;
+mod map_window;
 mod material_textures;
 mod menu;
 mod menu_blur;
@@ -141,7 +142,7 @@ pub fn plugin(app: &mut App) {
         map_cache::plugin,
         compass::plugin,
     ));
-    app.add_plugins(minimap::plugin);
+    app.add_plugins((minimap::plugin, map_window::plugin));
     app.add_session_systems(
         Update,
         (|mut commands: Commands| commands.insert_resource(loading::TerrainArrived))
