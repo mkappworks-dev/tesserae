@@ -322,3 +322,30 @@ refusing whole without it.
   rows, which the World already freezes with its exact builds.
 - Plants are Server state replicated as Chunk edits; a Client draws what it is
   sent and decides no growth ([ADR-0002](0002-client-server-from-day-one.md)).
+
+## Amendment 2026-11-15: bounded spreading and vine crops
+
+Two optional fields on the unreleased 0.3 contract, no version change.
+
+- **`min-neighbours` on a spreader.** A target is seeded only where at least
+  that many Voxels of the Plant (Material) stand within `reach-m` of it,
+  counting the seeder. It is a count of Voxels like `density` and must stay
+  below it. A strict count blocks a lone placed seed for ever, so a Voxel with
+  none of its kind within its own reach is exempt: a lone seed grows one
+  neighbour and then, being a pair, is held to the count. A first attempt let
+  every source ask only for as many as it saw itself, up to the floor, which let
+  a lone seed grow a clump but also let a sparse cloud drift without end, so it
+  was dropped. The rule slows creep, it does not forbid it: a cluster at the
+  floor's own density can crawl, and a World at a smaller Voxel size holds more
+  Voxels within the same reach, so the counts are tuned for the size the Game
+  expects. The shared ground cover sets 4 with a density of 5 at 2 m reach and 7
+  with 9 at 3 m, which holds a generated patch to about twice its reach over two
+  game days where without the rule it ran on to the Chunk's edge at 1.0 m.
+- **Vine crops.** A `crop` with `fruit-vine` bears grown fruit on the ground
+  within `reach-m` (1.5), never touching (`gap-m`, 0.5, in Voxels rounded up and
+  at least one) and up to `max-fruit` (5), from a Sample of its ripe Stage at
+  `regrow-seconds`. Fruit uses the plant's `Role::Fruit`, so it is a grown
+  Material with no Item, is held by soil rather than a tree, drops its yield
+  when broken and is replaced; it only ripens and never seeds. The Biome
+  snapshot freezes a generated vine as a new optional `vine` form, so no World
+  made before it changes.

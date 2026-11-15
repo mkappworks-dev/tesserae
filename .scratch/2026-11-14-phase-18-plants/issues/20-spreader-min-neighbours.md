@@ -16,15 +16,11 @@ are today's behaviour. The existing `density` cap still applies, so
 `min-neighbours` must stay below `density` or nothing can ever spread; a row
 that sets it at or above `density` is a load error naming the Mod and Plant.
 
-A strict count would block a lone placed seed for ever. So the count a target
-must reach is `min(min-neighbours, c)`, where `c` is the number of Voxels of
-the Plant within `reach-m` of the seeding Voxel, itself included: a spreader
-seeds only where it would be at least as crowded as it is, up to
-`min-neighbours`. A lone seed (`c` = 1) seeds any target in reach, then two seed
-only targets that see both, and so on: it grows a compact clump and stops once
-every Voxel sees `min-neighbours`. A generated patch, whose Voxels see the full
-count, seeds only targets that see it too, so it fills holes and never
-advances.
+A strict count would block a lone placed seed for ever (it sees only itself), so
+a Voxel with no other of its kind within its own `reach-m` is exempt: a lone
+seed grows one neighbour, and then, being a pair, is held to the count like
+every other Voxel. A generated patch, whose Voxels have company, is held to it
+and so fills its holes and its front is slowed.
 
 Contract: `spreader-def.min-neighbours: option<u32>` in the 0.3 WIT (both
 copies), the TOML row field, the resolver, the snapshot is unaffected (growth
@@ -36,9 +32,10 @@ Game's tables gets a value so worldgen patches stay put.
 - [ ] A target with fewer than `min-neighbours` of the Plant within reach is
       refused and one with enough is seeded, at 1.0, 0.5 and 0.25 m.
 - [ ] A row with no `min-neighbours` grows exactly as before.
-- [ ] A lone seed grows something, bounded: a clump, not a field.
-- [ ] A generated-style patch fills holes but its extent does not advance over
-      many rounds; the same patch without the rule does advance.
+- [ ] A lone seed grows something (a neighbour), bounded: not a field.
+- [ ] A generated-style patch fills holes and creeps far less than the same
+      patch without the rule; the shared ground cover stays within about twice
+      its reach over two game days at 1.0 m.
 - [ ] `min-neighbours` at or above `density` is a load error.
 - [ ] Grass, tufts, ferns, flowers and mushrooms in `flora` and the Games set
       it.

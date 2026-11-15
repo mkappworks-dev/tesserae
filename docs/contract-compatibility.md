@@ -126,6 +126,13 @@ and absent in every earlier tree), and a `column-def` may name the fluid it
 stands in. Names and `#tag` references resolve after every Mod has declared; an
 unknown or unmatched one is a load error naming the Plant.
 
+A `crop-def` of line 0.3 gained an optional `fruit-vine` (a `fruit-vine-def`:
+stages, `regrow-seconds`, shape and optional `reach-m`, `gap-m` and `max-fruit`)
+and a `spreader-def` an optional `min-neighbours`, both appended last and absent
+in every earlier row. Both are optional fields of the unreleased text, so a
+Declaration built against the earlier 0.3 text no longer lines up and needs a
+rebuild; a row that sets neither behaves as before.
+
 A `plant-stage` of line 0.3 gained an optional `shape` as its last field (a
 Shape by full name the Stage's Voxels take; none keeps the Plant's or the
 fruit's), so a Declaration built against the earlier 0.3 text no longer lines up

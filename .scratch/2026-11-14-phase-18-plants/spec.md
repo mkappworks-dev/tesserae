@@ -520,10 +520,9 @@ The maintainer approved the mockup's "Spreaders and fields" section
   rule), makes a Sample seed a target only where at least that many Voxels of
   the same Plant stand within `reach-m` of it, counting the seeding Voxel. A
   patch then fills its holes and never advances. A lone placed seed would
-  never grow under a strict count, so the requirement is capped by how crowded
-  the seeding Voxel is itself: the target must be at least as crowded as the
-  source, up to `min-neighbours`. A lone seed grows into a compact clump and
-  stops; a generated patch, whose Voxels all see the full count, only fills.
+  never grow under a strict count, so a Voxel with none of its kind within its
+  own reach is exempt: a lone seed grows one neighbour, and a generated patch,
+  whose Voxels have company, is held to the count.
 - **Vine crops (ticket 21).** A `crop` may declare `fruit-vine`: its ripe Stage
   bears fruit on the ground around it, as a tree bears fruit on its canopy.
   Fruit stands within `reach-m` of the vine (1.5 m), never touching another

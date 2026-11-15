@@ -437,6 +437,13 @@ cutting.
 Breaking one drops its yield (a ripe one) and leaves canopy; a standing tree
 grows new fruit elsewhere on its canopy over time.
 
+**Vine crop** — a crop whose ripe Stage, the vine, bears fruit on the ground
+within reach, never touching another and up to a cap; the fruit never seeds, and
+breaking one lets the vine bear another.
+
+**Min-neighbours** — a spreader's floor: it seeds a target only where that many
+of its kind stand within reach, so a patch fills its holes and does not advance.
+
 **Branching** — the optional record on a tree row that gives it a lean, a fork
 into leaders, limbs and lobes, in metres and fractions of its height. A tree
 with none is a straight trunk under one crown.

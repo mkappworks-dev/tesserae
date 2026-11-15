@@ -88,9 +88,10 @@ features keeps its bare ground. A tree Plant's frozen form carries its `vines`
 side, density and length), absent when it hangs none. A surface feature that
 names a Plant freezes what generation reads of it, by Material and Shape name: a
 crop's or spreader's Stages, a column's Material, height and fluid, a tree's
-Materials, size and fruit; a feature that names a Material has none of it. The
-snapshot is separate from `entities` and changes neither the format nor the
-generator version.
+Materials, size and fruit, a vine crop's ripe Material, fruit and reach, gap and
+cap (a `vine` form, absent in a World made before vine crops); a feature that
+names a Material has none of it. The snapshot is separate from `entities` and
+changes neither the format nor the generator version.
 
 Plants add nothing else to the save. A Plant Voxel is a Material and its Stage
 is that Material, a tree is Voxels, and the Overlay, the Agenda and the
