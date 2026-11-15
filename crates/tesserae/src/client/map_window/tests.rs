@@ -652,3 +652,121 @@ mod waypoints {
         assert_eq!(ring, [200, 40, 40], "the ring is the kind's colour");
     }
 }
+
+/// The paint as it was before the tile-local reader: one `Map::sample` lookup per read.
+fn paint_reference(map: &Map, palette: &MapPalette, centre: Vec2, mpp: f32) -> Vec<u8> {
+    let half = view_half();
+    let offsets: &[f32] = if mpp > SAMPLE_M { &[-0.25, 0.25] } else { &[0.0] };
+    let mut pixels = Vec::new();
+    for y in 0..VIEW_H {
+        for x in 0..VIEW_W {
+            let here = Vec2::new(x as f32 + 0.5, y as f32 + 0.5);
+            let mut sum = [0u32; 4];
+            let mut seen = 0;
+            for dy in offsets {
+                for dx in offsets {
+                    let at = centre + (here - half + Vec2::new(*dx, *dy)) * mpp;
+                    let cell = cell_of(at.x, at.y);
+                    let Some([r, g, b, a]) = crate::client::minimap::ground_colour(map, cell, palette)
+                    else {
+                        continue;
+                    };
+                    let [r, g, b, a] = match map.sample(cell).and_then(|s| s.biome) {
+                        None => [r, g, b, a],
+                        Some(biome) => {
+                            let t = biome_colour(biome.index());
+                            let mix = |c: u8, t: u8| {
+                                (f32::from(c) * (1.0 - TINT) + f32::from(t) * TINT).round() as u8
+                            };
+                            [mix(r, t[0]), mix(g, t[1]), mix(b, t[2]), a]
+                        }
+                    };
+                    seen += 1;
+                    for (s, c) in sum.iter_mut().zip([r, g, b, a]) {
+                        *s += u32::from(c);
+                    }
+                }
+            }
+            let colour = if seen == 0 {
+                fog(x, y)
+            } else {
+                sum.map(|s| (s / seen) as u8)
+            };
+            pixels.extend_from_slice(&colour);
+        }
+    }
+    pixels
+}
+
+#[test]
+fn the_tile_local_paint_matches_a_lookup_per_sample_at_every_zoom() {
+    let mut map = Map::default();
+    for x in -90..90 {
+        for z in -70..70 {
+            if (x * 7 + z * 3) % 11 == 0 {
+                continue;
+            }
+            map.record(
+                [x, z],
+                Sample {
+                    height_m: ((x * 3 + z * 5) % 23) as i16,
+                    material: 1,
+                    biome: ((x + z) % 3 != 0).then(|| BiomeId::new(((x / 8 + z / 8) & 3) as u8)),
+                },
+            );
+        }
+    }
+    let palette = MapPalette::default();
+    let centre = Vec2::new(-13.0, 7.0);
+    for mpp in ZOOMS {
+        assert_eq!(
+            paint_view(&map, &palette, centre, mpp, None, &[]),
+            paint_reference(&map, &palette, centre, mpp),
+            "{mpp} m/px"
+        );
+    }
+}
+
+#[test]
+fn the_map_totals_are_not_recomputed_while_its_revision_is_unchanged() {
+    let mut map = Map::default();
+    map.record(
+        [1, 1],
+        Sample {
+            height_m: 1,
+            material: 1,
+            biome: Some(BiomeId::new(1)),
+        },
+    );
+    let mut stats = MapStats::default();
+    stats.refresh(&map, map.revision());
+    stats.refresh(&map, map.revision());
+    assert_eq!((stats.computed, stats.seen.clone(), stats.explored_m2), (1, vec![1], 4));
+    map.record(
+        [2, 1],
+        Sample {
+            height_m: 1,
+            material: 1,
+            biome: None,
+        },
+    );
+    stats.refresh(&map, map.revision());
+    assert_eq!((stats.computed, stats.explored_m2), (2, 8));
+}
+
+#[test]
+fn a_click_at_the_painted_images_centre_lands_on_the_views_centre() {
+    let (top_left, size) = (Vec2::new(100.0, 50.0), Vec2::new(640.0, 480.0));
+    let border = (Vec2::splat(2.0), Vec2::splat(2.0));
+    let centre = top_left + size / 2.0;
+    let pixel = view_pixel(centre, top_left, size, border).unwrap();
+    assert_eq!(pixel, view_half());
+    let window = MapWindow::default();
+    let here = Vec2::new(30.0, -20.0);
+    assert_eq!(window.world_at(here, pixel), here);
+    assert_eq!(view_pixel(top_left + Vec2::splat(1.0), top_left, size, border), None);
+    assert_eq!(
+        view_pixel(top_left + Vec2::splat(2.0), top_left, size, border),
+        Some(Vec2::ZERO)
+    );
+}

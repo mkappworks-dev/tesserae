@@ -36,7 +36,8 @@ pub fn cell_centre_m(cell: [i32; 2]) -> (f32, f32) {
     )
 }
 
-fn locate(cell: [i32; 2]) -> ([i32; 2], usize) {
+/// The tile holding a cell and the cell's index within the tile's samples.
+pub fn locate(cell: [i32; 2]) -> ([i32; 2], usize) {
     let n = TILE_SAMPLES as i32;
     let tile = [cell[0].div_euclid(n), cell[1].div_euclid(n)];
     let at = cell[1].rem_euclid(n) as usize * TILE_SAMPLES + cell[0].rem_euclid(n) as usize;
@@ -103,6 +104,11 @@ impl Map {
         let mut all: Vec<_> = self.tiles.iter().map(|(c, t)| (c, t.1, &t.0[..])).collect();
         all.sort_unstable_by_key(|(c, _, _)| **c);
         all.into_iter()
+    }
+
+    /// One tile's samples, row by row, for a reader that walks many neighbouring cells.
+    pub fn tile(&self, coord: [i32; 2]) -> Option<&[Option<Sample>]> {
+        self.tiles.get(&coord).map(|t| &t.0[..])
     }
 
     pub fn tile_revision(&self, coord: [i32; 2]) -> Option<u64> {

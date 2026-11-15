@@ -13,14 +13,14 @@ use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy::ui::{ComputedNode, UiGlobalTransform};
 use bevy::ui_widgets::Activate;
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
-use tesserae_core::map::{Map, SAMPLE_M, cell_of};
+use tesserae_core::map::{Map, SAMPLE_M, Sample, cell_of, locate};
 
 use super::actions::{Action, Actions};
 use super::buttons::{self, ButtonStyle, Eyebrow};
 use super::map_cache::{MapCache, MapPalette};
 use super::menu::Facts;
 use super::menu_ui as ui;
-use super::minimap::{Spot, arrow_at, fog, ground_colour};
+use super::minimap::{Spot, arrow_at, fog, shaded};
 use super::theme;
 use super::waypoints::{Mark, Marks, paint_marks, pick, view_marks};
 use crate::session::SessionApp;
@@ -97,14 +97,63 @@ pub(super) fn biome_colour(index: usize) -> [u8; 3] {
     [r, g, b]
 }
 
-fn tinted(map: &Map, cell: [i32; 2], palette: &MapPalette) -> Option<[u8; 4]> {
-    let [r, g, b, a] = ground_colour(map, cell, palette)?;
-    let Some(biome) = map.sample(cell).and_then(|s| s.biome) else {
-        return Some([r, g, b, a]);
-    };
-    let tint = biome_colour(biome.index());
-    let mix = |c: u8, t: u8| (f32::from(c) * (1.0 - TINT) + f32::from(t) * TINT).round() as u8;
-    Some([mix(r, tint[0]), mix(g, tint[1]), mix(b, tint[2]), a])
+/// Reads Map samples for neighbouring cells without a hash lookup each: it keeps the tiles last
+/// touched, and the Biome tints already worked out.
+struct Ground<'a> {
+    map: &'a Map,
+    palette: &'a MapPalette,
+    at: Reader<'a>,
+    behind: Reader<'a>,
+    tints: [Option<[u8; 3]>; 256],
+}
+
+/// The last tile read, so a run of cells in one tile costs one lookup.
+struct Reader<'a> {
+    coord: Option<[i32; 2]>,
+    samples: Option<&'a [Option<Sample>]>,
+}
+
+impl<'a> Reader<'a> {
+    fn sample(&mut self, map: &'a Map, cell: [i32; 2]) -> Option<Sample> {
+        let (tile, at) = locate(cell);
+        if self.coord != Some(tile) {
+            self.coord = Some(tile);
+            self.samples = map.tile(tile);
+        }
+        self.samples?[at]
+    }
+}
+
+impl<'a> Ground<'a> {
+    fn new(map: &'a Map, palette: &'a MapPalette) -> Self {
+        let reader = || Reader {
+            coord: None,
+            samples: None,
+        };
+        Ground {
+            map,
+            palette,
+            at: reader(),
+            behind: reader(),
+            tints: [None; 256],
+        }
+    }
+
+    fn tinted(&mut self, cell: [i32; 2]) -> Option<[u8; 4]> {
+        let sample = self.at.sample(self.map, cell)?;
+        let behind = self.behind.sample(self.map, [cell[0] - 1, cell[1] - 1]);
+        let [r, g, b, a] = shaded(&sample, behind, self.palette);
+        let Some(biome) = sample.biome else {
+            return Some([r, g, b, a]);
+        };
+        let index = biome.index();
+        let tint = match self.tints.get_mut(index) {
+            Some(slot) => *slot.get_or_insert_with(|| biome_colour(index)),
+            None => biome_colour(index),
+        };
+        let mix = |c: u8, t: u8| (f32::from(c) * (1.0 - TINT) + f32::from(t) * TINT).round() as u8;
+        Some([mix(r, tint[0]), mix(g, tint[1]), mix(b, tint[2]), a])
+    }
 }
 
 /// RGBA pixels of the view. Coarser zooms average four samples per pixel so
@@ -124,6 +173,7 @@ pub(super) fn paint_view(
         &[0.0]
     };
     let you_pixel = you.map(|(at, bearing)| (half + (at - centre) / metres_per_pixel, bearing));
+    let mut ground = Ground::new(map, palette);
     let mut pixels = Vec::with_capacity((VIEW_W * VIEW_H * 4) as usize);
     for y in 0..VIEW_H {
         for x in 0..VIEW_W {
@@ -135,7 +185,7 @@ pub(super) fn paint_view(
                 for dy in offsets {
                     for dx in offsets {
                         let at = centre + (here - half + Vec2::new(*dx, *dy)) * metres_per_pixel;
-                        if let Some(c) = tinted(map, cell_of(at.x, at.y), palette) {
+                        if let Some(c) = ground.tinted(cell_of(at.x, at.y)) {
                             seen += 1;
                             for (s, c) in sum.iter_mut().zip(c) {
                                 *s += u32::from(c);
@@ -199,6 +249,27 @@ fn biomes_seen(map: &Map) -> Vec<usize> {
     seen.sort_unstable();
     seen.dedup();
     seen
+}
+
+/// What walking every sample yields, kept until the Map's revision moves.
+#[derive(Default)]
+struct MapStats {
+    revision: Option<u64>,
+    seen: Vec<usize>,
+    explored_m2: u64,
+    computed: u32,
+}
+
+impl MapStats {
+    fn refresh(&mut self, map: &Map, revision: u64) {
+        if self.revision == Some(revision) {
+            return;
+        }
+        self.revision = Some(revision);
+        self.seen = biomes_seen(map);
+        self.explored_m2 = explored_m2(map);
+        self.computed += 1;
+    }
 }
 
 /// The longest round scale that fits, and its length in pixels.
@@ -377,18 +448,32 @@ fn track_pointer(
     let Ok((node, transform)) = views.single() else {
         return;
     };
-    let size = node.size() * node.inverse_scale_factor();
+    let scale = node.inverse_scale_factor();
+    let size = node.size() * scale;
     if size == Vec2::ZERO {
         return;
     }
-    let centre = transform.translation * node.inverse_scale_factor();
+    let border = node.border();
+    let inset = (
+        Vec2::new(border.min_inset.x, border.min_inset.y) * scale,
+        Vec2::new(border.max_inset.x, border.max_inset.y) * scale,
+    );
+    let top_left = transform.translation * scale - size / 2.0;
     let pointer = primary
         .cursor_position()
-        .map(|cursor| cursor - (centre - size / 2.0))
-        .filter(|p| p.cmpge(Vec2::ZERO).all() && p.cmplt(size).all());
+        .and_then(|cursor| view_pixel(cursor, top_left, size, inset));
     if window.pointer != pointer {
         window.pointer = pointer;
     }
+}
+
+/// The view pixel under `cursor`, given the node's outer box and its border. The image fills only
+/// the content box, so the border is taken off before scaling to the view's pixels.
+fn view_pixel(cursor: Vec2, top_left: Vec2, size: Vec2, (min, max): (Vec2, Vec2)) -> Option<Vec2> {
+    let content = size - min - max;
+    let within = cursor - top_left - min;
+    (within.cmpge(Vec2::ZERO).all() && within.cmplt(content).all())
+        .then(|| within / content * view_size())
 }
 
 // Disjoint filters so the four Text queries in `Lines` do not conflict.
@@ -427,6 +512,7 @@ fn sync(
     mut lines: Lines,
     mut drawn: Local<Option<(Drawn, Handle<Image>)>>,
     mut legend_shown: Local<Option<Vec<usize>>>,
+    mut stats: Local<MapStats>,
 ) {
     if !window.open {
         if drawn.take().is_some() {
@@ -517,13 +603,14 @@ fn sync(
     };
     set(lines.readout.iter_mut(), &text);
     set(lines.zoom.iter_mut(), &format!("{mpp} m / px"));
-    set(lines.area.iter_mut(), &area_text(explored_m2(&cache)));
+    stats.refresh(&cache, cache.revision());
+    set(lines.area.iter_mut(), &area_text(stats.explored_m2));
     let (metres, px) = scale_bar(mpp);
     set(lines.scale_text.iter_mut(), &format!("{metres} m"));
     for mut node in &mut lines.scale_bar {
         node.width = Val::Px(px);
     }
-    let seen = biomes_seen(&cache);
+    let seen = stats.seen.clone();
     if legend_shown.as_ref() != Some(&seen) {
         for list in &lines.legend {
             commands

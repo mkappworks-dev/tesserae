@@ -60,14 +60,25 @@ impl MinimapSize {
 /// how the ground rises from its north-west neighbour. `None` is fog.
 pub(super) fn ground_colour(map: &Map, cell: [i32; 2], palette: &MapPalette) -> Option<[u8; 4]> {
     let sample = map.sample(cell)?;
-    let [r, g, b, a] = super::map_cache::sample_colour(&sample, palette);
+    Some(shaded(
+        &sample,
+        map.sample([cell[0] - 1, cell[1] - 1]),
+        palette,
+    ))
+}
+
+/// [`ground_colour`] for a sample whose north-west neighbour the caller already holds.
+pub(super) fn shaded(
+    sample: &tesserae_core::map::Sample,
+    behind: Option<tesserae_core::map::Sample>,
+    palette: &MapPalette,
+) -> [u8; 4] {
+    let [r, g, b, a] = super::map_cache::sample_colour(sample, palette);
     let height = f32::from(sample.height_m);
-    let behind = map
-        .sample([cell[0] - 1, cell[1] - 1])
-        .map_or(height, |s| f32::from(s.height_m));
+    let behind = behind.map_or(height, |s| f32::from(s.height_m));
     let light = (1.0 + (height - behind) * 0.055 + (height - 12.0) * 0.004).clamp(0.62, 1.35);
     let shade = |c: u8| (f32::from(c) * light).round().clamp(0.0, 255.0) as u8;
-    Some([shade(r), shade(g), shade(b), a])
+    [shade(r), shade(g), shade(b), a]
 }
 
 /// Unexplored ground, hatched so it reads as not-yet-seen rather than empty.
