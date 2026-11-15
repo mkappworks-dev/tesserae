@@ -29,6 +29,7 @@ mod recording;
 mod registry;
 mod sandbox;
 mod sound;
+mod template;
 mod trust;
 
 pub use adapt::Line;
@@ -66,6 +67,7 @@ pub use recipe::{DeclaredRecipes, MAX_RECIPES, MAX_RECIPES_PER_MOD};
 pub use registry::{Kind, Registry, RegistryMismatch};
 pub use sandbox::{ModFault, ModInstance};
 pub use sound::{Sound, Sounds, Soundscape, resolve_sounds};
+pub use template::DeclaredTemplates;
 pub use trust::{CheckedPayload, Trust, Untrusted, Verdict};
 
 #[cfg(test)]

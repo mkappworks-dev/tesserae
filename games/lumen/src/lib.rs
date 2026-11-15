@@ -474,6 +474,7 @@ impl Guest for Lumen {
             plants: Vec::new(),
             marker_kinds: Vec::new(),
             death_marker_kind: None,
+            templates: Vec::new(),
             voxel_uses: Vec::new(),
             ores: vec![OreDef {
                 material: "crystals:amethyst".into(),

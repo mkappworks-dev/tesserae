@@ -10,6 +10,7 @@ mod plant;
 mod recipe;
 mod shape;
 mod sound;
+mod template;
 mod world;
 
 #[derive(Deserialize)]
@@ -58,6 +59,8 @@ struct Data {
     marker_kinds: Vec<MarkerKind>,
     #[serde(rename = "death-marker-kind")]
     death_marker_kind: Option<String>,
+    #[serde(default)]
+    templates: Vec<template::Template>,
 }
 
 #[derive(Deserialize)]
@@ -373,5 +376,6 @@ pub(crate) fn parse(id: &str, payload: &CheckedPayload) -> Result<Declaration, M
         plants: data.plants.into_iter().map(Into::into).collect(),
         marker_kinds: data.marker_kinds.into_iter().map(Into::into).collect(),
         death_marker_kind: data.death_marker_kind,
+        templates: data.templates.into_iter().map(Into::into).collect(),
     })
 }

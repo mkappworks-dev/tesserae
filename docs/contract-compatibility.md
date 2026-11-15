@@ -176,6 +176,22 @@ optional `material` and an optional `plant`, exactly one set, and an optional
 `biome-def` may list 16 `surface-features`, and a Mod 128 Materials, Shapes or
 appearance rows.
 
+Line 0.3 then gained `templates` on its `declaration`, appended after
+`death-marker-kind` in the same way; a Declaration for 0.1 or 0.2 loads with
+none. A `template-def` carries a `name` (local to the Mod; the engine adds
+`<mod id>:`), a `cell-m` grid size in metres, a `palette` of
+`template-palette-entry` rows each mapping one `char` to a closed
+`template-cell` (`keep`, `air`, or a `template-voxel` of a Material and an
+optional Shape by full name and an optional orientation byte), `layers` of rows
+of palette characters from the bottom up, an optional `ground-layer` that a
+Template must set, an optional `foundation` Material and an optional
+`level-tolerance-m`, from 0 to 16 and 1 when absent. Any Mod may declare one,
+and a World holds at most 64. A side is at most 64 metres and a Template at most
+65,536 cells. Names resolve after every Mod has declared; an unknown Material or
+Shape, a fluid, a character not in the palette or a grid out of bounds is a load
+error naming the Template. It is data only: no Mod is called and no host call is
+added.
+
 ## What is not frozen
 
 Line `0.x` is pre-release. Later gameplay steps may add new lines, and

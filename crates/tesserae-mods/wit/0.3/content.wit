@@ -466,7 +466,7 @@ interface content {
     /// `mean-seconds`, how long it takes on average to reach the next, at least
     /// 16, in seconds at any Voxel size.
     record plant-stage {
-        /// A solid Material, `<mod id>:<name>`.
+        /// A Material, `<mod id>:<name>`, that is not a fluid.
         material: string,
         mean-seconds: option<f32>,
         yields: list<plant-yield>,
@@ -1058,6 +1058,54 @@ interface content {
         color: srgba,
     }
 
+    /// A Voxel one palette character of a Template stands for.
+    record template-voxel {
+        /// A Material, `<mod id>:<name>`, that is not a fluid.
+        material: string,
+        /// A Shape, `<mod id>:<name>`; none is `core:cube`.
+        shape: option<string>,
+        /// One of the 24 orientations, as a Voxel's orientation byte; none is 0.
+        orientation: option<u8>,
+    }
+
+    /// What one palette character of a Template stands for.
+    variant template-cell {
+        /// Never written: the ground a Structure stands in shows through.
+        keep,
+        /// Written as air, so it carves.
+        air,
+        voxel(template-voxel),
+    }
+
+    record template-palette-entry {
+        symbol: char,
+        cell: template-cell,
+    }
+
+    /// A block of Voxels on a grid whose cell size is in metres, which a World
+    /// samples at its own Voxel size and turns in quarter turns.
+    record template-def {
+        /// The Template's local name; the engine adds `<mod id>:`.
+        name: string,
+        /// Every cell's edge, above 0 metres. A side is at most 64 metres and a
+        /// Template at most 65,536 cells.
+        cell-m: f32,
+        palette: list<template-palette-entry>,
+        /// From the bottom up. A layer is rows running +Z, a row characters
+        /// running +X; every layer has the same rows and every row the same
+        /// length, and every character is in the palette.
+        layers: list<list<string>>,
+        /// The layer that sits at ground height, counted from 0 at the bottom;
+        /// the layers below it are underground. Required: none is a load error.
+        ground-layer: option<u32>,
+        /// A Material, `<mod id>:<name>`, that is not a fluid, filling beneath
+        /// the lowest layer down to uneven ground.
+        foundation: option<string>,
+        /// How far the ground under the footprint may vary, 0 to 16 metres;
+        /// none is 1.
+        level-tolerance-m: option<f32>,
+    }
+
     /// Everything a Mod adds, in registration order: a name's id is its index
     /// after the engine's built-ins, so Materials start at 8 (7 is retired and
     /// never handed out) and Shapes at 4. A `world` or `view` from a Mod that is
@@ -1115,5 +1163,8 @@ interface content {
         /// The full name of the Marker kind a death leaves, from the Game only;
         /// it must name a declared Marker kind. `none` leaves no death mark.
         death-marker-kind: option<string>,
+        /// At most 64 in a World, from any Mod, named `<mod id>:<name>`. Names
+        /// resolve after every Mod has declared.
+        templates: list<template-def>,
     }
 }

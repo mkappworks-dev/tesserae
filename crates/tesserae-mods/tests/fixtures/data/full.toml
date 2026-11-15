@@ -279,3 +279,16 @@ kind = "station"
 material = "full:rock"
 tag = "bench"
 shape = "core:slab"
+
+[[templates]]
+name = "cairn"
+cell-m = 0.5
+layers = [["r.", "_r"]]
+ground-layer = 0
+foundation = "full:rock"
+level-tolerance-m = 2.0
+
+[templates.palette]
+"." = "air"
+"_" = "keep"
+"r" = { material = "full:rock", shape = "full:slab", orientation = 5 }

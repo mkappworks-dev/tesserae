@@ -216,6 +216,13 @@ pub enum ModError {
         name: String,
         reason: String,
     },
+    /// A `templates` row, named by its name.
+    Template {
+        id: String,
+        row: usize,
+        name: String,
+        reason: String,
+    },
     /// A `marker-kinds` row, named by its name.
     Marker {
         id: String,
@@ -466,6 +473,12 @@ impl fmt::Display for ModError {
                 name,
                 reason,
             } => write!(f, "mod `{id}`: plant {row} `{name}`: {reason}"),
+            ModError::Template {
+                id,
+                row,
+                name,
+                reason,
+            } => write!(f, "mod `{id}`: template {row} `{name}`: {reason}"),
             ModError::Marker {
                 id,
                 row,

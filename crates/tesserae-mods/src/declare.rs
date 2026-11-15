@@ -166,6 +166,7 @@ pub struct Behaviour {
     pub(crate) plants: Vec<content::PlantDef>,
     pub(crate) marker_kinds: Vec<content::MarkerKindDef>,
     pub(crate) death_marker_kind: Option<String>,
+    pub(crate) templates: Vec<content::TemplateDef>,
     /// Each Material's tags, by full name, for the Plants that name a `#tag`.
     pub(crate) material_tags: Vec<(String, Vec<String>)>,
     lake: Option<content::WaterParams>,
@@ -516,6 +517,7 @@ pub fn apply(
             plants: declaration.plants,
             marker_kinds: declaration.marker_kinds,
             death_marker_kind: declaration.death_marker_kind,
+            templates: declaration.templates,
             material_tags,
             lake,
             ground,
