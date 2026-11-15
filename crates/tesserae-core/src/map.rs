@@ -66,6 +66,8 @@ pub struct Map {
     max_tiles: usize,
     /// Tiles not yet handed out by [`Map::take_changed`].
     changed: BTreeSet<[i32; 2]>,
+    /// Counts every change to the samples, so a save can tell an unchanged Map from a changed one.
+    revision: u64,
 }
 
 impl Default for Map {
@@ -80,7 +82,19 @@ impl Map {
             tiles: HashMap::new(),
             max_tiles,
             changed: BTreeSet::new(),
+            revision: 0,
         }
+    }
+
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    /// Every tile, lowest coordinate first, so equal Maps iterate alike.
+    pub fn tiles(&self) -> impl Iterator<Item = (&[i32; 2], &[Option<Sample>])> {
+        let mut all: Vec<_> = self.tiles.iter().map(|(c, t)| (c, &t.0[..])).collect();
+        all.sort_unstable_by_key(|(c, _)| **c);
+        all.into_iter()
     }
 
     pub fn max_tiles(&self) -> usize {
@@ -106,6 +120,7 @@ impl Map {
         if *slot != Some(sample) {
             *slot = Some(sample);
             self.changed.insert(tile);
+            self.revision += 1;
         }
         Recorded::Stored
     }
@@ -138,6 +153,7 @@ impl Map {
     pub fn load_tile(&mut self, tile: TileData) {
         if tile.samples.len() == TILE_SAMPLES * TILE_SAMPLES {
             self.tiles.insert(tile.coord, Tile(tile.samples));
+            self.revision += 1;
         }
     }
 

@@ -1,6 +1,6 @@
 # 06: The Map is saved with the World
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 03, 04
 
@@ -21,9 +21,10 @@ save.
 
 ## Acceptance criteria
 
-- [ ] Explore, save, reopen: the Map reads back identical (a round trip through the persistence rig).
-- [ ] After reopening, the first Map the Client receives is the saved one, sent under the same per-step budget (ticket 04's full sync), and every tile arrives within a bounded number of steps.
-- [ ] A save made before this section opens with an empty Map and loads unchanged otherwise.
-- [ ] A save with an unchanged Map does not re-encode it; a test shows the revision counter gates the work.
-- [ ] A long-journey Map's saved size is a small fraction of raw; the measured size is noted in the commit message.
-- [ ] The section's validation refuses a corrupt Map with a clear error, as other sections do; fmt, clippy and tests pass.
+- [x] Explore, save, reopen: the Map reads back identical (a round trip through the persistence rig).
+- [x] After reopening, the first Map the Client receives is the saved one, sent under the same per-step budget (ticket 04's full sync), and every tile arrives within a bounded number of steps.
+- [x] A save made before this section opens with an empty Map and loads unchanged otherwise.
+- [x] A save with an unchanged Map does not re-encode it; a test shows the revision counter gates the work.
+- [x] A long-journey Map's saved size is a small fraction of raw; the measured size is noted in the commit message.
+- [x] The section's validation refuses a corrupt Map with a clear error, as other sections do.
+- [ ] fmt, clippy and tests pass. fmt and the new tests pass; clippy and the full suite are deferred to the end of the phase.

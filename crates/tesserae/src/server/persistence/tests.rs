@@ -547,6 +547,7 @@ fn real_terra_new_builds_but_reopened_guest_never_replays_construction() {
         paused: paused.into_iter().map(|(h, s)| (h, (*s).clone())).collect(),
         entities: Default::default(),
         containers: Vec::new(),
+        map: Default::default(),
         game_mode: Default::default(),
     };
     Writer::acquire(&dir.0, &opening.id, &content)
@@ -2248,4 +2249,107 @@ fn a_saved_container_whose_voxel_is_no_longer_one_spills_when_it_opens() {
         .map(|e| e.as_dropped().count)
         .collect();
     assert_eq!(dropped, [7]);
+}
+
+fn explore(rig: &mut Rig, cells: std::ops::Range<i32>) {
+    use crate::server::map::PlayerMap;
+    use tesserae_core::map::Sample;
+    let world = rig.app.world_mut();
+    let mut map = world.query::<&mut PlayerMap>().single_mut(world).unwrap();
+    for x in cells {
+        for z in 0..4 {
+            let sample = Sample {
+                height_m: (x % 17) as i16,
+                material: 3,
+                biome: Some(tesserae_core::BiomeId::new((z % 2) as u8)),
+            };
+            map.record([x, z], sample);
+        }
+    }
+}
+
+fn map_of(rig: &mut Rig) -> tesserae_core::map::Map {
+    use crate::server::map::PlayerMap;
+    let world = rig.app.world_mut();
+    world.query::<&PlayerMap>().single(world).unwrap().0.clone()
+}
+
+#[test]
+fn the_players_map_survives_save_and_reopen_and_is_sent_again_within_budget() {
+    use crate::server::map::TILES_PER_STEP;
+    let dir = Directory::new();
+    let mut rig = Rig::new(&dir);
+    explore(&mut rig, -200..300);
+    let explored = map_of(&mut rig);
+    assert!(explored.tile_count() > 8);
+    rig.settled_save();
+    drop(rig);
+    assert!(
+        !save::inspect(&dir.0)
+            .unwrap()
+            .unwrap()
+            .commit
+            .map
+            .is_empty()
+    );
+    let mut reopened = Rig::new(&dir);
+    reopened.tick();
+    let mut back = map_of(&mut reopened);
+    assert_eq!(
+        back.tiles().collect::<Vec<_>>(),
+        explored.tiles().collect::<Vec<_>>()
+    );
+    let mut steps = 0;
+    let mut received = 0;
+    while back.changed_count() > 0 {
+        received += back.take_changed(TILES_PER_STEP).len();
+        steps += 1;
+    }
+    assert_eq!(received, explored.tile_count());
+    assert_eq!(steps, explored.tile_count().div_ceil(TILES_PER_STEP));
+}
+
+#[test]
+fn a_save_without_a_map_section_opens_with_an_empty_map() {
+    let dir = Directory::new();
+    let mut rig = Rig::new(&dir);
+    explore(&mut rig, 0..10);
+    rig.settled_save();
+    drop(rig);
+    rewrite(&dir.0, |c| c.map = Default::default());
+    let generator = saved_generator(&dir);
+    let mut reopened = Rig::new(&dir);
+    reopened.tick();
+    assert_eq!(map_of(&mut reopened).tile_count(), 0);
+    assert_eq!(saved_generator(&dir), generator);
+}
+
+#[test]
+fn a_save_encodes_the_map_only_when_it_has_changed() {
+    let dir = Directory::new();
+    let mut rig = Rig::new(&dir);
+    explore(&mut rig, 0..10);
+    rig.settled_save();
+    rig.settled_save();
+    assert_eq!(rig.app.world().resource::<Persistence>().map_encodes, 1);
+    explore(&mut rig, 10..20);
+    rig.settled_save();
+    assert_eq!(rig.app.world().resource::<Persistence>().map_encodes, 2);
+}
+
+#[test]
+fn a_corrupt_map_section_is_refused_with_a_clear_error() {
+    let dir = Directory::new();
+    let mut rig = Rig::new(&dir);
+    explore(&mut rig, 0..10);
+    rig.settled_save();
+    drop(rig);
+    let recovered = save::inspect(&dir.0).unwrap().unwrap();
+    let mut commit = recovered.commit;
+    commit.map.tiles[0].planes = "!!".into();
+    let error = Writer::acquire(&dir.0, &commit.world, &commit.content)
+        .unwrap()
+        .write(&commit)
+        .unwrap_err();
+    assert!(error.to_string().contains("map:"), "{error}");
 }

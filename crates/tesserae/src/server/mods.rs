@@ -474,6 +474,7 @@ pub(crate) fn save_world(loaded: &LoadedMods, path: &Path) {
         paused: vec![],
         entities: Default::default(),
         containers: Vec::new(),
+        map: Default::default(),
         game_mode: Default::default(),
     };
     Writer::acquire(path, &id, &content)
@@ -1603,6 +1604,7 @@ biomes = ["plain:dry"]
                 paused: vec![],
                 entities: Default::default(),
                 containers: Vec::new(),
+                map: Default::default(),
                 game_mode: Default::default(),
             };
             Writer::acquire(&path, &id, &content)

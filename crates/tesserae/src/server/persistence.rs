@@ -269,6 +269,7 @@ struct Completed {
     extensions: extensions::Saved,
     entities: u64,
     containers: u64,
+    map: u64,
     details_completed: bool,
     #[cfg(feature = "profiling")]
     write_ms: f64,
@@ -307,6 +308,12 @@ pub struct Persistence {
     initial_entities: Option<tesserae_core::entity::Entities>,
     saved_containers: u64,
     initial_containers: Vec<save::containers::SavedContainer>,
+    saved_map: u64,
+    initial_map: Option<save::map::SavedMap>,
+    /// The encoding of the Map at the revision it was made, reused while the Map has not moved.
+    map_section: Option<(u64, save::map::SavedMap)>,
+    #[cfg(test)]
+    map_encodes: u32,
     restored_extensions: extensions::Saved,
     pub(super) reopened_mode: Option<super::player::MovementMode>,
     pub(super) reopened_view: Option<save::MovementV1>,
@@ -386,6 +393,7 @@ impl Persistence {
         let reopened_game_mode = changes.own.or(reopened_game_mode);
         let mut restored_entities = None;
         let mut initial_containers = Vec::new();
+        let mut initial_map = None;
         let (reopened_eye, initial_simulation, initial_chunks, generation, saved_revisions, detail) =
             if let Some(recovered) = opening.recovered {
                 recovered
@@ -394,6 +402,7 @@ impl Persistence {
                     .map_err(|e| e.to_string())?;
                 let mut c = recovered.commit;
                 initial_containers = std::mem::take(&mut c.containers);
+                initial_map = Some(std::mem::take(&mut c.map));
                 let items = loaded.every_item(settings.voxel_size);
                 restored_entities = Some(
                     c.entities
@@ -506,6 +515,11 @@ impl Persistence {
             initial_entities: restored_entities,
             saved_containers: 0,
             initial_containers,
+            saved_map: 0,
+            initial_map,
+            map_section: None,
+            #[cfg(test)]
+            map_encodes: 0,
             reopened_mode: restored
                 .map(|s| {
                     if s.flight {
@@ -539,7 +553,8 @@ pub(super) fn plugin(app: &mut App) {
         .add_session_systems(Update, restore_player.run_if(restoring))
         .add_session_systems(
             FixedPreUpdate,
-            drive
+            (restore_map, drive)
+                .chain()
                 .after(super::fluids::simulate)
                 .run_if(resource_exists::<Persistence>),
         )
@@ -666,6 +681,20 @@ pub(super) struct Held<'w, 's> {
     containers: Res<'w, super::container::Containers>,
 }
 
+/// Runs until the Player's Map exists, since a Player may spawn after the World opens.
+fn restore_map(mut p: ResMut<Persistence>, mut maps: Query<&mut super::map::PlayerMap>) {
+    if p.initial_map.is_none() {
+        return;
+    }
+    let Ok(mut map) = maps.single_mut() else {
+        return;
+    };
+    let saved = p.initial_map.take().expect("checked above");
+    map.0 = saved.restore();
+    p.saved_map = map.revision();
+    p.map_section = Some((map.revision(), saved));
+}
+
 pub(super) fn drive(
     mut p: ResMut<Persistence>,
     mut status: ResMut<SaveStatus>,
@@ -681,6 +710,9 @@ pub(super) fn drive(
     let player = held_player.get::<Player>().expect("filtered on Player");
     let extensions = extensions::capture(held_player);
     let (entities, items, containers) = (&held.entities, &held.items, &held.containers);
+    let map = held_player
+        .get::<super::map::PlayerMap>()
+        .expect("required by Player");
     let now = time.elapsed_secs_f64();
     p.elapsed += (now - p.last_clock).max(0.0);
     p.last_clock = now;
@@ -707,6 +739,7 @@ pub(super) fn drive(
                 p.saved_eye = Some(done.eye);
                 p.saved_entities = done.entities;
                 p.saved_containers = done.containers;
+                p.saved_map = done.map;
                 if done.details_completed
                     && let Some((_, d)) = p.details.as_mut()
                 {
@@ -722,6 +755,7 @@ pub(super) fn drive(
                     && p.saved_simulation == sim.revision
                     && p.saved_entities == entities.revision()
                     && p.saved_containers == containers.revision()
+                    && p.saved_map == map.revision()
                 {
                     leave.now();
                 } else if status.quitting {
@@ -747,7 +781,8 @@ pub(super) fn drive(
         || p.saved_extensions.as_ref() != extensions.as_ref().ok()
         || p.saved_simulation != sim.revision
         || p.saved_entities != entities.revision()
-        || p.saved_containers != containers.revision();
+        || p.saved_containers != containers.revision()
+        || p.saved_map != map.revision();
     if p.elapsed >= 30.0 {
         p.elapsed = 0.0;
         if status.dirty && !status.quitting {
@@ -832,6 +867,15 @@ pub(super) fn drive(
     };
     let entities_revision = entities.revision();
     let (saved_containers, containers_revision) = (containers.capture(), containers.revision());
+    let map_revision = map.revision();
+    if p.map_section.as_ref().map(|(r, _)| *r) != Some(map_revision) {
+        p.map_section = Some((map_revision, save::map::SavedMap::capture(map)));
+        #[cfg(test)]
+        {
+            p.map_encodes += 1;
+        }
+    }
+    let saved_map = p.map_section.as_ref().expect("set above").1.clone();
     let eye = player.eye();
     let writer = Arc::clone(p.writer.as_ref().expect("persistent"));
     let mapping = p.mapping.clone();
@@ -884,6 +928,7 @@ pub(super) fn drive(
                     .collect(),
                 entities: saved_entities,
                 containers: saved_containers,
+                map: saved_map,
                 game_mode,
             };
             writer.write(&commit)
@@ -907,6 +952,7 @@ pub(super) fn drive(
             extensions,
             entities: entities_revision,
             containers: containers_revision,
+            map: map_revision,
             #[cfg(feature = "profiling")]
             write_ms: write_started.elapsed().as_secs_f64() * 1e3,
         }
