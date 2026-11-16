@@ -10,6 +10,7 @@
 //! feeds the benches a fixed surface and makes no World.
 
 mod fields;
+mod ground;
 mod layouts;
 mod settlements;
 mod structures;

@@ -11,6 +11,7 @@
 use std::sync::Arc;
 
 use super::fields::{hashed, mix, unit};
+use super::ground::SAMPLE_M;
 use super::{Footprint, Worldgen, top_index};
 use crate::chunk::{CHUNK_SIZE, Chunk};
 use crate::climate::{BIOMES_SINCE, BiomeId, BiomeStructure};
@@ -34,8 +35,6 @@ pub(super) const NEIGHBOURS: [[i32; 2]; 8] = [
     [0, 1],
     [1, 1],
 ];
-/// How far apart the ground rules ask a footprint's columns.
-const SAMPLE_M: f32 = 1.0;
 
 /// One Biome's row, as generation at this Voxel size reads it.
 #[derive(Clone, Copy, Debug)]
@@ -218,53 +217,26 @@ impl Worldgen {
     /// Chunk decides alike.
     fn structure_accepts(&self, row: &Row, mut s: Structure) -> Option<Structure> {
         let listed = &self.structures.as_ref()?.listed;
-        let mut columns = Vec::new();
+        let points: Vec<_> = self
+            .sampled(&s, 2)
+            .into_iter()
+            .flat_map(|gz| self.sampled(&s, 0).into_iter().map(move |gx| (gx, gz)))
+            .map(|(gx, gz)| ([self.global_m(gx), self.global_m(gz)], true))
+            .collect();
         let (mut lowest_m, mut highest_m) = (f32::MAX, f32::MIN);
-        for gz in self.sampled(&s, 2) {
-            for gx in self.sampled(&s, 0) {
-                let (x_m, z_m) = (self.global_m(gx), self.global_m(gz));
-                let biome = self.biome_at(x_m, z_m)?;
-                if listed[biome.index()] & 1 << row.entry.template == 0 {
-                    return None;
-                }
-                let height_m = self.surface_height_m(x_m, z_m);
-                // Below the level some Voxel size floods the column, if not this one.
-                if self.water.is_some_and(|w| height_m < w.level_m) {
-                    return None;
-                }
-                (lowest_m, highest_m) = (lowest_m.min(height_m), highest_m.max(height_m));
-                if highest_m - lowest_m > row.level_tolerance_m {
-                    return None;
-                }
-                columns.push([x_m, z_m, height_m]);
-            }
-        }
-        // Last, as the dearest ask.
-        if columns
-            .iter()
-            .any(|&[x_m, z_m, height_m]| self.cave_may_cut(x_m, z_m, height_m))
-        {
+        let ground = self.sample_ground(points, |c| {
+            let listed_here = self
+                .biome_at(c.x_m, c.z_m)
+                .is_some_and(|b| listed[b.index()] & 1 << row.entry.template != 0);
+            (lowest_m, highest_m) = (lowest_m.min(c.height_m), highest_m.max(c.height_m));
+            listed_here && highest_m - lowest_m <= row.level_tolerance_m
+        })?;
+        if !self.uncut(&ground) {
             return None;
         }
-        let mut heights: Vec<f32> = columns.iter().map(|c| c[2]).collect();
-        heights.sort_by(f32::total_cmp);
-        let median_m = heights[(heights.len() - 1) / 2];
+        let median_m = ground.lower_median_m()?;
         s.min[1] = top_index(median_m, 0.0, self.voxel_size) - row.ground;
         Some(s)
-    }
-
-    /// Whether a cave may cut the surface of the column at `(x_m, z_m)`. Every Voxel size up to
-    /// [`SAMPLE_M`] has its surface Voxel's corner, where caves are asked, in the metre under the
-    /// surface, and `false` is a proof over that metre, so it holds at each of them.
-    pub(super) fn cave_may_cut(&self, x_m: f32, z_m: f32, height_m: f32) -> bool {
-        self.caves.as_ref().is_some_and(|caves| {
-            let depth_m = self.voxel_size.max(SAMPLE_M);
-            caves.may_carve(
-                [x_m, height_m - depth_m, z_m],
-                [x_m, height_m, z_m],
-                self.cave_scale_at(x_m, z_m),
-            )
-        })
     }
 
     /// The columns of a footprint's `slot` axis the ground rules ask: a metre apart from its

@@ -11,6 +11,7 @@ use std::f32::consts::TAU;
 use std::sync::Arc;
 
 use super::fields::{hashed, mix, unit};
+use super::ground::SAMPLE_M;
 use super::structures::{NEIGHBOURS, Structure};
 use super::{CARDINALS, Footprint, Worldgen, top_index};
 use crate::chunk::{CHUNK_SIZE, Chunk};
@@ -51,8 +52,6 @@ const APPROACH_M: (f32, f32) = (12.0, 40.0);
 /// the radius, and all at an approach path's end.
 const EDGE_WEAR: f32 = 0.25;
 const WEAR_SALT: u64 = 0x5e77_1e00_0000_0002;
-/// How far apart the ground rules ask a Plot's columns.
-const SAMPLE_M: f32 = 1.0;
 /// The most a Plot or a road is cut into or filled over the ground.
 const CUT_FILL_M: f32 = 2.0;
 /// What the ground rules allow at a Plot's sampled columns, short of [`CUT_FILL_M`] so a column
@@ -525,35 +524,21 @@ impl Worldgen {
                 .map(move |k| from + k as f32 * SAMPLE_M)
                 .take_while(move |&m| m < max[a] + APRON_M)
         };
-        let mut columns = Vec::new();
-        for z_m in along(1) {
-            for x_m in along(0) {
-                let height_m = self.surface_height_m(x_m, z_m);
-                if self.water.is_some_and(|w| height_m < w.level_m) {
-                    return None;
-                }
+        let points = along(1).flat_map(|z_m| {
+            along(0).map(move |x_m| {
                 let under = (min[0]..max[0]).contains(&x_m) && (min[1]..max[1]).contains(&z_m);
-                columns.push(([x_m, z_m, height_m], under));
-            }
-        }
-        let mut under: Vec<f32> = columns.iter().filter(|c| c.1).map(|c| c.0[2]).collect();
-        under.sort_by(f32::total_cmp);
-        let level_m = *under.get((under.len().max(1) - 1) / 2)?;
-        if columns
-            .iter()
-            .any(|c| (c.0[2] - level_m).abs() > SAMPLED_CUT_FILL_M)
+                ([x_m, z_m], under)
+            })
+        });
+        let ground = self.sample_ground(points, |_| true)?;
+        let level_m = ground.lower_median_m()?;
+        if ground
+            .columns()
+            .any(|c| (c.height_m - level_m).abs() > SAMPLED_CUT_FILL_M)
         {
             return None;
         }
-        // Last, as the dearest ask.
-        if columns
-            .iter()
-            .filter(|c| c.1)
-            .any(|&([x_m, z_m, height_m], _)| self.cave_may_cut(x_m, z_m, height_m))
-        {
-            return None;
-        }
-        Some(level_m)
+        self.uncut(&ground).then_some(level_m)
     }
 
     /// The Settlement a founding grows to: roads branched from its centre, then Plots beside them,

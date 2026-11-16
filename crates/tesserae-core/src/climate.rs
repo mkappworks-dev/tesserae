@@ -94,21 +94,39 @@ impl BiomeStructure {
 
     /// Checked against the Template it names, since its spacing's floor is that Template's size.
     pub fn validate(&self, template: &crate::template::Template) -> Result<(), ParamError> {
-        let bad = |rule| ParamError {
-            field: "biomes.structures",
-            rule,
-        };
-        if !(self.chance > 0.0 && self.chance <= 1.0) {
-            return Err(bad("chance must be above 0 and at most 1"));
-        }
         let [x, _, z] = template.size_m();
-        if !(self.spacing_m >= 2.0 * x.max(z) && self.spacing_m <= MAX_STRUCTURE_SPACING_M) {
-            return Err(bad(
-                "spacing must be at least twice the Template's longer side and at most 4096 m",
-            ));
-        }
-        Ok(())
+        validate_lattice(
+            "biomes.structures",
+            self.spacing_m,
+            self.chance,
+            2.0 * x.max(z),
+            "spacing must be at least twice the Template's longer side and at most 4096 m",
+        )
     }
+}
+
+/// The rules a lattice row's `spacing_m` and `chance` share: each lattice cell holds a draw with
+/// `chance`, and `spacing_m` is from `floor_m` to [`MAX_STRUCTURE_SPACING_M`].
+fn validate_lattice(
+    field: &'static str,
+    spacing_m: f32,
+    chance: f32,
+    floor_m: f32,
+    spacing_rule: &'static str,
+) -> Result<(), ParamError> {
+    if !(chance > 0.0 && chance <= 1.0) {
+        return Err(ParamError {
+            field,
+            rule: "chance must be above 0 and at most 1",
+        });
+    }
+    if !(spacing_m >= floor_m && spacing_m <= MAX_STRUCTURE_SPACING_M) {
+        return Err(ParamError {
+            field,
+            rule: spacing_rule,
+        });
+    }
+    Ok(())
 }
 
 /// Bounded so a [`Biome`] stays inline and `Copy`.
@@ -133,21 +151,13 @@ impl BiomeSettlement {
 
     /// Checked against the Settlement it names, since its spacing's floor is that one's reach.
     pub fn validate(&self, settlement: &crate::settlement::Settlement) -> Result<(), ParamError> {
-        if !(self.chance > 0.0 && self.chance <= 1.0) {
-            return Err(ParamError {
-                field: "biomes.settlements",
-                rule: "chance must be above 0 and at most 1",
-            });
-        }
-        let reach_m = settlement.reach_m();
-        if !(self.spacing_m >= 2.0 * reach_m && self.spacing_m <= MAX_STRUCTURE_SPACING_M) {
-            return Err(ParamError {
-                field: "biomes.settlements",
-                rule: "spacing must be at least twice the Settlement's radius and margin and at \
-                       most 4096 m",
-            });
-        }
-        Ok(())
+        validate_lattice(
+            "biomes.settlements",
+            self.spacing_m,
+            self.chance,
+            2.0 * settlement.reach_m(),
+            "spacing must be at least twice the Settlement's radius and margin and at most 4096 m",
+        )
     }
 }
 
@@ -1128,7 +1138,6 @@ impl SurfaceFeatures {
         Ok(self)
     }
 
-    /// This table with `settlements` as its Settlements.
     pub fn with_settlements(mut self, settlements: &[BiomeSettlement]) -> Result<Self, ParamError> {
         if settlements.len() > MAX_BIOME_SETTLEMENTS {
             return Err(ParamError {
