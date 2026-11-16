@@ -285,7 +285,7 @@ function run([x, y, z], [dx, dz], n, down = false) {
 
 /*
  * A building: foundation, walls per storey (half-timbered, a stone base course, a jettied upper
- * storey), windows (`windows`: [wide, tall] in cells, 1 by 1 unless given) on whole-cell sills, a Door (`door`: 1 single, 2 double, 0 none), an open front, a
+ * storey; `storey` cells from floor to floor, 4 unless given), windows (`windows`: [wide, tall] in cells, 1 by 1 unless given) on whole-cell sills, a Door (`door`: 1 single, 2 double, 0 none), an open front, a
  * porch, an optional L-shaped wing, a roof and a chimney. A Door on the wing stands in its end
  * wall. Returns `at`, which places furniture relative to the main room's corner, and `stairs`,
  * which lays a flight in the same frame.
@@ -308,6 +308,7 @@ function building(g, o) {
     hall = false,
     wing = null,
     windows: [winW, winH] = [1, 1],
+    storey = STOREY,
   } = o;
   /* Windows `winW` cells wide, a wall cell either side, along each wall. */
   const pane = (along) => along % (winW + 2) >= 2;
@@ -315,7 +316,7 @@ function building(g, o) {
     z0 = 1,
     x1 = x0 + w - 1,
     z1 = z0 + d - 1,
-    top = storeys * STOREY - 1;
+    top = storeys * storey - 1;
   const inMain = (x, z) => x >= x0 && x <= x1 && z >= z0 && z <= z1;
   const inWing = (x, z) =>
     wing && x >= x0 && x < x0 + wing.w && z > z1 && z <= z1 + wing.d;
@@ -356,8 +357,8 @@ function building(g, o) {
       inside(0, x, z) && g.put(x, 0, z, M(rim(0, x, z) ? "base" : "floor")),
   );
   for (let y = 1; y <= top; y++) {
-    const s = Math.floor(y / STOREY),
-      row = y % STOREY,
+    const s = Math.floor(y / storey),
+      row = y % storey,
       floorRow = !hall && row === 0;
     each((x, z) => {
       if (!inside(s, x, z)) return;
@@ -369,7 +370,11 @@ function building(g, o) {
       if (pane(along) && row >= 2 && row < 2 + winH)
         return g.put(x, y, z, M("glass"));
       if (course && s === 0 && row === 1) return g.put(x, y, z, M("base"));
-      if (timbered && (row === 3 || along % 3 === 0) && !(s === 0 && o.upper))
+      if (
+        timbered &&
+        (row === storey - 1 || along % 3 === 0) &&
+        !(s === 0 && o.upper)
+      )
         return g.put(x, y, z, M("frame"));
       /* A whole cell under the glass: a slab's open half would leave a gap. */
       if (row === 1 && pane(along)) return g.put(x, y, z, M("trim"));
@@ -424,33 +429,37 @@ function building(g, o) {
   return {
     at: (x, y, z, cell) => g.put(x0 + x, y, z0 + z, cell),
     stairs: (from, path, side) => flight(g, local(from), path.map(local), side),
+    storey,
+    top,
     x1,
     z1,
   };
 }
 
 const B = {
-  cottage: () => {
+  cottage: (w = 10, d = 9) => {
     const g = new Grid(),
       h = building(g, {
-        w: 8,
-        d: 7,
+        w,
+        d,
         roofKind: "steep",
         course: true,
         chimney: "west",
       });
     h.at(1, 1, 1, M("table", "table"));
-    h.at(6, 1, 1, M("chest"));
-    h.at(6, 1, 3, M("bench"));
-    h.at(3, 3, 3, M("lamp"));
+    h.at(w - 2, 1, 1, M("chest"));
+    h.at(w - 2, 1, 3, M("bench"));
+    /* Hung up in the roof, clear of the head. */
+    h.at((w >> 1) - 1, h.top + 1, (d - 1) >> 1, M("lamp"));
     return g.done();
   },
-  familyHouse: () => {
+  familyHouse: (w = 11, d = 10) => {
     const g = new Grid(),
       h = building(g, {
-        w: 9,
-        d: 8,
+        w,
+        d,
         storeys: 2,
+        storey: 5,
         roofKind: "gable",
         windows: [1, 2],
         timbered: true,
@@ -458,16 +467,18 @@ const B = {
         upper: true,
         chimney: "east",
       });
-    h.stairs([2, 1, 1], run([3, 1, 1], [1, 0], STOREY), [0, 1]);
-    h.at(4, 1, 4, M("table", "table"));
-    h.at(5, 1, 4, M("table", "table"));
-    h.at(1, 1, 3, M("chest"));
-    h.at(7, 1, 5, M("bench"));
-    h.at(1, 5, 6, M("chest"));
-    h.at(2, 5, 6, M("chest"));
-    h.at(5, 5, 4, M("table", "table"));
-    h.at(4, 3, 3, M("lamp"));
-    h.at(4, 7, 4, M("lamp"));
+    h.stairs([2, 1, 1], run([3, 1, 1], [1, 0], h.storey), [0, 1]);
+    const mx = (w - 1) >> 1,
+      mz = d >> 1;
+    h.at(mx, 1, mz, M("table", "table"));
+    h.at(mx + 1, 1, mz, M("table", "table"));
+    h.at(1, 1, mz - 1, M("chest"));
+    h.at(w - 2, 1, mz + 1, M("bench"));
+    h.at(1, h.storey + 1, d - 2, M("chest"));
+    h.at(2, h.storey + 1, d - 2, M("chest"));
+    h.at(mx + 1, h.storey + 1, mz, M("table", "table"));
+    h.at(mx, h.storey - 1, mz, M("lamp"));
+    h.at(mx, h.top + 1, mz, M("lamp"));
     return g.done();
   },
   farmhouse: () => {
@@ -493,7 +504,7 @@ const B = {
     h.at(7, 1, 3, M("chest"));
     h.at(1, -3, 4, M("chest"));
     h.at(2, -3, 4, M("chest"));
-    h.at(4, 3, 3, M("lamp"));
+    h.at(4, h.top + 1, 3, M("lamp"));
     return g.done();
   },
   inn: () => {
@@ -502,6 +513,7 @@ const B = {
         w: 11,
         d: 8,
         storeys: 2,
+        storey: 5,
         roofKind: "hip",
         windows: [2, 2],
         timbered: true,
@@ -512,7 +524,7 @@ const B = {
         chimney: "west",
         door: 2,
       });
-    h.stairs([4, 1, 1], run([5, 1, 1], [1, 0], STOREY), [0, 1]);
+    h.stairs([4, 1, 1], run([5, 1, 1], [1, 0], h.storey), [0, 1]);
     h.stairs([1, -3, 6], run([1, 0, 2], [0, 1], 4, true), [1, 0]);
     for (const [x, z] of [
       [3, 3],
@@ -520,10 +532,10 @@ const B = {
     ])
       h.at(x, 1, z, M("table", "table"));
     for (let z = 3; z <= 5; z++) h.at(9, 1, z, M("trim", "slab"));
-    for (const x of [2, 4, 6, 8]) h.at(x, 5, 7, M("chest"));
+    for (const x of [2, 4, 6, 8]) h.at(x, h.storey + 1, 7, M("chest"));
     for (const x of [3, 4, 5]) h.at(x, -3, 1, M("chest"));
-    h.at(5, 3, 4, M("lamp"));
-    h.at(5, 7, 4, M("lamp"));
+    h.at(5, h.storey - 1, 4, M("lamp"));
+    h.at(5, h.top + 1, 4, M("lamp"));
     h.at(8, 1, 8, M("lamp"));
     return g.done();
   },
@@ -592,7 +604,7 @@ const B = {
     for (let x = 1; x <= 4; x++) h.at(x, 1, 3, M("trim", "slab"));
     h.at(1, 1, 1, M("bench"));
     h.at(7, 1, 1, M("chest"));
-    h.at(4, 3, 4, M("lamp"));
+    h.at(4, h.top + 1, 4, M("lamp"));
     return g.done();
   },
   barn: () => {
@@ -639,7 +651,7 @@ const B = {
     g.put(2, 0, 0, M("lamp"));
     return g.done();
   },
-  /* A shaft of standing water from its floor to a metre under the ring's top; posts on the ring. */
+  /* A shaft of standing water from its floor to the ring's top; posts on the ring. */
   well: () => {
     const g = new Grid();
     for (let x = 0; x < 3; x++)
@@ -651,7 +663,7 @@ const B = {
         if (post) g.fill(x, 1, z, x, 3, z, M("frame", "post"));
         else if (!c) g.put(x, 1, z, M("base", "slab"));
       }
-    g.fill(1, -3, 1, 1, -1, 1, M("water"));
+    g.fill(1, -3, 1, 1, 0, 1, M("water"));
     roof(g, { x0: 0, x1: 2, z0: 0, z1: 2 }, 4, "gable", "ridge");
     g.put(1, 1, 1, "air");
     return g.done();
@@ -1005,7 +1017,7 @@ const SET = (game, names) =>
       names[i][1],
       names[i][2] ?? note,
       kind,
-      B[style],
+      names[i][3] ?? B[style],
       style,
     ),
   );
@@ -1058,8 +1070,9 @@ const GAME_TEMPLATES = {
   ],
   Tidewater: [
     ...SET("Tidewater", [
-      ["fisher-cottage", "Fisher's cottage"],
-      ["harbour-house", "Harbour house"],
+      /* An island's Settlement has little room: these keep the smaller footprint. */
+      ["fisher-cottage", "Fisher's cottage", undefined, () => B.cottage(8, 7)],
+      ["harbour-house", "Harbour house", undefined, () => B.familyHouse(9, 8)],
       ["shore-farm", "Shore farm"],
       ["harbour-inn", "Harbour inn"],
       ["net-loft", "Net loft"],
@@ -1444,11 +1457,13 @@ function rotateBox([[x0, y0, z0], [x1, y1, z1]], turn) {
 function visibleCells(t, s) {
   const solid = t.cells.filter((c) => c.k === "solid");
   if (s.view === "outside") return solid.filter((c) => c.y >= 0);
-  const floors = {
-    cellar: [-99, -1],
-    ground: [0, STOREY - 1],
-    upper: [STOREY, 2 * STOREY - 1],
-  }[s.floor];
+  /* A lamp hangs a cell up into the roof, so a band reaches past its walls. */
+  const { upper, storey } = storeysOf(t),
+    floors = {
+      cellar: [-99, -1],
+      ground: [0, upper ? storey - 1 : storey],
+      upper: [storey, 2 * storey],
+    }[s.floor];
   const inBand = solid.filter(
     (c) => c.y >= floors[0] && c.y <= floors[1] && c.m !== "roof",
   );
@@ -1478,10 +1493,12 @@ function visibleCells(t, s) {
   );
 }
 function storeysOf(t) {
-  const solid = t.cells.filter((c) => c.k === "solid");
+  const solid = t.cells.filter((c) => c.k === "solid"),
+    floors = solid.filter((c) => c.y > 0 && c.m === "floor").map((c) => c.y);
   return {
     cellar: solid.some((c) => c.y < 0),
-    upper: solid.some((c) => c.y === STOREY && c.m === "floor"),
+    upper: floors.length > 0,
+    storey: floors.length ? Math.min(...floors) : STOREY,
   };
 }
 async function drawStructure() {

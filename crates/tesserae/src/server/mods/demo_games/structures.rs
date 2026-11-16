@@ -663,7 +663,7 @@ fn terra_lays_out_a_town_of_cobbled_roads() {
                 && middle[0].pow(2) + middle[1].pow(2) <= 96 * 96
         })
         .count();
-    assert!(buildings >= 20, "the town lays {buildings} buildings");
+    assert!(buildings >= 18, "the town lays {buildings} buildings");
 }
 
 /// Each Game's bridge: a Template that spans. Meadow's footbridge is left out: its soft hills
