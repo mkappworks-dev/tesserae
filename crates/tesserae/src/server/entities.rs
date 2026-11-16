@@ -51,7 +51,7 @@ impl From<&WorldEntity> for EntityView {
     }
 }
 
-/// A change to what the Client draws. Plain data, the shape step 23 designs
+/// A change to what the Client draws. Plain data, the shape step 24 designs
 /// transport against.
 #[derive(Message, Clone, Copy, PartialEq, Debug)]
 pub enum EntityDelta {

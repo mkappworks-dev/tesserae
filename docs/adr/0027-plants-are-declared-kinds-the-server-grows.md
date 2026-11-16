@@ -136,7 +136,7 @@ Seeds, at least one, once for the tree when the region is first queued, so every
 tree cut down can be replanted; a leaf cut that leaves the tree grounded drops
 none. Player Remove, Mod Commands and burn-out all reach plant Voxels through
 the one write path, so all of them can start a Felling. Falling as a moving body
-is step 25's.
+is step 26's.
 
 A tree is parametric until Structures (step 20): a hash of seed and position
 chooses a whole trunk height inside `trunk-height-m`, and the canopy is an
