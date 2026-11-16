@@ -173,7 +173,8 @@ pub(crate) fn new_world_generator() -> u32 {
     tesserae_core::save::GENERATOR_VERSION
 }
 
-/// What the World is generated with. Under `dev`, `TESSERAE_CAVES=0` and
+/// What the World is generated with. Under `dev`, `TESSERAE_GENERATOR=3` makes a new World with the
+/// version 3 terrain, and `TESSERAE_CAVES=0` and
 /// `TESSERAE_SMOOTHING=0` turn the caves and the slope-smoothing stairs off, so
 /// a streaming change can be measured with and without them on one binary and
 /// not across two builds. `TESSERAE_WATER_LEVEL_M` moves the lake to that
@@ -190,6 +191,11 @@ fn dev_worldgen_params(
 ) -> WorldgenParams {
     let off = |name: &str| env(name).is_some_and(|v| v == "0");
     WorldgenParams {
+        generator: if env("TESSERAE_GENERATOR").is_some() {
+            generator_from(&env)
+        } else {
+            params.generator
+        },
         caves: if off("TESSERAE_CAVES") {
             None
         } else {
@@ -328,6 +334,17 @@ mod tests {
             generator_from(|_| None),
             tesserae_core::save::GENERATOR_VERSION
         );
+    }
+
+    #[cfg(feature = "dev")]
+    #[test]
+    fn the_dev_generator_override_reaches_the_parameters_a_new_world_runs() {
+        let params = dev_worldgen_params(WorldgenParams::default(), |name| {
+            (name == "TESSERAE_GENERATOR").then(|| "3".into())
+        });
+        assert_eq!(params.generator, 3);
+        let params = dev_worldgen_params(WorldgenParams::default(), |_| None);
+        assert_eq!(params.generator, tesserae_core::save::GENERATOR_VERSION);
     }
 
     #[cfg(feature = "dev")]
