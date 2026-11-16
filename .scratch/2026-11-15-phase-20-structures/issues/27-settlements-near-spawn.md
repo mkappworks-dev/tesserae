@@ -31,8 +31,10 @@ Decided 2026-11-16 by the user, from the numbers below:
   diagonal of spawn wherever the ground allows. Each Game sets it on its
   village rows. Contract: WIT (both copies), TOML, validator, snapshot,
   contract-compatibility.
-- **Denser everywhere.** Every Game's Settlement rows draw at chance 1.0, and
-  hamlet lattices close to their floor, twice the hamlet's reach.
+- **Denser everywhere, by about 30%.** Each Game's Settlement rows (chance,
+  and hamlet spacing no closer than its floor, twice the hamlet's reach) are
+  tuned so the census finds about 30% more Settlements than before; the user
+  judged 30 to 60% too many.
 - **Trails past the margin.** Margins stay 24 m. Two or three approach roads
   run on past the margin as trails, 40 to 90 m from the disc, worn path cells
   that follow the ground and stop at water, at a grade too steep, or at
@@ -47,8 +49,8 @@ Decided 2026-11-16 by the user, from the numbers below:
       origin in every Game at the test seeds where the ground allows, tested
       through `Worldgen::chunk`; WIT copies synced, TOML, validator and
       snapshot carry it, and a row without it behaves as before.
-- [ ] Every Game's Settlement rows draw at 1.0 and its hamlet lattice is at
-      its floor; the census finds more Settlements than before in each Game.
+- [ ] The census finds about 30% more Settlements than before in each Game
+      (25 to 35% at seed 7), the near-spawn villages included.
 - [ ] Trails run past the margin 40 to 90 m, follow the grade rules, stop at
       water and at another Settlement's claim, and look the same in any Chunk
       order and at 1.0, 0.5 and 0.25 m.
