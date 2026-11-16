@@ -568,7 +568,13 @@ fn real_terra_new_builds_but_reopened_guest_never_replays_construction() {
     };
     let (_, commands) = bevy::tasks::block_on(guest.tick(context(0))).unwrap();
     assert!(!commands.is_empty());
-    let generation = Generation::capture(loaded.world.unwrap(), &[], &[], &mapping).unwrap();
+    let generation = Generation::capture(
+        loaded.world.unwrap(),
+        &loaded.tables.templates,
+        &loaded.tables.settlements,
+        &mapping,
+    )
+    .unwrap();
     let (simulation, paused) = FluidSim::default().checkpoint(&mapping).unwrap();
     let commit = Commit {
         world: opening.id.clone(),

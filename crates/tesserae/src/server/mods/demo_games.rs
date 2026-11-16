@@ -270,8 +270,8 @@ fn meadow_declares_its_pumpkin_and_building_materials_and_takes_its_ground_from_
     assert_eq!(own[0].1, "meadow:pumpkin");
     assert_eq!(
         own.len(),
-        20,
-        "its pumpkin, 16 building Materials and 3 Stations"
+        26,
+        "its pumpkin, 16 building Materials, 3 Stations and 6 furnishings with the open door"
     );
     assert_eq!(own.last().map(|&(id, _)| id), last, "appended last");
     let ground = loaded.world.unwrap().ground.unwrap();

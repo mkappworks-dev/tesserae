@@ -2513,11 +2513,18 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
         let catalogue = published_catalogue(super::runtime::tests::terra_loaded(1.0));
         assert_eq!(
             catalogue.tools,
-            vec![CatalogueTool {
-                id: crate::server::tool::ToolId(0),
-                name: "terra:measure".into(),
-                kind: tesserae_mods::ToolKind::Measure,
-            }]
+            vec![
+                CatalogueTool {
+                    id: crate::server::tool::ToolId(0),
+                    name: "terra:measure".into(),
+                    kind: tesserae_mods::ToolKind::Measure,
+                },
+                CatalogueTool {
+                    id: crate::server::tool::ToolId(1),
+                    name: "terra:place".into(),
+                    kind: tesserae_mods::ToolKind::Place,
+                },
+            ]
         );
         assert!(published_catalogue(LoadedMods::default()).tools.is_empty());
     }
