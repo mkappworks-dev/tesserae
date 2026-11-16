@@ -557,7 +557,8 @@ controls, movement, save, camera and input work already in flight is tracked in
 | 17  | Weather                 | Weather state and tick, particles, sky hooks                                                      | Weather types, climate rules       | 13         | Not started     |
 | 18  | Plants                  | Growth on the Server tick, placement rules, harvesting                                            | Plant data                         | 13         | Done            |
 | 19  | Map, compass            | Server-provided summaries (the Client never reads World storage), map view                        | Map style, markers                 | 13         | Done            |
-| 20  | Structures              | Template format, deterministic placement by worldgen and tools                                    | Templates                          | 13         | Not started     |
+| 20  | Structures              | Template format, deterministic placement by worldgen and tools                                    | Templates                          | 13         | Done            |
+| 20b | Blueprints and Sites    | Blueprint Items that lay a Site, which builds itself over time from Items brought to it           | Blueprints                         | 15, 20     | Not started     |
 | 21  | Survival loop           | Health, damage, hunger, death, respawn, game modes                                                | Numbers and rules                  | 15         | Done            |
 | 22  | Mobs, animals           | Entity AI hooks, spawning, replication shape designed against transport                           | Behaviours, spawn tables           | 12, 13, 21 | Not started     |
 | 23  | NPCs                    | Persistent identity, dialogue and trade plumbing                                                  | NPC definitions, dialogue          | 15, 22     | Not started     |
@@ -639,45 +640,45 @@ Notes:
   list 16 surface features, Plants included, with vines hung from trees by
   worldgen only. The shared Mods `flora`, `crops` and `aquatic` declare the
   vegetation every Game places. Not shipped: falling trees as bodies (step 24),
-  tree templates (step 20), leaf decay and weather inputs (step 17). Measured by
-  the benchmark pass (Apple M5, thread CPU time, interleaved rounds, load
-  average 8 to 9, `cargo bench -p tesserae-core --bench plants` and the
-  `--ignored` rig in `server/fluids/plants/tests/bench.rs`): `PLANT_SAMPLES`
-  stays 32, so a Sample tick costs 0.01 us a Chunk with no Plant Material, 0.56
-  us a crop-meadow Chunk and 0.34 us a forest Chunk, and
-  `PLANTS_LANDED_PER_STEP` stays 64 (288 us a step when saturated, 4.5 us a
-  landing). `TREES_PER_STEP` is 1: an oak of 4 to 6 m lands whole in 0.16, 0.86
-  and 6.1 ms at 1.0, 0.5 and 0.25 m, so two a step would be 80% of a 15.6 ms
-  step at 0.25 m. `FELLED_PER_STEP` stays 32 (0.11, 0.11 and 0.38 ms a step).
-  Meshing 1024 `cross` Voxels costs 350 us against 209 us for the bare terrain,
-  below the 478 us of 1024 stairs, so flat Shapes stay uncapped; 4096 cost 541
-  us. A surface Chunk of a 16-feature Biome generates in 0.42, 0.24 and 0.20 ms
-  against 0.12, 0.08 and 0.08 bare. Branching trees (ticket 18; limbs, forks,
-  lean and lobes in metres, the shared species of `flora` all branch) cost more:
-  the shared oak is 6590 Voxels at 0.25 m against 3341 and lands in 0.29, 1.58
-  and 10.2 ms at 1.0, 0.5 and 0.25 m against 0.17, 0.86 and 6.1, 65% of a 15.6
-  ms step, so `TREES_PER_STEP` stays 1 (it cannot go lower); a felled step of 32
-  Voxels costs 0.12, 0.14 and 0.74 ms; a surface Chunk of the 16-feature Biome
-  with three branching trees generates in 0.73, 0.41 and 0.54 ms against 0.43,
-  0.25 and 0.20 with plain trees. Density and groves (ticket 19): a feature may
-  declare a `clump`, a scale in metres and a strength whose low-frequency field
-  multiplies its chance at a mean of 1, and the shipped Games tune every Biome
-  to the approved classes (dense trees 3.6 to 4.7 m apart, moderate 5.7 to 8 m,
-  sparse 15 to 67 m, measured over a sample of Chunks). Clumping every feature
-  of the worst-case 16-feature Biome costs a surface Chunk 0.61, 0.31 and 0.22
-  ms at 1.0, 0.5 and 0.25 m against 0.43, 0.25 and 0.20 without (interleaved
-  thread CPU time, load average 7 to 8): one noise evaluation per clumped
-  feature per column that can hold a feature. Harvest is breaking (Use harvests
-  nothing) and a standing fruit tree re-bears: each of its canopy Voxels Samples
-  at a mean of `regrow-seconds` times the tree's expected canopy cells, so the
-  tree grows one unripe fruit about every `regrow-seconds`, up to `density` of
-  its canopy. Measured (load average 8 to 12, the `--ignored` rig, 64 held
-  Chunks of 16 trees): a bare fruit forest costs 32.8 us a step against 23.6 for
-  a forest of fruitless trees, so the re-bearing site is about 0.14 us a Chunk,
-  and at generation's density it is 87.9 us with 4.7 ripenings landing a step;
-  the expected canopy count costs 8, 26 and 176 us once per Plant and Voxel size
-  for the branching oak at 1.0, 0.5 and 0.25 m (1.7, 7.9 and 55 us plain), then
-  is cached. See
+  trees as Templates (step 20 kept them parametric), leaf decay and weather
+  inputs (step 17). Measured by the benchmark pass (Apple M5, thread CPU time,
+  interleaved rounds, load average 8 to 9,
+  `cargo bench -p tesserae-core --bench plants` and the `--ignored` rig in
+  `server/fluids/plants/tests/bench.rs`): `PLANT_SAMPLES` stays 32, so a Sample
+  tick costs 0.01 us a Chunk with no Plant Material, 0.56 us a crop-meadow Chunk
+  and 0.34 us a forest Chunk, and `PLANTS_LANDED_PER_STEP` stays 64 (288 us a
+  step when saturated, 4.5 us a landing). `TREES_PER_STEP` is 1: an oak of 4 to
+  6 m lands whole in 0.16, 0.86 and 6.1 ms at 1.0, 0.5 and 0.25 m, so two a step
+  would be 80% of a 15.6 ms step at 0.25 m. `FELLED_PER_STEP` stays 32 (0.11,
+  0.11 and 0.38 ms a step). Meshing 1024 `cross` Voxels costs 350 us against 209
+  us for the bare terrain, below the 478 us of 1024 stairs, so flat Shapes stay
+  uncapped; 4096 cost 541 us. A surface Chunk of a 16-feature Biome generates in
+  0.42, 0.24 and 0.20 ms against 0.12, 0.08 and 0.08 bare. Branching trees
+  (ticket 18; limbs, forks, lean and lobes in metres, the shared species of
+  `flora` all branch) cost more: the shared oak is 6590 Voxels at 0.25 m against
+  3341 and lands in 0.29, 1.58 and 10.2 ms at 1.0, 0.5 and 0.25 m against 0.17,
+  0.86 and 6.1, 65% of a 15.6 ms step, so `TREES_PER_STEP` stays 1 (it cannot go
+  lower); a felled step of 32 Voxels costs 0.12, 0.14 and 0.74 ms; a surface
+  Chunk of the 16-feature Biome with three branching trees generates in 0.73,
+  0.41 and 0.54 ms against 0.43, 0.25 and 0.20 with plain trees. Density and
+  groves (ticket 19): a feature may declare a `clump`, a scale in metres and a
+  strength whose low-frequency field multiplies its chance at a mean of 1, and
+  the shipped Games tune every Biome to the approved classes (dense trees 3.6 to
+  4.7 m apart, moderate 5.7 to 8 m, sparse 15 to 67 m, measured over a sample of
+  Chunks). Clumping every feature of the worst-case 16-feature Biome costs a
+  surface Chunk 0.61, 0.31 and 0.22 ms at 1.0, 0.5 and 0.25 m against 0.43, 0.25
+  and 0.20 without (interleaved thread CPU time, load average 7 to 8): one noise
+  evaluation per clumped feature per column that can hold a feature. Harvest is
+  breaking (Use harvests nothing) and a standing fruit tree re-bears: each of
+  its canopy Voxels Samples at a mean of `regrow-seconds` times the tree's
+  expected canopy cells, so the tree grows one unripe fruit about every
+  `regrow-seconds`, up to `density` of its canopy. Measured (load average 8 to
+  12, the `--ignored` rig, 64 held Chunks of 16 trees): a bare fruit forest
+  costs 32.8 us a step against 23.6 for a forest of fruitless trees, so the
+  re-bearing site is about 0.14 us a Chunk, and at generation's density it is
+  87.9 us with 4.7 ripenings landing a step; the expected canopy count costs 8,
+  26 and 176 us once per Plant and Voxel size for the branching oak at 1.0, 0.5
+  and 0.25 m (1.7, 7.9 and 55 us plain), then is cached. See
   [ADR-0027](docs/adr/0027-plants-are-declared-kinds-the-server-grows.md) and
   the 2026-11-14 amendments to
   [ADR-0006](docs/adr/0006-shapes-are-table-data.md),
@@ -699,40 +700,88 @@ Notes:
   percent of its raw size, and a save without it opens empty. See
   [ADR-0028](docs/adr/0028-the-map-is-a-server-held-per-player-capture.md). Spec
   and tickets: `.scratch/2026-11-15-phase-19-map-compass/`.
-- **Step 20** is measured (ticket 18; Apple M5, thread CPU time, interleaved
-  rounds, load average 1.6 to 1.7,
-  `cargo bench -p tesserae-core --bench structures`, Templates and Settlements
-  built from core types on 12 m hills with caves and smoothing). The agreed
-  margin: Structures or a Settlement add at most 0.25 ms to a surface Chunk at
-  any Voxel size, whether the Chunk is the first to lay out its lattice cells
-  (cold) or a later one (warm), which is below the 0.30 ms the 16-feature
-  Biome's Plants add at 1 m. Every Chunk a Structure or Settlement reaches used
-  to accept or lay it out again, which put a Template at the cap (64 by 16 by 64
-  m, every cell written) at 0.63, 0.59 and 0.57 ms a Chunk at 1.0, 0.5 and 0.25
-  m and a Settlement at the cap (64 m radius, 24 Plots) at 0.50, 0.37 and 0.36
-  ms; so each generator, and every clone streaming makes of it, now shares a
-  bounded cache of what each lattice cell stands (16,384 Structures, 4,096
-  Settlement sites and 32 laid-out Settlements, forgotten whole when full),
-  which keeps generation a pure function of the seed and metres in any Chunk
-  order and on any thread. Per Chunk, warm then cold against bare: a 7 m house
-  64 m apart costs 0.21 and 0.24 ms against 0.21 and 0.20 at 1 m, 0.13 and 0.15
-  against 0.11 at 0.5 m, and 0.10 and 0.12 against 0.06 at 0.25 m; 14 m apart
-  (the densest it may be) 0.30 and 0.37 against 0.23, 0.15 and 0.19 against
-  0.08, and 0.14 and 0.16 against 0.07; the Template at the cap 0.26 and 0.36
-  against 0.25, 0.21 and 0.28 against 0.13, and 0.20 and 0.26 against 0.08 (the
-  dearest, 0.18 ms over bare); a 32 m village of 12 Plots 0.23 and 0.28 against
-  0.21, 0.17 and 0.22 against 0.11, and 0.15 and 0.20 against 0.08; and the
-  Settlement at the cap 0.24 and 0.31 against 0.23, 0.11 and 0.18 against 0.09,
-  and 0.10 and 0.17 against 0.07. Ratios to bare taken round by round reproduce
-  within a few percent at load average 9 to 12. Sky and deep-rock Chunks beyond
-  the band keep their early-outs (0.01 us with or without Structures). A World
-  without Structures is not free: an interleaved A/B of separate builds puts
-  bare generation at 2.0, 5.1 and 8.5% above main at 1.0, 0.5 and 0.25 m (about
-  5 us a Chunk), the same before and after this ticket; it bisects to the
-  Settlement levelling commit, which changes nothing on the bare path, and the
-  machine code of `Worldgen::chunk` shows its column loop re-addressing the
-  Chunk builder from the stack rather than a register, so it is code generation
-  and stays open.
+- **Step 20** is done. A Game or Mod declares Templates as data in the
+  unreleased 0.3 Declaration: a grid of cells in metres, each a Material, a
+  Shape and an Orientation by full name, or Keep, Air or `ground` (the local
+  Biome's surface Material, its soil below the Ground layer), with a Ground
+  layer, an optional foundation and a level tolerance. A World samples a
+  Template at its own Voxel size, so a Structure has the same footprint in
+  metres at 1.0, 0.5 and 0.25 m
+  ([ADR-0003](docs/adr/0003-voxel-size-is-per-world.md)'s amendment). A Biome
+  lists Structures and Settlements; worldgen stands them as pure functions of
+  the seed and metres, whole across Chunk borders, on level, dry, un-cut ground,
+  and trees, scatter and crop fields keep off them. A Settlement lays roads from
+  a centre and Plots beside them, each building's door facing its road, cuts and
+  fills each Plot level by at most 2 m and builds steep roads as stairs and
+  slabs. Every Material a Template names must be Obtainable in the World, or the
+  World is refused. A Creative Player's `place` Tool opens the Template list,
+  turns a Structure with R and places it whole as one undo group, from a ghost
+  the Server tints cell by cell. Every Game declares fifteen Templates, the
+  `place` Tool and a Settlement (Terra also a town), generated from the approved
+  mockup by `mockup/export-templates.mjs`, and the Rust starter a hut. A World
+  freezes the Templates and Settlements it uses in its generation snapshot, so
+  an old World generates what it did, with no new Generator version. How
+  Structures and Settlements are spread and their roads run is described in one
+  place, the authoring guide's
+  [Where they stand](docs/authoring-guide.md#where-they-stand). See
+  [ADR-0029](docs/adr/0029-structures-are-declared-templates-placed-as-pure-functions-of-metres.md).
+  Spec and tickets: `.scratch/2026-11-15-phase-20-structures/`.
+
+  Not shipped, or shipped short:
+  - Blueprints and Sites are step 20b. Container loot, entities, fluids,
+    weathering variants, mirroring and Structures at coarse LOD levels are out
+    of scope.
+  - A placement that would change more than the undo journal's 131,072 Voxels
+    (`RECORDED_LIMIT`) is refused with `TooBigToUndo` rather than landed without
+    an undo group; at 0.25 m a 32 m building can. Undoing or redoing a group of
+    more than 1,024 Voxels in one tick overflows `MAX_EDIT_EVENTS`, so Mods hear
+    the last 1,024 and a dropped count: a known gap, since spreading undo across
+    ticks would give up its all-or-nothing check.
+  - R is both Respawn and Turn Structure (`TurnStructure`); while the `place`
+    Tool is held it turns the Structure and cancels Respawn, and Settings lets
+    the two share that one key.
+  - Against the approved mockup, the Client's Template list is flat (no Homes,
+    Trades groups or per-Template notes, which nothing declares), the HUD card
+    has no isometric thumbnail (the ghost is in the World) and no buttons (the
+    cursor is grabbed in play; G and right mouse do the same), left mouse does
+    not cancel (Remove is taken while the Tool is held, and there is nothing to
+    cancel), and refusals read the Server's `RejectReason` messages rather than
+    the mockup's wording.
+  - The Tool lays no foundation and plays no Sound for a placement.
+
+  Measured (ticket 18; Apple M5, thread CPU time, interleaved rounds, load
+  average 1.6 to 1.7, `cargo bench -p tesserae-core --bench structures`,
+  Templates and Settlements built from core types on 12 m hills with caves and
+  smoothing). The agreed margin: Structures or a Settlement add at most 0.25 ms
+  to a surface Chunk at any Voxel size, whether the Chunk is the first to lay
+  out its lattice cells (cold) or a later one (warm), which is below the 0.30 ms
+  the 16-feature Biome's Plants add at 1 m. Every Chunk a Structure or
+  Settlement reaches used to accept or lay it out again, which put a Template at
+  the cap (64 by 16 by 64 m, every cell written) at 0.63, 0.59 and 0.57 ms a
+  Chunk at 1.0, 0.5 and 0.25 m and a Settlement at the cap (64 m radius, 24
+  Plots) at 0.50, 0.37 and 0.36 ms; so each generator, and every clone streaming
+  makes of it, now shares a bounded cache of what each lattice cell stands
+  (16,384 Structures, 4,096 Settlement sites and 32 laid-out Settlements,
+  forgotten whole when full), which keeps generation a pure function of the seed
+  and metres in any Chunk order and on any thread. Per Chunk, warm then cold
+  against bare: a 7 m house 64 m apart costs 0.21 and 0.24 ms against 0.21 and
+  0.20 at 1 m, 0.13 and 0.15 against 0.11 at 0.5 m, and 0.10 and 0.12 against
+  0.06 at 0.25 m; 14 m apart (the densest it may be) 0.30 and 0.37 against 0.23,
+  0.15 and 0.19 against 0.08, and 0.14 and 0.16 against 0.07; the Template at
+  the cap 0.26 and 0.36 against 0.25, 0.21 and 0.28 against 0.13, and 0.20 and
+  0.26 against 0.08 (the dearest, 0.18 ms over bare); a 32 m village of 12 Plots
+  0.23 and 0.28 against 0.21, 0.17 and 0.22 against 0.11, and 0.15 and 0.20
+  against 0.08; and the Settlement at the cap 0.24 and 0.31 against 0.23, 0.11
+  and 0.18 against 0.09, and 0.10 and 0.17 against 0.07. Ratios to bare taken
+  round by round reproduce within a few percent at load average 9 to 12. Sky and
+  deep-rock Chunks beyond the band keep their early-outs (0.01 us with or
+  without Structures). A World without Structures is not free: an interleaved
+  A/B of separate builds puts bare generation at 2.0, 5.1 and 8.5% above main at
+  1.0, 0.5 and 0.25 m (about 5 us a Chunk), the same before and after this
+  ticket; it bisects to the Settlement levelling commit, which changes nothing
+  on the bare path, and the machine code of `Worldgen::chunk` shows its column
+  loop re-addressing the Chunk builder from the stack rather than a register, so
+  it is code generation and stays open.
 
 - **Step 21** is done. A World has a default game mode and each Player their
   own, Creative or Survival; Edit World's changes wait in the sidecar until the

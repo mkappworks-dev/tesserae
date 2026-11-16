@@ -225,6 +225,22 @@ row, a radius over 64 m, more than 24 Plots or an unknown Template is a load
 error naming the Settlement. A World whose Biomes list none generates exactly as
 before, with no generator version change.
 
+Every Material a `template-def` names, and every `settlement-def`'s `path`, must
+be Obtainable in the World: laid, grown or dropped by worldgen, or made by a
+Recipe from what is. A breach refuses the World, naming the Template, the
+palette character (or `foundation`) and the Material, and a Grown Material or a
+Door's open Material in a `template-voxel` is refused outright. This is a loader
+rule, not a contract field
+([Loader rules are not the contract](#loader-rules-are-not-the-contract)).
+
+<!-- ticket-20 -->
+
+A `biome-settlement` row then gained a `chance`, above 0 and at most 1, as a
+`biome-structure` row has, so a Declaration built against the earlier 0.3 text
+needs a rebuild.
+
+<!-- /ticket-20 -->
+
 ## What is not frozen
 
 Line `0.x` is pre-release. Later gameplay steps may add new lines, and

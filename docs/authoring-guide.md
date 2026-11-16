@@ -148,70 +148,75 @@ which eases across the border where `ground` switches. A Biome may also name a
 ease to the blend of the Biomes around the Player. A Biome may list up to 16
 `surface-features`, solid Materials or [Plants](#plants) the Engine stands one
 Voxel above the Biome's surface Material at a mean spacing in metres (see
-[Data Mods](data-mods.md)); a Mod still places no terrain itself. Any Mod may
-declare Sounds and Sound sets and give a Sound set to any Mod's Material, and
-Soundscapes of ambient beds and music; only the Game's Soundscapes take a
-`context`, which the Engine plays as the Player's Eye goes underground or
-underwater (see [Data Mods](data-mods.md)).
+[Data Mods](data-mods.md)); a Mod still places no terrain itself. A Biome may
+also list `structures` and `settlements`, the [Templates](#templates) and
+[Settlements](#settlements) worldgen stands in it. Any Mod may declare Sounds
+and Sound sets and give a Sound set to any Mod's Material, and Soundscapes of
+ambient beds and music; only the Game's Soundscapes take a `context`, which the
+Engine plays as the Player's Eye goes underground or underwater (see
+[Data Mods](data-mods.md)).
 
-| Table                       | Fields                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `[[materials]]`             | `name`, `emission` (0 to 15), `dimming` (0 to 15), `occlusion`, `render`, `solid`, optional `remove-time-s`, optional `contact-damage-per-s` (0 to 1000 health per second while a Player's body overlaps it), optional `tags` (at most 8 labels, `[a-z][a-z0-9-]{0,31}`; a Plant's `soil`, `stands-in` and water `fluid` may name `#tag`)                                                                                                                                                                                                                                                                                                                               |
-| `[[shapes]]`                | `name`, `boxes`, optional `collision`, optional `connect`, optional `form` (`box`, `cross` or `plane`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| box in `boxes`              | `min`, `max`: three integers, sixteenths of a Voxel                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| box in `collision`          | `min`, `max`: three signed integers, sixteenths of a Voxel                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| `[shapes.connect]`          | `group`, `connects-to`, `to-sealed`, `arms` (each: `face`, `boxes`, optional `collision`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| `[[appearance]]`            | `material` (a local name), `color` (four RGBA bytes), optional `texture` (a PNG path)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| `[world]` (Game)            | optional `sea-level-m`, `relief-m`, `feature-size-m`, `soil-depth-m`, `octaves`, and the tables below                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| `[world.ground]`            | `rock`, `soil`, `surface`: full `<mod id>:<name>` Material names                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| `[world.caves]`             | `feature-size-m`, `radius-m`, `floor-m`, `octaves`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| `[world.smoothing]`         | `min-rise-m`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| `[world.water]`             | `level-m`, `material` (a fluid, by full name)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| `[world.climate]` (Game)    | `temperature-size-m`, `humidity-size-m` (metres; omitted keeps 512 m)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| `[world.movement]`          | `allow-flight`, `allow-physics`, `start-in-flight`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| `[world.map]` (Game)        | `enabled` (`false` forbids the Map and the Compass in the World; omitted permits them)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| `[world.character]`         | `pixel-m`, `skin` (a 64 by 64 PNG path), `idle`, `walk`, `sprint`, `airborne`, `crouch` (each `swing-deg`, `rate-hz`, `arm-raise-deg`), `bones`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| `[[world.character.bones]]` | `name`, optional `parent`, `role`, `pivot`, `cubes` (each `origin`, `size`, `uv`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| `[view]` (Game)             | `view-distance-m`, `lod-distance-m`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| `[[fluids]]`                | `material`, `reach-m`, `sideways-m-per-s`, `downward-m-per-s`, `recession-m-per-s`, `reset-drop-m`, `waterlogs`, `extinguishes`, optional `heat` (`strength`, `reach-m`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| `[[reactions]]`             | `first`, `second` (each `fluid`, `state`), `consumed`, optional `product`, optional `receiving`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| `[[combustion]]`            | `fuel`, `ignition-threshold`, `ignition-delay-s`, `emission`, optional `heat`, `end`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| `[[tools]]` (Game)          | `name`, `kind`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| `[[items]]`                 | `name`, `size-m` (0.05 to 0.5 m), `color`, optional `material` (solid; at most one item per Material; removing a Voxel of it drops the item), optional `max-stack` (1 to 64; omitted is 64), optional `food` (hunger restored, above 0 and at most 1000), optional `texture` (a 16 by 16 PNG path: a flat sprite)                                                                                                                                                                                                                                                                                                                                                       |
-| `[[plants]]`                | `name`, `kind`, `seed` (an Item), optional `shape`, `[plants.needs]`, then by kind: `stages`, optional `harvest-to` and `fruit-vine` (`crop`); `sapling`, `trunk`, `canopy`, `trunk-height-m`, `canopy-radius-m`, `mean-seconds`, the yields, optional `fruit`, `vines` and `branching` (`tree`); `material`, `max-height-m`, `direction`, `mean-seconds`, optional `stands-in` (`column`); `material`, `reach-m`, `mean-seconds`, `density`, optional `min-neighbours` (`spreader`); `material`, `mean-seconds`, `length-m` (`climber`); 128 per Mod, 512 in a World                                                                                                   |
-| `[[biomes]]`                | `name`, `temperature`, `humidity` (both 0 to 1), optional `ground` (`rock`, `soil`, `surface`: solid Materials by full name), optional `sky-fog` (`sky`, `fog`: sRGB `[r, g, b]`), optional `cave-scale` (0 to 4), optional `surface-features` (at most 16, each `material`: a solid by full name, or `plant`: a Plant by full name, optional `shape`, `spacing-m`: 1 to 1024, optional `clump`: `{ scale-m, strength }`, optional `field`: `{ group, scale-m, strays }`), optional `crop-fields` (at most 2, each `crops`: `[plant, weight]` pairs, `plot-m`: `[low, high]`, `spacing-m`, optional `path`, `ditch`, `near-water-m`); at most 16 per Mod and in a World |
-| `[[marker-kinds]]`          | `name`, `icon` (`home`, `camp`, `mine`, `farm`, `landmark`, `death`, `flag`, `pin` or `star`), `color` (four RGBA bytes); 16 per Mod                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| `death-marker-kind` (Game)  | the full `<mod id>:<name>` of the Marker kind a death leaves; a top-level key, before any table                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| `[survival]` (Game)         | each optional, omitted keeps the engine's default: `max-health` (20), `max-hunger` (20), `max-air-s` (10), `safe-fall-m` (3), `fall-damage-per-m` (1), `drowning-damage-per-s` (2), `hunger-per-min` (1), `sprinting-hunger-per-min` (2), `regeneration-hunger` (18), `regeneration-per-s` (0.25), `starvation-damage-per-s` (0.25), `keep-inventory` (false)                                                                                                                                                                                                                                                                                                           |
-| `[[ores]]`                  | `material` (solid), `min-depth-m`, `max-depth-m`, `vein-size-m`, `rarity`, optional `biomes`; 16 per Mod, 32 in a World                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| `[[sounds]]`                | `name`, `category`, `recordings` (at least one, each `file`: an Ogg Vorbis path, `weight`), `volume` and `pitch` (each `min`, `max`), optional `distance` (`reference-m`, `max-m`: required for `effects`, refused for the others)                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| `[[sound-sets]]`            | `name`, optional `break`, `place`, `hit`, `step`, `land`: each an `effects` Sound by full name                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| `[[material-sounds]]`       | `material`, `sound-set`: both by full name; at most one Sound set per Material in a World                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| `[[recipes]]`               | `inputs` (1 to 9 different Items, each `item`: by full name, `count`: at least 1), `output` (`item`, `count`: 1 to the Item's `max-stack`), `station` (`"hand"` or a Station's tag); 256 per Mod, 1024 in a World                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| `[[voxel-uses]]`            | `kind`, `material` (solid, by full name), then by kind: `open` for a `door` (solid, by full name) and optional `width-m` (0.5 to 4; omitted is 1) and `height-m` (1 to 4; omitted is 2), optional `slots` for a `container` (1 to 54; omitted is 27), `tag` for a `station`; optional `shape` for any kind (a Shape by full name); 64 per Mod                                                                                                                                                                                                                                                                                                                           |
-| `[[cause-sounds]]` (Game)   | `cause`, `sound` (an `effects` Sound by full name); each Cause at most once                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| `[[soundscapes]]`           | `name`, optional `context` (Game only, at most one each), `beds` (at most 8, each `sound`: an `ambient` Sound by full name, `volume`: 0 to 1), `music` (at most 8 `music` Sounds by full name), optional `silence-s` (`min`, `max`: 0 to 3600 s, default 60 to 180); 16 per Mod                                                                                                                                                                                                                                                                                                                                                                                         |
+| Table                       | Fields                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `[[materials]]`             | `name`, `emission` (0 to 15), `dimming` (0 to 15), `occlusion`, `render`, `solid`, optional `remove-time-s`, optional `contact-damage-per-s` (0 to 1000 health per second while a Player's body overlaps it), optional `tags` (at most 8 labels, `[a-z][a-z0-9-]{0,31}`; a Plant's `soil`, `stands-in` and water `fluid` may name `#tag`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `[[shapes]]`                | `name`, `boxes`, optional `collision`, optional `connect`, optional `form` (`box`, `cross` or `plane`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| box in `boxes`              | `min`, `max`: three integers, sixteenths of a Voxel                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| box in `collision`          | `min`, `max`: three signed integers, sixteenths of a Voxel                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `[shapes.connect]`          | `group`, `connects-to`, `to-sealed`, `arms` (each: `face`, `boxes`, optional `collision`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `[[appearance]]`            | `material` (a local name), `color` (four RGBA bytes), optional `texture` (a PNG path)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `[world]` (Game)            | optional `sea-level-m`, `relief-m`, `feature-size-m`, `soil-depth-m`, `octaves`, and the tables below                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `[world.ground]`            | `rock`, `soil`, `surface`: full `<mod id>:<name>` Material names                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `[world.caves]`             | `feature-size-m`, `radius-m`, `floor-m`, `octaves`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `[world.smoothing]`         | `min-rise-m`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `[world.water]`             | `level-m`, `material` (a fluid, by full name)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `[world.climate]` (Game)    | `temperature-size-m`, `humidity-size-m` (metres; omitted keeps 512 m)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `[world.movement]`          | `allow-flight`, `allow-physics`, `start-in-flight`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `[world.map]` (Game)        | `enabled` (`false` forbids the Map and the Compass in the World; omitted permits them)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `[world.character]`         | `pixel-m`, `skin` (a 64 by 64 PNG path), `idle`, `walk`, `sprint`, `airborne`, `crouch` (each `swing-deg`, `rate-hz`, `arm-raise-deg`), `bones`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `[[world.character.bones]]` | `name`, optional `parent`, `role`, `pivot`, `cubes` (each `origin`, `size`, `uv`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `[view]` (Game)             | `view-distance-m`, `lod-distance-m`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `[[fluids]]`                | `material`, `reach-m`, `sideways-m-per-s`, `downward-m-per-s`, `recession-m-per-s`, `reset-drop-m`, `waterlogs`, `extinguishes`, optional `heat` (`strength`, `reach-m`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `[[reactions]]`             | `first`, `second` (each `fluid`, `state`), `consumed`, optional `product`, optional `receiving`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `[[combustion]]`            | `fuel`, `ignition-threshold`, `ignition-delay-s`, `emission`, optional `heat`, `end`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `[[tools]]` (Game)          | `name`, `kind`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `[[items]]`                 | `name`, `size-m` (0.05 to 0.5 m), `color`, optional `material` (solid; at most one item per Material; removing a Voxel of it drops the item), optional `max-stack` (1 to 64; omitted is 64), optional `food` (hunger restored, above 0 and at most 1000), optional `texture` (a 16 by 16 PNG path: a flat sprite)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `[[plants]]`                | `name`, `kind`, `seed` (an Item), optional `shape`, `[plants.needs]`, then by kind: `stages`, optional `harvest-to` and `fruit-vine` (`crop`); `sapling`, `trunk`, `canopy`, `trunk-height-m`, `canopy-radius-m`, `mean-seconds`, the yields, optional `fruit`, `vines` and `branching` (`tree`); `material`, `max-height-m`, `direction`, `mean-seconds`, optional `stands-in` (`column`); `material`, `reach-m`, `mean-seconds`, `density`, optional `min-neighbours` (`spreader`); `material`, `mean-seconds`, `length-m` (`climber`); 128 per Mod, 512 in a World                                                                                                                                                                                                                                                                                                                                                                                 |
+| `[[biomes]]`                | `name`, `temperature`, `humidity` (both 0 to 1), optional `ground` (`rock`, `soil`, `surface`: solid Materials by full name), optional `sky-fog` (`sky`, `fog`: sRGB `[r, g, b]`), optional `cave-scale` (0 to 4), optional `surface-features` (at most 16, each `material`: a solid by full name, or `plant`: a Plant by full name, optional `shape`, `spacing-m`: 1 to 1024, optional `clump`: `{ scale-m, strength }`, optional `field`: `{ group, scale-m, strays }`), optional `crop-fields` (at most 2, each `crops`: `[plant, weight]` pairs, `plot-m`: `[low, high]`, `spacing-m`, optional `path`, `ditch`, `near-water-m`), optional `structures` (at most 4, each `template`: by full name, `spacing-m`: twice the Template's longer side to 4096, `chance`: above 0, at most 1), optional `settlements` (at most 2, each `settlement`: by full name, `spacing-m`: twice its radius and margin to 4096); at most 16 per Mod and in a World |
+| `[[templates]]`             | `name`, `cell-m` (metres), `palette` (one character to `"keep"`, `"air"`, `"ground"` or `{ material, shape, orientation }`), `layers` (bottom up, each rows along +Z of characters along +X), `ground-layer`, optional `foundation` (a solid by full name), optional `level-tolerance-m` (0 to 16; omitted is 1); at most 64 m a side and 65,536 cells, 64 in a World                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `[[settlements]]`           | `name`, `radius-m` (above 0, at most 64), optional `margin-m` (0 to 64; omitted is 16), optional `centre` (a Template by full name), `plots` (at most 24), `templates` (1 to 24, each `template`: by full name, optional `weight`: above 0, omitted is 1, `min`: omitted is 0, `max`: omitted is 24), optional `minimum` (omitted is 0), `path` (a solid by full name), optional `path-shape`; 16 in a World                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `[[marker-kinds]]`          | `name`, `icon` (`home`, `camp`, `mine`, `farm`, `landmark`, `death`, `flag`, `pin` or `star`), `color` (four RGBA bytes); 16 per Mod                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `death-marker-kind` (Game)  | the full `<mod id>:<name>` of the Marker kind a death leaves; a top-level key, before any table                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `[survival]` (Game)         | each optional, omitted keeps the engine's default: `max-health` (20), `max-hunger` (20), `max-air-s` (10), `safe-fall-m` (3), `fall-damage-per-m` (1), `drowning-damage-per-s` (2), `hunger-per-min` (1), `sprinting-hunger-per-min` (2), `regeneration-hunger` (18), `regeneration-per-s` (0.25), `starvation-damage-per-s` (0.25), `keep-inventory` (false)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `[[ores]]`                  | `material` (solid), `min-depth-m`, `max-depth-m`, `vein-size-m`, `rarity`, optional `biomes`; 16 per Mod, 32 in a World                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `[[sounds]]`                | `name`, `category`, `recordings` (at least one, each `file`: an Ogg Vorbis path, `weight`), `volume` and `pitch` (each `min`, `max`), optional `distance` (`reference-m`, `max-m`: required for `effects`, refused for the others)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `[[sound-sets]]`            | `name`, optional `break`, `place`, `hit`, `step`, `land`: each an `effects` Sound by full name                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `[[material-sounds]]`       | `material`, `sound-set`: both by full name; at most one Sound set per Material in a World                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `[[recipes]]`               | `inputs` (1 to 9 different Items, each `item`: by full name, `count`: at least 1), `output` (`item`, `count`: 1 to the Item's `max-stack`), `station` (`"hand"` or a Station's tag); 256 per Mod, 1024 in a World                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `[[voxel-uses]]`            | `kind`, `material` (solid, by full name), then by kind: `open` for a `door` (solid, by full name) and optional `width-m` (0.5 to 4; omitted is 1) and `height-m` (1 to 4; omitted is 2), optional `slots` for a `container` (1 to 54; omitted is 27), `tag` for a `station`; optional `shape` for any kind (a Shape by full name); 64 per Mod                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `[[cause-sounds]]` (Game)   | `cause`, `sound` (an `effects` Sound by full name); each Cause at most once                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `[[soundscapes]]`           | `name`, optional `context` (Game only, at most one each), `beds` (at most 8, each `sound`: an `ambient` Sound by full name, `volume`: 0 to 1), `music` (at most 8 `music` Sounds by full name), optional `silence-s` (`min`, `max`: 0 to 3600 s, default 60 to 180); 16 per Mod                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 
 Variants: `occlusion` is `opaque`, `same-material` or `never`; `render` is
 `opaque`, `blend` or `cutout`; a Sound `category` is `effects`, `ambient` or
 `music`; a Soundscape `context` is `default`, `underground` or `underwater`; a
 bone `role` is `body`, `head`, `arm-left`, `arm-right`, `leg-left`, `leg-right`
 or `fixed`; a reactant `state` is `any`, `source` or `flowing`; `consumed` and
-`receiving` are `first` or `second`; a tool `kind` is `measure`; a voxel-use
-`kind` is `door`, `container` or `station`; a Plant `kind` is `crop`, `tree`,
-`column`, `spreader` or `climber`; a Shape `form` is `box`, `cross` or `plane`;
-a column `direction` is `up` or `down`. A combustion `end` is `"permanent"` or
-`{ after = { seconds = 8, residue = "mod:ash" } }`, and an omitted `residue`
-removes the solid.
+`receiving` are `first` or `second`; a tool `kind` is `measure` or `place`; a
+voxel-use `kind` is `door`, `container` or `station`; a Plant `kind` is `crop`,
+`tree`, `column`, `spreader` or `climber`; a Shape `form` is `box`, `cross` or
+`plane`; a column `direction` is `up` or `down`. A combustion `end` is
+`"permanent"` or `{ after = { seconds = 8, residue = "mod:ash" } }`, and an
+omitted `residue` removes the solid.
 
-Materials, Shapes, Biomes, Plants, Marker kinds, Sounds, Sound sets and
-Soundscapes are declared by local name. Ground, water, fluid, reaction,
-combustion, ore and surface feature names, the Biomes an ore lists, the names in
-Sound sets, `material-sounds` and Soundscapes, and the Items, Materials, Shapes
-and `#tag`s in `recipes`, `voxel-uses` and `plants`, are full `<mod id>:<name>`
-names and resolve after every Mod has declared, whether the Material came from
-data or from a component. A Recipe may name a Material's implicit Item, which
-has the Material's full name.
+Materials, Shapes, Biomes, Plants, Marker kinds, Sounds, Sound sets,
+Soundscapes, Templates and Settlements are declared by local name. Ground,
+water, fluid, reaction, combustion, ore and surface feature names, the Biomes an
+ore lists, the names in Sound sets, `material-sounds` and Soundscapes, the
+Items, Materials, Shapes and `#tag`s in `recipes`, `voxel-uses` and `plants`,
+and every name in `templates`, `settlements` and a Biome's `structures` and
+`settlements`, are full `<mod id>:<name>` names and resolve after every Mod has
+declared, whether the Material came from data or from a component. A Recipe may
+name a Material's implicit Item, which has the Material's full name.
 
 ### A Declaration using every table
 
@@ -448,6 +453,8 @@ humidity = 0.4
 ground = { rock = "showcase:stone", soil = "showcase:ash", surface = "showcase:wood" }
 sky-fog = { sky = [150, 164, 184], fog = [176, 190, 208] }
 surface-features = [{ material = "showcase:iron", spacing-m = 32.0 }]
+structures = [{ template = "showcase:hut", spacing-m = 64.0, chance = 0.5 }]
+settlements = [{ settlement = "showcase:hamlet", spacing-m = 96.0 }]
 
 [[ores]]
 material = "showcase:iron"
@@ -456,6 +463,35 @@ max-depth-m = 40.0
 vein-size-m = 3.0
 rarity = 0.05
 biomes = ["showcase:cold"]
+
+[[templates]]
+name = "hut"
+cell-m = 1.0
+ground-layer = 1
+foundation = "showcase:stone"
+layers = [
+  ["gggg", "g..g", "g..g", "gggg"],
+  ["wwww", "w.ww", "wwww", "wwww"],
+  ["ssss", "s..s", "s..s", "s..s"],
+  ["ssss", "s..s", "s..s", "s..s"],
+  ["_rr_", "rrrr", "rrrr", "_rr_"],
+]
+
+[templates.palette]
+"s" = { material = "showcase:stone" }
+"w" = { material = "showcase:wood" }
+"r" = { material = "showcase:wood", shape = "core:slab" }
+"g" = "ground"
+"." = "air"
+"_" = "keep"
+
+[[settlements]]
+name = "hamlet"
+radius-m = 16.0
+plots = 4
+minimum = 2
+path = "showcase:stone"
+templates = [{ template = "showcase:hut", weight = 1.0, min = 1, max = 4 }]
 
 [[sounds]]
 name = "crack"
@@ -1001,6 +1037,258 @@ tree's `trunk-yield` gives the placed Item. A Player builds with the placed one,
 and since only grown Materials are ever part of a Felling, a cabin of placed
 logs and leaves stays standing when one log is cut, however much it looks like a
 tree.
+
+## Templates and Settlements
+
+A Template is a building declared as data: a grid of cells in metres, each a
+Material, a Shape and an Orientation, or Keep
+([ADR-0029](adr/0029-structures-are-declared-templates-placed-as-pure-functions-of-metres.md)).
+A Biome lists the Templates worldgen stands in it as Structures, and the
+Settlements it lays out of them; a Creative Player stamps one with the `place`
+Tool. Nothing is stored per Structure: once placed it is only Voxels. The Engine
+ships no Template, so a World with no Game has none.
+
+### Templates
+
+The hut in [A Declaration using every table](#a-declaration-using-every-table):
+
+```toml
+[[templates]]
+name = "hut"
+cell-m = 1.0
+ground-layer = 1
+foundation = "showcase:stone"
+layers = [
+  ["gggg", "g..g", "g..g", "gggg"],
+  ["wwww", "w.ww", "wwww", "wwww"],
+  ["ssss", "s..s", "s..s", "s..s"],
+  ["ssss", "s..s", "s..s", "s..s"],
+  ["_rr_", "rrrr", "rrrr", "_rr_"],
+]
+
+[templates.palette]
+"s" = { material = "showcase:stone" }
+"w" = { material = "showcase:wood" }
+"r" = { material = "showcase:wood", shape = "core:slab" }
+"g" = "ground"
+"." = "air"
+"_" = "keep"
+```
+
+`layers` run from the bottom up. Each is a list of rows, the first at the -Z
+edge, and each row is a string of palette characters along +X; every layer has
+the same rows and every row the same length. This hut is 4 by 5 by 4 m: a cellar
+walled in the local soil, a wooden floor with a hole down into it, stone walls
+with a doorway on the +Z side, and a slab roof whose corners are Keep.
+
+A palette character is one of:
+
+- `{ material, shape, orientation }`: a solid Material by full name, a Shape by
+  full name (omitted is a full cube) and an orientation byte, `up * 4 + turn`, 0
+  to 23 (omitted is 0). A Door is its closed Material and a Container is empty
+  until a Player fills it. A fluid, a Grown Material and a Door's open Material
+  are refused.
+- `"air"`: carves, so a cellar is cut into the ground and a room into a
+  hillside.
+- `"keep"`: never written, so what the Structure stands in shows through.
+- `"ground"`: the surface Material of the Biome the column stands in, at and
+  above the Ground layer, and its soil below, as a full cube. One Template then
+  sits on grass, sand or snow alike. Rock is never used, however deep a cellar
+  goes.
+
+`ground-layer` is required: the layer, counted from 0 at the bottom, that sits
+at ground height. Layers below it are underground. `foundation` is a solid
+Material that worldgen fills under each column, from the ground up to the lowest
+layer, so a Structure on uneven ground does not float; the `place` Tool lays
+none. `level-tolerance-m`, 0 to 16 m and 1 when omitted, is how far the ground
+under a Structure may rise and fall.
+
+`cell-m` is the grid's cell size in metres. A World takes, for each of its
+Voxels, the cell its centre falls in, so a Template whose sides are whole metres
+has the same footprint at 1.0, 0.5 and 0.25 m. A side that is not a whole number
+of the World's Voxels rounds to the nearest: a 0.5 m side is one Voxel in a 1 m
+World. A cell finer than the World loses detail, and a coarser one repeats.
+
+A Structure turns in quarter turns about the vertical axis; one quarter takes
+the Template's +Z edge to +X, and every cell's Orientation turns with it. It is
+never mirrored.
+
+A Template is at most 64 m a side and 65,536 cells, and a World holds at most 64
+from all its Mods. Any Mod may declare one, and an unknown Material or Shape, a
+character not in the palette or a grid over a limit is a load error naming the
+Template and the cell. A component returns the same record as a `TemplateDef`:
+the [Rust starter](../starters/rust/src/lib.rs) declares a stone hut in its
+`hut()`. The five demo Games generate theirs from the approved mockup with
+`node mockup/export-templates.mjs`, into `games/<game>/src/templates.rs`, and
+list them in `games/<game>/src/structures.rs`.
+
+### Obtainable
+
+Every Material a Template names, and every Settlement's `path`, must be
+Obtainable in the World: a Player there can get its Item without the building.
+The Engine works it out once, when a World's Game and Mods are composed:
+
+1. Start from what worldgen lays: the World's and each Biome's ground, the lake
+   fluid, ores, surface features and crop fields.
+2. Add what those give: breaking a laid Material gives its Plant's yields, else
+   its own Item, and a laid Plant grows every Material of that Plant.
+3. Add every Recipe output whose inputs are already Obtainable, until nothing
+   changes. Stations are not checked.
+
+Structures, the Catalogue and Mod Commands are not sources: a building is never
+the only source of its own Materials. A `ground` cell is always Obtainable,
+since the Biome lays it. Every Template the World declares is checked, whether a
+Biome lists it or not, and a breach refuses the World before it opens, naming
+the Template, the palette character (or `foundation`) and the Material:
+
+```text
+mod `showcase`: template 0 `hut`: palette `s`: Material `showcase:marble` is not Obtainable: no Biome lays it, no Plant yields it and no Recipe makes it from what is
+```
+
+Add a Recipe that makes it from Obtainable Items, a Biome or ore that lays it,
+or a dependency on a Mod that does.
+
+### Biomes stand Structures
+
+A Biome lists at most 4 `structures` rows:
+
+```toml
+structures = [{ template = "showcase:hut", spacing-m = 64.0, chance = 0.5 }]
+```
+
+`spacing-m` is at least twice the Template's longer side and at most 4096 m, and
+`chance`, above 0 and at most 1, is the share of lattice cells that try one.
+[Where they stand](#where-they-stand) says how places are picked. A place is
+taken only if every column of the footprint, sampled a metre apart:
+
+- is in a Biome that lists the Template;
+- is above the lake;
+- has no cave cutting its top metre;
+- and lies within the Template's `level-tolerance-m` of every other.
+
+The Ground layer then sits on the lower median of those heights, and the
+`foundation` fills down to any column that falls further. A Structure's non-Keep
+cells overwrite terrain, ore and lake water. Trees, scatter and crop fields keep
+off its footprint, and a Structure never asks about them. Each Chunk works out
+every Structure that can reach it and writes only its own Voxels, so a Structure
+is whole across Chunk borders whichever Chunk generates first, and the same at
+every Voxel size. The coarse LOD levels leave Structures out, and a Player never
+spawns inside one.
+
+A World freezes the Templates and Settlements its Biomes name in its generation
+snapshot when it is created. Editing a Template later changes nothing in a saved
+World, and a World saved before its Game had Templates generates none.
+
+### Settlements
+
+A Settlement is a village or town declared as rules rather than drawn, so no two
+are alike. The hamlet in
+[A Declaration using every table](#a-declaration-using-every-table):
+
+```toml
+[[settlements]]
+name = "hamlet"
+radius-m = 16.0
+plots = 4
+minimum = 2
+path = "showcase:stone"
+templates = [{ template = "showcase:hut", weight = 1.0, min = 1, max = 4 }]
+```
+
+and its Biome's row:
+
+```toml
+settlements = [{ settlement = "showcase:hamlet", spacing-m = 96.0 }]
+```
+
+- `radius-m`, above 0 and at most 64, is the disc it is laid out in; every
+  Template it names must be no wider than that.
+- `margin-m`, 0 to 64 m and 16 when omitted, keeps single Structures that far
+  outside the disc.
+- `centre` is an optional Template stood at the centre, such as a well. It must
+  pass a single Structure's ground rules, or no Settlement stands there.
+- `plots`, at most 24, is how many Plots it tries to fill, drawn from
+  `templates`: each Template's `min` first, then by `weight` up to `plots`,
+  never past a Template's `max`.
+- `minimum`: fewer Plots standing than this, or a Template's `min` unmet, and
+  the Settlement is dropped. Poor ground makes a Settlement smaller before it
+  makes it missing.
+- `path` and `path-shape` are its Roads: a solid Material, Obtainable, and the
+  Shape level Road takes.
+
+A Biome lists at most 2 `settlements` rows, each a `spacing-m` at least twice
+the radius and margin and at most 4096 m. Settlements claim ground first, then
+single Structures, crop fields, trees and scatter, and nothing asks back up that
+chain; a later row gives way to an earlier one it would overlap.
+
+Every Plot's door faces its Road. The door is the first closed Door cell in the
+lowest layer, from the Ground layer up, that holds one; a Template with none
+turns its +Z edge to the Road, so an open-fronted barn or a market stall opens
+onto it. A Plot stands where every metre sample of its footprint and a 2 m Apron
+round it is dry, no cave cuts the footprint's top metre, and every sample is
+within 1.5 m of the footprint's lower median. It is then cut and filled level,
+by at most 2 m, and the Apron eases back to the natural ground, so a hillside
+village sits on terraces with no cliff at their edges. A Plot needs no
+foundation, and the heightmap is unchanged. A Plot whose ground fails stays
+empty, and a single Structure in the wild keeps its strict level rule.
+
+The demo Games declare a village of their ten buildings round a well, and Terra
+also a town; see `games/<game>/src/structures.rs`.
+
+### Where they stand
+
+This section is the one place that says how Structures, Settlements, Plots and
+Roads are spread; the rules above do not depend on it.
+
+Each `structures` row has its own square lattice of `spacing-m` cells, salted by
+Biome and row. A hash of the seed and the cell decides, against `chance`,
+whether the cell holds a Structure, and up to 4 draws of a turn and a corner on
+whole metres, inset 0.5 m from the cell's border, are tried against the ground
+rules; the first that passes stands. A later row's draw gives way to an earlier
+row's Structure it would touch.
+
+Each `settlements` row has a lattice of its own. Every cell draws a centre on
+whole metres, placed so its disc and margin stay inside the cell. From the
+centre 3 or 4 Roads branch in 4 m steps, each step the gentlest of 5 bends that
+stays in the disc, dry, off the centre's Plot and no steeper than 0.45 rise over
+run; a Road is the metre cells within 1.5 m of its line. Plots are tried every 2
+m along each Road, on both sides and from the centre out, each with its door 3.5
+m back from the Road.
+
+Roads are graded over the Settlement's metre grid, no steeper than 0.45 rise
+over run, and laid in the `path` Material on the ground. Level Road takes
+`path-shape`; where it climbs it becomes the built-in slab and stair in the
+`path` Material, never more than half a Voxel between neighbours, so a Player
+walks up it. A stretch more than 2 m above or below its ground is not laid.
+
+<!-- ticket-20 -->
+
+A `settlements` row also takes a `chance`, above 0 and at most 1, as a
+`structures` row does, so not every cell holds a Settlement.
+
+<!-- /ticket-20 -->
+
+### The place Tool
+
+A Game declares the Tool by name and kind:
+
+```toml
+[[tools]]
+name = "place"
+kind = "place"
+```
+
+Only a Creative Player can use it; in Survival it is refused. With it held, Use
+(G) opens the list of the Game's Templates, R turns the Structure a quarter (R
+is also Respawn, which it does only while the Tool is not held), and Place
+(right mouse) stamps it where the Player aims. A ghost shows each cell tinted by
+what placing it would do: fill air, replace ground or water, carve, or refuse.
+Only the anchor, the cell in front of the face aimed at, needs to be in reach;
+the footprint centres on it and the Ground layer sits level with it. Placing
+costs no Items and lands whole or not at all, waiting up to 64 ticks for Chunks
+still loading before it refuses with a reason. It is one undo group, and Mods
+hear its Voxels as Edit events. A placement that would change more than 131,072
+Voxels is refused as too big to undo; at 0.25 m a 32 m building can.
 
 ## Artwork
 
