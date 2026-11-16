@@ -7,8 +7,10 @@ use std::collections::{HashSet, VecDeque};
 use std::sync::Arc;
 
 use bevy::asset::RenderAssetUsages;
+use bevy::image::ImageSampler;
 use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
+use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
 use tesserae_core::template::Turn;
 
@@ -106,6 +108,10 @@ impl Outcome {
         match self {
             Outcome::Whole(count) => format!("{} Voxels, placed whole, free.", grouped(count)),
             Outcome::Waiting => "Waiting for Chunks to load…".to_owned(),
+            // The shared reason speaks of single Voxels placed without an Item.
+            Outcome::Refused(RejectReason::CreativeOnly) => {
+                "The place Tool is Creative only.".to_owned()
+            }
             Outcome::Refused(reason) => reason.message().to_owned(),
         }
     }
@@ -412,10 +418,53 @@ pub(super) struct GhostMesh(usize);
 /// not fight the ground it stands on.
 const GHOST_INSET: f32 = 0.01;
 
-fn spawn_meshes(mut commands: Commands, mut materials: ResMut<Assets<StandardMaterial>>) {
+/// Texels across a cell face, and how many of them its edge line takes.
+const EDGE_TEXELS: u32 = 32;
+const EDGE_LINE: u32 = 2;
+/// The prototype's cell edge.
+const EDGE: [u8; 4] = [0x10, 0x14, 0x10, 0xff];
+
+/// The prototype's opacity for a face looking along each axis, as a share of
+/// the top's: the sides read apart without light.
+const FACE_SHARE: [f32; 3] = [0.6, 1.0, 0.8];
+
+/// White with a dark rim, which the tint multiplies: every cell drawn with its
+/// edges, as the prototype's ghost is.
+fn edge_image() -> Image {
+    let mut data = Vec::with_capacity((EDGE_TEXELS * EDGE_TEXELS * 4) as usize);
+    for y in 0..EDGE_TEXELS {
+        for x in 0..EDGE_TEXELS {
+            let rim = [x, y]
+                .iter()
+                .any(|&t| !(EDGE_LINE..EDGE_TEXELS - EDGE_LINE).contains(&t));
+            data.extend(if rim { EDGE } else { [0xff; 4] });
+        }
+    }
+    let mut image = Image::new(
+        Extent3d {
+            width: EDGE_TEXELS,
+            height: EDGE_TEXELS,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D2,
+        data,
+        TextureFormat::Rgba8UnormSrgb,
+        RenderAssetUsages::default(),
+    );
+    image.sampler = ImageSampler::linear();
+    image
+}
+
+fn spawn_meshes(
+    mut commands: Commands,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut images: ResMut<Assets<Image>>,
+) {
+    let edges = images.add(edge_image());
     let looks = Tint::ALL.map(|tint| {
         materials.add(StandardMaterial {
             base_color: tint.color(),
+            base_color_texture: Some(edges.clone()),
             alpha_mode: AlphaMode::Blend,
             unlit: true,
             ..default()
@@ -441,6 +490,7 @@ fn hull(cells: &[[i32; 3]], voxel_size: f32) -> Option<Mesh> {
     let present: HashSet<[i32; 3]> = cells.iter().copied().collect();
     let inset = voxel_size * GHOST_INSET;
     let (mut positions, mut normals, mut indices) = (Vec::new(), Vec::new(), Vec::new());
+    let (mut uvs, mut shares) = (Vec::new(), Vec::new());
     for &cell in cells {
         for axis in 0..3 {
             for up in [false, true] {
@@ -471,6 +521,8 @@ fn hull(cells: &[[i32; 3]], voxel_size: f32) -> Option<Mesh> {
                 let mut normal = [0.0; 3];
                 normal[axis] = if up { 1.0 } else { -1.0 };
                 normals.extend([normal; 4]);
+                uvs.extend([[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]);
+                shares.extend([[1.0, 1.0, 1.0, FACE_SHARE[axis]]; 4]);
                 // u × v points along +axis, so the far side winds the other way.
                 if up {
                     indices.extend([base, base + 1, base + 2, base, base + 2, base + 3]);
@@ -487,6 +539,8 @@ fn hull(cells: &[[i32; 3]], voxel_size: f32) -> Option<Mesh> {
         )
         .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
         .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, normals)
+        .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uvs)
+        .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, shares)
         .with_inserted_indices(Indices::U32(indices)),
     )
 }
@@ -890,6 +944,14 @@ mod tests {
             ghost.outcome,
             Some(Outcome::Refused(RejectReason::OutOfReach))
         );
+    }
+
+    #[test]
+    fn survival_hears_the_place_tool_is_creative_only() {
+        let mut app = app(Holding::Tool(PLACE));
+        answer(&mut app, Err(RejectReason::CreativeOnly));
+        let outcome = app.world().resource::<Ghost>().outcome.unwrap();
+        assert_eq!(outcome.text(), "The place Tool is Creative only.");
     }
 
     #[test]
