@@ -1257,6 +1257,10 @@ Structures on rough ground lowers `spacing-m`. The result is spread evenly but
 never on a visible grid, and differs with every seed. A later row's Structure
 gives way to an earlier row's it would touch.
 
+No Structure's footprint, and no Settlement's disc and margin, comes within 48 m
+of the World origin (x = 0, z = 0), where Games build their spawn area. A
+candidate that would is dropped like one the ground refuses.
+
 Each `settlements` row has a lattice of its own and the same rule: a centre
 anywhere in its lattice cell stands, with `chance`, unless a neighbour's
 higher-priority centre is nearer than twice the Settlement's radius plus margin.

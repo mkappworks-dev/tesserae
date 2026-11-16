@@ -33,6 +33,8 @@ const RADIUS_M: f32 = 24.0;
 const MARGIN_M: f32 = 8.0;
 /// Twice the radius and margin, the closest Settlements may be listed.
 const SPACING_M: f32 = 64.0;
+/// Where scans are centred, along x and z: well clear of the origin, which keeps Settlements out.
+const AWAY_M: f32 = 256.0;
 
 /// A Template drawn as rows along +Z of cells along +X, layers from the bottom up; the Ground layer
 /// is the bottom one, its first cell `m` marking where it is and how it is turned.
@@ -174,11 +176,22 @@ fn generator(size: f32, params: WorldgenParams, settlement: Settlement) -> World
         .with_settlements(&[settlement])
 }
 
-/// Every cell `with` makes differently from `bare` in `half_m` of the origin, generating the
-/// Chunks in one order or its reverse.
+/// Every cell `with` makes differently from `bare` in `half_m` of ([`AWAY_M`], [`AWAY_M`]),
+/// generating the Chunks in one order or its reverse.
 fn changed(
     with: &Worldgen,
     bare: &Worldgen,
+    half_m: f32,
+    reverse: bool,
+) -> HashMap<[i32; 3], (Voxel, Voxel)> {
+    changed_around(with, bare, AWAY_M, half_m, reverse)
+}
+
+/// [`changed`] in `half_m` of (`centre_m`, `centre_m`), on a Chunk border.
+fn changed_around(
+    with: &Worldgen,
+    bare: &Worldgen,
+    centre_m: f32,
     half_m: f32,
     reverse: bool,
 ) -> HashMap<[i32; 3], (Voxel, Voxel)> {
@@ -186,10 +199,10 @@ fn changed(
     let (low, high) = with.surface_bounds_m();
     let rows = (low / chunk_m).floor() as i32 - 1..=(high / chunk_m).ceil() as i32 + 1;
     let reach = (half_m / chunk_m).ceil() as i32;
+    let centre = (centre_m / chunk_m).round() as i32;
+    let (from, to) = (centre - reach, centre + reach);
     let mut coords: Vec<[i32; 3]> = rows
-        .flat_map(|cy| {
-            (-reach..reach).flat_map(move |cz| (-reach..reach).map(move |cx| [cx, cy, cz]))
-        })
+        .flat_map(|cy| (from..to).flat_map(move |cz| (from..to).map(move |cx| [cx, cy, cz])))
         .collect();
     if reverse {
         coords.reverse();
@@ -257,6 +270,7 @@ impl Laid {
         let chunk_m = SIZE_I as f32 * size;
         // A Structure the scan's edge cuts is not whole in it.
         let edge = (half_m / chunk_m).ceil() as i32 * SIZE_I - (6.0 / size).ceil() as i32;
+        let away = (AWAY_M / size).round() as i32;
         assert_eq!(
             changed,
             self::changed(&with, &bare, half_m, true),
@@ -268,7 +282,9 @@ impl Laid {
             let mark = [WELL, HOUSE, SHED][index];
             for at in changed.keys().copied() {
                 if changed[&at].0.material() != mark
-                    || [at[0], at[2]].iter().any(|&g| g < -edge || g >= edge)
+                    || [at[0], at[2]]
+                        .iter()
+                        .any(|&g| g - away < -edge || g - away >= edge)
                 {
                     continue;
                 }
@@ -330,7 +346,7 @@ impl Laid {
     fn centres_within(&self, inner_m: f32) -> Vec<[f32; 2]> {
         self.centres()
             .into_iter()
-            .filter(|c| c.iter().all(|v| v.abs() + RADIUS_M <= inner_m))
+            .filter(|c| c.iter().all(|v| (v - AWAY_M).abs() + RADIUS_M <= inner_m))
             .collect()
     }
 
@@ -424,6 +440,24 @@ fn a_settlement_is_whole_across_chunk_borders_and_equal_in_metres_at_every_voxel
     }
     assert_eq!(by_size[0], by_size[1], "1 m and 0.5 m lay out differently");
     assert_eq!(by_size[0], by_size[2], "1 m and 0.25 m lay out differently");
+}
+
+#[test]
+fn no_settlement_disc_or_margin_comes_within_48_m_of_the_origin() {
+    let size = 1.0;
+    let with = generator(size, plain(listing(true)), village());
+    let bare = generator(size, plain(listing(false)), village());
+    let changed = changed_around(&with, &bare, 0.0, 192.0, false);
+    let reach_m = |[x, z]: [i32; 2]| ((x as f32 + 0.5).hypot(z as f32 + 0.5)) * size;
+    let nearest = changed
+        .keys()
+        .map(|at| reach_m([at[0], at[2]]))
+        .fold(f32::MAX, f32::min);
+    assert!(nearest < 192.0, "nothing stood further out either");
+    assert!(
+        nearest >= 48.0,
+        "a Settlement changed ground {nearest} m from the origin"
+    );
 }
 
 #[test]
@@ -1077,7 +1111,10 @@ fn roads_wear_towards_the_edge_and_approach_paths_fade_out_inside_the_margin() {
     let centres: Vec<_> = laid
         .centres()
         .into_iter()
-        .filter(|c| c.iter().all(|v| v.abs() + RADIUS_M + margin_m <= half_m))
+        .filter(|c| {
+            c.iter()
+                .all(|v| (v - AWAY_M).abs() + RADIUS_M + margin_m <= half_m)
+        })
         .collect();
     assert!(!centres.is_empty(), "no Settlement");
     let rects: Vec<_> = laid.found.iter().map(|f| laid.rect(f)).collect();

@@ -105,6 +105,11 @@ are where the build is narrower or more exact than they say.
   are checked, since only a Creative Player can place another, and a listed
   Settlement's path Material is checked too. A Grown Material or a Door's open
   Material is refused in the shared validator before Obtainable is worked out.
+- **Generation keeps 48 m round the World origin clear.** No single Structure's
+  footprint and no Settlement's disc and margin comes within 48 m of x = 0, z =
+  0, where Games build their spawn area, such as Ember's lava vents. The check
+  is on the candidate, from metres alone, so it is free and leaves a World
+  without Structures unchanged.
 - **`ground` is a full cube, and never rock.** Its soil runs however deep a
   cellar goes.
 - **The snapshot keeps only what a World uses.** It freezes the Templates its

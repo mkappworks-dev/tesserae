@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use super::fields::{hashed, mix, unit};
 use super::ground::SAMPLE_M;
-use super::structures::{NEIGHBOURS, Structure};
+use super::structures::{NEIGHBOURS, ORIGIN_CLEAR_M, Structure};
 use super::{CARDINALS, Footprint, Worldgen, top_index};
 use crate::chunk::{CHUNK_SIZE, Chunk};
 use crate::climate::{BIOMES_SINCE, BiomeId, BiomeSettlement};
@@ -422,7 +422,7 @@ impl Worldgen {
                     (other, near) > (priority, cell) && (dx * dx + dz * dz).sqrt() < 2.0 * reach_m
                 })
         });
-        if crowded {
+        if crowded || distance(centre_m, [0.0, 0.0]) < reach_m + ORIGIN_CLEAR_M {
             return None;
         }
         let [x_m, z_m] = centre_m;

@@ -122,8 +122,9 @@ fn generated(
         .with_templates(templates)
         .with_settlements(settlements);
     let mut out = Vec::new();
-    for cz in -2..2 {
-        for cx in -2..2 {
+    // Out past the origin's keep-out, where a hamlet may stand.
+    for cz in -4..4 {
+        for cx in -4..4 {
             for cy in 0..3 {
                 let chunk = generator.chunk(cx, cy, cz);
                 for i in 0..=SIDE {
@@ -149,7 +150,7 @@ fn a_reopened_world_lays_out_the_settlements_it_was_made_with() {
     assert_ne!(
         made,
         generated(world(), &game(), &[]),
-        "a hamlet stands near the origin"
+        "a hamlet stands within 128 m of the origin"
     );
     let saved =
         reopened(&Generation::capture(world(), &game(), &settlements(PATH), &mapping()).unwrap());
