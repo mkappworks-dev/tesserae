@@ -31,7 +31,7 @@ as they are now, and others should be much larger.
 - **Games.** Each Game declares a range of Settlement kinds that fit it.
   - A hamlet: 3–6 Plots.
   - A village: 8–20 Plots.
-  - Terra's town grows into a large town: 30–80 Plots, cobbled, with a second
+  - Terra's town grows into a large town: 30–40 Plots, cobbled, with a second
     ring of streets.
   - Hamlets are common and towns rare, through each row's `chance` and
     spacing.
@@ -95,7 +95,7 @@ Decisions:
   24-Plot one). The snapshot omits both new fields for a fixed size.
 - Games: every Game lists a village (8 to 20 Plots, 40 to 64 m) and a hamlet
   (3 to 6, 24 to 32 m), the village first so a hamlet gives way. Terra's town
-  is 30 to 80 Plots, 96 to 150 m, cobbled, 384 m apart, with the village in
+  is 30 to 40 Plots, 96 to 150 m, cobbled, 384 m apart, with the village in
   its Biomes' second row. Tidewater's hamlet (22 to 26 m) and harbour (6 to 12
   Plots, 26 to 32 m) stay small for its islands; its test bar for "large" is 3
   buildings.
@@ -118,3 +118,9 @@ Warm stays within 0.25 ms; cold is 0.26 to 0.30 ms over bare, its one layout
 (about 2.5 ms) charged to the 9 Chunks timed. The margin is revisited in
 DESIGN.md: 0.35 ms cold for a Settlement wider than the old 64 m cap, 0.25 ms
 otherwise. The other variants are unchanged.
+
+Narrowed 2026-11-16 at the user's request: Terra's town is 30 to 40 Plots
+(was 30 to 80), its per-Template maxima halved to match. Its disc stays 96
+to 150 m: a 72 to 104 m disc rarely fit the 20-Plot minimum, so no town stood
+within 1.5 km of spawn at the test seed. Copies laid about 30 buildings
+before, so the cap mostly thins the largest.

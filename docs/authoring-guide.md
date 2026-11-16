@@ -1292,7 +1292,7 @@ empty, and a single Structure in the wild keeps its strict level rule.
 
 The demo Games declare a hamlet of 3 to 6 Plots and a village of 8 to 20 round a
 well (Tidewater's harbour stops at 12, as its islands do), and Terra also a
-cobbled town of 30 to 80; see `games/<game>/src/structures.rs`.
+cobbled town of 30 to 40; see `games/<game>/src/structures.rs`.
 
 ### Loot
 
