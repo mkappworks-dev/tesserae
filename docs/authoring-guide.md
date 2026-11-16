@@ -779,7 +779,7 @@ canopy Material. From `flora`'s apple and jungle trees:
 
 ```toml
 fruit = { stages = [{ material = "flora:apple_unripe", shape = "flora:apple_unripe", mean-seconds = 40.0 }, { material = "flora:apple_ripe", yields = [{ item = "flora:apple", count = [1, 2] }] }], density = 0.12, regrow-seconds = 120.0, shape = "flora:apple" }
-vines = { plant = "flora:vine", density = 0.12, length-m = 6.0 }
+vines = { plant = "flora:vine", density = 0.12, length-m = 4.0 }
 ```
 
 A tree may **branch**. Without `branching` it is a straight trunk under one
