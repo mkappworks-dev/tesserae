@@ -146,6 +146,7 @@ fn ui_context(owner: Owner) -> bool {
         owner,
         Owner::Menu
             | Owner::LayoutMenu
+            | Owner::StructureMenu
             | Owner::Inventory
             | Owner::Map
             | Owner::Settings
@@ -364,6 +365,7 @@ fn navigate(
         owner,
         Owner::Menu
             | Owner::LayoutMenu
+            | Owner::StructureMenu
             | Owner::Inventory
             | Owner::Map
             | Owner::Settings

@@ -51,13 +51,12 @@ pub use layout::LayoutCell;
 #[cfg(test)]
 pub(in crate::server) use layout::send_layout;
 pub use layout::{CellState, LayoutAim, LayoutAnswer, LayoutIntent, LayoutParams, Span};
-#[expect(unused_imports, reason = "for the Client's ghost, not yet drawn")]
 pub use structure::StructureCell;
 pub use structure::StructureIntent;
 #[cfg(test)]
 pub(in crate::server) use structure::send_structure;
-#[expect(unused_imports, reason = "for the Client's ghost, not yet drawn")]
-pub use structure_aim::StructureGhost;
+#[cfg(test)]
+pub(crate) use structure_aim::StructureGhost;
 pub use structure_aim::{StructureAim, StructureAnswer};
 
 use super::ContentTables;

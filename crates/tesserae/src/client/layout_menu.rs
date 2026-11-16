@@ -125,6 +125,7 @@ type Blockers<'w> = (
     Option<Res<'w, crate::server::persistence::SaveStatus>>,
     Option<Res<'w, super::inventory_window::InventoryWindow>>,
     Option<Res<'w, super::map_window::MapWindow>>,
+    Option<Res<'w, super::structure_menu::StructureList>>,
 );
 
 /// The Layout key opens the menu, turning the mode on, and closes it again into
@@ -135,7 +136,7 @@ pub(super) fn toggle(
     mut menu: ResMut<LayoutMenu>,
     mut mode: ResMut<LayoutMode>,
     preferences: Res<Preferences>,
-    (catalogue, settings, ui, save, inventory, map): Blockers,
+    (catalogue, settings, ui, save, inventory, map, list): Blockers,
     window: Single<&Window, With<PrimaryWindow>>,
     mut cursor: Single<&mut CursorOptions, With<PrimaryWindow>>,
 ) {
@@ -146,6 +147,7 @@ pub(super) fn toggle(
         || save.is_some_and(|save| save.modal())
         || inventory.is_some_and(|window| window.open)
         || map.is_some_and(|window| window.open)
+        || list.is_some_and(|list| list.open)
     {
         return;
     }
@@ -363,7 +365,7 @@ fn capitalised(word: &str) -> String {
         .unwrap_or_default()
 }
 
-fn eyebrow(parent: &mut ChildSpawnerCommands, title: &str) {
+pub(super) fn eyebrow(parent: &mut ChildSpawnerCommands, title: &str) {
     parent
         .spawn(Node {
             margin: UiRect::bottom(Val::Px(12.0)),
@@ -682,7 +684,10 @@ fn gap_row(body: &mut ChildSpawnerCommands, layout: &LayoutPreferences, voxel_si
 }
 
 /// A box of label and value rows.
-fn totals(body: &mut ChildSpawnerCommands, rows: impl FnOnce(&mut ChildSpawnerCommands)) {
+pub(super) fn totals(
+    body: &mut ChildSpawnerCommands,
+    rows: impl FnOnce(&mut ChildSpawnerCommands),
+) {
     body.spawn((
         Node {
             flex_direction: FlexDirection::Column,
@@ -698,7 +703,7 @@ fn totals(body: &mut ChildSpawnerCommands, rows: impl FnOnce(&mut ChildSpawnerCo
     .with_children(rows);
 }
 
-fn total_row(parent: &mut ChildSpawnerCommands, term: impl Bundle, value: impl Bundle) {
+pub(super) fn total_row(parent: &mut ChildSpawnerCommands, term: impl Bundle, value: impl Bundle) {
     parent
         .spawn(Node {
             justify_content: JustifyContent::SpaceBetween,
@@ -713,7 +718,7 @@ fn total_row(parent: &mut ChildSpawnerCommands, term: impl Bundle, value: impl B
 }
 
 /// A value with a quieter word after it, in one run of text.
-fn value_with(value: impl Into<String>, after: impl Into<String>) -> impl Bundle {
+pub(super) fn value_with(value: impl Into<String>, after: impl Into<String>) -> impl Bundle {
     (
         Text::new(value),
         theme::weighted(theme::TEXT_EYEBROW, theme::LABEL),
@@ -727,7 +732,7 @@ fn value_with(value: impl Into<String>, after: impl Into<String>) -> impl Bundle
     )
 }
 
-fn term(value: impl Into<String>) -> impl Bundle {
+pub(super) fn term(value: impl Into<String>) -> impl Bundle {
     look::label(
         value,
         theme::TEXT_EYEBROW,

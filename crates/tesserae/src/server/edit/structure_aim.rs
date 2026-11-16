@@ -52,10 +52,6 @@ pub struct StructureGhost {
     pub cells: Arc<[Option<StructureCell>]>,
 }
 
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "for the Client's ghost, not yet drawn")
-)]
 impl StructureGhost {
     /// Each Voxel the placement writes, with what writing it does.
     pub fn written(&self) -> impl Iterator<Item = ([i32; 3], StructureCell)> + '_ {
@@ -123,15 +119,17 @@ pub(super) fn receive_aim(
     }
 }
 
+type Content<'w> = (
+    Res<'w, ContentTables>,
+    Res<'w, WorldSettings>,
+    Option<Res<'w, Containers>>,
+    Option<Res<'w, WorldGenerator>>,
+);
+
 pub(super) fn answer_aim(
     mut state: ResMut<StructureAimState>,
     (store, meshes): (Res<ChunkStore>, Res<MeshState>),
-    (tables, world, containers, generator): (
-        Res<ContentTables>,
-        Res<WorldSettings>,
-        Option<Res<Containers>>,
-        Option<Res<WorldGenerator>>,
-    ),
+    (tables, world, containers, generator): Content,
     player: Single<(&Player, &PlayerMode)>,
     mut answers: MessageWriter<StructureAnswer>,
 ) {

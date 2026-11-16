@@ -164,6 +164,8 @@ pub(in crate::client) enum Flavour {
     ShapeChip,
     /// The way an axis grows, as text.
     Way,
+    /// A Template in the place Tool's list.
+    Pick,
 }
 
 #[derive(Component, Clone, Copy, Debug)]
@@ -205,6 +207,8 @@ fn flat_colours(flat: Flat) -> (Color, Color, Color) {
             theme::CHIP_ON,
         ),
         (Flavour::Way, _) => (none, none, theme::AXIS_WAY_INK),
+        (Flavour::Pick, false) => (theme::PRESET, theme::PRESET_EDGE, theme::PRESET_INK),
+        (Flavour::Pick, true) => (theme::PICK_ON, theme::PICK_ON_EDGE, theme::INK),
     }
 }
 

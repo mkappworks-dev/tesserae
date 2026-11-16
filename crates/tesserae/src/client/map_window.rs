@@ -491,7 +491,7 @@ pub(super) fn plugin(app: &mut App) {
 
 type Blockers<'w> = (
     Res<'w, super::menu::Menu>,
-    Option<Res<'w, super::layout_menu::LayoutMenu>>,
+    super::structure_menu::Docked<'w>,
     Option<Res<'w, super::settings::Settings>>,
     Option<Res<'w, super::input::UiInput>>,
     Option<Res<'w, super::inventory_window::InventoryWindow>>,
@@ -503,14 +503,14 @@ type Blockers<'w> = (
 pub(super) fn toggle(
     mut actions: ResMut<Actions>,
     mut window: ResMut<MapWindow>,
-    (menu, layout_menu, settings, ui, inventory, allowed): Blockers,
+    (menu, docked, settings, ui, inventory, allowed): Blockers,
     focused: Single<&Window, With<PrimaryWindow>>,
     mut cursor: Single<&mut CursorOptions, With<PrimaryWindow>>,
 ) {
     if !focused.focused
         || !allowed.0
         || menu.open
-        || layout_menu.is_some_and(|m| m.open)
+        || docked.open()
         || settings.is_some_and(|s| s.open)
         || ui.is_some_and(|ui| ui.text_entry)
         || inventory.is_some_and(|i| i.open)

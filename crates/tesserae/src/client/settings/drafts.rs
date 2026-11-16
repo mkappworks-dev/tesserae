@@ -44,7 +44,7 @@ pub(super) fn propose(settings: &mut Settings, action: Action, proposed: [Option
     let draft = settings.draft.as_mut().unwrap().0.map_mut(device);
     let conflicts: Vec<_> = draft
         .iter()
-        .filter(|(other, _)| **other != action)
+        .filter(|(other, _)| **other != action && !action.may_share(**other))
         .flat_map(|(&other, alternatives)| {
             alternatives
                 .iter()
