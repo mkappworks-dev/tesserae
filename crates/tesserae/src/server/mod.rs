@@ -153,6 +153,26 @@ pub fn plugin(app: &mut App) {
     }
 }
 
+/// The Generator version a new World is created under. Under `dev`, `TESSERAE_GENERATOR=3` picks
+/// the version 3 terrain before it is the default, so step 17 can be played before it ships.
+#[cfg(feature = "dev")]
+pub(crate) fn new_world_generator() -> u32 {
+    generator_from(|name| std::env::var(name).ok())
+}
+
+#[cfg(feature = "dev")]
+fn generator_from(env: impl Fn(&str) -> Option<String>) -> u32 {
+    env("TESSERAE_GENERATOR")
+        .and_then(|v| v.parse().ok())
+        .filter(|v| tesserae_core::save::SUPPORTED_GENERATORS.contains(v))
+        .unwrap_or(tesserae_core::save::GENERATOR_VERSION)
+}
+
+#[cfg(not(feature = "dev"))]
+pub(crate) fn new_world_generator() -> u32 {
+    tesserae_core::save::GENERATOR_VERSION
+}
+
 /// What the World is generated with. Under `dev`, `TESSERAE_CAVES=0` and
 /// `TESSERAE_SMOOTHING=0` turn the caves and the slope-smoothing stairs off, so
 /// a streaming change can be measured with and without them on one binary and
@@ -288,6 +308,21 @@ pub(crate) fn fixture_tables() -> Tables {
 mod tests {
     use super::*;
     use tesserae_core::CHUNK_SIZE;
+
+    #[cfg(feature = "dev")]
+    #[test]
+    fn the_dev_generator_override_takes_a_supported_version_only() {
+        let with = |v: &'static str| generator_from(move |_| Some(v.into()));
+        assert_eq!(with("3"), 3);
+        assert_eq!(with("1"), 1);
+        for ignored in ["0", "9", "three", ""] {
+            assert_eq!(with(ignored), tesserae_core::save::GENERATOR_VERSION);
+        }
+        assert_eq!(
+            generator_from(|_| None),
+            tesserae_core::save::GENERATOR_VERSION
+        );
+    }
 
     #[cfg(feature = "dev")]
     #[test]

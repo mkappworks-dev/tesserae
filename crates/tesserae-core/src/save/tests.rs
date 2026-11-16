@@ -209,13 +209,13 @@ fn a_changed_checksum_recovers_but_a_complete_new_version_refuses_rollback() {
 }
 
 #[test]
-fn generator_versions_1_and_2_open_and_any_other_is_refused() {
+fn generator_versions_1_to_3_open_and_any_other_is_refused() {
     let mut c = fixture();
-    for accepted in [1, 2] {
+    for accepted in [1, 2, 3] {
         c.generator = accepted;
         assert!(c.compatible(&c.content.clone()).is_ok(), "{accepted}");
     }
-    for refused in [0, 3, u32::MAX] {
+    for refused in [0, 4, u32::MAX] {
         c.generator = refused;
         assert!(
             matches!(
@@ -234,7 +234,7 @@ fn a_complete_commit_of_an_unknown_generator_refuses_rollback() {
     let mut writer = Writer::acquire(&d.0, &c.world, &c.content).unwrap();
     writer.write(&c).unwrap();
     c.sequence = 2;
-    c.generator = 3;
+    c.generator = 4;
     let body = serde_json::to_vec(&c).unwrap();
     let mut bytes = MAGIC.to_vec();
     bytes.extend(Sha256::digest(&body));

@@ -37,6 +37,7 @@ use crate::settlement::Settlement;
 use crate::shape::{MAX_SHAPED_PER_CHUNK, Orientation, SHAPE_SLAB, SHAPE_STAIR};
 use crate::tables::Tables;
 use crate::template::Template;
+use crate::terrain::{LANDFORMS_SINCE, LandformParams, Terrain};
 use crate::voxel::SHAPE_FULL_CUBE;
 use crate::voxel::{MaterialId, Voxel};
 
@@ -74,6 +75,8 @@ pub struct WorldgenParams {
     pub ores: OreTable,
     /// A World pins the version it was created with, so a revision never reshapes existing terrain.
     pub generator: u32,
+    /// Read by version 3 only.
+    pub landforms: LandformParams,
 }
 
 /// A fluid filling the open air above the ground up to one height: the World's
@@ -174,6 +177,7 @@ impl Default for WorldgenParams {
             biomes: BiomeTable::default(),
             ores: OreTable::default(),
             generator: crate::save::GENERATOR_VERSION,
+            landforms: LandformParams::default(),
         }
     }
 }
@@ -296,6 +300,21 @@ impl WorldgenParams {
             "ores.biomes",
             "must name Biomes the World declares",
         )?;
+        if self.generator >= LANDFORMS_SINCE {
+            let land = self.landforms;
+            require(
+                [land.depth_m, land.height_m, land.overhang_m]
+                    .iter()
+                    .all(|m| (0.0..=MAX_HEIGHT_M).contains(m)),
+                "landforms",
+                "must be finite and within 65536 m",
+            )?;
+            require(
+                land.height_m >= self.relief_m && land.depth_m >= 0.0,
+                "landforms.height_m",
+                "must hold the relief above Sea level",
+            )?;
+        }
         require(
             crate::save::SUPPORTED_GENERATORS.contains(&self.generator),
             "generator",
@@ -622,6 +641,8 @@ pub struct Worldgen {
     seed: u32,
     /// Hoisted out of the inner loop: `chunk` samples this per column.
     inv_feature_size: f32,
+    /// Version 3's landforms; `None` under 1 and 2, whose height is the one fBm above.
+    terrain: Option<Terrain>,
     caves: Option<CaveField>,
     /// Whether the smoothing pass runs: configured, and a one-Voxel step is at
     /// least `min_rise_m` at this Voxel size.
@@ -870,6 +891,7 @@ impl Worldgen {
             params,
             seed: folded,
             inv_feature_size: 1.0 / params.feature_size_m,
+            terrain: (params.generator >= LANDFORMS_SINCE).then(|| Terrain::new(folded, &params)),
             caves: params.caves.map(|p| CaveField::new(folded, p)),
             smoothing: params
                 .smoothing
@@ -1011,8 +1033,16 @@ impl Worldgen {
         Some(columns)
     }
 
+    /// Version 3's fields at a column; `None` under version 1 or 2.
+    pub fn landform_fields(&self, x_m: f32, z_m: f32) -> Option<crate::terrain::Fields> {
+        self.terrain.as_ref().map(|t| t.fields(x_m, z_m))
+    }
+
     /// The metre height of the surface over a point on the ground plane.
     pub fn surface_height_m(&self, x_m: f32, z_m: f32) -> f32 {
+        if let Some(terrain) = &self.terrain {
+            return terrain.height_m(x_m, z_m);
+        }
         let n = fbm2(
             x_m * self.inv_feature_size,
             z_m * self.inv_feature_size,
@@ -1096,6 +1126,14 @@ impl Worldgen {
 
     /// The band the ground itself is in, below anything a Plant stands up to.
     fn terrain_band_m(&self) -> (f32, f32) {
+        if self.params.generator >= LANDFORMS_SINCE {
+            let land = self.params.landforms;
+            let sea_m = self.params.sea_level_m;
+            return (
+                sea_m - land.depth_m - land.overhang_m,
+                sea_m + land.height_m + land.overhang_m,
+            );
+        }
         (
             self.params.sea_level_m,
             self.params.sea_level_m + self.params.relief_m,

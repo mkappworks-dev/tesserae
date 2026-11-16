@@ -286,6 +286,83 @@ pub fn fbm3_range(lo: [f32; 3], hi: [f32; 3], seed: u32, octaves: u32) -> (f32, 
     )
 }
 
+/// Three independent values in `[0, 1)` for one integer cell: a hashed draw for a feature that
+/// stands in some cells (a volcano), in a fixed place for the cell.
+pub fn cell_hash(xi: i32, zi: i32, seed: u32) -> [f32; 3] {
+    [
+        lattice(xi, zi, seed),
+        lattice(xi, zi, seed.wrapping_add(0x51ed_0001)),
+        lattice(xi, zi, seed.wrapping_add(0x51ed_0002)),
+    ]
+}
+
+/// A ridge: `fbm2` folded about its middle, so crests are lines and not points. In `[0, 1]`,
+/// `1` along a crest.
+#[inline]
+pub fn ridged2(x: f32, z: f32, seed: u32, octaves: u32) -> f32 {
+    1.0 - (2.0 * fbm2(x, z, seed, octaves) - 1.0).abs()
+}
+
+/// `(x_m, z_m)` pushed by a smooth field of wavelength `size_m`, by at most `amount_m` on either
+/// axis, so a caller can promise a bound on how far the warp moves a sample.
+///
+/// The offsets use two decorrelated seeds of one octave: a warp is a coarse bend, and finer
+/// octaves belong to the fields it bends.
+#[inline]
+pub fn warp2(x_m: f32, z_m: f32, seed: u32, size_m: f32, amount_m: f32) -> (f32, f32) {
+    let (x, z) = (x_m / size_m, z_m / size_m);
+    let dx = noise2(x, z, seed.wrapping_add(0x7a17_0001)) * 2.0 - 1.0;
+    let dz = noise2(x, z, seed.wrapping_add(0x7a17_0002)) * 2.0 - 1.0;
+    (x_m + dx * amount_m, z_m + dz * amount_m)
+}
+
+/// An interval containing [`noise2`] everywhere in the box `lo..=hi`: the extremes of the lattice
+/// corners of every cell the box touches, which smoothstep never leaves. `None` when the box
+/// touches too many cells to be worth walking.
+fn noise2_range(lo: [f32; 2], hi: [f32; 2], seed: u32) -> Option<(f32, f32)> {
+    const MAX_CELLS: i64 = 64;
+    let (x0, x1) = (lo[0].floor() as i64, hi[0].floor() as i64 + 1);
+    let (z0, z1) = (lo[1].floor() as i64, hi[1].floor() as i64 + 1);
+    if (x1 - x0 + 1) * (z1 - z0 + 1) > MAX_CELLS {
+        return None;
+    }
+    let (mut min, mut max) = (1.0f32, 0.0f32);
+    for z in z0..=z1 {
+        for x in x0..=x1 {
+            let v = lattice(x as i32, z as i32, seed);
+            min = min.min(v);
+            max = max.max(v);
+        }
+    }
+    Some((min, max))
+}
+
+/// An interval containing [`fbm2`] everywhere in the box `lo..=hi`, sound like [`fbm3_range`].
+pub fn fbm2_range(lo: [f32; 2], hi: [f32; 2], seed: u32, octaves: u32) -> (f32, f32) {
+    let (mut low, mut high, mut total) = (0.0, 0.0, 0.0);
+    let (mut amplitude, mut frequency) = (1.0, 1.0);
+    for octave in 0..octaves {
+        let (min, max) = noise2_range(
+            lo.map(|v| v * frequency),
+            hi.map(|v| v * frequency),
+            seed.wrapping_add(octave),
+        )
+        .unwrap_or((0.0, 1.0));
+        low += min * amplitude;
+        high += max * amplitude;
+        total += amplitude;
+        amplitude *= 0.5;
+        frequency *= 2.0;
+    }
+    if total == 0.0 {
+        return (0.0, 0.0);
+    }
+    (
+        (low / total - RANGE_SLACK).max(0.0),
+        (high / total + RANGE_SLACK).min(1.0),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -462,5 +539,57 @@ mod tests {
         let a: Vec<f32> = (0..64).map(|i| noise2(i as f32 * 0.5, 0.25, 1)).collect();
         let b: Vec<f32> = (0..64).map(|i| noise2(i as f32 * 0.5, 0.25, 2)).collect();
         assert_ne!(a, b);
+    }
+
+    #[test]
+    fn ridged_noise_is_in_unit_range() {
+        for i in 0..4000 {
+            let r = ridged2(i as f32 * 0.37, i as f32 * -0.11, 0x5eed, 4);
+            assert!((0.0..=1.0).contains(&r), "{r}");
+        }
+    }
+
+    #[test]
+    fn a_warp_never_moves_a_sample_further_than_its_amount() {
+        for i in 0..4000 {
+            let (x, z) = (i as f32 * 7.3 - 9000.0, i as f32 * -3.1 + 400.0);
+            let (wx, wz) = warp2(x, z, 0x5eed, 300.0, 40.0);
+            assert!((wx - x).abs() <= 40.0 && (wz - z).abs() <= 40.0, "{i}");
+        }
+    }
+
+    #[test]
+    fn a_warp_is_a_pure_function_of_its_inputs() {
+        assert_eq!(
+            warp2(12.5, -3.0, 9, 100.0, 20.0),
+            warp2(12.5, -3.0, 9, 100.0, 20.0)
+        );
+        assert_ne!(
+            warp2(12.5, -3.0, 9, 100.0, 20.0),
+            warp2(12.5, -3.0, 10, 100.0, 20.0)
+        );
+    }
+
+    #[test]
+    fn the_2d_range_contains_every_sample_in_its_box() {
+        for i in 0..300u32 {
+            let lo = [unit(i, 1) * 40.0 - 20.0, unit(i, 2) * 40.0 - 20.0];
+            let hi = [lo[0] + unit(i, 3) * 4.0, lo[1] + unit(i, 4) * 4.0];
+            let (min, max) = fbm2_range(lo, hi, 0x5eed, 3);
+            for k in 0..64u32 {
+                let x = lo[0] + (hi[0] - lo[0]) * unit(k, 5 + i);
+                let z = lo[1] + (hi[1] - lo[1]) * unit(k, 99 + i);
+                let n = fbm2(x, z, 0x5eed, 3);
+                assert!(
+                    (min..=max).contains(&n),
+                    "{n} not in {min}..={max} at {x},{z}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_huge_box_gives_the_whole_unit_range() {
+        assert_eq!(fbm2_range([-1e5, -1e5], [1e5, 1e5], 1, 3), (0.0, 1.0));
     }
 }

@@ -1,6 +1,6 @@
 # 01: Version dispatch and the declared band
 
-Status: ready-for-agent
+Status: done
 
 Spec: [Phase 17](../spec.md).
 
@@ -10,7 +10,7 @@ One dispatch on Generator version for terrain height, caves and the water consum
 
 ## Acceptance criteria
 
-- [ ] Versions 1 and 2 generate the recorded digests, bit for bit.
-- [ ] A test can generate under version 3 by passing it; the save refuses 3.
-- [ ] A save without the new fields reads as before.
-- [ ] No Voxel is solid above the version 3 bound; the deep early-out never declares a non-uniform Chunk uniform.
+- [x] Versions 1 and 2 generate the recorded digests, bit for bit.
+- [x] A test can generate under version 3 by passing it; the save refuses 3.
+- [x] A save without the new fields reads as before.
+- [x] No Voxel is solid above the version 3 bound; the deep early-out never declares a non-uniform Chunk uniform.

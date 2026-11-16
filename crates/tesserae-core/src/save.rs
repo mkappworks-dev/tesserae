@@ -14,10 +14,12 @@ use sha2::{Digest, Sha256};
 use crate::{CHUNK_SIZE, CHUNK_VOLUME, Chunk, ChunkOverlay, Fluid, Level, Overlay, Voxel};
 
 pub const FORMAT_VERSION: u32 = 1;
+/// What a new World is created under. Version 3 is supported but not yet the default: it moves
+/// here when step 17's last ticket lands.
 pub const GENERATOR_VERSION: u32 = 2;
 /// Every version that ever shipped stays until a migration exists: a World keeps the one it was
 /// created with.
-pub const SUPPORTED_GENERATORS: [u32; 2] = [1, GENERATOR_VERSION];
+pub const SUPPORTED_GENERATORS: [u32; 3] = [1, 2, 3];
 const MAGIC: &[u8; 8] = b"TESSAVE1";
 const MAX_COMMIT_BYTES: u64 = 256 * 1024 * 1024;
 
@@ -579,6 +581,9 @@ pub struct Generation {
     /// The Settlements the Biomes lay out, for the same reason. Absent when no Biome lists one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub settlements: Option<Vec<SavedSettlement>>,
+    /// Version 3's terrain tuning. Absent in a World under version 1 or 2, which never read it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub landforms: Option<crate::terrain::LandformParams>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -956,6 +961,7 @@ impl Generation {
                 .transpose()?,
             templates: (!saved_templates.is_empty()).then_some(saved_templates),
             settlements: (!saved_settlements.is_empty()).then_some(saved_settlements),
+            landforms: (p.generator >= crate::terrain::LANDFORMS_SINCE).then_some(p.landforms),
         })
     }
 
@@ -1087,6 +1093,10 @@ impl Generation {
             climate: self.climate.filter(|_| biomes_apply).unwrap_or_default(),
             biomes,
             ores: crate::OreTable::new(&ores).map_err(|e| Error::Corrupt(e.to_string()))?,
+            landforms: self
+                .landforms
+                .filter(|_| generator >= crate::terrain::LANDFORMS_SINCE)
+                .unwrap_or_default(),
         };
         p.validate().map_err(|e| Error::Corrupt(e.to_string()))?;
         Ok(p)

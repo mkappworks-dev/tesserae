@@ -374,7 +374,7 @@ impl Persistence {
         let generator = opening
             .recovered
             .as_ref()
-            .map_or(save::GENERATOR_VERSION, |r| r.commit.generator);
+            .map_or_else(super::new_world_generator, |r| r.commit.generator);
         let reopened_game_mode = opening
             .recovered
             .as_ref()

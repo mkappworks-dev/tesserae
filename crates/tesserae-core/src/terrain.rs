@@ -1,0 +1,258 @@
+//! Generator version 3's terrain: a vertical band around Sea level inside which every field lives.
+//! See `docs/adr/0030-generator-version-3-is-a-layered-field-stack-in-a-declared-band.md`.
+
+/// The first Generator version whose terrain is the layered field stack.
+pub const LANDFORMS_SINCE: u32 = 3;
+
+/// What a Game tunes of version 3's terrain, in metres. Plain `Copy` data like the rest of
+/// [`crate::WorldgenParams`]; read only by version 3.
+#[derive(Clone, Copy, PartialEq, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct LandformParams {
+    /// How far the sea floor may fall below Sea level.
+    pub depth_m: f32,
+    /// How far the land may rise above Sea level; a peak past it is clamped.
+    pub height_m: f32,
+    /// How far the 3D density may push solid or air past the base surface.
+    pub overhang_m: f32,
+    /// The horizontal period of the continent field: how far apart two oceans are.
+    pub continent_size_m: f32,
+}
+
+impl Default for LandformParams {
+    fn default() -> Self {
+        LandformParams {
+            depth_m: 96.0,
+            height_m: 192.0,
+            overhang_m: 12.0,
+            continent_size_m: 6000.0,
+        }
+    }
+}
+
+/// The fields version 3 reads at a column, each a pure function of the seed and a position in
+/// metres.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct Fields {
+    /// 0 deep ocean to 1 far inland.
+    pub continent: f32,
+    /// 0 rugged to 1 worn flat.
+    pub erosion: f32,
+    /// 0 flat to 1 mountainous: where the 3D density may add overhangs.
+    pub ruggedness: f32,
+}
+
+const SALT_WARP: u32 = 0x1a4d_0001;
+const SALT_CONTINENT: u32 = 0x1a4d_0011;
+const SALT_EROSION: u32 = 0x1a4d_0021;
+const SALT_PEAKS: u32 = 0x1a4d_0031;
+const SALT_DETAIL: u32 = 0x1a4d_0041;
+const SALT_PLATEAU: u32 = 0x1a4d_0051;
+const SALT_CANYON: u32 = 0x1a4d_0061;
+const SALT_CANYON_LINE: u32 = 0x1a4d_0071;
+const SALT_ISLANDS: u32 = 0x1a4d_0081;
+const SALT_VOLCANO: u32 = 0x1a4d_0091;
+
+/// Continent field to base height, as fractions of the sea floor depth below Sea level (negative
+/// knots) and of the land height above it (positive): a deep floor, a slope, a shelf, a coast
+/// and then rising inland.
+const CONTINENT_CURVE: [(f32, f32); 8] = [
+    (0.00, -0.95),
+    (0.20, -0.88),
+    (0.32, -0.40),
+    (0.40, -0.10),
+    (0.47, 0.0),
+    (0.53, 0.02),
+    (0.70, 0.08),
+    (1.00, 0.14),
+];
+
+const WARP_SIZE_M: f32 = 1500.0;
+const WARP_AMOUNT_M: f32 = 400.0;
+const EROSION_SIZE_M: f32 = 2800.0;
+const PEAKS_SIZE_M: f32 = 1400.0;
+const MESA_STEP_M: f32 = 18.0;
+const VOLCANO_CELL_M: f32 = 5000.0;
+const VOLCANO_RADIUS_M: f32 = 700.0;
+
+/// Version 3's base ground: Sea level, the band, and the detail octaves a Game tunes with
+/// `feature_size_m`, `octaves` and `relief_m`.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Terrain {
+    seed: u32,
+    sea_m: f32,
+    depth_m: f32,
+    height_m: f32,
+    continent_size_m: f32,
+    inv_feature_size: f32,
+    octaves: u32,
+    relief_m: f32,
+}
+
+#[inline]
+fn smooth(edge0: f32, edge1: f32, x: f32) -> f32 {
+    let t = ((x - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+fn curve(points: &[(f32, f32)], t: f32) -> f32 {
+    let i = points
+        .partition_point(|p| p.0 <= t)
+        .clamp(1, points.len() - 1);
+    let ((t0, v0), (t1, v1)) = (points[i - 1], points[i]);
+    v0 + (v1 - v0) * smooth(t0, t1, t)
+}
+
+impl Terrain {
+    pub(crate) fn new(seed: u32, p: &crate::WorldgenParams) -> Self {
+        Terrain {
+            seed,
+            sea_m: p.sea_level_m,
+            depth_m: p.landforms.depth_m,
+            height_m: p.landforms.height_m,
+            continent_size_m: p.landforms.continent_size_m,
+            inv_feature_size: 1.0 / p.feature_size_m,
+            octaves: p.octaves,
+            relief_m: p.relief_m,
+        }
+    }
+
+    fn warped(&self, x_m: f32, z_m: f32) -> (f32, f32) {
+        crate::noise::warp2(
+            x_m,
+            z_m,
+            self.seed.wrapping_add(SALT_WARP),
+            WARP_SIZE_M,
+            WARP_AMOUNT_M,
+        )
+    }
+
+    pub(crate) fn fields(&self, x_m: f32, z_m: f32) -> Fields {
+        let (wx, wz) = self.warped(x_m, z_m);
+        self.fields_warped(wx, wz)
+    }
+
+    fn fields_warped(&self, wx: f32, wz: f32) -> Fields {
+        let size = self.continent_size_m;
+        let continent = crate::noise::fbm2(
+            wx / size,
+            wz / size,
+            self.seed.wrapping_add(SALT_CONTINENT),
+            4,
+        );
+        let erosion = crate::noise::fbm2(
+            wx / EROSION_SIZE_M,
+            wz / EROSION_SIZE_M,
+            self.seed.wrapping_add(SALT_EROSION),
+            3,
+        );
+        let inland = smooth(0.50, 0.70, continent);
+        Fields {
+            continent,
+            erosion,
+            ruggedness: inland * (1.0 - erosion).powf(1.5),
+        }
+    }
+
+    /// The ground's height in metres: inside `sea - depth ..= sea + height`.
+    pub(crate) fn height_m(&self, x_m: f32, z_m: f32) -> f32 {
+        let seed = self.seed;
+        let (wx, wz) = self.warped(x_m, z_m);
+        let f = self.fields_warped(wx, wz);
+        let inland = smooth(0.50, 0.70, f.continent);
+        let (d, h) = (self.depth_m, self.height_m);
+
+        let base = curve(&CONTINENT_CURVE, f.continent);
+        let mut offset = if base < 0.0 { base * d } else { base * h };
+
+        let ridge = crate::noise::ridged2(
+            wx / PEAKS_SIZE_M,
+            wz / PEAKS_SIZE_M,
+            seed.wrapping_add(SALT_PEAKS),
+            4,
+        );
+        offset += h * 0.8 * ridge * ridge * f.ruggedness;
+
+        let n = crate::noise::fbm2(
+            x_m * self.inv_feature_size,
+            z_m * self.inv_feature_size,
+            seed.wrapping_add(SALT_DETAIL),
+            self.octaves,
+        );
+        let worn = 0.35 + 0.65 * (1.0 - f.erosion);
+        offset += (n - 0.5) * self.relief_m * if base < 0.0 { 0.3 } else { worn };
+
+        let plateau =
+            crate::noise::fbm2(wx / 3500.0, wz / 3500.0, seed.wrapping_add(SALT_PLATEAU), 2);
+        let mesa = smooth(0.58, 0.68, plateau) * inland * f.erosion;
+        if mesa > 0.0 {
+            let above = offset.max(0.0);
+            let step = (above / MESA_STEP_M).floor();
+            let frac = above / MESA_STEP_M - step;
+            let terraced = (step + smooth(0.75, 1.0, frac)) * MESA_STEP_M;
+            offset += (terraced - above) * mesa;
+        }
+
+        let canyon =
+            crate::noise::fbm2(wx / 2500.0, wz / 2500.0, seed.wrapping_add(SALT_CANYON), 2);
+        let line = crate::noise::ridged2(
+            wx / 600.0,
+            wz / 600.0,
+            seed.wrapping_add(SALT_CANYON_LINE),
+            2,
+        );
+        offset -= 70.0
+            * smooth(0.72, 0.82, canyon)
+            * inland
+            * smooth(0.88, 0.97, line)
+            * offset.max(0.0).min(70.0)
+            / 70.0;
+
+        if base < 0.0 {
+            let band = smooth(0.28, 0.34, f.continent) * (1.0 - smooth(0.40, 0.46, f.continent));
+            let islands = smooth(
+                0.62,
+                0.72,
+                crate::noise::fbm2(wx / 500.0, wz / 500.0, seed.wrapping_add(SALT_ISLANDS), 3),
+            );
+            offset += band * islands * (0.35 * d + 8.0);
+        }
+
+        offset += self.volcano(x_m, z_m, inland);
+
+        self.sea_m + offset.clamp(-d, h)
+    }
+
+    /// A cone at a hashed spot of some 5 km cells, over land only.
+    fn volcano(&self, x_m: f32, z_m: f32, inland: f32) -> f32 {
+        if inland <= 0.0 {
+            return 0.0;
+        }
+        let (cx, cz) = (
+            (x_m / VOLCANO_CELL_M).floor() as i32,
+            (z_m / VOLCANO_CELL_M).floor() as i32,
+        );
+        let mut best = 0.0f32;
+        for dz in -1..=1 {
+            for dx in -1..=1 {
+                let (ix, iz) = (cx + dx, cz + dz);
+                let h = crate::noise::cell_hash(ix, iz, self.seed.wrapping_add(SALT_VOLCANO));
+                if h[0] > 0.22 {
+                    continue;
+                }
+                let (px, pz) = (
+                    (ix as f32 + 0.2 + 0.6 * h[1]) * VOLCANO_CELL_M,
+                    (iz as f32 + 0.2 + 0.6 * h[2]) * VOLCANO_CELL_M,
+                );
+                let r = ((x_m - px).powi(2) + (z_m - pz).powi(2)).sqrt();
+                if r >= VOLCANO_RADIUS_M {
+                    continue;
+                }
+                let cone = (1.0 - r / VOLCANO_RADIUS_M).powf(1.3) * self.height_m * 0.55;
+                let crater = 40.0 * (1.0 - smooth(0.0, 90.0, r));
+                best = best.max(cone - crater);
+            }
+        }
+        best * inland
+    }
+}

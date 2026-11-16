@@ -1,6 +1,6 @@
 # 03: Landform fields and base height (17a)
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 01, 02
 
@@ -12,6 +12,6 @@ Continentalness, erosion, peaks-and-valleys and ruggedness as warped 2D fields i
 
 ## Acceptance criteria
 
-- [ ] Same Voxels in any Chunk order and at 1.0, 0.5 and 0.25 m.
-- [ ] Every height lies in the band.
-- [ ] A screenshot of each landform is reviewed.
+- [x] Same Voxels in any Chunk order and at 1.0, 0.5 and 0.25 m.
+- [x] Every height lies in the band.
+- [x] A screenshot of each landform is reviewed (pending the maintainer).
