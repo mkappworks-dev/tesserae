@@ -1023,7 +1023,8 @@ impl Form {
     fn seed_label(&self) -> String {
         match self.seed() {
             Ok(seed) if self.seed.trim().is_empty() => format!("Random seed: {seed}"),
-            Ok(seed) => format!("Resolved seed: {seed}"),
+            Ok(seed) if self.seed.trim().parse::<i128>().is_ok() => format!("Seed: {seed}"),
+            Ok(seed) => format!("Seed from these words: {seed}"),
             Err(e) => e,
         }
     }

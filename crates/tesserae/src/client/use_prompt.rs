@@ -11,18 +11,19 @@ use super::theme;
 use crate::server::tool::UseRefusal;
 use crate::session::SessionApp;
 
-/// Below the reticle's centre, in pixels, to the prompt's centre.
-const BELOW_RETICLE_PX: f32 = 37.0;
+/// Below the reticle's centre, in pixels, to the top of the column the prompt and the place hint
+/// share.
+const BELOW_RETICLE_PX: f32 = 24.0;
+const HINT_GAP_PX: f32 = 6.0;
 const PROMPT_BACKGROUND: Color = Color::srgba_u8(0x0b, 0x0b, 0x0d, 0xcc);
 const PROMPT_INK: Color = Color::srgb_u8(0xf1, 0xf0, 0xed);
 const REFUSED_INK: Color = Color::srgb_u8(0xa9, 0xad, 0xb6);
 const KEY_EDGE: Color = Color::srgba_u8(0xff, 0xff, 0xff, 0x4d);
 const KEY_BACKGROUND: Color = Color::srgba_u8(0, 0, 0, 0xbb);
 
+/// The row the prompt is drawn in, collapsed while there is nothing to say.
 #[derive(Component)]
 struct Prompt;
-#[derive(Component)]
-struct PromptRow;
 #[derive(Component)]
 struct PromptKey;
 #[derive(Component)]
@@ -38,6 +39,19 @@ pub(super) fn plugin(app: &mut App) {
 enum Wording {
     Verb(String),
     Refused(&'static str),
+}
+
+/// Near a pinned Structure preview: Use builds it, and the Structures and clear keys cancel it.
+fn build_wording(bindings: &Bindings, labels: &Labels) -> Wording {
+    let first = |action| {
+        let all = bindings.label(action, labels);
+        all.split(" / ").next().unwrap_or_default().to_owned()
+    };
+    Wording::Verb(format!(
+        "Build · {} / {} Cancel",
+        first(Action::Structures),
+        first(Action::ClearTool)
+    ))
 }
 
 /// What the Player calls a Usable Voxel of `material`: its declared name.
@@ -68,26 +82,28 @@ fn wording(
     }
 }
 
+/// The prompt above the place hint, one column under the reticle, so the two never overlap.
 fn spawn(mut commands: Commands) {
     commands
         .spawn((
-            Prompt,
-            Visibility::Hidden,
             Pickable::IGNORE,
             Node {
                 position_type: PositionType::Absolute,
                 width: Val::Percent(100.0),
-                height: Val::Percent(100.0),
-                top: Val::Px(BELOW_RETICLE_PX),
-                justify_content: JustifyContent::Center,
+                top: Val::Percent(50.0),
+                margin: UiRect::top(Val::Px(BELOW_RETICLE_PX)),
+                flex_direction: FlexDirection::Column,
                 align_items: AlignItems::Center,
+                row_gap: Val::Px(HINT_GAP_PX),
                 ..default()
             },
         ))
         .with_children(|root| {
             root.spawn((
-                PromptRow,
+                Prompt,
+                Pickable::IGNORE,
                 Node {
+                    display: Display::None,
                     align_items: AlignItems::Center,
                     column_gap: Val::Px(6.0),
                     padding: UiRect::new(Val::Px(4.0), Val::Px(8.0), Val::Px(3.0), Val::Px(3.0)),
@@ -123,13 +139,13 @@ fn spawn(mut commands: Commands) {
                     TextColor(PROMPT_INK),
                 ));
             });
+            root.spawn(super::removal::place_hint_bundle());
         });
 }
 
 type PromptParts<'w, 's> = (
-    Query<'w, 's, &'static mut Visibility, With<Prompt>>,
-    Query<'w, 's, &'static mut Node, (With<PromptRow>, Without<PromptKey>)>,
-    Query<'w, 's, (&'static mut Text, &'static mut Node), (With<PromptKey>, Without<PromptRow>)>,
+    Query<'w, 's, &'static mut Node, (With<Prompt>, Without<PromptKey>)>,
+    Query<'w, 's, (&'static mut Text, &'static mut Node), (With<PromptKey>, Without<Prompt>)>,
     Query<
         'w,
         's,
@@ -143,21 +159,29 @@ fn show(
     catalogue: Res<Catalogue>,
     (bindings, labels): (Res<Bindings>, Res<Labels>),
     dead: Option<Res<super::death::Dead>>,
-    (mut prompt, mut row, mut key, mut text): PromptParts,
+    pin: Option<Res<super::structure::PinPrompt>>,
+    (mut row, mut key, mut text): PromptParts,
 ) {
-    let wording = wording(
-        &target,
-        &sent,
-        time.elapsed_secs_f64(),
-        (&hotbar, &catalogue),
-    )
+    let wording = if pin.is_some_and(|p| p.0) {
+        Some(build_wording(&bindings, &labels))
+    } else {
+        wording(
+            &target,
+            &sent,
+            time.elapsed_secs_f64(),
+            (&hotbar, &catalogue),
+        )
+    }
     .filter(|_| super::death::alive(dead));
-    for mut visibility in &mut prompt {
-        visibility.set_if_neq(if wording.is_some() {
-            Visibility::Inherited
-        } else {
-            Visibility::Hidden
-        });
+    let display = if wording.is_some() {
+        Display::Flex
+    } else {
+        Display::None
+    };
+    for mut node in &mut row {
+        if node.display != display {
+            node.display = display;
+        }
     }
     let Some(wording) = wording else {
         return;
@@ -239,11 +263,11 @@ mod tests {
         }
         app.update();
         let world = app.world_mut();
-        let visible = world
-            .query_filtered::<&Visibility, With<Prompt>>()
+        let row = world
+            .query_filtered::<&Node, With<Prompt>>()
             .single(world)
             .unwrap();
-        if *visible == Visibility::Hidden {
+        if row.display == Display::None {
             return None;
         }
         let (key, node) = world
@@ -328,6 +352,37 @@ mod tests {
             prompt(&mut app, Some(Err(UseRefusal::OutOfReach)), None),
             Some((None, "Out of reach".into()))
         );
+    }
+
+    #[test]
+    fn the_prompt_and_the_place_hint_stack_in_one_column_and_a_hidden_prompt_takes_no_room() {
+        let mut app = app();
+        prompt(&mut app, Some(door(false)), None);
+        let world = app.world_mut();
+        let (row, column) = world
+            .query_filtered::<(Entity, &ChildOf), With<Prompt>>()
+            .single(world)
+            .map(|(row, parent)| (row, parent.parent()))
+            .unwrap();
+        let hint_parent = world
+            .query_filtered::<&ChildOf, With<super::super::removal::PlaceHint>>()
+            .single(world)
+            .unwrap()
+            .parent();
+        assert_eq!(column, hint_parent, "one column");
+        let column = world.get::<Node>(hint_parent).unwrap();
+        assert_eq!(column.flex_direction, FlexDirection::Column);
+        assert!(column.row_gap != Val::Px(0.0), "a gap between them");
+        let children = world.get::<Children>(hint_parent).unwrap();
+        assert_eq!(children.first(), Some(&row), "the prompt first");
+        assert!(prompt(&mut app, None, None).is_none());
+        let world = app.world_mut();
+        let display = world
+            .query_filtered::<&Node, With<Prompt>>()
+            .single(world)
+            .unwrap()
+            .display;
+        assert_eq!(display, Display::None, "hidden, the hint moves up");
     }
 
     #[test]

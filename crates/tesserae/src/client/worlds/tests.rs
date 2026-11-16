@@ -539,12 +539,42 @@ fn quit_is_a_title_action_and_every_screen_keeps_settings_in_the_header() {
     }
 }
 
+fn resolved(app: &mut App) -> String {
+    app.world_mut()
+        .query_filtered::<&Text, With<Resolved>>()
+        .single(app.world())
+        .unwrap()
+        .0
+        .clone()
+}
+
+#[test]
+fn a_new_form_opens_with_its_random_seed_in_the_field() {
+    let worlds = Directory::new();
+    let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
+    app.update();
+    act(&mut app, Act::New);
+    let form = &launcher(&app).form;
+    assert_eq!(form.seed, form.random_seed.to_string());
+    let random = form.random_seed;
+    assert_eq!(resolved(&mut app), format!("Seed: {random}"));
+    act(&mut app, Act::Back);
+    assert!(
+        matches!(launcher(&app).screen, Screen::Worlds),
+        "an untouched form leaves without asking"
+    );
+    act(&mut app, Act::New);
+    type_into(&mut app, Field::Seed, "ridge");
+    assert!(resolved(&mut app).starts_with("Seed from these words: "));
+}
+
 #[test]
 fn a_blank_seed_shows_the_random_seed_that_will_be_used() {
     let worlds = Directory::new();
     let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
     app.update();
     act(&mut app, Act::New);
+    type_into(&mut app, Field::Seed, "");
     let shown = app
         .world_mut()
         .query_filtered::<&Text, With<Resolved>>()

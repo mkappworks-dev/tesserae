@@ -277,10 +277,16 @@ fn component() -> Declaration {
                 end: content::BurnEnd::Permanent,
             },
         ],
-        tools: vec![content::ToolDef {
-            name: "ruler".into(),
-            kind: content::ToolKind::Measure,
-        }],
+        tools: vec![
+            content::ToolDef {
+                name: "ruler".into(),
+                kind: content::ToolKind::Measure,
+            },
+            content::ToolDef {
+                name: "builder".into(),
+                kind: content::ToolKind::Place,
+            },
+        ],
         items: vec![
             content::ItemDef {
                 name: "log".into(),
@@ -325,6 +331,9 @@ fn component() -> Declaration {
                 cave_scale: Some(0.0),
                 surface_features: Vec::new(),
                 crop_fields: Vec::new(),
+                structures: Vec::new(),
+                settlements: Vec::new(),
+                loot: None,
             },
             content::BiomeDef {
                 soundscape: None,
@@ -354,6 +363,9 @@ fn component() -> Declaration {
                     }),
                 }],
                 crop_fields: Vec::new(),
+                structures: Vec::new(),
+                settlements: Vec::new(),
+                loot: None,
             },
         ],
         ores: vec![
@@ -488,6 +500,53 @@ fn component() -> Declaration {
         plants: Vec::new(),
         marker_kinds: Vec::new(),
         death_marker_kind: None,
+        templates: vec![content::TemplateDef {
+            name: "cairn".into(),
+            cell_m: 0.5,
+            palette: vec![
+                content::TemplatePaletteEntry {
+                    symbol: '.',
+                    cell: content::TemplateCell::Air,
+                },
+                content::TemplatePaletteEntry {
+                    symbol: '_',
+                    cell: content::TemplateCell::Keep,
+                },
+                content::TemplatePaletteEntry {
+                    symbol: 'r',
+                    cell: content::TemplateCell::Voxel(content::TemplateVoxel {
+                        material: "full:rock".into(),
+                        shape: Some("full:slab".into()),
+                        orientation: Some(5),
+                    }),
+                },
+            ],
+            layers: vec![vec!["r.".into(), "_r".into()]],
+            ground_layer: Some(0),
+            foundation: Some("full:rock".into()),
+            level_tolerance_m: Some(2.0),
+            spans: false,
+        }],
+        settlements: vec![content::SettlementDef {
+            name: "hamlet".into(),
+            radius_m: 24.0,
+            radius_min_m: Some(16.0),
+            margin_m: Some(8.0),
+            centre: Some("full:cairn".into()),
+            plots: 4,
+            plots_min: Some(2),
+            templates: vec![content::SettlementPlot {
+                template: "full:cairn".into(),
+                weight: 2.0,
+                min: 1,
+                max: 3,
+                loot: None,
+            }],
+            minimum: 2,
+            path: "full:rock".into(),
+            path_shape: Some("full:slab".into()),
+            loot: None,
+        }],
         voxel_uses: vec![
             content::VoxelUse {
                 material: "full:wood".into(),

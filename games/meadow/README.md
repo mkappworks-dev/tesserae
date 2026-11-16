@@ -11,12 +11,14 @@ gazebo posts are `flora:wood` in the `glassworks:fence` Shape.
 
 ## Dependencies
 
-[strata](../../mods/strata/), [flora](../../mods/flora/),
-[glassworks](../../mods/glassworks/), and it suggests
-[wanderer](../../mods/wanderer/) for its character. Its one Material is its
-food, `meadow:pumpkin`; every other name it uses is `<mod id>:<name>` from those
-Mods. It declares only its World (ground, sea level, relief, climate and the
-like), its Biomes and ore, its food and one behaviour.
+[strata](../../mods/strata/), [waters](../../mods/waters/) for the water in its
+well, [flora](../../mods/flora/), [glassworks](../../mods/glassworks/), and it
+suggests [wanderer](../../mods/wanderer/) for its character. Its own Materials
+are its food, `meadow:pumpkin`, and the building Materials and anvil, forge and
+oven Stations its Templates use (`src/building.rs`); every other name it uses is
+`<mod id>:<name>` from those Mods. It declares only its World (ground, sea
+level, relief, climate and the like), its Biomes and ore, its food, its building
+Materials with their Recipes, and one behaviour.
 
 ## Food
 
@@ -52,11 +54,11 @@ of four posts under a glass slab roof. The glade is cut at a fixed height in the
 middle of the ground band, because a Mod cannot read the terrain it will build
 on.
 
-The test builds the Game, loads it with its three Mods and checks that no
-Material is declared in Rust, that the ground names `strata` Materials, and that
-the trees and gazebo are placed at 0.5 m and 0.25 m Voxels. Others check the
-three Biomes' sky and fog and ground, and that the basalt veins lie in rock
-within their band.
+The test builds the Game, loads it with its three Mods and checks that its own
+Materials are its pumpkin and building Materials, that the ground names `strata`
+Materials, and that the trees and gazebo are placed at 0.5 m and 0.25 m Voxels.
+Others check the three Biomes' sky and fog and ground, and that the basalt veins
+lie in rock within their band.
 
 ## Run it
 
@@ -65,7 +67,7 @@ and point the Engine at it:
 
 ```sh
 ./scripts/build-guests
-tesserae package mods/strata mods/flora mods/glassworks mods/wanderer --out dist
+tesserae package mods/strata mods/waters mods/flora mods/glassworks mods/wanderer --out dist
 tesserae package games/meadow --mods mods --out dist --trust-for-run
 tesserae --mods dist/mods
 ```

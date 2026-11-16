@@ -7,7 +7,7 @@ use super::{SCATTER_SEED, SurfaceScatter, Worldgen, top_index};
 use crate::climate::{BiomeId, CropField, Field, SurfaceFeatures, SurfacePlantKind};
 use crate::voxel::Voxel;
 
-fn mix(mut z: u64) -> u64 {
+pub(super) fn mix(mut z: u64) -> u64 {
     z = z.wrapping_add(0x9e37_79b9_7f4a_7c15);
     z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
     z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
@@ -15,11 +15,11 @@ fn mix(mut z: u64) -> u64 {
 }
 
 /// Uniform in `[0, 1)`.
-fn unit(h: u64) -> f64 {
+pub(super) fn unit(h: u64) -> f64 {
     (h >> 11) as f64 / (1u64 << 53) as f64
 }
 
-fn hashed(seed: u32, salt: u64, parts: &[u64]) -> u64 {
+pub(super) fn hashed(seed: u32, salt: u64, parts: &[u64]) -> u64 {
     parts
         .iter()
         .fold(mix(SCATTER_SEED ^ u64::from(seed) ^ salt), |h, &p| {
@@ -419,11 +419,12 @@ impl Worldgen {
     }
 
     /// Lays the paths and ditches of `placed` in the ground and stands their crops, for the
-    /// columns of the Chunk at `coord`.
+    /// columns of the Chunk at `coord` that `kept` leaves free.
     pub(super) fn crop_fields(
         &self,
         chunk: &mut crate::chunk::Chunk,
         placed: &[Placed],
+        kept: &[super::Footprint],
         coord: [i32; 3],
     ) {
         let size = crate::chunk::CHUNK_SIZE as i32;
@@ -433,7 +434,7 @@ impl Worldgen {
             let [min, max] = p.footprint();
             for gz in min[1].max(origin[2])..max[1].min(origin[2] + size) {
                 for gx in min[0].max(origin[0])..max[0].min(origin[0] + size) {
-                    let Some(cell) = p.cell(gx, gz) else {
+                    let Some(cell) = p.cell(gx, gz).filter(|_| !super::covers(kept, gx, gz)) else {
                         continue;
                     };
                     let (x_m, z_m) = (self.global_m(gx), self.global_m(gz));

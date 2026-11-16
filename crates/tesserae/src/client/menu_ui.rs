@@ -956,10 +956,12 @@ pub(super) enum IconKind {
     Target,
     FlagPlus,
     Dismiss,
+    /// The place Tool's card: the prototype's `layout` outline.
+    Layout,
 }
-const ICONS: usize = 23;
+const ICONS: usize = 24;
 /// The icons drawn from the prototype's 24-unit outlines, in atlas order.
-const DRAWN: [IconKind; 20] = [
+const DRAWN: [IconKind; 21] = [
     IconKind::Settings,
     IconKind::Mods,
     IconKind::Check,
@@ -980,6 +982,7 @@ const DRAWN: [IconKind; 20] = [
     IconKind::Target,
     IconKind::FlagPlus,
     IconKind::Dismiss,
+    IconKind::Layout,
 ];
 #[derive(Component)]
 pub(super) struct Icon(pub IconKind, pub Color);
@@ -1273,6 +1276,14 @@ fn drawn(kind: IconKind, p: Vec2) -> f32 {
         IconKind::Dismiss => {
             stroke(segment(v(6.0, 6.0), v(18.0, 18.0)).min(segment(v(18.0, 6.0), v(6.0, 18.0))))
         }
+        IconKind::Layout => stroke(
+            [v(6.5, 6.5), v(17.5, 6.5), v(6.5, 17.5)]
+                .into_iter()
+                .map(|centre| rounded(centre, Vec2::splat(3.5), 0.0))
+                .fold(f32::MAX, f32::min)
+                .min(segment(v(14.0, 17.5), v(21.0, 17.5)))
+                .min(segment(v(17.5, 14.0), v(17.5, 21.0))),
+        ),
         IconKind::Chevron => stroke(path(&[v(9.0, 5.0), v(16.0, 12.0), v(9.0, 19.0)])),
         IconKind::Collapsed => fill(convex(&[v(8.0, 6.0), v(17.0, 12.0), v(8.0, 18.0)])),
         IconKind::Expanded => fill(convex(&[v(6.0, 8.0), v(18.0, 8.0), v(12.0, 17.0)])),

@@ -1,0 +1,235 @@
+//! Every Mod's `templates`, from a data Declaration or a component alike,
+//! resolved against the World's Materials and Shapes once all have declared.
+
+use std::collections::HashMap;
+
+use tesserae_core::shape::Orientation;
+use tesserae_core::template::{Cell, DEFAULT_LEVEL_TOLERANCE_M, MAX_TEMPLATES, Template};
+use tesserae_core::{MaterialId, SHAPE_FULL_CUBE, ShapeId, Tables, Voxel};
+
+use crate::bindings::tesserae::mods::content;
+use crate::declare::{Behaviour, NAME_RULE, valid_local};
+use crate::error::ModError;
+use crate::registry::{Kind, Registry};
+
+/// Every Mod's Template rows in load order, taken from its Behaviour before
+/// [`crate::resolve`] consumes it.
+#[derive(Clone, PartialEq, Debug, Default)]
+pub struct DeclaredTemplates {
+    rows: Vec<(String, Vec<content::TemplateDef>)>,
+}
+
+impl DeclaredTemplates {
+    pub fn take(behaviours: &mut [Behaviour]) -> Self {
+        Self {
+            rows: behaviours
+                .iter_mut()
+                .map(|b| (b.mod_id.clone(), std::mem::take(&mut b.templates)))
+                .collect(),
+        }
+    }
+
+    /// The World's Templates in load order. `tables` must hold every Material
+    /// and Shape already.
+    pub fn resolve(&self, registry: &Registry, tables: &Tables) -> Result<Vec<Template>, ModError> {
+        let mut templates: Vec<Template> = Vec::new();
+        for (mod_id, rows) in &self.rows {
+            for (row, def) in rows.iter().enumerate() {
+                let fail = |reason: String| ModError::Template {
+                    id: mod_id.clone(),
+                    row,
+                    name: def.name.clone(),
+                    reason,
+                };
+                if templates.len() == MAX_TEMPLATES {
+                    return Err(fail(format!(
+                        "is one more than the {MAX_TEMPLATES} Templates a World holds"
+                    )));
+                }
+                if !valid_local(&def.name) {
+                    return Err(fail(NAME_RULE.into()));
+                }
+                let name = format!("{mod_id}:{}", def.name);
+                if templates.iter().any(|t| t.name == name) {
+                    return Err(fail("must be unique among the Mod's templates".into()));
+                }
+                templates.push(template(name, def, registry, tables).map_err(fail)?);
+            }
+        }
+        Ok(templates)
+    }
+
+    /// Refuses the first Material a resolved Template that is `used`, by its
+    /// full name, names and `refuse` gives a reason against, naming the
+    /// Template and its palette character.
+    pub fn check(
+        &self,
+        registry: &Registry,
+        used: impl Fn(&str) -> bool,
+        refuse: impl Fn(MaterialId) -> Option<String>,
+    ) -> Result<(), ModError> {
+        for (mod_id, rows) in &self.rows {
+            for (row, def) in rows.iter().enumerate() {
+                if !used(&format!("{mod_id}:{}", def.name)) {
+                    continue;
+                }
+                let palette = def.palette.iter().filter_map(|entry| match &entry.cell {
+                    content::TemplateCell::Voxel(v) => {
+                        Some((format!("palette `{}`", entry.symbol), &v.material))
+                    }
+                    _ => None,
+                });
+                let foundation = def.foundation.iter().map(|m| ("foundation".to_owned(), m));
+                for (at, material) in palette.chain(foundation) {
+                    let Some(id) = registry.id_of(Kind::Material, material) else {
+                        continue;
+                    };
+                    if let Some(reason) = refuse(id as MaterialId) {
+                        return Err(ModError::Template {
+                            id: mod_id.clone(),
+                            row,
+                            name: def.name.clone(),
+                            reason: format!("{at}: Material `{material}` {reason}"),
+                        });
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+fn template(
+    name: String,
+    def: &content::TemplateDef,
+    registry: &Registry,
+    tables: &Tables,
+) -> Result<Template, String> {
+    let mut palette = HashMap::new();
+    for entry in &def.palette {
+        let at = format!("palette `{}`", entry.symbol);
+        let cell = match &entry.cell {
+            content::TemplateCell::Keep => Cell::Keep,
+            content::TemplateCell::Air => Cell::Air,
+            content::TemplateCell::Ground => Cell::Ground,
+            content::TemplateCell::Voxel(v) => {
+                Cell::Voxel(voxel(v, registry, tables).map_err(|reason| format!("{at}: {reason}"))?)
+            }
+        };
+        if palette.insert(entry.symbol, cell).is_some() {
+            return Err(format!("{at} is declared twice"));
+        }
+    }
+    let layers = def
+        .layers
+        .iter()
+        .enumerate()
+        .map(|(y, layer)| {
+            layer
+                .iter()
+                .enumerate()
+                .map(|(z, row)| {
+                    row.chars()
+                        .enumerate()
+                        .map(|(x, symbol)| {
+                            palette.get(&symbol).copied().ok_or_else(|| {
+                                format!(
+                                    "layer {y}, row {z}, column {x}: `{symbol}` is not in the \
+                                     palette"
+                                )
+                            })
+                        })
+                        .collect::<Result<Vec<_>, _>>()
+                })
+                .collect::<Result<Vec<_>, _>>()
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let ground_layer = def
+        .ground_layer
+        .ok_or("names no ground-layer, the layer that sits at ground height")?;
+    let foundation = def
+        .foundation
+        .as_deref()
+        .map(|m| solid(m, registry, tables).map_err(|reason| format!("foundation: {reason}")))
+        .transpose()?;
+    let template = Template::new(
+        name,
+        def.cell_m,
+        layers,
+        ground_layer as usize,
+        foundation,
+        def.level_tolerance_m.unwrap_or(DEFAULT_LEVEL_TOLERANCE_M),
+    );
+    template
+        .and_then(|t| if def.spans { t.spanning() } else { Ok(t) })
+        .map_err(|e| e.to_string())
+}
+
+fn voxel(
+    v: &content::TemplateVoxel,
+    registry: &Registry,
+    tables: &Tables,
+) -> Result<Voxel, String> {
+    if let Some(id) = registry.id_of(Kind::Material, &v.material)
+        && tables.fluids.contains(id as MaterialId)
+    {
+        return fluid_source(v, id as MaterialId);
+    }
+    let material = solid(&v.material, registry, tables)?;
+    let shape = match &v.shape {
+        Some(name) => registry
+            .id_of(Kind::Shape, name)
+            .ok_or_else(|| format!("names unknown Shape `{name}`"))?
+            as ShapeId,
+        None => SHAPE_FULL_CUBE,
+    };
+    let orientation =
+        Orientation::from_bits(v.orientation.unwrap_or(0)).ok_or("orientation must be below 24")?;
+    let voxel = Voxel::shaped(material, shape, orientation);
+    tables.vet_placed(voxel).map_err(|f| f.to_string())?;
+    Ok(voxel)
+}
+
+/// A fluid cell: a whole cube of the fluid, which every placement reads as a
+/// source, so it stands where it is put at every Voxel size.
+fn fluid_source(v: &content::TemplateVoxel, id: MaterialId) -> Result<Voxel, String> {
+    let shaped = v.shape.as_deref().is_some_and(|s| s != "core:cube");
+    if shaped || v.orientation.unwrap_or(0) != 0 {
+        return Err(format!(
+            "fluid Material `{}` is written as a whole cube, a source, with no Shape or orientation",
+            v.material
+        ));
+    }
+    Ok(Voxel::cube(id))
+}
+
+/// A Material a Template may write as a solid, or a foundation or path: one
+/// that exists and is no fluid, since air is the `air` cell.
+pub(crate) fn solid(
+    name: &str,
+    registry: &Registry,
+    tables: &Tables,
+) -> Result<MaterialId, String> {
+    let id = registry
+        .id_of(Kind::Material, name)
+        .ok_or_else(|| format!("names unknown Material `{name}`"))? as MaterialId;
+    tables
+        .vet_placed(Voxel::cube(id))
+        .map_err(|f| format!("Material `{name}`: {f}"))?;
+    if tables.fluids.contains(id) {
+        return Err(format!(
+            "Material `{name}` is a fluid, which a Template does not carry"
+        ));
+    }
+    if tables.plants.is_grown(id) {
+        return Err(format!(
+            "Material `{name}` is a Grown Material, which only a Plant's growth makes"
+        ));
+    }
+    if tables.uses.is_open(id) {
+        return Err(format!(
+            "Material `{name}` is a Door's open form; a Template holds the Door closed"
+        ));
+    }
+    Ok(id)
+}

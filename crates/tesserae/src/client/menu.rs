@@ -120,7 +120,7 @@ pub(super) fn plugin(app: &mut App) {
 type Overlays<'w> = (
     Option<Res<'w, super::settings::Settings>>,
     Option<Res<'w, super::input::UiInput>>,
-    Option<Res<'w, super::layout_menu::LayoutMenu>>,
+    super::structure_menu::Docked<'w>,
     Option<Res<'w, super::inventory_window::InventoryWindow>>,
     Option<Res<'w, super::map_window::MapWindow>>,
     Option<Res<'w, crate::server::persistence::SaveStatus>>,
@@ -134,13 +134,13 @@ pub(super) fn toggle(
     mut menu: ResMut<Menu>,
     cursor: Single<&mut CursorOptions, With<PrimaryWindow>>,
     window: Single<&Window, With<PrimaryWindow>>,
-    (settings, ui, layout_menu, inventory, map, save, allowed): Overlays,
+    (settings, ui, docked, inventory, map, save, allowed): Overlays,
 ) {
     if !window.focused
         || ui.is_some_and(|ui| ui.text_entry)
         || settings.is_some_and(|settings| settings.open)
         || save.is_some_and(|save| save.modal())
-        || layout_menu.is_some_and(|menu| menu.open)
+        || docked.open()
         || inventory.is_some_and(|window| window.open)
         || map.is_some_and(|window| window.open)
     {
@@ -658,13 +658,15 @@ pub(super) type Covers<'w> = (
     Option<Res<'w, super::settings::Settings>>,
     Option<Res<'w, super::inventory_window::InventoryWindow>>,
     Option<Res<'w, super::map_window::MapWindow>>,
+    Option<Res<'w, super::structure_menu::StructureList>>,
 );
 
-pub(super) fn covered((menu, settings, inventory, map): &Covers) -> bool {
+pub(super) fn covered((menu, settings, inventory, map, structures): &Covers) -> bool {
     menu.as_ref().is_some_and(|m| m.open)
         || settings.as_ref().is_some_and(|s| s.open)
         || inventory.as_ref().is_some_and(|i| i.open)
         || map.as_ref().is_some_and(|m| m.open)
+        || structures.as_ref().is_some_and(|l| l.open)
 }
 
 #[cfg(test)]

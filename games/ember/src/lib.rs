@@ -1,11 +1,15 @@
 //! A volcanic highland. Basalt chimneys are built on start and erupt on a timer; the lava, the
 //! water it meets and the wood it burns behave by the rules in the Mods this Game depends on
-//! (strata, waters, flora, crops, hearth), so none are declared here; its one Material is its food.
+//! (strata, waters, flora, crops, hearth), so none are declared here;
+//! its own Materials are its food and its building Materials.
 
 wit_bindgen::generate!({ path: "../../crates/tesserae-mods/wit/0.3", world: "mod" });
 
+mod building;
 mod food;
 mod plants;
+mod structures;
+mod templates;
 
 use std::cell::RefCell;
 use std::collections::VecDeque;
@@ -15,7 +19,8 @@ use exports::tesserae::mods::guest::{
 };
 use tesserae::mods::commands::{Fill, SourceFill};
 use tesserae::mods::content::{
-    BiomeDef, ClimateParams, GroundParams, MovementPolicy, OreDef, SkyFog, WaterParams,
+    BiomeDef, ClimateParams, GroundParams, MovementPolicy, OreDef, SkyFog, ToolDef, ToolKind,
+    WaterParams,
 };
 use tesserae::mods::types::{BoxM, Vec3, Voxel};
 
@@ -68,10 +73,13 @@ fn biomes() -> Vec<BiomeDef> {
             }),
             cave_scale: None,
             crop_fields: plants::ash_fields(),
+            structures: structures::wild(&["basalt_wall", "stepped_altar", "ash_pit"]),
+            settlements: structures::village(),
             surface_features: [food::feature()]
                 .into_iter()
                 .chain(plants::ash_flats())
                 .collect(),
+            loot: Some(structures::loot(structures::biome_loot("ash_flats"))),
         },
         BiomeDef {
             soundscape: None,
@@ -85,7 +93,10 @@ fn biomes() -> Vec<BiomeDef> {
             }),
             cave_scale: Some(1.5),
             crop_fields: Vec::new(),
+            structures: structures::wild(&["obsidian_spire", "ash_pit"]),
+            settlements: structures::village(),
             surface_features: Vec::new(),
+            loot: Some(structures::loot(structures::biome_loot("scorched"))),
         },
         BiomeDef {
             soundscape: None,
@@ -99,10 +110,13 @@ fn biomes() -> Vec<BiomeDef> {
             }),
             cave_scale: Some(0.5),
             crop_fields: Vec::new(),
+            structures: structures::wild(&["obsidian_spire", "barrow"]),
+            settlements: structures::village(),
             surface_features: [food::feature()]
                 .into_iter()
                 .chain(plants::highland())
                 .collect(),
+            loot: Some(structures::loot(structures::biome_loot("highland"))),
         },
         BiomeDef {
             soundscape: None,
@@ -116,7 +130,10 @@ fn biomes() -> Vec<BiomeDef> {
             }),
             cave_scale: Some(0.5),
             crop_fields: Vec::new(),
+            structures: structures::wild(&["barrow", "basalt_wall"]),
+            settlements: Vec::new(),
             surface_features: plants::cinder_bog(),
+            loot: Some(structures::loot(structures::biome_loot("cinder_bog"))),
         },
     ]
 }
@@ -346,15 +363,24 @@ impl Guest for Ember {
             humidity_size_m: CLIMATE_SIZE_M,
         });
         Declaration {
-            materials: vec![food::material()],
-            shapes: Vec::new(),
-            appearance: vec![food::appearance()],
+            materials: [food::material()]
+                .into_iter()
+                .chain(building::materials())
+                .collect(),
+            shapes: building::shapes(),
+            appearance: [food::appearance()]
+                .into_iter()
+                .chain(building::appearance())
+                .collect(),
             world: Some(world),
             view: None,
             fluids: Vec::new(),
             reactions: Vec::new(),
             combustion: Vec::new(),
-            tools: Vec::new(),
+            tools: vec![ToolDef {
+                name: "place".into(),
+                kind: ToolKind::Place,
+            }],
             items: vec![food::item()],
             biomes: biomes(),
             survival: None,
@@ -363,11 +389,13 @@ impl Guest for Ember {
             material_sounds: Vec::new(),
             soundscapes: Vec::new(),
             cause_sounds: Vec::new(),
-            recipes: Vec::new(),
+            recipes: building::recipes(),
             plants: Vec::new(),
             marker_kinds: Vec::new(),
             death_marker_kind: None,
-            voxel_uses: Vec::new(),
+            templates: templates::templates(),
+            settlements: structures::settlements(),
+            voxel_uses: building::voxel_uses(),
             ores: vec![OreDef {
                 material: "waters:obsidian".into(),
                 min_depth_m: 6.0,

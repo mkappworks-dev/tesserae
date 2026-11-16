@@ -1,5 +1,6 @@
-//! Writes every Terra Material's texture faces as PNG, and an index of its Materials and Shapes,
-//! into `mockup/blocks/` for the mockup's `/blocks` gallery. Run `scripts/build-guests` first.
+//! Writes the texture faces of every demo Game's own Materials as PNG under `mockup/blocks/<game>/`,
+//! and an index of them and Terra's Shapes, for the mockup's `/blocks` gallery. Run
+//! `scripts/build-guests` first.
 
 use std::fs::{self, File};
 use std::io::BufWriter;
@@ -13,10 +14,31 @@ use tesserae_mods::{Found, Kind, MATERIAL_TEXTURE_EDGE, ModHost, Registry, Trust
 
 /// The order a texture lays its faces out in, left to right.
 const FACES: [&str; 3] = ["top", "side", "bottom"];
+const GAMES: [&str; 5] = ["terra", "tidewater", "ember", "lumen", "meadow"];
 
 fn main() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let found = Found::read(&root.join("games/terra")).expect("games/terra/mod.toml");
+    let out = root.join("mockup/blocks");
+    let _ = fs::remove_dir_all(&out);
+    let mut materials = Vec::new();
+    let mut shapes = Vec::new();
+    for game in GAMES {
+        let (game_materials, game_shapes) = export(&root, game, &out);
+        materials.extend(game_materials);
+        shapes.extend(game_shapes);
+    }
+    let index = json!({ "games": GAMES, "edge": MATERIAL_TEXTURE_EDGE, "faces": FACES, "materials": materials, "shapes": shapes });
+    fs::write(
+        out.join("index.json"),
+        serde_json::to_string_pretty(&index).unwrap() + "\n",
+    )
+    .unwrap();
+    println!("wrote {} Materials to mockup/blocks", materials.len());
+}
+
+/// The Materials `game` declares itself, their faces written to `out/<game>/`, and its Shapes.
+fn export(root: &Path, game: &str, out: &Path) -> (Vec<Value>, Vec<Value>) {
+    let found = Found::read(&root.join("games").join(game)).expect("games/<game>/mod.toml");
     let scratch = root.join("target/export-blocks");
     fs::create_dir_all(&scratch).unwrap();
     let mut trust = Trust::load(scratch.join("trust.json"));
@@ -24,20 +46,24 @@ fn main() {
     let host = ModHost::new().unwrap();
     let compiled = host
         .load(vec![found], &trust)
-        .expect("build Terra with scripts/build-guests");
+        .unwrap_or_else(|e| panic!("build {game} with scripts/build-guests: {e}"));
     let instance = block_on(host.instantiate(&compiled[0], 0)).unwrap();
-    let (_, declaration) = block_on(instance.declare()).unwrap();
+    let (_, mut declaration) = block_on(instance.declare()).unwrap();
+    // Only the Game is loaded, and its World and Settlements name the shared Mods' Materials.
+    declaration.world = None;
+    declaration.biomes.clear();
+    declaration.ores.clear();
+    declaration.settlements.clear();
     let mut tables = Tables::builtin();
     let mut registry = Registry::builtin();
-    let applied = apply(declaration, "terra", &mut tables, &mut registry, true).unwrap();
+    let applied = apply(declaration, game, &mut tables, &mut registry, true).unwrap();
     resolve(vec![applied.behaviour], &mut tables, &registry).unwrap();
 
-    let out = root.join("mockup/blocks");
-    let _ = fs::remove_dir_all(&out);
-    fs::create_dir_all(&out).unwrap();
+    fs::create_dir_all(out.join(game)).unwrap();
+    let prefix = format!("{game}:");
     let mut materials = Vec::new();
     for (id, name) in registry.names(Kind::Material) {
-        let Some(short) = name.strip_prefix("terra:") else {
+        let Some(short) = name.strip_prefix(&prefix) else {
             continue;
         };
         let id = id as MaterialId;
@@ -50,7 +76,7 @@ fn main() {
         let mut faces = serde_json::Map::new();
         if let Some(pixels) = &appearance.texture {
             for (face, label) in FACES.iter().enumerate() {
-                let file = format!("{short}.{label}.png");
+                let file = format!("{game}/{short}.{label}.png");
                 write_face(&out.join(&file), pixels, face);
                 faces.insert((*label).into(), file.into());
             }
@@ -85,6 +111,7 @@ fn main() {
         };
         materials.push(json!({
             "name": name,
+            "game": game,
             "color": [c.r, c.g, c.b, c.a],
             "render": format!("{:?}", tables.materials.render(cube)).to_lowercase(),
             "solid": def.solid,
@@ -95,11 +122,14 @@ fn main() {
         }));
     }
 
-    let stone = registry.id_of(Kind::Material, "terra:stone").unwrap() as MaterialId;
-    let shapes: Vec<Value> = registry
+    // Every Shape is drawn in Terra's stone, so only Terra's Shapes are listed.
+    let Some(stone) = registry.id_of(Kind::Material, "terra:stone") else {
+        return (materials, Vec::new());
+    };
+    let shapes = registry
         .names(Kind::Shape)
         .map(|(id, name)| {
-            let voxel = Voxel::new(stone, id as u8, 0);
+            let voxel = Voxel::new(stone as MaterialId, id as u8, 0);
             let boxes = |connections| {
                 tables
                     .shapes
@@ -116,14 +146,7 @@ fn main() {
             shape
         })
         .collect();
-
-    let index = json!({ "game": "terra", "edge": MATERIAL_TEXTURE_EDGE, "faces": FACES, "materials": materials, "shapes": shapes });
-    fs::write(
-        out.join("index.json"),
-        serde_json::to_string_pretty(&index).unwrap() + "\n",
-    )
-    .unwrap();
-    println!("wrote {} Materials to mockup/blocks", materials.len());
+    (materials, shapes)
 }
 
 fn registry_name(registry: &Registry, id: MaterialId) -> &str {

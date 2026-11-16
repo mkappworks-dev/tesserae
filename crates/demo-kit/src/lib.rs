@@ -1,8 +1,12 @@
 //! What the demo Games share and the contract does not: the noise and tint
-//! their textures are drawn with, a texture's layout, and their food.
+//! their textures are drawn with, a texture's layout, their food, their
+//! building Materials and Stations, and their Settlement.
 //!
 //! Each Game binds the WIT contract itself, so the records it declares are its
 //! own types; [`food!`] writes the functions that build them inside the Game.
+
+pub mod building;
+pub mod structures;
 
 /// A texture face's edge in pixels.
 pub const EDGE: usize = 16;

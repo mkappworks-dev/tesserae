@@ -138,7 +138,7 @@ fn show_hint(
     covers: super::menu::Covers,
     dead: Option<Res<super::death::Dead>>,
 ) {
-    // The Menu, Settings, Inventory and death screen free the cursor too, but say where to go themselves.
+    // Covering screens and the death screen free the cursor too, but say where to go themselves.
     let covered = super::menu::covered(&covers);
     let wanted =
         if cursor.grab_mode == CursorGrabMode::None && !covered && super::death::alive(dead) {
@@ -165,7 +165,7 @@ fn show_hint(
     }));
 }
 
-fn reset(
+pub(super) fn reset(
     ownership: Res<super::input::Ownership>,
     actions: Res<Actions>,
     camera: Single<(&mut Transform, &mut FlyCamera, &CameraHome)>,
@@ -212,12 +212,12 @@ pub(super) fn grab_cursor(
     cursor: Single<&mut CursorOptions, With<PrimaryWindow>>,
     settings: Option<Res<super::settings::Settings>>,
     ui: Option<Res<super::input::UiInput>>,
-    layout_menu: Option<Res<super::layout_menu::LayoutMenu>>,
+    docked: super::structure_menu::Docked,
 ) {
     let mut cursor = cursor.into_inner();
     if settings.is_some_and(|settings| settings.open)
         || ui.is_some_and(|ui| ui.text_entry)
-        || layout_menu.is_some_and(|menu| menu.open)
+        || docked.open()
     {
         cursor.grab_mode = CursorGrabMode::None;
         cursor.visible = true;

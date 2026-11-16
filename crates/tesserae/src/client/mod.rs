@@ -67,6 +67,8 @@ mod soak;
 mod sound;
 mod soundscape;
 mod sprite;
+mod structure;
+mod structure_menu;
 mod theme;
 mod tile_preview;
 mod tool;
@@ -147,6 +149,7 @@ pub fn plugin(app: &mut App) {
         compass::plugin,
     ));
     app.add_plugins((minimap::plugin, map_window::plugin));
+    app.add_plugins((structure::plugin, structure_menu::plugin));
     app.add_plugins((waypoints::plugin, waypoint_panel::plugin));
     app.add_session_systems(
         Update,

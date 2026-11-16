@@ -299,6 +299,12 @@ fn the_rust_starter_builds_validates_rebuilds_and_mixes_with_data_content() {
     let loaded = installed(&out, &trust);
     let ids: Vec<_> = loaded.required.iter().map(|m| m.id.as_str()).collect();
     assert_eq!(ids, ["starter_rust", "extra"]);
+    let templates: Vec<_> = loaded.tables.templates.iter().map(|t| &t.name).collect();
+    assert_eq!(
+        templates,
+        ["starter_rust:hut"],
+        "the starter's documented Template"
+    );
     assert!(
         trust.exists(),
         "installing grants Trust to the exact builds"

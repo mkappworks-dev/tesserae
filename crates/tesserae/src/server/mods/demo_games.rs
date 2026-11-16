@@ -16,9 +16,12 @@ use super::{LoadedMods, TrustMode, load};
 use crate::world::WorldSettings;
 
 mod biomes;
+mod building;
 mod fields;
 mod food;
 mod plants;
+mod rooms;
+pub(in crate::server) mod structures;
 mod vegetation;
 
 fn checkout() -> PathBuf {
@@ -240,7 +243,7 @@ fn every_demo_game_draws_the_character_of_the_mod_it_suggests() {
 }
 
 #[test]
-fn meadow_declares_only_its_pumpkin_and_takes_its_ground_from_strata() {
+fn meadow_declares_its_pumpkin_and_building_materials_and_takes_its_ground_from_strata() {
     let (_install, loaded) = loaded("meadow", 0.5);
     assert!(loaded.game);
     assert_eq!(
@@ -250,8 +253,9 @@ fn meadow_declares_only_its_pumpkin_and_takes_its_ground_from_strata() {
             "strata",
             "flora",
             "crops",
-            "meadow",
-            "wanderer"
+            "wanderer",
+            "waters",
+            "meadow"
         ]
     );
     let own: Vec<_> = loaded
@@ -265,11 +269,13 @@ fn meadow_declares_only_its_pumpkin_and_takes_its_ground_from_strata() {
         .names(Kind::Material)
         .map(|(id, _)| id)
         .max();
+    assert_eq!(own[0].1, "meadow:pumpkin");
     assert_eq!(
-        own,
-        [(last.unwrap(), "meadow:pumpkin".to_owned())],
-        "appended last"
+        own.len(),
+        26,
+        "its pumpkin, 16 building Materials, 3 Stations and 6 furnishings with the open door"
     );
+    assert_eq!(own.last().map(|&(id, _)| id), last, "appended last");
     let ground = loaded.world.unwrap().ground.unwrap();
     assert_eq!(ground.rock, material(&loaded, "strata:stone"));
     assert_eq!(ground.soil, material(&loaded, "strata:clay"));
@@ -525,8 +531,9 @@ fn lumen_builds_blended_glass_light_and_all_three_shapes() {
             "strata",
             "flora",
             "crops",
-            "lumen",
-            "wanderer"
+            "wanderer",
+            "waters",
+            "lumen"
         ]
     );
     let batches = run(&mut loaded, 0.5, 0.05, 40);

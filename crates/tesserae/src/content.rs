@@ -97,6 +97,153 @@ pub struct ContentCatalogue {
     pub rock: Option<MaterialId>,
     /// The Game's tools, in declared order.
     pub tools: Vec<CatalogueTool>,
+    /// The World's Templates in load order: what the `place` Tool offers.
+    pub templates: Vec<CatalogueTemplate>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct CatalogueTemplate {
+    /// `<mod id>:<name>`, as a Structure intent names it.
+    pub name: String,
+    /// Along x, y and z before any turn; a quarter turn swaps x and z.
+    pub size_m: [f32; 3],
+    /// [`template_thumbnail`] at each quarter turn, in turn order; empty when not drawn.
+    pub thumbnails: [std::sync::Arc<[u8]>; 4],
+}
+
+/// Pixels along each side of a Template's thumbnail.
+pub const THUMBNAIL_PX: usize = 64;
+
+/// RGBA pixels of a small isometric picture of `template` turned by `turn`: a cube for each cell
+/// that is not Keep or Air, in its Material's `colour` (a `ground` cell in `ground`), its top lit
+/// and its two near sides shaded, and clear where nothing is drawn. Drawn from content alone, so
+/// the place Tool's list shows it with no World and no render pass.
+pub fn template_thumbnail(
+    template: &tesserae_core::template::Template,
+    turn: tesserae_core::template::Turn,
+    colour: impl Fn(MaterialId) -> [u8; 4],
+    ground: [u8; 4],
+) -> std::sync::Arc<[u8]> {
+    use tesserae_core::template::Cell;
+    let sampled = template.sample(template.cell_m(), turn);
+    let [w, h, d] = sampled.size();
+    let mut cubes = Vec::new();
+    for y in 0..h {
+        for z in 0..d {
+            for x in 0..w {
+                match sampled.cell([x, y, z]) {
+                    Cell::Voxel(v) if !v.is_air() => cubes.push(([x, y, z], colour(v.material()))),
+                    Cell::Ground => cubes.push(([x, y, z], ground)),
+                    _ => {}
+                }
+            }
+        }
+    }
+    let mut pixels = vec![0u8; THUMBNAIL_PX * THUMBNAIL_PX * 4];
+    if cubes.is_empty() {
+        return pixels.into();
+    }
+    let at = |[x, y, z]: [i32; 3]| [(x - z) as f32, (x + z) as f32 / 2.0 - y as f32];
+    let (mut low, mut high) = ([f32::MAX; 2], [f32::MIN; 2]);
+    for &([x, y, z], _) in &cubes {
+        for corner in [
+            [x, y + 1, z],
+            [x + 1, y, z],
+            [x, y, z + 1],
+            [x + 1, y + 1, z + 1],
+        ] {
+            let p = at(corner);
+            for a in 0..2 {
+                low[a] = low[a].min(p[a]);
+                high[a] = high[a].max(p[a]);
+            }
+        }
+    }
+    let margin = 2.0;
+    let side = THUMBNAIL_PX as f32 - 2.0 * margin;
+    let scale = side / (high[0] - low[0]).max(high[1] - low[1]);
+    let offset =
+        [0, 1].map(|a| margin + (side - (high[a] - low[a]) * scale) / 2.0 - low[a] * scale);
+    let px = |corner: [i32; 3]| {
+        let p = at(corner);
+        [p[0] * scale + offset[0], p[1] * scale + offset[1]]
+    };
+    // Far cubes first, so nearer ones paint over them.
+    cubes.sort_by_key(|&([x, y, z], _)| (x + z, y));
+    for ([x, y, z], rgba) in cubes {
+        let faces = [
+            (
+                [
+                    [x, y, z + 1],
+                    [x + 1, y, z + 1],
+                    [x + 1, y + 1, z + 1],
+                    [x, y + 1, z + 1],
+                ],
+                0.8,
+            ),
+            (
+                [
+                    [x + 1, y, z],
+                    [x + 1, y, z + 1],
+                    [x + 1, y + 1, z + 1],
+                    [x + 1, y + 1, z],
+                ],
+                0.65,
+            ),
+            (
+                [
+                    [x, y + 1, z],
+                    [x + 1, y + 1, z],
+                    [x + 1, y + 1, z + 1],
+                    [x, y + 1, z + 1],
+                ],
+                1.0,
+            ),
+        ];
+        for (corners, light) in faces {
+            fill_quad(&mut pixels, corners.map(px), rgba, light);
+        }
+    }
+    pixels.into()
+}
+
+/// Paints the convex quad `corners` in pixel space with `rgba` scaled by `light`, over what is
+/// there.
+fn fill_quad(pixels: &mut [u8], corners: [[f32; 2]; 4], rgba: [u8; 4], light: f32) {
+    let n = THUMBNAIL_PX as i32;
+    let low = [0, 1].map(|a| {
+        corners
+            .iter()
+            .map(|c| c[a])
+            .fold(f32::MAX, f32::min)
+            .floor() as i32
+    });
+    let high = [0, 1].map(|a| corners.iter().map(|c| c[a]).fold(f32::MIN, f32::max).ceil() as i32);
+    let alpha = f32::from(rgba[3]) / 255.0;
+    for py in low[1].max(0)..high[1].min(n) {
+        for px in low[0].max(0)..high[0].min(n) {
+            let p = [px as f32 + 0.5, py as f32 + 0.5];
+            let sides = (0..4).map(|i| {
+                let [a, b] = [corners[i], corners[(i + 1) % 4]];
+                (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0])
+            });
+            let (mut neg, mut pos) = (false, false);
+            for side in sides {
+                neg |= side < 0.0;
+                pos |= side > 0.0;
+            }
+            if neg && pos {
+                continue;
+            }
+            let i = ((py * n + px) * 4) as usize;
+            for c in 0..3 {
+                let lit = f32::from(rgba[c]) * light;
+                pixels[i + c] =
+                    (lit * alpha + f32::from(pixels[i + c]) * (1.0 - alpha)).round() as u8;
+            }
+            pixels[i + 3] = pixels[i + 3].max(rgba[3]);
+        }
+    }
 }
 
 impl CatalogueTool {
@@ -211,4 +358,48 @@ pub struct WorldFacts {
     /// How far apart the Climate map's temperature and humidity change, in metres.
     pub temperature_size_m: f32,
     pub humidity_size_m: f32,
+}
+
+#[cfg(test)]
+mod thumbnail_tests {
+    use super::*;
+    use tesserae_core::Voxel;
+    use tesserae_core::template::{Cell, Template, Turn};
+
+    const RED: [u8; 4] = [200, 0, 0, 255];
+    const BLUE: [u8; 4] = [0, 0, 200, 255];
+
+    /// Three red cells along x, and a blue one a layer up over the last.
+    fn ell() -> Template {
+        let (r, b, k) = (
+            Cell::Voxel(Voxel::cube(1)),
+            Cell::Voxel(Voxel::cube(2)),
+            Cell::Keep,
+        );
+        Template::new(
+            "t:ell".into(),
+            1.0,
+            vec![vec![vec![r, r, r]], vec![vec![k, k, b]]],
+            0,
+            None,
+            1.0,
+        )
+        .unwrap()
+    }
+
+    fn drawn(turn: Turn) -> std::sync::Arc<[u8]> {
+        let colour = |m| if m == 1 { RED } else { BLUE };
+        template_thumbnail(&ell(), turn, colour, [0, 0, 0, 255])
+    }
+
+    #[test]
+    fn a_templates_thumbnail_shows_its_materials_on_a_clear_ground_and_turns_with_it() {
+        let thumb = drawn(Turn::NONE);
+        assert_eq!(thumb.len(), THUMBNAIL_PX * THUMBNAIL_PX * 4);
+        let pixels: Vec<[u8; 4]> = thumb.chunks(4).map(|p| [p[0], p[1], p[2], p[3]]).collect();
+        assert!(pixels.contains(&RED), "a red top");
+        assert!(pixels.contains(&BLUE), "a blue top");
+        assert_eq!(pixels[0][3], 0, "clear where nothing is drawn");
+        assert_ne!(drawn(Turn::new(1)), thumb, "a turn turns it");
+    }
 }

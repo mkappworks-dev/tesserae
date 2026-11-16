@@ -38,6 +38,7 @@ mod lod;
 mod lod_rings;
 pub mod map;
 pub mod mods;
+mod obtainable;
 pub mod persistence;
 pub mod plants;
 pub mod player;
@@ -217,11 +218,19 @@ fn open_world(
     params: Option<Res<mods::WorldParameters>>,
     persistence: Option<Res<persistence::Persistence>>,
 ) {
-    let params = params.map_or_else(|| worldgen_params(None), |params| params.0);
+    let templates = params.as_ref().map_or(&[][..], |p| p.1.as_slice());
+    let settlements = params.as_ref().map_or(&[][..], |p| p.2.as_slice());
+    let loot = params.as_ref().map_or(&[][..], |p| p.3.as_slice());
+    let params = params
+        .as_ref()
+        .map_or_else(|| worldgen_params(None), |params| params.0);
     if params.ground.is_none() {
         info!("World has no ground: no Game named rock, soil and surface");
     }
-    let generator = Worldgen::new(world.seed, world.voxel_size, params);
+    let generator = Worldgen::new(world.seed, world.voxel_size, params)
+        .with_templates(templates)
+        .with_settlements(settlements)
+        .with_loot(loot);
     let mut spawn = SpawnPoint::new(spawn_eye(&generator));
     if let Some(eye) = persistence.and_then(|p| p.reopened_eye) {
         spawn = spawn.with_entry(eye);
@@ -230,16 +239,23 @@ fn open_world(
     commands.insert_resource(WorldGenerator(generator));
 }
 
-/// Over the origin, clear of the ground and of any lake standing on it, and
-/// no lower than the top of anything generated under the Player's body.
+/// How far from the origin a new World looks for a Settlement to spawn the Player beside.
+const SPAWN_SEARCH_M: f32 = 512.0;
+
+/// Just outside the Settlement nearest the origin, or over the origin with none that near; clear
+/// of the ground and of any lake standing on it, and no lower than the top of anything generated
+/// under the Player's body.
 fn spawn_eye(generator: &Worldgen) -> Vec3 {
-    let ground_m = generator.surface_height_m(0.0, 0.0);
+    let [x, z] = generator
+        .settlement_spawn_m(SPAWN_SEARCH_M)
+        .unwrap_or([0.0; 2]);
+    let ground_m = generator.surface_height_m(x, z);
     let top_m = generator
         .water()
         .map_or(ground_m, |w| w.level_m.max(ground_m));
     let half = player::BODY_HALF_WIDTH_M;
-    let clear_m = generator.clear_height_m([-half; 2], [half; 2]);
-    Vec3::new(0.0, (top_m + SPAWN_CLEARANCE_M).max(clear_m), 0.0)
+    let clear_m = generator.clear_height_m([x - half, z - half], [x + half, z + half]);
+    Vec3::new(x, (top_m + SPAWN_CLEARANCE_M).max(clear_m), z)
 }
 
 /// `f` over `items` on one thread each, results in `items` order; a panic is re-raised as it was.

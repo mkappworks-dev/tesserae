@@ -329,6 +329,16 @@ impl Orientation {
         (0..ORIENTATIONS as u8).map(Orientation)
     }
 
+    /// Turned `quarters` quarter-turns about the World's +Y whatever its own
+    /// `up`, as a Voxel turns with the Structure it is part of; unlike
+    /// [`Orientation::turned`], which turns about the Shape's own `up`.
+    pub fn yawed(self, quarters: u8) -> Self {
+        let m = mul(&TURN[(quarters % 4) as usize], &self.matrix());
+        Orientation::all()
+            .find(|o| o.matrix() == m)
+            .expect("the 24 rotations are closed under a turn")
+    }
+
     /// The face constant the Shape's own face `face` points to.
     pub fn face_of(self, face: usize) -> usize {
         let to = apply(&self.matrix(), crate::mesh::FACE_STEPS[face]);

@@ -3,6 +3,6 @@ version = "0.1.0"
 description = "Crystals & twilight"
 api = "0.3"
 root = true
-depends = ["strata", "flora", "crops", "glassworks", "frost", "crystals"]
+depends = ["strata", "waters", "flora", "crops", "glassworks", "frost", "crystals"]
 suggests = ["wanderer"]
 wasm = "lumen.wasm"

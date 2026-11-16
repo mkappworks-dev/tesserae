@@ -475,7 +475,7 @@ function simPanel() {
   return `<aside class="sim-panel" aria-label="Prototype simulation"><header><b>Simulate</b><span>${mode} · not part of the design</span><button data-action="sim-toggle" aria-expanded="${!state.simCollapsed}">${state.simCollapsed ? "Show" : "Hide"}</button></header>${
     state.simCollapsed
       ? ""
-      : `<div class="sim-group"><small>Items</small>${b("Place held (right-click)", "sim-place")}${b("Break Stone", "sim-break")}${b("Undo (Z)", "sim-undo")}${b("Pick up 12 Dirt", "sim-pickup", "dirt:12")}${b("Fill every slot", "sim-fill")}</div>${useSimGroup(b)}<div class="sim-group"><small>Body</small>${b("Fall 9 m", "sim-fall", 9)}${b("Fall 25 m", "sim-fall", 25)}${b(v.underwater ? "Surface" : "Dive", "sim-dive")}${b("2 s underwater", "sim-breath")}${b("Touch lava 1 s", "sim-lava")}${b("Sprint 10 s", "sim-time", "sprint")}${b("Wait 60 s", "sim-time", "idle")}${b("Eat held (G)", "sim-eat")}${b("Starve", "sim-starve")}${b("Die, items despawned", "sim-despawned")}</div><div class="sim-group"><small>Engine states</small>${b("Hold remove", "sim-aim", "breaking")}${b("Place hint", "sim-aim", "place")}${b("Measure tool", "sim-aim", "measure")}${b("Hold Fire", "sim-tool", "Fire")}${b("Saving", "sim-save", "saving")}${b("Save failed", "sim-save", "error")}${b("Save failed on quit", "sim-save", "quit-error")}${b("Exit without saving", "sim-save", "confirm")}</div><div class="sim-group"><small>Game declares</small><small>Melon: food 6 · regeneration ${rules.regenPerSecond} health/s at hunger ${rules.regenAbove}+</small><label><input type="checkbox" data-bind="keepInventory" ${state.keepInventory ? "checked" : ""}> keep_inventory</label></div><div class="sim-group"><small>Map policy</small><label><input type="checkbox" data-bind="mapForbidden" ${state.mapForbidden ? "checked" : ""}> Game forbids the Map</label></div><pre class="sim-state">health ${v.health}/${rules.maxHealth}  hunger ${v.hunger}/${rules.maxHunger}  air ${v.air}/${rules.maxAir}${v.underwater ? " (underwater)" : ""}
+      : `<div class="sim-group"><small>Items</small>${b("Place held (right-click)", "sim-place")}${b("Break Stone", "sim-break")}${b("Undo (Z)", "sim-undo")}${b("Pick up 12 Dirt", "sim-pickup", "dirt:12")}${b("Fill every slot", "sim-fill")}</div>${useSimGroup(b)}<div class="sim-group"><small>Body</small>${b("Fall 9 m", "sim-fall", 9)}${b("Fall 25 m", "sim-fall", 25)}${b(v.underwater ? "Surface" : "Dive", "sim-dive")}${b("2 s underwater", "sim-breath")}${b("Touch lava 1 s", "sim-lava")}${b("Sprint 10 s", "sim-time", "sprint")}${b("Wait 60 s", "sim-time", "idle")}${b("Eat held (G)", "sim-eat")}${b("Starve", "sim-starve")}${b("Die, items despawned", "sim-despawned")}</div><div class="sim-group"><small>Engine states</small>${b("Hold remove", "sim-aim", "breaking")}${b("Place hint", "sim-aim", "place")}${b("Measure tool", "sim-aim", "measure")}${b("Place tool", "sim-tool", "Place")}${b("Hold Fire", "sim-tool", "Fire")}${b("Saving", "sim-save", "saving")}${b("Save failed", "sim-save", "error")}${b("Save failed on quit", "sim-save", "quit-error")}${b("Exit without saving", "sim-save", "confirm")}</div><div class="sim-group"><small>Game declares</small><small>Melon: food 6 · regeneration ${rules.regenPerSecond} health/s at hunger ${rules.regenAbove}+</small><label><input type="checkbox" data-bind="keepInventory" ${state.keepInventory ? "checked" : ""}> keep_inventory</label></div><div class="sim-group"><small>Map policy</small><label><input type="checkbox" data-bind="mapForbidden" ${state.mapForbidden ? "checked" : ""}> Game forbids the Map</label></div><pre class="sim-state">health ${v.health}/${rules.maxHealth}  hunger ${v.hunger}/${rules.maxHunger}  air ${v.air}/${rules.maxAir}${v.underwater ? " (underwater)" : ""}
 journal ${
           state.journal
             .map((j) => j.kind + ":" + j.id)
@@ -686,7 +686,12 @@ window.addEventListener(
         return;
       }
     }
-    if (state.screen === "play" && e.key.toLowerCase() === "g") {
+    // With the place Tool in hand, G is the Tool's: it builds a pinned preview.
+    if (
+      state.screen === "play" &&
+      e.key.toLowerCase() === "g" &&
+      state.heldTool !== "Place"
+    ) {
       e.preventDefault();
       e.stopImmediatePropagation();
       /* Aimed at a Usable Voxel, Use acts on it before eating is considered. */

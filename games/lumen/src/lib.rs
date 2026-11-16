@@ -4,8 +4,11 @@
 
 wit_bindgen::generate!({ path: "../../crates/tesserae-mods/wit/0.3", world: "mod" });
 
+mod building;
 mod food;
 mod plants;
+mod structures;
+mod templates;
 
 use std::cell::RefCell;
 use std::collections::VecDeque;
@@ -15,7 +18,7 @@ use exports::tesserae::mods::guest::{
 };
 use tesserae::mods::commands::Fill;
 use tesserae::mods::content::{
-    BiomeDef, ClimateParams, GroundParams, MovementPolicy, OreDef, SkyFog,
+    BiomeDef, ClimateParams, GroundParams, MovementPolicy, OreDef, SkyFog, ToolDef, ToolKind,
 };
 use tesserae::mods::types::{BoxM, Vec3, Voxel};
 
@@ -80,10 +83,13 @@ fn biomes() -> Vec<BiomeDef> {
             }),
             cave_scale: None,
             crop_fields: plants::garden_fields(),
+            structures: structures::wild(&["star_ring", "glass_dome"]),
+            settlements: structures::village(),
             surface_features: [food::feature()]
                 .into_iter()
                 .chain(plants::garden())
                 .collect(),
+            loot: Some(structures::loot(structures::biome_loot("garden"))),
         },
         BiomeDef {
             soundscape: None,
@@ -97,7 +103,10 @@ fn biomes() -> Vec<BiomeDef> {
             }),
             cave_scale: None,
             crop_fields: Vec::new(),
+            structures: structures::wild(&["crystal_spire", "observatory"]),
+            settlements: structures::village(),
             surface_features: plants::arid_court(),
+            loot: Some(structures::loot(structures::biome_loot("arid_court"))),
         },
         BiomeDef {
             soundscape: None,
@@ -111,10 +120,13 @@ fn biomes() -> Vec<BiomeDef> {
             }),
             cave_scale: None,
             crop_fields: Vec::new(),
+            structures: structures::wild(&["crystal_spire", "geode_hollow"]),
+            settlements: structures::village(),
             surface_features: [food::feature()]
                 .into_iter()
                 .chain(plants::frost_court())
                 .collect(),
+            loot: Some(structures::loot(structures::biome_loot("frost_court"))),
         },
         BiomeDef {
             soundscape: None,
@@ -128,7 +140,10 @@ fn biomes() -> Vec<BiomeDef> {
             }),
             cave_scale: None,
             crop_fields: Vec::new(),
+            structures: structures::wild(&["glass_dome", "observatory"]),
+            settlements: structures::village(),
             surface_features: plants::conservatory(),
+            loot: Some(structures::loot(structures::biome_loot("conservatory"))),
         },
         BiomeDef {
             soundscape: None,
@@ -142,7 +157,10 @@ fn biomes() -> Vec<BiomeDef> {
             }),
             cave_scale: None,
             crop_fields: Vec::new(),
+            structures: structures::wild(&["geode_hollow", "star_ring"]),
+            settlements: Vec::new(),
             surface_features: plants::lily_pond(),
+            loot: Some(structures::loot(structures::biome_loot("lily_pond"))),
         },
     ]
 }
@@ -453,15 +471,24 @@ impl Guest for Lumen {
             humidity_size_m: CLIMATE_SIZE_M,
         });
         Declaration {
-            materials: vec![food::material()],
-            shapes: Vec::new(),
-            appearance: vec![food::appearance()],
+            materials: [food::material()]
+                .into_iter()
+                .chain(building::materials())
+                .collect(),
+            shapes: building::shapes(),
+            appearance: [food::appearance()]
+                .into_iter()
+                .chain(building::appearance())
+                .collect(),
             world: Some(world),
             view: None,
             fluids: Vec::new(),
             reactions: Vec::new(),
             combustion: Vec::new(),
-            tools: Vec::new(),
+            tools: vec![ToolDef {
+                name: "place".into(),
+                kind: ToolKind::Place,
+            }],
             items: vec![food::item()],
             biomes: biomes(),
             survival: None,
@@ -470,11 +497,13 @@ impl Guest for Lumen {
             material_sounds: Vec::new(),
             soundscapes: Vec::new(),
             cause_sounds: Vec::new(),
-            recipes: Vec::new(),
+            recipes: building::recipes(),
             plants: Vec::new(),
             marker_kinds: Vec::new(),
             death_marker_kind: None,
-            voxel_uses: Vec::new(),
+            templates: templates::templates(),
+            settlements: structures::settlements(),
+            voxel_uses: building::voxel_uses(),
             ores: vec![OreDef {
                 material: "crystals:amethyst".into(),
                 min_depth_m: 8.0,

@@ -20,3 +20,12 @@ The mod API exposes metres. No mod may assume one Voxel is one metre.
 Cost is non-linear and intentional: 0.25m is 64× the Voxels per cubic metre, so
 an unchanged Chunk budget covers a quarter of the distance. View distance in
 metres scales as 1/`voxel_size`.
+
+## Amendment, 2026-11-15: Templates are sampled in metres
+
+A Template (step 20) is authored on a grid whose cell size is declared in
+metres, never in the World's Voxels. A Structure takes, for each of the World's
+Voxels, the Template cell its centre falls in, so it has the same footprint in
+metres at 1.0, 0.5 and 0.25 m. A Template finer than the World loses detail; a
+coarser one repeats cells.
+[ADR-0029](0029-structures-are-declared-templates-placed-as-pure-functions-of-metres.md).

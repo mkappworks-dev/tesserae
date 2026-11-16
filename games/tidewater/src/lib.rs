@@ -5,8 +5,11 @@
 
 wit_bindgen::generate!({ path: "../../crates/tesserae-mods/wit/0.3", world: "mod" });
 
+mod building;
 mod food;
 mod plants;
+mod structures;
+mod templates;
 
 use std::cell::RefCell;
 use std::collections::VecDeque;
@@ -17,7 +20,7 @@ use exports::tesserae::mods::guest::{
 use tesserae::mods::commands::{Fill, SourceFill};
 use tesserae::mods::content::{
     BiomeDef, CaveParams, ClimateParams, GroundParams, MovementPolicy, OreDef, SkyFog,
-    SmoothingParams, WaterParams,
+    SmoothingParams, ToolDef, ToolKind, WaterParams,
 };
 use tesserae::mods::types::{BoxM, Vec3, Voxel};
 
@@ -244,15 +247,24 @@ impl Guest for Tidewater {
             humidity_size_m: 256.0,
         });
         Declaration {
-            materials: vec![food::material()],
-            shapes: Vec::new(),
-            appearance: vec![food::appearance()],
+            materials: [food::material()]
+                .into_iter()
+                .chain(building::materials())
+                .collect(),
+            shapes: building::shapes(),
+            appearance: [food::appearance()]
+                .into_iter()
+                .chain(building::appearance())
+                .collect(),
             world: Some(world),
             view: None,
             fluids: Vec::new(),
             reactions: Vec::new(),
             combustion: Vec::new(),
-            tools: Vec::new(),
+            tools: vec![ToolDef {
+                name: "place".into(),
+                kind: ToolKind::Place,
+            }],
             items: vec![food::item()],
             biomes: vec![
                 BiomeDef {
@@ -267,10 +279,13 @@ impl Guest for Tidewater {
                     }),
                     cave_scale: Some(1.4),
                     crop_fields: plants::lagoon_fields(),
+                    structures: structures::wild(&["dock", "stilt_house", "sea_arch"]),
+                    settlements: structures::village(),
                     surface_features: [food::feature()]
                         .into_iter()
                         .chain(plants::lagoon())
                         .collect(),
+                    loot: Some(structures::loot(structures::biome_loot("lagoon"))),
                 },
                 BiomeDef {
                     soundscape: None,
@@ -288,10 +303,17 @@ impl Guest for Tidewater {
                     }),
                     cave_scale: Some(0.0),
                     crop_fields: Vec::new(),
+                    structures: [
+                        structures::wild(&["lighthouse"]),
+                        structures::bridge("rope_bridge"),
+                    ]
+                    .concat(),
+                    settlements: structures::village(),
                     surface_features: [food::feature()]
                         .into_iter()
                         .chain(plants::salt_flats())
                         .collect(),
+                    loot: Some(structures::loot(structures::biome_loot("salt_flats"))),
                 },
                 BiomeDef {
                     soundscape: None,
@@ -309,7 +331,10 @@ impl Guest for Tidewater {
                     }),
                     cave_scale: None,
                     crop_fields: Vec::new(),
+                    structures: structures::wild(&["lighthouse", "sea_arch"]),
+                    settlements: structures::village(),
                     surface_features: plants::cold_shallows(),
+                    loot: Some(structures::loot(structures::biome_loot("cold_shallows"))),
                 },
                 BiomeDef {
                     soundscape: None,
@@ -323,7 +348,14 @@ impl Guest for Tidewater {
                     }),
                     cave_scale: Some(1.4),
                     crop_fields: Vec::new(),
+                    structures: [
+                        structures::bridge("rope_bridge"),
+                        structures::wild(&["stilt_house"]),
+                    ]
+                    .concat(),
+                    settlements: structures::village(),
                     surface_features: plants::rainforest(),
+                    loot: Some(structures::loot(structures::biome_loot("rainforest"))),
                 },
                 BiomeDef {
                     soundscape: None,
@@ -341,7 +373,10 @@ impl Guest for Tidewater {
                     }),
                     cave_scale: Some(0.7),
                     crop_fields: Vec::new(),
+                    structures: structures::wild(&["dock", "stilt_house"]),
+                    settlements: structures::village(),
                     surface_features: plants::tidal_marsh(),
+                    loot: Some(structures::loot(structures::biome_loot("tidal_marsh"))),
                 },
             ],
             survival: None,
@@ -350,11 +385,13 @@ impl Guest for Tidewater {
             material_sounds: Vec::new(),
             soundscapes: Vec::new(),
             cause_sounds: Vec::new(),
-            recipes: Vec::new(),
+            recipes: building::recipes(),
             plants: Vec::new(),
             marker_kinds: Vec::new(),
             death_marker_kind: None,
-            voxel_uses: Vec::new(),
+            templates: templates::templates(),
+            settlements: structures::settlements(),
+            voxel_uses: building::voxel_uses(),
             ores: vec![OreDef {
                 material: "crystals:aquamarine".into(),
                 min_depth_m: 6.0,

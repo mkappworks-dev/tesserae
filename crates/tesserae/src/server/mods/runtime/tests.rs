@@ -181,32 +181,6 @@ impl Harness {
         self.dispatch();
         self.await_landing();
     }
-    /// One step of the fluid simulation at most: it may fall behind the Mod's
-    /// ticks, never run ahead of them.
-    fn step_fluids(&mut self) {
-        self.app
-            .world_mut()
-            .run_system_once(crate::server::fluids::simulate)
-            .unwrap();
-    }
-    fn settle_fluids(&mut self) {
-        let started = Instant::now();
-        loop {
-            self.step_fluids();
-            let sim = self
-                .app
-                .world()
-                .resource::<crate::server::fluids::FluidSim>();
-            if sim.is_idle() {
-                return;
-            }
-            assert!(
-                started.elapsed() < Duration::from_secs(300),
-                "never settled"
-            );
-            std::thread::sleep(Duration::from_micros(50));
-        }
-    }
     fn pending(&self) -> &PendingCommands {
         self.app.world().resource::<PendingCommands>()
     }
@@ -505,6 +479,7 @@ fn history_is_bounded_and_each_mod_counts_only_the_events_it_missed() {
             after: Voxel::cube(tesserae_core::testgen::fixtures().ground.rock),
         });
         assert_eq!(history.since(&mut fast, &mut fast_dropped).len(), 1);
+        history.next_tick();
     }
     assert_eq!(history.events.len(), MAX_EDIT_EVENTS);
     assert_eq!(history.dropped, 7);
@@ -513,6 +488,116 @@ fn history_is_bounded_and_each_mod_counts_only_the_events_it_missed() {
     assert_eq!(events[0].at[0], 7.0);
     assert_eq!((fast_dropped, slow_dropped), (0, 7));
     assert!(history.since(&mut slow, &mut slow_dropped).is_empty());
+}
+
+#[test]
+fn a_placed_structures_voxels_reach_a_mod_as_edit_events() {
+    use crate::server::edit::StructureIntent;
+    use crate::server::player::Player;
+    use tesserae_core::template::{Cell, Template, Turn};
+    let mut h = Harness::new(&[9]);
+    let mut tables = (*h.app.world().resource::<ContentTables>().0).clone();
+    // A Keep Ground layer on the rock aimed at, and the pair on it.
+    let pair = vec![
+        vec![vec![Cell::Keep; 2]],
+        vec![vec![Cell::Voxel(Voxel::cube(h.rock)); 2]],
+    ];
+    tables
+        .templates
+        .push(Template::new("t:pair".into(), 1.0, pair, 0, None, 1.0).unwrap());
+    h.app
+        .insert_resource(ContentTables(std::sync::Arc::new(tables)))
+        .insert_resource(WorldSettings::default())
+        .add_plugins(edit::plugin);
+    let eye = Vec3::new(2.5, 6.0, 2.5);
+    h.app.world_mut().spawn(Player::at(eye));
+    h.put([2, 2, 2], Voxel::cube(h.rock));
+    h.app.world_mut().write_message(StructureIntent {
+        origin: eye,
+        direction: Vec3::NEG_Y,
+        template: "t:pair".into(),
+        turn: Turn::NONE,
+        pinned: None,
+    });
+    h.app.world_mut().run_schedule(RunFixedMainLoop);
+    h.app.world_mut().run_schedule(FixedPreUpdate);
+    assert_eq!(h.voxel([1, 3, 2]), Voxel::cube(h.rock));
+    assert_eq!(h.voxel([2, 3, 2]), Voxel::cube(h.rock));
+    h.call();
+    let log = h.log(0);
+    assert!(log.contains("edits=2"), "{log}");
+    assert!(log.contains("x: 1.0, y: 3.0, z: 2.0"), "{log}");
+}
+
+#[test]
+fn every_voxel_of_an_undo_past_one_ticks_events_reaches_a_mod_in_order() {
+    use crate::server::edit::StructureIntent;
+    use crate::server::edit::tests::replay;
+    use crate::server::player::Player;
+    use crate::server::undo::HistoryAction::Undo;
+    use tesserae_core::template::{Cell, Template, Turn};
+    let mut h = Harness::new(&[9]);
+    let mut tables = (*h.app.world().resource::<ContentTables>().0).clone();
+    let [w, layers, d] = [30, 2, 20];
+    // A Keep Ground layer on the rock aimed at, and the slab on it.
+    let mut slab = vec![vec![vec![Cell::Voxel(Voxel::cube(h.rock)); w]; d]; layers + 1];
+    slab[0] = vec![vec![Cell::Keep; w]; d];
+    tables
+        .templates
+        .push(Template::new("t:slab".into(), 1.0, slab, 0, None, 1.0).unwrap());
+    h.app
+        .insert_resource(ContentTables(std::sync::Arc::new(tables)))
+        .insert_resource(WorldSettings::default())
+        .add_plugins(edit::plugin);
+    let eye = Vec3::new(16.5, 8.0, 16.5);
+    h.app.world_mut().spawn(Player::at(eye));
+    h.put([16, 2, 16], Voxel::cube(h.rock));
+    h.app.world_mut().write_message(StructureIntent {
+        origin: eye,
+        direction: Vec3::NEG_Y,
+        template: "t:slab".into(),
+        turn: Turn::NONE,
+        pinned: None,
+    });
+    let placed = w * layers * d;
+    let mut heard = Vec::new();
+    while heard.iter().sum::<usize>() < placed {
+        h.app.world_mut().run_schedule(RunFixedMainLoop);
+        h.app.world_mut().run_schedule(FixedPreUpdate);
+        h.call();
+        heard.extend(edits_heard(&h.log(0)));
+        assert!(heard.len() < 64, "placing stalled at {heard:?}");
+    }
+    assert_eq!(heard.iter().sum::<usize>(), placed);
+    assert_eq!(h.voxel([16, 3, 16]), Voxel::cube(h.rock));
+
+    replay(&mut h.app, Undo);
+    assert!(h.voxel([16, 3, 16]).is_air(), "the undo lands in one tick");
+    let mut undone = Vec::new();
+    let mut first = Vec::new();
+    while undone.iter().sum::<usize>() < placed {
+        h.call();
+        let log = h.log(0);
+        undone.extend(edits_heard(&log));
+        first.extend(
+            log.lines()
+                .filter_map(|l| l.split(" first=").nth(1).map(str::to_owned)),
+        );
+        assert!(undone.len() < 8, "undo events stalled at {undone:?}");
+    }
+    assert_eq!(undone, [MAX_EDIT_EVENTS, placed - MAX_EDIT_EVENTS]);
+    // Undone in reverse: the last Voxel placed is the first heard taken back.
+    let last_placed = format!("x: {}.0, y: 4.0, z: {}.0", 1 + w - 1, 6 + d - 1);
+    assert!(first[0].contains(&last_placed), "{}", first[0]);
+    h.call();
+    assert!(h.log(0).contains("edits=0"));
+}
+
+/// How many Edit events each call the queue guest logged was given.
+fn edits_heard(log: &str) -> Vec<usize> {
+    log.lines()
+        .filter_map(|l| l.split(" edits=").nth(1)?.split(' ').next()?.parse().ok())
+        .collect()
 }
 
 #[test]
@@ -1166,7 +1251,7 @@ fn assert_lakes_in_valleys(params: WorldgenParams, size: f32, water: u16) {
 }
 
 #[test]
-fn terra_contract_content_build_and_scenarios_reach_real_voxels_and_light() {
+fn terra_contract_content_loads_and_terra_builds_nothing_at_spawn() {
     for size in [1.0, 0.5, 0.25] {
         let loaded = terra_loaded(size);
         // Terra loads after the shared Mods it depends on, so its ids start after theirs.
@@ -1207,6 +1292,8 @@ fn terra_contract_content_build_and_scenarios_reach_real_voxels_and_light() {
             .iter()
             .filter(|(id, _)| *id >= base)
             .map(|&(id, colour)| (id - base + 8, colour))
+            // Its building Materials follow, covered by the demo Games' building tests.
+            .take(22)
             .collect();
         assert_eq!(
             own,
@@ -1250,10 +1337,6 @@ fn terra_contract_content_build_and_scenarios_reach_real_voxels_and_light() {
             .id_of(tesserae_mods::Kind::Material, "terra:water")
             .unwrap() as u16;
         assert_eq!(terra_water, base + 6);
-        let grass = loaded
-            .registry
-            .id_of(tesserae_mods::Kind::Material, "terra:grass")
-            .unwrap() as u16;
         assert_eq!(
             *loaded.tables.materials.def(terra_water),
             tesserae_core::testgen::WATER_MATERIAL
@@ -1289,11 +1372,7 @@ fn terra_contract_content_build_and_scenarios_reach_real_voxels_and_light() {
                 .id_of(tesserae_mods::Kind::Material, name)
                 .unwrap() as u16
         };
-        let (mud, wood, brick) = (
-            material("terra:mud"),
-            material("terra:wood"),
-            material("terra:brick"),
-        );
+        let (mud, brick) = (material("terra:mud"), material("terra:brick"));
         assert_eq!((mud, brick), (base + 4, base + 5));
         let mud_flow = loaded.tables.fluids.get(mud).unwrap();
         assert!(mud_flow.waterlogs && mud_flow.extinguishes && mud_flow.heat.is_none());
@@ -1361,8 +1440,7 @@ fn terra_contract_content_build_and_scenarios_reach_real_voxels_and_light() {
         let log = h.log(0);
         assert!(log.is_empty(), "{log}");
         assert_eq!(h.app.world().resource::<ModJobs>().tick, 0);
-        // The site, the stage on it, what its fluids fall into and the spawn
-        // neighbourhood.
+        // The spawn neighbourhood.
         let chunk = |m: f32| (m / (CHUNK_SIZE as f32 * size)).floor() as i32;
         let across = chunk(-32.0).min(-2)..=chunk(31.0).max(1);
         let held: Vec<ChunkCoord> = across
@@ -1370,199 +1448,29 @@ fn terra_contract_content_build_and_scenarios_reach_real_voxels_and_light() {
             .flat_map(|x| (-1..=chunk(52.0).max(2)).map(move |y| (x, y)))
             .flat_map(|(x, y)| across.clone().map(move |z| ChunkCoord::new(x, y, z)))
             .collect();
-        // Real terrain, hills and lakes included, so the site must level it.
+        // Real terrain, hills and lakes included.
         for &coord in &held {
             let mut store = h.app.world_mut().resource_mut::<ChunkStore>();
             store.insert(coord, terrain.chunk(coord.x, coord.y, coord.z));
             store.set_light(coord, ChunkLight::dark());
         }
-        let by_size =
-            |counts: [u64; 3]| counts[[1.0, 0.5, 0.25].iter().position(|&s| s == size).unwrap()];
-        // The stage's 94/684/5326 plus the site: 54 x 10 m of footprint, 16 m
-        // of source removal, 15 of stone, 1 of grass and 14 of air.
-        let site = |per_m3: u64| 54 * 10 * (16 + 15 + 1 + 14) * per_m3;
-        let total = by_size([94 + site(1), 684 + site(8), 5326 + site(64)]);
-        // Each call sends one batch within the host's caps; the scenarios
-        // start only once every batch has landed.
-        let mut sent = 0;
-        let mut log = String::new();
-        let mut calls = 0;
-        loop {
-            h.call();
-            log.push_str(&h.log(0));
-            if log.contains("terra build applied") {
-                break;
-            }
-            assert!(!log.contains("terra scenario"), "started before the build");
-            let batch = h.backlog(0);
-            assert!(batch <= 65_536, "batch of {batch} Voxels");
-            sent += batch;
-            while h.backlog(0) > 0 {
-                h.drain();
-            }
-            calls += 1;
-            assert!(calls <= 64, "the build never finished sending");
-        }
-        assert_eq!(sent, total);
-        let index = |v: [f32; 3]| v.map(|m| (m / size).floor() as i32);
-        // The stage was laid out on 28 m beams and now stands on the 36 m site.
-        let lift = 8.0;
-        let lifted = |v: [f32; 3]| index([v[0], v[1] + lift, v[2]]);
-        // The site off the stage's row: ground to 36 m under grass, then air,
-        // with no lake water anywhere in it.
-        for x in (-28..26).step_by(3) {
-            for z in [-12, -11, -10, -3] {
-                let at = |y: f32| index([x as f32, y, z as f32]);
-                for y in (20..35).map(|y| y as f32) {
-                    let here = h.occupants(at(y));
-                    assert_eq!(here.solid, Voxel::cube(stone), "{size} m: {x} {y} {z}");
-                    assert_eq!(here.fluid, None, "{size} m: {x} {y} {z}");
-                }
-                assert_eq!(h.voxel(at(35.0)), Voxel::cube(grass), "{size} m: {x} {z}");
-                for y in (36..50).map(|y| y as f32) {
-                    let here = h.occupants(at(y));
-                    assert!(here.solid.is_air(), "{size} m: {x} {y} {z}");
-                    assert_eq!(here.fluid, None, "{size} m: {x} {y} {z}");
-                }
-            }
-        }
-        for x in -4..2 {
-            for y in 24..29 {
-                assert_eq!(
-                    h.voxel(lifted([x as f32, y as f32, -7.0])),
-                    Voxel::cube(stone)
-                );
-            }
-        }
-        assert_eq!(
-            h.voxel(lifted([3.0, 30.0, -7.0])),
-            Voxel::new(stone, shape_base, 0)
-        );
-        assert_eq!(h.voxel(lifted([3.0, 31.0, -7.0])), Voxel::cube(base));
-        assert_eq!(h.voxel(lifted([15.0, 29.0, -7.0])), Voxel::new(stone, 1, 4));
-        assert_eq!(h.voxel(lifted([-13.0, 30.0, -5.0])), Voxel::cube(stone));
-        assert_eq!(h.voxel(lifted([-12.0, 29.0, -7.0])), Voxel::cube(wood));
-        let store = h.app.world().resource::<ChunkStore>();
-        assert_eq!(store.light_at(lifted([3.0, 31.0, -7.0])).block(), 15);
-        let [x, y, z] = lifted([-1.0, 29.0, -7.0]);
-        let source = store.occupants([x, y, z], &tables_of(&h).fluids).unwrap();
-        assert_eq!(source.fluid, Some(tesserae_core::Fluid::source(lava)));
-        assert_eq!(store.light_at([x, y + 1, z]).block(), 14, "lava lights");
-        // The scenarios start on the finished build, then keep their time.
-        assert_eq!(log.matches("terra first tick:").count(), 1);
-        // Removing sources where there are none is reported as rejected, so
-        // the only rejections are the site's dry cells.
-        let reported = |key: &str| -> u64 {
-            let rest = &log[log.find(key).unwrap() + key.len()..];
-            rest.split(|c: char| !c.is_ascii_digit())
-                .next()
-                .unwrap()
-                .parse()
-                .unwrap()
-        };
-        let (applied, rejected) = (reported("terra build applied="), reported("rejected="));
-        assert_eq!(applied + rejected, total, "{log}");
-        assert!(rejected <= 54 * 10 * 16 * by_size([1, 8, 64]), "{log}");
-        assert!(log.contains("terra scenario: sources placed, fuel lit"));
-        let started = h.backlog(0);
-        assert_eq!(started, by_size([6, 12, 36]));
-        while h.backlog(0) > 0 {
-            h.drain();
-        }
-        assert_eq!(h.pending().queues[0].report.rejected, 0);
-        for (at, fluid) in [
-            ([6.0, 29.0, -7.0], mud),
-            ([9.0, 29.0, -7.0], lava),
-            ([19.0, 29.0, -7.0], terra_water),
-            ([22.0, 35.0, -7.0], terra_water),
-        ] {
-            let here = h.occupants(lifted(at));
-            assert_eq!(
-                here.fluid,
-                Some(tesserae_core::Fluid::source(fluid)),
-                "{at:?}"
-            );
-        }
-        for at in [[-14.0, 30.0 - size, -7.0], [-23.0, 30.0 - size, -7.0]] {
-            assert!(h.occupants(lifted(at)).burning.is_some(), "{at:?} unlit");
-        }
-        let mut calls = 0;
-        while !h.log(0).contains("water poured on the burning post") {
-            h.call();
-            h.step_fluids();
-            calls += 1;
-            assert!(calls <= 300, "never doused");
-        }
-        assert!((255..=257).contains(&calls), "doused after {calls} ticks");
-        while h.backlog(0) > 0 {
-            h.drain();
-        }
-        assert_eq!(
-            h.occupants(lifted([-23.0, 30.0, -7.0])).fluid,
-            Some(tesserae_core::Fluid::source(terra_water))
-        );
-        while !h.log(0).contains("source taken away") {
-            h.call();
-            h.step_fluids();
-            calls += 1;
-            assert!(calls <= 1600, "the waterfall never dried");
-        }
-        // At 0.25 m the scenario water spreading over the site keeps the
-        // bounded scheduler busy, so by now the fall has only its source.
-        let (probe, what) = if size < 0.5 {
-            ([22.0, 35.0, -7.0], "no waterfall source")
-        } else {
-            ([23.0, 30.0, -7.0], "no waterfall")
-        };
-        let falling = h.occupants(lifted(probe)).fluid;
-        assert_eq!(falling.map(|f| f.material), Some(terra_water), "{what}");
-        while h.backlog(0) > 0 {
-            h.drain();
-        }
-        assert_eq!(h.occupants(lifted([22.0, 35.0, -7.0])).fluid, None);
-        assert_eq!(h.pending().queues[0].report.rejected, 0);
-        h.settle_fluids();
-        assert_eq!(
-            h.occupants(lifted([23.0, 30.0, -7.0])).fluid,
-            None,
-            "{size} m"
-        );
-        let row = |from: f32, to: f32| {
-            let [x0, y, z] = lifted([from, 29.0, -7.0]);
-            (x0..lifted([to, 29.0, -7.0])[0]).map(move |x| [x, y, z])
-        };
-        assert!(
-            row(6.0, 9.0).any(|at| h.voxel(at) == Voxel::cube(brick)),
-            "{size} m: no mud fired to brick"
-        );
-        assert!(
-            row(9.0, 19.0).any(|at| h.voxel(at) == Voxel::cube(stone)),
-            "{size} m: no lava cooled to stone"
-        );
-        let post = lifted([-23.0, 29.0, -7.0]);
-        let span = (1.0 / size) as i32;
-        let cells = (0..span)
-            .flat_map(|dz| (0..span).flat_map(move |dy| (0..span).map(move |dx| [dx, dy, dz])));
-        for d in cells {
-            let at = [post[0] + d[0], post[1] + d[1], post[2] + d[2]];
-            let here = h.occupants(at);
-            assert_eq!(here.solid, Voxel::cube(wood), "{size} m: {at:?}");
-            assert!(here.burning.is_none(), "{size} m: {at:?} was not put out");
-        }
-        for &coord in &held {
-            let store = h.app.world().resource::<ChunkStore>();
-            let kinds = store.get(coord).unwrap().kinds();
-            assert!(
-                kinds.iter().all(
-                    |v| v.material() != tesserae_core::material::FIRST_MOD_ID.saturating_sub(1)
-                ),
-                "the retired id at {coord}"
-            );
-        }
+        // Terra builds nothing in a World: a new World's spawn stands beside a Settlement.
         for _ in 0..8 {
             h.call();
+            assert_eq!(h.backlog(0), 0, "{size} m: Terra sent Commands");
         }
-        assert_eq!(h.backlog(0), 0, "Terra runs its scenarios once");
+        let store = h.app.world().resource::<ChunkStore>();
+        for &coord in &held {
+            let (held, generated) = (
+                store.get(coord).unwrap(),
+                terrain.chunk(coord.x, coord.y, coord.z),
+            );
+            let n = CHUNK_SIZE;
+            let same = (0..n).all(|y| {
+                (0..n).all(|z| (0..n).all(|x| held.get(x, y, z) == generated.get(x, y, z)))
+            });
+            assert!(same, "{size} m: {coord} changed");
+        }
     }
 }
 

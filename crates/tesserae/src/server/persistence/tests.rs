@@ -380,6 +380,52 @@ fn a_grown_crop_and_tree_reopen_as_the_materials_they_grew_to() {
 }
 
 #[test]
+fn a_placed_structure_is_saved_like_any_build_and_reloads() {
+    use tesserae_core::template::{Cell, Template, Turn};
+    let dir = Directory::new();
+    let with_bar = |loaded: &mut crate::server::mods::LoadedMods| {
+        let wood = loaded.registry.id_of(Kind::Material, "terra:wood").unwrap() as u16;
+        // A Keep Ground layer on the hollow's floor, and the bar on it.
+        let bar = vec![
+            vec![vec![Cell::Keep; 3]],
+            vec![vec![Cell::Voxel(Voxel::cube(wood)); 3]],
+        ];
+        loaded
+            .tables
+            .templates
+            .push(Template::new("t:bar".into(), 1.0, bar, 0, None, 1.0).unwrap());
+    };
+    let mut rig = Rig::open_with(dir.opening(), WorldSettings::default(), with_bar);
+    rig.app.add_plugins(edit::plugin);
+    rig.insert();
+    // From the Player's Eye at (8, 4, 8), down at the floor of the hollow.
+    edit::send_structure(
+        &mut rig.app,
+        edit::StructureIntent {
+            origin: Vec3::new(8.0, 4.0, 8.0),
+            direction: Vec3::NEG_Y,
+            template: "t:bar".into(),
+            turn: Turn::NONE,
+            pinned: None,
+        },
+    );
+    rig.tick();
+    let wood = Voxel::cube(rig.wood);
+    let placed = rig.app.world().resource::<ChunkStore>().get(coord([0; 3]));
+    assert!((7..10).all(|x| placed.unwrap().get(x, 1, 8) == wood));
+    rig.settled_save();
+    drop(rig);
+    let mut reopened = Rig::open_with(dir.opening(), WorldSettings::default(), with_bar);
+    reopened.insert();
+    let store = reopened.app.world().resource::<ChunkStore>();
+    let chunk = store.get(coord([0; 3])).unwrap();
+    for x in 7..10 {
+        assert_eq!(chunk.get(x, 1, 8), wood);
+    }
+    assert!(chunk.get(6, 1, 8).is_air());
+}
+
+#[test]
 fn save_snapshot_cannot_authorize_eviction_after_a_later_edit() {
     let dir = Directory::new();
     let mut rig = Rig::new(&dir);
@@ -512,7 +558,7 @@ fn autosave_at_thirty_seconds_preserves_current_server_player() {
 }
 
 #[test]
-fn real_terra_new_builds_but_reopened_guest_never_replays_construction() {
+fn real_terra_builds_nothing_new_or_reopened() {
     let dir = Directory::new();
     let opening = dir.opening();
     let settings = WorldSettings::default();
@@ -526,8 +572,14 @@ fn real_terra_new_builds_but_reopened_guest_never_replays_construction() {
         last: tesserae_mods::BatchReport::default(),
     };
     let (_, commands) = bevy::tasks::block_on(guest.tick(context(0))).unwrap();
-    assert!(!commands.is_empty());
-    let generation = Generation::capture(loaded.world.unwrap(), &mapping).unwrap();
+    assert!(commands.is_empty(), "a new Terra builds nothing at spawn");
+    let generation = Generation::capture(
+        loaded.world.unwrap(),
+        &loaded.tables.templates,
+        &loaded.tables.settlements,
+        &mapping,
+    )
+    .unwrap();
     let (simulation, paused) = FluidSim::default().checkpoint(&mapping).unwrap();
     let commit = Commit {
         world: opening.id.clone(),
@@ -549,6 +601,7 @@ fn real_terra_new_builds_but_reopened_guest_never_replays_construction() {
         containers: Vec::new(),
         map: Default::default(),
         game_mode: Default::default(),
+        looted: Vec::new(),
     };
     Writer::acquire(&dir.0, &opening.id, &content)
         .unwrap()
@@ -2392,4 +2445,151 @@ fn a_corrupt_map_section_is_refused_with_a_clear_error() {
         .write(&commit)
         .unwrap_err();
     assert!(error.to_string().contains("map:"), "{error}");
+}
+
+/// A 2 m square slab of `material`.
+fn slab(
+    loaded: &crate::server::mods::LoadedMods,
+    material: &str,
+) -> tesserae_core::template::Template {
+    use tesserae_core::template::{Cell, Template};
+    let id = loaded.registry.id_of(Kind::Material, material).unwrap() as u16;
+    let layers = vec![vec![vec![Cell::Voxel(Voxel::cube(id)); 2]; 2]];
+    Template::new("terra:slab".into(), 1.0, layers, 0, None, 1.0).unwrap()
+}
+
+/// The first Biome stands a slab of `material` on a 16 m lattice.
+fn declares_slab(material: &'static str) -> impl FnOnce(&mut crate::server::mods::LoadedMods) {
+    use tesserae_core::{BiomeStructure, BiomeTable};
+    move |loaded| {
+        declares_biomes(["terra:dry", "terra:wet"])(loaded);
+        loaded.tables.templates = vec![slab(loaded, material)];
+        let world = loaded.world.as_mut().unwrap();
+        let mut biomes = world.biomes.as_slice().to_vec();
+        biomes[0].surface_features = biomes[0]
+            .surface_features
+            .with_structures(&[BiomeStructure {
+                template: 0,
+                spacing_m: 16.0,
+                chance: 0.5,
+            }])
+            .unwrap();
+        world.biomes = BiomeTable::new(&biomes).unwrap();
+    }
+}
+
+/// The Templates the opened World's generator stands, `None` for the Game's own.
+fn prepared_templates(
+    dir: &Directory,
+    game: impl FnOnce(&mut crate::server::mods::LoadedMods),
+) -> (
+    Option<Vec<tesserae_core::template::Template>>,
+    crate::server::mods::LoadedMods,
+) {
+    let (opening, settings) = (dir.opening(), WorldSettings::default());
+    let mut loaded = crate::server::mods::terra_for_save(&opening, &settings);
+    game(&mut loaded);
+    Persistence::prepare(opening, &mut loaded, settings).unwrap();
+    (loaded.world_templates.take(), loaded)
+}
+
+#[test]
+fn a_reopened_world_stands_the_templates_it_was_saved_with_whatever_the_game_declares_now() {
+    let (fresh, _) = prepared_templates(&Directory::new(), declares_slab("terra:stone"));
+    assert_eq!(fresh, None);
+
+    let dir = Directory::new();
+    Rig::open_with(
+        dir.opening(),
+        WorldSettings::default(),
+        declares_slab("terra:stone"),
+    )
+    .settled_save();
+    let saved = save::inspect(&dir.0).unwrap().unwrap().commit.parameters;
+    assert_eq!(saved.templates.unwrap()[0].name, "terra:slab");
+
+    let (reopened, loaded) = prepared_templates(&dir, declares_slab("terra:wood"));
+    assert_eq!(reopened, Some(vec![slab(&loaded, "terra:stone")]));
+}
+
+/// The first Biome lays out a hamlet of slabs whose roads are `path`.
+fn declares_hamlet(path: &'static str) -> impl FnOnce(&mut crate::server::mods::LoadedMods) {
+    use tesserae_core::settlement::{Building, PlotRule, Settlement};
+    use tesserae_core::{BiomeSettlement, BiomeTable};
+    move |loaded| {
+        declares_biomes(["terra:dry", "terra:wet"])(loaded);
+        loaded.tables.templates = vec![slab(loaded, "terra:stone")];
+        let id = loaded.registry.id_of(Kind::Material, path).unwrap() as u16;
+        let slab = Building {
+            template: 0,
+            door: None,
+        };
+        loaded.tables.settlements = vec![Settlement {
+            name: "terra:hamlet".into(),
+            radius_m: 16.0,
+            radius_min_m: 16.0,
+            margin_m: 4.0,
+            centre: Some(slab),
+            plots: 4,
+            plots_min: 4,
+            rules: vec![PlotRule {
+                building: slab,
+                weight: 1.0,
+                min: 0,
+                max: 4,
+                loot: None,
+            }],
+            minimum: 0,
+            path: Voxel::cube(id),
+            loot: None,
+        }];
+        let world = loaded.world.as_mut().unwrap();
+        let mut biomes = world.biomes.as_slice().to_vec();
+        biomes[0].surface_features = biomes[0]
+            .surface_features
+            .with_settlements(&[BiomeSettlement {
+                settlement: 0,
+                spacing_m: 48.0,
+                chance: 1.0,
+                near_spawn: false,
+            }])
+            .unwrap();
+        world.biomes = BiomeTable::new(&biomes).unwrap();
+    }
+}
+
+#[test]
+fn a_reopened_world_lays_out_the_settlements_it_was_saved_with_whatever_the_game_declares_now() {
+    fn opened(
+        dir: &Directory,
+        game: impl FnOnce(&mut crate::server::mods::LoadedMods),
+    ) -> crate::server::mods::LoadedMods {
+        let (opening, settings) = (dir.opening(), WorldSettings::default());
+        let mut loaded = crate::server::mods::terra_for_save(&opening, &settings);
+        game(&mut loaded);
+        Persistence::prepare(opening, &mut loaded, settings).unwrap();
+        loaded
+    }
+    assert_eq!(
+        opened(&Directory::new(), declares_hamlet("terra:stone")).world_settlements,
+        None
+    );
+
+    let dir = Directory::new();
+    Rig::open_with(
+        dir.opening(),
+        WorldSettings::default(),
+        declares_hamlet("terra:stone"),
+    )
+    .settled_save();
+    let saved = save::inspect(&dir.0).unwrap().unwrap().commit.parameters;
+    assert_eq!(saved.settlements.unwrap()[0].name, "terra:hamlet");
+
+    let loaded = opened(&dir, declares_hamlet("terra:wood"));
+    let stone = loaded
+        .registry
+        .id_of(Kind::Material, "terra:stone")
+        .unwrap() as u16;
+    let reopened = loaded.world_settlements.unwrap();
+    assert_eq!(reopened[0].path, Voxel::cube(stone));
 }

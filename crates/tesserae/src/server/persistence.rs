@@ -308,6 +308,7 @@ pub struct Persistence {
     initial_entities: Option<tesserae_core::entity::Entities>,
     saved_containers: u64,
     initial_containers: Vec<save::containers::SavedContainer>,
+    initial_looted: Vec<[i32; 3]>,
     saved_map: u64,
     initial_map: Option<save::map::SavedMap>,
     /// The encoding of the Map at the revision it was made, reused while the Map has not moved.
@@ -397,6 +398,7 @@ impl Persistence {
         let reopened_game_mode = changes.own.or(reopened_game_mode);
         let mut restored_entities = None;
         let mut initial_containers = Vec::new();
+        let mut initial_looted = Vec::new();
         let mut initial_map = None;
         let (reopened_eye, initial_simulation, initial_chunks, generation, saved_revisions, detail) =
             if let Some(recovered) = opening.recovered {
@@ -406,6 +408,7 @@ impl Persistence {
                     .map_err(|e| e.to_string())?;
                 let mut c = recovered.commit;
                 initial_containers = std::mem::take(&mut c.containers);
+                initial_looted = std::mem::take(&mut c.looted);
                 initial_map = Some(std::mem::take(&mut c.map));
                 let items = loaded.every_item(settings.voxel_size);
                 restored_entities = Some(
@@ -424,6 +427,18 @@ impl Persistence {
                         .restore(&mapping, c.generator)
                         .map_err(|e| e.to_string())?,
                 );
+                loaded.world_templates = Some(
+                    c.parameters
+                        .templates(&mapping)
+                        .map_err(|e| e.to_string())?,
+                );
+                loaded.world_settlements = Some(
+                    c.parameters
+                        .settlements(&mapping)
+                        .map_err(|e| e.to_string())?,
+                );
+                loaded.world_biome_loot =
+                    Some(c.parameters.biome_loot().map_err(|e| e.to_string())?);
                 let revisions = c
                     .chunks
                     .iter()
@@ -468,7 +483,14 @@ impl Persistence {
                     None,
                     None,
                     vec![],
-                    Generation::capture(params, &mapping).map_err(|e| e.to_string())?,
+                    Generation::capture(
+                        params,
+                        &loaded.tables.templates,
+                        &loaded.tables.settlements,
+                        &mapping,
+                    )
+                    .map_err(|e| e.to_string())?
+                    .with_biome_loot(&loaded.biome_loot),
                     BTreeMap::new(),
                     "New World - unsaved".into(),
                 )
@@ -519,6 +541,7 @@ impl Persistence {
             initial_entities: restored_entities,
             saved_containers: 0,
             initial_containers,
+            initial_looted,
             saved_map: 0,
             initial_map,
             map_section: None,
@@ -606,9 +629,10 @@ fn install(world: &mut World) {
         p.saved_entities = entities.revision();
         world.insert_resource(EntityStore(entities));
     }
-    world.insert_resource(super::container::Containers::restore(std::mem::take(
-        &mut p.initial_containers,
-    )));
+    world.insert_resource(super::container::Containers::restore(
+        std::mem::take(&mut p.initial_containers),
+        std::mem::take(&mut p.initial_looted),
+    ));
     world.insert_resource(p);
 }
 
@@ -875,6 +899,7 @@ pub(super) fn drive(
     };
     let entities_revision = entities.revision();
     let (saved_containers, containers_revision) = (containers.capture(), containers.revision());
+    let looted = containers.looted();
     let map_revision = map.revision();
     if p.map_section.as_ref().map(|(r, _)| *r) != Some(map_revision) {
         let p = &mut *p;
@@ -939,6 +964,7 @@ pub(super) fn drive(
                     .collect(),
                 entities: saved_entities,
                 containers: saved_containers,
+                looted,
                 map: saved_map,
                 game_mode,
             };

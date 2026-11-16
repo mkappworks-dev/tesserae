@@ -163,6 +163,7 @@ impl From<Combustion> for content::CombustionDef {
 #[serde(rename_all = "kebab-case")]
 enum Kind {
     Measure,
+    Place,
 }
 
 #[derive(Deserialize)]
@@ -178,6 +179,7 @@ impl From<Tool> for content::ToolDef {
             name: t.name,
             kind: match t.kind {
                 Kind::Measure => content::ToolKind::Measure,
+                Kind::Place => content::ToolKind::Place,
             },
         }
     }
@@ -296,7 +298,35 @@ pub(super) struct Biome {
     surface_features: Vec<SurfaceFeature>,
     #[serde(default)]
     crop_fields: Vec<CropField>,
+    #[serde(default)]
+    structures: Vec<BiomeStructure>,
+    #[serde(default)]
+    settlements: Vec<BiomeSettlement>,
+    loot: Option<super::settlement::Loot>,
     soundscape: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+struct BiomeSettlement {
+    settlement: String,
+    spacing_m: f32,
+    #[serde(default = "every_cell")]
+    chance: f32,
+    #[serde(default)]
+    near_spawn: bool,
+}
+
+fn every_cell() -> f32 {
+    1.0
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+struct BiomeStructure {
+    template: String,
+    spacing_m: f32,
+    chance: f32,
 }
 
 #[derive(Deserialize)]
@@ -408,6 +438,26 @@ impl From<Biome> for content::BiomeDef {
                     near_water_m: f.near_water_m,
                 })
                 .collect(),
+            structures: b
+                .structures
+                .into_iter()
+                .map(|s| content::BiomeStructure {
+                    template: s.template,
+                    spacing_m: s.spacing_m,
+                    chance: s.chance,
+                })
+                .collect(),
+            settlements: b
+                .settlements
+                .into_iter()
+                .map(|s| content::BiomeSettlement {
+                    settlement: s.settlement,
+                    spacing_m: s.spacing_m,
+                    chance: s.chance,
+                    near_spawn: s.near_spawn,
+                })
+                .collect(),
+            loot: b.loot.map(Into::into),
         }
     }
 }

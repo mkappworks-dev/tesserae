@@ -13,13 +13,13 @@ copying: code for behaviour, data for content, shared across Games.
 All Games are MIT licensed and sit in `games/<id>/`. Only a Game declares
 `world`, `view` and `tools`.
 
-| Game                             | Behaviour (Rust)                         | Depends on                                                            | Shows                                                                                                         |
-| -------------------------------- | ---------------------------------------- | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| [terra](../games/terra/)         | Everything but its plants                | strata, waters, flora, crops, aquatic                                 | A Game that declares its own content, fluids, fire, a tool, Biomes and an ore                                 |
-| [meadow](../games/meadow/)       | Builds a glade, three trees and a gazebo | strata, flora, crops, glassworks (suggests wanderer)                  | A Game whose only Material is its food; a Shape from one Mod with a Material of another; Biomes from `strata` |
-| [ember](../games/ember/)         | Lava vents erupt on a timer              | strata, waters, flora, crops, hearth (suggests golem)                 | Fluid, reaction and fire rules that live in Mods; Biomes that tune the caves                                  |
-| [tidewater](../games/tidewater/) | The sea level rises and falls slowly     | strata, waters, flora, crops, aquatic, crystals (suggests sprite)     | Sea level, caves, smoothing, Biomes and a gem ore; fluid Commands from `tick`                                 |
-| [lumen](../games/lumen/)         | Lanterns light up in sequence            | strata, flora, crops, glassworks, frost, crystals (suggests wanderer) | Blended glass, emission and Shapes; timed placement from `tick`; Biomes with a snow court and a gem ore       |
+| Game                             | Behaviour (Rust)                         | Depends on                                                                    | Shows                                                                                                         |
+| -------------------------------- | ---------------------------------------- | ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| [terra](../games/terra/)         | Everything but its plants                | strata, waters, flora, crops, aquatic                                         | A Game that declares its own content, fluids, fire, a tool, Biomes and an ore                                 |
+| [meadow](../games/meadow/)       | Builds a glade, three trees and a gazebo | strata, waters, flora, crops, glassworks (suggests wanderer)                  | A Game whose only Material is its food; a Shape from one Mod with a Material of another; Biomes from `strata` |
+| [ember](../games/ember/)         | Lava vents erupt on a timer              | strata, waters, flora, crops, hearth (suggests golem)                         | Fluid, reaction and fire rules that live in Mods; Biomes that tune the caves                                  |
+| [tidewater](../games/tidewater/) | The sea level rises and falls slowly     | strata, waters, flora, crops, aquatic, crystals (suggests sprite)             | Sea level, caves, smoothing, Biomes and a gem ore; fluid Commands from `tick`                                 |
+| [lumen](../games/lumen/)         | Lanterns light up in sequence            | strata, waters, flora, crops, glassworks, frost, crystals (suggests wanderer) | Blended glass, emission and Shapes; timed placement from `tick`; Biomes with a snow court and a gem ore       |
 
 ## Food
 

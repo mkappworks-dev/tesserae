@@ -321,7 +321,7 @@ fn merge(
         map.insert(action, alternatives);
         explicit.insert(action);
     }
-    let mut seen: Vec<super::actions::Binding> = Vec::new();
+    let mut seen: Vec<(super::actions::Binding, Action)> = Vec::new();
     let mut actions: Vec<_> = map.keys().copied().collect();
     actions.sort_by_key(|action| (!explicit.contains(action), format!("{action:?}")));
     for action in actions {
@@ -341,15 +341,17 @@ fn merge(
             {
                 return Err(io::Error::other("reserved controller binding"));
             }
-            if seen.iter().any(|previous| {
-                previous.trigger == binding.trigger && previous.modifier.overlaps(binding.modifier)
+            if seen.iter().any(|(previous, owner)| {
+                previous.trigger == binding.trigger
+                    && previous.modifier.overlaps(binding.modifier)
+                    && !action.may_share(*owner)
             }) {
                 if explicit.contains(&action) {
                     return Err(io::Error::other("conflicting user bindings"));
                 }
                 *alternative = None;
             } else {
-                seen.push(binding);
+                seen.push((binding, action));
             }
         }
     }

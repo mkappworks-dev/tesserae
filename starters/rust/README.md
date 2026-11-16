@@ -1,8 +1,9 @@
 # Rust starter
 
 A Game written in Rust and compiled to a WebAssembly component. It declares two
-Materials and ground, a Workbench, a Chest and a Door with two Recipes, and has
-empty `start` and `tick` callbacks to grow from.
+Materials and ground, a Workbench, a Chest and a Door with three Recipes, a
+Template of a stone hut, and has empty `start` and `tick` callbacks to grow
+from.
 
 **Supported contract line:** 0.3, from the bundled `wit/` directory
 (`tesserae:mods@0.3.0`). The only dependency is `wit-bindgen`, from crates.io;

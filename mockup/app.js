@@ -239,6 +239,10 @@ function navigate(screen) {
   state.filter = "All";
   render();
 }
+/* A seed as the engine draws one: 64 random bits from the OS source, shown as the number it is. */
+function randomSeed() {
+  return crypto.getRandomValues(new BigUint64Array(1))[0].toString();
+}
 function startCreate(from) {
   Object.assign(state, {
     screen: "wizard",
@@ -246,7 +250,7 @@ function startCreate(from) {
     editId: null,
     name: from ? `${from.name} — new world` : "",
     game: from?.game || "Terra",
-    seed: from?.seed || games.Terra.seed,
+    seed: from?.seed || randomSeed(),
     voxel: from?.voxel || "1",
     mode: from?.mode || "Creative",
     mods: clone(from?.mods || []),
@@ -326,6 +330,9 @@ function render() {
   else if (state.screen === "map") {
     screen.innerHTML = mapPage();
     mapMount();
+  } else if (state.screen === "structures") {
+    screen.innerHTML = structuresPage();
+    drawStructure();
   }
   if (state.screen === "play") mapPlayMount();
   placeToast();
@@ -414,7 +421,7 @@ function worldForm() {
     )
     .join(
       "",
-    )}</div><div class="spacer"></div>${modePicks("mode", state.mode, { legend: "Game mode", hint: "Every Player starts in this mode. You can change it later in Edit World." })}<div class="spacer"></div><div class="row between"><p class="section-label">World seed</p>${button("↻ Randomize", "randomize", { small: true, ghost: true })}</div>${textField("Words or a number", "seed", state.seed, { hint: "The same seed and generation settings create the same terrain. Blank picks a random seed." })}<div class="row between"><small>${state.seed ? `Seed: ${esc(state.seed)}` : "Random seed: chosen when the World is created"}</small>${button("Copy", "copy-seed", { small: true, ghost: true })}</div><details><summary>More World options</summary>${selectField("Voxel size (metres)", "voxel", state.voxel, ["1", "0.5", "0.25"])}<div class="notice">1 m · default<br>0.5 m · 2× finer, half the view distance<br>0.25 m · 4× finer, a quarter of the view distance<br>This choice is fixed when the World is created.</div></details>`;
+    )}</div><div class="spacer"></div>${modePicks("mode", state.mode, { legend: "Game mode", hint: "Every Player starts in this mode. You can change it later in Edit World." })}<div class="spacer"></div><div class="row between"><p class="section-label">World seed</p>${button("↻ Randomize", "randomize", { small: true, ghost: true })}</div>${textField("Words or a number", "seed", state.seed, { hint: "Starts with a random seed. Type words or a number to choose your own: the same seed and generation settings create the same terrain." })}<div class="row between"><small>${!state.seed.trim() ? "Random seed: chosen when the World is created" : /^-?\d+$/.test(state.seed.trim()) ? `Seed: ${esc(state.seed.trim())}` : `Seed from these words: ${esc(state.seed.trim())}`}</small>${button("Copy", "copy-seed", { small: true, ghost: true })}</div><details><summary>More World options</summary>${selectField("Voxel size (metres)", "voxel", state.voxel, ["1", "0.5", "0.25"])}<div class="notice">1 m · default<br>0.5 m · 2× finer, half the view distance<br>0.25 m · 4× finer, a quarter of the view distance<br>This choice is fixed when the World is created.</div></details>`;
 }
 function required() {
   return games[state.game].required;
@@ -503,7 +510,7 @@ function play() {
     name = held ? stackItem(held)?.name : "",
     hud = survivalHud();
   const aid = state.aimHelper;
-  return `<div class="reticle" aria-hidden="true">+</div>${useHint()}${handMarkup(held)}${aid === "breaking" ? '<div class="layout-status" style="position:absolute;left:50%;top:calc(50% - 46px);transform:translateX(-50%);width:100px;height:12px;padding:1px"><div style="width:62%;height:100%;background:var(--leaf)"></div></div>' : aid === "place" ? '<small style="position:absolute;left:50%;top:calc(50% + 24px);transform:translateX(-50%)">Right Click to place</small>' : aid === "measure" ? '<aside class="layout-status" style="left:34px;right:auto;top:auto;bottom:60px"><small>Distance 3.00 m<br>X 3.00 m · 6.00 voxels<br>Y 0.00 m · 0.00 voxels<br>Z 0.00 m · 0.00 voxels</small></aside>' : ""}${hud.overlay}${mapPlayChrome()}${state.quickLayout?.active ? layoutStatus() : ""}<div class="hud-bottom"><div class="hud-item-name" aria-live="polite">${esc(name || "")}</div>${hud.above}<div class="row" style="align-items:flex-end;gap:12px"><div class="hotbar storage-grid" role="toolbar" aria-label="Hotbar">${creativeBar()}</div>${state.heldTool ? `<div class="hotbar storage-grid" style="grid-template-columns:44px" aria-label="In hand"><div class="item-slot active" style="display:grid;place-items:center;font-size:11px">${esc(state.heldTool)}</div></div>` : ""}</div></div>${simPanel()}`;
+  return `<div class="reticle" aria-hidden="true">+</div><div class="reticle-hints">${useHint()}${structurePrompt()}${aid === "place" ? "<small>Right Click to place</small>" : ""}</div>${handMarkup(held)}${aid === "breaking" ? '<div class="layout-status" style="position:absolute;left:50%;top:calc(50% - 46px);transform:translateX(-50%);width:100px;height:12px;padding:1px"><div style="width:62%;height:100%;background:var(--leaf)"></div></div>' : aid === "measure" ? '<aside class="layout-status" style="left:34px;right:auto;top:auto;bottom:60px"><small>Distance 3.00 m<br>X 3.00 m · 6.00 voxels<br>Y 0.00 m · 0.00 voxels<br>Z 0.00 m · 0.00 voxels</small></aside>' : ""}${hud.overlay}${mapPlayChrome()}${state.quickLayout?.active ? layoutStatus() : ""}${structureHud()}<div class="hud-bottom"><div class="hud-item-name" aria-live="polite">${esc(name || "")}</div>${hud.above}<div class="row" style="align-items:flex-end;gap:12px"><div class="hotbar storage-grid" role="toolbar" aria-label="Hotbar">${creativeBar()}</div>${state.heldTool ? `<div class="hotbar storage-grid" style="grid-template-columns:44px" aria-label="In hand"><div class="item-slot active" style="display:grid;place-items:center;font-size:11px">${esc(state.heldTool)}</div></div>` : ""}</div></div>${simPanel()}`;
 }
 
 function modsLibrary() {
@@ -548,6 +555,7 @@ function action(name, value) {
   if (survivalAction(name, value)) return;
   if (mapAction(name, value)) return;
   if (layoutAction(name, value)) return;
+  if (structuresAction(name, value)) return;
   if (craftingAction(name, value)) return;
   if (inventoryAction(name, value)) return;
   if (name.startsWith("settings-") && settingsAction(name, value)) return;
@@ -603,15 +611,7 @@ function action(name, value) {
     return;
   }
   if (name === "randomize") {
-    state.seed =
-      [
-        "moss-and-morning",
-        "over-the-ridgeline",
-        "one-more-horizon",
-        "where-the-river-turns",
-      ][Math.floor(Math.random() * 4)] +
-      "-" +
-      Math.floor(Math.random() * 999);
+    state.seed = randomSeed();
     state.dirty = true;
     render();
     return;

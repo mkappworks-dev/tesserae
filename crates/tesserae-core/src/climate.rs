@@ -69,6 +69,102 @@ pub const FIELD_PLOT_M: std::ops::RangeInclusive<f32> = 6.0..=24.0;
 /// The mean distance between planted fields, in metres.
 pub const FIELD_SPACING_M: std::ops::RangeInclusive<f32> = 32.0..=256.0;
 
+/// Bounded so a [`Biome`] stays inline and `Copy`.
+pub const MAX_BIOME_STRUCTURES: usize = 4;
+
+/// The widest lattice a Biome's Structures stand on, in metres.
+pub const MAX_STRUCTURE_SPACING_M: f32 = 4096.0;
+
+/// A Template a Biome stands as a Structure: each square lattice cell `spacing_m` on a side holds
+/// one with `chance`.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct BiomeStructure {
+    /// An index into the World's Templates.
+    pub template: u16,
+    pub spacing_m: f32,
+    pub chance: f32,
+}
+
+impl BiomeStructure {
+    const NONE: BiomeStructure = BiomeStructure {
+        template: 0,
+        spacing_m: 0.0,
+        chance: 0.0,
+    };
+
+    /// Checked against the Template it names, since its spacing's floor is that Template's size.
+    pub fn validate(&self, template: &crate::template::Template) -> Result<(), ParamError> {
+        let [x, _, z] = template.size_m();
+        validate_lattice(
+            "biomes.structures",
+            self.spacing_m,
+            self.chance,
+            2.0 * x.max(z),
+            "spacing must be at least twice the Template's longer side and at most 4096 m",
+        )
+    }
+}
+
+/// The rules a lattice row's `spacing_m` and `chance` share: each lattice cell holds a draw with
+/// `chance`, and `spacing_m` is from `floor_m` to [`MAX_STRUCTURE_SPACING_M`].
+fn validate_lattice(
+    field: &'static str,
+    spacing_m: f32,
+    chance: f32,
+    floor_m: f32,
+    spacing_rule: &'static str,
+) -> Result<(), ParamError> {
+    if !(chance > 0.0 && chance <= 1.0) {
+        return Err(ParamError {
+            field,
+            rule: "chance must be above 0 and at most 1",
+        });
+    }
+    if !(spacing_m >= floor_m && spacing_m <= MAX_STRUCTURE_SPACING_M) {
+        return Err(ParamError {
+            field,
+            rule: spacing_rule,
+        });
+    }
+    Ok(())
+}
+
+/// Bounded so a [`Biome`] stays inline and `Copy`.
+pub const MAX_BIOME_SETTLEMENTS: usize = 2;
+
+/// A Settlement a Biome lays out: each square lattice cell `spacing_m` on a side holds a candidate
+/// centre with `chance`, which stands unless a neighbour's would meet its disc and margin.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct BiomeSettlement {
+    /// An index into the World's Settlements.
+    pub settlement: u16,
+    pub spacing_m: f32,
+    pub chance: f32,
+    /// The four lattice cells round the origin always draw, win against their neighbours, and
+    /// draw their centre clear of the origin's keep-out, so a Player finds one near spawn.
+    pub near_spawn: bool,
+}
+
+impl BiomeSettlement {
+    const NONE: BiomeSettlement = BiomeSettlement {
+        settlement: 0,
+        spacing_m: 0.0,
+        chance: 0.0,
+        near_spawn: false,
+    };
+
+    /// Checked against the Settlement it names, since its spacing's floor is that one's reach.
+    pub fn validate(&self, settlement: &crate::settlement::Settlement) -> Result<(), ParamError> {
+        validate_lattice(
+            "biomes.settlements",
+            self.spacing_m,
+            self.chance,
+            2.0 * settlement.reach_m(),
+            "spacing must be at least twice the Settlement's radius and margin and at most 4096 m",
+        )
+    }
+}
+
 /// Each field in `[0, 1)`.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct Climate {
@@ -946,6 +1042,10 @@ pub struct SurfaceFeatures {
     features: [SurfaceFeature; MAX_SURFACE_FEATURES],
     crop_len: u8,
     crop_fields: [CropField; MAX_CROP_FIELDS],
+    structure_len: u8,
+    structures: [BiomeStructure; MAX_BIOME_STRUCTURES],
+    settlement_len: u8,
+    settlements: [BiomeSettlement; MAX_BIOME_SETTLEMENTS],
 }
 
 impl Default for SurfaceFeatures {
@@ -960,6 +1060,10 @@ impl SurfaceFeatures {
         features: [SurfaceFeature::cube(AIR, 0.0); MAX_SURFACE_FEATURES],
         crop_len: 0,
         crop_fields: [CropField::NONE; MAX_CROP_FIELDS],
+        structure_len: 0,
+        structures: [BiomeStructure::NONE; MAX_BIOME_STRUCTURES],
+        settlement_len: 0,
+        settlements: [BiomeSettlement::NONE; MAX_BIOME_SETTLEMENTS],
     };
 
     pub fn new(features: &[SurfaceFeature]) -> Result<Self, ParamError> {
@@ -1024,8 +1128,42 @@ impl SurfaceFeatures {
         Ok(self)
     }
 
+    /// This table with `structures` as its Structures, each checked against its Template where
+    /// the World's Templates are known.
+    pub fn with_structures(mut self, structures: &[BiomeStructure]) -> Result<Self, ParamError> {
+        if structures.len() > MAX_BIOME_STRUCTURES {
+            return Err(ParamError {
+                field: "biomes.structures",
+                rule: "holds at most 4 Structures",
+            });
+        }
+        self.structures[..structures.len()].copy_from_slice(structures);
+        self.structure_len = structures.len() as u8;
+        Ok(self)
+    }
+
+    pub fn with_settlements(mut self, settlements: &[BiomeSettlement]) -> Result<Self, ParamError> {
+        if settlements.len() > MAX_BIOME_SETTLEMENTS {
+            return Err(ParamError {
+                field: "biomes.settlements",
+                rule: "holds at most 2 Settlements",
+            });
+        }
+        self.settlements[..settlements.len()].copy_from_slice(settlements);
+        self.settlement_len = settlements.len() as u8;
+        Ok(self)
+    }
+
     pub fn as_slice(&self) -> &[SurfaceFeature] {
         &self.features[..self.len as usize]
+    }
+
+    pub fn structures(&self) -> &[BiomeStructure] {
+        &self.structures[..self.structure_len as usize]
+    }
+
+    pub fn settlements(&self) -> &[BiomeSettlement] {
+        &self.settlements[..self.settlement_len as usize]
     }
 
     pub fn crop_fields(&self) -> &[CropField] {

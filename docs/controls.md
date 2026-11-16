@@ -5,7 +5,9 @@ and Return to Worlds. Escape closes an open overlay (the Inventory, the Layout
 card, a dialog) before it opens the Menu, and resumes from the Menu. Inside a
 menu, Tab moves focus. **I** opens and closes the Inventory, and **C** opens it
 with the Catalogue search focused; in Survival the Catalogue is closed and C
-says it is Creative-only.
+says it is Creative-only. **G** or **Backspace** closes the Inventory too, so a
+chest or workbench opened with G closes with G; while typing in the search they
+type.
 
 **B** shows or hides the Compass, a strip across the top of the screen with your
 heading in degrees, the cardinal letters (North picked out in red) and ticks.
@@ -116,6 +118,16 @@ closed. Place commits a layout, Remove cancels it and the clear key
 axis, digits type it, **J** moves to the next axis and **T** reverses it. Point
 to point takes A, B, then C for depth; C needs no surface. These are remappable
 actions under Key bindings.
+
+**K** opens the place Tool's list of Templates, taking the Tool into hand, in
+Creative; Survival is refused. Picking a Template closes the list, and its ghost
+follows your aim. With the list open, **K** closes it back into play with the
+Tool in hand, the clear key (**Backspace**) closes it and puts the Tool away,
+and **Escape** closes it with the cursor free. With the Tool in hand, **R**
+turns the Structure, and Place pins a preview where you aim. Walk round it;
+within 8 m a prompt says **G** builds it. **K**, **Backspace**, or Remove (left
+mouse) aimed at it cancels it; with no preview pinned, **K** or **Backspace**
+puts the Tool away.
 
 Gameplay input is cancelled when ownership changes. Inputs held through a menu,
 focus change or device cancellation require release before activation. Pending

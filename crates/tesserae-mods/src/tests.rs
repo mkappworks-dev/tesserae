@@ -21,10 +21,13 @@ mod markers;
 mod plants;
 mod recipes;
 mod sandbox;
+mod settlements;
 mod shared_mods;
 mod sounds;
 mod soundscapes;
 mod starters;
+mod structures;
+mod templates;
 
 fn guest(name: &str) -> PathBuf {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))

@@ -163,6 +163,10 @@ end = "permanent"
 name = "ruler"
 kind = "measure"
 
+[[tools]]
+name = "builder"
+kind = "place"
+
 [[items]]
 name = "log"
 size-m = 0.25
@@ -279,3 +283,29 @@ kind = "station"
 material = "full:rock"
 tag = "bench"
 shape = "core:slab"
+
+[[templates]]
+name = "cairn"
+cell-m = 0.5
+layers = [["r.", "_r"]]
+ground-layer = 0
+foundation = "full:rock"
+level-tolerance-m = 2.0
+
+[templates.palette]
+"." = "air"
+"_" = "keep"
+"r" = { material = "full:rock", shape = "full:slab", orientation = 5 }
+
+[[settlements]]
+name = "hamlet"
+radius-min-m = 16.0
+radius-max-m = 24.0
+margin-m = 8.0
+centre = "full:cairn"
+plots-min = 2
+plots-max = 4
+minimum = 2
+path = "full:rock"
+path-shape = "full:slab"
+templates = [{ template = "full:cairn", weight = 2.0, min = 1, max = 3 }]

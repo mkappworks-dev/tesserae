@@ -81,6 +81,8 @@ impl Guest for Lake {
             plants: Vec::new(),
             marker_kinds: Vec::new(),
             death_marker_kind: None,
+            templates: Vec::new(),
+            settlements: Vec::new(),
             voxel_uses: Vec::new(),
             ores: vec![],
         }

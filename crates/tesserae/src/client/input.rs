@@ -12,6 +12,8 @@ pub(super) enum Owner {
     PointerFree,
     Menu,
     LayoutMenu,
+    /// The place Tool's Template list.
+    StructureMenu,
     Inventory,
     Map,
     Settings,
@@ -84,6 +86,7 @@ pub(super) fn plugin(app: &mut App) {
             resolve
                 .after(super::menu::toggle)
                 .after(super::layout_menu::toggle)
+                .after(super::structure_menu::toggle)
                 .after(super::camera::grab_cursor),
         );
 }
@@ -93,7 +96,7 @@ type Contexts<'w> = (
     Option<Res<'w, super::settings::Settings>>,
     Option<Res<'w, UiInput>>,
     Option<Res<'w, crate::server::persistence::SaveStatus>>,
-    Option<Res<'w, super::layout_menu::LayoutMenu>>,
+    super::structure_menu::Docked<'w>,
     Option<Res<'w, super::inventory_window::InventoryWindow>>,
     Option<Res<'w, super::map_window::MapWindow>>,
     Option<Res<'w, super::death::Dead>>,
@@ -102,7 +105,7 @@ type Contexts<'w> = (
 pub(super) fn resolve(
     (keys, mouse, pad): super::actions::Devices,
     touch: Res<super::touch::TouchFrame>,
-    (menu, settings, ui, save, layout_menu, inventory, map, dead): Contexts,
+    (menu, settings, ui, save, docked, inventory, map, dead): Contexts,
     window: Single<(&Window, &CursorOptions), With<PrimaryWindow>>,
     mut ownership: ResMut<Ownership>,
     bindings: Res<super::actions::Bindings>,
@@ -126,8 +129,10 @@ pub(super) fn resolve(
         Owner::Settings
     } else if menu.open {
         Owner::Menu
-    } else if layout_menu.is_some_and(|menu| menu.open) {
+    } else if docked.layout.as_ref().is_some_and(|menu| menu.open) {
         Owner::LayoutMenu
+    } else if docked.list.as_ref().is_some_and(|list| list.open) {
+        Owner::StructureMenu
     } else if inventory.is_some_and(|window| window.open) {
         Owner::Inventory
     } else if map.is_some_and(|window| window.open) {
@@ -184,6 +189,7 @@ pub(super) fn resolve(
                     owner,
                     Owner::Unfocused
                         | Owner::LayoutMenu
+                        | Owner::StructureMenu
                         | Owner::Settings
                         | Owner::BindingCapture
                         | Owner::TextEntry

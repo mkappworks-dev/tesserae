@@ -176,11 +176,100 @@ optional `material` and an optional `plant`, exactly one set, and an optional
 `biome-def` may list 16 `surface-features`, and a Mod 128 Materials, Shapes or
 appearance rows.
 
+Line 0.3 then gained `templates` on its `declaration`, appended after
+`death-marker-kind` in the same way; a Declaration for 0.1 or 0.2 loads with
+none. A `template-def` carries a `name` (local to the Mod; the engine adds
+`<mod id>:`), a `cell-m` grid size in metres, a `palette` of
+`template-palette-entry` rows each mapping one `char` to a closed
+`template-cell` (`keep`, `air`, or a `template-voxel` of a Material and an
+optional Shape by full name and an optional orientation byte), `layers` of rows
+of palette characters from the bottom up, an optional `ground-layer` that a
+Template must set, an optional `foundation` Material and an optional
+`level-tolerance-m`, from 0 to 16 and 1 when absent. Any Mod may declare one,
+and a World holds at most 64. A side is at most 64 metres and a Template at most
+65,536 cells. Names resolve after every Mod has declared; an unknown Material or
+Shape, a fluid, a character not in the palette or a grid out of bounds is a load
+error naming the Template. It is data only: no Mod is called and no host call is
+added.
+
+A `template-def` of line 0.3 then gained `spans`, a bool after
+`level-tolerance-m`, false in every Declaration built before it. A Template that
+spans stands only where its longer side crosses a gap, a valley or water,
+between two dry landings. A span under 6 m is a load error naming the Template,
+and a Settlement that draws one is a load error naming the Settlement. A
+Declaration built against the earlier 0.3 text needs a rebuild; a data Mod's
+`spans` defaults to false.
+
+A `biome-def` of line 0.3 then gained a `structures` list before `soundscape`,
+at most 4 `biome-structure` rows of a `template` by full name, a `spacing-m` at
+least twice the Template's longer side and at most 4096 m, and a `chance` above
+0 and at most 1. A Declaration built against the earlier 0.3 text needs a
+rebuild. A fifth row, an unknown Template or a spacing under its floor is a load
+error naming the Biome. A Biome with none generates exactly as before, with no
+generator version change.
+
+`template-cell` then gained `ground`, the surface Material of the Biome a
+Structure's column stands in at and above the ground layer and its soil below,
+so one Template fits grass, sand or snow. A Declaration built against the
+earlier 0.3 text needs a rebuild. It is never refused as not Obtainable.
+
+The closed `tool-kind` of line 0.3 then gained `place`, after `measure`. A Game
+declares a `place` Tool by name and kind like any Tool; its Use edits nothing
+and enters no history, and only a Creative Player may place a Structure with it.
+A Declaration built against the earlier 0.3 text needs a rebuild.
+
+The `declaration` of line 0.3 then gained `settlements`, appended after
+`templates`, and a `biome-def` gained a `settlements` list after `structures`. A
+`settlement-def` carries a `name` (local to the Mod), a `radius-m` above 0 and
+at most 64, an optional `margin-m` from 0 to 64 (16 when absent), an optional
+`centre` Template, a count of `plots` of at most 24, from 1 to 24
+`settlement-plot` rows of a `template`, a `weight` above 0 and a `min` and `max`
+count, an overall `minimum`, and a `path` Material with an optional
+`path-shape`. A World holds at most 16. A `biome-settlement` row names a
+`settlement` by full name and a `spacing-m` at least twice its radius and margin
+and at most 4096 m; a Biome lists at most 2. A Declaration for 0.1 or 0.2 loads
+with none, and one built against the earlier 0.3 text needs a rebuild. A third
+row, a radius over 64 m, more than 24 Plots or an unknown Template is a load
+error naming the Settlement. A World whose Biomes list none generates exactly as
+before, with no generator version change.
+
+Every Material a `template-def` names, and every `settlement-def`'s `path`, must
+be Obtainable in the World: laid, grown or dropped by worldgen, or made by a
+Recipe from what is. A breach refuses the World, naming the Template, the
+palette character (or `foundation`) and the Material, and a Grown Material or a
+Door's open Material in a `template-voxel` is refused outright. This is a loader
+rule, not a contract field
+([Loader rules are not the contract](#loader-rules-are-not-the-contract)).
+
+A `biome-settlement` then gained `chance`, after `spacing-m`, above 0 and at
+most 1; a TOML Declaration that leaves it out gets 1. Each lattice square draws
+a candidate centre anywhere in it, which stands with `chance` unless a
+neighbouring square's candidate with a higher draw is near enough for their
+discs and margins to meet. A Declaration built against the earlier 0.3 text
+needs a rebuild.
+
+A `biome-settlement` then gained `near-spawn`, a `bool` after `chance`: the four
+lattice squares round the origin always draw a centre, clear of the spawn's
+keep-out, and win against their neighbours. A TOML Declaration that leaves it
+out gets false. A Declaration built against the earlier 0.3 text needs a
+rebuild.
+
+A `settlement-def`, a `settlement-plot` and a `biome-def` then each gained an
+optional `loot`, last, a `loot-table` record: `rolls-min` and `rolls-max` (at
+most 27) and 1 to 16 `loot-entry` rows of an `item` by full name, a `min` of at
+least 1, a `max` no more than the Item's stack, and a `weight` above 0. A chest
+worldgen stands in a Settlement building draws from its row's table, else the
+Settlement's; one in a wilderness Structure from its Biome's. Every Item is
+checked once every Mod has declared, and need not be Obtainable another way.
+Tables are frozen in the generation snapshot with the Settlements and Biomes.
+`none` stocks nothing, so a Declaration without loot loads as before but needs a
+rebuild against the new record fields.
+
 ## What is not frozen
 
 Line `0.x` is pre-release. Later gameplay steps may add new lines, and
 publishing a starter does not freeze the Tools, commands or simulation features
-those steps add. The final **1.0 contract freeze belongs to roadmap step 27**
+those steps add. The final **1.0 contract freeze belongs to roadmap step 28**
 (release hardening); until then, treat any new line as possible.
 
 Saved Worlds are separate: they require the exact build that created them

@@ -212,25 +212,26 @@ Crafting works the same in both panes:
 
 ## Block gallery
 
-`/blocks` previews every Terra Material as a textured block, drawn from Terra's
-own textures, so a look can be judged before it ships. It shows each Material's
-cube and its top, side and bottom faces, every placeable Shape in a chosen
-Material, the Door closed and open beside a 1.8 m Player silhouette, and the
-Gate the same in a fence run, at 1, 0.5 or 0.25 m Voxels. Code is in `blocks.js`
-and `blocks.css`.
+`/blocks` previews every Material each demo Game declares as a textured block,
+drawn from the Game's own textures and grouped by Game, so a look can be judged
+before it ships. It shows each Material's cube and its top, side and bottom
+faces, every placeable Shape in a chosen Material, the Door closed and open
+beside a 1.8 m Player silhouette, and the Gate the same in a fence run, at 1,
+0.5 or 0.25 m Voxels. Code is in `blocks.js` and `blocks.css`.
 
 The textures under `blocks/` are generated; do not edit them by hand. After
-changing Terra's textures, regenerate them from the repository root:
+changing a Game's textures, regenerate them from the repository root:
 
 ```sh
 scripts/build-guests && cargo run -p tesserae-mods --example export-blocks
 ```
 
-The example loads the built Terra component through the Mod loader and writes
-each Material's faces as PNG, plus `blocks/index.json`, which lists the
-Materials, their render class and Use, and the Shapes' boxes. Lighting in the
-gallery is illustrative: sides are darkened by a fixed amount, and a translucent
-block shows only its three near faces.
+The example loads each built Game component through the Mod loader and writes
+each of its own Materials' faces as PNG under `blocks/<game>/`, plus
+`blocks/index.json`, which lists the Games, the Materials, their render class
+and Use, and Terra's Shapes' boxes. Lighting in the gallery is illustrative:
+sides are darkened by a fixed amount, and a translucent block shows only its
+three near faces.
 
 ## Plants and flat sprites (step 18, proposed, awaiting approval)
 
@@ -290,3 +291,61 @@ shows the engine's state: the Map, Compass and minimap keys do nothing, the
 Compass and minimap are hidden, the Menu has no Map button, and the switches and
 bindings stay in Settings marked "Not available in this World." The terrain and
 the explored route are drawn from noise here, not from the engine.
+
+## Structures and the Place Tool (step 20, proposed, awaiting approval)
+
+Illustrates step 20; ticket 01 of `.scratch/2026-11-15-phase-20-structures`.
+Code is in `structures.js`, `structure-materials.js` and `structures.css`,
+reusing the Layout workspace. Each Game has fifteen Templates (Terra, Tidewater,
+Ember, Lumen, Meadow): ten Settlement buildings (homes, an inn, a warehouse, a
+blacksmith, a bakery, a market stall, a barn and a well) and five wilderness
+Structures. The panel's example Game switch shows each set. The stage switches
+between Outside and Inside, drawn with the textures each Game exports, and
+Placing, the in-game ghost; Inside lifts the roof and near walls and picks a
+floor (Cellar, Ground, Upper). The smithy's anvil and forge and the bakery's
+oven are the Game's own Stations.
+
+The builders here are the Templates' source: `node mockup/export-templates.mjs`
+writes each Game's cells to `mockup/templates/<game>.json` and to
+`games/<game>/src/templates.rs`, which declares them, and a test checks the
+declared cells against the JSON. Run it after changing a builder or a style;
+`--check` fails if either output is out of date. Reach the screen at
+`/structures`, or hold the tool from Simulate (Engine states, "Place tool") on
+`/play`.
+
+Each building kind has its own shape: a steep thatched cottage, a jettied
+half-timbered family house, an L-shaped farmhouse with a porch, an inn with a
+hipped roof, a long warehouse, a lean-to smithy with a forge chimney, a brick
+bakery with its oven at the back, a striped market stall and a two-pitch barn.
+Their Materials differ per building and per Game: each Game declares about
+sixteen building Materials (planks, logs, plaster, cobble, ashlar, tiles,
+thatch, slate, shingles, cloth) and its anvil, forge and oven, and
+`structure-materials.js` draws them from the Block gallery's exported textures.
+Each Game also declares its own door, chest, workbench, glass and lamp. Every
+Game maps Terra's choices to its own Materials, so a Meadow farmhouse is birch,
+fieldstone and moss shingles where Terra's is spruce, cobblestone and shingles.
+
+The bridges each have their own build: Terra's stone bridge humps over a low
+brick-ringed arch between parapets with lamps at the ends; Meadow's footbridge
+steps up onto log trestles with posts and plank rails; Tidewater's rope bridge
+sags between two raised log landings with rope rails and lamp posts. The preview
+runs a stream under every column a bridge spans in the open.
+
+- A Tool, not an Item: it takes a hand slot beside the hotbar. Use (G) opens the
+  Template list, R turns the Structure a quarter, and Place (right mouse) lays
+  the whole Structure or nothing. Z removes it in one step.
+- In play the HUD card shows the Template, its facing, size, tallies, outcome
+  and key hints, but no preview and no buttons: the cursor is grabbed, G and
+  right mouse do those jobs, and the ghost stands in the World. The list window
+  keeps its Place here and Put the Tool away buttons.
+- The ghost tints each cell by what placing it does: free, replaces ground,
+  replaces water, or blocked. The Voxel tallies are for this World's Voxel size;
+  a Template is authored on a 1.0 m grid and sampled to it.
+- Air cells that carve ground or water show as outlines, so a cellar reads as
+  cut into the ground. Keep cells are not drawn.
+- Refusals use the existing top-right notice card: "The place Tool is Creative
+  only.", "Out of reach." (only the anchor must be in reach), "You are standing
+  inside it." and "Waiting for Chunks to load…", which then places or refuses.
+- The panel's example aim (Level, Hillside, Shore; In reach, Too far, Inside,
+  Loading) is prototype chrome: in the game the aim decides these. Worldgen's
+  level rule does not apply to a Player's placement.

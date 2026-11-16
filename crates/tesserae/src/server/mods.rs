@@ -5,6 +5,7 @@ pub use runtime::ModDisabled;
 
 pub(in crate::server) use runtime::{Drain, EditHistory};
 
+use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 use std::io::{self, BufRead, IsTerminal, Write};
 use std::path::{Path, PathBuf};
@@ -12,6 +13,9 @@ use std::path::{Path, PathBuf};
 use crate::launch::Installed;
 use crate::session::{SessionApp, SessionTeardown};
 use bevy::prelude::*;
+use tesserae_core::loot::LootTable;
+use tesserae_core::settlement::Settlement;
+use tesserae_core::template::{Template, Turn};
 use tesserae_core::{MaterialId, SHAPE_FULL_CUBE, ShapeId, Tables, WorldgenParams};
 use tesserae_mods::{
     Kind, ModHost, ModInstance, Registered, Registry, Scan, Trust, Verdict, ViewParams, WorldInfo,
@@ -20,8 +24,8 @@ use tesserae_mods::{
 };
 
 use crate::content::{
-    CatalogueMaterial, CatalogueShape, CatalogueTool, CharacterModel, ContentCatalogue,
-    MaterialPalette, MaterialTextures,
+    CatalogueMaterial, CatalogueShape, CatalogueTemplate, CatalogueTool, CharacterModel,
+    ContentCatalogue, MaterialPalette, MaterialTextures,
 };
 use crate::world::WorldSettings;
 
@@ -108,6 +112,15 @@ pub struct LoadedMods {
     pub tables: Tables,
     pub registry: Registry,
     pub world: Option<WorldgenParams>,
+    /// The Templates a reopened World was made with, which its Biomes' Structures index into.
+    /// `None` is a new World, which stands the Game's own.
+    pub world_templates: Option<Vec<Template>>,
+    /// The Settlements a reopened World was made with, alongside [`Self::world_templates`].
+    pub world_settlements: Option<Vec<Settlement>>,
+    /// Each Biome's loot by id, what its wilderness Structures' chests hold.
+    pub biome_loot: Vec<Option<LootTable>>,
+    /// The Biome loot a reopened World was made with, alongside [`Self::world_templates`].
+    pub world_biome_loot: Option<Vec<Option<LootTable>>>,
     pub view: Option<ViewParams>,
     pub appearance: Vec<(MaterialId, [u8; 4])>,
     pub textures: Vec<(MaterialId, Vec<u8>)>,
@@ -132,6 +145,10 @@ impl Default for LoadedMods {
             tables: Tables::builtin(),
             registry: Registry::builtin(),
             world: None,
+            world_templates: None,
+            world_settlements: None,
+            biome_loot: Vec::new(),
+            world_biome_loot: None,
             view: None,
             appearance: Vec::new(),
             textures: Vec::new(),
@@ -181,7 +198,12 @@ fn placeable(tables: &Tables, material: MaterialId) -> bool {
 }
 
 #[derive(Resource)]
-pub(super) struct WorldParameters(pub WorldgenParams);
+pub(super) struct WorldParameters(
+    pub WorldgenParams,
+    pub Vec<Template>,
+    pub Vec<Settlement>,
+    pub Vec<Option<LootTable>>,
+);
 
 /// One Game or Mod a World was made with.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -462,7 +484,14 @@ pub(crate) fn save_world(loaded: &LoadedMods, path: &Path) {
         sequence: 1,
         seed: 123,
         voxel_size_m: 0.5,
-        parameters: Generation::capture(loaded.world.unwrap(), &mapping).unwrap(),
+        parameters: Generation::capture(
+            loaded.world.unwrap(),
+            &loaded.tables.templates,
+            &loaded.tables.settlements,
+            &mapping,
+        )
+        .unwrap()
+        .with_biome_loot(&loaded.biome_loot),
         content: content.clone(),
         player: save::Player {
             eye_m: [1.0, 2.0, 3.0],
@@ -476,6 +505,7 @@ pub(crate) fn save_world(loaded: &LoadedMods, path: &Path) {
         paused: vec![],
         entities: Default::default(),
         containers: Vec::new(),
+        looted: Vec::new(),
         map: Default::default(),
         game_mode: Default::default(),
     };
@@ -614,6 +644,8 @@ pub(crate) async fn declare_all(
     let biome_rows = biome_rows(&behaviours);
     let recipes = tesserae_mods::DeclaredRecipes::take(&mut behaviours);
     let plants = tesserae_mods::DeclaredPlants::take(&mut behaviours);
+    let templates = tesserae_mods::DeclaredTemplates::take(&mut behaviours);
+    let settlements = tesserae_mods::DeclaredSettlements::take(&mut behaviours);
     let (ground, lake) =
         resolve(behaviours, &mut loaded.tables, &loaded.registry).map_err(|e| e.to_string())?;
     // Grown Materials decide which implicit Items exist, so Plants resolve
@@ -626,6 +658,12 @@ pub(crate) async fn declare_all(
             &loaded.tables.plants,
             &loaded.every_item(world.voxel_size).0,
         )
+        .map_err(|e| e.to_string())?;
+    loaded.tables.templates = templates
+        .resolve(&loaded.registry, &loaded.tables)
+        .map_err(|e| e.to_string())?;
+    loaded.tables.settlements = settlements
+        .resolve(&loaded.registry, &loaded.tables)
         .map_err(|e| e.to_string())?;
     // After the Plant table, because a surface feature may name a Plant.
     let (biomes, ores) = resolve_biomes(
@@ -651,7 +689,65 @@ pub(crate) async fn declare_all(
         world.biomes = biomes;
         world.ores = ores;
     }
+    let obtainable = super::obtainable::obtainable(&loaded, &loaded.every_item(world.voxel_size));
+    let (used_templates, used_settlements) = stood_by_biomes(&loaded);
+    // A fluid cell is exempt: a well is meant to be a Settlement's water, even where nothing else is.
+    let refuse = |m| {
+        (!obtainable.contains(&m) && !loaded.tables.fluids.contains(m)).then(|| {
+            "is not Obtainable: no Biome lays it, no Plant yields it and no Recipe makes it from \
+             what is"
+                .to_owned()
+        })
+    };
+    templates
+        .check(
+            &loaded.registry,
+            |name| used_templates.contains(name),
+            refuse,
+        )
+        .map_err(|e| e.to_string())?;
+    settlements
+        .check(
+            &loaded.registry,
+            |name| used_settlements.contains(name),
+            refuse,
+        )
+        .map_err(|e| e.to_string())?;
+    let items = loaded.every_item(world.voxel_size).0;
+    settlements.check_loot(&items).map_err(|e| e.to_string())?;
+    loaded.biome_loot =
+        tesserae_mods::biome_loot(&biome_rows, &items).map_err(|e| e.to_string())?;
     Ok(loaded)
+}
+
+/// The names of the Templates and Settlements the World's Biomes stand, a Settlement's own
+/// Templates included: only these must be Obtainable, as the `place` Tool is Creative's alone.
+fn stood_by_biomes(loaded: &LoadedMods) -> (HashSet<String>, HashSet<String>) {
+    let tables = &loaded.tables;
+    let biomes = loaded
+        .world
+        .as_ref()
+        .map_or(&[][..], |w| w.biomes.as_slice());
+    let settlements: Vec<&Settlement> = biomes
+        .iter()
+        .flat_map(|b| b.surface_features.settlements())
+        .filter_map(|row| tables.settlements.get(usize::from(row.settlement)))
+        .collect();
+    let templates = biomes
+        .iter()
+        .flat_map(|b| b.surface_features.structures())
+        .map(|row| row.template)
+        .chain(settlements.iter().flat_map(|s| {
+            s.centre
+                .iter()
+                .chain(s.rules.iter().map(|r| &r.building))
+                .map(|b| b.template)
+        }))
+        .filter_map(|at| tables.templates.get(usize::from(at)))
+        .map(|t| t.name.clone())
+        .collect();
+    let settlements = settlements.iter().map(|s| s.name.clone()).collect();
+    (templates, settlements)
 }
 
 fn load_with_opening(
@@ -777,6 +873,13 @@ fn install(world: &mut World) {
         .get_resource::<WorldSettings>()
         .map_or(WorldSettings::default().voxel_size, |w| w.voxel_size);
     let items = loaded.every_item(voxel_size);
+    let templates = loaded
+        .world_templates
+        .unwrap_or_else(|| loaded.tables.templates.clone());
+    let settlements = loaded
+        .world_settlements
+        .unwrap_or_else(|| loaded.tables.settlements.clone());
+    let loot = loaded.world_biome_loot.unwrap_or(loaded.biome_loot);
     let markers = crate::content::MarkerKinds(loaded.tables.markers.clone());
     let tables = super::ContentTables::from_loaded(loaded.tables, loaded.game);
     let reopened = world
@@ -793,6 +896,15 @@ fn install(world: &mut World) {
         params.water.map(|lake| lake.material),
         params.ground.map(|ground| ground.rock),
     );
+    let colours: HashMap<MaterialId, [u8; 4]> = loaded.appearance.iter().copied().collect();
+    let colour = |m: MaterialId| colours.get(&m).copied().unwrap_or([128, 128, 128, 255]);
+    let ground = params
+        .ground
+        .map_or([96, 128, 72, 255], |g| colour(g.surface));
+    for (entry, template) in catalogue.templates.iter_mut().zip(&tables.0.templates) {
+        entry.thumbnails = [0, 1, 2, 3]
+            .map(|q| crate::content::template_thumbnail(template, Turn::new(q), colour, ground));
+    }
     catalogue.tools = loaded
         .tools
         .iter()
@@ -871,7 +983,7 @@ fn install(world: &mut World) {
     world.insert_resource(super::craft::Recipes(loaded.recipes));
     world.insert_resource(placing);
     world.insert_resource(items);
-    world.insert_resource(WorldParameters(params));
+    world.insert_resource(WorldParameters(params, templates, settlements, loot));
     world.insert_resource(super::streaming::streaming_settings(loaded.view));
     world.insert_resource(runtime::ModJobs::new(loaded.registry, loaded.mods));
     let (name, default_mode) = world
@@ -966,6 +1078,15 @@ pub(in crate::server) fn catalogue(
         lake,
         rock,
         tools: Vec::new(),
+        templates: tables
+            .templates
+            .iter()
+            .map(|t| CatalogueTemplate {
+                name: t.name.clone(),
+                size_m: t.size_m(),
+                thumbnails: Default::default(),
+            })
+            .collect(),
     }
 }
 
@@ -1313,11 +1434,32 @@ surface = "plain:rock"
         assert_eq!(catalogue.lake, Some(water));
         assert_eq!(
             catalogue.tools,
-            vec![CatalogueTool {
-                id: crate::server::tool::ToolId(0),
-                name: "full:ruler".into(),
-                kind: tesserae_mods::ToolKind::Measure,
-            }]
+            vec![
+                CatalogueTool {
+                    id: crate::server::tool::ToolId(0),
+                    name: "full:ruler".into(),
+                    kind: tesserae_mods::ToolKind::Measure,
+                },
+                CatalogueTool {
+                    id: crate::server::tool::ToolId(1),
+                    name: "full:builder".into(),
+                    kind: tesserae_mods::ToolKind::Place,
+                },
+            ]
+        );
+        let [cairn] = &catalogue.templates[..] else {
+            panic!("one Template: {:?}", catalogue.templates.len());
+        };
+        assert_eq!(
+            (cairn.name.as_str(), cairn.size_m),
+            ("full:cairn", [1.0, 0.5, 1.0])
+        );
+        assert!(
+            cairn
+                .thumbnails
+                .iter()
+                .all(|t| t.len() == crate::content::THUMBNAIL_PX.pow(2) * 4),
+            "a thumbnail at each turn"
         );
         let material = |m: MaterialId| catalogue.materials.iter().find(|c| c.id == m).unwrap();
         assert!(material(lava).fluid.is_some() && !material(lava).solid);
@@ -1492,6 +1634,241 @@ biomes = ["plain:dry"]
         assert_eq!(world.climate, tesserae_core::ClimateParams::default());
     }
 
+    /// A Biome standing the hut, so the hut must be Obtainable.
+    const HUT_BIOME: &str = r#"[[biomes]]
+name = "huts"
+temperature = 0.5
+humidity = 0.5
+structures = [{ template = "plain:hut", spacing-m = 64.0, chance = 0.5 }]
+"#;
+
+    /// A Game whose ground is all rock, with planks and gem nothing lays, and a Biome standing a
+    /// hut of rock and planks.
+    fn hut_game(extra: &str) -> String {
+        format!(
+            r#"{DATA_GAME}
+{HUT_BIOME}
+[[materials]]
+name = "planks"
+emission = 0
+dimming = 15
+occlusion = "opaque"
+render = "opaque"
+solid = true
+[[materials]]
+name = "gem"
+emission = 0
+dimming = 15
+occlusion = "opaque"
+render = "opaque"
+solid = true
+[[templates]]
+name = "hut"
+cell-m = 1.0
+ground-layer = 0
+layers = [["rp"]]
+[templates.palette]
+"r" = {{ material = "plain:rock" }}
+"p" = {{ material = "plain:planks" }}
+{extra}
+"#
+        )
+    }
+
+    /// The refusal of Create World, then of opening, for a Game in `s`.
+    fn refusals(s: &Scratch) -> (Result<(), String>, Result<(), String>) {
+        let scan = tesserae_mods::scan(&s.0.join("mods")).unwrap();
+        let found = scan.games.into_iter().chain(scan.mods).collect();
+        let created = preview(found, &s.0.join("trust.json"), false).map(|_| ());
+        (created, s.load(TrustMode::All).map(|_| ()))
+    }
+
+    #[test]
+    fn a_template_material_only_a_recipe_makes_needs_the_recipes_inputs_obtainable() {
+        let from_rock = "[[recipes]]\ninputs = [{ item = \"plain:rock\", count = 1 }]\n\
+                         output = { item = \"plain:planks\", count = 4 }\nstation = \"hand\"\n";
+        let from_gem = from_rock.replace("plain:rock", "plain:gem");
+        let s = Scratch::new();
+        data(&s, "plain", true, "", &hut_game(from_rock));
+        assert_eq!(refusals(&s), (Ok(()), Ok(())));
+        for unmade in ["", from_gem.as_str()] {
+            let s = Scratch::new();
+            data(&s, "plain", true, "", &hut_game(unmade));
+            let want = "mod `plain`: template 0 `hut`: palette `p`: Material `plain:planks` is \
+                        not Obtainable: no Biome lays it, no Plant yields it and no Recipe makes \
+                        it from what is";
+            let (created, opened) = refusals(&s);
+            assert_eq!(created.unwrap_err(), want);
+            assert_eq!(opened.unwrap_err(), want);
+        }
+    }
+
+    #[test]
+    fn only_what_a_biome_stands_must_be_obtainable() {
+        let hamlet = "[[settlements]]\nname = \"hamlet\"\nradius-m = 8.0\nplots = 1\n\
+                      path = \"plain:gem\"\ntemplates = [{ template = \"plain:hut\" }]\n";
+        let settled = "settlements = [{ settlement = \"plain:hamlet\", spacing-m = 64.0 }]\n";
+        let unlisted = |game: String| game.replace(HUT_BIOME, "");
+        let listed = |game: String| {
+            game.replace(
+                HUT_BIOME,
+                &HUT_BIOME.replace("structures = [", &format!("{settled}structures = [")),
+            )
+        };
+        let want = "mod `plain`: settlement 0 `hamlet`: path: Material `plain:gem` is not \
+                    Obtainable: no Biome lays it, no Plant yields it and no Recipe makes it from \
+                    what is";
+        for (game, refusal) in [
+            (unlisted(hut_game("")), None),
+            (unlisted(hut_game(hamlet)), None),
+            (listed(hut_game(hamlet)), Some("plain:planks")),
+        ] {
+            let s = Scratch::new();
+            data(&s, "plain", true, "", &game);
+            let (created, opened) = refusals(&s);
+            match refusal {
+                None => assert_eq!((created, opened), (Ok(()), Ok(())), "{game}"),
+                Some(material) => {
+                    for refusal in [created, opened] {
+                        assert!(refusal.unwrap_err().contains(material), "{game}");
+                    }
+                }
+            }
+        }
+        let from_rock = "[[recipes]]\ninputs = [{ item = \"plain:rock\", count = 1 }]\n\
+                         output = { item = \"plain:planks\", count = 4 }\nstation = \"hand\"\n";
+        let s = Scratch::new();
+        data(
+            &s,
+            "plain",
+            true,
+            "",
+            &listed(hut_game(&format!("{from_rock}{hamlet}"))),
+        );
+        let (created, opened) = refusals(&s);
+        assert_eq!(created.unwrap_err(), want);
+        assert_eq!(opened.unwrap_err(), want);
+    }
+
+    #[test]
+    fn a_ground_cell_is_obtainable_by_definition() {
+        let from_rock = "[[recipes]]\ninputs = [{ item = \"plain:rock\", count = 1 }]\n\
+                         output = { item = \"plain:planks\", count = 4 }\nstation = \"hand\"\n";
+        let plot = "[[templates]]\nname = \"plot\"\ncell-m = 1.0\nground-layer = 0\n\
+                    layers = [[\"gg\"]]\n[templates.palette]\n\"g\" = \"ground\"\n";
+        let s = Scratch::new();
+        data(
+            &s,
+            "plain",
+            true,
+            "",
+            &hut_game(&format!("{from_rock}{plot}")),
+        );
+        assert_eq!(refusals(&s), (Ok(()), Ok(())));
+    }
+
+    #[test]
+    fn a_fluid_cell_need_not_be_obtainable() {
+        let from_rock = "[[recipes]]\ninputs = [{ item = \"plain:rock\", count = 1 }]\n\
+                         output = { item = \"plain:planks\", count = 4 }\nstation = \"hand\"\n";
+        let water = "[[materials]]\nname = \"water\"\nemission = 0\ndimming = 2\n\
+                     occlusion = \"same-material\"\nrender = \"blend\"\nsolid = false\n\
+                     [[fluids]]\nmaterial = \"plain:water\"\nreach-m = 7.0\n\
+                     sideways-m-per-s = 4.0\ndownward-m-per-s = 8.0\n\
+                     recession-m-per-s = 4.0\nreset-drop-m = 0.5\n\
+                     waterlogs = true\nextinguishes = true\n";
+        let game = hut_game(&format!("{from_rock}{water}"))
+            .replace("layers = [[\"rp\"]]", "layers = [[\"rpw\"]]")
+            .replace(
+                "\"p\" = { material = \"plain:planks\" }",
+                "\"p\" = { material = \"plain:planks\" }\n\"w\" = { material = \"plain:water\" }",
+            );
+        let s = Scratch::new();
+        data(&s, "plain", true, "", &game);
+        assert_eq!(refusals(&s), (Ok(()), Ok(())));
+    }
+
+    #[test]
+    fn what_biomes_lay_plants_yield_and_ores_hold_is_obtainable() {
+        let moss = "[[materials]]\nname = \"moss\"\nemission = 0\ndimming = 15\n\
+                    occlusion = \"opaque\"\nrender = \"opaque\"\nsolid = true\n\
+                    [[items]]\nname = \"board\"\nsize-m = 0.25\ncolor = [1, 2, 3, 255]\n\
+                    material = \"plain:planks\"\n\
+                    [[plants]]\nname = \"moss\"\nkind = \"spreader\"\nseed = \"plain:moss\"\n\
+                    material = \"plain:moss\"\nreach-m = 2.0\nmean-seconds = 60.0\ndensity = 5\n\
+                    yields = [{ item = \"plain:board\", count = [1, 1] }]\n\
+                    [plants.needs]\nsoil = [\"plain:rock\"]\n";
+        let mossy = "[[biomes]]\nname = \"mossy\"\ntemperature = 0.5\nhumidity = 0.5\n\
+                     surface-features = [{ material = \"plain:moss\", spacing-m = 8.0 }]\n";
+        let gem = "[[biomes]]\nname = \"dry\"\ntemperature = 0.5\nhumidity = 0.5\n\
+                   [[ores]]\nmaterial = \"plain:gem\"\nmin-depth-m = 5.0\nmax-depth-m = 50.0\n\
+                   vein-size-m = 2.0\nrarity = 0.1\n\
+                   [[recipes]]\ninputs = [{ item = \"plain:gem\", count = 1 }]\n\
+                   output = { item = \"plain:planks\", count = 4 }\nstation = \"hand\"\n";
+        for (extra, loads) in [
+            (format!("{moss}{mossy}"), true),
+            (moss.to_owned(), false),
+            (gem.to_owned(), true),
+        ] {
+            let s = Scratch::new();
+            data(&s, "plain", true, "", &hut_game(&extra));
+            let (created, opened) = refusals(&s);
+            assert_eq!(
+                (created.is_ok(), opened.is_ok()),
+                (loads, loads),
+                "{extra}: {created:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_grown_material_or_a_doors_open_material_in_a_template_is_refused() {
+        let content = "\"g\" = { material = \"plain:ripe\" }\n\
+                       \"d\" = { material = \"plain:open\" }\n\
+                       [[materials]]\nname = \"sprout\"\nemission = 0\ndimming = 0\n\
+                       occlusion = \"never\"\nrender = \"cutout\"\nsolid = true\n\
+                       [[materials]]\nname = \"ripe\"\nemission = 0\ndimming = 0\n\
+                       occlusion = \"never\"\nrender = \"cutout\"\nsolid = true\n\
+                       [[materials]]\nname = \"open\"\nemission = 0\ndimming = 15\n\
+                       occlusion = \"opaque\"\nrender = \"opaque\"\nsolid = true\n\
+                       [[plants]]\nname = \"wheat\"\nkind = \"crop\"\nseed = \"plain:sprout\"\n\
+                       stages = [{ material = \"plain:sprout\", mean-seconds = 20.0 }, \
+                       { material = \"plain:ripe\" }]\n\
+                       [plants.needs]\nsoil = [\"plain:rock\"]\n\
+                       [[voxel-uses]]\nkind = \"door\"\nmaterial = \"plain:planks\"\n\
+                       open = \"plain:open\"\nwidth-m = 1.0\n";
+        for (drop, want) in [
+            (
+                "\"d\" = { material = \"plain:open\" }\n",
+                "palette `g`: Material `plain:ripe` is a Grown Material, which only a Plant's \
+                 growth makes",
+            ),
+            (
+                "\"g\" = { material = \"plain:ripe\" }\n",
+                "palette `d`: Material `plain:open` is a Door's open form; a Template holds the \
+                 Door closed",
+            ),
+        ] {
+            let s = Scratch::new();
+            data(
+                &s,
+                "plain",
+                true,
+                "",
+                &hut_game(&content.replacen(drop, "", 1)),
+            );
+            let (created, opened) = refusals(&s);
+            for refusal in [created, opened] {
+                let refusal = refusal.unwrap_err();
+                assert!(
+                    refusal.starts_with("mod `plain`: template 0 `hut`: ")
+                        && refusal.ends_with(want),
+                    "{refusal}"
+                );
+            }
+        }
+    }
+
     #[test]
     fn data_content_resolves_names_across_data_and_component_mods() {
         let s = Scratch::new();
@@ -1600,7 +1977,14 @@ biomes = ["plain:dry"]
                 sequence: 1,
                 seed: 123,
                 voxel_size_m: 0.5,
-                parameters: Generation::capture(loaded.world.unwrap(), &mapping).unwrap(),
+                parameters: Generation::capture(
+                    loaded.world.unwrap(),
+                    &loaded.tables.templates,
+                    &loaded.tables.settlements,
+                    &mapping,
+                )
+                .unwrap()
+                .with_biome_loot(&loaded.biome_loot),
                 content: content.clone(),
                 player: save::Player {
                     eye_m: [1.0, 2.0, 3.0],
@@ -1614,6 +1998,7 @@ biomes = ["plain:dry"]
                 paused: vec![],
                 entities: Default::default(),
                 containers: Vec::new(),
+                looted: Vec::new(),
                 map: Default::default(),
                 game_mode: Default::default(),
             };
@@ -2284,11 +2669,18 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
         let catalogue = published_catalogue(super::runtime::tests::terra_loaded(1.0));
         assert_eq!(
             catalogue.tools,
-            vec![CatalogueTool {
-                id: crate::server::tool::ToolId(0),
-                name: "terra:measure".into(),
-                kind: tesserae_mods::ToolKind::Measure,
-            }]
+            vec![
+                CatalogueTool {
+                    id: crate::server::tool::ToolId(0),
+                    name: "terra:measure".into(),
+                    kind: tesserae_mods::ToolKind::Measure,
+                },
+                CatalogueTool {
+                    id: crate::server::tool::ToolId(1),
+                    name: "terra:place".into(),
+                    kind: tesserae_mods::ToolKind::Place,
+                },
+            ]
         );
         assert!(published_catalogue(LoadedMods::default()).tools.is_empty());
     }
@@ -2407,7 +2799,7 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
             .next()
             .unwrap()
             .0;
-        assert!((10..=30).contains(&book.len()), "{}", book.len());
+        assert!((10..=40).contains(&book.len()), "{}", book.len());
         let at = |item: &str| {
             let at = book.iter().position(|r| r.output.item == item).unwrap();
             assert_eq!(book[at].station, Station::Tag("workbench".into()));

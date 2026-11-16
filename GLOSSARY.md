@@ -284,10 +284,10 @@ One Item places the whole Door, Use toggles all of it, and removing any Voxel of
 it removes it all and drops the closed one's Item. Its row may fix a Shape, as
 Terra's fixes a thin panel: placing turns the panel to face the Player, hinged
 on the half of the cell aimed at, and Use turns each Voxel of it a quarter about
-that hinge edge, so it swings aside at 1 m and turns as slats at finer sizes.
-Bodies collide with the panel as drawn, except that an open Door with no fixed
-Shape, or wider than one Voxel so that its slats stand too close for a body,
-lets them through. Aim still stops on it.
+that hinge edge. Open, only a leaf's hinge edge shows its panel: the rest folds
+into it, drawn as nothing and passed by aim, so a leaf opens as one panel
+against its jamb. Bodies collide with the panel as drawn, except that an open
+Door with no fixed Shape, or wider than one Voxel, lets them through.
 
 **Game mode** — Creative or Survival. A World has a default; each Player has
 their own. Both spend an Item per placed Voxel and drop one per removed Voxel, a
@@ -504,6 +504,68 @@ directions and the bearing of each Waypoint. Presentation only. Not the Map.
 
 **North** — the World's −Z axis, in every World at every Voxel size. The
 direction the Player faces at heading zero.
+
+## Structures
+
+**Template** — a named block of Voxels a Game or Mod declares: each Voxel is a
+Material, a Shape and an Orientation, laid out on a grid whose size is given in
+metres. Data, not a place in a World; a World with no Game has none.
+
+**Template cell** — one square of a Template's grid, `cell-m` on a side, in
+metres: Keep, Air, ground or a Voxel. Not a Cell, which is a Chunk's footprint.
+
+**Keep** — a Template cell that is never written, so the ground a Structure
+stands in shows through. Air in a Template is not Keep: it carves.
+
+**Ground layer** — the layer of a Template that sits at the ground's height
+where a Structure is placed. Layers below it are underground, such as a cellar.
+
+**Obtainable** — of a Material, that a Player in a World can get its Item: from
+what world generation lays, grows or drops, or by Recipes from things already
+obtainable. Structures and the Catalogue are not sources. Every cell of a
+Template must be obtainable in each World it is used in.
+
+**Structure** — a Template placed in a World, by world generation, by a Player's
+Tool or by a Site. Rotated about the vertical axis in quarter turns, and the
+same size in metres at every Voxel size. Nothing is stored per Structure: once
+placed it is only Voxels.
+
+**Settlement** — a group of Structures that world generation lays around a
+centre and joins with paths, from rules a Game or Mod declares: a radius in
+metres, an optional centre Template, the Templates it may hold and a path
+Material. Its Plots and radius may be a range, and each copy draws its size from
+it. A hamlet, a village and a town are a Game's names for Settlements of
+different rules, not different things.
+
+**Lattice cell** — one square of a lattice world generation spreads Structures,
+Settlements or crop fields on, a row's spacing in metres on a side. It holds at
+most one candidate. Not a Cell.
+
+**Building** — a Template a Settlement stands at its centre or on a Plot, with
+the Template cell of its door if it has one.
+
+**Plot** — the ground one Structure of a Settlement stands on. A Plot whose
+ground fails the rules stays empty.
+
+**Apron** — the 2 m band round a Plot's footprint that world generation eases
+from the Plot's level back to the natural ground, so a levelled Plot has no
+cliff at its edge.
+
+**Road** — a Settlement's way between its centre and its Plots, laid by world
+generation in the Settlement's path Material on graded ground, as stairs and
+slabs where it climbs. Every Plot's door faces one. Not a Layout and not a crop
+field's path.
+
+**Loot** — the Items a chest world generation stands holds, drawn by weight from
+a table a Settlement, one of its Buildings or a Biome declares, the first time a
+Container is needed for it. A chest a Player places, or the place Tool stands,
+holds none. Not a drop, which a broken Voxel gives.
+
+**Blueprint** — an Item that names one Template. Laying it makes a Site.
+
+**Site** — a laid Blueprint: a Structure not yet built, kept by the World until
+its last Voxel is placed from Items brought to it. Once complete it is only
+Voxels, like any Structure.
 
 ## Audio
 

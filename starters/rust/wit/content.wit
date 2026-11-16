@@ -357,6 +357,9 @@ interface content {
         /// Reads two corners and reports the distance between them. Edits
         /// nothing.
         measure,
+        /// Places a whole Template, for a Creative Player. Use opens the list
+        /// of the World's Templates and edits nothing.
+        place,
     }
 
     /// A tool the Player can hold. The engine runs it; a Mod is never called
@@ -466,7 +469,7 @@ interface content {
     /// `mean-seconds`, how long it takes on average to reach the next, at least
     /// 16, in seconds at any Voxel size.
     record plant-stage {
-        /// A solid Material, `<mod id>:<name>`.
+        /// A Material, `<mod id>:<name>`, that is not a fluid.
         material: string,
         mean-seconds: option<f32>,
         yields: list<plant-yield>,
@@ -757,6 +760,15 @@ interface content {
         /// paths between them and a ditch, over this Biome's ground. Empty
         /// stands none.
         crop-fields: list<crop-field>,
+        /// At most 4 Templates world generation stands in this Biome as
+        /// Structures. Empty stands none.
+        structures: list<biome-structure>,
+        /// At most 2 Settlements world generation lays out in this Biome. Empty
+        /// lays out none.
+        settlements: list<biome-settlement>,
+        /// What the chests of wilderness Structures standing in this Biome
+        /// hold; `none` leaves them empty.
+        loot: option<loot-table>,
         /// Optional Soundscape full name, resolved across loaded Mods.
         soundscape: option<string>,
     }
@@ -840,6 +852,41 @@ interface content {
         /// its centre, above 0 and at most `spacing-m`; none is anywhere. A
         /// World without a lake has none.
         near-water-m: option<f32>,
+    }
+
+    /// A Template a Biome stands as a Structure: each square of a lattice
+    /// `spacing-m` on a side holds one with `chance`, turned by quarter turns
+    /// and inset so two never touch. Where, how turned and how high is a pure
+    /// function of the World seed and positions in metres, so a Structure is
+    /// whole across Chunk borders and the same at every Voxel size. Its cells
+    /// overwrite the ground, Air included; `keep` cells leave it.
+    record biome-structure {
+        /// A Template, `<mod id>:<name>`, from any loaded Mod.
+        template: string,
+        /// At least twice the Template's longer side, at most 4096 m.
+        spacing-m: f32,
+        /// Above 0 and at most 1.
+        chance: f32,
+    }
+
+    /// A Settlement a Biome lays out: each square of a lattice `spacing-m` on
+    /// a side draws a centre anywhere in it with `chance`, which stands unless
+    /// a neighbouring square's draw would meet its disc and margin, and where
+    /// the ground at its centre takes it. Its layout is a pure function of the
+    /// World seed and the square, so it is whole across Chunk borders and the
+    /// same at every Voxel size. It claims ground before single Structures,
+    /// crop fields, trees and scatter.
+    record biome-settlement {
+        /// A Settlement, `<mod id>:<name>`, from any loaded Mod.
+        settlement: string,
+        /// At least twice the Settlement's radius and margin, at most 4096 m.
+        spacing-m: f32,
+        /// Above 0 and at most 1.
+        chance: f32,
+        /// The four squares round the origin always draw a centre, clear of
+        /// the spawn's keep-out, and win against their neighbours, so a
+        /// Player finds this Settlement near spawn where the ground takes it.
+        near-spawn: bool,
     }
 
     /// A low-frequency density field over the ground, in metres, that multiplies
@@ -1058,6 +1105,146 @@ interface content {
         color: srgba,
     }
 
+    /// A Voxel one palette character of a Template stands for.
+    record template-voxel {
+        /// A Material, `<mod id>:<name>`, that is not a fluid.
+        material: string,
+        /// A Shape, `<mod id>:<name>`; none is `core:cube`.
+        shape: option<string>,
+        /// One of the 24 orientations, as a Voxel's orientation byte; none is 0.
+        orientation: option<u8>,
+    }
+
+    /// What one palette character of a Template stands for.
+    variant template-cell {
+        /// Never written: the ground a Structure stands in shows through.
+        keep,
+        /// Written as air, so it carves.
+        air,
+        voxel(template-voxel),
+        /// The ground where the Structure stands: its column's Biome's surface
+        /// Material at and above the ground layer, its soil below.
+        ground,
+    }
+
+    record template-palette-entry {
+        symbol: char,
+        cell: template-cell,
+    }
+
+    /// A block of Voxels on a grid whose cell size is in metres, which a World
+    /// samples at its own Voxel size and turns in quarter turns.
+    record template-def {
+        /// The Template's local name; the engine adds `<mod id>:`.
+        name: string,
+        /// Every cell's edge, above 0 metres. A side is at most 64 metres and a
+        /// Template at most 65,536 cells.
+        cell-m: f32,
+        palette: list<template-palette-entry>,
+        /// From the bottom up. A layer is rows running +Z, a row characters
+        /// running +X; every layer has the same rows and every row the same
+        /// length, and every character is in the palette.
+        layers: list<list<string>>,
+        /// The layer that sits at ground height, counted from 0 at the bottom;
+        /// the layers below it are underground. Required: none is a load error.
+        ground-layer: option<u32>,
+        /// A Material, `<mod id>:<name>`, that is not a fluid, filling beneath
+        /// the lowest layer down to uneven ground.
+        foundation: option<string>,
+        /// How far the ground under the footprint may vary, 0 to 16 metres;
+        /// none is 1.
+        level-tolerance-m: option<f32>,
+        /// Stands only where its longer side, at least 6 metres, crosses a gap,
+        /// a valley or water, from a dry 2 metre landing at one end to one at
+        /// the other. No Settlement may draw it.
+        spans: bool,
+    }
+
+    /// A Template a Settlement draws its Plots from.
+    record settlement-plot {
+        /// A Template, `<mod id>:<name>`, from any loaded Mod. Its door, the
+        /// first Door cell from its Ground layer up, faces the road.
+        template: string,
+        /// Above 0: how often it is drawn against the others.
+        weight: f32,
+        /// At least this many stand, or the Settlement is dropped.
+        min: u8,
+        /// At most this many stand.
+        max: u8,
+        /// What this Template's chests hold, in place of the Settlement's
+        /// `loot`.
+        loot: option<loot-table>,
+    }
+
+    /// A hamlet, village or town world generation lays out: roads branch from
+    /// its centre along gentle ground, forking part-way once its radius reaches
+    /// 66 metres, and Plots grow beside them, each Structure turned so its door
+    /// faces the road. Each copy draws its size from the World seed and its
+    /// lattice square: its most Plots evenly from `plots-min` to `plots`, and
+    /// its radius from `radius-min-m` to `radius-m` following them.
+    record settlement-def {
+        /// The Settlement's local name; the engine adds `<mod id>:`.
+        name: string,
+        /// The largest copy's radius, above 0 and at most 160 metres.
+        radius-m: f32,
+        /// The smallest copy's radius, above 0 and at most `radius-m`; none is
+        /// `radius-m`. No Template it names is wider.
+        radius-min-m: option<f32>,
+        /// How far past its disc single Structures keep out, 0 to 64 metres;
+        /// none is 16.
+        margin-m: option<f32>,
+        /// A Template, `<mod id>:<name>`, that stands at its centre.
+        centre: option<string>,
+        /// How many Plots the largest copy lays at most besides its centre, at
+        /// most 96.
+        plots: u8,
+        /// How many Plots the smallest copy lays at most, at most `plots`; none
+        /// is `plots`.
+        plots-min: option<u8>,
+        /// From 1 to 96 rows; their minimums add up to at most `plots-min`.
+        templates: list<settlement-plot>,
+        /// Fewer Plots than this, besides its centre, and it is dropped; at
+        /// most `plots-min`.
+        minimum: u8,
+        /// A Material, `<mod id>:<name>`, that is not a fluid, its roads are
+        /// laid in.
+        path: string,
+        /// A Shape, `<mod id>:<name>`, its roads take on level ground; none is
+        /// `core:cube`.
+        path-shape: option<string>,
+        /// What its buildings' chests hold, unless a Template's row gives its
+        /// own; `none` leaves them empty.
+        loot: option<loot-table>,
+    }
+
+    /// What a chest world generation stands holds, drawn the first time a
+    /// Container is needed for it: opened, or broken. The draw is a pure
+    /// function of the World seed, the chest's place in its Structure and the
+    /// table, so it is the same whenever it happens and at every Voxel size.
+    /// A chest a Player places, or the `place` Tool stands, starts empty.
+    record loot-table {
+        /// How many Stacks it draws, from `rolls-min` to `rolls-max`, at most
+        /// 27; each a Slot of its own, and a draw past the last free Slot is
+        /// dropped.
+        rolls-min: u8,
+        rolls-max: u8,
+        /// From 1 to 16 entries.
+        entries: list<loot-entry>,
+    }
+
+    /// One thing a loot table may draw.
+    record loot-entry {
+        /// An Item, `<mod id>:<name>`, from any loaded Mod. It need not be
+        /// Obtainable another way: loot is a source.
+        item: string,
+        /// A Stack of `min` to `max`, with `min` at least 1 and `max` at most
+        /// the Item's `max-stack`.
+        min: u32,
+        max: u32,
+        /// Above 0: how often it is drawn against the others.
+        weight: f32,
+    }
+
     /// Everything a Mod adds, in registration order: a name's id is its index
     /// after the engine's built-ins, so Materials start at 8 (7 is retired and
     /// never handed out) and Shapes at 4. A `world` or `view` from a Mod that is
@@ -1115,5 +1302,11 @@ interface content {
         /// The full name of the Marker kind a death leaves, from the Game only;
         /// it must name a declared Marker kind. `none` leaves no death mark.
         death-marker-kind: option<string>,
+        /// At most 64 in a World, from any Mod, named `<mod id>:<name>`. Names
+        /// resolve after every Mod has declared.
+        templates: list<template-def>,
+        /// At most 16 in a World, from any Mod, named `<mod id>:<name>`. Names
+        /// resolve after every Mod has declared.
+        settlements: list<settlement-def>,
     }
 }

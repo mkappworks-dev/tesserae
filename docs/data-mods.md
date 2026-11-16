@@ -147,6 +147,54 @@ the low edge and an optional distance from the lake. Both are pure functions of
 the seed and positions in metres. The rules and an example of each are in the
 authoring guide's [Fields](authoring-guide.md#fields).
 
+Any Mod may declare `[[templates]]`, buildings as data. A Template row is
+`name`, `cell-m` (the grid's cell size in metres), `layers` (from the bottom up,
+each a list of rows along +Z, each row a string of palette characters along +X),
+`ground-layer` (the layer at ground height, counted from 0), an optional
+`foundation` (a solid Material by full name), an optional `level-tolerance-m` (0
+to 16, 1 when absent) and an optional `spans` (false when absent: true for a
+bridge, which stands only across a gap, a valley or water), with a
+`[templates.palette]` table mapping each character to `"keep"`, `"air"`,
+`"ground"` or `{ material, shape, orientation }` (a solid Material and an
+optional Shape by full name, and an orientation byte from 0 to 23). A Template
+is at most 64 m a side and 65,536 cells, and a World holds at most 64. Every
+Material a Template names must be Obtainable in the World, and a fluid, a Grown
+Material or a Door's open Material is refused; each refusal names the Template
+and the palette character.
+
+Any Mod may declare `[[settlements]]`: `name`, `radius-m` (above 0, at most 64),
+optional `margin-m` (0 to 64, 16 when absent), optional `centre` (a Template by
+full name), `plots` (at most 24), `templates` (1 to 24
+`{ template, weight, min, max }`, weight 1, min 0 and max 24 when absent),
+optional `minimum` (0 when absent), `path` (a solid, Obtainable Material by full
+name), optional `path-shape` and optional `loot`. A World holds at most 16, and
+every Template a Settlement names is no wider than its radius. A `templates` row
+may carry its own `loot`, which its chests draw from in place of the
+Settlement's.
+
+A `loot` table is `rolls-min` (1 when absent), `rolls-max` (`rolls-min` when
+absent, at most 27) and `entries`, 1 to 16 `{ item, min, max, weight }`: an Item
+by full name, a count from `min` (1 when absent) to `max` (`min` when absent, no
+more than the Item's stack), and a weight above 0 (1 when absent). A Biome may
+carry `loot` too, for the chests of the wilderness Structures standing in it. An
+unknown Item is refused, naming the Settlement or Biome. The rules are in the
+authoring guide's [Loot](authoring-guide.md#loot).
+
+A Biome row may add `structures`, at most 4 `{ template, spacing-m, chance }`
+entries: a Template by full name, a spacing from twice the Template's longer
+side to 4096 m, and a chance above 0 and at most 1. It may add `settlements`, at
+most 2 `{ settlement, spacing-m, chance, near-spawn }` entries: a Settlement by
+full name, a spacing from twice its radius and margin to 4096 m, a chance above
+0 and at most 1 that defaults to 1 when left out, and `near-spawn`, false when
+left out, which always stands one in the four lattice cells round the origin.
+
+Worldgen stands them from the World seed alone, whole across Chunk borders and
+the same in metres at every Voxel size, and the World's saved Biome table
+freezes the Templates and Settlements they name, so a World saved before keeps
+its bare ground. The rules, a worked example of each and the `place` Tool are in
+the authoring guide's
+[Templates and Settlements](authoring-guide.md#templates-and-settlements).
+
 Tables that are absent change nothing: a World with no Biomes generates as it
 always did.
 

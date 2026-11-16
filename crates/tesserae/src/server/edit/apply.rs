@@ -185,7 +185,7 @@ pub(in crate::server) fn apply_pending(
     waiting.extend(pending.0.drain(..));
     pending.0 = waiting;
     // Single Edits go first, so a large layout never starves them.
-    let PendingEdits(_, layouts) = &mut *pending;
+    let PendingEdits(_, layouts, _) = &mut *pending;
     let started = layout::drain(
         layouts,
         EDITS_PER_TICK - applied,
@@ -275,21 +275,26 @@ fn land_whole(
             Err(reason) => {
                 for entry in group.into_iter().rev() {
                     let _ = set_occupants(store, meshes, tables, entry.at, entry.before);
-                    history.record(tesserae_mods::EditEvent {
-                        before: entry.event.after,
-                        after: entry.event.before,
-                        kind: EditKind::Solid {
-                            before: entry.after.solid,
-                            after: entry.before.solid,
-                        },
-                        ..entry.event
-                    });
+                    history.record(taken_back(&entry));
                 }
                 return Err(reason);
             }
         }
     }
     Ok(group)
+}
+
+/// What Mods hear when a whole-Voxel `entry` that never stood is taken back.
+pub(super) fn taken_back(entry: &crate::server::undo::Entry) -> tesserae_mods::EditEvent {
+    tesserae_mods::EditEvent {
+        before: entry.event.after,
+        after: entry.event.before,
+        kind: EditKind::Solid {
+            before: entry.after.solid,
+            after: entry.before.solid,
+        },
+        ..entry.event
+    }
 }
 
 /// What a Player's own single Place or Remove did, for the Client to show.
@@ -362,14 +367,37 @@ pub(super) fn land(
     {
         return Err(RejectReason::InsidePlayer);
     }
+    let mut batch = Batch::default();
+    let landed = land_in(&mut batch, store, meshes, tables, world, at, change, action);
+    batch.finish(store, meshes, tables);
+    let entry = landed?;
+    history.record(entry.event);
+    Ok(entry)
+}
+
+/// [`land`]'s write alone, in a batch the caller finishes, returning the entry
+/// whose event the caller reports to Mods.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn land_in(
+    batch: &mut Batch,
+    store: &mut ChunkStore,
+    meshes: &mut MeshState,
+    tables: &Tables,
+    world: &WorldSettings,
+    at: [i32; 3],
+    change: Change,
+    action: EditAction,
+) -> Result<crate::server::undo::Entry, RejectReason> {
     let before = store.voxel(at).ok_or(RejectReason::NotLoaded)?;
     let was = store
         .occupants(at, &tables.fluids)
         .ok_or(RejectReason::NotLoaded)?;
     match change {
-        Change::Solid(voxel) => set_voxel(store, meshes, tables, at, voxel)?,
-        Change::Occupants(occupants) => set_occupants(store, meshes, tables, at, occupants)?,
-    }
+        Change::Solid(voxel) => batch.set_voxel(store, meshes, tables, at, voxel)?,
+        Change::Occupants(occupants) => {
+            batch.set_occupants(store, meshes, tables, at, occupants)?
+        }
+    };
     let after = store.voxel(at).expect("the edited Chunk is held");
     let now = store
         .occupants(at, &tables.fluids)
@@ -391,7 +419,6 @@ pub(super) fn land(
         before,
         after,
     };
-    history.record(event);
     Ok(crate::server::undo::Entry {
         at,
         lifetime: store
@@ -564,14 +591,7 @@ impl Batch {
         };
         let occupants = Occupants { solid, ..occupants };
         tables.vet_occupants(occupants)?;
-        // A cube looks the same however it is turned, and a connected Shape
-        // ignores its orientation, so the turn is dropped. Left in, two that
-        // look identical would be two palette entries and unequal.
-        let solid = if solid.shape() == SHAPE_FULL_CUBE || tables.shapes.is_connected(solid) {
-            Voxel::new(solid.material(), solid.shape(), 0)
-        } else {
-            solid
-        };
+        let solid = stored_solid(tables, solid);
         let (voxel, overlay) = Occupants { solid, ..occupants }.encode(&tables.fluids);
 
         let before = chunk.get(place.x, place.y, place.z);
@@ -606,6 +626,9 @@ impl Batch {
         store.set_overlay(place, overlay);
         if voxel != before {
             store.set_voxel(place, voxel);
+            if tables.uses.container(before.material()).is_some() {
+                store.note_container_left(at, before);
+            }
         }
         // Light reads fluid as it reads a cube of its Material, or combined
         // with the solid it stands in, and a fire by its emission, so water
@@ -702,6 +725,21 @@ impl Batch {
     }
 }
 
+/// The solid as [`Batch::set_occupants`] stores it: air bare, and a cube or a
+/// connected Shape unturned.
+pub(in crate::server) fn stored_solid(tables: &Tables, solid: Voxel) -> Voxel {
+    // A cube looks the same however it is turned, and a connected Shape
+    // ignores its orientation, so the turn is dropped. Left in, two that
+    // look identical would be two palette entries and unequal.
+    if solid.is_air() {
+        Voxel::AIR
+    } else if solid.shape() == SHAPE_FULL_CUBE || tables.shapes.is_connected(solid) {
+        Voxel::new(solid.material(), solid.shape(), 0)
+    } else {
+        solid
+    }
+}
+
 /// One write, relit at once: [`Batch::set_occupants`] in a batch of its own.
 pub(in crate::server) fn set_occupants(
     store: &mut ChunkStore,
@@ -738,6 +776,7 @@ pub(super) fn vet_capacity(
 
 /// One whole-Voxel write, relit at once: [`Batch::set_voxel`] in a batch of
 /// its own.
+#[cfg(any(test, feature = "dev", feature = "profiling"))]
 pub(in crate::server) fn set_voxel(
     store: &mut ChunkStore,
     meshes: &mut MeshState,

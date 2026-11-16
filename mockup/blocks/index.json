@@ -5,7 +5,13 @@
     "side",
     "bottom"
   ],
-  "game": "terra",
+  "games": [
+    "terra",
+    "tidewater",
+    "ember",
+    "lumen",
+    "meadow"
+  ],
   "materials": [
     {
       "boxes": [
@@ -30,10 +36,11 @@
       ],
       "emission": 15,
       "faces": {
-        "bottom": "lamp.bottom.png",
-        "side": "lamp.side.png",
-        "top": "lamp.top.png"
+        "bottom": "terra/lamp.bottom.png",
+        "side": "terra/lamp.side.png",
+        "top": "terra/lamp.top.png"
       },
+      "game": "terra",
       "name": "terra:lamp",
       "render": "opaque",
       "solid": true,
@@ -62,10 +69,11 @@
       ],
       "emission": 15,
       "faces": {
-        "bottom": "lava.bottom.png",
-        "side": "lava.side.png",
-        "top": "lava.top.png"
+        "bottom": "terra/lava.bottom.png",
+        "side": "terra/lava.side.png",
+        "top": "terra/lava.top.png"
       },
+      "game": "terra",
       "name": "terra:lava",
       "render": "opaque",
       "solid": false,
@@ -94,10 +102,11 @@
       ],
       "emission": 0,
       "faces": {
-        "bottom": "wood.bottom.png",
-        "side": "wood.side.png",
-        "top": "wood.top.png"
+        "bottom": "terra/wood.bottom.png",
+        "side": "terra/wood.side.png",
+        "top": "terra/wood.top.png"
       },
+      "game": "terra",
       "name": "terra:wood",
       "render": "opaque",
       "solid": true,
@@ -126,10 +135,11 @@
       ],
       "emission": 0,
       "faces": {
-        "bottom": "ash.bottom.png",
-        "side": "ash.side.png",
-        "top": "ash.top.png"
+        "bottom": "terra/ash.bottom.png",
+        "side": "terra/ash.side.png",
+        "top": "terra/ash.top.png"
       },
+      "game": "terra",
       "name": "terra:ash",
       "render": "opaque",
       "solid": true,
@@ -158,10 +168,11 @@
       ],
       "emission": 0,
       "faces": {
-        "bottom": "mud.bottom.png",
-        "side": "mud.side.png",
-        "top": "mud.top.png"
+        "bottom": "terra/mud.bottom.png",
+        "side": "terra/mud.side.png",
+        "top": "terra/mud.top.png"
       },
+      "game": "terra",
       "name": "terra:mud",
       "render": "blend",
       "solid": false,
@@ -190,10 +201,11 @@
       ],
       "emission": 0,
       "faces": {
-        "bottom": "brick.bottom.png",
-        "side": "brick.side.png",
-        "top": "brick.top.png"
+        "bottom": "terra/brick.bottom.png",
+        "side": "terra/brick.side.png",
+        "top": "terra/brick.top.png"
       },
+      "game": "terra",
       "name": "terra:brick",
       "render": "opaque",
       "solid": true,
@@ -222,10 +234,11 @@
       ],
       "emission": 0,
       "faces": {
-        "bottom": "water.bottom.png",
-        "side": "water.side.png",
-        "top": "water.top.png"
+        "bottom": "terra/water.bottom.png",
+        "side": "terra/water.side.png",
+        "top": "terra/water.top.png"
       },
+      "game": "terra",
       "name": "terra:water",
       "render": "blend",
       "solid": false,
@@ -254,10 +267,11 @@
       ],
       "emission": 0,
       "faces": {
-        "bottom": "stone.bottom.png",
-        "side": "stone.side.png",
-        "top": "stone.top.png"
+        "bottom": "terra/stone.bottom.png",
+        "side": "terra/stone.side.png",
+        "top": "terra/stone.top.png"
       },
+      "game": "terra",
       "name": "terra:stone",
       "render": "opaque",
       "solid": true,
@@ -286,10 +300,11 @@
       ],
       "emission": 0,
       "faces": {
-        "bottom": "dirt.bottom.png",
-        "side": "dirt.side.png",
-        "top": "dirt.top.png"
+        "bottom": "terra/dirt.bottom.png",
+        "side": "terra/dirt.side.png",
+        "top": "terra/dirt.top.png"
       },
+      "game": "terra",
       "name": "terra:dirt",
       "render": "opaque",
       "solid": true,
@@ -318,10 +333,11 @@
       ],
       "emission": 0,
       "faces": {
-        "bottom": "grass.bottom.png",
-        "side": "grass.side.png",
-        "top": "grass.top.png"
+        "bottom": "terra/grass.bottom.png",
+        "side": "terra/grass.side.png",
+        "top": "terra/grass.top.png"
       },
+      "game": "terra",
       "name": "terra:grass",
       "render": "opaque",
       "solid": true,
@@ -350,10 +366,11 @@
       ],
       "emission": 0,
       "faces": {
-        "bottom": "glass.bottom.png",
-        "side": "glass.side.png",
-        "top": "glass.top.png"
+        "bottom": "terra/glass.bottom.png",
+        "side": "terra/glass.side.png",
+        "top": "terra/glass.top.png"
       },
+      "game": "terra",
       "name": "terra:glass",
       "render": "blend",
       "solid": true,
@@ -382,10 +399,11 @@
       ],
       "emission": 0,
       "faces": {
-        "bottom": "leaves.bottom.png",
-        "side": "leaves.side.png",
-        "top": "leaves.top.png"
+        "bottom": "terra/leaves.bottom.png",
+        "side": "terra/leaves.side.png",
+        "top": "terra/leaves.top.png"
       },
+      "game": "terra",
       "name": "terra:leaves",
       "render": "cutout",
       "solid": true,
@@ -414,10 +432,11 @@
       ],
       "emission": 0,
       "faces": {
-        "bottom": "sand.bottom.png",
-        "side": "sand.side.png",
-        "top": "sand.top.png"
+        "bottom": "terra/sand.bottom.png",
+        "side": "terra/sand.side.png",
+        "top": "terra/sand.top.png"
       },
+      "game": "terra",
       "name": "terra:sand",
       "render": "opaque",
       "solid": true,
@@ -446,10 +465,11 @@
       ],
       "emission": 0,
       "faces": {
-        "bottom": "snow.bottom.png",
-        "side": "snow.side.png",
-        "top": "snow.top.png"
+        "bottom": "terra/snow.bottom.png",
+        "side": "terra/snow.side.png",
+        "top": "terra/snow.top.png"
       },
+      "game": "terra",
       "name": "terra:snow",
       "render": "opaque",
       "solid": true,
@@ -478,10 +498,11 @@
       ],
       "emission": 0,
       "faces": {
-        "bottom": "iron.bottom.png",
-        "side": "iron.side.png",
-        "top": "iron.top.png"
+        "bottom": "terra/iron.bottom.png",
+        "side": "terra/iron.side.png",
+        "top": "terra/iron.top.png"
       },
+      "game": "terra",
       "name": "terra:iron",
       "render": "opaque",
       "solid": true,
@@ -510,10 +531,11 @@
       ],
       "emission": 0,
       "faces": {
-        "bottom": "melon.bottom.png",
-        "side": "melon.side.png",
-        "top": "melon.top.png"
+        "bottom": "terra/melon.bottom.png",
+        "side": "terra/melon.side.png",
+        "top": "terra/melon.top.png"
       },
+      "game": "terra",
       "name": "terra:melon",
       "render": "opaque",
       "solid": true,
@@ -590,10 +612,11 @@
       ],
       "emission": 0,
       "faces": {
-        "bottom": "workbench.bottom.png",
-        "side": "workbench.side.png",
-        "top": "workbench.top.png"
+        "bottom": "terra/workbench.bottom.png",
+        "side": "terra/workbench.side.png",
+        "top": "terra/workbench.top.png"
       },
+      "game": "terra",
       "name": "terra:workbench",
       "render": "opaque",
       "solid": true,
@@ -624,10 +647,11 @@
       ],
       "emission": 0,
       "faces": {
-        "bottom": "chest.bottom.png",
-        "side": "chest.side.png",
-        "top": "chest.top.png"
+        "bottom": "terra/chest.bottom.png",
+        "side": "terra/chest.side.png",
+        "top": "terra/chest.top.png"
       },
+      "game": "terra",
       "name": "terra:chest",
       "render": "opaque",
       "solid": true,
@@ -658,10 +682,11 @@
       ],
       "emission": 0,
       "faces": {
-        "bottom": "door.bottom.png",
-        "side": "door.side.png",
-        "top": "door.top.png"
+        "bottom": "terra/door.bottom.png",
+        "side": "terra/door.side.png",
+        "top": "terra/door.top.png"
       },
+      "game": "terra",
       "name": "terra:door",
       "render": "opaque",
       "solid": true,
@@ -727,10 +752,11 @@
       ],
       "emission": 0,
       "faces": {
-        "bottom": "door_open.bottom.png",
-        "side": "door_open.side.png",
-        "top": "door_open.top.png"
+        "bottom": "terra/door_open.bottom.png",
+        "side": "terra/door_open.side.png",
+        "top": "terra/door_open.top.png"
       },
+      "game": "terra",
       "name": "terra:door_open",
       "render": "opaque",
       "solid": true,
@@ -796,10 +822,11 @@
       ],
       "emission": 0,
       "faces": {
-        "bottom": "gate.bottom.png",
-        "side": "gate.side.png",
-        "top": "gate.top.png"
+        "bottom": "terra/gate.bottom.png",
+        "side": "terra/gate.side.png",
+        "top": "terra/gate.top.png"
       },
+      "game": "terra",
       "name": "terra:gate",
       "render": "cutout",
       "solid": true,
@@ -865,10 +892,11 @@
       ],
       "emission": 0,
       "faces": {
-        "bottom": "gate_open.bottom.png",
-        "side": "gate_open.side.png",
-        "top": "gate_open.top.png"
+        "bottom": "terra/gate_open.bottom.png",
+        "side": "terra/gate_open.side.png",
+        "top": "terra/gate_open.top.png"
       },
+      "game": "terra",
       "name": "terra:gate_open",
       "render": "cutout",
       "solid": true,
@@ -910,6 +938,4566 @@
           "width-m": 1.0
         }
       }
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        184,
+        138,
+        84,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "terra/oak_planks.bottom.png",
+        "side": "terra/oak_planks.side.png",
+        "top": "terra/oak_planks.top.png"
+      },
+      "game": "terra",
+      "name": "terra:oak_planks",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        122,
+        86,
+        52,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "terra/spruce_planks.bottom.png",
+        "side": "terra/spruce_planks.side.png",
+        "top": "terra/spruce_planks.top.png"
+      },
+      "game": "terra",
+      "name": "terra:spruce_planks",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        79,
+        54,
+        32,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "terra/dark_oak_planks.bottom.png",
+        "side": "terra/dark_oak_planks.side.png",
+        "top": "terra/dark_oak_planks.top.png"
+      },
+      "game": "terra",
+      "name": "terra:dark_oak_planks",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        142,
+        59,
+        44,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "terra/red_planks.bottom.png",
+        "side": "terra/red_planks.side.png",
+        "top": "terra/red_planks.top.png"
+      },
+      "game": "terra",
+      "name": "terra:red_planks",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        107,
+        74,
+        43,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "terra/oak_log.bottom.png",
+        "side": "terra/oak_log.side.png",
+        "top": "terra/oak_log.top.png"
+      },
+      "game": "terra",
+      "name": "terra:oak_log",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        62,
+        42,
+        25,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "terra/dark_log.bottom.png",
+        "side": "terra/dark_log.side.png",
+        "top": "terra/dark_log.top.png"
+      },
+      "game": "terra",
+      "name": "terra:dark_log",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        233,
+        227,
+        211,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "terra/whitewash.bottom.png",
+        "side": "terra/whitewash.side.png",
+        "top": "terra/whitewash.top.png"
+      },
+      "game": "terra",
+      "name": "terra:whitewash",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        138,
+        138,
+        133,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "terra/cobblestone.bottom.png",
+        "side": "terra/cobblestone.side.png",
+        "top": "terra/cobblestone.top.png"
+      },
+      "game": "terra",
+      "name": "terra:cobblestone",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        169,
+        165,
+        154,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "terra/ashlar.bottom.png",
+        "side": "terra/ashlar.side.png",
+        "top": "terra/ashlar.top.png"
+      },
+      "game": "terra",
+      "name": "terra:ashlar",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        168,
+        73,
+        47,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "terra/clay_tiles.bottom.png",
+        "side": "terra/clay_tiles.side.png",
+        "top": "terra/clay_tiles.top.png"
+      },
+      "game": "terra",
+      "name": "terra:clay_tiles",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        200,
+        122,
+        69,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "terra/terracotta_tiles.bottom.png",
+        "side": "terra/terracotta_tiles.side.png",
+        "top": "terra/terracotta_tiles.top.png"
+      },
+      "game": "terra",
+      "name": "terra:terracotta_tiles",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        201,
+        167,
+        82,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "terra/thatch.bottom.png",
+        "side": "terra/thatch.side.png",
+        "top": "terra/thatch.top.png"
+      },
+      "game": "terra",
+      "name": "terra:thatch",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        76,
+        85,
+        96,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "terra/slate.bottom.png",
+        "side": "terra/slate.side.png",
+        "top": "terra/slate.top.png"
+      },
+      "game": "terra",
+      "name": "terra:slate",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        109,
+        90,
+        69,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "terra/shingles.bottom.png",
+        "side": "terra/shingles.side.png",
+        "top": "terra/shingles.top.png"
+      },
+      "game": "terra",
+      "name": "terra:shingles",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        201,
+        79,
+        79,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "terra/awning.bottom.png",
+        "side": "terra/awning.side.png",
+        "top": "terra/awning.top.png"
+      },
+      "game": "terra",
+      "name": "terra:awning",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        91,
+        97,
+        104,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "terra/anvil.bottom.png",
+        "side": "terra/anvil.side.png",
+        "top": "terra/anvil.top.png"
+      },
+      "game": "terra",
+      "name": "terra:anvil",
+      "render": "opaque",
+      "solid": true,
+      "use": {
+        "station": "anvil"
+      }
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        138,
+        138,
+        133,
+        255
+      ],
+      "emission": 6,
+      "faces": {
+        "bottom": "terra/forge.bottom.png",
+        "side": "terra/forge.side.png",
+        "top": "terra/forge.top.png"
+      },
+      "game": "terra",
+      "name": "terra:forge",
+      "render": "opaque",
+      "solid": true,
+      "use": {
+        "station": "forge"
+      }
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        168,
+        73,
+        47,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "terra/oven.bottom.png",
+        "side": "terra/oven.side.png",
+        "top": "terra/oven.top.png"
+      },
+      "game": "terra",
+      "name": "terra:oven",
+      "render": "opaque",
+      "solid": true,
+      "use": {
+        "station": "oven"
+      }
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        112,
+        74,
+        42,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "tidewater/coconut.bottom.png",
+        "side": "tidewater/coconut.side.png",
+        "top": "tidewater/coconut.top.png"
+      },
+      "game": "tidewater",
+      "name": "tidewater:coconut",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        239,
+        228,
+        207,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "tidewater/shell_plaster.bottom.png",
+        "side": "tidewater/shell_plaster.side.png",
+        "top": "tidewater/shell_plaster.top.png"
+      },
+      "game": "tidewater",
+      "name": "tidewater:shell_plaster",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        138,
+        114,
+        83,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "tidewater/palm_log.bottom.png",
+        "side": "tidewater/palm_log.side.png",
+        "top": "tidewater/palm_log.top.png"
+      },
+      "game": "tidewater",
+      "name": "tidewater:palm_log",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        143,
+        134,
+        118,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "tidewater/driftwood_log.bottom.png",
+        "side": "tidewater/driftwood_log.side.png",
+        "top": "tidewater/driftwood_log.top.png"
+      },
+      "game": "tidewater",
+      "name": "tidewater:driftwood_log",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        216,
+        196,
+        143,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "tidewater/sandstone.bottom.png",
+        "side": "tidewater/sandstone.side.png",
+        "top": "tidewater/sandstone.top.png"
+      },
+      "game": "tidewater",
+      "name": "tidewater:sandstone",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        217,
+        139,
+        116,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "tidewater/coral_block.bottom.png",
+        "side": "tidewater/coral_block.side.png",
+        "top": "tidewater/coral_block.top.png"
+      },
+      "game": "tidewater",
+      "name": "tidewater:coral_block",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        183,
+        167,
+        106,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "tidewater/reed_thatch.bottom.png",
+        "side": "tidewater/reed_thatch.side.png",
+        "top": "tidewater/reed_thatch.top.png"
+      },
+      "game": "tidewater",
+      "name": "tidewater:reed_thatch",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        231,
+        214,
+        195,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "tidewater/shell_tiles.bottom.png",
+        "side": "tidewater/shell_tiles.side.png",
+        "top": "tidewater/shell_tiles.top.png"
+      },
+      "game": "tidewater",
+      "name": "tidewater:shell_tiles",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        91,
+        116,
+        128,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "tidewater/sea_shingles.bottom.png",
+        "side": "tidewater/sea_shingles.side.png",
+        "top": "tidewater/sea_shingles.top.png"
+      },
+      "game": "tidewater",
+      "name": "tidewater:sea_shingles",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        61,
+        92,
+        99,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "tidewater/sea_slate.bottom.png",
+        "side": "tidewater/sea_slate.side.png",
+        "top": "tidewater/sea_slate.top.png"
+      },
+      "game": "tidewater",
+      "name": "tidewater:sea_slate",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        208,
+        122,
+        98,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "tidewater/coral_tiles.bottom.png",
+        "side": "tidewater/coral_tiles.side.png",
+        "top": "tidewater/coral_tiles.top.png"
+      },
+      "game": "tidewater",
+      "name": "tidewater:coral_tiles",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        185,
+        174,
+        152,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "tidewater/driftwood.bottom.png",
+        "side": "tidewater/driftwood.side.png",
+        "top": "tidewater/driftwood.top.png"
+      },
+      "game": "tidewater",
+      "name": "tidewater:driftwood",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        79,
+        126,
+        168,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "tidewater/blue_planks.bottom.png",
+        "side": "tidewater/blue_planks.side.png",
+        "top": "tidewater/blue_planks.top.png"
+      },
+      "game": "tidewater",
+      "name": "tidewater:blue_planks",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        138,
+        90,
+        54,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "tidewater/teak_planks.bottom.png",
+        "side": "tidewater/teak_planks.side.png",
+        "top": "tidewater/teak_planks.top.png"
+      },
+      "game": "tidewater",
+      "name": "tidewater:teak_planks",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        63,
+        138,
+        134,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "tidewater/teal_planks.bottom.png",
+        "side": "tidewater/teal_planks.side.png",
+        "top": "tidewater/teal_planks.top.png"
+      },
+      "game": "tidewater",
+      "name": "tidewater:teal_planks",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        217,
+        139,
+        116,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "tidewater/coral_brick.bottom.png",
+        "side": "tidewater/coral_brick.side.png",
+        "top": "tidewater/coral_brick.top.png"
+      },
+      "game": "tidewater",
+      "name": "tidewater:coral_brick",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        233,
+        228,
+        212,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "tidewater/sailcloth.bottom.png",
+        "side": "tidewater/sailcloth.side.png",
+        "top": "tidewater/sailcloth.top.png"
+      },
+      "game": "tidewater",
+      "name": "tidewater:sailcloth",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        91,
+        97,
+        104,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "tidewater/anvil.bottom.png",
+        "side": "tidewater/anvil.side.png",
+        "top": "tidewater/anvil.top.png"
+      },
+      "game": "tidewater",
+      "name": "tidewater:anvil",
+      "render": "opaque",
+      "solid": true,
+      "use": {
+        "station": "anvil"
+      }
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        216,
+        196,
+        143,
+        255
+      ],
+      "emission": 6,
+      "faces": {
+        "bottom": "tidewater/forge.bottom.png",
+        "side": "tidewater/forge.side.png",
+        "top": "tidewater/forge.top.png"
+      },
+      "game": "tidewater",
+      "name": "tidewater:forge",
+      "render": "opaque",
+      "solid": true,
+      "use": {
+        "station": "forge"
+      }
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        217,
+        139,
+        116,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "tidewater/oven.bottom.png",
+        "side": "tidewater/oven.side.png",
+        "top": "tidewater/oven.top.png"
+      },
+      "game": "tidewater",
+      "name": "tidewater:oven",
+      "render": "opaque",
+      "solid": true,
+      "use": {
+        "station": "oven"
+      }
+    },
+    {
+      "boxes": [
+        [
+          [
+            1,
+            0,
+            1
+          ],
+          [
+            4,
+            12,
+            4
+          ]
+        ],
+        [
+          [
+            12,
+            0,
+            1
+          ],
+          [
+            15,
+            12,
+            4
+          ]
+        ],
+        [
+          [
+            1,
+            0,
+            12
+          ],
+          [
+            4,
+            12,
+            15
+          ]
+        ],
+        [
+          [
+            12,
+            0,
+            12
+          ],
+          [
+            15,
+            12,
+            15
+          ]
+        ],
+        [
+          [
+            0,
+            12,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        138,
+        90,
+        54,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "tidewater/workbench.bottom.png",
+        "side": "tidewater/workbench.side.png",
+        "top": "tidewater/workbench.top.png"
+      },
+      "game": "tidewater",
+      "name": "tidewater:workbench",
+      "render": "opaque",
+      "solid": true,
+      "use": {
+        "station": "workbench"
+      }
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        138,
+        90,
+        54,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "tidewater/chest.bottom.png",
+        "side": "tidewater/chest.side.png",
+        "top": "tidewater/chest.top.png"
+      },
+      "game": "tidewater",
+      "name": "tidewater:chest",
+      "render": "opaque",
+      "solid": true,
+      "use": {
+        "container": 27
+      }
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            13
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        138,
+        90,
+        54,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "tidewater/door.bottom.png",
+        "side": "tidewater/door.side.png",
+        "top": "tidewater/door.top.png"
+      },
+      "game": "tidewater",
+      "name": "tidewater:door",
+      "render": "opaque",
+      "solid": true,
+      "use": {
+        "door": {
+          "boxes": {
+            "closed": [
+              [
+                [
+                  0,
+                  0,
+                  13
+                ],
+                [
+                  16,
+                  16,
+                  16
+                ]
+              ]
+            ],
+            "open": [
+              [
+                [
+                  13,
+                  0,
+                  0
+                ],
+                [
+                  16,
+                  16,
+                  16
+                ]
+              ]
+            ]
+          },
+          "closed": "tidewater:door",
+          "height-m": 2.0,
+          "open": "tidewater:door_open",
+          "width-m": 1.0
+        }
+      }
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            13
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        138,
+        90,
+        54,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "tidewater/door_open.bottom.png",
+        "side": "tidewater/door_open.side.png",
+        "top": "tidewater/door_open.top.png"
+      },
+      "game": "tidewater",
+      "name": "tidewater:door_open",
+      "render": "opaque",
+      "solid": true,
+      "use": {
+        "door": {
+          "boxes": {
+            "closed": [
+              [
+                [
+                  0,
+                  0,
+                  13
+                ],
+                [
+                  16,
+                  16,
+                  16
+                ]
+              ]
+            ],
+            "open": [
+              [
+                [
+                  13,
+                  0,
+                  0
+                ],
+                [
+                  16,
+                  16,
+                  16
+                ]
+              ]
+            ]
+          },
+          "closed": "tidewater:door",
+          "height-m": 2.0,
+          "open": "tidewater:door_open",
+          "width-m": 1.0
+        }
+      }
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        159,
+        216,
+        207,
+        96
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "tidewater/glass.bottom.png",
+        "side": "tidewater/glass.side.png",
+        "top": "tidewater/glass.top.png"
+      },
+      "game": "tidewater",
+      "name": "tidewater:glass",
+      "render": "blend",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        255,
+        226,
+        168,
+        255
+      ],
+      "emission": 15,
+      "faces": {
+        "bottom": "tidewater/lamp.bottom.png",
+        "side": "tidewater/lamp.side.png",
+        "top": "tidewater/lamp.top.png"
+      },
+      "game": "tidewater",
+      "name": "tidewater:lamp",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        176,
+        36,
+        28,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "ember/pepper.bottom.png",
+        "side": "ember/pepper.side.png",
+        "top": "ember/pepper.top.png"
+      },
+      "game": "ember",
+      "name": "ember:pepper",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        140,
+        132,
+        125,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "ember/ash_plaster.bottom.png",
+        "side": "ember/ash_plaster.side.png",
+        "top": "ember/ash_plaster.top.png"
+      },
+      "game": "ember",
+      "name": "ember:ash_plaster",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        43,
+        34,
+        32,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "ember/charred_log.bottom.png",
+        "side": "ember/charred_log.side.png",
+        "top": "ember/charred_log.top.png"
+      },
+      "game": "ember",
+      "name": "ember:charred_log",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        42,
+        35,
+        51,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "ember/obsidian.bottom.png",
+        "side": "ember/obsidian.side.png",
+        "top": "ember/obsidian.top.png"
+      },
+      "game": "ember",
+      "name": "ember:obsidian",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        59,
+        56,
+        54,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "ember/basalt_cobble.bottom.png",
+        "side": "ember/basalt_cobble.side.png",
+        "top": "ember/basalt_cobble.top.png"
+      },
+      "game": "ember",
+      "name": "ember:basalt_cobble",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        69,
+        64,
+        61,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "ember/basalt.bottom.png",
+        "side": "ember/basalt.side.png",
+        "top": "ember/basalt.top.png"
+      },
+      "game": "ember",
+      "name": "ember:basalt",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        91,
+        97,
+        104,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "ember/iron_sheet.bottom.png",
+        "side": "ember/iron_sheet.side.png",
+        "top": "ember/iron_sheet.top.png"
+      },
+      "game": "ember",
+      "name": "ember:iron_sheet",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        138,
+        74,
+        44,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "ember/rust_tiles.bottom.png",
+        "side": "ember/rust_tiles.side.png",
+        "top": "ember/rust_tiles.top.png"
+      },
+      "game": "ember",
+      "name": "ember:rust_tiles",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        58,
+        48,
+        44,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "ember/soot_shingles.bottom.png",
+        "side": "ember/soot_shingles.side.png",
+        "top": "ember/soot_shingles.top.png"
+      },
+      "game": "ember",
+      "name": "ember:soot_shingles",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        90,
+        47,
+        40,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "ember/ember_slate.bottom.png",
+        "side": "ember/ember_slate.side.png",
+        "top": "ember/ember_slate.top.png"
+      },
+      "game": "ember",
+      "name": "ember:ember_slate",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        184,
+        69,
+        44,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "ember/magma_tiles.bottom.png",
+        "side": "ember/magma_tiles.side.png",
+        "top": "ember/magma_tiles.top.png"
+      },
+      "game": "ember",
+      "name": "ember:magma_tiles",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        62,
+        48,
+        41,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "ember/soot_planks.bottom.png",
+        "side": "ember/soot_planks.side.png",
+        "top": "ember/soot_planks.top.png"
+      },
+      "game": "ember",
+      "name": "ember:soot_planks",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        93,
+        74,
+        64,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "ember/ash_planks.bottom.png",
+        "side": "ember/ash_planks.side.png",
+        "top": "ember/ash_planks.top.png"
+      },
+      "game": "ember",
+      "name": "ember:ash_planks",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        42,
+        33,
+        29,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "ember/char_planks.bottom.png",
+        "side": "ember/char_planks.side.png",
+        "top": "ember/char_planks.top.png"
+      },
+      "game": "ember",
+      "name": "ember:char_planks",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        122,
+        58,
+        34,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "ember/rust_planks.bottom.png",
+        "side": "ember/rust_planks.side.png",
+        "top": "ember/rust_planks.top.png"
+      },
+      "game": "ember",
+      "name": "ember:rust_planks",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        107,
+        75,
+        62,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "ember/ash_brick.bottom.png",
+        "side": "ember/ash_brick.side.png",
+        "top": "ember/ash_brick.top.png"
+      },
+      "game": "ember",
+      "name": "ember:ash_brick",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        217,
+        130,
+        43,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "ember/ember_cloth.bottom.png",
+        "side": "ember/ember_cloth.side.png",
+        "top": "ember/ember_cloth.top.png"
+      },
+      "game": "ember",
+      "name": "ember:ember_cloth",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        91,
+        97,
+        104,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "ember/anvil.bottom.png",
+        "side": "ember/anvil.side.png",
+        "top": "ember/anvil.top.png"
+      },
+      "game": "ember",
+      "name": "ember:anvil",
+      "render": "opaque",
+      "solid": true,
+      "use": {
+        "station": "anvil"
+      }
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        59,
+        56,
+        54,
+        255
+      ],
+      "emission": 6,
+      "faces": {
+        "bottom": "ember/forge.bottom.png",
+        "side": "ember/forge.side.png",
+        "top": "ember/forge.top.png"
+      },
+      "game": "ember",
+      "name": "ember:forge",
+      "render": "opaque",
+      "solid": true,
+      "use": {
+        "station": "forge"
+      }
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        107,
+        75,
+        62,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "ember/oven.bottom.png",
+        "side": "ember/oven.side.png",
+        "top": "ember/oven.top.png"
+      },
+      "game": "ember",
+      "name": "ember:oven",
+      "render": "opaque",
+      "solid": true,
+      "use": {
+        "station": "oven"
+      }
+    },
+    {
+      "boxes": [
+        [
+          [
+            1,
+            0,
+            1
+          ],
+          [
+            4,
+            12,
+            4
+          ]
+        ],
+        [
+          [
+            12,
+            0,
+            1
+          ],
+          [
+            15,
+            12,
+            4
+          ]
+        ],
+        [
+          [
+            1,
+            0,
+            12
+          ],
+          [
+            4,
+            12,
+            15
+          ]
+        ],
+        [
+          [
+            12,
+            0,
+            12
+          ],
+          [
+            15,
+            12,
+            15
+          ]
+        ],
+        [
+          [
+            0,
+            12,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        74,
+        51,
+        40,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "ember/workbench.bottom.png",
+        "side": "ember/workbench.side.png",
+        "top": "ember/workbench.top.png"
+      },
+      "game": "ember",
+      "name": "ember:workbench",
+      "render": "opaque",
+      "solid": true,
+      "use": {
+        "station": "workbench"
+      }
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        74,
+        51,
+        40,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "ember/chest.bottom.png",
+        "side": "ember/chest.side.png",
+        "top": "ember/chest.top.png"
+      },
+      "game": "ember",
+      "name": "ember:chest",
+      "render": "opaque",
+      "solid": true,
+      "use": {
+        "container": 27
+      }
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            13
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        74,
+        51,
+        40,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "ember/door.bottom.png",
+        "side": "ember/door.side.png",
+        "top": "ember/door.top.png"
+      },
+      "game": "ember",
+      "name": "ember:door",
+      "render": "opaque",
+      "solid": true,
+      "use": {
+        "door": {
+          "boxes": {
+            "closed": [
+              [
+                [
+                  0,
+                  0,
+                  13
+                ],
+                [
+                  16,
+                  16,
+                  16
+                ]
+              ]
+            ],
+            "open": [
+              [
+                [
+                  13,
+                  0,
+                  0
+                ],
+                [
+                  16,
+                  16,
+                  16
+                ]
+              ]
+            ]
+          },
+          "closed": "ember:door",
+          "height-m": 2.0,
+          "open": "ember:door_open",
+          "width-m": 1.0
+        }
+      }
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            13
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        74,
+        51,
+        40,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "ember/door_open.bottom.png",
+        "side": "ember/door_open.side.png",
+        "top": "ember/door_open.top.png"
+      },
+      "game": "ember",
+      "name": "ember:door_open",
+      "render": "opaque",
+      "solid": true,
+      "use": {
+        "door": {
+          "boxes": {
+            "closed": [
+              [
+                [
+                  0,
+                  0,
+                  13
+                ],
+                [
+                  16,
+                  16,
+                  16
+                ]
+              ]
+            ],
+            "open": [
+              [
+                [
+                  13,
+                  0,
+                  0
+                ],
+                [
+                  16,
+                  16,
+                  16
+                ]
+              ]
+            ]
+          },
+          "closed": "ember:door",
+          "height-m": 2.0,
+          "open": "ember:door_open",
+          "width-m": 1.0
+        }
+      }
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        216,
+        160,
+        112,
+        96
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "ember/glass.bottom.png",
+        "side": "ember/glass.side.png",
+        "top": "ember/glass.top.png"
+      },
+      "game": "ember",
+      "name": "ember:glass",
+      "render": "blend",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        255,
+        160,
+        74,
+        255
+      ],
+      "emission": 15,
+      "faces": {
+        "bottom": "ember/lamp.bottom.png",
+        "side": "ember/lamp.side.png",
+        "top": "ember/lamp.top.png"
+      },
+      "game": "ember",
+      "name": "ember:lamp",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        214,
+        226,
+        120,
+        255
+      ],
+      "emission": 6,
+      "faces": {
+        "bottom": "lumen/glowberry.bottom.png",
+        "side": "lumen/glowberry.side.png",
+        "top": "lumen/glowberry.top.png"
+      },
+      "game": "lumen",
+      "name": "lumen:glowberry",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        217,
+        220,
+        240,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "lumen/pale_plaster.bottom.png",
+        "side": "lumen/pale_plaster.side.png",
+        "top": "lumen/pale_plaster.top.png"
+      },
+      "game": "lumen",
+      "name": "lumen:pale_plaster",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        169,
+        174,
+        200,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "lumen/silverwood.bottom.png",
+        "side": "lumen/silverwood.side.png",
+        "top": "lumen/silverwood.top.png"
+      },
+      "game": "lumen",
+      "name": "lumen:silverwood",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        138,
+        108,
+        201,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "lumen/amethyst.bottom.png",
+        "side": "lumen/amethyst.side.png",
+        "top": "lumen/amethyst.top.png"
+      },
+      "game": "lumen",
+      "name": "lumen:amethyst",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        140,
+        143,
+        179,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "lumen/moon_cobble.bottom.png",
+        "side": "lumen/moon_cobble.side.png",
+        "top": "lumen/moon_cobble.top.png"
+      },
+      "game": "lumen",
+      "name": "lumen:moon_cobble",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        155,
+        158,
+        194,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "lumen/moonstone.bottom.png",
+        "side": "lumen/moonstone.side.png",
+        "top": "lumen/moonstone.top.png"
+      },
+      "game": "lumen",
+      "name": "lumen:moonstone",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        127,
+        199,
+        181,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "lumen/glowcap.bottom.png",
+        "side": "lumen/glowcap.side.png",
+        "top": "lumen/glowcap.top.png"
+      },
+      "game": "lumen",
+      "name": "lumen:glowcap",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        168,
+        179,
+        201,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "lumen/silver_tiles.bottom.png",
+        "side": "lumen/silver_tiles.side.png",
+        "top": "lumen/silver_tiles.top.png"
+      },
+      "game": "lumen",
+      "name": "lumen:silver_tiles",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        74,
+        79,
+        122,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "lumen/dusk_shingles.bottom.png",
+        "side": "lumen/dusk_shingles.side.png",
+        "top": "lumen/dusk_shingles.top.png"
+      },
+      "game": "lumen",
+      "name": "lumen:dusk_shingles",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        47,
+        53,
+        87,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "lumen/night_slate.bottom.png",
+        "side": "lumen/night_slate.side.png",
+        "top": "lumen/night_slate.top.png"
+      },
+      "game": "lumen",
+      "name": "lumen:night_slate",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        180,
+        143,
+        214,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "lumen/prism_tiles.bottom.png",
+        "side": "lumen/prism_tiles.side.png",
+        "top": "lumen/prism_tiles.top.png"
+      },
+      "game": "lumen",
+      "name": "lumen:prism_tiles",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        93,
+        90,
+        138,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "lumen/star_planks.bottom.png",
+        "side": "lumen/star_planks.side.png",
+        "top": "lumen/star_planks.top.png"
+      },
+      "game": "lumen",
+      "name": "lumen:star_planks",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        63,
+        61,
+        102,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "lumen/dusk_planks.bottom.png",
+        "side": "lumen/dusk_planks.side.png",
+        "top": "lumen/dusk_planks.top.png"
+      },
+      "game": "lumen",
+      "name": "lumen:dusk_planks",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        42,
+        41,
+        68,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "lumen/ink_planks.bottom.png",
+        "side": "lumen/ink_planks.side.png",
+        "top": "lumen/ink_planks.top.png"
+      },
+      "game": "lumen",
+      "name": "lumen:ink_planks",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        106,
+        74,
+        154,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "lumen/violet_planks.bottom.png",
+        "side": "lumen/violet_planks.side.png",
+        "top": "lumen/violet_planks.top.png"
+      },
+      "game": "lumen",
+      "name": "lumen:violet_planks",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        140,
+        143,
+        179,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "lumen/moon_brick.bottom.png",
+        "side": "lumen/moon_brick.side.png",
+        "top": "lumen/moon_brick.top.png"
+      },
+      "game": "lumen",
+      "name": "lumen:moon_brick",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        143,
+        211,
+        200,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "lumen/lumen_cloth.bottom.png",
+        "side": "lumen/lumen_cloth.side.png",
+        "top": "lumen/lumen_cloth.top.png"
+      },
+      "game": "lumen",
+      "name": "lumen:lumen_cloth",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        168,
+        179,
+        201,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "lumen/anvil.bottom.png",
+        "side": "lumen/anvil.side.png",
+        "top": "lumen/anvil.top.png"
+      },
+      "game": "lumen",
+      "name": "lumen:anvil",
+      "render": "opaque",
+      "solid": true,
+      "use": {
+        "station": "anvil"
+      }
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        140,
+        143,
+        179,
+        255
+      ],
+      "emission": 6,
+      "faces": {
+        "bottom": "lumen/forge.bottom.png",
+        "side": "lumen/forge.side.png",
+        "top": "lumen/forge.top.png"
+      },
+      "game": "lumen",
+      "name": "lumen:forge",
+      "render": "opaque",
+      "solid": true,
+      "use": {
+        "station": "forge"
+      }
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        140,
+        143,
+        179,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "lumen/oven.bottom.png",
+        "side": "lumen/oven.side.png",
+        "top": "lumen/oven.top.png"
+      },
+      "game": "lumen",
+      "name": "lumen:oven",
+      "render": "opaque",
+      "solid": true,
+      "use": {
+        "station": "oven"
+      }
+    },
+    {
+      "boxes": [
+        [
+          [
+            1,
+            0,
+            1
+          ],
+          [
+            4,
+            12,
+            4
+          ]
+        ],
+        [
+          [
+            12,
+            0,
+            1
+          ],
+          [
+            15,
+            12,
+            4
+          ]
+        ],
+        [
+          [
+            1,
+            0,
+            12
+          ],
+          [
+            4,
+            12,
+            15
+          ]
+        ],
+        [
+          [
+            12,
+            0,
+            12
+          ],
+          [
+            15,
+            12,
+            15
+          ]
+        ],
+        [
+          [
+            0,
+            12,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        59,
+        53,
+        80,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "lumen/workbench.bottom.png",
+        "side": "lumen/workbench.side.png",
+        "top": "lumen/workbench.top.png"
+      },
+      "game": "lumen",
+      "name": "lumen:workbench",
+      "render": "opaque",
+      "solid": true,
+      "use": {
+        "station": "workbench"
+      }
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        59,
+        53,
+        80,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "lumen/chest.bottom.png",
+        "side": "lumen/chest.side.png",
+        "top": "lumen/chest.top.png"
+      },
+      "game": "lumen",
+      "name": "lumen:chest",
+      "render": "opaque",
+      "solid": true,
+      "use": {
+        "container": 27
+      }
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            13
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        59,
+        53,
+        80,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "lumen/door.bottom.png",
+        "side": "lumen/door.side.png",
+        "top": "lumen/door.top.png"
+      },
+      "game": "lumen",
+      "name": "lumen:door",
+      "render": "opaque",
+      "solid": true,
+      "use": {
+        "door": {
+          "boxes": {
+            "closed": [
+              [
+                [
+                  0,
+                  0,
+                  13
+                ],
+                [
+                  16,
+                  16,
+                  16
+                ]
+              ]
+            ],
+            "open": [
+              [
+                [
+                  13,
+                  0,
+                  0
+                ],
+                [
+                  16,
+                  16,
+                  16
+                ]
+              ]
+            ]
+          },
+          "closed": "lumen:door",
+          "height-m": 2.0,
+          "open": "lumen:door_open",
+          "width-m": 1.0
+        }
+      }
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            13
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        59,
+        53,
+        80,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "lumen/door_open.bottom.png",
+        "side": "lumen/door_open.side.png",
+        "top": "lumen/door_open.top.png"
+      },
+      "game": "lumen",
+      "name": "lumen:door_open",
+      "render": "opaque",
+      "solid": true,
+      "use": {
+        "door": {
+          "boxes": {
+            "closed": [
+              [
+                [
+                  0,
+                  0,
+                  13
+                ],
+                [
+                  16,
+                  16,
+                  16
+                ]
+              ]
+            ],
+            "open": [
+              [
+                [
+                  13,
+                  0,
+                  0
+                ],
+                [
+                  16,
+                  16,
+                  16
+                ]
+              ]
+            ]
+          },
+          "closed": "lumen:door",
+          "height-m": 2.0,
+          "open": "lumen:door_open",
+          "width-m": 1.0
+        }
+      }
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        185,
+        168,
+        240,
+        96
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "lumen/glass.bottom.png",
+        "side": "lumen/glass.side.png",
+        "top": "lumen/glass.top.png"
+      },
+      "game": "lumen",
+      "name": "lumen:glass",
+      "render": "blend",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        216,
+        236,
+        255,
+        255
+      ],
+      "emission": 15,
+      "faces": {
+        "bottom": "lumen/lamp.bottom.png",
+        "side": "lumen/lamp.side.png",
+        "top": "lumen/lamp.top.png"
+      },
+      "game": "lumen",
+      "name": "lumen:lamp",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        214,
+        118,
+        32,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "meadow/pumpkin.bottom.png",
+        "side": "meadow/pumpkin.side.png",
+        "top": "meadow/pumpkin.top.png"
+      },
+      "game": "meadow",
+      "name": "meadow:pumpkin",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        241,
+        234,
+        214,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "meadow/whitewash.bottom.png",
+        "side": "meadow/whitewash.side.png",
+        "top": "meadow/whitewash.top.png"
+      },
+      "game": "meadow",
+      "name": "meadow:whitewash",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        230,
+        225,
+        211,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "meadow/birch_log.bottom.png",
+        "side": "meadow/birch_log.side.png",
+        "top": "meadow/birch_log.top.png"
+      },
+      "game": "meadow",
+      "name": "meadow:birch_log",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        90,
+        61,
+        40,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "meadow/walnut_log.bottom.png",
+        "side": "meadow/walnut_log.side.png",
+        "top": "meadow/walnut_log.top.png"
+      },
+      "game": "meadow",
+      "name": "meadow:walnut_log",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        156,
+        154,
+        136,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "meadow/fieldstone.bottom.png",
+        "side": "meadow/fieldstone.side.png",
+        "top": "meadow/fieldstone.top.png"
+      },
+      "game": "meadow",
+      "name": "meadow:fieldstone",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        176,
+        173,
+        154,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "meadow/river_stone.bottom.png",
+        "side": "meadow/river_stone.side.png",
+        "top": "meadow/river_stone.top.png"
+      },
+      "game": "meadow",
+      "name": "meadow:river_stone",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        216,
+        182,
+        79,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "meadow/straw.bottom.png",
+        "side": "meadow/straw.side.png",
+        "top": "meadow/straw.top.png"
+      },
+      "game": "meadow",
+      "name": "meadow:straw",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        201,
+        122,
+        122,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "meadow/rose_tiles.bottom.png",
+        "side": "meadow/rose_tiles.side.png",
+        "top": "meadow/rose_tiles.top.png"
+      },
+      "game": "meadow",
+      "name": "meadow:rose_tiles",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        111,
+        138,
+        69,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "meadow/moss_shingles.bottom.png",
+        "side": "meadow/moss_shingles.side.png",
+        "top": "meadow/moss_shingles.top.png"
+      },
+      "game": "meadow",
+      "name": "meadow:moss_shingles",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        111,
+        154,
+        69,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "meadow/moss_roof.bottom.png",
+        "side": "meadow/moss_roof.side.png",
+        "top": "meadow/moss_roof.top.png"
+      },
+      "game": "meadow",
+      "name": "meadow:moss_roof",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        214,
+        154,
+        60,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "meadow/honey_tiles.bottom.png",
+        "side": "meadow/honey_tiles.side.png",
+        "top": "meadow/honey_tiles.top.png"
+      },
+      "game": "meadow",
+      "name": "meadow:honey_tiles",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        216,
+        194,
+        143,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "meadow/birch_planks.bottom.png",
+        "side": "meadow/birch_planks.side.png",
+        "top": "meadow/birch_planks.top.png"
+      },
+      "game": "meadow",
+      "name": "meadow:birch_planks",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        201,
+        143,
+        58,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "meadow/honey_planks.bottom.png",
+        "side": "meadow/honey_planks.side.png",
+        "top": "meadow/honey_planks.top.png"
+      },
+      "game": "meadow",
+      "name": "meadow:honey_planks",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        107,
+        74,
+        48,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "meadow/walnut_planks.bottom.png",
+        "side": "meadow/walnut_planks.side.png",
+        "top": "meadow/walnut_planks.top.png"
+      },
+      "game": "meadow",
+      "name": "meadow:walnut_planks",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        127,
+        154,
+        106,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "meadow/sage_planks.bottom.png",
+        "side": "meadow/sage_planks.side.png",
+        "top": "meadow/sage_planks.top.png"
+      },
+      "game": "meadow",
+      "name": "meadow:sage_planks",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        185,
+        112,
+        79,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "meadow/clay_brick.bottom.png",
+        "side": "meadow/clay_brick.side.png",
+        "top": "meadow/clay_brick.top.png"
+      },
+      "game": "meadow",
+      "name": "meadow:clay_brick",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        232,
+        184,
+        74,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "meadow/bloom_cloth.bottom.png",
+        "side": "meadow/bloom_cloth.side.png",
+        "top": "meadow/bloom_cloth.top.png"
+      },
+      "game": "meadow",
+      "name": "meadow:bloom_cloth",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        91,
+        97,
+        104,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "meadow/anvil.bottom.png",
+        "side": "meadow/anvil.side.png",
+        "top": "meadow/anvil.top.png"
+      },
+      "game": "meadow",
+      "name": "meadow:anvil",
+      "render": "opaque",
+      "solid": true,
+      "use": {
+        "station": "anvil"
+      }
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        156,
+        154,
+        136,
+        255
+      ],
+      "emission": 6,
+      "faces": {
+        "bottom": "meadow/forge.bottom.png",
+        "side": "meadow/forge.side.png",
+        "top": "meadow/forge.top.png"
+      },
+      "game": "meadow",
+      "name": "meadow:forge",
+      "render": "opaque",
+      "solid": true,
+      "use": {
+        "station": "forge"
+      }
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        185,
+        112,
+        79,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "meadow/oven.bottom.png",
+        "side": "meadow/oven.side.png",
+        "top": "meadow/oven.top.png"
+      },
+      "game": "meadow",
+      "name": "meadow:oven",
+      "render": "opaque",
+      "solid": true,
+      "use": {
+        "station": "oven"
+      }
+    },
+    {
+      "boxes": [
+        [
+          [
+            1,
+            0,
+            1
+          ],
+          [
+            4,
+            12,
+            4
+          ]
+        ],
+        [
+          [
+            12,
+            0,
+            1
+          ],
+          [
+            15,
+            12,
+            4
+          ]
+        ],
+        [
+          [
+            1,
+            0,
+            12
+          ],
+          [
+            4,
+            12,
+            15
+          ]
+        ],
+        [
+          [
+            12,
+            0,
+            12
+          ],
+          [
+            15,
+            12,
+            15
+          ]
+        ],
+        [
+          [
+            0,
+            12,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        110,
+        74,
+        46,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "meadow/workbench.bottom.png",
+        "side": "meadow/workbench.side.png",
+        "top": "meadow/workbench.top.png"
+      },
+      "game": "meadow",
+      "name": "meadow:workbench",
+      "render": "opaque",
+      "solid": true,
+      "use": {
+        "station": "workbench"
+      }
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        110,
+        74,
+        46,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "meadow/chest.bottom.png",
+        "side": "meadow/chest.side.png",
+        "top": "meadow/chest.top.png"
+      },
+      "game": "meadow",
+      "name": "meadow:chest",
+      "render": "opaque",
+      "solid": true,
+      "use": {
+        "container": 27
+      }
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            13
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        110,
+        74,
+        46,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "meadow/door.bottom.png",
+        "side": "meadow/door.side.png",
+        "top": "meadow/door.top.png"
+      },
+      "game": "meadow",
+      "name": "meadow:door",
+      "render": "opaque",
+      "solid": true,
+      "use": {
+        "door": {
+          "boxes": {
+            "closed": [
+              [
+                [
+                  0,
+                  0,
+                  13
+                ],
+                [
+                  16,
+                  16,
+                  16
+                ]
+              ]
+            ],
+            "open": [
+              [
+                [
+                  13,
+                  0,
+                  0
+                ],
+                [
+                  16,
+                  16,
+                  16
+                ]
+              ]
+            ]
+          },
+          "closed": "meadow:door",
+          "height-m": 2.0,
+          "open": "meadow:door_open",
+          "width-m": 1.0
+        }
+      }
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            13
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        110,
+        74,
+        46,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "meadow/door_open.bottom.png",
+        "side": "meadow/door_open.side.png",
+        "top": "meadow/door_open.top.png"
+      },
+      "game": "meadow",
+      "name": "meadow:door_open",
+      "render": "opaque",
+      "solid": true,
+      "use": {
+        "door": {
+          "boxes": {
+            "closed": [
+              [
+                [
+                  0,
+                  0,
+                  13
+                ],
+                [
+                  16,
+                  16,
+                  16
+                ]
+              ]
+            ],
+            "open": [
+              [
+                [
+                  13,
+                  0,
+                  0
+                ],
+                [
+                  16,
+                  16,
+                  16
+                ]
+              ]
+            ]
+          },
+          "closed": "meadow:door",
+          "height-m": 2.0,
+          "open": "meadow:door_open",
+          "width-m": 1.0
+        }
+      }
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        207,
+        232,
+        192,
+        96
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "meadow/glass.bottom.png",
+        "side": "meadow/glass.side.png",
+        "top": "meadow/glass.top.png"
+      },
+      "game": "meadow",
+      "name": "meadow:glass",
+      "render": "blend",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        255,
+        217,
+        138,
+        255
+      ],
+      "emission": 15,
+      "faces": {
+        "bottom": "meadow/lamp.bottom.png",
+        "side": "meadow/lamp.side.png",
+        "top": "meadow/lamp.top.png"
+      },
+      "game": "meadow",
+      "name": "meadow:lamp",
+      "render": "opaque",
+      "solid": true,
+      "use": null
     }
   ],
   "shapes": [

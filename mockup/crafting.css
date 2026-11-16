@@ -166,11 +166,19 @@
   margin-top: 8px;
 }
 
-.use-hint {
+/* The Use prompt above the place hint, one column under the reticle, so the two never overlap. */
+.reticle-hints {
   position: absolute;
   left: 50%;
-  top: calc(50% + 26px);
+  top: calc(50% + 24px);
   transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  pointer-events: none;
+}
+.use-hint {
   display: flex;
   align-items: center;
   gap: 6px;

@@ -1,0 +1,3508 @@
+{
+ "game": "ember",
+ "templates": [
+  {
+   "name": "ember:ash_hut",
+   "label": "Ash hut",
+   "kind": "home",
+   "size": [
+    12,
+    18,
+    11
+   ],
+   "ground_layer": 0,
+   "foundation": "ember:basalt_cobble",
+   "level_tolerance_m": null,
+   "spans": false,
+   "palette": [
+    {
+     "symbol": ".",
+     "cell": "keep"
+    },
+    {
+     "symbol": ":",
+     "cell": "air"
+    },
+    {
+     "symbol": "A",
+     "material": "ember:basalt_cobble",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "B",
+     "material": "ember:soot_planks",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "C",
+     "material": "ember:charred_log",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "D",
+     "material": "ember:soot_planks",
+     "shape": "ember:table",
+     "orientation": 0
+    },
+    {
+     "symbol": "E",
+     "material": "ember:door",
+     "shape": "ember:panel",
+     "orientation": 6
+    },
+    {
+     "symbol": "F",
+     "material": "ember:chest",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "G",
+     "material": "ember:workbench",
+     "shape": "ember:table",
+     "orientation": 0
+    },
+    {
+     "symbol": "H",
+     "material": "ember:ash_plaster",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "I",
+     "material": "ember:glass",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "J",
+     "material": "ember:iron_sheet",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "K",
+     "material": "ember:iron_sheet",
+     "shape": "core:stair",
+     "orientation": 0
+    },
+    {
+     "symbol": "L",
+     "material": "ember:iron_sheet",
+     "shape": "core:stair",
+     "orientation": 2
+    },
+    {
+     "symbol": "M",
+     "material": "ember:lamp",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "N",
+     "material": "ember:iron_sheet",
+     "shape": "core:slab",
+     "orientation": 0
+    },
+    {
+     "symbol": "O",
+     "material": "ember:basalt_cobble",
+     "shape": "core:slab",
+     "orientation": 0
+    }
+   ],
+   "layers": [
+    [
+     "............",
+     ".AAAAAAAAAA.",
+     ".ABBBBBBBBA.",
+     ".ABBBBBBBBA.",
+     ".ABBBBBBBBA.",
+     ".ABBBBBBBBA.",
+     ".ABBBBBBBBA.",
+     ".ABBBBBBBBA.",
+     ".ABBBBBBBBA.",
+     ".AAAAAAAAAA.",
+     "............"
+    ],
+    [
+     "............",
+     ".CAAAAAAAAC.",
+     ".AD::::::FA.",
+     ".A::::::::A.",
+     ".A:::::::GA.",
+     ".A::::::::A.",
+     ".A::::::::A.",
+     ".A::::::::A.",
+     ".A::::::::A.",
+     ".CAAAEEAAAC.",
+     "............"
+    ],
+    [
+     "............",
+     ".CHHIHHIHHC.",
+     ".A::::::::H.",
+     ".H::::::::H.",
+     ".I::::::::I.",
+     ".H::::::::H.",
+     ".H::::::::H.",
+     ".I::::::::I.",
+     ".H::::::::H.",
+     ".CIHHEEHIHC.",
+     "............"
+    ],
+    [
+     "............",
+     ".CHHHHHHHHC.",
+     ".A::::::::H.",
+     ".H::::::::H.",
+     ".H::::::::H.",
+     ".H::::::::H.",
+     ".H::::::::H.",
+     ".H::::::::H.",
+     ".H::::::::H.",
+     ".CHHHEEHHHC.",
+     "............"
+    ],
+    [
+     "JJJJJJJJJJJJ",
+     ".H::::::::H.",
+     ".A::::::::H.",
+     ".H::::::::H.",
+     ".H::::::::H.",
+     ".H:::M::::H.",
+     ".H::::::::H.",
+     ".H::::::::H.",
+     ".H::::::::H.",
+     ".H::CCCC::H.",
+     "JJJJJJJJJJJJ"
+    ],
+    [
+     "KKKKKKKKKKKK",
+     ".H::::::::H.",
+     ".A::::::::H.",
+     ".H::::::::H.",
+     ".H::::::::H.",
+     ".H::::::::H.",
+     ".H::::::::H.",
+     ".H::::::::H.",
+     ".H::::::::H.",
+     ".H::::::::H.",
+     "LLLLLLLLLLLL"
+    ],
+    [
+     "............",
+     "JJJJJJJJJJJJ",
+     ".A::::::::H.",
+     ".H::::::::H.",
+     ".H::::::::H.",
+     ".H::::::::H.",
+     ".H::::::::H.",
+     ".H::::::::H.",
+     ".H::::::::H.",
+     "JJJJJJJJJJJJ",
+     "............"
+    ],
+    [
+     "............",
+     "KKKKKKKKKKKK",
+     ".A::::::::H.",
+     ".H::::::::H.",
+     ".H::::::::H.",
+     ".H::::::::H.",
+     ".H::::::::H.",
+     ".H::::::::H.",
+     ".H::::::::H.",
+     "LLLLLLLLLLLL",
+     "............"
+    ],
+    [
+     "............",
+     "............",
+     "JAJJJJJJJJJJ",
+     ".H::::::::H.",
+     ".H::::::::H.",
+     ".H::::::::H.",
+     ".H::::::::H.",
+     ".H::::::::H.",
+     "JJJJJJJJJJJJ",
+     "............",
+     "............"
+    ],
+    [
+     "............",
+     "............",
+     "KAKKKKKKKKKK",
+     ".H::::::::H.",
+     ".H::::::::H.",
+     ".H::::::::H.",
+     ".H::::::::H.",
+     ".H::::::::H.",
+     "LLLLLLLLLLLL",
+     "............",
+     "............"
+    ],
+    [
+     "............",
+     "............",
+     ".A..........",
+     "JJJJJJJJJJJJ",
+     ".H::::::::H.",
+     ".H::::::::H.",
+     ".H::::::::H.",
+     "JJJJJJJJJJJJ",
+     "............",
+     "............",
+     "............"
+    ],
+    [
+     "............",
+     "............",
+     ".A..........",
+     "KKKKKKKKKKKK",
+     ".H::::::::H.",
+     ".H::::::::H.",
+     ".H::::::::H.",
+     "LLLLLLLLLLLL",
+     "............",
+     "............",
+     "............"
+    ],
+    [
+     "............",
+     "............",
+     ".A..........",
+     "............",
+     "JJJJJJJJJJJJ",
+     ".H::::::::H.",
+     "JJJJJJJJJJJJ",
+     "............",
+     "............",
+     "............",
+     "............"
+    ],
+    [
+     "............",
+     "............",
+     ".A..........",
+     "............",
+     "KKKKKKKKKKKK",
+     ".H::::::::H.",
+     "LLLLLLLLLLLL",
+     "............",
+     "............",
+     "............",
+     "............"
+    ],
+    [
+     "............",
+     "............",
+     ".A..........",
+     "............",
+     "............",
+     "NNNNNNNNNNNN",
+     "............",
+     "............",
+     "............",
+     "............",
+     "............"
+    ],
+    [
+     "............",
+     "............",
+     ".A..........",
+     "............",
+     "............",
+     "............",
+     "............",
+     "............",
+     "............",
+     "............",
+     "............"
+    ],
+    [
+     "............",
+     "............",
+     ".A..........",
+     "............",
+     "............",
+     "............",
+     "............",
+     "............",
+     "............",
+     "............",
+     "............"
+    ],
+    [
+     "............",
+     "............",
+     ".O..........",
+     "............",
+     "............",
+     "............",
+     "............",
+     "............",
+     "............",
+     "............",
+     "............"
+    ]
+   ]
+  },
+  {
+   "name": "ember:forge_hall",
+   "label": "Forge hall",
+   "kind": "home",
+   "size": [
+    13,
+    20,
+    13
+   ],
+   "ground_layer": 0,
+   "foundation": "ember:basalt_cobble",
+   "level_tolerance_m": null,
+   "spans": false,
+   "palette": [
+    {
+     "symbol": ".",
+     "cell": "keep"
+    },
+    {
+     "symbol": ":",
+     "cell": "air"
+    },
+    {
+     "symbol": "A",
+     "material": "ember:basalt_cobble",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "B",
+     "material": "ember:ash_planks",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "C",
+     "material": "ember:obsidian",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "D",
+     "material": "ember:basalt",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "E",
+     "material": "ember:char_planks",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "F",
+     "material": "ember:chest",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "G",
+     "material": "ember:basalt",
+     "shape": "core:stair",
+     "orientation": 1
+    },
+    {
+     "symbol": "H",
+     "material": "ember:door",
+     "shape": "ember:panel",
+     "orientation": 0
+    },
+    {
+     "symbol": "I",
+     "material": "ember:char_planks",
+     "shape": "ember:table",
+     "orientation": 0
+    },
+    {
+     "symbol": "J",
+     "material": "ember:workbench",
+     "shape": "ember:table",
+     "orientation": 0
+    },
+    {
+     "symbol": "K",
+     "material": "ember:ash_brick",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "L",
+     "material": "ember:glass",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "M",
+     "material": "ember:lamp",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "N",
+     "material": "ember:ash_plaster",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "O",
+     "material": "ember:rust_tiles",
+     "shape": "core:stair",
+     "orientation": 0
+    },
+    {
+     "symbol": "P",
+     "material": "ember:rust_tiles",
+     "shape": "core:stair",
+     "orientation": 2
+    },
+    {
+     "symbol": "Q",
+     "material": "ember:rust_tiles",
+     "shape": "core:slab",
+     "orientation": 0
+    },
+    {
+     "symbol": "R",
+     "material": "ember:ash_brick",
+     "shape": "core:slab",
+     "orientation": 0
+    }
+   ],
+   "layers": [
+    [
+     ".............",
+     ".AAAAAAAAAAA.",
+     ".ABBBBBBBBBA.",
+     ".ABBBBBBBBBA.",
+     ".ABBBBBBBBBA.",
+     ".ABBBBBBBBBA.",
+     ".ABBBBBBBBBA.",
+     ".ABBBBBBBBBA.",
+     ".ABBBBBBBBBA.",
+     ".ABBBBBBBBBA.",
+     ".AAAAAAAAAAA.",
+     ".............",
+     "............."
+    ],
+    [
+     ".............",
+     ".CDDEDDEDDEC.",
+     ".D::G::::::K.",
+     ".D::G::::::E.",
+     ".E:::::::::D.",
+     ".DF::::::::D.",
+     ".D::::II:::E.",
+     ".E::::::::JD.",
+     ".D:::::::::D.",
+     ".D:::::::::E.",
+     ".CDDEHHEDDEC.",
+     ".............",
+     "............."
+    ],
+    [
+     ".............",
+     ".CDDLDDLDDLC.",
+     ".D:::G:::::K.",
+     ".D:::G:::::L.",
+     ".L:::::::::D.",
+     ".D:::::::::D.",
+     ".D:::::::::L.",
+     ".L:::::::::D.",
+     ".D:::::::::D.",
+     ".D:::::::::L.",
+     ".CDDLHHLDDLC.",
+     ".............",
+     "............."
+    ],
+    [
+     ".............",
+     ".CDDLDDLDDLC.",
+     ".D::::G::::K.",
+     ".D::::G::::L.",
+     ".L:::::::::D.",
+     ".D:::::::::D.",
+     ".D:::::::::L.",
+     ".L:::::::::D.",
+     ".D:::::::::D.",
+     ".D:::::::::L.",
+     ".CDDLHHLDDLC.",
+     ".............",
+     "............."
+    ],
+    [
+     ".............",
+     ".CDDDDDDDDDC.",
+     ".D:::::G:::K.",
+     ".D:::::G:::D.",
+     ".D:::::::::D.",
+     ".D:::::::::D.",
+     ".D::::M::::D.",
+     ".D:::::::::D.",
+     ".D:::::::::D.",
+     ".D:::::::::D.",
+     ".CDDCCCCDDDC.",
+     ".............",
+     "............."
+    ],
+    [
+     ".............",
+     ".CCCCCCCCCCC.",
+     ".CBBB:::GBBK.",
+     ".CBBB:::GBBC.",
+     ".CBBBBBBBBBC.",
+     ".CBBBBBBBBBC.",
+     ".CBBBBBBBBBC.",
+     ".CBBBBBBBBBC.",
+     ".CBBBBBBBBBC.",
+     ".CBBBBBBBBBC.",
+     ".CBBBBBBBBBC.",
+     ".CCCCCCCCCCC.",
+     "............."
+    ],
+    [
+     ".............",
+     ".CCNECNECNEC.",
+     ".C:::::::::K.",
+     ".N:::::::::E.",
+     ".E:::::::::C.",
+     ".C:::::::::N.",
+     ".N:::::I:::E.",
+     ".E:::::::::C.",
+     ".C:::::::::N.",
+     ".NFF:::::::E.",
+     ".E:::::::::C.",
+     ".CNECNECNECC.",
+     "............."
+    ],
+    [
+     ".............",
+     ".CCNLCNLCNLC.",
+     ".C:::::::::K.",
+     ".N:::::::::L.",
+     ".L:::::::::C.",
+     ".C:::::::::N.",
+     ".N:::::::::L.",
+     ".L:::::::::C.",
+     ".C:::::::::N.",
+     ".N:::::::::L.",
+     ".L:::::::::C.",
+     ".CNLCNLCNLCC.",
+     "............."
+    ],
+    [
+     ".............",
+     ".CCNLCNLCNLC.",
+     ".C:::::::::K.",
+     ".N:::::::::L.",
+     ".L:::::::::C.",
+     ".C:::::::::N.",
+     ".N:::::::::L.",
+     ".L:::::::::C.",
+     ".C:::::::::N.",
+     ".N:::::::::L.",
+     ".L:::::::::C.",
+     ".CNLCNLCNLCC.",
+     "............."
+    ],
+    [
+     ".............",
+     ".CCCCCCCCCCC.",
+     ".C:::::::::K.",
+     ".C:::::::::C.",
+     ".C:::::::::C.",
+     ".C:::::::::C.",
+     ".C:::::::::C.",
+     ".C:::::::::C.",
+     ".C:::::::::C.",
+     ".C:::::::::C.",
+     ".C:::::::::C.",
+     ".CCCCCCCCCCC.",
+     "............."
+    ],
+    [
+     "OOOOOOOOOOOOO",
+     ".D:::::::::D.",
+     ".D:::::::::K.",
+     ".D:::::::::D.",
+     ".D:::::::::D.",
+     ".D:::::::::D.",
+     ".D::::M::::D.",
+     ".D:::::::::D.",
+     ".D:::::::::D.",
+     ".D:::::::::D.",
+     ".D:::::::::D.",
+     ".D:::::::::D.",
+     "PPPPPPPPPPPPP"
+    ],
+    [
+     ".............",
+     "OOOOOOOOOOOOO",
+     ".D:::::::::K.",
+     ".D:::::::::D.",
+     ".D:::::::::D.",
+     ".D:::::::::D.",
+     ".D:::::::::D.",
+     ".D:::::::::D.",
+     ".D:::::::::D.",
+     ".D:::::::::D.",
+     ".D:::::::::D.",
+     "PPPPPPPPPPPPP",
+     "............."
+    ],
+    [
+     ".............",
+     ".............",
+     "OOOOOOOOOOOKO",
+     ".D:::::::::D.",
+     ".D:::::::::D.",
+     ".D:::::::::D.",
+     ".D:::::::::D.",
+     ".D:::::::::D.",
+     ".D:::::::::D.",
+     ".D:::::::::D.",
+     "PPPPPPPPPPPPP",
+     ".............",
+     "............."
+    ],
+    [
+     ".............",
+     ".............",
+     "...........K.",
+     "OOOOOOOOOOOOO",
+     ".D:::::::::D.",
+     ".D:::::::::D.",
+     ".D:::::::::D.",
+     ".D:::::::::D.",
+     ".D:::::::::D.",
+     "PPPPPPPPPPPPP",
+     ".............",
+     ".............",
+     "............."
+    ],
+    [
+     ".............",
+     ".............",
+     "...........K.",
+     ".............",
+     "OOOOOOOOOOOOO",
+     ".D:::::::::D.",
+     ".D:::::::::D.",
+     ".D:::::::::D.",
+     "PPPPPPPPPPPPP",
+     ".............",
+     ".............",
+     ".............",
+     "............."
+    ],
+    [
+     ".............",
+     ".............",
+     "...........K.",
+     ".............",
+     ".............",
+     "OOOOOOOOOOOOO",
+     ".D:::::::::D.",
+     "PPPPPPPPPPPPP",
+     ".............",
+     ".............",
+     ".............",
+     ".............",
+     "............."
+    ],
+    [
+     ".............",
+     ".............",
+     "...........K.",
+     ".............",
+     ".............",
+     ".............",
+     "QQQQQQQQQQQQQ",
+     ".............",
+     ".............",
+     ".............",
+     ".............",
+     ".............",
+     "............."
+    ],
+    [
+     ".............",
+     ".............",
+     "...........K.",
+     ".............",
+     ".............",
+     ".............",
+     ".............",
+     ".............",
+     ".............",
+     ".............",
+     ".............",
+     ".............",
+     "............."
+    ],
+    [
+     ".............",
+     ".............",
+     "...........K.",
+     ".............",
+     ".............",
+     ".............",
+     ".............",
+     ".............",
+     ".............",
+     ".............",
+     ".............",
+     ".............",
+     "............."
+    ],
+    [
+     ".............",
+     ".............",
+     "...........R.",
+     ".............",
+     ".............",
+     ".............",
+     ".............",
+     ".............",
+     ".............",
+     ".............",
+     ".............",
+     ".............",
+     "............."
+    ]
+   ]
+  },
+  {
+   "name": "ember:cinder_farm",
+   "label": "Cinder farm",
+   "kind": "home",
+   "size": [
+    11,
+    15,
+    12
+   ],
+   "ground_layer": 4,
+   "foundation": "ember:basalt_cobble",
+   "level_tolerance_m": null,
+   "spans": false,
+   "palette": [
+    {
+     "symbol": ".",
+     "cell": "keep"
+    },
+    {
+     "symbol": ":",
+     "cell": "air"
+    },
+    {
+     "symbol": "A",
+     "material": "ember:basalt_cobble",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "B",
+     "material": "ember:chest",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "C",
+     "material": "ember:ash_planks",
+     "shape": "core:stair",
+     "orientation": 3
+    },
+    {
+     "symbol": "D",
+     "material": "ember:soot_planks",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "E",
+     "material": "ember:charred_log",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "F",
+     "material": "ember:door",
+     "shape": "ember:panel",
+     "orientation": 6
+    },
+    {
+     "symbol": "G",
+     "material": "ember:soot_planks",
+     "shape": "ember:table",
+     "orientation": 0
+    },
+    {
+     "symbol": "H",
+     "material": "ember:workbench",
+     "shape": "ember:table",
+     "orientation": 0
+    },
+    {
+     "symbol": "I",
+     "material": "ember:glass",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "J",
+     "material": "ember:ash_planks",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "K",
+     "material": "ember:soot_planks",
+     "shape": "core:slab",
+     "orientation": 0
+    },
+    {
+     "symbol": "L",
+     "material": "ember:soot_shingles",
+     "shape": "core:stair",
+     "orientation": 2
+    },
+    {
+     "symbol": "M",
+     "material": "ember:char_planks",
+     "shape": "core:slab",
+     "orientation": 0
+    },
+    {
+     "symbol": "N",
+     "material": "ember:charred_log",
+     "shape": "core:post",
+     "orientation": 0
+    },
+    {
+     "symbol": "O",
+     "material": "ember:soot_shingles",
+     "shape": "core:stair",
+     "orientation": 0
+    },
+    {
+     "symbol": "P",
+     "material": "ember:lamp",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "Q",
+     "material": "ember:soot_shingles",
+     "shape": "core:stair",
+     "orientation": 3
+    },
+    {
+     "symbol": "R",
+     "material": "ember:soot_shingles",
+     "shape": "core:stair",
+     "orientation": 1
+    },
+    {
+     "symbol": "S",
+     "material": "ember:basalt_cobble",
+     "shape": "core:slab",
+     "orientation": 0
+    }
+   ],
+   "layers": [
+    [
+     "...........",
+     ".AAAAAAAAA.",
+     ".AAAAAAAAA.",
+     ".AAAAAAAAA.",
+     ".AAAAAAAAA.",
+     ".AAAAAAAAA.",
+     ".AAAAAAAAA.",
+     "...........",
+     "...........",
+     "...........",
+     "...........",
+     "..........."
+    ],
+    [
+     "...........",
+     ".AAAAAAAAA.",
+     ".A::::C::A.",
+     ".A::::C::A.",
+     ".A:::::::A.",
+     ".ABB:::::A.",
+     ".A:::AAAAA.",
+     "...........",
+     "...........",
+     "...........",
+     "...........",
+     "..........."
+    ],
+    [
+     "...........",
+     ".AAAAAAAAA.",
+     ".A:::C:::A.",
+     ".A:::C:::A.",
+     ".A:::::::A.",
+     ".A:::::::A.",
+     ".A:::AAAAA.",
+     "...........",
+     "...........",
+     "...........",
+     "...........",
+     "..........."
+    ],
+    [
+     "...........",
+     ".AAAAAAAAA.",
+     ".A::C::::A.",
+     ".A::C::::A.",
+     ".A:::::::A.",
+     ".A:::::::A.",
+     ".A:::AAAAA.",
+     "...........",
+     "...........",
+     "...........",
+     "...........",
+     "..........."
+    ],
+    [
+     "...........",
+     ".AAAAAAAAA.",
+     ".ADC:::DDA.",
+     ".ADC:::DDA.",
+     ".ADDDDDDDA.",
+     ".ADDDDDDDA.",
+     ".ADDDAAAAA.",
+     ".ADDAKKKKK.",
+     ".ADDAKKKKK.",
+     ".ADDA......",
+     ".AAAA......",
+     "..........."
+    ],
+    [
+     "...........",
+     ".EAAAAAAAE.",
+     ".A::::::BA.",
+     ".A::::::BA.",
+     ".A::::::BA.",
+     ".A::::GGHA.",
+     ".A:::AAAAE.",
+     ".A::A......",
+     ".A::AN..NN.",
+     ".A::A......",
+     ".EFFE......",
+     "..........."
+    ],
+    [
+     "...........",
+     ".EIJJIIJJE.",
+     ".I:::::::A.",
+     ".J:::::::J.",
+     ".J:::::::J.",
+     ".I:::::::I.",
+     ".I:::IJJIE.",
+     ".J::I......",
+     ".J::JN..NN.",
+     ".I::J......",
+     ".EFFE......",
+     "..........."
+    ],
+    [
+     "...........",
+     ".EIJJIIJJE.",
+     ".I:::::::A.",
+     ".J:::::::J.",
+     ".J:::::::J.",
+     ".I:::::::I.",
+     ".I:::IJJIE.",
+     ".J::I......",
+     ".J::JN..NN.",
+     ".I::J......",
+     ".EFFE......",
+     "..........."
+    ],
+    [
+     "OOOOOOOOOOO",
+     ".J:::::::J.",
+     ".J:::::::A.",
+     ".J:::::::J.",
+     ".J:::P:::J.",
+     ".J:::::::J.",
+     "RJ:::Q:::J.",
+     "LLLLLLLLLLL",
+     "R::::MMMMM.",
+     "R::::Q.....",
+     "REEEEQ.....",
+     "R....Q....."
+    ],
+    [
+     "...........",
+     "OOOOOOOOOOO",
+     ".J:::::::A.",
+     ".J:::::::J.",
+     ".J:::::::J.",
+     ".J:::::::J.",
+     "LLLLLLLLLLL",
+     ".RJJQ......",
+     ".R::Q......",
+     ".R::Q......",
+     ".RJJQ......",
+     ".R..Q......"
+    ],
+    [
+     "...........",
+     "...........",
+     "OOOOOOOOOAO",
+     ".J:::::::J.",
+     ".J:::::::J.",
+     "LLLLLLLLLLL",
+     "..MM.......",
+     "..MM.......",
+     "..MM.......",
+     "..MM.......",
+     "..MM.......",
+     "..MM......."
+    ],
+    [
+     "...........",
+     "...........",
+     ".........A.",
+     "MMMMMMMMMMM",
+     "MMMMMMMMMMM",
+     "...........",
+     "...........",
+     "...........",
+     "...........",
+     "...........",
+     "...........",
+     "..........."
+    ],
+    [
+     "...........",
+     "...........",
+     ".........A.",
+     "...........",
+     "...........",
+     "...........",
+     "...........",
+     "...........",
+     "...........",
+     "...........",
+     "...........",
+     "..........."
+    ],
+    [
+     "...........",
+     "...........",
+     ".........A.",
+     "...........",
+     "...........",
+     "...........",
+     "...........",
+     "...........",
+     "...........",
+     "...........",
+     "...........",
+     "..........."
+    ],
+    [
+     "...........",
+     "...........",
+     ".........S.",
+     "...........",
+     "...........",
+     "...........",
+     "...........",
+     "...........",
+     "...........",
+     "...........",
+     "...........",
+     "..........."
+    ]
+   ]
+  },
+  {
+   "name": "ember:ember_inn",
+   "label": "Ember inn",
+   "kind": "trade",
+   "size": [
+    13,
+    23,
+    11
+   ],
+   "ground_layer": 4,
+   "foundation": "ember:basalt",
+   "level_tolerance_m": null,
+   "spans": false,
+   "palette": [
+    {
+     "symbol": ".",
+     "cell": "keep"
+    },
+    {
+     "symbol": ":",
+     "cell": "air"
+    },
+    {
+     "symbol": "A",
+     "material": "ember:basalt",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "B",
+     "material": "ember:basalt",
+     "shape": "core:stair",
+     "orientation": 2
+    },
+    {
+     "symbol": "C",
+     "material": "ember:chest",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "D",
+     "material": "ember:char_planks",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "E",
+     "material": "ember:obsidian",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "F",
+     "material": "ember:ash_brick",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "G",
+     "material": "ember:char_planks",
+     "shape": "ember:table",
+     "orientation": 0
+    },
+    {
+     "symbol": "H",
+     "material": "ember:door",
+     "shape": "ember:panel",
+     "orientation": 6
+    },
+    {
+     "symbol": "I",
+     "material": "ember:basalt",
+     "shape": "core:stair",
+     "orientation": 1
+    },
+    {
+     "symbol": "J",
+     "material": "ember:door",
+     "shape": "ember:panel",
+     "orientation": 0
+    },
+    {
+     "symbol": "K",
+     "material": "ember:char_planks",
+     "shape": "core:slab",
+     "orientation": 0
+    },
+    {
+     "symbol": "L",
+     "material": "ember:glass",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "M",
+     "material": "ember:lamp",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "N",
+     "material": "ember:ash_plaster",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "O",
+     "material": "ember:ember_slate",
+     "shape": "core:stair",
+     "orientation": 0
+    },
+    {
+     "symbol": "P",
+     "material": "ember:ember_slate",
+     "shape": "core:stair",
+     "orientation": 2
+    },
+    {
+     "symbol": "Q",
+     "material": "ember:ember_slate",
+     "shape": "core:stair",
+     "orientation": 1
+    },
+    {
+     "symbol": "R",
+     "material": "ember:ember_slate",
+     "shape": "core:stair",
+     "orientation": 3
+    },
+    {
+     "symbol": "S",
+     "material": "ember:ember_slate",
+     "shape": "core:slab",
+     "orientation": 0
+    },
+    {
+     "symbol": "T",
+     "material": "ember:ash_brick",
+     "shape": "core:slab",
+     "orientation": 0
+    }
+   ],
+   "layers": [
+    [
+     ".............",
+     ".AAAAAAAAAAA.",
+     ".AAAAAAAAAAA.",
+     ".AAAAAAAAAAA.",
+     ".AAAAAAAAAAA.",
+     ".AAAAAAAAAAA.",
+     ".AAAAAAAAAAA.",
+     ".AAAAAAAAAAA.",
+     ".AAAAAAAAAAA.",
+     ".............",
+     "............."
+    ],
+    [
+     ".............",
+     ".AAAAAAAAAAA.",
+     ".A::CCC::::A.",
+     ".A:::::::::A.",
+     ".A:::::::::A.",
+     ".A:::::::::A.",
+     ".ABB:::::::A.",
+     ".A:::::::::A.",
+     ".AAAAAAAAAAA.",
+     ".............",
+     "............."
+    ],
+    [
+     ".............",
+     ".AAAAAAAAAAA.",
+     ".A:::::::::A.",
+     ".A:::::::::A.",
+     ".A:::::::::A.",
+     ".ABB:::::::A.",
+     ".A:::::::::A.",
+     ".A:::::::::A.",
+     ".AAAAAAAAAAA.",
+     ".............",
+     "............."
+    ],
+    [
+     ".............",
+     ".AAAAAAAAAAA.",
+     ".A:::::::::A.",
+     ".A:::::::::A.",
+     ".ABB:::::::A.",
+     ".A:::::::::A.",
+     ".A:::::::::A.",
+     ".A:::::::::A.",
+     ".AAAAAAAAAAA.",
+     ".............",
+     "............."
+    ],
+    [
+     ".............",
+     ".AAAAAAAAAAA.",
+     ".ADDDDDDDDDA.",
+     ".ABBDDDDDDDA.",
+     ".A::DDDDDDDA.",
+     ".A::DDDDDDDA.",
+     ".A::DDDDDDDA.",
+     ".ADDDDDDDDDA.",
+     ".AAAAAAAAAAA.",
+     ".............",
+     "............."
+    ],
+    [
+     ".............",
+     ".EAAAAAAAAAE.",
+     ".F::::I::::A.",
+     ".A::::I::::A.",
+     ".A::G::G::KA.",
+     ".A::::::::KA.",
+     ".A::::::::KA.",
+     ".A:::::::::A.",
+     ".EAAHHJJAAAE.",
+     ".........M...",
+     "............."
+    ],
+    [
+     ".............",
+     ".ELAALLAALLE.",
+     ".F:::::I:::A.",
+     ".A:::::I:::L.",
+     ".A:::::::::L.",
+     ".L:::::::::A.",
+     ".L:::::::::A.",
+     ".A:::::::::L.",
+     ".ELLHHJJAALE.",
+     ".............",
+     "............."
+    ],
+    [
+     ".............",
+     ".ELAALLAALLE.",
+     ".F::::::I::A.",
+     ".A::::::I::L.",
+     ".A:::::::::L.",
+     ".L:::::::::A.",
+     ".L:::::::::A.",
+     ".A:::::::::L.",
+     ".ELLHHJJAALE.",
+     ".............",
+     "............."
+    ],
+    [
+     ".............",
+     ".EAAAAAAAAAE.",
+     ".F:::::::I:A.",
+     ".A:::::::I:A.",
+     ".A:::::::::A.",
+     ".A::::M::::A.",
+     ".A:::::::::A.",
+     ".A:::::::::A.",
+     ".EAEEEEEEAAE.",
+     ".............",
+     "............."
+    ],
+    [
+     ".............",
+     ".EEEEEEEEEEE.",
+     ".FDDDDD:::IE.",
+     ".EDDDDD:::IE.",
+     ".EDDDDDDDDDE.",
+     ".EDDDDDDDDDE.",
+     ".EDDDDDDDDDE.",
+     ".EDDDDDDDDDE.",
+     ".EDDDDDDDDDE.",
+     ".EEEEEEEEEEE.",
+     "............."
+    ],
+    [
+     ".............",
+     ".EENNEDNEDDE.",
+     ".F:::::::::N.",
+     ".N:::::::::D.",
+     ".N:::::::::E.",
+     ".E:::::::::N.",
+     ".D:::::::::N.",
+     ".N:::::::::E.",
+     ".E:C:C:C:C:D.",
+     ".EDENDENNEDE.",
+     "............."
+    ],
+    [
+     ".............",
+     ".ELNNLLNELLE.",
+     ".F:::::::::N.",
+     ".N:::::::::L.",
+     ".N:::::::::L.",
+     ".L:::::::::N.",
+     ".L:::::::::N.",
+     ".N:::::::::L.",
+     ".E:::::::::L.",
+     ".ELENLLNNLLE.",
+     "............."
+    ],
+    [
+     ".............",
+     ".ELNNLLNELLE.",
+     ".F:::::::::N.",
+     ".N:::::::::L.",
+     ".N:::::::::L.",
+     ".L:::::::::N.",
+     ".L:::::::::N.",
+     ".N:::::::::L.",
+     ".E:::::::::L.",
+     ".ELENLLNNLLE.",
+     "............."
+    ],
+    [
+     ".............",
+     ".EEEEEEEEEEE.",
+     ".F:::::::::E.",
+     ".E:::::::::E.",
+     ".E:::::::::E.",
+     ".E:::::::::E.",
+     ".E:::::::::E.",
+     ".E:::::::::E.",
+     ".E:::::::::E.",
+     ".EEEEEEEEEEE.",
+     "............."
+    ],
+    [
+     "OOOOOOOOOOOOO",
+     "Q.:::::::::.R",
+     "QF:::::::::.R",
+     "Q.:::::::::.R",
+     "Q.:::::::::.R",
+     "Q.::::M::::.R",
+     "Q.:::::::::.R",
+     "Q.:::::::::.R",
+     "Q.:::::::::.R",
+     "Q.:::::::::.R",
+     "PPPPPPPPPPPPP"
+    ],
+    [
+     ".............",
+     ".OOOOOOOOOOO.",
+     ".F:::::::::R.",
+     ".Q:::::::::R.",
+     ".Q:::::::::R.",
+     ".Q:::::::::R.",
+     ".Q:::::::::R.",
+     ".Q:::::::::R.",
+     ".Q:::::::::R.",
+     ".PPPPPPPPPPP.",
+     "............."
+    ],
+    [
+     ".............",
+     ".............",
+     ".FOOOOOOOOO..",
+     "..Q:::::::R..",
+     "..Q:::::::R..",
+     "..Q:::::::R..",
+     "..Q:::::::R..",
+     "..Q:::::::R..",
+     "..PPPPPPPPP..",
+     ".............",
+     "............."
+    ],
+    [
+     ".............",
+     ".............",
+     ".F...........",
+     "...OOOOOOO...",
+     "...Q:::::R...",
+     "...Q:::::R...",
+     "...Q:::::R...",
+     "...PPPPPPP...",
+     ".............",
+     ".............",
+     "............."
+    ],
+    [
+     ".............",
+     ".............",
+     ".F...........",
+     ".............",
+     "....OOOOO....",
+     "....Q:::R....",
+     "....PPPPP....",
+     ".............",
+     ".............",
+     ".............",
+     "............."
+    ],
+    [
+     ".............",
+     ".............",
+     ".F...........",
+     ".............",
+     ".............",
+     ".....SSS.....",
+     ".............",
+     ".............",
+     ".............",
+     ".............",
+     "............."
+    ],
+    [
+     ".............",
+     ".............",
+     ".F...........",
+     ".............",
+     ".............",
+     ".............",
+     ".............",
+     ".............",
+     ".............",
+     ".............",
+     "............."
+    ],
+    [
+     ".............",
+     ".............",
+     ".F...........",
+     ".............",
+     ".............",
+     ".............",
+     ".............",
+     ".............",
+     ".............",
+     ".............",
+     "............."
+    ],
+    [
+     ".............",
+     ".............",
+     ".T...........",
+     ".............",
+     ".............",
+     ".............",
+     ".............",
+     ".............",
+     ".............",
+     ".............",
+     "............."
+    ]
+   ]
+  },
+  {
+   "name": "ember:ore_store",
+   "label": "Ore store",
+   "kind": "trade",
+   "size": [
+    16,
+    13,
+    10
+   ],
+   "ground_layer": 0,
+   "foundation": "ember:basalt_cobble",
+   "level_tolerance_m": null,
+   "spans": false,
+   "palette": [
+    {
+     "symbol": ".",
+     "cell": "keep"
+    },
+    {
+     "symbol": ":",
+     "cell": "air"
+    },
+    {
+     "symbol": "A",
+     "material": "ember:basalt_cobble",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "B",
+     "material": "ember:ash_planks",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "C",
+     "material": "ember:charred_log",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "D",
+     "material": "ember:chest",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "E",
+     "material": "ember:door",
+     "shape": "ember:panel",
+     "orientation": 6
+    },
+    {
+     "symbol": "F",
+     "material": "ember:door",
+     "shape": "ember:panel",
+     "orientation": 0
+    },
+    {
+     "symbol": "G",
+     "material": "ember:char_planks",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "H",
+     "material": "ember:glass",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "I",
+     "material": "ember:lamp",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "J",
+     "material": "ember:ember_slate",
+     "shape": "core:stair",
+     "orientation": 0
+    },
+    {
+     "symbol": "K",
+     "material": "ember:ember_slate",
+     "shape": "core:stair",
+     "orientation": 2
+    },
+    {
+     "symbol": "L",
+     "material": "ember:char_planks",
+     "shape": "core:slab",
+     "orientation": 0
+    }
+   ],
+   "layers": [
+    [
+     "................",
+     ".AAAAAAAAAAAAAA.",
+     ".ABBBBBBBBBBBBA.",
+     ".ABBBBBBBBBBBBA.",
+     ".ABBBBBBBBBBBBA.",
+     ".ABBBBBBBBBBBBA.",
+     ".ABBBBBBBBBBBBA.",
+     ".ABBBBBBBBBBBBA.",
+     ".AAAAAAAAAAAAAA.",
+     "................"
+    ],
+    [
+     "................",
+     ".CAAAAAAAAAAAAC.",
+     ".ADDDDDDDDDDDDA.",
+     ".AD::::::::::DA.",
+     ".AD::::::::::DA.",
+     ".AD::DDDDDD::DA.",
+     ".AD::::::::::DA.",
+     ".A::::::::::::A.",
+     ".CAAAAEEFFAAAAC.",
+     "................"
+    ],
+    [
+     "................",
+     ".CCGHCGHCGHCGHC.",
+     ".CDDDDDDDDDDDDG.",
+     ".GD::::::::::DH.",
+     ".HD::::::::::DC.",
+     ".CD::::::::::DG.",
+     ".GD::::::::::DH.",
+     ".H::::::::::::C.",
+     ".CGHCGEEFFCGHCC.",
+     "................"
+    ],
+    [
+     "................",
+     ".CCCHCCHCCHCCHC.",
+     ".CDDDDDDDDDDDDC.",
+     ".C::::::::::::H.",
+     ".H::::::::::::C.",
+     ".C::::::::::::C.",
+     ".C::::::::::::H.",
+     ".H::::::::::::C.",
+     ".CCHCCEEFFCCHCC.",
+     "................"
+    ],
+    [
+     "................",
+     ".CCGGCGGCGGCGGC.",
+     ".C::::::::::::G.",
+     ".G::::::::::::G.",
+     ".G::::::::::::C.",
+     ".C::::::::::::G.",
+     ".G::::::::::::G.",
+     ".G::::::::::::C.",
+     ".CGGCCCCCCCGGCC.",
+     "................"
+    ],
+    [
+     "................",
+     ".CCGCCGCCGCCGCC.",
+     ".C::::::::::::G.",
+     ".G::::::::::::C.",
+     ".C::::::::::::C.",
+     ".C::::::::::::G.",
+     ".G::::::::::::C.",
+     ".C::::::::::::C.",
+     ".CGCCGCCGCCGCCC.",
+     "................"
+    ],
+    [
+     "................",
+     ".CCGHCGHCGHCGHC.",
+     ".C::::::::::::G.",
+     ".G::::::::::::H.",
+     ".H:::::I::::::C.",
+     ".C::::::::::::G.",
+     ".G::::::::::::H.",
+     ".H::::::::::::C.",
+     ".CGHCGHCGHCGHCC.",
+     "................"
+    ],
+    [
+     "................",
+     ".CCCHCCHCCHCCHC.",
+     ".C::::::::::::C.",
+     ".C::::::::::::H.",
+     ".H::::::::::::C.",
+     ".C::::::::::::C.",
+     ".C::::::::::::H.",
+     ".H::::::::::::C.",
+     ".CCHCCHCCHCCHCC.",
+     "................"
+    ],
+    [
+     "JJJJJJJJJJJJJJJJ",
+     ".G::::::::::::G.",
+     ".G::::::::::::G.",
+     ".G::::::::::::G.",
+     ".G::::::::::::G.",
+     ".G::::::::::::G.",
+     ".G::::::::::::G.",
+     ".G::::::::::::G.",
+     ".G::::::::::::G.",
+     "KKKKKKKKKKKKKKKK"
+    ],
+    [
+     "................",
+     "JJJJJJJJJJJJJJJJ",
+     ".G::::::::::::G.",
+     ".G::::::::::::G.",
+     ".G::::::::::::G.",
+     ".G::::::::::::G.",
+     ".G::::::::::::G.",
+     ".G::::::::::::G.",
+     "KKKKKKKKKKKKKKKK",
+     "................"
+    ],
+    [
+     "................",
+     "................",
+     "JJJJJJJJJJJJJJJJ",
+     ".G::::::::::::G.",
+     ".G::::::::::::G.",
+     ".G::::::::::::G.",
+     ".G::::::::::::G.",
+     "KKKKKKKKKKKKKKKK",
+     "................",
+     "................"
+    ],
+    [
+     "................",
+     "................",
+     "................",
+     "JJJJJJJJJJJJJJJJ",
+     ".G::::::::::::G.",
+     ".G::::::::::::G.",
+     "KKKKKKKKKKKKKKKK",
+     "................",
+     "................",
+     "................"
+    ],
+    [
+     "................",
+     "................",
+     "................",
+     "................",
+     "LLLLLLLLLLLLLLLL",
+     "LLLLLLLLLLLLLLLL",
+     "................",
+     "................",
+     "................",
+     "................"
+    ]
+   ]
+  },
+  {
+   "name": "ember:smelter",
+   "label": "Smelter",
+   "kind": "trade",
+   "size": [
+    10,
+    9,
+    8
+   ],
+   "ground_layer": 0,
+   "foundation": "ember:basalt",
+   "level_tolerance_m": null,
+   "spans": false,
+   "palette": [
+    {
+     "symbol": ".",
+     "cell": "keep"
+    },
+    {
+     "symbol": ":",
+     "cell": "air"
+    },
+    {
+     "symbol": "A",
+     "material": "ember:basalt",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "B",
+     "material": "ember:obsidian",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "C",
+     "material": "ember:workbench",
+     "shape": "ember:table",
+     "orientation": 0
+    },
+    {
+     "symbol": "D",
+     "material": "ember:chest",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "E",
+     "material": "ember:anvil",
+     "shape": "core:slab",
+     "orientation": 0
+    },
+    {
+     "symbol": "F",
+     "material": "ember:ash_brick",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "G",
+     "material": "ember:forge",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "H",
+     "material": "ember:basalt_cobble",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "I",
+     "material": "ember:glass",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "J",
+     "material": "ember:lamp",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "K",
+     "material": "ember:ember_slate",
+     "shape": "core:slab",
+     "orientation": 0
+    },
+    {
+     "symbol": "L",
+     "material": "ember:ember_slate",
+     "shape": "core:stair",
+     "orientation": 2
+    }
+   ],
+   "layers": [
+    [
+     "..........",
+     ".AAAAAAAA.",
+     ".AAAAAAAA.",
+     ".AAAAAAAA.",
+     ".AAAAAAAA.",
+     ".AAAAAAAA.",
+     ".AAAAAAAA.",
+     ".........."
+    ],
+    [
+     "..........",
+     ".BAAAAAAB.",
+     ".ACD::FFA.",
+     ".A::::GFA.",
+     ".AD:E:::A.",
+     ".A::::::A.",
+     ".B::B::BB.",
+     ".........."
+    ],
+    [
+     "..........",
+     ".BHHIHFFB.",
+     ".H::::::H.",
+     ".H:::::JI.",
+     ".I::::::H.",
+     ".H::::::H.",
+     ".B::B::BB.",
+     ".........."
+    ],
+    [
+     "..........",
+     ".BHHHHFFB.",
+     ".H::::::H.",
+     ".H::::::H.",
+     ".H::::::H.",
+     ".H::::::H.",
+     ".BBBBBBBB.",
+     ".........."
+    ],
+    [
+     "..........",
+     ".HHHHHFFH.",
+     ".H::::::H.",
+     ".H::::::H.",
+     ".H::::::H.",
+     ".H::::::H.",
+     "LLLLLLLLLL",
+     "KKKKKKKKKK"
+    ],
+    [
+     "..........",
+     ".HHHHHFFH.",
+     ".H::::::H.",
+     ".H::::::H.",
+     "LLLLLLLLLL",
+     "KKKKKKKKKK",
+     "..........",
+     ".........."
+    ],
+    [
+     "..........",
+     ".HHHHHFFH.",
+     "LLLLLLLLLL",
+     "KKKKKKKKKK",
+     "..........",
+     "..........",
+     "..........",
+     ".........."
+    ],
+    [
+     "LLLLLLLLLL",
+     "KKKKKKFFKK",
+     "..........",
+     "..........",
+     "..........",
+     "..........",
+     "..........",
+     ".........."
+    ],
+    [
+     "..........",
+     "......FF..",
+     "..........",
+     "..........",
+     "..........",
+     "..........",
+     "..........",
+     ".........."
+    ]
+   ]
+  },
+  {
+   "name": "ember:charcoal_kiln",
+   "label": "Charcoal kiln",
+   "kind": "trade",
+   "size": [
+    11,
+    12,
+    10
+   ],
+   "ground_layer": 0,
+   "foundation": "ember:basalt_cobble",
+   "level_tolerance_m": null,
+   "spans": false,
+   "palette": [
+    {
+     "symbol": ".",
+     "cell": "keep"
+    },
+    {
+     "symbol": ":",
+     "cell": "air"
+    },
+    {
+     "symbol": "A",
+     "material": "ember:basalt_cobble",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "B",
+     "material": "ember:soot_planks",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "C",
+     "material": "ember:charred_log",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "D",
+     "material": "ember:workbench",
+     "shape": "ember:table",
+     "orientation": 0
+    },
+    {
+     "symbol": "E",
+     "material": "ember:soot_planks",
+     "shape": "core:slab",
+     "orientation": 0
+    },
+    {
+     "symbol": "F",
+     "material": "ember:ash_brick",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "G",
+     "material": "ember:door",
+     "shape": "ember:panel",
+     "orientation": 0
+    },
+    {
+     "symbol": "H",
+     "material": "ember:oven",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "I",
+     "material": "ember:chest",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "J",
+     "material": "ember:glass",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "K",
+     "material": "ember:magma_tiles",
+     "shape": "core:stair",
+     "orientation": 0
+    },
+    {
+     "symbol": "L",
+     "material": "ember:magma_tiles",
+     "shape": "core:stair",
+     "orientation": 2
+    },
+    {
+     "symbol": "M",
+     "material": "ember:magma_tiles",
+     "shape": "core:stair",
+     "orientation": 1
+    },
+    {
+     "symbol": "N",
+     "material": "ember:lamp",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "O",
+     "material": "ember:magma_tiles",
+     "shape": "core:stair",
+     "orientation": 3
+    },
+    {
+     "symbol": "P",
+     "material": "ember:magma_tiles",
+     "shape": "core:slab",
+     "orientation": 0
+    },
+    {
+     "symbol": "Q",
+     "material": "ember:ash_brick",
+     "shape": "core:slab",
+     "orientation": 0
+    }
+   ],
+   "layers": [
+    [
+     "...........",
+     ".AAAAAAAAA.",
+     ".ABBBBBBBA.",
+     ".ABBBBBBBA.",
+     ".ABBBBBBBA.",
+     ".ABBBBBBBA.",
+     ".ABBBBBBBA.",
+     ".ABBBBBBBA.",
+     ".AAAAAAAAA.",
+     "..........."
+    ],
+    [
+     "....FFF....",
+     ".CAAAAAAAC.",
+     ".AD:FHF:IF.",
+     ".A:::::::A.",
+     ".AEEEE:::A.",
+     ".A:::::::A.",
+     ".A:::::::A.",
+     ".A:::::::A.",
+     ".CAAGGAAAC.",
+     "..........."
+    ],
+    [
+     "....FFF....",
+     ".CFFJFFJFC.",
+     ".F::FFF::F.",
+     ".F:::::::F.",
+     ".J:::::::F.",
+     ".F:::::::J.",
+     ".F:::::::F.",
+     ".J:::::::F.",
+     ".CFJGGJFFC.",
+     "..........."
+    ],
+    [
+     "....PPP....",
+     ".CFFFFFFFC.",
+     ".F:::::::F.",
+     ".F:::::::F.",
+     ".F:::::::F.",
+     ".F:::::::F.",
+     ".F:::::::F.",
+     ".F:::::::F.",
+     ".CFFGGFFFC.",
+     "..........."
+    ],
+    [
+     "KKKKKKKKKKK",
+     "M.:::::::.O",
+     "M.:::::::FO",
+     "M.:::::::.O",
+     "M.:::::::.O",
+     "M.:::N:::.O",
+     "M.:::::::.O",
+     "M.:::::::.O",
+     "M.:CCCC::.O",
+     "LLLLLLLLLLL"
+    ],
+    [
+     "...........",
+     ".KKKKKKKKK.",
+     ".M:::::::F.",
+     ".M:::::::O.",
+     ".M:::::::O.",
+     ".M:::::::O.",
+     ".M:::::::O.",
+     ".M:::::::O.",
+     ".LLLLLLLLL.",
+     "..........."
+    ],
+    [
+     "...........",
+     "...........",
+     "..KKKKKKKF.",
+     "..M:::::O..",
+     "..M:::::O..",
+     "..M:::::O..",
+     "..M:::::O..",
+     "..LLLLLLL..",
+     "...........",
+     "..........."
+    ],
+    [
+     "...........",
+     "...........",
+     ".........F.",
+     "...KKKKK...",
+     "...M:::O...",
+     "...M:::O...",
+     "...LLLLL...",
+     "...........",
+     "...........",
+     "..........."
+    ],
+    [
+     "...........",
+     "...........",
+     ".........F.",
+     "...........",
+     "....PPP....",
+     "....PPP....",
+     "...........",
+     "...........",
+     "...........",
+     "..........."
+    ],
+    [
+     "...........",
+     "...........",
+     ".........F.",
+     "...........",
+     "...........",
+     "...........",
+     "...........",
+     "...........",
+     "...........",
+     "..........."
+    ],
+    [
+     "...........",
+     "...........",
+     ".........F.",
+     "...........",
+     "...........",
+     "...........",
+     "...........",
+     "...........",
+     "...........",
+     "..........."
+    ],
+    [
+     "...........",
+     "...........",
+     ".........Q.",
+     "...........",
+     "...........",
+     "...........",
+     "...........",
+     "...........",
+     "...........",
+     "..........."
+    ]
+   ]
+  },
+  {
+   "name": "ember:ore_stall",
+   "label": "Ore stall",
+   "kind": "trade",
+   "size": [
+    9,
+    6,
+    7
+   ],
+   "ground_layer": 0,
+   "foundation": "ember:basalt_cobble",
+   "level_tolerance_m": null,
+   "spans": false,
+   "palette": [
+    {
+     "symbol": ".",
+     "cell": "keep"
+    },
+    {
+     "symbol": ":",
+     "cell": "air"
+    },
+    {
+     "symbol": "A",
+     "material": "ember:basalt_cobble",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "B",
+     "material": "ember:soot_planks",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "C",
+     "material": "ember:charred_log",
+     "shape": "core:post",
+     "orientation": 0
+    },
+    {
+     "symbol": "D",
+     "material": "ember:ember_cloth",
+     "shape": "core:slab",
+     "orientation": 0
+    },
+    {
+     "symbol": "E",
+     "material": "ember:ember_cloth",
+     "shape": "core:stair",
+     "orientation": 2
+    },
+    {
+     "symbol": "F",
+     "material": "ember:chest",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "G",
+     "material": "ember:lamp",
+     "shape": "core:cube",
+     "orientation": 0
+    }
+   ],
+   "layers": [
+    [
+     ".........",
+     ".ABBBBBA.",
+     ".BBBBBBB.",
+     ".BBBBBBB.",
+     ".BBBBBBB.",
+     ".ABBBBBA.",
+     "........."
+    ],
+    [
+     ".........",
+     ".A.F.F.A.",
+     ".........",
+     ".........",
+     "..BBBBB..",
+     ".A.....A.",
+     "........."
+    ],
+    [
+     ".........",
+     ".C.....C.",
+     ".........",
+     ".........",
+     ".........",
+     ".C.....C.",
+     "........."
+    ],
+    [
+     ".........",
+     ".C.....C.",
+     ".........",
+     ".........",
+     ".........",
+     ".C.....C.",
+     "........."
+    ],
+    [
+     ".........",
+     ".C..G..C.",
+     "DDDDDDDDD",
+     "DDDDDDDDD",
+     "DDDDDDDDD",
+     "DDDDDDDDD",
+     "EEEEEEEEE"
+    ],
+    [
+     "DDDDDDDDD",
+     "DDDDDDDDD",
+     ".........",
+     ".........",
+     ".........",
+     ".........",
+     "........."
+    ]
+   ]
+  },
+  {
+   "name": "ember:basalt_hall",
+   "label": "Basalt hall",
+   "kind": "farm",
+   "size": [
+    13,
+    16,
+    11
+   ],
+   "ground_layer": 0,
+   "foundation": "ember:basalt_cobble",
+   "level_tolerance_m": null,
+   "spans": false,
+   "palette": [
+    {
+     "symbol": ".",
+     "cell": "keep"
+    },
+    {
+     "symbol": ":",
+     "cell": "air"
+    },
+    {
+     "symbol": "A",
+     "material": "ember:basalt_cobble",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "B",
+     "material": "ember:ash_planks",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "C",
+     "material": "ember:ash_plaster",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "D",
+     "material": "ember:chest",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "E",
+     "material": "ember:ash_plaster",
+     "shape": "core:post",
+     "orientation": 0
+    },
+    {
+     "symbol": "F",
+     "material": "ember:door",
+     "shape": "ember:panel",
+     "orientation": 6
+    },
+    {
+     "symbol": "G",
+     "material": "ember:door",
+     "shape": "ember:panel",
+     "orientation": 0
+    },
+    {
+     "symbol": "H",
+     "material": "ember:rust_planks",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "I",
+     "material": "ember:glass",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "J",
+     "material": "ember:soot_shingles",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "K",
+     "material": "ember:soot_shingles",
+     "shape": "core:stair",
+     "orientation": 0
+    },
+    {
+     "symbol": "L",
+     "material": "ember:soot_shingles",
+     "shape": "core:stair",
+     "orientation": 2
+    },
+    {
+     "symbol": "M",
+     "material": "ember:char_planks",
+     "shape": "core:slab",
+     "orientation": 0
+    }
+   ],
+   "layers": [
+    [
+     ".............",
+     ".AAAAAAAAAAA.",
+     ".ABBBBBBBBBA.",
+     ".ABBBBBBBBBA.",
+     ".ABBBBBBBBBA.",
+     ".ABBBBBBBBBA.",
+     ".ABBBBBBBBBA.",
+     ".ABBBBBBBBBA.",
+     ".ABBBBBBBBBA.",
+     ".AAAAAAAAAAA.",
+     "............."
+    ],
+    [
+     ".............",
+     ".CAAAAAAAAAC.",
+     ".ADED::::EDA.",
+     ".A:E:::::E:A.",
+     ".A:E:::::E:A.",
+     ".A:E:::::E:A.",
+     ".A:E:::::E:A.",
+     ".A:::::::::A.",
+     ".A:::::::::A.",
+     ".CAAFFGGAAAC.",
+     "............."
+    ],
+    [
+     ".............",
+     ".CCHICHICHIC.",
+     ".C:::::::::H.",
+     ".H:::::::::I.",
+     ".I:::::::::C.",
+     ".C:::::::::H.",
+     ".H:::::::::I.",
+     ".I:::::::::C.",
+     ".C:::::::::H.",
+     ".CICFFGGICHC.",
+     "............."
+    ],
+    [
+     ".............",
+     ".CCCICCICCIC.",
+     ".C:::::::::C.",
+     ".C:::::::::I.",
+     ".I:::::::::C.",
+     ".C:::::::::C.",
+     ".C:::::::::I.",
+     ".I:::::::::C.",
+     ".C:::::::::C.",
+     ".CICFFGGICCC.",
+     "............."
+    ],
+    [
+     ".............",
+     ".CCHHCHHCHHC.",
+     ".C:::::::::H.",
+     ".H:::::::::H.",
+     ".H:::::::::C.",
+     ".C:::::::::H.",
+     ".H:::::::::H.",
+     ".H:::::::::C.",
+     ".C:::::::::H.",
+     ".CHCCCCCCCHC.",
+     "............."
+    ],
+    [
+     ".............",
+     ".CCHCCHCCHCC.",
+     ".C:::::::::H.",
+     ".H:::::::::C.",
+     ".C:::::::::C.",
+     ".C:::::::::H.",
+     ".H:::::::::C.",
+     ".C:::::::::C.",
+     ".C:::::::::H.",
+     ".CCCHC:HCCHC.",
+     "............."
+    ],
+    [
+     ".............",
+     ".CCHICHICHIC.",
+     ".C:::::::::H.",
+     ".H:::::::::I.",
+     ".I:::::::::C.",
+     ".C:::::::::H.",
+     ".H:::::::::I.",
+     ".I:::::::::C.",
+     ".C:::::::::H.",
+     ".CICHI:HICHC.",
+     "............."
+    ],
+    [
+     ".............",
+     ".CCCICCICCIC.",
+     ".C:::::::::C.",
+     ".C:::::::::I.",
+     ".I:::::::::C.",
+     ".C:::::::::C.",
+     ".C:::::::::I.",
+     ".I:::::::::C.",
+     ".C:::::::::C.",
+     ".CICCICCICCC.",
+     "............."
+    ],
+    [
+     "JJJJJJJJJJJJJ",
+     ".H:::::::::H.",
+     ".H:::::::::H.",
+     ".H:::::::::H.",
+     ".H:::::::::H.",
+     ".H:::::::::H.",
+     ".H:::::::::H.",
+     ".H:::::::::H.",
+     ".H:::::::::H.",
+     ".H:::::::::H.",
+     "JJJJJJJJJJJJJ"
+    ],
+    [
+     "KKKKKKKKKKKKK",
+     ".H:::::::::H.",
+     ".H:::::::::H.",
+     ".H:::::::::H.",
+     ".H:::::::::H.",
+     ".H:::::::::H.",
+     ".H:::::::::H.",
+     ".H:::::::::H.",
+     ".H:::::::::H.",
+     ".H:::::::::H.",
+     "LLLLLLLLLLLLL"
+    ],
+    [
+     ".............",
+     "JJJJJJJJJJJJJ",
+     ".H:::::::::H.",
+     ".H:::::::::H.",
+     ".H:::::::::H.",
+     ".H:::::::::H.",
+     ".H:::::::::H.",
+     ".H:::::::::H.",
+     ".H:::::::::H.",
+     "JJJJJJJJJJJJJ",
+     "............."
+    ],
+    [
+     ".............",
+     "KKKKKKKKKKKKK",
+     ".H:::::::::H.",
+     ".H:::::::::H.",
+     ".H:::::::::H.",
+     ".H:::::::::H.",
+     ".H:::::::::H.",
+     ".H:::::::::H.",
+     ".H:::::::::H.",
+     "LLLLLLLLLLLLL",
+     "............."
+    ],
+    [
+     ".............",
+     ".............",
+     "KKKKKKKKKKKKK",
+     ".H:::::::::H.",
+     ".H:::::::::H.",
+     ".H:::::::::H.",
+     ".H:::::::::H.",
+     ".H:::::::::H.",
+     "LLLLLLLLLLLLL",
+     ".............",
+     "............."
+    ],
+    [
+     ".............",
+     ".............",
+     ".............",
+     "KKKKKKKKKKKKK",
+     ".H:::::::::H.",
+     ".H:::::::::H.",
+     ".H:::::::::H.",
+     "LLLLLLLLLLLLL",
+     ".............",
+     ".............",
+     "............."
+    ],
+    [
+     ".............",
+     ".............",
+     ".............",
+     ".............",
+     "KKKKKKKKKKKKK",
+     ".H:::::::::H.",
+     "LLLLLLLLLLLLL",
+     ".............",
+     ".............",
+     ".............",
+     "............."
+    ],
+    [
+     ".............",
+     ".............",
+     ".............",
+     ".............",
+     ".............",
+     "MMMMMMMMMMMMM",
+     ".............",
+     ".............",
+     ".............",
+     ".............",
+     "............."
+    ]
+   ]
+  },
+  {
+   "name": "ember:cistern",
+   "label": "Cistern",
+   "kind": "centre",
+   "size": [
+    5,
+    11,
+    5
+   ],
+   "ground_layer": 4,
+   "foundation": "ember:basalt_cobble",
+   "level_tolerance_m": null,
+   "spans": false,
+   "palette": [
+    {
+     "symbol": ".",
+     "cell": "keep"
+    },
+    {
+     "symbol": ":",
+     "cell": "air"
+    },
+    {
+     "symbol": "A",
+     "material": "ember:basalt_cobble",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "B",
+     "material": "ember:charred_log",
+     "shape": "core:post",
+     "orientation": 0
+    },
+    {
+     "symbol": "C",
+     "material": "ember:basalt_cobble",
+     "shape": "core:slab",
+     "orientation": 0
+    },
+    {
+     "symbol": "D",
+     "material": "waters:water",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "E",
+     "material": "ember:rust_tiles",
+     "shape": "core:stair",
+     "orientation": 0
+    },
+    {
+     "symbol": "F",
+     "material": "ember:rust_tiles",
+     "shape": "core:stair",
+     "orientation": 2
+    },
+    {
+     "symbol": "G",
+     "material": "ember:rust_tiles",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "H",
+     "material": "ember:rust_tiles",
+     "shape": "core:slab",
+     "orientation": 0
+    }
+   ],
+   "layers": [
+    [
+     ".....",
+     ".AAA.",
+     ".AAA.",
+     ".AAA.",
+     "....."
+    ],
+    [
+     ".....",
+     ".AAA.",
+     ".ADA.",
+     ".AAA.",
+     "....."
+    ],
+    [
+     ".....",
+     ".AAA.",
+     ".ADA.",
+     ".AAA.",
+     "....."
+    ],
+    [
+     ".....",
+     ".AAA.",
+     ".ADA.",
+     ".AAA.",
+     "....."
+    ],
+    [
+     ".....",
+     ".AAA.",
+     ".ADA.",
+     ".AAA.",
+     "....."
+    ],
+    [
+     ".....",
+     ".BCB.",
+     ".C:C.",
+     ".BCB.",
+     "....."
+    ],
+    [
+     ".....",
+     ".B.B.",
+     ".....",
+     ".B.B.",
+     "....."
+    ],
+    [
+     ".....",
+     ".B.B.",
+     ".....",
+     ".B.B.",
+     "....."
+    ],
+    [
+     "EEEEE",
+     ".G:G.",
+     ".G:G.",
+     ".G:G.",
+     "FFFFF"
+    ],
+    [
+     ".....",
+     "EEEEE",
+     ".G:G.",
+     "FFFFF",
+     "....."
+    ],
+    [
+     ".....",
+     ".....",
+     "HHHHH",
+     ".....",
+     "....."
+    ]
+   ]
+  },
+  {
+   "name": "ember:obsidian_spire",
+   "label": "Obsidian spire",
+   "kind": "wild",
+   "size": [
+    7,
+    17,
+    7
+   ],
+   "ground_layer": 2,
+   "foundation": "ember:basalt",
+   "level_tolerance_m": 2,
+   "spans": false,
+   "palette": [
+    {
+     "symbol": ".",
+     "cell": "keep"
+    },
+    {
+     "symbol": ":",
+     "cell": "air"
+    },
+    {
+     "symbol": "A",
+     "material": "ember:ash_brick",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "B",
+     "material": "ember:charred_log",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "C",
+     "material": "ember:lamp",
+     "shape": "core:cube",
+     "orientation": 0
+    }
+   ],
+   "layers": [
+    [
+     "..AAA..",
+     ".AAAAA.",
+     "AAAAAAA",
+     "AAAAAAA",
+     "AAAAAAA",
+     ".AAAAA.",
+     "..AAA.."
+    ],
+    [
+     "..AAA..",
+     ".AAAAA.",
+     "AAAAAAA",
+     "AAAAAAA",
+     "AAAAAAA",
+     ".AAAAA.",
+     "..AAA.."
+    ],
+    [
+     "..BBB..",
+     ".BBBBB.",
+     "BBBBBBB",
+     "BBBBBBB",
+     "BBBBBBB",
+     ".BBBBB.",
+     "..BBB.."
+    ],
+    [
+     "...A...",
+     ".AAAAA.",
+     ".AAAAA.",
+     "AAAAAAA",
+     ".AAAAA.",
+     ".AAAAA.",
+     "...A..."
+    ],
+    [
+     ".......",
+     ".AAAAA.",
+     ".AAAAA.",
+     ".AAAAA.",
+     ".AAAAA.",
+     ".AAAAA.",
+     "......."
+    ],
+    [
+     ".......",
+     "..BBB..",
+     ".BBBBB.",
+     ".BBBBB.",
+     ".BBBBB.",
+     "..BBB..",
+     "......."
+    ],
+    [
+     ".......",
+     "..AAA..",
+     ".AAAAA.",
+     ".AAAAA.",
+     ".AAAAA.",
+     "..AAA..",
+     "......."
+    ],
+    [
+     ".......",
+     "..AAA..",
+     ".AAAAA.",
+     ".AAAAA.",
+     ".AAAAA.",
+     "..AAA..",
+     "......."
+    ],
+    [
+     ".......",
+     "...B...",
+     "..BBB..",
+     ".BBBBB.",
+     "..BBB..",
+     "...B...",
+     "......."
+    ],
+    [
+     ".......",
+     ".......",
+     "..AAA..",
+     "..AAA..",
+     "..AAA..",
+     ".......",
+     "......."
+    ],
+    [
+     ".......",
+     ".......",
+     "..AAA..",
+     "..AAA..",
+     "..AAA..",
+     ".......",
+     "......."
+    ],
+    [
+     ".......",
+     ".......",
+     "..BBB..",
+     "..BBB..",
+     "..BBB..",
+     ".......",
+     "......."
+    ],
+    [
+     ".......",
+     ".......",
+     "...A...",
+     "..AAA..",
+     "...A...",
+     ".......",
+     "......."
+    ],
+    [
+     ".......",
+     ".......",
+     "...A...",
+     "..AAA..",
+     "...A...",
+     ".......",
+     "......."
+    ],
+    [
+     ".......",
+     ".......",
+     ".......",
+     "...B...",
+     ".......",
+     ".......",
+     "......."
+    ],
+    [
+     ".......",
+     ".......",
+     ".......",
+     "...C...",
+     ".......",
+     ".......",
+     "......."
+    ],
+    [
+     ".......",
+     ".......",
+     ".......",
+     "...C...",
+     ".......",
+     ".......",
+     "......."
+    ]
+   ]
+  },
+  {
+   "name": "ember:ash_pit",
+   "label": "Ash pit",
+   "kind": "wild",
+   "size": [
+    9,
+    4,
+    9
+   ],
+   "ground_layer": 3,
+   "foundation": "ember:basalt",
+   "level_tolerance_m": 2,
+   "spans": false,
+   "palette": [
+    {
+     "symbol": ".",
+     "cell": "keep"
+    },
+    {
+     "symbol": ":",
+     "cell": "air"
+    },
+    {
+     "symbol": "A",
+     "material": "ember:basalt",
+     "shape": "core:cube",
+     "orientation": 0
+    }
+   ],
+   "layers": [
+    [
+     ".........",
+     "...:::...",
+     "..:::::..",
+     ".:::::::.",
+     ".:::::::.",
+     ".:::::::.",
+     "..:::::..",
+     "...:::...",
+     "........."
+    ],
+    [
+     ".........",
+     ".........",
+     "..:::::..",
+     "..:::::..",
+     "..:::::..",
+     "..:::::..",
+     "..:::::..",
+     ".........",
+     "........."
+    ],
+    [
+     ".........",
+     ".........",
+     "...:::...",
+     "..:::::..",
+     "..:::::..",
+     "..:::::..",
+     "...:::...",
+     ".........",
+     "........."
+    ],
+    [
+     "...AAA...",
+     ".AA:::AA.",
+     ".A:::::A.",
+     "A:::::::A",
+     "A:::::::A",
+     "A:::::::A",
+     ".A:::::A.",
+     ".AA:::AA.",
+     "...AAA..."
+    ]
+   ]
+  },
+  {
+   "name": "ember:basalt_wall",
+   "label": "Basalt wall",
+   "kind": "wild",
+   "size": [
+    13,
+    6,
+    2
+   ],
+   "ground_layer": 0,
+   "foundation": "ember:basalt",
+   "level_tolerance_m": 2,
+   "spans": false,
+   "palette": [
+    {
+     "symbol": ".",
+     "cell": "keep"
+    },
+    {
+     "symbol": ":",
+     "cell": "air"
+    },
+    {
+     "symbol": "A",
+     "material": "ember:charred_log",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "B",
+     "material": "ember:basalt",
+     "shape": "core:cube",
+     "orientation": 0
+    }
+   ],
+   "layers": [
+    [
+     "ABBBABBBABBBA",
+     "ABBBABBBABBBA"
+    ],
+    [
+     "ABBBA...ABBBA",
+     "ABBBA...ABBBA"
+    ],
+    [
+     "ABBBA...ABBBA",
+     "ABBBA...ABBBA"
+    ],
+    [
+     "ABBBA...ABBBA",
+     "ABBBA...ABBBA"
+    ],
+    [
+     "ABBBABBBABBBA",
+     "ABBBABBBABBBA"
+    ],
+    [
+     "A.B.A.B.A.B.A",
+     "A.B.A.B.A.B.A"
+    ]
+   ]
+  },
+  {
+   "name": "ember:stepped_altar",
+   "label": "Stepped altar",
+   "kind": "wild",
+   "size": [
+    9,
+    5,
+    9
+   ],
+   "ground_layer": 0,
+   "foundation": "ember:basalt",
+   "level_tolerance_m": 2,
+   "spans": false,
+   "palette": [
+    {
+     "symbol": ".",
+     "cell": "keep"
+    },
+    {
+     "symbol": ":",
+     "cell": "air"
+    },
+    {
+     "symbol": "A",
+     "material": "ember:basalt",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "B",
+     "material": "ember:basalt_cobble",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "C",
+     "material": "ember:ash_brick",
+     "shape": "core:cube",
+     "orientation": 0
+    }
+   ],
+   "layers": [
+    [
+     "AAAAAAAAA",
+     "AAAAAAAAA",
+     "AAAAAAAAA",
+     "AAAAAAAAA",
+     "AAAAAAAAA",
+     "AAAAAAAAA",
+     "AAAAAAAAA",
+     "AAAAAAAAA",
+     "AAAAAAAAA"
+    ],
+    [
+     ".........",
+     ".BBBBBBB.",
+     ".BBBBBBB.",
+     ".BBBBBBB.",
+     ".BBBBBBB.",
+     ".BBBBBBB.",
+     ".BBBBBBB.",
+     ".BBBBBBB.",
+     "........."
+    ],
+    [
+     ".........",
+     ".........",
+     "..AAAAA..",
+     "..AAAAA..",
+     "..AAAAA..",
+     "..AAAAA..",
+     "..AAAAA..",
+     ".........",
+     "........."
+    ],
+    [
+     ".........",
+     ".........",
+     ".........",
+     "...BBB...",
+     "...BBB...",
+     "...BBB...",
+     ".........",
+     ".........",
+     "........."
+    ],
+    [
+     ".........",
+     ".........",
+     ".........",
+     ".........",
+     "....C....",
+     ".........",
+     ".........",
+     ".........",
+     "........."
+    ]
+   ]
+  },
+  {
+   "name": "ember:barrow",
+   "label": "Buried barrow",
+   "kind": "wild",
+   "size": [
+    13,
+    9,
+    13
+   ],
+   "ground_layer": 4,
+   "foundation": "ember:basalt",
+   "level_tolerance_m": 2,
+   "spans": false,
+   "palette": [
+    {
+     "symbol": ".",
+     "cell": "keep"
+    },
+    {
+     "symbol": ":",
+     "cell": "air"
+    },
+    {
+     "symbol": "A",
+     "material": "ember:basalt",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "B",
+     "material": "ember:chest",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "C",
+     "material": "ember:basalt_cobble",
+     "shape": "core:stair",
+     "orientation": 0
+    },
+    {
+     "symbol": "D",
+     "material": "ember:ember_slate",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "E",
+     "material": "ember:door",
+     "shape": "ember:panel",
+     "orientation": 6
+    }
+   ],
+   "layers": [
+    [
+     ".............",
+     ".............",
+     ".............",
+     "...AAAAAAA...",
+     "...AAAAAAA...",
+     "...AAAAAAA...",
+     "...AAAAAAA...",
+     "...AAAAAAA...",
+     "...AAAAAAA...",
+     "...AAAAAAA...",
+     ".............",
+     ".............",
+     "............."
+    ],
+    [
+     ".............",
+     ".............",
+     ".............",
+     "...AAAAAAA...",
+     "...A:::::A...",
+     "...A:::::A...",
+     "...A:::::A...",
+     "...A:::::A...",
+     "...AB:CC:A...",
+     "...AAAAAAA...",
+     ".............",
+     ".............",
+     "............."
+    ],
+    [
+     ".............",
+     ".............",
+     ".............",
+     "...AAAAAAA...",
+     "...A:::::A...",
+     "...A:::::A...",
+     "...A:::::A...",
+     "...A:::::A...",
+     "...A:::::A...",
+     "...AAACCAA...",
+     ".............",
+     ".............",
+     "............."
+    ],
+    [
+     ".............",
+     ".............",
+     ".............",
+     "...AAAAAAA...",
+     "...A:::::A...",
+     "...A:::::A...",
+     "...A:::::A...",
+     "...A:::::A...",
+     "...A:::::A...",
+     "...AAA::AA...",
+     "......CC.....",
+     ".............",
+     "............."
+    ],
+    [
+     "......A......",
+     "...AAAAAAA...",
+     "..AAAAAAAAA..",
+     ".AAAAAAAAAAA.",
+     ".AAAAAAAAAAA.",
+     ".AAAAAAAAAAA.",
+     "AAAAAAAAAAAAA",
+     ".AAAAAAAAAAA.",
+     ".AAAAA::AAAA.",
+     ".AAAAA::AAAA.",
+     "..AAAA::AAA..",
+     "...AAACCAA...",
+     "......A......"
+    ],
+    [
+     ".............",
+     "....DDDDD....",
+     "..DDDDDDDDD..",
+     "..DDDDDDDDD..",
+     ".DDDDDDDDDDD.",
+     ".DDDDDDDDDDD.",
+     ".DDDDDDDDDDD.",
+     ".DDDDDDDDDDD.",
+     ".DDDDDDDDDDD.",
+     "..DDDD::DDD..",
+     "..DDDD::DDD..",
+     "....DD::D....",
+     ".....AEEA...."
+    ],
+    [
+     ".............",
+     ".............",
+     "....DDDDD....",
+     "...DDDDDDD...",
+     "..DDDDDDDDD..",
+     "..DDDDDDDDD..",
+     "..DDDDDDDDD..",
+     "..DDDDDDDDD..",
+     "..DDDDDDDDD..",
+     "...DDDDDDD...",
+     "....DD::D....",
+     "......::.....",
+     ".....AEEA...."
+    ],
+    [
+     ".............",
+     ".............",
+     ".............",
+     "......D......",
+     "....DDDDD....",
+     "....DDDDD....",
+     "...DDDDDDD...",
+     "....DDDDD....",
+     "....DDDDD....",
+     "......D......",
+     ".............",
+     "......::.....",
+     ".....AEEA...."
+    ],
+    [
+     ".............",
+     ".............",
+     ".............",
+     ".............",
+     ".............",
+     ".............",
+     ".............",
+     ".............",
+     ".............",
+     ".............",
+     ".............",
+     ".............",
+     ".....AAAA...."
+    ]
+   ]
+  }
+ ]
+}
