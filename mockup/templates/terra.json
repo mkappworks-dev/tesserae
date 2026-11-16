@@ -13,6 +13,7 @@
    "ground_layer": 0,
    "foundation": "terra:cobblestone",
    "level_tolerance_m": null,
+   "spans": false,
    "palette": [
     {
      "symbol": ".",
@@ -254,6 +255,7 @@
    "ground_layer": 0,
    "foundation": "terra:cobblestone",
    "level_tolerance_m": null,
+   "spans": false,
    "palette": [
     {
      "symbol": ".",
@@ -557,6 +559,7 @@
    "ground_layer": 3,
    "foundation": "terra:cobblestone",
    "level_tolerance_m": null,
+   "spans": false,
    "palette": [
     {
      "symbol": ".",
@@ -886,6 +889,7 @@
    "ground_layer": 3,
    "foundation": "terra:ashlar",
    "level_tolerance_m": null,
+   "spans": false,
    "palette": [
     {
      "symbol": ".",
@@ -1273,6 +1277,7 @@
    "ground_layer": 0,
    "foundation": "terra:cobblestone",
    "level_tolerance_m": null,
+   "spans": false,
    "palette": [
     {
      "symbol": ".",
@@ -1520,6 +1525,7 @@
    "ground_layer": 0,
    "foundation": "terra:ashlar",
    "level_tolerance_m": null,
+   "spans": false,
    "palette": [
     {
      "symbol": ".",
@@ -1707,6 +1713,7 @@
    "ground_layer": 0,
    "foundation": "terra:cobblestone",
    "level_tolerance_m": null,
+   "spans": false,
    "palette": [
     {
      "symbol": ".",
@@ -1944,6 +1951,7 @@
    "ground_layer": 0,
    "foundation": "terra:cobblestone",
    "level_tolerance_m": null,
+   "spans": false,
    "palette": [
     {
      "symbol": ".",
@@ -2045,6 +2053,7 @@
    "ground_layer": 0,
    "foundation": "terra:cobblestone",
    "level_tolerance_m": null,
+   "spans": false,
    "palette": [
     {
      "symbol": ".",
@@ -2350,6 +2359,7 @@
    "ground_layer": 3,
    "foundation": "terra:cobblestone",
    "level_tolerance_m": null,
+   "spans": false,
    "palette": [
     {
      "symbol": ".",
@@ -2487,6 +2497,7 @@
    "ground_layer": 3,
    "foundation": "terra:ashlar",
    "level_tolerance_m": 2,
+   "spans": false,
    "palette": [
     {
      "symbol": ".",
@@ -2682,6 +2693,7 @@
    "ground_layer": 2,
    "foundation": "terra:ashlar",
    "level_tolerance_m": 2,
+   "spans": true,
    "palette": [
     {
      "symbol": ".",
@@ -2799,6 +2811,7 @@
    "ground_layer": 0,
    "foundation": "terra:ashlar",
    "level_tolerance_m": 2,
+   "spans": false,
    "palette": [
     {
      "symbol": ".",
@@ -2919,6 +2932,7 @@
    "ground_layer": 0,
    "foundation": "terra:ashlar",
    "level_tolerance_m": 2,
+   "spans": false,
    "palette": [
     {
      "symbol": ".",
@@ -3020,6 +3034,7 @@
    "ground_layer": 0,
    "foundation": "terra:ashlar",
    "level_tolerance_m": 2,
+   "spans": false,
    "palette": [
     {
      "symbol": ".",

@@ -86,6 +86,7 @@ fn hut() -> TemplateDef {
         ground_layer: Some(0),
         foundation: Some("starter_rust:stone".into()),
         level_tolerance_m: None,
+        spans: false,
     }
 }
 

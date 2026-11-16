@@ -89,6 +89,7 @@ fn every_games_templates_are_the_cells_the_approved_mockup_exports() {
             assert_eq!(foundation.as_deref(), t["foundation"].as_str(), "{label}");
             let tolerance = t["level_tolerance_m"].as_f64().unwrap_or(1.0) as f32;
             assert_eq!(template.level_tolerance_m(), tolerance, "{label}");
+            assert_eq!(template.spans(), t["spans"].as_bool().unwrap(), "{label}");
 
             let palette: HashMap<char, String> = t["palette"]
                 .as_array()
@@ -311,6 +312,11 @@ struct Found {
 /// Every Template of `templates` standing whole in `world`: each of its Voxel cells there, and
 /// each Air cell air. Found from its first Voxel cell, by every Voxel of that cell's Material.
 fn standing(world: &Generated, templates: &[Template], size: f32) -> Vec<Found> {
+    standing_of(world, templates, size, true)
+}
+
+/// [`standing`], asking Air cells to be air only if `air`: a span leaves its gap as it was.
+fn standing_of(world: &Generated, templates: &[Template], size: f32, air: bool) -> Vec<Found> {
     let first = |t: &Template, turn| {
         let sampled = t.sample(size, turn);
         let [sx, sy, sz] = sampled.size();
@@ -335,7 +341,7 @@ fn standing(world: &Generated, templates: &[Template], size: f32) -> Vec<Found> 
             let cells: Vec<([i32; 3], Cell)> = (0..sy)
                 .flat_map(|y| (0..sz).flat_map(move |z| (0..sx).map(move |x| [x, y, z])))
                 .map(|at| (at, sampled.cell(at)))
-                .filter(|(_, c)| matches!(c, Cell::Voxel(_) | Cell::Air))
+                .filter(|(_, c)| matches!(c, Cell::Voxel(_)) || (air && *c == Cell::Air))
                 .collect();
             let Some(&(first, Cell::Voxel(anchor))) =
                 cells.iter().find(|(_, c)| matches!(c, Cell::Voxel(_)))
@@ -516,4 +522,43 @@ fn terra_lays_out_a_town_of_cobbled_roads() {
     };
     let town = wells.map(|(_, &rect)| road(rect)).max().unwrap_or(0);
     assert!(town > 100, "{town} cobbled road cells round a well");
+}
+
+/// Each Game's bridge and the water it crosses where it crosses any.
+const BRIDGES: [(&str, &str, &str); 2] = [
+    ("terra", "terra:stone_bridge", "terra:water"),
+    ("tidewater", "tidewater:rope_bridge", "waters:water"),
+];
+
+#[test]
+fn terra_and_tidewater_each_stand_a_bridge_over_a_gap_near_spawn() {
+    for (game, bridge, water) in BRIDGES {
+        let (_install, loaded) = loaded(game, 1.0);
+        let templates = &loaded.tables.templates;
+        let index = templates.iter().position(|t| t.name == bridge).unwrap();
+        assert!(templates[index].spans(), "{bridge}");
+        let generator = Worldgen::new(SEED, 1.0, loaded.world.unwrap())
+            .with_templates(templates)
+            .with_settlements(&loaded.tables.settlements);
+        let world = Generated::new(&generator, HALF_M);
+        let water = material(&loaded, water);
+        let found: Vec<Found> =
+            standing_of(&world, std::slice::from_ref(&templates[index]), 1.0, false);
+        let wet = found
+            .iter()
+            .filter(|f| {
+                let [sx, _, sz] = templates[index].sample(1.0, f.turn).size();
+                let middle = [f.corner[0] + sx / 2, f.corner[2] + sz / 2];
+                (f.corner[1] - 24..f.corner[1] + templates[index].sample(1.0, f.turn).ground()).any(
+                    |y| world.get([middle[0], y, middle[1]]).map(|v| v.material()) == Some(water),
+                )
+            })
+            .count();
+        eprintln!(
+            "BRIDGES {game}: {} in {} km2, {wet} over water",
+            found.len(),
+            (2.0 * HALF_M / 1000.0).powi(2)
+        );
+        assert!(!found.is_empty(), "{game}: no bridge stands near spawn");
+    }
 }

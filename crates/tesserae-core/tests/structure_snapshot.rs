@@ -63,9 +63,13 @@ fn unused() -> Template {
 
 /// The hut is listed second in the Game, behind a Template no Biome lists.
 fn world() -> WorldgenParams {
+    spaced(8.0)
+}
+
+fn spaced(spacing_m: f32) -> WorldgenParams {
     let structures = [BiomeStructure {
         template: 1,
-        spacing_m: 8.0,
+        spacing_m,
         chance: 1.0,
     }];
     let biome = Biome {
@@ -189,4 +193,30 @@ fn a_snapshot_naming_a_material_that_is_gone_fails_as_any_missing_name_does() {
         matches!(&err, Error::Incompatible(m) if m == "missing Material t:wall"),
         "{err}"
     );
+}
+
+#[test]
+fn a_template_that_spans_is_saved_as_one_and_any_other_without_saying() {
+    let plank = Cell::Voxel(Voxel::cube(FLOOR));
+    let bridge = Template::new(
+        "t:bridge".to_owned(),
+        1.0,
+        vec![vec![vec![plank; 6]]],
+        0,
+        None,
+        1.0,
+    )
+    .unwrap()
+    .spanning()
+    .unwrap();
+    for (template, spans) in [(bridge, true), (hut(WALL), false)] {
+        let game = [unused(), template];
+        let json = serde_json::to_value(
+            Generation::capture(spaced(12.0), &game, &[], &mapping()).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(json["templates"][0].get("spans").is_some(), spans, "{json}");
+        let saved: Generation = serde_json::from_value(json).unwrap();
+        assert_eq!(saved.templates(&mapping()).unwrap()[0].spans(), spans);
+    }
 }

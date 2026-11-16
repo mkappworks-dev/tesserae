@@ -192,6 +192,14 @@ Shape, a fluid, a character not in the palette or a grid out of bounds is a load
 error naming the Template. It is data only: no Mod is called and no host call is
 added.
 
+A `template-def` of line 0.3 then gained `spans`, a bool after
+`level-tolerance-m`, false in every Declaration built before it. A Template that
+spans stands only where its longer side crosses a gap, a valley or water,
+between two dry landings. A span under 6 m is a load error naming the Template,
+and a Settlement that draws one is a load error naming the Settlement. A
+Declaration built against the earlier 0.3 text needs a rebuild; a data Mod's
+`spans` defaults to false.
+
 A `biome-def` of line 0.3 then gained a `structures` list before `soundscape`,
 at most 4 `biome-structure` rows of a `template` by full name, a `spacing-m` at
 least twice the Template's longer side and at most 4096 m, and a `chance` above

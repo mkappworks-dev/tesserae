@@ -1147,6 +1147,10 @@ interface content {
         /// How far the ground under the footprint may vary, 0 to 16 metres;
         /// none is 1.
         level-tolerance-m: option<f32>,
+        /// Stands only where its longer side, at least 6 metres, crosses a gap,
+        /// a valley or water, from a dry 2 metre landing at one end to one at
+        /// the other. No Settlement may draw it.
+        spans: bool,
     }
 
     /// A Template a Settlement draws its Plots from.

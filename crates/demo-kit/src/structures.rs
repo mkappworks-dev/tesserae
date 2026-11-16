@@ -9,6 +9,9 @@ pub const MINIMUM: u8 = 3;
 /// Over twice the widest wilderness Template, so they stand apart.
 pub const WILD_SPACING_M: f32 = 256.0;
 pub const WILD_CHANCE: f32 = 0.5;
+/// A bridge's cell searches itself for a gap and seldom finds one, so its lattice is closer than
+/// the other wilderness Templates' and every cell is drawn.
+pub const BRIDGE_SPACING_M: f32 = 128.0;
 
 /// A Template a Settlement draws its Plots from, by its unqualified name.
 pub struct Plot {
@@ -96,6 +99,15 @@ macro_rules! structures {
                     chance: $crate::structures::WILD_CHANCE,
                 })
                 .collect()
+        }
+
+        /// The Game's bridge `name`, a Template that spans water.
+        pub fn bridge(name: &str) -> Vec<crate::tesserae::mods::content::BiomeStructure> {
+            vec![crate::tesserae::mods::content::BiomeStructure {
+                template: $village.qualified(name),
+                spacing_m: $crate::structures::BRIDGE_SPACING_M,
+                chance: 1.0,
+            }]
         }
     };
 }

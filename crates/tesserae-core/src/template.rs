@@ -12,6 +12,10 @@ pub const MAX_TEMPLATE_CELLS: usize = 65_536;
 pub const MAX_TEMPLATES: usize = 64;
 pub const DEFAULT_LEVEL_TOLERANCE_M: f32 = 1.0;
 pub const MAX_LEVEL_TOLERANCE_M: f32 = 16.0;
+/// The ground a Template that spans a gap stands on at each end of its span.
+pub const LANDING_M: f32 = 2.0;
+/// The shortest span: both landings and a middle third clear of them.
+pub const MIN_SPAN_M: f32 = 3.0 * LANDING_M;
 
 /// Slack on metre comparisons, so a side of exactly 64 m or a Voxel centre on a
 /// cell edge does not flip with float error.
@@ -51,6 +55,8 @@ pub enum TemplateError {
         layers: usize,
     },
     Tolerance,
+    /// Spans a gap along a side shorter than [`MIN_SPAN_M`].
+    ShortSpan(f32),
 }
 
 impl std::fmt::Display for TemplateError {
@@ -77,6 +83,11 @@ impl std::fmt::Display for TemplateError {
             TemplateError::Tolerance => write!(
                 f,
                 "level-tolerance-m must be from 0 to {MAX_LEVEL_TOLERANCE_M} metres"
+            ),
+            TemplateError::ShortSpan(metres) => write!(
+                f,
+                "spans {metres} m; a span is at least {MIN_SPAN_M} m, a {LANDING_M} m landing at \
+                 each end"
             ),
         }
     }
@@ -121,6 +132,7 @@ pub struct Template {
     ground_layer: usize,
     foundation: Option<MaterialId>,
     level_tolerance_m: f32,
+    spans: bool,
 }
 
 impl Template {
@@ -180,7 +192,52 @@ impl Template {
             ground_layer,
             foundation,
             level_tolerance_m,
+            spans: false,
         })
+    }
+
+    /// The Template, standing only where its longer side crosses a gap, a valley or water, from
+    /// one bank to the other.
+    pub fn spanning(self) -> Result<Self, TemplateError> {
+        let span_m = self.span_m();
+        if span_m < MIN_SPAN_M - GUARD {
+            return Err(TemplateError::ShortSpan(span_m));
+        }
+        Ok(Template {
+            spans: true,
+            ..self
+        })
+    }
+
+    pub fn spans(&self) -> bool {
+        self.spans
+    }
+
+    /// Its longer side, x when they are equal: the span, when it spans a gap.
+    pub fn span_m(&self) -> f32 {
+        let [x, _, z] = self.size_m();
+        x.max(z)
+    }
+
+    /// How far above the Ground layer's floor, in metres, its lowest Voxel cell between the
+    /// landings from the Ground layer up is: the deck's underside, which the ground under the span
+    /// must not rise into. Piers below the Ground layer reach down into the gap.
+    pub fn underside_m(&self) -> f32 {
+        let along = usize::from(self.size[2] > self.size[0]) * 2;
+        let span_m = self.span_m();
+        let [w, h, d] = self.size;
+        let lowest = (self.ground_layer..h)
+            .find(|&y| {
+                (0..d).any(|z| {
+                    (0..w).any(|x| {
+                        let centre_m = ([x, y, z][along] as f32 + 0.5) * self.cell_m;
+                        (LANDING_M..span_m - LANDING_M).contains(&centre_m)
+                            && matches!(self.cell([x, y, z]), Cell::Voxel(_))
+                    })
+                })
+            })
+            .unwrap_or(h);
+        (lowest as f32 - self.ground_layer as f32) * self.cell_m
     }
 
     pub fn cell_m(&self) -> f32 {

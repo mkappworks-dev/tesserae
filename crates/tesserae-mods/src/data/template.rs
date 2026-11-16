@@ -14,6 +14,8 @@ pub(super) struct Template {
     ground_layer: Option<u32>,
     foundation: Option<String>,
     level_tolerance_m: Option<f32>,
+    #[serde(default)]
+    spans: bool,
 }
 
 #[derive(Deserialize)]
@@ -65,6 +67,7 @@ impl From<Template> for content::TemplateDef {
             ground_layer: t.ground_layer,
             foundation: t.foundation,
             level_tolerance_m: t.level_tolerance_m,
+            spans: t.spans,
         }
     }
 }

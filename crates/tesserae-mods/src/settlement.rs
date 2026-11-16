@@ -106,6 +106,11 @@ fn settlement(
             .iter()
             .position(|t| t.name == template)
             .ok_or_else(|| format!("`{template}` names no Template"))?;
+        if tables.templates[at].spans() {
+            return Err(format!(
+                "`{template}` spans a gap, and a Plot is level ground"
+            ));
+        }
         let is_door = |m| tables.uses.door(m).is_some_and(|d| d.closed == m);
         Ok(Building {
             template: at as u16,

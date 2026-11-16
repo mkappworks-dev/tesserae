@@ -151,7 +151,7 @@ fn refusal(settlements: &str, rows: &str) -> String {
 }
 
 #[test]
-fn a_third_row_a_wide_radius_too_many_plots_or_an_unknown_template_names_the_settlement() {
+fn a_third_row_a_wide_radius_too_many_plots_an_unknown_or_spanning_template_names_the_settlement() {
     let row = "{ settlement = \"t:village\", spacing-m = 120.0 }";
     let third = refusal(&settlement(VILLAGE), &[row; 3].join(", "));
     assert!(
@@ -169,6 +169,20 @@ fn a_third_row_a_wide_radius_too_many_plots_or_an_unknown_template_names_the_set
     assert!(
         unknown.contains("`village`") && unknown.contains("t:castle"),
         "{unknown}"
+    );
+    let bridge = "[[templates]]\nname = \"bridge\"\ncell-m = 1.0\nground-layer = 0\n\
+                  spans = true\nlayers = [[\"pppppp\"]]\n\n[templates.palette]\n\
+                  \"p\" = { material = \"t:planks\" }\n";
+    let spanning = refusal(
+        &format!(
+            "{bridge}{}",
+            settlement(&VILLAGE.replace("t:house", "t:bridge"))
+        ),
+        "",
+    );
+    assert!(
+        spanning.contains("`village`") && spanning.contains("spans a gap"),
+        "{spanning}"
     );
     let missing = refusal(
         &settlement(VILLAGE),

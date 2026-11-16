@@ -674,6 +674,8 @@ pub struct SavedTemplate {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub foundation: Option<String>,
     pub level_tolerance_m: f32,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub spans: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1236,6 +1238,7 @@ fn saved_template(
             .map(|m| mapping.material_name(m))
             .transpose()?,
         level_tolerance_m: t.level_tolerance_m(),
+        spans: t.spans(),
     })
 }
 
@@ -1287,6 +1290,13 @@ fn restored_template(
             .transpose()?,
         t.level_tolerance_m,
     )
+    .and_then(|template| {
+        if t.spans {
+            template.spanning()
+        } else {
+            Ok(template)
+        }
+    })
     .map_err(|e| corrupt(&e.to_string()))
 }
 

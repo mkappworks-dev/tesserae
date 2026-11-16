@@ -151,14 +151,16 @@ Any Mod may declare `[[templates]]`, buildings as data. A Template row is
 `name`, `cell-m` (the grid's cell size in metres), `layers` (from the bottom up,
 each a list of rows along +Z, each row a string of palette characters along +X),
 `ground-layer` (the layer at ground height, counted from 0), an optional
-`foundation` (a solid Material by full name) and an optional `level-tolerance-m`
-(0 to 16, 1 when absent), with a `[templates.palette]` table mapping each
-character to `"keep"`, `"air"`, `"ground"` or `{ material, shape, orientation }`
-(a solid Material and an optional Shape by full name, and an orientation byte
-from 0 to 23). A Template is at most 64 m a side and 65,536 cells, and a World
-holds at most 64. Every Material a Template names must be Obtainable in the
-World, and a fluid, a Grown Material or a Door's open Material is refused; each
-refusal names the Template and the palette character.
+`foundation` (a solid Material by full name), an optional `level-tolerance-m` (0
+to 16, 1 when absent) and an optional `spans` (false when absent: true for a
+bridge, which stands only across a gap, a valley or water), with a
+`[templates.palette]` table mapping each character to `"keep"`, `"air"`,
+`"ground"` or `{ material, shape, orientation }` (a solid Material and an
+optional Shape by full name, and an orientation byte from 0 to 23). A Template
+is at most 64 m a side and 65,536 cells, and a World holds at most 64. Every
+Material a Template names must be Obtainable in the World, and a fluid, a Grown
+Material or a Door's open Material is refused; each refusal names the Template
+and the palette character.
 
 Any Mod may declare `[[settlements]]`: `name`, `radius-m` (above 0, at most 64),
 optional `margin-m` (0 to 64, 16 when absent), optional `centre` (a Template by

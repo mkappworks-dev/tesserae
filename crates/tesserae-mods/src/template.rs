@@ -152,15 +152,17 @@ fn template(
         .as_deref()
         .map(|m| solid(m, registry, tables).map_err(|reason| format!("foundation: {reason}")))
         .transpose()?;
-    Template::new(
+    let template = Template::new(
         name,
         def.cell_m,
         layers,
         ground_layer as usize,
         foundation,
         def.level_tolerance_m.unwrap_or(DEFAULT_LEVEL_TOLERANCE_M),
-    )
-    .map_err(|e| e.to_string())
+    );
+    template
+        .and_then(|t| if def.spans { t.spanning() } else { Ok(t) })
+        .map_err(|e| e.to_string())
 }
 
 fn voxel(

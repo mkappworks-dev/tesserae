@@ -649,7 +649,11 @@ impl Guest for Terra {
                     }),
                     cave_scale: Some(1.5),
                     crop_fields: Vec::new(),
-                    structures: structures::wild(&["ruined_keep", "stone_bridge"]),
+                    structures: [
+                        structures::wild(&["ruined_keep"]),
+                        structures::bridge("stone_bridge"),
+                    ]
+                    .concat(),
                     settlements: structures::village(),
                     surface_features: plants::dry(),
                 },
@@ -705,7 +709,7 @@ impl Guest for Terra {
                     }),
                     cave_scale: Some(0.5),
                     crop_fields: Vec::new(),
-                    structures: structures::wild(&["stone_bridge"]),
+                    structures: structures::bridge("stone_bridge"),
                     settlements: Vec::new(),
                     surface_features: plants::swamp(),
                 },

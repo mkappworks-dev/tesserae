@@ -302,7 +302,11 @@ impl Guest for Tidewater {
                     }),
                     cave_scale: Some(0.0),
                     crop_fields: Vec::new(),
-                    structures: structures::wild(&["lighthouse", "rope_bridge"]),
+                    structures: [
+                        structures::wild(&["lighthouse"]),
+                        structures::bridge("rope_bridge"),
+                    ]
+                    .concat(),
                     settlements: structures::village(),
                     surface_features: [food::feature()]
                         .into_iter()
@@ -341,7 +345,11 @@ impl Guest for Tidewater {
                     }),
                     cave_scale: Some(1.4),
                     crop_fields: Vec::new(),
-                    structures: structures::wild(&["rope_bridge", "stilt_house"]),
+                    structures: [
+                        structures::bridge("rope_bridge"),
+                        structures::wild(&["stilt_house"]),
+                    ]
+                    .concat(),
                     settlements: structures::village(),
                     surface_features: plants::rainforest(),
                 },

@@ -209,6 +209,7 @@ fn every_orientation() -> Declaration {
             ground_layer: Some(0),
             foundation: None,
             level_tolerance_m: None,
+            spans: false,
         })
         .collect();
     Declaration {
@@ -319,6 +320,7 @@ fn component() -> Declaration {
             ground_layer: Some(0),
             foundation: None,
             level_tolerance_m: None,
+            spans: false,
         }],
         ..empty()
     }
@@ -353,7 +355,7 @@ fn toml_layers(layers: &[Vec<String>]) -> String {
 #[test]
 fn a_bad_template_fails_the_load_naming_it_from_data_and_a_component() {
     type Edit = fn(&mut content::TemplateDef);
-    let cases: [(&str, Edit, String, &[&str]); 7] = [
+    let cases: [(&str, Edit, String, &[&str]); 8] = [
         (
             "unknown Material",
             |t| t.palette[0].cell = voxel("t:marble", None),
@@ -397,6 +399,18 @@ fn a_bad_template_fails_the_load_naming_it_from_data_and_a_component() {
             data_hut("[[\"#\"]]", ""),
             &["ground-layer"],
         ),
+        (
+            "spanning 5 m",
+            |t| {
+                t.layers = grid(1, 5, 1);
+                t.spans = true;
+            },
+            data_hut(
+                &toml_layers(&grid(1, 5, 1)),
+                "ground-layer = 0\nspans = true",
+            ),
+            &["spans 5 m", "6"],
+        ),
     ];
     for (what, edit, toml, expected) in cases {
         let mut native = component();
@@ -408,6 +422,23 @@ fn a_bad_template_fails_the_load_naming_it_from_data_and_a_component() {
                 "{what} from {source}: {err}"
             );
         }
+    }
+}
+
+#[test]
+fn a_template_spans_only_when_it_says_from_data_and_a_component() {
+    let (_, templates) = hut().unwrap();
+    assert!(templates.iter().all(|t| !t.spans()));
+    let mut native = component();
+    native.templates[0].layers = grid(3, 6, 1);
+    native.templates[0].spans = true;
+    let toml = data_hut(
+        &toml_layers(&grid(3, 6, 1)),
+        "ground-layer = 0\nspans = true",
+    );
+    for declaration in [native, data(&toml).unwrap()] {
+        let (_, templates) = load(vec![("t", declaration)]).unwrap();
+        assert!(templates[0].spans());
     }
 }
 

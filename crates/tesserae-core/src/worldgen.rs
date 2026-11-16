@@ -9,6 +9,7 @@
 //! Contrast `crate::testgen`, which is tuned in Voxel indices on purpose: it
 //! feeds the benches a fixed surface and makes no World.
 
+mod crossings;
 mod fields;
 mod ground;
 mod layouts;

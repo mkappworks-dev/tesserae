@@ -22,6 +22,9 @@ const TOWN_SPACING_M: f32 = 384.0;
 /// Over twice the widest wilderness Template, so they stand apart.
 const WILD_SPACING_M: f32 = 256.0;
 const WILD_CHANCE: f32 = 0.5;
+/// A bridge's cell searches itself for a gap and seldom finds one: a closer lattice, every cell
+/// drawn.
+const BRIDGE_SPACING_M: f32 = 96.0;
 
 fn plot(name: &str, weight: f32, min: u8, max: u8) -> SettlementPlot {
     SettlementPlot {
@@ -108,4 +111,13 @@ pub fn wild(names: &[&str]) -> Vec<BiomeStructure> {
             chance: WILD_CHANCE,
         })
         .collect()
+}
+
+/// Terra's bridge `name`, a Template that spans water.
+pub fn bridge(name: &str) -> Vec<BiomeStructure> {
+    vec![BiomeStructure {
+        template: format!("terra:{name}"),
+        spacing_m: BRIDGE_SPACING_M,
+        chance: 1.0,
+    }]
 }

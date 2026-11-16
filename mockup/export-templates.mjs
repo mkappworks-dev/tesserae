@@ -20,8 +20,8 @@ for (const file of ["structure-materials.js", "structures.js"])
   vm.runInContext(readFileSync(join(root, "mockup", file), "utf8"), context, {
     filename: file,
   });
-const { GAME_TEMPLATES, materialOf } = vm.runInContext(
-  "({ GAME_TEMPLATES, materialOf })",
+const { GAME_TEMPLATES, materialOf, spans } = vm.runInContext(
+  "({ GAME_TEMPLATES, materialOf, spans })",
   context,
 );
 
@@ -90,6 +90,7 @@ function exportTemplate(t) {
     ground_layer: -lo[1],
     foundation: materialOf(t, { m: "base" }),
     level_tolerance_m: t.kind === "wild" ? WILD_TOLERANCE_M : null,
+    spans: spans(t),
     palette,
     layers: grid.map((layer) => layer.map((row) => row.join(""))),
   };
@@ -110,6 +111,7 @@ function rust(game, templates) {
         ground_layer: ${t.ground_layer},
         foundation: ${str(t.foundation)},
         level_tolerance_m: ${t.level_tolerance_m === null ? "None" : `Some(${t.level_tolerance_m.toFixed(1)})`},
+        spans: ${t.spans},
         palette: &[${t.palette.map((p) => `(${str(p.symbol).replace(/^"|"$/g, "'")}, ${cell(p)})`).join(", ")}],
         layers: &[${t.layers.map((l) => `&[${l.map(str).join(", ")}]`).join(", ")}],
     },`,
@@ -134,6 +136,7 @@ struct Drawn {
     ground_layer: u32,
     foundation: &'static str,
     level_tolerance_m: Option<f32>,
+    spans: bool,
     palette: &'static [(char, Cell)],
     layers: &'static [&'static [&'static str]],
 }
@@ -174,6 +177,7 @@ pub fn templates() -> Vec<TemplateDef> {
             ground_layer: Some(t.ground_layer),
             foundation: Some(t.foundation.into()),
             level_tolerance_m: t.level_tolerance_m,
+            spans: t.spans,
         })
         .collect()
 }

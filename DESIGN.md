@@ -719,10 +719,12 @@ Notes:
   the Server tints Template cell by Template cell. Every Game declares fifteen
   Templates, the `place` Tool and a Settlement (Terra also a town), generated
   from the approved mockup by `mockup/export-templates.mjs`, and the Rust
-  starter a hut. A World freezes the Templates and Settlements it uses in its
-  generation snapshot, so an old World generates what it did, with no new
-  Generator version. How Structures and Settlements are spread and their roads
-  run is described in one place, the authoring guide's
+  starter a hut. Terra's, Meadow's and Tidewater's bridges declare `spans` and
+  stand only across a gap, a valley or water, between two dry landings. A World
+  freezes the Templates and Settlements it uses in its generation snapshot, so
+  an old World generates what it did, with no new Generator version. How
+  Structures and Settlements are spread and their roads run is described in one
+  place, the authoring guide's
   [Where they stand](docs/authoring-guide.md#where-they-stand). See
   [ADR-0029](docs/adr/0029-structures-are-declared-templates-placed-as-pure-functions-of-metres.md).
   Spec and tickets: `.scratch/2026-11-15-phase-20-structures/`.

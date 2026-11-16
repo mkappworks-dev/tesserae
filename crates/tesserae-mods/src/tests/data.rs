@@ -523,6 +523,7 @@ fn component() -> Declaration {
             ground_layer: Some(0),
             foundation: Some("full:rock".into()),
             level_tolerance_m: Some(2.0),
+            spans: false,
         }],
         settlements: vec![content::SettlementDef {
             name: "hamlet".into(),

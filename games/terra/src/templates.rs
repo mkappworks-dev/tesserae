@@ -17,6 +17,7 @@ struct Drawn {
     ground_layer: u32,
     foundation: &'static str,
     level_tolerance_m: Option<f32>,
+    spans: bool,
     palette: &'static [(char, Cell)],
     layers: &'static [&'static [&'static str]],
 }
@@ -27,6 +28,7 @@ const TEMPLATES: [Drawn; 15] = [
         ground_layer: 0,
         foundation: "terra:cobblestone",
         level_tolerance_m: None,
+        spans: false,
         palette: &[
             ('.', Keep),
             (':', Air),
@@ -96,6 +98,7 @@ const TEMPLATES: [Drawn; 15] = [
         ground_layer: 0,
         foundation: "terra:cobblestone",
         level_tolerance_m: None,
+        spans: false,
         palette: &[
             ('.', Keep),
             (':', Air),
@@ -301,6 +304,7 @@ const TEMPLATES: [Drawn; 15] = [
         ground_layer: 3,
         foundation: "terra:cobblestone",
         level_tolerance_m: None,
+        spans: false,
         palette: &[
             ('.', Keep),
             (':', Air),
@@ -527,6 +531,7 @@ const TEMPLATES: [Drawn; 15] = [
         ground_layer: 3,
         foundation: "terra:ashlar",
         level_tolerance_m: None,
+        spans: false,
         palette: &[
             ('.', Keep),
             (':', Air),
@@ -816,6 +821,7 @@ const TEMPLATES: [Drawn; 15] = [
         ground_layer: 0,
         foundation: "terra:cobblestone",
         level_tolerance_m: None,
+        spans: false,
         palette: &[
             ('.', Keep),
             (':', Air),
@@ -995,6 +1001,7 @@ const TEMPLATES: [Drawn; 15] = [
         ground_layer: 0,
         foundation: "terra:ashlar",
         level_tolerance_m: None,
+        spans: false,
         palette: &[
             ('.', Keep),
             (':', Air),
@@ -1109,6 +1116,7 @@ const TEMPLATES: [Drawn; 15] = [
         ground_layer: 0,
         foundation: "terra:cobblestone",
         level_tolerance_m: None,
+        spans: false,
         palette: &[
             ('.', Keep),
             (':', Air),
@@ -1248,6 +1256,7 @@ const TEMPLATES: [Drawn; 15] = [
         ground_layer: 0,
         foundation: "terra:cobblestone",
         level_tolerance_m: None,
+        spans: false,
         palette: &[
             ('.', Keep),
             (':', Air),
@@ -1281,6 +1290,7 @@ const TEMPLATES: [Drawn; 15] = [
         ground_layer: 0,
         foundation: "terra:cobblestone",
         level_tolerance_m: None,
+        spans: false,
         palette: &[
             ('.', Keep),
             (':', Air),
@@ -1513,6 +1523,7 @@ const TEMPLATES: [Drawn; 15] = [
         ground_layer: 3,
         foundation: "terra:cobblestone",
         level_tolerance_m: None,
+        spans: false,
         palette: &[
             ('.', Keep),
             (':', Air),
@@ -1542,6 +1553,7 @@ const TEMPLATES: [Drawn; 15] = [
         ground_layer: 3,
         foundation: "terra:ashlar",
         level_tolerance_m: Some(2.0),
+        spans: false,
         palette: &[
             ('.', Keep),
             (':', Air),
@@ -1577,6 +1589,7 @@ const TEMPLATES: [Drawn; 15] = [
         ground_layer: 2,
         foundation: "terra:ashlar",
         level_tolerance_m: Some(2.0),
+        spans: true,
         palette: &[
             ('.', Keep),
             (':', Air),
@@ -1651,6 +1664,7 @@ const TEMPLATES: [Drawn; 15] = [
         ground_layer: 0,
         foundation: "terra:ashlar",
         level_tolerance_m: Some(2.0),
+        spans: false,
         palette: &[
             ('.', Keep),
             (':', Air),
@@ -1743,6 +1757,7 @@ const TEMPLATES: [Drawn; 15] = [
         ground_layer: 0,
         foundation: "terra:ashlar",
         level_tolerance_m: Some(2.0),
+        spans: false,
         palette: &[
             ('.', Keep),
             (':', Air),
@@ -1811,6 +1826,7 @@ const TEMPLATES: [Drawn; 15] = [
         ground_layer: 0,
         foundation: "terra:ashlar",
         level_tolerance_m: Some(2.0),
+        spans: false,
         palette: &[
             ('.', Keep),
             (':', Air),
@@ -1859,6 +1875,7 @@ pub fn templates() -> Vec<TemplateDef> {
             ground_layer: Some(t.ground_layer),
             foundation: Some(t.foundation.into()),
             level_tolerance_m: t.level_tolerance_m,
+            spans: t.spans,
         })
         .collect()
 }

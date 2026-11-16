@@ -1407,6 +1407,8 @@ async function drawStructure() {
   }
   g.globalAlpha = 1;
 }
+/* A bridge spans: worldgen stands it only where it crosses a gap, a valley or water. */
+const spans = (tpl) => /Bridge$/.test(tpl?.style || "");
 /* Grass round the Structure, and for a bridge a stream through every column it spans in the open. */
 function groundCells(t, tpl) {
   const taken = new Set(
@@ -1419,7 +1421,7 @@ function groundCells(t, tpl) {
         .map((c) => (long ? c.x : c.z)),
     ),
     stream = (x, z) =>
-      /Bridge$/.test(tpl?.style || "") &&
+      spans(tpl) &&
       (long
         ? x >= 0 && x < t.w && !standing.has(x)
         : z >= 0 && z < t.d && !standing.has(z)),

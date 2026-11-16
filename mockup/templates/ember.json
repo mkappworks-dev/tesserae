@@ -13,6 +13,7 @@
    "ground_layer": 0,
    "foundation": "ember:basalt_cobble",
    "level_tolerance_m": null,
+   "spans": false,
    "palette": [
     {
      "symbol": ".",
@@ -254,6 +255,7 @@
    "ground_layer": 0,
    "foundation": "ember:basalt_cobble",
    "level_tolerance_m": null,
+   "spans": false,
    "palette": [
     {
      "symbol": ".",
@@ -557,6 +559,7 @@
    "ground_layer": 3,
    "foundation": "ember:basalt_cobble",
    "level_tolerance_m": null,
+   "spans": false,
    "palette": [
     {
      "symbol": ".",
@@ -886,6 +889,7 @@
    "ground_layer": 3,
    "foundation": "ember:basalt",
    "level_tolerance_m": null,
+   "spans": false,
    "palette": [
     {
      "symbol": ".",
@@ -1273,6 +1277,7 @@
    "ground_layer": 0,
    "foundation": "ember:basalt_cobble",
    "level_tolerance_m": null,
+   "spans": false,
    "palette": [
     {
      "symbol": ".",
@@ -1520,6 +1525,7 @@
    "ground_layer": 0,
    "foundation": "ember:basalt",
    "level_tolerance_m": null,
+   "spans": false,
    "palette": [
     {
      "symbol": ".",
@@ -1707,6 +1713,7 @@
    "ground_layer": 0,
    "foundation": "ember:basalt_cobble",
    "level_tolerance_m": null,
+   "spans": false,
    "palette": [
     {
      "symbol": ".",
@@ -1944,6 +1951,7 @@
    "ground_layer": 0,
    "foundation": "ember:basalt_cobble",
    "level_tolerance_m": null,
+   "spans": false,
    "palette": [
     {
      "symbol": ".",
@@ -2045,6 +2053,7 @@
    "ground_layer": 0,
    "foundation": "ember:basalt_cobble",
    "level_tolerance_m": null,
+   "spans": false,
    "palette": [
     {
      "symbol": ".",
@@ -2350,6 +2359,7 @@
    "ground_layer": 3,
    "foundation": "ember:basalt_cobble",
    "level_tolerance_m": null,
+   "spans": false,
    "palette": [
     {
      "symbol": ".",
@@ -2487,6 +2497,7 @@
    "ground_layer": 2,
    "foundation": "ember:basalt",
    "level_tolerance_m": 2,
+   "spans": false,
    "palette": [
     {
      "symbol": ".",
@@ -2683,6 +2694,7 @@
    "ground_layer": 3,
    "foundation": "ember:basalt",
    "level_tolerance_m": 2,
+   "spans": false,
    "palette": [
     {
      "symbol": ".",
@@ -2758,6 +2770,7 @@
    "ground_layer": 0,
    "foundation": "ember:basalt",
    "level_tolerance_m": 2,
+   "spans": false,
    "palette": [
     {
      "symbol": ".",
@@ -2819,6 +2832,7 @@
    "ground_layer": 0,
    "foundation": "ember:basalt",
    "level_tolerance_m": 2,
+   "spans": false,
    "palette": [
     {
      "symbol": ".",
@@ -2917,6 +2931,7 @@
    "ground_layer": 3,
    "foundation": "ember:basalt",
    "level_tolerance_m": 2,
+   "spans": false,
    "palette": [
     {
      "symbol": ".",

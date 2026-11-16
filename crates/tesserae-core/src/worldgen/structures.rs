@@ -20,10 +20,10 @@ use crate::voxel::Voxel;
 use crate::worldgen::WorldgenParams;
 use crate::worldgen::settlements::LaidSettlement;
 
-const STRUCTURE_SALT: u64 = 0x5717_c7e0_0000_0001;
+pub(super) const STRUCTURE_SALT: u64 = 0x5717_c7e0_0000_0001;
 /// Kept clear of a lattice cell's border by a candidate's point, so its footprint's centre, once
 /// the corner is on whole metres, is still in the cell.
-const INSET_M: f32 = 0.5;
+pub(super) const INSET_M: f32 = 0.5;
 /// A lattice cell's eight neighbours.
 pub(super) const NEIGHBOURS: [[i32; 2]; 8] = [
     [-1, -1],
@@ -38,17 +38,19 @@ pub(super) const NEIGHBOURS: [[i32; 2]; 8] = [
 
 /// One Biome's row, as generation at this Voxel size reads it.
 #[derive(Clone, Copy, Debug)]
-struct Row {
-    biome: BiomeId,
-    row: u64,
-    entry: BiomeStructure,
+pub(super) struct Row {
+    pub(super) biome: BiomeId,
+    pub(super) row: u64,
+    pub(super) entry: BiomeStructure,
     /// Voxels along x, y and z, by turn.
-    sizes: [[i32; 3]; 4],
+    pub(super) sizes: [[i32; 3]; 4],
     /// The lowest Voxel layer of the Ground layer.
-    ground: i32,
-    level_tolerance_m: f32,
+    pub(super) ground: i32,
+    pub(super) level_tolerance_m: f32,
     /// The Template's longer side, in metres.
     longer_m: f32,
+    /// Its Template spans a gap: how far above the Ground layer its deck's underside is.
+    pub(super) underside_m: Option<f32>,
 }
 
 /// Built only when some Biome lists a Structure whose Template the World has, so a World without
@@ -58,7 +60,7 @@ pub(super) struct StructurePass {
     /// In claim order.
     rows: Vec<Row>,
     /// By Biome, a bit for each Template it lists; a World holds at most 64.
-    listed: Vec<u64>,
+    pub(super) listed: Vec<u64>,
     /// The most Voxels a Structure reaches above and below the ground's top Voxel.
     pub(super) above: i32,
     pub(super) below: i32,
@@ -90,6 +92,7 @@ impl StructurePass {
                     ground: sampled.ground(),
                     level_tolerance_m: template.level_tolerance_m(),
                     longer_m: template.size_m()[0].max(template.size_m()[2]),
+                    underside_m: template.spans().then(|| template.underside_m()),
                 });
             }
         }
@@ -151,19 +154,7 @@ impl Worldgen {
     /// metres so it stands alike at every Voxel size; its footprint's centre in metres, inside the
     /// cell; and its priority over its neighbours'.
     fn structure_draw(&self, row: &Row, cell: [i32; 2]) -> Option<(Structure, [f32; 2], u64)> {
-        let h = hashed(
-            self.seed,
-            STRUCTURE_SALT,
-            &[
-                row.biome.index() as u64,
-                row.row,
-                cell[0] as u32 as u64,
-                cell[1] as u32 as u64,
-            ],
-        );
-        if unit(mix(h ^ 1)) >= f64::from(row.entry.chance) {
-            return None;
-        }
+        let h = self.held(row, cell)?;
         let turn = Turn::new((mix(h ^ 2) & 3) as u8);
         let template = &self.templates[usize::from(row.entry.template)];
         let [x_m, _, z_m] = template.size_m();
@@ -191,6 +182,21 @@ impl Worldgen {
             size,
         };
         Some((s, centre_m, mix(h ^ 6)))
+    }
+
+    /// A cell's hash, if the row's chance holds it.
+    pub(super) fn held(&self, row: &Row, cell: [i32; 2]) -> Option<u64> {
+        let h = hashed(
+            self.seed,
+            STRUCTURE_SALT,
+            &[
+                row.biome.index() as u64,
+                row.row,
+                cell[0] as u32 as u64,
+                cell[1] as u32 as u64,
+            ],
+        );
+        (unit(mix(h ^ 1)) < f64::from(row.entry.chance)).then_some(h)
     }
 
     /// A held cell's candidate, if no neighbouring cell's candidate with a higher priority is
@@ -260,6 +266,10 @@ impl Worldgen {
             .into_iter()
             .filter_map(|cell| {
                 self.layouts.structure((index, cell), || {
+                    // A crossing keeps inside its own cell, so it needs no neighbour's draw.
+                    if row.underside_m.is_some() {
+                        return self.crossing(&row, cell);
+                    }
                     let s = self.structure_candidate(&row, cell)?;
                     self.structure_accepts(&row, s)
                 })
@@ -387,15 +397,16 @@ impl Worldgen {
         }
         let template = &self.templates[usize::from(s.template)];
         let sampled = template.sample(self.voxel_size, s.turn);
-        let mut set = |[x, y, z]: [i32; 3], voxel| {
-            let [lx, ly, lz] = [x, y, z].map(|g| g.rem_euclid(size) as usize);
-            chunk.set(lx, ly, lz, voxel);
-        };
+        let local = |at: [i32; 3]| at.map(|g| g.rem_euclid(size) as usize);
         for z in low[2]..high[2] {
             for x in low[0]..high[0] {
+                let landing = !template.spans() || self.on_landing(s, [x, z]);
                 let ground = std::cell::OnceCell::new();
                 for y in low[1]..high[1] {
-                    let voxel = match sampled.cell([x - s.min[0], y - s.min[1], z - s.min[2]]) {
+                    let cell = sampled.cell([x - s.min[0], y - s.min[1], z - s.min[2]]);
+                    let voxel = match cell {
+                        // Under a span the gap stays as it is, ground, water or air.
+                        Cell::Air | Cell::Ground if !landing => continue,
                         Cell::Keep => continue,
                         Cell::Air => Voxel::AIR,
                         Cell::Voxel(v) => v,
@@ -407,7 +418,8 @@ impl Worldgen {
                             sampled.ground_voxel(y - s.min[1], ground)
                         }
                     };
-                    set([x, y, z], voxel);
+                    let [lx, ly, lz] = local([x, y, z]);
+                    chunk.set(lx, ly, lz, voxel);
                 }
             }
         }
@@ -422,14 +434,16 @@ impl Worldgen {
                 if !matches!(
                     sampled.cell([x - s.min[0], 0, z - s.min[2]]),
                     Cell::Voxel(_) | Cell::Ground
-                ) {
+                ) || (template.spans() && !self.on_landing(s, [x, z]))
+                {
                     continue;
                 }
                 let height_m = self.surface_height_m(self.global_m(x), self.global_m(z));
                 let ground = top_index(height_m, 0.0, self.voxel_size);
                 let from = (ground + 1).max(origin[1]);
                 for y in from..s.min[1].min(origin[1] + size) {
-                    set([x, y, z], Voxel::cube(foundation));
+                    let [lx, ly, lz] = local([x, y, z]);
+                    chunk.set(lx, ly, lz, Voxel::cube(foundation));
                 }
             }
         }

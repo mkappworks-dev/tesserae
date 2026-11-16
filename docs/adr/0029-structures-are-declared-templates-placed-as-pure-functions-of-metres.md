@@ -114,6 +114,15 @@ are where the build is narrower or more exact than they say.
   Tool is held) turns the Structure; the Player's facing does not pick it. The
   Tool lays no foundation, and its footprint centres on the anchor with the
   Ground layer level with it.
+- **A bridge searches its cell for a gap.** A Template that declares `spans`
+  stands only where its span crosses a gap from one dry 2 m landing to the
+  other: under the middle third, ground 2 m below the Ground layer, or water
+  half a metre deep somewhere. Its lattice cell tries a 2 m grid of points and
+  four turns and keeps the deepest gap inside the cell, so its row skips the
+  neighbour draw. Under its span its `air` and `ground` cells keep what is
+  there, and the foundation fills only under the landings. On the demo Games'
+  rolling ground, deep dry valleys at a bridge's scale are rare: the bridges
+  found cross water.
 - **The undo journal refuses rather than overflows.** Its cap is 131,072 changed
   Voxels across 128 groups, and a placement over it is refused before landing
   with `TooBigToUndo`, so a placement is always one undo group. An undo lands in
