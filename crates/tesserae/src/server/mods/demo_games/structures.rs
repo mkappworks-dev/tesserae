@@ -729,3 +729,33 @@ fn every_game_stocks_its_settlements_buildings_and_wilderness_biomes_with_loot()
         }
     }
 }
+
+#[test]
+fn every_template_cell_of_a_material_that_fixes_its_shape_is_in_that_shape() {
+    for game in GAMES {
+        let (_install, loaded) = loaded(game, 1.0);
+        let uses = &loaded.tables.uses;
+        for template in &loaded.tables.templates {
+            let [w, h, d] = template.size();
+            for y in 0..h {
+                for z in 0..d {
+                    for x in 0..w {
+                        let Cell::Voxel(v) = template.cell([x, y, z]) else {
+                            continue;
+                        };
+                        if let Some(fixed) = uses.shape(v.material()) {
+                            assert_eq!(
+                                v.shape(),
+                                fixed,
+                                "{}: {} at {:?} is not in its row's Shape",
+                                template.name,
+                                name(&loaded, Kind::Material, usize::from(v.material())),
+                                [x, y, z]
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

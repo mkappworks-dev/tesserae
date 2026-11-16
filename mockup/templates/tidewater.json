@@ -62,7 +62,7 @@
     {
      "symbol": "G",
      "material": "tidewater:workbench",
-     "shape": "core:cube",
+     "shape": "tidewater:table",
      "orientation": 0
     },
     {
@@ -372,7 +372,7 @@
     {
      "symbol": "J",
      "material": "tidewater:workbench",
-     "shape": "core:cube",
+     "shape": "tidewater:table",
      "orientation": 0
     },
     {
@@ -715,7 +715,7 @@
     {
      "symbol": "H",
      "material": "tidewater:workbench",
-     "shape": "core:cube",
+     "shape": "tidewater:table",
      "orientation": 0
     },
     {
@@ -1708,7 +1708,7 @@
     {
      "symbol": "C",
      "material": "tidewater:workbench",
-     "shape": "core:cube",
+     "shape": "tidewater:table",
      "orientation": 0
     },
     {
@@ -1902,7 +1902,7 @@
     {
      "symbol": "D",
      "material": "tidewater:workbench",
-     "shape": "core:cube",
+     "shape": "tidewater:table",
      "orientation": 0
     },
     {

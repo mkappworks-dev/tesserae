@@ -68,7 +68,13 @@ class Grid {
     };
   }
 }
-const M = (m, shape = "cube", turn = 0) => ({ m, shape, turn });
+/* A Station whose Game row fixes its Shape is drawn and exported in it, as a Player's Place puts it. */
+const FIXED_SHAPE = { bench: "table" };
+const M = (m, shape = FIXED_SHAPE[m] || "cube", turn = 0) => ({
+  m,
+  shape,
+  turn,
+});
 
 /*
  * A roof over the wall rectangle, one Voxel of overhang all round. The ridge runs along x;

@@ -62,7 +62,7 @@
     {
      "symbol": "G",
      "material": "terra:workbench",
-     "shape": "core:cube",
+     "shape": "terra:table",
      "orientation": 0
     },
     {
@@ -372,7 +372,7 @@
     {
      "symbol": "J",
      "material": "terra:workbench",
-     "shape": "core:cube",
+     "shape": "terra:table",
      "orientation": 0
     },
     {
@@ -715,7 +715,7 @@
     {
      "symbol": "H",
      "material": "terra:workbench",
-     "shape": "core:cube",
+     "shape": "terra:table",
      "orientation": 0
     },
     {
@@ -1708,7 +1708,7 @@
     {
      "symbol": "C",
      "material": "terra:workbench",
-     "shape": "core:cube",
+     "shape": "terra:table",
      "orientation": 0
     },
     {
@@ -1902,7 +1902,7 @@
     {
      "symbol": "D",
      "material": "terra:workbench",
-     "shape": "core:cube",
+     "shape": "terra:table",
      "orientation": 0
     },
     {
