@@ -11,10 +11,12 @@ use std::sync::Arc;
 
 use super::fields::{hashed, mix, unit};
 use super::structures::Structure;
-use super::{Footprint, Worldgen, top_index};
+use super::{CARDINALS, Footprint, Worldgen, top_index};
 use crate::chunk::{CHUNK_SIZE, Chunk};
 use crate::climate::{BIOMES_SINCE, BiomeId, BiomeSettlement};
+use crate::mesh::POS_Y;
 use crate::settlement::{Building, Settlement};
+use crate::shape::{Orientation, SHAPE_SLAB, SHAPE_STAIR};
 use crate::template::{Template, Turn};
 use crate::voxel::Voxel;
 use crate::worldgen::WorldgenParams;
@@ -35,6 +37,11 @@ const APRON_M: f32 = 2.0;
 const SLOT_M: f32 = 2.0;
 /// How far apart the ground rules ask a Plot's columns.
 const SAMPLE_M: f32 = 1.0;
+/// The most a Plot or a road is cut into or filled over the ground.
+const CUT_FILL_M: f32 = 2.0;
+/// What the ground rules allow at a Plot's sampled columns, short of [`CUT_FILL_M`] so a column
+/// between two samples still keeps within it.
+const SAMPLED_CUT_FILL_M: f32 = 1.5;
 
 /// A cardinal direction's step on the ground plane, indexed as a [`Turn`] takes +Z: +Z, +X, -Z,
 /// -X.
@@ -104,12 +111,14 @@ impl SettlementPass {
         if rows.is_empty() {
             return None;
         }
+        // Levelling and grading lift and sink the ground, and a Plot with it.
+        let lift = (CUT_FILL_M / voxel_size).ceil() as i32 + 1;
         Some(SettlementPass {
             settlements: settlements.into(),
             rows,
             listed,
-            above,
-            below,
+            above: above + lift,
+            below: below + lift,
             reach_m,
         })
     }
@@ -127,7 +136,7 @@ struct Site {
     reach_m: f32,
     /// The way its first road leaves, and its centre's door faces.
     facing: u8,
-    centre: Option<Structure>,
+    centre: Option<(Structure, Lot)>,
 }
 
 impl Site {
@@ -156,8 +165,12 @@ pub(super) struct Town {
     origin_m: [i32; 2],
     side: i32,
     road: Vec<bool>,
+    /// The height, in metres, a road is graded to at each cell's centre.
+    grade: Vec<f32>,
     /// The centre's first, if it has one.
     pub(super) plots: Vec<Structure>,
+    /// Each Plot's ground, levelled; by [`Self::plots`].
+    lots: Vec<Lot>,
 }
 
 impl Town {
@@ -181,10 +194,12 @@ impl Town {
 }
 
 /// A Plot taken, as rectangles in metres `[min, max)`: its Structure, and that widened by the
-/// apron.
+/// apron; and the height its ground is levelled to.
 #[derive(Clone, Copy, Debug)]
 struct Lot {
+    rect: [[f32; 2]; 2],
     kept: [[f32; 2]; 2],
+    height_m: f32,
 }
 
 fn overlap([a_min, a_max]: [[f32; 2]; 2], [b_min, b_max]: [[f32; 2]; 2]) -> bool {
@@ -324,8 +339,7 @@ impl Worldgen {
                 let front = [0, 1].map(|a| {
                     centre_m[a] - FACINGS[usize::from(facing)][a] * (ROAD_HALF_M + APRON_M)
                 });
-                let (structure, _) = self.plot(building, facing, front)?;
-                Some(structure)
+                Some(self.plot(building, facing, front)?)
             }
             None if self.cave_may_cut(x_m, z_m, height_m) => return None,
             None => None,
@@ -341,18 +355,12 @@ impl Worldgen {
     }
 
     /// The Structure `building` stands as on a Plot, turned so its door faces `facing` from
-    /// `door_m`, the point before its door, if the ground there takes it; and the rectangle it
-    /// covers, in metres.
-    fn plot(
-        &self,
-        building: &Building,
-        facing: u8,
-        door_m: [f32; 2],
-    ) -> Option<(Structure, [[f32; 2]; 2])> {
+    /// `door_m`, the point before its door, if the ground there takes it; and its Plot.
+    fn plot(&self, building: &Building, facing: u8, door_m: [f32; 2]) -> Option<(Structure, Lot)> {
         let (turn, corner_m, size_m) = self.turned(building, facing, door_m);
         let rect = [corner_m, [0, 1].map(|a| corner_m[a] + size_m[a])];
         let template = &self.templates[usize::from(building.template)];
-        let height_m = self.plot_ground(template, corner_m, size_m)?;
+        let height_m = self.plot_ground(rect)?;
         let sampled = template.sample(self.voxel_size, turn);
         let size = sampled.size();
         let [x, z] = corner_m.map(|m| (m / self.voxel_size).round() as i32);
@@ -364,7 +372,11 @@ impl Worldgen {
                 min: [x, y, z],
                 size,
             },
-            rect,
+            Lot {
+                rect,
+                kept: widened(rect, APRON_M),
+                height_m,
+            },
         ))
     }
 
@@ -400,44 +412,45 @@ impl Worldgen {
         (turn, corner_m, size_m)
     }
 
-    /// The height a Plot's Structure stands at, the lower median of its footprint's ground, if the
-    /// ground takes it: dry, level to within the Template's tolerance and no cave in its top metre.
-    fn plot_ground(
-        &self,
-        template: &Template,
-        corner_m: [f32; 2],
-        size_m: [f32; 2],
-    ) -> Option<f32> {
+    /// The height a Plot's ground is levelled to, the lower median of its footprint's ground, if
+    /// the ground takes it: dry under the footprint and its apron, no cave in the footprint's top
+    /// metre, and every sampled column within [`SAMPLED_CUT_FILL_M`] of that height.
+    fn plot_ground(&self, [min, max]: [[f32; 2]; 2]) -> Option<f32> {
         let along = |a: usize| {
+            let from = min[a] - APRON_M;
             (0..)
-                .map(|k| k as f32 * SAMPLE_M)
-                .take_while(move |&k_m| k_m < size_m[a])
-                .map(move |k_m| corner_m[a] + k_m)
+                .map(move |k| from + k as f32 * SAMPLE_M)
+                .take_while(move |&m| m < max[a] + APRON_M)
         };
-        let mut heights = Vec::new();
-        let (mut lowest_m, mut highest_m) = (f32::MAX, f32::MIN);
+        let mut columns = Vec::new();
         for z_m in along(1) {
             for x_m in along(0) {
                 let height_m = self.surface_height_m(x_m, z_m);
                 if self.water.is_some_and(|w| height_m < w.level_m) {
                     return None;
                 }
-                (lowest_m, highest_m) = (lowest_m.min(height_m), highest_m.max(height_m));
-                if highest_m - lowest_m > template.level_tolerance_m() {
-                    return None;
-                }
-                heights.push([x_m, z_m, height_m]);
+                let under = (min[0]..max[0]).contains(&x_m) && (min[1]..max[1]).contains(&z_m);
+                columns.push(([x_m, z_m, height_m], under));
             }
         }
-        if heights
+        let mut under: Vec<f32> = columns.iter().filter(|c| c.1).map(|c| c.0[2]).collect();
+        under.sort_by(f32::total_cmp);
+        let level_m = *under.get((under.len().max(1) - 1) / 2)?;
+        if columns
             .iter()
-            .any(|&[x_m, z_m, height_m]| self.cave_may_cut(x_m, z_m, height_m))
+            .any(|c| (c.0[2] - level_m).abs() > SAMPLED_CUT_FILL_M)
         {
             return None;
         }
-        let mut sorted: Vec<f32> = heights.iter().map(|c| c[2]).collect();
-        sorted.sort_by(f32::total_cmp);
-        Some(sorted[(sorted.len() - 1) / 2])
+        // Last, as the dearest ask.
+        if columns
+            .iter()
+            .filter(|c| c.1)
+            .any(|&([x_m, z_m, height_m], _)| self.cave_may_cut(x_m, z_m, height_m))
+        {
+            return None;
+        }
+        Some(level_m)
     }
 
     /// The Settlement a Site grows to: roads branched from its centre, then Plots beside them.
@@ -446,18 +459,7 @@ impl Worldgen {
         let settlement = self.settlement_of(site);
         let radius_m = settlement.radius_m;
         let centre = site.centre_m;
-        let mut lots = Vec::new();
-        let mut plots = Vec::new();
-        if let Some(s) = site.centre {
-            let rect = [
-                [0, 2].map(|a| s.min[a] as f32 * self.voxel_size),
-                [0, 2].map(|a| (s.min[a] + s.size[a]) as f32 * self.voxel_size),
-            ];
-            lots.push(Lot {
-                kept: widened(rect, APRON_M),
-            });
-            plots.push(s);
-        }
+        let (plots, lots): (Vec<_>, Vec<_>) = site.centre.into_iter().unzip();
         let roads = self.roads(site, radius_m, &lots);
         let reach = radius_m.ceil() as i32;
         let origin_m = centre.map(|c| c as i32 - reach);
@@ -469,13 +471,16 @@ impl Worldgen {
             origin_m,
             side,
             road: vec![false; (side * side) as usize],
+            grade: Vec::new(),
             plots,
+            lots,
         };
         for road in &roads {
             for pair in road.windows(2) {
-                self.rasterise(&mut town, pair[0], pair[1], &lots);
+                self.rasterise(&mut town, pair[0], pair[1]);
             }
         }
+        self.grade(&mut town);
 
         let mins: usize = settlement.rules.iter().map(|r| usize::from(r.min)).sum();
         let queue = self.plot_queue(settlement, site.hash);
@@ -522,14 +527,14 @@ impl Worldgen {
                         dx * dx + dz * dz <= radius_m * radius_m
                     });
                     if !inside
-                        || lots.iter().any(|l: &Lot| overlap(l.kept, kept))
+                        || town.lots.iter().any(|l| overlap(l.kept, kept))
                         || town.any_road(kept)
                     {
                         continue;
                     }
                     match self.plot(building, facing, door_m) {
-                        Some((s, _)) => {
-                            lots.push(Lot { kept });
+                        Some((s, lot)) => {
+                            town.lots.push(lot);
                             town.plots.push(s);
                             next += 1;
                         }
@@ -638,7 +643,7 @@ impl Worldgen {
 
     /// Marks the cells of the disc whose centre is within [`ROAD_HALF_M`] of the segment `a..b`,
     /// outside every one of `lots`.
-    fn rasterise(&self, town: &mut Town, a: [f32; 2], b: [f32; 2], lots: &[Lot]) {
+    fn rasterise(&self, town: &mut Town, a: [f32; 2], b: [f32; 2]) {
         let low = [0, 1].map(|i| (a[i].min(b[i]) - ROAD_HALF_M).floor() as i32);
         let high = [0, 1].map(|i| (a[i].max(b[i]) + ROAD_HALF_M).ceil() as i32);
         let [ex, ez] = [b[0] - a[0], b[1] - a[1]];
@@ -651,7 +656,7 @@ impl Worldgen {
                 let [cx, cz] = [0, 1].map(|i| p[i] - town.centre_m[i]);
                 if dx * dx + dz * dz > ROAD_HALF_M * ROAD_HALF_M
                     || cx * cx + cz * cz > town.radius_m * town.radius_m
-                    || lots.iter().any(|l| overlap(l.kept, [p, p]))
+                    || town.lots.iter().any(|l| overlap(l.kept, [p, p]))
                 {
                     continue;
                 }
@@ -663,41 +668,207 @@ impl Worldgen {
         }
     }
 
-    /// Writes a Settlement's roads and Plots that fall in the Chunk at `coord`.
+    /// Grades the roads: the height at each cell's centre midway between the highest surface no
+    /// steeper than [`MAX_ROAD_GRADE`] under the road's ground and the lowest over it, so it never
+    /// climbs faster than that between any two points. A road cell that would be cut or filled by
+    /// more than [`CUT_FILL_M`] is not laid.
+    fn grade(&self, town: &mut Town) {
+        let side = town.side as usize;
+        let at =
+            |i: usize, j: usize| [0, 1].map(|a| town.origin_m[a] as f32 + [i, j][a] as f32 + 0.5);
+        let natural: Vec<f32> = (0..side * side)
+            .map(|c| {
+                let [x, z] = at(c % side, c / side);
+                if town.road[c] {
+                    self.surface_height_m(x, z)
+                } else {
+                    f32::NAN
+                }
+            })
+            .collect();
+        let mut over: Vec<f32> = natural
+            .iter()
+            .map(|h| if h.is_nan() { f32::MAX } else { *h })
+            .collect();
+        let mut under: Vec<f32> = natural
+            .iter()
+            .map(|h| if h.is_nan() { f32::MIN } else { *h })
+            .collect();
+        let step = MAX_ROAD_GRADE * SAMPLE_M;
+        let mut relax = |c: usize, n: usize| {
+            over[c] = over[c].min(over[n] + step);
+            under[c] = under[c].max(under[n] - step);
+        };
+        for c in 0..side * side {
+            if c % side > 0 {
+                relax(c, c - 1);
+            }
+            if c >= side {
+                relax(c, c - side);
+            }
+        }
+        for c in (0..side * side).rev() {
+            if c % side + 1 < side {
+                relax(c, c + 1);
+            }
+            if c + side < side * side {
+                relax(c, c + side);
+            }
+        }
+        town.grade = over
+            .iter()
+            .zip(&under)
+            .map(|(o, u)| (o + u) / 2.0)
+            .collect();
+        for (c, h) in natural.iter().enumerate() {
+            if town.road[c] && (town.grade[c] - h).abs() > CUT_FILL_M {
+                town.road[c] = false;
+            }
+        }
+    }
+
+    /// Writes a Settlement that falls in the Chunk at `coord`: each Plot's ground levelled, then
+    /// its roads graded, then its Plots' Structures.
     pub(super) fn stand_town(&self, chunk: &mut Chunk, coord: [i32; 3], town: &Town) {
         let size = CHUNK_SIZE as i32;
         let origin = coord.map(|c| c * size);
-        let inside = |y: i32| (origin[1]..origin[1] + size).contains(&y);
         let half = self.voxel_size / 2.0;
-        for gz in origin[2]..origin[2] + size {
-            for gx in origin[0]..origin[0] + size {
-                let (x_m, z_m) = (self.global_m(gx), self.global_m(gz));
-                let cell = [(x_m + half).floor() as i32, (z_m + half).floor() as i32];
-                if !town.road_at(cell) {
-                    continue;
-                }
-                let height_m = self.surface_height_m(x_m, z_m);
-                if self.water.is_some_and(|w| height_m < w.level_m) {
-                    continue;
-                }
-                let top = top_index(height_m, 0.0, self.voxel_size);
-                let [lx, lz] = [gx - origin[0], gz - origin[2]].map(|l| l as usize);
-                if inside(top) {
-                    chunk.set(lx, (top - origin[1]) as usize, lz, town.path);
-                }
-                // A smoothing stair on the road would trip whoever walks it.
-                if inside(top + 1) {
-                    chunk.set(lx, (top + 1 - origin[1]) as usize, lz, Voxel::AIR);
+        for lot in &town.lots {
+            let [min, max] = widened(lot.rect, APRON_M);
+            let low =
+                [0, 1].map(|a| ((min[a] / self.voxel_size).floor() as i32).max(origin[a * 2]));
+            let high = [0, 1]
+                .map(|a| ((max[a] / self.voxel_size).ceil() as i32).min(origin[a * 2] + size));
+            for gz in low[1]..high[1] {
+                for gx in low[0]..high[0] {
+                    let (x_m, z_m) = (self.global_m(gx), self.global_m(gz));
+                    let centre = [x_m + half, z_m + half];
+                    let away = (0..2)
+                        .map(|a| (lot.rect[0][a] - centre[a]).max(centre[a] - lot.rect[1][a]))
+                        .fold(0.0f32, f32::max);
+                    if away > APRON_M {
+                        continue;
+                    }
+                    let natural_m = self.surface_height_m(x_m, z_m);
+                    if self.water.is_some_and(|w| natural_m < w.level_m) {
+                        continue;
+                    }
+                    // The apron eases from the Plot's height to the ground just past it.
+                    let blend = away / (APRON_M + SAMPLE_M);
+                    let target_m = (lot.height_m + (natural_m - lot.height_m) * blend)
+                        .clamp(natural_m - CUT_FILL_M, natural_m + CUT_FILL_M);
+                    let Some(ground) = self.column_ground(gx, gz) else {
+                        continue;
+                    };
+                    let top = top_index(target_m, 0.0, self.voxel_size);
+                    self.reshape(
+                        chunk,
+                        origin,
+                        [gx, gz],
+                        natural_m,
+                        top,
+                        Voxel::cube(ground.surface),
+                    );
                 }
             }
         }
+        for gz in origin[2]..origin[2] + size {
+            for gx in origin[0]..origin[0] + size {
+                let (x_m, z_m) = (self.global_m(gx), self.global_m(gz));
+                let Some(half_voxels) = self.road_height(town, [gx, gz]) else {
+                    continue;
+                };
+                let natural_m = self.surface_height_m(x_m, z_m);
+                let top = half_voxels.div_euclid(2) - 1;
+                self.reshape(chunk, origin, [gx, gz], natural_m, top, town.path);
+                if half_voxels % 2 == 0 || !(origin[1]..origin[1] + size).contains(&(top + 1)) {
+                    continue;
+                }
+                let rising: Vec<u8> = CARDINALS
+                    .iter()
+                    .filter(|&&(dx, dz, _)| {
+                        self.road_height(town, [gx + dx, gz + dz]) == Some(half_voxels + 1)
+                    })
+                    .map(|c| c.2)
+                    .collect();
+                let material = town.path.material();
+                let voxel = match rising[..] {
+                    [turn] => Voxel::shaped(material, SHAPE_STAIR, Orientation::new(POS_Y, turn)),
+                    _ => Voxel::shaped(material, SHAPE_SLAB, Orientation::IDENTITY),
+                };
+                let local =
+                    [gx - origin[0], top + 1 - origin[1], gz - origin[2]].map(|l| l as usize);
+                chunk.set(local[0], local[1], local[2], voxel);
+            }
+        }
         for s in &town.plots {
-            self.stand_structure(chunk, coord, s);
+            self.stand_structure(chunk, coord, s, false);
+        }
+    }
+
+    /// The height, in half Voxels, a road's walked surface is at in the column at `(gx, gz)`:
+    /// above the Voxel whose floor is at or under the graded height, as the ground's own top is.
+    /// `None` where no road is laid.
+    fn road_height(&self, town: &Town, [gx, gz]: [i32; 2]) -> Option<i32> {
+        let half = self.voxel_size / 2.0;
+        let (x_m, z_m) = (self.global_m(gx), self.global_m(gz));
+        if !town.road_at([(x_m + half).floor() as i32, (z_m + half).floor() as i32]) {
+            return None;
+        }
+        if self
+            .water
+            .is_some_and(|w| self.surface_height_m(x_m, z_m) < w.level_m)
+        {
+            return None;
+        }
+        let graded_m = town.graded([x_m + half, z_m + half]);
+        Some((graded_m / half).floor() as i32 + 2)
+    }
+
+    /// Moves the top of the column at `(gx, gz)` from the ground's to Voxel `top`, which becomes
+    /// `cap`: soil fills beneath it and air clears above it, through the ground's old top and the
+    /// smoothing stair that may stand on it.
+    fn reshape(
+        &self,
+        chunk: &mut Chunk,
+        origin: [i32; 3],
+        [gx, gz]: [i32; 2],
+        natural_m: f32,
+        top: i32,
+        cap: Voxel,
+    ) {
+        let size = CHUNK_SIZE as i32;
+        let Some(ground) = self.column_ground(gx, gz) else {
+            return;
+        };
+        let natural = top_index(natural_m, 0.0, self.voxel_size);
+        let low = natural.min(top).max(origin[1]);
+        let high = (natural.max(top) + 1).min(origin[1] + size - 1);
+        let [lx, lz] = [gx - origin[0], gz - origin[2]].map(|l| l as usize);
+        for y in low..=high {
+            let voxel = match y.cmp(&top) {
+                std::cmp::Ordering::Less => Voxel::cube(ground.soil),
+                std::cmp::Ordering::Equal => cap,
+                std::cmp::Ordering::Greater => Voxel::AIR,
+            };
+            chunk.set(lx, (y - origin[1]) as usize, lz, voxel);
         }
     }
 }
 
 impl Town {
+    /// The graded height at a point, in metres, between the cells' centres.
+    fn graded(&self, point: [f32; 2]) -> f32 {
+        let side = self.side as usize;
+        let [u, v] = [0, 1].map(|a| point[a] - self.origin_m[a] as f32 - 0.5);
+        let [i, j] = [u, v].map(|t| (t.floor().max(0.0) as usize).min(side - 2));
+        let [s, t] = [u - i as f32, v - j as f32].map(|f| f.clamp(0.0, 1.0));
+        let g = |i: usize, j: usize| self.grade[j * side + i];
+        let near = g(i, j) * (1.0 - s) + g(i + 1, j) * s;
+        let far = g(i, j + 1) * (1.0 - s) + g(i + 1, j + 1) * s;
+        near * (1.0 - t) + far * t
+    }
+
     /// Whether a road cell's centre lies in `rect`, in metres.
     fn any_road(&self, [min, max]: [[f32; 2]; 2]) -> bool {
         let (low, high) = (min.map(|m| m.floor() as i32), max.map(|m| m.ceil() as i32));

@@ -360,14 +360,21 @@ impl Worldgen {
             self.stand_town(chunk, coord, town);
         }
         for s in &claims.structures {
-            self.stand_structure(chunk, coord, s);
+            self.stand_structure(chunk, coord, s, true);
         }
     }
 
     /// Writes a Structure's cells that fall in the Chunk at `coord`: a Keep cell is left, anything
     /// else, Air included, overwrites what is there. Under a Voxel in its lowest layer, the
-    /// foundation Material fills down to the ground.
-    pub(super) fn stand_structure(&self, chunk: &mut Chunk, coord: [i32; 3], s: &Structure) {
+    /// foundation Material fills down to the ground, unless `foundation` is false, where the
+    /// ground has been levelled to it.
+    pub(super) fn stand_structure(
+        &self,
+        chunk: &mut Chunk,
+        coord: [i32; 3],
+        s: &Structure,
+        foundation: bool,
+    ) {
         let size = CHUNK_SIZE as i32;
         let origin = coord.map(|c| c * size);
         let low = [0, 1, 2].map(|a| s.min[a].max(origin[a]));
@@ -401,7 +408,7 @@ impl Worldgen {
                 }
             }
         }
-        let Some(foundation) = template.foundation() else {
+        let Some(foundation) = template.foundation().filter(|_| foundation) else {
             return;
         };
         if origin[1] >= s.min[1] {

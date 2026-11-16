@@ -577,3 +577,220 @@ fn no_single_structure_field_or_tree_stands_in_a_settlement_and_no_structure_in_
         "no single Structure anywhere"
     );
 }
+
+/// Hills enough that Plots are cut and filled and roads climb.
+fn hilly(features: SurfaceFeatures) -> WorldgenParams {
+    WorldgenParams {
+        relief_m: 12.0,
+        ..plain(features)
+    }
+}
+
+/// A World's columns, read from whichever Chunk holds them.
+struct Columns {
+    generator: Worldgen,
+    chunks: std::cell::RefCell<HashMap<[i32; 3], tesserae_core::Chunk>>,
+}
+
+impl Columns {
+    fn new(generator: Worldgen) -> Self {
+        Columns {
+            generator,
+            chunks: Default::default(),
+        }
+    }
+
+    fn at(&self, at: [i32; 3]) -> Voxel {
+        let chunk = at.map(|c| c.div_euclid(SIZE_I));
+        let local = at.map(|c| c.rem_euclid(SIZE_I) as usize);
+        let mut chunks = self.chunks.borrow_mut();
+        chunks
+            .entry(chunk)
+            .or_insert_with(|| self.generator.chunk(chunk[0], chunk[1], chunk[2]))
+            .get(local[0], local[1], local[2])
+    }
+
+    /// The highest non-air Voxel of the column and where it is.
+    fn top(&self, [x, z]: [i32; 2]) -> (i32, Voxel) {
+        let size = self.generator.voxel_size();
+        let (_, high) = self.generator.surface_bounds_m();
+        let mut y = (high / size).ceil() as i32 + 1;
+        loop {
+            let v = self.at([x, y, z]);
+            if !v.is_air() {
+                return (y, v);
+            }
+            y -= 1;
+        }
+    }
+
+    /// The height, in metres, a body walks on in the column: half a Voxel lower on a slab or a
+    /// stair's low side.
+    fn walked_m(&self, column: [i32; 2]) -> f32 {
+        let size = self.generator.voxel_size();
+        let (y, v) = self.top(column);
+        let half = if v.shape() == 0 { 1.0 } else { 0.5 };
+        (y as f32 + half) * size
+    }
+}
+
+/// The columns within `by` metres of a Plot, and outside it.
+fn around(laid: &Laid, f: &Found, by: f32) -> Vec<[i32; 2]> {
+    let reach = (by / laid.size).round() as i32;
+    let [min, max] = laid.rect(f);
+    (min[1] - reach..max[1] + reach)
+        .flat_map(|z| (min[0] - reach..max[0] + reach).map(move |x| [x, z]))
+        .filter(|&[x, z]| !((min[0]..max[0]).contains(&x) && (min[1]..max[1]).contains(&z)))
+        .collect()
+}
+
+#[test]
+fn every_plot_is_level_and_no_cut_or_fill_exceeds_two_metres() {
+    let half_m = 96.0;
+    for size in [1.0, 0.5] {
+        let laid = Laid::scan(size, hilly, half_m);
+        let towns = laid.towns(half_m);
+        assert!(!towns.is_empty(), "{size} m: no Settlement on the hills");
+        let with = Columns::new(generator(size, hilly(listing(true)), village()));
+        let bare = Columns::new(generator(size, hilly(listing(false)), village()));
+        let mut moved_m = 0.0f32;
+        let plots: Vec<_> = laid
+            .found
+            .iter()
+            .filter(|f| towns.iter().any(|&c| laid.holds(f, c)))
+            .collect();
+        assert!(plots.len() > 4, "{size} m: only {} Plots", plots.len());
+        for f in plots {
+            let [min, max] = laid.rect(f);
+            let floor = f.corner[1] + templates()[f.template].sample(size, f.turn).ground();
+            for z in min[1]..max[1] {
+                for x in min[0]..max[0] {
+                    assert!(
+                        !with.at([x, floor - 1, z]).is_air(),
+                        "{size} m: {f:?} is not on level ground at {x}, {z}"
+                    );
+                }
+            }
+            for column in around(&laid, f, 2.0) {
+                if laid.road.contains(&column) {
+                    continue;
+                }
+                let shift_m = (with.top(column).0 - bare.top(column).0) as f32 * size;
+                assert!(
+                    shift_m.abs() <= 2.0,
+                    "{size} m: {f:?} moves {column:?} by {shift_m} m"
+                );
+                moved_m = moved_m.max(shift_m.abs());
+            }
+        }
+        assert!(moved_m >= 0.5, "{size} m: no apron was cut or filled");
+    }
+}
+
+#[test]
+fn the_apron_blends_into_the_ground_with_no_cliff_at_its_edge() {
+    let half_m = 96.0;
+    for size in [1.0, 0.5] {
+        let laid = Laid::scan(size, hilly, half_m);
+        let towns = laid.towns(half_m);
+        let with = Columns::new(generator(size, hilly(listing(true)), village()));
+        let bare = Columns::new(generator(size, hilly(listing(false)), village()));
+        let rects: Vec<_> = laid.found.iter().map(|f| laid.rect(f)).collect();
+        let open = |[x, z]: [i32; 2]| {
+            !laid.road.contains(&[x, z])
+                && !rects.iter().any(|[min, max]| {
+                    (min[0]..max[0]).contains(&x) && (min[1]..max[1]).contains(&z)
+                })
+        };
+        let mut pairs = 0;
+        for f in laid
+            .found
+            .iter()
+            .filter(|f| towns.iter().any(|&c| laid.holds(f, c)))
+        {
+            for column in around(&laid, f, 3.0).into_iter().filter(|&c| open(c)) {
+                for next in [[column[0] + 1, column[1]], [column[0], column[1] + 1]] {
+                    if !open(next) {
+                        continue;
+                    }
+                    pairs += 1;
+                    let step = |c: &Columns| (c.top(column).0 - c.top(next).0).abs() as f32 * size;
+                    // The apron eases 2 m over 3 m at most, on top of the ground's own slope.
+                    let allowed = step(&bare) + 2.0 / 3.0 * size + size;
+                    assert!(
+                        step(&with) <= allowed,
+                        "{size} m: a cliff of {} m between {column:?} and {next:?}",
+                        step(&with)
+                    );
+                }
+            }
+        }
+        assert!(pairs > 100, "{size} m: only {pairs} pairs");
+    }
+}
+
+#[test]
+fn a_road_never_rises_more_than_a_slab_per_step() {
+    let half_m = 64.0;
+    for size in SIZES {
+        let laid = Laid::scan(size, hilly, half_m);
+        let with = Columns::new(generator(size, hilly(listing(true)), village()));
+        let (mut steps, mut climbs) = (0, 0);
+        for &column in &laid.road {
+            let here = with.walked_m(column);
+            for next in [[column[0] + 1, column[1]], [column[0], column[1] + 1]] {
+                if !laid.road.contains(&next) {
+                    continue;
+                }
+                let rise = (with.walked_m(next) - here).abs();
+                assert!(
+                    rise <= size / 2.0 + 1e-4,
+                    "{size} m: the road rises {rise} m from {column:?} to {next:?}"
+                );
+                steps += 1;
+                climbs += usize::from(rise > 0.0);
+            }
+            assert_eq!(with.top(column).1.material(), PATH, "{size} m: {column:?}");
+        }
+        assert!(steps > 200, "{size} m: only {steps} road steps");
+        assert!(climbs > 10, "{size} m: the roads never climb");
+    }
+}
+
+#[test]
+fn wilderness_structures_keep_the_strict_rule_and_are_never_levelled() {
+    let half_m = 96.0;
+    let size = 1.0;
+    let hilly_crowded = |s| WorldgenParams {
+        relief_m: 12.0,
+        ..crowded(s)
+    };
+    let laid = Laid::scan(size, hilly_crowded, half_m);
+    let towns = laid.towns(half_m);
+    assert!(!towns.is_empty());
+    let with = generator(size, hilly_crowded(listing(true)), village());
+    let wild = generator(size, hilly_crowded(listing(false)), village());
+    let changed = changed(&with, &wild, half_m - RADIUS_M - MARGIN_M, false);
+    // Every centre on the lattice, whether its Settlement stood or not.
+    let centres: Vec<[f32; 2]> = (-2..2)
+        .flat_map(|i| (-2..2).map(move |j| [i, j].map(|k| (k as f32 + 0.5) * SPACING_M)))
+        .collect();
+    // A tree that would reach into a disc is left out whole, so its own cells change a little
+    // further out.
+    let tree_m = 6.0;
+    for at in changed.keys() {
+        assert!(
+            centres
+                .iter()
+                .any(|&c| laid.within([at[0], at[2]], c, RADIUS_M + MARGIN_M + tree_m)),
+            "{at:?} changed outside every Settlement's disc and margin"
+        );
+    }
+    assert!(
+        changed.values().any(|(w, _)| w.material() == LONE) || {
+            let lone = Columns::new(with);
+            (-60..60).any(|x| (-60..60).any(|z| lone.top([x, z]).1.material() == LONE))
+        },
+        "no single Structure stands"
+    );
+}
