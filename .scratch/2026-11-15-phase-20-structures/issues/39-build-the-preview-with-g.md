@@ -33,6 +33,8 @@ preview".
       sends the pinned intent; G further away sends nothing, tested.
 - [ ] K and Backspace cancel a pinned preview and keep the Tool; without one
       they put the Tool away, tested.
+- [ ] Left mouse on the pinned preview cancels it; elsewhere it does nothing,
+      tested.
 - [ ] The prompt shows only near a pinned preview, tested.
 
 ## Comments

@@ -1795,7 +1795,7 @@ function structuresPage() {
     s.view === "placing"
       ? `<p class="item-eyebrow">WHAT PLACING DOES</p><div class="structure-keys">${structureLegend(tally)}</div>`
       : `<p class="item-eyebrow">MATERIALS · ALL OBTAINABLE IN ${tpl.game.toUpperCase()}</p><div class="structure-keys">${structureMaterials()}</div>`
-  }<div class="layout-totals"><div><span>Authored</span><b>1.0 m <small>grid</small></b></div><div><span>This World</span><b>${tally.voxel} m <small>Voxels</small></b></div></div><div class="structure-outcome ${tone}" role="status">${text}</div><p class="item-eyebrow">EXAMPLE AIM</p>${seg(GROUNDS, "ground", "structure-ground")}${seg({ ok: "In reach", far: "Too far", inside: "Inside", loading: "Loading" }, "case", "structure-case")}<small>In the game the aim decides these. The browser uses examples. Worldgen's level rule does not apply to a Player's placement.</small></div><footer><small>K opens and closes this list · Pick a Template and aim · R turns · Right mouse pins a preview; near it, G builds it whole and K or Backspace cancels it · K or Backspace puts the Tool away · Z removes it in one step · Left mouse cancels</small>${button("Place here", "structure-place", { primary: true })}${button("Put the Tool away", "structure-exit", { ghost: true })}</footer></section></div>`;
+  }<div class="layout-totals"><div><span>Authored</span><b>1.0 m <small>grid</small></b></div><div><span>This World</span><b>${tally.voxel} m <small>Voxels</small></b></div></div><div class="structure-outcome ${tone}" role="status">${text}</div><p class="item-eyebrow">EXAMPLE AIM</p>${seg(GROUNDS, "ground", "structure-ground")}${seg({ ok: "In reach", far: "Too far", inside: "Inside", loading: "Loading" }, "case", "structure-case")}<small>In the game the aim decides these. The browser uses examples. Worldgen's level rule does not apply to a Player's placement.</small></div><footer><small>K opens and closes this list · Pick a Template and aim · R turns · Right mouse pins a preview; near it, G builds it whole, and K, Backspace or Left mouse on it cancels it · K or Backspace puts the Tool away · Z removes it in one step · Left mouse cancels</small>${button("Place here", "structure-place", { primary: true })}${button("Put the Tool away", "structure-exit", { ghost: true })}</footer></section></div>`;
 }
 function structureHud() {
   if (state.heldTool !== "Place" || state.screen !== "play") return "";
@@ -1805,7 +1805,7 @@ function structureHud() {
     [tone, text] = structureOutcome();
   return `<aside class="layout-status structure-hud"><span>${icon("layout", 18)} Place Tool</span><div class="structure-hud-head"><span class="structure-thumb">${structureThumb(s.template, s.turn)}</span><b>${TEMPLATES[s.template].name} · facing ${FACING[s.turn]}</b></div><small>${tally.size.map((n) => n.toFixed(1)).join(" × ")} m · ${structureNumber(tally.total)} Voxels</small><div class="structure-keys compact">${structureLegend(tally)}</div><div class="structure-outcome ${tone}" role="status">${text}</div><small><kbd>K</kbd> Templates <kbd>R</kbd> Turn</small>${
     s.pinned
-      ? `<small><b>Preview pinned.</b> Come close: G builds it whole, K or Backspace cancels it.</small>`
+      ? `<small><b>Preview pinned.</b> Come close: G builds it whole. K, Backspace or Left mouse on it cancels it.</small>`
       : `<small>Right mouse pins a preview to walk round · K or Backspace puts the Tool away</small>`
   }</aside>`;
 }
@@ -1930,4 +1930,17 @@ document.addEventListener("contextmenu", (e) => {
   e.preventDefault();
   ensureStructure();
   structuresPlace();
+});
+/* Left mouse on a pinned preview cancels it; the browser takes the aim to be on it. */
+document.addEventListener("mousedown", (e) => {
+  if (
+    e.button !== 0 ||
+    state.screen !== "play" ||
+    state.heldTool !== "Place" ||
+    !state.structure?.pinned ||
+    e.target.closest?.("button,a,input,select,textarea,.structure-hud")
+  )
+    return;
+  e.preventDefault();
+  action("structure-unpin");
 });
