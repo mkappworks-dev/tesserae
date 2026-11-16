@@ -111,6 +111,38 @@ impl BiomeStructure {
     }
 }
 
+/// Bounded so a [`Biome`] stays inline and `Copy`.
+pub const MAX_BIOME_SETTLEMENTS: usize = 2;
+
+/// A Settlement a Biome lays out: each square lattice cell `spacing_m` on a side may hold one,
+/// its disc and margin inside the cell.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct BiomeSettlement {
+    /// An index into the World's Settlements.
+    pub settlement: u16,
+    pub spacing_m: f32,
+}
+
+impl BiomeSettlement {
+    const NONE: BiomeSettlement = BiomeSettlement {
+        settlement: 0,
+        spacing_m: 0.0,
+    };
+
+    /// Checked against the Settlement it names, since its spacing's floor is that one's reach.
+    pub fn validate(&self, settlement: &crate::settlement::Settlement) -> Result<(), ParamError> {
+        let reach_m = settlement.radius_m + settlement.margin_m;
+        if !(self.spacing_m >= 2.0 * reach_m && self.spacing_m <= MAX_STRUCTURE_SPACING_M) {
+            return Err(ParamError {
+                field: "biomes.settlements",
+                rule: "spacing must be at least twice the Settlement's radius and margin and at \
+                       most 4096 m",
+            });
+        }
+        Ok(())
+    }
+}
+
 /// Each field in `[0, 1)`.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct Climate {
@@ -990,6 +1022,8 @@ pub struct SurfaceFeatures {
     crop_fields: [CropField; MAX_CROP_FIELDS],
     structure_len: u8,
     structures: [BiomeStructure; MAX_BIOME_STRUCTURES],
+    settlement_len: u8,
+    settlements: [BiomeSettlement; MAX_BIOME_SETTLEMENTS],
 }
 
 impl Default for SurfaceFeatures {
@@ -1006,6 +1040,8 @@ impl SurfaceFeatures {
         crop_fields: [CropField::NONE; MAX_CROP_FIELDS],
         structure_len: 0,
         structures: [BiomeStructure::NONE; MAX_BIOME_STRUCTURES],
+        settlement_len: 0,
+        settlements: [BiomeSettlement::NONE; MAX_BIOME_SETTLEMENTS],
     };
 
     pub fn new(features: &[SurfaceFeature]) -> Result<Self, ParamError> {
@@ -1084,12 +1120,29 @@ impl SurfaceFeatures {
         Ok(self)
     }
 
+    /// This table with `settlements` as its Settlements.
+    pub fn with_settlements(mut self, settlements: &[BiomeSettlement]) -> Result<Self, ParamError> {
+        if settlements.len() > MAX_BIOME_SETTLEMENTS {
+            return Err(ParamError {
+                field: "biomes.settlements",
+                rule: "holds at most 2 Settlements",
+            });
+        }
+        self.settlements[..settlements.len()].copy_from_slice(settlements);
+        self.settlement_len = settlements.len() as u8;
+        Ok(self)
+    }
+
     pub fn as_slice(&self) -> &[SurfaceFeature] {
         &self.features[..self.len as usize]
     }
 
     pub fn structures(&self) -> &[BiomeStructure] {
         &self.structures[..self.structure_len as usize]
+    }
+
+    pub fn settlements(&self) -> &[BiomeSettlement] {
+        &self.settlements[..self.settlement_len as usize]
     }
 
     pub fn crop_fields(&self) -> &[CropField] {

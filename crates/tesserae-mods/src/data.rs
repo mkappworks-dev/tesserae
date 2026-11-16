@@ -61,6 +61,8 @@ struct Data {
     death_marker_kind: Option<String>,
     #[serde(default)]
     templates: Vec<template::Template>,
+    #[serde(default)]
+    settlements: Vec<template::Settlement>,
 }
 
 #[derive(Deserialize)]
@@ -377,5 +379,6 @@ pub(crate) fn parse(id: &str, payload: &CheckedPayload) -> Result<Declaration, M
         marker_kinds: data.marker_kinds.into_iter().map(Into::into).collect(),
         death_marker_kind: data.death_marker_kind,
         templates: data.templates.into_iter().map(Into::into).collect(),
+        settlements: data.settlements.into_iter().map(Into::into).collect(),
     })
 }

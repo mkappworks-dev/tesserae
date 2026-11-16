@@ -71,6 +71,7 @@ fn biomes() -> Vec<BiomeDef> {
             cave_scale: None,
             crop_fields: plants::meadow_fields(),
             structures: Vec::new(),
+            settlements: Vec::new(),
             surface_features: [food::feature()]
                 .into_iter()
                 .chain(plants::meadow())
@@ -89,6 +90,7 @@ fn biomes() -> Vec<BiomeDef> {
             cave_scale: None,
             crop_fields: Vec::new(),
             structures: Vec::new(),
+            settlements: Vec::new(),
             surface_features: [food::feature()]
                 .into_iter()
                 .chain(plants::heath())
@@ -107,6 +109,7 @@ fn biomes() -> Vec<BiomeDef> {
             cave_scale: None,
             crop_fields: Vec::new(),
             structures: Vec::new(),
+            settlements: Vec::new(),
             surface_features: plants::dunes(),
         },
         BiomeDef {
@@ -122,6 +125,7 @@ fn biomes() -> Vec<BiomeDef> {
             cave_scale: None,
             crop_fields: Vec::new(),
             structures: Vec::new(),
+            settlements: Vec::new(),
             surface_features: plants::thicket(),
         },
         BiomeDef {
@@ -137,6 +141,7 @@ fn biomes() -> Vec<BiomeDef> {
             cave_scale: None,
             crop_fields: Vec::new(),
             structures: Vec::new(),
+            settlements: Vec::new(),
             surface_features: plants::fen(),
         },
         BiomeDef {
@@ -152,6 +157,7 @@ fn biomes() -> Vec<BiomeDef> {
             cave_scale: None,
             crop_fields: plants::prairie_fields(),
             structures: Vec::new(),
+            settlements: Vec::new(),
             surface_features: plants::prairie(),
         },
     ]
@@ -442,6 +448,7 @@ impl Guest for Meadow {
             marker_kinds: Vec::new(),
             death_marker_kind: None,
             templates: Vec::new(),
+            settlements: Vec::new(),
             voxel_uses: building::voxel_uses(),
             ores: vec![OreDef {
                 material: "strata:basalt".into(),

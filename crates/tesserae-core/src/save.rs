@@ -576,6 +576,9 @@ pub struct Generation {
     /// World. Absent when no Biome lists a Structure, as in every World saved before them.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub templates: Option<Vec<SavedTemplate>>,
+    /// The Settlements the Biomes lay out, for the same reason. Absent when no Biome lists one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub settlements: Option<Vec<SavedSettlement>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -602,6 +605,49 @@ pub struct SavedBiome {
     /// Absent is a Biome that stands no Structures, as every Biome was before them.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub structures: Vec<SavedStructure>,
+    /// Absent is a Biome that lays out no Settlements, as every Biome was before them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub settlements: Vec<SavedBiomeSettlement>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SavedBiomeSettlement {
+    /// An index into [`Generation::settlements`], not the Game's table.
+    pub settlement: u16,
+    pub spacing_m: f32,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SavedSettlement {
+    pub name: String,
+    pub radius_m: f32,
+    pub margin_m: f32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub centre: Option<SavedBuilding>,
+    pub plots: u8,
+    pub rules: Vec<SavedPlotRule>,
+    pub minimum: u8,
+    pub path: Solid,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SavedBuilding {
+    /// An index into [`Generation::templates`], not the Game's table.
+    pub template: u16,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub door: Option<[u16; 2]>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SavedPlotRule {
+    pub building: SavedBuilding,
+    pub weight: f32,
+    pub min: u8,
+    pub max: u8,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -805,11 +851,12 @@ pub struct SavedOre {
 }
 
 impl Generation {
-    /// `templates` is the Game's table the Biomes' Structures index into; only those a Biome
-    /// lists are kept.
+    /// `templates` and `settlements` are the Game's tables the Biomes' rows index into; only those
+    /// a Biome lists, and the Templates its Settlements use, are kept.
     pub fn capture(
         p: crate::WorldgenParams,
         templates: &[crate::template::Template],
+        settlements: &[crate::settlement::Settlement],
         mapping: &Mapping,
     ) -> Result<Self, Error> {
         mapping.validate()?;
@@ -817,14 +864,31 @@ impl Generation {
         // Version 1 ignores all three, so saving them would pin nothing.
         let has_biomes = p.generator >= crate::climate::BIOMES_SINCE && !p.biomes.is_empty();
         let has_ores = p.generator >= crate::climate::BIOMES_SINCE && !p.ores.is_empty();
-        let mut kept: Vec<u16> = p
-            .biomes
-            .as_slice()
-            .iter()
-            .filter(|_| has_biomes)
+        let listed = || p.biomes.as_slice().iter().filter(|_| has_biomes);
+        let mut towns: Vec<u16> = listed()
+            .flat_map(|b| b.surface_features.settlements())
+            .map(|s| s.settlement)
+            .collect();
+        towns.sort_unstable();
+        towns.dedup();
+        let town = |at: u16| {
+            settlements.get(usize::from(at)).ok_or_else(|| {
+                Error::Corrupt("a Biome's Settlement names a missing Settlement".into())
+            })
+        };
+        let mut kept: Vec<u16> = listed()
             .flat_map(|b| b.surface_features.structures())
             .map(|s| s.template)
             .collect();
+        for &at in &towns {
+            let s = town(at)?;
+            kept.extend(
+                s.centre
+                    .iter()
+                    .chain(s.rules.iter().map(|r| &r.building))
+                    .map(|b| b.template),
+            );
+        }
         kept.sort_unstable();
         kept.dedup();
         let template = |at: u16| {
@@ -835,6 +899,10 @@ impl Generation {
         let saved_templates = kept
             .iter()
             .map(|&at| saved_template(template(at)?, mapping))
+            .collect::<Result<Vec<_>, _>>()?;
+        let saved_settlements = towns
+            .iter()
+            .map(|&at| saved_settlement(town(at)?, &kept, mapping))
             .collect::<Result<Vec<_>, _>>()?;
         Ok(Self {
             sea_level_m: p.sea_level_m,
@@ -855,7 +923,7 @@ impl Generation {
                     p.biomes
                         .as_slice()
                         .iter()
-                        .map(|b| saved_biome(b, &kept, mapping))
+                        .map(|b| saved_biome(b, &kept, &towns, mapping))
                         .collect::<Result<_, _>>()
                 })
                 .transpose()?,
@@ -869,7 +937,41 @@ impl Generation {
                 })
                 .transpose()?,
             templates: (!saved_templates.is_empty()).then_some(saved_templates),
+            settlements: (!saved_settlements.is_empty()).then_some(saved_settlements),
         })
+    }
+
+    /// The World's Settlements, which the rows of [`Self::restore`]'s Biomes index into; their
+    /// Buildings index [`Self::templates`].
+    pub fn settlements(
+        &self,
+        mapping: &Mapping,
+    ) -> Result<Vec<crate::settlement::Settlement>, Error> {
+        let templates = self.templates(mapping)?;
+        let settlements = self
+            .settlements
+            .as_deref()
+            .unwrap_or_default()
+            .iter()
+            .map(|s| {
+                let settlement = restored_settlement(s, mapping)?;
+                settlement
+                    .validate(&templates)
+                    .map_err(|e| Error::Corrupt(format!("Settlement {}: {e}", s.name)))?;
+                Ok(settlement)
+            })
+            .collect::<Result<Vec<_>, Error>>()?;
+        for row in self.biomes.iter().flatten().flat_map(|b| &b.settlements) {
+            let settlement = settlements
+                .get(usize::from(row.settlement))
+                .ok_or_else(|| {
+                    Error::Corrupt("a Biome's Settlement names a missing Settlement".into())
+                })?;
+            restored_biome_settlement(row)
+                .validate(settlement)
+                .map_err(|e| Error::Corrupt(e.to_string()))?;
+        }
+        Ok(settlements)
     }
 
     /// The World's Templates, which the Structures of [`Self::restore`]'s Biomes index into.
@@ -950,7 +1052,12 @@ impl Generation {
     }
 }
 
-fn saved_biome(b: &crate::Biome, kept: &[u16], mapping: &Mapping) -> Result<SavedBiome, Error> {
+fn saved_biome(
+    b: &crate::Biome,
+    kept: &[u16],
+    towns: &[u16],
+    mapping: &Mapping,
+) -> Result<SavedBiome, Error> {
     Ok(SavedBiome {
         name: b.name.to_string(),
         temperature: b.temperature,
@@ -995,6 +1102,81 @@ fn saved_biome(b: &crate::Biome, kept: &[u16], mapping: &Mapping) -> Result<Save
                 chance: s.chance,
             })
             .collect(),
+        settlements: b
+            .surface_features
+            .settlements()
+            .iter()
+            .map(|s| SavedBiomeSettlement {
+                settlement: towns.binary_search(&s.settlement).unwrap_or_default() as u16,
+                spacing_m: s.spacing_m,
+            })
+            .collect(),
+    })
+}
+
+fn restored_biome_settlement(s: &SavedBiomeSettlement) -> crate::BiomeSettlement {
+    crate::BiomeSettlement {
+        settlement: s.settlement,
+        spacing_m: s.spacing_m,
+    }
+}
+
+fn saved_settlement(
+    s: &crate::settlement::Settlement,
+    kept: &[u16],
+    mapping: &Mapping,
+) -> Result<SavedSettlement, Error> {
+    let building = |b: &crate::settlement::Building| SavedBuilding {
+        template: kept.binary_search(&b.template).unwrap_or_default() as u16,
+        door: b.door,
+    };
+    Ok(SavedSettlement {
+        name: s.name.clone(),
+        radius_m: s.radius_m,
+        margin_m: s.margin_m,
+        centre: s.centre.as_ref().map(building),
+        plots: s.plots,
+        rules: s
+            .rules
+            .iter()
+            .map(|r| SavedPlotRule {
+                building: building(&r.building),
+                weight: r.weight,
+                min: r.min,
+                max: r.max,
+            })
+            .collect(),
+        minimum: s.minimum,
+        path: mapping.voxel(s.path)?,
+    })
+}
+
+fn restored_settlement(
+    s: &SavedSettlement,
+    mapping: &Mapping,
+) -> Result<crate::settlement::Settlement, Error> {
+    let building = |b: &SavedBuilding| crate::settlement::Building {
+        template: b.template,
+        door: b.door,
+    };
+    Ok(crate::settlement::Settlement {
+        name: s.name.clone(),
+        radius_m: s.radius_m,
+        margin_m: s.margin_m,
+        centre: s.centre.as_ref().map(building),
+        plots: s.plots,
+        rules: s
+            .rules
+            .iter()
+            .map(|r| crate::settlement::PlotRule {
+                building: building(&r.building),
+                weight: r.weight,
+                min: r.min,
+                max: r.max,
+            })
+            .collect(),
+        minimum: s.minimum,
+        path: mapping.restore_voxel(&s.path)?,
     })
 }
 
@@ -1168,9 +1350,15 @@ fn restored_features(b: &SavedBiome, mapping: &Mapping) -> Result<crate::Surface
         .map(|f| restored_crop_field(f, mapping))
         .collect::<Result<Vec<_>, Error>>()?;
     let structures: Vec<_> = b.structures.iter().map(restored_structure).collect();
+    let settlements: Vec<_> = b
+        .settlements
+        .iter()
+        .map(restored_biome_settlement)
+        .collect();
     crate::SurfaceFeatures::new(&features)
         .and_then(|table| table.with_crop_fields(&fields))
         .and_then(|table| table.with_structures(&structures))
+        .and_then(|table| table.with_settlements(&settlements))
         .map_err(|e| Error::Corrupt(e.to_string()))
 }
 
@@ -1619,7 +1807,7 @@ impl Commit {
         self.content.require(installed)?;
         let mapping = self.content.validation_mapping()?;
         self.parameters.restore(&mapping, self.generator)?;
-        self.parameters.templates(&mapping)?;
+        self.parameters.settlements(&mapping)?;
         let mut coords = BTreeSet::new();
         for chunk in &self.chunks {
             if !coords.insert(chunk.coord) {

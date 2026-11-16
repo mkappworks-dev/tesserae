@@ -103,6 +103,7 @@ pub(super) fn empty() -> Declaration {
         marker_kinds: Vec::new(),
         death_marker_kind: None,
         templates: Vec::new(),
+        settlements: Vec::new(),
         voxel_uses: Vec::new(),
     }
 }

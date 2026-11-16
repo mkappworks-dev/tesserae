@@ -151,6 +151,7 @@ fn a_mods_soundscape_has_no_context_and_may_use_the_games_sounds() {
         surface_features: vec![],
         crop_fields: Vec::new(),
         structures: Vec::new(),
+        settlements: Vec::new(),
         soundscape: Some("m:desert".into()),
     });
     let sounds = load(vec![("g", game()), ("m", desert)]).unwrap();
@@ -360,6 +361,7 @@ fn biome_soundscape_resolves_and_unknown_name_is_refused() {
         surface_features: vec![],
         crop_fields: Vec::new(),
         structures: Vec::new(),
+        settlements: Vec::new(),
         soundscape: Some("g:surface".into()),
     });
     let resolved = load(vec![("g", d.clone())]).unwrap();

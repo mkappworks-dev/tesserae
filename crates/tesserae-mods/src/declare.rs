@@ -8,11 +8,12 @@ pub const DEFAULT_REMOVE_TIME: Duration = Duration::from_millis(350);
 
 use tesserae_core::survival::MAX_SURVIVAL_VALUE;
 use tesserae_core::{
-    AIR, Biome, BiomeId, BiomeName, BiomeSet, BiomeStructure, BiomeTable, Burn, CombustionDef,
-    FluidDef, GroundParams, Heat, MAX_BIOME_STRUCTURES, MAX_BIOMES, MAX_CAVE_SCALE, MAX_ORES,
-    MaterialId, Ore, OreTable, ParamError, Phase, Reactant, ReactionDef, Side, SkyFog,
-    SurfaceFeature, SurfaceFeatures, SurfaceFruit, SurfacePlant, SurfacePlantKind, SurfaceTree,
-    SurfaceVine, SurvivalRules, Tables, Voxel, VoxelUse, WaterParams, WorldgenParams,
+    AIR, Biome, BiomeId, BiomeName, BiomeSet, BiomeSettlement, BiomeStructure, BiomeTable, Burn,
+    CombustionDef, FluidDef, GroundParams, Heat, MAX_BIOME_SETTLEMENTS, MAX_BIOME_STRUCTURES,
+    MAX_BIOMES, MAX_CAVE_SCALE, MAX_ORES, MaterialId, Ore, OreTable, ParamError, Phase, Reactant,
+    ReactionDef, Side, SkyFog, SurfaceFeature, SurfaceFeatures, SurfaceFruit, SurfacePlant,
+    SurfacePlantKind, SurfaceTree, SurfaceVine, SurvivalRules, Tables, Voxel, VoxelUse,
+    WaterParams, WorldgenParams,
 };
 
 use tesserae_core::plant::{Direction as PlantDirection, Kind as PlantKind};
@@ -167,6 +168,7 @@ pub struct Behaviour {
     pub(crate) marker_kinds: Vec<content::MarkerKindDef>,
     pub(crate) death_marker_kind: Option<String>,
     pub(crate) templates: Vec<content::TemplateDef>,
+    pub(crate) settlements: Vec<content::SettlementDef>,
     /// Each Material's tags, by full name, for the Plants that name a `#tag`.
     pub(crate) material_tags: Vec<(String, Vec<String>)>,
     lake: Option<content::WaterParams>,
@@ -518,6 +520,7 @@ pub fn apply(
             marker_kinds: declaration.marker_kinds,
             death_marker_kind: declaration.death_marker_kind,
             templates: declaration.templates,
+            settlements: declaration.settlements,
             material_tags,
             lake,
             ground,
@@ -904,6 +907,48 @@ fn crop_field(
     Ok(field)
 }
 
+/// A Biome's Settlement rows, each naming one of the World's Settlements, which resolve first.
+fn biome_settlements(
+    b: &Behaviour,
+    biome: &str,
+    rows: &[content::BiomeSettlement],
+    tables: &Tables,
+) -> Result<Vec<BiomeSettlement>, ModError> {
+    let bad = |index, rule: String| ModError::BadSettlement {
+        id: b.mod_id.clone(),
+        biome: biome.to_owned(),
+        index,
+        rule,
+    };
+    if let Some(extra) = rows.get(MAX_BIOME_SETTLEMENTS) {
+        return Err(bad(
+            MAX_BIOME_SETTLEMENTS,
+            format!(
+                "`{}`: a Biome lists at most {MAX_BIOME_SETTLEMENTS} Settlements",
+                extra.settlement
+            ),
+        ));
+    }
+    rows.iter()
+        .enumerate()
+        .map(|(index, row)| {
+            let at = tables
+                .settlements
+                .iter()
+                .position(|s| s.name == row.settlement)
+                .ok_or_else(|| bad(index, format!("`{}` names no Settlement", row.settlement)))?;
+            let settlement = BiomeSettlement {
+                settlement: at as u16,
+                spacing_m: row.spacing_m,
+            };
+            settlement
+                .validate(&tables.settlements[at])
+                .map_err(|e| bad(index, format!("`{}`: {}", row.settlement, e.rule)))?;
+            Ok(settlement)
+        })
+        .collect()
+}
+
 /// A Biome's Structure rows, each naming one of the World's Templates, which resolve first.
 fn biome_structures(
     b: &Behaviour,
@@ -1061,6 +1106,7 @@ pub fn resolve_biomes(
                 .map(|(index, f)| crop_field(b, row, &def.name, index, f, tables, registry))
                 .collect::<Result<Vec<_>, _>>()?;
             let structures = biome_structures(b, &def.name, &def.structures, tables)?;
+            let settlements = biome_settlements(b, &def.name, &def.settlements, tables)?;
             biomes.push(Biome {
                 name: BiomeName::new(&format!("{}:{}", b.mod_id, def.name)).map_err(bad)?,
                 temperature: def.temperature,
@@ -1074,6 +1120,7 @@ pub fn resolve_biomes(
                 surface_features: SurfaceFeatures::new(&features)
                     .and_then(|table| table.with_crop_fields(&crop_fields))
                     .and_then(|table| table.with_structures(&structures))
+                    .and_then(|table| table.with_settlements(&settlements))
                     .map_err(bad)?,
             });
         }

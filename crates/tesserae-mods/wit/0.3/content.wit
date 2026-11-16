@@ -760,6 +760,9 @@ interface content {
         /// At most 4 Templates world generation stands in this Biome as
         /// Structures. Empty stands none.
         structures: list<biome-structure>,
+        /// At most 2 Settlements world generation lays out in this Biome. Empty
+        /// lays out none.
+        settlements: list<biome-settlement>,
         /// Optional Soundscape full name, resolved across loaded Mods.
         soundscape: option<string>,
     }
@@ -858,6 +861,19 @@ interface content {
         spacing-m: f32,
         /// Above 0 and at most 1.
         chance: f32,
+    }
+
+    /// A Settlement a Biome lays out: each square of a lattice `spacing-m` on
+    /// a side may hold one, its disc and margin inside the square, where the
+    /// ground at its centre takes it. Its layout is a pure function of the
+    /// World seed and the square, so it is whole across Chunk borders and the
+    /// same at every Voxel size. It claims ground before single Structures,
+    /// crop fields, trees and scatter.
+    record biome-settlement {
+        /// A Settlement, `<mod id>:<name>`, from any loaded Mod.
+        settlement: string,
+        /// At least twice the Settlement's radius and margin, at most 4096 m.
+        spacing-m: f32,
     }
 
     /// A low-frequency density field over the ground, in metres, that multiplies
@@ -1127,6 +1143,46 @@ interface content {
         level-tolerance-m: option<f32>,
     }
 
+    /// A Template a Settlement draws its Plots from.
+    record settlement-plot {
+        /// A Template, `<mod id>:<name>`, from any loaded Mod. Its door, the
+        /// first Door cell from its Ground layer up, faces the road.
+        template: string,
+        /// Above 0: how often it is drawn against the others.
+        weight: f32,
+        /// At least this many stand, or the Settlement is dropped.
+        min: u8,
+        /// At most this many stand.
+        max: u8,
+    }
+
+    /// A village or town world generation lays out: roads branch from its
+    /// centre along gentle ground, and Plots grow beside them, each Structure
+    /// turned so its door faces the road.
+    record settlement-def {
+        /// The Settlement's local name; the engine adds `<mod id>:`.
+        name: string,
+        /// Above 0 and at most 64 metres. No Template it names is wider.
+        radius-m: f32,
+        /// How far past its disc single Structures keep out, 0 to 64 metres;
+        /// none is 16.
+        margin-m: option<f32>,
+        /// A Template, `<mod id>:<name>`, that stands at its centre.
+        centre: option<string>,
+        /// How many Plots it lays at most besides its centre, at most 24.
+        plots: u8,
+        /// From 1 to 24 rows; their minimums add up to at most `plots`.
+        templates: list<settlement-plot>,
+        /// Fewer Plots than this, besides its centre, and it is dropped.
+        minimum: u8,
+        /// A Material, `<mod id>:<name>`, that is not a fluid, its roads are
+        /// laid in.
+        path: string,
+        /// A Shape, `<mod id>:<name>`, its roads take on level ground; none is
+        /// `core:cube`.
+        path-shape: option<string>,
+    }
+
     /// Everything a Mod adds, in registration order: a name's id is its index
     /// after the engine's built-ins, so Materials start at 8 (7 is retired and
     /// never handed out) and Shapes at 4. A `world` or `view` from a Mod that is
@@ -1187,5 +1243,8 @@ interface content {
         /// At most 64 in a World, from any Mod, named `<mod id>:<name>`. Names
         /// resolve after every Mod has declared.
         templates: list<template-def>,
+        /// At most 16 in a World, from any Mod, named `<mod id>:<name>`. Names
+        /// resolve after every Mod has declared.
+        settlements: list<settlement-def>,
     }
 }

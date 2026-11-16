@@ -693,7 +693,7 @@ fn a_snapshot_freezes_what_generation_needs_of_each_plant() {
         water: lake(40.0),
         ..flat(&[tree_feature(16.0, true), crop_feature(16.0), kelp])
     };
-    let saved = Generation::capture(params, &[], &mapping()).unwrap();
+    let saved = Generation::capture(params, &[], &[], &mapping()).unwrap();
     let json = serde_json::to_string(&saved).unwrap();
     let reopened: Generation = serde_json::from_str(&json).unwrap();
     let restored = reopened.restore(&mapping(), 2).unwrap();
@@ -735,7 +735,7 @@ fn a_snapshot_without_a_fruit_shape_restores_cubes() {
 #[test]
 fn a_snapshot_of_material_features_writes_no_plant() {
     let params = flat(&[SurfaceFeature::cube(fixtures().leaves, 8.0)]);
-    let saved = Generation::capture(params, &[], &mapping_with_leaves()).unwrap();
+    let saved = Generation::capture(params, &[], &[], &mapping_with_leaves()).unwrap();
     let json = serde_json::to_string(&saved).unwrap();
     assert!(!json.contains("plant"), "{json}");
 }
@@ -909,7 +909,7 @@ fn a_snapshot_keeps_sixteen_features_and_a_trees_vines() {
     }
     mapping.materials.insert(VINE, "t:vine".into());
     mapping.shapes.insert(VINE_SHAPE, "t:vine_plane".into());
-    let saved = Generation::capture(params, &[], &mapping).unwrap();
+    let saved = Generation::capture(params, &[], &[], &mapping).unwrap();
     let json = serde_json::to_string(&saved).unwrap();
     let restored = serde_json::from_str::<Generation>(&json)
         .unwrap()
@@ -960,7 +960,8 @@ fn a_snapshot_keeps_a_trees_branching_and_a_tree_without_it_saves_none() {
     let capture = |branching| {
         let params = flat(&[branching_feature(16.0, true, branching)]);
         let json =
-            serde_json::to_string(&Generation::capture(params, &[], &mapping()).unwrap()).unwrap();
+            serde_json::to_string(&Generation::capture(params, &[], &[], &mapping()).unwrap())
+                .unwrap();
         (params, json)
     };
     let (params, json) = capture(Some(BRANCHING));
@@ -1205,7 +1206,7 @@ fn a_clumped_tree_across_a_chunk_border_is_whole_at_every_voxel_size() {
 fn a_snapshot_carries_the_clump_and_an_older_one_loads_without() {
     let grove = clumped(crop_feature(16.0), 48.0, 0.7);
     let params = flat(&[grove, crop_feature(20.0)]);
-    let saved = Generation::capture(params, &[], &mapping()).unwrap();
+    let saved = Generation::capture(params, &[], &[], &mapping()).unwrap();
     let json = serde_json::to_string(&saved).unwrap();
     let value: serde_json::Value = serde_json::from_str(&json).unwrap();
     let features = &value["biomes"][0]["surface_features"];
@@ -1265,7 +1266,7 @@ fn generated_fruit_takes_the_shape_of_the_stage_it_is_drawn_at() {
 #[test]
 fn a_snapshot_keeps_each_fruit_stages_shape_and_an_older_one_loads_without() {
     let params = flat(&[staged_fruit_feature(16.0)]);
-    let saved = Generation::capture(params, &[], &mapping()).unwrap();
+    let saved = Generation::capture(params, &[], &[], &mapping()).unwrap();
     let json = serde_json::to_string(&saved).unwrap();
     let value: serde_json::Value = serde_json::from_str(&json).unwrap();
     let fruit = &value["biomes"][0]["surface_features"][0]["plant"]["form"]["fruit"];
@@ -1277,7 +1278,8 @@ fn a_snapshot_keeps_each_fruit_stages_shape_and_an_older_one_loads_without() {
     let restored = reopened.restore(&mapping(), 2).unwrap();
     assert_eq!(restored.biomes, params.biomes);
 
-    let plain = Generation::capture(flat(&[tree_feature(16.0, true)]), &[], &mapping()).unwrap();
+    let plain =
+        Generation::capture(flat(&[tree_feature(16.0, true)]), &[], &[], &mapping()).unwrap();
     let json = serde_json::to_string(&plain).unwrap();
     assert!(
         !json.contains("stage_shapes"),
@@ -1327,7 +1329,7 @@ fn a_generated_crop_takes_the_shape_of_the_stage_it_is_drawn_at() {
 #[test]
 fn a_snapshot_keeps_each_crop_stages_shape_and_an_older_one_loads_without() {
     let params = flat(&[staged_crop_feature(16.0)]);
-    let saved = Generation::capture(params, &[], &mapping()).unwrap();
+    let saved = Generation::capture(params, &[], &[], &mapping()).unwrap();
     let json = serde_json::to_string(&saved).unwrap();
     let value: serde_json::Value = serde_json::from_str(&json).unwrap();
     let form = &value["biomes"][0]["surface_features"][0]["plant"]["form"];
@@ -1341,7 +1343,7 @@ fn a_snapshot_keeps_each_crop_stages_shape_and_an_older_one_loads_without() {
         .unwrap();
     assert_eq!(restored.biomes, params.biomes);
 
-    let plain = Generation::capture(flat(&[crop_feature(16.0)]), &[], &mapping()).unwrap();
+    let plain = Generation::capture(flat(&[crop_feature(16.0)]), &[], &[], &mapping()).unwrap();
     assert!(
         !serde_json::to_string(&plain)
             .unwrap()
@@ -1472,7 +1474,7 @@ fn a_generated_vine_bears_whole_apart_fruit_across_chunk_borders_at_every_voxel_
 #[test]
 fn a_snapshot_carries_a_generated_vine() {
     let params = flat(&[melon_feature(16.0)]);
-    let saved = Generation::capture(params, &[], &mapping()).unwrap();
+    let saved = Generation::capture(params, &[], &[], &mapping()).unwrap();
     let json = serde_json::to_string(&saved).unwrap();
     let reopened: Generation = serde_json::from_str(&json).unwrap();
     let restored = reopened.restore(&mapping(), 2).unwrap();

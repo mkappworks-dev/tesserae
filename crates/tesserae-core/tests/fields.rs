@@ -609,7 +609,7 @@ fn a_snapshot_freezes_the_fields_and_an_older_one_has_none() {
         ),
         None,
     );
-    let saved = Generation::capture(params, &[], &mapping()).unwrap();
+    let saved = Generation::capture(params, &[], &[], &mapping()).unwrap();
     let json = serde_json::to_string(&saved).unwrap();
     let restored = serde_json::from_str::<Generation>(&json)
         .unwrap()
@@ -631,7 +631,7 @@ fn a_snapshot_freezes_the_fields_and_an_older_one_has_none() {
         None,
     );
     let json =
-        serde_json::to_string(&Generation::capture(plain, &[], &mapping()).unwrap()).unwrap();
+        serde_json::to_string(&Generation::capture(plain, &[], &[], &mapping()).unwrap()).unwrap();
     assert!(!json.contains("crop_fields") && !json.contains("\"field\""));
     assert_eq!(
         serde_json::from_str::<Generation>(&json)

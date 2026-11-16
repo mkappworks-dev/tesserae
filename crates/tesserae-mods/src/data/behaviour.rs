@@ -298,7 +298,16 @@ pub(super) struct Biome {
     crop_fields: Vec<CropField>,
     #[serde(default)]
     structures: Vec<BiomeStructure>,
+    #[serde(default)]
+    settlements: Vec<BiomeSettlement>,
     soundscape: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+struct BiomeSettlement {
+    settlement: String,
+    spacing_m: f32,
 }
 
 #[derive(Deserialize)]
@@ -425,6 +434,14 @@ impl From<Biome> for content::BiomeDef {
                     template: s.template,
                     spacing_m: s.spacing_m,
                     chance: s.chance,
+                })
+                .collect(),
+            settlements: b
+                .settlements
+                .into_iter()
+                .map(|s| content::BiomeSettlement {
+                    settlement: s.settlement,
+                    spacing_m: s.spacing_m,
                 })
                 .collect(),
         }

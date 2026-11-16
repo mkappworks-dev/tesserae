@@ -205,6 +205,21 @@ Structure's column stands in at and above the ground layer and its soil below,
 so one Template fits grass, sand or snow. A Declaration built against the
 earlier 0.3 text needs a rebuild. It is never refused as not Obtainable.
 
+The `declaration` of line 0.3 then gained `settlements`, appended after
+`templates`, and a `biome-def` gained a `settlements` list after `structures`. A
+`settlement-def` carries a `name` (local to the Mod), a `radius-m` above 0 and
+at most 64, an optional `margin-m` from 0 to 64 (16 when absent), an optional
+`centre` Template, a count of `plots` of at most 24, from 1 to 24
+`settlement-plot` rows of a `template`, a `weight` above 0 and a `min` and `max`
+count, an overall `minimum`, and a `path` Material with an optional
+`path-shape`. A World holds at most 16. A `biome-settlement` row names a
+`settlement` by full name and a `spacing-m` at least twice its radius and margin
+and at most 4096 m; a Biome lists at most 2. A Declaration for 0.1 or 0.2 loads
+with none, and one built against the earlier 0.3 text needs a rebuild. A third
+row, a radius over 64 m, more than 24 Plots or an unknown Template is a load
+error naming the Settlement. A World whose Biomes list none generates exactly as
+before, with no generator version change.
+
 ## What is not frozen
 
 Line `0.x` is pre-release. Later gameplay steps may add new lines, and

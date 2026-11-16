@@ -71,6 +71,7 @@ fn biomes() -> Vec<BiomeDef> {
             cave_scale: None,
             crop_fields: plants::ash_fields(),
             structures: Vec::new(),
+            settlements: Vec::new(),
             surface_features: [food::feature()]
                 .into_iter()
                 .chain(plants::ash_flats())
@@ -89,6 +90,7 @@ fn biomes() -> Vec<BiomeDef> {
             cave_scale: Some(1.5),
             crop_fields: Vec::new(),
             structures: Vec::new(),
+            settlements: Vec::new(),
             surface_features: Vec::new(),
         },
         BiomeDef {
@@ -104,6 +106,7 @@ fn biomes() -> Vec<BiomeDef> {
             cave_scale: Some(0.5),
             crop_fields: Vec::new(),
             structures: Vec::new(),
+            settlements: Vec::new(),
             surface_features: [food::feature()]
                 .into_iter()
                 .chain(plants::highland())
@@ -122,6 +125,7 @@ fn biomes() -> Vec<BiomeDef> {
             cave_scale: Some(0.5),
             crop_fields: Vec::new(),
             structures: Vec::new(),
+            settlements: Vec::new(),
             surface_features: plants::cinder_bog(),
         },
     ]
@@ -380,6 +384,7 @@ impl Guest for Ember {
             marker_kinds: Vec::new(),
             death_marker_kind: None,
             templates: Vec::new(),
+            settlements: Vec::new(),
             voxel_uses: building::voxel_uses(),
             ores: vec![OreDef {
                 material: "waters:obsidian".into(),

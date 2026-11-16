@@ -3,19 +3,19 @@
 //! Where a Structure stands, how it is turned and how high is a function of the seed and metres
 //! alone, so every Chunk it reaches decides it alike and writes only its own Voxels.
 //!
-//! Claim order: earlier rows (by Biome, then by row) claim ground first and a later row's draw that
-//! would touch one gives way. Whatever is laid after Structures (fields, trees, scatter) asks
-//! [`Worldgen::structures_near`] for footprints; a Structure never asks about them.
-
-use std::sync::Arc;
+//! Claim order: Settlements first, keeping single Structures out of their discs and margins; then
+//! earlier rows (by Biome, then by row), and a later row's draw that would touch one gives way.
+//! Whatever is laid after Structures (fields, trees, scatter) asks [`Worldgen::claims_near`] for
+//! footprints; a Structure never asks about them.
 
 use super::fields::{hashed, mix, unit};
-use super::{Worldgen, top_index};
+use super::{Footprint, Worldgen, top_index};
 use crate::chunk::{CHUNK_SIZE, Chunk};
 use crate::climate::{BIOMES_SINCE, BiomeId, BiomeStructure};
 use crate::template::{Cell, Template, Turn};
 use crate::voxel::Voxel;
 use crate::worldgen::WorldgenParams;
+use crate::worldgen::settlements::Town;
 
 const STRUCTURE_SALT: u64 = 0x5717_c7e0_0000_0001;
 /// Places a held lattice cell tries before it stands nothing.
@@ -42,14 +42,13 @@ struct Row {
 /// one generates exactly as before.
 #[derive(Clone, Debug)]
 pub(super) struct StructurePass {
-    templates: Arc<[Template]>,
     /// In claim order.
     rows: Vec<Row>,
     /// By Biome, a bit for each Template it lists; a World holds at most 64.
     listed: Vec<u64>,
     /// The most Voxels a Structure reaches above and below the ground's top Voxel.
-    above: i32,
-    below: i32,
+    pub(super) above: i32,
+    pub(super) below: i32,
 }
 
 impl StructurePass {
@@ -86,7 +85,6 @@ impl StructurePass {
         let above = rows.iter().map(|r| r.sizes[0][1] - r.ground).max()?;
         let below = rows.iter().map(|r| r.ground).max()?;
         Some(StructurePass {
-            templates: templates.into(),
             rows,
             listed,
             above,
@@ -95,13 +93,14 @@ impl StructurePass {
     }
 }
 
-/// A Structure that stands, in global Voxel indices.
+/// A Structure that stands, alone or on a Settlement's Plot, in global Voxel indices.
 #[derive(Clone, Copy, Debug)]
 pub(super) struct Structure {
-    row: usize,
-    turn: Turn,
-    min: [i32; 3],
-    size: [i32; 3],
+    /// An index into the World's Templates.
+    pub(super) template: u16,
+    pub(super) turn: Turn,
+    pub(super) min: [i32; 3],
+    pub(super) size: [i32; 3],
 }
 
 impl Structure {
@@ -114,7 +113,7 @@ impl Structure {
     }
 
     /// Whether it covers or borders a column of `region`, `[min, max)`.
-    fn touches(&self, [min, max]: [[i32; 2]; 2]) -> bool {
+    pub(super) fn touches(&self, [min, max]: [[i32; 2]; 2]) -> bool {
         let [own_min, own_max] = self.footprint();
         (0..2).all(|a| own_min[a] <= max[a] && min[a] <= own_max[a])
     }
@@ -135,7 +134,6 @@ impl Worldgen {
     /// it would not fit inside the cell's inset.
     fn structure_draw(
         &self,
-        index: usize,
         row: &Row,
         cell: [i32; 2],
         held: u64,
@@ -143,7 +141,7 @@ impl Worldgen {
     ) -> Option<Structure> {
         let h = mix(held ^ (attempt + 1).wrapping_mul(0x9e37_79b9_7f4a_7c15));
         let turn = Turn::new((mix(h ^ 2) & 3) as u8);
-        let template = &self.structures.as_ref()?.templates[usize::from(row.entry.template)];
+        let template = &self.templates[usize::from(row.entry.template)];
         let [x_m, _, z_m] = template.size_m();
         let along_m = if turn.quarters().is_multiple_of(2) {
             [x_m, z_m]
@@ -164,7 +162,7 @@ impl Worldgen {
             min[slot] = (corner_m / self.voxel_size).round() as i32;
         }
         Some(Structure {
-            row: index,
+            template: row.entry.template,
             turn,
             min,
             size,
@@ -215,7 +213,7 @@ impl Worldgen {
     /// Whether a cave may cut the surface of the column at `(x_m, z_m)`. Every Voxel size up to
     /// [`SAMPLE_M`] has its surface Voxel's corner, where caves are asked, in the metre under the
     /// surface, and `false` is a proof over that metre, so it holds at each of them.
-    fn cave_may_cut(&self, x_m: f32, z_m: f32, height_m: f32) -> bool {
+    pub(super) fn cave_may_cut(&self, x_m: f32, z_m: f32, height_m: f32) -> bool {
         self.caves.as_ref().is_some_and(|caves| {
             let depth_m = self.voxel_size.max(SAMPLE_M);
             caves.may_carve(
@@ -260,7 +258,7 @@ impl Worldgen {
                     return None;
                 }
                 (0..ATTEMPTS)
-                    .filter_map(|attempt| self.structure_draw(index, &row, cell, h, attempt))
+                    .filter_map(|attempt| self.structure_draw(&row, cell, h, attempt))
                     .find_map(|s| self.structure_accepts(&row, s))
             })
             .filter(|s| s.touches(region))
@@ -269,7 +267,7 @@ impl Worldgen {
 
     /// Every Structure that covers or borders a column of `region`, `[min, max)`, in claim order.
     /// A later row's Structure gives way to an earlier row's it would touch, so a column belongs to
-    /// one Structure.
+    /// one Structure, and every one gives way to a Settlement.
     pub(super) fn structures_near(&self, region: [[i32; 2]; 2]) -> Vec<Structure> {
         let Some(pass) = &self.structures else {
             return Vec::new();
@@ -279,7 +277,7 @@ impl Worldgen {
             for s in self.row_structures(index, region) {
                 let claimed =
                     (0..index).any(|before| !self.row_structures(before, s.footprint()).is_empty());
-                if !claimed {
+                if !claimed && !self.settled(s.footprint()) {
                     standing.push(s);
                 }
             }
@@ -290,12 +288,19 @@ impl Worldgen {
     /// The floors, in metres, a Structure's Voxels lie between, from the terrain band and the
     /// tallest and deepest listed Template alone. `None` where no Structure stands.
     pub(super) fn structure_band_m(&self) -> Option<(f32, f32)> {
-        let pass = self.structures.as_ref()?;
+        let reaches = [
+            self.structures.as_ref().map(|p| (p.above, p.below)),
+            self.settlements.as_ref().map(|p| (p.above, p.below)),
+        ];
+        let (above, below) = reaches
+            .into_iter()
+            .flatten()
+            .reduce(|a, b| (a.0.max(b.0), a.1.max(b.1)))?;
         let (lowest, highest) = self.terrain_band_m();
         let size = self.voxel_size;
         Some((
-            lowest - (pass.below + 1) as f32 * size,
-            highest + (pass.above + 1) as f32 * size,
+            lowest - (below + 1) as f32 * size,
+            highest + (above + 1) as f32 * size,
         ))
     }
 
@@ -305,10 +310,15 @@ impl Worldgen {
             .is_some_and(|(lowest, highest)| floor_m <= highest && ceiling_m >= lowest)
     }
 
-    /// The top, in metres, of the highest Structure covering a column of `region`, `[min, max)`.
+    /// The top, in metres, of the highest Structure covering a column of `region`, `[min, max)`,
+    /// alone or on a Plot.
     pub(super) fn structures_clear_m(&self, [min, max]: [[i32; 2]; 2]) -> Option<f32> {
-        self.structures_near([min, max])
-            .into_iter()
+        let claims = self.claims_near([min, max]);
+        claims
+            .towns
+            .iter()
+            .flat_map(|t| t.plots.iter())
+            .chain(&claims.structures)
             .filter(|s| {
                 let [own_min, own_max] = s.footprint();
                 (0..2).all(|a| own_min[a] < max[a] && min[a] < own_max[a])
@@ -317,70 +327,108 @@ impl Worldgen {
             .reduce(f32::max)
     }
 
-    /// Writes every Structure's cells that fall in the Chunk at `coord`: a Keep cell is left,
-    /// anything else, Air included, overwrites what is there. Under a Voxel in its lowest layer,
-    /// the foundation Material fills down to the ground.
-    pub(super) fn stand_structures(&self, chunk: &mut Chunk, coord: [i32; 3]) {
-        let Some(pass) = &self.structures else {
-            return;
-        };
+    /// Everything that claims ground ahead of fields, trees and scatter and covers or borders a
+    /// column of `region`: the Settlements, then the single Structures.
+    pub(super) fn claims_near(&self, region: [[i32; 2]; 2]) -> Claims {
+        if self.structure_band_m().is_none() {
+            return Claims::default();
+        }
+        Claims {
+            towns: self.towns_near(region),
+            structures: self.structures_near(region),
+        }
+    }
+
+    /// What fields, trees and scatter keep off.
+    pub(super) fn footprints(&self, claims: &Claims) -> Vec<Footprint> {
+        claims
+            .towns
+            .iter()
+            .map(|t| t.footprint(self.voxel_size))
+            .chain(
+                claims
+                    .structures
+                    .iter()
+                    .map(|s| Footprint::rect(s.footprint())),
+            )
+            .collect()
+    }
+
+    /// Writes every claim that falls in the Chunk at `coord`: Settlements, then single Structures.
+    pub(super) fn stand_claims(&self, chunk: &mut Chunk, coord: [i32; 3], claims: &Claims) {
+        for town in &claims.towns {
+            self.stand_town(chunk, coord, town);
+        }
+        for s in &claims.structures {
+            self.stand_structure(chunk, coord, s);
+        }
+    }
+
+    /// Writes a Structure's cells that fall in the Chunk at `coord`: a Keep cell is left, anything
+    /// else, Air included, overwrites what is there. Under a Voxel in its lowest layer, the
+    /// foundation Material fills down to the ground.
+    pub(super) fn stand_structure(&self, chunk: &mut Chunk, coord: [i32; 3], s: &Structure) {
         let size = CHUNK_SIZE as i32;
         let origin = coord.map(|c| c * size);
-        let region = [[origin[0], origin[2]], [origin[0] + size, origin[2] + size]];
-        for s in self.structures_near(region) {
-            let low = [0, 1, 2].map(|a| s.min[a].max(origin[a]));
-            let high = [0, 1, 2].map(|a| (s.min[a] + s.size[a]).min(origin[a] + size));
-            if low[0] >= high[0] || low[2] >= high[2] {
-                continue;
-            }
-            let template = &pass.templates[usize::from(pass.rows[s.row].entry.template)];
-            let sampled = template.sample(self.voxel_size, s.turn);
-            let mut set = |[x, y, z]: [i32; 3], voxel| {
-                let [lx, ly, lz] = [x, y, z].map(|g| g.rem_euclid(size) as usize);
-                chunk.set(lx, ly, lz, voxel);
-            };
-            for z in low[2]..high[2] {
-                for x in low[0]..high[0] {
-                    let ground = std::cell::OnceCell::new();
-                    for y in low[1]..high[1] {
-                        let voxel = match sampled.cell([x - s.min[0], y - s.min[1], z - s.min[2]]) {
-                            Cell::Keep => continue,
-                            Cell::Air => Voxel::AIR,
-                            Cell::Voxel(v) => v,
-                            Cell::Ground => {
-                                let ground = ground.get_or_init(|| self.column_ground(x, z));
-                                let Some(ground) = *ground else {
-                                    continue;
-                                };
-                                sampled.ground_voxel(y - s.min[1], ground)
-                            }
-                        };
-                        set([x, y, z], voxel);
-                    }
+        let low = [0, 1, 2].map(|a| s.min[a].max(origin[a]));
+        let high = [0, 1, 2].map(|a| (s.min[a] + s.size[a]).min(origin[a] + size));
+        if low[0] >= high[0] || low[2] >= high[2] {
+            return;
+        }
+        let template = &self.templates[usize::from(s.template)];
+        let sampled = template.sample(self.voxel_size, s.turn);
+        let mut set = |[x, y, z]: [i32; 3], voxel| {
+            let [lx, ly, lz] = [x, y, z].map(|g| g.rem_euclid(size) as usize);
+            chunk.set(lx, ly, lz, voxel);
+        };
+        for z in low[2]..high[2] {
+            for x in low[0]..high[0] {
+                let ground = std::cell::OnceCell::new();
+                for y in low[1]..high[1] {
+                    let voxel = match sampled.cell([x - s.min[0], y - s.min[1], z - s.min[2]]) {
+                        Cell::Keep => continue,
+                        Cell::Air => Voxel::AIR,
+                        Cell::Voxel(v) => v,
+                        Cell::Ground => {
+                            let ground = ground.get_or_init(|| self.column_ground(x, z));
+                            let Some(ground) = *ground else {
+                                continue;
+                            };
+                            sampled.ground_voxel(y - s.min[1], ground)
+                        }
+                    };
+                    set([x, y, z], voxel);
                 }
             }
-            let Some(foundation) = template.foundation() else {
-                continue;
-            };
-            if origin[1] >= s.min[1] {
-                continue;
-            }
-            for z in low[2]..high[2] {
-                for x in low[0]..high[0] {
-                    if !matches!(
-                        sampled.cell([x - s.min[0], 0, z - s.min[2]]),
-                        Cell::Voxel(_) | Cell::Ground
-                    ) {
-                        continue;
-                    }
-                    let height_m = self.surface_height_m(self.global_m(x), self.global_m(z));
-                    let ground = top_index(height_m, 0.0, self.voxel_size);
-                    let from = (ground + 1).max(origin[1]);
-                    for y in from..s.min[1].min(origin[1] + size) {
-                        set([x, y, z], Voxel::cube(foundation));
-                    }
+        }
+        let Some(foundation) = template.foundation() else {
+            return;
+        };
+        if origin[1] >= s.min[1] {
+            return;
+        }
+        for z in low[2]..high[2] {
+            for x in low[0]..high[0] {
+                if !matches!(
+                    sampled.cell([x - s.min[0], 0, z - s.min[2]]),
+                    Cell::Voxel(_) | Cell::Ground
+                ) {
+                    continue;
+                }
+                let height_m = self.surface_height_m(self.global_m(x), self.global_m(z));
+                let ground = top_index(height_m, 0.0, self.voxel_size);
+                let from = (ground + 1).max(origin[1]);
+                for y in from..s.min[1].min(origin[1] + size) {
+                    set([x, y, z], Voxel::cube(foundation));
                 }
             }
         }
     }
+}
+
+/// What claims ground near a region, worked out once per Chunk.
+#[derive(Default)]
+pub(super) struct Claims {
+    pub(super) towns: Vec<Town>,
+    pub(super) structures: Vec<Structure>,
 }

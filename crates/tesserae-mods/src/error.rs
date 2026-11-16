@@ -170,6 +170,13 @@ pub enum ModError {
         index: usize,
         rule: String,
     },
+    /// A Biome's Settlement row names no Settlement, is one too many, or is out of range.
+    BadSettlement {
+        id: String,
+        biome: String,
+        index: usize,
+        rule: String,
+    },
     /// A fluid, reaction or fire row names a Material no loaded Mod registered.
     UnknownName {
         id: String,
@@ -218,6 +225,13 @@ pub enum ModError {
     },
     /// A `plants` row, named by its name.
     Plant {
+        id: String,
+        row: usize,
+        name: String,
+        reason: String,
+    },
+    /// A `settlements` row, named by its name.
+    Settlement {
         id: String,
         row: usize,
         name: String,
@@ -428,6 +442,12 @@ impl fmt::Display for ModError {
                 index,
                 rule,
             } => write!(f, "mod `{id}`: biome `{biome}` structure {index}: {rule}"),
+            ModError::BadSettlement {
+                id,
+                biome,
+                index,
+                rule,
+            } => write!(f, "mod `{id}`: biome `{biome}` settlement {index}: {rule}"),
             ModError::TooManyFeatures {
                 id,
                 biome,
@@ -492,6 +512,12 @@ impl fmt::Display for ModError {
                 name,
                 reason,
             } => write!(f, "mod `{id}`: template {row} `{name}`: {reason}"),
+            ModError::Settlement {
+                id,
+                row,
+                name,
+                reason,
+            } => write!(f, "mod `{id}`: settlement {row} `{name}`: {reason}"),
             ModError::Marker {
                 id,
                 row,

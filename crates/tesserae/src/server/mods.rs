@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 use crate::launch::Installed;
 use crate::session::{SessionApp, SessionTeardown};
 use bevy::prelude::*;
+use tesserae_core::settlement::Settlement;
 use tesserae_core::template::Template;
 use tesserae_core::{MaterialId, SHAPE_FULL_CUBE, ShapeId, Tables, WorldgenParams};
 use tesserae_mods::{
@@ -112,6 +113,8 @@ pub struct LoadedMods {
     /// The Templates a reopened World was made with, which its Biomes' Structures index into.
     /// `None` is a new World, which stands the Game's own.
     pub world_templates: Option<Vec<Template>>,
+    /// The Settlements a reopened World was made with, alongside [`Self::world_templates`].
+    pub world_settlements: Option<Vec<Settlement>>,
     pub view: Option<ViewParams>,
     pub appearance: Vec<(MaterialId, [u8; 4])>,
     pub textures: Vec<(MaterialId, Vec<u8>)>,
@@ -137,6 +140,7 @@ impl Default for LoadedMods {
             registry: Registry::builtin(),
             world: None,
             world_templates: None,
+            world_settlements: None,
             view: None,
             appearance: Vec::new(),
             textures: Vec::new(),
@@ -186,7 +190,7 @@ fn placeable(tables: &Tables, material: MaterialId) -> bool {
 }
 
 #[derive(Resource)]
-pub(super) struct WorldParameters(pub WorldgenParams, pub Vec<Template>);
+pub(super) struct WorldParameters(pub WorldgenParams, pub Vec<Template>, pub Vec<Settlement>);
 
 /// One Game or Mod a World was made with.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -467,8 +471,13 @@ pub(crate) fn save_world(loaded: &LoadedMods, path: &Path) {
         sequence: 1,
         seed: 123,
         voxel_size_m: 0.5,
-        parameters: Generation::capture(loaded.world.unwrap(), &loaded.tables.templates, &mapping)
-            .unwrap(),
+        parameters: Generation::capture(
+            loaded.world.unwrap(),
+            &loaded.tables.templates,
+            &loaded.tables.settlements,
+            &mapping,
+        )
+        .unwrap(),
         content: content.clone(),
         player: save::Player {
             eye_m: [1.0, 2.0, 3.0],
@@ -621,6 +630,7 @@ pub(crate) async fn declare_all(
     let recipes = tesserae_mods::DeclaredRecipes::take(&mut behaviours);
     let plants = tesserae_mods::DeclaredPlants::take(&mut behaviours);
     let templates = tesserae_mods::DeclaredTemplates::take(&mut behaviours);
+    let settlements = tesserae_mods::DeclaredSettlements::take(&mut behaviours);
     let (ground, lake) =
         resolve(behaviours, &mut loaded.tables, &loaded.registry).map_err(|e| e.to_string())?;
     // Grown Materials decide which implicit Items exist, so Plants resolve
@@ -635,6 +645,9 @@ pub(crate) async fn declare_all(
         )
         .map_err(|e| e.to_string())?;
     loaded.tables.templates = templates
+        .resolve(&loaded.registry, &loaded.tables)
+        .map_err(|e| e.to_string())?;
+    loaded.tables.settlements = settlements
         .resolve(&loaded.registry, &loaded.tables)
         .map_err(|e| e.to_string())?;
     // After the Plant table, because a surface feature may name a Plant.
@@ -663,14 +676,18 @@ pub(crate) async fn declare_all(
     }
     // Every Template the World declares, until Biomes say which they place.
     let obtainable = super::obtainable::obtainable(&loaded, &loaded.every_item(world.voxel_size));
-    templates
-        .check(&loaded.registry, |m| {
-            (!obtainable.contains(&m)).then(|| {
-                "is not Obtainable: no Biome lays it, no Plant yields it and no Recipe makes it \
-                 from what is"
-                    .to_owned()
-            })
+    let refuse = |m| {
+        (!obtainable.contains(&m)).then(|| {
+            "is not Obtainable: no Biome lays it, no Plant yields it and no Recipe makes it from \
+             what is"
+                .to_owned()
         })
+    };
+    templates
+        .check(&loaded.registry, refuse)
+        .map_err(|e| e.to_string())?;
+    settlements
+        .check(&loaded.registry, refuse)
         .map_err(|e| e.to_string())?;
     Ok(loaded)
 }
@@ -801,6 +818,9 @@ fn install(world: &mut World) {
     let templates = loaded
         .world_templates
         .unwrap_or_else(|| loaded.tables.templates.clone());
+    let settlements = loaded
+        .world_settlements
+        .unwrap_or_else(|| loaded.tables.settlements.clone());
     let markers = crate::content::MarkerKinds(loaded.tables.markers.clone());
     let tables = super::ContentTables::from_loaded(loaded.tables, loaded.game);
     let reopened = world
@@ -895,7 +915,7 @@ fn install(world: &mut World) {
     world.insert_resource(super::craft::Recipes(loaded.recipes));
     world.insert_resource(placing);
     world.insert_resource(items);
-    world.insert_resource(WorldParameters(params, templates));
+    world.insert_resource(WorldParameters(params, templates, settlements));
     world.insert_resource(super::streaming::streaming_settings(loaded.view));
     world.insert_resource(runtime::ModJobs::new(loaded.registry, loaded.mods));
     let (name, default_mode) = world
@@ -1784,6 +1804,7 @@ layers = [["rp"]]
                 parameters: Generation::capture(
                     loaded.world.unwrap(),
                     &loaded.tables.templates,
+                    &loaded.tables.settlements,
                     &mapping,
                 )
                 .unwrap(),

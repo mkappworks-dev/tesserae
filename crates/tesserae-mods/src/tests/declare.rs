@@ -68,6 +68,7 @@ pub(super) fn declaring(materials: &[&str], shapes: &[&str]) -> Declaration {
         marker_kinds: Vec::new(),
         death_marker_kind: None,
         templates: Vec::new(),
+        settlements: Vec::new(),
         voxel_uses: Vec::new(),
     }
 }
@@ -1493,6 +1494,7 @@ fn biome(name: &str, temperature: f32, humidity: f32) -> content::BiomeDef {
         surface_features: Vec::new(),
         crop_fields: Vec::new(),
         structures: Vec::new(),
+        settlements: Vec::new(),
     }
 }
 

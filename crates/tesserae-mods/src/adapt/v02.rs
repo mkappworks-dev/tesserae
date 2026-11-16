@@ -246,6 +246,7 @@ pub(crate) fn declaration(d: old::Declaration, log: &LogHandle) -> content::Decl
         marker_kinds: Vec::new(),
         death_marker_kind: None,
         templates: Vec::new(),
+        settlements: Vec::new(),
     }
 }
 

@@ -82,6 +82,7 @@ fn biomes() -> Vec<BiomeDef> {
             cave_scale: None,
             crop_fields: plants::garden_fields(),
             structures: Vec::new(),
+            settlements: Vec::new(),
             surface_features: [food::feature()]
                 .into_iter()
                 .chain(plants::garden())
@@ -100,6 +101,7 @@ fn biomes() -> Vec<BiomeDef> {
             cave_scale: None,
             crop_fields: Vec::new(),
             structures: Vec::new(),
+            settlements: Vec::new(),
             surface_features: plants::arid_court(),
         },
         BiomeDef {
@@ -115,6 +117,7 @@ fn biomes() -> Vec<BiomeDef> {
             cave_scale: None,
             crop_fields: Vec::new(),
             structures: Vec::new(),
+            settlements: Vec::new(),
             surface_features: [food::feature()]
                 .into_iter()
                 .chain(plants::frost_court())
@@ -133,6 +136,7 @@ fn biomes() -> Vec<BiomeDef> {
             cave_scale: None,
             crop_fields: Vec::new(),
             structures: Vec::new(),
+            settlements: Vec::new(),
             surface_features: plants::conservatory(),
         },
         BiomeDef {
@@ -148,6 +152,7 @@ fn biomes() -> Vec<BiomeDef> {
             cave_scale: None,
             crop_fields: Vec::new(),
             structures: Vec::new(),
+            settlements: Vec::new(),
             surface_features: plants::lily_pond(),
         },
     ]
@@ -487,6 +492,7 @@ impl Guest for Lumen {
             marker_kinds: Vec::new(),
             death_marker_kind: None,
             templates: Vec::new(),
+            settlements: Vec::new(),
             voxel_uses: building::voxel_uses(),
             ores: vec![OreDef {
                 material: "crystals:amethyst".into(),

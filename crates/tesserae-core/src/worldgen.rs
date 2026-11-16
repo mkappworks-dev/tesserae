@@ -10,7 +10,10 @@
 //! feeds the benches a fixed surface and makes no World.
 
 mod fields;
+mod settlements;
 mod structures;
+
+use std::sync::Arc;
 
 use crate::chunk::{CHUNK_SIZE, Chunk, ChunkBuilder};
 use crate::climate::{
@@ -23,6 +26,7 @@ use crate::noise::{Fbm3Cache, fbm2, fbm3_cached, fbm3_range};
 use crate::ore::{OreField, OreMask, OreTable};
 use crate::plant::tree::{Part, fruit_stage, tree_voxels, vine_voxels};
 use crate::plant::{CountRange, Fruit, Stage, Tree, first_fruit_offsets};
+use crate::settlement::Settlement;
 use crate::shape::{MAX_SHAPED_PER_CHUNK, Orientation, SHAPE_SLAB, SHAPE_STAIR};
 use crate::tables::Tables;
 use crate::template::Template;
@@ -546,14 +550,39 @@ const EASED_RISE_VOXELS: i32 = 1;
 /// it. `smoothing_stairs_face_the_step_they_climb` checks it against the table.
 const CARDINALS: [(i32, i32, u8); 4] = [(0, 1, 0), (1, 0, 1), (0, -1, 2), (-1, 0, 3)];
 
-/// Columns a Structure covers, `[min, max)` per axis, x then z.
-type Footprint = [[i32; 2]; 2];
+/// Columns a Structure or a Settlement claims ahead of fields, trees and scatter: `[min, max)` per
+/// axis, x then z, or only those whose centre is in a disc inside that box.
+#[derive(Clone, Copy, Debug)]
+struct Footprint {
+    min: [i32; 2],
+    max: [i32; 2],
+    /// Centre and radius, in Voxels.
+    disc: Option<([f32; 2], f32)>,
+}
+
+impl Footprint {
+    fn rect([min, max]: [[i32; 2]; 2]) -> Self {
+        Footprint {
+            min,
+            max,
+            disc: None,
+        }
+    }
+
+    fn covers(&self, gx: i32, gz: i32) -> bool {
+        let boxed =
+            (self.min[0]..self.max[0]).contains(&gx) && (self.min[1]..self.max[1]).contains(&gz);
+        boxed
+            && self.disc.is_none_or(|([cx, cz], r)| {
+                let (dx, dz) = (gx as f32 + 0.5 - cx, gz as f32 + 0.5 - cz);
+                dx * dx + dz * dz <= r * r
+            })
+    }
+}
 
 /// Whether column `(gx, gz)` is under any of `footprints`: what trees, scatter and fields keep off.
 fn covers(footprints: &[Footprint], gx: i32, gz: i32) -> bool {
-    footprints
-        .iter()
-        .any(|[min, max]| (min[0]..max[0]).contains(&gx) && (min[1]..max[1]).contains(&gz))
+    footprints.iter().any(|f| f.covers(gx, gz))
 }
 
 fn surface_index(x: i32, z: i32) -> usize {
@@ -600,7 +629,10 @@ pub struct Worldgen {
     scatter: Option<SurfaceScatter>,
     /// How far Plants raise [`Self::surface_bounds_m`] above the terrain band; 0 without any.
     plant_rise_m: f32,
+    /// Every Template the World has, which Structure rows and Settlements index.
+    templates: Arc<[Template]>,
     structures: Option<structures::StructurePass>,
+    settlements: Option<settlements::SettlementPass>,
 }
 
 /// Voxels of slack over a Plant's declared rise, for the base's own cell and rounding up.
@@ -844,7 +876,9 @@ impl Worldgen {
                 .filter(|s| s.rise_m > 0.0)
                 .map_or(0.0, |s| s.rise_m + PLANT_RISE_SLACK_VOXELS * voxel_size),
             scatter,
+            templates: Arc::new([]),
             structures: None,
+            settlements: None,
         }
     }
 
@@ -852,6 +886,20 @@ impl Worldgen {
     /// `templates` by index. Rows naming no Template stand nothing.
     pub fn with_templates(mut self, templates: &[Template]) -> Self {
         self.structures = structures::StructurePass::new(&self.params, self.voxel_size, templates);
+        self.templates = templates.into();
+        self
+    }
+
+    /// This generator laying out the Settlements its Biomes list, each row naming one of
+    /// `settlements` by index, whose Buildings name Templates given to [`Self::with_templates`]
+    /// first. Rows naming no Settlement lay out nothing.
+    pub fn with_settlements(mut self, settlements: &[Settlement]) -> Self {
+        self.settlements = settlements::SettlementPass::new(
+            &self.params,
+            self.voxel_size,
+            &self.templates,
+            settlements,
+        );
         self
     }
 
@@ -1064,7 +1112,8 @@ impl Worldgen {
         if floor_m > highest {
             let mut chunk = Chunk::air();
             if self.structures_may_reach(floor_m, ceiling_m) {
-                self.stand_structures(&mut chunk, [cx, cy, cz]);
+                let claims = self.claims_near(self.chunk_columns([cx, cz], 0));
+                self.stand_claims(&mut chunk, [cx, cy, cz], &claims);
             }
             return chunk;
         }
@@ -1087,7 +1136,8 @@ impl Worldgen {
                 self.carve(&mut chunk, caves, origin_m, ceiling_m, columns.as_ref());
             }
             if self.structures_may_reach(floor_m, ceiling_m) {
-                self.stand_structures(&mut chunk, [cx, cy, cz]);
+                let claims = self.claims_near(self.chunk_columns([cx, cz], 0));
+                self.stand_claims(&mut chunk, [cx, cy, cz], &claims);
             }
             return chunk;
         }
@@ -1213,22 +1263,17 @@ impl Worldgen {
                 columns.as_ref(),
             );
         }
+        let margin = self
+            .scatter
+            .map_or(0, |s| (s.reach_m / self.voxel_size).ceil() as i32 + 1);
+        // A tree a margin away reaches a margin further.
+        let claims = self.claims_near(self.chunk_columns([cx, cz], 2 * margin));
         if self.structures_may_reach(floor_m, ceiling_m) {
-            self.stand_structures(&mut chunk, [cx, cy, cz]);
+            self.stand_claims(&mut chunk, [cx, cy, cz], &claims);
         }
         if let Some(scatter) = &self.scatter {
-            let size = CHUNK_SIZE as i32;
-            let margin = (scatter.reach_m / self.voxel_size).ceil() as i32 + 1;
-            let region = [
-                [cx, cz].map(|c| c * size - margin),
-                [cx, cz].map(|c| (c + 1) * size + margin),
-            ];
-            let placed = self.fields_near(scatter, region);
-            // A tree a margin away reaches a margin further.
-            let kept = self.footprints_near([
-                [cx, cz].map(|c| c * size - 2 * margin),
-                [cx, cz].map(|c| (c + 1) * size + 2 * margin),
-            ]);
+            let placed = self.fields_near(scatter, self.chunk_columns([cx, cz], margin));
+            let kept = self.footprints(&claims);
             self.scatter(
                 &mut chunk,
                 scatter,
@@ -1448,12 +1493,18 @@ impl Worldgen {
         self.axis_m(g.div_euclid(size), g.rem_euclid(size))
     }
 
-    /// The footprint of every Structure covering or bordering a column of `region`.
-    fn footprints_near(&self, region: Footprint) -> Vec<Footprint> {
-        self.structures_near(region)
-            .iter()
-            .map(|s| s.footprint())
-            .collect()
+    /// The footprint of every Structure and Settlement covering or bordering a column of `region`.
+    fn footprints_near(&self, region: [[i32; 2]; 2]) -> Vec<Footprint> {
+        self.footprints(&self.claims_near(region))
+    }
+
+    /// The columns of the Chunk at `[cx, cz]`, widened by `margin` on every side.
+    fn chunk_columns(&self, [cx, cz]: [i32; 2], margin: i32) -> [[i32; 2]; 2] {
+        let size = CHUNK_SIZE as i32;
+        [
+            [cx, cz].map(|c| c * size - margin),
+            [cx, cz].map(|c| (c + 1) * size + margin),
+        ]
     }
 
     /// Whether the ground cell at global Voxel `at` is carved away: what the Chunk holding it
@@ -1494,9 +1545,9 @@ impl Worldgen {
     ) -> bool {
         let [gx, _, gz] = standing.base;
         let margin = (scatter.reach_m / self.voxel_size).ceil() as i32 + 1;
-        let near = kept.iter().any(|[min, max]| {
-            (min[0] - margin..max[0] + margin).contains(&gx)
-                && (min[1] - margin..max[1] + margin).contains(&gz)
+        let near = kept.iter().any(|f| {
+            (f.min[0] - margin..f.max[0] + margin).contains(&gx)
+                && (f.min[1] - margin..f.max[1] + margin).contains(&gz)
         });
         if !near {
             return false;

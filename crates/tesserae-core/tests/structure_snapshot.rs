@@ -128,7 +128,7 @@ fn a_reopened_world_stands_the_structures_it_was_made_with() {
         "the hut stands near the origin"
     );
 
-    let saved = reopened(&Generation::capture(world(), &game, &mapping()).unwrap());
+    let saved = reopened(&Generation::capture(world(), &game, &[], &mapping()).unwrap());
     let params = saved.restore(&mapping(), GENERATOR).unwrap();
     let templates = saved.templates(&mapping()).unwrap();
     assert_eq!(
@@ -145,7 +145,7 @@ fn a_reopened_world_stands_the_structures_it_was_made_with() {
 #[test]
 fn a_game_that_edits_a_template_never_reshapes_a_saved_world() {
     let saved =
-        reopened(&Generation::capture(world(), &[unused(), hut(WALL)], &mapping()).unwrap());
+        reopened(&Generation::capture(world(), &[unused(), hut(WALL)], &[], &mapping()).unwrap());
     let edited = [unused(), hut(POST)];
     let made = generated(world(), &[unused(), hut(WALL)]);
     assert_ne!(generated(world(), &edited), made);
@@ -166,7 +166,8 @@ fn a_world_saved_before_structures_opens_with_none() {
         .unwrap(),
         ..world()
     };
-    let json = serde_json::to_value(Generation::capture(bare, &[], &mapping()).unwrap()).unwrap();
+    let json =
+        serde_json::to_value(Generation::capture(bare, &[], &[], &mapping()).unwrap()).unwrap();
     assert!(json.get("templates").is_none());
     assert!(json["biomes"][0].get("structures").is_none());
 
@@ -180,7 +181,7 @@ fn a_world_saved_before_structures_opens_with_none() {
 #[test]
 fn a_snapshot_naming_a_material_that_is_gone_fails_as_any_missing_name_does() {
     let saved =
-        reopened(&Generation::capture(world(), &[unused(), hut(WALL)], &mapping()).unwrap());
+        reopened(&Generation::capture(world(), &[unused(), hut(WALL)], &[], &mapping()).unwrap());
     let mut gone = mapping();
     gone.materials.remove(&WALL);
     let err = saved.templates(&gone).unwrap_err();

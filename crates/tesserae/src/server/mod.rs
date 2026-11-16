@@ -219,13 +219,16 @@ fn open_world(
     persistence: Option<Res<persistence::Persistence>>,
 ) {
     let templates = params.as_ref().map_or(&[][..], |p| p.1.as_slice());
+    let settlements = params.as_ref().map_or(&[][..], |p| p.2.as_slice());
     let params = params
         .as_ref()
         .map_or_else(|| worldgen_params(None), |params| params.0);
     if params.ground.is_none() {
         info!("World has no ground: no Game named rock, soil and surface");
     }
-    let generator = Worldgen::new(world.seed, world.voxel_size, params).with_templates(templates);
+    let generator = Worldgen::new(world.seed, world.voxel_size, params)
+        .with_templates(templates)
+        .with_settlements(settlements);
     let mut spawn = SpawnPoint::new(spawn_eye(&generator));
     if let Some(eye) = persistence.and_then(|p| p.reopened_eye) {
         spawn = spawn.with_entry(eye);

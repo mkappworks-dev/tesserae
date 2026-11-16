@@ -21,6 +21,7 @@ mod markers;
 mod plants;
 mod recipes;
 mod sandbox;
+mod settlements;
 mod shared_mods;
 mod sounds;
 mod soundscapes;

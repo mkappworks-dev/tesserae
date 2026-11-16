@@ -498,6 +498,7 @@ mod surface_features {
             surface_features: features,
             crop_fields,
             structures: Vec::new(),
+            settlements: Vec::new(),
         }];
         let (mut tables, mut registry) = (Tables::builtin(), Registry::builtin());
         let mut behaviours: Vec<Behaviour> =

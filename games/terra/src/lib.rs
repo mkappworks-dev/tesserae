@@ -612,6 +612,7 @@ impl Guest for Terra {
                     // short walk, and no Wood lies about on its own.
                     crop_fields: plants::temperate_fields(),
                     structures: Vec::new(),
+                    settlements: Vec::new(),
                     surface_features: [SurfaceFeature {
                         material: Some("terra:melon".into()),
                         plant: None,
@@ -641,6 +642,7 @@ impl Guest for Terra {
                     cave_scale: Some(1.5),
                     crop_fields: Vec::new(),
                     structures: Vec::new(),
+                    settlements: Vec::new(),
                     surface_features: plants::dry(),
                 },
                 BiomeDef {
@@ -660,6 +662,7 @@ impl Guest for Terra {
                     cave_scale: Some(0.0),
                     crop_fields: Vec::new(),
                     structures: Vec::new(),
+                    settlements: Vec::new(),
                     surface_features: plants::cold(),
                 },
                 BiomeDef {
@@ -675,6 +678,7 @@ impl Guest for Terra {
                     cave_scale: None,
                     crop_fields: Vec::new(),
                     structures: Vec::new(),
+                    settlements: Vec::new(),
                     surface_features: plants::jungle(),
                 },
                 BiomeDef {
@@ -694,6 +698,7 @@ impl Guest for Terra {
                     cave_scale: Some(0.5),
                     crop_fields: Vec::new(),
                     structures: Vec::new(),
+                    settlements: Vec::new(),
                     surface_features: plants::swamp(),
                 },
                 BiomeDef {
@@ -713,6 +718,7 @@ impl Guest for Terra {
                     cave_scale: None,
                     crop_fields: Vec::new(),
                     structures: Vec::new(),
+                    settlements: Vec::new(),
                     surface_features: plants::savanna(),
                 },
             ],
@@ -871,6 +877,7 @@ impl Guest for Terra {
             ],
             death_marker_kind: Some("terra:death".into()),
             templates: Vec::new(),
+            settlements: Vec::new(),
             voxel_uses: vec![
                 VoxelUse {
                     material: "terra:door".into(),

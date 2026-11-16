@@ -213,6 +213,21 @@ impl Template {
         self.level_tolerance_m
     }
 
+    /// The cell `[x, z]` of its door: the first cell `is_door` takes, rows in
+    /// order, in the lowest layer from the Ground layer up that has one. A door
+    /// stands on a floor, so it may be a layer above the Ground layer.
+    pub fn door_cell(&self, is_door: impl Fn(MaterialId) -> bool) -> Option<[u16; 2]> {
+        let [w, h, d] = self.size;
+        (self.ground_layer..h).find_map(|y| {
+            (0..d).find_map(|z| {
+                (0..w).find_map(|x| match self.cell([x, y, z]) {
+                    Cell::Voxel(v) if is_door(v.material()) => Some([x as u16, z as u16]),
+                    _ => None,
+                })
+            })
+        })
+    }
+
     /// The Template as a World of `voxel_size` holds it, turned by `turn`.
     pub fn sample(&self, voxel_size: f32, turn: Turn) -> Sampled<'_> {
         let along = |axis: usize| -> Vec<u16> {

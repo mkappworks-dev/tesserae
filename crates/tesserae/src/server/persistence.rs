@@ -429,6 +429,11 @@ impl Persistence {
                         .templates(&mapping)
                         .map_err(|e| e.to_string())?,
                 );
+                loaded.world_settlements = Some(
+                    c.parameters
+                        .settlements(&mapping)
+                        .map_err(|e| e.to_string())?,
+                );
                 let revisions = c
                     .chunks
                     .iter()
@@ -473,8 +478,13 @@ impl Persistence {
                     None,
                     None,
                     vec![],
-                    Generation::capture(params, &loaded.tables.templates, &mapping)
-                        .map_err(|e| e.to_string())?,
+                    Generation::capture(
+                        params,
+                        &loaded.tables.templates,
+                        &loaded.tables.settlements,
+                        &mapping,
+                    )
+                    .map_err(|e| e.to_string())?,
                     BTreeMap::new(),
                     "New World - unsaved".into(),
                 )

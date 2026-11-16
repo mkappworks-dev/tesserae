@@ -326,6 +326,7 @@ fn component() -> Declaration {
                 surface_features: Vec::new(),
                 crop_fields: Vec::new(),
                 structures: Vec::new(),
+                settlements: Vec::new(),
             },
             content::BiomeDef {
                 soundscape: None,
@@ -356,6 +357,7 @@ fn component() -> Declaration {
                 }],
                 crop_fields: Vec::new(),
                 structures: Vec::new(),
+                settlements: Vec::new(),
             },
         ],
         ores: vec![
@@ -515,6 +517,22 @@ fn component() -> Declaration {
             ground_layer: Some(0),
             foundation: Some("full:rock".into()),
             level_tolerance_m: Some(2.0),
+        }],
+        settlements: vec![content::SettlementDef {
+            name: "hamlet".into(),
+            radius_m: 24.0,
+            margin_m: Some(8.0),
+            centre: Some("full:cairn".into()),
+            plots: 4,
+            templates: vec![content::SettlementPlot {
+                template: "full:cairn".into(),
+                weight: 2.0,
+                min: 1,
+                max: 3,
+            }],
+            minimum: 2,
+            path: "full:rock".into(),
+            path_shape: Some("full:slab".into()),
         }],
         voxel_uses: vec![
             content::VoxelUse {

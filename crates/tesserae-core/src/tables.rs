@@ -8,6 +8,7 @@ use crate::material::MaterialTable;
 use crate::occupants::{Fluid, Level, Occupants};
 use crate::plant::PlantTable;
 use crate::reaction::{ReactionDef, ReactionError, ReactionTable};
+use crate::settlement::Settlement;
 use crate::shape::{Orientation, ShapeTable};
 use crate::template::Template;
 use crate::usable::{UseError, VoxelUse, VoxelUses};
@@ -31,6 +32,8 @@ pub struct Tables {
     pub markers: MarkerKinds,
     /// In load order.
     pub templates: Vec<Template>,
+    /// In load order; their Buildings index `templates`.
+    pub settlements: Vec<Settlement>,
 }
 
 /// Why [`Tables::vet_placed`] refused a Voxel.

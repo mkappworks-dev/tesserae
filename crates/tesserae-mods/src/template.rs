@@ -180,7 +180,11 @@ fn voxel(
 
 /// A Material a Template may write: one that exists and is no fluid, since a
 /// fluid is an occupant and air is the `air` cell.
-fn solid(name: &str, registry: &Registry, tables: &Tables) -> Result<MaterialId, String> {
+pub(crate) fn solid(
+    name: &str,
+    registry: &Registry,
+    tables: &Tables,
+) -> Result<MaterialId, String> {
     let id = registry
         .id_of(Kind::Material, name)
         .ok_or_else(|| format!("names unknown Material `{name}`"))? as MaterialId;
