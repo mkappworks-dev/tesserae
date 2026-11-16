@@ -249,6 +249,8 @@ struct Shown<'w, 's> {
     dead: Option<Res<'w, super::death::Dead>>,
     allowed: Res<'w, super::map_cache::MapAllowed>,
     roots: Query<'w, 's, Entity, With<MinimapRoot>>,
+    hotbar: Option<Res<'w, super::edit::Hotbar>>,
+    catalogue: Option<Res<'w, super::edit::Catalogue>>,
 }
 
 type Sources<'w> = (
@@ -273,9 +275,16 @@ fn sync(
         dead,
         allowed,
         roots,
+        hotbar,
+        catalogue,
     } = shown;
+    // The place Tool's card stands where the minimap would.
+    let placing = hotbar
+        .zip(catalogue)
+        .is_some_and(|(hotbar, catalogue)| super::structure::holding_place(&hotbar, &catalogue.0));
     let hidden = !allowed.0
         || !preferences.minimap
+        || placing
         || super::menu::covered(&covers)
         || !super::death::alive(dead);
     let Some((eye, bearing)) = spot.0.filter(|_| !hidden) else {
@@ -600,6 +609,33 @@ mod tests {
         app.update();
         assert!(app.world().resource::<Preferences>().minimap);
         assert!(pixels(&mut app).is_none());
+    }
+
+    #[test]
+    fn holding_the_place_tool_hides_the_minimap_until_it_is_put_away() {
+        use super::super::edit::{Catalogue, Holding, Hotbar};
+        use crate::content::{CatalogueTool, ContentCatalogue};
+        use crate::server::tool::{ToolId, ToolKind};
+        let mut app = app();
+        app.insert_resource(Catalogue(ContentCatalogue {
+            tools: vec![CatalogueTool {
+                id: ToolId(0),
+                name: "terra:place".into(),
+                kind: ToolKind::Place,
+            }],
+            ..default()
+        }))
+        .init_resource::<Hotbar>();
+        show(&mut app);
+        pose(&mut app, Vec3::ZERO, 0.0);
+        assert!(pixels(&mut app).is_some());
+        app.world_mut().resource_mut::<Hotbar>().outside = Some(Holding::Tool(ToolId(0)));
+        app.update();
+        assert!(pixels(&mut app).is_none());
+        assert!(app.world().resource::<Preferences>().minimap);
+        app.world_mut().resource_mut::<Hotbar>().outside = Some(Holding::Fire);
+        app.update();
+        assert!(pixels(&mut app).is_some());
     }
 
     #[test]

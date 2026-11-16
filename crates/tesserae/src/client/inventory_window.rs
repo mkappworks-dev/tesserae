@@ -930,29 +930,7 @@ fn header(card: &mut ChildSpawnerCommands, state: &Built) {
                     theme::LABEL,
                     theme::INK,
                 ));
-                title
-                    .spawn((
-                        Node {
-                            min_width: Val::Px(20.0),
-                            padding: UiRect::axes(Val::Px(5.0), Val::Px(2.0)),
-                            border: UiRect {
-                                bottom: Val::Px(theme::FRAME),
-                                ..UiRect::all(Val::Px(theme::RULE))
-                            },
-                            border_radius: BorderRadius::all(Val::Px(theme::RADIUS_TAG)),
-                            justify_content: JustifyContent::Center,
-                            ..default()
-                        },
-                        BackgroundColor(theme::KEY_CHIP),
-                        BorderColor::all(theme::KEY_CHIP_EDGE),
-                        Pickable::IGNORE,
-                    ))
-                    .with_child(look::label(
-                        state.key.clone(),
-                        theme::TEXT_KEY,
-                        theme::SEMIBOLD,
-                        theme::KEY_CHIP_INK,
-                    ));
+                look::key_cap(title, state.key.clone(), ());
             });
         header
             .spawn(Node {

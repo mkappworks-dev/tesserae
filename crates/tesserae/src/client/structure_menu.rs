@@ -94,7 +94,7 @@ enum Info {
     Size,
     Count(usize),
     Outcome,
-    Keys,
+    Key(Action),
     PlaceKey,
 }
 
@@ -316,33 +316,39 @@ fn picks(body: &mut ChildSpawnerCommands, catalogue: &ContentCatalogue, chosen: 
                     selected: chosen == Some(template.name.as_str()),
                 },
                 Node {
-                    flex_direction: FlexDirection::Column,
-                    align_items: AlignItems::FlexStart,
-                    justify_content: JustifyContent::FlexStart,
-                    row_gap: Val::Px(3.0),
                     padding: UiRect::axes(Val::Px(12.0), Val::Px(10.0)),
                     border_radius: BorderRadius::all(Val::Px(5.0)),
                     ..default()
                 },
                 |pick, _| {
-                    pick.spawn(look::label(
-                        super::menu_ui::declared_title(&template.name),
-                        theme::TEXT_SMALL,
-                        theme::MEDIUM,
-                        theme::INK,
-                    ));
-                    pick.spawn(look::label(
-                        size_text(template.size_m),
-                        theme::TEXT_EYEBROW,
-                        theme::REGULAR,
-                        theme::PRESET_INK,
-                    ));
-                    pick.spawn(look::label(
-                        template.name.clone(),
-                        theme::TEXT_EYEBROW,
-                        theme::REGULAR,
-                        theme::muted(),
-                    ));
+                    // `flat` centres its content whatever the node asks.
+                    pick.spawn(Node {
+                        width: Val::Percent(100.0),
+                        flex_direction: FlexDirection::Column,
+                        align_items: AlignItems::FlexStart,
+                        row_gap: Val::Px(3.0),
+                        ..default()
+                    })
+                    .with_children(|lines| {
+                        lines.spawn(look::label(
+                            super::menu_ui::declared_title(&template.name),
+                            theme::TEXT_SMALL,
+                            theme::MEDIUM,
+                            theme::INK,
+                        ));
+                        lines.spawn(look::label(
+                            size_text(template.size_m),
+                            theme::TEXT_EYEBROW,
+                            theme::REGULAR,
+                            theme::PRESET_INK,
+                        ));
+                        lines.spawn(look::label(
+                            template.name.clone(),
+                            theme::TEXT_EYEBROW,
+                            theme::REGULAR,
+                            theme::muted(),
+                        ));
+                    });
                 },
             );
         }
@@ -543,7 +549,25 @@ fn hud(parent: &mut ChildSpawnerCommands) {
             card.spawn((Info::Size, small("", theme::muted())));
             legend(card, 3.0, 0.0);
             outcome_box(card, 0.0);
-            card.spawn((Info::Keys, small("", theme::muted())));
+            card.spawn(Node {
+                align_items: AlignItems::Center,
+                column_gap: Val::Px(6.0),
+                margin: UiRect::top(Val::Px(4.0)),
+                ..default()
+            })
+            .with_children(|keys| {
+                for (action, what) in [(Action::Use, "Templates"), (Action::TurnStructure, "Turn")]
+                {
+                    look::key_cap(keys, "", Info::Key(action));
+                    keys.spawn((
+                        Node {
+                            margin: UiRect::right(Val::Px(6.0)),
+                            ..default()
+                        },
+                        small(what, theme::muted()),
+                    ));
+                }
+            });
             card.spawn((Info::PlaceKey, small("", theme::muted())));
         });
 }
@@ -755,11 +779,7 @@ fn update_info(
             Info::Outcome => ghost
                 .outcome
                 .map_or("Aim at a surface to place it.".to_owned(), Outcome::text),
-            Info::Keys => format!(
-                "{} Templates   {} Turn",
-                keys(Action::Use),
-                keys(Action::TurnStructure)
-            ),
+            Info::Key(action) => keys(action),
             Info::PlaceKey => format!("{} places it whole", keys(Action::Place)),
         }
     };

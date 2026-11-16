@@ -322,6 +322,35 @@ fn paint_focus(
     }
 }
 
+/// A key as a `kbd` cap; `marker` goes on its text, for a key that is rebound.
+pub(in crate::client) fn key_cap(
+    parent: &mut ChildSpawnerCommands,
+    key: impl Into<String>,
+    marker: impl Bundle,
+) {
+    parent
+        .spawn((
+            Node {
+                min_width: Val::Px(20.0),
+                padding: UiRect::axes(Val::Px(5.0), Val::Px(2.0)),
+                border: UiRect {
+                    bottom: Val::Px(theme::FRAME),
+                    ..UiRect::all(Val::Px(theme::RULE))
+                },
+                border_radius: BorderRadius::all(Val::Px(theme::RADIUS_TAG)),
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
+            BackgroundColor(theme::KEY_CHIP),
+            BorderColor::all(theme::KEY_CHIP_EDGE),
+            Pickable::IGNORE,
+        ))
+        .with_child((
+            marker,
+            label(key, theme::TEXT_KEY, theme::SEMIBOLD, theme::KEY_CHIP_INK),
+        ));
+}
+
 /// The 40 px close cross in a window's header.
 pub(in crate::client) fn close(parent: &mut ChildSpawnerCommands, act: impl Bundle) -> Entity {
     flat(

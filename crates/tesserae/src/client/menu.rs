@@ -658,13 +658,15 @@ pub(super) type Covers<'w> = (
     Option<Res<'w, super::settings::Settings>>,
     Option<Res<'w, super::inventory_window::InventoryWindow>>,
     Option<Res<'w, super::map_window::MapWindow>>,
+    Option<Res<'w, super::structure_menu::StructureList>>,
 );
 
-pub(super) fn covered((menu, settings, inventory, map): &Covers) -> bool {
+pub(super) fn covered((menu, settings, inventory, map, structures): &Covers) -> bool {
     menu.as_ref().is_some_and(|m| m.open)
         || settings.as_ref().is_some_and(|s| s.open)
         || inventory.as_ref().is_some_and(|i| i.open)
         || map.as_ref().is_some_and(|m| m.open)
+        || structures.as_ref().is_some_and(|l| l.open)
 }
 
 #[cfg(test)]
