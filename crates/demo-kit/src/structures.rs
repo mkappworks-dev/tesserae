@@ -2,7 +2,7 @@
 //! wilderness Templates in.
 
 /// Room round a Settlement's disc for the paths that lead into it.
-pub const MARGIN_M: f32 = 24.0;
+pub const MARGIN_M: f32 = 16.0;
 /// A packed earth road, laid by the ground itself.
 pub const PATH: &str = "strata:soil";
 /// Over twice the widest wilderness Template, so they stand apart.

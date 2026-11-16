@@ -7,7 +7,7 @@ const HAMLET: Village = Village {
     game: "tidewater",
     name: "hamlet",
     radius_m: (22.0, 26.0),
-    spacing_m: 104.0,
+    spacing_m: 100.0,
     chance: 0.6,
     near_spawn: false,
     centre: "tide_well",

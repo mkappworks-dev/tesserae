@@ -12,12 +12,12 @@ const VILLAGE_RADIUS_M: (f32, f32) = (40.0, 64.0);
 /// Wide enough that the largest copies grow a second ring of streets.
 const TOWN_RADIUS_M: (f32, f32) = (96.0, 150.0);
 /// Room round a Settlement's disc for the paths that lead into it.
-const MARGIN_M: f32 = 24.0;
+const MARGIN_M: f32 = 16.0;
 /// Each lattice is over twice its kind's largest radius and margin: few cells pass the ground
 /// rules, so a World still shows a village every few hundred metres, hamlets between them and a
 /// town rarely.
-const HAMLET_SPACING_M: f32 = 128.0;
-const VILLAGE_SPACING_M: f32 = 192.0;
+const HAMLET_SPACING_M: f32 = 96.0;
+const VILLAGE_SPACING_M: f32 = 160.0;
 const TOWN_SPACING_M: f32 = 384.0;
 /// Thins the lattices' draws, so Settlements stand apart rather than in every cell.
 const HAMLET_CHANCE: f32 = 0.8;

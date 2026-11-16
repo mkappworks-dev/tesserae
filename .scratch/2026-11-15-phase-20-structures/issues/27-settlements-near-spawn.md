@@ -1,6 +1,6 @@
 # 27: Measure how far Settlements stand, and make them easier to find
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 20, 24
 
@@ -45,16 +45,16 @@ Decided 2026-11-16 by the user, from the numbers below:
 
 - [x] The numbers are recorded in this ticket for every Game.
 - [x] The user decides what changes, if anything.
-- [ ] A `near-spawn` row stands a Settlement within the four cells round the
+- [x] A `near-spawn` row stands a Settlement within the four cells round the
       origin in every Game at the test seeds where the ground allows, tested
       through `Worldgen::chunk`; WIT copies synced, TOML, validator and
       snapshot carry it, and a row without it behaves as before.
-- [ ] The census finds about 30% more Settlements than before in each Game
+- [x] The census finds about 30% more Settlements than before in each Game
       (25 to 35% at seed 7), the near-spawn villages included.
-- [ ] Trails run past the margin 40 to 90 m, follow the grade rules, stop at
+- [x] Trails run past the margin 40 to 90 m, follow the grade rules, stop at
       water and at another Settlement's claim, and look the same in any Chunk
       order and at 1.0, 0.5 and 0.25 m.
-- [ ] The benchmark still meets its margins.
+- [x] The benchmark still meets its margins.
 
 ## Comments
 
@@ -84,3 +84,58 @@ Reading: Settlements are not far, the nearest usually 100 to 270 m, but the
 nearby ones are mostly hamlets of 2 to 5 buildings about 60 m across, villages
 lay 6 to 11 buildings, and approach paths end at most 40 m out, so they are
 easy to walk past.
+
+Built 2026-11-16.
+
+Near spawn: `BiomeSettlement::near_spawn` (`climate.rs`), carried by both WIT
+copies (`near-spawn`, after `chance`), TOML (`near-spawn`, false when left
+out), the loader and the snapshot (`SavedBiomeSettlement::near_spawn`, left
+out when false). `near_spawn_draw` (`worldgen/settlements.rs`): in the four
+lattice cells round the origin a near-spawn row skips the chance roll, takes
+the top priority against its neighbours, and draws its centre at a seeded
+distance from just past the keep-out for its largest copy (reach + 48 m + 2 m)
+to the cell's side, at a seeded angle across the cell's quarter, on whole
+metres. A lattice too small for that draws as any other row. Every Game's
+village rows say it (demo-kit `Village::near_spawn`, Terra's `row`).
+
+Trails: `TRAIL_M` (40 to 90 m past the disc) replaces the 12 to 40 m approach
+paths and their cut at the margin. `walk` stops a road short of another
+Settlement's disc and margin and of the origin's keep-out; `rasterise` no
+longer cuts at the margin; `laid_settlements_near` asks `foundings_within` a
+trail's reach further, while `settled` (what keeps wild Structures out) still
+asks only disc and margin. A wild Structure may stand on a trail.
+
+Density, measured as before (seed 7, 3.07 km square, 1 m), against the count
+with `near-spawn` and the old lattices:
+
+| Game      | Before | After | Change | Rows now                                    |
+| --------- | ------ | ----- | ------ | ------------------------------------------- |
+| Terra     | 62     | 78    | +26%   | village 160 m, 0.7; hamlet 96 m, 0.8        |
+| Tidewater | 59     | 74    | +25%   | harbour 112 m, 0.6; hamlet 100 m, 0.6       |
+| Ember     | 65     | 86    | +32%   | village 160 m, 0.8; hamlet 96 m, 0.8        |
+| Lumen     | 174    | 227   | +30%   | village 256 m, 1.0; hamlet 128 m, 0.8       |
+| Meadow    | 155    | 207   | +34%   | village 224 m, 0.9; hamlet 112 m, 0.8       |
+
+How: every Game's Settlement margin went from 24 to 16 m (trails now run past
+it, so it no longer has to hold the approach paths), which lowers each
+lattice's floor, and the lattices closed towards it. Raising `chance` did not
+help: more draws are turned away by the neighbour check and by earlier rows'
+claims, so counts stayed level or fell; neither did keeping neighbours apart
+by their own drawn sizes rather than the largest (tried, reverted). Terra's
+town keeps 384 m.
+
+Nearest Settlement to spawn at seed 7 after: Terra 141 m, Tidewater 224 m,
+Ember 262 m, Lumen 165 m, Meadow 156 m. Tidewater's harbour lattice (112 m)
+leaves its near-spawn draw 98 to 111 m out, mostly water at that seed.
+
+Tests: `a_near_spawn_row_stands_its_settlement_in_the_cells_round_the_origin`
+(five seeds: one to four round spawn with the flag at chance 0.01, at most one
+over all five without, and nothing within 48 m of the origin);
+`trails_run_past_the_margin_and_fade_out`;
+`a_trail_stops_short_of_another_settlements_disc_and_margin` (two kinds told
+apart by their path Material, packed at their floor);
+`roads_wear_towards_the_edge_of_the_disc` (the wear half of the old approach
+test); the loader's `a_biome_settlement_row_may_say_near_spawn`; the
+snapshot test now round-trips a near-spawn row. The wilderness test allows
+trail ground past the margin. `a_fixed_size_settlement_lays_out_exactly_as_before_ranges`
+is re-pinned, as its approach paths now run on as trails.
