@@ -139,3 +139,18 @@ test); the loader's `a_biome_settlement_row_may_say_near_spawn`; the
 snapshot test now round-trips a near-spawn row. The wilderness test allows
 trail ground past the margin. `a_fixed_size_settlement_lays_out_exactly_as_before_ranges`
 is re-pinned, as its approach paths now run on as trails.
+
+Trails' cost, found by the full benchmark: with the road grid widened to hold
+90 m trails, a cold layout graded about five times the cells, and the
+village (+0.35 ms at 1 m) and the town at the cap (+0.40 to +0.43 ms) went past
+their margins. Trails past the disc and margin now live outside the grid:
+`LaidSettlement::trail`, a sorted list of metre cells, which `stand_trail`
+lays as the path Material on each column's own top Voxel, keeping a smoothing
+stair on it. Only roads inside the grid (`grid_m`: disc, margin and half a
+path) are graded; a worn trail cell past it changes nothing. The slab-per-step
+test now asks it of graded roads only, and the fixed-size digests are re-pinned
+again.
+
+Benchmark after (load 5 to 7; cold, over bare): village +0.16, +0.15, +0.10 ms
+at 1.0, 0.5, 0.25 m; town (64 m) +0.11, +0.14, +0.17 ms; town at the cap +0.28,
++0.29, +0.29 ms (margin 0.35 ms); every warm variant within 0.25 ms.

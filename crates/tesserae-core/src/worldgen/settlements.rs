@@ -210,6 +210,9 @@ pub(super) struct LaidSettlement {
     plots: Vec<Plot>,
     /// The points its approach paths step through past the disc.
     approach: Vec<[f32; 2]>,
+    /// Metre cells of its trails past the grid, laid in its path Material on the ground as it
+    /// lies; sorted.
+    trail: Vec<[i32; 2]>,
 }
 
 /// What a metre cell of a Settlement's square holds.
@@ -282,6 +285,12 @@ struct Slot {
 /// How far from its centre a Settlement's roads and trails may reach.
 fn paths_m(radius_m: f32) -> f32 {
     radius_m + TRAIL_M.1 + APPROACH_HALF_M
+}
+
+/// How far from its centre a Settlement's graded grid reaches: its disc and margin. Trails past it
+/// are kept as a list of cells laid on the natural ground, since grading costs the grid's area.
+fn grid_m(radius_m: f32, settlement: &Settlement) -> f32 {
+    radius_m + settlement.margin_m + APPROACH_HALF_M
 }
 
 fn lerp((low, high): (f32, f32), t: f32) -> f32 {
@@ -615,7 +624,7 @@ impl Worldgen {
         let centre = founding.centre_m;
         let (structures, plots): (Vec<_>, Vec<_>) = founding.centre.into_iter().unzip();
         let roads = self.roads(founding, &plots);
-        let reach = paths_m(radius_m).ceil() as i32 + 1;
+        let reach = grid_m(radius_m, settlement).ceil() as i32 + 1;
         let origin_m = centre.map(|c| c as i32 - reach);
         let side = 2 * reach + 1;
         let approach = roads
@@ -638,12 +647,15 @@ impl Worldgen {
             structures,
             plots,
             approach,
+            trail: Vec::new(),
         };
         for road in &roads {
             for pair in road.points.windows(2) {
                 self.rasterise(&mut laid, road, pair[0], pair[1]);
             }
         }
+        laid.trail.sort_unstable();
+        laid.trail.dedup();
         self.grade(&mut laid);
 
         let mins: usize = settlement.rules.iter().map(|r| usize::from(r.min)).sum();
@@ -934,15 +946,19 @@ impl Worldgen {
                     continue;
                 }
                 let [i, j] = [x - laid.origin_m[0], z - laid.origin_m[1]];
-                if !((0..laid.side).contains(&i) && (0..laid.side).contains(&j)) {
-                    continue;
-                }
                 let worn = wear > 0.0
                     && unit(hashed(
                         self.seed,
                         WEAR_SALT,
                         &[x as u32 as u64, z as u32 as u64],
                     )) < f64::from(wear);
+                if !((0..laid.side).contains(&i) && (0..laid.side).contains(&j)) {
+                    // A worn trail cell shows the ground as it is, so only a laid one is kept.
+                    if !worn {
+                        laid.trail.push([x, z]);
+                    }
+                    continue;
+                }
                 let cell = &mut laid.road[(j * laid.side + i) as usize];
                 if *cell != Lane::Laid {
                     *cell = if worn { Lane::Worn } else { Lane::Laid };
@@ -1096,8 +1112,49 @@ impl Worldgen {
                 chunk.set(local[0], local[1], local[2], voxel);
             }
         }
+        self.stand_trail(chunk, origin, laid);
         for s in &laid.structures {
             self.stand_structure(chunk, coord, s, false);
+        }
+    }
+
+    /// A Settlement's trail cells past its grid that fall in the Chunk at `origin`: each
+    /// column's own top Voxel becomes its path Material, so a trail follows the ground as it
+    /// lies.
+    fn stand_trail(&self, chunk: &mut Chunk, origin: [i32; 3], laid: &LaidSettlement) {
+        let size = CHUNK_SIZE as i32;
+        let half = self.voxel_size / 2.0;
+        let column = |m: i32| ((m as f32 / self.voxel_size) - 1e-3).floor() as i32;
+        let [x0, z0] = [origin[0], origin[2]].map(|g| self.global_m(g).floor() as i32);
+        let [x1, z1] = [origin[0], origin[2]].map(|g| self.global_m(g + size).ceil() as i32);
+        let first = laid.trail.partition_point(|c| c[0] < x0);
+        for &[x, z] in &laid.trail[first..] {
+            if x >= x1 {
+                break;
+            }
+            if !(z0..z1).contains(&z) {
+                continue;
+            }
+            for gz in column(z).max(origin[2])..(column(z + 1) + 1).min(origin[2] + size) {
+                for gx in column(x).max(origin[0])..(column(x + 1) + 1).min(origin[0] + size) {
+                    let (x_m, z_m) = (self.global_m(gx), self.global_m(gz));
+                    if metre_cell(x_m, z_m, half) != [x, z] {
+                        continue;
+                    }
+                    let natural_m = self.surface_height_m(x_m, z_m);
+                    if self.water.is_some_and(|w| natural_m < w.level_m) {
+                        continue;
+                    }
+                    let top = top_index(natural_m, 0.0, self.voxel_size) - origin[1];
+                    // Only the ground's own top: a smoothing stair on it keeps a slope walkable.
+                    if (0..size).contains(&top) {
+                        let [lx, lz] = [gx - origin[0], gz - origin[2]].map(|l| l as usize);
+                        if !chunk.get(lx, top as usize, lz).is_air() {
+                            chunk.set(lx, top as usize, lz, laid.path);
+                        }
+                    }
+                }
+            }
         }
     }
 

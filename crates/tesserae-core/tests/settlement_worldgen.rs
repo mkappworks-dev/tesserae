@@ -930,11 +930,18 @@ fn a_road_never_rises_more_than_a_slab_per_step() {
     for size in SIZES {
         let laid = Laid::scan(size, hilly, half_m);
         let with = Columns::new(generator(size, hilly(listing(true)), village()));
+        // A trail past the margin follows the ground as it lies; only the roads are graded.
+        let centres = laid.centres();
+        let graded = |c: [i32; 2]| {
+            centres
+                .iter()
+                .any(|&centre| laid.within(c, centre, RADIUS_M + MARGIN_M))
+        };
         let (mut steps, mut climbs) = (0, 0);
-        for &column in &laid.road {
+        for &column in laid.road.iter().filter(|&&c| graded(c)) {
             let here = with.walked_m(column);
             for next in [[column[0] + 1, column[1]], [column[0], column[1] + 1]] {
-                if !laid.road.contains(&next) {
+                if !laid.road.contains(&next) || !graded(next) {
                     continue;
                 }
                 let rise = (with.walked_m(next) - here).abs();
@@ -1574,7 +1581,7 @@ fn a_fixed_size_settlement_lays_out_exactly_as_before_ranges() {
             digest(&changed(&with, &bare, half_m, false))
         })
         .collect();
-    assert_eq!(digests, [0x2448_afad_d101_f153, 0xd1e1_3aec_7d83_b739]);
+    assert_eq!(digests, [0x6418_4939_4e1a_2ea1, 0xb08f_816e_daa9_9247]);
 }
 
 const OTHER_PATH: MaterialId = 195;
