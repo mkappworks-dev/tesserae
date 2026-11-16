@@ -897,7 +897,11 @@ impl Worldgen {
                 .smoothing
                 .is_some_and(|p| EASED_RISE_VOXELS as f32 * voxel_size >= p.min_rise_m),
             water: params.water.map(|w| WaterParams {
-                level_m: w.level_m.min(params.sea_level_m + params.relief_m),
+                level_m: if params.generator >= LANDFORMS_SINCE {
+                    params.sea_level_m
+                } else {
+                    w.level_m.min(params.sea_level_m + params.relief_m)
+                },
                 ..w
             }),
             climate: ClimateField::new(folded, params.climate),
@@ -953,9 +957,23 @@ impl Worldgen {
         self.voxel_size
     }
 
-    /// The lake, its level clamped as generation clamps it.
+    /// The lake, its level clamped as generation clamps it. Under version 3 the level is Sea level;
+    /// ask [`Self::water_level_m`] for a column's own.
     pub fn water(&self) -> Option<WaterParams> {
         self.water
+    }
+
+    /// The height up to which open air over a column fills with the Game's fluid, if the Game
+    /// declared one. The ground there may stand above it, which is a dry column.
+    pub fn water_level_m(&self, _x_m: f32, _z_m: f32) -> Option<f32> {
+        self.water.map(|w| w.level_m)
+    }
+
+    /// The Water surface over a column: the height of the water standing or running on it, `None`
+    /// where the ground is above the water or the Game declared no fluid.
+    pub fn water_surface_m(&self, x_m: f32, z_m: f32) -> Option<f32> {
+        self.water_level_m(x_m, z_m)
+            .filter(|&level_m| self.surface_height_m(x_m, z_m) < level_m)
     }
 
     pub fn climate_at(&self, x_m: f32, z_m: f32) -> Climate {
@@ -1209,7 +1227,8 @@ impl Worldgen {
         let top_m = (0..CHUNK_SIZE as i32)
             .flat_map(|z| (0..CHUNK_SIZE as i32).map(move |x| surface_index(x, z)))
             .map(|i| surface_m[i])
-            .fold(f32::MIN, f32::max);
+            .fold(f32::MIN, f32::max)
+            + self.terrain.map_or(0.0, |t| t.overhang_max_m());
         // A Chunk above every column holds only air and water, which take nothing from a Biome.
         let columns = if floor_m <= top_m {
             self.column_grounds(cx, cz)
@@ -1261,19 +1280,31 @@ impl Worldgen {
                     .as_ref()
                     .map_or(ground, |columns| columns[z * CHUNK_SIZE + x]);
                 let biome = self.column_biome([cx, cz], [x, z]);
+                let water_level_m = self.water_level_m(x_m, z_m);
+                let amp_m = self.terrain.map_or(0.0, |t| t.overhang_amp_m(x_m, z_m));
+                let push_m = |y_m: f32| {
+                    self.terrain
+                        .map_or(0.0, |t| t.overhang_push_m(x_m, y_m, z_m, amp_m))
+                };
 
                 for y in 0..CHUNK_SIZE {
                     let y_m = floor_m + y as f32 * self.voxel_size;
-                    let below_m = surface_m - y_m;
+                    let base_m = surface_m - y_m;
+                    // Only within `amp_m` of the base surface does the density move it.
+                    let banded = amp_m > 0.0 && base_m.abs() <= amp_m;
+                    let below_m = if banded { base_m + push_m(y_m) } else { base_m };
                     if below_m < 0.0 {
-                        if let Some(water) = self.water
-                            && y_m < water.level_m
+                        if let (Some(water), Some(level_m)) = (self.water, water_level_m)
+                            && y_m < level_m
                         {
                             chunk.set(x, y, z, Voxel::cube(water.material));
                             continue;
                         }
-                        // y_m only rises, so the rest of the column is sky.
-                        break;
+                        if base_m < -amp_m {
+                            // y_m only rises, so the rest of the column is sky.
+                            break;
+                        }
+                        continue;
                     }
                     // A cave carves through the Grass cap like anything else,
                     // which is what a mouth is.
@@ -1291,7 +1322,12 @@ impl Worldgen {
                     {
                         continue;
                     }
-                    let material = if below_m < self.voxel_size {
+                    let exposed = if banded {
+                        base_m - self.voxel_size + push_m(y_m + self.voxel_size) < 0.0
+                    } else {
+                        below_m < self.voxel_size
+                    };
+                    let material = if exposed {
                         ground.surface
                     } else if below_m < self.params.soil_depth_m {
                         ground.soil
@@ -1638,7 +1674,10 @@ impl Worldgen {
         if y_m > highest || self.carved([gx, top, gz]) {
             return None;
         }
-        let under_lake = self.water.filter(|w| y_m < w.level_m);
+        let under_lake = self.water.filter(|_| {
+            self.water_level_m(x_m, z_m)
+                .is_some_and(|level_m| y_m < level_m)
+        });
         match (plant.kind, under_lake) {
             (
                 SurfacePlantKind::Column {
@@ -1693,9 +1732,12 @@ impl Worldgen {
         let most = ((max_height_m / self.voxel_size + 1e-3).floor() as i32).max(1);
         let mut run = 1 + (standing.vary * f64::from(most)) as i32;
         if stands_in.is_some()
-            && let Some(w) = self.water
+            && let Some(level_m) = self.water_level_m(
+                self.global_m(standing.base[0]),
+                self.global_m(standing.base[2]),
+            )
         {
-            let room = ((w.level_m - self.global_m(standing.base[1])) / self.voxel_size).ceil();
+            let room = ((level_m - self.global_m(standing.base[1])) / self.voxel_size).ceil();
             run = run.min((room as i32).max(1));
         }
         run
@@ -1712,7 +1754,9 @@ impl Worldgen {
         let y_m = self.global_m(base[1]);
         if y_m > highest
             || self.carved([gx, top, gz])
-            || self.water.is_some_and(|w| y_m < w.level_m)
+            || self
+                .water_level_m(x_m, z_m)
+                .is_some_and(|level_m| y_m < level_m)
             || (self.smoothing && self.eased(top, [gx, gz], base[1]))
         {
             return None;

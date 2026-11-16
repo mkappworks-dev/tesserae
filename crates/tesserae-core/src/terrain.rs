@@ -17,6 +17,9 @@ pub struct LandformParams {
     pub overhang_m: f32,
     /// The horizontal period of the continent field: how far apart two oceans are.
     pub continent_size_m: f32,
+    /// Whether the 3D density runs. Off for the coarse levels that generate columns, which draw
+    /// the heightfield alone.
+    pub overhangs: bool,
 }
 
 impl Default for LandformParams {
@@ -26,6 +29,7 @@ impl Default for LandformParams {
             height_m: 192.0,
             overhang_m: 12.0,
             continent_size_m: 6000.0,
+            overhangs: true,
         }
     }
 }
@@ -52,6 +56,10 @@ const SALT_CANYON: u32 = 0x1a4d_0061;
 const SALT_CANYON_LINE: u32 = 0x1a4d_0071;
 const SALT_ISLANDS: u32 = 0x1a4d_0081;
 const SALT_VOLCANO: u32 = 0x1a4d_0091;
+const SALT_OVERHANG: u32 = 0x1a4d_00a1;
+
+/// The wavelength of the density noise, in metres: arches and ledges a few Voxels thick.
+const OVERHANG_SIZE_M: f32 = 10.0;
 
 /// Continent field to base height, as fractions of the sea floor depth below Sea level (negative
 /// knots) and of the land height above it (positive): a deep floor, a slope, a shelf, a coast
@@ -87,6 +95,7 @@ pub(crate) struct Terrain {
     inv_feature_size: f32,
     octaves: u32,
     relief_m: f32,
+    overhang_m: f32,
 }
 
 #[inline]
@@ -114,6 +123,11 @@ impl Terrain {
             inv_feature_size: 1.0 / p.feature_size_m,
             octaves: p.octaves,
             relief_m: p.relief_m,
+            overhang_m: if p.landforms.overhangs {
+                p.landforms.overhang_m
+            } else {
+                0.0
+            },
         }
     }
 
@@ -140,13 +154,18 @@ impl Terrain {
             self.seed.wrapping_add(SALT_CONTINENT),
             4,
         );
-        let erosion = crate::noise::fbm2(
-            wx / EROSION_SIZE_M,
-            wz / EROSION_SIZE_M,
-            self.seed.wrapping_add(SALT_EROSION),
-            3,
+        // fBm bunches around a half, so a contrast curve spreads the fields across their range.
+        let erosion = smooth(
+            0.25,
+            0.75,
+            crate::noise::fbm2(
+                wx / EROSION_SIZE_M,
+                wz / EROSION_SIZE_M,
+                self.seed.wrapping_add(SALT_EROSION),
+                3,
+            ),
         );
-        let inland = smooth(0.50, 0.70, continent);
+        let inland = smooth(0.50, 0.66, continent);
         Fields {
             continent,
             erosion,
@@ -159,7 +178,7 @@ impl Terrain {
         let seed = self.seed;
         let (wx, wz) = self.warped(x_m, z_m);
         let f = self.fields_warped(wx, wz);
-        let inland = smooth(0.50, 0.70, f.continent);
+        let inland = smooth(0.50, 0.66, f.continent);
         let (d, h) = (self.depth_m, self.height_m);
 
         let base = curve(&CONTINENT_CURVE, f.continent);
@@ -221,6 +240,32 @@ impl Terrain {
         offset += self.volcano(x_m, z_m, inland);
 
         self.sea_m + offset.clamp(-d, h)
+    }
+
+    /// The most the density can push the surface anywhere, which widens the early-out bounds.
+    pub(crate) fn overhang_max_m(&self) -> f32 {
+        self.overhang_m
+    }
+
+    /// How far, in metres, the 3D density pushes the surface up or down over a column: zero on
+    /// flat ground, up to `overhang_m` on rugged.
+    pub(crate) fn overhang_amp_m(&self, x_m: f32, z_m: f32) -> f32 {
+        if self.overhang_m <= 0.0 {
+            return 0.0;
+        }
+        self.overhang_m * smooth(0.2, 0.55, self.fields(x_m, z_m).ruggedness)
+    }
+
+    /// The signed push of the density at a point, in `-amp_m..amp_m`: positive is solid.
+    pub(crate) fn overhang_push_m(&self, x_m: f32, y_m: f32, z_m: f32, amp_m: f32) -> f32 {
+        let n = crate::noise::fbm3(
+            x_m / OVERHANG_SIZE_M,
+            y_m / OVERHANG_SIZE_M,
+            z_m / OVERHANG_SIZE_M,
+            self.seed.wrapping_add(SALT_OVERHANG),
+            2,
+        );
+        ((n * 2.0 - 1.0) * 2.0).clamp(-1.0, 1.0) * amp_m
     }
 
     /// A cone at a hashed spot of some 5 km cells, over land only.

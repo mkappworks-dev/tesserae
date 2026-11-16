@@ -1,6 +1,6 @@
 # 05: Overhangs (17a)
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 03
 
@@ -12,6 +12,6 @@ The bounded 3D density near the surface, zero where ruggedness is low. Levels 3 
 
 ## Acceptance criteria
 
-- [ ] Arches and sheer cliffs appear on rugged ground; plains and sea floors are heightfields.
-- [ ] The band plus `overhang_m` holds as the one bound.
-- [ ] Flat-ground Chunks stay within the benchmark budget.
+- [x] Arches and sheer cliffs appear on rugged ground; plains and sea floors are heightfields.
+- [x] The band plus `overhang_m` holds as the one bound.
+- [x] Flat-ground Chunks stay within the benchmark budget.

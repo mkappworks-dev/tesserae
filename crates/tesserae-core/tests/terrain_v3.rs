@@ -137,3 +137,181 @@ fn chunks_hold_the_surface_to_within_a_voxel() {
     let local = (h - (cy * CHUNK_SIZE as i32) as f32).floor() as usize;
     assert!(!chunk.get(5, local.min(CHUNK_SIZE - 1), 9).is_air());
 }
+
+fn wet_world() -> WorldgenParams {
+    WorldgenParams {
+        water: Some(tesserae_core::worldgen::WaterParams {
+            level_m: 9999.0,
+            material: tesserae_core::testgen::fixtures().water,
+        }),
+        ..v3()
+    }
+}
+
+/// A column the sea covers by at least `depth_m`, found by walking a fixed grid.
+fn ocean_column(g: &Worldgen, depth_m: f32) -> (f32, f32) {
+    (-60..60)
+        .flat_map(|j| (-60..60).map(move |i| (i as f32 * 100.0, j as f32 * 100.0)))
+        .find(|&(x, z)| g.surface_height_m(x, z) < 24.0 - depth_m)
+        .expect("a World has ocean")
+}
+
+#[test]
+fn the_sea_fills_ocean_columns_up_to_sea_level_and_no_higher() {
+    let g = Worldgen::new(SEED, 1.0, wet_world());
+    let water = tesserae_core::testgen::fixtures().water;
+    let (x, z) = ocean_column(&g, 6.0);
+    let (cx, cz) = ((x / 32.0).floor() as i32, (z / 32.0).floor() as i32);
+    let (lx, lz) = (
+        (x - cx as f32 * 32.0) as usize,
+        (z - cz as f32 * 32.0) as usize,
+    );
+    let at = |y_m: f32| {
+        let cy = (y_m / 32.0).floor() as i32;
+        g.chunk(cx, cy, cz)
+            .get(lx, (y_m - cy as f32 * 32.0) as usize, lz)
+    };
+    assert_eq!(at(22.0).material(), water, "just under Sea level");
+    assert!(at(24.0).is_air(), "at Sea level");
+    assert!(at(30.0).is_air(), "above it");
+}
+
+#[test]
+fn water_surface_is_sea_level_over_ocean_and_none_over_land() {
+    let g = Worldgen::new(SEED, 1.0, wet_world());
+    let (mut wet, mut dry) = (0, 0);
+    for j in -30..30 {
+        for i in -30..30 {
+            let (x, z) = (i as f32 * 211.0, j as f32 * 211.0);
+            match g.water_surface_m(x, z) {
+                Some(level) => {
+                    assert_eq!(level, 24.0);
+                    assert!(g.surface_height_m(x, z) < 24.0);
+                    wet += 1;
+                }
+                None => {
+                    assert!(g.surface_height_m(x, z) >= 24.0);
+                    dry += 1;
+                }
+            }
+        }
+    }
+    assert!(wet > 100 && dry > 100, "{wet} wet, {dry} dry");
+}
+
+#[test]
+fn without_a_fluid_the_basins_are_dry() {
+    let g = Worldgen::new(SEED, 1.0, v3());
+    assert_eq!(g.water_surface_m(0.0, 0.0), None);
+    let (x, z) = ocean_column(&g, 6.0);
+    assert_eq!(g.water_surface_m(x, z), None);
+}
+
+#[test]
+fn a_coarse_generator_draws_the_same_coast() {
+    let fine = Worldgen::new(SEED, 1.0, wet_world());
+    let coarse = Worldgen::new(SEED, 4.0, wet_world());
+    for j in -30..30 {
+        for i in -30..30 {
+            let (x, z) = (i as f32 * 137.0, j as f32 * 137.0);
+            assert_eq!(fine.water_surface_m(x, z), coarse.water_surface_m(x, z));
+        }
+    }
+}
+
+fn dry_v3() -> WorldgenParams {
+    WorldgenParams {
+        caves: None,
+        smoothing: None,
+        ..v3()
+    }
+}
+
+/// Whether a column of chunks holds a solid Voxel over an air one, scanning a metre column.
+fn has_overhang(g: &Worldgen, x: i32, z: i32, from_m: i32, to_m: i32) -> bool {
+    let (cx, cz) = (x.div_euclid(32), z.div_euclid(32));
+    let (lx, lz) = (x.rem_euclid(32) as usize, z.rem_euclid(32) as usize);
+    let mut seen_air = false;
+    for y in from_m..to_m {
+        let cy = y.div_euclid(32);
+        let v = g.chunk(cx, cy, cz).get(lx, y.rem_euclid(32) as usize, lz);
+        if v.is_air() {
+            seen_air = true;
+        } else if seen_air {
+            return true;
+        }
+    }
+    false
+}
+
+fn columns_where(g: &Worldgen, keep: impl Fn(f32) -> bool, want: usize) -> Vec<(i32, i32)> {
+    (-80..80)
+        .flat_map(|j| (-80..80).map(move |i| (i * 61, j * 61)))
+        .filter(|&(x, z)| keep(g.landform_fields(x as f32, z as f32).unwrap().ruggedness))
+        .take(want)
+        .collect()
+}
+
+#[test]
+fn flat_ground_is_a_heightfield() {
+    let g = Worldgen::new(SEED, 1.0, dry_v3());
+    for (x, z) in columns_where(&g, |r| r < 0.05, 12) {
+        let h = g.surface_height_m(x as f32, z as f32);
+        assert!(
+            !has_overhang(&g, x, z, h as i32 - 20, h as i32 + 20),
+            "{x},{z}"
+        );
+    }
+}
+
+#[test]
+fn rugged_ground_has_overhangs_and_arches() {
+    let g = Worldgen::new(SEED, 1.0, dry_v3());
+    let rugged = columns_where(&g, |r| r > 0.5, 60);
+    assert!(rugged.len() >= 20, "{} rugged columns", rugged.len());
+    let with = rugged
+        .iter()
+        .filter(|&&(x, z)| {
+            let h = g.surface_height_m(x as f32, z as f32);
+            has_overhang(&g, x, z, h as i32 - 14, h as i32 + 14)
+        })
+        .count();
+    assert!(with * 5 >= rugged.len(), "{with} of {}", rugged.len());
+}
+
+#[test]
+fn turning_overhangs_off_leaves_a_heightfield_everywhere() {
+    let params = WorldgenParams {
+        landforms: LandformParams {
+            overhangs: false,
+            ..landforms()
+        },
+        ..dry_v3()
+    };
+    let g = Worldgen::new(SEED, 1.0, params);
+    for (x, z) in columns_where(&g, |r| r > 0.5, 20) {
+        let h = g.surface_height_m(x as f32, z as f32);
+        assert!(
+            !has_overhang(&g, x, z, h as i32 - 14, h as i32 + 14),
+            "{x},{z}"
+        );
+    }
+}
+
+#[test]
+fn nothing_stands_more_than_the_overhang_above_the_base_surface() {
+    let g = Worldgen::new(SEED, 1.0, dry_v3());
+    for (x, z) in columns_where(&g, |r| r > 0.5, 20) {
+        let h = g.surface_height_m(x as f32, z as f32);
+        let (cx, cz) = (x.div_euclid(32), z.div_euclid(32));
+        let top = ((h + 10.0 + 6.0) as i32).max(0);
+        for y in (h as i32 + 12)..top + 20 {
+            let v = g.chunk(cx, y.div_euclid(32), cz).get(
+                x.rem_euclid(32) as usize,
+                y.rem_euclid(32) as usize,
+                z.rem_euclid(32) as usize,
+            );
+            assert!(v.is_air(), "solid at {x},{y},{z} over ground {h}");
+        }
+    }
+}

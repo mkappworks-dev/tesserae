@@ -355,10 +355,7 @@ impl Worldgen {
                 let angle = toward + turn as f32 * TAU / 8.0;
                 [cx + out_m * angle.cos(), cz + out_m * angle.sin()]
             })
-            .find(|&[x, z]| {
-                self.water
-                    .is_none_or(|w| self.surface_height_m(x, z) >= w.level_m)
-            })
+            .find(|&[x, z]| self.water_surface_m(x, z).is_none())
     }
 
     pub(super) fn settlement_pass(&self) -> Option<&SettlementPass> {
@@ -538,7 +535,10 @@ impl Worldgen {
             return None;
         }
         let height_m = self.surface_height_m(x_m, z_m);
-        if self.water.is_some_and(|w| height_m < w.level_m) {
+        if self
+            .water_level_m(x_m, z_m)
+            .is_some_and(|level_m| height_m < level_m)
+        {
             return None;
         }
         let facing = (mix(hash ^ 2) & 3) as u8;
@@ -921,7 +921,10 @@ impl Worldgen {
                     continue;
                 }
                 let next_m = self.surface_height_m(next[0], next[1]);
-                if self.water.is_some_and(|w| next_m < w.level_m) {
+                if self
+                    .water_level_m(next[0], next[1])
+                    .is_some_and(|level_m| next_m < level_m)
+                {
                     continue;
                 }
                 let grade = (next_m - height_m).abs() / ROAD_STEP_M;
@@ -1087,7 +1090,10 @@ impl Worldgen {
                         continue;
                     }
                     let natural_m = self.surface_height_m(x_m, z_m);
-                    if self.water.is_some_and(|w| natural_m < w.level_m) {
+                    if self
+                        .water_level_m(x_m, z_m)
+                        .is_some_and(|level_m| natural_m < level_m)
+                    {
                         continue;
                     }
                     // The apron eases from the Plot's height to the ground just past it.
@@ -1175,7 +1181,10 @@ impl Worldgen {
                         continue;
                     }
                     let natural_m = self.surface_height_m(x_m, z_m);
-                    if self.water.is_some_and(|w| natural_m < w.level_m) {
+                    if self
+                        .water_level_m(x_m, z_m)
+                        .is_some_and(|level_m| natural_m < level_m)
+                    {
                         continue;
                     }
                     let top = top_index(natural_m, 0.0, self.voxel_size) - origin[1];
@@ -1200,10 +1209,7 @@ impl Worldgen {
         if !laid.road_at(metre_cell(x_m, z_m, half)) {
             return None;
         }
-        if self
-            .water
-            .is_some_and(|w| self.surface_height_m(x_m, z_m) < w.level_m)
-        {
+        if self.water_surface_m(x_m, z_m).is_some() {
             return None;
         }
         let graded_m = laid.graded([x_m + half, z_m + half]);

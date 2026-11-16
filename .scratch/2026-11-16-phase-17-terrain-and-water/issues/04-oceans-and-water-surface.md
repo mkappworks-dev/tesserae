@@ -1,6 +1,6 @@
 # 04: Oceans, Sea level and the Water surface function (17a)
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 03
 
@@ -12,6 +12,6 @@ Shelf, slope, deep floor, trenches, coasts with beaches, cliffs and stony shores
 
 ## Acceptance criteria
 
-- [ ] No consumer reads `water.level_m` under version 3.
-- [ ] A World with no Game fluid has the basins, dry.
-- [ ] Coarse levels draw the same coast as level 0 to within a coarse Voxel.
+- [x] No consumer reads `water.level_m` under version 3.
+- [x] A World with no Game fluid has the basins, dry.
+- [x] Coarse levels draw the same coast as level 0 to within a coarse Voxel.

@@ -334,7 +334,7 @@ impl Worldgen {
         let (_, highest) = self.terrain_band_m();
         let [wx, wz] = p.extent();
         if let Some(reach_m) = p.field.near_water_m {
-            let lake = self.water?;
+            self.water?;
             let [min, max] = p.footprint();
             let centre = |a: usize| (self.global_m(min[a]) + self.global_m(max[a])) / 2.0;
             let (cx, cz) = (centre(0), centre(1));
@@ -345,7 +345,7 @@ impl Worldgen {
                         cx + reach_m * k * angle.cos(),
                         cz + reach_m * k * angle.sin(),
                     );
-                    self.surface_height_m(x, z) < lake.level_m
+                    self.water_surface_m(x, z).is_some()
                 })
             });
             if !near {
@@ -381,7 +381,9 @@ impl Worldgen {
             let y_m = self.global_m(top + 1);
             if y_m > highest
                 || self.carved([gx, top, gz])
-                || self.water.is_some_and(|w| y_m < w.level_m)
+                || self
+                    .water_level_m(x_m, z_m)
+                    .is_some_and(|level_m| y_m < level_m)
             {
                 return None;
             }
