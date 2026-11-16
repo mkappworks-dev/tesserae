@@ -110,9 +110,11 @@ fn village() -> Settlement {
     Settlement {
         name: "t:village".into(),
         radius_m: RADIUS_M,
+        radius_min_m: RADIUS_M,
         margin_m: MARGIN_M,
         centre: Some(building(&t, 0)),
         plots: 8,
+        plots_min: 8,
         rules: vec![
             PlotRule {
                 building: building(&t, 1),
@@ -381,8 +383,69 @@ impl Laid {
 
     /// Whether `f` stands in the Settlement at `centre`.
     fn holds(&self, f: &Found, centre: [f32; 2]) -> bool {
+        self.holds_in(f, centre, RADIUS_M)
+    }
+
+    /// Whether `f` stands in the disc of `radius_m` at `centre`.
+    fn holds_in(&self, f: &Found, centre: [f32; 2], radius_m: f32) -> bool {
         let [min, max] = self.rect(f);
-        self.within([0, 1].map(|a| (min[a] + max[a]) / 2), centre, RADIUS_M)
+        self.within([0, 1].map(|a| (min[a] + max[a]) / 2), centre, radius_m)
+    }
+
+    /// How many of the Structures `kept` keeps have a door, asserting each faces a road: a road
+    /// cell within 10 of the door, out of the edge nearest it.
+    fn doors_facing_a_road(&self, kept: impl Fn(&Found) -> bool) -> usize {
+        let templates = templates();
+        let mut doors = 0;
+        for f in self.found.iter().filter(|f| kept(f)) {
+            let sampled = templates[f.template].sample(self.size, f.turn);
+            let [sx, sy, sz] = sampled.size();
+            let door = (0..sy)
+                .flat_map(|y| (0..sz).flat_map(move |z| (0..sx).map(move |x| [x, y, z])))
+                .find(|&at| matches!(sampled.cell(at), Cell::Voxel(v) if v.material() == DOOR));
+            let Some([x, _, z]) = door else {
+                continue;
+            };
+            doors += 1;
+            // Out of the edge nearest the door.
+            let edges = [
+                (sz - 1 - z, [0, 1]),
+                (sx - 1 - x, [1, 0]),
+                (z, [0, -1]),
+                (x, [-1, 0]),
+            ];
+            let (_, out) = edges.iter().min_by_key(|e| e.0).unwrap();
+            let from = [f.corner[0] + x, f.corner[2] + z];
+            // The road may be diagonal and a worn patch shows no path, so look along three lines.
+            let faces = (-1..=1).any(|across| {
+                (1..=10).any(|k| {
+                    self.road.contains(&[
+                        from[0] + out[0] * k + out[1] * across,
+                        from[1] + out[1] * k + out[0] * across,
+                    ])
+                })
+            });
+            assert!(faces, "the door of {f:?} faces no road");
+        }
+        doors
+    }
+
+    /// The Structures standing in each Settlement, by its centre: each goes to the nearest.
+    fn by_centre(&self) -> Vec<([f32; 2], Vec<Found>)> {
+        let centres = self.centres();
+        let mut out: Vec<_> = centres.iter().map(|&c| (c, Vec::new())).collect();
+        for f in self.found.iter().filter(|f| f.template != 0) {
+            let [min, max] = self.rect(f);
+            let mid = [0, 1].map(|a| (min[a] + max[a]) as f32 * self.size / 2.0);
+            let nearest = (0..centres.len()).min_by(|&i, &j| {
+                let d = |c: [f32; 2]| (c[0] - mid[0]).hypot(c[1] - mid[1]);
+                d(centres[i]).total_cmp(&d(centres[j]))
+            });
+            if let Some(i) = nearest {
+                out[i].1.push(*f);
+            }
+        }
+        out
     }
 
     fn within(&self, [x, z]: [i32; 2], centre: [f32; 2], radius_m: f32) -> bool {
@@ -467,45 +530,10 @@ fn no_settlement_disc_or_margin_comes_within_48_m_of_the_origin() {
 fn every_door_faces_a_road_no_two_plots_overlap_and_counts_keep_their_bounds() {
     let half_m = 128.0;
     let laid = Laid::scan(1.0, plain, half_m);
-    let templates = templates();
     let centres = laid.centres_within(half_m);
     assert!(centres.len() >= 3, "only {} Settlements", centres.len());
-    let mut doors = 0;
     // A Settlement the scan cuts may have its road outside it.
-    for f in laid
-        .found
-        .iter()
-        .filter(|f| centres.iter().any(|&c| laid.holds(f, c)))
-    {
-        let sampled = templates[f.template].sample(1.0, f.turn);
-        let [sx, sy, sz] = sampled.size();
-        let door = (0..sy)
-            .flat_map(|y| (0..sz).flat_map(move |z| (0..sx).map(move |x| [x, y, z])))
-            .find(|&at| matches!(sampled.cell(at), Cell::Voxel(v) if v.material() == DOOR));
-        let Some([x, _, z]) = door else {
-            continue;
-        };
-        doors += 1;
-        // Out of the edge nearest the door.
-        let edges = [
-            (sz - 1 - z, [0, 1]),
-            (sx - 1 - x, [1, 0]),
-            (z, [0, -1]),
-            (x, [-1, 0]),
-        ];
-        let (_, out) = edges.iter().min_by_key(|e| e.0).unwrap();
-        let from = [f.corner[0] + x, f.corner[2] + z];
-        // The road may be diagonal and a worn patch shows no path, so look along three lines.
-        let faces = (-1..=1).any(|across| {
-            (1..=10).any(|k| {
-                laid.road.contains(&[
-                    from[0] + out[0] * k + out[1] * across,
-                    from[1] + out[1] * k + out[0] * across,
-                ])
-            })
-        });
-        assert!(faces, "the door of {f:?} faces no road");
-    }
+    let doors = laid.doors_facing_a_road(|f| centres.iter().any(|&c| laid.holds(f, c)));
     assert!(doors > 8, "only {doors} doors");
     let rects: Vec<_> = laid.found.iter().map(|f| laid.rect(f)).collect();
     for (i, a) in rects.iter().enumerate() {
@@ -540,6 +568,7 @@ fn every_door_faces_a_road_no_two_plots_overlap_and_counts_keep_their_bounds() {
 fn a_settlement_below_its_minimum_is_dropped() {
     let crowded = Settlement {
         plots: 8,
+        plots_min: 8,
         minimum: 8,
         rules: vec![PlotRule {
             min: 8,
@@ -985,9 +1014,11 @@ fn hamlet() -> Settlement {
     Settlement {
         name: "t:hamlet".into(),
         radius_m: 6.0,
+        radius_min_m: 6.0,
         margin_m: 2.0,
         centre: Some(building(&t, 0)),
         plots: 1,
+        plots_min: 1,
         rules: vec![PlotRule {
             building: building(&t, 2),
             weight: 1.0,
@@ -1192,4 +1223,231 @@ fn roads_wear_towards_the_edge_and_approach_paths_fade_out_inside_the_margin() {
     }
     assert_eq!(worn_in, 0, "worn near the centre");
     assert!(worn_out > 0, "no worn patch towards the edge");
+}
+
+/// From 2 Plots in a 20 m disc to 10 in a 36 m one.
+fn ranged() -> Settlement {
+    Settlement {
+        radius_min_m: 20.0,
+        radius_m: 36.0,
+        plots_min: 2,
+        plots: 10,
+        minimum: 1,
+        rules: vec![
+            PlotRule {
+                min: 1,
+                max: 8,
+                ..village().rules[0].clone()
+            },
+            PlotRule {
+                min: 1,
+                max: 4,
+                ..village().rules[1].clone()
+            },
+        ],
+        ..village()
+    }
+}
+
+#[test]
+fn one_declaration_lays_copies_from_its_fewest_to_its_most_plots_and_none_meet() {
+    let settlement = ranged();
+    let spacing_m = 2.0 * settlement.reach_m();
+    let half_m = 256.0;
+    let params = |listed| plain(listing_at(listed, spacing_m, 1.0));
+    let laid = Laid::scan_of(1.0, params, settlement.clone(), SEED, half_m);
+    // Only copies the scan holds whole.
+    let inner_m = half_m - settlement.radius_m - 8.0;
+    let copies: Vec<_> = laid
+        .by_centre()
+        .into_iter()
+        .filter(|(c, _)| c.iter().all(|v| (v - AWAY_M).abs() <= inner_m))
+        .collect();
+    assert!(copies.len() >= 6, "only {} copies", copies.len());
+    let counts: Vec<usize> = copies.iter().map(|(_, f)| f.len()).collect();
+    let (fewest, most) = (counts.iter().min().unwrap(), counts.iter().max().unwrap());
+    assert!(
+        *fewest <= 3 && *most >= 8,
+        "copies lay {counts:?} Plots, not 2 to 10"
+    );
+    assert!(counts.iter().all(|&n| n <= 10), "{counts:?}");
+    // The radius follows the Plots: a small copy's Plots all stand within its smaller disc.
+    for (centre, found) in &copies {
+        let furthest = found
+            .iter()
+            .map(|f| {
+                let [min, max] = laid.rect(f);
+                (0..2)
+                    .map(|a| {
+                        let near = (min[a] as f32 - centre[a]).abs();
+                        let far = (max[a] as f32 - centre[a]).abs();
+                        near.max(far)
+                    })
+                    .fold(0.0f32, f32::hypot)
+            })
+            .fold(0.0, f32::max);
+        if found.len() <= 3 {
+            assert!(
+                furthest <= 26.0,
+                "{centre:?}: a small copy reaches {furthest} m"
+            );
+        }
+    }
+    let centres = laid.centres();
+    for (i, a) in centres.iter().enumerate() {
+        for b in &centres[..i] {
+            let d = (a[0] - b[0]).hypot(a[1] - b[1]);
+            assert!(
+                d >= 2.0 * settlement.reach_m(),
+                "{a:?} and {b:?} are {d} m apart"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_ranged_settlement_is_the_same_in_metres_at_every_voxel_size() {
+    let settlement = ranged();
+    let spacing_m = 2.0 * settlement.reach_m();
+    let half_m = 96.0;
+    let params = |listed| plain(listing_at(listed, spacing_m, 1.0));
+    let mut by_size = Vec::new();
+    for size in SIZES {
+        let laid = Laid::scan_of(size, params, settlement.clone(), SEED, half_m);
+        assert!(!laid.centres().is_empty(), "{size} m: no Settlement");
+        let mut places: Vec<_> = laid
+            .found
+            .iter()
+            .map(|f| {
+                let [x, z] = [f.corner[0], f.corner[2]].map(|c| c as f32 * size);
+                (f.template, x.to_bits(), z.to_bits(), f.turn.quarters())
+            })
+            .collect();
+        places.sort();
+        by_size.push(places);
+    }
+    assert_eq!(by_size[0], by_size[1], "1 m and 0.5 m lay out differently");
+    assert_eq!(by_size[0], by_size[2], "1 m and 0.25 m lay out differently");
+}
+
+/// A 100 m disc of up to 40 Plots: wide enough for its roads to fork.
+fn large() -> Settlement {
+    Settlement {
+        radius_min_m: 100.0,
+        radius_m: 100.0,
+        plots_min: 40,
+        plots: 40,
+        minimum: 10,
+        rules: vec![
+            PlotRule {
+                min: 1,
+                max: 30,
+                ..village().rules[0].clone()
+            },
+            PlotRule {
+                min: 1,
+                max: 15,
+                ..village().rules[1].clone()
+            },
+        ],
+        ..village()
+    }
+}
+
+#[test]
+fn a_large_settlement_forks_its_roads_and_every_door_still_faces_a_road() {
+    let settlement = large();
+    let spacing_m = 2.0 * settlement.reach_m();
+    let half_m = 256.0;
+    let params = |listed| plain(listing_at(listed, spacing_m, 1.0));
+    let laid = Laid::scan_of(1.0, params, settlement.clone(), SEED, half_m);
+    let inner_m = half_m - settlement.radius_m;
+    let centres: Vec<_> = laid
+        .centres()
+        .into_iter()
+        .filter(|c| c.iter().all(|v| (v - AWAY_M).abs() <= inner_m))
+        .collect();
+    assert!(!centres.is_empty(), "no large Settlement stood whole");
+    for &centre in &centres {
+        // 3 or 4 roads leave the centre; past the first forks, a ring crosses more.
+        let crossings = |radius_m: f32| {
+            let on = |k: usize| {
+                let angle = k as f32 * std::f32::consts::TAU / 720.0;
+                let at = [0, 1].map(|a| {
+                    let along = if a == 0 { angle.cos() } else { angle.sin() };
+                    (centre[a] + radius_m * along).floor() as i32
+                });
+                laid.road.contains(&at)
+            };
+            (0..720).filter(|&k| on(k) && !on((k + 719) % 720)).count()
+        };
+        let near = crossings(20.0);
+        assert!((3..=4).contains(&near), "{centre:?}: {near} roads leave it");
+        let past = (40..=48).step_by(2).map(|r| crossings(r as f32)).max();
+        assert!(
+            past.is_some_and(|n| n > near),
+            "{centre:?}: {past:?} roads past the forks, {near} near the centre"
+        );
+        let plots = laid
+            .found
+            .iter()
+            .filter(|f| f.template != 0 && laid.holds_in(f, centre, settlement.radius_m))
+            .count();
+        assert!(plots >= 25, "{centre:?}: only {plots} Plots");
+    }
+    let doors = laid.doors_facing_a_road(|f| {
+        centres
+            .iter()
+            .any(|&c| laid.holds_in(f, c, settlement.radius_m))
+    });
+    assert!(doors >= 25, "only {doors} doors");
+}
+
+/// FNV-1a over every cell `with` changes from `bare` in a scan, in coordinate order: stable across
+/// Rust releases, unlike `DefaultHasher`.
+fn digest(changed: &HashMap<[i32; 3], (Voxel, Voxel)>) -> u64 {
+    let mut cells: Vec<_> = changed.iter().collect();
+    cells.sort_by_key(|(at, _)| **at);
+    let mut hash = 0xcbf2_9ce4_8422_2325u64;
+    for (at, (with, _)) in cells {
+        let bytes = at.iter().flat_map(|c| c.to_le_bytes()).chain([
+            with.material().to_le_bytes()[0],
+            with.material().to_le_bytes()[1],
+            with.orientation(),
+        ]);
+        for byte in bytes {
+            hash = (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3);
+        }
+    }
+    hash
+}
+
+/// The digests are what the generator laid before Settlements took size ranges.
+#[test]
+fn a_fixed_size_settlement_lays_out_exactly_as_before_ranges() {
+    let wide = Settlement {
+        radius_m: 64.0,
+        radius_min_m: 64.0,
+        plots: 24,
+        plots_min: 24,
+        ..village()
+    };
+    let cases = [
+        (village(), hilly(listing(true)), hilly(listing(false)), 96.0),
+        (
+            wide.clone(),
+            plain(listing_at(true, 2.0 * wide.reach_m(), 1.0)),
+            plain(listing_at(false, 2.0 * wide.reach_m(), 1.0)),
+            160.0,
+        ),
+    ];
+    let digests: Vec<u64> = cases
+        .into_iter()
+        .map(|(settlement, with, bare, half_m)| {
+            let with = generator(1.0, with, settlement.clone());
+            let bare = generator(1.0, bare, settlement);
+            digest(&changed(&with, &bare, half_m, false))
+        })
+        .collect();
+    assert_eq!(digests, [0x47a5_0e68_07da_bd2f, 0xea8c_66c4_03cf_ac60]);
 }

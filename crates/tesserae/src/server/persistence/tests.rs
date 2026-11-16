@@ -2522,9 +2522,11 @@ fn declares_hamlet(path: &'static str) -> impl FnOnce(&mut crate::server::mods::
         loaded.tables.settlements = vec![Settlement {
             name: "terra:hamlet".into(),
             radius_m: 16.0,
+            radius_min_m: 16.0,
             margin_m: 4.0,
             centre: Some(slab),
             plots: 4,
+            plots_min: 4,
             rules: vec![PlotRule {
                 building: slab,
                 weight: 1.0,

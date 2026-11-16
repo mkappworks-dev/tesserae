@@ -1172,24 +1172,35 @@ interface content {
         loot: option<loot-table>,
     }
 
-    /// A village or town world generation lays out: roads branch from its
-    /// centre along gentle ground, and Plots grow beside them, each Structure
-    /// turned so its door faces the road.
+    /// A hamlet, village or town world generation lays out: roads branch from
+    /// its centre along gentle ground, forking part-way in a disc wider than
+    /// 64 metres, and Plots grow beside them, each Structure turned so its door
+    /// faces the road. Each copy draws its size from the World seed and its
+    /// lattice square: its most Plots evenly from `plots-min` to `plots`, and
+    /// its radius from `radius-min-m` to `radius-m` following them.
     record settlement-def {
         /// The Settlement's local name; the engine adds `<mod id>:`.
         name: string,
-        /// Above 0 and at most 64 metres. No Template it names is wider.
+        /// The largest copy's radius, above 0 and at most 160 metres.
         radius-m: f32,
+        /// The smallest copy's radius, above 0 and at most `radius-m`; none is
+        /// `radius-m`. No Template it names is wider.
+        radius-min-m: option<f32>,
         /// How far past its disc single Structures keep out, 0 to 64 metres;
         /// none is 16.
         margin-m: option<f32>,
         /// A Template, `<mod id>:<name>`, that stands at its centre.
         centre: option<string>,
-        /// How many Plots it lays at most besides its centre, at most 24.
+        /// How many Plots the largest copy lays at most besides its centre, at
+        /// most 96.
         plots: u8,
-        /// From 1 to 24 rows; their minimums add up to at most `plots`.
+        /// How many Plots the smallest copy lays at most, at most `plots`; none
+        /// is `plots`.
+        plots-min: option<u8>,
+        /// From 1 to 96 rows; their minimums add up to at most `plots-min`.
         templates: list<settlement-plot>,
-        /// Fewer Plots than this, besides its centre, and it is dropped.
+        /// Fewer Plots than this, besides its centre, and it is dropped; at
+        /// most `plots-min`.
         minimum: u8,
         /// A Material, `<mod id>:<name>`, that is not a fluid, its roads are
         /// laid in.

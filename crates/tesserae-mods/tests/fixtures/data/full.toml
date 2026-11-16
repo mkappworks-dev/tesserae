@@ -299,10 +299,12 @@ level-tolerance-m = 2.0
 
 [[settlements]]
 name = "hamlet"
-radius-m = 24.0
+radius-min-m = 16.0
+radius-max-m = 24.0
 margin-m = 8.0
 centre = "full:cairn"
-plots = 4
+plots-min = 2
+plots-max = 4
 minimum = 2
 path = "full:rock"
 path-shape = "full:slab"

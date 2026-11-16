@@ -1,23 +1,42 @@
-//! The Settlement Tidewater lays out from its Templates, and the rows its Biomes list it and its
+//! The Settlements Tidewater lays out from its Templates, and the rows its Biomes list them and its
 //! wilderness Templates in.
 
 use demo_kit::structures::{Loot, Village, plot};
 
-const VILLAGE: Village = Village {
+const HAMLET: Village = Village {
     game: "tidewater",
-    name: "harbour",
-    // Small, since islands are.
-    radius_m: 28.0,
+    name: "hamlet",
+    radius_m: (22.0, 26.0),
     spacing_m: 104.0,
     chance: 0.6,
     centre: "tide_well",
-    plots: 8,
+    plots: (3, 6),
+    minimum: 1,
     templates: &[
         plot("fisher_cottage", 4.0, 1, 4),
-        plot("harbour_house", 3.0, 1, 3),
+        plot("harbour_house", 3.0, 0, 2),
         plot("shore_farm", 2.0, 0, 2),
+        plot("smokehouse", 1.0, 0, 1).stocked(&SMOKEHOUSE_LOOT),
+    ],
+    loot: &HARBOUR_LOOT,
+};
+
+const VILLAGE: Village = Village {
+    game: "tidewater",
+    name: "harbour",
+    // Small, since islands are: the largest copy still fits on one.
+    radius_m: (26.0, 32.0),
+    spacing_m: 112.0,
+    chance: 0.6,
+    centre: "tide_well",
+    plots: (6, 12),
+    minimum: 3,
+    templates: &[
+        plot("fisher_cottage", 4.0, 1, 6),
+        plot("harbour_house", 3.0, 1, 4),
+        plot("shore_farm", 2.0, 0, 3),
         plot("harbour_inn", 1.0, 0, 1),
-        plot("net_loft", 1.0, 0, 1).stocked(&NET_LOFT_LOOT),
+        plot("net_loft", 1.0, 0, 2).stocked(&NET_LOFT_LOOT),
         plot("boatwright", 1.0, 0, 1).stocked(&BOATWRIGHT_LOOT),
         plot("smokehouse", 1.0, 0, 1).stocked(&SMOKEHOUSE_LOOT),
         plot("fish_market", 2.0, 0, 3),
@@ -112,4 +131,4 @@ pub fn biome_loot(biome: &str) -> &'static Loot {
     }
 }
 
-demo_kit::structures!(VILLAGE);
+demo_kit::structures!(HAMLET, VILLAGE);

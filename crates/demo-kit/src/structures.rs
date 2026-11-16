@@ -1,11 +1,10 @@
-//! A demo Game's one Settlement, and the rows its Biomes list it and its wilderness Templates in.
+//! A demo Game's Settlements, a hamlet and a village, and the rows its Biomes list them and its
+//! wilderness Templates in.
 
 /// Room round a Settlement's disc for the paths that lead into it.
 pub const MARGIN_M: f32 = 24.0;
 /// A packed earth road, laid by the ground itself.
 pub const PATH: &str = "strata:soil";
-/// Below this many Plots besides its centre, a Settlement is dropped.
-pub const MINIMUM: u8 = 3;
 /// Over twice the widest wilderness Template, so they stand apart.
 pub const WILD_SPACING_M: f32 = 256.0;
 pub const WILD_CHANCE: f32 = 0.5;
@@ -52,16 +51,20 @@ pub struct Loot {
 pub struct Village {
     pub game: &'static str,
     pub name: &'static str,
-    /// No Template is wider than this, so every one fits a Plot.
-    pub radius_m: f32,
-    /// At least twice the radius and [`MARGIN_M`]: few lattice cells pass the ground rules, so a
-    /// World still shows one every few hundred metres.
+    /// The smallest and largest copy's disc; no Template is wider than the smallest, so every one
+    /// fits a Plot.
+    pub radius_m: (f32, f32),
+    /// At least twice the largest radius and [`MARGIN_M`]: few lattice cells pass the ground
+    /// rules, so a World still shows one every few hundred metres.
     pub spacing_m: f32,
     /// Thins the lattice's draws, so villages stand apart rather than in every lattice cell.
     pub chance: f32,
     /// The centre Template, by its unqualified name.
     pub centre: &'static str,
-    pub plots: u8,
+    /// The most Plots the smallest and the largest copy lay.
+    pub plots: (u8, u8),
+    /// Below this many Plots besides its centre, a copy is dropped.
+    pub minimum: u8,
     pub templates: &'static [Plot],
     /// What its buildings' chests hold, unless a Plot has its own.
     pub loot: &'static Loot,
@@ -73,36 +76,40 @@ impl Village {
     }
 }
 
-/// Writes `settlements`, `village`, `wild`, `bridge` and `loot` for the Game's [`Village`]
-/// `$village`. Expanded
-/// inside the Game, where `crate::tesserae::mods` is its WIT binding.
+/// Writes `settlements`, `village`, `wild`, `bridge` and `loot` for the Game's [`Village`]s
+/// `$hamlet` and `$village`. Expanded inside the Game, where `crate::tesserae::mods` is its WIT
+/// binding.
 #[macro_export]
 macro_rules! structures {
-    ($village:path) => {
+    ($hamlet:path, $village:path) => {
         pub fn settlements() -> Vec<crate::tesserae::mods::content::SettlementDef> {
             use crate::tesserae::mods::content::{SettlementDef, SettlementPlot};
-            vec![SettlementDef {
-                name: $village.name.into(),
-                radius_m: $village.radius_m,
-                margin_m: Some($crate::structures::MARGIN_M),
-                centre: Some($village.qualified($village.centre)),
-                plots: $village.plots,
-                templates: $village
-                    .templates
-                    .iter()
-                    .map(|p| SettlementPlot {
-                        template: $village.qualified(p.template),
-                        weight: p.weight,
-                        min: p.min,
-                        max: p.max,
-                        loot: p.loot.map(loot),
-                    })
-                    .collect(),
-                minimum: $crate::structures::MINIMUM,
-                path: $crate::structures::PATH.into(),
-                path_shape: None,
-                loot: Some(loot($village.loot)),
-            }]
+            [&$hamlet, &$village]
+                .map(|kind: &$crate::structures::Village| SettlementDef {
+                    name: kind.name.into(),
+                    radius_m: kind.radius_m.1,
+                    radius_min_m: Some(kind.radius_m.0),
+                    margin_m: Some($crate::structures::MARGIN_M),
+                    centre: Some(kind.qualified(kind.centre)),
+                    plots: kind.plots.1,
+                    plots_min: Some(kind.plots.0),
+                    templates: kind
+                        .templates
+                        .iter()
+                        .map(|p| SettlementPlot {
+                            template: kind.qualified(p.template),
+                            weight: p.weight,
+                            min: p.min,
+                            max: p.max,
+                            loot: p.loot.map(loot),
+                        })
+                        .collect(),
+                    minimum: kind.minimum,
+                    path: $crate::structures::PATH.into(),
+                    path_shape: None,
+                    loot: Some(loot(kind.loot)),
+                })
+                .into()
         }
 
         /// A loot table, for the Settlement or a Biome's `loot`.
@@ -127,12 +134,18 @@ macro_rules! structures {
             }
         }
 
+        /// A settled Biome's rows: the village first, so a hamlet the lattice puts where one
+        /// stands gives way.
         pub fn village() -> Vec<crate::tesserae::mods::content::BiomeSettlement> {
-            vec![crate::tesserae::mods::content::BiomeSettlement {
-                settlement: $village.qualified($village.name),
-                spacing_m: $village.spacing_m,
-                chance: $village.chance,
-            }]
+            [&$village, &$hamlet]
+                .map(|kind: &$crate::structures::Village| {
+                    crate::tesserae::mods::content::BiomeSettlement {
+                        settlement: kind.qualified(kind.name),
+                        spacing_m: kind.spacing_m,
+                        chance: kind.chance,
+                    }
+                })
+                .into()
         }
 
         /// Each of `names`, a wilderness Template of the Game's.

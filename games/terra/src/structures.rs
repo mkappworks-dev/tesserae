@@ -5,20 +5,25 @@ use crate::tesserae::mods::content::{
     BiomeSettlement, BiomeStructure, LootEntry, LootTable, SettlementDef, SettlementPlot,
 };
 
-/// No Template is wider than this, so every one fits a Plot.
-const VILLAGE_RADIUS_M: f32 = 40.0;
+/// The smallest and largest copy's disc of each kind. No Template is wider than the smallest, so
+/// every one fits a Plot.
+const HAMLET_RADIUS_M: (f32, f32) = (24.0, 32.0);
+const VILLAGE_RADIUS_M: (f32, f32) = (40.0, 64.0);
+/// Wide enough that the largest copies grow a second ring of streets.
+const TOWN_RADIUS_M: (f32, f32) = (96.0, 150.0);
 /// Room round a Settlement's disc for the paths that lead into it.
 const MARGIN_M: f32 = 24.0;
-/// Twice the village's radius and margin, the closest the lattice allows: few cells pass the
-/// ground rules, so a World still shows one every few hundred metres.
-const VILLAGE_SPACING_M: f32 = 128.0;
-/// Thins the lattice's draws, so villages stand apart rather than in every cell.
+/// Each lattice is over twice its kind's largest radius and margin: few cells pass the ground
+/// rules, so a World still shows a village every few hundred metres, hamlets between them and a
+/// town rarely.
+const HAMLET_SPACING_M: f32 = 128.0;
+const VILLAGE_SPACING_M: f32 = 192.0;
+const TOWN_SPACING_M: f32 = 384.0;
+/// Thins the lattices' draws, so Settlements stand apart rather than in every cell.
+const HAMLET_CHANCE: f32 = 0.8;
 const VILLAGE_CHANCE: f32 = 0.7;
 /// A packed earth road, laid by the ground itself.
 const VILLAGE_PATH: &str = "terra:dirt";
-/// A town's disc, and its lattice: wider apart than villages, so one is a rarer find.
-const TOWN_RADIUS_M: f32 = 64.0;
-const TOWN_SPACING_M: f32 = 384.0;
 /// Over twice the widest wilderness Template, so they stand apart.
 const WILD_SPACING_M: f32 = 256.0;
 const WILD_CHANCE: f32 = 0.5;
@@ -60,7 +65,7 @@ fn stocked(plot: SettlementPlot, table: LootTable) -> SettlementPlot {
     }
 }
 
-/// A village keeps a little food and seed.
+/// A village or hamlet keeps a little food and seed.
 fn village_loot() -> LootTable {
     loot(
         (1, 3),
@@ -178,73 +183,113 @@ pub fn biome_loot(biome: &str) -> LootTable {
     }
 }
 
+/// A Settlement of Terra's: its disc and most Plots run from its smallest copy to its largest.
+fn kind(
+    name: &str,
+    (radius_min_m, radius_m): (f32, f32),
+    (plots_min, plots): (u8, u8),
+    templates: Vec<SettlementPlot>,
+    minimum: u8,
+    path: &str,
+    loot: LootTable,
+) -> SettlementDef {
+    SettlementDef {
+        name: name.into(),
+        radius_m,
+        radius_min_m: Some(radius_min_m),
+        margin_m: Some(MARGIN_M),
+        centre: Some("terra:well".into()),
+        plots,
+        plots_min: Some(plots_min),
+        templates,
+        minimum,
+        path: path.into(),
+        path_shape: None,
+        loot: Some(loot),
+    }
+}
+
 pub fn settlements() -> Vec<SettlementDef> {
     vec![
-        SettlementDef {
-            name: "village".into(),
-            radius_m: VILLAGE_RADIUS_M,
-            margin_m: Some(MARGIN_M),
-            centre: Some("terra:well".into()),
-            plots: 12,
-            templates: vec![
-                plot("cottage", 4.0, 1, 4),
-                plot("family_house", 3.0, 1, 3),
-                plot("farmhouse", 2.0, 0, 2),
+        kind(
+            "village",
+            VILLAGE_RADIUS_M,
+            (8, 20),
+            vec![
+                plot("cottage", 4.0, 1, 6),
+                plot("family_house", 3.0, 1, 4),
+                plot("farmhouse", 2.0, 0, 3),
                 plot("inn", 1.0, 0, 1),
-                plot("warehouse", 1.0, 0, 1),
+                plot("warehouse", 1.0, 0, 2),
                 stocked(plot("blacksmith", 1.0, 0, 1), smithy_loot()),
                 stocked(plot("bakery", 1.0, 0, 1), bakery_loot()),
                 plot("market_stall", 2.0, 0, 3),
                 plot("barn", 1.0, 0, 2),
             ],
-            minimum: 3,
-            path: VILLAGE_PATH.into(),
-            path_shape: None,
-            loot: Some(village_loot()),
-        },
-        SettlementDef {
-            name: "town".into(),
-            radius_m: TOWN_RADIUS_M,
-            margin_m: Some(MARGIN_M),
-            centre: Some("terra:well".into()),
-            plots: 22,
-            templates: vec![
+            5,
+            VILLAGE_PATH,
+            village_loot(),
+        ),
+        kind(
+            "town",
+            TOWN_RADIUS_M,
+            (30, 80),
+            vec![
                 // One at least: two of the larger cottages crowd out the minimums after them.
-                plot("cottage", 4.0, 1, 6),
-                plot("family_house", 3.0, 1, 4),
-                plot("farmhouse", 2.0, 1, 3),
-                plot("inn", 1.0, 1, 1),
-                plot("warehouse", 1.0, 0, 2),
-                stocked(plot("blacksmith", 1.0, 1, 1), smithy_loot()),
-                stocked(plot("bakery", 1.0, 1, 2), bakery_loot()),
-                plot("market_stall", 2.0, 1, 4),
-                plot("barn", 1.0, 0, 3),
+                plot("cottage", 4.0, 1, 24),
+                plot("family_house", 3.0, 1, 16),
+                plot("farmhouse", 2.0, 1, 8),
+                plot("inn", 1.0, 1, 3),
+                plot("warehouse", 1.0, 0, 6),
+                stocked(plot("blacksmith", 1.0, 1, 3), smithy_loot()),
+                stocked(plot("bakery", 1.0, 1, 4), bakery_loot()),
+                plot("market_stall", 2.0, 1, 12),
+                plot("barn", 1.0, 0, 6),
             ],
-            minimum: 8,
-            path: "terra:cobblestone".into(),
-            path_shape: None,
-            loot: Some(town_loot()),
-        },
+            20,
+            "terra:cobblestone",
+            town_loot(),
+        ),
+        kind(
+            "hamlet",
+            HAMLET_RADIUS_M,
+            (3, 6),
+            vec![
+                plot("cottage", 4.0, 1, 4),
+                plot("family_house", 3.0, 0, 2),
+                plot("farmhouse", 2.0, 0, 2),
+                stocked(plot("bakery", 1.0, 0, 1), bakery_loot()),
+            ],
+            2,
+            VILLAGE_PATH,
+            village_loot(),
+        ),
     ]
 }
 
+fn row(name: &str, spacing_m: f32, chance: f32) -> BiomeSettlement {
+    BiomeSettlement {
+        settlement: format!("terra:{name}"),
+        spacing_m,
+        chance,
+    }
+}
+
+/// A settled Biome's rows: the village first, so a hamlet the lattice puts where one stands gives
+/// way.
 pub fn village() -> Vec<BiomeSettlement> {
-    vec![BiomeSettlement {
-        settlement: "terra:village".into(),
-        spacing_m: VILLAGE_SPACING_M,
-        chance: VILLAGE_CHANCE,
-    }]
+    vec![
+        row("village", VILLAGE_SPACING_M, VILLAGE_CHANCE),
+        row("hamlet", HAMLET_SPACING_M, HAMLET_CHANCE),
+    ]
 }
 
 /// The town first, so a village the lattice puts where it stands gives way.
 pub fn town_and_village() -> Vec<BiomeSettlement> {
-    let mut rows = vec![BiomeSettlement {
-        settlement: "terra:town".into(),
-        spacing_m: TOWN_SPACING_M,
-        chance: 1.0,
-    }];
-    rows.extend(village());
-    rows
+    vec![
+        row("town", TOWN_SPACING_M, 1.0),
+        row("village", VILLAGE_SPACING_M, VILLAGE_CHANCE),
+    ]
 }
 
 /// Each of `names`, a wilderness Template of Terra's.

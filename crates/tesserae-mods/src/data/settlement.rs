@@ -6,10 +6,14 @@ use crate::bindings::tesserae::mods::content;
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub(super) struct Settlement {
     name: String,
+    #[serde(alias = "radius-max-m")]
     radius_m: f32,
+    radius_min_m: Option<f32>,
     margin_m: Option<f32>,
     centre: Option<String>,
+    #[serde(alias = "plots-max")]
     plots: u8,
+    plots_min: Option<u8>,
     templates: Vec<SettlementPlot>,
     #[serde(default)]
     minimum: u8,
@@ -92,9 +96,11 @@ impl From<Settlement> for content::SettlementDef {
         Self {
             name: s.name,
             radius_m: s.radius_m,
+            radius_min_m: s.radius_min_m,
             margin_m: s.margin_m,
             centre: s.centre,
             plots: s.plots,
+            plots_min: s.plots_min,
             templates: s
                 .templates
                 .into_iter()

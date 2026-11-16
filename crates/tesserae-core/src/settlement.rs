@@ -5,8 +5,8 @@ use crate::loot::LootTable;
 use crate::template::Template;
 use crate::voxel::Voxel;
 
-pub const MAX_SETTLEMENT_RADIUS_M: f32 = 64.0;
-pub const MAX_PLOTS: u8 = 24;
+pub const MAX_SETTLEMENT_RADIUS_M: f32 = 160.0;
+pub const MAX_PLOTS: u8 = 96;
 /// Settlements in a World, from every Mod together.
 pub const MAX_SETTLEMENTS: usize = 16;
 /// How far past a Settlement's disc single Structures keep out, unless it says.
@@ -38,12 +38,17 @@ pub struct PlotRule {
 pub struct Settlement {
     /// `<mod id>:<name>`.
     pub name: String,
+    /// The largest disc a copy draws; with [`Self::radius_min_m`], the range its radius follows
+    /// its Plots across.
     pub radius_m: f32,
+    pub radius_min_m: f32,
     /// Single Structures keep this far past the disc.
     pub margin_m: f32,
     pub centre: Option<Building>,
-    /// How many Plots it lays at most, besides its centre.
+    /// How many Plots the largest copy lays at most, besides its centre.
     pub plots: u8,
+    /// How many Plots the smallest copy lays at most; equal to [`Self::plots`] for a fixed size.
+    pub plots_min: u8,
     pub rules: Vec<PlotRule>,
     /// Below this many Plots, besides its centre, the Settlement is dropped.
     pub minimum: u8,
@@ -54,9 +59,22 @@ pub struct Settlement {
 }
 
 impl Settlement {
-    /// Its disc and margin, in metres.
+    /// Its largest disc and margin, in metres.
     pub fn reach_m(&self) -> f32 {
         self.radius_m + self.margin_m
+    }
+
+    /// The most Plots and the radius of the copy drawn at `t`, from 0 to below 1: the Plots spread
+    /// evenly over the range, the radius following them.
+    pub(crate) fn size_at(&self, t: f64) -> (u8, f32) {
+        let span = self.plots - self.plots_min;
+        if span == 0 {
+            return (self.plots, self.radius_m);
+        }
+        let extra = ((t * f64::from(span + 1)) as u8).min(span);
+        let share = f32::from(extra) / f32::from(span);
+        let radius_m = self.radius_min_m + (self.radius_m - self.radius_min_m) * share;
+        (self.plots_min + extra, radius_m)
     }
 
     /// Checked against the World's Templates, which every [`Building`] indexes.
@@ -65,6 +83,9 @@ impl Settlement {
             return Err(format!(
                 "radius-m must be above 0 and at most {MAX_SETTLEMENT_RADIUS_M} m"
             ));
+        }
+        if !(self.radius_min_m > 0.0 && self.radius_min_m <= self.radius_m) {
+            return Err("radius-min-m must be above 0 and at most its largest radius".into());
         }
         if !(0.0..=MAX_SETTLEMENT_MARGIN_M).contains(&self.margin_m) {
             return Err(format!(
@@ -80,12 +101,18 @@ impl Settlement {
         if self.rules.is_empty() || self.rules.len() > usize::from(MAX_PLOTS) {
             return Err(format!("draws its Plots from 1 to {MAX_PLOTS} Templates"));
         }
-        if self.minimum > self.plots {
-            return Err("its minimum is more Plots than it lays".into());
+        if self.plots_min > self.plots {
+            return Err("plots-min must be at most its most Plots".into());
+        }
+        // Checked against the smallest copy, so every copy can reach them.
+        if self.minimum > self.plots_min {
+            return Err("its minimum is more Plots than its smallest copy lays".into());
         }
         let mins: u32 = self.rules.iter().map(|r| u32::from(r.min)).sum();
-        if mins > u32::from(self.plots) {
-            return Err("its Templates' minimums add up to more Plots than it lays".into());
+        if mins > u32::from(self.plots_min) {
+            return Err(
+                "its Templates' minimums add up to more Plots than its smallest copy lays".into(),
+            );
         }
         let buildings = self
             .centre
@@ -96,9 +123,9 @@ impl Settlement {
                 .get(usize::from(building.template))
                 .ok_or("names a missing Template")?;
             let [x, _, z] = template.size_m();
-            if x.max(z) > self.radius_m {
+            if x.max(z) > self.radius_min_m {
                 return Err(format!(
-                    "`{}` is wider than the Settlement's radius",
+                    "`{}` is wider than the Settlement's smallest radius",
                     template.name
                 ));
             }

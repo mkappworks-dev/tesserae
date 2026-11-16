@@ -533,8 +533,9 @@ placed it is only Voxels.
 **Settlement** — a group of Structures that world generation lays around a
 centre and joins with paths, from rules a Game or Mod declares: a radius in
 metres, an optional centre Template, the Templates it may hold and a path
-Material. A village and a town are a Game's names for Settlements of different
-rules, not different things.
+Material. Its Plots and radius may be a range, and each copy draws its size from
+it. A hamlet, a village and a town are a Game's names for Settlements of
+different rules, not different things.
 
 **Lattice cell** — one square of a lattice world generation spreads Structures,
 Settlements or crop fields on, a row's spacing in metres on a side. It holds at

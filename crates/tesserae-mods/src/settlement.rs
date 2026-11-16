@@ -172,9 +172,11 @@ fn settlement(
     let settlement = Settlement {
         name,
         radius_m: def.radius_m,
+        radius_min_m: def.radius_min_m.unwrap_or(def.radius_m),
         margin_m: def.margin_m.unwrap_or(DEFAULT_SETTLEMENT_MARGIN_M),
         centre: def.centre.as_deref().map(building).transpose()?,
         plots: def.plots,
+        plots_min: def.plots_min.unwrap_or(def.plots),
         rules,
         minimum: def.minimum,
         path,

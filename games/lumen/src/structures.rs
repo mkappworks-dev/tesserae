@@ -1,22 +1,41 @@
-//! The Settlement Lumen lays out from its Templates, and the rows its Biomes list it and its
+//! The Settlements Lumen lays out from its Templates, and the rows its Biomes list them and its
 //! wilderness Templates in.
 
 use demo_kit::structures::{Loot, Village, plot};
 
+const HAMLET: Village = Village {
+    game: "lumen",
+    name: "hamlet",
+    radius_m: (24.0, 32.0),
+    spacing_m: 160.0,
+    chance: 0.8,
+    centre: "moon_well",
+    plots: (3, 6),
+    minimum: 2,
+    templates: &[
+        plot("lantern_cottage", 4.0, 1, 4),
+        plot("twilight_house", 3.0, 0, 2),
+        plot("glow_farm", 2.0, 0, 2),
+        plot("lens_kiln", 1.0, 0, 1).stocked(&KILN_LOOT),
+    ],
+    loot: &VILLAGE_LOOT,
+};
+
 const VILLAGE: Village = Village {
     game: "lumen",
     name: "village",
-    radius_m: 40.0,
+    radius_m: (40.0, 64.0),
     spacing_m: 320.0,
     chance: 1.0,
     centre: "moon_well",
-    plots: 12,
+    plots: (8, 20),
+    minimum: 5,
     templates: &[
-        plot("lantern_cottage", 4.0, 1, 4),
-        plot("twilight_house", 3.0, 1, 3),
-        plot("glow_farm", 2.0, 0, 2),
+        plot("lantern_cottage", 4.0, 1, 6),
+        plot("twilight_house", 3.0, 1, 4),
+        plot("glow_farm", 2.0, 0, 3),
         plot("starlight_inn", 1.0, 0, 1),
-        plot("crystal_vault", 1.0, 0, 1).stocked(&VAULT_LOOT),
+        plot("crystal_vault", 1.0, 0, 2).stocked(&VAULT_LOOT),
         plot("glassworks", 1.0, 0, 1).stocked(&GLASSWORKS_LOOT),
         plot("lens_kiln", 1.0, 0, 1).stocked(&KILN_LOOT),
         plot("glass_stall", 2.0, 0, 3),
@@ -112,4 +131,4 @@ pub fn biome_loot(biome: &str) -> &'static Loot {
     }
 }
 
-demo_kit::structures!(VILLAGE);
+demo_kit::structures!(HAMLET, VILLAGE);

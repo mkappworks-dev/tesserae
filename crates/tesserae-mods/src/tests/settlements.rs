@@ -135,6 +135,82 @@ fn a_biome_lists_a_settlement_by_name_and_each_door_is_found() {
 }
 
 #[test]
+fn a_settlement_declares_its_plots_and_radius_as_ranges_and_a_single_value_is_a_fixed_size() {
+    let town = "radius-min-m = 40.0\nradius-max-m = 160.0\ncentre = \"t:well\"\n\
+                plots-min = 30\nplots-max = 96\n\
+                templates = [{ template = \"t:house\", weight = 2.0, min = 1, max = 96 }]";
+    let (settlements, _) = load(&world(
+        &format!(
+            "{}{}",
+            settlement(VILLAGE),
+            settlement(town).replace("village", "town")
+        ),
+        "{ settlement = \"t:town\", spacing-m = 352.0 }",
+    ))
+    .unwrap();
+    let [village, town] = &settlements[..] else {
+        panic!("{settlements:?}");
+    };
+    assert_eq!(
+        (
+            village.plots_min,
+            village.plots,
+            village.radius_min_m,
+            village.radius_m
+        ),
+        (6, 6, 32.0, 32.0),
+        "a single value is a fixed size"
+    );
+    assert_eq!(
+        (town.plots_min, town.plots, town.radius_min_m, town.radius_m),
+        (30, 96, 40.0, 160.0)
+    );
+}
+
+#[test]
+fn a_range_upside_down_or_too_small_for_its_minimums_or_buildings_is_refused() {
+    let ranged = |fields: &str| {
+        settlement(&format!(
+            "centre = \"t:well\"\n{fields}\n\
+             templates = [{{ template = \"t:house\", weight = 2.0, min = 1, max = 4 }}]"
+        ))
+    };
+    for (fields, says) in [
+        ("radius-m = 32.0\nplots-min = 7\nplots = 6", "plots-min"),
+        (
+            "radius-min-m = 40.0\nradius-m = 32.0\nplots = 6",
+            "radius-min-m",
+        ),
+        (
+            "radius-min-m = 3.0\nradius-m = 32.0\nplots = 6",
+            "smallest radius",
+        ),
+        ("radius-m = 32.0\nplots-min = 0\nplots = 6", "smallest copy"),
+        ("radius-m = 32.0\nplots = 6\nplots-max = 6", "duplicate"),
+    ] {
+        let refused = refusal(&ranged(fields), "");
+        assert!(refused.contains(says), "{fields}: {refused}");
+    }
+}
+
+#[test]
+fn the_spacing_rule_takes_the_largest_radius() {
+    let town = "radius-min-m = 20.0\nradius-max-m = 100.0\ncentre = \"t:well\"\n\
+                plots-min = 3\nplots-max = 40\n\
+                templates = [{ template = \"t:house\", weight = 2.0, min = 1, max = 40 }]";
+    let close = refusal(
+        &settlement(town),
+        "{ settlement = \"t:village\", spacing-m = 200.0 }",
+    );
+    assert!(close.contains("twice"), "{close}");
+    load(&world(
+        &settlement(town),
+        "{ settlement = \"t:village\", spacing-m = 232.0 }",
+    ))
+    .unwrap();
+}
+
+#[test]
 fn a_biome_row_carries_its_chance() {
     let (_, biomes) = load(&world(
         &settlement(VILLAGE),
@@ -159,13 +235,13 @@ fn a_third_row_a_wide_radius_too_many_plots_an_unknown_or_spanning_template_name
         third.contains("t:village") && third.contains("at most 2"),
         "{third}"
     );
-    let wide = refusal(&settlement(&VILLAGE.replace("32.0", "64.5")), "");
+    let wide = refusal(&settlement(&VILLAGE.replace("32.0", "160.5")), "");
     assert!(
         wide.contains("`village`") && wide.contains("radius"),
         "{wide}"
     );
-    let many = refusal(&settlement(&VILLAGE.replace("plots = 6", "plots = 25")), "");
-    assert!(many.contains("`village`") && many.contains("24"), "{many}");
+    let many = refusal(&settlement(&VILLAGE.replace("plots = 6", "plots = 97")), "");
+    assert!(many.contains("`village`") && many.contains("96"), "{many}");
     let unknown = refusal(&settlement(&VILLAGE.replace("t:house", "t:castle")), "");
     assert!(
         unknown.contains("`village`") && unknown.contains("t:castle"),

@@ -530,9 +530,11 @@ fn component() -> Declaration {
         settlements: vec![content::SettlementDef {
             name: "hamlet".into(),
             radius_m: 24.0,
+            radius_min_m: Some(16.0),
             margin_m: Some(8.0),
             centre: Some("full:cairn".into()),
             plots: 4,
+            plots_min: Some(2),
             templates: vec![content::SettlementPlot {
                 template: "full:cairn".into(),
                 weight: 2.0,

@@ -201,9 +201,11 @@ fn settlement(name: &str, radius_m: f32, plots: u8) -> Settlement {
     Settlement {
         name: name.into(),
         radius_m,
+        radius_min_m: radius_m,
         margin_m: 16.0,
         centre: Some(building(&t, 2)),
         plots,
+        plots_min: plots,
         rules: vec![rule(0, 2.0, 1, plots), rule(1, 1.0, 1, plots / 2)],
         minimum: 2,
         path: Voxel::cube(PATH),
@@ -291,13 +293,17 @@ fn with_settlement(size: f32, settlement: Settlement) -> Worldgen {
 
 /// The metre column the 9 Chunks centre on: amid what `with` stands nearest the origin, found at
 /// 1 m, so every Voxel size times the same ground. Also the number of Voxels it changed there.
+/// How many Chunks either way of the origin [`centre_m`] looks: far enough for the cap town,
+/// whose disc and margin keep it over 224 m out.
+const SCAN_CHUNKS: i32 = 12;
+
 fn centre_m(with: &Worldgen, bare: &Worldgen) -> ([f32; 2], usize) {
     let chunk_m = CHUNK_SIZE as f32;
     let (low, high) = with.surface_bounds_m();
     let rows = (low / chunk_m).floor() as i32..=(high / chunk_m).ceil() as i32;
     let mut changed = Vec::new();
-    for cz in -4..4 {
-        for cx in -4..4 {
+    for cz in -SCAN_CHUNKS..SCAN_CHUNKS {
+        for cx in -SCAN_CHUNKS..SCAN_CHUNKS {
             for cy in rows.clone() {
                 let (w, b) = (with.chunk(cx, cy, cz), bare.chunk(cx, cy, cz));
                 if w.same_packing(&b) {
@@ -321,7 +327,7 @@ fn centre_m(with: &Worldgen, bare: &Worldgen) -> ([f32; 2], usize) {
     let nearest = *changed
         .iter()
         .min_by(|a, b| distance(a).total_cmp(&distance(b)))
-        .expect("nothing stood in 256 m");
+        .expect("nothing stood in the scan");
     let near: Vec<_> = changed
         .iter()
         .filter(|p| (p[0] - nearest[0]).abs() < 32.0 && (p[1] - nearest[1]).abs() < 32.0)
@@ -369,7 +375,7 @@ const ROUNDS: usize = 101;
 
 fn surface() {
     // Each kind with the bare World it adds to.
-    let kinds: [(&str, Make, Make); 6] = [
+    let kinds: [(&str, Make, Make); 7] = [
         (
             "house, sparse (64 m)",
             Box::new(|s| with_structure(s, 0, 64.0)),
@@ -391,8 +397,13 @@ fn surface() {
             Box::new(bare),
         ),
         (
-            "in a town at the cap (64 m, 24)",
+            "in a town (64 m, 24 Plots)",
             Box::new(|s| with_settlement(s, settlement("t:town", 64.0, 24))),
+            Box::new(bare),
+        ),
+        (
+            "in a town at the cap (160 m, 96 Plots)",
+            Box::new(|s| with_settlement(s, settlement("t:city", 160.0, 96))),
             Box::new(bare),
         ),
         (
@@ -405,7 +416,7 @@ fn surface() {
         .iter()
         .map(|(name, make, plain)| {
             let (centre, changed) = centre_m(&make(1.0), &plain(1.0));
-            println!("{name}: {changed} Voxels changed at 1 m within 128 m, centred on {centre:?}");
+            println!("{name}: {changed} Voxels changed at 1 m within 384 m, centred on {centre:?}");
             centre
         })
         .collect();

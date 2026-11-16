@@ -140,17 +140,17 @@ fn every_game_lays_out_a_settlement_of_its_buildings_each_door_on_a_closed_door_
         let (_install, loaded) = loaded(game, 1.0);
         let settlements = &loaded.tables.settlements;
         let names: Vec<&str> = settlements.iter().map(|s| &*s.name).collect();
-        let expected: &[&str] = match game {
-            "terra" => &["terra:village", "terra:town"],
-            "tidewater" => &["tidewater:harbour"],
-            "ember" => &["ember:hamlet"],
-            _ => &[],
+        let expected = match game {
+            "terra" => vec![
+                "terra:village".into(),
+                "terra:town".into(),
+                "terra:hamlet".into(),
+            ],
+            "tidewater" => vec!["tidewater:hamlet".into(), "tidewater:harbour".into()],
+            _ => vec![format!("{game}:hamlet"), format!("{game}:village")],
         };
-        if expected.is_empty() {
-            assert_eq!(names, [format!("{game}:village")], "{game}");
-        } else {
-            assert_eq!(names, expected, "{game}");
-        }
+        assert_eq!(names, expected, "{game}");
+        let mut used = HashSet::new();
         let exported = export(game);
         let door = material(&loaded, &format!("{game}:door"));
         assert!(is_closed_door(&loaded, door), "{game}:door is a Door");
@@ -160,8 +160,7 @@ fn every_game_lays_out_a_settlement_of_its_buildings_each_door_on_a_closed_door_
                 .iter()
                 .chain(settlement.rules.iter().map(|r| &r.building))
                 .collect();
-            let used: HashSet<u16> = buildings.iter().map(|b| b.template).collect();
-            assert_eq!(used.len(), 10, "{}: every building kind", settlement.name);
+            used.extend(buildings.iter().map(|b| b.template));
             for building in buildings {
                 let template = &loaded.tables.templates[usize::from(building.template)];
                 let kind = exported[usize::from(building.template)]["kind"]
@@ -169,7 +168,7 @@ fn every_game_lays_out_a_settlement_of_its_buildings_each_door_on_a_closed_door_
                     .unwrap();
                 assert_ne!(kind, "wild", "{}", template.name);
                 let [w, _, d] = template.size_m();
-                assert!(w.max(d) <= settlement.radius_m, "{}", template.name);
+                assert!(w.max(d) <= settlement.radius_min_m, "{}", template.name);
                 // The smithy, warehouse and barn are open-fronted, and the well and stall have no
                 // front: with no door, their +Z side faces the road, and that is where the mockup
                 // opens them.
@@ -202,6 +201,7 @@ fn every_game_lays_out_a_settlement_of_its_buildings_each_door_on_a_closed_door_
                 }
             }
         }
+        assert_eq!(used.len(), 10, "{game}: every building kind");
     }
 }
 
@@ -540,9 +540,72 @@ fn a_world_of_each_game_shows_its_templates_and_a_settlement_level_whole_and_fur
     }
 }
 
-/// Where Terra's town stands at [`SEED`], about 590 m from spawn: the town's lattice is 384 m, so
+/// How far from spawn the scan for Settlements of every size looks: a few of the villages'
+/// lattice cells, and one of Terra's town's.
+const SIZES_SCAN_M: f32 = 768.0;
+
+#[test]
+fn a_world_of_each_game_lays_small_and_large_settlements() {
+    for game in GAMES {
+        let (_install, loaded) = loaded(game, 1.0);
+        let templates = &loaded.tables.templates;
+        let generator = Worldgen::new(SEED, 1.0, loaded.world.unwrap())
+            .with_templates(templates)
+            .with_settlements(&loaded.tables.settlements);
+        let world = Generated::new(&generator, SIZES_SCAN_M);
+        let found = standing(&world, templates, 1.0);
+        let exported = export(game);
+        let kinds: Vec<&str> = found
+            .iter()
+            .map(|f| exported[f.template]["kind"].as_str().unwrap())
+            .collect();
+        let sizes = copy_sizes(&found, &kinds, SIZES_SCAN_M);
+        // Tidewater's islands hold only a handful of buildings, whatever a harbour draws.
+        let large = if game == "tidewater" { 3 } else { 8 };
+        assert!(
+            sizes.first().is_some_and(|&n| n < large.min(6))
+                && sizes.last().is_some_and(|&n| n >= large),
+            "{game}: copies of {sizes:?} buildings, not small and large"
+        );
+    }
+}
+
+/// How many buildings each Settlement whose centre stands in `half_m` of spawn, less a large
+/// copy's reach, lays besides its centre, fewest first: each building goes to the nearest centre.
+/// `kinds` holds each one's export kind.
+fn copy_sizes(found: &[Found], kinds: &[&str], half_m: f32) -> Vec<usize> {
+    let middle = |f: &Found| [f.corner[0], f.corner[2]].map(|g| g as f32);
+    let all: Vec<[f32; 2]> = found
+        .iter()
+        .zip(kinds)
+        .filter(|(_, k)| **k == "centre")
+        .map(|(f, _)| middle(f))
+        .collect();
+    let centres: Vec<[f32; 2]> = all
+        .iter()
+        .copied()
+        .filter(|c| c.iter().all(|v| v.abs() <= half_m - 64.0))
+        .collect();
+    let mut sizes = vec![0; centres.len()];
+    for (f, _) in found
+        .iter()
+        .zip(kinds)
+        .filter(|(_, k)| !matches!(**k, "centre" | "wild"))
+    {
+        let at = middle(f);
+        let d = |c: &[f32; 2]| (c[0] - at[0]).hypot(c[1] - at[1]);
+        let nearest = all.iter().min_by(|a, b| d(a).total_cmp(&d(b)));
+        if let Some(i) = nearest.and_then(|n| centres.iter().position(|c| c == n)) {
+            sizes[i] += 1;
+        }
+    }
+    sizes.sort_unstable();
+    sizes
+}
+
+/// Where Terra's town stands at [`SEED`], about 490 m from spawn: the town's lattice is 384 m, so
 /// the square the other tests scan need not hold one.
-const TERRA_TOWN_M: [f32; 2] = [-416.0, -416.0];
+const TERRA_TOWN_M: [f32; 2] = [456.0, -166.0];
 
 #[test]
 fn terra_lays_out_a_town_of_cobbled_roads() {
@@ -551,7 +614,7 @@ fn terra_lays_out_a_town_of_cobbled_roads() {
     let generator = Worldgen::new(SEED, 1.0, loaded.world.unwrap())
         .with_templates(templates)
         .with_settlements(&loaded.tables.settlements);
-    let world = Generated::around(&generator, TERRA_TOWN_M, 128.0);
+    let world = Generated::around(&generator, TERRA_TOWN_M, 160.0);
     let found = standing(&world, templates, 1.0);
     let cobble = material(&loaded, "terra:cobblestone");
     let rects: Vec<[[i32; 2]; 2]> = found
@@ -584,8 +647,23 @@ fn terra_lays_out_a_town_of_cobbled_roads() {
         }
         cells
     };
-    let town = wells.map(|(_, &rect)| road(rect)).max().unwrap_or(0);
+    let (town, at) = wells
+        .map(|(_, &rect)| (road(rect), rect))
+        .max_by_key(|&(cells, _)| cells)
+        .unwrap_or_default();
     assert!(town > 100, "{town} cobbled road cells round a well");
+    // Its buildings, each nearer its well than the town's smallest radius.
+    let centre = [0, 1].map(|a| (at[0][a] + at[1][a]) / 2);
+    let buildings = rects
+        .iter()
+        .zip(&found)
+        .filter(|(r, f)| {
+            let middle = [0, 1].map(|a| (r[0][a] + r[1][a]) / 2 - centre[a]);
+            templates[f.template].name != "terra:well"
+                && middle[0].pow(2) + middle[1].pow(2) <= 96 * 96
+        })
+        .count();
+    assert!(buildings >= 20, "the town lays {buildings} buildings");
 }
 
 /// Each Game's bridge: a Template that spans. Meadow's footbridge is left out: its soft hills

@@ -786,6 +786,16 @@ Notes:
   loop re-addressing the Chunk builder from the stack rather than a register, so
   it is code generation and stays open.
 
+  Settlements from hamlets to towns (ticket 24) raised the caps to a 160 m
+  radius and 96 Plots, and the margin is revisited for them: warm, a town at the
+  new cap stays within 0.25 ms (0.21, 0.13 and 0.12 ms a Chunk against 0.19,
+  0.08 and 0.06 at 1.0, 0.5 and 0.25 m), but cold it costs 0.45, 0.37 and 0.36
+  ms, 0.26 to 0.30 over bare. Cold charges its one layout, about 2.5 ms, to the
+  9 Chunks timed; it is cached per lattice cell and such a town reaches over a
+  hundred surface Chunks, so the margin for a Settlement wider than the old 64 m
+  cap is 0.35 ms cold, and 0.25 ms warm as before. Settlements of 64 m or less
+  lay out exactly as before.
+
 - **Step 21** is done. A World has a default game mode and each Player their
   own, Creative or Survival; Edit World's changes wait in the sidecar until the
   Server applies them at the next open

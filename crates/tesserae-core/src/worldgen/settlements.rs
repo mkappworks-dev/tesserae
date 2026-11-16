@@ -57,6 +57,19 @@ const CUT_FILL_M: f32 = 2.0;
 /// What the ground rules allow at a Plot's sampled columns, short of [`CUT_FILL_M`] so a column
 /// between two samples still keeps within it.
 const SAMPLED_CUT_FILL_M: f32 = 1.5;
+/// A road forks every this many metres out from the centre, both ways across it, where at least
+/// [`FORK_ROOM_M`] of the disc is left past the fork: never in a disc of 64 m or less.
+const FORK_EVERY_M: f32 = 36.0;
+const FORK_ROOM_M: f32 = 30.0;
+/// The share of the ring a fork's distance traces between two roads from the centre that a fork
+/// road runs, drawn between these.
+const FORK_LENGTH: (f32, f32) = (0.35, 0.55);
+/// The most a road from the centre runs, as a multiple of the furthest it may reach.
+const WANDER: f32 = 8.0;
+/// Of the two ways a road may fork at each distance, the share that do.
+const FORK_CHANCE: f64 = 0.75;
+/// How far a fork road turns off square to its road, either way, at most.
+const FORK_JITTER: f32 = 0.25;
 
 /// A cardinal direction's step on the ground plane, indexed as a [`Turn`] takes +Z: +Z, +X, -Z,
 /// -X.
@@ -148,6 +161,9 @@ pub(super) struct Founding {
     hash: u64,
     /// On whole metres.
     centre_m: [f32; 2],
+    /// The disc and the most Plots this copy draws.
+    radius_m: f32,
+    plots: u8,
     /// Its disc and margin, in metres.
     reach_m: f32,
     /// The way its first road leaves, and its centre's door faces.
@@ -244,6 +260,14 @@ struct Road {
     end_m: f32,
 }
 
+/// Where a road may step: within `limit_m` of `centre`, and only outwards past `inner_m`.
+#[derive(Clone, Copy)]
+struct Reach {
+    centre: [f32; 2],
+    inner_m: f32,
+    limit_m: f32,
+}
+
 /// A place along a road a Plot is tried.
 struct Slot {
     key: u64,
@@ -256,8 +280,8 @@ struct Slot {
 
 /// How far from its centre a Settlement's roads and approach paths may reach: never past its
 /// margin, so they stay on ground it already claims.
-fn paths_m(settlement: &Settlement) -> f32 {
-    settlement.radius_m + settlement.margin_m.min(APPROACH_M.1 + APPROACH_HALF_M)
+fn paths_m(radius_m: f32, settlement: &Settlement) -> f32 {
+    radius_m + settlement.margin_m.min(APPROACH_M.1 + APPROACH_HALF_M)
 }
 
 fn lerp((low, high): (f32, f32), t: f32) -> f32 {
@@ -311,7 +335,7 @@ impl Worldgen {
         self.foundings_near(region)
             .into_iter()
             .filter(|s| {
-                let paths_m = paths_m(self.settlement_of(s));
+                let paths_m = paths_m(s.radius_m, self.settlement_of(s));
                 s.reaches(widened(region, self.voxel_size), paths_m)
             })
             .filter_map(|s| self.layouts.laid((s.row, s.cell), || self.lay_out(&s)))
@@ -417,13 +441,16 @@ impl Worldgen {
         let pass = self.settlement_pass()?;
         let settlement = &pass.settlements[usize::from(row.entry.settlement)];
         let (hash, centre_m, priority) = self.founding_draw(row, cell)?;
-        let reach_m = settlement.radius_m + settlement.margin_m;
+        // Neighbours are kept apart at the largest disc, which the lattice's spacing allows for.
+        let largest_m = settlement.reach_m();
+        let (plots, radius_m) = settlement.size_at(unit(mix(hash ^ 9)));
+        let reach_m = radius_m + settlement.margin_m;
         let crowded = NEIGHBOURS.iter().any(|&[di, dj]| {
             let near = [cell[0] + di, cell[1] + dj];
             self.founding_draw(row, near)
                 .is_some_and(|(_, other_m, other)| {
                     let [dx, dz] = [0, 1].map(|a| other_m[a] - centre_m[a]);
-                    (other, near) > (priority, cell) && (dx * dx + dz * dz).sqrt() < 2.0 * reach_m
+                    (other, near) > (priority, cell) && (dx * dx + dz * dz).sqrt() < 2.0 * largest_m
                 })
         });
         if crowded || distance(centre_m, [0.0, 0.0]) < reach_m + ORIGIN_CLEAR_M {
@@ -454,6 +481,8 @@ impl Worldgen {
             cell,
             hash,
             centre_m,
+            radius_m,
+            plots,
             reach_m,
             facing,
             centre,
@@ -548,11 +577,11 @@ impl Worldgen {
     /// tried in a seeded order. `None` when fewer Plots stand than it needs.
     fn lay_out(&self, founding: &Founding) -> Option<LaidSettlement> {
         let settlement = self.settlement_of(founding);
-        let radius_m = settlement.radius_m;
+        let radius_m = founding.radius_m;
         let centre = founding.centre_m;
         let (structures, plots): (Vec<_>, Vec<_>) = founding.centre.into_iter().unzip();
         let roads = self.roads(founding, settlement, &plots);
-        let reach = paths_m(settlement).ceil() as i32 + 1;
+        let reach = paths_m(radius_m, settlement).ceil() as i32 + 1;
         let origin_m = centre.map(|c| c as i32 - reach);
         let side = 2 * reach + 1;
         let approach = roads
@@ -584,7 +613,8 @@ impl Worldgen {
         self.grade(&mut laid);
 
         let mins: usize = settlement.rules.iter().map(|r| usize::from(r.min)).sum();
-        let queue = self.plot_queue(settlement, founding.hash);
+        let mut queue = self.plot_queue(settlement, founding.plots, founding.hash);
+        let ranged = settlement.plots_min != settlement.plots;
         let mut next = 0;
         for slot in slots(founding, &roads) {
             let Some(&rule) = queue.get(next) else {
@@ -632,9 +662,16 @@ impl Worldgen {
                     laid.rules.push(Some(rule));
                     next += 1;
                 }
-                // The Plot stays empty; a Template still short of its minimum tries again.
-                None if next >= mins => next += 1,
-                None => {}
+                // A Template still short of its minimum tries again.
+                None if next < mins => {}
+                // A ranged copy tries the Template again after the rest, so its size follows its
+                // draw on rough ground. A fixed size keeps the layout saved Worlds pin.
+                None if ranged => {
+                    queue.push(rule);
+                    next += 1;
+                }
+                // The Plot stays empty.
+                None => next += 1,
             }
         }
         let placed = laid.structures.len() - usize::from(founding.centre.is_some());
@@ -643,14 +680,14 @@ impl Worldgen {
 
     /// Which rule each Plot draws, in the order they are tried: every minimum first, then weighted
     /// draws within each maximum.
-    fn plot_queue(&self, settlement: &Settlement, hash: u64) -> Vec<usize> {
+    fn plot_queue(&self, settlement: &Settlement, plots: u8, hash: u64) -> Vec<usize> {
         let mut queue = Vec::new();
         let mut counts = vec![0u8; settlement.rules.len()];
         for (i, rule) in settlement.rules.iter().enumerate() {
             queue.extend(std::iter::repeat_n(i, usize::from(rule.min)));
             counts[i] = rule.min;
         }
-        while queue.len() < usize::from(settlement.plots) {
+        while queue.len() < usize::from(plots) {
             let open: Vec<usize> = (0..settlement.rules.len())
                 .filter(|&i| counts[i] < settlement.rules[i].max)
                 .collect();
@@ -675,10 +712,12 @@ impl Worldgen {
 
     /// Each road from the centre: points [`ROAD_STEP_M`] apart, each step the gentlest of its
     /// bends that stays in the disc, dry, clear of `plots` and no steeper than a road climbs. Two
-    /// or three run on past the disc as approach paths, heading only outwards there.
+    /// or three run on past the disc as approach paths, heading only outwards there. In a wide
+    /// disc each then forks, after them.
     fn roads(&self, founding: &Founding, settlement: &Settlement, plots: &[Plot]) -> Vec<Road> {
         let centre = founding.centre_m;
-        let radius_m = settlement.radius_m;
+        let radius_m = founding.radius_m;
+        let inner_m = radius_m - ROAD_HALF_M;
         let count = 3 + (mix(founding.hash ^ 5) % 2) as usize;
         let approaches = 2 + (mix(founding.hash ^ 7) % 2) as usize;
         let first_approach = (mix(founding.hash ^ 8) % count as u64) as usize;
@@ -692,8 +731,7 @@ impl Worldgen {
                 (unit(mix(founding.hash ^ (16 + branch as u64))) as f32 - 0.5) * 0.5 * TAU
                     / count as f32
             };
-            let mut heading = base + branch as f32 * TAU / count as f32 + jitter;
-            let inner_m = radius_m - ROAD_HALF_M;
+            let heading = base + branch as f32 * TAU / count as f32 + jitter;
             let limit_m = if (branch + count - first_approach) % count < approaches {
                 let drawn = lerp(
                     APPROACH_M,
@@ -704,55 +742,119 @@ impl Worldgen {
                 inner_m
             }
             .max(inner_m);
-            let mut point = centre;
-            let mut height_m = self.surface_height_m(point[0], point[1]);
-            let mut road = vec![point];
-            loop {
-                let mut best: Option<(f32, f32, [f32; 2], f32)> = None;
-                for (k, bend) in ROAD_BENDS.into_iter().enumerate() {
-                    let angle = heading + bend;
-                    let next = [
-                        point[0] + ROAD_STEP_M * angle.cos(),
-                        point[1] + ROAD_STEP_M * angle.sin(),
-                    ];
-                    let out_m = distance(next, centre);
-                    if out_m > limit_m
-                        || (out_m > inner_m && out_m <= distance(point, centre))
-                        || plots
-                            .iter()
-                            .any(|plot| overlap(widened(plot.kept, ROAD_HALF_M), [next, next]))
-                    {
+            let reach = Reach {
+                centre,
+                inner_m,
+                limit_m,
+            };
+            // A road hemmed in by hills could otherwise wander round inside the disc for
+            // thousands of steps.
+            let steps = (WANDER * limit_m / ROAD_STEP_M).ceil() as usize;
+            roads.push(self.walk(centre, heading, reach, steps, plots));
+        }
+        let rings = ((radius_m - FORK_ROOM_M) / FORK_EVERY_M).floor().max(0.0) as usize;
+        for spoke in 0..count {
+            for ring in 1..=rings {
+                let out_m = ring as f32 * FORK_EVERY_M;
+                let points = &roads[spoke].points;
+                let Some(at) = points.iter().position(|&p| distance(p, centre) >= out_m) else {
+                    continue;
+                };
+                let (from, ahead) = (points[at.saturating_sub(1)], points[at]);
+                let along = (ahead[1] - from[1]).atan2(ahead[0] - from[0]);
+                for (side, turn) in [-1.0f32, 1.0].into_iter().enumerate() {
+                    let key =
+                        mix(founding.hash ^ (0x300 + ((spoke * 16 + ring) * 2 + side) as u64));
+                    if unit(mix(key ^ 1)) >= FORK_CHANCE {
                         continue;
                     }
-                    let next_m = self.surface_height_m(next[0], next[1]);
-                    if self.water.is_some_and(|w| next_m < w.level_m) {
-                        continue;
-                    }
-                    let grade = (next_m - height_m).abs() / ROAD_STEP_M;
-                    if grade > MAX_ROAD_GRADE {
-                        continue;
-                    }
-                    let cost = grade + BEND_COST * k as f32;
-                    if best.is_none_or(|b| cost < b.0) {
-                        best = Some((cost, angle, next, next_m));
+                    let skew = (unit(mix(key ^ 2)) as f32 - 0.5) * 2.0 * FORK_JITTER;
+                    let length_m =
+                        lerp(FORK_LENGTH, unit(mix(key ^ 3)) as f32) * out_m * TAU / count as f32;
+                    let steps = (length_m / ROAD_STEP_M).ceil() as usize;
+                    let reach = Reach {
+                        centre,
+                        inner_m,
+                        limit_m: inner_m,
+                    };
+                    let fork = self.walk(
+                        ahead,
+                        along + turn * (TAU / 4.0 + skew),
+                        reach,
+                        steps,
+                        plots,
+                    );
+                    if fork.points.len() > 1 {
+                        roads.push(fork);
                     }
                 }
-                let Some((_, angle, next, next_m)) = best else {
-                    break;
-                };
-                (heading, point, height_m) = (angle, next, next_m);
-                road.push(point);
             }
-            let end_m = road
-                .iter()
-                .map(|&p| distance(p, centre))
-                .fold(0.0, f32::max);
-            roads.push(Road {
-                points: road,
-                end_m,
-            });
         }
         roads
+    }
+
+    /// A road from `start` heading `heading`, at most `steps` steps, each the gentlest of its
+    /// bends that stays in `reach`, dry, clear of `plots` and no steeper than a road climbs.
+    fn walk(
+        &self,
+        start: [f32; 2],
+        mut heading: f32,
+        reach: Reach,
+        steps: usize,
+        plots: &[Plot],
+    ) -> Road {
+        let Reach {
+            centre,
+            inner_m,
+            limit_m,
+        } = reach;
+        let mut point = start;
+        let mut height_m = self.surface_height_m(point[0], point[1]);
+        let mut road = vec![point];
+        while road.len() <= steps {
+            let mut best: Option<(f32, f32, [f32; 2], f32)> = None;
+            for (k, bend) in ROAD_BENDS.into_iter().enumerate() {
+                let angle = heading + bend;
+                let next = [
+                    point[0] + ROAD_STEP_M * angle.cos(),
+                    point[1] + ROAD_STEP_M * angle.sin(),
+                ];
+                let out_m = distance(next, centre);
+                if out_m > limit_m
+                    || (out_m > inner_m && out_m <= distance(point, centre))
+                    || plots
+                        .iter()
+                        .any(|plot| overlap(widened(plot.kept, ROAD_HALF_M), [next, next]))
+                {
+                    continue;
+                }
+                let next_m = self.surface_height_m(next[0], next[1]);
+                if self.water.is_some_and(|w| next_m < w.level_m) {
+                    continue;
+                }
+                let grade = (next_m - height_m).abs() / ROAD_STEP_M;
+                if grade > MAX_ROAD_GRADE {
+                    continue;
+                }
+                let cost = grade + BEND_COST * k as f32;
+                if best.is_none_or(|b| cost < b.0) {
+                    best = Some((cost, angle, next, next_m));
+                }
+            }
+            let Some((_, angle, next, next_m)) = best else {
+                break;
+            };
+            (heading, point, height_m) = (angle, next, next_m);
+            road.push(point);
+        }
+        let end_m = road
+            .iter()
+            .map(|&p| distance(p, centre))
+            .fold(0.0, f32::max);
+        Road {
+            points: road,
+            end_m,
+        }
     }
 
     /// Marks the cells whose centre is near the segment `a..b` of `road`, outside every one of

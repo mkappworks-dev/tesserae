@@ -1,22 +1,41 @@
-//! The Settlement Ember lays out from its Templates, and the rows its Biomes list it and its
+//! The Settlements Ember lays out from its Templates, and the rows its Biomes list them and its
 //! wilderness Templates in.
 
 use demo_kit::structures::{Loot, Village, plot};
 
-const VILLAGE: Village = Village {
+const HAMLET: Village = Village {
     game: "ember",
     name: "hamlet",
-    radius_m: 40.0,
+    radius_m: (24.0, 32.0),
+    spacing_m: 128.0,
+    chance: 0.8,
+    centre: "cistern",
+    plots: (3, 6),
+    minimum: 2,
+    templates: &[
+        plot("ash_hut", 4.0, 1, 4),
+        plot("forge_hall", 3.0, 0, 2).stocked(&FORGE_LOOT),
+        plot("cinder_farm", 2.0, 0, 2),
+        plot("charcoal_kiln", 1.0, 0, 1).stocked(&KILN_LOOT),
+    ],
+    loot: &HAMLET_LOOT,
+};
+
+const VILLAGE: Village = Village {
+    game: "ember",
+    name: "village",
+    radius_m: (40.0, 64.0),
     spacing_m: 192.0,
     chance: 0.8,
     centre: "cistern",
-    plots: 12,
+    plots: (8, 20),
+    minimum: 5,
     templates: &[
-        plot("ash_hut", 4.0, 1, 4),
-        plot("forge_hall", 3.0, 1, 3).stocked(&FORGE_LOOT),
-        plot("cinder_farm", 2.0, 0, 2),
+        plot("ash_hut", 4.0, 1, 6),
+        plot("forge_hall", 3.0, 1, 4).stocked(&FORGE_LOOT),
+        plot("cinder_farm", 2.0, 0, 3),
         plot("ember_inn", 1.0, 0, 1),
-        plot("ore_store", 1.0, 0, 1),
+        plot("ore_store", 1.0, 0, 2),
         plot("smelter", 1.0, 0, 1).stocked(&SMELTER_LOOT),
         plot("charcoal_kiln", 1.0, 0, 1).stocked(&KILN_LOOT),
         plot("ore_stall", 2.0, 0, 3),
@@ -101,4 +120,4 @@ pub fn biome_loot(biome: &str) -> &'static Loot {
     }
 }
 
-demo_kit::structures!(VILLAGE);
+demo_kit::structures!(HAMLET, VILLAGE);

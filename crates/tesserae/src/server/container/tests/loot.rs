@@ -226,9 +226,9 @@ fn dropped_counts(app: &App, except: &str) -> BTreeMap<String, u32> {
     counted(names.iter().map(|(n, c)| (&**n, *c)))
 }
 
-/// Terra's village round spawn at [`SEED`], and its town about 590 m off.
+/// Terra's village round spawn at [`SEED`], and its town about 490 m off.
 const VILLAGE_HALF_M: f32 = 320.0;
-const TERRA_TOWN_M: [f32; 2] = [-416.0, -416.0];
+const TERRA_TOWN_M: [f32; 2] = [456.0, -166.0];
 
 /// Which of Terra's Settlements laid out the well at `well`: only a town lays cobblestone roads.
 fn settlement_at(terra: &Game, world: &Generated, well: [i32; 3]) -> &'static str {

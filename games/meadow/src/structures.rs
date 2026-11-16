@@ -1,22 +1,41 @@
-//! The Settlement Meadow lays out from its Templates, and the rows its Biomes list it and its
+//! The Settlements Meadow lays out from its Templates, and the rows its Biomes list them and its
 //! wilderness Templates in.
 
 use demo_kit::structures::{Loot, Village, plot};
 
+const HAMLET: Village = Village {
+    game: "meadow",
+    name: "hamlet",
+    radius_m: (24.0, 32.0),
+    spacing_m: 128.0,
+    chance: 0.8,
+    centre: "pond_well",
+    plots: (3, 6),
+    minimum: 2,
+    templates: &[
+        plot("cottage", 4.0, 1, 4),
+        plot("family_house", 3.0, 0, 2),
+        plot("farmhouse", 2.0, 0, 2),
+        plot("bakery", 1.0, 0, 1).stocked(&BAKERY_LOOT),
+    ],
+    loot: &VILLAGE_LOOT,
+};
+
 const VILLAGE: Village = Village {
     game: "meadow",
     name: "village",
-    radius_m: 40.0,
+    radius_m: (40.0, 64.0),
     spacing_m: 256.0,
     chance: 0.9,
     centre: "pond_well",
-    plots: 12,
+    plots: (8, 20),
+    minimum: 5,
     templates: &[
-        plot("cottage", 4.0, 1, 4),
-        plot("family_house", 3.0, 1, 3),
-        plot("farmhouse", 2.0, 0, 2),
+        plot("cottage", 4.0, 1, 6),
+        plot("family_house", 3.0, 1, 4),
+        plot("farmhouse", 2.0, 0, 3),
         plot("tavern", 1.0, 0, 1),
-        plot("granary", 1.0, 0, 1).stocked(&GRANARY_LOOT),
+        plot("granary", 1.0, 0, 2).stocked(&GRANARY_LOOT),
         plot("tinker", 1.0, 0, 1).stocked(&TINKER_LOOT),
         plot("bakery", 1.0, 0, 1).stocked(&BAKERY_LOOT),
         plot("honey_stall", 2.0, 0, 3),
@@ -119,4 +138,4 @@ pub fn biome_loot(biome: &str) -> &'static Loot {
     }
 }
 
-demo_kit::structures!(VILLAGE);
+demo_kit::structures!(HAMLET, VILLAGE);

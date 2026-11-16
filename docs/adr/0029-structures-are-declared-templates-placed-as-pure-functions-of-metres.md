@@ -140,6 +140,14 @@ are where the build is narrower or more exact than they say.
   drawn or written over, so a chest put back is a Player's. The draw is keyed by
   the Structure's whole-metre corner and the Template cell, never the Voxel or
   its height, and only a Template cell's first Voxel draws.
+- **A Settlement's size is a range each copy draws.** Its most Plots are drawn
+  evenly from `plots-min` to `plots` by its lattice cell's hash, and its radius
+  follows them from `radius-min-m` to `radius-m`, up to 160 m and 96 Plots.
+  Spacing, bounds and claims take the largest radius, so copies never meet. From
+  a 66 m disc roads fork every 36 m out, both ways, into streets. A ranged copy
+  tries a Template that failed its ground again after the rest, so its size
+  follows its draw on rough ground; a fixed-size copy keeps the old order, so a
+  World made before ranges lays out the same.
 - **The undo journal refuses rather than overflows.** Its cap is 131,072 changed
   Voxels across 128 groups, and a placement over it is refused before landing
   with `TooBigToUndo`, so a placement is always one undo group. An undo lands in

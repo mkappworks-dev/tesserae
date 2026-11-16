@@ -627,10 +627,15 @@ pub struct SavedBiomeSettlement {
 pub struct SavedSettlement {
     pub name: String,
     pub radius_m: f32,
+    /// Absent for a fixed size, as every Settlement saved before ranges was.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub radius_min_m: Option<f32>,
     pub margin_m: f32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub centre: Option<SavedBuilding>,
     pub plots: u8,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plots_min: Option<u8>,
     pub rules: Vec<SavedPlotRule>,
     pub minimum: u8,
     pub path: Solid,
@@ -1175,9 +1180,11 @@ fn saved_settlement(
     Ok(SavedSettlement {
         name: s.name.clone(),
         radius_m: s.radius_m,
+        radius_min_m: (s.radius_min_m != s.radius_m).then_some(s.radius_min_m),
         margin_m: s.margin_m,
         centre: s.centre.as_ref().map(building),
         plots: s.plots,
+        plots_min: (s.plots_min != s.plots).then_some(s.plots_min),
         rules: s
             .rules
             .iter()
@@ -1206,9 +1213,11 @@ fn restored_settlement(
     Ok(crate::settlement::Settlement {
         name: s.name.clone(),
         radius_m: s.radius_m,
+        radius_min_m: s.radius_min_m.unwrap_or(s.radius_m),
         margin_m: s.margin_m,
         centre: s.centre.as_ref().map(building),
         plots: s.plots,
+        plots_min: s.plots_min.unwrap_or(s.plots),
         rules: s
             .rules
             .iter()

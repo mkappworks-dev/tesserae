@@ -183,7 +183,7 @@ Engine plays as the Player's Eye goes underground or underwater (see
 | `[[plants]]`                | `name`, `kind`, `seed` (an Item), optional `shape`, `[plants.needs]`, then by kind: `stages`, optional `harvest-to` and `fruit-vine` (`crop`); `sapling`, `trunk`, `canopy`, `trunk-height-m`, `canopy-radius-m`, `mean-seconds`, the yields, optional `fruit`, `vines` and `branching` (`tree`); `material`, `max-height-m`, `direction`, `mean-seconds`, optional `stands-in` (`column`); `material`, `reach-m`, `mean-seconds`, `density`, optional `min-neighbours` (`spreader`); `material`, `mean-seconds`, `length-m` (`climber`); 128 per Mod, 512 in a World                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `[[biomes]]`                | `name`, `temperature`, `humidity` (both 0 to 1), optional `ground` (`rock`, `soil`, `surface`: solid Materials by full name), optional `sky-fog` (`sky`, `fog`: sRGB `[r, g, b]`), optional `cave-scale` (0 to 4), optional `surface-features` (at most 16, each `material`: a solid by full name, or `plant`: a Plant by full name, optional `shape`, `spacing-m`: 1 to 1024, optional `clump`: `{ scale-m, strength }`, optional `field`: `{ group, scale-m, strays }`), optional `crop-fields` (at most 2, each `crops`: `[plant, weight]` pairs, `plot-m`: `[low, high]`, `spacing-m`, optional `path`, `ditch`, `near-water-m`), optional `structures` (at most 4, each `template`: by full name, `spacing-m`: twice the Template's longer side to 4096, `chance`: above 0, at most 1), optional `settlements` (at most 2, each `settlement`: by full name, `spacing-m`: twice its radius and margin to 4096, optional `chance`: above 0, at most 1, 1 when omitted), optional `loot` (a [loot table](#loot)); at most 16 per Mod and in a World |
 | `[[templates]]`             | `name`, `cell-m` (metres), `palette` (one character to `"keep"`, `"air"`, `"ground"` or `{ material, shape, orientation }`), `layers` (bottom up, each rows along +Z of characters along +X), `ground-layer`, optional `foundation` (a solid by full name), optional `level-tolerance-m` (0 to 16; omitted is 1), optional `spans` (a bridge; omitted is false); at most 64 m a side and 65,536 Template cells, 64 in a World                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| `[[settlements]]`           | `name`, `radius-m` (above 0, at most 64), optional `margin-m` (0 to 64; omitted is 16), optional `centre` (a Template by full name), `plots` (at most 24), `templates` (1 to 24, each `template`: by full name, optional `weight`: above 0, omitted is 1, `min`: omitted is 0, `max`: omitted is 24), optional `minimum` (omitted is 0), `path` (a solid by full name), optional `path-shape`, optional `loot` (a [loot table](#loot), also on a `templates` row); 16 in a World                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `[[settlements]]`           | `name`, `radius-m` or `radius-max-m` (above 0, at most 160), optional `radius-min-m` (omitted is `radius-m`), optional `margin-m` (0 to 64; omitted is 16), optional `centre` (a Template by full name), `plots` or `plots-max` (at most 96), optional `plots-min` (omitted is `plots`), `templates` (1 to 96, each `template`: by full name, optional `weight`: above 0, omitted is 1, `min`: omitted is 0, `max`: omitted is 96), optional `minimum` (omitted is 0), `path` (a solid by full name), optional `path-shape`, optional `loot` (a [loot table](#loot), also on a `templates` row); 16 in a World                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `[[marker-kinds]]`          | `name`, `icon` (`home`, `camp`, `mine`, `farm`, `landmark`, `death`, `flag`, `pin` or `star`), `color` (four RGBA bytes); 16 per Mod                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `death-marker-kind` (Game)  | the full `<mod id>:<name>` of the Marker kind a death leaves; a top-level key, before any table                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `[survival]` (Game)         | each optional, omitted keeps the engine's default: `max-health` (20), `max-hunger` (20), `max-air-s` (10), `safe-fall-m` (3), `fall-damage-per-m` (1), `drowning-damage-per-s` (2), `hunger-per-min` (1), `sprinting-hunger-per-min` (2), `regeneration-hunger` (18), `regeneration-per-s` (0.25), `starvation-damage-per-s` (0.25), `keep-inventory` (false)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
@@ -1228,8 +1228,8 @@ Settlement may not draw a bridge.
 
 ### Settlements
 
-A Settlement is a village or town declared as rules rather than drawn, so no two
-are alike. The hamlet in
+A Settlement is a hamlet, village or town declared as rules rather than drawn,
+so no two are alike. The hamlet in
 [A Declaration using every table](#a-declaration-using-every-table):
 
 ```toml
@@ -1248,14 +1248,22 @@ and its Biome's row:
 settlements = [{ settlement = "showcase:hamlet", spacing-m = 96.0 }]
 ```
 
-- `radius-m`, above 0 and at most 64, is the disc it is laid out in; every
-  Template it names must be no wider than that.
+- `radius-m`, above 0 and at most 160, is the disc it is laid out in; every
+  Template it names must be no wider than that. From 66 m its roads fork
+  part-way into streets, which keep the same grade and bend rules.
+- `plots-min` and `radius-min-m` make it a range: each copy draws its most Plots
+  evenly from `plots-min` to `plots` by the World seed and its lattice cell, and
+  its radius from `radius-min-m` to `radius-m` following the Plots drawn.
+  `plots-max` and `radius-max-m` are other names for `plots` and `radius-m`.
+  Omitted, the copy is a fixed size, laid out as before ranges existed. Every
+  Template must then be no wider than `radius-min-m`, and `minimum` and the
+  `templates` rows' `min`s count against `plots-min`.
 - `margin-m`, 0 to 64 m and 16 when omitted, keeps single Structures that far
   outside the disc. Approach paths run at most the margin less 0.9 m past the
   disc, so under about 13 m they are shorter and under about 1 m there are none.
 - `centre` is an optional Template stood at the centre, such as a well. It must
   pass a single Structure's ground rules, or no Settlement stands there.
-- `plots`, at most 24, is how many Plots it tries to fill, drawn from
+- `plots`, at most 96, is how many Plots it tries to fill, drawn from
   `templates`: each Template's `min` first, then by `weight` up to `plots`,
   never past a Template's `max`.
 - `minimum`: fewer Plots standing than this, or a Template's `min` unmet, and
@@ -1265,10 +1273,11 @@ settlements = [{ settlement = "showcase:hamlet", spacing-m = 96.0 }]
   Shape level Road takes.
 
 A Biome lists at most 2 `settlements` rows, each a `spacing-m` at least twice
-the radius and margin and at most 4096 m, and a `chance`, above 0 and at most 1
-and 1 when omitted, that a lattice cell tries one. Settlements claim ground
-first, then single Structures, crop fields, trees and scatter, and nothing asks
-back up that chain; a later row gives way to an earlier one it would overlap.
+the largest radius and margin, so no two copies meet whatever they draw, and at
+most 4096 m, and a `chance`, above 0 and at most 1 and 1 when omitted, that a
+lattice cell tries one. Settlements claim ground first, then single Structures,
+crop fields, trees and scatter, and nothing asks back up that chain; a later row
+gives way to an earlier one it would overlap.
 
 Every Plot's door faces its Road. The door is the first closed Door Template
 cell in the lowest layer, from the Ground layer up, that holds one; a Template
@@ -1281,8 +1290,9 @@ a hillside village sits on terraces with no cliff at their edges. A Plot needs
 no foundation, and the heightmap is unchanged. A Plot whose ground fails stays
 empty, and a single Structure in the wild keeps its strict level rule.
 
-The demo Games declare a village of their ten buildings round a well, and Terra
-also a town; see `games/<game>/src/structures.rs`.
+The demo Games declare a hamlet of 3 to 6 Plots and a village of 8 to 20 round a
+well (Tidewater's harbour stops at 12, as its islands do), and Terra also a
+cobbled town of 30 to 80; see `games/<game>/src/structures.rs`.
 
 ### Loot
 

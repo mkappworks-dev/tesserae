@@ -60,9 +60,11 @@ fn hamlet(path: MaterialId) -> Settlement {
     Settlement {
         name: "t:hamlet".into(),
         radius_m: 20.0,
+        radius_min_m: 20.0,
         margin_m: 4.0,
         centre: Some(building(1, 5)),
         plots: 6,
+        plots_min: 6,
         rules: vec![PlotRule {
             building: building(2, 3),
             weight: 1.0,
@@ -211,6 +213,36 @@ fn a_world_saved_before_settlements_opens_with_none() {
     assert!(json["biomes"][0].get("settlements").is_none());
     let older: Generation = serde_json::from_value(json).unwrap();
     assert!(older.settlements(&mapping()).unwrap().is_empty());
+}
+
+#[test]
+fn a_saved_world_keeps_each_settlements_size_range_and_a_fixed_size_saves_as_before() {
+    let ranged = Settlement {
+        radius_min_m: 12.0,
+        plots_min: 2,
+        ..hamlet(PATH)
+    };
+    let capture = |settlement: Settlement| {
+        let saved = reopened(
+            // The Biome lists the second.
+            &Generation::capture(world(), &game(), &[hamlet(PATH), settlement], &mapping())
+                .unwrap(),
+        );
+        let json = serde_json::to_value(&saved).unwrap();
+        let s = &saved.settlements(&mapping()).unwrap()[0];
+        ((s.radius_min_m, s.radius_m, s.plots_min, s.plots), json)
+    };
+    let (kept, json) = capture(ranged);
+    assert_eq!(kept, (12.0, 20.0, 2, 6));
+    assert_eq!(json["settlements"][0]["radius_min_m"], 12.0);
+    assert_eq!(json["settlements"][0]["plots_min"], 2);
+    let (kept, json) = capture(hamlet(PATH));
+    assert_eq!(kept, (20.0, 20.0, 6, 6));
+    let fixed = json["settlements"][0].as_object().unwrap();
+    assert!(
+        !fixed.contains_key("radius_min_m") && !fixed.contains_key("plots_min"),
+        "{fixed:?}"
+    );
 }
 
 fn table(item: &str) -> LootTable {
