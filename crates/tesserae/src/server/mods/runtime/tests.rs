@@ -505,6 +505,7 @@ fn history_is_bounded_and_each_mod_counts_only_the_events_it_missed() {
             after: Voxel::cube(tesserae_core::testgen::fixtures().ground.rock),
         });
         assert_eq!(history.since(&mut fast, &mut fast_dropped).len(), 1);
+        history.next_tick();
     }
     assert_eq!(history.events.len(), MAX_EDIT_EVENTS);
     assert_eq!(history.dropped, 7);
@@ -547,6 +548,74 @@ fn a_placed_structures_voxels_reach_a_mod_as_edit_events() {
     let log = h.log(0);
     assert!(log.contains("edits=2"), "{log}");
     assert!(log.contains("x: 1.0, y: 3.0, z: 2.0"), "{log}");
+}
+
+#[test]
+fn every_voxel_of_an_undo_past_one_ticks_events_reaches_a_mod_in_order() {
+    use crate::server::edit::StructureIntent;
+    use crate::server::edit::tests::replay;
+    use crate::server::player::Player;
+    use crate::server::undo::HistoryAction::Undo;
+    use tesserae_core::template::{Cell, Template, Turn};
+    let mut h = Harness::new(&[9]);
+    let mut tables = (*h.app.world().resource::<ContentTables>().0).clone();
+    let [w, layers, d] = [30, 2, 20];
+    let slab = vec![vec![vec![Cell::Voxel(Voxel::cube(h.rock)); w]; d]; layers];
+    tables
+        .templates
+        .push(Template::new("t:slab".into(), 1.0, slab, 0, None, 1.0).unwrap());
+    h.app
+        .insert_resource(ContentTables(std::sync::Arc::new(tables)))
+        .insert_resource(WorldSettings::default())
+        .add_plugins(edit::plugin);
+    let eye = Vec3::new(16.5, 8.0, 16.5);
+    h.app.world_mut().spawn(Player::at(eye));
+    h.put([16, 2, 16], Voxel::cube(h.rock));
+    h.app.world_mut().write_message(StructureIntent {
+        origin: eye,
+        direction: Vec3::NEG_Y,
+        template: "t:slab".into(),
+        turn: Turn::NONE,
+    });
+    let placed = w * layers * d;
+    let mut heard = Vec::new();
+    while heard.iter().sum::<usize>() < placed {
+        h.app.world_mut().run_schedule(RunFixedMainLoop);
+        h.app.world_mut().run_schedule(FixedPreUpdate);
+        h.call();
+        heard.extend(edits_heard(&h.log(0)));
+        assert!(heard.len() < 64, "placing stalled at {heard:?}");
+    }
+    assert_eq!(heard.iter().sum::<usize>(), placed);
+    assert_eq!(h.voxel([16, 3, 16]), Voxel::cube(h.rock));
+
+    replay(&mut h.app, Undo);
+    assert!(h.voxel([16, 3, 16]).is_air(), "the undo lands in one tick");
+    let mut undone = Vec::new();
+    let mut first = Vec::new();
+    while undone.iter().sum::<usize>() < placed {
+        h.call();
+        let log = h.log(0);
+        undone.extend(edits_heard(&log));
+        first.extend(
+            log.lines()
+                .filter_map(|l| l.split(" first=").nth(1).map(str::to_owned)),
+        );
+        assert!(undone.len() < 8, "undo events stalled at {undone:?}");
+    }
+    assert_eq!(undone, [MAX_EDIT_EVENTS, placed - MAX_EDIT_EVENTS]);
+    // Undone in reverse: the last Voxel placed is the first heard taken back.
+    let last_placed = format!("x: {}.0, y: 4.0, z: {}.0", 1 + w - 1, 6 + d - 1);
+    assert!(first[0].contains(&last_placed), "{}", first[0]);
+    h.call();
+    assert!(h.log(0).contains("edits=0"));
+}
+
+/// How many Edit events each call the queue guest logged was given.
+fn edits_heard(log: &str) -> Vec<usize> {
+    log.lines()
+        .filter_map(|l| l.split(" edits=").nth(1)?.split(' ').next()?.parse().ok())
+        .collect()
 }
 
 #[test]

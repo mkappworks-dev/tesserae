@@ -733,10 +733,10 @@ Notes:
     of scope.
   - A placement that would change more than the undo journal's 131,072 Voxels
     (`RECORDED_LIMIT`) is refused with `TooBigToUndo` rather than landed without
-    an undo group; at 0.25 m a 32 m building can. Undoing or redoing a group of
-    more than 1,024 Voxels in one tick overflows `MAX_EDIT_EVENTS`, so Mods hear
-    the last 1,024 and a dropped count: a known gap, since spreading undo across
-    ticks would give up its all-or-nothing check.
+    an undo group; at 0.25 m a 32 m building can. An undo or redo still lands
+    whole in one tick, and Mods hear every Voxel of it as an Edit event: past
+    1,024 (`MAX_EDIT_EVENTS`) in one tick, the rest wait in order and are
+    released 1,024 a tick, so a Mod called every tick misses none.
   - R is both Respawn and Turn Structure (`TurnStructure`); while the `place`
     Tool is held it turns the Structure and cancels Respawn, and Settings lets
     the two share that one key.

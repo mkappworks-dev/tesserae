@@ -116,6 +116,6 @@ are where the build is narrower or more exact than they say.
   Ground layer level with it.
 - **The undo journal refuses rather than overflows.** Its cap is 131,072 changed
   Voxels across 128 groups, and a placement over it is refused before landing
-  with `TooBigToUndo`, so a placement is always one undo group. Undoing a group
-  of more than 1,024 Voxels in one tick tells Mods only the last 1,024 Edit
-  events and a dropped count; that is a known gap.
+  with `TooBigToUndo`, so a placement is always one undo group. An undo lands in
+  one tick, and its Edit events past 1,024 in that tick wait in order and reach
+  Mods 1,024 a tick after it, so a Mod hears every Voxel of it.

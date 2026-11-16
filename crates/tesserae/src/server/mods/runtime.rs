@@ -59,16 +59,40 @@ pub(in crate::server) struct EditHistory {
     events: VecDeque<EditEvent>,
     next: u64,
     dropped: u64,
+    /// Past this tick's [`MAX_EDIT_EVENTS`], in order, released over the
+    /// following ticks so a Mod called every tick hears every one, however
+    /// large an undo is.
+    waiting: VecDeque<EditEvent>,
+    this_tick: usize,
 }
 
 impl EditHistory {
     pub(in crate::server) fn record(&mut self, event: EditEvent) {
+        if self.waiting.is_empty() && self.this_tick < MAX_EDIT_EVENTS {
+            self.push(event);
+        } else {
+            self.waiting.push_back(event);
+        }
+    }
+
+    fn push(&mut self, event: EditEvent) {
         if self.events.len() == MAX_EDIT_EVENTS {
             self.events.pop_front();
             self.dropped = self.dropped.saturating_add(1);
         }
         self.events.push_back(event);
         self.next += 1;
+        self.this_tick += 1;
+    }
+
+    /// Starts the next tick's batch with what is waiting.
+    fn next_tick(&mut self) {
+        self.this_tick = 0;
+        while self.this_tick < MAX_EDIT_EVENTS
+            && let Some(event) = self.waiting.pop_front()
+        {
+            self.push(event);
+        }
     }
 
     fn since(&self, cursor: &mut u64, dropped: &mut u64) -> Vec<EditEvent> {
@@ -352,7 +376,7 @@ pub(in crate::server) fn drain(
 fn dispatch(
     mut jobs: ResMut<ModJobs>,
     mut pending: ResMut<PendingCommands>,
-    history: Res<EditHistory>,
+    mut history: ResMut<EditHistory>,
     tables: Res<ContentTables>,
     world: Res<WorldSettings>,
     time: Res<Time<Fixed>>,
@@ -432,6 +456,7 @@ fn dispatch(
             })
         }));
     }
+    history.next_tick();
 }
 
 #[cfg(test)]

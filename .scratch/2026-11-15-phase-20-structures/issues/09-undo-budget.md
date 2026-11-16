@@ -42,10 +42,12 @@ their present checks.
 - `undo::restore` now writes a group in one `Batch` with one relight, rolled
   back in the same batch on a midway failure, instead of a relight per Voxel.
   An undo or redo of a whole Structure still lands in one tick.
-- Deferred: an undo or redo of a group over 1,024 Voxels records more Edit
-  events in one tick than `EditHistory` holds (`MAX_EDIT_EVENTS`), so Mods
-  hear the last 1,024 and a dropped count. Spreading undo across ticks would
-  give up its all-or-nothing check, so it is left for a later ticket.
+- An undo or redo of a group over 1,024 Voxels still lands in one tick, so
+  it keeps its all-or-nothing check. Its Edit events past `MAX_EDIT_EVENTS`
+  in that tick wait in `EditHistory` in order and are released 1,024 a tick
+  in `dispatch`, so a Mod called every tick hears every Voxel (review fix;
+  `every_voxel_of_an_undo_past_one_ticks_events_reaches_a_mod_in_order` in
+  `server/mods/runtime/tests.rs`).
 - Tests: `server/edit/structure/tests/undo.rs` (one undo and one redo, the
   Container check, the oversized refusal), and
   `a_template_at_the_cap_fits_twice_and_the_oldest_groups_go_first` beside
