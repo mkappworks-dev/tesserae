@@ -126,6 +126,22 @@ surface it has a **mouth**, and sky light can enter there.
 open air above the ground with the Game's lake fluid, any fluid it declared. One
 level for the whole World, so a valley below it is a lake; a Cave is never
 filled. A Game that names no lake fluid, and a World with no Game, have none.
+Under Generator version 2 and earlier only; version 3 has a Sea level and a
+Water surface instead.
+
+**Sea level** — the height in metres of the ocean's surface under Generator
+version 3. Ground below it, away from land, is the sea floor.
+
+**Water surface** — the height in metres of standing or running water at a
+column, if there is any: the sea at Sea level, a lake at its own flat level, a
+river stepping down its course. One answer per column that Settlements, bridges,
+the Waterline, coarse levels and spawn all ask. A Game that declares no fluid
+still has the basins, dry.
+
+**Landform** — the large-scale shape of the ground (ocean, coast, plain, hills,
+plateau, canyon, mountain range) that fields of the seed and a position in
+metres lay down, before Biomes, water or Caves. Engine-owned: a Game tunes
+landforms and cannot add a kind.
 
 **Light level** — how much light reaches a Voxel, from 0 to 15. The one quantity
 in the engine that is **dimensionless**: a count of attenuation steps, not a
@@ -168,11 +184,15 @@ Never produces a mesh.
 
 **Climate** — continuous fields, temperature and humidity, that are a pure
 function of the seed and a position in metres. They choose the Biome; they are
-not a Biome.
+not a Biome. Under Generator version 3 temperature falls with altitude and
+humidity rises toward the sea, and Weather reads the same Climate.
 
 **Biome** — a region type a Game or Mod declares and Climate selects. It owns
 the ground Materials, surface features, ores, cave tuning and the sky and fog
-colours of the columns it covers.
+colours of the columns it covers. Under version 3 it is also selected by
+altitude, distance from the coast and erosion, and may scale its landform's
+detail relief; a Biome that names no range matches every value on that axis. A
+cave Biome is chosen the same way in three dimensions.
 
 **Surface feature** — a Material a Biome declares and world generation stands
 one Voxel above that Biome's full surface Voxels, from the seed, at a mean

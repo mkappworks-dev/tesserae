@@ -70,7 +70,7 @@ journal's cap counts cells rather than entries.
 
 ## Not decided here
 
-Blueprints and Sites, which build a Structure over time from Items (step 22),
+Blueprints and Sites, which build a Structure over time from Items (step 23),
 and loot, entities, fluids, weathering variants and mirroring. The format
 reserves room for them, and each needs Server machinery that belongs to a later
 step. Existing trees stay parametric

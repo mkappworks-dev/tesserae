@@ -537,7 +537,7 @@ multiplayer is a later transport swap, not a rewrite.
    belong to step 13; they are listed there because they change what the sky and
    fog should be.
 
-### Steps 10 to 28: engine systems and game content
+### Steps 10 to 29: engine systems and game content
 
 Each step has an Engine part, the mechanism, and a Game or Mod part, the data
 that uses it. The Engine part always comes first, crosses the WIT contract, and
@@ -559,14 +559,15 @@ controls, movement, save, camera and input work already in flight is tracked in
 | 19  | Map, compass            | Server-provided summaries (the Client never reads World storage), map view                                                   | Map style, markers                 | 13         | Done            |
 | 20  | Structures              | Template format, deterministic placement by worldgen and tools                                                               | Templates                          | 13         | Done            |
 | 21  | Survival loop           | Health, damage, hunger, death, respawn, game modes                                                                           | Numbers and rules                  | 15         | Done            |
-| 22  | Blueprints and Sites    | Blueprint Items that lay a Site, which builds itself over time from Items brought to it                                      | Blueprints                         | 15, 20     | Not started     |
-| 23  | Weather                 | Weather state and tick, particles, sky hooks                                                                                 | Weather types, climate rules       | 13, 17     | Not started     |
-| 24  | Mobs, animals           | Entity AI hooks, spawning, replication shape designed against transport                                                      | Behaviours, spawn tables           | 12, 13, 21 | Not started     |
-| 25  | NPCs                    | Persistent identity, dialogue and trade plumbing                                                                             | NPC definitions, dialogue          | 15, 24     | Not started     |
-| 26  | Logic and machines      | Wiring and automation, then moving and flying Voxel bodies (see below)                                                       | Machine parts, logic components    | 12, 20     | Not started     |
-| 27  | Creation tools          | Structure, material and texture editors, screenshot and replay mode                                                          | Content made with them             | 10, 20     | Not started     |
-| 28  | Chat and commands       | Command registry, parser, permissions                                                                                        | The commands                       | -          | Not started     |
-| 29  | Release hardening       | Final 1.0 contract freeze, macOS bundle, first-run, save migration tests, diagnostics, CI budgets                            | -                                  | all        | Not started     |
+| 22  | LOD features            | Trees and Structures drawn at coarse levels as sparse impostors from the same pure draws, and a ring quality curve           | Larger default view distance       | 6, 18, 20  | Not started     |
+| 23  | Blueprints and Sites    | Blueprint Items that lay a Site, which builds itself over time from Items brought to it                                      | Blueprints                         | 15, 20     | Not started     |
+| 24  | Weather                 | Weather state and tick, particles, sky hooks                                                                                 | Weather types, climate rules       | 13, 17     | Not started     |
+| 25  | Mobs, animals           | Entity AI hooks, spawning, replication shape designed against transport                                                      | Behaviours, spawn tables           | 12, 13, 21 | Not started     |
+| 26  | NPCs                    | Persistent identity, dialogue and trade plumbing                                                                             | NPC definitions, dialogue          | 15, 25     | Not started     |
+| 27  | Logic and machines      | Wiring and automation, then moving and flying Voxel bodies (see below)                                                       | Machine parts, logic components    | 12, 20     | Not started     |
+| 28  | Creation tools          | Structure, material and texture editors, screenshot and replay mode                                                          | Content made with them             | 10, 20     | Not started     |
+| 29  | Chat and commands       | Command registry, parser, permissions                                                                                        | The commands                       | -          | Not started     |
+| 30  | Release hardening       | Final 1.0 contract freeze, macOS bundle, first-run, save migration tests, diagnostics, CI budgets                            | -                                  | all        | Not started     |
 
 Notes:
 
@@ -640,9 +641,9 @@ Notes:
   canopy while it stands), soil and water are Material tags, and a Biome may
   list 16 surface features, Plants included, with vines hung from trees by
   worldgen only. The shared Mods `flora`, `crops` and `aquatic` declare the
-  vegetation every Game places. Not shipped: falling trees as bodies (step 26),
+  vegetation every Game places. Not shipped: falling trees as bodies (step 27),
   trees as Templates (step 20 kept them parametric), leaf decay and weather
-  inputs (step 23). Measured by the benchmark pass (Apple M5, thread CPU time,
+  inputs (step 24). Measured by the benchmark pass (Apple M5, thread CPU time,
   interleaved rounds, load average 8 to 9,
   `cargo bench -p tesserae-core --bench plants` and the `--ignored` rig in
   `server/fluids/plants/tests/bench.rs`): `PLANT_SAMPLES` stays 32, so a Sample
@@ -731,7 +732,7 @@ Notes:
   Spec and tickets: `.scratch/2026-11-15-phase-20-structures/`.
 
   Not shipped, or shipped short:
-  - Blueprints and Sites are step 22. Container loot, entities, fluids,
+  - Blueprints and Sites are step 23. Container loot, entities, fluids,
     weathering variants, mirroring and Structures at coarse LOD levels are out
     of scope.
   - A placement that would change more than the undo journal's 131,072 Voxels
@@ -823,7 +824,7 @@ Notes:
   edit-and-restart loop was run by hand in the real window for a data change, a
   Rust change, a failure and its correction (ticket 08). It establishes how
   contracts evolve compatibly while later systems add APIs. The final 1.0
-  contract freeze belongs to step 29, after those systems are implemented.
+  contract freeze belongs to step 30, after those systems are implemented.
   `mods/` holds fifteen shared data Mods and `games/` four small Rust Games
   built on them (`docs/demo-games.md`); `terra` remains the one self-contained
   Game.
@@ -856,10 +857,19 @@ Notes:
     fields in metres, coarse to fine, and coarse LOD levels read the same
     fields. The Games then declare the new Biomes and water. Phase 20's bridges
     find river crossings with no change to their rule, and Meadow, whose rolling
-    ground has no gap, stands its first footbridges. Weather (step 23) follows
+    ground has no gap, stands its first footbridges. Weather (step 24) follows
     step 17 and reads its climate, so rain and snow fall by altitude, coast and
     Biome; weather never edits terrain.
-- **Step 26** is the largest unknown in 1.0. Machines move as a unit, so they
+- **Step 22** is not started. Trees and Structures exist at level 0 only
+  ([ADR-0022](docs/adr/0022-biomes-are-column-content-and-a-world-pins-its-generator.md),
+  [ADR-0029](docs/adr/0029-structures-are-declared-templates-placed-as-pure-functions-of-metres.md)),
+  which ends at `view_distance_m` (192 m by default), so from above nothing
+  stands on the ground beyond it. This step draws them at the coarse levels as
+  sparse impostors from the same pure draws, since the coarse vote loses a lone
+  tree, and replaces the fixed doubling of the rings with a quality curve and a
+  larger default. It follows step 17 so it reads that step's fields, and its
+  memory cost is measured against the LOD budget in step 6.
+- **Step 27** is the largest unknown in 1.0. Machines move as a unit, so they
   need collision, lighting and meshing outside the Chunk grid, Server-owned
   motion that composes with the Player's flight and physics movement, and a save
   format for a body that straddles Chunks. Spike it before committing the scope.
