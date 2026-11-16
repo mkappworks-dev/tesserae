@@ -659,10 +659,12 @@ mod tests {
                 CatalogueTemplate {
                     name: "terra:cottage".into(),
                     size_m: [7.0, 8.0, 5.0],
+                    thumbnails: Default::default(),
                 },
                 CatalogueTemplate {
                     name: "terra:well".into(),
                     size_m: [3.0, 4.0, 3.0],
+                    thumbnails: Default::default(),
                 },
             ],
             ..default()

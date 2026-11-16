@@ -5,7 +5,7 @@ pub use runtime::ModDisabled;
 
 pub(in crate::server) use runtime::{Drain, EditHistory};
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 use std::io::{self, BufRead, IsTerminal, Write};
 use std::path::{Path, PathBuf};
@@ -15,7 +15,7 @@ use crate::session::{SessionApp, SessionTeardown};
 use bevy::prelude::*;
 use tesserae_core::loot::LootTable;
 use tesserae_core::settlement::Settlement;
-use tesserae_core::template::Template;
+use tesserae_core::template::{Template, Turn};
 use tesserae_core::{MaterialId, SHAPE_FULL_CUBE, ShapeId, Tables, WorldgenParams};
 use tesserae_mods::{
     Kind, ModHost, ModInstance, Registered, Registry, Scan, Trust, Verdict, ViewParams, WorldInfo,
@@ -896,6 +896,15 @@ fn install(world: &mut World) {
         params.water.map(|lake| lake.material),
         params.ground.map(|ground| ground.rock),
     );
+    let colours: HashMap<MaterialId, [u8; 4]> = loaded.appearance.iter().copied().collect();
+    let colour = |m: MaterialId| colours.get(&m).copied().unwrap_or([128, 128, 128, 255]);
+    let ground = params
+        .ground
+        .map_or([96, 128, 72, 255], |g| colour(g.surface));
+    for (entry, template) in catalogue.templates.iter_mut().zip(&tables.0.templates) {
+        entry.thumbnails = [0, 1, 2, 3]
+            .map(|q| crate::content::template_thumbnail(template, Turn::new(q), colour, ground));
+    }
     catalogue.tools = loaded
         .tools
         .iter()
@@ -1075,6 +1084,7 @@ pub(in crate::server) fn catalogue(
             .map(|t| CatalogueTemplate {
                 name: t.name.clone(),
                 size_m: t.size_m(),
+                thumbnails: Default::default(),
             })
             .collect(),
     }
@@ -1437,12 +1447,19 @@ surface = "plain:rock"
                 },
             ]
         );
+        let [cairn] = &catalogue.templates[..] else {
+            panic!("one Template: {:?}", catalogue.templates.len());
+        };
         assert_eq!(
-            catalogue.templates,
-            vec![CatalogueTemplate {
-                name: "full:cairn".into(),
-                size_m: [1.0, 0.5, 1.0],
-            }]
+            (cairn.name.as_str(), cairn.size_m),
+            ("full:cairn", [1.0, 0.5, 1.0])
+        );
+        assert!(
+            cairn
+                .thumbnails
+                .iter()
+                .all(|t| t.len() == crate::content::THUMBNAIL_PX.pow(2) * 4),
+            "a thumbnail at each turn"
         );
         let material = |m: MaterialId| catalogue.materials.iter().find(|c| c.id == m).unwrap();
         assert!(material(lava).fluid.is_some() && !material(lava).solid);

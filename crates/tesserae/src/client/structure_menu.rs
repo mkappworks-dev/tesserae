@@ -24,6 +24,7 @@ use crate::server::edit::StructureIntent;
 use crate::server::tool::{ToolKind, UseIntent, UseOutcome, UseResult, UseWith};
 use crate::session::SessionApp;
 use crate::world::WorldSettings;
+use tesserae_core::template::Turn;
 
 const CARD_WIDTH: f32 = 360.0;
 const PANEL_TOP_PX: f32 = 28.0;
@@ -32,6 +33,8 @@ const PAD_X: f32 = 20.0;
 const HUD_WIDTH: f32 = 270.0;
 const HUD_TOP_PX: f32 = 150.0;
 const SWATCH_PX: f32 = 12.0;
+const THUMB_PX: f32 = 40.0;
+const THUMB_BACKGROUND: Color = Color::srgb_u8(0x14, 0x14, 0x18);
 const ICON_PX: f32 = 18.0;
 /// The prototype's outcome box: its edge and fill for each tone.
 const QUIET_EDGE: Color = Color::srgb_u8(0x5c, 0x5c, 0x65);
@@ -91,6 +94,22 @@ enum Control {
     PutAway,
 }
 
+/// Each Template's thumbnail at each quarter turn, by its place in the Catalogue.
+#[derive(Resource, Default)]
+pub(super) struct Thumbs(Vec<[Handle<Image>; 4]>);
+
+impl Thumbs {
+    fn of(&self, at: usize, turn: Turn) -> Handle<Image> {
+        self.0
+            .get(at)
+            .map_or_else(Handle::default, |t| t[usize::from(turn.quarters())].clone())
+    }
+}
+
+/// The placement card's thumbnail, of the chosen Template as it is turned.
+#[derive(Component)]
+struct Thumb;
+
 /// The lines that follow the aim and the choices without a rebuild.
 #[derive(Component, Clone, Copy, PartialEq)]
 enum Info {
@@ -109,6 +128,7 @@ struct OutcomeBox;
 
 pub(super) fn plugin(app: &mut App) {
     app.init_session_state::<StructureList>()
+        .init_session_state::<Thumbs>()
         .add_observer(activate)
         .add_session_systems(
             Update,
@@ -116,7 +136,7 @@ pub(super) fn plugin(app: &mut App) {
                 toggle
                     .after(super::menu::toggle)
                     .before(super::input::resolve),
-                (open_on_use, render, update_info)
+                (make_thumbs, open_on_use, render, update_info)
                     .chain()
                     .after(toggle)
                     .after(super::structure::track),
@@ -341,7 +361,62 @@ fn size_text(size: [f32; 3]) -> String {
     format!("{:.1} × {:.1} × {:.1} m", size[0], size[1], size[2])
 }
 
-fn picks(body: &mut ChildSpawnerCommands, catalogue: &ContentCatalogue, chosen: Option<&str>) {
+/// A thumbnail of a Template, as the list's rows and the placement card show it.
+fn thumb(image: Handle<Image>) -> impl Bundle {
+    (
+        ImageNode::new(image),
+        Node {
+            width: Val::Px(THUMB_PX),
+            height: Val::Px(THUMB_PX),
+            flex_shrink: 0.0,
+            border_radius: BorderRadius::all(Val::Px(4.0)),
+            ..default()
+        },
+        BackgroundColor(THUMB_BACKGROUND),
+    )
+}
+
+/// Images of the Catalogue's thumbnails, made again whenever the Catalogue changes.
+fn make_thumbs(
+    catalogue: Res<Catalogue>,
+    mut images: ResMut<Assets<Image>>,
+    mut thumbs: ResMut<Thumbs>,
+) {
+    if !catalogue.is_changed() {
+        return;
+    }
+    let side = crate::content::THUMBNAIL_PX as u32;
+    thumbs.0 = catalogue
+        .0
+        .templates
+        .iter()
+        .map(|t| {
+            t.thumbnails.clone().map(|pixels| {
+                if pixels.len() != (side * side * 4) as usize {
+                    return Handle::default();
+                }
+                images.add(Image::new(
+                    bevy::render::render_resource::Extent3d {
+                        width: side,
+                        height: side,
+                        depth_or_array_layers: 1,
+                    },
+                    bevy::render::render_resource::TextureDimension::D2,
+                    pixels.to_vec(),
+                    bevy::render::render_resource::TextureFormat::Rgba8UnormSrgb,
+                    bevy::asset::RenderAssetUsages::default(),
+                ))
+            })
+        })
+        .collect();
+}
+
+fn picks(
+    body: &mut ChildSpawnerCommands,
+    catalogue: &ContentCatalogue,
+    chosen: Option<&str>,
+    thumbs: &Thumbs,
+) {
     body.spawn(Node {
         flex_direction: FlexDirection::Column,
         row_gap: Val::Px(7.0),
@@ -370,30 +445,38 @@ fn picks(body: &mut ChildSpawnerCommands, catalogue: &ContentCatalogue, chosen: 
                     // `flat` centres its content whatever the node asks.
                     pick.spawn(Node {
                         width: Val::Percent(100.0),
-                        flex_direction: FlexDirection::Column,
-                        align_items: AlignItems::FlexStart,
-                        row_gap: Val::Px(3.0),
+                        align_items: AlignItems::Center,
+                        column_gap: Val::Px(10.0),
                         ..default()
                     })
-                    .with_children(|lines| {
-                        lines.spawn(look::label(
-                            super::menu_ui::declared_title(&template.name),
-                            theme::TEXT_SMALL,
-                            theme::MEDIUM,
-                            theme::INK,
-                        ));
-                        lines.spawn(look::label(
-                            size_text(template.size_m),
-                            theme::TEXT_EYEBROW,
-                            theme::REGULAR,
-                            theme::PRESET_INK,
-                        ));
-                        lines.spawn(look::label(
-                            template.name.clone(),
-                            theme::TEXT_EYEBROW,
-                            theme::REGULAR,
-                            theme::muted(),
-                        ));
+                    .with_children(|row| {
+                        row.spawn(thumb(thumbs.of(at, Turn::NONE)));
+                        row.spawn(Node {
+                            flex_direction: FlexDirection::Column,
+                            align_items: AlignItems::FlexStart,
+                            row_gap: Val::Px(3.0),
+                            ..default()
+                        })
+                        .with_children(|lines| {
+                            lines.spawn(look::label(
+                                super::menu_ui::declared_title(&template.name),
+                                theme::TEXT_SMALL,
+                                theme::MEDIUM,
+                                theme::INK,
+                            ));
+                            lines.spawn(look::label(
+                                size_text(template.size_m),
+                                theme::TEXT_EYEBROW,
+                                theme::REGULAR,
+                                theme::PRESET_INK,
+                            ));
+                            lines.spawn(look::label(
+                                template.name.clone(),
+                                theme::TEXT_EYEBROW,
+                                theme::REGULAR,
+                                theme::muted(),
+                            ));
+                        });
                     });
                 },
             );
@@ -596,10 +679,18 @@ fn hud(parent: &mut ChildSpawnerCommands) {
                     theme::LAYOUT_STATUS_INK,
                 ));
             });
-            card.spawn((
-                Info::Title,
-                look::label("", theme::TEXT_BODY, theme::MEDIUM, theme::INK),
-            ));
+            card.spawn(Node {
+                align_items: AlignItems::Center,
+                column_gap: Val::Px(10.0),
+                ..default()
+            })
+            .with_children(|head| {
+                head.spawn((Thumb, thumb(Handle::default())));
+                head.spawn((
+                    Info::Title,
+                    look::label("", theme::TEXT_BODY, theme::MEDIUM, theme::INK),
+                ));
+            });
             card.spawn((Info::Size, small("", theme::muted())));
             legend(card, 3.0, 0.0);
             outcome_box(card, 0.0);
@@ -631,7 +722,7 @@ fn hud(parent: &mut ChildSpawnerCommands) {
 #[allow(clippy::too_many_arguments)]
 fn list_panel(
     commands: &mut Commands,
-    catalogue: &ContentCatalogue,
+    (catalogue, thumbs): (&ContentCatalogue, &Thumbs),
     tool: &PlaceTool,
     voxel_size: f32,
     scroll: Vec2,
@@ -692,7 +783,7 @@ fn list_panel(
                 ))
                 .with_children(|body| {
                     eyebrow(body, &format!("TEMPLATES{game} · {count}"));
-                    picks(body, catalogue, chosen);
+                    picks(body, catalogue, chosen, thumbs);
                     eyebrow(body, "TURN");
                     turn_row(body, &keys(Action::TurnStructure));
                     eyebrow(body, "WHAT PLACING DOES");
@@ -724,7 +815,7 @@ fn render(
     (controls, cards): (Query<&Control>, Query<&ScrollPosition, With<Card>>),
     (tool, hotbar, catalogue): (Res<PlaceTool>, Res<Hotbar>, Res<Catalogue>),
     (bindings, labels, world): (Res<Bindings>, Res<Labels>, Res<WorldSettings>),
-    focus: Res<InputFocus>,
+    (focus, thumbs): (Res<InputFocus>, Res<Thumbs>),
 ) {
     let want = if list.open {
         Some(true)
@@ -735,7 +826,11 @@ fn render(
     };
     let rebuild = want != list.shown
         || (want == Some(true)
-            && (list.dirty || tool.is_changed() || catalogue.is_changed() || labels.is_changed()));
+            && (list.dirty
+                || tool.is_changed()
+                || catalogue.is_changed()
+                || labels.is_changed()
+                || thumbs.is_changed()));
     if !rebuild {
         return;
     }
@@ -772,7 +867,7 @@ fn render(
         Some(true) => {
             list_panel(
                 &mut commands,
-                &catalogue.0,
+                (&catalogue.0, &thumbs),
                 &tool,
                 world.voxel_size,
                 scroll,
@@ -809,8 +904,16 @@ fn update_info(
     mut texts: Query<(&Info, &mut Text)>,
     mut spans: Query<(&Info, &mut TextSpan)>,
     mut boxes: Query<(&mut BackgroundColor, &mut BorderColor), With<OutcomeBox>>,
+    (thumbs, mut shown): (Res<Thumbs>, Query<&mut ImageNode, With<Thumb>>),
 ) {
     let chosen = tool.chosen(&catalogue.0);
+    let at = catalogue.0.templates.iter().position(|t| Some(t) == chosen);
+    let image = at.map_or_else(Handle::default, |at| thumbs.of(at, tool.turn));
+    for mut node in &mut shown {
+        if node.image != image {
+            node.image = image.clone();
+        }
+    }
     let keys = |action| key(&bindings, &labels, action);
     let line = |part: Info| -> String {
         match part {
@@ -888,6 +991,7 @@ mod tests {
             templates: vec![CatalogueTemplate {
                 name: "terra:cottage".into(),
                 size_m: [7.0, 8.0, 5.0],
+                thumbnails: Default::default(),
             }],
             ..default()
         }));
