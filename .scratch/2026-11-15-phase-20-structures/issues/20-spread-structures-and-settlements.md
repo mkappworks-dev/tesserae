@@ -36,6 +36,14 @@ the centre first, so every village is a tight cluster.
   - The density falls off towards the edge, so outer buildings stand further
     apart.
   - Roads still branch from the centre, and doors still face their road.
+- **Roads and paths**: a Settlement's roads are laid in its declared path
+  Material, so a Game picks stone or dirt (for example cobble in a town, packed
+  dirt in a hamlet). They narrow and wear towards the disc's edge: seeded worn
+  patches let the Biome's surface show through. Two or three of the roads run
+  on past the disc as approach paths, a seeded 12 to 40 m and never beyond the
+  Settlement's margin, so they stay inside the ground it already claims. They
+  follow the same grade rules and fade out into the terrain rather than
+  stopping square.
 - Everything is computed in metres from the seed and the cell, and is
   identical at every Voxel size.
 
@@ -50,6 +58,9 @@ the centre first, so every village is a tight cluster.
       any Chunk order and at 1.0, 0.5 and 0.25 m.
 - [ ] Within a Settlement, the gaps between neighbouring Plots vary, and
       Plots reach the outer half of the disc.
+- [ ] A Settlement's roads are its path Material, wear towards the edge, and
+      at least two run past the disc as approach paths that end inside the
+      margin and fade out, tested.
 - [ ] WIT, TOML, validator and snapshot carry the Settlement row's `chance`,
       and the WIT copies are synced.
 - [ ] The benchmark (ticket 18) still meets its margin.
