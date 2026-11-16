@@ -17,7 +17,7 @@ use crate::climate::{BIOMES_SINCE, BiomeId, BiomeStructure};
 use crate::template::{Cell, Template, Turn};
 use crate::voxel::Voxel;
 use crate::worldgen::WorldgenParams;
-use crate::worldgen::settlements::Town;
+use crate::worldgen::settlements::LaidSettlement;
 
 const STRUCTURE_SALT: u64 = 0x5717_c7e0_0000_0001;
 /// Kept clear of a lattice cell's border by a candidate's point, so its footprint's centre, once
@@ -346,9 +346,9 @@ impl Worldgen {
     pub(super) fn structures_clear_m(&self, [min, max]: [[i32; 2]; 2]) -> Option<f32> {
         let claims = self.claims_near([min, max]);
         claims
-            .towns
+            .settlements
             .iter()
-            .flat_map(|t| t.plots.iter())
+            .flat_map(|t| t.structures.iter())
             .chain(&claims.structures)
             .filter(|s| {
                 let [own_min, own_max] = s.footprint();
@@ -365,7 +365,7 @@ impl Worldgen {
             return Claims::default();
         }
         Claims {
-            towns: self.towns_near(region),
+            settlements: self.laid_settlements_near(region),
             structures: self.structures_near(region),
         }
     }
@@ -373,7 +373,7 @@ impl Worldgen {
     /// What fields, trees and scatter keep off.
     pub(super) fn footprints(&self, claims: &Claims) -> Vec<Footprint> {
         claims
-            .towns
+            .settlements
             .iter()
             .flat_map(|t| t.footprints(self.voxel_size))
             .chain(
@@ -387,8 +387,8 @@ impl Worldgen {
 
     /// Writes every claim that falls in the Chunk at `coord`: Settlements, then single Structures.
     pub(super) fn stand_claims(&self, chunk: &mut Chunk, coord: [i32; 3], claims: &Claims) {
-        for town in &claims.towns {
-            self.stand_town(chunk, coord, town);
+        for laid in &claims.settlements {
+            self.stand_settlement(chunk, coord, laid);
         }
         for s in &claims.structures {
             self.stand_structure(chunk, coord, s, true);
@@ -467,6 +467,6 @@ impl Worldgen {
 /// What claims ground near a region, worked out once per Chunk.
 #[derive(Default)]
 pub(super) struct Claims {
-    pub(super) towns: Vec<Arc<Town>>,
+    pub(super) settlements: Vec<Arc<LaidSettlement>>,
     pub(super) structures: Vec<Structure>,
 }

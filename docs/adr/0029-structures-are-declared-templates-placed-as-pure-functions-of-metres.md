@@ -12,32 +12,32 @@ meshing, light and collision need nothing new, and no Generator version moves
 
 A Template is one more appended list in the unreleased 0.3 Declaration, in TOML
 beside the Manifest
-([ADR-0020](0020-data-only-mods-and-development-restarts.md)). Its cells name a
-Material, a Shape and an Orientation by full `<mod id>:<name>`, never by id, as
-the save does. The grid's cell size is in metres, and a World samples it at its
-own Voxel size ([ADR-0003](0003-voxel-size-is-per-world.md)). Authoring in
-Voxels was rejected: it would pin a Template to one Voxel size, or refuse every
-World that differs.
+([ADR-0020](0020-data-only-mods-and-development-restarts.md)). Its Template
+cells name a Material, a Shape and an Orientation by full `<mod id>:<name>`,
+never by id, as the save does. A Template cell's side is in metres, and a World
+samples it at its own Voxel size ([ADR-0003](0003-voxel-size-is-per-world.md)).
+Authoring in Voxels was rejected: it would pin a Template to one Voxel size, or
+refuse every World that differs.
 
 ## Worldgen placement is a lattice of pure draws
 
-A Biome lists `structures` rows outside the 16 surface-feature slots. Each cell
-of a square lattice `spacing-m` on a side draws, by a hash of the seed and the
-cell, a candidate anywhere in it with its rotation and a priority. It stands
-only if no neighbouring cell's candidate with a higher priority lies within the
-spacing (a pure-function Poisson disc, so Structures are never on a grid nor
-clumped), and then only if the ground takes it; a refused candidate is not tried
-again elsewhere, since a retry could stand nearer a neighbour than the spacing.
-Settlement centres are spread the same way, kept apart by their discs and
-margins. The neighbours are asked for candidates only, never the ground, so the
-answer is the same from every Chunk. Each Chunk decides every Structure that can
-reach it and writes only its own Voxels, so one is whole across Chunk borders
-and equal in metres at every size. The pass reads no Chunk, so a player's edit
-never changes what a neighbouring Chunk generates.
+A Biome lists `structures` rows outside the 16 surface-feature slots. Each
+lattice cell of a square lattice `spacing-m` on a side draws, by a hash of the
+seed and the lattice cell, a candidate anywhere in it with its rotation and a
+priority. It stands only if no neighbouring lattice cell's candidate with a
+higher priority lies within the spacing (a pure-function Poisson disc, so
+Structures are never on a grid nor clumped), and then only if the ground takes
+it; a refused candidate is not tried again elsewhere, since a retry could stand
+nearer a neighbour than the spacing. Settlement centres are spread the same way,
+kept apart by their discs and margins. The neighbours are asked for candidates
+only, never the ground, so the answer is the same from every Chunk. Each Chunk
+decides every Structure that can reach it and writes only its own Voxels, so one
+is whole across Chunk borders and equal in metres at every size. The pass reads
+no Chunk, so a player's edit never changes what a neighbouring Chunk generates.
 
-A Structure's non-`keep` cells always overwrite terrain, ore and lake water. A
-Biome with no `structures` runs no pass. Trees, scatter and fields skip a
-Structure's footprint, and a Structure never asks about them, which avoids a
+A Structure's non-`keep` Template cells always overwrite terrain, ore and lake
+water. A Biome with no `structures` runs no pass. Trees, scatter and fields skip
+a Structure's footprint, and a Structure never asks about them, which avoids a
 cycle. Coarse levels leave Structures out, as they leave Plants out.
 
 ## Every Material is Obtainable
@@ -87,9 +87,9 @@ are where the build is narrower or more exact than they say.
   median; it is then cut and filled by at most 2 m. A Settlement's centre
   Template, and every single Structure, keep the strict tolerance rule.
 - **A door faces the Road by a rule, not a declaration.** The door is the first
-  closed Door cell in the lowest layer, from the Ground layer up, that holds
-  one, found through the Game's Door voxel-use and frozen in the snapshot. A
-  Template with none turns its +Z edge to the Road.
+  closed Door Template cell in the lowest layer, from the Ground layer up, that
+  holds one, found through the Game's Door voxel-use and frozen in the snapshot.
+  A Template with none turns its +Z edge to the Road.
 - **Roads are graded, and climb as built-in slabs and stairs.** No steeper than
   0.45 rise over run, so neighbouring columns differ by at most half a Voxel at
   any size; the declared path Shape is used only on level Road.

@@ -865,45 +865,45 @@ impl Generation {
         // Version 1 ignores all three, so saving them would pin nothing.
         let has_biomes = p.generator >= crate::climate::BIOMES_SINCE && !p.biomes.is_empty();
         let has_ores = p.generator >= crate::climate::BIOMES_SINCE && !p.ores.is_empty();
-        let listed = || p.biomes.as_slice().iter().filter(|_| has_biomes);
-        let mut towns: Vec<u16> = listed()
+        let saved_biomes = || p.biomes.as_slice().iter().filter(|_| has_biomes);
+        let mut kept_settlements: Vec<u16> = saved_biomes()
             .flat_map(|b| b.surface_features.settlements())
             .map(|s| s.settlement)
             .collect();
-        towns.sort_unstable();
-        towns.dedup();
-        let town = |at: u16| {
+        kept_settlements.sort_unstable();
+        kept_settlements.dedup();
+        let settlement = |at: u16| {
             settlements.get(usize::from(at)).ok_or_else(|| {
                 Error::Corrupt("a Biome's Settlement names a missing Settlement".into())
             })
         };
-        let mut kept: Vec<u16> = listed()
+        let mut kept_templates: Vec<u16> = saved_biomes()
             .flat_map(|b| b.surface_features.structures())
             .map(|s| s.template)
             .collect();
-        for &at in &towns {
-            let s = town(at)?;
-            kept.extend(
+        for &at in &kept_settlements {
+            let s = settlement(at)?;
+            kept_templates.extend(
                 s.centre
                     .iter()
                     .chain(s.rules.iter().map(|r| &r.building))
                     .map(|b| b.template),
             );
         }
-        kept.sort_unstable();
-        kept.dedup();
+        kept_templates.sort_unstable();
+        kept_templates.dedup();
         let template = |at: u16| {
             templates.get(usize::from(at)).ok_or_else(|| {
                 Error::Corrupt("a Biome's Structure names a missing Template".into())
             })
         };
-        let saved_templates = kept
+        let saved_templates = kept_templates
             .iter()
             .map(|&at| saved_template(template(at)?, mapping))
             .collect::<Result<Vec<_>, _>>()?;
-        let saved_settlements = towns
+        let saved_settlements = kept_settlements
             .iter()
-            .map(|&at| saved_settlement(town(at)?, &kept, mapping))
+            .map(|&at| saved_settlement(settlement(at)?, &kept_templates, mapping))
             .collect::<Result<Vec<_>, _>>()?;
         Ok(Self {
             sea_level_m: p.sea_level_m,
@@ -924,7 +924,7 @@ impl Generation {
                     p.biomes
                         .as_slice()
                         .iter()
-                        .map(|b| saved_biome(b, &kept, &towns, mapping))
+                        .map(|b| saved_biome(b, &kept_templates, &kept_settlements, mapping))
                         .collect::<Result<_, _>>()
                 })
                 .transpose()?,
@@ -1055,8 +1055,8 @@ impl Generation {
 
 fn saved_biome(
     b: &crate::Biome,
-    kept: &[u16],
-    towns: &[u16],
+    kept_templates: &[u16],
+    kept_settlements: &[u16],
     mapping: &Mapping,
 ) -> Result<SavedBiome, Error> {
     Ok(SavedBiome {
@@ -1098,7 +1098,9 @@ fn saved_biome(
             .structures()
             .iter()
             .map(|s| SavedStructure {
-                template: kept.binary_search(&s.template).unwrap_or_default() as u16,
+                template: kept_templates
+                    .binary_search(&s.template)
+                    .unwrap_or_default() as u16,
                 spacing_m: s.spacing_m,
                 chance: s.chance,
             })
@@ -1108,7 +1110,9 @@ fn saved_biome(
             .settlements()
             .iter()
             .map(|s| SavedBiomeSettlement {
-                settlement: towns.binary_search(&s.settlement).unwrap_or_default() as u16,
+                settlement: kept_settlements
+                    .binary_search(&s.settlement)
+                    .unwrap_or_default() as u16,
                 spacing_m: s.spacing_m,
                 chance: s.chance,
             })
@@ -1126,11 +1130,13 @@ fn restored_biome_settlement(s: &SavedBiomeSettlement) -> crate::BiomeSettlement
 
 fn saved_settlement(
     s: &crate::settlement::Settlement,
-    kept: &[u16],
+    kept_templates: &[u16],
     mapping: &Mapping,
 ) -> Result<SavedSettlement, Error> {
     let building = |b: &crate::settlement::Building| SavedBuilding {
-        template: kept.binary_search(&b.template).unwrap_or_default() as u16,
+        template: kept_templates
+            .binary_search(&b.template)
+            .unwrap_or_default() as u16,
         door: b.door,
     };
     Ok(SavedSettlement {

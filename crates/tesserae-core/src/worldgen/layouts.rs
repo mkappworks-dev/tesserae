@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::hash::Hash;
 use std::sync::{Arc, Mutex};
 
-use super::settlements::{Site, Town};
+use super::settlements::{Founding, LaidSettlement};
 use super::structures::Structure;
 
 /// Lattice cells by row index and cell.
@@ -17,8 +17,8 @@ type CellKey = (usize, [i32; 2]);
 #[derive(Default)]
 pub(super) struct Layouts {
     structures: Memo<CellKey, Option<Structure>>,
-    sites: Memo<CellKey, Option<Site>>,
-    towns: Memo<CellKey, Option<Arc<Town>>>,
+    foundings: Memo<CellKey, Option<Founding>>,
+    settlements: Memo<CellKey, Option<Arc<LaidSettlement>>>,
 }
 
 impl Layouts {
@@ -30,16 +30,21 @@ impl Layouts {
         self.structures.get_or(key, STRUCTURES_KEPT, work)
     }
 
-    pub(super) fn site(&self, key: CellKey, work: impl FnOnce() -> Option<Site>) -> Option<Site> {
-        self.sites.get_or(key, SITES_KEPT, work)
-    }
-
-    pub(super) fn town(
+    pub(super) fn founding(
         &self,
         key: CellKey,
-        work: impl FnOnce() -> Option<Town>,
-    ) -> Option<Arc<Town>> {
-        self.towns.get_or(key, TOWNS_KEPT, || work().map(Arc::new))
+        work: impl FnOnce() -> Option<Founding>,
+    ) -> Option<Founding> {
+        self.foundings.get_or(key, FOUNDINGS_KEPT, work)
+    }
+
+    pub(super) fn laid(
+        &self,
+        key: CellKey,
+        work: impl FnOnce() -> Option<LaidSettlement>,
+    ) -> Option<Arc<LaidSettlement>> {
+        self.settlements
+            .get_or(key, LAID_KEPT, || work().map(Arc::new))
     }
 }
 
@@ -50,9 +55,9 @@ impl std::fmt::Debug for Layouts {
 }
 
 const STRUCTURES_KEPT: usize = 16_384;
-const SITES_KEPT: usize = 4_096;
-/// A Town at the largest radius holds about 85 KB of road and grade.
-const TOWNS_KEPT: usize = 32;
+const FOUNDINGS_KEPT: usize = 4_096;
+/// A Settlement laid out at the largest radius holds about 85 KB of road and grade.
+const LAID_KEPT: usize = 32;
 
 #[derive(Default)]
 struct Memo<K, V>(Mutex<HashMap<K, V>>);

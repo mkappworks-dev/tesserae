@@ -511,6 +511,9 @@ direction the Player faces at heading zero.
 Material, a Shape and an Orientation, laid out on a grid whose size is given in
 metres. Data, not a place in a World; a World with no Game has none.
 
+**Template cell** — one square of a Template's grid, `cell-m` on a side, in
+metres: Keep, Air, ground or a Voxel. Not a Cell, which is a Chunk's footprint.
+
 **Keep** — a Template cell that is never written, so the ground a Structure
 stands in shows through. Air in a Template is not Keep: it carves.
 
@@ -532,6 +535,13 @@ centre and joins with paths, from rules a Game or Mod declares: a radius in
 metres, an optional centre Template, the Templates it may hold and a path
 Material. A village and a town are a Game's names for Settlements of different
 rules, not different things.
+
+**Lattice cell** — one square of a lattice world generation spreads Structures,
+Settlements or crop fields on, a row's spacing in metres on a side. It holds at
+most one candidate. Not a Cell.
+
+**Building** — a Template a Settlement stands at its centre or on a Plot, with
+the Template cell of its door if it has one.
 
 **Plot** — the ground one Structure of a Settlement stands on. A Plot whose
 ground fails the rules stays empty.

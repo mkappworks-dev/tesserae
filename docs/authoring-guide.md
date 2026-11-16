@@ -182,7 +182,7 @@ Engine plays as the Player's Eye goes underground or underwater (see
 | `[[items]]`                 | `name`, `size-m` (0.05 to 0.5 m), `color`, optional `material` (solid; at most one item per Material; removing a Voxel of it drops the item), optional `max-stack` (1 to 64; omitted is 64), optional `food` (hunger restored, above 0 and at most 1000), optional `texture` (a 16 by 16 PNG path: a flat sprite)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `[[plants]]`                | `name`, `kind`, `seed` (an Item), optional `shape`, `[plants.needs]`, then by kind: `stages`, optional `harvest-to` and `fruit-vine` (`crop`); `sapling`, `trunk`, `canopy`, `trunk-height-m`, `canopy-radius-m`, `mean-seconds`, the yields, optional `fruit`, `vines` and `branching` (`tree`); `material`, `max-height-m`, `direction`, `mean-seconds`, optional `stands-in` (`column`); `material`, `reach-m`, `mean-seconds`, `density`, optional `min-neighbours` (`spreader`); `material`, `mean-seconds`, `length-m` (`climber`); 128 per Mod, 512 in a World                                                                                                                                                                                                                                                                                                                                                                                 |
 | `[[biomes]]`                | `name`, `temperature`, `humidity` (both 0 to 1), optional `ground` (`rock`, `soil`, `surface`: solid Materials by full name), optional `sky-fog` (`sky`, `fog`: sRGB `[r, g, b]`), optional `cave-scale` (0 to 4), optional `surface-features` (at most 16, each `material`: a solid by full name, or `plant`: a Plant by full name, optional `shape`, `spacing-m`: 1 to 1024, optional `clump`: `{ scale-m, strength }`, optional `field`: `{ group, scale-m, strays }`), optional `crop-fields` (at most 2, each `crops`: `[plant, weight]` pairs, `plot-m`: `[low, high]`, `spacing-m`, optional `path`, `ditch`, `near-water-m`), optional `structures` (at most 4, each `template`: by full name, `spacing-m`: twice the Template's longer side to 4096, `chance`: above 0, at most 1), optional `settlements` (at most 2, each `settlement`: by full name, `spacing-m`: twice its radius and margin to 4096); at most 16 per Mod and in a World |
-| `[[templates]]`             | `name`, `cell-m` (metres), `palette` (one character to `"keep"`, `"air"`, `"ground"` or `{ material, shape, orientation }`), `layers` (bottom up, each rows along +Z of characters along +X), `ground-layer`, optional `foundation` (a solid by full name), optional `level-tolerance-m` (0 to 16; omitted is 1); at most 64 m a side and 65,536 cells, 64 in a World                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `[[templates]]`             | `name`, `cell-m` (metres), `palette` (one character to `"keep"`, `"air"`, `"ground"` or `{ material, shape, orientation }`), `layers` (bottom up, each rows along +Z of characters along +X), `ground-layer`, optional `foundation` (a solid by full name), optional `level-tolerance-m` (0 to 16; omitted is 1); at most 64 m a side and 65,536 Template cells, 64 in a World                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `[[settlements]]`           | `name`, `radius-m` (above 0, at most 64), optional `margin-m` (0 to 64; omitted is 16), optional `centre` (a Template by full name), `plots` (at most 24), `templates` (1 to 24, each `template`: by full name, optional `weight`: above 0, omitted is 1, `min`: omitted is 0, `max`: omitted is 24), optional `minimum` (omitted is 0), `path` (a solid by full name), optional `path-shape`; 16 in a World                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `[[marker-kinds]]`          | `name`, `icon` (`home`, `camp`, `mine`, `farm`, `landmark`, `death`, `flag`, `pin` or `star`), `color` (four RGBA bytes); 16 per Mod                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `death-marker-kind` (Game)  | the full `<mod id>:<name>` of the Marker kind a death leaves; a top-level key, before any table                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
@@ -1040,8 +1040,8 @@ tree.
 
 ## Templates and Settlements
 
-A Template is a building declared as data: a grid of cells in metres, each a
-Material, a Shape and an Orientation, or Keep
+A Template is a building declared as data: a grid of Template cells in metres,
+each a Material, a Shape and an Orientation, or Keep
 ([ADR-0029](adr/0029-structures-are-declared-templates-placed-as-pure-functions-of-metres.md)).
 A Biome lists the Templates worldgen stands in it as Structures, and the
 Settlements it lays out of them; a Creative Player stamps one with the `place`
@@ -1103,24 +1103,26 @@ layer, so a Structure on uneven ground does not float; the `place` Tool lays
 none. `level-tolerance-m`, 0 to 16 m and 1 when omitted, is how far the ground
 under a Structure may rise and fall.
 
-`cell-m` is the grid's cell size in metres. A World takes, for each of its
-Voxels, the cell its centre falls in, so a Template whose sides are whole metres
-has the same footprint at 1.0, 0.5 and 0.25 m. A side that is not a whole number
-of the World's Voxels rounds to the nearest: a 0.5 m side is one Voxel in a 1 m
-World. A cell finer than the World loses detail, and a coarser one repeats.
+`cell-m` is a Template cell's side in metres. A World takes, for each of its
+Voxels, the Template cell its centre falls in, so a Template whose sides are
+whole metres has the same footprint at 1.0, 0.5 and 0.25 m. A side that is not a
+whole number of the World's Voxels rounds to the nearest: a 0.5 m side is one
+Voxel in a 1 m World. A Template cell finer than the World loses detail, and a
+coarser one repeats.
 
 A Structure turns in quarter turns about the vertical axis; one quarter takes
-the Template's +Z edge to +X, and every cell's Orientation turns with it. It is
-never mirrored.
+the Template's +Z edge to +X, and every Template cell's Orientation turns with
+it. It is never mirrored.
 
-A Template is at most 64 m a side and 65,536 cells, and a World holds at most 64
-from all its Mods. Any Mod may declare one, and an unknown Material or Shape, a
-character not in the palette or a grid over a limit is a load error naming the
-Template and the cell. A component returns the same record as a `TemplateDef`:
-the [Rust starter](../starters/rust/src/lib.rs) declares a stone hut in its
-`hut()`. The five demo Games generate theirs from the approved mockup with
-`node mockup/export-templates.mjs`, into `games/<game>/src/templates.rs`, and
-list them in `games/<game>/src/structures.rs`.
+A Template is at most 64 m a side and 65,536 Template cells, and a World holds
+at most 64 from all its Mods. Any Mod may declare one, and an unknown Material
+or Shape, a character not in the palette or a grid over a limit is a load error
+naming the Template and the Template cell. A component returns the same record
+as a `TemplateDef`: the [Rust starter](../starters/rust/src/lib.rs) declares a
+stone hut in its `hut()`. The five demo Games generate theirs from the approved
+mockup with `node mockup/export-templates.mjs`, into
+`games/<game>/src/templates.rs`, and list them in
+`games/<game>/src/structures.rs`.
 
 ### Obtainable
 
@@ -1168,12 +1170,12 @@ taken only if every column of the footprint, sampled a metre apart:
 
 The Ground layer then sits on the lower median of those heights, and the
 `foundation` fills down to any column that falls further. A Structure's non-Keep
-cells overwrite terrain, ore and lake water. Trees, scatter and crop fields keep
-off its footprint, and a Structure never asks about them. Each Chunk works out
-every Structure that can reach it and writes only its own Voxels, so a Structure
-is whole across Chunk borders whichever Chunk generates first, and the same at
-every Voxel size. The coarse LOD levels leave Structures out, and a Player never
-spawns inside one.
+Template cells overwrite terrain, ore and lake water. Trees, scatter and crop
+fields keep off its footprint, and a Structure never asks about them. Each Chunk
+works out every Structure that can reach it and writes only its own Voxels, so a
+Structure is whole across Chunk borders whichever Chunk generates first, and the
+same at every Voxel size. The coarse LOD levels leave Structures out, and a
+Player never spawns inside one.
 
 A World freezes the Templates and Settlements its Biomes name in its generation
 snapshot when it is created. Editing a Template later changes nothing in a saved
@@ -1221,15 +1223,15 @@ the radius and margin and at most 4096 m. Settlements claim ground first, then
 single Structures, crop fields, trees and scatter, and nothing asks back up that
 chain; a later row gives way to an earlier one it would overlap.
 
-Every Plot's door faces its Road. The door is the first closed Door cell in the
-lowest layer, from the Ground layer up, that holds one; a Template with none
-turns its +Z edge to the Road, so an open-fronted barn or a market stall opens
-onto it. A Plot stands where every metre sample of its footprint and a 2 m Apron
-round it is dry, no cave cuts the footprint's top metre, and every sample is
-within 1.5 m of the footprint's lower median. It is then cut and filled level,
-by at most 2 m, and the Apron eases back to the natural ground, so a hillside
-village sits on terraces with no cliff at their edges. A Plot needs no
-foundation, and the heightmap is unchanged. A Plot whose ground fails stays
+Every Plot's door faces its Road. The door is the first closed Door Template
+cell in the lowest layer, from the Ground layer up, that holds one; a Template
+with none turns its +Z edge to the Road, so an open-fronted barn or a market
+stall opens onto it. A Plot stands where every metre sample of its footprint and
+a 2 m Apron round it is dry, no cave cuts the footprint's top metre, and every
+sample is within 1.5 m of the footprint's lower median. It is then cut and
+filled level, by at most 2 m, and the Apron eases back to the natural ground, so
+a hillside village sits on terraces with no cliff at their edges. A Plot needs
+no foundation, and the heightmap is unchanged. A Plot whose ground fails stays
 empty, and a single Structure in the wild keeps its strict level rule.
 
 The demo Games declare a village of their ten buildings round a well, and Terra
@@ -1240,25 +1242,26 @@ also a town; see `games/<game>/src/structures.rs`.
 This section is the one place that says how Structures, Settlements, Plots and
 Roads are spread; the rules above do not depend on it.
 
-Each `structures` row has its own square lattice of `spacing-m` cells, salted by
-Biome and row. From a hash of the seed and the cell alone, every cell draws a
-candidate (a turn and a corner on whole metres anywhere in the cell) and a
-priority. The candidate stands, with `chance`, unless one of the 8 neighbouring
-cells has a higher-priority candidate nearer than `spacing-m`. Only then are the
-ground rules asked; a candidate the ground refuses leaves its cell empty, with
-no retry, so a Game that wants more Structures on rough ground lowers
-`spacing-m`. The result is spread evenly but never on a visible grid, and
-differs with every seed. A later row's Structure gives way to an earlier row's
-it would touch.
+Each `structures` row has its own square lattice of `spacing-m` lattice cells,
+salted by Biome and row. From a hash of the seed and the lattice cell alone,
+every lattice cell draws a candidate (a turn and a corner on whole metres
+anywhere in it) and a priority. The candidate stands, with `chance`, unless one
+of the 8 neighbouring lattice cells has a higher-priority candidate nearer than
+`spacing-m`. Only then are the ground rules asked; a candidate the ground
+refuses leaves its lattice cell empty, with no retry, so a Game that wants more
+Structures on rough ground lowers `spacing-m`. The result is spread evenly but
+never on a visible grid, and differs with every seed. A later row's Structure
+gives way to an earlier row's it would touch.
 
 Each `settlements` row has a lattice of its own and the same rule: a centre
-anywhere in its cell stands, with `chance`, unless a neighbour's higher-priority
-centre is nearer than twice the Settlement's radius plus margin. From the centre
-3 or 4 Roads branch in 4 m steps, each step the gentlest of 5 bends that stays
-in the disc, dry, off the centre's Plot and no steeper than 0.45 rise over run.
-Plots are tried along each Road on both sides in a seeded order, at seeded gaps
-of 1 to 4 m and set back 0 to 2 m, and each keeps up to 4 m more clear ground
-the further it stands from the centre, so houses thin out towards the edge.
+anywhere in its lattice cell stands, with `chance`, unless a neighbour's
+higher-priority centre is nearer than twice the Settlement's radius plus margin.
+From the centre 3 or 4 Roads branch in 4 m steps, each step the gentlest of 5
+bends that stays in the disc, dry, off the centre's Plot and no steeper than
+0.45 rise over run. Plots are tried along each Road on both sides in a seeded
+order, at seeded gaps of 1 to 4 m and set back 0 to 2 m, and each keeps up to 4
+m more clear ground the further it stands from the centre, so houses thin out
+towards the edge.
 
 Roads are graded over the Settlement's metre grid, no steeper than 0.45 rise
 over run, and laid in the `path` Material on the ground. Level Road takes
@@ -1285,14 +1288,14 @@ kind = "place"
 Only a Creative Player can use it; in Survival it is refused. With it held, Use
 (G) opens the list of the Game's Templates, R turns the Structure a quarter (R
 is also Respawn, which it does only while the Tool is not held), and Place
-(right mouse) stamps it where the Player aims. A ghost shows each cell tinted by
-what placing it would do: fill air, replace ground or water, carve, or refuse.
-Only the anchor, the cell in front of the face aimed at, needs to be in reach;
-the footprint centres on it and the Ground layer sits level with it. Placing
-costs no Items and lands whole or not at all, waiting up to 64 ticks for Chunks
-still loading before it refuses with a reason. It is one undo group, and Mods
-hear its Voxels as Edit events. A placement that would change more than 131,072
-Voxels is refused as too big to undo; at 0.25 m a 32 m building can.
+(right mouse) stamps it where the Player aims. A ghost shows each Template cell
+tinted by what placing it would do: fill air, replace ground or water, carve, or
+refuse. Only the anchor, the cell in front of the face aimed at, needs to be in
+reach; the footprint centres on it and the Ground layer sits level with it.
+Placing costs no Items and lands whole or not at all, waiting up to 64 ticks for
+Chunks still loading before it refuses with a reason. It is one undo group, and
+Mods hear its Voxels as Edit events. A placement that would change more than
+131,072 Voxels is refused as too big to undo; at 0.25 m a 32 m building can.
 
 ## Artwork
 

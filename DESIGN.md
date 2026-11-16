@@ -701,10 +701,10 @@ Notes:
   [ADR-0028](docs/adr/0028-the-map-is-a-server-held-per-player-capture.md). Spec
   and tickets: `.scratch/2026-11-15-phase-19-map-compass/`.
 - **Step 20** is done. A Game or Mod declares Templates as data in the
-  unreleased 0.3 Declaration: a grid of cells in metres, each a Material, a
-  Shape and an Orientation by full name, or Keep, Air or `ground` (the local
-  Biome's surface Material, its soil below the Ground layer), with a Ground
-  layer, an optional foundation and a level tolerance. A World samples a
+  unreleased 0.3 Declaration: a grid of Template cells in metres, each a
+  Material, a Shape and an Orientation by full name, or Keep, Air or `ground`
+  (the local Biome's surface Material, its soil below the Ground layer), with a
+  Ground layer, an optional foundation and a level tolerance. A World samples a
   Template at its own Voxel size, so a Structure has the same footprint in
   metres at 1.0, 0.5 and 0.25 m
   ([ADR-0003](docs/adr/0003-voxel-size-is-per-world.md)'s amendment). A Biome
@@ -716,13 +716,13 @@ Notes:
   slabs. Every Material a Template names must be Obtainable in the World, or the
   World is refused. A Creative Player's `place` Tool opens the Template list,
   turns a Structure with R and places it whole as one undo group, from a ghost
-  the Server tints cell by cell. Every Game declares fifteen Templates, the
-  `place` Tool and a Settlement (Terra also a town), generated from the approved
-  mockup by `mockup/export-templates.mjs`, and the Rust starter a hut. A World
-  freezes the Templates and Settlements it uses in its generation snapshot, so
-  an old World generates what it did, with no new Generator version. How
-  Structures and Settlements are spread and their roads run is described in one
-  place, the authoring guide's
+  the Server tints Template cell by Template cell. Every Game declares fifteen
+  Templates, the `place` Tool and a Settlement (Terra also a town), generated
+  from the approved mockup by `mockup/export-templates.mjs`, and the Rust
+  starter a hut. A World freezes the Templates and Settlements it uses in its
+  generation snapshot, so an old World generates what it did, with no new
+  Generator version. How Structures and Settlements are spread and their roads
+  run is described in one place, the authoring guide's
   [Where they stand](docs/authoring-guide.md#where-they-stand). See
   [ADR-0029](docs/adr/0029-structures-are-declared-templates-placed-as-pure-functions-of-metres.md).
   Spec and tickets: `.scratch/2026-11-15-phase-20-structures/`.
@@ -757,11 +757,11 @@ Notes:
   out its lattice cells (cold) or a later one (warm), which is below the 0.30 ms
   the 16-feature Biome's Plants add at 1 m. Every Chunk a Structure or
   Settlement reaches used to accept or lay it out again, which put a Template at
-  the cap (64 by 16 by 64 m, every cell written) at 0.63, 0.59 and 0.57 ms a
-  Chunk at 1.0, 0.5 and 0.25 m and a Settlement at the cap (64 m radius, 24
+  the cap (64 by 16 by 64 m, every Template cell written) at 0.63, 0.59 and 0.57
+  ms a Chunk at 1.0, 0.5 and 0.25 m and a Settlement at the cap (64 m radius, 24
   Plots) at 0.50, 0.37 and 0.36 ms; so each generator, and every clone streaming
   makes of it, now shares a bounded cache of what each lattice cell stands
-  (16,384 Structures, 4,096 Settlement sites and 32 laid-out Settlements,
+  (16,384 Structures, 4,096 Settlement centres and 32 laid-out Settlements,
   forgotten whole when full), which keeps generation a pure function of the seed
   and metres in any Chunk order and on any thread. Per Chunk, warm then cold
   against bare: a 7 m house 64 m apart costs 0.21 and 0.24 ms against 0.21 and

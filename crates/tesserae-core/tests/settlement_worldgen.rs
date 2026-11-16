@@ -327,7 +327,7 @@ impl Laid {
     }
 
     /// The centres, in metres, of the Settlements that stood fully inside `inner_m`.
-    fn towns(&self, inner_m: f32) -> Vec<[f32; 2]> {
+    fn centres_within(&self, inner_m: f32) -> Vec<[f32; 2]> {
         self.centres()
             .into_iter()
             .filter(|c| c.iter().all(|v| v.abs() + RADIUS_M <= inner_m))
@@ -387,7 +387,10 @@ fn a_settlement_is_whole_across_chunk_borders_and_equal_in_metres_at_every_voxel
     let mut by_size = Vec::new();
     for size in SIZES {
         let laid = Laid::scan(size, plain, half_m);
-        assert!(laid.towns(half_m).len() >= 2, "{size} m: few Settlements");
+        assert!(
+            laid.centres_within(half_m).len() >= 2,
+            "{size} m: few Settlements"
+        );
         let crossings = laid
             .found
             .iter()
@@ -428,14 +431,14 @@ fn every_door_faces_a_road_no_two_plots_overlap_and_counts_keep_their_bounds() {
     let half_m = 128.0;
     let laid = Laid::scan(1.0, plain, half_m);
     let templates = templates();
-    let towns = laid.towns(half_m);
-    assert!(towns.len() >= 3, "only {} Settlements", towns.len());
+    let centres = laid.centres_within(half_m);
+    assert!(centres.len() >= 3, "only {} Settlements", centres.len());
     let mut doors = 0;
     // A Settlement the scan cuts may have its road outside it.
     for f in laid
         .found
         .iter()
-        .filter(|f| towns.iter().any(|&c| laid.holds(f, c)))
+        .filter(|f| centres.iter().any(|&c| laid.holds(f, c)))
     {
         let sampled = templates[f.template].sample(1.0, f.turn);
         let [sx, sy, sz] = sampled.size();
@@ -475,7 +478,7 @@ fn every_door_faces_a_road_no_two_plots_overlap_and_counts_keep_their_bounds() {
         }
     }
     let rules = village().rules;
-    for centre in towns {
+    for centre in centres {
         let mut counts = [0u8; 3];
         for f in &laid.found {
             if laid.holds(f, centre) {
@@ -579,8 +582,8 @@ fn no_single_structure_field_or_tree_stands_in_a_settlement_and_no_structure_in_
     let half_m = 96.0;
     let size = 1.0;
     let laid = Laid::scan(size, crowded, half_m);
-    let towns = laid.towns(half_m);
-    assert!(!towns.is_empty(), "no Settlement stood among the trees");
+    let centres = laid.centres_within(half_m);
+    assert!(!centres.is_empty(), "no Settlement stood among the trees");
     let with = generator(size, crowded(listing(true)), village());
     let wild = generator(size, crowded(listing(false)), village());
     let cells = changed(
@@ -601,7 +604,7 @@ fn no_single_structure_field_or_tree_stands_in_a_settlement_and_no_structure_in_
                 .iter()
                 .filter(|(at, (w, _))| {
                     materials.contains(&w.material())
-                        && towns
+                        && centres
                             .iter()
                             .any(|&c| laid.within([at[0], at[2]], c, reach_m))
                 })
@@ -700,15 +703,15 @@ fn every_plot_is_level_and_no_cut_or_fill_exceeds_two_metres() {
     let half_m = 96.0;
     for size in [1.0, 0.5] {
         let laid = Laid::scan(size, hilly, half_m);
-        let towns = laid.towns(half_m);
-        assert!(!towns.is_empty(), "{size} m: no Settlement on the hills");
+        let centres = laid.centres_within(half_m);
+        assert!(!centres.is_empty(), "{size} m: no Settlement on the hills");
         let with = Columns::new(generator(size, hilly(listing(true)), village()));
         let bare = Columns::new(generator(size, hilly(listing(false)), village()));
         let mut moved_m = 0.0f32;
         let plots: Vec<_> = laid
             .found
             .iter()
-            .filter(|f| towns.iter().any(|&c| laid.holds(f, c)))
+            .filter(|f| centres.iter().any(|&c| laid.holds(f, c)))
             .collect();
         assert!(plots.len() > 4, "{size} m: only {} Plots", plots.len());
         for f in plots {
@@ -743,7 +746,7 @@ fn the_apron_blends_into_the_ground_with_no_cliff_at_its_edge() {
     let half_m = 96.0;
     for size in [1.0, 0.5] {
         let laid = Laid::scan(size, hilly, half_m);
-        let towns = laid.towns(half_m);
+        let centres = laid.centres_within(half_m);
         let with = Columns::new(generator(size, hilly(listing(true)), village()));
         let bare = Columns::new(generator(size, hilly(listing(false)), village()));
         let rects: Vec<_> = laid.found.iter().map(|f| laid.rect(f)).collect();
@@ -757,7 +760,7 @@ fn the_apron_blends_into_the_ground_with_no_cliff_at_its_edge() {
         for f in laid
             .found
             .iter()
-            .filter(|f| towns.iter().any(|&c| laid.holds(f, c)))
+            .filter(|f| centres.iter().any(|&c| laid.holds(f, c)))
         {
             for column in around(&laid, f, 3.0).into_iter().filter(|&c| open(c)) {
                 for next in [[column[0] + 1, column[1]], [column[0], column[1] + 1]] {
@@ -817,8 +820,7 @@ fn wilderness_structures_keep_the_strict_rule_and_are_never_levelled() {
         ..crowded(s)
     };
     let laid = Laid::scan(size, hilly_crowded, half_m);
-    let towns = laid.towns(half_m);
-    assert!(!towns.is_empty());
+    assert!(!laid.centres_within(half_m).is_empty());
     let with = generator(size, hilly_crowded(listing(true)), village());
     let wild = generator(size, hilly_crowded(listing(false)), village());
     // Two Chunks in, far enough inside the scan that every Settlement reaching it has its well
@@ -829,7 +831,7 @@ fn wilderness_structures_keep_the_strict_rule_and_are_never_levelled() {
     // further out.
     let tree_m = 6.0;
     for (at, (_, was)) in &changed {
-        // A Site whose layout falls short still keeps single Structures out.
+        // A Settlement whose layout falls short still keeps single Structures out.
         assert!(
             was.material() == LONE
                 || centres.iter().any(|&c| laid.within(
@@ -1027,9 +1029,9 @@ fn two_seeds_lay_settlements_out_differently() {
 fn plots_spread_over_the_disc_with_uneven_gaps() {
     let half_m = 128.0;
     let laid = Laid::scan(1.0, plain, half_m);
-    let towns = laid.towns(half_m);
+    let centres = laid.centres_within(half_m);
     let (mut outer, mut gaps) = (0, HashSet::new());
-    for &centre in &towns {
+    for &centre in &centres {
         let rects: Vec<_> = laid
             .found
             .iter()
@@ -1053,8 +1055,11 @@ fn plots_spread_over_the_disc_with_uneven_gaps() {
             gaps.extend(nearest);
         }
     }
-    assert!(towns.len() >= 3, "only {} Settlements", towns.len());
-    assert!(outer >= towns.len(), "only {outer} Plots in the outer half");
+    assert!(centres.len() >= 3, "only {} Settlements", centres.len());
+    assert!(
+        outer >= centres.len(),
+        "only {outer} Plots in the outer half"
+    );
     assert!(gaps.len() >= 4, "the gaps between Plots are {gaps:?}");
 }
 
@@ -1069,12 +1074,12 @@ fn roads_wear_towards_the_edge_and_approach_paths_fade_out_inside_the_margin() {
     let half_m = 160.0;
     let params = |listed| plain(listing_at(listed, spacing_m, 1.0));
     let laid = Laid::scan_of(1.0, params, wide, SEED, half_m);
-    let towns: Vec<_> = laid
+    let centres: Vec<_> = laid
         .centres()
         .into_iter()
         .filter(|c| c.iter().all(|v| v.abs() + RADIUS_M + margin_m <= half_m))
         .collect();
-    assert!(!towns.is_empty(), "no Settlement");
+    assert!(!centres.is_empty(), "no Settlement");
     let rects: Vec<_> = laid.found.iter().map(|f| laid.rect(f)).collect();
     let under_plot = |[x, z]: [i32; 2]| {
         rects
@@ -1082,7 +1087,7 @@ fn roads_wear_towards_the_edge_and_approach_paths_fade_out_inside_the_margin() {
             .any(|[min, max]| (min[0]..max[0]).contains(&x) && (min[1]..max[1]).contains(&z))
     };
     let (mut worn_in, mut worn_out) = (0, 0);
-    for centre in towns {
+    for centre in centres {
         let away = |[x, z]: [i32; 2]| {
             let [dx, dz] = [x as f32 + 0.5 - centre[0], z as f32 + 0.5 - centre[1]];
             ((dx * dx + dz * dz).sqrt(), dz.atan2(dx))
