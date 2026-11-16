@@ -943,6 +943,7 @@ fn biome_settlements(
                 settlement: at as u16,
                 spacing_m: row.spacing_m,
                 chance: row.chance,
+                near_spawn: row.near_spawn,
             };
             settlement
                 .validate(&tables.settlements[at])

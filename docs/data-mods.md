@@ -183,9 +183,10 @@ authoring guide's [Loot](authoring-guide.md#loot).
 A Biome row may add `structures`, at most 4 `{ template, spacing-m, chance }`
 entries: a Template by full name, a spacing from twice the Template's longer
 side to 4096 m, and a chance above 0 and at most 1. It may add `settlements`, at
-most 2 `{ settlement, spacing-m, chance }` entries: a Settlement by full name, a
-spacing from twice its radius and margin to 4096 m, and a chance above 0 and at
-most 1 that defaults to 1 when left out.
+most 2 `{ settlement, spacing-m, chance, near-spawn }` entries: a Settlement by
+full name, a spacing from twice its radius and margin to 4096 m, a chance above
+0 and at most 1 that defaults to 1 when left out, and `near-spawn`, false when
+left out, which always stands one in the four lattice cells round the origin.
 
 Worldgen stands them from the World seed alone, whole across Chunk borders and
 the same in metres at every Voxel size, and the World's saved Biome table

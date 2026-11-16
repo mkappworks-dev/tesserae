@@ -267,11 +267,13 @@ pub fn settlements() -> Vec<SettlementDef> {
     ]
 }
 
+/// A Biome's row for the Settlement `name`; a village row stands one near spawn.
 fn row(name: &str, spacing_m: f32, chance: f32) -> BiomeSettlement {
     BiomeSettlement {
         settlement: format!("terra:{name}"),
         spacing_m,
         chance,
+        near_spawn: name == "village",
     }
 }
 

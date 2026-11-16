@@ -1262,8 +1262,7 @@ settlements = [{ settlement = "showcase:hamlet", spacing-m = 96.0 }]
   Template must then be no wider than `radius-min-m`, and `minimum` and the
   `templates` rows' `min`s count against `plots-min`.
 - `margin-m`, 0 to 64 m and 16 when omitted, keeps single Structures that far
-  outside the disc. Approach paths run at most the margin less 0.9 m past the
-  disc, so under about 13 m they are shorter and under about 1 m there are none.
+  outside the disc. Trails run on past it.
 - `centre` is an optional Template stood at the centre, such as a well. It must
   pass a single Structure's ground rules, or no Settlement stands there.
 - `plots`, at most 96, is how many Plots it tries to fill, drawn from
@@ -1278,8 +1277,13 @@ settlements = [{ settlement = "showcase:hamlet", spacing-m = 96.0 }]
 A Biome lists at most 2 `settlements` rows, each a `spacing-m` at least twice
 the largest radius and margin, so no two copies meet whatever they draw, and at
 most 4096 m, and a `chance`, above 0 and at most 1 and 1 when omitted, that a
-lattice cell tries one. Settlements claim ground first, then single Structures,
-crop fields, trees and scatter, and nothing asks back up that chain; a later row
+lattice cell tries one. A row may also say `near-spawn = true`: the four lattice
+cells round the origin then always draw, win against their neighbours and draw
+their centre clear of the spawn's keep-out, so the Settlement stands within
+about a cell's diagonal of spawn wherever the ground takes it; its `spacing-m`
+must then be more than its largest radius and margin plus 50 m, or the row draws
+as any other. Settlements claim ground first, then single Structures, crop
+fields, trees and scatter, and nothing asks back up that chain; a later row
 gives way to an earlier one it would overlap.
 
 Every Plot's door faces its Road. The door is the first closed Door Template
@@ -1366,9 +1370,12 @@ walks up it. A stretch more than 2 m above or below its ground is not laid.
 
 Roads narrow towards the disc's edge, and past half the radius each Road cell
 wears to the Biome's surface by its own seeded draw, up to a quarter of them at
-the edge. Two or three Roads run on past the disc as approach paths, a seeded 12
-to 40 m and never beyond the margin, wearing away entirely by their end so they
-fade into the ground. Trees, scatter and fields keep off Roads and paths.
+the edge. Two or three Roads run on past the disc as trails, a seeded 40 to 90
+m, past the margin over ground the Settlement does not claim, so a Player finds
+a path leading in. A trail follows the grade rules, stops at water, at another
+Settlement's disc and margin and at the origin's keep-out, and wears away
+entirely by its end so it fades into the ground. A wilderness Structure may
+stand on a trail. Trees, scatter and fields keep off Roads and trails.
 
 ### The place Tool
 

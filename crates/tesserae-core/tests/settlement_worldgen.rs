@@ -165,10 +165,20 @@ fn listing(settlements: bool) -> SurfaceFeatures {
 }
 
 fn listing_at(settlements: bool, spacing_m: f32, chance: f32) -> SurfaceFeatures {
+    listing_near(settlements, spacing_m, chance, false)
+}
+
+fn listing_near(
+    settlements: bool,
+    spacing_m: f32,
+    chance: f32,
+    near_spawn: bool,
+) -> SurfaceFeatures {
     let rows = [BiomeSettlement {
         settlement: 0,
         spacing_m,
         chance,
+        near_spawn,
     }];
     SurfaceFeatures::NONE
         .with_settlements(if settlements { &rows } else { &[] })
@@ -510,8 +520,12 @@ fn a_settlement_is_whole_across_chunk_borders_and_equal_in_metres_at_every_voxel
 
 #[test]
 fn no_settlement_disc_or_margin_comes_within_48_m_of_the_origin() {
+    no_settlement_within_48_m(plain(listing(true)));
+}
+
+fn no_settlement_within_48_m(params: WorldgenParams) {
     let size = 1.0;
-    let with = generator(size, plain(listing(true)), village());
+    let with = generator(size, params, village());
     let bare = generator(size, plain(listing(false)), village());
     let changed = changed_around(&with, &bare, 0.0, 192.0, false);
     let reach_m = |[x, z]: [i32; 2]| ((x as f32 + 0.5).hypot(z as f32 + 0.5)) * size;
@@ -524,6 +538,54 @@ fn no_settlement_disc_or_margin_comes_within_48_m_of_the_origin() {
         nearest >= 48.0,
         "a Settlement changed ground {nearest} m from the origin"
     );
+}
+
+/// Wells, one per Settlement, in `half_m` of the origin.
+fn wells_round_spawn(
+    seed: u64,
+    spacing_m: f32,
+    chance: f32,
+    near_spawn: bool,
+    half_m: f32,
+) -> usize {
+    let make = |listed| {
+        Worldgen::new(
+            seed,
+            1.0,
+            plain(listing_near(listed, spacing_m, chance, near_spawn)),
+        )
+        .with_templates(&templates())
+        .with_settlements(&[village()])
+    };
+    let changed = changed_around(&make(true), &make(false), 0.0, half_m, false);
+    let is_well = |at: [i32; 3]| changed.get(&at).is_some_and(|c| c.0.material() == WELL);
+    changed
+        .keys()
+        .filter(|&&[x, y, z]| {
+            is_well([x, y, z])
+                && !is_well([x - 1, y, z])
+                && !is_well([x, y, z - 1])
+                && !is_well([x, y - 1, z])
+        })
+        .count()
+}
+
+#[test]
+fn a_near_spawn_row_stands_its_settlement_in_the_cells_round_the_origin() {
+    // A chance so low that the row stands nothing round spawn without the flag.
+    let (spacing_m, chance) = (128.0, 0.01);
+    let seeds = [SEED, 1, 2, 3, 4];
+    let without: usize = seeds
+        .iter()
+        .map(|&seed| wells_round_spawn(seed, spacing_m, chance, false, 192.0))
+        .sum();
+    assert!(without <= 1, "{without} round spawn without the flag");
+    for seed in seeds {
+        let near = wells_round_spawn(seed, spacing_m, chance, true, 192.0);
+        assert!((1..=4).contains(&near), "seed {seed}: {near} round spawn");
+    }
+    // Still clear of the origin, where Games build their spawn.
+    no_settlement_within_48_m(plain(listing_near(true, spacing_m, chance, true)));
 }
 
 #[test]
@@ -910,15 +972,16 @@ fn wilderness_structures_keep_the_strict_rule_and_are_never_levelled() {
     // further out.
     let tree_m = 6.0;
     for (at, (_, was)) in &changed {
-        // A Settlement whose layout falls short still keeps single Structures out.
+        // A Settlement whose layout falls short still keeps single Structures out. Its trails,
+        // worn into the ground and graded, run on past its margin.
         assert!(
             was.material() == LONE
                 || centres.iter().any(|&c| laid.within(
                     [at[0], at[2]],
                     c,
-                    RADIUS_M + MARGIN_M + tree_m
+                    RADIUS_M + TRAIL_MAX_M + tree_m
                 )),
-            "{at:?} changed outside every Settlement's disc and margin"
+            "{at:?} changed outside every Settlement's disc, margin and trails"
         );
     }
     assert!(
@@ -1146,8 +1209,11 @@ fn plots_spread_over_the_disc_with_uneven_gaps() {
     assert!(gaps.len() >= 4, "the gaps between Plots are {gaps:?}");
 }
 
+/// How far a trail runs past the disc, at most.
+const TRAIL_MAX_M: f32 = 90.0;
+
 #[test]
-fn roads_wear_towards_the_edge_and_approach_paths_fade_out_inside_the_margin() {
+fn roads_wear_towards_the_edge_of_the_disc() {
     let margin_m = 40.0;
     let wide = Settlement {
         margin_m,
@@ -1195,14 +1261,52 @@ fn roads_wear_towards_the_edge_and_approach_paths_fade_out_inside_the_margin() {
                 }
             }
         }
+    }
+    assert_eq!(worn_in, 0, "worn near the centre");
+    assert!(worn_out > 0, "no worn patch towards the edge");
+}
+
+#[test]
+fn trails_run_past_the_margin_and_fade_out() {
+    let margin_m = MARGIN_M;
+    // Far enough apart that no other Settlement's claim cuts a trail short.
+    let spacing_m = 200.0;
+    let half_m = 256.0;
+    let params = |listed| plain(listing_at(listed, spacing_m, 1.0));
+    let laid = Laid::scan_of(1.0, params, village(), SEED, half_m);
+    let centres: Vec<_> = laid
+        .centres()
+        .into_iter()
+        .filter(|c| {
+            c.iter()
+                .all(|v| (v - AWAY_M).abs() + RADIUS_M + TRAIL_MAX_M + 2.0 <= half_m)
+        })
+        .collect();
+    assert!(!centres.is_empty(), "no Settlement");
+    for centre in centres {
+        let away = |[x, z]: [i32; 2]| {
+            let [dx, dz] = [x as f32 + 0.5 - centre[0], z as f32 + 0.5 - centre[1]];
+            ((dx * dx + dz * dz).sqrt(), dz.atan2(dx))
+        };
+        // This Settlement's own trails: the road cells nearer it than any other centre.
+        let all = laid.centres();
+        let own = |[x, z]: [i32; 2]| {
+            let d2 =
+                |c: [f32; 2]| (x as f32 + 0.5 - c[0]).powi(2) + (z as f32 + 0.5 - c[1]).powi(2);
+            all.iter().all(|&c| d2(centre) <= d2(c))
+        };
         let mut past: Vec<(f32, f32)> = laid
             .road
             .iter()
+            .filter(|&&c| own(c))
             .map(|&c| away(c))
-            .filter(|&(d, _)| d > RADIUS_M + 1.0 && d < RADIUS_M + margin_m + 8.0)
+            .filter(|&(d, _)| d > RADIUS_M + 1.0 && d < RADIUS_M + TRAIL_MAX_M + 8.0)
             .collect();
         for &(d, _) in &past {
-            assert!(d <= RADIUS_M + margin_m, "a path {d} m from {centre:?}");
+            assert!(
+                d <= RADIUS_M + TRAIL_MAX_M + 1.0,
+                "a trail {d} m from {centre:?}"
+            );
         }
         // One run of angles per approach path.
         past.sort_by(|a, b| a.1.total_cmp(&b.1));
@@ -1217,25 +1321,32 @@ fn roads_wear_towards_the_edge_and_approach_paths_fade_out_inside_the_margin() {
             let first = paths.remove(0);
             paths.last_mut().unwrap().extend(first);
         }
-        assert!(
-            paths.len() >= 2,
-            "{centre:?}: {} approach paths",
-            paths.len()
-        );
+        assert!(paths.len() >= 2, "{centre:?}: {} trails", paths.len());
+        let mut furthest = 0.0f32;
         for path in paths {
             let end = path.iter().copied().fold(0.0, f32::max);
-            assert!(end > RADIUS_M + 8.0, "{centre:?}: a path ends at {end} m");
-            // The first and last 4 m.
+            furthest = furthest.max(end);
+            assert!(
+                end > RADIUS_M + margin_m,
+                "{centre:?}: a trail ends at {end} m, inside the margin"
+            );
+            // The first and last 4 m. A winding trail can split into runs of angles; a run that
+            // does not start at the disc is the far end of one already counted.
             let near = path.iter().filter(|&&d| d < RADIUS_M + 5.0).count();
             let far = path.iter().filter(|&&d| d > end - 4.0).count();
+            if near == 0 {
+                continue;
+            }
             assert!(
                 far < near,
                 "{centre:?}: {far} path cells at the end, {near} near"
             );
         }
+        assert!(
+            furthest >= RADIUS_M + 40.0,
+            "{centre:?}: the longest trail ends at {furthest} m"
+        );
     }
-    assert_eq!(worn_in, 0, "worn near the centre");
-    assert!(worn_out > 0, "no worn patch towards the edge");
 }
 
 /// From 2 Plots in a 20 m disc to 10 in a 36 m one.
@@ -1435,7 +1546,8 @@ fn digest(changed: &HashMap<[i32; 3], (Voxel, Voxel)>) -> u64 {
     hash
 }
 
-/// The digests are what the generator laid before Settlements took size ranges.
+/// The digests are what the generator laid before Settlements took size ranges, re-pinned when
+/// approach paths ran on as trails (ticket 27): a fixed size still lays out as it did then.
 #[test]
 fn a_fixed_size_settlement_lays_out_exactly_as_before_ranges() {
     let wide = Settlement {
@@ -1462,5 +1574,72 @@ fn a_fixed_size_settlement_lays_out_exactly_as_before_ranges() {
             digest(&changed(&with, &bare, half_m, false))
         })
         .collect();
-    assert_eq!(digests, [0x47a5_0e68_07da_bd2f, 0xea8c_66c4_03cf_ac60]);
+    assert_eq!(digests, [0x2448_afad_d101_f153, 0xd1e1_3aec_7d83_b739]);
+}
+
+const OTHER_PATH: MaterialId = 195;
+
+#[test]
+fn a_trail_stops_short_of_another_settlements_disc_and_margin() {
+    // Two kinds a lattice apart at their floor, told apart by their roads' Material.
+    let other = Settlement {
+        name: "t:other".into(),
+        path: Voxel::cube(OTHER_PATH),
+        ..village()
+    };
+    let spacing_m = 2.0 * (RADIUS_M + MARGIN_M);
+    let rows = [0, 1].map(|settlement| BiomeSettlement {
+        settlement,
+        spacing_m,
+        chance: 1.0,
+        near_spawn: false,
+    });
+    let make = |listed: bool| {
+        let features = SurfaceFeatures::NONE
+            .with_settlements(if listed { &rows } else { &[] })
+            .unwrap();
+        Worldgen::new(SEED, 1.0, plain(features))
+            .with_templates(&templates())
+            .with_settlements(&[village(), other.clone()])
+    };
+    let half_m = 160.0;
+    let changed = changed_around(&make(true), &make(false), AWAY_M, half_m, false);
+    let path_of = |at: &[i32; 3]| {
+        changed
+            .get(at)
+            .map(|c| c.0.material())
+            .filter(|&m| m == PATH || m == OTHER_PATH)
+    };
+    let is_well = |at: [i32; 3]| changed.get(&at).is_some_and(|c| c.0.material() == WELL);
+    let centres: Vec<([f32; 2], MaterialId)> = changed
+        .keys()
+        .filter(|&&[x, y, z]| {
+            is_well([x, y, z])
+                && !is_well([x - 1, y, z])
+                && !is_well([x, y, z - 1])
+                && !is_well([x, y - 1, z])
+        })
+        .filter_map(|&[x, _, z]| {
+            let own = changed
+                .keys()
+                .filter(|at| path_of(at).is_some())
+                .min_by_key(|at| (at[0] - x).pow(2) + (at[2] - z).pow(2))?;
+            Some(([x as f32 + 1.0, z as f32 + 1.0], path_of(own)?))
+        })
+        .collect();
+    let kinds: HashSet<MaterialId> = centres.iter().map(|&(_, m)| m).collect();
+    assert_eq!(kinds.len(), 2, "both kinds stand");
+    // A metre or two short of the claim, for where the well stands from the centre.
+    let claim_m = RADIUS_M + MARGIN_M - 3.0;
+    for (at, path) in changed.keys().filter_map(|at| Some((at, path_of(at)?))) {
+        for &(centre, own) in &centres {
+            let d = ((at[0] as f32 + 0.5 - centre[0]).powi(2)
+                + (at[2] as f32 + 0.5 - centre[1]).powi(2))
+            .sqrt();
+            assert!(
+                path == own || d >= claim_m,
+                "a trail of {path} at {at:?} lies {d} m from {centre:?}, a Settlement of {own}"
+            );
+        }
+    }
 }

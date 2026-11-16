@@ -284,6 +284,7 @@ fn with_settlement(size: f32, settlement: Settlement) -> Worldgen {
         settlement: 0,
         spacing_m: 2.0 * (settlement.radius_m + settlement.margin_m),
         chance: 1.0,
+        near_spawn: false,
     };
     let features = SurfaceFeatures::NONE.with_settlements(&[row]).unwrap();
     Worldgen::new(SEED, size, params(features))

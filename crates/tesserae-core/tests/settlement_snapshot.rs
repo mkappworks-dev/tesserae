@@ -83,6 +83,7 @@ fn world() -> WorldgenParams {
         settlement: 1,
         spacing_m: 48.0,
         chance: 0.75,
+        near_spawn: true,
     }];
     WorldgenParams {
         generator: GENERATOR,

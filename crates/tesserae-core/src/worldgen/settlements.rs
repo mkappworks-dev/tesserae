@@ -46,8 +46,9 @@ const SPREAD_M: f32 = 4.0;
 const EDGE_HALF_M: f32 = 1.0;
 /// An approach path's half width past the disc.
 const APPROACH_HALF_M: f32 = 0.9;
-/// How far an approach path runs past the disc, drawn between these and cut short by the margin.
-const APPROACH_M: (f32, f32) = (12.0, 40.0);
+/// How far an approach path runs past the disc as a trail, drawn between these: past the margin,
+/// over ground the Settlement does not claim, stopping short of another Settlement's.
+const TRAIL_M: (f32, f32) = (40.0, 90.0);
 /// The share of a road's cells worn to the Biome's surface at the disc's edge; none inside half
 /// the radius, and all at an approach path's end.
 const EDGE_WEAR: f32 = 0.25;
@@ -278,10 +279,9 @@ struct Slot {
     setback_m: f32,
 }
 
-/// How far from its centre a Settlement's roads and approach paths may reach: never past its
-/// margin, so they stay on ground it already claims.
-fn paths_m(radius_m: f32, settlement: &Settlement) -> f32 {
-    radius_m + settlement.margin_m.min(APPROACH_M.1 + APPROACH_HALF_M)
+/// How far from its centre a Settlement's roads and trails may reach.
+fn paths_m(radius_m: f32) -> f32 {
+    radius_m + TRAIL_M.1 + APPROACH_HALF_M
 }
 
 fn lerp((low, high): (f32, f32), t: f32) -> f32 {
@@ -332,12 +332,9 @@ impl Worldgen {
     /// Every Settlement laid out whose disc covers or borders a column of `region`, `[min, max)`.
     pub(super) fn laid_settlements_near(&self, region: [[i32; 2]; 2]) -> Vec<Arc<LaidSettlement>> {
         let region = self.region_m(region);
-        self.foundings_near(region)
+        self.foundings_within(region, TRAIL_M.1 + APPROACH_HALF_M)
             .into_iter()
-            .filter(|s| {
-                let paths_m = paths_m(s.radius_m, self.settlement_of(s));
-                s.reaches(widened(region, self.voxel_size), paths_m)
-            })
+            .filter(|s| s.reaches(widened(region, self.voxel_size), paths_m(s.radius_m)))
             .filter_map(|s| self.layouts.laid((s.row, s.cell), || self.lay_out(&s)))
             .collect()
     }
@@ -359,18 +356,24 @@ impl Worldgen {
     /// The foundings of every row whose disc and margin reach `region`, in metres, in claim order. A
     /// later row's founding gives way to an earlier row's it would overlap.
     fn foundings_near(&self, region: [[f32; 2]; 2]) -> Vec<Founding> {
+        self.foundings_within(region, 0.0)
+    }
+
+    /// [`Self::foundings_near`], for a region `extra_m` past each disc and margin: where trails
+    /// run.
+    fn foundings_within(&self, region: [[f32; 2]; 2], extra_m: f32) -> Vec<Founding> {
         let Some(pass) = self.settlement_pass() else {
             return Vec::new();
         };
         let mut standing = Vec::new();
         for index in 0..pass.rows.len() {
-            for founding in self.row_foundings(index, region) {
+            for founding in self.row_foundings(index, region, extra_m) {
                 let around = widened(
                     [founding.centre_m, founding.centre_m],
                     founding.reach_m + pass.reach_m,
                 );
                 let claimed = (0..index).any(|before| {
-                    self.row_foundings(before, around)
+                    self.row_foundings(before, around, 0.0)
                         .iter()
                         .any(|s| s.overlaps(&founding))
                 });
@@ -382,15 +385,16 @@ impl Worldgen {
         standing
     }
 
-    /// The foundings of one row whose disc and margin reach `region`, in metres.
-    fn row_foundings(&self, index: usize, region: [[f32; 2]; 2]) -> Vec<Founding> {
+    /// The foundings of one row whose disc and margin, widened by `extra_m`, reach `region`, in
+    /// metres.
+    fn row_foundings(&self, index: usize, region: [[f32; 2]; 2], extra_m: f32) -> Vec<Founding> {
         let Some(pass) = self.settlement_pass() else {
             return Vec::new();
         };
         let row = pass.rows[index];
         let spacing = row.entry.spacing_m;
         let at = |m: f32| (m / spacing).floor() as i32;
-        let reach_m = self.settlement_of_row(&row).reach_m();
+        let reach_m = self.settlement_of_row(&row).reach_m() + extra_m;
         let (low, high) = (
             [0, 1].map(|a| at(region[0][a] - reach_m)),
             [0, 1].map(|a| at(region[1][a] + reach_m)),
@@ -401,7 +405,7 @@ impl Worldgen {
                 self.layouts
                     .founding((index, cell), || self.founding(index, &row, cell))
             })
-            .filter(|s| s.reaches(region, s.reach_m))
+            .filter(|s| s.reaches(region, s.reach_m + extra_m))
             .collect()
     }
 
@@ -418,6 +422,9 @@ impl Worldgen {
                 cell[1] as u32 as u64,
             ],
         );
+        if let Some(centre_m) = self.near_spawn_draw(row, cell, hash) {
+            return Some((hash, centre_m, u64::MAX));
+        }
         if unit(mix(hash ^ 1)) >= f64::from(row.entry.chance) {
             return None;
         }
@@ -430,6 +437,33 @@ impl Worldgen {
             centre_m[axis] = low + (mix(hash ^ (3 + axis as u64)) % (free + 1)) as f32;
         }
         Some((hash, centre_m, mix(hash ^ 6)))
+    }
+
+    /// A `near-spawn` row's draw in one of the four cells round the origin: a whole-metre centre
+    /// a seeded distance out, from just past the origin's keep-out for the largest copy to the
+    /// cell's side, at a seeded angle across the cell's quarter, so it always lies in its cell.
+    /// `None` for any other cell, or where the cell is too small to hold one past the keep-out.
+    fn near_spawn_draw(&self, row: &Row, cell: [i32; 2], hash: u64) -> Option<[f32; 2]> {
+        if !row.entry.near_spawn || !cell.iter().all(|c| (-1..=0).contains(c)) {
+            return None;
+        }
+        let side_m = row.entry.spacing_m;
+        // A metre spare each way for the rounding to whole metres.
+        let keep_m = self.settlement_of_row(row).reach_m() + ORIGIN_CLEAR_M + 2.0;
+        if keep_m >= side_m - 1.0 {
+            return None;
+        }
+        let out_m = keep_m + (side_m - 1.0 - keep_m) * unit(mix(hash ^ 10)) as f32;
+        let angle = TAU / 4.0 * unit(mix(hash ^ 11)) as f32;
+        let along = [out_m * angle.cos(), out_m * angle.sin()];
+        Some([0, 1].map(|a| {
+            let m = along[a].round();
+            if cell[a] == 0 {
+                m.min(side_m - 1.0)
+            } else {
+                -m.max(1.0)
+            }
+        }))
     }
 
     /// The founding a lattice cell holds: its candidate, if no neighbouring cell's candidate with a
@@ -580,8 +614,8 @@ impl Worldgen {
         let radius_m = founding.radius_m;
         let centre = founding.centre_m;
         let (structures, plots): (Vec<_>, Vec<_>) = founding.centre.into_iter().unzip();
-        let roads = self.roads(founding, settlement, &plots);
-        let reach = paths_m(radius_m, settlement).ceil() as i32 + 1;
+        let roads = self.roads(founding, &plots);
+        let reach = paths_m(radius_m).ceil() as i32 + 1;
         let origin_m = centre.map(|c| c as i32 - reach);
         let side = 2 * reach + 1;
         let approach = roads
@@ -607,7 +641,7 @@ impl Worldgen {
         };
         for road in &roads {
             for pair in road.points.windows(2) {
-                self.rasterise(&mut laid, settlement, road, pair[0], pair[1]);
+                self.rasterise(&mut laid, road, pair[0], pair[1]);
             }
         }
         self.grade(&mut laid);
@@ -714,7 +748,7 @@ impl Worldgen {
     /// bends that stays in the disc, dry, clear of `plots` and no steeper than a road climbs. Two
     /// or three run on past the disc as approach paths, heading only outwards there. In a wide
     /// disc each then forks, after them.
-    fn roads(&self, founding: &Founding, settlement: &Settlement, plots: &[Plot]) -> Vec<Road> {
+    fn roads(&self, founding: &Founding, plots: &[Plot]) -> Vec<Road> {
         let centre = founding.centre_m;
         let radius_m = founding.radius_m;
         let inner_m = radius_m - ROAD_HALF_M;
@@ -723,6 +757,15 @@ impl Worldgen {
         let first_approach = (mix(founding.hash ^ 8) % count as u64) as usize;
         let first = FACINGS[usize::from(founding.facing)];
         let base = first[1].atan2(first[0]);
+        // Another Settlement's disc and margin, which a road stops short of.
+        let others: Vec<([f32; 2], f32)> = self
+            .foundings_near(widened([centre, centre], paths_m(radius_m)))
+            .into_iter()
+            .filter(|f| (f.row, f.cell) != (founding.row, founding.cell))
+            .map(|f| (f.centre_m, f.reach_m + APPROACH_HALF_M))
+            // Nor into the origin's keep-out, where Games build their spawn.
+            .chain([([0.0; 2], ORIGIN_CLEAR_M + APPROACH_HALF_M)])
+            .collect();
         let mut roads = Vec::with_capacity(count);
         for branch in 0..count {
             let jitter = if branch == 0 {
@@ -733,11 +776,11 @@ impl Worldgen {
             };
             let heading = base + branch as f32 * TAU / count as f32 + jitter;
             let limit_m = if (branch + count - first_approach) % count < approaches {
-                let drawn = lerp(
-                    APPROACH_M,
-                    unit(mix(founding.hash ^ (32 + branch as u64))) as f32,
-                );
-                radius_m + drawn.min(settlement.margin_m - APPROACH_HALF_M)
+                radius_m
+                    + lerp(
+                        TRAIL_M,
+                        unit(mix(founding.hash ^ (32 + branch as u64))) as f32,
+                    )
             } else {
                 inner_m
             }
@@ -750,7 +793,7 @@ impl Worldgen {
             // A road hemmed in by hills could otherwise wander round inside the disc for
             // thousands of steps.
             let steps = (WANDER * limit_m / ROAD_STEP_M).ceil() as usize;
-            roads.push(self.walk(centre, heading, reach, steps, plots));
+            roads.push(self.walk(centre, heading, reach, steps, (plots, &others)));
         }
         let rings = ((radius_m - FORK_ROOM_M) / FORK_EVERY_M).floor().max(0.0) as usize;
         for spoke in 0..count {
@@ -782,7 +825,7 @@ impl Worldgen {
                         along + turn * (TAU / 4.0 + skew),
                         reach,
                         steps,
-                        plots,
+                        (plots, &others),
                     );
                     if fork.points.len() > 1 {
                         roads.push(fork);
@@ -794,14 +837,15 @@ impl Worldgen {
     }
 
     /// A road from `start` heading `heading`, at most `steps` steps, each the gentlest of its
-    /// bends that stays in `reach`, dry, clear of `plots` and no steeper than a road climbs.
+    /// bends that stays in `reach`, dry, clear of `plots` and of `others`' discs and margins, and
+    /// no steeper than a road climbs.
     fn walk(
         &self,
         start: [f32; 2],
         mut heading: f32,
         reach: Reach,
         steps: usize,
-        plots: &[Plot],
+        (plots, others): (&[Plot], &[([f32; 2], f32)]),
     ) -> Road {
         let Reach {
             centre,
@@ -825,6 +869,9 @@ impl Worldgen {
                     || plots
                         .iter()
                         .any(|plot| overlap(widened(plot.kept, ROAD_HALF_M), [next, next]))
+                    || others
+                        .iter()
+                        .any(|&(c, reach_m)| distance(next, c) < reach_m)
                 {
                     continue;
                 }
@@ -859,16 +906,9 @@ impl Worldgen {
 
     /// Marks the cells whose centre is near the segment `a..b` of `road`, outside every one of
     /// `plots`: within [`ROAD_HALF_M`] at the centre, narrowing to [`EDGE_HALF_M`] at the disc's
-    /// edge and [`APPROACH_HALF_M`] past it. Cells towards the edge wear, by a draw of their own,
-    /// more often the further out, so an approach path fades into the ground at its end.
-    fn rasterise(
-        &self,
-        laid: &mut LaidSettlement,
-        settlement: &Settlement,
-        road: &Road,
-        a: [f32; 2],
-        b: [f32; 2],
-    ) {
+    /// edge and [`APPROACH_HALF_M`] past it, out along a trail. Cells towards the edge wear, by a
+    /// draw of their own, more often the further out, so a trail fades into the ground at its end.
+    fn rasterise(&self, laid: &mut LaidSettlement, road: &Road, a: [f32; 2], b: [f32; 2]) {
         let radius_m = laid.radius_m;
         let low = [0, 1].map(|i| (a[i].min(b[i]) - ROAD_HALF_M).floor() as i32);
         let high = [0, 1].map(|i| (a[i].max(b[i]) + ROAD_HALF_M).ceil() as i32);
@@ -889,7 +929,6 @@ impl Worldgen {
                     (APPROACH_HALF_M, lerp((EDGE_WEAR, 1.0), end * end))
                 };
                 if dx * dx + dz * dz > half_m * half_m
-                    || out_m > radius_m + settlement.margin_m
                     || laid.plots.iter().any(|plot| overlap(plot.kept, [p, p]))
                 {
                     continue;

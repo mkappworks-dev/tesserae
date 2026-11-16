@@ -313,6 +313,8 @@ struct BiomeSettlement {
     spacing_m: f32,
     #[serde(default = "every_cell")]
     chance: f32,
+    #[serde(default)]
+    near_spawn: bool,
 }
 
 fn every_cell() -> f32 {
@@ -452,6 +454,7 @@ impl From<Biome> for content::BiomeDef {
                     settlement: s.settlement,
                     spacing_m: s.spacing_m,
                     chance: s.chance,
+                    near_spawn: s.near_spawn,
                 })
                 .collect(),
             loot: b.loot.map(Into::into),

@@ -883,6 +883,10 @@ interface content {
         spacing-m: f32,
         /// Above 0 and at most 1.
         chance: f32,
+        /// The four squares round the origin always draw a centre, clear of
+        /// the spawn's keep-out, and win against their neighbours, so a
+        /// Player finds this Settlement near spawn where the ground takes it.
+        near-spawn: bool,
     }
 
     /// A low-frequency density field over the ground, in metres, that multiplies

@@ -2551,6 +2551,7 @@ fn declares_hamlet(path: &'static str) -> impl FnOnce(&mut crate::server::mods::
                 settlement: 0,
                 spacing_m: 48.0,
                 chance: 1.0,
+                near_spawn: false,
             }])
             .unwrap();
         world.biomes = BiomeTable::new(&biomes).unwrap();

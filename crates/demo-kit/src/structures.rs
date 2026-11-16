@@ -59,6 +59,8 @@ pub struct Village {
     pub spacing_m: f32,
     /// Thins the lattice's draws, so villages stand apart rather than in every lattice cell.
     pub chance: f32,
+    /// The lattice cells round the origin always draw one, so a Player finds it near spawn.
+    pub near_spawn: bool,
     /// The centre Template, by its unqualified name.
     pub centre: &'static str,
     /// The most Plots the smallest and the largest copy lay.
@@ -141,6 +143,7 @@ macro_rules! structures {
                         settlement: kind.qualified(kind.name),
                         spacing_m: kind.spacing_m,
                         chance: kind.chance,
+                        near_spawn: kind.near_spawn,
                     }
                 })
                 .into()

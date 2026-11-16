@@ -128,10 +128,21 @@ fn a_biome_lists_a_settlement_by_name_and_each_door_is_found() {
         [BiomeSettlement {
             settlement: 0,
             spacing_m: 120.0,
-            chance: 1.0
+            chance: 1.0,
+            near_spawn: false,
         }],
         "every lattice cell draws a Settlement unless the row says"
     );
+}
+
+#[test]
+fn a_biome_settlement_row_may_say_near_spawn() {
+    let (_, biomes) = load(&world(
+        &settlement(VILLAGE),
+        "{ settlement = \"t:village\", spacing-m = 120.0, near-spawn = true }",
+    ))
+    .unwrap();
+    assert!(biomes.as_slice()[0].surface_features.settlements()[0].near_spawn);
 }
 
 #[test]

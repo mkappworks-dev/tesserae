@@ -140,6 +140,9 @@ pub struct BiomeSettlement {
     pub settlement: u16,
     pub spacing_m: f32,
     pub chance: f32,
+    /// The four lattice cells round the origin always draw, win against their neighbours, and
+    /// draw their centre clear of the origin's keep-out, so a Player finds one near spawn.
+    pub near_spawn: bool,
 }
 
 impl BiomeSettlement {
@@ -147,6 +150,7 @@ impl BiomeSettlement {
         settlement: 0,
         spacing_m: 0.0,
         chance: 0.0,
+        near_spawn: false,
     };
 
     /// Checked against the Settlement it names, since its spacing's floor is that one's reach.

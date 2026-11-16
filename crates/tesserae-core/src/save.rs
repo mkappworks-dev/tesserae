@@ -620,6 +620,9 @@ pub struct SavedBiomeSettlement {
     pub settlement: u16,
     pub spacing_m: f32,
     pub chance: f32,
+    /// Absent is false, as every row saved before it was.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub near_spawn: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1152,6 +1155,7 @@ fn saved_biome(
                     .unwrap_or_default() as u16,
                 spacing_m: s.spacing_m,
                 chance: s.chance,
+                near_spawn: s.near_spawn,
             })
             .collect(),
         loot: None,
@@ -1163,6 +1167,7 @@ fn restored_biome_settlement(s: &SavedBiomeSettlement) -> crate::BiomeSettlement
         settlement: s.settlement,
         spacing_m: s.spacing_m,
         chance: s.chance,
+        near_spawn: s.near_spawn,
     }
 }
 

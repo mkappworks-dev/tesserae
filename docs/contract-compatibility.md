@@ -248,6 +248,12 @@ neighbouring square's candidate with a higher draw is near enough for their
 discs and margins to meet. A Declaration built against the earlier 0.3 text
 needs a rebuild.
 
+A `biome-settlement` then gained `near-spawn`, a `bool` after `chance`: the four
+lattice squares round the origin always draw a centre, clear of the spawn's
+keep-out, and win against their neighbours. A TOML Declaration that leaves it
+out gets false. A Declaration built against the earlier 0.3 text needs a
+rebuild.
+
 A `settlement-def`, a `settlement-plot` and a `biome-def` then each gained an
 optional `loot`, last, a `loot-table` record: `rolls-min` and `rolls-max` (at
 most 27) and 1 to 16 `loot-entry` rows of an `item` by full name, a `min` of at
