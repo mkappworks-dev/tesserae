@@ -773,6 +773,7 @@ pub(super) fn vet_capacity(
 
 /// One whole-Voxel write, relit at once: [`Batch::set_voxel`] in a batch of
 /// its own.
+#[cfg(any(test, feature = "dev", feature = "profiling"))]
 pub(in crate::server) fn set_voxel(
     store: &mut ChunkStore,
     meshes: &mut MeshState,
