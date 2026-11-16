@@ -241,8 +241,9 @@ type Blockers<'w> = (
     Option<Res<'w, super::map_window::MapWindow>>,
 );
 
-/// The Inventory key opens the window and closes it into play; Escape closes
-/// it into play too, and is spent so the cursor stays grabbed. The Catalogue
+/// The Inventory key opens the window and closes it into play; Escape, Use and
+/// the clear key close it into play too, Escape spent so the cursor stays
+/// grabbed. The Catalogue
 /// key opens it, or keeps it open, with the cursor in the Catalogue search.
 fn toggle(
     mut actions: ResMut<Actions>,
@@ -267,6 +268,14 @@ fn toggle(
     let key = actions.started(Action::Inventory);
     let search = actions.started(Action::SearchCatalogue);
     let escape = window.open && actions.cancel_requested();
+    // A chest or bench opened with Use closes with Use again, or the clear key.
+    let shut = window.open && (actions.started(Action::Use) || actions.started(Action::ClearTool));
+    if shut {
+        actions.cancel(Action::Use);
+        actions.cancel(Action::ClearTool);
+        close(&mut window, &mut cursor);
+        return;
+    }
     if !key && !search && !escape {
         return;
     }
@@ -621,7 +630,8 @@ struct Built {
     picked: Option<SlotAddress>,
     inspected: Option<Slot>,
     details: bool,
-    key: String,
+    /// The keys that close it: the Inventory key, Use and the clear key.
+    keys: [String; 3],
     /// The open Container, whose pane takes the side pane's place.
     container: Option<crate::server::container::ContainerShown>,
     /// The Catalogue is beside the Inventory only outside Survival.
@@ -674,7 +684,10 @@ fn render(
         picked: window.picked,
         inspected: window.inspected,
         details: window.details,
-        key: bindings.label(Action::Inventory, &labels),
+        keys: [Action::Inventory, Action::Use, Action::ClearTool].map(|action| {
+            let all = bindings.label(action, &labels);
+            all.split(" / ").next().unwrap_or_default().to_owned()
+        }),
         container: open.0.clone(),
         survival: mode.survival(),
         pane: pane.shown(mode.survival()),
@@ -930,7 +943,9 @@ fn header(card: &mut ChildSpawnerCommands, state: &Built) {
                     theme::LABEL,
                     theme::INK,
                 ));
-                look::key_cap(title, state.key.clone(), ());
+                for key in &state.keys {
+                    look::key_cap(title, key.clone(), ());
+                }
             });
         header
             .spawn(Node {
@@ -1929,6 +1944,17 @@ mod tests {
         press(&mut app, KeyCode::KeyI);
         assert!(!shown(&mut app));
         assert_eq!(cursor(&mut app), (CursorGrabMode::Locked, false));
+    }
+
+    #[test]
+    fn use_or_the_clear_key_closes_the_window_into_play() {
+        for key in [KeyCode::KeyG, KeyCode::Backspace] {
+            let mut app = app();
+            press(&mut app, KeyCode::KeyI);
+            press(&mut app, key);
+            assert!(!shown(&mut app), "{key:?}");
+            assert_eq!(cursor(&mut app), (CursorGrabMode::Locked, false), "{key:?}");
+        }
     }
 
     #[test]

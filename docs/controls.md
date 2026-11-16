@@ -5,7 +5,9 @@ and Return to Worlds. Escape closes an open overlay (the Inventory, the Layout
 card, a dialog) before it opens the Menu, and resumes from the Menu. Inside a
 menu, Tab moves focus. **I** opens and closes the Inventory, and **C** opens it
 with the Catalogue search focused; in Survival the Catalogue is closed and C
-says it is Creative-only.
+says it is Creative-only. **G** or **Backspace** closes the Inventory too, so a
+chest or workbench opened with G closes with G; while typing in the search they
+type.
 
 **B** shows or hides the Compass, a strip across the top of the screen with your
 heading in degrees, the cardinal letters (North picked out in red) and ticks.

@@ -212,7 +212,7 @@ function voxelIcon(item, shape = "Cube") {
   return `<svg class="voxel-icon" viewBox="0 0 48 48" aria-hidden="true"><path d="${top}" fill="${item.color}"/><path d="${left}" fill="${item.color}"/><path d="${right}" fill="${item.color}"/><path d="${left}" fill="#000" opacity=".16"/><path d="${right}" fill="#000" opacity=".32"/></svg>`;
 }
 function inventoryTabs() {
-  return `<div class="inventory-title">${icon("storage")}<h1>Inventory</h1><kbd>I</kbd></div>`;
+  return `<div class="inventory-title">${icon("storage")}<h1>Inventory</h1><kbd>I</kbd><kbd>G</kbd><kbd>⌫</kbd></div>`;
 }
 function itemShell(content, footer) {
   return `<section class="item-window" data-details="${!!state.showItemDetails}" aria-label="Player inventory"><header class="item-window-header">${inventoryTabs()}<div class="item-window-context"><button class="item-details-toggle" data-action="item-details" aria-label="Toggle item details" aria-expanded="${!!state.showItemDetails}" aria-controls="item-inspector">${icon("info")}</button>${creativeAccess() ? '<span class="access-badge">Creative access</span>' : ""}<button class="item-close" data-action="inventory-close" aria-label="Close and return to game">${icon("close")}</button></div></header>${content}<footer class="item-window-footer">${footer}</footer></section>`;
@@ -672,7 +672,11 @@ document.addEventListener("keydown", (e) => {
     return;
   }
   if (!["play", "pause", "storage"].includes(state.screen)) return;
-  if (e.key === "Escape" && state.screen === "storage") {
+  // A chest or bench opened with G closes with G again, or Backspace, as with Escape.
+  if (
+    state.screen === "storage" &&
+    (e.key === "Escape" || e.key === "Backspace" || e.key.toLowerCase() === "g")
+  ) {
     e.preventDefault();
     e.stopImmediatePropagation();
     action("inventory-close");
