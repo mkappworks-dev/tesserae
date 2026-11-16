@@ -13,10 +13,10 @@ use tesserae_mods::{Kind, ToolKind};
 use super::{checkout, loaded, material};
 use crate::server::mods::LoadedMods;
 
-const GAMES: [&str; 5] = ["terra", "tidewater", "ember", "lumen", "meadow"];
+pub(super) const GAMES: [&str; 5] = ["terra", "tidewater", "ember", "lumen", "meadow"];
 
 /// The mockup's export of `game`'s Templates, `mockup/templates/<game>.json`.
-fn export(game: &str) -> Vec<Value> {
+pub(super) fn export(game: &str) -> Vec<Value> {
     let path = checkout().join(format!("mockup/templates/{game}.json"));
     let json: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
     json["templates"].as_array().unwrap().clone()
@@ -127,7 +127,7 @@ fn every_games_templates_are_the_cells_the_approved_mockup_exports() {
 }
 
 /// A closed Door: the Material a Door row of the Game's names as its own.
-fn is_closed_door(loaded: &LoadedMods, material: MaterialId) -> bool {
+pub(super) fn is_closed_door(loaded: &LoadedMods, material: MaterialId) -> bool {
     matches!(
         loaded.tables.uses.of(material),
         Some((row, VoxelUse::Door { .. })) if row == material
@@ -378,6 +378,21 @@ fn standing_of(world: &Generated, templates: &[Template], size: f32, air: bool) 
     found
 }
 
+/// The edge the Settlement turns to its road: the one nearest the door's cell.
+pub(super) fn road_side(size: [i32; 3], [x, _, z]: [i32; 3]) -> [i32; 2] {
+    let [w, _, d] = size;
+    [
+        (d - 1 - z, [0, 1]),
+        (w - 1 - x, [1, 0]),
+        (z, [0, -1]),
+        (x, [-1, 0]),
+    ]
+    .into_iter()
+    .min_by_key(|&(distance, _)| distance)
+    .map(|(_, out)| out)
+    .unwrap()
+}
+
 /// The demo World tests' seed; the square is wide enough that each Game lays out a Settlement in
 /// it.
 pub(in crate::server) const SEED: u64 = 7;
@@ -431,6 +446,51 @@ fn a_world_of_each_game_shows_its_templates_and_a_settlement_level_whole_and_fur
                 name(&loaded, Kind::Material, furnishing.into())
             );
         }
+
+        // Each door looks out onto the Settlement's path, where the scan holds what is before it.
+        let paths: HashSet<MaterialId> = loaded
+            .tables
+            .settlements
+            .iter()
+            .map(|s| s.path.material())
+            .collect();
+        let door = material(&loaded, &format!("{game}:door"));
+        let mut facing = 0;
+        for f in &buildings {
+            let sampled = templates[f.template].sample(1.0, f.turn);
+            let [sx, sy, sz] = sampled.size();
+            let Some(at) = (0..sy)
+                .flat_map(|y| (0..sz).flat_map(move |z| (0..sx).map(move |x| [x, y, z])))
+                .find(|&at| matches!(sampled.cell(at), Cell::Voxel(v) if v.material() == door))
+            else {
+                continue;
+            };
+            let [dx, dz] = road_side(sampled.size(), at);
+            let from = [f.corner[0] + at[0], f.corner[2] + at[2]];
+            let ahead: Vec<Option<Voxel>> = (1..=10)
+                .flat_map(|k| (-1..=1).map(move |across| (k, across)))
+                .map(|(k, across)| {
+                    world.top([
+                        from[0] + dx * k + dz * across,
+                        from[1] + dz * k + dx * across,
+                    ])
+                })
+                .collect();
+            if ahead.iter().any(Option::is_none) {
+                continue;
+            }
+            assert!(
+                ahead
+                    .iter()
+                    .flatten()
+                    .any(|v| paths.contains(&v.material())),
+                "{game}: the door of {} at {:?} faces no path",
+                templates[f.template].name,
+                f.corner
+            );
+            facing += 1;
+        }
+        assert!(facing > 0, "{game}: no door's road was in the scan");
 
         let mut cellars = 0;
         for f in &found {

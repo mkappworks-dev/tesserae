@@ -858,6 +858,90 @@ mod tests {
         assert_eq!(built(&app), 0);
     }
 
+    /// A stone basin 3 cells across, 1 m cells: a floor, a ring of walls round one cell of water,
+    /// and air above.
+    fn basin() -> Template {
+        let water = Cell::Voxel(Voxel::cube(tesserae_core::testgen::fixtures().water));
+        let ring = |middle: Cell| -> Vec<Vec<Cell>> {
+            (0..3)
+                .map(|z| {
+                    (0..3)
+                        .map(|x| {
+                            if x == 1 && z == 1 {
+                                middle
+                            } else {
+                                Cell::Voxel(stone())
+                            }
+                        })
+                        .collect()
+                })
+                .collect()
+        };
+        Template::new(
+            "t:basin".into(),
+            1.0,
+            vec![ring(Cell::Voxel(stone())), ring(water), ring(Cell::Air)],
+            0,
+            None,
+            1.0,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn a_templates_water_lands_as_sources_the_flow_keeps_at_every_voxel_size() {
+        use bevy::tasks::{AsyncComputeTaskPool, TaskPoolBuilder};
+        AsyncComputeTaskPool::get_or_init(|| TaskPoolBuilder::new().num_threads(4).build());
+        let water = tesserae_core::testgen::fixtures().water;
+        for size in [1.0, 0.25] {
+            let mut app = app_with_tables(&[(origin(), ground())], tables_with(vec![basin()]));
+            app.insert_resource(WorldSettings {
+                voxel_size: size,
+                ..default()
+            })
+            .init_resource::<crate::server::fluids::FluidSim>();
+            // Down at (16, 16) in Voxels, onto the ground's top at y = 8.
+            let origin_m = Vec3::new(16.5, 12.0, 16.5) * size;
+            send(
+                &mut app,
+                StructureIntent {
+                    origin: origin_m,
+                    ..intent("t:basin")
+                },
+            );
+            settle(&mut app);
+            assert!(rejections(&mut app).is_empty(), "at {size}");
+            let wet = |app: &App| {
+                let store = app.world().resource::<ChunkStore>();
+                let tables = &app.world().resource::<ContentTables>().0;
+                let n = tesserae_core::CHUNK_SIZE as i32;
+                let (mut sources, mut flowing) = (0, 0);
+                for y in 0..n {
+                    for z in 0..n {
+                        for x in 0..n {
+                            let here = store.occupants([x, y, z], &tables.fluids).unwrap();
+                            match here.fluid {
+                                Some(f) if f.material == water && f.source => sources += 1,
+                                Some(_) => flowing += 1,
+                                None => {}
+                            }
+                        }
+                    }
+                }
+                (sources, flowing)
+            };
+            let cells = (1.0 / size).powi(3) as usize;
+            assert_eq!(wet(&app), (cells, 0), "landed at {size}");
+            for _ in 0..256 {
+                app.world_mut()
+                    .run_system_once(crate::server::fluids::simulate)
+                    .unwrap();
+                std::thread::sleep(std::time::Duration::from_micros(50));
+            }
+            assert_eq!(wet(&app), (cells, 0), "kept at {size}");
+        }
+    }
+
     #[test]
     fn a_structure_at_a_quarter_metre_lands_within_the_per_tick_budget() {
         let mut app = hut_app();

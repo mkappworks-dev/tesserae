@@ -691,8 +691,9 @@ pub(crate) async fn declare_all(
     }
     let obtainable = super::obtainable::obtainable(&loaded, &loaded.every_item(world.voxel_size));
     let (used_templates, used_settlements) = stood_by_biomes(&loaded);
+    // A fluid cell is exempt: a well is meant to be a Settlement's water, even where nothing else is.
     let refuse = |m| {
-        (!obtainable.contains(&m)).then(|| {
+        (!obtainable.contains(&m) && !loaded.tables.fluids.contains(m)).then(|| {
             "is not Obtainable: no Biome lays it, no Plant yields it and no Recipe makes it from \
              what is"
                 .to_owned()
@@ -1746,6 +1747,27 @@ layers = [["rp"]]
             "",
             &hut_game(&format!("{from_rock}{plot}")),
         );
+        assert_eq!(refusals(&s), (Ok(()), Ok(())));
+    }
+
+    #[test]
+    fn a_fluid_cell_need_not_be_obtainable() {
+        let from_rock = "[[recipes]]\ninputs = [{ item = \"plain:rock\", count = 1 }]\n\
+                         output = { item = \"plain:planks\", count = 4 }\nstation = \"hand\"\n";
+        let water = "[[materials]]\nname = \"water\"\nemission = 0\ndimming = 2\n\
+                     occlusion = \"same-material\"\nrender = \"blend\"\nsolid = false\n\
+                     [[fluids]]\nmaterial = \"plain:water\"\nreach-m = 7.0\n\
+                     sideways-m-per-s = 4.0\ndownward-m-per-s = 8.0\n\
+                     recession-m-per-s = 4.0\nreset-drop-m = 0.5\n\
+                     waterlogs = true\nextinguishes = true\n";
+        let game = hut_game(&format!("{from_rock}{water}"))
+            .replace("layers = [[\"rp\"]]", "layers = [[\"rpw\"]]")
+            .replace(
+                "\"p\" = { material = \"plain:planks\" }",
+                "\"p\" = { material = \"plain:planks\" }\n\"w\" = { material = \"plain:water\" }",
+            );
+        let s = Scratch::new();
+        data(&s, "plain", true, "", &game);
         assert_eq!(refusals(&s), (Ok(()), Ok(())));
     }
 

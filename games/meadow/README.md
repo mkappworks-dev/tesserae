@@ -11,11 +11,11 @@ gazebo posts are `flora:wood` in the `glassworks:fence` Shape.
 
 ## Dependencies
 
-[strata](../../mods/strata/), [flora](../../mods/flora/),
-[glassworks](../../mods/glassworks/), and it suggests
-[wanderer](../../mods/wanderer/) for its character. Its own Materials are its
-food, `meadow:pumpkin`, and the building Materials and anvil, forge and oven
-Stations its Templates use (`src/building.rs`); every other name it uses is
+[strata](../../mods/strata/), [waters](../../mods/waters/) for the water in its
+well, [flora](../../mods/flora/), [glassworks](../../mods/glassworks/), and it
+suggests [wanderer](../../mods/wanderer/) for its character. Its own Materials
+are its food, `meadow:pumpkin`, and the building Materials and anvil, forge and
+oven Stations its Templates use (`src/building.rs`); every other name it uses is
 `<mod id>:<name>` from those Mods. It declares only its World (ground, sea
 level, relief, climate and the like), its Biomes and ore, its food, its building
 Materials with their Recipes, and one behaviour.
@@ -67,7 +67,7 @@ and point the Engine at it:
 
 ```sh
 ./scripts/build-guests
-tesserae package mods/strata mods/flora mods/glassworks mods/wanderer --out dist
+tesserae package mods/strata mods/waters mods/flora mods/glassworks mods/wanderer --out dist
 tesserae package games/meadow --mods mods --out dist --trust-for-run
 tesserae --mods dist/mods
 ```

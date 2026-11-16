@@ -294,9 +294,13 @@ fn the_biome_content_adds_only_the_dependencies_a_biome_needs() {
                 "frost",
                 "glassworks",
                 "strata",
+                "waters",
             ],
         ),
-        ("meadow", vec!["crops", "flora", "glassworks", "strata"]),
+        (
+            "meadow",
+            vec!["crops", "flora", "glassworks", "strata", "waters"],
+        ),
     ] {
         let (_install, loaded) = declared(game);
         let mut found: Vec<_> = loaded.required.iter().map(|m| m.id.as_str()).collect();

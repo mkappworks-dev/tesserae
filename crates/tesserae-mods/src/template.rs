@@ -170,6 +170,11 @@ fn voxel(
     registry: &Registry,
     tables: &Tables,
 ) -> Result<Voxel, String> {
+    if let Some(id) = registry.id_of(Kind::Material, &v.material)
+        && tables.fluids.contains(id as MaterialId)
+    {
+        return fluid_source(v, id as MaterialId);
+    }
     let material = solid(&v.material, registry, tables)?;
     let shape = match &v.shape {
         Some(name) => registry
@@ -185,8 +190,21 @@ fn voxel(
     Ok(voxel)
 }
 
-/// A Material a Template may write: one that exists and is no fluid, since a
-/// fluid is an occupant and air is the `air` cell.
+/// A fluid cell: a whole cube of the fluid, which every placement reads as a
+/// source, so it stands where it is put at every Voxel size.
+fn fluid_source(v: &content::TemplateVoxel, id: MaterialId) -> Result<Voxel, String> {
+    let shaped = v.shape.as_deref().is_some_and(|s| s != "core:cube");
+    if shaped || v.orientation.unwrap_or(0) != 0 {
+        return Err(format!(
+            "fluid Material `{}` is written as a whole cube, a source, with no Shape or orientation",
+            v.material
+        ));
+    }
+    Ok(Voxel::cube(id))
+}
+
+/// A Material a Template may write as a solid, or a foundation or path: one
+/// that exists and is no fluid, since air is the `air` cell.
 pub(crate) fn solid(
     name: &str,
     registry: &Registry,

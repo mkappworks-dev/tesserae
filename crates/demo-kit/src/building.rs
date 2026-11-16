@@ -94,6 +94,11 @@ pub const fn station(
     }
 }
 
+/// A Door's size: whole Template cells, so a Template's opening fits it at every Voxel size, with
+/// room round a Player's 0.6 m by 1.8 m body.
+pub const DOOR_WIDTH_M: f32 = 2.0;
+pub const DOOR_HEIGHT_M: f32 = 3.0;
+
 /// A Forge's fire and an Oven's embers.
 const GLOW: u32 = 0xe8742a;
 const SOOT: u32 = 0x2a2220;
@@ -557,8 +562,8 @@ macro_rules! building {
                         (Pattern::Door, _) => (
                             VoxelUseKind::Door(DoorDef {
                                 open: full(&format!("{}_open", b.name)),
-                                width_m: Some(1.0),
-                                height_m: Some(2.0),
+                                width_m: Some($crate::building::DOOR_WIDTH_M),
+                                height_m: Some($crate::building::DOOR_HEIGHT_M),
                             }),
                             Some(full("panel")),
                         ),

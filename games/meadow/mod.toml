@@ -3,6 +3,6 @@ version = "0.2.0"
 description = "Soft hills & small wonders"
 api = "0.3"
 root = true
-depends = ["strata", "flora", "crops", "glassworks"]
+depends = ["strata", "waters", "flora", "crops", "glassworks"]
 suggests = ["wanderer"]
 wasm = "meadow.wasm"

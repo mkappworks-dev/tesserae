@@ -138,10 +138,74 @@ function roof(g, { x0, x1, z0, z1 }, base, kind, gable = "wall") {
   }
 }
 
+/* A Door is 2 cells wide and 3 tall, a whole number of cells so it fits the opening at any Voxel size. */
+const DOOR_W = 2,
+  DOOR_H = 3;
+
+/*
+ * Door leaves in the wall row z, from x0 for `leaves` Doors, standing on y = 1 and facing +Z, with a
+ * lintel above. `hinge` is the side seen from outside: "left" is +X, "right" is -X. A single Door
+ * hinges away from the nearer corner (`corners`); a pair hinges on its outer edges.
+ */
+function doorway(g, x0, z, leaves, corners, m = "frame") {
+  const w = leaves * DOOR_W,
+    nearLow = corners && x0 - corners[0] < corners[1] - (x0 + w - 1);
+  for (let x = x0; x < x0 + w; x++) {
+    const hinge =
+      leaves === 1
+        ? nearLow
+          ? "left"
+          : "right"
+        : x < x0 + DOOR_W
+          ? "right"
+          : "left";
+    for (let y = 1; y <= DOOR_H; y++)
+      g.put(x, y, z, { ...M("door", "panel"), hinge });
+  }
+  for (let x = x0 - 1; x <= x0 + w; x++) g.put(x, DOOR_H + 1, z, M(m));
+}
+
+/* The way a stair rises, by its `turn`, as [dx, dz]. */
+const RISES = [
+  [0, 1],
+  [-1, 0],
+  [0, -1],
+  [1, 0],
+];
+/*
+ * Stairs at each [x, y, z] of `path`, each rising from the cell before it (`from` before the first),
+ * with two cells cleared above each for headroom: that clearing is the opening in a floor above.
+ */
+function flight(g, from, path, m = "wall") {
+  let prev = from;
+  for (const [x, y, z] of path) {
+    const rise = [Math.sign(x - prev[0]), Math.sign(z - prev[2])];
+    const turn = RISES.findIndex(
+      ([dx, dz]) => dx === rise[0] && dz === rise[1],
+    );
+    g.put(x, y, z, M(m, "stair", turn));
+    prev = [x, y, z];
+  }
+  for (const [x, y, z] of path)
+    for (const k of [1, 2])
+      if (g.get(x, y + k, z)?.shape !== "stair") g.put(x, y + k, z, "air");
+}
+/* `n` stairs from [x, y, z] one cell per step along [dx, dz], up or `down`; listed bottom first. */
+function run([x, y, z], [dx, dz], n, down = false) {
+  const path = Array.from({ length: n }, (_, i) => [
+    x + dx * i,
+    y + (down ? -i : i),
+    z + dz * i,
+  ]);
+  return down ? path.reverse() : path;
+}
+
 /*
  * A building: foundation, walls per storey (half-timbered, a stone base course, a jettied upper
- * storey), windows with sills, a door or an open front, a porch, an optional L-shaped wing, a
- * roof and a chimney. Returns `at`, which places furniture relative to the main room's corner.
+ * storey), windows with sills, a Door (`door`: 1 single, 2 double, 0 none), an open front, a
+ * porch, an optional L-shaped wing, a roof and a chimney. A Door on the wing stands in its end
+ * wall. Returns `at`, which places furniture relative to the main room's corner, and `stairs`,
+ * which lays a flight in the same frame.
  */
 function building(g, o) {
   const {
@@ -155,7 +219,8 @@ function building(g, o) {
     porch = false,
     chimney = null,
     cellar = 0,
-    wide = 0,
+    door = 1,
+    doorOnWing = false,
     open = false,
     hall = false,
     wing = null,
@@ -224,31 +289,19 @@ function building(g, o) {
       g.put(x, y, z, M(wallMat));
     });
   }
-  const doorX = wing
-    ? x0 + wing.w + Math.floor((w - wing.w) / 2)
-    : x0 + Math.floor(w / 2);
   if (open)
     for (let x = x0 + 1; x < x1; x++)
       for (let y = 1; y <= 3; y++)
         g.put(x, y, z1, (x - x0) % 3 === 0 || y === 3 ? M("frame") : "air");
-  else if (wide)
-    for (let x = doorX - wide; x <= doorX + wide; x++)
-      for (let y = 1; y <= 3; y++)
-        g.put(x, y, z1, y === 3 ? M("frame") : "air");
-  else {
-    g.put(doorX, 1, z1, M("door", "panel"));
-    g.put(doorX, 2, z1, M("door", "panel"));
-    g.put(doorX, 3, z1, M("frame"));
-  }
   if (porch) {
     const px0 = wing ? x0 + wing.w : x0,
       px1 = x1;
     for (let x = px0; x <= px1; x++)
       for (const z of [z1 + 1, z1 + 2]) {
         g.put(x, 0, z, M("trim", "slab"));
-        g.put(x, 3, z, M("ridge", "slab"));
+        g.put(x, DOOR_H + 1, z, M("ridge", "slab"));
         if (z === z1 + 2 && (x === px0 || x === px1 || (x - px0) % 3 === 0))
-          g.fill(x, 1, z, x, 2, z, M("frame", "post"));
+          g.fill(x, 1, z, x, DOOR_H, z, M("frame", "post"));
       }
   }
   const zTop = jetty && storeys > 1 ? z1 + 1 : z1;
@@ -268,35 +321,48 @@ function building(g, o) {
         g.put(z, y, x, c.k === "air" ? "air" : { ...c, turn });
     }
   }
+  if (door && !open) {
+    const [lo, hi, z] = doorOnWing
+        ? [x0, x0 + wing.w - 1, z1 + wing.d]
+        : [wing ? x0 + wing.w : x0, x1, z1],
+      width = door * DOOR_W;
+    doorway(g, lo + Math.floor((hi - lo + 1 - width) / 2), z, door, [lo, hi]);
+  }
   if (chimney) {
     const cx = chimney === "east" ? x1 : x0;
     for (let y = 1; y <= peak + 1; y++) g.put(cx, y, z0 + 1, M("chimney"));
     g.put(cx, peak + 2, z0 + 1, M("chimney", "slab"));
   }
-  return { at: (x, y, z, cell) => g.put(x0 + x, y, z0 + z, cell), x1, z1 };
+  const local = ([x, y, z]) => [x0 + x, y, z0 + z];
+  return {
+    at: (x, y, z, cell) => g.put(x0 + x, y, z0 + z, cell),
+    stairs: (from, path) => flight(g, local(from), path.map(local)),
+    x1,
+    z1,
+  };
 }
 
 const B = {
   cottage: () => {
     const g = new Grid(),
       h = building(g, {
-        w: 6,
-        d: 5,
+        w: 8,
+        d: 7,
         roofKind: "steep",
         course: true,
         chimney: "west",
       });
     h.at(1, 1, 1, M("table", "table"));
-    h.at(4, 1, 1, M("chest"));
-    h.at(4, 1, 3, M("bench"));
-    h.at(2, 3, 2, M("lamp"));
+    h.at(6, 1, 1, M("chest"));
+    h.at(6, 1, 3, M("bench"));
+    h.at(3, 3, 3, M("lamp"));
     return g.done();
   },
   familyHouse: () => {
     const g = new Grid(),
       h = building(g, {
-        w: 7,
-        d: 6,
+        w: 9,
+        d: 8,
         storeys: 2,
         roofKind: "gable",
         timbered: true,
@@ -304,15 +370,16 @@ const B = {
         upper: true,
         chimney: "east",
       });
-    h.at(2, 1, 2, M("table", "table"));
-    h.at(3, 1, 2, M("table", "table"));
-    h.at(1, 1, 1, M("chest"));
-    h.at(5, 1, 4, M("bench"));
-    h.at(1, 5, 1, M("chest"));
-    h.at(2, 5, 1, M("chest"));
-    h.at(4, 5, 3, M("table", "table"));
-    h.at(3, 3, 3, M("lamp"));
-    h.at(3, 7, 3, M("lamp"));
+    h.stairs([2, 1, 1], run([3, 1, 1], [1, 0], STOREY));
+    h.at(4, 1, 4, M("table", "table"));
+    h.at(5, 1, 4, M("table", "table"));
+    h.at(1, 1, 3, M("chest"));
+    h.at(7, 1, 5, M("bench"));
+    h.at(1, 5, 6, M("chest"));
+    h.at(2, 5, 6, M("chest"));
+    h.at(5, 5, 4, M("table", "table"));
+    h.at(4, 3, 3, M("lamp"));
+    h.at(4, 7, 4, M("lamp"));
     return g.done();
   },
   farmhouse: () => {
@@ -324,17 +391,19 @@ const B = {
         porch: true,
         roofKind: "gable",
         course: true,
-        cellar: 3,
+        cellar: 4,
         chimney: "east",
+        doorOnWing: true,
       });
-    h.at(5, 1, 2, M("table", "table"));
-    h.at(6, 1, 2, M("table", "table"));
-    h.at(1, 1, 1, M("bench"));
+    h.stairs([6, -3, 1], run([2, 0, 1], [1, 0], 4, true));
+    h.at(5, 1, 3, M("table", "table"));
+    h.at(6, 1, 3, M("table", "table"));
+    h.at(7, 1, 4, M("bench"));
     h.at(7, 1, 1, M("chest"));
-    h.at(1, 1, 7, M("chest"));
-    h.at(2, 1, 7, M("chest"));
-    h.at(1, -2, 1, M("chest"));
-    h.at(2, -2, 1, M("chest"));
+    h.at(7, 1, 2, M("chest"));
+    h.at(7, 1, 3, M("chest"));
+    h.at(1, -3, 4, M("chest"));
+    h.at(2, -3, 4, M("chest"));
     h.at(4, 3, 3, M("lamp"));
     return g.done();
   },
@@ -349,22 +418,23 @@ const B = {
         jetty: true,
         upper: true,
         course: true,
-        cellar: 3,
+        cellar: 4,
         chimney: "west",
+        door: 2,
       });
+    h.stairs([4, 1, 1], run([5, 1, 1], [1, 0], STOREY));
+    h.stairs([1, -3, 6], run([1, 0, 2], [0, 1], 4, true));
     for (const [x, z] of [
-      [3, 2],
-      [3, 5],
-      [7, 2],
-      [7, 5],
+      [3, 3],
+      [6, 3],
     ])
       h.at(x, 1, z, M("table", "table"));
-    for (let x = 5; x <= 9; x++) h.at(x, 1, 1, M("trim", "slab"));
-    for (const x of [2, 4, 6, 8]) h.at(x, 5, 1, M("chest"));
-    for (const x of [1, 2, 3]) h.at(x, -2, 1, M("chest"));
+    for (let z = 3; z <= 5; z++) h.at(9, 1, z, M("trim", "slab"));
+    for (const x of [2, 4, 6, 8]) h.at(x, 5, 7, M("chest"));
+    for (const x of [3, 4, 5]) h.at(x, -3, 1, M("chest"));
     h.at(5, 3, 4, M("lamp"));
     h.at(5, 7, 4, M("lamp"));
-    h.at(Math.floor(11 / 2) + 2, 1, 8, M("lamp"));
+    h.at(8, 1, 8, M("lamp"));
     return g.done();
   },
   warehouse: () => {
@@ -374,7 +444,7 @@ const B = {
         d: 8,
         storeys: 2,
         hall: true,
-        wide: 1,
+        door: 2,
         roofKind: "gable",
         timbered: true,
         course: true,
@@ -417,8 +487,8 @@ const B = {
   bakery: () => {
     const g = new Grid(),
       h = building(g, {
-        w: 7,
-        d: 6,
+        w: 9,
+        d: 8,
         roofKind: "hip",
         chimney: "east",
         course: true,
@@ -428,10 +498,10 @@ const B = {
         (h.at(x, y, 1, M("chimney")), h.at(x, y, -1, M("chimney")));
     for (let x = 3; x <= 5; x++) h.at(x, 3, -1, M("roof", "slab"));
     h.at(4, 1, 1, M("oven"));
-    for (let x = 1; x <= 5; x++) h.at(x, 1, 3, M("trim", "slab"));
+    for (let x = 1; x <= 4; x++) h.at(x, 1, 3, M("trim", "slab"));
     h.at(1, 1, 1, M("bench"));
-    h.at(1, 1, 2, M("chest"));
-    h.at(3, 3, 3, M("lamp"));
+    h.at(7, 1, 1, M("chest"));
+    h.at(4, 3, 4, M("lamp"));
     return g.done();
   },
   barn: () => {
@@ -441,14 +511,14 @@ const B = {
         d: 9,
         storeys: 2,
         hall: true,
-        wide: 1,
+        door: 2,
         roofKind: "gambrel",
         timbered: true,
         course: true,
       });
     for (let z = 1; z <= 5; z++)
-      for (const x of [3, 7]) h.at(x, 1, z, M("frame", "post"));
-    for (const x of [1, 2, 9]) h.at(x, 1, 1, M("chest"));
+      for (const x of [2, 8]) h.at(x, 1, z, M("frame", "post"));
+    for (const x of [1, 3, 9]) h.at(x, 1, 1, M("chest"));
     for (const y of [5, 6]) h.at(5, y, 8, "air");
     return g.done();
   },
@@ -477,28 +547,28 @@ const B = {
     g.put(2, 0, 0, M("lamp"));
     return g.done();
   },
+  /* A shaft of standing water from its floor to a metre under the ring's top; posts on the ring. */
   well: () => {
     const g = new Grid();
     for (let x = 0; x < 3; x++)
       for (let z = 0; z < 3; z++) {
-        const c = x === 1 && z === 1;
+        const c = x === 1 && z === 1,
+          post = x !== 1 && z !== 1;
+        g.put(x, -4, z, M("base"));
         g.fill(x, -3, z, x, 0, z, c ? "air" : M("base"));
-        if (!c) g.put(x, 1, z, M("base", "slab"));
+        if (post) g.fill(x, 1, z, x, 3, z, M("frame", "post"));
+        else if (!c) g.put(x, 1, z, M("base", "slab"));
       }
-    for (const [x, z] of [
-      [0, 0],
-      [2, 0],
-      [0, 2],
-      [2, 2],
-    ])
-      g.fill(x, 2, z, x, 3, z, M("frame", "post"));
+    g.fill(1, -3, 1, 1, -1, 1, M("water"));
     roof(g, { x0: 0, x1: 2, z0: 0, z1: 2 }, 4, "gable", "ridge");
     g.put(1, 1, 1, "air");
     return g.done();
   },
+  /* A tower round a stair that spirals up its walls to the roof deck, and down into its cellar. */
   tower: (n, h, cellar = 0) => {
     const g = new Grid(),
-      edge = (x, z) => x === 0 || z === 0 || x === n - 1 || z === n - 1;
+      edge = (x, z) => x === 0 || z === 0 || x === n - 1 || z === n - 1,
+      m = Math.floor(n / 2);
     for (let y = -cellar; y < 0; y++)
       for (let x = 1; x < n - 1; x++)
         for (let z = 1; z < n - 1; z++)
@@ -522,21 +592,51 @@ const B = {
               x,
               y,
               z,
-              z === n - 1 && x === Math.floor(n / 2) && y <= 2
-                ? M("door", "panel")
-                : y % 4 === 2 && (x + z) % 3 === 0
-                  ? M("glass")
-                  : M(
-                      (x === 0 || x === n - 1) && (z === 0 || z === n - 1)
-                        ? "frame"
-                        : y % 5 === 0
-                          ? "accent"
-                          : "base",
-                    ),
+              y % 4 === 2 && (x + z) % 3 === 0
+                ? M("glass")
+                : M(
+                    (x === 0 || x === n - 1) && (z === 0 || z === n - 1)
+                      ? "frame"
+                      : y % 5 === 0
+                        ? "accent"
+                        : "base",
+                  ),
             );
           else g.put(x, y, z, "air");
         }
-    g.put(Math.floor(n / 2), h + 1, Math.floor(n / 2), M("lamp"));
+    doorway(g, m - 1, n - 1, 1, [1, n - 2]);
+    /* The ring inside the walls, starting beside the Door so the cells inside it are passed last. */
+    const ring = (lo, hi, from) => {
+      const out = [];
+      for (let x = from; x <= hi; x++) out.push([x, hi]);
+      for (let z = hi - 1; z >= lo; z--) out.push([hi, z]);
+      for (let x = hi - 1; x >= lo; x--) out.push([x, lo]);
+      for (let z = lo + 1; z <= hi; z++) out.push([lo, z]);
+      for (let x = lo + 1; x < from; x++) out.push([x, hi]);
+      return out;
+    };
+    const up = ring(1, n - 2, m + 1);
+    flight(
+      g,
+      [m, 1, n - 2],
+      Array.from({ length: h }, (_, i) => {
+        const [x, z] = up[i % up.length];
+        return [x, i + 1, z];
+      }),
+    );
+    if (cellar) {
+      const down = ring(2, n - 3, 2),
+        [lx, lz] = down[cellar % down.length];
+      flight(
+        g,
+        [lx, -cellar + 1, lz],
+        Array.from({ length: cellar }, (_, i) => {
+          const [x, z] = down[cellar - 1 - i];
+          return [x, i - cellar + 1, z];
+        }),
+      );
+    }
+    g.put(m, h + 1, m, M("lamp"));
     return g.done();
   },
   /* A stone bridge: a deck that humps over one round arch, parapets with coping, lamps at the ends. */
@@ -716,33 +816,42 @@ const B = {
                 : "air",
             );
         }
-    if (!under)
-      (g.put(r, 1, n - 1, M("door", "panel")),
-        g.put(r, 2, n - 1, M("door", "panel")));
+    if (!under) {
+      /* The Door stands where the shell is still a wall at its lintel, with a cut out to the ground. */
+      const zd = r + 3;
+      for (let x = r; x < r + DOOR_W; x++)
+        for (let y = 1; y <= DOOR_H; y++)
+          for (let z = zd + 1; z < n; z++)
+            if (g.get(x, y, z)) g.put(x, y, z, "air");
+      for (const x of [r - 1, r + DOOR_W])
+        g.fill(x, 1, zd, x, DOOR_H, zd, M("accent"));
+      doorway(g, r, zd, 1, [0, n - 1], "accent");
+    }
     g.put(r, under ? -r + 1 : 1, r, M("lamp"));
     return g.done();
   },
-  mound: (r, h) => {
+  /* A crypt `a` cells either side of the middle under a mound, down a stair from a Door at its foot. */
+  mound: (r, h, a) => {
     const g = new Grid(),
-      n = 2 * r + 1;
-    for (let y = -3; y <= h; y++)
+      n = 2 * r + 1,
+      land = 2 * r - 5;
+    for (let y = -4; y <= h; y++)
       for (let x = 0; x < n; x++)
         for (let z = 0; z < n; z++) {
+          const dx = Math.abs(x - r),
+            dz = Math.abs(z - r);
           if (y < 0) {
-            if (Math.abs(x - r) <= 2 && Math.abs(z - r) <= 2)
-              g.put(
-                x,
-                y,
-                z,
-                Math.abs(x - r) === 2 || Math.abs(z - r) === 2 || y === -3
-                  ? M("base")
-                  : "air",
-              );
-          } else if (x === r && z > r && y <= 1) g.put(x, y, z, "air");
-          else if (Math.hypot((x - r) / r, y / (h + 0.5), (z - r) / r) <= 1)
+            if (dx <= a + 1 && dz <= a + 1)
+              g.put(x, y, z, dx > a || dz > a || y === -4 ? M("base") : "air");
+          } else if (Math.hypot((x - r) / r, y / (h + 0.5), (z - r) / r) <= 1)
             g.put(x, y, z, M(y === 0 ? "base" : "roof"));
         }
-    g.put(r, -2, r, M("chest"));
+    for (let x = r; x < r + DOOR_W; x++)
+      flight(g, [x, -3, land], run([x, -3, land + 1], [0, 1], 4));
+    for (const x of [r - 1, r + DOOR_W])
+      g.fill(x, 1, n - 1, x, DOOR_H, n - 1, M("base"));
+    doorway(g, r, n - 1, 1, [0, n - 1], "base");
+    g.put(r - a, -3, r + a, M("chest"));
     return g.done();
   },
   pit: (r, depth) => {
@@ -758,28 +867,33 @@ const B = {
         }
     return g.done();
   },
+  /* A house on posts, up a stair along its front to a landing at the Door. */
   stilt: (w, d, lift = 3) => {
-    const g = new Grid();
-    building(g, { w, d, roofKind: "steep" });
-    const out = g.done();
-    for (const c of out.cells) c.y += lift;
+    const house = new Grid(),
+      g = new Grid();
+    building(house, { w, d, roofKind: "steep" });
+    for (const [key, c] of house.map) {
+      const [x, y, z] = key.split(",").map(Number);
+      g.map.set(`${x},${y + lift},${z}`, c);
+    }
     for (const [x, z] of [
       [1, 1],
       [w, 1],
       [1, d],
       [w, d],
     ])
-      for (let y = 0; y < lift; y++)
-        out.cells.push({
-          k: "solid",
-          m: "frame",
-          shape: "post",
-          turn: 0,
-          x,
-          y,
-          z,
-        });
-    return out;
+      g.fill(x, 0, z, x, lift - 1, z, M("frame", "post"));
+    const dx = 1 + Math.floor((w - DOOR_W) / 2),
+      z = d + 1;
+    for (let x = dx; x < dx + DOOR_W; x++) {
+      g.put(x, lift, z, M("floor"));
+      g.fill(x, 0, z, x, lift - 1, z, M("frame", "post"));
+    }
+    const steps = run([dx - lift, 1, z], [1, 0], lift);
+    flight(g, [dx - lift - 1, 1, z], steps);
+    for (const [x, y] of steps)
+      if (y > 1) g.fill(x, 1, z, x, y - 1, z, M("frame"));
+    return g.done();
   },
   pyramid: (n) => {
     const g = new Grid();
@@ -861,7 +975,7 @@ const GAME_TEMPLATES = {
       "Watchtower",
       "Cellar below the Ground layer",
       "wild",
-      () => B.tower(6, 11, 3),
+      () => B.tower(6, 11, 4),
     ),
     T(
       "Terra",
@@ -973,7 +1087,7 @@ const GAME_TEMPLATES = {
       B.pyramid(9),
     ),
     T("Ember", "barrow", "Buried barrow", "Tomb under a mound", "wild", () =>
-      B.mound(6, 3),
+      B.mound(6, 3, 2),
     ),
   ],
   Lumen: [
@@ -1003,7 +1117,7 @@ const GAME_TEMPLATES = {
       "Observatory",
       "Cellar for the lens",
       "wild",
-      () => B.tower(7, 9, 3),
+      () => B.tower(7, 9, 4),
     ),
     T(
       "Lumen",
@@ -1039,7 +1153,7 @@ const GAME_TEMPLATES = {
       ["pond-well", "Pond well"],
     ]),
     T("Meadow", "burrow", "Burrow", "Home under a mound", "wild", () =>
-      B.mound(4, 2),
+      B.mound(4, 2, 1),
     ),
     T("Meadow", "treehouse", "Treehouse", "On stilts", "wild", () =>
       B.stilt(4, 4, 4),
@@ -1106,6 +1220,8 @@ function turned(id, turn) {
   return out;
 }
 function materialOf(t, c) {
+  if (c.m === "water")
+    return t.game === "Terra" ? "terra:water" : "waters:water";
   if (FIXED[c.m]) return `${t.game.toLowerCase()}:${FIXED[c.m]}`;
   const style = STYLES[t.style] || STYLES.wild,
     role = { wall2: style.wall2 ? "wall2" : "wall", table: "trim" }[c.m] || c.m;

@@ -20,6 +20,7 @@ mod building;
 mod fields;
 mod food;
 mod plants;
+mod rooms;
 pub(in crate::server) mod structures;
 mod vegetation;
 
@@ -252,8 +253,9 @@ fn meadow_declares_its_pumpkin_and_building_materials_and_takes_its_ground_from_
             "strata",
             "flora",
             "crops",
-            "meadow",
-            "wanderer"
+            "wanderer",
+            "waters",
+            "meadow"
         ]
     );
     let own: Vec<_> = loaded
@@ -529,8 +531,9 @@ fn lumen_builds_blended_glass_light_and_all_three_shapes() {
             "strata",
             "flora",
             "crops",
-            "lumen",
-            "wanderer"
+            "wanderer",
+            "waters",
+            "lumen"
         ]
     );
     let batches = run(&mut loaded, 0.5, 0.05, 40);

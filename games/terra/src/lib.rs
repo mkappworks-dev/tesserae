@@ -60,6 +60,11 @@ enum Stage {
     Dried,
 }
 
+/// The door's size: whole Template cells, so a Template's opening fits it at every Voxel size, with
+/// room round a Player's 0.6 m by 1.8 m body.
+const DOOR_WIDTH_M: f32 = 2.0;
+const DOOR_HEIGHT_M: f32 = 3.0;
+
 /// Seconds after the scenarios start that water reaches the burning post, and
 /// that the waterfall's source is taken away.
 const DOUSE_S: f32 = 4.0;
@@ -901,8 +906,8 @@ impl Guest for Terra {
                     material: "terra:door".into(),
                     kind: VoxelUseKind::Door(tesserae::mods::content::DoorDef {
                         open: "terra:door_open".into(),
-                        width_m: Some(1.0),
-                        height_m: Some(2.0),
+                        width_m: Some(DOOR_WIDTH_M),
+                        height_m: Some(DOOR_HEIGHT_M),
                     }),
                     shape: Some("terra:panel".into()),
                 },

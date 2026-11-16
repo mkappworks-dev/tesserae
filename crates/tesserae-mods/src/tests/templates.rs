@@ -370,10 +370,11 @@ fn a_bad_template_fails_the_load_naming_it_from_data_and_a_component() {
             &["palette `#`", "t:arch"],
         ),
         (
-            "a fluid",
-            |t| t.palette[0].cell = voxel("t:water", None),
-            data_hut("[[\"#\"]]", "ground-layer = 0").replace("t:stone\" }", "t:water\" }"),
-            &["palette `#`", "t:water"],
+            "a shaped fluid",
+            |t| t.palette[0].cell = voxel("t:water", Some("core:slab")),
+            data_hut("[[\"#\"]]", "ground-layer = 0")
+                .replace("t:stone\" }", "t:water\", shape = \"core:slab\" }"),
+            &["palette `#`", "t:water", "whole cube"],
         ),
         (
             "a cell not in the palette",
@@ -422,6 +423,22 @@ fn a_bad_template_fails_the_load_naming_it_from_data_and_a_component() {
                 "{what} from {source}: {err}"
             );
         }
+    }
+}
+
+#[test]
+fn a_fluid_cell_loads_as_its_source_from_data_and_a_component() {
+    let mut native = component();
+    native.templates[0].palette[0].cell = voxel("t:water", None);
+    let toml = data_hut("[[\"#\"]]", "ground-layer = 0").replace("t:stone\" }", "t:water\" }");
+    for (source, declaration) in [("component", native), ("data", data(&toml).unwrap())] {
+        let (registry, templates) = load(vec![("t", declaration)]).unwrap();
+        let water = registry.id_of(Kind::Material, "t:water").unwrap() as u16;
+        assert_eq!(
+            templates[0].cell([0, 0, 0]),
+            Cell::Voxel(tesserae_core::Voxel::cube(water)),
+            "{source}"
+        );
     }
 }
 

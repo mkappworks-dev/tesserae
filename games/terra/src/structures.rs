@@ -17,7 +17,7 @@ const VILLAGE_CHANCE: f32 = 0.7;
 /// A packed earth road, laid by the ground itself.
 const VILLAGE_PATH: &str = "terra:dirt";
 /// A town's disc, and its lattice: wider apart than villages, so one is a rarer find.
-const TOWN_RADIUS_M: f32 = 60.0;
+const TOWN_RADIUS_M: f32 = 64.0;
 const TOWN_SPACING_M: f32 = 384.0;
 /// Over twice the widest wilderness Template, so they stand apart.
 const WILD_SPACING_M: f32 = 256.0;
@@ -209,7 +209,8 @@ pub fn settlements() -> Vec<SettlementDef> {
             centre: Some("terra:well".into()),
             plots: 22,
             templates: vec![
-                plot("cottage", 4.0, 2, 6),
+                // One at least: two of the larger cottages crowd out the minimums after them.
+                plot("cottage", 4.0, 1, 6),
                 plot("family_house", 3.0, 1, 4),
                 plot("farmhouse", 2.0, 1, 3),
                 plot("inn", 1.0, 1, 1),
