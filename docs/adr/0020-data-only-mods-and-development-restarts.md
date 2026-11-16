@@ -71,7 +71,7 @@ content, excluding development configuration and source files, in the existing
 remain in the authoring project, separate from its installed output.
 
 The SDK establishes an authoring workflow and a WIT compatibility policy now;
-the final 1.0 contract freeze remains in step 27 after later engine systems add
+the final 1.0 contract freeze remains in step 28 after later engine systems add
 their APIs.
 
 Acceptance tests exercise the existing Mod loader and Server startup boundaries,
