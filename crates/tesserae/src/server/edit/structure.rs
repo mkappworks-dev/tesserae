@@ -49,6 +49,9 @@ pub struct StructureIntent {
     pub direction: Vec3,
     pub template: String,
     pub turn: Turn,
+    /// The anchor of a preview the Player pinned, which the ray no longer picks: it stands
+    /// there while the Player walks round it, within [`PIN_REACH_M`] of the Eye.
+    pub pinned: Option<[i32; 3]>,
 }
 
 impl StructureIntent {
@@ -239,12 +242,30 @@ pub(in crate::server) struct PendingStructure {
     waited: u32,
 }
 
+/// How far from the Eye a pinned preview may stand and still be judged or built: a Player
+/// walks round it to look, so it is further than [`super::EDIT_REACH_M`].
+pub const PIN_REACH_M: f32 = 64.0;
+
+/// Whether a pinned anchor stands within [`PIN_REACH_M`] of the Eye.
+pub(super) fn pin_in_reach(
+    anchor: [i32; 3],
+    eye: Vec3,
+    voxel_size: f32,
+) -> Result<(), RejectReason> {
+    let centre = Vec3::from_array(anchor.map(|c| (c as f32 + 0.5) * voxel_size));
+    if centre.distance(eye) <= PIN_REACH_M {
+        Ok(())
+    } else {
+        Err(RejectReason::OutOfReach)
+    }
+}
+
 pub(super) fn receive(
     mut intents: MessageReader<StructureIntent>,
     mut pending: ResMut<PendingEdits>,
     mut rejected: MessageWriter<EditRejected>,
     player: Single<(&Player, &PlayerMode)>,
-    tables: Res<ContentTables>,
+    (tables, world): (Res<ContentTables>, Res<WorldSettings>),
 ) {
     let (player, mode) = *player;
     for intent in intents.read() {
@@ -260,6 +281,9 @@ pub(super) fn receive(
                 .iter()
                 .position(|t| t.name == intent.template)
                 .ok_or(RejectReason::UnknownTemplate)?;
+            if let Some(anchor) = intent.pinned {
+                pin_in_reach(anchor, player.eye(), world.voxel_size)?;
+            }
             if pending.2.len() >= MAX_PENDING_STRUCTURES {
                 return Err(RejectReason::Busy);
             }
@@ -268,7 +292,7 @@ pub(super) fn receive(
                 turn: intent.turn,
                 direction: intent.direction,
                 reach,
-                anchor: None,
+                anchor: intent.pinned,
                 next: 0,
                 landing: false,
                 shaped: HashMap::new(),
@@ -557,6 +581,7 @@ mod tests {
             direction: Vec3::NEG_Y,
             template: template.into(),
             turn: Turn::NONE,
+            pinned: None,
         }
     }
 
@@ -628,6 +653,42 @@ mod tests {
                 "the ground at {size}"
             );
         }
+    }
+
+    #[test]
+    fn a_pinned_preview_is_built_at_its_anchor_from_where_the_player_now_stands() {
+        let mut app = hut_app();
+        // Pinned straight down onto (16, 7, 16), then built from 30 m away, looking along -z.
+        send(
+            &mut app,
+            StructureIntent {
+                origin: Vec3::new(16.5, 12.0, 46.5),
+                pinned: Some([16, 7, 16]),
+                ..intent("t:hut")
+            },
+        );
+        settle(&mut app);
+        assert!(rejections(&mut app).is_empty());
+        assert_eq!(voxel_at(&app, [13, 8, 13]), stone(), "a wall");
+        assert!(voxel_at(&app, [16, 8, 16]).is_air(), "the room");
+        assert_eq!(voxel_at(&app, [16, 9, 16]), stone(), "the roof");
+    }
+
+    #[test]
+    fn a_pinned_preview_further_than_its_reach_is_refused() {
+        let mut app = hut_app();
+        let away = 16.5 + PIN_REACH_M + 2.0;
+        send(
+            &mut app,
+            StructureIntent {
+                origin: Vec3::new(16.5, 12.0, away),
+                pinned: Some([16, 7, 16]),
+                ..intent("t:hut")
+            },
+        );
+        settle(&mut app);
+        assert_eq!(rejections(&mut app), [RejectReason::OutOfReach]);
+        assert_eq!(built(&app), 0);
     }
 
     #[test]

@@ -1,9 +1,11 @@
-//! The `place` Tool: Use opens the Template list, the turn key turns the
-//! Structure a quarter, and Place sends the Structure intent.
+//! The `place` Tool: the turn key turns the Structure a quarter, Place pins a
+//! preview where it is aimed, and aimed at the pinned preview Place sends the
+//! Structure intent and the clear key cancels it.
 //!
-//! The ghost is drawn from the Server's [`StructureAnswer`], each cell tinted
-//! by what placing it does, so nothing here reads World storage (ADR-0002).
-use std::collections::{HashSet, VecDeque};
+//! The ghost is drawn from the Server's [`StructureAnswer`], each cell in its
+//! Material's colour, red where placing it is refused, so nothing here reads
+//! World storage (ADR-0002). The pinned preview is the Client's alone.
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 
 use bevy::asset::RenderAssetUsages;
@@ -147,6 +149,9 @@ pub(super) struct PlaceTool {
     /// By full name, so a choice outlives a Catalogue that reorders.
     template: Option<String>,
     pub(super) turn: Turn,
+    /// The preview the Player pinned: its anchor, and the heading it was aimed along, which
+    /// centres it as it did then.
+    pub(super) pinned: Option<([i32; 3], Vec3)>,
 }
 
 impl PlaceTool {
@@ -171,11 +176,16 @@ impl PlaceTool {
         catalogue: &ContentCatalogue,
         camera: &GlobalTransform,
     ) -> Option<StructureIntent> {
+        let (direction, pinned) = match self.pinned {
+            Some((anchor, heading)) => (heading, Some(anchor)),
+            None => (*camera.forward(), None),
+        };
         Some(StructureIntent {
             origin: camera.translation(),
-            direction: *camera.forward(),
+            direction,
             template: self.chosen(catalogue)?.name.clone(),
             turn: self.turn,
+            pinned,
         })
     }
 
@@ -199,10 +209,53 @@ pub(super) fn holding_place(hotbar: &Hotbar, catalogue: &ContentCatalogue) -> bo
         if catalogue.tool(id).is_some_and(|t| t.kind == ToolKind::Place))
 }
 
-/// With the place Tool in hand: the turn key turns, Place sends the Structure
-/// intent, and Use and Remove are taken so they send no Use: the Structures
-/// key asks for the list. Like an Edit, nothing is sent by the click that
-/// grabs the cursor.
+/// Pins the preview where the Server's fresh answer anchors the aim, if there
+/// is one; whether it did.
+pub(super) fn pin(
+    tool: &mut PlaceTool,
+    preview: &Preview,
+    catalogue: &ContentCatalogue,
+    camera: &GlobalTransform,
+    now: f64,
+) -> bool {
+    let Some(intent) = tool.intent(catalogue, camera) else {
+        return false;
+    };
+    let anchor = preview
+        .fresh(&intent, now)
+        .and_then(|answer| answer.ghost.as_ref().ok())
+        .map(|ghost| ghost.anchor);
+    if let Some(anchor) = anchor {
+        tool.pinned = Some((anchor, intent.direction));
+    }
+    anchor.is_some()
+}
+
+/// Whether the crosshair ray meets the ghost's box, `corner` and `size` in Voxels.
+fn aimed_at(camera: &GlobalTransform, corner: [i32; 3], size: [i32; 3], voxel_size: f32) -> bool {
+    let (origin, direction) = (camera.translation(), *camera.forward());
+    let (mut near, mut far) = (0.0f32, crate::server::edit::PIN_REACH_M);
+    for a in 0..3 {
+        let low = corner[a] as f32 * voxel_size;
+        let high = (corner[a] + size[a]) as f32 * voxel_size;
+        if direction[a].abs() < 1e-6 {
+            if origin[a] < low || origin[a] > high {
+                return false;
+            }
+            continue;
+        }
+        let [t0, t1] = [low, high].map(|edge| (edge - origin[a]) / direction[a]);
+        near = near.max(t0.min(t1));
+        far = far.min(t0.max(t1));
+    }
+    near <= far
+}
+
+/// With the place Tool in hand: the turn key turns; Place pins a preview where
+/// the Server's fresh answer anchors it, and aimed at the pinned preview sends
+/// the Structure intent; the clear key aimed at it cancels it. Use and Remove
+/// are taken so they send no Use: the Structures key asks for the list. Like an
+/// Edit, nothing is sent by the click that grabs the cursor.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn intercept(
     ownership: Res<Ownership>,
@@ -211,11 +264,15 @@ pub(super) fn intercept(
     (hotbar, catalogue): (Res<Hotbar>, Res<Catalogue>),
     camera: Single<&GlobalTransform, With<FlyCamera>>,
     mut tool: ResMut<PlaceTool>,
+    (preview, time, world): (Res<Preview>, Res<Time>, Res<WorldSettings>),
     mut intents: MessageWriter<StructureIntent>,
     mut was_grabbed: Local<bool>,
 ) {
     let grabbed = cursor.grab_mode == CursorGrabMode::Locked;
     let ready = grabbed && std::mem::replace(&mut *was_grabbed, grabbed);
+    if !holding_place(&hotbar, &catalogue.0) && tool.pinned.is_some() {
+        tool.pinned = None;
+    }
     if !ownership.gameplay() || !holding_place(&hotbar, &catalogue.0) {
         return;
     }
@@ -226,11 +283,35 @@ pub(super) fn intercept(
         actions.cancel(Action::Respawn);
         actions.cancel(Action::Turn);
     }
-    if ready
-        && actions.started(Action::Place)
-        && let Some(intent) = tool.intent(&catalogue.0, &camera)
-    {
-        intents.write(intent);
+    let intent = tool.intent(&catalogue.0, &camera);
+    let ghost = intent
+        .as_ref()
+        .and_then(|intent| preview.fresh(intent, time.elapsed_secs_f64()))
+        .and_then(|answer| answer.ghost.as_ref().ok());
+    let on_pin = tool.pinned.is_some()
+        && ghost.is_some_and(|g| aimed_at(&camera, g.corner, g.size, world.voxel_size));
+    if ready && actions.started(Action::Place) {
+        match (tool.pinned, intent) {
+            (Some(_), Some(intent)) if on_pin => {
+                intents.write(intent);
+                tool.pinned = None;
+            }
+            (Some(_), _) => {}
+            (None, Some(_)) => {
+                pin(
+                    &mut tool,
+                    &preview,
+                    &catalogue.0,
+                    &camera,
+                    time.elapsed_secs_f64(),
+                );
+            }
+            (None, None) => {}
+        }
+    }
+    if on_pin && actions.started(Action::ClearTool) {
+        tool.pinned = None;
+        actions.cancel(Action::ClearTool);
     }
     actions.cancel(Action::Place);
     actions.cancel(Action::Remove);
@@ -252,6 +333,7 @@ impl Preview {
         (now - at <= ANSWER_SECS
             && asked.template == now_intent.template
             && asked.turn == now_intent.turn
+            && asked.pinned == now_intent.pinned
             && asked.origin.distance_squared(now_intent.origin) <= 4.0
             && asked.direction.dot(now_intent.direction) >= 0.94)
             .then_some(answer)
@@ -317,8 +399,8 @@ type Answered = (Arc<[Option<StructureCell>]>, [i32; 3], [i32; 3]);
 pub(super) struct Ghost {
     /// What the cells below were sorted from.
     from: Option<Answered>,
-    /// Solid cells of each tint, in [`Tint::ALL`] order.
-    pub(super) solid: [Vec<[i32; 3]>; 4],
+    /// Solid cells of each tint, in [`Tint::ALL`] order, each with its Material's colour.
+    pub(super) solid: [Vec<([i32; 3], [f32; 3])>; 4],
     /// Carved cells, drawn as outlines.
     pub(super) outlined: Vec<[i32; 3]>,
     /// Voxels of each tint, in [`Tint::ALL`] order.
@@ -329,10 +411,30 @@ pub(super) struct Ghost {
     changed: bool,
 }
 
+/// Each Material's colour, linear, from the Server's palette: the ghost is drawn in it.
+#[derive(Resource, Default)]
+pub(super) struct GhostPalette(HashMap<tesserae_core::MaterialId, [f32; 3]>);
+
+fn learn_palette(
+    mut palettes: MessageReader<crate::content::MaterialPalette>,
+    mut colours: ResMut<GhostPalette>,
+) {
+    for palette in palettes.read() {
+        colours.0 = palette
+            .0
+            .iter()
+            .map(|&(id, [r, g, b, _])| {
+                let linear = Color::srgb_u8(r, g, b).to_linear();
+                (id, [linear.red, linear.green, linear.blue])
+            })
+            .collect();
+    }
+}
+
 /// Keeps [`Ghost`] in step with the latest answer that still describes the aim.
 pub(super) fn track(
     (hotbar, catalogue): (Res<Hotbar>, Res<Catalogue>),
-    tool: Res<PlaceTool>,
+    (tool, palette): (Res<PlaceTool>, Res<GhostPalette>),
     camera: Single<&GlobalTransform, With<FlyCamera>>,
     preview: Res<Preview>,
     time: Res<Time>,
@@ -367,15 +469,29 @@ pub(super) fn track(
     if unchanged {
         return;
     }
-    let mut solid: [Vec<[i32; 3]>; 4] = default();
+    let mut solid: [Vec<([i32; 3], [f32; 3])>; 4] = default();
     let mut outlined = Vec::new();
     let mut tally = [0; 4];
-    for (at, cell) in judged_ghost.written() {
+    let looks = judged_ghost.voxels.iter();
+    for ((at, cell), voxel) in judged_ghost.written().zip(
+        looks
+            .zip(judged_ghost.cells.iter())
+            .filter_map(|(voxel, cell)| cell.map(|_| voxel)),
+    ) {
         let (tint, draw) = judged(cell);
         let slot = Tint::ALL.iter().position(|t| *t == tint).unwrap_or(0);
         tally[slot] += 1;
+        // A refused cell is drawn in the warning's own red.
+        let colour = match tint {
+            Tint::Blocked => [1.0; 3],
+            _ => palette
+                .0
+                .get(&voxel.material())
+                .copied()
+                .unwrap_or([1.0; 3]),
+        };
         match draw {
-            Draw::Solid => solid[slot].push(at),
+            Draw::Solid => solid[slot].push((at, colour)),
             Draw::Outline => outlined.push(at),
             Draw::Hidden => {}
         }
@@ -427,6 +543,8 @@ impl Ghost {
 pub(super) struct GhostMesh(usize);
 
 const GHOST_INSET: f32 = 0.01;
+/// How solid the ghost's own colours stand: the World shows through.
+const GHOST_ALPHA: f32 = 0.7;
 /// Wide enough to keep its depth apart from the face under it at 0.25 m.
 const GHOST_OUTSET: f32 = 0.02;
 
@@ -473,9 +591,14 @@ fn spawn_meshes(
     mut images: ResMut<Assets<Image>>,
 ) {
     let edges = images.add(edge_image());
+    // The Template's own colours ride on each cell; a refused cell keeps its tint.
     let looks = Tint::ALL.map(|tint| {
+        let base_color = match tint {
+            Tint::Blocked => tint.color(),
+            _ => Color::srgba(1.0, 1.0, 1.0, GHOST_ALPHA),
+        };
         materials.add(StandardMaterial {
-            base_color: tint.color(),
+            base_color,
             base_color_texture: Some(edges.clone()),
             alpha_mode: AlphaMode::Blend,
             unlit: true,
@@ -494,16 +617,16 @@ fn spawn_meshes(
     }
 }
 
-/// The outside of a set of cells, each side moved out by `grown` metres: the
-/// sides no other cell of the set covers.
-fn hull(cells: &[[i32; 3]], voxel_size: f32, grown: f32) -> Option<Mesh> {
+/// The outside of a set of cells, each side moved out by `grown` metres and
+/// coloured by its cell: the sides no other cell of the set covers.
+fn hull(cells: &[([i32; 3], [f32; 3])], voxel_size: f32, grown: f32) -> Option<Mesh> {
     if cells.is_empty() {
         return None;
     }
-    let present: HashSet<[i32; 3]> = cells.iter().copied().collect();
+    let present: HashSet<[i32; 3]> = cells.iter().map(|&(at, _)| at).collect();
     let (mut positions, mut normals, mut indices) = (Vec::new(), Vec::new(), Vec::new());
     let (mut uvs, mut shares) = (Vec::new(), Vec::new());
-    for &cell in cells {
+    for &(cell, [r, g, b]) in cells {
         for axis in 0..3 {
             for up in [false, true] {
                 let mut next = cell;
@@ -534,7 +657,7 @@ fn hull(cells: &[[i32; 3]], voxel_size: f32, grown: f32) -> Option<Mesh> {
                 normal[axis] = if up { 1.0 } else { -1.0 };
                 normals.extend([normal; 4]);
                 uvs.extend([[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]);
-                shares.extend([[1.0, 1.0, 1.0, FACE_SHARE[axis]]; 4]);
+                shares.extend([[r, g, b, FACE_SHARE[axis]]; 4]);
                 // u × v points along +axis, so the far side winds the other way.
                 if up {
                     indices.extend([base, base + 1, base + 2, base, base + 2, base + 3]);
@@ -614,6 +737,7 @@ pub(super) fn plugin(app: &mut App) {
     app.init_session_state::<PlaceTool>()
         .init_session_state::<Preview>()
         .init_session_state::<Ghost>()
+        .init_session_state::<GhostPalette>()
         .add_session_systems(Startup, spawn_meshes)
         .add_session_systems(
             Update,
@@ -624,7 +748,7 @@ pub(super) fn plugin(app: &mut App) {
                     .before(super::camera::reset)
                     .before(super::removal::hold)
                     .before(super::edit::select_held),
-                (report, receive, track, build, outline)
+                (learn_palette, report, receive, track, build, outline)
                     .chain()
                     .after(super::view::place)
                     .after(intercept),
@@ -679,6 +803,8 @@ mod tests {
             .init_resource::<PlaceTool>()
             .init_resource::<Preview>()
             .init_resource::<Ghost>()
+            .init_resource::<GhostPalette>()
+            .insert_resource(WorldSettings::default())
             .add_message::<StructureIntent>()
             .add_message::<StructureAim>()
             .add_message::<StructureAnswer>()
@@ -742,26 +868,99 @@ mod tests {
             .collect()
     }
 
-    #[test]
-    fn place_sends_the_chosen_template_turned_along_the_crosshair_ray() {
+    /// Moves the camera 3 m over `at`, in metres, looking straight down.
+    fn look_down_at(app: &mut App, at: Vec3) {
+        let world = app.world_mut();
+        let mut camera = world.query_filtered::<&mut GlobalTransform, With<FlyCamera>>();
+        *camera.single_mut(world).unwrap() = GlobalTransform::from(
+            Transform::from_translation(at + Vec3::Y * 3.0).looking_to(Vec3::NEG_Y, Vec3::Z),
+        );
+        app.update();
+    }
+
+    /// The default Template pinned over the 2 × 2 box of [`judged`], whose anchor is (11, 5, 21).
+    fn pinned_app() -> App {
         let mut app = app(Holding::Tool(PLACE));
+        answer(&mut app, Ok(judged([Some(StructureCell::Places); 4])));
+        assert!(
+            frame(&mut app, None, Some(MouseButton::Right)).is_empty(),
+            "pinning sends nothing"
+        );
+        assert_eq!(
+            app.world()
+                .resource::<PlaceTool>()
+                .pinned
+                .map(|(anchor, _)| anchor),
+            Some([11, 5, 21])
+        );
+        app
+    }
+
+    #[test]
+    fn place_pins_a_preview_and_aimed_at_it_place_builds_it() {
+        let mut app = pinned_app();
+        // Walked away, looking elsewhere: the preview stays put and Place builds nothing.
+        look_down_at(&mut app, Vec3::new(40.0, 5.0, 40.0));
+        assert!(frame(&mut app, None, Some(MouseButton::Right)).is_empty());
+        let asked = aims(&mut app)
+            .last()
+            .cloned()
+            .expect("asked of the pinned anchor");
+        assert_eq!(asked.intent.pinned, Some([11, 5, 21]));
+
+        look_down_at(&mut app, Vec3::new(11.0, 5.5, 21.0));
+        answer(&mut app, Ok(judged([Some(StructureCell::Places); 4])));
         let [intent] = &frame(&mut app, None, Some(MouseButton::Right))[..] else {
             panic!("one intent");
         };
         assert_eq!(intent.template, "terra:cottage", "the first by default");
-        assert_eq!(intent.turn, Turn::NONE);
-        assert_eq!(intent.origin, Vec3::new(1.0, 2.0, 3.0));
-        assert!(intent.direction.abs_diff_eq(Vec3::NEG_Y, 1e-6));
+        assert_eq!(intent.pinned, Some([11, 5, 21]));
+        assert!(
+            intent.direction.abs_diff_eq(Vec3::NEG_Y, 1e-6),
+            "along the heading it was pinned with"
+        );
+        assert!(app.world().resource::<PlaceTool>().pinned.is_none());
+    }
 
+    #[test]
+    fn the_clear_key_aimed_at_the_pinned_preview_cancels_it_and_is_taken() {
+        let mut app = pinned_app();
+        look_down_at(&mut app, Vec3::new(11.0, 5.5, 21.0));
+        answer(&mut app, Ok(judged([Some(StructureCell::Places); 4])));
         app.world_mut()
-            .resource_mut::<PlaceTool>()
-            .choose("terra:well");
-        frame(&mut app, Some(KeyCode::KeyR), None);
-        let [intent] = &frame(&mut app, None, Some(MouseButton::Right))[..] else {
-            panic!("one intent");
-        };
-        assert_eq!(intent.template, "terra:well");
-        assert_eq!(intent.turn, Turn::new(1));
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::Backspace);
+        app.update();
+        assert!(app.world().resource::<PlaceTool>().pinned.is_none());
+        assert!(
+            !app.world().resource::<Actions>().started(Action::ClearTool),
+            "the Tool stays in hand"
+        );
+    }
+
+    #[test]
+    fn the_ghost_is_drawn_in_its_materials_colours_and_a_refused_cell_in_red() {
+        let mut app = app(Holding::Tool(PLACE));
+        app.world_mut()
+            .resource_mut::<GhostPalette>()
+            .0
+            .insert(5, [0.5, 0.25, 0.0]);
+        answer(
+            &mut app,
+            Ok(judged([
+                Some(StructureCell::Places),
+                Some(StructureCell::Refused(RejectReason::Occupied)),
+                None,
+                None,
+            ])),
+        );
+        let ghost = app.world().resource::<Ghost>();
+        assert_eq!(ghost.solid[0], vec![([10, 5, 20], [0.5, 0.25, 0.0])]);
+        assert_eq!(
+            ghost.solid[3],
+            vec![([11, 5, 20], [1.0; 3])],
+            "the tint alone"
+        );
     }
 
     #[test]
@@ -868,6 +1067,11 @@ mod tests {
         app.update();
     }
 
+    /// Where a tint's solid cells stand.
+    fn at(cells: &[([i32; 3], [f32; 3])]) -> Vec<[i32; 3]> {
+        cells.iter().map(|&(at, _)| at).collect()
+    }
+
     /// A 2 × 2 × 1 box at (10, 5, 20), x fastest then z.
     fn judged(cells: [Option<StructureCell>; 4]) -> StructureGhost {
         StructureGhost {
@@ -875,6 +1079,7 @@ mod tests {
             corner: [10, 5, 20],
             size: [2, 1, 2],
             cells: Arc::from(cells),
+            voxels: Arc::from([tesserae_core::Voxel::cube(5); 4]),
         }
     }
 
@@ -892,7 +1097,7 @@ mod tests {
         );
         let ghost = app.world().resource::<Ghost>();
         assert_eq!(
-            ghost.solid,
+            ghost.solid.each_ref().map(|cells| at(cells)),
             [
                 vec![[10, 5, 20]],
                 vec![[11, 5, 20]],
@@ -923,7 +1128,7 @@ mod tests {
         );
         let ghost = app.world().resource::<Ghost>();
         assert_eq!(ghost.outlined, vec![[10, 5, 20]]);
-        assert_eq!(ghost.solid[0], vec![[10, 5, 21], [11, 5, 21]]);
+        assert_eq!(at(&ghost.solid[0]), vec![[10, 5, 21], [11, 5, 21]]);
         assert_eq!(ghost.tally, [3, 1, 0, 0]);
     }
 
@@ -940,7 +1145,7 @@ mod tests {
             ])),
         );
         let ghost = app.world().resource::<Ghost>();
-        assert_eq!(ghost.solid[3], vec![[11, 5, 20]]);
+        assert_eq!(at(&ghost.solid[3]), vec![[11, 5, 20]]);
         assert_eq!(
             ghost.outcome,
             Some(Outcome::Refused(RejectReason::InsidePlayer))

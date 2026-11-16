@@ -121,7 +121,9 @@ actions under Key bindings.
 Creative; Survival is refused. With the list open, **K** closes it back into
 play with the Tool in hand, the clear key (**Backspace**) closes it and puts the
 Tool away, and **Escape** closes it with the cursor free. With the Tool in hand,
-**R** turns the Structure, Place stamps it, and Use opens nothing.
+**R** turns the Structure and Use opens nothing. Place pins a preview of the
+Structure where you aim; walk round it, then aim at it and press Place to build
+it or the clear key to cancel it.
 
 Gameplay input is cancelled when ownership changes. Inputs held through a menu,
 focus change or device cancellation require release before activation. Pending

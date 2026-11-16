@@ -39,3 +39,9 @@ Voxel size, measured over 400 trees each at 1.0, 0.5 and 0.25 m by
 No digest moved: `generator_version`, `surface_features`, `coarse_generation`
 and `plant_worldgen` pass unchanged. A World's snapshot pins its Plant rows,
 so a World made before keeps its shorter jungle; no new Generator version.
+
+Found after closing: a World pins each Mod's build hash (`Content::require`),
+so changing `flora` stops a World made before from opening ("required Mod
+flora 0.2.0 (...) is missing or changed"); the play-tested `tt` and `New
+World` are such. This branch's Template changes do the same through Terra's
+build. Decided 2026-11-16 by the user: accept it; play-test in a new World.

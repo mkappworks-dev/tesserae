@@ -406,6 +406,7 @@ fn a_placed_structure_is_saved_like_any_build_and_reloads() {
             direction: Vec3::NEG_Y,
             template: "t:bar".into(),
             turn: Turn::NONE,
+            pinned: None,
         },
     );
     rig.tick();

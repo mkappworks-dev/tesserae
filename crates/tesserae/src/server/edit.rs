@@ -52,7 +52,7 @@ pub use layout::LayoutCell;
 pub(in crate::server) use layout::send_layout;
 pub use layout::{CellState, LayoutAim, LayoutAnswer, LayoutIntent, LayoutParams, Span};
 pub use structure::StructureCell;
-pub use structure::StructureIntent;
+pub use structure::{PIN_REACH_M, StructureIntent};
 #[cfg(test)]
 pub(in crate::server) use structure::{drain as drain_structures, send_structure};
 #[cfg(test)]

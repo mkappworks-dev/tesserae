@@ -9,9 +9,10 @@
 use std::sync::Arc;
 
 use bevy::prelude::*;
+use tesserae_core::Voxel;
 use tesserae_core::collide::Aabb;
 
-use super::structure::{Placement, StructureCell, judge_cell, structure_anchor};
+use super::structure::{Placement, StructureCell, judge_cell, pin_in_reach, structure_anchor};
 use super::{Reach, RejectReason, StructureIntent, reach_from};
 use crate::server::container::Containers;
 use crate::server::game_mode::PlayerMode;
@@ -50,6 +51,9 @@ pub struct StructureGhost {
     /// One per Voxel of the box, x fastest, then z, then y from the bottom;
     /// `None` where the Template keeps what is there.
     pub cells: Arc<[Option<StructureCell>]>,
+    /// What each of those Voxels would hold, so the ghost is drawn as the Template itself; Air
+    /// where it carves or keeps.
+    pub voxels: Arc<[Voxel]>,
 }
 
 impl StructureGhost {
@@ -146,7 +150,13 @@ pub(super) fn answer_aim(
             .iter()
             .position(|t| t.name == aim.intent.template)
             .ok_or(RejectReason::UnknownTemplate)?;
-        let anchor = structure_anchor(&store, &tables, &world, aim.intent.direction, reach)?;
+        let anchor = match aim.intent.pinned {
+            Some(anchor) => {
+                pin_in_reach(anchor, player.eye(), world.voxel_size)?;
+                anchor
+            }
+            None => structure_anchor(&store, &tables, &world, aim.intent.direction, reach)?,
+        };
         let placement = Placement::new(
             &tables.templates[template],
             world.voxel_size,
@@ -167,18 +177,23 @@ pub(super) fn answer_aim(
             return Ok(judged.ghost.clone());
         }
         let around = (body, containers.as_deref());
-        let cells = (0..placement.len())
-            .map(|i| {
-                placement.get(i).map(|(at, voxel)| {
-                    judge_cell(&store, &meshes, &tables, &world, around, at, voxel)
-                })
+        let (cells, voxels): (Vec<_>, Vec<_>) = (0..placement.len())
+            .map(|i| match placement.get(i) {
+                Some((at, voxel)) => (
+                    Some(judge_cell(
+                        &store, &meshes, &tables, &world, around, at, voxel,
+                    )),
+                    voxel,
+                ),
+                None => (None, Voxel::AIR),
             })
-            .collect();
+            .unzip();
         let ghost = StructureGhost {
             anchor,
             corner: placement.corner(),
             size: placement.size(),
-            cells,
+            cells: cells.into(),
+            voxels: voxels.into(),
         };
         state.judged = Some(Judged {
             key,
@@ -243,6 +258,7 @@ mod tests {
             direction: Vec3::NEG_Y,
             template: template.into(),
             turn,
+            pinned: None,
         }
     }
 
@@ -327,6 +343,23 @@ mod tests {
         assert_eq!(ghost.refused(), None);
         assert!(app.world().resource::<PendingEdits>().is_empty());
         assert!(voxel_at(&app, [16, 8, 16]).is_air());
+    }
+
+    #[test]
+    fn a_pinned_aim_answers_its_anchor_wherever_the_player_looks_and_the_ghost_names_its_voxels() {
+        let mut app = app_with_tables(&[(origin(), ground())], tables_with(vec![cellar()]));
+        let pinned = StructureIntent {
+            origin: Vec3::new(16.5, 12.0, 40.5),
+            direction: Vec3::Y,
+            pinned: Some([16, 7, 16]),
+            ..intent("t:cellar", Turn::NONE)
+        };
+        let ghost = ghost(ask(&mut app, 1, pinned));
+        assert_eq!((ghost.anchor, ghost.corner), ([16, 7, 16], [15, 6, 16]));
+        assert_eq!(ghost.voxels.len(), ghost.cells.len());
+        // The top layer's middle cell is the cellar's Air, its ends stone.
+        assert_eq!(ghost.voxels[6], stone());
+        assert_eq!(ghost.voxels[7], Voxel::AIR);
     }
 
     /// One stone and one Keep along x, then a stone above the Keep: any turn

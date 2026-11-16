@@ -442,6 +442,7 @@ fn a_place_tool_structures_chests_start_empty() {
             direction: Vec3::NEG_Y,
             template: "terra:cottage".into(),
             turn: Turn::NONE,
+            pinned: None,
         },
     );
     for _ in 0..200 {

@@ -543,6 +543,7 @@ fn a_placed_structures_voxels_reach_a_mod_as_edit_events() {
         direction: Vec3::NEG_Y,
         template: "t:pair".into(),
         turn: Turn::NONE,
+        pinned: None,
     });
     h.app.world_mut().run_schedule(RunFixedMainLoop);
     h.app.world_mut().run_schedule(FixedPreUpdate);
@@ -582,6 +583,7 @@ fn every_voxel_of_an_undo_past_one_ticks_events_reaches_a_mod_in_order() {
         direction: Vec3::NEG_Y,
         template: "t:slab".into(),
         turn: Turn::NONE,
+        pinned: None,
     });
     let placed = w * layers * d;
     let mut heard = Vec::new();

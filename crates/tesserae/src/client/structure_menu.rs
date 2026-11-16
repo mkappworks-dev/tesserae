@@ -20,7 +20,6 @@ use super::menu_ui::IconKind;
 use super::structure::{Ghost, Outcome, PlaceTool, Tint, grouped, holding_place, turned_size_m};
 use super::theme;
 use crate::content::ContentCatalogue;
-use crate::server::edit::StructureIntent;
 use crate::server::tool::{ToolKind, UseIntent, UseOutcome, UseResult, UseWith};
 use crate::session::SessionApp;
 use crate::world::WorldSettings;
@@ -258,7 +257,7 @@ fn activate(
     mut tool: ResMut<PlaceTool>,
     (catalogue, mut hotbar): (Res<Catalogue>, ResMut<Hotbar>),
     camera: Query<&GlobalTransform, With<FlyCamera>>,
-    mut intents: MessageWriter<StructureIntent>,
+    (preview, time): (Res<super::structure::Preview>, Res<Time>),
     mut cursor: Query<&mut CursorOptions, With<PrimaryWindow>>,
 ) {
     let Ok(&control) = controls.get(event.entity) else {
@@ -280,13 +279,16 @@ fn activate(
         }
         Control::Turn => tool.turn = tool.turn.next(),
         Control::Close => shut(),
+        // As Place does: the first step pins the preview, to walk round before building.
         Control::PlaceHere => {
-            if let Some(intent) = camera
-                .iter()
-                .next()
-                .and_then(|camera| tool.intent(&catalogue.0, camera))
-            {
-                intents.write(intent);
+            if let Some(camera) = camera.iter().next() {
+                super::structure::pin(
+                    &mut tool,
+                    &preview,
+                    &catalogue.0,
+                    camera,
+                    time.elapsed_secs_f64(),
+                );
             }
             shut();
         }
@@ -737,12 +739,14 @@ fn list_panel(
     let chosen = tool.chosen(catalogue).map(|t| t.name.as_str());
     let keys = |action| key(bindings, labels, action);
     let hint = format!(
-        "{} opens and closes this list · {} puts the Tool away · {} turns · {} places the whole \
-         Structure or nothing · {} removes it in one step",
+        "{} opens and closes this list · {} puts the Tool away · {} turns · {} pins a preview; \
+         aimed at it, {} builds it whole and {} cancels it · {} removes it in one step",
         keys(Action::Structures),
         keys(Action::ClearTool),
         keys(Action::TurnStructure),
         keys(Action::Place),
+        keys(Action::Place),
+        keys(Action::ClearTool),
         keys(Action::Undo),
     );
     commands
@@ -940,7 +944,14 @@ fn update_info(
                 .outcome
                 .map_or("Aim at a surface to place it.".to_owned(), Outcome::text),
             Info::Key(action) => keys(action),
-            Info::PlaceKey => format!("{} places it whole", keys(Action::Place)),
+            Info::PlaceKey => match tool.pinned {
+                Some(_) => format!(
+                    "Preview pinned. Aim at it: {} builds it whole, {} cancels it",
+                    keys(Action::Place),
+                    keys(Action::ClearTool)
+                ),
+                None => format!("{} pins a preview to walk round", keys(Action::Place)),
+            },
         }
     };
     for (part, mut text) in &mut texts {
