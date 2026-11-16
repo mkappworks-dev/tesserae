@@ -11,6 +11,6 @@ One dispatch on Generator version for terrain height, caves and the water consum
 ## Acceptance criteria
 
 - [x] Versions 1 and 2 generate the recorded digests, bit for bit.
-- [x] A test can generate under version 3 by passing it; the save refuses 3.
+- [x] A test can generate under version 3 by passing it; the save reopens 3, and a new World is made under 3 only with `TESSERAE_GENERATOR=3` under `dev` until ticket 14.
 - [x] A save without the new fields reads as before.
 - [x] No Voxel is solid above the version 3 bound; the deep early-out never declares a non-uniform Chunk uniform.

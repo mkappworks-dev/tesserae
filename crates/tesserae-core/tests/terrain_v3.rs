@@ -551,3 +551,68 @@ fn caverns_under_the_water_table_are_underground_lakes_and_the_rest_are_air() {
         "{dry_hollow} air voxels above the water table"
     );
 }
+
+fn fingerprint(chunk: &tesserae_core::Chunk) -> Vec<u16> {
+    (0..CHUNK_SIZE)
+        .flat_map(|z| (0..CHUNK_SIZE).flat_map(move |y| (0..CHUNK_SIZE).map(move |x| (x, y, z))))
+        .map(|(x, y, z)| chunk.get(x, y, z).material())
+        .collect()
+}
+
+#[test]
+fn chunks_are_the_same_in_any_order_and_with_a_cold_cache() {
+    let coords: Vec<(i32, i32, i32)> = (-3..3)
+        .flat_map(|cx| (-2..2).flat_map(move |cz| (-3..4).map(move |cy| (cx * 37, cy, cz * 41))))
+        .collect();
+    let forward = Worldgen::new(SEED, 1.0, caved_wet_v3());
+    let a: Vec<_> = coords
+        .iter()
+        .map(|&(x, y, z)| fingerprint(&forward.chunk(x, y, z)))
+        .collect();
+    let backward = Worldgen::new(SEED, 1.0, caved_wet_v3());
+    let mut b: Vec<_> = coords
+        .iter()
+        .rev()
+        .map(|&(x, y, z)| {
+            backward.forget_regions();
+            fingerprint(&backward.chunk(x, y, z))
+        })
+        .collect();
+    b.reverse();
+    assert_eq!(a, b);
+}
+
+#[test]
+fn solid_and_air_are_the_same_in_metres_at_every_voxel_size() {
+    let fine = Worldgen::new(SEED, 0.5, caved_wet_v3());
+    let coarse = Worldgen::new(SEED, 1.0, caved_wet_v3());
+    let at = |g: &Worldgen, size: f32, x_m: f32, y_m: f32, z_m: f32| {
+        let (ix, iy, iz) = (
+            (x_m / size) as i32,
+            (y_m / size).floor() as i32,
+            (z_m / size) as i32,
+        );
+        g.chunk(ix.div_euclid(32), iy.div_euclid(32), iz.div_euclid(32))
+            .get(
+                ix.rem_euclid(32) as usize,
+                iy.rem_euclid(32) as usize,
+                iz.rem_euclid(32) as usize,
+            )
+    };
+    let mut compared = 0;
+    for (x, z) in [
+        (40.0, 40.0),
+        (555.0, -310.0),
+        (-1200.0, 900.0),
+        (3000.0, 2500.0),
+    ] {
+        let h = coarse.surface_height_m(x, z);
+        for dy in -30..30 {
+            let y = (h + dy as f32).floor();
+            let (a, b) = (at(&coarse, 1.0, x, y, z), at(&fine, 0.5, x, y, z));
+            assert_eq!(a.is_air(), b.is_air(), "at {x},{y},{z}");
+            compared += 1;
+        }
+    }
+    assert!(compared > 200);
+}

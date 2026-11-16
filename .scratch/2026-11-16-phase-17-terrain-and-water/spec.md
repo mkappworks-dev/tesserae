@@ -86,16 +86,18 @@ the spec records the shape, not the constants.
 
 **Versioning and snapshot.**
 
-- `GENERATOR_VERSION` moves to 3 and `SUPPORTED_GENERATORS` gains 3 in the last
-  ticket only. Until then a World cannot be created or saved under 3, but tests
-  generate under it by passing the version to `Worldgen`.
+- `SUPPORTED_GENERATORS` gains 3 in ticket 01 so the save can reopen a World made
+  under it, and `GENERATOR_VERSION` (what a new World is made under) moves to 3 in
+  the last ticket only. Until then `TESSERAE_GENERATOR=3` under `dev` makes a
+  version 3 World, and tests pass the version to `Worldgen`; a World made that way
+  before the last ticket is throwaway.
 - Terrain height, caves and the water consumers dispatch on the version through
   one function, replacing the single `BIOMES_SINCE` comparison. Versions 1 and 2
   call today's code unchanged.
 - Every new parameter is an optional field of the save's `Generation` snapshot,
   defaulted when absent, so an older save reads as before.
 
-**The band.** `floor_m` and `ceiling_m` in metres, plus `overhang_m`. The global
+**The band.** `depth_m` below Sea level and `height_m` above it, in metres, plus `overhang_m`. The global
 surface bound is `[floor_m - overhang_m, ceiling_m + overhang_m]` widened by
 Plants and Structures as today. The chunk early-outs, `above_the_surface` and
 the Structure band read it. A mountain past the ceiling is clamped. Uniform deep

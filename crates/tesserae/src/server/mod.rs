@@ -154,7 +154,7 @@ pub fn plugin(app: &mut App) {
 }
 
 /// The Generator version a new World is created under. Under `dev`, `TESSERAE_GENERATOR=3` picks
-/// the version 3 terrain before it is the default, so step 17 can be played before it ships.
+/// the version 3 terrain while it is not yet the default.
 #[cfg(feature = "dev")]
 pub(crate) fn new_world_generator() -> u32 {
     generator_from(|name| std::env::var(name).ok())

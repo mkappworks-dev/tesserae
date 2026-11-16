@@ -966,8 +966,7 @@ impl Worldgen {
         self.voxel_size
     }
 
-    /// The lake, its level clamped as generation clamps it. Under version 3 the level is Sea level;
-    /// ask [`Self::water_level_m`] for a column's own.
+    /// Under version 3 the lake's level is Sea level; ask [`Self::water_level_m`] for a column's own.
     pub fn water(&self) -> Option<WaterParams> {
         self.water
     }

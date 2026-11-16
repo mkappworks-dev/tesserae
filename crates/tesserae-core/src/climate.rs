@@ -281,9 +281,8 @@ impl ClimateField {
         sum / weights
     }
 
-    /// The earlier of two equally near Biomes, `None` for an empty table. Under version 3 the Climate is moved by `site.1` (temperature and
-    /// humidity) and only Biomes whose selectors admit `site.0` compete, falling back to all of
-    /// them where none does, so a column always has a Biome.
+    /// The earlier of two equally near Biomes, `None` for an empty table. `site` (version 3) moves
+    /// the Climate and ranks the Biomes by their selectors; a column that none admits still gets one.
     pub(crate) fn biome_at(
         &self,
         biomes: &BiomeTable,
@@ -1233,7 +1232,6 @@ const SKY_BLEND_WIDTH: f32 = 0.1;
 pub struct BiomeTable {
     len: u8,
     biomes: [Biome; MAX_BIOMES],
-    /// Version 3's selectors, beside the Biomes so a Biome literal needs no new field.
     selectors: [BiomeSelectors; MAX_BIOMES],
 }
 

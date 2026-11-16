@@ -63,6 +63,12 @@ pub(crate) struct Region {
     nodes: Vec<Node>,
 }
 
+impl Node {
+    fn is_lake(&self) -> bool {
+        self.level_m - self.height_m > LAKE_MIN_DEPTH_M
+    }
+}
+
 impl Region {
     fn node(&self, i: i32, j: i32, region: [i32; 2]) -> Node {
         let (li, lj) = (
@@ -74,13 +80,30 @@ impl Region {
     }
 }
 
+/// The ground's ceiling a river's valley sets, and how strongly it applies.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct Valley {
+    pub ceiling_m: f32,
+    /// 1 at the water's edge, easing to 0 at the valley's reach.
+    pub fade: f32,
+}
+
+/// The nearest river segment to a point.
+#[derive(Clone, Copy)]
+struct Nearest {
+    /// Metres from the segment's bank (its centre less half its width), never negative.
+    edge_m: f32,
+    surface_m: f32,
+    width_m: f32,
+}
+
 /// What a column sees of the water on the land.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct Wet {
     /// The level water stands at over this column, if a lake or river reaches it.
     pub level_m: Option<f32>,
-    /// How far the river valley lowers the ground here, applied as a ceiling.
-    pub ground_ceiling_m: Option<(f32, f32)>,
+    /// The valley a river cuts here, if one reaches.
+    pub valley: Option<Valley>,
 }
 
 pub(crate) struct Drainage {
@@ -92,7 +115,8 @@ pub(crate) struct Drainage {
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
-/// The region this thread asked for last, and whose drainage: a Chunk's columns nearly always share it.
+/// The region this thread asked for last and whose drainage it was. A stale entry is harmless: a
+/// region is a pure function of its Drainage, so this only skips the lock and the map.
 type LastRegion = Option<(u64, [i32; 2], Arc<Region>)>;
 
 thread_local! {
@@ -114,6 +138,8 @@ impl Drainage {
         }
     }
 
+    /// Drops the cache and this thread's last region; another thread keeps its own until it next
+    /// misses.
     pub(crate) fn forget(&self) {
         self.cache.write().unwrap().clear();
         LAST.with(|l| *l.borrow_mut() = None);
@@ -192,8 +218,7 @@ impl Drainage {
                 }
                 let f = height[n].max(here + EPS_M);
                 level[n] = f;
-                // The step from `n` back to `at` is the opposite direction.
-                parent[n] = (7 - k) as u8;
+                parent[n] = opposite(k);
                 heap.push(Reverse((sortable(f), n)));
             }
         }
@@ -230,7 +255,7 @@ impl Drainage {
 
         for (di, dj) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
             let n = region.node(i0 + di, j0 + dj, key);
-            if n.level_m - n.height_m > LAKE_MIN_DEPTH_M && n.level_m > self.sea_m {
+            if n.is_lake() && n.level_m > self.sea_m {
                 level_m = Some(level_m.map_or(n.level_m, |l: f32| l.max(n.level_m)));
             }
         }
@@ -238,7 +263,7 @@ impl Drainage {
         // Bends the lattice's straight 8-way segments into meanders; bounded under a node's width so
         // the stencil below still holds every segment that can reach the point.
         let (qx, qz) = crate::noise::warp2(x_m, z_m, MEANDER_SEED, 90.0, 14.0);
-        let mut best: Option<(f32, f32, f32)> = None;
+        let mut best: Option<Nearest> = None;
         for dj in -1..=2 {
             for di in -1..=2 {
                 let (ni, nj) = (i0 + di, j0 + dj);
@@ -248,9 +273,7 @@ impl Drainage {
                 }
                 let (si, sj) = STEPS[n.down as usize];
                 let p = region.node(ni + si, nj + sj, key);
-                if p.level_m - p.height_m > LAKE_MIN_DEPTH_M
-                    && n.level_m - n.height_m > LAKE_MIN_DEPTH_M
-                {
+                if p.is_lake() && n.is_lake() {
                     continue;
                 }
                 let a = [ni as f32 * NODE_M, nj as f32 * NODE_M];
@@ -264,28 +287,41 @@ impl Drainage {
                 let width = river_width_m(n.catchment) * (1.0 - t) + river_width_m(p.catchment) * t;
                 let surface = (n.level_m * (1.0 - t) + p.level_m * t) - SURFACE_BELOW_M;
                 let edge = (d - width / 2.0).max(0.0);
-                if best.is_none_or(|(e, _, _)| edge < e) {
-                    best = Some((edge, surface, width));
+                if best.is_none_or(|b| edge < b.edge_m) {
+                    best = Some(Nearest {
+                        edge_m: edge,
+                        surface_m: surface,
+                        width_m: width,
+                    });
                 }
             }
         }
-        let mut ground_ceiling_m = None;
-        if let Some((edge, surface, width)) = best
+        let mut valley = None;
+        if let Some(Nearest {
+            edge_m: edge,
+            surface_m: surface,
+            width_m: width,
+        }) = best
             && edge < VALLEY_REACH_M
         {
             let dig = 1.2 + 0.25 * width.sqrt();
             let target = surface - dig + edge * BANK_SLOPE;
             let fade = 1.0 - smoothstep(0.66 * VALLEY_REACH_M, VALLEY_REACH_M, edge);
-            ground_ceiling_m = Some((target, fade));
+            valley = Some(Valley {
+                ceiling_m: target,
+                fade,
+            });
             if edge * BANK_SLOPE < dig * 2.0 {
                 level_m = Some(level_m.map_or(surface, |l| l.max(surface)));
             }
         }
-        Wet {
-            level_m,
-            ground_ceiling_m,
-        }
+        Wet { level_m, valley }
     }
+}
+
+/// `STEPS` is ordered so that a step and its reverse sum to 7.
+fn opposite(step: usize) -> u8 {
+    (STEPS.len() - 1 - step) as u8
 }
 
 fn river_width_m(catchment: u32) -> f32 {
@@ -295,4 +331,114 @@ fn river_width_m(catchment: u32) -> f32 {
 fn smoothstep(a: f32, b: f32, x: f32) -> f32 {
     let t = ((x - a) / (b - a)).clamp(0.0, 1.0);
     t * t * (3.0 - 2.0 * t)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SEA_M: f32 = 24.0;
+
+    /// Hills and a sea in one corner, so water has somewhere to go.
+    fn drainage() -> Drainage {
+        Drainage::new(SEA_M, |x, z| {
+            let n = crate::noise::fbm2(x / 900.0, z / 900.0, 7, 4);
+            SEA_M - 30.0 + n * 140.0 - (x + z).max(0.0) * 0.004
+        })
+    }
+
+    fn region_nodes(d: &Drainage, key: [i32; 2]) -> Vec<(i32, i32, Node)> {
+        let region = d.solve(key);
+        (-MARGIN..REGION_NODES + MARGIN)
+            .flat_map(|j| (-MARGIN..REGION_NODES + MARGIN).map(move |i| (i, j)))
+            .map(|(i, j)| {
+                let at = [i + key[0] * REGION_NODES, j + key[1] * REGION_NODES];
+                (at[0], at[1], region.node(at[0], at[1], key))
+            })
+            .collect()
+    }
+
+    #[test]
+    fn every_stream_runs_downhill_and_ends_at_the_sea_or_the_edge_of_what_is_stored() {
+        let d = drainage();
+        let key = [0, 0];
+        let region = d.solve(key);
+        let stored = |i: i32, j: i32| {
+            (-MARGIN..REGION_NODES + MARGIN).contains(&i)
+                && (-MARGIN..REGION_NODES + MARGIN).contains(&j)
+        };
+        let mut checked = 0;
+        for (i, j, n) in region_nodes(&d, key) {
+            if n.catchment < STREAM_NODES {
+                continue;
+            }
+            let (mut at, mut node) = ((i, j), n);
+            for _ in 0..(STORED * STORED) {
+                if node.down == NO_PARENT {
+                    break;
+                }
+                let (di, dj) = STEPS[node.down as usize];
+                let next = (at.0 + di, at.1 + dj);
+                if !stored(next.0, next.1) {
+                    break;
+                }
+                let down = region.node(next.0, next.1, key);
+                assert!(
+                    down.level_m <= node.level_m + 1e-3,
+                    "water ran uphill at {at:?}"
+                );
+                assert!(
+                    down.catchment > node.catchment,
+                    "a stream lost water at {at:?}"
+                );
+                (at, node) = (next, down);
+            }
+            // A stream stopped for a reason: it reached the sea, the only outlet inside the stored
+            // area, or it left that area.
+            if node.down == NO_PARENT {
+                assert!(
+                    node.level_m <= SEA_M + 1e-3,
+                    "a stream ends on dry land at {at:?}"
+                );
+            } else {
+                let (di, dj) = STEPS[node.down as usize];
+                assert!(
+                    !stored(at.0 + di, at.1 + dj),
+                    "a stream stopped short at {at:?}"
+                );
+            }
+            checked += 1;
+        }
+        assert!(checked > 20, "{checked} stream nodes");
+    }
+
+    #[test]
+    fn a_basin_fills_to_its_spill_and_no_water_stands_below_the_ground() {
+        let d = drainage();
+        let mut lakes = 0;
+        for (_, _, n) in region_nodes(&d, [0, 0]) {
+            assert!(n.level_m >= n.height_m - 1e-3, "water under the ground");
+            lakes += n.is_lake() as u32;
+        }
+        assert!(lakes > 0, "no basin in the test land");
+    }
+
+    #[test]
+    fn neighbouring_regions_agree_where_their_stored_nodes_overlap() {
+        let d = drainage();
+        let (a, b) = (d.solve([0, 0]), d.solve([1, 0]));
+        let (mut same, mut total) = (0, 0);
+        for j in 0..REGION_NODES {
+            for i in REGION_NODES..REGION_NODES + MARGIN {
+                let (na, nb) = (a.node(i, j, [0, 0]), b.node(i, j, [1, 0]));
+                total += 1;
+                same += ((na.level_m - nb.level_m).abs() < 1e-3 && na.down == nb.down) as u32;
+            }
+        }
+        // Two windows differ only where a far boundary reaches them: nearly every node agrees.
+        assert!(
+            same * 100 >= total * 95,
+            "{same} of {total} border nodes agree"
+        );
+    }
 }

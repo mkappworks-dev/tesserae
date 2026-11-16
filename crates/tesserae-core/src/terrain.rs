@@ -388,8 +388,8 @@ impl Terrain {
     /// cut into it.
     pub(crate) fn height_m(&self, x_m: f32, z_m: f32) -> f32 {
         let h = self.base.base_height_m(x_m, z_m);
-        match self.drainage.wet(x_m, z_m).ground_ceiling_m {
-            Some((ceiling_m, fade)) if ceiling_m < h => h - (h - ceiling_m) * fade,
+        match self.drainage.wet(x_m, z_m).valley {
+            Some(v) if v.ceiling_m < h => h - (h - v.ceiling_m) * v.fade,
             _ => h,
         }
     }
