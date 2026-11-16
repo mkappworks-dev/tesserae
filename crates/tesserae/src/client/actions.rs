@@ -57,6 +57,7 @@ pub(super) enum Action {
     LayoutReverse,
     LayoutActive,
     TurnStructure,
+    Structures,
     /// Saved as `catalogue` before the Menu replaced the Catalogue page.
     #[serde(alias = "catalogue")]
     Menu,
@@ -316,6 +317,7 @@ impl Bindings {
             (LayoutReverse, KeyCode::KeyT),
             (LayoutActive, KeyCode::KeyJ),
             (TurnStructure, KeyCode::KeyR),
+            (Structures, KeyCode::KeyK),
         ]
         .into_iter()
         .chain(SLOTS.into_iter().zip(super::edit::SLOT_KEYS))

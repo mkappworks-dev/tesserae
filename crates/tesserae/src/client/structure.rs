@@ -200,9 +200,9 @@ pub(super) fn holding_place(hotbar: &Hotbar, catalogue: &ContentCatalogue) -> bo
 }
 
 /// With the place Tool in hand: the turn key turns, Place sends the Structure
-/// intent, and Remove is taken so it sends no Use. Use itself is left to the
-/// Tool's Use, whose answer opens the list. Like an Edit, nothing is sent by
-/// the click that grabs the cursor.
+/// intent, and Use and Remove are taken so they send no Use: the Structures
+/// key asks for the list. Like an Edit, nothing is sent by the click that
+/// grabs the cursor.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn intercept(
     ownership: Res<Ownership>,
@@ -234,6 +234,7 @@ pub(super) fn intercept(
     }
     actions.cancel(Action::Place);
     actions.cancel(Action::Remove);
+    actions.cancel(Action::Use);
 }
 
 #[derive(Resource, Default)]
@@ -781,6 +782,16 @@ mod tests {
             assert_eq!(tool.turn, Turn::new(quarters));
         }
         assert_eq!(app.world().resource::<PlaceTool>().facing(), "South");
+    }
+
+    #[test]
+    fn use_with_the_place_tool_in_hand_is_taken_and_opens_nothing() {
+        let mut app = app(Holding::Tool(PLACE));
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::KeyG);
+        app.update();
+        assert!(!app.world().resource::<Actions>().started(Action::Use));
     }
 
     #[test]

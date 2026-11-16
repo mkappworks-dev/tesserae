@@ -53,6 +53,7 @@ pub(in crate::client) fn action_name(action: Action) -> &'static str {
         LayoutReverse => "Layout: reverse the axis",
         LayoutActive => "Layout: next axis",
         TurnStructure => "Place Tool: turn the Structure",
+        Structures => "Structure placement",
         Menu => "Open the Menu",
         Settings => "Open Settings",
         Inventory => "Open Inventory",
@@ -70,7 +71,7 @@ pub(in crate::client) fn category(action: Action) -> &'static str {
         | Slower | MovementMode | View | ZoomIn | ZoomOut => "Movement",
         Place | PlacementGhost | Remove | Sample | EmptyHand | Shape | Turn | Flip | CycleTool
         | Use | ClearTool | Layout | LayoutMore | LayoutLess | LayoutReverse | LayoutActive
-        | TurnStructure => "Building",
+        | TurnStructure | Structures => "Building",
         _ => "Interface",
     }
 }
@@ -887,6 +888,7 @@ pub(super) fn binding_order(action: Action) -> usize {
         LayoutReverse,
         LayoutActive,
         TurnStructure,
+        Structures,
         Menu,
         Inventory,
         Map,

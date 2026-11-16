@@ -1654,7 +1654,7 @@ function structuresPage() {
     s.view === "placing"
       ? `<p class="item-eyebrow">WHAT PLACING DOES</p><div class="structure-keys">${structureLegend(tally)}</div>`
       : `<p class="item-eyebrow">MATERIALS · ALL OBTAINABLE IN ${tpl.game.toUpperCase()}</p><div class="structure-keys">${structureMaterials()}</div>`
-  }<div class="layout-totals"><div><span>Authored</span><b>1.0 m <small>grid</small></b></div><div><span>This World</span><b>${tally.voxel} m <small>Voxels</small></b></div></div><div class="structure-outcome ${tone}" role="status">${text}</div><p class="item-eyebrow">EXAMPLE AIM</p>${seg(GROUNDS, "ground", "structure-ground")}${seg({ ok: "In reach", far: "Too far", inside: "Inside", loading: "Loading" }, "case", "structure-case")}<small>In the game the aim decides these. The browser uses examples. Worldgen's level rule does not apply to a Player's placement.</small></div><footer><small>Use opens this list · R turns · Right mouse places the whole Structure or nothing · Z removes it in one step · Left mouse cancels</small>${button("Place here", "structure-place", { primary: true })}${button("Put the Tool away", "structure-exit", { ghost: true })}</footer></section></div>`;
+  }<div class="layout-totals"><div><span>Authored</span><b>1.0 m <small>grid</small></b></div><div><span>This World</span><b>${tally.voxel} m <small>Voxels</small></b></div></div><div class="structure-outcome ${tone}" role="status">${text}</div><p class="item-eyebrow">EXAMPLE AIM</p>${seg(GROUNDS, "ground", "structure-ground")}${seg({ ok: "In reach", far: "Too far", inside: "Inside", loading: "Loading" }, "case", "structure-case")}<small>In the game the aim decides these. The browser uses examples. Worldgen's level rule does not apply to a Player's placement.</small></div><footer><small>K opens and closes this list · Backspace puts the Tool away · R turns · Right mouse places the whole Structure or nothing · Z removes it in one step · Left mouse cancels</small>${button("Place here", "structure-place", { primary: true })}${button("Put the Tool away", "structure-exit", { ghost: true })}</footer></section></div>`;
 }
 function structureHud() {
   if (state.heldTool !== "Place" || state.screen !== "play") return "";
@@ -1662,7 +1662,7 @@ function structureHud() {
   const s = state.structure,
     tally = structureTally(),
     [tone, text] = structureOutcome();
-  return `<aside class="layout-status structure-hud"><span>${icon("layout", 18)} Place Tool</span><b>${TEMPLATES[s.template].name} · facing ${FACING[s.turn]}</b><small>${tally.size.map((n) => n.toFixed(1)).join(" × ")} m · ${structureNumber(tally.total)} Voxels</small><div class="structure-keys compact">${structureLegend(tally)}</div><div class="structure-outcome ${tone}" role="status">${text}</div><small><kbd>G</kbd> Templates <kbd>R</kbd> Turn</small><small>Right mouse places it whole</small></aside>`;
+  return `<aside class="layout-status structure-hud"><span>${icon("layout", 18)} Place Tool</span><b>${TEMPLATES[s.template].name} · facing ${FACING[s.turn]}</b><small>${tally.size.map((n) => n.toFixed(1)).join(" × ")} m · ${structureNumber(tally.total)} Voxels</small><div class="structure-keys compact">${structureLegend(tally)}</div><div class="structure-outcome ${tone}" role="status">${text}</div><small><kbd>K</kbd> Templates <kbd>R</kbd> Turn</small><small>Right mouse places it whole</small></aside>`;
 }
 
 function structuresPlace() {
@@ -1717,16 +1717,26 @@ document.addEventListener("keydown", (e) => {
   )
     return;
   const key = e.key.toLowerCase(),
+    listing = state.screen === "structures",
     holding = state.screen === "play" && state.heldTool === "Place";
-  if (!(holding || state.screen === "structures")) return;
+  /* K is Structure placement's own key, as L is the Layout menu's: from play it takes the Tool. */
+  if (key === "k" && state.screen === "play") state.heldTool = "Place";
   const act =
-    key === "r"
-      ? "structure-turn"
-      : key === "g" && holding
-        ? "structure-open"
-        : e.key === "Escape" && state.screen === "structures"
-          ? "structure-close"
-          : "";
+    key === "k"
+      ? listing
+        ? "structure-close"
+        : state.screen === "play"
+          ? "structure-open"
+          : ""
+      : !(holding || listing)
+        ? ""
+        : key === "r"
+          ? "structure-turn"
+          : e.key === "Backspace" && listing
+            ? "structure-exit"
+            : e.key === "Escape" && listing
+              ? "structure-close"
+              : "";
   if (!act) return;
   e.preventDefault();
   e.stopImmediatePropagation();

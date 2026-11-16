@@ -21,7 +21,7 @@ use super::structure::{Ghost, Outcome, PlaceTool, Tint, grouped, holding_place, 
 use super::theme;
 use crate::content::ContentCatalogue;
 use crate::server::edit::StructureIntent;
-use crate::server::tool::{UseOutcome, UseResult};
+use crate::server::tool::{ToolKind, UseIntent, UseOutcome, UseResult, UseWith};
 use crate::session::SessionApp;
 use crate::world::WorldSettings;
 
@@ -48,6 +48,9 @@ pub(super) struct StructureList {
     dirty: bool,
     /// What is up now: the list, the HUD card, or nothing.
     shown: Option<bool>,
+    /// The Structures key asked to use the place Tool, so its answer opens the list with the
+    /// Tool in hand whatever was held.
+    asked: bool,
 }
 
 impl StructureList {
@@ -121,18 +124,47 @@ pub(super) fn plugin(app: &mut App) {
         );
 }
 
-/// Escape closes the list with the cursor free, as it does the Layout menu;
-/// putting the Tool down closes it into play.
+/// The Structures key asks to use the place Tool from play, held or not, as the
+/// Layout key opens its menu; the Server's answer opens the list. With the list
+/// open it closes it into play, the clear key closes it and puts the Tool away,
+/// and Escape closes it with the cursor free, as it does the Layout menu.
+/// Putting the Tool down closes it into play.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn toggle(
     actions: Res<Actions>,
     mut list: ResMut<StructureList>,
-    (hotbar, catalogue): (Res<Hotbar>, Res<Catalogue>),
+    (mut hotbar, catalogue): (ResMut<Hotbar>, Res<Catalogue>),
+    (menu, settings, layout, inventory, map): Blockers,
+    camera: Query<&GlobalTransform, With<FlyCamera>>,
+    mut intents: MessageWriter<UseIntent>,
     mut cursor: Single<&mut CursorOptions, With<PrimaryWindow>>,
 ) {
+    let key = actions.started(Action::Structures);
     if !list.open {
+        let blocked = menu.open
+            || settings.is_some_and(|s| s.open)
+            || layout.is_some_and(|m| m.open)
+            || inventory.is_some_and(|w| w.open)
+            || map.is_some_and(|w| w.open);
+        let place = catalogue.0.tools.iter().find(|t| t.kind == ToolKind::Place);
+        if key
+            && !blocked
+            && let (Some(place), Some(camera)) = (place, camera.iter().next())
+        {
+            intents.write(UseIntent {
+                with: UseWith::Tool(place.id),
+                origin: camera.translation(),
+                direction: *camera.forward(),
+                expected: None,
+            });
+            list.asked = true;
+        }
         return;
     }
-    if !holding_place(&hotbar, &catalogue.0) {
+    if !holding_place(&hotbar, &catalogue.0) || key {
+        close(&mut list, &mut cursor, true);
+    } else if actions.started(Action::ClearTool) {
+        hotbar.outside = None;
         close(&mut list, &mut cursor, true);
     } else if actions.cancel_requested() {
         close(&mut list, &mut cursor, false);
@@ -158,20 +190,29 @@ type Blockers<'w> = (
 );
 
 /// The Server allowed the place Tool's Use: the list opens, unless another
-/// window opened while the answer was on its way.
+/// window opened while the answer was on its way. Asked by the Structures key,
+/// it takes the place Tool into hand.
 fn open_on_use(
     mut outcomes: MessageReader<UseOutcome>,
     mut list: ResMut<StructureList>,
-    (hotbar, catalogue): (Res<Hotbar>, Res<Catalogue>),
+    (mut hotbar, catalogue): (ResMut<Hotbar>, Res<Catalogue>),
     (menu, settings, layout, inventory, map): Blockers,
     mut cursor: Single<&mut CursorOptions, With<PrimaryWindow>>,
 ) {
-    let asked = outcomes
-        .read()
-        .any(|UseOutcome(outcome)| matches!(outcome, Ok(UseResult::TemplateList)));
-    if !asked
+    let mut answered = false;
+    let mut allowed = false;
+    for UseOutcome(outcome) in outcomes.read() {
+        answered = true;
+        allowed |= matches!(outcome, Ok(UseResult::TemplateList));
+    }
+    let by_key = list.asked;
+    if answered {
+        list.asked = false;
+    }
+    let place = catalogue.0.tools.iter().find(|t| t.kind == ToolKind::Place);
+    if !allowed
         || list.open
-        || !holding_place(&hotbar, &catalogue.0)
+        || !(by_key || holding_place(&hotbar, &catalogue.0))
         || menu.open
         || settings.is_some_and(|s| s.open)
         || layout.is_some_and(|m| m.open)
@@ -179,6 +220,9 @@ fn open_on_use(
         || map.is_some_and(|w| w.open)
     {
         return;
+    }
+    if by_key && let Some(place) = place {
+        hotbar.outside = Some(super::edit::Holding::Tool(place.id));
     }
     list.open = true;
     list.dirty = true;
@@ -566,8 +610,10 @@ fn hud(parent: &mut ChildSpawnerCommands) {
                 ..default()
             })
             .with_children(|keys| {
-                for (action, what) in [(Action::Use, "Templates"), (Action::TurnStructure, "Turn")]
-                {
+                for (action, what) in [
+                    (Action::Structures, "Templates"),
+                    (Action::TurnStructure, "Turn"),
+                ] {
                     look::key_cap(keys, "", Info::Key(action));
                     keys.spawn((
                         Node {
@@ -600,9 +646,10 @@ fn list_panel(
     let chosen = tool.chosen(catalogue).map(|t| t.name.as_str());
     let keys = |action| key(bindings, labels, action);
     let hint = format!(
-        "{} opens this list · {} turns · {} places the whole Structure or nothing · {} \
-         removes it in one step",
-        keys(Action::Use),
+        "{} opens and closes this list · {} puts the Tool away · {} turns · {} places the whole \
+         Structure or nothing · {} removes it in one step",
+        keys(Action::Structures),
+        keys(Action::ClearTool),
         keys(Action::TurnStructure),
         keys(Action::Place),
         keys(Action::Undo),
@@ -830,7 +877,8 @@ mod tests {
             .init_resource::<StructureList>()
             .init_resource::<super::super::menu::Menu>()
             .add_message::<UseOutcome>()
-            .add_systems(Update, open_on_use);
+            .add_message::<UseIntent>()
+            .add_systems(Update, (toggle, open_on_use).chain());
         app.insert_resource(Catalogue(ContentCatalogue {
             tools: vec![CatalogueTool {
                 id: ToolId(0),
@@ -854,7 +902,73 @@ mod tests {
                 ..default()
             },
         ));
+        app.world_mut().spawn((
+            FlyCamera::default(),
+            GlobalTransform::from(Transform::from_xyz(1.0, 2.0, 3.0)),
+        ));
         app
+    }
+
+    /// One frame with `key` pressed; the Use intents it sent.
+    fn press(app: &mut App, key: KeyCode) -> Vec<UseIntent> {
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(key);
+        app.update();
+        let mut keys = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+        keys.release_all();
+        keys.clear();
+        app.world_mut()
+            .resource_mut::<Messages<UseIntent>>()
+            .drain()
+            .collect()
+    }
+
+    fn answered(app: &mut App) {
+        app.world_mut()
+            .write_message(UseOutcome(Ok(UseResult::TemplateList)));
+        app.update();
+    }
+
+    fn held(app: &App) -> Option<super::super::edit::Holding> {
+        app.world().resource::<Hotbar>().outside
+    }
+
+    #[test]
+    fn k_from_play_asks_to_use_the_place_tool_and_the_answer_opens_the_list_with_it_in_hand() {
+        let mut app = app(super::super::edit::Holding::Empty);
+        let sent = press(&mut app, KeyCode::KeyK);
+        assert_eq!(sent.len(), 1);
+        assert_eq!(sent[0].with, UseWith::Tool(ToolId(0)));
+        answered(&mut app);
+        assert!(app.world().resource::<StructureList>().open);
+        assert_eq!(
+            held(&app),
+            Some(super::super::edit::Holding::Tool(ToolId(0)))
+        );
+        assert_eq!(cursor(&mut app), CursorGrabMode::None);
+    }
+
+    #[test]
+    fn k_closes_the_list_into_play_and_backspace_puts_the_tool_away() {
+        let mut app = app(super::super::edit::Holding::Tool(ToolId(0)));
+        answered(&mut app);
+        assert!(
+            press(&mut app, KeyCode::KeyK).is_empty(),
+            "closing asks nothing"
+        );
+        assert!(!app.world().resource::<StructureList>().open);
+        assert_eq!(cursor(&mut app), CursorGrabMode::Locked);
+        assert_eq!(
+            held(&app),
+            Some(super::super::edit::Holding::Tool(ToolId(0)))
+        );
+
+        answered(&mut app);
+        press(&mut app, KeyCode::Backspace);
+        assert!(!app.world().resource::<StructureList>().open);
+        assert_eq!(cursor(&mut app), CursorGrabMode::Locked);
+        assert_eq!(held(&app), None, "the Tool put away");
     }
 
     fn cursor(app: &mut App) -> CursorGrabMode {

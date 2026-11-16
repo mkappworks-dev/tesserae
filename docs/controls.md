@@ -117,6 +117,12 @@ axis, digits type it, **J** moves to the next axis and **T** reverses it. Point
 to point takes A, B, then C for depth; C needs no surface. These are remappable
 actions under Key bindings.
 
+**K** opens the place Tool's list of Templates, taking the Tool into hand, in
+Creative; Survival is refused. With the list open, **K** closes it back into
+play with the Tool in hand, the clear key (**Backspace**) closes it and puts the
+Tool away, and **Escape** closes it with the cursor free. With the Tool in hand,
+**R** turns the Structure, Place stamps it, and Use opens nothing.
+
 Gameplay input is cancelled when ownership changes. Inputs held through a menu,
 focus change or device cancellation require release before activation. Pending
 sampling replies are discarded. The Server continues simulating while UI is open

@@ -63,6 +63,7 @@ const settingsDefaults = {
     "Flip Shape": "E",
     "Toggle placement ghost": "H",
     "Layout mode and menu": "L",
+    "Structure placement": "K",
     "Open the Menu": "Tab",
     "Release cursor": "Escape",
     "Open Settings": "F10",
