@@ -1316,15 +1316,22 @@ const TINT = {
   water: ["#6fb3e8", 0.55],
   blocked: ["#ec7070", 0.85],
 };
-/* The in-game ghost: what placing each cell does, never what it looks like. */
+/* The in-game ghost: the Template itself, translucent, in its own Materials and red where blocked. */
 function structureSvg() {
   const s = state.structure,
+    tpl = TEMPLATES[s.template],
     t = turned(s.template, s.turn),
     S = 16,
     P = (x, y, z) => [(x - z) * S, ((x + z) * S) / 2 - y * S],
     poly = (pts) => pts.map((p) => p.join(",")).join(" "),
     out = [],
-    coords = [];
+    coords = [],
+    pats = new Map(),
+    look = (c) => {
+      const name = materialOf(tpl, c);
+      if (!pats.has(name)) pats.set(name, `ghost-${pats.size}`);
+      return `url(#${pats.get(name)})`;
+    };
   const face = (pts, fill, op, stroke) => {
     coords.push(...pts);
     out.push(
@@ -1368,6 +1375,8 @@ function structureSvg() {
       );
       continue;
     }
+    const fill = st === "blocked" ? color : look(c),
+      seen = st === "blocked" ? op : 0.78;
     face(
       [
         P(x, y, z + 1),
@@ -1375,8 +1384,8 @@ function structureSvg() {
         P(x + 1, y + 1, z + 1),
         P(x, y + 1, z + 1),
       ],
-      color,
-      op * 0.8,
+      fill,
+      seen * 0.8,
       "#101410",
     );
     face(
@@ -1386,8 +1395,8 @@ function structureSvg() {
         P(x + 1, y + 1, z + 1),
         P(x + 1, y + 1, z),
       ],
-      color,
-      op * 0.6,
+      fill,
+      seen * 0.6,
       "#101410",
     );
     face(
@@ -1397,8 +1406,8 @@ function structureSvg() {
         P(x + 1, y + 1, z + 1),
         P(x, y + 1, z + 1),
       ],
-      color,
-      op,
+      fill,
+      seen,
       "#101410",
     );
   }
@@ -1406,7 +1415,13 @@ function structureSvg() {
     ys = coords.map((p) => p[1]),
     minX = Math.min(...xs) - 10,
     minY = Math.min(...ys) - 10;
-  return `<svg class="layout-world-grid" viewBox="${minX} ${minY} ${Math.max(...xs) - minX + 10} ${Math.max(...ys) - minY + 10}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Ghost of the ${TEMPLATES[s.template].name}, facing ${FACING[s.turn]}">${out.join("")}</svg>`;
+  const defs = [...pats]
+    .map(
+      ([name, pid]) =>
+        `<pattern id="${pid}" patternUnits="userSpaceOnUse" width="${S}" height="${S}"><image href="${materialSwatch(name)}" width="${S}" height="${S}" preserveAspectRatio="none"/></pattern>`,
+    )
+    .join("");
+  return `<svg class="layout-world-grid" viewBox="${minX} ${minY} ${Math.max(...xs) - minX + 10} ${Math.max(...ys) - minY + 10}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Ghost of the ${TEMPLATES[s.template].name}, facing ${FACING[s.turn]}"><defs>${defs}</defs>${out.join("")}</svg>`;
 }
 
 function rotateBox([[x0, y0, z0], [x1, y1, z1]], turn) {
@@ -1774,7 +1789,7 @@ function structuresPage() {
     s.view === "placing"
       ? `<p class="item-eyebrow">WHAT PLACING DOES</p><div class="structure-keys">${structureLegend(tally)}</div>`
       : `<p class="item-eyebrow">MATERIALS · ALL OBTAINABLE IN ${tpl.game.toUpperCase()}</p><div class="structure-keys">${structureMaterials()}</div>`
-  }<div class="layout-totals"><div><span>Authored</span><b>1.0 m <small>grid</small></b></div><div><span>This World</span><b>${tally.voxel} m <small>Voxels</small></b></div></div><div class="structure-outcome ${tone}" role="status">${text}</div><p class="item-eyebrow">EXAMPLE AIM</p>${seg(GROUNDS, "ground", "structure-ground")}${seg({ ok: "In reach", far: "Too far", inside: "Inside", loading: "Loading" }, "case", "structure-case")}<small>In the game the aim decides these. The browser uses examples. Worldgen's level rule does not apply to a Player's placement.</small></div><footer><small>K opens and closes this list · Backspace puts the Tool away · R turns · Right mouse places the whole Structure or nothing · Z removes it in one step · Left mouse cancels</small>${button("Place here", "structure-place", { primary: true })}${button("Put the Tool away", "structure-exit", { ghost: true })}</footer></section></div>`;
+  }<div class="layout-totals"><div><span>Authored</span><b>1.0 m <small>grid</small></b></div><div><span>This World</span><b>${tally.voxel} m <small>Voxels</small></b></div></div><div class="structure-outcome ${tone}" role="status">${text}</div><p class="item-eyebrow">EXAMPLE AIM</p>${seg(GROUNDS, "ground", "structure-ground")}${seg({ ok: "In reach", far: "Too far", inside: "Inside", loading: "Loading" }, "case", "structure-case")}<small>In the game the aim decides these. The browser uses examples. Worldgen's level rule does not apply to a Player's placement.</small></div><footer><small>K opens and closes this list · Backspace puts the Tool away · R turns · Right mouse pins a preview; aimed at it, Right mouse builds it whole and Backspace cancels it · Z removes it in one step · Left mouse cancels</small>${button("Place here", "structure-place", { primary: true })}${button("Put the Tool away", "structure-exit", { ghost: true })}</footer></section></div>`;
 }
 function structureHud() {
   if (state.heldTool !== "Place" || state.screen !== "play") return "";
@@ -1782,10 +1797,26 @@ function structureHud() {
   const s = state.structure,
     tally = structureTally(),
     [tone, text] = structureOutcome();
-  return `<aside class="layout-status structure-hud"><span>${icon("layout", 18)} Place Tool</span><div class="structure-hud-head"><span class="structure-thumb">${structureThumb(s.template, s.turn)}</span><b>${TEMPLATES[s.template].name} · facing ${FACING[s.turn]}</b></div><small>${tally.size.map((n) => n.toFixed(1)).join(" × ")} m · ${structureNumber(tally.total)} Voxels</small><div class="structure-keys compact">${structureLegend(tally)}</div><div class="structure-outcome ${tone}" role="status">${text}</div><small><kbd>K</kbd> Templates <kbd>R</kbd> Turn</small><small>Right mouse places it whole</small></aside>`;
+  return `<aside class="layout-status structure-hud"><span>${icon("layout", 18)} Place Tool</span><div class="structure-hud-head"><span class="structure-thumb">${structureThumb(s.template, s.turn)}</span><b>${TEMPLATES[s.template].name} · facing ${FACING[s.turn]}</b></div><small>${tally.size.map((n) => n.toFixed(1)).join(" × ")} m · ${structureNumber(tally.total)} Voxels</small><div class="structure-keys compact">${structureLegend(tally)}</div><div class="structure-outcome ${tone}" role="status">${text}</div><small><kbd>K</kbd> Templates <kbd>R</kbd> Turn</small>${
+    s.pinned
+      ? `<small><b>Preview pinned.</b> Aim at it: Right mouse builds it whole, Backspace cancels it.</small>`
+      : `<small>Right mouse pins a preview to walk round</small>`
+  }</aside>`;
 }
 
+/* Two steps: the first press pins the ghost where it is aimed, the next, aimed at it, builds it. */
 function structuresPlace() {
+  if (!state.structure.pinned) {
+    state.structure.pinned = true;
+    notice(
+      "Preview pinned. Walk round it; aim at it to build or cancel.",
+      "info",
+    );
+    if (state.screen === "structures") navigate("play");
+    else render();
+    return;
+  }
+  state.structure.pinned = false;
   const [tone, text] = structureOutcome();
   if (tone === "refused") return notice(text, "warn");
   if (tone === "wait") {
@@ -1796,6 +1827,7 @@ function structuresPlace() {
   }
   notice(`${TEMPLATES[state.structure.template].name} placed.`);
   log("structure placed");
+  render();
 }
 function structuresAction(name, value) {
   if (!name.startsWith("structure-")) return false;
@@ -1824,7 +1856,11 @@ function structuresAction(name, value) {
   else if (name === "structure-ground") ((s.ground = value), again());
   else if (name === "structure-case") ((s.case = value), again());
   else if (name === "structure-place") structuresPlace();
-  else return false;
+  else if (name === "structure-unpin") {
+    s.pinned = false;
+    notice("Preview cancelled.", "info");
+    render();
+  } else return false;
   return true;
 }
 document.addEventListener("keydown", (e) => {
@@ -1852,13 +1888,22 @@ document.addEventListener("keydown", (e) => {
         ? ""
         : key === "r"
           ? "structure-turn"
-          : e.key === "Backspace" && listing
-            ? "structure-exit"
-            : e.key === "Escape" && listing
-              ? "structure-close"
-              : "";
+          : e.key === "Backspace" && holding && state.structure.pinned
+            ? "structure-unpin"
+            : e.key === "Backspace" && listing
+              ? "structure-exit"
+              : e.key === "Escape" && listing
+                ? "structure-close"
+                : "";
   if (!act) return;
   e.preventDefault();
   e.stopImmediatePropagation();
   action(act);
+});
+/* Right mouse with the place Tool in hand: pin a preview, or, aimed at the pinned one, build it. */
+document.addEventListener("contextmenu", (e) => {
+  if (state.screen !== "play" || state.heldTool !== "Place") return;
+  e.preventDefault();
+  ensureStructure();
+  structuresPlace();
 });
