@@ -554,7 +554,7 @@ controls, movement, save, camera and input work already in flight is tracked in
 | 14  | Audio                   | Server-driven events, metre attenuation, mixing, Soundscapes and Audio settings                                              | CC0 Terra sounds and music         | -          | Done            |
 | 15  | Inventory               | Server-owned transactions that compose with the undo journal, save                                                           | Stack sizes, item rules            | 11, 12     | Done            |
 | 16  | Crafting                | Recipe schema, station interaction, Use on Voxels (doors, containers), UI host                                               | Recipes, stations                  | 15         | Done            |
-| 17  | Weather                 | Weather state and tick, particles, sky hooks                                                                                 | Weather types, climate rules       | 13         | Not started     |
+| 17  | Weather                 | Weather state and tick, particles, sky hooks                                                                                 | Weather types, climate rules       | 13, 22     | Not started     |
 | 18  | Plants                  | Growth on the Server tick, placement rules, harvesting                                                                       | Plant data                         | 13         | Done            |
 | 19  | Map, compass            | Server-provided summaries (the Client never reads World storage), map view                                                   | Map style, markers                 | 13         | Done            |
 | 20  | Structures              | Template format, deterministic placement by worldgen and tools                                                               | Templates                          | 13         | Done            |
@@ -843,7 +843,9 @@ Notes:
     its landform, which amends ADR-0022. Everything is spread by seeded, layered
     fields in metres, coarse to fine, and coarse LOD levels read the same
     fields. The Games then declare the new Biomes and water. Phase 20's bridges
-    find river crossings with no change to their rule.
+    find river crossings with no change to their rule. Weather (step 17) follows
+    step 22 and reads its climate, so rain and snow fall by altitude, coast and
+    Biome; weather never edits terrain.
 - **Step 25** is the largest unknown in 1.0. Machines move as a unit, so they
   need collision, lighting and meshing outside the Chunk grid, Server-owned
   motion that composes with the Player's flight and physics movement, and a save
