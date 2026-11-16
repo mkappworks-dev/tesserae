@@ -771,6 +771,32 @@ interface content {
         loot: option<loot-table>,
         /// Optional Soundscape full name, resolved across loaded Mods.
         soundscape: option<string>,
+        /// Where this Biome may stand beyond its Climate, and how rough its
+        /// landform is, under Generator version 3 only. `none` matches every
+        /// altitude, coast and erosion and leaves relief alone.
+        selectors: option<biome-selectors>,
+    }
+
+    /// An inclusive range; `min` is at most `max`.
+    record selector-range {
+        min: f32,
+        max: f32,
+    }
+
+    /// A Biome's place in the land. A range left `none` matches every value
+    /// on that axis, so a Biome declared before version 3 is unchanged. When
+    /// Biomes tie in Climate the earlier one wins, so list a specific Biome
+    /// before the general one it sits inside.
+    record biome-selectors {
+        /// Metres above Sea level; negative is under the sea.
+        altitude: option<selector-range>,
+        /// Metres inland of the coast; negative is offshore.
+        coast: option<selector-range>,
+        /// 0 rugged to 1 worn flat.
+        erosion: option<selector-range>,
+        /// Multiplies the detail relief of the Biome's landform, 0 to 4. It
+        /// blends smoothly across the Biome's border.
+        relief: option<f32>,
     }
 
     /// A Material or a Plant scattered over a Biome's surface, deterministically

@@ -281,6 +281,22 @@ impl Item {
     }
 }
 
+/// A Biome's place in the land, as a data Mod writes it.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+pub(super) struct Selectors {
+    altitude: Option<[f32; 2]>,
+    coast: Option<[f32; 2]>,
+    erosion: Option<[f32; 2]>,
+    relief: Option<f32>,
+}
+
+impl From<[f32; 2]> for content::SelectorRange {
+    fn from([min, max]: [f32; 2]) -> Self {
+        Self { min, max }
+    }
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub(super) struct Biome {
@@ -293,6 +309,8 @@ pub(super) struct Biome {
     sky_fog: Option<SkyFog>,
 
     cave_scale: Option<f32>,
+
+    selectors: Option<Selectors>,
 
     #[serde(default)]
     surface_features: Vec<SurfaceFeature>,
@@ -406,6 +424,13 @@ impl From<Biome> for content::BiomeDef {
             sky_fog: b.sky_fog.map(Into::into),
 
             cave_scale: b.cave_scale,
+
+            selectors: b.selectors.map(|s| content::BiomeSelectors {
+                altitude: s.altitude.map(Into::into),
+                coast: s.coast.map(Into::into),
+                erosion: s.erosion.map(Into::into),
+                relief: s.relief,
+            }),
 
             surface_features: b
                 .surface_features

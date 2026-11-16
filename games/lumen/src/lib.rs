@@ -73,6 +73,7 @@ fn biomes() -> Vec<BiomeDef> {
     vec![
         BiomeDef {
             soundscape: None,
+            selectors: None,
             name: "garden".into(),
             temperature: 0.5,
             humidity: 0.5,
@@ -93,6 +94,7 @@ fn biomes() -> Vec<BiomeDef> {
         },
         BiomeDef {
             soundscape: None,
+            selectors: None,
             name: "arid_court".into(),
             temperature: 0.78,
             humidity: 0.25,
@@ -110,6 +112,7 @@ fn biomes() -> Vec<BiomeDef> {
         },
         BiomeDef {
             soundscape: None,
+            selectors: None,
             name: "frost_court".into(),
             temperature: 0.22,
             humidity: 0.65,
@@ -130,6 +133,7 @@ fn biomes() -> Vec<BiomeDef> {
         },
         BiomeDef {
             soundscape: None,
+            selectors: None,
             name: "conservatory".into(),
             temperature: 0.72,
             humidity: 0.7,
@@ -147,6 +151,7 @@ fn biomes() -> Vec<BiomeDef> {
         },
         BiomeDef {
             soundscape: None,
+            selectors: None,
             name: "lily_pond".into(),
             temperature: 0.55,
             humidity: 0.78,

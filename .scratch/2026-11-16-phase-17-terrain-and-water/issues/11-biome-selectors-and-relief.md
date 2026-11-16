@@ -12,7 +12,9 @@ Altitude, coast and erosion ranges and a relief scale on Biomes, in the unreleas
 
 ## Acceptance criteria
 
-- [ ] Every earlier Biome declaration loads and behaves as before.
-- [ ] Relief multiplies detail octaves only; the band and base surface do not move.
-- [ ] Borders blend relief and cave tuning smoothly.
-- [ ] A bad range is a load error naming the Biome.
+- [x] Every earlier Biome declaration loads and behaves as before.
+- [x] Relief multiplies detail octaves only; the band and base surface do not move.
+- [x] Borders blend relief and cave tuning smoothly.
+- [x] A bad range is a load error naming the Biome.
+
+- [ ] Strata: rock layers by depth below the surface, their Materials declared per Biome (not built; selectors, relief, the 0.3 WIT field and the TOML loader are).

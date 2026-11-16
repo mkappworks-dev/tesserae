@@ -1,6 +1,6 @@
 # 10: Climate by altitude and coast (17d)
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 04, 06
 
@@ -12,5 +12,5 @@ Spec: [Phase 17](../spec.md).
 
 ## Acceptance criteria
 
-- [ ] Pure in metres at every Voxel size.
-- [ ] Versions 1 and 2 climate is unchanged.
+- [x] Pure in metres at every Voxel size.
+- [x] Versions 1 and 2 climate is unchanged.

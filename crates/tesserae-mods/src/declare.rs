@@ -1000,6 +1000,7 @@ pub fn resolve_biomes(
     lake: Option<MaterialId>,
 ) -> Result<(BiomeTable, OreTable), ModError> {
     let mut biomes: Vec<Biome> = Vec::new();
+    let mut selectors: Vec<tesserae_core::BiomeSelectors> = Vec::new();
     for b in behaviours {
         for (row, def) in b.biomes.iter().enumerate() {
             let bad = |source| ModError::Params {
@@ -1111,6 +1112,19 @@ pub fn resolve_biomes(
                 .collect::<Result<Vec<_>, _>>()?;
             let structures = biome_structures(b, &def.name, &def.structures, tables)?;
             let settlements = biome_settlements(b, &def.name, &def.settlements, tables)?;
+            let range = |r: &Option<content::SelectorRange>| r.as_ref().map(|r| [r.min, r.max]);
+            let chosen = def
+                .selectors
+                .as_ref()
+                .map(|s| tesserae_core::BiomeSelectors {
+                    altitude_m: range(&s.altitude),
+                    coast_m: range(&s.coast),
+                    erosion: range(&s.erosion),
+                    relief: s.relief,
+                })
+                .unwrap_or_default();
+            chosen.validate().map_err(bad)?;
+            selectors.push(chosen);
             biomes.push(Biome {
                 name: BiomeName::new(&format!("{}:{}", b.mod_id, def.name)).map_err(bad)?,
                 temperature: def.temperature,
@@ -1176,7 +1190,9 @@ pub fn resolve_biomes(
     };
     let last = behaviours.last().map_or("", |b| b.mod_id.as_str());
     Ok((
-        BiomeTable::new(&biomes).map_err(|e| table(e, last, "biome"))?,
+        BiomeTable::new(&biomes)
+            .and_then(|t| t.with_selectors(&selectors))
+            .map_err(|e| table(e, last, "biome"))?,
         OreTable::new(&ores).map_err(|e| table(e, last, "ore"))?,
     ))
 }

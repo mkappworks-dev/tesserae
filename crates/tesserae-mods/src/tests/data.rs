@@ -320,6 +320,7 @@ fn component() -> Declaration {
         biomes: vec![
             content::BiomeDef {
                 soundscape: None,
+                selectors: None,
                 name: "dry".into(),
                 temperature: 0.8,
                 humidity: 0.15,
@@ -337,6 +338,7 @@ fn component() -> Declaration {
             },
             content::BiomeDef {
                 soundscape: None,
+                selectors: None,
                 name: "wet".into(),
                 temperature: 0.35,
                 humidity: 0.9,

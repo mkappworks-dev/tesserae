@@ -514,6 +514,7 @@ impl Guest for Terra {
             biomes: vec![
                 BiomeDef {
                     soundscape: Some("terra:temperate".into()),
+                    selectors: None,
                     name: "temperate".into(),
                     temperature: 0.5,
                     humidity: 0.5,
@@ -544,6 +545,7 @@ impl Guest for Terra {
                 },
                 BiomeDef {
                     soundscape: Some("terra:dry".into()),
+                    selectors: None,
                     name: "dry".into(),
                     temperature: 0.7,
                     humidity: 0.3,
@@ -569,6 +571,7 @@ impl Guest for Terra {
                 },
                 BiomeDef {
                     soundscape: Some("terra:cold".into()),
+                    selectors: None,
                     name: "cold".into(),
                     temperature: 0.3,
                     humidity: 0.55,
@@ -590,6 +593,7 @@ impl Guest for Terra {
                 },
                 BiomeDef {
                     soundscape: None,
+                    selectors: None,
                     name: "jungle".into(),
                     temperature: 0.72,
                     humidity: 0.7,
@@ -607,6 +611,7 @@ impl Guest for Terra {
                 },
                 BiomeDef {
                     soundscape: None,
+                    selectors: None,
                     name: "swamp".into(),
                     temperature: 0.55,
                     humidity: 0.78,
@@ -628,6 +633,7 @@ impl Guest for Terra {
                 },
                 BiomeDef {
                     soundscape: Some("terra:dry".into()),
+                    selectors: None,
                     name: "savanna".into(),
                     temperature: 0.78,
                     humidity: 0.5,
