@@ -117,8 +117,8 @@ fn altitude_and_coast_ranges_put_a_biome_where_the_land_suits_it() {
         altitude_m: Some([-1000.0, -2.0]),
         ..BiomeSelectors::default()
     };
-    // Same Climate point: only the selectors tell the Biomes apart, and a tie goes to the earlier
-    // Biome, so the specific ones come before the one that matches everything.
+    // Same Climate point: only the selectors tell the Biomes apart. A Biome that names a range and
+    // admits the column beats the one that names none, whatever the order.
     let g = world(
         &[
             biome("sea", 0.5, 0.5),

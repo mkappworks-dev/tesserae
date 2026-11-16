@@ -670,6 +670,9 @@ pub struct Worldgen {
     biome_loot: Arc<[Option<LootTable>]>,
 }
 
+/// The water table, as how far under Sea level it lies: a cavern below it is flooded.
+const WATER_TABLE_BELOW_SEA_M: f32 = 2.0;
+
 /// Voxels of slack over a Plant's declared rise, for the base's own cell and rounding up.
 const PLANT_RISE_SLACK_VOXELS: f32 = 3.0;
 
@@ -977,6 +980,46 @@ impl Worldgen {
             None => Some(sea),
             Some(terrain) => Some(terrain.inland_water_m(x_m, z_m).map_or(sea, |l| l.max(sea))),
         }
+    }
+
+    /// The dry column nearest `from`, searched outwards to `max_m`, for a Player to spawn on: not
+    /// under water, a metre or more above it, and no cliff within a few metres. Under versions 1
+    /// and 2, whose World has no ocean to start in, it is `from` itself.
+    pub fn dry_land_near_m(&self, from: [f32; 2], max_m: f32) -> Option<[f32; 2]> {
+        if self.terrain.is_none() {
+            return Some(from);
+        }
+        const STEP_M: f32 = 16.0;
+        const CLIFF_M: f32 = 6.0;
+        const CLIFF_DROP_M: f32 = 4.0;
+        let suits = |x: f32, z: f32| {
+            let h = self.surface_height_m(x, z);
+            let clear_of_water = self
+                .water_level_m(x, z)
+                .is_none_or(|level_m| h >= level_m + 1.0);
+            clear_of_water
+                && (0..8).all(|k| {
+                    let a = k as f32 * std::f32::consts::FRAC_PI_4;
+                    let (sx, sz) = (x + CLIFF_M * a.cos(), z + CLIFF_M * a.sin());
+                    (self.surface_height_m(sx, sz) - h).abs() <= CLIFF_DROP_M
+                })
+        };
+        if suits(from[0], from[1]) {
+            return Some(from);
+        }
+        let rings = (max_m / STEP_M) as u32;
+        for ring in 1..=rings {
+            let r = ring as f32 * STEP_M;
+            let n = ((std::f32::consts::TAU * r / STEP_M).ceil() as u32).max(6);
+            for k in 0..n {
+                let a = k as f32 * std::f32::consts::TAU / n as f32;
+                let (x, z) = (from[0] + r * a.cos(), from[1] + r * a.sin());
+                if suits(x, z) {
+                    return Some([x, z]);
+                }
+            }
+        }
+        None
     }
 
     /// The Water surface over a column: the height of the water standing or running on it, `None`
@@ -1392,6 +1435,12 @@ impl Worldgen {
                         && base_m >= CAVERN_MIN_DEPTH_M
                         && caverns.carves(x_m, y_m, z_m)
                     {
+                        // Under the water table a cavern is an underground lake.
+                        if let Some(water) = self.water
+                            && y_m < self.params.sea_level_m - WATER_TABLE_BELOW_SEA_M
+                        {
+                            chunk.set(x, y, z, Voxel::cube(water.material));
+                        }
                         continue;
                     }
                     let exposed = if banded {

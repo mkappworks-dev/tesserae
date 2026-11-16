@@ -114,8 +114,12 @@ const GAMES: [Game; 5] = [
                     "flora:dry_grass",
                 ],
             ),
+            // The Biomes of the land's shape, which only version 3 chooses and which grow nothing.
+            ("ocean", &[]),
+            ("beach", &[]),
+            ("alpine", &[]),
         ],
-        bare: &[],
+        bare: &["ocean", "beach", "alpine"],
         lake: true,
     },
     Game {
@@ -440,8 +444,13 @@ fn census(game: &Game) -> (BTreeMap<(usize, String), u64>, Vec<String>) {
             }
         }
     }
+    let selectors = generator.params().biomes;
     assert!(
-        taken.iter().all(|&n| n > 0),
+        taken
+            .iter()
+            .enumerate()
+            // A Biome of the land's shape is not chosen before version 3.
+            .all(|(i, &n)| n > 0 || selectors.selectors()[i].is_ranged()),
         "{}: a Biome has no ground within 3.8 km: {taken:?}",
         game.name
     );
@@ -1142,6 +1151,10 @@ fn ground_cover_grows_in_patches_at_each_biomes_class_and_flowers_stay_rare() {
         for (index, (name, _)) in game.biomes.iter().enumerate() {
             let full = format!("{}:{name}", game.name);
             let name = *name;
+            if grounds[index].is_empty() {
+                // A Biome of the land's shape, which only version 3 chooses.
+                continue;
+            }
             let cover = measure(&grounds[index]);
             println!(
                 "{full}: cover {:.1}% bare {:.1}% clustered {:.0}%",

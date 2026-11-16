@@ -316,8 +316,18 @@ impl ClimateField {
             }
             nearest
         };
-        let admitted = site.and_then(|(s, _)| pick(&|i| biomes.selectors()[i].admits(&s)));
-        let (i, _) = admitted.or_else(|| pick(&|_| true))?;
+        let selectors = biomes.selectors();
+        let chosen = match site {
+            // A Biome that names a range and admits the column beats one that names none, however
+            // near the others are in Climate; failing both, the nearest of all.
+            Some((s, _)) => pick(&|i| selectors[i].is_ranged() && selectors[i].admits(&s))
+                .or_else(|| pick(&|i| !selectors[i].is_ranged()))
+                .or_else(|| pick(&|_| true)),
+            // Before version 3 there is no altitude or coast to ask, so a Biome of the land's
+            // shape is not part of the World.
+            None => pick(&|i| !selectors[i].is_ranged()).or_else(|| pick(&|_| true)),
+        };
+        let (i, _) = chosen?;
         Some(BiomeId(i as u8))
     }
 
@@ -1269,6 +1279,12 @@ impl BiomeSelectors {
         within(self.altitude_m, site.altitude_m)
             && within(self.coast_m, site.coast_m)
             && within(self.erosion, site.erosion)
+    }
+
+    /// Whether the Biome names any range, which makes it a Biome of the land's shape: version 3
+    /// prefers it where it admits the column, and versions 1 and 2 never choose it.
+    pub fn is_ranged(&self) -> bool {
+        self.altitude_m.is_some() || self.coast_m.is_some() || self.erosion.is_some()
     }
 
     pub fn validate(&self) -> Result<(), ParamError> {

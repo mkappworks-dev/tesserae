@@ -12,5 +12,7 @@ Each demo Game declares ocean, shore, river, alpine and its own Biomes and its w
 
 ## Acceptance criteria
 
-- [ ] Every new Material is Obtainable.
+- [x] Every new Material is Obtainable (Terra's new Biomes use Materials it already has).
 - [ ] Each Game's World has ocean, a river and a cave Biome within a short flight.
+
+Built: Terra declares ocean, beach and alpine Biomes by altitude. Not built: the other four Games, a river Biome (no selector reads a river), the Games' water fluid declarations, Meadow's footbridges, and a flight check of ocean, river and cave per Game.

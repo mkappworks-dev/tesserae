@@ -473,3 +473,81 @@ fn ravines_cut_narrow_slots_into_rugged_land() {
     }
     assert!(slots > 0, "no ravines found");
 }
+
+#[test]
+fn spawning_finds_dry_land_clear_of_cliffs_and_water() {
+    let g = Worldgen::new(SEED, 1.0, wet_world());
+    // Start from the middle of an ocean.
+    let (x, z) = ocean_column(&g, 20.0);
+    let [sx, sz] = g
+        .dry_land_near_m([x, z], 8000.0)
+        .expect("land within reach");
+    let h = g.surface_height_m(sx, sz);
+    assert!(
+        h >= g.water_level_m(sx, sz).unwrap() + 1.0,
+        "{h} at {sx},{sz}"
+    );
+    for k in 0..8 {
+        let a = k as f32 * std::f32::consts::FRAC_PI_4;
+        let near = g.surface_height_m(sx + 6.0 * a.cos(), sz + 6.0 * a.sin());
+        assert!((near - h).abs() <= 4.0, "a cliff beside the spawn");
+    }
+}
+
+#[test]
+fn earlier_versions_spawn_where_they_always_did() {
+    let v2 = WorldgenParams {
+        generator: 2,
+        ..wet_world()
+    };
+    let g = Worldgen::new(SEED, 1.0, v2);
+    assert_eq!(g.dry_land_near_m([12.0, -7.0], 5000.0), Some([12.0, -7.0]));
+}
+
+fn caved_wet_v3() -> WorldgenParams {
+    WorldgenParams {
+        caves: Some(tesserae_core::CaveParams {
+            radius_m: 0.001,
+            ..tesserae_core::CaveParams::default()
+        }),
+        smoothing: None,
+        ..wet_world()
+    }
+}
+
+#[test]
+fn caverns_under_the_water_table_are_underground_lakes_and_the_rest_are_air() {
+    let g = Worldgen::new(SEED, 1.0, caved_wet_v3());
+    let water = tesserae_core::testgen::fixtures().water;
+    let (mut lake, mut dry_hollow, mut wet_above) = (0, 0, 0);
+    for j in -16..16 {
+        for i in -16..16 {
+            let (x, z) = (i * 233i32, j * 241i32);
+            let h = g.surface_height_m(x as f32, z as f32) as i32;
+            if h < 130 {
+                continue;
+            }
+            // From the band's floor up to well above the water table, deep under the ground.
+            let (cx, cz) = (x.div_euclid(32), z.div_euclid(32));
+            for y in -70i32..90 {
+                let v = g.chunk(cx, y.div_euclid(32), cz).get(
+                    x.rem_euclid(32) as usize,
+                    y.rem_euclid(32) as usize,
+                    z.rem_euclid(32) as usize,
+                );
+                if v.material() == water {
+                    lake += 1;
+                    wet_above += (y >= 22) as u32;
+                } else if v.is_air() {
+                    dry_hollow += (y >= 22) as u32;
+                }
+            }
+        }
+    }
+    assert!(lake > 50, "{lake} underground lake voxels");
+    assert_eq!(wet_above, 0, "water over the water table");
+    assert!(
+        dry_hollow > 50,
+        "{dry_hollow} air voxels above the water table"
+    );
+}

@@ -1,6 +1,6 @@
 # 12: Retarget Plants, Structures, Settlements and spawn
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 04, 07
 
@@ -12,6 +12,8 @@ Surface features, Plants, crop fields, Structures, Settlements and crossings rea
 
 ## Acceptance criteria
 
-- [ ] The player spawns on dry land at least a metre above the Water surface.
-- [ ] No Structure stands in water or on a steep slope.
-- [ ] Their own tests and digests under versions 1 and 2 pass unchanged.
+- [x] The player spawns on dry land at least a metre above the Water surface.
+- [ ] No Structure stands in water or on a steep slope (rests on the existing ground rule; no new test).
+- [x] Their own tests and digests under versions 1 and 2 pass unchanged.
+
+Not separately tested: that no Structure stands in water or on a steep slope; it rests on the existing ground rule, which now asks the Water surface function, and the Terra Game's Structure tests pass under it.

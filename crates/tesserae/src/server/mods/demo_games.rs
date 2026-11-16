@@ -666,7 +666,10 @@ fn palette(world: &WorldgenParams) -> Vec<(&str, [u8; 3], [u8; 3])> {
         .biomes
         .as_slice()
         .iter()
-        .map(|b| {
+        .zip(world.biomes.selectors())
+        // The Biomes of the land's shape are version 3's.
+        .filter(|(_, s)| !s.is_ranged())
+        .map(|(b, _)| {
             let colours = b.sky_fog.expect("every Biome of these Games has a pair");
             (b.name.as_str(), colours.sky, colours.fog)
         })
@@ -850,7 +853,9 @@ fn terra_biomes_all_cover_ground_and_the_temperate_one_most() {
     let (_install, loaded) = loaded("terra", 0.5);
     let world = loaded.world.unwrap();
     for seed in [7, 1, 2024] {
+        // The first six are the Biomes version 2 chooses.
         let shares = shares(world, seed, 4000.0, 50.0);
+        let shares = &shares[..6];
         assert!(
             shares.iter().all(|&s| s > 0.04) && shares[0] > shares[1] && shares[0] > shares[2],
             "seed {seed}: {shares:?}"

@@ -259,6 +259,9 @@ fn open_world(
     commands.insert_resource(WorldGenerator(generator));
 }
 
+/// How far a new World looks for dry land when the spawn point is in the sea.
+const DRY_LAND_SEARCH_M: f32 = 6000.0;
+
 /// How far from the origin a new World looks for a Settlement to spawn the Player beside.
 const SPAWN_SEARCH_M: f32 = 512.0;
 
@@ -266,9 +269,12 @@ const SPAWN_SEARCH_M: f32 = 512.0;
 /// of the ground and of any lake standing on it, and no lower than the top of anything generated
 /// under the Player's body.
 fn spawn_eye(generator: &Worldgen) -> Vec3 {
-    let [x, z] = generator
+    let beside = generator
         .settlement_spawn_m(SPAWN_SEARCH_M)
         .unwrap_or([0.0; 2]);
+    let [x, z] = generator
+        .dry_land_near_m(beside, DRY_LAND_SEARCH_M)
+        .unwrap_or(beside);
     let ground_m = generator.surface_height_m(x, z);
     let top_m = generator
         .water()

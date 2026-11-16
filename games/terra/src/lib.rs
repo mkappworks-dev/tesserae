@@ -12,10 +12,11 @@ mod templates;
 mod textures;
 
 use tesserae::mods::content::{
-    Appearance, BiomeDef, BurnAfter, BurnEnd, ClimateParams, CombustionDef, FluidDef, FluidState,
-    GroundParams, HeatDef, ItemDef, MarkerIcon, MarkerKindDef, MaterialDef, Occlusion, OreDef,
-    Reactant, ReactionDef, ReactionSide, RecipeDef, RecipeStack, RenderClass, ShapeDef, SkyFog,
-    SurfaceFeature, ToolDef, ToolKind, ViewParams, VoxelUse, VoxelUseKind, WaterParams,
+    Appearance, BiomeDef, BiomeSelectors, BurnAfter, BurnEnd, ClimateParams, CombustionDef,
+    FluidDef, FluidState, GroundParams, HeatDef, ItemDef, MarkerIcon, MarkerKindDef, MaterialDef,
+    Occlusion, OreDef, Reactant, ReactionDef, ReactionSide, RecipeDef, RecipeStack, RenderClass,
+    SelectorRange, ShapeDef, SkyFog, SurfaceFeature, ToolDef, ToolKind, ViewParams, VoxelUse,
+    VoxelUseKind, WaterParams,
 };
 use tesserae::mods::types::{Arm, CollisionBox, ConnectDef, NodeBox, Srgba};
 
@@ -652,6 +653,95 @@ impl Guest for Terra {
                     settlements: structures::village(),
                     surface_features: plants::savanna(),
                     loot: Some(structures::biome_loot("savanna")),
+                },
+                // Version 3 only: the sea floor, the strand and the high ground, chosen by altitude.
+                // They name a range, so version 3 prefers them where they fit and earlier versions never choose them.
+                BiomeDef {
+                    soundscape: None,
+                    selectors: Some(BiomeSelectors {
+                        altitude: Some(SelectorRange {
+                            min: -1000.0,
+                            max: -0.01,
+                        }),
+                        coast: None,
+                        erosion: None,
+                        relief: None,
+                    }),
+                    name: "ocean".into(),
+                    temperature: 0.5,
+                    humidity: 0.8,
+                    ground: Some(GroundParams {
+                        rock: "terra:stone".into(),
+                        soil: "terra:sand".into(),
+                        surface: "terra:sand".into(),
+                    }),
+                    sky_fog: Some(SkyFog {
+                        sky: (118, 150, 178),
+                        fog: (130, 164, 190),
+                    }),
+                    cave_scale: Some(0.0),
+                    crop_fields: Vec::new(),
+                    structures: Vec::new(),
+                    settlements: Vec::new(),
+                    surface_features: Vec::new(),
+                    loot: None,
+                },
+                BiomeDef {
+                    soundscape: None,
+                    selectors: Some(BiomeSelectors {
+                        altitude: Some(SelectorRange { min: 0.0, max: 3.0 }),
+                        coast: None,
+                        erosion: None,
+                        relief: None,
+                    }),
+                    name: "beach".into(),
+                    temperature: 0.6,
+                    humidity: 0.6,
+                    ground: Some(GroundParams {
+                        rock: "terra:stone".into(),
+                        soil: "terra:sand".into(),
+                        surface: "terra:sand".into(),
+                    }),
+                    sky_fog: Some(SkyFog {
+                        sky: (140, 156, 176),
+                        fog: (160, 176, 196),
+                    }),
+                    cave_scale: None,
+                    crop_fields: Vec::new(),
+                    structures: Vec::new(),
+                    settlements: Vec::new(),
+                    surface_features: Vec::new(),
+                    loot: None,
+                },
+                BiomeDef {
+                    soundscape: Some("terra:cold".into()),
+                    selectors: Some(BiomeSelectors {
+                        altitude: Some(SelectorRange {
+                            min: 90.0,
+                            max: 1000.0,
+                        }),
+                        coast: None,
+                        erosion: None,
+                        relief: None,
+                    }),
+                    name: "alpine".into(),
+                    temperature: 0.25,
+                    humidity: 0.4,
+                    ground: Some(GroundParams {
+                        rock: "terra:stone".into(),
+                        soil: "terra:stone".into(),
+                        surface: "terra:snow".into(),
+                    }),
+                    sky_fog: Some(SkyFog {
+                        sky: (150, 168, 192),
+                        fog: (180, 194, 214),
+                    }),
+                    cave_scale: Some(0.0),
+                    crop_fields: Vec::new(),
+                    structures: Vec::new(),
+                    settlements: Vec::new(),
+                    surface_features: Vec::new(),
+                    loot: None,
                 },
             ],
             survival: None,
