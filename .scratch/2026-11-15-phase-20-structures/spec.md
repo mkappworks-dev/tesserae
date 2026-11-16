@@ -430,9 +430,9 @@ the Mod loader's data tests.
 ## Out of Scope
 
 - Container loot, entities, fluids and burning in Templates, and anything
-  needing Server machinery worldgen cannot run (steps 22 and 23).
+  needing Server machinery worldgen cannot run (steps 23 and 24).
 - Mirroring a Structure.
-- Capturing a Template from the World, and the structure editor (step 25).
+- Capturing a Template from the World, and the structure editor (step 26).
 - Converting trees to Templates; ADR-0027's parametric trees stay.
 - Structures at coarse LOD levels, so a distant landmark is not drawn.
 - Placing in Survival or for an Item cost; Blueprints and Sites are step 20b.
@@ -440,7 +440,7 @@ the Mod loader's data tests.
   it is placed.
 - Unique landmarks fixed at World creation.
 - A Mod Command that places a Template.
-- Moving or flying bodies built from Templates (step 24).
+- Moving or flying bodies built from Templates (step 25).
 
 ## Further Notes
 
