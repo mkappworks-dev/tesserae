@@ -97,6 +97,16 @@ pub struct ContentCatalogue {
     pub rock: Option<MaterialId>,
     /// The Game's tools, in declared order.
     pub tools: Vec<CatalogueTool>,
+    /// The World's Templates in load order: what the `place` Tool offers.
+    pub templates: Vec<CatalogueTemplate>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct CatalogueTemplate {
+    /// `<mod id>:<name>`, as a Structure intent names it.
+    pub name: String,
+    /// Along x, y and z before any turn; a quarter turn swaps x and z.
+    pub size_m: [f32; 3],
 }
 
 impl CatalogueTool {

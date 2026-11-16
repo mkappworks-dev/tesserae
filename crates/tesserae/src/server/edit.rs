@@ -28,6 +28,7 @@ mod resolve;
 #[cfg(test)]
 mod sound_tests;
 mod structure;
+mod structure_aim;
 #[cfg(test)]
 pub(in crate::server) mod tests;
 
@@ -50,9 +51,13 @@ pub use layout::LayoutCell;
 #[cfg(test)]
 pub(in crate::server) use layout::send_layout;
 pub use layout::{CellState, LayoutAim, LayoutAnswer, LayoutIntent, LayoutParams, Span};
+pub use structure::StructureCell;
 pub use structure::StructureIntent;
 #[cfg(test)]
 pub(in crate::server) use structure::send_structure;
+#[cfg(test)]
+pub(crate) use structure_aim::StructureGhost;
+pub use structure_aim::{StructureAim, StructureAnswer};
 
 use super::ContentTables;
 use super::game_mode::PlayerMode;
@@ -429,6 +434,9 @@ pub(super) fn plugin(app: &mut App) {
         .init_session_resource::<Striking>()
         .init_session_resource::<super::tool::Tools>()
         .init_session_resource::<layout::LayoutAimState>()
+        .init_session_resource::<structure_aim::StructureAimState>()
+        .add_session_message::<StructureAim>()
+        .add_session_message::<StructureAnswer>()
         .add_player_intent::<LayoutIntent>()
         .add_player_intent::<StructureIntent>()
         .add_session_message::<LayoutAim>()
@@ -459,6 +467,7 @@ pub(super) fn plugin(app: &mut App) {
                 layout::receive,
                 layout::receive_aim,
                 structure::receive,
+                structure_aim::receive_aim,
                 pick,
                 super::undo::receive,
             )
@@ -478,6 +487,7 @@ pub(super) fn plugin(app: &mut App) {
                 answer_aim,
                 strike.run_if(super::persistence::playing),
                 layout::answer_aim,
+                structure_aim::answer_aim,
             )
                 .chain(),
         );

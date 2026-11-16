@@ -69,6 +69,7 @@ pub struct ItemDef {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ToolKind {
     Measure,
+    Place,
 }
 
 /// A declared tool, named `<mod id>:<name>`.
@@ -82,6 +83,7 @@ impl From<content::ToolKind> for ToolKind {
     fn from(kind: content::ToolKind) -> Self {
         match kind {
             content::ToolKind::Measure => ToolKind::Measure,
+            content::ToolKind::Place => ToolKind::Place,
         }
     }
 }

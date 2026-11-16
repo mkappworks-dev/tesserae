@@ -163,6 +163,7 @@ impl From<Combustion> for content::CombustionDef {
 #[serde(rename_all = "kebab-case")]
 enum Kind {
     Measure,
+    Place,
 }
 
 #[derive(Deserialize)]
@@ -178,6 +179,7 @@ impl From<Tool> for content::ToolDef {
             name: t.name,
             kind: match t.kind {
                 Kind::Measure => content::ToolKind::Measure,
+                Kind::Place => content::ToolKind::Place,
             },
         }
     }

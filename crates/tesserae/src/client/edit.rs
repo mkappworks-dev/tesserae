@@ -1019,6 +1019,7 @@ mod tests {
             lake: None,
             rock: Some(tesserae_core::testgen::fixtures().ground.rock),
             tools: Vec::new(),
+            templates: Vec::new(),
         }
     }
 

@@ -235,7 +235,7 @@ pub(super) fn closed(window: Option<Res<InventoryWindow>>) -> bool {
 
 type Blockers<'w> = (
     Res<'w, super::menu::Menu>,
-    Option<Res<'w, super::layout_menu::LayoutMenu>>,
+    super::structure_menu::Docked<'w>,
     Option<Res<'w, super::settings::Settings>>,
     Option<Res<'w, super::input::UiInput>>,
     Option<Res<'w, super::map_window::MapWindow>>,
@@ -247,7 +247,7 @@ type Blockers<'w> = (
 fn toggle(
     mut actions: ResMut<Actions>,
     (mut window, mut side): (ResMut<InventoryWindow>, ResMut<catalogue::Side>),
-    (menu, layout_menu, settings, ui, map): Blockers,
+    (menu, docked, settings, ui, map): Blockers,
     (focused, mode): (
         Single<&Window, With<PrimaryWindow>>,
         Res<super::game_mode::Mode>,
@@ -257,7 +257,7 @@ fn toggle(
 ) {
     if !focused.focused
         || menu.open
-        || layout_menu.is_some_and(|m| m.open)
+        || docked.open()
         || settings.is_some_and(|s| s.open)
         || ui.is_some_and(|ui| ui.text_entry)
         || map.is_some_and(|m| m.open)

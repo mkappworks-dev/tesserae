@@ -357,6 +357,9 @@ interface content {
         /// Reads two corners and reports the distance between them. Edits
         /// nothing.
         measure,
+        /// Places a whole Template, for a Creative Player. Use opens the list
+        /// of the World's Templates and edits nothing.
+        place,
     }
 
     /// A tool the Player can hold. The engine runs it; a Mod is never called

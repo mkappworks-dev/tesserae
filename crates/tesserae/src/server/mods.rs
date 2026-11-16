@@ -22,8 +22,8 @@ use tesserae_mods::{
 };
 
 use crate::content::{
-    CatalogueMaterial, CatalogueShape, CatalogueTool, CharacterModel, ContentCatalogue,
-    MaterialPalette, MaterialTextures,
+    CatalogueMaterial, CatalogueShape, CatalogueTemplate, CatalogueTool, CharacterModel,
+    ContentCatalogue, MaterialPalette, MaterialTextures,
 };
 use crate::world::WorldSettings;
 
@@ -1010,6 +1010,14 @@ pub(in crate::server) fn catalogue(
         lake,
         rock,
         tools: Vec::new(),
+        templates: tables
+            .templates
+            .iter()
+            .map(|t| CatalogueTemplate {
+                name: t.name.clone(),
+                size_m: t.size_m(),
+            })
+            .collect(),
     }
 }
 
@@ -1357,10 +1365,24 @@ surface = "plain:rock"
         assert_eq!(catalogue.lake, Some(water));
         assert_eq!(
             catalogue.tools,
-            vec![CatalogueTool {
-                id: crate::server::tool::ToolId(0),
-                name: "full:ruler".into(),
-                kind: tesserae_mods::ToolKind::Measure,
+            vec![
+                CatalogueTool {
+                    id: crate::server::tool::ToolId(0),
+                    name: "full:ruler".into(),
+                    kind: tesserae_mods::ToolKind::Measure,
+                },
+                CatalogueTool {
+                    id: crate::server::tool::ToolId(1),
+                    name: "full:builder".into(),
+                    kind: tesserae_mods::ToolKind::Place,
+                },
+            ]
+        );
+        assert_eq!(
+            catalogue.templates,
+            vec![CatalogueTemplate {
+                name: "full:cairn".into(),
+                size_m: [1.0, 0.5, 1.0],
             }]
         );
         let material = |m: MaterialId| catalogue.materials.iter().find(|c| c.id == m).unwrap();

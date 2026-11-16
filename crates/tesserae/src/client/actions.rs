@@ -56,6 +56,7 @@ pub(super) enum Action {
     LayoutLess,
     LayoutReverse,
     LayoutActive,
+    TurnStructure,
     /// Saved as `catalogue` before the Menu replaced the Catalogue page.
     #[serde(alias = "catalogue")]
     Menu,
@@ -68,6 +69,17 @@ pub(super) enum Action {
     Diagnostics,
 }
 use Action::*;
+
+impl Action {
+    /// Pairs that share a default key because they never act at once: with
+    /// the place Tool in hand, its turn takes R from Respawn.
+    pub(super) fn may_share(self, other: Action) -> bool {
+        matches!(
+            (self, other),
+            (TurnStructure, Respawn) | (Respawn, TurnStructure)
+        )
+    }
+}
 
 pub(super) const SLOTS: [Action; 9] = [
     Slot1, Slot2, Slot3, Slot4, Slot5, Slot6, Slot7, Slot8, Slot9,
@@ -303,6 +315,7 @@ impl Bindings {
             (Layout, KeyCode::KeyL),
             (LayoutReverse, KeyCode::KeyT),
             (LayoutActive, KeyCode::KeyJ),
+            (TurnStructure, KeyCode::KeyR),
         ]
         .into_iter()
         .chain(SLOTS.into_iter().zip(super::edit::SLOT_KEYS))
@@ -776,7 +789,10 @@ mod tests {
         let mut owners: Vec<(Binding, Action)> = Vec::new();
         for (action, alternatives) in Bindings::keyboard_defaults() {
             for binding in alternatives.into_iter().flatten() {
-                if let Some((_, other)) = owners.iter().find(|(seen, _)| *seen == binding) {
+                if let Some((_, other)) = owners
+                    .iter()
+                    .find(|(seen, other)| *seen == binding && !action.may_share(*other))
+                {
                     panic!("{other:?} and {action:?} share {binding:?}");
                 }
                 owners.push((binding, action));

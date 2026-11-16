@@ -1068,12 +1068,30 @@ fn climb_m_s(lift_m: f32, fly_for_s: f32, horizontal_m_s: f32) -> f32 {
     wanted.clamp(-room, room)
 }
 
+/// `TESSERAE_SCREENSHOT_PLACE` holds the Game's place Tool, and `=list` opens
+/// its Template list too.
 fn capture_holding(
     catalogue: Res<super::edit::Catalogue>,
     mut hotbar: ResMut<super::edit::Hotbar>,
+    mut list: ResMut<super::structure_menu::StructureList>,
     mut configured: Local<bool>,
 ) {
     if *configured {
+        return;
+    }
+    if let Some(place) = std::env::var_os("TESSERAE_SCREENSHOT_PLACE") {
+        let tool = catalogue
+            .0
+            .tools
+            .iter()
+            .find(|t| t.kind == crate::server::tool::ToolKind::Place);
+        if let Some(tool) = tool {
+            hotbar.outside = Some(super::edit::Holding::Tool(tool.id));
+            if place == "list" {
+                list.show();
+            }
+            *configured = true;
+        }
         return;
     }
     let Ok(name) = std::env::var("TESSERAE_SCREENSHOT_MATERIAL") else {

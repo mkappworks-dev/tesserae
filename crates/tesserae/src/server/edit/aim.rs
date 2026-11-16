@@ -141,7 +141,7 @@ pub(super) fn answer_aim(
         let mut target = aim_target(&store, &tables, &world, &meshes, report, reach);
         let ray = (report.origin, report.direction);
         target.use_aim = match report.tool {
-            Some(tool) => Some(crate::server::tool::aim_use(
+            Some(tool) => crate::server::tool::aim_use(
                 &store,
                 &tables,
                 &world,
@@ -149,7 +149,7 @@ pub(super) fn answer_aim(
                 tool,
                 ray,
                 player.eye(),
-            )),
+            ),
             None => crate::server::usable::aim(&store, &tables, &world, ray, player.eye()),
         };
         targets.write(target);

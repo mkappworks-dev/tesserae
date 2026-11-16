@@ -163,6 +163,10 @@ end = "permanent"
 name = "ruler"
 kind = "measure"
 
+[[tools]]
+name = "builder"
+kind = "place"
+
 [[items]]
 name = "log"
 size-m = 0.25
