@@ -616,6 +616,7 @@ pub struct SavedBiomeSettlement {
     /// An index into [`Generation::settlements`], not the Game's table.
     pub settlement: u16,
     pub spacing_m: f32,
+    pub chance: f32,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1109,6 +1110,7 @@ fn saved_biome(
             .map(|s| SavedBiomeSettlement {
                 settlement: towns.binary_search(&s.settlement).unwrap_or_default() as u16,
                 spacing_m: s.spacing_m,
+                chance: s.chance,
             })
             .collect(),
     })
@@ -1118,6 +1120,7 @@ fn restored_biome_settlement(s: &SavedBiomeSettlement) -> crate::BiomeSettlement
     crate::BiomeSettlement {
         settlement: s.settlement,
         spacing_m: s.spacing_m,
+        chance: s.chance,
     }
 }
 

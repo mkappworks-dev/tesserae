@@ -126,8 +126,23 @@ fn a_biome_lists_a_settlement_by_name_and_each_door_is_found() {
         biomes.as_slice()[0].surface_features.settlements(),
         [BiomeSettlement {
             settlement: 0,
-            spacing_m: 120.0
-        }]
+            spacing_m: 120.0,
+            chance: 1.0
+        }],
+        "every lattice cell draws a Settlement unless the row says"
+    );
+}
+
+#[test]
+fn a_biome_row_carries_its_chance() {
+    let (_, biomes) = load(&world(
+        &settlement(VILLAGE),
+        "{ settlement = \"t:village\", spacing-m = 120.0, chance = 0.4 }",
+    ))
+    .unwrap();
+    assert_eq!(
+        biomes.as_slice()[0].surface_features.settlements()[0].chance,
+        0.4
     );
 }
 
@@ -168,4 +183,14 @@ fn a_third_row_a_wide_radius_too_many_plots_or_an_unknown_template_names_the_set
         close.contains("t:village") && close.contains("twice"),
         "{close}"
     );
+    for chance in ["0.0", "1.5"] {
+        let odds = refusal(
+            &settlement(VILLAGE),
+            &format!("{{ settlement = \"t:village\", spacing-m = 120.0, chance = {chance} }}"),
+        );
+        assert!(
+            odds.contains("t:village") && odds.contains("chance"),
+            "{odds}"
+        );
+    }
 }

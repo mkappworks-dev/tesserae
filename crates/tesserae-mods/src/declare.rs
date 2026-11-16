@@ -942,6 +942,7 @@ fn biome_settlements(
             let settlement = BiomeSettlement {
                 settlement: at as u16,
                 spacing_m: row.spacing_m,
+                chance: row.chance,
             };
             settlement
                 .validate(&tables.settlements[at])

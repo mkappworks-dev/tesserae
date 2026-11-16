@@ -867,8 +867,9 @@ interface content {
     }
 
     /// A Settlement a Biome lays out: each square of a lattice `spacing-m` on
-    /// a side may hold one, its disc and margin inside the square, where the
-    /// ground at its centre takes it. Its layout is a pure function of the
+    /// a side draws a centre anywhere in it with `chance`, which stands unless
+    /// a neighbouring square's draw would meet its disc and margin, and where
+    /// the ground at its centre takes it. Its layout is a pure function of the
     /// World seed and the square, so it is whole across Chunk borders and the
     /// same at every Voxel size. It claims ground before single Structures,
     /// crop fields, trees and scatter.
@@ -877,6 +878,8 @@ interface content {
         settlement: string,
         /// At least twice the Settlement's radius and margin, at most 4096 m.
         spacing-m: f32,
+        /// Above 0 and at most 1.
+        chance: f32,
     }
 
     /// A low-frequency density field over the ground, in metres, that multiplies

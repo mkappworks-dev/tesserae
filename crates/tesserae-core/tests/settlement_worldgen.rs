@@ -31,7 +31,7 @@ const SIZES: [f32; 3] = [1.0, 0.5, 0.25];
 const SIZE_I: i32 = CHUNK_SIZE as i32;
 const RADIUS_M: f32 = 24.0;
 const MARGIN_M: f32 = 8.0;
-/// Twice the radius and margin, so every lattice cell's centre is the cell's own.
+/// Twice the radius and margin, the closest Settlements may be listed.
 const SPACING_M: f32 = 64.0;
 
 /// A Template drawn as rows along +Z of cells along +X, layers from the bottom up; the Ground layer
@@ -154,9 +154,14 @@ fn plain(features: SurfaceFeatures) -> WorldgenParams {
 }
 
 fn listing(settlements: bool) -> SurfaceFeatures {
+    listing_at(settlements, SPACING_M, 1.0)
+}
+
+fn listing_at(settlements: bool, spacing_m: f32, chance: f32) -> SurfaceFeatures {
     let rows = [BiomeSettlement {
         settlement: 0,
-        spacing_m: SPACING_M,
+        spacing_m,
+        chance,
     }];
     SurfaceFeatures::NONE
         .with_settlements(if settlements { &rows } else { &[] })
@@ -224,9 +229,34 @@ struct Laid {
 
 impl Laid {
     fn scan(size: f32, params: impl Fn(SurfaceFeatures) -> WorldgenParams, half_m: f32) -> Self {
-        let with = generator(size, params(listing(true)), village());
-        let bare = generator(size, params(listing(false)), village());
+        Self::scan_of(
+            size,
+            |listed| params(listing(listed)),
+            village(),
+            SEED,
+            half_m,
+        )
+    }
+
+    /// What `settlement` laid in a scan of a World whose params `params` makes, with or without
+    /// its Biome row.
+    fn scan_of(
+        size: f32,
+        params: impl Fn(bool) -> WorldgenParams,
+        settlement: Settlement,
+        seed: u64,
+        half_m: f32,
+    ) -> Self {
+        let make = |listed| {
+            Worldgen::new(seed, size, params(listed))
+                .with_templates(&templates())
+                .with_settlements(std::slice::from_ref(&settlement))
+        };
+        let (with, bare) = (make(true), make(false));
         let changed = changed(&with, &bare, half_m, false);
+        let chunk_m = SIZE_I as f32 * size;
+        // A Structure the scan's edge cuts is not whole in it.
+        let edge = (half_m / chunk_m).ceil() as i32 * SIZE_I - (6.0 / size).ceil() as i32;
         assert_eq!(
             changed,
             self::changed(&with, &bare, half_m, true),
@@ -237,7 +267,9 @@ impl Laid {
         for (index, template) in templates.iter().enumerate().take(3) {
             let mark = [WELL, HOUSE, SHED][index];
             for at in changed.keys().copied() {
-                if changed[&at].0.material() != mark {
+                if changed[&at].0.material() != mark
+                    || [at[0], at[2]].iter().any(|&g| g < -edge || g >= edge)
+                {
                     continue;
                 }
                 let is_mark = |p: [i32; 3]| changed.get(&p).is_some_and(|c| c.0.material() == mark);
@@ -296,22 +328,36 @@ impl Laid {
 
     /// The centres, in metres, of the Settlements that stood fully inside `inner_m`.
     fn towns(&self, inner_m: f32) -> Vec<[f32; 2]> {
-        let lattice = (0..)
-            .map(|k| SPACING_M / 2.0 + k as f32 * SPACING_M)
-            .take_while(|&c| c < inner_m);
-        let centres: Vec<f32> = lattice.flat_map(|c| [c, -c]).collect();
-        let mut towns = Vec::new();
-        for &x in &centres {
-            for &z in &centres {
-                if x.abs() + RADIUS_M > inner_m || z.abs() + RADIUS_M > inner_m {
-                    continue;
-                }
-                if self.road.iter().any(|c| self.within(*c, [x, z], RADIUS_M)) {
-                    towns.push([x, z]);
-                }
-            }
-        }
-        towns
+        self.centres()
+            .into_iter()
+            .filter(|c| c.iter().all(|v| v.abs() + RADIUS_M <= inner_m))
+            .collect()
+    }
+
+    /// The centre, in metres, of every Settlement that stood, found from its well: the 3 m well's
+    /// +Z edge, turned, faces the centre, 3.5 m away on whole metres, its corner rounded to them.
+    fn centres(&self) -> Vec<[f32; 2]> {
+        self.found
+            .iter()
+            .filter(|f| f.template == 0)
+            .map(|f| {
+                let out = [[0.0, 1.0], [1.0, 0.0], [0.0, -1.0], [-1.0, 0.0]]
+                    [usize::from(f.turn.quarters())];
+                [0, 1].map(|a| {
+                    let corner_m = f.corner[a * 2] as f32 * self.size;
+                    let corner_of = |c: f32| match out[a] {
+                        1.0 => (c - 3.5 - 3.0).round(),
+                        -1.0 => (c + 3.5).round(),
+                        _ => (c - 1.5).round(),
+                    };
+                    let near = (corner_m + 1.5 + out[a] * 5.0).round() as i32;
+                    (near - 2..=near + 2)
+                        .map(|c| c as f32)
+                        .find(|&c| corner_of(c) == corner_m)
+                        .expect("a centre")
+                })
+            })
+            .collect()
     }
 
     /// Whether `f` stands in the Settlement at `centre`.
@@ -337,7 +383,7 @@ fn first_mark(template: &Template, size: f32, turn: Turn, mark: MaterialId) -> O
 
 #[test]
 fn a_settlement_is_whole_across_chunk_borders_and_equal_in_metres_at_every_voxel_size() {
-    let half_m = 64.0;
+    let half_m = 96.0;
     let mut by_size = Vec::new();
     for size in SIZES {
         let laid = Laid::scan(size, plain, half_m);
@@ -351,7 +397,7 @@ fn a_settlement_is_whole_across_chunk_borders_and_equal_in_metres_at_every_voxel
             })
             .count();
         assert!(
-            crossings > 2,
+            crossings > 0,
             "{size} m: {crossings} Plots crossed a Chunk border"
         );
         let mut places: Vec<_> = laid
@@ -379,7 +425,7 @@ fn a_settlement_is_whole_across_chunk_borders_and_equal_in_metres_at_every_voxel
 
 #[test]
 fn every_door_faces_a_road_no_two_plots_overlap_and_counts_keep_their_bounds() {
-    let half_m = 96.0;
+    let half_m = 128.0;
     let laid = Laid::scan(1.0, plain, half_m);
     let templates = templates();
     let towns = laid.towns(half_m);
@@ -409,9 +455,14 @@ fn every_door_faces_a_road_no_two_plots_overlap_and_counts_keep_their_bounds() {
         ];
         let (_, out) = edges.iter().min_by_key(|e| e.0).unwrap();
         let from = [f.corner[0] + x, f.corner[2] + z];
-        let faces = (1..=6).any(|k| {
-            laid.road
-                .contains(&[from[0] + out[0] * k, from[1] + out[1] * k])
+        // The road may be diagonal and a worn patch shows no path, so look along three lines.
+        let faces = (-1..=1).any(|across| {
+            (1..=10).any(|k| {
+                laid.road.contains(&[
+                    from[0] + out[0] * k + out[1] * across,
+                    from[1] + out[1] * k + out[0] * across,
+                ])
+            })
         });
         assert!(faces, "the door of {f:?} faces no road");
     }
@@ -770,19 +821,22 @@ fn wilderness_structures_keep_the_strict_rule_and_are_never_levelled() {
     assert!(!towns.is_empty());
     let with = generator(size, hilly_crowded(listing(true)), village());
     let wild = generator(size, hilly_crowded(listing(false)), village());
-    let changed = changed(&with, &wild, half_m - RADIUS_M - MARGIN_M, false);
-    // Every centre on the lattice, whether its Settlement stood or not.
-    let centres: Vec<[f32; 2]> = (-2..2)
-        .flat_map(|i| (-2..2).map(move |j| [i, j].map(|k| (k as f32 + 0.5) * SPACING_M)))
-        .collect();
+    // Two Chunks in, far enough inside the scan that every Settlement reaching it has its well
+    // found.
+    let changed = changed(&with, &wild, 32.0, false);
+    let centres = laid.centres();
     // A tree that would reach into a disc is left out whole, so its own cells change a little
     // further out.
     let tree_m = 6.0;
-    for at in changed.keys() {
+    for (at, (_, was)) in &changed {
+        // A Site whose layout falls short still keeps single Structures out.
         assert!(
-            centres
-                .iter()
-                .any(|&c| laid.within([at[0], at[2]], c, RADIUS_M + MARGIN_M + tree_m)),
+            was.material() == LONE
+                || centres.iter().any(|&c| laid.within(
+                    [at[0], at[2]],
+                    c,
+                    RADIUS_M + MARGIN_M + tree_m
+                )),
             "{at:?} changed outside every Settlement's disc and margin"
         );
     }
@@ -883,4 +937,212 @@ fn sky_and_deep_rock_beyond_a_settlement_keep_their_early_outs() {
             }
         }
     }
+}
+
+/// A well and at most one shed, 6 m across and 2 m of margin: small enough for a scan to hold
+/// hundreds.
+fn hamlet() -> Settlement {
+    let t = templates();
+    Settlement {
+        name: "t:hamlet".into(),
+        radius_m: 6.0,
+        margin_m: 2.0,
+        centre: Some(building(&t, 0)),
+        plots: 1,
+        rules: vec![PlotRule {
+            building: building(&t, 2),
+            weight: 1.0,
+            min: 0,
+            max: 1,
+        }],
+        minimum: 0,
+        path: Voxel::cube(PATH),
+    }
+}
+
+const HAMLET_SPACING_M: f32 = 16.0;
+
+fn hamlets(seed: u64) -> Vec<[f32; 2]> {
+    let params = |listed| plain(listing_at(listed, HAMLET_SPACING_M, 1.0));
+    Laid::scan_of(1.0, params, hamlet(), seed, 192.0).centres()
+}
+
+#[test]
+fn settlements_never_meet_and_their_centres_spread_evenly_over_their_cells() {
+    let centres = hamlets(SEED);
+    assert!(centres.len() > 150, "only {} Settlements", centres.len());
+    let reach_m = hamlet().reach_m();
+    for (i, a) in centres.iter().enumerate() {
+        for b in &centres[..i] {
+            let d = ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2)).sqrt();
+            assert!(d >= 2.0 * reach_m, "{a:?} and {b:?} are {d} m apart");
+        }
+    }
+    // Where in its lattice cell each centre stands, by quarter of the cell along each axis.
+    let mut quarters = [[0usize; 4]; 2];
+    let mut offsets = HashSet::new();
+    for c in &centres {
+        for a in 0..2 {
+            let offset = c[a].rem_euclid(HAMLET_SPACING_M);
+            quarters[a][(offset / (HAMLET_SPACING_M / 4.0)) as usize] += 1;
+            offsets.insert((a, offset as i32));
+        }
+    }
+    let fair = centres.len() / 4;
+    for (a, counts) in quarters.iter().enumerate() {
+        for &n in counts {
+            assert!(
+                n * 2 > fair && n < fair * 2,
+                "axis {a}: {counts:?} of {} is not even",
+                centres.len()
+            );
+        }
+    }
+    assert!(
+        offsets.len() >= 28,
+        "only {} offsets: a grid",
+        offsets.len()
+    );
+}
+
+#[test]
+fn two_seeds_lay_settlements_out_differently() {
+    let other = hamlets(SEED ^ 0xdead_beef);
+    let ours: HashSet<_> = hamlets(SEED)
+        .into_iter()
+        .map(|c| c.map(f32::to_bits))
+        .collect();
+    let shared = other
+        .iter()
+        .filter(|c| ours.contains(&c.map(f32::to_bits)))
+        .count();
+    assert!(
+        shared * 10 < other.len(),
+        "{shared} of {} alike",
+        other.len()
+    );
+}
+
+#[test]
+fn plots_spread_over_the_disc_with_uneven_gaps() {
+    let half_m = 128.0;
+    let laid = Laid::scan(1.0, plain, half_m);
+    let towns = laid.towns(half_m);
+    let (mut outer, mut gaps) = (0, HashSet::new());
+    for &centre in &towns {
+        let rects: Vec<_> = laid
+            .found
+            .iter()
+            .filter(|f| f.template != 0 && laid.holds(f, centre))
+            .map(|f| laid.rect(f))
+            .collect();
+        for (i, a) in rects.iter().enumerate() {
+            let mid = [0, 1].map(|k| (a[0][k] + a[1][k]) as f32 / 2.0 + 0.5 - centre[k]);
+            outer += usize::from((mid[0] * mid[0] + mid[1] * mid[1]).sqrt() > RADIUS_M / 2.0);
+            let nearest = rects
+                .iter()
+                .enumerate()
+                .filter(|&(j, _)| j != i)
+                .map(|(_, b)| {
+                    (0..2)
+                        .map(|k| (b[0][k] - a[1][k]).max(a[0][k] - b[1][k]))
+                        .max()
+                })
+                .min()
+                .flatten();
+            gaps.extend(nearest);
+        }
+    }
+    assert!(towns.len() >= 3, "only {} Settlements", towns.len());
+    assert!(outer >= towns.len(), "only {outer} Plots in the outer half");
+    assert!(gaps.len() >= 4, "the gaps between Plots are {gaps:?}");
+}
+
+#[test]
+fn roads_wear_towards_the_edge_and_approach_paths_fade_out_inside_the_margin() {
+    let margin_m = 40.0;
+    let wide = Settlement {
+        margin_m,
+        ..village()
+    };
+    let spacing_m = 2.0 * (RADIUS_M + margin_m);
+    let half_m = 160.0;
+    let params = |listed| plain(listing_at(listed, spacing_m, 1.0));
+    let laid = Laid::scan_of(1.0, params, wide, SEED, half_m);
+    let towns: Vec<_> = laid
+        .centres()
+        .into_iter()
+        .filter(|c| c.iter().all(|v| v.abs() + RADIUS_M + margin_m <= half_m))
+        .collect();
+    assert!(!towns.is_empty(), "no Settlement");
+    let rects: Vec<_> = laid.found.iter().map(|f| laid.rect(f)).collect();
+    let under_plot = |[x, z]: [i32; 2]| {
+        rects
+            .iter()
+            .any(|[min, max]| (min[0]..max[0]).contains(&x) && (min[1]..max[1]).contains(&z))
+    };
+    let (mut worn_in, mut worn_out) = (0, 0);
+    for centre in towns {
+        let away = |[x, z]: [i32; 2]| {
+            let [dx, dz] = [x as f32 + 0.5 - centre[0], z as f32 + 0.5 - centre[1]];
+            ((dx * dx + dz * dz).sqrt(), dz.atan2(dx))
+        };
+        // A worn patch: bare ground with road on both sides of it.
+        for x in centre[0] as i32 - 24..centre[0] as i32 + 24 {
+            for z in centre[1] as i32 - 24..centre[1] as i32 + 24 {
+                let (d, _) = away([x, z]);
+                let flanked = [[1, 0], [0, 1]].iter().any(|[dx, dz]| {
+                    laid.road.contains(&[x - dx, z - dz]) && laid.road.contains(&[x + dx, z + dz])
+                });
+                if d > RADIUS_M || laid.road.contains(&[x, z]) || under_plot([x, z]) || !flanked {
+                    continue;
+                }
+                if d < RADIUS_M / 2.0 {
+                    worn_in += 1;
+                } else {
+                    worn_out += 1;
+                }
+            }
+        }
+        let mut past: Vec<(f32, f32)> = laid
+            .road
+            .iter()
+            .map(|&c| away(c))
+            .filter(|&(d, _)| d > RADIUS_M + 1.0 && d < RADIUS_M + margin_m + 8.0)
+            .collect();
+        for &(d, _) in &past {
+            assert!(d <= RADIUS_M + margin_m, "a path {d} m from {centre:?}");
+        }
+        // One run of angles per approach path.
+        past.sort_by(|a, b| a.1.total_cmp(&b.1));
+        let mut paths: Vec<Vec<f32>> = Vec::new();
+        for (i, &(d, angle)) in past.iter().enumerate() {
+            match paths.last_mut() {
+                Some(path) if i > 0 && angle - past[i - 1].1 < 0.3 => path.push(d),
+                _ => paths.push(vec![d]),
+            }
+        }
+        if paths.len() > 1 && past[0].1 + std::f32::consts::TAU - past[past.len() - 1].1 < 0.3 {
+            let first = paths.remove(0);
+            paths.last_mut().unwrap().extend(first);
+        }
+        assert!(
+            paths.len() >= 2,
+            "{centre:?}: {} approach paths",
+            paths.len()
+        );
+        for path in paths {
+            let end = path.iter().copied().fold(0.0, f32::max);
+            assert!(end > RADIUS_M + 8.0, "{centre:?}: a path ends at {end} m");
+            // The first and last 4 m.
+            let near = path.iter().filter(|&&d| d < RADIUS_M + 5.0).count();
+            let far = path.iter().filter(|&&d| d > end - 4.0).count();
+            assert!(
+                far < near,
+                "{centre:?}: {far} path cells at the end, {near} near"
+            );
+        }
+    }
+    assert_eq!(worn_in, 0, "worn near the centre");
+    assert!(worn_out > 0, "no worn patch towards the edge");
 }

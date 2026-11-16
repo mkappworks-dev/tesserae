@@ -310,6 +310,12 @@ pub(super) struct Biome {
 struct BiomeSettlement {
     settlement: String,
     spacing_m: f32,
+    #[serde(default = "every_cell")]
+    chance: f32,
+}
+
+fn every_cell() -> f32 {
+    1.0
 }
 
 #[derive(Deserialize)]
@@ -444,6 +450,7 @@ impl From<Biome> for content::BiomeDef {
                 .map(|s| content::BiomeSettlement {
                     settlement: s.settlement,
                     spacing_m: s.spacing_m,
+                    chance: s.chance,
                 })
                 .collect(),
         }

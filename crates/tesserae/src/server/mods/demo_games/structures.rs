@@ -229,18 +229,45 @@ struct Generated {
 
 impl Generated {
     fn new(generator: &Worldgen, half_m: f32) -> Self {
+        Self::around(generator, [0.0, 0.0], half_m)
+    }
+
+    /// The Chunks within `half_m` of `centre_m`.
+    fn around(generator: &Worldgen, centre_m: [f32; 2], half_m: f32) -> Self {
         let chunk_m = CHUNK_SIZE as f32 * generator.voxel_size();
         let (low, high) = generator.surface_bounds_m();
-        let reach = (half_m / chunk_m).ceil() as i32;
+        let [low_x, low_z] = centre_m.map(|c| ((c - half_m) / chunk_m).floor() as i32);
+        let [high_x, high_z] = centre_m.map(|c| ((c + half_m) / chunk_m).ceil() as i32);
         let mut chunks = HashMap::new();
         for cy in (low / chunk_m).floor() as i32 - 1..=(high / chunk_m).ceil() as i32 + 1 {
-            for cz in -reach..reach {
-                for cx in -reach..reach {
+            for cz in low_z..high_z {
+                for cx in low_x..high_x {
                     chunks.insert([cx, cy, cz], generator.chunk(cx, cy, cz));
                 }
             }
         }
         Generated { chunks }
+    }
+
+    /// The highest non-air Voxel of the column `[x, z]`.
+    fn top(&self, [x, z]: [i32; 2]) -> Option<Voxel> {
+        let size = CHUNK_SIZE as i32;
+        let [cx, cz] = [x, z].map(|g| g.div_euclid(size));
+        let [lx, lz] = [x, z].map(|g| g.rem_euclid(size) as usize);
+        let mut rows: Vec<i32> = self
+            .chunks
+            .keys()
+            .filter(|c| c[0] == cx && c[2] == cz)
+            .map(|c| c[1])
+            .collect();
+        rows.sort_unstable_by(|a, b| b.cmp(a));
+        rows.iter().find_map(|&cy| {
+            let chunk = &self.chunks[&[cx, cy, cz]];
+            (0..CHUNK_SIZE)
+                .rev()
+                .map(|y| chunk.get(lx, y, lz))
+                .find(|v| !v.is_air())
+        })
     }
 
     fn get(&self, at: [i32; 3]) -> Option<Voxel> {
@@ -441,4 +468,52 @@ fn a_world_of_each_game_shows_its_templates_and_a_settlement_level_whole_and_fur
         }
         assert!(cellars > 0, "{game}: a building with a cellar stands");
     }
+}
+
+/// Where Terra's town stands at [`SEED`], about 590 m from spawn: the town's lattice is 384 m, so
+/// the square the other tests scan need not hold one.
+const TERRA_TOWN_M: [f32; 2] = [-416.0, -416.0];
+
+#[test]
+fn terra_lays_out_a_town_of_cobbled_roads() {
+    let (_install, loaded) = loaded("terra", 1.0);
+    let templates = &loaded.tables.templates;
+    let generator = Worldgen::new(SEED, 1.0, loaded.world.unwrap())
+        .with_templates(templates)
+        .with_settlements(&loaded.tables.settlements);
+    let world = Generated::around(&generator, TERRA_TOWN_M, 128.0);
+    let found = standing(&world, templates, 1.0);
+    let cobble = material(&loaded, "terra:cobblestone");
+    let rects: Vec<[[i32; 2]; 2]> = found
+        .iter()
+        .map(|f| {
+            let [sx, _, sz] = templates[f.template].sample(1.0, f.turn).size();
+            [
+                [f.corner[0], f.corner[2]],
+                [f.corner[0] + sx, f.corner[2] + sz],
+            ]
+        })
+        .collect();
+    let wells = found
+        .iter()
+        .zip(&rects)
+        .filter(|(f, _)| templates[f.template].name == "terra:well");
+    // Only a town lays cobblestone roads, and no wild Structure stands within its margin.
+    let road = |[min, max]: [[i32; 2]; 2]| {
+        let centre = [0, 1].map(|a| (min[a] + max[a]) / 2);
+        let mut cells = 0;
+        for z in centre[1] - 60..centre[1] + 60 {
+            for x in centre[0] - 60..centre[0] + 60 {
+                let built = rects.iter().any(|[min, max]| {
+                    (min[0]..max[0]).contains(&x) && (min[1]..max[1]).contains(&z)
+                });
+                if !built && world.top([x, z]).is_some_and(|v| v.material() == cobble) {
+                    cells += 1;
+                }
+            }
+        }
+        cells
+    };
+    let town = wells.map(|(_, &rect)| road(rect)).max().unwrap_or(0);
+    assert!(town > 100, "{town} cobbled road cells round a well");
 }

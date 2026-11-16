@@ -152,10 +152,20 @@ impl Probe {
         world: impl Fn(&[BiomeStructure]) -> WorldgenParams,
         rows: &[BiomeStructure],
     ) -> Self {
+        Self::seeded(SEED, size, template, world, rows)
+    }
+
+    fn seeded(
+        seed: u64,
+        size: f32,
+        template: Template,
+        world: impl Fn(&[BiomeStructure]) -> WorldgenParams,
+        rows: &[BiomeStructure],
+    ) -> Self {
         Probe {
-            with: Worldgen::new(SEED, size, world(rows))
+            with: Worldgen::new(seed, size, world(rows))
                 .with_templates(std::slice::from_ref(&template)),
-            bare: Worldgen::new(SEED, size, world(&[])),
+            bare: Worldgen::new(seed, size, world(&[])),
             template,
             chunks: RefCell::default(),
         }
@@ -624,10 +634,10 @@ fn places(found: &[Found]) -> Vec<([i32; 3], u8)> {
 #[test]
 fn no_structure_stands_in_a_lake() {
     let size = 1.0;
-    let rows = [row(16.0, 1.0)];
+    let rows = [row(10.0, 1.0)];
     let water = tesserae_core::testgen::fixtures().water;
     let wet = Probe::of(size, hut(), lake, &rows);
-    let found = structures(&wet, size, 64.0);
+    let found = structures(&wet, size, 128.0);
     assert!(found.len() > 4, "only {} Structures", found.len());
     for f in &found {
         for column in columns(&wet, f, size) {
@@ -640,7 +650,7 @@ fn no_structure_stands_in_a_lake() {
             );
         }
     }
-    let dry = structures(&Probe::new(size, &rows), size, 64.0);
+    let dry = structures(&Probe::new(size, &rows), size, 128.0);
     assert_ne!(places(&found), places(&dry), "the lake turned no draw away");
 }
 
@@ -796,7 +806,7 @@ fn a_cellar_is_underground_and_the_ground_layer_level_with_the_surface() {
 #[test]
 fn a_foundation_fills_the_gap_on_uneven_ground_and_is_absent_without_one() {
     for size in [1.0, 0.5] {
-        let rows = [row(16.0, 1.0)];
+        let rows = [row(10.0, 1.0)];
         let (mut filled, mut open) = (0, 0);
         for foundation in [Some(FOUNDATION), None] {
             let probe = Probe::of(size, deck(foundation), hilly, &rows);
@@ -1015,4 +1025,61 @@ fn no_body_clears_below_the_top_of_a_structure_it_stands_over() {
             }
         }
     }
+}
+
+/// The centre, in metres, of each found hut's footprint.
+fn centres(found: &[Found], size: f32) -> Vec<[f32; 2]> {
+    found
+        .iter()
+        .map(|f| {
+            let [sx, _, sz] = hut().sample(size, f.turn).size();
+            [(f.corner[0], sx), (f.corner[2], sz)].map(|(c, s)| (c as f32 + s as f32 / 2.0) * size)
+        })
+        .collect()
+}
+
+#[test]
+fn no_two_structures_of_a_row_stand_closer_than_their_spacing_nor_on_a_grid() {
+    let size = 1.0;
+    let spacing_m = 10.0;
+    let found = structures(&Probe::new(size, &[row(spacing_m, 1.0)]), size, 128.0);
+    let centres = centres(&found, size);
+    assert!(centres.len() > 200, "only {} Structures", centres.len());
+    let mut nearest = Vec::new();
+    for (i, a) in centres.iter().enumerate() {
+        let d = centres
+            .iter()
+            .enumerate()
+            .filter(|&(j, _)| j != i)
+            .map(|(_, b)| ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2)).sqrt())
+            .fold(f32::MAX, f32::min);
+        assert!(
+            d >= spacing_m,
+            "the Structure at {a:?} is {d} m from another"
+        );
+        nearest.push(d);
+    }
+    // Neither a grid nor clumps: nearest neighbours at many distances.
+    let distinct: HashSet<_> = nearest.iter().map(|d| (d * 2.0) as i32).collect();
+    assert!(distinct.len() >= 8, "nearest distances {distinct:?}");
+    let offsets: HashSet<_> = centres
+        .iter()
+        .flat_map(|c| c.map(|v| (v.rem_euclid(spacing_m) * 2.0) as i32))
+        .collect();
+    assert!(offsets.len() >= 16, "offsets in a cell {offsets:?}");
+}
+
+#[test]
+fn two_seeds_stand_structures_differently() {
+    let size = 1.0;
+    let rows = [row(10.0, 1.0)];
+    let ours = places(&structures(&Probe::new(size, &rows), size, 64.0));
+    let probe = Probe::seeded(SEED ^ 0xdead_beef, size, hut(), flat, &rows);
+    let theirs = places(&structures(&probe, size, 64.0));
+    let shared = theirs.iter().filter(|p| ours.contains(p)).count();
+    assert!(
+        shared * 10 < theirs.len(),
+        "{shared} of {} alike",
+        theirs.len()
+    );
 }

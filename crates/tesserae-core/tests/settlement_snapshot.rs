@@ -77,6 +77,7 @@ fn world() -> WorldgenParams {
     let rows = [BiomeSettlement {
         settlement: 1,
         spacing_m: 48.0,
+        chance: 0.75,
     }];
     WorldgenParams {
         generator: GENERATOR,
@@ -167,6 +168,10 @@ fn a_reopened_world_lays_out_the_settlements_it_was_made_with() {
         ["t:hamlet"]
     );
     let params = saved.restore(&mapping(), GENERATOR).unwrap();
+    assert_eq!(
+        params.biomes.as_slice()[0].surface_features.settlements()[0].chance,
+        0.75
+    );
     assert_eq!(generated(params, &templates, &kept), made);
 }
 

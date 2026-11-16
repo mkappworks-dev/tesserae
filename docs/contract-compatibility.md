@@ -225,6 +225,13 @@ row, a radius over 64 m, more than 24 Plots or an unknown Template is a load
 error naming the Settlement. A World whose Biomes list none generates exactly as
 before, with no generator version change.
 
+A `biome-settlement` then gained `chance`, after `spacing-m`, above 0 and at
+most 1; a TOML Declaration that leaves it out gets 1. Each lattice square draws
+a candidate centre anywhere in it, which stands with `chance` unless a
+neighbouring square's candidate with a higher draw is near enough for their
+discs and margins to meet. A Declaration built against the earlier 0.3 text
+needs a rebuild.
+
 ## What is not frozen
 
 Line `0.x` is pre-release. Later gameplay steps may add new lines, and

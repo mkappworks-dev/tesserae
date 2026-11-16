@@ -11,7 +11,7 @@ use std::f32::consts::TAU;
 use std::sync::Arc;
 
 use super::fields::{hashed, mix, unit};
-use super::structures::Structure;
+use super::structures::{NEIGHBOURS, Structure};
 use super::{CARDINALS, Footprint, Worldgen, top_index};
 use crate::chunk::{CHUNK_SIZE, Chunk};
 use crate::climate::{BIOMES_SINCE, BiomeId, BiomeSettlement};
@@ -34,8 +34,23 @@ const ROAD_BENDS: [f32; 5] = [0.0, -0.3, 0.3, -0.6, 0.6];
 const BEND_COST: f32 = 0.05;
 /// Ground kept clear around a Plot: between its Structure and a road, and between two.
 const APRON_M: f32 = 2.0;
-/// How far apart along a road Plots are tried.
-const SLOT_M: f32 = 2.0;
+/// The gaps, in metres, between the places along a road a Plot is tried, drawn between these.
+const SLOT_GAP_M: (f32, f32) = (1.0, 4.0);
+/// The most a Plot stands back from its road past its apron.
+const SETBACK_M: f32 = 2.0;
+/// The clearance a Plot keeps past its apron from another, at the disc's edge; none at the
+/// centre, so buildings stand further apart outwards.
+const SPREAD_M: f32 = 4.0;
+/// A road's half width at the disc's edge, narrowing from [`ROAD_HALF_M`] at the centre.
+const EDGE_HALF_M: f32 = 1.0;
+/// An approach path's half width past the disc.
+const APPROACH_HALF_M: f32 = 0.9;
+/// How far an approach path runs past the disc, drawn between these and cut short by the margin.
+const APPROACH_M: (f32, f32) = (12.0, 40.0);
+/// The share of a road's cells worn to the Biome's surface at the disc's edge; none inside half
+/// the radius, and all at an approach path's end.
+const EDGE_WEAR: f32 = 0.25;
+const WEAR_SALT: u64 = 0x5e77_1e00_0000_0002;
 /// How far apart the ground rules ask a Plot's columns.
 const SAMPLE_M: f32 = 1.0;
 /// The most a Plot or a road is cut into or filled over the ground.
@@ -166,33 +181,84 @@ pub(super) struct Town {
     /// The metre cell at the corner of the square the disc fits in.
     origin_m: [i32; 2],
     side: i32,
-    road: Vec<bool>,
+    road: Vec<Lane>,
     /// The height, in metres, a road is graded to at each cell's centre.
     grade: Vec<f32>,
     /// The centre's first, if it has one.
     pub(super) plots: Vec<Structure>,
     /// Each Plot's ground, levelled; by [`Self::plots`].
     lots: Vec<Lot>,
+    /// The points its approach paths step through past the disc.
+    approach: Vec<[f32; 2]>,
+}
+
+/// What a metre cell of a Settlement's square holds.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Lane {
+    Open,
+    /// Laid in the Settlement's path Material.
+    Laid,
+    /// Graded like a road, but showing the Biome's surface.
+    Worn,
 }
 
 impl Town {
-    fn road_at(&self, [x, z]: [i32; 2]) -> bool {
+    fn lane_at(&self, [x, z]: [i32; 2]) -> Lane {
         let [i, j] = [x - self.origin_m[0], z - self.origin_m[1]];
-        (0..self.side).contains(&i)
-            && (0..self.side).contains(&j)
-            && self.road[(j * self.side + i) as usize]
-    }
-
-    /// Its disc, which fields, trees and scatter keep off.
-    pub(super) fn footprint(&self, voxel_size: f32) -> Footprint {
-        let centre = self.centre_m.map(|c| c / voxel_size);
-        let radius = self.radius_m / voxel_size;
-        Footprint {
-            min: centre.map(|c| (c - radius).floor() as i32),
-            max: centre.map(|c| (c + radius).ceil() as i32),
-            disc: Some((centre, radius)),
+        if (0..self.side).contains(&i) && (0..self.side).contains(&j) {
+            self.road[(j * self.side + i) as usize]
+        } else {
+            Lane::Open
         }
     }
+
+    fn road_at(&self, at: [i32; 2]) -> bool {
+        self.lane_at(at) != Lane::Open
+    }
+
+    /// Its disc and the ground along its approach paths, which fields, trees and scatter keep
+    /// off.
+    pub(super) fn footprints(&self, voxel_size: f32) -> impl Iterator<Item = Footprint> + '_ {
+        let around = ROAD_STEP_M / 2.0 + APPROACH_HALF_M + 0.5;
+        std::iter::once((self.centre_m, self.radius_m))
+            .chain(self.approach.iter().map(move |&p| (p, around)))
+            .map(move |(centre_m, radius_m)| {
+                let centre = centre_m.map(|c| c / voxel_size);
+                let radius = radius_m / voxel_size;
+                Footprint {
+                    min: centre.map(|c| (c - radius).floor() as i32),
+                    max: centre.map(|c| (c + radius).ceil() as i32),
+                    disc: Some((centre, radius)),
+                }
+            })
+    }
+}
+
+/// A road from a Settlement's centre: its points [`ROAD_STEP_M`] apart, and the furthest any is
+/// from the centre.
+struct Road {
+    points: Vec<[f32; 2]>,
+    end_m: f32,
+}
+
+/// A place along a road a Plot is tried.
+struct Slot {
+    key: u64,
+    road: usize,
+    along: f32,
+    /// Which side of the road, as `1` or `-1`.
+    side: f32,
+    setback_m: f32,
+}
+
+/// How far from its centre a Settlement's roads and approach paths may reach: never past its
+/// margin, so they stay on ground it already claims.
+fn paths_m(settlement: &Settlement) -> f32 {
+    settlement.radius_m + settlement.margin_m.min(APPROACH_M.1 + APPROACH_HALF_M)
+}
+
+fn lerp((low, high): (f32, f32), t: f32) -> f32 {
+    low + (high - low) * t
 }
 
 /// A Plot taken, as rectangles in metres `[min, max)`: its Structure, and that widened by the
@@ -242,8 +308,8 @@ impl Worldgen {
         self.sites_near(region)
             .into_iter()
             .filter(|s| {
-                let radius_m = self.settlement_of(s).radius_m;
-                s.reaches(widened(region, self.voxel_size), radius_m)
+                let paths_m = paths_m(self.settlement_of(s));
+                s.reaches(widened(region, self.voxel_size), paths_m)
             })
             .filter_map(|s| self.layouts.town((s.row, s.cell), || self.lay_out(&s)))
             .collect()
@@ -255,7 +321,12 @@ impl Worldgen {
 
     fn settlement_of(&self, site: &Site) -> &Settlement {
         let pass = self.settlement_pass().expect("a Site has a pass");
-        &pass.settlements[usize::from(pass.rows[site.row].entry.settlement)]
+        self.settlement_of_row(&pass.rows[site.row])
+    }
+
+    fn settlement_of_row(&self, row: &Row) -> &Settlement {
+        let pass = self.settlement_pass().expect("a row has a pass");
+        &pass.settlements[usize::from(row.entry.settlement)]
     }
 
     /// The Sites of every row whose disc and margin reach `region`, in metres, in claim order. A
@@ -289,9 +360,10 @@ impl Worldgen {
         let row = pass.rows[index];
         let spacing = row.entry.spacing_m;
         let at = |m: f32| (m / spacing).floor() as i32;
+        let reach_m = self.settlement_of_row(&row).reach_m();
         let (low, high) = (
-            [0, 1].map(|a| at(region[0][a])),
-            [0, 1].map(|a| at(region[1][a])),
+            [0, 1].map(|a| at(region[0][a] - reach_m)),
+            [0, 1].map(|a| at(region[1][a] + reach_m)),
         );
         (low[1]..=high[1])
             .flat_map(|j| (low[0]..=high[0]).map(move |i| [i, j]))
@@ -303,10 +375,9 @@ impl Worldgen {
             .collect()
     }
 
-    /// The Site a lattice cell holds, if the ground at its centre takes it.
-    fn site(&self, index: usize, row: &Row, cell: [i32; 2]) -> Option<Site> {
-        let pass = self.settlement_pass()?;
-        let settlement = &pass.settlements[usize::from(row.entry.settlement)];
+    /// A held cell's candidate centre, on whole metres anywhere in the cell, and its priority
+    /// over its neighbours', from hashes alone.
+    fn site_draw(&self, row: &Row, cell: [i32; 2]) -> Option<(u64, [f32; 2], u64)> {
         let hash = hashed(
             self.seed,
             SETTLEMENT_SALT,
@@ -317,17 +388,40 @@ impl Worldgen {
                 cell[1] as u32 as u64,
             ],
         );
-        let reach_m = settlement.radius_m + settlement.margin_m;
+        if unit(mix(hash ^ 1)) >= f64::from(row.entry.chance) {
+            return None;
+        }
         let mut centre_m = [0.0; 2];
         for axis in 0..2 {
             let from = cell[axis] as f32 * row.entry.spacing_m;
-            let low = (from + reach_m).ceil();
-            let high = (from + row.entry.spacing_m - reach_m).floor();
-            if high < low {
-                return None;
-            }
-            let free = (high - low) as u64;
+            let low = from.ceil();
+            let high = (from + row.entry.spacing_m).ceil() - 1.0;
+            let free = (high - low).max(0.0) as u64;
             centre_m[axis] = low + (mix(hash ^ (3 + axis as u64)) % (free + 1)) as f32;
+        }
+        Some((hash, centre_m, mix(hash ^ 6)))
+    }
+
+    /// The Site a lattice cell holds: its candidate, if no neighbouring cell's candidate with a
+    /// higher priority is near enough for their discs and margins to meet, and the ground at its
+    /// centre takes it. The neighbours are asked for candidates alone, never the ground, so the
+    /// answer is the same from every Chunk; the spacing is at least twice the reach, so only the
+    /// eight neighbours can be that near.
+    fn site(&self, index: usize, row: &Row, cell: [i32; 2]) -> Option<Site> {
+        let pass = self.settlement_pass()?;
+        let settlement = &pass.settlements[usize::from(row.entry.settlement)];
+        let (hash, centre_m, priority) = self.site_draw(row, cell)?;
+        let reach_m = settlement.radius_m + settlement.margin_m;
+        let crowded = NEIGHBOURS.iter().any(|&[di, dj]| {
+            let near = [cell[0] + di, cell[1] + dj];
+            self.site_draw(row, near)
+                .is_some_and(|(_, other_m, other)| {
+                    let [dx, dz] = [0, 1].map(|a| other_m[a] - centre_m[a]);
+                    (other, near) > (priority, cell) && (dx * dx + dz * dz).sqrt() < 2.0 * reach_m
+                })
+        });
+        if crowded {
+            return None;
         }
         let [x_m, z_m] = centre_m;
         let biome = self.biome_at(x_m, z_m)?;
@@ -459,31 +553,38 @@ impl Worldgen {
         Some(level_m)
     }
 
-    /// The Settlement a Site grows to: roads branched from its centre, then Plots beside them.
-    /// `None` when fewer Plots stand than it needs.
+    /// The Settlement a Site grows to: roads branched from its centre, then Plots beside them,
+    /// tried in a seeded order. `None` when fewer Plots stand than it needs.
     fn lay_out(&self, site: &Site) -> Option<Town> {
         let settlement = self.settlement_of(site);
         let radius_m = settlement.radius_m;
         let centre = site.centre_m;
         let (plots, lots): (Vec<_>, Vec<_>) = site.centre.into_iter().unzip();
-        let roads = self.roads(site, radius_m, &lots);
-        let reach = radius_m.ceil() as i32;
+        let roads = self.roads(site, settlement, &lots);
+        let reach = paths_m(settlement).ceil() as i32 + 1;
         let origin_m = centre.map(|c| c as i32 - reach);
         let side = 2 * reach + 1;
+        let approach = roads
+            .iter()
+            .flat_map(|r| &r.points)
+            .filter(|p| distance(**p, centre) > radius_m)
+            .copied()
+            .collect();
         let mut town = Town {
             centre_m: centre,
             radius_m,
             path: settlement.path,
             origin_m,
             side,
-            road: vec![false; (side * side) as usize],
+            road: vec![Lane::Open; (side * side) as usize],
             grade: Vec::new(),
             plots,
             lots,
+            approach,
         };
         for road in &roads {
-            for pair in road.windows(2) {
-                self.rasterise(&mut town, pair[0], pair[1]);
+            for pair in road.points.windows(2) {
+                self.rasterise(&mut town, settlement, road, pair[0], pair[1]);
             }
         }
         self.grade(&mut town);
@@ -491,66 +592,52 @@ impl Worldgen {
         let mins: usize = settlement.rules.iter().map(|r| usize::from(r.min)).sum();
         let queue = self.plot_queue(settlement, site.hash);
         let mut next = 0;
-        let lengths: Vec<f32> = roads.iter().map(|r| length(r)).collect();
-        let longest = lengths.iter().copied().fold(0.0, f32::max);
-        let mut along = SLOT_M;
-        'slots: while along <= longest {
-            for (road, &len) in roads.iter().zip(&lengths) {
-                if along > len {
-                    continue;
-                }
-                let (point, heading) = point_along(road, along);
-                for side in [1.0, -1.0] {
-                    let Some(&rule) = queue.get(next) else {
-                        break 'slots;
+        for slot in slots(site, &roads) {
+            let Some(&rule) = queue.get(next) else {
+                break;
+            };
+            let (point, heading) = point_along(&roads[slot.road].points, slot.along);
+            let normal = [-heading[1] * slot.side, heading[0] * slot.side];
+            // The door faces back across the road's side to its line.
+            let facing = (0..4u8)
+                .max_by(|&a, &b| {
+                    let dot = |q: u8| {
+                        let f = FACINGS[usize::from(q)];
+                        -(f[0] * normal[0] + f[1] * normal[1])
                     };
-                    let normal = [-heading[1] * side, heading[0] * side];
-                    // The door faces back across the road's side to its line.
-                    let facing = (0..4u8)
-                        .max_by(|&a, &b| {
-                            let dot = |q: u8| {
-                                let f = FACINGS[usize::from(q)];
-                                -(f[0] * normal[0] + f[1] * normal[1])
-                            };
-                            dot(a).total_cmp(&dot(b))
-                        })
-                        .unwrap_or_default();
-                    let step = FACINGS[usize::from(facing)];
-                    let door_m = [0, 1].map(|a| point[a] - step[a] * (ROAD_HALF_M + APRON_M));
-                    let building = &settlement.rules[rule].building;
-                    let (_, corner_m, size_m) = self.turned(building, facing, door_m);
-                    let rect = [corner_m, [0, 1].map(|a| corner_m[a] + size_m[a])];
-                    let kept = widened(rect, APRON_M);
-                    let inside = [
-                        kept[0],
-                        kept[1],
-                        [kept[0][0], kept[1][1]],
-                        [kept[1][0], kept[0][1]],
-                    ]
-                    .iter()
-                    .all(|p| {
-                        let [dx, dz] = [0, 1].map(|a| p[a] - centre[a]);
-                        dx * dx + dz * dz <= radius_m * radius_m
-                    });
-                    if !inside
-                        || town.lots.iter().any(|l| overlap(l.kept, kept))
-                        || town.any_road(kept)
-                    {
-                        continue;
-                    }
-                    match self.plot(building, facing, door_m) {
-                        Some((s, lot)) => {
-                            town.lots.push(lot);
-                            town.plots.push(s);
-                            next += 1;
-                        }
-                        // The Plot stays empty; a Template still short of its minimum tries again.
-                        None if next >= mins => next += 1,
-                        None => {}
-                    }
-                }
+                    dot(a).total_cmp(&dot(b))
+                })
+                .unwrap_or_default();
+            let step = FACINGS[usize::from(facing)];
+            let back_m = ROAD_HALF_M + APRON_M + slot.setback_m;
+            let door_m = [0, 1].map(|a| point[a] - step[a] * back_m);
+            let building = &settlement.rules[rule].building;
+            let (_, corner_m, size_m) = self.turned(building, facing, door_m);
+            let rect = [corner_m, [0, 1].map(|a| corner_m[a] + size_m[a])];
+            let kept = widened(rect, APRON_M);
+            let inside = [
+                kept[0],
+                kept[1],
+                [kept[0][0], kept[1][1]],
+                [kept[1][0], kept[0][1]],
+            ]
+            .iter()
+            .all(|&p| distance(p, centre) <= radius_m);
+            let middle = [0, 1].map(|a| (rect[0][a] + rect[1][a]) / 2.0);
+            let clear = widened(kept, SPREAD_M * distance(middle, centre) / radius_m);
+            if !inside || town.lots.iter().any(|l| overlap(l.kept, clear)) || town.any_road(kept) {
+                continue;
             }
-            along += SLOT_M;
+            match self.plot(building, facing, door_m) {
+                Some((s, lot)) => {
+                    town.lots.push(lot);
+                    town.plots.push(s);
+                    next += 1;
+                }
+                // The Plot stays empty; a Template still short of its minimum tries again.
+                None if next >= mins => next += 1,
+                None => {}
+            }
         }
         let placed = town.plots.len() - usize::from(site.centre.is_some());
         (next >= mins && placed >= usize::from(settlement.minimum)).then_some(town)
@@ -589,10 +676,14 @@ impl Worldgen {
     }
 
     /// Each road from the centre: points [`ROAD_STEP_M`] apart, each step the gentlest of its
-    /// bends that stays in the disc, dry, clear of `lots` and no steeper than a road climbs.
-    fn roads(&self, site: &Site, radius_m: f32, lots: &[Lot]) -> Vec<Vec<[f32; 2]>> {
+    /// bends that stays in the disc, dry, clear of `lots` and no steeper than a road climbs. Two
+    /// or three run on past the disc as approach paths, heading only outwards there.
+    fn roads(&self, site: &Site, settlement: &Settlement, lots: &[Lot]) -> Vec<Road> {
         let centre = site.centre_m;
+        let radius_m = settlement.radius_m;
         let count = 3 + (mix(site.hash ^ 5) % 2) as usize;
+        let approaches = 2 + (mix(site.hash ^ 7) % 2) as usize;
+        let first_approach = (mix(site.hash ^ 8) % count as u64) as usize;
         let first = FACINGS[usize::from(site.facing)];
         let base = first[1].atan2(first[0]);
         let mut roads = Vec::with_capacity(count);
@@ -604,6 +695,17 @@ impl Worldgen {
                     / count as f32
             };
             let mut heading = base + branch as f32 * TAU / count as f32 + jitter;
+            let inner_m = radius_m - ROAD_HALF_M;
+            let limit_m = if (branch + count - first_approach) % count < approaches {
+                let drawn = lerp(
+                    APPROACH_M,
+                    unit(mix(site.hash ^ (32 + branch as u64))) as f32,
+                );
+                radius_m + drawn.min(settlement.margin_m - APPROACH_HALF_M)
+            } else {
+                inner_m
+            }
+            .max(inner_m);
             let mut point = centre;
             let mut height_m = self.surface_height_m(point[0], point[1]);
             let mut road = vec![point];
@@ -615,8 +717,9 @@ impl Worldgen {
                         point[0] + ROAD_STEP_M * angle.cos(),
                         point[1] + ROAD_STEP_M * angle.sin(),
                     ];
-                    let [dx, dz] = [0, 1].map(|a| next[a] - centre[a]);
-                    if (dx * dx + dz * dz).sqrt() > radius_m - ROAD_HALF_M
+                    let out_m = distance(next, centre);
+                    if out_m > limit_m
+                        || (out_m > inner_m && out_m <= distance(point, centre))
                         || lots
                             .iter()
                             .any(|l| overlap(widened(l.kept, ROAD_HALF_M), [next, next]))
@@ -642,14 +745,31 @@ impl Worldgen {
                 (heading, point, height_m) = (angle, next, next_m);
                 road.push(point);
             }
-            roads.push(road);
+            let end_m = road
+                .iter()
+                .map(|&p| distance(p, centre))
+                .fold(0.0, f32::max);
+            roads.push(Road {
+                points: road,
+                end_m,
+            });
         }
         roads
     }
 
-    /// Marks the cells of the disc whose centre is within [`ROAD_HALF_M`] of the segment `a..b`,
-    /// outside every one of `lots`.
-    fn rasterise(&self, town: &mut Town, a: [f32; 2], b: [f32; 2]) {
+    /// Marks the cells whose centre is near the segment `a..b` of `road`, outside every one of
+    /// `lots`: within [`ROAD_HALF_M`] at the centre, narrowing to [`EDGE_HALF_M`] at the disc's
+    /// edge and [`APPROACH_HALF_M`] past it. Cells towards the edge wear, by a draw of their own,
+    /// more often the further out, so an approach path fades into the ground at its end.
+    fn rasterise(
+        &self,
+        town: &mut Town,
+        settlement: &Settlement,
+        road: &Road,
+        a: [f32; 2],
+        b: [f32; 2],
+    ) {
+        let radius_m = town.radius_m;
         let low = [0, 1].map(|i| (a[i].min(b[i]) - ROAD_HALF_M).floor() as i32);
         let high = [0, 1].map(|i| (a[i].max(b[i]) + ROAD_HALF_M).ceil() as i32);
         let [ex, ez] = [b[0] - a[0], b[1] - a[1]];
@@ -659,16 +779,34 @@ impl Worldgen {
                 let p = [x as f32 + 0.5, z as f32 + 0.5];
                 let t = (((p[0] - a[0]) * ex + (p[1] - a[1]) * ez) / len2).clamp(0.0, 1.0);
                 let [dx, dz] = [p[0] - a[0] - t * ex, p[1] - a[1] - t * ez];
-                let [cx, cz] = [0, 1].map(|i| p[i] - town.centre_m[i]);
-                if dx * dx + dz * dz > ROAD_HALF_M * ROAD_HALF_M
-                    || cx * cx + cz * cz > town.radius_m * town.radius_m
+                let out_m = distance(p, town.centre_m);
+                let (half_m, wear) = if out_m <= radius_m {
+                    let edge = out_m / radius_m;
+                    let half_m = lerp((ROAD_HALF_M, EDGE_HALF_M), edge);
+                    (half_m, EDGE_WEAR * (2.0 * edge - 1.0).clamp(0.0, 1.0))
+                } else {
+                    let end = ((out_m - radius_m) / (road.end_m - radius_m)).clamp(0.0, 1.0);
+                    (APPROACH_HALF_M, lerp((EDGE_WEAR, 1.0), end * end))
+                };
+                if dx * dx + dz * dz > half_m * half_m
+                    || out_m > radius_m + settlement.margin_m
                     || town.lots.iter().any(|l| overlap(l.kept, [p, p]))
                 {
                     continue;
                 }
                 let [i, j] = [x - town.origin_m[0], z - town.origin_m[1]];
-                if (0..town.side).contains(&i) && (0..town.side).contains(&j) {
-                    town.road[(j * town.side + i) as usize] = true;
+                if !((0..town.side).contains(&i) && (0..town.side).contains(&j)) {
+                    continue;
+                }
+                let worn = wear > 0.0
+                    && unit(hashed(
+                        self.seed,
+                        WEAR_SALT,
+                        &[x as u32 as u64, z as u32 as u64],
+                    )) < f64::from(wear);
+                let cell = &mut town.road[(j * town.side + i) as usize];
+                if *cell != Lane::Laid {
+                    *cell = if worn { Lane::Worn } else { Lane::Laid };
                 }
             }
         }
@@ -685,7 +823,7 @@ impl Worldgen {
         let natural: Vec<f32> = (0..side * side)
             .map(|c| {
                 let [x, z] = at(c % side, c / side);
-                if town.road[c] {
+                if town.road[c] != Lane::Open {
                     self.surface_height_m(x, z)
                 } else {
                     f32::NAN
@@ -727,8 +865,8 @@ impl Worldgen {
             .map(|(o, u)| (o + u) / 2.0)
             .collect();
         for (c, h) in natural.iter().enumerate() {
-            if town.road[c] && (town.grade[c] - h).abs() > CUT_FILL_M {
-                town.road[c] = false;
+            if town.road[c] != Lane::Open && (town.grade[c] - h).abs() > CUT_FILL_M {
+                town.road[c] = Lane::Open;
             }
         }
     }
@@ -784,9 +922,16 @@ impl Worldgen {
                 let Some(half_voxels) = self.road_height(town, [gx, gz]) else {
                     continue;
                 };
+                let cap = match town.lane_at(metre_cell(x_m, z_m, half)) {
+                    Lane::Worn => match self.column_ground(gx, gz) {
+                        Some(ground) => Voxel::cube(ground.surface),
+                        None => continue,
+                    },
+                    _ => town.path,
+                };
                 let natural_m = self.surface_height_m(x_m, z_m);
                 let top = half_voxels.div_euclid(2) - 1;
-                self.reshape(chunk, origin, [gx, gz], natural_m, top, town.path);
+                self.reshape(chunk, origin, [gx, gz], natural_m, top, cap);
                 if half_voxels % 2 == 0 || !(origin[1]..origin[1] + size).contains(&(top + 1)) {
                     continue;
                 }
@@ -797,7 +942,7 @@ impl Worldgen {
                     })
                     .map(|c| c.2)
                     .collect();
-                let material = town.path.material();
+                let material = cap.material();
                 let voxel = match rising[..] {
                     [turn] => Voxel::shaped(material, SHAPE_STAIR, Orientation::new(POS_Y, turn)),
                     _ => Voxel::shaped(material, SHAPE_SLAB, Orientation::IDENTITY),
@@ -818,7 +963,7 @@ impl Worldgen {
     fn road_height(&self, town: &Town, [gx, gz]: [i32; 2]) -> Option<i32> {
         let half = self.voxel_size / 2.0;
         let (x_m, z_m) = (self.global_m(gx), self.global_m(gz));
-        if !town.road_at([(x_m + half).floor() as i32, (z_m + half).floor() as i32]) {
+        if !town.road_at(metre_cell(x_m, z_m, half)) {
             return None;
         }
         if self
@@ -887,10 +1032,47 @@ impl Town {
     }
 }
 
+/// The metre cell holding the centre of the column whose corner is at `(x_m, z_m)`.
+fn metre_cell(x_m: f32, z_m: f32, half: f32) -> [i32; 2] {
+    [(x_m + half).floor() as i32, (z_m + half).floor() as i32]
+}
+
+fn distance(a: [f32; 2], b: [f32; 2]) -> f32 {
+    let [dx, dz] = [0, 1].map(|i| a[i] - b[i]);
+    (dx * dx + dz * dz).sqrt()
+}
+
 fn length(road: &[[f32; 2]]) -> f32 {
-    road.windows(2)
-        .map(|p| ((p[1][0] - p[0][0]).powi(2) + (p[1][1] - p[0][1]).powi(2)).sqrt())
-        .sum()
+    road.windows(2).map(|p| distance(p[0], p[1])).sum()
+}
+
+/// The places along `roads` a Plot is tried, at seeded gaps on each side of each road and a seeded
+/// distance back from it, in a seeded order, so Plots spread over the disc.
+fn slots(site: &Site, roads: &[Road]) -> Vec<Slot> {
+    let mut slots = Vec::new();
+    for (r, road) in roads.iter().enumerate() {
+        let len = length(&road.points);
+        for (k, side) in [1.0, -1.0].into_iter().enumerate() {
+            let lane = mix(site.hash ^ (0x200 + 2 * r + k) as u64);
+            let mut along = 0.0;
+            for n in 0.. {
+                let key = mix(lane ^ n);
+                along += lerp(SLOT_GAP_M, unit(mix(key ^ 1)) as f32);
+                if along > len {
+                    break;
+                }
+                slots.push(Slot {
+                    key,
+                    road: r,
+                    along,
+                    side,
+                    setback_m: SETBACK_M * unit(mix(key ^ 2)) as f32,
+                });
+            }
+        }
+    }
+    slots.sort_unstable_by_key(|s| s.key);
+    slots
 }
 
 /// The point `along` metres down a road, and the unit heading of its segment there.

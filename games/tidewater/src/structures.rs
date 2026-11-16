@@ -12,6 +12,8 @@ const MARGIN_M: f32 = 24.0;
 /// Twice the village's radius and margin, the closest the lattice allows: few cells pass the
 /// ground rules, so a World still shows one every few hundred metres.
 const VILLAGE_SPACING_M: f32 = 104.0;
+/// Thins the lattice's draws, so villages stand apart rather than in every cell.
+const VILLAGE_CHANCE: f32 = 0.6;
 /// A packed earth road, laid by the ground itself.
 const VILLAGE_PATH: &str = "strata:soil";
 /// Over twice the widest wilderness Template, so they stand apart.
@@ -55,6 +57,7 @@ pub fn village() -> Vec<BiomeSettlement> {
     vec![BiomeSettlement {
         settlement: "tidewater:harbour".into(),
         spacing_m: VILLAGE_SPACING_M,
+        chance: VILLAGE_CHANCE,
     }]
 }
 

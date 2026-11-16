@@ -1,4 +1,4 @@
-//! Structures: Templates a Biome lists, stood on a lattice of pure draws (ADR-0029).
+//! Structures: Templates a Biome lists, spread by a Poisson-disc draw on a lattice (ADR-0029).
 //!
 //! Where a Structure stands, how it is turned and how high is a function of the seed and metres
 //! alone, so every Chunk it reaches decides it alike and writes only its own Voxels.
@@ -20,10 +20,20 @@ use crate::worldgen::WorldgenParams;
 use crate::worldgen::settlements::Town;
 
 const STRUCTURE_SALT: u64 = 0x5717_c7e0_0000_0001;
-/// Places a held lattice cell tries before it stands nothing.
-const ATTEMPTS: u64 = 4;
-/// Kept clear of a lattice cell's border, so Structures in two cells never touch.
+/// Kept clear of a lattice cell's border by a candidate's point, so its footprint's centre, once
+/// the corner is on whole metres, is still in the cell.
 const INSET_M: f32 = 0.5;
+/// A lattice cell's eight neighbours.
+pub(super) const NEIGHBOURS: [[i32; 2]; 8] = [
+    [-1, -1],
+    [0, -1],
+    [1, -1],
+    [-1, 0],
+    [1, 0],
+    [-1, 1],
+    [0, 1],
+    [1, 1],
+];
 /// How far apart the ground rules ask a footprint's columns.
 const SAMPLE_M: f32 = 1.0;
 
@@ -38,6 +48,8 @@ struct Row {
     /// The lowest Voxel layer of the Ground layer.
     ground: i32,
     level_tolerance_m: f32,
+    /// The Template's longer side, in metres.
+    longer_m: f32,
 }
 
 /// Built only when some Biome lists a Structure whose Template the World has, so a World without
@@ -78,6 +90,7 @@ impl StructurePass {
                     sizes: [0, 1, 2, 3].map(|q| template.sample(voxel_size, Turn::new(q)).size()),
                     ground: sampled.ground(),
                     level_tolerance_m: template.level_tolerance_m(),
+                    longer_m: template.size_m()[0].max(template.size_m()[2]),
                 });
             }
         }
@@ -122,26 +135,36 @@ impl Structure {
 }
 
 impl Worldgen {
-    /// The lattice cells of a row that columns `[min, max)` touch.
-    fn structure_cells(&self, entry: &BiomeStructure, [min, max]: [[i32; 2]; 2]) -> Vec<[i32; 2]> {
-        let at = |g: i32| (g as f32 * self.voxel_size / entry.spacing_m).floor() as i32;
-        let (low, high) = ([0, 1].map(|a| at(min[a])), [0, 1].map(|a| at(max[a] - 1)));
+    /// The lattice cells of a row whose Structure may touch columns `[min, max)`: a cell's
+    /// Structure is centred in it and reaches half its Template's longer side past it.
+    fn structure_cells(&self, row: &Row, [min, max]: [[i32; 2]; 2]) -> Vec<[i32; 2]> {
+        let spacing = row.entry.spacing_m;
+        let reach_m = row.longer_m / 2.0 + self.voxel_size;
+        let at = |m: f32| (m / spacing).floor() as i32;
+        let low = [0, 1].map(|a| at(self.global_m(min[a]) - reach_m));
+        let high = [0, 1].map(|a| at(self.global_m(max[a]) + reach_m));
         (low[1]..=high[1])
             .flat_map(|j| (low[0]..=high[0]).map(move |i| [i, j]))
             .collect()
     }
 
-    /// The `attempt`th place a held cell's Structure may stand, before the ground is asked: its
-    /// turn, and its corner on whole metres so it stands alike at every Voxel size. `None` where
-    /// it would not fit inside the cell's inset.
-    fn structure_draw(
-        &self,
-        row: &Row,
-        cell: [i32; 2],
-        held: u64,
-        attempt: u64,
-    ) -> Option<Structure> {
-        let h = mix(held ^ (attempt + 1).wrapping_mul(0x9e37_79b9_7f4a_7c15));
+    /// A held cell's candidate, from hashes alone: its Structure, turned, its corner on whole
+    /// metres so it stands alike at every Voxel size; its footprint's centre in metres, inside the
+    /// cell; and its priority over its neighbours'.
+    fn structure_draw(&self, row: &Row, cell: [i32; 2]) -> Option<(Structure, [f32; 2], u64)> {
+        let h = hashed(
+            self.seed,
+            STRUCTURE_SALT,
+            &[
+                row.biome.index() as u64,
+                row.row,
+                cell[0] as u32 as u64,
+                cell[1] as u32 as u64,
+            ],
+        );
+        if unit(mix(h ^ 1)) >= f64::from(row.entry.chance) {
+            return None;
+        }
         let turn = Turn::new((mix(h ^ 2) & 3) as u8);
         let template = &self.templates[usize::from(row.entry.template)];
         let [x_m, _, z_m] = template.size_m();
@@ -151,24 +174,42 @@ impl Worldgen {
             [z_m, x_m]
         };
         let size = row.sizes[usize::from(turn.quarters())];
-        let mut min = [0; 3];
+        let (mut min, mut centre_m) = ([0; 3], [0.0; 2]);
         for (axis, slot) in [0, 2].into_iter().enumerate() {
-            let from = cell[axis] as f32 * row.entry.spacing_m;
-            let low = (from + INSET_M).ceil();
-            let high = (from + row.entry.spacing_m - INSET_M - along_m[axis]).floor();
-            if high < low {
-                return None;
-            }
-            let free = (high - low) as u64;
-            let corner_m = low + (mix(h ^ (3 + axis as u64)) % (free + 1)) as f32;
+            let spacing = row.entry.spacing_m;
+            // Rounding the corner moves the centre at most half a metre, so it stays in the cell.
+            let point_m = cell[axis] as f32 * spacing
+                + INSET_M
+                + unit(mix(h ^ (3 + axis as u64))) as f32 * (spacing - 2.0 * INSET_M);
+            let corner_m = (point_m - along_m[axis] / 2.0).round();
+            centre_m[axis] = corner_m + along_m[axis] / 2.0;
             min[slot] = (corner_m / self.voxel_size).round() as i32;
         }
-        Some(Structure {
+        let s = Structure {
             template: row.entry.template,
             turn,
             min,
             size,
-        })
+        };
+        Some((s, centre_m, mix(h ^ 6)))
+    }
+
+    /// A held cell's candidate, if no neighbouring cell's candidate with a higher priority is
+    /// within the row's spacing. Asks candidates alone, never the ground, so the answer is the
+    /// same from every Chunk; the spacing is at least the cell's side, so only the eight
+    /// neighbours can be that near.
+    fn structure_candidate(&self, row: &Row, cell: [i32; 2]) -> Option<Structure> {
+        let (s, centre_m, priority) = self.structure_draw(row, cell)?;
+        let spacing = row.entry.spacing_m;
+        let crowded = NEIGHBOURS.iter().any(|&[di, dj]| {
+            let near = [cell[0] + di, cell[1] + dj];
+            self.structure_draw(row, near)
+                .is_some_and(|(_, other_m, other)| {
+                    let [dx, dz] = [0, 1].map(|a| other_m[a] - centre_m[a]);
+                    (other, near) > (priority, cell) && dx * dx + dz * dz < spacing * spacing
+                })
+        });
+        (!crowded).then_some(s)
     }
 
     /// Whether the ground under a drawn Structure takes it, and how high it then stands: its
@@ -237,32 +278,18 @@ impl Worldgen {
             .collect()
     }
 
-    /// The Structures of one row touching columns `region`, each held cell standing at the first
-    /// of its draws the ground takes, before any earlier row is asked.
+    /// The Structures of one row touching columns `region`, each a cell's candidate that stands
+    /// where the ground takes it, before any earlier row is asked.
     fn row_structures(&self, index: usize, region: [[i32; 2]; 2]) -> Vec<Structure> {
         let Some(row) = self.structures.as_ref().map(|p| p.rows[index]) else {
             return Vec::new();
         };
-        self.structure_cells(&row.entry, region)
+        self.structure_cells(&row, region)
             .into_iter()
             .filter_map(|cell| {
                 self.layouts.structure((index, cell), || {
-                    let h = hashed(
-                        self.seed,
-                        STRUCTURE_SALT,
-                        &[
-                            row.biome.index() as u64,
-                            row.row,
-                            cell[0] as u32 as u64,
-                            cell[1] as u32 as u64,
-                        ],
-                    );
-                    if unit(mix(h ^ 1)) >= f64::from(row.entry.chance) {
-                        return None;
-                    }
-                    (0..ATTEMPTS)
-                        .filter_map(|attempt| self.structure_draw(&row, cell, h, attempt))
-                        .find_map(|s| self.structure_accepts(&row, s))
+                    let s = self.structure_candidate(&row, cell)?;
+                    self.structure_accepts(&row, s)
                 })
             })
             .filter(|s| s.touches(region))
@@ -348,7 +375,7 @@ impl Worldgen {
         claims
             .towns
             .iter()
-            .map(|t| t.footprint(self.voxel_size))
+            .flat_map(|t| t.footprints(self.voxel_size))
             .chain(
                 claims
                     .structures

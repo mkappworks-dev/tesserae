@@ -114,24 +114,32 @@ impl BiomeStructure {
 /// Bounded so a [`Biome`] stays inline and `Copy`.
 pub const MAX_BIOME_SETTLEMENTS: usize = 2;
 
-/// A Settlement a Biome lays out: each square lattice cell `spacing_m` on a side may hold one,
-/// its disc and margin inside the cell.
+/// A Settlement a Biome lays out: each square lattice cell `spacing_m` on a side holds a candidate
+/// centre with `chance`, which stands unless a neighbour's would meet its disc and margin.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct BiomeSettlement {
     /// An index into the World's Settlements.
     pub settlement: u16,
     pub spacing_m: f32,
+    pub chance: f32,
 }
 
 impl BiomeSettlement {
     const NONE: BiomeSettlement = BiomeSettlement {
         settlement: 0,
         spacing_m: 0.0,
+        chance: 0.0,
     };
 
     /// Checked against the Settlement it names, since its spacing's floor is that one's reach.
     pub fn validate(&self, settlement: &crate::settlement::Settlement) -> Result<(), ParamError> {
-        let reach_m = settlement.radius_m + settlement.margin_m;
+        if !(self.chance > 0.0 && self.chance <= 1.0) {
+            return Err(ParamError {
+                field: "biomes.settlements",
+                rule: "chance must be above 0 and at most 1",
+            });
+        }
+        let reach_m = settlement.reach_m();
         if !(self.spacing_m >= 2.0 * reach_m && self.spacing_m <= MAX_STRUCTURE_SPACING_M) {
             return Err(ParamError {
                 field: "biomes.settlements",

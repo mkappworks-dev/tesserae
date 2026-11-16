@@ -21,13 +21,19 @@ World that differs.
 
 ## Worldgen placement is a lattice of pure draws
 
-A Biome lists `structures` rows outside the 16 surface-feature slots. A square
-lattice of `spacing-m` cells holds a Structure by a hash of the seed and the
-cell, with its rotation, inset so two never touch, and tried up to 4 times
-against the ground rules, as crop fields are. Each Chunk decides every Structure
-that can reach it and writes only its own Voxels, so one is whole across Chunk
-borders and equal in metres at every size. The pass reads no Chunk, so a
-player's edit never changes what a neighbouring Chunk generates.
+A Biome lists `structures` rows outside the 16 surface-feature slots. Each cell
+of a square lattice `spacing-m` on a side draws, by a hash of the seed and the
+cell, a candidate anywhere in it with its rotation and a priority. It stands
+only if no neighbouring cell's candidate with a higher priority lies within the
+spacing (a pure-function Poisson disc, so Structures are never on a grid nor
+clumped), and then only if the ground takes it; a refused candidate is not tried
+again elsewhere, since a retry could stand nearer a neighbour than the spacing.
+Settlement centres are spread the same way, kept apart by their discs and
+margins. The neighbours are asked for candidates only, never the ground, so the
+answer is the same from every Chunk. Each Chunk decides every Structure that can
+reach it and writes only its own Voxels, so one is whole across Chunk borders
+and equal in metres at every size. The pass reads no Chunk, so a player's edit
+never changes what a neighbouring Chunk generates.
 
 A Structure's non-`keep` cells always overwrite terrain, ore and lake water. A
 Biome with no `structures` runs no pass. Trees, scatter and fields skip a

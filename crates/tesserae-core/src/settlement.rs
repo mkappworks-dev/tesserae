@@ -49,6 +49,11 @@ pub struct Settlement {
 }
 
 impl Settlement {
+    /// Its disc and margin, in metres.
+    pub fn reach_m(&self) -> f32 {
+        self.radius_m + self.margin_m
+    }
+
     /// Checked against the World's Templates, which every [`Building`] indexes.
     pub fn validate(&self, templates: &[Template]) -> Result<(), String> {
         if !(self.radius_m > 0.0 && self.radius_m <= MAX_SETTLEMENT_RADIUS_M) {
