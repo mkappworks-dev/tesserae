@@ -9,3 +9,6 @@ CHANGELOG.md
 
 # Written by `cargo run -p tesserae-mods --example export-blocks`.
 mockup/blocks/
+
+# Written by `node mockup/export-templates.mjs`.
+mockup/templates/

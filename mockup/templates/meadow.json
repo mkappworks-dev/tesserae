@@ -1,0 +1,2995 @@
+{
+ "game": "meadow",
+ "templates": [
+  {
+   "name": "meadow:cottage",
+   "label": "Cottage",
+   "kind": "home",
+   "size": [
+    8,
+    14,
+    7
+   ],
+   "ground_layer": 0,
+   "foundation": "meadow:fieldstone",
+   "level_tolerance_m": null,
+   "palette": [
+    {
+     "symbol": ".",
+     "cell": "keep"
+    },
+    {
+     "symbol": ":",
+     "cell": "air"
+    },
+    {
+     "symbol": "A",
+     "material": "meadow:fieldstone",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "B",
+     "material": "meadow:birch_planks",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "C",
+     "material": "meadow:birch_log",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "D",
+     "material": "meadow:birch_planks",
+     "shape": "meadow:table",
+     "orientation": 0
+    },
+    {
+     "symbol": "E",
+     "material": "meadow:door",
+     "shape": "meadow:panel",
+     "orientation": 0
+    },
+    {
+     "symbol": "F",
+     "material": "meadow:chest",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "G",
+     "material": "meadow:workbench",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "H",
+     "material": "meadow:whitewash",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "I",
+     "material": "meadow:glass",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "J",
+     "material": "meadow:lamp",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "K",
+     "material": "meadow:straw",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "L",
+     "material": "meadow:straw",
+     "shape": "core:stair",
+     "orientation": 0
+    },
+    {
+     "symbol": "M",
+     "material": "meadow:straw",
+     "shape": "core:stair",
+     "orientation": 2
+    },
+    {
+     "symbol": "N",
+     "material": "meadow:straw",
+     "shape": "core:slab",
+     "orientation": 0
+    },
+    {
+     "symbol": "O",
+     "material": "meadow:fieldstone",
+     "shape": "core:slab",
+     "orientation": 0
+    }
+   ],
+   "layers": [
+    [
+     "........",
+     ".AAAAAA.",
+     ".ABBBBA.",
+     ".ABBBBA.",
+     ".ABBBBA.",
+     ".AAAAAA.",
+     "........"
+    ],
+    [
+     "........",
+     ".CAAAAC.",
+     ".AD::FA.",
+     ".A::::A.",
+     ".A:::GA.",
+     ".CAAEAC.",
+     "........"
+    ],
+    [
+     "........",
+     ".CHHIHC.",
+     ".A::::I.",
+     ".H::::H.",
+     ".I::::H.",
+     ".CHIEHC.",
+     "........"
+    ],
+    [
+     "........",
+     ".CHHHHC.",
+     ".A::::H.",
+     ".H:J::H.",
+     ".H::::H.",
+     ".CHHCHC.",
+     "........"
+    ],
+    [
+     "KKKKKKKK",
+     ".H::::H.",
+     ".A::::H.",
+     ".H::::H.",
+     ".H::::H.",
+     ".H::::H.",
+     "KKKKKKKK"
+    ],
+    [
+     "LLLLLLLL",
+     ".H::::H.",
+     ".A::::H.",
+     ".H::::H.",
+     ".H::::H.",
+     ".H::::H.",
+     "MMMMMMMM"
+    ],
+    [
+     "........",
+     "KKKKKKKK",
+     ".A::::H.",
+     ".H::::H.",
+     ".H::::H.",
+     "KKKKKKKK",
+     "........"
+    ],
+    [
+     "........",
+     "LLLLLLLL",
+     ".A::::H.",
+     ".H::::H.",
+     ".H::::H.",
+     "MMMMMMMM",
+     "........"
+    ],
+    [
+     "........",
+     "........",
+     "KAKKKKKK",
+     ".H::::H.",
+     "KKKKKKKK",
+     "........",
+     "........"
+    ],
+    [
+     "........",
+     "........",
+     "LALLLLLL",
+     ".H::::H.",
+     "MMMMMMMM",
+     "........",
+     "........"
+    ],
+    [
+     "........",
+     "........",
+     ".A......",
+     "NNNNNNNN",
+     "........",
+     "........",
+     "........"
+    ],
+    [
+     "........",
+     "........",
+     ".A......",
+     "........",
+     "........",
+     "........",
+     "........"
+    ],
+    [
+     "........",
+     "........",
+     ".A......",
+     "........",
+     "........",
+     "........",
+     "........"
+    ],
+    [
+     "........",
+     "........",
+     ".O......",
+     "........",
+     "........",
+     "........",
+     "........"
+    ]
+   ]
+  },
+  {
+   "name": "meadow:family_house",
+   "label": "Family house",
+   "kind": "home",
+   "size": [
+    9,
+    16,
+    9
+   ],
+   "ground_layer": 0,
+   "foundation": "meadow:fieldstone",
+   "level_tolerance_m": null,
+   "palette": [
+    {
+     "symbol": ".",
+     "cell": "keep"
+    },
+    {
+     "symbol": ":",
+     "cell": "air"
+    },
+    {
+     "symbol": "A",
+     "material": "meadow:fieldstone",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "B",
+     "material": "meadow:honey_planks",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "C",
+     "material": "meadow:walnut_log",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "D",
+     "material": "meadow:river_stone",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "E",
+     "material": "meadow:walnut_planks",
+     "shape": "core:slab",
+     "orientation": 0
+    },
+    {
+     "symbol": "F",
+     "material": "meadow:chest",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "G",
+     "material": "meadow:walnut_planks",
+     "shape": "meadow:table",
+     "orientation": 0
+    },
+    {
+     "symbol": "H",
+     "material": "meadow:door",
+     "shape": "meadow:panel",
+     "orientation": 0
+    },
+    {
+     "symbol": "I",
+     "material": "meadow:workbench",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "J",
+     "material": "meadow:clay_brick",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "K",
+     "material": "meadow:glass",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "L",
+     "material": "meadow:lamp",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "M",
+     "material": "meadow:whitewash",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "N",
+     "material": "meadow:rose_tiles",
+     "shape": "core:stair",
+     "orientation": 0
+    },
+    {
+     "symbol": "O",
+     "material": "meadow:rose_tiles",
+     "shape": "core:stair",
+     "orientation": 2
+    },
+    {
+     "symbol": "P",
+     "material": "meadow:rose_tiles",
+     "shape": "core:slab",
+     "orientation": 0
+    },
+    {
+     "symbol": "Q",
+     "material": "meadow:clay_brick",
+     "shape": "core:slab",
+     "orientation": 0
+    }
+   ],
+   "layers": [
+    [
+     ".........",
+     ".AAAAAAA.",
+     ".ABBBBBA.",
+     ".ABBBBBA.",
+     ".ABBBBBA.",
+     ".ABBBBBA.",
+     ".AAAAAAA.",
+     ".........",
+     "........."
+    ],
+    [
+     ".........",
+     ".CDDEDDC.",
+     ".DF::::J.",
+     ".D:GG::D.",
+     ".E:::::E.",
+     ".D::::ID.",
+     ".CEDHEDC.",
+     ".........",
+     "........."
+    ],
+    [
+     ".........",
+     ".CDDKDDC.",
+     ".D:::::J.",
+     ".D:::::D.",
+     ".K:::::K.",
+     ".D:::::D.",
+     ".CKDHKDC.",
+     ".........",
+     "........."
+    ],
+    [
+     ".........",
+     ".CDDDDDC.",
+     ".D:::::J.",
+     ".D:::::D.",
+     ".D::L::D.",
+     ".D:::::D.",
+     ".CDDCDDC.",
+     ".........",
+     "........."
+    ],
+    [
+     ".........",
+     ".CCCCCCC.",
+     ".CBBBBBJ.",
+     ".CBBBBBC.",
+     ".CBBBBBC.",
+     ".CBBBBBC.",
+     ".CBBBBBC.",
+     ".CCCCCCC.",
+     "........."
+    ],
+    [
+     ".........",
+     ".CCMECMC.",
+     ".CFF:::J.",
+     ".M:::::M.",
+     ".E:::G:E.",
+     ".C:::::C.",
+     ".M:::::M.",
+     ".CCMECMC.",
+     "........."
+    ],
+    [
+     ".........",
+     ".CCMKCMC.",
+     ".C:::::J.",
+     ".M:::::M.",
+     ".K:::::K.",
+     ".C:::::C.",
+     ".M:::::M.",
+     ".CCMKCMC.",
+     "........."
+    ],
+    [
+     ".........",
+     ".CCCCCCC.",
+     ".C:::::J.",
+     ".C:::::C.",
+     ".C::L::C.",
+     ".C:::::C.",
+     ".C:::::C.",
+     ".CCCCCCC.",
+     "........."
+    ],
+    [
+     "NNNNNNNNN",
+     ".D:::::D.",
+     ".D:::::J.",
+     ".D:::::D.",
+     ".D:::::D.",
+     ".D:::::D.",
+     ".D:::::D.",
+     ".D:::::D.",
+     "OOOOOOOOO"
+    ],
+    [
+     ".........",
+     "NNNNNNNNN",
+     ".D:::::J.",
+     ".D:::::D.",
+     ".D:::::D.",
+     ".D:::::D.",
+     ".D:::::D.",
+     "OOOOOOOOO",
+     "........."
+    ],
+    [
+     ".........",
+     ".........",
+     "NNNNNNNJN",
+     ".D:::::D.",
+     ".D:::::D.",
+     ".D:::::D.",
+     "OOOOOOOOO",
+     ".........",
+     "........."
+    ],
+    [
+     ".........",
+     ".........",
+     ".......J.",
+     "NNNNNNNNN",
+     ".D:::::D.",
+     "OOOOOOOOO",
+     ".........",
+     ".........",
+     "........."
+    ],
+    [
+     ".........",
+     ".........",
+     ".......J.",
+     ".........",
+     "PPPPPPPPP",
+     ".........",
+     ".........",
+     ".........",
+     "........."
+    ],
+    [
+     ".........",
+     ".........",
+     ".......J.",
+     ".........",
+     ".........",
+     ".........",
+     ".........",
+     ".........",
+     "........."
+    ],
+    [
+     ".........",
+     ".........",
+     ".......J.",
+     ".........",
+     ".........",
+     ".........",
+     ".........",
+     ".........",
+     "........."
+    ],
+    [
+     ".........",
+     ".........",
+     ".......Q.",
+     ".........",
+     ".........",
+     ".........",
+     ".........",
+     ".........",
+     "........."
+    ]
+   ]
+  },
+  {
+   "name": "meadow:farmhouse",
+   "label": "Farmhouse",
+   "kind": "home",
+   "size": [
+    11,
+    14,
+    12
+   ],
+   "ground_layer": 3,
+   "foundation": "meadow:fieldstone",
+   "level_tolerance_m": null,
+   "palette": [
+    {
+     "symbol": ".",
+     "cell": "keep"
+    },
+    {
+     "symbol": ":",
+     "cell": "air"
+    },
+    {
+     "symbol": "A",
+     "material": "meadow:fieldstone",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "B",
+     "material": "meadow:chest",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "C",
+     "material": "meadow:birch_planks",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "D",
+     "material": "meadow:birch_log",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "E",
+     "material": "meadow:workbench",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "F",
+     "material": "meadow:birch_planks",
+     "shape": "meadow:table",
+     "orientation": 0
+    },
+    {
+     "symbol": "G",
+     "material": "meadow:door",
+     "shape": "meadow:panel",
+     "orientation": 0
+    },
+    {
+     "symbol": "H",
+     "material": "meadow:honey_planks",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "I",
+     "material": "meadow:glass",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "J",
+     "material": "meadow:lamp",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "K",
+     "material": "meadow:birch_planks",
+     "shape": "core:slab",
+     "orientation": 0
+    },
+    {
+     "symbol": "L",
+     "material": "meadow:walnut_planks",
+     "shape": "core:slab",
+     "orientation": 0
+    },
+    {
+     "symbol": "M",
+     "material": "meadow:birch_log",
+     "shape": "core:post",
+     "orientation": 0
+    },
+    {
+     "symbol": "N",
+     "material": "meadow:moss_shingles",
+     "shape": "core:stair",
+     "orientation": 0
+    },
+    {
+     "symbol": "O",
+     "material": "meadow:moss_shingles",
+     "shape": "core:stair",
+     "orientation": 2
+    },
+    {
+     "symbol": "P",
+     "material": "meadow:moss_shingles",
+     "shape": "core:stair",
+     "orientation": 3
+    },
+    {
+     "symbol": "Q",
+     "material": "meadow:moss_shingles",
+     "shape": "core:stair",
+     "orientation": 1
+    },
+    {
+     "symbol": "R",
+     "material": "meadow:fieldstone",
+     "shape": "core:slab",
+     "orientation": 0
+    }
+   ],
+   "layers": [
+    [
+     "...........",
+     ".AAAAAAAAA.",
+     ".AAAAAAAAA.",
+     ".AAAAAAAAA.",
+     ".AAAAAAAAA.",
+     ".AAAAAAAAA.",
+     ".AAAAAAAAA.",
+     "...........",
+     "...........",
+     "...........",
+     "...........",
+     "..........."
+    ],
+    [
+     "...........",
+     ".AAAAAAAAA.",
+     ".ABB:::::A.",
+     ".A:::::::A.",
+     ".A:::::::A.",
+     ".A:::::::A.",
+     ".A:::AAAAA.",
+     "...........",
+     "...........",
+     "...........",
+     "...........",
+     "..........."
+    ],
+    [
+     "...........",
+     ".AAAAAAAAA.",
+     ".A:::::::A.",
+     ".A:::::::A.",
+     ".A:::::::A.",
+     ".A:::::::A.",
+     ".A:::AAAAA.",
+     "...........",
+     "...........",
+     "...........",
+     "...........",
+     "..........."
+    ],
+    [
+     "...........",
+     ".AAAAAAAAA.",
+     ".ACCCCCCCA.",
+     ".ACCCCCCCA.",
+     ".ACCCCCCCA.",
+     ".ACCCCCCCA.",
+     ".ACCCAAAAA.",
+     ".ACCAKKKKK.",
+     ".ACCAKKKKK.",
+     ".ACCA......",
+     ".AAAA......",
+     "..........."
+    ],
+    [
+     "...........",
+     ".DAAAAAAAD.",
+     ".AE:::::BA.",
+     ".A::::FF:A.",
+     ".A:::::::A.",
+     ".A:::::::A.",
+     ".A:::AAGAD.",
+     ".A::A......",
+     ".ABBAM..MM.",
+     ".A::A......",
+     ".DAAD......",
+     "..........."
+    ],
+    [
+     "...........",
+     ".DHHIHHIHD.",
+     ".H:::::::A.",
+     ".H:::::::H.",
+     ".I:::::::H.",
+     ".H:::::::I.",
+     ".H:::IHGID.",
+     ".I::I......",
+     ".H::HM..MM.",
+     ".H::H......",
+     ".DHHD......",
+     "..........."
+    ],
+    [
+     "...........",
+     ".DHHHHHHHD.",
+     ".H:::::::A.",
+     ".H:::::::H.",
+     ".H:::J:::H.",
+     ".H:::::::H.",
+     ".H:::HHDHD.",
+     ".H::HLLLLL.",
+     ".H::HLLLLL.",
+     ".H::H......",
+     ".DHHD......",
+     "..........."
+    ],
+    [
+     "NNNNNNNNNNN",
+     ".H:::::::H.",
+     ".H:::::::A.",
+     ".H:::::::H.",
+     ".H:::::::H.",
+     ".H:::::::H.",
+     "QH:::P:::H.",
+     "OOOOOOOOOOO",
+     "Q::::P.....",
+     "Q::::P.....",
+     "QHHHHP.....",
+     "Q....P....."
+    ],
+    [
+     "...........",
+     "NNNNNNNNNNN",
+     ".H:::::::A.",
+     ".H:::::::H.",
+     ".H:::::::H.",
+     ".H:::::::H.",
+     "OOOOOOOOOOO",
+     ".QHHP......",
+     ".Q::P......",
+     ".Q::P......",
+     ".QHHP......",
+     ".Q..P......"
+    ],
+    [
+     "...........",
+     "...........",
+     "NNNNNNNNNAN",
+     ".H:::::::H.",
+     ".H:::::::H.",
+     "OOOOOOOOOOO",
+     "..LL.......",
+     "..LL.......",
+     "..LL.......",
+     "..LL.......",
+     "..LL.......",
+     "..LL......."
+    ],
+    [
+     "...........",
+     "...........",
+     ".........A.",
+     "LLLLLLLLLLL",
+     "LLLLLLLLLLL",
+     "...........",
+     "...........",
+     "...........",
+     "...........",
+     "...........",
+     "...........",
+     "..........."
+    ],
+    [
+     "...........",
+     "...........",
+     ".........A.",
+     "...........",
+     "...........",
+     "...........",
+     "...........",
+     "...........",
+     "...........",
+     "...........",
+     "...........",
+     "..........."
+    ],
+    [
+     "...........",
+     "...........",
+     ".........A.",
+     "...........",
+     "...........",
+     "...........",
+     "...........",
+     "...........",
+     "...........",
+     "...........",
+     "...........",
+     "..........."
+    ],
+    [
+     "...........",
+     "...........",
+     ".........R.",
+     "...........",
+     "...........",
+     "...........",
+     "...........",
+     "...........",
+     "...........",
+     "...........",
+     "...........",
+     "..........."
+    ]
+   ]
+  },
+  {
+   "name": "meadow:tavern",
+   "label": "Tavern",
+   "kind": "trade",
+   "size": [
+    13,
+    20,
+    11
+   ],
+   "ground_layer": 3,
+   "foundation": "meadow:river_stone",
+   "level_tolerance_m": null,
+   "palette": [
+    {
+     "symbol": ".",
+     "cell": "keep"
+    },
+    {
+     "symbol": ":",
+     "cell": "air"
+    },
+    {
+     "symbol": "A",
+     "material": "meadow:river_stone",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "B",
+     "material": "meadow:chest",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "C",
+     "material": "meadow:walnut_planks",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "D",
+     "material": "meadow:walnut_log",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "E",
+     "material": "meadow:clay_brick",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "F",
+     "material": "meadow:walnut_planks",
+     "shape": "meadow:table",
+     "orientation": 0
+    },
+    {
+     "symbol": "G",
+     "material": "meadow:walnut_planks",
+     "shape": "core:slab",
+     "orientation": 0
+    },
+    {
+     "symbol": "H",
+     "material": "meadow:door",
+     "shape": "meadow:panel",
+     "orientation": 0
+    },
+    {
+     "symbol": "I",
+     "material": "meadow:glass",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "J",
+     "material": "meadow:lamp",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "K",
+     "material": "meadow:whitewash",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "L",
+     "material": "meadow:moss_roof",
+     "shape": "core:stair",
+     "orientation": 0
+    },
+    {
+     "symbol": "M",
+     "material": "meadow:moss_roof",
+     "shape": "core:stair",
+     "orientation": 2
+    },
+    {
+     "symbol": "N",
+     "material": "meadow:moss_roof",
+     "shape": "core:stair",
+     "orientation": 1
+    },
+    {
+     "symbol": "O",
+     "material": "meadow:moss_roof",
+     "shape": "core:stair",
+     "orientation": 3
+    },
+    {
+     "symbol": "P",
+     "material": "meadow:moss_roof",
+     "shape": "core:slab",
+     "orientation": 0
+    },
+    {
+     "symbol": "Q",
+     "material": "meadow:clay_brick",
+     "shape": "core:slab",
+     "orientation": 0
+    }
+   ],
+   "layers": [
+    [
+     ".............",
+     ".AAAAAAAAAAA.",
+     ".AAAAAAAAAAA.",
+     ".AAAAAAAAAAA.",
+     ".AAAAAAAAAAA.",
+     ".AAAAAAAAAAA.",
+     ".AAAAAAAAAAA.",
+     ".AAAAAAAAAAA.",
+     ".AAAAAAAAAAA.",
+     ".............",
+     "............."
+    ],
+    [
+     ".............",
+     ".AAAAAAAAAAA.",
+     ".ABBB::::::A.",
+     ".A:::::::::A.",
+     ".A:::::::::A.",
+     ".A:::::::::A.",
+     ".A:::::::::A.",
+     ".A:::::::::A.",
+     ".AAAAAAAAAAA.",
+     ".............",
+     "............."
+    ],
+    [
+     ".............",
+     ".AAAAAAAAAAA.",
+     ".A:::::::::A.",
+     ".A:::::::::A.",
+     ".A:::::::::A.",
+     ".A:::::::::A.",
+     ".A:::::::::A.",
+     ".A:::::::::A.",
+     ".AAAAAAAAAAA.",
+     ".............",
+     "............."
+    ],
+    [
+     ".............",
+     ".AAAAAAAAAAA.",
+     ".ACCCCCCCCCA.",
+     ".ACCCCCCCCCA.",
+     ".ACCCCCCCCCA.",
+     ".ACCCCCCCCCA.",
+     ".ACCCCCCCCCA.",
+     ".ACCCCCCCCCA.",
+     ".AAAAAAAAAAA.",
+     ".............",
+     "............."
+    ],
+    [
+     ".............",
+     ".DAAAAAAAAAD.",
+     ".E::::GGGGGA.",
+     ".A::F:::F::A.",
+     ".A:::::::::A.",
+     ".A:::::::::A.",
+     ".A::F:::F::A.",
+     ".A:::::::::A.",
+     ".DAAAAHAAAAD.",
+     "........J....",
+     "............."
+    ],
+    [
+     ".............",
+     ".DAAIAAIAAID.",
+     ".E:::::::::A.",
+     ".A:::::::::I.",
+     ".I:::::::::A.",
+     ".A:::::::::A.",
+     ".A:::::::::I.",
+     ".I:::::::::A.",
+     ".DAIAAHAAIAD.",
+     ".............",
+     "............."
+    ],
+    [
+     ".............",
+     ".DAAAAAAAAAD.",
+     ".E:::::::::A.",
+     ".A:::::::::A.",
+     ".A:::::::::A.",
+     ".A::::J::::A.",
+     ".A:::::::::A.",
+     ".A:::::::::A.",
+     ".DAAAADAAAAD.",
+     ".............",
+     "............."
+    ],
+    [
+     ".............",
+     ".DDDDDDDDDDD.",
+     ".ECCCCCCCCCD.",
+     ".DCCCCCCCCCD.",
+     ".DCCCCCCCCCD.",
+     ".DCCCCCCCCCD.",
+     ".DCCCCCCCCCD.",
+     ".DCCCCCCCCCD.",
+     ".DCCCCCCCCCD.",
+     ".DDDDDDDDDDD.",
+     "............."
+    ],
+    [
+     ".............",
+     ".DDKGDKGDKGD.",
+     ".E:B:B:B:B:K.",
+     ".K:::::::::G.",
+     ".G:::::::::D.",
+     ".D:::::::::K.",
+     ".K:::::::::G.",
+     ".G:::::::::D.",
+     ".D:::::::::K.",
+     ".DGDKGDKGDKD.",
+     "............."
+    ],
+    [
+     ".............",
+     ".DDKIDKIDKID.",
+     ".E:::::::::K.",
+     ".K:::::::::I.",
+     ".I:::::::::D.",
+     ".D:::::::::K.",
+     ".K:::::::::I.",
+     ".I:::::::::D.",
+     ".D:::::::::K.",
+     ".DIDKIDKIDKD.",
+     "............."
+    ],
+    [
+     ".............",
+     ".DDDDDDDDDDD.",
+     ".E:::::::::D.",
+     ".D:::::::::D.",
+     ".D:::::::::D.",
+     ".D::::J::::D.",
+     ".D:::::::::D.",
+     ".D:::::::::D.",
+     ".D:::::::::D.",
+     ".DDDDDDDDDDD.",
+     "............."
+    ],
+    [
+     "LLLLLLLLLLLLL",
+     "N.:::::::::.O",
+     "NE:::::::::.O",
+     "N.:::::::::.O",
+     "N.:::::::::.O",
+     "N.:::::::::.O",
+     "N.:::::::::.O",
+     "N.:::::::::.O",
+     "N.:::::::::.O",
+     "N.:::::::::.O",
+     "MMMMMMMMMMMMM"
+    ],
+    [
+     ".............",
+     ".LLLLLLLLLLL.",
+     ".E:::::::::O.",
+     ".N:::::::::O.",
+     ".N:::::::::O.",
+     ".N:::::::::O.",
+     ".N:::::::::O.",
+     ".N:::::::::O.",
+     ".N:::::::::O.",
+     ".MMMMMMMMMMM.",
+     "............."
+    ],
+    [
+     ".............",
+     ".............",
+     ".ELLLLLLLLL..",
+     "..N:::::::O..",
+     "..N:::::::O..",
+     "..N:::::::O..",
+     "..N:::::::O..",
+     "..N:::::::O..",
+     "..MMMMMMMMM..",
+     ".............",
+     "............."
+    ],
+    [
+     ".............",
+     ".............",
+     ".E...........",
+     "...LLLLLLL...",
+     "...N:::::O...",
+     "...N:::::O...",
+     "...N:::::O...",
+     "...MMMMMMM...",
+     ".............",
+     ".............",
+     "............."
+    ],
+    [
+     ".............",
+     ".............",
+     ".E...........",
+     ".............",
+     "....LLLLL....",
+     "....N:::O....",
+     "....MMMMM....",
+     ".............",
+     ".............",
+     ".............",
+     "............."
+    ],
+    [
+     ".............",
+     ".............",
+     ".E...........",
+     ".............",
+     ".............",
+     ".....PPP.....",
+     ".............",
+     ".............",
+     ".............",
+     ".............",
+     "............."
+    ],
+    [
+     ".............",
+     ".............",
+     ".E...........",
+     ".............",
+     ".............",
+     ".............",
+     ".............",
+     ".............",
+     ".............",
+     ".............",
+     "............."
+    ],
+    [
+     ".............",
+     ".............",
+     ".E...........",
+     ".............",
+     ".............",
+     ".............",
+     ".............",
+     ".............",
+     ".............",
+     ".............",
+     "............."
+    ],
+    [
+     ".............",
+     ".............",
+     ".Q...........",
+     ".............",
+     ".............",
+     ".............",
+     ".............",
+     ".............",
+     ".............",
+     ".............",
+     "............."
+    ]
+   ]
+  },
+  {
+   "name": "meadow:granary",
+   "label": "Granary",
+   "kind": "trade",
+   "size": [
+    16,
+    13,
+    10
+   ],
+   "ground_layer": 0,
+   "foundation": "meadow:fieldstone",
+   "level_tolerance_m": null,
+   "palette": [
+    {
+     "symbol": ".",
+     "cell": "keep"
+    },
+    {
+     "symbol": ":",
+     "cell": "air"
+    },
+    {
+     "symbol": "A",
+     "material": "meadow:fieldstone",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "B",
+     "material": "meadow:honey_planks",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "C",
+     "material": "meadow:birch_log",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "D",
+     "material": "meadow:chest",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "E",
+     "material": "meadow:walnut_planks",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "F",
+     "material": "meadow:glass",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "G",
+     "material": "meadow:birch_log",
+     "shape": "core:slab",
+     "orientation": 0
+    },
+    {
+     "symbol": "H",
+     "material": "meadow:lamp",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "I",
+     "material": "meadow:moss_roof",
+     "shape": "core:stair",
+     "orientation": 0
+    },
+    {
+     "symbol": "J",
+     "material": "meadow:moss_roof",
+     "shape": "core:stair",
+     "orientation": 2
+    },
+    {
+     "symbol": "K",
+     "material": "meadow:walnut_planks",
+     "shape": "core:slab",
+     "orientation": 0
+    }
+   ],
+   "layers": [
+    [
+     "................",
+     ".AAAAAAAAAAAAAA.",
+     ".ABBBBBBBBBBBBA.",
+     ".ABBBBBBBBBBBBA.",
+     ".ABBBBBBBBBBBBA.",
+     ".ABBBBBBBBBBBBA.",
+     ".ABBBBBBBBBBBBA.",
+     ".ABBBBBBBBBBBBA.",
+     ".AAAAAAAAAAAAAA.",
+     "................"
+    ],
+    [
+     "................",
+     ".CAAAAAAAAAAAAC.",
+     ".ADDDDDDDDDDDDA.",
+     ".AD::::::::::DA.",
+     ".AD::::::::::DA.",
+     ".AD::DDDDDD::DA.",
+     ".AD::::::::::DA.",
+     ".A::::::::::::A.",
+     ".CAAAAA:::AAAAC.",
+     "................"
+    ],
+    [
+     "................",
+     ".CCEFCEFCEFCEFC.",
+     ".CDDDDDDDDDDDDE.",
+     ".ED::::::::::DF.",
+     ".FD::::::::::DC.",
+     ".CD::::::::::DE.",
+     ".ED::::::::::DF.",
+     ".F::::::::::::C.",
+     ".CEFCEF:::CEFCC.",
+     "................"
+    ],
+    [
+     "................",
+     ".CCCCCCCCCCCCCC.",
+     ".CDDDDDDDDDDDDC.",
+     ".C::::::::::::C.",
+     ".C::::::::::::C.",
+     ".C::::::::::::C.",
+     ".C::::::::::::C.",
+     ".C::::::::::::C.",
+     ".CCCCCCCCCCCCCC.",
+     "................"
+    ],
+    [
+     "................",
+     ".CCEECEECEECEEC.",
+     ".C::::::::::::E.",
+     ".E::::::::::::E.",
+     ".E::::::::::::C.",
+     ".C::::::::::::E.",
+     ".E::::::::::::E.",
+     ".E::::::::::::C.",
+     ".CEECEECEECEECC.",
+     "................"
+    ],
+    [
+     "................",
+     ".CCEGCEGCEGCEGC.",
+     ".C::::::::::::E.",
+     ".E::::::::::::G.",
+     ".G::::::::::::C.",
+     ".C::::::::::::E.",
+     ".E::::::::::::G.",
+     ".G::::::::::::C.",
+     ".CEGCEGCEGCEGCC.",
+     "................"
+    ],
+    [
+     "................",
+     ".CCEFCEFCEFCEFC.",
+     ".C::::::::::::E.",
+     ".E::::::::::::F.",
+     ".F:::::H::::::C.",
+     ".C::::::::::::E.",
+     ".E::::::::::::F.",
+     ".F::::::::::::C.",
+     ".CEFCEFCEFCEFCC.",
+     "................"
+    ],
+    [
+     "................",
+     ".CCCCCCCCCCCCCC.",
+     ".C::::::::::::C.",
+     ".C::::::::::::C.",
+     ".C::::::::::::C.",
+     ".C::::::::::::C.",
+     ".C::::::::::::C.",
+     ".C::::::::::::C.",
+     ".CCCCCCCCCCCCCC.",
+     "................"
+    ],
+    [
+     "IIIIIIIIIIIIIIII",
+     ".E::::::::::::E.",
+     ".E::::::::::::E.",
+     ".E::::::::::::E.",
+     ".E::::::::::::E.",
+     ".E::::::::::::E.",
+     ".E::::::::::::E.",
+     ".E::::::::::::E.",
+     ".E::::::::::::E.",
+     "JJJJJJJJJJJJJJJJ"
+    ],
+    [
+     "................",
+     "IIIIIIIIIIIIIIII",
+     ".E::::::::::::E.",
+     ".E::::::::::::E.",
+     ".E::::::::::::E.",
+     ".E::::::::::::E.",
+     ".E::::::::::::E.",
+     ".E::::::::::::E.",
+     "JJJJJJJJJJJJJJJJ",
+     "................"
+    ],
+    [
+     "................",
+     "................",
+     "IIIIIIIIIIIIIIII",
+     ".E::::::::::::E.",
+     ".E::::::::::::E.",
+     ".E::::::::::::E.",
+     ".E::::::::::::E.",
+     "JJJJJJJJJJJJJJJJ",
+     "................",
+     "................"
+    ],
+    [
+     "................",
+     "................",
+     "................",
+     "IIIIIIIIIIIIIIII",
+     ".E::::::::::::E.",
+     ".E::::::::::::E.",
+     "JJJJJJJJJJJJJJJJ",
+     "................",
+     "................",
+     "................"
+    ],
+    [
+     "................",
+     "................",
+     "................",
+     "................",
+     "KKKKKKKKKKKKKKKK",
+     "KKKKKKKKKKKKKKKK",
+     "................",
+     "................",
+     "................",
+     "................"
+    ]
+   ]
+  },
+  {
+   "name": "meadow:tinker",
+   "label": "Tinker's workshop",
+   "kind": "trade",
+   "size": [
+    10,
+    9,
+    8
+   ],
+   "ground_layer": 0,
+   "foundation": "meadow:river_stone",
+   "level_tolerance_m": null,
+   "palette": [
+    {
+     "symbol": ".",
+     "cell": "keep"
+    },
+    {
+     "symbol": ":",
+     "cell": "air"
+    },
+    {
+     "symbol": "A",
+     "material": "meadow:river_stone",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "B",
+     "material": "meadow:walnut_log",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "C",
+     "material": "meadow:workbench",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "D",
+     "material": "meadow:chest",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "E",
+     "material": "meadow:anvil",
+     "shape": "core:slab",
+     "orientation": 0
+    },
+    {
+     "symbol": "F",
+     "material": "meadow:clay_brick",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "G",
+     "material": "meadow:forge",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "H",
+     "material": "meadow:fieldstone",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "I",
+     "material": "meadow:glass",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "J",
+     "material": "meadow:lamp",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "K",
+     "material": "meadow:moss_roof",
+     "shape": "core:slab",
+     "orientation": 0
+    },
+    {
+     "symbol": "L",
+     "material": "meadow:moss_roof",
+     "shape": "core:stair",
+     "orientation": 2
+    }
+   ],
+   "layers": [
+    [
+     "..........",
+     ".AAAAAAAA.",
+     ".AAAAAAAA.",
+     ".AAAAAAAA.",
+     ".AAAAAAAA.",
+     ".AAAAAAAA.",
+     ".AAAAAAAA.",
+     ".........."
+    ],
+    [
+     "..........",
+     ".BAAAAAAB.",
+     ".ACD::FFA.",
+     ".A::::GFA.",
+     ".AD:E:::A.",
+     ".A::::::A.",
+     ".B::B::BB.",
+     ".........."
+    ],
+    [
+     "..........",
+     ".BHHIHFFB.",
+     ".H::::::H.",
+     ".H:::::JI.",
+     ".I::::::H.",
+     ".H::::::H.",
+     ".B::B::BB.",
+     ".........."
+    ],
+    [
+     "..........",
+     ".BHHHHFFB.",
+     ".H::::::H.",
+     ".H::::::H.",
+     ".H::::::H.",
+     ".H::::::H.",
+     ".BBBBBBBB.",
+     ".........."
+    ],
+    [
+     "..........",
+     ".HHHHHFFH.",
+     ".H::::::H.",
+     ".H::::::H.",
+     ".H::::::H.",
+     ".H::::::H.",
+     "LLLLLLLLLL",
+     "KKKKKKKKKK"
+    ],
+    [
+     "..........",
+     ".HHHHHFFH.",
+     ".H::::::H.",
+     ".H::::::H.",
+     "LLLLLLLLLL",
+     "KKKKKKKKKK",
+     "..........",
+     ".........."
+    ],
+    [
+     "..........",
+     ".HHHHHFFH.",
+     "LLLLLLLLLL",
+     "KKKKKKKKKK",
+     "..........",
+     "..........",
+     "..........",
+     ".........."
+    ],
+    [
+     "LLLLLLLLLL",
+     "KKKKKKFFKK",
+     "..........",
+     "..........",
+     "..........",
+     "..........",
+     "..........",
+     ".........."
+    ],
+    [
+     "..........",
+     "......FF..",
+     "..........",
+     "..........",
+     "..........",
+     "..........",
+     "..........",
+     ".........."
+    ]
+   ]
+  },
+  {
+   "name": "meadow:bakery",
+   "label": "Bakery",
+   "kind": "trade",
+   "size": [
+    9,
+    11,
+    8
+   ],
+   "ground_layer": 0,
+   "foundation": "meadow:fieldstone",
+   "level_tolerance_m": null,
+   "palette": [
+    {
+     "symbol": ".",
+     "cell": "keep"
+    },
+    {
+     "symbol": ":",
+     "cell": "air"
+    },
+    {
+     "symbol": "A",
+     "material": "meadow:fieldstone",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "B",
+     "material": "meadow:birch_planks",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "C",
+     "material": "meadow:birch_log",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "D",
+     "material": "meadow:workbench",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "E",
+     "material": "meadow:chest",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "F",
+     "material": "meadow:birch_planks",
+     "shape": "core:slab",
+     "orientation": 0
+    },
+    {
+     "symbol": "G",
+     "material": "meadow:clay_brick",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "H",
+     "material": "meadow:door",
+     "shape": "meadow:panel",
+     "orientation": 0
+    },
+    {
+     "symbol": "I",
+     "material": "meadow:oven",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "J",
+     "material": "meadow:glass",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "K",
+     "material": "meadow:lamp",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "L",
+     "material": "meadow:honey_tiles",
+     "shape": "core:stair",
+     "orientation": 0
+    },
+    {
+     "symbol": "M",
+     "material": "meadow:honey_tiles",
+     "shape": "core:stair",
+     "orientation": 2
+    },
+    {
+     "symbol": "N",
+     "material": "meadow:honey_tiles",
+     "shape": "core:stair",
+     "orientation": 1
+    },
+    {
+     "symbol": "O",
+     "material": "meadow:honey_tiles",
+     "shape": "core:stair",
+     "orientation": 3
+    },
+    {
+     "symbol": "P",
+     "material": "meadow:honey_tiles",
+     "shape": "core:slab",
+     "orientation": 0
+    },
+    {
+     "symbol": "Q",
+     "material": "meadow:clay_brick",
+     "shape": "core:slab",
+     "orientation": 0
+    }
+   ],
+   "layers": [
+    [
+     ".........",
+     ".AAAAAAA.",
+     ".ABBBBBA.",
+     ".ABBBBBA.",
+     ".ABBBBBA.",
+     ".ABBBBBA.",
+     ".AAAAAAA.",
+     "........."
+    ],
+    [
+     "....GGG..",
+     ".CAAAAAC.",
+     ".AD:GIGG.",
+     ".AE::::A.",
+     ".AFFFFFA.",
+     ".A:::::A.",
+     ".CAAHAAC.",
+     "........."
+    ],
+    [
+     "....GGG..",
+     ".CGGJGGC.",
+     ".G::GGGG.",
+     ".G:::::G.",
+     ".J:::::J.",
+     ".G:::::G.",
+     ".CJGHJGC.",
+     "........."
+    ],
+    [
+     "....PPP..",
+     ".CGGGGGC.",
+     ".G:::::G.",
+     ".G:::::G.",
+     ".G::K::G.",
+     ".G:::::G.",
+     ".CGGCGGC.",
+     "........."
+    ],
+    [
+     "LLLLLLLLL",
+     "N.:::::.O",
+     "N.:::::GO",
+     "N.:::::.O",
+     "N.:::::.O",
+     "N.:::::.O",
+     "N.:::::.O",
+     "MMMMMMMMM"
+    ],
+    [
+     ".........",
+     ".LLLLLLL.",
+     ".N:::::G.",
+     ".N:::::O.",
+     ".N:::::O.",
+     ".N:::::O.",
+     ".MMMMMMM.",
+     "........."
+    ],
+    [
+     ".........",
+     ".........",
+     "..LLLLLG.",
+     "..N:::O..",
+     "..N:::O..",
+     "..MMMMM..",
+     ".........",
+     "........."
+    ],
+    [
+     ".........",
+     ".........",
+     ".......G.",
+     "...PPP...",
+     "...PPP...",
+     ".........",
+     ".........",
+     "........."
+    ],
+    [
+     ".........",
+     ".........",
+     ".......G.",
+     ".........",
+     ".........",
+     ".........",
+     ".........",
+     "........."
+    ],
+    [
+     ".........",
+     ".........",
+     ".......G.",
+     ".........",
+     ".........",
+     ".........",
+     ".........",
+     "........."
+    ],
+    [
+     ".........",
+     ".........",
+     ".......Q.",
+     ".........",
+     ".........",
+     ".........",
+     ".........",
+     "........."
+    ]
+   ]
+  },
+  {
+   "name": "meadow:honey_stall",
+   "label": "Honey stall",
+   "kind": "trade",
+   "size": [
+    7,
+    5,
+    6
+   ],
+   "ground_layer": 0,
+   "foundation": "meadow:fieldstone",
+   "level_tolerance_m": null,
+   "palette": [
+    {
+     "symbol": ".",
+     "cell": "keep"
+    },
+    {
+     "symbol": ":",
+     "cell": "air"
+    },
+    {
+     "symbol": "A",
+     "material": "meadow:birch_log",
+     "shape": "core:post",
+     "orientation": 0
+    },
+    {
+     "symbol": "B",
+     "material": "meadow:birch_planks",
+     "shape": "core:slab",
+     "orientation": 0
+    },
+    {
+     "symbol": "C",
+     "material": "meadow:bloom_cloth",
+     "shape": "core:slab",
+     "orientation": 0
+    },
+    {
+     "symbol": "D",
+     "material": "meadow:bloom_cloth",
+     "shape": "core:stair",
+     "orientation": 2
+    },
+    {
+     "symbol": "E",
+     "material": "meadow:chest",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "F",
+     "material": "meadow:lamp",
+     "shape": "core:cube",
+     "orientation": 0
+    }
+   ],
+   "layers": [
+    [
+     ".......",
+     ".AEFEA.",
+     ".......",
+     ".BBBBB.",
+     ".A...A.",
+     "......."
+    ],
+    [
+     ".......",
+     ".A...A.",
+     ".......",
+     ".......",
+     ".BBBBB.",
+     "......."
+    ],
+    [
+     ".......",
+     ".A...A.",
+     ".......",
+     ".......",
+     ".A...A.",
+     "......."
+    ],
+    [
+     ".......",
+     ".A...A.",
+     "CCCCCCC",
+     "CCCCCCC",
+     "CCCCCCC",
+     "DDDDDDD"
+    ],
+    [
+     "CCCCCCC",
+     "CCCCCCC",
+     ".......",
+     ".......",
+     ".......",
+     "......."
+    ]
+   ]
+  },
+  {
+   "name": "meadow:mill_barn",
+   "label": "Mill barn",
+   "kind": "farm",
+   "size": [
+    13,
+    16,
+    11
+   ],
+   "ground_layer": 0,
+   "foundation": "meadow:fieldstone",
+   "level_tolerance_m": null,
+   "palette": [
+    {
+     "symbol": ".",
+     "cell": "keep"
+    },
+    {
+     "symbol": ":",
+     "cell": "air"
+    },
+    {
+     "symbol": "A",
+     "material": "meadow:fieldstone",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "B",
+     "material": "meadow:honey_planks",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "C",
+     "material": "meadow:whitewash",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "D",
+     "material": "meadow:chest",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "E",
+     "material": "meadow:whitewash",
+     "shape": "core:post",
+     "orientation": 0
+    },
+    {
+     "symbol": "F",
+     "material": "meadow:sage_planks",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "G",
+     "material": "meadow:glass",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "H",
+     "material": "meadow:whitewash",
+     "shape": "core:slab",
+     "orientation": 0
+    },
+    {
+     "symbol": "I",
+     "material": "meadow:moss_shingles",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "J",
+     "material": "meadow:moss_shingles",
+     "shape": "core:stair",
+     "orientation": 0
+    },
+    {
+     "symbol": "K",
+     "material": "meadow:moss_shingles",
+     "shape": "core:stair",
+     "orientation": 2
+    },
+    {
+     "symbol": "L",
+     "material": "meadow:walnut_planks",
+     "shape": "core:slab",
+     "orientation": 0
+    }
+   ],
+   "layers": [
+    [
+     ".............",
+     ".AAAAAAAAAAA.",
+     ".ABBBBBBBBBA.",
+     ".ABBBBBBBBBA.",
+     ".ABBBBBBBBBA.",
+     ".ABBBBBBBBBA.",
+     ".ABBBBBBBBBA.",
+     ".ABBBBBBBBBA.",
+     ".ABBBBBBBBBA.",
+     ".AAAAAAAAAAA.",
+     "............."
+    ],
+    [
+     ".............",
+     ".CAAAAAAAAAC.",
+     ".ADDE:::E:DA.",
+     ".A::E:::E::A.",
+     ".A::E:::E::A.",
+     ".A::E:::E::A.",
+     ".A::E:::E::A.",
+     ".A:::::::::A.",
+     ".A:::::::::A.",
+     ".CAAA:::AAAC.",
+     "............."
+    ],
+    [
+     ".............",
+     ".CCFGCFGCFGC.",
+     ".C:::::::::F.",
+     ".F:::::::::G.",
+     ".G:::::::::C.",
+     ".C:::::::::F.",
+     ".F:::::::::G.",
+     ".G:::::::::C.",
+     ".C:::::::::F.",
+     ".CGCF:::GCFC.",
+     "............."
+    ],
+    [
+     ".............",
+     ".CCCCCCCCCCC.",
+     ".C:::::::::C.",
+     ".C:::::::::C.",
+     ".C:::::::::C.",
+     ".C:::::::::C.",
+     ".C:::::::::C.",
+     ".C:::::::::C.",
+     ".C:::::::::C.",
+     ".CCCCCCCCCCC.",
+     "............."
+    ],
+    [
+     ".............",
+     ".CCFFCFFCFFC.",
+     ".C:::::::::F.",
+     ".F:::::::::F.",
+     ".F:::::::::C.",
+     ".C:::::::::F.",
+     ".F:::::::::F.",
+     ".F:::::::::C.",
+     ".C:::::::::F.",
+     ".CFCFFCFFCFC.",
+     "............."
+    ],
+    [
+     ".............",
+     ".CCFHCFHCFHC.",
+     ".C:::::::::F.",
+     ".F:::::::::H.",
+     ".H:::::::::C.",
+     ".C:::::::::F.",
+     ".F:::::::::H.",
+     ".H:::::::::C.",
+     ".C:::::::::F.",
+     ".CHCFH:FHCFC.",
+     "............."
+    ],
+    [
+     ".............",
+     ".CCFGCFGCFGC.",
+     ".C:::::::::F.",
+     ".F:::::::::G.",
+     ".G:::::::::C.",
+     ".C:::::::::F.",
+     ".F:::::::::G.",
+     ".G:::::::::C.",
+     ".C:::::::::F.",
+     ".CGCFG:FGCFC.",
+     "............."
+    ],
+    [
+     ".............",
+     ".CCCCCCCCCCC.",
+     ".C:::::::::C.",
+     ".C:::::::::C.",
+     ".C:::::::::C.",
+     ".C:::::::::C.",
+     ".C:::::::::C.",
+     ".C:::::::::C.",
+     ".C:::::::::C.",
+     ".CCCCCCCCCCC.",
+     "............."
+    ],
+    [
+     "IIIIIIIIIIIII",
+     ".F:::::::::F.",
+     ".F:::::::::F.",
+     ".F:::::::::F.",
+     ".F:::::::::F.",
+     ".F:::::::::F.",
+     ".F:::::::::F.",
+     ".F:::::::::F.",
+     ".F:::::::::F.",
+     ".F:::::::::F.",
+     "IIIIIIIIIIIII"
+    ],
+    [
+     "JJJJJJJJJJJJJ",
+     ".F:::::::::F.",
+     ".F:::::::::F.",
+     ".F:::::::::F.",
+     ".F:::::::::F.",
+     ".F:::::::::F.",
+     ".F:::::::::F.",
+     ".F:::::::::F.",
+     ".F:::::::::F.",
+     ".F:::::::::F.",
+     "KKKKKKKKKKKKK"
+    ],
+    [
+     ".............",
+     "IIIIIIIIIIIII",
+     ".F:::::::::F.",
+     ".F:::::::::F.",
+     ".F:::::::::F.",
+     ".F:::::::::F.",
+     ".F:::::::::F.",
+     ".F:::::::::F.",
+     ".F:::::::::F.",
+     "IIIIIIIIIIIII",
+     "............."
+    ],
+    [
+     ".............",
+     "JJJJJJJJJJJJJ",
+     ".F:::::::::F.",
+     ".F:::::::::F.",
+     ".F:::::::::F.",
+     ".F:::::::::F.",
+     ".F:::::::::F.",
+     ".F:::::::::F.",
+     ".F:::::::::F.",
+     "KKKKKKKKKKKKK",
+     "............."
+    ],
+    [
+     ".............",
+     ".............",
+     "JJJJJJJJJJJJJ",
+     ".F:::::::::F.",
+     ".F:::::::::F.",
+     ".F:::::::::F.",
+     ".F:::::::::F.",
+     ".F:::::::::F.",
+     "KKKKKKKKKKKKK",
+     ".............",
+     "............."
+    ],
+    [
+     ".............",
+     ".............",
+     ".............",
+     "JJJJJJJJJJJJJ",
+     ".F:::::::::F.",
+     ".F:::::::::F.",
+     ".F:::::::::F.",
+     "KKKKKKKKKKKKK",
+     ".............",
+     ".............",
+     "............."
+    ],
+    [
+     ".............",
+     ".............",
+     ".............",
+     ".............",
+     "JJJJJJJJJJJJJ",
+     ".F:::::::::F.",
+     "KKKKKKKKKKKKK",
+     ".............",
+     ".............",
+     ".............",
+     "............."
+    ],
+    [
+     ".............",
+     ".............",
+     ".............",
+     ".............",
+     ".............",
+     "LLLLLLLLLLLLL",
+     ".............",
+     ".............",
+     ".............",
+     ".............",
+     "............."
+    ]
+   ]
+  },
+  {
+   "name": "meadow:pond_well",
+   "label": "Pond well",
+   "kind": "centre",
+   "size": [
+    5,
+    10,
+    5
+   ],
+   "ground_layer": 3,
+   "foundation": "meadow:fieldstone",
+   "level_tolerance_m": null,
+   "palette": [
+    {
+     "symbol": ".",
+     "cell": "keep"
+    },
+    {
+     "symbol": ":",
+     "cell": "air"
+    },
+    {
+     "symbol": "A",
+     "material": "meadow:fieldstone",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "B",
+     "material": "meadow:fieldstone",
+     "shape": "core:slab",
+     "orientation": 0
+    },
+    {
+     "symbol": "C",
+     "material": "meadow:birch_log",
+     "shape": "core:post",
+     "orientation": 0
+    },
+    {
+     "symbol": "D",
+     "material": "meadow:rose_tiles",
+     "shape": "core:stair",
+     "orientation": 0
+    },
+    {
+     "symbol": "E",
+     "material": "meadow:rose_tiles",
+     "shape": "core:stair",
+     "orientation": 2
+    },
+    {
+     "symbol": "F",
+     "material": "meadow:rose_tiles",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "G",
+     "material": "meadow:rose_tiles",
+     "shape": "core:slab",
+     "orientation": 0
+    }
+   ],
+   "layers": [
+    [
+     ".....",
+     ".AAA.",
+     ".A:A.",
+     ".AAA.",
+     "....."
+    ],
+    [
+     ".....",
+     ".AAA.",
+     ".A:A.",
+     ".AAA.",
+     "....."
+    ],
+    [
+     ".....",
+     ".AAA.",
+     ".A:A.",
+     ".AAA.",
+     "....."
+    ],
+    [
+     ".....",
+     ".AAA.",
+     ".A:A.",
+     ".AAA.",
+     "....."
+    ],
+    [
+     ".....",
+     ".BBB.",
+     ".B:B.",
+     ".BBB.",
+     "....."
+    ],
+    [
+     ".....",
+     ".C.C.",
+     ".....",
+     ".C.C.",
+     "....."
+    ],
+    [
+     ".....",
+     ".C.C.",
+     ".....",
+     ".C.C.",
+     "....."
+    ],
+    [
+     "DDDDD",
+     ".F:F.",
+     ".F:F.",
+     ".F:F.",
+     "EEEEE"
+    ],
+    [
+     ".....",
+     "DDDDD",
+     ".F:F.",
+     "EEEEE",
+     "....."
+    ],
+    [
+     ".....",
+     ".....",
+     "GGGGG",
+     ".....",
+     "....."
+    ]
+   ]
+  },
+  {
+   "name": "meadow:burrow",
+   "label": "Burrow",
+   "kind": "wild",
+   "size": [
+    9,
+    6,
+    9
+   ],
+   "ground_layer": 3,
+   "foundation": "meadow:river_stone",
+   "level_tolerance_m": 2,
+   "palette": [
+    {
+     "symbol": ".",
+     "cell": "keep"
+    },
+    {
+     "symbol": ":",
+     "cell": "air"
+    },
+    {
+     "symbol": "A",
+     "material": "meadow:river_stone",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "B",
+     "material": "meadow:chest",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "C",
+     "material": "meadow:moss_roof",
+     "shape": "core:cube",
+     "orientation": 0
+    }
+   ],
+   "layers": [
+    [
+     ".........",
+     ".........",
+     "..AAAAA..",
+     "..AAAAA..",
+     "..AAAAA..",
+     "..AAAAA..",
+     "..AAAAA..",
+     ".........",
+     "........."
+    ],
+    [
+     ".........",
+     ".........",
+     "..AAAAA..",
+     "..A:::A..",
+     "..A:B:A..",
+     "..A:::A..",
+     "..AAAAA..",
+     ".........",
+     "........."
+    ],
+    [
+     ".........",
+     ".........",
+     "..AAAAA..",
+     "..A:::A..",
+     "..A:::A..",
+     "..A:::A..",
+     "..AAAAA..",
+     ".........",
+     "........."
+    ],
+    [
+     "....A....",
+     "..AAAAA..",
+     ".AAAAAAA.",
+     ".AAAAAAA.",
+     "AAAAAAAAA",
+     ".AAA:AAA.",
+     ".AAA:AAA.",
+     "..AA:AA..",
+     "....:...."
+    ],
+    [
+     ".........",
+     "..CCCCC..",
+     ".CCCCCCC.",
+     ".CCCCCCC.",
+     ".CCCCCCC.",
+     ".CCC:CCC.",
+     ".CCC:CCC.",
+     "..CC:CC..",
+     "....:...."
+    ],
+    [
+     ".........",
+     ".........",
+     "...CCC...",
+     "..CCCCC..",
+     "..CCCCC..",
+     "..CCCCC..",
+     "...CCC...",
+     ".........",
+     "........."
+    ]
+   ]
+  },
+  {
+   "name": "meadow:treehouse",
+   "label": "Treehouse",
+   "kind": "wild",
+   "size": [
+    6,
+    13,
+    6
+   ],
+   "ground_layer": 0,
+   "foundation": "meadow:river_stone",
+   "level_tolerance_m": 2,
+   "palette": [
+    {
+     "symbol": ".",
+     "cell": "keep"
+    },
+    {
+     "symbol": ":",
+     "cell": "air"
+    },
+    {
+     "symbol": "A",
+     "material": "meadow:river_stone",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "B",
+     "material": "meadow:birch_planks",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "C",
+     "material": "meadow:birch_log",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "D",
+     "material": "meadow:fieldstone",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "E",
+     "material": "meadow:door",
+     "shape": "meadow:panel",
+     "orientation": 0
+    },
+    {
+     "symbol": "F",
+     "material": "meadow:moss_roof",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "G",
+     "material": "meadow:moss_roof",
+     "shape": "core:stair",
+     "orientation": 0
+    },
+    {
+     "symbol": "H",
+     "material": "meadow:moss_roof",
+     "shape": "core:stair",
+     "orientation": 2
+    },
+    {
+     "symbol": "I",
+     "material": "meadow:moss_roof",
+     "shape": "core:slab",
+     "orientation": 0
+    },
+    {
+     "symbol": "J",
+     "material": "meadow:birch_log",
+     "shape": "core:post",
+     "orientation": 0
+    }
+   ],
+   "layers": [
+    [
+     "......",
+     ".J..J.",
+     "......",
+     "......",
+     ".J..J.",
+     "......"
+    ],
+    [
+     "......",
+     ".J..J.",
+     "......",
+     "......",
+     ".J..J.",
+     "......"
+    ],
+    [
+     "......",
+     ".J..J.",
+     "......",
+     "......",
+     ".J..J.",
+     "......"
+    ],
+    [
+     "......",
+     ".J..J.",
+     "......",
+     "......",
+     ".J..J.",
+     "......"
+    ],
+    [
+     "......",
+     ".AAAA.",
+     ".ABBA.",
+     ".ABBA.",
+     ".AAAA.",
+     "......"
+    ],
+    [
+     "......",
+     ".CDDC.",
+     ".D::D.",
+     ".D::D.",
+     ".CDEC.",
+     "......"
+    ],
+    [
+     "......",
+     ".CDDC.",
+     ".D::D.",
+     ".D::D.",
+     ".CDEC.",
+     "......"
+    ],
+    [
+     "......",
+     ".CDDC.",
+     ".D::D.",
+     ".D::D.",
+     ".CDCC.",
+     "......"
+    ],
+    [
+     "FFFFFF",
+     ".D::D.",
+     ".D::D.",
+     ".D::D.",
+     ".D::D.",
+     "FFFFFF"
+    ],
+    [
+     "GGGGGG",
+     ".D::D.",
+     ".D::D.",
+     ".D::D.",
+     ".D::D.",
+     "HHHHHH"
+    ],
+    [
+     "......",
+     "FFFFFF",
+     ".D::D.",
+     ".D::D.",
+     "FFFFFF",
+     "......"
+    ],
+    [
+     "......",
+     "GGGGGG",
+     ".D::D.",
+     ".D::D.",
+     "HHHHHH",
+     "......"
+    ],
+    [
+     "......",
+     "......",
+     "IIIIII",
+     "IIIIII",
+     "......",
+     "......"
+    ]
+   ]
+  },
+  {
+   "name": "meadow:hive",
+   "label": "Hive",
+   "kind": "wild",
+   "size": [
+    5,
+    3,
+    5
+   ],
+   "ground_layer": 0,
+   "foundation": "meadow:river_stone",
+   "level_tolerance_m": 2,
+   "palette": [
+    {
+     "symbol": ".",
+     "cell": "keep"
+    },
+    {
+     "symbol": ":",
+     "cell": "air"
+    },
+    {
+     "symbol": "A",
+     "material": "meadow:river_stone",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "B",
+     "material": "meadow:fieldstone",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "C",
+     "material": "meadow:clay_brick",
+     "shape": "core:cube",
+     "orientation": 0
+    }
+   ],
+   "layers": [
+    [
+     "AAAAA",
+     "AAAAA",
+     "AAAAA",
+     "AAAAA",
+     "AAAAA"
+    ],
+    [
+     ".....",
+     ".BBB.",
+     ".BBB.",
+     ".BBB.",
+     "....."
+    ],
+    [
+     ".....",
+     ".....",
+     "..C..",
+     ".....",
+     "....."
+    ]
+   ]
+  },
+  {
+   "name": "meadow:footbridge",
+   "label": "Footbridge",
+   "kind": "wild",
+   "size": [
+    11,
+    4,
+    3
+   ],
+   "ground_layer": 1,
+   "foundation": "meadow:fieldstone",
+   "level_tolerance_m": 2,
+   "palette": [
+    {
+     "symbol": ".",
+     "cell": "keep"
+    },
+    {
+     "symbol": ":",
+     "cell": "air"
+    },
+    {
+     "symbol": "A",
+     "material": "meadow:birch_planks",
+     "shape": "core:slab",
+     "orientation": 0
+    },
+    {
+     "symbol": "B",
+     "material": "meadow:birch_log",
+     "shape": "core:post",
+     "orientation": 0
+    },
+    {
+     "symbol": "C",
+     "material": "meadow:birch_planks",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "D",
+     "material": "meadow:honey_planks",
+     "shape": "meadow:panel",
+     "orientation": 2
+    },
+    {
+     "symbol": "E",
+     "material": "meadow:honey_planks",
+     "shape": "meadow:panel",
+     "orientation": 0
+    },
+    {
+     "symbol": "F",
+     "material": "meadow:birch_log",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "G",
+     "material": "meadow:fieldstone",
+     "shape": "core:cube",
+     "orientation": 0
+    }
+   ],
+   "layers": [
+    [
+     "G.........G",
+     "G.........G",
+     "G.........G"
+    ],
+    [
+     "ACF.....FCA",
+     "ACF.....FCA",
+     "ACF.....FCA"
+    ],
+    [
+     "BDAAAAAAADB",
+     "..AAAAAAA..",
+     "BEAAAAAAAEB"
+    ],
+    [
+     "..BDBDBDB..",
+     "...........",
+     "..BEBEBEB.."
+    ]
+   ]
+  },
+  {
+   "name": "meadow:fairy_ring",
+   "label": "Fairy ring",
+   "kind": "wild",
+   "size": [
+    7,
+    2,
+    7
+   ],
+   "ground_layer": 0,
+   "foundation": "meadow:river_stone",
+   "level_tolerance_m": 2,
+   "palette": [
+    {
+     "symbol": ".",
+     "cell": "keep"
+    },
+    {
+     "symbol": ":",
+     "cell": "air"
+    },
+    {
+     "symbol": "A",
+     "material": "meadow:river_stone",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "B",
+     "material": "meadow:clay_brick",
+     "shape": "core:slab",
+     "orientation": 0
+    },
+    {
+     "symbol": "C",
+     "material": "meadow:clay_brick",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "D",
+     "material": "meadow:lamp",
+     "shape": "core:cube",
+     "orientation": 0
+    }
+   ],
+   "layers": [
+    [
+     "...A...",
+     ".A...A.",
+     ".......",
+     "A..C..A",
+     ".......",
+     ".A...A.",
+     "...A..."
+    ],
+    [
+     "...B...",
+     ".B...B.",
+     ".......",
+     "B..D..B",
+     ".......",
+     ".B...B.",
+     "...B..."
+    ]
+   ]
+  }
+ ]
+}

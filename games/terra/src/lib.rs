@@ -7,6 +7,8 @@ mod audio;
 mod building;
 mod character;
 mod plants;
+mod structures;
+mod templates;
 mod textures;
 
 use std::cell::RefCell;
@@ -477,10 +479,16 @@ impl Guest for Terra {
                     residue: Some("terra:ash".into()),
                 }),
             }],
-            tools: vec![ToolDef {
-                name: "measure".into(),
-                kind: ToolKind::Measure,
-            }],
+            tools: vec![
+                ToolDef {
+                    name: "measure".into(),
+                    kind: ToolKind::Measure,
+                },
+                ToolDef {
+                    name: "place".into(),
+                    kind: ToolKind::Place,
+                },
+            ],
             items: vec![
                 ItemDef {
                     name: "rock".into(),
@@ -611,8 +619,8 @@ impl Guest for Terra {
                     // carpet; the oaks every 9 m give Wood for a Workbench, Chest and Door in a
                     // short walk, and no Wood lies about on its own.
                     crop_fields: plants::temperate_fields(),
-                    structures: Vec::new(),
-                    settlements: Vec::new(),
+                    structures: structures::wild(&["watchtower", "standing_stones", "waystone"]),
+                    settlements: structures::town_and_village(),
                     surface_features: [SurfaceFeature {
                         material: Some("terra:melon".into()),
                         plant: None,
@@ -641,8 +649,8 @@ impl Guest for Terra {
                     }),
                     cave_scale: Some(1.5),
                     crop_fields: Vec::new(),
-                    structures: Vec::new(),
-                    settlements: Vec::new(),
+                    structures: structures::wild(&["ruined_keep", "stone_bridge"]),
+                    settlements: structures::village(),
                     surface_features: plants::dry(),
                 },
                 BiomeDef {
@@ -661,8 +669,8 @@ impl Guest for Terra {
                     }),
                     cave_scale: Some(0.0),
                     crop_fields: Vec::new(),
-                    structures: Vec::new(),
-                    settlements: Vec::new(),
+                    structures: structures::wild(&["watchtower", "ruined_keep"]),
+                    settlements: structures::village(),
                     surface_features: plants::cold(),
                 },
                 BiomeDef {
@@ -677,7 +685,7 @@ impl Guest for Terra {
                     }),
                     cave_scale: None,
                     crop_fields: Vec::new(),
-                    structures: Vec::new(),
+                    structures: structures::wild(&["ruined_keep"]),
                     settlements: Vec::new(),
                     surface_features: plants::jungle(),
                 },
@@ -697,7 +705,7 @@ impl Guest for Terra {
                     }),
                     cave_scale: Some(0.5),
                     crop_fields: Vec::new(),
-                    structures: Vec::new(),
+                    structures: structures::wild(&["stone_bridge"]),
                     settlements: Vec::new(),
                     surface_features: plants::swamp(),
                 },
@@ -717,8 +725,8 @@ impl Guest for Terra {
                     }),
                     cave_scale: None,
                     crop_fields: Vec::new(),
-                    structures: Vec::new(),
-                    settlements: Vec::new(),
+                    structures: structures::wild(&["standing_stones", "waystone"]),
+                    settlements: structures::village(),
                     surface_features: plants::savanna(),
                 },
             ],
@@ -876,8 +884,8 @@ impl Guest for Terra {
                 marker("death", MarkerIcon::Death, [217, 100, 92]),
             ],
             death_marker_kind: Some("terra:death".into()),
-            templates: Vec::new(),
-            settlements: Vec::new(),
+            templates: templates::templates(),
+            settlements: structures::settlements(),
             voxel_uses: vec![
                 VoxelUse {
                     material: "terra:door".into(),

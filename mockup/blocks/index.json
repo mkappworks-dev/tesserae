@@ -2209,6 +2209,330 @@
       "boxes": [
         [
           [
+            1,
+            0,
+            1
+          ],
+          [
+            4,
+            12,
+            4
+          ]
+        ],
+        [
+          [
+            12,
+            0,
+            1
+          ],
+          [
+            15,
+            12,
+            4
+          ]
+        ],
+        [
+          [
+            1,
+            0,
+            12
+          ],
+          [
+            4,
+            12,
+            15
+          ]
+        ],
+        [
+          [
+            12,
+            0,
+            12
+          ],
+          [
+            15,
+            12,
+            15
+          ]
+        ],
+        [
+          [
+            0,
+            12,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        138,
+        90,
+        54,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "tidewater/workbench.bottom.png",
+        "side": "tidewater/workbench.side.png",
+        "top": "tidewater/workbench.top.png"
+      },
+      "game": "tidewater",
+      "name": "tidewater:workbench",
+      "render": "opaque",
+      "solid": true,
+      "use": {
+        "station": "workbench"
+      }
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        138,
+        90,
+        54,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "tidewater/chest.bottom.png",
+        "side": "tidewater/chest.side.png",
+        "top": "tidewater/chest.top.png"
+      },
+      "game": "tidewater",
+      "name": "tidewater:chest",
+      "render": "opaque",
+      "solid": true,
+      "use": {
+        "container": 27
+      }
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            13
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        138,
+        90,
+        54,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "tidewater/door.bottom.png",
+        "side": "tidewater/door.side.png",
+        "top": "tidewater/door.top.png"
+      },
+      "game": "tidewater",
+      "name": "tidewater:door",
+      "render": "opaque",
+      "solid": true,
+      "use": {
+        "door": {
+          "boxes": {
+            "closed": [
+              [
+                [
+                  0,
+                  0,
+                  13
+                ],
+                [
+                  16,
+                  16,
+                  16
+                ]
+              ]
+            ],
+            "open": [
+              [
+                [
+                  13,
+                  0,
+                  0
+                ],
+                [
+                  16,
+                  16,
+                  16
+                ]
+              ]
+            ]
+          },
+          "closed": "tidewater:door",
+          "height-m": 2.0,
+          "open": "tidewater:door_open",
+          "width-m": 1.0
+        }
+      }
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            13
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        138,
+        90,
+        54,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "tidewater/door_open.bottom.png",
+        "side": "tidewater/door_open.side.png",
+        "top": "tidewater/door_open.top.png"
+      },
+      "game": "tidewater",
+      "name": "tidewater:door_open",
+      "render": "opaque",
+      "solid": true,
+      "use": {
+        "door": {
+          "boxes": {
+            "closed": [
+              [
+                [
+                  0,
+                  0,
+                  13
+                ],
+                [
+                  16,
+                  16,
+                  16
+                ]
+              ]
+            ],
+            "open": [
+              [
+                [
+                  13,
+                  0,
+                  0
+                ],
+                [
+                  16,
+                  16,
+                  16
+                ]
+              ]
+            ]
+          },
+          "closed": "tidewater:door",
+          "height-m": 2.0,
+          "open": "tidewater:door_open",
+          "width-m": 1.0
+        }
+      }
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        159,
+        216,
+        207,
+        96
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "tidewater/glass.bottom.png",
+        "side": "tidewater/glass.side.png",
+        "top": "tidewater/glass.top.png"
+      },
+      "game": "tidewater",
+      "name": "tidewater:glass",
+      "render": "blend",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        255,
+        226,
+        168,
+        255
+      ],
+      "emission": 15,
+      "faces": {
+        "bottom": "tidewater/lamp.bottom.png",
+        "side": "tidewater/lamp.side.png",
+        "top": "tidewater/lamp.top.png"
+      },
+      "game": "tidewater",
+      "name": "tidewater:lamp",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
             0,
             0,
             0
@@ -2870,6 +3194,330 @@
       "use": {
         "station": "oven"
       }
+    },
+    {
+      "boxes": [
+        [
+          [
+            1,
+            0,
+            1
+          ],
+          [
+            4,
+            12,
+            4
+          ]
+        ],
+        [
+          [
+            12,
+            0,
+            1
+          ],
+          [
+            15,
+            12,
+            4
+          ]
+        ],
+        [
+          [
+            1,
+            0,
+            12
+          ],
+          [
+            4,
+            12,
+            15
+          ]
+        ],
+        [
+          [
+            12,
+            0,
+            12
+          ],
+          [
+            15,
+            12,
+            15
+          ]
+        ],
+        [
+          [
+            0,
+            12,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        74,
+        51,
+        40,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "ember/workbench.bottom.png",
+        "side": "ember/workbench.side.png",
+        "top": "ember/workbench.top.png"
+      },
+      "game": "ember",
+      "name": "ember:workbench",
+      "render": "opaque",
+      "solid": true,
+      "use": {
+        "station": "workbench"
+      }
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        74,
+        51,
+        40,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "ember/chest.bottom.png",
+        "side": "ember/chest.side.png",
+        "top": "ember/chest.top.png"
+      },
+      "game": "ember",
+      "name": "ember:chest",
+      "render": "opaque",
+      "solid": true,
+      "use": {
+        "container": 27
+      }
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            13
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        74,
+        51,
+        40,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "ember/door.bottom.png",
+        "side": "ember/door.side.png",
+        "top": "ember/door.top.png"
+      },
+      "game": "ember",
+      "name": "ember:door",
+      "render": "opaque",
+      "solid": true,
+      "use": {
+        "door": {
+          "boxes": {
+            "closed": [
+              [
+                [
+                  0,
+                  0,
+                  13
+                ],
+                [
+                  16,
+                  16,
+                  16
+                ]
+              ]
+            ],
+            "open": [
+              [
+                [
+                  13,
+                  0,
+                  0
+                ],
+                [
+                  16,
+                  16,
+                  16
+                ]
+              ]
+            ]
+          },
+          "closed": "ember:door",
+          "height-m": 2.0,
+          "open": "ember:door_open",
+          "width-m": 1.0
+        }
+      }
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            13
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        74,
+        51,
+        40,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "ember/door_open.bottom.png",
+        "side": "ember/door_open.side.png",
+        "top": "ember/door_open.top.png"
+      },
+      "game": "ember",
+      "name": "ember:door_open",
+      "render": "opaque",
+      "solid": true,
+      "use": {
+        "door": {
+          "boxes": {
+            "closed": [
+              [
+                [
+                  0,
+                  0,
+                  13
+                ],
+                [
+                  16,
+                  16,
+                  16
+                ]
+              ]
+            ],
+            "open": [
+              [
+                [
+                  13,
+                  0,
+                  0
+                ],
+                [
+                  16,
+                  16,
+                  16
+                ]
+              ]
+            ]
+          },
+          "closed": "ember:door",
+          "height-m": 2.0,
+          "open": "ember:door_open",
+          "width-m": 1.0
+        }
+      }
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        216,
+        160,
+        112,
+        96
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "ember/glass.bottom.png",
+        "side": "ember/glass.side.png",
+        "top": "ember/glass.top.png"
+      },
+      "game": "ember",
+      "name": "ember:glass",
+      "render": "blend",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        255,
+        160,
+        74,
+        255
+      ],
+      "emission": 15,
+      "faces": {
+        "bottom": "ember/lamp.bottom.png",
+        "side": "ember/lamp.side.png",
+        "top": "ember/lamp.top.png"
+      },
+      "game": "ember",
+      "name": "ember:lamp",
+      "render": "opaque",
+      "solid": true,
+      "use": null
     },
     {
       "boxes": [
@@ -3541,6 +4189,330 @@
       "boxes": [
         [
           [
+            1,
+            0,
+            1
+          ],
+          [
+            4,
+            12,
+            4
+          ]
+        ],
+        [
+          [
+            12,
+            0,
+            1
+          ],
+          [
+            15,
+            12,
+            4
+          ]
+        ],
+        [
+          [
+            1,
+            0,
+            12
+          ],
+          [
+            4,
+            12,
+            15
+          ]
+        ],
+        [
+          [
+            12,
+            0,
+            12
+          ],
+          [
+            15,
+            12,
+            15
+          ]
+        ],
+        [
+          [
+            0,
+            12,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        59,
+        53,
+        80,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "lumen/workbench.bottom.png",
+        "side": "lumen/workbench.side.png",
+        "top": "lumen/workbench.top.png"
+      },
+      "game": "lumen",
+      "name": "lumen:workbench",
+      "render": "opaque",
+      "solid": true,
+      "use": {
+        "station": "workbench"
+      }
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        59,
+        53,
+        80,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "lumen/chest.bottom.png",
+        "side": "lumen/chest.side.png",
+        "top": "lumen/chest.top.png"
+      },
+      "game": "lumen",
+      "name": "lumen:chest",
+      "render": "opaque",
+      "solid": true,
+      "use": {
+        "container": 27
+      }
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            13
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        59,
+        53,
+        80,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "lumen/door.bottom.png",
+        "side": "lumen/door.side.png",
+        "top": "lumen/door.top.png"
+      },
+      "game": "lumen",
+      "name": "lumen:door",
+      "render": "opaque",
+      "solid": true,
+      "use": {
+        "door": {
+          "boxes": {
+            "closed": [
+              [
+                [
+                  0,
+                  0,
+                  13
+                ],
+                [
+                  16,
+                  16,
+                  16
+                ]
+              ]
+            ],
+            "open": [
+              [
+                [
+                  13,
+                  0,
+                  0
+                ],
+                [
+                  16,
+                  16,
+                  16
+                ]
+              ]
+            ]
+          },
+          "closed": "lumen:door",
+          "height-m": 2.0,
+          "open": "lumen:door_open",
+          "width-m": 1.0
+        }
+      }
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            13
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        59,
+        53,
+        80,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "lumen/door_open.bottom.png",
+        "side": "lumen/door_open.side.png",
+        "top": "lumen/door_open.top.png"
+      },
+      "game": "lumen",
+      "name": "lumen:door_open",
+      "render": "opaque",
+      "solid": true,
+      "use": {
+        "door": {
+          "boxes": {
+            "closed": [
+              [
+                [
+                  0,
+                  0,
+                  13
+                ],
+                [
+                  16,
+                  16,
+                  16
+                ]
+              ]
+            ],
+            "open": [
+              [
+                [
+                  13,
+                  0,
+                  0
+                ],
+                [
+                  16,
+                  16,
+                  16
+                ]
+              ]
+            ]
+          },
+          "closed": "lumen:door",
+          "height-m": 2.0,
+          "open": "lumen:door_open",
+          "width-m": 1.0
+        }
+      }
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        185,
+        168,
+        240,
+        96
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "lumen/glass.bottom.png",
+        "side": "lumen/glass.side.png",
+        "top": "lumen/glass.top.png"
+      },
+      "game": "lumen",
+      "name": "lumen:glass",
+      "render": "blend",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        216,
+        236,
+        255,
+        255
+      ],
+      "emission": 15,
+      "faces": {
+        "bottom": "lumen/lamp.bottom.png",
+        "side": "lumen/lamp.side.png",
+        "top": "lumen/lamp.top.png"
+      },
+      "game": "lumen",
+      "name": "lumen:lamp",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
             0,
             0,
             0
@@ -4202,6 +5174,330 @@
       "use": {
         "station": "oven"
       }
+    },
+    {
+      "boxes": [
+        [
+          [
+            1,
+            0,
+            1
+          ],
+          [
+            4,
+            12,
+            4
+          ]
+        ],
+        [
+          [
+            12,
+            0,
+            1
+          ],
+          [
+            15,
+            12,
+            4
+          ]
+        ],
+        [
+          [
+            1,
+            0,
+            12
+          ],
+          [
+            4,
+            12,
+            15
+          ]
+        ],
+        [
+          [
+            12,
+            0,
+            12
+          ],
+          [
+            15,
+            12,
+            15
+          ]
+        ],
+        [
+          [
+            0,
+            12,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        110,
+        74,
+        46,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "meadow/workbench.bottom.png",
+        "side": "meadow/workbench.side.png",
+        "top": "meadow/workbench.top.png"
+      },
+      "game": "meadow",
+      "name": "meadow:workbench",
+      "render": "opaque",
+      "solid": true,
+      "use": {
+        "station": "workbench"
+      }
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        110,
+        74,
+        46,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "meadow/chest.bottom.png",
+        "side": "meadow/chest.side.png",
+        "top": "meadow/chest.top.png"
+      },
+      "game": "meadow",
+      "name": "meadow:chest",
+      "render": "opaque",
+      "solid": true,
+      "use": {
+        "container": 27
+      }
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            13
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        110,
+        74,
+        46,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "meadow/door.bottom.png",
+        "side": "meadow/door.side.png",
+        "top": "meadow/door.top.png"
+      },
+      "game": "meadow",
+      "name": "meadow:door",
+      "render": "opaque",
+      "solid": true,
+      "use": {
+        "door": {
+          "boxes": {
+            "closed": [
+              [
+                [
+                  0,
+                  0,
+                  13
+                ],
+                [
+                  16,
+                  16,
+                  16
+                ]
+              ]
+            ],
+            "open": [
+              [
+                [
+                  13,
+                  0,
+                  0
+                ],
+                [
+                  16,
+                  16,
+                  16
+                ]
+              ]
+            ]
+          },
+          "closed": "meadow:door",
+          "height-m": 2.0,
+          "open": "meadow:door_open",
+          "width-m": 1.0
+        }
+      }
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            13
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        110,
+        74,
+        46,
+        255
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "meadow/door_open.bottom.png",
+        "side": "meadow/door_open.side.png",
+        "top": "meadow/door_open.top.png"
+      },
+      "game": "meadow",
+      "name": "meadow:door_open",
+      "render": "opaque",
+      "solid": true,
+      "use": {
+        "door": {
+          "boxes": {
+            "closed": [
+              [
+                [
+                  0,
+                  0,
+                  13
+                ],
+                [
+                  16,
+                  16,
+                  16
+                ]
+              ]
+            ],
+            "open": [
+              [
+                [
+                  13,
+                  0,
+                  0
+                ],
+                [
+                  16,
+                  16,
+                  16
+                ]
+              ]
+            ]
+          },
+          "closed": "meadow:door",
+          "height-m": 2.0,
+          "open": "meadow:door_open",
+          "width-m": 1.0
+        }
+      }
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        207,
+        232,
+        192,
+        96
+      ],
+      "emission": 0,
+      "faces": {
+        "bottom": "meadow/glass.bottom.png",
+        "side": "meadow/glass.side.png",
+        "top": "meadow/glass.top.png"
+      },
+      "game": "meadow",
+      "name": "meadow:glass",
+      "render": "blend",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
+        255,
+        217,
+        138,
+        255
+      ],
+      "emission": 15,
+      "faces": {
+        "bottom": "meadow/lamp.bottom.png",
+        "side": "meadow/lamp.side.png",
+        "top": "meadow/lamp.top.png"
+      },
+      "game": "meadow",
+      "name": "meadow:lamp",
+      "render": "opaque",
+      "solid": true,
+      "use": null
     }
   ],
   "shapes": [

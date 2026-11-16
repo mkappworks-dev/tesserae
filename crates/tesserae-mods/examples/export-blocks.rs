@@ -49,10 +49,11 @@ fn export(root: &Path, game: &str, out: &Path) -> (Vec<Value>, Vec<Value>) {
         .unwrap_or_else(|e| panic!("build {game} with scripts/build-guests: {e}"));
     let instance = block_on(host.instantiate(&compiled[0], 0)).unwrap();
     let (_, mut declaration) = block_on(instance.declare()).unwrap();
-    // Only the Game is loaded, and its World names the shared Mods' ground and ores.
+    // Only the Game is loaded, and its World and Settlements name the shared Mods' Materials.
     declaration.world = None;
     declaration.biomes.clear();
     declaration.ores.clear();
+    declaration.settlements.clear();
     let mut tables = Tables::builtin();
     let mut registry = Registry::builtin();
     let applied = apply(declaration, game, &mut tables, &mut registry, true).unwrap();

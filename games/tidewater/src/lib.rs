@@ -8,6 +8,8 @@ wit_bindgen::generate!({ path: "../../crates/tesserae-mods/wit/0.3", world: "mod
 mod building;
 mod food;
 mod plants;
+mod structures;
+mod templates;
 
 use std::cell::RefCell;
 use std::collections::VecDeque;
@@ -18,7 +20,7 @@ use exports::tesserae::mods::guest::{
 use tesserae::mods::commands::{Fill, SourceFill};
 use tesserae::mods::content::{
     BiomeDef, CaveParams, ClimateParams, GroundParams, MovementPolicy, OreDef, SkyFog,
-    SmoothingParams, WaterParams,
+    SmoothingParams, ToolDef, ToolKind, WaterParams,
 };
 use tesserae::mods::types::{BoxM, Vec3, Voxel};
 
@@ -249,7 +251,7 @@ impl Guest for Tidewater {
                 .into_iter()
                 .chain(building::materials())
                 .collect(),
-            shapes: Vec::new(),
+            shapes: building::shapes(),
             appearance: [food::appearance()]
                 .into_iter()
                 .chain(building::appearance())
@@ -259,7 +261,10 @@ impl Guest for Tidewater {
             fluids: Vec::new(),
             reactions: Vec::new(),
             combustion: Vec::new(),
-            tools: Vec::new(),
+            tools: vec![ToolDef {
+                name: "place".into(),
+                kind: ToolKind::Place,
+            }],
             items: vec![food::item()],
             biomes: vec![
                 BiomeDef {
@@ -274,8 +279,8 @@ impl Guest for Tidewater {
                     }),
                     cave_scale: Some(1.4),
                     crop_fields: plants::lagoon_fields(),
-                    structures: Vec::new(),
-                    settlements: Vec::new(),
+                    structures: structures::wild(&["dock", "stilt_house", "sea_arch"]),
+                    settlements: structures::village(),
                     surface_features: [food::feature()]
                         .into_iter()
                         .chain(plants::lagoon())
@@ -297,8 +302,8 @@ impl Guest for Tidewater {
                     }),
                     cave_scale: Some(0.0),
                     crop_fields: Vec::new(),
-                    structures: Vec::new(),
-                    settlements: Vec::new(),
+                    structures: structures::wild(&["lighthouse", "rope_bridge"]),
+                    settlements: structures::village(),
                     surface_features: [food::feature()]
                         .into_iter()
                         .chain(plants::salt_flats())
@@ -320,8 +325,8 @@ impl Guest for Tidewater {
                     }),
                     cave_scale: None,
                     crop_fields: Vec::new(),
-                    structures: Vec::new(),
-                    settlements: Vec::new(),
+                    structures: structures::wild(&["lighthouse", "sea_arch"]),
+                    settlements: structures::village(),
                     surface_features: plants::cold_shallows(),
                 },
                 BiomeDef {
@@ -336,8 +341,8 @@ impl Guest for Tidewater {
                     }),
                     cave_scale: Some(1.4),
                     crop_fields: Vec::new(),
-                    structures: Vec::new(),
-                    settlements: Vec::new(),
+                    structures: structures::wild(&["rope_bridge", "stilt_house"]),
+                    settlements: structures::village(),
                     surface_features: plants::rainforest(),
                 },
                 BiomeDef {
@@ -356,8 +361,8 @@ impl Guest for Tidewater {
                     }),
                     cave_scale: Some(0.7),
                     crop_fields: Vec::new(),
-                    structures: Vec::new(),
-                    settlements: Vec::new(),
+                    structures: structures::wild(&["dock", "stilt_house"]),
+                    settlements: structures::village(),
                     surface_features: plants::tidal_marsh(),
                 },
             ],
@@ -371,8 +376,8 @@ impl Guest for Tidewater {
             plants: Vec::new(),
             marker_kinds: Vec::new(),
             death_marker_kind: None,
-            templates: Vec::new(),
-            settlements: Vec::new(),
+            templates: templates::templates(),
+            settlements: structures::settlements(),
             voxel_uses: building::voxel_uses(),
             ores: vec![OreDef {
                 material: "crystals:aquamarine".into(),

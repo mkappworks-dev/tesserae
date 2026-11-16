@@ -8,6 +8,8 @@ wit_bindgen::generate!({ path: "../../crates/tesserae-mods/wit/0.3", world: "mod
 mod building;
 mod food;
 mod plants;
+mod structures;
+mod templates;
 
 use std::cell::RefCell;
 use std::collections::VecDeque;
@@ -17,7 +19,8 @@ use exports::tesserae::mods::guest::{
 };
 use tesserae::mods::commands::{Fill, SourceFill};
 use tesserae::mods::content::{
-    BiomeDef, ClimateParams, GroundParams, MovementPolicy, OreDef, SkyFog, WaterParams,
+    BiomeDef, ClimateParams, GroundParams, MovementPolicy, OreDef, SkyFog, ToolDef, ToolKind,
+    WaterParams,
 };
 use tesserae::mods::types::{BoxM, Vec3, Voxel};
 
@@ -70,8 +73,8 @@ fn biomes() -> Vec<BiomeDef> {
             }),
             cave_scale: None,
             crop_fields: plants::ash_fields(),
-            structures: Vec::new(),
-            settlements: Vec::new(),
+            structures: structures::wild(&["basalt_wall", "stepped_altar", "ash_pit"]),
+            settlements: structures::village(),
             surface_features: [food::feature()]
                 .into_iter()
                 .chain(plants::ash_flats())
@@ -89,8 +92,8 @@ fn biomes() -> Vec<BiomeDef> {
             }),
             cave_scale: Some(1.5),
             crop_fields: Vec::new(),
-            structures: Vec::new(),
-            settlements: Vec::new(),
+            structures: structures::wild(&["obsidian_spire", "ash_pit"]),
+            settlements: structures::village(),
             surface_features: Vec::new(),
         },
         BiomeDef {
@@ -105,8 +108,8 @@ fn biomes() -> Vec<BiomeDef> {
             }),
             cave_scale: Some(0.5),
             crop_fields: Vec::new(),
-            structures: Vec::new(),
-            settlements: Vec::new(),
+            structures: structures::wild(&["obsidian_spire", "barrow"]),
+            settlements: structures::village(),
             surface_features: [food::feature()]
                 .into_iter()
                 .chain(plants::highland())
@@ -124,7 +127,7 @@ fn biomes() -> Vec<BiomeDef> {
             }),
             cave_scale: Some(0.5),
             crop_fields: Vec::new(),
-            structures: Vec::new(),
+            structures: structures::wild(&["barrow", "basalt_wall"]),
             settlements: Vec::new(),
             surface_features: plants::cinder_bog(),
         },
@@ -360,7 +363,7 @@ impl Guest for Ember {
                 .into_iter()
                 .chain(building::materials())
                 .collect(),
-            shapes: Vec::new(),
+            shapes: building::shapes(),
             appearance: [food::appearance()]
                 .into_iter()
                 .chain(building::appearance())
@@ -370,7 +373,10 @@ impl Guest for Ember {
             fluids: Vec::new(),
             reactions: Vec::new(),
             combustion: Vec::new(),
-            tools: Vec::new(),
+            tools: vec![ToolDef {
+                name: "place".into(),
+                kind: ToolKind::Place,
+            }],
             items: vec![food::item()],
             biomes: biomes(),
             survival: None,
@@ -383,8 +389,8 @@ impl Guest for Ember {
             plants: Vec::new(),
             marker_kinds: Vec::new(),
             death_marker_kind: None,
-            templates: Vec::new(),
-            settlements: Vec::new(),
+            templates: templates::templates(),
+            settlements: structures::settlements(),
             voxel_uses: building::voxel_uses(),
             ores: vec![OreDef {
                 material: "waters:obsidian".into(),

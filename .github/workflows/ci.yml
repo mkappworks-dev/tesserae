@@ -51,6 +51,9 @@ jobs:
           cargo fmt --manifest-path crates/demo-kit/Cargo.toml --check
           cargo fmt --manifest-path starters/rust/Cargo.toml --check
 
+      - name: Game Templates match the mockup's export
+        run: node mockup/export-templates.mjs --check
+
       - name: Clippy
         run: cargo clippy --workspace --all-targets --all-features
 

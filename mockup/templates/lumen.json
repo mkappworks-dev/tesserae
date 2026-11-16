@@ -1,0 +1,3122 @@
+{
+ "game": "lumen",
+ "templates": [
+  {
+   "name": "lumen:lantern_cottage",
+   "label": "Lantern cottage",
+   "kind": "home",
+   "size": [
+    8,
+    14,
+    7
+   ],
+   "ground_layer": 0,
+   "foundation": "lumen:moon_cobble",
+   "level_tolerance_m": null,
+   "palette": [
+    {
+     "symbol": ".",
+     "cell": "keep"
+    },
+    {
+     "symbol": ":",
+     "cell": "air"
+    },
+    {
+     "symbol": "A",
+     "material": "lumen:moon_cobble",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "B",
+     "material": "lumen:star_planks",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "C",
+     "material": "lumen:silverwood",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "D",
+     "material": "lumen:star_planks",
+     "shape": "lumen:table",
+     "orientation": 0
+    },
+    {
+     "symbol": "E",
+     "material": "lumen:door",
+     "shape": "lumen:panel",
+     "orientation": 0
+    },
+    {
+     "symbol": "F",
+     "material": "lumen:chest",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "G",
+     "material": "lumen:workbench",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "H",
+     "material": "lumen:pale_plaster",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "I",
+     "material": "lumen:glass",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "J",
+     "material": "lumen:lamp",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "K",
+     "material": "lumen:glowcap",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "L",
+     "material": "lumen:glowcap",
+     "shape": "core:stair",
+     "orientation": 0
+    },
+    {
+     "symbol": "M",
+     "material": "lumen:glowcap",
+     "shape": "core:stair",
+     "orientation": 2
+    },
+    {
+     "symbol": "N",
+     "material": "lumen:glowcap",
+     "shape": "core:slab",
+     "orientation": 0
+    },
+    {
+     "symbol": "O",
+     "material": "lumen:moon_cobble",
+     "shape": "core:slab",
+     "orientation": 0
+    }
+   ],
+   "layers": [
+    [
+     "........",
+     ".AAAAAA.",
+     ".ABBBBA.",
+     ".ABBBBA.",
+     ".ABBBBA.",
+     ".AAAAAA.",
+     "........"
+    ],
+    [
+     "........",
+     ".CAAAAC.",
+     ".AD::FA.",
+     ".A::::A.",
+     ".A:::GA.",
+     ".CAAEAC.",
+     "........"
+    ],
+    [
+     "........",
+     ".CHHIHC.",
+     ".A::::I.",
+     ".H::::H.",
+     ".I::::H.",
+     ".CHIEHC.",
+     "........"
+    ],
+    [
+     "........",
+     ".CHHHHC.",
+     ".A::::H.",
+     ".H:J::H.",
+     ".H::::H.",
+     ".CHHCHC.",
+     "........"
+    ],
+    [
+     "KKKKKKKK",
+     ".H::::H.",
+     ".A::::H.",
+     ".H::::H.",
+     ".H::::H.",
+     ".H::::H.",
+     "KKKKKKKK"
+    ],
+    [
+     "LLLLLLLL",
+     ".H::::H.",
+     ".A::::H.",
+     ".H::::H.",
+     ".H::::H.",
+     ".H::::H.",
+     "MMMMMMMM"
+    ],
+    [
+     "........",
+     "KKKKKKKK",
+     ".A::::H.",
+     ".H::::H.",
+     ".H::::H.",
+     "KKKKKKKK",
+     "........"
+    ],
+    [
+     "........",
+     "LLLLLLLL",
+     ".A::::H.",
+     ".H::::H.",
+     ".H::::H.",
+     "MMMMMMMM",
+     "........"
+    ],
+    [
+     "........",
+     "........",
+     "KAKKKKKK",
+     ".H::::H.",
+     "KKKKKKKK",
+     "........",
+     "........"
+    ],
+    [
+     "........",
+     "........",
+     "LALLLLLL",
+     ".H::::H.",
+     "MMMMMMMM",
+     "........",
+     "........"
+    ],
+    [
+     "........",
+     "........",
+     ".A......",
+     "NNNNNNNN",
+     "........",
+     "........",
+     "........"
+    ],
+    [
+     "........",
+     "........",
+     ".A......",
+     "........",
+     "........",
+     "........",
+     "........"
+    ],
+    [
+     "........",
+     "........",
+     ".A......",
+     "........",
+     "........",
+     "........",
+     "........"
+    ],
+    [
+     "........",
+     "........",
+     ".O......",
+     "........",
+     "........",
+     "........",
+     "........"
+    ]
+   ]
+  },
+  {
+   "name": "lumen:twilight_house",
+   "label": "Twilight house",
+   "kind": "home",
+   "size": [
+    9,
+    16,
+    9
+   ],
+   "ground_layer": 0,
+   "foundation": "lumen:moon_cobble",
+   "level_tolerance_m": null,
+   "palette": [
+    {
+     "symbol": ".",
+     "cell": "keep"
+    },
+    {
+     "symbol": ":",
+     "cell": "air"
+    },
+    {
+     "symbol": "A",
+     "material": "lumen:moon_cobble",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "B",
+     "material": "lumen:dusk_planks",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "C",
+     "material": "lumen:amethyst",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "D",
+     "material": "lumen:moonstone",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "E",
+     "material": "lumen:ink_planks",
+     "shape": "core:slab",
+     "orientation": 0
+    },
+    {
+     "symbol": "F",
+     "material": "lumen:chest",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "G",
+     "material": "lumen:ink_planks",
+     "shape": "lumen:table",
+     "orientation": 0
+    },
+    {
+     "symbol": "H",
+     "material": "lumen:door",
+     "shape": "lumen:panel",
+     "orientation": 0
+    },
+    {
+     "symbol": "I",
+     "material": "lumen:workbench",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "J",
+     "material": "lumen:moon_brick",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "K",
+     "material": "lumen:glass",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "L",
+     "material": "lumen:lamp",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "M",
+     "material": "lumen:pale_plaster",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "N",
+     "material": "lumen:silver_tiles",
+     "shape": "core:stair",
+     "orientation": 0
+    },
+    {
+     "symbol": "O",
+     "material": "lumen:silver_tiles",
+     "shape": "core:stair",
+     "orientation": 2
+    },
+    {
+     "symbol": "P",
+     "material": "lumen:silver_tiles",
+     "shape": "core:slab",
+     "orientation": 0
+    },
+    {
+     "symbol": "Q",
+     "material": "lumen:moon_brick",
+     "shape": "core:slab",
+     "orientation": 0
+    }
+   ],
+   "layers": [
+    [
+     ".........",
+     ".AAAAAAA.",
+     ".ABBBBBA.",
+     ".ABBBBBA.",
+     ".ABBBBBA.",
+     ".ABBBBBA.",
+     ".AAAAAAA.",
+     ".........",
+     "........."
+    ],
+    [
+     ".........",
+     ".CDDEDDC.",
+     ".DF::::J.",
+     ".D:GG::D.",
+     ".E:::::E.",
+     ".D::::ID.",
+     ".CEDHEDC.",
+     ".........",
+     "........."
+    ],
+    [
+     ".........",
+     ".CDDKDDC.",
+     ".D:::::J.",
+     ".D:::::D.",
+     ".K:::::K.",
+     ".D:::::D.",
+     ".CKDHKDC.",
+     ".........",
+     "........."
+    ],
+    [
+     ".........",
+     ".CDDDDDC.",
+     ".D:::::J.",
+     ".D:::::D.",
+     ".D::L::D.",
+     ".D:::::D.",
+     ".CDDCDDC.",
+     ".........",
+     "........."
+    ],
+    [
+     ".........",
+     ".CCCCCCC.",
+     ".CBBBBBJ.",
+     ".CBBBBBC.",
+     ".CBBBBBC.",
+     ".CBBBBBC.",
+     ".CBBBBBC.",
+     ".CCCCCCC.",
+     "........."
+    ],
+    [
+     ".........",
+     ".CCMECMC.",
+     ".CFF:::J.",
+     ".M:::::M.",
+     ".E:::G:E.",
+     ".C:::::C.",
+     ".M:::::M.",
+     ".CCMECMC.",
+     "........."
+    ],
+    [
+     ".........",
+     ".CCMKCMC.",
+     ".C:::::J.",
+     ".M:::::M.",
+     ".K:::::K.",
+     ".C:::::C.",
+     ".M:::::M.",
+     ".CCMKCMC.",
+     "........."
+    ],
+    [
+     ".........",
+     ".CCCCCCC.",
+     ".C:::::J.",
+     ".C:::::C.",
+     ".C::L::C.",
+     ".C:::::C.",
+     ".C:::::C.",
+     ".CCCCCCC.",
+     "........."
+    ],
+    [
+     "NNNNNNNNN",
+     ".D:::::D.",
+     ".D:::::J.",
+     ".D:::::D.",
+     ".D:::::D.",
+     ".D:::::D.",
+     ".D:::::D.",
+     ".D:::::D.",
+     "OOOOOOOOO"
+    ],
+    [
+     ".........",
+     "NNNNNNNNN",
+     ".D:::::J.",
+     ".D:::::D.",
+     ".D:::::D.",
+     ".D:::::D.",
+     ".D:::::D.",
+     "OOOOOOOOO",
+     "........."
+    ],
+    [
+     ".........",
+     ".........",
+     "NNNNNNNJN",
+     ".D:::::D.",
+     ".D:::::D.",
+     ".D:::::D.",
+     "OOOOOOOOO",
+     ".........",
+     "........."
+    ],
+    [
+     ".........",
+     ".........",
+     ".......J.",
+     "NNNNNNNNN",
+     ".D:::::D.",
+     "OOOOOOOOO",
+     ".........",
+     ".........",
+     "........."
+    ],
+    [
+     ".........",
+     ".........",
+     ".......J.",
+     ".........",
+     "PPPPPPPPP",
+     ".........",
+     ".........",
+     ".........",
+     "........."
+    ],
+    [
+     ".........",
+     ".........",
+     ".......J.",
+     ".........",
+     ".........",
+     ".........",
+     ".........",
+     ".........",
+     "........."
+    ],
+    [
+     ".........",
+     ".........",
+     ".......J.",
+     ".........",
+     ".........",
+     ".........",
+     ".........",
+     ".........",
+     "........."
+    ],
+    [
+     ".........",
+     ".........",
+     ".......Q.",
+     ".........",
+     ".........",
+     ".........",
+     ".........",
+     ".........",
+     "........."
+    ]
+   ]
+  },
+  {
+   "name": "lumen:glow_farm",
+   "label": "Glow farm",
+   "kind": "home",
+   "size": [
+    11,
+    14,
+    12
+   ],
+   "ground_layer": 3,
+   "foundation": "lumen:moon_cobble",
+   "level_tolerance_m": null,
+   "palette": [
+    {
+     "symbol": ".",
+     "cell": "keep"
+    },
+    {
+     "symbol": ":",
+     "cell": "air"
+    },
+    {
+     "symbol": "A",
+     "material": "lumen:moon_cobble",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "B",
+     "material": "lumen:chest",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "C",
+     "material": "lumen:star_planks",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "D",
+     "material": "lumen:silverwood",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "E",
+     "material": "lumen:workbench",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "F",
+     "material": "lumen:star_planks",
+     "shape": "lumen:table",
+     "orientation": 0
+    },
+    {
+     "symbol": "G",
+     "material": "lumen:door",
+     "shape": "lumen:panel",
+     "orientation": 0
+    },
+    {
+     "symbol": "H",
+     "material": "lumen:dusk_planks",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "I",
+     "material": "lumen:glass",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "J",
+     "material": "lumen:lamp",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "K",
+     "material": "lumen:star_planks",
+     "shape": "core:slab",
+     "orientation": 0
+    },
+    {
+     "symbol": "L",
+     "material": "lumen:ink_planks",
+     "shape": "core:slab",
+     "orientation": 0
+    },
+    {
+     "symbol": "M",
+     "material": "lumen:silverwood",
+     "shape": "core:post",
+     "orientation": 0
+    },
+    {
+     "symbol": "N",
+     "material": "lumen:dusk_shingles",
+     "shape": "core:stair",
+     "orientation": 0
+    },
+    {
+     "symbol": "O",
+     "material": "lumen:dusk_shingles",
+     "shape": "core:stair",
+     "orientation": 2
+    },
+    {
+     "symbol": "P",
+     "material": "lumen:dusk_shingles",
+     "shape": "core:stair",
+     "orientation": 3
+    },
+    {
+     "symbol": "Q",
+     "material": "lumen:dusk_shingles",
+     "shape": "core:stair",
+     "orientation": 1
+    },
+    {
+     "symbol": "R",
+     "material": "lumen:moon_cobble",
+     "shape": "core:slab",
+     "orientation": 0
+    }
+   ],
+   "layers": [
+    [
+     "...........",
+     ".AAAAAAAAA.",
+     ".AAAAAAAAA.",
+     ".AAAAAAAAA.",
+     ".AAAAAAAAA.",
+     ".AAAAAAAAA.",
+     ".AAAAAAAAA.",
+     "...........",
+     "...........",
+     "...........",
+     "...........",
+     "..........."
+    ],
+    [
+     "...........",
+     ".AAAAAAAAA.",
+     ".ABB:::::A.",
+     ".A:::::::A.",
+     ".A:::::::A.",
+     ".A:::::::A.",
+     ".A:::AAAAA.",
+     "...........",
+     "...........",
+     "...........",
+     "...........",
+     "..........."
+    ],
+    [
+     "...........",
+     ".AAAAAAAAA.",
+     ".A:::::::A.",
+     ".A:::::::A.",
+     ".A:::::::A.",
+     ".A:::::::A.",
+     ".A:::AAAAA.",
+     "...........",
+     "...........",
+     "...........",
+     "...........",
+     "..........."
+    ],
+    [
+     "...........",
+     ".AAAAAAAAA.",
+     ".ACCCCCCCA.",
+     ".ACCCCCCCA.",
+     ".ACCCCCCCA.",
+     ".ACCCCCCCA.",
+     ".ACCCAAAAA.",
+     ".ACCAKKKKK.",
+     ".ACCAKKKKK.",
+     ".ACCA......",
+     ".AAAA......",
+     "..........."
+    ],
+    [
+     "...........",
+     ".DAAAAAAAD.",
+     ".AE:::::BA.",
+     ".A::::FF:A.",
+     ".A:::::::A.",
+     ".A:::::::A.",
+     ".A:::AAGAD.",
+     ".A::A......",
+     ".ABBAM..MM.",
+     ".A::A......",
+     ".DAAD......",
+     "..........."
+    ],
+    [
+     "...........",
+     ".DHHIHHIHD.",
+     ".H:::::::A.",
+     ".H:::::::H.",
+     ".I:::::::H.",
+     ".H:::::::I.",
+     ".H:::IHGID.",
+     ".I::I......",
+     ".H::HM..MM.",
+     ".H::H......",
+     ".DHHD......",
+     "..........."
+    ],
+    [
+     "...........",
+     ".DHHHHHHHD.",
+     ".H:::::::A.",
+     ".H:::::::H.",
+     ".H:::J:::H.",
+     ".H:::::::H.",
+     ".H:::HHDHD.",
+     ".H::HLLLLL.",
+     ".H::HLLLLL.",
+     ".H::H......",
+     ".DHHD......",
+     "..........."
+    ],
+    [
+     "NNNNNNNNNNN",
+     ".H:::::::H.",
+     ".H:::::::A.",
+     ".H:::::::H.",
+     ".H:::::::H.",
+     ".H:::::::H.",
+     "QH:::P:::H.",
+     "OOOOOOOOOOO",
+     "Q::::P.....",
+     "Q::::P.....",
+     "QHHHHP.....",
+     "Q....P....."
+    ],
+    [
+     "...........",
+     "NNNNNNNNNNN",
+     ".H:::::::A.",
+     ".H:::::::H.",
+     ".H:::::::H.",
+     ".H:::::::H.",
+     "OOOOOOOOOOO",
+     ".QHHP......",
+     ".Q::P......",
+     ".Q::P......",
+     ".QHHP......",
+     ".Q..P......"
+    ],
+    [
+     "...........",
+     "...........",
+     "NNNNNNNNNAN",
+     ".H:::::::H.",
+     ".H:::::::H.",
+     "OOOOOOOOOOO",
+     "..LL.......",
+     "..LL.......",
+     "..LL.......",
+     "..LL.......",
+     "..LL.......",
+     "..LL......."
+    ],
+    [
+     "...........",
+     "...........",
+     ".........A.",
+     "LLLLLLLLLLL",
+     "LLLLLLLLLLL",
+     "...........",
+     "...........",
+     "...........",
+     "...........",
+     "...........",
+     "...........",
+     "..........."
+    ],
+    [
+     "...........",
+     "...........",
+     ".........A.",
+     "...........",
+     "...........",
+     "...........",
+     "...........",
+     "...........",
+     "...........",
+     "...........",
+     "...........",
+     "..........."
+    ],
+    [
+     "...........",
+     "...........",
+     ".........A.",
+     "...........",
+     "...........",
+     "...........",
+     "...........",
+     "...........",
+     "...........",
+     "...........",
+     "...........",
+     "..........."
+    ],
+    [
+     "...........",
+     "...........",
+     ".........R.",
+     "...........",
+     "...........",
+     "...........",
+     "...........",
+     "...........",
+     "...........",
+     "...........",
+     "...........",
+     "..........."
+    ]
+   ]
+  },
+  {
+   "name": "lumen:starlight_inn",
+   "label": "Starlight inn",
+   "kind": "trade",
+   "size": [
+    13,
+    20,
+    11
+   ],
+   "ground_layer": 3,
+   "foundation": "lumen:moonstone",
+   "level_tolerance_m": null,
+   "palette": [
+    {
+     "symbol": ".",
+     "cell": "keep"
+    },
+    {
+     "symbol": ":",
+     "cell": "air"
+    },
+    {
+     "symbol": "A",
+     "material": "lumen:moonstone",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "B",
+     "material": "lumen:chest",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "C",
+     "material": "lumen:ink_planks",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "D",
+     "material": "lumen:amethyst",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "E",
+     "material": "lumen:moon_brick",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "F",
+     "material": "lumen:ink_planks",
+     "shape": "lumen:table",
+     "orientation": 0
+    },
+    {
+     "symbol": "G",
+     "material": "lumen:ink_planks",
+     "shape": "core:slab",
+     "orientation": 0
+    },
+    {
+     "symbol": "H",
+     "material": "lumen:door",
+     "shape": "lumen:panel",
+     "orientation": 0
+    },
+    {
+     "symbol": "I",
+     "material": "lumen:glass",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "J",
+     "material": "lumen:lamp",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "K",
+     "material": "lumen:pale_plaster",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "L",
+     "material": "lumen:night_slate",
+     "shape": "core:stair",
+     "orientation": 0
+    },
+    {
+     "symbol": "M",
+     "material": "lumen:night_slate",
+     "shape": "core:stair",
+     "orientation": 2
+    },
+    {
+     "symbol": "N",
+     "material": "lumen:night_slate",
+     "shape": "core:stair",
+     "orientation": 1
+    },
+    {
+     "symbol": "O",
+     "material": "lumen:night_slate",
+     "shape": "core:stair",
+     "orientation": 3
+    },
+    {
+     "symbol": "P",
+     "material": "lumen:night_slate",
+     "shape": "core:slab",
+     "orientation": 0
+    },
+    {
+     "symbol": "Q",
+     "material": "lumen:moon_brick",
+     "shape": "core:slab",
+     "orientation": 0
+    }
+   ],
+   "layers": [
+    [
+     ".............",
+     ".AAAAAAAAAAA.",
+     ".AAAAAAAAAAA.",
+     ".AAAAAAAAAAA.",
+     ".AAAAAAAAAAA.",
+     ".AAAAAAAAAAA.",
+     ".AAAAAAAAAAA.",
+     ".AAAAAAAAAAA.",
+     ".AAAAAAAAAAA.",
+     ".............",
+     "............."
+    ],
+    [
+     ".............",
+     ".AAAAAAAAAAA.",
+     ".ABBB::::::A.",
+     ".A:::::::::A.",
+     ".A:::::::::A.",
+     ".A:::::::::A.",
+     ".A:::::::::A.",
+     ".A:::::::::A.",
+     ".AAAAAAAAAAA.",
+     ".............",
+     "............."
+    ],
+    [
+     ".............",
+     ".AAAAAAAAAAA.",
+     ".A:::::::::A.",
+     ".A:::::::::A.",
+     ".A:::::::::A.",
+     ".A:::::::::A.",
+     ".A:::::::::A.",
+     ".A:::::::::A.",
+     ".AAAAAAAAAAA.",
+     ".............",
+     "............."
+    ],
+    [
+     ".............",
+     ".AAAAAAAAAAA.",
+     ".ACCCCCCCCCA.",
+     ".ACCCCCCCCCA.",
+     ".ACCCCCCCCCA.",
+     ".ACCCCCCCCCA.",
+     ".ACCCCCCCCCA.",
+     ".ACCCCCCCCCA.",
+     ".AAAAAAAAAAA.",
+     ".............",
+     "............."
+    ],
+    [
+     ".............",
+     ".DAAAAAAAAAD.",
+     ".E::::GGGGGA.",
+     ".A::F:::F::A.",
+     ".A:::::::::A.",
+     ".A:::::::::A.",
+     ".A::F:::F::A.",
+     ".A:::::::::A.",
+     ".DAAAAHAAAAD.",
+     "........J....",
+     "............."
+    ],
+    [
+     ".............",
+     ".DAAIAAIAAID.",
+     ".E:::::::::A.",
+     ".A:::::::::I.",
+     ".I:::::::::A.",
+     ".A:::::::::A.",
+     ".A:::::::::I.",
+     ".I:::::::::A.",
+     ".DAIAAHAAIAD.",
+     ".............",
+     "............."
+    ],
+    [
+     ".............",
+     ".DAAAAAAAAAD.",
+     ".E:::::::::A.",
+     ".A:::::::::A.",
+     ".A:::::::::A.",
+     ".A::::J::::A.",
+     ".A:::::::::A.",
+     ".A:::::::::A.",
+     ".DAAAADAAAAD.",
+     ".............",
+     "............."
+    ],
+    [
+     ".............",
+     ".DDDDDDDDDDD.",
+     ".ECCCCCCCCCD.",
+     ".DCCCCCCCCCD.",
+     ".DCCCCCCCCCD.",
+     ".DCCCCCCCCCD.",
+     ".DCCCCCCCCCD.",
+     ".DCCCCCCCCCD.",
+     ".DCCCCCCCCCD.",
+     ".DDDDDDDDDDD.",
+     "............."
+    ],
+    [
+     ".............",
+     ".DDKGDKGDKGD.",
+     ".E:B:B:B:B:K.",
+     ".K:::::::::G.",
+     ".G:::::::::D.",
+     ".D:::::::::K.",
+     ".K:::::::::G.",
+     ".G:::::::::D.",
+     ".D:::::::::K.",
+     ".DGDKGDKGDKD.",
+     "............."
+    ],
+    [
+     ".............",
+     ".DDKIDKIDKID.",
+     ".E:::::::::K.",
+     ".K:::::::::I.",
+     ".I:::::::::D.",
+     ".D:::::::::K.",
+     ".K:::::::::I.",
+     ".I:::::::::D.",
+     ".D:::::::::K.",
+     ".DIDKIDKIDKD.",
+     "............."
+    ],
+    [
+     ".............",
+     ".DDDDDDDDDDD.",
+     ".E:::::::::D.",
+     ".D:::::::::D.",
+     ".D:::::::::D.",
+     ".D::::J::::D.",
+     ".D:::::::::D.",
+     ".D:::::::::D.",
+     ".D:::::::::D.",
+     ".DDDDDDDDDDD.",
+     "............."
+    ],
+    [
+     "LLLLLLLLLLLLL",
+     "N.:::::::::.O",
+     "NE:::::::::.O",
+     "N.:::::::::.O",
+     "N.:::::::::.O",
+     "N.:::::::::.O",
+     "N.:::::::::.O",
+     "N.:::::::::.O",
+     "N.:::::::::.O",
+     "N.:::::::::.O",
+     "MMMMMMMMMMMMM"
+    ],
+    [
+     ".............",
+     ".LLLLLLLLLLL.",
+     ".E:::::::::O.",
+     ".N:::::::::O.",
+     ".N:::::::::O.",
+     ".N:::::::::O.",
+     ".N:::::::::O.",
+     ".N:::::::::O.",
+     ".N:::::::::O.",
+     ".MMMMMMMMMMM.",
+     "............."
+    ],
+    [
+     ".............",
+     ".............",
+     ".ELLLLLLLLL..",
+     "..N:::::::O..",
+     "..N:::::::O..",
+     "..N:::::::O..",
+     "..N:::::::O..",
+     "..N:::::::O..",
+     "..MMMMMMMMM..",
+     ".............",
+     "............."
+    ],
+    [
+     ".............",
+     ".............",
+     ".E...........",
+     "...LLLLLLL...",
+     "...N:::::O...",
+     "...N:::::O...",
+     "...N:::::O...",
+     "...MMMMMMM...",
+     ".............",
+     ".............",
+     "............."
+    ],
+    [
+     ".............",
+     ".............",
+     ".E...........",
+     ".............",
+     "....LLLLL....",
+     "....N:::O....",
+     "....MMMMM....",
+     ".............",
+     ".............",
+     ".............",
+     "............."
+    ],
+    [
+     ".............",
+     ".............",
+     ".E...........",
+     ".............",
+     ".............",
+     ".....PPP.....",
+     ".............",
+     ".............",
+     ".............",
+     ".............",
+     "............."
+    ],
+    [
+     ".............",
+     ".............",
+     ".E...........",
+     ".............",
+     ".............",
+     ".............",
+     ".............",
+     ".............",
+     ".............",
+     ".............",
+     "............."
+    ],
+    [
+     ".............",
+     ".............",
+     ".E...........",
+     ".............",
+     ".............",
+     ".............",
+     ".............",
+     ".............",
+     ".............",
+     ".............",
+     "............."
+    ],
+    [
+     ".............",
+     ".............",
+     ".Q...........",
+     ".............",
+     ".............",
+     ".............",
+     ".............",
+     ".............",
+     ".............",
+     ".............",
+     "............."
+    ]
+   ]
+  },
+  {
+   "name": "lumen:crystal_vault",
+   "label": "Crystal vault",
+   "kind": "trade",
+   "size": [
+    16,
+    13,
+    10
+   ],
+   "ground_layer": 0,
+   "foundation": "lumen:moon_cobble",
+   "level_tolerance_m": null,
+   "palette": [
+    {
+     "symbol": ".",
+     "cell": "keep"
+    },
+    {
+     "symbol": ":",
+     "cell": "air"
+    },
+    {
+     "symbol": "A",
+     "material": "lumen:moon_cobble",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "B",
+     "material": "lumen:dusk_planks",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "C",
+     "material": "lumen:silverwood",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "D",
+     "material": "lumen:chest",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "E",
+     "material": "lumen:ink_planks",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "F",
+     "material": "lumen:glass",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "G",
+     "material": "lumen:silverwood",
+     "shape": "core:slab",
+     "orientation": 0
+    },
+    {
+     "symbol": "H",
+     "material": "lumen:lamp",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "I",
+     "material": "lumen:night_slate",
+     "shape": "core:stair",
+     "orientation": 0
+    },
+    {
+     "symbol": "J",
+     "material": "lumen:night_slate",
+     "shape": "core:stair",
+     "orientation": 2
+    },
+    {
+     "symbol": "K",
+     "material": "lumen:ink_planks",
+     "shape": "core:slab",
+     "orientation": 0
+    }
+   ],
+   "layers": [
+    [
+     "................",
+     ".AAAAAAAAAAAAAA.",
+     ".ABBBBBBBBBBBBA.",
+     ".ABBBBBBBBBBBBA.",
+     ".ABBBBBBBBBBBBA.",
+     ".ABBBBBBBBBBBBA.",
+     ".ABBBBBBBBBBBBA.",
+     ".ABBBBBBBBBBBBA.",
+     ".AAAAAAAAAAAAAA.",
+     "................"
+    ],
+    [
+     "................",
+     ".CAAAAAAAAAAAAC.",
+     ".ADDDDDDDDDDDDA.",
+     ".AD::::::::::DA.",
+     ".AD::::::::::DA.",
+     ".AD::DDDDDD::DA.",
+     ".AD::::::::::DA.",
+     ".A::::::::::::A.",
+     ".CAAAAA:::AAAAC.",
+     "................"
+    ],
+    [
+     "................",
+     ".CCEFCEFCEFCEFC.",
+     ".CDDDDDDDDDDDDE.",
+     ".ED::::::::::DF.",
+     ".FD::::::::::DC.",
+     ".CD::::::::::DE.",
+     ".ED::::::::::DF.",
+     ".F::::::::::::C.",
+     ".CEFCEF:::CEFCC.",
+     "................"
+    ],
+    [
+     "................",
+     ".CCCCCCCCCCCCCC.",
+     ".CDDDDDDDDDDDDC.",
+     ".C::::::::::::C.",
+     ".C::::::::::::C.",
+     ".C::::::::::::C.",
+     ".C::::::::::::C.",
+     ".C::::::::::::C.",
+     ".CCCCCCCCCCCCCC.",
+     "................"
+    ],
+    [
+     "................",
+     ".CCEECEECEECEEC.",
+     ".C::::::::::::E.",
+     ".E::::::::::::E.",
+     ".E::::::::::::C.",
+     ".C::::::::::::E.",
+     ".E::::::::::::E.",
+     ".E::::::::::::C.",
+     ".CEECEECEECEECC.",
+     "................"
+    ],
+    [
+     "................",
+     ".CCEGCEGCEGCEGC.",
+     ".C::::::::::::E.",
+     ".E::::::::::::G.",
+     ".G::::::::::::C.",
+     ".C::::::::::::E.",
+     ".E::::::::::::G.",
+     ".G::::::::::::C.",
+     ".CEGCEGCEGCEGCC.",
+     "................"
+    ],
+    [
+     "................",
+     ".CCEFCEFCEFCEFC.",
+     ".C::::::::::::E.",
+     ".E::::::::::::F.",
+     ".F:::::H::::::C.",
+     ".C::::::::::::E.",
+     ".E::::::::::::F.",
+     ".F::::::::::::C.",
+     ".CEFCEFCEFCEFCC.",
+     "................"
+    ],
+    [
+     "................",
+     ".CCCCCCCCCCCCCC.",
+     ".C::::::::::::C.",
+     ".C::::::::::::C.",
+     ".C::::::::::::C.",
+     ".C::::::::::::C.",
+     ".C::::::::::::C.",
+     ".C::::::::::::C.",
+     ".CCCCCCCCCCCCCC.",
+     "................"
+    ],
+    [
+     "IIIIIIIIIIIIIIII",
+     ".E::::::::::::E.",
+     ".E::::::::::::E.",
+     ".E::::::::::::E.",
+     ".E::::::::::::E.",
+     ".E::::::::::::E.",
+     ".E::::::::::::E.",
+     ".E::::::::::::E.",
+     ".E::::::::::::E.",
+     "JJJJJJJJJJJJJJJJ"
+    ],
+    [
+     "................",
+     "IIIIIIIIIIIIIIII",
+     ".E::::::::::::E.",
+     ".E::::::::::::E.",
+     ".E::::::::::::E.",
+     ".E::::::::::::E.",
+     ".E::::::::::::E.",
+     ".E::::::::::::E.",
+     "JJJJJJJJJJJJJJJJ",
+     "................"
+    ],
+    [
+     "................",
+     "................",
+     "IIIIIIIIIIIIIIII",
+     ".E::::::::::::E.",
+     ".E::::::::::::E.",
+     ".E::::::::::::E.",
+     ".E::::::::::::E.",
+     "JJJJJJJJJJJJJJJJ",
+     "................",
+     "................"
+    ],
+    [
+     "................",
+     "................",
+     "................",
+     "IIIIIIIIIIIIIIII",
+     ".E::::::::::::E.",
+     ".E::::::::::::E.",
+     "JJJJJJJJJJJJJJJJ",
+     "................",
+     "................",
+     "................"
+    ],
+    [
+     "................",
+     "................",
+     "................",
+     "................",
+     "KKKKKKKKKKKKKKKK",
+     "KKKKKKKKKKKKKKKK",
+     "................",
+     "................",
+     "................",
+     "................"
+    ]
+   ]
+  },
+  {
+   "name": "lumen:glassworks",
+   "label": "Glassworks",
+   "kind": "trade",
+   "size": [
+    10,
+    9,
+    8
+   ],
+   "ground_layer": 0,
+   "foundation": "lumen:moonstone",
+   "level_tolerance_m": null,
+   "palette": [
+    {
+     "symbol": ".",
+     "cell": "keep"
+    },
+    {
+     "symbol": ":",
+     "cell": "air"
+    },
+    {
+     "symbol": "A",
+     "material": "lumen:moonstone",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "B",
+     "material": "lumen:amethyst",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "C",
+     "material": "lumen:workbench",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "D",
+     "material": "lumen:chest",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "E",
+     "material": "lumen:anvil",
+     "shape": "core:slab",
+     "orientation": 0
+    },
+    {
+     "symbol": "F",
+     "material": "lumen:moon_brick",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "G",
+     "material": "lumen:forge",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "H",
+     "material": "lumen:moon_cobble",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "I",
+     "material": "lumen:glass",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "J",
+     "material": "lumen:lamp",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "K",
+     "material": "lumen:night_slate",
+     "shape": "core:slab",
+     "orientation": 0
+    },
+    {
+     "symbol": "L",
+     "material": "lumen:night_slate",
+     "shape": "core:stair",
+     "orientation": 2
+    }
+   ],
+   "layers": [
+    [
+     "..........",
+     ".AAAAAAAA.",
+     ".AAAAAAAA.",
+     ".AAAAAAAA.",
+     ".AAAAAAAA.",
+     ".AAAAAAAA.",
+     ".AAAAAAAA.",
+     ".........."
+    ],
+    [
+     "..........",
+     ".BAAAAAAB.",
+     ".ACD::FFA.",
+     ".A::::GFA.",
+     ".AD:E:::A.",
+     ".A::::::A.",
+     ".B::B::BB.",
+     ".........."
+    ],
+    [
+     "..........",
+     ".BHHIHFFB.",
+     ".H::::::H.",
+     ".H:::::JI.",
+     ".I::::::H.",
+     ".H::::::H.",
+     ".B::B::BB.",
+     ".........."
+    ],
+    [
+     "..........",
+     ".BHHHHFFB.",
+     ".H::::::H.",
+     ".H::::::H.",
+     ".H::::::H.",
+     ".H::::::H.",
+     ".BBBBBBBB.",
+     ".........."
+    ],
+    [
+     "..........",
+     ".HHHHHFFH.",
+     ".H::::::H.",
+     ".H::::::H.",
+     ".H::::::H.",
+     ".H::::::H.",
+     "LLLLLLLLLL",
+     "KKKKKKKKKK"
+    ],
+    [
+     "..........",
+     ".HHHHHFFH.",
+     ".H::::::H.",
+     ".H::::::H.",
+     "LLLLLLLLLL",
+     "KKKKKKKKKK",
+     "..........",
+     ".........."
+    ],
+    [
+     "..........",
+     ".HHHHHFFH.",
+     "LLLLLLLLLL",
+     "KKKKKKKKKK",
+     "..........",
+     "..........",
+     "..........",
+     ".........."
+    ],
+    [
+     "LLLLLLLLLL",
+     "KKKKKKFFKK",
+     "..........",
+     "..........",
+     "..........",
+     "..........",
+     "..........",
+     ".........."
+    ],
+    [
+     "..........",
+     "......FF..",
+     "..........",
+     "..........",
+     "..........",
+     "..........",
+     "..........",
+     ".........."
+    ]
+   ]
+  },
+  {
+   "name": "lumen:lens_kiln",
+   "label": "Lens kiln",
+   "kind": "trade",
+   "size": [
+    9,
+    11,
+    8
+   ],
+   "ground_layer": 0,
+   "foundation": "lumen:moon_cobble",
+   "level_tolerance_m": null,
+   "palette": [
+    {
+     "symbol": ".",
+     "cell": "keep"
+    },
+    {
+     "symbol": ":",
+     "cell": "air"
+    },
+    {
+     "symbol": "A",
+     "material": "lumen:moon_cobble",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "B",
+     "material": "lumen:star_planks",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "C",
+     "material": "lumen:silverwood",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "D",
+     "material": "lumen:workbench",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "E",
+     "material": "lumen:chest",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "F",
+     "material": "lumen:star_planks",
+     "shape": "core:slab",
+     "orientation": 0
+    },
+    {
+     "symbol": "G",
+     "material": "lumen:moon_brick",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "H",
+     "material": "lumen:door",
+     "shape": "lumen:panel",
+     "orientation": 0
+    },
+    {
+     "symbol": "I",
+     "material": "lumen:oven",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "J",
+     "material": "lumen:glass",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "K",
+     "material": "lumen:lamp",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "L",
+     "material": "lumen:prism_tiles",
+     "shape": "core:stair",
+     "orientation": 0
+    },
+    {
+     "symbol": "M",
+     "material": "lumen:prism_tiles",
+     "shape": "core:stair",
+     "orientation": 2
+    },
+    {
+     "symbol": "N",
+     "material": "lumen:prism_tiles",
+     "shape": "core:stair",
+     "orientation": 1
+    },
+    {
+     "symbol": "O",
+     "material": "lumen:prism_tiles",
+     "shape": "core:stair",
+     "orientation": 3
+    },
+    {
+     "symbol": "P",
+     "material": "lumen:prism_tiles",
+     "shape": "core:slab",
+     "orientation": 0
+    },
+    {
+     "symbol": "Q",
+     "material": "lumen:moon_brick",
+     "shape": "core:slab",
+     "orientation": 0
+    }
+   ],
+   "layers": [
+    [
+     ".........",
+     ".AAAAAAA.",
+     ".ABBBBBA.",
+     ".ABBBBBA.",
+     ".ABBBBBA.",
+     ".ABBBBBA.",
+     ".AAAAAAA.",
+     "........."
+    ],
+    [
+     "....GGG..",
+     ".CAAAAAC.",
+     ".AD:GIGG.",
+     ".AE::::A.",
+     ".AFFFFFA.",
+     ".A:::::A.",
+     ".CAAHAAC.",
+     "........."
+    ],
+    [
+     "....GGG..",
+     ".CGGJGGC.",
+     ".G::GGGG.",
+     ".G:::::G.",
+     ".J:::::J.",
+     ".G:::::G.",
+     ".CJGHJGC.",
+     "........."
+    ],
+    [
+     "....PPP..",
+     ".CGGGGGC.",
+     ".G:::::G.",
+     ".G:::::G.",
+     ".G::K::G.",
+     ".G:::::G.",
+     ".CGGCGGC.",
+     "........."
+    ],
+    [
+     "LLLLLLLLL",
+     "N.:::::.O",
+     "N.:::::GO",
+     "N.:::::.O",
+     "N.:::::.O",
+     "N.:::::.O",
+     "N.:::::.O",
+     "MMMMMMMMM"
+    ],
+    [
+     ".........",
+     ".LLLLLLL.",
+     ".N:::::G.",
+     ".N:::::O.",
+     ".N:::::O.",
+     ".N:::::O.",
+     ".MMMMMMM.",
+     "........."
+    ],
+    [
+     ".........",
+     ".........",
+     "..LLLLLG.",
+     "..N:::O..",
+     "..N:::O..",
+     "..MMMMM..",
+     ".........",
+     "........."
+    ],
+    [
+     ".........",
+     ".........",
+     ".......G.",
+     "...PPP...",
+     "...PPP...",
+     ".........",
+     ".........",
+     "........."
+    ],
+    [
+     ".........",
+     ".........",
+     ".......G.",
+     ".........",
+     ".........",
+     ".........",
+     ".........",
+     "........."
+    ],
+    [
+     ".........",
+     ".........",
+     ".......G.",
+     ".........",
+     ".........",
+     ".........",
+     ".........",
+     "........."
+    ],
+    [
+     ".........",
+     ".........",
+     ".......Q.",
+     ".........",
+     ".........",
+     ".........",
+     ".........",
+     "........."
+    ]
+   ]
+  },
+  {
+   "name": "lumen:glass_stall",
+   "label": "Glass stall",
+   "kind": "trade",
+   "size": [
+    7,
+    5,
+    6
+   ],
+   "ground_layer": 0,
+   "foundation": "lumen:moon_cobble",
+   "level_tolerance_m": null,
+   "palette": [
+    {
+     "symbol": ".",
+     "cell": "keep"
+    },
+    {
+     "symbol": ":",
+     "cell": "air"
+    },
+    {
+     "symbol": "A",
+     "material": "lumen:silverwood",
+     "shape": "core:post",
+     "orientation": 0
+    },
+    {
+     "symbol": "B",
+     "material": "lumen:star_planks",
+     "shape": "core:slab",
+     "orientation": 0
+    },
+    {
+     "symbol": "C",
+     "material": "lumen:lumen_cloth",
+     "shape": "core:slab",
+     "orientation": 0
+    },
+    {
+     "symbol": "D",
+     "material": "lumen:lumen_cloth",
+     "shape": "core:stair",
+     "orientation": 2
+    },
+    {
+     "symbol": "E",
+     "material": "lumen:chest",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "F",
+     "material": "lumen:lamp",
+     "shape": "core:cube",
+     "orientation": 0
+    }
+   ],
+   "layers": [
+    [
+     ".......",
+     ".AEFEA.",
+     ".......",
+     ".BBBBB.",
+     ".A...A.",
+     "......."
+    ],
+    [
+     ".......",
+     ".A...A.",
+     ".......",
+     ".......",
+     ".BBBBB.",
+     "......."
+    ],
+    [
+     ".......",
+     ".A...A.",
+     ".......",
+     ".......",
+     ".A...A.",
+     "......."
+    ],
+    [
+     ".......",
+     ".A...A.",
+     "CCCCCCC",
+     "CCCCCCC",
+     "CCCCCCC",
+     "DDDDDDD"
+    ],
+    [
+     "CCCCCCC",
+     "CCCCCCC",
+     ".......",
+     ".......",
+     ".......",
+     "......."
+    ]
+   ]
+  },
+  {
+   "name": "lumen:glass_hall",
+   "label": "Glass hall",
+   "kind": "farm",
+   "size": [
+    13,
+    16,
+    11
+   ],
+   "ground_layer": 0,
+   "foundation": "lumen:moon_cobble",
+   "level_tolerance_m": null,
+   "palette": [
+    {
+     "symbol": ".",
+     "cell": "keep"
+    },
+    {
+     "symbol": ":",
+     "cell": "air"
+    },
+    {
+     "symbol": "A",
+     "material": "lumen:moon_cobble",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "B",
+     "material": "lumen:dusk_planks",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "C",
+     "material": "lumen:pale_plaster",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "D",
+     "material": "lumen:chest",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "E",
+     "material": "lumen:pale_plaster",
+     "shape": "core:post",
+     "orientation": 0
+    },
+    {
+     "symbol": "F",
+     "material": "lumen:violet_planks",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "G",
+     "material": "lumen:glass",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "H",
+     "material": "lumen:pale_plaster",
+     "shape": "core:slab",
+     "orientation": 0
+    },
+    {
+     "symbol": "I",
+     "material": "lumen:dusk_shingles",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "J",
+     "material": "lumen:dusk_shingles",
+     "shape": "core:stair",
+     "orientation": 0
+    },
+    {
+     "symbol": "K",
+     "material": "lumen:dusk_shingles",
+     "shape": "core:stair",
+     "orientation": 2
+    },
+    {
+     "symbol": "L",
+     "material": "lumen:ink_planks",
+     "shape": "core:slab",
+     "orientation": 0
+    }
+   ],
+   "layers": [
+    [
+     ".............",
+     ".AAAAAAAAAAA.",
+     ".ABBBBBBBBBA.",
+     ".ABBBBBBBBBA.",
+     ".ABBBBBBBBBA.",
+     ".ABBBBBBBBBA.",
+     ".ABBBBBBBBBA.",
+     ".ABBBBBBBBBA.",
+     ".ABBBBBBBBBA.",
+     ".AAAAAAAAAAA.",
+     "............."
+    ],
+    [
+     ".............",
+     ".CAAAAAAAAAC.",
+     ".ADDE:::E:DA.",
+     ".A::E:::E::A.",
+     ".A::E:::E::A.",
+     ".A::E:::E::A.",
+     ".A::E:::E::A.",
+     ".A:::::::::A.",
+     ".A:::::::::A.",
+     ".CAAA:::AAAC.",
+     "............."
+    ],
+    [
+     ".............",
+     ".CCFGCFGCFGC.",
+     ".C:::::::::F.",
+     ".F:::::::::G.",
+     ".G:::::::::C.",
+     ".C:::::::::F.",
+     ".F:::::::::G.",
+     ".G:::::::::C.",
+     ".C:::::::::F.",
+     ".CGCF:::GCFC.",
+     "............."
+    ],
+    [
+     ".............",
+     ".CCCCCCCCCCC.",
+     ".C:::::::::C.",
+     ".C:::::::::C.",
+     ".C:::::::::C.",
+     ".C:::::::::C.",
+     ".C:::::::::C.",
+     ".C:::::::::C.",
+     ".C:::::::::C.",
+     ".CCCCCCCCCCC.",
+     "............."
+    ],
+    [
+     ".............",
+     ".CCFFCFFCFFC.",
+     ".C:::::::::F.",
+     ".F:::::::::F.",
+     ".F:::::::::C.",
+     ".C:::::::::F.",
+     ".F:::::::::F.",
+     ".F:::::::::C.",
+     ".C:::::::::F.",
+     ".CFCFFCFFCFC.",
+     "............."
+    ],
+    [
+     ".............",
+     ".CCFHCFHCFHC.",
+     ".C:::::::::F.",
+     ".F:::::::::H.",
+     ".H:::::::::C.",
+     ".C:::::::::F.",
+     ".F:::::::::H.",
+     ".H:::::::::C.",
+     ".C:::::::::F.",
+     ".CHCFH:FHCFC.",
+     "............."
+    ],
+    [
+     ".............",
+     ".CCFGCFGCFGC.",
+     ".C:::::::::F.",
+     ".F:::::::::G.",
+     ".G:::::::::C.",
+     ".C:::::::::F.",
+     ".F:::::::::G.",
+     ".G:::::::::C.",
+     ".C:::::::::F.",
+     ".CGCFG:FGCFC.",
+     "............."
+    ],
+    [
+     ".............",
+     ".CCCCCCCCCCC.",
+     ".C:::::::::C.",
+     ".C:::::::::C.",
+     ".C:::::::::C.",
+     ".C:::::::::C.",
+     ".C:::::::::C.",
+     ".C:::::::::C.",
+     ".C:::::::::C.",
+     ".CCCCCCCCCCC.",
+     "............."
+    ],
+    [
+     "IIIIIIIIIIIII",
+     ".F:::::::::F.",
+     ".F:::::::::F.",
+     ".F:::::::::F.",
+     ".F:::::::::F.",
+     ".F:::::::::F.",
+     ".F:::::::::F.",
+     ".F:::::::::F.",
+     ".F:::::::::F.",
+     ".F:::::::::F.",
+     "IIIIIIIIIIIII"
+    ],
+    [
+     "JJJJJJJJJJJJJ",
+     ".F:::::::::F.",
+     ".F:::::::::F.",
+     ".F:::::::::F.",
+     ".F:::::::::F.",
+     ".F:::::::::F.",
+     ".F:::::::::F.",
+     ".F:::::::::F.",
+     ".F:::::::::F.",
+     ".F:::::::::F.",
+     "KKKKKKKKKKKKK"
+    ],
+    [
+     ".............",
+     "IIIIIIIIIIIII",
+     ".F:::::::::F.",
+     ".F:::::::::F.",
+     ".F:::::::::F.",
+     ".F:::::::::F.",
+     ".F:::::::::F.",
+     ".F:::::::::F.",
+     ".F:::::::::F.",
+     "IIIIIIIIIIIII",
+     "............."
+    ],
+    [
+     ".............",
+     "JJJJJJJJJJJJJ",
+     ".F:::::::::F.",
+     ".F:::::::::F.",
+     ".F:::::::::F.",
+     ".F:::::::::F.",
+     ".F:::::::::F.",
+     ".F:::::::::F.",
+     ".F:::::::::F.",
+     "KKKKKKKKKKKKK",
+     "............."
+    ],
+    [
+     ".............",
+     ".............",
+     "JJJJJJJJJJJJJ",
+     ".F:::::::::F.",
+     ".F:::::::::F.",
+     ".F:::::::::F.",
+     ".F:::::::::F.",
+     ".F:::::::::F.",
+     "KKKKKKKKKKKKK",
+     ".............",
+     "............."
+    ],
+    [
+     ".............",
+     ".............",
+     ".............",
+     "JJJJJJJJJJJJJ",
+     ".F:::::::::F.",
+     ".F:::::::::F.",
+     ".F:::::::::F.",
+     "KKKKKKKKKKKKK",
+     ".............",
+     ".............",
+     "............."
+    ],
+    [
+     ".............",
+     ".............",
+     ".............",
+     ".............",
+     "JJJJJJJJJJJJJ",
+     ".F:::::::::F.",
+     "KKKKKKKKKKKKK",
+     ".............",
+     ".............",
+     ".............",
+     "............."
+    ],
+    [
+     ".............",
+     ".............",
+     ".............",
+     ".............",
+     ".............",
+     "LLLLLLLLLLLLL",
+     ".............",
+     ".............",
+     ".............",
+     ".............",
+     "............."
+    ]
+   ]
+  },
+  {
+   "name": "lumen:moon_well",
+   "label": "Moon well",
+   "kind": "centre",
+   "size": [
+    5,
+    10,
+    5
+   ],
+   "ground_layer": 3,
+   "foundation": "lumen:moon_cobble",
+   "level_tolerance_m": null,
+   "palette": [
+    {
+     "symbol": ".",
+     "cell": "keep"
+    },
+    {
+     "symbol": ":",
+     "cell": "air"
+    },
+    {
+     "symbol": "A",
+     "material": "lumen:moon_cobble",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "B",
+     "material": "lumen:moon_cobble",
+     "shape": "core:slab",
+     "orientation": 0
+    },
+    {
+     "symbol": "C",
+     "material": "lumen:silverwood",
+     "shape": "core:post",
+     "orientation": 0
+    },
+    {
+     "symbol": "D",
+     "material": "lumen:silver_tiles",
+     "shape": "core:stair",
+     "orientation": 0
+    },
+    {
+     "symbol": "E",
+     "material": "lumen:silver_tiles",
+     "shape": "core:stair",
+     "orientation": 2
+    },
+    {
+     "symbol": "F",
+     "material": "lumen:silver_tiles",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "G",
+     "material": "lumen:silver_tiles",
+     "shape": "core:slab",
+     "orientation": 0
+    }
+   ],
+   "layers": [
+    [
+     ".....",
+     ".AAA.",
+     ".A:A.",
+     ".AAA.",
+     "....."
+    ],
+    [
+     ".....",
+     ".AAA.",
+     ".A:A.",
+     ".AAA.",
+     "....."
+    ],
+    [
+     ".....",
+     ".AAA.",
+     ".A:A.",
+     ".AAA.",
+     "....."
+    ],
+    [
+     ".....",
+     ".AAA.",
+     ".A:A.",
+     ".AAA.",
+     "....."
+    ],
+    [
+     ".....",
+     ".BBB.",
+     ".B:B.",
+     ".BBB.",
+     "....."
+    ],
+    [
+     ".....",
+     ".C.C.",
+     ".....",
+     ".C.C.",
+     "....."
+    ],
+    [
+     ".....",
+     ".C.C.",
+     ".....",
+     ".C.C.",
+     "....."
+    ],
+    [
+     "DDDDD",
+     ".F:F.",
+     ".F:F.",
+     ".F:F.",
+     "EEEEE"
+    ],
+    [
+     ".....",
+     "DDDDD",
+     ".F:F.",
+     "EEEEE",
+     "....."
+    ],
+    [
+     ".....",
+     ".....",
+     "GGGGG",
+     ".....",
+     "....."
+    ]
+   ]
+  },
+  {
+   "name": "lumen:crystal_spire",
+   "label": "Crystal spire",
+   "kind": "wild",
+   "size": [
+    5,
+    15,
+    5
+   ],
+   "ground_layer": 2,
+   "foundation": "lumen:moonstone",
+   "level_tolerance_m": 2,
+   "palette": [
+    {
+     "symbol": ".",
+     "cell": "keep"
+    },
+    {
+     "symbol": ":",
+     "cell": "air"
+    },
+    {
+     "symbol": "A",
+     "material": "lumen:moon_brick",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "B",
+     "material": "lumen:silverwood",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "C",
+     "material": "lumen:lamp",
+     "shape": "core:cube",
+     "orientation": 0
+    }
+   ],
+   "layers": [
+    [
+     ".AAA.",
+     "AAAAA",
+     "AAAAA",
+     "AAAAA",
+     ".AAA."
+    ],
+    [
+     ".AAA.",
+     "AAAAA",
+     "AAAAA",
+     "AAAAA",
+     ".AAA."
+    ],
+    [
+     ".BBB.",
+     "BBBBB",
+     "BBBBB",
+     "BBBBB",
+     ".BBB."
+    ],
+    [
+     "..A..",
+     ".AAA.",
+     "AAAAA",
+     ".AAA.",
+     "..A.."
+    ],
+    [
+     ".....",
+     ".AAA.",
+     ".AAA.",
+     ".AAA.",
+     "....."
+    ],
+    [
+     ".....",
+     ".BBB.",
+     ".BBB.",
+     ".BBB.",
+     "....."
+    ],
+    [
+     ".....",
+     ".AAA.",
+     ".AAA.",
+     ".AAA.",
+     "....."
+    ],
+    [
+     ".....",
+     ".AAA.",
+     ".AAA.",
+     ".AAA.",
+     "....."
+    ],
+    [
+     ".....",
+     "..B..",
+     ".BBB.",
+     "..B..",
+     "....."
+    ],
+    [
+     ".....",
+     "..A..",
+     ".AAA.",
+     "..A..",
+     "....."
+    ],
+    [
+     ".....",
+     "..A..",
+     ".AAA.",
+     "..A..",
+     "....."
+    ],
+    [
+     ".....",
+     ".....",
+     "..B..",
+     ".....",
+     "....."
+    ],
+    [
+     ".....",
+     ".....",
+     "..A..",
+     ".....",
+     "....."
+    ],
+    [
+     ".....",
+     ".....",
+     "..C..",
+     ".....",
+     "....."
+    ],
+    [
+     ".....",
+     ".....",
+     "..C..",
+     ".....",
+     "....."
+    ]
+   ]
+  },
+  {
+   "name": "lumen:observatory",
+   "label": "Observatory",
+   "kind": "wild",
+   "size": [
+    7,
+    14,
+    7
+   ],
+   "ground_layer": 3,
+   "foundation": "lumen:moonstone",
+   "level_tolerance_m": 2,
+   "palette": [
+    {
+     "symbol": ".",
+     "cell": "keep"
+    },
+    {
+     "symbol": ":",
+     "cell": "air"
+    },
+    {
+     "symbol": "A",
+     "material": "lumen:moonstone",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "B",
+     "material": "lumen:star_planks",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "C",
+     "material": "lumen:silverwood",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "D",
+     "material": "lumen:door",
+     "shape": "lumen:panel",
+     "orientation": 0
+    },
+    {
+     "symbol": "E",
+     "material": "lumen:glass",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "F",
+     "material": "lumen:moon_brick",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "G",
+     "material": "lumen:lamp",
+     "shape": "core:cube",
+     "orientation": 0
+    }
+   ],
+   "layers": [
+    [
+     ".......",
+     ".AAAAA.",
+     ".AAAAA.",
+     ".AAAAA.",
+     ".AAAAA.",
+     ".AAAAA.",
+     "......."
+    ],
+    [
+     ".......",
+     ".AAAAA.",
+     ".A:::A.",
+     ".A:::A.",
+     ".A:::A.",
+     ".AAAAA.",
+     "......."
+    ],
+    [
+     ".......",
+     ".AAAAA.",
+     ".A:::A.",
+     ".A:::A.",
+     ".A:::A.",
+     ".AAAAA.",
+     "......."
+    ],
+    [
+     "AAAAAAA",
+     "ABBBBBA",
+     "ABBBBBA",
+     "ABBBBBA",
+     "ABBBBBA",
+     "ABBBBBA",
+     "AAAAAAA"
+    ],
+    [
+     "CAAAAAC",
+     "A:::::A",
+     "A:::::A",
+     "A:::::A",
+     "A:::::A",
+     "A:::::A",
+     "CAADAAC"
+    ],
+    [
+     "EAAEAAE",
+     "A:::::A",
+     "A:::::A",
+     "E:::::E",
+     "A:::::A",
+     "A:::::A",
+     "EAADAAE"
+    ],
+    [
+     "CAAAAAC",
+     "A:::::A",
+     "A:::::A",
+     "A:::::A",
+     "A:::::A",
+     "A:::::A",
+     "CAAAAAC"
+    ],
+    [
+     "CAAAAAC",
+     "A:::::A",
+     "A:::::A",
+     "A:::::A",
+     "A:::::A",
+     "A:::::A",
+     "CAAAAAC"
+    ],
+    [
+     "CFFFFFC",
+     "F:::::F",
+     "F:::::F",
+     "F:::::F",
+     "F:::::F",
+     "F:::::F",
+     "CFFFFFC"
+    ],
+    [
+     "EAAEAAE",
+     "A:::::A",
+     "A:::::A",
+     "E:::::E",
+     "A:::::A",
+     "A:::::A",
+     "EAAEAAE"
+    ],
+    [
+     "CAAAAAC",
+     "A:::::A",
+     "A:::::A",
+     "A:::::A",
+     "A:::::A",
+     "A:::::A",
+     "CAAAAAC"
+    ],
+    [
+     "CAAAAAC",
+     "A:::::A",
+     "A:::::A",
+     "A:::::A",
+     "A:::::A",
+     "A:::::A",
+     "CAAAAAC"
+    ],
+    [
+     "AAAAAAA",
+     "ABBBBBA",
+     "ABBBBBA",
+     "ABBBBBA",
+     "ABBBBBA",
+     "ABBBBBA",
+     "AAAAAAA"
+    ],
+    [
+     "A.A.A.A",
+     ".......",
+     "A.....A",
+     "...G...",
+     "A.....A",
+     ".......",
+     "A.A.A.A"
+    ]
+   ]
+  },
+  {
+   "name": "lumen:glass_dome",
+   "label": "Glass dome",
+   "kind": "wild",
+   "size": [
+    9,
+    5,
+    9
+   ],
+   "ground_layer": 0,
+   "foundation": "lumen:moonstone",
+   "level_tolerance_m": 2,
+   "palette": [
+    {
+     "symbol": ".",
+     "cell": "keep"
+    },
+    {
+     "symbol": ":",
+     "cell": "air"
+    },
+    {
+     "symbol": "A",
+     "material": "lumen:moon_cobble",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "B",
+     "material": "lumen:star_planks",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "C",
+     "material": "lumen:lamp",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "D",
+     "material": "lumen:door",
+     "shape": "lumen:panel",
+     "orientation": 0
+    },
+    {
+     "symbol": "E",
+     "material": "lumen:night_slate",
+     "shape": "core:cube",
+     "orientation": 0
+    }
+   ],
+   "layers": [
+    [
+     "..AABAA..",
+     ".ABBBBBA.",
+     "ABBBBBBBA",
+     "ABBBBBBBA",
+     "BBBBBBBBB",
+     "ABBBBBBBA",
+     "ABBBBBBBA",
+     ".ABBBBBA.",
+     "..AABAA.."
+    ],
+    [
+     "...AAA...",
+     ".AA:::AA.",
+     ".A:::::A.",
+     "A:::::::A",
+     "A:::C:::A",
+     "A:::::::A",
+     ".A:::::A.",
+     ".AA:::AA.",
+     "...ADA..."
+    ],
+    [
+     "....A....",
+     "..AAAAA..",
+     ".AA:::AA.",
+     ".A:::::A.",
+     "AA:::::AA",
+     ".A:::::A.",
+     ".AA:::AA.",
+     "..AAAAA..",
+     "....D...."
+    ],
+    [
+     ".........",
+     "...EEE...",
+     "..EEEEE..",
+     ".EE:::EE.",
+     ".EE:::EE.",
+     ".EE:::EE.",
+     "..EEEEE..",
+     "...EEE...",
+     "........."
+    ],
+    [
+     ".........",
+     ".........",
+     "....E....",
+     "...EEE...",
+     "..EEEEE..",
+     "...EEE...",
+     "....E....",
+     ".........",
+     "........."
+    ]
+   ]
+  },
+  {
+   "name": "lumen:star_ring",
+   "label": "Star ring",
+   "kind": "wild",
+   "size": [
+    15,
+    3,
+    15
+   ],
+   "ground_layer": 0,
+   "foundation": "lumen:moonstone",
+   "level_tolerance_m": 2,
+   "palette": [
+    {
+     "symbol": ".",
+     "cell": "keep"
+    },
+    {
+     "symbol": ":",
+     "cell": "air"
+    },
+    {
+     "symbol": "A",
+     "material": "lumen:moonstone",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "B",
+     "material": "lumen:moon_brick",
+     "shape": "core:slab",
+     "orientation": 0
+    },
+    {
+     "symbol": "C",
+     "material": "lumen:moon_brick",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "D",
+     "material": "lumen:lamp",
+     "shape": "core:cube",
+     "orientation": 0
+    }
+   ],
+   "layers": [
+    [
+     ".......A.......",
+     "...A.......A...",
+     "...............",
+     ".A...........A.",
+     "...............",
+     "...............",
+     "...............",
+     "A......C......A",
+     "...............",
+     "...............",
+     "...............",
+     ".A...........A.",
+     "...............",
+     "....A......A...",
+     ".......A......."
+    ],
+    [
+     ".......A.......",
+     "...A.......A...",
+     "...............",
+     ".A...........A.",
+     "...............",
+     "...............",
+     "...............",
+     "A......D......A",
+     "...............",
+     "...............",
+     "...............",
+     ".A...........A.",
+     "...............",
+     "....A......A...",
+     ".......A......."
+    ],
+    [
+     ".......B.......",
+     "...B.......B...",
+     "...............",
+     ".B...........B.",
+     "...............",
+     "...............",
+     "...............",
+     "B.............B",
+     "...............",
+     "...............",
+     "...............",
+     ".B...........B.",
+     "...............",
+     "....B......B...",
+     ".......B......."
+    ]
+   ]
+  },
+  {
+   "name": "lumen:geode_hollow",
+   "label": "Geode hollow",
+   "kind": "wild",
+   "size": [
+    9,
+    5,
+    9
+   ],
+   "ground_layer": 4,
+   "foundation": "lumen:moonstone",
+   "level_tolerance_m": 2,
+   "palette": [
+    {
+     "symbol": ".",
+     "cell": "keep"
+    },
+    {
+     "symbol": ":",
+     "cell": "air"
+    },
+    {
+     "symbol": "A",
+     "material": "lumen:moon_brick",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "B",
+     "material": "lumen:lamp",
+     "shape": "core:cube",
+     "orientation": 0
+    }
+   ],
+   "layers": [
+    [
+     ".........",
+     ".........",
+     "....A....",
+     "...AAA...",
+     "..AAAAA..",
+     "...AAA...",
+     "....A....",
+     ".........",
+     "........."
+    ],
+    [
+     ".........",
+     "...AAA...",
+     "..AAAAA..",
+     ".AA:::AA.",
+     ".AA:B:AA.",
+     ".AA:::AA.",
+     "..AAAAA..",
+     "...AAA...",
+     "........."
+    ],
+    [
+     "....A....",
+     "..AAAAA..",
+     ".AA:::AA.",
+     ".A:::::A.",
+     "AA:::::AA",
+     ".A:::::A.",
+     ".AA:::AA.",
+     "..AAAAA..",
+     "....A...."
+    ],
+    [
+     "...AAA...",
+     ".AA:::AA.",
+     ".A:::::A.",
+     "A:::::::A",
+     "A:::::::A",
+     "A:::::::A",
+     ".A:::::A.",
+     ".AA:::AA.",
+     "...AAA..."
+    ],
+    [
+     "..AAAAA..",
+     ".AA:::AA.",
+     "AA:::::AA",
+     "A:::::::A",
+     "A:::::::A",
+     "A:::::::A",
+     "AA:::::AA",
+     ".AA:::AA.",
+     "..AAAAA.."
+    ]
+   ]
+  }
+ ]
+}

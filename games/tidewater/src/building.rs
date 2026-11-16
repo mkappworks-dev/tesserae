@@ -1,5 +1,5 @@
 //! Tidewater's building Materials: driftwood, palm, sandstone, coral and sailcloth, and the
-//! Stations its buildings hold.
+//! Stations and furnishings its buildings hold.
 
 use demo_kit::building::{Block, Pattern::*, block, make, station};
 
@@ -9,7 +9,7 @@ const STONE: &str = "strata:stone";
 const SAND: &str = "strata:sand";
 const CLAY: &str = "strata:clay";
 
-pub const BLOCKS: [Block; 19] = [
+pub const BLOCKS: [Block; 24] = [
     block(
         "shell_plaster",
         Plaster,
@@ -142,6 +142,45 @@ pub const BLOCKS: [Block; 19] = [
         0xd98b74,
         0xefe0c8,
         make("hand", &[(CLAY, 6)], 1),
+    ),
+    station(
+        "workbench",
+        Workbench,
+        0x8a5a36,
+        0x4a4f55,
+        make("hand", &[(LOG, 4)], 1),
+    ),
+    block(
+        "chest",
+        Chest,
+        0x8a5a36,
+        0x4a4f55,
+        make("workbench", &[(LOG, 8)], 1),
+    ),
+    block(
+        "door",
+        Door,
+        0x8a5a36,
+        0x4a4f55,
+        make("workbench", &[(LOG, 3)], 1),
+    ),
+    block(
+        "glass",
+        Glass,
+        0x9fd8cf,
+        0xb9ae98,
+        make("oven", &[(SAND, 2)], 1),
+    ),
+    block(
+        "lamp",
+        Lamp,
+        0xffe2a8,
+        0x5b7480,
+        make(
+            "workbench",
+            &[("tidewater:glass", 1), ("crystals:aquamarine", 1)],
+            2,
+        ),
     ),
 ];
 

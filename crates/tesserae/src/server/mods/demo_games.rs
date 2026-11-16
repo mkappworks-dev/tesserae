@@ -20,6 +20,7 @@ mod building;
 mod fields;
 mod food;
 mod plants;
+mod structures;
 mod vegetation;
 
 fn checkout() -> PathBuf {

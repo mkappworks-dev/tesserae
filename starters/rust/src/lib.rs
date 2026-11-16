@@ -5,7 +5,8 @@ use exports::tesserae::mods::guest::{
 };
 use tesserae::mods::content::{
     Appearance, DoorDef, GroundParams, MaterialDef, MovementPolicy, Occlusion, RecipeDef,
-    RecipeStack, RenderClass, VoxelUse, VoxelUseKind,
+    RecipeStack, RenderClass, TemplateCell, TemplateDef, TemplatePaletteEntry, TemplateVoxel,
+    VoxelUse, VoxelUseKind,
 };
 use tesserae::mods::types::Srgba;
 
@@ -45,6 +46,46 @@ fn voxel_use(material: &str, kind: VoxelUseKind) -> VoxelUse {
         material: material.into(),
         kind,
         shape: None,
+    }
+}
+
+fn palette(symbol: char, material: &str) -> TemplatePaletteEntry {
+    TemplatePaletteEntry {
+        symbol,
+        cell: TemplateCell::Voxel(TemplateVoxel {
+            material: material.into(),
+            shape: None,
+            orientation: None,
+        }),
+    }
+}
+
+/// A stone hut, 3 m square, its door on the +Z side: layers from the bottom up, each a row of
+/// cells along +X for every metre along +Z. `:` carves its room out of whatever stands there.
+fn hut() -> TemplateDef {
+    TemplateDef {
+        name: "hut".into(),
+        cell_m: 1.0,
+        palette: vec![
+            palette('s', "starter_rust:stone"),
+            palette('d', "starter_rust:door"),
+            TemplatePaletteEntry {
+                symbol: ':',
+                cell: TemplateCell::Air,
+            },
+        ],
+        layers: [
+            ["sss", "sss", "sss"],
+            ["sss", "s:s", "sds"],
+            ["sss", "s:s", "sds"],
+            ["sss", "sss", "sss"],
+        ]
+        .iter()
+        .map(|layer| layer.iter().map(|&row| row.into()).collect())
+        .collect(),
+        ground_layer: Some(0),
+        foundation: Some("starter_rust:stone".into()),
+        level_tolerance_m: None,
     }
 }
 
@@ -114,11 +155,16 @@ impl Guest for Starter {
                     output: stack("starter_rust:chest", 1),
                     station: "workbench".into(),
                 },
+                RecipeDef {
+                    inputs: vec![stack("starter_rust:stone", 6)],
+                    output: stack("starter_rust:door", 1),
+                    station: "workbench".into(),
+                },
             ],
             plants: Vec::new(),
             marker_kinds: Vec::new(),
             death_marker_kind: None,
-            templates: Vec::new(),
+            templates: vec![hut()],
             settlements: Vec::new(),
             voxel_uses: vec![
                 voxel_use(

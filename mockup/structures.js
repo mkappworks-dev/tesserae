@@ -10,18 +10,22 @@ const CASES = {
 const VIEWS = { outside: "Outside", inside: "Inside", placing: "Placing" };
 const STOREY = 4;
 
-/* Roles a builder names; a Template's style says which Material fills each. */
+/* Roles a builder names; a Template's style says which Material fills each. These are each Game's own furnishings. */
 const FIXED = {
-  glass: "terra:glass",
-  door: "terra:door",
-  lamp: "terra:lamp",
-  chest: "terra:chest",
-  bench: "terra:workbench",
+  glass: "glass",
+  door: "door",
+  lamp: "lamp",
+  chest: "chest",
+  bench: "workbench",
+  anvil: "anvil",
+  forge: "forge",
+  oven: "oven",
 };
 const ROLE = {
   chest: "Container",
   bench: "Station",
   anvil: "Station (anvil)",
+  forge: "Station (forge)",
   oven: "Station (oven)",
   door: "Door",
 };
@@ -402,6 +406,7 @@ const B = {
       h.at(x, 1, z, M("chimney"));
     for (let y = 2; y <= 8; y++)
       (h.at(5, y, 0, M("chimney")), h.at(6, y, 0, M("chimney")));
+    h.at(5, 1, 2, M("forge"));
     h.at(6, 2, 2, M("lamp"));
     h.at(3, 1, 3, M("anvil", "slab"));
     h.at(1, 1, 1, M("bench"));
@@ -422,7 +427,7 @@ const B = {
       for (const y of [1, 2])
         (h.at(x, y, 1, M("chimney")), h.at(x, y, -1, M("chimney")));
     for (let x = 3; x <= 5; x++) h.at(x, 3, -1, M("roof", "slab"));
-    h.at(4, 1, 1, M("lamp"));
+    h.at(4, 1, 1, M("oven"));
     for (let x = 1; x <= 5; x++) h.at(x, 1, 3, M("trim", "slab"));
     h.at(1, 1, 1, M("bench"));
     h.at(1, 1, 2, M("chest"));
@@ -1093,13 +1098,9 @@ function turned(id, turn) {
   return out;
 }
 function materialOf(t, c) {
-  if (c.m === "anvil") return `${t.game.toLowerCase()}:anvil`;
-  if (FIXED[c.m]) return FIXED[c.m];
+  if (FIXED[c.m]) return `${t.game.toLowerCase()}:${FIXED[c.m]}`;
   const style = STYLES[t.style] || STYLES.wild,
-    role =
-      { wall2: style.wall2 ? "wall2" : "wall", oven: "chimney", table: "trim" }[
-        c.m
-      ] || c.m;
+    role = { wall2: style.wall2 ? "wall2" : "wall", table: "trim" }[c.m] || c.m;
   return gameMaterial(
     t.game,
     style[role] || STYLES.wild[role] || style.wall || "cobblestone",
@@ -1269,9 +1270,16 @@ function visibleCells(t, s) {
   return inBand.filter(
     (c) =>
       (c.y === floors[0] && s.floor !== "cellar") ||
-      ["chest", "bench", "anvil", "oven", "lamp", "table", "fence"].includes(
-        c.m,
-      ) ||
+      [
+        "chest",
+        "bench",
+        "anvil",
+        "forge",
+        "oven",
+        "lamp",
+        "table",
+        "fence",
+      ].includes(c.m) ||
       (c.x !== maxX.get(`${c.y},${c.z}`) && c.z !== maxZ.get(`${c.y},${c.x}`)),
   );
 }
@@ -1516,7 +1524,7 @@ function structuresPage() {
     (o, g) => ({ ...o, [g]: g }),
     {},
   );
-  return `<div class="layout-workspace"><div class="layout-stage"><div class="layout-stage-label"><span class="item-eyebrow">${s.view === "placing" ? "WORLD PREVIEW" : `${tpl.game.toUpperCase()} TEMPLATE`}</span><h1>${tpl.name}</h1><p>${tally.size.map((n) => n.toFixed(1)).join(" × ")} metres · facing ${FACING[s.turn]} · ${structureNumber(tally.total)} Voxels</p>${seg(VIEWS, "view", "structure-view", "structure-views")}${s.view === "inside" ? seg(floors, "floor", "structure-floor", "structure-views") : ""}</div>${stage}<div class="layout-preview-caption">${s.view === "placing" ? "Illustrative preview · no terrain is edited" : `Painted textures stand in for ${tpl.game}'s art · glass, doors, chests and lamps are Terra's exported ones · Stations are drawn as their nearest block`}</div></div><section class="layout-panel" aria-label="Place Tool"><header><div><p class="item-eyebrow">PLACE TOOL</p><h2>Structures</h2></div><button class="item-close" data-action="structure-close" aria-label="Close Structures">${icon("close")}</button></header><div class="layout-scroll" tabindex="0"><p class="item-eyebrow">EXAMPLE GAME</p>${seg(games, "game", "structure-game", "structure-games")}<p class="item-eyebrow">TEMPLATES · ${structureGame().toUpperCase()} · ${GAME_TEMPLATES[structureGame()].length}</p><div class="structure-list">${structureList()}</div><p class="item-eyebrow">TURN</p><div class="structure-turn"><button data-action="structure-turn" aria-label="Turn a quarter">${icon("reverse", 16)} Turn · R</button><span>Facing <b>${FACING[s.turn]}</b></span></div>${
+  return `<div class="layout-workspace"><div class="layout-stage"><div class="layout-stage-label"><span class="item-eyebrow">${s.view === "placing" ? "WORLD PREVIEW" : `${tpl.game.toUpperCase()} TEMPLATE`}</span><h1>${tpl.name}</h1><p>${tally.size.map((n) => n.toFixed(1)).join(" × ")} metres · facing ${FACING[s.turn]} · ${structureNumber(tally.total)} Voxels</p>${seg(VIEWS, "view", "structure-view", "structure-views")}${s.view === "inside" ? seg(floors, "floor", "structure-floor", "structure-views") : ""}</div>${stage}<div class="layout-preview-caption">${s.view === "placing" ? "Illustrative preview · no terrain is edited" : `Drawn with ${tpl.game}'s exported textures · its glass, doors, chests, lamps and Stations are its own`}</div></div><section class="layout-panel" aria-label="Place Tool"><header><div><p class="item-eyebrow">PLACE TOOL</p><h2>Structures</h2></div><button class="item-close" data-action="structure-close" aria-label="Close Structures">${icon("close")}</button></header><div class="layout-scroll" tabindex="0"><p class="item-eyebrow">EXAMPLE GAME</p>${seg(games, "game", "structure-game", "structure-games")}<p class="item-eyebrow">TEMPLATES · ${structureGame().toUpperCase()} · ${GAME_TEMPLATES[structureGame()].length}</p><div class="structure-list">${structureList()}</div><p class="item-eyebrow">TURN</p><div class="structure-turn"><button data-action="structure-turn" aria-label="Turn a quarter">${icon("reverse", 16)} Turn · R</button><span>Facing <b>${FACING[s.turn]}</b></span></div>${
     s.view === "placing"
       ? `<p class="item-eyebrow">WHAT PLACING DOES</p><div class="structure-keys">${structureLegend(tally)}</div>`
       : `<p class="item-eyebrow">MATERIALS · ALL OBTAINABLE IN ${tpl.game.toUpperCase()}</p><div class="structure-keys">${structureMaterials()}</div>`

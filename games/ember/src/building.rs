@@ -1,5 +1,5 @@
 //! Ember's building Materials: charred wood, basalt, obsidian, iron sheet and rust, and the
-//! Stations its buildings hold.
+//! Stations and furnishings its buildings hold.
 
 use demo_kit::building::{Block, Pattern::*, block, make, station};
 
@@ -11,7 +11,7 @@ const CLAY: &str = "strata:clay";
 const ASH: &str = "hearth:ash";
 const OBSIDIAN: &str = "waters:obsidian";
 
-pub const BLOCKS: [Block; 19] = [
+pub const BLOCKS: [Block; 24] = [
     block(
         "ash_plaster",
         Plaster,
@@ -144,6 +144,41 @@ pub const BLOCKS: [Block; 19] = [
         0x6b4b3e,
         0x2a2220,
         make("hand", &[(CLAY, 6)], 1),
+    ),
+    station(
+        "workbench",
+        Workbench,
+        0x4a3328,
+        0x2b2b2e,
+        make("hand", &[(LOG, 4)], 1),
+    ),
+    block(
+        "chest",
+        Chest,
+        0x4a3328,
+        0x2b2b2e,
+        make("workbench", &[(LOG, 8)], 1),
+    ),
+    block(
+        "door",
+        Door,
+        0x4a3328,
+        0x2b2b2e,
+        make("workbench", &[(LOG, 3)], 1),
+    ),
+    block(
+        "glass",
+        Glass,
+        0xd8a070,
+        0x3a3436,
+        make("oven", &[(ASH, 2)], 1),
+    ),
+    block(
+        "lamp",
+        Lamp,
+        0xffa04a,
+        0x2b2b2e,
+        make("workbench", &[("ember:glass", 1), (OBSIDIAN, 1)], 2),
     ),
 ];
 

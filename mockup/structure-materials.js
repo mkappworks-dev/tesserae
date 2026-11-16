@@ -209,22 +209,6 @@ const STYLES = {
     trim: "oak-planks",
   },
 };
-/* Materials Terra exports, used as they are by every Game. */
-const EXPORTED = [
-  "glass",
-  "door",
-  "lamp",
-  "chest",
-  "workbench",
-  "iron",
-  "brick",
-  "stone",
-  "wood",
-  "sand",
-  "leaves",
-  "grass",
-];
-
 function gameMaterial(game, terraName) {
   const name =
     game === "Terra" || !SUB[game]?.[terraName]

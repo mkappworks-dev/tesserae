@@ -296,15 +296,22 @@ the explored route are drawn from noise here, not from the engine.
 
 Illustrates step 20; ticket 01 of `.scratch/2026-11-15-phase-20-structures`.
 Code is in `structures.js`, `structure-materials.js` and `structures.css`,
-reusing the Layout workspace. Each Game has fifteen illustrative Templates
-(Terra, Tidewater, Ember, Lumen, Meadow), not declarations: ten Settlement
-buildings (homes, an inn, a warehouse, a blacksmith, a bakery, a market stall, a
-barn and a well) and five wilderness Structures. The panel's example Game switch
-shows each set. The stage switches between Outside and Inside, drawn with the
-textures each Game exports, and Placing, the in-game ghost; Inside lifts the
-roof and near walls and picks a floor (Cellar, Ground, Upper). The smithy's
-anvil is the Game's own anvil Station. Reach the screen at `/structures`, or
-hold the tool from Simulate (Engine states, "Place tool") on `/play`.
+reusing the Layout workspace. Each Game has fifteen Templates (Terra, Tidewater,
+Ember, Lumen, Meadow): ten Settlement buildings (homes, an inn, a warehouse, a
+blacksmith, a bakery, a market stall, a barn and a well) and five wilderness
+Structures. The panel's example Game switch shows each set. The stage switches
+between Outside and Inside, drawn with the textures each Game exports, and
+Placing, the in-game ghost; Inside lifts the roof and near walls and picks a
+floor (Cellar, Ground, Upper). The smithy's anvil and forge and the bakery's
+oven are the Game's own Stations.
+
+The builders here are the Templates' source: `node mockup/export-templates.mjs`
+writes each Game's cells to `mockup/templates/<game>.json` and to
+`games/<game>/src/templates.rs`, which declares them, and a test checks the
+declared cells against the JSON. Run it after changing a builder or a style;
+`--check` fails if either output is out of date. Reach the screen at
+`/structures`, or hold the tool from Simulate (Engine states, "Place tool") on
+`/play`.
 
 Each building kind has its own shape: a steep thatched cottage, a jettied
 half-timbered family house, an L-shaped farmhouse with a porch, an inn with a
@@ -313,10 +320,10 @@ bakery with its oven at the back, a striped market stall and a two-pitch barn.
 Their Materials differ per building and per Game: each Game declares about
 sixteen building Materials (planks, logs, plaster, cobble, ashlar, tiles,
 thatch, slate, shingles, cloth) and its anvil, forge and oven, and
-`structure-materials.js` draws them from the Block gallery's exported textures;
-the glass, doors, chests and lamps are Terra's. Every Game maps Terra's choices
-to its own Materials, so a Meadow farmhouse is birch, fieldstone and moss
-shingles where Terra's is spruce, cobblestone and shingles.
+`structure-materials.js` draws them from the Block gallery's exported textures.
+Each Game also declares its own door, chest, workbench, glass and lamp. Every
+Game maps Terra's choices to its own Materials, so a Meadow farmhouse is birch,
+fieldstone and moss shingles where Terra's is spruce, cobblestone and shingles.
 
 The bridges each have their own build: Terra's stone bridge humps over a low
 brick-ringed arch between parapets with lamps at the ends; Meadow's footbridge
