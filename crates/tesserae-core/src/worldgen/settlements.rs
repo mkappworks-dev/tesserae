@@ -58,7 +58,7 @@ const CUT_FILL_M: f32 = 2.0;
 /// between two samples still keeps within it.
 const SAMPLED_CUT_FILL_M: f32 = 1.5;
 /// A road forks every this many metres out from the centre, both ways across it, where at least
-/// [`FORK_ROOM_M`] of the disc is left past the fork: never in a disc of 64 m or less.
+/// [`FORK_ROOM_M`] of the disc is left past the fork: never in a disc of radius under 66 m.
 const FORK_EVERY_M: f32 = 36.0;
 const FORK_ROOM_M: f32 = 30.0;
 /// The share of the ring a fork's distance traces between two roads from the centre that a fork

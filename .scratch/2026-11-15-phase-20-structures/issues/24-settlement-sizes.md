@@ -118,6 +118,3 @@ Warm stays within 0.25 ms; cold is 0.26 to 0.30 ms over bare, its one layout
 (about 2.5 ms) charged to the 9 Chunks timed. The margin is revisited in
 DESIGN.md: 0.35 ms cold for a Settlement wider than the old 64 m cap, 0.25 ms
 otherwise. The other variants are unchanged.
-
-Not done: the WIT doc says forks start in a disc "wider than 64 metres"
-(exactly, from 66 m); left so the guests need no rebuild for a comment.

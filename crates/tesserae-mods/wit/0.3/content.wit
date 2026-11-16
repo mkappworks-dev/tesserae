@@ -1173,8 +1173,8 @@ interface content {
     }
 
     /// A hamlet, village or town world generation lays out: roads branch from
-    /// its centre along gentle ground, forking part-way in a disc wider than
-    /// 64 metres, and Plots grow beside them, each Structure turned so its door
+    /// its centre along gentle ground, forking part-way once its radius reaches
+    /// 66 metres, and Plots grow beside them, each Structure turned so its door
     /// faces the road. Each copy draws its size from the World seed and its
     /// lattice square: its most Plots evenly from `plots-min` to `plots`, and
     /// its radius from `radius-min-m` to `radius-m` following them.
