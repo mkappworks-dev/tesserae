@@ -41,6 +41,9 @@ fn load() -> String {
 
 type Variant<'a> = (&'a str, Box<dyn FnMut() + 'a>);
 
+/// A generator at a Voxel size.
+type Make = Box<dyn Fn(f32) -> Worldgen>;
+
 /// Runs every variant `reps` times per round for `rounds` rounds, interleaved, and prints each
 /// one's median CPU time per call divided by `per`, and the median over rounds of its ratio to the
 /// last variant named bare before it, which drifts less with load than a ratio of medians.
@@ -304,7 +307,7 @@ const ROUNDS: usize = 101;
 
 fn surface() {
     let flat = bare(1.0);
-    let kinds: [(&str, Box<dyn Fn(f32) -> Worldgen>); 5] = [
+    let kinds: [(&str, Make); 5] = [
         (
             "house, sparse (64 m)",
             Box::new(|s| with_structure(s, 0, 64.0)),
