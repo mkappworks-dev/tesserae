@@ -202,7 +202,7 @@ function run([x, y, z], [dx, dz], n, down = false) {
 
 /*
  * A building: foundation, walls per storey (half-timbered, a stone base course, a jettied upper
- * storey), windows with sills, a Door (`door`: 1 single, 2 double, 0 none), an open front, a
+ * storey), windows (`windows`: [wide, tall] in cells, 1 by 1 unless given) on whole-cell sills, a Door (`door`: 1 single, 2 double, 0 none), an open front, a
  * porch, an optional L-shaped wing, a roof and a chimney. A Door on the wing stands in its end
  * wall. Returns `at`, which places furniture relative to the main room's corner, and `stairs`,
  * which lays a flight in the same frame.
@@ -224,7 +224,10 @@ function building(g, o) {
     open = false,
     hall = false,
     wing = null,
+    windows: [winW, winH] = [1, 1],
   } = o;
+  /* Windows `winW` cells wide, a wall cell either side, along each wall. */
+  const pane = (along) => along % (winW + 2) >= 2;
   const x0 = 1,
     z0 = 1,
     x1 = x0 + w - 1,
@@ -280,12 +283,13 @@ function building(g, o) {
       const along = x + z,
         wallMat = s > 0 && o.upper ? "wall2" : "wall";
       if (corner(s, x, z)) return g.put(x, y, z, M("frame"));
+      if (pane(along) && row >= 2 && row < 2 + winH)
+        return g.put(x, y, z, M("glass"));
       if (course && s === 0 && row === 1) return g.put(x, y, z, M("base"));
       if (timbered && (row === 3 || along % 3 === 0) && !(s === 0 && o.upper))
         return g.put(x, y, z, M("frame"));
-      if (row === 2 && along % 3 === 2) return g.put(x, y, z, M("glass"));
-      if (row === 1 && along % 3 === 2)
-        return g.put(x, y, z, M("trim", "slab"));
+      /* A whole cell under the glass: a slab's open half would leave a gap. */
+      if (row === 1 && pane(along)) return g.put(x, y, z, M("trim"));
       g.put(x, y, z, M(wallMat));
     });
   }
@@ -365,6 +369,7 @@ const B = {
         d: 8,
         storeys: 2,
         roofKind: "gable",
+        windows: [1, 2],
         timbered: true,
         jetty: true,
         upper: true,
@@ -388,6 +393,7 @@ const B = {
         w: 9,
         d: 6,
         wing: { w: 4, d: 4 },
+        windows: [2, 2],
         porch: true,
         roofKind: "gable",
         course: true,
@@ -414,6 +420,7 @@ const B = {
         d: 8,
         storeys: 2,
         roofKind: "hip",
+        windows: [2, 2],
         timbered: true,
         jetty: true,
         upper: true,
@@ -444,6 +451,7 @@ const B = {
         d: 8,
         storeys: 2,
         hall: true,
+        windows: [1, 2],
         door: 2,
         roofKind: "gable",
         timbered: true,
@@ -511,6 +519,7 @@ const B = {
         d: 9,
         storeys: 2,
         hall: true,
+        windows: [1, 2],
         door: 2,
         roofKind: "gambrel",
         timbered: true,

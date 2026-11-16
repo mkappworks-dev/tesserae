@@ -486,3 +486,53 @@ fn a_player_walks_through_each_leaf_of_an_open_door_at_every_voxel_size() {
         }
     }
 }
+
+#[test]
+fn every_window_sits_on_a_whole_cell_and_the_larger_buildings_have_tall_ones() {
+    for game in GAMES {
+        let (_install, loaded) = loaded(game, 1.0);
+        let glass = super::material(&loaded, &format!("{game}:glass"));
+        let exported = export(game);
+        let mut tall = Vec::new();
+        let mut square = false;
+        for (index, template) in loaded.tables.templates.iter().enumerate() {
+            let name = &template.name;
+            let [w, h, d] = template.size();
+            let at = |x: usize, y: usize, z: usize| template.cell([x, y, z]);
+            let is_glass = |c: Cell| matches!(c, Cell::Voxel(v) if v.material() == glass);
+            for y in 1..h {
+                for z in 0..d {
+                    for x in 0..w {
+                        if !is_glass(at(x, y, z)) || is_glass(at(x, y - 1, z)) {
+                            continue;
+                        }
+                        let sill = at(x, y - 1, z);
+                        assert!(
+                            matches!(sill, Cell::Voxel(v) if v.shape() == tesserae_core::SHAPE_FULL_CUBE),
+                            "{name}: the glass at {:?} stands on {sill:?}",
+                            [x, y, z]
+                        );
+                        if y + 1 < h && is_glass(at(x, y + 1, z)) {
+                            tall.push(index);
+                            let beside = [
+                                (x + 1 < w).then(|| at(x + 1, y, z)),
+                                (z + 1 < d).then(|| at(x, y, z + 1)),
+                            ];
+                            square |= beside.into_iter().flatten().any(is_glass)
+                                && exported[index]["kind"] != "wild";
+                        }
+                    }
+                }
+            }
+        }
+        // The farmhouse, inn, warehouse and barn, by their place in each Game's list.
+        for index in [2, 3, 4, 8] {
+            assert!(
+                tall.contains(&index),
+                "{game}: {} has no window 2 tall",
+                loaded.tables.templates[index].name
+            );
+        }
+        assert!(square, "{game}: no window 2 by 2");
+    }
+}
