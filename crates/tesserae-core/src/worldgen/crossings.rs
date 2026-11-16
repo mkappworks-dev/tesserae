@@ -9,7 +9,7 @@ use super::{Worldgen, top_index};
 use crate::template::{LANDING_M, Template, Turn};
 
 /// How far apart a cell's search tries the middle of a span.
-const SEARCH_M: f32 = 2.0;
+const SEARCH_M: f32 = 3.0;
 /// How far below the landings' Ground layer the dry ground under the middle third of a span lies
 /// at least. A fixed depth, not one from the Template's deck, so a low deck is no excuse to bridge
 /// a dip.
@@ -41,8 +41,10 @@ impl Worldgen {
         let mut heights = Heights::new(low, high);
         let first = (mix(h ^ 2) & 3) as u8;
         let mut best: Option<(f32, Structure)> = None;
+        let level_m = self.water.map_or(f32::MIN, |w| w.level_m);
         for step in middles {
             let middle_m = step.map(|s| s as f32 * SEARCH_M);
+            let middle_h = heights.at(self, middle_m);
             for q in 0..4 {
                 let turn = Turn::new(first + q);
                 let along_m = turned_m(template, turn);
@@ -50,6 +52,21 @@ impl Worldgen {
                 let inside =
                     (0..2).all(|a| corner_m[a] >= low[a] && corner_m[a] + along_m[a] <= high[a]);
                 if !inside {
+                    continue;
+                }
+                // The middle is in the middle third, and every landing is within the tolerance
+                // of each far end: so a try whose ends are wet, or whose middle is neither wet nor
+                // low enough under both, cannot take.
+                let a = span_axis(template, turn);
+                let last_m = ((along_m[a] - SAMPLE_M) / SAMPLE_M).ceil() * SAMPLE_M;
+                let ends = [0.0, last_m].map(|k_m| {
+                    let mut p = corner_m;
+                    p[a] += k_m;
+                    heights.at(self, p)
+                });
+                let low_enough = middle_h < level_m
+                    || middle_h <= ends[0].min(ends[1]) + row.level_tolerance_m - GAP_M;
+                if !low_enough || ends.iter().any(|&h| h < level_m) {
                     continue;
                 }
                 if let Some((depth_m, s)) = self.gap(row, template, turn, corner_m, &mut heights)

@@ -11,7 +11,7 @@ use tesserae_core::template::{Cell, Template};
 use tesserae_core::testgen;
 use tesserae_core::{
     Biome, BiomeName, BiomeSettlement, BiomeStructure, BiomeTable, CHUNK_SIZE, ClimateParams,
-    MaterialId, SurfaceFeatures, Voxel, Worldgen, WorldgenParams,
+    MaterialId, SurfaceFeatures, Voxel, WaterParams, Worldgen, WorldgenParams,
 };
 
 /// Thread CPU time (user + system) in nanoseconds.
@@ -143,13 +143,42 @@ fn hall() -> Template {
     Template::new("t:hall".into(), 1.0, layers, 0, Some(FOUNDATION), 16.0).unwrap()
 }
 
-/// Indices into it: a house, a shed, a well, then the hall at the cap.
+/// A 15 m by 5 m bridge: a deck on the Ground layer, piers under its ends, parapets.
+fn bridge() -> Template {
+    let layers = (0..3)
+        .map(|y| {
+            (0..5)
+                .map(|z| {
+                    (0..15)
+                        .map(|x| {
+                            let end = x == 0 || x == 14;
+                            let edge = z == 0 || z == 4;
+                            match y {
+                                0 if end => Cell::Voxel(Voxel::cube(WALL)),
+                                1 => Cell::Voxel(Voxel::cube(FLOOR)),
+                                2 if edge => Cell::Voxel(Voxel::cube(WALL)),
+                                _ => Cell::Air,
+                            }
+                        })
+                        .collect()
+                })
+                .collect()
+        })
+        .collect();
+    Template::new("t:bridge".into(), 1.0, layers, 1, Some(FOUNDATION), 2.0)
+        .unwrap()
+        .spanning()
+        .unwrap()
+}
+
+/// Indices into it: a house, a shed, a well, the hall at the cap, then a bridge.
 fn templates() -> Vec<Template> {
     vec![
         hut("t:house", [7, 6, 7], 2.0),
         hut("t:shed", [5, 4, 5], 2.0),
         hut("t:well", [3, 3, 3], 2.0),
         hall(),
+        bridge(),
     ]
 }
 
@@ -204,6 +233,36 @@ fn params(features: SurfaceFeatures) -> WorldgenParams {
 
 fn bare(size: f32) -> Worldgen {
     Worldgen::new(SEED, size, params(SurfaceFeatures::NONE))
+}
+
+/// Steep hills with lakes in their valleys: ground a bridge finds gaps in.
+fn valleys(features: SurfaceFeatures) -> WorldgenParams {
+    let hills = WorldgenParams {
+        relief_m: 32.0,
+        feature_size_m: 24.0,
+        ..params(features)
+    };
+    WorldgenParams {
+        water: Some(WaterParams {
+            level_m: hills.sea_level_m + hills.relief_m * 5.0 / 12.0,
+            material: testgen::fixtures().water,
+        }),
+        ..hills
+    }
+}
+
+fn bare_valleys(size: f32) -> Worldgen {
+    Worldgen::new(SEED, size, valleys(SurfaceFeatures::NONE))
+}
+
+fn with_bridge(size: f32) -> Worldgen {
+    let row = BiomeStructure {
+        template: 4,
+        spacing_m: 96.0,
+        chance: 1.0,
+    };
+    let features = SurfaceFeatures::NONE.with_structures(&[row]).unwrap();
+    Worldgen::new(SEED, size, valleys(features)).with_templates(&templates())
 }
 
 fn with_structure(size: f32, template: u16, spacing_m: f32) -> Worldgen {
@@ -307,47 +366,61 @@ const SIZES: [f32; 3] = [1.0, 0.5, 0.25];
 const ROUNDS: usize = 101;
 
 fn surface() {
-    let flat = bare(1.0);
-    let kinds: [(&str, Make); 5] = [
+    // Each kind with the bare World it adds to.
+    let kinds: [(&str, Make, Make); 6] = [
         (
             "house, sparse (64 m)",
             Box::new(|s| with_structure(s, 0, 64.0)),
+            Box::new(bare),
         ),
         (
             "house, dense (14 m)",
             Box::new(|s| with_structure(s, 0, 14.0)),
+            Box::new(bare),
         ),
         (
             "hall at the cap (128 m)",
             Box::new(|s| with_structure(s, 3, 128.0)),
+            Box::new(bare),
         ),
         (
             "in a village (32 m, 12 Plots)",
             Box::new(|s| with_settlement(s, settlement("t:village", 32.0, 12))),
+            Box::new(bare),
         ),
         (
             "in a town at the cap (64 m, 24)",
             Box::new(|s| with_settlement(s, settlement("t:town", 64.0, 24))),
+            Box::new(bare),
+        ),
+        (
+            "bridge over a valley (96 m)",
+            Box::new(with_bridge),
+            Box::new(bare_valleys),
         ),
     ];
     let centres: Vec<[f32; 2]> = kinds
         .iter()
-        .map(|(name, make)| {
-            let (centre, changed) = centre_m(&make(1.0), &flat);
+        .map(|(name, make, plain)| {
+            let (centre, changed) = centre_m(&make(1.0), &plain(1.0));
             println!("{name}: {changed} Voxels changed at 1 m within 128 m, centred on {centre:?}");
             centre
         })
         .collect();
     for size in SIZES {
-        let generators: Vec<Worldgen> = kinds.iter().map(|(_, make)| make(size)).collect();
-        let plain = bare(size);
-        let rings: Vec<Vec<[i32; 3]>> = centres.iter().map(|&c| ring(&plain, c)).collect();
-        let cold_names: Vec<String> = kinds.iter().map(|(n, _)| format!("{n}, cold")).collect();
+        let generators: Vec<Worldgen> = kinds.iter().map(|(_, make, _)| make(size)).collect();
+        let plains: Vec<Worldgen> = kinds.iter().map(|(_, _, plain)| plain(size)).collect();
+        let rings: Vec<Vec<[i32; 3]>> = centres
+            .iter()
+            .zip(&plains)
+            .map(|(&c, plain)| ring(plain, c))
+            .collect();
+        let cold_names: Vec<String> = kinds.iter().map(|(n, ..)| format!("{n}, cold")).collect();
         let mut variants = Vec::new();
-        for (i, ((name, make), with)) in kinds.iter().zip(&generators).enumerate() {
-            variants.push(timed("bare", &plain, &rings[i]));
+        for (i, ((name, make, plain), with)) in kinds.iter().zip(&generators).enumerate() {
+            variants.push(timed("bare", &plains[i], &rings[i]));
             variants.push(timed(name, with, &rings[i]));
-            variants.push(cold("bare, cold", move || bare(size), &rings[i]));
+            variants.push(cold("bare, cold", move || plain(size), &rings[i]));
             variants.push(cold(&cold_names[i], move || make(size), &rings[i]));
         }
         compare(
