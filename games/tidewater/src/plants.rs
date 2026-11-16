@@ -50,7 +50,7 @@ pub fn salt_flats() -> Vec<SurfaceFeature> {
 
 pub fn cold_shallows() -> Vec<SurfaceFeature> {
     plants(&[
-        ("flora:pine", 8.0, 48.0, 0.8),
+        ("flora:pine", 7.5, 48.0, 0.8),
         ("crops:berry", 10.0, 22.0, 0.95),
         ("aquatic:kelp", 8.0, 16.0, 0.9),
         ("flora:tuft", 2.6, 14.0, 0.9),

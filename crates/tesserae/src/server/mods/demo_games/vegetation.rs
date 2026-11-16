@@ -1204,50 +1204,66 @@ fn ground_cover_grows_in_patches_at_each_biomes_class_and_flowers_stay_rare() {
     }
 }
 
-/// Headroom a Player walks under: nothing of a jungle tree but its trunk hangs lower.
-const JUNGLE_CLEAR_M: f32 = 4.0;
+/// Headroom a Player walks under: nothing of a tree but its trunk hangs lower.
+const TREE_CLEAR_M: f32 = 4.0;
 
 #[test]
-fn under_a_jungle_tree_nothing_but_its_trunk_is_lower_than_four_metres() {
+fn under_every_tree_nothing_but_its_trunk_is_lower_than_four_metres() {
     use tesserae_core::plant::tree::{tree_voxels, vine_voxels};
     for size in [1.0, 0.5, 0.25] {
         let (_install, loaded) = loaded("terra", size);
         let plants = &loaded.tables.plants;
-        let PlantKind::Tree(row) = &plants
-            .plants()
-            .iter()
-            .find(|p| p.name == "flora:jungle")
-            .unwrap()
-            .kind
-        else {
-            panic!("the jungle is a tree")
-        };
-        let vines = plants
-            .vines(&loaded.tables.shapes, row.vines.as_ref().unwrap())
-            .unwrap();
-        let mut lowest_m = f32::MAX;
-        for i in 0..400 {
-            let base = [i % 20 * 37, 0, i / 20 * 41];
-            let grown = tree_voxels(row, 7, base, size);
-            let beside = |at: [i32; 3]| at[0] != base[0] || at[2] != base[2];
-            let hung = vine_voxels(&grown, &vines, 7, size);
-            let low = grown
-                .iter()
-                .map(|v| v.at)
-                .chain(hung.iter().flat_map(|v| v.cells()))
-                .filter(|&at| beside(at))
-                .map(|at| at[1] as f32 * size)
-                .fold(f32::MAX, f32::min);
-            lowest_m = lowest_m.min(low);
-            let top_m = grown.iter().map(|v| v.at[1] + 1).max().unwrap() as f32 * size;
+        let mut low = Vec::new();
+        for plant in plants.plants() {
+            let PlantKind::Tree(row) = &plant.kind else {
+                continue;
+            };
+            let vines = row
+                .vines
+                .as_ref()
+                .map(|v| plants.vines(&loaded.tables.shapes, v).unwrap());
+            let mut lowest_m = f32::MAX;
+            for i in 0..200 {
+                let base = [i % 20 * 37, 0, i / 20 * 41];
+                let grown = tree_voxels(row, 7, base, size);
+                // The trunk stands in its own column, leaning by at most `lean-m` as it rises.
+                let lean = row.branching.as_ref().map_or(0.0, |b| b.lean_m);
+                let trunk = |at: [i32; 3]| {
+                    let off = ((at[0] - base[0]) as f32).hypot((at[2] - base[2]) as f32) * size;
+                    off <= lean * (at[1] as f32 * size) / row.trunk_height_m.0 + size
+                };
+                let hung: Vec<[i32; 3]> = vines
+                    .as_ref()
+                    .map(|v| {
+                        vine_voxels(&grown, v, 7, size)
+                            .iter()
+                            .flat_map(|v| v.cells())
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let wood_or_leaf = grown.iter().filter(|v| {
+                    !(v.part == tesserae_core::plant::tree::Part::Trunk && trunk(v.at))
+                });
+                let low_m = wood_or_leaf
+                    .map(|v| v.at)
+                    .chain(hung)
+                    .map(|at| at[1] as f32 * size)
+                    .fold(f32::MAX, f32::min);
+                lowest_m = lowest_m.min(low_m);
+                let top_m = grown.iter().map(|v| v.at[1] + 1).max().unwrap() as f32 * size;
+                assert!(
+                    top_m <= tesserae_core::plant::MAX_PLANT_HEIGHT_M,
+                    "{} at {size} m: {top_m} m tall",
+                    plant.name
+                );
+            }
+            low.push((plant.name.clone(), lowest_m));
+        }
+        for (name, lowest_m) in low {
             assert!(
-                top_m <= tesserae_core::plant::MAX_PLANT_HEIGHT_M,
-                "{size} m: {top_m} m tall"
+                lowest_m >= TREE_CLEAR_M,
+                "{name} at {size} m: leaves, limbs or vines at {lowest_m} m"
             );
         }
-        assert!(
-            lowest_m >= JUNGLE_CLEAR_M,
-            "{size} m: leaves, limbs or vines at {lowest_m} m"
-        );
     }
 }
