@@ -252,7 +252,7 @@ needs a rebuild.
 
 Line `0.x` is pre-release. Later gameplay steps may add new lines, and
 publishing a starter does not freeze the Tools, commands or simulation features
-those steps add. The final **1.0 contract freeze belongs to roadmap step 27**
+those steps add. The final **1.0 contract freeze belongs to roadmap step 28**
 (release hardening); until then, treat any new line as possible.
 
 Saved Worlds are separate: they require the exact build that created them

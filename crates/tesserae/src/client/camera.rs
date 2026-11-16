@@ -138,7 +138,7 @@ fn show_hint(
     covers: super::menu::Covers,
     dead: Option<Res<super::death::Dead>>,
 ) {
-    // The Menu, Settings, Inventory and death screen free the cursor too, but say where to go themselves.
+    // Covering screens and the death screen free the cursor too, but say where to go themselves.
     let covered = super::menu::covered(&covers);
     let wanted =
         if cursor.grab_mode == CursorGrabMode::None && !covered && super::death::alive(dead) {

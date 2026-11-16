@@ -375,7 +375,7 @@ closest competing choice if BSL's undefined "production use" becomes a problem.
 
 Version 1.0 is a single-player Game, shipped as Mods on the Engine, that someone
 can install, play for an hour, save, quit and resume, and then extend with a Mod
-of their own. Steps 1 to 27 below are one sequence in suggested delivery order,
+of their own. Steps 1 to 28 below are one sequence in suggested delivery order,
 earliest first; a dependency is named where one exists. Network transport is not
 in 1.0: ADR-0002 keeps single player on the same Server and Client split, so
 multiplayer is a later transport swap, not a rewrite.
@@ -537,7 +537,7 @@ multiplayer is a later transport swap, not a rewrite.
    belong to step 13; they are listed there because they change what the sky and
    fog should be.
 
-### Steps 10 to 27: engine systems and game content
+### Steps 10 to 28: engine systems and game content
 
 Each step has an Engine part, the mechanism, and a Game or Mod part, the data
 that uses it. The Engine part always comes first, crosses the WIT contract, and
@@ -545,27 +545,28 @@ ships no content: ADR-0016 keeps air as the only built-in Material. The
 controls, movement, save, camera and input work already in flight is tracked in
 `.scratch/2026-10-27-gameplay-performance-and-controls` and is not repeated.
 
-| #   | Step                    | Engine adds                                                                                       | Game or Mod supplies               | Depends on | Status          |
-| --- | ----------------------- | ------------------------------------------------------------------------------------------------- | ---------------------------------- | ---------- | --------------- |
-| 10  | Modding SDK             | Data-only declarations, folder loading, reload loop, SDK docs and WIT compatibility policy        | Example Game                       | -          | Done            |
-| 11  | Use action, first tool  | Server "use" verb, target validation, success and refusal feedback (tickets 20-21)                | Which tools exist and what they do | -          | First tool done |
-| 12  | Dropped items, pickup   | Entity system: Server simulation, pickup, save                                                    | Item definitions                   | -          | Done            |
-| 13  | Biomes, richer worldgen | Biome and climate seam, generator version pinned in the save                                      | Biomes, ores, surface features     | -          | Done            |
-| 14  | Audio                   | Server-driven events, metre attenuation, mixing, Soundscapes and Audio settings                   | CC0 Terra sounds and music         | -          | Done            |
-| 15  | Inventory               | Server-owned transactions that compose with the undo journal, save                                | Stack sizes, item rules            | 11, 12     | Done            |
-| 16  | Crafting                | Recipe schema, station interaction, Use on Voxels (doors, containers), UI host                    | Recipes, stations                  | 15         | Done            |
-| 17  | Weather                 | Weather state and tick, particles, sky hooks                                                      | Weather types, climate rules       | 13         | Not started     |
-| 18  | Plants                  | Growth on the Server tick, placement rules, harvesting                                            | Plant data                         | 13         | Done            |
-| 19  | Map, compass            | Server-provided summaries (the Client never reads World storage), map view                        | Map style, markers                 | 13         | Done            |
-| 20  | Structures              | Template format, deterministic placement by worldgen and tools                                    | Templates                          | 13         | Done            |
-| 20b | Blueprints and Sites    | Blueprint Items that lay a Site, which builds itself over time from Items brought to it           | Blueprints                         | 15, 20     | Not started     |
-| 21  | Survival loop           | Health, damage, hunger, death, respawn, game modes                                                | Numbers and rules                  | 15         | Done            |
-| 22  | Mobs, animals           | Entity AI hooks, spawning, replication shape designed against transport                           | Behaviours, spawn tables           | 12, 13, 21 | Not started     |
-| 23  | NPCs                    | Persistent identity, dialogue and trade plumbing                                                  | NPC definitions, dialogue          | 15, 22     | Not started     |
-| 24  | Logic and machines      | Wiring and automation, then moving and flying Voxel bodies (see below)                            | Machine parts, logic components    | 12, 20     | Not started     |
-| 25  | Creation tools          | Structure, material and texture editors, screenshot and replay mode                               | Content made with them             | 10, 20     | Not started     |
-| 26  | Chat and commands       | Command registry, parser, permissions                                                             | The commands                       | -          | Not started     |
-| 27  | Release hardening       | Final 1.0 contract freeze, macOS bundle, first-run, save migration tests, diagnostics, CI budgets | -                                  | all        | Not started     |
+| #   | Step                    | Engine adds                                                                                                                  | Game or Mod supplies               | Depends on | Status          |
+| --- | ----------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- | ---------- | --------------- |
+| 10  | Modding SDK             | Data-only declarations, folder loading, reload loop, SDK docs and WIT compatibility policy                                   | Example Game                       | -          | Done            |
+| 11  | Use action, first tool  | Server "use" verb, target validation, success and refusal feedback (tickets 20-21)                                           | Which tools exist and what they do | -          | First tool done |
+| 12  | Dropped items, pickup   | Entity system: Server simulation, pickup, save                                                                               | Item definitions                   | -          | Done            |
+| 13  | Biomes, richer worldgen | Biome and climate seam, generator version pinned in the save                                                                 | Biomes, ores, surface features     | -          | Done            |
+| 14  | Audio                   | Server-driven events, metre attenuation, mixing, Soundscapes and Audio settings                                              | CC0 Terra sounds and music         | -          | Done            |
+| 15  | Inventory               | Server-owned transactions that compose with the undo journal, save                                                           | Stack sizes, item rules            | 11, 12     | Done            |
+| 16  | Crafting                | Recipe schema, station interaction, Use on Voxels (doors, containers), UI host                                               | Recipes, stations                  | 15         | Done            |
+| 17  | Weather                 | Weather state and tick, particles, sky hooks                                                                                 | Weather types, climate rules       | 13, 22     | Not started     |
+| 18  | Plants                  | Growth on the Server tick, placement rules, harvesting                                                                       | Plant data                         | 13         | Done            |
+| 19  | Map, compass            | Server-provided summaries (the Client never reads World storage), map view                                                   | Map style, markers                 | 13         | Done            |
+| 20  | Structures              | Template format, deterministic placement by worldgen and tools                                                               | Templates                          | 13         | Done            |
+| 20b | Blueprints and Sites    | Blueprint Items that lay a Site, which builds itself over time from Items brought to it                                      | Blueprints                         | 15, 20     | Not started     |
+| 21  | Survival loop           | Health, damage, hunger, death, respawn, game modes                                                                           | Numbers and rules                  | 15         | Done            |
+| 22  | Terrain and water       | Generator version 3: landforms and oceans, rivers and lakes, caves and the underground, Biomes by altitude and coast (22a-d) | Terrain and water per Biome        | 13         | Not started     |
+| 23  | Mobs, animals           | Entity AI hooks, spawning, replication shape designed against transport                                                      | Behaviours, spawn tables           | 12, 13, 21 | Not started     |
+| 24  | NPCs                    | Persistent identity, dialogue and trade plumbing                                                                             | NPC definitions, dialogue          | 15, 23     | Not started     |
+| 25  | Logic and machines      | Wiring and automation, then moving and flying Voxel bodies (see below)                                                       | Machine parts, logic components    | 12, 20     | Not started     |
+| 26  | Creation tools          | Structure, material and texture editors, screenshot and replay mode                                                          | Content made with them             | 10, 20     | Not started     |
+| 27  | Chat and commands       | Command registry, parser, permissions                                                                                        | The commands                       | -          | Not started     |
+| 28  | Release hardening       | Final 1.0 contract freeze, macOS bundle, first-run, save migration tests, diagnostics, CI budgets                            | -                                  | all        | Not started     |
 
 Notes:
 
@@ -639,7 +640,7 @@ Notes:
   canopy while it stands), soil and water are Material tags, and a Biome may
   list 16 surface features, Plants included, with vines hung from trees by
   worldgen only. The shared Mods `flora`, `crops` and `aquatic` declare the
-  vegetation every Game places. Not shipped: falling trees as bodies (step 24),
+  vegetation every Game places. Not shipped: falling trees as bodies (step 25),
   trees as Templates (step 20 kept them parametric), leaf decay and weather
   inputs (step 17). Measured by the benchmark pass (Apple M5, thread CPU time,
   interleaved rounds, load average 8 to 9,
@@ -812,11 +813,42 @@ Notes:
   edit-and-restart loop was run by hand in the real window for a data change, a
   Rust change, a failure and its correction (ticket 08). It establishes how
   contracts evolve compatibly while later systems add APIs. The final 1.0
-  contract freeze belongs to step 27, after those systems are implemented.
+  contract freeze belongs to step 28, after those systems are implemented.
   `mods/` holds fifteen shared data Mods and `games/` four small Rust Games
   built on them (`docs/demo-games.md`); `terra` remains the one self-contained
   Game.
-- **Step 24** is the largest unknown in 1.0. Machines move as a unit, so they
+- **Step 22** is not started. It reworks the whole of worldgen, so it comes as
+  Generator version 3; a World made under version 2 keeps its terrain and
+  recorded digests. Today the surface is one height noise, caves are one tunnel
+  field, and a Biome, picked by temperature and humidity, never changes height.
+  Step 22 replaces that with a layered generator, delivered in four parts:
+  - **22a Landforms and oceans.** Continental-scale fields (how far inland, how
+    eroded, peaks against valleys), domain-warped so nothing reads as noise,
+    shape oceans (shelf, slope, deep floor, trenches), coasts with beaches,
+    cliffs and stony shores, archipelagos, plains, hills, plateaus and mesas,
+    canyons, badlands, volcanic cones and mountain ranges with ridges and
+    snow-capped peaks. A 3D density near the surface allows overhangs, arches
+    and sheer cliffs.
+  - **22b Water.** A sea level, lakes in basins, and rivers and streams found by
+    a drainage pass over a coarse lattice, from the mountains down to a lake or
+    the sea, carving valleys, deltas and waterfalls where they drop; springs and
+    a water table. Each region's drainage is computed once from the seed and
+    cached, so generation stays a pure function in any Chunk order.
+  - **22c Underground.** Rock strata, large caverns, winding tunnels, ravines,
+    underground lakes and rivers, lava lakes near the floor, aquifers and ore
+    veins, plus cave Biomes chosen in three dimensions (crystal, fungal,
+    dripstone, ice, lush) with their own surface features, such as stalactites.
+  - **22d Biomes.** Biome choice gains altitude, distance inland and erosion, so
+    ocean (warm, cold, deep, frozen), shore, river, swamp, alpine, desert-dune,
+    tundra and other Biomes fall where the land suits them, and borders blend
+    their ground, vegetation and colours. A Biome may shape its relief within
+    its landform, which amends ADR-0022. Everything is spread by seeded, layered
+    fields in metres, coarse to fine, and coarse LOD levels read the same
+    fields. The Games then declare the new Biomes and water. Phase 20's bridges
+    find river crossings with no change to their rule. Weather (step 17) follows
+    step 22 and reads its climate, so rain and snow fall by altitude, coast and
+    Biome; weather never edits terrain.
+- **Step 25** is the largest unknown in 1.0. Machines move as a unit, so they
   need collision, lighting and meshing outside the Chunk grid, Server-owned
   motion that composes with the Player's flight and physics movement, and a save
   format for a body that straddles Chunks. Spike it before committing the scope.

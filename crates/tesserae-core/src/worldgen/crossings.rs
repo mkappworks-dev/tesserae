@@ -67,8 +67,8 @@ impl Worldgen {
     /// The Structure turned by `turn` with its corner at `corner_m`, and how deep its gap is, if
     /// it crosses one there: dry landings within its level tolerance; under the middle third of
     /// its span, ground at least [`GAP_M`] below them or water, [`DEPTH_M`] deep somewhere; no
-    /// ground under the span rising into its deck; and no cave under any of it. The rules are
-    /// asked cheapest first.
+    /// ground under the span rising into its deck; no cave under any of it; and clear of the
+    /// origin. The rules are asked cheapest first.
     fn gap(
         &self,
         row: &Row,
@@ -159,7 +159,7 @@ impl Worldgen {
             ],
             size: row.sizes[usize::from(turn.quarters())],
         };
-        Some((depth_m, s))
+        self.clear_of_origin(&s).then_some((depth_m, s))
     }
 
     /// Whether the column `[x, z]` of a spanning Structure is under one of its landings.

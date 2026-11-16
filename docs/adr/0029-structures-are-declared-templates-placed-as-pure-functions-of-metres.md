@@ -105,6 +105,11 @@ are where the build is narrower or more exact than they say.
   are checked, since only a Creative Player can place another, and a listed
   Settlement's path Material is checked too. A Grown Material or a Door's open
   Material is refused in the shared validator before Obtainable is worked out.
+- **Generation keeps 48 m round the World origin clear.** No single Structure's
+  footprint and no Settlement's disc and margin comes within 48 m of x = 0, z =
+  0, where Games build their spawn area, such as Ember's lava vents. The check
+  is on the candidate, from metres alone, so it is free and leaves a World
+  without Structures unchanged.
 - **`ground` is a full cube, and never rock.** Its soil runs however deep a
   cellar goes.
 - **The snapshot keeps only what a World uses.** It freezes the Templates its
@@ -112,8 +117,11 @@ are where the build is narrower or more exact than they say.
   `place` Tool reads the Game's current table.
 - **The Tool's turn is the Player's choice.** R (shared with Respawn while the
   Tool is held) turns the Structure; the Player's facing does not pick it. The
-  Tool lays no foundation, and its footprint centres on the anchor with the
-  Ground layer level with it.
+  Tool lays no foundation. Its footprint's near edge, the side facing the
+  Player, sits on the anchor, centred across the Player's view, and the
+  Structure extends away from the Player, so it stands in front of them rather
+  than around them; an aim straight down centres it on the anchor. The Ground
+  layer is level with the anchor.
 - **A bridge searches its cell for a gap.** A Template that declares `spans`
   stands only where its span crosses a gap from one dry 2 m landing to the
   other: under the middle third, ground 2 m below the Ground layer, or water

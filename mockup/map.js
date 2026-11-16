@@ -361,7 +361,9 @@ function mapDrawMinimap() {
 }
 function mapPlayChrome() {
   const on = state.settings.compass === true && !state.mapForbidden;
-  return `${on ? compassHtml() : ""}${state.settings.minimap && !state.mapForbidden ? minimapHtml() : ""}`;
+  // The place Tool's card stands where the minimap would.
+  const placing = state.heldTool === "Place";
+  return `${on ? compassHtml() : ""}${state.settings.minimap && !state.mapForbidden && !placing ? minimapHtml() : ""}`;
 }
 function mapPlayMount() {
   mapDrawMinimap();

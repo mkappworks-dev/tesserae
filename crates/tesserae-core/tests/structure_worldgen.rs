@@ -23,6 +23,8 @@ const STAIR_FACING: u8 = 2;
 const SEED: u64 = 0x7e55_e2ae_0000_0001;
 const SIZES: [f32; 3] = [1.0, 0.5, 0.25];
 const SIZE_I: i32 = CHUNK_SIZE as i32;
+/// Where scans are centred, along x and z: well clear of the origin, which keeps Structures out.
+const AWAY_M: f32 = 128.0;
 
 /// 4 m along x, 5 m along z: a cellar, a floor marked at one corner so its turn shows, and walls
 /// with a stair and a doorway. `k` is Keep, `.` Air.
@@ -198,17 +200,27 @@ impl Probe {
         )
     }
 
-    /// Every cell the Structures changed, in `half_m` of the origin, generating the Chunks in
-    /// one order or its reverse.
+    /// Every cell the Structures changed, in `half_m` of ([`AWAY_M`], [`AWAY_M`]), generating the
+    /// Chunks in one order or its reverse.
     fn changed(&self, half_m: f32, reverse: bool) -> HashMap<[i32; 3], (Voxel, Voxel)> {
+        self.changed_around(AWAY_M, half_m, reverse)
+    }
+
+    /// [`Probe::changed`] in `half_m` of (`centre_m`, `centre_m`), on a Chunk border.
+    fn changed_around(
+        &self,
+        centre_m: f32,
+        half_m: f32,
+        reverse: bool,
+    ) -> HashMap<[i32; 3], (Voxel, Voxel)> {
         let chunk_m = SIZE_I as f32 * self.with.voxel_size();
         let (low, high) = self.with.surface_bounds_m();
         let rows = (low / chunk_m).floor() as i32 - 1..=(high / chunk_m).ceil() as i32 + 1;
         let reach = (half_m / chunk_m).ceil() as i32;
+        let centre = (centre_m / chunk_m).round() as i32;
+        let (from, to) = (centre - reach, centre + reach);
         let mut coords: Vec<[i32; 3]> = rows
-            .flat_map(|cy| {
-                (-reach..reach).flat_map(move |cz| (-reach..reach).map(move |cx| [cx, cy, cz]))
-            })
+            .flat_map(|cy| (from..to).flat_map(move |cz| (from..to).map(move |cx| [cx, cy, cz])))
             .collect();
         if reverse {
             coords.reverse();
@@ -315,7 +327,7 @@ fn holds(probe: &Probe, cells: &[([i32; 3], Cell)]) -> bool {
     })
 }
 
-/// Every Structure in `half_m` of the origin, each whole by its Template however many Chunks it
+/// Every Structure in `half_m` of ([`AWAY_M`], [`AWAY_M`]), each whole by its Template however many Chunks it
 /// spans, and nothing else changed; the same whichever order the Chunks are generated in.
 fn structures(probe: &Probe, size: f32, half_m: f32) -> Vec<Found> {
     let changed = probe.changed(half_m, false);
@@ -351,7 +363,7 @@ fn structures(probe: &Probe, size: f32, half_m: f32) -> Vec<Found> {
         // The scan stops at `half_m`, so a cell near it may belong to a Structure beyond.
         let edge = [at[0], at[2]]
             .iter()
-            .any(|&a| a.abs() as f32 * size > half_m - 8.0);
+            .any(|&a| (a as f32 * size - AWAY_M).abs() > half_m - 8.0);
         assert!(
             owned.contains(at) || edge,
             "{size} m: {at:?} changed outside any Structure"
@@ -402,7 +414,7 @@ fn whole_and_equal(world: impl Fn(&[BiomeStructure]) -> WorldgenParams + Copy) {
             );
             let [x, _, z] = metres(f.corner, size);
             // Away from the scan's edge, where a Structure may be cut.
-            if x.abs() < half_m - 8.0 && z.abs() < half_m - 8.0 {
+            if (x - AWAY_M).abs() < half_m - 8.0 && (z - AWAY_M).abs() < half_m - 8.0 {
                 places.push((x.to_bits(), z.to_bits(), f.turn));
             }
         }
@@ -513,6 +525,22 @@ fn a_structure_taller_than_the_terrain_band_is_whole_above_it() {
         above += usize::from(top[1] as f32 * size > highest);
     }
     assert!(above > 0, "no tower rose above the terrain band");
+}
+
+#[test]
+fn no_structure_comes_within_48_m_of_the_origin_where_games_build_their_spawn() {
+    let size = 1.0;
+    let probe = Probe::new(size, &[row(16.0, 1.0)]);
+    let changed = probe.changed_around(0.0, 96.0, false);
+    let nearest = changed
+        .keys()
+        .map(|at| ((at[0] as f32 + 0.5).hypot(at[2] as f32 + 0.5)) * size)
+        .fold(f32::MAX, f32::min);
+    assert!(nearest < 96.0, "nothing stood further out either");
+    assert!(
+        nearest >= 48.0,
+        "a Structure changed ground {nearest} m from the origin"
+    );
 }
 
 #[test]

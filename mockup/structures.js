@@ -809,7 +809,7 @@ const B = {
 };
 
 const T = (game, slug, name, note, kind, build, style = "wild") => ({
-  id: `${game.toLowerCase()}:${slug}`,
+  id: `${game.toLowerCase()}:${slug.replace(/-/g, "_")}`,
   game,
   name,
   note,
@@ -830,7 +830,15 @@ const SET = (game, names) =>
     ["barn", "Two-pitch roof, hay door, stalls", "farm"],
     ["well", "The centre of a Settlement", "centre"],
   ].map(([style, note, kind], i) =>
-    T(game, names[i][0], names[i][1], note, kind, B[style], style),
+    T(
+      game,
+      names[i][0],
+      names[i][1],
+      names[i][2] ?? note,
+      kind,
+      B[style],
+      style,
+    ),
   );
 
 const GAME_TEMPLATES = {
@@ -932,7 +940,7 @@ const GAME_TEMPLATES = {
   Ember: [
     ...SET("Ember", [
       ["ash-hut", "Ash hut"],
-      ["forge-hall", "Forge hall"],
+      ["forge-hall", "Forge hall", "Smiths' lodging, upper floor jutting out"],
       ["cinder-farm", "Cinder farm"],
       ["ember-inn", "Ember inn"],
       ["ore-store", "Ore store"],

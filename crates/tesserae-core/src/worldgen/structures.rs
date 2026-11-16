@@ -24,6 +24,8 @@ pub(super) const STRUCTURE_SALT: u64 = 0x5717_c7e0_0000_0001;
 /// Kept clear of a lattice cell's border by a candidate's point, so its footprint's centre, once
 /// the corner is on whole metres, is still in the cell.
 pub(super) const INSET_M: f32 = 0.5;
+/// No Structure or Settlement comes this near the World origin, where Games build their spawn.
+pub(super) const ORIGIN_CLEAR_M: f32 = 48.0;
 /// A lattice cell's eight neighbours.
 pub(super) const NEIGHBOURS: [[i32; 2]; 8] = [
     [-1, -1],
@@ -214,7 +216,18 @@ impl Worldgen {
                     (other, near) > (priority, cell) && dx * dx + dz * dz < spacing * spacing
                 })
         });
-        (!crowded).then_some(s)
+        (!crowded && self.clear_of_origin(&s)).then_some(s)
+    }
+
+    /// Whether every column of its footprint is at least [`ORIGIN_CLEAR_M`] from the origin.
+    pub(super) fn clear_of_origin(&self, s: &Structure) -> bool {
+        let [min, max] = s.footprint();
+        let [dx, dz] = [0, 1].map(|a| {
+            (min[a] as f32 * self.voxel_size)
+                .max(-(max[a] as f32 * self.voxel_size))
+                .max(0.0)
+        });
+        dx * dx + dz * dz >= ORIGIN_CLEAR_M * ORIGIN_CLEAR_M
     }
 
     /// Whether the ground under a drawn Structure takes it, and how high it then stands: its

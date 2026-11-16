@@ -15,6 +15,8 @@ use tesserae_core::{
 
 const SEED: u64 = 0x7e55_e2ae_0000_0001;
 const SIZE_I: i32 = CHUNK_SIZE as i32;
+/// Where scans are centred, along x and z: well clear of the origin, which keeps Structures out.
+const AWAY_M: f32 = 192.0;
 const WALL: MaterialId = 243;
 const TRUNK: MaterialId = 210;
 const CANOPY: MaterialId = 211;
@@ -104,17 +106,17 @@ fn params(features: SurfaceFeatures, structures: bool) -> WorldgenParams {
     }
 }
 
-/// Every non-Air cell in `half_m` of the origin by global cell, generating the Chunks in one order
-/// or its reverse.
+/// Every non-Air cell in `half_m` of ([`AWAY_M`], [`AWAY_M`]) by global cell, generating the
+/// Chunks in one order or its reverse.
 fn cells(generator: &Worldgen, half_m: f32, reverse: bool) -> HashMap<[i32; 3], Voxel> {
     let chunk_m = SIZE_I as f32 * generator.voxel_size();
     let (low, high) = generator.surface_bounds_m();
     let rows = (low / chunk_m).floor() as i32 - 1..=(high / chunk_m).ceil() as i32 + 1;
     let reach = (half_m / chunk_m).ceil() as i32;
+    let centre = (AWAY_M / chunk_m).round() as i32;
+    let (from, to) = (centre - reach, centre + reach);
     let mut coords: Vec<[i32; 3]> = rows
-        .flat_map(|cy| {
-            (-reach..reach).flat_map(move |cz| (-reach..reach).map(move |cx| [cx, cy, cz]))
-        })
+        .flat_map(|cy| (from..to).flat_map(move |cz| (from..to).map(move |cx| [cx, cy, cz])))
         .collect();
     if reverse {
         coords.reverse();
@@ -231,7 +233,12 @@ fn no_tree_stands_in_a_structure_and_every_tree_is_whole_across_chunk_borders() 
             .collect();
         assert!(feet.len() > 20, "{size} m: only {} trees", feet.len());
         let window = (half_m / (SIZE_I as f32 * size)).ceil() as i32 * SIZE_I;
-        let scanned = |at: &[i32; 3]| [at[0], at[2]].iter().all(|a| (-window..window).contains(a));
+        let away = (AWAY_M / size).round() as i32;
+        let scanned = |at: &[i32; 3]| {
+            [at[0], at[2]]
+                .iter()
+                .all(|a| (away - window..away + window).contains(a))
+        };
         let mut owned = HashSet::new();
         for &foot in &feet {
             for at in tree_at(size, foot) {
@@ -245,7 +252,7 @@ fn no_tree_stands_in_a_structure_and_every_tree_is_whole_across_chunk_borders() 
         for at in pair.with.keys().filter(|at| is_wood(at)) {
             let edge = [at[0], at[2]]
                 .iter()
-                .any(|&a| a.abs() as f32 * size > half_m - 6.0);
+                .any(|&a| (a as f32 * size - AWAY_M).abs() > half_m - 6.0);
             assert!(
                 owned.contains(at) || edge,
                 "{size} m: wood at {at:?} belongs to no whole tree"
