@@ -171,7 +171,7 @@ impl Worldgen {
             turn,
             min: [
                 corner[0],
-                top_index(median_m, 0.0, self.voxel_size) - row.ground,
+                top_index(median_m, 0.0, self.voxel_size) - row.ground_top,
                 corner[1],
             ],
             size: row.sizes[usize::from(turn.quarters())],

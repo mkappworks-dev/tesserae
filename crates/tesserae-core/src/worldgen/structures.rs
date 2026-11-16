@@ -46,8 +46,8 @@ pub(super) struct Row {
     pub(super) entry: BiomeStructure,
     /// Voxels along x, y and z, by turn.
     pub(super) sizes: [[i32; 3]; 4],
-    /// The lowest Voxel layer of the Ground layer.
-    pub(super) ground: i32,
+    /// The highest Voxel layer of the Ground layer, which stands on the ground's top.
+    pub(super) ground_top: i32,
     pub(super) level_tolerance_m: f32,
     /// The Template's longer side, in metres.
     longer_m: f32,
@@ -91,7 +91,7 @@ impl StructurePass {
                     row: row as u64,
                     entry,
                     sizes: [0, 1, 2, 3].map(|q| template.sample(voxel_size, Turn::new(q)).size()),
-                    ground: sampled.ground(),
+                    ground_top: sampled.ground_top(),
                     level_tolerance_m: template.level_tolerance_m(),
                     longer_m: template.size_m()[0].max(template.size_m()[2]),
                     underside_m: template.spans().then(|| template.underside_m()),
@@ -101,8 +101,8 @@ impl StructurePass {
         if rows.is_empty() {
             return None;
         }
-        let above = rows.iter().map(|r| r.sizes[0][1] - r.ground).max()?;
-        let below = rows.iter().map(|r| r.ground).max()?;
+        let above = rows.iter().map(|r| r.sizes[0][1] - r.ground_top).max()?;
+        let below = rows.iter().map(|r| r.ground_top).max()?;
         Some(StructurePass {
             rows,
             listed,
@@ -254,7 +254,7 @@ impl Worldgen {
             return None;
         }
         let median_m = ground.lower_median_m()?;
-        s.min[1] = top_index(median_m, 0.0, self.voxel_size) - row.ground;
+        s.min[1] = top_index(median_m, 0.0, self.voxel_size) - row.ground_top;
         Some(s)
     }
 

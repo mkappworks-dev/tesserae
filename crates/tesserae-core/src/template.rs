@@ -303,6 +303,12 @@ impl Template {
             .iter()
             .position(|&c| c as usize >= self.ground_layer)
             .unwrap_or(cells[1].len()) as i32;
+        let ground_top = (cells[1]
+            .iter()
+            .position(|&c| c as usize > self.ground_layer)
+            .unwrap_or(cells[1].len()) as i32
+            - 1)
+        .max(ground);
         let mut orientations = [0u8; 24];
         for o in Orientation::all() {
             orientations[o.bits() as usize] = o.yawed(turn.quarters()).bits();
@@ -312,6 +318,7 @@ impl Template {
             turn,
             cells,
             ground,
+            ground_top,
             orientations,
         }
     }
@@ -326,6 +333,7 @@ pub struct Sampled<'a> {
     /// For each axis of the unturned Template, each Voxel's cell.
     cells: [Vec<u16>; 3],
     ground: i32,
+    ground_top: i32,
     /// Each orientation byte after the turn.
     orientations: [u8; 24],
 }
@@ -353,6 +361,12 @@ impl Sampled<'_> {
     /// underground.
     pub fn ground(&self) -> i32 {
         self.ground
+    }
+
+    /// The highest Voxel layer of the Ground layer, which stands on the ground's top Voxel layer
+    /// so a floor is level with the ground beside it at every Voxel size.
+    pub fn ground_top(&self) -> i32 {
+        self.ground_top
     }
 
     /// What a [`Cell::Ground`] in Voxel layer `y` is where the column's

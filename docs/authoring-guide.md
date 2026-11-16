@@ -1187,14 +1187,15 @@ taken only if every column of the footprint, sampled a metre apart:
 - has no cave cutting its top metre;
 - and lies within the Template's `level-tolerance-m` of every other.
 
-The Ground layer then sits on the lower median of those heights, and the
-`foundation` fills down to any column that falls further. A Structure's non-Keep
-Template cells overwrite terrain, ore and lake water. Trees, scatter and crop
-fields keep off its footprint, and a Structure never asks about them. Each Chunk
-works out every Structure that can reach it and writes only its own Voxels, so a
-Structure is whole across Chunk borders whichever Chunk generates first, and the
-same at every Voxel size. The coarse LOD levels leave Structures out, and a
-Player never spawns inside one.
+The Ground layer's top then stands on the lower median of those heights, so a
+floor is level with the ground at every Voxel size, and the `foundation` fills
+down to any column that falls further. A Structure's non-Keep Template cells
+overwrite terrain, ore and lake water. Trees, scatter and crop fields keep off
+its footprint, and a Structure never asks about them. Each Chunk works out every
+Structure that can reach it and writes only its own Voxels, so a Structure is
+whole across Chunk borders whichever Chunk generates first, and the same at
+every Voxel size. The coarse LOD levels leave Structures out, and a Player never
+spawns inside one.
 
 A World freezes the Templates and Settlements its Biomes name in its generation
 snapshot when it is created. Editing a Template later changes nothing in a saved
@@ -1385,11 +1386,13 @@ tinted by what placing it would do: fill air, replace ground or water, carve, or
 refuse. Only the anchor, the cell in front of the face aimed at, needs to be in
 reach; the footprint's near edge sits on it, centred across your view, and the
 Structure extends away from you, so it stands in front of you. Aimed straight
-down, the footprint centres on the anchor. The Ground layer sits level with it.
-Placing costs no Items and lands whole or not at all, waiting up to 64 ticks for
-Chunks still loading before it refuses with a reason. It is one undo group, and
-Mods hear its Voxels as Edit events. A placement that would change more than
-131,072 Voxels is refused as too big to undo; at 0.25 m a 32 m building can.
+down, the footprint centres on the anchor. The Ground layer replaces the layer
+aimed at, so aimed at the ground's top a floor and a door's sill are level with
+the ground outside. Placing costs no Items and lands whole or not at all,
+waiting up to 64 ticks for Chunks still loading before it refuses with a reason.
+It is one undo group, and Mods hear its Voxels as Edit events. A placement that
+would change more than 131,072 Voxels is refused as too big to undo; at 0.25 m a
+32 m building can.
 
 ## Artwork
 

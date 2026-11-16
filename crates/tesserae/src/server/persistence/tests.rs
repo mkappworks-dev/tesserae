@@ -385,7 +385,11 @@ fn a_placed_structure_is_saved_like_any_build_and_reloads() {
     let dir = Directory::new();
     let with_bar = |loaded: &mut crate::server::mods::LoadedMods| {
         let wood = loaded.registry.id_of(Kind::Material, "terra:wood").unwrap() as u16;
-        let bar = vec![vec![vec![Cell::Voxel(Voxel::cube(wood)); 3]]];
+        // A Keep Ground layer on the hollow's floor, and the bar on it.
+        let bar = vec![
+            vec![vec![Cell::Keep; 3]],
+            vec![vec![Cell::Voxel(Voxel::cube(wood)); 3]],
+        ];
         loaded
             .tables
             .templates

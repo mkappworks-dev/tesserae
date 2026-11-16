@@ -269,7 +269,8 @@ fn crossings(land: Land) -> usize {
                     [f.corner[0] + j, f.corner[2] + k]
                 }
             };
-            let deck = f.corner[1] + per_m;
+            // The deck's top Voxel layer, which stands on the landings' ground.
+            let deck = f.corner[1] + spanning().sample(size, f.turn).ground_top();
             let depth = (deck - 20 * per_m..deck + 2 * per_m).rev();
             let ground = |[x, z]: [i32; 2]| {
                 depth

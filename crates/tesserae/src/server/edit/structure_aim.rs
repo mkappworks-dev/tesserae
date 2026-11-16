@@ -234,7 +234,7 @@ mod tests {
         tables
     }
 
-    /// Straight down at the ground over (16, 16), so the anchor is (16, 8, 16).
+    /// Straight down at the ground over (16, 16), so the anchor is its top Voxel, (16, 7, 16).
     const EYE: Vec3 = Vec3::new(16.5, 12.0, 16.5);
 
     fn intent(template: &str, turn: Turn) -> StructureIntent {
@@ -272,8 +272,8 @@ mod tests {
         answer.ghost.unwrap()
     }
 
-    /// Three cells across x at z 16, around the anchor at (16, 8, 16): the
-    /// Ground layer at y 8, one layer below it and one above.
+    /// Three cells across x at z 16, around the anchor at (16, 7, 16): the
+    /// Ground layer at y 7, one layer below it and one above.
     fn cellar() -> Template {
         let s = Cell::Voxel(stone());
         let (k, a) = (Cell::Keep, Cell::Air);
@@ -296,32 +296,32 @@ mod tests {
     fn the_ghost_gives_what_placing_does_at_each_voxel_without_touching_the_world() {
         let water = tesserae_core::testgen::fixtures().water;
         let mut chunk = ground();
-        chunk.set(15, 8, 16, Voxel::cube(water));
+        chunk.set(15, 7, 16, Voxel::cube(water));
         chunk.set(
             17,
-            8,
+            7,
             16,
             Voxel::shaped(stone().material(), SHAPE_SLAB, Default::default()),
         );
-        chunk.set(17, 9, 16, stone());
+        chunk.set(17, 8, 16, stone());
         let mut app = app_with_tables(&[(origin(), chunk)], tables_with(vec![cellar()]));
         let ghost = ghost(ask(&mut app, 1, intent("t:cellar", Turn::NONE)));
-        assert_eq!(ghost.anchor, [16, 8, 16]);
-        assert_eq!((ghost.corner, ghost.size), ([15, 7, 16], [3, 3, 1]));
+        assert_eq!(ghost.anchor, [16, 7, 16]);
+        assert_eq!((ghost.corner, ghost.size), ([15, 6, 16], [3, 3, 1]));
         let mut written: Vec<_> = ghost.written().collect();
         written.sort_by_key(|(at, _)| (at[1], at[0]));
         use StructureCell::*;
         assert_eq!(
             written,
             [
-                ([16, 7, 16], Carves),
-                ([17, 7, 16], Unchanged),
-                ([15, 8, 16], ReplacesFluid),
-                ([16, 8, 16], Places),
-                ([17, 8, 16], Replaces),
-                ([15, 9, 16], Places),
-                ([16, 9, 16], Unchanged),
-                ([17, 9, 16], Unchanged),
+                ([16, 6, 16], Carves),
+                ([17, 6, 16], Unchanged),
+                ([15, 7, 16], ReplacesFluid),
+                ([16, 7, 16], Unchanged),
+                ([17, 7, 16], Replaces),
+                ([15, 8, 16], Places),
+                ([16, 8, 16], Unchanged),
+                ([17, 8, 16], Unchanged),
             ]
         );
         assert_eq!(ghost.refused(), None);
@@ -355,17 +355,20 @@ mod tests {
                 [1, 2, 2]
             };
             assert_eq!(ghost.size, across, "{turn:?}");
-            let written: Vec<_> = ghost.written().collect();
+            let written: Vec<_> = ghost
+                .written()
+                .map(|(at, cell)| (at, cell, voxel_at(&app, at)))
+                .collect();
             assert_eq!(written.len(), 3, "{turn:?}");
             send_structure(&mut app, intent("t:hook", turn));
             for _ in 0..10 {
                 app.world_mut().run_system_once(structure::drain).unwrap();
             }
             assert!(rejections(&mut app).is_empty());
-            for (at, cell) in written {
+            for (at, cell, before) in written {
                 let expected = match cell {
                     StructureCell::Places => stone(),
-                    StructureCell::Unchanged => Voxel::AIR,
+                    StructureCell::Unchanged => before,
                     other => panic!("{turn:?} {at:?} {other:?}"),
                 };
                 assert_eq!(voxel_at(&app, at), expected, "{turn:?} {at:?}");
@@ -382,9 +385,9 @@ mod tests {
         };
         let mut app = app_with_tables(&[(origin(), ground())], tables_with(vec![cellar()]));
         let ghost = ghost(ask(&mut app, 1, ahead));
-        assert_eq!(ghost.anchor, [16, 8, 16]);
+        assert_eq!(ghost.anchor, [16, 7, 16]);
         // A quarter turn lays the cellar's three cells along z, from the aimed 16 on.
-        assert_eq!((ghost.corner, ghost.size), ([16, 7, 16], [1, 3, 3]));
+        assert_eq!((ghost.corner, ghost.size), ([16, 6, 16], [1, 3, 3]));
     }
 
     #[test]

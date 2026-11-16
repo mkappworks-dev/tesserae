@@ -73,8 +73,8 @@ pub(in crate::server) struct Placement<'a> {
 impl<'a> Placement<'a> {
     /// Its near edge on `anchor` and centred across the `aim`'s heading, so
     /// it stands in front of the Player; an aim straight down centres it. The
-    /// Ground layer's lowest Voxel layer is level with the anchor, so the
-    /// layers below it go into the ground aimed at.
+    /// Ground layer's top Voxel layer is level with the anchor, so the layers
+    /// below it go into the ground aimed at.
     pub(in crate::server) fn new(
         template: &'a Template,
         voxel_size: f32,
@@ -99,7 +99,7 @@ impl<'a> Placement<'a> {
         } else {
             [centred(0), away(2, aim.z)]
         };
-        let corner = [x, anchor[1] - sampled.ground(), z];
+        let corner = [x, anchor[1] - sampled.ground_top(), z];
         Placement {
             sampled,
             corner,
@@ -200,7 +200,9 @@ pub(in crate::server) fn judge_cell(
     }
 }
 
-/// The cell in front of the face the ray strikes: where a single Place would go.
+/// Across, the cell in front of the face the ray strikes, where a single Place would go; up, the
+/// struck Voxel's own layer, so a Structure aimed at the ground replaces its top layer. Under a
+/// ceiling it is the layer below.
 pub(in crate::server) fn structure_anchor(
     store: &ChunkStore,
     tables: &Tables,
@@ -210,7 +212,11 @@ pub(in crate::server) fn structure_anchor(
 ) -> Result<[i32; 3], RejectReason> {
     let (hit, _) = super::resolve::trace(store, tables, world, direction, reach, false)?;
     let step = tesserae_core::mesh::FACE_STEPS[hit.face];
-    Ok(std::array::from_fn(|i| hit.at[i] + step[i]))
+    Ok([
+        hit.at[0] + step[0],
+        hit.at[1] + step[1].min(0),
+        hit.at[2] + step[2],
+    ])
 }
 
 pub(in crate::server) struct PendingStructure {
@@ -579,19 +585,49 @@ mod tests {
         send(&mut app, intent("t:hut"));
         settle(&mut app);
         assert!(rejections(&mut app).is_empty());
-        // Centred on (16, 16): x and z from 7 to 24, the floor at the anchor's 8.
+        // Centred on (16, 16): x and z from 7 to 24, the floor on the aimed ground's top at 7.
         for (x, z) in [(7, 7), (24, 24), (7, 24), (16, 7)] {
-            for y in 8..11 {
+            for y in 7..10 {
                 assert_eq!(voxel_at(&app, [x, y, z]), stone(), "wall {x} {y} {z}");
             }
         }
         assert!(
-            EYE.distance(Vec3::new(7.5, 8.5, 7.5)) > super::super::EDIT_REACH_M,
+            EYE.distance(Vec3::new(7.5, 7.5, 7.5)) > super::super::EDIT_REACH_M,
             "the far corner is out of reach"
         );
-        assert!(voxel_at(&app, [16, 9, 16]).is_air(), "the room inside");
-        assert_eq!(voxel_at(&app, [16, 10, 16]), stone(), "the roof");
+        assert!(voxel_at(&app, [16, 8, 16]).is_air(), "the room inside");
+        assert_eq!(voxel_at(&app, [16, 9, 16]), stone(), "the roof");
         assert!(voxel_at(&app, [6, 8, 16]).is_air(), "nothing past the wall");
+    }
+
+    #[test]
+    fn a_placed_floor_is_level_with_the_ground_it_is_aimed_at_at_every_voxel_size() {
+        for size in [1.0, 0.5, 0.25] {
+            let mut app = hut_app();
+            app.insert_resource(WorldSettings {
+                voxel_size: size,
+                ..default()
+            });
+            // Straight down at the ground's top Voxel (16, 7, 16), whose top is at 8 Voxels.
+            let eye = Vec3::new(16.5 * size, 8.0 * size + 3.0, 16.5 * size);
+            send(
+                &mut app,
+                StructureIntent {
+                    origin: eye,
+                    ..intent("t:hut")
+                },
+            );
+            settle(&mut app);
+            assert!(rejections(&mut app).is_empty(), "{size}");
+            assert_eq!(voxel_at(&app, [16, 7, 16]), stone(), "the floor at {size}");
+            assert!(voxel_at(&app, [16, 8, 16]).is_air(), "the room at {size}");
+            let below = 8 - (1.0 / size) as i32;
+            assert_eq!(
+                voxel_at(&app, [16, below, 16]),
+                stone(),
+                "the ground at {size}"
+            );
+        }
     }
 
     #[test]
@@ -684,7 +720,8 @@ mod tests {
         send(&mut app, intent("t:hut"));
         settle(&mut app);
         assert!(rejections(&mut app).is_empty());
-        assert_eq!(built(&app), 6 * 6 * 2 + 4 * 5);
+        // The floor replaces stone with stone; the walls and roof are new.
+        assert_eq!(built(&app), 6 * 6 + 4 * 5);
         assert_eq!(held(&mut app, "t:stone"), 10);
     }
 
@@ -726,7 +763,7 @@ mod tests {
             .insert(east(), far);
         settle(&mut app);
         assert!(rejections(&mut app).is_empty());
-        for y in 8..11 {
+        for y in 7..10 {
             assert_eq!(voxel_at(&app, [27, y, 13]), stone());
             assert_eq!(voxel_at(&app, [32, y, 18]), stone(), "in the late Chunk");
         }
@@ -789,17 +826,17 @@ mod tests {
         send(&mut app, intent("t:cellar"));
         settle(&mut app);
         assert!(rejections(&mut app).is_empty());
-        // x 15..18 at z 16; the Ground layer at the anchor's y = 8.
+        // x 15..18 at z 16; the Ground layer on the aimed ground's top at y = 7.
         assert_eq!(
-            voxel_at(&app, [15, 7, 16]),
+            voxel_at(&app, [15, 6, 16]),
             stone(),
             "Keep: the ground stays"
         );
-        assert!(voxel_at(&app, [16, 7, 16]).is_air(), "carved below ground");
-        assert_eq!(voxel_at(&app, [15, 8, 16]), stone());
-        assert!(voxel_at(&app, [16, 8, 16]).is_air());
-        assert_eq!(voxel_at(&app, [16, 9, 16]), stone());
-        assert!(voxel_at(&app, [15, 9, 16]).is_air(), "Keep leaves the air");
+        assert!(voxel_at(&app, [16, 6, 16]).is_air(), "carved below ground");
+        assert_eq!(voxel_at(&app, [15, 7, 16]), stone());
+        assert!(voxel_at(&app, [16, 7, 16]).is_air());
+        assert_eq!(voxel_at(&app, [16, 8, 16]), stone());
+        assert!(voxel_at(&app, [15, 8, 16]).is_air(), "Keep leaves the air");
     }
 
     #[test]
@@ -823,15 +860,16 @@ mod tests {
         settle(&mut app);
         assert!(rejections(&mut app).is_empty());
         let ground = params.ground.unwrap();
-        assert_eq!(voxel_at(&app, [16, 7, 16]), Voxel::cube(ground.soil));
+        assert_eq!(voxel_at(&app, [16, 6, 16]), Voxel::cube(ground.soil));
+        assert_eq!(voxel_at(&app, [16, 7, 16]), Voxel::cube(ground.surface));
         assert_eq!(voxel_at(&app, [16, 8, 16]), Voxel::cube(ground.surface));
-        assert_eq!(voxel_at(&app, [16, 9, 16]), Voxel::cube(ground.surface));
     }
 
     #[test]
     fn a_turned_structure_lies_along_the_other_axis() {
         let s = Cell::Voxel(stone());
-        let bar = Template::new("t:bar".into(), 1.0, vec![vec![vec![s; 5]]], 0, None, 1.0).unwrap();
+        let layers = vec![vec![vec![Cell::Keep; 5]], vec![vec![s; 5]]];
+        let bar = Template::new("t:bar".into(), 1.0, layers, 0, None, 1.0).unwrap();
         let mut app = app_with_tables(&[(origin(), ground())], tables_with(vec![bar]));
         send(
             &mut app,
@@ -968,10 +1006,11 @@ mod tests {
             assert!(ticks < 10_000);
         }
         assert!(rejections(&mut app).is_empty());
-        // 24 Voxels a side: floor and roof 4 deep, and walls 4 thick between.
-        assert_eq!(before, 24 * 24 * 8 + (24 * 24 - 16 * 16) * 4);
+        // 24 Voxels a side: the roof 4 deep, and walls 4 thick under it. The floor replaces the
+        // ground's top 4 layers of stone with stone.
+        assert_eq!(before, 24 * 24 * 4 + (24 * 24 - 16 * 16) * 4);
         assert!(ticks > 1, "spread over ticks");
         assert_eq!(voxel_at(&app, [4, 8, 4]), stone());
-        assert_eq!(voxel_at(&app, [27, 19, 27]), stone());
+        assert_eq!(voxel_at(&app, [27, 15, 27]), stone());
     }
 }

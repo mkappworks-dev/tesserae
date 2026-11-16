@@ -782,7 +782,20 @@ fn every_plot_is_level_and_no_cut_or_fill_exceeds_two_metres() {
         assert!(plots.len() > 4, "{size} m: only {} Plots", plots.len());
         for f in plots {
             let [min, max] = laid.rect(f);
-            let floor = f.corner[1] + templates()[f.template].sample(size, f.turn).ground();
+            let templates = templates();
+            let sampled = templates[f.template].sample(size, f.turn);
+            let floor = f.corner[1] + sampled.ground();
+            let mut apron: Vec<i32> = around(&laid, f, size)
+                .into_iter()
+                .filter(|column| !laid.road.contains(column))
+                .map(|column| with.top(column).0)
+                .collect();
+            apron.sort();
+            assert_eq!(
+                f.corner[1] + sampled.ground_top(),
+                apron[apron.len() / 2],
+                "{size} m: {f:?}'s floor is not level with its apron"
+            );
             for z in min[1]..max[1] {
                 for x in min[0]..max[0] {
                     assert!(

@@ -10,7 +10,7 @@ fn one_undo_takes_the_whole_structure_back_and_one_redo_restores_it() {
     send(&mut app, intent("t:hut"));
     settle(&mut app);
     let whole = built(&app);
-    assert_eq!(whole, 6 * 6 * 2 + 4 * 5);
+    assert_eq!(whole, 6 * 6 + 4 * 5);
     replay(&mut app, Undo);
     assert!(rejections(&mut app).is_empty());
     assert_eq!(built(&app), 0);
@@ -27,17 +27,17 @@ fn chest_app() -> (App, MaterialId) {
     tables
         .register_use(chest, VoxelUse::Container { slots: 4 }, None)
         .unwrap();
-    let row = vec![vec![vec![
-        Cell::Voxel(Voxel::cube(chest)),
-        Cell::Voxel(stone()),
-    ]]];
+    let row = vec![
+        vec![vec![Cell::Keep, Cell::Keep]],
+        vec![vec![Cell::Voxel(Voxel::cube(chest)), Cell::Voxel(stone())]],
+    ];
     tables.templates = vec![Template::new("t:store".into(), 1.0, row, 0, None, 1.0).unwrap()];
     let mut app = app_with_tables(&[(origin(), ground())], tables);
     app.init_resource::<Containers>();
     (app, chest)
 }
 
-/// Where `chest_app`'s chest lands: one west of the anchor at (16, 8, 16).
+/// Where `chest_app`'s chest lands: one west of the anchor at (16, 7, 16), a layer up.
 const CHEST: [i32; 3] = [15, 8, 16];
 
 fn set_chest(app: &mut App, stack: Option<Stack>) {
@@ -78,10 +78,11 @@ fn undo_is_refused_while_a_container_the_structure_placed_holds_stacks() {
 
 #[test]
 fn a_placement_past_the_undo_budget_is_refused_before_any_cell_lands() {
-    // 32 m a side at 0.25 m: 139,008 cells change, past the 131,072 the journal holds.
-    let tables = tables_with(vec![hut("t:hall", 32)]);
-    let chunks: Vec<_> = (-2..=2)
-        .flat_map(|x| (-2..=2).map(move |z| (ChunkCoord::new(x, 0, z), ground())))
+    // 48 m a side at 0.25 m: the floor replaces stone with stone, and the roof and walls change
+    // 159,488 cells, past the 131,072 the journal holds.
+    let tables = tables_with(vec![hut("t:hall", 48)]);
+    let chunks: Vec<_> = (-3..=3)
+        .flat_map(|x| (-3..=3).map(move |z| (ChunkCoord::new(x, 0, z), ground())))
         .collect();
     let mut app = app_with_tables(&chunks, tables);
     app.insert_resource(WorldSettings {

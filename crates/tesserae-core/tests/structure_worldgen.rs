@@ -799,7 +799,7 @@ fn no_structure_stands_over_a_cave_mouth() {
 }
 
 #[test]
-fn a_cellar_is_underground_and_the_ground_layer_level_with_the_surface() {
+fn a_cellar_is_underground_and_the_floor_level_with_the_surface() {
     for size in SIZES {
         let probe = Probe::new(size, &[row(16.0, 1.0)]);
         let found = structures(&probe, size, 48.0);
@@ -818,7 +818,8 @@ fn a_cellar_is_underground_and_the_ground_layer_level_with_the_surface() {
                 .collect();
             tops.sort();
             let median = tops[(tops.len() - 1) / 2];
-            assert_eq!(f.mark[1], median, "{size} m: the floor at {:?}", f.mark);
+            let floor_top = f.mark[1] + (1.0 / size) as i32 - 1;
+            assert_eq!(floor_top, median, "{size} m: the floor at {:?}", f.mark);
             for (at, cell) in expected(&probe, size, f.turn, f.mark) {
                 if matches!(cell, Cell::Voxel(v) if v.material() == CELLAR) {
                     let (_, bare) = probe.at(at);

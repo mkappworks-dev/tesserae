@@ -131,8 +131,8 @@ impl SettlementPass {
                     let sampled = templates
                         .get(usize::from(building.template))?
                         .sample(voxel_size, Turn::NONE);
-                    above = above.max(sampled.size()[1] - sampled.ground());
-                    below = below.max(sampled.ground());
+                    above = above.max(sampled.size()[1] - sampled.ground_top());
+                    below = below.max(sampled.ground_top());
                 }
             }
         }
@@ -499,7 +499,7 @@ impl Worldgen {
         let sampled = template.sample(self.voxel_size, turn);
         let size = sampled.size();
         let [x, z] = corner_m.map(|m| (m / self.voxel_size).round() as i32);
-        let y = top_index(height_m, 0.0, self.voxel_size) - sampled.ground();
+        let y = top_index(height_m, 0.0, self.voxel_size) - sampled.ground_top();
         Some((
             Structure {
                 template: building.template,

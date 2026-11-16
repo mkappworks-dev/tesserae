@@ -523,7 +523,11 @@ fn a_placed_structures_voxels_reach_a_mod_as_edit_events() {
     use tesserae_core::template::{Cell, Template, Turn};
     let mut h = Harness::new(&[9]);
     let mut tables = (*h.app.world().resource::<ContentTables>().0).clone();
-    let pair = vec![vec![vec![Cell::Voxel(Voxel::cube(h.rock)); 2]]];
+    // A Keep Ground layer on the rock aimed at, and the pair on it.
+    let pair = vec![
+        vec![vec![Cell::Keep; 2]],
+        vec![vec![Cell::Voxel(Voxel::cube(h.rock)); 2]],
+    ];
     tables
         .templates
         .push(Template::new("t:pair".into(), 1.0, pair, 0, None, 1.0).unwrap());
@@ -560,7 +564,9 @@ fn every_voxel_of_an_undo_past_one_ticks_events_reaches_a_mod_in_order() {
     let mut h = Harness::new(&[9]);
     let mut tables = (*h.app.world().resource::<ContentTables>().0).clone();
     let [w, layers, d] = [30, 2, 20];
-    let slab = vec![vec![vec![Cell::Voxel(Voxel::cube(h.rock)); w]; d]; layers];
+    // A Keep Ground layer on the rock aimed at, and the slab on it.
+    let mut slab = vec![vec![vec![Cell::Voxel(Voxel::cube(h.rock)); w]; d]; layers + 1];
+    slab[0] = vec![vec![Cell::Keep; w]; d];
     tables
         .templates
         .push(Template::new("t:slab".into(), 1.0, slab, 0, None, 1.0).unwrap());
