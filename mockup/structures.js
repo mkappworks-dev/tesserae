@@ -172,23 +172,100 @@ const RISES = [
   [0, -1],
   [1, 0],
 ];
+/* Three cells cleared above every tread, 2.5 m clear over it: the opening in a floor above. */
+function headroom(g, treads) {
+  const own = new Set(treads.map((c) => c.join()));
+  for (const [x, y, z] of treads)
+    for (const k of [1, 2, 3])
+      if (!own.has([x, y + k, z].join())) g.put(x, y + k, z, "air");
+}
 /*
- * Stairs at each [x, y, z] of `path`, each rising from the cell before it (`from` before the first),
- * with two cells cleared above each for headroom: that clearing is the opening in a floor above.
+ * Stairs two cells wide: at each [x, y, z] of `path` and beside it across `side` ([dx, dz]), each
+ * rising from the cell before it (`from` before the first), with headroom over every tread.
  */
-function flight(g, from, path, m = "wall") {
+function flight(g, from, path, side, m = "wall") {
   let prev = from;
+  const treads = [];
   for (const [x, y, z] of path) {
     const rise = [Math.sign(x - prev[0]), Math.sign(z - prev[2])];
     const turn = RISES.findIndex(
       ([dx, dz]) => dx === rise[0] && dz === rise[1],
     );
-    g.put(x, y, z, M(m, "stair", turn));
+    for (const [ox, oz] of [[0, 0], side]) {
+      g.put(x + ox, y, z + oz, M(m, "stair", turn));
+      treads.push([x + ox, y, z + oz]);
+    }
     prev = [x, y, z];
   }
-  for (const [x, y, z] of path)
-    for (const k of [1, 2])
-      if (g.get(x, y + k, z)?.shape !== "stair") g.put(x, y + k, z, "air");
+  headroom(g, treads);
+}
+/*
+ * A stair two cells wide round a newel inside the square [lo, hi] (5 cells or more), from the floor
+ * at `bottom` to a tread at `top`: flights up each side and square landings at the corners. It
+ * leaves the corner at (lo, hi) climbing along x = lo, so the side at z = hi, where a tower's Door
+ * is, is the last side of each turn and its flight passes over the Door a turn up.
+ */
+function spiral(g, lo, hi, bottom, top, m = "base") {
+  const treads = [],
+    put = (cells, y, cell) => {
+      for (const [x, z] of cells)
+        (g.put(x, y, z, cell), treads.push([x, y, z]));
+    },
+    block = (x, z) => [
+      [x, z],
+      [x + 1, z],
+      [x, z + 1],
+      [x + 1, z + 1],
+    ],
+    corners = [
+      block(lo, lo),
+      block(hi - 1, lo),
+      block(hi - 1, hi - 1),
+      block(lo, hi - 1),
+    ],
+    sides = [
+      {
+        rise: [0, -1],
+        at: (i) => [
+          [lo, hi - 2 - i],
+          [lo + 1, hi - 2 - i],
+        ],
+      },
+      {
+        rise: [1, 0],
+        at: (i) => [
+          [lo + 2 + i, lo],
+          [lo + 2 + i, lo + 1],
+        ],
+      },
+      {
+        rise: [0, 1],
+        at: (i) => [
+          [hi, lo + 2 + i],
+          [hi - 1, lo + 2 + i],
+        ],
+      },
+      {
+        rise: [-1, 0],
+        at: (i) => [
+          [hi - 2 - i, hi],
+          [hi - 2 - i, hi - 1],
+        ],
+      },
+    ],
+    steps = hi - lo - 3;
+  let y = bottom;
+  for (let k = 0; y < top; k = (k + 1) % 4) {
+    const [dx, dz] = sides[k].rise,
+      turn = RISES.findIndex(([rx, rz]) => rx === dx && rz === dz);
+    for (let i = 0; i < steps && y < top; i++)
+      put(sides[k].at(i), ++y, M(m, "stair", turn));
+    if (y < top) put(corners[k], y, M(m));
+  }
+  for (let x = lo + 2; x <= hi - 2; x++)
+    for (let z = lo + 2; z <= hi - 2; z++)
+      g.fill(x, bottom + 1, z, x, top, z, M("frame"));
+  headroom(g, treads);
 }
 /* `n` stairs from [x, y, z] one cell per step along [dx, dz], up or `down`; listed bottom first. */
 function run([x, y, z], [dx, dz], n, down = false) {
@@ -340,7 +417,7 @@ function building(g, o) {
   const local = ([x, y, z]) => [x0 + x, y, z0 + z];
   return {
     at: (x, y, z, cell) => g.put(x0 + x, y, z0 + z, cell),
-    stairs: (from, path) => flight(g, local(from), path.map(local)),
+    stairs: (from, path, side) => flight(g, local(from), path.map(local), side),
     x1,
     z1,
   };
@@ -375,7 +452,7 @@ const B = {
         upper: true,
         chimney: "east",
       });
-    h.stairs([2, 1, 1], run([3, 1, 1], [1, 0], STOREY));
+    h.stairs([2, 1, 1], run([3, 1, 1], [1, 0], STOREY), [0, 1]);
     h.at(4, 1, 4, M("table", "table"));
     h.at(5, 1, 4, M("table", "table"));
     h.at(1, 1, 3, M("chest"));
@@ -401,9 +478,9 @@ const B = {
         chimney: "east",
         doorOnWing: true,
       });
-    h.stairs([6, -3, 1], run([2, 0, 1], [1, 0], 4, true));
-    h.at(5, 1, 3, M("table", "table"));
-    h.at(6, 1, 3, M("table", "table"));
+    h.stairs([6, -3, 1], run([2, 0, 1], [1, 0], 4, true), [0, 1]);
+    h.at(5, 1, 4, M("table", "table"));
+    h.at(6, 1, 4, M("table", "table"));
     h.at(7, 1, 4, M("bench"));
     h.at(7, 1, 1, M("chest"));
     h.at(7, 1, 2, M("chest"));
@@ -429,8 +506,8 @@ const B = {
         chimney: "west",
         door: 2,
       });
-    h.stairs([4, 1, 1], run([5, 1, 1], [1, 0], STOREY));
-    h.stairs([1, -3, 6], run([1, 0, 2], [0, 1], 4, true));
+    h.stairs([4, 1, 1], run([5, 1, 1], [1, 0], STOREY), [0, 1]);
+    h.stairs([1, -3, 6], run([1, 0, 2], [0, 1], 4, true), [1, 0]);
     for (const [x, z] of [
       [3, 3],
       [6, 3],
@@ -573,22 +650,15 @@ const B = {
     g.put(1, 1, 1, "air");
     return g.done();
   },
-  /* A tower round a stair that spirals up its walls to the roof deck, and down into its cellar. */
+  /* A tower round a two-wide stair that spirals from its cellar up its walls to the roof deck. */
   tower: (n, h, cellar = 0) => {
     const g = new Grid(),
       edge = (x, z) => x === 0 || z === 0 || x === n - 1 || z === n - 1,
       m = Math.floor(n / 2);
     for (let y = -cellar; y < 0; y++)
-      for (let x = 1; x < n - 1; x++)
-        for (let z = 1; z < n - 1; z++)
-          g.put(
-            x,
-            y,
-            z,
-            x === 1 || z === 1 || x === n - 2 || z === n - 2 || y === -cellar
-              ? M("base")
-              : "air",
-          );
+      for (let x = 0; x < n; x++)
+        for (let z = 0; z < n; z++)
+          g.put(x, y, z, edge(x, z) || y === -cellar ? M("base") : "air");
     for (let y = 0; y <= h + 1; y++)
       for (let x = 0; x < n; x++)
         for (let z = 0; z < n; z++) {
@@ -614,37 +684,7 @@ const B = {
           else g.put(x, y, z, "air");
         }
     doorway(g, m - 1, n - 1, 1, [1, n - 2]);
-    /* The ring inside the walls, starting beside the Door so the cells inside it are passed last. */
-    const ring = (lo, hi, from) => {
-      const out = [];
-      for (let x = from; x <= hi; x++) out.push([x, hi]);
-      for (let z = hi - 1; z >= lo; z--) out.push([hi, z]);
-      for (let x = hi - 1; x >= lo; x--) out.push([x, lo]);
-      for (let z = lo + 1; z <= hi; z++) out.push([lo, z]);
-      for (let x = lo + 1; x < from; x++) out.push([x, hi]);
-      return out;
-    };
-    const up = ring(1, n - 2, m + 1);
-    flight(
-      g,
-      [m, 1, n - 2],
-      Array.from({ length: h }, (_, i) => {
-        const [x, z] = up[i % up.length];
-        return [x, i + 1, z];
-      }),
-    );
-    if (cellar) {
-      const down = ring(2, n - 3, 2),
-        [lx, lz] = down[cellar % down.length];
-      flight(
-        g,
-        [lx, -cellar + 1, lz],
-        Array.from({ length: cellar }, (_, i) => {
-          const [x, z] = down[cellar - 1 - i];
-          return [x, i - cellar + 1, z];
-        }),
-      );
-    }
+    spiral(g, 1, n - 2, -cellar, h);
     g.put(m, h + 1, m, M("lamp"));
     return g.done();
   },
@@ -855,8 +895,7 @@ const B = {
           } else if (Math.hypot((x - r) / r, y / (h + 0.5), (z - r) / r) <= 1)
             g.put(x, y, z, M(y === 0 ? "base" : "roof"));
         }
-    for (let x = r; x < r + DOOR_W; x++)
-      flight(g, [x, -3, land], run([x, -3, land + 1], [0, 1], 4));
+    flight(g, [r, -3, land], run([r, -3, land + 1], [0, 1], 4), [1, 0]);
     for (const x of [r - 1, r + DOOR_W])
       g.fill(x, 1, n - 1, x, DOOR_H, n - 1, M("base"));
     doorway(g, r, n - 1, 1, [0, n - 1], "base");
@@ -894,14 +933,15 @@ const B = {
       g.fill(x, 0, z, x, lift - 1, z, M("frame", "post"));
     const dx = 1 + Math.floor((w - DOOR_W) / 2),
       z = d + 1;
-    for (let x = dx; x < dx + DOOR_W; x++) {
-      g.put(x, lift, z, M("floor"));
-      g.fill(x, 0, z, x, lift - 1, z, M("frame", "post"));
-    }
+    for (let x = dx; x < dx + DOOR_W; x++)
+      for (const lz of [z, z + 1]) {
+        g.put(x, lift, lz, M("floor"));
+        g.fill(x, 0, lz, x, lift - 1, lz, M("frame", "post"));
+      }
     const steps = run([dx - lift, 1, z], [1, 0], lift);
-    flight(g, [dx - lift - 1, 1, z], steps);
+    flight(g, [dx - lift - 1, 1, z], steps, [0, 1]);
     for (const [x, y] of steps)
-      if (y > 1) g.fill(x, 1, z, x, y - 1, z, M("frame"));
+      if (y > 1) g.fill(x, 1, z, x, y - 1, z + 1, M("frame"));
     return g.done();
   },
   pyramid: (n) => {
@@ -984,7 +1024,7 @@ const GAME_TEMPLATES = {
       "Watchtower",
       "Cellar below the Ground layer",
       "wild",
-      () => B.tower(6, 11, 4),
+      () => B.tower(7, 11, 4),
     ),
     T(
       "Terra",
@@ -1029,7 +1069,7 @@ const GAME_TEMPLATES = {
       "Lighthouse",
       "A tall lamp tower",
       "wild",
-      () => B.tower(5, 17),
+      () => B.tower(7, 17),
     ),
     T("Tidewater", "dock", "Dock", "Posts into the water", "wild", () =>
       B.dock(9),

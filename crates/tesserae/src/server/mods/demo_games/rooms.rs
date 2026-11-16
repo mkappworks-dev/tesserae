@@ -536,3 +536,34 @@ fn every_window_sits_on_a_whole_cell_and_the_larger_buildings_have_tall_ones() {
         assert!(square, "{game}: no window 2 by 2");
     }
 }
+
+#[test]
+fn every_stair_walked_to_is_two_wide_with_room_overhead() {
+    for game in GAMES {
+        let (_install, loaded) = loaded(game, 1.0);
+        for (index, template) in loaded.tables.templates.iter().enumerate() {
+            let name = &template.name;
+            let rooms = Rooms::new(&loaded, index);
+            for at in rooms.walk() {
+                let Cell::Voxel(v) = rooms.cell(at) else {
+                    continue;
+                };
+                if v.shape() != SHAPE_STAIR {
+                    continue;
+                }
+                let [x, y, z] = at;
+                let rise = FACE_STEPS[Orientation::from_bits(v.orientation())
+                    .unwrap()
+                    .face_of(POS_Z)];
+                let twin = [-1, 1]
+                    .iter()
+                    .any(|&s| rooms.cell([x + s * rise[2], y, z + s * rise[0]]) == Cell::Voxel(v));
+                assert!(twin, "{name}: the stair at {at:?} is one cell wide");
+                assert!(
+                    (1..=3).all(|k| rooms.open([x, y + k, z])),
+                    "{name}: the stair at {at:?} has under 2.5 m clear"
+                );
+            }
+        }
+    }
+}

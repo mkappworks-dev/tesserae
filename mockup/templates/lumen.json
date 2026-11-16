@@ -442,7 +442,7 @@
      "...........",
      ".CDDEDDEDC.",
      ".D::G::::K.",
-     ".D:::::::D.",
+     ".D::G::::D.",
      ".EF::::::D.",
      ".D:::II::E.",
      ".D::::::JD.",
@@ -455,7 +455,7 @@
      "...........",
      ".CDDLDDLDC.",
      ".D:::G:::K.",
-     ".D:::::::D.",
+     ".D:::G:::D.",
      ".L:::::::D.",
      ".D:::::::L.",
      ".D:::::::D.",
@@ -468,7 +468,7 @@
      "...........",
      ".CDDLDDLDC.",
      ".D::::G::K.",
-     ".D:::::::D.",
+     ".D::::G::D.",
      ".L:::M:::D.",
      ".D:::::::L.",
      ".D:::::::D.",
@@ -480,8 +480,8 @@
     [
      "...........",
      ".CCCCCCCCC.",
-     ".CBBB::GBK.",
-     ".CBBBBBBBC.",
+     ".CBB:::GBK.",
+     ".CBB:::GBC.",
      ".CBBBBBBBC.",
      ".CBBBBBBBC.",
      ".CBBBBBBBC.",
@@ -804,7 +804,7 @@
      "...........",
      ".AAAAAAAAA.",
      ".A::::C::A.",
-     ".A:::::::A.",
+     ".A::::C::A.",
      ".A:::::::A.",
      ".ABB:::::A.",
      ".A:::AAAAA.",
@@ -818,7 +818,7 @@
      "...........",
      ".AAAAAAAAA.",
      ".A:::C:::A.",
-     ".A:::::::A.",
+     ".A:::C:::A.",
      ".A:::::::A.",
      ".A:::::::A.",
      ".A:::AAAAA.",
@@ -832,7 +832,7 @@
      "...........",
      ".AAAAAAAAA.",
      ".A::C::::A.",
-     ".A:::::::A.",
+     ".A::C::::A.",
      ".A:::::::A.",
      ".A:::::::A.",
      ".A:::AAAAA.",
@@ -845,8 +845,8 @@
     [
      "...........",
      ".AAAAAAAAA.",
-     ".ADC::DDDA.",
-     ".ADDDDDDDA.",
+     ".ADC:::DDA.",
+     ".ADC:::DDA.",
      ".ADDDDDDDA.",
      ".ADDDDDDDA.",
      ".ADDDAAAAA.",
@@ -861,8 +861,8 @@
      ".EAAAAAAAE.",
      ".A::::::BA.",
      ".A::::::BA.",
-     ".A::::GGBA.",
-     ".A::::::HA.",
+     ".A::::::BA.",
+     ".A::::GGHA.",
      ".A:::AAAAE.",
      ".A::A......",
      ".A::AO..OO.",
@@ -1162,7 +1162,7 @@
      ".A:::::::::A.",
      ".A:::::::::A.",
      ".A:::::::::A.",
-     ".AB::::::::A.",
+     ".ABB:::::::A.",
      ".A:::::::::A.",
      ".AAAAAAAAAAA.",
      ".............",
@@ -1174,7 +1174,7 @@
      ".A:::::::::A.",
      ".A:::::::::A.",
      ".A:::::::::A.",
-     ".AB::::::::A.",
+     ".ABB:::::::A.",
      ".A:::::::::A.",
      ".A:::::::::A.",
      ".AAAAAAAAAAA.",
@@ -1186,7 +1186,7 @@
      ".AAAAAAAAAAA.",
      ".A:::::::::A.",
      ".A:::::::::A.",
-     ".AB::::::::A.",
+     ".ABB:::::::A.",
      ".A:::::::::A.",
      ".A:::::::::A.",
      ".A:::::::::A.",
@@ -1198,10 +1198,10 @@
      ".............",
      ".AAAAAAAAAAA.",
      ".ADDDDDDDDDA.",
-     ".ABDDDDDDDDA.",
-     ".A:DDDDDDDDA.",
-     ".A:DDDDDDDDA.",
-     ".ADDDDDDDDDA.",
+     ".ABBDDDDDDDA.",
+     ".A::DDDDDDDA.",
+     ".A::DDDDDDDA.",
+     ".A::DDDDDDDA.",
      ".ADDDDDDDDDA.",
      ".AAAAAAAAAAA.",
      ".............",
@@ -1211,7 +1211,7 @@
      ".............",
      ".EAAAAAAAAAE.",
      ".F::::I::::A.",
-     ".A:::::::::A.",
+     ".A::::I::::A.",
      ".A::G::G::KA.",
      ".A::::::::KA.",
      ".A::::::::KA.",
@@ -1224,7 +1224,7 @@
      ".............",
      ".ELAALLAALLE.",
      ".F:::::I:::A.",
-     ".A:::::::::L.",
+     ".A:::::I:::L.",
      ".A:::::::::L.",
      ".L:::::::::A.",
      ".L:::::::::A.",
@@ -1237,7 +1237,7 @@
      ".............",
      ".ELAALLAALLE.",
      ".F::::::I::A.",
-     ".A:::::::::L.",
+     ".A::::::I::L.",
      ".A:::::::::L.",
      ".L::::M::::A.",
      ".L:::::::::A.",
@@ -1249,8 +1249,8 @@
     [
      ".............",
      ".EEEEEEEEEEE.",
-     ".FDDDDD::IDE.",
-     ".EDDDDDDDDDE.",
+     ".FDDDD:::IDE.",
+     ".EDDDD:::IDE.",
      ".EDDDDDDDDDE.",
      ".EDDDDDDDDDE.",
      ".EDDDDDDDDDE.",
@@ -2851,7 +2851,7 @@
    "kind": "wild",
    "size": [
     7,
-    16,
+    17,
     7
    ],
    "ground_layer": 4,
@@ -2875,39 +2875,39 @@
     },
     {
      "symbol": "B",
-     "material": "lumen:moon_cobble",
+     "material": "lumen:moonstone",
      "shape": "core:stair",
-     "orientation": 0
+     "orientation": 2
     },
     {
      "symbol": "C",
-     "material": "lumen:moon_cobble",
-     "shape": "core:stair",
-     "orientation": 3
-    },
-    {
-     "symbol": "D",
-     "material": "lumen:star_planks",
-     "shape": "core:cube",
-     "orientation": 0
-    },
-    {
-     "symbol": "E",
      "material": "lumen:silverwood",
      "shape": "core:cube",
      "orientation": 0
     },
     {
-     "symbol": "F",
-     "material": "lumen:door",
-     "shape": "lumen:panel",
+     "symbol": "D",
+     "material": "lumen:moonstone",
+     "shape": "core:stair",
+     "orientation": 1
+    },
+    {
+     "symbol": "E",
+     "material": "lumen:moonstone",
+     "shape": "core:stair",
      "orientation": 0
     },
     {
-     "symbol": "G",
-     "material": "lumen:moon_cobble",
+     "symbol": "F",
+     "material": "lumen:moonstone",
      "shape": "core:stair",
-     "orientation": 1
+     "orientation": 3
+    },
+    {
+     "symbol": "G",
+     "material": "lumen:door",
+     "shape": "lumen:panel",
+     "orientation": 0
     },
     {
      "symbol": "H",
@@ -2917,13 +2917,13 @@
     },
     {
      "symbol": "I",
-     "material": "lumen:moon_cobble",
-     "shape": "core:stair",
-     "orientation": 2
+     "material": "lumen:moon_brick",
+     "shape": "core:cube",
+     "orientation": 0
     },
     {
      "symbol": "J",
-     "material": "lumen:moon_brick",
+     "material": "lumen:star_planks",
      "shape": "core:cube",
      "orientation": 0
     },
@@ -2936,145 +2936,154 @@
    ],
    "layers": [
     [
-     ".......",
-     ".AAAAA.",
-     ".AAAAA.",
-     ".AAAAA.",
-     ".AAAAA.",
-     ".AAAAA.",
-     "......."
-    ],
-    [
-     ".......",
-     ".AAAAA.",
-     ".A:::A.",
-     ".A::BA.",
-     ".A:::A.",
-     ".AAAAA.",
-     "......."
-    ],
-    [
-     ".......",
-     ".AAAAA.",
-     ".A:::A.",
-     ".A:::A.",
-     ".A::BA.",
-     ".AAAAA.",
-     "......."
-    ],
-    [
-     ".......",
-     ".AAAAA.",
-     ".A:::A.",
-     ".A:::A.",
-     ".A:C:A.",
-     ".AAAAA.",
-     "......."
-    ],
-    [
      "AAAAAAA",
-     "ADDDDDA",
-     "ADDDDDA",
-     "ADDDDDA",
-     "ADC::DA",
-     "ADDDDDA",
+     "AAAAAAA",
+     "AAAAAAA",
+     "AAAAAAA",
+     "AAAAAAA",
+     "AAAAAAA",
      "AAAAAAA"
     ],
     [
-     "EAAAAAE",
+     "AAAAAAA",
+     "AAA:::A",
+     "AAA:::A",
+     "ABBC::A",
      "A:::::A",
      "A:::::A",
+     "AAAAAAA"
+    ],
+    [
+     "AAAAAAA",
+     "A::DAAA",
+     "A::DAAA",
+     "A::C::A",
      "A:::::A",
      "A:::::A",
-     "A:::G:A",
-     "EAFFAAE"
+     "AAAAAAA"
+    ],
+    [
+     "AAAAAAA",
+     "A:::::A",
+     "A:::::A",
+     "A::CEEA",
+     "A:::AAA",
+     "A:::AAA",
+     "AAAAAAA"
+    ],
+    [
+     "AAAAAAA",
+     "A:::::A",
+     "A:::::A",
+     "A::C::A",
+     "AAAF::A",
+     "AAAF::A",
+     "AAAAAAA"
+    ],
+    [
+     "CAAAAAC",
+     "AAA:::A",
+     "AAA:::A",
+     "ABBC::A",
+     "A:::::A",
+     "A:::::A",
+     "CAGGAAC"
     ],
     [
      "HAAHAAH",
+     "A::DAAA",
+     "A::DAAA",
+     "H::C::H",
      "A:::::A",
      "A:::::A",
-     "H:::::H",
-     "A:::::A",
-     "A::::GA",
-     "HAFFAAH"
+     "HAGGAAH"
     ],
     [
-     "EAAAAAE",
+     "CAAAAAC",
      "A:::::A",
      "A:::::A",
-     "A:::::A",
-     "A::::IA",
-     "A:::::A",
-     "EAFFAAE"
+     "A::CEEA",
+     "A:::AAA",
+     "A:::AAA",
+     "CAGGAAC"
     ],
     [
-     "EAAAAAE",
+     "CAAAAAC",
      "A:::::A",
      "A:::::A",
-     "A::::IA",
-     "A:::::A",
-     "A:::::A",
-     "EEEEEAE"
+     "A::C::A",
+     "AAAF::A",
+     "AAAF::A",
+     "CCCCCAC"
     ],
     [
-     "EJJJJJE",
-     "J:::::J",
-     "J::::IJ",
-     "J:::::J",
-     "J:::::J",
-     "J:::::J",
-     "EJJJJJE"
+     "CIIIIIC",
+     "IAA:::I",
+     "IAA:::I",
+     "IBBC::I",
+     "I:::::I",
+     "I:::::I",
+     "CIIIIIC"
     ],
     [
      "HAAHAAH",
-     "A::::IA",
-     "A:::::A",
-     "H:::::H",
+     "A::DAAA",
+     "A::DAAA",
+     "H::C::H",
      "A:::::A",
      "A:::::A",
      "HAAHAAH"
     ],
     [
-     "EAAAAAE",
-     "A:::C:A",
+     "CAAAAAC",
      "A:::::A",
      "A:::::A",
-     "A:::::A",
-     "A:::::A",
-     "EAAAAAE"
+     "A::CEEA",
+     "A:::AAA",
+     "A:::AAA",
+     "CAAAAAC"
     ],
     [
-     "EAAAAAE",
+     "CAAAAAC",
+     "A:::::A",
+     "A:::::A",
      "A::C::A",
-     "A:::::A",
-     "A:::::A",
-     "A:::::A",
-     "A:::::A",
-     "EAAAAAE"
+     "AAAF::A",
+     "AAAF::A",
+     "CAAAAAC"
     ],
     [
      "AAAAAAA",
-     "ADC::DA",
-     "ADDDDDA",
-     "ADDDDDA",
-     "ADDDDDA",
-     "ADDDDDA",
+     "AJJ:::A",
+     "AJJ:::A",
+     "ABBC::A",
+     "A:::::A",
+     "A:::::A",
      "AAAAAAA"
     ],
     [
      "A.A.A.A",
-     "..::...",
-     "A.....A",
-     "...K...",
-     "A.....A",
      ".......",
+     "A.....A",
+     ".::K::.",
+     "A:::::A",
+     ".:::::.",
      "A.A.A.A"
     ],
     [
      ".......",
-     "..:....",
      ".......",
      ".......",
+     ".::....",
+     ".:::...",
+     ".:::...",
+     "......."
+    ],
+    [
+     ".......",
+     ".......",
+     ".......",
+     ".::....",
      ".......",
      ".......",
      "......."

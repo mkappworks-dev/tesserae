@@ -442,7 +442,7 @@
      "...........",
      ".CDDEDDEDC.",
      ".D::G::::K.",
-     ".D:::::::D.",
+     ".D::G::::D.",
      ".EF::::::D.",
      ".D:::II::E.",
      ".D::::::JD.",
@@ -455,7 +455,7 @@
      "...........",
      ".CDDLDDLDC.",
      ".D:::G:::K.",
-     ".D:::::::D.",
+     ".D:::G:::D.",
      ".L:::::::D.",
      ".D:::::::L.",
      ".D:::::::D.",
@@ -468,7 +468,7 @@
      "...........",
      ".CDDLDDLDC.",
      ".D::::G::K.",
-     ".D:::::::D.",
+     ".D::::G::D.",
      ".L:::M:::D.",
      ".D:::::::L.",
      ".D:::::::D.",
@@ -480,8 +480,8 @@
     [
      "...........",
      ".CCCCCCCCC.",
-     ".CBBB::GBK.",
-     ".CBBBBBBBC.",
+     ".CBB:::GBK.",
+     ".CBB:::GBC.",
      ".CBBBBBBBC.",
      ".CBBBBBBBC.",
      ".CBBBBBBBC.",
@@ -804,7 +804,7 @@
      "...........",
      ".AAAAAAAAA.",
      ".A::::C::A.",
-     ".A:::::::A.",
+     ".A::::C::A.",
      ".A:::::::A.",
      ".ABB:::::A.",
      ".A:::AAAAA.",
@@ -818,7 +818,7 @@
      "...........",
      ".AAAAAAAAA.",
      ".A:::C:::A.",
-     ".A:::::::A.",
+     ".A:::C:::A.",
      ".A:::::::A.",
      ".A:::::::A.",
      ".A:::AAAAA.",
@@ -832,7 +832,7 @@
      "...........",
      ".AAAAAAAAA.",
      ".A::C::::A.",
-     ".A:::::::A.",
+     ".A::C::::A.",
      ".A:::::::A.",
      ".A:::::::A.",
      ".A:::AAAAA.",
@@ -845,8 +845,8 @@
     [
      "...........",
      ".AAAAAAAAA.",
-     ".ADC::DDDA.",
-     ".ADDDDDDDA.",
+     ".ADC:::DDA.",
+     ".ADC:::DDA.",
      ".ADDDDDDDA.",
      ".ADDDDDDDA.",
      ".ADDDAAAAA.",
@@ -861,8 +861,8 @@
      ".EAAAAAAAE.",
      ".A::::::BA.",
      ".A::::::BA.",
-     ".A::::GGBA.",
-     ".A::::::HA.",
+     ".A::::::BA.",
+     ".A::::GGHA.",
      ".A:::AAAAE.",
      ".A::A......",
      ".A::AO..OO.",
@@ -1162,7 +1162,7 @@
      ".A:::::::::A.",
      ".A:::::::::A.",
      ".A:::::::::A.",
-     ".AB::::::::A.",
+     ".ABB:::::::A.",
      ".A:::::::::A.",
      ".AAAAAAAAAAA.",
      ".............",
@@ -1174,7 +1174,7 @@
      ".A:::::::::A.",
      ".A:::::::::A.",
      ".A:::::::::A.",
-     ".AB::::::::A.",
+     ".ABB:::::::A.",
      ".A:::::::::A.",
      ".A:::::::::A.",
      ".AAAAAAAAAAA.",
@@ -1186,7 +1186,7 @@
      ".AAAAAAAAAAA.",
      ".A:::::::::A.",
      ".A:::::::::A.",
-     ".AB::::::::A.",
+     ".ABB:::::::A.",
      ".A:::::::::A.",
      ".A:::::::::A.",
      ".A:::::::::A.",
@@ -1198,10 +1198,10 @@
      ".............",
      ".AAAAAAAAAAA.",
      ".ADDDDDDDDDA.",
-     ".ABDDDDDDDDA.",
-     ".A:DDDDDDDDA.",
-     ".A:DDDDDDDDA.",
-     ".ADDDDDDDDDA.",
+     ".ABBDDDDDDDA.",
+     ".A::DDDDDDDA.",
+     ".A::DDDDDDDA.",
+     ".A::DDDDDDDA.",
      ".ADDDDDDDDDA.",
      ".AAAAAAAAAAA.",
      ".............",
@@ -1211,7 +1211,7 @@
      ".............",
      ".EAAAAAAAAAE.",
      ".F::::I::::A.",
-     ".A:::::::::A.",
+     ".A::::I::::A.",
      ".A::G::G::KA.",
      ".A::::::::KA.",
      ".A::::::::KA.",
@@ -1224,7 +1224,7 @@
      ".............",
      ".ELAALLAALLE.",
      ".F:::::I:::A.",
-     ".A:::::::::L.",
+     ".A:::::I:::L.",
      ".A:::::::::L.",
      ".L:::::::::A.",
      ".L:::::::::A.",
@@ -1237,7 +1237,7 @@
      ".............",
      ".ELAALLAALLE.",
      ".F::::::I::A.",
-     ".A:::::::::L.",
+     ".A::::::I::L.",
      ".A:::::::::L.",
      ".L::::M::::A.",
      ".L:::::::::A.",
@@ -1249,8 +1249,8 @@
     [
      ".............",
      ".EEEEEEEEEEE.",
-     ".FDDDDD::IDE.",
-     ".EDDDDDDDDDE.",
+     ".FDDDD:::IDE.",
+     ".EDDDD:::IDE.",
      ".EDDDDDDDDDE.",
      ".EDDDDDDDDDE.",
      ".EDDDDDDDDDE.",
@@ -2701,9 +2701,9 @@
    "label": "Lighthouse",
    "kind": "wild",
    "size": [
-    5,
-    20,
-    5
+    7,
+    21,
+    7
    ],
    "ground_layer": 0,
    "foundation": "tidewater:coral_block",
@@ -2738,15 +2738,15 @@
     },
     {
      "symbol": "D",
-     "material": "tidewater:door",
-     "shape": "tidewater:panel",
-     "orientation": 0
+     "material": "tidewater:coral_block",
+     "shape": "core:stair",
+     "orientation": 2
     },
     {
      "symbol": "E",
-     "material": "tidewater:sandstone",
-     "shape": "core:stair",
-     "orientation": 1
+     "material": "tidewater:door",
+     "shape": "tidewater:panel",
+     "orientation": 0
     },
     {
      "symbol": "F",
@@ -2756,26 +2756,26 @@
     },
     {
      "symbol": "G",
-     "material": "tidewater:sandstone",
+     "material": "tidewater:coral_block",
      "shape": "core:stair",
-     "orientation": 2
+     "orientation": 1
     },
     {
      "symbol": "H",
-     "material": "tidewater:sandstone",
+     "material": "tidewater:coral_block",
+     "shape": "core:stair",
+     "orientation": 0
+    },
+    {
+     "symbol": "I",
+     "material": "tidewater:coral_block",
      "shape": "core:stair",
      "orientation": 3
     },
     {
-     "symbol": "I",
+     "symbol": "J",
      "material": "tidewater:coral_brick",
      "shape": "core:cube",
-     "orientation": 0
-    },
-    {
-     "symbol": "J",
-     "material": "tidewater:sandstone",
-     "shape": "core:stair",
      "orientation": 0
     },
     {
@@ -2787,144 +2787,193 @@
    ],
    "layers": [
     [
-     "AAAAA",
-     "ABBBA",
-     "ABBBA",
-     "ABBBA",
-     "AAAAA"
+     "AAAAAAA",
+     "ABBBBBA",
+     "ABBBBBA",
+     "ABBBBBA",
+     "ABBBBBA",
+     "ABBBBBA",
+     "AAAAAAA"
     ],
     [
-     "CAAAC",
-     "A:::A",
-     "A:::A",
-     "A::EA",
-     "CDDAC"
+     "CAAAAAC",
+     "AAA:::A",
+     "AAA:::A",
+     "ADDC::A",
+     "A:::::A",
+     "A:::::A",
+     "CAEEAAC"
     ],
     [
-     "FAAFC",
-     "A:::A",
-     "A::GF",
-     "F:::A",
-     "CDDAC"
+     "FAAFAAF",
+     "A::GAAA",
+     "A::GAAA",
+     "F::C::F",
+     "A:::::A",
+     "A:::::A",
+     "FAEEAAF"
     ],
     [
-     "CAAAC",
-     "A::GA",
-     "A:::A",
-     "A:::A",
-     "CDDAC"
+     "CAAAAAC",
+     "A:::::A",
+     "A:::::A",
+     "A::CHHA",
+     "A:::AAA",
+     "A:::AAA",
+     "CAEEAAC"
     ],
     [
-     "CAAAC",
-     "A:H:A",
-     "A:::A",
-     "A:::A",
-     "CCCCC"
+     "CAAAAAC",
+     "A:::::A",
+     "A:::::A",
+     "A::C::A",
+     "AAAI::A",
+     "AAAI::A",
+     "CCCCCAC"
     ],
     [
-     "CIIIC",
-     "IH::I",
-     "I:::I",
-     "I:::I",
-     "CIIIC"
+     "CJJJJJC",
+     "JAA:::J",
+     "JAA:::J",
+     "JDDC::J",
+     "J:::::J",
+     "J:::::J",
+     "CJJJJJC"
     ],
     [
-     "FAAFC",
-     "A:::A",
-     "AJ::F",
-     "F:::A",
-     "CAFAC"
+     "FAAFAAF",
+     "A::GAAA",
+     "A::GAAA",
+     "F::C::F",
+     "A:::::A",
+     "A:::::A",
+     "FAAFAAF"
     ],
     [
-     "CAAAC",
-     "A:::A",
-     "A:::A",
-     "AJ::A",
-     "CAAAC"
+     "CAAAAAC",
+     "A:::::A",
+     "A:::::A",
+     "A::CHHA",
+     "A:::AAA",
+     "A:::AAA",
+     "CAAAAAC"
     ],
     [
-     "CAAAC",
-     "A:::A",
-     "A:::A",
-     "A:E:A",
-     "CAAAC"
+     "CAAAAAC",
+     "A:::::A",
+     "A:::::A",
+     "A::C::A",
+     "AAAI::A",
+     "AAAI::A",
+     "CAAAAAC"
     ],
     [
-     "CAAAC",
-     "A:::A",
-     "A:::A",
-     "A::EA",
-     "CAAAC"
+     "CAAAAAC",
+     "AAA:::A",
+     "AAA:::A",
+     "ADDC::A",
+     "A:::::A",
+     "A:::::A",
+     "CAAAAAC"
     ],
     [
-     "FIIFC",
-     "I:::I",
-     "I::GF",
-     "F:::I",
-     "CIFIC"
+     "FJJFJJF",
+     "J::GAAJ",
+     "J::GAAJ",
+     "F::C::F",
+     "J:::::J",
+     "J:::::J",
+     "FJJFJJF"
     ],
     [
-     "CAAAC",
-     "A::GA",
-     "A:::A",
-     "A:::A",
-     "CAAAC"
+     "CAAAAAC",
+     "A:::::A",
+     "A:::::A",
+     "A::CHHA",
+     "A:::AAA",
+     "A:::AAA",
+     "CAAAAAC"
     ],
     [
-     "CAAAC",
-     "A:H:A",
-     "A:::A",
-     "A:::A",
-     "CAAAC"
+     "CAAAAAC",
+     "A:::::A",
+     "A:::::A",
+     "A::C::A",
+     "AAAI::A",
+     "AAAI::A",
+     "CAAAAAC"
     ],
     [
-     "CAAAC",
-     "AH::A",
-     "A:::A",
-     "A:::A",
-     "CAAAC"
+     "CAAAAAC",
+     "AAA:::A",
+     "AAA:::A",
+     "ADDC::A",
+     "A:::::A",
+     "A:::::A",
+     "CAAAAAC"
     ],
     [
-     "FAAFC",
-     "A:::A",
-     "AJ::F",
-     "F:::A",
-     "CAFAC"
+     "FAAFAAF",
+     "A::GAAA",
+     "A::GAAA",
+     "F::C::F",
+     "A:::::A",
+     "A:::::A",
+     "FAAFAAF"
     ],
     [
-     "CIIIC",
-     "I:::I",
-     "I:::I",
-     "IJ::I",
-     "CIIIC"
+     "CJJJJJC",
+     "J:::::J",
+     "J:::::J",
+     "J::CHHJ",
+     "J:::AAJ",
+     "J:::AAJ",
+     "CJJJJJC"
     ],
     [
-     "CAAAC",
-     "A:::A",
-     "A:::A",
-     "A:E:A",
-     "CAAAC"
+     "CAAAAAC",
+     "A:::::A",
+     "A:::::A",
+     "A::C::A",
+     "AAAI::A",
+     "AAAI::A",
+     "CAAAAAC"
     ],
     [
-     "AAAAA",
-     "ABBBA",
-     "ABBBA",
-     "A::EA",
-     "AAAAA"
+     "AAAAAAA",
+     "ABB:::A",
+     "ABB:::A",
+     "ADDC::A",
+     "A:::::A",
+     "A:::::A",
+     "AAAAAAA"
     ],
     [
-     "A.A.A",
-     ".....",
-     "A.K.A",
-     "..::.",
-     "A.A.A"
+     "A.A.A.A",
+     ".......",
+     "A.....A",
+     ".::K::.",
+     "A:::::A",
+     ".:::::.",
+     "A.A.A.A"
     ],
     [
-     ".....",
-     ".....",
-     ".....",
-     "...:.",
-     "....."
+     ".......",
+     ".......",
+     ".......",
+     ".::....",
+     ".:::...",
+     ".:::...",
+     "......."
+    ],
+    [
+     ".......",
+     ".......",
+     ".......",
+     ".::....",
+     ".......",
+     ".......",
+     "......."
     ]
    ]
   },
@@ -3004,7 +3053,7 @@
    "size": [
     8,
     12,
-    6
+    7
    ],
    "ground_layer": 0,
    "foundation": "tidewater:coral_block",
@@ -3099,6 +3148,7 @@
      "........",
      "........",
      "..K...K.",
+     "...KK...",
      "...KK..."
     ],
     [
@@ -3107,6 +3157,7 @@
      "........",
      "........",
      "..K...K.",
+     "LCCKK...",
      "LCCKK..."
     ],
     [
@@ -3115,6 +3166,7 @@
      "........",
      "........",
      "..K...K.",
+     ":LCKK...",
      ":LCKK..."
     ],
     [
@@ -3123,6 +3175,7 @@
      "..ABBBA.",
      "..ABBBA.",
      "..AAAAA.",
+     "::LBB...",
      "::LBB..."
     ],
     [
@@ -3131,7 +3184,8 @@
      "..D:::D.",
      "..D:::B.",
      "..CEEBC.",
-     ".::....."
+     ":::.....",
+     ":::....."
     ],
     [
      "........",
@@ -3139,7 +3193,8 @@
      "..D:::D.",
      "..D:::F.",
      "..CEEFC.",
-     "..:....."
+     ".::.....",
+     ".::....."
     ],
     [
      "........",
@@ -3147,7 +3202,8 @@
      "..D:::D.",
      "..D:::D.",
      "..CEEDC.",
-     "........"
+     "..:.....",
+     "..:....."
     ],
     [
      ".GGGGGGG",
@@ -3155,7 +3211,8 @@
      "..D:::D.",
      "..D:::D.",
      "..CCCCD.",
-     ".GGGGGGG"
+     ".GGGGGGG",
+     "........"
     ],
     [
      ".HHHHHHH",
@@ -3163,7 +3220,8 @@
      "..D:::D.",
      "..D:::D.",
      "..D:::D.",
-     ".IIIIIII"
+     ".IIIIIII",
+     "........"
     ],
     [
      "........",
@@ -3171,6 +3229,7 @@
      "..D:::D.",
      "..D:::D.",
      ".GGGGGGG",
+     "........",
      "........"
     ],
     [
@@ -3179,6 +3238,7 @@
      "..D:::D.",
      "..D:::D.",
      ".IIIIIII",
+     "........",
      "........"
     ],
     [
@@ -3186,6 +3246,7 @@
      "........",
      ".JJJJJJJ",
      ".JJJJJJJ",
+     "........",
      "........",
      "........"
     ]
