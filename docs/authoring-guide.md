@@ -1395,19 +1395,20 @@ of the Game's Templates and takes the Tool into hand, and K or Backspace closes
 it. With it held, R turns the Structure a quarter (R is also Respawn, which it
 does only while the Tool is not held). Placing takes two steps: Place (right
 mouse) pins a preview where the Player aims, which stays as they walk round it
-(within 64 m); aimed at the pinned preview, Place builds it and Backspace
-cancels it. The preview is the Player's own and is never saved. Its ghost shows
-each Template cell in its own Material, translucent, and red where placing it
-would be refused; carved cells are outlined. Only the anchor, the cell in front
-of the face aimed at, needs to be in reach; the footprint's near edge sits on
-it, centred across your view, and the Structure extends away from you, so it
-stands in front of you. Aimed straight down, the footprint centres on the
-anchor. The Ground layer replaces the layer aimed at, so aimed at the ground's
-top a floor and a door's sill are level with the ground outside. Placing costs
-no Items and lands whole or not at all, waiting up to 64 ticks for Chunks still
-loading before it refuses with a reason. It is one undo group, and Mods hear its
-Voxels as Edit events. A placement that would change more than 131,072 Voxels is
-refused as too big to undo; at 0.25 m a 32 m building can.
+(within 64 m); within 8 m of it Use (G) builds it, and K, Backspace or Remove
+(left mouse) aimed at it cancels it. The preview is the Player's own and is
+never saved. Its ghost shows each Template cell in its own Material,
+translucent, and red where placing it would be refused; carved cells are
+outlined. Only the anchor, the cell in front of the face aimed at, needs to be
+in reach; the footprint's near edge sits on it, centred across your view, and
+the Structure extends away from you, so it stands in front of you. Aimed
+straight down, the footprint centres on the anchor. The Ground layer replaces
+the layer aimed at, so aimed at the ground's top a floor and a door's sill are
+level with the ground outside. Placing costs no Items and lands whole or not at
+all, waiting up to 64 ticks for Chunks still loading before it refuses with a
+reason. It is one undo group, and Mods hear its Voxels as Edit events. A
+placement that would change more than 131,072 Voxels is refused as too big to
+undo; at 0.25 m a 32 m building can.
 
 ## Artwork
 

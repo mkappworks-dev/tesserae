@@ -41,6 +41,19 @@ enum Wording {
     Refused(&'static str),
 }
 
+/// Near a pinned Structure preview: Use builds it, and the Structures and clear keys cancel it.
+fn build_wording(bindings: &Bindings, labels: &Labels) -> Wording {
+    let first = |action| {
+        let all = bindings.label(action, labels);
+        all.split(" / ").next().unwrap_or_default().to_owned()
+    };
+    Wording::Verb(format!(
+        "Build · {} / {} Cancel",
+        first(Action::Structures),
+        first(Action::ClearTool)
+    ))
+}
+
 /// What the Player calls a Usable Voxel of `material`: its declared name.
 pub(super) fn material_title(catalogue: &Catalogue, material: tesserae_core::MaterialId) -> String {
     catalogue
@@ -146,14 +159,19 @@ fn show(
     catalogue: Res<Catalogue>,
     (bindings, labels): (Res<Bindings>, Res<Labels>),
     dead: Option<Res<super::death::Dead>>,
+    pin: Option<Res<super::structure::PinPrompt>>,
     (mut row, mut key, mut text): PromptParts,
 ) {
-    let wording = wording(
-        &target,
-        &sent,
-        time.elapsed_secs_f64(),
-        (&hotbar, &catalogue),
-    )
+    let wording = if pin.is_some_and(|p| p.0) {
+        Some(build_wording(&bindings, &labels))
+    } else {
+        wording(
+            &target,
+            &sent,
+            time.elapsed_secs_f64(),
+            (&hotbar, &catalogue),
+        )
+    }
     .filter(|_| super::death::alive(dead));
     let display = if wording.is_some() {
         Display::Flex

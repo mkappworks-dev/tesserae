@@ -1,6 +1,6 @@
 # 39: Pick, pin, then build with G or cancel with K or Backspace
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 29, 34
 
@@ -27,14 +27,36 @@ preview".
 
 ## Acceptance criteria
 
-- [ ] The mockup's keys, card and prompt follow the flow above.
-- [ ] Picking a Template closes the list, tested.
-- [ ] Right mouse pins and sends nothing; G within 8 m of the pinned preview
+- [x] The mockup's keys, card and prompt follow the flow above.
+- [x] Picking a Template closes the list, tested.
+- [x] Right mouse pins and sends nothing; G within 8 m of the pinned preview
       sends the pinned intent; G further away sends nothing, tested.
-- [ ] K and Backspace cancel a pinned preview and keep the Tool; without one
+- [x] K and Backspace cancel a pinned preview and keep the Tool; without one
       they put the Tool away, tested.
-- [ ] Left mouse on the pinned preview cancels it; elsewhere it does nothing,
+- [x] Left mouse on the pinned preview cancels it; elsewhere it does nothing,
       tested.
-- [ ] The prompt shows only near a pinned preview, tested.
+- [x] The prompt shows only near a pinned preview, tested.
 
 ## Comments
+
+Mockup: `structuresPlace` only pins; `structuresBuild` builds on G;
+`structurePrompt` shows `G Build K Cancel` under the reticle while a preview is
+pinned (the browser takes the Player to be close); picking a Template
+navigates back to play; K and Backspace cancel a pinned preview, else put the
+Tool away; left mouse cancels a pinned one. Survival's G handler now yields
+to the place Tool, as the Client's `intercept` takes Use.
+
+Client: `intercept` (`client/structure.rs`) pins on Place with nothing pinned;
+builds on Use within `BUILD_REACH_M` (the 8 m Edit reach) of the ghost's box
+(`near`); cancels on Remove aimed at the box, or on the clear or Structures
+key from anywhere, taking those keys so the Tool stays in hand; and sets
+`PinPrompt`, which `use_prompt` shows as `G Build · K / Backspace Cancel`.
+`structure_menu`: picking closes the list into play; the Structures key with
+the place Tool in hand and the list shut puts the Tool away.
+
+Tests: `place_pins_a_preview_and_near_it_use_builds_it`,
+`the_clear_and_structures_keys_cancel_the_pinned_preview_from_anywhere_and_are_taken`,
+`left_mouse_on_the_pinned_preview_cancels_it_and_elsewhere_does_nothing`,
+`k_with_the_place_tool_in_hand_and_the_list_shut_puts_it_away`,
+`picking_a_template_closes_the_list_into_play`. The prompt shows a frame after
+the answer it is drawn from lands.

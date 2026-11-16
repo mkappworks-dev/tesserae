@@ -143,11 +143,12 @@ pub(super) fn plugin(app: &mut App) {
         );
 }
 
-/// The Structures key asks to use the place Tool from play, held or not, as the
-/// Layout key opens its menu; the Server's answer opens the list. With the list
-/// open it closes it into play, the clear key closes it and puts the Tool away,
-/// and Escape closes it with the cursor free, as it does the Layout menu.
-/// Putting the Tool down closes it into play.
+/// The Structures key asks to use the place Tool from play with another hand, as
+/// the Layout key opens its menu; the Server's answer opens the list. With the
+/// Tool in hand it puts it away. With the list open it closes it into play, the
+/// clear key closes it and puts the Tool away, and Escape closes it with the
+/// cursor free, as it does the Layout menu. Putting the Tool down closes it into
+/// play.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn toggle(
     actions: Res<Actions>,
@@ -159,6 +160,12 @@ pub(super) fn toggle(
     mut cursor: Single<&mut CursorOptions, With<PrimaryWindow>>,
 ) {
     let key = actions.started(Action::Structures);
+    // With the place Tool in hand and no preview pinned (a pinned one takes the key first), the
+    // key puts the Tool away, as the clear key does.
+    if !list.open && key && holding_place(&hotbar, &catalogue.0) {
+        hotbar.outside = None;
+        return;
+    }
     if !list.open {
         let blocked = menu.open
             || settings.is_some_and(|s| s.open)
@@ -272,10 +279,12 @@ fn activate(
         }
     };
     match control {
+        // Picking closes the list: the ghost follows the aim, ready to pin.
         Control::Pick(at) => {
             if let Some(template) = catalogue.0.templates.get(at) {
                 tool.choose(&template.name);
             }
+            shut();
         }
         Control::Turn => tool.turn = tool.turn.next(),
         Control::Close => shut(),
@@ -1092,6 +1101,35 @@ mod tests {
             .single(app.world())
             .unwrap()
             .grab_mode
+    }
+
+    #[test]
+    fn k_with_the_place_tool_in_hand_and_the_list_shut_puts_it_away() {
+        let mut app = app(super::super::edit::Holding::Tool(ToolId(0)));
+        assert!(press(&mut app, KeyCode::KeyK).is_empty(), "asks nothing");
+        assert_eq!(held(&app), None);
+        assert!(!app.world().resource::<StructureList>().open);
+    }
+
+    #[test]
+    fn picking_a_template_closes_the_list_into_play() {
+        let mut app = app(super::super::edit::Holding::Tool(ToolId(0)));
+        app.init_resource::<PlaceTool>()
+            .init_resource::<super::super::structure::Preview>()
+            .add_observer(activate);
+        answered(&mut app);
+        let pick = app.world_mut().spawn(Control::Pick(0)).id();
+        app.world_mut().trigger(Activate { entity: pick });
+        app.update();
+        assert!(!app.world().resource::<StructureList>().open);
+        assert_eq!(cursor(&mut app), CursorGrabMode::Locked);
+        let catalogue = app.world().resource::<Catalogue>().0.clone();
+        let chosen = app
+            .world()
+            .resource::<PlaceTool>()
+            .chosen(&catalogue)
+            .map(|t| t.name.clone());
+        assert_eq!(chosen.as_deref(), Some("terra:cottage"));
     }
 
     #[test]

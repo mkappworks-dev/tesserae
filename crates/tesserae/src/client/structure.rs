@@ -231,6 +231,22 @@ pub(super) fn pin(
     anchor.is_some()
 }
 
+/// How near a pinned preview the Eye must be for Use to build it: an Edit's reach.
+const BUILD_REACH_M: f32 = crate::server::edit::EDIT_REACH_M;
+
+/// Whether the Player is near enough a pinned preview to build it, so the prompt says so.
+#[derive(Resource, Default, Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) struct PinPrompt(pub(super) bool);
+
+/// Whether the Eye stands within [`BUILD_REACH_M`] of the ghost's box, `corner` and `size` in
+/// Voxels.
+fn near(camera: &GlobalTransform, corner: [i32; 3], size: [i32; 3], voxel_size: f32) -> bool {
+    let eye = camera.translation();
+    let low = Vec3::from_array(corner.map(|c| c as f32 * voxel_size));
+    let high = low + Vec3::from_array(size.map(|s| s as f32 * voxel_size));
+    eye.clamp(low, high).distance(eye) <= BUILD_REACH_M
+}
+
 /// Whether the crosshair ray meets the ghost's box, `corner` and `size` in Voxels.
 fn aimed_at(camera: &GlobalTransform, corner: [i32; 3], size: [i32; 3], voxel_size: f32) -> bool {
     let (origin, direction) = (camera.translation(), *camera.forward());
@@ -252,10 +268,10 @@ fn aimed_at(camera: &GlobalTransform, corner: [i32; 3], size: [i32; 3], voxel_si
 }
 
 /// With the place Tool in hand: the turn key turns; Place pins a preview where
-/// the Server's fresh answer anchors it, and aimed at the pinned preview sends
-/// the Structure intent; the clear key aimed at it cancels it. Use and Remove
-/// are taken so they send no Use: the Structures key asks for the list. Like an
-/// Edit, nothing is sent by the click that grabs the cursor.
+/// the Server's fresh answer anchors it; near the pinned preview Use sends the
+/// Structure intent; Remove aimed at it, the clear key or the Structures key
+/// cancels it. Place, Use and Remove are taken so they send no Edit or Use.
+/// Like an Edit, nothing is sent by the click that grabs the cursor.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn intercept(
     ownership: Res<Ownership>,
@@ -265,13 +281,16 @@ pub(super) fn intercept(
     camera: Single<&GlobalTransform, With<FlyCamera>>,
     mut tool: ResMut<PlaceTool>,
     (preview, time, world): (Res<Preview>, Res<Time>, Res<WorldSettings>),
-    mut intents: MessageWriter<StructureIntent>,
+    (mut intents, mut prompt): (MessageWriter<StructureIntent>, ResMut<PinPrompt>),
     mut was_grabbed: Local<bool>,
 ) {
     let grabbed = cursor.grab_mode == CursorGrabMode::Locked;
     let ready = grabbed && std::mem::replace(&mut *was_grabbed, grabbed);
     if !holding_place(&hotbar, &catalogue.0) && tool.pinned.is_some() {
         tool.pinned = None;
+    }
+    if !holding_place(&hotbar, &catalogue.0) || !ownership.gameplay() {
+        prompt.set_if_neq(PinPrompt(false));
     }
     if !ownership.gameplay() || !holding_place(&hotbar, &catalogue.0) {
         return;
@@ -288,31 +307,36 @@ pub(super) fn intercept(
         .as_ref()
         .and_then(|intent| preview.fresh(intent, time.elapsed_secs_f64()))
         .and_then(|answer| answer.ghost.as_ref().ok());
-    let on_pin = tool.pinned.is_some()
-        && ghost.is_some_and(|g| aimed_at(&camera, g.corner, g.size, world.voxel_size));
-    if ready && actions.started(Action::Place) {
-        match (tool.pinned, intent) {
-            (Some(_), Some(intent)) if on_pin => {
-                intents.write(intent);
-                tool.pinned = None;
-            }
-            (Some(_), _) => {}
-            (None, Some(_)) => {
-                pin(
-                    &mut tool,
-                    &preview,
-                    &catalogue.0,
-                    &camera,
-                    time.elapsed_secs_f64(),
-                );
-            }
-            (None, None) => {}
-        }
+    let pinned = tool.pinned.is_some();
+    let on_pin =
+        pinned && ghost.is_some_and(|g| aimed_at(&camera, g.corner, g.size, world.voxel_size));
+    let near = pinned && ghost.is_some_and(|g| near(&camera, g.corner, g.size, world.voxel_size));
+    if ready && actions.started(Action::Place) && !pinned {
+        pin(
+            &mut tool,
+            &preview,
+            &catalogue.0,
+            &camera,
+            time.elapsed_secs_f64(),
+        );
     }
-    if on_pin && actions.started(Action::ClearTool) {
+    if ready
+        && actions.started(Action::Use)
+        && near
+        && let Some(intent) = intent
+    {
+        intents.write(intent);
+        tool.pinned = None;
+    }
+    // A stray click elsewhere never throws the preview away; the keys cancel it from anywhere.
+    let cancel = (ready && actions.started(Action::Remove) && on_pin)
+        || (pinned && (actions.started(Action::ClearTool) || actions.started(Action::Structures)));
+    if cancel {
         tool.pinned = None;
         actions.cancel(Action::ClearTool);
+        actions.cancel(Action::Structures);
     }
+    prompt.set_if_neq(PinPrompt(tool.pinned.is_some() && near));
     actions.cancel(Action::Place);
     actions.cancel(Action::Remove);
     actions.cancel(Action::Use);
@@ -738,6 +762,7 @@ pub(super) fn plugin(app: &mut App) {
         .init_session_state::<Preview>()
         .init_session_state::<Ghost>()
         .init_session_state::<GhostPalette>()
+        .init_session_state::<PinPrompt>()
         .add_session_systems(Startup, spawn_meshes)
         .add_session_systems(
             Update,
@@ -804,6 +829,7 @@ mod tests {
             .init_resource::<Preview>()
             .init_resource::<Ghost>()
             .init_resource::<GhostPalette>()
+            .init_resource::<PinPrompt>()
             .insert_resource(WorldSettings::default())
             .add_message::<StructureIntent>()
             .add_message::<StructureAim>()
@@ -897,20 +923,25 @@ mod tests {
     }
 
     #[test]
-    fn place_pins_a_preview_and_aimed_at_it_place_builds_it() {
+    fn place_pins_a_preview_and_near_it_use_builds_it() {
         let mut app = pinned_app();
-        // Walked away, looking elsewhere: the preview stays put and Place builds nothing.
+        // Walked away: the preview stays put, the prompt is gone, and neither Place nor Use builds.
         look_down_at(&mut app, Vec3::new(40.0, 5.0, 40.0));
-        assert!(frame(&mut app, None, Some(MouseButton::Right)).is_empty());
         let asked = aims(&mut app)
             .last()
             .cloned()
             .expect("asked of the pinned anchor");
         assert_eq!(asked.intent.pinned, Some([11, 5, 21]));
+        assert!(frame(&mut app, None, Some(MouseButton::Right)).is_empty());
+        assert!(frame(&mut app, Some(KeyCode::KeyG), None).is_empty());
+        assert!(!app.world().resource::<PinPrompt>().0);
 
         look_down_at(&mut app, Vec3::new(11.0, 5.5, 21.0));
         answer(&mut app, Ok(judged([Some(StructureCell::Places); 4])));
-        let [intent] = &frame(&mut app, None, Some(MouseButton::Right))[..] else {
+        // The prompt follows the answer a frame after it lands.
+        app.update();
+        assert!(app.world().resource::<PinPrompt>().0, "near it, the prompt");
+        let [intent] = &frame(&mut app, Some(KeyCode::KeyG), None)[..] else {
             panic!("one intent");
         };
         assert_eq!(intent.template, "terra:cottage", "the first by default");
@@ -923,19 +954,39 @@ mod tests {
     }
 
     #[test]
-    fn the_clear_key_aimed_at_the_pinned_preview_cancels_it_and_is_taken() {
+    fn the_clear_and_structures_keys_cancel_the_pinned_preview_from_anywhere_and_are_taken() {
+        for key in [KeyCode::Backspace, KeyCode::KeyK] {
+            let mut app = pinned_app();
+            look_down_at(&mut app, Vec3::new(40.0, 5.0, 40.0));
+            app.world_mut()
+                .resource_mut::<ButtonInput<KeyCode>>()
+                .press(key);
+            app.update();
+            assert!(
+                app.world().resource::<PlaceTool>().pinned.is_none(),
+                "{key:?}"
+            );
+            let actions = app.world().resource::<Actions>();
+            assert!(
+                !actions.started(Action::ClearTool) && !actions.started(Action::Structures),
+                "{key:?}: the Tool stays in hand"
+            );
+        }
+    }
+
+    #[test]
+    fn left_mouse_on_the_pinned_preview_cancels_it_and_elsewhere_does_nothing() {
         let mut app = pinned_app();
+        look_down_at(&mut app, Vec3::new(40.0, 5.0, 40.0));
+        frame(&mut app, None, Some(MouseButton::Left));
+        assert!(
+            app.world().resource::<PlaceTool>().pinned.is_some(),
+            "a stray click"
+        );
         look_down_at(&mut app, Vec3::new(11.0, 5.5, 21.0));
         answer(&mut app, Ok(judged([Some(StructureCell::Places); 4])));
-        app.world_mut()
-            .resource_mut::<ButtonInput<KeyCode>>()
-            .press(KeyCode::Backspace);
-        app.update();
+        frame(&mut app, None, Some(MouseButton::Left));
         assert!(app.world().resource::<PlaceTool>().pinned.is_none());
-        assert!(
-            !app.world().resource::<Actions>().started(Action::ClearTool),
-            "the Tool stays in hand"
-        );
     }
 
     #[test]
