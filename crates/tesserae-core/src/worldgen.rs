@@ -19,7 +19,8 @@ mod structures;
 
 pub use loot::{Loot, Stood};
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 use crate::chunk::{CHUNK_SIZE, Chunk, ChunkBuilder};
 use crate::climate::{
@@ -647,6 +648,9 @@ pub struct Worldgen {
     terrain: Option<Terrain>,
     /// Version 3's large chambers.
     caverns: Option<Caverns>,
+    /// The highest ground over a column footprint, by its corners and size in metres, so the sky
+    /// light does not wait on the band's global top.
+    tops: Arc<Mutex<HashMap<[u32; 5], f32>>>,
     caves: Option<CaveField>,
     /// Whether the smoothing pass runs: configured, and a one-Voxel step is at
     /// least `min_rise_m` at this Voxel size.
@@ -899,6 +903,7 @@ impl Worldgen {
             seed: folded,
             inv_feature_size: 1.0 / params.feature_size_m,
             terrain: (params.generator >= LANDFORMS_SINCE).then(|| Terrain::new(folded, &params)),
+            tops: Arc::default(),
             caverns: (params.generator >= LANDFORMS_SINCE && params.caves.is_some())
                 .then(|| Caverns::new(folded, &params)),
             caves: params.caves.map(|p| CaveField::new(folded, p)),
@@ -982,7 +987,8 @@ impl Worldgen {
     }
 
     /// The dry column nearest `from`, searched outwards to `max_m`, for a Player to spawn on: not
-    /// under water, a metre or more above it, and no cliff within a few metres. Under versions 1
+    /// under water, a metre or more above it, no cliff within a few metres, and dry ground all
+    /// round to ~100 m so the Player is on land and not a spit or an islet. Under versions 1
     /// and 2, whose World has no ocean to start in, it is `from` itself.
     pub fn dry_land_near_m(&self, from: [f32; 2], max_m: f32) -> Option<[f32; 2]> {
         if self.terrain.is_none() {
@@ -991,12 +997,23 @@ impl Worldgen {
         const STEP_M: f32 = 16.0;
         const CLIFF_M: f32 = 6.0;
         const CLIFF_DROP_M: f32 = 4.0;
+        const SHORE_RINGS_M: [f32; 2] = [48.0, 100.0];
+        let dry = |x: f32, z: f32| {
+            self.water_level_m(x, z)
+                .is_none_or(|level_m| self.surface_height_m(x, z) >= level_m + 0.5)
+        };
         let suits = |x: f32, z: f32| {
             let h = self.surface_height_m(x, z);
             let clear_of_water = self
                 .water_level_m(x, z)
                 .is_none_or(|level_m| h >= level_m + 1.0);
             clear_of_water
+                && SHORE_RINGS_M.iter().all(|&r| {
+                    (0..8).all(|k| {
+                        let a = k as f32 * std::f32::consts::FRAC_PI_4;
+                        dry(x + r * a.cos(), z + r * a.sin())
+                    })
+                })
                 && (0..8).all(|k| {
                     let a = k as f32 * std::f32::consts::FRAC_PI_4;
                     let (sx, sz) = (x + CLIFF_M * a.cos(), z + CLIFF_M * a.sin());
@@ -1118,6 +1135,54 @@ impl Worldgen {
             columns.max = columns.max.max(*scale);
         }
         Some(columns)
+    }
+
+    /// A height in metres above which nothing generated stands anywhere over the footprint
+    /// `min_m..max_m` on the ground plane: the global bound before version 3, and under it the
+    /// footprint's own highest ground with the overhang and what Plants and Structures stand
+    /// above it, so a Chunk over low ground sees sky without the Chunks above it, which the
+    /// Server does not hold, reaching the band's top.
+    pub fn surface_top_m(&self, min_m: [f32; 2], max_m: [f32; 2]) -> f32 {
+        let (_, global) = self.surface_bounds_m();
+        let Some(terrain) = &self.terrain else {
+            return global;
+        };
+        let key = [
+            min_m[0].to_bits(),
+            min_m[1].to_bits(),
+            max_m[0].to_bits(),
+            max_m[1].to_bits(),
+            0,
+        ];
+        if let Some(&top) = self.tops.lock().unwrap().get(&key) {
+            return top;
+        }
+        // Ground that rises between two samples is smooth to within the detail octaves, so a
+        // fixed slack covers the gap; the lattice is no coarser than a few Voxels of detail.
+        const STEP_M: f32 = 4.0;
+        const SLACK_M: f32 = 8.0;
+        let steps = |a: usize| ((max_m[a] - min_m[a]) / STEP_M).ceil() as u32 + 1;
+        let mut highest = f32::MIN;
+        for j in 0..steps(1) {
+            for i in 0..steps(0) {
+                let x = (min_m[0] + i as f32 * STEP_M).min(max_m[0]);
+                let z = (min_m[1] + j as f32 * STEP_M).min(max_m[1]);
+                // Water stands above ground that is under it, so its level counts.
+                let ground = terrain.height_m(x, z);
+                let water = self
+                    .water_level_m(x, z)
+                    .map_or(ground, |level_m| level_m.max(ground));
+                highest = highest.max(water);
+            }
+        }
+        let above_ground = global - self.terrain_band_m().1;
+        let top = (highest + terrain.overhang_max_m() + above_ground + SLACK_M).min(global);
+        let mut tops = self.tops.lock().unwrap();
+        if tops.len() >= 8192 {
+            tops.clear();
+        }
+        tops.insert(key, top);
+        top
     }
 
     /// Drops the drainage regions this generator has cached. Nothing it answers changes: a region

@@ -487,6 +487,16 @@ fn spawning_finds_dry_land_clear_of_cliffs_and_water() {
         h >= g.water_level_m(sx, sz).unwrap() + 1.0,
         "{h} at {sx},{sz}"
     );
+    for r in [48.0f32, 100.0] {
+        for k in 0..8 {
+            let a = k as f32 * std::f32::consts::FRAC_PI_4;
+            let (x, z) = (sx + r * a.cos(), sz + r * a.sin());
+            assert!(
+                g.water_surface_m(x, z).is_none(),
+                "water {r} m from the spawn"
+            );
+        }
+    }
     for k in 0..8 {
         let a = k as f32 * std::f32::consts::FRAC_PI_4;
         let near = g.surface_height_m(sx + 6.0 * a.cos(), sz + 6.0 * a.sin());
@@ -654,4 +664,41 @@ fn a_cave_cutting_an_overhang_under_water_leaves_water_not_air() {
         }
     }
     assert_eq!(wet, 8);
+}
+
+#[test]
+fn nothing_stands_above_a_footprints_own_top_and_versions_1_and_2_keep_the_global_bound() {
+    let g = Worldgen::new(SEED, 1.0, caved_wet_v3());
+    let (_, global) = g.surface_bounds_m();
+    let mut lower = 0;
+    for j in -12..12 {
+        for i in -12..12 {
+            let min = [i as f32 * 32.0 * 9.0, j as f32 * 32.0 * 11.0];
+            let top = g.surface_top_m(min, [min[0] + 32.0, min[1] + 32.0]);
+            assert!(top <= global);
+            lower += (top < global - 40.0) as u32;
+            let (cx, cz) = ((min[0] / 32.0) as i32, (min[1] / 32.0) as i32);
+            let cy = (top / 32.0).floor() as i32 + 1;
+            assert!(
+                g.chunk(cx, cy, cz).uniform().is_some_and(|v| v.is_air()),
+                "not sky over {min:?}, above {top}"
+            );
+        }
+    }
+    assert!(
+        lower > 100,
+        "{lower} footprints are well under the global bound"
+    );
+    let v2 = Worldgen::new(
+        SEED,
+        1.0,
+        WorldgenParams {
+            generator: 2,
+            ..wet_world()
+        },
+    );
+    assert_eq!(
+        v2.surface_top_m([0.0, 0.0], [32.0, 32.0]),
+        v2.surface_bounds_m().1
+    );
 }

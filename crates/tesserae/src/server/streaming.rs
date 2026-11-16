@@ -1017,7 +1017,9 @@ fn dispatch_relight(
 /// are. In Voxel indices it would be calibrated to one Voxel size, which is the
 /// mistake `docs/adr/0003-voxel-size-is-per-world.md` exists to prevent.
 fn above_the_surface(generator: &WorldGenerator, world: &WorldSettings, coord: ChunkCoord) -> bool {
-    let (_, highest_m) = generator.surface_bounds_m();
+    let size_m = CHUNK_SIZE as f32 * world.voxel_size;
+    let min_m = [coord.x as f32 * size_m, coord.z as f32 * size_m];
+    let highest_m = generator.surface_top_m(min_m, min_m.map(|m| m + size_m));
     let floor_m = (coord.y * CHUNK_SIZE as i32) as f32 * world.voxel_size;
     floor_m > highest_m
 }
