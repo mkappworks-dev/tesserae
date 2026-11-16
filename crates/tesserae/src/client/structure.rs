@@ -66,6 +66,17 @@ impl Tint {
             Tint::Blocked => Color::srgba_u8(0xec, 0x70, 0x70, 217),
         }
     }
+
+    /// How far each side of its cells stands out of the Voxel, as a share of
+    /// one: a cell over a Voxel it replaces is drawn just outside that
+    /// Voxel's faces, or the Voxel hides it; any other just inside, so it
+    /// does not fight the ground it stands on.
+    fn grown(self) -> f32 {
+        match self {
+            Tint::Ground | Tint::Water => GHOST_OUTSET,
+            Tint::Free | Tint::Blocked => -GHOST_INSET,
+        }
+    }
 }
 
 /// How a cell is drawn: a solid box, the outline of a carved one, or not at
@@ -414,9 +425,9 @@ impl Ghost {
 #[derive(Component)]
 pub(super) struct GhostMesh(usize);
 
-/// How much of a Voxel the ghost leaves bare on every outer side, so it does
-/// not fight the ground it stands on.
 const GHOST_INSET: f32 = 0.01;
+/// Wide enough to keep its depth apart from the face under it at 0.25 m.
+const GHOST_OUTSET: f32 = 0.02;
 
 /// Texels across a cell face, and how many of them its edge line takes.
 const EDGE_TEXELS: u32 = 32;
@@ -482,13 +493,13 @@ fn spawn_meshes(
     }
 }
 
-/// The outside of a set of cells: the sides no other cell of the set covers.
-fn hull(cells: &[[i32; 3]], voxel_size: f32) -> Option<Mesh> {
+/// The outside of a set of cells, each side moved out by `grown` metres: the
+/// sides no other cell of the set covers.
+fn hull(cells: &[[i32; 3]], voxel_size: f32, grown: f32) -> Option<Mesh> {
     if cells.is_empty() {
         return None;
     }
     let present: HashSet<[i32; 3]> = cells.iter().copied().collect();
-    let inset = voxel_size * GHOST_INSET;
     let (mut positions, mut normals, mut indices) = (Vec::new(), Vec::new(), Vec::new());
     let (mut uvs, mut shares) = (Vec::new(), Vec::new());
     for &cell in cells {
@@ -500,8 +511,8 @@ fn hull(cells: &[[i32; 3]], voxel_size: f32) -> Option<Mesh> {
                     continue;
                 }
                 let (u, v) = ((axis + 1) % 3, (axis + 2) % 3);
-                let low = Vec3::from_array(cell.map(|c| c as f32 * voxel_size)) + inset;
-                let span = voxel_size - 2.0 * inset;
+                let low = Vec3::from_array(cell.map(|c| c as f32 * voxel_size)) - grown;
+                let span = voxel_size + 2.0 * grown;
                 let corner = |du: f32, dv: f32| {
                     let mut p = low;
                     if up {
@@ -545,40 +556,46 @@ fn hull(cells: &[[i32; 3]], voxel_size: f32) -> Option<Mesh> {
     )
 }
 
-fn draw(
+fn build(
     mut ghost: ResMut<Ghost>,
     world: Res<WorldSettings>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut drawn: Query<(&GhostMesh, &mut Mesh3d, &mut Visibility)>,
-    mut gizmos: Gizmos,
 ) {
-    let size = world.voxel_size;
-    if std::mem::take(&mut ghost.changed) {
-        for (GhostMesh(slot), mut mesh, mut visibility) in &mut drawn {
-            if mesh.0 != Handle::default() {
-                meshes.remove(mesh.0.id());
-            }
-            // A new handle, not an edit in place, so Bevy recomputes the
-            // bounds it culls by.
-            mesh.0 = hull(&ghost.solid[*slot], size)
-                .map(|built| meshes.add(built))
-                .unwrap_or_default();
-            visibility.set_if_neq(if mesh.0 == Handle::default() {
-                Visibility::Hidden
-            } else {
-                Visibility::Visible
-            });
-        }
+    if !std::mem::take(&mut ghost.changed) {
+        return;
     }
+    let size = world.voxel_size;
+    for (GhostMesh(slot), mut mesh, mut visibility) in &mut drawn {
+        if mesh.0 != Handle::default() {
+            meshes.remove(mesh.0.id());
+        }
+        // A new handle, not an edit in place, so Bevy recomputes the
+        // bounds it culls by.
+        mesh.0 = hull(&ghost.solid[*slot], size, size * Tint::ALL[*slot].grown())
+            .map(|built| meshes.add(built))
+            .unwrap_or_default();
+        visibility.set_if_neq(if mesh.0 == Handle::default() {
+            Visibility::Hidden
+        } else {
+            Visibility::Visible
+        });
+    }
+}
+
+fn outline(ghost: Res<Ghost>, world: Res<WorldSettings>, mut gizmos: Gizmos) {
+    let size = world.voxel_size;
+    // Out of the face of the ground it carves, as a cell that replaces it is.
+    let grown = size * Tint::Ground.grown();
     let carved: HashSet<[i32; 3]> = ghost.outlined.iter().copied().collect();
     let colour = Tint::Ground.color().with_alpha(1.0);
     for &[x, y, z] in ghost.outlined.iter().take(MAX_OUTLINES) {
         if carved.contains(&[x, y + 1, z]) {
             continue;
         }
-        let top = (y + 1) as f32 * size;
-        let (x0, z0) = (x as f32 * size, z as f32 * size);
-        let (x1, z1) = (x0 + size, z0 + size);
+        let top = (y + 1) as f32 * size + grown;
+        let (x0, z0) = (x as f32 * size - grown, z as f32 * size - grown);
+        let (x1, z1) = (x0 + size + 2.0 * grown, z0 + size + 2.0 * grown);
         gizmos.linestrip(
             [
                 Vec3::new(x0, top, z0),
@@ -606,7 +623,7 @@ pub(super) fn plugin(app: &mut App) {
                     .before(super::camera::reset)
                     .before(super::removal::hold)
                     .before(super::edit::select_held),
-                (report, receive, track, draw)
+                (report, receive, track, build, outline)
                     .chain()
                     .after(super::view::place)
                     .after(intercept),
@@ -979,6 +996,75 @@ mod tests {
         });
         app.update();
         assert!(!app.world().resource::<Ghost>().shown());
+    }
+
+    /// The bounds, in metres, of one tint's built ghost mesh.
+    fn built_bounds(app: &mut App, tint: Tint) -> (Vec3, Vec3) {
+        let slot = Tint::ALL.iter().position(|t| *t == tint).unwrap();
+        let handle = app
+            .world_mut()
+            .query::<(&GhostMesh, &Mesh3d)>()
+            .iter(app.world())
+            .find(|(GhostMesh(at), _)| *at == slot)
+            .map(|(_, mesh)| mesh.0.clone())
+            .expect("a mesh per tint");
+        let meshes = app.world().resource::<Assets<Mesh>>();
+        let mesh = meshes.get(&handle).expect("the tint has cells");
+        let Some(bevy::mesh::VertexAttributeValues::Float32x3(positions)) =
+            mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+        else {
+            panic!("positions");
+        };
+        positions
+            .iter()
+            .map(|p| Vec3::from_array(*p))
+            .fold((Vec3::MAX, Vec3::MIN), |(low, high), p| {
+                (low.min(p), high.max(p))
+            })
+    }
+
+    #[test]
+    fn cells_that_replace_something_stand_proud_of_its_faces() {
+        use bevy::ecs::system::RunSystemOnce;
+        for voxel_size in [1.0, 0.5, 0.25] {
+            let mut app = app(Holding::Tool(PLACE));
+            app.insert_resource(WorldSettings {
+                voxel_size,
+                ..default()
+            })
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<StandardMaterial>>()
+            .init_resource::<Assets<Image>>()
+            .add_systems(Update, build.after(track));
+            app.world_mut().run_system_once(spawn_meshes).unwrap();
+            answer(
+                &mut app,
+                Ok(judged([
+                    Some(StructureCell::Places),
+                    Some(StructureCell::Replaces),
+                    Some(StructureCell::ReplacesFluid),
+                    None,
+                ])),
+            );
+            let voxel = |at: [i32; 3]| {
+                let low = Vec3::from_array(at.map(|c| c as f32)) * voxel_size;
+                (low, low + voxel_size)
+            };
+            for (tint, at) in [(Tint::Ground, [11, 5, 20]), (Tint::Water, [10, 5, 21])] {
+                let (low, high) = built_bounds(&mut app, tint);
+                let (voxel_low, voxel_high) = voxel(at);
+                assert!(
+                    low.cmplt(voxel_low).all() && high.cmpgt(voxel_high).all(),
+                    "{tint:?} at {voxel_size} m: {low}..{high} lies outside {voxel_low}..{voxel_high}"
+                );
+            }
+            let (low, high) = built_bounds(&mut app, Tint::Free);
+            let (voxel_low, voxel_high) = voxel([10, 5, 20]);
+            assert!(
+                low.cmpgt(voxel_low).all() && high.cmplt(voxel_high).all(),
+                "a free cell stays inside its Voxel at {voxel_size} m"
+            );
+        }
     }
 
     #[test]
