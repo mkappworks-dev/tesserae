@@ -626,29 +626,38 @@ const B = {
     for (const y of [5, 6]) h.at(5, y, 8, "air");
     return g.done();
   },
-  stall: () => {
-    const g = new Grid();
-    for (const [x, z] of [
-      [0, 0],
-      [4, 0],
-      [0, 3],
-      [4, 3],
-    ])
-      g.fill(x, 0, z, x, z === 0 ? 3 : 2, z, M("frame", "post"));
-    for (let x = -1; x <= 5; x++) {
-      for (let z = -1; z <= 4; z++)
+  /*
+   * Posts on corner stones: a stone flush in the Ground layer under each and another standing on it,
+   * so every post meets the ground wherever it is placed. A paved floor, a counter at the back and an
+   * awning higher at the front.
+   */
+  stall: (w = 7, d = 5) => {
+    const g = new Grid(),
+      [x1, z1] = [w - 1, d - 1],
+      corners = [
+        [0, 0],
+        [x1, 0],
+        [0, z1],
+        [x1, z1],
+      ];
+    for (let x = 0; x <= x1; x++)
+      for (let z = 0; z <= z1; z++) g.put(x, 0, z, M("floor"));
+    for (const [x, z] of corners) {
+      g.fill(x, 0, z, x, 1, z, M("base"));
+      g.fill(x, 2, z, x, z === 0 ? 4 : 3, z, M("frame", "post"));
+    }
+    for (let x = -1; x <= x1 + 1; x++)
+      for (let z = -1; z <= z1 + 1; z++)
         g.put(
           x,
-          z <= 0 ? 4 : z <= 2 ? 3 : 3,
+          z <= 0 ? 5 : 4,
           z,
-          z === 4 ? M("roof", "stair", 2) : M("roof", z <= 0 ? "slab" : "slab"),
+          z === z1 + 1 ? M("roof", "stair", 2) : M("roof", "slab"),
         );
-      if (x >= 0 && x <= 4) g.put(x, 1, 3, M("trim", "slab"));
-    }
-    for (let x = 0; x <= 4; x++) g.put(x, 0, 2, M("floor", "slab"));
-    g.put(1, 0, 0, M("chest"));
-    g.put(3, 0, 0, M("chest"));
-    g.put(2, 0, 0, M("lamp"));
+    for (let x = 1; x < x1; x++) g.put(x, 1, z1 - 1, M("trim"));
+    g.put(2, 1, 0, M("chest"));
+    g.put(x1 - 2, 1, 0, M("chest"));
+    g.put(w >> 1, 4, 0, M("lamp"));
     return g.done();
   },
   /* A shaft of standing water from its floor to the ring's top; posts on the ring. */

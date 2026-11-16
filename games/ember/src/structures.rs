@@ -25,7 +25,7 @@ const HAMLET: Village = Village {
 const VILLAGE: Village = Village {
     game: "ember",
     name: "village",
-    radius_m: (40.0, 64.0),
+    radius_m: (44.0, 64.0),
     spacing_m: 160.0,
     chance: 0.8,
     near_spawn: true,

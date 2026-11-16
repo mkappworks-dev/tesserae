@@ -2188,9 +2188,9 @@
    "label": "Fish market",
    "kind": "trade",
    "size": [
-    7,
-    5,
-    6
+    9,
+    6,
+    7
    ],
    "ground_layer": 0,
    "foundation": "tidewater:sandstone",
@@ -2207,36 +2207,42 @@
     },
     {
      "symbol": "A",
-     "material": "tidewater:palm_log",
-     "shape": "core:post",
+     "material": "tidewater:sandstone",
+     "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "B",
      "material": "tidewater:driftwood",
-     "shape": "core:slab",
+     "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "C",
-     "material": "tidewater:sailcloth",
-     "shape": "core:slab",
+     "material": "tidewater:palm_log",
+     "shape": "core:post",
      "orientation": 0
     },
     {
      "symbol": "D",
      "material": "tidewater:sailcloth",
+     "shape": "core:slab",
+     "orientation": 0
+    },
+    {
+     "symbol": "E",
+     "material": "tidewater:sailcloth",
      "shape": "core:stair",
      "orientation": 2
     },
     {
-     "symbol": "E",
+     "symbol": "F",
      "material": "tidewater:chest",
      "shape": "core:cube",
      "orientation": 0
     },
     {
-     "symbol": "F",
+     "symbol": "G",
      "material": "tidewater:lamp",
      "shape": "core:cube",
      "orientation": 0
@@ -2244,44 +2250,58 @@
    ],
    "layers": [
     [
-     ".......",
-     ".AEFEA.",
-     ".......",
-     ".BBBBB.",
-     ".A...A.",
-     "......."
+     ".........",
+     ".ABBBBBA.",
+     ".BBBBBBB.",
+     ".BBBBBBB.",
+     ".BBBBBBB.",
+     ".ABBBBBA.",
+     "........."
     ],
     [
-     ".......",
-     ".A...A.",
-     ".......",
-     ".......",
-     ".BBBBB.",
-     "......."
+     ".........",
+     ".A.F.F.A.",
+     ".........",
+     ".........",
+     "..BBBBB..",
+     ".A.....A.",
+     "........."
     ],
     [
-     ".......",
-     ".A...A.",
-     ".......",
-     ".......",
-     ".A...A.",
-     "......."
+     ".........",
+     ".C.....C.",
+     ".........",
+     ".........",
+     ".........",
+     ".C.....C.",
+     "........."
     ],
     [
-     ".......",
-     ".A...A.",
-     "CCCCCCC",
-     "CCCCCCC",
-     "CCCCCCC",
-     "DDDDDDD"
+     ".........",
+     ".C.....C.",
+     ".........",
+     ".........",
+     ".........",
+     ".C.....C.",
+     "........."
     ],
     [
-     "CCCCCCC",
-     "CCCCCCC",
-     ".......",
-     ".......",
-     ".......",
-     "......."
+     ".........",
+     ".C..G..C.",
+     "DDDDDDDDD",
+     "DDDDDDDDD",
+     "DDDDDDDDD",
+     "DDDDDDDDD",
+     "EEEEEEEEE"
+    ],
+    [
+     "DDDDDDDDD",
+     "DDDDDDDDD",
+     ".........",
+     ".........",
+     ".........",
+     ".........",
+     "........."
     ]
    ]
   },

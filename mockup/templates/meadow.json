@@ -2299,9 +2299,9 @@
    "label": "Honey stall",
    "kind": "trade",
    "size": [
-    7,
-    5,
-    6
+    9,
+    6,
+    7
    ],
    "ground_layer": 0,
    "foundation": "meadow:fieldstone",
@@ -2318,36 +2318,42 @@
     },
     {
      "symbol": "A",
-     "material": "meadow:birch_log",
-     "shape": "core:post",
+     "material": "meadow:fieldstone",
+     "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "B",
      "material": "meadow:birch_planks",
-     "shape": "core:slab",
+     "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "C",
-     "material": "meadow:bloom_cloth",
-     "shape": "core:slab",
+     "material": "meadow:birch_log",
+     "shape": "core:post",
      "orientation": 0
     },
     {
      "symbol": "D",
      "material": "meadow:bloom_cloth",
+     "shape": "core:slab",
+     "orientation": 0
+    },
+    {
+     "symbol": "E",
+     "material": "meadow:bloom_cloth",
      "shape": "core:stair",
      "orientation": 2
     },
     {
-     "symbol": "E",
+     "symbol": "F",
      "material": "meadow:chest",
      "shape": "core:cube",
      "orientation": 0
     },
     {
-     "symbol": "F",
+     "symbol": "G",
      "material": "meadow:lamp",
      "shape": "core:cube",
      "orientation": 0
@@ -2355,44 +2361,58 @@
    ],
    "layers": [
     [
-     ".......",
-     ".AEFEA.",
-     ".......",
-     ".BBBBB.",
-     ".A...A.",
-     "......."
+     ".........",
+     ".ABBBBBA.",
+     ".BBBBBBB.",
+     ".BBBBBBB.",
+     ".BBBBBBB.",
+     ".ABBBBBA.",
+     "........."
     ],
     [
-     ".......",
-     ".A...A.",
-     ".......",
-     ".......",
-     ".BBBBB.",
-     "......."
+     ".........",
+     ".A.F.F.A.",
+     ".........",
+     ".........",
+     "..BBBBB..",
+     ".A.....A.",
+     "........."
     ],
     [
-     ".......",
-     ".A...A.",
-     ".......",
-     ".......",
-     ".A...A.",
-     "......."
+     ".........",
+     ".C.....C.",
+     ".........",
+     ".........",
+     ".........",
+     ".C.....C.",
+     "........."
     ],
     [
-     ".......",
-     ".A...A.",
-     "CCCCCCC",
-     "CCCCCCC",
-     "CCCCCCC",
-     "DDDDDDD"
+     ".........",
+     ".C.....C.",
+     ".........",
+     ".........",
+     ".........",
+     ".C.....C.",
+     "........."
     ],
     [
-     "CCCCCCC",
-     "CCCCCCC",
-     ".......",
-     ".......",
-     ".......",
-     "......."
+     ".........",
+     ".C..G..C.",
+     "DDDDDDDDD",
+     "DDDDDDDDD",
+     "DDDDDDDDD",
+     "DDDDDDDDD",
+     "EEEEEEEEE"
+    ],
+    [
+     "DDDDDDDDD",
+     "DDDDDDDDD",
+     ".........",
+     ".........",
+     ".........",
+     ".........",
+     "........."
     ]
    ]
   },
