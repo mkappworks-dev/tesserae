@@ -1152,7 +1152,7 @@ const TINT = {
   blocked: ["#ec7070", 0.85],
 };
 /* The in-game ghost: what placing each cell does, never what it looks like. */
-function structureSvg(small) {
+function structureSvg() {
   const s = state.structure,
     t = turned(s.template, s.turn),
     S = 16,
@@ -1241,7 +1241,7 @@ function structureSvg(small) {
     ys = coords.map((p) => p[1]),
     minX = Math.min(...xs) - 10,
     minY = Math.min(...ys) - 10;
-  return `<svg class="${small ? "structure-thumb" : "layout-world-grid"}" viewBox="${minX} ${minY} ${Math.max(...xs) - minX + 10} ${Math.max(...ys) - minY + 10}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Ghost of the ${TEMPLATES[s.template].name}, facing ${FACING[s.turn]}">${out.join("")}</svg>`;
+  return `<svg class="layout-world-grid" viewBox="${minX} ${minY} ${Math.max(...xs) - minX + 10} ${Math.max(...ys) - minY + 10}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Ghost of the ${TEMPLATES[s.template].name}, facing ${FACING[s.turn]}">${out.join("")}</svg>`;
 }
 
 function rotateBox([[x0, y0, z0], [x1, y1, z1]], turn) {
@@ -1528,7 +1528,7 @@ function structuresPage() {
   };
   const stage =
     s.view === "placing"
-      ? `<div class="layout-ghost">${structureSvg(false)}</div>`
+      ? `<div class="layout-ghost">${structureSvg()}</div>`
       : `<div class="layout-ghost"><canvas id="structure-canvas" class="structure-canvas" role="img" aria-label="${tpl.name} from ${s.view}, facing ${FACING[s.turn]}"></canvas></div>`;
   const games = Object.keys(GAME_TEMPLATES).reduce(
     (o, g) => ({ ...o, [g]: g }),
@@ -1546,7 +1546,7 @@ function structureHud() {
   const s = state.structure,
     tally = structureTally(),
     [tone, text] = structureOutcome();
-  return `<aside class="layout-status structure-hud"><span>${icon("layout", 18)} Place Tool</span><b>${TEMPLATES[s.template].name} · facing ${FACING[s.turn]}</b>${structureSvg(true)}<small>${tally.size.map((n) => n.toFixed(1)).join(" × ")} m · ${structureNumber(tally.total)} Voxels</small><div class="structure-keys compact">${structureLegend(tally)}</div><div class="structure-outcome ${tone}" role="status">${text}</div><small><kbd>G</kbd> Templates <kbd>R</kbd> Turn</small><small>Right mouse places it whole</small><div class="row">${button("Templates · G", "structure-open", { small: true })}${button("Place", "structure-place", { small: true })}</div></aside>`;
+  return `<aside class="layout-status structure-hud"><span>${icon("layout", 18)} Place Tool</span><b>${TEMPLATES[s.template].name} · facing ${FACING[s.turn]}</b><small>${tally.size.map((n) => n.toFixed(1)).join(" × ")} m · ${structureNumber(tally.total)} Voxels</small><div class="structure-keys compact">${structureLegend(tally)}</div><div class="structure-outcome ${tone}" role="status">${text}</div><small><kbd>G</kbd> Templates <kbd>R</kbd> Turn</small><small>Right mouse places it whole</small></aside>`;
 }
 
 function structuresPlace() {

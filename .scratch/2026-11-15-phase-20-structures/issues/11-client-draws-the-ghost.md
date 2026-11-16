@@ -53,10 +53,11 @@ Place, with the HUD and refusals approved in ticket 01.
 - Against the mockup: the list keeps the header, TEMPLATES · GAME · N,
   picks, TURN row with Facing, WHAT PLACING DOES legend, Authored / This
   World totals, outcome box and the footer (Place here, Put the Tool away).
-  The HUD card keeps title, facing, size and Voxels, compact legend,
-  outcome and key hints. Left out: the HUD's isometric thumbnail (the ghost
-  is in the World itself) and its two buttons (the cursor is grabbed in
-  play; G and right mouse do the same). Outcome texts for refusals are the
+  The HUD card keeps the mockup's Place Tool icon, title, facing, size and
+  Voxels, compact legend, outcome and key hints. The mockup's card has since
+  dropped its isometric thumbnail (the ghost is in the World itself) and its
+  two buttons (the cursor is grabbed in play; G and right mouse do the
+  same), so the two now match. Outcome texts for refusals are the
   Server's `RejectReason::message()` ("Nothing in reach.", "You are
   standing there.") rather than the mockup's wording.
 - Not checked in the real game: no Game declares a Template yet, so the

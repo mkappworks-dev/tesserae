@@ -112,11 +112,6 @@
   top: 150px;
   width: 270px;
 }
-.structure-thumb {
-  width: 100%;
-  height: 130px;
-  filter: drop-shadow(0 4px 10px #000a);
-}
 .structure-games {
   flex-wrap: wrap;
 }
