@@ -19,6 +19,8 @@ pub(super) fn on_create_world(l: &mut Launcher, cx: &mut Acting, act: Act) {
                     .unwrap_or_default(),
                 ..Form::default()
             };
+            // In the field, so the seed is seen and can be copied before the World is made.
+            l.form.seed = l.form.random_seed.to_string();
             l.initial = l.form.clone();
             l.show(Screen::Create(Step::World));
         }

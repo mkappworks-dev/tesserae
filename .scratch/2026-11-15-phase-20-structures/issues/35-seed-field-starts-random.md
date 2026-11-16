@@ -1,6 +1,6 @@
 # 35: The seed field starts with a random seed
 
-Status: needs-info
+Status: done
 
 Spec: [Phase 20](../spec.md).
 
@@ -30,9 +30,14 @@ a fixed salt per feature and positions in metres.
 
 - [x] The mockup opens the form with a random numeric seed and Randomize
       draws another.
-- [ ] The mockup is approved.
-- [ ] The Client's form opens with `random_seed` in the field, tested.
+- [x] The mockup is approved.
+- [x] The Client's form opens with `random_seed` in the field, tested.
 
 ## Comments
 
-Waiting for the user to approve the mockup before the Client changes.
+Mockup approved. `Act::New` puts the form's `random_seed` in the field and
+takes that as the untouched form, so leaving it asks nothing; Recreate keeps
+the source World's seed. The label reads "Seed: N" for a number, "Seed from
+these words: N" for words, and "Random seed: N" for a field emptied by hand;
+the hint matches the mockup. Test:
+`a_new_form_opens_with_its_random_seed_in_the_field`.

@@ -1755,7 +1755,7 @@ fn form(
             "Words or a number",
             Field::Seed,
             &f.seed,
-            "The same seed and generation settings create the same terrain. Blank picks a random seed.",
+            "Starts with a random seed. Type words or a number to choose your own: the same seed and generation settings create the same terrain.",
             "",
         );
         gap(col, 18.0);
