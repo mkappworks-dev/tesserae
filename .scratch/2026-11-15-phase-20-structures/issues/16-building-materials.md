@@ -1,6 +1,6 @@
 # 16: Building Materials, textures and Stations per Game
 
-Status: ready-for-human
+Status: done
 
 Blocked by: 12
 
@@ -23,7 +23,7 @@ ship PNG art.
 
 ## Acceptance criteria
 
-- [ ] Every Material the mockup's Templates name exists in its Game with a
+- [x] Every Material the mockup's Templates name exists in its Game with a
       texture and passes the Obtainable check.
 - [x] Each Material has a Recipe or a worldgen source, and the Catalogue lists
       it in Creative.
@@ -74,3 +74,9 @@ ship PNG art.
 - `the_demo_games_textures_are_unchanged` was re-pinned. Before re-pinning,
   the fingerprint of every pre-existing texture was checked equal to its old
   pin in all five Games, so no existing art moved.
+- Closed by ticket 17 on 2026-11-16. Decision: each of Tidewater, Ember, Lumen
+  and Meadow declares its own door, chest, workbench, glass and lamp, painted
+  by `demo_kit::building` in the Game's style, and the mockup names them
+  instead of Terra's. Ticket 12's real check (`server/obtainable.rs`) runs on
+  every Game's load and refuses none of the Templates' Materials, so
+  criterion 1 holds.
