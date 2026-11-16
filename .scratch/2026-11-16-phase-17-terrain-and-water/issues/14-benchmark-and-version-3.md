@@ -15,3 +15,5 @@ Interleaved CPU-time A/B against `main`, recorded version 3 digests, and the bum
 - [ ] Surface Chunks within about 3x of version 2; early-outs unregressed.
 - [ ] Versions 1 and 2 digests unchanged.
 - [ ] A new World is version 3; a version 2 World opens as version 2.
+
+- [ ] Flat-ground and overhang Chunks are within the benchmark budget (moved here from ticket 05).

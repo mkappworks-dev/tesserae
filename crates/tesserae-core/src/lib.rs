@@ -13,6 +13,7 @@ pub mod climate;
 pub mod collide;
 pub mod combustion;
 pub mod craft;
+pub(crate) mod drainage;
 pub mod entity;
 pub mod fire;
 pub mod flow;

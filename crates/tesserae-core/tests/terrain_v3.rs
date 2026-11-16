@@ -177,7 +177,7 @@ fn the_sea_fills_ocean_columns_up_to_sea_level_and_no_higher() {
 }
 
 #[test]
-fn water_surface_is_sea_level_over_ocean_and_none_over_land() {
+fn water_surface_is_the_water_over_wet_ground_and_none_over_land() {
     let g = Worldgen::new(SEED, 1.0, wet_world());
     let (mut wet, mut dry) = (0, 0);
     for j in -30..30 {
@@ -185,12 +185,12 @@ fn water_surface_is_sea_level_over_ocean_and_none_over_land() {
             let (x, z) = (i as f32 * 211.0, j as f32 * 211.0);
             match g.water_surface_m(x, z) {
                 Some(level) => {
-                    assert_eq!(level, 24.0);
-                    assert!(g.surface_height_m(x, z) < 24.0);
+                    assert!(level >= 24.0, "sea or higher inland water: {level}");
+                    assert!(g.surface_height_m(x, z) < level);
                     wet += 1;
                 }
                 None => {
-                    assert!(g.surface_height_m(x, z) >= 24.0);
+                    assert!(g.surface_height_m(x, z) >= g.water_level_m(x, z).unwrap());
                     dry += 1;
                 }
             }
@@ -312,6 +312,78 @@ fn nothing_stands_more_than_the_overhang_above_the_base_surface() {
                 z.rem_euclid(32) as usize,
             );
             assert!(v.is_air(), "solid at {x},{y},{z} over ground {h}");
+        }
+    }
+}
+
+fn wet_columns(g: &Worldgen, x0: f32, z0: f32, n: i32, step: f32) -> Vec<(f32, f32, f32)> {
+    (0..n)
+        .flat_map(|j| (0..n).map(move |i| (x0 + i as f32 * step, z0 + j as f32 * step)))
+        .filter_map(|(x, z)| {
+            let level = g.water_level_m(x, z)?;
+            (g.surface_height_m(x, z) < level && level > 24.5).then_some((x, z, level))
+        })
+        .collect()
+}
+
+#[test]
+fn inland_water_exists_and_sits_above_the_sea() {
+    let g = Worldgen::new(SEED, 1.0, wet_world());
+    let inland = wet_columns(&g, -4096.0, -4096.0, 128, 64.0);
+    assert!(inland.len() > 40, "{} inland wet columns", inland.len());
+}
+
+#[test]
+fn drainage_gives_the_same_answers_with_a_cold_cache() {
+    let g = Worldgen::new(SEED, 1.0, wet_world());
+    let at = |g: &Worldgen| {
+        (0..40)
+            .flat_map(|j| (0..40).map(move |i| (i as f32 * 53.0 - 900.0, j as f32 * 71.0 - 1300.0)))
+            .map(|(x, z)| (g.surface_height_m(x, z), g.water_level_m(x, z)))
+            .collect::<Vec<_>>()
+    };
+    let warm = at(&g);
+    g.forget_regions();
+    let cold = at(&g);
+    let fresh = at(&Worldgen::new(SEED, 1.0, wet_world()));
+    assert_eq!(warm, cold);
+    assert_eq!(warm, fresh);
+}
+
+#[test]
+fn lakes_are_flat_and_hold_water_above_their_floor() {
+    let g = Worldgen::new(SEED, 1.0, wet_world());
+    let wet = wet_columns(&g, -4096.0, -4096.0, 256, 32.0);
+    assert!(!wet.is_empty());
+    for (x, z, level) in wet.iter().take(2000) {
+        assert!(g.surface_height_m(*x, *z) < *level);
+    }
+}
+
+#[test]
+fn a_river_valley_is_not_a_cliff_across_a_region_border() {
+    let g = Worldgen::new(SEED, 1.0, wet_world());
+    let mut worst = 0.0f32;
+    for k in 0..2000 {
+        let z = k as f32 * 3.7 - 3000.0;
+        for border in [-2048.0f32, 0.0, 2048.0] {
+            let step =
+                (g.surface_height_m(border + 0.5, z) - g.surface_height_m(border - 0.5, z)).abs();
+            worst = worst.max(step);
+        }
+    }
+    assert!(worst < 8.0, "a {worst} m step across a region border");
+}
+
+#[test]
+fn rivers_and_lakes_are_in_the_same_metres_at_every_voxel_size() {
+    let fine = Worldgen::new(SEED, 0.5, wet_world());
+    let coarse = Worldgen::new(SEED, 4.0, wet_world());
+    for j in 0..40 {
+        for i in 0..40 {
+            let (x, z) = (i as f32 * 97.0 - 1900.0, j as f32 * 83.0 - 1600.0);
+            assert_eq!(fine.water_level_m(x, z), coarse.water_level_m(x, z));
+            assert_eq!(fine.surface_height_m(x, z), coarse.surface_height_m(x, z));
         }
     }
 }

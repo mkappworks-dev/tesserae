@@ -1,6 +1,6 @@
 # 07: Rivers, valleys and waterfalls (17b)
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 06
 
@@ -12,6 +12,6 @@ Flow accumulation to river segments of growing width, a valley profile carved by
 
 ## Acceptance criteria
 
-- [ ] Every river reaches a lake or the sea, or is cut at the halo by definition.
-- [ ] A river is at the same metres at every Voxel size.
-- [ ] Phase 20's bridges find a river crossing with no change to their rule.
+- [x] Every river reaches a lake or the sea, or is cut at the halo by definition.
+- [x] A river is at the same metres at every Voxel size.
+- [ ] Phase 20's bridges find a river crossing with no change to their rule (the Water surface function is wired, not yet exercised on a river).

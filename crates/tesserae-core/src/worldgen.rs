@@ -965,8 +965,12 @@ impl Worldgen {
 
     /// The height up to which open air over a column fills with the Game's fluid, if the Game
     /// declared one. The ground there may stand above it, which is a dry column.
-    pub fn water_level_m(&self, _x_m: f32, _z_m: f32) -> Option<f32> {
-        self.water.map(|w| w.level_m)
+    pub fn water_level_m(&self, x_m: f32, z_m: f32) -> Option<f32> {
+        let sea = self.water?.level_m;
+        match &self.terrain {
+            None => Some(sea),
+            Some(terrain) => Some(terrain.inland_water_m(x_m, z_m).map_or(sea, |l| l.max(sea))),
+        }
     }
 
     /// The Water surface over a column: the height of the water standing or running on it, `None`
@@ -1049,6 +1053,14 @@ impl Worldgen {
             columns.max = columns.max.max(*scale);
         }
         Some(columns)
+    }
+
+    /// Drops the drainage regions this generator has cached. Nothing it answers changes: a region
+    /// is solved again, to the same result, when it is next asked.
+    pub fn forget_regions(&self) {
+        if let Some(terrain) = &self.terrain {
+            terrain.forget_regions();
+        }
     }
 
     /// Version 3's fields at a column; `None` under version 1 or 2.
@@ -1228,7 +1240,7 @@ impl Worldgen {
             .flat_map(|z| (0..CHUNK_SIZE as i32).map(move |x| surface_index(x, z)))
             .map(|i| surface_m[i])
             .fold(f32::MIN, f32::max)
-            + self.terrain.map_or(0.0, |t| t.overhang_max_m());
+            + self.terrain.as_ref().map_or(0.0, |t| t.overhang_max_m());
         // A Chunk above every column holds only air and water, which take nothing from a Biome.
         let columns = if floor_m <= top_m {
             self.column_grounds(cx, cz)
@@ -1281,9 +1293,13 @@ impl Worldgen {
                     .map_or(ground, |columns| columns[z * CHUNK_SIZE + x]);
                 let biome = self.column_biome([cx, cz], [x, z]);
                 let water_level_m = self.water_level_m(x_m, z_m);
-                let amp_m = self.terrain.map_or(0.0, |t| t.overhang_amp_m(x_m, z_m));
+                let amp_m = self
+                    .terrain
+                    .as_ref()
+                    .map_or(0.0, |t| t.overhang_amp_m(x_m, z_m));
                 let push_m = |y_m: f32| {
                     self.terrain
+                        .as_ref()
                         .map_or(0.0, |t| t.overhang_push_m(x_m, y_m, z_m, amp_m))
                 };
 

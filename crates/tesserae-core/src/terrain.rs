@@ -1,6 +1,10 @@
 //! Generator version 3's terrain: a vertical band around Sea level inside which every field lives.
 //! See `docs/adr/0030-generator-version-3-is-a-layered-field-stack-in-a-declared-band.md`.
 
+use std::sync::Arc;
+
+use crate::drainage::Drainage;
+
 /// The first Generator version whose terrain is the layered field stack.
 pub const LANDFORMS_SINCE: u32 = 3;
 
@@ -86,7 +90,7 @@ const VOLCANO_RADIUS_M: f32 = 700.0;
 /// Version 3's base ground: Sea level, the band, and the detail octaves a Game tunes with
 /// `feature_size_m`, `octaves` and `relief_m`.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct Terrain {
+struct Base {
     seed: u32,
     sea_m: f32,
     depth_m: f32,
@@ -112,9 +116,9 @@ fn curve(points: &[(f32, f32)], t: f32) -> f32 {
     v0 + (v1 - v0) * smooth(t0, t1, t)
 }
 
-impl Terrain {
-    pub(crate) fn new(seed: u32, p: &crate::WorldgenParams) -> Self {
-        Terrain {
+impl Base {
+    fn new(seed: u32, p: &crate::WorldgenParams) -> Self {
+        Base {
             seed,
             sea_m: p.sea_level_m,
             depth_m: p.landforms.depth_m,
@@ -141,7 +145,7 @@ impl Terrain {
         )
     }
 
-    pub(crate) fn fields(&self, x_m: f32, z_m: f32) -> Fields {
+    fn fields(&self, x_m: f32, z_m: f32) -> Fields {
         let (wx, wz) = self.warped(x_m, z_m);
         self.fields_warped(wx, wz)
     }
@@ -173,8 +177,8 @@ impl Terrain {
         }
     }
 
-    /// The ground's height in metres: inside `sea - depth ..= sea + height`.
-    pub(crate) fn height_m(&self, x_m: f32, z_m: f32) -> f32 {
+    /// The ground's height in metres before any river carves it.
+    fn base_height_m(&self, x_m: f32, z_m: f32) -> f32 {
         let seed = self.seed;
         let (wx, wz) = self.warped(x_m, z_m);
         let f = self.fields_warped(wx, wz);
@@ -243,13 +247,13 @@ impl Terrain {
     }
 
     /// The most the density can push the surface anywhere, which widens the early-out bounds.
-    pub(crate) fn overhang_max_m(&self) -> f32 {
+    fn overhang_max_m(&self) -> f32 {
         self.overhang_m
     }
 
     /// How far, in metres, the 3D density pushes the surface up or down over a column: zero on
     /// flat ground, up to `overhang_m` on rugged.
-    pub(crate) fn overhang_amp_m(&self, x_m: f32, z_m: f32) -> f32 {
+    fn overhang_amp_m(&self, x_m: f32, z_m: f32) -> f32 {
         if self.overhang_m <= 0.0 {
             return 0.0;
         }
@@ -257,7 +261,7 @@ impl Terrain {
     }
 
     /// The signed push of the density at a point, in `-amp_m..amp_m`: positive is solid.
-    pub(crate) fn overhang_push_m(&self, x_m: f32, y_m: f32, z_m: f32, amp_m: f32) -> f32 {
+    fn overhang_push_m(&self, x_m: f32, y_m: f32, z_m: f32, amp_m: f32) -> f32 {
         let n = crate::noise::fbm3(
             x_m / OVERHANG_SIZE_M,
             y_m / OVERHANG_SIZE_M,
@@ -299,5 +303,68 @@ impl Terrain {
             }
         }
         best * inland
+    }
+}
+
+/// Version 3's ground and water: the base landforms, and the lakes and rivers drained over them.
+#[derive(Clone)]
+pub(crate) struct Terrain {
+    base: Base,
+    drainage: Arc<Drainage>,
+}
+
+impl Terrain {
+    pub(crate) fn new(seed: u32, p: &crate::WorldgenParams) -> Self {
+        let base = Base::new(seed, p);
+        Terrain {
+            base,
+            drainage: Arc::new(Drainage::new(p.sea_level_m, move |x, z| {
+                base.base_height_m(x, z)
+            })),
+        }
+    }
+
+    pub(crate) fn fields(&self, x_m: f32, z_m: f32) -> Fields {
+        self.base.fields(x_m, z_m)
+    }
+
+    /// The ground's height in metres: inside `sea - depth ..= sea + height`, with rivers' valleys
+    /// cut into it.
+    pub(crate) fn height_m(&self, x_m: f32, z_m: f32) -> f32 {
+        let h = self.base.base_height_m(x_m, z_m);
+        match self.drainage.wet(x_m, z_m).ground_ceiling_m {
+            Some((ceiling_m, fade)) if ceiling_m < h => h - (h - ceiling_m) * fade,
+            _ => h,
+        }
+    }
+
+    /// The level lake or river water stands at over a column, if any reaches it; the sea is the
+    /// caller's.
+    pub(crate) fn inland_water_m(&self, x_m: f32, z_m: f32) -> Option<f32> {
+        self.drainage.wet(x_m, z_m).level_m
+    }
+
+    pub(crate) fn overhang_max_m(&self) -> f32 {
+        self.base.overhang_max_m()
+    }
+
+    pub(crate) fn overhang_amp_m(&self, x_m: f32, z_m: f32) -> f32 {
+        self.base.overhang_amp_m(x_m, z_m)
+    }
+
+    pub(crate) fn overhang_push_m(&self, x_m: f32, y_m: f32, z_m: f32, amp_m: f32) -> f32 {
+        self.base.overhang_push_m(x_m, y_m, z_m, amp_m)
+    }
+
+    pub(crate) fn forget_regions(&self) {
+        self.drainage.forget();
+    }
+}
+
+impl std::fmt::Debug for Terrain {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Terrain")
+            .field("base", &self.base)
+            .finish_non_exhaustive()
     }
 }

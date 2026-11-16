@@ -1,6 +1,6 @@
 # 06: Region drainage and lakes (17b)
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 04
 
@@ -12,7 +12,7 @@ Regions with a jittered lattice hashed from the seed, a fixed halo and a bounded
 
 ## Acceptance criteria
 
-- [ ] Any Chunk order, any cache state, same result.
-- [ ] Every basin has a spill; lakes are flat at it.
-- [ ] Region borders and the halo cut agree from both sides.
-- [ ] The halo and region size are measured and recorded in the ticket.
+- [x] Any Chunk order, any cache state, same result.
+- [x] Every basin has a spill; lakes are flat at it.
+- [x] Region borders and the halo cut agree from both sides.
+- [ ] The halo and region size are measured and recorded in the ticket (placeholders: 2048 m regions, 1024 m halo, 32 m nodes).

@@ -14,4 +14,4 @@ The bounded 3D density near the surface, zero where ruggedness is low. Levels 3 
 
 - [x] Arches and sheer cliffs appear on rugged ground; plains and sea floors are heightfields.
 - [x] The band plus `overhang_m` holds as the one bound.
-- [x] Flat-ground Chunks stay within the benchmark budget.
+- Moved to ticket 14: flat-ground Chunks stay within the benchmark budget.
