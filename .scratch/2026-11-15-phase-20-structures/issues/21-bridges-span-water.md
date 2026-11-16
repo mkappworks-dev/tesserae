@@ -56,9 +56,10 @@ A spanning Template's long axis, after its turn, is its span.
   - leaves the terrain under its span untouched but for its solid cells;
   - looks the same in any Chunk order and at 1.0, 0.5 and 0.25 m.
 - [x] A spanning Template never stands on flat ground.
-- [ ] Each of Terra, Meadow and Tidewater stands at least one bridge near spawn
-      at a fixed seed, tested by presence only. Terra and Tidewater do; Meadow
-      cannot (see Comments).
+- [x] Terra and Tidewater each stand at least one bridge near spawn at a fixed
+      seed, tested by presence only. ~~Meadow too~~: its ground has no gap, so
+      its footbridge waits for step 22's brooks and valleys (decided
+      2026-11-16).
 - [x] A Template that does not span behaves exactly as before. Worlds without
       Structures stay byte-identical.
 - [x] The benchmark still meets its 0.25 ms margin.
@@ -129,6 +130,9 @@ not built:
 - or Meadow gains a pond level and the water depth rule drops to 0 for it,
   accepting crossings whose water shows only at finer Voxels;
 - or Meadow's footbridge stops spanning and stands on level ground as before.
+
+Decided 2026-11-16: Meadow keeps its footbridge spanning and stands none
+until step 22 carves brooks and valleys into its ground.
 
 Benchmark (`cargo bench -p tesserae-core --bench structures`), new variant
 "bridge over a valley (96 m)" on its own hilly, wet bare World: warm +0, +1

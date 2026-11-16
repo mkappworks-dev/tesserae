@@ -845,7 +845,8 @@ Notes:
     its landform, which amends ADR-0022. Everything is spread by seeded, layered
     fields in metres, coarse to fine, and coarse LOD levels read the same
     fields. The Games then declare the new Biomes and water. Phase 20's bridges
-    find river crossings with no change to their rule. Weather (step 17) follows
+    find river crossings with no change to their rule, and Meadow, whose rolling
+    ground has no gap, stands its first footbridges. Weather (step 17) follows
     step 22 and reads its climate, so rain and snow fall by altitude, coast and
     Biome; weather never edits terrain.
 - **Step 25** is the largest unknown in 1.0. Machines move as a unit, so they
