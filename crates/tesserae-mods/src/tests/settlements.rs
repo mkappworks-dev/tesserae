@@ -1,13 +1,14 @@
 //! A Mod declares Settlements, and a Biome lists them, resolved by name once every Mod has
 //! declared.
 
+use tesserae_core::loot::{LootEntry, LootTable};
 use tesserae_core::settlement::{Building, Settlement};
 use tesserae_core::{BiomeSettlement, BiomeTable, Tables};
 
 use crate::bindings::tesserae::mods::content::Declaration;
 use crate::{
-    Behaviour, DeclaredSettlements, DeclaredTemplates, ModError, Registry, apply, biome_rows,
-    resolve, resolve_biomes,
+    Behaviour, DeclaredSettlements, DeclaredTemplates, ModError, Registry, apply, biome_loot,
+    biome_rows, resolve, resolve_biomes, resolve_items,
 };
 
 fn data(toml: &str) -> Result<Declaration, ModError> {
@@ -207,4 +208,107 @@ fn a_third_row_a_wide_radius_too_many_plots_an_unknown_or_spanning_template_name
             "{odds}"
         );
     }
+}
+
+/// Settlements and each Biome's loot, every Item checked as a World's load checks it once every
+/// Item exists.
+fn stocked(toml: &str) -> Result<(Vec<Settlement>, Vec<Option<LootTable>>), ModError> {
+    let (mut tables, mut registry) = (Tables::builtin(), Registry::builtin());
+    let mut behaviours: Vec<Behaviour> =
+        vec![apply(data(toml)?, "t", &mut tables, &mut registry, true)?.behaviour];
+    let items = resolve_items(&behaviours, &tables, &registry)?;
+    let rows = biome_rows(&behaviours);
+    let templates = DeclaredTemplates::take(&mut behaviours);
+    let settlements = DeclaredSettlements::take(&mut behaviours);
+    resolve(behaviours, &mut tables, &registry)?;
+    tables.templates = templates.resolve(&registry, &tables)?;
+    tables.settlements = settlements.resolve(&registry, &tables)?;
+    settlements.check_loot(&items)?;
+    Ok((tables.settlements, biome_loot(&rows, &items)?))
+}
+
+const ITEMS: &str = "[[items]]\nname = \"bread\"\nsize-m = 0.25\ncolor = [200, 160, 90, 255]\n\
+                     max-stack = 8\n\n[[items]]\nname = \"nail\"\nsize-m = 0.1\n\
+                     color = [90, 90, 90, 255]\n";
+
+/// A Settlement whose house has its own loot, and a Biome with loot of its own.
+fn stocked_world(settlement_loot: &str, house_loot: &str, biome_loot: &str) -> String {
+    let village = VILLAGE.replace(
+        "max = 4 }",
+        &format!("max = 4, loot = {{ entries = [{house_loot}] }} }}"),
+    );
+    format!(
+        "{CONTENT}\n{ITEMS}\n{}\n[settlements.loot]\nrolls-min = 2\nrolls-max = 5\n\
+         entries = [{settlement_loot}]\n\n[[biomes]]\nname = \"plain\"\ntemperature = 0.5\n\
+         humidity = 0.5\n\n[biomes.loot]\nentries = [{biome_loot}]\n",
+        settlement(&village)
+    )
+}
+
+#[test]
+fn a_settlement_its_buildings_and_a_biome_carry_their_loot() {
+    let (settlements, biomes) = stocked(&stocked_world(
+        "{ item = \"t:bread\", min = 1, max = 3, weight = 2.0 }, { item = \"t:nail\" }",
+        "{ item = \"t:nail\", min = 4, max = 9 }",
+        "{ item = \"t:bread\" }",
+    ))
+    .unwrap();
+    let entry = |item: &str, min, max, weight| LootEntry {
+        item: item.into(),
+        min,
+        max,
+        weight,
+    };
+    let village = &settlements[0];
+    assert_eq!(
+        village.loot,
+        Some(LootTable {
+            rolls_min: 2,
+            rolls_max: 5,
+            entries: vec![entry("t:bread", 1, 3, 2.0), entry("t:nail", 1, 1, 1.0)],
+        })
+    );
+    assert_eq!(
+        village.rules[0].loot,
+        Some(LootTable {
+            rolls_min: 1,
+            rolls_max: 1,
+            entries: vec![entry("t:nail", 4, 9, 1.0)],
+        }),
+        "one roll, and a count of min, unless it says"
+    );
+    assert_eq!(
+        biomes,
+        [Some(LootTable {
+            rolls_min: 1,
+            rolls_max: 1,
+            entries: vec![entry("t:bread", 1, 1, 1.0)],
+        })]
+    );
+}
+
+#[test]
+fn loot_naming_an_unknown_item_more_than_its_stack_or_out_of_range_is_refused() {
+    let refused =
+        |s: &str, h: &str, b: &str| stocked(&stocked_world(s, h, b)).unwrap_err().to_string();
+    let ok = "{ item = \"t:nail\" }";
+    let unknown = refused("{ item = \"t:cake\" }", ok, ok);
+    assert!(
+        unknown.contains("`village`") && unknown.contains("`t:cake` is no Item"),
+        "{unknown}"
+    );
+    let house = refused(ok, "{ item = \"t:cake\" }", ok);
+    assert!(
+        house.contains("`village`") && house.contains("t:house") && house.contains("t:cake"),
+        "{house}"
+    );
+    let biome = refused(ok, ok, "{ item = \"t:cake\" }");
+    assert!(
+        biome.contains("biome `plain` loot") && biome.contains("t:cake"),
+        "{biome}"
+    );
+    let stack = refused("{ item = \"t:bread\", max = 9 }", ok, ok);
+    assert!(stack.contains("stack of 8"), "{stack}");
+    let empty = refused(ok, "{ item = \"t:nail\", min = 0 }", ok);
+    assert!(empty.contains("min must be at least 1"), "{empty}");
 }

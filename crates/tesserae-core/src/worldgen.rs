@@ -13,8 +13,11 @@ mod crossings;
 mod fields;
 mod ground;
 mod layouts;
+mod loot;
 mod settlements;
 mod structures;
+
+pub use loot::{Loot, Stood};
 
 use std::sync::Arc;
 
@@ -24,6 +27,7 @@ use crate::climate::{
     SkyFogBlend, SurfaceFeature, SurfaceFeatures, SurfacePlant, SurfacePlantKind, SurfaceTree,
     SurfaceVine,
 };
+use crate::loot::LootTable;
 use crate::mesh::POS_Y;
 use crate::noise::{Fbm3Cache, fbm2, fbm3_cached, fbm3_range};
 use crate::ore::{OreField, OreMask, OreTable};
@@ -637,6 +641,8 @@ pub struct Worldgen {
     structures: Option<structures::StructurePass>,
     settlements: Option<settlements::SettlementPass>,
     layouts: Arc<layouts::Layouts>,
+    /// Each Biome's loot, by id: what its wilderness Structures' chests hold.
+    biome_loot: Arc<[Option<LootTable>]>,
 }
 
 /// Voxels of slack over a Plant's declared rise, for the base's own cell and rounding up.
@@ -884,6 +890,7 @@ impl Worldgen {
             structures: None,
             settlements: None,
             layouts: Arc::default(),
+            biome_loot: Arc::new([]),
         }
     }
 

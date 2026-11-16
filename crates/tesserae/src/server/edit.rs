@@ -54,7 +54,7 @@ pub use layout::{CellState, LayoutAim, LayoutAnswer, LayoutIntent, LayoutParams,
 pub use structure::StructureCell;
 pub use structure::StructureIntent;
 #[cfg(test)]
-pub(in crate::server) use structure::send_structure;
+pub(in crate::server) use structure::{drain as drain_structures, send_structure};
 #[cfg(test)]
 pub(crate) use structure_aim::StructureGhost;
 pub use structure_aim::{StructureAim, StructureAnswer};

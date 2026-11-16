@@ -79,6 +79,7 @@ fn biomes() -> Vec<BiomeDef> {
                 .into_iter()
                 .chain(plants::ash_flats())
                 .collect(),
+            loot: Some(structures::loot(structures::biome_loot("ash_flats"))),
         },
         BiomeDef {
             soundscape: None,
@@ -95,6 +96,7 @@ fn biomes() -> Vec<BiomeDef> {
             structures: structures::wild(&["obsidian_spire", "ash_pit"]),
             settlements: structures::village(),
             surface_features: Vec::new(),
+            loot: Some(structures::loot(structures::biome_loot("scorched"))),
         },
         BiomeDef {
             soundscape: None,
@@ -114,6 +116,7 @@ fn biomes() -> Vec<BiomeDef> {
                 .into_iter()
                 .chain(plants::highland())
                 .collect(),
+            loot: Some(structures::loot(structures::biome_loot("highland"))),
         },
         BiomeDef {
             soundscape: None,
@@ -130,6 +133,7 @@ fn biomes() -> Vec<BiomeDef> {
             structures: structures::wild(&["barrow", "basalt_wall"]),
             settlements: Vec::new(),
             surface_features: plants::cinder_bog(),
+            loot: Some(structures::loot(structures::biome_loot("cinder_bog"))),
         },
     ]
 }

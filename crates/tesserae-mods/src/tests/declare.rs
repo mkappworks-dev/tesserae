@@ -1501,6 +1501,7 @@ fn biome(name: &str, temperature: f32, humidity: f32) -> content::BiomeDef {
         crop_fields: Vec::new(),
         structures: Vec::new(),
         settlements: Vec::new(),
+        loot: None,
     }
 }
 

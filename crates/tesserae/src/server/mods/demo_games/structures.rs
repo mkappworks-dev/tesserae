@@ -224,8 +224,8 @@ fn a_world_with_no_game_has_no_template() {
 }
 
 /// The Chunks of a square `half_m` either side of the origin, every row a Structure reaches.
-struct Generated {
-    chunks: HashMap<[i32; 3], Chunk>,
+pub(in crate::server) struct Generated {
+    pub(in crate::server) chunks: HashMap<[i32; 3], Chunk>,
 }
 
 impl Generated {
@@ -234,7 +234,7 @@ impl Generated {
     }
 
     /// The Chunks within `half_m` of `centre_m`.
-    fn around(generator: &Worldgen, centre_m: [f32; 2], half_m: f32) -> Self {
+    pub(in crate::server) fn around(generator: &Worldgen, centre_m: [f32; 2], half_m: f32) -> Self {
         let chunk_m = CHUNK_SIZE as f32 * generator.voxel_size();
         let (low, high) = generator.surface_bounds_m();
         let [low_x, low_z] = centre_m.map(|c| ((c - half_m) / chunk_m).floor() as i32);
@@ -251,7 +251,7 @@ impl Generated {
     }
 
     /// The highest non-air Voxel of the column `[x, z]`.
-    fn top(&self, [x, z]: [i32; 2]) -> Option<Voxel> {
+    pub(in crate::server) fn top(&self, [x, z]: [i32; 2]) -> Option<Voxel> {
         let size = CHUNK_SIZE as i32;
         let [cx, cz] = [x, z].map(|g| g.div_euclid(size));
         let [lx, lz] = [x, z].map(|g| g.rem_euclid(size) as usize);
@@ -271,7 +271,7 @@ impl Generated {
         })
     }
 
-    fn get(&self, at: [i32; 3]) -> Option<Voxel> {
+    pub(in crate::server) fn get(&self, at: [i32; 3]) -> Option<Voxel> {
         let size = CHUNK_SIZE as i32;
         let chunk = self.chunks.get(&at.map(|g| g.div_euclid(size)))?;
         let [x, y, z] = at.map(|g| g.rem_euclid(size) as usize);
@@ -303,15 +303,19 @@ impl Generated {
 
 /// A Template found standing whole: which, its lowest corner and its turn.
 #[derive(Clone, Copy, Debug)]
-struct Found {
-    template: usize,
-    corner: [i32; 3],
-    turn: Turn,
+pub(in crate::server) struct Found {
+    pub template: usize,
+    pub corner: [i32; 3],
+    pub turn: Turn,
 }
 
 /// Every Template of `templates` standing whole in `world`: each of its Voxel cells there, and
 /// each Air cell air. Found from its first Voxel cell, by every Voxel of that cell's Material.
-fn standing(world: &Generated, templates: &[Template], size: f32) -> Vec<Found> {
+pub(in crate::server) fn standing(
+    world: &Generated,
+    templates: &[Template],
+    size: f32,
+) -> Vec<Found> {
     standing_of(world, templates, size, true)
 }
 
@@ -391,7 +395,7 @@ pub(super) fn road_side(size: [i32; 3], [x, _, z]: [i32; 3]) -> [i32; 2] {
 
 /// The demo World tests' seed; the square is wide enough that each Game lays out a Settlement in
 /// it.
-const SEED: u64 = 7;
+pub(in crate::server) const SEED: u64 = 7;
 const HALF_M: f32 = 320.0;
 
 #[test]
@@ -623,5 +627,27 @@ fn terra_and_tidewater_each_stand_a_bridge_over_a_gap_near_spawn() {
     for (game, bridge) in BRIDGES {
         let found = bridges(game, bridge, BRIDGE_SCAN_M);
         assert!(!found.is_empty(), "{game}: no bridge stands near spawn");
+    }
+}
+
+#[test]
+fn every_game_stocks_its_settlements_buildings_and_wilderness_biomes_with_loot() {
+    for game in GAMES {
+        let (_install, loaded) = loaded(game, 1.0);
+        for settlement in &loaded.tables.settlements {
+            assert!(settlement.loot.is_some(), "{}", settlement.name);
+            assert!(
+                settlement.rules.iter().any(|r| r.loot.is_some()),
+                "{}: a building keeps its own",
+                settlement.name
+            );
+        }
+        let biomes = loaded.world.as_ref().unwrap().biomes;
+        assert_eq!(loaded.biome_loot.len(), biomes.as_slice().len(), "{game}");
+        for (biome, loot) in biomes.as_slice().iter().zip(&loaded.biome_loot) {
+            if !biome.surface_features.structures().is_empty() {
+                assert!(loot.is_some(), "{game}: {}", biome.name.as_str());
+            }
+        }
     }
 }

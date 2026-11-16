@@ -13,6 +13,7 @@ use std::path::{Path, PathBuf};
 use crate::launch::Installed;
 use crate::session::{SessionApp, SessionTeardown};
 use bevy::prelude::*;
+use tesserae_core::loot::LootTable;
 use tesserae_core::settlement::Settlement;
 use tesserae_core::template::Template;
 use tesserae_core::{MaterialId, SHAPE_FULL_CUBE, ShapeId, Tables, WorldgenParams};
@@ -116,6 +117,10 @@ pub struct LoadedMods {
     pub world_templates: Option<Vec<Template>>,
     /// The Settlements a reopened World was made with, alongside [`Self::world_templates`].
     pub world_settlements: Option<Vec<Settlement>>,
+    /// Each Biome's loot by id, what its wilderness Structures' chests hold.
+    pub biome_loot: Vec<Option<LootTable>>,
+    /// The Biome loot a reopened World was made with, alongside [`Self::world_templates`].
+    pub world_biome_loot: Option<Vec<Option<LootTable>>>,
     pub view: Option<ViewParams>,
     pub appearance: Vec<(MaterialId, [u8; 4])>,
     pub textures: Vec<(MaterialId, Vec<u8>)>,
@@ -142,6 +147,8 @@ impl Default for LoadedMods {
             world: None,
             world_templates: None,
             world_settlements: None,
+            biome_loot: Vec::new(),
+            world_biome_loot: None,
             view: None,
             appearance: Vec::new(),
             textures: Vec::new(),
@@ -191,7 +198,12 @@ fn placeable(tables: &Tables, material: MaterialId) -> bool {
 }
 
 #[derive(Resource)]
-pub(super) struct WorldParameters(pub WorldgenParams, pub Vec<Template>, pub Vec<Settlement>);
+pub(super) struct WorldParameters(
+    pub WorldgenParams,
+    pub Vec<Template>,
+    pub Vec<Settlement>,
+    pub Vec<Option<LootTable>>,
+);
 
 /// One Game or Mod a World was made with.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -478,7 +490,8 @@ pub(crate) fn save_world(loaded: &LoadedMods, path: &Path) {
             &loaded.tables.settlements,
             &mapping,
         )
-        .unwrap(),
+        .unwrap()
+        .with_biome_loot(&loaded.biome_loot),
         content: content.clone(),
         player: save::Player {
             eye_m: [1.0, 2.0, 3.0],
@@ -492,6 +505,7 @@ pub(crate) fn save_world(loaded: &LoadedMods, path: &Path) {
         paused: vec![],
         entities: Default::default(),
         containers: Vec::new(),
+        looted: Vec::new(),
         map: Default::default(),
         game_mode: Default::default(),
     };
@@ -699,6 +713,10 @@ pub(crate) async fn declare_all(
             refuse,
         )
         .map_err(|e| e.to_string())?;
+    let items = loaded.every_item(world.voxel_size).0;
+    settlements.check_loot(&items).map_err(|e| e.to_string())?;
+    loaded.biome_loot =
+        tesserae_mods::biome_loot(&biome_rows, &items).map_err(|e| e.to_string())?;
     Ok(loaded)
 }
 
@@ -861,6 +879,7 @@ fn install(world: &mut World) {
     let settlements = loaded
         .world_settlements
         .unwrap_or_else(|| loaded.tables.settlements.clone());
+    let loot = loaded.world_biome_loot.unwrap_or(loaded.biome_loot);
     let markers = crate::content::MarkerKinds(loaded.tables.markers.clone());
     let tables = super::ContentTables::from_loaded(loaded.tables, loaded.game);
     let reopened = world
@@ -955,7 +974,7 @@ fn install(world: &mut World) {
     world.insert_resource(super::craft::Recipes(loaded.recipes));
     world.insert_resource(placing);
     world.insert_resource(items);
-    world.insert_resource(WorldParameters(params, templates, settlements));
+    world.insert_resource(WorldParameters(params, templates, settlements, loot));
     world.insert_resource(super::streaming::streaming_settings(loaded.view));
     world.insert_resource(runtime::ModJobs::new(loaded.registry, loaded.mods));
     let (name, default_mode) = world
@@ -1947,7 +1966,8 @@ layers = [["rp"]]
                     &loaded.tables.settlements,
                     &mapping,
                 )
-                .unwrap(),
+                .unwrap()
+                .with_biome_loot(&loaded.biome_loot),
                 content: content.clone(),
                 player: save::Player {
                     eye_m: [1.0, 2.0, 3.0],
@@ -1961,6 +1981,7 @@ layers = [["rp"]]
                 paused: vec![],
                 entities: Default::default(),
                 containers: Vec::new(),
+                looted: Vec::new(),
                 map: Default::default(),
                 game_mode: Default::default(),
             };

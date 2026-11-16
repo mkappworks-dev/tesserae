@@ -58,6 +58,8 @@ pub struct ChunkStore {
     changed_chunks: BTreeSet<ChunkCoord>,
     /// Coordinates a Chunk arrived at or left since `super::fluids` looked.
     lifecycle: BTreeSet<ChunkCoord>,
+    /// Container Voxels written over since `super::container` looked, each with what it was.
+    left_containers: Vec<([i32; 3], Voxel)>,
 }
 
 /// Positions journalled before the journal coalesces by Chunk. A tick's
@@ -212,6 +214,16 @@ impl ChunkStore {
             heated: std::mem::take(&mut self.heated),
             chunks: std::mem::take(&mut self.changed_chunks),
         }
+    }
+
+    pub(in crate::server) fn note_container_left(&mut self, at: [i32; 3], was: Voxel) {
+        if self.left_containers.len() < JOURNAL_CAP {
+            self.left_containers.push((at, was));
+        }
+    }
+
+    pub(in crate::server) fn take_left_containers(&mut self) -> Vec<([i32; 3], Voxel)> {
+        std::mem::take(&mut self.left_containers)
     }
 
     pub(in crate::server) fn take_lifecycle(&mut self) -> BTreeSet<ChunkCoord> {

@@ -220,6 +220,7 @@ fn open_world(
 ) {
     let templates = params.as_ref().map_or(&[][..], |p| p.1.as_slice());
     let settlements = params.as_ref().map_or(&[][..], |p| p.2.as_slice());
+    let loot = params.as_ref().map_or(&[][..], |p| p.3.as_slice());
     let params = params
         .as_ref()
         .map_or_else(|| worldgen_params(None), |params| params.0);
@@ -228,7 +229,8 @@ fn open_world(
     }
     let generator = Worldgen::new(world.seed, world.voxel_size, params)
         .with_templates(templates)
-        .with_settlements(settlements);
+        .with_settlements(settlements)
+        .with_loot(loot);
     let mut spawn = SpawnPoint::new(spawn_eye(&generator));
     if let Some(eye) = persistence.and_then(|p| p.reopened_eye) {
         spawn = spawn.with_entry(eye);

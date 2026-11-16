@@ -302,6 +302,7 @@ pub(super) struct Biome {
     structures: Vec<BiomeStructure>,
     #[serde(default)]
     settlements: Vec<BiomeSettlement>,
+    loot: Option<super::settlement::Loot>,
     soundscape: Option<String>,
 }
 
@@ -453,6 +454,7 @@ impl From<Biome> for content::BiomeDef {
                     chance: s.chance,
                 })
                 .collect(),
+            loot: b.loot.map(Into::into),
         }
     }
 }

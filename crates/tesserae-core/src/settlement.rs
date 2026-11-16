@@ -1,6 +1,7 @@
 //! Settlements: rules world generation lays out as roads and Plots around a
 //! centre, each Plot a Template. ADR-0029.
 
+use crate::loot::LootTable;
 use crate::template::Template;
 use crate::voxel::Voxel;
 
@@ -23,12 +24,14 @@ pub struct Building {
 }
 
 /// One weighted entry a Settlement draws its Plots from.
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Debug)]
 pub struct PlotRule {
     pub building: Building,
     pub weight: f32,
     pub min: u8,
     pub max: u8,
+    /// What its chests hold, in place of the Settlement's.
+    pub loot: Option<LootTable>,
 }
 
 #[derive(Clone, PartialEq, Debug)]
@@ -46,6 +49,8 @@ pub struct Settlement {
     pub minimum: u8,
     /// What its roads are laid in on level ground.
     pub path: Voxel,
+    /// What its buildings' chests hold, unless a building has its own.
+    pub loot: Option<LootTable>,
 }
 
 impl Settlement {
@@ -112,6 +117,14 @@ impl Settlement {
             if rule.min > rule.max {
                 return Err("a Template's min must be at most its max".into());
             }
+        }
+        let loots = self
+            .rules
+            .iter()
+            .filter_map(|r| r.loot.as_ref())
+            .chain(&self.loot);
+        for loot in loots {
+            loot.validate().map_err(|e| format!("loot: {e}"))?;
         }
         Ok(())
     }

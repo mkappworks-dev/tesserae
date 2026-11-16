@@ -142,9 +142,9 @@ Rule fixes:
   they now depend on `waters`. Their wells are their only water, and a source in
   a well can be taken as a water Item, by design.
 
-Other changes: Terra's town keeps its 60 m radius but needs one cottage, not
-two: two of the larger cottages at the head of the queue left no room for the
-other minimums, so no town stood at the test's spot. Meadow's and Lumen's
+Other changes: Terra's town needs one cottage, not two: two of the larger
+cottages at the head of the queue left no room for the other minimums, so no
+town stood at the test's spot. No radius or spacing grew for this ticket. Meadow's and Lumen's
 texture fingerprints are re-pinned because `waters` brings its obsidian texture
 into their Worlds; nothing a Game draws changed. The tests' load orders and
 dependency lists for Lumen and Meadow gained `waters`.

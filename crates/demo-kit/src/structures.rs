@@ -19,6 +19,8 @@ pub struct Plot {
     pub weight: f32,
     pub min: u8,
     pub max: u8,
+    /// What its chests hold, in place of the Settlement's.
+    pub loot: Option<&'static Loot>,
 }
 
 pub const fn plot(template: &'static str, weight: f32, min: u8, max: u8) -> Plot {
@@ -27,7 +29,24 @@ pub const fn plot(template: &'static str, weight: f32, min: u8, max: u8) -> Plot
         weight,
         min,
         max,
+        loot: None,
     }
+}
+
+impl Plot {
+    pub const fn stocked(self, loot: &'static Loot) -> Plot {
+        Plot {
+            loot: Some(loot),
+            ..self
+        }
+    }
+}
+
+/// What a worldgen chest holds: `rolls` Stacks, each an entry `(item, min, max, weight)`, the Item
+/// by its full name.
+pub struct Loot {
+    pub rolls: (u8, u8),
+    pub entries: &'static [(&'static str, u32, u32, f32)],
 }
 
 pub struct Village {
@@ -44,6 +63,8 @@ pub struct Village {
     pub centre: &'static str,
     pub plots: u8,
     pub templates: &'static [Plot],
+    /// What its buildings' chests hold, unless a Plot has its own.
+    pub loot: &'static Loot,
 }
 
 impl Village {
@@ -52,7 +73,8 @@ impl Village {
     }
 }
 
-/// Writes `settlements`, `village` and `wild` for the Game's [`Village`] `$village`. Expanded
+/// Writes `settlements`, `village`, `wild`, `bridge` and `loot` for the Game's [`Village`]
+/// `$village`. Expanded
 /// inside the Game, where `crate::tesserae::mods` is its WIT binding.
 #[macro_export]
 macro_rules! structures {
@@ -73,12 +95,36 @@ macro_rules! structures {
                         weight: p.weight,
                         min: p.min,
                         max: p.max,
+                        loot: p.loot.map(loot),
                     })
                     .collect(),
                 minimum: $crate::structures::MINIMUM,
                 path: $crate::structures::PATH.into(),
                 path_shape: None,
+                loot: Some(loot($village.loot)),
             }]
+        }
+
+        /// A loot table, for the Settlement or a Biome's `loot`.
+        pub fn loot(
+            table: &$crate::structures::Loot,
+        ) -> crate::tesserae::mods::content::LootTable {
+            crate::tesserae::mods::content::LootTable {
+                rolls_min: table.rolls.0,
+                rolls_max: table.rolls.1,
+                entries: table
+                    .entries
+                    .iter()
+                    .map(
+                        |&(item, min, max, weight)| crate::tesserae::mods::content::LootEntry {
+                            item: item.into(),
+                            min,
+                            max,
+                            weight,
+                        },
+                    )
+                    .collect(),
+            }
         }
 
         pub fn village() -> Vec<crate::tesserae::mods::content::BiomeSettlement> {

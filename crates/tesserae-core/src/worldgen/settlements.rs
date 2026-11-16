@@ -73,7 +73,7 @@ struct Row {
 /// exactly as before.
 #[derive(Clone, Debug)]
 pub(super) struct SettlementPass {
-    settlements: Arc<[Settlement]>,
+    pub(super) settlements: Arc<[Settlement]>,
     /// In claim order.
     rows: Vec<Row>,
     /// By Biome, a bit for each Settlement it lists.
@@ -183,8 +183,12 @@ pub(super) struct LaidSettlement {
     road: Vec<Lane>,
     /// The height, in metres, a road is graded to at each cell's centre.
     grade: Vec<f32>,
+    /// An index into the World's Settlements.
+    pub(super) settlement: u16,
     /// The centre's first, if it has one.
     pub(super) structures: Vec<Structure>,
+    /// The rule each of [`Self::structures`] was drawn by; the centre's is `None`.
+    pub(super) rules: Vec<Option<usize>>,
     /// Each one's Plot, levelled; by [`Self::structures`].
     plots: Vec<Plot>,
     /// The points its approach paths step through past the disc.
@@ -291,7 +295,7 @@ fn door_side(template: &Template, door: Option<[u16; 2]>) -> u8 {
 }
 
 impl Worldgen {
-    fn settlement_pass(&self) -> Option<&SettlementPass> {
+    pub(super) fn settlement_pass(&self) -> Option<&SettlementPass> {
         self.settlements.as_ref()
     }
 
@@ -557,6 +561,7 @@ impl Worldgen {
             .filter(|p| distance(**p, centre) > radius_m)
             .copied()
             .collect();
+        let pass = self.settlement_pass().expect("a founding has a pass");
         let mut laid = LaidSettlement {
             centre_m: centre,
             radius_m,
@@ -565,6 +570,8 @@ impl Worldgen {
             side,
             road: vec![Lane::Open; (side * side) as usize],
             grade: Vec::new(),
+            settlement: pass.rows[founding.row].entry.settlement,
+            rules: vec![None; structures.len()],
             structures,
             plots,
             approach,
@@ -622,6 +629,7 @@ impl Worldgen {
                 Some((s, plot)) => {
                     laid.plots.push(plot);
                     laid.structures.push(s);
+                    laid.rules.push(Some(rule));
                     next += 1;
                 }
                 // The Plot stays empty; a Template still short of its minimum tries again.

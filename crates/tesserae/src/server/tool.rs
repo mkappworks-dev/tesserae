@@ -206,9 +206,10 @@ pub(super) fn answer_use(
     (tables, world, tools): (Res<ContentTables>, Res<WorldSettings>, Res<Tools>),
     hand: Hand,
     (mut commands, mut opened): (Commands, MessageWriter<super::station::StationOpened>),
-    (mut containers, mut audio): (
+    (mut containers, mut audio, loot): (
         Option<ResMut<super::container::Containers>>,
         super::sound::Emitter,
+        super::container::LootSource,
     ),
 ) {
     let Hand { player, status } = hand;
@@ -256,6 +257,9 @@ pub(super) fn answer_use(
                                 else {
                                     return Err(UseRefusal::TargetChanged);
                                 };
+                                if let Some(source) = loot.get() {
+                                    containers.draw_loot(source, aimed.at, aimed.voxel, slots);
+                                }
                                 containers.open(entity, aimed.at, aimed.voxel, slots);
                                 audio.emit_at(Cause::ContainerOpen, aimed.at);
                                 Ok(UseResult::Container(aimed.at))

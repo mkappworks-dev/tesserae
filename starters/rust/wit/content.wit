@@ -766,6 +766,9 @@ interface content {
         /// At most 2 Settlements world generation lays out in this Biome. Empty
         /// lays out none.
         settlements: list<biome-settlement>,
+        /// What the chests of wilderness Structures standing in this Biome
+        /// hold; `none` leaves them empty.
+        loot: option<loot-table>,
         /// Optional Soundscape full name, resolved across loaded Mods.
         soundscape: option<string>,
     }
@@ -1164,6 +1167,9 @@ interface content {
         min: u8,
         /// At most this many stand.
         max: u8,
+        /// What this Template's chests hold, in place of the Settlement's
+        /// `loot`.
+        loot: option<loot-table>,
     }
 
     /// A village or town world generation lays out: roads branch from its
@@ -1191,6 +1197,37 @@ interface content {
         /// A Shape, `<mod id>:<name>`, its roads take on level ground; none is
         /// `core:cube`.
         path-shape: option<string>,
+        /// What its buildings' chests hold, unless a Template's row gives its
+        /// own; `none` leaves them empty.
+        loot: option<loot-table>,
+    }
+
+    /// What a chest world generation stands holds, drawn the first time a
+    /// Container is needed for it: opened, or broken. The draw is a pure
+    /// function of the World seed, the chest's place in its Structure and the
+    /// table, so it is the same whenever it happens and at every Voxel size.
+    /// A chest a Player places, or the `place` Tool stands, starts empty.
+    record loot-table {
+        /// How many Stacks it draws, from `rolls-min` to `rolls-max`, at most
+        /// 27; each a Slot of its own, and a draw past the last free Slot is
+        /// dropped.
+        rolls-min: u8,
+        rolls-max: u8,
+        /// From 1 to 16 entries.
+        entries: list<loot-entry>,
+    }
+
+    /// One thing a loot table may draw.
+    record loot-entry {
+        /// An Item, `<mod id>:<name>`, from any loaded Mod. It need not be
+        /// Obtainable another way: loot is a source.
+        item: string,
+        /// A Stack of `min` to `max`, with `min` at least 1 and `max` at most
+        /// the Item's `max-stack`.
+        min: u32,
+        max: u32,
+        /// Above 0: how often it is drawn against the others.
+        weight: f32,
     }
 
     /// Everything a Mod adds, in registration order: a name's id is its index

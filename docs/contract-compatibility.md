@@ -248,6 +248,17 @@ neighbouring square's candidate with a higher draw is near enough for their
 discs and margins to meet. A Declaration built against the earlier 0.3 text
 needs a rebuild.
 
+A `settlement-def`, a `settlement-plot` and a `biome-def` then each gained an
+optional `loot`, last, a `loot-table` record: `rolls-min` and `rolls-max` (at
+most 27) and 1 to 16 `loot-entry` rows of an `item` by full name, a `min` of at
+least 1, a `max` no more than the Item's stack, and a `weight` above 0. A chest
+worldgen stands in a Settlement building draws from its row's table, else the
+Settlement's; one in a wilderness Structure from its Biome's. Every Item is
+checked once every Mod has declared, and need not be Obtainable another way.
+Tables are frozen in the generation snapshot with the Settlements and Biomes.
+`none` stocks nothing, so a Declaration without loot loads as before but needs a
+rebuild against the new record fields.
+
 ## What is not frozen
 
 Line `0.x` is pre-release. Later gameplay steps may add new lines, and

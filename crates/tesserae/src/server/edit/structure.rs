@@ -296,7 +296,7 @@ struct Spend {
 
 /// Judges and lands queued placements, front first, within the tick's budget.
 #[allow(clippy::too_many_arguments)]
-pub(super) fn drain(
+pub(in crate::server) fn drain(
     mut pending: ResMut<PendingEdits>,
     (mut history, mut journal): (ResMut<EditHistory>, ResMut<Journal>),
     (mut store, mut meshes): (ResMut<ChunkStore>, ResMut<MeshState>),

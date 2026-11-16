@@ -177,6 +177,12 @@ pub enum ModError {
         index: usize,
         rule: String,
     },
+    /// A Biome's loot names no Item or is out of range.
+    BadLoot {
+        id: String,
+        biome: String,
+        rule: String,
+    },
     /// A fluid, reaction or fire row names a Material no loaded Mod registered.
     UnknownName {
         id: String,
@@ -448,6 +454,9 @@ impl fmt::Display for ModError {
                 index,
                 rule,
             } => write!(f, "mod `{id}`: biome `{biome}` settlement {index}: {rule}"),
+            ModError::BadLoot { id, biome, rule } => {
+                write!(f, "mod `{id}`: biome `{biome}` loot: {rule}")
+            }
             ModError::TooManyFeatures {
                 id,
                 biome,

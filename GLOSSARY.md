@@ -555,6 +555,11 @@ generation in the Settlement's path Material on graded ground, as stairs and
 slabs where it climbs. Every Plot's door faces one. Not a Layout and not a crop
 field's path.
 
+**Loot** — the Items a chest world generation stands holds, drawn by weight from
+a table a Settlement, one of its Buildings or a Biome declares, the first time a
+Container is needed for it. A chest a Player places, or the place Tool stands,
+holds none. Not a drop, which a broken Voxel gives.
+
 **Blueprint** — an Item that names one Template. Laying it makes a Site.
 
 **Site** — a laid Blueprint: a Structure not yet built, kept by the World until
