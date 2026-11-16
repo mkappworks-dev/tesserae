@@ -239,6 +239,10 @@ function navigate(screen) {
   state.filter = "All";
   render();
 }
+/* A seed as the engine draws one: 64 random bits from the OS source, shown as the number it is. */
+function randomSeed() {
+  return crypto.getRandomValues(new BigUint64Array(1))[0].toString();
+}
 function startCreate(from) {
   Object.assign(state, {
     screen: "wizard",
@@ -246,7 +250,7 @@ function startCreate(from) {
     editId: null,
     name: from ? `${from.name} — new world` : "",
     game: from?.game || "Terra",
-    seed: from?.seed || games.Terra.seed,
+    seed: from?.seed || randomSeed(),
     voxel: from?.voxel || "1",
     mode: from?.mode || "Creative",
     mods: clone(from?.mods || []),
@@ -417,7 +421,7 @@ function worldForm() {
     )
     .join(
       "",
-    )}</div><div class="spacer"></div>${modePicks("mode", state.mode, { legend: "Game mode", hint: "Every Player starts in this mode. You can change it later in Edit World." })}<div class="spacer"></div><div class="row between"><p class="section-label">World seed</p>${button("↻ Randomize", "randomize", { small: true, ghost: true })}</div>${textField("Words or a number", "seed", state.seed, { hint: "The same seed and generation settings create the same terrain. Blank picks a random seed." })}<div class="row between"><small>${state.seed ? `Seed: ${esc(state.seed)}` : "Random seed: chosen when the World is created"}</small>${button("Copy", "copy-seed", { small: true, ghost: true })}</div><details><summary>More World options</summary>${selectField("Voxel size (metres)", "voxel", state.voxel, ["1", "0.5", "0.25"])}<div class="notice">1 m · default<br>0.5 m · 2× finer, half the view distance<br>0.25 m · 4× finer, a quarter of the view distance<br>This choice is fixed when the World is created.</div></details>`;
+    )}</div><div class="spacer"></div>${modePicks("mode", state.mode, { legend: "Game mode", hint: "Every Player starts in this mode. You can change it later in Edit World." })}<div class="spacer"></div><div class="row between"><p class="section-label">World seed</p>${button("↻ Randomize", "randomize", { small: true, ghost: true })}</div>${textField("Words or a number", "seed", state.seed, { hint: "Starts with a random seed. Type words or a number to choose your own: the same seed and generation settings create the same terrain." })}<div class="row between"><small>${!state.seed.trim() ? "Random seed: chosen when the World is created" : /^-?\d+$/.test(state.seed.trim()) ? `Seed: ${esc(state.seed.trim())}` : `Seed from these words: ${esc(state.seed.trim())}`}</small>${button("Copy", "copy-seed", { small: true, ghost: true })}</div><details><summary>More World options</summary>${selectField("Voxel size (metres)", "voxel", state.voxel, ["1", "0.5", "0.25"])}<div class="notice">1 m · default<br>0.5 m · 2× finer, half the view distance<br>0.25 m · 4× finer, a quarter of the view distance<br>This choice is fixed when the World is created.</div></details>`;
 }
 function required() {
   return games[state.game].required;
@@ -607,15 +611,7 @@ function action(name, value) {
     return;
   }
   if (name === "randomize") {
-    state.seed =
-      [
-        "moss-and-morning",
-        "over-the-ridgeline",
-        "one-more-horizon",
-        "where-the-river-turns",
-      ][Math.floor(Math.random() * 4)] +
-      "-" +
-      Math.floor(Math.random() * 999);
+    state.seed = randomSeed();
     state.dirty = true;
     render();
     return;
