@@ -99,12 +99,12 @@ are where the build is narrower or more exact than they say.
   whole when full, whose values are worked out outside its lock from the seed
   and the key alone, so generation stays a pure function of metres in any Chunk
   order and on any thread.
-- **Obtainable is over Items, and checks more than it must.** A Material is
+- **Obtainable is over Items, and checks only what Biomes stand.** A Material is
   Obtainable when an Item that places it can be held. Recipe Stations are not
-  checked. Every Template the World declares is checked, not only the ones its
-  Biomes list, and a Settlement's path Material is checked too. A Grown Material
-  or a Door's open Material is refused in the shared validator before Obtainable
-  is worked out.
+  checked. Only the Templates a World's Biomes list, alone or in a Settlement,
+  are checked, since only a Creative Player can place another, and a listed
+  Settlement's path Material is checked too. A Grown Material or a Door's open
+  Material is refused in the shared validator before Obtainable is worked out.
 - **`ground` is a full cube, and never rock.** Its soil runs however deep a
   cellar goes.
 - **The snapshot keeps only what a World uses.** It freezes the Templates its

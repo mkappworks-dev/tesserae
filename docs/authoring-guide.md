@@ -1126,9 +1126,10 @@ mockup with `node mockup/export-templates.mjs`, into
 
 ### Obtainable
 
-Every Material a Template names, and every Settlement's `path`, must be
-Obtainable in the World: a Player there can get its Item without the building.
-The Engine works it out once, when a World's Game and Mods are composed:
+Every Material a Template a Biome stands names, alone or in a Settlement, and
+that Settlement's `path`, must be Obtainable in the World: a Player there can
+get its Item without the building. The Engine works it out once, when a World's
+Game and Mods are composed:
 
 1. Start from what worldgen lays: the World's and each Biome's ground, the lake
    fluid, ores, surface features and crop fields.
@@ -1139,9 +1140,10 @@ The Engine works it out once, when a World's Game and Mods are composed:
 
 Structures, the Catalogue and Mod Commands are not sources: a building is never
 the only source of its own Materials. A `ground` cell is always Obtainable,
-since the Biome lays it. Every Template the World declares is checked, whether a
-Biome lists it or not, and a breach refuses the World before it opens, naming
-the Template, the palette character (or `foundation`) and the Material:
+since the Biome lays it. A Template or Settlement no Biome of the World lists is
+not checked, as only a Creative Player can place it. A breach refuses the World
+before it opens, naming the Template, the palette character (or `foundation`)
+and the Material:
 
 ```text
 mod `showcase`: template 0 `hut`: palette `s`: Material `showcase:marble` is not Obtainable: no Biome lays it, no Plant yields it and no Recipe makes it from what is

@@ -59,15 +59,20 @@ impl DeclaredTemplates {
         Ok(templates)
     }
 
-    /// Refuses the first Material a resolved Template names that `refuse`
-    /// gives a reason against, naming the Template and its palette character.
+    /// Refuses the first Material a resolved Template that is `used`, by its
+    /// full name, names and `refuse` gives a reason against, naming the
+    /// Template and its palette character.
     pub fn check(
         &self,
         registry: &Registry,
+        used: impl Fn(&str) -> bool,
         refuse: impl Fn(MaterialId) -> Option<String>,
     ) -> Result<(), ModError> {
         for (mod_id, rows) in &self.rows {
             for (row, def) in rows.iter().enumerate() {
+                if !used(&format!("{mod_id}:{}", def.name)) {
+                    continue;
+                }
                 let palette = def.palette.iter().filter_map(|entry| match &entry.cell {
                     content::TemplateCell::Voxel(v) => {
                         Some((format!("palette `{}`", entry.symbol), &v.material))

@@ -8,6 +8,7 @@ mod behaviour;
 mod character;
 mod plant;
 mod recipe;
+mod settlement;
 mod shape;
 mod sound;
 mod template;
@@ -62,7 +63,7 @@ struct Data {
     #[serde(default)]
     templates: Vec<template::Template>,
     #[serde(default)]
-    settlements: Vec<template::Settlement>,
+    settlements: Vec<settlement::Settlement>,
 }
 
 #[derive(Deserialize)]

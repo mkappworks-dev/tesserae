@@ -503,7 +503,6 @@ impl Worldgen {
             point = [point[1], size_m[0] - point[0]];
             size_m = [size_m[1], size_m[0]];
         }
-        // The door's front is on the edge it faces.
         match facing {
             0 => point[1] = size_m[1],
             1 => point[0] = size_m[0],

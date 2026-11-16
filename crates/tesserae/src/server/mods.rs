@@ -5,6 +5,7 @@ pub use runtime::ModDisabled;
 
 pub(in crate::server) use runtime::{Drain, EditHistory};
 
+use std::collections::HashSet;
 use std::ffi::OsString;
 use std::io::{self, BufRead, IsTerminal, Write};
 use std::path::{Path, PathBuf};
@@ -674,8 +675,8 @@ pub(crate) async fn declare_all(
         world.biomes = biomes;
         world.ores = ores;
     }
-    // Every Template the World declares, until Biomes say which they place.
     let obtainable = super::obtainable::obtainable(&loaded, &loaded.every_item(world.voxel_size));
+    let (used_templates, used_settlements) = stood_by_biomes(&loaded);
     let refuse = |m| {
         (!obtainable.contains(&m)).then(|| {
             "is not Obtainable: no Biome lays it, no Plant yields it and no Recipe makes it from \
@@ -684,12 +685,50 @@ pub(crate) async fn declare_all(
         })
     };
     templates
-        .check(&loaded.registry, refuse)
+        .check(
+            &loaded.registry,
+            |name| used_templates.contains(name),
+            refuse,
+        )
         .map_err(|e| e.to_string())?;
     settlements
-        .check(&loaded.registry, refuse)
+        .check(
+            &loaded.registry,
+            |name| used_settlements.contains(name),
+            refuse,
+        )
         .map_err(|e| e.to_string())?;
     Ok(loaded)
+}
+
+/// The names of the Templates and Settlements the World's Biomes stand, a Settlement's own
+/// Templates included: only these must be Obtainable, as the `place` Tool is Creative's alone.
+fn stood_by_biomes(loaded: &LoadedMods) -> (HashSet<String>, HashSet<String>) {
+    let tables = &loaded.tables;
+    let biomes = loaded
+        .world
+        .as_ref()
+        .map_or(&[][..], |w| w.biomes.as_slice());
+    let settlements: Vec<&Settlement> = biomes
+        .iter()
+        .flat_map(|b| b.surface_features.settlements())
+        .filter_map(|row| tables.settlements.get(usize::from(row.settlement)))
+        .collect();
+    let templates = biomes
+        .iter()
+        .flat_map(|b| b.surface_features.structures())
+        .map(|row| row.template)
+        .chain(settlements.iter().flat_map(|s| {
+            s.centre
+                .iter()
+                .chain(s.rules.iter().map(|r| &r.building))
+                .map(|b| b.template)
+        }))
+        .filter_map(|at| tables.templates.get(usize::from(at)))
+        .map(|t| t.name.clone())
+        .collect();
+    let settlements = settlements.iter().map(|s| s.name.clone()).collect();
+    (templates, settlements)
 }
 
 fn load_with_opening(
@@ -1558,10 +1597,20 @@ biomes = ["plain:dry"]
         assert_eq!(world.climate, tesserae_core::ClimateParams::default());
     }
 
-    /// A Game whose ground is all rock, with planks and gem nothing lays.
+    /// A Biome standing the hut, so the hut must be Obtainable.
+    const HUT_BIOME: &str = r#"[[biomes]]
+name = "huts"
+temperature = 0.5
+humidity = 0.5
+structures = [{ template = "plain:hut", spacing-m = 64.0, chance = 0.5 }]
+"#;
+
+    /// A Game whose ground is all rock, with planks and gem nothing lays, and a Biome standing a
+    /// hut of rock and planks.
     fn hut_game(extra: &str) -> String {
         format!(
             r#"{DATA_GAME}
+{HUT_BIOME}
 [[materials]]
 name = "planks"
 emission = 0
@@ -1615,6 +1664,53 @@ layers = [["rp"]]
             assert_eq!(created.unwrap_err(), want);
             assert_eq!(opened.unwrap_err(), want);
         }
+    }
+
+    #[test]
+    fn only_what_a_biome_stands_must_be_obtainable() {
+        let hamlet = "[[settlements]]\nname = \"hamlet\"\nradius-m = 8.0\nplots = 1\n\
+                      path = \"plain:gem\"\ntemplates = [{ template = \"plain:hut\" }]\n";
+        let settled = "settlements = [{ settlement = \"plain:hamlet\", spacing-m = 64.0 }]\n";
+        let unlisted = |game: String| game.replace(HUT_BIOME, "");
+        let listed = |game: String| {
+            game.replace(
+                HUT_BIOME,
+                &HUT_BIOME.replace("structures = [", &format!("{settled}structures = [")),
+            )
+        };
+        let want = "mod `plain`: settlement 0 `hamlet`: path: Material `plain:gem` is not \
+                    Obtainable: no Biome lays it, no Plant yields it and no Recipe makes it from \
+                    what is";
+        for (game, refusal) in [
+            (unlisted(hut_game("")), None),
+            (unlisted(hut_game(hamlet)), None),
+            (listed(hut_game(hamlet)), Some("plain:planks")),
+        ] {
+            let s = Scratch::new();
+            data(&s, "plain", true, "", &game);
+            let (created, opened) = refusals(&s);
+            match refusal {
+                None => assert_eq!((created, opened), (Ok(()), Ok(())), "{game}"),
+                Some(material) => {
+                    for refusal in [created, opened] {
+                        assert!(refusal.unwrap_err().contains(material), "{game}");
+                    }
+                }
+            }
+        }
+        let from_rock = "[[recipes]]\ninputs = [{ item = \"plain:rock\", count = 1 }]\n\
+                         output = { item = \"plain:planks\", count = 4 }\nstation = \"hand\"\n";
+        let s = Scratch::new();
+        data(
+            &s,
+            "plain",
+            true,
+            "",
+            &listed(hut_game(&format!("{from_rock}{hamlet}"))),
+        );
+        let (created, opened) = refusals(&s);
+        assert_eq!(created.unwrap_err(), want);
+        assert_eq!(opened.unwrap_err(), want);
     }
 
     #[test]
