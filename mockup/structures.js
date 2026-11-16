@@ -1795,7 +1795,7 @@ function structuresPage() {
     s.view === "placing"
       ? `<p class="item-eyebrow">WHAT PLACING DOES</p><div class="structure-keys">${structureLegend(tally)}</div>`
       : `<p class="item-eyebrow">MATERIALS · ALL OBTAINABLE IN ${tpl.game.toUpperCase()}</p><div class="structure-keys">${structureMaterials()}</div>`
-  }<div class="layout-totals"><div><span>Authored</span><b>1.0 m <small>grid</small></b></div><div><span>This World</span><b>${tally.voxel} m <small>Voxels</small></b></div></div><div class="structure-outcome ${tone}" role="status">${text}</div><p class="item-eyebrow">EXAMPLE AIM</p>${seg(GROUNDS, "ground", "structure-ground")}${seg({ ok: "In reach", far: "Too far", inside: "Inside", loading: "Loading" }, "case", "structure-case")}<small>In the game the aim decides these. The browser uses examples. Worldgen's level rule does not apply to a Player's placement.</small></div><footer><small>K opens and closes this list · Backspace puts the Tool away · R turns · Right mouse pins a preview; aimed at it, Right mouse builds it whole and Backspace cancels it · Z removes it in one step · Left mouse cancels</small>${button("Place here", "structure-place", { primary: true })}${button("Put the Tool away", "structure-exit", { ghost: true })}</footer></section></div>`;
+  }<div class="layout-totals"><div><span>Authored</span><b>1.0 m <small>grid</small></b></div><div><span>This World</span><b>${tally.voxel} m <small>Voxels</small></b></div></div><div class="structure-outcome ${tone}" role="status">${text}</div><p class="item-eyebrow">EXAMPLE AIM</p>${seg(GROUNDS, "ground", "structure-ground")}${seg({ ok: "In reach", far: "Too far", inside: "Inside", loading: "Loading" }, "case", "structure-case")}<small>In the game the aim decides these. The browser uses examples. Worldgen's level rule does not apply to a Player's placement.</small></div><footer><small>K opens and closes this list · Pick a Template and aim · R turns · Right mouse pins a preview; near it, G builds it whole and K or Backspace cancels it · K or Backspace puts the Tool away · Z removes it in one step · Left mouse cancels</small>${button("Place here", "structure-place", { primary: true })}${button("Put the Tool away", "structure-exit", { ghost: true })}</footer></section></div>`;
 }
 function structureHud() {
   if (state.heldTool !== "Place" || state.screen !== "play") return "";
@@ -1805,23 +1805,36 @@ function structureHud() {
     [tone, text] = structureOutcome();
   return `<aside class="layout-status structure-hud"><span>${icon("layout", 18)} Place Tool</span><div class="structure-hud-head"><span class="structure-thumb">${structureThumb(s.template, s.turn)}</span><b>${TEMPLATES[s.template].name} · facing ${FACING[s.turn]}</b></div><small>${tally.size.map((n) => n.toFixed(1)).join(" × ")} m · ${structureNumber(tally.total)} Voxels</small><div class="structure-keys compact">${structureLegend(tally)}</div><div class="structure-outcome ${tone}" role="status">${text}</div><small><kbd>K</kbd> Templates <kbd>R</kbd> Turn</small>${
     s.pinned
-      ? `<small><b>Preview pinned.</b> Aim at it: Right mouse builds it whole, Backspace cancels it.</small>`
-      : `<small>Right mouse pins a preview to walk round</small>`
+      ? `<small><b>Preview pinned.</b> Come close: G builds it whole, K or Backspace cancels it.</small>`
+      : `<small>Right mouse pins a preview to walk round · K or Backspace puts the Tool away</small>`
   }</aside>`;
 }
 
-/* Two steps: the first press pins the ghost where it is aimed, the next, aimed at it, builds it. */
+/* Right mouse pins the ghost where it is aimed; once pinned it stays until built or cancelled. */
 function structuresPlace() {
-  if (!state.structure.pinned) {
-    state.structure.pinned = true;
-    notice(
-      "Preview pinned. Walk round it; aim at it to build or cancel.",
-      "info",
-    );
-    if (state.screen === "structures") navigate("play");
-    else render();
-    return;
-  }
+  if (state.structure.pinned)
+    return notice("Come close to the preview: G builds it.", "info");
+  state.structure.pinned = true;
+  notice(
+    "Preview pinned. Walk round it; come close and press G to build it.",
+    "info",
+  );
+  if (state.screen === "structures") navigate("play");
+  else render();
+}
+/* The prompt under the reticle near a pinned preview: the browser takes the Player to be close. */
+function structurePrompt() {
+  if (
+    state.screen !== "play" ||
+    state.heldTool !== "Place" ||
+    !state.structure?.pinned
+  )
+    return "";
+  return `<div class="use-hint"><kbd>G</kbd>Build<kbd>K</kbd>Cancel</div>`;
+}
+/* G near the pinned preview builds it, whole or not at all. */
+function structuresBuild() {
+  if (!state.structure.pinned) return;
   state.structure.pinned = false;
   const [tone, text] = structureOutcome();
   if (tone === "refused") return notice(text, "warn");
@@ -1851,8 +1864,11 @@ function structuresAction(name, value) {
   else if (name === "structure-exit") {
     state.heldTool = null;
     navigate("play");
-  } else if (name === "structure-pick") ((s.template = value), again());
-  else if (name === "structure-game") {
+  } else if (name === "structure-pick") {
+    // Picking closes the list: the ghost follows the aim, ready to pin.
+    s.template = value;
+    navigate("play");
+  } else if (name === "structure-game") {
     state.structureGame = value;
     s.template = GAME_TEMPLATES[value][0].id;
     again();
@@ -1862,6 +1878,7 @@ function structuresAction(name, value) {
   else if (name === "structure-ground") ((s.ground = value), again());
   else if (name === "structure-case") ((s.case = value), again());
   else if (name === "structure-place") structuresPlace();
+  else if (name === "structure-build") structuresBuild();
   else if (name === "structure-unpin") {
     s.pinned = false;
     notice("Preview cancelled.", "info");
@@ -1881,32 +1898,33 @@ document.addEventListener("keydown", (e) => {
   const key = e.key.toLowerCase(),
     listing = state.screen === "structures",
     holding = state.screen === "play" && state.heldTool === "Place";
+  const pinned = holding && state.structure?.pinned,
+    cancel = key === "k" || e.key === "Backspace";
   /* K is Structure placement's own key, as L is the Layout menu's: from play it takes the Tool. */
-  if (key === "k" && state.screen === "play") state.heldTool = "Place";
+  if (key === "k" && state.screen === "play" && !holding)
+    state.heldTool = "Place";
   const act =
-    key === "k"
-      ? listing
-        ? "structure-close"
-        : state.screen === "play"
-          ? "structure-open"
-          : ""
-      : !(holding || listing)
-        ? ""
-        : key === "r"
-          ? "structure-turn"
-          : e.key === "Backspace" && holding && state.structure.pinned
-            ? "structure-unpin"
-            : e.key === "Backspace" && listing
-              ? "structure-exit"
-              : e.key === "Escape" && listing
-                ? "structure-close"
-                : "";
+    key === "k" && listing
+      ? "structure-close"
+      : key === "k" && state.screen === "play" && !holding
+        ? "structure-open"
+        : cancel && pinned
+          ? "structure-unpin"
+          : cancel && (holding || listing)
+            ? "structure-exit"
+            : key === "g" && pinned
+              ? "structure-build"
+              : key === "r" && (holding || listing)
+                ? "structure-turn"
+                : e.key === "Escape" && listing
+                  ? "structure-close"
+                  : "";
   if (!act) return;
   e.preventDefault();
   e.stopImmediatePropagation();
   action(act);
 });
-/* Right mouse with the place Tool in hand: pin a preview, or, aimed at the pinned one, build it. */
+/* Right mouse with the place Tool in hand pins a preview. */
 document.addEventListener("contextmenu", (e) => {
   if (state.screen !== "play" || state.heldTool !== "Place") return;
   e.preventDefault();

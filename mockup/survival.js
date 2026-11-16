@@ -686,7 +686,12 @@ window.addEventListener(
         return;
       }
     }
-    if (state.screen === "play" && e.key.toLowerCase() === "g") {
+    // With the place Tool in hand, G is the Tool's: it builds a pinned preview.
+    if (
+      state.screen === "play" &&
+      e.key.toLowerCase() === "g" &&
+      state.heldTool !== "Place"
+    ) {
       e.preventDefault();
       e.stopImmediatePropagation();
       /* Aimed at a Usable Voxel, Use acts on it before eating is considered. */
