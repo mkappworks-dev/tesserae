@@ -22,7 +22,8 @@ the centre first, so every village is a tight cluster.
   - Each lattice cell draws a candidate anywhere in the cell from the seed.
   - A candidate stands only if no candidate in a neighbouring cell with a
     higher draw lies within the minimum distance. The minimum distance is the
-    declared spacing for Structures, and the reach for Settlements.
+    declared spacing for Structures, and twice the reach (radius plus margin)
+    for Settlements.
   - This is a pure-function Poisson-disc scheme: each cell asks only its
     neighbours' candidates, never the ground rules, so it stays cheap and
     independent of Chunk order.
