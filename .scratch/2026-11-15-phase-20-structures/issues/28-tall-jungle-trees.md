@@ -1,6 +1,6 @@
 # 28: Jungle trees stand tall enough to walk under
 
-Status: ready-for-agent
+Status: done
 
 Spec: [Phase 20](../spec.md).
 
@@ -20,9 +20,22 @@ Play-testing found the jungle hard to cross: its trees are too short. The
 
 ## Acceptance criteria
 
-- [ ] Under every jungle tree worldgen stands, nothing of the tree but its
+- [x] Under every jungle tree worldgen stands, nothing of the tree but its
       trunk is lower than 4 m above its base, at 1.0, 0.5 and 0.25 m, tested.
-- [ ] The tree stays within `MAX_PLANT_HEIGHT_M`.
-- [ ] Every recorded digest test still passes unchanged.
+- [x] The tree stays within `MAX_PLANT_HEIGHT_M`.
+- [x] Every recorded digest test still passes unchanged.
 
 ## Comments
+
+`flora:jungle` in `mods/flora/content.toml`: trunk 10 to 16 m became 18 to
+24 m, limbs start at 0.6 of it (was 0.55), and vines hang at most 4 m (was 6
+m). Before, leaves and limbs began 4 to 6 m up and vines reached 1 to 2 m off
+the ground; now the lowest leaf, limb or vine stands 7 m or more up at every
+Voxel size, measured over 400 trees each at 1.0, 0.5 and 0.25 m by
+`under_a_jungle_tree_nothing_but_its_trunk_is_lower_than_four_metres`
+(`demo_games/vegetation.rs`), which also keeps the tree within
+`MAX_PLANT_HEIGHT_M`.
+
+No digest moved: `generator_version`, `surface_features`, `coarse_generation`
+and `plant_worldgen` pass unchanged. A World's snapshot pins its Plant rows,
+so a World made before keeps its shorter jungle; no new Generator version.

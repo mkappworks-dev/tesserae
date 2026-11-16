@@ -1148,12 +1148,12 @@ shape = "flora:cross"
 sapling = "flora:jungle_sapling"
 trunk = "flora:jungle_log"
 canopy = "flora:jungle_leaves"
-trunk-height-m = [10.0, 16.0]
+trunk-height-m = [18.0, 24.0]
 canopy-radius-m = 5.0
 mean-seconds = 140.0
 sapling-yield = [1, 2]
-vines = { plant = "flora:vine", density = 0.12, length-m = 6.0 }
-branching = { limbs = [3, 4], start = 0.55, reach-m = 4.5, rise = 0.2, lean-m = 0.0, lobe-radius-m = 1.8 }
+vines = { plant = "flora:vine", density = 0.12, length-m = 4.0 }
+branching = { limbs = [3, 4], start = 0.6, reach-m = 4.5, rise = 0.2, lean-m = 0.0, lobe-radius-m = 1.8 }
 
 [plants.needs]
 soil = ["#soil"]
