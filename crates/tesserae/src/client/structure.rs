@@ -152,6 +152,15 @@ pub(super) struct PlaceTool {
     /// The preview the Player pinned: its anchor, and the heading it was aimed along, which
     /// centres it as it did then.
     pub(super) pinned: Option<([i32; 3], Vec3)>,
+    pressed: Pressed,
+}
+
+/// The presses [`intercept`] took this frame, for [`act`] to answer once the camera is placed.
+#[derive(Default, Clone, Copy)]
+struct Pressed {
+    place: bool,
+    use_: bool,
+    remove: bool,
 }
 
 impl PlaceTool {
@@ -267,30 +276,22 @@ fn aimed_at(camera: &GlobalTransform, corner: [i32; 3], size: [i32; 3], voxel_si
     near <= far
 }
 
-/// With the place Tool in hand: the turn key turns; Place pins a preview where
-/// the Server's fresh answer anchors it; near the pinned preview Use sends the
-/// Structure intent; Remove aimed at it, the clear key or the Structures key
-/// cancels it. Place, Use and Remove are taken so they send no Edit or Use.
-/// Like an Edit, nothing is sent by the click that grabs the cursor.
-#[allow(clippy::too_many_arguments)]
+/// With the place Tool in hand: the turn key turns, and the clear key or the Structures key
+/// cancels a pinned preview. Place, Use and Remove are taken so they send no Edit or Use, and
+/// left for [`act`]. Like an Edit, nothing is sent by the click that grabs the cursor.
 pub(super) fn intercept(
     ownership: Res<Ownership>,
     mut actions: ResMut<Actions>,
     cursor: Single<&CursorOptions, With<PrimaryWindow>>,
     (hotbar, catalogue): (Res<Hotbar>, Res<Catalogue>),
-    camera: Single<&GlobalTransform, With<FlyCamera>>,
     mut tool: ResMut<PlaceTool>,
-    (preview, time, world): (Res<Preview>, Res<Time>, Res<WorldSettings>),
-    (mut intents, mut prompt): (MessageWriter<StructureIntent>, ResMut<PinPrompt>),
     mut was_grabbed: Local<bool>,
 ) {
     let grabbed = cursor.grab_mode == CursorGrabMode::Locked;
     let ready = grabbed && std::mem::replace(&mut *was_grabbed, grabbed);
+    tool.pressed = Pressed::default();
     if !holding_place(&hotbar, &catalogue.0) && tool.pinned.is_some() {
         tool.pinned = None;
-    }
-    if !holding_place(&hotbar, &catalogue.0) || !ownership.gameplay() {
-        prompt.set_if_neq(PinPrompt(false));
     }
     if !ownership.gameplay() || !holding_place(&hotbar, &catalogue.0) {
         return;
@@ -302,6 +303,41 @@ pub(super) fn intercept(
         actions.cancel(Action::Respawn);
         actions.cancel(Action::Turn);
     }
+    // A stray click elsewhere never throws the preview away; the keys cancel it from anywhere.
+    if tool.pinned.is_some()
+        && (actions.started(Action::ClearTool) || actions.started(Action::Structures))
+    {
+        tool.pinned = None;
+        actions.cancel(Action::ClearTool);
+        actions.cancel(Action::Structures);
+    }
+    tool.pressed = Pressed {
+        place: ready && actions.started(Action::Place),
+        use_: ready && actions.started(Action::Use),
+        remove: ready && actions.started(Action::Remove),
+    };
+    actions.cancel(Action::Place);
+    actions.cancel(Action::Remove);
+    actions.cancel(Action::Use);
+}
+
+/// Answers [`intercept`]'s presses from where the camera ends up, as the aim was asked from
+/// there: in the third person the view moves it back from the Eye after input. Place pins a
+/// preview where the Server's fresh answer anchors it; near the pinned preview Use sends the
+/// Structure intent; Remove aimed at it cancels it.
+pub(super) fn act(
+    ownership: Res<Ownership>,
+    (hotbar, catalogue): (Res<Hotbar>, Res<Catalogue>),
+    camera: Single<&GlobalTransform, With<FlyCamera>>,
+    mut tool: ResMut<PlaceTool>,
+    (preview, time, world): (Res<Preview>, Res<Time>, Res<WorldSettings>),
+    (mut intents, mut prompt): (MessageWriter<StructureIntent>, ResMut<PinPrompt>),
+) {
+    if !ownership.gameplay() || !holding_place(&hotbar, &catalogue.0) {
+        prompt.set_if_neq(PinPrompt(false));
+        return;
+    }
+    let pressed = std::mem::take(&mut tool.pressed);
     let intent = tool.intent(&catalogue.0, &camera);
     let ghost = intent
         .as_ref()
@@ -311,7 +347,7 @@ pub(super) fn intercept(
     let on_pin =
         pinned && ghost.is_some_and(|g| aimed_at(&camera, g.corner, g.size, world.voxel_size));
     let near = pinned && ghost.is_some_and(|g| near(&camera, g.corner, g.size, world.voxel_size));
-    if ready && actions.started(Action::Place) && !pinned {
+    if pressed.place && !pinned {
         pin(
             &mut tool,
             &preview,
@@ -320,26 +356,17 @@ pub(super) fn intercept(
             time.elapsed_secs_f64(),
         );
     }
-    if ready
-        && actions.started(Action::Use)
+    if pressed.use_
         && near
         && let Some(intent) = intent
     {
         intents.write(intent);
         tool.pinned = None;
     }
-    // A stray click elsewhere never throws the preview away; the keys cancel it from anywhere.
-    let cancel = (ready && actions.started(Action::Remove) && on_pin)
-        || (pinned && (actions.started(Action::ClearTool) || actions.started(Action::Structures)));
-    if cancel {
+    if pressed.remove && on_pin {
         tool.pinned = None;
-        actions.cancel(Action::ClearTool);
-        actions.cancel(Action::Structures);
     }
     prompt.set_if_neq(PinPrompt(tool.pinned.is_some() && near));
-    actions.cancel(Action::Place);
-    actions.cancel(Action::Remove);
-    actions.cancel(Action::Use);
 }
 
 #[derive(Resource, Default)]
@@ -773,7 +800,7 @@ pub(super) fn plugin(app: &mut App) {
                     .before(super::camera::reset)
                     .before(super::removal::hold)
                     .before(super::edit::select_held),
-                (learn_palette, report, receive, track, build, outline)
+                (learn_palette, act, report, receive, track, build, outline)
                     .chain()
                     .after(super::view::place)
                     .after(intercept),
@@ -852,7 +879,7 @@ mod tests {
                 Transform::from_xyz(1.0, 2.0, 3.0).looking_to(Vec3::NEG_Y, Vec3::Z),
             ),
         ));
-        app.add_systems(Update, (intercept, report, receive, track).chain());
+        app.add_systems(Update, (intercept, act, report, receive, track).chain());
         // The first frame only notes that the cursor was already grabbed.
         app.update();
         app
@@ -951,6 +978,36 @@ mod tests {
             "along the heading it was pinned with"
         );
         assert!(app.world().resource::<PlaceTool>().pinned.is_none());
+    }
+
+    #[test]
+    fn in_the_third_person_place_pins_the_ghost_asked_from_behind_the_shoulder() {
+        let mut app = app(Holding::Tool(PLACE));
+        let pose = |y: f32| {
+            move |mut camera: Single<&mut GlobalTransform, With<FlyCamera>>| {
+                **camera = GlobalTransform::from(
+                    Transform::from_xyz(1.0, y, 3.0).looking_to(Vec3::NEG_Y, Vec3::Z),
+                );
+            }
+        };
+        // The view moves the camera out of the eye to the boom between input and the aim report.
+        app.add_systems(
+            Update,
+            (
+                pose(2.0).before(intercept),
+                pose(6.0).after(intercept).before(act),
+            ),
+        );
+        app.update();
+        answer(&mut app, Ok(judged([Some(StructureCell::Places); 4])));
+        frame(&mut app, None, Some(MouseButton::Right));
+        assert_eq!(
+            app.world()
+                .resource::<PlaceTool>()
+                .pinned
+                .map(|(anchor, _)| anchor),
+            Some([11, 5, 21])
+        );
     }
 
     #[test]
