@@ -13,15 +13,41 @@
 }
 .structure-pick {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 3px;
+  align-items: center;
+  gap: 10px;
   padding: 10px 12px;
   background: #1d1d22;
   border: 1px solid #5c5c65;
   border-radius: 5px;
   color: #c3c7cf;
   text-align: left;
+}
+.structure-pick-text {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+}
+/* A Template's thumbnail: the list's rows and the placement card. */
+.structure-thumb {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  padding: 4px;
+  box-sizing: border-box;
+  background: #141418;
+  border-radius: 4px;
+}
+.structure-thumb svg {
+  width: 100%;
+  height: 100%;
+}
+.structure-hud-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 .structure-pick b {
   font-size: 14px;

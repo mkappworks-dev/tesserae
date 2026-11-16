@@ -1602,6 +1602,77 @@ function structureMaterials() {
     })
     .join("");
 }
+/* A small isometric picture of a Template from its cells and each Material's texture: the list's rows and the placement card show it. */
+let thumbs = 0;
+function structureThumb(id, turn = 0) {
+  const tpl = TEMPLATES[id],
+    t = turned(id, turn),
+    S = 4,
+    P = (x, y, z) => [(x - z) * S, ((x + z) * S) / 2 - y * S],
+    pts = (a) => a.map((p) => p.join(",")).join(" "),
+    pats = new Map(),
+    out = [],
+    xs = [],
+    ys = [],
+    tag = `thumb${thumbs++}`;
+  const face = (corners, name, shade) => {
+    if (!pats.has(name)) pats.set(name, `${tag}-${pats.size}`);
+    for (const [x, y] of corners) (xs.push(x), ys.push(y));
+    out.push(
+      `<polygon points="${pts(corners)}" fill="url(#${pats.get(name)})"/>`,
+    );
+    if (shade)
+      out.push(
+        `<polygon points="${pts(corners)}" fill="#000" fill-opacity="${shade}"/>`,
+      );
+  };
+  const order = t.cells
+    .filter((c) => c.k === "solid")
+    .sort((a, b) => a.x + a.z - (b.x + b.z) || a.y - b.y);
+  for (const c of order) {
+    const { x, y, z } = c,
+      name = materialOf(tpl, c);
+    face(
+      [
+        P(x, y, z + 1),
+        P(x + 1, y, z + 1),
+        P(x + 1, y + 1, z + 1),
+        P(x, y + 1, z + 1),
+      ],
+      name,
+      0.2,
+    );
+    face(
+      [
+        P(x + 1, y, z),
+        P(x + 1, y, z + 1),
+        P(x + 1, y + 1, z + 1),
+        P(x + 1, y + 1, z),
+      ],
+      name,
+      0.35,
+    );
+    face(
+      [
+        P(x, y + 1, z),
+        P(x + 1, y + 1, z),
+        P(x + 1, y + 1, z + 1),
+        P(x, y + 1, z + 1),
+      ],
+      name,
+      0,
+    );
+  }
+  const defs = [...pats]
+      .map(
+        ([name, pid]) =>
+          `<pattern id="${pid}" patternUnits="userSpaceOnUse" width="${S}" height="${S}"><image href="${materialSwatch(name)}" width="${S}" height="${S}" preserveAspectRatio="none"/></pattern>`,
+      )
+      .join(""),
+    minX = Math.min(...xs),
+    minY = Math.min(...ys);
+  return `<svg viewBox="${minX} ${minY} ${Math.max(...xs) - minX} ${Math.max(...ys) - minY}" preserveAspectRatio="xMidYMid meet" aria-hidden="true"><defs>${defs}</defs>${out.join("")}</svg>`;
+}
 function structureList() {
   const list = GAME_TEMPLATES[structureGame()];
   return Object.entries(KINDS)
@@ -1612,7 +1683,7 @@ function structureList() {
         .map((t) => {
           const b = turned(t.id, 0),
             ys = b.cells.map((c) => c.y);
-          return `<button class="structure-pick ${state.structure.template === t.id ? "active" : ""}" data-action="structure-pick" data-value="${t.id}" aria-pressed="${state.structure.template === t.id}"><b>${t.name}</b><small>${b.w}.0 × ${Math.max(...ys) - Math.min(...ys) + 1}.0 × ${b.d}.0 m · ${t.note}</small><small class="quiet">${t.id}</small></button>`;
+          return `<button class="structure-pick ${state.structure.template === t.id ? "active" : ""}" data-action="structure-pick" data-value="${t.id}" aria-pressed="${state.structure.template === t.id}"><span class="structure-thumb">${structureThumb(t.id)}</span><span class="structure-pick-text"><b>${t.name}</b><small>${b.w}.0 × ${Math.max(...ys) - Math.min(...ys) + 1}.0 × ${b.d}.0 m · ${t.note}</small><small class="quiet">${t.id}</small></span></button>`;
         })
         .join("")}`;
     })
@@ -1662,7 +1733,7 @@ function structureHud() {
   const s = state.structure,
     tally = structureTally(),
     [tone, text] = structureOutcome();
-  return `<aside class="layout-status structure-hud"><span>${icon("layout", 18)} Place Tool</span><b>${TEMPLATES[s.template].name} · facing ${FACING[s.turn]}</b><small>${tally.size.map((n) => n.toFixed(1)).join(" × ")} m · ${structureNumber(tally.total)} Voxels</small><div class="structure-keys compact">${structureLegend(tally)}</div><div class="structure-outcome ${tone}" role="status">${text}</div><small><kbd>K</kbd> Templates <kbd>R</kbd> Turn</small><small>Right mouse places it whole</small></aside>`;
+  return `<aside class="layout-status structure-hud"><span>${icon("layout", 18)} Place Tool</span><div class="structure-hud-head"><span class="structure-thumb">${structureThumb(s.template, s.turn)}</span><b>${TEMPLATES[s.template].name} · facing ${FACING[s.turn]}</b></div><small>${tally.size.map((n) => n.toFixed(1)).join(" × ")} m · ${structureNumber(tally.total)} Voxels</small><div class="structure-keys compact">${structureLegend(tally)}</div><div class="structure-outcome ${tone}" role="status">${text}</div><small><kbd>K</kbd> Templates <kbd>R</kbd> Turn</small><small>Right mouse places it whole</small></aside>`;
 }
 
 function structuresPlace() {
