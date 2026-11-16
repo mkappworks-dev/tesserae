@@ -269,7 +269,7 @@ impl Base {
             * smooth(0.72, 0.82, canyon)
             * inland
             * smooth(0.88, 0.97, line)
-            * offset.max(0.0).min(70.0)
+            * offset.clamp(0.0, 70.0)
             / 70.0;
 
         if base < 0.0 {

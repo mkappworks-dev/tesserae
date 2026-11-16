@@ -92,8 +92,11 @@ pub(crate) struct Drainage {
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
+/// The region this thread asked for last, and whose drainage: a Chunk's columns nearly always share it.
+type LastRegion = Option<(u64, [i32; 2], Arc<Region>)>;
+
 thread_local! {
-    static LAST: RefCell<Option<(u64, [i32; 2], Arc<Region>)>> = const { RefCell::new(None) };
+    static LAST: RefCell<LastRegion> = const { RefCell::new(None) };
 }
 
 fn sortable(f: f32) -> u32 {
