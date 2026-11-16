@@ -614,10 +614,23 @@ natively; no Mod is called when a Voxel is used
 
 Any row may set `shape`, a Shape by full name (`core:slab`, or a Mod's own),
 which a Player's Place of its Material always uses whatever Shape they chose:
-Terra's Door and its 1 m Gate are a thin `terra:panel`, and its Workbench a
-`terra:table`. A Station or Container keeps the Player's Orientation; a Door is
-turned as above. A Shape any row fixes is that row's alone: the Player is not
-offered it to place other Materials in.
+Terra's 2 by 3 m Door and its 1 m Gate are a thin `terra:panel`, and its
+Workbench a `terra:table`. A Station or Container keeps the Player's
+Orientation; a Door is turned as above. A Shape any row fixes is that row's
+alone: the Player is not offered it to place other Materials in.
+
+#### Choosing a Door's hinge
+
+A Door's panel opens onto its hinge side. A Player picks it by aim: placing a
+Door hinges it on the half of the cell the crosshair is on, left or right of the
+middle. A Template picks it by each Door cell's orientation byte: upright (`up`
+is +Y), the panel's own +Z face is its front and its hinge is the side its own
++X turns to; upside down (`up` is -Y) the front stays and the hinge swaps sides,
+the only way to mirror it. So with the panel on +Z, orientation 0 hinges on +X
+and 6 on -X. The Structure's turn turns both. Hinge a single Door away from the
+nearer corner of its wall, and the two leaves of a double Door on their outer
+edges, so they open from the middle; the demo Games' mockup says it per Door
+cell with `hinge: "left"` or `"right"`, seen from outside.
 
 A Material is in at most one row, as its `material` or as a Door's open one. Any
 Mod may add Recipes for another Mod's Items and Stations; names resolve after
@@ -1086,8 +1099,10 @@ A palette character is one of:
 - `{ material, shape, orientation }`: a solid Material by full name, a Shape by
   full name (omitted is a full cube) and an orientation byte, `up * 4 + turn`, 0
   to 23 (omitted is 0). A Door is its closed Material and a Container is empty
-  until a Player fills it. A fluid, a Grown Material and a Door's open Material
-  are refused.
+  until a Player fills it. A fluid is written as a full cube with no Shape or
+  orientation, and lands as a source at every Voxel size, so a well holds still
+  water that neither worldgen nor the flow drains. A Grown Material and a Door's
+  open Material are refused.
 - `"air"`: carves, so a cellar is cut into the ground and a room into a
   hillside.
 - `"keep"`: never written, so what the Structure stands in shows through.
@@ -1141,10 +1156,11 @@ Game and Mods are composed:
 
 Structures, the Catalogue and Mod Commands are not sources: a building is never
 the only source of its own Materials. A `ground` cell is always Obtainable,
-since the Biome lays it. A Template or Settlement no Biome of the World lists is
-not checked, as only a Creative Player can place it. A breach refuses the World
-before it opens, naming the Template, the palette character (or `foundation`)
-and the Material:
+since the Biome lays it, and a fluid cell is not checked: a well is meant to be
+a Settlement's water, even in a World that lays none. A Template or Settlement
+no Biome of the World lists is not checked, as only a Creative Player can place
+it. A breach refuses the World before it opens, naming the Template, the palette
+character (or `foundation`) and the Material:
 
 ```text
 mod `showcase`: template 0 `hut`: palette `s`: Material `showcase:marble` is not Obtainable: no Biome lays it, no Plant yields it and no Recipe makes it from what is

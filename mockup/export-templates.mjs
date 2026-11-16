@@ -40,8 +40,16 @@ const KEEP = ".",
   SYMBOLS =
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789#$%&*+=?@^~!<>/|;,";
 
-/* The mockup turns a cell's +Z edge to -X per quarter; an orientation byte's quarter takes it to +X. */
-const orientation = (turn) => (4 - (turn % 4)) % 4;
+/*
+ * The mockup turns a cell's +Z edge to -X per quarter; an orientation byte's quarter takes it to +X.
+ * Upright, a Door's panel opens onto its +X side, its "left" seen from outside; a "right" hinge is
+ * the same panel upside down, the only turn that keeps the panel's face and swaps its hinge.
+ */
+const UPSIDE_DOWN = [6, 5, 4, 7];
+function orientation(turn, hinge) {
+  const upright = (4 - (turn % 4)) % 4;
+  return hinge === "right" ? UPSIDE_DOWN[upright] : upright;
+}
 
 function exportTemplate(t) {
   const game = t.game.toLowerCase(),
@@ -69,7 +77,7 @@ function exportTemplate(t) {
       const voxel = {
           material: materialOf(t, c),
           shape: shape.includes(":") ? shape : `${game}:${shape}`,
-          orientation: orientation(c.turn || 0),
+          orientation: orientation(c.turn || 0, c.hinge),
         },
         key = JSON.stringify(voxel);
       if (!symbolOf.has(key)) {
