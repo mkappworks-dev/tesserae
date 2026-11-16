@@ -86,7 +86,7 @@ pub(super) struct Bar;
 #[derive(Component)]
 pub(super) struct Fill;
 #[derive(Component)]
-struct PlaceHint;
+pub(super) struct PlaceHint;
 
 pub(super) fn plugin(app: &mut App) {
     app.init_session_state::<Progress>()
@@ -129,25 +129,21 @@ fn spawn(mut commands: Commands) {
                 ..default()
             },
         ));
-    commands.spawn((
+}
+
+/// The hint under the reticle that Place would put a Voxel down; the Use prompt's column holds it.
+pub(super) fn place_hint_bundle() -> impl Bundle {
+    (
         PlaceHint,
         Visibility::Hidden,
         Pickable::IGNORE,
-        UiTransform::from_translation(Val2::new(Val::Percent(-50.0), Val::Px(0.0))),
         Text::new("Right-click to place"),
         TextFont {
             font_size: bevy::text::FontSize::Px(12.0),
             ..default()
         },
         TextColor(Color::srgba(1.0, 1.0, 1.0, 0.85)),
-        Node {
-            position_type: PositionType::Absolute,
-            top: Val::Percent(50.0),
-            left: Val::Percent(50.0),
-            margin: UiRect::top(Val::Px(24.0)),
-            ..default()
-        },
-    ));
+    )
 }
 pub(super) fn hold(
     (actions, preferences, ownership, cursor, menu, hotbar, mut previous_hand): Controls,
