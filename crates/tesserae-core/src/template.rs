@@ -365,8 +365,8 @@ impl Sampled<'_> {
         })
     }
 
-    /// The cell at `at`, each in `0..size()`, with its Orientation turned.
-    pub fn cell(&self, [x, y, z]: [i32; 3]) -> Cell {
+    /// The unturned Template's cell the Voxel at `at` samples, each in `0..size()`.
+    pub fn source(&self, [x, y, z]: [i32; 3]) -> [usize; 3] {
         let [w, _, d] = self.cells.each_ref().map(|c| c.len() as i32);
         // Undo the turn: a quarter takes the Template's (x, z) to (z, w - 1 - x).
         let (tx, tz) = match self.turn.quarters() {
@@ -375,11 +375,16 @@ impl Sampled<'_> {
             2 => (w - 1 - x, d - 1 - z),
             _ => (z, d - 1 - x),
         };
-        let cell = self.template.cell([
+        [
             self.cells[0][tx as usize] as usize,
             self.cells[1][y as usize] as usize,
             self.cells[2][tz as usize] as usize,
-        ]);
+        ]
+    }
+
+    /// The cell at `at`, each in `0..size()`, with its Orientation turned.
+    pub fn cell(&self, at: [i32; 3]) -> Cell {
+        let cell = self.template.cell(self.source(at));
         match cell {
             Cell::Voxel(v) => Cell::Voxel(Voxel::new(
                 v.material(),

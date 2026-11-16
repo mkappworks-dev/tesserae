@@ -596,6 +596,7 @@ fn real_terra_new_builds_but_reopened_guest_never_replays_construction() {
         containers: Vec::new(),
         map: Default::default(),
         game_mode: Default::default(),
+        looted: Vec::new(),
     };
     Writer::acquire(&dir.0, &opening.id, &content)
         .unwrap()
@@ -2529,9 +2530,11 @@ fn declares_hamlet(path: &'static str) -> impl FnOnce(&mut crate::server::mods::
                 weight: 1.0,
                 min: 0,
                 max: 4,
+                loot: None,
             }],
             minimum: 0,
             path: Voxel::cube(id),
+            loot: None,
         }];
         let world = loaded.world.as_mut().unwrap();
         let mut biomes = world.biomes.as_slice().to_vec();

@@ -196,6 +196,7 @@ fn settlement(name: &str, radius_m: f32, plots: u8) -> Settlement {
         weight,
         min,
         max,
+        loot: None,
     };
     Settlement {
         name: name.into(),
@@ -206,6 +207,7 @@ fn settlement(name: &str, radius_m: f32, plots: u8) -> Settlement {
         rules: vec![rule(0, 2.0, 1, plots), rule(1, 1.0, 1, plots / 2)],
         minimum: 2,
         path: Voxel::cube(PATH),
+        loot: None,
     }
 }
 

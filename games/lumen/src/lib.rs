@@ -89,6 +89,7 @@ fn biomes() -> Vec<BiomeDef> {
                 .into_iter()
                 .chain(plants::garden())
                 .collect(),
+            loot: Some(structures::loot(structures::biome_loot("garden"))),
         },
         BiomeDef {
             soundscape: None,
@@ -105,6 +106,7 @@ fn biomes() -> Vec<BiomeDef> {
             structures: structures::wild(&["crystal_spire", "observatory"]),
             settlements: structures::village(),
             surface_features: plants::arid_court(),
+            loot: Some(structures::loot(structures::biome_loot("arid_court"))),
         },
         BiomeDef {
             soundscape: None,
@@ -124,6 +126,7 @@ fn biomes() -> Vec<BiomeDef> {
                 .into_iter()
                 .chain(plants::frost_court())
                 .collect(),
+            loot: Some(structures::loot(structures::biome_loot("frost_court"))),
         },
         BiomeDef {
             soundscape: None,
@@ -140,6 +143,7 @@ fn biomes() -> Vec<BiomeDef> {
             structures: structures::wild(&["glass_dome", "observatory"]),
             settlements: structures::village(),
             surface_features: plants::conservatory(),
+            loot: Some(structures::loot(structures::biome_loot("conservatory"))),
         },
         BiomeDef {
             soundscape: None,
@@ -156,6 +160,7 @@ fn biomes() -> Vec<BiomeDef> {
             structures: structures::wild(&["geode_hollow", "star_ring"]),
             settlements: Vec::new(),
             surface_features: plants::lily_pond(),
+            loot: Some(structures::loot(structures::biome_loot("lily_pond"))),
         },
     ]
 }

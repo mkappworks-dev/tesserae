@@ -22,6 +22,7 @@ pub mod inventory;
 pub mod layout;
 pub mod light;
 pub mod lod;
+pub mod loot;
 pub mod map;
 pub mod marker;
 pub mod material;

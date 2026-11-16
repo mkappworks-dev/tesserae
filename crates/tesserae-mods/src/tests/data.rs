@@ -333,6 +333,7 @@ fn component() -> Declaration {
                 crop_fields: Vec::new(),
                 structures: Vec::new(),
                 settlements: Vec::new(),
+                loot: None,
             },
             content::BiomeDef {
                 soundscape: None,
@@ -364,6 +365,7 @@ fn component() -> Declaration {
                 crop_fields: Vec::new(),
                 structures: Vec::new(),
                 settlements: Vec::new(),
+                loot: None,
             },
         ],
         ores: vec![
@@ -536,10 +538,12 @@ fn component() -> Declaration {
                 weight: 2.0,
                 min: 1,
                 max: 3,
+                loot: None,
             }],
             minimum: 2,
             path: "full:rock".into(),
             path_shape: Some("full:slab".into()),
+            loot: None,
         }],
         voxel_uses: vec![
             content::VoxelUse {

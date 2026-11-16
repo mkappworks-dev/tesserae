@@ -1,3 +1,5 @@
+mod loot;
+
 use bevy::ecs::system::RunSystemOnce;
 use tesserae_core::inventory::{Destination, Refusal, Slot};
 use tesserae_core::{MaterialDef, Tables, VoxelUse};

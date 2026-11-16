@@ -608,6 +608,9 @@ pub struct SavedBiome {
     /// Absent is a Biome that lays out no Settlements, as every Biome was before them.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub settlements: Vec<SavedBiomeSettlement>,
+    /// What its wilderness Structures' chests hold; absent fills none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub loot: Option<crate::loot::LootTable>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -631,6 +634,8 @@ pub struct SavedSettlement {
     pub rules: Vec<SavedPlotRule>,
     pub minimum: u8,
     pub path: Solid,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub loot: Option<crate::loot::LootTable>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -642,13 +647,15 @@ pub struct SavedBuilding {
     pub door: Option<[u16; 2]>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SavedPlotRule {
     pub building: SavedBuilding,
     pub weight: f32,
     pub min: u8,
     pub max: u8,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub loot: Option<crate::loot::LootTable>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -977,6 +984,29 @@ impl Generation {
         Ok(settlements)
     }
 
+    /// This snapshot with each Biome's loot, by Biome id; a Biome past the end has none.
+    pub fn with_biome_loot(mut self, loot: &[Option<crate::loot::LootTable>]) -> Self {
+        for (saved, loot) in self.biomes.iter_mut().flatten().zip(loot) {
+            saved.loot = loot.clone();
+        }
+        self
+    }
+
+    /// Each Biome's loot, by the id [`Self::restore`] gives it.
+    pub fn biome_loot(&self) -> Result<Vec<Option<crate::loot::LootTable>>, Error> {
+        self.biomes
+            .iter()
+            .flatten()
+            .map(|b| {
+                if let Some(loot) = &b.loot {
+                    loot.validate()
+                        .map_err(|e| Error::Corrupt(format!("Biome {} loot: {e}", b.name)))?;
+                }
+                Ok(b.loot.clone())
+            })
+            .collect()
+    }
+
     /// The World's Templates, which the Structures of [`Self::restore`]'s Biomes index into.
     pub fn templates(&self, mapping: &Mapping) -> Result<Vec<crate::template::Template>, Error> {
         mapping.validate()?;
@@ -1119,6 +1149,7 @@ fn saved_biome(
                 chance: s.chance,
             })
             .collect(),
+        loot: None,
     })
 }
 
@@ -1155,10 +1186,12 @@ fn saved_settlement(
                 weight: r.weight,
                 min: r.min,
                 max: r.max,
+                loot: r.loot.clone(),
             })
             .collect(),
         minimum: s.minimum,
         path: mapping.voxel(s.path)?,
+        loot: s.loot.clone(),
     })
 }
 
@@ -1184,10 +1217,12 @@ fn restored_settlement(
                 weight: r.weight,
                 min: r.min,
                 max: r.max,
+                loot: r.loot.clone(),
             })
             .collect(),
         minimum: s.minimum,
         path: mapping.restore_voxel(&s.path)?,
+        loot: s.loot.clone(),
     })
 }
 
@@ -1793,6 +1828,10 @@ pub struct Commit {
     /// Stacks: opens with none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub containers: Vec<containers::SavedContainer>,
+    /// The cells whose worldgen chest has drawn its loot or been changed, so it never draws
+    /// again. Absent in commits written before loot.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub looted: Vec<[i32; 3]>,
     /// Absent in commits written before Maps, or with nothing explored: opens
     /// with an empty Map.
     #[serde(default, skip_serializing_if = "map::SavedMap::is_empty")]

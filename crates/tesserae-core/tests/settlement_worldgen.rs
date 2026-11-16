@@ -119,16 +119,19 @@ fn village() -> Settlement {
                 weight: 2.0,
                 min: 1,
                 max: 5,
+                loot: None,
             },
             PlotRule {
                 building: building(&t, 2),
                 weight: 1.0,
                 min: 1,
                 max: 3,
+                loot: None,
             },
         ],
         minimum: 3,
         path: Voxel::cube(PATH),
+        loot: None,
     }
 }
 
@@ -541,7 +544,7 @@ fn a_settlement_below_its_minimum_is_dropped() {
         rules: vec![PlotRule {
             min: 8,
             max: 8,
-            ..village().rules[0]
+            ..village().rules[0].clone()
         }],
         ..village()
     };
@@ -990,9 +993,11 @@ fn hamlet() -> Settlement {
             weight: 1.0,
             min: 0,
             max: 1,
+            loot: None,
         }],
         minimum: 0,
         path: Voxel::cube(PATH),
+        loot: None,
     }
 }
 

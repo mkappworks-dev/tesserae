@@ -3,6 +3,10 @@
 //! the Player's own Remove or history that takes a Container away spills its
 //! Stacks as Dropped items
 //! (`docs/adr/0026-usable-voxels-are-declared-kinds-the-server-runs.md`).
+//!
+//! A chest worldgen stood draws its loot the first time a Container is needed
+//! for it: opened, or written over. Its cell is then looted for good, so a
+//! Player's chest put back there starts empty.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -12,7 +16,7 @@ use tesserae_core::collide::VoxelVolume;
 use tesserae_core::entity::DropSpec;
 use tesserae_core::inventory::Stack;
 use tesserae_core::save::containers::SavedContainer;
-use tesserae_core::{MaterialId, Voxel};
+use tesserae_core::{MaterialId, Voxel, Worldgen};
 
 use super::ContentTables;
 use super::entities::EntityStore;
@@ -31,7 +35,22 @@ pub struct Containers {
     /// Containers whose viewers have not been sent their Stacks since they
     /// changed or were opened.
     unsent: BTreeSet<[i32; 3]>,
+    /// Cells whose worldgen chest has drawn its loot, or was written over first.
+    looted: BTreeSet<[i32; 3]>,
     revision: u64,
+}
+
+/// What a worldgen chest's loot is drawn from, where the World has a generator.
+#[derive(bevy::ecs::system::SystemParam)]
+pub(super) struct LootSource<'w> {
+    generator: Option<Res<'w, super::WorldGenerator>>,
+    items: Option<Res<'w, Items>>,
+}
+
+impl LootSource<'_> {
+    pub(super) fn get(&self) -> Option<(&Worldgen, &Items)> {
+        Some((&self.generator.as_ref()?.0, self.items.as_ref()?))
+    }
 }
 
 /// A Player's open Container, and the Voxel it was when opened: any change to
@@ -69,6 +88,37 @@ impl Containers {
 
     pub fn revision(&self) -> u64 {
         self.revision
+    }
+
+    /// Puts the loot of the chest worldgen stood at `at` in it, the first time
+    /// it is asked while the cell still holds that chest as `voxel`; anything
+    /// else there draws nothing.
+    pub(super) fn draw_loot(
+        &mut self,
+        (generator, items): (&Worldgen, &Items),
+        at: [i32; 3],
+        voxel: Voxel,
+        slots: usize,
+    ) {
+        if self.looted.contains(&at) {
+            return;
+        }
+        let Some(stood) = generator.stood_at(at).filter(|s| s.voxel == voxel) else {
+            return;
+        };
+        self.looted.insert(at);
+        self.revision += 1;
+        // A Container held from before loot existed keeps what it holds.
+        let (Some(loot), false) = (stood.loot, self.held.contains_key(&at)) else {
+            return;
+        };
+        let drawn = loot.draw(slots).into_iter().map(|slot| {
+            let mut stack = slot?;
+            let item = items.named(&stack.item)?;
+            stack.count = stack.count.min(items.0[item].max_stack);
+            Some(stack)
+        });
+        self.held.insert(at, drawn.collect());
     }
 
     /// Opens `viewer`'s session on the Container `voxel` at `at`, closing any
@@ -117,9 +167,14 @@ impl Containers {
             .collect()
     }
 
-    pub fn restore(saved: Vec<SavedContainer>) -> Self {
+    pub fn looted(&self) -> Vec<[i32; 3]> {
+        self.looted.iter().copied().collect()
+    }
+
+    pub fn restore(saved: Vec<SavedContainer>, looted: Vec<[i32; 3]>) -> Self {
         Self {
             held: saved.into_iter().map(|c| (c.at, c.slots)).collect(),
+            looted: looted.into_iter().collect(),
             ..default()
         }
     }
@@ -149,12 +204,19 @@ pub(super) fn plugin(app: &mut App) {
 #[allow(clippy::too_many_arguments)]
 pub(super) fn watch(
     mut containers: ResMut<Containers>,
-    (store, tables, world): (Res<ChunkStore>, Res<ContentTables>, Res<WorldSettings>),
-    players: Query<&Player>,
+    (mut store, tables, world): (ResMut<ChunkStore>, Res<ContentTables>, Res<WorldSettings>),
+    (players, generator): (Query<&Player>, Option<Res<super::WorldGenerator>>),
     (mut entities, items): (ResMut<EntityStore>, Res<Items>),
     (mut closed, mut audio): (MessageWriter<ContainerClosed>, Emitter),
 ) {
     let containers = &mut *containers;
+    for (at, was) in store.take_left_containers() {
+        let (Some(generator), Some(slots)) = (&generator, tables.uses.container(was.material()))
+        else {
+            continue;
+        };
+        containers.draw_loot((&generator.0, &items), at, was, slots);
+    }
     containers.sessions.retain(|&viewer, session| {
         let why = if store.voxel(session.at) != Some(session.voxel) {
             Closed::Changed

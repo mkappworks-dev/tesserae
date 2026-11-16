@@ -78,6 +78,7 @@ fn biomes() -> Vec<BiomeDef> {
                 .into_iter()
                 .chain(plants::meadow())
                 .collect(),
+            loot: Some(structures::loot(structures::biome_loot("meadow"))),
         },
         BiomeDef {
             soundscape: None,
@@ -97,6 +98,7 @@ fn biomes() -> Vec<BiomeDef> {
                 .into_iter()
                 .chain(plants::heath())
                 .collect(),
+            loot: Some(structures::loot(structures::biome_loot("heath"))),
         },
         BiomeDef {
             soundscape: None,
@@ -113,6 +115,7 @@ fn biomes() -> Vec<BiomeDef> {
             structures: structures::wild(&["burrow"]),
             settlements: Vec::new(),
             surface_features: plants::dunes(),
+            loot: Some(structures::loot(structures::biome_loot("dunes"))),
         },
         BiomeDef {
             soundscape: None,
@@ -129,6 +132,7 @@ fn biomes() -> Vec<BiomeDef> {
             structures: structures::wild(&["treehouse", "hive"]),
             settlements: Vec::new(),
             surface_features: plants::thicket(),
+            loot: Some(structures::loot(structures::biome_loot("thicket"))),
         },
         BiomeDef {
             soundscape: None,
@@ -142,9 +146,14 @@ fn biomes() -> Vec<BiomeDef> {
             }),
             cave_scale: None,
             crop_fields: Vec::new(),
-            structures: [structures::bridge("footbridge"), structures::wild(&["treehouse"])].concat(),
+            structures: [
+                structures::bridge("footbridge"),
+                structures::wild(&["treehouse"]),
+            ]
+            .concat(),
             settlements: Vec::new(),
             surface_features: plants::fen(),
+            loot: Some(structures::loot(structures::biome_loot("fen"))),
         },
         BiomeDef {
             soundscape: None,
@@ -158,9 +167,14 @@ fn biomes() -> Vec<BiomeDef> {
             }),
             cave_scale: None,
             crop_fields: plants::prairie_fields(),
-            structures: [structures::bridge("footbridge"), structures::wild(&["hive"])].concat(),
+            structures: [
+                structures::bridge("footbridge"),
+                structures::wild(&["hive"]),
+            ]
+            .concat(),
             settlements: structures::village(),
             surface_features: plants::prairie(),
+            loot: Some(structures::loot(structures::biome_loot("prairie"))),
         },
     ]
 }

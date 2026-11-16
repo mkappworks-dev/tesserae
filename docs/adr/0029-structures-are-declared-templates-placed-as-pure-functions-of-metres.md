@@ -131,6 +131,15 @@ are where the build is narrower or more exact than they say.
   there, and the foundation fills only under the landings. On the demo Games'
   rolling ground, deep dry valleys at a bridge's scale are rare: the bridges
   found cross water.
+- **Chests hold loot, drawn on the Server, not by worldgen.** Worldgen still
+  writes Voxels only. A pure query, `Worldgen::stood_at`, says what a worldgen
+  Structure stands at a cell and which table applies: a Settlement building's
+  own, else the Settlement's, else, in the wild, the Biome's at that column. The
+  Server draws from it the first time a Container is needed for a chest whose
+  cell still holds that Voxel, and records the cell as looted, in the save, once
+  drawn or written over, so a chest put back is a Player's. The draw is keyed by
+  the Structure's whole-metre corner and the Template cell, never the Voxel or
+  its height, and only a Template cell's first Voxel draws.
 - **The undo journal refuses rather than overflows.** Its cap is 131,072 changed
   Voxels across 128 groups, and a placement over it is refused before landing
   with `TooBigToUndo`, so a placement is always one undo group. An undo lands in

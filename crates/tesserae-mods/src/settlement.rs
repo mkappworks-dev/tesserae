@@ -8,7 +8,7 @@ use tesserae_core::shape::Orientation;
 use tesserae_core::{MaterialId, SHAPE_FULL_CUBE, ShapeId, Tables, Voxel};
 
 use crate::bindings::tesserae::mods::content;
-use crate::declare::{Behaviour, NAME_RULE, valid_local};
+use crate::declare::{Behaviour, ItemDef, NAME_RULE, valid_local};
 use crate::error::ModError;
 use crate::registry::{Kind, Registry};
 use crate::template::solid;
@@ -62,6 +62,30 @@ impl DeclaredSettlements {
             }
         }
         Ok(settlements)
+    }
+
+    /// Refuses the first loot entry whose Item no loaded Mod declares, or whose stack is too big.
+    pub fn check_loot(&self, items: &[ItemDef]) -> Result<(), ModError> {
+        for (mod_id, rows) in &self.rows {
+            for (row, def) in rows.iter().enumerate() {
+                let fail = |reason: String| ModError::Settlement {
+                    id: mod_id.clone(),
+                    row,
+                    name: def.name.clone(),
+                    reason,
+                };
+                if let Some(loot) = &def.loot {
+                    crate::loot::check(loot, items).map_err(|e| fail(format!("loot: {e}")))?;
+                }
+                for plot in &def.templates {
+                    if let Some(loot) = &plot.loot {
+                        crate::loot::check(loot, items)
+                            .map_err(|e| fail(format!("`{}` loot: {e}", plot.template)))?;
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Refuses the first path Material of a Settlement that is `used`, by its full name, that
@@ -126,6 +150,12 @@ fn settlement(
                 weight: p.weight,
                 min: p.min,
                 max: p.max,
+                loot: p
+                    .loot
+                    .as_ref()
+                    .map(crate::loot::table)
+                    .transpose()
+                    .map_err(|e| format!("`{}` loot: {e}", p.template))?,
             })
         })
         .collect::<Result<Vec<_>, String>>()?;
@@ -148,6 +178,12 @@ fn settlement(
         rules,
         minimum: def.minimum,
         path,
+        loot: def
+            .loot
+            .as_ref()
+            .map(crate::loot::table)
+            .transpose()
+            .map_err(|e| format!("loot: {e}"))?,
     };
     settlement.validate(&tables.templates)?;
     Ok(settlement)

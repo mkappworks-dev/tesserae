@@ -285,6 +285,7 @@ impl Guest for Tidewater {
                         .into_iter()
                         .chain(plants::lagoon())
                         .collect(),
+                    loot: Some(structures::loot(structures::biome_loot("lagoon"))),
                 },
                 BiomeDef {
                     soundscape: None,
@@ -312,6 +313,7 @@ impl Guest for Tidewater {
                         .into_iter()
                         .chain(plants::salt_flats())
                         .collect(),
+                    loot: Some(structures::loot(structures::biome_loot("salt_flats"))),
                 },
                 BiomeDef {
                     soundscape: None,
@@ -332,6 +334,7 @@ impl Guest for Tidewater {
                     structures: structures::wild(&["lighthouse", "sea_arch"]),
                     settlements: structures::village(),
                     surface_features: plants::cold_shallows(),
+                    loot: Some(structures::loot(structures::biome_loot("cold_shallows"))),
                 },
                 BiomeDef {
                     soundscape: None,
@@ -352,6 +355,7 @@ impl Guest for Tidewater {
                     .concat(),
                     settlements: structures::village(),
                     surface_features: plants::rainforest(),
+                    loot: Some(structures::loot(structures::biome_loot("rainforest"))),
                 },
                 BiomeDef {
                     soundscape: None,
@@ -372,6 +376,7 @@ impl Guest for Tidewater {
                     structures: structures::wild(&["dock", "stilt_house"]),
                     settlements: structures::village(),
                     surface_features: plants::tidal_marsh(),
+                    loot: Some(structures::loot(structures::biome_loot("tidal_marsh"))),
                 },
             ],
             survival: None,

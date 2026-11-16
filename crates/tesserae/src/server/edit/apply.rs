@@ -626,6 +626,9 @@ impl Batch {
         store.set_overlay(place, overlay);
         if voxel != before {
             store.set_voxel(place, voxel);
+            if tables.uses.container(before.material()).is_some() {
+                store.note_container_left(at, before);
+            }
         }
         // Light reads fluid as it reads a cube of its Material, or combined
         // with the solid it stands in, and a fire by its emission, so water

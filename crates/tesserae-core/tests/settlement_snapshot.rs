@@ -1,6 +1,7 @@
 //! A World keeps the Settlements it was made with, and the Templates they use, in its generation
 //! snapshot, so a Game that later edits either never reshapes the World.
 
+use tesserae_core::loot::{LootEntry, LootTable};
 use tesserae_core::save::{Generation, Mapping};
 use tesserae_core::settlement::{Building, PlotRule, Settlement};
 use tesserae_core::template::{Cell, Template};
@@ -67,9 +68,11 @@ fn hamlet(path: MaterialId) -> Settlement {
             weight: 1.0,
             min: 1,
             max: 6,
+            loot: None,
         }],
         minimum: 1,
         path: Voxel::cube(path),
+        loot: None,
     }
 }
 
@@ -208,4 +211,44 @@ fn a_world_saved_before_settlements_opens_with_none() {
     assert!(json["biomes"][0].get("settlements").is_none());
     let older: Generation = serde_json::from_value(json).unwrap();
     assert!(older.settlements(&mapping()).unwrap().is_empty());
+}
+
+fn table(item: &str) -> LootTable {
+    LootTable {
+        rolls_min: 1,
+        rolls_max: 3,
+        entries: vec![LootEntry {
+            item: item.into(),
+            min: 1,
+            max: 4,
+            weight: 1.0,
+        }],
+    }
+}
+
+#[test]
+fn a_world_keeps_the_loot_it_was_made_with_and_one_made_without_saves_none() {
+    let mut stocked = settlements(PATH);
+    stocked[1].loot = Some(table("t:bread"));
+    stocked[1].rules[0].loot = Some(table("t:nail"));
+    let biome_loot = [Some(table("t:shell"))];
+    let saved = reopened(
+        &Generation::capture(world(), &game(), &stocked, &mapping())
+            .unwrap()
+            .with_biome_loot(&biome_loot),
+    );
+    let kept = saved.settlements(&mapping()).unwrap();
+    assert_eq!(kept[0].loot, Some(table("t:bread")));
+    assert_eq!(kept[0].rules[0].loot, Some(table("t:nail")));
+    assert_eq!(saved.biome_loot().unwrap(), biome_loot);
+
+    let json = serde_json::to_value(
+        Generation::capture(world(), &game(), &settlements(PATH), &mapping()).unwrap(),
+    )
+    .unwrap();
+    assert!(json["settlements"][0].get("loot").is_none());
+    assert!(json["settlements"][0]["rules"][0].get("loot").is_none());
+    assert!(json["biomes"][0].get("loot").is_none());
+    let older: Generation = serde_json::from_value(json).unwrap();
+    assert_eq!(older.biome_loot().unwrap(), [None]);
 }

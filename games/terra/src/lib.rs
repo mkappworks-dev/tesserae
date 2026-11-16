@@ -632,6 +632,7 @@ impl Guest for Terra {
                     .into_iter()
                     .chain(plants::temperate())
                     .collect(),
+                    loot: Some(structures::biome_loot("temperate")),
                 },
                 BiomeDef {
                     soundscape: Some("terra:dry".into()),
@@ -656,6 +657,7 @@ impl Guest for Terra {
                     .concat(),
                     settlements: structures::village(),
                     surface_features: plants::dry(),
+                    loot: Some(structures::biome_loot("dry")),
                 },
                 BiomeDef {
                     soundscape: Some("terra:cold".into()),
@@ -676,6 +678,7 @@ impl Guest for Terra {
                     structures: structures::wild(&["watchtower", "ruined_keep"]),
                     settlements: structures::village(),
                     surface_features: plants::cold(),
+                    loot: Some(structures::biome_loot("cold")),
                 },
                 BiomeDef {
                     soundscape: None,
@@ -692,6 +695,7 @@ impl Guest for Terra {
                     structures: structures::wild(&["ruined_keep"]),
                     settlements: Vec::new(),
                     surface_features: plants::jungle(),
+                    loot: Some(structures::biome_loot("jungle")),
                 },
                 BiomeDef {
                     soundscape: None,
@@ -712,6 +716,7 @@ impl Guest for Terra {
                     structures: structures::bridge("stone_bridge"),
                     settlements: Vec::new(),
                     surface_features: plants::swamp(),
+                    loot: Some(structures::biome_loot("swamp")),
                 },
                 BiomeDef {
                     soundscape: Some("terra:dry".into()),
@@ -732,6 +737,7 @@ impl Guest for Terra {
                     structures: structures::wild(&["standing_stones", "waystone"]),
                     settlements: structures::village(),
                     surface_features: plants::savanna(),
+                    loot: Some(structures::biome_loot("savanna")),
                 },
             ],
             survival: None,

@@ -20,7 +20,7 @@ mod building;
 mod fields;
 mod food;
 mod plants;
-mod structures;
+pub(in crate::server) mod structures;
 mod vegetation;
 
 fn checkout() -> PathBuf {

@@ -15,6 +15,7 @@ pub(super) struct Settlement {
     minimum: u8,
     path: String,
     path_shape: Option<String>,
+    loot: Option<Loot>,
 }
 
 #[derive(Deserialize)]
@@ -27,6 +28,55 @@ struct SettlementPlot {
     min: u8,
     #[serde(default = "every")]
     max: u8,
+    loot: Option<Loot>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+pub(super) struct Loot {
+    #[serde(default = "one_roll")]
+    rolls_min: u8,
+    rolls_max: Option<u8>,
+    entries: Vec<LootEntry>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LootEntry {
+    item: String,
+    #[serde(default = "one_item")]
+    min: u32,
+    /// Absent is `min`.
+    max: Option<u32>,
+    #[serde(default = "one")]
+    weight: f32,
+}
+
+fn one_roll() -> u8 {
+    1
+}
+
+fn one_item() -> u32 {
+    1
+}
+
+impl From<Loot> for content::LootTable {
+    fn from(l: Loot) -> Self {
+        Self {
+            rolls_min: l.rolls_min,
+            rolls_max: l.rolls_max.unwrap_or(l.rolls_min),
+            entries: l
+                .entries
+                .into_iter()
+                .map(|e| content::LootEntry {
+                    item: e.item,
+                    min: e.min,
+                    max: e.max.unwrap_or(e.min),
+                    weight: e.weight,
+                })
+                .collect(),
+        }
+    }
 }
 
 fn one() -> f32 {
@@ -53,11 +103,13 @@ impl From<Settlement> for content::SettlementDef {
                     weight: p.weight,
                     min: p.min,
                     max: p.max,
+                    loot: p.loot.map(Into::into),
                 })
                 .collect(),
             minimum: s.minimum,
             path: s.path,
             path_shape: s.path_shape,
+            loot: s.loot.map(Into::into),
         }
     }
 }

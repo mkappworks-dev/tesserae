@@ -18,6 +18,7 @@ mod host;
 mod limits;
 mod loader;
 mod log;
+mod loot;
 mod manifest;
 mod marker;
 mod package;
@@ -56,6 +57,7 @@ pub use error::ModError;
 pub use limits::{MAX_COMMANDS, ManifestLimits, ModLimits};
 pub use loader::{Compiled, ModHost};
 pub use log::{LogDrain, LogHandle, LogLevel, LogLine};
+pub use loot::biome_loot;
 pub use manifest::{
     DEFAULT_GAME, Found, MAX_SCAN_ENTRIES, Manifest, Migration, Rejected, SUPPORTED_API, Scan,
     games_dir, migrate_legacy_games, plan, scan, with_dependencies,

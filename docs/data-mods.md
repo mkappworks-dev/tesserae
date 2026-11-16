@@ -167,8 +167,18 @@ optional `margin-m` (0 to 64, 16 when absent), optional `centre` (a Template by
 full name), `plots` (at most 24), `templates` (1 to 24
 `{ template, weight, min, max }`, weight 1, min 0 and max 24 when absent),
 optional `minimum` (0 when absent), `path` (a solid, Obtainable Material by full
-name) and optional `path-shape`. A World holds at most 16, and every Template a
-Settlement names is no wider than its radius.
+name), optional `path-shape` and optional `loot`. A World holds at most 16, and
+every Template a Settlement names is no wider than its radius. A `templates` row
+may carry its own `loot`, which its chests draw from in place of the
+Settlement's.
+
+A `loot` table is `rolls-min` (1 when absent), `rolls-max` (`rolls-min` when
+absent, at most 27) and `entries`, 1 to 16 `{ item, min, max, weight }`: an Item
+by full name, a count from `min` (1 when absent) to `max` (`min` when absent, no
+more than the Item's stack), and a weight above 0 (1 when absent). A Biome may
+carry `loot` too, for the chests of the wilderness Structures standing in it. An
+unknown Item is refused, naming the Settlement or Biome. The rules are in the
+authoring guide's [Loot](authoring-guide.md#loot).
 
 A Biome row may add `structures`, at most 4 `{ template, spacing-m, chance }`
 entries: a Template by full name, a spacing from twice the Template's longer
