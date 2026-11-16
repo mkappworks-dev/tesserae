@@ -239,16 +239,23 @@ fn open_world(
     commands.insert_resource(WorldGenerator(generator));
 }
 
-/// Over the origin, clear of the ground and of any lake standing on it, and
-/// no lower than the top of anything generated under the Player's body.
+/// How far from the origin a new World looks for a Settlement to spawn the Player beside.
+const SPAWN_SEARCH_M: f32 = 512.0;
+
+/// Just outside the Settlement nearest the origin, or over the origin with none that near; clear
+/// of the ground and of any lake standing on it, and no lower than the top of anything generated
+/// under the Player's body.
 fn spawn_eye(generator: &Worldgen) -> Vec3 {
-    let ground_m = generator.surface_height_m(0.0, 0.0);
+    let [x, z] = generator
+        .settlement_spawn_m(SPAWN_SEARCH_M)
+        .unwrap_or([0.0; 2]);
+    let ground_m = generator.surface_height_m(x, z);
     let top_m = generator
         .water()
         .map_or(ground_m, |w| w.level_m.max(ground_m));
     let half = player::BODY_HALF_WIDTH_M;
-    let clear_m = generator.clear_height_m([-half; 2], [half; 2]);
-    Vec3::new(0.0, (top_m + SPAWN_CLEARANCE_M).max(clear_m), 0.0)
+    let clear_m = generator.clear_height_m([x - half, z - half], [x + half, z + half]);
+    Vec3::new(x, (top_m + SPAWN_CLEARANCE_M).max(clear_m), z)
 }
 
 /// `f` over `items` on one thread each, results in `items` order; a panic is re-raised as it was.

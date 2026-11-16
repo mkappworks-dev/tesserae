@@ -558,7 +558,7 @@ fn autosave_at_thirty_seconds_preserves_current_server_player() {
 }
 
 #[test]
-fn real_terra_new_builds_but_reopened_guest_never_replays_construction() {
+fn real_terra_builds_nothing_new_or_reopened() {
     let dir = Directory::new();
     let opening = dir.opening();
     let settings = WorldSettings::default();
@@ -572,7 +572,7 @@ fn real_terra_new_builds_but_reopened_guest_never_replays_construction() {
         last: tesserae_mods::BatchReport::default(),
     };
     let (_, commands) = bevy::tasks::block_on(guest.tick(context(0))).unwrap();
-    assert!(!commands.is_empty());
+    assert!(commands.is_empty(), "a new Terra builds nothing at spawn");
     let generation = Generation::capture(
         loaded.world.unwrap(),
         &loaded.tables.templates,

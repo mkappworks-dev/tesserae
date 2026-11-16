@@ -1650,3 +1650,60 @@ fn a_trail_stops_short_of_another_settlements_disc_and_margin() {
         }
     }
 }
+
+#[test]
+fn the_spawn_stands_just_outside_the_settlement_nearest_the_origin() {
+    let generator = generator(1.0, plain(listing_near(true, 128.0, 1.0, true)), village());
+    let [x, z] = generator
+        .settlement_spawn_m(512.0)
+        .expect("a Settlement near the origin");
+    let wells = |half_m: f32| {
+        let make = |listed| generator_for(listed);
+        let changed = changed_around(&make(true), &make(false), 0.0, half_m, false);
+        let is_well = |at: [i32; 3]| changed.get(&at).is_some_and(|c| c.0.material() == WELL);
+        changed
+            .keys()
+            .filter(|&&[x, y, z]| {
+                is_well([x, y, z])
+                    && !is_well([x - 1, y, z])
+                    && !is_well([x, y, z - 1])
+                    && !is_well([x, y - 1, z])
+            })
+            .map(|&[x, _, z]| [x as f32 + 1.0, z as f32 + 1.0])
+            .collect::<Vec<_>>()
+    };
+    let all = wells(192.0);
+    // The well stands a few metres off its Settlement's centre, in front of the road it faces.
+    let off_m = 8.0;
+    let to = |c: &[f32; 2], p: [f32; 2]| (c[0] - p[0]).hypot(c[1] - p[1]);
+    let own = all
+        .iter()
+        .min_by(|a, b| to(a, [x, z]).total_cmp(&to(b, [x, z])))
+        .unwrap();
+    let from_centre = to(own, [x, z]);
+    assert!(
+        (RADIUS_M - off_m..=RADIUS_M + MARGIN_M + off_m).contains(&from_centre),
+        "the spawn stands {from_centre} m from its Settlement's well"
+    );
+    let nearest = all.iter().map(|c| to(c, [0.0; 2])).fold(f32::MAX, f32::min);
+    assert!(
+        to(own, [0.0; 2]) <= nearest + 2.0 * off_m,
+        "{own:?} is not the Settlement nearest the origin"
+    );
+    assert!(
+        generator
+            .water()
+            .is_none_or(|w| generator.surface_height_m(x, z) >= w.level_m),
+        "on dry ground"
+    );
+    // A World with none near keeps the origin.
+    assert_eq!(generator_for(false).settlement_spawn_m(512.0), None);
+}
+
+fn generator_for(listed: bool) -> Worldgen {
+    generator(
+        1.0,
+        plain(listing_near(listed, 128.0, 1.0, true)),
+        village(),
+    )
+}
