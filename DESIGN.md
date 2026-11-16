@@ -699,6 +699,41 @@ Notes:
   percent of its raw size, and a save without it opens empty. See
   [ADR-0028](docs/adr/0028-the-map-is-a-server-held-per-player-capture.md). Spec
   and tickets: `.scratch/2026-11-15-phase-19-map-compass/`.
+- **Step 20** is measured (ticket 18; Apple M5, thread CPU time, interleaved
+  rounds, load average 1.6 to 1.7,
+  `cargo bench -p tesserae-core --bench structures`, Templates and Settlements
+  built from core types on 12 m hills with caves and smoothing). The agreed
+  margin: Structures or a Settlement add at most 0.25 ms to a surface Chunk at
+  any Voxel size, whether the Chunk is the first to lay out its lattice cells
+  (cold) or a later one (warm), which is below the 0.30 ms the 16-feature
+  Biome's Plants add at 1 m. Every Chunk a Structure or Settlement reaches used
+  to accept or lay it out again, which put a Template at the cap (64 by 16 by 64
+  m, every cell written) at 0.63, 0.59 and 0.57 ms a Chunk at 1.0, 0.5 and 0.25
+  m and a Settlement at the cap (64 m radius, 24 Plots) at 0.50, 0.37 and 0.36
+  ms; so each generator, and every clone streaming makes of it, now shares a
+  bounded cache of what each lattice cell stands (16,384 Structures, 4,096
+  Settlement sites and 32 laid-out Settlements, forgotten whole when full),
+  which keeps generation a pure function of the seed and metres in any Chunk
+  order and on any thread. Per Chunk, warm then cold against bare: a 7 m house
+  64 m apart costs 0.21 and 0.24 ms against 0.21 and 0.20 at 1 m, 0.13 and 0.15
+  against 0.11 at 0.5 m, and 0.10 and 0.12 against 0.06 at 0.25 m; 14 m apart
+  (the densest it may be) 0.30 and 0.37 against 0.23, 0.15 and 0.19 against
+  0.08, and 0.14 and 0.16 against 0.07; the Template at the cap 0.26 and 0.36
+  against 0.25, 0.21 and 0.28 against 0.13, and 0.20 and 0.26 against 0.08 (the
+  dearest, 0.18 ms over bare); a 32 m village of 12 Plots 0.23 and 0.28 against
+  0.21, 0.17 and 0.22 against 0.11, and 0.15 and 0.20 against 0.08; and the
+  Settlement at the cap 0.24 and 0.31 against 0.23, 0.11 and 0.18 against 0.09,
+  and 0.10 and 0.17 against 0.07. Ratios to bare taken round by round reproduce
+  within a few percent at load average 9 to 12. Sky and deep-rock Chunks beyond
+  the band keep their early-outs (0.01 us with or without Structures). A World
+  without Structures is not free: an interleaved A/B of separate builds puts
+  bare generation at 2.0, 5.1 and 8.5% above main at 1.0, 0.5 and 0.25 m (about
+  5 us a Chunk), the same before and after this ticket; it bisects to the
+  Settlement levelling commit, which changes nothing on the bare path, and the
+  machine code of `Worldgen::chunk` shows its column loop re-addressing the
+  Chunk builder from the stack rather than a register, so it is code generation
+  and stays open.
+
 - **Step 21** is done. A World has a default game mode and each Player their
   own, Creative or Survival; Edit World's changes wait in the sidecar until the
   Server applies them at the next open

@@ -10,6 +10,7 @@
 //! feeds the benches a fixed surface and makes no World.
 
 mod fields;
+mod layouts;
 mod settlements;
 mod structures;
 
@@ -633,6 +634,7 @@ pub struct Worldgen {
     templates: Arc<[Template]>,
     structures: Option<structures::StructurePass>,
     settlements: Option<settlements::SettlementPass>,
+    layouts: Arc<layouts::Layouts>,
 }
 
 /// Voxels of slack over a Plant's declared rise, for the base's own cell and rounding up.
@@ -879,6 +881,7 @@ impl Worldgen {
             templates: Arc::new([]),
             structures: None,
             settlements: None,
+            layouts: Arc::default(),
         }
     }
 
@@ -887,6 +890,7 @@ impl Worldgen {
     pub fn with_templates(mut self, templates: &[Template]) -> Self {
         self.structures = structures::StructurePass::new(&self.params, self.voxel_size, templates);
         self.templates = templates.into();
+        self.layouts = Arc::default();
         self
     }
 
@@ -900,6 +904,7 @@ impl Worldgen {
             &self.templates,
             settlements,
         );
+        self.layouts = Arc::default();
         self
     }
 

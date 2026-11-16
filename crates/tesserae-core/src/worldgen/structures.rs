@@ -8,6 +8,8 @@
 //! Whatever is laid after Structures (fields, trees, scatter) asks [`Worldgen::claims_near`] for
 //! footprints; a Structure never asks about them.
 
+use std::sync::Arc;
+
 use super::fields::{hashed, mix, unit};
 use super::{Footprint, Worldgen, top_index};
 use crate::chunk::{CHUNK_SIZE, Chunk};
@@ -244,22 +246,24 @@ impl Worldgen {
         self.structure_cells(&row.entry, region)
             .into_iter()
             .filter_map(|cell| {
-                let h = hashed(
-                    self.seed,
-                    STRUCTURE_SALT,
-                    &[
-                        row.biome.index() as u64,
-                        row.row,
-                        cell[0] as u32 as u64,
-                        cell[1] as u32 as u64,
-                    ],
-                );
-                if unit(mix(h ^ 1)) >= f64::from(row.entry.chance) {
-                    return None;
-                }
-                (0..ATTEMPTS)
-                    .filter_map(|attempt| self.structure_draw(&row, cell, h, attempt))
-                    .find_map(|s| self.structure_accepts(&row, s))
+                self.layouts.structure((index, cell), || {
+                    let h = hashed(
+                        self.seed,
+                        STRUCTURE_SALT,
+                        &[
+                            row.biome.index() as u64,
+                            row.row,
+                            cell[0] as u32 as u64,
+                            cell[1] as u32 as u64,
+                        ],
+                    );
+                    if unit(mix(h ^ 1)) >= f64::from(row.entry.chance) {
+                        return None;
+                    }
+                    (0..ATTEMPTS)
+                        .filter_map(|attempt| self.structure_draw(&row, cell, h, attempt))
+                        .find_map(|s| self.structure_accepts(&row, s))
+                })
             })
             .filter(|s| s.touches(region))
             .collect()
@@ -436,6 +440,6 @@ impl Worldgen {
 /// What claims ground near a region, worked out once per Chunk.
 #[derive(Default)]
 pub(super) struct Claims {
-    pub(super) towns: Vec<Town>,
+    pub(super) towns: Vec<Arc<Town>>,
     pub(super) structures: Vec<Structure>,
 }
