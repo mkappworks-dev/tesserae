@@ -113,9 +113,7 @@ macro_rules! structures {
         }
 
         /// A loot table, for the Settlement or a Biome's `loot`.
-        pub fn loot(
-            table: &$crate::structures::Loot,
-        ) -> crate::tesserae::mods::content::LootTable {
+        pub fn loot(table: &$crate::structures::Loot) -> crate::tesserae::mods::content::LootTable {
             crate::tesserae::mods::content::LootTable {
                 rolls_min: table.rolls.0,
                 rolls_max: table.rolls.1,
