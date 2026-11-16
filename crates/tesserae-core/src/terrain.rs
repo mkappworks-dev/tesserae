@@ -61,6 +61,9 @@ const SALT_CANYON_LINE: u32 = 0x1a4d_0071;
 const SALT_ISLANDS: u32 = 0x1a4d_0081;
 const SALT_VOLCANO: u32 = 0x1a4d_0091;
 const SALT_OVERHANG: u32 = 0x1a4d_00a1;
+const SALT_CAVERN: u32 = 0x1a4d_00c1;
+const SALT_RAVINE: u32 = 0x1a4d_00d1;
+const SALT_RAVINE_MASK: u32 = 0x1a4d_00d2;
 
 /// The wavelength of the density noise, in metres: arches and ledges a few Voxels thick.
 const OVERHANG_SIZE_M: f32 = 10.0;
@@ -241,6 +244,20 @@ impl Base {
             offset += band * islands * (0.35 * d + 8.0);
         }
 
+        // Narrow slots cut deep into rugged land: ridged noise, thresholded near its crest.
+        let slot = crate::noise::ridged2(wx / 450.0, wz / 450.0, seed.wrapping_add(SALT_RAVINE), 2);
+        let ravines = smooth(
+            0.58,
+            0.68,
+            crate::noise::fbm2(
+                wx / 3000.0,
+                wz / 3000.0,
+                seed.wrapping_add(SALT_RAVINE_MASK),
+                2,
+            ),
+        );
+        offset -= 45.0 * ravines * inland * smooth(0.975, 0.995, slot) * smooth(8.0, 30.0, offset);
+
         offset += self.volcano(x_m, z_m, inland);
 
         self.sea_m + offset.clamp(-d, h)
@@ -366,5 +383,50 @@ impl std::fmt::Debug for Terrain {
         f.debug_struct("Terrain")
             .field("base", &self.base)
             .finish_non_exhaustive()
+    }
+}
+
+/// Large chambers in the rock, a thresholded low-frequency 3D field squashed vertically. They stay
+/// a depth under the ground so none breaches the surface, and above the band's floor so the
+/// uniform deep rock below it stays uniform.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Caverns {
+    seed: u32,
+    /// No cavern below this height, the band's floor.
+    pub(crate) floor_m: f32,
+}
+
+/// The field value above which rock is cavern.
+const CAVERN_CUT: f32 = 0.67;
+const CAVERN_SIZE_M: [f32; 3] = [200.0, 90.0, 200.0];
+/// A cavern's roof stays this far under the ground.
+pub(crate) const CAVERN_MIN_DEPTH_M: f32 = 22.0;
+
+impl Caverns {
+    pub(crate) fn new(seed: u32, p: &crate::WorldgenParams) -> Self {
+        Caverns {
+            seed: seed.wrapping_add(SALT_CAVERN),
+            floor_m: p.sea_level_m - p.landforms.depth_m - p.landforms.overhang_m,
+        }
+    }
+
+    pub(crate) fn carves(&self, x_m: f32, y_m: f32, z_m: f32) -> bool {
+        y_m >= self.floor_m
+            && crate::noise::fbm3(
+                x_m / CAVERN_SIZE_M[0],
+                y_m / CAVERN_SIZE_M[1],
+                z_m / CAVERN_SIZE_M[2],
+                self.seed,
+                2,
+            ) > CAVERN_CUT
+    }
+
+    /// Whether anything in the box `lo..=hi` (metres) could be a cavern; `false` is a proof.
+    pub(crate) fn may_carve(&self, lo: [f32; 3], hi: [f32; 3]) -> bool {
+        if hi[1] < self.floor_m {
+            return false;
+        }
+        let scale = |p: [f32; 3]| [0, 1, 2].map(|a| p[a] / CAVERN_SIZE_M[a]);
+        crate::noise::fbm3_range(scale(lo), scale(hi), self.seed, 2).1 > CAVERN_CUT
     }
 }

@@ -387,3 +387,89 @@ fn rivers_and_lakes_are_in_the_same_metres_at_every_voxel_size() {
         }
     }
 }
+
+fn caved_v3() -> WorldgenParams {
+    WorldgenParams {
+        // Tunnels thinner than a Voxel, so what a column holds is cavern and nothing else.
+        caves: Some(tesserae_core::CaveParams {
+            radius_m: 0.001,
+            ..tesserae_core::CaveParams::default()
+        }),
+        smoothing: None,
+        ..v3()
+    }
+}
+
+/// Whether each Voxel of the metre column `x, z` from `from_m` up to `to_m` is air.
+fn air_column(g: &Worldgen, x: i32, z: i32, from_m: i32, to_m: i32) -> Vec<bool> {
+    let (cx, cz) = (x.div_euclid(32), z.div_euclid(32));
+    let (lx, lz) = (x.rem_euclid(32) as usize, z.rem_euclid(32) as usize);
+    let mut out = Vec::new();
+    let mut y = from_m;
+    while y < to_m {
+        let cy = y.div_euclid(32);
+        let chunk = g.chunk(cx, cy, cz);
+        while y < to_m && y.div_euclid(32) == cy {
+            out.push(chunk.get(lx, y.rem_euclid(32) as usize, lz).is_air());
+            y += 1;
+        }
+    }
+    out
+}
+
+#[test]
+fn caverns_exist_deep_under_mountains_and_never_breach_the_surface() {
+    let g = Worldgen::new(SEED, 1.0, caved_v3());
+    let (mut hollow, mut breach) = (0, 0);
+    for j in -16..16 {
+        for i in -16..16 {
+            let (x, z) = (i * 233, j * 241);
+            let h = g.surface_height_m(x as f32, z as f32) as i32;
+            if h < 40 {
+                continue;
+            }
+            let col = air_column(&g, x, z, h - 90, h - 14);
+            // Index 0 is 90 m down; the last 6 are 20 to 14 m down, clear of the roof's own margin.
+            breach += col[col.len() - 6..].iter().filter(|&&a| a).count();
+            hollow += col[..col.len() - 6].iter().filter(|&&a| a).count();
+        }
+    }
+    assert_eq!(breach, 0, "air within 20 m of the ground");
+    assert!(hollow > 100, "{hollow} cavern voxels sampled");
+}
+
+#[test]
+fn rock_below_the_band_floor_stays_uniform() {
+    let g = Worldgen::new(SEED, 1.0, caved_v3());
+    let below = ((24.0f32 - 100.0 - 10.0 - 3.0) / 32.0).floor() as i32 - 1;
+    for (cx, cz) in [(0, 0), (40, -30), (-90, 77)] {
+        assert!(g.chunk(cx, below, cz).uniform().is_some());
+    }
+}
+
+#[test]
+fn ravines_cut_narrow_slots_into_rugged_land() {
+    let g = Worldgen::new(SEED, 1.0, v3());
+    let mut slots = 0;
+    for j in -60..60 {
+        for i in -60..60 {
+            let (x, z) = (i as f32 * 97.0, j as f32 * 89.0);
+            if g.landform_fields(x, z).unwrap().ruggedness < 0.3 {
+                continue;
+            }
+            // A slot is a point far lower than the ground ten metres either side of it.
+            for k in 0..40 {
+                let x = x + k as f32 * 7.0;
+                let (a, b, c) = (
+                    g.surface_height_m(x - 10.0, z),
+                    g.surface_height_m(x, z),
+                    g.surface_height_m(x + 10.0, z),
+                );
+                if a - b > 18.0 && c - b > 18.0 {
+                    slots += 1;
+                }
+            }
+        }
+    }
+    assert!(slots > 0, "no ravines found");
+}

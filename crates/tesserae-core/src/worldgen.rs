@@ -37,7 +37,7 @@ use crate::settlement::Settlement;
 use crate::shape::{MAX_SHAPED_PER_CHUNK, Orientation, SHAPE_SLAB, SHAPE_STAIR};
 use crate::tables::Tables;
 use crate::template::Template;
-use crate::terrain::{LANDFORMS_SINCE, LandformParams, Terrain};
+use crate::terrain::{CAVERN_MIN_DEPTH_M, Caverns, LANDFORMS_SINCE, LandformParams, Terrain};
 use crate::voxel::SHAPE_FULL_CUBE;
 use crate::voxel::{MaterialId, Voxel};
 
@@ -643,6 +643,8 @@ pub struct Worldgen {
     inv_feature_size: f32,
     /// Version 3's landforms; `None` under 1 and 2, whose height is the one fBm above.
     terrain: Option<Terrain>,
+    /// Version 3's large chambers.
+    caverns: Option<Caverns>,
     caves: Option<CaveField>,
     /// Whether the smoothing pass runs: configured, and a one-Voxel step is at
     /// least `min_rise_m` at this Voxel size.
@@ -892,6 +894,8 @@ impl Worldgen {
             seed: folded,
             inv_feature_size: 1.0 / params.feature_size_m,
             terrain: (params.generator >= LANDFORMS_SINCE).then(|| Terrain::new(folded, &params)),
+            caverns: (params.generator >= LANDFORMS_SINCE && params.caves.is_some())
+                .then(|| Caverns::new(folded, &params)),
             caves: params.caves.map(|p| CaveField::new(folded, p)),
             smoothing: params
                 .smoothing
@@ -1280,6 +1284,32 @@ impl Worldgen {
                 )
             });
 
+        let cavern_blocks = self.caverns.as_ref().map(|c| {
+            let mut blocks = [false; BLOCKS * BLOCKS * BLOCKS];
+            let step_m = (BLOCK as f32) * self.voxel_size;
+            let reach_m = (BLOCK - 1) as f32 * self.voxel_size;
+            let roof_m = top_m - CAVERN_MIN_DEPTH_M;
+            for bz in 0..BLOCKS {
+                for by in 0..BLOCKS {
+                    for bx in 0..BLOCKS {
+                        let lo = [
+                            origin_m[0] + bx as f32 * step_m,
+                            origin_m[1] + by as f32 * step_m,
+                            origin_m[2] + bz as f32 * step_m,
+                        ];
+                        let hi = [
+                            lo[0] + reach_m,
+                            (lo[1] + reach_m).min(roof_m),
+                            lo[2] + reach_m,
+                        ];
+                        blocks[(bz * BLOCKS + by) * BLOCKS + bx] =
+                            lo[1] <= hi[1] && c.may_carve(lo, hi);
+                    }
+                }
+            }
+            blocks
+        });
+
         let ores = self.ores_reaching(floor_m, ceiling_m);
         let mut chunk = ChunkBuilder::new();
         let mut cave_cache = Default::default();
@@ -1335,6 +1365,13 @@ impl Worldgen {
                                 .as_ref()
                                 .map_or(1.0, |c| c.scales[z * CHUNK_SIZE + x]),
                         )
+                    {
+                        continue;
+                    }
+                    if let (Some(caverns), Some(blocks)) = (&self.caverns, &cavern_blocks)
+                        && blocks[block_of(x, y, z)]
+                        && base_m >= CAVERN_MIN_DEPTH_M
+                        && caverns.carves(x_m, y_m, z_m)
                     {
                         continue;
                     }
