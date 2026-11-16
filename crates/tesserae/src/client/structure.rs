@@ -152,12 +152,12 @@ pub(super) struct PlaceTool {
     /// The preview the Player pinned: its anchor, and the heading it was aimed along, which
     /// centres it as it did then.
     pub(super) pinned: Option<([i32; 3], Vec3)>,
-    pressed: Pressed,
 }
 
 /// The presses [`intercept`] took this frame, for [`act`] to answer once the camera is placed.
-#[derive(Default, Clone, Copy)]
-struct Pressed {
+/// Apart from [`PlaceTool`], whose every change redraws the list.
+#[derive(Resource, Default, Clone, Copy)]
+pub(super) struct Pressed {
     place: bool,
     use_: bool,
     remove: bool,
@@ -284,12 +284,12 @@ pub(super) fn intercept(
     mut actions: ResMut<Actions>,
     cursor: Single<&CursorOptions, With<PrimaryWindow>>,
     (hotbar, catalogue): (Res<Hotbar>, Res<Catalogue>),
-    mut tool: ResMut<PlaceTool>,
+    (mut tool, mut pressed): (ResMut<PlaceTool>, ResMut<Pressed>),
     mut was_grabbed: Local<bool>,
 ) {
     let grabbed = cursor.grab_mode == CursorGrabMode::Locked;
     let ready = grabbed && std::mem::replace(&mut *was_grabbed, grabbed);
-    tool.pressed = Pressed::default();
+    *pressed = Pressed::default();
     if !holding_place(&hotbar, &catalogue.0) && tool.pinned.is_some() {
         tool.pinned = None;
     }
@@ -311,7 +311,7 @@ pub(super) fn intercept(
         actions.cancel(Action::ClearTool);
         actions.cancel(Action::Structures);
     }
-    tool.pressed = Pressed {
+    *pressed = Pressed {
         place: ready && actions.started(Action::Place),
         use_: ready && actions.started(Action::Use),
         remove: ready && actions.started(Action::Remove),
@@ -329,7 +329,7 @@ pub(super) fn act(
     ownership: Res<Ownership>,
     (hotbar, catalogue): (Res<Hotbar>, Res<Catalogue>),
     camera: Single<&GlobalTransform, With<FlyCamera>>,
-    mut tool: ResMut<PlaceTool>,
+    (mut tool, pressed): (ResMut<PlaceTool>, Res<Pressed>),
     (preview, time, world): (Res<Preview>, Res<Time>, Res<WorldSettings>),
     (mut intents, mut prompt): (MessageWriter<StructureIntent>, ResMut<PinPrompt>),
 ) {
@@ -337,7 +337,6 @@ pub(super) fn act(
         prompt.set_if_neq(PinPrompt(false));
         return;
     }
-    let pressed = std::mem::take(&mut tool.pressed);
     let intent = tool.intent(&catalogue.0, &camera);
     let ghost = intent
         .as_ref()
@@ -786,6 +785,7 @@ fn outline(ghost: Res<Ghost>, world: Res<WorldSettings>, mut gizmos: Gizmos) {
 
 pub(super) fn plugin(app: &mut App) {
     app.init_session_state::<PlaceTool>()
+        .init_session_state::<Pressed>()
         .init_session_state::<Preview>()
         .init_session_state::<Ghost>()
         .init_session_state::<GhostPalette>()
@@ -853,6 +853,7 @@ mod tests {
         app.insert_resource(Ownership::playing())
             .init_resource::<Time>()
             .init_resource::<PlaceTool>()
+            .init_resource::<Pressed>()
             .init_resource::<Preview>()
             .init_resource::<Ghost>()
             .init_resource::<GhostPalette>()
@@ -978,6 +979,23 @@ mod tests {
             "along the heading it was pinned with"
         );
         assert!(app.world().resource::<PlaceTool>().pinned.is_none());
+    }
+
+    #[test]
+    fn an_idle_frame_leaves_the_tool_unchanged_so_the_list_is_not_redrawn() {
+        #[derive(Resource, Default)]
+        struct Changed(bool);
+        let mut app = app(Holding::Tool(PLACE));
+        app.init_resource::<Changed>().add_systems(
+            Update,
+            (|tool: Res<PlaceTool>, mut changed: ResMut<Changed>| {
+                changed.0 = tool.is_changed();
+            })
+            .after(track),
+        );
+        app.update();
+        app.update();
+        assert!(!app.world().resource::<Changed>().0);
     }
 
     #[test]
