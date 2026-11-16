@@ -75,3 +75,47 @@ and loot, entities, fluids, weathering variants and mirroring. The format
 reserves room for them, and each needs Server machinery that belongs to a later
 step. Existing trees stay parametric
 ([ADR-0027](0027-plants-are-declared-kinds-the-server-grows.md)).
+
+## Amendment, 2026-11-16: as built
+
+Checked against the code at the end of step 20. The decisions above hold; these
+are where the build is narrower or more exact than they say.
+
+- **Settlement Plots do not use a Template's level tolerance.** A Plot stands
+  where every metre sample of its footprint and a 2 m Apron is dry, no cave cuts
+  the footprint's top metre and every sample is within 1.5 m of the lower
+  median; it is then cut and filled by at most 2 m. A Settlement's centre
+  Template, and every single Structure, keep the strict tolerance rule.
+- **A door faces the Road by a rule, not a declaration.** The door is the first
+  closed Door cell in the lowest layer, from the Ground layer up, that holds
+  one, found through the Game's Door voxel-use and frozen in the snapshot. A
+  Template with none turns its +Z edge to the Road.
+- **Roads are graded, and climb as built-in slabs and stairs.** No steeper than
+  0.45 rise over run, so neighbouring columns differ by at most half a Voxel at
+  any size; the declared path Shape is used only on level Road.
+- **Generation keeps a bounded cache of what each lattice cell stands.** Without
+  it every Chunk a Structure or Settlement reaches worked it out again (up to
+  0.63 ms a Chunk). Each generator and its clones share one cache, forgotten
+  whole when full, whose values are worked out outside its lock from the seed
+  and the key alone, so generation stays a pure function of metres in any Chunk
+  order and on any thread.
+- **Obtainable is over Items, and checks more than it must.** A Material is
+  Obtainable when an Item that places it can be held. Recipe Stations are not
+  checked. Every Template the World declares is checked, not only the ones its
+  Biomes list, and a Settlement's path Material is checked too. A Grown Material
+  or a Door's open Material is refused in the shared validator before Obtainable
+  is worked out.
+- **`ground` is a full cube, and never rock.** Its soil runs however deep a
+  cellar goes.
+- **The snapshot keeps only what a World uses.** It freezes the Templates its
+  Biomes and Settlements name, renumbered, not the Game's whole table; the
+  `place` Tool reads the Game's current table.
+- **The Tool's turn is the Player's choice.** R (shared with Respawn while the
+  Tool is held) turns the Structure; the Player's facing does not pick it. The
+  Tool lays no foundation, and its footprint centres on the anchor with the
+  Ground layer level with it.
+- **The undo journal refuses rather than overflows.** Its cap is 131,072 changed
+  Voxels across 128 groups, and a placement over it is refused before landing
+  with `TooBigToUndo`, so a placement is always one undo group. Undoing a group
+  of more than 1,024 Voxels in one tick tells Mods only the last 1,024 Edit
+  events and a dropped count; that is a known gap.

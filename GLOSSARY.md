@@ -536,6 +536,15 @@ rules, not different things.
 **Plot** — the ground one Structure of a Settlement stands on. A Plot whose
 ground fails the rules stays empty.
 
+**Apron** — the 2 m band round a Plot's footprint that world generation eases
+from the Plot's level back to the natural ground, so a levelled Plot has no
+cliff at its edge.
+
+**Road** — a Settlement's way between its centre and its Plots, laid by world
+generation in the Settlement's path Material on graded ground, as stairs and
+slabs where it climbs. Every Plot's door faces one. Not a Layout and not a crop
+field's path.
+
 **Blueprint** — an Item that names one Template. Laying it makes a Site.
 
 **Site** — a laid Blueprint: a Structure not yet built, kept by the World until
