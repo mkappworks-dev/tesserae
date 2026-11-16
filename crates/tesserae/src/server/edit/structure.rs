@@ -37,6 +37,9 @@ const STRUCTURE_VOXELS_PER_TICK: DrainBudget = MOD_VOXELS_PER_TICK;
 /// Placements queued at once. Each may hold a whole Template's cells.
 const MAX_PENDING_STRUCTURES: usize = 4;
 
+/// An aim with less heading than this across the ground looks straight down.
+const NO_HEADING: f32 = 1e-3;
+
 /// What a Creative Player wants stamped: the Template by full name, the ray
 /// that picks the anchor, as for a single Place, and the quarter turn. Intent
 /// only: the Client never sends cells.
@@ -68,22 +71,35 @@ pub(in crate::server) struct Placement<'a> {
 }
 
 impl<'a> Placement<'a> {
-    /// Centred on `anchor` across, with the Ground layer's lowest Voxel layer
-    /// level with it, so the layers below it go into the ground aimed at.
+    /// Its near edge on `anchor` and centred across the `aim`'s heading, so
+    /// it stands in front of the Player; an aim straight down centres it. The
+    /// Ground layer's lowest Voxel layer is level with the anchor, so the
+    /// layers below it go into the ground aimed at.
     pub(in crate::server) fn new(
         template: &'a Template,
         voxel_size: f32,
         turn: Turn,
-        anchor: [i32; 3],
+        (anchor, aim): ([i32; 3], Vec3),
         generator: Option<&'a Worldgen>,
     ) -> Self {
         let sampled = template.sample(voxel_size, turn);
         let size = sampled.size();
-        let corner = [
-            anchor[0] - size[0] / 2,
-            anchor[1] - sampled.ground(),
-            anchor[2] - size[2] / 2,
-        ];
+        let centred = |axis: usize| anchor[axis] - size[axis] / 2;
+        let away = |axis: usize, heading: f32| {
+            if heading > 0.0 {
+                anchor[axis]
+            } else {
+                anchor[axis] - size[axis] + 1
+            }
+        };
+        let [x, z] = if aim.x.abs().max(aim.z.abs()) < NO_HEADING {
+            [centred(0), centred(2)]
+        } else if aim.x.abs() > aim.z.abs() {
+            [away(0, aim.x), centred(2)]
+        } else {
+            [centred(0), away(2, aim.z)]
+        };
+        let corner = [x, anchor[1] - sampled.ground(), z];
         Placement {
             sampled,
             corner,
@@ -348,7 +364,7 @@ fn step(
         &tables.templates[structure.template],
         world.voxel_size,
         structure.turn,
-        anchor,
+        (anchor, structure.direction),
         generator,
     );
     while !structure.landing {
@@ -576,6 +592,53 @@ mod tests {
         assert!(voxel_at(&app, [16, 9, 16]).is_air(), "the room inside");
         assert_eq!(voxel_at(&app, [16, 10, 16]), stone(), "the roof");
         assert!(voxel_at(&app, [6, 8, 16]).is_air(), "nothing past the wall");
+    }
+
+    #[test]
+    fn a_slanted_aim_stands_the_structure_in_front_with_its_near_edge_on_the_aimed_cell() {
+        // From z 12.5 down to the ground over (16, 16): heading +z.
+        let ahead = StructureIntent {
+            origin: Vec3::new(16.5, 12.0, 12.5),
+            direction: Vec3::new(0.0, -1.0, 1.0).normalize(),
+            ..intent("t:hut")
+        };
+        let mut app = hut_app();
+        send(&mut app, ahead);
+        settle(&mut app);
+        assert!(rejections(&mut app).is_empty());
+        // Six across: z from the aimed 16 to 21, x centred from 13 to 18.
+        for (x, z) in [(13, 16), (18, 16), (13, 21), (18, 21)] {
+            assert_eq!(voxel_at(&app, [x, 8, z]), stone(), "corner {x} {z}");
+        }
+        assert!(
+            voxel_at(&app, [16, 8, 15]).is_air(),
+            "nothing behind the near edge"
+        );
+        assert!(
+            voxel_at(&app, [12, 8, 16]).is_air(),
+            "nothing past the side"
+        );
+    }
+
+    #[test]
+    fn looking_along_negative_x_the_structure_extends_toward_negative_x() {
+        let back = StructureIntent {
+            origin: Vec3::new(20.5, 12.0, 16.5),
+            direction: Vec3::new(-1.0, -1.0, 0.0).normalize(),
+            ..intent("t:hut")
+        };
+        let mut app = hut_app();
+        send(&mut app, back);
+        settle(&mut app);
+        assert!(rejections(&mut app).is_empty());
+        // The aim meets the ground over (16, 16): x from 11 to 16, z from 13 to 18.
+        for (x, z) in [(11, 13), (16, 13), (11, 18), (16, 18)] {
+            assert_eq!(voxel_at(&app, [x, 8, z]), stone(), "corner {x} {z}");
+        }
+        assert!(
+            voxel_at(&app, [17, 8, 16]).is_air(),
+            "nothing behind the near edge"
+        );
     }
 
     fn hut_app() -> App {

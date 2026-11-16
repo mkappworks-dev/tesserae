@@ -1295,7 +1295,9 @@ is also Respawn, which it does only while the Tool is not held), and Place
 (right mouse) stamps it where the Player aims. A ghost shows each Template cell
 tinted by what placing it would do: fill air, replace ground or water, carve, or
 refuse. Only the anchor, the cell in front of the face aimed at, needs to be in
-reach; the footprint centres on it and the Ground layer sits level with it.
+reach; the footprint's near edge sits on it, centred across your view, and the
+Structure extends away from you, so it stands in front of you. Aimed straight
+down, the footprint centres on the anchor. The Ground layer sits level with it.
 Placing costs no Items and lands whole or not at all, waiting up to 64 ticks for
 Chunks still loading before it refuses with a reason. It is one undo group, and
 Mods hear its Voxels as Edit events. A placement that would change more than

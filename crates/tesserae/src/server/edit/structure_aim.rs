@@ -151,13 +151,13 @@ pub(super) fn answer_aim(
             &tables.templates[template],
             world.voxel_size,
             aim.intent.turn,
-            anchor,
+            (anchor, aim.intent.direction),
             generator.as_deref().map(|g| &g.0),
         );
         let body = player
             .solid_body()
             .filter(|body| touches(body, &placement, world.voxel_size));
-        let key = (template, aim.intent.turn, anchor, body);
+        let key = (template, aim.intent.turn, placement.corner(), body);
         let containers_moved = containers.as_ref().is_some_and(|c| c.is_changed());
         if let Some(judged) = &state.judged
             && judged.key == key
@@ -371,6 +371,20 @@ mod tests {
                 assert_eq!(voxel_at(&app, at), expected, "{turn:?} {at:?}");
             }
         }
+    }
+
+    #[test]
+    fn a_slanted_aim_answers_a_ghost_in_front_with_its_near_edge_on_the_aimed_cell() {
+        let ahead = StructureIntent {
+            origin: Vec3::new(16.5, 12.0, 12.5),
+            direction: Vec3::new(0.0, -1.0, 1.0).normalize(),
+            ..intent("t:cellar", Turn::new(1))
+        };
+        let mut app = app_with_tables(&[(origin(), ground())], tables_with(vec![cellar()]));
+        let ghost = ghost(ask(&mut app, 1, ahead));
+        assert_eq!(ghost.anchor, [16, 8, 16]);
+        // A quarter turn lays the cellar's three cells along z, from the aimed 16 on.
+        assert_eq!((ghost.corner, ghost.size), ([16, 7, 16], [1, 3, 3]));
     }
 
     #[test]

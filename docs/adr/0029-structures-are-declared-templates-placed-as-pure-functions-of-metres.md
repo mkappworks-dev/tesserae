@@ -112,8 +112,11 @@ are where the build is narrower or more exact than they say.
   `place` Tool reads the Game's current table.
 - **The Tool's turn is the Player's choice.** R (shared with Respawn while the
   Tool is held) turns the Structure; the Player's facing does not pick it. The
-  Tool lays no foundation, and its footprint centres on the anchor with the
-  Ground layer level with it.
+  Tool lays no foundation. Its footprint's near edge, the side facing the
+  Player, sits on the anchor, centred across the Player's view, and the
+  Structure extends away from the Player, so it stands in front of them rather
+  than around them; an aim straight down centres it on the anchor. The Ground
+  layer is level with the anchor.
 - **The undo journal refuses rather than overflows.** Its cap is 131,072 changed
   Voxels across 128 groups, and a placement over it is refused before landing
   with `TooBigToUndo`, so a placement is always one undo group. An undo lands in
