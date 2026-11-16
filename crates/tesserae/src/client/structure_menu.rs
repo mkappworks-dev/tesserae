@@ -16,6 +16,7 @@ use super::cinematic as cine;
 use super::edit::{Catalogue, Hotbar};
 use super::inventory_window::look::{self, Flat, Flavour};
 use super::layout_menu::{eyebrow, term, total_row, totals, value_with};
+use super::menu_ui::IconKind;
 use super::structure::{Ghost, Outcome, PlaceTool, Tint, grouped, holding_place, turned_size_m};
 use super::theme;
 use crate::content::ContentCatalogue;
@@ -31,6 +32,7 @@ const PAD_X: f32 = 20.0;
 const HUD_WIDTH: f32 = 270.0;
 const HUD_TOP_PX: f32 = 150.0;
 const SWATCH_PX: f32 = 12.0;
+const ICON_PX: f32 = 18.0;
 /// The prototype's outcome box: its edge and fill for each tone.
 const QUIET_EDGE: Color = Color::srgb_u8(0x5c, 0x5c, 0x65);
 const WHOLE_EDGE: Color = Color::srgb_u8(0x6c, 0x8f, 0x6c);
@@ -536,12 +538,20 @@ fn hud(parent: &mut ChildSpawnerCommands) {
         ))
         .with_children(|card| {
             card.spawn(theme::ring(theme::RADIUS_MENU));
-            card.spawn(look::label(
-                "Place Tool",
-                theme::TEXT_EYEBROW,
-                theme::REGULAR,
-                theme::LAYOUT_STATUS_INK,
-            ));
+            card.spawn(Node {
+                align_items: AlignItems::Center,
+                column_gap: Val::Px(8.0),
+                ..default()
+            })
+            .with_children(|line| {
+                super::menu_ui::icon(line, IconKind::Layout, theme::LAYOUT_STATUS_INK, ICON_PX);
+                line.spawn(look::label(
+                    "Place Tool",
+                    theme::TEXT_EYEBROW,
+                    theme::REGULAR,
+                    theme::LAYOUT_STATUS_INK,
+                ));
+            });
             card.spawn((
                 Info::Title,
                 look::label("", theme::TEXT_BODY, theme::MEDIUM, theme::INK),
