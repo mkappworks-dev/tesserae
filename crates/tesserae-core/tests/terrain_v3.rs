@@ -616,3 +616,42 @@ fn solid_and_air_are_the_same_in_metres_at_every_voxel_size() {
     }
     assert!(compared > 200);
 }
+
+/// Columns where a cave once cut an overhang's rock above the ground under the water, leaving air.
+#[test]
+fn a_cave_cutting_an_overhang_under_water_leaves_water_not_air() {
+    let params = WorldgenParams {
+        smoothing: None,
+        ..wet_world()
+    };
+    let g = Worldgen::new(1, 1.0, params);
+    let mut wet = 0;
+    for (x, z) in [
+        (2988i32, 0i32),
+        (-4067, -553),
+        (-1743, 1896),
+        (-3237, -3318),
+        (-2656, -3239),
+        (-3071, -632),
+        (4067, 948),
+        (2075, 2054),
+    ] {
+        let level = g.water_level_m(x as f32, z as f32).unwrap();
+        let ground = g.surface_height_m(x as f32, z as f32);
+        assert!(
+            ground < level,
+            "{x},{z} is no longer under water: retarget this test"
+        );
+        wet += 1;
+        let from = ground.floor() as i32 + 1;
+        let to = level.ceil() as i32;
+        let air = air_column(&g, x, z, from, to);
+        for (y, is_air) in (from..to).zip(air) {
+            assert!(
+                !(is_air && (y as f32) < level),
+                "air under water at {x},{y},{z}"
+            );
+        }
+    }
+    assert_eq!(wet, 8);
+}

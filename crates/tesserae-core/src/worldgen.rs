@@ -1427,6 +1427,13 @@ impl Worldgen {
                                 .map_or(1.0, |c| c.scales[z * CHUNK_SIZE + x]),
                         )
                     {
+                        // An overhang's rock above the ground, cut by a cave, is open water, not a hole.
+                        if base_m < 0.0
+                            && let (Some(water), Some(level_m)) = (self.water, water_level_m)
+                            && y_m < level_m
+                        {
+                            chunk.set(x, y, z, Voxel::cube(water.material));
+                        }
                         continue;
                     }
                     if let (Some(caverns), Some(blocks)) = (&self.caverns, &cavern_blocks)
@@ -1805,7 +1812,15 @@ impl Worldgen {
                     ..
                 },
                 Some(w),
-            ) if w.material == fluid => {}
+            ) if w.material == fluid => {
+                // Version 3 needs a Voxel of water left over the Plant's top.
+                let depth_m = self
+                    .water_level_m(x_m, z_m)
+                    .map_or(0.0, |level_m| level_m - y_m);
+                if self.terrain.is_some() && depth_m <= size {
+                    return None;
+                }
+            }
             (
                 SurfacePlantKind::Column {
                     stands_in: Some(_), ..
@@ -1858,7 +1873,9 @@ impl Worldgen {
             )
         {
             let room = ((level_m - self.global_m(standing.base[1])) / self.voxel_size).ceil();
-            run = run.min((room as i32).max(1));
+            // Version 3 leaves the surface Voxel as water, so a Plant never punches a hole in the top.
+            let kept = i32::from(self.terrain.is_some());
+            run = run.min((room as i32 - kept).max(1));
         }
         run
     }
