@@ -794,3 +794,93 @@ fn wilderness_structures_keep_the_strict_rule_and_are_never_levelled() {
         "no single Structure stands"
     );
 }
+
+#[test]
+fn chunks_are_the_same_from_threads_sharing_one_generator_in_any_order() {
+    let size = 0.5;
+    let make = || generator(size, crowded(listing(true)), village());
+    let shared = make();
+    let chunk_m = SIZE_I as f32 * size;
+    let (low, high) = shared.surface_bounds_m();
+    let rows = (low / chunk_m).floor() as i32..=(high / chunk_m).ceil() as i32;
+    let reach = (48.0 / chunk_m).ceil() as i32;
+    let coords: Vec<[i32; 3]> = rows
+        .flat_map(|cy| {
+            (-reach..reach).flat_map(move |cz| (-reach..reach).map(move |cx| [cx, cy, cz]))
+        })
+        .collect();
+    // A generator of its own for each Chunk shares nothing with any other Chunk.
+    let alone: Vec<_> = coords
+        .iter()
+        .map(|&[x, y, z]| make().chunk(x, y, z))
+        .collect();
+    let threads = 4;
+    let seen: Vec<Vec<(usize, tesserae_core::Chunk)>> = std::thread::scope(|scope| {
+        let handles: Vec<_> = (0..threads)
+            .map(|t| {
+                let (generator, coords) = (shared.clone(), &coords);
+                scope.spawn(move || {
+                    let mut order: Vec<usize> = (0..coords.len()).collect();
+                    order.rotate_left(t * coords.len() / threads);
+                    if t % 2 == 1 {
+                        order.reverse();
+                    }
+                    order
+                        .into_iter()
+                        .map(|i| {
+                            let [x, y, z] = coords[i];
+                            (i, generator.chunk(x, y, z))
+                        })
+                        .collect()
+                })
+            })
+            .collect();
+        handles.into_iter().map(|h| h.join().unwrap()).collect()
+    });
+    assert!(
+        alone.iter().any(|c| c.uniform().is_none()),
+        "nothing generated"
+    );
+    let voxels = |c: &tesserae_core::Chunk| {
+        let mut all = Vec::with_capacity(CHUNK_SIZE.pow(3));
+        for z in 0..CHUNK_SIZE {
+            for y in 0..CHUNK_SIZE {
+                for x in 0..CHUNK_SIZE {
+                    all.push(c.get(x, y, z));
+                }
+            }
+        }
+        all
+    };
+    for (i, chunk) in seen.into_iter().flatten() {
+        assert!(
+            voxels(&chunk) == voxels(&alone[i]),
+            "{:?} differs",
+            coords[i]
+        );
+    }
+}
+
+#[test]
+fn sky_and_deep_rock_beyond_a_settlement_keep_their_early_outs() {
+    let rock = Voxel::cube(fixtures().ground.rock);
+    for size in SIZES {
+        let with = generator(size, crowded(listing(true)), village());
+        let bare = Worldgen::new(SEED, size, plain(listing(false)));
+        let chunk_m = SIZE_I as f32 * size;
+        let (low, high) = with.surface_bounds_m();
+        assert!(
+            (low, high) != bare.surface_bounds_m(),
+            "the Settlement does not widen the bounds"
+        );
+        let sky = (high / chunk_m).floor() as i32 + 1;
+        let deep = ((low - with.params().soil_depth_m) / chunk_m).floor() as i32 - 1;
+        let reach = (48.0 / chunk_m).ceil() as i32;
+        for cz in -reach..reach {
+            for cx in -reach..reach {
+                assert_eq!(with.chunk(cx, sky, cz).uniform(), Some(Voxel::AIR));
+                assert_eq!(with.chunk(cx, deep, cz).uniform(), Some(rock));
+            }
+        }
+    }
+}

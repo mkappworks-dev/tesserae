@@ -2,7 +2,8 @@
 //! and the Settlement's lattice cell alone (ADR-0029).
 //!
 //! The layout works in metres, every Plot's corner on whole metres, so it is the same at every
-//! Voxel size; every Chunk a Settlement reaches lays it out again and writes only its own Voxels.
+//! Voxel size; every Chunk a Settlement reaches takes the same layout and writes only its own
+//! Voxels.
 //! A Settlement claims ground before single Structures, fields, trees and scatter, and never asks
 //! about any of them.
 
@@ -127,8 +128,9 @@ impl SettlementPass {
 /// A lattice cell's Settlement whose centre the ground takes, before its roads and Plots are
 /// laid out.
 #[derive(Clone, Copy, Debug)]
-struct Site {
+pub(super) struct Site {
     row: usize,
+    cell: [i32; 2],
     hash: u64,
     /// On whole metres.
     centre_m: [f32; 2],
@@ -235,7 +237,7 @@ impl Worldgen {
     }
 
     /// Every Settlement laid out whose disc covers or borders a column of `region`, `[min, max)`.
-    pub(super) fn towns_near(&self, region: [[i32; 2]; 2]) -> Vec<Town> {
+    pub(super) fn towns_near(&self, region: [[i32; 2]; 2]) -> Vec<Arc<Town>> {
         let region = self.region_m(region);
         self.sites_near(region)
             .into_iter()
@@ -243,7 +245,7 @@ impl Worldgen {
                 let radius_m = self.settlement_of(s).radius_m;
                 s.reaches(widened(region, self.voxel_size), radius_m)
             })
-            .filter_map(|s| self.lay_out(&s))
+            .filter_map(|s| self.layouts.town((s.row, s.cell), || self.lay_out(&s)))
             .collect()
     }
 
@@ -293,7 +295,10 @@ impl Worldgen {
         );
         (low[1]..=high[1])
             .flat_map(|j| (low[0]..=high[0]).map(move |i| [i, j]))
-            .filter_map(|cell| self.site(index, &row, cell))
+            .filter_map(|cell| {
+                self.layouts
+                    .site((index, cell), || self.site(index, &row, cell))
+            })
             .filter(|s| s.reaches(region, s.reach_m))
             .collect()
     }
@@ -346,6 +351,7 @@ impl Worldgen {
         };
         Some(Site {
             row: index,
+            cell,
             hash,
             centre_m,
             reach_m,
