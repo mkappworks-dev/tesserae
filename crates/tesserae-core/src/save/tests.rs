@@ -566,6 +566,39 @@ fn biomes_climate_and_ores_restore_in_order_with_their_materials_remapped() {
 }
 
 #[test]
+fn version_3_biome_selectors_round_trip_and_older_worlds_save_none() {
+    let selectors = [
+        crate::BiomeSelectors {
+            altitude_m: Some([50.0, 900.0]),
+            relief: Some(2.0),
+            ..Default::default()
+        },
+        crate::BiomeSelectors::default(),
+        crate::BiomeSelectors {
+            coast_m: Some([-500.0, 40.0]),
+            erosion: Some([0.2, 0.9]),
+            ..Default::default()
+        },
+    ];
+    let mut params = biome_params(3);
+    params.biomes = params.biomes.with_selectors(&selectors).unwrap();
+    let saved = Generation::capture(params, &[], &[], &mapping(8, 9, 4)).unwrap();
+    let json = serde_json::to_string(&saved).unwrap();
+    assert!(json.contains("altitude_m"));
+    let restored = saved.restore(&mapping(8, 9, 4), 3).unwrap();
+    assert_eq!(restored.biomes.selectors(), &selectors);
+
+    let mut older = biome_params(2);
+    older.biomes = older.biomes.with_selectors(&selectors).unwrap();
+    let saved = Generation::capture(older, &[], &[], &mapping(8, 9, 4)).unwrap();
+    assert!(
+        !serde_json::to_string(&saved)
+            .unwrap()
+            .contains("altitude_m")
+    );
+}
+
+#[test]
 fn a_biomes_ground_is_saved_by_name_and_restored_through_the_mapping() {
     let mut params = biome_params(2);
     let table = params.biomes.as_slice().to_vec();

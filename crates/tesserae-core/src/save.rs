@@ -589,6 +589,9 @@ pub struct Generation {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SavedBiome {
+    /// Absent matches every altitude, coast and erosion and leaves relief alone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selectors: Option<crate::BiomeSelectors>,
     pub name: String,
     pub temperature: f32,
     pub humidity: f32,
@@ -946,7 +949,16 @@ impl Generation {
                     p.biomes
                         .as_slice()
                         .iter()
-                        .map(|b| saved_biome(b, &kept_templates, &kept_settlements, mapping))
+                        .zip(p.biomes.selectors())
+                        .map(|(b, selectors)| {
+                            let mut saved =
+                                saved_biome(b, &kept_templates, &kept_settlements, mapping)?;
+                            // Only version 3 reads them, so an older World's snapshot is as it was.
+                            saved.selectors = (p.generator >= crate::terrain::LANDFORMS_SINCE
+                                && *selectors != crate::BiomeSelectors::default())
+                            .then_some(*selectors);
+                            Ok::<_, Error>(saved)
+                        })
                         .collect::<Result<_, _>>()
                 })
                 .transpose()?,
@@ -1110,6 +1122,7 @@ fn saved_biome(
     mapping: &Mapping,
 ) -> Result<SavedBiome, Error> {
     Ok(SavedBiome {
+        selectors: None,
         name: b.name.to_string(),
         temperature: b.temperature,
         humidity: b.humidity,
@@ -1394,7 +1407,13 @@ fn restored_biomes(saved: &[SavedBiome], mapping: &Mapping) -> Result<crate::Bio
             })
         })
         .collect::<Result<Vec<_>, Error>>()?;
-    crate::BiomeTable::new(&biomes).map_err(|e| Error::Corrupt(e.to_string()))
+    let selectors: Vec<_> = saved
+        .iter()
+        .map(|b| b.selectors.unwrap_or_default())
+        .collect();
+    crate::BiomeTable::new(&biomes)
+        .and_then(|t| t.with_selectors(&selectors))
+        .map_err(|e| Error::Corrupt(e.to_string()))
 }
 
 fn restored_features(b: &SavedBiome, mapping: &Mapping) -> Result<crate::SurfaceFeatures, Error> {

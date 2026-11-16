@@ -335,7 +335,9 @@ impl WorldgenParams {
             })
             .collect();
         WorldgenParams {
-            biomes: BiomeTable::new(&bare).expect("only the features changed"),
+            biomes: BiomeTable::new(&bare)
+                .and_then(|t| t.with_selectors(self.biomes.selectors()))
+                .expect("only the features changed"),
             ..self
         }
     }
@@ -988,13 +990,30 @@ impl Worldgen {
         self.climate.at(x_m, z_m)
     }
 
+    /// The Climate at a height: under version 3 the air is colder higher up and wetter near the
+    /// sea, as Weather will read it; under 1 and 2 height changes nothing.
+    pub fn climate_at_height(&self, x_m: f32, y_m: f32, z_m: f32) -> Climate {
+        let c = self.climate.at(x_m, z_m);
+        let Some(terrain) = &self.terrain else {
+            return c;
+        };
+        let (_, (_, humidity)) = terrain.site(x_m, z_m);
+        let (temperature, _) =
+            crate::terrain::climate_shift(y_m - self.params.sea_level_m, f32::MAX);
+        Climate {
+            temperature: (c.temperature + temperature).clamp(0.0, 1.0),
+            humidity: (c.humidity + humidity).clamp(0.0, 1.0),
+        }
+    }
+
     /// `None` where the World has no Biomes or runs a Generator version from before them. Pure in
     /// the seed and the position, so the same at every Voxel size and LOD level.
     pub fn biome_at(&self, x_m: f32, z_m: f32) -> Option<BiomeId> {
         if self.params.generator < BIOMES_SINCE {
             return None;
         }
-        self.climate.biome_at(&self.params.biomes, x_m, z_m)
+        let site = self.terrain.as_ref().map(|t| t.site(x_m, z_m));
+        self.climate.biome_at(&self.params.biomes, x_m, z_m, site)
     }
 
     /// The ground the column at global Voxel `(gx, gz)` is made of, as the Chunk holding it lays

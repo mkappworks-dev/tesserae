@@ -3,6 +3,7 @@
 
 use std::sync::Arc;
 
+use crate::climate::{BiomeTable, ClimateField, MAX_BIOMES, Site};
 use crate::drainage::Drainage;
 
 /// The first Generator version whose terrain is the layered field stack.
@@ -65,6 +66,24 @@ const SALT_CAVERN: u32 = 0x1a4d_00c1;
 const SALT_RAVINE: u32 = 0x1a4d_00d1;
 const SALT_RAVINE_MASK: u32 = 0x1a4d_00d2;
 
+/// The continent field's value at the coast, and how many metres one unit of it is worth inland:
+/// an approximation of distance, good enough to place a Biome.
+const COAST_CONTINENT: f32 = 0.47;
+const COAST_M_PER_UNIT: f32 = 0.4;
+/// Temperature (a unit-square coordinate) lost per metre above Sea level.
+const LAPSE_PER_M: f32 = 0.0016;
+/// Humidity gained at the coast, fading to nothing this far inland.
+const COAST_WET: f32 = 0.3;
+const COAST_WET_REACH_M: f32 = 1800.0;
+
+/// How the Climate of the unit square moves with altitude and the coast: `(temperature, humidity)`.
+pub(crate) fn climate_shift(altitude_m: f32, coast_m: f32) -> (f32, f32) {
+    (
+        -LAPSE_PER_M * altitude_m.max(0.0),
+        COAST_WET * (1.0 - smooth(0.0, COAST_WET_REACH_M, coast_m)),
+    )
+}
+
 /// The wavelength of the density noise, in metres: arches and ledges a few Voxels thick.
 const OVERHANG_SIZE_M: f32 = 10.0;
 
@@ -92,7 +111,7 @@ const VOLCANO_RADIUS_M: f32 = 700.0;
 
 /// Version 3's base ground: Sea level, the band, and the detail octaves a Game tunes with
 /// `feature_size_m`, `octaves` and `relief_m`.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 struct Base {
     seed: u32,
     sea_m: f32,
@@ -103,6 +122,8 @@ struct Base {
     octaves: u32,
     relief_m: f32,
     overhang_m: f32,
+    /// Present only when a Biome declares a relief scale.
+    relief_by_biome: Option<(ClimateField, Arc<BiomeTable>, [f32; MAX_BIOMES])>,
 }
 
 #[inline]
@@ -130,6 +151,17 @@ impl Base {
             inv_feature_size: 1.0 / p.feature_size_m,
             octaves: p.octaves,
             relief_m: p.relief_m,
+            relief_by_biome: p.biomes.shapes_relief().then(|| {
+                let mut offsets = [0.0; MAX_BIOMES];
+                for (o, s) in offsets.iter_mut().zip(p.biomes.selectors()) {
+                    *o = s.relief.unwrap_or(1.0) - 1.0;
+                }
+                (
+                    ClimateField::new(seed, p.climate),
+                    Arc::new(p.biomes),
+                    offsets,
+                )
+            }),
             overhang_m: if p.landforms.overhangs {
                 p.landforms.overhang_m
             } else {
@@ -206,7 +238,13 @@ impl Base {
             self.octaves,
         );
         let worn = 0.35 + 0.65 * (1.0 - f.erosion);
-        offset += (n - 0.5) * self.relief_m * if base < 0.0 { 0.3 } else { worn };
+        let scale = self
+            .relief_by_biome
+            .as_ref()
+            .map_or(1.0, |(climate, biomes, offsets)| {
+                (1.0 + climate.blend(biomes, x_m, z_m, offsets)).max(0.0)
+            });
+        offset += (n - 0.5) * self.relief_m * scale * if base < 0.0 { 0.3 } else { worn };
 
         let plateau =
             crate::noise::fbm2(wx / 3500.0, wz / 3500.0, seed.wrapping_add(SALT_PLATEAU), 2);
@@ -334,9 +372,10 @@ impl Terrain {
     pub(crate) fn new(seed: u32, p: &crate::WorldgenParams) -> Self {
         let base = Base::new(seed, p);
         Terrain {
-            base,
-            drainage: Arc::new(Drainage::new(p.sea_level_m, move |x, z| {
-                base.base_height_m(x, z)
+            base: base.clone(),
+            drainage: Arc::new(Drainage::new(p.sea_level_m, {
+                let base = base.clone();
+                move |x, z| base.base_height_m(x, z)
             })),
         }
     }
@@ -359,6 +398,23 @@ impl Terrain {
     /// caller's.
     pub(crate) fn inland_water_m(&self, x_m: f32, z_m: f32) -> Option<f32> {
         self.drainage.wet(x_m, z_m).level_m
+    }
+
+    /// What a Biome's selectors ask of the column, and how its Climate shifts there: the air is
+    /// colder by altitude and wetter toward the sea.
+    pub(crate) fn site(&self, x_m: f32, z_m: f32) -> (Site, (f32, f32)) {
+        let f = self.base.fields(x_m, z_m);
+        let altitude_m = self.height_m(x_m, z_m) - self.base.sea_m;
+        let coast_m =
+            (f.continent - COAST_CONTINENT) * self.base.continent_size_m * COAST_M_PER_UNIT;
+        (
+            Site {
+                altitude_m,
+                coast_m,
+                erosion: f.erosion,
+            },
+            climate_shift(altitude_m, coast_m),
+        )
     }
 
     pub(crate) fn overhang_max_m(&self) -> f32 {
