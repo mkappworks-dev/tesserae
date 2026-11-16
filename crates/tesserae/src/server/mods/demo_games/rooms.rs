@@ -6,7 +6,7 @@
 use std::collections::{HashMap, HashSet};
 
 use tesserae_core::collide::{Aabb, VoxelVolume, sweep};
-use tesserae_core::mesh::{FACE_STEPS, POS_Z};
+use tesserae_core::mesh::{FACE_STEPS, NEG_X as NEG_X_FACE, POS_X as POS_X_FACE, POS_Z};
 use tesserae_core::template::{Cell, Sampled, Turn};
 use tesserae_core::{Orientation, SHAPE_POST, SHAPE_SLAB, SHAPE_STAIR, Voxel};
 
@@ -461,7 +461,20 @@ fn a_player_walks_through_each_leaf_of_an_open_door_at_every_voxel_size() {
             for at in &doors {
                 let v = placed.voxels[at];
                 let door = tables.uses.door(v.material()).unwrap();
-                placed.voxels.insert(*at, door.toggle(v));
+                let open = door.toggle(v);
+                // Each leaf opens onto its outer edge: a pair as a mirrored pair.
+                let hinge = Orientation::from_bits(open.orientation())
+                    .unwrap()
+                    .face_of(POS_Z);
+                if leaves == 2 {
+                    let outer = if at[0] < low + leaf_cells {
+                        NEG_X_FACE
+                    } else {
+                        POS_X_FACE
+                    };
+                    assert_eq!(hinge, outer, "{name}: the leaf at {at:?} at {size}");
+                }
+                placed.voxels.insert(*at, open);
             }
             for leaf in 0..leaves {
                 assert_eq!(

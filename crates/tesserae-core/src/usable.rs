@@ -409,6 +409,32 @@ impl VoxelUses {
         )
     }
 
+    /// Whether the Voxel at `at` is an open Door Voxel folded into its leaf: the Voxel on its
+    /// hinge side, the face its open panel lies on, is the same open Voxel turned the same way.
+    /// Only a leaf's hinge edge shows its panel, so a 2 m leaf opens as one panel against its
+    /// jamb; a folded Voxel draws nothing and the aim ray passes it. Bodies already pass an open
+    /// Door wider than one Voxel ([`Self::passes_bodies`]).
+    pub fn folded(
+        &self,
+        voxel: Voxel,
+        at: [i32; 3],
+        voxel_at: impl FnOnce([i32; 3]) -> Option<Voxel>,
+    ) -> bool {
+        // A scan with no allocation: the mesher asks of every shaped Voxel.
+        let turns = self.rows.iter().any(|(_, kind, shape)| {
+            matches!(kind, VoxelUse::Door { open, .. } if *open == voxel.material())
+                && shape.is_some()
+        });
+        if !turns {
+            return false;
+        }
+        let hinge = Orientation::from_bits(voxel.orientation())
+            .unwrap_or_default()
+            .face_of(crate::mesh::POS_Z);
+        let step = crate::mesh::FACE_STEPS[hinge];
+        voxel_at([at[0] + step[0], at[1] + step[1], at[2] + step[2]]) == Some(voxel)
+    }
+
     pub fn door(&self, material: MaterialId) -> Option<Door> {
         match *self.row(material)? {
             (
@@ -720,6 +746,72 @@ mod tests {
             boxes(&tables, door.toggle(facing_x)),
             [([0, 0, 13], [16, 16, 16])]
         );
+    }
+
+    /// Voxels by position, air elsewhere, for the aim ray.
+    struct Held(std::collections::HashMap<[i32; 3], Voxel>);
+
+    impl crate::collide::VoxelVolume for Held {
+        fn voxel(&self, at: [i32; 3]) -> Option<Voxel> {
+            Some(self.0.get(&at).copied().unwrap_or(Voxel::AIR))
+        }
+    }
+
+    #[test]
+    fn an_open_leaf_draws_only_its_hinge_edge_and_the_aim_ray_passes_the_rest() {
+        use crate::collide::raycast;
+        use crate::light::{ChunkLight, Light};
+        use crate::mesh::{LitChunk, mesh_chunk};
+        let (mut tables, door, _) = panelled();
+        let stone = tables.materials.register(MaterialDef::OPAQUE).unwrap();
+        let chosen = Voxel::shaped(door.closed, SHAPE_STAIR, Orientation::IDENTITY);
+        let light = ChunkLight::filled(Light::new(15, 0));
+        // A 2 m leaf is 2, 4 and 8 Voxels wide at 1.0, 0.5 and 0.25 m, 3 tall, at z 4 from x 4.
+        for width in [2, 4, 8] {
+            for (hinge, edge) in [(NEG_X, 4), (POS_X, 3 + width)] {
+                let closed = tables.uses.placed(chosen, POS_Z, hinge);
+                let open = door.toggle(closed);
+                let drawn = |voxel: Voxel| {
+                    let mut chunk = crate::Chunk::air();
+                    for x in 4..4 + width as usize {
+                        for y in 4..7 {
+                            chunk.set(x, y, 4, voxel);
+                        }
+                    }
+                    mesh_chunk(LitChunk::new(&chunk, &light), [None; 6], &tables).shaped_voxels
+                };
+                assert_eq!(drawn(closed), 3 * width as u32, "closed, {width} wide");
+                assert_eq!(drawn(open), 3, "open on {hinge}, {width} wide");
+
+                let mut held = Held(Default::default());
+                for x in 4..4 + width {
+                    for y in 4..7 {
+                        held.0.insert([x, y, 4], open);
+                    }
+                    held.0.insert([x, 5, 1], Voxel::cube(stone));
+                }
+                let along =
+                    |x: f32| raycast(&held, &tables, 1.0, [x, 5.5, 8.0], [0.0, 0.0, -1.0], 16.0);
+                let edge_x = if hinge == NEG_X {
+                    edge as f32 + 0.05
+                } else {
+                    edge as f32 + 0.95
+                };
+                assert_eq!(
+                    along(edge_x).unwrap().at,
+                    [edge, 5, 4],
+                    "the panel at the jamb"
+                );
+                let far = if hinge == NEG_X { 3 + width } else { 4 };
+                for x in [far as f32 + 0.05, far as f32 + 0.95] {
+                    assert_eq!(
+                        along(x).unwrap().at,
+                        [far, 5, 1],
+                        "through the opening at {x}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]

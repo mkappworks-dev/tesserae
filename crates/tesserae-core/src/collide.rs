@@ -345,7 +345,7 @@ pub fn raycast_until(
 
     loop {
         let voxel = vol.voxel(cell)?;
-        let nearest = stops(voxel)
+        let nearest = (stops(voxel) && !tables.uses.folded(voxel, cell, |at| vol.voxel(at)))
             .then(|| {
                 tables
                     .shapes

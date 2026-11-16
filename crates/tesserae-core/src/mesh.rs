@@ -1200,7 +1200,11 @@ fn mesh_shaped(n: &Neighborhood, tables: &Tables, mesh: &mut ChunkMesh) {
         for z in 0..CHUNK_SIZE as i32 {
             for x in 0..CHUNK_SIZE as i32 {
                 let voxel = n.at(x, y, z);
-                if !voxel.is_shaped() {
+                if !voxel.is_shaped()
+                    || tables
+                        .uses
+                        .folded(voxel, [x, y, z], |[x, y, z]| Some(n.at(x, y, z)))
+                {
                     continue;
                 }
                 mesh.shaped_voxels += 1;

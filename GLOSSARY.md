@@ -284,10 +284,10 @@ One Item places the whole Door, Use toggles all of it, and removing any Voxel of
 it removes it all and drops the closed one's Item. Its row may fix a Shape, as
 Terra's fixes a thin panel: placing turns the panel to face the Player, hinged
 on the half of the cell aimed at, and Use turns each Voxel of it a quarter about
-that hinge edge, so it swings aside at 1 m and turns as slats at finer sizes.
-Bodies collide with the panel as drawn, except that an open Door with no fixed
-Shape, or wider than one Voxel so that its slats stand too close for a body,
-lets them through. Aim still stops on it.
+that hinge edge. Open, only a leaf's hinge edge shows its panel: the rest folds
+into it, drawn as nothing and passed by aim, so a leaf opens as one panel
+against its jamb. Bodies collide with the panel as drawn, except that an open
+Door with no fixed Shape, or wider than one Voxel, lets them through.
 
 **Game mode** — Creative or Survival. A World has a default; each Player has
 their own. Both spend an Item per placed Voxel and drop one per removed Voxel, a

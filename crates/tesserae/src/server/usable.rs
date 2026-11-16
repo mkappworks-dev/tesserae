@@ -707,7 +707,8 @@ mod tests {
                 d.closed
             };
             let cells = door_cells(&app, &d);
-            remove(&mut app, 0.25, 6);
+            // Open, the leaf folds against its jamb on +X, x 7, and the ray passes the rest.
+            remove(&mut app, 0.25, if opened { 7 } else { 6 });
             assert!(door_cells(&app, &d).is_empty(), "opened {opened}");
             assert_eq!(dropped(&app), 1, "one Item, opened {opened}");
             replay(&mut app, Undo);

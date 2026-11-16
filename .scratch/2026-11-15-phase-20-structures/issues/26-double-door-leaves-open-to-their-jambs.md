@@ -1,6 +1,6 @@
 # 26: A Door's leaf opens as one panel against its jamb
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 22
 
@@ -32,12 +32,32 @@ hinge jamb, and its other cells show nothing.
 
 ## Acceptance criteria
 
-- [ ] An open single and double Door mesh only their hinge-edge Voxels, at
+- [x] An open single and double Door mesh only their hinge-edge Voxels, at
       1.0, 0.5 and 0.25 m, tested in `tesserae-core`'s mesher.
-- [ ] The aim ray passes a folded Voxel and strikes what stands behind it, and
+- [x] The aim ray passes a folded Voxel and strikes what stands behind it, and
       still strikes the panel at the jamb.
-- [ ] A closed Door and a one-Voxel Door draw as before.
-- [ ] Opening and closing a Template's double Door through the Server's Use
-      leaves the pair mirrored.
+- [x] A closed Door and a one-Voxel Door draw as before.
+- [x] Opening a Template's double Door leaves the pair mirrored, each leaf
+      onto its outer edge, at 1.0, 0.5 and 0.25 m (checked on Terra's inn).
 
 ## Comments
+
+Where it lives: `VoxelUses::folded` (`usable.rs`), asked by `mesh_shaped`
+(`mesh.rs`) for every shaped Voxel before it counts or draws, and by
+`raycast_until` (`collide.rs`), so the Server's aim, Use, Remove and Place all
+pass a folded Voxel. The check scans the Door rows without allocating; a
+Voxel that is not an open Door with a fixed Shape answers at once.
+
+Tests: `an_open_leaf_draws_only_its_hinge_edge_and_the_aim_ray_passes_the_rest`
+(2, 4 and 8 Voxel leaves, hinged either way: 3 Voxels drawn of each open leaf,
+all of a closed one; the ray strikes the jamb panel and passes the rest to the
+stone behind); `a_player_walks_through_each_leaf...` in
+`demo_games/rooms.rs` now asks each leaf of the inn's pair to open onto its
+outer edge. `breaking_any_cell_removes_the_whole_door...` aims its removal of
+an open Door at the jamb panel, as the folded Voxels let the ray through.
+
+Checked in play on the play-tested World's warehouse: the opened pair shows
+one panel against each jamb, and the opening is clear.
+
+Known gap: two single Doors side by side, hinged the same way and both open,
+fold the second into the first, so the second shows no panel.

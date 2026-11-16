@@ -597,14 +597,16 @@ natively; no Mod is called when a Voxel is used
   `material` and `open`, two solid Materials, over all of it. With a fixed
   `shape` (below) each Voxel is that Shape drawn closed against its own +Z:
   placing turns it to face the Player, hinged on the half of the cell they aimed
-  at, and Use turns it a quarter about that hinge edge, a swing at 1 m Voxels
-  and turning slats at finer sizes. Bodies collide with what is drawn, except
-  that an open Door with no fixed Shape, which keeps the Player's Shape and
-  Orientation, or one wider than a Voxel, whose slats stand too close for a
-  body, lets them through. Aim, Use and Remove stop on it either way. Removing
-  any Voxel of a Door removes it all and drops one of the closed one's Item; the
-  open Material gets no implicit Item and cannot be placed. Doors side by side
-  stay two Doors. Toggling never enters the undo journal.
+  at, and Use turns it a quarter about that hinge edge. An open Voxel whose
+  neighbour on its hinge side is the same open Voxel is folded into its leaf: it
+  draws nothing and aim passes it, so a leaf wider than one Voxel opens as one
+  panel against its jamb and a pair opens from the middle. Bodies collide with
+  what is drawn, except that an open Door with no fixed Shape, which keeps the
+  Player's Shape and Orientation, or one wider than a Voxel lets them through.
+  Aim, Use and Remove stop on what is drawn. Removing any Voxel of a Door
+  removes it all and drops one of the closed one's Item; the open Material gets
+  no implicit Item and cannot be placed. Doors side by side stay two Doors.
+  Toggling never enters the undo journal.
 - `container`: the Voxel holds `slots` Stacks of its own, shown beside the
   Inventory. A Player cannot break one that holds Stacks; anything else that
   removes it spills them as Dropped items.
