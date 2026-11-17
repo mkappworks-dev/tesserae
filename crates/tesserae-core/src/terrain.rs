@@ -108,10 +108,10 @@ const WARP_AMOUNT_M: f32 = 400.0;
 const EROSION_SIZE_M: f32 = 2800.0;
 const PEAKS_SIZE_M: f32 = 1400.0;
 const MESA_STEP_M: f32 = 18.0;
-/// How far from its fold a ridge's crest is rounded, in the ridge field's units.
-const RIDGE_ROUND: f32 = 0.12;
-/// The ridge field below which the ground between mountains is a level floor.
-const VALLEY_FLOOR: f32 = 0.45;
+/// How far the mountain field may lie from its middle and still be a level valley floor, and how
+/// far it must for a massif's top.
+const VALLEY_FLOOR: f32 = 0.05;
+const MASSIF_TOP: f32 = 0.75;
 /// The calm patches' period, and the band of their field that fades them in.
 const CALM_SIZE_M: f32 = 450.0;
 const CALM_CUT: [f32; 2] = [0.36, 0.48];
@@ -308,14 +308,14 @@ impl Base {
         if self.overhang_m <= 0.0 {
             return 0.0;
         }
-        // Only a rugged range's upper flanks and crests: on a valley floor or a gentle foot the
+        // Only where a range rises well above its valleys: on a valley floor or a gentle foot the
         // density would only scatter knobs over a smooth slope.
         let (wx, wz) = self.warped(x_m, z_m);
-        let rugged = smooth(0.45, 0.8, self.fields_warped(wx, wz).ruggedness);
+        let rugged = self.fields_warped(wx, wz).ruggedness;
         if rugged <= 0.0 {
             return 0.0;
         }
-        self.overhang_m * rugged * smooth(0.35, 0.8, self.mountain(wx, wz))
+        self.overhang_m * smooth(0.1, 0.3, self.mountain(wx, wz) * rugged)
     }
 
     /// The signed push of the density at a point, in `-amp_m..amp_m`: positive is solid.
@@ -330,9 +330,11 @@ impl Base {
         ((n * 2.0 - 1.0) * 2.0).clamp(-1.0, 1.0) * amp_m
     }
 
-    /// 0 to 1: how far a mountain range rises here, before ruggedness scales it. A ridge's crest is
-    /// rounded rather than folded to a crease, and below a third of the ridge field the ground is a
-    /// level valley floor, from which the flanks rise smoothly.
+    /// 0 to 1: how far a mountain range rises here, before ruggedness scales it. Massifs stand
+    /// where the field is far from its middle, and the valleys between them follow the lines
+    /// where it crosses its middle: those lines run on and join, so a valley drains to lower land
+    /// instead of being a basin the drainage fills with a lake. Near those lines the ground is a
+    /// level floor, from which the flanks rise smoothly.
     fn mountain(&self, wx: f32, wz: f32) -> f32 {
         let n = crate::noise::fbm2(
             wx / PEAKS_SIZE_M,
@@ -340,10 +342,7 @@ impl Base {
             self.seed.wrapping_add(SALT_PEAKS),
             3,
         );
-        let d = (2.0 * n - 1.0).abs();
-        let soft = ((d * d + RIDGE_ROUND * RIDGE_ROUND).sqrt() - RIDGE_ROUND)
-            / ((1.0 + RIDGE_ROUND * RIDGE_ROUND).sqrt() - RIDGE_ROUND);
-        smooth(VALLEY_FLOOR, 1.0, 1.0 - soft).powf(1.25)
+        smooth(VALLEY_FLOOR, MASSIF_TOP, (2.0 * n - 1.0).abs()).powf(1.2)
     }
 
     /// 0 to 1: the patches of calm ground, before the coast fades them.

@@ -274,7 +274,20 @@ fn flat_ground_is_a_heightfield() {
 #[test]
 fn rugged_ground_has_overhangs_and_arches() {
     let g = Worldgen::new(SEED, 1.0, dry_v3());
-    let rugged = columns_where(&g, |r| r > 0.9, 60);
+    // Mountain flanks: rugged land standing well above the sea, not a valley floor in it.
+    let high: Vec<(i32, i32)> = (-80..80)
+        .flat_map(|j| (-80..80).map(move |i| (i * 61, j * 61)))
+        .filter(|&(x, z)| {
+            g.landform_fields(x as f32, z as f32).unwrap().ruggedness > 0.6
+                && g.surface_height_m(x as f32, z as f32) > 24.0 + 60.0
+        })
+        .collect();
+    let rugged: Vec<(i32, i32)> = high
+        .iter()
+        .copied()
+        .step_by((high.len() / 60).max(1))
+        .take(60)
+        .collect();
     assert!(rugged.len() >= 20, "{} rugged columns", rugged.len());
     let with = rugged
         .iter()
@@ -537,8 +550,8 @@ fn caverns_under_the_water_table_are_underground_lakes_and_the_rest_are_air() {
     let g = Worldgen::new(SEED, 1.0, caved_wet_v3());
     let water = tesserae_core::testgen::fixtures().water;
     let (mut lake, mut dry_hollow, mut wet_above) = (0, 0, 0);
-    for j in -16..16 {
-        for i in -16..16 {
+    for j in -32..32 {
+        for i in -32..32 {
             let (x, z) = (i * 233i32, j * 241i32);
             let h = g.surface_height_m(x as f32, z as f32) as i32;
             if h < 60 {
@@ -777,8 +790,8 @@ fn flooded_caverns_are_sealed_from_dry_tunnels() {
     let g = Worldgen::new(SEED, 1.0, caved_world());
     // Under the mountains, where caverns are deep and tunnels cross them below the water table.
     let mut checked = 0;
-    for j in -16..16 {
-        for i in -16..16 {
+    for j in -32..32 {
+        for i in -32..32 {
             let (x, z) = (i * 233i32, j * 241i32);
             if g.surface_height_m(x as f32, z as f32) < 90.0 || checked == 4 {
                 continue;
@@ -822,4 +835,29 @@ fn mountain_flanks_are_smooth_and_level_floors_lie_between_them() {
     // Mountains cut by calm patches and covered in fine knobs bent 0.038 m a metre.
     assert!(bend < 0.03, "the ground bends {bend} m a metre");
     assert!(level > 0.4, "{level} of rugged columns are level");
+}
+
+/// The share of rugged land whose ground stands under a lake or river: high where valleys between
+/// mountains are closed basins the drainage fills.
+fn rugged_under_inland_water(g: &Worldgen) -> f32 {
+    let (mut wet, mut n) = (0usize, 0usize);
+    for j in -60..60 {
+        for i in -60..60 {
+            let (x, z) = (i as f32 * 157.0, j as f32 * 163.0);
+            if g.landform_fields(x, z).is_none_or(|f| f.ruggedness < 0.5) {
+                continue;
+            }
+            n += 1;
+            wet += g.water_surface_m(x, z).is_some_and(|l| l > 24.5) as usize;
+        }
+    }
+    wet as f32 / n as f32
+}
+
+#[test]
+fn valleys_between_mountains_drain_rather_than_flood() {
+    let g = Worldgen::new(SEED, 1.0, wet_world());
+    let wet = rugged_under_inland_water(&g);
+    // Valleys that were the blobs between ridges flooded 9% of it.
+    assert!(wet < 0.07, "{wet} of rugged land is under a lake");
 }
