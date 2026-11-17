@@ -738,9 +738,13 @@ fn shares(world: WorldgenParams, seed: u64, half_m: f32, step_m: f32) -> Vec<f32
 fn assert_ore_in_band(game: &str, material_name: &str) {
     let (_install, loaded) = loaded(game, 0.5);
     let world = loaded.world.unwrap();
-    assert_eq!(world.ores.len(), 1, "{game} declares one ore");
-    let ore = world.ores.as_slice()[0];
-    assert_eq!(ore.material, material(&loaded, material_name));
+    let wanted = material(&loaded, material_name);
+    let ore = *world
+        .ores
+        .as_slice()
+        .iter()
+        .find(|o| o.material == wanted)
+        .unwrap_or_else(|| panic!("{game} declares no {material_name} ore"));
     let depths = ore_depths(world, 0.5, &ore);
     assert!(depths.len() > 100, "{game}: {} ore Voxels", depths.len());
     let slack = 0.5;
@@ -867,6 +871,7 @@ fn terra_biomes_all_cover_ground_and_the_temperate_one_most() {
 #[test]
 fn terra_iron_appears_in_rock_within_its_band() {
     assert_ore_in_band("terra", "terra:iron");
+    assert_ore_in_band("terra", "terra:crystal");
 }
 
 #[test]

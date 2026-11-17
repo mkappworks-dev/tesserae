@@ -1293,7 +1293,7 @@ fn terra_contract_content_loads_and_terra_builds_nothing_at_spawn() {
             .filter(|(id, _)| *id >= base)
             .map(|&(id, colour)| (id - base + 8, colour))
             // Its building Materials follow, covered by the demo Games' building tests.
-            .take(22)
+            .take(23)
             .collect();
         assert_eq!(
             own,
@@ -1313,13 +1313,14 @@ fn terra_contract_content_loads_and_terra_builds_nothing_at_spawn() {
                 (20, [214, 196, 140, 255]),
                 (21, [236, 240, 246, 255]),
                 (22, [150, 120, 104, 255]),
-                (23, [84, 150, 56, 255]),
-                (24, [214, 190, 140, 255]),
-                (25, [128, 62, 40, 255]),
-                (26, [128, 88, 50, 255]),
+                (23, [150, 110, 230, 255]),
+                (24, [84, 150, 56, 255]),
+                (25, [214, 190, 140, 255]),
+                (26, [128, 62, 40, 255]),
                 (27, [128, 88, 50, 255]),
-                (28, [140, 97, 55, 255]),
-                (29, [140, 97, 55, 255])
+                (28, [128, 88, 50, 255]),
+                (29, [140, 97, 55, 255]),
+                (30, [140, 97, 55, 255])
             ]
         );
         assert_eq!(loaded.tables.materials.def(base).emission, 15);

@@ -113,6 +113,11 @@ const BLOCK_LIGHT_TINT: vec3<f32> = vec3<f32>(1.0, 0.72, 0.42);
 // exposure works in.
 const BLOCK_LIGHT_STRENGTH: f32 = 4.0;
 
+// The ambient dome a face no sky light reaches still gets: light level 5's, so a sealed cave's
+// walls read as shapes and not a void, while a torch is still what lights it. Level 1's was too
+// faint to show rock at all. The sun gets none.
+const UNLIT_AMBIENT: f32 = 0.107;
+
 // Flat, like the Material index: every vertex of a greedy quad carries the same
 // level because light is part of the merge key, so interpolating would only
 // blur the seam between two quads that deliberately did not merge.
@@ -188,10 +193,10 @@ fn fragment(
     // leaking into a roofed space, because the shadow map has no idea the roof
     // is there once the fragment is past the last cascade;
     // directional_shadow_factor alone would leave the ambient dome lighting a
-    // cave. pbr_types.wesl's own doc on that field says "use this for custom
+    // cave past its faint floor. pbr_types.wesl's own doc on that field says "use this for custom
     // shadow maps", which is exactly what a sky-light flood-fill is.
     let sky = light_level(in.light, 4u);
-    pbr_input.diffuse_occlusion *= vec3<f32>(sky);
+    pbr_input.diffuse_occlusion *= vec3<f32>(max(sky, UNLIT_AMBIENT));
     pbr_input.directional_shadow_factor *= sky;
 
     // Block light is a local source, so it is emissive: tinted by the Voxel's

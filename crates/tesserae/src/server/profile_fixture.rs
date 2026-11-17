@@ -197,6 +197,11 @@ fn cave_eye(g: &tesserae_core::Worldgen, near_m: Vec3) -> Option<Vec3> {
     let voxel_m = g.voxel_size();
     let cell_m = CHUNK_SIZE as f32 * voxel_m;
     let floor_m = g.params().caves?.floor_m;
+    // A capture of a sealed cavern asks for more rock overhead; the profile keeps its own default.
+    let cover_m = std::env::var("TESSERAE_PROFILE_CAVE_COVER_M")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(CAVE_COVER_M);
     let reach = (CAVE_SEARCH_M / cell_m).ceil() as i32;
     let (cx0, cz0) = (
         (near_m.x / cell_m).floor() as i32,
@@ -205,7 +210,7 @@ fn cave_eye(g: &tesserae_core::Worldgen, near_m: Vec3) -> Option<Vec3> {
     let (_, highest_m) = g.surface_bounds_m();
     let (lowest_cy, highest_cy) = (
         (floor_m / cell_m).floor() as i32,
-        ((highest_m - CAVE_COVER_M) / cell_m).floor() as i32,
+        ((highest_m - cover_m) / cell_m).floor() as i32,
     );
     let index = |c: i32, i: usize| (c * size + i as i32) as f32 * voxel_m;
     let mut best: Option<(usize, [i32; 3], [usize; 3])> = None;
@@ -227,7 +232,7 @@ fn cave_eye(g: &tesserae_core::Worldgen, near_m: Vec3) -> Option<Vec3> {
                     for y in 0..CHUNK_SIZE {
                         for x in 0..CHUNK_SIZE {
                             let below_m = ground[z * CHUNK_SIZE + x] - index(cy, y);
-                            if below_m >= CAVE_COVER_M && chunk.get(x, y, z).is_air() {
+                            if below_m >= cover_m && chunk.get(x, y, z).is_air() {
                                 covered.push([x, y, z]);
                             }
                         }

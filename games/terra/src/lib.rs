@@ -256,6 +256,11 @@ impl Guest for Terra {
                 solid("sand"),
                 solid("snow"),
                 solid("iron"),
+                // Veins deep in the rock that a cavern or shaft lays open: the light down there.
+                MaterialDef {
+                    emission: 10,
+                    ..solid("crystal")
+                },
                 solid("melon"),
                 solid("workbench"),
                 solid("chest"),
@@ -284,6 +289,7 @@ impl Guest for Terra {
                 appearance("sand", [214, 196, 140, 255]),
                 appearance("snow", [236, 240, 246, 255]),
                 appearance("iron", [150, 120, 104, 255]),
+                appearance("crystal", [150, 110, 230, 255]),
                 appearance("melon", [84, 150, 56, 255]),
                 appearance("workbench", [214, 190, 140, 255]),
                 appearance("chest", [128, 62, 40, 255]),
@@ -933,14 +939,24 @@ impl Guest for Terra {
             .into_iter()
             .chain(building::voxel_uses())
             .collect(),
-            ores: vec![OreDef {
-                material: "terra:iron".into(),
-                min_depth_m: 5.0,
-                max_depth_m: 28.0,
-                vein_size_m: 5.0,
-                rarity: 0.1,
-                biomes: Vec::new(),
-            }],
+            ores: vec![
+                OreDef {
+                    material: "terra:iron".into(),
+                    min_depth_m: 5.0,
+                    max_depth_m: 28.0,
+                    vein_size_m: 5.0,
+                    rarity: 0.1,
+                    biomes: Vec::new(),
+                },
+                OreDef {
+                    material: "terra:crystal".into(),
+                    min_depth_m: 24.0,
+                    max_depth_m: 160.0,
+                    vein_size_m: 4.0,
+                    rarity: 0.15,
+                    biomes: Vec::new(),
+                },
+            ],
         }
     }
 
