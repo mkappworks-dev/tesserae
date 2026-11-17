@@ -691,6 +691,10 @@ pub struct Worldgen {
 /// The water table, as how far under Sea level it lies: a cavern below it is flooded.
 const WATER_TABLE_BELOW_SEA_M: f32 = 2.0;
 
+/// How many of its crown radii a tree keeps clear of other trunks: crowns that meet without
+/// closing into one roof.
+const CROWN_SPACING: f32 = 1.5;
+
 /// Voxels of slack over a Plant's declared rise, for the base's own cell and rounding up.
 const PLANT_RISE_SLACK_VOXELS: f32 = 3.0;
 
@@ -2127,12 +2131,12 @@ impl Worldgen {
     }
 
     /// [`Self::plant_at`] before a planted field clears the column: what the column draws, unless
-    /// under version 3 it is a tree with a stronger tree's trunk inside its crown.
+    /// under version 3 it is a tree with a stronger tree's trunk within [`CROWN_SPACING`] crowns.
     fn plant_raw(&self, scatter: &SurfaceScatter, gx: i32, gz: i32) -> Option<Standing> {
         let standing = self.plant_drawn(scatter, gx, gz)?;
         if let SurfacePlantKind::Tree(tree) = standing.plant.kind
             && self.terrain.is_some()
-            && self.crowded(scatter, [gx, gz], tree.canopy_radius_m)
+            && self.crowded(scatter, [gx, gz], CROWN_SPACING * tree.canopy_radius_m)
         {
             return None;
         }

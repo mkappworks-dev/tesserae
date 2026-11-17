@@ -1529,7 +1529,7 @@ fn version_2_keeps_trees_declared_closer_than_their_crowns() {
 }
 
 #[test]
-fn trees_declared_closer_than_their_crowns_stand_a_crown_apart() {
+fn trees_declared_closer_than_their_crowns_stand_apart() {
     for size in [1.0, 0.5] {
         let params = WorldgenParams {
             generator: 3,
@@ -1543,7 +1543,8 @@ fn trees_declared_closer_than_their_crowns_stand_a_crown_apart() {
         let g = Worldgen::new(SEED, size, params);
         let feet = trunk_feet(&g, 2);
         assert!(feet.len() > 40, "{size} m: only {} trees", feet.len());
-        let crown_m = oak_with(false, None).canopy_radius_m;
+        // Worldgen keeps one and a half crown radii between trunks.
+        let crown_m = 1.5 * oak_with(false, None).canopy_radius_m;
         for (i, a) in feet.iter().enumerate() {
             for b in &feet[i + 1..] {
                 let d = ((a[0] - b[0]) as f32).hypot((a[1] - b[1]) as f32) * size;
