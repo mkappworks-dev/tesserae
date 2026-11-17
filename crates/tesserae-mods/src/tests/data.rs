@@ -548,6 +548,7 @@ fn component() -> Declaration {
             path: "full:rock".into(),
             path_shape: Some("full:slab".into()),
             loot: None,
+            outskirts: None,
         }],
         voxel_uses: vec![
             content::VoxelUse {

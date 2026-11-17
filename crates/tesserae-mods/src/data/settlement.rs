@@ -20,6 +20,16 @@ pub(super) struct Settlement {
     path: String,
     path_shape: Option<String>,
     loot: Option<Loot>,
+    outskirts: Option<Outskirts>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+struct Outskirts {
+    templates: Vec<SettlementPlot>,
+    #[serde(default)]
+    count_min: u8,
+    count_max: u8,
 }
 
 #[derive(Deserialize)]
@@ -101,21 +111,28 @@ impl From<Settlement> for content::SettlementDef {
             centre: s.centre,
             plots: s.plots,
             plots_min: s.plots_min,
-            templates: s
-                .templates
-                .into_iter()
-                .map(|p| content::SettlementPlot {
-                    template: p.template,
-                    weight: p.weight,
-                    min: p.min,
-                    max: p.max,
-                    loot: p.loot.map(Into::into),
-                })
-                .collect(),
+            templates: s.templates.into_iter().map(Into::into).collect(),
             minimum: s.minimum,
             path: s.path,
             path_shape: s.path_shape,
             loot: s.loot.map(Into::into),
+            outskirts: s.outskirts.map(|o| content::SettlementOutskirts {
+                templates: o.templates.into_iter().map(Into::into).collect(),
+                count_min: o.count_min,
+                count_max: o.count_max,
+            }),
+        }
+    }
+}
+
+impl From<SettlementPlot> for content::SettlementPlot {
+    fn from(p: SettlementPlot) -> Self {
+        Self {
+            template: p.template,
+            weight: p.weight,
+            min: p.min,
+            max: p.max,
+            loot: p.loot.map(Into::into),
         }
     }
 }

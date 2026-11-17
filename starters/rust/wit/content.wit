@@ -1241,6 +1241,20 @@ interface content {
         /// What its buildings' chests hold, unless a Template's row gives its
         /// own; `none` leaves them empty.
         loot: option<loot-table>,
+        /// Buildings laid beside its approach paths just past its disc, inside
+        /// its margin: fields, orchards, paddocks. `none` lays none.
+        outskirts: option<settlement-outskirts>,
+    }
+
+    /// What a Settlement lays past its disc, drawn like its Plots.
+    record settlement-outskirts {
+        /// Up to 96 rows. Each Template's longer side is at most the
+        /// Settlement's margin.
+        templates: list<settlement-plot>,
+        /// How many a copy lays at most, drawn from `count-min` to
+        /// `count-max`, at most 96.
+        count-min: u8,
+        count-max: u8,
     }
 
     /// What a chest world generation stands holds, drawn the first time a

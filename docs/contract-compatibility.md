@@ -254,6 +254,14 @@ keep-out, and win against their neighbours. A TOML Declaration that leaves it
 out gets false. A Declaration built against the earlier 0.3 text needs a
 rebuild.
 
+A `settlement-def` then gained `outskirts`, an optional `settlement-outskirts`
+record after `loot`: a list of `settlement-plot` rows, each Template no longer
+than the Settlement's margin, and a `count-min` and `count-max` of at most 96.
+Its Buildings stand beside the approach paths just past the disc, inside the
+margin. Absent lays none, so a Settlement declared without it lays out as
+before, and a TOML Declaration that leaves it out gets none. A Declaration built
+against the earlier 0.3 text needs a rebuild.
+
 A `settlement-def`, a `settlement-plot` and a `biome-def` then each gained an
 optional `loot`, last, a `loot-table` record: `rolls-min` and `rolls-max` (at
 most 27) and 1 to 16 `loot-entry` rows of an `item` by full name, a `min` of at

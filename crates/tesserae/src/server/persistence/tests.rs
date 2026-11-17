@@ -2542,6 +2542,7 @@ fn declares_hamlet(path: &'static str) -> impl FnOnce(&mut crate::server::mods::
             minimum: 0,
             path: Voxel::cube(id),
             loot: None,
+            outskirts: Default::default(),
         }];
         let world = loaded.world.as_mut().unwrap();
         let mut biomes = world.biomes.as_slice().to_vec();

@@ -399,3 +399,33 @@ fn loot_naming_an_unknown_item_more_than_its_stack_or_out_of_range_is_refused() 
     let empty = refused(ok, "{ item = \"t:nail\", min = 0 }", ok);
     assert!(empty.contains("min must be at least 1"), "{empty}");
 }
+
+#[test]
+fn a_settlement_lists_outskirts_and_one_naming_a_missing_template_is_refused() {
+    let farmed = format!(
+        "{VILLAGE}\nmargin-m = 20.0\n\
+         outskirts = {{ count-min = 2, count-max = 4, templates = [{{ template = \"t:well\" }}] }}"
+    );
+    let (settlements, _) = load(&world(
+        &settlement(&farmed),
+        "{ settlement = \"t:village\", spacing-m = 120.0 }",
+    ))
+    .unwrap();
+    let outskirts = &settlements[0].outskirts;
+    assert_eq!(outskirts.count, (2, 4));
+    assert_eq!(outskirts.rules[0].building.template, 0);
+    let (plain, _) = load(&world(
+        &settlement(VILLAGE),
+        "{ settlement = \"t:village\", spacing-m = 120.0 }",
+    ))
+    .unwrap();
+    assert!(plain[0].outskirts.rules.is_empty(), "none unless it says");
+    let missing = farmed.replace("t:well\" }]", "t:barn\" }]");
+    let err = load(&world(
+        &settlement(&missing),
+        "{ settlement = \"t:village\", spacing-m = 120.0 }",
+    ))
+    .unwrap_err()
+    .to_string();
+    assert!(err.contains("village") && err.contains("t:barn"), "{err}");
+}

@@ -206,6 +206,7 @@ fn kind(
         path: path.into(),
         path_shape: None,
         loot: Some(loot),
+        outskirts: None,
     }
 }
 

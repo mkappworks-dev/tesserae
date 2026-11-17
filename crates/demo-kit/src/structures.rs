@@ -110,6 +110,7 @@ macro_rules! structures {
                     path: $crate::structures::PATH.into(),
                     path_shape: None,
                     loot: Some(loot(kind.loot)),
+                    outskirts: None,
                 })
                 .into()
         }
