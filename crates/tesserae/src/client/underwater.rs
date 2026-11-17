@@ -35,7 +35,7 @@ pub(super) fn submerged(camera_y: f32, fluid: Option<FluidSurface>, was_submerge
 }
 
 /// How far the clearest fluid (dimming 0) is seen through.
-const MAX_RANGE_M: f32 = 40.0;
+const MAX_RANGE_M: f32 = 64.0;
 
 /// Floor, so the densest fluid is still a view and not a flat colour.
 const MIN_RANGE_M: f32 = 1.5;
