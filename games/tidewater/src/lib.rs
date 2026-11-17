@@ -270,6 +270,7 @@ impl Guest for Tidewater {
                 BiomeDef {
                     soundscape: None,
                     selectors: None,
+                    strata: None,
                     name: "lagoon".into(),
                     temperature: 0.5,
                     humidity: 0.5,
@@ -291,6 +292,7 @@ impl Guest for Tidewater {
                 BiomeDef {
                     soundscape: None,
                     selectors: None,
+                    strata: None,
                     name: "salt_flats".into(),
                     temperature: 0.7,
                     humidity: 0.3,
@@ -320,6 +322,7 @@ impl Guest for Tidewater {
                 BiomeDef {
                     soundscape: None,
                     selectors: None,
+                    strata: None,
                     name: "cold_shallows".into(),
                     temperature: 0.3,
                     humidity: 0.55,
@@ -342,6 +345,7 @@ impl Guest for Tidewater {
                 BiomeDef {
                     soundscape: None,
                     selectors: None,
+                    strata: None,
                     name: "rainforest".into(),
                     temperature: 0.72,
                     humidity: 0.7,
@@ -364,6 +368,7 @@ impl Guest for Tidewater {
                 BiomeDef {
                     soundscape: None,
                     selectors: None,
+                    strata: None,
                     name: "tidal_marsh".into(),
                     temperature: 0.55,
                     humidity: 0.78,

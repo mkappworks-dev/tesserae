@@ -667,10 +667,20 @@ pub struct Generation {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct SavedStratum {
+    pub material: String,
+    pub depth_m: [f32; 2],
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SavedBiome {
     /// Absent matches every altitude, coast and erosion and leaves relief alone.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub selectors: Option<crate::BiomeSelectors>,
+    /// Absent is plain rock under the soil, as before strata.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub strata: Vec<SavedStratum>,
     pub name: String,
     pub temperature: f32,
     pub humidity: f32,
@@ -1043,13 +1053,27 @@ impl Generation {
                         .as_slice()
                         .iter()
                         .zip(p.biomes.selectors())
-                        .map(|(b, selectors)| {
+                        .zip(p.biomes.strata())
+                        .map(|((b, selectors), strata)| {
                             let mut saved =
                                 saved_biome(b, &kept_templates, &kept_settlements, mapping)?;
                             // Only version 3 reads them, so an older World's snapshot is as it was.
-                            saved.selectors = (p.generator >= crate::terrain::LANDFORMS_SINCE
+                            let v3 = p.generator >= crate::terrain::LANDFORMS_SINCE;
+                            saved.selectors = (v3
                                 && *selectors != crate::BiomeSelectors::default())
                             .then_some(*selectors);
+                            if v3 {
+                                saved.strata = strata
+                                    .as_slice()
+                                    .iter()
+                                    .map(|l| {
+                                        Ok::<_, Error>(SavedStratum {
+                                            material: mapping.material_name(l.material)?,
+                                            depth_m: l.depth_m,
+                                        })
+                                    })
+                                    .collect::<Result<_, _>>()?;
+                            }
                             Ok::<_, Error>(saved)
                         })
                         .collect::<Result<_, _>>()
@@ -1216,6 +1240,7 @@ fn saved_biome(
 ) -> Result<SavedBiome, Error> {
     Ok(SavedBiome {
         selectors: None,
+        strata: Vec::new(),
         name: b.name.to_string(),
         temperature: b.temperature,
         humidity: b.humidity,
@@ -1512,8 +1537,25 @@ fn restored_biomes(saved: &[SavedBiome], mapping: &Mapping) -> Result<crate::Bio
         .iter()
         .map(|b| b.selectors.unwrap_or_default())
         .collect();
+    let strata = saved
+        .iter()
+        .map(|b| {
+            let layers = b
+                .strata
+                .iter()
+                .map(|l| {
+                    Ok(crate::Stratum {
+                        material: mapping.material_id(&l.material)?,
+                        depth_m: l.depth_m,
+                    })
+                })
+                .collect::<Result<Vec<_>, Error>>()?;
+            crate::Strata::new(&layers).map_err(|e| Error::Corrupt(e.to_string()))
+        })
+        .collect::<Result<Vec<_>, Error>>()?;
     crate::BiomeTable::new(&biomes)
         .and_then(|t| t.with_selectors(&selectors))
+        .and_then(|t| t.with_strata(&strata))
         .map_err(|e| Error::Corrupt(e.to_string()))
 }
 

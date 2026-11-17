@@ -1233,6 +1233,7 @@ pub struct BiomeTable {
     len: u8,
     biomes: [Biome; MAX_BIOMES],
     selectors: [BiomeSelectors; MAX_BIOMES],
+    strata: [Strata; MAX_BIOMES],
 }
 
 impl Default for BiomeTable {
@@ -1241,7 +1242,76 @@ impl Default for BiomeTable {
             len: 0,
             biomes: [Biome::UNUSED; MAX_BIOMES],
             selectors: [BiomeSelectors::default(); MAX_BIOMES],
+            strata: [Strata::default(); MAX_BIOMES],
         }
+    }
+}
+
+pub const MAX_STRATA: usize = 8;
+/// The deepest a stratum reaches below the surface, so the uniform deep rock still starts within
+/// the band.
+pub const MAX_STRATUM_DEPTH_M: f32 = 96.0;
+
+/// A layer of a Biome's rock from `depth_m[0]` to `depth_m[1]` metres below a column's surface,
+/// read by Generator version 3 only. Its edges undulate a few metres, so it reads as bedding.
+#[derive(Clone, Copy, PartialEq, Debug, Default)]
+pub struct Stratum {
+    pub material: MaterialId,
+    pub depth_m: [f32; 2],
+}
+
+/// A Biome's strata, the first that holds a depth winning; rock fills the rest.
+#[derive(Clone, Copy, PartialEq, Debug, Default)]
+pub struct Strata {
+    len: u8,
+    layers: [Stratum; MAX_STRATA],
+}
+
+impl Strata {
+    pub fn new(layers: &[Stratum]) -> Result<Self, ParamError> {
+        if layers.len() > MAX_STRATA {
+            return Err(ParamError {
+                field: "biomes.strata",
+                rule: "holds at most 8 strata",
+            });
+        }
+        if !layers.iter().all(|l| {
+            let [top, bottom] = l.depth_m;
+            top.is_finite()
+                && bottom.is_finite()
+                && 0.0 <= top
+                && top < bottom
+                && bottom <= MAX_STRATUM_DEPTH_M
+        }) {
+            return Err(ParamError {
+                field: "biomes.strata.depth_m",
+                rule: "must run down from a top of at least 0 to a deeper bottom of at most 96 m",
+            });
+        }
+        let mut strata = Strata::default();
+        strata.layers[..layers.len()].copy_from_slice(layers);
+        strata.len = layers.len() as u8;
+        Ok(strata)
+    }
+
+    pub fn as_slice(&self) -> &[Stratum] {
+        &self.layers[..usize::from(self.len)]
+    }
+
+    /// The stratum `below_m` under the surface holds, its edges shifted down by `wave_m`.
+    pub fn at(&self, below_m: f32, wave_m: f32) -> Option<MaterialId> {
+        let below_m = below_m - wave_m;
+        self.as_slice()
+            .iter()
+            .find(|l| (l.depth_m[0]..l.depth_m[1]).contains(&below_m))
+            .map(|l| l.material)
+    }
+
+    pub fn deepest_m(&self) -> f32 {
+        self.as_slice()
+            .iter()
+            .map(|l| l.depth_m[1])
+            .fold(0.0, f32::max)
     }
 }
 
@@ -1364,6 +1434,23 @@ impl BiomeTable {
 
     pub fn selectors(&self) -> &[BiomeSelectors] {
         &self.selectors[..self.len as usize]
+    }
+
+    /// This table with `strata` for its Biomes, in order; fewer than the Biomes leaves the rest
+    /// plain rock.
+    pub fn with_strata(mut self, strata: &[Strata]) -> Result<Self, ParamError> {
+        if strata.len() > self.len() {
+            return Err(ParamError {
+                field: "biomes.strata",
+                rule: "must not name more Biomes than the table holds",
+            });
+        }
+        self.strata[..strata.len()].copy_from_slice(strata);
+        Ok(self)
+    }
+
+    pub fn strata(&self) -> &[Strata] {
+        &self.strata[..self.len as usize]
     }
 
     /// Whether any Biome says anything about relief.

@@ -12,7 +12,7 @@ mod templates;
 mod textures;
 
 use tesserae::mods::content::{
-    Appearance, BiomeDef, BiomeSelectors, BurnAfter, BurnEnd, ClimateParams, CombustionDef,
+    Appearance, BiomeDef, BiomeSelectors, BiomeStratum, BurnAfter, BurnEnd, ClimateParams, CombustionDef,
     FluidDef, FluidState, GroundParams, HeatDef, ItemDef, MarkerIcon, MarkerKindDef, MaterialDef,
     Occlusion, OreDef, Reactant, ReactionDef, ReactionSide, RecipeDef, RecipeStack, RenderClass,
     SelectorRange, ShapeDef, SkyFog, SurfaceFeature, ToolDef, ToolKind, ViewParams, VoxelUse,
@@ -524,6 +524,7 @@ impl Guest for Terra {
                 BiomeDef {
                     soundscape: Some("terra:temperate".into()),
                     selectors: None,
+                    strata: bedding("temperate"),
                     name: "temperate".into(),
                     temperature: 0.5,
                     humidity: 0.5,
@@ -555,6 +556,7 @@ impl Guest for Terra {
                 BiomeDef {
                     soundscape: Some("terra:dry".into()),
                     selectors: None,
+                    strata: bedding("dry"),
                     name: "dry".into(),
                     temperature: 0.7,
                     humidity: 0.3,
@@ -581,6 +583,7 @@ impl Guest for Terra {
                 BiomeDef {
                     soundscape: Some("terra:cold".into()),
                     selectors: None,
+                    strata: bedding("cold"),
                     name: "cold".into(),
                     temperature: 0.3,
                     humidity: 0.55,
@@ -603,6 +606,7 @@ impl Guest for Terra {
                 BiomeDef {
                     soundscape: None,
                     selectors: None,
+                    strata: bedding("jungle"),
                     name: "jungle".into(),
                     temperature: 0.72,
                     humidity: 0.7,
@@ -621,6 +625,7 @@ impl Guest for Terra {
                 BiomeDef {
                     soundscape: None,
                     selectors: None,
+                    strata: bedding("swamp"),
                     name: "swamp".into(),
                     temperature: 0.55,
                     humidity: 0.78,
@@ -643,6 +648,7 @@ impl Guest for Terra {
                 BiomeDef {
                     soundscape: Some("terra:dry".into()),
                     selectors: None,
+                    strata: bedding("savanna"),
                     name: "savanna".into(),
                     temperature: 0.78,
                     humidity: 0.5,
@@ -675,6 +681,7 @@ impl Guest for Terra {
                         erosion: None,
                         relief: None,
                     }),
+                    strata: bedding("ocean"),
                     name: "ocean".into(),
                     temperature: 0.5,
                     humidity: 0.8,
@@ -702,6 +709,7 @@ impl Guest for Terra {
                         erosion: None,
                         relief: None,
                     }),
+                    strata: bedding("beach"),
                     name: "beach".into(),
                     temperature: 0.6,
                     humidity: 0.6,
@@ -732,6 +740,7 @@ impl Guest for Terra {
                         erosion: None,
                         relief: None,
                     }),
+                    strata: bedding("alpine"),
                     name: "alpine".into(),
                     temperature: 0.25,
                     humidity: 0.4,
@@ -971,3 +980,30 @@ impl Guest for Terra {
 }
 
 export!(Terra);
+
+/// The rock a Biome beds under its soil, from the top down: a clay seam, a band of paler stone and
+/// basalt deep down; sand over the clay where the ground is dry, and no clay up a mountain.
+fn bedding(biome: &str) -> Option<Vec<BiomeStratum>> {
+    let layer = |material: &str, depth_min_m: f32, depth_max_m: f32| BiomeStratum {
+        material: material.into(),
+        depth_min_m,
+        depth_max_m,
+    };
+    let deep = layer("strata:basalt", 40.0, 96.0);
+    Some(match biome {
+        "dry" | "savanna" | "beach" => vec![
+            layer("terra:sand", 3.0, 8.0),
+            layer("strata:clay", 14.0, 17.0),
+            layer("strata:stone", 22.0, 30.0),
+            deep,
+        ],
+        "alpine" => vec![layer("strata:stone", 6.0, 28.0), deep],
+        "ocean" => vec![layer("strata:clay", 2.0, 6.0), deep],
+        _ => vec![
+            layer("strata:clay", 4.0, 7.0),
+            layer("strata:stone", 12.0, 20.0),
+            deep,
+        ],
+    })
+}
+

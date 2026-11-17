@@ -1,6 +1,6 @@
 # 11: Biome selectors and relief (17d)
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 10
 
@@ -17,4 +17,4 @@ Altitude, coast and erosion ranges and a relief scale on Biomes, in the unreleas
 - [x] Borders blend relief and cave tuning smoothly.
 - [x] A bad range is a load error naming the Biome.
 
-- [ ] Strata: rock layers by depth below the surface, their Materials declared per Biome (not built; selectors, relief, the 0.3 WIT field and the TOML loader are).
+- [x] Strata: rock layers by depth below the surface, their Materials declared per Biome in the 0.3 Declaration and the TOML loader, snapshotted in the save; version 3 only.

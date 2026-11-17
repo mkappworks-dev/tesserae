@@ -678,6 +678,33 @@ fn version_3_biome_selectors_round_trip_and_older_worlds_save_none() {
 }
 
 #[test]
+fn version_3_strata_are_saved_by_name_and_older_worlds_save_none() {
+    let strata = [crate::Strata::new(&[crate::Stratum {
+        material: 9,
+        depth_m: [4.0, 9.0],
+    }])
+    .unwrap()];
+    let mut params = biome_params(3);
+    params.biomes = params.biomes.with_strata(&strata).unwrap();
+    let saved = Generation::capture(params, &[], &[], &mapping(8, 9, 4)).unwrap();
+    let json = serde_json::to_value(&saved).unwrap();
+    let material = &json["biomes"][0]["strata"][0]["material"];
+    assert!(material.is_string(), "{json}");
+    let restored = saved.restore(&mapping(8, 9, 4), 3).unwrap();
+    assert_eq!(restored.biomes.strata()[0], strata[0]);
+    assert!(
+        restored.biomes.strata()[1..]
+            .iter()
+            .all(|s| s.as_slice().is_empty())
+    );
+
+    let mut older = biome_params(2);
+    older.biomes = older.biomes.with_strata(&strata).unwrap();
+    let saved = Generation::capture(older, &[], &[], &mapping(8, 9, 4)).unwrap();
+    assert!(!serde_json::to_string(&saved).unwrap().contains("strata"));
+}
+
+#[test]
 fn a_biomes_ground_is_saved_by_name_and_restored_through_the_mapping() {
     let mut params = biome_params(2);
     let table = params.biomes.as_slice().to_vec();

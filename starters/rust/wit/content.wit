@@ -775,6 +775,19 @@ interface content {
         /// landform is, under Generator version 3 only. `none` matches every
         /// altitude, coast and erosion and leaves relief alone.
         selectors: option<biome-selectors>,
+        /// Layers of rock by depth below the surface, under Generator version
+        /// 3 only, at most 8. The first that holds a depth wins; the Biome's
+        /// rock fills the rest. `none` is plain rock under the soil.
+        strata: option<list<biome-stratum>>,
+    }
+
+    /// A layer of a Biome's rock from `depth-min-m` to `depth-max-m` below
+    /// the surface, at most 96 m down. Its edges undulate a few metres.
+    record biome-stratum {
+        /// A solid Material, `<mod id>:<name>`.
+        material: string,
+        depth-min-m: f32,
+        depth-max-m: f32,
     }
 
     /// An inclusive range; `min` is at most `max`.

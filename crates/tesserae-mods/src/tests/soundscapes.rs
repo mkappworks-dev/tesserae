@@ -154,6 +154,7 @@ fn a_mods_soundscape_has_no_context_and_may_use_the_games_sounds() {
         settlements: Vec::new(),
         soundscape: Some("m:desert".into()),
         selectors: None,
+        strata: None,
         loot: None,
     });
     let sounds = load(vec![("g", game()), ("m", desert)]).unwrap();
@@ -366,6 +367,7 @@ fn biome_soundscape_resolves_and_unknown_name_is_refused() {
         settlements: Vec::new(),
         soundscape: Some("g:surface".into()),
         selectors: None,
+        strata: None,
         loot: None,
     });
     let resolved = load(vec![("g", d.clone())]).unwrap();

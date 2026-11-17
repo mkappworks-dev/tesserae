@@ -1001,6 +1001,7 @@ pub fn resolve_biomes(
 ) -> Result<(BiomeTable, OreTable), ModError> {
     let mut biomes: Vec<Biome> = Vec::new();
     let mut selectors: Vec<tesserae_core::BiomeSelectors> = Vec::new();
+    let mut strata: Vec<tesserae_core::Strata> = Vec::new();
     for b in behaviours {
         for (row, def) in b.biomes.iter().enumerate() {
             let bad = |source| ModError::Params {
@@ -1125,6 +1126,27 @@ pub fn resolve_biomes(
                 .unwrap_or_default();
             chosen.validate().map_err(bad)?;
             selectors.push(chosen);
+            let layers = def
+                .strata
+                .iter()
+                .flatten()
+                .map(|l| {
+                    let material = lookup(b, registry, "biome", row, &l.material)?;
+                    if !tables.materials.solid(Voxel::cube(material))
+                        || tables.fluids.contains(material)
+                    {
+                        return Err(bad(ParamError {
+                            field: "biomes.strata.material",
+                            rule: "must be a solid Material",
+                        }));
+                    }
+                    Ok(tesserae_core::Stratum {
+                        material,
+                        depth_m: [l.depth_min_m, l.depth_max_m],
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            strata.push(tesserae_core::Strata::new(&layers).map_err(bad)?);
             biomes.push(Biome {
                 name: BiomeName::new(&format!("{}:{}", b.mod_id, def.name)).map_err(bad)?,
                 temperature: def.temperature,
@@ -1192,6 +1214,7 @@ pub fn resolve_biomes(
     Ok((
         BiomeTable::new(&biomes)
             .and_then(|t| t.with_selectors(&selectors))
+            .and_then(|t| t.with_strata(&strata))
             .map_err(|e| table(e, last, "biome"))?,
         OreTable::new(&ores).map_err(|e| table(e, last, "ore"))?,
     ))

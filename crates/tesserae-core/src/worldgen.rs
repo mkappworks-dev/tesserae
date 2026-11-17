@@ -25,8 +25,8 @@ use std::sync::{Arc, Mutex};
 use crate::chunk::{CHUNK_SIZE, Chunk, ChunkBuilder};
 use crate::climate::{
     BIOMES_SINCE, Biome, BiomeId, BiomeTable, Climate, ClimateField, ClimateParams, MAX_BIOMES,
-    SkyFogBlend, SurfaceFeature, SurfaceFeatures, SurfacePlant, SurfacePlantKind, SurfaceTree,
-    SurfaceVine,
+    SkyFogBlend, Strata, SurfaceFeature, SurfaceFeatures, SurfacePlant, SurfacePlantKind,
+    SurfaceTree, SurfaceVine,
 };
 use crate::loot::LootTable;
 use crate::mesh::POS_Y;
@@ -338,6 +338,7 @@ impl WorldgenParams {
         WorldgenParams {
             biomes: BiomeTable::new(&bare)
                 .and_then(|t| t.with_selectors(self.biomes.selectors()))
+                .and_then(|t| t.with_strata(self.biomes.strata()))
                 .expect("only the features changed"),
             ..self
         }
@@ -367,6 +368,20 @@ impl WorldgenParams {
                 )?;
                 require(!tables.fluids.contains(material), field, "is a fluid")?;
             }
+        }
+        for stratum in self.biomes.strata().iter().flat_map(|s| s.as_slice()) {
+            let (field, material) = ("biomes.strata.material", stratum.material);
+            require(
+                tables.materials.contains(material),
+                field,
+                "names no registered Material",
+            )?;
+            require(
+                tables.materials.solid(Voxel::cube(material)),
+                field,
+                "is not solid",
+            )?;
+            require(!tables.fluids.contains(material), field, "is a fluid")?;
         }
         let field = "biomes.surface_features.material";
         for feature in self
@@ -673,6 +688,8 @@ pub struct Worldgen {
     water: Option<WaterParams>,
     climate: ClimateField,
     biome_grounds: Option<BiomeGrounds>,
+    /// Whether any Biome lays strata, which version 3 alone reads.
+    strata: bool,
     /// `None` without ores, and under a Generator version from before them.
     ores: Option<OreField>,
     cave_tuning: Option<CaveTuning>,
@@ -690,6 +707,23 @@ pub struct Worldgen {
 
 /// The water table, as how far under Sea level it lies: a cavern below it is flooded.
 const WATER_TABLE_BELOW_SEA_M: f32 = 2.0;
+/// How far a stratum's edges rise and fall, and over what span, so bedding never reads as a ruled
+/// line.
+const STRATA_WAVE_M: f32 = 3.0;
+const STRATA_WAVE_SIZE_M: f32 = 48.0;
+const STRATA_SALT: u32 = 0x5e7a_7a00;
+
+/// How far down a column's strata are shifted at `(x_m, z_m)`, from 0 to [`STRATA_WAVE_M`]: one
+/// field in metres, so every Voxel size and Chunk lays the same bedding.
+fn strata_wave_m(seed: u32, x_m: f32, z_m: f32) -> f32 {
+    let n = crate::noise::fbm2(
+        x_m / STRATA_WAVE_SIZE_M,
+        z_m / STRATA_WAVE_SIZE_M,
+        seed ^ STRATA_SALT,
+        2,
+    );
+    (n * 0.5 + 0.5).clamp(0.0, 1.0) * STRATA_WAVE_M
+}
 
 /// How many of its crown radii a tree keeps clear of other trunks: crowns that meet without
 /// closing into one roof.
@@ -955,6 +989,12 @@ impl Worldgen {
             }),
             climate: ClimateField::new(folded, params.climate),
             biome_grounds: BiomeGrounds::new(&params),
+            strata: params.generator >= LANDFORMS_SINCE
+                && params
+                    .biomes
+                    .strata()
+                    .iter()
+                    .any(|s| !s.as_slice().is_empty()),
             ores: OreField::new(folded, &params.ores).filter(|_| params.generator >= BIOMES_SINCE),
             cave_tuning: CaveTuning::new(&params),
             plant_rise_m: scatter
@@ -1511,7 +1551,7 @@ impl Worldgen {
             }
             return chunk;
         }
-        if ceiling_m < lowest - self.params.soil_depth_m {
+        if ceiling_m < lowest - self.solid_below_m() {
             let mut chunk = self.deep_rock(cx, cz, ground);
             if let Some((field, ores)) = self.ores_reaching(floor_m, ceiling_m) {
                 self.sow_deep_rock(&mut chunk, [cx, cz], origin_m, field, ores);
@@ -1683,6 +1723,7 @@ impl Worldgen {
                     |s| s.water_level_m[surface_index(x as i32, z as i32)],
                 );
                 let mut sealed_m = None;
+                let mut wave_m = None;
                 // The density never reaches down to water here or beside, so it opens no hollow
                 // that water would stand or pour into.
                 let amp_m = stack.as_ref().map_or(0.0, |s| {
@@ -1799,6 +1840,13 @@ impl Worldgen {
                         ores.and_then(|(field, mask)| {
                             field.at(mask, [x_m, y_m, z_m], below_m, &biome)
                         })
+                        .or_else(|| {
+                            let strata = self.strata.then(&biome)??;
+                            let strata = &self.params.biomes.strata()[strata.index()];
+                            let wave_m =
+                                *wave_m.get_or_insert_with(|| strata_wave_m(self.seed, x_m, z_m));
+                            strata.at(below_m, wave_m)
+                        })
                         .unwrap_or(ground.rock)
                     };
                     chunk.set(x, y, z, Voxel::cube(material));
@@ -1844,6 +1892,23 @@ impl Worldgen {
 
     /// Each column's own rock where Biomes disagree: the one case that must ask all 1024 columns
     /// for their Biome.
+    /// How far under the lowest surface every Voxel is the ground's rock: past the soil and the
+    /// deepest stratum's undulating bottom.
+    fn solid_below_m(&self) -> f32 {
+        let strata_m = if self.strata {
+            self.params
+                .biomes
+                .strata()
+                .iter()
+                .map(Strata::deepest_m)
+                .fold(0.0, f32::max)
+                + STRATA_WAVE_M
+        } else {
+            0.0
+        };
+        self.params.soil_depth_m.max(strata_m)
+    }
+
     fn deep_rock(&self, cx: i32, cz: i32, ground: GroundParams) -> Chunk {
         let columns = self
             .biome_grounds

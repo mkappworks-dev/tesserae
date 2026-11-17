@@ -312,6 +312,8 @@ pub(super) struct Biome {
 
     selectors: Option<Selectors>,
 
+    strata: Option<Vec<Stratum>>,
+
     #[serde(default)]
     surface_features: Vec<SurfaceFeature>,
     #[serde(default)]
@@ -322,6 +324,14 @@ pub(super) struct Biome {
     settlements: Vec<BiomeSettlement>,
     loot: Option<super::settlement::Loot>,
     soundscape: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+struct Stratum {
+    material: String,
+    depth_min_m: f32,
+    depth_max_m: f32,
 }
 
 #[derive(Deserialize)]
@@ -430,6 +440,17 @@ impl From<Biome> for content::BiomeDef {
                 coast: s.coast.map(Into::into),
                 erosion: s.erosion.map(Into::into),
                 relief: s.relief,
+            }),
+
+            strata: b.strata.map(|layers| {
+                layers
+                    .into_iter()
+                    .map(|l| content::BiomeStratum {
+                        material: l.material,
+                        depth_min_m: l.depth_min_m,
+                        depth_max_m: l.depth_max_m,
+                    })
+                    .collect()
             }),
 
             surface_features: b

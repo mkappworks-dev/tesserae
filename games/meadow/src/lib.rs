@@ -63,6 +63,7 @@ fn biomes() -> Vec<BiomeDef> {
         BiomeDef {
             soundscape: None,
             selectors: None,
+            strata: None,
             name: "meadow".into(),
             temperature: 0.5,
             humidity: 0.5,
@@ -84,6 +85,7 @@ fn biomes() -> Vec<BiomeDef> {
         BiomeDef {
             soundscape: None,
             selectors: None,
+            strata: None,
             name: "heath".into(),
             temperature: 0.3,
             humidity: 0.7,
@@ -105,6 +107,7 @@ fn biomes() -> Vec<BiomeDef> {
         BiomeDef {
             soundscape: None,
             selectors: None,
+            strata: None,
             name: "dunes".into(),
             temperature: 0.75,
             humidity: 0.25,
@@ -123,6 +126,7 @@ fn biomes() -> Vec<BiomeDef> {
         BiomeDef {
             soundscape: None,
             selectors: None,
+            strata: None,
             name: "thicket".into(),
             temperature: 0.72,
             humidity: 0.7,
@@ -141,6 +145,7 @@ fn biomes() -> Vec<BiomeDef> {
         BiomeDef {
             soundscape: None,
             selectors: None,
+            strata: None,
             name: "fen".into(),
             temperature: 0.55,
             humidity: 0.78,
@@ -163,6 +168,7 @@ fn biomes() -> Vec<BiomeDef> {
         BiomeDef {
             soundscape: None,
             selectors: None,
+            strata: None,
             name: "prairie".into(),
             temperature: 0.78,
             humidity: 0.5,

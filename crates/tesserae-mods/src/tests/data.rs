@@ -321,6 +321,7 @@ fn component() -> Declaration {
             content::BiomeDef {
                 soundscape: None,
                 selectors: None,
+                strata: None,
                 name: "dry".into(),
                 temperature: 0.8,
                 humidity: 0.15,
@@ -339,6 +340,7 @@ fn component() -> Declaration {
             content::BiomeDef {
                 soundscape: None,
                 selectors: None,
+                strata: None,
                 name: "wet".into(),
                 temperature: 0.35,
                 humidity: 0.9,
