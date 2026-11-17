@@ -172,6 +172,9 @@ impl CaveBiomeTable {
 pub(crate) const CAVE_CELL_M: f32 = 4.0;
 /// The size of the cave Climate's regions.
 const CAVE_CLIMATE_SIZE_M: f32 = 160.0;
+/// The field gathers round its middle, a tenth of it under 0.32 and a tenth over 0.68; stretched
+/// by this, those tenths reach 0.1 and 0.9, so a point declared near a corner is ever chosen.
+const CAVE_CLIMATE_STRETCH: f32 = 2.2;
 const SALT_CAVE_TEMPERATURE: u32 = 0xca7e_0001;
 const SALT_CAVE_HUMIDITY: u32 = 0xca7e_0002;
 /// How far under the surface a cave Biome's rock, floor and fog begin, so the ground a Player
@@ -192,7 +195,10 @@ pub(crate) fn cave_biome_at(
     }
     let centre = [x_m, y_m, z_m].map(|m| ((m / CAVE_CELL_M).floor() + 0.5) * CAVE_CELL_M);
     let [x, y, z] = centre.map(|m| m / CAVE_CLIMATE_SIZE_M);
-    let unit = |salt| (crate::noise::fbm3(x, y, z, seed ^ salt, 2) * 0.5 + 0.5).clamp(0.0, 1.0);
+    let unit = |salt| {
+        let n = crate::noise::fbm3(x, y, z, seed ^ salt, 2);
+        ((n - 0.5) * CAVE_CLIMATE_STRETCH + 0.5).clamp(0.0, 1.0)
+    };
     let (t, h) = (unit(SALT_CAVE_TEMPERATURE), unit(SALT_CAVE_HUMIDITY));
     let altitude_m = centre[1] - sea_level_m;
     table

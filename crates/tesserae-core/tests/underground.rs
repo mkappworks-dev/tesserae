@@ -335,3 +335,40 @@ fn a_table_holds_at_most_16_cave_biomes_each_named_once() {
     assert!(CaveBiomeTable::new(&seventeen[..16]).is_ok());
     assert!(CaveBiomeTable::new(&[named(1), named(1)]).is_err());
 }
+
+#[test]
+fn cave_biomes_near_the_corners_of_the_cave_climate_each_take_a_share() {
+    let corner = |name: &str, at: (f32, f32)| {
+        CaveBiome::new(
+            BiomeName::new(name).unwrap(),
+            at,
+            None,
+            None,
+            None,
+            None,
+            &[],
+        )
+        .unwrap()
+    };
+    let caves = [
+        corner("t:cold_dry", (0.2, 0.2)),
+        corner("t:warm_wet", (0.8, 0.8)),
+        corner("t:middle", (0.5, 0.5)),
+    ];
+    let g = Worldgen::new(SEED, 1.0, params(3, &caves, false));
+    let mut counts: HashMap<String, u32> = HashMap::new();
+    for i in 0..40 {
+        for j in 0..40 {
+            let [x, z] = [i as f32 * 53.0, j as f32 * 47.0];
+            let y = g.surface_height_m(x, z) - 40.0;
+            if let Some(name) = g.cave_biome_name_at(x, y, z) {
+                *counts.entry(name.to_owned()).or_default() += 1;
+            }
+        }
+    }
+    let total: u32 = counts.values().sum();
+    for cave in &caves {
+        let n = counts.get(cave.name.as_str()).copied().unwrap_or(0);
+        assert!(n * 8 > total, "{}: {n} of {total}", cave.name);
+    }
+}

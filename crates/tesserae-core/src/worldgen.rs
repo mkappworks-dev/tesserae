@@ -736,7 +736,7 @@ fn strata_wave_m(seed: u32, x_m: f32, z_m: f32) -> f32 {
         seed ^ STRATA_SALT,
         2,
     );
-    (n * 0.5 + 0.5).clamp(0.0, 1.0) * STRATA_WAVE_M
+    n * STRATA_WAVE_M
 }
 
 /// How many of its crown radii a tree keeps clear of other trunks: crowns that meet without
