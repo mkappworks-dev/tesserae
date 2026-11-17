@@ -678,9 +678,10 @@ const B = {
     return g.done();
   },
   /*
-   * Farm ground: worked soil in the Ground layer under rows of a crop's first Stage, which grows
-   * and ripens like a planted one. `crops` cycles row by row along z; a grass lane runs across the
-   * middle, and a grass rim round it keeps the rows off the road.
+   * Farm ground: worked soil in the Ground layer under rows of a crop, which grows and ripens like a
+   * planted one; a later Stage is a field planted earlier. `crops` cycles row by row along z, each a
+   * Material on the cross Shape or `{ m, shape }`; a grass lane runs across the middle, and a grass
+   * rim round it keeps the rows off the road.
    */
   field: (crops, w = 9, d = 7) => {
     const g = new Grid(),
@@ -692,9 +693,70 @@ const B = {
           g.put(x, 0, z, M("terra:grass"));
           continue;
         }
+        const crop = crops[z % crops.length];
         g.put(x, 0, z, M("terra:dirt"));
-        g.put(x, 1, z, M(crops[z % crops.length], "cross"));
+        g.put(
+          x,
+          1,
+          z,
+          typeof crop === "string" ? M(crop, "cross") : M(crop.m, crop.shape),
+        );
       }
+    return g.done();
+  },
+  /*
+   * Sugar cane on sand either side of a water channel down the middle, in clumps one to three tall
+   * that grow on to the cane's height.
+   */
+  caneField: (w = 13, d = 9) => {
+    const g = new Grid(),
+      channel = d >> 1;
+    for (let x = 0; x < w; x++)
+      for (let z = 0; z < d; z++) {
+        const rim = x === 0 || z === 0 || x === w - 1 || z === d - 1;
+        if (rim) g.put(x, 0, z, M("terra:grass"));
+        else if (z === channel) g.put(x, 0, z, M("water"));
+        else {
+          g.put(x, 0, z, M("terra:sand"));
+          if (Math.abs(z - channel) <= 2 && x % 2 === 1)
+            g.fill(
+              x,
+              1,
+              z,
+              x,
+              1 + ((x * 7 + z * 3) % 3),
+              z,
+              M("flora:cane", "cross"),
+            );
+        }
+      }
+    return g.done();
+  },
+  /*
+   * A dark plank shed, its Door on +Z, over a dirt floor of mushrooms, which grow only out of the
+   * light.
+   */
+  mushroomShed: (w = 7, d = 6) => {
+    const g = new Grid(),
+      wall = M("terra:oak_planks");
+    for (let x = 0; x < w; x++)
+      for (let z = 0; z < d; z++) {
+        const edge = x === 0 || z === 0 || x === w - 1 || z === d - 1;
+        g.put(x, 0, z, M("terra:dirt"));
+        if (edge) g.fill(x, 1, z, x, 3, z, wall);
+        else if ((x + z) % 2 === 0 && z < d - 2)
+          g.put(
+            x,
+            1,
+            z,
+            M(
+              x % 4 === 1 ? "flora:mushroom_red" : "flora:mushroom_brown",
+              "flora:mushroom",
+            ),
+          );
+        g.put(x, 4, z, wall);
+      }
+    doorway(g, w >> 1, d - 1, 1, [0, w - 1], "terra:oak_planks");
     return g.done();
   },
   /* Young fruit trees in rows on grass, three metres apart, which grow up as wild ones do. */
@@ -1147,10 +1209,18 @@ const GAME_TEMPLATES = {
       B.arch(5, 5),
     ),
     T("Terra", "wheat-field", "Wheat field", "Rows of wheat", "field", () =>
-      B.field(["crops:wheat_sprout"], 11, 7),
+      B.field(["crops:wheat_sprout"], 15, 11),
+    ),
+    T(
+      "Terra",
+      "ripe-wheat-field",
+      "Ripe wheat field",
+      "Wheat ready to harvest",
+      "field",
+      () => B.field(["crops:wheat_ripe"], 19, 13),
     ),
     T("Terra", "carrot-field", "Carrot field", "Rows of carrots", "field", () =>
-      B.field(["crops:carrot_sprout"]),
+      B.field(["crops:carrot_sprout"], 13, 9),
     ),
     T(
       "Terra",
@@ -1158,7 +1228,7 @@ const GAME_TEMPLATES = {
       "Potato field",
       "Rows of potatoes",
       "field",
-      () => B.field(["crops:potato_sprout"]),
+      () => B.field(["crops:potato_sprout", "crops:potato_young"], 13, 9),
     ),
     T(
       "Terra",
@@ -1169,9 +1239,49 @@ const GAME_TEMPLATES = {
       () =>
         B.field(
           ["crops:wheat_sprout", "crops:carrot_sprout", "crops:potato_sprout"],
+          15,
           11,
+        ),
+    ),
+    T(
+      "Terra",
+      "berry-field",
+      "Berry field",
+      "Rows of berry bushes",
+      "field",
+      () =>
+        B.field(
+          [
+            { m: "crops:berry_bush", shape: "crops:berry_young" },
+            { m: "crops:berry_ripe", shape: "crops:berry_ripe" },
+          ],
+          13,
           9,
         ),
+    ),
+    T(
+      "Terra",
+      "watermelon-patch",
+      "Watermelon patch",
+      "Vines that bear melons",
+      "field",
+      () => B.field(["crops:watermelon_vine"], 13, 9),
+    ),
+    T(
+      "Terra",
+      "cane-field",
+      "Sugar cane field",
+      "Cane beside a water channel",
+      "field",
+      () => B.caneField(),
+    ),
+    T(
+      "Terra",
+      "mushroom-shed",
+      "Mushroom shed",
+      "Mushrooms grown in the dark",
+      "field",
+      () => B.mushroomShed(),
     ),
     T(
       "Terra",
@@ -1180,11 +1290,15 @@ const GAME_TEMPLATES = {
       "Apple, cherry and orange trees",
       "field",
       () =>
-        B.orchard([
-          "flora:apple_sapling",
-          "flora:cherry_sapling",
-          "flora:orange_sapling",
-        ]),
+        B.orchard(
+          [
+            "flora:apple_sapling",
+            "flora:cherry_sapling",
+            "flora:orange_sapling",
+          ],
+          13,
+          13,
+        ),
     ),
     T(
       "Terra",
@@ -1192,7 +1306,7 @@ const GAME_TEMPLATES = {
       "Paddock",
       "A fence round grass, a gate",
       "field",
-      () => B.paddock(),
+      () => B.paddock(14, 12),
     ),
     T(
       "Terra",

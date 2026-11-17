@@ -196,9 +196,13 @@ impl<'a> Rooms<'a> {
 }
 
 fn levels_of(exported: &[serde_json::Value], index: usize, name: &str) -> Option<&'static [f32]> {
-    // A field, an orchard, a paddock or a garden: open ground with no door.
+    // A field, an orchard, a paddock or a garden is open ground with no door; a shed has one.
     if exported[index]["kind"] == "field" {
-        return Some(&[]);
+        return Some(if name == "terra:mushroom_shed" {
+            &[1.0]
+        } else {
+            &[]
+        });
     }
     if exported[index]["kind"] != "wild" {
         return Some(SETTLEMENT_LEVELS[index]);

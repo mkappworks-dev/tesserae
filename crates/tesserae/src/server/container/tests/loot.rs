@@ -226,9 +226,9 @@ fn dropped_counts(app: &App, except: &str) -> BTreeMap<String, u32> {
     counted(names.iter().map(|(n, c)| (&**n, *c)))
 }
 
-/// Terra's village round spawn at [`SEED`], and its town about 490 m off.
-const VILLAGE_HALF_M: f32 = 320.0;
-const TERRA_TOWN_M: [f32; 2] = [456.0, -166.0];
+/// Terra's village nearest spawn at [`SEED`], and its town about 360 m off.
+const TERRA_VILLAGE_M: [f32; 2] = [32.0, -211.0];
+const TERRA_TOWN_M: [f32; 2] = [356.0, 30.0];
 
 /// Which of Terra's Settlements laid out the well at `well`: only a town lays cobblestone roads.
 fn settlement_at(terra: &Game, world: &Generated, well: [i32; 3]) -> &'static str {
@@ -252,7 +252,7 @@ fn settlement_at(terra: &Game, world: &Generated, well: [i32; 3]) -> &'static st
 fn a_settlement_chest_holds_only_its_buildings_table_or_else_its_settlements() {
     let terra = game("terra", 1.0);
     let mut seen = BTreeMap::<(&str, bool), usize>::new();
-    for (centre_m, half_m) in [([0.0, 0.0], VILLAGE_HALF_M), (TERRA_TOWN_M, 128.0)] {
+    for (centre_m, half_m) in [(TERRA_VILLAGE_M, 128.0), (TERRA_TOWN_M, 128.0)] {
         let (world, chests) = terra.chests(centre_m, half_m);
         let wells: Vec<_> = standing(&world, &terra.loaded.tables.templates, 1.0)
             .into_iter()
@@ -332,7 +332,7 @@ fn a_wilderness_chest_holds_only_its_biomes_table() {
 
 /// A chest of Terra's village at 1.0 m: where it stands, and its Template's name.
 fn village_chest(terra: &Game) -> ([i32; 3], String) {
-    let (_, chests) = terra.chests([0.0, 0.0], VILLAGE_HALF_M);
+    let (_, chests) = terra.chests(TERRA_VILLAGE_M, 128.0);
     chests
         .into_iter()
         .find(|(_, t)| t == "terra:cottage")

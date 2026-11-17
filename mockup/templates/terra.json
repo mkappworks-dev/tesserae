@@ -3556,9 +3556,9 @@
    "label": "Wheat field",
    "kind": "field",
    "size": [
-    11,
+    15,
     2,
-    7
+    11
    ],
    "ground_layer": 0,
    "foundation": "terra:ashlar",
@@ -3594,22 +3594,104 @@
    ],
    "layers": [
     [
-     "AAAAAAAAAAA",
-     "ABBBBBBBBBA",
-     "ABBBBBBBBBA",
-     "AAAAAAAAAAA",
-     "ABBBBBBBBBA",
-     "ABBBBBBBBBA",
-     "AAAAAAAAAAA"
+     "AAAAAAAAAAAAAAA",
+     "ABBBBBBBBBBBBBA",
+     "ABBBBBBBBBBBBBA",
+     "ABBBBBBBBBBBBBA",
+     "ABBBBBBBBBBBBBA",
+     "AAAAAAAAAAAAAAA",
+     "ABBBBBBBBBBBBBA",
+     "ABBBBBBBBBBBBBA",
+     "ABBBBBBBBBBBBBA",
+     "ABBBBBBBBBBBBBA",
+     "AAAAAAAAAAAAAAA"
     ],
     [
-     "...........",
-     ".CCCCCCCCC.",
-     ".CCCCCCCCC.",
-     "...........",
-     ".CCCCCCCCC.",
-     ".CCCCCCCCC.",
-     "..........."
+     "...............",
+     ".CCCCCCCCCCCCC.",
+     ".CCCCCCCCCCCCC.",
+     ".CCCCCCCCCCCCC.",
+     ".CCCCCCCCCCCCC.",
+     "...............",
+     ".CCCCCCCCCCCCC.",
+     ".CCCCCCCCCCCCC.",
+     ".CCCCCCCCCCCCC.",
+     ".CCCCCCCCCCCCC.",
+     "..............."
+    ]
+   ]
+  },
+  {
+   "name": "terra:ripe_wheat_field",
+   "label": "Ripe wheat field",
+   "kind": "field",
+   "size": [
+    19,
+    2,
+    13
+   ],
+   "ground_layer": 0,
+   "foundation": "terra:ashlar",
+   "level_tolerance_m": null,
+   "spans": false,
+   "palette": [
+    {
+     "symbol": ".",
+     "cell": "keep"
+    },
+    {
+     "symbol": ":",
+     "cell": "air"
+    },
+    {
+     "symbol": "A",
+     "material": "terra:grass",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "B",
+     "material": "terra:dirt",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "C",
+     "material": "crops:wheat_ripe",
+     "shape": "flora:cross",
+     "orientation": 0
+    }
+   ],
+   "layers": [
+    [
+     "AAAAAAAAAAAAAAAAAAA",
+     "ABBBBBBBBBBBBBBBBBA",
+     "ABBBBBBBBBBBBBBBBBA",
+     "ABBBBBBBBBBBBBBBBBA",
+     "ABBBBBBBBBBBBBBBBBA",
+     "ABBBBBBBBBBBBBBBBBA",
+     "AAAAAAAAAAAAAAAAAAA",
+     "ABBBBBBBBBBBBBBBBBA",
+     "ABBBBBBBBBBBBBBBBBA",
+     "ABBBBBBBBBBBBBBBBBA",
+     "ABBBBBBBBBBBBBBBBBA",
+     "ABBBBBBBBBBBBBBBBBA",
+     "AAAAAAAAAAAAAAAAAAA"
+    ],
+    [
+     "...................",
+     ".CCCCCCCCCCCCCCCCC.",
+     ".CCCCCCCCCCCCCCCCC.",
+     ".CCCCCCCCCCCCCCCCC.",
+     ".CCCCCCCCCCCCCCCCC.",
+     ".CCCCCCCCCCCCCCCCC.",
+     "...................",
+     ".CCCCCCCCCCCCCCCCC.",
+     ".CCCCCCCCCCCCCCCCC.",
+     ".CCCCCCCCCCCCCCCCC.",
+     ".CCCCCCCCCCCCCCCCC.",
+     ".CCCCCCCCCCCCCCCCC.",
+     "..................."
     ]
    ]
   },
@@ -3618,9 +3700,9 @@
    "label": "Carrot field",
    "kind": "field",
    "size": [
-    9,
+    13,
     2,
-    7
+    9
    ],
    "ground_layer": 0,
    "foundation": "terra:ashlar",
@@ -3656,22 +3738,26 @@
    ],
    "layers": [
     [
-     "AAAAAAAAA",
-     "ABBBBBBBA",
-     "ABBBBBBBA",
-     "AAAAAAAAA",
-     "ABBBBBBBA",
-     "ABBBBBBBA",
-     "AAAAAAAAA"
+     "AAAAAAAAAAAAA",
+     "ABBBBBBBBBBBA",
+     "ABBBBBBBBBBBA",
+     "ABBBBBBBBBBBA",
+     "AAAAAAAAAAAAA",
+     "ABBBBBBBBBBBA",
+     "ABBBBBBBBBBBA",
+     "ABBBBBBBBBBBA",
+     "AAAAAAAAAAAAA"
     ],
     [
-     ".........",
-     ".CCCCCCC.",
-     ".CCCCCCC.",
-     ".........",
-     ".CCCCCCC.",
-     ".CCCCCCC.",
-     "........."
+     ".............",
+     ".CCCCCCCCCCC.",
+     ".CCCCCCCCCCC.",
+     ".CCCCCCCCCCC.",
+     ".............",
+     ".CCCCCCCCCCC.",
+     ".CCCCCCCCCCC.",
+     ".CCCCCCCCCCC.",
+     "............."
     ]
    ]
   },
@@ -3680,9 +3766,9 @@
    "label": "Potato field",
    "kind": "field",
    "size": [
-    9,
+    13,
     2,
-    7
+    9
    ],
    "ground_layer": 0,
    "foundation": "terra:ashlar",
@@ -3711,6 +3797,12 @@
     },
     {
      "symbol": "C",
+     "material": "crops:potato_young",
+     "shape": "flora:cross",
+     "orientation": 0
+    },
+    {
+     "symbol": "D",
      "material": "crops:potato_sprout",
      "shape": "flora:cross",
      "orientation": 0
@@ -3718,22 +3810,26 @@
    ],
    "layers": [
     [
-     "AAAAAAAAA",
-     "ABBBBBBBA",
-     "ABBBBBBBA",
-     "AAAAAAAAA",
-     "ABBBBBBBA",
-     "ABBBBBBBA",
-     "AAAAAAAAA"
+     "AAAAAAAAAAAAA",
+     "ABBBBBBBBBBBA",
+     "ABBBBBBBBBBBA",
+     "ABBBBBBBBBBBA",
+     "AAAAAAAAAAAAA",
+     "ABBBBBBBBBBBA",
+     "ABBBBBBBBBBBA",
+     "ABBBBBBBBBBBA",
+     "AAAAAAAAAAAAA"
     ],
     [
-     ".........",
-     ".CCCCCCC.",
-     ".CCCCCCC.",
-     ".........",
-     ".CCCCCCC.",
-     ".CCCCCCC.",
-     "........."
+     ".............",
+     ".CCCCCCCCCCC.",
+     ".DDDDDDDDDDD.",
+     ".CCCCCCCCCCC.",
+     ".............",
+     ".CCCCCCCCCCC.",
+     ".DDDDDDDDDDD.",
+     ".CCCCCCCCCCC.",
+     "............."
     ]
    ]
   },
@@ -3742,9 +3838,9 @@
    "label": "Mixed field",
    "kind": "field",
    "size": [
-    11,
+    15,
     2,
-    9
+    11
    ],
    "ground_layer": 0,
    "foundation": "terra:ashlar",
@@ -3792,26 +3888,358 @@
    ],
    "layers": [
     [
-     "AAAAAAAAAAA",
-     "ABBBBBBBBBA",
-     "ABBBBBBBBBA",
-     "ABBBBBBBBBA",
-     "AAAAAAAAAAA",
-     "ABBBBBBBBBA",
-     "ABBBBBBBBBA",
-     "ABBBBBBBBBA",
-     "AAAAAAAAAAA"
+     "AAAAAAAAAAAAAAA",
+     "ABBBBBBBBBBBBBA",
+     "ABBBBBBBBBBBBBA",
+     "ABBBBBBBBBBBBBA",
+     "ABBBBBBBBBBBBBA",
+     "AAAAAAAAAAAAAAA",
+     "ABBBBBBBBBBBBBA",
+     "ABBBBBBBBBBBBBA",
+     "ABBBBBBBBBBBBBA",
+     "ABBBBBBBBBBBBBA",
+     "AAAAAAAAAAAAAAA"
     ],
     [
-     "...........",
-     ".CCCCCCCCC.",
-     ".DDDDDDDDD.",
-     ".EEEEEEEEE.",
-     "...........",
-     ".DDDDDDDDD.",
-     ".EEEEEEEEE.",
-     ".CCCCCCCCC.",
-     "..........."
+     "...............",
+     ".CCCCCCCCCCCCC.",
+     ".DDDDDDDDDDDDD.",
+     ".EEEEEEEEEEEEE.",
+     ".CCCCCCCCCCCCC.",
+     "...............",
+     ".EEEEEEEEEEEEE.",
+     ".CCCCCCCCCCCCC.",
+     ".DDDDDDDDDDDDD.",
+     ".EEEEEEEEEEEEE.",
+     "..............."
+    ]
+   ]
+  },
+  {
+   "name": "terra:berry_field",
+   "label": "Berry field",
+   "kind": "field",
+   "size": [
+    13,
+    2,
+    9
+   ],
+   "ground_layer": 0,
+   "foundation": "terra:ashlar",
+   "level_tolerance_m": null,
+   "spans": false,
+   "palette": [
+    {
+     "symbol": ".",
+     "cell": "keep"
+    },
+    {
+     "symbol": ":",
+     "cell": "air"
+    },
+    {
+     "symbol": "A",
+     "material": "terra:grass",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "B",
+     "material": "terra:dirt",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "C",
+     "material": "crops:berry_ripe",
+     "shape": "crops:berry_ripe",
+     "orientation": 0
+    },
+    {
+     "symbol": "D",
+     "material": "crops:berry_bush",
+     "shape": "crops:berry_young",
+     "orientation": 0
+    }
+   ],
+   "layers": [
+    [
+     "AAAAAAAAAAAAA",
+     "ABBBBBBBBBBBA",
+     "ABBBBBBBBBBBA",
+     "ABBBBBBBBBBBA",
+     "AAAAAAAAAAAAA",
+     "ABBBBBBBBBBBA",
+     "ABBBBBBBBBBBA",
+     "ABBBBBBBBBBBA",
+     "AAAAAAAAAAAAA"
+    ],
+    [
+     ".............",
+     ".CCCCCCCCCCC.",
+     ".DDDDDDDDDDD.",
+     ".CCCCCCCCCCC.",
+     ".............",
+     ".CCCCCCCCCCC.",
+     ".DDDDDDDDDDD.",
+     ".CCCCCCCCCCC.",
+     "............."
+    ]
+   ]
+  },
+  {
+   "name": "terra:watermelon_patch",
+   "label": "Watermelon patch",
+   "kind": "field",
+   "size": [
+    13,
+    2,
+    9
+   ],
+   "ground_layer": 0,
+   "foundation": "terra:ashlar",
+   "level_tolerance_m": null,
+   "spans": false,
+   "palette": [
+    {
+     "symbol": ".",
+     "cell": "keep"
+    },
+    {
+     "symbol": ":",
+     "cell": "air"
+    },
+    {
+     "symbol": "A",
+     "material": "terra:grass",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "B",
+     "material": "terra:dirt",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "C",
+     "material": "crops:watermelon_vine",
+     "shape": "flora:cross",
+     "orientation": 0
+    }
+   ],
+   "layers": [
+    [
+     "AAAAAAAAAAAAA",
+     "ABBBBBBBBBBBA",
+     "ABBBBBBBBBBBA",
+     "ABBBBBBBBBBBA",
+     "AAAAAAAAAAAAA",
+     "ABBBBBBBBBBBA",
+     "ABBBBBBBBBBBA",
+     "ABBBBBBBBBBBA",
+     "AAAAAAAAAAAAA"
+    ],
+    [
+     ".............",
+     ".CCCCCCCCCCC.",
+     ".CCCCCCCCCCC.",
+     ".CCCCCCCCCCC.",
+     ".............",
+     ".CCCCCCCCCCC.",
+     ".CCCCCCCCCCC.",
+     ".CCCCCCCCCCC.",
+     "............."
+    ]
+   ]
+  },
+  {
+   "name": "terra:cane_field",
+   "label": "Sugar cane field",
+   "kind": "field",
+   "size": [
+    13,
+    4,
+    9
+   ],
+   "ground_layer": 0,
+   "foundation": "terra:ashlar",
+   "level_tolerance_m": null,
+   "spans": false,
+   "palette": [
+    {
+     "symbol": ".",
+     "cell": "keep"
+    },
+    {
+     "symbol": ":",
+     "cell": "air"
+    },
+    {
+     "symbol": "A",
+     "material": "terra:grass",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "B",
+     "material": "terra:sand",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "C",
+     "material": "flora:cane",
+     "shape": "flora:cross",
+     "orientation": 0
+    },
+    {
+     "symbol": "D",
+     "material": "terra:water",
+     "shape": "core:cube",
+     "orientation": 0
+    }
+   ],
+   "layers": [
+    [
+     "AAAAAAAAAAAAA",
+     "ABBBBBBBBBBBA",
+     "ABBBBBBBBBBBA",
+     "ABBBBBBBBBBBA",
+     "ADDDDDDDDDDDA",
+     "ABBBBBBBBBBBA",
+     "ABBBBBBBBBBBA",
+     "ABBBBBBBBBBBA",
+     "AAAAAAAAAAAAA"
+    ],
+    [
+     ".............",
+     ".............",
+     ".C.C.C.C.C.C.",
+     ".C.C.C.C.C.C.",
+     ".............",
+     ".C.C.C.C.C.C.",
+     ".C.C.C.C.C.C.",
+     ".............",
+     "............."
+    ],
+    [
+     ".............",
+     ".............",
+     ".C...C.C...C.",
+     ".C...C.C...C.",
+     ".............",
+     ".C...C.C...C.",
+     ".C...C.C...C.",
+     ".............",
+     "............."
+    ],
+    [
+     ".............",
+     ".............",
+     ".....C.....C.",
+     ".....C.....C.",
+     ".............",
+     ".....C.....C.",
+     ".....C.....C.",
+     ".............",
+     "............."
+    ]
+   ]
+  },
+  {
+   "name": "terra:mushroom_shed",
+   "label": "Mushroom shed",
+   "kind": "field",
+   "size": [
+    7,
+    5,
+    6
+   ],
+   "ground_layer": 0,
+   "foundation": "terra:ashlar",
+   "level_tolerance_m": null,
+   "spans": false,
+   "palette": [
+    {
+     "symbol": ".",
+     "cell": "keep"
+    },
+    {
+     "symbol": ":",
+     "cell": "air"
+    },
+    {
+     "symbol": "A",
+     "material": "terra:dirt",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "B",
+     "material": "terra:oak_planks",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "C",
+     "material": "flora:mushroom_red",
+     "shape": "flora:mushroom",
+     "orientation": 0
+    },
+    {
+     "symbol": "D",
+     "material": "flora:mushroom_brown",
+     "shape": "flora:mushroom",
+     "orientation": 0
+    },
+    {
+     "symbol": "E",
+     "material": "terra:door",
+     "shape": "terra:panel",
+     "orientation": 6
+    }
+   ],
+   "layers": [
+    [
+     "AAAAAAA",
+     "AAAAAAA",
+     "AAAAAAA",
+     "AAAAAAA",
+     "AAAAAAA",
+     "AAAAAAA"
+    ],
+    [
+     "BBBBBBB",
+     "BC.D.CB",
+     "B.D.D.B",
+     "BC.D.CB",
+     "B.....B",
+     "BBBEEBB"
+    ],
+    [
+     "BBBBBBB",
+     "B.....B",
+     "B.....B",
+     "B.....B",
+     "B.....B",
+     "BBBEEBB"
+    ],
+    [
+     "BBBBBBB",
+     "B.....B",
+     "B.....B",
+     "B.....B",
+     "B.....B",
+     "BBBEEBB"
+    ],
+    [
+     "BBBBBBB",
+     "BBBBBBB",
+     "BBBBBBB",
+     "BBBBBBB",
+     "BBBBBBB",
+     "BBBBBBB"
     ]
    ]
   },
@@ -3820,9 +4248,9 @@
    "label": "Orchard",
    "kind": "field",
    "size": [
-    11,
+    13,
     2,
-    11
+    13
    ],
    "ground_layer": 0,
    "foundation": "terra:ashlar",
@@ -3852,30 +4280,34 @@
    ],
    "layers": [
     [
-     "AAAAAAAAAAA",
-     "AAAAAAAAAAA",
-     "AAAAAAAAAAA",
-     "AAAAAAAAAAA",
-     "AAAAAAAAAAA",
-     "AAAAAAAAAAA",
-     "AAAAAAAAAAA",
-     "AAAAAAAAAAA",
-     "AAAAAAAAAAA",
-     "AAAAAAAAAAA",
-     "AAAAAAAAAAA"
+     "AAAAAAAAAAAAA",
+     "AAAAAAAAAAAAA",
+     "AAAAAAAAAAAAA",
+     "AAAAAAAAAAAAA",
+     "AAAAAAAAAAAAA",
+     "AAAAAAAAAAAAA",
+     "AAAAAAAAAAAAA",
+     "AAAAAAAAAAAAA",
+     "AAAAAAAAAAAAA",
+     "AAAAAAAAAAAAA",
+     "AAAAAAAAAAAAA",
+     "AAAAAAAAAAAAA",
+     "AAAAAAAAAAAAA"
     ],
     [
-     "...........",
-     ".B..B..B..B",
-     "...........",
-     "...........",
-     ".B..B..B..B",
-     "...........",
-     "...........",
-     ".B..B..B..B",
-     "...........",
-     "...........",
-     ".B..B..B..B"
+     ".............",
+     ".B..B..B..B..",
+     ".............",
+     ".............",
+     ".B..B..B..B..",
+     ".............",
+     ".............",
+     ".B..B..B..B..",
+     ".............",
+     ".............",
+     ".B..B..B..B..",
+     ".............",
+     "............."
     ]
    ]
   },
@@ -3884,9 +4316,9 @@
    "label": "Paddock",
    "kind": "field",
    "size": [
-    12,
+    14,
     2,
-    10
+    12
    ],
    "ground_layer": 0,
    "foundation": "terra:ashlar",
@@ -3916,28 +4348,32 @@
    ],
    "layers": [
     [
-     "AAAAAAAAAAAA",
-     "AAAAAAAAAAAA",
-     "AAAAAAAAAAAA",
-     "AAAAAAAAAAAA",
-     "AAAAAAAAAAAA",
-     "AAAAAAAAAAAA",
-     "AAAAAAAAAAAA",
-     "AAAAAAAAAAAA",
-     "AAAAAAAAAAAA",
-     "AAAAAAAAAAAA"
+     "AAAAAAAAAAAAAA",
+     "AAAAAAAAAAAAAA",
+     "AAAAAAAAAAAAAA",
+     "AAAAAAAAAAAAAA",
+     "AAAAAAAAAAAAAA",
+     "AAAAAAAAAAAAAA",
+     "AAAAAAAAAAAAAA",
+     "AAAAAAAAAAAAAA",
+     "AAAAAAAAAAAAAA",
+     "AAAAAAAAAAAAAA",
+     "AAAAAAAAAAAAAA",
+     "AAAAAAAAAAAAAA"
     ],
     [
-     "BBBBBBBBBBBB",
-     "B..........B",
-     "B..........B",
-     "B..........B",
-     "B..........B",
-     "B..........B",
-     "B..........B",
-     "B..........B",
-     "B..........B",
-     "BBBBB::BBBBB"
+     "BBBBBBBBBBBBBB",
+     "B............B",
+     "B............B",
+     "B............B",
+     "B............B",
+     "B............B",
+     "B............B",
+     "B............B",
+     "B............B",
+     "B............B",
+     "B............B",
+     "BBBBBB::BBBBBB"
     ]
    ]
   },

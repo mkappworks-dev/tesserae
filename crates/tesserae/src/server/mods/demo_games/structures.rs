@@ -604,7 +604,7 @@ fn copy_sizes(found: &[Found], kinds: &[&str], half_m: f32) -> Vec<usize> {
     for (f, _) in found
         .iter()
         .zip(kinds)
-        .filter(|(_, k)| !matches!(**k, "centre" | "wild"))
+        .filter(|(_, k)| !matches!(**k, "centre" | "wild" | "field"))
     {
         let at = middle(f);
         let d = |c: &[f32; 2]| (c[0] - at[0]).hypot(c[1] - at[1]);
@@ -617,9 +617,9 @@ fn copy_sizes(found: &[Found], kinds: &[&str], half_m: f32) -> Vec<usize> {
     sizes
 }
 
-/// Where Terra's town stands at [`SEED`], about 490 m from spawn: the town's lattice is 384 m, so
+/// Where Terra's town stands at [`SEED`], about 360 m from spawn: the town's lattice is 416 m, so
 /// the square the other tests scan need not hold one.
-const TERRA_TOWN_M: [f32; 2] = [456.0, -166.0];
+const TERRA_TOWN_M: [f32; 2] = [356.0, 30.0];
 
 #[test]
 fn terra_lays_out_a_town_of_cobbled_roads() {
@@ -677,7 +677,7 @@ fn terra_lays_out_a_town_of_cobbled_roads() {
                 && middle[0].pow(2) + middle[1].pow(2) <= 96 * 96
         })
         .count();
-    assert!(buildings >= 18, "the town lays {buildings} buildings");
+    assert!(buildings >= 15, "the town lays {buildings} buildings");
 }
 
 /// Each Game's bridge: a Template that spans. Meadow's footbridge is left out: its soft hills

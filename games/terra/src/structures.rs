@@ -12,15 +12,16 @@ const HAMLET_RADIUS_M: (f32, f32) = (24.0, 32.0);
 const VILLAGE_RADIUS_M: (f32, f32) = (40.0, 64.0);
 /// Wide enough that the largest copies grow a second ring of streets.
 const TOWN_RADIUS_M: (f32, f32) = (96.0, 150.0);
-/// Room round a Settlement's disc for the paths that lead into it and the fields beside them.
-const MARGIN_M: f32 = 28.0;
-const TOWN_MARGIN_M: f32 = 32.0;
+/// Room round a Settlement's disc for the paths that lead into it and two rows of fields beside
+/// them.
+const MARGIN_M: f32 = 44.0;
+const TOWN_MARGIN_M: f32 = 52.0;
 /// Each lattice is over twice its kind's largest radius and margin: few cells pass the ground
 /// rules, so a World still shows a village every few hundred metres, hamlets between them and a
 /// town rarely.
-const HAMLET_SPACING_M: f32 = 128.0;
-const VILLAGE_SPACING_M: f32 = 192.0;
-const TOWN_SPACING_M: f32 = 384.0;
+const HAMLET_SPACING_M: f32 = 160.0;
+const VILLAGE_SPACING_M: f32 = 224.0;
+const TOWN_SPACING_M: f32 = 416.0;
 /// Thins the lattices' draws, so Settlements stand apart rather than in every cell.
 const HAMLET_CHANCE: f32 = 0.8;
 const VILLAGE_CHANCE: f32 = 0.7;
@@ -214,13 +215,14 @@ fn kind(
     }
 }
 
-/// Fields, orchards and paddocks beside the approach paths, from `count.0` to `count.1` of them.
-fn farms(count: (u8, u8), templates: Vec<SettlementPlot>) -> SettlementOutskirts {
+/// Fields, orchards, paddocks and sheds beside the approach paths of `chance` of a kind's copies,
+/// from `count.0` to `count.1` of them; a copy without room for `count.0` has none.
+fn farms(chance: f32, count: (u8, u8), templates: Vec<SettlementPlot>) -> SettlementOutskirts {
     SettlementOutskirts {
         templates,
         count_min: count.0,
         count_max: count.1,
-        chance: None,
+        chance: Some(chance),
     }
 }
 
@@ -248,12 +250,18 @@ pub fn settlements() -> Vec<SettlementDef> {
             (
                 MARGIN_M,
                 farms(
-                    (4, 8),
+                    0.65,
+                    (6, 10),
                     vec![
-                        plot("wheat_field", 3.0, 0, 4),
-                        plot("mixed_field", 2.0, 0, 2),
+                        plot("wheat_field", 2.0, 0, 3),
+                        plot("ripe_wheat_field", 1.5, 0, 2),
+                        plot("mixed_field", 1.5, 0, 2),
                         plot("carrot_field", 1.0, 0, 2),
                         plot("potato_field", 1.0, 0, 2),
+                        plot("berry_field", 1.0, 0, 2),
+                        plot("watermelon_patch", 1.0, 0, 1),
+                        plot("cane_field", 1.0, 0, 1),
+                        plot("mushroom_shed", 0.5, 0, 1),
                         plot("orchard", 1.0, 0, 1),
                         plot("paddock", 1.0, 0, 2),
                     ],
@@ -283,12 +291,18 @@ pub fn settlements() -> Vec<SettlementDef> {
             (
                 TOWN_MARGIN_M,
                 farms(
-                    (8, 14),
+                    0.85,
+                    (10, 16),
                     vec![
-                        plot("wheat_field", 3.0, 1, 6),
-                        plot("mixed_field", 2.0, 0, 4),
+                        plot("wheat_field", 2.5, 0, 5),
+                        plot("ripe_wheat_field", 2.0, 0, 4),
+                        plot("mixed_field", 1.5, 0, 3),
                         plot("carrot_field", 1.0, 0, 3),
                         plot("potato_field", 1.0, 0, 3),
+                        plot("berry_field", 1.0, 0, 2),
+                        plot("watermelon_patch", 1.0, 0, 2),
+                        plot("cane_field", 1.0, 0, 2),
+                        plot("mushroom_shed", 0.5, 0, 2),
                         plot("orchard", 1.5, 0, 3),
                         plot("paddock", 1.0, 0, 3),
                     ],
@@ -312,10 +326,14 @@ pub fn settlements() -> Vec<SettlementDef> {
             (
                 MARGIN_M,
                 farms(
-                    (1, 3),
+                    0.4,
+                    (4, 6),
                     vec![
-                        plot("carrot_field", 1.0, 0, 1),
-                        plot("potato_field", 1.0, 0, 1),
+                        plot("carrot_field", 1.0, 0, 2),
+                        plot("potato_field", 1.0, 0, 2),
+                        plot("berry_field", 1.0, 0, 2),
+                        plot("cane_field", 0.5, 0, 1),
+                        plot("mushroom_shed", 0.5, 0, 1),
                         plot("paddock", 1.0, 0, 1),
                     ],
                 ),

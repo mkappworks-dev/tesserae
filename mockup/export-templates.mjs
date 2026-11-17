@@ -74,7 +74,8 @@ function exportTemplate(t) {
   for (const c of cells) {
     let symbol = AIR;
     if (c.k !== "air") {
-      const shape = SHAPES[c.shape];
+      /* A Mod's own Shape, such as a crop Stage's, is named in full. */
+      const shape = c.shape?.includes(":") ? c.shape : SHAPES[c.shape];
       if (!shape) throw new Error(`${t.id}: no Shape for \`${c.shape}\``);
       const voxel = {
           material: materialOf(t, c),
