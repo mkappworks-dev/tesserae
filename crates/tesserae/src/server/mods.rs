@@ -646,6 +646,7 @@ pub(crate) async fn declare_all(
     let plants = tesserae_mods::DeclaredPlants::take(&mut behaviours);
     let templates = tesserae_mods::DeclaredTemplates::take(&mut behaviours);
     let settlements = tesserae_mods::DeclaredSettlements::take(&mut behaviours);
+    let underground = tesserae_mods::DeclaredUnderground::take(&mut behaviours);
     let (ground, lake) =
         resolve(behaviours, &mut loaded.tables, &loaded.registry).map_err(|e| e.to_string())?;
     // Grown Materials decide which implicit Items exist, so Plants resolve
@@ -683,11 +684,16 @@ pub(crate) async fn declare_all(
             &loaded.tables.uses.station_tags().collect::<Vec<_>>(),
         )
         .map_err(|e| e.to_string())?;
+    let (lava, cave_biomes) = underground
+        .resolve(&loaded.registry, &loaded.tables)
+        .map_err(|e| e.to_string())?;
     if let Some(world) = &mut loaded.world {
         world.water = lake;
         world.ground = ground;
         world.biomes = biomes;
         world.ores = ores;
+        world.lava = lava;
+        world.cave_biomes = cave_biomes;
     }
     let obtainable = super::obtainable::obtainable(&loaded, &loaded.every_item(world.voxel_size));
     let (used_templates, used_settlements) = stood_by_biomes(&loaded);
@@ -1766,6 +1772,64 @@ layers = [["rp"]]
             &hut_game(&format!("{from_rock}{plot}")),
         );
         assert_eq!(refusals(&s), (Ok(()), Ok(())));
+    }
+
+    #[test]
+    fn a_games_lava_and_cave_biomes_resolve_and_a_bad_one_is_refused_naming_it() {
+        let magma = "[[materials]]\nname = \"magma\"\nemission = 15\ndimming = 2\n\
+                     occlusion = \"same-material\"\nrender = \"blend\"\nsolid = false\n\
+                     [[fluids]]\nmaterial = \"plain:magma\"\nreach-m = 3.0\n\
+                     sideways-m-per-s = 1.0\ndownward-m-per-s = 2.0\n\
+                     recession-m-per-s = 1.0\nreset-drop-m = 0.5\n\
+                     waterlogs = false\nextinguishes = false\n";
+        let cave = |name: &str| {
+            format!(
+                "[[world.cave-biomes]]\nname = \"{name}\"\ntemperature = 0.5\nhumidity = 0.5\n\
+                 rock = \"plain:rock\"\nsky-fog = {{ sky = [1, 2, 3], fog = [4, 5, 6] }}\n\
+                 features = [{{ material = \"plain:rock\", spacing-m = 4.0 }}]\n"
+            )
+        };
+        let game = |lava: &str, caves: &str| {
+            format!("{DATA_GAME}{magma}[world]\nlava = \"{lava}\"\n{caves}")
+        };
+        let s = Scratch::new();
+        data(&s, "plain", true, "", &game("plain:magma", &cave("glow")));
+        let loaded = s.load(TrustMode::All).unwrap();
+        let world = loaded.world.unwrap();
+        let id = |name| loaded.registry.id_of(Kind::Material, name).unwrap() as MaterialId;
+        assert_eq!(world.lava, Some(id("plain:magma")));
+        let [glow] = world.cave_biomes.as_slice() else {
+            panic!("one cave Biome");
+        };
+        assert_eq!(glow.name.as_str(), "plain:glow");
+        assert_eq!(
+            (glow.rock, glow.features()[0].spacing_m),
+            (Some(id("plain:rock")), 4.0)
+        );
+
+        let seventeen: String = (0..17).map(|i| cave(&format!("cave{i}"))).collect();
+        for (lava, caves, want) in [
+            (
+                "plain:rock",
+                cave("glow"),
+                "`plain:rock`: lava has no fluid row",
+            ),
+            (
+                "plain:magma",
+                seventeen,
+                "`cave16`: cave_biomes holds at most 16",
+            ),
+            (
+                "plain:magma",
+                cave("glow").replace("spacing-m = 4.0", "spacing-m = 0.5"),
+                "`glow`: cave_biomes.features.spacing_m",
+            ),
+        ] {
+            let s = Scratch::new();
+            data(&s, "plain", true, "", &game(lava, &caves));
+            let err = s.load(TrustMode::All).map(|_| ()).unwrap_err();
+            assert!(err.contains(want), "{err}");
+        }
     }
 
     #[test]

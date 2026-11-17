@@ -224,6 +224,46 @@ interface content {
         /// Only the Game may set it: a `climate` from a Mod that is not the Game
         /// is a load error, like the rest of `world` beyond the character.
         climate: option<climate-params>,
+        /// The fluid Generator version 3's deepest caverns hold, a fluid of any
+        /// loaded Mod, `<mod id>:<name>`. `none` leaves them open. Only the Game
+        /// may set it.
+        lava: option<string>,
+        /// Regions of Generator version 3's underground, each with its own
+        /// rock, cavern floor, features and fog, at most 16. `none` leaves the
+        /// underground as the surface Biomes lay it. Only the Game may set it.
+        cave-biomes: option<list<cave-biome-def>>,
+    }
+
+    /// A region of the underground, chosen where the cave Climate (two 3D
+    /// fields) lies nearest its point, from 12 m under the surface down.
+    record cave-biome-def {
+        /// Unique among the Game's cave Biomes; the World names it
+        /// `<mod id>:<name>`.
+        name: string,
+        /// A point in the unit square of the cave Climate.
+        temperature: f32,
+        humidity: f32,
+        /// Metres above Sea level, negative under it; `none` matches every
+        /// height.
+        altitude: option<selector-range>,
+        /// Solid Materials, `<mod id>:<name>`: the rock that replaces the
+        /// ground's and its strata, and the Voxel under a cavern's open floor.
+        /// `none` keeps the ground's.
+        rock: option<string>,
+        floor: option<string>,
+        /// The air in its caverns; `none` keeps the surface Biome's.
+        sky-fog: option<sky-fog>,
+        /// At most 8.
+        features: list<cave-feature>,
+    }
+
+    /// A solid Material standing on a cave Biome's dry floor, about one in
+    /// every `spacing-m` by `spacing-m` metres of it, 1 to 64.
+    record cave-feature {
+        material: string,
+        /// `none` is a cube.
+        shape: option<string>,
+        spacing-m: f32,
     }
 
     /// The size of the Climate regions, in metres: the horizontal period of the

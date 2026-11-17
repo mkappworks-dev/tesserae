@@ -554,6 +554,7 @@ fn caverns_under_the_water_table_are_underground_lakes_and_the_rest_are_air() {
             }
             // From the band's floor up to the caverns' roof, deep under the ground.
             let (cx, cz) = (x.div_euclid(32), z.div_euclid(32));
+            let table_m = g.water_table_m(x as f32, z as f32);
             for y in -70i32..h - 22 {
                 let v = g.chunk(cx, y.div_euclid(32), cz).get(
                     x.rem_euclid(32) as usize,
@@ -562,9 +563,9 @@ fn caverns_under_the_water_table_are_underground_lakes_and_the_rest_are_air() {
                 );
                 if v.material() == water {
                     lake += 1;
-                    wet_above += (y >= 22) as u32;
+                    wet_above += (y as f32 >= table_m) as u32;
                 } else if v.is_air() {
-                    dry_hollow += (y >= 22) as u32;
+                    dry_hollow += (y as f32 >= table_m) as u32;
                 }
             }
         }

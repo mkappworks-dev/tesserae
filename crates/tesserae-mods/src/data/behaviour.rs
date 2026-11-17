@@ -396,7 +396,7 @@ struct Clump {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
-struct SkyFog {
+pub(super) struct SkyFog {
     #[serde(deserialize_with = "rgb")]
     sky: [u8; 3],
     #[serde(deserialize_with = "rgb")]

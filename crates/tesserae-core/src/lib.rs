@@ -42,6 +42,7 @@ pub mod tables;
 pub mod template;
 pub mod terrain;
 pub mod testgen;
+pub mod underground;
 pub mod usable;
 pub mod visibility;
 pub mod voxel;
@@ -87,6 +88,10 @@ pub use shape::{
 };
 pub use survival::SurvivalRules;
 pub use tables::{PlaceFault, Tables};
+pub use underground::{
+    CaveBiome, CaveBiomeTable, CaveFeature, MAX_CAVE_BIOMES, MAX_CAVE_FEATURE_SPACING_M,
+    MAX_CAVE_FEATURES,
+};
 pub use usable::{
     Across, CONTAINER_SLOTS, DOOR_HEIGHT_M, DOOR_HEIGHTS_M, DOOR_WIDTH_M, DOOR_WIDTHS_M, Door,
     MAX_CONTAINER_SLOTS, Rise, UseError, VoxelUse, VoxelUses, door_faces, facing, placed_in,

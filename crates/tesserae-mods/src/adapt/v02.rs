@@ -134,6 +134,8 @@ fn world(p: old::WorldParams, log: &LogHandle) -> content::WorldParams {
         ground: None,
         water: None,
         climate: None,
+        lava: None,
+        cave_biomes: None,
     }
 }
 

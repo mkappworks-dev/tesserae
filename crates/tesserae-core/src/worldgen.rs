@@ -39,6 +39,10 @@ use crate::shape::{MAX_SHAPED_PER_CHUNK, Orientation, SHAPE_SLAB, SHAPE_STAIR};
 use crate::tables::Tables;
 use crate::template::Template;
 use crate::terrain::{CAVERN_MIN_DEPTH_M, Caverns, LANDFORMS_SINCE, LandformParams, Terrain};
+use crate::underground::{
+    AQUIFER_WALL_M, CAVE_BIOME_MIN_DEPTH_M, CaveBiomeTable, LAVA_DEPTH_M, LAVA_SEAL_M,
+    SPRING_SPACING_M, aquifer_cell, aquifer_rise_m, cave_biome_at,
+};
 use crate::voxel::SHAPE_FULL_CUBE;
 use crate::voxel::{MaterialId, Voxel};
 
@@ -78,6 +82,10 @@ pub struct WorldgenParams {
     pub generator: u32,
     /// Read by version 3 only.
     pub landforms: LandformParams,
+    /// The fluid version 3's deepest caverns hold; `None` leaves them open.
+    pub lava: Option<MaterialId>,
+    /// Read by version 3 only; empty leaves the underground as the surface Biomes lay it.
+    pub cave_biomes: CaveBiomeTable,
 }
 
 /// A fluid filling the open air above the ground up to one height: the World's
@@ -179,6 +187,8 @@ impl Default for WorldgenParams {
             ores: OreTable::default(),
             generator: crate::save::GENERATOR_VERSION,
             landforms: LandformParams::default(),
+            lava: None,
+            cave_biomes: CaveBiomeTable::default(),
         }
     }
 }
@@ -690,6 +700,8 @@ pub struct Worldgen {
     biome_grounds: Option<BiomeGrounds>,
     /// Whether any Biome lays strata, which version 3 alone reads.
     strata: bool,
+    /// Whether version 3 has cave Biomes to choose.
+    underground_biomes: bool,
     /// `None` without ores, and under a Generator version from before them.
     ores: Option<OreField>,
     cave_tuning: Option<CaveTuning>,
@@ -712,6 +724,8 @@ const WATER_TABLE_BELOW_SEA_M: f32 = 2.0;
 const STRATA_WAVE_M: f32 = 3.0;
 const STRATA_WAVE_SIZE_M: f32 = 48.0;
 const STRATA_SALT: u32 = 0x5e7a_7a00;
+const SALT_SPRING: u32 = 0x5971_0000;
+const SALT_CAVE_FEATURE: u32 = 0xcafe_0000;
 
 /// How far down a column's strata are shifted at `(x_m, z_m)`, from 0 to [`STRATA_WAVE_M`]: one
 /// field in metres, so every Voxel size and Chunk lays the same bedding.
@@ -995,6 +1009,8 @@ impl Worldgen {
                     .strata()
                     .iter()
                     .any(|s| !s.as_slice().is_empty()),
+            underground_biomes: params.generator >= LANDFORMS_SINCE
+                && !params.cave_biomes.is_empty(),
             ores: OreField::new(folded, &params.ores).filter(|_| params.generator >= BIOMES_SINCE),
             cave_tuning: CaveTuning::new(&params),
             plant_rise_m: scatter
@@ -1697,7 +1713,7 @@ impl Worldgen {
             .unwrap_or_default();
 
         let ores = self.ores_reaching(floor_m, ceiling_m);
-        let table_m = self.params.sea_level_m - WATER_TABLE_BELOW_SEA_M;
+        let mut cave_biomes: HashMap<[i32; 3], Option<u8>> = HashMap::new();
         let mut chunk = ChunkBuilder::new();
         let mut cave_cache = Default::default();
         for z in 0..CHUNK_SIZE {
@@ -1724,6 +1740,7 @@ impl Worldgen {
                 );
                 let mut sealed_m = None;
                 let mut wave_m = None;
+                let table_m = self.water_table_m(x_m, z_m);
                 // The density never reaches down to water here or beside, so it opens no hollow
                 // that water would stand or pour into.
                 let amp_m = stack.as_ref().map_or(0.0, |s| {
@@ -1772,9 +1789,11 @@ impl Worldgen {
                     }
                     // A tunnel or shaft never opens a flooded cavern below the water table.
                     let walled = || {
-                        self.water.is_some()
-                            && y_m < table_m
-                            && self.caverns.is_some_and(|c| c.walls_in(x_m, y_m, z_m))
+                        let flooded = (self.water.is_some() && y_m < table_m)
+                            || self
+                                .lava_m()
+                                .is_some_and(|lava_m| y_m < lava_m + LAVA_SEAL_M);
+                        flooded && self.caverns.is_some_and(|c| c.walls_in(x_m, y_m, z_m))
                     };
                     // A cave carves through the Grass cap like anything else,
                     // which is what a mouth is.
@@ -1814,16 +1833,17 @@ impl Worldgen {
                     if let (Some(caverns), Some(blocks)) = (&self.caverns, &cavern_blocks)
                         && blocks[block_of(x, y, z)]
                         && base_m >= CAVERN_MIN_DEPTH_M
-                        && caverns.carves(x_m, y_m, z_m)
+                        && self.cavern_open(caverns, [x_m, y_m, z_m])
                         && y_m
                             >= *sealed_m
                                 .get_or_insert_with(|| self.sealed_below_m(x_m, z_m, surface_m))
                     {
-                        // Under the water table a cavern is an underground lake.
-                        if let Some(water) = self.water
-                            && y_m < table_m
+                        if let Some(fill) =
+                            self.cavern_fill(caverns, [x_m, y_m, z_m], table_m, || {
+                                self.cave_biome_cached(&mut cave_biomes, [x_m, y_m, z_m], base_m)
+                            })
                         {
-                            chunk.set(x, y, z, Voxel::cube(water.material));
+                            chunk.set(x, y, z, fill);
                         }
                         continue;
                     }
@@ -1836,9 +1856,27 @@ impl Worldgen {
                         ground.surface
                     } else if below_m < self.params.soil_depth_m {
                         ground.soil
+                    } else if let Some(water) = self.water
+                        && self.spring_at([x_m, y_m, z_m], base_m, table_m)
+                    {
+                        water.material
                     } else {
                         ores.and_then(|(field, mask)| {
                             field.at(mask, [x_m, y_m, z_m], below_m, &biome)
+                        })
+                        .or_else(|| {
+                            let at = [x_m, y_m, z_m];
+                            let cave = self.cave_biome_cached(&mut cave_biomes, at, base_m)?;
+                            let cave = &self.params.cave_biomes.as_slice()[usize::from(cave)];
+                            cave.floor
+                                .filter(|_| {
+                                    self.caverns.as_ref().is_some_and(|c| {
+                                        let above = [x_m, y_m + self.voxel_size, z_m];
+                                        base_m - self.voxel_size >= CAVERN_MIN_DEPTH_M
+                                            && self.cavern_open(c, above)
+                                    })
+                                })
+                                .or(cave.rock)
                         })
                         .or_else(|| {
                             let strata = self.strata.then(&biome)??;
@@ -1892,6 +1930,209 @@ impl Worldgen {
 
     /// Each column's own rock where Biomes disagree: the one case that must ask all 1024 columns
     /// for their Biome.
+    /// The top of the lava version 3's deepest caverns hold, with a World lava.
+    fn lava_m(&self) -> Option<f32> {
+        let caverns = self.caverns.as_ref()?;
+        self.params.lava.map(|_| caverns.floor_m + LAVA_DEPTH_M)
+    }
+
+    /// The water table under `(x_m, z_m)`: the World's a little under Sea level, raised across
+    /// a perched aquifer's whole region so its lakes stand level.
+    pub fn water_table_m(&self, x_m: f32, z_m: f32) -> f32 {
+        let table_m = self.params.sea_level_m - WATER_TABLE_BELOW_SEA_M;
+        if self.caverns.is_none() || self.water.is_none() {
+            return table_m;
+        }
+        table_m + aquifer_rise_m(self.seed, aquifer_cell([x_m, z_m]))
+    }
+
+    /// Whether a cavern is open at a point: carved, and not in the rock kept over the lava or
+    /// along an aquifer's border.
+    fn cavern_open(&self, caverns: &Caverns, [x_m, y_m, z_m]: [f32; 3]) -> bool {
+        if !caverns.carves(x_m, y_m, z_m) {
+            return false;
+        }
+        if let Some(lava_m) = self.lava_m()
+            && (lava_m..lava_m + LAVA_SEAL_M).contains(&y_m)
+        {
+            return false;
+        }
+        !self.aquifer_walled([x_m, y_m, z_m])
+    }
+
+    /// Whether a point lies in the wall kept along an aquifer region's border, below the higher
+    /// of the two tables either side where one is raised.
+    fn aquifer_walled(&self, [x_m, y_m, z_m]: [f32; 3]) -> bool {
+        if self.water.is_none() {
+            return false;
+        }
+        let cell = aquifer_cell([x_m, z_m]);
+        let at = [x_m, z_m];
+        let mut highest_m = 0.0f32;
+        let mut near = false;
+        for axis in 0..2 {
+            let within = at[axis] - cell[axis] as f32 * crate::underground::AQUIFER_CELL_M;
+            let step = if within < AQUIFER_WALL_M {
+                -1
+            } else if within > crate::underground::AQUIFER_CELL_M - AQUIFER_WALL_M {
+                1
+            } else {
+                continue;
+            };
+            let mut other = cell;
+            other[axis] += step;
+            near = true;
+            highest_m = highest_m.max(aquifer_rise_m(self.seed, other));
+        }
+        if !near {
+            return false;
+        }
+        highest_m = highest_m.max(aquifer_rise_m(self.seed, cell));
+        highest_m > 0.0 && y_m < self.params.sea_level_m - WATER_TABLE_BELOW_SEA_M + highest_m
+    }
+
+    /// What fills an open cavern Voxel: lava near the band's floor, water under the table, a cave
+    /// Biome's feature on a dry floor, or `None`, air.
+    fn cavern_fill(
+        &self,
+        caverns: &Caverns,
+        [x_m, y_m, z_m]: [f32; 3],
+        table_m: f32,
+        cave: impl FnOnce() -> Option<u8>,
+    ) -> Option<Voxel> {
+        if let (Some(lava), Some(lava_m)) = (self.params.lava, self.lava_m())
+            && y_m < lava_m
+        {
+            return Some(Voxel::cube(lava));
+        }
+        let water = self.water?;
+        if y_m < table_m {
+            return Some(Voxel::cube(water.material));
+        }
+        // Whole metres alone, so a coarser Voxel size stands the same few.
+        let whole = |m: f32| m == m.floor();
+        if !(whole(x_m) && whole(z_m) && whole(y_m)) {
+            return None;
+        }
+        let draw = |salt: u32, spacing_m: f32| {
+            let seed = self.seed ^ salt ^ (y_m as i32 as u32).wrapping_mul(0x9e37_79b1);
+            crate::noise::cell_hash(x_m as i32, z_m as i32, seed)[0] < 1.0 / (spacing_m * spacing_m)
+        };
+        let cave = &self.params.cave_biomes.as_slice()[usize::from(cave()?)];
+        if self.hollow_at(caverns, [x_m, y_m - self.voxel_size, z_m]) {
+            return None;
+        }
+        cave.features()
+            .iter()
+            .enumerate()
+            .find(|&(i, f)| draw(SALT_CAVE_FEATURE + i as u32, f.spacing_m))
+            .map(|(_, f)| Voxel::new(f.material, f.shape, 0))
+    }
+
+    /// Whether a floor Voxel of a perched aquifer's dry cavern wells up as a spring: a pool one
+    /// Voxel deep, rock below and on every side, so the water stands rather than pours.
+    fn spring_at(&self, [x_m, y_m, z_m]: [f32; 3], base_m: f32, table_m: f32) -> bool {
+        let Some(caverns) = &self.caverns else {
+            return false;
+        };
+        let whole = |m: f32| m == m.floor();
+        if self.water.is_none()
+            || table_m <= self.params.sea_level_m - WATER_TABLE_BELOW_SEA_M
+            || y_m < table_m
+            || base_m - self.voxel_size < CAVERN_MIN_DEPTH_M
+            || !(whole(x_m) && whole(z_m))
+        {
+            return false;
+        }
+        let seed = self.seed ^ SALT_SPRING ^ (y_m as i32 as u32).wrapping_mul(0x9e37_79b1);
+        let chance = 1.0 / (SPRING_SPACING_M * SPRING_SPACING_M);
+        if crate::noise::cell_hash(x_m as i32, z_m as i32, seed)[0] >= chance {
+            return false;
+        }
+        let v = self.voxel_size;
+        let open = |[dx, dy, dz]: [f32; 3]| self.hollow_at(caverns, [x_m + dx, y_m + dy, z_m + dz]);
+        open([0.0, v, 0.0])
+            && ![
+                [0.0, -v, 0.0],
+                [v, 0.0, 0.0],
+                [-v, 0.0, 0.0],
+                [0.0, 0.0, v],
+                [0.0, 0.0, -v],
+            ]
+            .into_iter()
+            .any(open)
+    }
+
+    /// Whether a cavern or a tunnel opens a point, as far as a spring or a cave feature beside it
+    /// needs to know.
+    fn hollow_at(&self, caverns: &Caverns, [x_m, y_m, z_m]: [f32; 3]) -> bool {
+        self.cavern_open(caverns, [x_m, y_m, z_m])
+            || self
+                .caves
+                .as_ref()
+                .is_some_and(|c| c.carves(x_m, y_m, z_m, self.cave_scale_at(x_m, z_m)))
+    }
+
+    /// The cave Biome of a Voxel `base_m` under the surface, cached by lattice cell for the Chunk.
+    fn cave_biome_cached(
+        &self,
+        cache: &mut HashMap<[i32; 3], Option<u8>>,
+        at: [f32; 3],
+        base_m: f32,
+    ) -> Option<u8> {
+        if !self.underground_biomes || base_m < CAVE_BIOME_MIN_DEPTH_M {
+            return None;
+        }
+        let cell = at.map(|m| (m / crate::underground::CAVE_CELL_M).floor() as i32);
+        *cache.entry(cell).or_insert_with(|| {
+            cave_biome_at(
+                &self.params.cave_biomes,
+                self.seed,
+                self.params.sea_level_m,
+                at,
+            )
+        })
+    }
+
+    /// The fog of the cave Biome round a point at least [`CAVE_BIOME_MIN_DEPTH_M`] under the
+    /// surface, where one has fog; `None` leaves the surface's air.
+    pub fn cave_fog_at(&self, x_m: f32, y_m: f32, z_m: f32) -> Option<SkyFogBlend> {
+        if !self.underground_biomes
+            || self.surface_height_m(x_m, z_m) - y_m < CAVE_BIOME_MIN_DEPTH_M
+        {
+            return None;
+        }
+        let cave = cave_biome_at(
+            &self.params.cave_biomes,
+            self.seed,
+            self.params.sea_level_m,
+            [x_m, y_m, z_m],
+        )?;
+        self.params.cave_biomes.as_slice()[usize::from(cave)]
+            .fog
+            .map(|f| f.blend())
+    }
+
+    /// The name of the cave Biome round a point, as [`Self::cave_fog_at`] finds it.
+    pub fn cave_biome_name_at(&self, x_m: f32, y_m: f32, z_m: f32) -> Option<&str> {
+        if !self.underground_biomes
+            || self.surface_height_m(x_m, z_m) - y_m < CAVE_BIOME_MIN_DEPTH_M
+        {
+            return None;
+        }
+        let cave = cave_biome_at(
+            &self.params.cave_biomes,
+            self.seed,
+            self.params.sea_level_m,
+            [x_m, y_m, z_m],
+        )?;
+        Some(
+            self.params.cave_biomes.as_slice()[usize::from(cave)]
+                .name
+                .as_str(),
+        )
+    }
+
     /// How far under the lowest surface every Voxel is the ground's rock: past the soil and the
     /// deepest stratum's undulating bottom.
     fn solid_below_m(&self) -> f32 {

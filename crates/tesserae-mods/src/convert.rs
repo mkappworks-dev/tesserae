@@ -183,6 +183,8 @@ pub(crate) fn engine_world_params() -> content::WorldParams {
         ground: None,
         water: None,
         climate: None,
+        lava: None,
+        cave_biomes: None,
     }
 }
 

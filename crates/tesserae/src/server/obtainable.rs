@@ -49,7 +49,13 @@ pub(super) fn obtainable(loaded: &LoadedMods, items: &Items) -> HashSet<Material
                     .strata()
                     .iter()
                     .flat_map(|s| s.as_slice().iter().map(|l| l.material)),
-            );
+            )
+            .chain(world.cave_biomes.as_slice().iter().flat_map(|c| {
+                c.rock
+                    .into_iter()
+                    .chain(c.floor)
+                    .chain(c.features().iter().map(|f| f.material))
+            }));
         for material in laid {
             reach.lay(material);
         }

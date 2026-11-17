@@ -705,6 +705,50 @@ fn version_3_strata_are_saved_by_name_and_older_worlds_save_none() {
 }
 
 #[test]
+fn version_3_lava_and_cave_biomes_are_saved_by_name_and_older_worlds_save_none() {
+    let cave = crate::CaveBiome::new(
+        crate::BiomeName::new("terra:glow").unwrap(),
+        (0.3, 0.7),
+        Some([-80.0, -10.0]),
+        Some(8),
+        None,
+        Some(crate::SkyFog {
+            sky: [1, 2, 3],
+            fog: [4, 5, 6],
+        }),
+        &[crate::CaveFeature {
+            material: 8,
+            shape: 4,
+            spacing_m: 5.0,
+        }],
+    )
+    .unwrap();
+    let mut params = biome_params(3);
+    params.lava = Some(9);
+    params.cave_biomes = crate::CaveBiomeTable::new(&[cave]).unwrap();
+    let saved = Generation::capture(params, &[], &[], &mapping(8, 9, 4)).unwrap();
+    let json = serde_json::to_value(&saved).unwrap();
+    assert_eq!(json["lava"], "terra:water");
+    assert_eq!(
+        json["cave_biomes"][0]["features"][0]["shape"],
+        "terra:shape"
+    );
+    let restored = saved.restore(&mapping(8, 9, 4), 3).unwrap();
+    assert_eq!(restored.lava, Some(9));
+    assert_eq!(restored.cave_biomes.as_slice(), [cave]);
+
+    let mut older = biome_params(2);
+    older.lava = Some(9);
+    older.cave_biomes = crate::CaveBiomeTable::new(&[cave]).unwrap();
+    let saved = Generation::capture(older, &[], &[], &mapping(8, 9, 4)).unwrap();
+    let json = serde_json::to_string(&saved).unwrap();
+    assert!(
+        !json.contains("lava") && !json.contains("cave_biomes"),
+        "{json}"
+    );
+}
+
+#[test]
 fn a_biomes_ground_is_saved_by_name_and_restored_through_the_mapping() {
     let mut params = biome_params(2);
     let table = params.biomes.as_slice().to_vec();

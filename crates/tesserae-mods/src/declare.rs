@@ -175,6 +175,8 @@ pub struct Behaviour {
     pub(crate) material_tags: Vec<(String, Vec<String>)>,
     lake: Option<content::WaterParams>,
     ground: Option<content::GroundParams>,
+    pub(crate) lava: Option<String>,
+    pub(crate) cave_biomes: Vec<content::CaveBiomeDef>,
 }
 
 /// The first `world` field a Mod set besides `character`: anything but the engine's own terrain
@@ -365,6 +367,12 @@ pub fn apply(
     }
     let map = declaration.world.as_ref().and_then(|p| p.map_policy);
     let ground = declaration.world.as_ref().and_then(|p| p.ground.clone());
+    let lava = declaration.world.as_ref().and_then(|p| p.lava.clone());
+    let cave_biomes = declaration
+        .world
+        .as_ref()
+        .and_then(|p| p.cave_biomes.clone())
+        .unwrap_or_default();
     let (world, lake) = declaration.world.map(world_params).unzip();
     let lake = lake.flatten();
     if let Some(params) = world {
@@ -526,6 +534,8 @@ pub fn apply(
             material_tags,
             lake,
             ground,
+            lava,
+            cave_biomes,
         },
     })
 }

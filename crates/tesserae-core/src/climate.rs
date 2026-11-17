@@ -391,7 +391,7 @@ pub struct BiomeName {
 }
 
 impl BiomeName {
-    const UNUSED: BiomeName = BiomeName {
+    pub(crate) const UNUSED: BiomeName = BiomeName {
         len: 0,
         bytes: [0; MAX_BIOME_NAME_BYTES],
     };

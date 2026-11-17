@@ -195,6 +195,8 @@ fn component() -> Declaration {
                 airborne: motion(10.0, 0.0, -20.0),
                 crouch: motion(20.0, 1.0, 0.0),
             }),
+            lava: None,
+            cave_biomes: None,
             sea_level_m: 20.0,
             relief_m: 12.0,
             feature_size_m: 48.0,

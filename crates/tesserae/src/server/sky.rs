@@ -33,7 +33,10 @@ fn publish(
         return;
     };
     let eye = player.eye();
-    let Some(now) = generator.sky_fog_at(eye.x, eye.z) else {
+    let Some(now) = generator
+        .cave_fog_at(eye.x, eye.y, eye.z)
+        .or_else(|| generator.sky_fog_at(eye.x, eye.z))
+    else {
         return;
     };
     if sent.is_some_and(|sent| !moved(sent, now)) {

@@ -663,6 +663,38 @@ pub struct Generation {
     /// Version 3's terrain tuning. Absent in a World under version 1 or 2, which never read it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub landforms: Option<crate::terrain::LandformParams>,
+    /// Version 3's lava, by name. Absent with none, and under version 1 or 2.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lava: Option<String>,
+    /// Version 3's cave Biomes. Absent with none, and under version 1 or 2.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cave_biomes: Vec<SavedCaveBiome>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SavedCaveBiome {
+    pub name: String,
+    pub temperature: f32,
+    pub humidity: f32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub altitude_m: Option<[f32; 2]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rock: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub floor: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fog: Option<crate::SkyFog>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub features: Vec<SavedCaveFeature>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SavedCaveFeature {
+    pub material: String,
+    pub shape: String,
+    pub spacing_m: f32,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1091,6 +1123,20 @@ impl Generation {
             templates: (!saved_templates.is_empty()).then_some(saved_templates),
             settlements: (!saved_settlements.is_empty()).then_some(saved_settlements),
             landforms: (p.generator >= crate::terrain::LANDFORMS_SINCE).then_some(p.landforms),
+            lava: p
+                .lava
+                .filter(|_| p.generator >= crate::terrain::LANDFORMS_SINCE)
+                .map(|m| mapping.material_name(m))
+                .transpose()?,
+            cave_biomes: if p.generator >= crate::terrain::LANDFORMS_SINCE {
+                p.cave_biomes
+                    .as_slice()
+                    .iter()
+                    .map(|b| saved_cave_biome(b, mapping))
+                    .collect::<Result<_, _>>()?
+            } else {
+                Vec::new()
+            },
         })
     }
 
@@ -1226,10 +1272,81 @@ impl Generation {
                 .landforms
                 .filter(|_| generator >= crate::terrain::LANDFORMS_SINCE)
                 .unwrap_or_default(),
+            lava: self
+                .lava
+                .as_deref()
+                .filter(|_| generator >= crate::terrain::LANDFORMS_SINCE)
+                .map(|name| mapping.material_id(name))
+                .transpose()?,
+            cave_biomes: if generator >= crate::terrain::LANDFORMS_SINCE {
+                let biomes = self
+                    .cave_biomes
+                    .iter()
+                    .map(|b| restored_cave_biome(b, mapping))
+                    .collect::<Result<Vec<_>, _>>()?;
+                crate::CaveBiomeTable::new(&biomes).map_err(|e| Error::Corrupt(e.to_string()))?
+            } else {
+                crate::CaveBiomeTable::default()
+            },
         };
         p.validate().map_err(|e| Error::Corrupt(e.to_string()))?;
         Ok(p)
     }
+}
+
+fn saved_cave_biome(b: &crate::CaveBiome, mapping: &Mapping) -> Result<SavedCaveBiome, Error> {
+    Ok(SavedCaveBiome {
+        name: b.name.to_string(),
+        temperature: b.temperature,
+        humidity: b.humidity,
+        altitude_m: b.altitude_m,
+        rock: b.rock.map(|m| mapping.material_name(m)).transpose()?,
+        floor: b.floor.map(|m| mapping.material_name(m)).transpose()?,
+        fog: b.fog,
+        features: b
+            .features()
+            .iter()
+            .map(|f| {
+                Ok(SavedCaveFeature {
+                    material: mapping.material_name(f.material)?,
+                    shape: mapping.shapes.get(&f.shape).cloned().ok_or_else(|| {
+                        Error::Incompatible(format!("unregistered Shape id {}", f.shape))
+                    })?,
+                    spacing_m: f.spacing_m,
+                })
+            })
+            .collect::<Result<_, Error>>()?,
+    })
+}
+
+fn restored_cave_biome(b: &SavedCaveBiome, mapping: &Mapping) -> Result<crate::CaveBiome, Error> {
+    let features = b
+        .features
+        .iter()
+        .map(|f| {
+            Ok(crate::CaveFeature {
+                material: mapping.material_id(&f.material)?,
+                shape: mapping.shape_id(&f.shape)?,
+                spacing_m: f.spacing_m,
+            })
+        })
+        .collect::<Result<Vec<_>, Error>>()?;
+    crate::CaveBiome::new(
+        crate::BiomeName::new(&b.name).map_err(|e| Error::Corrupt(e.to_string()))?,
+        (b.temperature, b.humidity),
+        b.altitude_m,
+        b.rock
+            .as_deref()
+            .map(|n| mapping.material_id(n))
+            .transpose()?,
+        b.floor
+            .as_deref()
+            .map(|n| mapping.material_id(n))
+            .transpose()?,
+        b.fog,
+        &features,
+    )
+    .map_err(|e| Error::Corrupt(e.to_string()))
 }
 
 fn saved_biome(
