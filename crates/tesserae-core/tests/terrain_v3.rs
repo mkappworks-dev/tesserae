@@ -975,3 +975,37 @@ fn voxel_walls(g: &Worldgen) -> (f32, usize) {
     }
     (walls as f32 / n as f32, n)
 }
+
+#[test]
+fn rock_formations_stand_on_the_sea_floor_and_stay_under_water() {
+    let g = Worldgen::new(SEED, 1.0, v3());
+    let (mut ocean, mut formations) = (0, 0);
+    for j in -150..150 {
+        for i in -150..150 {
+            let (x, z) = (i as f32 * 17.0, j as f32 * 19.0);
+            let h = |dx: f32, dz: f32| g.terrain_height_m(x + dx, z + dz);
+            let here = h(0.0, 0.0);
+            if here >= 24.0 - 1.0 || here < 24.0 - 40.0 {
+                continue;
+            }
+            ocean += 1;
+            let around = [(12.0, 0.0), (-12.0, 0.0), (0.0, 12.0), (0.0, -12.0)]
+                .map(|(dx, dz)| h(dx, dz))
+                .into_iter()
+                .fold(f32::MAX, f32::min);
+            // Rising off a floor 8 m or more down: a formation, not the shore's own slope.
+            if here - around > 3.0 && around < 24.0 - 8.0 {
+                formations += 1;
+                assert!(
+                    here <= 24.0 - 2.0 + 1e-3,
+                    "a formation at {x},{z} reaches {here}"
+                );
+            }
+        }
+    }
+    assert!(ocean > 5000, "{ocean} sea columns");
+    assert!(
+        formations * 200 > ocean,
+        "{formations} formations in {ocean} sea columns"
+    );
+}

@@ -917,6 +917,8 @@ struct Stack {
     water_level_m: [Option<f32>; SURFACE_W * SURFACE_W],
     /// How far the overhang density may push each column, before water and Structures limit it.
     overhang_m: [f32; CHUNK_SIZE * CHUNK_SIZE],
+    /// Columns where a sea-floor formation lays bare rock instead of the ground's surface.
+    rock: [bool; CHUNK_SIZE * CHUNK_SIZE],
     grounds: Option<ColumnGrounds>,
 }
 
@@ -1169,10 +1171,17 @@ impl Worldgen {
             let (x, z) = ((i % CHUNK_SIZE) as i32, (i / CHUNK_SIZE) as i32);
             terrain.overhang_amp_m(self.axis_m(cx, x), self.axis_m(cz, z))
         });
+        let sea_m = self.params.sea_level_m;
+        let rock = std::array::from_fn(|i| {
+            let (x, z) = ((i % CHUNK_SIZE) as i32, (i / CHUNK_SIZE) as i32);
+            surface_m[surface_index(x, z)] < sea_m - 1.0
+                && terrain.seabed_rock(self.axis_m(cx, x), self.axis_m(cz, z))
+        });
         let stack = Arc::new(Stack {
             surface_m,
             water_level_m,
             overhang_m,
+            rock,
             grounds: self.column_grounds(cx, cz),
         });
         let mut stacks = self.stacks.lock().expect("stacks");
@@ -1659,6 +1668,15 @@ impl Worldgen {
                 let ground = columns
                     .as_ref()
                     .map_or(ground, |columns| columns[z * CHUNK_SIZE + x]);
+                let ground = if stack.as_ref().is_some_and(|s| s.rock[z * CHUNK_SIZE + x]) {
+                    GroundParams {
+                        surface: ground.rock,
+                        soil: ground.rock,
+                        ..ground
+                    }
+                } else {
+                    ground
+                };
                 let biome = self.column_biome([cx, cz], [x, z]);
                 let water_level_m = stack.as_ref().map_or_else(
                     || self.water_level_m(x_m, z_m),

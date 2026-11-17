@@ -70,6 +70,7 @@ const SALT_CALM: u32 = 0x1a4d_00f1;
 const SALT_CRAG: u32 = 0x1a4d_0101;
 const SALT_TERRACE: u32 = 0x1a4d_0111;
 const SALT_OUTCROP: u32 = 0x1a4d_0121;
+const SALT_SEABED: u32 = 0x1a4d_0131;
 
 /// The continent field's value at the coast, and how many metres one unit of it is worth inland:
 /// an approximation of distance, good enough to place a Biome.
@@ -123,6 +124,12 @@ const TERRACE_STRENGTH: f32 = 0.8;
 /// The overhang density's outcrops: how far apart, and the field value above which one stands.
 const OUTCROP_SIZE_M: f32 = 90.0;
 const OUTCROP_CUT: f32 = 0.55;
+/// Sea-floor formations: the water always kept over them, a reef's height, and one rock outcrop
+/// or pillar in some cells this wide.
+const SEABED_CLEAR_M: f32 = 2.0;
+const REEF_M: f32 = 4.0;
+const OUTCROP_CELL_M: f32 = 56.0;
+const OUTCROP_CHANCE: f32 = 0.3;
 /// The share of the land's height a range's body approaches; its crags rise above that.
 const SUMMIT_SHARE: f32 = 0.85;
 const MESA_STEP_M: f32 = 18.0;
@@ -334,6 +341,10 @@ impl Base {
 
         offset += self.volcano(x_m, z_m);
 
+        if base < 0.0 {
+            offset += self.seabed_rise_m(wx, wz, offset);
+        }
+
         self.sea_m + offset.clamp(-d, h)
     }
 
@@ -455,6 +466,53 @@ impl Base {
             2,
         );
         smooth(0.52, 0.62, region) * smooth(0.975, 0.995, slot)
+    }
+
+    /// How far rock formations raise the sea floor at `offset_m` below Sea level: outcrops and
+    /// pillars standing off the floor, and reef ridges along the shelf. Always [`SEABED_CLEAR_M`]
+    /// or more under the surface, so water stands over every one of them.
+    fn seabed_rise_m(&self, wx: f32, wz: f32, offset_m: f32) -> f32 {
+        let room_m = (-SEABED_CLEAR_M - offset_m).max(0.0);
+        if room_m <= 0.0 {
+            return 0.0;
+        }
+        self.formation_m(wx, wz, offset_m).min(room_m)
+    }
+
+    /// [`Self::seabed_rise_m`] before it is kept under the surface.
+    fn formation_m(&self, wx: f32, wz: f32, offset_m: f32) -> f32 {
+        let seed = self.seed.wrapping_add(SALT_SEABED);
+        let reef = crate::noise::ridged2(wx / 220.0, wz / 220.0, seed, 2);
+        let shelf = smooth(-30.0, -18.0, offset_m) * (1.0 - smooth(-6.0, -3.0, offset_m));
+        let mut rise_m = REEF_M * shelf * smooth(0.86, 0.96, reef);
+        let (cx, cz) = (
+            (wx / OUTCROP_CELL_M).floor() as i32,
+            (wz / OUTCROP_CELL_M).floor() as i32,
+        );
+        let fray = crate::noise::fbm2(wx / 7.0, wz / 7.0, seed.wrapping_add(1), 2);
+        for dz in -1..=1 {
+            for dx in -1..=1 {
+                let (ix, iz) = (cx + dx, cz + dz);
+                let h = crate::noise::cell_hash(ix, iz, seed.wrapping_add(2));
+                if h[0] > OUTCROP_CHANCE {
+                    continue;
+                }
+                let k = h[0] / OUTCROP_CHANCE;
+                let centre = [
+                    (ix as f32 + 0.2 + 0.6 * h[1]) * OUTCROP_CELL_M,
+                    (iz as f32 + 0.2 + 0.6 * h[2]) * OUTCROP_CELL_M,
+                ];
+                let radius_m = (3.0 + 7.0 * h[1]) * (0.8 + 0.4 * fray);
+                let r = ((wx - centre[0]).powi(2) + (wz - centre[1]).powi(2)).sqrt() / radius_m;
+                if r >= 1.0 {
+                    continue;
+                }
+                // Flat-topped with steep sides: a pillar when narrow, a table when wide.
+                let height_m = 3.0 + 11.0 * k;
+                rise_m = rise_m.max(height_m * (1.0 - smooth(0.55, 1.0, r)));
+            }
+        }
+        rise_m
     }
 
     /// The sea floor `offset_m` (below Sea level) raised into an island where one stands: a
@@ -589,6 +647,19 @@ impl Terrain {
 
     pub(crate) fn overhang_max_m(&self) -> f32 {
         self.base.overhang_max_m()
+    }
+
+    /// Whether a sea-floor formation stands at least a metre proud here, so its face is bare rock
+    /// and not the sea's sand.
+    pub(crate) fn seabed_rock(&self, x_m: f32, z_m: f32) -> bool {
+        let b = &self.base;
+        let (wx, wz) = b.warped(x_m, z_m);
+        let f = b.fields_warped(wx, wz);
+        if curve(&CONTINENT_CURVE, f.continent) >= 0.0 {
+            return false;
+        }
+        let floor_m = self.height_m(x_m, z_m) - b.sea_m;
+        floor_m <= -SEABED_CLEAR_M && b.formation_m(wx, wz, floor_m) >= 1.0
     }
 
     pub(crate) fn overhang_amp_m(&self, x_m: f32, z_m: f32) -> f32 {
