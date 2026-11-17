@@ -169,6 +169,16 @@ pub fn swamp() -> Vec<SurfaceFeature> {
     ])
 }
 
+/// Kelp forests and seagrass meadows in patches across the sea floor, with bare sand between, and
+/// red weed scattered on the shelf.
+pub fn ocean() -> Vec<SurfaceFeature> {
+    plants(&[
+        ("aquatic:kelp", 4.0, 48.0, 0.85),
+        ("aquatic:seagrass", 3.0, 28.0, 0.85),
+        ("aquatic:red_weed", 9.0, 18.0, 0.9),
+    ])
+}
+
 pub fn savanna() -> Vec<SurfaceFeature> {
     [
         plants(&[

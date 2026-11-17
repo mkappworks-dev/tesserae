@@ -691,7 +691,7 @@ impl Guest for Terra {
                     crop_fields: Vec::new(),
                     structures: Vec::new(),
                     settlements: Vec::new(),
-                    surface_features: Vec::new(),
+                    surface_features: plants::ocean(),
                     loot: None,
                 },
                 BiomeDef {
