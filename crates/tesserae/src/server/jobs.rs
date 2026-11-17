@@ -355,7 +355,9 @@ pub(in crate::server) fn generate(
     Generated {
         #[cfg(any(feature = "dev", feature = "profiling"))]
         connectivity: connectivity(&chunk, &tables.materials),
-        overlay: tables.plants.generated_overlay(&chunk),
+        overlay: tables
+            .plants
+            .generated_overlay(&chunk, worldgen.water().map(|w| w.material)),
         chunk,
     }
 }
