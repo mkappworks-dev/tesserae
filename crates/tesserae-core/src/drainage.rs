@@ -163,9 +163,9 @@ impl Drainage {
         }
     }
 
-    /// The level of a lake that covers every corner of the lattice cell holding `(x_m, z_m)`,
-    /// all at one level; `None` anywhere else, so a river crossing a window's edge is never dammed
-    /// by ground this coarse lattice is too wide to see the valley of.
+    /// The level of the highest lake on a corner of the lattice cell holding `(x_m, z_m)`; `None`
+    /// where no corner is lake, so a river crossing a window's edge away from any lake is never
+    /// dammed by ground this coarse lattice is too wide to see the valley of.
     fn lake_level_at(&self, x_m: f32, z_m: f32) -> Option<f32> {
         let (i0, j0) = (
             (x_m / self.node_m).floor() as i32,
@@ -173,13 +173,12 @@ impl Drainage {
         );
         let key = [i0.div_euclid(REGION_NODES), j0.div_euclid(REGION_NODES)];
         let region = self.region(key);
-        let corners =
-            [(0, 0), (1, 0), (0, 1), (1, 1)].map(|(di, dj)| region.node(i0 + di, j0 + dj, key));
-        let level = corners[0].level_m;
-        corners
+        [(0, 0), (1, 0), (0, 1), (1, 1)]
+            .map(|(di, dj)| region.node(i0 + di, j0 + dj, key))
             .iter()
-            .all(|n| n.is_lake() && (n.level_m - level).abs() < 0.01)
-            .then_some(level)
+            .filter(|n| n.is_lake())
+            .map(|n| n.level_m)
+            .reduce(f32::max)
     }
 
     /// Drops the cache and this thread's last region; another thread keeps its own until it next

@@ -274,20 +274,14 @@ fn flat_ground_is_a_heightfield() {
 #[test]
 fn rugged_ground_has_overhangs_and_arches() {
     let g = Worldgen::new(SEED, 1.0, dry_v3());
-    // Mountain flanks: rugged land standing well above the sea, not a valley floor in it.
-    let high: Vec<(i32, i32)> = (-80..80)
+    // A range's upper flanks and summits: the highest rugged land, not a valley floor in it.
+    let mut high: Vec<(f32, (i32, i32))> = (-80..80)
         .flat_map(|j| (-80..80).map(move |i| (i * 61, j * 61)))
-        .filter(|&(x, z)| {
-            g.landform_fields(x as f32, z as f32).unwrap().ruggedness > 0.6
-                && g.surface_height_m(x as f32, z as f32) > 24.0 + 60.0
-        })
+        .filter(|&(x, z)| g.landform_fields(x as f32, z as f32).unwrap().ruggedness > 0.6)
+        .map(|(x, z)| (g.surface_height_m(x as f32, z as f32), (x, z)))
         .collect();
-    let rugged: Vec<(i32, i32)> = high
-        .iter()
-        .copied()
-        .step_by((high.len() / 60).max(1))
-        .take(60)
-        .collect();
+    high.sort_by(|a, b| b.0.total_cmp(&a.0));
+    let rugged: Vec<(i32, i32)> = high.iter().take(60).map(|&(_, c)| c).collect();
     assert!(rugged.len() >= 20, "{} rugged columns", rugged.len());
     let with = rugged
         .iter()
@@ -296,7 +290,8 @@ fn rugged_ground_has_overhangs_and_arches() {
             has_overhang(&g, x, z, h as i32 - 14, h as i32 + 14)
         })
         .count();
-    assert!(with * 10 >= rugged.len(), "{with} of {}", rugged.len());
+    // Overhangs stay on a range's upper flanks and crests, rare enough not to roughen its slopes.
+    assert!(with * 20 >= rugged.len(), "{with} of {}", rugged.len());
 }
 
 #[test]
@@ -860,4 +855,40 @@ fn valleys_between_mountains_drain_rather_than_flood() {
     let wet = rugged_under_inland_water(&g);
     // Valleys that were the blobs between ridges flooded 9% of it.
     assert!(wet < 0.07, "{wet} of rugged land is under a lake");
+}
+
+/// Over the 60 highest rugged columns: the share whose ground slopes steeper than 1 in 2 across
+/// 4 m, and the share whose ground rises and falls more than 2 m within 6 m.
+fn summit_shape(g: &Worldgen) -> (f32, f32) {
+    let mut high: Vec<(f32, (f32, f32))> = (-80..80)
+        .flat_map(|j| (-80..80).map(move |i| (i as f32 * 61.0, j as f32 * 61.0)))
+        .filter(|&(x, z)| g.landform_fields(x, z).unwrap().ruggedness > 0.6)
+        .map(|(x, z)| (g.terrain_height_m(x, z), (x, z)))
+        .collect();
+    high.sort_by(|a, b| b.0.total_cmp(&a.0));
+    let (mut steep, mut rough) = (0, 0);
+    for &(_, (x, z)) in high.iter().take(60) {
+        let h = |dx: f32, dz: f32| g.terrain_height_m(x + dx, z + dz);
+        let slope = ((h(2.0, 0.0) - h(-2.0, 0.0)).powi(2) + (h(0.0, 2.0) - h(0.0, -2.0)).powi(2))
+            .sqrt()
+            / 4.0;
+        steep += (slope > 0.5) as usize;
+        let ring: Vec<f32> = (-3..=3)
+            .flat_map(|j| (-3..=3).map(move |i| (i as f32 * 2.0, j as f32 * 2.0)))
+            .map(|(dx, dz)| h(dx, dz))
+            .collect();
+        let (lo, hi) = ring
+            .iter()
+            .fold((f32::MAX, f32::MIN), |(l, u), &v| (l.min(v), u.max(v)));
+        rough += (hi - lo > 2.0) as usize;
+    }
+    (steep as f32 / 60.0, rough as f32 / 60.0)
+}
+
+#[test]
+fn mountains_have_steep_upper_flanks_and_uneven_summits() {
+    let (steep, rough) = summit_shape(&Worldgen::new(SEED, 1.0, v3()));
+    // Rounded massifs had 3% of their highest ground this steep and half of it uneven.
+    assert!(steep > 0.2, "{steep} of summit columns are steep");
+    assert!(rough > 0.85, "{rough} of summit columns are uneven");
 }

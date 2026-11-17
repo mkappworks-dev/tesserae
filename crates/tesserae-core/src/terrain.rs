@@ -67,6 +67,7 @@ const SALT_RAVINE: u32 = 0x1a4d_00d1;
 const SALT_RAVINE_MASK: u32 = 0x1a4d_00d2;
 const SALT_SHAFT: u32 = 0x1a4d_00e1;
 const SALT_CALM: u32 = 0x1a4d_00f1;
+const SALT_CRAG: u32 = 0x1a4d_0101;
 
 /// The continent field's value at the coast, and how many metres one unit of it is worth inland:
 /// an approximation of distance, good enough to place a Biome.
@@ -107,11 +108,17 @@ const WARP_SIZE_M: f32 = 1500.0;
 const WARP_AMOUNT_M: f32 = 400.0;
 const EROSION_SIZE_M: f32 = 2800.0;
 const PEAKS_SIZE_M: f32 = 1400.0;
+/// The crags on a range's upper flanks and summits: their spacing, and their height as a share
+/// of the land's.
+const CRAG_SIZE_M: f32 = 100.0;
+const CRAG_HEIGHT: f32 = 0.22;
+/// The share of the land's height a range's body approaches; its crags rise above that.
+const SUMMIT_SHARE: f32 = 0.85;
 const MESA_STEP_M: f32 = 18.0;
 /// How far the mountain field may lie from its middle and still be a level valley floor, and how
 /// far it must for a massif's top.
 const VALLEY_FLOOR: f32 = 0.05;
-const MASSIF_TOP: f32 = 0.75;
+const MASSIF_TOP: f32 = 0.45;
 /// The calm patches' period, and the band of their field that fades them in.
 const CALM_SIZE_M: f32 = 450.0;
 const CALM_CUT: [f32; 2] = [0.36, 0.48];
@@ -242,7 +249,25 @@ impl Base {
         // build never lie far off. Mountains rise from them rather than being cut by them.
         let calm = self.calm(wx, wz) * inland;
         let mountain = self.mountain(wx, wz) * f.ruggedness;
-        offset += h * 1.1 * mountain;
+        // Eased toward the band's top rather than cut flat by the clamp, so a high range still
+        // ends in peaks.
+        let crest_m = h * SUMMIT_SHARE;
+        offset += crest_m * (1.0 - (-h * 1.1 * mountain / crest_m).exp());
+        // High up a range the rock breaks into crags and knolls rather than a smooth dome.
+        let summit = smooth(0.12, 0.45, mountain);
+        if summit > 0.0 {
+            // Knolls standing on ground that joins up, not ridges walling off hollows: a ridge
+            // network would leave pits between its crests for the drainage to fill as tarns.
+            let n = crate::noise::fbm2(
+                wx / CRAG_SIZE_M,
+                wz / CRAG_SIZE_M,
+                seed.wrapping_add(SALT_CRAG),
+                3,
+            );
+            // Rising straight from the threshold, so a knoll ends in a point and not a flat top.
+            let crag = ((n - 0.42) / 0.38).max(0.0);
+            offset += h * CRAG_HEIGHT * summit * crag;
+        }
 
         let detail = |octaves| {
             crate::noise::fbm2(
@@ -260,7 +285,8 @@ impl Base {
         let plain = (smooth(0.2, 0.5, f.erosion) * inland).max(calm).max(floor);
         let rough = detail(self.octaves);
         let broad = detail(self.octaves.min(2));
-        let n = rough + (broad - rough) * plain.max(smooth(0.2, 0.6, f.ruggedness));
+        let flank = smooth(0.2, 0.6, f.ruggedness) * (1.0 - summit);
+        let n = rough + (broad - rough) * plain.max(flank);
         // Detail also dies out at the waterline, so noise does not litter the coast with islets.
         let shore = 0.2 + 0.8 * smooth(0.0, 14.0, offset.abs());
         let worn =
@@ -315,7 +341,7 @@ impl Base {
         if rugged <= 0.0 {
             return 0.0;
         }
-        self.overhang_m * smooth(0.1, 0.3, self.mountain(wx, wz) * rugged)
+        self.overhang_m * smooth(0.04, 0.2, self.mountain(wx, wz) * rugged)
     }
 
     /// The signed push of the density at a point, in `-amp_m..amp_m`: positive is solid.
@@ -334,7 +360,8 @@ impl Base {
     /// where the field is far from its middle, and the valleys between them follow the lines
     /// where it crosses its middle: those lines run on and join, so a valley drains to lower land
     /// instead of being a basin the drainage fills with a lake. Near those lines the ground is a
-    /// level floor, from which the flanks rise smoothly.
+    /// level floor. Not capped at 1: the rare far reaches of the field are the highest peaks,
+    /// which the band clamps.
     fn mountain(&self, wx: f32, wz: f32) -> f32 {
         let n = crate::noise::fbm2(
             wx / PEAKS_SIZE_M,
@@ -342,7 +369,9 @@ impl Base {
             self.seed.wrapping_add(SALT_PEAKS),
             3,
         );
-        smooth(VALLEY_FLOOR, MASSIF_TOP, (2.0 * n - 1.0).abs()).powf(1.2)
+        // Squared, so a foot rises gently off the floor and the upper flanks steepen to the top.
+        let t = (((2.0 * n - 1.0).abs() - VALLEY_FLOOR) / (MASSIF_TOP - VALLEY_FLOOR)).max(0.0);
+        t * t
     }
 
     /// 0 to 1: the patches of calm ground, before the coast fades them.
