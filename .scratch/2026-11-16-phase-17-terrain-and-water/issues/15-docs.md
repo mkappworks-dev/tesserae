@@ -1,6 +1,6 @@
 # 15: Docs
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 14
 
@@ -12,4 +12,4 @@ The authoring guide and `docs/contract-compatibility.md` for the new fields, DES
 
 ## Acceptance criteria
 
-- [ ] `cargo fmt --all --check` and `npm run fmt:check` pass.
+- [x] `cargo fmt --all --check` and `npm run fmt:check` pass.

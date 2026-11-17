@@ -213,7 +213,23 @@ on level ground clear of the lake, caves and trees.
 
 **Generator version** — the revision of the world generation algorithm a World
 was created under. A World keeps it for life, so a later revision never changes
-its terrain for the same seed.
+its terrain for the same seed. A new World is version 3.
+
+**Stratum** — a layer of a Biome's rock between two depths below the surface,
+its edges undulating a few metres. Version 3 only.
+
+**Cave Biome** — a region of the underground, chosen in three dimensions from 12
+m under the surface, with its own rock, cavern floor, features and fog.
+
+**Aquifer** — a region of version 3's underground whose water table stands above
+the World's, so its cavern lakes stand higher and level across it.
+
+**Spring** — a one-Voxel pool welling up in an aquifer's dry cavern floor,
+sealed by rock below and beside, so it stands rather than pours.
+
+**Outskirts** — a Settlement's Buildings past its disc, beside its approach
+paths and round its edge, in groups each laid by its own chance: farms, ponds,
+brooks and waterfalls.
 
 ## Runtime
 

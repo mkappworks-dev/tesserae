@@ -554,7 +554,7 @@ controls, movement, save, camera and input work already in flight is tracked in
 | 14  | Audio                   | Server-driven events, metre attenuation, mixing, Soundscapes and Audio settings                                              | CC0 Terra sounds and music         | -          | Done            |
 | 15  | Inventory               | Server-owned transactions that compose with the undo journal, save                                                           | Stack sizes, item rules            | 11, 12     | Done            |
 | 16  | Crafting                | Recipe schema, station interaction, Use on Voxels (doors, containers), UI host                                               | Recipes, stations                  | 15         | Done            |
-| 17  | Terrain and water       | Generator version 3: landforms and oceans, rivers and lakes, caves and the underground, Biomes by altitude and coast (17a-d) | Terrain and water per Biome        | 13         | Not started     |
+| 17  | Terrain and water       | Generator version 3: landforms and oceans, rivers and lakes, caves and the underground, Biomes by altitude and coast (17a-d) | Terrain and water per Biome        | 13         | Done            |
 | 18  | Plants                  | Growth on the Server tick, placement rules, harvesting                                                                       | Plant data                         | 13         | Done            |
 | 19  | Map, compass            | Server-provided summaries (the Client never reads World storage), map view                                                   | Map style, markers                 | 13         | Done            |
 | 20  | Structures              | Template format, deterministic placement by worldgen and tools                                                               | Templates                          | 13         | Done            |
@@ -828,38 +828,31 @@ Notes:
   `mods/` holds fifteen shared data Mods and `games/` four small Rust Games
   built on them (`docs/demo-games.md`); `terra` remains the one self-contained
   Game.
-- **Step 17** is not started. It reworks the whole of worldgen, so it comes as
-  Generator version 3; a World made under version 2 keeps its terrain and
-  recorded digests. Today the surface is one height noise, caves are one tunnel
-  field, and a Biome, picked by temperature and humidity, never changes height.
-  Step 17 replaces that with a layered generator, delivered in four parts:
-  - **17a Landforms and oceans.** Continental-scale fields (how far inland, how
-    eroded, peaks against valleys), domain-warped so nothing reads as noise,
-    shape oceans (shelf, slope, deep floor, trenches), coasts with beaches,
-    cliffs and stony shores, archipelagos, plains, hills, plateaus and mesas,
-    canyons, badlands, volcanic cones and mountain ranges with ridges and
-    snow-capped peaks. A 3D density near the surface allows overhangs, arches
-    and sheer cliffs.
-  - **17b Water.** A sea level, lakes in basins, and rivers and streams found by
-    a drainage pass over a coarse lattice, from the mountains down to a lake or
-    the sea, carving valleys, deltas and waterfalls where they drop; springs and
-    a water table. Each region's drainage is computed once from the seed and
-    cached, so generation stays a pure function in any Chunk order.
-  - **17c Underground.** Rock strata, large caverns, winding tunnels, ravines,
-    underground lakes and rivers, lava lakes near the floor, aquifers and ore
-    veins, plus cave Biomes chosen in three dimensions (crystal, fungal,
-    dripstone, ice, lush) with their own surface features, such as stalactites.
-  - **17d Biomes.** Biome choice gains altitude, distance inland and erosion, so
-    ocean (warm, cold, deep, frozen), shore, river, swamp, alpine, desert-dune,
-    tundra and other Biomes fall where the land suits them, and borders blend
-    their ground, vegetation and colours. A Biome may shape its relief within
-    its landform, which amends ADR-0022. Everything is spread by seeded, layered
-    fields in metres, coarse to fine, and coarse LOD levels read the same
-    fields. The Games then declare the new Biomes and water. Phase 20's bridges
-    find river crossings with no change to their rule, and Meadow, whose rolling
-    ground has no gap, stands its first footbridges. Weather (step 24) follows
-    step 17 and reads its climate, so rain and snow fall by altitude, coast and
-    Biome; weather never edits terrain.
+- **Step 17** is done. A new World is Generator version 3; a World made under 1
+  or 2 keeps its terrain and recorded digests. Version 3 is a stack of fields in
+  metres over a declared band (ADR-0030): continentalness, erosion and peaks
+  shape oceans with a shelf and formations on the floor, coasts, plains, benched
+  and craggy mountains and volcanic cones, with overhangs near the surface. A
+  regional drainage solve, cached per 2 km region with a halo, fills basins as
+  lakes and cuts rivers down valleys to the sea. Underground, Biomes bed strata,
+  caverns open under 22 m of rock, lava fills the deepest under a sealing floor,
+  perched aquifers raise the water table by region and well up in sealed
+  springs, and a Game declares up to 16 cave Biomes, chosen in 3D, with their
+  own rock, floor, features and fog. Biomes gain altitude, coast, erosion and
+  river selectors and a relief scale, and every demo Game declares ocean, shore,
+  river and alpine Biomes, cave Biomes and its water. Settlements gained
+  outskirts (farms, ponds, brooks and waterfalls by chance), a new Player enters
+  a village where its first food grows, and no cave opens within 16 m of a
+  Structure. The terrain's arithmetic runs on `libm`, so it rounds alike on
+  every platform; Settlement roads still use the platform's trigonometry, as in
+  version 2. Measured on the thread's CPU clock against `main`: the sky and deep
+  early-outs are unchanged (0.01 µs a Chunk), version 2's surface Chunks cost
+  about 105 µs against 90, and version 3's about 950 µs warm and 1350 cold, some
+  9 times version 2's against a budget of 3; the per-column heightfield (`fbm2`,
+  the drainage's lookup and the base height) is most of it, and
+  `tech/phase-17-worldgen-performance` takes it on with bit-identical changes.
+  Weather (step 24) follows and reads the Climate by altitude and coast; weather
+  never edits terrain.
 - **Step 22** is not started. Trees and Structures exist at level 0 only
   ([ADR-0022](docs/adr/0022-biomes-are-column-content-and-a-world-pins-its-generator.md),
   [ADR-0029](docs/adr/0029-structures-are-declared-templates-placed-as-pure-functions-of-metres.md)),
