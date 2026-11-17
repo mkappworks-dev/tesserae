@@ -2061,8 +2061,15 @@ impl Worldgen {
         {
             return f32::NEG_INFINITY;
         }
-        [
+        // The Voxels beside the column, which a carve here would open onto, and a few metres out,
+        // which a tunnel's width reaches.
+        let s = self.voxel_size;
+        let level_m = [
             (0.0, 0.0),
+            (s, 0.0),
+            (-s, 0.0),
+            (0.0, s),
+            (0.0, -s),
             (REACH_M, 0.0),
             (-REACH_M, 0.0),
             (0.0, REACH_M),
@@ -2070,7 +2077,13 @@ impl Worldgen {
         ]
         .into_iter()
         .filter_map(|(dx, dz)| wet(x_m + dx, z_m + dz))
-        .fold(f32::NEG_INFINITY, f32::max)
+        .fold(f32::NEG_INFINITY, f32::max);
+        // Water fills the whole Voxel its level reaches into, so the rock is sealed to that
+        // Voxel's top and not only to the level.
+        if level_m == f32::NEG_INFINITY {
+            return level_m;
+        }
+        (self.level_top(level_m) + 1) as f32 * s
     }
 
     /// Whether the ground cell at global Voxel `at` is carved away: what the Chunk holding it
