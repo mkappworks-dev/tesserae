@@ -2120,8 +2120,42 @@ impl Worldgen {
         cells.iter().any(|(at, _)| covers(kept, at[0], at[2]))
     }
 
-    /// [`Self::plant_at`] before a planted field clears the column.
+    /// [`Self::plant_at`] before a planted field clears the column: what the column draws, unless
+    /// under version 3 it is a tree with a stronger tree's trunk inside its crown.
     fn plant_raw(&self, scatter: &SurfaceScatter, gx: i32, gz: i32) -> Option<Standing> {
+        let standing = self.plant_drawn(scatter, gx, gz)?;
+        if let SurfacePlantKind::Tree(tree) = standing.plant.kind
+            && self.terrain.is_some()
+            && self.crowded(scatter, [gx, gz], tree.canopy_radius_m)
+        {
+            return None;
+        }
+        Some(standing)
+    }
+
+    /// Whether a tree whose draw beats this column's stands within `radius_m` of it. Each column
+    /// asks only draws and the trees they would stand, never whether those stand themselves, so
+    /// every Chunk decides alike; a lower draw wins, so of two trees too close the same one stays.
+    fn crowded(&self, scatter: &SurfaceScatter, [gx, gz]: [i32; 2], radius_m: f32) -> bool {
+        let own = SurfaceScatter::draw(self.seed, self.global_m(gx), self.global_m(gz));
+        let reach = (radius_m / self.voxel_size).ceil() as i32;
+        let r2 = (radius_m / self.voxel_size).powi(2);
+        (-reach..=reach)
+            .flat_map(|dz| (-reach..=reach).map(move |dx| (dx, dz)))
+            .filter(|&(dx, dz)| (dx, dz) != (0, 0) && ((dx * dx + dz * dz) as f32) < r2)
+            .any(|(dx, dz)| {
+                let (nx, nz) = (gx + dx, gz + dz);
+                let draw = SurfaceScatter::draw(self.seed, self.global_m(nx), self.global_m(nz));
+                draw < own
+                    && draw < scatter.most
+                    && self
+                        .plant_drawn(scatter, nx, nz)
+                        .is_some_and(|s| matches!(s.plant.kind, SurfacePlantKind::Tree(_)))
+            })
+    }
+
+    /// What a column's own draw stands on it, before any neighbour is asked.
+    fn plant_drawn(&self, scatter: &SurfaceScatter, gx: i32, gz: i32) -> Option<Standing> {
         self.params.ground?;
         let (x_m, z_m) = (self.global_m(gx), self.global_m(gz));
         let draw = SurfaceScatter::draw(self.seed, x_m, z_m);

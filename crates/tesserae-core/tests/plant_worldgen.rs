@@ -1485,3 +1485,73 @@ fn a_snapshot_carries_a_generated_vine() {
     assert_eq!(form["fruit"][0], "t:melon0");
     assert_eq!(form["max_fruit"], VINE_FRUIT);
 }
+
+/// Where each trunk stands in the square of `half` Chunks round the origin: a trunk Voxel with
+/// ground under it.
+fn trunk_feet(g: &Worldgen, half: i32) -> Vec<[i32; 2]> {
+    let (low, high) = g.surface_bounds_m();
+    let chunk_m = CHUNK_SIZE as f32 * g.voxel_size();
+    let rows = (low / chunk_m).floor() as i32 - 1..=(high / chunk_m).ceil() as i32;
+    let mut feet = Vec::new();
+    for cz in -half..half {
+        for cx in -half..half {
+            let column: Vec<Chunk> = rows.clone().map(|cy| g.chunk(cx, cy, cz)).collect();
+            let at =
+                |x: usize, y: usize, z: usize| column[y / CHUNK_SIZE].get(x, y % CHUNK_SIZE, z);
+            for z in 0..CHUNK_SIZE {
+                for x in 0..CHUNK_SIZE {
+                    let foot = (1..column.len() * CHUNK_SIZE).any(|y| {
+                        at(x, y, z).material() == TRUNK && {
+                            let under = at(x, y - 1, z);
+                            !under.is_air() && !is_tree_material(under.material())
+                        }
+                    });
+                    if foot {
+                        let size = CHUNK_SIZE as i32;
+                        feet.push([cx * size + x as i32, cz * size + z as i32]);
+                    }
+                }
+            }
+        }
+    }
+    feet
+}
+
+#[test]
+fn version_2_keeps_trees_declared_closer_than_their_crowns() {
+    let g = Worldgen::new(SEED, 1.0, flat(&[tree_feature(3.0, false)]));
+    let feet = trunk_feet(&g, 2);
+    let touching = feet.iter().any(|a| {
+        feet.iter()
+            .any(|b| a != b && (a[0] - b[0]).abs() <= 1 && (a[1] - b[1]).abs() <= 1)
+    });
+    assert!(touching, "version 2's trees stand where they always did");
+}
+
+#[test]
+fn trees_declared_closer_than_their_crowns_stand_a_crown_apart() {
+    for size in [1.0, 0.5] {
+        let params = WorldgenParams {
+            generator: 3,
+            sea_level_m: -40.0,
+            landforms: tesserae_core::terrain::LandformParams {
+                overhangs: false,
+                ..Default::default()
+            },
+            ..flat(&[tree_feature(3.0, false)])
+        };
+        let g = Worldgen::new(SEED, size, params);
+        let feet = trunk_feet(&g, 2);
+        assert!(feet.len() > 40, "{size} m: only {} trees", feet.len());
+        let crown_m = oak_with(false, None).canopy_radius_m;
+        for (i, a) in feet.iter().enumerate() {
+            for b in &feet[i + 1..] {
+                let d = ((a[0] - b[0]) as f32).hypot((a[1] - b[1]) as f32) * size;
+                assert!(
+                    d >= crown_m,
+                    "{size} m: trunks at {a:?} and {b:?} stand {d} m apart"
+                );
+            }
+        }
+    }
+}
