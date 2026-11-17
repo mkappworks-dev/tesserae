@@ -1119,6 +1119,31 @@ impl Worldgen {
         self
     }
 
+    /// This generator reading `other`'s work where it would only repeat it: always `other`'s
+    /// terrain, so one drainage solve serves both, and at the same Voxel size its column cache.
+    /// What either stands on the ground, Plants and Structures, is its own. Unless
+    /// [`Self::can_share`], it keeps its own work.
+    pub fn sharing(mut self, other: &Worldgen) -> Self {
+        if !self.can_share(other) {
+            return self;
+        }
+        self.terrain = other.terrain.clone();
+        if self.voxel_size == other.voxel_size {
+            self.columns = Arc::clone(&other.columns);
+        }
+        self
+    }
+
+    /// Whether the seeds and every parameter but the surface features and smoothing match, as
+    /// they do between level 0 and the coarse levels' sources (ADR-0011).
+    pub fn can_share(&self, other: &Worldgen) -> bool {
+        let terrain_of = |p: WorldgenParams| WorldgenParams {
+            smoothing: None,
+            ..p.without_surface_features()
+        };
+        self.seed == other.seed && terrain_of(self.params) == terrain_of(other.params)
+    }
+
     pub fn params(&self) -> WorldgenParams {
         self.params
     }

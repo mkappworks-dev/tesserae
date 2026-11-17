@@ -180,11 +180,12 @@ impl LodGenerators {
         };
         let sources = (0..levels.saturating_sub(1))
             .map(|j| {
-                if j == 0 {
+                let source = if j == 0 {
                     Worldgen::new(world.seed, world.voxel_size, bare)
                 } else {
                     Worldgen::new(world.seed, world.voxel_size * level_scale(j), coarse)
-                }
+                };
+                source.sharing(level_zero)
             })
             .collect();
         let mut generators = LodGenerators {
