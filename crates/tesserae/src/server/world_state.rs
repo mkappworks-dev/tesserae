@@ -255,9 +255,19 @@ impl ChunkStore {
     /// from its neighbours, which is also what makes a Chunk arriving next to
     /// it brighten this one.
     pub(in crate::server) fn insert(&mut self, coord: ChunkCoord, chunk: Chunk) {
+        self.insert_generated(coord, chunk, ChunkOverlay::none());
+    }
+
+    /// A Chunk as worldgen made it, with the fluid its Plants stand in; one the archive holds
+    /// comes back as it was saved instead.
+    pub(in crate::server) fn insert_generated(
+        &mut self,
+        coord: ChunkCoord,
+        chunk: Chunk,
+        overlay: ChunkOverlay,
+    ) {
         let restored = self.archived.remove(&coord);
-        let (chunk, overlay) =
-            restored.unwrap_or_else(|| (Arc::new(chunk), Arc::new(ChunkOverlay::none())));
+        let (chunk, overlay) = restored.unwrap_or_else(|| (Arc::new(chunk), Arc::new(overlay)));
         self.chunks.insert(coord, chunk);
         self.light.insert(coord, Arc::new(ChunkLight::dark()));
         self.overlays.insert(coord, overlay);

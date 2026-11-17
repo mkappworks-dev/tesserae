@@ -12,10 +12,10 @@ pub use reach::first_fruit_offsets;
 
 use std::collections::HashMap;
 
-use crate::chunk::{CHUNK_SIZE, CHUNK_VOLUME};
+use crate::chunk::{CHUNK_SIZE, CHUNK_VOLUME, Chunk};
 use crate::climate::Climate;
 use crate::light::{Light, MAX_LIGHT};
-use crate::occupants::Occupants;
+use crate::occupants::{ChunkOverlay, Fluid, Occupants, Overlay};
 use crate::shape::ShapeTable;
 use crate::voxel::{MaterialId, ShapeId, Voxel};
 
@@ -416,6 +416,46 @@ impl PlantTable {
     /// The Plant a Material belongs to and its role there.
     pub fn of(&self, material: MaterialId) -> Option<PlantRef> {
         self.by_material.get(&material).copied()
+    }
+
+    /// The fluid a Plant's Voxel of `material` stands in, if its Plant stands in one.
+    pub fn stands_in(&self, material: MaterialId) -> Option<MaterialId> {
+        match &self.plants.get(self.of(material)?.plant)?.kind {
+            Kind::Column { stands_in, .. } => stands_in.first().copied(),
+            _ => None,
+        }
+    }
+
+    /// The overlay a generated Chunk comes with: a source of the fluid each Plant stands in, in
+    /// its cell. Worldgen stands such a Plant only in that fluid, but a Chunk holds one Voxel a
+    /// cell, so without this the Plant stands in a dry hole the fluid simulation pours into.
+    pub fn generated_overlay(&self, chunk: &Chunk) -> ChunkOverlay {
+        let mut overlay = ChunkOverlay::none();
+        if !chunk
+            .kinds()
+            .iter()
+            .any(|v| self.stands_in(v.material()).is_some())
+        {
+            return overlay;
+        }
+        for z in 0..CHUNK_SIZE {
+            for y in 0..CHUNK_SIZE {
+                for x in 0..CHUNK_SIZE {
+                    if let Some(fluid) = self.stands_in(chunk.get(x, y, z).material()) {
+                        overlay.set(
+                            x,
+                            y,
+                            z,
+                            Overlay {
+                                fluid: Some(Fluid::source(fluid)),
+                                burning: None,
+                            },
+                        );
+                    }
+                }
+            }
+        }
+        overlay
     }
 
     /// Whether a Material is made only by growth and worldgen: a later Stage,
@@ -1429,6 +1469,36 @@ mod tests {
             table.lacks_soil(1, at, &solid_at(&[])).is_none(),
             "no plant"
         );
+    }
+
+    #[test]
+    fn a_generated_plant_that_stands_in_a_fluid_stands_in_a_source_of_it() {
+        const KELP: MaterialId = 10;
+        const WATER: MaterialId = 5;
+        let table = one(
+            Kind::Column {
+                max_height_m: 4.0,
+                direction: Direction::Up,
+                mean_seconds: 60.0,
+                stands_in: vec![WATER],
+                yields: Vec::new(),
+            },
+            KELP,
+        );
+        let mut chunk = Chunk::filled(Voxel::cube(WATER));
+        chunk.set(3, 4, 5, Voxel::cube(KELP));
+        chunk.set(3, 5, 5, Voxel::cube(KELP));
+        let overlay = table.generated_overlay(&chunk);
+        for y in [4, 5] {
+            assert_eq!(overlay.get(3, y, 5).fluid, Some(Fluid::source(WATER)));
+        }
+        assert_eq!(
+            overlay.get(3, 6, 5).fluid,
+            None,
+            "packed water carries none"
+        );
+        let dry = table.generated_overlay(&Chunk::filled(Voxel::cube(WATER)));
+        assert_eq!(dry.get(0, 0, 0).fluid, None);
     }
 
     #[test]

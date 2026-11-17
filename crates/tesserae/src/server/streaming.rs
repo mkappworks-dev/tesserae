@@ -826,7 +826,7 @@ fn land_generated(
         if store.contains(coord) || !evict.contains(delta(center, coord)) {
             continue;
         }
-        store.insert(coord, generated.chunk);
+        store.insert_generated(coord, generated.chunk, generated.overlay);
         // A Chunk restored from the archive is not what the job generated.
         #[cfg(any(feature = "dev", feature = "profiling"))]
         if let Some(held) = store
