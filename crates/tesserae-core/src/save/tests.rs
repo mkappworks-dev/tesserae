@@ -1,4 +1,6 @@
 use super::*;
+use flate2::Compression;
+use flate2::write::DeflateEncoder;
 
 pub(super) struct Directory(pub(super) PathBuf);
 impl Directory {
@@ -127,8 +129,8 @@ fn named_cells_restore_with_different_runtime_ids_including_removals() {
         },
     );
     let saved = SavedChunk::capture([-1, 2, 3], 7, &chunk, &overlay, &mapping(8, 9, 4)).unwrap();
-    let encoded = serde_json::to_vec(&saved).unwrap();
-    let decoded: SavedChunk = serde_json::from_slice(&encoded).unwrap();
+    let decoded = record::read_chunk(&record::chunk(&saved).unwrap()).unwrap();
+    assert_eq!(decoded, saved);
     let (restored, o) = decoded.restore(&mapping(17, 8, 5)).unwrap();
     assert_eq!(restored.get(1, 0, 0), Voxel::cube(17));
     assert_eq!(restored.get(0, 0, 1), Voxel::AIR);
@@ -144,29 +146,62 @@ fn named_cells_restore_with_different_runtime_ids_including_removals() {
     ));
 }
 
+/// Format 2's cells: a plane of low bytes then of high bytes, deflated and base64.
+fn planes(indices: &[u16]) -> String {
+    let mut raw: Vec<u8> = indices.iter().map(|i| i.to_le_bytes()[0]).collect();
+    raw.extend(indices.iter().map(|i| i.to_le_bytes()[1]));
+    let mut deflater = DeflateEncoder::new(Vec::new(), Compression::fast());
+    deflater.write_all(&raw).unwrap();
+    STANDARD.encode(deflater.finish().unwrap())
+}
+
 #[test]
 fn malformed_cells_and_orientations_fail_without_panics() {
     let m = mapping(8, 9, 4);
-    let good = SavedChunk::capture([0; 3], 0, &Chunk::air(), &ChunkOverlay::none(), &m).unwrap();
-    let refused = |change: &dyn Fn(&mut SavedChunk)| {
-        let mut saved = good.clone();
+    let mut chunk = Chunk::air();
+    chunk.set(0, 0, 0, Voxel::cube(8));
+    let good = SavedChunk::capture([0; 3], 0, &chunk, &ChunkOverlay::none(), &m).unwrap();
+    let format_2 = SavedChunk {
+        cells: planes(&good.indices().unwrap().0),
+        packed: Vec::new(),
+        ..good.clone()
+    };
+    assert_eq!(format_2.restore(&m).unwrap().0.get(0, 0, 0), Voxel::cube(8));
+    let refused = |from: &SavedChunk, change: &dyn Fn(&mut SavedChunk)| {
+        let mut saved = from.clone();
         change(&mut saved);
         matches!(saved.restore(&m), Err(Error::Corrupt(_)))
     };
-    assert!(refused(&|s| s.cells = "not base64!".into()));
-    assert!(refused(&|s| s.cells = STANDARD.encode([1, 2, 3])));
-    assert!(refused(&|s| s.palette.clear()));
-    assert!(refused(&|s| s.palette[0].solid.orientation = 24));
-    assert!(refused(
-        &|s| s.runs = vec![(CHUNK_VOLUME as u32, s.palette[0].clone())]
-    ));
-    // A palette index past its end.
-    let mut far = vec![0u8; CHUNK_VOLUME * 2];
-    far[0] = 1;
-    let mut deflater = DeflateEncoder::new(Vec::new(), Compression::fast());
-    deflater.write_all(&far).unwrap();
-    let far = STANDARD.encode(deflater.finish().unwrap());
-    assert!(refused(&|s| s.cells = far.clone()));
+    for from in [&good, &format_2] {
+        assert!(refused(from, &|s| s.palette.clear()));
+        assert!(refused(from, &|s| s.palette[0].solid.orientation = 24));
+        assert!(refused(from, &|s| s.runs =
+            vec![(CHUNK_VOLUME as u32, s.palette[0].clone())]));
+    }
+    assert!(refused(&good, &|s| s.cells = format_2.cells.clone()));
+    assert!(refused(&good, &|s| s.packed = vec![1, 2, 3]));
+    assert!(refused(&good, &|s| {
+        s.packed = record::pack_indices(&[0; 64], 2).unwrap()
+    }));
+    assert!(refused(&format_2, &|s| s.cells = "not base64!".into()));
+    assert!(refused(&format_2, &|s| s.cells = STANDARD.encode([1, 2, 3])));
+    // A palette index past its end, in each format.
+    let mut far = vec![0u16; CHUNK_VOLUME];
+    far[0] = 2;
+    assert!(refused(&format_2, &|s| s.cells = planes(&far)));
+    let mut three = good.clone();
+    three.palette.push(good.palette[0].clone());
+    assert!(refused(&three, &|s| {
+        s.packed = record::pack_indices(
+            &{
+                let mut far = vec![0u16; CHUNK_VOLUME];
+                far[0] = 3;
+                far
+            },
+            3,
+        )
+        .unwrap()
+    }));
 }
 
 /// Format 1 spelled every run's cell out; a World saved that way still opens.
@@ -191,6 +226,7 @@ fn a_format_1_chunk_of_runs_restores() {
         ],
         palette: Vec::new(),
         cells: String::new(),
+        packed: Vec::new(),
     };
     let json = serde_json::to_string(&legacy).unwrap();
     assert!(!json.contains("palette") && !json.contains("cells"));
@@ -223,8 +259,8 @@ fn a_ground_chunk_saves_in_a_few_kilobytes() {
         }
     }
     let saved = SavedChunk::capture([0; 3], 1, &chunk, &ChunkOverlay::none(), &m).unwrap();
-    let bytes = serde_json::to_vec(&saved).unwrap().len();
-    assert!(bytes < 8 * 1024, "{bytes} bytes");
+    let bytes = record::chunk(&saved).unwrap().len();
+    assert!(bytes < 2 * 1024, "{bytes} bytes");
     let (back, _) = saved.restore(&m).unwrap();
     assert!(
         back.same_packing(&chunk)
@@ -752,8 +788,15 @@ fn format_1_and_2_commits_open_and_the_next_write_stores_every_chunk() {
         runs: vec![(CHUNK_VOLUME as u32, ground([0; 3], 0, 8).palette[0].clone())],
         palette: Vec::new(),
         cells: String::new(),
+        packed: Vec::new(),
     };
-    for (format, chunk) in [(1, legacy), (2, ground([1, 0, 0], 4, 8))] {
+    let packed = ground([1, 0, 0], 4, 8);
+    let format_2 = SavedChunk {
+        cells: planes(&packed.indices().unwrap().0),
+        packed: Vec::new(),
+        ..packed
+    };
+    for (format, chunk) in [(1, legacy), (2, format_2)] {
         let d = Directory::new();
         let mut c = fixture();
         c.format = format;
@@ -805,25 +848,127 @@ fn a_damaged_or_missing_record_makes_its_commit_corrupt() {
     );
 }
 
-#[test]
-fn a_record_of_another_kind_or_a_bad_body_is_corrupt() {
-    let saved = ground([0; 3], 1, 8);
-    let record = encode_record(CHUNK_RECORD, &saved).unwrap();
-    assert_eq!(
-        decode_record::<SavedChunk>(CHUNK_RECORD, &record).unwrap(),
-        saved
-    );
-    for bad in [
-        &record[..1],
-        &record[..record.len() / 2],
-        &[CHUNK_RECORD, 9, 0][..],
-    ] {
-        assert!(matches!(
-            decode_record::<SavedChunk>(CHUNK_RECORD, bad),
-            Err(Error::Corrupt(_))
-        ));
+fn every_share_field() -> record::PausedWork {
+    let m = mapping(8, 9, 4);
+    let solid = m.voxel(Voxel::new(8, 4, 23)).unwrap();
+    record::PausedWork {
+        timers: TimerState {
+            flow: vec![
+                ([-1, 2, 3], 17, Some(m.fluid(Fluid::source(9)).unwrap())),
+                ([1, 2, 3], 0, None),
+            ],
+            fire: vec![
+                (
+                    [1, 0, 0],
+                    FireClock::Running { remaining: 31 },
+                    FireChange::Ignite { fuel: 63 },
+                ),
+                (
+                    [2, 0, 0],
+                    FireClock::Frozen {
+                        remaining: 9,
+                        solid: solid.clone(),
+                    },
+                    FireChange::Burnout { residue: solid },
+                ),
+                (
+                    [3, 0, 0],
+                    FireClock::Running { remaining: 1 },
+                    FireChange::Extinguish,
+                ),
+            ],
+        },
+        wakes: vec![([i32::MIN, 0, i32::MAX], u64::MAX)],
+        rescans: vec![Rescan {
+            home: [0, -1, 0],
+            pass: vec![([0, -32, 0], [31, -1, 31])],
+            span: 0,
+            offset: 77,
+            next: vec![([0, -2, 0], [1, -1, 1])],
+            parked: Some(([4, -4, 4], [5, -3, 5])),
+        }],
+        landing_cursors: vec![([0, 0, 0], [5, 6, 7])],
     }
-    assert!(decode_record::<PausedWork>(SHARE_RECORD, &record).is_err());
+}
+
+#[test]
+fn chunks_and_paused_shares_round_trip_through_binary_records() {
+    let m = mapping(8, 9, 4);
+    let mut chunk = Chunk::filled(Voxel::cube(8));
+    let mut overlay = ChunkOverlay::none();
+    for (i, at) in [[0, 0, 0], [31, 31, 31], [5, 6, 7]].into_iter().enumerate() {
+        chunk.set(at[0], at[1], at[2], Voxel::new(8, 4, i as u8));
+    }
+    overlay.set(
+        1,
+        1,
+        1,
+        Overlay {
+            fluid: Some(Fluid::source(9)),
+            burning: Some(crate::Burning { fuel: 3 }),
+        },
+    );
+    for (chunk, overlay) in [(Chunk::air(), ChunkOverlay::none()), (chunk, overlay)] {
+        let saved = SavedChunk::capture([-1, 2, -3], 9, &chunk, &overlay, &m).unwrap();
+        let back = record::read_chunk(&record::chunk(&saved).unwrap()).unwrap();
+        assert_eq!(back, saved);
+        let (c, o) = back.restore(&m).unwrap();
+        for i in 0..CHUNK_VOLUME {
+            let (x, y, z) = (i / 1024, i / 32 % 32, i % 32);
+            assert_eq!(c.get(x, y, z), chunk.get(x, y, z));
+            assert_eq!(o.get(x, y, z), overlay.get(x, y, z));
+        }
+    }
+    let work = every_share_field();
+    assert_eq!(
+        record::read_share(&record::share(&work).unwrap()).unwrap(),
+        work
+    );
+}
+
+#[test]
+fn a_truncated_overlong_or_mistyped_record_is_corrupt() {
+    let chunk = record::chunk(&ground([0; 3], 1, 8)).unwrap();
+    let share = record::share(&every_share_field()).unwrap();
+    let corrupt = |r: Result<(), Error>| matches!(r, Err(Error::Corrupt(_)));
+    let m = mapping(8, 9, 4);
+    for cut in 0..chunk.len() {
+        let read = record::read_chunk(&chunk[..cut]).and_then(|c| c.restore(&m).map(drop));
+        assert!(corrupt(read), "{cut}");
+    }
+    for cut in 0..share.len() {
+        assert!(
+            corrupt(record::read_share(&share[..cut]).map(drop)),
+            "{cut}"
+        );
+    }
+    assert!(corrupt(record::read_share(&chunk).map(drop)));
+    assert!(corrupt(record::read_chunk(&share).map(drop)));
+    let mut versioned = chunk.clone();
+    versioned[1] = 9;
+    assert!(corrupt(record::read_chunk(&versioned).map(drop)));
+    // A body with bytes past its content, and indices past one Chunk.
+    let mut work = every_share_field();
+    work.landing_cursors.clear();
+    let mut long = record::share(&work).unwrap();
+    let (head, body) = long.split_at(2);
+    let mut inflated = Vec::new();
+    flate2::read::DeflateDecoder::new(body)
+        .read_to_end(&mut inflated)
+        .unwrap();
+    inflated.extend([0, 0]);
+    let mut deflater = DeflateEncoder::new(head.to_vec(), Compression::default());
+    deflater.write_all(&inflated).unwrap();
+    long = deflater.finish().unwrap();
+    assert!(corrupt(record::read_share(&long).map(drop)));
+    let mut saved = ground([0; 3], 1, 8);
+    saved.packed = record::pack_indices(&vec![0; CHUNK_VOLUME + 64], 2).unwrap();
+    saved.palette.push(saved.palette[0].clone());
+    let back = record::read_chunk(&record::chunk(&saved).unwrap()).unwrap();
+    assert!(matches!(
+        back.restore(&mapping(8, 9, 4)),
+        Err(Error::Corrupt(_))
+    ));
 }
 
 #[test]
@@ -1851,4 +1996,60 @@ fn a_commit_without_containers_opens_with_none_and_a_bad_entry_is_corrupt() {
         slots: vec![rock],
     };
     assert!(crate::save::containers::validate(&[twice.clone(), twice]).is_err());
+}
+
+#[test]
+fn a_dump_names_every_chunk_and_share_and_touches_nothing() {
+    let d = Directory::new();
+    let mut c = fixture();
+    c.chunks = vec![ground([0; 3], 1, 8), ground([1, 0, 0], 2, 9)];
+    let mut share = c.simulation.empty();
+    share.agenda.wakes = vec![([160, 0, 0], 7)];
+    c.paused = vec![([5, 0, 0], share)];
+    let mut writer = Writer::acquire(&d.0, &c.world, &c.content).unwrap();
+    writer.write(&c).unwrap();
+    c.sequence = 2;
+    c.chunks.pop();
+    writer.write(&c).unwrap();
+    let files = || {
+        let mut all: Vec<_> = fs::read_dir(&d.0)
+            .unwrap()
+            .map(|e| {
+                let path = e.unwrap().path();
+                let bytes = fs::read(&path).unwrap();
+                (path, bytes)
+            })
+            .collect();
+        all.sort();
+        all
+    };
+    let before = files();
+    let newest: serde_json::Value =
+        serde_json::from_str(&dump(&d.0, None).unwrap().to_string()).unwrap();
+    assert_eq!(files(), before);
+    assert_eq!(newest["commit"]["sequence"], 2);
+    assert_eq!(newest["chunks"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        newest["chunks"][0]["palette"][0]["solid"]["material"],
+        "terra:stone"
+    );
+    assert_eq!(
+        newest["chunks"][0]["runs"],
+        serde_json::json!([[CHUNK_VOLUME, 0]])
+    );
+    assert_eq!(newest["chunks"][0]["record"].as_array().unwrap().len(), 4);
+    assert_eq!(newest["paused"][0]["home"], serde_json::json!([5, 0, 0]));
+    assert_eq!(newest["paused"][0]["share"]["agenda"]["wakes"][0][1], 7);
+    let first = dump(&d.0, Some(1)).unwrap();
+    let coords: Vec<_> = first["chunks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["coord"].clone())
+        .collect();
+    assert_eq!(
+        coords,
+        [serde_json::json!([0, 0, 0]), serde_json::json!([1, 0, 0])]
+    );
+    assert!(dump(&d.0, Some(9)).is_err());
 }

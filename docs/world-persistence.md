@@ -72,12 +72,16 @@ z fastest. Format 2 names each distinct cell of a Chunk once in a palette and
 stores one palette index a Voxel, as a low-byte plane then a high-byte plane,
 deflated and base64: a few kilobytes a Chunk where format 1's run-length
 records, which spelled a cell's names in every run, took a few hundred. Format 3
-stores each Chunk version once, as a record in a pack (below). Format 1 and 2
-commits still open. Material and Shape references are names, including packed
-lake sources, Overlay fluid, pending flow and fire residue. Runtime ids are
-resolved against a supplied mapping; a missing name fails. Fluid records
-preserve source identity and each Void's surface, reach and descent. Burning
-records preserve fuel. Generation records resolve named ground and lake content.
+stores each Chunk version once, as a binary record in a pack (below), with the
+same palette and planes, the high plane only past 256 cells and neither for a
+single cell, deflated at the default level: about half of format 2's fast
+deflate on a flown World's Chunks, and 8% smaller than indices bit-packed at the
+fewest bits. Format 1 and 2 commits still open. Material and Shape references
+are names, including packed lake sources, Overlay fluid, pending flow and fire
+residue. Runtime ids are resolved against a supplied mapping; a missing name
+fails. Fluid records preserve source identity and each Void's surface, reach and
+descent. Burning records preserve fuel. Generation records resolve named ground
+and lake content.
 
 A World also snapshots its own Climate, Biome table and ores in its generation
 parameters, so a Game that gains a Biome later cannot reshape it. The three
@@ -184,7 +188,11 @@ A World directory has immutable `00000000000000000001.commit` files, immutable
 `00000000000000000001.pack` files and one OS-locked `writer.lock` file. A commit
 contains an eight-byte `TESSAVE1` magic, 32-byte SHA-256 of the remaining bytes,
 and UTF-8 JSON. JSON records reject unknown fields. Sequence in the filename
-must agree with the body. There are no implicit migrations.
+must agree with the body. There are no implicit migrations. A commit's generator
+version is 1 or 2 and any other is refused: a World keeps the version it was
+created with, new Worlds are stamped 2, and a version 1 World keeps its version
+1 terrain. The current prototype caps a whole commit at 256 MiB; exceeding it
+reports an error, not successful saving.
 
 A format 3 commit is a manifest. It holds everything earlier formats did, except
 that each Chunk is its coordinate, revision and a record reference, and each
@@ -192,19 +200,21 @@ paused simulation share is its home and a record reference. A reference is a
 pack sequence, an offset, a length and the SHA-256 of the record's bytes, as a
 JSON array. A pack is a `TESPACK1` magic and then records back to back; the
 records a commit is the first to need go in the pack of its own sequence, and a
-commit with none writes no pack. A record is a kind, a version and a deflated
-JSON body: a Chunk as format 2 stored it, or a share's timers, wakes, rescans
-and landing cursors. A share's other fields are the active simulation's, which
-resuming reads nothing of but the fairness turn, and only when the active one
-has none. The manifest keeps the commit's shape so that an engine knowing only
-formats 1 and 2 refuses it as an unsupported format; an unreadable file would be
-skipped as corrupt and an older commit opened and written over. Opening reads,
-verifies and restores every record a manifest names; a missing pack, or a record
-that is short or fails its hash, makes the commit corrupt. A commit's generator
-version is 1 or 2 and any other is refused: a World keeps the version it was
-created with, new Worlds are stamped 2, and a version 1 World keeps its version
-1 terrain. The current prototype caps a whole commit at 256 MiB; exceeding it
-reports an error, not successful saving.
+commit with none writes no pack. A record is a kind and a version, then binary
+content whose integers are LEB128, signed ones zigzagged, and whose Material and
+Shape names go once each through a record-local name table, so a record is
+self-contained and compaction copies its bytes. A Chunk record is the length of
+a deflated part holding the table, coordinate, revision and palette, that part,
+then the deflated index planes as capture made them. A share record is one
+deflated part: the table, then the share's timers, wakes, rescans and landing
+cursors. A truncated or overlong record, or one of another kind or version, is
+corrupt. A share's other fields are the active simulation's, which resuming
+reads nothing of but the fairness turn, and only when the active one has none.
+The manifest keeps the commit's shape so that an engine knowing only formats 1
+and 2 refuses it as an unsupported format; an unreadable file would be skipped
+as corrupt and an older commit opened and written over. Opening reads, verifies
+and restores every record a manifest names; a missing pack, or a record that is
+short or fails its hash, makes the commit corrupt.
 
 Writing uses a unique create-new `.pending` file, writes header/checksum/body,
 syncs the complete file, renames it to its final sequence, then syncs the parent
@@ -266,6 +276,12 @@ write-through rename follows
 [Microsoft's API contract](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-movefileexw);
 no POSIX directory-sync guarantee is claimed there. No broad crash-safety
 guarantee is made.
+
+`tesserae save dump <world-dir> [--sequence N]` prints the newest commit, or the
+one numbered N, as JSON on stdout: its fields, each Chunk's palette by name and
+indices as runs of `[count, index]`, and each paused share, each with the record
+reference it came from in format 3. It reads any format, takes no lock and
+changes no file.
 
 ## Server snapshots and streaming
 

@@ -10,9 +10,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use base64::{Engine, engine::general_purpose::STANDARD};
-use flate2::Compression;
 use flate2::read::DeflateDecoder;
-use flate2::write::DeflateEncoder;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -248,22 +246,25 @@ pub struct Cell {
 
 /// Full authoritative Chunk, including Air, in x/y/z order, z fastest.
 ///
-/// Format 2 names each distinct cell once in `palette`; `cells` is one palette index a Voxel, as
-/// a plane of low bytes then a plane of high bytes, deflated and base64. A Chunk is mostly a few
-/// long stretches of one cell, so this is a few kilobytes where format 1's `runs`, each spelling
-/// its Material's name, made a few hundred.
+/// Formats 2 and 3 name each distinct cell once in `palette` and store one palette index a Voxel.
+/// Format 2's `cells` are a plane of low bytes then a plane of high bytes, deflated and base64;
+/// format 3's `packed` are the same planes, the high one only for a palette past 256 and neither
+/// for a palette of one, deflated at the default level; they travel only in a pack record. A Chunk is mostly a few long stretches of one cell, so either is
+/// a few kilobytes where format 1's `runs`, each spelling its Material's name, made a few hundred.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SavedChunk {
     pub coord: [i32; 3],
     pub revision: u64,
-    /// Format 1's cells; empty in format 2.
+    /// Format 1's cells; empty in formats 2 and 3.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub runs: Vec<(u32, Cell)>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub palette: Vec<Cell>,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub cells: String,
+    #[serde(skip)]
+    packed: Vec<u8>,
 }
 
 /// More distinct cells than this in one Chunk is corrupt: a palette index is a `u16`.
@@ -279,10 +280,8 @@ impl SavedChunk {
     ) -> Result<Self, Error> {
         mapping.validate()?;
         let mut palette: Vec<Cell> = Vec::new();
-        let mut index: std::collections::HashMap<(Voxel, Overlay), u16> =
-            std::collections::HashMap::new();
-        let mut raw = vec![0u8; CHUNK_VOLUME * 2];
-        let mut i = 0;
+        let mut index: HashMap<(Voxel, Overlay), u16> = HashMap::new();
+        let mut indices = Vec::with_capacity(CHUNK_VOLUME);
         for x in 0..CHUNK_SIZE {
             for y in 0..CHUNK_SIZE {
                 for z in 0..CHUNK_SIZE {
@@ -300,30 +299,36 @@ impl SavedChunk {
                             at
                         }
                     };
-                    let [lo, hi] = at.to_le_bytes();
-                    raw[i] = lo;
-                    raw[CHUNK_VOLUME + i] = hi;
-                    i += 1;
+                    indices.push(at);
                 }
             }
         }
-        let mut deflater = DeflateEncoder::new(Vec::new(), Compression::fast());
-        deflater.write_all(&raw)?;
         Ok(Self {
             coord,
             revision,
             runs: Vec::new(),
+            packed: record::pack_indices(&indices, palette.len())?,
             palette,
-            cells: STANDARD.encode(deflater.finish()?),
+            cells: String::new(),
         })
     }
 
-    /// Every Voxel's index into the cells returned beside them, from either format. A format 1
+    /// The palette and the packed indices a record holds, packing an older format's cells.
+    fn packed(&self) -> Result<(Vec<Cell>, std::borrow::Cow<'_, [u8]>), Error> {
+        if !self.packed.is_empty() {
+            return Ok((self.palette.clone(), self.packed.as_slice().into()));
+        }
+        let (indices, cells) = self.indices()?;
+        let packed = record::pack_indices(&indices, cells.len())?;
+        Ok((cells.into_iter().cloned().collect(), packed.into()))
+    }
+
+    /// Every Voxel's index into the cells returned beside them, from any format. A format 1
     /// run is its own cell; a Chunk holds at most one run a Voxel, so its index fits a `u16`.
     fn indices(&self) -> Result<(Vec<u16>, Vec<&Cell>), Error> {
         let corrupt = |why: &str| Error::Corrupt(format!("Chunk cells {why}"));
         if !self.runs.is_empty() {
-            if !self.palette.is_empty() || !self.cells.is_empty() {
+            if !self.palette.is_empty() || !self.cells.is_empty() || !self.packed.is_empty() {
                 return Err(corrupt("are in both formats"));
             }
             let count: u64 = self.runs.iter().map(|(n, _)| u64::from(*n)).sum();
@@ -340,6 +345,16 @@ impl SavedChunk {
         }
         if self.palette.is_empty() || self.palette.len() > MAX_PALETTE {
             return Err(corrupt("have no palette or too large a one"));
+        }
+        if !self.packed.is_empty() {
+            if !self.cells.is_empty() {
+                return Err(corrupt("are in both formats"));
+            }
+            let out = record::unpack_indices(&self.packed, self.palette.len())?;
+            if out.iter().any(|&k| usize::from(k) >= self.palette.len()) {
+                return Err(corrupt("name a cell past the palette"));
+            }
+            return Ok((out, self.palette.iter().collect()));
         }
         let packed = STANDARD
             .decode(&self.cells)
@@ -2358,16 +2373,7 @@ pub enum ChunkVersion {
 /// wrote is named again rather than encoded.
 pub type Draft = Commit<ChunkVersion, ([i32; 3], Arc<Simulation>)>;
 
-/// What a paused share holds of its own. The rest is the active simulation's, which resuming reads
-/// nothing of but the fairness turn, and only when the active one has none.
-#[derive(Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct PausedWork {
-    timers: TimerState,
-    wakes: Vec<([i32; 3], u64)>,
-    rescans: Vec<Rescan>,
-    landing_cursors: Vec<([i32; 3], [i32; 3])>,
-}
+use record::PausedWork;
 
 impl PausedWork {
     fn of(share: &Simulation) -> Self {
@@ -2387,33 +2393,6 @@ impl PausedWork {
         share.landing_cursors = self.landing_cursors;
         share
     }
-}
-
-const CHUNK_RECORD: u8 = 1;
-const SHARE_RECORD: u8 = 2;
-const RECORD_VERSION: u8 = 1;
-
-/// A kind, a version, then the value as deflated JSON.
-fn encode_record(kind: u8, value: &impl Serialize) -> Result<Vec<u8>, Error> {
-    let mut deflater = DeflateEncoder::new(vec![kind, RECORD_VERSION], Compression::default());
-    serde_json::to_writer(&mut deflater, value).map_err(|e| Error::Corrupt(e.to_string()))?;
-    Ok(deflater.finish()?)
-}
-
-fn decode_record<T: serde::de::DeserializeOwned>(kind: u8, bytes: &[u8]) -> Result<T, Error> {
-    let corrupt = |why: &str| Error::Corrupt(format!("save record {why}"));
-    if bytes.len() < 2 || bytes[0] != kind || bytes[1] != RECORD_VERSION {
-        return Err(corrupt("is of another kind or version"));
-    }
-    let mut json = Vec::new();
-    DeflateDecoder::new(&bytes[2..])
-        .take(MAX_RECORD_BYTES + 1)
-        .read_to_end(&mut json)
-        .map_err(|_| corrupt("does not inflate"))?;
-    if json.len() as u64 > MAX_RECORD_BYTES {
-        return Err(corrupt("exceeds size limit"));
-    }
-    serde_json::from_slice(&json).map_err(|e| corrupt(&e.to_string()))
 }
 
 /// The records one Commit writes, back to back after the pack's magic.
@@ -2502,7 +2481,7 @@ impl Manifest {
         commit.chunks = chunks
             .iter()
             .map(|(coord, revision, record)| {
-                let saved: SavedChunk = decode_record(CHUNK_RECORD, &packs.read(record)?)?;
+                let saved = record::read_chunk(&packs.read(record)?)?;
                 if saved.coord != *coord || saved.revision != *revision {
                     return Err(Error::Corrupt(
                         "a Chunk record is not the version its manifest names".into(),
@@ -2514,7 +2493,7 @@ impl Manifest {
         commit.paused = paused
             .iter()
             .map(|(home, record)| {
-                let work: PausedWork = decode_record(SHARE_RECORD, &packs.read(record)?)?;
+                let work = record::read_share(&packs.read(record)?)?;
                 Ok((*home, work.into_share(&commit.simulation)))
             })
             .collect::<Result<_, Error>>()?;
@@ -2753,7 +2732,7 @@ impl Writer {
                 ChunkVersion::New(saved) => {
                     distinct_chunk(&mut coords, saved.coord)?;
                     saved.restore(&mapping)?;
-                    let record = pack.add(&encode_record(CHUNK_RECORD, &saved)?);
+                    let record = pack.add(&record::chunk(&saved)?);
                     (saved.coord, saved.revision, record)
                 }
             });
@@ -2769,7 +2748,7 @@ impl Writer {
                 Some((_, record)) => record.clone(),
                 None => {
                     restore_share(share, manifest.simulation.logical_step, &mapping)?;
-                    pack.add(&encode_record(SHARE_RECORD, &PausedWork::of(share))?)
+                    pack.add(&record::share(&PausedWork::of(share))?)
                 }
             };
             manifest.paused.push((*home, record));
@@ -3092,6 +3071,70 @@ fn read_commit(path: &Path) -> Result<Commit, Error> {
     Ok(commit)
 }
 
+/// A Commit as JSON for a person to read: its own fields, then each Chunk's palette by name and
+/// indices as runs of `[count, index]`, then each paused share, each with the record it came from
+/// in format 3. The newest Commit by sequence unless `sequence` names one. Reads, never writes,
+/// and takes no lock.
+pub fn dump(directory: &Path, sequence: Option<u64>) -> Result<serde_json::Value, Error> {
+    let sequence = match sequence {
+        Some(n) => n,
+        None => fs::read_dir(directory)?
+            .filter_map(|e| Some(sequence_of(&e.ok()?.path(), "commit")?.ok()))
+            .flatten()
+            .max()
+            .ok_or_else(|| Error::Corrupt("the folder holds no commit".into()))?,
+    };
+    let path = commit_path(directory, sequence);
+    let body = read_body(&path)?;
+    let manifest = (body.get("format").and_then(|f| f.as_u64()) == Some(3))
+        .then(|| serde_json::from_value::<Manifest>(body))
+        .transpose()
+        .map_err(|e| Error::Corrupt(e.to_string()))?;
+    let (head, chunks, paused): (Commit<(), ()>, _, _) = read_commit(&path)?.split();
+    let mut commit = to_json(&head)?;
+    if let Some(fields) = commit.as_object_mut() {
+        fields.remove("chunks");
+        fields.remove("paused");
+    }
+    let chunks = chunks
+        .iter()
+        .enumerate()
+        .map(|(i, c)| {
+            let (indices, palette) = c.indices()?;
+            let mut runs: Vec<(u32, u16)> = Vec::new();
+            for index in indices {
+                match runs.last_mut() {
+                    Some((n, at)) if *at == index => *n += 1,
+                    _ => runs.push((1, index)),
+                }
+            }
+            Ok(serde_json::json!({
+                "coord": c.coord,
+                "revision": c.revision,
+                "record": manifest.as_ref().map(|m| to_json(&m.chunks[i].2)).transpose()?,
+                "palette": to_json(&palette)?,
+                "runs": runs,
+            }))
+        })
+        .collect::<Result<Vec<_>, Error>>()?;
+    let paused = paused
+        .iter()
+        .enumerate()
+        .map(|(i, (home, share))| {
+            Ok(serde_json::json!({
+                "home": home,
+                "record": manifest.as_ref().map(|m| to_json(&m.paused[i].1)).transpose()?,
+                "share": to_json(share)?,
+            }))
+        })
+        .collect::<Result<Vec<_>, Error>>()?;
+    Ok(serde_json::json!({ "commit": commit, "chunks": chunks, "paused": paused }))
+}
+
+fn to_json(value: &impl Serialize) -> Result<serde_json::Value, Error> {
+    serde_json::to_value(value).map_err(|e| Error::Corrupt(e.to_string()))
+}
+
 /// A commit file's checked JSON, refused as incompatible when its format is one this build does
 /// not open.
 fn read_body(path: &Path) -> Result<serde_json::Value, Error> {
@@ -3182,6 +3225,7 @@ pub mod containers;
 pub mod entities;
 pub mod library;
 pub mod map;
+mod record;
 #[cfg(test)]
 mod tests;
 
