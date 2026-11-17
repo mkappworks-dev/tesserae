@@ -359,11 +359,11 @@ fn door_side(template: &Template, door: Option<[u16; 2]>) -> u8 {
 
 impl Worldgen {
     /// Where a Player enters a new World: inside the laid-out Settlement nearest the origin within
-    /// `search_m` of it, halfway out from its centre on the south side or the nearest dry one round
+    /// `search_m` of it, of a row marked `near_spawn` if any is, halfway out from its centre on the south side or the nearest dry one round
     /// it; `None` where none stands that near.
     pub fn settlement_spawn_m(&self, search_m: f32) -> Option<[f32; 2]> {
         let origin = [0.0; 2];
-        let nearest = self
+        let laid: Vec<Founding> = self
             .foundings_near([[-search_m; 2], [search_m; 2]])
             .into_iter()
             .filter(|f| distance(f.centre_m, origin) <= search_m)
@@ -372,7 +372,17 @@ impl Worldgen {
                     .laid((f.row, f.cell), || self.lay_out(f))
                     .is_some()
             })
-            .min_by(|a, b| distance(a.centre_m, origin).total_cmp(&distance(b.centre_m, origin)))?;
+            .collect();
+        let pass = self.settlement_pass()?;
+        let nearest = |near_spawn: bool| {
+            laid.iter()
+                .filter(|f| !near_spawn || pass.rows[f.row].entry.near_spawn)
+                .min_by(|a, b| {
+                    distance(a.centre_m, origin).total_cmp(&distance(b.centre_m, origin))
+                })
+        };
+        // A row a Game marks for spawn first: its Biome is the one it means a new Player to enter.
+        let nearest = nearest(true).or_else(|| nearest(false))?;
         let [cx, cz] = nearest.centre_m;
         let out_m = nearest.radius_m * SPAWN_IN;
         // South of its centre first: a new Player looks north, across the Settlement.

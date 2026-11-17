@@ -176,6 +176,18 @@ macro_rules! structures {
                 .into()
         }
 
+        /// [`village`]'s rows for a Biome without the Game's food, whose villages never take the
+        /// spawn: a new Player enters where a first meal grows.
+        pub fn outlying() -> Vec<crate::tesserae::mods::content::BiomeSettlement> {
+            village()
+                .into_iter()
+                .map(|row| crate::tesserae::mods::content::BiomeSettlement {
+                    near_spawn: false,
+                    ..row
+                })
+                .collect()
+        }
+
         /// Each of `names`, a wilderness Template of the Game's.
         pub fn wild(names: &[&str]) -> Vec<crate::tesserae::mods::content::BiomeStructure> {
             names

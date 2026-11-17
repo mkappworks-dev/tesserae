@@ -99,7 +99,7 @@ fn biomes() -> Vec<BiomeDef> {
             cave_scale: Some(1.5),
             crop_fields: Vec::new(),
             structures: structures::wild(&["obsidian_spire", "ash_pit"]),
-            settlements: structures::village(),
+            settlements: structures::outlying(),
             surface_features: Vec::new(),
             loot: Some(structures::loot(structures::biome_loot("scorched"))),
         },

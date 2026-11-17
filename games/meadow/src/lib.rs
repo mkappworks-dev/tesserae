@@ -185,7 +185,7 @@ fn biomes() -> Vec<BiomeDef> {
                 structures::wild(&["hive"]),
             ]
             .concat(),
-            settlements: structures::village(),
+            settlements: structures::outlying(),
             surface_features: plants::prairie(),
             loot: Some(structures::loot(structures::biome_loot("prairie"))),
         },

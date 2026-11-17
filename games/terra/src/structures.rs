@@ -367,13 +367,14 @@ pub fn settlements() -> Vec<SettlementDef> {
     ]
 }
 
-/// A Biome's row for the Settlement `name`; a village row stands one near spawn.
-fn row(name: &str, spacing_m: f32, chance: f32) -> BiomeSettlement {
+/// A Biome's row for the Settlement `name`; `near_spawn` stands one near spawn, where a new
+/// Player enters.
+fn row(name: &str, spacing_m: f32, chance: f32, near_spawn: bool) -> BiomeSettlement {
     BiomeSettlement {
         settlement: format!("terra:{name}"),
         spacing_m,
         chance,
-        near_spawn: name == "village",
+        near_spawn,
     }
 }
 
@@ -381,16 +382,17 @@ fn row(name: &str, spacing_m: f32, chance: f32) -> BiomeSettlement {
 /// way.
 pub fn village() -> Vec<BiomeSettlement> {
     vec![
-        row("village", VILLAGE_SPACING_M, VILLAGE_CHANCE),
-        row("hamlet", HAMLET_SPACING_M, HAMLET_CHANCE),
+        row("village", VILLAGE_SPACING_M, VILLAGE_CHANCE, false),
+        row("hamlet", HAMLET_SPACING_M, HAMLET_CHANCE, false),
     ]
 }
 
-/// The town first, so a village the lattice puts where it stands gives way.
+/// The town first, so a village the lattice puts where it stands gives way. The temperate Biome's
+/// village is where a new Player enters, among the oaks and melons a first night needs.
 pub fn town_and_village() -> Vec<BiomeSettlement> {
     vec![
-        row("town", TOWN_SPACING_M, 1.0),
-        row("village", VILLAGE_SPACING_M, VILLAGE_CHANCE),
+        row("town", TOWN_SPACING_M, 1.0, false),
+        row("village", VILLAGE_SPACING_M, VILLAGE_CHANCE, true),
     ]
 }
 
