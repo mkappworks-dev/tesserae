@@ -227,10 +227,12 @@ impl Guest for Terra {
                     solid: false,
                 },
                 solid("brick"),
+                // Sky light fades over about 15 m of it: a version 3 sea and its lakes are tens of
+                // metres deep, and at 2 a Voxel their floors were black 7 m down.
                 MaterialDef {
                     name: "water".into(),
                     emission: 0,
-                    dimming: 2,
+                    dimming: 1,
                     occlusion: Occlusion::SameMaterial,
                     render: RenderClass::Blend,
                     remove_time_s: None,

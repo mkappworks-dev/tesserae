@@ -1332,7 +1332,7 @@ fn terra_contract_content_loads_and_terra_builds_nothing_at_spawn() {
         assert_eq!(lava, base + 1);
         assert_eq!(loaded.tables.materials.def(lava).emission, 15);
         let flow = loaded.tables.fluids.get(lava).unwrap();
-        // Its own water, with the fixture water's Material and fluid row.
+        // Its own water, with the fixture water's fluid row and Material, but clearer to light.
         let terra_water = loaded
             .registry
             .id_of(tesserae_mods::Kind::Material, "terra:water")
@@ -1340,7 +1340,10 @@ fn terra_contract_content_loads_and_terra_builds_nothing_at_spawn() {
         assert_eq!(terra_water, base + 6);
         assert_eq!(
             *loaded.tables.materials.def(terra_water),
-            tesserae_core::testgen::WATER_MATERIAL
+            tesserae_core::MaterialDef {
+                dimming: 1,
+                ..tesserae_core::testgen::WATER_MATERIAL
+            }
         );
         let water = loaded.tables.fluids.get(terra_water).unwrap();
         assert_eq!(*water, tesserae_core::testgen::WATER_FLUID);
