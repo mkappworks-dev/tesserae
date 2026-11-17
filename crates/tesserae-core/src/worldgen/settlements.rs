@@ -62,6 +62,8 @@ const WEAR_SALT: u64 = 0x5e77_1e00_0000_0002;
 const LEVEL_MARGIN_M: f32 = 16.0;
 /// Keeps the outskirts' draws apart from the disc's.
 const OUTSKIRT_SALT: u64 = 0x5e77_1e00_0000_0003;
+/// How many rows of outskirts stand back from an approach path.
+const OUTSKIRT_ROWS: usize = 2;
 /// How far the ground across a version 3 Settlement's disc may rise or fall from its centre.
 const DISC_RISE_M: f32 = 4.0;
 /// The most a Plot or a road is cut into or filled over the ground.
@@ -799,7 +801,8 @@ impl Worldgen {
 
     /// A Settlement's outskirts: Buildings beside its approach paths past its disc, each wholly
     /// outside the disc and inside its margin, clear of its roads and every other Plot, where the
-    /// ground takes it. Drawn after the disc's Plots, so they never move one.
+    /// ground takes it; a second row behind the first. Drawn after the disc's Plots, so they never
+    /// move one. A copy that cannot stand its count's minimum lays none, so no field stands alone.
     fn lay_outskirts(
         &self,
         founding: &Founding,
@@ -808,54 +811,73 @@ impl Worldgen {
         laid: &mut LaidSettlement,
     ) {
         let outskirts = &settlement.outskirts;
-        if outskirts.rules.is_empty() {
+        let hash = mix(founding.hash ^ OUTSKIRT_SALT);
+        if outskirts.rules.is_empty() || unit(mix(hash ^ 2)) as f32 >= outskirts.chance {
             return;
         }
-        let hash = mix(founding.hash ^ OUTSKIRT_SALT);
         let (low, high) = outskirts.count;
         let span = u32::from(high - low) + 1;
         let count = low + ((unit(mix(hash ^ 1)) * f64::from(span)) as u32).min(span - 1) as u8;
-        let queue = plot_queue(&outskirts.rules, count, hash);
+        let mut queue = plot_queue(&outskirts.rules, count, hash);
         let (centre, radius_m) = (founding.centre_m, founding.radius_m);
         let outer_m = radius_m + settlement.margin_m;
-        let mut next = 0;
-        for slot in slots(founding, roads) {
-            let Some(&rule) = queue.get(next) else {
-                break;
-            };
-            let (point, heading) = point_along(&roads[slot.road].points, slot.along);
-            if distance(point, centre) <= radius_m {
-                continue;
+        let slots = slots(founding, roads);
+        let mut placed = 0;
+        'rows: for row in 0..OUTSKIRT_ROWS {
+            for slot in &slots {
+                if placed == queue.len() {
+                    break 'rows;
+                }
+                let (point, heading) = point_along(&roads[slot.road].points, slot.along);
+                if distance(point, centre) <= radius_m {
+                    continue;
+                }
+                let normal = [-heading[1] * slot.side, heading[0] * slot.side];
+                let facing = facing_back(normal);
+                let step = FACINGS[usize::from(facing)];
+                // A slot takes the first queued Building that fits it, so one too large for every
+                // slot never holds back the rest.
+                for at in placed..queue.len() {
+                    let building = &outskirts.rules[queue[at]].building;
+                    let depth_m = self.turned(building, facing, point).2
+                        [usize::from(facing.is_multiple_of(2))];
+                    let back_m = APPROACH_HALF_M
+                        + APRON_M
+                        + slot.setback_m
+                        + row as f32 * (depth_m + 2.0 * APRON_M);
+                    let door_m = [0, 1].map(|a| point[a] - step[a] * back_m);
+                    let (_, corner_m, size_m) = self.turned(building, facing, door_m);
+                    let rect = [corner_m, [0, 1].map(|a| corner_m[a] + size_m[a])];
+                    let kept = widened(rect, APRON_M);
+                    let nearest = [0, 1].map(|a| centre[a].clamp(kept[0][a], kept[1][a]));
+                    let corners = [
+                        kept[0],
+                        kept[1],
+                        [kept[0][0], kept[1][1]],
+                        [kept[1][0], kept[0][1]],
+                    ];
+                    if distance(nearest, centre) <= radius_m
+                        || corners.iter().any(|&p| distance(p, centre) > outer_m)
+                        || laid.plots.iter().any(|plot| overlap(plot.kept, kept))
+                        || laid.any_road(kept)
+                    {
+                        continue;
+                    }
+                    if let Some((s, plot)) = self.plot(building, facing, door_m) {
+                        laid.plots.push(plot);
+                        laid.structures.push(s);
+                        laid.rules.push(None);
+                        queue.swap(placed, at);
+                        placed += 1;
+                        break;
+                    }
+                }
             }
-            let normal = [-heading[1] * slot.side, heading[0] * slot.side];
-            let facing = facing_back(normal);
-            let step = FACINGS[usize::from(facing)];
-            let back_m = APPROACH_HALF_M + APRON_M + slot.setback_m;
-            let door_m = [0, 1].map(|a| point[a] - step[a] * back_m);
-            let building = &outskirts.rules[rule].building;
-            let (_, corner_m, size_m) = self.turned(building, facing, door_m);
-            let rect = [corner_m, [0, 1].map(|a| corner_m[a] + size_m[a])];
-            let kept = widened(rect, APRON_M);
-            let nearest = [0, 1].map(|a| centre[a].clamp(kept[0][a], kept[1][a]));
-            let corners = [
-                kept[0],
-                kept[1],
-                [kept[0][0], kept[1][1]],
-                [kept[1][0], kept[0][1]],
-            ];
-            if distance(nearest, centre) <= radius_m
-                || corners.iter().any(|&p| distance(p, centre) > outer_m)
-                || laid.plots.iter().any(|plot| overlap(plot.kept, kept))
-                || laid.any_road(kept)
-            {
-                continue;
-            }
-            if let Some((s, plot)) = self.plot(building, facing, door_m) {
-                laid.plots.push(plot);
-                laid.structures.push(s);
-                laid.rules.push(None);
-                next += 1;
-            }
+        }
+        if placed < usize::from(low) {
+            laid.plots.truncate(laid.outskirts_from);
+            laid.structures.truncate(laid.outskirts_from);
+            laid.rules.truncate(laid.outskirts_from);
         }
     }
 

@@ -302,6 +302,7 @@ fn a_saved_world_keeps_its_settlements_outskirts_and_one_without_saves_none() {
                 loot: None,
             }],
             count: (1, 3),
+            chance: 0.5,
         },
         ..hamlet(PATH)
     };
@@ -325,10 +326,22 @@ fn a_saved_world_keeps_its_settlements_outskirts_and_one_without_saves_none() {
     };
     let (kept, templates, _) = capture(farmed.clone());
     assert_eq!(kept.outskirts.count, (1, 3));
+    assert_eq!(kept.outskirts.chance, 0.5);
     let outskirt = &templates[usize::from(kept.outskirts.rules[0].building.template)];
     assert_eq!(
         outskirt, "t:unused",
         "the outskirt's Template is kept and renumbered"
+    );
+    let mut always = farmed.clone();
+    always.outskirts.chance = 1.0;
+    let (kept, _, json) = capture(always);
+    assert_eq!(kept.outskirts.chance, 1.0);
+    assert!(
+        !json["settlements"][0]["outskirts"]
+            .as_object()
+            .unwrap()
+            .contains_key("chance"),
+        "every copy farming saves no chance"
     );
     let (kept, _, json) = capture(hamlet(PATH));
     assert!(kept.outskirts.rules.is_empty());

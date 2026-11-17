@@ -166,6 +166,7 @@ fn settlement(
         Some(o) => Outskirts {
             rules: rules_of(&o.templates).map_err(|e| format!("outskirts: {e}"))?,
             count: (o.count_min, o.count_max),
+            ..Outskirts::default()
         },
         None => Outskirts::default(),
     };

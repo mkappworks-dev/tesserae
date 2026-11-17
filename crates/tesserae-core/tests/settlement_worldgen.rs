@@ -1734,6 +1734,7 @@ fn farmed() -> Settlement {
                 loot: None,
             }],
             count: (4, 6),
+            chance: 1.0,
         },
         ..village()
     }
@@ -1814,6 +1815,7 @@ fn a_settlement_without_outskirts_lays_out_as_before() {
             outskirts: tesserae_core::settlement::Outskirts {
                 rules: Vec::new(),
                 count: (0, 0),
+                chance: 1.0,
             },
             ..village()
         },
@@ -1822,5 +1824,111 @@ fn a_settlement_without_outskirts_lays_out_as_before() {
     assert_eq!(
         changed(&plain_village, &bare, 96.0, false),
         changed(&empty, &bare, 96.0, false)
+    );
+}
+
+/// A hamlet whose fields stand on its approach paths, `chance` of its copies farming.
+fn farming_hamlet(count: (u8, u8), chance: f32) -> Settlement {
+    let t = templates();
+    Settlement {
+        margin_m: 20.0,
+        outskirts: tesserae_core::settlement::Outskirts {
+            rules: vec![PlotRule {
+                building: building(&t, 4),
+                weight: 1.0,
+                min: 0,
+                max: count.1,
+                loot: None,
+            }],
+            count,
+            chance,
+        },
+        ..hamlet()
+    }
+}
+
+/// How many fields each Settlement in a 640 m scan stands, by its well; none near the scan's edge,
+/// where a neighbour past it could claim a field.
+fn fields_per_settlement(settlement: Settlement) -> Vec<usize> {
+    let half_m = 320.0;
+    let made = |listed| {
+        generator(
+            1.0,
+            plain(listing_at(listed, 56.0, 1.0)),
+            settlement.clone(),
+        )
+    };
+    let changed = changed(&made(true), &made(false), half_m, false);
+    let wells: Vec<[f32; 2]> = marked(&changed, WELL)
+        .iter()
+        .map(|w| [w[0], w[2]].map(|g| g as f32 + 1.5))
+        .collect();
+    let mut counts = vec![0; wells.len()];
+    for corner in marked(&changed, FIELD) {
+        let middle = [corner[0], corner[2]].map(|g| g as f32);
+        let d = |w: [f32; 2]| (w[0] - middle[0]).hypot(w[1] - middle[1]);
+        let nearest = (0..wells.len())
+            .min_by(|&a, &b| d(wells[a]).total_cmp(&d(wells[b])))
+            .unwrap();
+        // Past its radius and margin, the field's own well is beyond the scan.
+        if d(wells[nearest]) < 40.0 {
+            counts[nearest] += 1;
+        }
+    }
+    wells
+        .iter()
+        .zip(counts)
+        .filter(|(w, _)| w.iter().all(|&c| (c - AWAY_M).abs() < half_m - 80.0))
+        .map(|(_, n)| n)
+        .collect()
+}
+
+#[test]
+fn a_share_of_settlements_farm_and_each_that_does_stands_its_minimum() {
+    let counts = fields_per_settlement(farming_hamlet((2, 3), 0.5));
+    let farming = counts.iter().filter(|&&n| n > 0).count();
+    assert!(counts.len() >= 20, "only {} Settlements", counts.len());
+    assert!(
+        farming * 3 > counts.len() && farming * 3 < 2 * counts.len(),
+        "{farming} of {} farm",
+        counts.len()
+    );
+    assert!(counts.iter().all(|&n| n == 0 || n >= 2), "{counts:?}");
+}
+
+#[test]
+fn a_settlement_whose_ground_cannot_hold_its_minimum_lays_no_outskirt() {
+    let counts = fields_per_settlement(farming_hamlet((40, 40), 1.0));
+    assert!(counts.len() >= 20, "only {} Settlements", counts.len());
+    assert!(counts.iter().all(|&n| n == 0), "{counts:?}");
+}
+
+#[test]
+fn fields_stand_two_deep_from_an_approach_path() {
+    let t = templates();
+    let crowded = Settlement {
+        outskirts: tesserae_core::settlement::Outskirts {
+            rules: vec![PlotRule {
+                building: building(&t, 4),
+                weight: 1.0,
+                min: 0,
+                max: 40,
+                loot: None,
+            }],
+            count: (1, 40),
+            chance: 1.0,
+        },
+        ..farmed()
+    };
+    let made = |listed| generator(1.0, plain(listing(listed)), crowded.clone());
+    let corners = marked(&changed(&made(true), &made(false), 160.0, false), FIELD);
+    // A second-row field stands straight behind its first-row neighbour: its 4 m depth and the two
+    // 2 m aprons between. Neighbours along a path stand at least 10 m apart.
+    let behind = |a: &[i32; 3], b: &[i32; 3]| {
+        (a[0] == b[0] && (a[2] - b[2]).abs() == 8) || (a[2] == b[2] && (a[0] - b[0]).abs() == 8)
+    };
+    assert!(
+        corners.iter().any(|a| corners.iter().any(|b| behind(a, b))),
+        "no field stands behind another: {corners:?}"
     );
 }

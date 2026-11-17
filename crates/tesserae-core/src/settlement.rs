@@ -36,11 +36,23 @@ pub struct PlotRule {
 
 /// Buildings a Settlement lays beside its approach paths past its disc, inside its margin: its
 /// fields, orchards and paddocks.
-#[derive(Clone, PartialEq, Debug, Default)]
+#[derive(Clone, PartialEq, Debug)]
 pub struct Outskirts {
     pub rules: Vec<PlotRule>,
-    /// How many a copy lays at most, drawn between these.
+    /// How many a copy lays at most, drawn between these. Fewer than the first lay none.
     pub count: (u8, u8),
+    /// The share of copies that lay any, in (0, 1].
+    pub chance: f32,
+}
+
+impl Default for Outskirts {
+    fn default() -> Self {
+        Self {
+            rules: Vec::new(),
+            count: (0, 0),
+            chance: 1.0,
+        }
+    }
 }
 
 #[derive(Clone, PartialEq, Debug)]
@@ -163,6 +175,9 @@ impl Settlement {
             return Err(format!(
                 "its outskirts draw from at most {MAX_PLOTS} Templates and lay from a smaller count to a larger, at most {MAX_PLOTS}"
             ));
+        }
+        if !(outskirts.chance > 0.0 && outskirts.chance <= 1.0) {
+            return Err("its outskirts' chance must be above 0 and at most 1".into());
         }
         for rule in &outskirts.rules {
             let template = templates

@@ -741,6 +741,9 @@ pub struct SavedSettlement {
 pub struct SavedOutskirts {
     pub rules: Vec<SavedPlotRule>,
     pub count: (u8, u8),
+    /// Absent where every copy farms.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chance: Option<f32>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1317,6 +1320,7 @@ fn saved_settlement(
         outskirts: (!s.outskirts.rules.is_empty()).then(|| SavedOutskirts {
             rules: s.outskirts.rules.iter().map(saved_rule).collect(),
             count: s.outskirts.count,
+            chance: (s.outskirts.chance < 1.0).then_some(s.outskirts.chance),
         }),
     })
 }
@@ -1354,6 +1358,7 @@ fn restored_settlement(
             .map(|o| crate::settlement::Outskirts {
                 rules: o.rules.iter().map(rule).collect(),
                 count: o.count,
+                chance: o.chance.unwrap_or(1.0),
             })
             .unwrap_or_default(),
     })
