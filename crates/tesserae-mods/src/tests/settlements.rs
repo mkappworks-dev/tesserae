@@ -412,14 +412,14 @@ fn a_settlement_lists_outskirts_and_one_naming_a_missing_template_is_refused() {
     ))
     .unwrap();
     let outskirts = &settlements[0].outskirts;
-    assert_eq!(outskirts.count, (2, 4));
-    assert_eq!(outskirts.rules[0].building.template, 0);
+    assert_eq!(outskirts[0].count, (2, 4));
+    assert_eq!(outskirts[0].rules[0].building.template, 0);
     let (plain, _) = load(&world(
         &settlement(VILLAGE),
         "{ settlement = \"t:village\", spacing-m = 120.0 }",
     ))
     .unwrap();
-    assert!(plain[0].outskirts.rules.is_empty(), "none unless it says");
+    assert!(plain[0].outskirts.is_empty(), "none unless it says");
     let missing = farmed.replace("t:well\" }]", "t:barn\" }]");
     let err = load(&world(
         &settlement(&missing),
@@ -440,11 +440,30 @@ fn outskirts_read_a_chance_and_refuse_one_outside_zero_to_one() {
     };
     let listed = "{ settlement = \"t:village\", spacing-m = 120.0 }";
     let (settlements, _) = load(&world(&settlement(&farmed("0.4")), listed)).unwrap();
-    assert_eq!(settlements[0].outskirts.chance, 0.4);
+    assert_eq!(settlements[0].outskirts[0].chance, 0.4);
     for wrong in ["0.0", "1.5"] {
         let err = load(&world(&settlement(&farmed(wrong)), listed))
             .unwrap_err()
             .to_string();
         assert!(err.contains("chance"), "{wrong}: {err}");
     }
+}
+
+#[test]
+fn a_settlement_lists_outskirt_groups_in_order() {
+    let grouped = format!(
+        "{VILLAGE}\nmargin-m = 20.0\n\
+         outskirts = [\
+         {{ count-min = 2, count-max = 4, templates = [{{ template = \"t:well\" }}] }}, \
+         {{ count-min = 1, count-max = 1, chance = 0.5, templates = [{{ template = \"t:well\" }}] }}]"
+    );
+    let (settlements, _) = load(&world(
+        &settlement(&grouped),
+        "{ settlement = \"t:village\", spacing-m = 120.0 }",
+    ))
+    .unwrap();
+    let groups = &settlements[0].outskirts;
+    assert_eq!(groups.len(), 2);
+    assert_eq!((groups[0].count, groups[1].count), ((2, 4), (1, 1)));
+    assert_eq!(groups[1].chance, 0.5);
 }

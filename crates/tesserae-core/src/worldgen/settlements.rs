@@ -17,7 +17,7 @@ use super::{CARDINALS, Footprint, Worldgen, top_index};
 use crate::chunk::{CHUNK_SIZE, Chunk};
 use crate::climate::{BIOMES_SINCE, BiomeId, BiomeSettlement};
 use crate::mesh::POS_Y;
-use crate::settlement::{Building, PlotRule, Settlement};
+use crate::settlement::{Building, Outskirts, PlotRule, Settlement};
 use crate::shape::{Orientation, SHAPE_SLAB, SHAPE_STAIR};
 use crate::template::{Template, Turn};
 use crate::voxel::Voxel;
@@ -141,7 +141,13 @@ impl SettlementPass {
                     .centre
                     .iter()
                     .chain(settlement.rules.iter().map(|r| &r.building))
-                    .chain(settlement.outskirts.rules.iter().map(|r| &r.building));
+                    .chain(
+                        settlement
+                            .outskirts
+                            .iter()
+                            .flat_map(|o| &o.rules)
+                            .map(|r| &r.building),
+                    );
                 for building in buildings {
                     let sampled = templates
                         .get(usize::from(building.template))?
@@ -795,23 +801,29 @@ impl Worldgen {
             return None;
         }
         laid.outskirts_from = laid.plots.len();
-        self.lay_outskirts(founding, settlement, &roads, &mut laid);
+        for (group, outskirts) in settlement.outskirts.iter().enumerate() {
+            self.lay_outskirts(founding, settlement, (group, outskirts), &roads, &mut laid);
+        }
         Some(laid)
     }
 
-    /// A Settlement's outskirts: Buildings beside its approach paths past its disc and then round
-    /// its edge, each wholly outside the disc and inside its margin, clear of its roads and every
-    /// other Plot, where the ground takes it; a second row behind the first. Drawn after the disc's Plots, so they never
-    /// move one. A copy that cannot stand its count's minimum lays none, so no field stands alone.
+    /// One group of a Settlement's outskirts: Buildings beside its approach paths past its disc and
+    /// then round its edge, each wholly outside the disc and inside its margin, clear of its roads
+    /// and every other Plot, where the ground takes it; a second row behind the first. Drawn after
+    /// the disc's Plots and every earlier group's, so it never moves one. A copy that cannot stand
+    /// the group's minimum lays none of it, so no field stands alone.
     fn lay_outskirts(
         &self,
         founding: &Founding,
         settlement: &Settlement,
+        (group, outskirts): (usize, &Outskirts),
         roads: &[Road],
         laid: &mut LaidSettlement,
     ) {
-        let outskirts = &settlement.outskirts;
-        let hash = mix(founding.hash ^ OUTSKIRT_SALT);
+        // The first group's draws are as they were before groups; a later one never moves them.
+        let hash =
+            mix(founding.hash ^ OUTSKIRT_SALT ^ (group as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15));
+        let from = laid.plots.len();
         if outskirts.rules.is_empty() || unit(mix(hash ^ 2)) as f32 >= outskirts.chance {
             return;
         }
@@ -891,9 +903,9 @@ impl Worldgen {
             }
         }
         if placed < usize::from(low) {
-            laid.plots.truncate(laid.outskirts_from);
-            laid.structures.truncate(laid.outskirts_from);
-            laid.rules.truncate(laid.outskirts_from);
+            laid.plots.truncate(from);
+            laid.structures.truncate(from);
+            laid.rules.truncate(from);
         }
     }
 

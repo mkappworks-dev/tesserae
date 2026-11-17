@@ -773,9 +773,27 @@ pub struct SavedSettlement {
     pub path: Solid,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub loot: Option<crate::loot::LootTable>,
-    /// Absent in a Settlement saved before outskirts, which lays none.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub outskirts: Option<SavedOutskirts>,
+    /// Absent in a Settlement saved before outskirts, which lays none; one object, not a list, in
+    /// one saved before outskirt groups.
+    #[serde(
+        default,
+        skip_serializing_if = "Vec::is_empty",
+        deserialize_with = "one_or_many"
+    )]
+    pub outskirts: Vec<SavedOutskirts>,
+}
+
+fn one_or_many<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<SavedOutskirts>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum OneOrMany {
+        One(SavedOutskirts),
+        Many(Vec<SavedOutskirts>),
+    }
+    Ok(match OneOrMany::deserialize(d)? {
+        OneOrMany::One(o) => vec![o],
+        OneOrMany::Many(v) => v,
+    })
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1046,7 +1064,12 @@ impl Generation {
                 s.centre
                     .iter()
                     .chain(s.rules.iter().map(|r| &r.building))
-                    .chain(s.outskirts.rules.iter().map(|r| &r.building))
+                    .chain(
+                        s.outskirts
+                            .iter()
+                            .flat_map(|o| &o.rules)
+                            .map(|r| &r.building),
+                    )
                     .map(|b| b.template),
             );
         }
@@ -1459,11 +1482,16 @@ fn saved_settlement(
         minimum: s.minimum,
         path: mapping.voxel(s.path)?,
         loot: s.loot.clone(),
-        outskirts: (!s.outskirts.rules.is_empty()).then(|| SavedOutskirts {
-            rules: s.outskirts.rules.iter().map(saved_rule).collect(),
-            count: s.outskirts.count,
-            chance: (s.outskirts.chance < 1.0).then_some(s.outskirts.chance),
-        }),
+        outskirts: s
+            .outskirts
+            .iter()
+            .filter(|o| !o.rules.is_empty())
+            .map(|o| SavedOutskirts {
+                rules: o.rules.iter().map(saved_rule).collect(),
+                count: o.count,
+                chance: (o.chance < 1.0).then_some(o.chance),
+            })
+            .collect(),
     })
 }
 
@@ -1496,13 +1524,13 @@ fn restored_settlement(
         loot: s.loot.clone(),
         outskirts: s
             .outskirts
-            .as_ref()
+            .iter()
             .map(|o| crate::settlement::Outskirts {
                 rules: o.rules.iter().map(rule).collect(),
                 count: o.count,
                 chance: o.chance.unwrap_or(1.0),
             })
-            .unwrap_or_default(),
+            .collect(),
     })
 }
 

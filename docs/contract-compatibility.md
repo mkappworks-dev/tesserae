@@ -268,6 +268,12 @@ is 1, every copy. A copy that cannot stand `count-min` now lays none, so no
 field stands alone. A Declaration built against the earlier 0.3 text needs a
 rebuild.
 
+A `settlement-def`'s `outskirts` then became a list of groups,
+`option<list<settlement-outskirts>>`, at most 4, laid in order and each drawn by
+its own chance: fields in one, ponds in another. The first group's draws are as
+before; a later group never moves them. A TOML Declaration may still give one
+table. A Declaration built against the earlier 0.3 text needs a rebuild.
+
 A `settlement-def`, a `settlement-plot` and a `biome-def` then each gained an
 optional `loot`, last, a `loot-table` record: `rolls-min` and `rolls-max` (at
 most 27) and 1 to 16 `loot-entry` rows of an `item` by full name, a `min` of at

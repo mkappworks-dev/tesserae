@@ -77,7 +77,7 @@ impl DeclaredSettlements {
                 if let Some(loot) = &def.loot {
                     crate::loot::check(loot, items).map_err(|e| fail(format!("loot: {e}")))?;
                 }
-                let outskirts = def.outskirts.iter().flat_map(|o| &o.templates);
+                let outskirts = def.outskirts.iter().flatten().flat_map(|o| &o.templates);
                 for plot in def.templates.iter().chain(outskirts) {
                     if let Some(loot) = &plot.loot {
                         crate::loot::check(loot, items)
@@ -162,14 +162,18 @@ fn settlement(
             .collect::<Result<Vec<_>, String>>()
     };
     let rules = rules_of(&def.templates)?;
-    let outskirts = match &def.outskirts {
-        Some(o) => Outskirts {
-            rules: rules_of(&o.templates).map_err(|e| format!("outskirts: {e}"))?,
-            count: (o.count_min, o.count_max),
-            chance: o.chance.unwrap_or(1.0),
-        },
-        None => Outskirts::default(),
-    };
+    let outskirts = def
+        .outskirts
+        .iter()
+        .flatten()
+        .map(|o| {
+            Ok::<_, String>(Outskirts {
+                rules: rules_of(&o.templates).map_err(|e| format!("outskirts: {e}"))?,
+                count: (o.count_min, o.count_max),
+                chance: o.chance.unwrap_or(1.0),
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
     let material = solid(&def.path, registry, tables).map_err(|e| format!("path: {e}"))?;
     let shape = match &def.path_shape {
         Some(shape) => registry

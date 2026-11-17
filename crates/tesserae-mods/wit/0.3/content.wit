@@ -1297,9 +1297,11 @@ interface content {
         /// What its buildings' chests hold, unless a Template's row gives its
         /// own; `none` leaves them empty.
         loot: option<loot-table>,
-        /// Buildings laid beside its approach paths just past its disc, inside
-        /// its margin: fields, orchards, paddocks. `none` lays none.
-        outskirts: option<settlement-outskirts>,
+        /// Groups of Buildings laid beside its approach paths just past its
+        /// disc, inside its margin, in order, each by its own chance: fields,
+        /// orchards and paddocks in one, ponds in another. At most 4. `none`
+        /// lays none.
+        outskirts: option<list<settlement-outskirts>>,
     }
 
     /// What a Settlement lays past its disc, drawn like its Plots.

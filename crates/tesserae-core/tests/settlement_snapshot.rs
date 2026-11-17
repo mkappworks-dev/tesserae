@@ -290,7 +290,7 @@ fn a_world_keeps_the_loot_it_was_made_with_and_one_made_without_saves_none() {
 #[test]
 fn a_saved_world_keeps_its_settlements_outskirts_and_one_without_saves_none() {
     let farmed = Settlement {
-        outskirts: tesserae_core::settlement::Outskirts {
+        outskirts: vec![tesserae_core::settlement::Outskirts {
             rules: vec![PlotRule {
                 building: Building {
                     template: 0,
@@ -303,7 +303,7 @@ fn a_saved_world_keeps_its_settlements_outskirts_and_one_without_saves_none() {
             }],
             count: (1, 3),
             chance: 0.5,
-        },
+        }],
         ..hamlet(PATH)
     };
     let capture = |settlement: Settlement| {
@@ -325,30 +325,61 @@ fn a_saved_world_keeps_its_settlements_outskirts_and_one_without_saves_none() {
         )
     };
     let (kept, templates, _) = capture(farmed.clone());
-    assert_eq!(kept.outskirts.count, (1, 3));
-    assert_eq!(kept.outskirts.chance, 0.5);
-    let outskirt = &templates[usize::from(kept.outskirts.rules[0].building.template)];
+    assert_eq!(kept.outskirts[0].count, (1, 3));
+    assert_eq!(kept.outskirts[0].chance, 0.5);
+    let outskirt = &templates[usize::from(kept.outskirts[0].rules[0].building.template)];
     assert_eq!(
         outskirt, "t:unused",
         "the outskirt's Template is kept and renumbered"
     );
     let mut always = farmed.clone();
-    always.outskirts.chance = 1.0;
+    always.outskirts[0].chance = 1.0;
     let (kept, _, json) = capture(always);
-    assert_eq!(kept.outskirts.chance, 1.0);
+    assert_eq!(kept.outskirts[0].chance, 1.0);
     assert!(
-        !json["settlements"][0]["outskirts"]
+        !json["settlements"][0]["outskirts"][0]
             .as_object()
             .unwrap()
             .contains_key("chance"),
         "every copy farming saves no chance"
     );
     let (kept, _, json) = capture(hamlet(PATH));
-    assert!(kept.outskirts.rules.is_empty());
+    assert!(kept.outskirts.is_empty());
     assert!(
         !json["settlements"][0]
             .as_object()
             .unwrap()
             .contains_key("outskirts")
     );
+}
+
+#[test]
+fn a_world_saved_with_one_outskirts_object_reopens_with_one_group() {
+    let farmed = Settlement {
+        outskirts: vec![tesserae_core::settlement::Outskirts {
+            rules: vec![PlotRule {
+                building: Building {
+                    template: 0,
+                    door: None,
+                },
+                weight: 1.0,
+                min: 0,
+                max: 3,
+                loot: None,
+            }],
+            count: (1, 3),
+            chance: 1.0,
+        }],
+        ..hamlet(PATH)
+    };
+    let mut json = serde_json::to_value(
+        Generation::capture(world(), &game(), &[hamlet(PATH), farmed], &mapping()).unwrap(),
+    )
+    .unwrap();
+    let group = json["settlements"][0]["outskirts"][0].clone();
+    json["settlements"][0]["outskirts"] = group;
+    let older: Generation = serde_json::from_value(json).unwrap();
+    let kept = &older.settlements(&mapping()).unwrap()[0];
+    assert_eq!(kept.outskirts.len(), 1);
+    assert_eq!(kept.outskirts[0].count, (1, 3));
 }

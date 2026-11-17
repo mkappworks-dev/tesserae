@@ -20,7 +20,15 @@ pub(super) struct Settlement {
     path: String,
     path_shape: Option<String>,
     loot: Option<Loot>,
-    outskirts: Option<Outskirts>,
+    outskirts: Option<OneOrMany>,
+}
+
+/// One outskirts table, or a list of groups.
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum OneOrMany {
+    One(Outskirts),
+    Many(Vec<Outskirts>),
 }
 
 #[derive(Deserialize)]
@@ -117,11 +125,20 @@ impl From<Settlement> for content::SettlementDef {
             path: s.path,
             path_shape: s.path_shape,
             loot: s.loot.map(Into::into),
-            outskirts: s.outskirts.map(|o| content::SettlementOutskirts {
-                templates: o.templates.into_iter().map(Into::into).collect(),
-                count_min: o.count_min,
-                count_max: o.count_max,
-                chance: o.chance,
+            outskirts: s.outskirts.map(|o| {
+                let groups = match o {
+                    OneOrMany::One(o) => vec![o],
+                    OneOrMany::Many(v) => v,
+                };
+                groups
+                    .into_iter()
+                    .map(|o| content::SettlementOutskirts {
+                        templates: o.templates.into_iter().map(Into::into).collect(),
+                        count_min: o.count_min,
+                        count_max: o.count_max,
+                        chance: o.chance,
+                    })
+                    .collect()
             }),
         }
     }

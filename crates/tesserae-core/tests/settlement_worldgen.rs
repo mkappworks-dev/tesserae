@@ -1725,7 +1725,7 @@ fn farmed() -> Settlement {
     let t = templates();
     Settlement {
         margin_m: 20.0,
-        outskirts: tesserae_core::settlement::Outskirts {
+        outskirts: vec![tesserae_core::settlement::Outskirts {
             rules: vec![PlotRule {
                 building: building(&t, 4),
                 weight: 1.0,
@@ -1735,7 +1735,7 @@ fn farmed() -> Settlement {
             }],
             count: (4, 6),
             chance: 1.0,
-        },
+        }],
         ..village()
     }
 }
@@ -1812,11 +1812,11 @@ fn a_settlement_without_outskirts_lays_out_as_before() {
         1.0,
         plain(listing(true)),
         Settlement {
-            outskirts: tesserae_core::settlement::Outskirts {
+            outskirts: vec![tesserae_core::settlement::Outskirts {
                 rules: Vec::new(),
                 count: (0, 0),
                 chance: 1.0,
-            },
+            }],
             ..village()
         },
     );
@@ -1832,7 +1832,7 @@ fn farming_hamlet(count: (u8, u8), chance: f32) -> Settlement {
     let t = templates();
     Settlement {
         margin_m: 20.0,
-        outskirts: tesserae_core::settlement::Outskirts {
+        outskirts: vec![tesserae_core::settlement::Outskirts {
             rules: vec![PlotRule {
                 building: building(&t, 4),
                 weight: 1.0,
@@ -1842,7 +1842,7 @@ fn farming_hamlet(count: (u8, u8), chance: f32) -> Settlement {
             }],
             count,
             chance,
-        },
+        }],
         ..hamlet()
     }
 }
@@ -1907,7 +1907,7 @@ fn a_settlement_whose_ground_cannot_hold_its_minimum_lays_no_outskirt() {
 fn fields_stand_two_deep_from_an_approach_path() {
     let t = templates();
     let crowded = Settlement {
-        outskirts: tesserae_core::settlement::Outskirts {
+        outskirts: vec![tesserae_core::settlement::Outskirts {
             rules: vec![PlotRule {
                 building: building(&t, 4),
                 weight: 1.0,
@@ -1917,7 +1917,7 @@ fn fields_stand_two_deep_from_an_approach_path() {
             }],
             count: (1, 40),
             chance: 1.0,
-        },
+        }],
         ..farmed()
     };
     let made = |listed| generator(1.0, plain(listing(listed)), crowded.clone());
@@ -1942,4 +1942,40 @@ fn more_fields_than_the_paths_hold_ring_the_disc() {
         "{farming} of {} stand eight fields: {counts:?}",
         counts.len()
     );
+}
+
+#[test]
+fn a_second_outskirt_group_lays_its_own_and_leaves_the_first_groups_plots() {
+    let t = templates();
+    let farms = farmed();
+    let with_lone = Settlement {
+        outskirts: [
+            farms.outskirts.clone(),
+            vec![tesserae_core::settlement::Outskirts {
+                rules: vec![PlotRule {
+                    building: building(&t, 3),
+                    weight: 1.0,
+                    min: 0,
+                    max: 4,
+                    loot: None,
+                }],
+                count: (1, 4),
+                chance: 1.0,
+            }],
+        ]
+        .concat(),
+        ..farmed()
+    };
+    let scan = |settlement: Settlement| {
+        let made = |listed| generator(1.0, plain(listing(listed)), settlement.clone());
+        changed(&made(true), &made(false), 160.0, false)
+    };
+    let (one, two) = (scan(farms), scan(with_lone));
+    assert_eq!(
+        marked(&one, FIELD),
+        marked(&two, FIELD),
+        "the fields stay put"
+    );
+    assert!(marked(&one, LONE).is_empty());
+    assert!(!marked(&two, LONE).is_empty(), "the second group stands");
 }

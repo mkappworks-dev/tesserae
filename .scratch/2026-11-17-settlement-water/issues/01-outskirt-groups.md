@@ -1,6 +1,6 @@
 # 01: Outskirt groups
 
-Status: ready-for-agent
+Status: done
 
 Spec: [Water by Settlements](../spec.md).
 
@@ -12,6 +12,6 @@ group restores as one.
 
 ## Acceptance criteria
 
-- [ ] A second group lays its Templates and leaves the first group's Plots where
+- [x] A second group lays its Templates and leaves the first group's Plots where
       they were.
-- [ ] A save with the earlier single `outskirts` object restores as one group.
+- [x] A save with the earlier single `outskirts` object restores as one group.
