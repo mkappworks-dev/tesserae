@@ -1,6 +1,6 @@
 # 05: Ponds and waterfalls for every demo Game
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 04
 
@@ -14,5 +14,5 @@ villages lay them as a water group by chance.
 
 ## Acceptance criteria
 
-- [ ] Every new Material is Obtainable in its Game.
-- [ ] Each Game's Settlements lay water near spawn somewhere in a scan.
+- [x] Every new Material is Obtainable in its Game.
+- [x] Each Game's Settlements lay water near spawn somewhere in a scan.

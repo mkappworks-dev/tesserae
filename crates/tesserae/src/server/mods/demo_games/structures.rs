@@ -576,6 +576,10 @@ fn a_world_of_each_game_lays_small_and_large_settlements() {
             .iter()
             .map(|f| exported[f.template]["kind"].as_str().unwrap())
             .collect();
+        assert!(
+            kinds.contains(&"water"),
+            "{game}: no pond or waterfall by a Settlement within {SIZES_SCAN_M} m"
+        );
         let sizes = copy_sizes(&found, &kinds, SIZES_SCAN_M);
         // Tidewater's islands hold only a handful of buildings, whatever a harbour draws.
         let large = if game == "tidewater" { 3 } else { 8 };

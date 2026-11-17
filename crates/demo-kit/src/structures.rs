@@ -70,7 +70,17 @@ pub struct Village {
     pub templates: &'static [Plot],
     /// What its buildings' chests hold, unless a Plot has its own.
     pub loot: &'static Loot,
+    /// The share of copies with water by them, and from how many to how many of [`WATER`].
+    pub water: (f32, (u8, u8)),
 }
+
+/// The ponds, brook and waterfall a Settlement lays among its outskirts, by unqualified name.
+pub const WATER: [Plot; 4] = [
+    plot("pond", 3.0, 0, 2),
+    plot("lily_pond", 2.0, 0, 1),
+    plot("brook_pond", 1.5, 0, 1),
+    plot("waterfall", 1.0, 0, 1),
+];
 
 impl Village {
     pub fn qualified(&self, name: &str) -> String {
@@ -110,7 +120,23 @@ macro_rules! structures {
                     path: $crate::structures::PATH.into(),
                     path_shape: None,
                     loot: Some(loot(kind.loot)),
-                    outskirts: None,
+                    outskirts: Some(vec![
+                        crate::tesserae::mods::content::SettlementOutskirts {
+                            templates: $crate::structures::WATER
+                                .iter()
+                                .map(|p| SettlementPlot {
+                                    template: kind.qualified(p.template),
+                                    weight: p.weight,
+                                    min: p.min,
+                                    max: p.max,
+                                    loot: None,
+                                })
+                                .collect(),
+                            count_min: kind.water.1.0,
+                            count_max: kind.water.1.1,
+                            chance: Some(kind.water.0),
+                        },
+                    ]),
                 })
                 .into()
         }
