@@ -208,7 +208,7 @@ impl Base {
         Fields {
             continent,
             erosion,
-            ruggedness: inland * (1.0 - erosion).powf(1.5),
+            ruggedness: inland * (1.0 - erosion).powf(1.0),
         }
     }
 
@@ -229,15 +229,28 @@ impl Base {
             seed.wrapping_add(SALT_PEAKS),
             4,
         );
-        offset += h * 0.8 * ridge * ridge * f.ruggedness;
+        offset += h * 0.9 * ridge.powf(1.5) * f.ruggedness;
 
-        let n = crate::noise::fbm2(
-            x_m * self.inv_feature_size,
-            z_m * self.inv_feature_size,
-            seed.wrapping_add(SALT_DETAIL),
-            self.octaves,
-        );
-        let worn = 0.35 + 0.65 * (1.0 - f.erosion);
+        let detail = |octaves| {
+            crate::noise::fbm2(
+                x_m * self.inv_feature_size,
+                z_m * self.inv_feature_size,
+                seed.wrapping_add(SALT_DETAIL),
+                octaves,
+            )
+        };
+        // Worn inland ground is a plain: the fine octaves that make it a field of small bumps
+        // fade out and the rest is gentler, so there are wide level places to build and farm.
+        let plain = smooth(0.2, 0.5, f.erosion) * inland;
+        let n = if plain > 0.0 {
+            let rough = detail(self.octaves);
+            rough + (detail(self.octaves.min(2)) - rough) * plain
+        } else {
+            detail(self.octaves)
+        };
+        // Detail also dies out at the waterline, so noise does not litter the coast with islets.
+        let shore = 0.2 + 0.8 * smooth(0.0, 14.0, offset.abs());
+        let worn = (0.35 + 0.65 * (1.0 - f.erosion)) * (1.0 - 0.8 * plain) * shore;
         let scale = self
             .relief_by_biome
             .as_ref()
@@ -273,13 +286,13 @@ impl Base {
             / 70.0;
 
         if base < 0.0 {
-            let band = smooth(0.28, 0.34, f.continent) * (1.0 - smooth(0.40, 0.46, f.continent));
+            let band = smooth(0.14, 0.24, f.continent) * (1.0 - smooth(0.40, 0.46, f.continent));
             let islands = smooth(
-                0.62,
-                0.72,
-                crate::noise::fbm2(wx / 500.0, wz / 500.0, seed.wrapping_add(SALT_ISLANDS), 3),
+                0.48,
+                0.56,
+                crate::noise::fbm2(wx / 2400.0, wz / 2400.0, seed.wrapping_add(SALT_ISLANDS), 3),
             );
-            offset += band * islands * (0.35 * d + 8.0);
+            offset += band * islands * (0.6 * d + 8.0);
         }
 
         // Narrow slots cut deep into rugged land: ridged noise, thresholded near its crest.
