@@ -303,17 +303,16 @@ const DRY_LAND_SEARCH_M: f32 = 6000.0;
 /// out.
 const SPAWN_SEARCH_M: [f32; 4] = [512.0, 1024.0, 2048.0, 4096.0];
 
-/// Just outside the Settlement nearest the origin, or over the origin with none that near; clear
+/// Inside the Settlement nearest the origin, or the dry land nearest the origin with none; clear
 /// of the ground and of any lake standing on it, and no lower than the top of anything generated
 /// under the Player's body.
 fn spawn_eye(generator: &Worldgen) -> Vec3 {
-    let beside = SPAWN_SEARCH_M
+    // A Settlement's disc is level dry ground already; only the origin needs looking round.
+    let [x, z] = SPAWN_SEARCH_M
         .iter()
         .find_map(|&r| generator.settlement_spawn_m(r))
+        .or_else(|| generator.dry_land_near_m([0.0; 2], DRY_LAND_SEARCH_M))
         .unwrap_or([0.0; 2]);
-    let [x, z] = generator
-        .dry_land_near_m(beside, DRY_LAND_SEARCH_M)
-        .unwrap_or(beside);
     let ground_m = generator.surface_height_m(x, z);
     let top_m = generator
         .water()

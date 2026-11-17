@@ -1652,7 +1652,7 @@ fn a_trail_stops_short_of_another_settlements_disc_and_margin() {
 }
 
 #[test]
-fn the_spawn_stands_just_outside_the_settlement_nearest_the_origin() {
+fn the_spawn_stands_inside_the_settlement_nearest_the_origin_south_of_its_centre() {
     let generator = generator(1.0, plain(listing_near(true, 128.0, 1.0, true)), village());
     let [x, z] = generator
         .settlement_spawn_m(512.0)
@@ -1682,7 +1682,7 @@ fn the_spawn_stands_just_outside_the_settlement_nearest_the_origin() {
         .unwrap();
     let from_centre = to(own, [x, z]);
     assert!(
-        (RADIUS_M - off_m..=RADIUS_M + MARGIN_M + off_m).contains(&from_centre),
+        (RADIUS_M * 0.55 - off_m..=RADIUS_M * 0.55 + off_m).contains(&from_centre),
         "the spawn stands {from_centre} m from its Settlement's well"
     );
     let nearest = all.iter().map(|c| to(c, [0.0; 2])).fold(f32::MAX, f32::min);

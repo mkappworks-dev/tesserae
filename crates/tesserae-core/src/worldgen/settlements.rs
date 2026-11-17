@@ -48,7 +48,8 @@ const EDGE_HALF_M: f32 = 1.0;
 const APPROACH_HALF_M: f32 = 0.9;
 /// How far past a Settlement's disc a new World's spawn stands: clear of its Plots, inside its
 /// margin.
-const SPAWN_OUT_M: f32 = 6.0;
+/// How far out from a Settlement's centre a new Player enters it, as a share of its radius.
+const SPAWN_IN: f32 = 0.55;
 /// How far an approach path runs past the disc as a trail, drawn between these: past the margin,
 /// over ground the Settlement does not claim, stopping short of another Settlement's.
 const TRAIL_M: (f32, f32) = (40.0, 90.0);
@@ -333,9 +334,9 @@ fn door_side(template: &Template, door: Option<[u16; 2]>) -> u8 {
 }
 
 impl Worldgen {
-    /// Where a Player enters a new World: just outside the disc of the laid-out Settlement nearest
-    /// the origin within `search_m` of it, on the side facing the origin or the nearest dry one
-    /// round it; `None` where none stands that near.
+    /// Where a Player enters a new World: inside the laid-out Settlement nearest the origin within
+    /// `search_m` of it, halfway out from its centre on the south side or the nearest dry one round
+    /// it; `None` where none stands that near.
     pub fn settlement_spawn_m(&self, search_m: f32) -> Option<[f32; 2]> {
         let origin = [0.0; 2];
         let nearest = self
@@ -349,8 +350,9 @@ impl Worldgen {
             })
             .min_by(|a, b| distance(a.centre_m, origin).total_cmp(&distance(b.centre_m, origin)))?;
         let [cx, cz] = nearest.centre_m;
-        let out_m = nearest.radius_m + SPAWN_OUT_M;
-        let toward = (-cz).atan2(-cx);
+        let out_m = nearest.radius_m * SPAWN_IN;
+        // South of its centre first: a new Player looks north, across the Settlement.
+        let toward = TAU / 4.0;
         (0..8)
             .map(|k: i32| {
                 let turn = (k + 1) / 2 * if k % 2 == 1 { 1 } else { -1 };
