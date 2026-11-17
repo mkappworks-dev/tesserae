@@ -115,9 +115,18 @@ pub(crate) struct Wet {
 pub(crate) struct Drainage {
     id: u64,
     sea_m: f32,
-    base: Box<dyn Fn(f32, f32) -> f32 + Send + Sync>,
+    /// This solve's lattice spacing: [`NODE_M`], or [`COARSE_NODE_M`] for the coarse one.
+    node_m: f32,
+    base: Arc<dyn Fn(f32, f32) -> f32 + Send + Sync>,
     cache: RwLock<HashMap<[i32; 2], Arc<Region>>>,
+    /// A solve on a coarser lattice over a wider window, whose large lakes set the level at the
+    /// edge of this one's windows. Without it a lake wider than a window is filled to whatever
+    /// spill each window happens to see, and two regions draw it at two levels.
+    coarse: Option<Box<Drainage>>,
 }
+
+/// The coarse solve's spacing: its region is 8 km and its halo 4 km.
+const COARSE_NODE_M: f32 = NODE_M * 4.0;
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
@@ -136,12 +145,41 @@ fn sortable(f: f32) -> u32 {
 
 impl Drainage {
     pub(crate) fn new(sea_m: f32, base: impl Fn(f32, f32) -> f32 + Send + Sync + 'static) -> Self {
+        let base: Arc<dyn Fn(f32, f32) -> f32 + Send + Sync> = Arc::new(base);
+        Drainage {
+            coarse: Some(Box::new(Self::lattice(sea_m, COARSE_NODE_M, base.clone()))),
+            ..Self::lattice(sea_m, NODE_M, base)
+        }
+    }
+
+    fn lattice(sea_m: f32, node_m: f32, base: Arc<dyn Fn(f32, f32) -> f32 + Send + Sync>) -> Self {
         Drainage {
             id: NEXT_ID.fetch_add(1, Ordering::Relaxed),
             sea_m,
-            base: Box::new(base),
+            node_m,
+            base,
             cache: RwLock::new(HashMap::new()),
+            coarse: None,
         }
+    }
+
+    /// The level of a lake that covers every corner of the lattice cell holding `(x_m, z_m)`,
+    /// all at one level; `None` anywhere else, so a river crossing a window's edge is never dammed
+    /// by ground this coarse lattice is too wide to see the valley of.
+    fn lake_level_at(&self, x_m: f32, z_m: f32) -> Option<f32> {
+        let (i0, j0) = (
+            (x_m / self.node_m).floor() as i32,
+            (z_m / self.node_m).floor() as i32,
+        );
+        let key = [i0.div_euclid(REGION_NODES), j0.div_euclid(REGION_NODES)];
+        let region = self.region(key);
+        let corners =
+            [(0, 0), (1, 0), (0, 1), (1, 1)].map(|(di, dj)| region.node(i0 + di, j0 + dj, key));
+        let level = corners[0].level_m;
+        corners
+            .iter()
+            .all(|n| n.is_lake() && (n.level_m - level).abs() < 0.01)
+            .then_some(level)
     }
 
     /// Drops the cache and this thread's last region; another thread keeps its own until it next
@@ -149,6 +187,9 @@ impl Drainage {
     pub(crate) fn forget(&self) {
         self.cache.write().unwrap().clear();
         LAST.with(|l| *l.borrow_mut() = None);
+        if let Some(coarse) = &self.coarse {
+            coarse.forget();
+        }
     }
 
     fn region(&self, key: [i32; 2]) -> Arc<Region> {
@@ -185,8 +226,8 @@ impl Drainage {
         for j in 0..WINDOW {
             for i in 0..WINDOW {
                 height[idx(i, j)] = (self.base)(
-                    (origin[0] + i) as f32 * NODE_M,
-                    (origin[1] + j) as f32 * NODE_M,
+                    (origin[0] + i) as f32 * self.node_m,
+                    (origin[1] + j) as f32 * self.node_m,
                 );
             }
         }
@@ -205,7 +246,13 @@ impl Drainage {
                 if h <= self.sea_m {
                     seed(i, j, self.sea_m, &mut level);
                 } else if edge {
-                    seed(i, j, h, &mut level);
+                    let lake = self.coarse.as_ref().and_then(|c| {
+                        c.lake_level_at(
+                            (origin[0] + i) as f32 * self.node_m,
+                            (origin[1] + j) as f32 * self.node_m,
+                        )
+                    });
+                    seed(i, j, lake.map_or(h, |l| l.max(h)), &mut level);
                 }
             }
         }
@@ -256,7 +303,7 @@ impl Drainage {
 
     /// The lake and river water over `(x_m, z_m)`, and the valley a river cuts there.
     pub(crate) fn wet(&self, x_m: f32, z_m: f32) -> Wet {
-        let (u, v) = (x_m / NODE_M, z_m / NODE_M);
+        let (u, v) = (x_m / self.node_m, z_m / self.node_m);
         let (i0, j0) = (u.floor() as i32, v.floor() as i32);
         let key = [i0.div_euclid(REGION_NODES), j0.div_euclid(REGION_NODES)];
         let region = self.region(key);
@@ -285,8 +332,11 @@ impl Drainage {
                 if p.is_lake() && n.is_lake() {
                     continue;
                 }
-                let a = [ni as f32 * NODE_M, nj as f32 * NODE_M];
-                let b = [(ni + si) as f32 * NODE_M, (nj + sj) as f32 * NODE_M];
+                let a = [ni as f32 * self.node_m, nj as f32 * self.node_m];
+                let b = [
+                    (ni + si) as f32 * self.node_m,
+                    (nj + sj) as f32 * self.node_m,
+                ];
                 let ab = [b[0] - a[0], b[1] - a[1]];
                 let t = (((qx - a[0]) * ab[0] + (qz - a[1]) * ab[1])
                     / (ab[0] * ab[0] + ab[1] * ab[1]))
@@ -492,6 +542,46 @@ mod tests {
             lakes > 0 && shallow > 0,
             "{lakes} lake nodes, {shallow} shallow"
         );
+    }
+
+    /// A bowl 5 km across, centred on the border between regions `[0, 0]` and `[1, 0]`, whose
+    /// one low notch is inside the first region's window and outside the second's.
+    fn bowl() -> Drainage {
+        Drainage::new(SEA_M, |x, z| {
+            let (dx, dz) = (x - 2048.0, z - 1024.0);
+            let r = (dx * dx + dz * dz).sqrt();
+            let notch = dx < 0.0 && dz.abs() < 200.0;
+            match r {
+                r if r < 2400.0 => SEA_M + 16.0 + r / 2400.0 * 5.0,
+                r if notch => SEA_M + 26.0 - (r - 2400.0) * 0.01,
+                r if r < 2700.0 => SEA_M + 56.0,
+                r => SEA_M + 56.0 - (r - 2700.0) * 0.01,
+            }
+        })
+    }
+
+    #[test]
+    fn a_lake_wider_than_a_window_has_one_level_on_both_sides_of_a_border() {
+        let d = bowl();
+        let (a, b) = (d.solve([0, 0]), d.solve([1, 0]));
+        let mut compared = 0;
+        for j in 24..40 {
+            for i in REGION_NODES..REGION_NODES + MARGIN {
+                let (na, nb) = (a.node(i, j, [0, 0]), b.node(i, j, [1, 0]));
+                assert!(
+                    na.is_lake() && nb.is_lake(),
+                    "node {i},{j} is lake on one side only"
+                );
+                assert!(
+                    (na.level_m - nb.level_m).abs() < 0.05,
+                    "node {i},{j}: {} against {}",
+                    na.level_m,
+                    nb.level_m
+                );
+                compared += 1;
+            }
+        }
+        assert!(compared > 30);
     }
 
     #[test]
