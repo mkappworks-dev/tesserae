@@ -799,9 +799,9 @@ impl Worldgen {
         Some(laid)
     }
 
-    /// A Settlement's outskirts: Buildings beside its approach paths past its disc, each wholly
-    /// outside the disc and inside its margin, clear of its roads and every other Plot, where the
-    /// ground takes it; a second row behind the first. Drawn after the disc's Plots, so they never
+    /// A Settlement's outskirts: Buildings beside its approach paths past its disc and then round
+    /// its edge, each wholly outside the disc and inside its margin, clear of its roads and every
+    /// other Plot, where the ground takes it; a second row behind the first. Drawn after the disc's Plots, so they never
     /// move one. A copy that cannot stand its count's minimum lays none, so no field stands alone.
     fn lay_outskirts(
         &self,
@@ -821,18 +821,37 @@ impl Worldgen {
         let mut queue = plot_queue(&outskirts.rules, count, hash);
         let (centre, radius_m) = (founding.centre_m, founding.radius_m);
         let outer_m = radius_m + settlement.margin_m;
-        let slots = slots(founding, roads);
+        // Each spot: a point, the way a Building stands back from it, and how far past its apron.
+        let along_paths = slots(founding, roads).into_iter().map(|slot| {
+            let (point, heading) = point_along(&roads[slot.road].points, slot.along);
+            let normal = [-heading[1] * slot.side, heading[0] * slot.side];
+            (point, normal, APPROACH_HALF_M + slot.setback_m)
+        });
+        // Then round the disc's edge, facing out, where the approach paths leave room.
+        let mut round_disc = Vec::new();
+        let (mut along, around) = (0.0, TAU * radius_m);
+        for n in 0.. {
+            let key = mix(hash ^ (0x400 + n));
+            along += lerp(SLOT_GAP_M, unit(mix(key ^ 1)) as f32);
+            if along > around {
+                break;
+            }
+            let angle = along / radius_m;
+            let normal = [angle.cos(), angle.sin()];
+            let point = [0, 1].map(|a| centre[a] + normal[a] * radius_m);
+            round_disc.push((key, (point, normal, SETBACK_M * unit(mix(key ^ 2)) as f32)));
+        }
+        round_disc.sort_unstable_by_key(|&(key, _)| key);
+        let spots: Vec<_> = along_paths
+            .filter(|&(point, ..)| distance(point, centre) > radius_m)
+            .chain(round_disc.into_iter().map(|(_, spot)| spot))
+            .collect();
         let mut placed = 0;
         'rows: for row in 0..OUTSKIRT_ROWS {
-            for slot in &slots {
+            for &(point, normal, setback_m) in &spots {
                 if placed == queue.len() {
                     break 'rows;
                 }
-                let (point, heading) = point_along(&roads[slot.road].points, slot.along);
-                if distance(point, centre) <= radius_m {
-                    continue;
-                }
-                let normal = [-heading[1] * slot.side, heading[0] * slot.side];
                 let facing = facing_back(normal);
                 let step = FACINGS[usize::from(facing)];
                 // A slot takes the first queued Building that fits it, so one too large for every
@@ -841,10 +860,7 @@ impl Worldgen {
                     let building = &outskirts.rules[queue[at]].building;
                     let depth_m = self.turned(building, facing, point).2
                         [usize::from(facing.is_multiple_of(2))];
-                    let back_m = APPROACH_HALF_M
-                        + APRON_M
-                        + slot.setback_m
-                        + row as f32 * (depth_m + 2.0 * APRON_M);
+                    let back_m = APRON_M + setback_m + row as f32 * (depth_m + 2.0 * APRON_M);
                     let door_m = [0, 1].map(|a| point[a] - step[a] * back_m);
                     let (_, corner_m, size_m) = self.turned(building, facing, door_m);
                     let rect = [corner_m, [0, 1].map(|a| corner_m[a] + size_m[a])];

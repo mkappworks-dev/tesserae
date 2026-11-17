@@ -30,7 +30,9 @@ has farmhouses and barns and no farm.
 - **Fuller farms, not everywhere.** After the first play-test: a Settlement
   farms by chance (most towns, many villages, some hamlets), and one that farms
   stands at least four fields or none. Fields are larger, stand two deep from
-  the path, and some wheat fields are already ripe.
+  the path and then round the disc, and some wheat fields are already ripe.
+  Farms vary: berry fields, watermelon patches, sugar cane by a water channel
+  and a dark mushroom shed join the wheat, carrots and potatoes.
 
 ## User Stories
 
@@ -74,6 +76,9 @@ has farmhouses and barns and no farm.
   all-or-nothing: when fewer fit, the Settlement lays no outskirts.
 - **Second row.** A slot is tried against the path first, then once more set
   back behind a first-row Building's depth, so fields stand two deep.
+- **Round the disc.** After the approach paths' slots, spots round the disc's
+  edge, facing out, in an order drawn from the hash: a town's minimum would not
+  fit beside two or three paths.
 - **Templates** come from the mockup's builders (`mockup/structures.js`, exported
   by `node mockup/export-templates.mjs`), never edited by hand in Terra.
 

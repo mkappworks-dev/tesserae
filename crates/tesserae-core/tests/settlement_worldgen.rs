@@ -1932,3 +1932,14 @@ fn fields_stand_two_deep_from_an_approach_path() {
         "no field stands behind another: {corners:?}"
     );
 }
+
+#[test]
+fn more_fields_than_the_paths_hold_ring_the_disc() {
+    let counts = fields_per_settlement(farming_hamlet((8, 8), 1.0));
+    let farming = counts.iter().filter(|&&n| n >= 8).count();
+    assert!(
+        farming * 2 > counts.len(),
+        "{farming} of {} stand eight fields: {counts:?}",
+        counts.len()
+    );
+}

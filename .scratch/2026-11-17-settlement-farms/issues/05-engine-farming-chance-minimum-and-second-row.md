@@ -19,3 +19,4 @@ first row.
 - [x] Fields stand two deep from an approach path somewhere in the test region.
 - [x] Version 1 and 2 digests pass unchanged; outskirts stay the same in metres
       at 1 and 0.5 m.
+- [x] More fields than the paths hold stand round the disc's edge.
