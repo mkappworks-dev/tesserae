@@ -47,6 +47,10 @@ Materials and Shapes.
 
 **World** — one save. Owns its Voxel size, its seed and its Chunks.
 
+**Commit** — one immutable, checksummed record of a World's authoritative state
+at a moment. Opening a World opens its newest complete Commit. Not "snapshot",
+which is a Job's view.
+
 **World list** — the launcher's list of every World folder, reached from the
 title screen before any Game runs. Not the Menu, which opens inside a World.
 
