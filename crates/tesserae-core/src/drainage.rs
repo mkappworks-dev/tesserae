@@ -18,7 +18,7 @@ const REGION_NODES: i32 = 64;
 const HALO_NODES: i32 = 32;
 /// Nodes stored past the region's own on every side, so a query near the border never asks the
 /// next region.
-const MARGIN: i32 = 3;
+const MARGIN: i32 = STENCIL + 2;
 const STORED: i32 = REGION_NODES + 2 * MARGIN;
 const WINDOW: i32 = REGION_NODES + 2 * HALO_NODES;
 
@@ -37,7 +37,14 @@ const MAX_CACHED_REGIONS: usize = 96;
 const SURFACE_BELOW_M: f32 = 0.6;
 /// The valley wall climbs this much per metre from the water's edge.
 const BANK_SLOPE: f32 = 0.5;
-const VALLEY_REACH_M: f32 = 120.0;
+/// Short enough that every segment reaching a point is in its stencil: a segment outside it is at
+/// least `STENCIL - 1` nodes away, less the meander's push. A reach past that dropped a segment at
+/// a node line while its valley still applied, and the ground stepped there.
+const VALLEY_REACH_M: f32 = (STENCIL - 1) as f32 * NODE_M - MEANDER_M;
+/// The nodes on each side of a point whose segments it asks.
+const STENCIL: i32 = 4;
+/// The most the meander warp moves a point.
+const MEANDER_M: f32 = 14.0;
 
 const NO_PARENT: u8 = 8;
 const MEANDER_SEED: u32 = 0x1a4d_00b1;
@@ -86,30 +93,13 @@ impl Region {
     }
 }
 
-/// The ground's ceiling a river's valley sets, and how strongly it applies.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct Valley {
-    pub ceiling_m: f32,
-    /// 1 at the water's edge, easing to 0 at the valley's reach.
-    pub fade: f32,
-}
-
-/// The nearest river segment to a point.
-#[derive(Clone, Copy)]
-struct Nearest {
-    /// Metres from the segment's bank (its centre less half its width), never negative.
-    edge_m: f32,
-    surface_m: f32,
-    width_m: f32,
-}
-
 /// What a column sees of the water on the land.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct Wet {
     /// The level water stands at over this column, if a lake or river reaches it.
     pub level_m: Option<f32>,
-    /// The valley a river cuts here, if one reaches.
-    pub valley: Option<Valley>,
+    /// How far rivers' valleys cut ground standing at the height asked about.
+    pub cut_m: f32,
 }
 
 pub(crate) struct Drainage {
@@ -300,8 +290,10 @@ impl Drainage {
         Region { nodes }
     }
 
-    /// The lake and river water over `(x_m, z_m)`, and the valley a river cuts there.
-    pub(crate) fn wet(&self, x_m: f32, z_m: f32) -> Wet {
+    /// The lake and river water over `(x_m, z_m)`, and how far rivers' valleys cut ground standing
+    /// at `ground_m` there. Each segment in reach cuts its own valley and the deepest wins, so the
+    /// ground is continuous where two segments are equally near.
+    pub(crate) fn wet(&self, x_m: f32, z_m: f32, ground_m: f32) -> Wet {
         let (u, v) = (x_m / self.node_m, z_m / self.node_m);
         let (i0, j0) = (u.floor() as i32, v.floor() as i32);
         let key = [i0.div_euclid(REGION_NODES), j0.div_euclid(REGION_NODES)];
@@ -317,10 +309,10 @@ impl Drainage {
 
         // Bends the lattice's straight 8-way segments into meanders; bounded under a node's width so
         // the stencil below still holds every segment that can reach the point.
-        let (qx, qz) = crate::noise::warp2(x_m, z_m, MEANDER_SEED, 90.0, 14.0);
-        let mut best: Option<Nearest> = None;
-        for dj in -1..=2 {
-            for di in -1..=2 {
+        let (qx, qz) = crate::noise::warp2(x_m, z_m, MEANDER_SEED, 90.0, MEANDER_M);
+        let mut cut_m = 0.0f32;
+        for dj in -STENCIL + 1..=STENCIL {
+            for di in -STENCIL + 1..=STENCIL {
                 let (ni, nj) = (i0 + di, j0 + dj);
                 let n = region.node(ni, nj, key);
                 if n.down == NO_PARENT || n.catchment < STREAM_NODES {
@@ -345,35 +337,19 @@ impl Drainage {
                 let width = river_width_m(n.catchment) * (1.0 - t) + river_width_m(p.catchment) * t;
                 let surface = (n.level_m * (1.0 - t) + p.level_m * t) - SURFACE_BELOW_M;
                 let edge = (d - width / 2.0).max(0.0);
-                if best.is_none_or(|b| edge < b.edge_m) {
-                    best = Some(Nearest {
-                        edge_m: edge,
-                        surface_m: surface,
-                        width_m: width,
-                    });
+                if edge >= VALLEY_REACH_M {
+                    continue;
+                }
+                let dig = 1.2 + 0.25 * width.sqrt();
+                let target = surface - dig + edge * BANK_SLOPE;
+                let fade = 1.0 - smoothstep(0.66 * VALLEY_REACH_M, VALLEY_REACH_M, edge);
+                cut_m = cut_m.max((ground_m - target).max(0.0) * fade);
+                if edge * BANK_SLOPE < dig * 2.0 {
+                    level_m = Some(level_m.map_or(surface, |l| l.max(surface)));
                 }
             }
         }
-        let mut valley = None;
-        if let Some(Nearest {
-            edge_m: edge,
-            surface_m: surface,
-            width_m: width,
-        }) = best
-            && edge < VALLEY_REACH_M
-        {
-            let dig = 1.2 + 0.25 * width.sqrt();
-            let target = surface - dig + edge * BANK_SLOPE;
-            let fade = 1.0 - smoothstep(0.66 * VALLEY_REACH_M, VALLEY_REACH_M, edge);
-            valley = Some(Valley {
-                ceiling_m: target,
-                fade,
-            });
-            if edge * BANK_SLOPE < dig * 2.0 {
-                level_m = Some(level_m.map_or(surface, |l| l.max(surface)));
-            }
-        }
-        Wet { level_m, valley }
+        Wet { level_m, cut_m }
     }
 }
 

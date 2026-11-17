@@ -124,6 +124,9 @@ const TERRACE_STRENGTH: f32 = 0.8;
 /// The overhang density's outcrops: how far apart, and the field value above which one stands.
 const OUTCROP_SIZE_M: f32 = 90.0;
 const OUTCROP_CUT: f32 = 0.55;
+/// How far below the coast, as a share of the sea's depth, the sea floor's gentler detail, its
+/// islands and its formations fade out, so the coast has no step.
+const COAST_EASE: f32 = 0.05;
 /// Sea-floor formations: the water always kept over them, a reef's height, and one rock outcrop
 /// or pillar in some cells this wide.
 const SEABED_CLEAR_M: f32 = 2.0;
@@ -318,7 +321,9 @@ impl Base {
             .map_or(1.0, |(climate, biomes, offsets)| {
                 (1.0 + climate.blend(biomes, x_m, z_m, offsets)).max(0.0)
             });
-        offset += (n - 0.5) * self.relief_m * scale * if base < 0.0 { 0.3 } else { worn };
+        // The sea floor's detail is gentler, eased across the coast so it has no step.
+        let land = smooth(-COAST_EASE, 0.0, base);
+        offset += (n - 0.5) * self.relief_m * scale * (0.3 + (worn - 0.3) * land);
 
         let plateau =
             crate::noise::fbm2(wx / 3500.0, wz / 3500.0, seed.wrapping_add(SALT_PLATEAU), 2);
@@ -333,16 +338,16 @@ impl Base {
 
         offset -= 70.0 * self.canyon(wx, wz) * inland * offset.clamp(0.0, 70.0) / 70.0;
 
-        if base < 0.0 {
-            offset = self.island(x_m, z_m, offset);
+        if land < 1.0 {
+            offset += (self.island(x_m, z_m, offset) - offset) * (1.0 - land);
         }
 
         offset -= 45.0 * self.ravine(wx, wz) * inland * smooth(8.0, 30.0, offset);
 
         offset += self.volcano(x_m, z_m);
 
-        if base < 0.0 {
-            offset += self.seabed_rise_m(wx, wz, offset);
+        if land < 1.0 {
+            offset += self.seabed_rise_m(wx, wz, offset) * (1.0 - land);
         }
 
         self.sea_m + offset.clamp(-d, h)
@@ -616,16 +621,13 @@ impl Terrain {
     /// cut into it.
     pub(crate) fn height_m(&self, x_m: f32, z_m: f32) -> f32 {
         let h = self.base.base_height_m(x_m, z_m);
-        match self.drainage.wet(x_m, z_m).valley {
-            Some(v) if v.ceiling_m < h => h - (h - v.ceiling_m) * v.fade,
-            _ => h,
-        }
+        h - self.drainage.wet(x_m, z_m, h).cut_m
     }
 
     /// The level lake or river water stands at over a column, if any reaches it; the sea is the
     /// caller's.
     pub(crate) fn inland_water_m(&self, x_m: f32, z_m: f32) -> Option<f32> {
-        self.drainage.wet(x_m, z_m).level_m
+        self.drainage.wet(x_m, z_m, f32::MIN).level_m
     }
 
     /// What a Biome's selectors ask of the column, and how its Climate shifts there: the air is

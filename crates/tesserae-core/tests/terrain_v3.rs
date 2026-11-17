@@ -1009,3 +1009,31 @@ fn rock_formations_stand_on_the_sea_floor_and_stay_under_water() {
         "{formations} formations in {ocean} sea columns"
     );
 }
+
+/// Land never jumps between two points a quarter of a metre apart: a cliff the heightfield draws
+/// is a slope, and only the overhang density stands walls. The sea floor's pillars are steep on
+/// purpose.
+#[test]
+fn the_ground_has_no_step_anywhere_along_a_line() {
+    let g = Worldgen::new(SEED, 1.0, wet_world());
+    let mut worst = (0.0f32, 0.0f32, 0.0f32);
+    for j in -200..200 {
+        let z = j as f32 * 19.0 + 0.3;
+        let mut last = g.terrain_height_m(-4000.0, z);
+        for i in 1..32000 {
+            let x = -4000.0 + i as f32 * 0.25;
+            let h = g.terrain_height_m(x, z);
+            if (h - last).abs() > worst.0 && h.min(last) > 24.0 {
+                worst = ((h - last).abs(), x, z);
+            }
+            last = h;
+        }
+    }
+    assert!(
+        worst.0 < 1.0,
+        "the ground steps {} m at {}, {}",
+        worst.0,
+        worst.1,
+        worst.2
+    );
+}
