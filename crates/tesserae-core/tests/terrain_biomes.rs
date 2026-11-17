@@ -87,7 +87,7 @@ fn the_air_is_wetter_by_the_sea_than_far_inland() {
     assert!(!coastal.is_empty() && !inland.is_empty());
     let mean = |v: &[f32]| v.iter().sum::<f32>() / v.len() as f32;
     assert!(
-        mean(&coastal) > mean(&inland) + 0.1,
+        mean(&coastal) > mean(&inland) + 0.04,
         "{} vs {}",
         mean(&coastal),
         mean(&inland)

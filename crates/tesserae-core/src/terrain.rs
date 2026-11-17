@@ -65,6 +65,7 @@ const SALT_OVERHANG: u32 = 0x1a4d_00a1;
 const SALT_CAVERN: u32 = 0x1a4d_00c1;
 const SALT_RAVINE: u32 = 0x1a4d_00d1;
 const SALT_RAVINE_MASK: u32 = 0x1a4d_00d2;
+const SALT_SHAFT: u32 = 0x1a4d_00e1;
 
 /// The continent field's value at the coast, and how many metres one unit of it is worth inland:
 /// an approximation of distance, good enough to place a Biome.
@@ -73,7 +74,7 @@ const COAST_M_PER_UNIT: f32 = 0.4;
 /// Temperature (a unit-square coordinate) lost per metre above Sea level.
 const LAPSE_PER_M: f32 = 0.0016;
 /// Humidity gained at the coast, fading to nothing this far inland.
-const COAST_WET: f32 = 0.3;
+const COAST_WET: f32 = 0.1;
 const COAST_WET_REACH_M: f32 = 1800.0;
 
 /// How the Climate of the unit square moves with altitude and the coast: `(temperature, humidity)`.
@@ -106,7 +107,11 @@ const WARP_AMOUNT_M: f32 = 400.0;
 const EROSION_SIZE_M: f32 = 2800.0;
 const PEAKS_SIZE_M: f32 = 1400.0;
 const MESA_STEP_M: f32 = 18.0;
-const VOLCANO_CELL_M: f32 = 5000.0;
+const VOLCANO_CELL_M: f32 = 2600.0;
+/// One island may stand in each cell this wide, at that chance, its radius in that range.
+const ISLAND_CELL_M: f32 = 3200.0;
+const ISLAND_CHANCE: f32 = 0.55;
+const ISLAND_RADIUS_M: [f32; 2] = [300.0, 1100.0];
 const VOLCANO_RADIUS_M: f32 = 700.0;
 
 /// Version 3's base ground: Sea level, the band, and the detail octaves a Game tunes with
@@ -270,46 +275,15 @@ impl Base {
             offset += (terraced - above) * mesa;
         }
 
-        let canyon =
-            crate::noise::fbm2(wx / 2500.0, wz / 2500.0, seed.wrapping_add(SALT_CANYON), 2);
-        let line = crate::noise::ridged2(
-            wx / 600.0,
-            wz / 600.0,
-            seed.wrapping_add(SALT_CANYON_LINE),
-            2,
-        );
-        offset -= 70.0
-            * smooth(0.72, 0.82, canyon)
-            * inland
-            * smooth(0.88, 0.97, line)
-            * offset.clamp(0.0, 70.0)
-            / 70.0;
+        offset -= 70.0 * self.canyon(wx, wz) * inland * offset.clamp(0.0, 70.0) / 70.0;
 
         if base < 0.0 {
-            let band = smooth(0.14, 0.24, f.continent) * (1.0 - smooth(0.40, 0.46, f.continent));
-            let islands = smooth(
-                0.48,
-                0.56,
-                crate::noise::fbm2(wx / 2400.0, wz / 2400.0, seed.wrapping_add(SALT_ISLANDS), 3),
-            );
-            offset += band * islands * (0.6 * d + 8.0);
+            offset = self.island(x_m, z_m, offset);
         }
 
-        // Narrow slots cut deep into rugged land: ridged noise, thresholded near its crest.
-        let slot = crate::noise::ridged2(wx / 450.0, wz / 450.0, seed.wrapping_add(SALT_RAVINE), 2);
-        let ravines = smooth(
-            0.58,
-            0.68,
-            crate::noise::fbm2(
-                wx / 3000.0,
-                wz / 3000.0,
-                seed.wrapping_add(SALT_RAVINE_MASK),
-                2,
-            ),
-        );
-        offset -= 45.0 * ravines * inland * smooth(0.975, 0.995, slot) * smooth(8.0, 30.0, offset);
+        offset -= 45.0 * self.ravine(wx, wz) * inland * smooth(8.0, 30.0, offset);
 
-        offset += self.volcano(x_m, z_m, inland);
+        offset += self.volcano(x_m, z_m);
 
         self.sea_m + offset.clamp(-d, h)
     }
@@ -340,11 +314,78 @@ impl Base {
         ((n * 2.0 - 1.0) * 2.0).clamp(-1.0, 1.0) * amp_m
     }
 
-    /// A cone at a hashed spot of some 5 km cells, over land only.
-    fn volcano(&self, x_m: f32, z_m: f32, inland: f32) -> f32 {
-        if inland <= 0.0 {
-            return 0.0;
+    /// 0 to 1: where a canyon cuts, a winding line through some regions of the land.
+    fn canyon(&self, wx: f32, wz: f32) -> f32 {
+        let seed = self.seed;
+        let region =
+            crate::noise::fbm2(wx / 2500.0, wz / 2500.0, seed.wrapping_add(SALT_CANYON), 2);
+        let line = crate::noise::ridged2(
+            wx / 600.0,
+            wz / 600.0,
+            seed.wrapping_add(SALT_CANYON_LINE),
+            2,
+        );
+        smooth(0.6, 0.7, region) * smooth(0.88, 0.97, line)
+    }
+
+    /// 0 to 1: narrow slots cut deep into the land, ridged noise thresholded near its crest.
+    fn ravine(&self, wx: f32, wz: f32) -> f32 {
+        let seed = self.seed;
+        let slot = crate::noise::ridged2(wx / 450.0, wz / 450.0, seed.wrapping_add(SALT_RAVINE), 2);
+        let region = crate::noise::fbm2(
+            wx / 3000.0,
+            wz / 3000.0,
+            seed.wrapping_add(SALT_RAVINE_MASK),
+            2,
+        );
+        smooth(0.52, 0.62, region) * smooth(0.975, 0.995, slot)
+    }
+
+    /// The sea floor `offset_m` (below Sea level) raised into an island where one stands: a
+    /// hashed disc in some cells, its edge frayed by noise, rising to a broad low crown so there
+    /// is room on it for trees and Structures.
+    fn island(&self, x_m: f32, z_m: f32, offset_m: f32) -> f32 {
+        let (cx, cz) = (
+            (x_m / ISLAND_CELL_M).floor() as i32,
+            (z_m / ISLAND_CELL_M).floor() as i32,
+        );
+        let fray = crate::noise::fbm2(
+            x_m / 500.0,
+            z_m / 500.0,
+            self.seed.wrapping_add(SALT_ISLANDS),
+            3,
+        );
+        let mut out = offset_m;
+        for dz in -1..=1 {
+            for dx in -1..=1 {
+                let (ix, iz) = (cx + dx, cz + dz);
+                let h = crate::noise::cell_hash(ix, iz, self.seed.wrapping_add(SALT_ISLANDS));
+                if h[0] > ISLAND_CHANCE {
+                    continue;
+                }
+                let k = h[0] / ISLAND_CHANCE;
+                let (px, pz) = (
+                    (ix as f32 + 0.25 + 0.5 * h[1]) * ISLAND_CELL_M,
+                    (iz as f32 + 0.25 + 0.5 * h[2]) * ISLAND_CELL_M,
+                );
+                let radius_m = ISLAND_RADIUS_M[0] + (ISLAND_RADIUS_M[1] - ISLAND_RADIUS_M[0]) * k;
+                let r = ((x_m - px).powi(2) + (z_m - pz).powi(2)).sqrt()
+                    / (radius_m * (0.7 + 0.6 * fray));
+                if r >= 1.3 {
+                    continue;
+                }
+                let crown_m = 6.0 + 22.0 * h[1];
+                // Inside the disc a low dome; past its edge the shore falls back to the floor.
+                let top = 2.0 + crown_m * (1.0 - r * r).max(0.0);
+                let land = 1.0 - smooth(0.85, 1.3, r);
+                out = out.max(offset_m + (top - offset_m) * land);
+            }
         }
+        out
+    }
+
+    /// A cone at a hashed spot of some cells; one off the coast rises from the sea as an island.
+    fn volcano(&self, x_m: f32, z_m: f32) -> f32 {
         let (cx, cz) = (
             (x_m / VOLCANO_CELL_M).floor() as i32,
             (z_m / VOLCANO_CELL_M).floor() as i32,
@@ -354,7 +395,7 @@ impl Base {
             for dx in -1..=1 {
                 let (ix, iz) = (cx + dx, cz + dz);
                 let h = crate::noise::cell_hash(ix, iz, self.seed.wrapping_add(SALT_VOLCANO));
-                if h[0] > 0.22 {
+                if h[0] > 0.3 {
                     continue;
                 }
                 let (px, pz) = (
@@ -370,7 +411,7 @@ impl Base {
                 best = best.max(cone - crater);
             }
         }
-        best * inland
+        best
     }
 }
 
@@ -468,6 +509,29 @@ pub(crate) struct Caverns {
 /// The field value above which rock is cavern.
 const CAVERN_CUT: f32 = 0.67;
 const CAVERN_SIZE_M: [f32; 3] = [200.0, 90.0, 200.0];
+/// One shaft may open in each cell this wide, about every other one.
+const SHAFT_CELL_M: f32 = 320.0;
+const SHAFT_CHANCE: f32 = 0.5;
+/// How far under its mouth a shaft looks for a cavern's roof.
+const SHAFT_REACH_M: f32 = 140.0;
+/// The widest a shaft is.
+const SHAFT_PAD_M: f32 = 4.5;
+
+/// A vertical way down from the ground into a cavern, which otherwise never breaches the surface.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Shaft {
+    pub(crate) centre_m: [f32; 2],
+    pub(crate) radius_m: f32,
+    /// The cavern's roof it opens into.
+    pub(crate) bottom_m: f32,
+}
+
+impl Shaft {
+    pub(crate) fn cuts(&self, x_m: f32, y_m: f32, z_m: f32) -> bool {
+        let [dx, dz] = [x_m - self.centre_m[0], z_m - self.centre_m[1]];
+        y_m >= self.bottom_m && dx * dx + dz * dz <= self.radius_m * self.radius_m
+    }
+}
 /// A cavern's roof stays this far under the ground.
 pub(crate) const CAVERN_MIN_DEPTH_M: f32 = 22.0;
 
@@ -488,6 +552,53 @@ impl Caverns {
                 self.seed,
                 2,
             ) > CAVERN_CUT
+    }
+
+    /// The shafts whose mouths lie within `pad_m` of the box `min..max` on the ground plane, each
+    /// over a cavern; `ground_m` is the surface height, and a shaft whose mouth `opens` refuses is
+    /// not dug.
+    pub(crate) fn shafts(
+        &self,
+        min: [f32; 2],
+        max: [f32; 2],
+        ground_m: impl Fn(f32, f32) -> f32,
+        opens: impl Fn(f32, f32) -> bool,
+    ) -> Vec<Shaft> {
+        let cell = |m: f32| (m / SHAFT_CELL_M).floor() as i32;
+        let mut out = Vec::new();
+        for iz in cell(min[1] - SHAFT_PAD_M)..=cell(max[1] + SHAFT_PAD_M) {
+            for ix in cell(min[0] - SHAFT_PAD_M)..=cell(max[0] + SHAFT_PAD_M) {
+                let h = crate::noise::cell_hash(ix, iz, self.seed.wrapping_add(SALT_SHAFT));
+                if h[0] > SHAFT_CHANCE {
+                    continue;
+                }
+                let centre_m = [
+                    (ix as f32 + 0.15 + 0.7 * h[1]) * SHAFT_CELL_M,
+                    (iz as f32 + 0.15 + 0.7 * h[2]) * SHAFT_CELL_M,
+                ];
+                let radius_m = 2.5 + 2.0 * h[0] / SHAFT_CHANCE;
+                let near = (0..2)
+                    .all(|a| centre_m[a] + radius_m >= min[a] && centre_m[a] - radius_m <= max[a]);
+                if !near || !opens(centre_m[0], centre_m[1]) {
+                    continue;
+                }
+                let top_m = ground_m(centre_m[0], centre_m[1]);
+                let mut y = top_m - CAVERN_MIN_DEPTH_M;
+                let lowest = self.floor_m.max(top_m - SHAFT_REACH_M);
+                while y >= lowest {
+                    if self.carves(centre_m[0], y, centre_m[1]) {
+                        out.push(Shaft {
+                            centre_m,
+                            radius_m,
+                            bottom_m: y,
+                        });
+                        break;
+                    }
+                    y -= 2.0;
+                }
+            }
+        }
+        out
     }
 
     /// Whether anything in the box `lo..=hi` (metres) could be a cavern; `false` is a proof.

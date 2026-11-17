@@ -651,6 +651,8 @@ pub struct Worldgen {
     /// The highest ground over a column footprint, by its corners and size in metres, so the sky
     /// light does not wait on the band's global top.
     tops: Arc<Mutex<HashMap<[u32; 5], f32>>>,
+    /// Under version 3, what every Chunk stacked over a column of Chunks reads alike, by `[cx, cz]`.
+    stacks: Arc<Mutex<HashMap<[i32; 2], Arc<Stack>>>>,
     caves: Option<CaveField>,
     /// Whether the smoothing pass runs: configured, and a one-Voxel step is at
     /// least `min_rise_m` at this Voxel size.
@@ -891,6 +893,18 @@ impl BiomeGrounds {
 
 type ColumnGrounds = [GroundParams; CHUNK_SIZE * CHUNK_SIZE];
 
+/// A column of Chunks' surface (with a one-column border), water levels and grounds. Version 3's
+/// band stands some ten Chunks tall, and each would otherwise sample all of it again.
+#[derive(Debug)]
+struct Stack {
+    surface_m: [f32; SURFACE_W * SURFACE_W],
+    water_level_m: [Option<f32>; CHUNK_SIZE * CHUNK_SIZE],
+    grounds: Option<ColumnGrounds>,
+}
+
+/// About 20 MB of stacks, far more than a streamed ring holds at once.
+const MAX_STACKS: usize = 1024;
+
 impl Worldgen {
     pub fn new(seed: u64, voxel_size: f32, params: WorldgenParams) -> Self {
         debug_assert!(voxel_size > 0.0, "a Voxel has an edge length");
@@ -904,6 +918,7 @@ impl Worldgen {
             inv_feature_size: 1.0 / params.feature_size_m,
             terrain: (params.generator >= LANDFORMS_SINCE).then(|| Terrain::new(folded, &params)),
             tops: Arc::default(),
+            stacks: Arc::default(),
             caverns: (params.generator >= LANDFORMS_SINCE && params.caves.is_some())
                 .then(|| Caverns::new(folded, &params)),
             caves: params.caves.map(|p| CaveField::new(folded, p)),
@@ -1107,6 +1122,36 @@ impl Worldgen {
         }))
     }
 
+    /// The stack over Chunk column `[cx, cz]`, built on first use. Two workers may both build one;
+    /// they build the same.
+    fn stack(&self, cx: i32, cz: i32, reach: i32) -> Arc<Stack> {
+        if let Some(s) = self.stacks.lock().expect("stacks").get(&[cx, cz]) {
+            return Arc::clone(s);
+        }
+        let mut surface_m = [0.0f32; SURFACE_W * SURFACE_W];
+        for z in -reach..CHUNK_SIZE as i32 + reach {
+            for x in -reach..CHUNK_SIZE as i32 + reach {
+                surface_m[surface_index(x, z)] =
+                    self.surface_height_m(self.axis_m(cx, x), self.axis_m(cz, z));
+            }
+        }
+        let water_level_m = std::array::from_fn(|i| {
+            let (x, z) = ((i % CHUNK_SIZE) as i32, (i / CHUNK_SIZE) as i32);
+            self.water_level_m(self.axis_m(cx, x), self.axis_m(cz, z))
+        });
+        let stack = Arc::new(Stack {
+            surface_m,
+            water_level_m,
+            grounds: self.column_grounds(cx, cz),
+        });
+        let mut stacks = self.stacks.lock().expect("stacks");
+        if stacks.len() >= MAX_STACKS {
+            stacks.clear();
+        }
+        stacks.insert([cx, cz], Arc::clone(&stack));
+        stack
+    }
+
     /// 1 where no Biome tunes the caves, otherwise a mean that moves continuously across a border,
     /// unlike the ground it sits beside.
     fn cave_scale_at(&self, x_m: f32, z_m: f32) -> f32 {
@@ -1185,9 +1230,10 @@ impl Worldgen {
         top
     }
 
-    /// Drops the drainage regions this generator has cached. Nothing it answers changes: a region
-    /// is solved again, to the same result, when it is next asked.
+    /// Drops the drainage regions and column stacks this generator has cached. Nothing it answers
+    /// changes: each is built again, to the same result, when it is next asked.
     pub fn forget_regions(&self) {
+        self.stacks.lock().expect("stacks").clear();
         if let Some(terrain) = &self.terrain {
             terrain.forget_regions();
         }
@@ -1357,13 +1403,20 @@ impl Worldgen {
         // The border is only read by smoothing, so a World of cubes does not
         // pay for it.
         let reach = if self.smoothing { 1 } else { 0 };
-        let mut surface_m = [0.0f32; SURFACE_W * SURFACE_W];
-        for z in -reach..CHUNK_SIZE as i32 + reach {
-            for x in -reach..CHUNK_SIZE as i32 + reach {
-                surface_m[surface_index(x, z)] =
-                    self.surface_height_m(self.axis_m(cx, x), self.axis_m(cz, z));
-            }
-        }
+        let stack = self.terrain.is_some().then(|| self.stack(cx, cz, reach));
+        let surface_m = stack.as_ref().map_or_else(
+            || {
+                let mut surface_m = [0.0f32; SURFACE_W * SURFACE_W];
+                for z in -reach..CHUNK_SIZE as i32 + reach {
+                    for x in -reach..CHUNK_SIZE as i32 + reach {
+                        surface_m[surface_index(x, z)] =
+                            self.surface_height_m(self.axis_m(cx, x), self.axis_m(cz, z));
+                    }
+                }
+                surface_m
+            },
+            |s| s.surface_m,
+        );
         // Nothing above the highest column of this Chunk is solid, so nothing
         // there is worth carving. The border is another Chunk's ground.
         let top_m = (0..CHUNK_SIZE as i32)
@@ -1372,10 +1425,12 @@ impl Worldgen {
             .fold(f32::MIN, f32::max)
             + self.terrain.as_ref().map_or(0.0, |t| t.overhang_max_m());
         // A Chunk above every column holds only air and water, which take nothing from a Biome.
-        let columns = if floor_m <= top_m {
-            self.column_grounds(cx, cz)
-        } else {
+        let columns = if floor_m > top_m {
             None
+        } else if let Some(stack) = &stack {
+            stack.grounds
+        } else {
+            self.column_grounds(cx, cz)
         };
         let reach_box = |caves: &CaveField, scale| {
             let ceiling_m = ceiling_m.min(top_m);
@@ -1436,6 +1491,20 @@ impl Worldgen {
             blocks
         });
 
+        let shafts = self
+            .caverns
+            .as_ref()
+            .filter(|_| floor_m <= top_m)
+            .map(|c| {
+                c.shafts(
+                    [origin_m[0], origin_m[2]],
+                    [origin_m[0] + reach_m, origin_m[2] + reach_m],
+                    |x, z| self.surface_height_m(x, z),
+                    |x, z| self.water_surface_m(x, z).is_none(),
+                )
+            })
+            .unwrap_or_default();
+
         let ores = self.ores_reaching(floor_m, ceiling_m);
         let mut chunk = ChunkBuilder::new();
         let mut cave_cache = Default::default();
@@ -1448,8 +1517,11 @@ impl Worldgen {
                     .as_ref()
                     .map_or(ground, |columns| columns[z * CHUNK_SIZE + x]);
                 let biome = self.column_biome([cx, cz], [x, z]);
-                let water_level_m = self.water_level_m(x_m, z_m);
-                let sealed_m = self.sealed_below_m(x_m, z_m, surface_m);
+                let water_level_m = stack.as_ref().map_or_else(
+                    || self.water_level_m(x_m, z_m),
+                    |s| s.water_level_m[z * CHUNK_SIZE + x],
+                );
+                let mut sealed_m = None;
                 let amp_m = self
                     .terrain
                     .as_ref()
@@ -1482,7 +1554,6 @@ impl Worldgen {
                     // A cave carves through the Grass cap like anything else,
                     // which is what a mouth is.
                     if let Some((caves, blocks)) = &reachable
-                        && y_m >= sealed_m
                         && blocks[block_of(x, y, z)]
                         && caves.carves_near(
                             &mut cave_cache,
@@ -1493,6 +1564,9 @@ impl Worldgen {
                                 .as_ref()
                                 .map_or(1.0, |c| c.scales[z * CHUNK_SIZE + x]),
                         )
+                        && y_m
+                            >= *sealed_m
+                                .get_or_insert_with(|| self.sealed_below_m(x_m, z_m, surface_m))
                     {
                         // An overhang's rock above the ground, cut by a cave, is open water, not a hole.
                         if base_m < 0.0
@@ -1503,11 +1577,20 @@ impl Worldgen {
                         }
                         continue;
                     }
+                    if shafts.iter().any(|s| s.cuts(x_m, y_m, z_m))
+                        && y_m
+                            >= *sealed_m
+                                .get_or_insert_with(|| self.sealed_below_m(x_m, z_m, surface_m))
+                    {
+                        continue;
+                    }
                     if let (Some(caverns), Some(blocks)) = (&self.caverns, &cavern_blocks)
                         && blocks[block_of(x, y, z)]
                         && base_m >= CAVERN_MIN_DEPTH_M
-                        && y_m >= sealed_m
                         && caverns.carves(x_m, y_m, z_m)
+                        && y_m
+                            >= *sealed_m
+                                .get_or_insert_with(|| self.sealed_below_m(x_m, z_m, surface_m))
                     {
                         // Under the water table a cavern is an underground lake.
                         if let Some(water) = self.water
@@ -2754,6 +2837,53 @@ mod tests {
             }
         }
         coords
+    }
+
+    #[test]
+    fn shafts_open_a_way_from_the_ground_down_into_a_cavern() {
+        let params = WorldgenParams {
+            generator: 3,
+            smoothing: None,
+            // Tunnels thinner than a Voxel, so the air found is the shaft's.
+            caves: Some(CaveParams {
+                radius_m: 0.001,
+                ..CaveParams::default()
+            }),
+            ..crate::testgen::world_params()
+        };
+        let g = Worldgen::new(SEED, 1.0, params);
+        let shafts = g.caverns.as_ref().unwrap().shafts(
+            [-3000.0, -3000.0],
+            [3000.0, 3000.0],
+            |x, z| g.surface_height_m(x, z),
+            |x, z| g.water_surface_m(x, z).is_none(),
+        );
+        assert!(shafts.len() > 20, "{} shafts", shafts.len());
+        let air = |x: i32, y: i32, z: i32| {
+            let s = CHUNK_SIZE as i32;
+            g.chunk(x.div_euclid(s), y.div_euclid(s), z.div_euclid(s))
+                .get(
+                    x.rem_euclid(s) as usize,
+                    y.rem_euclid(s) as usize,
+                    z.rem_euclid(s) as usize,
+                )
+                .is_air()
+        };
+        let open = shafts
+            .iter()
+            .take(12)
+            .filter(|s| {
+                let [x, z] = s.centre_m.map(|m| m.round());
+                let top = g.surface_height_m(x, z).floor() as i32 - 1;
+                let (x, z) = (x as i32, z as i32);
+                (s.bottom_m.ceil() as i32..top).all(|y| air(x, y, z))
+                    && air(x, s.bottom_m.floor() as i32 - 1, z)
+            })
+            .count();
+        assert!(
+            open >= 9,
+            "{open} of 12 shafts reach a cavern from the ground"
+        );
     }
 
     #[test]
