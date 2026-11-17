@@ -273,7 +273,7 @@ impl Base {
         // Eased toward the band's top rather than cut flat by the clamp, so a high range still
         // ends in peaks.
         let crest_m = h * SUMMIT_SHARE;
-        let rise_m = crest_m * (1.0 - (-h * 1.1 * mountain / crest_m).exp());
+        let rise_m = crest_m * (1.0 - libm::expf(-h * 1.1 * mountain / crest_m));
         // High up a range the rock breaks into crags and knolls rather than a smooth dome; below
         // them the flanks are benched.
         let summit = smooth(0.12, 0.45, mountain);
@@ -585,7 +585,7 @@ impl Base {
                 if r >= VOLCANO_RADIUS_M {
                     continue;
                 }
-                let cone = (1.0 - r / VOLCANO_RADIUS_M).powf(1.3) * self.height_m * 0.55;
+                let cone = libm::powf(1.0 - r / VOLCANO_RADIUS_M, 1.3) * self.height_m * 0.55;
                 let crater = 40.0 * (1.0 - smooth(0.0, 90.0, r));
                 best = best.max(cone - crater);
             }

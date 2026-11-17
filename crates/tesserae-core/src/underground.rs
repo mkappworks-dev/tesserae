@@ -207,7 +207,10 @@ pub(crate) fn cave_biome_at(
         .enumerate()
         .filter(|(_, b)| b.admits(altitude_m))
         .min_by(|(_, a), (_, b)| {
-            let d = |c: &CaveBiome| (c.temperature - t).hypot(c.humidity - h);
+            let d = |c: &CaveBiome| {
+                let (dt, dh) = (c.temperature - t, c.humidity - h);
+                (dt * dt + dh * dh).sqrt()
+            };
             d(a).total_cmp(&d(b))
         })
         .map(|(i, _)| i as u8)
