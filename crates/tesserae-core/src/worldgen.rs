@@ -688,6 +688,8 @@ pub struct Worldgen {
     tops: Arc<Mutex<HashMap<[u32; 5], f32>>>,
     /// What every Chunk over a Cell reads alike.
     columns: Arc<CellMap<ColumnCache>>,
+    /// Filled only by a generator that stands Plants.
+    plants: Arc<CellMap<CellPlants>>,
     caves: Option<CaveField>,
     /// Whether the smoothing pass runs: configured, and a one-Voxel step is at
     /// least `min_rise_m` at this Voxel size.
@@ -754,7 +756,25 @@ struct Standing {
     plant: SurfacePlant,
     base: [i32; 3],
     vary: f64,
+    /// The Biome and the index of its feature that declares the Plant.
+    declared: (BiomeId, u8),
 }
+
+/// A [`Standing`] as a Cell keeps it: the rest is the feature it names and a hash of its column.
+#[derive(Clone, Copy)]
+struct CellPlant {
+    /// `z * CHUNK_SIZE + x` in the Cell.
+    column: u16,
+    biome: u8,
+    feature: u8,
+    base_y: i32,
+}
+
+/// The Plants standing on each Cell's columns, in column order.
+type CellPlants = Box<[CellPlant]>;
+
+/// About 7 MB in a forest, where some 900 Plants stand on a Cell.
+const MAX_PLANT_CELLS: usize = 1024;
 
 /// Per feature index, so two clumped features of a Biome gather in different places.
 const CLUMP_SALT: u32 = 0x9e37_79b9;
@@ -856,6 +876,19 @@ impl SurfaceScatter {
         x_m: f32,
         z_m: f32,
     ) -> Option<&'a SurfaceFeature> {
+        self.pick_indexed(features, draw, seed, x_m, z_m)
+            .map(|(_, f)| f)
+    }
+
+    /// [`Self::pick`] with the feature's index.
+    fn pick_indexed<'a>(
+        &self,
+        features: &'a SurfaceFeatures,
+        draw: f64,
+        seed: u32,
+        x_m: f32,
+        z_m: f32,
+    ) -> Option<(usize, &'a SurfaceFeature)> {
         let mut reach = 0.0;
         let (index, feature) = features.as_slice().iter().enumerate().find(|&(i, f)| {
             let mut chance = Self::chance(self.unit_chance, f.spacing_m);
@@ -867,7 +900,7 @@ impl SurfaceScatter {
             draw < reach
         })?;
         // A drawn member the region does not hold leaves the column bare, not to the next feature.
-        fields::admits(features, index, seed, x_m, z_m).then_some(feature)
+        fields::admits(features, index, seed, x_m, z_m).then_some((index, feature))
     }
 
     /// Uniform in `[0, 1)`, from the seed and the column's metre position alone.
@@ -1013,6 +1046,7 @@ impl Worldgen {
             terrain: Terrain::new(folded, &params),
             tops: Arc::default(),
             columns: Arc::new(CellMap::new(MAX_COLUMN_CACHES)),
+            plants: Arc::new(CellMap::new(MAX_PLANT_CELLS)),
             // A Game with cave Biomes and no tunnels still has caverns for them.
             caverns: (params.caves.is_some() || !params.cave_biomes.is_empty())
                 .then(|| Caverns::new(folded, &params)),
@@ -1567,10 +1601,11 @@ impl Worldgen {
         top
     }
 
-    /// Drops the drainage regions and column caches this generator has kept. Nothing it answers
+    /// Drops the drainage regions, column caches and Plants this generator has kept. Nothing it answers
     /// changes: each is built again, to the same result, when it is next asked.
     pub fn forget_regions(&self) {
         self.columns.clear();
+        self.plants.clear();
         self.terrain.forget_regions();
     }
 
@@ -2035,7 +2070,7 @@ impl Worldgen {
                 [cx, cy, cz],
             );
             if scatter.plants {
-                self.plants(&mut chunk, scatter, &placed, &kept, [cx, cy, cz]);
+                self.plants(&mut chunk, scatter, [cx, cy, cz]);
             }
             self.crop_fields(&mut chunk, &placed, &kept, [cx, cy, cz]);
         }
@@ -2670,12 +2705,11 @@ impl Worldgen {
         if draw >= scatter.most {
             return None;
         }
-        let biome = self
-            .column_biome_id(gx, gz)
-            .and_then(|id| self.params.biomes.get(id))?;
-        let plant = scatter
-            .pick(&biome.surface_features, draw, self.seed, x_m, z_m)?
-            .plant?;
+        let id = self.column_biome_id(gx, gz)?;
+        let biome = self.params.biomes.get(id)?;
+        let (feature, drawn) =
+            scatter.pick_indexed(&biome.surface_features, draw, self.seed, x_m, z_m)?;
+        let plant = drawn.plant?;
         let size = self.voxel_size;
         let top = top_index(self.surface_height_m(x_m, z_m), 0.0, size);
         let base = [gx, top + 1, gz];
@@ -2720,7 +2754,68 @@ impl Worldgen {
             plant,
             base,
             vary: SurfaceScatter::draw_salted(self.seed, x_m, z_m, PLANT_VARY_SALT),
+            declared: (id, feature as u8),
         })
+    }
+
+    /// The Plants standing on Cell `[cx, cz]`, decided once with the fields and footprints that
+    /// decide them.
+    fn cell_plants(&self, scatter: &SurfaceScatter, [cx, cz]: [i32; 2]) -> Arc<CellPlants> {
+        self.plants.get_or_build([cx, cz], || {
+            let margin = (scatter.reach_m / self.voxel_size).ceil() as i32 + 1;
+            let placed = self.fields_near(scatter, self.chunk_columns([cx, cz], 0));
+            let kept = self.footprints_near(self.chunk_columns([cx, cz], margin));
+            let size = CHUNK_SIZE as i32;
+            (0..size * size)
+                .filter_map(|i| {
+                    let (gx, gz) = (cx * size + i % size, cz * size + i / size);
+                    let standing = self.plant_at(scatter, &placed, &kept, gx, gz)?;
+                    let (biome, feature) = standing.declared;
+                    Some(CellPlant {
+                        column: i as u16,
+                        biome: biome.index() as u8,
+                        feature,
+                        base_y: standing.base[1],
+                    })
+                })
+                .collect()
+        })
+    }
+
+    /// Every Plant standing on columns `min..=max`, in the fixed order of `z` then `x` that
+    /// decides which of two Plants takes a cell both reach.
+    fn plants_on(&self, scatter: &SurfaceScatter, min: [i32; 2], max: [i32; 2]) -> Vec<Standing> {
+        let size = CHUNK_SIZE as i32;
+        let cells = |a: usize| min[a].div_euclid(size)..=max[a].div_euclid(size);
+        let mut standing = Vec::new();
+        for cz in cells(1) {
+            for cx in cells(0) {
+                for p in self.cell_plants(scatter, [cx, cz]).iter() {
+                    let column = i32::from(p.column);
+                    let (gx, gz) = (cx * size + column % size, cz * size + column / size);
+                    if !(min[0]..=max[0]).contains(&gx) || !(min[1]..=max[1]).contains(&gz) {
+                        continue;
+                    }
+                    let biome = self
+                        .params
+                        .biomes
+                        .get(BiomeId::new(p.biome))
+                        .expect("a kept Plant's Biome");
+                    let plant = biome.surface_features.as_slice()[usize::from(p.feature)]
+                        .plant
+                        .expect("a kept Plant's feature");
+                    let (x_m, z_m) = (self.global_m(gx), self.global_m(gz));
+                    standing.push(Standing {
+                        plant,
+                        base: [gx, p.base_y, gz],
+                        vary: SurfaceScatter::draw_salted(self.seed, x_m, z_m, PLANT_VARY_SALT),
+                        declared: (BiomeId::new(p.biome), p.feature),
+                    });
+                }
+            }
+        }
+        standing.sort_by_key(|s| (s.base[2], s.base[0]));
+        standing
     }
 
     /// Whether smoothing would put a stair or slab in the cell over the column's top, as `smooth`
@@ -2897,14 +2992,7 @@ impl Worldgen {
     /// Stands the Plants whose Voxels fall in this Chunk. Trees reach over a Chunk's border, so
     /// every column within the widest canopy is asked, in one fixed order, and a Voxel goes only
     /// into an empty cell: the first tree to claim it wins from every Chunk's viewpoint.
-    fn plants(
-        &self,
-        chunk: &mut Chunk,
-        scatter: &SurfaceScatter,
-        placed: &[fields::Placed],
-        kept: &[Footprint],
-        coord: [i32; 3],
-    ) {
+    fn plants(&self, chunk: &mut Chunk, scatter: &SurfaceScatter, coord: [i32; 3]) {
         let size = CHUNK_SIZE as i32;
         let origin = [coord[0] * size, coord[1] * size, coord[2] * size];
         let (lowest, _) = self.terrain_band_m();
@@ -2938,70 +3026,71 @@ impl Worldgen {
         let mut trees = Vec::new();
         let mut hung: Vec<Vec<([i32; 3], Voxel)>> = Vec::new();
         let mut crops: Vec<([i32; 3], Voxel)> = Vec::new();
-        for gz in origin[2] - margin..origin[2] + size + margin {
-            for gx in origin[0] - margin..origin[0] + size + margin {
-                let own = (origin[0]..origin[0] + size).contains(&gx)
-                    && (origin[2]..origin[2] + size).contains(&gz);
-                let Some(standing) = self.plant_at(scatter, placed, kept, gx, gz) else {
-                    continue;
-                };
-                let base = standing.base;
-                match standing.plant.kind {
-                    SurfacePlantKind::Stages {
-                        materials,
-                        len,
-                        stage_shapes,
-                    } if own => {
-                        let stage = (standing.vary * f64::from(len)) as usize;
-                        let shape = stage_shapes[stage].unwrap_or(standing.plant.shape);
-                        let voxel = Voxel::new(materials[stage], shape, 0);
-                        put(chunk, base, voxel, None);
-                    }
-                    SurfacePlantKind::Column {
-                        material,
-                        stands_in,
-                        ..
-                    } if own => {
-                        let voxel = Voxel::new(material, standing.plant.shape, 0);
-                        for dy in 0..self.run_voxels(&standing) {
-                            put(chunk, [base[0], base[1] + dy, base[2]], voxel, stands_in);
-                        }
-                    }
-                    SurfacePlantKind::Tree(tree) => {
-                        let reach = (tree.reach_m() / self.voxel_size).ceil() as i32
-                            + 1
-                            + tree.rounding_slack_voxels();
-                        // A vine hangs from the canopy, so it can reach below the base on a slope.
-                        let hang = tree
-                            .vines
-                            .map_or(0, |v| (v.length_m / self.voxel_size).ceil() as i32 + 1);
-                        if outside(gx, origin[0]) > reach
-                            || outside(gz, origin[2]) > reach
-                            || base[1] - hang > origin[1] + size - 1
-                        {
-                            continue;
-                        }
-                        let rise = (scatter.rise_m / self.voxel_size).ceil() as i32 + 2;
-                        if base[1] + rise < origin[1] {
-                            continue;
-                        }
-                        trees.push((tree.trunk, self.tree_cells(&tree, base)));
-                        hung.extend(self.vine_cells(&tree, base));
-                    }
-                    SurfacePlantKind::Vine(vine) => {
-                        let reach = (vine.reach_m / self.voxel_size).ceil() as i32 + 1;
-                        let slope = reach + 2;
-                        if outside(gx, origin[0]) > reach
-                            || outside(gz, origin[2]) > reach
-                            || base[1] - slope > origin[1] + size - 1
-                            || base[1] + slope < origin[1]
-                        {
-                            continue;
-                        }
-                        crops.extend(self.crop_cells(&standing.plant, &vine, base));
-                    }
-                    _ => {}
+        let near = self.plants_on(
+            scatter,
+            [origin[0] - margin, origin[2] - margin],
+            [origin[0] + size + margin - 1, origin[2] + size + margin - 1],
+        );
+        for standing in near {
+            let base = standing.base;
+            let [gx, _, gz] = base;
+            let own = (origin[0]..origin[0] + size).contains(&gx)
+                && (origin[2]..origin[2] + size).contains(&gz);
+            match standing.plant.kind {
+                SurfacePlantKind::Stages {
+                    materials,
+                    len,
+                    stage_shapes,
+                } if own => {
+                    let stage = (standing.vary * f64::from(len)) as usize;
+                    let shape = stage_shapes[stage].unwrap_or(standing.plant.shape);
+                    let voxel = Voxel::new(materials[stage], shape, 0);
+                    put(chunk, base, voxel, None);
                 }
+                SurfacePlantKind::Column {
+                    material,
+                    stands_in,
+                    ..
+                } if own => {
+                    let voxel = Voxel::new(material, standing.plant.shape, 0);
+                    for dy in 0..self.run_voxels(&standing) {
+                        put(chunk, [base[0], base[1] + dy, base[2]], voxel, stands_in);
+                    }
+                }
+                SurfacePlantKind::Tree(tree) => {
+                    let reach = (tree.reach_m() / self.voxel_size).ceil() as i32
+                        + 1
+                        + tree.rounding_slack_voxels();
+                    // A vine hangs from the canopy, so it can reach below the base on a slope.
+                    let hang = tree
+                        .vines
+                        .map_or(0, |v| (v.length_m / self.voxel_size).ceil() as i32 + 1);
+                    if outside(gx, origin[0]) > reach
+                        || outside(gz, origin[2]) > reach
+                        || base[1] - hang > origin[1] + size - 1
+                    {
+                        continue;
+                    }
+                    let rise = (scatter.rise_m / self.voxel_size).ceil() as i32 + 2;
+                    if base[1] + rise < origin[1] {
+                        continue;
+                    }
+                    trees.push((tree.trunk, self.tree_cells(&tree, base)));
+                    hung.extend(self.vine_cells(&tree, base));
+                }
+                SurfacePlantKind::Vine(vine) => {
+                    let reach = (vine.reach_m / self.voxel_size).ceil() as i32 + 1;
+                    let slope = reach + 2;
+                    if outside(gx, origin[0]) > reach
+                        || outside(gz, origin[2]) > reach
+                        || base[1] - slope > origin[1] + size - 1
+                        || base[1] + slope < origin[1]
+                    {
+                        continue;
+                    }
+                    crops.extend(self.crop_cells(&standing.plant, &vine, base));
+                }
+                _ => {}
             }
         }
         // A trunk is never left with a hole where a neighbour's canopy got there first.
@@ -3060,32 +3149,36 @@ impl Worldgen {
                 }
             }
         }
-        for gz in *zs.start() - margin..=*zs.end() + margin {
-            for gx in *xs.start() - margin..=*xs.end() + margin {
-                let Some(standing) = self.plant_at(scatter, &placed, &kept, gx, gz) else {
-                    continue;
-                };
-                let base = standing.base;
-                let own = xs.contains(&gx) && zs.contains(&gz);
-                let top = match standing.plant.kind {
-                    SurfacePlantKind::Tree(tree) => self
-                        .tree_cells(&tree, base)
-                        .into_iter()
-                        .filter(|(at, _)| xs.contains(&at[0]) && zs.contains(&at[2]))
-                        .map(|(at, _)| at[1] + 1)
-                        .max(),
-                    SurfacePlantKind::Vine(vine) => self
-                        .crop_cells(&standing.plant, &vine, base)
-                        .into_iter()
-                        .filter(|(at, _)| xs.contains(&at[0]) && zs.contains(&at[2]))
-                        .map(|(at, _)| at[1] + 1)
-                        .max(),
-                    _ if own => Some(base[1] + self.run_voxels(&standing)),
-                    _ => None,
-                };
-                if let Some(top) = top {
-                    clear_m = clear_m.max(self.global_m(top));
-                }
+        let near = if scatter.plants {
+            self.plants_on(
+                scatter,
+                [*xs.start() - margin, *zs.start() - margin],
+                [*xs.end() + margin, *zs.end() + margin],
+            )
+        } else {
+            Vec::new()
+        };
+        for standing in near {
+            let base = standing.base;
+            let own = xs.contains(&base[0]) && zs.contains(&base[2]);
+            let top = match standing.plant.kind {
+                SurfacePlantKind::Tree(tree) => self
+                    .tree_cells(&tree, base)
+                    .into_iter()
+                    .filter(|(at, _)| xs.contains(&at[0]) && zs.contains(&at[2]))
+                    .map(|(at, _)| at[1] + 1)
+                    .max(),
+                SurfacePlantKind::Vine(vine) => self
+                    .crop_cells(&standing.plant, &vine, base)
+                    .into_iter()
+                    .filter(|(at, _)| xs.contains(&at[0]) && zs.contains(&at[2]))
+                    .map(|(at, _)| at[1] + 1)
+                    .max(),
+                _ if own => Some(base[1] + self.run_voxels(&standing)),
+                _ => None,
+            };
+            if let Some(top) = top {
+                clear_m = clear_m.max(self.global_m(top));
             }
         }
         clear_m
@@ -3321,6 +3414,59 @@ mod tests {
 
     fn highest_solid(column: &[Voxel]) -> Option<usize> {
         column.iter().rposition(|v| !v.is_air())
+    }
+
+    /// Version 3 under one Biome whose ground is grass every 2 m.
+    fn grassland() -> WorldgenParams {
+        let mut materials = [crate::AIR; crate::MAX_SURFACE_STAGES];
+        materials[0] = 220;
+        let grass = SurfaceFeature {
+            material: 220,
+            spacing_m: 2.0,
+            plant: Some(SurfacePlant {
+                shape: 0,
+                kind: SurfacePlantKind::Stages {
+                    materials,
+                    len: 1,
+                    stage_shapes: [None; crate::MAX_SURFACE_STAGES],
+                },
+            }),
+            clump: None,
+            field: None,
+        };
+        let biome = crate::Biome {
+            name: crate::BiomeName::new("t:grass").unwrap(),
+            temperature: 0.5,
+            humidity: 0.5,
+            ground: None,
+            sky_fog: None,
+            cave_scale: None,
+            surface_features: SurfaceFeatures::new(&[grass]).unwrap(),
+        };
+        WorldgenParams {
+            generator: 3,
+            sea_level_m: -40.0,
+            biomes: BiomeTable::new(&[biome]).unwrap(),
+            ..crate::testgen::world_params()
+        }
+    }
+
+    #[test]
+    fn only_a_generator_that_stands_plants_keeps_them() {
+        let generate = |g: &Worldgen| {
+            let [x, z] = [16.0, 16.0];
+            let cy = (g.surface_height_m(x, z) / CHUNK_SIZE as f32).floor() as i32;
+            for cy in cy - 1..=cy + 1 {
+                g.chunk(0, cy, 0);
+            }
+        };
+        let planted = Worldgen::new(SEED, 1.0, grassland());
+        generate(&planted);
+        assert!(planted.plants.len() > 0);
+        let bare = Worldgen::new(SEED, 1.0, grassland().without_surface_features());
+        generate(&bare);
+        assert_eq!(bare.plants.len(), 0);
+        assert!(bare.columns.len() > 0);
     }
 
     #[test]
