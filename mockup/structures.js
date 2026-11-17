@@ -737,45 +737,40 @@ const B = {
    * light.
    */
   /*
-   * A rounded pond: the World's water level with the ground, a metre deeper in its middle, on a
-   * clay bed with a sand rim; the ground outside the oval is kept. `pads` floats lily pads on one
-   * in `pads` of its cells, none when 0. Level sources, so nothing flows when it is made.
+   * A rounded pond in a Game's `look` (`rim`, `bed`): the World's water level with the ground, a
+   * metre deeper in its middle, on a bed with a rim round it; the ground outside the oval is kept.
+   * `pads` floats `look.pad` on one in `pads` of its cells, or stands `look.reed` on its rim, none
+   * when 0. Level sources, so nothing flows when it is made.
    */
-  pond: (w = 7, d = 5, pads = 0) => {
-    const g = B.pondCells(w, d);
+  pond: (look, w = 7, d = 5, pads = 0) => {
+    const g = B.pondCells(look, w, d);
     if (pads)
       for (const [key, c] of [...g.map]) {
         const [x, y, z] = key.split(",").map(Number);
-        if (y === 0 && c.m === "water" && (x * 7 + z * 3) % pads === 0)
-          g.put(x, 1, z, M("aquatic:lily_pad", "aquatic:pad"));
+        if (y !== 0 || (x * 7 + z * 3) % pads !== 0) continue;
+        if (c.m === "water" && look.pad)
+          g.put(x, 1, z, M(look.pad, "aquatic:pad"));
+        else if (c.m === look.rim && look.reed)
+          g.put(x, 1, z, M(look.reed, "cross"));
       }
     return g.done();
   },
   /*
-   * A pond fed along a stone-lined brook from a spring stone at its +Z end, so a Player can
-   * follow the water to it. The brook is level too.
+   * A pond fed along a brook lined with `look.stone` from a spring stone at its +Z end, so a
+   * Player can follow the water to it. The brook is level too.
    */
-  brookPond: (w = 7, d = 5, brook = 7) => {
-    const g = B.pondCells(w, d),
+  brookPond: (look, w = 7, d = 5, brook = 7) => {
+    const g = B.pondCells(look, w, d),
       mid = (w - 1) >> 1;
     for (let z = d - 1; z < d + brook; z++) {
       g.put(mid, 0, z, M("water"));
-      g.put(mid, -1, z, M("strata:clay"));
-      for (const x of [mid - 1, mid + 1])
-        g.put(x, 0, z, M("terra:cobblestone"));
+      g.put(mid, -1, z, M(look.bed));
+      for (const x of [mid - 1, mid + 1]) g.put(x, 0, z, M(look.stone));
     }
-    g.fill(
-      mid - 1,
-      0,
-      d + brook,
-      mid + 1,
-      1,
-      d + brook,
-      M("terra:cobblestone"),
-    );
+    g.fill(mid - 1, 0, d + brook, mid + 1, 1, d + brook, M(look.stone));
     return g.done();
   },
-  pondCells: (w, d) => {
+  pondCells: (look, w, d) => {
     const g = new Grid(),
       [cx, cz] = [(w - 1) / 2, (d - 1) / 2],
       within = (x, z, shrink) =>
@@ -786,38 +781,55 @@ const B = {
       for (let z = 0; z < d; z++) {
         if (!within(x, z, 0)) continue;
         if (!within(x, z, 1)) {
-          g.put(x, 0, z, M("terra:sand"));
+          g.put(x, 0, z, M(look.rim));
           continue;
         }
         const deep = within(x, z, 2);
         g.put(x, 0, z, M("water"));
         if (deep) g.put(x, -1, z, M("water"));
-        g.put(x, deep ? -2 : -1, z, M("strata:clay"));
+        g.put(x, deep ? -2 : -1, z, M(look.bed));
       }
     return g;
   },
   /*
-   * Water pouring off a rock ledge, `h` tall at its back, into a pool before it: a spring at the
-   * ledge's lip runs over its front, falls, and settles in the pool, which holds it.
+   * Water pouring off a rock ledge into a pool before it, in a Game's `look` (`rock`, `top`,
+   * `bed`): a spring at the ledge's back runs along a channel to its lip, falls, and settles in
+   * the pool. The ledge stands in uneven columns topped with `top`, lower at its sides and higher
+   * in a crag or two, and boulders sit on the pool's rim, so it reads as rock, not a block. The
+   * columns either side of the channel stand full height, which holds the channel's water.
    */
-  waterfall: (w = 7, d = 9, h = 5) => {
+  waterfall: (look, w = 9, d = 10, h = 5) => {
     const g = new Grid(),
-      rock = M("terra:stone"),
+      rock = M(look.rock),
       mid = (w - 1) >> 1,
-      ledge = 4;
+      ledge = 4,
+      bump = (x, z) => ((x * 5 + z * 3 + x * z) % 4) - 1;
     for (let x = 0; x < w; x++)
       for (let z = 0; z < d; z++) {
-        const edge = x === 0 || x === w - 1 || z === d - 1;
         if (z < ledge) {
-          // The ledge steps down a little at its sides, so it reads as rock, not a wall.
-          const top = h - (x === 0 || x === w - 1 ? 1 : 0);
-          g.fill(x, 0, z, x, top, z, rock);
+          const side = Math.min(x, w - 1 - x);
+          const top =
+            Math.abs(x - mid) <= 1
+              ? h
+              : h -
+                Math.max(0, 2 - side) +
+                Math.max(0, bump(x, z)) -
+                (z === ledge - 1 ? 1 : 0);
+          g.fill(x, 0, z, x, top - 1, z, rock);
+          if (Math.abs(x - mid) > 1 || z === 0) g.put(x, top, z, M(look.top));
+          else g.put(x, top, z, rock);
           continue;
         }
-        g.put(x, -2, z, M("strata:clay"));
-        // A rim a Voxel over the pool, so the fall's spread stays in it.
-        if (edge) g.fill(x, -1, z, x, 1, z, rock);
-        else g.fill(x, -1, z, x, 0, z, M("water"));
+        const edge = x === 0 || x === w - 1 || z === d - 1;
+        g.put(x, -2, z, M(look.bed));
+        if (!edge) {
+          g.fill(x, -1, z, x, 0, z, M("water"));
+          continue;
+        }
+        // A rim a Voxel over the pool, so the fall's spread stays in it, with a boulder here and
+        // there.
+        g.fill(x, -1, z, x, 1, z, rock);
+        if ((x * 3 + z * 7) % 5 === 0) g.put(x, 2, z, rock);
       }
     // A channel in the ledge's top to its lip, the spring at its back.
     for (let z = 1; z < ledge; z++) g.put(mid, h, z, M("water"));
@@ -1227,6 +1239,80 @@ const T = (game, slug, name, note, kind, build, style = "wild") => ({
   build,
   style,
 });
+/*
+ * Each Game's ponds and falls in its own Materials: a pond's rim and bed, a brook's stones, a
+ * ledge's rock and the turf over it, and lily pads where it has the aquatic Mod, else reeds.
+ */
+const WATER_LOOK = {
+  Terra: {
+    rim: "terra:sand",
+    bed: "strata:clay",
+    stone: "terra:cobblestone",
+    rock: "terra:stone",
+    top: "terra:grass",
+    pad: "aquatic:lily_pad",
+  },
+  Meadow: {
+    rim: "strata:sand",
+    bed: "strata:clay",
+    stone: "meadow:fieldstone",
+    rock: "strata:stone",
+    top: "strata:turf",
+    reed: "flora:cane",
+  },
+  Lumen: {
+    rim: "strata:sand",
+    bed: "strata:clay",
+    stone: "strata:stone",
+    rock: "strata:stone",
+    top: "strata:turf",
+    reed: "flora:cane",
+  },
+  Tidewater: {
+    rim: "strata:sand",
+    bed: "strata:sand",
+    stone: "strata:stone",
+    rock: "strata:stone",
+    top: "strata:turf",
+    pad: "aquatic:lily_pad",
+  },
+  Ember: {
+    rim: "hearth:ash",
+    bed: "strata:clay",
+    stone: "strata:basalt",
+    rock: "strata:basalt",
+    top: "hearth:ash",
+    reed: "flora:cane",
+  },
+};
+const WATER = (game) => {
+  const look = WATER_LOOK[game],
+    lilies = look.pad ? "Lily pond" : "Reed pond";
+  return [
+    T(game, "pond", "Pond", "Still water by the fields", "water", () =>
+      B.pond(look, 7, 5),
+    ),
+    T(game, "lily-pond", lilies, "A round pond with its plants", "water", () =>
+      B.pond(look, 9, 7, 3),
+    ),
+    T(
+      game,
+      "brook-pond",
+      "Brook and pond",
+      "A spring's brook into a pond",
+      "water",
+      () => B.brookPond(look),
+    ),
+    T(
+      game,
+      "waterfall",
+      "Waterfall",
+      "Water off a craggy ledge into a pool",
+      "water",
+      () => B.waterfall(look),
+    ),
+  ];
+};
 const SET = (game, names) =>
   [
     ["cottage", "One room, steep roof, chimney", "home"],
@@ -1371,33 +1457,7 @@ const GAME_TEMPLATES = {
       "field",
       () => B.mushroomShed(),
     ),
-    T("Terra", "pond", "Pond", "Still water by the fields", "water", () =>
-      B.pond(7, 5),
-    ),
-    T(
-      "Terra",
-      "lily-pond",
-      "Lily pond",
-      "Lilies on a round pond",
-      "water",
-      () => B.pond(9, 7, 3),
-    ),
-    T(
-      "Terra",
-      "brook-pond",
-      "Brook and pond",
-      "A spring's brook running into a pond",
-      "water",
-      () => B.brookPond(),
-    ),
-    T(
-      "Terra",
-      "waterfall",
-      "Waterfall",
-      "Water off a rock ledge into a pool",
-      "water",
-      () => B.waterfall(),
-    ),
+    ...WATER("Terra"),
     T(
       "Terra",
       "orchard",
@@ -1482,6 +1542,7 @@ const GAME_TEMPLATES = {
       () => B.ropeBridge(),
       "ropeBridge",
     ),
+    ...WATER("Tidewater"),
   ],
   Ember: [
     ...SET("Ember", [
@@ -1521,6 +1582,7 @@ const GAME_TEMPLATES = {
     T("Ember", "barrow", "Buried barrow", "Tomb under a mound", "wild", () =>
       B.mound(6, 3, 2),
     ),
+    ...WATER("Ember"),
   ],
   Lumen: [
     ...SET("Lumen", [
@@ -1570,6 +1632,7 @@ const GAME_TEMPLATES = {
       "wild",
       () => B.dome(4, true),
     ),
+    ...WATER("Lumen"),
   ],
   Meadow: [
     ...SET("Meadow", [
@@ -1604,6 +1667,7 @@ const GAME_TEMPLATES = {
     T("Meadow", "fairy-ring", "Fairy ring", "Lights in a circle", "wild", () =>
       B.ring(3, 8, 1),
     ),
+    ...WATER("Meadow"),
   ],
 };
 const TEMPLATES = Object.fromEntries(

@@ -3583,6 +3583,437 @@
      "..AAAAA.."
     ]
    ]
+  },
+  {
+   "name": "lumen:pond",
+   "label": "Pond",
+   "kind": "water",
+   "size": [
+    7,
+    3,
+    5
+   ],
+   "ground_layer": 2,
+   "foundation": "lumen:moonstone",
+   "level_tolerance_m": null,
+   "spans": false,
+   "palette": [
+    {
+     "symbol": ".",
+     "cell": "keep"
+    },
+    {
+     "symbol": ":",
+     "cell": "air"
+    },
+    {
+     "symbol": "A",
+     "material": "strata:sand",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "B",
+     "material": "waters:water",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "C",
+     "material": "strata:clay",
+     "shape": "core:cube",
+     "orientation": 0
+    }
+   ],
+   "layers": [
+    [
+     ".......",
+     ".......",
+     "..CCC..",
+     ".......",
+     "......."
+    ],
+    [
+     ".......",
+     "..CCC..",
+     ".CBBBC.",
+     "..CCC..",
+     "......."
+    ],
+    [
+     ".AAAAA.",
+     "AABBBAA",
+     "ABBBBBA",
+     "AABBBAA",
+     ".AAAAA."
+    ]
+   ]
+  },
+  {
+   "name": "lumen:lily_pond",
+   "label": "Reed pond",
+   "kind": "water",
+   "size": [
+    9,
+    4,
+    7
+   ],
+   "ground_layer": 2,
+   "foundation": "lumen:moonstone",
+   "level_tolerance_m": null,
+   "spans": false,
+   "palette": [
+    {
+     "symbol": ".",
+     "cell": "keep"
+    },
+    {
+     "symbol": ":",
+     "cell": "air"
+    },
+    {
+     "symbol": "A",
+     "material": "strata:sand",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "B",
+     "material": "waters:water",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "C",
+     "material": "strata:clay",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "D",
+     "material": "flora:cane",
+     "shape": "flora:cross",
+     "orientation": 0
+    }
+   ],
+   "layers": [
+    [
+     ".........",
+     ".........",
+     "...CCC...",
+     "..CCCCC..",
+     "...CCC...",
+     ".........",
+     "........."
+    ],
+    [
+     ".........",
+     "..CCCCC..",
+     ".CCBBBCC.",
+     ".CBBBBBC.",
+     ".CCBBBCC.",
+     "..CCCCC..",
+     "........."
+    ],
+    [
+     "..AAAAA..",
+     ".ABBBBBA.",
+     "ABBBBBBBA",
+     "ABBBBBBBA",
+     "ABBBBBBBA",
+     ".ABBBBBA.",
+     "..AAAAA.."
+    ],
+    [
+     "...D..D..",
+     ".........",
+     "D........",
+     "D........",
+     "D........",
+     ".........",
+     "...D..D.."
+    ]
+   ]
+  },
+  {
+   "name": "lumen:brook_pond",
+   "label": "Brook and pond",
+   "kind": "water",
+   "size": [
+    7,
+    4,
+    13
+   ],
+   "ground_layer": 2,
+   "foundation": "lumen:moonstone",
+   "level_tolerance_m": null,
+   "spans": false,
+   "palette": [
+    {
+     "symbol": ".",
+     "cell": "keep"
+    },
+    {
+     "symbol": ":",
+     "cell": "air"
+    },
+    {
+     "symbol": "A",
+     "material": "strata:sand",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "B",
+     "material": "waters:water",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "C",
+     "material": "strata:clay",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "D",
+     "material": "strata:stone",
+     "shape": "core:cube",
+     "orientation": 0
+    }
+   ],
+   "layers": [
+    [
+     ".......",
+     ".......",
+     "..CCC..",
+     ".......",
+     ".......",
+     ".......",
+     ".......",
+     ".......",
+     ".......",
+     ".......",
+     ".......",
+     ".......",
+     "......."
+    ],
+    [
+     ".......",
+     "..CCC..",
+     ".CBBBC.",
+     "..CCC..",
+     "...C...",
+     "...C...",
+     "...C...",
+     "...C...",
+     "...C...",
+     "...C...",
+     "...C...",
+     "...C...",
+     "......."
+    ],
+    [
+     ".AAAAA.",
+     "AABBBAA",
+     "ABBBBBA",
+     "AABBBAA",
+     ".ADBDA.",
+     "..DBD..",
+     "..DBD..",
+     "..DBD..",
+     "..DBD..",
+     "..DBD..",
+     "..DBD..",
+     "..DBD..",
+     "..DDD.."
+    ],
+    [
+     ".......",
+     ".......",
+     ".......",
+     ".......",
+     ".......",
+     ".......",
+     ".......",
+     ".......",
+     ".......",
+     ".......",
+     ".......",
+     ".......",
+     "..DDD.."
+    ]
+   ]
+  },
+  {
+   "name": "lumen:waterfall",
+   "label": "Waterfall",
+   "kind": "water",
+   "size": [
+    9,
+    10,
+    10
+   ],
+   "ground_layer": 2,
+   "foundation": "lumen:moonstone",
+   "level_tolerance_m": null,
+   "spans": false,
+   "palette": [
+    {
+     "symbol": ".",
+     "cell": "keep"
+    },
+    {
+     "symbol": ":",
+     "cell": "air"
+    },
+    {
+     "symbol": "A",
+     "material": "strata:stone",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "B",
+     "material": "strata:turf",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "C",
+     "material": "strata:clay",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "D",
+     "material": "waters:water",
+     "shape": "core:cube",
+     "orientation": 0
+    }
+   ],
+   "layers": [
+    [
+     ".........",
+     ".........",
+     ".........",
+     ".........",
+     "CCCCCCCCC",
+     "CCCCCCCCC",
+     "CCCCCCCCC",
+     "CCCCCCCCC",
+     "CCCCCCCCC",
+     "CCCCCCCCC"
+    ],
+    [
+     ".........",
+     ".........",
+     ".........",
+     ".........",
+     "ADDDDDDDA",
+     "ADDDDDDDA",
+     "ADDDDDDDA",
+     "ADDDDDDDA",
+     "ADDDDDDDA",
+     "AAAAAAAAA"
+    ],
+    [
+     "AAAAAAAAA",
+     "AAAAAAAAA",
+     "AAAAAAAAA",
+     "AAAAAAAAA",
+     "ADDDDDDDA",
+     "ADDDDDDDA",
+     "ADDDDDDDA",
+     "ADDDDDDDA",
+     "ADDDDDDDA",
+     "AAAAAAAAA"
+    ],
+    [
+     "AAAAAAAAA",
+     "AAAAAAAAA",
+     "AAAAAAAAA",
+     "AAAAAAAAA",
+     "A.......A",
+     "A.......A",
+     "A.......A",
+     "A.......A",
+     "A.......A",
+     "AAAAAAAAA"
+    ],
+    [
+     "AAAAAAAAA",
+     "AAAAAAAAA",
+     "AAAAAAAAA",
+     "BAAAAAAAB",
+     ".........",
+     "A........",
+     ".........",
+     ".........",
+     "........A",
+     "....A...."
+    ],
+    [
+     "BAAAAAAAB",
+     "AAAAAAAAA",
+     "AAAAAAAAA",
+     ".BAAAAAB.",
+     ".........",
+     ".........",
+     ".........",
+     ".........",
+     ".........",
+     "........."
+    ],
+    [
+     ".BAAAAAA.",
+     "ABAAAAABA",
+     "BBAAAAAAB",
+     "..BAAAB..",
+     ".........",
+     ".........",
+     ".........",
+     ".........",
+     ".........",
+     "........."
+    ],
+    [
+     "..ABBBAA.",
+     "B.AADAA.B",
+     "..BADABA.",
+     "...ADA...",
+     ".........",
+     ".........",
+     ".........",
+     ".........",
+     ".........",
+     "........."
+    ],
+    [
+     "..B.A.BB.",
+     "..A...A..",
+     ".......B.",
+     ".........",
+     ".........",
+     ".........",
+     ".........",
+     ".........",
+     ".........",
+     "........."
+    ],
+    [
+     ".........",
+     "..B...B..",
+     ".........",
+     ".........",
+     ".........",
+     ".........",
+     ".........",
+     ".........",
+     ".........",
+     "........."
+    ]
+   ]
   }
  ]
 }

@@ -1,6 +1,6 @@
 # 04: A craggy, mossy waterfall
 
-Status: ready-for-agent
+Status: done
 
 Spec: [Water by Settlements](../spec.md).
 
@@ -12,4 +12,4 @@ block.
 
 ## Acceptance criteria
 
-- [ ] A capture shows a craggy ledge and the fall held in its pool.
+- [x] A capture shows a craggy ledge and the fall held in its pool.
