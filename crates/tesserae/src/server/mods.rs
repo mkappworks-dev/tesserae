@@ -1543,7 +1543,7 @@ biomes = ["plain:dry"]
             ore[0].biomes.ids().map(|id| id.index()).collect::<Vec<_>>(),
             [1]
         );
-        assert_eq!(world.generator, 2);
+        assert_eq!(world.generator, tesserae_core::save::GENERATOR_VERSION);
     }
 
     #[test]
@@ -2539,6 +2539,14 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
         assert_eq!(generator.params().relief_m, 12.0);
     }
 
+    /// `loaded` under version 2, whose lakes stand at their declared level in its valleys.
+    fn at_version_2(mut loaded: LoadedMods) -> LoadedMods {
+        if let Some(world) = &mut loaded.world {
+            world.generator = 2;
+        }
+        loaded
+    }
+
     /// The World a load opens, as `cargo run` opens it.
     fn opened(loaded: LoadedMods) -> App {
         let mut app = App::new();
@@ -2578,7 +2586,7 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
         let brine = loaded.registry.id_of(Kind::Material, "lake:brine").unwrap() as MaterialId;
         let water = loaded.world.and_then(|w| w.water).expect("a lake");
         assert_eq!(water.material, brine);
-        let app = opened(loaded);
+        let app = opened(at_version_2(loaded));
         let generator = &app.world().resource::<super::super::WorldGenerator>().0;
         assert_eq!(generator.water().map(|w| w.material), Some(brine));
         assert_eq!(
@@ -2596,7 +2604,7 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
         let loaded = s.load(TrustMode::All).unwrap();
         assert!(loaded.game);
         assert_eq!(loaded.world.expect("the Game's parameters").water, None);
-        let app = opened(loaded);
+        let app = opened(at_version_2(loaded));
         let generator = &app.world().resource::<super::super::WorldGenerator>().0;
         assert_eq!(generator.water(), None);
         let defaults = WorldgenParams::default();

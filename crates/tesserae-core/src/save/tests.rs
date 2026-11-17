@@ -339,8 +339,8 @@ fn a_version_1_commit_keeps_its_version_through_a_write_and_recover() {
 }
 
 #[test]
-fn a_current_commit_is_version_2() {
-    assert_eq!(fixture().generator, 2);
+fn a_current_commit_is_version_3() {
+    assert_eq!(fixture().generator, 3);
 }
 
 #[test]

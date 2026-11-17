@@ -493,6 +493,8 @@ mod tests {
                     level_m: 70.0,
                     material: LAVA,
                 }),
+                // Version 2's lake stands at its declared level; version 3's sea at Sea level.
+                generator: 2,
                 ..WorldgenParams::default()
             },
         );

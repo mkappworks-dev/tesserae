@@ -1223,9 +1223,14 @@ fn fluids_named(loaded: &LoadedMods, params: WorldgenParams) -> Vec<u16> {
         .collect()
 }
 
-/// Terra's lakes are its water, standing in valleys at the default seed. Its
-/// stage site, not the generator, keeps them off the stage.
+/// Terra's lakes are its water, standing in valleys at the default seed under version 2, whose
+/// lakes stand at their declared level. Its stage site, not the generator, keeps them off the
+/// stage.
 fn assert_lakes_in_valleys(params: WorldgenParams, size: f32, water: u16) {
+    let params = WorldgenParams {
+        generator: 2,
+        ..params
+    };
     let lake = params.water.expect("Terra has lakes");
     assert_eq!(lake.material, water);
     let world = Worldgen::new(WorldSettings::default().seed, size, params);

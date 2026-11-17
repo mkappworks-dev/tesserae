@@ -217,7 +217,7 @@ fn world_params_field_for_field_with_the_lake_apart() {
                 temperature_size_m: 300.0,
                 humidity_size_m: 900.0,
             },
-            generator: 2,
+            generator: tesserae_core::save::GENERATOR_VERSION,
             ..WorldgenParams::default()
         }
     );

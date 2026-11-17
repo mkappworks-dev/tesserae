@@ -158,9 +158,12 @@ pub fn register_water(tables: &mut Tables) -> MaterialId {
     water
 }
 
+/// Version 2's terrain, which the algorithm tests' fixtures were laid out on; a test of version 3
+/// asks for it.
 pub fn world_params() -> crate::WorldgenParams {
     crate::WorldgenParams {
         ground: Some(fixtures().ground),
+        generator: 2,
         ..crate::WorldgenParams::default()
     }
 }

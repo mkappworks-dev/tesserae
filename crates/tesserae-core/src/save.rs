@@ -20,9 +20,8 @@ use crate::{CHUNK_SIZE, CHUNK_VOLUME, Chunk, ChunkOverlay, Fluid, Level, Overlay
 /// What a commit is written in. 2 packs each Chunk's cells; a format 1 commit still opens.
 pub const FORMAT_VERSION: u32 = 2;
 const SUPPORTED_FORMATS: [u32; 2] = [1, 2];
-/// What a new World is created under. Version 3 is supported but not yet the default: it moves
-/// here when step 17's last ticket lands.
-pub const GENERATOR_VERSION: u32 = 2;
+/// What a new World is created under.
+pub const GENERATOR_VERSION: u32 = 3;
 /// Every version that ever shipped stays until a migration exists: a World keeps the one it was
 /// created with.
 pub const SUPPORTED_GENERATORS: [u32; 3] = [1, 2, 3];

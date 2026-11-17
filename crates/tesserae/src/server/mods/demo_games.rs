@@ -105,6 +105,11 @@ pub(in crate::server) fn loaded(game: &str, voxel_size: f32) -> (Install, Loaded
         },
     )
     .unwrap();
+    // The positions these tests pin were found under version 2; a test of version 3 asks for it.
+    let mut loaded = loaded;
+    if let Some(world) = &mut loaded.world {
+        world.generator = 2;
+    }
     (install, loaded)
 }
 

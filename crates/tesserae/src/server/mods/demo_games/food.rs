@@ -3,7 +3,9 @@
 
 use bevy::ecs::system::RunSystemOnce;
 use bevy::prelude::*;
-use tesserae_core::{CHUNK_SIZE, Chunk, MaterialId, Orientation, SHAPE_FULL_CUBE, Voxel, Worldgen};
+use tesserae_core::{
+    CHUNK_SIZE, Chunk, MaterialId, Orientation, SHAPE_FULL_CUBE, Voxel, Worldgen, WorldgenParams,
+};
 use tesserae_mods::Kind;
 
 use super::{loaded, material};
@@ -100,16 +102,28 @@ fn nearest_m(generator: &Worldgen, food: MaterialId, within_m: f32) -> Option<f3
         .reduce(f32::min)
 }
 
-/// Horizontal metres from the spawn to every Voxel of `material` within `within_m`.
+/// Horizontal metres from the origin to every Voxel of `material` within `within_m`.
 pub(super) fn distances_m(generator: &Worldgen, material: MaterialId, within_m: f32) -> Vec<f32> {
+    let (lowest, highest) = generator.surface_bounds_m();
+    distances_around_m(generator, material, within_m, ([0.0; 2], (lowest, highest)))
+}
+
+/// Horizontal metres from `centre` to every Voxel of `material` within `within_m`, between the
+/// heights `rows_m`.
+fn distances_around_m(
+    generator: &Worldgen,
+    material: MaterialId,
+    within_m: f32,
+    (centre, (lowest, highest)): ([f32; 2], (f32, f32)),
+) -> Vec<f32> {
     let size = generator.voxel_size();
     let chunk_m = CHUNK_SIZE as f32 * size;
-    let (lowest, highest) = generator.surface_bounds_m();
     let rows = (lowest / chunk_m).floor() as i32..=(highest / chunk_m).ceil() as i32;
     let reach = (within_m / chunk_m).ceil() as i32;
+    let [ox, oz] = centre.map(|m| (m / chunk_m).floor() as i32);
     let mut found = Vec::new();
-    for cz in -reach..reach {
-        for cx in -reach..reach {
+    for cz in oz - reach..oz + reach {
+        for cx in ox - reach..ox + reach {
             for cy in rows.clone() {
                 let chunk = generator.chunk(cx, cy, cz);
                 if chunk.uniform().is_some() {
@@ -122,7 +136,8 @@ pub(super) fn distances_m(generator: &Worldgen, material: MaterialId, within_m: 
                                 continue;
                             }
                             let at = |c: i32, n: usize| (c * CHUNK_SIZE as i32 + n as i32) as f32;
-                            let d = (at(cx, x) * size).hypot(at(cz, z) * size);
+                            let d =
+                                (at(cx, x) * size - centre[0]).hypot(at(cz, z) * size - centre[1]);
                             if d <= within_m {
                                 found.push(d);
                             }
@@ -435,4 +450,48 @@ fn the_demo_games_textures_are_unchanged() {
         textures.sort();
         assert_eq!(fingerprint(&textures), expected, "{game}");
     }
+}
+
+/// Version 3's short walk: a new Player enters a village, and its disc, paths and outskirts, which
+/// the wild's scatter keeps off, stand between the spawn and the nearest food. Meadow's pumpkins
+/// lie up to 164 m off at the seeds below.
+const VILLAGE_WALK_M: f32 = 176.0;
+
+/// Version 3, a new World's: a new Player enters a village, so its food and the oaks for a first
+/// Workbench, Chest and Door are a short walk from there. Rows within 48 m of the spawn's height,
+/// which a short walk keeps to.
+#[test]
+fn a_new_version_3_world_has_food_and_wood_within_a_short_walk_of_the_spawn() {
+    crate::server::in_parallel(&FOODS, |food| {
+        let (_install, loaded) = loaded(food.game, 1.0);
+        let world = WorldgenParams {
+            generator: 3,
+            ..loaded.world.unwrap()
+        };
+        let id = material(&loaded, food.item);
+        let trunk = material(&loaded, "flora:oak_log");
+        let per_trunk = loaded.tables.plants.yields(trunk)[0].count.min;
+        for seed in [crate::world::WorldSettings::default().seed, 1, 3, 7] {
+            let generator = Worldgen::new(seed, 1.0, world)
+                .with_templates(&loaded.tables.templates)
+                .with_settlements(&loaded.tables.settlements);
+            let eye = crate::server::spawn_eye(&generator);
+            let around = ([eye.x, eye.z], (eye.y - 48.0, eye.y + 48.0));
+            assert!(
+                !distances_around_m(&generator, id, VILLAGE_WALK_M, around).is_empty(),
+                "{} seed {seed}: no {} within {VILLAGE_WALK_M} m of the spawn",
+                food.game,
+                food.item
+            );
+            if food.game == "terra" {
+                let wood = distances_around_m(&generator, trunk, VILLAGE_WALK_M, around).len()
+                    as u32
+                    * per_trunk;
+                assert!(
+                    wood >= WOOD_FOR_A_HOME,
+                    "seed {seed}: {wood} Wood within {VILLAGE_WALK_M} m of the spawn"
+                );
+            }
+        }
+    });
 }
