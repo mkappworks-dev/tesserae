@@ -447,6 +447,9 @@ fn old_completions_cannot_clear_new_edits_or_new_lifetimes() {
 #[test]
 fn injected_write_sync_and_rename_failures_preserve_previous_commit() {
     for phase in [
+        WritePhase::PackBody,
+        WritePhase::PackSync,
+        WritePhase::PackRename,
         WritePhase::Body,
         WritePhase::FileSync,
         WritePhase::Rename,
@@ -457,6 +460,7 @@ fn injected_write_sync_and_rename_failures_preserve_previous_commit() {
         let mut writer = Writer::acquire(&d.0, &c.world, &c.content).unwrap();
         writer.write(&c).unwrap();
         c.sequence = 2;
+        c.chunks = vec![ground([0; 3], 1, 8)];
         let result = writer.write_with(&c, |at| {
             if at == phase {
                 Err(io::Error::other("injected storage failure"))
@@ -482,6 +486,11 @@ fn injected_write_sync_and_rename_failures_preserve_previous_commit() {
                 .extension()
                 .is_none_or(|e| e != "pending"))
         );
+        assert_eq!(
+            pack_path(&d.0, 2).exists(),
+            phase == WritePhase::DirectorySync,
+            "{phase:?}"
+        );
         if phase == WritePhase::DirectorySync {
             assert!(writer.write(&c).is_err());
             c.sequence = 3;
@@ -490,17 +499,42 @@ fn injected_write_sync_and_rename_failures_preserve_previous_commit() {
     }
 }
 fn sequences(directory: &Path) -> Vec<u64> {
+    named(directory, "commit")
+}
+
+fn named(directory: &Path, extension: &str) -> Vec<u64> {
     let mut found: Vec<u64> = fs::read_dir(directory)
         .unwrap()
-        .filter_map(|e| {
-            let path = e.unwrap().path();
-            (path.extension()? == "commit")
-                .then(|| path.file_stem()?.to_str()?.parse().ok())
-                .flatten()
-        })
+        .filter_map(|e| sequence_of(&e.unwrap().path(), extension)?.ok())
         .collect();
     found.sort();
     found
+}
+
+/// A Chunk of one Material, so two of another revision differ.
+fn ground(coord: [i32; 3], revision: u64, material: u16) -> SavedChunk {
+    let chunk = Chunk::filled(Voxel::cube(material));
+    SavedChunk::capture(
+        coord,
+        revision,
+        &chunk,
+        &ChunkOverlay::none(),
+        &mapping(8, 9, 4),
+    )
+    .unwrap()
+}
+
+fn manifest(directory: &Path, sequence: u64) -> Manifest {
+    serde_json::from_value(read_body(&commit_path(directory, sequence)).unwrap()).unwrap()
+}
+
+/// A commit file as an older engine wrote it.
+fn write_raw(directory: &Path, commit: &Commit) {
+    let body = serde_json::to_vec(commit).unwrap();
+    let mut bytes = MAGIC.to_vec();
+    bytes.extend(Sha256::digest(&body));
+    bytes.extend(body);
+    fs::write(commit_path(directory, commit.sequence), bytes).unwrap();
 }
 
 fn write_kept(writer: &mut Writer, c: &mut Commit) {
@@ -605,6 +639,191 @@ fn a_writer_removes_abandoned_pending_files() {
     fs::write(d.0.join("abandoned.pending"), b"unfinished").unwrap();
     let _writer = Writer::acquire(&d.0, &c.world, &c.content).unwrap();
     assert!(!d.0.join("abandoned.pending").exists());
+}
+
+#[test]
+fn editing_one_chunk_after_a_save_writes_one_chunk_record() {
+    let d = Directory::new();
+    let mut c = fixture();
+    c.chunks = (0..5).map(|x| ground([x, 0, 0], 1, 8)).collect();
+    let mut writer = Writer::acquire(&d.0, &c.world, &c.content).unwrap();
+    writer.write(&c).unwrap();
+    assert_eq!(manifest(&d.0, 1).packs().filter(|&p| p == 1).count(), 5);
+    c.sequence = 2;
+    c.chunks[3] = ground([3, 0, 0], 2, 9);
+    writer.write(&c).unwrap();
+    assert_eq!(manifest(&d.0, 2).packs().filter(|&p| p == 2).count(), 1);
+    assert_eq!(recover(&d.0, &c.content).unwrap().unwrap().commit, c);
+    drop(writer);
+    let mut writer = Writer::acquire(&d.0, &c.world, &c.content).unwrap();
+    assert!(writer.stores([0, 0, 0], 1) && writer.stores([3, 0, 0], 2));
+    assert!(!writer.stores([3, 0, 0], 1));
+    c.sequence = 3;
+    writer.write(&c).unwrap();
+    assert!(!pack_path(&d.0, 3).exists());
+    assert_eq!(recover(&d.0, &c.content).unwrap().unwrap().commit, c);
+}
+
+#[test]
+fn an_unchanged_paused_share_is_named_not_written_again() {
+    let d = Directory::new();
+    let mut c = fixture();
+    let mut share = c.simulation.empty();
+    share.agenda.wakes = vec![([160, 0, 0], 7)];
+    let held = ([5, 0, 0], Arc::new(share.clone()));
+    let draft = |c: &Commit, shares: Vec<([i32; 3], Arc<Simulation>)>| {
+        let (mut draft, _, _): (Draft, _, _) = c.clone().split();
+        draft.paused = shares;
+        draft
+    };
+    let mut writer = Writer::acquire(&d.0, &c.world, &c.content).unwrap();
+    writer.write_draft(draft(&c, vec![held.clone()])).unwrap();
+    assert!(pack_path(&d.0, 1).exists());
+    c.sequence = 2;
+    writer.write_draft(draft(&c, vec![held.clone()])).unwrap();
+    assert!(!pack_path(&d.0, 2).exists());
+    c.paused = vec![([5, 0, 0], share.clone())];
+    assert_eq!(recover(&d.0, &c.content).unwrap().unwrap().commit, c);
+    c.sequence = 3;
+    let copy = ([5, 0, 0], Arc::new(share));
+    writer.write_draft(draft(&c, vec![copy])).unwrap();
+    assert!(pack_path(&d.0, 3).exists());
+}
+
+#[test]
+fn a_sparse_pack_is_compacted_forward_and_ages_out() {
+    let d = Directory::new();
+    let mut c = fixture();
+    c.chunks = (0..4).map(|x| ground([x, 0, 0], 1, 8)).collect();
+    let mut writer = Writer::acquire(&d.0, &c.world, &c.content).unwrap();
+    write_kept(&mut writer, &mut c);
+    for (x, chunk) in c.chunks.iter_mut().take(3).enumerate() {
+        *chunk = ground([x as i32, 0, 0], 2, 9);
+    }
+    write_kept(&mut writer, &mut c);
+    assert!(manifest(&d.0, 2).packs().all(|p| p == 2));
+    assert_eq!(named(&d.0, "pack"), [1, 2]);
+    write_kept(&mut writer, &mut c);
+    assert_eq!(named(&d.0, "pack"), [1, 2]);
+    write_kept(&mut writer, &mut c);
+    assert_eq!(sequences(&d.0), [2, 3, 4]);
+    assert_eq!(named(&d.0, "pack"), [2]);
+    assert_eq!(recover(&d.0, &c.content).unwrap().unwrap().commit, c);
+}
+
+#[test]
+fn a_pack_only_an_unparseable_commit_could_name_is_kept() {
+    let d = Directory::new();
+    let mut c = fixture();
+    c.chunks = vec![ground([0; 3], 1, 8)];
+    let mut writer = Writer::acquire(&d.0, &c.world, &c.content).unwrap();
+    write_kept(&mut writer, &mut c);
+    fs::write(pack_path(&d.0, 7), PACK_MAGIC).unwrap();
+    fs::write(commit_path(&d.0, 8), b"partial").unwrap();
+    writer.retain().unwrap();
+    assert_eq!(named(&d.0, "pack"), [1, 7]);
+    fs::remove_file(commit_path(&d.0, 8)).unwrap();
+    writer.retain().unwrap();
+    assert_eq!(named(&d.0, "pack"), [1]);
+}
+
+#[test]
+fn a_writer_reserves_the_sequence_of_an_orphan_pack() {
+    let d = Directory::new();
+    let mut c = fixture();
+    Writer::acquire(&d.0, &c.world, &c.content)
+        .unwrap()
+        .write(&c)
+        .unwrap();
+    fs::write(pack_path(&d.0, 5), PACK_MAGIC).unwrap();
+    let mut writer = Writer::acquire(&d.0, &c.world, &c.content).unwrap();
+    assert_eq!(writer.next_sequence().unwrap(), 6);
+    c.sequence = 5;
+    assert!(writer.write(&c).is_err());
+    write_kept(&mut writer, &mut c);
+    assert_eq!(named(&d.0, "pack"), Vec::<u64>::new());
+}
+
+#[test]
+fn format_1_and_2_commits_open_and_the_next_write_stores_every_chunk() {
+    let legacy = SavedChunk {
+        coord: [1, 0, 0],
+        revision: 4,
+        runs: vec![(CHUNK_VOLUME as u32, ground([0; 3], 0, 8).palette[0].clone())],
+        palette: Vec::new(),
+        cells: String::new(),
+    };
+    for (format, chunk) in [(1, legacy), (2, ground([1, 0, 0], 4, 8))] {
+        let d = Directory::new();
+        let mut c = fixture();
+        c.format = format;
+        c.chunks = vec![chunk];
+        write_raw(&d.0, &c);
+        let opened = recover(&d.0, &c.content).unwrap().unwrap().commit;
+        assert_eq!(opened, c, "format {format}");
+        let mut writer = Writer::acquire(&d.0, &c.world, &c.content).unwrap();
+        assert!(!writer.stores([1, 0, 0], 4));
+        c.format = FORMAT_VERSION;
+        c.sequence = 2;
+        writer.write(&c).unwrap();
+        assert!(manifest(&d.0, 2).packs().all(|p| p == 2));
+        assert_eq!(
+            recover(&d.0, &c.content).unwrap().unwrap().commit.chunks[0]
+                .restore(&mapping(8, 9, 4))
+                .unwrap()
+                .0
+                .get(5, 5, 5),
+            Voxel::cube(8)
+        );
+    }
+}
+
+#[test]
+fn a_damaged_or_missing_record_makes_its_commit_corrupt() {
+    let d = Directory::new();
+    let mut c = fixture();
+    let mut writer = Writer::acquire(&d.0, &c.world, &c.content).unwrap();
+    writer.write(&c).unwrap();
+    c.sequence = 2;
+    c.chunks = vec![ground([0; 3], 1, 8)];
+    writer.write(&c).unwrap();
+    let pack = pack_path(&d.0, 2);
+    let mut bytes = fs::read(&pack).unwrap();
+    *bytes.last_mut().unwrap() ^= 1;
+    fs::write(&pack, &bytes).unwrap();
+    let recovered = recover(&d.0, &c.content).unwrap().unwrap();
+    assert_eq!((recovered.commit.sequence, recovered.skipped.len()), (1, 1));
+    fs::write(&pack, &bytes[..bytes.len() - 1]).unwrap();
+    assert_eq!(
+        recover(&d.0, &c.content).unwrap().unwrap().commit.sequence,
+        1
+    );
+    fs::remove_file(&pack).unwrap();
+    assert_eq!(
+        recover(&d.0, &c.content).unwrap().unwrap().commit.sequence,
+        1
+    );
+}
+
+#[test]
+fn a_record_of_another_kind_or_a_bad_body_is_corrupt() {
+    let saved = ground([0; 3], 1, 8);
+    let record = encode_record(CHUNK_RECORD, &saved).unwrap();
+    assert_eq!(
+        decode_record::<SavedChunk>(CHUNK_RECORD, &record).unwrap(),
+        saved
+    );
+    for bad in [
+        &record[..1],
+        &record[..record.len() / 2],
+        &[CHUNK_RECORD, 9, 0][..],
+    ] {
+        assert!(matches!(
+            decode_record::<SavedChunk>(CHUNK_RECORD, bad),
+            Err(Error::Corrupt(_))
+        ));
+    }
+    assert!(decode_record::<PausedWork>(SHARE_RECORD, &record).is_err());
 }
 
 #[test]
@@ -1257,6 +1476,7 @@ fn interrupted_process_releases_writer_lock_and_recovers_previous_commit() {
         let mut commit = recovered.commit;
         let mut writer = Writer::acquire(&directory, &commit.world, &commit.content).unwrap();
         commit.sequence += 1;
+        commit.chunks = vec![ground([0; 3], 1, 8)];
         let _ = writer.write_with(&commit, |phase| {
             if phase == WritePhase::Rename {
                 fs::write(directory.join("ready"), b"synced pending file").unwrap();
@@ -1299,11 +1519,13 @@ fn interrupted_process_releases_writer_lock_and_recovers_previous_commit() {
         recover(&directory.0, &c.content).unwrap().unwrap().commit,
         c
     );
-    c.sequence = 2;
-    Writer::acquire(&directory.0, &c.world, &c.content)
-        .unwrap()
-        .write(&c)
-        .unwrap();
+    assert!(pack_path(&directory.0, 2).exists());
+    let mut writer = Writer::acquire(&directory.0, &c.world, &c.content).unwrap();
+    c.sequence = writer.next_sequence().unwrap();
+    assert_eq!(c.sequence, 3);
+    writer.write(&c).unwrap();
+    writer.retain().unwrap();
+    assert!(!pack_path(&directory.0, 2).exists());
     assert_eq!(
         recover(&directory.0, &c.content).unwrap().unwrap().commit,
         c

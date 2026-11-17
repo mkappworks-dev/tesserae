@@ -368,12 +368,23 @@ impl Agenda {
     }
 
     pub fn homes(&self) -> BTreeSet<[i32; 3]> {
+        let mut homes = self.wake_homes();
+        homes.extend(self.rescan_homes());
+        homes
+    }
+
+    /// Chunks with a Voxel due or under way.
+    pub fn wake_homes(&self) -> BTreeSet<[i32; 3]> {
         self.due
             .keys()
             .chain(self.in_step.iter())
             .map(|at| chunk_of(*at).0)
-            .chain(self.rescans.keys().copied())
             .collect()
+    }
+
+    /// Chunks with a rescan, waiting, under way or parked.
+    pub fn rescan_homes(&self) -> impl Iterator<Item = [i32; 3]> + '_ {
+        self.rescans.keys().copied()
     }
 
     pub fn limits(&self) -> Limits {

@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use bevy::ecs::resource::IsResource;
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures::check_ready};
-use tesserae_core::save::{self, Commit, Content, Generation, Mapping, WorldId, Writer, library};
+use tesserae_core::save::{self, Content, Generation, Mapping, WorldId, Writer, library};
 
 use super::entities::EntityStore;
 use super::fluids::FluidSim;
@@ -934,16 +934,23 @@ pub(super) fn drive(
         #[cfg(feature = "profiling")]
         let write_started = std::time::Instant::now();
         let result = (|| {
-            let chunks = chunks
-                .into_iter()
-                .map(|(home, revision, chunk, overlay)| {
-                    save::SavedChunk::capture(key(home), revision, &chunk, &overlay, &mapping)
-                })
-                .collect::<Result<_, _>>()?;
             let mut writer = writer
                 .lock()
                 .map_err(|_| save::Error::Corrupt("save worker lock poisoned".into()))?;
-            let commit = Commit {
+            let chunks = chunks
+                .into_iter()
+                .map(|(home, revision, chunk, overlay)| {
+                    let coord = key(home);
+                    Ok(if writer.stores(coord, revision) {
+                        save::ChunkVersion::Stored { coord, revision }
+                    } else {
+                        save::ChunkVersion::New(save::SavedChunk::capture(
+                            coord, revision, &chunk, &overlay, &mapping,
+                        )?)
+                    })
+                })
+                .collect::<Result<_, save::Error>>()?;
+            let commit = save::Draft {
                 format: save::FORMAT_VERSION,
                 generator,
                 world: id,
@@ -958,17 +965,14 @@ pub(super) fn drive(
                 },
                 chunks,
                 simulation,
-                paused: paused
-                    .into_iter()
-                    .map(|(home, saved)| (home, (*saved).clone()))
-                    .collect(),
+                paused,
                 entities: saved_entities,
                 containers: saved_containers,
                 looted,
                 map: saved_map,
                 game_mode,
             };
-            writer.write(&commit)?;
+            writer.write_draft(commit)?;
             if let Err(e) = writer.retain() {
                 warn!("could not remove an old save of this World: {e}");
             }

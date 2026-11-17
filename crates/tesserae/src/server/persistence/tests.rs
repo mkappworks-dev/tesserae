@@ -8,7 +8,7 @@ use bevy::ecs::message::Messages;
 use bevy::ecs::system::EntityCommands;
 use std::time::{Duration, Instant};
 use tesserae_core::biome_edits::{BiomeChoice, BiomeEdits, GroundNames};
-use tesserae_core::save::{GameMode, GameModeV1};
+use tesserae_core::save::{Commit, GameMode, GameModeV1};
 use tesserae_core::{Burning, Chunk, Fluid, Occupants, Voxel, WorldgenParams};
 use tesserae_mods::Kind;
 
@@ -305,6 +305,113 @@ fn edits_removals_fluid_fire_and_paused_timers_survive_eviction_and_restart() {
                 .iter()
                 .any(|e| matches!(e.1, save::FireClock::Running { remaining } if remaining > 400))
     );
+}
+
+/// A generated lake: settled water a rescan finds nothing to do in.
+fn pool(rig: &mut Rig) -> Chunk {
+    let mut chunk = Chunk::filled(Voxel::cube(rig.stone));
+    for x in 4..28 {
+        for z in 4..28 {
+            chunk.set(x, 4, z, Voxel::cube(rig.water));
+            for y in 5..12 {
+                chunk.set(x, y, z, Voxel::AIR);
+            }
+        }
+    }
+    let world = rig.app.world_mut();
+    world
+        .resource_mut::<ChunkStore>()
+        .insert(coord([0; 3]), chunk.clone());
+    world.resource_mut::<MeshState>().mark_lit(coord([0; 3]));
+    chunk
+}
+
+#[test]
+fn an_unchanged_wet_chunk_leaves_mid_rescan_without_a_commit_and_settles_on_return() {
+    let dir = Directory::new();
+    let mut rig = Rig::new(&dir);
+    rig.settled_save();
+    let generated = pool(&mut rig);
+    let rescanning = |r: &Rig| {
+        r.app
+            .world()
+            .resource::<FluidSim>()
+            .agenda()
+            .rescan_homes()
+            .any(|h| h == [0; 3])
+    };
+    rig.until(|r| r.app.world().resource::<FluidSim>().scanned > 0 && rescanning(r));
+    let store = rig.app.world().resource::<ChunkStore>();
+    assert!(!store.revisions.contains_key(&coord([0; 3])));
+    assert!(
+        rig.app
+            .world_mut()
+            .resource_mut::<ChunkStore>()
+            .remove(coord([0; 3]))
+    );
+    let store = rig.app.world().resource::<ChunkStore>();
+    assert!(!store.checkpoint && store.pending_evictions.is_empty());
+    for _ in 0..10 {
+        rig.tick();
+    }
+    assert!(!rescanning(&rig));
+    let p = rig.app.world().resource::<Persistence>();
+    let sim = rig.app.world().resource::<FluidSim>();
+    assert!(sim.checkpoint(&p.mapping).unwrap().1.is_empty());
+    pool(&mut rig);
+    rig.until(rescanning);
+    rig.until(|r| r.app.world().resource::<FluidSim>().is_idle());
+    let store = rig.app.world().resource::<ChunkStore>();
+    assert!(!store.revisions.contains_key(&coord([0; 3])));
+    assert!(store.get(coord([0; 3])).unwrap().same_packing(&generated));
+    rig.settled_save();
+    let saved = save::inspect(&dir.0).unwrap().unwrap().commit;
+    assert!(saved.chunks.is_empty() && saved.paused.is_empty());
+}
+
+#[test]
+fn an_unchanged_chunk_paused_mid_rescan_saves_no_share_and_settles_on_return() {
+    let dir = Directory::new();
+    let mut rig = Rig::new(&dir);
+    rig.settled_save();
+    let generated = pool(&mut rig);
+    let rescanning = |r: &Rig| {
+        r.app
+            .world()
+            .resource::<FluidSim>()
+            .agenda()
+            .rescan_homes()
+            .any(|h| h == [0; 3])
+    };
+    rig.until(|r| r.app.world().resource::<FluidSim>().scanned > 0 && rescanning(r));
+    // As when a running step reads the Chunk as it leaves: the eviction waits for a Commit.
+    let mut store = rig.app.world_mut().resource_mut::<ChunkStore>();
+    store.pending_evictions.insert(coord([0; 3]));
+    assert!(!store.remove(coord([0; 3])));
+    rig.until(|r| {
+        r.app
+            .world()
+            .resource::<ChunkStore>()
+            .approved_evictions
+            .contains_key(&coord([0; 3]))
+    });
+    let saved = save::inspect(&dir.0).unwrap().unwrap().commit;
+    assert!(saved.chunks.is_empty() && saved.paused.is_empty());
+    assert!(
+        rig.app
+            .world_mut()
+            .resource_mut::<ChunkStore>()
+            .remove(coord([0; 3]))
+    );
+    for _ in 0..10 {
+        rig.tick();
+    }
+    pool(&mut rig);
+    rig.until(rescanning);
+    rig.until(|r| r.app.world().resource::<FluidSim>().is_idle());
+    let store = rig.app.world().resource::<ChunkStore>();
+    assert!(!store.revisions.contains_key(&coord([0; 3])));
+    assert!(store.get(coord([0; 3])).unwrap().same_packing(&generated));
 }
 
 #[test]

@@ -311,10 +311,19 @@ impl FluidSim {
             if self.paused_chunks.contains_key(&home) {
                 continue;
             }
-            self.paused_chunks.insert(
-                home,
-                Arc::new(parts.remove(&key(home)).unwrap_or_else(|| active.empty())),
-            );
+            // A rescan-only share of a Chunk never changed is dropped as `simulation_chunks` drops
+            // it: resuming rescans a wet Chunk anyway, and kept it would ride every Commit.
+            let part = parts
+                .remove(&key(home))
+                .filter(|p| {
+                    store.revisions.contains_key(&home)
+                        || !p.timers.flow.is_empty()
+                        || !p.timers.fire.is_empty()
+                        || !p.agenda.wakes.is_empty()
+                        || !p.landing_cursors.is_empty()
+                })
+                .unwrap_or_else(|| active.empty());
+            self.paused_chunks.insert(home, Arc::new(part));
             self.simulated.remove(&home);
             self.awaiting.remove(&home);
             self.suspended.remove(&home);
@@ -626,10 +635,18 @@ pub(in crate::server) fn simulate(
     absorb_chunks(sim, &mut store, &meshes, &tables, &scale.heat);
     absorb_changes(sim, &mut store, &mut meshes, &tables.0, &scale.heat, &env);
     if store.persistent {
+        // A Chunk never changed whose only work is a rescan leaves as dry terrain does, its
+        // rescan dropped: `admit` queues it again when the Chunk returns.
+        let rescanned: Vec<_> = sim
+            .agenda
+            .rescan_homes()
+            .filter(|&h| store.revisions.contains_key(&coord(h)))
+            .collect();
         store.simulation_chunks = sim
             .agenda
-            .homes()
+            .wake_homes()
             .into_iter()
+            .chain(rescanned)
             .chain(sim.timers.homes())
             .map(coord)
             .collect();
