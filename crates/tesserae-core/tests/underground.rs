@@ -372,3 +372,79 @@ fn cave_biomes_near_the_corners_of_the_cave_climate_each_take_a_share() {
         assert!(n * 8 > total, "{}: {n} of {total}", cave.name);
     }
 }
+
+const HUT: MaterialId = 214;
+
+/// A 4 m square of one Material on the Ground layer, a Structure to keep caves from.
+fn hut() -> tesserae_core::template::Template {
+    use tesserae_core::template::Cell;
+    let floor = vec![vec![Cell::Voxel(Voxel::cube(HUT)); 4]; 4];
+    tesserae_core::template::Template::new("t:hut".into(), 1.0, vec![floor], 0, None, 4.0).unwrap()
+}
+
+fn with_huts(generator: u32, size: f32) -> Worldgen {
+    let plain = tesserae_core::Biome {
+        name: BiomeName::new("t:plain").unwrap(),
+        temperature: 0.5,
+        humidity: 0.5,
+        ground: None,
+        sky_fog: None,
+        cave_scale: Some(4.0),
+        surface_features: tesserae_core::SurfaceFeatures::NONE
+            .with_structures(&[tesserae_core::BiomeStructure {
+                template: 0,
+                spacing_m: 48.0,
+                chance: 1.0,
+            }])
+            .unwrap(),
+    };
+    let params = WorldgenParams {
+        biomes: tesserae_core::BiomeTable::new(&[plain]).unwrap(),
+        ..params(generator, &[], false)
+    };
+    Worldgen::new(SEED, size, params).with_templates(&[hut()])
+}
+
+/// Within `near_m` of a hut, and every Voxel of open air more than `depth_m` under the ground.
+fn caves_by_huts(g: &Worldgen, near_m: f32, depth_m: f32) -> (usize, usize, usize) {
+    let size = g.voxel_size();
+    // `find` answers in 1 m Chunks; a finer size holds the same metres in more.
+    let per = (1.0 / size) as i32;
+    let columns: Vec<[i32; 2]> = find(4, |x, z| g.surface_height_m(x, z) > 50.0)
+        .concat()
+        .into_iter()
+        .flat_map(|[cx, cz]| {
+            (0..per).flat_map(move |i| (0..per).map(move |j| [cx * per + i, cz * per + j]))
+        })
+        .collect();
+    let region = Region::new(g, &columns, -2 * per..4 * per, false);
+    let huts: Vec<[f32; 2]> = region
+        .voxels
+        .iter()
+        .filter(|(_, v)| v.material() == HUT)
+        .map(|(at, _)| [at[0] as f32 * size, at[2] as f32 * size])
+        .collect();
+    let (mut near, mut far) = (0, 0);
+    for (&at, v) in &region.voxels {
+        let [x, y, z] = region.metres(at);
+        if !v.is_air() || g.surface_height_m(x, z) - y < depth_m {
+            continue;
+        }
+        if huts.iter().any(|h| (h[0] - x).hypot(h[1] - z) < near_m) {
+            near += 1;
+        } else {
+            far += 1;
+        }
+    }
+    (huts.len(), near, far)
+}
+
+#[test]
+fn no_cave_opens_under_or_beside_a_structure_in_version_3() {
+    for size in [1.0, 0.5] {
+        let (huts, near, far) = caves_by_huts(&with_huts(3, size), 16.0, 14.0);
+        assert!(huts > 20, "{size} m: {huts} hut Voxels");
+        assert_eq!(near, 0, "{size} m: cave Voxels within 16 m of a hut");
+        assert!(far > 100, "{size} m: {far} cave Voxels elsewhere");
+    }
+}

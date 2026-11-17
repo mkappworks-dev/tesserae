@@ -23,8 +23,8 @@ cottage or under a ruin.
   spring along a stone brook, and a waterfall pouring off a rock ledge into a
   pool. Every Settlement kind lists them in a water group by chance.
 - **Caves keep off Structures.** No tunnel, cavern or shaft carves within 16 m
-  of a Structure's footprint, or of a Settlement's disc and margin, at any
-  depth. Version 3 only.
+  of a Structure's footprint, or of a Settlement's disc, approach paths or
+  outskirts, at any depth. Version 3 only.
 
 ## User Stories
 
@@ -51,8 +51,8 @@ cottage or under a ruin.
 - A second outskirt group lays its own Templates and leaves the first group's
   Plots where they were.
 - A saved World with a single `outskirts` object reopens unchanged.
-- No version 3 cave Voxel stands within 16 m of a Structure's footprint or a
-  Settlement's margin; version 2 is unchanged.
+- No version 3 cave Voxel stands within 16 m of a Structure's footprint, at
+  1 m and 0.5 m; version 2 is unchanged.
 - Captures: a village's pond and a waterfall.
 
 ## Out of Scope

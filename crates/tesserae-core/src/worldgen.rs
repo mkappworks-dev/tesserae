@@ -725,6 +725,8 @@ const STRATA_WAVE_M: f32 = 3.0;
 const STRATA_WAVE_SIZE_M: f32 = 48.0;
 const STRATA_SALT: u32 = 0x5e7a_7a00;
 const SALT_SPRING: u32 = 0x5971_0000;
+/// How far round a Structure, or a Settlement's disc, paths and outskirts, version 3 opens no cave.
+const CAVE_CLEAR_M: f32 = 16.0;
 const SALT_CAVE_FEATURE: u32 = 0xcafe_0000;
 
 /// How far down a column's strata are shifted at `(x_m, z_m)`, from 0 to [`STRATA_WAVE_M`]: one
@@ -1327,6 +1329,53 @@ impl Worldgen {
     }
 
     /// `None` when no Biome tunes the caves. Asked at the same metre position as the Voxels.
+    /// Version 3's columns of the Chunk at `[cx, cz]` that no cave may open in: within
+    /// [`CAVE_CLEAR_M`] of a Structure's footprint, or of a Settlement's disc, approach paths or
+    /// outskirts. `None` where nothing stands near.
+    fn cave_free(&self, cx: i32, cz: i32) -> Option<[bool; CHUNK_SIZE * CHUNK_SIZE]> {
+        if self.terrain.is_none() || (self.caves.is_none() && self.caverns.is_none()) {
+            return None;
+        }
+        let clear = (CAVE_CLEAR_M / self.voxel_size).ceil() as i32;
+        let near: Vec<Footprint> = self
+            .footprints_near(self.chunk_columns([cx, cz], clear))
+            .into_iter()
+            .map(|f| f.widened(clear))
+            .collect();
+        if near.is_empty() {
+            return None;
+        }
+        let size = CHUNK_SIZE as i32;
+        let free: [bool; CHUNK_SIZE * CHUNK_SIZE] = std::array::from_fn(|i| {
+            let (x, z) = ((i % CHUNK_SIZE) as i32, (i / CHUNK_SIZE) as i32);
+            covers(&near, cx * size + x, cz * size + z)
+        });
+        free.contains(&true).then_some(free)
+    }
+
+    /// [`Self::column_caves`] with no tunnel in the columns `free` keeps clear.
+    fn column_caves_clear_of(
+        &self,
+        cx: i32,
+        cz: i32,
+        free: Option<&[bool; CHUNK_SIZE * CHUNK_SIZE]>,
+    ) -> Option<ColumnCaves> {
+        let Some(free) = free else {
+            return self.column_caves(cx, cz);
+        };
+        let mut columns = self.column_caves(cx, cz).unwrap_or(ColumnCaves {
+            scales: [1.0; CHUNK_SIZE * CHUNK_SIZE],
+            max: 1.0,
+        });
+        for (scale, &kept) in columns.scales.iter_mut().zip(free) {
+            if kept {
+                *scale = 0.0;
+            }
+        }
+        columns.max = columns.scales.iter().copied().fold(0.0, f32::max);
+        Some(columns)
+    }
+
     fn column_caves(&self, cx: i32, cz: i32) -> Option<ColumnCaves> {
         self.cave_tuning.as_ref()?;
         let mut columns = ColumnCaves {
@@ -1584,7 +1633,8 @@ impl Worldgen {
                     self.cave_scale_bound(),
                 )
             {
-                let columns = self.column_caves(cx, cz);
+                let free = self.cave_free(cx, cz);
+                let columns = self.column_caves_clear_of(cx, cz, free.as_ref());
                 self.carve(&mut chunk, caves, origin_m, ceiling_m, columns.as_ref());
             }
             if self.structures_may_reach(floor_m, ceiling_m) {
@@ -1635,11 +1685,13 @@ impl Worldgen {
                     scale,
                 )
         };
+        let cave_free = self.cave_free(cx, cz);
         let cave_columns = self
             .caves
             .as_ref()
             .filter(|caves| reach_box(caves, self.cave_scale_bound()))
-            .and_then(|_| self.column_caves(cx, cz));
+            .and_then(|_| self.column_caves_clear_of(cx, cz, cave_free.as_ref()));
+        let free_at = |x: usize, z: usize| cave_free.is_some_and(|f| f[z * CHUNK_SIZE + x]);
         let reachable = self
             .caves
             .as_ref()
@@ -1824,7 +1876,8 @@ impl Worldgen {
                         }
                         continue;
                     }
-                    if shafts.iter().any(|s| s.cuts(x_m, y_m, z_m))
+                    if !free_at(x, z)
+                        && shafts.iter().any(|s| s.cuts(x_m, y_m, z_m))
                         && y_m
                             >= *sealed_m
                                 .get_or_insert_with(|| self.sealed_below_m(x_m, z_m, surface_m))
@@ -1834,6 +1887,7 @@ impl Worldgen {
                     }
                     if let (Some(caverns), Some(blocks)) = (&self.caverns, &cavern_blocks)
                         && blocks[block_of(x, y, z)]
+                        && !free_at(x, z)
                         && base_m >= CAVERN_MIN_DEPTH_M
                         && self.cavern_open(caverns, [x_m, y_m, z_m])
                         && y_m
