@@ -337,15 +337,34 @@ impl ClimateField {
         biomes: &BiomeTable,
         x_m: f32,
         z_m: f32,
+        site: Option<(Site, (f32, f32))>,
     ) -> Option<SkyFogBlend> {
+        let selectors = biomes.selectors();
+        // Under version 3, among the Biomes `biome_at` chooses from there: those of the land's
+        // shape that admit the column, else the rest, so the sky over a mountain is its own.
+        let ranged_here = site.is_some_and(|(s, _)| {
+            biomes.as_slice().iter().enumerate().any(|(i, b)| {
+                b.sky_fog.is_some() && selectors[i].is_ranged() && selectors[i].admits(&s)
+            })
+        });
+        let considered = |i: usize| match site {
+            Some((s, _)) if ranged_here => selectors[i].is_ranged() && selectors[i].admits(&s),
+            _ => !selectors[i].is_ranged(),
+        };
         let coloured = || {
             biomes
                 .as_slice()
                 .iter()
-                .filter_map(|b| Some((b, b.sky_fog?)))
+                .enumerate()
+                .filter(move |&(i, _)| considered(i))
+                .filter_map(|(_, b)| Some((b, b.sky_fog?)))
         };
         // Unwarped: the warp varies fast to roughen a border, and the air would shimmer with it.
-        let c = self.at(x_m, z_m);
+        let mut c = self.at(x_m, z_m);
+        if let Some((_, (dt, dh))) = site {
+            c.temperature += dt;
+            c.humidity += dh;
+        }
         let distance = |b: &Biome| {
             let (dt, dh) = (b.temperature - c.temperature, b.humidity - c.humidity);
             dt.hypot(dh)

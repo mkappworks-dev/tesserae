@@ -1188,7 +1188,8 @@ impl Worldgen {
         if self.params.generator < BIOMES_SINCE {
             return None;
         }
-        self.climate.sky_fog_at(&self.params.biomes, x_m, z_m)
+        let site = self.terrain.as_ref().map(|t| t.site(x_m, z_m));
+        self.climate.sky_fog_at(&self.params.biomes, x_m, z_m, site)
     }
 
     /// `None` when every column has the World's. Asked at the metre position of the column's
@@ -1768,6 +1769,8 @@ impl Worldgen {
 
         let ores = self.ores_reaching(floor_m, ceiling_m);
         let mut cave_biomes: HashMap<[i32; 3], Option<u8>> = HashMap::new();
+        // Per Chunk, so the column loop asks nothing of version 3's underground where none is.
+        let springs = self.caverns.is_some() && self.water.is_some();
         let mut chunk = ChunkBuilder::new();
         let mut cave_cache = Default::default();
         for z in 0..CHUNK_SIZE {
@@ -1913,6 +1916,7 @@ impl Worldgen {
                     } else if below_m < self.params.soil_depth_m {
                         ground.soil
                     } else if let Some(water) = self.water
+                        && springs
                         && self.spring_at([x_m, y_m, z_m], base_m, table_m)
                     {
                         water.material
@@ -1921,6 +1925,9 @@ impl Worldgen {
                             field.at(mask, [x_m, y_m, z_m], below_m, &biome)
                         })
                         .or_else(|| {
+                            if !self.underground_biomes {
+                                return None;
+                            }
                             let at = [x_m, y_m, z_m];
                             let cave = self.cave_biome_cached(&mut cave_biomes, at, base_m)?;
                             let cave = &self.params.cave_biomes.as_slice()[usize::from(cave)];
