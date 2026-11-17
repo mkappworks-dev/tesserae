@@ -261,8 +261,35 @@ fn open_world(
     if let Some(eye) = persistence.and_then(|p| p.reopened_eye) {
         spawn = spawn.with_entry(eye);
     }
+    #[cfg(feature = "dev")]
+    if let Some(eye) = std::env::var("TESSERAE_SPAWN_M")
+        .ok()
+        .and_then(|v| dev_spawn_eye(&generator, &v))
+    {
+        spawn = spawn.with_entry(eye);
+    }
     commands.insert_resource(spawn);
     commands.insert_resource(WorldGenerator(generator));
+}
+
+/// `x,z` puts the Eye over that column, clear of the ground and the water; `x,y,z` puts it there.
+#[cfg(feature = "dev")]
+fn dev_spawn_eye(generator: &Worldgen, value: &str) -> Option<Vec3> {
+    let v: Vec<f32> = value
+        .split(',')
+        .map(|s| s.trim().parse().ok())
+        .collect::<Option<_>>()?;
+    match v[..] {
+        [x, y, z] => Some(Vec3::new(x, y, z)),
+        [x, z] => {
+            let ground_m = generator.surface_height_m(x, z);
+            let top_m = generator
+                .water_level_m(x, z)
+                .map_or(ground_m, |level_m| level_m.max(ground_m));
+            Some(Vec3::new(x, top_m + SPAWN_CLEARANCE_M, z))
+        }
+        _ => None,
+    }
 }
 
 /// How far a new World looks for dry land when the spawn point is in the sea.
