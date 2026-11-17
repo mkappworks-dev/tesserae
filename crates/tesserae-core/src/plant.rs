@@ -478,6 +478,18 @@ impl PlantTable {
         }
     }
 
+    /// The first Stage of the crop whose later Stage `material` is: what a
+    /// Template's later Stage counts as, a field planted earlier.
+    pub fn planted_as(&self, material: MaterialId) -> Option<MaterialId> {
+        let PlantRef { plant, role } = self.of(material)?;
+        match (&self.plants.get(plant)?.kind, role) {
+            (Kind::Crop { stages, .. }, Role::Stage(n)) if n > 0 => {
+                stages.first().map(|s| s.material)
+            }
+            _ => None,
+        }
+    }
+
     /// The Material a crop advances to from `material`, if it is a crop Stage
     /// that has a next.
     pub fn next_stage(&self, material: MaterialId) -> Option<MaterialId> {

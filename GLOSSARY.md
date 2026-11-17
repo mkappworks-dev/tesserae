@@ -456,7 +456,8 @@ may name a Shape of its own, which its Voxels take.
 
 **Grown Material** — a Material only growth and generation make: a tree's trunk,
 canopy and fruit, and a Plant's later Stages. It has no Item and cannot be
-placed. What a Player places, however alike in look, is not one.
+placed. What a Player places, however alike in look, is not one. A Template may
+hold a crop's later Stage, a field planted earlier, but no tree's.
 
 **Seed** — the Item that places a Plant's first Stage: a seed, a sapling or a
 cutting.

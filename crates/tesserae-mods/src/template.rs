@@ -221,7 +221,8 @@ pub(crate) fn solid(
             "Material `{name}` is a fluid, which a Template does not carry"
         ));
     }
-    if tables.plants.is_grown(id) {
+    // A crop's later Stage is a field planted earlier; a tree's grown Voxels would fell as one.
+    if tables.plants.is_grown(id) && tables.plants.planted_as(id).is_none() {
         return Err(format!(
             "Material `{name}` is a Grown Material, which only a Plant's growth makes"
         ));

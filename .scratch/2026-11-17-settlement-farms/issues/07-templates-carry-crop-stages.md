@@ -1,6 +1,6 @@
 # 07: Templates may carry any crop Stage
 
-Status: ready-for-agent
+Status: done
 
 Spec: [Settlement farms](../spec.md).
 
@@ -12,7 +12,7 @@ Stage. ADR-0029 and the glossary say so.
 
 ## Acceptance criteria
 
-- [ ] A Template naming a ripe crop Stage loads; one naming a trunk fails as
+- [x] A Template naming a ripe crop Stage loads; one naming a trunk fails as
       before.
-- [ ] A Biome-stood Template with a ripe Stage is Obtainable when the crop's
+- [x] A Biome-stood Template with a ripe Stage is Obtainable when the crop's
       seed is.

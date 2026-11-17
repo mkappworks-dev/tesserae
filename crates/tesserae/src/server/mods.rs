@@ -693,7 +693,8 @@ pub(crate) async fn declare_all(
     let (used_templates, used_settlements) = stood_by_biomes(&loaded);
     // A fluid cell is exempt: a well is meant to be a Settlement's water, even where nothing else is.
     let refuse = |m| {
-        (!obtainable.contains(&m) && !loaded.tables.fluids.contains(m)).then(|| {
+        let planted = loaded.tables.plants.planted_as(m).unwrap_or(m);
+        (!obtainable.contains(&planted) && !loaded.tables.fluids.contains(m)).then(|| {
             "is not Obtainable: no Biome lays it, no Plant yields it and no Recipe makes it from \
              what is"
                 .to_owned()
@@ -1821,30 +1822,44 @@ layers = [["rp"]]
         }
     }
 
+    const WHEAT: &str = "[[materials]]\nname = \"sprout\"\nemission = 0\ndimming = 0\n\
+                         occlusion = \"never\"\nrender = \"cutout\"\nsolid = true\n\
+                         [[materials]]\nname = \"ripe\"\nemission = 0\ndimming = 0\n\
+                         occlusion = \"never\"\nrender = \"cutout\"\nsolid = true\n\
+                         [[items]]\nname = \"seeds\"\nsize-m = 0.25\ncolor = [1, 2, 3, 255]\n\
+                         material = \"plain:sprout\"\n\
+                         [[plants]]\nname = \"wheat\"\nkind = \"crop\"\nseed = \"plain:seeds\"\n\
+                         stages = [{ material = \"plain:sprout\", mean-seconds = 20.0 }, \
+                         { material = \"plain:ripe\" }]\n\
+                         [plants.needs]\nsoil = [\"plain:rock\"]\n";
+
     #[test]
-    fn a_grown_material_or_a_doors_open_material_in_a_template_is_refused() {
-        let content = "\"g\" = { material = \"plain:ripe\" }\n\
+    fn a_trees_grown_material_or_a_doors_open_material_in_a_template_is_refused() {
+        let content = "\"g\" = { material = \"plain:log\" }\n\
                        \"d\" = { material = \"plain:open\" }\n\
-                       [[materials]]\nname = \"sprout\"\nemission = 0\ndimming = 0\n\
+                       [[materials]]\nname = \"sapling\"\nemission = 0\ndimming = 0\n\
                        occlusion = \"never\"\nrender = \"cutout\"\nsolid = true\n\
-                       [[materials]]\nname = \"ripe\"\nemission = 0\ndimming = 0\n\
+                       [[materials]]\nname = \"log\"\nemission = 0\ndimming = 15\n\
+                       occlusion = \"opaque\"\nrender = \"opaque\"\nsolid = true\n\
+                       [[materials]]\nname = \"leaf\"\nemission = 0\ndimming = 1\n\
                        occlusion = \"never\"\nrender = \"cutout\"\nsolid = true\n\
                        [[materials]]\nname = \"open\"\nemission = 0\ndimming = 15\n\
                        occlusion = \"opaque\"\nrender = \"opaque\"\nsolid = true\n\
-                       [[plants]]\nname = \"wheat\"\nkind = \"crop\"\nseed = \"plain:sprout\"\n\
-                       stages = [{ material = \"plain:sprout\", mean-seconds = 20.0 }, \
-                       { material = \"plain:ripe\" }]\n\
+                       [[plants]]\nname = \"oak\"\nkind = \"tree\"\nseed = \"plain:sapling\"\n\
+                       sapling = \"plain:sapling\"\ntrunk = \"plain:log\"\n\
+                       canopy = \"plain:leaf\"\ntrunk-height-m = [3.0, 5.0]\n\
+                       canopy-radius-m = 2.5\nmean-seconds = 60.0\nsapling-yield = [1, 1]\n\
                        [plants.needs]\nsoil = [\"plain:rock\"]\n\
                        [[voxel-uses]]\nkind = \"door\"\nmaterial = \"plain:planks\"\n\
                        open = \"plain:open\"\nwidth-m = 1.0\n";
         for (drop, want) in [
             (
                 "\"d\" = { material = \"plain:open\" }\n",
-                "palette `g`: Material `plain:ripe` is a Grown Material, which only a Plant's \
+                "palette `g`: Material `plain:log` is a Grown Material, which only a Plant's \
                  growth makes",
             ),
             (
-                "\"g\" = { material = \"plain:ripe\" }\n",
+                "\"g\" = { material = \"plain:log\" }\n",
                 "palette `d`: Material `plain:open` is a Door's open form; a Template holds the \
                  Door closed",
             ),
@@ -1867,6 +1882,25 @@ layers = [["rp"]]
                 );
             }
         }
+    }
+
+    #[test]
+    fn a_crops_later_stage_in_a_template_is_obtainable_when_its_seed_is() {
+        let planks = "[[recipes]]\ninputs = [{ item = \"plain:rock\", count = 1 }]\n\
+                      output = { item = \"plain:planks\", count = 4 }\nstation = \"hand\"\n";
+        let ripe = format!("\"w\" = {{ material = \"plain:ripe\" }}\n{WHEAT}{planks}");
+        let sown = "[[recipes]]\ninputs = [{ item = \"plain:rock\", count = 1 }]\n\
+                    output = { item = \"plain:seeds\", count = 1 }\nstation = \"hand\"\n";
+        let s = Scratch::new();
+        data(&s, "plain", true, "", &hut_game(&format!("{ripe}{sown}")));
+        assert_eq!(refusals(&s), (Ok(()), Ok(())));
+        let s = Scratch::new();
+        data(&s, "plain", true, "", &hut_game(&ripe));
+        let refusal = refusals(&s).0.unwrap_err();
+        assert!(
+            refusal.contains("palette `w`: Material `plain:ripe` is not Obtainable"),
+            "{refusal}"
+        );
     }
 
     #[test]
