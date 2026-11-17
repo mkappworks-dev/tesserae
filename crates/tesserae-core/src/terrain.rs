@@ -108,6 +108,10 @@ const WARP_AMOUNT_M: f32 = 400.0;
 const EROSION_SIZE_M: f32 = 2800.0;
 const PEAKS_SIZE_M: f32 = 1400.0;
 const MESA_STEP_M: f32 = 18.0;
+/// How far from its fold a ridge's crest is rounded, in the ridge field's units.
+const RIDGE_ROUND: f32 = 0.12;
+/// The ridge field below which the ground between mountains is a level floor.
+const VALLEY_FLOOR: f32 = 0.45;
 /// The calm patches' period, and the band of their field that fades them in.
 const CALM_SIZE_M: f32 = 450.0;
 const CALM_CUT: [f32; 2] = [0.36, 0.48];
@@ -234,16 +238,11 @@ impl Base {
         let base = curve(&CONTINENT_CURVE, f.continent);
         let mut offset = if base < 0.0 { base * d } else { base * h };
 
-        let ridge = crate::noise::ridged2(
-            wx / PEAKS_SIZE_M,
-            wz / PEAKS_SIZE_M,
-            seed.wrapping_add(SALT_PEAKS),
-            4,
-        );
         // Patches of calm ground a few hundred metres across, everywhere inland: level places to
-        // build never lie far off, even in rough country, where they are benches between ridges.
+        // build never lie far off. Mountains rise from them rather than being cut by them.
         let calm = self.calm(wx, wz) * inland;
-        offset += h * 1.1 * ridge.powf(1.5) * f.ruggedness * (1.0 - 0.8 * calm);
+        let mountain = self.mountain(wx, wz) * f.ruggedness;
+        offset += h * 1.1 * mountain;
 
         let detail = |octaves| {
             crate::noise::fbm2(
@@ -253,15 +252,15 @@ impl Base {
                 octaves,
             )
         };
-        // Worn inland ground is a plain: the fine octaves that make it a field of small bumps
-        // fade out and the rest is gentler, so there are wide level places to build and farm.
-        let plain = (smooth(0.2, 0.5, f.erosion) * inland).max(calm);
-        let n = if plain > 0.0 {
-            let rough = detail(self.octaves);
-            rough + (detail(self.octaves.min(2)) - rough) * plain
-        } else {
-            detail(self.octaves)
-        };
+        // Worn inland ground is a plain, and so is a valley floor between mountains: the fine
+        // octaves that make it a field of small bumps fade out and the rest is gentler, so there
+        // are wide level places to build and farm. A mountain's flank keeps only the broad
+        // octaves, so it is a smooth slope and not a heap of knobs.
+        let floor = f.ruggedness * (1.0 - smooth(0.0, 0.35, mountain / f.ruggedness.max(1e-3)));
+        let plain = (smooth(0.2, 0.5, f.erosion) * inland).max(calm).max(floor);
+        let rough = detail(self.octaves);
+        let broad = detail(self.octaves.min(2));
+        let n = rough + (broad - rough) * plain.max(smooth(0.2, 0.6, f.ruggedness));
         // Detail also dies out at the waterline, so noise does not litter the coast with islets.
         let shore = 0.2 + 0.8 * smooth(0.0, 14.0, offset.abs());
         let worn =
@@ -309,7 +308,14 @@ impl Base {
         if self.overhang_m <= 0.0 {
             return 0.0;
         }
-        self.overhang_m * smooth(0.2, 0.55, self.fields(x_m, z_m).ruggedness)
+        // Only a rugged range's upper flanks and crests: on a valley floor or a gentle foot the
+        // density would only scatter knobs over a smooth slope.
+        let (wx, wz) = self.warped(x_m, z_m);
+        let rugged = smooth(0.45, 0.8, self.fields_warped(wx, wz).ruggedness);
+        if rugged <= 0.0 {
+            return 0.0;
+        }
+        self.overhang_m * rugged * smooth(0.35, 0.8, self.mountain(wx, wz))
     }
 
     /// The signed push of the density at a point, in `-amp_m..amp_m`: positive is solid.
@@ -322,6 +328,22 @@ impl Base {
             2,
         );
         ((n * 2.0 - 1.0) * 2.0).clamp(-1.0, 1.0) * amp_m
+    }
+
+    /// 0 to 1: how far a mountain range rises here, before ruggedness scales it. A ridge's crest is
+    /// rounded rather than folded to a crease, and below a third of the ridge field the ground is a
+    /// level valley floor, from which the flanks rise smoothly.
+    fn mountain(&self, wx: f32, wz: f32) -> f32 {
+        let n = crate::noise::fbm2(
+            wx / PEAKS_SIZE_M,
+            wz / PEAKS_SIZE_M,
+            self.seed.wrapping_add(SALT_PEAKS),
+            3,
+        );
+        let d = (2.0 * n - 1.0).abs();
+        let soft = ((d * d + RIDGE_ROUND * RIDGE_ROUND).sqrt() - RIDGE_ROUND)
+            / ((1.0 + RIDGE_ROUND * RIDGE_ROUND).sqrt() - RIDGE_ROUND);
+        smooth(VALLEY_FLOOR, 1.0, 1.0 - soft).powf(1.25)
     }
 
     /// 0 to 1: the patches of calm ground, before the coast fades them.

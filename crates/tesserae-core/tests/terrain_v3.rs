@@ -794,3 +794,32 @@ fn flooded_caverns_are_sealed_from_dry_tunnels() {
     }
     assert_eq!(checked, 4);
 }
+
+/// Over rugged ground: the mean bend of the surface between neighbouring metres, and the share of
+/// columns that are level over 8 m.
+fn rugged_shape(g: &Worldgen) -> (f32, f32, usize) {
+    let (mut bend, mut level, mut n) = (0.0f32, 0usize, 0usize);
+    for j in -60..60 {
+        for i in -60..60 {
+            let (x, z) = (i as f32 * 157.0, j as f32 * 163.0);
+            if g.landform_fields(x, z).is_none_or(|f| f.ruggedness < 0.5) {
+                continue;
+            }
+            let h = |dx: f32| g.terrain_height_m(x + dx, z);
+            bend += (h(1.0) - 2.0 * h(0.0) + h(-1.0)).abs();
+            level += ((h(4.0) - h(-4.0)).abs() < 0.8) as usize;
+            n += 1;
+        }
+    }
+    (bend / n as f32, level as f32 / n as f32, n)
+}
+
+#[test]
+fn mountain_flanks_are_smooth_and_level_floors_lie_between_them() {
+    let g = Worldgen::new(SEED, 1.0, v3());
+    let (bend, level, n) = rugged_shape(&g);
+    assert!(n > 500, "{n} rugged columns");
+    // Mountains cut by calm patches and covered in fine knobs bent 0.038 m a metre.
+    assert!(bend < 0.03, "the ground bends {bend} m a metre");
+    assert!(level > 0.4, "{level} of rugged columns are level");
+}

@@ -911,6 +911,8 @@ type ColumnGrounds = [GroundParams; CHUNK_SIZE * CHUNK_SIZE];
 struct Stack {
     surface_m: [f32; SURFACE_W * SURFACE_W],
     water_level_m: [Option<f32>; SURFACE_W * SURFACE_W],
+    /// How far the overhang density may push each column, before water and Structures limit it.
+    overhang_m: [f32; CHUNK_SIZE * CHUNK_SIZE],
     grounds: Option<ColumnGrounds>,
 }
 
@@ -1158,9 +1160,15 @@ impl Worldgen {
                 water_level_m[surface_index(x, z)] = raw[raw_index(x, z)].1;
             }
         }
+        let terrain = self.terrain.as_ref().expect("version 3");
+        let overhang_m = std::array::from_fn(|i| {
+            let (x, z) = ((i % CHUNK_SIZE) as i32, (i / CHUNK_SIZE) as i32);
+            terrain.overhang_amp_m(self.axis_m(cx, x), self.axis_m(cz, z))
+        });
         let stack = Arc::new(Stack {
             surface_m,
             water_level_m,
+            overhang_m,
             grounds: self.column_grounds(cx, cz),
         });
         let mut stacks = self.stacks.lock().expect("stacks");
@@ -1671,9 +1679,7 @@ impl Worldgen {
                     ) {
                         return 0.0;
                     }
-                    let terrain = self.terrain.as_ref().expect("a stack is version 3's");
-                    terrain
-                        .overhang_amp_m(x_m, z_m)
+                    s.overhang_m[z as usize * CHUNK_SIZE + x as usize]
                         .min((surface_m - wettest_m).max(0.0))
                 });
                 let push_m = |y_m: f32| {

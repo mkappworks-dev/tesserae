@@ -156,31 +156,29 @@ fn where_no_biome_admits_a_column_it_still_gets_one() {
 
 #[test]
 fn relief_scales_the_detail_of_the_ground_and_nothing_else() {
-    let flat = BiomeSelectors {
-        relief: Some(0.0),
-        ..BiomeSelectors::default()
-    };
-    let rough = BiomeSelectors {
-        relief: Some(3.0),
-        ..BiomeSelectors::default()
-    };
-    let bumps = |s: BiomeSelectors| {
+    let heights = |relief: f32| {
+        let s = BiomeSelectors {
+            relief: Some(relief),
+            ..BiomeSelectors::default()
+        };
         let g = world(&[biome("only", 0.5, 0.5)], &[s]);
-        let mut total = 0.0f32;
-        let mut base = Vec::new();
-        for i in 0..400 {
-            let x = i as f32 * 6.0 + 100_000.0;
-            let (a, b) = (g.surface_height_m(x, 0.0), g.surface_height_m(x + 6.0, 0.0));
-            total += (a - b).abs();
-            base.push(a);
-        }
-        (total, base)
+        (0..400)
+            .map(|i| g.terrain_height_m(i as f32 * 6.0 + 100_000.0, 0.0))
+            .collect::<Vec<_>>()
     };
-    let (flat_total, _) = bumps(flat);
-    let (rough_total, _) = bumps(rough);
+    let (none, once, thrice) = (heights(0.0), heights(1.0), heights(3.0));
+    // The detail is added once at relief 1, so relief 3 moves the ground twice as far from it
+    // as relief 0 does, the other way; terraces and clamps bend a few columns.
+    let mut ratios: Vec<f32> = (0..400)
+        .filter(|&i| (once[i] - none[i]).abs() > 0.05)
+        .map(|i| (thrice[i] - once[i]) / (once[i] - none[i]))
+        .collect();
+    assert!(ratios.len() > 200, "{} columns with detail", ratios.len());
+    ratios.sort_by(f32::total_cmp);
+    let median = ratios[ratios.len() / 2];
     assert!(
-        rough_total > flat_total * 1.15,
-        "{rough_total} vs {flat_total}"
+        (median - 2.0).abs() < 0.05,
+        "relief 3 moves the ground {median}x"
     );
 }
 
