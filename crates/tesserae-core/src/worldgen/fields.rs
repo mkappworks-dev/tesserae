@@ -374,7 +374,7 @@ impl Worldgen {
         for [dx, dz] in samples {
             let (gx, gz) = (p.min[0] + dx, p.min[1] + dz);
             let (x_m, z_m) = (self.global_m(gx), self.global_m(gz));
-            if self.biome_at(x_m, z_m) != Some(p.biome) {
+            if self.column_biome_id(gx, gz) != Some(p.biome) {
                 return None;
             }
             let top = top_index(self.surface_height_m(x_m, z_m), 0.0, size);

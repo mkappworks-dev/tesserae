@@ -9,6 +9,7 @@
 //! Contrast `crate::testgen`, which is tuned in Voxel indices on purpose: it
 //! feeds the benches a fixed surface and makes no World.
 
+mod cells;
 mod crossings;
 mod fields;
 mod ground;
@@ -19,8 +20,12 @@ mod structures;
 
 pub use loot::{Loot, Stood};
 
+use std::cell::RefCell;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
+
+use cells::CellMap;
 
 use crate::chunk::{CHUNK_SIZE, Chunk, ChunkBuilder};
 use crate::climate::{
@@ -681,8 +686,8 @@ pub struct Worldgen {
     /// The highest ground over a column footprint, by its corners and size in metres, so the sky
     /// light does not wait on the band's global top.
     tops: Arc<Mutex<HashMap<[u32; 5], f32>>>,
-    /// What every Chunk stacked over a column of Chunks reads alike, by `[cx, cz]`.
-    stacks: Arc<Mutex<HashMap<[i32; 2], Arc<Stack>>>>,
+    /// What every Chunk over a Cell reads alike.
+    columns: Arc<CellMap<ColumnCache>>,
     caves: Option<CaveField>,
     /// Whether the smoothing pass runs: configured, and a one-Voxel step is at
     /// least `min_rise_m` at this Voxel size.
@@ -908,6 +913,7 @@ impl CaveTuning {
     }
 }
 
+#[derive(Clone, Copy)]
 struct ColumnCaves {
     scales: [f32; CHUNK_SIZE * CHUNK_SIZE],
     max: f32,
@@ -948,21 +954,51 @@ impl BiomeGrounds {
 
 type ColumnGrounds = [GroundParams; CHUNK_SIZE * CHUNK_SIZE];
 
-/// A column of Chunks' surface and water levels (with a one-column border) and grounds. Version
-/// 3's band stands some ten Chunks tall, and each would otherwise sample all of it again.
-#[derive(Debug)]
-struct Stack {
+/// A Cell's surface and water levels (with a one-column border), and what its columns are asked
+/// once. Version 3's band stands some ten Chunks tall, and each would otherwise sample all of it
+/// again.
+struct ColumnCache {
     surface_m: [f32; SURFACE_W * SURFACE_W],
     water_level_m: [Option<f32>; SURFACE_W * SURFACE_W],
     /// How far the overhang density may push each column, before water and Structures limit it.
     overhang_m: [f32; CHUNK_SIZE * CHUNK_SIZE],
     /// Columns where a sea-floor formation lays bare rock instead of the ground's surface.
     rock: [bool; CHUNK_SIZE * CHUNK_SIZE],
-    grounds: Option<ColumnGrounds>,
+    /// Each column's Biome, [`UNASKED`] until it is first asked: most Chunks over a Cell ask none.
+    biomes: [AtomicU8; CHUNK_SIZE * CHUNK_SIZE],
+    /// Boxed so a Cell whose caves are never asked holds a pointer, not 4 KB.
+    caves: OnceLock<Box<ColumnCaves>>,
 }
 
-/// About 20 MB of stacks, far more than a streamed ring holds at once.
-const MAX_STACKS: usize = 1024;
+const UNASKED: u8 = u8::MAX;
+const NO_BIOME: u8 = u8::MAX - 1;
+
+impl ColumnCache {
+    /// Relaxed: a column's Biome is a pure function of it, so two workers racing store the same.
+    fn biome(&self, i: usize, ask: impl FnOnce() -> Option<BiomeId>) -> Option<BiomeId> {
+        match self.biomes[i].load(Ordering::Relaxed) {
+            UNASKED => {
+                let id = ask();
+                let stored = id.map_or(NO_BIOME, |id| id.index() as u8);
+                self.biomes[i].store(stored, Ordering::Relaxed);
+                id
+            }
+            NO_BIOME => None,
+            id => Some(BiomeId::new(id)),
+        }
+    }
+}
+
+/// About 20 MB of column caches, far more than a streamed ring holds at once.
+const MAX_COLUMN_CACHES: usize = 1024;
+
+type LastCell = Option<(u64, [i32; 2], Arc<ColumnCache>)>;
+
+thread_local! {
+    /// The Cell this thread asked last: each Chunk asks its own Cell per column. A stale entry is
+    /// harmless, since a Cell's cache is a pure function of its generator and key.
+    static LAST_CELL: RefCell<LastCell> = const { RefCell::new(None) };
+}
 
 impl Worldgen {
     pub fn new(seed: u64, voxel_size: f32, params: WorldgenParams) -> Self {
@@ -976,7 +1012,7 @@ impl Worldgen {
             seed: folded,
             terrain: Terrain::new(folded, &params),
             tops: Arc::default(),
-            stacks: Arc::default(),
+            columns: Arc::new(CellMap::new(MAX_COLUMN_CACHES)),
             // A Game with cave Biomes and no tunnels still has caverns for them.
             caverns: (params.caves.is_some() || !params.cave_biomes.is_empty())
                 .then(|| Caverns::new(folded, &params)),
@@ -1163,7 +1199,7 @@ impl Worldgen {
             return self.params.ground;
         };
         Some(
-            self.biome_at(self.global_m(gx), self.global_m(gz))
+            self.column_biome_id(gx, gz)
                 .map_or(grounds.world, |id| grounds.by_biome[id.index()]),
         )
     }
@@ -1178,19 +1214,60 @@ impl Worldgen {
     /// surface, so every LOD level reads the same Biome there.
     fn column_grounds(&self, cx: i32, cz: i32) -> Option<ColumnGrounds> {
         let grounds = self.biome_grounds.as_ref()?;
+        let cache = self.column_cache(cx, cz);
         Some(std::array::from_fn(|i| {
             let (x, z) = ((i % CHUNK_SIZE) as i32, (i / CHUNK_SIZE) as i32);
-            self.biome_at(self.axis_m(cx, x), self.axis_m(cz, z))
+            let ask = || self.biome_at(self.axis_m(cx, x), self.axis_m(cz, z));
+            cache
+                .biome(i, ask)
                 .map_or(grounds.world, |id| grounds.by_biome[id.index()])
         }))
     }
 
-    /// The stack over Chunk column `[cx, cz]`, built on first use. Two workers may both build one;
-    /// they build the same.
-    fn stack(&self, cx: i32, cz: i32) -> Arc<Stack> {
-        if let Some(s) = self.stacks.lock().expect("stacks").get(&[cx, cz]) {
-            return Arc::clone(s);
+    /// The Biome of the column at global Voxel `(gx, gz)`, as [`Self::biome_at`] at its corner.
+    /// It is kept in its Cell's cache, which asking builds.
+    fn column_biome_id(&self, gx: i32, gz: i32) -> Option<BiomeId> {
+        let ask = || self.biome_at(self.global_m(gx), self.global_m(gz));
+        if self.params.biomes.is_empty() {
+            return ask();
         }
+        let size = CHUNK_SIZE as i32;
+        let i = (gz.rem_euclid(size) * size + gx.rem_euclid(size)) as usize;
+        self.column_cache(gx.div_euclid(size), gz.div_euclid(size))
+            .biome(i, ask)
+    }
+
+    /// The cache over Cell `[cx, cz]` if some Chunk has built it.
+    fn held_columns(&self, cx: i32, cz: i32) -> Option<Arc<ColumnCache>> {
+        self.last_columns([cx, cz]).or_else(|| {
+            let held = self.columns.get([cx, cz])?;
+            LAST_CELL.with(|l| *l.borrow_mut() = Some((self.columns.id(), [cx, cz], held.clone())));
+            Some(held)
+        })
+    }
+
+    fn last_columns(&self, key: [i32; 2]) -> Option<Arc<ColumnCache>> {
+        LAST_CELL.with(|l| {
+            l.borrow()
+                .as_ref()
+                .filter(|(id, k, _)| *id == self.columns.id() && *k == key)
+                .map(|(_, _, c)| Arc::clone(c))
+        })
+    }
+
+    /// The cache over Cell `[cx, cz]`, built on first use.
+    fn column_cache(&self, cx: i32, cz: i32) -> Arc<ColumnCache> {
+        if let Some(c) = self.last_columns([cx, cz]) {
+            return c;
+        }
+        let cache = self
+            .columns
+            .get_or_build([cx, cz], || self.build_columns(cx, cz));
+        LAST_CELL.with(|l| *l.borrow_mut() = Some((self.columns.id(), [cx, cz], cache.clone())));
+        cache
+    }
+
+    fn build_columns(&self, cx: i32, cz: i32) -> ColumnCache {
         // The surface is kept to one column past the Chunk; its containment reads one further.
         const RAW_W: usize = SURFACE_W + 2;
         let raw_index = |x: i32, z: i32| (z + 2) as usize * RAW_W + (x + 2) as usize;
@@ -1220,19 +1297,14 @@ impl Worldgen {
             surface_m[surface_index(x, z)] < sea_m - 1.0
                 && terrain.seabed_rock(self.axis_m(cx, x), self.axis_m(cz, z))
         });
-        let stack = Arc::new(Stack {
+        ColumnCache {
             surface_m,
             water_level_m,
             overhang_m,
             rock,
-            grounds: self.column_grounds(cx, cz),
-        });
-        let mut stacks = self.stacks.lock().expect("stacks");
-        if stacks.len() >= MAX_STACKS {
-            stacks.clear();
+            biomes: std::array::from_fn(|_| AtomicU8::new(UNASKED)),
+            caves: OnceLock::new(),
         }
-        stacks.insert([cx, cz], Arc::clone(&stack));
-        stack
     }
 
     /// What the overhang density keeps off around the Chunk column `[cx, cz]`: Structures stand
@@ -1251,7 +1323,7 @@ impl Worldgen {
     /// water would stand or pour into.
     fn overhang_amp_at(
         &self,
-        s: &Stack,
+        s: &ColumnCache,
         kept_off: &[Footprint],
         [cx, cz]: [i32; 2],
         [x, z]: [i32; 2],
@@ -1282,11 +1354,11 @@ impl Worldgen {
         let size = CHUNK_SIZE as i32;
         let (cx, cz) = (gx.div_euclid(size), gz.div_euclid(size));
         let (x, z) = (gx.rem_euclid(size), gz.rem_euclid(size));
-        let stack = self.stack(cx, cz);
-        let surface_m = stack.surface_m[surface_index(x, z)];
+        let cache = self.column_cache(cx, cz);
+        let surface_m = cache.surface_m[surface_index(x, z)];
         let top = top_index(surface_m, 0.0, self.voxel_size);
         let amp_m =
-            self.overhang_amp_at(&stack, &self.overhang_kept_off([cx, cz]), [cx, cz], [x, z]);
+            self.overhang_amp_at(&cache, &self.overhang_kept_off([cx, cz]), [cx, cz], [x, z]);
         if amp_m <= 0.0 {
             return top;
         }
@@ -1430,16 +1502,24 @@ impl Worldgen {
 
     fn column_caves(&self, cx: i32, cz: i32) -> Option<ColumnCaves> {
         self.cave_tuning.as_ref()?;
-        let mut columns = ColumnCaves {
-            scales: [1.0; CHUNK_SIZE * CHUNK_SIZE],
-            max: 0.0,
+        let blend = || {
+            let mut columns = ColumnCaves {
+                scales: [1.0; CHUNK_SIZE * CHUNK_SIZE],
+                max: 0.0,
+            };
+            for (i, scale) in columns.scales.iter_mut().enumerate() {
+                let (x, z) = ((i % CHUNK_SIZE) as i32, (i / CHUNK_SIZE) as i32);
+                *scale = self.cave_scale_at(self.axis_m(cx, x), self.axis_m(cz, z));
+                columns.max = columns.max.max(*scale);
+            }
+            columns
         };
-        for (i, scale) in columns.scales.iter_mut().enumerate() {
-            let (x, z) = ((i % CHUNK_SIZE) as i32, (i / CHUNK_SIZE) as i32);
-            *scale = self.cave_scale_at(self.axis_m(cx, x), self.axis_m(cz, z));
-            columns.max = columns.max.max(*scale);
-        }
-        Some(columns)
+        Some(
+            **self
+                .column_cache(cx, cz)
+                .caves
+                .get_or_init(|| Box::new(blend())),
+        )
     }
 
     /// A height in metres above which nothing generated stands anywhere over the footprint
@@ -1487,10 +1567,10 @@ impl Worldgen {
         top
     }
 
-    /// Drops the drainage regions and column stacks this generator has cached. Nothing it answers
+    /// Drops the drainage regions and column caches this generator has kept. Nothing it answers
     /// changes: each is built again, to the same result, when it is next asked.
     pub fn forget_regions(&self) {
-        self.stacks.lock().expect("stacks").clear();
+        self.columns.clear();
         self.terrain.forget_regions();
     }
 
@@ -1510,7 +1590,7 @@ impl Worldgen {
     pub fn surface_height_m(&self, x_m: f32, z_m: f32) -> f32 {
         let column = |m: f32| (m / self.voxel_size).round() as i32;
         let (gx, gz) = (column(x_m), column(z_m));
-        // A Chunk asks at its columns' corners, the Stack's lattice; anything else asks its
+        // A Chunk asks at its columns' corners, the column cache's lattice; anything else asks its
         // own point and the points a Voxel from it.
         if self.global_m(gx) != x_m || self.global_m(gz) != z_m {
             let size = self.voxel_size;
@@ -1523,7 +1603,7 @@ impl Worldgen {
             gx.div_euclid(CHUNK_SIZE as i32),
             gz.div_euclid(CHUNK_SIZE as i32),
         );
-        if let Some(s) = self.stacks.lock().expect("stacks").get(&[cx, cz]) {
+        if let Some(s) = self.held_columns(cx, cz) {
             let (x, z) = (
                 gx.rem_euclid(CHUNK_SIZE as i32),
                 gz.rem_euclid(CHUNK_SIZE as i32),
@@ -1556,7 +1636,7 @@ impl Worldgen {
                     draw < scatter.most
                         && !covers(&kept, x, z)
                         && self
-                            .biome_at(x_m, z_m)
+                            .column_biome_id(x, z)
                             .and_then(|id| self.params.biomes.get(id))
                             .and_then(|biome| {
                                 scatter.pick(&biome.surface_features, draw, self.seed, x_m, z_m)
@@ -1673,8 +1753,8 @@ impl Worldgen {
             return chunk;
         }
 
-        let stack = self.stack(cx, cz);
-        let surface_m = stack.surface_m;
+        let cache = self.column_cache(cx, cz);
+        let surface_m = cache.surface_m;
         // Nothing above the highest column of this Chunk is solid, so nothing
         // there is worth carving. The border is another Chunk's ground.
         let top_m = (0..CHUNK_SIZE as i32)
@@ -1683,7 +1763,11 @@ impl Worldgen {
             .fold(f32::MIN, f32::max)
             + self.terrain.overhang_max_m();
         // A Chunk above every column holds only air and water, which take nothing from a Biome.
-        let columns = if floor_m > top_m { None } else { stack.grounds };
+        let columns = if floor_m > top_m {
+            None
+        } else {
+            self.column_grounds(cx, cz)
+        };
         let reach_box = |caves: &CaveField, scale| {
             let ceiling_m = ceiling_m.min(top_m);
             floor_m <= ceiling_m
@@ -1780,7 +1864,7 @@ impl Worldgen {
                 let ground = columns
                     .as_ref()
                     .map_or(ground, |columns| columns[z * CHUNK_SIZE + x]);
-                let ground = if stack.rock[z * CHUNK_SIZE + x] {
+                let ground = if cache.rock[z * CHUNK_SIZE + x] {
                     GroundParams {
                         surface: ground.rock,
                         soil: ground.rock,
@@ -1790,13 +1874,13 @@ impl Worldgen {
                     ground
                 };
                 let biome = self.column_biome([cx, cz], [x, z]);
-                let water_level_m = stack.water_level_m[surface_index(x as i32, z as i32)];
+                let water_level_m = cache.water_level_m[surface_index(x as i32, z as i32)];
                 let mut sealed_m = None;
                 let mut wave_m = None;
                 let table_m = self.water_table_m(x_m, z_m);
                 // The density never reaches down to water here or beside, so it opens no hollow
                 // that water would stand or pour into.
-                let amp_m = self.overhang_amp_at(&stack, &built, [cx, cz], [x as i32, z as i32]);
+                let amp_m = self.overhang_amp_at(&cache, &built, [cx, cz], [x as i32, z as i32]);
                 let push_m = |y_m: f32| self.terrain.overhang_push_m(x_m, y_m, z_m, amp_m);
 
                 for y in 0..CHUNK_SIZE {
@@ -2222,9 +2306,9 @@ impl Worldgen {
         [x, z]: [usize; 2],
     ) -> impl Fn() -> Option<BiomeId> + '_ {
         let cell = std::cell::OnceCell::new();
+        let size = CHUNK_SIZE as i32;
         move || {
-            *cell
-                .get_or_init(|| self.biome_at(self.axis_m(cx, x as i32), self.axis_m(cz, z as i32)))
+            *cell.get_or_init(|| self.column_biome_id(cx * size + x as i32, cz * size + z as i32))
         }
     }
 
@@ -2237,11 +2321,12 @@ impl Worldgen {
         field: &OreField,
         ores: OreMask,
     ) {
+        let cache = self.column_cache(coord[0], coord[1]);
         for z in 0..CHUNK_SIZE {
             for x in 0..CHUNK_SIZE {
                 let x_m = origin_m[0] + x as f32 * self.voxel_size;
                 let z_m = origin_m[2] + z as f32 * self.voxel_size;
-                let surface_m = self.surface_height_m(x_m, z_m);
+                let surface_m = cache.surface_m[surface_index(x as i32, z as i32)];
                 let biome = self.column_biome(coord, [x, z]);
                 for y in 0..CHUNK_SIZE {
                     let y_m = origin_m[1] + y as f32 * self.voxel_size;
@@ -2351,7 +2436,7 @@ impl Worldgen {
                     continue;
                 }
                 let Some(biome) = self
-                    .biome_at(x_m, z_m)
+                    .column_biome_id(gx, gz)
                     .and_then(|id| self.params.biomes.get(id))
                 else {
                     continue;
@@ -2586,7 +2671,7 @@ impl Worldgen {
             return None;
         }
         let biome = self
-            .biome_at(x_m, z_m)
+            .column_biome_id(gx, gz)
             .and_then(|id| self.params.biomes.get(id))?;
         let plant = scatter
             .pick(&biome.surface_features, draw, self.seed, x_m, z_m)?
@@ -3040,7 +3125,7 @@ impl Worldgen {
 
     /// Whether the cube pass fills the cell at global Voxel `[gx, y, gz]` with ground before
     /// caves: under the column's surface, or past it where the overhang density pushes it. It
-    /// asks the column and its neighbours rather than their Chunk's whole Stack, since a
+    /// asks the column and its neighbours rather than their Chunk's whole column cache, since a
     /// neighbour's Chunk may not be made yet.
     fn filled(&self, [gx, y, gz]: [i32; 3]) -> bool {
         let at_m = |gx, gz| [gx, gz].map(|g| self.global_m(g));
