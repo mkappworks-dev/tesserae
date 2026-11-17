@@ -1112,3 +1112,88 @@ fn two_seeds_stand_structures_differently() {
         theirs.len()
     );
 }
+
+/// Version 3's rugged land, whose density stands rock above the heightfield, with huts that take
+/// a few metres of rise.
+fn rugged(structures: &[BiomeStructure]) -> WorldgenParams {
+    WorldgenParams {
+        generator: 3,
+        sea_level_m: 24.0,
+        relief_m: 24.0,
+        landforms: tesserae_core::terrain::LandformParams {
+            overhang_m: 12.0,
+            ..Default::default()
+        },
+        ..flat(structures)
+    }
+}
+
+#[test]
+fn no_overhang_stands_over_a_structure_or_beside_it() {
+    let size = 1.0;
+    let probe = Probe::of(size, hut_level_to(4.0), rugged, &[row(10.0, 1.0)]);
+    // Rugged ground well inland, where the density reaches furthest.
+    let centre_m = (0..400)
+        .map(|i| 64.0 * i as f32)
+        .find(|&m| {
+            probe
+                .bare
+                .landform_fields(m, m)
+                .is_some_and(|f| f.ruggedness > 0.6)
+        })
+        .expect("rugged ground on the diagonal");
+    let changed = probe.changed_around(centre_m, 96.0, false);
+    let found = marks(&changed);
+    assert!(
+        found.len() >= 3,
+        "only {} huts on rugged ground",
+        found.len()
+    );
+    let mut asked = 0;
+    let ours = |v: Voxel| [CELLAR, FLOOR, MARK, WALL, STEP].contains(&v.material());
+    for mark in found {
+        // The hut's footprint, whichever way it turned, and four Voxels round it.
+        let mut cells = vec![mark];
+        let mut seen = HashSet::from([mark]);
+        let mut i = 0;
+        while i < cells.len() {
+            let at = cells[i];
+            i += 1;
+            for d in [
+                [1, 0, 0],
+                [-1, 0, 0],
+                [0, 1, 0],
+                [0, -1, 0],
+                [0, 0, 1],
+                [0, 0, -1],
+            ] {
+                let next = [0, 1, 2].map(|a| at[a] + d[a]);
+                if !seen.contains(&next) && changed.get(&next).is_some_and(|(w, _)| ours(*w)) {
+                    seen.insert(next);
+                    cells.push(next);
+                }
+            }
+        }
+        let span = |a: usize| {
+            let lo = cells.iter().map(|c| c[a]).min().unwrap();
+            let hi = cells.iter().map(|c| c[a]).max().unwrap();
+            lo - 4..=hi + 4
+        };
+        for z in span(2) {
+            for x in span(0) {
+                let top = (probe.with.surface_height_m(x as f32, z as f32) / size).floor() as i32;
+                for y in top + 1..top + 14 {
+                    let (with, _) = probe.at([x, y, z]);
+                    let g = probe.ground_of([x, z], size);
+                    assert!(
+                        ![g.rock, g.soil, g.surface].contains(&with.material()),
+                        "terrain stands over the ground at {:?} by the hut at {mark:?}",
+                        [x, y, z]
+                    );
+                    asked += 1;
+                }
+            }
+        }
+    }
+    assert!(asked > 1000);
+}

@@ -579,6 +579,9 @@ const EASED_RISE_VOXELS: i32 = 1;
 /// it. `smoothing_stairs_face_the_step_they_climb` checks it against the table.
 const CARDINALS: [(i32, i32, u8); 4] = [(0, 1, 0), (1, 0, 1), (0, -1, 2), (-1, 0, 3)];
 
+/// How far round a Structure's or a Settlement's footprint the overhang density keeps off.
+const OVERHANG_CLEAR_M: f32 = 6.0;
+
 /// Columns a Structure or a Settlement claims ahead of fields, trees and scatter: `[min, max)` per
 /// axis, x then z, or only those whose centre is in a disc inside that box.
 #[derive(Clone, Copy, Debug)]
@@ -595,6 +598,15 @@ impl Footprint {
             min,
             max,
             disc: None,
+        }
+    }
+
+    /// This footprint and `n` columns round it.
+    fn widened(self, n: i32) -> Self {
+        Footprint {
+            min: self.min.map(|m| m - n),
+            max: self.max.map(|m| m + n),
+            disc: self.disc.map(|(centre, r)| (centre, r + n as f32)),
         }
     }
 
@@ -1568,6 +1580,21 @@ impl Worldgen {
                 )
             });
 
+        // Structures stand on the heightfield, so the density keeps off them and a margin round
+        // them, where it would bury a wall or lean over a roof.
+        let built = self
+            .terrain
+            .as_ref()
+            .filter(|t| t.overhang_max_m() > 0.0 && floor_m <= top_m)
+            .map(|_| {
+                let clear = (OVERHANG_CLEAR_M / self.voxel_size).ceil() as i32;
+                let claims = self.claims_near(self.chunk_columns([cx, cz], clear));
+                self.footprints(&claims)
+                    .into_iter()
+                    .map(|f| f.widened(clear))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
         let cavern_blocks = self.caverns.as_ref().map(|c| {
             let mut blocks = [false; BLOCKS * BLOCKS * BLOCKS];
             let step_m = (BLOCK as f32) * self.voxel_size;
@@ -1637,6 +1664,13 @@ impl Worldgen {
                         .chain([surface_index(x, z)])
                         .filter_map(|i| s.water_level_m[i])
                         .fold(f32::MIN, f32::max);
+                    if covers(
+                        &built,
+                        cx * CHUNK_SIZE as i32 + x,
+                        cz * CHUNK_SIZE as i32 + z,
+                    ) {
+                        return 0.0;
+                    }
                     let terrain = self.terrain.as_ref().expect("a stack is version 3's");
                     terrain
                         .overhang_amp_m(x_m, z_m)
