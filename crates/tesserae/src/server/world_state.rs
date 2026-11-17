@@ -251,15 +251,15 @@ impl ChunkStore {
         self.chunks.len()
     }
 
-    /// A Chunk arrives dark. `super::streaming`'s relight stage fills it in
-    /// from its neighbours, which is also what makes a Chunk arriving next to
-    /// it brighten this one.
+    #[cfg(test)]
     pub(in crate::server) fn insert(&mut self, coord: ChunkCoord, chunk: Chunk) {
         self.insert_generated(coord, chunk, ChunkOverlay::none());
     }
 
     /// A Chunk as worldgen made it, with the fluid its Plants stand in; one the archive holds
-    /// comes back as it was saved instead.
+    /// comes back as it was saved instead. It arrives dark: `super::streaming`'s relight stage
+    /// fills it in from its neighbours, which is also what makes a Chunk arriving next to it
+    /// brighten this one.
     pub(in crate::server) fn insert_generated(
         &mut self,
         coord: ChunkCoord,
