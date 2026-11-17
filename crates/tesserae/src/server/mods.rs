@@ -1020,6 +1020,14 @@ fn install(world: &mut World) {
             .iter()
             .map(|b| b.name.as_str().to_owned())
             .collect(),
+        cave_biomes: world
+            .resource::<WorldParameters>()
+            .0
+            .cave_biomes
+            .as_slice()
+            .iter()
+            .map(|b| b.name.as_str().to_owned())
+            .collect(),
         default_mode,
         generator,
         temperature_size_m: climate.temperature_size_m,
@@ -1568,6 +1576,7 @@ biomes = ["plain:dry"]
                 voxel_size_m: 0.5,
                 seed: 123,
                 biomes: vec!["base:wet".into(), "plain:dry".into()],
+                cave_biomes: Vec::new(),
                 default_mode: crate::server::game_mode::GameMode::Creative,
                 generator: tesserae_core::save::GENERATOR_VERSION,
                 temperature_size_m: tesserae_core::climate::ClimateParams::default()

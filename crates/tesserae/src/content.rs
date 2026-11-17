@@ -330,6 +330,12 @@ pub struct SkyFogTarget {
 #[derive(Message, Clone, Copy, Debug, PartialEq)]
 pub struct HereBiome(pub Option<usize>);
 
+/// The cave Biome round the Player's Eye, as an index into [`WorldFacts::cave_biomes`], sent as it
+/// changes; `None` above ground and where the World has none. It names the place in place of
+/// [`HereBiome`] while it is `Some`.
+#[derive(Message, Clone, Copy, Debug, PartialEq)]
+pub struct HereCave(pub Option<usize>);
+
 /// Every Marker kind of the World and which one marks a death: what the Client names and draws
 /// the Map's and the Compass's marks from, sent once at session start.
 #[derive(Message, Clone, Debug, Default, PartialEq)]
@@ -351,6 +357,8 @@ pub struct WorldFacts {
     pub seed: u64,
     /// The snapshotted Biome table's declared names, in table order.
     pub biomes: Vec<String>,
+    /// The cave Biomes' names, in table order.
+    pub cave_biomes: Vec<String>,
     /// The mode a Player new to this World starts in.
     pub default_mode: tesserae_core::save::GameMode,
     /// The generator version this World was made with and keeps generating by.

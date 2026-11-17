@@ -38,6 +38,7 @@ fn app() -> App {
             voxel_size_m: 0.5,
             seed: 1,
             biomes: vec!["terra:forest".into(), "terra:dry_plains".into()],
+            cave_biomes: Vec::new(),
             default_mode: tesserae_core::save::GameMode::Creative,
             generator: 1,
             temperature_size_m: 300.0,

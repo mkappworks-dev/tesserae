@@ -2169,24 +2169,27 @@ impl Worldgen {
             .map(|f| f.blend())
     }
 
-    /// The name of the cave Biome round a point, as [`Self::cave_fog_at`] finds it.
-    pub fn cave_biome_name_at(&self, x_m: f32, y_m: f32, z_m: f32) -> Option<&str> {
+    /// The cave Biome round a point, by its place in the World's cave Biome table, as
+    /// [`Self::cave_fog_at`] finds it.
+    pub fn cave_biome_index_at(&self, x_m: f32, y_m: f32, z_m: f32) -> Option<usize> {
         if !self.underground_biomes
             || self.surface_height_m(x_m, z_m) - y_m < CAVE_BIOME_MIN_DEPTH_M
         {
             return None;
         }
-        let cave = cave_biome_at(
+        cave_biome_at(
             &self.params.cave_biomes,
             self.seed,
             self.params.sea_level_m,
             [x_m, y_m, z_m],
-        )?;
-        Some(
-            self.params.cave_biomes.as_slice()[usize::from(cave)]
-                .name
-                .as_str(),
         )
+        .map(usize::from)
+    }
+
+    /// The name of the cave Biome round a point, as [`Self::cave_fog_at`] finds it.
+    pub fn cave_biome_name_at(&self, x_m: f32, y_m: f32, z_m: f32) -> Option<&str> {
+        let at = self.cave_biome_index_at(x_m, y_m, z_m)?;
+        Some(self.params.cave_biomes.as_slice()[at].name.as_str())
     }
 
     /// How far under the lowest surface every Voxel is the ground's rock: past the soil and the

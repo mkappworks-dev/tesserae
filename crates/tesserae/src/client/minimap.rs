@@ -258,13 +258,13 @@ type Sources<'w> = (
     Res<'w, MapCache>,
     Res<'w, MapPalette>,
     Res<'w, super::waypoints::Marks>,
-    Option<Res<'w, Facts>>,
+    (Option<Res<'w, Facts>>, Option<Res<'w, super::menu::Cave>>),
 );
 
 fn sync(
     mut commands: Commands,
     shown: Shown,
-    (spot, cache, palette, marks, facts): Sources,
+    (spot, cache, palette, marks, (facts, cave)): Sources,
     mut images: ResMut<Assets<Image>>,
     mut lines: Query<(&Line, &mut Text)>,
     mut drawn: Local<Option<(Drawn, Handle<Image>)>>,
@@ -312,10 +312,17 @@ fn sync(
         }
         *drawn = None;
     }
-    let biome = cache
-        .sample(cell)
-        .and_then(|s| s.biome)
-        .and_then(|id| facts.as_ref()?.0.as_ref()?.biomes.get(id.index()))
+    let known = facts.as_ref().and_then(|f| f.0.as_ref());
+    // Underground, the cave's name is the place's, not the ground's over it.
+    let biome = cave
+        .as_ref()
+        .and_then(|c| c.name(known))
+        .or_else(|| {
+            cache
+                .sample(cell)
+                .and_then(|s| s.biome)
+                .and_then(|id| known?.biomes.get(id.index()))
+        })
         .map_or_else(
             || UNCHARTED.to_string(),
             |n| super::menu_ui::declared_title(n),
@@ -519,6 +526,7 @@ mod tests {
             voxel_size_m: 1.0,
             seed: 1,
             biomes: vec!["plains".into(), "river_bend".into()],
+            cave_biomes: vec!["t:crystal_cavern".into()],
             default_mode: tesserae_core::save::GameMode::Survival,
             generator: 2,
             temperature_size_m: 300.0,
@@ -695,6 +703,21 @@ mod tests {
         pose(&mut app, Vec3::new(-5.5, 8.0, 3.0), 0.0);
         assert_eq!(line(&mut app, Line::Biome), UNCHARTED);
         assert_eq!(line(&mut app, Line::Position), "X -6 · Z 3 · 8 m");
+    }
+
+    #[test]
+    fn underground_the_band_names_the_cave_biome_over_the_ground_above() {
+        let mut app = app();
+        show(&mut app);
+        send_tile(&mut app, explored_tile([0, 0], 1));
+        app.world_mut()
+            .insert_resource(crate::client::menu::Cave(Some(0)));
+        pose(&mut app, Vec3::new(20.7, -31.2, 40.1), 0.0);
+        assert_eq!(line(&mut app, Line::Biome), "Crystal cavern");
+        app.world_mut()
+            .insert_resource(crate::client::menu::Cave(None));
+        pose(&mut app, Vec3::new(20.7, 31.2, 40.1), 0.0);
+        assert_eq!(line(&mut app, Line::Biome), "River bend");
     }
 
     #[test]
