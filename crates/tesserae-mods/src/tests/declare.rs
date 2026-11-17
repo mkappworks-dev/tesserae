@@ -1600,6 +1600,7 @@ fn a_biomes_selectors_resolve_in_order_and_a_bad_range_is_refused_naming_the_mod
             altitude: altitude.map(|(min, max)| content::SelectorRange { min, max }),
             coast: None,
             erosion: None,
+            river: None,
             relief,
         });
         b

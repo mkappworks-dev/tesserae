@@ -634,7 +634,9 @@ impl Terrain {
     /// colder by altitude and wetter toward the sea.
     pub(crate) fn site(&self, x_m: f32, z_m: f32) -> (Site, (f32, f32)) {
         let f = self.base.fields(x_m, z_m);
-        let altitude_m = self.height_m(x_m, z_m) - self.base.sea_m;
+        let h = self.base.base_height_m(x_m, z_m);
+        let river_m = self.drainage.wet(x_m, z_m, h).cut_m;
+        let altitude_m = h - river_m - self.base.sea_m;
         let coast_m =
             (f.continent - COAST_CONTINENT) * self.base.continent_size_m * COAST_M_PER_UNIT;
         (
@@ -642,6 +644,7 @@ impl Terrain {
                 altitude_m,
                 coast_m,
                 erosion: f.erosion,
+                river_m,
             },
             climate_shift(altitude_m, coast_m),
         )

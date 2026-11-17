@@ -987,8 +987,10 @@ impl Worldgen {
             terrain: (params.generator >= LANDFORMS_SINCE).then(|| Terrain::new(folded, &params)),
             tops: Arc::default(),
             stacks: Arc::default(),
-            caverns: (params.generator >= LANDFORMS_SINCE && params.caves.is_some())
-                .then(|| Caverns::new(folded, &params)),
+            // A Game with cave Biomes and no tunnels still has caverns for them.
+            caverns: (params.generator >= LANDFORMS_SINCE
+                && (params.caves.is_some() || !params.cave_biomes.is_empty()))
+            .then(|| Caverns::new(folded, &params)),
             caves: params.caves.map(|p| CaveField::new(folded, p)),
             smoothing: params
                 .smoothing

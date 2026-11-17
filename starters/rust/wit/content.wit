@@ -847,6 +847,9 @@ interface content {
         coast: option<selector-range>,
         /// 0 rugged to 1 worn flat.
         erosion: option<selector-range>,
+        /// Metres a river's valley cuts the ground: 0 away from rivers,
+        /// most in a riverbed.
+        river: option<selector-range>,
         /// Multiplies the detail relief of the Biome's landform, 0 to 4. It
         /// blends smoothly across the Biome's border.
         relief: option<f32>,

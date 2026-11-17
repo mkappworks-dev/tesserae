@@ -288,6 +288,7 @@ pub(super) struct Selectors {
     altitude: Option<[f32; 2]>,
     coast: Option<[f32; 2]>,
     erosion: Option<[f32; 2]>,
+    river: Option<[f32; 2]>,
     relief: Option<f32>,
 }
 
@@ -439,6 +440,7 @@ impl From<Biome> for content::BiomeDef {
                 altitude: s.altitude.map(Into::into),
                 coast: s.coast.map(Into::into),
                 erosion: s.erosion.map(Into::into),
+                river: s.river.map(Into::into),
                 relief: s.relief,
             }),
 

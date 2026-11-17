@@ -1327,6 +1327,8 @@ pub struct BiomeSelectors {
     pub coast_m: Option<[f32; 2]>,
     /// 0 rugged to 1 worn flat.
     pub erosion: Option<[f32; 2]>,
+    /// Metres a river's valley cuts the ground: 0 away from rivers, most in a riverbed.
+    pub river_m: Option<[f32; 2]>,
     /// Multiplies the detail relief of the Biome's landform, from 0 to 4; `None` leaves it.
     pub relief: Option<f32>,
 }
@@ -1337,6 +1339,7 @@ pub struct Site {
     pub altitude_m: f32,
     pub coast_m: f32,
     pub erosion: f32,
+    pub river_m: f32,
 }
 
 pub const MAX_RELIEF_SCALE: f32 = 4.0;
@@ -1347,19 +1350,27 @@ impl BiomeSelectors {
         within(self.altitude_m, site.altitude_m)
             && within(self.coast_m, site.coast_m)
             && within(self.erosion, site.erosion)
+            && within(self.river_m, site.river_m)
     }
 
     /// Whether the Biome names any range, which makes it a Biome of the land's shape: version 3
     /// prefers it where it admits the column, and versions 1 and 2 never choose it.
     pub fn is_ranged(&self) -> bool {
-        self.altitude_m.is_some() || self.coast_m.is_some() || self.erosion.is_some()
+        self.altitude_m.is_some()
+            || self.coast_m.is_some()
+            || self.erosion.is_some()
+            || self.river_m.is_some()
     }
 
     pub fn validate(&self) -> Result<(), ParamError> {
         let ordered = |r: Option<[f32; 2]>| {
             r.is_none_or(|[lo, hi]| lo.is_finite() && hi.is_finite() && lo <= hi)
         };
-        if !(ordered(self.altitude_m) && ordered(self.coast_m) && ordered(self.erosion)) {
+        if !(ordered(self.altitude_m)
+            && ordered(self.coast_m)
+            && ordered(self.erosion)
+            && ordered(self.river_m))
+        {
             return Err(ParamError {
                 field: "biomes.selectors",
                 rule: "must give every range a finite low end not above its high end",

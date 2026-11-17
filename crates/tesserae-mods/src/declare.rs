@@ -1131,6 +1131,7 @@ pub fn resolve_biomes(
                     altitude_m: range(&s.altitude),
                     coast_m: range(&s.coast),
                     erosion: range(&s.erosion),
+                    river_m: range(&s.river),
                     relief: s.relief,
                 })
                 .unwrap_or_default();
