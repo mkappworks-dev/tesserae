@@ -2,7 +2,8 @@
 //! wilderness Templates in.
 
 use crate::tesserae::mods::content::{
-    BiomeSettlement, BiomeStructure, LootEntry, LootTable, SettlementDef, SettlementPlot,
+    BiomeSettlement, BiomeStructure, LootEntry, LootTable, SettlementDef, SettlementOutskirts,
+    SettlementPlot,
 };
 
 /// The smallest and largest copy's disc of each kind. No Template is wider than the smallest, so
@@ -11,13 +12,14 @@ const HAMLET_RADIUS_M: (f32, f32) = (24.0, 32.0);
 const VILLAGE_RADIUS_M: (f32, f32) = (40.0, 64.0);
 /// Wide enough that the largest copies grow a second ring of streets.
 const TOWN_RADIUS_M: (f32, f32) = (96.0, 150.0);
-/// Room round a Settlement's disc for the paths that lead into it.
-const MARGIN_M: f32 = 16.0;
+/// Room round a Settlement's disc for the paths that lead into it and the fields beside them.
+const MARGIN_M: f32 = 28.0;
+const TOWN_MARGIN_M: f32 = 32.0;
 /// Each lattice is over twice its kind's largest radius and margin: few cells pass the ground
 /// rules, so a World still shows a village every few hundred metres, hamlets between them and a
 /// town rarely.
-const HAMLET_SPACING_M: f32 = 96.0;
-const VILLAGE_SPACING_M: f32 = 160.0;
+const HAMLET_SPACING_M: f32 = 128.0;
+const VILLAGE_SPACING_M: f32 = 192.0;
 const TOWN_SPACING_M: f32 = 384.0;
 /// Thins the lattices' draws, so Settlements stand apart rather than in every cell.
 const HAMLET_CHANCE: f32 = 0.8;
@@ -184,6 +186,7 @@ pub fn biome_loot(biome: &str) -> LootTable {
 }
 
 /// A Settlement of Terra's: its disc and most Plots run from its smallest copy to its largest.
+#[allow(clippy::too_many_arguments)]
 fn kind(
     name: &str,
     (radius_min_m, radius_m): (f32, f32),
@@ -192,12 +195,13 @@ fn kind(
     minimum: u8,
     path: &str,
     loot: LootTable,
+    (margin_m, outskirts): (f32, SettlementOutskirts),
 ) -> SettlementDef {
     SettlementDef {
         name: name.into(),
         radius_m,
         radius_min_m: Some(radius_min_m),
-        margin_m: Some(MARGIN_M),
+        margin_m: Some(margin_m),
         centre: Some("terra:well".into()),
         plots,
         plots_min: Some(plots_min),
@@ -206,7 +210,16 @@ fn kind(
         path: path.into(),
         path_shape: None,
         loot: Some(loot),
-        outskirts: None,
+        outskirts: Some(outskirts),
+    }
+}
+
+/// Fields, orchards and paddocks beside the approach paths, from `count.0` to `count.1` of them.
+fn farms(count: (u8, u8), templates: Vec<SettlementPlot>) -> SettlementOutskirts {
+    SettlementOutskirts {
+        templates,
+        count_min: count.0,
+        count_max: count.1,
     }
 }
 
@@ -226,10 +239,25 @@ pub fn settlements() -> Vec<SettlementDef> {
                 stocked(plot("bakery", 1.0, 0, 1), bakery_loot()),
                 plot("market_stall", 2.0, 0, 3),
                 plot("barn", 1.0, 0, 2),
+                plot("garden", 2.0, 0, 3),
             ],
             5,
             VILLAGE_PATH,
             village_loot(),
+            (
+                MARGIN_M,
+                farms(
+                    (4, 8),
+                    vec![
+                        plot("wheat_field", 3.0, 0, 4),
+                        plot("mixed_field", 2.0, 0, 2),
+                        plot("carrot_field", 1.0, 0, 2),
+                        plot("potato_field", 1.0, 0, 2),
+                        plot("orchard", 1.0, 0, 1),
+                        plot("paddock", 1.0, 0, 2),
+                    ],
+                ),
+            ),
         ),
         kind(
             "town",
@@ -246,10 +274,25 @@ pub fn settlements() -> Vec<SettlementDef> {
                 stocked(plot("bakery", 1.0, 1, 2), bakery_loot()),
                 plot("market_stall", 2.0, 1, 6),
                 plot("barn", 1.0, 0, 3),
+                plot("garden", 2.0, 0, 6),
             ],
             20,
             "terra:cobblestone",
             town_loot(),
+            (
+                TOWN_MARGIN_M,
+                farms(
+                    (8, 14),
+                    vec![
+                        plot("wheat_field", 3.0, 1, 6),
+                        plot("mixed_field", 2.0, 0, 4),
+                        plot("carrot_field", 1.0, 0, 3),
+                        plot("potato_field", 1.0, 0, 3),
+                        plot("orchard", 1.5, 0, 3),
+                        plot("paddock", 1.0, 0, 3),
+                    ],
+                ),
+            ),
         ),
         kind(
             "hamlet",
@@ -260,10 +303,22 @@ pub fn settlements() -> Vec<SettlementDef> {
                 plot("family_house", 3.0, 0, 2),
                 plot("farmhouse", 2.0, 0, 2),
                 stocked(plot("bakery", 1.0, 0, 1), bakery_loot()),
+                plot("garden", 1.0, 0, 1),
             ],
             2,
             VILLAGE_PATH,
             village_loot(),
+            (
+                MARGIN_M,
+                farms(
+                    (1, 3),
+                    vec![
+                        plot("carrot_field", 1.0, 0, 1),
+                        plot("potato_field", 1.0, 0, 1),
+                        plot("paddock", 1.0, 0, 1),
+                    ],
+                ),
+            ),
         ),
     ]
 }

@@ -1,6 +1,6 @@
 # 04: Terra's Settlements declare outskirts and gardens
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 01, 02, 03
 

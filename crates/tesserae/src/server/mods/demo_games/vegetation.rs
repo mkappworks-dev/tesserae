@@ -114,12 +114,16 @@ const GAMES: [Game; 5] = [
                     "flora:dry_grass",
                 ],
             ),
-            // The Biomes of the land's shape, which only version 3 chooses and which grow nothing.
-            ("ocean", &[]),
+            // The Biomes of the land's shape, which only version 3 chooses: the sea's plants, and
+            // bare sand and rock.
+            (
+                "ocean",
+                &["aquatic:kelp", "aquatic:seagrass", "aquatic:red_weed"],
+            ),
             ("beach", &[]),
             ("alpine", &[]),
         ],
-        bare: &["ocean", "beach", "alpine"],
+        bare: &["beach", "alpine"],
         lake: true,
     },
     Game {
@@ -486,8 +490,10 @@ fn every_biome_of_every_demo_game_grows_its_declared_species_and_none_is_bare_by
                 game.bare.contains(name),
                 "{full} is bare only if declared so"
             );
+            // A Biome of the land's shape that the census, before version 3, never chose.
+            let chosen = counts.keys().any(|(b, _)| *b == index);
             for plant in *species {
-                if WATER_PLANTS.contains(plant) && !game.lake {
+                if (WATER_PLANTS.contains(plant) && !game.lake) || !chosen {
                     continue;
                 }
                 let total: u64 = materials_of(plant)
@@ -745,7 +751,7 @@ const DENSE: [&str; 9] = [
     "lily_pond",
 ];
 const MODERATE: [&str; 4] = ["temperate", "cold", "heath", "cold_shallows"];
-const SPARSE: [&str; 12] = [
+const SPARSE: [&str; 13] = [
     "savanna",
     "dry",
     "prairie",
@@ -758,6 +764,8 @@ const SPARSE: [&str; 12] = [
     "frost_court",
     "ash_flats",
     "lagoon",
+    // The sea grows weed, not trees.
+    "ocean",
 ];
 
 #[test]

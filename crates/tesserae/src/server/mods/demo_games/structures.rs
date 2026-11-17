@@ -165,7 +165,12 @@ fn every_game_lays_out_a_settlement_of_its_buildings_each_door_on_a_closed_door_
                 .iter()
                 .chain(settlement.rules.iter().map(|r| &r.building))
                 .collect();
-            used.extend(buildings.iter().map(|b| b.template));
+            used.extend(
+                buildings
+                    .iter()
+                    .map(|b| b.template)
+                    .filter(|&t| exported[usize::from(t)]["kind"] != "field"),
+            );
             for building in buildings {
                 let template = &loaded.tables.templates[usize::from(building.template)];
                 let kind = exported[usize::from(building.template)]["kind"]
@@ -206,7 +211,11 @@ fn every_game_lays_out_a_settlement_of_its_buildings_each_door_on_a_closed_door_
                 }
             }
         }
-        assert_eq!(used.len(), 10, "{game}: every building kind");
+        assert_eq!(
+            used.len(),
+            10,
+            "{game}: every building kind, besides fields and gardens"
+        );
     }
 }
 
