@@ -806,6 +806,14 @@ impl ShapeTable {
         for orientation in Orientation::all() {
             let mut variant =
                 self.derive(&grid, &base_collision, &def.boxes, &orientation.matrix());
+            // A flat Shape is drawn as thin quads, not its boxes, so fluid fills the whole cell
+            // round it: water round its boxes would be drawn as a box of water in the sea.
+            if def.form.is_flat() {
+                let start = self.voids.len() as u32;
+                self.voids
+                    .extend(find_voids(&[false; SUBDIV * SUBDIV * SUBDIV]).expect("one void"));
+                variant.voids = (start, self.voids.len() as u32 - start);
+            }
             variant.slots = match variant.slots {
                 CROWDED => 0,
                 _ => variant.voids.1 as u8,
