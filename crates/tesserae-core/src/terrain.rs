@@ -68,6 +68,8 @@ const SALT_RAVINE_MASK: u32 = 0x1a4d_00d2;
 const SALT_SHAFT: u32 = 0x1a4d_00e1;
 const SALT_CALM: u32 = 0x1a4d_00f1;
 const SALT_CRAG: u32 = 0x1a4d_0101;
+const SALT_TERRACE: u32 = 0x1a4d_0111;
+const SALT_OUTCROP: u32 = 0x1a4d_0121;
 
 /// The continent field's value at the coast, and how many metres one unit of it is worth inland:
 /// an approximation of distance, good enough to place a Biome.
@@ -112,6 +114,15 @@ const PEAKS_SIZE_M: f32 = 1400.0;
 /// of the land's.
 const CRAG_SIZE_M: f32 = 100.0;
 const CRAG_HEIGHT: f32 = 0.22;
+/// A range's benches: the rise from one to the next, the share of each step that is level, how
+/// far the benches drift before they meet as a ramp, and how fully the rise is stepped.
+const TERRACE_STEP_M: f32 = 10.0;
+const TERRACE_BENCH: f32 = 0.4;
+const TERRACE_DRIFT_M: f32 = 260.0;
+const TERRACE_STRENGTH: f32 = 0.8;
+/// The overhang density's outcrops: how far apart, and the field value above which one stands.
+const OUTCROP_SIZE_M: f32 = 90.0;
+const OUTCROP_CUT: f32 = 0.55;
 /// The share of the land's height a range's body approaches; its crags rise above that.
 const SUMMIT_SHARE: f32 = 0.85;
 const MESA_STEP_M: f32 = 18.0;
@@ -252,9 +263,12 @@ impl Base {
         // Eased toward the band's top rather than cut flat by the clamp, so a high range still
         // ends in peaks.
         let crest_m = h * SUMMIT_SHARE;
-        offset += crest_m * (1.0 - (-h * 1.1 * mountain / crest_m).exp());
-        // High up a range the rock breaks into crags and knolls rather than a smooth dome.
+        let rise_m = crest_m * (1.0 - (-h * 1.1 * mountain / crest_m).exp());
+        // High up a range the rock breaks into crags and knolls rather than a smooth dome; below
+        // them the flanks are benched.
         let summit = smooth(0.12, 0.45, mountain);
+        let crown = smooth(0.3, 0.45, mountain);
+        offset += rise_m + (self.terraced_m(wx, wz, rise_m) - rise_m) * (1.0 - crown);
         if summit > 0.0 {
             // Knolls standing on ground that joins up, not ridges walling off hollows: a ridge
             // network would leave pits between its crests for the drainage to fill as tarns.
@@ -341,7 +355,16 @@ impl Base {
         if rugged <= 0.0 {
             return 0.0;
         }
-        self.overhang_m * smooth(0.04, 0.2, self.mountain(wx, wz) * rugged)
+        // And there only in scattered outcrops: everywhere, it walled whole flanks.
+        let outcrop = crate::noise::fbm2(
+            wx / OUTCROP_SIZE_M,
+            wz / OUTCROP_SIZE_M,
+            self.seed.wrapping_add(SALT_OUTCROP),
+            2,
+        );
+        self.overhang_m
+            * smooth(0.04, 0.2, self.mountain(wx, wz) * rugged)
+            * smooth(OUTCROP_CUT, OUTCROP_CUT + 0.08, outcrop)
     }
 
     /// The signed push of the density at a point, in `-amp_m..amp_m`: positive is solid.
@@ -372,6 +395,28 @@ impl Base {
         // Squared, so a foot rises gently off the floor and the upper flanks steepen to the top.
         let t = (((2.0 * n - 1.0).abs() - VALLEY_FLOOR) / (MASSIF_TOP - VALLEY_FLOOR)).max(0.0);
         t * t
+    }
+
+    /// A range's rise broken into benches: level ground every [`TERRACE_STEP_M`] with a slope up
+    /// to the next. Each step's height drifts across the range, so one bench runs down into the
+    /// next as a ramp somewhere along it, and there is always a way up that is not a climb. The
+    /// foot is left alone, so the valley floor meets the range without a ledge.
+    fn terraced_m(&self, wx: f32, wz: f32, rise_m: f32) -> f32 {
+        let foot = smooth(0.0, TERRACE_STEP_M, rise_m);
+        if foot <= 0.0 {
+            return rise_m;
+        }
+        let drift_m = crate::noise::fbm2(
+            wx / TERRACE_DRIFT_M,
+            wz / TERRACE_DRIFT_M,
+            self.seed.wrapping_add(SALT_TERRACE),
+            2,
+        ) * 3.0
+            * TERRACE_STEP_M;
+        let t = (rise_m + drift_m) / TERRACE_STEP_M;
+        let step = t.floor();
+        let terraced_m = (step + smooth(TERRACE_BENCH, 1.0, t - step)) * TERRACE_STEP_M - drift_m;
+        rise_m + (terraced_m - rise_m) * foot * TERRACE_STRENGTH
     }
 
     /// 0 to 1: the patches of calm ground, before the coast fades them.

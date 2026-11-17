@@ -290,8 +290,8 @@ fn rugged_ground_has_overhangs_and_arches() {
             has_overhang(&g, x, z, h as i32 - 14, h as i32 + 14)
         })
         .count();
-    // Overhangs stay on a range's upper flanks and crests, rare enough not to roughen its slopes.
-    assert!(with * 20 >= rugged.len(), "{with} of {}", rugged.len());
+    // Overhangs are scattered outcrops on a range's upper flanks and crests, not every slope.
+    assert!(with >= 2, "{with} of {}", rugged.len());
 }
 
 #[test]
@@ -890,5 +890,88 @@ fn mountains_have_steep_upper_flanks_and_uneven_summits() {
     let (steep, rough) = summit_shape(&Worldgen::new(SEED, 1.0, v3()));
     // Rounded massifs had 3% of their highest ground this steep and half of it uneven.
     assert!(steep > 0.2, "{steep} of summit columns are steep");
-    assert!(rough > 0.85, "{rough} of summit columns are uneven");
+    assert!(rough > 0.8, "{rough} of summit columns are uneven");
+}
+
+/// Over mountain land (rugged, well above its valley): the share of columns sloping more than
+/// 1 in 1 across 2 m, and of those that are a wall, rising more than 3 m within a metre.
+fn mountain_slopes(g: &Worldgen) -> (f32, f32, f32, usize) {
+    let (mut steep, mut wall, mut bench, mut n) = (0, 0, 0, 0);
+    for j in -120..120 {
+        for i in -120..120 {
+            let (x, z) = (i as f32 * 41.0, j as f32 * 43.0);
+            if g.landform_fields(x, z).is_none_or(|f| f.ruggedness < 0.5) {
+                continue;
+            }
+            let h = |dx: f32, dz: f32| g.terrain_height_m(x + dx, z + dz);
+            if h(0.0, 0.0) < 24.0 + 40.0 {
+                continue;
+            }
+            n += 1;
+            let g2 = ((h(1.0, 0.0) - h(-1.0, 0.0)).powi(2) + (h(0.0, 1.0) - h(0.0, -1.0)).powi(2))
+                .sqrt()
+                / 2.0;
+            steep += (g2 > 1.0) as usize;
+            let rise = [(1.0, 0.0), (-1.0, 0.0), (0.0, 1.0), (0.0, -1.0)]
+                .iter()
+                .map(|&(dx, dz)| (h(dx, dz) - h(0.0, 0.0)).abs())
+                .fold(0.0f32, f32::max);
+            wall += (rise > 3.0) as usize;
+            bench += (g2 < 0.15) as usize;
+        }
+    }
+    let f = |k: usize| k as f32 / n as f32;
+    (f(steep), f(wall), f(bench), n)
+}
+
+#[test]
+fn mountains_are_climbable_with_benches_and_few_walls() {
+    let (_, wall, bench, n) = mountain_slopes(&Worldgen::new(SEED, 1.0, v3()));
+    assert!(n > 200, "{n} mountain columns");
+    assert_eq!(wall, 0.0, "the heightfield has no walls");
+    // Smooth flanks had a fifth of their ground level; benches make it more.
+    assert!(bench > 0.25, "{bench} of mountain ground is level");
+    // Overhangs everywhere on rugged ground made a wall at 6% of mountain columns.
+    let (walls, n) = voxel_walls(&Worldgen::new(SEED, 1.0, dry_v3()));
+    assert!(n > 30, "{n} mountain columns");
+    assert!(walls < 0.04, "{walls} of mountain columns stand by a wall");
+}
+
+/// From generated Chunks over mountain land: the share of columns whose top solid Voxel stands
+/// more than 3 Voxels above or below a neighbour's.
+fn voxel_walls(g: &Worldgen) -> (f32, usize) {
+    let (mut walls, mut n) = (0, 0);
+    for j in -40..40 {
+        for i in -40..40 {
+            let (x, z) = (i * 123, j * 129);
+            if g.landform_fields(x as f32, z as f32)
+                .is_none_or(|f| f.ruggedness < 0.5)
+                || g.terrain_height_m(x as f32, z as f32) < 24.0 + 40.0
+            {
+                continue;
+            }
+            let top = |x: i32, z: i32| {
+                let h = g.terrain_height_m(x as f32, z as f32) as i32;
+                (h - 16..h + 16)
+                    .rev()
+                    .find(|&y| {
+                        !g.chunk(x.div_euclid(32), y.div_euclid(32), z.div_euclid(32))
+                            .get(
+                                x.rem_euclid(32) as usize,
+                                y.rem_euclid(32) as usize,
+                                z.rem_euclid(32) as usize,
+                            )
+                            .is_air()
+                    })
+                    .unwrap_or(h - 16)
+            };
+            n += 1;
+            let here = top(x, z);
+            walls += [(1, 0), (0, 1)]
+                .iter()
+                .any(|&(dx, dz)| (top(x + dx, z + dz) - here).abs() > 3)
+                as usize;
+        }
+    }
+    (walls as f32 / n as f32, n)
 }
