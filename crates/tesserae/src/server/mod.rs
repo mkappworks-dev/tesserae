@@ -147,8 +147,11 @@ pub fn plugin(app: &mut App) {
         footfall::plugin,
         causal_sound::plugin,
     ));
+    // Asked for, so a played World starts at its Settlement and not among test Shapes.
     #[cfg(feature = "dev")]
-    if std::env::var_os("TESSERAE_PROFILE_FIXTURE").is_none() {
+    if std::env::var_os("TESSERAE_GALLERY").is_some()
+        && std::env::var_os("TESSERAE_PROFILE_FIXTURE").is_none()
+    {
         app.add_plugins(gallery::plugin);
     }
 }
@@ -295,15 +298,18 @@ fn dev_spawn_eye(generator: &Worldgen, value: &str) -> Option<Vec3> {
 /// How far a new World looks for dry land when the spawn point is in the sea.
 const DRY_LAND_SEARCH_M: f32 = 6000.0;
 
-/// How far from the origin a new World looks for a Settlement to spawn the Player beside.
-const SPAWN_SEARCH_M: f32 = 512.0;
+/// How far from the origin a new World looks for a Settlement to spawn the Player beside, nearest
+/// ring first: version 3 lays Settlements only on level ground, so the nearest may be kilometres
+/// out.
+const SPAWN_SEARCH_M: [f32; 4] = [512.0, 1024.0, 2048.0, 4096.0];
 
 /// Just outside the Settlement nearest the origin, or over the origin with none that near; clear
 /// of the ground and of any lake standing on it, and no lower than the top of anything generated
 /// under the Player's body.
 fn spawn_eye(generator: &Worldgen) -> Vec3 {
-    let beside = generator
-        .settlement_spawn_m(SPAWN_SEARCH_M)
+    let beside = SPAWN_SEARCH_M
+        .iter()
+        .find_map(|&r| generator.settlement_spawn_m(r))
         .unwrap_or([0.0; 2]);
     let [x, z] = generator
         .dry_land_near_m(beside, DRY_LAND_SEARCH_M)
