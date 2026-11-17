@@ -529,6 +529,9 @@ pub(crate) struct Caverns {
 
 /// The field value above which rock is cavern.
 const CAVERN_CUT: f32 = 0.67;
+/// How far under the cut the shell round a flooded cavern reaches: more than the field moves in a
+/// Voxel, so at least one Voxel of rock stands between its water and a dry tunnel.
+const CAVERN_SHELL: f32 = 0.06;
 const CAVERN_SIZE_M: [f32; 3] = [200.0, 90.0, 200.0];
 /// One shaft may open in each cell this wide, about every other one.
 const SHAFT_CELL_M: f32 = 320.0;
@@ -564,15 +567,24 @@ impl Caverns {
         }
     }
 
+    fn field(&self, x_m: f32, y_m: f32, z_m: f32) -> f32 {
+        crate::noise::fbm3(
+            x_m / CAVERN_SIZE_M[0],
+            y_m / CAVERN_SIZE_M[1],
+            z_m / CAVERN_SIZE_M[2],
+            self.seed,
+            2,
+        )
+    }
+
     pub(crate) fn carves(&self, x_m: f32, y_m: f32, z_m: f32) -> bool {
-        y_m >= self.floor_m
-            && crate::noise::fbm3(
-                x_m / CAVERN_SIZE_M[0],
-                y_m / CAVERN_SIZE_M[1],
-                z_m / CAVERN_SIZE_M[2],
-                self.seed,
-                2,
-            ) > CAVERN_CUT
+        y_m >= self.floor_m && self.field(x_m, y_m, z_m) > CAVERN_CUT
+    }
+
+    /// Whether the rock at a point is a cavern's or the shell of rock kept round it, which a
+    /// tunnel or a shaft must not cut below the water table, where the cavern is a lake.
+    pub(crate) fn walls_in(&self, x_m: f32, y_m: f32, z_m: f32) -> bool {
+        self.field(x_m, y_m, z_m) > CAVERN_CUT - CAVERN_SHELL
     }
 
     /// The shafts whose mouths lie within `pad_m` of the box `min..max` on the ground plane, each

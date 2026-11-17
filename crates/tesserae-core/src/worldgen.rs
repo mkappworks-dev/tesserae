@@ -1506,6 +1506,7 @@ impl Worldgen {
             .unwrap_or_default();
 
         let ores = self.ores_reaching(floor_m, ceiling_m);
+        let table_m = self.params.sea_level_m - WATER_TABLE_BELOW_SEA_M;
         let mut chunk = ChunkBuilder::new();
         let mut cave_cache = Default::default();
         for z in 0..CHUNK_SIZE {
@@ -1551,6 +1552,12 @@ impl Worldgen {
                         }
                         continue;
                     }
+                    // A tunnel or shaft never opens a flooded cavern below the water table.
+                    let walled = || {
+                        self.water.is_some()
+                            && y_m < table_m
+                            && self.caverns.is_some_and(|c| c.walls_in(x_m, y_m, z_m))
+                    };
                     // A cave carves through the Grass cap like anything else,
                     // which is what a mouth is.
                     if let Some((caves, blocks)) = &reachable
@@ -1567,6 +1574,7 @@ impl Worldgen {
                         && y_m
                             >= *sealed_m
                                 .get_or_insert_with(|| self.sealed_below_m(x_m, z_m, surface_m))
+                        && !walled()
                     {
                         // An overhang's rock above the ground, cut by a cave, is open water, not a hole.
                         if base_m < 0.0
@@ -1581,6 +1589,7 @@ impl Worldgen {
                         && y_m
                             >= *sealed_m
                                 .get_or_insert_with(|| self.sealed_below_m(x_m, z_m, surface_m))
+                        && !walled()
                     {
                         continue;
                     }
@@ -1594,7 +1603,7 @@ impl Worldgen {
                     {
                         // Under the water table a cavern is an underground lake.
                         if let Some(water) = self.water
-                            && y_m < self.params.sea_level_m - WATER_TABLE_BELOW_SEA_M
+                            && y_m < table_m
                         {
                             chunk.set(x, y, z, Voxel::cube(water.material));
                         }

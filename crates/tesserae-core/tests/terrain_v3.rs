@@ -666,23 +666,14 @@ fn nothing_stands_above_a_footprints_own_top_and_versions_1_and_2_keep_the_globa
     );
 }
 
-/// Water that stands beside or above air would be poured into it by the fluid simulation.
-#[test]
-fn generated_water_has_no_air_below_or_beside_it() {
+/// Water Voxels with Air below or beside them in the `n`-Chunk square around Chunk column
+/// `centre`, from `ys` Chunks: what the fluid simulation would pour out.
+fn leaks(g: &Worldgen, centre: (i32, i32), n: i32, ys: std::ops::Range<i32>) -> (u32, u32, u32) {
     let water = tesserae_core::testgen::fixtures().water;
-    let params = WorldgenParams {
-        caves: Some(tesserae_core::CaveParams::default()),
-        smoothing: None,
-        ..wet_world()
-    };
-    let g = Worldgen::new(SEED, 1.0, params);
-    // 8x8 chunks wide, y -4..4 chunks
-    let (x0, z0) = (-37i32, -41i32);
-    let n = 16usize;
-    let ys = -4..5;
+    let (x0, z0) = (centre.0 - n / 2, centre.1 - n / 2);
     let mut grid = std::collections::HashMap::new();
-    for cz in z0..z0 + n as i32 {
-        for cx in x0..x0 + n as i32 {
+    for cz in z0..z0 + n {
+        for cx in x0..x0 + n {
             for cy in ys.clone() {
                 grid.insert((cx, cy, cz), g.chunk(cx, cy, cz));
             }
@@ -699,29 +690,64 @@ fn generated_water_has_no_air_below_or_beside_it() {
             })
     };
     let (mut wet, mut down, mut side) = (0, 0, 0);
-    for x in x0 * 32 + 1..(x0 + n as i32) * 32 - 1 {
-        for z in z0 * 32 + 1..(z0 + n as i32) * 32 - 1 {
-            for y in -128..128 {
+    for x in x0 * 32 + 1..(x0 + n) * 32 - 1 {
+        for z in z0 * 32 + 1..(z0 + n) * 32 - 1 {
+            for y in ys.start * 32 + 1..ys.end * 32 {
                 let Some(v) = get(x, y, z) else { continue };
-                if v.is_air() || v.material() != water {
+                if v.material() != water {
                     continue;
                 }
                 wet += 1;
-                if get(x, y - 1, z).is_some_and(|b| b.is_air()) {
-                    down += 1;
-                }
+                down += get(x, y - 1, z).is_some_and(|b| b.is_air()) as u32;
                 for (dx, dz) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
-                    if get(x + dx, y, z + dz).is_some_and(|b| b.is_air()) {
-                        side += 1;
-                    }
+                    side += get(x + dx, y, z + dz).is_some_and(|b| b.is_air()) as u32;
                 }
             }
         }
     }
+    (wet, down, side)
+}
+
+fn caved_world() -> WorldgenParams {
+    WorldgenParams {
+        caves: Some(tesserae_core::CaveParams::default()),
+        smoothing: None,
+        ..wet_world()
+    }
+}
+
+/// Water that stands beside or above air would be poured into it by the fluid simulation.
+#[test]
+fn generated_water_has_no_air_below_or_beside_it() {
+    let g = Worldgen::new(SEED, 1.0, caved_world());
+    let (wet, down, side) = leaks(&g, (-29, -33), 16, -4..5);
     assert!(wet > 100_000, "the region holds water");
     assert_eq!(
         (down, side),
         (0, 0),
         "water would flow into {down} cells below and {side} beside it"
     );
+}
+
+#[test]
+fn flooded_caverns_are_sealed_from_dry_tunnels() {
+    let g = Worldgen::new(SEED, 1.0, caved_world());
+    // Under the mountains, where caverns are deep and tunnels cross them below the water table.
+    let mut checked = 0;
+    for j in -16..16 {
+        for i in -16..16 {
+            let (x, z) = (i * 233i32, j * 241i32);
+            if g.surface_height_m(x as f32, z as f32) < 90.0 || checked == 4 {
+                continue;
+            }
+            checked += 1;
+            let (_, down, side) = leaks(&g, (x.div_euclid(32), z.div_euclid(32)), 4, -3..1);
+            assert_eq!(
+                (down, side),
+                (0, 0),
+                "under {x}, {z}, cavern water would flow into {down} cells below and {side} beside it"
+            );
+        }
+    }
+    assert_eq!(checked, 4);
 }
