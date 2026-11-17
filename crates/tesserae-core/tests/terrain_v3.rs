@@ -702,3 +702,63 @@ fn nothing_stands_above_a_footprints_own_top_and_versions_1_and_2_keep_the_globa
         v2.surface_bounds_m().1
     );
 }
+
+/// Water that stands beside or above air would be poured into it by the fluid simulation.
+#[test]
+fn generated_water_has_no_air_below_or_beside_it() {
+    let water = tesserae_core::testgen::fixtures().water;
+    let params = WorldgenParams {
+        caves: Some(tesserae_core::CaveParams::default()),
+        smoothing: None,
+        ..wet_world()
+    };
+    let g = Worldgen::new(SEED, 1.0, params);
+    // 8x8 chunks wide, y -4..4 chunks
+    let (x0, z0) = (-37i32, -41i32);
+    let n = 16usize;
+    let ys = -4..5;
+    let mut grid = std::collections::HashMap::new();
+    for cz in z0..z0 + n as i32 {
+        for cx in x0..x0 + n as i32 {
+            for cy in ys.clone() {
+                grid.insert((cx, cy, cz), g.chunk(cx, cy, cz));
+            }
+        }
+    }
+    let get = |x: i32, y: i32, z: i32| {
+        grid.get(&(x.div_euclid(32), y.div_euclid(32), z.div_euclid(32)))
+            .map(|c| {
+                c.get(
+                    x.rem_euclid(32) as usize,
+                    y.rem_euclid(32) as usize,
+                    z.rem_euclid(32) as usize,
+                )
+            })
+    };
+    let (mut wet, mut down, mut side) = (0, 0, 0);
+    for x in x0 * 32 + 1..(x0 + n as i32) * 32 - 1 {
+        for z in z0 * 32 + 1..(z0 + n as i32) * 32 - 1 {
+            for y in -128..128 {
+                let Some(v) = get(x, y, z) else { continue };
+                if v.is_air() || v.material() != water {
+                    continue;
+                }
+                wet += 1;
+                if get(x, y - 1, z).is_some_and(|b| b.is_air()) {
+                    down += 1;
+                }
+                for (dx, dz) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
+                    if get(x + dx, y, z + dz).is_some_and(|b| b.is_air()) {
+                        side += 1;
+                    }
+                }
+            }
+        }
+    }
+    assert!(wet > 100_000, "the region holds water");
+    assert_eq!(
+        (down, side),
+        (0, 0),
+        "water would flow into {down} cells below and {side} beside it"
+    );
+}

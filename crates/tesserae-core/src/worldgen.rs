@@ -1449,6 +1449,7 @@ impl Worldgen {
                     .map_or(ground, |columns| columns[z * CHUNK_SIZE + x]);
                 let biome = self.column_biome([cx, cz], [x, z]);
                 let water_level_m = self.water_level_m(x_m, z_m);
+                let sealed_m = self.sealed_below_m(x_m, z_m, surface_m);
                 let amp_m = self
                     .terrain
                     .as_ref()
@@ -1481,6 +1482,7 @@ impl Worldgen {
                     // A cave carves through the Grass cap like anything else,
                     // which is what a mouth is.
                     if let Some((caves, blocks)) = &reachable
+                        && y_m >= sealed_m
                         && blocks[block_of(x, y, z)]
                         && caves.carves_near(
                             &mut cave_cache,
@@ -1504,6 +1506,7 @@ impl Worldgen {
                     if let (Some(caverns), Some(blocks)) = (&self.caverns, &cavern_blocks)
                         && blocks[block_of(x, y, z)]
                         && base_m >= CAVERN_MIN_DEPTH_M
+                        && y_m >= sealed_m
                         && caverns.carves(x_m, y_m, z_m)
                     {
                         // Under the water table a cavern is an underground lake.
@@ -1785,6 +1788,38 @@ impl Worldgen {
             [cx, cz].map(|c| c * size - margin),
             [cx, cz].map(|c| (c + 1) * size + margin),
         ]
+    }
+
+    /// Under version 3, rock below this height stays solid: a cave opening onto water would let
+    /// the fluid simulation pour it in, a hole that keeps changing and being saved.
+    fn sealed_below_m(&self, x_m: f32, z_m: f32, ground_m: f32) -> f32 {
+        /// Higher than any bank this steep is too far from the water to open onto it.
+        const CLEAR_M: f32 = 64.0;
+        const REACH_M: f32 = 4.0;
+        if self.terrain.is_none() || self.water.is_none() {
+            return f32::NEG_INFINITY;
+        }
+        let wet = |x, z| {
+            self.water_level_m(x, z).filter(|_| {
+                self.surface_height_m(x, z) < self.water_level_m(x, z).unwrap_or(f32::MIN)
+            })
+        };
+        if self
+            .water_level_m(x_m, z_m)
+            .is_some_and(|level| ground_m > level + CLEAR_M)
+        {
+            return f32::NEG_INFINITY;
+        }
+        [
+            (0.0, 0.0),
+            (REACH_M, 0.0),
+            (-REACH_M, 0.0),
+            (0.0, REACH_M),
+            (0.0, -REACH_M),
+        ]
+        .into_iter()
+        .filter_map(|(dx, dz)| wet(x_m + dx, z_m + dz))
+        .fold(f32::NEG_INFINITY, f32::max)
     }
 
     /// Whether the ground cell at global Voxel `at` is carved away: what the Chunk holding it
