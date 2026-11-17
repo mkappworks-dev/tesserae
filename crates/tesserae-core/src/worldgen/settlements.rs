@@ -56,6 +56,8 @@ const TRAIL_M: (f32, f32) = (40.0, 90.0);
 /// the radius, and all at an approach path's end.
 const EDGE_WEAR: f32 = 0.25;
 const WEAR_SALT: u64 = 0x5e77_1e00_0000_0002;
+/// How far the ground across a version 3 Settlement's disc may rise or fall from its centre.
+const DISC_RISE_M: f32 = 4.0;
 /// The most a Plot or a road is cut into or filled over the ground.
 const CUT_FILL_M: f32 = 2.0;
 /// What the ground rules allow at a Plot's sampled columns, short of [`CUT_FILL_M`] so a column
@@ -541,6 +543,9 @@ impl Worldgen {
         {
             return None;
         }
+        if !self.level_disc(centre_m, height_m, reach_m) {
+            return None;
+        }
         let facing = (mix(hash ^ 2) & 3) as u8;
         let centre = match &settlement.centre {
             Some(building) => {
@@ -562,6 +567,25 @@ impl Worldgen {
             reach_m,
             facing,
             centre,
+        })
+    }
+
+    /// Whether the ground over a Settlement's disc is level enough to found it on: under version 3,
+    /// whose land rises into hills and mountains, within [`DISC_RISE_M`] of its centre on two
+    /// rings; before it, whose land is gentle, always.
+    pub(super) fn level_disc(&self, centre_m: [f32; 2], height_m: f32, reach_m: f32) -> bool {
+        if self.terrain.is_none() {
+            return true;
+        }
+        [0.5, 1.0].into_iter().all(|ring| {
+            (0..8).all(|k| {
+                let angle = k as f32 * TAU / 8.0;
+                let [x, z] = [
+                    centre_m[0] + ring * reach_m * angle.cos(),
+                    centre_m[1] + ring * reach_m * angle.sin(),
+                ];
+                (self.surface_height_m(x, z) - height_m).abs() <= DISC_RISE_M
+            })
         })
     }
 

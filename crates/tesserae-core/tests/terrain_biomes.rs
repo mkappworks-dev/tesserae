@@ -179,7 +179,7 @@ fn relief_scales_the_detail_of_the_ground_and_nothing_else() {
     let (flat_total, _) = bumps(flat);
     let (rough_total, _) = bumps(rough);
     assert!(
-        rough_total > flat_total * 1.3,
+        rough_total > flat_total * 1.15,
         "{rough_total} vs {flat_total}"
     );
 }

@@ -66,6 +66,7 @@ const SALT_CAVERN: u32 = 0x1a4d_00c1;
 const SALT_RAVINE: u32 = 0x1a4d_00d1;
 const SALT_RAVINE_MASK: u32 = 0x1a4d_00d2;
 const SALT_SHAFT: u32 = 0x1a4d_00e1;
+const SALT_CALM: u32 = 0x1a4d_00f1;
 
 /// The continent field's value at the coast, and how many metres one unit of it is worth inland:
 /// an approximation of distance, good enough to place a Biome.
@@ -107,6 +108,11 @@ const WARP_AMOUNT_M: f32 = 400.0;
 const EROSION_SIZE_M: f32 = 2800.0;
 const PEAKS_SIZE_M: f32 = 1400.0;
 const MESA_STEP_M: f32 = 18.0;
+/// The calm patches' period, and the band of their field that fades them in.
+const CALM_SIZE_M: f32 = 450.0;
+const CALM_CUT: [f32; 2] = [0.36, 0.48];
+/// Where on the worn-to-rugged range the land starts and stops rising into hills and mountains.
+const RUGGED_CUT: [f32; 2] = [0.4, 0.85];
 const VOLCANO_CELL_M: f32 = 2600.0;
 /// One island may stand in each cell this wide, at that chance, its radius in that range.
 const ISLAND_CELL_M: f32 = 3200.0;
@@ -213,7 +219,7 @@ impl Base {
         Fields {
             continent,
             erosion,
-            ruggedness: inland * (1.0 - erosion).powf(1.0),
+            ruggedness: inland * smooth(RUGGED_CUT[0], RUGGED_CUT[1], 1.0 - erosion),
         }
     }
 
@@ -234,7 +240,10 @@ impl Base {
             seed.wrapping_add(SALT_PEAKS),
             4,
         );
-        offset += h * 0.9 * ridge.powf(1.5) * f.ruggedness;
+        // Patches of calm ground a few hundred metres across, everywhere inland: level places to
+        // build never lie far off, even in rough country, where they are benches between ridges.
+        let calm = self.calm(wx, wz) * inland;
+        offset += h * 1.1 * ridge.powf(1.5) * f.ruggedness * (1.0 - 0.8 * calm);
 
         let detail = |octaves| {
             crate::noise::fbm2(
@@ -246,7 +255,7 @@ impl Base {
         };
         // Worn inland ground is a plain: the fine octaves that make it a field of small bumps
         // fade out and the rest is gentler, so there are wide level places to build and farm.
-        let plain = smooth(0.2, 0.5, f.erosion) * inland;
+        let plain = (smooth(0.2, 0.5, f.erosion) * inland).max(calm);
         let n = if plain > 0.0 {
             let rough = detail(self.octaves);
             rough + (detail(self.octaves.min(2)) - rough) * plain
@@ -255,7 +264,8 @@ impl Base {
         };
         // Detail also dies out at the waterline, so noise does not litter the coast with islets.
         let shore = 0.2 + 0.8 * smooth(0.0, 14.0, offset.abs());
-        let worn = (0.35 + 0.65 * (1.0 - f.erosion)) * (1.0 - 0.8 * plain) * shore;
+        let worn =
+            (0.35 + 0.65 * (1.0 - f.erosion)) * (1.0 - 0.8 * plain) * (1.0 - 0.6 * calm) * shore;
         let scale = self
             .relief_by_biome
             .as_ref()
@@ -312,6 +322,17 @@ impl Base {
             2,
         );
         ((n * 2.0 - 1.0) * 2.0).clamp(-1.0, 1.0) * amp_m
+    }
+
+    /// 0 to 1: the patches of calm ground, before the coast fades them.
+    fn calm(&self, wx: f32, wz: f32) -> f32 {
+        let n = crate::noise::fbm2(
+            wx / CALM_SIZE_M,
+            wz / CALM_SIZE_M,
+            self.seed.wrapping_add(SALT_CALM),
+            2,
+        );
+        smooth(CALM_CUT[0], CALM_CUT[1], n)
     }
 
     /// 0 to 1: where a canyon cuts, a winding line through some regions of the land.

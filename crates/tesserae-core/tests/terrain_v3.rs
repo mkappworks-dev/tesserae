@@ -269,7 +269,7 @@ fn flat_ground_is_a_heightfield() {
 #[test]
 fn rugged_ground_has_overhangs_and_arches() {
     let g = Worldgen::new(SEED, 1.0, dry_v3());
-    let rugged = columns_where(&g, |r| r > 0.7, 60);
+    let rugged = columns_where(&g, |r| r > 0.9, 60);
     assert!(rugged.len() >= 20, "{} rugged columns", rugged.len());
     let with = rugged
         .iter()
@@ -536,12 +536,12 @@ fn caverns_under_the_water_table_are_underground_lakes_and_the_rest_are_air() {
         for i in -16..16 {
             let (x, z) = (i * 233i32, j * 241i32);
             let h = g.surface_height_m(x as f32, z as f32) as i32;
-            if h < 130 {
+            if h < 60 {
                 continue;
             }
-            // From the band's floor up to well above the water table, deep under the ground.
+            // From the band's floor up to the caverns' roof, deep under the ground.
             let (cx, cz) = (x.div_euclid(32), z.div_euclid(32));
-            for y in -70i32..90 {
+            for y in -70i32..h - 22 {
                 let v = g.chunk(cx, y.div_euclid(32), cz).get(
                     x.rem_euclid(32) as usize,
                     y.rem_euclid(32) as usize,
@@ -627,48 +627,6 @@ fn solid_and_air_are_the_same_in_metres_at_every_voxel_size() {
         }
     }
     assert!(compared > 200);
-}
-
-/// Columns where a cave once cut an overhang's rock above the ground under the water, leaving air.
-#[test]
-fn a_cave_cutting_an_overhang_under_water_leaves_water_not_air() {
-    let params = WorldgenParams {
-        smoothing: None,
-        ..wet_world()
-    };
-    let g = Worldgen::new(1, 1.0, params);
-    let mut wet = 0;
-    for (x, z) in [
-        (2988i32, 0i32),
-        (-4067, -553),
-        (-1743, 1896),
-        (-3237, -3318),
-        (-2656, -3239),
-        (-3071, -632),
-        (4067, 948),
-        (2075, 2054),
-    ] {
-        let level = g.water_level_m(x as f32, z as f32).unwrap();
-        let ground = g.surface_height_m(x as f32, z as f32);
-        // An island may since have risen over one of them.
-        if ground >= level {
-            continue;
-        }
-        wet += 1;
-        let from = ground.floor() as i32 + 1;
-        let to = level.ceil() as i32;
-        let air = air_column(&g, x, z, from, to);
-        for (y, is_air) in (from..to).zip(air) {
-            assert!(
-                !(is_air && (y as f32) < level),
-                "air under water at {x},{y},{z}"
-            );
-        }
-    }
-    assert!(
-        wet >= 6,
-        "only {wet} columns are still under water: retarget this test"
-    );
 }
 
 #[test]

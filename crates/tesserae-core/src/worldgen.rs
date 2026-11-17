@@ -2840,6 +2840,56 @@ mod tests {
     }
 
     #[test]
+    fn a_version_3_settlement_is_founded_only_where_its_disc_is_level() {
+        let g = Worldgen::new(
+            SEED,
+            1.0,
+            WorldgenParams {
+                generator: 3,
+                ..crate::testgen::world_params()
+            },
+        );
+        let reach_m = 40.0;
+        let rise = |x: f32, z: f32| {
+            let h = g.surface_height_m(x, z);
+            let r = (0..16)
+                .map(|k| {
+                    let a = k as f32 * std::f32::consts::TAU / 16.0;
+                    (g.surface_height_m(x + reach_m * a.cos(), z + reach_m * a.sin()) - h).abs()
+                })
+                .fold(0.0, f32::max);
+            (h, r)
+        };
+        let (mut steep, mut level) = (0, 0);
+        for j in -40..40 {
+            for i in -40..40 {
+                let [x, z] = [i as f32 * 97.0, j as f32 * 89.0];
+                let (h, r) = rise(x, z);
+                if h < 30.0 {
+                    continue;
+                }
+                if r > 12.0 {
+                    steep += 1;
+                    assert!(
+                        !g.level_disc([x, z], h, reach_m),
+                        "founded on a slope at {x},{z}"
+                    );
+                } else if r < 1.5 {
+                    level += 1;
+                    assert!(
+                        g.level_disc([x, z], h, reach_m),
+                        "refused level ground at {x},{z}"
+                    );
+                }
+            }
+        }
+        assert!(
+            steep > 50 && level > 50,
+            "{steep} steep and {level} level sites"
+        );
+    }
+
+    #[test]
     fn shafts_open_a_way_from_the_ground_down_into_a_cavern() {
         let params = WorldgenParams {
             generator: 3,
