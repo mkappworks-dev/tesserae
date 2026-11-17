@@ -893,12 +893,12 @@ impl BiomeGrounds {
 
 type ColumnGrounds = [GroundParams; CHUNK_SIZE * CHUNK_SIZE];
 
-/// A column of Chunks' surface (with a one-column border), water levels and grounds. Version 3's
-/// band stands some ten Chunks tall, and each would otherwise sample all of it again.
+/// A column of Chunks' surface and water levels (with a one-column border) and grounds. Version
+/// 3's band stands some ten Chunks tall, and each would otherwise sample all of it again.
 #[derive(Debug)]
 struct Stack {
     surface_m: [f32; SURFACE_W * SURFACE_W],
-    water_level_m: [Option<f32>; CHUNK_SIZE * CHUNK_SIZE],
+    water_level_m: [Option<f32>; SURFACE_W * SURFACE_W],
     grounds: Option<ColumnGrounds>,
 }
 
@@ -1124,21 +1124,28 @@ impl Worldgen {
 
     /// The stack over Chunk column `[cx, cz]`, built on first use. Two workers may both build one;
     /// they build the same.
-    fn stack(&self, cx: i32, cz: i32, reach: i32) -> Arc<Stack> {
+    fn stack(&self, cx: i32, cz: i32) -> Arc<Stack> {
         if let Some(s) = self.stacks.lock().expect("stacks").get(&[cx, cz]) {
             return Arc::clone(s);
         }
-        let mut surface_m = [0.0f32; SURFACE_W * SURFACE_W];
-        for z in -reach..CHUNK_SIZE as i32 + reach {
-            for x in -reach..CHUNK_SIZE as i32 + reach {
-                surface_m[surface_index(x, z)] =
-                    self.surface_height_m(self.axis_m(cx, x), self.axis_m(cz, z));
+        // The surface is kept to one column past the Chunk; its containment reads one further.
+        const RAW_W: usize = SURFACE_W + 2;
+        let raw_index = |x: i32, z: i32| (z + 2) as usize * RAW_W + (x + 2) as usize;
+        let mut raw = [(0.0f32, None); RAW_W * RAW_W];
+        for z in -2..CHUNK_SIZE as i32 + 2 {
+            for x in -2..CHUNK_SIZE as i32 + 2 {
+                raw[raw_index(x, z)] = self.raw_column(self.axis_m(cx, x), self.axis_m(cz, z));
             }
         }
-        let water_level_m = std::array::from_fn(|i| {
-            let (x, z) = ((i % CHUNK_SIZE) as i32, (i / CHUNK_SIZE) as i32);
-            self.water_level_m(self.axis_m(cx, x), self.axis_m(cz, z))
-        });
+        let mut surface_m = [0.0f32; SURFACE_W * SURFACE_W];
+        let mut water_level_m = [None; SURFACE_W * SURFACE_W];
+        for z in -1..CHUNK_SIZE as i32 + 1 {
+            for x in -1..CHUNK_SIZE as i32 + 1 {
+                let around = CARDINALS.map(|(dx, dz, _)| raw[raw_index(x + dx, z + dz)]);
+                surface_m[surface_index(x, z)] = self.contained_m(raw[raw_index(x, z)], around);
+                water_level_m[surface_index(x, z)] = raw[raw_index(x, z)].1;
+            }
+        }
         let stack = Arc::new(Stack {
             surface_m,
             water_level_m,
@@ -1150,6 +1157,67 @@ impl Worldgen {
         }
         stacks.insert([cx, cz], Arc::clone(&stack));
         stack
+    }
+
+    /// Version 3's ground and water level over a column before either is reconciled with its
+    /// neighbours'.
+    fn raw_column(&self, x_m: f32, z_m: f32) -> (f32, Option<f32>) {
+        let terrain = self.terrain.as_ref().expect("version 3");
+        (terrain.height_m(x_m, z_m), self.water_level_m(x_m, z_m))
+    }
+
+    /// The highest Voxel the water over a column fills, if it stands above the ground: the cube
+    /// pass's own comparisons, `y_m < level` for water and `top_index` for ground.
+    fn water_top(&self, (ground_m, level_m): (f32, Option<f32>)) -> Option<i32> {
+        let k = self.level_top(level_m?);
+        (k > top_index(ground_m, 0.0, self.voxel_size)).then_some(k)
+    }
+
+    /// The highest Voxel water standing at `level_m` fills, whatever the ground under it.
+    fn level_top(&self, level_m: f32) -> i32 {
+        let mut k = (level_m / self.voxel_size).ceil() as i32;
+        while k as f32 * self.voxel_size >= level_m {
+            k -= 1;
+        }
+        k
+    }
+
+    /// A column's surface once its water is contained: where a neighbour's water stands higher
+    /// than this column's own, the ground rises to hold it as a rock lip, so no generated water
+    /// has open air beside it for the fluid simulation to pour into. Equal tops meet as one
+    /// surface. Asked on the Voxel lattice, so each Voxel size draws its own lips.
+    fn contained_m(&self, own: (f32, Option<f32>), around: [(f32, Option<f32>); 4]) -> f32 {
+        let wet = self.water_top(own);
+        let held = around
+            .into_iter()
+            .filter_map(|q| self.water_top(q))
+            .max()
+            .filter(|&h| wet.is_none_or(|w| h > w));
+        match held {
+            Some(h) if h > top_index(own.0, 0.0, self.voxel_size) => {
+                (h as f32 + 0.5) * self.voxel_size
+            }
+            _ => own.0,
+        }
+    }
+
+    /// [`Self::contained_m`] at a point, its neighbours a Voxel away along each axis, reading their
+    /// ground only where their water could stand above this column's top.
+    fn contained_at_m(&self, [x_m, z_m]: [f32; 2], around: [[f32; 2]; 4]) -> f32 {
+        let own = self.raw_column(x_m, z_m);
+        let reach =
+            self.water_top(own)
+                .unwrap_or(i32::MIN)
+                .max(top_index(own.0, 0.0, self.voxel_size));
+        let around = around.map(|[x_m, z_m]| {
+            let level_m = self.water_level_m(x_m, z_m);
+            if level_m.is_none_or(|l| self.level_top(l) <= reach) {
+                (own.0, None)
+            } else {
+                self.raw_column(x_m, z_m)
+            }
+        });
+        self.contained_m(own, around)
     }
 
     /// 1 where no Biome tunes the caves, otherwise a mean that moves continuously across a border,
@@ -1239,15 +1307,50 @@ impl Worldgen {
         }
     }
 
+    /// The ground in metres before water is contained, which is the same at every Voxel size:
+    /// [`Self::surface_height_m`] rises from it only by a lip a Voxel wide beside water.
+    pub fn terrain_height_m(&self, x_m: f32, z_m: f32) -> f32 {
+        match &self.terrain {
+            Some(terrain) => terrain.height_m(x_m, z_m),
+            None => self.surface_height_m(x_m, z_m),
+        }
+    }
+
     /// Version 3's fields at a column; `None` under version 1 or 2.
     pub fn landform_fields(&self, x_m: f32, z_m: f32) -> Option<crate::terrain::Fields> {
         self.terrain.as_ref().map(|t| t.fields(x_m, z_m))
     }
 
-    /// The metre height of the surface over a point on the ground plane.
+    /// The metre height of the surface over a point on the ground plane. Under version 3, that of
+    /// the Voxel column nearest it, with its water contained: what every Chunk stands on.
     pub fn surface_height_m(&self, x_m: f32, z_m: f32) -> f32 {
-        if let Some(terrain) = &self.terrain {
-            return terrain.height_m(x_m, z_m);
+        if self.terrain.is_some() {
+            let column = |m: f32| (m / self.voxel_size).round() as i32;
+            let (gx, gz) = (column(x_m), column(z_m));
+            // A Chunk asks at its columns' corners, the Stack's lattice; anything else asks its
+            // own point and the points a Voxel from it.
+            if self.global_m(gx) != x_m || self.global_m(gz) != z_m {
+                let size = self.voxel_size;
+                return self.contained_at_m(
+                    [x_m, z_m],
+                    CARDINALS.map(|(dx, dz, _)| [x_m + dx as f32 * size, z_m + dz as f32 * size]),
+                );
+            }
+            let (cx, cz) = (
+                gx.div_euclid(CHUNK_SIZE as i32),
+                gz.div_euclid(CHUNK_SIZE as i32),
+            );
+            if let Some(s) = self.stacks.lock().expect("stacks").get(&[cx, cz]) {
+                let (x, z) = (
+                    gx.rem_euclid(CHUNK_SIZE as i32),
+                    gz.rem_euclid(CHUNK_SIZE as i32),
+                );
+                return s.surface_m[surface_index(x, z)];
+            }
+            return self.contained_at_m(
+                [x_m, z_m],
+                CARDINALS.map(|(dx, dz, _)| [self.global_m(gx + dx), self.global_m(gz + dz)]),
+            );
         }
         let n = fbm2(
             x_m * self.inv_feature_size,
@@ -1403,7 +1506,7 @@ impl Worldgen {
         // The border is only read by smoothing, so a World of cubes does not
         // pay for it.
         let reach = if self.smoothing { 1 } else { 0 };
-        let stack = self.terrain.is_some().then(|| self.stack(cx, cz, reach));
+        let stack = self.terrain.is_some().then(|| self.stack(cx, cz));
         let surface_m = stack.as_ref().map_or_else(
             || {
                 let mut surface_m = [0.0f32; SURFACE_W * SURFACE_W];
@@ -1520,13 +1623,25 @@ impl Worldgen {
                 let biome = self.column_biome([cx, cz], [x, z]);
                 let water_level_m = stack.as_ref().map_or_else(
                     || self.water_level_m(x_m, z_m),
-                    |s| s.water_level_m[z * CHUNK_SIZE + x],
+                    |s| s.water_level_m[surface_index(x as i32, z as i32)],
                 );
                 let mut sealed_m = None;
-                let amp_m = self
-                    .terrain
-                    .as_ref()
-                    .map_or(0.0, |t| t.overhang_amp_m(x_m, z_m));
+                // The density never reaches down to water here or beside, so it opens no hollow
+                // that water would stand or pour into.
+                let amp_m = stack.as_ref().map_or(0.0, |s| {
+                    let (x, z) = (x as i32, z as i32);
+                    let wettest_m = CARDINALS
+                        .iter()
+                        .map(|&(dx, dz, _)| surface_index(x + dx, z + dz))
+                        .filter(|&i| s.water_level_m[i].is_some_and(|l| l > s.surface_m[i]))
+                        .chain([surface_index(x, z)])
+                        .filter_map(|i| s.water_level_m[i])
+                        .fold(f32::MIN, f32::max);
+                    let terrain = self.terrain.as_ref().expect("a stack is version 3's");
+                    terrain
+                        .overhang_amp_m(x_m, z_m)
+                        .min((surface_m - wettest_m).max(0.0))
+                });
                 let push_m = |y_m: f32| {
                     self.terrain
                         .as_ref()

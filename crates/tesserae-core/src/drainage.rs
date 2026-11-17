@@ -25,8 +25,11 @@ const WINDOW: i32 = REGION_NODES + 2 * HALO_NODES;
 /// Added to a node's level for each step downstream across a flat, so water finds its way out
 /// without the lake's surface tilting visibly.
 const EPS_M: f32 = 1e-4;
-/// A node this far under its basin's spill level is lake.
+/// A basin whose deepest node is this far under its spill level is a lake.
 const LAKE_MIN_DEPTH_M: f32 = 2.5;
+/// More than the `EPS_M` steps a flat adds up across a window: a node under its fill level by this
+/// much is in a basin.
+const FLOODED_M: f32 = 0.05;
 /// Catchment, in nodes, above which a node carries a stream.
 const STREAM_NODES: u32 = 120;
 const MAX_CACHED_REGIONS: usize = 96;
@@ -52,11 +55,14 @@ const STEPS: [(i32, i32); 8] = [
 #[derive(Clone, Copy, Debug)]
 struct Node {
     /// The base ground, before any river carves it.
+    #[cfg(test)]
     height_m: f32,
     /// The fill level: the ground, or the spill level of the basin it lies in.
     level_m: f32,
     catchment: u32,
     down: u8,
+    /// In a basin deep enough to be a lake, shallow margins included, so the lake reaches its shore.
+    lake: bool,
 }
 
 pub(crate) struct Region {
@@ -65,7 +71,7 @@ pub(crate) struct Region {
 
 impl Node {
     fn is_lake(&self) -> bool {
-        self.level_m - self.height_m > LAKE_MIN_DEPTH_M
+        self.lake
     }
 }
 
@@ -222,6 +228,7 @@ impl Drainage {
                 heap.push(Reverse((sortable(f), n)));
             }
         }
+        let lake = lakes(&height, &level);
         let mut catchment = vec![1u32; size];
         for &at in order.iter().rev() {
             if parent[at] != NO_PARENT {
@@ -235,10 +242,12 @@ impl Drainage {
             for li in 0..STORED {
                 let at = idx(li - MARGIN + HALO_NODES, lj - MARGIN + HALO_NODES);
                 nodes.push(Node {
+                    #[cfg(test)]
                     height_m: height[at],
                     level_m: level[at],
                     catchment: catchment[at],
                     down: parent[at],
+                    lake: lake[at],
                 });
             }
         }
@@ -317,6 +326,46 @@ impl Drainage {
         }
         Wet { level_m, valley }
     }
+}
+
+/// Per window node, whether it lies in a basin some node of which is deeper than a lake's least
+/// depth: each 8-connected group of flooded nodes is one basin, filled to one spill level.
+fn lakes(height: &[f32], level: &[f32]) -> Vec<bool> {
+    let flooded = |at: usize| level[at] - height[at] > FLOODED_M;
+    let mut lake = vec![false; height.len()];
+    let mut seen = vec![false; height.len()];
+    let mut group = Vec::new();
+    for start in 0..height.len() {
+        if seen[start] || !flooded(start) {
+            continue;
+        }
+        seen[start] = true;
+        group.clear();
+        group.push(start);
+        let (mut i, mut deep) = (0, false);
+        while let Some(&at) = group.get(i) {
+            i += 1;
+            deep |= level[at] - height[at] > LAKE_MIN_DEPTH_M;
+            let (ci, cj) = ((at as i32) % WINDOW, (at as i32) / WINDOW);
+            for (di, dj) in STEPS {
+                let (ni, nj) = (ci + di, cj + dj);
+                if !(0..WINDOW).contains(&ni) || !(0..WINDOW).contains(&nj) {
+                    continue;
+                }
+                let n = (nj * WINDOW + ni) as usize;
+                if !seen[n] && flooded(n) {
+                    seen[n] = true;
+                    group.push(n);
+                }
+            }
+        }
+        if deep {
+            for &at in &group {
+                lake[at] = true;
+            }
+        }
+    }
+    lake
 }
 
 /// `STEPS` is ordered so that a step and its reverse sum to 7.
@@ -421,6 +470,28 @@ mod tests {
             lakes += n.is_lake() as u32;
         }
         assert!(lakes > 0, "no basin in the test land");
+    }
+
+    #[test]
+    fn a_lake_takes_in_the_shallow_margins_of_its_basin() {
+        let d = drainage();
+        let (mut shallow, mut lakes) = (0, 0);
+        for (_, _, n) in region_nodes(&d, [0, 0]) {
+            let depth = n.level_m - n.height_m;
+            if n.is_lake() {
+                lakes += 1;
+                shallow += (depth < LAKE_MIN_DEPTH_M) as u32;
+            } else {
+                assert!(
+                    depth <= LAKE_MIN_DEPTH_M,
+                    "a node {depth} m deep is not lake"
+                );
+            }
+        }
+        assert!(
+            lakes > 0 && shallow > 0,
+            "{lakes} lake nodes, {shallow} shallow"
+        );
     }
 
     #[test]

@@ -112,7 +112,7 @@ fn the_ground_is_the_same_in_metres_at_every_voxel_size() {
     let a = Worldgen::new(SEED, 1.0, v3());
     let b = Worldgen::new(SEED, 0.25, v3());
     for (x, z) in [(0.0, 0.0), (513.5, -820.25), (-4000.0, 3333.0)] {
-        assert_eq!(a.surface_height_m(x, z), b.surface_height_m(x, z));
+        assert_eq!(a.terrain_height_m(x, z), b.terrain_height_m(x, z));
     }
 }
 
@@ -214,6 +214,11 @@ fn a_coarse_generator_draws_the_same_coast() {
     for j in -30..30 {
         for i in -30..30 {
             let (x, z) = (i as f32 * 137.0, j as f32 * 137.0);
+            // A lip that holds water back stands a Voxel wide, so a coarse one may hold the shore.
+            let lipped = |g: &Worldgen| g.surface_height_m(x, z) > g.terrain_height_m(x, z);
+            if lipped(&fine) || lipped(&coarse) {
+                continue;
+            }
             assert_eq!(fine.water_surface_m(x, z), coarse.water_surface_m(x, z));
         }
     }
@@ -385,7 +390,7 @@ fn rivers_and_lakes_are_in_the_same_metres_at_every_voxel_size() {
         for i in 0..40 {
             let (x, z) = (i as f32 * 97.0 - 1900.0, j as f32 * 83.0 - 1600.0);
             assert_eq!(fine.water_level_m(x, z), coarse.water_level_m(x, z));
-            assert_eq!(fine.surface_height_m(x, z), coarse.surface_height_m(x, z));
+            assert_eq!(fine.terrain_height_m(x, z), coarse.terrain_height_m(x, z));
         }
     }
 }
@@ -727,6 +732,44 @@ fn generated_water_has_no_air_below_or_beside_it() {
         (0, 0),
         "water would flow into {down} cells below and {side} beside it"
     );
+}
+
+/// The first `want` Chunk columns, on a coarse walk, whose water stands above the sea.
+fn inland_water_chunks(g: &Worldgen, want: usize) -> Vec<(i32, i32)> {
+    let mut found: Vec<(i32, i32)> = Vec::new();
+    for j in -40..40 {
+        for i in -40..40 {
+            let (x, z) = (i as f32 * 61.0, j as f32 * 67.0);
+            let wet = g.water_surface_m(x, z).is_some_and(|l| l > 25.0);
+            let chunk = ((x / 32.0).floor() as i32, (z / 32.0).floor() as i32);
+            let apart = found
+                .iter()
+                .all(|c| (c.0 - chunk.0).abs() > 8 || (c.1 - chunk.1).abs() > 8);
+            if wet && apart {
+                found.push(chunk);
+                if found.len() == want {
+                    return found;
+                }
+            }
+        }
+    }
+    found
+}
+
+#[test]
+fn lakes_and_rivers_meet_their_shores_and_each_other_without_a_wall() {
+    let g = Worldgen::new(SEED, 1.0, caved_world());
+    let mut total = 0;
+    for centre in inland_water_chunks(&g, 6) {
+        let (wet, down, side) = leaks(&g, centre, 6, 0..4);
+        total += wet;
+        assert_eq!(
+            (down, side),
+            (0, 0),
+            "around Chunk column {centre:?}, water would flow into {down} cells below and {side} beside it"
+        );
+    }
+    assert!(total > 10_000, "{total} inland water Voxels");
 }
 
 #[test]
