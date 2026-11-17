@@ -968,7 +968,11 @@ pub(super) fn drive(
                 map: saved_map,
                 game_mode,
             };
-            writer.write(&commit)
+            writer.write(&commit)?;
+            if let Err(e) = writer.retain() {
+                warn!("could not remove an old save of this World: {e}");
+            }
+            Ok(())
         })()
         .map_err(|e: save::Error| e.to_string());
         let details_completed = result.is_ok()

@@ -194,8 +194,17 @@ directory on macOS/Linux. Windows uses a write-through `MoveFileExW` rename
 instead of POSIX directory sync. Only completion of the platform's entire
 protocol may acknowledge a snapshot. A failure after rename can leave a complete
 visible commit; the failed sequence is reserved and a retry uses a newer
-sequence. Previous commits are retained. There is no garbage collection yet;
-storage use grows with successful commits.
+sequence.
+
+A World keeps its three newest commits (`KEPT_COMMITS`). Once a writer has
+completed three since it acquired the lock, each later completion deletes every
+commit older than the third newest it completed; before that it deletes none, so
+a reopened World keeps the commits it opened from until newer ones replace them.
+A corrupt or reserved sequence sits below the new ones and ages out the same
+way. Deletion follows the completed protocol, so the newest commit is durable
+first, and its order does not matter: recovery falls back newest first. A failed
+delete is a warning, never a save failure, and the next completion retries it.
+Acquiring the lock removes leftover `.pending` files.
 
 Recovery is read-only, newest first. Pending files are ignored. Incomplete,
 checksum-invalid or semantically corrupt commits can fall back to an older
@@ -286,8 +295,8 @@ movement/view fields require versioned extensions; this PR invents no modes.
 
 ## Limits and validation
 
-The full commit currently has a 256 MiB encoded size limit. Previous complete
-commits are retained without garbage collection. Restored changed Chunks remain
+The full commit currently has a 256 MiB encoded size limit. Three complete
+commits are kept; each holds every changed Chunk. Restored changed Chunks remain
 in memory as shared handles when unloaded. Large, long-lived Worlds therefore
 need later compaction/indexing work; a limit or storage failure is a visible
 error and retains unsaved state, never a successful save report. Checkpoints

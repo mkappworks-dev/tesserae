@@ -1,7 +1,7 @@
 //! Portable authoritative World records and immutable, checksummed commits.
 //!
 //! Runtime ids never cross this boundary. A commit is visible only after its
-//! complete file has been synced and renamed; previous commits are retained.
+//! complete file has been synced and renamed; older ones go once newer ones replace them.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File, OpenOptions};
@@ -26,6 +26,8 @@ pub const GENERATOR_VERSION: u32 = 3;
 /// created with.
 pub const SUPPORTED_GENERATORS: [u32; 3] = [1, 2, 3];
 const MAGIC: &[u8; 8] = b"TESSAVE1";
+/// How many Commits a World keeps: recovery falls back through the older ones.
+pub const KEPT_COMMITS: usize = 3;
 const MAX_COMMIT_BYTES: u64 = 256 * 1024 * 1024;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -2265,6 +2267,8 @@ pub struct Writer {
     _lock: File,
     world: WorldId,
     last: Option<u64>,
+    /// The newest Commits this Writer completed, at most [`KEPT_COMMITS`], oldest first.
+    completed: Vec<u64>,
     installed: Content,
 }
 
@@ -2291,6 +2295,7 @@ impl Writer {
             _lock: lock,
             world: world.clone(),
             last: None,
+            completed: Vec::new(),
             installed: installed.clone(),
         };
         // Another writer may have completed between the read-only validation
@@ -2307,7 +2312,10 @@ impl Writer {
         // while holding the lock rather than racing an earlier writer.
         for entry in fs::read_dir(directory)? {
             let path = entry?.path();
-            if path.extension().is_some_and(|e| e == "commit") {
+            if path.extension().is_some_and(|e| e == "pending") {
+                // Never read; a failed removal only leaves it for the next writer.
+                let _ = fs::remove_file(&path);
+            } else if path.extension().is_some_and(|e| e == "commit") {
                 let n = path
                     .file_stem()
                     .and_then(|n| n.to_str())
@@ -2380,7 +2388,41 @@ impl Writer {
         if result.is_ok() || path.exists() {
             self.last = Some(commit.sequence);
         }
+        if result.is_ok() {
+            self.completed.push(commit.sequence);
+            if self.completed.len() > KEPT_COMMITS {
+                self.completed.remove(0);
+            }
+        }
         result
+    }
+
+    /// Deletes every Commit older than the oldest of the last [`KEPT_COMMITS`] this Writer
+    /// completed, and none before it has completed that many, so a reopened World keeps the
+    /// Commits it opened from until newer ones can replace them. Every deletion is attempted;
+    /// the first failure is returned, and the next call retries.
+    pub fn retain(&self) -> Result<(), Error> {
+        if self.completed.len() < KEPT_COMMITS {
+            return Ok(());
+        }
+        let oldest = self.completed[0];
+        let mut failed = None;
+        for entry in fs::read_dir(&self.directory)? {
+            let path = entry?.path();
+            let older = path.extension().is_some_and(|e| e == "commit")
+                && path
+                    .file_stem()
+                    .and_then(|n| n.to_str())
+                    .and_then(|n| n.parse::<u64>().ok())
+                    .is_some_and(|n| n < oldest);
+            if older
+                && let Err(e) = fs::remove_file(&path)
+                && e.kind() != io::ErrorKind::NotFound
+            {
+                failed.get_or_insert(e);
+            }
+        }
+        failed.map_or(Ok(()), |e| Err(e.into()))
     }
 }
 

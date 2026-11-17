@@ -489,6 +489,124 @@ fn injected_write_sync_and_rename_failures_preserve_previous_commit() {
         writer.write(&c).unwrap();
     }
 }
+fn sequences(directory: &Path) -> Vec<u64> {
+    let mut found: Vec<u64> = fs::read_dir(directory)
+        .unwrap()
+        .filter_map(|e| {
+            let path = e.unwrap().path();
+            (path.extension()? == "commit")
+                .then(|| path.file_stem()?.to_str()?.parse().ok())
+                .flatten()
+        })
+        .collect();
+    found.sort();
+    found
+}
+
+fn write_kept(writer: &mut Writer, c: &mut Commit) {
+    c.sequence = writer.next_sequence().unwrap();
+    writer.write(c).unwrap();
+    writer.retain().unwrap();
+}
+
+#[test]
+fn only_the_newest_kept_commits_remain() {
+    let d = Directory::new();
+    let mut c = fixture();
+    let mut writer = Writer::acquire(&d.0, &c.world, &c.content).unwrap();
+    write_kept(&mut writer, &mut c);
+    write_kept(&mut writer, &mut c);
+    assert_eq!(sequences(&d.0), [1, 2]);
+    for _ in 0..4 {
+        write_kept(&mut writer, &mut c);
+    }
+    assert_eq!(sequences(&d.0), [4, 5, 6]);
+    assert_eq!(
+        recover(&d.0, &c.content).unwrap().unwrap().commit.sequence,
+        6
+    );
+}
+
+#[test]
+fn a_reopened_world_keeps_its_commits_until_three_new_ones_complete() {
+    let d = Directory::new();
+    let mut c = fixture();
+    let mut writer = Writer::acquire(&d.0, &c.world, &c.content).unwrap();
+    for _ in 0..5 {
+        write_kept(&mut writer, &mut c);
+    }
+    drop(writer);
+    let mut writer = Writer::acquire(&d.0, &c.world, &c.content).unwrap();
+    write_kept(&mut writer, &mut c);
+    write_kept(&mut writer, &mut c);
+    assert_eq!(sequences(&d.0), [3, 4, 5, 6, 7]);
+    write_kept(&mut writer, &mut c);
+    assert_eq!(sequences(&d.0), [6, 7, 8]);
+}
+
+#[test]
+fn a_corrupt_newer_commit_ages_out_and_a_failed_write_deletes_nothing() {
+    let d = Directory::new();
+    let mut c = fixture();
+    let mut writer = Writer::acquire(&d.0, &c.world, &c.content).unwrap();
+    write_kept(&mut writer, &mut c);
+    drop(writer);
+    fs::write(d.0.join("00000000000000000002.commit"), b"partial").unwrap();
+    let mut writer = Writer::acquire(&d.0, &c.world, &c.content).unwrap();
+    write_kept(&mut writer, &mut c);
+    write_kept(&mut writer, &mut c);
+    c.sequence = writer.next_sequence().unwrap();
+    assert!(
+        writer
+            .write_with(&c, |at| if at == WritePhase::FileSync {
+                Err(io::Error::other("injected storage failure"))
+            } else {
+                Ok(())
+            })
+            .is_err()
+    );
+    writer.retain().unwrap();
+    assert_eq!(sequences(&d.0), [1, 2, 3, 4]);
+    write_kept(&mut writer, &mut c);
+    assert_eq!(sequences(&d.0), [3, 4, 5]);
+}
+
+#[test]
+fn a_failed_delete_keeps_the_write_and_is_retried() {
+    let d = Directory::new();
+    let mut c = fixture();
+    let mut writer = Writer::acquire(&d.0, &c.world, &c.content).unwrap();
+    writer.write(&c).unwrap();
+    // A nonempty directory under an old Commit's name cannot be removed as a file.
+    let blocker = d.0.join("00000000000000000001.commit");
+    fs::remove_file(&blocker).unwrap();
+    fs::create_dir(&blocker).unwrap();
+    fs::write(blocker.join("blocker"), b"x").unwrap();
+    for _ in 0..3 {
+        c.sequence = writer.next_sequence().unwrap();
+        writer.write(&c).unwrap();
+    }
+    assert!(writer.retain().is_err());
+    assert_eq!(
+        recover(&d.0, &c.content).unwrap().unwrap().commit.sequence,
+        4
+    );
+    fs::remove_file(blocker.join("blocker")).unwrap();
+    fs::remove_dir(&blocker).unwrap();
+    fs::write(&blocker, b"stale").unwrap();
+    writer.retain().unwrap();
+    assert_eq!(sequences(&d.0), [2, 3, 4]);
+}
+
+#[test]
+fn a_writer_removes_abandoned_pending_files() {
+    let d = Directory::new();
+    let c = fixture();
+    fs::write(d.0.join("abandoned.pending"), b"unfinished").unwrap();
+    let _writer = Writer::acquire(&d.0, &c.world, &c.content).unwrap();
+    assert!(!d.0.join("abandoned.pending").exists());
+}
+
 #[test]
 fn flow_ignition_burnout_and_frozen_timers_keep_remaining_steps_and_names() {
     let old = mapping(8, 9, 4);
