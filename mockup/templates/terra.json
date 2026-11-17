@@ -4244,6 +4244,410 @@
    ]
   },
   {
+   "name": "terra:pond",
+   "label": "Pond",
+   "kind": "water",
+   "size": [
+    7,
+    3,
+    5
+   ],
+   "ground_layer": 2,
+   "foundation": "terra:ashlar",
+   "level_tolerance_m": null,
+   "spans": false,
+   "palette": [
+    {
+     "symbol": ".",
+     "cell": "keep"
+    },
+    {
+     "symbol": ":",
+     "cell": "air"
+    },
+    {
+     "symbol": "A",
+     "material": "terra:sand",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "B",
+     "material": "terra:water",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "C",
+     "material": "strata:clay",
+     "shape": "core:cube",
+     "orientation": 0
+    }
+   ],
+   "layers": [
+    [
+     ".......",
+     ".......",
+     "..CCC..",
+     ".......",
+     "......."
+    ],
+    [
+     ".......",
+     "..CCC..",
+     ".CBBBC.",
+     "..CCC..",
+     "......."
+    ],
+    [
+     ".AAAAA.",
+     "AABBBAA",
+     "ABBBBBA",
+     "AABBBAA",
+     ".AAAAA."
+    ]
+   ]
+  },
+  {
+   "name": "terra:lily_pond",
+   "label": "Lily pond",
+   "kind": "water",
+   "size": [
+    9,
+    4,
+    7
+   ],
+   "ground_layer": 2,
+   "foundation": "terra:ashlar",
+   "level_tolerance_m": null,
+   "spans": false,
+   "palette": [
+    {
+     "symbol": ".",
+     "cell": "keep"
+    },
+    {
+     "symbol": ":",
+     "cell": "air"
+    },
+    {
+     "symbol": "A",
+     "material": "terra:sand",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "B",
+     "material": "terra:water",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "C",
+     "material": "strata:clay",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "D",
+     "material": "aquatic:lily_pad",
+     "shape": "aquatic:pad",
+     "orientation": 0
+    }
+   ],
+   "layers": [
+    [
+     ".........",
+     ".........",
+     "...CCC...",
+     "..CCCCC..",
+     "...CCC...",
+     ".........",
+     "........."
+    ],
+    [
+     ".........",
+     "..CCCCC..",
+     ".CCBBBCC.",
+     ".CBBBBBC.",
+     ".CCBBBCC.",
+     "..CCCCC..",
+     "........."
+    ],
+    [
+     "..AAAAA..",
+     ".ABBBBBA.",
+     "ABBBBBBBA",
+     "ABBBBBBBA",
+     "ABBBBBBBA",
+     ".ABBBBBA.",
+     "..AAAAA.."
+    ],
+    [
+     ".........",
+     "...D..D..",
+     "...D..D..",
+     "...D..D..",
+     "...D..D..",
+     "...D..D..",
+     "........."
+    ]
+   ]
+  },
+  {
+   "name": "terra:brook_pond",
+   "label": "Brook and pond",
+   "kind": "water",
+   "size": [
+    7,
+    4,
+    13
+   ],
+   "ground_layer": 2,
+   "foundation": "terra:ashlar",
+   "level_tolerance_m": null,
+   "spans": false,
+   "palette": [
+    {
+     "symbol": ".",
+     "cell": "keep"
+    },
+    {
+     "symbol": ":",
+     "cell": "air"
+    },
+    {
+     "symbol": "A",
+     "material": "terra:sand",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "B",
+     "material": "terra:water",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "C",
+     "material": "strata:clay",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "D",
+     "material": "terra:cobblestone",
+     "shape": "core:cube",
+     "orientation": 0
+    }
+   ],
+   "layers": [
+    [
+     ".......",
+     ".......",
+     "..CCC..",
+     ".......",
+     ".......",
+     ".......",
+     ".......",
+     ".......",
+     ".......",
+     ".......",
+     ".......",
+     ".......",
+     "......."
+    ],
+    [
+     ".......",
+     "..CCC..",
+     ".CBBBC.",
+     "..CCC..",
+     "...C...",
+     "...C...",
+     "...C...",
+     "...C...",
+     "...C...",
+     "...C...",
+     "...C...",
+     "...C...",
+     "......."
+    ],
+    [
+     ".AAAAA.",
+     "AABBBAA",
+     "ABBBBBA",
+     "AABBBAA",
+     ".ADBDA.",
+     "..DBD..",
+     "..DBD..",
+     "..DBD..",
+     "..DBD..",
+     "..DBD..",
+     "..DBD..",
+     "..DBD..",
+     "..DDD.."
+    ],
+    [
+     ".......",
+     ".......",
+     ".......",
+     ".......",
+     ".......",
+     ".......",
+     ".......",
+     ".......",
+     ".......",
+     ".......",
+     ".......",
+     ".......",
+     "..DDD.."
+    ]
+   ]
+  },
+  {
+   "name": "terra:waterfall",
+   "label": "Waterfall",
+   "kind": "water",
+   "size": [
+    7,
+    9,
+    9
+   ],
+   "ground_layer": 2,
+   "foundation": "terra:ashlar",
+   "level_tolerance_m": null,
+   "spans": false,
+   "palette": [
+    {
+     "symbol": ".",
+     "cell": "keep"
+    },
+    {
+     "symbol": ":",
+     "cell": "air"
+    },
+    {
+     "symbol": "A",
+     "material": "terra:stone",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "B",
+     "material": "strata:clay",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "C",
+     "material": "terra:water",
+     "shape": "core:cube",
+     "orientation": 0
+    }
+   ],
+   "layers": [
+    [
+     ".......",
+     ".......",
+     ".......",
+     ".......",
+     "BBBBBBB",
+     "BBBBBBB",
+     "BBBBBBB",
+     "BBBBBBB",
+     "BBBBBBB"
+    ],
+    [
+     ".......",
+     ".......",
+     ".......",
+     ".......",
+     "ACCCCCA",
+     "ACCCCCA",
+     "ACCCCCA",
+     "ACCCCCA",
+     "AAAAAAA"
+    ],
+    [
+     "AAAAAAA",
+     "AAAAAAA",
+     "AAAAAAA",
+     "AAAAAAA",
+     "ACCCCCA",
+     "ACCCCCA",
+     "ACCCCCA",
+     "ACCCCCA",
+     "AAAAAAA"
+    ],
+    [
+     "AAAAAAA",
+     "AAAAAAA",
+     "AAAAAAA",
+     "AAAAAAA",
+     "A.....A",
+     "A.....A",
+     "A.....A",
+     "A.....A",
+     "AAAAAAA"
+    ],
+    [
+     "AAAAAAA",
+     "AAAAAAA",
+     "AAAAAAA",
+     "AAAAAAA",
+     ".......",
+     ".......",
+     ".......",
+     ".......",
+     "......."
+    ],
+    [
+     "AAAAAAA",
+     "AAAAAAA",
+     "AAAAAAA",
+     "AAAAAAA",
+     ".......",
+     ".......",
+     ".......",
+     ".......",
+     "......."
+    ],
+    [
+     "AAAAAAA",
+     "AAAAAAA",
+     "AAAAAAA",
+     "AAAAAAA",
+     ".......",
+     ".......",
+     ".......",
+     ".......",
+     "......."
+    ],
+    [
+     ".AAAAA.",
+     ".AACAA.",
+     ".AACAA.",
+     ".AACAA.",
+     ".......",
+     ".......",
+     ".......",
+     ".......",
+     "......."
+    ],
+    [
+     "...A...",
+     ".......",
+     ".......",
+     ".......",
+     ".......",
+     ".......",
+     ".......",
+     ".......",
+     "......."
+    ]
+   ]
+  },
+  {
    "name": "terra:orchard",
    "label": "Orchard",
    "kind": "field",

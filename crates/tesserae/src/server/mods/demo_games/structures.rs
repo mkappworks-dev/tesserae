@@ -66,9 +66,12 @@ fn every_games_templates_are_the_cells_the_approved_mockup_exports() {
             .iter()
             .map(|t| t["kind"].as_str().unwrap())
             .collect();
-        // Ten Settlement buildings and five wild ones in every Game; Terra adds its fields.
+        // Ten Settlement buildings and five wild ones in every Game; Terra adds its fields and water.
         assert_eq!(
-            kinds.iter().filter(|&&k| k != "field").count(),
+            kinds
+                .iter()
+                .filter(|&&k| !matches!(k, "field" | "water"))
+                .count(),
             15,
             "{game}"
         );
@@ -165,12 +168,12 @@ fn every_game_lays_out_a_settlement_of_its_buildings_each_door_on_a_closed_door_
                 .iter()
                 .chain(settlement.rules.iter().map(|r| &r.building))
                 .collect();
-            used.extend(
-                buildings
-                    .iter()
-                    .map(|b| b.template)
-                    .filter(|&t| exported[usize::from(t)]["kind"] != "field"),
-            );
+            used.extend(buildings.iter().map(|b| b.template).filter(|&t| {
+                !matches!(
+                    exported[usize::from(t)]["kind"].as_str(),
+                    Some("field" | "water")
+                )
+            }));
             for building in buildings {
                 let template = &loaded.tables.templates[usize::from(building.template)];
                 let kind = exported[usize::from(building.template)]["kind"]
@@ -604,7 +607,7 @@ fn copy_sizes(found: &[Found], kinds: &[&str], half_m: f32) -> Vec<usize> {
     for (f, _) in found
         .iter()
         .zip(kinds)
-        .filter(|(_, k)| !matches!(**k, "centre" | "wild" | "field"))
+        .filter(|(_, k)| !matches!(**k, "centre" | "wild" | "field" | "water"))
     {
         let at = middle(f);
         let d = |c: &[f32; 2]| (c[0] - at[0]).hypot(c[1] - at[1]);

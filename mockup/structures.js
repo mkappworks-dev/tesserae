@@ -736,6 +736,94 @@ const B = {
    * A dark plank shed, its Door on +Z, over a dirt floor of mushrooms, which grow only out of the
    * light.
    */
+  /*
+   * A rounded pond: the World's water level with the ground, a metre deeper in its middle, on a
+   * clay bed with a sand rim; the ground outside the oval is kept. `pads` floats lily pads on one
+   * in `pads` of its cells, none when 0. Level sources, so nothing flows when it is made.
+   */
+  pond: (w = 7, d = 5, pads = 0) => {
+    const g = B.pondCells(w, d);
+    if (pads)
+      for (const [key, c] of [...g.map]) {
+        const [x, y, z] = key.split(",").map(Number);
+        if (y === 0 && c.m === "water" && (x * 7 + z * 3) % pads === 0)
+          g.put(x, 1, z, M("aquatic:lily_pad", "aquatic:pad"));
+      }
+    return g.done();
+  },
+  /*
+   * A pond fed along a stone-lined brook from a spring stone at its +Z end, so a Player can
+   * follow the water to it. The brook is level too.
+   */
+  brookPond: (w = 7, d = 5, brook = 7) => {
+    const g = B.pondCells(w, d),
+      mid = (w - 1) >> 1;
+    for (let z = d - 1; z < d + brook; z++) {
+      g.put(mid, 0, z, M("water"));
+      g.put(mid, -1, z, M("strata:clay"));
+      for (const x of [mid - 1, mid + 1])
+        g.put(x, 0, z, M("terra:cobblestone"));
+    }
+    g.fill(
+      mid - 1,
+      0,
+      d + brook,
+      mid + 1,
+      1,
+      d + brook,
+      M("terra:cobblestone"),
+    );
+    return g.done();
+  },
+  pondCells: (w, d) => {
+    const g = new Grid(),
+      [cx, cz] = [(w - 1) / 2, (d - 1) / 2],
+      within = (x, z, shrink) =>
+        ((x - cx) / (cx + 0.5 - shrink)) ** 2 +
+          ((z - cz) / (cz + 0.5 - shrink)) ** 2 <=
+        1;
+    for (let x = 0; x < w; x++)
+      for (let z = 0; z < d; z++) {
+        if (!within(x, z, 0)) continue;
+        if (!within(x, z, 1)) {
+          g.put(x, 0, z, M("terra:sand"));
+          continue;
+        }
+        const deep = within(x, z, 2);
+        g.put(x, 0, z, M("water"));
+        if (deep) g.put(x, -1, z, M("water"));
+        g.put(x, deep ? -2 : -1, z, M("strata:clay"));
+      }
+    return g;
+  },
+  /*
+   * Water pouring off a rock ledge, `h` tall at its back, into a pool before it: a spring at the
+   * ledge's lip runs over its front, falls, and settles in the pool, which holds it.
+   */
+  waterfall: (w = 7, d = 9, h = 5) => {
+    const g = new Grid(),
+      rock = M("terra:stone"),
+      mid = (w - 1) >> 1,
+      ledge = 4;
+    for (let x = 0; x < w; x++)
+      for (let z = 0; z < d; z++) {
+        const edge = x === 0 || x === w - 1 || z === d - 1;
+        if (z < ledge) {
+          // The ledge steps down a little at its sides, so it reads as rock, not a wall.
+          const top = h - (x === 0 || x === w - 1 ? 1 : 0);
+          g.fill(x, 0, z, x, top, z, rock);
+          continue;
+        }
+        g.put(x, -2, z, M("strata:clay"));
+        // A rim a Voxel over the pool, so the fall's spread stays in it.
+        if (edge) g.fill(x, -1, z, x, 1, z, rock);
+        else g.fill(x, -1, z, x, 0, z, M("water"));
+      }
+    // A channel in the ledge's top to its lip, the spring at its back.
+    for (let z = 1; z < ledge; z++) g.put(mid, h, z, M("water"));
+    g.put(mid, h + 1, 0, rock);
+    return g.done();
+  },
   mushroomShed: (w = 7, d = 6) => {
     const g = new Grid(),
       wall = M("terra:oak_planks");
@@ -1283,6 +1371,33 @@ const GAME_TEMPLATES = {
       "field",
       () => B.mushroomShed(),
     ),
+    T("Terra", "pond", "Pond", "Still water by the fields", "water", () =>
+      B.pond(7, 5),
+    ),
+    T(
+      "Terra",
+      "lily-pond",
+      "Lily pond",
+      "Lilies on a round pond",
+      "water",
+      () => B.pond(9, 7, 3),
+    ),
+    T(
+      "Terra",
+      "brook-pond",
+      "Brook and pond",
+      "A spring's brook running into a pond",
+      "water",
+      () => B.brookPond(),
+    ),
+    T(
+      "Terra",
+      "waterfall",
+      "Waterfall",
+      "Water off a rock ledge into a pool",
+      "water",
+      () => B.waterfall(),
+    ),
     T(
       "Terra",
       "orchard",
@@ -1501,6 +1616,7 @@ const KINDS = {
   trade: "Trades and stores",
   farm: "Farm",
   field: "Fields and gardens",
+  water: "Ponds and falls",
   centre: "Centre",
   wild: "Wilderness",
 };

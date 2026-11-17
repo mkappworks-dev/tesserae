@@ -22,7 +22,7 @@ struct Drawn {
     layers: &'static [&'static [&'static str]],
 }
 
-const TEMPLATES: [Drawn; 27] = [
+const TEMPLATES: [Drawn; 31] = [
     Drawn {
         name: "cottage",
         ground_layer: 0,
@@ -2717,6 +2717,163 @@ const TEMPLATES: [Drawn; 27] = [
             ],
             &[
                 "BBBBBBB", "BBBBBBB", "BBBBBBB", "BBBBBBB", "BBBBBBB", "BBBBBBB",
+            ],
+        ],
+    },
+    Drawn {
+        name: "pond",
+        ground_layer: 2,
+        foundation: "terra:ashlar",
+        level_tolerance_m: None,
+        spans: false,
+        palette: &[
+            ('.', Keep),
+            (':', Air),
+            ('A', Voxel("terra:sand", "core:cube", 0)),
+            ('B', Voxel("terra:water", "core:cube", 0)),
+            ('C', Voxel("strata:clay", "core:cube", 0)),
+        ],
+        layers: &[
+            &[".......", ".......", "..CCC..", ".......", "......."],
+            &[".......", "..CCC..", ".CBBBC.", "..CCC..", "......."],
+            &[".AAAAA.", "AABBBAA", "ABBBBBA", "AABBBAA", ".AAAAA."],
+        ],
+    },
+    Drawn {
+        name: "lily_pond",
+        ground_layer: 2,
+        foundation: "terra:ashlar",
+        level_tolerance_m: None,
+        spans: false,
+        palette: &[
+            ('.', Keep),
+            (':', Air),
+            ('A', Voxel("terra:sand", "core:cube", 0)),
+            ('B', Voxel("terra:water", "core:cube", 0)),
+            ('C', Voxel("strata:clay", "core:cube", 0)),
+            ('D', Voxel("aquatic:lily_pad", "aquatic:pad", 0)),
+        ],
+        layers: &[
+            &[
+                ".........",
+                ".........",
+                "...CCC...",
+                "..CCCCC..",
+                "...CCC...",
+                ".........",
+                ".........",
+            ],
+            &[
+                ".........",
+                "..CCCCC..",
+                ".CCBBBCC.",
+                ".CBBBBBC.",
+                ".CCBBBCC.",
+                "..CCCCC..",
+                ".........",
+            ],
+            &[
+                "..AAAAA..",
+                ".ABBBBBA.",
+                "ABBBBBBBA",
+                "ABBBBBBBA",
+                "ABBBBBBBA",
+                ".ABBBBBA.",
+                "..AAAAA..",
+            ],
+            &[
+                ".........",
+                "...D..D..",
+                "...D..D..",
+                "...D..D..",
+                "...D..D..",
+                "...D..D..",
+                ".........",
+            ],
+        ],
+    },
+    Drawn {
+        name: "brook_pond",
+        ground_layer: 2,
+        foundation: "terra:ashlar",
+        level_tolerance_m: None,
+        spans: false,
+        palette: &[
+            ('.', Keep),
+            (':', Air),
+            ('A', Voxel("terra:sand", "core:cube", 0)),
+            ('B', Voxel("terra:water", "core:cube", 0)),
+            ('C', Voxel("strata:clay", "core:cube", 0)),
+            ('D', Voxel("terra:cobblestone", "core:cube", 0)),
+        ],
+        layers: &[
+            &[
+                ".......", ".......", "..CCC..", ".......", ".......", ".......", ".......",
+                ".......", ".......", ".......", ".......", ".......", ".......",
+            ],
+            &[
+                ".......", "..CCC..", ".CBBBC.", "..CCC..", "...C...", "...C...", "...C...",
+                "...C...", "...C...", "...C...", "...C...", "...C...", ".......",
+            ],
+            &[
+                ".AAAAA.", "AABBBAA", "ABBBBBA", "AABBBAA", ".ADBDA.", "..DBD..", "..DBD..",
+                "..DBD..", "..DBD..", "..DBD..", "..DBD..", "..DBD..", "..DDD..",
+            ],
+            &[
+                ".......", ".......", ".......", ".......", ".......", ".......", ".......",
+                ".......", ".......", ".......", ".......", ".......", "..DDD..",
+            ],
+        ],
+    },
+    Drawn {
+        name: "waterfall",
+        ground_layer: 2,
+        foundation: "terra:ashlar",
+        level_tolerance_m: None,
+        spans: false,
+        palette: &[
+            ('.', Keep),
+            (':', Air),
+            ('A', Voxel("terra:stone", "core:cube", 0)),
+            ('B', Voxel("strata:clay", "core:cube", 0)),
+            ('C', Voxel("terra:water", "core:cube", 0)),
+        ],
+        layers: &[
+            &[
+                ".......", ".......", ".......", ".......", "BBBBBBB", "BBBBBBB", "BBBBBBB",
+                "BBBBBBB", "BBBBBBB",
+            ],
+            &[
+                ".......", ".......", ".......", ".......", "ACCCCCA", "ACCCCCA", "ACCCCCA",
+                "ACCCCCA", "AAAAAAA",
+            ],
+            &[
+                "AAAAAAA", "AAAAAAA", "AAAAAAA", "AAAAAAA", "ACCCCCA", "ACCCCCA", "ACCCCCA",
+                "ACCCCCA", "AAAAAAA",
+            ],
+            &[
+                "AAAAAAA", "AAAAAAA", "AAAAAAA", "AAAAAAA", "A.....A", "A.....A", "A.....A",
+                "A.....A", "AAAAAAA",
+            ],
+            &[
+                "AAAAAAA", "AAAAAAA", "AAAAAAA", "AAAAAAA", ".......", ".......", ".......",
+                ".......", ".......",
+            ],
+            &[
+                "AAAAAAA", "AAAAAAA", "AAAAAAA", "AAAAAAA", ".......", ".......", ".......",
+                ".......", ".......",
+            ],
+            &[
+                "AAAAAAA", "AAAAAAA", "AAAAAAA", "AAAAAAA", ".......", ".......", ".......",
+                ".......", ".......",
+            ],
+            &[
+                ".AAAAA.", ".AACAA.", ".AACAA.", ".AACAA.", ".......", ".......", ".......",
+                ".......", ".......",
+            ],
+            &[
+                "...A...", ".......", ".......", ".......", ".......", ".......", ".......",
+                ".......", ".......",
             ],
         ],
     },

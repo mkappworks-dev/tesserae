@@ -196,7 +196,7 @@ fn kind(
     minimum: u8,
     path: &str,
     loot: LootTable,
-    (margin_m, outskirts): (f32, SettlementOutskirts),
+    (margin_m, outskirts): (f32, Vec<SettlementOutskirts>),
 ) -> SettlementDef {
     SettlementDef {
         name: name.into(),
@@ -211,7 +211,7 @@ fn kind(
         path: path.into(),
         path_shape: None,
         loot: Some(loot),
-        outskirts: Some(vec![outskirts]),
+        outskirts: Some(outskirts),
     }
 }
 
@@ -220,6 +220,22 @@ fn kind(
 fn farms(chance: f32, count: (u8, u8), templates: Vec<SettlementPlot>) -> SettlementOutskirts {
     SettlementOutskirts {
         templates,
+        count_min: count.0,
+        count_max: count.1,
+        chance: Some(chance),
+    }
+}
+
+/// Ponds, a brook and now and then a waterfall by `chance` of a kind's copies, from `count.0` to
+/// `count.1` of them, apart from its farms.
+fn waters(chance: f32, count: (u8, u8)) -> SettlementOutskirts {
+    SettlementOutskirts {
+        templates: vec![
+            plot("pond", 3.0, 0, 2),
+            plot("lily_pond", 2.0, 0, 1),
+            plot("brook_pond", 1.5, 0, 1),
+            plot("waterfall", 1.0, 0, 1),
+        ],
         count_min: count.0,
         count_max: count.1,
         chance: Some(chance),
@@ -249,23 +265,26 @@ pub fn settlements() -> Vec<SettlementDef> {
             village_loot(),
             (
                 MARGIN_M,
-                farms(
-                    0.65,
-                    (6, 10),
-                    vec![
-                        plot("wheat_field", 2.0, 0, 3),
-                        plot("ripe_wheat_field", 1.5, 0, 2),
-                        plot("mixed_field", 1.5, 0, 2),
-                        plot("carrot_field", 1.0, 0, 2),
-                        plot("potato_field", 1.0, 0, 2),
-                        plot("berry_field", 1.0, 0, 2),
-                        plot("watermelon_patch", 1.0, 0, 1),
-                        plot("cane_field", 1.0, 0, 1),
-                        plot("mushroom_shed", 0.5, 0, 1),
-                        plot("orchard", 1.0, 0, 1),
-                        plot("paddock", 1.0, 0, 2),
-                    ],
-                ),
+                vec![
+                    farms(
+                        0.65,
+                        (6, 10),
+                        vec![
+                            plot("wheat_field", 2.0, 0, 3),
+                            plot("ripe_wheat_field", 1.5, 0, 2),
+                            plot("mixed_field", 1.5, 0, 2),
+                            plot("carrot_field", 1.0, 0, 2),
+                            plot("potato_field", 1.0, 0, 2),
+                            plot("berry_field", 1.0, 0, 2),
+                            plot("watermelon_patch", 1.0, 0, 1),
+                            plot("cane_field", 1.0, 0, 1),
+                            plot("mushroom_shed", 0.5, 0, 1),
+                            plot("orchard", 1.0, 0, 1),
+                            plot("paddock", 1.0, 0, 2),
+                        ],
+                    ),
+                    waters(0.9, (1, 3)),
+                ],
             ),
         ),
         kind(
@@ -290,23 +309,26 @@ pub fn settlements() -> Vec<SettlementDef> {
             town_loot(),
             (
                 TOWN_MARGIN_M,
-                farms(
-                    0.85,
-                    (10, 16),
-                    vec![
-                        plot("wheat_field", 2.5, 0, 5),
-                        plot("ripe_wheat_field", 2.0, 0, 4),
-                        plot("mixed_field", 1.5, 0, 3),
-                        plot("carrot_field", 1.0, 0, 3),
-                        plot("potato_field", 1.0, 0, 3),
-                        plot("berry_field", 1.0, 0, 2),
-                        plot("watermelon_patch", 1.0, 0, 2),
-                        plot("cane_field", 1.0, 0, 2),
-                        plot("mushroom_shed", 0.5, 0, 2),
-                        plot("orchard", 1.5, 0, 3),
-                        plot("paddock", 1.0, 0, 3),
-                    ],
-                ),
+                vec![
+                    farms(
+                        0.85,
+                        (10, 16),
+                        vec![
+                            plot("wheat_field", 2.5, 0, 5),
+                            plot("ripe_wheat_field", 2.0, 0, 4),
+                            plot("mixed_field", 1.5, 0, 3),
+                            plot("carrot_field", 1.0, 0, 3),
+                            plot("potato_field", 1.0, 0, 3),
+                            plot("berry_field", 1.0, 0, 2),
+                            plot("watermelon_patch", 1.0, 0, 2),
+                            plot("cane_field", 1.0, 0, 2),
+                            plot("mushroom_shed", 0.5, 0, 2),
+                            plot("orchard", 1.5, 0, 3),
+                            plot("paddock", 1.0, 0, 3),
+                        ],
+                    ),
+                    waters(1.0, (2, 4)),
+                ],
             ),
         ),
         kind(
@@ -325,18 +347,21 @@ pub fn settlements() -> Vec<SettlementDef> {
             village_loot(),
             (
                 MARGIN_M,
-                farms(
-                    0.4,
-                    (4, 6),
-                    vec![
-                        plot("carrot_field", 1.0, 0, 2),
-                        plot("potato_field", 1.0, 0, 2),
-                        plot("berry_field", 1.0, 0, 2),
-                        plot("cane_field", 0.5, 0, 1),
-                        plot("mushroom_shed", 0.5, 0, 1),
-                        plot("paddock", 1.0, 0, 1),
-                    ],
-                ),
+                vec![
+                    farms(
+                        0.4,
+                        (4, 6),
+                        vec![
+                            plot("carrot_field", 1.0, 0, 2),
+                            plot("potato_field", 1.0, 0, 2),
+                            plot("berry_field", 1.0, 0, 2),
+                            plot("cane_field", 0.5, 0, 1),
+                            plot("mushroom_shed", 0.5, 0, 1),
+                            plot("paddock", 1.0, 0, 1),
+                        ],
+                    ),
+                    waters(0.7, (1, 2)),
+                ],
             ),
         ),
     ]
