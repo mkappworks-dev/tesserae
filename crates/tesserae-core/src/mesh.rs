@@ -982,6 +982,12 @@ fn covers(tables: &Tables, across: Voxel, face: usize, here: Voxel) -> bool {
 /// exactly "it is a full cube, or a Shape that seals the face" - the rule before
 /// Materials had a say - and the Material table is not consulted. `SURFACES`
 /// is whether any cell holds fluid below a full surface, which is translucent.
+///
+/// A row of a slice is a 32-bit mask: which of its Voxels are full cubes, which
+/// of those may show a face, which are left to merge. Only a face that may
+/// show asks the per-Voxel question, so a buried cube costs a bit operation.
+/// The quads, and their order, are what the per-Voxel scan of
+/// `pass1_reference` makes, which a test holds.
 fn pass1<const TRANSLUCENT: bool, const SURFACES: bool>(
     n: &Neighborhood,
     tables: &Tables,
@@ -989,7 +995,9 @@ fn pass1<const TRANSLUCENT: bool, const SURFACES: bool>(
 ) {
     let shapes = &tables.shapes;
     let materials = &tables.materials;
-    let mut mask = vec![None::<FaceKey>; CHUNK_SIZE * CHUNK_SIZE];
+    let cubes = CubeRows::of(n);
+    let mut open = [0u32; CHUNK_SIZE];
+    let mut keys: [FaceKey; CHUNK_SIZE * CHUNK_SIZE] = [(0, Light::DARK); CHUNK_SIZE * CHUNK_SIZE];
 
     for d in 0..3usize {
         // (d, u, v) is a cyclic permutation of (x, y, z), so u cross v = d and
@@ -1005,37 +1013,35 @@ fn pass1<const TRANSLUCENT: bool, const SURFACES: bool>(
             let under_surface = SURFACES && face == POS_Y;
 
             for s in 0..CHUNK_SIZE {
-                mask.fill(None);
+                let beyond = s as i32 + step;
                 for a in 0..CHUNK_SIZE {
-                    // Indexed by strides: with the cell's coordinates in an
-                    // array indexed by axis, they lived on the stack and the
-                    // loop's speed came down to how the optimiser laid out the
-                    // function around it.
+                    let here = cubes.row(v, s as i32, a);
+                    // Against a cube, a face shows only where a Material lets
+                    // it, and only a translucent Chunk has one that does.
+                    let mut maybe = if TRANSLUCENT {
+                        here
+                    } else {
+                        here & !cubes.row(v, beyond, a)
+                    };
+                    open[a] = 0;
                     let row = pad_index(0, 0, 0) + s * STRIDES[d] + a * STRIDES[u];
-                    for b in 0..CHUNK_SIZE {
+                    while maybe != 0 {
+                        let b = maybe.trailing_zeros() as usize;
+                        maybe &= maybe - 1;
                         let i = row + b * STRIDES[v];
                         let here = n.voxels[i];
-                        if !here.is_full_cube() {
-                            continue;
-                        }
                         let j = if positive {
                             i + STRIDES[d]
                         } else {
                             i - STRIDES[d]
                         };
                         let mut c = [0i32; 3];
-                        c[d] = s as i32 + step;
+                        c[d] = beyond;
                         c[u] = a as i32;
                         c[v] = b as i32;
                         // Hidden only if the Voxel across covers this whole
                         // face. A slab beside a cube hides the cube's face on
                         // the slab's sealed side and nowhere else.
-                        //
-                        // The cube test comes first and alone because it is
-                        // nearly every answer, and `seals` for all of them
-                        // measured 2-6% slower on `greedy_mesh/solid` and
-                        // `/terrain`. `seals` is the same question, asked of
-                        // the table only for a shaped Voxel.
                         let across = n.voxels[j];
                         let hidden = if across.is_full_cube() {
                             !TRANSLUCENT || hides(materials, across, here)
@@ -1060,35 +1066,29 @@ fn pass1<const TRANSLUCENT: bool, const SURFACES: bool>(
                         // one the face belongs to: an opaque Voxel holds 0 by
                         // construction, which is what makes the dimming rule
                         // work, so lighting a face by its own Voxel would make
-                        // every face black. Read from the cell this loop has
-                        // already fetched to test occlusion.
-                        let lit = n.light[j];
-                        mask[a * CHUNK_SIZE + b] = Some((here.material(), lit));
+                        // every face black.
+                        open[a] |= 1 << b;
+                        keys[a * CHUNK_SIZE + b] = (here.material(), n.light[j]);
                     }
                 }
 
-                let mut a = 0;
-                while a < CHUNK_SIZE {
-                    let mut b = 0;
-                    while b < CHUNK_SIZE {
-                        let Some(key) = mask[a * CHUNK_SIZE + b] else {
-                            b += 1;
-                            continue;
-                        };
-                        let (m, lit) = key;
+                for a in 0..CHUNK_SIZE {
+                    while open[a] != 0 {
+                        let b = open[a].trailing_zeros() as usize;
+                        let key = keys[a * CHUNK_SIZE + b];
+                        let same = |row: usize, at: usize| keys[row * CHUNK_SIZE + at] == key;
 
                         let mut w = 1;
-                        while b + w < CHUNK_SIZE && mask[a * CHUNK_SIZE + b + w] == Some(key) {
+                        while b + w < CHUNK_SIZE && open[a] >> (b + w) & 1 == 1 && same(a, b + w) {
                             w += 1;
                         }
+                        let span_bits = (u32::MAX >> (CHUNK_SIZE - w)) << b;
 
                         let mut h = 1;
-                        'grow: while a + h < CHUNK_SIZE {
-                            for k in 0..w {
-                                if mask[(a + h) * CHUNK_SIZE + b + k] != Some(key) {
-                                    break 'grow;
-                                }
-                            }
+                        while a + h < CHUNK_SIZE
+                            && open[a + h] & span_bits == span_bits
+                            && (b..b + w).all(|k| same(a + h, k))
+                        {
                             h += 1;
                         }
 
@@ -1096,7 +1096,7 @@ fn pass1<const TRANSLUCENT: bool, const SURFACES: bool>(
                         let plane = (s + usize::from(positive)) * sub;
                         let span =
                             |at: usize, len: usize| [(at * sub) as u16, ((at + len) * sub) as u16];
-
+                        let (m, lit) = key;
                         // A run is one Material, so it is one layer.
                         let layer = if TRANSLUCENT {
                             mesh.layer(materials.def(m).render)
@@ -1111,20 +1111,62 @@ fn pass1<const TRANSLUCENT: bool, const SURFACES: bool>(
                             m as u32,
                             lit,
                         ));
-
-                        for i in 0..h {
-                            for j in 0..w {
-                                mask[(a + i) * CHUNK_SIZE + b + j] = None;
-                            }
+                        for row in &mut open[a..a + h] {
+                            *row &= !span_bits;
                         }
-                        b += w;
                     }
-                    a += 1;
                 }
             }
         }
     }
 }
+
+/// Which Voxels are full cubes, a row of the Chunk at a time along each axis,
+/// with the shell's rows across the other two: what pass 1 compares a slice
+/// with the one beyond it by.
+struct CubeRows {
+    /// By the row's axis `v`, then by its coordinates on `(v + 1) % 3`, from -1,
+    /// and on `(v + 2) % 3`, from 0: a bit per Voxel along `v`.
+    rows: [Box<[u32]>; 3],
+}
+
+impl CubeRows {
+    fn of(n: &Neighborhood) -> Self {
+        let mut rows: [Box<[u32]>; 3] =
+            std::array::from_fn(|_| vec![0u32; PADDED * CHUNK_SIZE].into_boxed_slice());
+        let inside = |c: i32| (0..CHUNK_SIZE as i32).contains(&c);
+        for y in -1..=CHUNK_SIZE as i32 {
+            for z in -1..=CHUNK_SIZE as i32 {
+                let start = pad_index(-1, y, z);
+                for (k, voxel) in n.voxels[start..start + PADDED].iter().enumerate() {
+                    if !voxel.is_full_cube() {
+                        continue;
+                    }
+                    let x = k as i32 - 1;
+                    let at = [x, y, z];
+                    for v in 0..3 {
+                        let (p, q) = (at[(v + 1) % 3], at[(v + 2) % 3]);
+                        if inside(at[v]) && inside(q) {
+                            let row = (p + 1) as usize * CHUNK_SIZE + q as usize;
+                            rows[v][row] |= 1 << at[v];
+                        }
+                    }
+                }
+            }
+        }
+        CubeRows { rows }
+    }
+
+    /// The row along `v` at `p` on the next axis round, -1 to the Chunk's edge,
+    /// and `q` on the one after.
+    #[inline]
+    fn row(&self, v: usize, p: i32, q: usize) -> u32 {
+        self.rows[v][(p + 1) as usize * CHUNK_SIZE + q]
+    }
+}
+
+#[cfg(test)]
+mod pass1_reference;
 
 /// Pass 2: each shaped Voxel's own exposed surface, appended to pass 1's.
 ///
