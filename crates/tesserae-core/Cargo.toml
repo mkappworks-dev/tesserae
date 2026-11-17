@@ -42,6 +42,10 @@ harness = false
 name = "structures"
 harness = false
 
+[[bench]]
+name = "worldgen_v3"
+harness = false
+
 [dependencies]
 base64 = "0.23"
 flate2 = "1"
