@@ -17,7 +17,7 @@ use super::{CARDINALS, Footprint, Worldgen, top_index};
 use crate::chunk::{CHUNK_SIZE, Chunk};
 use crate::climate::{BIOMES_SINCE, BiomeId, BiomeSettlement};
 use crate::mesh::POS_Y;
-use crate::settlement::{Building, Settlement};
+use crate::settlement::{Building, PlotRule, Settlement};
 use crate::shape::{Orientation, SHAPE_SLAB, SHAPE_STAIR};
 use crate::template::{Template, Turn};
 use crate::voxel::Voxel;
@@ -57,6 +57,11 @@ const TRAIL_M: (f32, f32) = (40.0, 90.0);
 /// the radius, and all at an approach path's end.
 const EDGE_WEAR: f32 = 0.25;
 const WEAR_SALT: u64 = 0x5e77_1e00_0000_0002;
+/// How far past its disc a version 3 Settlement's ground must be level: its outskirts, further
+/// out, each find their own level ground.
+const LEVEL_MARGIN_M: f32 = 16.0;
+/// Keeps the outskirts' draws apart from the disc's.
+const OUTSKIRT_SALT: u64 = 0x5e77_1e00_0000_0003;
 /// How far the ground across a version 3 Settlement's disc may rise or fall from its centre.
 const DISC_RISE_M: f32 = 4.0;
 /// The most a Plot or a road is cut into or filled over the ground.
@@ -133,7 +138,8 @@ impl SettlementPass {
                 let buildings = settlement
                     .centre
                     .iter()
-                    .chain(settlement.rules.iter().map(|r| &r.building));
+                    .chain(settlement.rules.iter().map(|r| &r.building))
+                    .chain(settlement.outskirts.rules.iter().map(|r| &r.building));
                 for building in buildings {
                     let sampled = templates
                         .get(usize::from(building.template))?
@@ -219,6 +225,8 @@ pub(super) struct LaidSettlement {
     /// Metre cells of its trails past the grid, laid in its path Material on the ground as it
     /// lies; sorted.
     trail: Vec<[i32; 2]>,
+    /// The first of [`Self::plots`] and [`Self::structures`] that is an outskirt; the rest are.
+    outskirts_from: usize,
 }
 
 /// What a metre cell of a Settlement's square holds.
@@ -249,7 +257,7 @@ impl LaidSettlement {
     /// off.
     pub(super) fn footprints(&self, voxel_size: f32) -> impl Iterator<Item = Footprint> + '_ {
         let around = ROAD_STEP_M / 2.0 + APPROACH_HALF_M + 0.5;
-        std::iter::once((self.centre_m, self.radius_m))
+        let discs = std::iter::once((self.centre_m, self.radius_m))
             .chain(self.approach.iter().map(move |&p| (p, around)))
             .map(move |(centre_m, radius_m)| {
                 let centre = centre_m.map(|c| c / voxel_size);
@@ -259,7 +267,15 @@ impl LaidSettlement {
                     max: centre.map(|c| (c + radius).ceil() as i32),
                     disc: Some((centre, radius)),
                 }
-            })
+            });
+        // The outskirts and their aprons, past the disc.
+        let outskirts = self.plots[self.outskirts_from..].iter().map(move |p| {
+            Footprint::rect([
+                p.kept[0].map(|m| (m / voxel_size).floor() as i32),
+                p.kept[1].map(|m| (m / voxel_size).ceil() as i32),
+            ])
+        });
+        discs.chain(outskirts)
     }
 }
 
@@ -545,7 +561,8 @@ impl Worldgen {
         {
             return None;
         }
-        if !self.level_disc(centre_m, height_m, reach_m) {
+        let level_m = radius_m + settlement.margin_m.min(LEVEL_MARGIN_M);
+        if !self.level_disc(centre_m, height_m, level_m) {
             return None;
         }
         let facing = (mix(hash ^ 2) & 3) as u8;
@@ -707,6 +724,7 @@ impl Worldgen {
             plots,
             approach,
             trail: Vec::new(),
+            outskirts_from: usize::MAX,
         };
         for road in &roads {
             for pair in road.points.windows(2) {
@@ -718,7 +736,7 @@ impl Worldgen {
         self.grade(&mut laid);
 
         let mins: usize = settlement.rules.iter().map(|r| usize::from(r.min)).sum();
-        let mut queue = self.plot_queue(settlement, founding.plots, founding.hash);
+        let mut queue = plot_queue(&settlement.rules, founding.plots, founding.hash);
         let ranged = settlement.plots_min != settlement.plots;
         let mut next = 0;
         for slot in slots(founding, &roads) {
@@ -727,16 +745,7 @@ impl Worldgen {
             };
             let (point, heading) = point_along(&roads[slot.road].points, slot.along);
             let normal = [-heading[1] * slot.side, heading[0] * slot.side];
-            // The door faces back across the road's side to its line.
-            let facing = (0..4u8)
-                .max_by(|&a, &b| {
-                    let dot = |q: u8| {
-                        let f = FACINGS[usize::from(q)];
-                        -(f[0] * normal[0] + f[1] * normal[1])
-                    };
-                    dot(a).total_cmp(&dot(b))
-                })
-                .unwrap_or_default();
+            let facing = facing_back(normal);
             let step = FACINGS[usize::from(facing)];
             let back_m = ROAD_HALF_M + APRON_M + slot.setback_m;
             let door_m = [0, 1].map(|a| point[a] - step[a] * back_m);
@@ -780,39 +789,74 @@ impl Worldgen {
             }
         }
         let placed = laid.structures.len() - usize::from(founding.centre.is_some());
-        (next >= mins && placed >= usize::from(settlement.minimum)).then_some(laid)
+        if next < mins || placed < usize::from(settlement.minimum) {
+            return None;
+        }
+        laid.outskirts_from = laid.plots.len();
+        self.lay_outskirts(founding, settlement, &roads, &mut laid);
+        Some(laid)
     }
 
-    /// Which rule each Plot draws, in the order they are tried: every minimum first, then weighted
-    /// draws within each maximum.
-    fn plot_queue(&self, settlement: &Settlement, plots: u8, hash: u64) -> Vec<usize> {
-        let mut queue = Vec::new();
-        let mut counts = vec![0u8; settlement.rules.len()];
-        for (i, rule) in settlement.rules.iter().enumerate() {
-            queue.extend(std::iter::repeat_n(i, usize::from(rule.min)));
-            counts[i] = rule.min;
+    /// A Settlement's outskirts: Buildings beside its approach paths past its disc, each wholly
+    /// outside the disc and inside its margin, clear of its roads and every other Plot, where the
+    /// ground takes it. Drawn after the disc's Plots, so they never move one.
+    fn lay_outskirts(
+        &self,
+        founding: &Founding,
+        settlement: &Settlement,
+        roads: &[Road],
+        laid: &mut LaidSettlement,
+    ) {
+        let outskirts = &settlement.outskirts;
+        if outskirts.rules.is_empty() {
+            return;
         }
-        while queue.len() < usize::from(plots) {
-            let open: Vec<usize> = (0..settlement.rules.len())
-                .filter(|&i| counts[i] < settlement.rules[i].max)
-                .collect();
-            let Some(&last) = open.last() else {
+        let hash = mix(founding.hash ^ OUTSKIRT_SALT);
+        let (low, high) = outskirts.count;
+        let span = u32::from(high - low) + 1;
+        let count = low + ((unit(mix(hash ^ 1)) * f64::from(span)) as u32).min(span - 1) as u8;
+        let queue = plot_queue(&outskirts.rules, count, hash);
+        let (centre, radius_m) = (founding.centre_m, founding.radius_m);
+        let outer_m = radius_m + settlement.margin_m;
+        let mut next = 0;
+        for slot in slots(founding, roads) {
+            let Some(&rule) = queue.get(next) else {
                 break;
             };
-            let total: f32 = open.iter().map(|&i| settlement.rules[i].weight).sum();
-            let mut draw = unit(mix(hash ^ (0x100 + queue.len() as u64))) as f32 * total;
-            let pick = open
-                .iter()
-                .copied()
-                .find(|&i| {
-                    draw -= settlement.rules[i].weight;
-                    draw < 0.0
-                })
-                .unwrap_or(last);
-            queue.push(pick);
-            counts[pick] += 1;
+            let (point, heading) = point_along(&roads[slot.road].points, slot.along);
+            if distance(point, centre) <= radius_m {
+                continue;
+            }
+            let normal = [-heading[1] * slot.side, heading[0] * slot.side];
+            let facing = facing_back(normal);
+            let step = FACINGS[usize::from(facing)];
+            let back_m = APPROACH_HALF_M + APRON_M + slot.setback_m;
+            let door_m = [0, 1].map(|a| point[a] - step[a] * back_m);
+            let building = &outskirts.rules[rule].building;
+            let (_, corner_m, size_m) = self.turned(building, facing, door_m);
+            let rect = [corner_m, [0, 1].map(|a| corner_m[a] + size_m[a])];
+            let kept = widened(rect, APRON_M);
+            let nearest = [0, 1].map(|a| centre[a].clamp(kept[0][a], kept[1][a]));
+            let corners = [
+                kept[0],
+                kept[1],
+                [kept[0][0], kept[1][1]],
+                [kept[1][0], kept[0][1]],
+            ];
+            if distance(nearest, centre) <= radius_m
+                || corners.iter().any(|&p| distance(p, centre) > outer_m)
+                || laid.plots.iter().any(|plot| overlap(plot.kept, kept))
+                || laid.any_road(kept)
+            {
+                continue;
+            }
+            if let Some((s, plot)) = self.plot(building, facing, door_m) {
+                laid.plots.push(plot);
+                laid.structures.push(s);
+                laid.rules.push(None);
+                next += 1;
+            }
         }
-        queue
     }
 
     /// Each road from the centre: points [`ROAD_STEP_M`] apart, each step the gentlest of its
@@ -1299,6 +1343,51 @@ impl LaidSettlement {
 }
 
 /// The metre cell holding the centre of the column whose corner is at `(x_m, z_m)`.
+/// Which rule each Plot draws, in the order they are tried: every minimum first, then weighted
+/// draws within each maximum.
+fn plot_queue(rules: &[PlotRule], plots: u8, hash: u64) -> Vec<usize> {
+    let mut queue = Vec::new();
+    let mut counts = vec![0u8; rules.len()];
+    for (i, rule) in rules.iter().enumerate() {
+        queue.extend(std::iter::repeat_n(i, usize::from(rule.min)));
+        counts[i] = rule.min;
+    }
+    while queue.len() < usize::from(plots) {
+        let open: Vec<usize> = (0..rules.len())
+            .filter(|&i| counts[i] < rules[i].max)
+            .collect();
+        let Some(&last) = open.last() else {
+            break;
+        };
+        let total: f32 = open.iter().map(|&i| rules[i].weight).sum();
+        let mut draw = unit(mix(hash ^ (0x100 + queue.len() as u64))) as f32 * total;
+        let pick = open
+            .iter()
+            .copied()
+            .find(|&i| {
+                draw -= rules[i].weight;
+                draw < 0.0
+            })
+            .unwrap_or(last);
+        queue.push(pick);
+        counts[pick] += 1;
+    }
+    queue
+}
+
+/// The facing whose door looks back across a road's side, `normal`, to its line.
+fn facing_back(normal: [f32; 2]) -> u8 {
+    (0..4u8)
+        .max_by(|&a, &b| {
+            let dot = |q: u8| {
+                let f = FACINGS[usize::from(q)];
+                -(f[0] * normal[0] + f[1] * normal[1])
+            };
+            dot(a).total_cmp(&dot(b))
+        })
+        .unwrap_or_default()
+}
+
 fn metre_cell(x_m: f32, z_m: f32, half: f32) -> [i32; 2] {
     [(x_m + half).floor() as i32, (z_m + half).floor() as i32]
 }

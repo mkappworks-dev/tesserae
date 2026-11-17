@@ -25,6 +25,7 @@ const CANOPY: MaterialId = 189;
 const FLOWERS: MaterialId = 190;
 const CROP: [MaterialId; 3] = [191, 192, 193];
 const FURROW: MaterialId = 194;
+const FIELD: MaterialId = 195;
 
 const SEED: u64 = 0x7e55_e2ae_0000_0001;
 const SIZES: [f32; 3] = [1.0, 0.5, 0.25];
@@ -94,8 +95,17 @@ fn lone() -> Template {
     drawn("t:lone", LONE, &[&["mm", "mm"]])
 }
 
+/// An outskirt field, 6 m by 4 m, one corner cell marked.
+fn field() -> Template {
+    drawn(
+        "t:field",
+        FIELD,
+        &[&["mfffff", "ffffff", "ffffff", "ffffff"]],
+    )
+}
+
 fn templates() -> Vec<Template> {
-    vec![well(), house(), shed(), lone()]
+    vec![well(), house(), shed(), lone(), field()]
 }
 
 fn building(templates: &[Template], index: u16) -> Building {
@@ -134,6 +144,7 @@ fn village() -> Settlement {
         minimum: 3,
         path: Voxel::cube(PATH),
         loot: None,
+        outskirts: Default::default(),
     }
 }
 
@@ -1112,6 +1123,7 @@ fn hamlet() -> Settlement {
         minimum: 0,
         path: Voxel::cube(PATH),
         loot: None,
+        outskirts: Default::default(),
     }
 }
 
@@ -1706,4 +1718,109 @@ fn generator_for(listed: bool) -> Worldgen {
         plain(listing_near(listed, 128.0, 1.0, true)),
         village(),
     )
+}
+
+/// The village with fields laid beside its approach paths, within a margin wide enough for them.
+fn farmed() -> Settlement {
+    let t = templates();
+    Settlement {
+        margin_m: 20.0,
+        outskirts: tesserae_core::settlement::Outskirts {
+            rules: vec![PlotRule {
+                building: building(&t, 4),
+                weight: 1.0,
+                min: 0,
+                max: 6,
+                loot: None,
+            }],
+            count: (4, 6),
+        },
+        ..village()
+    }
+}
+
+/// Each field's corner cell in the cells `with` changed, and each well's, a Settlement's centre.
+fn marked(changed: &HashMap<[i32; 3], (Voxel, Voxel)>, mark: MaterialId) -> Vec<[i32; 3]> {
+    let is = |at: [i32; 3]| changed.get(&at).is_some_and(|c| c.0.material() == mark);
+    let mut found: Vec<[i32; 3]> = changed
+        .keys()
+        .copied()
+        .filter(|&[x, y, z]| {
+            is([x, y, z]) && !is([x - 1, y, z]) && !is([x, y, z - 1]) && !is([x, y - 1, z])
+        })
+        .collect();
+    found.sort();
+    found
+}
+
+#[test]
+fn outskirt_fields_stand_past_the_disc_inside_the_margin_the_same_at_every_voxel_size() {
+    let listed = |size: f32, on: bool| generator(size, plain(listing(on)), farmed());
+    let mut in_metres = Vec::new();
+    for size in [1.0, 0.5] {
+        let (with, bare) = (listed(size, true), listed(size, false));
+        let changed = changed(&with, &bare, 160.0, false);
+        assert_eq!(
+            changed,
+            self::changed(&with, &bare, 160.0, true),
+            "{size} m: order"
+        );
+        let wells = marked(&changed, WELL);
+        let fields: Vec<[i32; 3]> = changed
+            .iter()
+            .filter(|(_, c)| c.0.material() == FIELD)
+            .map(|(at, _)| *at)
+            .collect();
+        assert!(wells.len() >= 2, "{size} m: {} Settlements", wells.len());
+        assert!(fields.len() >= 6, "{size} m: {} fields", fields.len());
+        for at in &fields {
+            let p = [at[0], at[2]].map(|g| (g as f32 + 0.5) * size);
+            // One near the scan's edge may belong to a Settlement whose well is past it.
+            if p.iter()
+                .any(|&c| (c - AWAY_M).abs() > 160.0 - RADIUS_M - 30.0)
+            {
+                continue;
+            }
+            let d = wells
+                .iter()
+                .map(|w| {
+                    let c = [w[0], w[2]].map(|g| g as f32 * size + 1.5);
+                    (p[0] - c[0]).hypot(p[1] - c[1])
+                })
+                .fold(f32::MAX, f32::min);
+            // The well stands a few metres off its centre.
+            assert!(
+                (RADIUS_M - 4.0..=RADIUS_M + 20.0 + 8.0).contains(&d),
+                "{size} m: a field's corner {d} m from its Settlement's well"
+            );
+        }
+        let mut corners: Vec<[i64; 2]> = marked(&changed, FIELD)
+            .iter()
+            .map(|c| [c[0], c[2]].map(|g| (g as f32 * size).round() as i64))
+            .collect();
+        corners.sort();
+        in_metres.push(corners);
+    }
+    assert_eq!(in_metres[0], in_metres[1], "the fields' corners in metres");
+}
+
+#[test]
+fn a_settlement_without_outskirts_lays_out_as_before() {
+    let plain_village = generator(1.0, plain(listing(true)), village());
+    let empty = generator(
+        1.0,
+        plain(listing(true)),
+        Settlement {
+            outskirts: tesserae_core::settlement::Outskirts {
+                rules: Vec::new(),
+                count: (0, 0),
+            },
+            ..village()
+        },
+    );
+    let bare = generator(1.0, plain(listing(false)), village());
+    assert_eq!(
+        changed(&plain_village, &bare, 96.0, false),
+        changed(&empty, &bare, 96.0, false)
+    );
 }

@@ -210,6 +210,7 @@ fn settlement(name: &str, radius_m: f32, plots: u8) -> Settlement {
         minimum: 2,
         path: Voxel::cube(PATH),
         loot: None,
+        outskirts: Default::default(),
     }
 }
 

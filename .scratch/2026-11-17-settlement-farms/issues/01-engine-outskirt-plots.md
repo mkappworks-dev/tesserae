@@ -1,6 +1,6 @@
 # 01: The Engine lays outskirt Plots
 
-Status: ready-for-agent
+Status: done
 
 Spec: [Settlement farms](../spec.md).
 
@@ -13,8 +13,8 @@ footprints join `LaidSettlement::footprints`.
 
 ## Acceptance criteria
 
-- [ ] An outskirt Building stands whole outside the disc and inside the margin,
+- [x] An outskirt Building stands whole outside the disc and inside the margin,
       in any Chunk order and the same in metres at 1 and 0.5 m.
-- [ ] No field, tree or scatter Plant stands on an outskirt Plot or its apron.
-- [ ] A Settlement without outskirts lays out exactly as before; recorded
+- [x] No field, tree or scatter Plant stands on an outskirt Plot or its apron.
+- [x] A Settlement without outskirts lays out exactly as before; recorded
       digests pass.

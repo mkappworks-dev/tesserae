@@ -731,6 +731,16 @@ pub struct SavedSettlement {
     pub path: Solid,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub loot: Option<crate::loot::LootTable>,
+    /// Absent in a Settlement saved before outskirts, which lays none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outskirts: Option<SavedOutskirts>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SavedOutskirts {
+    pub rules: Vec<SavedPlotRule>,
+    pub count: (u8, u8),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -991,6 +1001,7 @@ impl Generation {
                 s.centre
                     .iter()
                     .chain(s.rules.iter().map(|r| &r.building))
+                    .chain(s.outskirts.rules.iter().map(|r| &r.building))
                     .map(|b| b.template),
             );
         }
@@ -1284,6 +1295,13 @@ fn saved_settlement(
             .unwrap_or_default() as u16,
         door: b.door,
     };
+    let saved_rule = |r: &crate::settlement::PlotRule| SavedPlotRule {
+        building: building(&r.building),
+        weight: r.weight,
+        min: r.min,
+        max: r.max,
+        loot: r.loot.clone(),
+    };
     Ok(SavedSettlement {
         name: s.name.clone(),
         radius_m: s.radius_m,
@@ -1292,20 +1310,14 @@ fn saved_settlement(
         centre: s.centre.as_ref().map(building),
         plots: s.plots,
         plots_min: (s.plots_min != s.plots).then_some(s.plots_min),
-        rules: s
-            .rules
-            .iter()
-            .map(|r| SavedPlotRule {
-                building: building(&r.building),
-                weight: r.weight,
-                min: r.min,
-                max: r.max,
-                loot: r.loot.clone(),
-            })
-            .collect(),
+        rules: s.rules.iter().map(saved_rule).collect(),
         minimum: s.minimum,
         path: mapping.voxel(s.path)?,
         loot: s.loot.clone(),
+        outskirts: (!s.outskirts.rules.is_empty()).then(|| SavedOutskirts {
+            rules: s.outskirts.rules.iter().map(saved_rule).collect(),
+            count: s.outskirts.count,
+        }),
     })
 }
 
@@ -1317,6 +1329,13 @@ fn restored_settlement(
         template: b.template,
         door: b.door,
     };
+    let rule = |r: &SavedPlotRule| crate::settlement::PlotRule {
+        building: building(&r.building),
+        weight: r.weight,
+        min: r.min,
+        max: r.max,
+        loot: r.loot.clone(),
+    };
     Ok(crate::settlement::Settlement {
         name: s.name.clone(),
         radius_m: s.radius_m,
@@ -1325,20 +1344,18 @@ fn restored_settlement(
         centre: s.centre.as_ref().map(building),
         plots: s.plots,
         plots_min: s.plots_min.unwrap_or(s.plots),
-        rules: s
-            .rules
-            .iter()
-            .map(|r| crate::settlement::PlotRule {
-                building: building(&r.building),
-                weight: r.weight,
-                min: r.min,
-                max: r.max,
-                loot: r.loot.clone(),
-            })
-            .collect(),
+        rules: s.rules.iter().map(rule).collect(),
         minimum: s.minimum,
         path: mapping.restore_voxel(&s.path)?,
         loot: s.loot.clone(),
+        outskirts: s
+            .outskirts
+            .as_ref()
+            .map(|o| crate::settlement::Outskirts {
+                rules: o.rules.iter().map(rule).collect(),
+                count: o.count,
+            })
+            .unwrap_or_default(),
     })
 }
 

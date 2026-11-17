@@ -34,6 +34,15 @@ pub struct PlotRule {
     pub loot: Option<LootTable>,
 }
 
+/// Buildings a Settlement lays beside its approach paths past its disc, inside its margin: its
+/// fields, orchards and paddocks.
+#[derive(Clone, PartialEq, Debug, Default)]
+pub struct Outskirts {
+    pub rules: Vec<PlotRule>,
+    /// How many a copy lays at most, drawn between these.
+    pub count: (u8, u8),
+}
+
 #[derive(Clone, PartialEq, Debug)]
 pub struct Settlement {
     /// `<mod id>:<name>`.
@@ -56,6 +65,7 @@ pub struct Settlement {
     pub path: Voxel,
     /// What its buildings' chests hold, unless a building has its own.
     pub loot: Option<LootTable>,
+    pub outskirts: Outskirts,
 }
 
 impl Settlement {
@@ -145,9 +155,37 @@ impl Settlement {
                 return Err("a Template's min must be at most its max".into());
             }
         }
+        let outskirts = &self.outskirts;
+        if outskirts.rules.len() > usize::from(MAX_PLOTS)
+            || outskirts.count.0 > outskirts.count.1
+            || outskirts.count.1 > MAX_PLOTS
+        {
+            return Err(format!(
+                "its outskirts draw from at most {MAX_PLOTS} Templates and lay from a smaller count to a larger, at most {MAX_PLOTS}"
+            ));
+        }
+        for rule in &outskirts.rules {
+            let template = templates
+                .get(usize::from(rule.building.template))
+                .ok_or("an outskirt names a missing Template")?;
+            let [x, _, z] = template.size_m();
+            if x.max(z) > self.margin_m {
+                return Err(format!(
+                    "outskirt `{}` is wider than the Settlement's margin",
+                    template.name
+                ));
+            }
+            if !(rule.weight.is_finite() && rule.weight > 0.0) || rule.min > rule.max {
+                return Err(format!(
+                    "outskirt `{}`: its weight must be above 0 and its min at most its max",
+                    template.name
+                ));
+            }
+        }
         let loots = self
             .rules
             .iter()
+            .chain(&outskirts.rules)
             .filter_map(|r| r.loot.as_ref())
             .chain(&self.loot);
         for loot in loots {

@@ -75,6 +75,7 @@ fn hamlet(path: MaterialId) -> Settlement {
         minimum: 1,
         path: Voxel::cube(path),
         loot: None,
+        outskirts: Default::default(),
     }
 }
 
@@ -284,4 +285,57 @@ fn a_world_keeps_the_loot_it_was_made_with_and_one_made_without_saves_none() {
     assert!(json["biomes"][0].get("loot").is_none());
     let older: Generation = serde_json::from_value(json).unwrap();
     assert_eq!(older.biome_loot().unwrap(), [None]);
+}
+
+#[test]
+fn a_saved_world_keeps_its_settlements_outskirts_and_one_without_saves_none() {
+    let farmed = Settlement {
+        outskirts: tesserae_core::settlement::Outskirts {
+            rules: vec![PlotRule {
+                building: Building {
+                    template: 0,
+                    door: None,
+                },
+                weight: 1.0,
+                min: 0,
+                max: 3,
+                loot: None,
+            }],
+            count: (1, 3),
+        },
+        ..hamlet(PATH)
+    };
+    let capture = |settlement: Settlement| {
+        let saved = reopened(
+            &Generation::capture(world(), &game(), &[hamlet(PATH), settlement], &mapping())
+                .unwrap(),
+        );
+        let json = serde_json::to_value(&saved).unwrap();
+        let templates: Vec<String> = saved
+            .templates(&mapping())
+            .unwrap()
+            .into_iter()
+            .map(|t| t.name)
+            .collect();
+        (
+            saved.settlements(&mapping()).unwrap()[0].clone(),
+            templates,
+            json,
+        )
+    };
+    let (kept, templates, _) = capture(farmed.clone());
+    assert_eq!(kept.outskirts.count, (1, 3));
+    let outskirt = &templates[usize::from(kept.outskirts.rules[0].building.template)];
+    assert_eq!(
+        outskirt, "t:unused",
+        "the outskirt's Template is kept and renumbered"
+    );
+    let (kept, _, json) = capture(hamlet(PATH));
+    assert!(kept.outskirts.rules.is_empty());
+    assert!(
+        !json["settlements"][0]
+            .as_object()
+            .unwrap()
+            .contains_key("outskirts")
+    );
 }
