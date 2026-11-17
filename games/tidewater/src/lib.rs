@@ -7,6 +7,7 @@ wit_bindgen::generate!({ path: "../../crates/tesserae-mods/wit/0.3", world: "mod
 
 mod building;
 mod food;
+mod landforms;
 mod plants;
 mod structures;
 mod templates;
@@ -246,6 +247,7 @@ impl Guest for Tidewater {
             temperature_size_m: 256.0,
             humidity_size_m: 256.0,
         });
+        world.cave_biomes = Some(landforms::caves());
         Declaration {
             materials: [food::material()]
                 .into_iter()
@@ -388,7 +390,10 @@ impl Guest for Tidewater {
                     surface_features: plants::tidal_marsh(),
                     loot: Some(structures::loot(structures::biome_loot("tidal_marsh"))),
                 },
-            ],
+            ]
+            .into_iter()
+            .chain(landforms::biomes())
+            .collect(),
             survival: None,
             sounds: Vec::new(),
             sound_sets: Vec::new(),

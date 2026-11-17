@@ -121,7 +121,15 @@ fn declared(game: &str) -> (super::Install, super::LoadedMods) {
 fn check_biomes(game: &str, approved: &[Approved]) {
     let (_install, loaded) = declared(game);
     let world = loaded.world.expect("the Game declares a World");
-    let biomes = world.biomes.as_slice();
+    // The Biomes of the land's shape share one look per Game, so the palette is the Climate's.
+    let biomes: Vec<_> = world
+        .biomes
+        .as_slice()
+        .iter()
+        .zip(world.biomes.selectors())
+        .filter(|(_, s)| !s.is_ranged())
+        .map(|(b, _)| b)
+        .collect();
     assert_eq!(biomes.len(), approved.len(), "{game} declares its Biomes");
     for (biome, approved) in biomes.iter().zip(approved) {
         let name = biome.name.as_str();
@@ -222,7 +230,11 @@ fn check_ore(game: &str, material_name: &str, only: &[&str]) {
     let generator = Worldgen::new(7, 1.0, params);
     // The patch around a column of each Biome crosses into its neighbours, so every Voxel is judged
     // by its own column, and a Biome the ore leaves out must still show none of it.
-    for biome in (0..params.biomes.len() as u8).map(BiomeId::new) {
+    // A Biome of the land's shape is not chosen before version 3.
+    for biome in (0..params.biomes.len() as u8)
+        .map(BiomeId::new)
+        .filter(|b| !params.biomes.selectors()[b.index()].is_ranged())
+    {
         let found = ore_near(&generator, params, biome);
         if allowed.contains(&biome) {
             assert!(

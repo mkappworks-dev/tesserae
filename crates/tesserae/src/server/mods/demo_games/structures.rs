@@ -7,7 +7,7 @@ use std::fs;
 use serde_json::Value;
 use tesserae_core::template::{Cell, Template, Turn};
 use tesserae_core::usable::VoxelUse;
-use tesserae_core::{CHUNK_SIZE, Chunk, MaterialId, Voxel, Worldgen};
+use tesserae_core::{CHUNK_SIZE, Chunk, MaterialId, Voxel, Worldgen, WorldgenParams};
 use tesserae_mods::{Kind, ToolKind};
 
 use super::{checkout, loaded, material};
@@ -723,6 +723,26 @@ fn terra_and_tidewater_each_stand_a_bridge_over_a_gap_near_spawn() {
 }
 
 #[test]
+fn meadow_stands_its_first_footbridges_over_its_version_3_rivers() {
+    let (generator, loaded) = version_3("meadow");
+    let templates = &loaded.tables.templates;
+    let index = templates
+        .iter()
+        .position(|t| t.name == "meadow:footbridge")
+        .unwrap();
+    let river = flight()
+        .into_iter()
+        .find(|&at| biome_name(&generator, at) == "meadow:river")
+        .expect("a river within a short flight");
+    let world = Generated::around(&generator, river, BRIDGE_SCAN_M);
+    let found = standing_of(&world, std::slice::from_ref(&templates[index]), 1.0, false);
+    assert!(
+        !found.is_empty(),
+        "no footbridge stands by the river at {river:?}"
+    );
+}
+
+#[test]
 fn every_game_stocks_its_settlements_buildings_and_wilderness_biomes_with_loot() {
     for game in GAMES {
         let (_install, loaded) = loaded(game, 1.0);
@@ -771,5 +791,62 @@ fn every_template_cell_of_a_material_that_fixes_its_shape_is_in_that_shape() {
                 }
             }
         }
+    }
+}
+
+/// How far a Player flies to find the land's shapes and an underground region: rivers follow the
+/// drainage, and at [`SEED`] the nearest runs some 3.5 km from spawn.
+const FLIGHT_M: f32 = 4096.0;
+
+/// The columns within [`FLIGHT_M`] of spawn on a 32 m lattice, nearest first.
+fn flight() -> Vec<[f32; 2]> {
+    let reach = (FLIGHT_M / 32.0) as i32;
+    let mut at: Vec<[f32; 2]> = (-reach..=reach)
+        .flat_map(|i| (-reach..=reach).map(move |j| [i as f32 * 32.0, j as f32 * 32.0]))
+        .filter(|[x, z]| x.hypot(*z) <= FLIGHT_M)
+        .collect();
+    at.sort_by(|a, b| a[0].hypot(a[1]).total_cmp(&b[0].hypot(b[1])));
+    at
+}
+
+/// A version 3 World of `game`, and the name of the Biome at a column.
+fn version_3(game: &str) -> (Worldgen, LoadedMods) {
+    let (_install, loaded) = loaded(game, 1.0);
+    let params = WorldgenParams {
+        generator: 3,
+        ..loaded.world.unwrap()
+    };
+    let generator = Worldgen::new(SEED, 1.0, params)
+        .with_templates(&loaded.tables.templates)
+        .with_settlements(&loaded.tables.settlements);
+    (generator, loaded)
+}
+
+fn biome_name(generator: &Worldgen, [x, z]: [f32; 2]) -> String {
+    let biomes = generator.params().biomes;
+    generator
+        .biome_at(x, z)
+        .and_then(|id| biomes.get(id))
+        .map_or_else(String::new, |b| b.name.as_str().to_owned())
+}
+
+#[test]
+fn every_game_has_ocean_a_river_and_a_cave_biome_within_a_short_flight_under_version_3() {
+    for game in GAMES {
+        let (generator, _loaded) = version_3(game);
+        let (mut ocean, mut river, mut cave) = (false, false, false);
+        for at in flight() {
+            let name = biome_name(&generator, at);
+            ocean |= name == format!("{game}:ocean");
+            river |= name == format!("{game}:river");
+            let deep_m = generator.surface_height_m(at[0], at[1]) - 40.0;
+            cave |= !cave && generator.cave_biome_name_at(at[0], deep_m, at[1]).is_some();
+            if ocean && river && cave {
+                break;
+            }
+        }
+        assert!(ocean, "{game}: no ocean within {FLIGHT_M} m");
+        assert!(river, "{game}: no river within {FLIGHT_M} m");
+        assert!(cave, "{game}: no cave Biome within {FLIGHT_M} m");
     }
 }

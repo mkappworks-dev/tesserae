@@ -922,7 +922,13 @@ fn tidewater_biomes_all_cover_ground_and_the_lagoon_most() {
     let (_install, loaded) = loaded("tidewater", 0.5);
     let world = loaded.world.unwrap();
     for seed in [7, 1, 2024] {
-        let shares = shares(world, seed, 4000.0, 50.0);
+        // A Biome of the land's shape is not chosen before version 3.
+        let shares: Vec<f32> = shares(world, seed, 4000.0, 50.0)
+            .into_iter()
+            .zip(world.biomes.selectors())
+            .filter(|(_, s)| !s.is_ranged())
+            .map(|(share, _)| share)
+            .collect();
         assert!(
             shares.iter().all(|&s| s > 0.04) && shares[0] > shares[1] && shares[0] > shares[2],
             "seed {seed}: {shares:?}"

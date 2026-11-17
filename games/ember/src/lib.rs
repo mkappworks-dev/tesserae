@@ -7,6 +7,7 @@ wit_bindgen::generate!({ path: "../../crates/tesserae-mods/wit/0.3", world: "mod
 
 mod building;
 mod food;
+mod landforms;
 mod plants;
 mod structures;
 mod templates;
@@ -370,6 +371,8 @@ impl Guest for Ember {
             temperature_size_m: CLIMATE_SIZE_M,
             humidity_size_m: CLIMATE_SIZE_M,
         });
+        world.cave_biomes = Some(landforms::caves());
+        world.lava = Some("hearth:lava".into());
         Declaration {
             materials: [food::material()]
                 .into_iter()
@@ -390,7 +393,7 @@ impl Guest for Ember {
                 kind: ToolKind::Place,
             }],
             items: vec![food::item()],
-            biomes: biomes(),
+            biomes: biomes().into_iter().chain(landforms::biomes()).collect(),
             survival: None,
             sounds: Vec::new(),
             sound_sets: Vec::new(),

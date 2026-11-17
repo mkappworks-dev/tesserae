@@ -2217,10 +2217,26 @@ const TEMPLATES: [Drawn; 15] = [
             ('G', Voxel("meadow:fieldstone", "core:cube", 0)),
         ],
         layers: &[
-            &["G.........G", "G.........G", "G.........G"],
-            &["ACF.....FCA", "ACF.....FCA", "ACF.....FCA"],
-            &["BDAAAAAAADB", "..AAAAAAA..", "BEAAAAAAAEB"],
-            &["..BDBDBDB..", "...........", "..BEBEBEB.."],
+            &[
+                "G...............G",
+                "G...............G",
+                "G...............G",
+            ],
+            &[
+                "ACF...........FCA",
+                "ACF...........FCA",
+                "ACF...........FCA",
+            ],
+            &[
+                "BDAAAAAAAAAAAAADB",
+                "..AAAAAAAAAAAAA..",
+                "BEAAAAAAAAAAAAAEB",
+            ],
+            &[
+                "..BDBDBDBDBDBDB..",
+                ".................",
+                "..BEBEBEBEBEBEB..",
+            ],
         ],
     },
     Drawn {

@@ -3313,7 +3313,7 @@
    "label": "Footbridge",
    "kind": "wild",
    "size": [
-    11,
+    17,
     4,
     3
    ],
@@ -3375,24 +3375,24 @@
    ],
    "layers": [
     [
-     "G.........G",
-     "G.........G",
-     "G.........G"
+     "G...............G",
+     "G...............G",
+     "G...............G"
     ],
     [
-     "ACF.....FCA",
-     "ACF.....FCA",
-     "ACF.....FCA"
+     "ACF...........FCA",
+     "ACF...........FCA",
+     "ACF...........FCA"
     ],
     [
-     "BDAAAAAAADB",
-     "..AAAAAAA..",
-     "BEAAAAAAAEB"
+     "BDAAAAAAAAAAAAADB",
+     "..AAAAAAAAAAAAA..",
+     "BEAAAAAAAAAAAAAEB"
     ],
     [
-     "..BDBDBDB..",
-     "...........",
-     "..BEBEBEB.."
+     "..BDBDBDBDBDBDB..",
+     ".................",
+     "..BEBEBEBEBEBEB.."
     ]
    ]
   },

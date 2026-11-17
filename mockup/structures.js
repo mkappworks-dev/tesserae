@@ -1482,7 +1482,8 @@ const GAME_TEMPLATES = {
       "Footbridge",
       "On log trestles over a brook",
       "wild",
-      () => B.footbridge(),
+      /* Long enough to land dry either side of a river's narrowest water. */
+      () => B.footbridge(17),
       "woodBridge",
     ),
     T("Meadow", "fairy-ring", "Fairy ring", "Lights in a circle", "wild", () =>

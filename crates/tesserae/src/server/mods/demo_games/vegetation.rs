@@ -122,6 +122,7 @@ const GAMES: [Game; 5] = [
             ),
             ("beach", &[]),
             ("alpine", &[]),
+            ("river", &["flora:cane"]),
         ],
         bare: &["beach", "alpine"],
         lake: true,
@@ -200,8 +201,13 @@ const GAMES: [Game; 5] = [
                     "flora:dry_grass",
                 ],
             ),
+            // The Biomes of the land's shape, which only version 3 chooses.
+            ("ocean", &[]),
+            ("shore", &[]),
+            ("river", &["flora:cane"]),
+            ("alpine", &[]),
         ],
-        bare: &[],
+        bare: &["ocean", "shore", "alpine"],
         lake: false,
     },
     Game {
@@ -238,8 +244,13 @@ const GAMES: [Game; 5] = [
                     "flora:tall_grass",
                 ],
             ),
+            // The Biomes of the land's shape, which only version 3 chooses.
+            ("ocean", &[]),
+            ("shore", &[]),
+            ("river", &[]),
+            ("alpine", &[]),
         ],
-        bare: &["scorched"],
+        bare: &["scorched", "ocean", "shore", "river", "alpine"],
         lake: true,
     },
     Game {
@@ -294,8 +305,13 @@ const GAMES: [Game; 5] = [
                     "flora:fern",
                 ],
             ),
+            // The Biomes of the land's shape, which only version 3 chooses.
+            ("ocean", &[]),
+            ("shore", &[]),
+            ("river", &["flora:cane"]),
+            ("alpine", &[]),
         ],
-        bare: &[],
+        bare: &["ocean", "shore", "alpine"],
         lake: true,
     },
     Game {
@@ -358,8 +374,13 @@ const GAMES: [Game; 5] = [
                     "flora:tuft",
                 ],
             ),
+            // The Biomes of the land's shape, which only version 3 chooses.
+            ("ocean", &[]),
+            ("shore", &[]),
+            ("river", &["flora:cane"]),
+            ("alpine", &[]),
         ],
-        bare: &[],
+        bare: &["ocean", "shore", "alpine"],
         lake: false,
     },
 ];
@@ -751,7 +772,7 @@ const DENSE: [&str; 9] = [
     "lily_pond",
 ];
 const MODERATE: [&str; 4] = ["temperate", "cold", "heath", "cold_shallows"];
-const SPARSE: [&str; 13] = [
+const SPARSE: [&str; 14] = [
     "savanna",
     "dry",
     "prairie",
@@ -764,8 +785,9 @@ const SPARSE: [&str; 13] = [
     "frost_court",
     "ash_flats",
     "lagoon",
-    // The sea grows weed, not trees.
+    // The sea grows weed, not trees, and a river's banks cane.
     "ocean",
+    "river",
 ];
 
 #[test]

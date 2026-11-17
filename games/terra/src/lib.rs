@@ -6,17 +6,18 @@ use exports::tesserae::mods::guest::{
 mod audio;
 mod building;
 mod character;
+mod landforms;
 mod plants;
 mod structures;
 mod templates;
 mod textures;
 
 use tesserae::mods::content::{
-    Appearance, BiomeDef, BiomeSelectors, BiomeStratum, BurnAfter, BurnEnd, ClimateParams, CombustionDef,
-    FluidDef, FluidState, GroundParams, HeatDef, ItemDef, MarkerIcon, MarkerKindDef, MaterialDef,
-    Occlusion, OreDef, Reactant, ReactionDef, ReactionSide, RecipeDef, RecipeStack, RenderClass,
-    SelectorRange, ShapeDef, SkyFog, SurfaceFeature, ToolDef, ToolKind, ViewParams, VoxelUse,
-    VoxelUseKind, WaterParams,
+    Appearance, BiomeDef, BiomeSelectors, BiomeStratum, BurnAfter, BurnEnd, ClimateParams,
+    CombustionDef, FluidDef, FluidState, GroundParams, HeatDef, ItemDef, MarkerIcon, MarkerKindDef,
+    MaterialDef, Occlusion, OreDef, Reactant, ReactionDef, ReactionSide, RecipeDef, RecipeStack,
+    RenderClass, SelectorRange, ShapeDef, SkyFog, SurfaceFeature, ToolDef, ToolKind, ViewParams,
+    VoxelUse, VoxelUseKind, WaterParams,
 };
 use tesserae::mods::types::{Arm, CollisionBox, ConnectDef, NodeBox, Srgba};
 
@@ -181,6 +182,8 @@ impl Guest for Terra {
             soil: "terra:dirt".into(),
             surface: "terra:grass".into(),
         });
+        world.lava = Some("terra:lava".into());
+        world.cave_biomes = Some(landforms::caves());
         // Smaller than the engine's 512 m, so a walk across the stage meets a border.
         world.climate = Some(ClimateParams {
             temperature_size_m: 256.0,
@@ -679,6 +682,7 @@ impl Guest for Terra {
                         }),
                         coast: None,
                         erosion: None,
+                        river: None,
                         relief: None,
                     }),
                     strata: bedding("ocean"),
@@ -707,6 +711,7 @@ impl Guest for Terra {
                         altitude: Some(SelectorRange { min: 0.0, max: 3.0 }),
                         coast: None,
                         erosion: None,
+                        river: None,
                         relief: None,
                     }),
                     strata: bedding("beach"),
@@ -738,6 +743,7 @@ impl Guest for Terra {
                         }),
                         coast: None,
                         erosion: None,
+                        river: None,
                         relief: None,
                     }),
                     strata: bedding("alpine"),
@@ -760,7 +766,10 @@ impl Guest for Terra {
                     surface_features: Vec::new(),
                     loot: None,
                 },
-            ],
+            ]
+            .into_iter()
+            .chain([landforms::river()])
+            .collect(),
             survival: None,
             sounds: audio::sounds(),
             sound_sets: audio::sets(),
@@ -1006,4 +1015,3 @@ fn bedding(biome: &str) -> Option<Vec<BiomeStratum>> {
         ],
     })
 }
-
