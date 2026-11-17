@@ -30,6 +30,7 @@ struct Outskirts {
     #[serde(default)]
     count_min: u8,
     count_max: u8,
+    chance: Option<f32>,
 }
 
 #[derive(Deserialize)]
@@ -120,6 +121,7 @@ impl From<Settlement> for content::SettlementDef {
                 templates: o.templates.into_iter().map(Into::into).collect(),
                 count_min: o.count_min,
                 count_max: o.count_max,
+                chance: o.chance,
             }),
         }
     }

@@ -262,6 +262,12 @@ margin. Absent lays none, so a Settlement declared without it lays out as
 before, and a TOML Declaration that leaves it out gets none. A Declaration built
 against the earlier 0.3 text needs a rebuild.
 
+A `settlement-outskirts` then gained `chance`, an optional `f32` last: the share
+of a Settlement's copies that lay any outskirts, above 0 and at most 1. Absent
+is 1, every copy. A copy that cannot stand `count-min` now lays none, so no
+field stands alone. A Declaration built against the earlier 0.3 text needs a
+rebuild.
+
 A `settlement-def`, a `settlement-plot` and a `biome-def` then each gained an
 optional `loot`, last, a `loot-table` record: `rolls-min` and `rolls-max` (at
 most 27) and 1 to 16 `loot-entry` rows of an `item` by full name, a `min` of at

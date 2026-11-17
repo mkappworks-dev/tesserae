@@ -220,6 +220,7 @@ fn farms(count: (u8, u8), templates: Vec<SettlementPlot>) -> SettlementOutskirts
         templates,
         count_min: count.0,
         count_max: count.1,
+        chance: None,
     }
 }
 

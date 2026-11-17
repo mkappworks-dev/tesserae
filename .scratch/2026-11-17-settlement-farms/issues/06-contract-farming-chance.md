@@ -1,6 +1,6 @@
 # 06: Contract and snapshot: the farming chance
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 05
 
@@ -14,6 +14,6 @@ value outside (0, 1]; the save's Settlement snapshot keeps it, absent when 1.
 
 ## Acceptance criteria
 
-- [ ] A loader test reads `chance` and refuses 0 and 1.5.
-- [ ] A saved World keeps a chance below 1 and saves none for 1.
-- [ ] `docs/contract-compatibility.md` notes the field.
+- [x] A loader test reads `chance` and refuses 0 and 1.5.
+- [x] A saved World keeps a chance below 1 and saves none for 1.
+- [x] `docs/contract-compatibility.md` notes the field.

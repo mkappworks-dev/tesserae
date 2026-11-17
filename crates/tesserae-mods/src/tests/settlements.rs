@@ -429,3 +429,22 @@ fn a_settlement_lists_outskirts_and_one_naming_a_missing_template_is_refused() {
     .to_string();
     assert!(err.contains("village") && err.contains("t:barn"), "{err}");
 }
+
+#[test]
+fn outskirts_read_a_chance_and_refuse_one_outside_zero_to_one() {
+    let farmed = |chance: &str| {
+        format!(
+            "{VILLAGE}\nmargin-m = 20.0\n\
+             outskirts = {{ count-min = 2, count-max = 4, chance = {chance}, templates = [{{ template = \"t:well\" }}] }}"
+        )
+    };
+    let listed = "{ settlement = \"t:village\", spacing-m = 120.0 }";
+    let (settlements, _) = load(&world(&settlement(&farmed("0.4")), listed)).unwrap();
+    assert_eq!(settlements[0].outskirts.chance, 0.4);
+    for wrong in ["0.0", "1.5"] {
+        let err = load(&world(&settlement(&farmed(wrong)), listed))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("chance"), "{wrong}: {err}");
+    }
+}

@@ -1255,6 +1255,9 @@ interface content {
         /// `count-max`, at most 96.
         count-min: u8,
         count-max: u8,
+        /// The share of copies that lay any, above 0 and at most 1; every
+        /// copy when absent. A copy that cannot stand `count-min` lays none.
+        chance: option<f32>,
     }
 
     /// What a chest world generation stands holds, drawn the first time a
