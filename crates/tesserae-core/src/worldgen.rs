@@ -22,7 +22,7 @@ pub use loot::{Loot, Stood};
 
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{AtomicU8, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use cells::CellMap;
@@ -1001,10 +1001,14 @@ struct ColumnCache {
     biomes: [AtomicU8; CHUNK_SIZE * CHUNK_SIZE],
     /// Boxed so a Cell whose caves are never asked holds a pointer, not 4 KB.
     caves: OnceLock<Box<ColumnCaves>>,
+    /// The bits of each column's [`Worldgen::sealed_below_m`], [`UNSEALED`] until a carve asks.
+    sealed_m: [AtomicU32; CHUNK_SIZE * CHUNK_SIZE],
 }
 
 const UNASKED: u8 = u8::MAX;
 const NO_BIOME: u8 = u8::MAX - 1;
+/// A NaN: a seal is a Voxel's top or minus infinity.
+const UNSEALED: u32 = 0x7fc0_5ea1;
 
 impl ColumnCache {
     /// Relaxed: a column's Biome is a pure function of it, so two workers racing store the same.
@@ -1018,6 +1022,18 @@ impl ColumnCache {
             }
             NO_BIOME => None,
             id => Some(BiomeId::new(id)),
+        }
+    }
+
+    /// Relaxed like [`Self::biome`]: the seal is a pure function of the column.
+    fn sealed_m(&self, i: usize, seal: impl FnOnce() -> f32) -> f32 {
+        match self.sealed_m[i].load(Ordering::Relaxed) {
+            UNSEALED => {
+                let m = seal();
+                self.sealed_m[i].store(m.to_bits(), Ordering::Relaxed);
+                m
+            }
+            bits => f32::from_bits(bits),
         }
     }
 }
@@ -1338,6 +1354,7 @@ impl Worldgen {
             rock,
             biomes: std::array::from_fn(|_| AtomicU8::new(UNASKED)),
             caves: OnceLock::new(),
+            sealed_m: std::array::from_fn(|_| AtomicU32::new(UNSEALED)),
         }
     }
 
@@ -1913,6 +1930,11 @@ impl Worldgen {
                 let mut sealed_m = None;
                 let mut wave_m = None;
                 let table_m = self.water_table_m(x_m, z_m);
+                let seal = || {
+                    cache.sealed_m(z * CHUNK_SIZE + x, || {
+                        self.sealed_below_m(x_m, z_m, surface_m)
+                    })
+                };
                 // The density never reaches down to water here or beside, so it opens no hollow
                 // that water would stand or pour into.
                 let amp_m = self.overhang_amp_at(&cache, &built, [cx, cz], [x as i32, z as i32]);
@@ -1951,9 +1973,7 @@ impl Worldgen {
                                 .as_ref()
                                 .map_or(1.0, |c| c.scales[z * CHUNK_SIZE + x]),
                         )
-                        && y_m
-                            >= *sealed_m
-                                .get_or_insert_with(|| self.sealed_below_m(x_m, z_m, surface_m))
+                        && y_m >= *sealed_m.get_or_insert_with(seal)
                         && !walled()
                     {
                         // An overhang's rock above the ground, cut by a cave, is open water, not a hole.
@@ -1967,9 +1987,7 @@ impl Worldgen {
                     }
                     if !free_at(x, z)
                         && shafts.iter().any(|s| s.cuts(x_m, y_m, z_m))
-                        && y_m
-                            >= *sealed_m
-                                .get_or_insert_with(|| self.sealed_below_m(x_m, z_m, surface_m))
+                        && y_m >= *sealed_m.get_or_insert_with(seal)
                         && !walled()
                     {
                         continue;
@@ -1979,9 +1997,7 @@ impl Worldgen {
                         && !free_at(x, z)
                         && base_m >= CAVERN_MIN_DEPTH_M
                         && self.cavern_open(caverns, [x_m, y_m, z_m])
-                        && y_m
-                            >= *sealed_m
-                                .get_or_insert_with(|| self.sealed_below_m(x_m, z_m, surface_m))
+                        && y_m >= *sealed_m.get_or_insert_with(seal)
                     {
                         if let Some(fill) =
                             self.cavern_fill(caverns, [x_m, y_m, z_m], table_m, || {

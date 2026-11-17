@@ -775,14 +775,16 @@ fn caved_world() -> WorldgenParams {
 /// Water that stands beside or above air would be poured into it by the fluid simulation.
 #[test]
 fn generated_water_has_no_air_below_or_beside_it() {
-    let g = Worldgen::new(SEED, 1.0, caved_world());
-    let (wet, down, side) = leaks(&g, (-29, -33), 16, -4..5);
-    assert!(wet > 100_000, "the region holds water");
-    assert_eq!(
-        (down, side),
-        (0, 0),
-        "water would flow into {down} cells below and {side} beside it"
-    );
+    for (size, centre, ys) in [(1.0, (-29, -33), -4..5), (0.5, (-58, -66), -8..10)] {
+        let g = Worldgen::new(SEED, size, caved_world());
+        let (wet, down, side) = leaks(&g, centre, 16, ys);
+        assert!(wet > 100_000, "the region holds water at {size} m");
+        assert_eq!(
+            (down, side),
+            (0, 0),
+            "at {size} m, water would flow into {down} cells below and {side} beside it"
+        );
+    }
 }
 
 /// The first `want` Chunk columns, on a coarse walk, whose water stands above the sea.
@@ -825,25 +827,29 @@ fn lakes_and_rivers_meet_their_shores_and_each_other_without_a_wall() {
 
 #[test]
 fn flooded_caverns_are_sealed_from_dry_tunnels() {
-    let g = Worldgen::new(SEED, 1.0, caved_world());
-    // Under the mountains, where caverns are deep and tunnels cross them below the water table.
-    let mut checked = 0;
-    for j in -32..32 {
-        for i in -32..32 {
-            let (x, z) = (i * 233i32, j * 241i32);
-            if g.surface_height_m(x as f32, z as f32) < 90.0 || checked == 4 {
-                continue;
+    for (size, scale) in [(1.0, 1), (0.5, 2)] {
+        let g = Worldgen::new(SEED, size, caved_world());
+        // Under the mountains, where caverns are deep and tunnels cross them below the water table.
+        let mut checked = 0;
+        for j in -32..32 {
+            for i in -32..32 {
+                let (x, z) = (i * 233i32, j * 241i32);
+                if g.surface_height_m(x as f32, z as f32) < 90.0 || checked == 4 {
+                    continue;
+                }
+                checked += 1;
+                let centre = ((x * scale).div_euclid(32), (z * scale).div_euclid(32));
+                let (_, down, side) = leaks(&g, centre, 4 * scale, -3 * scale..scale);
+                assert_eq!(
+                    (down, side),
+                    (0, 0),
+                    "under {x}, {z} at {size} m, cavern water would flow into {down} cells below \
+                     and {side} beside it"
+                );
             }
-            checked += 1;
-            let (_, down, side) = leaks(&g, (x.div_euclid(32), z.div_euclid(32)), 4, -3..1);
-            assert_eq!(
-                (down, side),
-                (0, 0),
-                "under {x}, {z}, cavern water would flow into {down} cells below and {side} beside it"
-            );
         }
+        assert_eq!(checked, 4);
     }
-    assert_eq!(checked, 4);
 }
 
 /// Over rugged ground: the mean bend of the surface between neighbouring metres, and the share of
