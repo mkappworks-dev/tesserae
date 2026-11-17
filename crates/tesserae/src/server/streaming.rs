@@ -1454,7 +1454,7 @@ pub(in crate::server) mod tests {
     use bevy::ecs::system::RunSystemOnce;
     use bevy::tasks::{AsyncComputeTaskPool, TaskPoolBuilder};
     use tesserae_core::light::{Light, MAX_LIGHT, light_chunk};
-    use tesserae_core::{Chunk, ChunkLight, LitChunk, MeshLayer, mesh_chunk};
+    use tesserae_core::{Chunk, ChunkLight, LitChunk, mesh_chunk};
     use tesserae_core::{Voxel, Worldgen, WorldgenParams};
 
     fn rings(voxel_size: f32) -> Rings {
@@ -1795,15 +1795,7 @@ pub(in crate::server) mod tests {
     }
 
     pub(in crate::server) fn same_mesh(a: &ChunkMesh, b: &ChunkMesh) -> bool {
-        let layer = |a: &MeshLayer, b: &MeshLayer| {
-            a.positions == b.positions
-                && a.normals == b.normals
-                && a.uvs == b.uvs
-                && a.materials == b.materials
-                && a.light == b.light
-                && a.indices == b.indices
-        };
-        layer(&a.opaque, &b.opaque) && layer(&a.blended, &b.blended) && layer(&a.cutout, &b.cutout)
+        a.opaque == b.opaque && a.blended == b.blended && a.cutout == b.cutout
     }
 
     /// The light of the Chunk a mesh was built from, which `publish` requires
@@ -2282,9 +2274,9 @@ pub(in crate::server) mod tests {
             lit_faces += message
                 .mesh
                 .opaque
-                .light
+                .quads
                 .iter()
-                .filter(|&&l| l != 0)
+                .filter(|q| q.light != Light::DARK)
                 .count();
         }
         assert!(lit_faces > 0, "every published face was baked dark");

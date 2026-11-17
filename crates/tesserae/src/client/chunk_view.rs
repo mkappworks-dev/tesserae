@@ -11,7 +11,7 @@
 //! `docs/adr/0019-a-level-is-drawn-until-another-replaces-it.md`.
 
 use bevy::asset::RenderAssetUsages;
-use bevy::camera::visibility::RenderLayers;
+use bevy::camera::visibility::{NoAutoAabb, RenderLayers};
 use bevy::light::NotShadowCaster;
 use bevy::mesh::MeshTag;
 use bevy::platform::collections::{HashMap, HashSet};
@@ -20,15 +20,16 @@ use bevy::tasks::{ComputeTaskPool, Task};
 
 use crate::session::SessionApp;
 use bevy::render::storage::ShaderBuffer;
-use tesserae_core::{ChunkMesh, MeshLayer};
+use tesserae_core::ChunkMesh;
 
 use crate::client::blend_order::{BlendOrder, sort_blended};
 use crate::client::camera::MainCamera;
-use crate::client::chunk_mesh::chunk_mesh_to_mesh;
+use crate::client::chunk_mesh::{ChunkQuads, placeholder};
 use crate::client::drawn_mask::{self, DrawnMask};
 use crate::client::in_flight::InFlight;
 use crate::render::chunk_material::{ChunkMaterial, ChunkMaterialExtension, LodParams};
 use crate::render::fog::{self, FogSettings};
+use crate::render::quad_buffer::QuadBuffer;
 use crate::server::streaming::{
     ChunkMeshReady, ChunkUnloaded, LodMeshReady, LodUnloaded, StreamingSettings,
 };
@@ -154,9 +155,9 @@ pub(super) fn terrain_arrived(entities: Option<Res<ChunkEntities>>) -> bool {
     entities.is_some_and(|e| !e.opaque.is_empty())
 }
 
-/// A material per mesh layer, for every Chunk, as the Material index is a
-/// vertex attribute: they differ in alpha mode, and share the record of what
-/// each level draws.
+/// A material per mesh layer, for every Chunk, as the Material index is in the
+/// quad buffer: they differ in alpha mode, and share the quad buffer and the
+/// record of what each level draws.
 #[derive(Resource)]
 struct TerrainMaterial {
     opaque: Handle<ChunkMaterial>,
@@ -181,23 +182,22 @@ impl TerrainMaterial {
     }
 }
 
-/// A Chunk's meshes, built off the main thread: a mesh layer with nothing to
+/// A Chunk's layers, packed off the main thread: a mesh layer with nothing to
 /// draw has none.
 struct Built {
-    opaque: Option<Mesh>,
-    blended: Option<Mesh>,
+    opaque: Option<ChunkQuads>,
+    blended: Option<ChunkQuads>,
     order: Option<BlendOrder>,
-    cutout: Option<Mesh>,
+    cutout: Option<ChunkQuads>,
 }
 
 impl Built {
-    fn new(mesh: &ChunkMesh, voxel_size: f32) -> Self {
-        let build = |layer: &MeshLayer| (!layer.is_empty()).then(|| chunk_mesh_to_mesh(layer));
+    fn new(mesh: &ChunkMesh, level: u32, voxel_size: f32) -> Self {
         Self {
-            opaque: build(&mesh.opaque),
-            blended: build(&mesh.blended),
+            opaque: ChunkQuads::pack(&mesh.opaque, level),
+            blended: ChunkQuads::pack(&mesh.blended, level),
             order: BlendOrder::new(&mesh.blended, voxel_size),
-            cutout: build(&mesh.cutout),
+            cutout: ChunkQuads::pack(&mesh.cutout, level),
         }
     }
 }
@@ -280,6 +280,7 @@ fn add_material(
         extension.apply_palette(message);
     }
     let drawn = buffers.add(ShaderBuffer::new(vec![0u32], RenderAssetUsages::default()));
+    let quads = QuadBuffer::new(&mut buffers);
     let opaque = ChunkMaterial {
         base: StandardMaterial {
             perceptual_roughness: 0.95,
@@ -288,6 +289,7 @@ fn add_material(
         extension: ChunkMaterialExtension {
             lod: LodParams { tint: debug_tint() },
             drawn: drawn.clone(),
+            quads: quads.handle.clone(),
             ..extension
         },
     };
@@ -316,6 +318,7 @@ fn add_material(
             ..material.extension.clone()
         },
     };
+    commands.insert_resource(quads);
     commands.insert_resource(TerrainMaterial {
         opaque_untested: materials.add(untested(&opaque)),
         cutout_untested: materials.add(untested(&cutout)),
@@ -341,47 +344,62 @@ fn debug_tint() -> u32 {
 struct Draw<'a, 'w, 's> {
     commands: &'a mut Commands<'w, 's>,
     meshes: &'a mut Assets<Mesh>,
-    mesh_of: &'a dyn Fn(Entity) -> Option<Handle<Mesh>>,
+    quads: &'a mut QuadBuffer,
+    held_of: &'a dyn Fn(Entity) -> Option<Held>,
+}
+
+/// What an entity holds that outlives it unless given back: its placeholder
+/// and its range of the quad buffer.
+struct Held {
+    mesh: Handle<Mesh>,
+    at: u32,
+    len: u32,
 }
 
 impl Draw<'_, '_, '_> {
-    /// Brings one layer's entity for `key` in line with `mesh`: spawned,
+    /// Brings one layer's entity for `key` in line with `layer`: spawned,
     /// replaced or, if the layer has nothing, despawned. The entity, if it
     /// draws something.
     fn show(
         &mut self,
         entities: &mut LayerEntities,
         material: &Handle<ChunkMaterial>,
-        mesh: Option<Mesh>,
+        layer: Option<ChunkQuads>,
         key: (u32, ChunkCoord),
         world: &WorldSettings,
         casts_shadows: bool,
     ) -> Option<Entity> {
-        let Some(mesh) = mesh else {
+        let Some(mut layer) = layer else {
             self.hide(entities, key);
             return None;
         };
         let (level, coord) = key;
-        let handle = self.meshes.add(mesh);
+        layer.at = self.quads.alloc(layer.words().len() as u32);
+        self.quads.write(layer.at, layer.words());
+        let drawn = (
+            Mesh3d(self.meshes.add(placeholder(layer.quad_count()))),
+            MeshTag::new(layer.at),
+            layer.aabb(),
+            layer,
+        );
         match entities.get(&key) {
             // Replacing rather than despawning and respawning keeps the
-            // entity id stable, and dropping the old handle is what stops a
-            // few minutes of flying from leaking every mesh ever uploaded.
+            // entity id stable, and giving back what the old one held is what
+            // stops a few minutes of flying from leaking every mesh ever sent.
             Some(&entity) => {
-                if let Some(old) = (self.mesh_of)(entity) {
-                    self.meshes.remove(&old);
-                }
-                self.commands.entity(entity).insert(Mesh3d(handle));
+                self.give_back(entity);
+                self.commands.entity(entity).insert(drawn);
                 Some(entity)
             }
             None => {
                 let mut entity = self.commands.spawn((
-                    Mesh3d(handle),
+                    drawn,
+                    // The placeholder has no positions to find an `Aabb` from.
+                    NoAutoAabb,
                     MeshMaterial3d(material.clone()),
                     Transform::from_translation(world.chunk_origin_at(coord, level))
                         .with_scale(Vec3::splat(world.voxel_size_at(level))),
                     coord,
-                    MeshTag::new(level),
                     layer_of(level),
                 ));
                 if !casts_shadows {
@@ -397,11 +415,24 @@ impl Draw<'_, '_, '_> {
         let Some(entity) = entities.remove(&key) else {
             return;
         };
-        if let Some(mesh) = (self.mesh_of)(entity) {
-            self.meshes.remove(&mesh);
-        }
+        self.give_back(entity);
         self.commands.entity(entity).despawn();
     }
+
+    fn give_back(&mut self, entity: Entity) {
+        if let Some(held) = (self.held_of)(entity) {
+            self.meshes.remove(&held.mesh);
+            self.quads.release(held.at, held.len);
+        }
+    }
+}
+
+fn held(entity: Entity, existing: &Query<(&Mesh3d, &ChunkQuads)>) -> Option<Held> {
+    existing.get(entity).ok().map(|(mesh, quads)| Held {
+        mesh: mesh.0.clone(),
+        at: quads.at,
+        len: quads.words().len() as u32,
+    })
 }
 
 #[cfg_attr(
@@ -415,10 +446,10 @@ fn land_meshes(
     mut commands: Commands,
     mut building: ResMut<Building>,
     mut entities: ResMut<ChunkEntities>,
-    mut meshes: ResMut<Assets<Mesh>>,
+    (mut meshes, mut quads): (ResMut<Assets<Mesh>>, ResMut<QuadBuffer>),
     material: Res<TerrainMaterial>,
     world: Res<WorldSettings>,
-    existing: Query<&Mesh3d>,
+    existing: Query<(&Mesh3d, &ChunkQuads)>,
     #[cfg(any(feature = "dev", feature = "profiling"))] mut cost: ResMut<
         crate::cost::MainThreadCost,
     >,
@@ -431,7 +462,8 @@ fn land_meshes(
     let mut draw = Draw {
         commands: &mut commands,
         meshes: &mut meshes,
-        mesh_of: &|entity| existing.get(entity).ok().map(|m| m.0.clone()),
+        quads: &mut quads,
+        held_of: &|entity| held(entity, &existing),
     };
     for (key, built) in building.in_flight.landed() {
         // Marked drawn as it lands, not as it is sent: a bit set for a mesh
@@ -517,7 +549,7 @@ fn receive_meshes(
     let coarse = coarse.drain().map(|m| (m.level, m.coord, m.mesh));
     for (level, coord, mesh) in level0.chain(coarse) {
         let voxel_size = world.voxel_size_at(level);
-        let build = async move { Built::new(&mesh, voxel_size) };
+        let build = async move { Built::new(&mesh, level, voxel_size) };
         #[cfg(test)]
         let build = {
             let hold = std::sync::Arc::clone(&building.hold);
@@ -566,8 +598,8 @@ fn drop_meshes(
 fn release(
     mut commands: Commands,
     mut entities: ResMut<ChunkEntities>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    existing: Query<&Mesh3d>,
+    (mut meshes, mut quads): (ResMut<Assets<Mesh>>, ResMut<QuadBuffer>),
+    existing: Query<(&Mesh3d, &ChunkQuads)>,
     streaming: Res<StreamingSettings>,
     world: Res<WorldSettings>,
     camera: Query<&GlobalTransform, With<MainCamera>>,
@@ -607,7 +639,8 @@ fn release(
     let mut draw = Draw {
         commands: &mut commands,
         meshes: &mut meshes,
-        mesh_of: &|entity| existing.get(entity).ok().map(|m| m.0.clone()),
+        quads: &mut quads,
+        held_of: &|entity| held(entity, &existing),
     };
     for key in released {
         draw.hide(&mut entities.opaque, key);
@@ -795,8 +828,10 @@ fn spawn_camera(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::client::chunk_mesh::{VERTICES_PER_QUAD, expand};
     use bevy::ecs::system::RunSystemOnce;
     use tesserae_core::light::{Light, MAX_LIGHT};
+    use tesserae_core::mesh::Soup;
     use tesserae_core::{Chunk, ChunkLight, LitChunk, MaterialId, Tables, Voxel, mesh_chunk};
 
     fn watered() -> (Tables, MaterialId) {
@@ -1646,6 +1681,10 @@ mod tests {
         entity_at(app, 0, coord)
     }
 
+    fn queued(app: &App) -> usize {
+        app.world().resource::<QuadBuffer>().queued()
+    }
+
     fn drawn(app: &mut App) -> usize {
         app.world_mut()
             .query_filtered::<Entity, With<Mesh3d>>()
@@ -1653,10 +1692,26 @@ mod tests {
             .count()
     }
 
-    fn decoded(app: &App, entity: Entity) -> MeshLayer {
-        let handle = &app.world().get::<Mesh3d>(entity).unwrap().0;
-        let mesh = app.world().resource::<Assets<Mesh>>().get(handle).unwrap();
-        crate::client::chunk_mesh::decoded(mesh).expect("a packed Chunk mesh")
+    /// What the shader draws for `entity`, read from the quad buffer as the
+    /// GPU would hold it: six vertices a quad in drawing order, unindexed.
+    fn decoded(app: &App, entity: Entity) -> Soup {
+        let world = app.world();
+        let quads = world.get::<ChunkQuads>(entity).expect("a Chunk layer");
+        let tag = world.get::<MeshTag>(entity).unwrap().value;
+        assert_eq!(tag, quads.at, "the shader finds the layer by its tag");
+        let buffer = &world.resource::<QuadBuffer>().mirror;
+        let vertices = quads.quad_count() * VERTICES_PER_QUAD;
+        let mut soup = Soup::default();
+        for vertex in 0..vertices {
+            let expanded = expand(buffer, tag, vertex);
+            soup.positions.push(expanded.corner.position);
+            soup.normals.push(expanded.corner.normal);
+            soup.uvs.push(expanded.corner.uv);
+            soup.materials.push(expanded.material);
+            soup.light.push(expanded.light);
+            soup.indices.push(vertex);
+        }
+        soup
     }
 
     /// In metres from the entity's origin.
@@ -1702,7 +1757,7 @@ mod tests {
                 "level {level}"
             );
             assert_eq!(world.get::<ChunkCoord>(blended), Some(&coord));
-            assert_eq!(world.get::<MeshTag>(blended).unwrap().value, level);
+            assert_eq!(world.get::<ChunkQuads>(blended).unwrap().level(), level);
             assert_eq!(
                 world.get::<RenderLayers>(blended),
                 Some(&layer_of(level)),
@@ -1746,22 +1801,13 @@ mod tests {
         let coord = ChunkCoord::new(0, 0, 0);
         put_eye(&mut app, Vec3::new(5.5, 5.5, 8.4));
         send_mesh(&mut app, coord, two_panes());
-        let entity = blended_at(&app, 0, coord).unwrap();
-        let handle = app.world().get::<Mesh3d>(entity).unwrap().0.clone();
-        app.world_mut()
-            .resource_mut::<Messages<AssetEvent<Mesh>>>()
-            .clear();
+        let before = queued(&app);
         // Between the panes and inside their x and y span, where a nearest-centre
         // order would change and the separating planes' cannot.
         for z in [8.0, 7.2, 9.6] {
             put_eye(&mut app, Vec3::new(5.4, 5.6, z));
         }
-        let modified = app
-            .world_mut()
-            .resource_mut::<Messages<AssetEvent<Mesh>>>()
-            .drain()
-            .any(|e| e.is_modified(&handle));
-        assert!(!modified);
+        assert_eq!(queued(&app), before, "no record was rewritten");
     }
 
     /// One drawn quad of a blended mesh, axis-aligned, in the entity's metres.
@@ -1776,7 +1822,7 @@ mod tests {
     /// The blended mesh's quads in the order the GPU draws them.
     fn drawn_quads(app: &App, entity: Entity) -> Vec<DrawnQuad> {
         let positions = positions(app, entity);
-        let MeshLayer {
+        let Soup {
             normals, indices, ..
         } = decoded(app, entity);
         indices
@@ -2072,18 +2118,10 @@ mod tests {
         let coord = ChunkCoord::new(0, 0, 0);
         put_eye(&mut app, Vec3::new(60.0, 50.0, 3.0));
         send_mesh(&mut app, coord, two_pools());
-        let entity = blended_at(&app, 0, coord).unwrap();
-        let handle = app.world().get::<Mesh3d>(entity).unwrap().0.clone();
-        app.world_mut()
-            .resource_mut::<Messages<AssetEvent<Mesh>>>()
-            .clear();
+        assert!(blended_at(&app, 0, coord).is_some());
+        let before = queued(&app);
         put_eye(&mut app, Vec3::new(-60.0, 50.0, 3.0));
-        let modified = app
-            .world_mut()
-            .resource_mut::<Messages<AssetEvent<Mesh>>>()
-            .drain()
-            .any(|e| e.is_modified(&handle));
-        assert!(!modified, "a sheet's draw order cannot matter");
+        assert_eq!(queued(&app), before, "a sheet's draw order cannot matter");
     }
 
     /// Two leaf cubes beside open sky: every face is in the cutout layer.
@@ -2144,7 +2182,7 @@ mod tests {
                 .is_none(),
             "a canopy's shadow has its holes, not none"
         );
-        assert_eq!(app.world().get::<MeshTag>(entity).unwrap().value, 0);
+        assert_eq!(app.world().get::<ChunkQuads>(entity).unwrap().level(), 0);
 
         send_mesh(&mut app, coord, geometry());
         assert_eq!(
@@ -2232,6 +2270,11 @@ mod tests {
 
         assert_eq!(drawn(&mut app), 0);
         assert_eq!(app.world().resource::<Assets<Mesh>>().len(), 0);
+        assert_eq!(
+            app.world().resource::<QuadBuffer>().used(),
+            0,
+            "every range given back"
+        );
     }
 
     #[test]
@@ -2299,7 +2342,7 @@ mod tests {
         let check = |app: &App, level: u32| {
             let entity = entity_at(app, level, coord).unwrap();
             let world = app.world();
-            assert_eq!(world.get::<MeshTag>(entity).unwrap().value, level);
+            assert_eq!(world.get::<ChunkQuads>(entity).unwrap().level(), level);
             assert_eq!(
                 world.get::<RenderLayers>(entity),
                 Some(&RenderLayers::layer(level as usize)),
@@ -2331,6 +2374,17 @@ mod tests {
         assert!(
             app.world().resource::<Assets<Mesh>>().get(&first).is_none(),
             "the superseded Mesh asset is still loaded"
+        );
+        let held = app.world().get::<ChunkQuads>(entity).unwrap().words().len();
+        assert_eq!(
+            app.world().resource::<QuadBuffer>().used() as usize,
+            held,
+            "the superseded range is given back"
+        );
+        assert_eq!(
+            decoded(&app, entity).positions.len(),
+            6,
+            "the one face open to the air"
         );
     }
 

@@ -159,7 +159,7 @@ pub(super) fn item_mesh(
     {
         return Some(sprite::cross_mesh(material));
     }
-    let layer = geometry(held, catalogue)?;
+    let layer = geometry(held, catalogue)?.soup();
     let mut mesh = Mesh::new(
         PrimitiveTopology::TriangleList,
         RenderAssetUsages::default(),

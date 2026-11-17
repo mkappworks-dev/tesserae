@@ -1,171 +1,329 @@
-//! `ChunkMesh` → Bevy `Mesh`, packed to 16 bytes a vertex.
+//! A Chunk layer's quads as the quad buffer holds them: a header, a table of
+//! the layer's (Material, light) pairs, then one record per quad, which
+//! `chunk_vertex.wesl` expands from the vertex index. See
+//! `docs/adr/0030-a-chunk-mesh-is-one-record-per-quad.md`.
 //!
 //! This conversion lives in `tesserae` and never in `tesserae-core`, which must
 //! acquire no `bevy` or `wgpu` dependency even transitively. See
 //! `docs/architecture.md` invariant 3.
 
 use bevy::asset::RenderAssetUsages;
-use bevy::mesh::{
-    Indices, MeshVertexAttribute, PrimitiveTopology, VertexAttributeValues, VertexFormat,
-};
+use bevy::camera::primitives::Aabb;
+use bevy::mesh::{MeshVertexAttribute, PrimitiveTopology, VertexAttributeValues, VertexFormat};
+use bevy::platform::collections::HashMap;
 use bevy::prelude::*;
-use bevy::shape::Aabb3d;
 use tesserae_core::MeshLayer;
-use tesserae_core::shape::SUBDIV;
+use tesserae_core::light::Light;
+#[cfg(test)]
+use tesserae_core::mesh::Corner;
+use tesserae_core::mesh::{PAINT_SHIFT, PAINT_SLOTS, Quad};
 
-/// Position in sixteenths of a Voxel, `xyz`, and in `w` the face the vertex
-/// belongs to, `NEG_X..=POS_Z`, which `chunk_vertex.wesl` turns back into the
-/// normal.
-///
-/// Sixteenths because every Shape, fluid surface and flame lies on that grid,
-/// so the packing is exact. Signed because a flame stands a sixteenth outside
-/// the Chunk, and sixteen bits because positions local to a region of Chunks
-/// need the range: ±2047 Voxels.
-pub const ATTRIBUTE_POSITION_FACE: MeshVertexAttribute =
-    MeshVertexAttribute::new("Vertex_PositionFace", 2_084_155_063, VertexFormat::Sint16x4);
+/// The placeholder a Chunk layer's mesh is made of: six vertices a quad, which
+/// no pipeline reads. Bevy draws a mesh's vertex count, and this is the
+/// smallest attribute that gives it one.
+pub const ATTRIBUTE_PLACEHOLDER: MeshVertexAttribute =
+    MeshVertexAttribute::new("Vertex_QuadPlaceholder", 2_084_155_066, VertexFormat::Uint8);
 
-/// UV in sixteenths of a Voxel, on the same grid as the positions.
-pub const ATTRIBUTE_UV: MeshVertexAttribute =
-    MeshVertexAttribute::new("Vertex_ChunkUv", 2_084_155_064, VertexFormat::Uint16x2);
+pub const VERTICES_PER_QUAD: u32 = 6;
 
-/// Which Material the vertex belongs to in the low [`LIGHT_SHIFT`] bits, and
-/// the packed sky and block light of the face above them.
-///
-/// The Material needs 17 bits, for [`tesserae_core::mesh::FLAME`]. Light is
-/// baked per vertex rather than sampled on the GPU: thousands of torches as
-/// point lights is not viable on any hardware, so light is a per-Voxel
-/// flood-fill and this attribute is how it reaches the shader.
-pub const ATTRIBUTE_MATERIAL_LIGHT: MeshVertexAttribute =
-    MeshVertexAttribute::new("Vertex_MaterialLight", 2_084_155_065, VertexFormat::Uint32);
-
-/// Packed position and UV steps per Voxel.
-pub const STEPS: f32 = SUBDIV as f32;
-
+/// The Material is in the low bits of a table word, the light above them. The
+/// Material needs 17 bits, for [`tesserae_core::mesh::FLAME`].
 pub const LIGHT_SHIFT: u32 = 24;
 
-/// The mesh is in Voxels, not metres: the entity's `Transform` scales it by
-/// the level's Voxel size. The `Aabb` is explicit because Bevy can only derive
-/// one from a `Float32x3` position.
-pub fn chunk_mesh_to_mesh(layer: &MeshLayer) -> Mesh {
-    // Unchecked per vertex: the mesher emits only whole sixteenths, from `NodeBox`es `register`
-    // bounds, and `every_shape_and_fluid_level_decodes_to_the_meshers_own_vertices` holds it.
-    let step = |c: f32| (c * STEPS) as i16;
-    let position_face: Vec<[i16; 4]> = layer
-        .positions
-        .iter()
-        .zip(&layer.normals)
-        .map(|(p, n)| [step(p[0]), step(p[1]), step(p[2]), face_of(*n)])
-        .collect();
-    let uvs: Vec<[u16; 2]> = layer
-        .uvs
-        .iter()
-        .map(|uv| uv.map(|c| step(c) as u16))
-        .collect();
-    let material_light: Vec<u32> = layer
-        .materials
-        .iter()
-        .zip(&layer.light)
-        .map(|(&material, &light)| {
-            debug_assert!(material < 1 << LIGHT_SHIFT && light <= 0xff);
-            material | light << LIGHT_SHIFT
-        })
-        .collect();
+/// The LOD level, the table's length and the words a record takes.
+pub const HEADER_WORDS: u32 = 3;
 
-    let (min, max) = position_face
-        .iter()
-        .fold((IVec3::MAX, IVec3::MIN), |(lo, hi), p| {
-            let p = IVec3::new(p[0].into(), p[1].into(), p[2].into());
-            (lo.min(p), hi.max(p))
-        });
-    let mut mesh = Mesh::new(
+/// The geometry, with the table index in the second word's top bits.
+const NARROW: u32 = 2;
+/// The geometry and the table word itself, for a layer with more pairs than a
+/// table index reaches.
+const WIDE: u32 = 3;
+
+/// One Chunk layer's words, ready for the quad buffer. The Client keeps it
+/// beside the entity drawing it, as collision and the blended sort read it.
+#[derive(Component, Clone, Debug)]
+pub struct ChunkQuads {
+    words: Vec<u32>,
+    aabb: Aabb,
+    /// Where `words` starts in the quad buffer, which `MeshTag` carries to the
+    /// shader. Set as it lands.
+    pub at: u32,
+}
+
+impl ChunkQuads {
+    /// `None` for a layer with nothing to draw.
+    pub fn pack(layer: &MeshLayer, level: u32) -> Option<ChunkQuads> {
+        if layer.is_empty() {
+            return None;
+        }
+        let mut slots: HashMap<u32, u32> = HashMap::default();
+        let mut table = Vec::new();
+        for quad in &layer.quads {
+            let word = paint(quad.material, quad.light);
+            slots.entry(word).or_insert_with(|| {
+                table.push(word);
+                table.len() as u32 - 1
+            });
+        }
+        let stride = if table.len() > PAINT_SLOTS {
+            WIDE
+        } else {
+            NARROW
+        };
+        let mut words = Vec::with_capacity(
+            (HEADER_WORDS + stride * layer.quad_count() as u32) as usize + table.len(),
+        );
+        words.extend([level, 0, stride]);
+        if stride == NARROW {
+            words[1] = table.len() as u32;
+            words.extend_from_slice(&table);
+        }
+        for quad in &layer.quads {
+            let [lo, hi] = quad.geometry;
+            let word = paint(quad.material, quad.light);
+            if stride == NARROW {
+                words.extend([lo, hi | slots[&word] << PAINT_SHIFT]);
+            } else {
+                words.extend([lo, hi, word]);
+            }
+        }
+        let (min, max) = layer.quads.iter().flat_map(Quad::corners).fold(
+            (Vec3::MAX, Vec3::MIN),
+            |(lo, hi), c| {
+                let p = Vec3::from(c.position);
+                (lo.min(p), hi.max(p))
+            },
+        );
+        Some(ChunkQuads {
+            words,
+            aabb: Aabb::from_min_max(min, max),
+            at: 0,
+        })
+    }
+
+    pub fn words(&self) -> &[u32] {
+        &self.words
+    }
+
+    #[cfg(any(test, feature = "dev", feature = "profiling"))]
+    pub fn level(&self) -> u32 {
+        self.words[0]
+    }
+
+    pub fn quad_count(&self) -> u32 {
+        (self.words.len() as u32 - self.records_at()) / self.stride()
+    }
+
+    /// The bounds of every corner, in Voxels: the placeholder has no positions
+    /// Bevy could find them from.
+    pub fn aabb(&self) -> Aabb {
+        self.aabb
+    }
+
+    /// What the GPU holds for the layer: its words and its placeholder.
+    #[cfg(any(feature = "dev", feature = "profiling"))]
+    pub fn gpu_bytes(&self) -> usize {
+        self.words.len() * 4 + (self.quad_count() * VERTICES_PER_QUAD) as usize
+    }
+
+    fn stride(&self) -> u32 {
+        self.words[2]
+    }
+
+    /// Where the records start, past the header and the table.
+    pub fn records_at(&self) -> u32 {
+        HEADER_WORDS + self.words[1]
+    }
+
+    /// The layer's quads, read back from its words.
+    pub fn quads(&self) -> impl Iterator<Item = Quad> + '_ {
+        let table = &self.words[HEADER_WORDS as usize..self.records_at() as usize];
+        self.words[self.records_at() as usize..]
+            .chunks(self.stride() as usize)
+            .map(move |record| {
+                let geometry = [record[0], record[1] & ((1 << PAINT_SHIFT) - 1)];
+                let word = match record {
+                    [_, hi] => table[(hi >> PAINT_SHIFT) as usize],
+                    _ => record[2],
+                };
+                Quad {
+                    geometry,
+                    material: word & ((1 << LIGHT_SHIFT) - 1),
+                    light: Light::from_packed((word >> LIGHT_SHIFT) as u8),
+                }
+            })
+    }
+
+    /// The records in `order`, for the blended sort to write over its own.
+    pub fn records_in(&self, order: &[u32]) -> Vec<u32> {
+        let (at, stride) = (self.records_at() as usize, self.stride() as usize);
+        order
+            .iter()
+            .flat_map(|&q| &self.words[at + q as usize * stride..][..stride])
+            .copied()
+            .collect()
+    }
+}
+
+/// A Material and the light on it as one table word.
+pub fn paint(material: u32, light: Light) -> u32 {
+    debug_assert!(material < 1 << LIGHT_SHIFT);
+    material | u32::from(light.packed()) << LIGHT_SHIFT
+}
+
+/// The mesh a layer of `quads` quads draws: render-world only, since nothing
+/// on the main world reads it.
+pub fn placeholder(quads: u32) -> Mesh {
+    Mesh::new(
         PrimitiveTopology::TriangleList,
-        RenderAssetUsages::default(),
+        RenderAssetUsages::RENDER_WORLD,
     )
     .with_inserted_attribute(
-        ATTRIBUTE_POSITION_FACE,
-        VertexAttributeValues::Sint16x4(position_face),
+        ATTRIBUTE_PLACEHOLDER,
+        VertexAttributeValues::Uint8(vec![0; (quads * VERTICES_PER_QUAD) as usize]),
     )
-    .with_inserted_attribute(ATTRIBUTE_UV, VertexAttributeValues::Uint16x2(uvs))
-    .with_inserted_attribute(ATTRIBUTE_MATERIAL_LIGHT, material_light)
-    .with_inserted_indices(Indices::U32(layer.indices.clone()));
-    if !layer.positions.is_empty() {
-        mesh.final_aabb = Some(Aabb3d {
-            min: (min.as_vec3() / STEPS).into(),
-            max: (max.as_vec3() / STEPS).into(),
-        });
-    }
-    mesh
 }
 
-/// The face an axis-aligned unit normal belongs to, in `FACE_STEPS` order.
-fn face_of(normal: [f32; 3]) -> i16 {
-    let axis = normal.iter().position(|&c| c != 0.0).unwrap_or(0);
-    (axis * 2 + usize::from(normal[axis] > 0.0)) as i16
+/// What `chunk_vertex.wesl` makes of one vertex.
+#[cfg(test)]
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct Expanded {
+    pub corner: Corner,
+    pub material: u32,
+    pub light: u32,
+    pub level: u32,
 }
 
-/// What `chunk_vertex.wesl` reads back from a mesh [`chunk_mesh_to_mesh`]
-/// made, in Voxels: the layer it was made from.
-pub fn decoded(mesh: &Mesh) -> Option<MeshLayer> {
-    let (
-        Some(VertexAttributeValues::Sint16x4(position_face)),
-        Some(VertexAttributeValues::Uint16x2(uvs)),
-        Some(VertexAttributeValues::Uint32(material_light)),
-        Some(Indices::U32(indices)),
-    ) = (
-        mesh.attribute(ATTRIBUTE_POSITION_FACE),
-        mesh.attribute(ATTRIBUTE_UV),
-        mesh.attribute(ATTRIBUTE_MATERIAL_LIGHT),
-        mesh.indices(),
-    )
-    else {
-        return None;
+/// `chunk_vertex.wesl`'s `expand`, step for step, for the test that holds the
+/// two equal: `buffer` is the quad buffer, `at` the layer's tag and `vertex`
+/// the mesh-local vertex index.
+#[cfg(test)]
+pub fn expand(buffer: &[u32], at: u32, vertex: u32) -> Expanded {
+    use tesserae_core::mesh::{KIND_CROSS, PLANE_BIAS};
+    let word = |i: u32| buffer[i as usize];
+    let level = word(at);
+    let table = at + HEADER_WORDS;
+    let quad = vertex / VERTICES_PER_QUAD;
+    let corner = (0x0032_0210u32 >> (4 * (vertex % VERTICES_PER_QUAD))) & 15;
+    let record = table + word(at + 1) + quad * word(at + 2);
+    let (lo, hi) = (word(record), word(record + 1));
+    let paint = if word(at + 2) == WIDE {
+        word(record + 2)
+    } else {
+        word(table + (hi >> PAINT_SHIFT))
     };
-    Some(MeshLayer {
-        positions: position_face
-            .iter()
-            .map(|p| [p[0], p[1], p[2]].map(|c| f32::from(c) / STEPS))
-            .collect(),
-        normals: position_face
-            .iter()
-            .map(|p| {
-                let face = p[3] as usize;
-                let mut normal = [0.0; 3];
-                normal[face / 2] = if face % 2 == 1 { 1.0 } else { -1.0 };
-                normal
-            })
-            .collect(),
-        uvs: uvs
-            .iter()
-            .map(|uv| uv.map(|c| f32::from(c) / STEPS))
-            .collect(),
-        materials: material_light
-            .iter()
-            .map(|w| w & ((1 << LIGHT_SHIFT) - 1))
-            .collect(),
-        light: material_light.iter().map(|w| w >> LIGHT_SHIFT).collect(),
-        indices: indices.clone(),
-    })
+    let kind = lo & 7;
+    let mut position = [0.0f32; 3];
+    let mut normal = [0.0f32; 3];
+    let uv;
+    if kind < KIND_CROSS {
+        let positive = kind & 1 == 1;
+        let d = (kind / 2) as usize;
+        let (u, v) = ((d + 1) % 3, (d + 2) % 3);
+        let plane = ((lo >> 3) & 1023) as i32 - PLANE_BIAS;
+        let u0 = (lo >> 13) & 511;
+        let v0 = (lo >> 22) & 511;
+        let u1 = u0 + (hi & 511) + 1;
+        let v1 = v0 + ((hi >> 9) & 511) + 1;
+        let (high_u, high_v) = if positive {
+            (corner == 1 || corner == 2, corner >= 2)
+        } else {
+            (corner >= 2, corner == 1 || corner == 2)
+        };
+        let cu = if high_u { u1 } else { u0 };
+        let cv = if high_v { v1 } else { v0 };
+        position[d] = plane as f32 / 16.0;
+        position[u] = cu as f32 / 16.0;
+        position[v] = cv as f32 / 16.0;
+        normal[d] = if positive { 1.0 } else { -1.0 };
+        uv = [
+            (cu - u0 / 16 * 16) as f32 / 16.0,
+            (cv - v0 / 16 * 16) as f32 / 16.0,
+        ];
+    } else {
+        let c = lo >> 3;
+        let cell = [c & 31, (c >> 5) & 31, (c >> 10) & 31];
+        let reversed = (lo >> 20) & 1 == 1;
+        let i = if reversed { 3 - corner } else { corner };
+        let (high_u, high_v) = (i == 1 || i == 2, i >= 2);
+        uv = [f32::from(u8::from(high_u)), f32::from(u8::from(high_v))];
+        let side = if reversed { -1.0 } else { 1.0 };
+        if kind == KIND_CROSS {
+            let rising = (lo >> 18) & 1 == 0;
+            let x = u32::from(if rising { high_u } else { !high_u });
+            position = [
+                (cell[0] + x) as f32,
+                (cell[1] + u32::from(high_v)) as f32,
+                (cell[2] + u32::from(high_u)) as f32,
+            ];
+            normal[2] = side;
+        } else {
+            let d = ((lo >> 18) & 3) as usize;
+            let (u, v) = ((d + 1) % 3, (d + 2) % 3);
+            let offset = (lo >> 21) & 31;
+            let cu = if high_u {
+                ((hi >> 4) & 15) + 1
+            } else {
+                hi & 15
+            };
+            let cv = if high_v {
+                ((hi >> 12) & 15) + 1
+            } else {
+                (hi >> 8) & 15
+            };
+            position[d] = (cell[d] * 16 + offset) as f32 / 16.0;
+            position[u] = (cell[u] * 16 + cu) as f32 / 16.0;
+            position[v] = (cell[v] * 16 + cv) as f32 / 16.0;
+            normal[d] = side;
+        }
+    }
+    Expanded {
+        corner: Corner {
+            position,
+            normal,
+            uv,
+        },
+        material: paint & ((1 << LIGHT_SHIFT) - 1),
+        light: paint >> LIGHT_SHIFT,
+        level,
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tesserae_core::light::{Light, MAX_LIGHT};
+    use tesserae_core::light::MAX_LIGHT;
     use tesserae_core::shape::examples;
     use tesserae_core::testgen::fixtures;
     use tesserae_core::{
-        Burning, CHUNK_SIZE, Chunk, ChunkLight, ChunkOverlay, Fluid, Level, LitChunk, Neighborhood,
-        Orientation, Overlay, Tables, Voxel, greedy_mesh,
+        Burning, CHUNK_SIZE, Chunk, ChunkLight, ChunkOverlay, Fluid, Form, Level, LitChunk,
+        Neighborhood, NodeBox, Orientation, Overlay, ShapeDef, Tables, Voxel, greedy_mesh,
     };
 
     /// Both channels non-zero, so a nibble lost on the way shows.
     static LIT: ChunkLight = ChunkLight::filled(Light::new(MAX_LIGHT, 7));
 
-    /// The builtin Shapes, then a fence and a pipe, which connect.
+    /// The builtin Shapes, then a fence and a pipe, which connect, a Cross and
+    /// two Plane forms, one of them of odd thickness.
     fn tables() -> Tables {
         let mut tables = fixtures().tables.clone();
         tables.shapes.register(examples::fence()).unwrap();
         tables.shapes.register(examples::pipe()).unwrap();
+        for (form, b) in [
+            (Form::Cross, NodeBox::new([4, 0, 4], [12, 16, 12])),
+            (Form::Plane, NodeBox::new([1, 1, 0], [15, 15, 2])),
+            (Form::Plane, NodeBox::new([0, 3, 2], [16, 4, 14])),
+        ] {
+            tables
+                .shapes
+                .register(ShapeDef {
+                    form,
+                    connect: None,
+                    boxes: vec![b],
+                    collision: None,
+                })
+                .unwrap();
+        }
         tables
     }
 
@@ -207,7 +365,11 @@ mod tests {
                         1 + 2 * (cell / 15 % 15),
                     ];
                     cell += 1;
-                    chunk.set(at[0], at[1], at[2], Voxel::shaped(rock, shape, orientation));
+                    let voxel = Voxel::shaped(rock, shape, orientation);
+                    chunk.set(at[0], at[1], at[2], voxel);
+                    if tables.shapes.form_of(voxel).is_flat() {
+                        continue;
+                    }
                     let level = Level {
                         surface,
                         reach: 1,
@@ -238,42 +400,41 @@ mod tests {
         greedy_mesh(&Neighborhood::isolated(lit), tables)
     }
 
-    fn assert_decodes_exactly(layer: &MeshLayer, what: &str) {
-        let decoded = decoded(&chunk_mesh_to_mesh(layer)).expect("a packed Chunk mesh");
-        assert_eq!(decoded.positions, layer.positions, "{what}: positions");
-        assert_eq!(decoded.normals, layer.normals, "{what}: normals");
-        assert_eq!(decoded.uvs, layer.uvs, "{what}: uvs");
-        assert_eq!(decoded.materials, layer.materials, "{what}: materials");
-        assert_eq!(decoded.light, layer.light, "{what}: light");
-        assert_eq!(decoded.indices, layer.indices, "{what}: indices");
-    }
-
-    /// Bevy derives an `Aabb` only from `Float32x3` positions; without one a
-    /// Chunk is never frustum culled.
-    #[test]
-    fn the_aabb_is_exactly_the_bounds_of_the_decoded_positions() {
-        use bevy::camera::primitives::MeshAabb;
-        let mesh = every_kind_of_face(&tables());
-        let packed = chunk_mesh_to_mesh(&mesh.cutout);
-        let aabb = packed.get_aabb().expect("an Aabb Bevy can find");
-        let positions = mesh.cutout.positions.iter().map(|&p| Vec3::from(p));
-        let lo = positions.clone().fold(Vec3::MAX, Vec3::min);
-        let hi = positions.fold(Vec3::MIN, Vec3::max);
-        assert_eq!(Vec3::from(aabb.min()), lo);
-        assert_eq!(Vec3::from(aabb.max()), hi);
-        assert_eq!(lo.x, -1.0 / 16.0, "a flame outside the Chunk");
-
-        let empty = chunk_mesh_to_mesh(&MeshLayer::default());
-        assert!(empty.get_aabb().is_none());
+    /// Packs `layer` at an offset into a buffer of other words, as the quad
+    /// buffer would hold it, and expands every vertex as the shader does.
+    fn assert_expands_exactly(layer: &MeshLayer, what: &str) {
+        let level = 3;
+        let packed = ChunkQuads::pack(layer, level).expect("a layer with quads");
+        let at = 5;
+        let mut buffer = vec![u32::MAX; at as usize];
+        buffer.extend_from_slice(packed.words());
+        buffer.extend([u32::MAX; 4]);
+        for (q, quad) in layer.quads.iter().enumerate() {
+            let corners = quad.corners();
+            for (k, &corner) in tesserae_core::mesh::QUAD_CORNERS.iter().enumerate() {
+                let vertex = q as u32 * VERTICES_PER_QUAD + k as u32;
+                let expanded = expand(&buffer, at, vertex);
+                assert_eq!(
+                    expanded.corner, corners[corner],
+                    "{what}: quad {q} vertex {k}"
+                );
+                assert_eq!(expanded.material, quad.material, "{what}: quad {q}");
+                assert_eq!(expanded.light, u32::from(quad.light.packed()), "{what}");
+                assert_eq!(expanded.level, level);
+            }
+        }
+        assert_eq!(packed.quads().collect::<Vec<_>>(), layer.quads, "{what}");
     }
 
     #[test]
-    fn every_shape_and_fluid_level_decodes_to_the_meshers_own_vertices() {
+    fn every_shape_and_fluid_level_expands_to_the_meshers_own_corners() {
         let tables = tables();
         for shape in 0..tables.shapes.len() as u8 {
             for (orientation, quads) in tables.shapes.preview_geometry(shape).iter().enumerate() {
                 let layer = tesserae_core::mesh::mesh_shape(quads, fixtures().ground.rock);
-                assert_decodes_exactly(&layer, &format!("Shape {shape} turned {orientation}"));
+                if !layer.is_empty() {
+                    assert_expands_exactly(&layer, &format!("Shape {shape} turned {orientation}"));
+                }
             }
         }
 
@@ -283,34 +444,83 @@ mod tests {
             (&mesh.blended, "blended"),
             (&mesh.cutout, "cutout"),
         ] {
-            assert_decodes_exactly(layer, what);
+            assert_expands_exactly(layer, what);
         }
 
         // What the scene is for: the extremes the packing has to hold.
-        let all = || {
+        let corners = || {
             [&mesh.opaque, &mesh.blended, &mesh.cutout]
                 .into_iter()
-                .flat_map(|l| l.positions.iter())
+                .flat_map(|l| l.quads.iter().flat_map(Quad::corners))
         };
-        let lowest = all().flat_map(|p| p.iter()).copied().fold(0.0, f32::min);
-        let highest = all().flat_map(|p| p.iter()).copied().fold(0.0, f32::max);
-        assert_eq!(lowest, -1.0 / 16.0, "a flame outside the Chunk's low faces");
-        assert_eq!(highest, 32.0 + 1.0 / 16.0, "and outside its high ones");
-        assert!(mesh.cutout.materials.contains(&tesserae_core::mesh::FLAME));
-        let widest = mesh
-            .opaque
-            .uvs
-            .iter()
-            .flatten()
-            .copied()
-            .fold(0.0, f32::max);
+        let coordinates = || corners().flat_map(|c| c.position);
+        assert_eq!(
+            coordinates().fold(0.0, f32::min),
+            -1.0 / 16.0,
+            "a flame below"
+        );
+        assert_eq!(
+            coordinates().fold(0.0, f32::max),
+            32.0 + 1.0 / 16.0,
+            "and one above"
+        );
+        let kinds: Vec<_> = corners().map(|c| c.normal).collect();
+        assert!(kinds.contains(&[0.0, 0.0, -1.0]), "the back of a Cross");
+        assert!(
+            mesh.cutout
+                .quads
+                .iter()
+                .any(|q| q.material == tesserae_core::mesh::FLAME)
+        );
+        let widest = corners().flat_map(|c| c.uv).fold(0.0, f32::max);
         assert_eq!(widest, 32.0, "the floor's UVs span the Chunk");
         for surface in 1..=Fluid::FULL_SURFACE {
             let height = 2.0 + f32::from(surface) / 16.0;
             assert!(
-                mesh.blended.positions.iter().any(|p| p[1] == height),
+                mesh.blended
+                    .quads
+                    .iter()
+                    .flat_map(Quad::corners)
+                    .any(|c| c.position[1] == height),
                 "no fluid surface at {height}"
             );
         }
+    }
+
+    /// More pairs than a table index reaches: every quad carries its own.
+    #[test]
+    fn a_layer_with_more_pairs_than_a_table_holds_still_expands_exactly() {
+        let quads: Vec<Quad> = (0..PAINT_SLOTS as u32 + 3)
+            .map(|i| {
+                let light = Light::from_packed(i as u8);
+                Quad::face(3, 16, [0, 16], [0, 16], i >> 8, light)
+            })
+            .collect();
+        let layer = MeshLayer { quads };
+        let packed = ChunkQuads::pack(&layer, 0).unwrap();
+        assert_eq!(packed.stride(), WIDE);
+        assert_expands_exactly(&layer, "wide");
+    }
+
+    #[test]
+    fn the_aabb_is_exactly_the_bounds_of_every_corner() {
+        let mesh = every_kind_of_face(&tables());
+        let packed = ChunkQuads::pack(&mesh.cutout, 0).unwrap();
+        let corners = mesh.cutout.quads.iter().flat_map(Quad::corners);
+        let lo = corners
+            .clone()
+            .fold(Vec3::MAX, |a, c| a.min(Vec3::from(c.position)));
+        let hi = corners.fold(Vec3::MIN, |a, c| a.max(Vec3::from(c.position)));
+        assert_eq!(Vec3::from(packed.aabb().min()), lo);
+        assert_eq!(Vec3::from(packed.aabb().max()), hi);
+        assert_eq!(lo.x, -1.0 / 16.0, "a flame outside the Chunk");
+        assert!(ChunkQuads::pack(&MeshLayer::default(), 0).is_none());
+    }
+
+    #[test]
+    fn the_placeholder_has_six_vertices_a_quad_and_no_indices() {
+        let mesh = placeholder(7);
+        assert_eq!(mesh.count_vertices(), 42);
+        assert!(mesh.indices().is_none());
     }
 }

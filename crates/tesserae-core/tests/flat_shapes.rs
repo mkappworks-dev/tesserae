@@ -124,10 +124,11 @@ fn a_cross_spans_exactly_one_voxel_whatever_the_chunk_holds() {
         Voxel::shaped(f.grass, f.cross, Orientation::default()),
     );
     let m = mesh(&f, &c);
-    let lo = m.cutout.positions.iter().fold([f32::MAX; 3], |a, p| {
+    let m_cutout = m.cutout.soup();
+    let lo = m_cutout.positions.iter().fold([f32::MAX; 3], |a, p| {
         [a[0].min(p[0]), a[1].min(p[1]), a[2].min(p[2])]
     });
-    let hi = m.cutout.positions.iter().fold([f32::MIN; 3], |a, p| {
+    let hi = m_cutout.positions.iter().fold([f32::MIN; 3], |a, p| {
         [a[0].max(p[0]), a[1].max(p[1]), a[2].max(p[2])]
     });
     assert_eq!(lo, [3.0, 4.0, 5.0]);
@@ -150,7 +151,7 @@ fn a_plane_draws_one_double_sided_quad_in_every_orientation() {
 }
 
 fn assert_upright(m: &tesserae_core::ChunkMesh, y0: f32, y1: f32) {
-    let l = &m.cutout;
+    let l = &m.cutout.soup();
     for (i, p) in l.positions.iter().enumerate() {
         assert_eq!(
             l.uvs[i][1],
@@ -172,7 +173,7 @@ fn a_cross_faces_sideways_with_its_sprite_upright() {
     );
     let m = mesh(&f, &c);
     assert_upright(&m, 4.0, 5.0);
-    let n = &m.cutout.normals;
+    let n = &m.cutout.soup().normals;
     assert_eq!(n.len(), 16);
     assert!(
         n.iter()
@@ -188,7 +189,7 @@ fn a_plane_faces_along_its_thin_axis_with_its_sprite_upright() {
         let v = Voxel::shaped(f.grass, f.plane, orientation);
         let mut c = Chunk::air();
         put(&mut c, [3, 4, 5], v);
-        let l = mesh(&f, &c).cutout;
+        let l = mesh(&f, &c).cutout.soup();
         let axis = l.normals[0].iter().position(|&c| c != 0.0).unwrap();
         for (i, n) in l.normals.iter().enumerate() {
             assert_eq!(

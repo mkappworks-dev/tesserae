@@ -15,11 +15,12 @@
 
 use std::collections::BinaryHeap;
 
-use bevy::mesh::Indices;
 use bevy::prelude::*;
 use tesserae_core::MeshLayer;
 
 use super::camera::MainCamera;
+use super::chunk_mesh::ChunkQuads;
+use crate::render::quad_buffer::QuadBuffer;
 
 /// Above this many quads the pairwise order is not worth its square cost, and
 /// a mesh falls back to drawing the farthest centre first, which is right
@@ -49,8 +50,6 @@ struct Quad {
 #[derive(Component)]
 pub(super) struct BlendOrder {
     quads: Vec<Quad>,
-    /// The mesher's six indices per quad, in its order.
-    indices: Vec<u32>,
     /// The distinct positions on each axis where a quad's box starts or ends,
     /// sorted, and which cell of them the Eye was in at the last sort: the order
     /// depends on nothing else.
@@ -66,14 +65,18 @@ impl BlendOrder {
     /// as the surface of a lake: no two of them can overlap on screen, so their
     /// order cannot matter and the mesh is never re-indexed.
     pub(super) fn new(layer: &MeshLayer, voxel_size: f32) -> Option<Self> {
+        if layer.is_empty() {
+            return None;
+        }
         let quads: Vec<Quad> = layer
-            .indices
-            .chunks(6)
-            .map(|corners| {
-                let at = |i: u32| Vec3::from(layer.positions[i as usize]) * voxel_size;
-                let min = corners.iter().map(|&i| at(i)).fold(Vec3::MAX, Vec3::min);
-                let max = corners.iter().map(|&i| at(i)).fold(Vec3::MIN, Vec3::max);
-                let normal = Vec3::from(layer.normals[corners[0] as usize]);
+            .quads
+            .iter()
+            .map(|quad| {
+                let corners = quad.corners();
+                let at = |c: &tesserae_core::mesh::Corner| Vec3::from(c.position) * voxel_size;
+                let min = corners.iter().map(at).fold(Vec3::MAX, Vec3::min);
+                let max = corners.iter().map(at).fold(Vec3::MIN, Vec3::max);
+                let normal = Vec3::from(corners[0].normal);
                 let axis = (0..3).find(|&a| normal[a] != 0.0).unwrap_or(1);
                 Quad {
                     axis,
@@ -84,7 +87,7 @@ impl BlendOrder {
                 }
             })
             .collect();
-        let facing = |q: usize| layer.normals[layer.indices[q * 6] as usize];
+        let facing = |q: usize| layer.quads[q].corners()[0].normal;
         let flat =
             (0..quads.len()).all(|q| facing(q) == facing(0) && quads[q].plane == quads[0].plane);
         if flat {
@@ -103,7 +106,6 @@ impl BlendOrder {
             order: (0..quads.len() as u32).collect(),
             centre: quads.iter().map(|q| q.centre).sum::<Vec3>() / quads.len() as f32,
             quads,
-            indices: layer.indices.clone(),
             planes,
             cell: None,
         })
@@ -119,9 +121,9 @@ impl BlendOrder {
         std::array::from_fn(|a| self.planes[a].partition_point(|&p| p < eye[a]))
     }
 
-    /// The indices to draw from `eye` (metres from the entity's origin),
-    /// back to front, or `None` if the mesh needs no change.
-    fn resort(&mut self, eye: Vec3) -> Option<Vec<u32>> {
+    /// The order to draw the quads in from `eye` (metres from the entity's
+    /// origin), back to front, or `None` if it has not changed.
+    fn resort(&mut self, eye: Vec3) -> Option<&[u32]> {
         let cell = self.cell_of(eye);
         if self.cell == Some(cell) {
             return None;
@@ -136,13 +138,7 @@ impl BlendOrder {
             return None;
         }
         self.order = order;
-        Some(
-            self.order
-                .iter()
-                .flat_map(|&q| &self.indices[q as usize * 6..q as usize * 6 + 6])
-                .copied()
-                .collect(),
-        )
+        Some(&self.order)
     }
 
     /// Farthest centre first.
@@ -322,10 +318,12 @@ fn behind(a: &Quad, b: &Quad, eye: Vec3) -> Option<bool> {
     None
 }
 
+/// Writes each re-sorted layer's records over its own range of the quad
+/// buffer, in the new order: nothing else of the layer moves.
 pub(super) fn sort_blended(
     eye: Query<&GlobalTransform, With<MainCamera>>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut blended: Query<(&mut BlendOrder, &Mesh3d, &Transform)>,
+    mut buffer: ResMut<QuadBuffer>,
+    mut blended: Query<(&mut BlendOrder, &ChunkQuads, &Transform)>,
     #[cfg(any(feature = "dev", feature = "profiling"))] mut cost: ResMut<
         crate::cost::MainThreadCost,
     >,
@@ -338,25 +336,23 @@ pub(super) fn sort_blended(
     let mut sorted = 0;
     let mut stale: Vec<_> = blended
         .iter_mut()
-        .filter_map(|(order, mesh, transform)| {
+        .filter_map(|(order, quads, transform)| {
             let local = eye.translation() - transform.translation;
             order
                 .stale(local)
-                .then(|| (local.distance_squared(order.centre), local, order, mesh))
+                .then(|| (local.distance_squared(order.centre), local, order, quads))
         })
         .collect();
     stale.sort_by(|a, b| a.0.total_cmp(&b.0));
-    for (n, (_, local, mut order, mesh)) in stale.into_iter().enumerate() {
+    for (n, (_, local, mut order, quads)) in stale.into_iter().enumerate() {
         // The nearest mesh always sorts, so a slow frame cannot starve it.
         if n > 0 && started.elapsed() > FRAME_BUDGET {
             break;
         }
-        let Some(indices) = order.resort(local) else {
+        let Some(order) = order.resort(local) else {
             continue;
         };
-        if let Some(mut mesh) = meshes.get_mut(&mesh.0) {
-            mesh.insert_indices(Indices::U32(indices));
-        }
+        buffer.write(quads.at + quads.records_at(), &quads.records_in(order));
         #[cfg(any(feature = "dev", feature = "profiling"))]
         {
             sorted += 1;

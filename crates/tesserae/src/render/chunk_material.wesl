@@ -1,9 +1,9 @@
 // The chunk material: StandardMaterial lit by bevy_pbr, tinted by the Voxel's
 // Material index and gated by the flood-fill's two light channels.
 //
-// A vertex stage is needed as well as a fragment stage only because bevy_pbr's
-// VertexOutput is a fixed struct: there is no way to forward an extra per-vertex
-// attribute through pbr's own vertex entry point.
+// The vertex stage is its own: it expands each corner from the quad buffer, and
+// bevy_pbr's VertexOutput is a fixed struct with no room for the Material and
+// light it forwards.
 
 import bevy_pbr::render::{
     forward_io::{FragmentOutput, VertexOutput},

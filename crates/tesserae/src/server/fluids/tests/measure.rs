@@ -126,6 +126,7 @@ impl Probe {
             [&mesh.opaque, &mesh.blended, &mesh.cutout]
                 .iter()
                 .any(|layer| {
+                    let layer = layer.soup();
                     layer
                         .positions
                         .chunks(4)

@@ -48,8 +48,8 @@ impl Levels {
 fn walls(plain: &ChunkMesh, seamed: &ChunkMesh) -> HashSet<(usize, bool, IVec3)> {
     let mut cells = HashSet::default();
     for (layer, base) in [
-        (&seamed.opaque, &plain.opaque),
-        (&seamed.cutout, &plain.cutout),
+        (&seamed.opaque.soup(), &plain.opaque.soup()),
+        (&seamed.cutout.soup(), &plain.cutout.soup()),
     ] {
         for q in base.positions.len() / 4..layer.positions.len() / 4 {
             let n = layer.normals[q * 4];

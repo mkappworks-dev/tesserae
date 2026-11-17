@@ -10,8 +10,8 @@
 //! an agent, does not have — and because flying the camera for a fixed distance
 //! first makes the result the same picture every time.
 
+use super::chunk_mesh::ChunkQuads;
 use bevy::camera::RenderTarget;
-use bevy::mesh::MeshTag;
 use bevy::prelude::*;
 
 use crate::session::SessionApp;
@@ -1163,8 +1163,7 @@ fn report(
     stats: Res<StreamingStats>,
     camera: Single<(&Transform, &FlyCamera), With<MainCamera>>,
     preferences: Res<super::profile::Preferences>,
-    drawn: Query<(&MeshTag, &Transform, &Mesh3d)>,
-    meshes: Res<Assets<Mesh>>,
+    drawn: Query<(&ChunkQuads, &Transform)>,
     world: Res<WorldSettings>,
 ) {
     let (camera, movement) = camera.into_inner();
@@ -1230,11 +1229,11 @@ fn report(
     let eye = camera.translation;
     let mut reach_m: Vec<(f32, f32)> = Vec::new();
     let mut held_bytes: Vec<usize> = Vec::new();
-    for (tag, at, mesh) in &drawn {
-        let level = tag.value as usize;
+    for (quads, at) in &drawn {
+        let level = quads.level() as usize;
         held_bytes.resize(held_bytes.len().max(level + 1), 0);
-        held_bytes[level] += meshes.get(&mesh.0).map_or(0, mesh_bytes);
-        let cell = world.cell_size_at(tag.value);
+        held_bytes[level] += quads.gpu_bytes();
+        let cell = world.cell_size_at(quads.level());
         let corners = [(0.0, 0.0), (cell, 0.0), (0.0, cell), (cell, cell)].map(|(dx, dz)| {
             Vec2::new(at.translation.x + dx - eye.x, at.translation.z + dz - eye.z).length()
         });
@@ -1258,10 +1257,6 @@ fn report(
         .collect();
     info!("capture_lod held/meshed={}", per_level.join(","));
     log_levels(&capture.frames, &stats.levels, &held_bytes);
-}
-
-fn mesh_bytes(mesh: &Mesh) -> usize {
-    mesh.get_vertex_buffer_size() + mesh.get_index_buffer_bytes().map_or(0, <[u8]>::len)
 }
 
 /// One line per level and kind, so `scripts/frame-runs` still sees only the lines

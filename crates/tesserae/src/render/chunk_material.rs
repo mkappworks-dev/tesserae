@@ -17,9 +17,7 @@ use bevy::render::render_resource::{
 use bevy::render::storage::ShaderBuffer;
 use bevy::shader::{ShaderDefVal, ShaderRef};
 
-use crate::client::chunk_mesh::{
-    ATTRIBUTE_MATERIAL_LIGHT, ATTRIBUTE_POSITION_FACE, ATTRIBUTE_UV, LIGHT_SHIFT, STEPS,
-};
+use crate::client::chunk_mesh::{HEADER_WORDS, LIGHT_SHIFT};
 
 /// What to spawn in `MeshMaterial3d`.
 pub type ChunkMaterial = ExtendedMaterial<StandardMaterial, ChunkMaterialExtension>;
@@ -60,6 +58,9 @@ pub struct ChunkMaterialExtension {
     pub texture: Option<Handle<Image>>,
     #[uniform(105)]
     pub textured: [UVec4; TEXTURED_VECS],
+    /// Every Chunk layer's quads, in `render::quad_buffer`'s ranges.
+    #[storage(106, read_only)]
+    pub quads: Handle<ShaderBuffer>,
     /// Whether the pipeline holds the coverage test's `discard`. A Chunk no
     /// finer level draws any of takes a material without it: on Apple's
     /// tile-based GPUs a pipeline that may discard defeats hidden-surface
@@ -105,6 +106,7 @@ impl Default for ChunkMaterialExtension {
             drawn: Handle::default(),
             texture: None,
             textured: [UVec4::ZERO; TEXTURED_VECS],
+            quads: Handle::default(),
             coverage_test: true,
         }
     }
@@ -123,6 +125,8 @@ impl MaterialExtension for ChunkMaterialExtension {
         shader()
     }
 
+    // Defining the prepass shaders is also what keeps the material bind group,
+    // and the quad buffer in it, bound in the shadow and depth passes.
     fn prepass_fragment_shader() -> ShaderRef {
         embedded("chunk_prepass.wesl")
     }
@@ -134,18 +138,12 @@ impl MaterialExtension for ChunkMaterialExtension {
     fn specialize(
         _pipeline: &MaterialExtensionPipeline,
         descriptor: &mut RenderPipelineDescriptor,
-        layout: &MeshVertexBufferLayoutRef,
+        _layout: &MeshVertexBufferLayoutRef,
         key: MaterialExtensionKey<Self>,
     ) -> Result<(), SpecializedMeshPipelineError> {
-        // A packed Chunk mesh has none of `bevy_pbr`'s attributes, so the base
-        // material's layout is empty and the packed one has to be declared
-        // here. Spelling the set out is safe because this material is only
-        // ever used on meshes from `chunk_mesh_to_mesh`.
-        descriptor.vertex.buffers = vec![layout.0.get_layout(&[
-            ATTRIBUTE_POSITION_FACE.at_shader_location(0),
-            ATTRIBUTE_UV.at_shader_location(1),
-            ATTRIBUTE_MATERIAL_LIGHT.at_shader_location(2),
-        ])?];
+        // The vertex shader reads the quad buffer, never the mesh, which is a
+        // placeholder from `chunk_mesh::placeholder` for its vertex count.
+        descriptor.vertex.buffers = Vec::new();
 
         // Reach the shader as `constants::*`, so neither the uniform's length
         // nor the light scale can drift from the Rust side.
@@ -154,8 +152,11 @@ impl MaterialExtension for ChunkMaterialExtension {
             ShaderDefVal::UInt("CHUNK_PALETTE_SLOTS".into(), PALETTE_LEN as u32 + 1),
             ShaderDefVal::UInt("CHUNK_FLAME".into(), tesserae_core::mesh::FLAME),
             ShaderDefVal::UInt("CHUNK_MAX_LIGHT".into(), tesserae_core::MAX_LIGHT as u32),
-            ShaderDefVal::UInt("CHUNK_VERTEX_STEPS".into(), STEPS as u32),
             ShaderDefVal::UInt("CHUNK_LIGHT_SHIFT".into(), LIGHT_SHIFT),
+            ShaderDefVal::UInt("CHUNK_HEADER_WORDS".into(), HEADER_WORDS),
+            ShaderDefVal::UInt("CHUNK_PAINT_SHIFT".into(), tesserae_core::mesh::PAINT_SHIFT),
+            ShaderDefVal::Int("CHUNK_PLANE_BIAS".into(), tesserae_core::mesh::PLANE_BIAS),
+            ShaderDefVal::UInt("CHUNK_KIND_CROSS".into(), tesserae_core::mesh::KIND_CROSS),
             ShaderDefVal::UInt(
                 "CHUNK_TEXTURE_EDGE".into(),
                 super::texture_atlas::EDGE as u32,
