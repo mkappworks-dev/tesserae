@@ -8,12 +8,18 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 
+use base64::{Engine, engine::general_purpose::STANDARD};
+use flate2::Compression;
+use flate2::read::DeflateDecoder;
+use flate2::write::DeflateEncoder;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::{CHUNK_SIZE, CHUNK_VOLUME, Chunk, ChunkOverlay, Fluid, Level, Overlay, Voxel};
 
-pub const FORMAT_VERSION: u32 = 1;
+/// What a commit is written in. 2 packs each Chunk's cells; a format 1 commit still opens.
+pub const FORMAT_VERSION: u32 = 2;
+const SUPPORTED_FORMATS: [u32; 2] = [1, 2];
 /// What a new World is created under. Version 3 is supported but not yet the default: it moves
 /// here when step 17's last ticket lands.
 pub const GENERATOR_VERSION: u32 = 2;
@@ -233,14 +239,28 @@ pub struct Cell {
     pub fuel: Option<u16>,
 }
 
-/// Full authoritative Chunk, including Air. Runs are in x/y/z order, z fastest.
+/// Full authoritative Chunk, including Air, in x/y/z order, z fastest.
+///
+/// Format 2 names each distinct cell once in `palette`; `cells` is one palette index a Voxel, as
+/// a plane of low bytes then a plane of high bytes, deflated and base64. A Chunk is mostly a few
+/// long stretches of one cell, so this is a few kilobytes where format 1's `runs`, each spelling
+/// its Material's name, made a few hundred.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SavedChunk {
     pub coord: [i32; 3],
     pub revision: u64,
+    /// Format 1's cells; empty in format 2.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub runs: Vec<(u32, Cell)>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub palette: Vec<Cell>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub cells: String,
 }
+
+/// More distinct cells than this in one Chunk is corrupt: a palette index is a `u16`.
+const MAX_PALETTE: usize = u16::MAX as usize + 1;
 
 impl SavedChunk {
     pub fn capture(
@@ -251,29 +271,89 @@ impl SavedChunk {
         mapping: &Mapping,
     ) -> Result<Self, Error> {
         mapping.validate()?;
-        let mut runs: Vec<(u32, Cell)> = Vec::new();
+        let mut palette: Vec<Cell> = Vec::new();
+        let mut index: std::collections::HashMap<(Voxel, Overlay), u16> =
+            std::collections::HashMap::new();
+        let mut raw = vec![0u8; CHUNK_VOLUME * 2];
+        let mut i = 0;
         for x in 0..CHUNK_SIZE {
             for y in 0..CHUNK_SIZE {
                 for z in 0..CHUNK_SIZE {
-                    let o = overlay.get(x, y, z);
-                    let cell = Cell {
-                        solid: mapping.voxel(chunk.get(x, y, z))?,
-                        fluid: o.fluid.map(|f| mapping.fluid(f)).transpose()?,
-                        fuel: o.burning.map(|b| b.fuel),
+                    let (v, o) = (chunk.get(x, y, z), overlay.get(x, y, z));
+                    let at = match index.get(&(v, o)) {
+                        Some(&at) => at,
+                        None => {
+                            palette.push(Cell {
+                                solid: mapping.voxel(v)?,
+                                fluid: o.fluid.map(|f| mapping.fluid(f)).transpose()?,
+                                fuel: o.burning.map(|b| b.fuel),
+                            });
+                            let at = (palette.len() - 1) as u16;
+                            index.insert((v, o), at);
+                            at
+                        }
                     };
-                    if let Some((n, _)) = runs.last_mut().filter(|(_, c)| c == &cell) {
-                        *n += 1;
-                    } else {
-                        runs.push((1, cell));
-                    }
+                    let [lo, hi] = at.to_le_bytes();
+                    raw[i] = lo;
+                    raw[CHUNK_VOLUME + i] = hi;
+                    i += 1;
                 }
             }
         }
+        let mut deflater = DeflateEncoder::new(Vec::new(), Compression::fast());
+        deflater.write_all(&raw)?;
         Ok(Self {
             coord,
             revision,
-            runs,
+            runs: Vec::new(),
+            palette,
+            cells: STANDARD.encode(deflater.finish()?),
         })
+    }
+
+    /// Every Voxel's index into the cells returned beside them, from either format. A format 1
+    /// run is its own cell; a Chunk holds at most one run a Voxel, so its index fits a `u16`.
+    fn indices(&self) -> Result<(Vec<u16>, Vec<&Cell>), Error> {
+        let corrupt = |why: &str| Error::Corrupt(format!("Chunk cells {why}"));
+        if !self.runs.is_empty() {
+            if !self.palette.is_empty() || !self.cells.is_empty() {
+                return Err(corrupt("are in both formats"));
+            }
+            let count: u64 = self.runs.iter().map(|(n, _)| u64::from(*n)).sum();
+            if count != CHUNK_VOLUME as u64 || self.runs.iter().any(|(n, _)| *n == 0) {
+                return Err(Error::Corrupt(
+                    "Chunk run lengths do not fill one Chunk".into(),
+                ));
+            }
+            let mut out = Vec::with_capacity(CHUNK_VOLUME);
+            for (k, (n, _)) in self.runs.iter().enumerate() {
+                out.extend(std::iter::repeat_n(k as u16, *n as usize));
+            }
+            return Ok((out, self.runs.iter().map(|(_, c)| c).collect()));
+        }
+        if self.palette.is_empty() || self.palette.len() > MAX_PALETTE {
+            return Err(corrupt("have no palette or too large a one"));
+        }
+        let packed = STANDARD
+            .decode(&self.cells)
+            .map_err(|_| corrupt("are not base64"))?;
+        let mut raw = Vec::with_capacity(CHUNK_VOLUME * 2);
+        // One byte past the expected length, so an overlong stream is refused without being
+        // inflated whole.
+        DeflateDecoder::new(packed.as_slice())
+            .take(CHUNK_VOLUME as u64 * 2 + 1)
+            .read_to_end(&mut raw)
+            .map_err(|_| corrupt("do not inflate"))?;
+        if raw.len() != CHUNK_VOLUME * 2 {
+            return Err(corrupt("do not fill one Chunk"));
+        }
+        let out: Vec<u16> = (0..CHUNK_VOLUME)
+            .map(|i| u16::from_le_bytes([raw[i], raw[CHUNK_VOLUME + i]]))
+            .collect();
+        if out.iter().any(|&k| usize::from(k) >= self.palette.len()) {
+            return Err(corrupt("name a cell past the palette"));
+        }
+        Ok((out, self.palette.iter().collect()))
     }
 
     pub fn restore(&self, mapping: &Mapping) -> Result<(Chunk, ChunkOverlay), Error> {
@@ -287,35 +367,34 @@ impl SavedChunk {
                 "Chunk coordinate exceeds Voxel lattice".into(),
             ));
         }
-        let count: u64 = self.runs.iter().map(|(n, _)| u64::from(*n)).sum();
-        if count != CHUNK_VOLUME as u64 || self.runs.iter().any(|(n, _)| *n == 0) {
-            return Err(Error::Corrupt(
-                "Chunk run lengths do not fill one Chunk".into(),
-            ));
-        }
+        let (indices, cells) = self.indices()?;
+        let restored = cells
+            .iter()
+            .map(|cell| {
+                Ok::<_, Error>((
+                    mapping.restore_voxel(&cell.solid)?,
+                    Overlay {
+                        fluid: cell
+                            .fluid
+                            .as_ref()
+                            .map(|f| mapping.restore_fluid(f))
+                            .transpose()?,
+                        burning: cell.fuel.map(|fuel| crate::Burning { fuel }),
+                    },
+                ))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
         let mut chunk = Chunk::filled(Voxel::AIR);
         let mut overlay = ChunkOverlay::none();
-        let mut i = 0;
-        for (n, cell) in &self.runs {
-            let voxel = mapping.restore_voxel(&cell.solid)?;
-            let o = Overlay {
-                fluid: cell
-                    .fluid
-                    .as_ref()
-                    .map(|f| mapping.restore_fluid(f))
-                    .transpose()?,
-                burning: cell.fuel.map(|fuel| crate::Burning { fuel }),
-            };
-            for _ in 0..*n {
-                let (x, y, z) = (
-                    i / (CHUNK_SIZE * CHUNK_SIZE),
-                    i / CHUNK_SIZE % CHUNK_SIZE,
-                    i % CHUNK_SIZE,
-                );
-                chunk.set(x, y, z, voxel);
-                overlay.set(x, y, z, o);
-                i += 1;
-            }
+        for (i, &k) in indices.iter().enumerate() {
+            let (x, y, z) = (
+                i / (CHUNK_SIZE * CHUNK_SIZE),
+                i / CHUNK_SIZE % CHUNK_SIZE,
+                i % CHUNK_SIZE,
+            );
+            let (voxel, o) = restored[usize::from(k)];
+            chunk.set(x, y, z, voxel);
+            overlay.set(x, y, z, o);
         }
         Ok((chunk, overlay))
     }
@@ -1887,7 +1966,9 @@ pub struct Commit {
 
 impl Commit {
     pub fn compatible(&self, installed: &Content) -> Result<(), Error> {
-        if self.format != FORMAT_VERSION || !SUPPORTED_GENERATORS.contains(&self.generator) {
+        if !SUPPORTED_FORMATS.contains(&self.format)
+            || !SUPPORTED_GENERATORS.contains(&self.generator)
+        {
             return Err(Error::Incompatible(format!(
                 "unsupported save/generator version {}/{}",
                 self.format, self.generator
@@ -2209,7 +2290,11 @@ fn read_commit(path: &Path) -> Result<Commit, Error> {
     }
     let value: serde_json::Value =
         serde_json::from_slice(&bytes[40..]).map_err(|e| Error::Corrupt(e.to_string()))?;
-    if value.get("format").and_then(|v| v.as_u64()) != Some(FORMAT_VERSION as u64) {
+    if !value
+        .get("format")
+        .and_then(|v| v.as_u64())
+        .is_some_and(|f| SUPPORTED_FORMATS.iter().any(|&s| u64::from(s) == f))
+    {
         return Err(Error::Incompatible("unsupported save format".into()));
     }
     let commit: Commit =

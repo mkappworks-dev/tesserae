@@ -145,15 +145,94 @@ fn named_cells_restore_with_different_runtime_ids_including_removals() {
 }
 
 #[test]
-fn malformed_runs_and_orientations_fail_without_panics() {
+fn malformed_cells_and_orientations_fail_without_panics() {
     let m = mapping(8, 9, 4);
-    let mut saved =
-        SavedChunk::capture([0; 3], 0, &Chunk::air(), &ChunkOverlay::none(), &m).unwrap();
-    saved.runs[0].0 -= 1;
-    assert!(matches!(saved.restore(&m), Err(Error::Corrupt(_))));
-    saved.runs[0].0 += 1;
-    saved.runs[0].1.solid.orientation = 24;
-    assert!(matches!(saved.restore(&m), Err(Error::Corrupt(_))));
+    let good = SavedChunk::capture([0; 3], 0, &Chunk::air(), &ChunkOverlay::none(), &m).unwrap();
+    let refused = |change: &dyn Fn(&mut SavedChunk)| {
+        let mut saved = good.clone();
+        change(&mut saved);
+        matches!(saved.restore(&m), Err(Error::Corrupt(_)))
+    };
+    assert!(refused(&|s| s.cells = "not base64!".into()));
+    assert!(refused(&|s| s.cells = STANDARD.encode([1, 2, 3])));
+    assert!(refused(&|s| s.palette.clear()));
+    assert!(refused(&|s| s.palette[0].solid.orientation = 24));
+    assert!(refused(
+        &|s| s.runs = vec![(CHUNK_VOLUME as u32, s.palette[0].clone())]
+    ));
+    // A palette index past its end.
+    let mut far = vec![0u8; CHUNK_VOLUME * 2];
+    far[0] = 1;
+    let mut deflater = DeflateEncoder::new(Vec::new(), Compression::fast());
+    deflater.write_all(&far).unwrap();
+    let far = STANDARD.encode(deflater.finish().unwrap());
+    assert!(refused(&|s| s.cells = far.clone()));
+}
+
+/// Format 1 spelled every run's cell out; a World saved that way still opens.
+#[test]
+fn a_format_1_chunk_of_runs_restores() {
+    let m = mapping(8, 9, 4);
+    let cell = |material: &str| Cell {
+        solid: Solid {
+            material: material.into(),
+            shape: "core:cube".into(),
+            orientation: 0,
+        },
+        fluid: None,
+        fuel: None,
+    };
+    let legacy = SavedChunk {
+        coord: [1, 2, 3],
+        revision: 4,
+        runs: vec![
+            (1, cell("terra:stone")),
+            (CHUNK_VOLUME as u32 - 1, cell("core:air")),
+        ],
+        palette: Vec::new(),
+        cells: String::new(),
+    };
+    let json = serde_json::to_string(&legacy).unwrap();
+    assert!(!json.contains("palette") && !json.contains("cells"));
+    let (chunk, _) = serde_json::from_str::<SavedChunk>(&json)
+        .unwrap()
+        .restore(&m)
+        .unwrap();
+    assert_eq!(chunk.get(0, 0, 0), Voxel::cube(8));
+    assert_eq!(chunk.get(0, 0, 1), Voxel::AIR);
+    let mut short = legacy.clone();
+    short.runs[1].0 -= 1;
+    assert!(matches!(short.restore(&m), Err(Error::Corrupt(_))));
+}
+
+/// Terrain cut by a surface and a tunnel, with grass on top: what made format 1 hundreds of
+/// kilobytes a Chunk.
+#[test]
+fn a_ground_chunk_saves_in_a_few_kilobytes() {
+    let m = mapping(8, 9, 4);
+    let mut chunk = Chunk::air();
+    for x in 0..CHUNK_SIZE {
+        for z in 0..CHUNK_SIZE {
+            let top = 10 + (x * 7 + z * 3) % 11;
+            for y in 0..=top {
+                let tunnel = (x as i32 - 16).pow(2) + (y as i32 - 6).pow(2) < 9;
+                if !tunnel {
+                    chunk.set(x, y, z, Voxel::cube(if y == top { 9 } else { 8 }));
+                }
+            }
+        }
+    }
+    let saved = SavedChunk::capture([0; 3], 1, &chunk, &ChunkOverlay::none(), &m).unwrap();
+    let bytes = serde_json::to_vec(&saved).unwrap().len();
+    assert!(bytes < 8 * 1024, "{bytes} bytes");
+    let (back, _) = saved.restore(&m).unwrap();
+    assert!(
+        back.same_packing(&chunk)
+            || (0..CHUNK_VOLUME).all(|i| {
+                let (x, y, z) = (i / 1024, i / 32 % 32, i % 32);
+                back.get(x, y, z) == chunk.get(x, y, z)
+            })
+    );
 }
 
 #[test]
