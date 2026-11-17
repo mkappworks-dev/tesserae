@@ -14,6 +14,6 @@ them.
 
 ## Acceptance criteria
 
-- [ ] A new World's spawn village has fields along its approach roads and a
+- [x] A new World's spawn village has fields along its approach roads and a
       garden inside, seen in a capture.
-- [ ] Terra's Settlement snapshot tests pass with the new declarations.
+- [x] Terra's Settlement snapshot tests pass with the new declarations.

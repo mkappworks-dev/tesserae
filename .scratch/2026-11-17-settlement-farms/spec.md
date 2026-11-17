@@ -27,6 +27,10 @@ has farmhouses and barns and no farm.
   farmland and crop rows with a lane, an orchard Template (apple, cherry or
   orange trees in rows), a fenced paddock with a gate, and a fenced vegetable
   garden. A town has the most outskirts, a village several, a hamlet one or two.
+- **Fuller farms, not everywhere.** After the first play-test: a Settlement
+  farms by chance (most towns, many villages, some hamlets), and one that farms
+  stands at least four fields or none. Fields are larger, stand two deep from
+  the path, and some wheat fields are already ripe.
 
 ## User Stories
 
@@ -40,6 +44,9 @@ has farmhouses and barns and no farm.
 5. As a Player with a World made before this, my Settlements are unchanged.
 6. As a Player at 0.5 m Voxels, the same fields are in the same place in
    metres.
+7. As a Player, some Settlements are ringed by large farms, some have none, and
+   one never has a single lonely field.
+8. As a Player, I sometimes arrive at harvest time: a wheat field already ripe.
 
 ## Implementation Decisions
 
@@ -57,9 +64,16 @@ has farmhouses and barns and no farm.
   unreleased 0.3 Declaration (`docs/contract-compatibility.md`); the TOML loader
   and the save's Settlement snapshot follow, defaulted when absent so a saved
   World lays out as before.
-- **Crops in Templates** are a crop's first Stage on farmland, so they grow and
-  are harvested by the existing Plant rules; trees in an orchard are a grown
-  tree's Voxels, so they fell and drop like a wild one.
+- **Crops in Templates** may be any of a crop's Stages on farmland, so they
+  grow and are harvested by the existing Plant rules; a later Stage is a field
+  planted earlier. It is Obtainable when its crop's first Stage is. Trunk,
+  canopy and fruit stay refused, since Felling tells a grown tree from a build
+  by them; an orchard holds saplings.
+- **Chance and minimum.** `outskirts` gains a `chance` that the Settlement
+  farms at all, drawn from its hash, default 1. The count range's minimum is
+  all-or-nothing: when fewer fit, the Settlement lays no outskirts.
+- **Second row.** A slot is tried against the path first, then once more set
+  back behind a first-row Building's depth, so fields stand two deep.
 - **Templates** come from the mockup's builders (`mockup/structures.js`, exported
   by `node mockup/export-templates.mjs`), never edited by hand in Terra.
 
@@ -72,6 +86,10 @@ has farmhouses and barns and no farm.
 - No field, tree or scatter Plant stands on an outskirt Plot or its apron.
 - A Settlement without outskirts lays out exactly as before.
 - A snapshot without outskirts restores none.
+- Over many Settlements, about `chance` of them farm, and each that does stands
+  at least the minimum.
+- A Template naming a later crop Stage loads, and one naming a tree's trunk
+  still fails.
 - Captures, offscreen: a village from its approach road and from above, kept in
   one `/tmp` folder and deleted at review.
 
