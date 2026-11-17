@@ -32,6 +32,8 @@ const SHAPES = {
   post: "core:post",
   panel: "panel",
   table: "table",
+  fence: "fence",
+  cross: "flora:cross",
 };
 /* Wilderness Structures stand on rougher ground than the Settlement levels for its Plots. */
 const WILD_TOLERANCE_M = 2;

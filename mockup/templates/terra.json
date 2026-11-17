@@ -3550,6 +3550,474 @@
      "BBBBB"
     ]
    ]
+  },
+  {
+   "name": "terra:wheat_field",
+   "label": "Wheat field",
+   "kind": "field",
+   "size": [
+    11,
+    2,
+    7
+   ],
+   "ground_layer": 0,
+   "foundation": "terra:ashlar",
+   "level_tolerance_m": null,
+   "spans": false,
+   "palette": [
+    {
+     "symbol": ".",
+     "cell": "keep"
+    },
+    {
+     "symbol": ":",
+     "cell": "air"
+    },
+    {
+     "symbol": "A",
+     "material": "terra:grass",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "B",
+     "material": "terra:dirt",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "C",
+     "material": "crops:wheat_sprout",
+     "shape": "flora:cross",
+     "orientation": 0
+    }
+   ],
+   "layers": [
+    [
+     "AAAAAAAAAAA",
+     "ABBBBBBBBBA",
+     "ABBBBBBBBBA",
+     "AAAAAAAAAAA",
+     "ABBBBBBBBBA",
+     "ABBBBBBBBBA",
+     "AAAAAAAAAAA"
+    ],
+    [
+     "...........",
+     ".CCCCCCCCC.",
+     ".CCCCCCCCC.",
+     "...........",
+     ".CCCCCCCCC.",
+     ".CCCCCCCCC.",
+     "..........."
+    ]
+   ]
+  },
+  {
+   "name": "terra:carrot_field",
+   "label": "Carrot field",
+   "kind": "field",
+   "size": [
+    9,
+    2,
+    7
+   ],
+   "ground_layer": 0,
+   "foundation": "terra:ashlar",
+   "level_tolerance_m": null,
+   "spans": false,
+   "palette": [
+    {
+     "symbol": ".",
+     "cell": "keep"
+    },
+    {
+     "symbol": ":",
+     "cell": "air"
+    },
+    {
+     "symbol": "A",
+     "material": "terra:grass",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "B",
+     "material": "terra:dirt",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "C",
+     "material": "crops:carrot_sprout",
+     "shape": "flora:cross",
+     "orientation": 0
+    }
+   ],
+   "layers": [
+    [
+     "AAAAAAAAA",
+     "ABBBBBBBA",
+     "ABBBBBBBA",
+     "AAAAAAAAA",
+     "ABBBBBBBA",
+     "ABBBBBBBA",
+     "AAAAAAAAA"
+    ],
+    [
+     ".........",
+     ".CCCCCCC.",
+     ".CCCCCCC.",
+     ".........",
+     ".CCCCCCC.",
+     ".CCCCCCC.",
+     "........."
+    ]
+   ]
+  },
+  {
+   "name": "terra:potato_field",
+   "label": "Potato field",
+   "kind": "field",
+   "size": [
+    9,
+    2,
+    7
+   ],
+   "ground_layer": 0,
+   "foundation": "terra:ashlar",
+   "level_tolerance_m": null,
+   "spans": false,
+   "palette": [
+    {
+     "symbol": ".",
+     "cell": "keep"
+    },
+    {
+     "symbol": ":",
+     "cell": "air"
+    },
+    {
+     "symbol": "A",
+     "material": "terra:grass",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "B",
+     "material": "terra:dirt",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "C",
+     "material": "crops:potato_sprout",
+     "shape": "flora:cross",
+     "orientation": 0
+    }
+   ],
+   "layers": [
+    [
+     "AAAAAAAAA",
+     "ABBBBBBBA",
+     "ABBBBBBBA",
+     "AAAAAAAAA",
+     "ABBBBBBBA",
+     "ABBBBBBBA",
+     "AAAAAAAAA"
+    ],
+    [
+     ".........",
+     ".CCCCCCC.",
+     ".CCCCCCC.",
+     ".........",
+     ".CCCCCCC.",
+     ".CCCCCCC.",
+     "........."
+    ]
+   ]
+  },
+  {
+   "name": "terra:mixed_field",
+   "label": "Mixed field",
+   "kind": "field",
+   "size": [
+    11,
+    2,
+    9
+   ],
+   "ground_layer": 0,
+   "foundation": "terra:ashlar",
+   "level_tolerance_m": null,
+   "spans": false,
+   "palette": [
+    {
+     "symbol": ".",
+     "cell": "keep"
+    },
+    {
+     "symbol": ":",
+     "cell": "air"
+    },
+    {
+     "symbol": "A",
+     "material": "terra:grass",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "B",
+     "material": "terra:dirt",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "C",
+     "material": "crops:carrot_sprout",
+     "shape": "flora:cross",
+     "orientation": 0
+    },
+    {
+     "symbol": "D",
+     "material": "crops:potato_sprout",
+     "shape": "flora:cross",
+     "orientation": 0
+    },
+    {
+     "symbol": "E",
+     "material": "crops:wheat_sprout",
+     "shape": "flora:cross",
+     "orientation": 0
+    }
+   ],
+   "layers": [
+    [
+     "AAAAAAAAAAA",
+     "ABBBBBBBBBA",
+     "ABBBBBBBBBA",
+     "ABBBBBBBBBA",
+     "AAAAAAAAAAA",
+     "ABBBBBBBBBA",
+     "ABBBBBBBBBA",
+     "ABBBBBBBBBA",
+     "AAAAAAAAAAA"
+    ],
+    [
+     "...........",
+     ".CCCCCCCCC.",
+     ".DDDDDDDDD.",
+     ".EEEEEEEEE.",
+     "...........",
+     ".DDDDDDDDD.",
+     ".EEEEEEEEE.",
+     ".CCCCCCCCC.",
+     "..........."
+    ]
+   ]
+  },
+  {
+   "name": "terra:orchard",
+   "label": "Orchard",
+   "kind": "field",
+   "size": [
+    11,
+    2,
+    11
+   ],
+   "ground_layer": 0,
+   "foundation": "terra:ashlar",
+   "level_tolerance_m": null,
+   "spans": false,
+   "palette": [
+    {
+     "symbol": ".",
+     "cell": "keep"
+    },
+    {
+     "symbol": ":",
+     "cell": "air"
+    },
+    {
+     "symbol": "A",
+     "material": "terra:grass",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "B",
+     "material": "flora:orange_sapling",
+     "shape": "flora:cross",
+     "orientation": 0
+    }
+   ],
+   "layers": [
+    [
+     "AAAAAAAAAAA",
+     "AAAAAAAAAAA",
+     "AAAAAAAAAAA",
+     "AAAAAAAAAAA",
+     "AAAAAAAAAAA",
+     "AAAAAAAAAAA",
+     "AAAAAAAAAAA",
+     "AAAAAAAAAAA",
+     "AAAAAAAAAAA",
+     "AAAAAAAAAAA",
+     "AAAAAAAAAAA"
+    ],
+    [
+     "...........",
+     ".B..B..B..B",
+     "...........",
+     "...........",
+     ".B..B..B..B",
+     "...........",
+     "...........",
+     ".B..B..B..B",
+     "...........",
+     "...........",
+     ".B..B..B..B"
+    ]
+   ]
+  },
+  {
+   "name": "terra:paddock",
+   "label": "Paddock",
+   "kind": "field",
+   "size": [
+    12,
+    2,
+    10
+   ],
+   "ground_layer": 0,
+   "foundation": "terra:ashlar",
+   "level_tolerance_m": null,
+   "spans": false,
+   "palette": [
+    {
+     "symbol": ".",
+     "cell": "keep"
+    },
+    {
+     "symbol": ":",
+     "cell": "air"
+    },
+    {
+     "symbol": "A",
+     "material": "terra:grass",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "B",
+     "material": "terra:oak_planks",
+     "shape": "terra:fence",
+     "orientation": 0
+    }
+   ],
+   "layers": [
+    [
+     "AAAAAAAAAAAA",
+     "AAAAAAAAAAAA",
+     "AAAAAAAAAAAA",
+     "AAAAAAAAAAAA",
+     "AAAAAAAAAAAA",
+     "AAAAAAAAAAAA",
+     "AAAAAAAAAAAA",
+     "AAAAAAAAAAAA",
+     "AAAAAAAAAAAA",
+     "AAAAAAAAAAAA"
+    ],
+    [
+     "BBBBBBBBBBBB",
+     "B..........B",
+     "B..........B",
+     "B..........B",
+     "B..........B",
+     "B..........B",
+     "B..........B",
+     "B..........B",
+     "B..........B",
+     "BBBBB::BBBBB"
+    ]
+   ]
+  },
+  {
+   "name": "terra:garden",
+   "label": "Vegetable garden",
+   "kind": "field",
+   "size": [
+    7,
+    2,
+    6
+   ],
+   "ground_layer": 0,
+   "foundation": "terra:ashlar",
+   "level_tolerance_m": null,
+   "spans": false,
+   "palette": [
+    {
+     "symbol": ".",
+     "cell": "keep"
+    },
+    {
+     "symbol": ":",
+     "cell": "air"
+    },
+    {
+     "symbol": "A",
+     "material": "terra:dirt",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "B",
+     "material": "terra:oak_planks",
+     "shape": "terra:fence",
+     "orientation": 0
+    },
+    {
+     "symbol": "C",
+     "material": "crops:potato_sprout",
+     "shape": "flora:cross",
+     "orientation": 0
+    },
+    {
+     "symbol": "D",
+     "material": "crops:berry_sprout",
+     "shape": "flora:cross",
+     "orientation": 0
+    },
+    {
+     "symbol": "E",
+     "material": "crops:carrot_sprout",
+     "shape": "flora:cross",
+     "orientation": 0
+    },
+    {
+     "symbol": "F",
+     "material": "terra:sand",
+     "shape": "core:cube",
+     "orientation": 0
+    }
+   ],
+   "layers": [
+    [
+     "AAAFAAA",
+     "AAAFAAA",
+     "AAAFAAA",
+     "AAAFAAA",
+     "AAAFAAA",
+     "AAAFAAA"
+    ],
+    [
+     "BBBBBBB",
+     "BCC.CCB",
+     "BDD.DDB",
+     "BEE.EEB",
+     "BCC.CCB",
+     "BB::BBB"
+    ]
+   ]
   }
  ]
 }

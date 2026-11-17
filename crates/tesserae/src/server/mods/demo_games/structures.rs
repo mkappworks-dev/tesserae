@@ -66,7 +66,12 @@ fn every_games_templates_are_the_cells_the_approved_mockup_exports() {
             .iter()
             .map(|t| t["kind"].as_str().unwrap())
             .collect();
-        assert_eq!(kinds.len(), 15, "{game}");
+        // Ten Settlement buildings and five wild ones in every Game; Terra adds its fields.
+        assert_eq!(
+            kinds.iter().filter(|&&k| k != "field").count(),
+            15,
+            "{game}"
+        );
         assert_eq!(kinds.iter().filter(|&&k| k == "wild").count(), 5, "{game}");
 
         for (template, t) in loaded.tables.templates.iter().zip(&exported) {

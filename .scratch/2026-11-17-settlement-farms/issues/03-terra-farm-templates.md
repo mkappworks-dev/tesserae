@@ -1,6 +1,6 @@
 # 03: Terra's field, orchard, paddock and garden Templates
 
-Status: ready-for-agent
+Status: done
 
 Spec: [Settlement farms](../spec.md).
 
@@ -13,5 +13,10 @@ and a fenced vegetable garden small enough for a disc Plot.
 
 ## Acceptance criteria
 
-- [ ] Every Template validates and every Material in it is Obtainable.
-- [ ] Crops in a Template grow and are harvested like planted ones.
+- [x] Every Template validates and every Material in it is Obtainable.
+- [x] Crops in a Template grow and are harvested like planted ones.
+
+## Comments
+
+An orchard stands saplings, which grow into trees as wild ones do: a grown tree's
+log and leaves are refused in a Template by the Obtainable rule.

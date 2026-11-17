@@ -677,6 +677,76 @@ const B = {
     g.put(1, 1, 1, "air");
     return g.done();
   },
+  /*
+   * Farm ground: worked soil in the Ground layer under rows of a crop's first Stage, which grows
+   * and ripens like a planted one. `crops` cycles row by row along z; a grass lane runs across the
+   * middle, and a grass rim round it keeps the rows off the road.
+   */
+  field: (crops, w = 9, d = 7) => {
+    const g = new Grid(),
+      lane = d >> 1;
+    for (let x = 0; x < w; x++)
+      for (let z = 0; z < d; z++) {
+        const rim = x === 0 || z === 0 || x === w - 1 || z === d - 1;
+        if (rim || z === lane) {
+          g.put(x, 0, z, M("terra:grass"));
+          continue;
+        }
+        g.put(x, 0, z, M("terra:dirt"));
+        g.put(x, 1, z, M(crops[z % crops.length], "cross"));
+      }
+    return g.done();
+  },
+  /* Young fruit trees in rows on grass, three metres apart, which grow up as wild ones do. */
+  orchard: (saplings, w = 11, d = 11) => {
+    const g = new Grid();
+    for (let x = 0; x < w; x++)
+      for (let z = 0; z < d; z++) {
+        g.put(x, 0, z, M("terra:grass"));
+        if (x % 3 === 1 && z % 3 === 1)
+          g.put(x, 1, z, M(saplings[(x + z) % saplings.length], "cross"));
+      }
+    return g.done();
+  },
+  /* A fence round grass with a gate gap two wide in the middle of its road side, +Z. */
+  paddock: (w = 12, d = 10, inside = () => null) => {
+    const g = new Grid(),
+      gate = [(w >> 1) - 1, w >> 1];
+    for (let x = 0; x < w; x++)
+      for (let z = 0; z < d; z++) {
+        const edge = x === 0 || z === 0 || x === w - 1 || z === d - 1;
+        const cell = inside(x, z);
+        g.put(x, 0, z, cell?.ground ?? M("terra:grass"));
+        if (edge)
+          g.put(
+            x,
+            1,
+            z,
+            z === d - 1 && gate.includes(x)
+              ? "air"
+              : M("terra:oak_planks", "fence"),
+          );
+        else if (cell?.plant) g.put(x, 1, z, cell.plant);
+      }
+    return g.done();
+  },
+  /* A fenced vegetable plot small enough for a Plot among houses: beds of crops, a path between. */
+  garden: (w = 7, d = 6) =>
+    B.paddock(w, d, (x, z) =>
+      x === w >> 1
+        ? { ground: M("terra:sand") }
+        : {
+            ground: M("terra:dirt"),
+            plant: M(
+              [
+                "crops:carrot_sprout",
+                "crops:potato_sprout",
+                "crops:berry_sprout",
+              ][z % 3],
+              "cross",
+            ),
+          },
+    ),
   /* A tower round a two-wide stair that spirals from its cellar up its walls to the roof deck. */
   tower: (n, h, cellar = 0) => {
     const g = new Grid(),
@@ -1076,6 +1146,62 @@ const GAME_TEMPLATES = {
     T("Terra", "waystone", "Waystone arch", "Marks a road", "wild", () =>
       B.arch(5, 5),
     ),
+    T("Terra", "wheat-field", "Wheat field", "Rows of wheat", "field", () =>
+      B.field(["crops:wheat_sprout"], 11, 7),
+    ),
+    T("Terra", "carrot-field", "Carrot field", "Rows of carrots", "field", () =>
+      B.field(["crops:carrot_sprout"]),
+    ),
+    T(
+      "Terra",
+      "potato-field",
+      "Potato field",
+      "Rows of potatoes",
+      "field",
+      () => B.field(["crops:potato_sprout"]),
+    ),
+    T(
+      "Terra",
+      "mixed-field",
+      "Mixed field",
+      "Wheat, carrots and potatoes",
+      "field",
+      () =>
+        B.field(
+          ["crops:wheat_sprout", "crops:carrot_sprout", "crops:potato_sprout"],
+          11,
+          9,
+        ),
+    ),
+    T(
+      "Terra",
+      "orchard",
+      "Orchard",
+      "Apple, cherry and orange trees",
+      "field",
+      () =>
+        B.orchard([
+          "flora:apple_sapling",
+          "flora:cherry_sapling",
+          "flora:orange_sapling",
+        ]),
+    ),
+    T(
+      "Terra",
+      "paddock",
+      "Paddock",
+      "A fence round grass, a gate",
+      "field",
+      () => B.paddock(),
+    ),
+    T(
+      "Terra",
+      "garden",
+      "Vegetable garden",
+      "Fenced beds by a house",
+      "field",
+      () => B.garden(),
+    ),
   ],
   Tidewater: [
     ...SET("Tidewater", [
@@ -1259,6 +1385,7 @@ const KINDS = {
   home: "Homes",
   trade: "Trades and stores",
   farm: "Farm",
+  field: "Fields and gardens",
   centre: "Centre",
   wild: "Wilderness",
 };
@@ -1297,6 +1424,8 @@ function turned(id, turn) {
   return out;
 }
 function materialOf(t, c) {
+  /* A Mod's own Material, such as a crop or a sapling, named in full. */
+  if (c.m.includes(":")) return c.m;
   if (c.m === "water")
     return t.game === "Terra" ? "terra:water" : "waters:water";
   if (FIXED[c.m]) return `${t.game.toLowerCase()}:${FIXED[c.m]}`;
