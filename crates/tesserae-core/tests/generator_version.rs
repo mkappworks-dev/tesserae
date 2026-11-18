@@ -3,54 +3,87 @@
 //! surface, smoothed slopes, the sea and the sky, at two Voxel sizes.
 
 use sha2::{Digest, Sha256};
-use tesserae_core::testgen::fixtures;
+use tesserae_core::material::MaterialDef;
+use tesserae_core::save::Mapping;
+use tesserae_core::testgen::{
+    Fixtures, fixtures, register_glass, register_ground, register_lantern, register_leaves,
+    register_water,
+};
 use tesserae_core::worldgen::WaterParams;
-use tesserae_core::{CHUNK_SIZE, Chunk, Voxel, Worldgen, WorldgenParams};
+use tesserae_core::{CHUNK_SIZE, Chunk, GroundParams, Tables, Worldgen, WorldgenParams};
 
 const SEEDS: [u64; 3] = [0x7e55_e2ae_0000_0001, 1, 0xdead_beef_cafe_f00d];
 const VOXEL_SIZES: [f32; 2] = [1.0, 0.5];
 
 /// The fixture ground alone, with none of the fixture Biomes these were recorded without.
 fn params() -> WorldgenParams {
+    params_of(fixtures())
+}
+
+fn params_of(f: &Fixtures) -> WorldgenParams {
     WorldgenParams {
         sea_level_m: 24.0,
         relief_m: 24.0,
         water: Some(WaterParams {
             level_m: 24.0,
-            material: fixtures().water,
+            material: f.water,
         }),
-        ground: Some(fixtures().ground),
+        ground: Some(f.ground),
         ..WorldgenParams::default()
     }
 }
 
-fn put(digest: &mut Sha256, v: Voxel) {
-    digest.update(v.material().to_le_bytes());
-    digest.update(v.shape().to_le_bytes());
-    digest.update([v.orientation()]);
+fn names() -> Mapping {
+    fixtures().mapping()
 }
 
-fn hash(digest: &mut Sha256, chunk: &Chunk) {
-    match chunk.uniform() {
-        Some(v) => {
-            digest.update([1]);
-            put(digest, v);
-        }
-        None => {
-            digest.update([0]);
-            chunk.kinds().iter().for_each(|&v| put(digest, v));
-            for z in 0..CHUNK_SIZE {
-                for y in 0..CHUNK_SIZE {
-                    for x in 0..CHUNK_SIZE {
-                        put(digest, chunk.get(x, y, z));
-                    }
+/// The fixtures again, behind a Material they do not use and each in another order, as another
+/// set of Mods would load them.
+fn reordered() -> Fixtures {
+    let mut tables = Tables::builtin();
+    tables.materials.register(MaterialDef::OPAQUE).unwrap();
+    let water = register_water(&mut tables);
+    let leaves = register_leaves(&mut tables);
+    let glass = register_glass(&mut tables);
+    let lantern = register_lantern(&mut tables);
+    let ground = register_ground(&mut tables);
+    Fixtures {
+        tables,
+        ground: GroundParams {
+            rock: ground.surface,
+            soil: ground.rock,
+            surface: ground.soil,
+        },
+        lantern,
+        glass,
+        leaves,
+        water,
+    }
+}
+
+/// Every Voxel in box order as its Material name, Shape name and Orientation, so content
+/// registered in another order makes the same digest.
+fn hash(digest: &mut Sha256, names: &Mapping, chunk: &Chunk) {
+    for z in 0..CHUNK_SIZE {
+        for y in 0..CHUNK_SIZE {
+            for x in 0..CHUNK_SIZE {
+                let v = chunk.get(x, y, z);
+                let material = names
+                    .materials
+                    .get(&v.material())
+                    .expect("a named Material");
+                let shape = names.shapes.get(&v.shape()).expect("a named Shape");
+                for name in [material, shape] {
+                    digest.update((name.len() as u32).to_le_bytes());
+                    digest.update(name.as_bytes());
                 }
+                digest.update([v.orientation()]);
             }
         }
     }
 }
 
-fn digest(generator: &Worldgen) -> String {
+fn digest(generator: &Worldgen, names: &Mapping) -> String {
     let chunk_m = CHUNK_SIZE as f32 * generator.voxel_size();
     let rows = (-8.0 / chunk_m).floor() as i32..=(56.0 / chunk_m).floor() as i32;
     let reach = (64.0 / chunk_m).ceil() as i32;
@@ -58,7 +91,7 @@ fn digest(generator: &Worldgen) -> String {
     for cy in rows {
         for cz in -reach..=reach {
             for cx in -reach..=reach {
-                hash(&mut digest, &generator.chunk(cx, cy, cz));
+                hash(&mut digest, names, &generator.chunk(cx, cy, cz));
             }
         }
     }
@@ -75,7 +108,7 @@ fn digests() -> Vec<String> {
         .flat_map(|&seed| {
             VOXEL_SIZES
                 .iter()
-                .map(move |&size| digest(&Worldgen::new(seed, size, params())))
+                .map(move |&size| digest(&Worldgen::new(seed, size, params()), &names()))
         })
         .collect()
 }
@@ -99,14 +132,18 @@ fn the_boxes_hold_caves_and_water() {
             water: None,
             ..params()
         };
-        assert_ne!(mountain_digest(&g(params())), mountain_digest(&g(no_caves)));
-        assert_ne!(digest(&g(params())), digest(&g(no_water)));
+        let names = names();
+        assert_ne!(
+            mountain_digest(&g(params()), &names),
+            mountain_digest(&g(no_caves), &names)
+        );
+        assert_ne!(digest(&g(params()), &names), digest(&g(no_water), &names));
     }
 }
 
 /// A box over version 3's high ground, found on a coarse walk, where its mountains and crags are:
 /// the terrain whose arithmetic must round alike on every platform.
-fn mountain_digest(generator: &Worldgen) -> String {
+fn mountain_digest(generator: &Worldgen, names: &Mapping) -> String {
     let chunk_m = CHUNK_SIZE as f32 * generator.voxel_size();
     let (x, z) = (-40..40)
         .flat_map(|i| (-40..40).map(move |j| (i as f32 * 97.0, j as f32 * 89.0)))
@@ -120,7 +157,7 @@ fn mountain_digest(generator: &Worldgen) -> String {
     for cy in rows {
         for dz in -reach..=reach {
             for dx in -reach..=reach {
-                hash(&mut digest, &generator.chunk(cx + dx, cy, cz + dz));
+                hash(&mut digest, names, &generator.chunk(cx + dx, cy, cz + dz));
             }
         }
     }
@@ -129,6 +166,28 @@ fn mountain_digest(generator: &Worldgen) -> String {
         .iter()
         .map(|b| format!("{b:02x}"))
         .collect()
+}
+
+#[test]
+fn content_registered_in_another_order_makes_the_recorded_chunks() {
+    let f = &reordered();
+    assert_ne!(f.water, fixtures().water);
+    let names = &f.mapping();
+    let made: Vec<[String; 2]> = SEEDS
+        .iter()
+        .flat_map(|&seed| {
+            VOXEL_SIZES.iter().map(move |&size| {
+                let g = Worldgen::new(seed, size, params_of(f));
+                [digest(&g, names), mountain_digest(&g, names)]
+            })
+        })
+        .collect();
+    let recorded: Vec<[String; 2]> = RECORDED
+        .iter()
+        .zip(RECORDED_HIGH_GROUND)
+        .map(|(a, b)| [a.to_string(), b.to_string()])
+        .collect();
+    assert_eq!(made, recorded);
 }
 
 #[test]
@@ -143,27 +202,27 @@ fn version_3_high_ground_makes_the_recorded_chunks() {
         .flat_map(|&seed| {
             VOXEL_SIZES
                 .iter()
-                .map(move |&size| mountain_digest(&Worldgen::new(seed, size, params())))
+                .map(move |&size| mountain_digest(&Worldgen::new(seed, size, params()), &names()))
         })
         .collect();
     assert_eq!(made, RECORDED_HIGH_GROUND);
 }
 
-/// Seed by seed, Voxel sizes 1.0 then 0.5, recorded when version 3 became the default.
+/// Seed by seed, Voxel sizes 1.0 then 0.5, recorded by name on macOS arm64.
 const RECORDED: [&str; 6] = [
-    "d32a1f39d58ffc2d24aed96a17be69a8b733d125e9d71f6286e0d4d95723a18f",
-    "ea9cfe26fa6fb73bc97dd6ee376e86aa1e23308e1a7bd218b10b02149ef5319e",
-    "41f49b58fa581d660964fe68cddded7111c1b502e1a7edeaeb1eb7350d25e544",
-    "660d62813c2afda2bfb4c29ee7ad09869ff0ed3a4ff7a380cdcb1015c14c0cc0",
-    "2133246b0ad95656e25f9ad142c4660fe3b87fc7d2bc47b1378653f07376b785",
-    "2a3f04ee201eff445cdc79ebf440d27b94b843b1ac79644a82c92d386c9b84a4",
+    "a4fd4e45002e6d42f0ae07f8621954dd30c57bad3b9d3e7584a330d758228206",
+    "ebf20050e277ede4cefbea7b74827e4ab7e48325c8c2b71cc4b80a66cfb5b499",
+    "593c469c29549daace8b653525371b75d8908e28c1bef334e52192adf8b832a3",
+    "f1cd3f1aa34a942e1d9957e652976f6d4d7ee7fbf52bd0a747cd1e3e0da872af",
+    "a9c87fa3863e38373f9130af4b73433c28a029132a904b07eec63875b494738b",
+    "84f84bcc01850e9d34a116049bba82ae18d59fbeb1f2f10ed13d8de388d0123d",
 ];
 
 const RECORDED_HIGH_GROUND: [&str; 6] = [
-    "d63e72fa06046418db49e380f08c47ebd92923242dd6eac213dfb1baf7d0121f",
-    "0e08a079a56249e4fadfba5139800dc5e3fedd610269a4d6f610463053e2e47d",
-    "cc1c576b00b9dd62dd692d99ca3805702a2f93ab1ca5726e2610bbe618450df8",
-    "065a43afdfab4c37686f04a47b49c2fc96563cfe4f9a7002e34d796ebc75afb4",
-    "953d165751df3f52f0011f3d7c550f7ae7267dd0a24446ea6e984d580ef799cf",
-    "9cfe5be297cf04ee308ae2ff0f5d1d2dddd3794d8ee67af6632a14185601718f",
+    "7a80e94176e2e757e7e2bbbcb177bd1486b213d92f4b52d6741b867b8a1a65a6",
+    "befbf69f9d6199a7c80d8987ca55d247e30926e811b78b2f2d8cf404ddbceaf8",
+    "a294e853ab69022edcb21a4acc16e61c8f66cab913008c5c8916ae19052c8472",
+    "df143051397417a0e8916a02eb4030b8947b8a31717c0fb72487e867c0e4581b",
+    "95d2a641d8ef992f71229012b2c5b2639cb304ae2ecfb77445b4938a70a9f936",
+    "44e0402afe6124bb3f702ff90d37becd443552003432be6098546cab03d05d3a",
 ];
