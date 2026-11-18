@@ -475,20 +475,29 @@ mod tests {
             WorldSettings::default().seed,
             1.0,
             WorldgenParams {
+                sea_level_m: 70.0,
                 water: Some(tesserae_core::WaterParams {
                     level_m: 70.0,
                     material: LAVA,
                 }),
-                // Version 2's lake stands at its declared level; version 3's sea at Sea level.
-                generator: 2,
+                // No land rises the metre above Sea level a spawn needs, so the search finds none.
+                // Not zero: the mountains' rise divides by it.
+                landforms: tesserae_core::terrain::LandformParams {
+                    height_m: 0.5,
+                    overhangs: false,
+                    ..default()
+                },
                 ..WorldgenParams::default()
             },
         );
         assert!(
             generator.surface_height_m(0.0, 0.0) < 70.0,
-            "the fixture floods the spawn"
+            "the fixture floods the origin"
         );
-        assert_eq!(spawn_eye(&generator).y, 70.0 + SPAWN_CLEARANCE_M);
+        assert_eq!(
+            spawn_eye(&generator),
+            Vec3::new(0.0, 70.0 + SPAWN_CLEARANCE_M, 0.0)
+        );
     }
 
     /// Whether a Player standing at `feet` overlaps anything `generator`

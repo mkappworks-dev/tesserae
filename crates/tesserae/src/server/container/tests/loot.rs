@@ -13,8 +13,8 @@ use super::*;
 use crate::server::WorldGenerator;
 use crate::server::edit::StructureIntent;
 use crate::server::mods::LoadedMods;
-use crate::server::mods::demo_games::structures::{Generated, SEED, standing};
-use crate::server::mods::demo_games::{Install, at_version_2, loaded};
+use crate::server::mods::demo_games::structures::{Generated, SEED, standing, terra_town_m};
+use crate::server::mods::demo_games::{Install, loaded};
 use crate::world::WorldSettings;
 
 struct Game {
@@ -97,7 +97,11 @@ impl Game {
     /// Every chest of a Template standing whole within `half_m` of `centre_m`, with air above it,
     /// and the Template's name.
     fn chests(&self, centre_m: [f32; 2], half_m: f32) -> (Generated, Vec<([i32; 3], String)>) {
-        let world = Generated::around(&self.generator, centre_m, half_m);
+        self.chests_in(Generated::around(&self.generator, centre_m, half_m))
+    }
+
+    /// [`Self::chests`] of the Templates standing whole in `world`.
+    fn chests_in(&self, world: Generated) -> (Generated, Vec<([i32; 3], String)>) {
         let templates = &self.loaded.tables.templates;
         let mut chests = Vec::new();
         for f in standing(&world, templates, self.size()) {
@@ -230,9 +234,6 @@ fn dropped_counts(app: &App, except: &str) -> BTreeMap<String, u32> {
     counted(names.iter().map(|(n, c)| (&**n, *c)))
 }
 
-/// Terra's town at [`SEED`], about 360 m from the origin.
-const TERRA_TOWN_M: [f32; 2] = [356.0, 30.0];
-
 /// Inside the village a new Player enters, a point its chests lie within 128 m of.
 fn village_m(terra: &Game) -> [f32; 2] {
     terra
@@ -262,10 +263,12 @@ fn settlement_at(terra: &Game, world: &Generated, well: [i32; 3]) -> &'static st
 #[test]
 fn a_settlement_chest_holds_only_its_buildings_table_or_else_its_settlements() {
     let (install, loaded) = loaded("terra", 1.0);
-    let terra = game_of("terra", 1.0, (install, at_version_2(loaded)));
+    let town_m = terra_town_m(&loaded);
+    let terra = game_of("terra", 1.0, (install, loaded));
     let mut seen = BTreeMap::<(&str, bool), usize>::new();
-    for (centre_m, half_m) in [(village_m(&terra), 128.0), (TERRA_TOWN_M, 128.0)] {
-        let (world, chests) = terra.chests(centre_m, half_m);
+    for (centre_m, half_m) in [(village_m(&terra), 128.0), (town_m, 128.0)] {
+        let (world, chests) =
+            terra.chests_in(Generated::around_ground(&terra.generator, centre_m, half_m));
         let wells: Vec<_> = standing(&world, &terra.loaded.tables.templates, 1.0)
             .into_iter()
             .filter(|f| terra.loaded.tables.templates[f.template].name == "terra:well")

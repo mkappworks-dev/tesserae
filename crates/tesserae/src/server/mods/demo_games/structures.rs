@@ -7,7 +7,9 @@ use std::fs;
 use serde_json::Value;
 use tesserae_core::template::{Cell, Template, Turn};
 use tesserae_core::usable::VoxelUse;
-use tesserae_core::{CHUNK_SIZE, Chunk, MaterialId, Voxel, Worldgen};
+use tesserae_core::{
+    Biome, BiomeSettlement, BiomeTable, CHUNK_SIZE, Chunk, MaterialId, Voxel, Worldgen,
+};
 use tesserae_mods::{Kind, ToolKind};
 
 use super::{checkout, loaded, material};
@@ -240,6 +242,10 @@ fn a_world_with_no_game_has_no_template() {
     assert!(loaded.tables.settlements.is_empty());
 }
 
+/// How far below and above a Settlement's ground [`Generated::around_ground`] reaches: its cellars
+/// and its tallest building, with the cut and fill that level it.
+const SETTLED_BAND_M: (f32, f32) = (24.0, 40.0);
+
 /// The Chunks of a square `half_m` either side of a centre, every row a Structure reaches.
 pub(in crate::server) struct Generated {
     pub(in crate::server) chunks: HashMap<[i32; 3], Chunk>,
@@ -253,19 +259,49 @@ impl Generated {
 
     /// The Chunks within `half_m` of `centre_m`.
     pub(in crate::server) fn around(generator: &Worldgen, centre_m: [f32; 2], half_m: f32) -> Self {
+        Self::within(generator, centre_m, half_m, generator.surface_bounds_m())
+    }
+
+    /// [`Self::around`], in only the rows [`SETTLED_BAND_M`] about the ground at `centre_m`: a
+    /// Settlement stands on a level disc, and version 3's whole band is many times as tall.
+    pub(in crate::server) fn around_ground(
+        generator: &Worldgen,
+        centre_m: [f32; 2],
+        half_m: f32,
+    ) -> Self {
+        let ground_m = generator.surface_height_m(centre_m[0], centre_m[1]);
+        let (below, above) = SETTLED_BAND_M;
+        Self::within(
+            generator,
+            centre_m,
+            half_m,
+            (ground_m - below, ground_m + above),
+        )
+    }
+
+    fn within(
+        generator: &Worldgen,
+        centre_m: [f32; 2],
+        half_m: f32,
+        (low, high): (f32, f32),
+    ) -> Self {
         let chunk_m = CHUNK_SIZE as f32 * generator.voxel_size();
-        let (low, high) = generator.surface_bounds_m();
         let [low_x, low_z] = centre_m.map(|c| ((c - half_m) / chunk_m).floor() as i32);
         let [high_x, high_z] = centre_m.map(|c| ((c + half_m) / chunk_m).ceil() as i32);
-        let mut chunks = HashMap::new();
-        for cy in (low / chunk_m).floor() as i32 - 1..=(high / chunk_m).ceil() as i32 + 1 {
-            for cz in low_z..high_z {
+        let rows: Vec<i32> = (low_z..high_z).collect();
+        let ys = (low / chunk_m).floor() as i32 - 1..=(high / chunk_m).ceil() as i32 + 1;
+        let chunks = crate::server::in_parallel(&rows, |&cz| {
+            let mut row = Vec::new();
+            for cy in ys.clone() {
                 for cx in low_x..high_x {
-                    chunks.insert([cx, cy, cz], generator.chunk(cx, cy, cz));
+                    row.push(([cx, cy, cz], generator.chunk(cx, cy, cz)));
                 }
             }
+            row
+        });
+        Generated {
+            chunks: chunks.into_iter().flatten().collect(),
         }
-        Generated { chunks }
     }
 
     /// The highest non-air Voxel of the column `[x, z]`.
@@ -632,19 +668,61 @@ fn copy_sizes(found: &[Found], kinds: &[&str], spawn: [f32; 2], half_m: f32) -> 
     sizes
 }
 
-/// Where Terra's town stands at [`SEED`], about 360 m from spawn: the town's lattice is 416 m, so
-/// the square the other tests scan need not hold one.
-const TERRA_TOWN_M: [f32; 2] = [356.0, 30.0];
+/// How far out [`terra_town_m`] looks: towns stand only on level temperate ground, and at
+/// [`SEED`] the nearest is about 5.2 km from the origin.
+const TOWN_SEARCH_M: f32 = 8192.0;
+
+/// A point inside Terra's town nearest the origin at [`SEED`], found by a copy of `loaded`'s World
+/// whose other Settlement rows name nothing. Each row keeps its place, so a town draws as in the
+/// World. One the World's other Settlements crowd out is found but does not stand, which the
+/// caller's scan of the World catches.
+pub(in crate::server) fn terra_town_m(loaded: &LoadedMods) -> [f32; 2] {
+    let settlements = &loaded.tables.settlements;
+    let town = settlements
+        .iter()
+        .position(|s| s.name == "terra:town")
+        .expect("terra:town") as u16;
+    let mut world = loaded.world.unwrap();
+    let biomes: Vec<Biome> = world
+        .biomes
+        .as_slice()
+        .iter()
+        .map(|b| {
+            let rows: Vec<BiomeSettlement> = b
+                .surface_features
+                .settlements()
+                .iter()
+                .map(|&r| BiomeSettlement {
+                    settlement: if r.settlement == town { town } else { u16::MAX },
+                    ..r
+                })
+                .collect();
+            Biome {
+                surface_features: b.surface_features.with_settlements(&rows).unwrap(),
+                ..*b
+            }
+        })
+        .collect();
+    world.biomes = BiomeTable::new(&biomes)
+        .and_then(|t| t.with_selectors(world.biomes.selectors()))
+        .and_then(|t| t.with_strata(world.biomes.strata()))
+        .unwrap();
+    let towns = Worldgen::new(SEED, 1.0, world)
+        .with_templates(&loaded.tables.templates)
+        .with_settlements(settlements);
+    towns
+        .settlement_spawn_m(TOWN_SEARCH_M)
+        .expect("a town within the search")
+}
 
 #[test]
 fn terra_lays_out_a_town_of_cobbled_roads() {
     let (_install, loaded) = loaded("terra", 1.0);
-    let loaded = super::at_version_2(loaded);
     let templates = &loaded.tables.templates;
     let generator = Worldgen::new(SEED, 1.0, loaded.world.unwrap())
         .with_templates(templates)
         .with_settlements(&loaded.tables.settlements);
-    let world = Generated::around(&generator, TERRA_TOWN_M, 160.0);
+    let world = Generated::around_ground(&generator, terra_town_m(&loaded), 160.0);
     let found = standing(&world, templates, 1.0);
     let cobble = material(&loaded, "terra:cobblestone");
     let rects: Vec<[[i32; 2]; 2]> = found
