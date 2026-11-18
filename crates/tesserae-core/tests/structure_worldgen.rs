@@ -657,16 +657,12 @@ fn a_biome_with_four_structures_sixteen_features_and_two_fields_stays_inline_in_
 
 /// About half the ground under water: the sea, its floor let down below the low land.
 fn lake(structures: &[BiomeStructure]) -> WorldgenParams {
-    let params = flat(structures);
+    let params = common::sea_floor(flat(structures));
     WorldgenParams {
         water: Some(WaterParams {
             level_m: params.sea_level_m,
             material: tesserae_core::testgen::fixtures().water,
         }),
-        landforms: LandformParams {
-            depth_m: params.relief_m,
-            ..params.landforms
-        },
         ..params
     }
 }

@@ -602,13 +602,9 @@ fn kelp_stands_in_the_lake_and_nothing_else_does() {
     );
     // The water is the sea, so the low land's floor is let down under it.
     let with_lake = |features: &[SurfaceFeature]| {
-        let land = flat(features);
+        let land = common::sea_floor(flat(features));
         WorldgenParams {
             water: lake(land.sea_level_m),
-            landforms: tesserae_core::terrain::LandformParams {
-                depth_m: land.relief_m,
-                ..land.landforms
-            },
             ..land
         }
     };

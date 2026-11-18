@@ -5,52 +5,23 @@
     reason = "a test's own maths is not generation"
 )]
 
+mod common;
+
 use std::collections::HashSet;
 
+use common::{CASES, chunk_span, water_near};
 use tesserae_core::testgen::{content, fixtures};
 use tesserae_core::{CHUNK_SIZE, Chunk, Fluid, MaterialId, Worldgen};
-
-/// The golden digests' seeds and Voxel sizes.
-const CASES: [(u64, f32); 4] = [
-    (0x7e55_e2ae_0000_0001, 1.0),
-    (0x7e55_e2ae_0000_0001, 0.5),
-    (0xdead_beef_cafe_f00d, 1.0),
-    (0xdead_beef_cafe_f00d, 0.5),
-];
 
 /// The Chunks within `half_m` of `centre_m`, from 16 m under the ground to 16 m over it.
 fn chunks_near(g: &Worldgen, centre_m: [f32; 2], half_m: f32) -> impl Iterator<Item = Chunk> + '_ {
     let chunk_m = CHUNK_SIZE as f32 * g.voxel_size();
-    let span = move |c: f32| {
-        ((c - half_m) / chunk_m).floor() as i32..=((c + half_m) / chunk_m).floor() as i32
-    };
-    span(centre_m[1]).flat_map(move |cz| {
-        span(centre_m[0]).flat_map(move |cx| {
+    chunk_span(centre_m[1], half_m, chunk_m).flat_map(move |cz| {
+        chunk_span(centre_m[0], half_m, chunk_m).flat_map(move |cx| {
             let h = g.surface_height_m((cx as f32 + 0.5) * chunk_m, (cz as f32 + 0.5) * chunk_m);
-            let rows =
-                ((h - 16.0) / chunk_m).floor() as i32..=((h + 16.0) / chunk_m).floor() as i32;
-            rows.map(move |cy| g.chunk(cx, cy, cz))
+            chunk_span(h, 16.0, chunk_m).map(move |cy| g.chunk(cx, cy, cz))
         })
     })
-}
-
-/// The water at least 2 m deep nearest `from`, searched in rings 16 m apart: a reed leaves a Voxel
-/// of water over its top.
-fn water_near(g: &Worldgen, from: [f32; 2]) -> [f32; 2] {
-    (0..128)
-        .flat_map(|ring| {
-            let r = ring as f32 * 16.0;
-            let n = (ring * 6).max(1);
-            (0..n).map(move |k| {
-                let a = k as f32 * std::f32::consts::TAU / n as f32;
-                [from[0] + r * a.cos(), from[1] + r * a.sin()]
-            })
-        })
-        .find(|&[x, z]| {
-            g.water_surface_m(x, z)
-                .is_some_and(|level_m| level_m - g.surface_height_m(x, z) >= 2.0)
-        })
-        .expect("water within 2 km")
 }
 
 fn materials_near(g: &Worldgen, centre_m: [f32; 2], half_m: f32) -> HashSet<MaterialId> {

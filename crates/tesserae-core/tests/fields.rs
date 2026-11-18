@@ -502,16 +502,15 @@ fn a_field_stands_on_no_water_and_near_water_means_near_the_lake() {
     // ground 0.6 m under the sea, which a 1 m top Voxel fills to the level and a 0.5 m one leaves
     // under water, so only 1 m stood fields there.
     let lake = |features| {
-        let land = level(
+        let land = common::sea_floor(level(
             features,
             Some(WaterParams {
                 level_m: 0.0,
                 material: fixtures().water,
             }),
-        );
+        ));
         WorldgenParams {
             landforms: LandformParams {
-                depth_m: land.relief_m,
                 continent_size_m: 800.0,
                 ..land.landforms
             },

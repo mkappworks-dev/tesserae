@@ -8,8 +8,10 @@
     reason = "a test's own maths is not generation"
 )]
 
+mod common;
 mod digest;
 
+use common::{CASES, chunk_span, water_near};
 use sha2::{Digest, Sha256};
 use tesserae_core::material::MaterialDef;
 use tesserae_core::save::Mapping;
@@ -213,14 +215,6 @@ const RECORDED_HIGH_GROUND: [&str; 6] = [
     "44e0402afe6124bb3f702ff90d37becd443552003432be6098546cab03d05d3a",
 ];
 
-/// The content digests' seeds and Voxel sizes. The sea stands over the origin at each.
-const CASES: [(u64, f32); 4] = [
-    (0x7e55_e2ae_0000_0001, 1.0),
-    (0x7e55_e2ae_0000_0001, 0.5),
-    (0xdead_beef_cafe_f00d, 1.0),
-    (0xdead_beef_cafe_f00d, 0.5),
-];
-
 /// The forest's trunks. Unregistered, since generation never asks the tables; [`names`] names it.
 const WOOD: MaterialId = 200;
 
@@ -271,14 +265,11 @@ fn overlay_of(g: &Worldgen, plants: &PlantTable, chunk: &Chunk) -> ChunkOverlay 
 /// The Chunks within `half_m` of `centre_m` across, from 16 m under its ground to 16 m over it.
 fn boxed(g: &Worldgen, plants: &PlantTable, centre_m: [f32; 2], half_m: f32) -> Boxed {
     let chunk_m = CHUNK_SIZE as f32 * g.voxel_size();
-    let span = |c: f32, half: f32| {
-        ((c - half) / chunk_m).floor() as i32..=((c + half) / chunk_m).floor() as i32
-    };
     let ground_m = g.surface_height_m(centre_m[0], centre_m[1]);
     let mut chunks = Vec::new();
-    for cy in span(ground_m, 16.0) {
-        for cz in span(centre_m[1], half_m) {
-            for cx in span(centre_m[0], half_m) {
+    for cy in chunk_span(ground_m, 16.0, chunk_m) {
+        for cz in chunk_span(centre_m[1], half_m, chunk_m) {
+            for cx in chunk_span(centre_m[0], half_m, chunk_m) {
                 let chunk = g.chunk(cx, cy, cz);
                 let overlay = overlay_of(g, plants, &chunk);
                 chunks.push((chunk, overlay));
@@ -327,34 +318,13 @@ fn sweep(
         })
         .find(|&[cx, cz]| {
             let ground_m = g.surface_height_m(centre(cx), centre(cz));
-            let rows = ((ground_m - 16.0) / chunk_m).floor() as i32
-                ..=((ground_m + 16.0) / chunk_m).floor() as i32;
-            rows.into_iter().any(|cy| {
+            chunk_span(ground_m, 16.0, chunk_m).any(|cy| {
                 let chunk = g.chunk(cx, cy, cz);
                 found(&chunk, &overlay_of(g, plants, &chunk))
             })
         })
         .map(|c| c.map(centre))
         .expect("the content within 256 m")
-}
-
-/// The water at least 2 m deep nearest `from`, searched in rings 16 m apart: a reed leaves a Voxel
-/// of water over its top.
-fn water_near(g: &Worldgen, from: [f32; 2]) -> [f32; 2] {
-    (0..128)
-        .flat_map(|ring| {
-            let r = ring as f32 * 16.0;
-            let n = (ring * 6).max(1);
-            (0..n).map(move |k| {
-                let a = k as f32 * std::f32::consts::TAU / n as f32;
-                [from[0] + r * a.cos(), from[1] + r * a.sin()]
-            })
-        })
-        .find(|&[x, z]| {
-            g.water_surface_m(x, z)
-                .is_some_and(|level_m| level_m - g.surface_height_m(x, z) >= 2.0)
-        })
-        .expect("water within 2 km")
 }
 
 /// Each Voxel's generated Overlay in box order: a 0 where it holds no fluid, else a 1, the fluid's
