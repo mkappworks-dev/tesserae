@@ -11,7 +11,7 @@ use tesserae_core::template::{Cell, Template};
 use tesserae_core::testgen;
 use tesserae_core::{
     Biome, BiomeName, BiomeSettlement, BiomeStructure, BiomeTable, CHUNK_SIZE, ClimateParams,
-    MaterialId, SurfaceFeatures, Voxel, WaterParams, Worldgen, WorldgenParams,
+    MaterialId, SurfaceFeatures, Voxel, Worldgen, WorldgenParams,
 };
 
 /// Thread CPU time (user + system) in nanoseconds.
@@ -232,7 +232,7 @@ fn params(features: SurfaceFeatures) -> WorldgenParams {
             surface_features: features,
         }])
         .unwrap(),
-        ..testgen::world_params_v3()
+        ..testgen::world_params()
     }
 }
 
@@ -240,19 +240,12 @@ fn bare(size: f32) -> Worldgen {
     Worldgen::new(SEED, size, params(SurfaceFeatures::NONE))
 }
 
-/// Steep hills with lakes in their valleys: ground a bridge finds gaps in.
+/// Steep hills by the fixture's sea and rivers: ground a bridge finds gaps in.
 fn valleys(features: SurfaceFeatures) -> WorldgenParams {
-    let hills = WorldgenParams {
+    WorldgenParams {
         relief_m: 32.0,
         feature_size_m: 24.0,
         ..params(features)
-    };
-    WorldgenParams {
-        water: Some(WaterParams {
-            level_m: hills.sea_level_m + hills.relief_m * 5.0 / 12.0,
-            material: testgen::fixtures().water,
-        }),
-        ..hills
     }
 }
 

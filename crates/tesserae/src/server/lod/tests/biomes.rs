@@ -44,7 +44,7 @@ fn params() -> WorldgenParams {
         },
         biomes: BiomeTable::new(&[biome("cold", 0.2, tundra()), biome("warm", 0.8, desert())])
             .unwrap(),
-        ..tesserae_core::testgen::world_params_v3()
+        ..tesserae_core::testgen::world_params()
             .with_default_lake(tesserae_core::testgen::fixtures().water)
     }
 }

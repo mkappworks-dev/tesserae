@@ -356,7 +356,7 @@ mod tests {
     fn parts() -> Parts {
         Parts::select(
             &crate::server::fixture_tables(),
-            tesserae_core::testgen::world_params_v3(),
+            tesserae_core::testgen::world_params(),
         )
         .unwrap()
     }
@@ -639,7 +639,7 @@ mod tests {
         let ground = tesserae_core::testgen::register_ground(&mut tables);
         let params = WorldgenParams {
             ground: Some(ground),
-            ..tesserae_core::testgen::world_params_v3()
+            ..tesserae_core::testgen::world_params()
         };
         let sparse = Parts::select(&tables, params).unwrap();
         assert_eq!(

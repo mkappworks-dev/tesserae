@@ -36,7 +36,7 @@ fn params(biomes: &[Biome]) -> WorldgenParams {
         water: None,
         climate: small_regions(),
         biomes: BiomeTable::new(biomes).unwrap(),
-        ..tesserae_core::testgen::world_params_v3()
+        ..tesserae_core::testgen::world_params()
     })
 }
 

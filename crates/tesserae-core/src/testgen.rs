@@ -158,19 +158,8 @@ pub fn register_water(tables: &mut Tables) -> MaterialId {
     water
 }
 
-/// Version 2's terrain, which the algorithm tests' fixtures were laid out on; a test of version 3
-/// asks for [`world_params_v3`].
+/// The fixture ground under version 3's default landforms, a sea at Sea level and two Biomes.
 pub fn world_params() -> crate::WorldgenParams {
-    crate::WorldgenParams {
-        ground: Some(fixtures().ground),
-        generator: 2,
-        ..crate::WorldgenParams::default()
-    }
-}
-
-/// Version 3's terrain on the fixture ground: its default landforms, a sea at Sea level and two
-/// Biomes, for tests moving off [`world_params`].
-pub fn world_params_v3() -> crate::WorldgenParams {
     let biome = |name, temperature| crate::Biome {
         name: crate::BiomeName::new(name).expect("valid fixture Biome name"),
         temperature,
@@ -189,9 +178,8 @@ pub fn world_params_v3() -> crate::WorldgenParams {
         }),
         biomes: crate::BiomeTable::new(&[biome("cold", 0.25), biome("warm", 0.75)])
             .expect("valid fixture Biomes"),
-        generator: 3,
-        landforms: crate::terrain::LandformParams::default(),
-        ..world_params()
+        ground: Some(fixtures().ground),
+        ..crate::WorldgenParams::default()
     }
 }
 
@@ -353,8 +341,8 @@ mod tests {
     }
 
     #[test]
-    fn version_3_params_generate_ground_water_and_biomes() {
-        let params = world_params_v3();
+    fn the_fixture_params_generate_ground_water_and_biomes() {
+        let params = world_params();
         assert_eq!(params.generator, 3);
         assert_eq!(params.validate(), Ok(()));
         assert_eq!(params.validate_lake(&fixtures().tables), Ok(()));

@@ -24,13 +24,13 @@ use std::sync::{Arc, Mutex};
 
 use crate::chunk::{CHUNK_SIZE, Chunk, ChunkBuilder};
 use crate::climate::{
-    BIOMES_SINCE, Biome, BiomeId, BiomeTable, Climate, ClimateField, ClimateParams, MAX_BIOMES,
-    SkyFogBlend, Strata, SurfaceFeature, SurfaceFeatures, SurfacePlant, SurfacePlantKind,
-    SurfaceTree, SurfaceVine,
+    Biome, BiomeId, BiomeTable, Climate, ClimateField, ClimateParams, MAX_BIOMES, SkyFogBlend,
+    Strata, SurfaceFeature, SurfaceFeatures, SurfacePlant, SurfacePlantKind, SurfaceTree,
+    SurfaceVine,
 };
 use crate::loot::LootTable;
 use crate::mesh::POS_Y;
-use crate::noise::{Fbm3Cache, fbm2, fbm3_cached, fbm3_range};
+use crate::noise::{Fbm3Cache, fbm3_cached, fbm3_range};
 use crate::ore::{OreField, OreMask, OreTable};
 use crate::plant::tree::{Part, fruit_stage, tree_voxels, vine_voxels};
 use crate::plant::{CountRange, Fruit, Stage, Tree, first_fruit_offsets};
@@ -38,7 +38,7 @@ use crate::settlement::Settlement;
 use crate::shape::{MAX_SHAPED_PER_CHUNK, Orientation, SHAPE_SLAB, SHAPE_STAIR};
 use crate::tables::Tables;
 use crate::template::Template;
-use crate::terrain::{CAVERN_MIN_DEPTH_M, Caverns, LANDFORMS_SINCE, LandformParams, Terrain};
+use crate::terrain::{CAVERN_MIN_DEPTH_M, Caverns, LandformParams, Terrain};
 use crate::underground::{
     AQUIFER_WALL_M, CAVE_BIOME_MIN_DEPTH_M, CaveBiomeTable, LAVA_DEPTH_M, LAVA_SEAL_M,
     SPRING_SPACING_M, aquifer_cell, aquifer_rise_m, cave_biome_at,
@@ -72,19 +72,17 @@ pub struct WorldgenParams {
     /// `None` is a World without lakes.
     pub water: Option<WaterParams>,
     pub ground: Option<GroundParams>,
-    /// Read by every Generator version, but only version 2 selects Biomes from it.
     pub climate: ClimateParams,
-    /// Empty is a World with no Biomes. Ignored by Generator version 1.
+    /// Empty is a World with no Biomes.
     pub biomes: BiomeTable,
-    /// Empty is a World without ore. Ignored by Generator version 1.
+    /// Empty is a World without ore.
     pub ores: OreTable,
     /// A World pins the version it was created with, so a revision never reshapes existing terrain.
     pub generator: u32,
-    /// Read by version 3 only.
     pub landforms: LandformParams,
     /// The fluid version 3's deepest caverns hold; `None` leaves them open.
     pub lava: Option<MaterialId>,
-    /// Read by version 3 only; empty leaves the underground as the surface Biomes lay it.
+    /// Empty leaves the underground as the surface Biomes lay it.
     pub cave_biomes: CaveBiomeTable,
 }
 
@@ -95,8 +93,8 @@ pub struct WorldgenParams {
 /// ground and not above it.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct WaterParams {
-    /// The height of the lake's surface. Clamped to the top of the surface
-    /// band, because the Server treats everything above that as open sky.
+    /// Not read: the generator's water stands at Sea level. Kept because the contract's
+    /// `water-params` and the save still carry it.
     pub level_m: f32,
     /// Any registered Material with a fluid row; [`WorldgenParams::validate_lake`]
     /// checks it against the tables.
@@ -163,11 +161,6 @@ impl Default for CaveParams {
     }
 }
 
-/// Where [`WorldgenParams::with_default_lake`] puts the surface, as a fraction
-/// of the relief above sea level: about the 25th percentile of the default
-/// ground, so valleys hold lakes and most land is dry.
-const DEFAULT_WATER_FRACTION: f32 = 5.0 / 12.0;
-
 impl Default for WorldgenParams {
     fn default() -> Self {
         let (sea_level_m, relief_m) = (24.0, 48.0);
@@ -194,11 +187,11 @@ impl Default for WorldgenParams {
 }
 
 impl WorldgenParams {
-    /// These parameters with lakes of `material` in the valleys of their ground.
+    /// These parameters with a sea of `material` up to Sea level, and lakes and rivers inland.
     pub fn with_default_lake(self, material: MaterialId) -> Self {
         WorldgenParams {
             water: Some(WaterParams {
-                level_m: self.sea_level_m + self.relief_m * DEFAULT_WATER_FRACTION,
+                level_m: self.sea_level_m,
                 material,
             }),
             ..self
@@ -311,23 +304,21 @@ impl WorldgenParams {
             "ores.biomes",
             "must name Biomes the World declares",
         )?;
-        if self.generator >= LANDFORMS_SINCE {
-            let land = self.landforms;
-            require(
-                [land.depth_m, land.height_m, land.overhang_m]
-                    .iter()
-                    .all(|m| (0.0..=MAX_HEIGHT_M).contains(m)),
-                "landforms",
-                "must be finite and within 65536 m",
-            )?;
-            require(
-                land.height_m >= self.relief_m && land.depth_m >= 0.0,
-                "landforms.height_m",
-                "must hold the relief above Sea level",
-            )?;
-        }
+        let land = self.landforms;
         require(
-            crate::save::SUPPORTED_GENERATORS.contains(&self.generator),
+            [land.depth_m, land.height_m, land.overhang_m]
+                .iter()
+                .all(|m| (0.0..=MAX_HEIGHT_M).contains(m)),
+            "landforms",
+            "must be finite and within 65536 m",
+        )?;
+        require(
+            land.height_m >= self.relief_m && land.depth_m >= 0.0,
+            "landforms.height_m",
+            "must hold the relief above Sea level",
+        )?;
+        require(
+            self.generator == crate::save::GENERATOR_VERSION,
             "generator",
             "must be a supported Generator version",
         )?;
@@ -679,30 +670,27 @@ pub struct Worldgen {
     /// fold rather than truncate and two seeds differing only above bit 32
     /// still make different worlds.
     seed: u32,
-    /// Hoisted out of the inner loop: `chunk` samples this per column.
-    inv_feature_size: f32,
-    /// Version 3's landforms; `None` under 1 and 2, whose height is the one fBm above.
-    terrain: Option<Terrain>,
-    /// Version 3's large chambers.
+    terrain: Terrain,
+    /// The large chambers.
     caverns: Option<Caverns>,
     /// The highest ground over a column footprint, by its corners and size in metres, so the sky
     /// light does not wait on the band's global top.
     tops: Arc<Mutex<HashMap<[u32; 5], f32>>>,
-    /// Under version 3, what every Chunk stacked over a column of Chunks reads alike, by `[cx, cz]`.
+    /// What every Chunk stacked over a column of Chunks reads alike, by `[cx, cz]`.
     stacks: Arc<Mutex<HashMap<[i32; 2], Arc<Stack>>>>,
     caves: Option<CaveField>,
     /// Whether the smoothing pass runs: configured, and a one-Voxel step is at
     /// least `min_rise_m` at this Voxel size.
     smoothing: bool,
-    /// The lake, its level already clamped to the surface band.
+    /// The World's water, its level Sea level.
     water: Option<WaterParams>,
     climate: ClimateField,
     biome_grounds: Option<BiomeGrounds>,
-    /// Whether any Biome lays strata, which version 3 alone reads.
+    /// Whether any Biome lays strata.
     strata: bool,
-    /// Whether version 3 has cave Biomes to choose.
+    /// Whether there are cave Biomes to choose.
     underground_biomes: bool,
-    /// `None` without ores, and under a Generator version from before them.
+    /// `None` without ores.
     ores: Option<OreField>,
     cave_tuning: Option<CaveTuning>,
     scatter: Option<SurfaceScatter>,
@@ -784,9 +772,7 @@ struct SurfaceScatter {
 
 impl SurfaceScatter {
     fn new(params: &WorldgenParams, voxel_size: f32) -> Option<Self> {
-        if params.generator < BIOMES_SINCE || params.ground.is_none() {
-            return None;
-        }
+        params.ground?;
         let unit_chance = f64::from(voxel_size).powi(2);
         let most = params
             .biomes
@@ -903,10 +889,7 @@ struct CaveTuning {
 impl CaveTuning {
     fn new(params: &WorldgenParams) -> Option<Self> {
         let tuned = |b: &crate::Biome| b.cave_scale.filter(|&s| s != 1.0);
-        if params.caves.is_none()
-            || params.generator < BIOMES_SINCE
-            || !params.biomes.as_slice().iter().any(|b| tuned(b).is_some())
-        {
+        if params.caves.is_none() || !params.biomes.as_slice().iter().any(|b| tuned(b).is_some()) {
             return None;
         }
         let mut offsets = [0.0; MAX_BIOMES];
@@ -936,12 +919,11 @@ struct BiomeGrounds {
 impl BiomeGrounds {
     fn new(params: &WorldgenParams) -> Option<Self> {
         let world = params.ground?;
-        if params.generator < BIOMES_SINCE
-            || !params
-                .biomes
-                .as_slice()
-                .iter()
-                .any(|b| b.ground.is_some_and(|g| g != world))
+        if !params
+            .biomes
+            .as_slice()
+            .iter()
+            .any(|b| b.ground.is_some_and(|g| g != world))
         {
             return None;
         }
@@ -985,37 +967,29 @@ impl Worldgen {
             voxel_size,
             params,
             seed: folded,
-            inv_feature_size: 1.0 / params.feature_size_m,
-            terrain: (params.generator >= LANDFORMS_SINCE).then(|| Terrain::new(folded, &params)),
+            terrain: Terrain::new(folded, &params),
             tops: Arc::default(),
             stacks: Arc::default(),
             // A Game with cave Biomes and no tunnels still has caverns for them.
-            caverns: (params.generator >= LANDFORMS_SINCE
-                && (params.caves.is_some() || !params.cave_biomes.is_empty()))
-            .then(|| Caverns::new(folded, &params)),
+            caverns: (params.caves.is_some() || !params.cave_biomes.is_empty())
+                .then(|| Caverns::new(folded, &params)),
             caves: params.caves.map(|p| CaveField::new(folded, p)),
             smoothing: params
                 .smoothing
                 .is_some_and(|p| EASED_RISE_VOXELS as f32 * voxel_size >= p.min_rise_m),
             water: params.water.map(|w| WaterParams {
-                level_m: if params.generator >= LANDFORMS_SINCE {
-                    params.sea_level_m
-                } else {
-                    w.level_m.min(params.sea_level_m + params.relief_m)
-                },
+                level_m: params.sea_level_m,
                 ..w
             }),
             climate: ClimateField::new(folded, params.climate),
             biome_grounds: BiomeGrounds::new(&params),
-            strata: params.generator >= LANDFORMS_SINCE
-                && params
-                    .biomes
-                    .strata()
-                    .iter()
-                    .any(|s| !s.as_slice().is_empty()),
-            underground_biomes: params.generator >= LANDFORMS_SINCE
-                && !params.cave_biomes.is_empty(),
-            ores: OreField::new(folded, &params.ores).filter(|_| params.generator >= BIOMES_SINCE),
+            strata: params
+                .biomes
+                .strata()
+                .iter()
+                .any(|s| !s.as_slice().is_empty()),
+            underground_biomes: !params.cave_biomes.is_empty(),
+            ores: OreField::new(folded, &params.ores),
             cave_tuning: CaveTuning::new(&params),
             plant_rise_m: scatter
                 .filter(|s| s.rise_m > 0.0)
@@ -1066,7 +1040,7 @@ impl Worldgen {
         self.voxel_size
     }
 
-    /// Under version 3 the lake's level is Sea level; ask [`Self::water_level_m`] for a column's own.
+    /// The sea's level is Sea level; ask [`Self::water_level_m`] for a column's own.
     pub fn water(&self) -> Option<WaterParams> {
         self.water
     }
@@ -1075,20 +1049,17 @@ impl Worldgen {
     /// declared one. The ground there may stand above it, which is a dry column.
     pub fn water_level_m(&self, x_m: f32, z_m: f32) -> Option<f32> {
         let sea = self.water?.level_m;
-        match &self.terrain {
-            None => Some(sea),
-            Some(terrain) => Some(terrain.inland_water_m(x_m, z_m).map_or(sea, |l| l.max(sea))),
-        }
+        Some(
+            self.terrain
+                .inland_water_m(x_m, z_m)
+                .map_or(sea, |l| l.max(sea)),
+        )
     }
 
     /// The dry column nearest `from`, searched outwards to `max_m`, for a Player to spawn on: not
     /// under water, a metre or more above it, no cliff within a few metres, and dry ground all
-    /// round to ~100 m so the Player is on land and not a spit or an islet. Under versions 1
-    /// and 2, whose World has no ocean to start in, it is `from` itself.
+    /// round to ~100 m so the Player is on land and not a spit or an islet.
     pub fn dry_land_near_m(&self, from: [f32; 2], max_m: f32) -> Option<[f32; 2]> {
-        if self.terrain.is_none() {
-            return Some(from);
-        }
         const STEP_M: f32 = 16.0;
         const CLIFF_M: f32 = 6.0;
         const CLIFF_DROP_M: f32 = 4.0;
@@ -1136,7 +1107,7 @@ impl Worldgen {
     /// Where a new Player spawns: inside the Settlement nearest the origin, searched in widening
     /// rings, else the dry land nearest the origin, else the origin.
     pub fn spawn_m(&self) -> [f32; 2] {
-        // Version 3 lays Settlements only on level ground, so the nearest may be kilometres out.
+        // Settlements stand only on level ground, so the nearest may be kilometres out.
         const SETTLEMENT_RINGS_M: [f32; 4] = [512.0, 1024.0, 2048.0, 4096.0];
         const DRY_LAND_SEARCH_M: f32 = 6000.0;
         // A Settlement's disc is level dry ground already; only the origin needs looking round.
@@ -1158,14 +1129,11 @@ impl Worldgen {
         self.climate.at(x_m, z_m)
     }
 
-    /// The Climate at a height: under version 3 the air is colder higher up and wetter near the
-    /// sea, as Weather will read it; under 1 and 2 height changes nothing.
+    /// The Climate at a height: the air is colder higher up and wetter near the sea, as Weather
+    /// will read it.
     pub fn climate_at_height(&self, x_m: f32, y_m: f32, z_m: f32) -> Climate {
         let c = self.climate.at(x_m, z_m);
-        let Some(terrain) = &self.terrain else {
-            return c;
-        };
-        let (_, (_, humidity)) = terrain.site(x_m, z_m);
+        let (_, (_, humidity)) = self.terrain.site(x_m, z_m);
         let (temperature, _) =
             crate::terrain::climate_shift(y_m - self.params.sea_level_m, f32::MAX);
         Climate {
@@ -1174,13 +1142,10 @@ impl Worldgen {
         }
     }
 
-    /// `None` where the World has no Biomes or runs a Generator version from before them. Pure in
-    /// the seed and the position, so the same at every Voxel size and LOD level.
+    /// `None` where the World has no Biomes. Pure in the seed and the position, so the same at
+    /// every Voxel size and LOD level.
     pub fn biome_at(&self, x_m: f32, z_m: f32) -> Option<BiomeId> {
-        if self.params.generator < BIOMES_SINCE {
-            return None;
-        }
-        let site = self.terrain.as_ref().map(|t| t.site(x_m, z_m));
+        let site = self.terrain.site(x_m, z_m);
         self.climate.biome_at(&self.params.biomes, x_m, z_m, site)
     }
 
@@ -1196,13 +1161,9 @@ impl Worldgen {
         )
     }
 
-    /// `None` where no Biome has colours or the Generator version predates them. Pure like
-    /// [`Self::biome_at`].
+    /// `None` where no Biome has colours. Pure like [`Self::biome_at`].
     pub fn sky_fog_at(&self, x_m: f32, z_m: f32) -> Option<SkyFogBlend> {
-        if self.params.generator < BIOMES_SINCE {
-            return None;
-        }
-        let site = self.terrain.as_ref().map(|t| t.site(x_m, z_m));
+        let site = self.terrain.site(x_m, z_m);
         self.climate.sky_fog_at(&self.params.biomes, x_m, z_m, site)
     }
 
@@ -1241,7 +1202,7 @@ impl Worldgen {
                 water_level_m[surface_index(x, z)] = raw[raw_index(x, z)].1;
             }
         }
-        let terrain = self.terrain.as_ref().expect("version 3");
+        let terrain = &self.terrain;
         let overhang_m = std::array::from_fn(|i| {
             let (x, z) = ((i % CHUNK_SIZE) as i32, (i / CHUNK_SIZE) as i32);
             terrain.overhang_amp_m(self.axis_m(cx, x), self.axis_m(cz, z))
@@ -1307,9 +1268,10 @@ impl Worldgen {
     /// push above the surface included. Caves only take away, so they are not asked.
     fn ground_top(&self, gx: i32, gz: i32) -> i32 {
         let (x_m, z_m) = (self.global_m(gx), self.global_m(gz));
-        let Some(terrain) = self.terrain.as_ref().filter(|t| t.overhang_max_m() > 0.0) else {
+        let terrain = &self.terrain;
+        if terrain.overhang_max_m() <= 0.0 {
             return top_index(self.surface_height_m(x_m, z_m), 0.0, self.voxel_size);
-        };
+        }
         let size = CHUNK_SIZE as i32;
         let (cx, cz) = (gx.div_euclid(size), gz.div_euclid(size));
         let (x, z) = (gx.rem_euclid(size), gz.rem_euclid(size));
@@ -1333,11 +1295,13 @@ impl Worldgen {
             .unwrap_or(top)
     }
 
-    /// Version 3's ground and water level over a column before either is reconciled with its
+    /// The ground and water level over a column before either is reconciled with its
     /// neighbours'.
     fn raw_column(&self, x_m: f32, z_m: f32) -> (f32, Option<f32>) {
-        let terrain = self.terrain.as_ref().expect("version 3");
-        (terrain.height_m(x_m, z_m), self.water_level_m(x_m, z_m))
+        (
+            self.terrain.height_m(x_m, z_m),
+            self.water_level_m(x_m, z_m),
+        )
     }
 
     /// The highest Voxel the water over a column fills, if it stands above the ground: the cube
@@ -1410,11 +1374,11 @@ impl Worldgen {
     }
 
     /// `None` when no Biome tunes the caves. Asked at the same metre position as the Voxels.
-    /// Version 3's columns of the Chunk at `[cx, cz]` that no cave may open in: within
+    /// The columns of the Chunk at `[cx, cz]` that no cave may open in: within
     /// [`CAVE_CLEAR_M`] of a Structure's footprint, or of a Settlement's disc, approach paths or
     /// outskirts. `None` where nothing stands near.
     fn cave_free(&self, cx: i32, cz: i32) -> Option<[bool; CHUNK_SIZE * CHUNK_SIZE]> {
-        if self.terrain.is_none() || (self.caves.is_none() && self.caverns.is_none()) {
+        if self.caves.is_none() && self.caverns.is_none() {
             return None;
         }
         let clear = (CAVE_CLEAR_M / self.voxel_size).ceil() as i32;
@@ -1472,15 +1436,12 @@ impl Worldgen {
     }
 
     /// A height in metres above which nothing generated stands anywhere over the footprint
-    /// `min_m..max_m` on the ground plane: the global bound before version 3, and under it the
-    /// footprint's own highest ground with the overhang and what Plants and Structures stand
+    /// `min_m..max_m` on the ground plane: the footprint's own highest ground with the overhang and what Plants and Structures stand
     /// above it, so a Chunk over low ground sees sky without the Chunks above it, which the
     /// Server does not hold, reaching the band's top.
     pub fn surface_top_m(&self, min_m: [f32; 2], max_m: [f32; 2]) -> f32 {
         let (_, global) = self.surface_bounds_m();
-        let Some(terrain) = &self.terrain else {
-            return global;
-        };
+        let terrain = &self.terrain;
         let key = [
             min_m[0].to_bits(),
             min_m[1].to_bits(),
@@ -1523,63 +1484,49 @@ impl Worldgen {
     /// changes: each is built again, to the same result, when it is next asked.
     pub fn forget_regions(&self) {
         self.stacks.lock().expect("stacks").clear();
-        if let Some(terrain) = &self.terrain {
-            terrain.forget_regions();
-        }
+        self.terrain.forget_regions();
     }
 
     /// The ground in metres before water is contained, which is the same at every Voxel size:
     /// [`Self::surface_height_m`] rises from it only by a lip a Voxel wide beside water.
     pub fn terrain_height_m(&self, x_m: f32, z_m: f32) -> f32 {
-        match &self.terrain {
-            Some(terrain) => terrain.height_m(x_m, z_m),
-            None => self.surface_height_m(x_m, z_m),
-        }
+        self.terrain.height_m(x_m, z_m)
     }
 
-    /// Version 3's fields at a column; `None` under version 1 or 2.
-    pub fn landform_fields(&self, x_m: f32, z_m: f32) -> Option<crate::terrain::Fields> {
-        self.terrain.as_ref().map(|t| t.fields(x_m, z_m))
+    /// The landform fields at a column.
+    pub fn landform_fields(&self, x_m: f32, z_m: f32) -> crate::terrain::Fields {
+        self.terrain.fields(x_m, z_m)
     }
 
-    /// The metre height of the surface over a point on the ground plane. Under version 3, that of
-    /// the Voxel column nearest it, with its water contained: what every Chunk stands on.
+    /// The metre height of the surface over a point on the ground plane: that of the Voxel column
+    /// nearest it, with its water contained: what every Chunk stands on.
     pub fn surface_height_m(&self, x_m: f32, z_m: f32) -> f32 {
-        if self.terrain.is_some() {
-            let column = |m: f32| (m / self.voxel_size).round() as i32;
-            let (gx, gz) = (column(x_m), column(z_m));
-            // A Chunk asks at its columns' corners, the Stack's lattice; anything else asks its
-            // own point and the points a Voxel from it.
-            if self.global_m(gx) != x_m || self.global_m(gz) != z_m {
-                let size = self.voxel_size;
-                return self.contained_at_m(
-                    [x_m, z_m],
-                    CARDINALS.map(|(dx, dz, _)| [x_m + dx as f32 * size, z_m + dz as f32 * size]),
-                );
-            }
-            let (cx, cz) = (
-                gx.div_euclid(CHUNK_SIZE as i32),
-                gz.div_euclid(CHUNK_SIZE as i32),
-            );
-            if let Some(s) = self.stacks.lock().expect("stacks").get(&[cx, cz]) {
-                let (x, z) = (
-                    gx.rem_euclid(CHUNK_SIZE as i32),
-                    gz.rem_euclid(CHUNK_SIZE as i32),
-                );
-                return s.surface_m[surface_index(x, z)];
-            }
+        let column = |m: f32| (m / self.voxel_size).round() as i32;
+        let (gx, gz) = (column(x_m), column(z_m));
+        // A Chunk asks at its columns' corners, the Stack's lattice; anything else asks its
+        // own point and the points a Voxel from it.
+        if self.global_m(gx) != x_m || self.global_m(gz) != z_m {
+            let size = self.voxel_size;
             return self.contained_at_m(
                 [x_m, z_m],
-                CARDINALS.map(|(dx, dz, _)| [self.global_m(gx + dx), self.global_m(gz + dz)]),
+                CARDINALS.map(|(dx, dz, _)| [x_m + dx as f32 * size, z_m + dz as f32 * size]),
             );
         }
-        let n = fbm2(
-            x_m * self.inv_feature_size,
-            z_m * self.inv_feature_size,
-            self.seed,
-            self.params.octaves,
+        let (cx, cz) = (
+            gx.div_euclid(CHUNK_SIZE as i32),
+            gz.div_euclid(CHUNK_SIZE as i32),
         );
-        self.params.sea_level_m + n * self.params.relief_m
+        if let Some(s) = self.stacks.lock().expect("stacks").get(&[cx, cz]) {
+            let (x, z) = (
+                gx.rem_euclid(CHUNK_SIZE as i32),
+                gz.rem_euclid(CHUNK_SIZE as i32),
+            );
+            return s.surface_m[surface_index(x, z)];
+        }
+        self.contained_at_m(
+            [x_m, z_m],
+            CARDINALS.map(|(dx, dz, _)| [self.global_m(gx + dx), self.global_m(gz + dz)]),
+        )
     }
 
     /// The metre height above which nothing generated stands in any column
@@ -1627,7 +1574,7 @@ impl Worldgen {
     }
 
     /// The band `surface_height_m` is confined to, as `(lowest, highest)` in
-    /// metres. Sound because [`fbm2`] is normalised to `[0, 1)`; the two
+    /// metres: the landforms' declared band, which clamps every peak. The two
     /// early-outs in [`Worldgen::chunk`] and the Server's vertical streaming
     /// extent are both derived from it.
     ///
@@ -1656,17 +1603,11 @@ impl Worldgen {
 
     /// The band the ground itself is in, below anything a Plant stands up to.
     fn terrain_band_m(&self) -> (f32, f32) {
-        if self.params.generator >= LANDFORMS_SINCE {
-            let land = self.params.landforms;
-            let sea_m = self.params.sea_level_m;
-            return (
-                sea_m - land.depth_m - land.overhang_m,
-                sea_m + land.height_m + land.overhang_m,
-            );
-        }
+        let land = self.params.landforms;
+        let sea_m = self.params.sea_level_m;
         (
-            self.params.sea_level_m,
-            self.params.sea_level_m + self.params.relief_m,
+            sea_m - land.depth_m - land.overhang_m,
+            sea_m + land.height_m + land.overhang_m,
         )
     }
 
@@ -1725,38 +1666,17 @@ impl Worldgen {
             return chunk;
         }
 
-        // The border is only read by smoothing, so a World of cubes does not
-        // pay for it.
-        let reach = if self.smoothing { 1 } else { 0 };
-        let stack = self.terrain.is_some().then(|| self.stack(cx, cz));
-        let surface_m = stack.as_ref().map_or_else(
-            || {
-                let mut surface_m = [0.0f32; SURFACE_W * SURFACE_W];
-                for z in -reach..CHUNK_SIZE as i32 + reach {
-                    for x in -reach..CHUNK_SIZE as i32 + reach {
-                        surface_m[surface_index(x, z)] =
-                            self.surface_height_m(self.axis_m(cx, x), self.axis_m(cz, z));
-                    }
-                }
-                surface_m
-            },
-            |s| s.surface_m,
-        );
+        let stack = self.stack(cx, cz);
+        let surface_m = stack.surface_m;
         // Nothing above the highest column of this Chunk is solid, so nothing
         // there is worth carving. The border is another Chunk's ground.
         let top_m = (0..CHUNK_SIZE as i32)
             .flat_map(|z| (0..CHUNK_SIZE as i32).map(move |x| surface_index(x, z)))
             .map(|i| surface_m[i])
             .fold(f32::MIN, f32::max)
-            + self.terrain.as_ref().map_or(0.0, |t| t.overhang_max_m());
+            + self.terrain.overhang_max_m();
         // A Chunk above every column holds only air and water, which take nothing from a Biome.
-        let columns = if floor_m > top_m {
-            None
-        } else if let Some(stack) = &stack {
-            stack.grounds
-        } else {
-            self.column_grounds(cx, cz)
-        };
+        let columns = if floor_m > top_m { None } else { stack.grounds };
         let reach_box = |caves: &CaveField, scale| {
             let ceiling_m = ceiling_m.min(top_m);
             floor_m <= ceiling_m
@@ -1794,12 +1714,11 @@ impl Worldgen {
 
         // Structures stand on the heightfield, so the density keeps off them and a margin round
         // them, where it would bury a wall or lean over a roof.
-        let built = self
-            .terrain
-            .as_ref()
-            .filter(|t| t.overhang_max_m() > 0.0 && floor_m <= top_m)
-            .map(|_| self.overhang_kept_off([cx, cz]))
-            .unwrap_or_default();
+        let built = if self.terrain.overhang_max_m() > 0.0 && floor_m <= top_m {
+            self.overhang_kept_off([cx, cz])
+        } else {
+            Default::default()
+        };
         let cavern_blocks = self.caverns.as_ref().map(|c| {
             let mut blocks = [false; BLOCKS * BLOCKS * BLOCKS];
             let step_m = (BLOCK as f32) * self.voxel_size;
@@ -1854,7 +1773,7 @@ impl Worldgen {
                 let ground = columns
                     .as_ref()
                     .map_or(ground, |columns| columns[z * CHUNK_SIZE + x]);
-                let ground = if stack.as_ref().is_some_and(|s| s.rock[z * CHUNK_SIZE + x]) {
+                let ground = if stack.rock[z * CHUNK_SIZE + x] {
                     GroundParams {
                         surface: ground.rock,
                         soil: ground.rock,
@@ -1864,23 +1783,14 @@ impl Worldgen {
                     ground
                 };
                 let biome = self.column_biome([cx, cz], [x, z]);
-                let water_level_m = stack.as_ref().map_or_else(
-                    || self.water_level_m(x_m, z_m),
-                    |s| s.water_level_m[surface_index(x as i32, z as i32)],
-                );
+                let water_level_m = stack.water_level_m[surface_index(x as i32, z as i32)];
                 let mut sealed_m = None;
                 let mut wave_m = None;
                 let table_m = self.water_table_m(x_m, z_m);
                 // The density never reaches down to water here or beside, so it opens no hollow
                 // that water would stand or pour into.
-                let amp_m = stack.as_ref().map_or(0.0, |s| {
-                    self.overhang_amp_at(s, &built, [cx, cz], [x as i32, z as i32])
-                });
-                let push_m = |y_m: f32| {
-                    self.terrain
-                        .as_ref()
-                        .map_or(0.0, |t| t.overhang_push_m(x_m, y_m, z_m, amp_m))
-                };
+                let amp_m = self.overhang_amp_at(&stack, &built, [cx, cz], [x as i32, z as i32]);
+                let push_m = |y_m: f32| self.terrain.overhang_push_m(x_m, y_m, z_m, amp_m);
 
                 for y in 0..CHUNK_SIZE {
                     let y_m = floor_m + y as f32 * self.voxel_size;
@@ -2488,13 +2398,13 @@ impl Worldgen {
         ]
     }
 
-    /// Under version 3, rock below this height stays solid: a cave opening onto water would let
+    /// Rock below this height stays solid: a cave opening onto water would let
     /// the fluid simulation pour it in, a hole that keeps changing and being saved.
     fn sealed_below_m(&self, x_m: f32, z_m: f32, ground_m: f32) -> f32 {
         /// Higher than any bank this steep is too far from the water to open onto it.
         const CLEAR_M: f32 = 64.0;
         const REACH_M: f32 = 4.0;
-        if self.terrain.is_none() || self.water.is_none() {
+        if self.water.is_none() {
             return f32::NEG_INFINITY;
         }
         let wet = |x, z| {
@@ -2591,11 +2501,10 @@ impl Worldgen {
     }
 
     /// [`Self::plant_at`] before a planted field clears the column: what the column draws, unless
-    /// under version 3 it is a tree with a stronger tree's trunk within [`CROWN_SPACING`] crowns.
+    /// it is a tree with a stronger tree's trunk within [`CROWN_SPACING`] crowns.
     fn plant_raw(&self, scatter: &SurfaceScatter, gx: i32, gz: i32) -> Option<Standing> {
         let standing = self.plant_drawn(scatter, gx, gz)?;
         if let SurfacePlantKind::Tree(tree) = standing.plant.kind
-            && self.terrain.is_some()
             && self.crowded(scatter, [gx, gz], CROWN_SPACING * tree.canopy_radius_m)
         {
             return None;
@@ -2658,11 +2567,11 @@ impl Worldgen {
                 },
                 Some(w),
             ) if w.material == fluid => {
-                // Version 3 needs a Voxel of water left over the Plant's top.
+                // A Voxel of water is left over the Plant's top.
                 let depth_m = self
                     .water_level_m(x_m, z_m)
                     .map_or(0.0, |level_m| level_m - y_m);
-                if self.terrain.is_some() && depth_m <= size {
+                if depth_m <= size {
                     return None;
                 }
             }
@@ -2718,9 +2627,8 @@ impl Worldgen {
             )
         {
             let room = ((level_m - self.global_m(standing.base[1])) / self.voxel_size).ceil();
-            // Version 3 leaves the surface Voxel as water, so a Plant never punches a hole in the top.
-            let kept = i32::from(self.terrain.is_some());
-            run = run.min((room as i32 - kept).max(1));
+            // The surface Voxel stays water, so a Plant never punches a hole in the top.
+            run = run.min((room as i32 - 1).max(1));
         }
         run
     }
@@ -3187,7 +3095,7 @@ mod tests {
                 caves: None,
                 smoothing: None,
                 water: None,
-                ..crate::testgen::world_params_v3()
+                ..crate::testgen::world_params()
             },
         )
     }
@@ -3199,7 +3107,7 @@ mod tests {
             WorldgenParams {
                 smoothing: None,
                 water: None,
-                ..crate::testgen::world_params_v3()
+                ..crate::testgen::world_params()
             },
         )
     }
@@ -3207,7 +3115,7 @@ mod tests {
     /// Smoothing with no minimum rise, so it fires at any Voxel size: the tests
     /// about where it places things, rather than whether it runs.
     fn smoothed(voxel_size: f32, caves: bool) -> Worldgen {
-        let defaults = crate::testgen::world_params_v3();
+        let defaults = crate::testgen::world_params();
         Worldgen::new(
             SEED,
             voxel_size,
@@ -3244,7 +3152,7 @@ mod tests {
 
     #[test]
     fn no_ground_is_air_without_moving_the_surface() {
-        let params = crate::testgen::world_params_v3();
+        let params = crate::testgen::world_params();
         for size in [1.0, 0.5, 0.25] {
             let solid = Worldgen::new(7, size, params);
             let empty = Worldgen::new(
@@ -3303,7 +3211,7 @@ mod tests {
 
     #[test]
     fn soil_is_a_physical_depth_not_a_voxel_count() {
-        let soil_m = crate::testgen::world_params_v3().soil_depth_m;
+        let soil_m = crate::testgen::world_params().soil_depth_m;
         for voxel_size in [1.0, 0.5, 0.25] {
             let g = terrain(voxel_size);
             let dirt = column(&g, 0, 0)
@@ -3367,8 +3275,8 @@ mod tests {
     /// empty sky in both.
     #[test]
     fn a_different_seed_is_a_different_world() {
-        let a = Worldgen::new(1, 1.0, crate::testgen::world_params_v3());
-        let b = Worldgen::new(2, 1.0, crate::testgen::world_params_v3());
+        let a = Worldgen::new(1, 1.0, crate::testgen::world_params());
+        let b = Worldgen::new(2, 1.0, crate::testgen::world_params());
         assert!((0..200).any(|i| {
             let m = i as f32 * 11.3;
             a.surface_height_m(m, -m) != b.surface_height_m(m, -m)
@@ -3378,8 +3286,8 @@ mod tests {
     #[test]
     fn a_seed_differing_only_in_its_high_bits_is_a_different_world() {
         // Truncating the u64 instead of folding it would make these one world.
-        let a = Worldgen::new(1, 1.0, crate::testgen::world_params_v3());
-        let b = Worldgen::new(1 | (1 << 40), 1.0, crate::testgen::world_params_v3());
+        let a = Worldgen::new(1, 1.0, crate::testgen::world_params());
+        let b = Worldgen::new(1 | (1 << 40), 1.0, crate::testgen::world_params());
         assert!((0..200).any(|i| {
             let m = i as f32 * 11.3;
             a.surface_height_m(m, -m) != b.surface_height_m(m, -m)
@@ -3426,30 +3334,15 @@ mod tests {
             u64::MAX - 1,
             u64::MAX,
         ] {
-            terrain_digest(seed, crate::testgen::world_params_v3());
+            terrain_digest(seed, crate::testgen::world_params());
         }
     }
 
     /// The u64 → u32 fold lets distinct seeds share terrain, which the spec allows.
     #[test]
     fn seeds_whose_halves_cancel_fold_to_the_same_world() {
-        let digest = |seed| terrain_digest(seed, crate::testgen::world_params_v3());
+        let digest = |seed| terrain_digest(seed, crate::testgen::world_params());
         assert_eq!(digest(0x0000_0001_0000_0001), digest(0));
-    }
-
-    /// Pinned before the `fbm2` overflow fix; any change here is a generator
-    /// version bump, because saved Worlds regenerate unchanged Chunks from seed.
-    #[test]
-    fn existing_seeds_keep_their_terrain() {
-        assert_eq!(
-            [0x7e55_e2ae_0000_0001, SEED, 1]
-                .map(|seed| terrain_digest(seed, crate::testgen::world_params())),
-            [
-                15_198_775_482_155_333_751,
-                8_180_675_714_824_193_589,
-                847_418_896_653_193_282
-            ]
-        );
     }
 
     #[test]
@@ -3508,7 +3401,7 @@ mod tests {
 
     #[test]
     fn a_version_3_settlement_is_founded_only_where_its_disc_is_level() {
-        let g = Worldgen::new(SEED, 1.0, crate::testgen::world_params_v3());
+        let g = Worldgen::new(SEED, 1.0, crate::testgen::world_params());
         let reach_m = 40.0;
         let rise = |x: f32, z: f32| {
             let h = g.surface_height_m(x, z);
@@ -3559,7 +3452,7 @@ mod tests {
                 radius_m: 0.001,
                 ..CaveParams::default()
             }),
-            ..crate::testgen::world_params_v3()
+            ..crate::testgen::world_params()
         };
         let g = Worldgen::new(SEED, 1.0, params);
         let shafts = g.caverns.as_ref().unwrap().shafts(
@@ -3710,7 +3603,7 @@ mod tests {
                 },
                 biomes: BiomeTable::new(&[biome("none", 0.1, 0.0), biome("wide", 0.9, 3.0)])
                     .unwrap(),
-                ..crate::testgen::world_params_v3()
+                ..crate::testgen::world_params()
             },
         )
     }
@@ -3822,37 +3715,6 @@ mod tests {
             ..tuned_params
         };
         assert!(chunks(bare(tuned_params.biomes)) == chunks(bare(table([None, None]))));
-    }
-
-    /// Generator version 1 knows no Biomes, so a tuned table moves not a single Voxel.
-    #[test]
-    fn version_1_ignores_cave_tuning() {
-        let tuned_params = WorldgenParams {
-            generator: 2,
-            ..tuned(1.0).params
-        };
-        let chunks = |params: WorldgenParams| -> Vec<Voxel> {
-            let g = Worldgen::new(SEED, 1.0, params);
-            sweep(1.0)
-                .into_iter()
-                .flat_map(|(x, y, z)| voxels(&g.chunk(x, y, z)))
-                .collect()
-        };
-        let mut untuned = tuned_params.biomes.as_slice().to_vec();
-        for b in &mut untuned {
-            b.cave_scale = None;
-        }
-        let plain = chunks(WorldgenParams {
-            biomes: BiomeTable::new(&untuned).unwrap(),
-            ..tuned_params
-        });
-        assert!(
-            plain
-                == chunks(WorldgenParams {
-                    generator: 1,
-                    ..tuned_params
-                })
-        );
     }
 
     #[test]
@@ -4001,7 +3863,7 @@ mod tests {
     #[test]
     fn nothing_below_the_cave_floor_is_carved() {
         let g = caved(1.0);
-        let tunnels = crate::testgen::world_params_v3().caves.unwrap().floor_m;
+        let tunnels = crate::testgen::world_params().caves.unwrap().floor_m;
         let floor = tunnels.min(g.caverns.as_ref().unwrap().floor_m);
         let cell = CHUNK_SIZE as f32;
         let below = (floor / cell).floor() as i32 - 1;
@@ -4027,7 +3889,7 @@ mod tests {
                 floor_m: -250.0,
                 ..CaveParams::default()
             }),
-            ..crate::testgen::world_params_v3()
+            ..crate::testgen::world_params()
         };
         let g = Worldgen::new(SEED, 1.0, params);
         // Version 3's band reaches below the tunnels, and a Chunk inside it is seldom stored
@@ -4132,7 +3994,7 @@ mod tests {
     }
 
     fn flooded(voxel_size: f32, material: MaterialId) -> Worldgen {
-        let params = crate::testgen::world_params_v3();
+        let params = crate::testgen::world_params();
         Worldgen::new(
             COAST,
             voxel_size,
@@ -4189,7 +4051,7 @@ mod tests {
     #[test]
     fn the_default_parameters_have_no_lakes_and_generate_no_fluid() {
         let params = WorldgenParams {
-            ground: crate::testgen::world_params_v3().ground,
+            ground: crate::testgen::world_params().ground,
             ..WorldgenParams::default()
         };
         assert_eq!(params.water, None);
@@ -4246,7 +4108,7 @@ mod tests {
                 1.0,
                 WorldgenParams {
                     smoothing,
-                    ..crate::testgen::world_params_v3()
+                    ..crate::testgen::world_params()
                 }
                 .with_default_lake(material),
             )
@@ -4273,41 +4135,6 @@ mod tests {
             placed > 0 && under_water > 0,
             "the sweep has both stairs and water"
         );
-    }
-
-    /// A level above the surface band would put water where the Server assumes
-    /// open sky, so it stops at the band's top.
-    #[test]
-    fn water_never_rises_above_the_highest_ground() {
-        let (_, [water, _]) = lake_tables();
-        let g = Worldgen::new(
-            SEED,
-            1.0,
-            WorldgenParams {
-                water: Some(WaterParams {
-                    level_m: 10_000.0,
-                    material: water,
-                }),
-                smoothing: None,
-                ..crate::testgen::world_params()
-            },
-        );
-        let (_, highest_m) = g.surface_bounds_m();
-        let cy = (highest_m / CHUNK_SIZE as f32).floor() as i32;
-        let chunk = g.chunk(0, cy, 0);
-        let mut water = 0;
-        for y in 0..CHUNK_SIZE {
-            let y_m = g.axis_m(cy, y as i32);
-            for (x, z) in (0..CHUNK_SIZE).flat_map(|x| (0..CHUNK_SIZE).map(move |z| (x, z))) {
-                let v = chunk.get(x, y, z);
-                if y_m > highest_m {
-                    assert!(v.is_air(), "{v:?} at {y_m} m");
-                } else if v == Voxel::cube(water) {
-                    water += 1;
-                }
-            }
-        }
-        assert!(water > 0, "the band's top Chunk is flooded below the top");
     }
 
     #[test]
@@ -4641,7 +4468,7 @@ mod tests {
         // Against the same World without it, every Voxel is unchanged except
         // that air gained a shaped Voxel.
         let (with, without) = (smoothed(1.0, true), {
-            let defaults = crate::testgen::world_params_v3();
+            let defaults = crate::testgen::world_params();
             Worldgen::new(
                 SEED,
                 1.0,
@@ -4675,7 +4502,7 @@ mod tests {
         // A one-Voxel step is `voxel_size` metres, so the pass fires exactly
         // when that clears the threshold, whatever the Voxel size.
         let fires = |voxel_size: f32, min_rise_m: f32| {
-            let defaults = crate::testgen::world_params_v3();
+            let defaults = crate::testgen::world_params();
             let g = Worldgen::new(
                 COAST,
                 voxel_size,
@@ -4707,7 +4534,7 @@ mod tests {
 
     #[test]
     fn the_default_smooths_a_1m_world_and_not_a_half_metre_one() {
-        let defaults = crate::testgen::world_params_v3();
+        let defaults = crate::testgen::world_params();
         let any = |voxel_size: f32| {
             let g = Worldgen::new(COAST, voxel_size, defaults);
             sweep(voxel_size)
@@ -4724,7 +4551,7 @@ mod tests {
         // only if the pass could not have placed anything there.
         let g = smoothed(1.0, true);
         let (lowest, highest) = g.surface_bounds_m();
-        let soil = crate::testgen::world_params_v3().soil_depth_m;
+        let soil = crate::testgen::world_params().soil_depth_m;
         let cell = CHUNK_SIZE as f32;
         let mut seen = 0;
         for cx in -4..4 {
@@ -4754,12 +4581,12 @@ mod tests {
                 .materials
                 .register(crate::testgen::WATER_MATERIAL)
                 .unwrap();
-            let lake = |material| crate::testgen::world_params_v3().with_default_lake(material);
+            let lake = |material| crate::testgen::world_params().with_default_lake(material);
             for material in fluids {
                 assert_eq!(lake(material).validate_lake(&tables), Ok(()));
             }
             assert_eq!(
-                crate::testgen::world_params_v3().validate_lake(&tables),
+                crate::testgen::world_params().validate_lake(&tables),
                 Ok(())
             );
             for (material, rule) in [
@@ -4787,7 +4614,7 @@ mod tests {
 
         #[test]
         fn the_default_is_valid_with_and_without_its_options() {
-            let d = crate::testgen::world_params_v3();
+            let d = crate::testgen::world_params();
             assert_eq!(d.validate(), Ok(()));
             let bare = WorldgenParams {
                 caves: None,
@@ -4801,7 +4628,7 @@ mod tests {
         #[test]
         fn a_value_that_is_not_a_finite_number_names_its_field() {
             for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
-                let d = crate::testgen::world_params_v3();
+                let d = crate::testgen::world_params();
                 let cave = CaveParams::default();
                 assert_eq!(
                     field(WorldgenParams {
@@ -4865,7 +4692,7 @@ mod tests {
 
         #[test]
         fn sizes_depths_and_relief_have_their_floors() {
-            let d = crate::testgen::world_params_v3();
+            let d = crate::testgen::world_params();
             assert_eq!(
                 field(WorldgenParams {
                     relief_m: -1.0,
@@ -4930,7 +4757,7 @@ mod tests {
 
         #[test]
         fn octaves_run_from_one_to_the_lattices_reach() {
-            let d = crate::testgen::world_params_v3();
+            let d = crate::testgen::world_params();
             assert_eq!(field(WorldgenParams { octaves: 0, ..d }), "octaves");
             assert_eq!(
                 field(WorldgenParams {
@@ -4964,7 +4791,7 @@ mod tests {
 
         #[test]
         fn the_surface_band_stays_within_reach_of_the_origin() {
-            let d = crate::testgen::world_params_v3();
+            let d = crate::testgen::world_params();
             assert_eq!(
                 field(WorldgenParams {
                     sea_level_m: 1e9,

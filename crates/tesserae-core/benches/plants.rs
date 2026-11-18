@@ -325,7 +325,7 @@ fn params(features: &[SurfaceFeature]) -> WorldgenParams {
             humidity_size_m: 64.0,
         },
         biomes: BiomeTable::new(&[biome]).unwrap(),
-        ..testgen::world_params_v3()
+        ..testgen::world_params()
     }
 }
 

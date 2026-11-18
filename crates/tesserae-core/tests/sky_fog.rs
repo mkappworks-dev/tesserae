@@ -35,12 +35,11 @@ fn two_coloured() -> [Biome; 2] {
     ]
 }
 
-fn generator_with(seed: u64, voxel_size: f32, biomes: &[Biome], generator: u32) -> Worldgen {
+fn generator_with(seed: u64, voxel_size: f32, biomes: &[Biome]) -> Worldgen {
     Worldgen::new(
         seed,
         voxel_size,
         WorldgenParams {
-            generator,
             climate: ClimateParams {
                 temperature_size_m: 200.0,
                 humidity_size_m: 200.0,
@@ -52,7 +51,7 @@ fn generator_with(seed: u64, voxel_size: f32, biomes: &[Biome], generator: u32) 
 }
 
 fn generator(biomes: &[Biome]) -> Worldgen {
-    generator_with(SEED, 1.0, biomes, tesserae_core::save::GENERATOR_VERSION)
+    generator_with(SEED, 1.0, biomes)
 }
 
 /// Past one Climate feature size in each direction, so several regions are crossed.
@@ -71,12 +70,6 @@ fn a_world_with_no_biome_colours_has_none_to_send() {
         let g = generator(biomes);
         assert!(grid().all(|(x, z)| g.sky_fog_at(x, z).is_none()));
     }
-}
-
-#[test]
-fn a_generator_from_before_biomes_has_none_to_send() {
-    let g = generator_with(SEED, 1.0, &two_coloured(), 1);
-    assert!(grid().all(|(x, z)| g.sky_fog_at(x, z).is_none()));
 }
 
 #[test]
@@ -161,12 +154,7 @@ fn walking_across_a_border_never_steps() {
 fn the_colours_are_the_same_at_every_voxel_size_and_lod_level() {
     let base = generator(&two_coloured());
     for voxel_size in [0.25, 0.5, 2.0, 4.0, 16.0] {
-        let other = generator_with(
-            SEED,
-            voxel_size,
-            &two_coloured(),
-            tesserae_core::save::GENERATOR_VERSION,
-        );
+        let other = generator_with(SEED, voxel_size, &two_coloured());
         assert!(
             grid().all(|(x, z)| base.sky_fog_at(x, z) == other.sky_fog_at(x, z)),
             "differs at voxel size {voxel_size}"
@@ -178,12 +166,7 @@ fn the_colours_are_the_same_at_every_voxel_size_and_lod_level() {
 fn the_colours_are_a_pure_function_of_the_seed() {
     let (a, b) = (generator(&two_coloured()), generator(&two_coloured()));
     assert!(grid().all(|(x, z)| a.sky_fog_at(x, z) == b.sky_fog_at(x, z)));
-    let other = generator_with(
-        SEED + 1,
-        1.0,
-        &two_coloured(),
-        tesserae_core::save::GENERATOR_VERSION,
-    );
+    let other = generator_with(SEED + 1, 1.0, &two_coloured());
     assert!(grid().any(|(x, z)| a.sky_fog_at(x, z) != other.sky_fog_at(x, z)));
 }
 

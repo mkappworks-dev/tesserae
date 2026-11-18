@@ -747,7 +747,7 @@ fn a_shaft_dug_under_a_generated_lake_fills_from_it() {
     let generator = Worldgen::new(
         7,
         1.0,
-        crate::testgen::world_params_v3().with_default_lake(water()),
+        crate::testgen::world_params().with_default_lake(water()),
     );
     let level = generator.water().expect("the World has a lake").level_m as i32;
     let tables = tables();

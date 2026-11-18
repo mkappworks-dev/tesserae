@@ -277,11 +277,11 @@ table. A Declaration built against the earlier 0.3 text needs a rebuild.
 A `biome-def` then gained `selectors`, an optional `biome-selectors` record of
 `selector-range`s for `altitude`, `coast`, `erosion` and `river` and an optional
 `relief`, and `strata`, an optional list of up to 8 `biome-stratum` records
-(`material`, `depth-min-m`, `depth-max-m`); Generator version 3 alone reads
-them, and absent they ask nothing. `world-params` gained `lava`, an optional
-fluid name, and `cave-biomes`, an optional list of up to 16 `cave-biome-def`
-records with their `cave-feature`s; both are the Game's alone. A Declaration
-built against the earlier 0.3 text needs a rebuild.
+(`material`, `depth-min-m`, `depth-max-m`); absent, they ask nothing.
+`world-params` gained `lava`, an optional fluid name, and `cave-biomes`, an
+optional list of up to 16 `cave-biome-def` records with their `cave-feature`s;
+both are the Game's alone. A Declaration built against the earlier 0.3 text
+needs a rebuild.
 
 A `settlement-def`, a `settlement-plot` and a `biome-def` then each gained an
 optional `loot`, last, a `loot-table` record: `rolls-min` and `rolls-max` (at

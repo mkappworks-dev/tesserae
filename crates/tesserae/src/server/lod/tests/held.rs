@@ -477,7 +477,7 @@ impl Lake {
                     level_m: self.level_m,
                     material: lake_fluid(),
                 }),
-                ..tesserae_core::testgen::world_params_v3()
+                ..tesserae_core::testgen::world_params()
             },
         )
     }

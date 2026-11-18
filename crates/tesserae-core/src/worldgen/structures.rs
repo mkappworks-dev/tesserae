@@ -14,7 +14,7 @@ use super::fields::{hashed, mix, unit};
 use super::ground::SAMPLE_M;
 use super::{Footprint, Worldgen, top_index};
 use crate::chunk::{CHUNK_SIZE, Chunk};
-use crate::climate::{BIOMES_SINCE, BiomeId, BiomeStructure};
+use crate::climate::{BiomeId, BiomeStructure};
 use crate::template::{Cell, Template, Turn};
 use crate::voxel::Voxel;
 use crate::worldgen::WorldgenParams;
@@ -74,9 +74,7 @@ impl StructurePass {
         voxel_size: f32,
         templates: &[Template],
     ) -> Option<Self> {
-        if params.generator < BIOMES_SINCE || params.ground.is_none() {
-            return None;
-        }
+        params.ground?;
         let mut rows = Vec::new();
         let mut listed = vec![0; params.biomes.as_slice().len()];
         for (b, biome) in params.biomes.as_slice().iter().enumerate() {

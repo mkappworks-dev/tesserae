@@ -13,7 +13,7 @@ const BASALT: MaterialId = 201;
 /// How far a stratum's edges may undulate, and a Voxel of rounding.
 const SLACK_M: f32 = 3.0 + 1.0;
 
-fn params(generator: u32, strata: &[Stratum]) -> WorldgenParams {
+fn params(strata: &[Stratum]) -> WorldgenParams {
     let plain = Biome {
         name: BiomeName::new("t:plain").unwrap(),
         temperature: 0.5,
@@ -24,14 +24,13 @@ fn params(generator: u32, strata: &[Stratum]) -> WorldgenParams {
         surface_features: SurfaceFeatures::NONE,
     };
     WorldgenParams {
-        generator,
         caves: None,
         biomes: BiomeTable::new(&[plain])
             .unwrap()
             .with_strata(&[Strata::new(strata).unwrap()])
             .unwrap(),
         water: None,
-        ..tesserae_core::testgen::world_params_v3()
+        ..tesserae_core::testgen::world_params()
     }
 }
 
@@ -113,7 +112,7 @@ fn solid_columns(columns: &mut Columns, depth_m: f32) -> Vec<(f32, f32, Column)>
 fn strata_lie_at_their_depth_and_thickness_the_same_at_every_voxel_size() {
     let mut tops = Vec::new();
     for size in [1.0, 0.5] {
-        let mut columns = Columns::new(Worldgen::new(SEED, size, params(3, &bedded())));
+        let mut columns = Columns::new(Worldgen::new(SEED, size, params(&bedded())));
         let solid = solid_columns(&mut columns, 48.0);
         assert!(
             solid.len() >= 50,
@@ -146,26 +145,13 @@ fn strata_lie_at_their_depth_and_thickness_the_same_at_every_voxel_size() {
 
 #[test]
 fn strata_undulate_rather_than_rule_a_line() {
-    let mut columns = Columns::new(Worldgen::new(SEED, 0.5, params(3, &bedded())));
+    let mut columns = Columns::new(Worldgen::new(SEED, 0.5, params(&bedded())));
     let starts: std::collections::HashSet<i32> = solid_columns(&mut columns, 12.0)
         .iter()
         .filter_map(|(_, _, c)| layer(c, CLAY, 0.5))
         .map(|(first_m, _)| (first_m * 2.0).round() as i32)
         .collect();
     assert!(starts.len() >= 4, "the clay starts at only {starts:?}");
-}
-
-#[test]
-fn version_2_lays_no_strata() {
-    let mut columns = Columns::new(Worldgen::new(SEED, 1.0, params(2, &bedded())));
-    let solid = solid_columns(&mut columns, 48.0);
-    assert!(solid.len() >= 50, "only {} solid columns", solid.len());
-    for (x, z, column) in solid {
-        assert!(
-            column.iter().all(|&(_, m)| m != CLAY && m != BASALT),
-            "({x}, {z})"
-        );
-    }
 }
 
 #[test]

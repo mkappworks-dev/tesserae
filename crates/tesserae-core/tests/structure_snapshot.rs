@@ -91,7 +91,7 @@ fn spaced(spacing_m: f32) -> WorldgenParams {
         },
         biomes: BiomeTable::new(&[biome]).unwrap(),
         water: None,
-        ..tesserae_core::testgen::world_params_v3()
+        ..tesserae_core::testgen::world_params()
     }
 }
 

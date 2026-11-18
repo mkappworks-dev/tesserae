@@ -10,11 +10,8 @@ use tesserae_core::{CHUNK_SIZE, Chunk, Voxel, Worldgen, WorldgenParams, downsamp
 
 const SEEDS: [u64; 3] = [0x7e55_e2ae_0000_0001, 1, 0xdead_beef_cafe_f00d];
 
-fn params(generator: u32, caves: bool) -> WorldgenParams {
-    let defaults = match generator {
-        2 => tesserae_core::testgen::world_params(),
-        _ => tesserae_core::testgen::world_params_v3(),
-    };
+fn params(caves: bool) -> WorldgenParams {
+    let defaults = tesserae_core::testgen::world_params();
     WorldgenParams {
         sea_level_m: 24.0,
         relief_m: 24.0,
@@ -27,13 +24,13 @@ fn params(generator: u32, caves: bool) -> WorldgenParams {
     }
 }
 
-fn source(seed: u64, generator: u32, level: u32, caves: bool) -> Worldgen {
+fn source(seed: u64, level: u32, caves: bool) -> Worldgen {
     let params = if level == 1 {
-        params(generator, caves)
+        params(caves)
     } else {
         WorldgenParams {
             smoothing: None,
-            ..params(generator, caves)
+            ..params(caves)
         }
     };
     Worldgen::new(seed, 2f32.powi(level as i32 - 1), params)
@@ -65,15 +62,11 @@ fn hash(digest: &mut Sha256, chunk: &Chunk) {
     }
 }
 
-/// The box's middle column along x and its floor and ceiling, in metres. Version 2's land lies
-/// inside a fixed band at the origin; version 3's anywhere in its own, and under the sea a
-/// tunnel never opens, so its box is hung from the first ground east of the origin standing
-/// well above Sea level.
-fn box_m(seed: u64, generator: u32) -> (f32, f32, f32) {
-    if generator == 2 {
-        return (0.0, -24.0, 48.0);
-    }
-    let g = source(seed, generator, 1, true);
+/// The box's middle column along x and its floor and ceiling, in metres. Land lies anywhere in
+/// the band, and under the sea a tunnel never opens, so the box is hung from the first ground east
+/// of the origin standing well above Sea level.
+fn box_m(seed: u64) -> (f32, f32, f32) {
+    let g = source(seed, 1, true);
     let x_m = (0..)
         .map(|i| i as f32 * 128.0)
         .find(|&x| g.surface_height_m(x, 0.0) > g.params().sea_level_m + 10.0)
@@ -83,11 +76,11 @@ fn box_m(seed: u64, generator: u32) -> (f32, f32, f32) {
 }
 
 /// Every child and every coarse Chunk of a level over the box, in order.
-fn level_digest(seed: u64, generator: u32, level: u32, caves: bool) -> String {
-    let source = source(seed, generator, level, caves);
+fn level_digest(seed: u64, level: u32, caves: bool) -> String {
+    let source = source(seed, level, caves);
     let shapes = &fixtures().tables.shapes;
     let cell_m = CHUNK_SIZE as f32 * 2f32.powi(level as i32);
-    let (x_m, lowest, highest) = box_m(seed, generator);
+    let (x_m, lowest, highest) = box_m(seed);
     let middle = (x_m / cell_m).floor() as i32;
     let rows = (lowest / cell_m).floor() as i32..=(highest / cell_m).floor() as i32;
     let mut digest = Sha256::new();
@@ -116,41 +109,34 @@ fn level_digest(seed: u64, generator: u32, level: u32, caves: bool) -> String {
         .collect()
 }
 
-fn digests(generator: u32) -> Vec<String> {
+fn digests() -> Vec<String> {
     SEEDS
         .iter()
-        .flat_map(|&seed| (1..=3).map(move |level| level_digest(seed, generator, level, true)))
+        .flat_map(|&seed| (1..=3).map(move |level| level_digest(seed, level, true)))
         .collect()
 }
 
 #[test]
 fn coarse_generation_makes_the_recorded_chunks() {
-    assert_eq!(digests(3), RECORDED_V3);
-}
-
-#[test]
-fn coarse_generation_makes_the_recorded_version_2_chunks() {
-    assert_eq!(digests(2), RECORDED);
+    assert_eq!(digests(), RECORDED);
 }
 
 /// Without this the digests could be of a box no tunnel reaches.
 #[test]
 fn the_box_holds_caves_at_every_level_and_seed() {
-    for generator in [2, 3] {
-        for seed in SEEDS {
-            for level in 1..=3 {
-                assert_ne!(
-                    level_digest(seed, generator, level, true),
-                    level_digest(seed, generator, level, false),
-                    "version {generator} seed {seed:#x} level {level}"
-                );
-            }
+    for seed in SEEDS {
+        for level in 1..=3 {
+            assert_ne!(
+                level_digest(seed, level, true),
+                level_digest(seed, level, false),
+                "seed {seed:#x} level {level}"
+            );
         }
     }
 }
 
 /// Seed by seed, levels 1 to 3.
-const RECORDED_V3: [&str; 9] = [
+const RECORDED: [&str; 9] = [
     "0dac0ab4e3f47e573f129ee13edaa7e9b32b6085ee904fcd8941924640a768eb",
     "4143c6812bd9c83c95b95936e5b40ddddbecd16baecd0441ad8e838728f3de9b",
     "828c72d635866191045ea71815be1f73360b9d818defedfd30d1401b267c5077",
@@ -160,17 +146,4 @@ const RECORDED_V3: [&str; 9] = [
     "4e9208c14abe8f725e335fed32544932fb5bc109efacae51a13eed3d5afe1081",
     "8b0871bd21530d3c966a53a5d87c5c60de3d3ba3002587a21a38a712ee2ae50a",
     "fc5d6ec5b8ec83281061b05989ffbe98d2abc007617196d64a2ee4a3c58dbf07",
-];
-
-/// Version 2's, seed by seed, levels 1 to 3.
-const RECORDED: [&str; 9] = [
-    "98c2b7a7339a8a9a27026b11f10c7b7d7a6f3ff6df44677a62995e626a1653ba",
-    "6c85e4de887343eb19cb93a9ed4f9dde6425f5b230edfbc1ff36f92d7db3894e",
-    "b72260c8135e0d9fbfc2dc7d35c70276fc591030ef6113d012def23c4ab7e11e",
-    "77ec008a50ece99498a033c18593d7dc55ff33cb17ffe706398d1487d08d1e06",
-    "b0406c89466629eb046c391631deab65c647cbbf31a98bbaf900cce7aa338c57",
-    "77b46bc33e7dbd3e066ae5b922e3cc230351900ef98ead899ca8b4020b2b6db4",
-    "ea1a2afd94daf783aa71c80d9ab670e95a3754a3ba379269cf420b151393e558",
-    "bc2806f705d1f542fac132f127584979c0e9ec23124ef92856ecabb2ea639ac8",
-    "0cc8e5edcf2eeb58024dff406a1b65ad8c92af1fe38e723e365c5e5e4d278fff",
 ];

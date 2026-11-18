@@ -1,8 +1,8 @@
 use tesserae_core::WorldgenParams;
 use tesserae_core::terrain::LandformParams;
 
-/// Version 3's land held between Sea level and `relief_m` above it, with no sea floor and no
-/// overhangs: version 2's band, for a test of what stands on the ground rather than its shape.
+/// The land held between Sea level and `relief_m` above it, with no sea floor and no overhangs,
+/// for a test of what stands on the ground rather than its shape.
 pub fn lowland(params: WorldgenParams) -> WorldgenParams {
     WorldgenParams {
         landforms: LandformParams {

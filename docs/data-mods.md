@@ -102,8 +102,7 @@ World with no ground is empty air whatever its Biomes name.
 An ore is a blob of `vein-size-m` metres at most, in a cube of that edge; a
 `rarity` fraction of the cubes hold one. It replaces rock only, never soil, the
 surface, water or air, inside its depth band and its Biomes. Caves carve the ore
-with the rock, the farthest LOD levels carry none, and a World on Generator
-version 1 has none.
+with the rock, and the farthest LOD levels carry none.
 
 A Biome row may also add `sky-fog = { sky = [r, g, b], fog = [r, g, b] }`, sRGB
 bytes, both together or neither. `sky` is the colour behind the terrain and

@@ -230,7 +230,7 @@ fn check_ore(game: &str, material_name: &str, only: &[&str]) {
     let generator = Worldgen::new(7, 1.0, params);
     // The patch around a column of each Biome crosses into its neighbours, so every Voxel is judged
     // by its own column, and a Biome the ore leaves out must still show none of it.
-    // A Biome of the land's shape is not chosen before version 3.
+    // A Biome of the land's shape may find no column it admits near here.
     for biome in (0..params.biomes.len() as u8)
         .map(BiomeId::new)
         .filter(|b| !params.biomes.selectors()[b.index()].is_ranged())

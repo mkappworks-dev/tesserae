@@ -449,7 +449,6 @@ impl Guest for Meadow {
             humidity_size_m: CLIMATE_SIZE_M,
         });
         world.cave_biomes = Some(landforms::caves());
-        // Under Sea level, where version 2's ground never sinks, so only version 3 has a sea.
         world.water = Some(tesserae::mods::content::WaterParams {
             level_m: SEA_LEVEL_M - 1.0,
             material: "waters:water".into(),

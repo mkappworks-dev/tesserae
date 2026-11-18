@@ -569,7 +569,7 @@ mod tests {
 
     #[test]
     fn the_cave_eye_is_in_open_air_under_cover_with_room_to_turn() {
-        let g = tesserae_core::Worldgen::new(7, 1.0, tesserae_core::testgen::world_params_v3());
+        let g = tesserae_core::Worldgen::new(7, 1.0, tesserae_core::testgen::world_params());
         let eye = cave_eye(&g, Vec3::ZERO).expect("a cave near the origin");
         let size = tesserae_core::CHUNK_SIZE as i32;
         let open = |p: Vec3| {

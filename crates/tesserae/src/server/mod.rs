@@ -156,32 +156,10 @@ pub fn plugin(app: &mut App) {
     }
 }
 
-/// The Generator version a new World is created under. Under `dev`, `TESSERAE_GENERATOR=3` picks
-/// the version 3 terrain while it is not yet the default.
-#[cfg(feature = "dev")]
-pub(crate) fn new_world_generator() -> u32 {
-    generator_from(|name| std::env::var(name).ok())
-}
-
-#[cfg(feature = "dev")]
-fn generator_from(env: impl Fn(&str) -> Option<String>) -> u32 {
-    env("TESSERAE_GENERATOR")
-        .and_then(|v| v.parse().ok())
-        .filter(|v| tesserae_core::save::SUPPORTED_GENERATORS.contains(v))
-        .unwrap_or(tesserae_core::save::GENERATOR_VERSION)
-}
-
-#[cfg(not(feature = "dev"))]
-pub(crate) fn new_world_generator() -> u32 {
-    tesserae_core::save::GENERATOR_VERSION
-}
-
-/// What the World is generated with. Under `dev`, `TESSERAE_GENERATOR=3` makes a new World with the
-/// version 3 terrain, and `TESSERAE_CAVES=0` and
-/// `TESSERAE_SMOOTHING=0` turn the caves and the slope-smoothing stairs off, so
-/// a streaming change can be measured with and without them on one binary and
-/// not across two builds. `TESSERAE_WATER_LEVEL_M` moves the lake to that
-/// height, and `=off` takes it out.
+/// What the World is generated with. Under `dev`, `TESSERAE_CAVES=0`,
+/// `TESSERAE_SMOOTHING=0` and `TESSERAE_WATER=0` turn the caves, the
+/// slope-smoothing stairs and the water off, so a streaming change can be
+/// measured with and without them on one binary and not across two builds.
 #[cfg(feature = "dev")]
 fn worldgen_params(params: Option<WorldgenParams>) -> WorldgenParams {
     dev_worldgen_params(params.unwrap_or_default(), |name| std::env::var(name).ok())
@@ -194,11 +172,6 @@ fn dev_worldgen_params(
 ) -> WorldgenParams {
     let off = |name: &str| env(name).is_some_and(|v| v == "0");
     WorldgenParams {
-        generator: if env("TESSERAE_GENERATOR").is_some() {
-            generator_from(&env)
-        } else {
-            params.generator
-        },
         caves: if off("TESSERAE_CAVES") {
             None
         } else {
@@ -209,25 +182,10 @@ fn dev_worldgen_params(
         } else {
             params.smoothing
         },
-        water: match (env("TESSERAE_WATER_LEVEL_M").as_deref(), params.water) {
-            (Some("off"), _) => None,
-            (Some(_), None) => {
-                warn!(
-                    "TESSERAE_WATER_LEVEL_M: the Game names no lake fluid, so there is no lake to move"
-                );
-                None
-            }
-            (Some(v), Some(water)) => {
-                Some(
-                    v.parse()
-                        .ok()
-                        .map_or(water, |level_m| tesserae_core::WaterParams {
-                            level_m,
-                            ..water
-                        }),
-                )
-            }
-            (None, water) => water,
+        water: if off("TESSERAE_WATER") {
+            None
+        } else {
+            params.water
         },
         ..params
     }
@@ -341,32 +299,6 @@ mod tests {
 
     #[cfg(feature = "dev")]
     #[test]
-    fn the_dev_generator_override_takes_a_supported_version_only() {
-        let with = |v: &'static str| generator_from(move |_| Some(v.into()));
-        assert_eq!(with("3"), 3);
-        assert_eq!(with("1"), 1);
-        for ignored in ["0", "9", "three", ""] {
-            assert_eq!(with(ignored), tesserae_core::save::GENERATOR_VERSION);
-        }
-        assert_eq!(
-            generator_from(|_| None),
-            tesserae_core::save::GENERATOR_VERSION
-        );
-    }
-
-    #[cfg(feature = "dev")]
-    #[test]
-    fn the_dev_generator_override_reaches_the_parameters_a_new_world_runs() {
-        let params = dev_worldgen_params(WorldgenParams::default(), |name| {
-            (name == "TESSERAE_GENERATOR").then(|| "3".into())
-        });
-        assert_eq!(params.generator, 3);
-        let params = dev_worldgen_params(WorldgenParams::default(), |_| None);
-        assert_eq!(params.generator, tesserae_core::save::GENERATOR_VERSION);
-    }
-
-    #[cfg(feature = "dev")]
-    #[test]
     fn dev_overrides_apply_after_the_loaded_world_parameters() {
         let loaded = WorldgenParams {
             relief_m: 12.0,
@@ -375,35 +307,19 @@ mod tests {
         .with_default_lake(LAKE);
         assert!(loaded.caves.is_some());
         let params = dev_worldgen_params(loaded, |name| match name {
-            "TESSERAE_CAVES" | "TESSERAE_SMOOTHING" => Some("0".into()),
-            "TESSERAE_WATER_LEVEL_M" => Some("27".into()),
+            "TESSERAE_CAVES" | "TESSERAE_SMOOTHING" | "TESSERAE_WATER" => Some("0".into()),
             _ => None,
         });
         assert!(params.caves.is_none());
         assert!(params.smoothing.is_none());
-        let water = params.water.unwrap();
-        assert_eq!((water.level_m, water.material), (27.0, LAKE));
+        assert!(params.water.is_none());
         assert_eq!(params.relief_m, 12.0);
-        assert!(
-            dev_worldgen_params(loaded, |_| Some("off".into()))
-                .water
-                .is_none()
-        );
+        assert_eq!(dev_worldgen_params(loaded, |_| None), loaded);
     }
 
     /// Any id: these parameters are never generated or validated.
     #[cfg(feature = "dev")]
     const LAKE: tesserae_core::MaterialId = 9;
-
-    #[cfg(feature = "dev")]
-    #[test]
-    fn a_water_level_with_no_lake_fluid_changes_nothing() {
-        let dry = WorldgenParams::default();
-        let params = dev_worldgen_params(dry, |name| {
-            (name == "TESSERAE_WATER_LEVEL_M").then(|| "27".into())
-        });
-        assert_eq!(params, dry);
-    }
 
     #[test]
     fn a_world_with_no_game_is_dry() {
@@ -572,7 +488,6 @@ mod tests {
                     relief_m: 48.0,
                     feature_size_m: 16.0,
                     biomes: BiomeTable::new(std::slice::from_ref(&field)).unwrap(),
-                    generator: 3,
                     ..tesserae_core::testgen::world_params()
                 },
             );

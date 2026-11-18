@@ -687,8 +687,8 @@ impl Guest for Terra {
                     surface_features: plants::savanna(),
                     loot: Some(structures::biome_loot("savanna")),
                 },
-                // Version 3 only: the sea floor, the strand and the high ground, chosen by altitude.
-                // They name a range, so version 3 prefers them where they fit and earlier versions never choose them.
+                // The sea floor, the strand and the high ground, chosen by altitude: they name a
+                // range, so they are preferred where they fit.
                 BiomeDef {
                     soundscape: None,
                     selectors: Some(BiomeSelectors {

@@ -1951,7 +1951,7 @@ mod tests {
     }
 
     fn source_of(seed: u64, j: u32) -> Worldgen {
-        let params = tesserae_core::testgen::world_params_v3();
+        let params = tesserae_core::testgen::world_params();
         let params = if j == 0 {
             params
         } else {
@@ -2003,8 +2003,7 @@ mod tests {
 
     #[test]
     fn the_source_generators_sit_at_doubling_voxel_sizes_and_only_level_zero_smooths() {
-        let level_zero =
-            Worldgen::new(world().seed, 1.0, tesserae_core::testgen::world_params_v3());
+        let level_zero = Worldgen::new(world().seed, 1.0, tesserae_core::testgen::world_params());
         let sources = LodGenerators::new(&world(), &level_zero, LEVELS);
         assert_eq!(sources.levels(), LEVELS);
         assert!(sources.sources[0].params().smoothing.is_some());
@@ -2143,8 +2142,7 @@ mod tests {
 
     fn probed(probe: FarProbe) -> Harness {
         let mut h = harness();
-        let level_zero =
-            Worldgen::new(world().seed, 1.0, tesserae_core::testgen::world_params_v3());
+        let level_zero = Worldgen::new(world().seed, 1.0, tesserae_core::testgen::world_params());
         h.app.insert_resource(
             LodGenerators::new(&world(), &level_zero, LEVELS).with_probe(&world(), probe),
         );
@@ -2166,7 +2164,7 @@ mod tests {
             }
         }
         // Built here as `COLUMNS_FROM` builds it: an 8 m Voxel asked about its middle, no caves.
-        let p = tesserae_core::testgen::world_params_v3();
+        let p = tesserae_core::testgen::world_params();
         let columns = Worldgen::new(
             world().seed,
             8.0,
@@ -2204,7 +2202,7 @@ mod tests {
         for level in 2..LEVELS {
             // Sampled at each Voxel's middle height: half a level-k Voxel up.
             let voxel_m = 2f32.powi(level as i32);
-            let p = tesserae_core::testgen::world_params_v3();
+            let p = tesserae_core::testgen::world_params();
             let own = Worldgen::new(
                 world().seed,
                 voxel_m,
@@ -2265,7 +2263,7 @@ mod tests {
 
     #[test]
     fn a_direct_probe_drains_none_of_the_lakes_the_downsample_shows() {
-        let params = tesserae_core::testgen::world_params_v3()
+        let params = tesserae_core::testgen::world_params()
             .with_default_lake(tesserae_core::testgen::fixtures().water);
         let lake = |probe| {
             let mut h = Harness::with_world(lod_settings(), UNLIMITED, world(), params);
@@ -3436,7 +3434,7 @@ mod tests {
     fn coarse_water(level: u32, rows: usize, level_m: Option<f32>) -> ChunkMesh {
         let tables = crate::server::fixture_tables();
         let water = tesserae_core::testgen::fixtures().water;
-        let params = tesserae_core::testgen::world_params_v3();
+        let params = tesserae_core::testgen::world_params();
         let surface = Worldgen::new(
             world().seed,
             world().voxel_size,
@@ -3665,7 +3663,7 @@ mod tests {
             WorldgenParams {
                 caves: None,
                 water: None,
-                ..tesserae_core::testgen::world_params_v3()
+                ..tesserae_core::testgen::world_params()
             },
         )
     }
@@ -3705,9 +3703,9 @@ mod tests {
                 // Ground, so no lake: water has light of its own (`coarse_light_in`).
                 water: None,
                 smoothing: (level == 1)
-                    .then(|| tesserae_core::testgen::world_params_v3().smoothing)
+                    .then(|| tesserae_core::testgen::world_params().smoothing)
                     .flatten(),
-                ..tesserae_core::testgen::world_params_v3()
+                ..tesserae_core::testgen::world_params()
             };
             let source = Worldgen::new(world().seed, 2f32.powi(level as i32 - 1), params);
             let cell_m = CHUNK_SIZE as f32 * 2f32.powi(level as i32);
@@ -3774,7 +3772,7 @@ mod persistence_tests {
         let base = Worldgen::new(
             world.seed,
             world.voxel_size,
-            tesserae_core::testgen::world_params_v3(),
+            tesserae_core::testgen::world_params(),
         );
         let generators = LodGenerators::new(&world, &base, 5);
         let water = tesserae_core::testgen::fixtures().water;
@@ -3863,7 +3861,7 @@ mod persistence_tests {
         let base = Worldgen::new(
             world.seed,
             world.voxel_size,
-            tesserae_core::testgen::world_params_v3(),
+            tesserae_core::testgen::world_params(),
         );
         let generators = LodGenerators::new(&world, &base, 5);
         let home = ChunkCoord::new(0, -2, 0);

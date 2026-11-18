@@ -307,7 +307,7 @@ mod tests {
             caves: None,
             smoothing: None,
             biomes: BiomeTable::new(&[field]).unwrap(),
-            ..tesserae_core::testgen::world_params_v3()
+            ..tesserae_core::testgen::world_params()
         };
         // A seed whose origin is dry land under version 3.
         let generator = Worldgen::new(42, 1.0, params);

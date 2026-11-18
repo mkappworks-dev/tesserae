@@ -1,4 +1,4 @@
-//! Terra's river banks and its underground, which Generator version 3 alone reads.
+//! Terra's river banks and its underground.
 
 use crate::tesserae::mods::content::{
     BiomeDef, BiomeSelectors, CaveBiomeDef, CaveFeature, GroundParams, SelectorRange, SkyFog,

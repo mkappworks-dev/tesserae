@@ -1595,9 +1595,7 @@ biomes = ["plain:dry"]
         );
         data(&s, "plain", true, "depends = ['base']", &game);
         data(&s, "base", false, "", WET);
-        let mut loaded = s.load(TrustMode::All).unwrap();
-        // A World made before the current generator keeps its own version.
-        loaded.world.as_mut().unwrap().generator = 1;
+        let loaded = s.load(TrustMode::All).unwrap();
         let mut app = App::new();
         app.insert_non_send(loaded)
             .insert_resource(WorldSettings {
@@ -1618,7 +1616,7 @@ biomes = ["plain:dry"]
                 facts.temperature_size_m,
                 facts.humidity_size_m
             ),
-            (1, 300.0, 700.0)
+            (tesserae_core::save::GENERATOR_VERSION, 300.0, 700.0)
         );
     }
 

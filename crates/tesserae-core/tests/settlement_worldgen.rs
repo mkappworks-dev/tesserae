@@ -171,7 +171,7 @@ fn plain(features: SurfaceFeatures) -> WorldgenParams {
         }])
         .unwrap(),
         water: None,
-        ..tesserae_core::testgen::world_params_v3()
+        ..tesserae_core::testgen::world_params()
     })
 }
 
@@ -780,7 +780,7 @@ fn no_single_structure_field_or_tree_stands_in_a_settlement_and_no_structure_in_
 fn hilly(features: SurfaceFeatures) -> WorldgenParams {
     WorldgenParams {
         relief_m: 24.0,
-        landforms: tesserae_core::testgen::world_params_v3().landforms,
+        landforms: tesserae_core::testgen::world_params().landforms,
         ..plain(features)
     }
 }
@@ -1573,45 +1573,22 @@ fn digest(changed: &HashMap<[i32; 3], (Voxel, Voxel)>) -> u64 {
     hash
 }
 
-/// Version 3's layout of a fixed size, recorded when the tests moved onto it from version 2's
-/// below.
+/// A fixed size's layout, recorded when the tests moved onto version 3.
 #[test]
 fn a_fixed_size_settlement_lays_out_exactly_as_before_ranges() {
     assert_eq!(
-        fixed_size_digests(3),
+        fixed_size_digests(),
         [0x183e_8cc7_22d6_c831, 0x70e7_a31c_5752_aafc]
     );
 }
 
-/// The digests are what the generator laid before Settlements took size ranges, re-pinned when
-/// approach paths ran on as trails (ticket 27): a fixed size still lays out as it did then.
-#[test]
-fn a_fixed_size_settlement_lays_out_exactly_as_before_ranges_in_version_2() {
-    assert_eq!(
-        fixed_size_digests(2),
-        [0x6418_4939_4e1a_2ea1, 0xb08f_816e_daa9_9247]
-    );
-}
-
-/// Version 2's cases are its own hilly and plain land, relief 12 and 3.
-fn fixed_size_digests(version: u32) -> Vec<u64> {
+fn fixed_size_digests() -> Vec<u64> {
     let wide = Settlement {
         radius_m: 64.0,
         radius_min_m: 64.0,
         plots: 24,
         plots_min: 24,
         ..village()
-    };
-    let hilly = |features| match version {
-        2 => WorldgenParams {
-            relief_m: 12.0,
-            ..plain(features)
-        },
-        _ => hilly(features),
-    };
-    let pinned = |params| WorldgenParams {
-        generator: version,
-        ..params
     };
     let cases = [
         (village(), hilly(listing(true)), hilly(listing(false)), 96.0),
@@ -1625,8 +1602,8 @@ fn fixed_size_digests(version: u32) -> Vec<u64> {
     cases
         .into_iter()
         .map(|(settlement, with, bare, half_m)| {
-            let with = generator(1.0, pinned(with), settlement.clone());
-            let bare = generator(1.0, pinned(bare), settlement);
+            let with = generator(1.0, with, settlement.clone());
+            let bare = generator(1.0, bare, settlement);
             digest(&changed(&with, &bare, half_m, false))
         })
         .collect()

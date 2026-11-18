@@ -1,4 +1,4 @@
-//! Generator version 3's terrain: a vertical band around Sea level inside which every field lives.
+//! The terrain: a vertical band around Sea level inside which every field lives.
 //! See `docs/adr/0030-generator-version-3-is-a-layered-field-stack-in-a-declared-band.md`.
 
 use std::sync::Arc;
@@ -6,11 +6,8 @@ use std::sync::Arc;
 use crate::climate::{BiomeTable, ClimateField, MAX_BIOMES, Site};
 use crate::drainage::Drainage;
 
-/// The first Generator version whose terrain is the layered field stack.
-pub const LANDFORMS_SINCE: u32 = 3;
-
 /// What a Game tunes of version 3's terrain, in metres. Plain `Copy` data like the rest of
-/// [`crate::WorldgenParams`]; read only by version 3.
+/// [`crate::WorldgenParams`].
 #[derive(Clone, Copy, PartialEq, Debug, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct LandformParams {

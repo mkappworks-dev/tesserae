@@ -828,28 +828,29 @@ Notes:
   `mods/` holds fifteen shared data Mods and `games/` four small Rust Games
   built on them (`docs/demo-games.md`); `terra` remains the one self-contained
   Game.
-- **Step 17** is done. A new World is Generator version 3; a World made under 1
-  or 2 keeps its terrain and recorded digests. Version 3 is a stack of fields in
-  metres over a declared band (ADR-0030): continentalness, erosion and peaks
-  shape oceans with a shelf and formations on the floor, coasts, plains, benched
-  and craggy mountains and volcanic cones, with overhangs near the surface. A
-  regional drainage solve, cached per 2 km region with a halo, fills basins as
-  lakes and cuts rivers down valleys to the sea. Underground, Biomes bed strata,
-  caverns open under 22 m of rock, lava fills the deepest under a sealing floor,
-  perched aquifers raise the water table by region and well up in sealed
-  springs, and a Game declares up to 16 cave Biomes, chosen in 3D, with their
-  own rock, floor, features and fog. Biomes gain altitude, coast, erosion and
-  river selectors and a relief scale, and every demo Game declares ocean, shore,
-  river and alpine Biomes, cave Biomes and its water. Settlements gained
-  outskirts (farms, ponds, brooks and waterfalls by chance), a new Player enters
-  a village where its first food grows, and no cave opens within 16 m of a
-  Structure. The terrain's arithmetic runs on `libm`, so it rounds alike on
-  every platform; Settlement roads still use the platform's trigonometry, as in
-  version 2. Measured on the thread's CPU clock against `main`: the sky and deep
-  early-outs are unchanged (0.01 µs a Chunk), version 2's surface Chunks cost
-  about 105 µs against 90, and version 3's about 950 µs warm and 1350 cold, some
-  9 times version 2's against a budget of 3; the per-column heightfield (`fbm2`,
-  the drainage's lookup and the base height) is most of it, and
+- **Step 17** is done. Generator version 3 is the only version: versions 1 and 2
+  were deleted before the first release, and a World stamped either refuses to
+  open (ADR-0033). Version 3 is a stack of fields in metres over a declared band
+  (ADR-0030): continentalness, erosion and peaks shape oceans with a shelf and
+  formations on the floor, coasts, plains, benched and craggy mountains and
+  volcanic cones, with overhangs near the surface. A regional drainage solve,
+  cached per 2 km region with a halo, fills basins as lakes and cuts rivers down
+  valleys to the sea. Underground, Biomes bed strata, caverns open under 22 m of
+  rock, lava fills the deepest under a sealing floor, perched aquifers raise the
+  water table by region and well up in sealed springs, and a Game declares up to
+  16 cave Biomes, chosen in 3D, with their own rock, floor, features and fog.
+  Biomes gain altitude, coast, erosion and river selectors and a relief scale,
+  and every demo Game declares ocean, shore, river and alpine Biomes, cave
+  Biomes and its water. Settlements gained outskirts (farms, ponds, brooks and
+  waterfalls by chance), a new Player enters a village where its first food
+  grows, and no cave opens within 16 m of a Structure. The terrain's arithmetic
+  runs on `libm`, so it rounds alike on every platform; Settlement roads still
+  use the platform's trigonometry. Measured on the thread's CPU clock against
+  `main` when it landed: the sky and deep early-outs were unchanged (0.01 µs a
+  Chunk), the version 2 terrain it replaced cost about 105 µs a surface Chunk
+  against 90, and version 3's about 950 µs warm and 1350 cold, some 9 times that
+  against a budget of 3; the per-column heightfield (`fbm2`, the drainage's
+  lookup and the base height) is most of it, and
   `tech/phase-17-worldgen-performance` takes it on with bit-identical changes.
   Weather (step 24) follows and reads the Climate by altitude and coast; weather
   never edits terrain.

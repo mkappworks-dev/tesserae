@@ -48,7 +48,7 @@ fn level(features: SurfaceFeatures, water: Option<WaterParams>) -> WorldgenParam
             humidity_size_m: 64.0,
         },
         biomes: BiomeTable::new(&[biome(features)]).unwrap(),
-        ..tesserae_core::testgen::world_params_v3()
+        ..tesserae_core::testgen::world_params()
     })
 }
 

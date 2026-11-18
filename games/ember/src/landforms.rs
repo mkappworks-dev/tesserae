@@ -1,4 +1,4 @@
-//! Ember's sea, shore, river banks and high ground, and its underground, which Generator version 3 alone reads.
+//! Ember's sea, shore, river banks and high ground, and its underground.
 
 use crate::tesserae::mods::content::{BiomeDef, CaveBiomeDef};
 use demo_kit::{ALPINE_M, Cave, Landform, OCEAN_M, RIVER_CUT_M, RIVER_M, SHORE_M};

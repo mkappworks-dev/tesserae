@@ -20,9 +20,6 @@ const HUMIDITY_SEED: u32 = 0x0c11_a8e0;
 const WARP_TEMPERATURE_SEED: u32 = 0x0c11_a9e0;
 const WARP_HUMIDITY_SEED: u32 = 0x0c11_aae0;
 
-/// Version 1 stays frozen as it was before Biomes existed.
-pub const BIOMES_SINCE: u32 = 2;
-
 /// Bounded so [`BiomeTable`] stays inline and [`crate::WorldgenParams`] stays `Copy`.
 pub const MAX_BIOMES: usize = 16;
 
@@ -288,16 +285,14 @@ impl ClimateField {
         biomes: &BiomeTable,
         x_m: f32,
         z_m: f32,
-        site: Option<(Site, (f32, f32))>,
+        (site, (dt, dh)): (Site, (f32, f32)),
     ) -> Option<BiomeId> {
         if biomes.is_empty() {
             return None;
         }
         let mut c = self.warped(x_m, z_m);
-        if let Some((_, (dt, dh))) = site {
-            c.temperature += dt;
-            c.humidity += dh;
-        }
+        c.temperature += dt;
+        c.humidity += dh;
         let distance = |b: &Biome| {
             let (dt, dh) = (b.temperature - c.temperature, b.humidity - c.humidity);
             dt * dt + dh * dh
@@ -316,16 +311,11 @@ impl ClimateField {
             nearest
         };
         let selectors = biomes.selectors();
-        let chosen = match site {
-            // A Biome that names a range and admits the column beats one that names none, however
-            // near the others are in Climate; failing both, the nearest of all.
-            Some((s, _)) => pick(&|i| selectors[i].is_ranged() && selectors[i].admits(&s))
-                .or_else(|| pick(&|i| !selectors[i].is_ranged()))
-                .or_else(|| pick(&|_| true)),
-            // Before version 3 there is no altitude or coast to ask, so a Biome of the land's
-            // shape is not part of the World.
-            None => pick(&|i| !selectors[i].is_ranged()).or_else(|| pick(&|_| true)),
-        };
+        // A Biome that names a range and admits the column beats one that names none, however near
+        // the others are in Climate; failing both, the nearest of all.
+        let chosen = pick(&|i| selectors[i].is_ranged() && selectors[i].admits(&site))
+            .or_else(|| pick(&|i| !selectors[i].is_ranged()))
+            .or_else(|| pick(&|_| true));
         let (i, _) = chosen?;
         Some(BiomeId(i as u8))
     }
@@ -337,19 +327,20 @@ impl ClimateField {
         biomes: &BiomeTable,
         x_m: f32,
         z_m: f32,
-        site: Option<(Site, (f32, f32))>,
+        (site, (dt, dh)): (Site, (f32, f32)),
     ) -> Option<SkyFogBlend> {
         let selectors = biomes.selectors();
-        // Under version 3, among the Biomes `biome_at` chooses from there: those of the land's
-        // shape that admit the column, else the rest, so the sky over a mountain is its own.
-        let ranged_here = site.is_some_and(|(s, _)| {
-            biomes.as_slice().iter().enumerate().any(|(i, b)| {
-                b.sky_fog.is_some() && selectors[i].is_ranged() && selectors[i].admits(&s)
-            })
+        // Among the Biomes `biome_at` chooses from there: those of the land's shape that admit the
+        // column, else the rest, so the sky over a mountain is its own.
+        let ranged_here = biomes.as_slice().iter().enumerate().any(|(i, b)| {
+            b.sky_fog.is_some() && selectors[i].is_ranged() && selectors[i].admits(&site)
         });
-        let considered = |i: usize| match site {
-            Some((s, _)) if ranged_here => selectors[i].is_ranged() && selectors[i].admits(&s),
-            _ => !selectors[i].is_ranged(),
+        let considered = |i: usize| {
+            if ranged_here {
+                selectors[i].is_ranged() && selectors[i].admits(&site)
+            } else {
+                !selectors[i].is_ranged()
+            }
         };
         let coloured = || {
             biomes
@@ -361,10 +352,8 @@ impl ClimateField {
         };
         // Unwarped: the warp varies fast to roughen a border, and the air would shimmer with it.
         let mut c = self.at(x_m, z_m);
-        if let Some((_, (dt, dh))) = site {
-            c.temperature += dt;
-            c.humidity += dh;
-        }
+        c.temperature += dt;
+        c.humidity += dh;
         let distance = |b: &Biome| {
             let (dt, dh) = (b.temperature - c.temperature, b.humidity - c.humidity);
             dt.hypot(dh)
@@ -1271,8 +1260,8 @@ pub const MAX_STRATA: usize = 8;
 /// the band.
 pub const MAX_STRATUM_DEPTH_M: f32 = 96.0;
 
-/// A layer of a Biome's rock from `depth_m[0]` to `depth_m[1]` metres below a column's surface,
-/// read by Generator version 3 only. Its edges undulate a few metres, so it reads as bedding.
+/// A layer of a Biome's rock from `depth_m[0]` to `depth_m[1]` metres below a column's surface.
+/// Its edges undulate a few metres, so it reads as bedding.
 #[derive(Clone, Copy, PartialEq, Debug, Default)]
 pub struct Stratum {
     pub material: MaterialId,
@@ -1334,9 +1323,8 @@ impl Strata {
     }
 }
 
-/// Where a Biome may stand beyond its Climate, read by Generator version 3 only. A range left
-/// `None` matches every value on that axis, so a Biome declared before version 3 is unchanged.
-/// Ranges are inclusive.
+/// Where a Biome may stand beyond its Climate. A range left `None` matches every value on that
+/// axis. Ranges are inclusive.
 #[derive(Clone, Copy, PartialEq, Debug, Default, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct BiomeSelectors {
@@ -1372,8 +1360,8 @@ impl BiomeSelectors {
             && within(self.river_m, site.river_m)
     }
 
-    /// Whether the Biome names any range, which makes it a Biome of the land's shape: version 3
-    /// prefers it where it admits the column, and versions 1 and 2 never choose it.
+    /// Whether the Biome names any range, which makes it a Biome of the land's shape: preferred
+    /// where it admits the column.
     pub fn is_ranged(&self) -> bool {
         self.altitude_m.is_some()
             || self.coast_m.is_some()

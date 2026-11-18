@@ -21,11 +21,9 @@ use crate::{CHUNK_SIZE, CHUNK_VOLUME, Chunk, ChunkOverlay, Fluid, Level, Overlay
 /// out, and both still open.
 pub const FORMAT_VERSION: u32 = 3;
 const SUPPORTED_FORMATS: [u32; 3] = [1, 2, 3];
-/// What a new World is created under.
+/// The only Generator version a World is created or opened under; 1 and 2 were deleted before the
+/// first release, with no migration (ADR-0033).
 pub const GENERATOR_VERSION: u32 = 3;
-/// Every version that ever shipped stays until a migration exists: a World keeps the one it was
-/// created with.
-pub const SUPPORTED_GENERATORS: [u32; 3] = [1, 2, 3];
 const MAGIC: &[u8; 8] = b"TESSAVE1";
 /// How many Commits a World keeps: recovery falls back through the older ones.
 pub const KEPT_COMMITS: usize = 3;
@@ -668,7 +666,7 @@ pub struct Generation {
     pub lake: Option<(f32, String)>,
     pub ground: Option<[String; 3]>,
     /// A snapshot, so a Game that later gains a Biome never reshapes the World. All three are
-    /// absent together: before Biomes, for Generator version 1 and for an empty table.
+    /// absent together for an empty table.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub climate: Option<crate::ClimateParams>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -682,13 +680,13 @@ pub struct Generation {
     /// The Settlements the Biomes lay out, for the same reason. Absent when no Biome lists one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub settlements: Option<Vec<SavedSettlement>>,
-    /// Version 3's terrain tuning. Absent in a World under version 1 or 2, which never read it.
+    /// The terrain tuning; absent reads as the default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub landforms: Option<crate::terrain::LandformParams>,
-    /// Version 3's lava, by name. Absent with none, and under version 1 or 2.
+    /// The lava, by name. Absent with none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lava: Option<String>,
-    /// Version 3's cave Biomes. Absent with none, and under version 1 or 2.
+    /// The cave Biomes. Absent with none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub cave_biomes: Vec<SavedCaveBiome>,
 }
@@ -1061,9 +1059,8 @@ impl Generation {
     ) -> Result<Self, Error> {
         mapping.validate()?;
         p.validate().map_err(|e| Error::Corrupt(e.to_string()))?;
-        // Version 1 ignores all three, so saving them would pin nothing.
-        let has_biomes = p.generator >= crate::climate::BIOMES_SINCE && !p.biomes.is_empty();
-        let has_ores = p.generator >= crate::climate::BIOMES_SINCE && !p.ores.is_empty();
+        let has_biomes = !p.biomes.is_empty();
+        let has_ores = !p.ores.is_empty();
         let saved_biomes = || p.biomes.as_slice().iter().filter(|_| has_biomes);
         let mut kept_settlements: Vec<u16> = saved_biomes()
             .flat_map(|b| b.surface_features.settlements())
@@ -1134,23 +1131,18 @@ impl Generation {
                         .map(|((b, selectors), strata)| {
                             let mut saved =
                                 saved_biome(b, &kept_templates, &kept_settlements, mapping)?;
-                            // Only version 3 reads them, so an older World's snapshot is as it was.
-                            let v3 = p.generator >= crate::terrain::LANDFORMS_SINCE;
-                            saved.selectors = (v3
-                                && *selectors != crate::BiomeSelectors::default())
-                            .then_some(*selectors);
-                            if v3 {
-                                saved.strata = strata
-                                    .as_slice()
-                                    .iter()
-                                    .map(|l| {
-                                        Ok::<_, Error>(SavedStratum {
-                                            material: mapping.material_name(l.material)?,
-                                            depth_m: l.depth_m,
-                                        })
+                            saved.selectors = (*selectors != crate::BiomeSelectors::default())
+                                .then_some(*selectors);
+                            saved.strata = strata
+                                .as_slice()
+                                .iter()
+                                .map(|l| {
+                                    Ok::<_, Error>(SavedStratum {
+                                        material: mapping.material_name(l.material)?,
+                                        depth_m: l.depth_m,
                                     })
-                                    .collect::<Result<_, _>>()?;
-                            }
+                                })
+                                .collect::<Result<_, _>>()?;
                             Ok::<_, Error>(saved)
                         })
                         .collect::<Result<_, _>>()
@@ -1167,21 +1159,14 @@ impl Generation {
                 .transpose()?,
             templates: (!saved_templates.is_empty()).then_some(saved_templates),
             settlements: (!saved_settlements.is_empty()).then_some(saved_settlements),
-            landforms: (p.generator >= crate::terrain::LANDFORMS_SINCE).then_some(p.landforms),
-            lava: p
-                .lava
-                .filter(|_| p.generator >= crate::terrain::LANDFORMS_SINCE)
-                .map(|m| mapping.material_name(m))
-                .transpose()?,
-            cave_biomes: if p.generator >= crate::terrain::LANDFORMS_SINCE {
-                p.cave_biomes
-                    .as_slice()
-                    .iter()
-                    .map(|b| saved_cave_biome(b, mapping))
-                    .collect::<Result<_, _>>()?
-            } else {
-                Vec::new()
-            },
+            landforms: Some(p.landforms),
+            lava: p.lava.map(|m| mapping.material_name(m)).transpose()?,
+            cave_biomes: p
+                .cave_biomes
+                .as_slice()
+                .iter()
+                .map(|b| saved_cave_biome(b, mapping))
+                .collect::<Result<_, _>>()?,
         })
     }
 
@@ -1270,18 +1255,15 @@ impl Generation {
         generator: u32,
     ) -> Result<crate::WorldgenParams, Error> {
         mapping.validate()?;
-        let biomes_apply = generator >= crate::climate::BIOMES_SINCE;
         let biomes = self
             .biomes
             .as_deref()
-            .filter(|_| biomes_apply)
             .map(|saved| restored_biomes(saved, mapping))
             .transpose()?
             .unwrap_or_default();
         let ores = self
             .ores
             .as_deref()
-            .filter(|_| biomes_apply)
             .unwrap_or_default()
             .iter()
             .map(|o| restored_ore(o, &biomes, mapping))
@@ -1310,28 +1292,22 @@ impl Generation {
                 .as_ref()
                 .map(|names| ground_ids(names, mapping))
                 .transpose()?,
-            climate: self.climate.filter(|_| biomes_apply).unwrap_or_default(),
+            climate: self.climate.unwrap_or_default(),
             biomes,
             ores: crate::OreTable::new(&ores).map_err(|e| Error::Corrupt(e.to_string()))?,
-            landforms: self
-                .landforms
-                .filter(|_| generator >= crate::terrain::LANDFORMS_SINCE)
-                .unwrap_or_default(),
+            landforms: self.landforms.unwrap_or_default(),
             lava: self
                 .lava
                 .as_deref()
-                .filter(|_| generator >= crate::terrain::LANDFORMS_SINCE)
                 .map(|name| mapping.material_id(name))
                 .transpose()?,
-            cave_biomes: if generator >= crate::terrain::LANDFORMS_SINCE {
+            cave_biomes: {
                 let biomes = self
                     .cave_biomes
                     .iter()
                     .map(|b| restored_cave_biome(b, mapping))
                     .collect::<Result<Vec<_>, _>>()?;
                 crate::CaveBiomeTable::new(&biomes).map_err(|e| Error::Corrupt(e.to_string()))?
-            } else {
-                crate::CaveBiomeTable::default()
             },
         };
         p.validate().map_err(|e| Error::Corrupt(e.to_string()))?;
@@ -2243,9 +2219,14 @@ impl<C, P> Commit<C, P> {
 
     /// Everything but the Chunks and paused shares, and the mapping their names resolve through.
     fn compatible_head(&self, installed: &Content) -> Result<Mapping, Error> {
-        if !SUPPORTED_FORMATS.contains(&self.format)
-            || !SUPPORTED_GENERATORS.contains(&self.generator)
-        {
+        if (1..GENERATOR_VERSION).contains(&self.generator) {
+            return Err(Error::Incompatible(format!(
+                "generator version {} predates version {GENERATOR_VERSION}, the only one this \
+                 Engine generates",
+                self.generator
+            )));
+        }
+        if !SUPPORTED_FORMATS.contains(&self.format) || self.generator != GENERATOR_VERSION {
             return Err(Error::Incompatible(format!(
                 "unsupported save/generator version {}/{}",
                 self.format, self.generator

@@ -429,14 +429,14 @@ fn rescans(c: &mut Criterion) {
     let lake = Worldgen::new(
         SEED,
         1.0,
-        tesserae_core::testgen::world_params_v3().with_default_lake(water),
+        tesserae_core::testgen::world_params().with_default_lake(water),
     );
     let dry = Worldgen::new(
         SEED,
         1.0,
         WorldgenParams {
             water: None,
-            ..tesserae_core::testgen::world_params_v3()
+            ..tesserae_core::testgen::world_params()
         },
     );
     let level = lake.water().expect("the World has water").level_m;

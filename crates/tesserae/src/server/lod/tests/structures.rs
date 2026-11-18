@@ -32,7 +32,7 @@ fn params() -> WorldgenParams {
     };
     WorldgenParams {
         biomes: BiomeTable::new(&[towers]).unwrap(),
-        ..tesserae_core::testgen::world_params_v3()
+        ..tesserae_core::testgen::world_params()
     }
 }
 

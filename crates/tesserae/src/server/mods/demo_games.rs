@@ -108,15 +108,6 @@ pub(in crate::server) fn loaded(game: &str, voxel_size: f32) -> (Install, Loaded
     (install, loaded)
 }
 
-/// `loaded` under version 2, for a test whose Game tuning or pinned place has not been found again
-/// under version 3.
-pub(in crate::server) fn at_version_2(mut loaded: LoadedMods) -> LoadedMods {
-    if let Some(world) = &mut loaded.world {
-        world.generator = 2;
-    }
-    loaded
-}
-
 /// The Mods `loaded` holds, in load order.
 fn ids(loaded: &LoadedMods) -> Vec<&str> {
     loaded.required.iter().map(|m| m.id.as_str()).collect()

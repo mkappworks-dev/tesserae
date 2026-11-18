@@ -126,15 +126,10 @@ World parameters. Without ground the World is empty air.
 Sized in metres, so it is the same Cave at any Voxel size. Where one breaks the
 surface it has a **mouth**, and sky light can enter there.
 
-**Water level** — the height in metres up to which World generation fills the
-open air above the ground with the Game's lake fluid, any fluid it declared. One
-level for the whole World, so a valley below it is a lake; a Cave is never
-filled. A Game that names no lake fluid, and a World with no Game, have none.
-Under Generator version 2 and earlier only; version 3 has a Sea level and a
-Water surface instead.
-
-**Sea level** — the height in metres of the ocean's surface under Generator
-version 3. Ground below it, away from land, is the sea floor.
+**Sea level** — the height in metres of the ocean's surface. Ground below it,
+away from land, is the sea floor. World generation fills the open air under it
+with the Game's water fluid, any fluid it declared; a Game that names none, and
+a World with no Game, have no sea.
 
 **Water surface** — the height in metres of standing or running water at a
 column, if there is any: the sea at Sea level, a lake at its own flat level, a
@@ -188,15 +183,15 @@ Never produces a mesh.
 
 **Climate** — continuous fields, temperature and humidity, that are a pure
 function of the seed and a position in metres. They choose the Biome; they are
-not a Biome. Under Generator version 3 temperature falls with altitude and
-humidity rises toward the sea, and Weather reads the same Climate.
+not a Biome. Temperature falls with altitude and humidity rises toward the sea,
+and Weather reads the same Climate.
 
 **Biome** — a region type a Game or Mod declares and Climate selects. It owns
 the ground Materials, surface features, ores, cave tuning and the sky and fog
-colours of the columns it covers. Under version 3 it is also selected by
-altitude, distance from the coast and erosion, and may scale its landform's
-detail relief; a Biome that names no range matches every value on that axis. A
-cave Biome is chosen the same way in three dimensions.
+colours of the columns it covers. It is also selected by altitude, distance from
+the coast and erosion, and may scale its landform's detail relief; a Biome that
+names no range matches every value on that axis. A cave Biome is chosen the same
+way in three dimensions.
 
 **Surface feature** — a Material a Biome declares and world generation stands
 one Voxel above that Biome's full surface Voxels, from the seed, at a mean
@@ -217,16 +212,17 @@ on level ground clear of the lake, caves and trees.
 
 **Generator version** — the revision of the world generation algorithm a World
 was created under. A World keeps it for life, so a later revision never changes
-its terrain for the same seed. A new World is version 3.
+its terrain for the same seed. Version 3 is the only one the Engine generates; a
+World stamped 1 or 2, from before the first release, refuses to open.
 
 **Stratum** — a layer of a Biome's rock between two depths below the surface,
-its edges undulating a few metres. Version 3 only.
+its edges undulating a few metres.
 
 **Cave Biome** — a region of the underground, chosen in three dimensions from 12
 m under the surface, with its own rock, cavern floor, features and fog.
 
-**Aquifer** — a region of version 3's underground whose water table stands above
-the World's, so its cavern lakes stand higher and level across it.
+**Aquifer** — a region of the underground whose water table stands above the
+World's, so its cavern lakes stand higher and level across it.
 
 **Spring** — a one-Voxel pool welling up in an aquifer's dry cavern floor,
 sealed by rock below and beside, so it stands rather than pours.

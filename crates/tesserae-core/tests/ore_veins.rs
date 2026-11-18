@@ -33,7 +33,7 @@ fn anywhere() -> Ore {
 fn params(ores: &[Ore]) -> WorldgenParams {
     common::lowland(WorldgenParams {
         ores: OreTable::new(ores).unwrap(),
-        ..tesserae_core::testgen::world_params_v3()
+        ..tesserae_core::testgen::world_params()
     })
 }
 
@@ -349,28 +349,4 @@ fn two_ores_each_make_their_own_veins() {
     );
     let (a, b) = (ore_voxels(&g, lantern).len(), ore_voxels(&g, glass).len());
     assert!(a > 500 && b > 500, "{a} {b}");
-}
-
-#[test]
-fn generator_version_1_has_no_ore() {
-    let v1 = |ores: &[Ore]| WorldgenParams {
-        generator: 1,
-        ..bare(ores)
-    };
-    let (with, without) = (generator(v1(&[anywhere()]), 1.0), generator(v1(&[]), 1.0));
-    for cy in -1..3 {
-        for cz in -1..1 {
-            for cx in -1..1 {
-                let (a, b) = (with.chunk(cx, cy, cz), without.chunk(cx, cy, cz));
-                assert!(a.kinds() == b.kinds());
-                for z in 0..CHUNK_SIZE {
-                    for y in 0..CHUNK_SIZE {
-                        for x in 0..CHUNK_SIZE {
-                            assert_eq!(a.get(x, y, z), b.get(x, y, z));
-                        }
-                    }
-                }
-            }
-        }
-    }
 }

@@ -40,9 +40,8 @@ fn crystal_cave() -> CaveBiome {
     .unwrap()
 }
 
-fn params(generator: u32, caves: &[CaveBiome], lava: bool) -> WorldgenParams {
+fn params(caves: &[CaveBiome], lava: bool) -> WorldgenParams {
     WorldgenParams {
-        generator,
         sea_level_m: 24.0,
         relief_m: 24.0,
         landforms: LandformParams::default(),
@@ -54,7 +53,7 @@ fn params(generator: u32, caves: &[CaveBiome], lava: bool) -> WorldgenParams {
         }),
         lava: lava.then_some(LAVA),
         cave_biomes: CaveBiomeTable::new(caves).unwrap(),
-        ..tesserae_core::testgen::world_params_v3()
+        ..tesserae_core::testgen::world_params()
     }
 }
 
@@ -140,7 +139,7 @@ fn find(want: usize, keep: impl Fn(f32, f32) -> bool) -> Vec<Vec<[i32; 2]>> {
 
 #[test]
 fn caverns_near_the_bands_floor_hold_lava_sealed_off_from_every_cavern_above() {
-    let g = Worldgen::new(SEED, 1.0, params(3, &[], true));
+    let g = Worldgen::new(SEED, 1.0, params(&[], true));
     // The band's floor, 108 m under Sea level, and 10 m of lava over it.
     let lava_top_m = 24.0 - 96.0 - 12.0 + 10.0;
     let mut lava = 0;
@@ -169,7 +168,7 @@ fn caverns_near_the_bands_floor_hold_lava_sealed_off_from_every_cavern_above() {
     }
     assert!(lava > 100, "{lava} lava Voxels");
     let dry = Region::new(
-        &Worldgen::new(SEED, 1.0, params(3, &[], false)),
+        &Worldgen::new(SEED, 1.0, params(&[], false)),
         &columns(1.0),
         band(1.0),
         false,
@@ -179,7 +178,7 @@ fn caverns_near_the_bands_floor_hold_lava_sealed_off_from_every_cavern_above() {
 
 #[test]
 fn a_perched_aquifer_raises_its_regions_lakes_and_wells_up_in_sealed_springs() {
-    let g = Worldgen::new(SEED, 1.0, params(3, &[], false));
+    let g = Worldgen::new(SEED, 1.0, params(&[], false));
     let world_table_m = 24.0 - 2.0;
     let raised = (-40..40)
         .flat_map(|i| (-40..40).map(move |j| [i as f32 * 96.0, j as f32 * 96.0]))
@@ -203,7 +202,7 @@ fn a_perched_aquifer_raises_its_regions_lakes_and_wells_up_in_sealed_springs() {
 
 #[test]
 fn springs_stand_in_rock_and_never_beside_air() {
-    let g = Worldgen::new(SEED, 1.0, params(3, &[], false));
+    let g = Worldgen::new(SEED, 1.0, params(&[], false));
     // High ground over a perched aquifer, whose caverns stand dry over its lakes.
     let wet = find(30, |x, z| {
         g.water_table_m(x, z) > 40.0 && g.surface_height_m(x, z) > 100.0
@@ -239,7 +238,7 @@ fn springs_stand_in_rock_and_never_beside_air() {
 fn a_cave_biome_is_chosen_the_same_at_every_voxel_size_and_chunk_order() {
     let caves = [crystal_cave()];
     let rock_cells = |size: f32, reverse: bool| {
-        let g = Worldgen::new(SEED, size, params(3, &caves, false));
+        let g = Worldgen::new(SEED, size, params(&caves, false));
         let region = Region::new(&g, &columns(size), band(size), reverse);
         let per = (1.0 / size) as i32;
         let mut cells: Vec<[i32; 3]> = region
@@ -266,7 +265,7 @@ fn a_cave_biome_is_chosen_the_same_at_every_voxel_size_and_chunk_order() {
 #[test]
 fn a_cave_biome_floors_its_caverns_stands_features_on_them_and_fogs_its_air() {
     let caves = [crystal_cave()];
-    let g = Worldgen::new(SEED, 1.0, params(3, &caves, false));
+    let g = Worldgen::new(SEED, 1.0, params(&caves, false));
     let high = find(6, |x, z| g.surface_height_m(x, z) > 100.0);
     let region = Region::new(&g, &high.concat(), 0..3, false);
     let (mut floors, mut glows) = (0, 0);
@@ -300,17 +299,6 @@ fn a_cave_biome_floors_its_caverns_stands_features_on_them_and_fogs_its_air() {
     assert_eq!(fog.fog.map(|c| (c * 255.0).round() as u8), [20, 40, 120]);
     let surface = g.surface_height_m(0.0, 0.0);
     assert_eq!(g.cave_fog_at(0.0, surface + 1.0, 0.0), None, "the open air");
-}
-
-#[test]
-fn version_2_has_no_lava_springs_or_cave_biomes() {
-    let caves = [crystal_cave()];
-    let g = Worldgen::new(SEED, 1.0, params(2, &caves, true));
-    let region = Region::new(&g, &columns(1.0), band(1.0), false);
-    for m in [LAVA, CRYSTAL, MOSS, GLOW] {
-        assert_eq!(region.count(m), 0, "{m}");
-    }
-    assert_eq!(g.cave_fog_at(300.0, -40.0, -100.0), None);
 }
 
 #[test]
@@ -355,7 +343,7 @@ fn cave_biomes_near_the_corners_of_the_cave_climate_each_take_a_share() {
         corner("t:warm_wet", (0.8, 0.8)),
         corner("t:middle", (0.5, 0.5)),
     ];
-    let g = Worldgen::new(SEED, 1.0, params(3, &caves, false));
+    let g = Worldgen::new(SEED, 1.0, params(&caves, false));
     let mut counts: HashMap<String, u32> = HashMap::new();
     for i in 0..40 {
         for j in 0..40 {
@@ -382,7 +370,7 @@ fn hut() -> tesserae_core::template::Template {
     tesserae_core::template::Template::new("t:hut".into(), 1.0, vec![floor], 0, None, 4.0).unwrap()
 }
 
-fn with_huts(generator: u32, size: f32) -> Worldgen {
+fn with_huts(size: f32) -> Worldgen {
     let plain = tesserae_core::Biome {
         name: BiomeName::new("t:plain").unwrap(),
         temperature: 0.5,
@@ -400,7 +388,7 @@ fn with_huts(generator: u32, size: f32) -> Worldgen {
     };
     let params = WorldgenParams {
         biomes: tesserae_core::BiomeTable::new(&[plain]).unwrap(),
-        ..params(generator, &[], false)
+        ..params(&[], false)
     };
     Worldgen::new(SEED, size, params).with_templates(&[hut()])
 }
@@ -442,7 +430,7 @@ fn caves_by_huts(g: &Worldgen, near_m: f32, depth_m: f32) -> (usize, usize, usiz
 #[test]
 fn no_cave_opens_under_or_beside_a_structure_in_version_3() {
     for size in [1.0, 0.5] {
-        let (huts, near, far) = caves_by_huts(&with_huts(3, size), 16.0, 14.0);
+        let (huts, near, far) = caves_by_huts(&with_huts(size), 16.0, 14.0);
         assert!(huts > 20, "{size} m: {huts} hut Voxels");
         assert_eq!(near, 0, "{size} m: cave Voxels within 16 m of a hut");
         assert!(far > 100, "{size} m: {far} cave Voxels elsewhere");

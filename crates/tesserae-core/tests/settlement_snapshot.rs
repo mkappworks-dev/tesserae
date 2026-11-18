@@ -106,7 +106,7 @@ fn world() -> WorldgenParams {
         }])
         .unwrap(),
         water: None,
-        ..tesserae_core::testgen::world_params_v3()
+        ..tesserae_core::testgen::world_params()
     }
 }
 

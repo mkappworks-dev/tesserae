@@ -106,7 +106,7 @@ fn params(structures: &[BiomeStructure], land: Land) -> WorldgenParams {
             overhangs: false,
             ..LandformParams::default()
         },
-        ..tesserae_core::testgen::world_params_v3()
+        ..tesserae_core::testgen::world_params()
     };
     let params = WorldgenParams {
         water: (land == Land::Wet).then(|| WaterParams {
@@ -425,17 +425,12 @@ fn a_bridge_never_stands_on_flat_ground() {
     );
 }
 
-/// Version 3's valleys: a hilly stretch, found on a coarse walk, stands bridges over water and
-/// dry gaps alike.
+/// A hilly stretch, found on a coarse walk, stands bridges over water and dry gaps alike.
 #[test]
-fn version_3_stands_bridges_over_its_valleys() {
+fn bridges_stand_over_valleys() {
     for land in [Land::Dry, Land::Wet] {
-        let v3 = |structures: &[BiomeStructure]| WorldgenParams {
-            generator: 3,
-            ..params(structures, land)
-        };
-        let with = Worldgen::new(SEED, 1.0, v3(&[ROW])).with_templates(&[spanning()]);
-        let bare = Worldgen::new(SEED, 1.0, v3(&[]));
+        let with = Worldgen::new(SEED, 1.0, params(&[ROW], land)).with_templates(&[spanning()]);
+        let bare = Worldgen::new(SEED, 1.0, params(&[], land));
         let (x_m, z_m) = (-60..60)
             .flat_map(|i| (-60..60).map(move |j| (i as f32 * 97.0, j as f32 * 89.0)))
             .find(|&(x, z)| {

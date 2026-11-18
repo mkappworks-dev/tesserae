@@ -136,7 +136,7 @@ fn flat(features: &[SurfaceFeature]) -> WorldgenParams {
         },
         biomes: BiomeTable::new(&[biome(features)]).unwrap(),
         water: None,
-        ..tesserae_core::testgen::world_params_v3()
+        ..tesserae_core::testgen::world_params()
     })
 }
 
@@ -1530,25 +1530,9 @@ fn trunk_feet(g: &Worldgen, half: i32) -> Vec<[i32; 2]> {
 }
 
 #[test]
-fn version_2_keeps_trees_declared_closer_than_their_crowns() {
-    let params = WorldgenParams {
-        generator: 2,
-        ..flat(&[tree_feature(3.0, false)])
-    };
-    let g = Worldgen::new(SEED, 1.0, params);
-    let feet = trunk_feet(&g, 2);
-    let touching = feet.iter().any(|a| {
-        feet.iter()
-            .any(|b| a != b && (a[0] - b[0]).abs() <= 1 && (a[1] - b[1]).abs() <= 1)
-    });
-    assert!(touching, "version 2's trees stand where they always did");
-}
-
-#[test]
 fn trees_declared_closer_than_their_crowns_stand_apart() {
     for size in [1.0, 0.5] {
         let params = WorldgenParams {
-            generator: 3,
             sea_level_m: -40.0,
             landforms: tesserae_core::terrain::LandformParams {
                 overhangs: false,

@@ -14,7 +14,7 @@ use tesserae_core::{
 fn dry() -> WorldgenParams {
     WorldgenParams {
         water: None,
-        ..tesserae_core::testgen::world_params_v3()
+        ..tesserae_core::testgen::world_params()
     }
 }
 
@@ -794,7 +794,7 @@ fn shore() -> (Worldgen, (i32, i32, i32)) {
         1.0,
         WorldgenParams {
             caves: None,
-            ..tesserae_core::testgen::world_params_v3()
+            ..tesserae_core::testgen::world_params()
         }
         .with_default_lake(fixture().1),
     );

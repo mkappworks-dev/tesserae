@@ -84,7 +84,7 @@ fn biome_world() -> WorldgenParams {
             biomes: BiomeSet::new(&[BiomeId::new(0)]).unwrap(),
         }])
         .unwrap(),
-        ..tesserae_core::testgen::world_params_v3()
+        ..tesserae_core::testgen::world_params()
     })
 }
 
@@ -143,33 +143,16 @@ fn digests(params: WorldgenParams) -> Vec<String> {
         .collect()
 }
 
-const RECORDED_V3: [&str; 4] = [
+const RECORDED: [&str; 4] = [
     "3112f65200e9db56ef900f375b68980c6ee8d8faaedac301f81313af0e4cd4db",
     "3e4fbe12a76219faf6ac37255373e917b99c090ccb3d06bf220b62c4aa2919e3",
     "0e024edda2287acbc442ab793da892ce77d71db0007e0f50ff24d9c0223116cb",
     "87a4ec8a7a7ae89aa0431bd5c214528472c3a68774d1b2564dd950a59faca15b",
 ];
 
-/// Recorded from version 2 before Biomes could declare surface features.
-const RECORDED: [&str; 4] = [
-    "0db202cb8cb72b310ae9a68e30cde16faba7020f3c47067d2a1667992447f738",
-    "96a265785ad001567cdc3f010e3e4fe8e0cd9373ef3cf501bd01e0f375d3bbb5",
-    "aa26ea118fcc8c882ba3c4935a1fe05d5311e97929a52fa4146c0ad875093ea4",
-    "463ab24223f05a1e74c1ce08b0cf459a4b8fdee789776305b7c5e81aef09cf41",
-];
-
 #[test]
 fn a_world_whose_biomes_declare_no_features_makes_the_recorded_chunks() {
-    assert_eq!(digests(biome_world()), RECORDED_V3);
-}
-
-#[test]
-fn a_version_2_world_whose_biomes_declare_no_features_makes_the_recorded_chunks() {
-    let v2 = WorldgenParams {
-        generator: 2,
-        ..biome_world()
-    };
-    assert_eq!(digests(v2), RECORDED);
+    assert_eq!(digests(biome_world()), RECORDED);
 }
 
 fn mapping() -> Mapping {
@@ -201,7 +184,7 @@ fn a_snapshot_whose_biomes_have_no_features_restores_to_the_recorded_chunks() {
     assert!(biomes.iter().all(|b| b.get("surface_features").is_none()));
     let reopened: Generation = serde_json::from_value(json).unwrap();
     let params = reopened.restore(&mapping(), 3).unwrap();
-    assert_eq!(digests(params), RECORDED_V3);
+    assert_eq!(digests(params), RECORDED);
 }
 
 #[test]
@@ -282,7 +265,7 @@ fn plain(features: &[SurfaceFeature]) -> WorldgenParams {
         smoothing: None,
         biomes: BiomeTable::new(&[featured(biome("t:plain", 0.5, None, None), features)]).unwrap(),
         water: None,
-        ..tesserae_core::testgen::world_params_v3()
+        ..tesserae_core::testgen::world_params()
     }
 }
 

@@ -15,7 +15,7 @@ use super::ground::SAMPLE_M;
 use super::structures::{NEIGHBOURS, ORIGIN_CLEAR_M, Structure};
 use super::{CARDINALS, Footprint, Worldgen, top_index};
 use crate::chunk::{CHUNK_SIZE, Chunk};
-use crate::climate::{BIOMES_SINCE, BiomeId, BiomeSettlement};
+use crate::climate::{BiomeId, BiomeSettlement};
 use crate::mesh::POS_Y;
 use crate::settlement::{Building, Outskirts, PlotRule, Settlement};
 use crate::shape::{Orientation, SHAPE_SLAB, SHAPE_STAIR};
@@ -119,9 +119,7 @@ impl SettlementPass {
         templates: &[Template],
         settlements: &[Settlement],
     ) -> Option<Self> {
-        if params.generator < BIOMES_SINCE || params.ground.is_none() {
-            return None;
-        }
+        params.ground?;
         let mut rows = Vec::new();
         let mut listed = vec![0; params.biomes.as_slice().len()];
         let (mut above, mut below, mut reach_m) = (0, 0, 0.0f32);
@@ -607,13 +605,9 @@ impl Worldgen {
         })
     }
 
-    /// Whether the ground over a Settlement's disc is level enough to found it on: under version 3,
-    /// whose land rises into hills and mountains, within [`DISC_RISE_M`] of its centre on two
-    /// rings; before it, whose land is gentle, always.
+    /// Whether the ground over a Settlement's disc is level enough to found it on: within
+    /// [`DISC_RISE_M`] of its centre on two rings.
     pub(super) fn level_disc(&self, centre_m: [f32; 2], height_m: f32, reach_m: f32) -> bool {
-        if self.terrain.is_none() {
-            return true;
-        }
         [0.5, 1.0].into_iter().all(|ring| {
             (0..8).all(|k| {
                 let angle = k as f32 * TAU / 8.0;

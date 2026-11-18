@@ -2190,7 +2190,7 @@ mod tests {
             // These tests diff a World against the same one without tunnels; a
             // stair beside a mouth would be a difference of its own.
             smoothing: None,
-            ..crate::testgen::world_params_v3()
+            ..crate::testgen::world_params()
         };
         assert!(params.caves.is_some());
         (
@@ -2339,7 +2339,7 @@ mod tests {
         let params = WorldgenParams {
             caves: caves.then(Default::default),
             smoothing: Some(crate::worldgen::SmoothingParams::default()),
-            ..crate::testgen::world_params_v3()
+            ..crate::testgen::world_params()
         };
         (
             Worldgen::new(0x7e55_e2ae, 1.0, params),
@@ -2435,7 +2435,7 @@ mod tests {
             WorldgenParams {
                 caves: None,
                 smoothing: None,
-                ..crate::testgen::world_params_v3()
+                ..crate::testgen::world_params()
             },
         );
         for cz in -8..8 {
@@ -3070,7 +3070,7 @@ mod tests {
             1.0,
             WorldgenParams {
                 water: None,
-                ..crate::testgen::world_params_v3()
+                ..crate::testgen::world_params()
             },
         );
         let size = CHUNK_SIZE as f32;

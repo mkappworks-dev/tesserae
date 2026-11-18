@@ -135,7 +135,7 @@ fn flat(structures: &[BiomeStructure]) -> WorldgenParams {
         },
         biomes: BiomeTable::new(&[biome(structures)]).unwrap(),
         water: None,
-        ..tesserae_core::testgen::world_params_v3()
+        ..tesserae_core::testgen::world_params()
     })
 }
 
@@ -595,7 +595,7 @@ fn two_rows_of_one_spacing_never_stand_structures_that_touch() {
 
 #[test]
 fn templates_no_biome_lists_change_nothing() {
-    let params = tesserae_core::testgen::world_params_v3();
+    let params = tesserae_core::testgen::world_params();
     for size in SIZES {
         let plain = Worldgen::new(SEED, size, params);
         let given = Worldgen::new(SEED, size, params).with_templates(&[hut()]);
@@ -780,7 +780,7 @@ fn a_structure_stands_only_in_a_biome_that_lists_it() {
 /// overhangs, whose rock a Structure clears round it, so the ground under one is the ground its
 /// rules asked.
 fn hilly(structures: &[BiomeStructure]) -> WorldgenParams {
-    let land = tesserae_core::testgen::world_params_v3();
+    let land = tesserae_core::testgen::world_params();
     WorldgenParams {
         relief_m: land.relief_m,
         landforms: LandformParams {
@@ -1199,7 +1199,6 @@ fn two_seeds_stand_structures_differently() {
 /// a few metres of rise.
 fn rugged(structures: &[BiomeStructure]) -> WorldgenParams {
     WorldgenParams {
-        generator: 3,
         sea_level_m: 24.0,
         relief_m: 24.0,
         landforms: LandformParams {
@@ -1217,12 +1216,7 @@ fn no_overhang_stands_over_a_structure_or_beside_it() {
     // Rugged ground well inland, where the density reaches furthest.
     let centre_m = (0..400)
         .map(|i| 64.0 * i as f32)
-        .find(|&m| {
-            probe
-                .bare
-                .landform_fields(m, m)
-                .is_some_and(|f| f.ruggedness > 0.6)
-        })
+        .find(|&m| probe.bare.landform_fields(m, m).ruggedness > 0.6)
         .expect("rugged ground on the diagonal");
     let changed = probe.changed_around(centre_m, 96.0, false);
     let found = marks(&changed);
