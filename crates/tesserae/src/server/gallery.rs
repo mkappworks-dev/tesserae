@@ -639,6 +639,7 @@ mod tests {
         let ground = tesserae_core::testgen::register_ground(&mut tables);
         let params = WorldgenParams {
             ground: Some(ground),
+            water: None,
             ..tesserae_core::testgen::world_params()
         };
         let sparse = Parts::select(&tables, params).unwrap();
