@@ -8,8 +8,10 @@ use crate::chunk::{CHUNK_SIZE, Chunk};
 use crate::fluid::FluidDef;
 use crate::material::{MaterialDef, Occlusion, RenderClass};
 use crate::noise::fbm2;
+use crate::save::Mapping;
+use crate::shape::{SHAPE_POST, SHAPE_SLAB, SHAPE_STAIR};
 use crate::tables::Tables;
-use crate::voxel::{MaterialId, Voxel};
+use crate::voxel::{AIR, MaterialId, SHAPE_FULL_CUBE, Voxel};
 
 use crate::worldgen::GroundParams;
 
@@ -193,6 +195,33 @@ pub struct Fixtures {
     pub water: MaterialId,
 }
 
+impl Fixtures {
+    /// The tables carry no names, so these are the fixtures' own: what a digest hashes in place
+    /// of an id that moves with registration order.
+    pub fn mapping(&self) -> Mapping {
+        let materials = [
+            (AIR, "core:air"),
+            (self.ground.rock, "t:rock"),
+            (self.ground.soil, "t:soil"),
+            (self.ground.surface, "t:surface"),
+            (self.lantern, "t:lantern"),
+            (self.glass, "t:glass"),
+            (self.leaves, "t:leaves"),
+            (self.water, "t:water"),
+        ];
+        let shapes = [
+            (SHAPE_FULL_CUBE, "core:cube"),
+            (SHAPE_SLAB, "core:slab"),
+            (SHAPE_STAIR, "core:stair"),
+            (SHAPE_POST, "core:post"),
+        ];
+        Mapping {
+            materials: materials.map(|(id, n)| (id, n.to_owned())).into(),
+            shapes: shapes.map(|(id, n)| (id, n.to_owned())).into(),
+        }
+    }
+}
+
 pub fn fixtures() -> &'static Fixtures {
     static FIXTURES: std::sync::OnceLock<Fixtures> = std::sync::OnceLock::new();
     FIXTURES.get_or_init(|| {
@@ -365,6 +394,20 @@ mod tests {
         assert!(ground, "no fixture surface in the sampled Chunks");
         assert!(water, "no fixture water in the sampled Chunks");
         assert_eq!(biomes.len(), 2, "both fixture Biomes occur");
+    }
+
+    #[test]
+    fn the_fixture_mapping_names_every_registered_material_and_shape_once() {
+        let f = fixtures();
+        let mapping = f.mapping();
+        assert_eq!(mapping.validate().map_err(|e| e.to_string()), Ok(()));
+        let named: Vec<_> = mapping.materials.keys().copied().collect();
+        let registered: Vec<_> = (0..f.tables.materials.len() as MaterialId)
+            .filter(|&id| f.tables.materials.contains(id))
+            .collect();
+        assert_eq!(named, registered);
+        let shapes: Vec<_> = mapping.shapes.keys().map(|&id| id as usize).collect();
+        assert_eq!(shapes, (0..f.tables.shapes.len()).collect::<Vec<_>>());
     }
 
     #[test]
