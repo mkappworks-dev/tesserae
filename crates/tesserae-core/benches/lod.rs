@@ -11,12 +11,11 @@ use tesserae_core::{ShapeTable, Voxel, Worldgen, WorldgenParams, mesh_chunk, tes
 const SEED: u64 = 0x7e55_e2ae_0000_0001;
 const DEEPEST_LEVEL: u32 = 5;
 
-/// A default World with its lakes left out: the terrain every figure in this
-/// file measured before lakes, so a change stays comparable with `main`.
+/// A default World with its water left out, so the figures in this file measure the terrain alone.
 fn dry() -> WorldgenParams {
     WorldgenParams {
         water: None,
-        ..tesserae_core::testgen::world_params()
+        ..tesserae_core::testgen::world_params_v3()
     }
 }
 

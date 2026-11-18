@@ -1217,7 +1217,7 @@ mod tests {
         let params = WorldgenParams {
             caves: None,
             water: None,
-            ..crate::testgen::world_params()
+            ..crate::testgen::world_params_v3()
         };
         let below = level - 1;
         // Level 0 keeps its stairs; the sources above it are cubes, as in the Server.
@@ -1282,7 +1282,7 @@ mod tests {
                     voxel_m,
                     WorldgenParams {
                         caves: None,
-                        ..crate::testgen::world_params()
+                        ..crate::testgen::world_params_v3()
                     },
                 )
                 .surface_height_m(cx * voxel_m, cz * voxel_m);
@@ -1506,7 +1506,7 @@ mod tests {
         let generator = Worldgen::new(
             SEED,
             1.0,
-            crate::testgen::world_params().with_default_lake(water()),
+            crate::testgen::world_params_v3().with_default_lake(water()),
         );
         let level_m = generator.water().expect("the World has a lake").level_m;
         let waterline = Some(Waterline {

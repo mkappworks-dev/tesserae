@@ -14,6 +14,7 @@ use tesserae_core::{
     Burn, Burning, CHUNK_SIZE, Chunk, ChunkOverlay, CombustionDef, Fluid, FluidDef, Heat,
     MaterialDef, MaterialId, Occlusion, Occupants, Orientation, Overlay, Phase, Reactant,
     ReactionDef, RenderClass, SHAPE_POST, SHAPE_SLAB, Side, Tables, Voxel, Worldgen,
+    WorldgenParams,
 };
 
 const SEED: u64 = 0x7e55_e2ae_0000_0001;
@@ -428,11 +429,20 @@ fn rescans(c: &mut Criterion) {
     let lake = Worldgen::new(
         SEED,
         1.0,
-        tesserae_core::testgen::world_params().with_default_lake(water),
+        tesserae_core::testgen::world_params_v3().with_default_lake(water),
     );
-    let dry = Worldgen::new(SEED, 1.0, tesserae_core::testgen::world_params());
+    let dry = Worldgen::new(
+        SEED,
+        1.0,
+        WorldgenParams {
+            water: None,
+            ..tesserae_core::testgen::world_params_v3()
+        },
+    );
+    let level = lake.water().expect("the World has water").level_m;
+    let cy = (level / CHUNK_SIZE as f32).floor() as i32;
     let shore = (-8..8)
-        .flat_map(|x| (-8..8).map(move |z| [x, 1, z]))
+        .flat_map(|x| (-8..8).map(move |z| [x, cy, z]))
         .find(|&[x, y, z]| {
             let chunk = lake.chunk(x, y, z);
             chunk.uniform().is_none() && chunk.kinds().iter().any(|v| v.material() == water)
