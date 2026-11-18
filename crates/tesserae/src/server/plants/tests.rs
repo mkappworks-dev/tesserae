@@ -179,6 +179,7 @@ fn content_full(shaped: bool, branching: Option<Branching>, staged: bool) -> Con
             Kind::Tree(Tree {
                 vines: None,
                 branching,
+                crowding_m: None,
                 trunk,
                 canopy,
                 trunk_height_m: if branching.is_some() {

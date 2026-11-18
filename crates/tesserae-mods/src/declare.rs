@@ -828,6 +828,7 @@ fn surface_feature(
                 trunk_height_m: tree.trunk_height_m,
                 canopy_radius_m: tree.canopy_radius_m,
                 branching: tree.branching,
+                crowding_m: tree.crowding_m,
                 fruit,
             })
         }

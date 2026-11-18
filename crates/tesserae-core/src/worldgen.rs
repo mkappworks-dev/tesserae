@@ -2549,11 +2549,16 @@ impl Worldgen {
     }
 
     /// [`Self::plant_at`] before a planted field clears the column: what the column draws, unless
-    /// it is a tree with a stronger tree's trunk within [`CROWN_SPACING`] crowns.
+    /// it is a tree with a stronger tree's trunk within its crowding distance.
     fn plant_raw(&self, scatter: &SurfaceScatter, gx: i32, gz: i32) -> Option<Standing> {
         let standing = self.plant_drawn(scatter, gx, gz)?;
         if let SurfacePlantKind::Tree(tree) = standing.plant.kind
-            && self.crowded(scatter, [gx, gz], CROWN_SPACING * tree.canopy_radius_m)
+            && self.crowded(
+                scatter,
+                [gx, gz],
+                tree.crowding_m
+                    .unwrap_or(CROWN_SPACING * tree.canopy_radius_m),
+            )
         {
             return None;
         }
@@ -2737,6 +2742,7 @@ impl Worldgen {
             trunk_height_m: tree.trunk_height_m,
             canopy_radius_m: tree.canopy_radius_m,
             branching: tree.branching,
+            crowding_m: tree.crowding_m,
             mean_seconds: 0.0,
             trunk_yield: Vec::new(),
             canopy_yield: Vec::new(),

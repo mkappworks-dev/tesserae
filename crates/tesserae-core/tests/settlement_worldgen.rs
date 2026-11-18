@@ -677,6 +677,7 @@ fn settlements_no_biome_lists_change_nothing() {
 fn oak() -> SurfaceTree {
     SurfaceTree {
         branching: None,
+        crowding_m: None,
         trunk: TRUNK,
         canopy: CANOPY,
         trunk_height_m: (3.0, 5.0),

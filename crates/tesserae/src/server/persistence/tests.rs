@@ -1893,6 +1893,7 @@ fn declares_plants() -> impl FnOnce(&mut crate::server::mods::LoadedMods) {
             feature(SurfacePlantKind::Tree(SurfaceTree {
                 vines: None,
                 branching: None,
+                crowding_m: None,
                 trunk: id("terra:wood"),
                 canopy: id("terra:leaves"),
                 trunk_height_m: (3.0, 5.0),

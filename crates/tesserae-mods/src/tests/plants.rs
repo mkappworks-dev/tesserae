@@ -360,6 +360,7 @@ mod surface_features {
                 content::PlantKind::Tree(content::TreeDef {
                     vines: None,
                     branching: None,
+                    crowding_m: None,
                     sapling: "t:sapling".into(),
                     sapling_yields: Vec::new(),
                     trunk: "t:log".into(),
@@ -1208,6 +1209,50 @@ mod surface_features {
         }
     }
 
+    fn crowded_at(crowding_m: Option<f32>) -> Vec<content::PlantDef> {
+        let mut rows = plants();
+        for row in &mut rows {
+            if let content::PlantKind::Tree(tree) = &mut row.kind {
+                tree.crowding_m = crowding_m;
+            }
+        }
+        rows
+    }
+
+    #[test]
+    fn a_trees_crowding_freezes_into_the_biome_and_a_tree_without_it_has_none() {
+        for crowding_m in [Some(2.5), None] {
+            let (biomes, ..) = resolved_with(
+                vec![feature(None, Some("t:oak"), None)],
+                crowded_at(crowding_m),
+            )
+            .unwrap();
+            let SurfacePlantKind::Tree(frozen) = biomes.as_slice()[0].surface_features.as_slice()
+                [0]
+            .plant
+            .unwrap()
+            .kind
+            else {
+                panic!("a tree");
+            };
+            assert_eq!(frozen.crowding_m, crowding_m);
+        }
+    }
+
+    #[test]
+    fn a_crowding_distance_outside_0_to_12_m_is_a_load_error_naming_the_tree() {
+        for bad in [0.0, -1.0, 12.5, f32::NAN] {
+            let err = resolved_with(vec![], crowded_at(Some(bad)))
+                .unwrap_err()
+                .to_string();
+            assert!(
+                err.contains("oak") && err.contains("crowding-m"),
+                "{bad}: {err}"
+            );
+        }
+        assert!(resolved_with(vec![], crowded_at(Some(12.0))).is_ok());
+    }
+
     #[test]
     fn a_biome_names_sixteen_features_and_seventeen_is_refused_naming_it() {
         let many = |n: usize| -> Vec<_> {
@@ -1318,4 +1363,29 @@ fn a_data_mod_declares_branching_in_its_tree_row() {
         crate::data::parse("t", &payload).is_err(),
         "unknown fields are refused"
     );
+}
+
+#[test]
+fn a_data_mod_declares_a_crowding_distance_in_its_tree_row() {
+    let row = |extra: &str| {
+        format!(
+            "[[plants]]\nname = \"jungle\"\nkind = \"tree\"\nseed = \"t:sapling\"\n\
+             sapling = \"t:sapling\"\ntrunk = \"t:log\"\ncanopy = \"t:leaf\"\n\
+             trunk-height-m = [3.0, 5.0]\ncanopy-radius-m = 5.0\nmean-seconds = 60.0\n\
+             sapling-yield = [1, 1]\n{extra}[plants.needs]\nsoil = [\"t:sand\"]\n"
+        )
+    };
+    let crowding = |toml: String| {
+        let payload = crate::trust::CheckedPayload::for_test(
+            "content.toml",
+            [("content.toml", toml.into_bytes())],
+        );
+        let declared = crate::data::parse("t", &payload).unwrap();
+        let content::PlantKind::Tree(tree) = &declared.plants[0].kind else {
+            panic!("a tree");
+        };
+        tree.crowding_m
+    };
+    assert_eq!(crowding(row("crowding-m = 3.0\n")), Some(3.0));
+    assert_eq!(crowding(row("")), None);
 }

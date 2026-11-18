@@ -70,6 +70,7 @@ pub(super) fn regrowing(
     let tree = Tree {
         vines: None,
         branching,
+        crowding_m: None,
         trunk,
         canopy,
         trunk_height_m,

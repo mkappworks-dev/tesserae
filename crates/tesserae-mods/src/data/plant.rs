@@ -45,6 +45,7 @@ pub(super) enum Plant {
         fruit: Option<Fruit>,
         vines: Option<Vines>,
         branching: Option<Branching>,
+        crowding_m: Option<f32>,
     },
     Column {
         name: String,
@@ -260,6 +261,7 @@ impl From<Plant> for content::PlantDef {
                 fruit,
                 vines,
                 branching,
+                crowding_m,
             } => Self {
                 name,
                 seed,
@@ -297,6 +299,7 @@ impl From<Plant> for content::PlantDef {
                         tiers: b.tiers,
                         lobe_radius_m: b.lobe_radius_m,
                     }),
+                    crowding_m,
                 }),
             },
             Plant::Column {

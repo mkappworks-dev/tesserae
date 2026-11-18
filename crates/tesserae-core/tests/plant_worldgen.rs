@@ -62,6 +62,7 @@ const BRANCHING: Branching = Branching {
 fn oak_with(fruit: bool, branching: Option<Branching>) -> SurfaceTree {
     SurfaceTree {
         branching,
+        crowding_m: None,
         trunk: TRUNK,
         canopy: CANOPY,
         trunk_height_m: (3.0, 5.0),
@@ -223,6 +224,7 @@ fn row_of(fruit: bool, branching: Option<Branching>) -> Tree {
     Tree {
         vines: None,
         branching,
+        crowding_m: None,
         trunk: o.trunk,
         canopy: o.canopy,
         trunk_height_m: o.trunk_height_m,
@@ -1534,30 +1536,90 @@ fn trunk_feet(g: &Worldgen, half: i32) -> Vec<[i32; 2]> {
     feet
 }
 
+/// Dry ground under trees declared 3 m apart, which no crown allows.
+fn grove(tree: SurfaceTree) -> WorldgenParams {
+    let mut feature = tree_feature(3.0, false);
+    feature.plant.as_mut().unwrap().kind = SurfacePlantKind::Tree(tree);
+    WorldgenParams {
+        sea_level_m: -40.0,
+        landforms: tesserae_core::terrain::LandformParams {
+            overhangs: false,
+            ..Default::default()
+        },
+        ..flat(&[feature])
+    }
+}
+
+/// The trunks' feet, each pair at least `apart_m` apart, and the closest pair's distance.
+fn assert_feet_apart(g: &Worldgen, apart_m: f32) -> (usize, f32) {
+    let size = g.voxel_size();
+    let feet = trunk_feet(g, 2);
+    let mut closest = f32::MAX;
+    for (i, a) in feet.iter().enumerate() {
+        for b in &feet[i + 1..] {
+            let d = ((a[0] - b[0]) as f32).hypot((a[1] - b[1]) as f32) * size;
+            assert!(
+                d >= apart_m,
+                "{size} m: trunks at {a:?} and {b:?} stand {d} m apart"
+            );
+            closest = closest.min(d);
+        }
+    }
+    (feet.len(), closest)
+}
+
 #[test]
 fn trees_declared_closer_than_their_crowns_stand_apart() {
     for size in [1.0, 0.5] {
-        let params = WorldgenParams {
-            sea_level_m: -40.0,
-            landforms: tesserae_core::terrain::LandformParams {
-                overhangs: false,
-                ..Default::default()
-            },
-            ..flat(&[tree_feature(3.0, false)])
-        };
-        let g = Worldgen::new(SEED, size, params);
-        let feet = trunk_feet(&g, 2);
-        assert!(feet.len() > 40, "{size} m: only {} trees", feet.len());
+        let g = Worldgen::new(SEED, size, grove(oak_with(false, None)));
         // Worldgen keeps one and a half crown radii between trunks.
         let crown_m = 1.5 * oak_with(false, None).canopy_radius_m;
-        for (i, a) in feet.iter().enumerate() {
-            for b in &feet[i + 1..] {
-                let d = ((a[0] - b[0]) as f32).hypot((a[1] - b[1]) as f32) * size;
-                assert!(
-                    d >= crown_m,
-                    "{size} m: trunks at {a:?} and {b:?} stand {d} m apart"
-                );
-            }
-        }
+        let (trees, _) = assert_feet_apart(&g, crown_m);
+        assert!(trees > 40, "{size} m: only {trees} trees");
     }
+}
+
+#[test]
+fn a_tree_that_declares_its_crowding_stands_that_close_and_no_closer() {
+    for size in [1.0, 0.5] {
+        let crowns = assert_feet_apart(
+            &Worldgen::new(SEED, size, grove(oak_with(false, None))),
+            0.0,
+        );
+        let close = SurfaceTree {
+            crowding_m: Some(2.0),
+            ..oak_with(false, None)
+        };
+        let (trees, closest) = assert_feet_apart(&Worldgen::new(SEED, size, grove(close)), 2.0);
+        assert!(
+            closest < 1.5 * close.canopy_radius_m && trees > crowns.0 * 3 / 2,
+            "{size} m: {trees} trees against {}, the closest {closest} m apart",
+            crowns.0
+        );
+    }
+}
+
+#[test]
+fn a_snapshot_keeps_a_trees_crowding_and_a_tree_without_it_saves_none() {
+    let capture = |crowding_m| {
+        let params = grove(SurfaceTree {
+            crowding_m,
+            ..oak_with(false, None)
+        });
+        let json =
+            serde_json::to_string(&Generation::capture(params, &[], &[], &mapping()).unwrap())
+                .unwrap();
+        (params, json)
+    };
+    let (params, json) = capture(Some(2.0));
+    let reopened: Generation = serde_json::from_str(&json).unwrap();
+    assert_eq!(
+        reopened.restore(&mapping(), 3).unwrap().biomes,
+        params.biomes
+    );
+    let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+    let form = &value["biomes"][0]["surface_features"][0]["plant"]["form"];
+    assert_eq!(form["crowding_m"], 2.0f32);
+    let (_, plain) = capture(None);
+    assert!(!plain.contains("crowding"), "an old tree saves as it did");
 }

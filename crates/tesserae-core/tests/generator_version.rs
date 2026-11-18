@@ -240,6 +240,7 @@ fn forest() -> WorldgenParams {
                 fruit: None,
                 vines: None,
                 branching: None,
+                crowding_m: None,
             }),
         }),
         clump: None,

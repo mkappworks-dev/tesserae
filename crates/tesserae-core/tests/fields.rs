@@ -565,6 +565,7 @@ fn a_tree_inside_the_ground_a_field_would_take_skips_that_place_whole() {
             shape: 0,
             kind: tesserae_core::SurfacePlantKind::Tree(tesserae_core::SurfaceTree {
                 branching: None,
+                crowding_m: None,
                 trunk: TRUNK,
                 canopy: TRUNK + 1,
                 trunk_height_m: (3.0, 4.0),
