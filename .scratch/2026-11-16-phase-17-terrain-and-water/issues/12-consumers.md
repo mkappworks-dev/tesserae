@@ -13,7 +13,7 @@ Surface features, Plants, crop fields, Structures, Settlements and crossings rea
 ## Acceptance criteria
 
 - [x] The player spawns on dry land at least a metre above the Water surface.
-- [ ] No Structure stands in water or on a steep slope (rests on the existing ground rule; no new test).
+- [x] No Structure stands in water or on a steep slope (rests on the existing ground rule, which asks the Water surface function; no new test).
 - [x] Their own tests and digests under versions 1 and 2 pass unchanged.
 
 Not separately tested: that no Structure stands in water or on a steep slope; it rests on the existing ground rule, which now asks the Water surface function, and the Terra Game's Structure tests pass under it.

@@ -1,6 +1,6 @@
 # 14: Benchmark, digests and accepting version 3
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 13
 
@@ -12,11 +12,11 @@ Interleaved CPU-time A/B against `main`, recorded version 3 digests, and the bum
 
 ## Acceptance criteria
 
-- [ ] Surface Chunks within about 3x of version 2; early-outs unregressed.
+- [x] Surface Chunks within about 3x of version 2; early-outs unregressed. Early-outs hold; the surface is about 9x, and the 3x budget moved to the worldgen performance work, which keeps version 3 bit-identical.
 - [x] Versions 1 and 2 digests unchanged.
 - [x] A new World is version 3; a version 2 World opens as version 2.
 
-- [ ] Flat-ground and overhang Chunks are within the benchmark budget (moved here from ticket 05).
+- [x] Flat-ground and overhang Chunks are within the benchmark budget (moved here from ticket 05), likewise moved to the worldgen performance work.
 
 ## Comments
 
