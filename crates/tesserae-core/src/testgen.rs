@@ -8,7 +8,9 @@ use crate::chunk::{CHUNK_SIZE, Chunk};
 use crate::fluid::FluidDef;
 use crate::material::{MaterialDef, Occlusion, RenderClass};
 use crate::noise::fbm2;
+use crate::settlement::{Building, PlotRule, Settlement};
 use crate::tables::Tables;
+use crate::template::{Cell, Template};
 use crate::voxel::{MaterialId, Voxel};
 
 use crate::worldgen::GroundParams;
@@ -160,15 +162,7 @@ pub fn register_water(tables: &mut Tables) -> MaterialId {
 
 /// The fixture ground under version 3's default landforms, a sea at Sea level and two Biomes.
 pub fn world_params() -> crate::WorldgenParams {
-    let biome = |name, temperature| crate::Biome {
-        name: crate::BiomeName::new(name).expect("valid fixture Biome name"),
-        temperature,
-        humidity: 0.5,
-        ground: None,
-        sky_fog: None,
-        cave_scale: None,
-        surface_features: crate::SurfaceFeatures::NONE,
-    };
+    let biome = |name, temperature| biome(name, temperature, crate::SurfaceFeatures::NONE);
     let sea_level_m = 24.0;
     crate::WorldgenParams {
         sea_level_m,
@@ -183,6 +177,18 @@ pub fn world_params() -> crate::WorldgenParams {
     }
 }
 
+fn biome(name: &str, temperature: f32, surface_features: crate::SurfaceFeatures) -> crate::Biome {
+    crate::Biome {
+        name: crate::BiomeName::new(name).expect("valid fixture Biome name"),
+        temperature,
+        humidity: 0.5,
+        ground: None,
+        sky_fog: None,
+        cave_scale: None,
+        surface_features,
+    }
+}
+
 /// Shared registered content for algorithm tests and benches.
 pub struct Fixtures {
     pub tables: Tables,
@@ -191,6 +197,7 @@ pub struct Fixtures {
     pub glass: MaterialId,
     pub leaves: MaterialId,
     pub water: MaterialId,
+    pub content: ContentMaterials,
 }
 
 pub fn fixtures() -> &'static Fixtures {
@@ -202,6 +209,7 @@ pub fn fixtures() -> &'static Fixtures {
         let glass = register_glass(&mut tables);
         let leaves = register_leaves(&mut tables);
         let water = register_water(&mut tables);
+        let content = register_content(&mut tables);
         Fixtures {
             tables,
             ground,
@@ -209,6 +217,201 @@ pub fn fixtures() -> &'static Fixtures {
             glass,
             leaves,
             water,
+            content,
+        }
+    })
+}
+
+/// The Materials only [`content`] generates.
+pub struct ContentMaterials {
+    pub flower: MaterialId,
+    pub reed: MaterialId,
+    pub crop: [MaterialId; 3],
+    pub lane: MaterialId,
+    /// Only the Structure's Template is made of it, so a sweep for it finds the Structure.
+    pub stone: MaterialId,
+    /// The Settlement's buildings.
+    pub hall: MaterialId,
+    pub road: MaterialId,
+}
+
+/// Solid, as [`crate::WorldgenParams::validate_ground`] asks of every surface feature.
+const PLANT_MATERIAL: MaterialDef = MaterialDef {
+    emission: 0,
+    dimming: 0,
+    occlusion: Occlusion::Never,
+    render: RenderClass::Cutout,
+    solid: true,
+};
+
+/// After [`register_water`] in [`fixtures`], so no earlier fixture id moves.
+pub fn register_content(tables: &mut Tables) -> ContentMaterials {
+    let mut register = |def| {
+        tables
+            .materials
+            .register(def)
+            .expect("valid fixture content")
+    };
+    ContentMaterials {
+        flower: register(PLANT_MATERIAL),
+        reed: register(PLANT_MATERIAL),
+        crop: [(); 3].map(|()| register(PLANT_MATERIAL)),
+        lane: register(MaterialDef::OPAQUE),
+        stone: register(MaterialDef::OPAQUE),
+        hall: register(MaterialDef::OPAQUE),
+        road: register(MaterialDef::OPAQUE),
+    }
+}
+
+/// A World holding one of every kind of content generation places, on [`world_params`]' ground,
+/// sea and Biomes.
+pub struct Content {
+    pub params: crate::WorldgenParams,
+    /// The Plants its features name, from which a generated Chunk's Overlay is derived.
+    pub plants: crate::PlantTable,
+    pub templates: Vec<Template>,
+    pub settlements: Vec<Settlement>,
+}
+
+impl Content {
+    pub fn worldgen(&self, seed: u64, voxel_size: f32) -> crate::Worldgen {
+        crate::Worldgen::new(seed, voxel_size, self.params)
+            .with_templates(&self.templates)
+            .with_settlements(&self.settlements)
+    }
+}
+
+/// A `side` metre square floor of `material` with a post of it at the centre, `height` cells tall.
+fn post(name: &str, side: usize, height: usize, material: MaterialId) -> Template {
+    let layers = (0..height)
+        .map(|y| {
+            (0..side)
+                .map(|z| {
+                    (0..side)
+                        .map(|x| {
+                            if y == 0 || [x, z] == [side / 2; 2] {
+                                Cell::Voxel(Voxel::cube(material))
+                            } else {
+                                Cell::Air
+                            }
+                        })
+                        .collect()
+                })
+                .collect()
+        })
+        .collect();
+    Template::new(name.into(), 1.0, layers, 0, None, 2.0).expect("valid fixture Template")
+}
+
+pub fn content() -> &'static Content {
+    static CONTENT: std::sync::OnceLock<Content> = std::sync::OnceLock::new();
+    CONTENT.get_or_init(|| {
+        let m = &fixtures().content;
+        let water = fixtures().water;
+        let reed = crate::SurfaceFeature {
+            plant: Some(crate::SurfacePlant {
+                shape: crate::SHAPE_FULL_CUBE,
+                kind: crate::SurfacePlantKind::Column {
+                    material: m.reed,
+                    max_height_m: 3.0,
+                    stands_in: Some(water),
+                },
+            }),
+            ..crate::SurfaceFeature::cube(m.reed, 4.0)
+        };
+        let mut field =
+            crate::CropField::new((6.0, 10.0), 48.0, Some(m.lane), Some(water), Some(16.0));
+        field
+            .push(
+                crate::FieldCrop::new(crate::SHAPE_FULL_CUBE, &m.crop, &[], 1.0)
+                    .expect("valid fixture crop"),
+            )
+            .expect("room for the fixture crop");
+        let templates = vec![
+            post("t:cairn", 3, 3, m.stone),
+            post("t:hall", 5, 3, m.hall),
+            post("t:hut", 3, 2, m.hall),
+        ];
+        let building = |template| Building {
+            template,
+            door: None,
+        };
+        let settlements = vec![Settlement {
+            name: "t:hamlet".into(),
+            radius_m: 16.0,
+            radius_min_m: 16.0,
+            margin_m: 8.0,
+            centre: Some(building(1)),
+            plots: 4,
+            plots_min: 4,
+            rules: vec![PlotRule {
+                building: building(2),
+                weight: 1.0,
+                min: 1,
+                max: 4,
+                loot: None,
+            }],
+            minimum: 1,
+            path: Voxel::cube(m.road),
+            loot: None,
+            outskirts: Vec::new(),
+        }];
+        let hamlet = crate::BiomeSettlement {
+            settlement: 0,
+            spacing_m: 256.0,
+            chance: 0.5,
+            near_spawn: true,
+        };
+        let cairn = crate::BiomeStructure {
+            template: 0,
+            spacing_m: 64.0,
+            chance: 0.5,
+        };
+        let features = |extra: &[crate::SurfaceFeature]| {
+            crate::SurfaceFeatures::new(&[extra, &[reed]].concat())
+                .and_then(|f| f.with_crop_fields(&[field]))
+                .and_then(|f| f.with_structures(&[cairn]))
+                .and_then(|f| f.with_settlements(&[hamlet]))
+                .expect("valid fixture features")
+        };
+        let biomes = [
+            biome("cold", 0.25, features(&[])),
+            biome(
+                "warm",
+                0.75,
+                features(&[crate::SurfaceFeature::cube(m.flower, 6.0)]),
+            ),
+        ];
+        let mut plants = crate::PlantTable::default();
+        plants
+            .push(crate::plant::Plant {
+                name: "t:reed".into(),
+                seed: "t:reed".into(),
+                first: m.reed,
+                shape: None,
+                needs: crate::plant::Needs {
+                    soil: vec![fixtures().ground.soil, fixtures().ground.surface],
+                    light_max: 15,
+                    ..Default::default()
+                },
+                kind: crate::plant::Kind::Column {
+                    max_height_m: 3.0,
+                    direction: crate::plant::Direction::Up,
+                    mean_seconds: 60.0,
+                    stands_in: vec![water],
+                    yields: Vec::new(),
+                },
+                sapling_yields: Vec::new(),
+            })
+            .expect("valid fixture Plant");
+        Content {
+            params: crate::WorldgenParams {
+                biomes: crate::BiomeTable::new(&biomes).expect("valid fixture Biomes"),
+                ..world_params()
+            },
+            plants,
+            templates,
+            settlements,
         }
     })
 }
@@ -365,6 +568,34 @@ mod tests {
         assert!(ground, "no fixture surface in the sampled Chunks");
         assert!(water, "no fixture water in the sampled Chunks");
         assert_eq!(biomes.len(), 2, "both fixture Biomes occur");
+    }
+
+    #[test]
+    fn the_content_registers_after_every_other_fixture_and_validates() {
+        let (f, c) = (fixtures(), content());
+        let m = &f.content;
+        let ids = [
+            m.flower, m.reed, m.crop[0], m.crop[1], m.crop[2], m.lane, m.stone, m.hall, m.road,
+        ];
+        let next = usize::from(f.water) + 1;
+        assert_eq!(ids.map(usize::from), std::array::from_fn(|i| next + i));
+        assert_eq!(f.tables.materials.len(), next + ids.len());
+        assert_eq!(c.params.validate(), Ok(()));
+        assert_eq!(c.params.validate_ground(&f.tables), Ok(()));
+        assert_eq!(c.params.validate_lake(&f.tables), Ok(()));
+        for settlement in &c.settlements {
+            assert_eq!(settlement.validate(&c.templates), Ok(()));
+        }
+        for biome in c.params.biomes.as_slice() {
+            for row in biome.surface_features.structures() {
+                let template = &c.templates[usize::from(row.template)];
+                assert_eq!(row.validate(template), Ok(()));
+            }
+            for row in biome.surface_features.settlements() {
+                let settlement = &c.settlements[usize::from(row.settlement)];
+                assert_eq!(row.validate(settlement), Ok(()));
+            }
+        }
     }
 
     #[test]
