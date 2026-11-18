@@ -776,13 +776,10 @@ struct SurfaceScatter {
 }
 
 impl SurfaceScatter {
-    #[expect(
-        clippy::disallowed_methods,
-        reason = "generation: generator-determinism ticket 12 makes this a multiplication"
-    )]
     fn new(params: &WorldgenParams, voxel_size: f32) -> Option<Self> {
         params.ground?;
-        let unit_chance = f64::from(voxel_size).powi(2);
+        let size = f64::from(voxel_size);
+        let unit_chance = size * size;
         let most = params
             .biomes
             .as_slice()
@@ -820,12 +817,9 @@ impl SurfaceScatter {
         })
     }
 
-    #[expect(
-        clippy::disallowed_methods,
-        reason = "generation: generator-determinism ticket 12 makes this a multiplication"
-    )]
     fn chance(unit_chance: f64, spacing_m: f32) -> f64 {
-        (unit_chance / f64::from(spacing_m).powi(2)).min(1.0)
+        let spacing = f64::from(spacing_m);
+        (unit_chance / (spacing * spacing)).min(1.0)
     }
 
     /// The most a Biome's chances sum to, each feature at its clump's densest, so `most` bounds
@@ -2568,14 +2562,11 @@ impl Worldgen {
     /// Whether a tree whose draw beats this column's stands within `radius_m` of it. Each column
     /// asks only draws and the trees they would stand, never whether those stand themselves, so
     /// every Chunk decides alike; a lower draw wins, so of two trees too close the same one stays.
-    #[expect(
-        clippy::disallowed_methods,
-        reason = "generation: generator-determinism ticket 12 makes this a multiplication"
-    )]
     fn crowded(&self, scatter: &SurfaceScatter, [gx, gz]: [i32; 2], radius_m: f32) -> bool {
         let own = SurfaceScatter::draw(self.seed, self.global_m(gx), self.global_m(gz));
-        let reach = (radius_m / self.voxel_size).ceil() as i32;
-        let r2 = (radius_m / self.voxel_size).powi(2);
+        let radius = radius_m / self.voxel_size;
+        let reach = radius.ceil() as i32;
+        let r2 = radius * radius;
         (-reach..=reach)
             .flat_map(|dz| (-reach..=reach).map(move |dx| (dx, dz)))
             .filter(|&(dx, dz)| (dx, dz) != (0, 0) && ((dx * dx + dz * dz) as f32) < r2)

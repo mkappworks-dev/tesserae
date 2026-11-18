@@ -482,10 +482,6 @@ impl Base {
     }
 
     /// [`Self::seabed_rise_m`] before it is kept under the surface.
-    #[expect(
-        clippy::disallowed_methods,
-        reason = "generation: generator-determinism ticket 12 makes this a multiplication"
-    )]
     fn formation_m(&self, wx: f32, wz: f32, offset_m: f32) -> f32 {
         let seed = self.seed.wrapping_add(SALT_SEABED);
         let reef = crate::noise::ridged2(wx / 220.0, wz / 220.0, seed, 2);
@@ -509,7 +505,8 @@ impl Base {
                     (iz as f32 + 0.2 + 0.6 * h[2]) * OUTCROP_CELL_M,
                 ];
                 let radius_m = (3.0 + 7.0 * h[1]) * (0.8 + 0.4 * fray);
-                let r = ((wx - centre[0]).powi(2) + (wz - centre[1]).powi(2)).sqrt() / radius_m;
+                let (dx, dz) = (wx - centre[0], wz - centre[1]);
+                let r = (dx * dx + dz * dz).sqrt() / radius_m;
                 if r >= 1.0 {
                     continue;
                 }
@@ -524,10 +521,6 @@ impl Base {
     /// The sea floor `offset_m` (below Sea level) raised into an island where one stands: a
     /// hashed disc in some cells, its edge frayed by noise, rising to a broad low crown so there
     /// is room on it for trees and Structures.
-    #[expect(
-        clippy::disallowed_methods,
-        reason = "generation: generator-determinism ticket 12 makes this a multiplication"
-    )]
     fn island(&self, x_m: f32, z_m: f32, offset_m: f32) -> f32 {
         let (cx, cz) = (
             (x_m / ISLAND_CELL_M).floor() as i32,
@@ -553,8 +546,8 @@ impl Base {
                     (iz as f32 + 0.25 + 0.5 * h[2]) * ISLAND_CELL_M,
                 );
                 let radius_m = ISLAND_RADIUS_M[0] + (ISLAND_RADIUS_M[1] - ISLAND_RADIUS_M[0]) * k;
-                let r = ((x_m - px).powi(2) + (z_m - pz).powi(2)).sqrt()
-                    / (radius_m * (0.7 + 0.6 * fray));
+                let (dx, dz) = (x_m - px, z_m - pz);
+                let r = (dx * dx + dz * dz).sqrt() / (radius_m * (0.7 + 0.6 * fray));
                 if r >= 1.3 {
                     continue;
                 }
@@ -569,10 +562,6 @@ impl Base {
     }
 
     /// A cone at a hashed spot of some cells; one off the coast rises from the sea as an island.
-    #[expect(
-        clippy::disallowed_methods,
-        reason = "generation: generator-determinism ticket 12 makes this a multiplication"
-    )]
     fn volcano(&self, x_m: f32, z_m: f32) -> f32 {
         let (cx, cz) = (
             (x_m / VOLCANO_CELL_M).floor() as i32,
@@ -590,7 +579,8 @@ impl Base {
                     (ix as f32 + 0.2 + 0.6 * h[1]) * VOLCANO_CELL_M,
                     (iz as f32 + 0.2 + 0.6 * h[2]) * VOLCANO_CELL_M,
                 );
-                let r = ((x_m - px).powi(2) + (z_m - pz).powi(2)).sqrt();
+                let (dx, dz) = (x_m - px, z_m - pz);
+                let r = (dx * dx + dz * dz).sqrt();
                 if r >= VOLCANO_RADIUS_M {
                     continue;
                 }
