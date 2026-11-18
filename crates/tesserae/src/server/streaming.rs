@@ -1620,7 +1620,7 @@ pub(in crate::server) mod tests {
         pub(in crate::server) anchor: Entity,
     }
 
-    /// Version 3 puts the default seed's origin far out at sea; this seed's is dry land with rivers.
+    /// The default seed's origin is far out at sea; this seed's is dry land with rivers.
     pub(in crate::server) fn land() -> WorldSettings {
         WorldSettings {
             seed: 42,

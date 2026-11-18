@@ -138,7 +138,7 @@ fn dense() -> impl Iterator<Item = (f32, f32)> {
     (-100..100).flat_map(|i| (-100..100).map(move |j| (i as f32 * 11.0, j as f32 * 11.0)))
 }
 
-/// The temperature version 3 selects a Biome by: the Climate of the air at the ground.
+/// The temperature a Biome is selected by: the Climate of the air at the ground.
 fn ground_temperature(g: &Worldgen, x: f32, z: f32) -> f32 {
     g.climate_at_height(x, g.surface_height_m(x, z), z)
         .temperature

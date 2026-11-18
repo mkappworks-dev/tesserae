@@ -781,8 +781,8 @@ fn no_single_structure_field_or_tree_stands_in_a_settlement_and_no_structure_in_
     );
 }
 
-/// Hills enough that Plots are cut and filled and roads climb: version 3's own land, its relief
-/// doubled since the scans fall on the sea floor, where version 3 tempers it.
+/// Hills enough that Plots are cut and filled and roads climb: the default land, its relief
+/// doubled since the scans fall on the sea floor, where generation tempers it.
 fn hilly(features: SurfaceFeatures) -> WorldgenParams {
     WorldgenParams {
         relief_m: 24.0,
@@ -1579,7 +1579,6 @@ fn digest(changed: &HashMap<[i32; 3], (Voxel, Voxel)>) -> u64 {
     hash
 }
 
-/// A fixed size's layout, recorded when the tests moved onto version 3.
 #[test]
 fn a_fixed_size_settlement_lays_out_exactly_as_before_ranges() {
     assert_eq!(
@@ -1733,7 +1732,6 @@ fn the_spawn_stands_inside_the_settlement_nearest_the_origin_south_of_its_centre
 
 #[test]
 fn a_new_player_spawns_in_the_nearest_settlement_else_at_the_origin() {
-    // Recorded from the Server's search before the Generator answered it.
     assert_eq!(
         generator_for(true).spawn_m().map(f32::to_bits),
         [1_110_441_984, 1_122_002_534]

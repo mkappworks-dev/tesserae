@@ -497,7 +497,7 @@ fn a_field_generates_the_same_cells_whichever_chunks_are_made_first() {
 
 #[test]
 fn a_field_stands_on_no_water_and_near_water_means_near_the_lake() {
-    // Version 3's water is the sea, so the level ground's floor is let down a metre under it, and
+    // The water is the sea, so the level ground's floor is let down a metre under it, and
     // small continents give the window a shore. On the default continent the whole window is
     // ground 0.6 m under the sea, which a 1 m top Voxel fills to the level and a 0.5 m one leaves
     // under water, so only 1 m stood fields there.

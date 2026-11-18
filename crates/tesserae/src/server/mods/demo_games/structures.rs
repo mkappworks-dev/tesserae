@@ -294,7 +294,7 @@ impl Generated {
     }
 
     /// [`Self::around`], in only the rows [`SETTLED_BAND_M`] about the ground at `centre_m`: a
-    /// Settlement stands on a level disc, and version 3's whole band is many times as tall.
+    /// Settlement stands on a level disc, and the whole band is many times as tall.
     pub(in crate::server) fn around_ground(
         generator: &Worldgen,
         centre_m: [f32; 2],

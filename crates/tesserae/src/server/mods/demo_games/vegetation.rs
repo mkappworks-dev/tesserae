@@ -410,8 +410,8 @@ fn is_standalone_wood(name: &str) -> bool {
 
 /// Chunk columns sampled per Biome, each 32 m square at a 1 m Voxel.
 const SAMPLES: usize = 32;
-/// Chunk columns sampled per Biome where water covers its ground, besides [`SAMPLES`]: under
-/// version 3 a Biome holds water only in its few lakes, which the first [`SAMPLES`] may all miss.
+/// Chunk columns sampled per Biome where water covers its ground, besides [`SAMPLES`]: a
+/// Biome holds water only in its few lakes, which the first [`SAMPLES`] may all miss.
 const WET_SAMPLES: usize = 8;
 /// The census's name for a tree trunk's lowest Voxel: a log on the ground under [`TREE_CLEAR_M`] of
 /// logs, which a neighbour's limb resting on a slope never is.
@@ -419,7 +419,7 @@ const TRUNK_FOOT: &str = "trunk foot";
 
 /// The highest row of each Chunk column a Plant can reach: none stands higher than the ground of
 /// its own Chunk column or a neighbour's, past which no crown reaches, raised by the overhangs and
-/// the tallest Plant. The rows above are sky, the costliest Chunks version 3 makes.
+/// the tallest Plant. The rows above are sky, the costliest Chunks generation makes.
 struct PlantCeiling<'a> {
     generator: &'a Worldgen,
     lift_m: f32,

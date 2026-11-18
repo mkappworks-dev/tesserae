@@ -1,4 +1,4 @@
-//! Water in a version 3 Terra World: no air standing inside it, and no Plant punching a hole in its top.
+//! Water in a Terra World: no air standing inside it, and no Plant punching a hole in its top.
 
 use tesserae_core::{Voxel, Worldgen, WorldgenParams};
 

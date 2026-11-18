@@ -127,8 +127,8 @@ const ROW: BiomeStructure = BiomeStructure {
     chance: 1.0,
 };
 
-/// The first river well inland on a coarse walk: version 3's valleys narrow enough to bridge are
-/// its rivers' cuts, dry where the World has no water. A whole number of 1 m Chunks, so it is a
+/// The first river well inland on a coarse walk: the valleys narrow enough to bridge are the
+/// rivers' cuts, dry where the World has no water. A whole number of 1 m Chunks, so it is a
 /// Chunk corner at every size.
 fn centre_m() -> [f32; 2] {
     let bare = Worldgen::new(SEED, 1.0, params(&[], Land::Wet));

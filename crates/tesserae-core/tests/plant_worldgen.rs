@@ -600,7 +600,7 @@ fn kelp_stands_in_the_lake_and_nothing_else_does() {
         KELP,
         6.0,
     );
-    // Version 3's water is the sea, so the low land's floor is let down under it.
+    // The water is the sea, so the low land's floor is let down under it.
     let with_lake = |features: &[SurfaceFeature]| {
         let land = flat(features);
         WorldgenParams {

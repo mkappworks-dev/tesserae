@@ -1443,9 +1443,9 @@ impl Worldgen {
     }
 
     /// A height in metres above which nothing generated stands anywhere over the footprint
-    /// `min_m..max_m` on the ground plane: the footprint's own highest ground with the overhang and what Plants and Structures stand
-    /// above it, so a Chunk over low ground sees sky without the Chunks above it, which the
-    /// Server does not hold, reaching the band's top.
+    /// `min_m..max_m` on the ground plane: the footprint's own highest ground with the overhang
+    /// and what Plants and Structures stand above it, so a Chunk over low ground sees sky without
+    /// the Chunks above it, which the Server does not hold, reaching the band's top.
     pub fn surface_top_m(&self, min_m: [f32; 2], max_m: [f32; 2]) -> f32 {
         let (_, global) = self.surface_bounds_m();
         let terrain = &self.terrain;
@@ -3165,8 +3165,7 @@ mod tests {
     use super::*;
 
     const SEED: u64 = 0x7e55_e2ae;
-    /// Under version 3 [`SEED`]'s sweep is flat lowland; this one's holds sea, dry land and
-    /// one-Voxel steps.
+    /// [`SEED`]'s sweep is flat lowland; this one's holds sea, dry land and one-Voxel steps.
     const COAST: u64 = 3907;
 
     /// The terrain tests are about the surface, so they run without caves or
@@ -3981,7 +3980,7 @@ mod tests {
             ..crate::testgen::world_params()
         };
         let g = Worldgen::new(SEED, 1.0, params);
-        // Version 3's band reaches below the tunnels, and a Chunk inside it is seldom stored
+        // The band reaches below the tunnels, and a Chunk inside it is seldom stored
         // uniform: so the layers just under the band.
         let below = (g.surface_bounds_m().0 / CHUNK_SIZE as f32).floor() as i32;
         let (mut uniform, mut carved) = (0, 0);

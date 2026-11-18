@@ -162,7 +162,7 @@ pub fn register_water(tables: &mut Tables) -> MaterialId {
     water
 }
 
-/// The fixture ground under version 3's default landforms, a sea at Sea level and two Biomes.
+/// The fixture ground under the default landforms, a sea at Sea level and two Biomes.
 pub fn world_params() -> crate::WorldgenParams {
     let biome = |name, temperature| biome(name, temperature, crate::SurfaceFeatures::NONE);
     let sea_level_m = 24.0;

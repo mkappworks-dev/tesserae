@@ -577,7 +577,6 @@ fn spawning_finds_dry_land_clear_of_cliffs_and_water() {
 #[test]
 fn a_world_with_no_settlement_spawns_on_the_dry_land_nearest_the_origin() {
     let g = Worldgen::new(SEED, 1.0, wet_world());
-    // Recorded from the Server's search before the Generator answered it.
     assert_eq!(
         g.spawn_m().map(f32::to_bits),
         [3_286_458_261, 1_145_715_809]

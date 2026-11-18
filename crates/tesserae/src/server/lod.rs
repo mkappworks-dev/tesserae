@@ -3458,7 +3458,7 @@ mod tests {
             world().seed,
             world().voxel_size,
             WorldgenParams {
-                // Version 3's water stands at Sea level.
+                // The water stands at Sea level.
                 sea_level_m: level_m.unwrap_or(params.sea_level_m),
                 water: level_m.map(|level_m| tesserae_core::WaterParams {
                     level_m,

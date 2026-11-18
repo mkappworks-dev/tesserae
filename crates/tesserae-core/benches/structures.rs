@@ -294,7 +294,7 @@ fn with_settlement(size: f32, settlement: Settlement) -> Worldgen {
 /// How many Chunks either way of its anchor [`centre_m`] looks: far enough for the cap town,
 /// whose disc and margin keep it over 224 m out.
 const SCAN_CHUNKS: i32 = 12;
-/// How far [`centre_m`] asks for a Settlement: version 3 founds one only on a level disc, often a
+/// How far [`centre_m`] asks for a Settlement: one is founded only on a level disc, often a
 /// kilometre or more from the origin.
 const SETTLEMENT_SEARCH_M: f32 = 4000.0;
 

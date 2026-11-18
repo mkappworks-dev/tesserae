@@ -21,8 +21,7 @@ use crate::{CHUNK_SIZE, CHUNK_VOLUME, Chunk, ChunkOverlay, Fluid, Level, Overlay
 /// out, and both still open.
 pub const FORMAT_VERSION: u32 = 3;
 const SUPPORTED_FORMATS: [u32; 3] = [1, 2, 3];
-/// The only Generator version a World is created or opened under; 1 and 2 were deleted before the
-/// first release, with no migration (ADR-0033).
+/// The only Generator version a World is created or opened under (ADR-0033).
 pub const GENERATOR_VERSION: u32 = 3;
 const MAGIC: &[u8; 8] = b"TESSAVE1";
 /// How many Commits a World keeps: recovery falls back through the older ones.

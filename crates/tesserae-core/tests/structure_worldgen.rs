@@ -33,7 +33,7 @@ const SIZES: [f32; 3] = [1.0, 0.5, 0.25];
 const SIZE_I: i32 = CHUNK_SIZE as i32;
 /// Where scans are centred, along x and z: well clear of the origin, which keeps Structures out.
 const AWAY_M: f32 = 128.0;
-/// How far from a Structure's footprint version 3 fills any cave the ground would open.
+/// How far from a Structure's footprint generation fills any cave the ground would open.
 const CAVE_CLEAR_M: f32 = 16.0;
 
 /// 4 m along x, 5 m along z: a cellar, a floor marked at one corner so its turn shows, and walls
@@ -781,7 +781,7 @@ fn a_structure_stands_only_in_a_biome_that_lists_it() {
     assert!(warm > 100, "the warm Biome is hardly there: {warm} columns");
 }
 
-/// Version 3's own land at the default relief: steep hills, scanned at [`hills_m`]. Without
+/// The default land at the default relief: steep hills, scanned at [`hills_m`]. Without
 /// overhangs, whose rock a Structure clears round it, so the ground under one is the ground its
 /// rules asked.
 fn hilly(structures: &[BiomeStructure]) -> WorldgenParams {
