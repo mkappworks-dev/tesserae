@@ -1748,6 +1748,16 @@ fn the_spawn_stands_inside_the_settlement_nearest_the_origin_south_of_its_centre
     assert_eq!(generator_for(false).settlement_spawn_m(512.0), None);
 }
 
+#[test]
+fn a_new_player_spawns_in_the_nearest_settlement_else_at_the_origin() {
+    // Recorded from the Server's search before the Generator answered it.
+    assert_eq!(
+        generator_for(true).spawn_m().map(f32::to_bits),
+        [1_110_441_984, 1_122_002_534]
+    );
+    assert_eq!(generator_for(false).spawn_m(), [0.0; 2]);
+}
+
 fn generator_for(listed: bool) -> Worldgen {
     generator(
         1.0,

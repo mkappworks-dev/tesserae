@@ -1,6 +1,6 @@
 # 06: The Generator answers where a new Player spawns
 
-Status: ready-for-agent
+Status: done
 
 Spec: [Generator determinism](../spec.md).
 
@@ -17,8 +17,8 @@ they did before.
 
 ## Acceptance criteria
 
-- [ ] The Server holds no part of the search, its rings or its fallback; it
+- [x] The Server holds no part of the search, its rings or its fallback; it
       calls the Generator's query.
-- [ ] For the existing test seeds the query returns the position the Server's
+- [x] For the existing test seeds the query returns the position the Server's
       search returned before (a test pins one).
-- [ ] Generator output and the recorded digests are unchanged.
+- [x] Generator output and the recorded digests are unchanged.
