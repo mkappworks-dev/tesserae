@@ -747,7 +747,7 @@ fn a_shaft_dug_under_a_generated_lake_fills_from_it() {
     let generator = Worldgen::new(
         7,
         1.0,
-        crate::testgen::world_params().with_default_lake(water()),
+        crate::testgen::world_params_v3().with_default_lake(water()),
     );
     let level = generator.water().expect("the World has a lake").level_m as i32;
     let tables = tables();
@@ -756,7 +756,7 @@ fn a_shaft_dug_under_a_generated_lake_fills_from_it() {
     // output near the origin.
     let cy = level.div_euclid(size);
     let (bed, chunk) = (-8..8)
-        .flat_map(|cx| (-8..8).flat_map(move |cz| [[cx, cy - 1, cz], [cx, cy, cz]]))
+        .flat_map(|cx| (-8..8).flat_map(move |cz| (cy - 4..=cy).map(move |y| [cx, y, cz])))
         .find_map(|c| {
             let voxels = generator.chunk(c[0], c[1], c[2]);
             let solid = |y: usize, x: usize, z: usize| {

@@ -3115,6 +3115,9 @@ mod tests {
     use super::*;
 
     const SEED: u64 = 0x7e55_e2ae;
+    /// Under version 3 [`SEED`]'s sweep is flat lowland; this one's holds sea, dry land and
+    /// one-Voxel steps.
+    const COAST: u64 = 3907;
 
     /// The terrain tests are about the surface, so they run without caves or
     /// smoothing, which would put a stair on the Grass cap; the ones about
@@ -3127,7 +3130,7 @@ mod tests {
                 caves: None,
                 smoothing: None,
                 water: None,
-                ..crate::testgen::world_params()
+                ..crate::testgen::world_params_v3()
             },
         )
     }
@@ -3139,7 +3142,7 @@ mod tests {
             WorldgenParams {
                 smoothing: None,
                 water: None,
-                ..crate::testgen::world_params()
+                ..crate::testgen::world_params_v3()
             },
         )
     }
@@ -3147,7 +3150,7 @@ mod tests {
     /// Smoothing with no minimum rise, so it fires at any Voxel size: the tests
     /// about where it places things, rather than whether it runs.
     fn smoothed(voxel_size: f32, caves: bool) -> Worldgen {
-        let defaults = crate::testgen::world_params();
+        let defaults = crate::testgen::world_params_v3();
         Worldgen::new(
             SEED,
             voxel_size,
@@ -3184,7 +3187,7 @@ mod tests {
 
     #[test]
     fn no_ground_is_air_without_moving_the_surface() {
-        let params = crate::testgen::world_params();
+        let params = crate::testgen::world_params_v3();
         for size in [1.0, 0.5, 0.25] {
             let solid = Worldgen::new(7, size, params);
             let empty = Worldgen::new(
@@ -3243,7 +3246,7 @@ mod tests {
 
     #[test]
     fn soil_is_a_physical_depth_not_a_voxel_count() {
-        let soil_m = crate::testgen::world_params().soil_depth_m;
+        let soil_m = crate::testgen::world_params_v3().soil_depth_m;
         for voxel_size in [1.0, 0.5, 0.25] {
             let g = terrain(voxel_size);
             let dirt = column(&g, 0, 0)
@@ -3307,8 +3310,8 @@ mod tests {
     /// empty sky in both.
     #[test]
     fn a_different_seed_is_a_different_world() {
-        let a = Worldgen::new(1, 1.0, crate::testgen::world_params());
-        let b = Worldgen::new(2, 1.0, crate::testgen::world_params());
+        let a = Worldgen::new(1, 1.0, crate::testgen::world_params_v3());
+        let b = Worldgen::new(2, 1.0, crate::testgen::world_params_v3());
         assert!((0..200).any(|i| {
             let m = i as f32 * 11.3;
             a.surface_height_m(m, -m) != b.surface_height_m(m, -m)
@@ -3318,8 +3321,8 @@ mod tests {
     #[test]
     fn a_seed_differing_only_in_its_high_bits_is_a_different_world() {
         // Truncating the u64 instead of folding it would make these one world.
-        let a = Worldgen::new(1, 1.0, crate::testgen::world_params());
-        let b = Worldgen::new(1 | (1 << 40), 1.0, crate::testgen::world_params());
+        let a = Worldgen::new(1, 1.0, crate::testgen::world_params_v3());
+        let b = Worldgen::new(1 | (1 << 40), 1.0, crate::testgen::world_params_v3());
         assert!((0..200).any(|i| {
             let m = i as f32 * 11.3;
             a.surface_height_m(m, -m) != b.surface_height_m(m, -m)
@@ -3328,8 +3331,8 @@ mod tests {
 
     /// FNV-1a over surface heights and one surface Chunk, so a pinned value is
     /// stable across toolchains, unlike `DefaultHasher`.
-    fn terrain_digest(seed: u64) -> u64 {
-        let g = Worldgen::new(seed, 1.0, crate::testgen::world_params());
+    fn terrain_digest(seed: u64, params: WorldgenParams) -> u64 {
+        let g = Worldgen::new(seed, 1.0, params);
         let mut hash = 0xcbf2_9ce4_8422_2325_u64;
         let mut eat = |word: u32| {
             for byte in word.to_le_bytes() {
@@ -3366,14 +3369,15 @@ mod tests {
             u64::MAX - 1,
             u64::MAX,
         ] {
-            terrain_digest(seed);
+            terrain_digest(seed, crate::testgen::world_params_v3());
         }
     }
 
     /// The u64 → u32 fold lets distinct seeds share terrain, which the spec allows.
     #[test]
     fn seeds_whose_halves_cancel_fold_to_the_same_world() {
-        assert_eq!(terrain_digest(0x0000_0001_0000_0001), terrain_digest(0));
+        let digest = |seed| terrain_digest(seed, crate::testgen::world_params_v3());
+        assert_eq!(digest(0x0000_0001_0000_0001), digest(0));
     }
 
     /// Pinned before the `fbm2` overflow fix; any change here is a generator
@@ -3381,7 +3385,8 @@ mod tests {
     #[test]
     fn existing_seeds_keep_their_terrain() {
         assert_eq!(
-            [0x7e55_e2ae_0000_0001, SEED, 1].map(terrain_digest),
+            [0x7e55_e2ae_0000_0001, SEED, 1]
+                .map(|seed| terrain_digest(seed, crate::testgen::world_params())),
             [
                 15_198_775_482_155_333_751,
                 8_180_675_714_824_193_589,
@@ -3446,14 +3451,7 @@ mod tests {
 
     #[test]
     fn a_version_3_settlement_is_founded_only_where_its_disc_is_level() {
-        let g = Worldgen::new(
-            SEED,
-            1.0,
-            WorldgenParams {
-                generator: 3,
-                ..crate::testgen::world_params()
-            },
-        );
+        let g = Worldgen::new(SEED, 1.0, crate::testgen::world_params_v3());
         let reach_m = 40.0;
         let rise = |x: f32, z: f32| {
             let h = g.surface_height_m(x, z);
@@ -3497,14 +3495,14 @@ mod tests {
     #[test]
     fn shafts_open_a_way_from_the_ground_down_into_a_cavern() {
         let params = WorldgenParams {
-            generator: 3,
             smoothing: None,
+            water: None,
             // Tunnels thinner than a Voxel, so the air found is the shaft's.
             caves: Some(CaveParams {
                 radius_m: 0.001,
                 ..CaveParams::default()
             }),
-            ..crate::testgen::world_params()
+            ..crate::testgen::world_params_v3()
         };
         let g = Worldgen::new(SEED, 1.0, params);
         let shafts = g.caverns.as_ref().unwrap().shafts(
@@ -3655,7 +3653,7 @@ mod tests {
                 },
                 biomes: BiomeTable::new(&[biome("none", 0.1, 0.0), biome("wide", 0.9, 3.0)])
                     .unwrap(),
-                ..crate::testgen::world_params()
+                ..crate::testgen::world_params_v3()
             },
         )
     }
@@ -3751,20 +3749,14 @@ mod tests {
             biomes: table([None, None]),
             ..tuned_params
         });
-        // Scale 1 is the World's own caves, and Generator version 1 knows no
-        // Biomes, so neither moves a single Voxel.
-        for params in [
-            WorldgenParams {
-                biomes: table([Some(1.0), Some(1.0)]),
-                ..tuned_params
-            },
-            WorldgenParams {
-                generator: 1,
-                ..tuned_params
-            },
-        ] {
-            assert!(plain == chunks(params));
-        }
+        // Scale 1 is the World's own caves, so it moves not a single Voxel.
+        assert!(
+            plain
+                == chunks(WorldgenParams {
+                    biomes: table([Some(1.0), Some(1.0)]),
+                    ..tuned_params
+                })
+        );
         // A World without caves has nothing to tune; coarse LOD levels are built
         // that way.
         let bare = |biomes| WorldgenParams {
@@ -3773,6 +3765,37 @@ mod tests {
             ..tuned_params
         };
         assert!(chunks(bare(tuned_params.biomes)) == chunks(bare(table([None, None]))));
+    }
+
+    /// Generator version 1 knows no Biomes, so a tuned table moves not a single Voxel.
+    #[test]
+    fn version_1_ignores_cave_tuning() {
+        let tuned_params = WorldgenParams {
+            generator: 2,
+            ..tuned(1.0).params
+        };
+        let chunks = |params: WorldgenParams| -> Vec<Voxel> {
+            let g = Worldgen::new(SEED, 1.0, params);
+            sweep(1.0)
+                .into_iter()
+                .flat_map(|(x, y, z)| voxels(&g.chunk(x, y, z)))
+                .collect()
+        };
+        let mut untuned = tuned_params.biomes.as_slice().to_vec();
+        for b in &mut untuned {
+            b.cave_scale = None;
+        }
+        let plain = chunks(WorldgenParams {
+            biomes: BiomeTable::new(&untuned).unwrap(),
+            ..tuned_params
+        });
+        assert!(
+            plain
+                == chunks(WorldgenParams {
+                    generator: 1,
+                    ..tuned_params
+                })
+        );
     }
 
     #[test]
@@ -3921,7 +3944,8 @@ mod tests {
     #[test]
     fn nothing_below_the_cave_floor_is_carved() {
         let g = caved(1.0);
-        let floor = crate::testgen::world_params().caves.unwrap().floor_m;
+        let tunnels = crate::testgen::world_params_v3().caves.unwrap().floor_m;
+        let floor = tunnels.min(g.caverns.as_ref().unwrap().floor_m);
         let cell = CHUNK_SIZE as f32;
         let below = (floor / cell).floor() as i32 - 1;
         for (cx, cz) in [(0, 0), (4, -3), (-7, 2)] {
@@ -3943,16 +3967,19 @@ mod tests {
         let params = WorldgenParams {
             caves: Some(CaveParams {
                 feature_size_m: 128.0,
-                floor_m: -120.0,
+                floor_m: -250.0,
                 ..CaveParams::default()
             }),
-            ..crate::testgen::world_params()
+            ..crate::testgen::world_params_v3()
         };
         let g = Worldgen::new(SEED, 1.0, params);
+        // Version 3's band reaches below the tunnels, and a Chunk inside it is seldom stored
+        // uniform: so the layers just under the band.
+        let below = (g.surface_bounds_m().0 / CHUNK_SIZE as f32).floor() as i32;
         let (mut uniform, mut carved) = (0, 0);
         for cx in -5..5 {
             for cz in -5..5 {
-                for cy in -4..0 {
+                for cy in below - 4..below {
                     match g.chunk(cx, cy, cz).uniform() {
                         Some(v) => {
                             assert_eq!(v, Voxel::cube(crate::testgen::fixtures().ground.rock));
@@ -4047,23 +4074,30 @@ mod tests {
         (tables, [water, lava])
     }
 
-    fn flooded(voxel_size: f32, level_m: f32, material: MaterialId) -> Worldgen {
+    fn flooded(voxel_size: f32, material: MaterialId) -> Worldgen {
+        let params = crate::testgen::world_params_v3();
         Worldgen::new(
-            SEED,
+            COAST,
             voxel_size,
             WorldgenParams {
-                water: Some(WaterParams { level_m, material }),
-                // Smoothing yields to water; `smoothing_never_replaces_water`
-                // is about that, and this about the water alone.
+                water: Some(WaterParams {
+                    level_m: params.sea_level_m,
+                    material,
+                }),
+                // Smoothing yields to water, a cavern under the water table holds it and overhangs
+                // leave the heightfield; this is about the water alone.
                 smoothing: None,
-                ..crate::testgen::world_params()
+                caves: None,
+                landforms: crate::terrain::LandformParams {
+                    overhangs: false,
+                    ..params.landforms
+                },
+                ..params
             },
         )
     }
 
-    /// A lake only ever replaces air above the ground and below its level, and
-    /// fills all of that with its own fluid: a cave stays dry and the ground is
-    /// unchanged.
+    /// Water fills the air between the ground and the water surface over it, and nothing else.
     #[test]
     fn water_fills_the_open_air_between_the_ground_and_its_level_and_nothing_else() {
         let (_, fluids) = lake_tables();
@@ -4071,43 +4105,22 @@ mod tests {
             .into_iter()
             .flat_map(|v| fluids.map(|m| (v, m)))
         {
-            let dry = Worldgen::new(
-                SEED,
-                voxel_size,
-                WorldgenParams {
-                    water: None,
-                    smoothing: None,
-                    ..crate::testgen::world_params()
-                },
-            );
-            // Halfway up the ground the sweep covers, so it has both shores and
-            // dry land.
-            let heights: Vec<f32> = (-48..48)
-                .flat_map(|x| (-48..48).map(move |z| (x as f32, z as f32)))
-                .map(|(x, z)| dry.surface_height_m(x, z))
-                .collect();
-            let lowest = heights.iter().copied().fold(f32::MAX, f32::min);
-            let highest = heights.iter().copied().fold(f32::MIN, f32::max);
-            let level_m = (lowest + highest) / 2.0;
-            let wet = flooded(voxel_size, level_m, material);
+            let g = flooded(voxel_size, material);
             let mut filled = 0;
             for (cx, cy, cz) in sweep(voxel_size) {
-                let (a, b) = (dry.chunk(cx, cy, cz), wet.chunk(cx, cy, cz));
+                let chunk = g.chunk(cx, cy, cz);
                 for z in 0..CHUNK_SIZE {
                     for x in 0..CHUNK_SIZE {
-                        let x_m = dry.axis_m(cx, x as i32);
-                        let z_m = dry.axis_m(cz, z as i32);
-                        let surface_m = dry.surface_height_m(x_m, z_m);
+                        let x_m = g.axis_m(cx, x as i32);
+                        let z_m = g.axis_m(cz, z as i32);
+                        let surface_m = g.surface_height_m(x_m, z_m);
+                        let level_m = g.water_surface_m(x_m, z_m).unwrap_or(f32::MIN);
                         for y in 0..CHUNK_SIZE {
-                            let y_m = dry.axis_m(cy, y as i32);
-                            let (before, after) = (a.get(x, y, z), b.get(x, y, z));
-                            let open = before.is_air() && y_m > surface_m && y_m < level_m;
-                            if open {
-                                assert_eq!(after, Voxel::cube(material), "{x_m} {y_m} {z_m}");
-                                filled += 1;
-                            } else {
-                                assert_eq!(after, before, "{x_m} {y_m} {z_m}");
-                            }
+                            let y_m = g.axis_m(cy, y as i32);
+                            let wet = chunk.get(x, y, z) == Voxel::cube(material);
+                            let open = y_m > surface_m && y_m < level_m;
+                            assert_eq!(wet, open, "{x_m} {y_m} {z_m}");
+                            filled += usize::from(wet);
                         }
                     }
                 }
@@ -4118,8 +4131,12 @@ mod tests {
 
     #[test]
     fn the_default_parameters_have_no_lakes_and_generate_no_fluid() {
-        assert_eq!(crate::testgen::world_params().water, None);
-        let g = Worldgen::new(SEED, 1.0, crate::testgen::world_params());
+        let params = WorldgenParams {
+            ground: crate::testgen::world_params_v3().ground,
+            ..WorldgenParams::default()
+        };
+        assert_eq!(params.water, None);
+        let g = Worldgen::new(COAST, 1.0, params);
         for (cx, cy, cz) in sweep(1.0) {
             for v in g.chunk(cx, cy, cz).kinds() {
                 assert!(
@@ -4142,7 +4159,7 @@ mod tests {
     fn a_lake_of_any_fluid_is_read_as_its_sources() {
         let (tables, fluids) = lake_tables();
         for material in fluids {
-            let g = flooded(1.0, mid_level_m(), material);
+            let g = flooded(1.0, material);
             let lake = sweep(1.0)
                 .into_iter()
                 .map(|(cx, cy, cz)| g.chunk(cx, cy, cz))
@@ -4153,12 +4170,6 @@ mod tests {
                 Some(crate::Fluid::source(material))
             );
         }
-    }
-
-    /// Between the lowest and highest ground of the default sweep.
-    fn mid_level_m() -> f32 {
-        let p = crate::testgen::world_params();
-        p.sea_level_m + p.relief_m / 2.0
     }
 
     /// Under water a step stays a step: a stair holds one Voxel, and in a water
@@ -4174,11 +4185,11 @@ mod tests {
     fn smoothing_never_replaces_a_lake_of(material: MaterialId) {
         let wet = |smoothing| {
             Worldgen::new(
-                SEED,
+                COAST,
                 1.0,
                 WorldgenParams {
                     smoothing,
-                    ..crate::testgen::world_params()
+                    ..crate::testgen::world_params_v3()
                 }
                 .with_default_lake(material),
             )
@@ -4212,7 +4223,18 @@ mod tests {
     #[test]
     fn water_never_rises_above_the_highest_ground() {
         let (_, [water, _]) = lake_tables();
-        let g = flooded(1.0, 10_000.0, water);
+        let g = Worldgen::new(
+            SEED,
+            1.0,
+            WorldgenParams {
+                water: Some(WaterParams {
+                    level_m: 10_000.0,
+                    material: water,
+                }),
+                smoothing: None,
+                ..crate::testgen::world_params()
+            },
+        );
         let (_, highest_m) = g.surface_bounds_m();
         let cy = (highest_m / CHUNK_SIZE as f32).floor() as i32;
         let chunk = g.chunk(0, cy, 0);
@@ -4236,10 +4258,12 @@ mod tests {
         // `caves: None` costs one `Option` check and changes nothing else.
         let g = terrain(1.0);
         assert!(g.caves.is_none());
-        let cy = (g.surface_height_m(0.0, 0.0) / CHUNK_SIZE as f32).floor() as i32;
+        let cell = CHUNK_SIZE as f32;
+        let cy = (g.surface_height_m(0.0, 0.0) / cell).floor() as i32;
         assert_eq!(g.chunk(0, cy, 0).uniform(), None);
+        let (lowest_m, _) = g.surface_bounds_m();
         assert_eq!(
-            g.chunk(0, (-24.0 / CHUNK_SIZE as f32).floor() as i32, 0)
+            g.chunk(0, (lowest_m / cell).floor() as i32 - 1, 0)
                 .uniform(),
             Some(Voxel::cube(crate::testgen::fixtures().ground.rock))
         );
@@ -4560,7 +4584,7 @@ mod tests {
         // Against the same World without it, every Voxel is unchanged except
         // that air gained a shaped Voxel.
         let (with, without) = (smoothed(1.0, true), {
-            let defaults = crate::testgen::world_params();
+            let defaults = crate::testgen::world_params_v3();
             Worldgen::new(
                 SEED,
                 1.0,
@@ -4594,9 +4618,9 @@ mod tests {
         // A one-Voxel step is `voxel_size` metres, so the pass fires exactly
         // when that clears the threshold, whatever the Voxel size.
         let fires = |voxel_size: f32, min_rise_m: f32| {
-            let defaults = crate::testgen::world_params();
+            let defaults = crate::testgen::world_params_v3();
             let g = Worldgen::new(
-                SEED,
+                COAST,
                 voxel_size,
                 WorldgenParams {
                     caves: None,
@@ -4626,9 +4650,9 @@ mod tests {
 
     #[test]
     fn the_default_smooths_a_1m_world_and_not_a_half_metre_one() {
-        let defaults = crate::testgen::world_params();
+        let defaults = crate::testgen::world_params_v3();
         let any = |voxel_size: f32| {
-            let g = Worldgen::new(SEED, voxel_size, defaults);
+            let g = Worldgen::new(COAST, voxel_size, defaults);
             sweep(voxel_size)
                 .into_iter()
                 .any(|(x, y, z)| g.chunk(x, y, z).may_contain_shaped())
@@ -4643,7 +4667,7 @@ mod tests {
         // only if the pass could not have placed anything there.
         let g = smoothed(1.0, true);
         let (lowest, highest) = g.surface_bounds_m();
-        let soil = crate::testgen::world_params().soil_depth_m;
+        let soil = crate::testgen::world_params_v3().soil_depth_m;
         let cell = CHUNK_SIZE as f32;
         let mut seen = 0;
         for cx in -4..4 {
@@ -4673,12 +4697,12 @@ mod tests {
                 .materials
                 .register(crate::testgen::WATER_MATERIAL)
                 .unwrap();
-            let lake = |material| crate::testgen::world_params().with_default_lake(material);
+            let lake = |material| crate::testgen::world_params_v3().with_default_lake(material);
             for material in fluids {
                 assert_eq!(lake(material).validate_lake(&tables), Ok(()));
             }
             assert_eq!(
-                crate::testgen::world_params().validate_lake(&tables),
+                crate::testgen::world_params_v3().validate_lake(&tables),
                 Ok(())
             );
             for (material, rule) in [
@@ -4706,7 +4730,7 @@ mod tests {
 
         #[test]
         fn the_default_is_valid_with_and_without_its_options() {
-            let d = crate::testgen::world_params();
+            let d = crate::testgen::world_params_v3();
             assert_eq!(d.validate(), Ok(()));
             let bare = WorldgenParams {
                 caves: None,
@@ -4720,7 +4744,7 @@ mod tests {
         #[test]
         fn a_value_that_is_not_a_finite_number_names_its_field() {
             for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
-                let d = crate::testgen::world_params();
+                let d = crate::testgen::world_params_v3();
                 let cave = CaveParams::default();
                 assert_eq!(
                     field(WorldgenParams {
@@ -4784,7 +4808,7 @@ mod tests {
 
         #[test]
         fn sizes_depths_and_relief_have_their_floors() {
-            let d = crate::testgen::world_params();
+            let d = crate::testgen::world_params_v3();
             assert_eq!(
                 field(WorldgenParams {
                     relief_m: -1.0,
@@ -4849,7 +4873,7 @@ mod tests {
 
         #[test]
         fn octaves_run_from_one_to_the_lattices_reach() {
-            let d = crate::testgen::world_params();
+            let d = crate::testgen::world_params_v3();
             assert_eq!(field(WorldgenParams { octaves: 0, ..d }), "octaves");
             assert_eq!(
                 field(WorldgenParams {
@@ -4883,7 +4907,7 @@ mod tests {
 
         #[test]
         fn the_surface_band_stays_within_reach_of_the_origin() {
-            let d = crate::testgen::world_params();
+            let d = crate::testgen::world_params_v3();
             assert_eq!(
                 field(WorldgenParams {
                     sea_level_m: 1e9,

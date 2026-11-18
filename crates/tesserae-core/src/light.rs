@@ -2190,7 +2190,7 @@ mod tests {
             // These tests diff a World against the same one without tunnels; a
             // stair beside a mouth would be a difference of its own.
             smoothing: None,
-            ..crate::testgen::world_params()
+            ..crate::testgen::world_params_v3()
         };
         assert!(params.caves.is_some());
         (
@@ -2339,7 +2339,7 @@ mod tests {
         let params = WorldgenParams {
             caves: caves.then(Default::default),
             smoothing: Some(crate::worldgen::SmoothingParams::default()),
-            ..crate::testgen::world_params()
+            ..crate::testgen::world_params_v3()
         };
         (
             Worldgen::new(0x7e55_e2ae, 1.0, params),
@@ -2428,18 +2428,20 @@ mod tests {
     /// The first surface Chunk, in a fixed scan order, holding enough of a ramp
     /// to be worth the lattice, and (when asked) a Grass cap a tunnel removed.
     fn ramp_chunk(with: &Worldgen, without: &Worldgen, mouth: bool) -> [i32; 3] {
-        let cy = (with.surface_height_m(0.0, 0.0) / CHUNK_SIZE as f32).floor() as i32;
+        let size = CHUNK_SIZE as f32;
         let bare = Worldgen::new(
             0x7e55_e2ae,
             1.0,
             WorldgenParams {
                 caves: None,
                 smoothing: None,
-                ..crate::testgen::world_params()
+                ..crate::testgen::world_params_v3()
             },
         );
         for cz in -8..8 {
             for cx in -8..8 {
+                let centre = |c: i32| (c as f32 + 0.5) * size;
+                let cy = (with.surface_height_m(centre(cx), centre(cz)) / size).floor() as i32;
                 let a = with.chunk(cx, cy, cz);
                 if smoothed(with, without, [cx, cy, cz]).len() < 20 {
                     continue;
@@ -3063,9 +3065,22 @@ mod tests {
     /// stairs and slabs and hand-built clear, emitting and shaped rooms alike.
     #[test]
     fn a_dry_chunk_lights_the_same_by_the_dry_sweep_and_the_wet_one() {
-        let world = Worldgen::new(0x7e55_e2ae, 1.0, crate::testgen::world_params());
-        let mut chunks: Vec<Chunk> = (-1..=2)
-            .flat_map(|y| [[0, y, 0], [3, y, -2]])
+        let world = Worldgen::new(
+            0x7e55_e2ae,
+            1.0,
+            WorldgenParams {
+                water: None,
+                ..crate::testgen::world_params_v3()
+            },
+        );
+        let size = CHUNK_SIZE as f32;
+        let mut chunks: Vec<Chunk> = [[0, 0], [3, -2]]
+            .into_iter()
+            .flat_map(|[x, z]| {
+                let centre = |c: i32| (c as f32 + 0.5) * size;
+                let top = (world.surface_height_m(centre(x), centre(z)) / size).floor() as i32;
+                (top - 2..=top + 1).map(move |y| [x, y, z])
+            })
             .map(|[x, y, z]| world.chunk(x, y, z))
             .collect();
         let mut room = Chunk::air();
