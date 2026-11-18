@@ -216,7 +216,7 @@ impl Run {
             caves: None,
             smoothing: None,
             water: None,
-            ..tesserae_core::testgen::world_params()
+            ..tesserae_core::testgen::world_params_v3()
         };
         let settings = StreamingSettings {
             view_distance_m: 24.0,

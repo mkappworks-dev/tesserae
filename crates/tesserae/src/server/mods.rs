@@ -2539,14 +2539,6 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
         assert_eq!(generator.params().relief_m, 12.0);
     }
 
-    /// `loaded` under version 2, whose lakes stand at their declared level in its valleys.
-    fn at_version_2(mut loaded: LoadedMods) -> LoadedMods {
-        if let Some(world) = &mut loaded.world {
-            world.generator = 2;
-        }
-        loaded
-    }
-
     /// The World a load opens, as `cargo run` opens it.
     fn opened(loaded: LoadedMods) -> App {
         let mut app = App::new();
@@ -2562,10 +2554,10 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
     }
 
     /// What generation puts in the open air above a valley floor, below
-    /// `level_m`, near the origin.
+    /// `level_m`, within a kilometre of the origin.
     fn over_a_valley(generator: &tesserae_core::Worldgen, level_m: f32) -> tesserae_core::Voxel {
-        let (x, z) = (-64..64)
-            .flat_map(|x| (-64..64).map(move |z| (x as f32, z as f32)))
+        let (x, z) = (-128..128)
+            .flat_map(|x| (-128..128).map(move |z| (x as f32 * 8.0, z as f32 * 8.0)))
             .find(|&(x, z)| generator.surface_height_m(x, z) < level_m - 2.0)
             .expect("ground below the level near the origin");
         let y = (generator.surface_height_m(x, z) + level_m) / 2.0;
@@ -2586,9 +2578,10 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
         let brine = loaded.registry.id_of(Kind::Material, "lake:brine").unwrap() as MaterialId;
         let water = loaded.world.and_then(|w| w.water).expect("a lake");
         assert_eq!(water.material, brine);
-        let app = opened(at_version_2(loaded));
+        let app = opened(loaded);
         let generator = &app.world().resource::<super::super::WorldGenerator>().0;
-        assert_eq!(generator.water().map(|w| w.material), Some(brine));
+        let water = generator.water().expect("the World keeps the lake");
+        assert_eq!(water.material, brine);
         assert_eq!(
             over_a_valley(generator, water.level_m),
             tesserae_core::Voxel::cube(brine)
@@ -2604,7 +2597,7 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
         let loaded = s.load(TrustMode::All).unwrap();
         assert!(loaded.game);
         assert_eq!(loaded.world.expect("the Game's parameters").water, None);
-        let app = opened(at_version_2(loaded));
+        let app = opened(loaded);
         let generator = &app.world().resource::<super::super::WorldGenerator>().0;
         assert_eq!(generator.water(), None);
         let defaults = WorldgenParams::default();

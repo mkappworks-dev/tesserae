@@ -14,7 +14,7 @@ use crate::server::WorldGenerator;
 use crate::server::edit::StructureIntent;
 use crate::server::mods::LoadedMods;
 use crate::server::mods::demo_games::structures::{Generated, SEED, standing};
-use crate::server::mods::demo_games::{Install, loaded};
+use crate::server::mods::demo_games::{Install, at_version_2, loaded};
 use crate::world::WorldSettings;
 
 struct Game {
@@ -28,6 +28,10 @@ struct Game {
 /// `name` loaded as a World of `size` opens it.
 fn game(name: &'static str, size: f32) -> Game {
     let (install, loaded) = loaded(name, size);
+    game_of(name, size, (install, loaded))
+}
+
+fn game_of(name: &'static str, size: f32, (install, loaded): (Install, LoadedMods)) -> Game {
     let generator = Worldgen::new(SEED, size, loaded.world.unwrap())
         .with_templates(&loaded.tables.templates)
         .with_settlements(&loaded.tables.settlements)
@@ -257,7 +261,8 @@ fn settlement_at(terra: &Game, world: &Generated, well: [i32; 3]) -> &'static st
 
 #[test]
 fn a_settlement_chest_holds_only_its_buildings_table_or_else_its_settlements() {
-    let terra = game("terra", 1.0);
+    let (install, loaded) = loaded("terra", 1.0);
+    let terra = game_of("terra", 1.0, (install, at_version_2(loaded)));
     let mut seen = BTreeMap::<(&str, bool), usize>::new();
     for (centre_m, half_m) in [(village_m(&terra), 128.0), (TERRA_TOWN_M, 128.0)] {
         let (world, chests) = terra.chests(centre_m, half_m);
@@ -316,7 +321,8 @@ fn a_settlement_chest_holds_only_its_buildings_table_or_else_its_settlements() {
 #[test]
 fn a_wilderness_chest_holds_only_its_biomes_table() {
     let ember = game("ember", 1.0);
-    let (world, chests) = ember.chests([0.0, 0.0], 640.0);
+    let eye = crate::server::spawn_eye(&ember.generator);
+    let (world, chests) = ember.chests([eye.x, eye.z], 640.0);
     let wild: Vec<_> = chests
         .into_iter()
         .filter(|(_, t)| t == "ember:barrow")

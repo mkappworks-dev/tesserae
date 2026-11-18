@@ -7,7 +7,7 @@ use std::fs;
 use serde_json::Value;
 use tesserae_core::template::{Cell, Template, Turn};
 use tesserae_core::usable::VoxelUse;
-use tesserae_core::{CHUNK_SIZE, Chunk, MaterialId, Voxel, Worldgen, WorldgenParams};
+use tesserae_core::{CHUNK_SIZE, Chunk, MaterialId, Voxel, Worldgen};
 use tesserae_mods::{Kind, ToolKind};
 
 use super::{checkout, loaded, material};
@@ -240,14 +240,15 @@ fn a_world_with_no_game_has_no_template() {
     assert!(loaded.tables.settlements.is_empty());
 }
 
-/// The Chunks of a square `half_m` either side of the origin, every row a Structure reaches.
+/// The Chunks of a square `half_m` either side of a centre, every row a Structure reaches.
 pub(in crate::server) struct Generated {
     pub(in crate::server) chunks: HashMap<[i32; 3], Chunk>,
 }
 
 impl Generated {
+    /// The Chunks within `half_m` of the spawn.
     fn new(generator: &Worldgen, half_m: f32) -> Self {
-        Self::around(generator, [0.0, 0.0], half_m)
+        Self::around(generator, spawn_m(generator), half_m)
     }
 
     /// The Chunks within `half_m` of `centre_m`.
@@ -410,6 +411,12 @@ pub(super) fn road_side(size: [i32; 3], [x, _, z]: [i32; 3]) -> [i32; 2] {
     .unwrap()
 }
 
+/// The column a new Player is spawned on.
+fn spawn_m(generator: &Worldgen) -> [f32; 2] {
+    let eye = crate::server::spawn_eye(generator);
+    [eye.x, eye.z]
+}
+
 /// The demo World tests' seed; the square is wide enough that each Game lays out a Settlement in
 /// it.
 pub(in crate::server) const SEED: u64 = 7;
@@ -565,6 +572,7 @@ const SIZES_SCAN_M: f32 = 768.0;
 fn a_world_of_each_game_lays_small_and_large_settlements() {
     for game in GAMES {
         let (_install, loaded) = loaded(game, 1.0);
+        let loaded = super::at_version_2(loaded);
         let templates = &loaded.tables.templates;
         let generator = Worldgen::new(SEED, 1.0, loaded.world.unwrap())
             .with_templates(templates)
@@ -580,7 +588,7 @@ fn a_world_of_each_game_lays_small_and_large_settlements() {
             kinds.contains(&"water"),
             "{game}: no pond or waterfall by a Settlement within {SIZES_SCAN_M} m"
         );
-        let sizes = copy_sizes(&found, &kinds, SIZES_SCAN_M);
+        let sizes = copy_sizes(&found, &kinds, spawn_m(&generator), SIZES_SCAN_M);
         // Tidewater's islands hold only a handful of buildings, whatever a harbour draws.
         let large = if game == "tidewater" { 3 } else { 8 };
         assert!(
@@ -591,10 +599,10 @@ fn a_world_of_each_game_lays_small_and_large_settlements() {
     }
 }
 
-/// How many buildings each Settlement whose centre stands in `half_m` of spawn, less a large
+/// How many buildings each Settlement whose centre stands in `half_m` of `spawn`, less a large
 /// copy's reach, lays besides its centre, fewest first: each building goes to the nearest centre.
 /// `kinds` holds each one's export kind.
-fn copy_sizes(found: &[Found], kinds: &[&str], half_m: f32) -> Vec<usize> {
+fn copy_sizes(found: &[Found], kinds: &[&str], spawn: [f32; 2], half_m: f32) -> Vec<usize> {
     let middle = |f: &Found| [f.corner[0], f.corner[2]].map(|g| g as f32);
     let all: Vec<[f32; 2]> = found
         .iter()
@@ -605,7 +613,7 @@ fn copy_sizes(found: &[Found], kinds: &[&str], half_m: f32) -> Vec<usize> {
     let centres: Vec<[f32; 2]> = all
         .iter()
         .copied()
-        .filter(|c| c.iter().all(|v| v.abs() <= half_m - 64.0))
+        .filter(|c| (0..2).all(|a| (c[a] - spawn[a]).abs() <= half_m - 64.0))
         .collect();
     let mut sizes = vec![0; centres.len()];
     for (f, _) in found
@@ -631,6 +639,7 @@ const TERRA_TOWN_M: [f32; 2] = [356.0, 30.0];
 #[test]
 fn terra_lays_out_a_town_of_cobbled_roads() {
     let (_install, loaded) = loaded("terra", 1.0);
+    let loaded = super::at_version_2(loaded);
     let templates = &loaded.tables.templates;
     let generator = Worldgen::new(SEED, 1.0, loaded.world.unwrap())
         .with_templates(templates)
@@ -694,8 +703,8 @@ const BRIDGES: [(&str, &str); 2] = [
     ("tidewater", "tidewater:rope_bridge"),
 ];
 
-/// The bridges of `game` standing in `half_m` of spawn at [`SEED`], each with whether the ground
-/// under its middle is below the water level.
+/// The bridges of `game` standing in `half_m` of its river nearest spawn at [`SEED`], each with
+/// whether the ground under its middle is below the water level.
 fn bridges(game: &str, bridge: &str, half_m: f32) -> Vec<(Found, bool)> {
     let (_install, loaded) = loaded(game, 1.0);
     let templates = &loaded.tables.templates;
@@ -704,7 +713,11 @@ fn bridges(game: &str, bridge: &str, half_m: f32) -> Vec<(Found, bool)> {
     let generator = Worldgen::new(SEED, 1.0, loaded.world.unwrap())
         .with_templates(templates)
         .with_settlements(&loaded.tables.settlements);
-    let world = Generated::new(&generator, half_m);
+    let river = flight()
+        .into_iter()
+        .find(|&at| biome_name(&generator, at) == format!("{game}:river"))
+        .expect("a river within a short flight");
+    let world = Generated::around(&generator, river, half_m);
     let template = std::slice::from_ref(&templates[index]);
     standing_of(&world, template, 1.0, false)
         .into_iter()
@@ -717,15 +730,15 @@ fn bridges(game: &str, bridge: &str, half_m: f32) -> Vec<(Found, bool)> {
         .collect()
 }
 
-/// How far from spawn the scan for a bridge looks: a few lattice cells of the bridges' rows,
+/// How far from a river the scan for a bridge looks: a few lattice cells of the bridges' rows,
 /// since few cells hold a gap.
 const BRIDGE_SCAN_M: f32 = 512.0;
 
 #[test]
-fn terra_and_tidewater_each_stand_a_bridge_over_a_gap_near_spawn() {
+fn terra_and_tidewater_each_stand_a_bridge_over_a_gap_by_their_nearest_river() {
     for (game, bridge) in BRIDGES {
         let found = bridges(game, bridge, BRIDGE_SCAN_M);
-        assert!(!found.is_empty(), "{game}: no bridge stands near spawn");
+        assert!(!found.is_empty(), "{game}: no bridge stands by the river");
     }
 }
 
@@ -819,11 +832,7 @@ fn flight() -> Vec<[f32; 2]> {
 /// A version 3 World of `game`, and the name of the Biome at a column.
 fn version_3(game: &str) -> (Worldgen, LoadedMods) {
     let (_install, loaded) = loaded(game, 1.0);
-    let params = WorldgenParams {
-        generator: 3,
-        ..loaded.world.unwrap()
-    };
-    let generator = Worldgen::new(SEED, 1.0, params)
+    let generator = Worldgen::new(SEED, 1.0, loaded.world.unwrap())
         .with_templates(&loaded.tables.templates)
         .with_settlements(&loaded.tables.settlements);
     (generator, loaded)

@@ -4,7 +4,8 @@
 use bevy::ecs::system::RunSystemOnce;
 use bevy::prelude::*;
 use tesserae_core::{
-    CHUNK_SIZE, Chunk, MaterialId, Orientation, SHAPE_FULL_CUBE, Voxel, Worldgen, WorldgenParams,
+    CHUNK_SIZE, Chunk, MaterialId, Orientation, SHAPE_FULL_CUBE, Tables, Voxel, Worldgen,
+    WorldgenParams,
 };
 use tesserae_mods::Kind;
 
@@ -95,17 +96,29 @@ fn every_demo_game_declares_a_food_of_its_own_that_grows_on_its_biomes() {
     }
 }
 
-/// Horizontal metres from the spawn, over the origin, to the nearest Voxel of `food`.
+/// A new World of `loaded` at `seed`, with the Settlements a new Player is spawned in.
+pub(super) fn new_world(loaded: &super::LoadedMods, seed: u64, size: f32) -> Worldgen {
+    new_world_of(loaded.world.unwrap(), &loaded.tables, seed, size)
+}
+
+fn new_world_of(world: WorldgenParams, tables: &Tables, seed: u64, size: f32) -> Worldgen {
+    Worldgen::new(seed, size, world)
+        .with_templates(&tables.templates)
+        .with_settlements(&tables.settlements)
+}
+
+/// Horizontal metres from the spawn to the nearest Voxel of `food`.
 fn nearest_m(generator: &Worldgen, food: MaterialId, within_m: f32) -> Option<f32> {
     distances_m(generator, food, within_m)
         .into_iter()
         .reduce(f32::min)
 }
 
-/// Horizontal metres from the origin to every Voxel of `material` within `within_m`.
+/// Horizontal metres from the spawn to every Voxel of `material` within `within_m`.
 pub(super) fn distances_m(generator: &Worldgen, material: MaterialId, within_m: f32) -> Vec<f32> {
-    let (lowest, highest) = generator.surface_bounds_m();
-    distances_around_m(generator, material, within_m, ([0.0; 2], (lowest, highest)))
+    let eye = crate::server::spawn_eye(generator);
+    let rows = generator.surface_bounds_m();
+    distances_around_m(generator, material, within_m, ([eye.x, eye.z], rows))
 }
 
 /// Horizontal metres from `centre` to every Voxel of `material` within `within_m`, between the
@@ -166,10 +179,10 @@ fn a_new_world_of_every_demo_game_has_its_food_within_a_short_walk_of_the_spawn(
     ];
     crate::server::in_parallel(&FOODS, |food| {
         let (_install, loaded) = loaded(food.game, 0.5);
-        let world = loaded.world.unwrap();
+        let (world, tables) = (loaded.world.unwrap(), &loaded.tables);
         let id = material(&loaded, food.item);
         crate::server::in_parallel(&seeds, |&seed| {
-            let generator = Worldgen::new(seed, 0.5, world);
+            let generator = new_world_of(world, tables, seed, 0.5);
             assert!(
                 nearest_m(&generator, id, SHORT_WALK_M).is_some(),
                 "{} seed {seed}: no {} within {SHORT_WALK_M} m",
@@ -188,7 +201,6 @@ const WOOD_FOR_A_HOME: u32 = 15;
 #[test]
 fn a_survival_player_finds_wood_for_a_workbench_a_chest_and_a_door_in_the_oaks_near_the_spawn() {
     let (_install, loaded) = loaded("terra", 0.5);
-    let world = loaded.world.unwrap();
     let wood = material(&loaded, "flora:wood");
     let trunk = material(&loaded, "flora:oak_log");
     let yields = loaded.tables.plants.yields(trunk);
@@ -205,7 +217,7 @@ fn a_survival_player_finds_wood_for_a_workbench_a_chest_and_a_door_in_the_oaks_n
         7,
         2024,
     ] {
-        let generator = Worldgen::new(seed, 0.5, world);
+        let generator = new_world(&loaded, seed, 0.5);
         assert!(
             distances_m(&generator, wood, SHORT_WALK_M).is_empty(),
             "seed {seed}: Wood lies about on its own"
@@ -452,24 +464,18 @@ fn the_demo_games_textures_are_unchanged() {
     }
 }
 
-/// Version 3, a new World's: a new Player enters a village, so its food, in a patch by it, and the
-/// oaks for a first Workbench, Chest and Door are a short walk from there. Rows within 48 m of the
-/// spawn's height, which a short walk keeps to.
+/// A new Player enters a village, so its food, in a patch by it, and the oaks for a first
+/// Workbench, Chest and Door are a short walk from there. Rows within 48 m of the spawn's height,
+/// which a short walk keeps to.
 #[test]
-fn a_new_version_3_world_has_food_and_wood_within_a_short_walk_of_the_spawn() {
+fn a_new_world_has_food_and_wood_within_a_short_walk_of_the_spawn() {
     crate::server::in_parallel(&FOODS, |food| {
         let (_install, loaded) = loaded(food.game, 1.0);
-        let world = WorldgenParams {
-            generator: 3,
-            ..loaded.world.unwrap()
-        };
         let id = material(&loaded, food.item);
         let trunk = material(&loaded, "flora:oak_log");
         let per_trunk = loaded.tables.plants.yields(trunk)[0].count.min;
         for seed in [crate::world::WorldSettings::default().seed, 1, 3, 7] {
-            let generator = Worldgen::new(seed, 1.0, world)
-                .with_templates(&loaded.tables.templates)
-                .with_settlements(&loaded.tables.settlements);
+            let generator = new_world(&loaded, seed, 1.0);
             let eye = crate::server::spawn_eye(&generator);
             let around = ([eye.x, eye.z], (eye.y - 48.0, eye.y + 48.0));
             assert!(

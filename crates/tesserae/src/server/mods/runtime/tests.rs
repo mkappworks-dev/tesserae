@@ -1223,23 +1223,20 @@ fn fluids_named(loaded: &LoadedMods, params: WorldgenParams) -> Vec<u16> {
         .collect()
 }
 
-/// Terra's lakes are its water, standing in valleys at the default seed under version 2, whose
-/// lakes stand at their declared level. Its stage site, not the generator, keeps them off the
-/// stage.
+/// Terra's lakes are its water, standing in valleys at the default seed. Its stage site, not the
+/// generator, keeps them off the stage.
 fn assert_lakes_in_valleys(params: WorldgenParams, size: f32, water: u16) {
-    let params = WorldgenParams {
-        generator: 2,
-        ..params
-    };
-    let lake = params.water.expect("Terra has lakes");
-    assert_eq!(lake.material, water);
+    assert_eq!(params.water.expect("Terra has lakes").material, water);
     let world = Worldgen::new(WorldSettings::default().seed, size, params);
     let mut valley = None;
-    // Well below the lake, so the smoothing pass's eased stairs cannot reach it.
+    // Well below the water, so the smoothing pass's eased stairs cannot reach it.
     'search: for x in (-40..40).map(|i| i as f32 * 4.0) {
         for z in (-40..40).map(|i| i as f32 * 4.0) {
-            if world.surface_height_m(x, z) < lake.level_m - 3.0 {
-                valley = Some([x, lake.level_m - 0.5, z]);
+            let Some(level_m) = world.water_level_m(x, z) else {
+                continue;
+            };
+            if world.surface_height_m(x, z) < level_m - 3.0 {
+                valley = Some([x, level_m - 0.5, z]);
                 break 'search;
             }
         }

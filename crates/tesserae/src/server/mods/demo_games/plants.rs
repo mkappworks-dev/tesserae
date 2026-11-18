@@ -124,10 +124,9 @@ fn bread_and_pie_are_made_from_the_produce() {
 /// and wheat, though other Biomes may hold the spawn itself.
 #[test]
 fn a_new_terra_world_grows_oaks_apples_and_wheat_within_a_short_walk() {
-    use super::food::{SHORT_WALK_M, distances_m};
+    use super::food::{SHORT_WALK_M, distances_m, new_world};
     let (_install, loaded) = loaded("terra", 0.5);
-    let world = loaded.world.unwrap();
-    let generator = tesserae_core::Worldgen::new(7, 0.5, world);
+    let generator = new_world(&loaded, 7, 0.5);
     for names in [
         &["flora:oak_leaves"][..],
         &["flora:apple_unripe", "flora:apple_ripe"],
@@ -148,7 +147,7 @@ fn a_new_terra_world_grows_oaks_apples_and_wheat_within_a_short_walk() {
 
 #[test]
 fn terras_plants_name_their_shapes_and_a_generated_apple_is_the_box_apple() {
-    use super::food::SHORT_WALK_M;
+    use super::food::{SHORT_WALK_M, new_world};
     use tesserae_core::CHUNK_SIZE;
     let (_install, loaded) = loaded("terra", 0.5);
     let plants = &loaded.tables.plants;
@@ -183,7 +182,7 @@ fn terras_plants_name_their_shapes_and_a_generated_apple_is_the_box_apple() {
         assert!(!loaded.tables.shapes.seals(voxel, face), "face {face}");
     }
 
-    let generator = tesserae_core::Worldgen::new(7, 0.5, loaded.world.unwrap());
+    let generator = new_world(&loaded, 7, 0.5);
     let small = shape(&loaded, "flora:apple_unripe");
     let drawn = [
         (material(&loaded, "flora:apple_unripe"), small),
@@ -192,10 +191,12 @@ fn terras_plants_name_their_shapes_and_a_generated_apple_is_the_box_apple() {
     let chunk_m = CHUNK_SIZE as f32 * 0.5;
     let (lowest, highest) = generator.surface_bounds_m();
     let reach = (SHORT_WALK_M / chunk_m).ceil() as i32;
+    let eye = crate::server::spawn_eye(&generator);
+    let [ox, oz] = [eye.x, eye.z].map(|m| (m / chunk_m).floor() as i32);
     let mut found = 0;
     let mut seen = [false; 2];
-    for cz in -reach..reach {
-        for cx in -reach..reach {
+    for cz in oz - reach..oz + reach {
+        for cx in ox - reach..ox + reach {
             for cy in (lowest / chunk_m).floor() as i32..=(highest / chunk_m).ceil() as i32 {
                 let chunk = generator.chunk(cx, cy, cz);
                 if chunk.uniform().is_some() {

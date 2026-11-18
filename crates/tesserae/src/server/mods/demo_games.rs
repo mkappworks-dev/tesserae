@@ -105,12 +105,16 @@ pub(in crate::server) fn loaded(game: &str, voxel_size: f32) -> (Install, Loaded
         },
     )
     .unwrap();
-    // The positions these tests pin were found under version 2; a test of version 3 asks for it.
-    let mut loaded = loaded;
+    (install, loaded)
+}
+
+/// `loaded` under version 2, for a test whose Game tuning or pinned place has not been found again
+/// under version 3.
+pub(in crate::server) fn at_version_2(mut loaded: LoadedMods) -> LoadedMods {
     if let Some(world) = &mut loaded.world {
         world.generator = 2;
     }
-    (install, loaded)
+    loaded
 }
 
 /// The Mods `loaded` holds, in load order.
@@ -861,7 +865,7 @@ fn terra_shows_its_six_biomes_with_the_approved_sky_and_fog() {
 #[test]
 fn terra_biomes_all_cover_ground_and_the_temperate_one_most() {
     let (_install, loaded) = loaded("terra", 0.5);
-    let world = loaded.world.unwrap();
+    let world = at_version_2(loaded).world.unwrap();
     for seed in [7, 1, 2024] {
         // The first six are the Biomes version 2 chooses.
         let shares = shares(world, seed, 4000.0, 50.0);
@@ -925,7 +929,7 @@ fn tidewater_shows_its_five_biomes_with_the_approved_sky_and_fog() {
 #[test]
 fn tidewater_biomes_all_cover_ground_and_the_lagoon_most() {
     let (_install, loaded) = loaded("tidewater", 0.5);
-    let world = loaded.world.unwrap();
+    let world = at_version_2(loaded).world.unwrap();
     for seed in [7, 1, 2024] {
         // A Biome of the land's shape is not chosen before version 3.
         let shares: Vec<f32> = shares(world, seed, 4000.0, 50.0)

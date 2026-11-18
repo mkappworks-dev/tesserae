@@ -47,7 +47,7 @@ fn place(h: &mut Harness, at: [i32; 3], voxel: Voxel) {
 
 fn with_water(tables: Tables) -> (Harness, MaterialId) {
     let water = tesserae_core::testgen::fixtures().water;
-    let mut h = Harness::new(small(), UNLIMITED);
+    let mut h = Harness::on_land(small(), UNLIMITED);
     h.app.insert_resource(ContentTables(Arc::new(tables)));
     (h, water)
 }

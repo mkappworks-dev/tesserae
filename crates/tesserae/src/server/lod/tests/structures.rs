@@ -32,7 +32,7 @@ fn params() -> WorldgenParams {
     };
     WorldgenParams {
         biomes: BiomeTable::new(&[towers]).unwrap(),
-        ..tesserae_core::testgen::world_params()
+        ..tesserae_core::testgen::world_params_v3()
     }
 }
 
@@ -82,7 +82,7 @@ fn towers_at(generators: &LodGenerators, level_zero: &Worldgen, level: u32) -> u
 
 #[test]
 fn coarse_levels_hold_no_structure_voxel() {
-    let world = WorldSettings::default();
+    let world = land();
     let level_zero =
         Worldgen::new(world.seed, world.voxel_size, params()).with_templates(&[tower()]);
     let generators = LodGenerators::new(&world, &level_zero, LEVELS);

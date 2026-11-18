@@ -413,7 +413,16 @@ const SAMPLES: usize = 32;
 
 /// `(Biome index, Material name)` to Voxels found, over a sample of every Biome's ground.
 fn census(game: &Game) -> (BTreeMap<(usize, String), u64>, Vec<String>) {
+    census_of(game, |loaded| loaded)
+}
+
+/// [`census`] of the Game as `version` leaves it.
+fn census_of(
+    game: &Game,
+    version: fn(super::LoadedMods) -> super::LoadedMods,
+) -> (BTreeMap<(usize, String), u64>, Vec<String>) {
     let (_install, loaded) = loaded(game.name, 1.0);
+    let loaded = version(loaded);
     let world = loaded.world.unwrap();
     let biomes: Vec<String> = world
         .biomes
@@ -492,7 +501,7 @@ const OVERHANG_LIMIT: u64 = 100;
 #[test]
 fn every_biome_of_every_demo_game_grows_its_declared_species_and_none_is_bare_by_accident() {
     for game in &GAMES {
-        let (counts, biomes) = census(game);
+        let (counts, biomes) = census_of(game, super::at_version_2);
         let (_install, loaded) = loaded(game.name, 1.0);
         let world = loaded.world.unwrap();
         assert_eq!(biomes.len(), game.biomes.len(), "{}", game.name);
@@ -676,6 +685,7 @@ fn every_fruit_is_a_box_shape_that_breaking_picks_and_the_tree_grows_again() {
 /// Chunks' columns of the Biome cover.
 fn trees_per_hectare(game: &Game) -> Vec<(String, f64)> {
     let (_install, loaded) = loaded(game.name, 1.0);
+    let loaded = super::at_version_2(loaded);
     let world = loaded.world.unwrap();
     let biomes: Vec<String> = world
         .biomes
@@ -864,6 +874,7 @@ fn terra_trees_find_their_climate_across_their_whole_biome() {
         ("acacia", "savanna"),
     ];
     let (_install, loaded) = loaded("terra", 1.0);
+    let loaded = super::at_version_2(loaded);
     let world = loaded.world.unwrap();
     let biomes: Vec<String> = world
         .biomes
@@ -885,8 +896,8 @@ fn terra_trees_find_their_climate_across_their_whole_biome() {
             .position(|b| *b == format!("terra:{biome}"))
             .unwrap();
         let (mut inside, mut fit) = (0, 0);
-        for z in (-4000..4000).step_by(32) {
-            for x in (-4000..4000).step_by(32) {
+        for z in (-4000..4000).step_by(16) {
+            for x in (-4000..4000).step_by(16) {
                 let (x, z) = (x as f32, z as f32);
                 if generator.biome_at(x, z).map(|b| b.index()) != Some(index) {
                     continue;
@@ -1197,7 +1208,8 @@ fn ground_cover_grows_in_patches_at_each_biomes_class_and_flowers_stay_rare() {
                     .map(|p| cover.by_plant[GROUND_COVER.iter().position(|c| c == p).unwrap()])
                     .sum()
             };
-            if game.bare.contains(&name) {
+            // The sea's floor and a river's bed lie under water, where no ground cover grows.
+            if game.bare.contains(&name) || ["ocean", "river"].contains(&name) {
                 assert!(
                     cover.total < 0.02,
                     "{full}: bare on purpose, {:.3}",

@@ -40,7 +40,7 @@ fn app() -> App {
             biomes: vec!["terra:forest".into(), "terra:dry_plains".into()],
             cave_biomes: Vec::new(),
             default_mode: tesserae_core::save::GameMode::Creative,
-            generator: 1,
+            generator: 3,
             temperature_size_m: 300.0,
             humidity_size_m: 700.0,
         })))

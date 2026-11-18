@@ -1620,13 +1620,34 @@ pub(in crate::server) mod tests {
         pub(in crate::server) anchor: Entity,
     }
 
+    /// Version 3 puts the default seed's origin far out at sea; this seed's is dry land with rivers.
+    pub(in crate::server) fn land() -> WorldSettings {
+        WorldSettings {
+            seed: 42,
+            ..WorldSettings::default()
+        }
+    }
+
     impl Harness {
         pub(in crate::server) fn new(settings: StreamingSettings, budget: StreamingBudget) -> Self {
             Self::with_world(
                 settings,
                 budget,
                 WorldSettings::default(),
-                tesserae_core::testgen::world_params(),
+                tesserae_core::testgen::world_params_v3(),
+            )
+        }
+
+        /// A Harness whose origin is on [`land`].
+        pub(in crate::server) fn on_land(
+            settings: StreamingSettings,
+            budget: StreamingBudget,
+        ) -> Self {
+            Self::with_world(
+                settings,
+                budget,
+                land(),
+                tesserae_core::testgen::world_params_v3(),
             )
         }
 
@@ -2168,7 +2189,7 @@ pub(in crate::server) mod tests {
         let generator = Worldgen::new(
             WorldSettings::default().seed,
             WorldSettings::default().voxel_size,
-            tesserae_core::testgen::world_params(),
+            tesserae_core::testgen::world_params_v3(),
         );
         let (_, highest_m) = generator.surface_bounds_m();
         let cell = WorldSettings::default().cell_size();
@@ -2196,7 +2217,7 @@ pub(in crate::server) mod tests {
         let generator = Worldgen::new(
             WorldSettings::default().seed,
             WorldSettings::default().voxel_size,
-            tesserae_core::testgen::world_params(),
+            tesserae_core::testgen::world_params_v3(),
         );
         let (lowest_m, _) = generator.surface_bounds_m();
         let cell = WorldSettings::default().cell_size();
@@ -2255,7 +2276,7 @@ pub(in crate::server) mod tests {
     /// pointless if the Client is handed zeroes.
     #[test]
     fn a_surface_chunk_is_published_with_light_on_it() {
-        let mut h = Harness::new(small(), UNLIMITED);
+        let mut h = Harness::on_land(small(), UNLIMITED);
         let mut lit_faces = 0;
         for message in h.settle().0 {
             lit_faces += message
@@ -2467,7 +2488,7 @@ pub(in crate::server) mod tests {
     /// dropping it for that would mean never delivering at all.
     #[test]
     fn sustained_edits_to_one_chunk_still_deliver_meshes() {
-        let mut h = Harness::new(small(), UNLIMITED);
+        let mut h = Harness::on_land(small(), UNLIMITED);
         h.settle();
         h.jobs_mut().mesh.scramble = true;
         let ground = h

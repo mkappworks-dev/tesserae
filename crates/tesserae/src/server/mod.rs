@@ -509,19 +509,26 @@ mod tests {
     /// makes, and whether a surface feature stands under their body.
     fn standing_at(generator: &Worldgen, feet: Vec3) -> (bool, bool) {
         let fixtures = tesserae_core::testgen::fixtures();
-        let size = CHUNK_SIZE as f32;
+        let size = CHUNK_SIZE as i32;
         let mut store = world_state::ChunkStore::default();
-        let floor = ((feet.y - 1.0) / size).floor() as i32;
-        let ceiling = ((feet.y + 2.0) / size).floor() as i32;
+        let floor = ((feet.y - 1.0) / size as f32).floor() as i32;
+        let ceiling = ((feet.y + 2.0) / size as f32).floor() as i32;
+        let half = player::BODY_HALF_WIDTH_M;
+        let columns = |m: f32| (m - half).floor() as i32..=(m + half).floor() as i32;
         let mut featured = false;
-        for cz in [-1, 0] {
-            for cx in [-1, 0] {
+        for z in columns(feet.z) {
+            for x in columns(feet.x) {
                 for cy in floor..=ceiling {
-                    let chunk = generator.chunk(cx, cy, cz);
-                    let local = |c: i32| if c == 0 { 0 } else { CHUNK_SIZE - 1 };
+                    let coord =
+                        crate::world::ChunkCoord::new(x.div_euclid(size), cy, z.div_euclid(size));
+                    let chunk = store
+                        .get(coord)
+                        .cloned()
+                        .unwrap_or_else(|| generator.chunk(coord.x, coord.y, coord.z));
+                    let local = |c: i32| c.rem_euclid(size) as usize;
                     featured |= (0..CHUNK_SIZE)
-                        .any(|y| chunk.get(local(cx), y, local(cz)).material() == fixtures.lantern);
-                    store.insert(crate::world::ChunkCoord::new(cx, cy, cz), chunk);
+                        .any(|y| chunk.get(local(x), y, local(z)).material() == fixtures.lantern);
+                    store.insert(coord, chunk);
                 }
             }
         }
@@ -570,11 +577,16 @@ mod tests {
                     relief_m: 48.0,
                     feature_size_m: 16.0,
                     biomes: BiomeTable::new(std::slice::from_ref(&field)).unwrap(),
+                    // Version 3 spawns seed 50 inside something at the origin, 139 m up.
                     ..tesserae_core::testgen::world_params()
                 },
             );
-            let (overlaps, under) = standing_at(&generator, spawn_eye(&generator));
-            assert!(!overlaps, "seed {seed}: the Player spawns inside something");
+            let feet = spawn_eye(&generator);
+            let (overlaps, under) = standing_at(&generator, feet);
+            assert!(
+                !overlaps,
+                "seed {seed}: the Player spawns inside something at {feet}"
+            );
             featured += usize::from(under);
         }
         assert!(featured > 0, "no seed stood a feature under the spawn");

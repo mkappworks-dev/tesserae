@@ -44,7 +44,7 @@ fn params() -> WorldgenParams {
         },
         biomes: BiomeTable::new(&[biome("cold", 0.2, tundra()), biome("warm", 0.8, desert())])
             .unwrap(),
-        ..tesserae_core::testgen::world_params()
+        ..tesserae_core::testgen::world_params_v3()
             .with_default_lake(tesserae_core::testgen::fixtures().water)
     }
 }
@@ -82,7 +82,7 @@ fn chunk_of(generators: &LodGenerators, tables: &Tables, level: u32, c: ChunkCoo
 fn check(voxel_size: f32) {
     let world = WorldSettings {
         voxel_size,
-        ..WorldSettings::default()
+        ..land()
     };
     let level_zero = Worldgen::new(world.seed, voxel_size, params());
     let generators = LodGenerators::new(&world, &level_zero, LEVELS);
@@ -162,7 +162,7 @@ fn coarse_levels_show_the_biome_ground_of_level_zero_at_half_metre_voxels() {
 
 #[test]
 fn the_column_generators_cap_each_column_with_its_biomes_surface() {
-    let world = WorldSettings::default();
+    let world = land();
     let level_zero = Worldgen::new(world.seed, 1.0, params());
     let generators = LodGenerators::new(&world, &level_zero, LEVELS);
     let direct = generators.direct(3).expect("level 3 is column-only");
@@ -212,7 +212,7 @@ fn coarse_levels_leave_surface_features_out() {
         })
         .collect();
     params.biomes = BiomeTable::new(&featured).unwrap();
-    let world = WorldSettings::default();
+    let world = land();
     let level_zero = Worldgen::new(world.seed, world.voxel_size, params);
     let generators = LodGenerators::with_probe(
         LodGenerators::new(&world, &level_zero, LEVELS),

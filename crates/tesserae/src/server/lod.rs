@@ -1662,7 +1662,9 @@ fn dispatch_meshes(
 mod tests {
     use super::*;
     use crate::server::edit::set_voxel;
-    use crate::server::streaming::tests::{Harness, SETTLE_CEILING, UNLIMITED, same_mesh, small};
+    use crate::server::streaming::tests::{
+        Harness, SETTLE_CEILING, UNLIMITED, land, same_mesh, small,
+    };
     use bevy::ecs::system::RunSystemOnce;
     use tesserae_core::light::{Light, MAX_LIGHT};
     use tesserae_core::{ChunkLight, SHAPE_STAIR, Tables, Voxel, downsample, mesh_chunk};
@@ -1945,7 +1947,11 @@ mod tests {
 
     /// Built on its own so a mistake in `LodGenerators` is not shared with the expectation.
     fn source(j: u32) -> Worldgen {
-        let params = tesserae_core::testgen::world_params();
+        source_of(world().seed, j)
+    }
+
+    fn source_of(seed: u64, j: u32) -> Worldgen {
+        let params = tesserae_core::testgen::world_params_v3();
         let params = if j == 0 {
             params
         } else {
@@ -1954,11 +1960,7 @@ mod tests {
                 ..params
             }
         };
-        Worldgen::new(
-            world().seed,
-            world().voxel_size * 2f32.powi(j as i32),
-            params,
-        )
+        Worldgen::new(seed, world().voxel_size * 2f32.powi(j as i32), params)
     }
 
     fn expected(level: u32, coord: ChunkCoord, override_child: Option<(usize, &Chunk)>) -> Chunk {
@@ -2001,7 +2003,8 @@ mod tests {
 
     #[test]
     fn the_source_generators_sit_at_doubling_voxel_sizes_and_only_level_zero_smooths() {
-        let level_zero = Worldgen::new(world().seed, 1.0, tesserae_core::testgen::world_params());
+        let level_zero =
+            Worldgen::new(world().seed, 1.0, tesserae_core::testgen::world_params_v3());
         let sources = LodGenerators::new(&world(), &level_zero, LEVELS);
         assert_eq!(sources.levels(), LEVELS);
         assert!(sources.sources[0].params().smoothing.is_some());
@@ -2140,7 +2143,8 @@ mod tests {
 
     fn probed(probe: FarProbe) -> Harness {
         let mut h = harness();
-        let level_zero = Worldgen::new(world().seed, 1.0, tesserae_core::testgen::world_params());
+        let level_zero =
+            Worldgen::new(world().seed, 1.0, tesserae_core::testgen::world_params_v3());
         h.app.insert_resource(
             LodGenerators::new(&world(), &level_zero, LEVELS).with_probe(&world(), probe),
         );
@@ -2162,7 +2166,7 @@ mod tests {
             }
         }
         // Built here as `COLUMNS_FROM` builds it: an 8 m Voxel asked about its middle, no caves.
-        let p = tesserae_core::testgen::world_params();
+        let p = tesserae_core::testgen::world_params_v3();
         let columns = Worldgen::new(
             world().seed,
             8.0,
@@ -2200,7 +2204,7 @@ mod tests {
         for level in 2..LEVELS {
             // Sampled at each Voxel's middle height: half a level-k Voxel up.
             let voxel_m = 2f32.powi(level as i32);
-            let p = tesserae_core::testgen::world_params();
+            let p = tesserae_core::testgen::world_params_v3();
             let own = Worldgen::new(
                 world().seed,
                 voxel_m,
@@ -2261,7 +2265,7 @@ mod tests {
 
     #[test]
     fn a_direct_probe_drains_none_of_the_lakes_the_downsample_shows() {
-        let params = tesserae_core::testgen::world_params()
+        let params = tesserae_core::testgen::world_params_v3()
             .with_default_lake(tesserae_core::testgen::fixtures().water);
         let lake = |probe| {
             let mut h = Harness::with_world(lod_settings(), UNLIMITED, world(), params);
@@ -3432,15 +3436,18 @@ mod tests {
     fn coarse_water(level: u32, rows: usize, level_m: Option<f32>) -> ChunkMesh {
         let tables = crate::server::fixture_tables();
         let water = tesserae_core::testgen::fixtures().water;
+        let params = tesserae_core::testgen::world_params_v3();
         let surface = Worldgen::new(
             world().seed,
             world().voxel_size,
             WorldgenParams {
+                // Version 3's water stands at Sea level.
+                sea_level_m: level_m.unwrap_or(params.sea_level_m),
                 water: level_m.map(|level_m| tesserae_core::WaterParams {
                     level_m,
                     material: water,
                 }),
-                ..tesserae_core::testgen::world_params()
+                ..params
             },
         );
         let mut center = Chunk::air();
@@ -3626,12 +3633,13 @@ mod tests {
         assert_eq!(layer.indices.len(), 12);
     }
 
-    /// The mesh `mesh_coarse` makes of a level-`level` Chunk of `source`'s ground.
-    fn coarse_mesh(level: u32, coord: ChunkCoord, source: &Worldgen) -> ChunkMesh {
+    /// The mesh `mesh_coarse` makes of a level-`level` Chunk of `source`'s ground, made from
+    /// `seed`.
+    fn coarse_mesh(level: u32, coord: ChunkCoord, seed: u64, source: &Worldgen) -> ChunkMesh {
         let (center, around) = chunks_around(level, coord, source);
         let voxel_m = world().voxel_size * 2f32.powi(level as i32);
         mesh_coarse(
-            &Worldgen::new(world().seed, 1.0, source.params()),
+            &Worldgen::new(seed, 1.0, source.params()),
             level,
             voxel_m,
             coord,
@@ -3650,30 +3658,28 @@ mod tests {
             .unwrap_or(MAX_LIGHT)
     }
 
-    fn without_caves() -> Worldgen {
+    fn without_caves(seed: u64) -> Worldgen {
         Worldgen::new(
-            world().seed,
+            seed,
             1.0,
             WorldgenParams {
                 caves: None,
                 water: None,
-                ..tesserae_core::testgen::world_params()
+                ..tesserae_core::testgen::world_params_v3()
             },
         )
     }
 
-    /// The default seed's mouth at (-26, -352) m, a hole through the surface 14 m deep at level
-    /// 1 with a tunnel off it, found by a probe over the generator. Its Chunk at level 1 is
-    /// (-1, 0, -6).
+    /// A mouth through the land seed's surface, in its level 1 Chunk (-1, 0, -6).
     #[test]
     fn a_cave_mouth_at_level_one_has_faces_lit_below_open_sky() {
-        let coord = ChunkCoord::new(-1, 0, -6);
+        let (coord, seed) = (ChunkCoord::new(-1, 0, -6), land().seed);
         assert!(
-            darkest_sky(&coarse_mesh(1, coord, &source(0))) < MAX_LIGHT,
+            darkest_sky(&coarse_mesh(1, coord, seed, &source_of(seed, 0))) < MAX_LIGHT,
             "the mouth is lit like open ground"
         );
         assert_eq!(
-            darkest_sky(&coarse_mesh(1, coord, &without_caves())),
+            darkest_sky(&coarse_mesh(1, coord, seed, &without_caves(seed))),
             MAX_LIGHT,
             "the same ground without caves is not"
         );
@@ -3699,9 +3705,9 @@ mod tests {
                 // Ground, so no lake: water has light of its own (`coarse_light_in`).
                 water: None,
                 smoothing: (level == 1)
-                    .then(|| tesserae_core::testgen::world_params().smoothing)
+                    .then(|| tesserae_core::testgen::world_params_v3().smoothing)
                     .flatten(),
-                ..tesserae_core::testgen::world_params()
+                ..tesserae_core::testgen::world_params_v3()
             };
             let source = Worldgen::new(world().seed, 2f32.powi(level as i32 - 1), params);
             let cell_m = CHUNK_SIZE as f32 * 2f32.powi(level as i32);
@@ -3726,7 +3732,7 @@ mod tests {
                         &tables,
                     );
                     assert!(
-                        same_mesh(&coarse_mesh(level, coord, &source), &open),
+                        same_mesh(&coarse_mesh(level, coord, world().seed, &source), &open),
                         "level {level} {coord} is not lit as open sky"
                     );
                     meshes += usize::from(!open.is_empty());
@@ -3768,7 +3774,7 @@ mod persistence_tests {
         let base = Worldgen::new(
             world.seed,
             world.voxel_size,
-            tesserae_core::testgen::world_params(),
+            tesserae_core::testgen::world_params_v3(),
         );
         let generators = LodGenerators::new(&world, &base, 5);
         let water = tesserae_core::testgen::fixtures().water;
@@ -3857,7 +3863,7 @@ mod persistence_tests {
         let base = Worldgen::new(
             world.seed,
             world.voxel_size,
-            tesserae_core::testgen::world_params(),
+            tesserae_core::testgen::world_params_v3(),
         );
         let generators = LodGenerators::new(&world, &base, 5);
         let home = ChunkCoord::new(0, -2, 0);

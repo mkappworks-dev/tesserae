@@ -935,7 +935,7 @@ mod tests {
             biomes: vec!["terra:ash_flats".into(), "terra:meadow".into()],
             cave_biomes: Vec::new(),
             default_mode: GameMode::Survival,
-            generator: 2,
+            generator: 3,
             temperature_size_m: 300.0,
             humidity_size_m: 700.0,
         });
@@ -948,7 +948,7 @@ mod tests {
         choose(&mut app, Choice::Details);
         let shown = texts(&mut app);
         assert!(shown.iter().any(|t| t == "River bend"), "{shown:?}");
-        let body = "Terra · 0.5 m voxels\nSeed: 42\n2 biomes · Generator version 2\nDefault mode Survival · your mode Creative\nTemperature / humidity size: 300 m / 700 m";
+        let body = "Terra · 0.5 m voxels\nSeed: 42\n2 biomes · Generator version 3\nDefault mode Survival · your mode Creative\nTemperature / humidity size: 300 m / 700 m";
         assert!(shown.iter().any(|t| t == body), "{body} in {shown:?}");
         press(&mut app, KeyCode::Escape);
         assert!(open(&app), "Escape closes the details only");

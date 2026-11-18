@@ -913,7 +913,7 @@ mod tests {
         )
         .unwrap();
         let mut app = app_with_tables(&[(origin(), ground())], tables_with(vec![plot]));
-        let params = tesserae_core::testgen::world_params();
+        let params = tesserae_core::testgen::world_params_v3();
         app.insert_resource(crate::server::WorldGenerator(tesserae_core::Worldgen::new(
             0, 1.0, params,
         )));
