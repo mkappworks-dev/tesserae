@@ -194,7 +194,13 @@ recorded version 3 digests.
 - **Version 3 defects found on the way** (a Surface feature lost at a Chunk's
   top, crop fields near water missing at 0.5 m, smoothing steps at one seed) are
   fixed inside the same pre-release exception, before the correction, so every
-  move of version 3's output lands before the freeze resumes.
+  move of version 3's output lands before the freeze resumes. A spawn that
+  overlaps what is generated under the Player is fixed before versions 1 and 2
+  go, since a test of it still needs version 2.
+- **The Games are retuned for version 3** (Biome shares, tree spacing, bare
+  Biomes, Settlement sizes, crop weights) so their tests pass under it with
+  unchanged thresholds, and tests that pinned a place on version 2's map find it
+  by search or on a hand-built World. Both land before versions 1 and 2 go.
 
 ## Testing Decisions
 

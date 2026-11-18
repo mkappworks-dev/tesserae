@@ -4,7 +4,7 @@ Status: ready-for-agent
 
 Spec: [Generator determinism](../spec.md).
 
-Blocked by: 02, 03, 04.
+Blocked by: 02, 03, 04, 15, 16, 17.
 
 ## What to build
 
