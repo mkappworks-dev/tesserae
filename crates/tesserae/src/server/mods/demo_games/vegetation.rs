@@ -410,19 +410,34 @@ fn is_standalone_wood(name: &str) -> bool {
 
 /// Chunk columns sampled per Biome, each 32 m square at a 1 m Voxel.
 const SAMPLES: usize = 32;
+/// Chunk columns sampled per Biome where water covers its ground, besides [`SAMPLES`]: under
+/// version 3 a Biome holds water only in its few lakes, which the first [`SAMPLES`] may all miss.
+const WET_SAMPLES: usize = 8;
+/// The census's name for a tree trunk's lowest Voxel: a log on the ground under [`TREE_CLEAR_M`] of
+/// logs, which a neighbour's limb resting on a slope never is.
+const TRUNK_FOOT: &str = "trunk foot";
 
 /// `(Biome index, Material name)` to Voxels found, over a sample of every Biome's ground.
 fn census(game: &Game) -> (BTreeMap<(usize, String), u64>, Vec<String>) {
-    census_of(game, |loaded| loaded)
+    census_of(game, |loaded| loaded, false)
 }
 
-/// [`census`] of the Game as `version` leaves it.
+/// [`census`] of the Game as `edit` leaves it, of only what stands on the surface: a cave under a
+/// Biome holds its cave Biome's Plants, not the Biome's.
+fn surface_census(
+    game: &Game,
+    edit: fn(super::LoadedMods) -> super::LoadedMods,
+) -> (BTreeMap<(usize, String), u64>, Vec<String>) {
+    census_of(game, edit, true)
+}
+
 fn census_of(
     game: &Game,
-    version: fn(super::LoadedMods) -> super::LoadedMods,
+    edit: fn(super::LoadedMods) -> super::LoadedMods,
+    surface_only: bool,
 ) -> (BTreeMap<(usize, String), u64>, Vec<String>) {
     let (_install, loaded) = loaded(game.name, 1.0);
-    let loaded = version(loaded);
+    let loaded = edit(loaded);
     let world = loaded.world.unwrap();
     let biomes: Vec<String> = world
         .biomes
@@ -443,35 +458,104 @@ fn census_of(
         .map(|(id, name)| (id as u16, name.to_owned()))
         .collect();
 
+    let logs: BTreeSet<u16> = named
+        .iter()
+        .filter(|(_, name)| name.ends_with("_log"))
+        .map(|(&id, _)| id)
+        .collect();
+    let plant_made: BTreeSet<u16> = loaded
+        .registry
+        .names(Kind::Material)
+        .filter(|(_, name)| {
+            ["flora:", "crops:", "aquatic:"]
+                .iter()
+                .any(|owner| name.starts_with(owner))
+        })
+        .map(|(id, _)| id as u16)
+        .collect();
+
     let generator = Worldgen::new(7, 1.0, world);
+    let water = generator.water().map(|w| w.material);
     let chunk_m = CHUNK_SIZE as f32;
     let (low, high) = generator.surface_bounds_m();
     let rows = (low / chunk_m).floor() as i32..=(high / chunk_m).ceil() as i32;
+    let centre = |cx: i32, cz: i32| ((cx as f32 + 0.5) * chunk_m, (cz as f32 + 0.5) * chunk_m);
+    let biome_of = |(x, z): (f32, f32)| generator.biome_at(x, z).unwrap().index();
     let mut taken = vec![0usize; biomes.len()];
-    let mut counts = BTreeMap::new();
+    let mut columns = Vec::new();
     for cz in (-120..120).step_by(3) {
         for cx in (-120..120).step_by(3) {
-            let centre = ((cx as f32 + 0.5) * chunk_m, (cz as f32 + 0.5) * chunk_m);
-            let biome = generator.biome_at(centre.0, centre.1).unwrap().index();
-            if taken[biome] >= SAMPLES {
+            let biome = biome_of(centre(cx, cz));
+            if taken[biome] < SAMPLES {
+                taken[biome] += 1;
+                columns.push((cx, cz));
+            }
+        }
+    }
+    let mut wet = vec![0usize; biomes.len()];
+    for cz in -120..120 {
+        for cx in -120..120 {
+            let (x, z) = centre(cx, cz);
+            let under_water = generator
+                .water_surface_m(x, z)
+                .is_some_and(|w| w > generator.surface_height_m(x, z));
+            let biome = biome_of((x, z));
+            if under_water && wet[biome] < WET_SAMPLES && !columns.contains(&(cx, cz)) {
+                wet[biome] += 1;
+                columns.push((cx, cz));
+            }
+        }
+    }
+    let at = |c: i32, n: usize| (c * CHUNK_SIZE as i32 + n as i32) as f32;
+    let mut counts = BTreeMap::new();
+    let rise = (TREE_CLEAR_M as usize).min(CHUNK_SIZE);
+    for (cx, cz) in columns {
+        let mut surface = HashMap::new();
+        for cy in rows.clone() {
+            let chunk = generator.chunk(cx, cy, cz);
+            if chunk.uniform().is_some() {
                 continue;
             }
-            taken[biome] += 1;
-            for cy in rows.clone() {
-                let chunk = generator.chunk(cx, cy, cz);
-                if chunk.uniform().is_some() {
-                    continue;
-                }
-                for z in 0..CHUNK_SIZE {
-                    for y in 0..CHUNK_SIZE {
-                        for x in 0..CHUNK_SIZE {
-                            let Some(name) = named.get(&chunk.get(x, y, z).material()) else {
+            let mut above = None;
+            for z in 0..CHUNK_SIZE {
+                for y in 0..CHUNK_SIZE {
+                    for x in 0..CHUNK_SIZE {
+                        let material = chunk.get(x, y, z).material();
+                        let Some(name) = named.get(&material) else {
+                            continue;
+                        };
+                        if surface_only {
+                            let ground = *surface.entry((x, z)).or_insert_with(|| {
+                                generator.surface_height_m(at(cx, x), at(cz, z))
+                            });
+                            // A Plant stands on the column's top Voxel, so its lowest Voxel is the
+                            // one at the surface.
+                            if at(cy, y) < ground - 1.0 {
                                 continue;
-                            };
-                            let at = |c: i32, n: usize| (c * CHUNK_SIZE as i32 + n as i32) as f32;
-                            let here = generator.biome_at(at(cx, x), at(cz, z));
-                            let here = here.unwrap().index();
-                            *counts.entry((here, name.clone())).or_default() += 1;
+                            }
+                        }
+                        let here = biome_of((at(cx, x), at(cz, z)));
+                        *counts.entry((here, name.clone())).or_default() += 1;
+                        let below = (y > 0).then(|| chunk.get(x, y - 1, z));
+                        let on_ground = below.is_some_and(|b| {
+                            !b.is_air()
+                                && !plant_made.contains(&b.material())
+                                && Some(b.material()) != water
+                        });
+                        let mut trunk = || {
+                            (y..y + rise).all(|up| {
+                                let voxel = if up < CHUNK_SIZE {
+                                    chunk.get(x, up, z)
+                                } else {
+                                    let next = above
+                                        .get_or_insert_with(|| generator.chunk(cx, cy + 1, cz));
+                                    next.get(x, up - CHUNK_SIZE, z)
+                                };
+                                logs.contains(&voxel.material())
+                            })
+                        };
+                        if logs.contains(&material) && on_ground && trunk() {
+                            *counts.entry((here, TRUNK_FOOT.to_owned())).or_default() += 1;
                         }
                     }
                 }
@@ -495,16 +579,68 @@ fn found(counts: &BTreeMap<(usize, String), u64>, biome: usize, name: &str) -> u
     counts.get(&(biome, name.to_owned())).copied().unwrap_or(0)
 }
 
-/// Trunk Voxels a bare Biome may hold from the limbs of a neighbour's trees.
-const OVERHANG_LIMIT: u64 = 100;
+/// The names of every tree's fruit Materials, in every Stage.
+fn fruit_of(loaded: &super::LoadedMods) -> BTreeSet<String> {
+    loaded
+        .registry
+        .names(Kind::Material)
+        .filter(|&(id, _)| loaded.tables.plants.canopy_of_fruit(id as u16).is_some())
+        .map(|(_, name)| name.to_owned())
+        .collect()
+}
+
+/// What Biome `index` grows that a bare Biome must not. A neighbour's crowns reach over the border
+/// with their limbs, vines and fruit, however long the border; a tree standing here has a trunk
+/// foot.
+fn strays<'a>(
+    counts: &'a BTreeMap<(usize, String), u64>,
+    index: usize,
+    fruit: &BTreeSet<String>,
+) -> Vec<(&'a str, u64)> {
+    counts
+        .iter()
+        .filter(|((b, name), _)| {
+            let overhang = name == "flora:vine" || name.ends_with("_log") || fruit.contains(name);
+            *b == index && !overhang
+        })
+        .map(|((_, name), n)| (name.as_str(), *n))
+        .collect()
+}
+
+/// Terra with its beach growing the temperate Biome's ground cover and trees.
+fn beach_grown_by_accident(mut loaded: super::LoadedMods) -> super::LoadedMods {
+    let world = loaded.world.as_mut().unwrap();
+    let mut biomes = world.biomes.as_slice().to_vec();
+    let temperate = super::biome(world, "terra:temperate").surface_features;
+    let beach = biomes.iter_mut().find(|b| b.name.as_str() == "terra:beach");
+    beach.unwrap().surface_features = temperate;
+    world.biomes = tesserae_core::BiomeTable::new(&biomes)
+        .and_then(|t| t.with_selectors(world.biomes.selectors()))
+        .and_then(|t| t.with_strata(world.biomes.strata()))
+        .unwrap();
+    loaded
+}
+
+#[test]
+fn a_bare_biome_that_grows_on_its_own_surface_is_caught() {
+    let terra = &GAMES[0];
+    let (counts, biomes) = surface_census(terra, beach_grown_by_accident);
+    let beach = biomes.iter().position(|b| b == "terra:beach").unwrap();
+    let (_install, loaded) = loaded(terra.name, 1.0);
+    let plants = strays(&counts, beach, &fruit_of(&loaded));
+    assert!(
+        plants.iter().any(|&(name, _)| name == "flora:tuft")
+            && plants.iter().any(|&(name, _)| name == TRUNK_FOOT),
+        "{plants:?}"
+    );
+}
 
 #[test]
 fn every_biome_of_every_demo_game_grows_its_declared_species_and_none_is_bare_by_accident() {
     for game in &GAMES {
-        // Under version 3 Terra's mushroom grotto runs under the alpine Biome's mountains and a
-        // neighbour's palm hangs a coconut over the beach's metre of strand.
-        let (counts, biomes) = census_of(game, super::at_version_2);
+        let (counts, biomes) = surface_census(game, |loaded| loaded);
         let (_install, loaded) = loaded(game.name, 1.0);
+        let fruit = fruit_of(&loaded);
         let world = loaded.world.unwrap();
         assert_eq!(biomes.len(), game.biomes.len(), "{}", game.name);
         for (index, (name, species)) in game.biomes.iter().enumerate() {
@@ -535,16 +671,7 @@ fn every_biome_of_every_demo_game_grows_its_declared_species_and_none_is_bare_by
                 assert!(total > 0, "{full} grows no {plant}");
             }
             if species.is_empty() {
-                // A neighbour's vines hang across the border, and its limbs reach a few Voxels
-                // over it; a tree standing here would be hundreds.
-                let plants: Vec<_> = counts
-                    .iter()
-                    .filter(|((b, name), n)| {
-                        *b == index
-                            && name != "flora:vine"
-                            && !(name.ends_with("_log") && **n < OVERHANG_LIMIT)
-                    })
-                    .collect();
+                let plants = strays(&counts, index, &fruit);
                 assert!(plants.is_empty(), "{full} is bare on purpose: {plants:?}");
             }
         }
