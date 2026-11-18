@@ -46,6 +46,32 @@ fn a_band_that_does_not_hold_the_relief_is_refused() {
     assert!(bad.validate().is_err());
 }
 
+/// A band of no height would scale its mountains by 0 / 0, so every height is NaN and drainage
+/// never settles; the least height above it is finite everywhere.
+#[test]
+fn a_band_of_no_height_is_refused_and_the_least_above_it_generates() {
+    let at = |height_m| WorldgenParams {
+        relief_m: 0.0,
+        landforms: LandformParams {
+            height_m,
+            ..landforms()
+        },
+        ..v3()
+    };
+    let refused = at(0.0).validate().unwrap_err();
+    assert_eq!(refused.field, "landforms.height_m");
+    assert!(refused.to_string().contains("above 0"), "{refused}");
+    let least = at(f32::from_bits(1));
+    assert_eq!(least.validate(), Ok(()));
+    for size in [1.0, 0.5] {
+        let g = Worldgen::new(SEED, size, least);
+        for (x, z) in [(0.0, 0.0), (37.0, -410.0), (-2900.0, 1300.0)] {
+            assert!(g.terrain_height_m(x, z).is_finite(), "{size} m ({x}, {z})");
+            assert!(g.surface_height_m(x, z).is_finite(), "{size} m ({x}, {z})");
+        }
+    }
+}
+
 #[test]
 fn version_3_bounds_the_surface_by_the_band_and_the_overhang() {
     let (lowest, highest) = Worldgen::new(SEED, 1.0, v3()).surface_bounds_m();

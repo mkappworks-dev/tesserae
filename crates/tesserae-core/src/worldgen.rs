@@ -313,6 +313,11 @@ impl WorldgenParams {
             "must be finite and within 65536 m",
         )?;
         require(
+            land.height_m > 0.0,
+            "landforms.height_m",
+            "must be above 0 m, since a range's rise is a share of it",
+        )?;
+        require(
             land.height_m >= self.relief_m && land.depth_m >= 0.0,
             "landforms.height_m",
             "must hold the relief above Sea level",
