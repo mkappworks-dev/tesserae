@@ -24,6 +24,13 @@ naming 12, and the job is not a required check until 12.
 
 - [ ] The job runs on every PR on the four targets (or three, with the Rosetta
       note).
-- [ ] It runs the digest tests only, not the whole suite.
+- [x] It runs the digest tests only, not the whole suite.
 - [ ] Which digests differ on which target is recorded in a comment here.
-- [ ] Every target allowed to fail names 12 as what removes the allowance.
+- [x] Every target allowed to fail names 12 as what removes the allowance.
+
+## Comments
+
+- The job is its own workflow, `.github/workflows/determinism.yml`, with CI's triggers plus `workflow_dispatch`; in `ci.yml` the manual trigger would run the whole of CI. One matrix of four, `fail-fast: false`, each `continue-on-error` with a comment naming 12. Cached like CI (`Swatinem/rust-cache`, keyed by target, saved from `main` only).
+- Rosetta is on the arm64 `macos-latest` image (macOS 26): its template, [`macOS-26.arm64.anka.pkr.hcl`](https://github.com/actions/runner-images/blob/main/images/macos/templates/macOS-26.arm64.anka.pkr.hcl), runs [`install-rosetta.sh`](https://github.com/actions/runner-images/blob/main/images/macos/scripts/build/install-rosetta.sh) (`softwareupdate --install-rosetta --agree-to-license`) unconditionally. The image's software list does not name it, as it names no OS component. So x86-64 macOS stays, built with `--target x86_64-apple-darwin`; a `Check Rosetta` step fails by name if a later image drops it.
+- What it runs, in release: the whole of `generator_version`, `coarse_generation` and `surface_features` (the recorded digests and the asserts that their boxes hold what they digest), and `settlement_worldgen`'s `a_fixed_size_settlement_lays_out_exactly_as_before_ranges`, the one other recorded digest in `tesserae-core`. `worldgen.rs`'s `terrain_digest` tests compare seeds with each other, not with a recording, so they stay out. The exact commands passed on this Mac (arm64): 10, 2, 8 and 1 tests, about 11 s of test time. The x86-64 target could not be run here: this Mac has no Rosetta.
+- Not yet seen on GitHub: nothing has been pushed, so which digests differ on which target (the third criterion) waits for the first run, and so does the first. Status stays `ready-for-agent` until that run is recorded here.
