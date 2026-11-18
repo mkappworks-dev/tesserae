@@ -2157,7 +2157,7 @@ impl Worldgen {
         })
     }
 
-    /// The fog of the cave Biome round a point at least [`CAVE_BIOME_MIN_DEPTH_M`] under the
+    /// The fog of the cave Biome round a point at least `CAVE_BIOME_MIN_DEPTH_M` under the
     /// surface, where one has fog; `None` leaves the surface's air.
     pub fn cave_fog_at(&self, x_m: f32, y_m: f32, z_m: f32) -> Option<SkyFogBlend> {
         if !self.underground_biomes
