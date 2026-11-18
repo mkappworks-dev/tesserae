@@ -14,16 +14,17 @@ everywhere and stay as they are.
 Generator version, so updating it is a generator change and must pass the
 digests unchanged.
 
-**Versions 2 and 3 were corrected in place, once.** Both had merged with `std`
+**Version 3 was corrected in place, once.** It had merged with `std`
 trigonometry in Settlements, crop fields and the spawn search, and `powi` in
 Surface features and landforms, but nothing had been released: every World made
-under them was a development World. This overrides, once, the rule that a
-World's pinned version never changes its terrain
+under it was a development World, and versions 1 and 2 were deleted outright
+([ADR-0033](0033-generator-version-3-is-the-only-version.md)). This overrides,
+once, the rule that a World's pinned version never changes its terrain
 ([ADR-0022](0022-biomes-are-column-content-and-a-world-pins-its-generator.md))
 and version 3's freeze
 ([ADR-0030](0030-generator-version-3-is-a-layered-field-stack-in-a-declared-band.md)).
-Freezing them on `std` and adding a version 4 that differed only in its maths
-would have left those versions unportable for good and added a Generator version
+Freezing it on `std` and adding a version 4 that differed only in its maths
+would have left version 3 unportable for good and added a Generator version
 nobody could see. After the first release, a fix to a Generator version, however
 small, is a new version.
 

@@ -1,10 +1,10 @@
-# 06: Clippy refuses platform maths
+# 11: Clippy refuses platform maths
 
 Status: ready-for-agent
 
 Spec: [Generator determinism](../spec.md).
 
-Blocked by: None (can start immediately).
+Blocked by: 05.
 
 ## What to build
 
@@ -13,15 +13,15 @@ the spec lists as non-deterministic, with a reason pointing at ADR-0032, so a
 new landform that reaches for `.sin()` fails the Lint job on Linux. Every crate
 but `tesserae-core` allows them at crate level. Inside it, audio, entity motion,
 Plant growth, the sky blend, unit test modules, the integration tests and the
-benches allow them explicitly. Each generation site 07 will correct carries a
-temporary allow whose reason names 07, so the lint lands green now and, once 07
+benches allow them explicitly. Each generation site 12 will correct carries a
+temporary allow whose reason names 12, so the lint lands green now and, once 12
 removes those allows, proves nothing is left.
 
 ## Acceptance criteria
 
 - [ ] A scratch build shows the lint firing on method-call syntax (`x.sin()`,
       `x.powi(2)`) on `f32` and `f64`, naming ADR-0032; noted in a comment here
-      before anything else.
+      before anything else (this check can run before 05).
 - [ ] Every use of a listed method sits under an explicit allow: permanent
-      outside generation, temporary naming 07 inside it.
+      outside generation, temporary naming 12 inside it.
 - [ ] The Lint job (`--all-targets`) passes.

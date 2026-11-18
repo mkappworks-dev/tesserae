@@ -2,6 +2,9 @@
 
 Status: accepted.
 
+Amended by [ADR-0033](0033-generator-version-3-is-the-only-version.md): versions
+1 and 2 are deleted, and their Worlds no longer open.
+
 Step 17 reworks worldgen from one height noise, one flat lake level and one cave
 field into landforms, oceans, rivers, a layered underground and Biomes chosen by
 altitude and coast. A World made under version 1 or 2 keeps its terrain and its
