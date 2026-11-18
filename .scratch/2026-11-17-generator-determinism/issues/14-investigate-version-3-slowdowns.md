@@ -2,8 +2,8 @@
 
 Status: done
 
-Spec: [Generator determinism](../spec.md). Belongs with the worldgen version 3
-performance work; move it there if that spec merges first.
+Spec: [Generator determinism](../spec.md). The worldgen version 3 performance
+branch lands after this one and takes its causes as input.
 
 Blocked by: None (can start immediately).
 
