@@ -541,11 +541,11 @@ impl Guest for Terra {
                     // carpet; the oaks every 9 m give Wood for a Workbench, Chest and Door in a
                     // short walk, and no Wood lies about on its own.
                     crop_fields: plants::temperate_fields(),
-                    structures: [
-                        structures::wild(&["watchtower", "standing_stones", "waystone"]),
-                        structures::bridge("stone_bridge"),
-                    ]
-                    .concat(),
+                    structures: structures::wild_and_bridged(&[
+                        "watchtower",
+                        "standing_stones",
+                        "waystone",
+                    ]),
                     settlements: structures::town_and_village(),
                     surface_features: [SurfaceFeature {
                         material: Some("terra:melon".into()),
@@ -578,11 +578,7 @@ impl Guest for Terra {
                     }),
                     cave_scale: Some(1.5),
                     crop_fields: Vec::new(),
-                    structures: [
-                        structures::wild(&["ruined_keep"]),
-                        structures::bridge("stone_bridge"),
-                    ]
-                    .concat(),
+                    structures: structures::wild_and_bridged(&["ruined_keep"]),
                     settlements: structures::village(),
                     surface_features: plants::dry(),
                     loot: Some(structures::biome_loot("dry")),
@@ -605,11 +601,7 @@ impl Guest for Terra {
                     }),
                     cave_scale: Some(0.0),
                     crop_fields: Vec::new(),
-                    structures: [
-                        structures::wild(&["watchtower", "ruined_keep"]),
-                        structures::bridge("stone_bridge"),
-                    ]
-                    .concat(),
+                    structures: structures::wild_and_bridged(&["watchtower", "ruined_keep"]),
                     settlements: structures::village(),
                     surface_features: plants::cold(),
                     loot: Some(structures::biome_loot("cold")),
@@ -628,11 +620,7 @@ impl Guest for Terra {
                     }),
                     cave_scale: None,
                     crop_fields: Vec::new(),
-                    structures: [
-                        structures::wild(&["ruined_keep"]),
-                        structures::bridge("stone_bridge"),
-                    ]
-                    .concat(),
+                    structures: structures::wild_and_bridged(&["ruined_keep"]),
                     settlements: Vec::new(),
                     surface_features: plants::jungle(),
                     loot: Some(structures::biome_loot("jungle")),
@@ -678,11 +666,7 @@ impl Guest for Terra {
                     }),
                     cave_scale: None,
                     crop_fields: plants::savanna_fields(),
-                    structures: [
-                        structures::wild(&["standing_stones", "waystone"]),
-                        structures::bridge("stone_bridge"),
-                    ]
-                    .concat(),
+                    structures: structures::wild_and_bridged(&["standing_stones", "waystone"]),
                     settlements: structures::village(),
                     surface_features: plants::savanna(),
                     loot: Some(structures::biome_loot("savanna")),

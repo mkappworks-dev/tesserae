@@ -422,6 +422,11 @@ pub fn wild(names: &[&str]) -> Vec<BiomeStructure> {
         .collect()
 }
 
+/// Each of `names` in the wild, and the stone bridge over the Biome's water.
+pub fn wild_and_bridged(names: &[&str]) -> Vec<BiomeStructure> {
+    [wild(names), bridge("stone_bridge")].concat()
+}
+
 /// Terra's bridge `name`, a Template that spans water.
 pub fn bridge(name: &str) -> Vec<BiomeStructure> {
     vec![BiomeStructure {
