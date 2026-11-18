@@ -25,6 +25,8 @@ fn featured(biome: Biome, features: &[SurfaceFeature]) -> Biome {
     }
 }
 
+mod common;
+
 const SEEDS: [u64; 2] = [0x7e55_e2ae_0000_0001, 0xdead_beef_cafe_f00d];
 const VOXEL_SIZES: [f32; 2] = [1.0, 0.5];
 
@@ -53,9 +55,10 @@ fn desert() -> GroundParams {
     }
 }
 
-/// Every pass the generator has: caves tuned per Biome, smoothing, a lake, Biome grounds and ore.
+/// Every pass the generator has: caves tuned per Biome, smoothing, water, Biome grounds and ore;
+/// on low land, so the ground lies in the box the digests read.
 fn biome_world() -> WorldgenParams {
-    WorldgenParams {
+    common::lowland(WorldgenParams {
         sea_level_m: 24.0,
         relief_m: 24.0,
         water: Some(WaterParams {
@@ -81,8 +84,8 @@ fn biome_world() -> WorldgenParams {
             biomes: BiomeSet::new(&[BiomeId::new(0)]).unwrap(),
         }])
         .unwrap(),
-        ..tesserae_core::testgen::world_params()
-    }
+        ..tesserae_core::testgen::world_params_v3()
+    })
 }
 
 fn put(digest: &mut Sha256, v: Voxel) {
@@ -140,7 +143,14 @@ fn digests(params: WorldgenParams) -> Vec<String> {
         .collect()
 }
 
-/// Recorded from the generator before Biomes could declare surface features.
+const RECORDED_V3: [&str; 4] = [
+    "3112f65200e9db56ef900f375b68980c6ee8d8faaedac301f81313af0e4cd4db",
+    "3e4fbe12a76219faf6ac37255373e917b99c090ccb3d06bf220b62c4aa2919e3",
+    "0e024edda2287acbc442ab793da892ce77d71db0007e0f50ff24d9c0223116cb",
+    "87a4ec8a7a7ae89aa0431bd5c214528472c3a68774d1b2564dd950a59faca15b",
+];
+
+/// Recorded from version 2 before Biomes could declare surface features.
 const RECORDED: [&str; 4] = [
     "0db202cb8cb72b310ae9a68e30cde16faba7020f3c47067d2a1667992447f738",
     "96a265785ad001567cdc3f010e3e4fe8e0cd9373ef3cf501bd01e0f375d3bbb5",
@@ -150,7 +160,16 @@ const RECORDED: [&str; 4] = [
 
 #[test]
 fn a_world_whose_biomes_declare_no_features_makes_the_recorded_chunks() {
-    assert_eq!(digests(biome_world()), RECORDED);
+    assert_eq!(digests(biome_world()), RECORDED_V3);
+}
+
+#[test]
+fn a_version_2_world_whose_biomes_declare_no_features_makes_the_recorded_chunks() {
+    let v2 = WorldgenParams {
+        generator: 2,
+        ..biome_world()
+    };
+    assert_eq!(digests(v2), RECORDED);
 }
 
 fn mapping() -> Mapping {
@@ -181,8 +200,8 @@ fn a_snapshot_whose_biomes_have_no_features_restores_to_the_recorded_chunks() {
     assert_eq!(biomes.len(), 3);
     assert!(biomes.iter().all(|b| b.get("surface_features").is_none()));
     let reopened: Generation = serde_json::from_value(json).unwrap();
-    let params = reopened.restore(&mapping(), 2).unwrap();
-    assert_eq!(digests(params), RECORDED);
+    let params = reopened.restore(&mapping(), 3).unwrap();
+    assert_eq!(digests(params), RECORDED_V3);
 }
 
 #[test]
@@ -262,7 +281,8 @@ fn plain(features: &[SurfaceFeature]) -> WorldgenParams {
         caves: None,
         smoothing: None,
         biomes: BiomeTable::new(&[featured(biome("t:plain", 0.5, None, None), features)]).unwrap(),
-        ..tesserae_core::testgen::world_params()
+        water: None,
+        ..tesserae_core::testgen::world_params_v3()
     }
 }
 
@@ -304,7 +324,9 @@ fn generation_is_deterministic_and_follows_the_seed() {
 
 /// A 4 m spacing at 4 m Voxels is every column, so each column that may hold a feature must, and
 /// the generator's every other pass is in play: caves, smoothing, a lake and Biome grounds. Lifted,
-/// the band crosses a Chunk's top, so some features stand in the Chunk above their ground.
+/// the band crosses a Chunk's top, so some features stand in the Chunk above their ground; dry,
+/// since the Chunk above asks whether a tunnel opened the ground without knowing that version 3
+/// keeps tunnels shut beside the sea.
 #[test]
 fn a_feature_stands_on_every_full_surface_voxel_of_its_biome_and_nowhere_else() {
     let size = 4.0;
@@ -317,11 +339,8 @@ fn a_feature_stands_on_every_full_surface_voxel_of_its_biome_and_nowhere_else() 
     ])
     .unwrap();
     let lifted = WorldgenParams {
-        sea_level_m: params.sea_level_m + 88.0,
-        water: params.water.map(|w| WaterParams {
-            level_m: w.level_m + 88.0,
-            ..w
-        }),
+        sea_level_m: params.sea_level_m + 100.0,
+        water: None,
         ..params
     };
     for (seed, params) in [(SEEDS[0], params), (SEEDS[1], params), (SEEDS[0], lifted)] {

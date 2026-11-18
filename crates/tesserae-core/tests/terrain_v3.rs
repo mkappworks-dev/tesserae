@@ -20,7 +20,8 @@ fn v3() -> WorldgenParams {
         sea_level_m: 24.0,
         relief_m: 24.0,
         landforms: landforms(),
-        ..tesserae_core::testgen::world_params()
+        water: None,
+        ..tesserae_core::testgen::world_params_v3()
     }
 }
 

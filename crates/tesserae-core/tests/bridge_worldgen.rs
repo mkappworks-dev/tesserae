@@ -5,10 +5,13 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 
 use tesserae_core::template::{Cell, Template, Turn};
+use tesserae_core::terrain::LandformParams;
 use tesserae_core::{
     Biome, BiomeName, BiomeStructure, BiomeTable, CHUNK_SIZE, Chunk, ClimateParams, MaterialId,
     SurfaceFeatures, Voxel, WaterParams, Worldgen, WorldgenParams,
 };
+
+mod common;
 
 const DECK: MaterialId = 241;
 const MARK: MaterialId = 242;
@@ -20,7 +23,7 @@ const SOLID: [MaterialId; 4] = [DECK, MARK, RAIL, PIER];
 const SEED: u64 = 0x7e55_e2ae_0000_0001;
 const SIZES: [f32; 3] = [1.0, 0.5, 0.25];
 const SIZE_I: i32 = CHUNK_SIZE as i32;
-/// Where the scans look for bridges, each side of the origin.
+/// Where the scans look for bridges, each side of [`centre_m`].
 const HALF_M: f32 = 128.0;
 const SPAN: usize = 15;
 
@@ -68,14 +71,16 @@ fn spanning() -> Template {
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum Land {
-    /// Hills and valleys, no water.
+    /// Hills and river valleys, no water.
     Dry,
-    /// The same, its valleys' floors under water.
+    /// The same, its rivers in their valleys.
     Wet,
     /// Ground that rises and falls by less than a gap.
     Flat,
 }
 
+/// Without overhangs, whose rock a gap is not measured by, so the ground under a span is the
+/// ground the generator measured.
 fn params(structures: &[BiomeStructure], land: Land) -> WorldgenParams {
     let base = WorldgenParams {
         relief_m: if land == Land::Flat { 1.5 } else { 32.0 },
@@ -96,14 +101,23 @@ fn params(structures: &[BiomeStructure], land: Land) -> WorldgenParams {
             surface_features: SurfaceFeatures::NONE.with_structures(structures).unwrap(),
         }])
         .unwrap(),
-        ..tesserae_core::testgen::world_params()
+        water: None,
+        landforms: LandformParams {
+            overhangs: false,
+            ..LandformParams::default()
+        },
+        ..tesserae_core::testgen::world_params_v3()
     };
-    WorldgenParams {
+    let params = WorldgenParams {
         water: (land == Land::Wet).then(|| WaterParams {
-            level_m: base.sea_level_m + base.relief_m * 5.0 / 12.0,
+            level_m: base.sea_level_m,
             material: tesserae_core::testgen::fixtures().water,
         }),
         ..base
+    };
+    match land {
+        Land::Flat => common::lowland(params),
+        _ => params,
     }
 }
 
@@ -113,11 +127,25 @@ const ROW: BiomeStructure = BiomeStructure {
     chance: 1.0,
 };
 
+/// The first river well inland on a coarse walk: version 3's valleys narrow enough to bridge are
+/// its rivers' cuts, dry where the World has no water. A whole number of 1 m Chunks, so it is a
+/// Chunk corner at every size.
+fn centre_m() -> [f32; 2] {
+    let bare = Worldgen::new(SEED, 1.0, params(&[], Land::Wet));
+    let inland_m = bare.params().sea_level_m + 20.0;
+    let (x_m, z_m) = (-60..60)
+        .flat_map(|i| (-60..60).map(move |j| (i as f32 * 97.0, j as f32 * 89.0)))
+        .find(|&(x, z)| bare.water_surface_m(x, z).is_some_and(|w| w > inland_m))
+        .expect("a river");
+    [x_m, z_m].map(|m| (m / SIZE_I as f32).floor() * SIZE_I as f32)
+}
+
 /// A World with the Template listed and the same World without, Chunk by Chunk.
 struct Probe {
     with: Worldgen,
     bare: Worldgen,
     bare_chunks: RefCell<HashMap<[i32; 3], Chunk>>,
+    centre_m: [f32; 2],
 }
 
 impl Probe {
@@ -127,19 +155,39 @@ impl Probe {
                 .with_templates(std::slice::from_ref(&template)),
             bare: Worldgen::new(SEED, size, params(&[], land)),
             bare_chunks: RefCell::default(),
+            centre_m: centre_m(),
         }
     }
 
-    /// Every cell in `HALF_M` of the origin the Template changed, generated in one order or its
+    /// The Chunk holding the centre, along x and z.
+    fn centre_chunk(&self) -> [i32; 2] {
+        let chunk_m = SIZE_I as f32 * self.with.voxel_size();
+        self.centre_m.map(|m| (m / chunk_m) as i32)
+    }
+
+    /// Every cell in `HALF_M` of the centre the Template changed, generated in one order or its
     /// reverse, as it is with the Template and without.
     fn changed(&self, reverse: bool) -> HashMap<[i32; 3], (Voxel, Voxel)> {
         let chunk_m = SIZE_I as f32 * self.with.voxel_size();
-        let (low, high) = self.with.surface_bounds_m();
-        let rows = (low / chunk_m).floor() as i32 - 1..=(high / chunk_m).ceil() as i32 + 1;
+        // The ground's own band here, and room for a Template's height above and its piers below.
+        let (mut low, mut high) = (f32::MAX, f32::MIN);
+        for i in -32..=32 {
+            for j in -32..=32 {
+                let [x, z] = [i, j].map(|k| k as f32 * HALF_M / 32.0);
+                let h = self
+                    .bare
+                    .surface_height_m(self.centre_m[0] + x, self.centre_m[1] + z);
+                (low, high) = (low.min(h), high.max(h));
+            }
+        }
+        let rows =
+            ((low - 24.0) / chunk_m).floor() as i32..=((high + 24.0) / chunk_m).ceil() as i32;
         let reach = (HALF_M / chunk_m).ceil() as i32;
+        let [mx, mz] = self.centre_chunk();
         let mut coords: Vec<[i32; 3]> = rows
             .flat_map(|cy| {
-                (-reach..reach).flat_map(move |cz| (-reach..reach).map(move |cx| [cx, cy, cz]))
+                (mz - reach..mz + reach)
+                    .flat_map(move |cz| (mx - reach..mx + reach).map(move |cx| [cx, cy, cz]))
             })
             .collect();
         if reverse {
@@ -191,6 +239,7 @@ struct Found {
 /// Each bridge, from the corner of each block of `MARK` Voxels: the turn whose deck, laid from
 /// there, the World holds.
 fn bridges(changed: &HashMap<[i32; 3], (Voxel, Voxel)>, size: f32) -> Vec<Found> {
+    let centre = centre_m().map(|m| (m / size) as i32);
     let is = |at: [i32; 3], m| changed.get(&at).is_some_and(|(w, _)| w.material() == m);
     let template = spanning();
     let mut found = Vec::new();
@@ -199,7 +248,7 @@ fn bridges(changed: &HashMap<[i32; 3], (Voxel, Voxel)>, size: f32) -> Vec<Found>
             continue;
         }
         // The scan stops at `HALF_M`, so a bridge near it may be cut.
-        if [x, z]
+        if [x - centre[0], z - centre[1]]
             .iter()
             .any(|&g| g.abs() as f32 * size > HALF_M - 16.0)
         {
@@ -248,7 +297,6 @@ fn crossings(land: Land) -> usize {
     let mut wet = 0;
     for size in SIZES {
         let probe = Probe::new(size, spanning(), land);
-        let level_m = probe.bare.water().map_or(f32::MIN, |w| w.level_m);
         let changed = probe.changed(false);
         assert_eq!(changed, probe.changed(true), "{size} m: order");
         let found = bridges(&changed, size);
@@ -286,6 +334,14 @@ fn crossings(land: Land) -> usize {
                     .clone()
                     .any(|y| probe.bare_at([x, y, z]).material() == water)
             };
+            // As the generator asks it: the ground below its column's water level, which may lie
+            // within a Voxel of it and so show no water Voxel.
+            let under_water = |[x, z]: [i32; 2]| {
+                probe
+                    .bare
+                    .water_surface_m(x as f32 * size, z as f32 * size)
+                    .is_some()
+            };
             let span_m = span as f32 * size;
             // The ground rules ask whole metres.
             let middle_third = (0..span)
@@ -303,7 +359,7 @@ fn crossings(land: Land) -> usize {
                     let top = ground(column(k, j)) as f32 * size;
                     let gap = (deck + 1) as f32 * size - top;
                     assert!(
-                        gap > 2.0 || top < level_m,
+                        gap > 2.0 || under_water(column(k, j)),
                         "{size} m: no gap under the middle at {f:?}"
                     );
                 }

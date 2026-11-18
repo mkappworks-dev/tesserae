@@ -27,6 +27,8 @@ const CROP: [MaterialId; 3] = [191, 192, 193];
 const FURROW: MaterialId = 194;
 const FIELD: MaterialId = 195;
 
+mod common;
+
 const SEED: u64 = 0x7e55_e2ae_0000_0001;
 const SIZES: [f32; 3] = [1.0, 0.5, 0.25];
 const SIZE_I: i32 = CHUNK_SIZE as i32;
@@ -148,8 +150,9 @@ fn village() -> Settlement {
     }
 }
 
+/// Low, gentle land, so most draws stand.
 fn plain(features: SurfaceFeatures) -> WorldgenParams {
-    WorldgenParams {
+    common::lowland(WorldgenParams {
         relief_m: 3.0,
         caves: None,
         smoothing: None,
@@ -167,8 +170,9 @@ fn plain(features: SurfaceFeatures) -> WorldgenParams {
             surface_features: features,
         }])
         .unwrap(),
-        ..tesserae_core::testgen::world_params()
-    }
+        water: None,
+        ..tesserae_core::testgen::world_params_v3()
+    })
 }
 
 fn listing(settlements: bool) -> SurfaceFeatures {
@@ -771,10 +775,12 @@ fn no_single_structure_field_or_tree_stands_in_a_settlement_and_no_structure_in_
     );
 }
 
-/// Hills enough that Plots are cut and filled and roads climb.
+/// Hills enough that Plots are cut and filled and roads climb: version 3's own land, its relief
+/// doubled since the scans fall on the sea floor, where version 3 tempers it.
 fn hilly(features: SurfaceFeatures) -> WorldgenParams {
     WorldgenParams {
-        relief_m: 12.0,
+        relief_m: 24.0,
+        landforms: tesserae_core::testgen::world_params_v3().landforms,
         ..plain(features)
     }
 }
@@ -974,9 +980,11 @@ fn a_road_never_rises_more_than_a_slab_per_step() {
 fn wilderness_structures_keep_the_strict_rule_and_are_never_levelled() {
     let half_m = 96.0;
     let size = 1.0;
-    let hilly_crowded = |s| WorldgenParams {
-        relief_m: 12.0,
-        ..crowded(s)
+    let hilly_crowded = |s| {
+        common::lowland(WorldgenParams {
+            relief_m: 12.0,
+            ..crowded(s)
+        })
     };
     let laid = Laid::scan(size, hilly_crowded, half_m);
     assert!(!laid.centres_within(half_m).is_empty());
@@ -1565,16 +1573,45 @@ fn digest(changed: &HashMap<[i32; 3], (Voxel, Voxel)>) -> u64 {
     hash
 }
 
+/// Version 3's layout of a fixed size, recorded when the tests moved onto it from version 2's
+/// below.
+#[test]
+fn a_fixed_size_settlement_lays_out_exactly_as_before_ranges() {
+    assert_eq!(
+        fixed_size_digests(3),
+        [0x183e_8cc7_22d6_c831, 0x70e7_a31c_5752_aafc]
+    );
+}
+
 /// The digests are what the generator laid before Settlements took size ranges, re-pinned when
 /// approach paths ran on as trails (ticket 27): a fixed size still lays out as it did then.
 #[test]
-fn a_fixed_size_settlement_lays_out_exactly_as_before_ranges() {
+fn a_fixed_size_settlement_lays_out_exactly_as_before_ranges_in_version_2() {
+    assert_eq!(
+        fixed_size_digests(2),
+        [0x6418_4939_4e1a_2ea1, 0xb08f_816e_daa9_9247]
+    );
+}
+
+/// Version 2's cases are its own hilly and plain land, relief 12 and 3.
+fn fixed_size_digests(version: u32) -> Vec<u64> {
     let wide = Settlement {
         radius_m: 64.0,
         radius_min_m: 64.0,
         plots: 24,
         plots_min: 24,
         ..village()
+    };
+    let hilly = |features| match version {
+        2 => WorldgenParams {
+            relief_m: 12.0,
+            ..plain(features)
+        },
+        _ => hilly(features),
+    };
+    let pinned = |params| WorldgenParams {
+        generator: version,
+        ..params
     };
     let cases = [
         (village(), hilly(listing(true)), hilly(listing(false)), 96.0),
@@ -1585,15 +1622,14 @@ fn a_fixed_size_settlement_lays_out_exactly_as_before_ranges() {
             160.0,
         ),
     ];
-    let digests: Vec<u64> = cases
+    cases
         .into_iter()
         .map(|(settlement, with, bare, half_m)| {
-            let with = generator(1.0, with, settlement.clone());
-            let bare = generator(1.0, bare, settlement);
+            let with = generator(1.0, pinned(with), settlement.clone());
+            let bare = generator(1.0, pinned(bare), settlement);
             digest(&changed(&with, &bare, half_m, false))
         })
-        .collect();
-    assert_eq!(digests, [0x6418_4939_4e1a_2ea1, 0xb08f_816e_daa9_9247]);
+        .collect()
 }
 
 const OTHER_PATH: MaterialId = 195;
