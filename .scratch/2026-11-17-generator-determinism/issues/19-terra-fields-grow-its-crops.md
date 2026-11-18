@@ -51,7 +51,6 @@ and switch the test to the fields-only comparison.
 - Variants were searched in-test by rewriting the loaded params' crop fields,
   so no Terra rebuild per try. Dry fields also passed but were left out: dry
   land is cactus and palm, not a farm.
-- The full `cargo test -p tesserae -p tesserae-mods --features tesserae/dev`
-  run fails only ticket 20's two tests
-  (`parts_follow_properties_and_missing_kinds_are_omitted`,
-  `every_mesh_carries_the_sight_lines_of_its_chunk_as_it_stands`).
+- `cargo test -p tesserae -p tesserae-mods --features tesserae/dev` passes
+  after merging `tech/generator-determinism` at b0171d5b (1676 and 310 tests);
+  before it, only ticket 20's two failures.
