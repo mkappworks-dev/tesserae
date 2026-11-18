@@ -1,6 +1,6 @@
 # 01: Retention
 
-Status: ready-for-agent
+Status: done
 
 Spec: [Save: retention, incremental commits and binary Chunk records](../spec.md).
 

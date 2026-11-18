@@ -1,6 +1,6 @@
 # 02: Incremental Commits
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 01
 

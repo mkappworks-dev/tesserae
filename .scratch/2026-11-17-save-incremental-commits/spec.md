@@ -1,4 +1,4 @@
-Status: ready-for-agent
+Status: done
 
 # Save: retention, incremental commits and binary Chunk records
 

@@ -1,6 +1,6 @@
 # 03: Binary records and `save dump`
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 02
 
