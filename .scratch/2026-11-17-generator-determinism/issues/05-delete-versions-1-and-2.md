@@ -4,7 +4,7 @@ Status: ready-for-agent
 
 Spec: [Generator determinism](../spec.md).
 
-Blocked by: 02, 03, 04, 15, 16, 17.
+Blocked by: 02, 03, 04, 15, 16, 17, 18.
 
 ## What to build
 
@@ -25,3 +25,6 @@ change.
 - [ ] The version 3 digests are unchanged.
 - [ ] No doc outside ADRs and `.scratch/` describes version 1 or 2 as
       generating.
+- [ ] No test is pinned to version 1 or 2. The one exception,
+      `each_biome_scatters_its_trees_at_its_density_class`, runs under version 3
+      ignored with a reason naming ticket 13.
