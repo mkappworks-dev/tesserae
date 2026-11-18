@@ -24,11 +24,6 @@ jobs:
   determinism:
     name: Determinism (${{ matrix.target }})
     runs-on: ${{ matrix.runner }}
-    # The digests were recorded from today's std maths on arm64 macOS, so another
-    # target may legitimately differ until ticket 12 of
-    # .scratch/2026-11-17-generator-determinism moves generation onto libm. Ticket 12
-    # removes this allowance and makes the job a required check.
-    continue-on-error: true
     strategy:
       fail-fast: false
       matrix:
