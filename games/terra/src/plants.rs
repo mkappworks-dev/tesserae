@@ -108,12 +108,26 @@ pub fn temperate() -> Vec<SurfaceFeature> {
 pub fn temperate_fields() -> Vec<CropField> {
     let crops = [
         ("crops:wheat", 6.0),
+        ("crops:carrot", 3.0),
+        ("crops:potato", 2.0),
+    ];
+    vec![
+        crop_field(&crops, (6.0, 12.0), 64.0, Some(48.0)),
+        crop_field(&crops, (6.0, 12.0), 96.0, None),
+    ]
+}
+
+/// Wheat fields on the dry grassland too, laid out as temperate's: temperate ground is a twentieth
+/// of the land, too little to stand all three crops near spawn on its own.
+pub fn savanna_fields() -> Vec<CropField> {
+    let crops = [
+        ("crops:wheat", 7.0),
         ("crops:carrot", 2.0),
         ("crops:potato", 2.0),
     ];
     vec![
-        crop_field(&crops, (6.0, 12.0), 72.0, Some(40.0)),
-        crop_field(&crops, (6.0, 12.0), 112.0, None),
+        crop_field(&crops, (6.0, 12.0), 64.0, Some(48.0)),
+        crop_field(&crops, (6.0, 12.0), 96.0, None),
     ]
 }
 
