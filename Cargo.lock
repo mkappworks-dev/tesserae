@@ -6067,6 +6067,7 @@ dependencies = [
  "criterion",
  "flate2",
  "getrandom 0.4.3",
+ "libm",
  "serde",
  "serde_json",
  "sha2 0.11.1",

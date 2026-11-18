@@ -34,8 +34,9 @@ pub(super) fn submerged(camera_y: f32, fluid: Option<FluidSurface>, was_submerge
     camera_y < leave_at
 }
 
-/// How far the clearest fluid (dimming 0) is seen through.
-const MAX_RANGE_M: f32 = 40.0;
+/// How far the clearest fluid (dimming 0) is seen through: far enough that a sea floor runs on
+/// toward the horizon.
+const MAX_RANGE_M: f32 = 160.0;
 
 /// Floor, so the densest fluid is still a view and not a flat colour.
 const MIN_RANGE_M: f32 = 1.5;
@@ -46,7 +47,8 @@ const UNPAINTED_HUE: [f32; 3] = [0.1, 0.25, 0.4];
 /// The distance at which the fluid hides the view, from the light dimming it
 /// already has: no new field, and a fluid that stops light stops sight.
 fn range_m(dimming: u8) -> f32 {
-    (MAX_RANGE_M / (1.0 + f32::from(dimming))).max(MIN_RANGE_M)
+    // Squared, so a fluid that dims light at all is soon murky: mud is seen through 3 m.
+    (MAX_RANGE_M / (1.0 + f32::from(dimming)).powi(2)).max(MIN_RANGE_M)
 }
 
 /// Fog that ends in `hue` at the fluid's range. `sky` is the colour behind

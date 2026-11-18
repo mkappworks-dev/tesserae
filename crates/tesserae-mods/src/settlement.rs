@@ -2,7 +2,7 @@
 //! World's Templates once all have declared.
 
 use tesserae_core::settlement::{
-    Building, DEFAULT_SETTLEMENT_MARGIN_M, MAX_SETTLEMENTS, PlotRule, Settlement,
+    Building, DEFAULT_SETTLEMENT_MARGIN_M, MAX_SETTLEMENTS, Outskirts, PlotRule, Settlement,
 };
 use tesserae_core::shape::Orientation;
 use tesserae_core::{MaterialId, SHAPE_FULL_CUBE, ShapeId, Tables, Voxel};
@@ -77,7 +77,8 @@ impl DeclaredSettlements {
                 if let Some(loot) = &def.loot {
                     crate::loot::check(loot, items).map_err(|e| fail(format!("loot: {e}")))?;
                 }
-                for plot in &def.templates {
+                let outskirts = def.outskirts.iter().flatten().flat_map(|o| &o.templates);
+                for plot in def.templates.iter().chain(outskirts) {
                     if let Some(loot) = &plot.loot {
                         crate::loot::check(loot, items)
                             .map_err(|e| fail(format!("`{}` loot: {e}", plot.template)))?;
@@ -141,24 +142,38 @@ fn settlement(
             door: tables.templates[at].door_cell(is_door),
         })
     };
-    let rules = def
-        .templates
+    let rules_of = |plots: &[content::SettlementPlot]| {
+        plots
+            .iter()
+            .map(|p| {
+                Ok(PlotRule {
+                    building: building(&p.template)?,
+                    weight: p.weight,
+                    min: p.min,
+                    max: p.max,
+                    loot: p
+                        .loot
+                        .as_ref()
+                        .map(crate::loot::table)
+                        .transpose()
+                        .map_err(|e| format!("`{}` loot: {e}", p.template))?,
+                })
+            })
+            .collect::<Result<Vec<_>, String>>()
+    };
+    let rules = rules_of(&def.templates)?;
+    let outskirts = def
+        .outskirts
         .iter()
-        .map(|p| {
-            Ok(PlotRule {
-                building: building(&p.template)?,
-                weight: p.weight,
-                min: p.min,
-                max: p.max,
-                loot: p
-                    .loot
-                    .as_ref()
-                    .map(crate::loot::table)
-                    .transpose()
-                    .map_err(|e| format!("`{}` loot: {e}", p.template))?,
+        .flatten()
+        .map(|o| {
+            Ok::<_, String>(Outskirts {
+                rules: rules_of(&o.templates).map_err(|e| format!("outskirts: {e}"))?,
+                count: (o.count_min, o.count_max),
+                chance: o.chance.unwrap_or(1.0),
             })
         })
-        .collect::<Result<Vec<_>, String>>()?;
+        .collect::<Result<Vec<_>, _>>()?;
     let material = solid(&def.path, registry, tables).map_err(|e| format!("path: {e}"))?;
     let shape = match &def.path_shape {
         Some(shape) => registry
@@ -186,6 +201,7 @@ fn settlement(
             .map(crate::loot::table)
             .transpose()
             .map_err(|e| format!("loot: {e}"))?,
+        outskirts,
     };
     settlement.validate(&tables.templates)?;
     Ok(settlement)

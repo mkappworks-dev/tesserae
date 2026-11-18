@@ -1491,6 +1491,8 @@ fn a_mod_that_is_not_the_game_may_not_declare_survival() {
 fn biome(name: &str, temperature: f32, humidity: f32) -> content::BiomeDef {
     content::BiomeDef {
         soundscape: None,
+        selectors: None,
+        strata: None,
         name: name.into(),
         temperature,
         humidity,
@@ -1591,6 +1593,103 @@ fn biomes_and_ores_append_in_load_order_with_ores_naming_any_mods_biome() {
 }
 
 #[test]
+fn a_biomes_selectors_resolve_in_order_and_a_bad_range_is_refused_naming_the_mod() {
+    let selected = |relief: Option<f32>, altitude: Option<(f32, f32)>| {
+        let mut b = biome("alpine", 0.2, 0.3);
+        b.selectors = Some(content::BiomeSelectors {
+            altitude: altitude.map(|(min, max)| content::SelectorRange { min, max }),
+            coast: None,
+            erosion: None,
+            river: None,
+            relief,
+        });
+        b
+    };
+    let mut load = Load::new();
+    let (biomes, _) = resolved_biomes(
+        &mut load,
+        &[(
+            "a",
+            with_biomes(
+                &[],
+                vec![
+                    selected(Some(1.5), Some((60.0, 900.0))),
+                    biome("plain", 0.5, 0.5),
+                ],
+                vec![],
+            ),
+        )],
+    )
+    .unwrap();
+    let [alpine, plain] = biomes.selectors() else {
+        panic!("two Biomes");
+    };
+    assert_eq!(
+        (alpine.altitude_m, alpine.relief),
+        (Some([60.0, 900.0]), Some(1.5))
+    );
+    assert_eq!(*plain, tesserae_core::BiomeSelectors::default());
+
+    for bad in [selected(None, Some((9.0, 1.0))), selected(Some(7.0), None)] {
+        let err = resolved_biomes(
+            &mut Load::new(),
+            &[("a", with_biomes(&[], vec![bad], vec![]))],
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("selectors"), "{err}");
+    }
+}
+
+#[test]
+fn a_biomes_strata_resolve_to_material_ids_and_a_bad_stratum_is_refused() {
+    let bedded = |material: &str, depth_min_m: f32, depth_max_m: f32| content::BiomeDef {
+        strata: Some(vec![content::BiomeStratum {
+            material: material.into(),
+            depth_min_m,
+            depth_max_m,
+        }]),
+        ..biome("dry", 0.8, 0.1)
+    };
+    let mut load = Load::new();
+    let (biomes, _) = resolved_biomes(
+        &mut load,
+        &[(
+            "a",
+            with_biomes(
+                &["clay"],
+                vec![bedded("a:clay", 4.0, 9.0), biome("wet", 0.2, 0.9)],
+                vec![],
+            ),
+        )],
+    )
+    .unwrap();
+    let clay = load.registry.id_of(Kind::Material, "a:clay").unwrap() as u16;
+    let [dry, wet] = biomes.strata() else {
+        panic!("two Biomes");
+    };
+    assert_eq!(
+        dry.as_slice(),
+        [tesserae_core::Stratum {
+            material: clay,
+            depth_m: [4.0, 9.0],
+        }]
+    );
+    assert!(wet.as_slice().is_empty());
+    for (bad, want) in [
+        (bedded("a:clay", 9.0, 4.0), "strata"),
+        (bedded("a:clay", 4.0, 120.0), "strata"),
+        (bedded("a:none", 4.0, 9.0), "a:none"),
+    ] {
+        let err = resolved_biomes(
+            &mut Load::new(),
+            &[("a", with_biomes(&["clay"], vec![bad], vec![]))],
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains(want), "{err}");
+    }
+}
+
+#[test]
 fn a_biomes_ground_resolves_to_material_ids_and_an_omitted_ground_stays_none() {
     let mut load = Load::new();
     let (biomes, _) = resolved_biomes(
@@ -1603,6 +1702,8 @@ fn a_biomes_ground_resolves_to_material_ids_and_an_omitted_ground_stays_none() {
                     vec![
                         content::BiomeDef {
                             soundscape: None,
+                            selectors: None,
+                            strata: None,
                             ground: ground("a:sand", "a:clay", "a:dust"),
                             ..biome("dry", 0.8, 0.1)
                         },
@@ -1618,6 +1719,8 @@ fn a_biomes_ground_resolves_to_material_ids_and_an_omitted_ground_stays_none() {
                     &[],
                     vec![content::BiomeDef {
                         soundscape: None,
+                        selectors: None,
+                        strata: None,
                         ground: ground("a:dust", "a:dust", "a:sand"),
                         ..biome("cold", 0.1, 0.4)
                     }],
@@ -1660,6 +1763,8 @@ fn a_biomes_sky_and_fog_resolve_as_a_pair_and_an_omitted_pair_stays_none() {
                 vec![
                     content::BiomeDef {
                         soundscape: None,
+                        selectors: None,
+                        strata: None,
                         sky_fog: Some(content::SkyFog {
                             sky: (126, 146, 168),
                             fog: (136, 160, 190),
@@ -1695,12 +1800,16 @@ fn a_biomes_cave_scale_resolves_and_an_omitted_one_stays_none() {
                 vec![
                     content::BiomeDef {
                         soundscape: None,
+                        selectors: None,
+                        strata: None,
                         cave_scale: Some(0.0),
                         ..biome("flat", 0.8, 0.1)
                     },
                     biome("plain", 0.5, 0.5),
                     content::BiomeDef {
                         soundscape: None,
+                        selectors: None,
+                        strata: None,
                         cave_scale: Some(2.5),
                         ..biome("holey", 0.2, 0.9)
                     },
@@ -1725,6 +1834,8 @@ fn a_bad_cave_scale_names_the_mod_that_declared_it() {
                     &[],
                     vec![content::BiomeDef {
                         soundscape: None,
+                        selectors: None,
+                        strata: None,
                         cave_scale: Some(scale),
                         ..biome("odd", 0.5, 0.5)
                     }],
@@ -1773,6 +1884,8 @@ fn a_biomes_surface_features_resolve_to_any_mods_solid_in_order() {
                     vec![
                         content::BiomeDef {
                             soundscape: None,
+                            selectors: None,
+                            strata: None,
                             surface_features: vec![
                                 feature("b:gourd", 24.0),
                                 feature("a:melon", 16.0),
@@ -1805,6 +1918,8 @@ fn a_bad_surface_feature_names_the_mod_and_the_field() {
             &["melon"],
             vec![content::BiomeDef {
                 soundscape: None,
+                selectors: None,
+                strata: None,
                 surface_features: features,
                 ..biome("field", 0.5, 0.5)
             }],
@@ -1901,6 +2016,8 @@ fn a_bad_surface_feature_names_the_mod_and_the_field() {
                 &["melon"],
                 vec![content::BiomeDef {
                     soundscape: None,
+                    selectors: None,
+                    strata: None,
                     surface_features: vec![ok],
                     ..biome("field", 0.5, 0.5)
                 }],
@@ -1932,6 +2049,8 @@ fn a_bad_biome_ground_names_the_mod_and_the_field() {
             &["rock"],
             vec![content::BiomeDef {
                 soundscape: None,
+                selectors: None,
+                strata: None,
                 ground,
                 ..biome("dry", 0.5, 0.5)
             }],

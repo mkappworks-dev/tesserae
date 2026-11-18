@@ -20,6 +20,7 @@ const HAMLET: Village = Village {
         plot("lens_kiln", 1.0, 0, 1).stocked(&KILN_LOOT),
     ],
     loot: &VILLAGE_LOOT,
+    water: (0.7, (1, 2)),
 };
 
 const VILLAGE: Village = Village {
@@ -44,6 +45,7 @@ const VILLAGE: Village = Village {
         plot("glass_hall", 1.0, 0, 2),
     ],
     loot: &VILLAGE_LOOT,
+    water: (0.9, (1, 3)),
 };
 
 /// A village keeps glowberries, glass and the odd crystal.

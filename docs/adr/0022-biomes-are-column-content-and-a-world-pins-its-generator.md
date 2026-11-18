@@ -139,3 +139,18 @@ freezes what generation reads of the Plant, by Material and Shape name: its
 Stages, a column's Material, height and fluid, a tree's Materials, size, fruit
 and vines. A World therefore never changes when a Game later edits or drops the
 Plant. A `climber` and a column growing down cannot be a feature.
+
+## Biomes may shape relief within their landform
+
+Amended 2026-11-16, from step 17 (Generator version 3). A Biome may declare a
+`relief` scale, and a roughness, that multiply the detail octaves of its
+landform. It still cannot move the base surface or the World's vertical band
+([ADR-0030](0030-generator-version-3-is-a-layered-field-stack-in-a-declared-band.md)),
+so what the first paragraph protects holds: coarse levels, the Server's
+streaming band and open-sky relight read the engine's fields, never a Biome.
+
+- **Detail only.** Dunes in a desert and rolling in a plain come from the
+  multiplier; a mountain is a mountain in every Biome.
+- **Blended.** The multiplier eases across a border like cave tuning, because a
+  step in relief is visible.
+- **Version 3 only.** Versions 1 and 2 keep a Biome that never changes height.

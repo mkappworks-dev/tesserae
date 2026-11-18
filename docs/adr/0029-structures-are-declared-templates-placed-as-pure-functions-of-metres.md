@@ -70,7 +70,7 @@ journal's cap counts cells rather than entries.
 
 ## Not decided here
 
-Blueprints and Sites, which build a Structure over time from Items (step 20b),
+Blueprints and Sites, which build a Structure over time from Items (step 23),
 and loot, entities, fluids, weathering variants and mirroring. The format
 reserves room for them, and each needs Server machinery that belongs to a later
 step. Existing trees stay parametric
@@ -104,7 +104,11 @@ are where the build is narrower or more exact than they say.
   checked. Only the Templates a World's Biomes list, alone or in a Settlement,
   are checked, since only a Creative Player can place another, and a listed
   Settlement's path Material is checked too. A Grown Material or a Door's open
-  Material is refused in the shared validator before Obtainable is worked out.
+  Material is refused in the shared validator before Obtainable is worked out,
+  except a crop's later Stage: it is a field planted earlier, grows and is
+  harvested like any crop, and is Obtainable when its first Stage is. A tree's
+  trunk, canopy and fruit stay refused, since Felling would take them for a
+  tree.
 - **Generation keeps 48 m round the World origin clear.** No single Structure's
   footprint and no Settlement's disc and margin comes within 48 m of x = 0, z =
   0, where Games build their spawn area, such as Ember's lava vents. The check

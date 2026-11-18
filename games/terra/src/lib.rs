@@ -6,16 +6,18 @@ use exports::tesserae::mods::guest::{
 mod audio;
 mod building;
 mod character;
+mod landforms;
 mod plants;
 mod structures;
 mod templates;
 mod textures;
 
 use tesserae::mods::content::{
-    Appearance, BiomeDef, BurnAfter, BurnEnd, ClimateParams, CombustionDef, FluidDef, FluidState,
-    GroundParams, HeatDef, ItemDef, MarkerIcon, MarkerKindDef, MaterialDef, Occlusion, OreDef,
-    Reactant, ReactionDef, ReactionSide, RecipeDef, RecipeStack, RenderClass, ShapeDef, SkyFog,
-    SurfaceFeature, ToolDef, ToolKind, ViewParams, VoxelUse, VoxelUseKind, WaterParams,
+    Appearance, BiomeDef, BiomeSelectors, BiomeStratum, BurnAfter, BurnEnd, ClimateParams,
+    CombustionDef, FluidDef, FluidState, GroundParams, HeatDef, ItemDef, MarkerIcon, MarkerKindDef,
+    MaterialDef, Occlusion, OreDef, Reactant, ReactionDef, ReactionSide, RecipeDef, RecipeStack,
+    RenderClass, SelectorRange, ShapeDef, SkyFog, SurfaceFeature, ToolDef, ToolKind, ViewParams,
+    VoxelUse, VoxelUseKind, WaterParams,
 };
 use tesserae::mods::types::{Arm, CollisionBox, ConnectDef, NodeBox, Srgba};
 
@@ -180,6 +182,8 @@ impl Guest for Terra {
             soil: "terra:dirt".into(),
             surface: "terra:grass".into(),
         });
+        world.lava = Some("terra:lava".into());
+        world.cave_biomes = Some(landforms::caves());
         // Smaller than the engine's 512 m, so a walk across the stage meets a border.
         world.climate = Some(ClimateParams {
             temperature_size_m: 256.0,
@@ -226,10 +230,12 @@ impl Guest for Terra {
                     solid: false,
                 },
                 solid("brick"),
+                // Clear: sky light reaches the floor of a version 3 sea tens of metres down, and the
+                // underwater fog, which follows dimming, reaches its farthest.
                 MaterialDef {
                     name: "water".into(),
                     emission: 0,
-                    dimming: 2,
+                    dimming: 0,
                     occlusion: Occlusion::SameMaterial,
                     render: RenderClass::Blend,
                     remove_time_s: None,
@@ -255,6 +261,11 @@ impl Guest for Terra {
                 solid("sand"),
                 solid("snow"),
                 solid("iron"),
+                // Veins deep in the rock that a cavern or shaft lays open: the light down there.
+                MaterialDef {
+                    emission: 10,
+                    ..solid("crystal")
+                },
                 solid("melon"),
                 solid("workbench"),
                 solid("chest"),
@@ -283,6 +294,7 @@ impl Guest for Terra {
                 appearance("sand", [214, 196, 140, 255]),
                 appearance("snow", [236, 240, 246, 255]),
                 appearance("iron", [150, 120, 104, 255]),
+                appearance("crystal", [150, 110, 230, 255]),
                 appearance("melon", [84, 150, 56, 255]),
                 appearance("workbench", [214, 190, 140, 255]),
                 appearance("chest", [128, 62, 40, 255]),
@@ -514,6 +526,8 @@ impl Guest for Terra {
             biomes: vec![
                 BiomeDef {
                     soundscape: Some("terra:temperate".into()),
+                    selectors: None,
+                    strata: bedding("temperate"),
                     name: "temperate".into(),
                     temperature: 0.5,
                     humidity: 0.5,
@@ -544,6 +558,8 @@ impl Guest for Terra {
                 },
                 BiomeDef {
                     soundscape: Some("terra:dry".into()),
+                    selectors: None,
+                    strata: bedding("dry"),
                     name: "dry".into(),
                     temperature: 0.7,
                     humidity: 0.3,
@@ -569,6 +585,8 @@ impl Guest for Terra {
                 },
                 BiomeDef {
                     soundscape: Some("terra:cold".into()),
+                    selectors: None,
+                    strata: bedding("cold"),
                     name: "cold".into(),
                     temperature: 0.3,
                     humidity: 0.55,
@@ -590,6 +608,8 @@ impl Guest for Terra {
                 },
                 BiomeDef {
                     soundscape: None,
+                    selectors: None,
+                    strata: bedding("jungle"),
                     name: "jungle".into(),
                     temperature: 0.72,
                     humidity: 0.7,
@@ -607,6 +627,8 @@ impl Guest for Terra {
                 },
                 BiomeDef {
                     soundscape: None,
+                    selectors: None,
+                    strata: bedding("swamp"),
                     name: "swamp".into(),
                     temperature: 0.55,
                     humidity: 0.78,
@@ -628,6 +650,8 @@ impl Guest for Terra {
                 },
                 BiomeDef {
                     soundscape: Some("terra:dry".into()),
+                    selectors: None,
+                    strata: bedding("savanna"),
                     name: "savanna".into(),
                     temperature: 0.78,
                     humidity: 0.5,
@@ -647,7 +671,105 @@ impl Guest for Terra {
                     surface_features: plants::savanna(),
                     loot: Some(structures::biome_loot("savanna")),
                 },
-            ],
+                // Version 3 only: the sea floor, the strand and the high ground, chosen by altitude.
+                // They name a range, so version 3 prefers them where they fit and earlier versions never choose them.
+                BiomeDef {
+                    soundscape: None,
+                    selectors: Some(BiomeSelectors {
+                        altitude: Some(SelectorRange {
+                            min: -1000.0,
+                            max: -0.01,
+                        }),
+                        coast: None,
+                        erosion: None,
+                        river: None,
+                        relief: None,
+                    }),
+                    strata: bedding("ocean"),
+                    name: "ocean".into(),
+                    temperature: 0.5,
+                    humidity: 0.8,
+                    ground: Some(GroundParams {
+                        rock: "terra:stone".into(),
+                        soil: "terra:sand".into(),
+                        surface: "terra:sand".into(),
+                    }),
+                    sky_fog: Some(SkyFog {
+                        sky: (118, 150, 178),
+                        fog: (130, 164, 190),
+                    }),
+                    cave_scale: Some(0.0),
+                    crop_fields: Vec::new(),
+                    structures: Vec::new(),
+                    settlements: Vec::new(),
+                    surface_features: plants::ocean(),
+                    loot: None,
+                },
+                BiomeDef {
+                    soundscape: None,
+                    selectors: Some(BiomeSelectors {
+                        altitude: Some(SelectorRange { min: 0.0, max: 3.0 }),
+                        coast: None,
+                        erosion: None,
+                        river: None,
+                        relief: None,
+                    }),
+                    strata: bedding("beach"),
+                    name: "beach".into(),
+                    temperature: 0.6,
+                    humidity: 0.6,
+                    ground: Some(GroundParams {
+                        rock: "terra:stone".into(),
+                        soil: "terra:sand".into(),
+                        surface: "terra:sand".into(),
+                    }),
+                    sky_fog: Some(SkyFog {
+                        sky: (140, 156, 176),
+                        fog: (160, 176, 196),
+                    }),
+                    cave_scale: None,
+                    crop_fields: Vec::new(),
+                    structures: Vec::new(),
+                    settlements: Vec::new(),
+                    surface_features: Vec::new(),
+                    loot: None,
+                },
+                BiomeDef {
+                    soundscape: Some("terra:cold".into()),
+                    selectors: Some(BiomeSelectors {
+                        altitude: Some(SelectorRange {
+                            min: 90.0,
+                            max: 1000.0,
+                        }),
+                        coast: None,
+                        erosion: None,
+                        river: None,
+                        relief: None,
+                    }),
+                    strata: bedding("alpine"),
+                    name: "alpine".into(),
+                    temperature: 0.25,
+                    humidity: 0.4,
+                    ground: Some(GroundParams {
+                        rock: "terra:stone".into(),
+                        soil: "terra:stone".into(),
+                        surface: "terra:snow".into(),
+                    }),
+                    sky_fog: Some(SkyFog {
+                        sky: (150, 168, 192),
+                        fog: (180, 194, 214),
+                    }),
+                    cave_scale: Some(0.0),
+                    crop_fields: Vec::new(),
+                    structures: Vec::new(),
+                    settlements: Vec::new(),
+                    surface_features: Vec::new(),
+                    loot: None,
+                },
+            ]
+            .into_iter()
+            .chain([landforms::river()])
+            .collect(),
             survival: None,
             sounds: audio::sounds(),
             sound_sets: audio::sets(),
@@ -837,14 +959,24 @@ impl Guest for Terra {
             .into_iter()
             .chain(building::voxel_uses())
             .collect(),
-            ores: vec![OreDef {
-                material: "terra:iron".into(),
-                min_depth_m: 5.0,
-                max_depth_m: 28.0,
-                vein_size_m: 5.0,
-                rarity: 0.1,
-                biomes: Vec::new(),
-            }],
+            ores: vec![
+                OreDef {
+                    material: "terra:iron".into(),
+                    min_depth_m: 5.0,
+                    max_depth_m: 28.0,
+                    vein_size_m: 5.0,
+                    rarity: 0.1,
+                    biomes: Vec::new(),
+                },
+                OreDef {
+                    material: "terra:crystal".into(),
+                    min_depth_m: 24.0,
+                    max_depth_m: 160.0,
+                    vein_size_m: 4.0,
+                    rarity: 0.15,
+                    biomes: Vec::new(),
+                },
+            ],
         }
     }
 
@@ -857,3 +989,29 @@ impl Guest for Terra {
 }
 
 export!(Terra);
+
+/// The rock a Biome beds under its soil, from the top down: a clay seam, a band of paler stone and
+/// basalt deep down; sand over the clay where the ground is dry, and no clay up a mountain.
+fn bedding(biome: &str) -> Option<Vec<BiomeStratum>> {
+    let layer = |material: &str, depth_min_m: f32, depth_max_m: f32| BiomeStratum {
+        material: material.into(),
+        depth_min_m,
+        depth_max_m,
+    };
+    let deep = layer("strata:basalt", 40.0, 96.0);
+    Some(match biome {
+        "dry" | "savanna" | "beach" => vec![
+            layer("terra:sand", 3.0, 8.0),
+            layer("strata:clay", 14.0, 17.0),
+            layer("strata:stone", 22.0, 30.0),
+            deep,
+        ],
+        "alpine" => vec![layer("strata:stone", 6.0, 28.0), deep],
+        "ocean" => vec![layer("strata:clay", 2.0, 6.0), deep],
+        _ => vec![
+            layer("strata:clay", 4.0, 7.0),
+            layer("strata:stone", 12.0, 20.0),
+            deep,
+        ],
+    })
+}

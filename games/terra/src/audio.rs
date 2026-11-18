@@ -266,6 +266,7 @@ pub fn materials() -> Vec<MaterialSound> {
         ("sand", "soft"),
         ("snow", "soft"),
         ("iron", "metal"),
+        ("crystal", "stone"),
         ("melon", "soft"),
     ]
     .map(|(material, set)| (format!("terra:{material}"), set))

@@ -281,6 +281,23 @@ impl Item {
     }
 }
 
+/// A Biome's place in the land, as a data Mod writes it.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+pub(super) struct Selectors {
+    altitude: Option<[f32; 2]>,
+    coast: Option<[f32; 2]>,
+    erosion: Option<[f32; 2]>,
+    river: Option<[f32; 2]>,
+    relief: Option<f32>,
+}
+
+impl From<[f32; 2]> for content::SelectorRange {
+    fn from([min, max]: [f32; 2]) -> Self {
+        Self { min, max }
+    }
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub(super) struct Biome {
@@ -294,6 +311,10 @@ pub(super) struct Biome {
 
     cave_scale: Option<f32>,
 
+    selectors: Option<Selectors>,
+
+    strata: Option<Vec<Stratum>>,
+
     #[serde(default)]
     surface_features: Vec<SurfaceFeature>,
     #[serde(default)]
@@ -304,6 +325,14 @@ pub(super) struct Biome {
     settlements: Vec<BiomeSettlement>,
     loot: Option<super::settlement::Loot>,
     soundscape: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+struct Stratum {
+    material: String,
+    depth_min_m: f32,
+    depth_max_m: f32,
 }
 
 #[derive(Deserialize)]
@@ -368,7 +397,7 @@ struct Clump {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
-struct SkyFog {
+pub(super) struct SkyFog {
     #[serde(deserialize_with = "rgb")]
     sky: [u8; 3],
     #[serde(deserialize_with = "rgb")]
@@ -406,6 +435,25 @@ impl From<Biome> for content::BiomeDef {
             sky_fog: b.sky_fog.map(Into::into),
 
             cave_scale: b.cave_scale,
+
+            selectors: b.selectors.map(|s| content::BiomeSelectors {
+                altitude: s.altitude.map(Into::into),
+                coast: s.coast.map(Into::into),
+                erosion: s.erosion.map(Into::into),
+                river: s.river.map(Into::into),
+                relief: s.relief,
+            }),
+
+            strata: b.strata.map(|layers| {
+                layers
+                    .into_iter()
+                    .map(|l| content::BiomeStratum {
+                        material: l.material,
+                        depth_min_m: l.depth_min_m,
+                        depth_max_m: l.depth_max_m,
+                    })
+                    .collect()
+            }),
 
             surface_features: b
                 .surface_features

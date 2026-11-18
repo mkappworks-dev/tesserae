@@ -34,6 +34,27 @@ pub struct PlotRule {
     pub loot: Option<LootTable>,
 }
 
+/// Buildings a Settlement lays beside its approach paths past its disc, inside its margin: its
+/// fields, orchards and paddocks.
+#[derive(Clone, PartialEq, Debug)]
+pub struct Outskirts {
+    pub rules: Vec<PlotRule>,
+    /// How many a copy lays at most, drawn between these. Fewer than the first lay none.
+    pub count: (u8, u8),
+    /// The share of copies that lay any, in (0, 1].
+    pub chance: f32,
+}
+
+impl Default for Outskirts {
+    fn default() -> Self {
+        Self {
+            rules: Vec::new(),
+            count: (0, 0),
+            chance: 1.0,
+        }
+    }
+}
+
 #[derive(Clone, PartialEq, Debug)]
 pub struct Settlement {
     /// `<mod id>:<name>`.
@@ -56,7 +77,12 @@ pub struct Settlement {
     pub path: Voxel,
     /// What its buildings' chests hold, unless a building has its own.
     pub loot: Option<LootTable>,
+    /// Groups laid in order past the disc, each by its own chance: farms, then water, say.
+    pub outskirts: Vec<Outskirts>,
 }
+
+/// The most outskirt groups a Settlement declares.
+pub const MAX_OUTSKIRT_GROUPS: usize = 4;
 
 impl Settlement {
     /// Its largest disc and margin, in metres.
@@ -145,9 +171,46 @@ impl Settlement {
                 return Err("a Template's min must be at most its max".into());
             }
         }
+        if self.outskirts.len() > MAX_OUTSKIRT_GROUPS {
+            return Err(format!(
+                "it declares at most {MAX_OUTSKIRT_GROUPS} outskirt groups"
+            ));
+        }
+        for outskirts in &self.outskirts {
+            if outskirts.rules.len() > usize::from(MAX_PLOTS)
+                || outskirts.count.0 > outskirts.count.1
+                || outskirts.count.1 > MAX_PLOTS
+            {
+                return Err(format!(
+                    "its outskirts draw from at most {MAX_PLOTS} Templates and lay from a smaller count to a larger, at most {MAX_PLOTS}"
+                ));
+            }
+            if !(outskirts.chance > 0.0 && outskirts.chance <= 1.0) {
+                return Err("its outskirts' chance must be above 0 and at most 1".into());
+            }
+            for rule in &outskirts.rules {
+                let template = templates
+                    .get(usize::from(rule.building.template))
+                    .ok_or("an outskirt names a missing Template")?;
+                let [x, _, z] = template.size_m();
+                if x.max(z) > self.margin_m {
+                    return Err(format!(
+                        "outskirt `{}` is wider than the Settlement's margin",
+                        template.name
+                    ));
+                }
+                if !(rule.weight.is_finite() && rule.weight > 0.0) || rule.min > rule.max {
+                    return Err(format!(
+                        "outskirt `{}`: its weight must be above 0 and its min at most its max",
+                        template.name
+                    ));
+                }
+            }
+        }
         let loots = self
             .rules
             .iter()
+            .chain(self.outskirts.iter().flat_map(|o| &o.rules))
             .filter_map(|r| r.loot.as_ref())
             .chain(&self.loot);
         for loot in loots {

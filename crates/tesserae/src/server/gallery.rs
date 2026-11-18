@@ -1,4 +1,4 @@
-//! A gallery of every built-in Shape near the spawn point. `dev` only.
+//! A gallery of every built-in Shape near the spawn point. `dev` only, and only when `TESSERAE_GALLERY` is set.
 //!
 //! Terrain contains no shaped Voxel, so nothing in build-order step 5 is
 //! observable without this, and the `dev` capture cannot click. It places

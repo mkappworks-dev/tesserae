@@ -145,15 +145,94 @@ fn named_cells_restore_with_different_runtime_ids_including_removals() {
 }
 
 #[test]
-fn malformed_runs_and_orientations_fail_without_panics() {
+fn malformed_cells_and_orientations_fail_without_panics() {
     let m = mapping(8, 9, 4);
-    let mut saved =
-        SavedChunk::capture([0; 3], 0, &Chunk::air(), &ChunkOverlay::none(), &m).unwrap();
-    saved.runs[0].0 -= 1;
-    assert!(matches!(saved.restore(&m), Err(Error::Corrupt(_))));
-    saved.runs[0].0 += 1;
-    saved.runs[0].1.solid.orientation = 24;
-    assert!(matches!(saved.restore(&m), Err(Error::Corrupt(_))));
+    let good = SavedChunk::capture([0; 3], 0, &Chunk::air(), &ChunkOverlay::none(), &m).unwrap();
+    let refused = |change: &dyn Fn(&mut SavedChunk)| {
+        let mut saved = good.clone();
+        change(&mut saved);
+        matches!(saved.restore(&m), Err(Error::Corrupt(_)))
+    };
+    assert!(refused(&|s| s.cells = "not base64!".into()));
+    assert!(refused(&|s| s.cells = STANDARD.encode([1, 2, 3])));
+    assert!(refused(&|s| s.palette.clear()));
+    assert!(refused(&|s| s.palette[0].solid.orientation = 24));
+    assert!(refused(
+        &|s| s.runs = vec![(CHUNK_VOLUME as u32, s.palette[0].clone())]
+    ));
+    // A palette index past its end.
+    let mut far = vec![0u8; CHUNK_VOLUME * 2];
+    far[0] = 1;
+    let mut deflater = DeflateEncoder::new(Vec::new(), Compression::fast());
+    deflater.write_all(&far).unwrap();
+    let far = STANDARD.encode(deflater.finish().unwrap());
+    assert!(refused(&|s| s.cells = far.clone()));
+}
+
+/// Format 1 spelled every run's cell out; a World saved that way still opens.
+#[test]
+fn a_format_1_chunk_of_runs_restores() {
+    let m = mapping(8, 9, 4);
+    let cell = |material: &str| Cell {
+        solid: Solid {
+            material: material.into(),
+            shape: "core:cube".into(),
+            orientation: 0,
+        },
+        fluid: None,
+        fuel: None,
+    };
+    let legacy = SavedChunk {
+        coord: [1, 2, 3],
+        revision: 4,
+        runs: vec![
+            (1, cell("terra:stone")),
+            (CHUNK_VOLUME as u32 - 1, cell("core:air")),
+        ],
+        palette: Vec::new(),
+        cells: String::new(),
+    };
+    let json = serde_json::to_string(&legacy).unwrap();
+    assert!(!json.contains("palette") && !json.contains("cells"));
+    let (chunk, _) = serde_json::from_str::<SavedChunk>(&json)
+        .unwrap()
+        .restore(&m)
+        .unwrap();
+    assert_eq!(chunk.get(0, 0, 0), Voxel::cube(8));
+    assert_eq!(chunk.get(0, 0, 1), Voxel::AIR);
+    let mut short = legacy.clone();
+    short.runs[1].0 -= 1;
+    assert!(matches!(short.restore(&m), Err(Error::Corrupt(_))));
+}
+
+/// Terrain cut by a surface and a tunnel, with grass on top: what made format 1 hundreds of
+/// kilobytes a Chunk.
+#[test]
+fn a_ground_chunk_saves_in_a_few_kilobytes() {
+    let m = mapping(8, 9, 4);
+    let mut chunk = Chunk::air();
+    for x in 0..CHUNK_SIZE {
+        for z in 0..CHUNK_SIZE {
+            let top = 10 + (x * 7 + z * 3) % 11;
+            for y in 0..=top {
+                let tunnel = (x as i32 - 16).pow(2) + (y as i32 - 6).pow(2) < 9;
+                if !tunnel {
+                    chunk.set(x, y, z, Voxel::cube(if y == top { 9 } else { 8 }));
+                }
+            }
+        }
+    }
+    let saved = SavedChunk::capture([0; 3], 1, &chunk, &ChunkOverlay::none(), &m).unwrap();
+    let bytes = serde_json::to_vec(&saved).unwrap().len();
+    assert!(bytes < 8 * 1024, "{bytes} bytes");
+    let (back, _) = saved.restore(&m).unwrap();
+    assert!(
+        back.same_packing(&chunk)
+            || (0..CHUNK_VOLUME).all(|i| {
+                let (x, y, z) = (i / 1024, i / 32 % 32, i % 32);
+                back.get(x, y, z) == chunk.get(x, y, z)
+            })
+    );
 }
 
 #[test]
@@ -209,13 +288,13 @@ fn a_changed_checksum_recovers_but_a_complete_new_version_refuses_rollback() {
 }
 
 #[test]
-fn generator_versions_1_and_2_open_and_any_other_is_refused() {
+fn generator_versions_1_to_3_open_and_any_other_is_refused() {
     let mut c = fixture();
-    for accepted in [1, 2] {
+    for accepted in [1, 2, 3] {
         c.generator = accepted;
         assert!(c.compatible(&c.content.clone()).is_ok(), "{accepted}");
     }
-    for refused in [0, 3, u32::MAX] {
+    for refused in [0, 4, u32::MAX] {
         c.generator = refused;
         assert!(
             matches!(
@@ -234,7 +313,7 @@ fn a_complete_commit_of_an_unknown_generator_refuses_rollback() {
     let mut writer = Writer::acquire(&d.0, &c.world, &c.content).unwrap();
     writer.write(&c).unwrap();
     c.sequence = 2;
-    c.generator = 3;
+    c.generator = 4;
     let body = serde_json::to_vec(&c).unwrap();
     let mut bytes = MAGIC.to_vec();
     bytes.extend(Sha256::digest(&body));
@@ -260,8 +339,8 @@ fn a_version_1_commit_keeps_its_version_through_a_write_and_recover() {
 }
 
 #[test]
-fn a_current_commit_is_version_2() {
-    assert_eq!(fixture().generator, 2);
+fn a_current_commit_is_version_3() {
+    assert_eq!(fixture().generator, 3);
 }
 
 #[test]
@@ -563,6 +642,110 @@ fn biomes_climate_and_ores_restore_in_order_with_their_materials_remapped() {
     assert_eq!(ores[0].biomes, was[0].biomes);
     assert_eq!(ores[1].biomes, was[1].biomes);
     assert_eq!(ores[0].rarity, was[0].rarity);
+}
+
+#[test]
+fn version_3_biome_selectors_round_trip_and_older_worlds_save_none() {
+    let selectors = [
+        crate::BiomeSelectors {
+            altitude_m: Some([50.0, 900.0]),
+            relief: Some(2.0),
+            ..Default::default()
+        },
+        crate::BiomeSelectors::default(),
+        crate::BiomeSelectors {
+            coast_m: Some([-500.0, 40.0]),
+            erosion: Some([0.2, 0.9]),
+            ..Default::default()
+        },
+    ];
+    let mut params = biome_params(3);
+    params.biomes = params.biomes.with_selectors(&selectors).unwrap();
+    let saved = Generation::capture(params, &[], &[], &mapping(8, 9, 4)).unwrap();
+    let json = serde_json::to_string(&saved).unwrap();
+    assert!(json.contains("altitude_m"));
+    let restored = saved.restore(&mapping(8, 9, 4), 3).unwrap();
+    assert_eq!(restored.biomes.selectors(), &selectors);
+
+    let mut older = biome_params(2);
+    older.biomes = older.biomes.with_selectors(&selectors).unwrap();
+    let saved = Generation::capture(older, &[], &[], &mapping(8, 9, 4)).unwrap();
+    assert!(
+        !serde_json::to_string(&saved)
+            .unwrap()
+            .contains("altitude_m")
+    );
+}
+
+#[test]
+fn version_3_strata_are_saved_by_name_and_older_worlds_save_none() {
+    let strata = [crate::Strata::new(&[crate::Stratum {
+        material: 9,
+        depth_m: [4.0, 9.0],
+    }])
+    .unwrap()];
+    let mut params = biome_params(3);
+    params.biomes = params.biomes.with_strata(&strata).unwrap();
+    let saved = Generation::capture(params, &[], &[], &mapping(8, 9, 4)).unwrap();
+    let json = serde_json::to_value(&saved).unwrap();
+    let material = &json["biomes"][0]["strata"][0]["material"];
+    assert!(material.is_string(), "{json}");
+    let restored = saved.restore(&mapping(8, 9, 4), 3).unwrap();
+    assert_eq!(restored.biomes.strata()[0], strata[0]);
+    assert!(
+        restored.biomes.strata()[1..]
+            .iter()
+            .all(|s| s.as_slice().is_empty())
+    );
+
+    let mut older = biome_params(2);
+    older.biomes = older.biomes.with_strata(&strata).unwrap();
+    let saved = Generation::capture(older, &[], &[], &mapping(8, 9, 4)).unwrap();
+    assert!(!serde_json::to_string(&saved).unwrap().contains("strata"));
+}
+
+#[test]
+fn version_3_lava_and_cave_biomes_are_saved_by_name_and_older_worlds_save_none() {
+    let cave = crate::CaveBiome::new(
+        crate::BiomeName::new("terra:glow").unwrap(),
+        (0.3, 0.7),
+        Some([-80.0, -10.0]),
+        Some(8),
+        None,
+        Some(crate::SkyFog {
+            sky: [1, 2, 3],
+            fog: [4, 5, 6],
+        }),
+        &[crate::CaveFeature {
+            material: 8,
+            shape: 4,
+            spacing_m: 5.0,
+        }],
+    )
+    .unwrap();
+    let mut params = biome_params(3);
+    params.lava = Some(9);
+    params.cave_biomes = crate::CaveBiomeTable::new(&[cave]).unwrap();
+    let saved = Generation::capture(params, &[], &[], &mapping(8, 9, 4)).unwrap();
+    let json = serde_json::to_value(&saved).unwrap();
+    assert_eq!(json["lava"], "terra:water");
+    assert_eq!(
+        json["cave_biomes"][0]["features"][0]["shape"],
+        "terra:shape"
+    );
+    let restored = saved.restore(&mapping(8, 9, 4), 3).unwrap();
+    assert_eq!(restored.lava, Some(9));
+    assert_eq!(restored.cave_biomes.as_slice(), [cave]);
+
+    let mut older = biome_params(2);
+    older.lava = Some(9);
+    older.cave_biomes = crate::CaveBiomeTable::new(&[cave]).unwrap();
+    let saved = Generation::capture(older, &[], &[], &mapping(8, 9, 4)).unwrap();
+    let json = serde_json::to_string(&saved).unwrap();
+    assert!(
+        !json.contains("lava") && !json.contains("cave_biomes"),
+        "{json}"
+    );
 }
 
 #[test]

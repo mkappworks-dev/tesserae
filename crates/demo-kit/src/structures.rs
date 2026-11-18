@@ -70,7 +70,22 @@ pub struct Village {
     pub templates: &'static [Plot],
     /// What its buildings' chests hold, unless a Plot has its own.
     pub loot: &'static Loot,
+    /// The share of copies with water by them, and from how many to how many of [`WATER`].
+    pub water: (f32, (u8, u8)),
 }
+
+/// One or two patches of the Game's first food by every copy, after its water, so a new Player
+/// who enters a village finds a meal beside it.
+pub const FOOD: (u8, u8) = (1, 2);
+pub const FOOD_PATCH: &str = "food_patch";
+
+/// The ponds, brook and waterfall a Settlement lays among its outskirts, by unqualified name.
+pub const WATER: [Plot; 4] = [
+    plot("pond", 3.0, 0, 2),
+    plot("lily_pond", 2.0, 0, 1),
+    plot("brook_pond", 1.5, 0, 1),
+    plot("waterfall", 1.0, 0, 1),
+];
 
 impl Village {
     pub fn qualified(&self, name: &str) -> String {
@@ -110,6 +125,35 @@ macro_rules! structures {
                     path: $crate::structures::PATH.into(),
                     path_shape: None,
                     loot: Some(loot(kind.loot)),
+                    outskirts: Some(vec![
+                        crate::tesserae::mods::content::SettlementOutskirts {
+                            templates: $crate::structures::WATER
+                                .iter()
+                                .map(|p| SettlementPlot {
+                                    template: kind.qualified(p.template),
+                                    weight: p.weight,
+                                    min: p.min,
+                                    max: p.max,
+                                    loot: None,
+                                })
+                                .collect(),
+                            count_min: kind.water.1.0,
+                            count_max: kind.water.1.1,
+                            chance: Some(kind.water.0),
+                        },
+                        crate::tesserae::mods::content::SettlementOutskirts {
+                            templates: vec![SettlementPlot {
+                                template: kind.qualified($crate::structures::FOOD_PATCH),
+                                weight: 1.0,
+                                min: 0,
+                                max: $crate::structures::FOOD.1,
+                                loot: None,
+                            }],
+                            count_min: $crate::structures::FOOD.0,
+                            count_max: $crate::structures::FOOD.1,
+                            chance: Some(1.0),
+                        },
+                    ]),
                 })
                 .into()
         }
@@ -147,6 +191,18 @@ macro_rules! structures {
                     }
                 })
                 .into()
+        }
+
+        /// [`village`]'s rows for a Biome without the Game's food, whose villages never take the
+        /// spawn: a new Player enters where a first meal grows.
+        pub fn outlying() -> Vec<crate::tesserae::mods::content::BiomeSettlement> {
+            village()
+                .into_iter()
+                .map(|row| crate::tesserae::mods::content::BiomeSettlement {
+                    near_spawn: false,
+                    ..row
+                })
+                .collect()
         }
 
         /// Each of `names`, a wilderness Template of the Game's.

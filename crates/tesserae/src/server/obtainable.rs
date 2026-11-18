@@ -42,7 +42,20 @@ pub(super) fn obtainable(loaded: &LoadedMods, items: &Items) -> HashSet<Material
                 all.extend(features.crop_fields().iter().flat_map(|f| f.materials()));
                 all
             }))
-            .chain(world.ores.as_slice().iter().map(|o| o.material));
+            .chain(world.ores.as_slice().iter().map(|o| o.material))
+            .chain(
+                world
+                    .biomes
+                    .strata()
+                    .iter()
+                    .flat_map(|s| s.as_slice().iter().map(|l| l.material)),
+            )
+            .chain(world.cave_biomes.as_slice().iter().flat_map(|c| {
+                c.rock
+                    .into_iter()
+                    .chain(c.floor)
+                    .chain(c.features().iter().map(|f| f.material))
+            }));
         for material in laid {
             reach.lay(material);
         }

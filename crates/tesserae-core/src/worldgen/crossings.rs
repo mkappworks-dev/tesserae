@@ -41,7 +41,7 @@ impl Worldgen {
         let mut heights = Heights::new(low, high);
         let first = (mix(h ^ 2) & 3) as u8;
         let mut best: Option<(f32, Structure)> = None;
-        let level_m = self.water.map_or(f32::MIN, |w| w.level_m);
+        let level_m = |p: [f32; 2]| self.water_level_m(p[0], p[1]).unwrap_or(f32::MIN);
         for step in middles {
             let middle_m = step.map(|s| s as f32 * SEARCH_M);
             let middle_h = heights.at(self, middle_m);
@@ -62,11 +62,11 @@ impl Worldgen {
                 let ends = [0.0, last_m].map(|k_m| {
                     let mut p = corner_m;
                     p[a] += k_m;
-                    heights.at(self, p)
+                    (p, heights.at(self, p))
                 });
-                let low_enough = middle_h < level_m
-                    || middle_h <= ends[0].min(ends[1]) + row.level_tolerance_m - GAP_M;
-                if !low_enough || ends.iter().any(|&h| h < level_m) {
+                let low_enough = middle_h < level_m(middle_m)
+                    || middle_h <= ends[0].1.min(ends[1].1) + row.level_tolerance_m - GAP_M;
+                if !low_enough || ends.iter().any(|&(p, h)| h < level_m(p)) {
                     continue;
                 }
                 if let Some((depth_m, s)) = self.gap(row, template, turn, corner_m, &mut heights)
@@ -115,7 +115,7 @@ impl Worldgen {
                 .collect::<Vec<_>>()
         };
         let landing = |k_m: f32| k_m < LANDING_M || k_m >= span_m - LANDING_M;
-        let level_m = self.water.map_or(f32::MIN, |w| w.level_m);
+        let level_m = |p: [f32; 2]| self.water_level_m(p[0], p[1]).unwrap_or(f32::MIN);
 
         let landings = columns(&landing);
         let (mut lowest_m, mut highest_m) = (f32::MAX, f32::MIN);
@@ -123,7 +123,7 @@ impl Worldgen {
         for &p in &landings {
             let height_m = heights.at(self, p);
             (lowest_m, highest_m) = (lowest_m.min(height_m), highest_m.max(height_m));
-            if height_m < level_m || highest_m - lowest_m > row.level_tolerance_m {
+            if height_m < level_m(p) || highest_m - lowest_m > row.level_tolerance_m {
                 return None;
             }
             landing_m.push(height_m);
@@ -131,18 +131,21 @@ impl Worldgen {
         landing_m.sort_by(f32::total_cmp);
         let median_m = landing_m[(landing_m.len() - 1) / 2];
 
-        let (mut depth_m, mut wet_only, mut bed_m) = (f32::MAX, false, f32::MAX);
+        let (mut depth_m, mut wet_only, mut bed_m, mut bed_level_m) =
+            (f32::MAX, false, f32::MAX, f32::MIN);
         for p in columns(&|k_m| (span_m / 3.0..2.0 * span_m / 3.0).contains(&k_m)) {
             let height_m = heights.at(self, p);
             let dropped = median_m - height_m >= GAP_M;
-            if !dropped && height_m >= level_m {
+            if !dropped && height_m >= level_m(p) {
                 return None;
             }
             wet_only |= !dropped;
-            bed_m = bed_m.min(height_m);
+            if height_m < bed_m {
+                (bed_m, bed_level_m) = (height_m, level_m(p));
+            }
             depth_m = depth_m.min(median_m - height_m);
         }
-        if wet_only && bed_m > level_m - DEPTH_M {
+        if wet_only && bed_m > bed_level_m - DEPTH_M {
             return None;
         }
         // The higher landing's bank may stand above the Ground layer by the level tolerance, and

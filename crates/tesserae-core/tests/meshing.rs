@@ -13,6 +13,7 @@ use tesserae_core::{
 
 const FENCE: u8 = 4;
 const PIPE: u8 = 5;
+const CROSS: u8 = 6;
 
 /// The builtin Tables, then a fence, a six-way pipe and the fixture water
 /// registered as a Mod would.
@@ -22,6 +23,12 @@ fn fixture() -> &'static (Tables, u16) {
         let mut t = fixtures().tables.clone();
         assert_eq!(t.shapes.register(examples::fence()), Ok(FENCE));
         assert_eq!(t.shapes.register(examples::pipe()), Ok(PIPE));
+        let cross = tesserae_core::ShapeDef {
+            form: tesserae_core::Form::Cross,
+            boxes: vec![NodeBox::new([3, 0, 3], [13, 14, 13])],
+            ..Default::default()
+        };
+        assert_eq!(t.shapes.register(cross), Ok(CROSS));
         let water = fixtures().water;
         (t, water)
     })
@@ -2230,6 +2237,30 @@ fn a_waterlogged_stair_in_a_lake_draws_no_faces_inside_the_water() {
         }
     }
     chunk.set(4, 4, 4, stair);
+    let mut overlay = tesserae_core::ChunkOverlay::none();
+    overlay.set(4, 4, 4, soaked(tesserae_core::Fluid::source(water)));
+    let mesh = mesh_chunk(unlit(&chunk).with_overlay(&overlay), [None; 6], tables());
+    for p in blended_positions(&mesh) {
+        assert!(p.iter().any(|&c| c == 3.0 || c == 6.0), "{p:?}");
+    }
+    assert_eq!(mesh.blended.quad_count(), 6, "the lake's six sides");
+}
+
+/// A plant drawn as a cross, standing in a lake, shows no water face in the lake: its water fills
+/// the whole cell round its thin quads, not a box round its bounds.
+#[test]
+fn a_cross_plant_standing_in_a_lake_draws_no_water_inside_it() {
+    let water = water();
+    let plant = Voxel::new(fixtures().leaves, CROSS, 0);
+    let mut chunk = Chunk::air();
+    for x in 3..6 {
+        for y in 3..6 {
+            for z in 3..6 {
+                chunk.set(x, y, z, Voxel::cube(water));
+            }
+        }
+    }
+    chunk.set(4, 4, 4, plant);
     let mut overlay = tesserae_core::ChunkOverlay::none();
     overlay.set(4, 4, 4, soaked(tesserae_core::Fluid::source(water)));
     let mesh = mesh_chunk(unlit(&chunk).with_overlay(&overlay), [None; 6], tables());

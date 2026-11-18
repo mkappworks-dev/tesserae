@@ -3514,6 +3514,477 @@
      ".E.............E."
     ]
    ]
+  },
+  {
+   "name": "tidewater:pond",
+   "label": "Pond",
+   "kind": "water",
+   "size": [
+    7,
+    3,
+    5
+   ],
+   "ground_layer": 2,
+   "foundation": "tidewater:coral_block",
+   "level_tolerance_m": null,
+   "spans": false,
+   "palette": [
+    {
+     "symbol": ".",
+     "cell": "keep"
+    },
+    {
+     "symbol": ":",
+     "cell": "air"
+    },
+    {
+     "symbol": "A",
+     "material": "strata:sand",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "B",
+     "material": "waters:water",
+     "shape": "core:cube",
+     "orientation": 0
+    }
+   ],
+   "layers": [
+    [
+     ".......",
+     ".......",
+     "..AAA..",
+     ".......",
+     "......."
+    ],
+    [
+     ".......",
+     "..AAA..",
+     ".ABBBA.",
+     "..AAA..",
+     "......."
+    ],
+    [
+     ".AAAAA.",
+     "AABBBAA",
+     "ABBBBBA",
+     "AABBBAA",
+     ".AAAAA."
+    ]
+   ]
+  },
+  {
+   "name": "tidewater:lily_pond",
+   "label": "Lily pond",
+   "kind": "water",
+   "size": [
+    9,
+    4,
+    7
+   ],
+   "ground_layer": 2,
+   "foundation": "tidewater:coral_block",
+   "level_tolerance_m": null,
+   "spans": false,
+   "palette": [
+    {
+     "symbol": ".",
+     "cell": "keep"
+    },
+    {
+     "symbol": ":",
+     "cell": "air"
+    },
+    {
+     "symbol": "A",
+     "material": "strata:sand",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "B",
+     "material": "waters:water",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "C",
+     "material": "aquatic:lily_pad",
+     "shape": "aquatic:pad",
+     "orientation": 0
+    }
+   ],
+   "layers": [
+    [
+     ".........",
+     ".........",
+     "...AAA...",
+     "..AAAAA..",
+     "...AAA...",
+     ".........",
+     "........."
+    ],
+    [
+     ".........",
+     "..AAAAA..",
+     ".AABBBAA.",
+     ".ABBBBBA.",
+     ".AABBBAA.",
+     "..AAAAA..",
+     "........."
+    ],
+    [
+     "..AAAAA..",
+     ".ABBBBBA.",
+     "ABBBBBBBA",
+     "ABBBBBBBA",
+     "ABBBBBBBA",
+     ".ABBBBBA.",
+     "..AAAAA.."
+    ],
+    [
+     ".........",
+     "...C..C..",
+     "...C..C..",
+     "...C..C..",
+     "...C..C..",
+     "...C..C..",
+     "........."
+    ]
+   ]
+  },
+  {
+   "name": "tidewater:brook_pond",
+   "label": "Brook and pond",
+   "kind": "water",
+   "size": [
+    7,
+    4,
+    13
+   ],
+   "ground_layer": 2,
+   "foundation": "tidewater:coral_block",
+   "level_tolerance_m": null,
+   "spans": false,
+   "palette": [
+    {
+     "symbol": ".",
+     "cell": "keep"
+    },
+    {
+     "symbol": ":",
+     "cell": "air"
+    },
+    {
+     "symbol": "A",
+     "material": "strata:sand",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "B",
+     "material": "waters:water",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "C",
+     "material": "strata:stone",
+     "shape": "core:cube",
+     "orientation": 0
+    }
+   ],
+   "layers": [
+    [
+     ".......",
+     ".......",
+     "..AAA..",
+     ".......",
+     ".......",
+     ".......",
+     ".......",
+     ".......",
+     ".......",
+     ".......",
+     ".......",
+     ".......",
+     "......."
+    ],
+    [
+     ".......",
+     "..AAA..",
+     ".ABBBA.",
+     "..AAA..",
+     "...A...",
+     "...A...",
+     "...A...",
+     "...A...",
+     "...A...",
+     "...A...",
+     "...A...",
+     "...A...",
+     "......."
+    ],
+    [
+     ".AAAAA.",
+     "AABBBAA",
+     "ABBBBBA",
+     "AABBBAA",
+     ".ACBCA.",
+     "..CBC..",
+     "..CBC..",
+     "..CBC..",
+     "..CBC..",
+     "..CBC..",
+     "..CBC..",
+     "..CBC..",
+     "..CCC.."
+    ],
+    [
+     ".......",
+     ".......",
+     ".......",
+     ".......",
+     ".......",
+     ".......",
+     ".......",
+     ".......",
+     ".......",
+     ".......",
+     ".......",
+     ".......",
+     "..CCC.."
+    ]
+   ]
+  },
+  {
+   "name": "tidewater:waterfall",
+   "label": "Waterfall",
+   "kind": "water",
+   "size": [
+    9,
+    10,
+    10
+   ],
+   "ground_layer": 2,
+   "foundation": "tidewater:coral_block",
+   "level_tolerance_m": null,
+   "spans": false,
+   "palette": [
+    {
+     "symbol": ".",
+     "cell": "keep"
+    },
+    {
+     "symbol": ":",
+     "cell": "air"
+    },
+    {
+     "symbol": "A",
+     "material": "strata:stone",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "B",
+     "material": "strata:turf",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "C",
+     "material": "strata:sand",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "D",
+     "material": "waters:water",
+     "shape": "core:cube",
+     "orientation": 0
+    }
+   ],
+   "layers": [
+    [
+     ".........",
+     ".........",
+     ".........",
+     ".........",
+     "CCCCCCCCC",
+     "CCCCCCCCC",
+     "CCCCCCCCC",
+     "CCCCCCCCC",
+     "CCCCCCCCC",
+     "CCCCCCCCC"
+    ],
+    [
+     ".........",
+     ".........",
+     ".........",
+     ".........",
+     "ADDDDDDDA",
+     "ADDDDDDDA",
+     "ADDDDDDDA",
+     "ADDDDDDDA",
+     "ADDDDDDDA",
+     "AAAAAAAAA"
+    ],
+    [
+     "AAAAAAAAA",
+     "AAAAAAAAA",
+     "AAAAAAAAA",
+     "AAAAAAAAA",
+     "ADDDDDDDA",
+     "ADDDDDDDA",
+     "ADDDDDDDA",
+     "ADDDDDDDA",
+     "ADDDDDDDA",
+     "AAAAAAAAA"
+    ],
+    [
+     "AAAAAAAAA",
+     "AAAAAAAAA",
+     "AAAAAAAAA",
+     "AAAAAAAAA",
+     "A.......A",
+     "A.......A",
+     "A.......A",
+     "A.......A",
+     "A.......A",
+     "AAAAAAAAA"
+    ],
+    [
+     "AAAAAAAAA",
+     "AAAAAAAAA",
+     "AAAAAAAAA",
+     "BAAAAAAAB",
+     ".........",
+     "A........",
+     ".........",
+     ".........",
+     "........A",
+     "....A...."
+    ],
+    [
+     "BAAAAAAAB",
+     "AAAAAAAAA",
+     "AAAAAAAAA",
+     ".BAAAAAB.",
+     ".........",
+     ".........",
+     ".........",
+     ".........",
+     ".........",
+     "........."
+    ],
+    [
+     ".BAAAAAA.",
+     "ABAAAAABA",
+     "BBAAAAAAB",
+     "..BAAAB..",
+     ".........",
+     ".........",
+     ".........",
+     ".........",
+     ".........",
+     "........."
+    ],
+    [
+     "..ABBBAA.",
+     "B.AADAA.B",
+     "..BADABA.",
+     "...ADA...",
+     ".........",
+     ".........",
+     ".........",
+     ".........",
+     ".........",
+     "........."
+    ],
+    [
+     "..B.A.BB.",
+     "..A...A..",
+     ".......B.",
+     ".........",
+     ".........",
+     ".........",
+     ".........",
+     ".........",
+     ".........",
+     "........."
+    ],
+    [
+     ".........",
+     "..B...B..",
+     ".........",
+     ".........",
+     ".........",
+     ".........",
+     ".........",
+     ".........",
+     ".........",
+     "........."
+    ]
+   ]
+  },
+  {
+   "name": "tidewater:food_patch",
+   "label": "Coconut heap",
+   "kind": "field",
+   "size": [
+    7,
+    2,
+    5
+   ],
+   "ground_layer": 0,
+   "foundation": "tidewater:coral_block",
+   "level_tolerance_m": null,
+   "spans": false,
+   "palette": [
+    {
+     "symbol": ".",
+     "cell": "keep"
+    },
+    {
+     "symbol": ":",
+     "cell": "air"
+    },
+    {
+     "symbol": "A",
+     "material": "strata:turf",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "B",
+     "material": "strata:sand",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "C",
+     "material": "tidewater:coconut",
+     "shape": "core:cube",
+     "orientation": 0
+    }
+   ],
+   "layers": [
+    [
+     "AAAAAAA",
+     "ABBBBBA",
+     "ABBBBBA",
+     "ABBBBBA",
+     "AAAAAAA"
+    ],
+    [
+     ".......",
+     "..C.C..",
+     ".C.C.C.",
+     "..C.C..",
+     "......."
+    ]
+   ]
   }
  ]
 }

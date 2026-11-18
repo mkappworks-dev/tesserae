@@ -67,13 +67,16 @@ items are a separate `entities` record, below, and the World's default game mode
 is an optional `game_mode`, absent meaning Creative. Global preferences are
 separate data.
 
-Changed Chunks are complete run-length encoded level-0 records, including Air.
-Traversal is x/y/z, z fastest. Material and Shape references are names,
-including packed lake sources, Overlay fluid, pending flow and fire residue.
-Runtime ids are resolved against a supplied mapping; a missing name fails. Fluid
-records preserve source identity and each Void's surface, reach and descent.
-Burning records preserve fuel. Generation records resolve named ground and lake
-content.
+Changed Chunks are complete level-0 records, including Air. Traversal is x/y/z,
+z fastest. Format 2 names each distinct cell of a Chunk once in a palette and
+stores one palette index a Voxel, as a low-byte plane then a high-byte plane,
+deflated and base64: a few kilobytes a Chunk where format 1's run-length
+records, which spelled a cell's names in every run, took a few hundred. Format 1
+commits still open. Material and Shape references are names, including packed
+lake sources, Overlay fluid, pending flow and fire residue. Runtime ids are
+resolved against a supplied mapping; a missing name fails. Fluid records
+preserve source identity and each Void's surface, reach and descent. Burning
+records preserve fuel. Generation records resolve named ground and lake content.
 
 A World also snapshots its own Climate, Biome table and ores in its generation
 parameters, so a Game that gains a Biome later cannot reshape it. The three
@@ -126,13 +129,13 @@ The Player stores its authoritative Eye and a `movement_v1` extension with
 flight/physics mode, actual crouched stance and finite yaw/pitch. The optional
 `crouching` field defaults to false for earlier `movement_v1` saves. Missing
 extension explicitly restores legacy flight; velocity and held input are session
-state. Unknown extensions refuse loading. The base format stays 1: older engines
-already refuse nonempty extensions and cannot overwrite these saves. Save
-dirtiness and completion include the extension, including mode/view changes at a
-stationary Eye. Rebuilds of a required Game still change its exact build hash:
-existing commits with a different required build refuse loading and remain
-untouched. There is no automatic content migration. Movement policy is Game
-declaration data.
+state. Unknown extensions refuse loading. Extensions alone never moved the base
+format: older engines already refuse nonempty extensions and cannot overwrite
+these saves. Save dirtiness and completion include the extension, including
+mode/view changes at a stationary Eye. Rebuilds of a required Game still change
+its exact build hash: existing commits with a different required build refuse
+loading and remain untouched. There is no automatic content migration. Movement
+policy is Game declaration data.
 
 Dropped items are saved whole in every commit as `entities`: the next entity id
 and, per drop, its id, Item by name, count, position and velocity in metres,

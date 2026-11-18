@@ -581,6 +581,7 @@ mod tests {
             voxel_size_m: 1.0,
             seed: 1,
             biomes: Vec::new(),
+            cave_biomes: Vec::new(),
             default_mode: GameMode::Survival,
             generator: 2,
             temperature_size_m: 300.0,

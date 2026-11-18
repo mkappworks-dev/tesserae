@@ -489,6 +489,8 @@ mod surface_features {
         d.plants = plants;
         d.biomes = vec![content::BiomeDef {
             soundscape: None,
+            selectors: None,
+            strata: None,
             name: "field".into(),
             temperature: 0.5,
             humidity: 0.5,

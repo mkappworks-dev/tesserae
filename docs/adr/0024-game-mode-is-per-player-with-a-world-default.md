@@ -23,7 +23,7 @@ World, writes the default and the Player's own mode it was asked for to the
 sidecar as pending, under the writer lock, and refuses while the World is open.
 The Server applies them when the World next opens, before the Player spawns, and
 clears them with its first commit. No Client changes a mode during play, and
-there is no command to do so until step 27.
+there is no command to do so until step 29.
 
 The mode decides what the Server allows, never what the Client asks: in
 Survival, Catalogue takes and the switch to flight are refused, a Player saved
@@ -36,7 +36,7 @@ Rejected: a World-only mode, which is simpler for one Player but cannot let one
 Player build freely while another survives, and would need a save format change
 the day there are two; and changing a mode while the World runs, which would
 need a Client to change Player state (ADR-0002) or a command with permissions,
-which is step 27. Applying at open keeps the commit the Server's alone: the
+which is step 29. Applying at open keeps the commit the Server's alone: the
 launcher writes only the sidecar, and the change reaches the save in the
 Server's next commit like any other Player state.
 

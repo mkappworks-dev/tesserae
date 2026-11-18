@@ -194,3 +194,117 @@ macro_rules! plants {
         }
     };
 }
+
+/// A Biome Generator version 3 chooses by the land's shape: it names a range, so version 3 prefers
+/// it where the column fits and earlier versions never choose it.
+pub struct Landform {
+    pub name: &'static str,
+    pub climate: (f32, f32),
+    /// Metres above Sea level.
+    pub altitude_m: (f32, f32),
+    /// Metres a river's valley cuts the ground; `None` asks nothing of rivers.
+    pub river_m: Option<(f32, f32)>,
+    /// Rock, soil and surface.
+    pub ground: [&'static str; 3],
+    pub sky: [u8; 3],
+    pub fog: [u8; 3],
+    /// `false` keeps tunnels from under it, as under the sea.
+    pub caves: bool,
+}
+
+/// The sea floor, the strand, the high ground, and a river's banks below the high ground.
+pub const OCEAN_M: (f32, f32) = (-1000.0, -0.01);
+pub const SHORE_M: (f32, f32) = (0.0, 3.0);
+pub const ALPINE_M: (f32, f32) = (90.0, 1000.0);
+pub const RIVER_M: (f32, f32) = (0.0, 90.0);
+pub const RIVER_CUT_M: (f32, f32) = (1.5, 1000.0);
+
+/// A region of the underground with its own rock, floor, features and fog.
+pub struct Cave {
+    pub name: &'static str,
+    pub climate: (f32, f32),
+    /// Metres above Sea level; `None` matches every height.
+    pub altitude_m: Option<(f32, f32)>,
+    pub rock: Option<&'static str>,
+    pub floor: Option<&'static str>,
+    pub sky: [u8; 3],
+    pub fog: [u8; 3],
+    /// Material, Shape (`None` a cube) and spacing in metres.
+    pub features: &'static [(&'static str, Option<&'static str>, f32)],
+}
+
+/// Writes `landform(l, features)` and `cave(c)`, the Game's own records for a [`Landform`] and a
+/// [`Cave`]. Expanded inside the Game, where `crate::tesserae::mods` is its WIT binding.
+#[macro_export]
+macro_rules! landforms {
+    () => {
+        pub fn landform(
+            l: &$crate::Landform,
+            surface_features: Vec<crate::tesserae::mods::content::SurfaceFeature>,
+        ) -> crate::tesserae::mods::content::BiomeDef {
+            use crate::tesserae::mods::content as c;
+            let range = |(min, max): (f32, f32)| c::SelectorRange { min, max };
+            let [rock, soil, surface] = l.ground;
+            let [s0, s1, s2] = l.sky;
+            let [f0, f1, f2] = l.fog;
+            c::BiomeDef {
+                soundscape: None,
+                selectors: Some(c::BiomeSelectors {
+                    altitude: Some(range(l.altitude_m)),
+                    coast: None,
+                    erosion: None,
+                    river: l.river_m.map(range),
+                    relief: None,
+                }),
+                strata: None,
+                name: l.name.into(),
+                temperature: l.climate.0,
+                humidity: l.climate.1,
+                ground: Some(c::GroundParams {
+                    rock: rock.into(),
+                    soil: soil.into(),
+                    surface: surface.into(),
+                }),
+                sky_fog: Some(c::SkyFog {
+                    sky: (s0, s1, s2),
+                    fog: (f0, f1, f2),
+                }),
+                cave_scale: (!l.caves).then_some(0.0),
+                crop_fields: Vec::new(),
+                structures: Vec::new(),
+                settlements: Vec::new(),
+                surface_features,
+                loot: None,
+            }
+        }
+
+        pub fn cave(cave: &$crate::Cave) -> crate::tesserae::mods::content::CaveBiomeDef {
+            use crate::tesserae::mods::content as c;
+            let [s0, s1, s2] = cave.sky;
+            let [f0, f1, f2] = cave.fog;
+            c::CaveBiomeDef {
+                name: cave.name.into(),
+                temperature: cave.climate.0,
+                humidity: cave.climate.1,
+                altitude: cave
+                    .altitude_m
+                    .map(|(min, max)| c::SelectorRange { min, max }),
+                rock: cave.rock.map(Into::into),
+                floor: cave.floor.map(Into::into),
+                sky_fog: Some(c::SkyFog {
+                    sky: (s0, s1, s2),
+                    fog: (f0, f1, f2),
+                }),
+                features: cave
+                    .features
+                    .iter()
+                    .map(|&(material, shape, spacing_m)| c::CaveFeature {
+                        material: material.into(),
+                        shape: shape.map(Into::into),
+                        spacing_m,
+                    })
+                    .collect(),
+            }
+        }
+    };
+}

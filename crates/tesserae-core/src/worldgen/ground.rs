@@ -49,7 +49,10 @@ impl Worldgen {
         for ([x_m, z_m], under) in points {
             let height_m = self.surface_height_m(x_m, z_m);
             // Below the level some Voxel size floods the column, if not this one.
-            if self.water.is_some_and(|w| height_m < w.level_m) {
+            if self
+                .water_level_m(x_m, z_m)
+                .is_some_and(|level_m| height_m < level_m)
+            {
                 return None;
             }
             let column = Column {

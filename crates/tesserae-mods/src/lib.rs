@@ -33,6 +33,7 @@ mod settlement;
 mod sound;
 mod template;
 mod trust;
+mod underground;
 
 pub use adapt::Line;
 pub use bindings::exports::tesserae::mods::guest::{Registered, RegisteredId, WorldInfo};
@@ -73,6 +74,7 @@ pub use settlement::DeclaredSettlements;
 pub use sound::{Sound, Sounds, Soundscape, resolve_sounds};
 pub use template::DeclaredTemplates;
 pub use trust::{CheckedPayload, Trust, Untrusted, Verdict};
+pub use underground::DeclaredUnderground;
 
 #[cfg(test)]
 mod tests;

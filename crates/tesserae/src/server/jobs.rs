@@ -17,7 +17,9 @@ use bevy::tasks::{AsyncComputeTaskPool, Task};
 use tesserae_core::light::{Light, MAX_LIGHT, light_cells};
 #[cfg(any(feature = "dev", feature = "profiling"))]
 use tesserae_core::visibility::{Connectivity, connectivity};
-use tesserae_core::{Chunk, ChunkLight, ChunkMesh, LitChunk, Tables, Worldgen, mesh_chunk};
+use tesserae_core::{
+    Chunk, ChunkLight, ChunkMesh, ChunkOverlay, LitChunk, Tables, Worldgen, mesh_chunk,
+};
 
 use super::world_state::Snapshot;
 use crate::world::ChunkCoord;
@@ -338,6 +340,7 @@ pub(in crate::server) fn solve(
 /// each other through it.
 pub(in crate::server) struct Generated {
     pub chunk: Chunk,
+    pub overlay: ChunkOverlay,
     #[cfg(any(feature = "dev", feature = "profiling"))]
     pub connectivity: Connectivity,
 }
@@ -349,11 +352,12 @@ pub(in crate::server) fn generate(
     tables: &Tables,
 ) -> Generated {
     let chunk = worldgen.chunk(coord.x, coord.y, coord.z);
-    #[cfg(not(any(feature = "dev", feature = "profiling")))]
-    let _ = tables;
     Generated {
         #[cfg(any(feature = "dev", feature = "profiling"))]
         connectivity: connectivity(&chunk, &tables.materials),
+        overlay: tables
+            .plants
+            .generated_overlay(&chunk, worldgen.water().map(|w| w.material)),
         chunk,
     }
 }

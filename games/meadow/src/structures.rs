@@ -20,6 +20,7 @@ const HAMLET: Village = Village {
         plot("bakery", 1.0, 0, 1).stocked(&BAKERY_LOOT),
     ],
     loot: &VILLAGE_LOOT,
+    water: (0.7, (1, 2)),
 };
 
 const VILLAGE: Village = Village {
@@ -44,6 +45,7 @@ const VILLAGE: Village = Village {
         plot("mill_barn", 1.0, 0, 2),
     ],
     loot: &VILLAGE_LOOT,
+    water: (0.9, (1, 3)),
 };
 
 /// A village keeps bread, grain and pumpkins.

@@ -219,6 +219,12 @@ pub enum ModError {
         name: String,
         source: ParamError,
     },
+    /// The Game's lava or one of its cave Biomes, by name.
+    Underground {
+        id: String,
+        name: String,
+        source: ParamError,
+    },
     /// A row of `sounds`, `sound-sets` or `material-sounds`, named by its full name or, for a
     /// `material-sounds` row, its Material.
     Sound {
@@ -499,6 +505,11 @@ impl fmt::Display for ModError {
             ModError::Lake { id, name, source } => write!(
                 f,
                 "mod `{id}`: world: {} `{name}` {}",
+                source.field, source.rule
+            ),
+            ModError::Underground { id, name, source } => write!(
+                f,
+                "mod `{id}`: world: `{name}`: {} {}",
                 source.field, source.rule
             ),
             ModError::Sound {

@@ -1670,9 +1670,10 @@ fn pinned_generator(dir: &Directory) -> u32 {
 #[test]
 fn a_new_world_is_stamped_with_the_current_generator() {
     let dir = Directory::new();
-    assert_eq!(pinned_generator(&dir), 2);
+    let current = tesserae_core::save::GENERATOR_VERSION;
+    assert_eq!(pinned_generator(&dir), current);
     Rig::new(&dir).settled_save();
-    assert_eq!(saved_generator(&dir), 2);
+    assert_eq!(saved_generator(&dir), current);
 }
 
 #[test]
@@ -2542,6 +2543,7 @@ fn declares_hamlet(path: &'static str) -> impl FnOnce(&mut crate::server::mods::
             minimum: 0,
             path: Voxel::cube(id),
             loot: None,
+            outskirts: Default::default(),
         }];
         let world = loaded.world.as_mut().unwrap();
         let mut biomes = world.biomes.as_slice().to_vec();

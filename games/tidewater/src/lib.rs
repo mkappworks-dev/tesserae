@@ -7,6 +7,7 @@ wit_bindgen::generate!({ path: "../../crates/tesserae-mods/wit/0.3", world: "mod
 
 mod building;
 mod food;
+mod landforms;
 mod plants;
 mod structures;
 mod templates;
@@ -246,6 +247,7 @@ impl Guest for Tidewater {
             temperature_size_m: 256.0,
             humidity_size_m: 256.0,
         });
+        world.cave_biomes = Some(landforms::caves());
         Declaration {
             materials: [food::material()]
                 .into_iter()
@@ -269,6 +271,8 @@ impl Guest for Tidewater {
             biomes: vec![
                 BiomeDef {
                     soundscape: None,
+                    selectors: None,
+                    strata: None,
                     name: "lagoon".into(),
                     temperature: 0.5,
                     humidity: 0.5,
@@ -289,6 +293,8 @@ impl Guest for Tidewater {
                 },
                 BiomeDef {
                     soundscape: None,
+                    selectors: None,
+                    strata: None,
                     name: "salt_flats".into(),
                     temperature: 0.7,
                     humidity: 0.3,
@@ -317,6 +323,8 @@ impl Guest for Tidewater {
                 },
                 BiomeDef {
                     soundscape: None,
+                    selectors: None,
+                    strata: None,
                     name: "cold_shallows".into(),
                     temperature: 0.3,
                     humidity: 0.55,
@@ -332,12 +340,14 @@ impl Guest for Tidewater {
                     cave_scale: None,
                     crop_fields: Vec::new(),
                     structures: structures::wild(&["lighthouse", "sea_arch"]),
-                    settlements: structures::village(),
+                    settlements: structures::outlying(),
                     surface_features: plants::cold_shallows(),
                     loot: Some(structures::loot(structures::biome_loot("cold_shallows"))),
                 },
                 BiomeDef {
                     soundscape: None,
+                    selectors: None,
+                    strata: None,
                     name: "rainforest".into(),
                     temperature: 0.72,
                     humidity: 0.7,
@@ -353,12 +363,14 @@ impl Guest for Tidewater {
                         structures::wild(&["stilt_house"]),
                     ]
                     .concat(),
-                    settlements: structures::village(),
+                    settlements: structures::outlying(),
                     surface_features: plants::rainforest(),
                     loot: Some(structures::loot(structures::biome_loot("rainforest"))),
                 },
                 BiomeDef {
                     soundscape: None,
+                    selectors: None,
+                    strata: None,
                     name: "tidal_marsh".into(),
                     temperature: 0.55,
                     humidity: 0.78,
@@ -374,11 +386,14 @@ impl Guest for Tidewater {
                     cave_scale: Some(0.7),
                     crop_fields: Vec::new(),
                     structures: structures::wild(&["dock", "stilt_house"]),
-                    settlements: structures::village(),
+                    settlements: structures::outlying(),
                     surface_features: plants::tidal_marsh(),
                     loot: Some(structures::loot(structures::biome_loot("tidal_marsh"))),
                 },
-            ],
+            ]
+            .into_iter()
+            .chain(landforms::biomes())
+            .collect(),
             survival: None,
             sounds: Vec::new(),
             sound_sets: Vec::new(),

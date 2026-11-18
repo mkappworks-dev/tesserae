@@ -23,6 +23,7 @@ mod plants;
 mod rooms;
 pub(in crate::server) mod structures;
 mod vegetation;
+mod water;
 
 fn checkout() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
@@ -104,6 +105,11 @@ pub(in crate::server) fn loaded(game: &str, voxel_size: f32) -> (Install, Loaded
         },
     )
     .unwrap();
+    // The positions these tests pin were found under version 2; a test of version 3 asks for it.
+    let mut loaded = loaded;
+    if let Some(world) = &mut loaded.world {
+        world.generator = 2;
+    }
     (install, loaded)
 }
 
@@ -666,7 +672,10 @@ fn palette(world: &WorldgenParams) -> Vec<(&str, [u8; 3], [u8; 3])> {
         .biomes
         .as_slice()
         .iter()
-        .map(|b| {
+        .zip(world.biomes.selectors())
+        // The Biomes of the land's shape are version 3's.
+        .filter(|(_, s)| !s.is_ranged())
+        .map(|(b, _)| {
             let colours = b.sky_fog.expect("every Biome of these Games has a pair");
             (b.name.as_str(), colours.sky, colours.fog)
         })
@@ -734,9 +743,13 @@ fn shares(world: WorldgenParams, seed: u64, half_m: f32, step_m: f32) -> Vec<f32
 fn assert_ore_in_band(game: &str, material_name: &str) {
     let (_install, loaded) = loaded(game, 0.5);
     let world = loaded.world.unwrap();
-    assert_eq!(world.ores.len(), 1, "{game} declares one ore");
-    let ore = world.ores.as_slice()[0];
-    assert_eq!(ore.material, material(&loaded, material_name));
+    let wanted = material(&loaded, material_name);
+    let ore = *world
+        .ores
+        .as_slice()
+        .iter()
+        .find(|o| o.material == wanted)
+        .unwrap_or_else(|| panic!("{game} declares no {material_name} ore"));
     let depths = ore_depths(world, 0.5, &ore);
     assert!(depths.len() > 100, "{game}: {} ore Voxels", depths.len());
     let slack = 0.5;
@@ -850,7 +863,9 @@ fn terra_biomes_all_cover_ground_and_the_temperate_one_most() {
     let (_install, loaded) = loaded("terra", 0.5);
     let world = loaded.world.unwrap();
     for seed in [7, 1, 2024] {
+        // The first six are the Biomes version 2 chooses.
         let shares = shares(world, seed, 4000.0, 50.0);
+        let shares = &shares[..6];
         assert!(
             shares.iter().all(|&s| s > 0.04) && shares[0] > shares[1] && shares[0] > shares[2],
             "seed {seed}: {shares:?}"
@@ -861,6 +876,7 @@ fn terra_biomes_all_cover_ground_and_the_temperate_one_most() {
 #[test]
 fn terra_iron_appears_in_rock_within_its_band() {
     assert_ore_in_band("terra", "terra:iron");
+    assert_ore_in_band("terra", "terra:crystal");
 }
 
 #[test]
@@ -911,7 +927,13 @@ fn tidewater_biomes_all_cover_ground_and_the_lagoon_most() {
     let (_install, loaded) = loaded("tidewater", 0.5);
     let world = loaded.world.unwrap();
     for seed in [7, 1, 2024] {
-        let shares = shares(world, seed, 4000.0, 50.0);
+        // A Biome of the land's shape is not chosen before version 3.
+        let shares: Vec<f32> = shares(world, seed, 4000.0, 50.0)
+            .into_iter()
+            .zip(world.biomes.selectors())
+            .filter(|(_, s)| !s.is_ranged())
+            .map(|(share, _)| share)
+            .collect();
         assert!(
             shares.iter().all(|&s| s > 0.04) && shares[0] > shares[1] && shares[0] > shares[2],
             "seed {seed}: {shares:?}"

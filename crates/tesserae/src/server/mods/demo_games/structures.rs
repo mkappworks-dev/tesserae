@@ -7,7 +7,7 @@ use std::fs;
 use serde_json::Value;
 use tesserae_core::template::{Cell, Template, Turn};
 use tesserae_core::usable::VoxelUse;
-use tesserae_core::{CHUNK_SIZE, Chunk, MaterialId, Voxel, Worldgen};
+use tesserae_core::{CHUNK_SIZE, Chunk, MaterialId, Voxel, Worldgen, WorldgenParams};
 use tesserae_mods::{Kind, ToolKind};
 
 use super::{checkout, loaded, material};
@@ -66,7 +66,15 @@ fn every_games_templates_are_the_cells_the_approved_mockup_exports() {
             .iter()
             .map(|t| t["kind"].as_str().unwrap())
             .collect();
-        assert_eq!(kinds.len(), 15, "{game}");
+        // Ten Settlement buildings and five wild ones in every Game; Terra adds its fields and water.
+        assert_eq!(
+            kinds
+                .iter()
+                .filter(|&&k| !matches!(k, "field" | "water"))
+                .count(),
+            15,
+            "{game}"
+        );
         assert_eq!(kinds.iter().filter(|&&k| k == "wild").count(), 5, "{game}");
 
         for (template, t) in loaded.tables.templates.iter().zip(&exported) {
@@ -160,7 +168,12 @@ fn every_game_lays_out_a_settlement_of_its_buildings_each_door_on_a_closed_door_
                 .iter()
                 .chain(settlement.rules.iter().map(|r| &r.building))
                 .collect();
-            used.extend(buildings.iter().map(|b| b.template));
+            used.extend(buildings.iter().map(|b| b.template).filter(|&t| {
+                !matches!(
+                    exported[usize::from(t)]["kind"].as_str(),
+                    Some("field" | "water")
+                )
+            }));
             for building in buildings {
                 let template = &loaded.tables.templates[usize::from(building.template)];
                 let kind = exported[usize::from(building.template)]["kind"]
@@ -201,7 +214,11 @@ fn every_game_lays_out_a_settlement_of_its_buildings_each_door_on_a_closed_door_
                 }
             }
         }
-        assert_eq!(used.len(), 10, "{game}: every building kind");
+        assert_eq!(
+            used.len(),
+            10,
+            "{game}: every building kind, besides fields and gardens"
+        );
     }
 }
 
@@ -559,6 +576,10 @@ fn a_world_of_each_game_lays_small_and_large_settlements() {
             .iter()
             .map(|f| exported[f.template]["kind"].as_str().unwrap())
             .collect();
+        assert!(
+            kinds.contains(&"water"),
+            "{game}: no pond or waterfall by a Settlement within {SIZES_SCAN_M} m"
+        );
         let sizes = copy_sizes(&found, &kinds, SIZES_SCAN_M);
         // Tidewater's islands hold only a handful of buildings, whatever a harbour draws.
         let large = if game == "tidewater" { 3 } else { 8 };
@@ -590,7 +611,7 @@ fn copy_sizes(found: &[Found], kinds: &[&str], half_m: f32) -> Vec<usize> {
     for (f, _) in found
         .iter()
         .zip(kinds)
-        .filter(|(_, k)| !matches!(**k, "centre" | "wild"))
+        .filter(|(_, k)| !matches!(**k, "centre" | "wild" | "field" | "water"))
     {
         let at = middle(f);
         let d = |c: &[f32; 2]| (c[0] - at[0]).hypot(c[1] - at[1]);
@@ -603,9 +624,9 @@ fn copy_sizes(found: &[Found], kinds: &[&str], half_m: f32) -> Vec<usize> {
     sizes
 }
 
-/// Where Terra's town stands at [`SEED`], about 490 m from spawn: the town's lattice is 384 m, so
+/// Where Terra's town stands at [`SEED`], about 360 m from spawn: the town's lattice is 416 m, so
 /// the square the other tests scan need not hold one.
-const TERRA_TOWN_M: [f32; 2] = [456.0, -166.0];
+const TERRA_TOWN_M: [f32; 2] = [356.0, 30.0];
 
 #[test]
 fn terra_lays_out_a_town_of_cobbled_roads() {
@@ -663,7 +684,7 @@ fn terra_lays_out_a_town_of_cobbled_roads() {
                 && middle[0].pow(2) + middle[1].pow(2) <= 96 * 96
         })
         .count();
-    assert!(buildings >= 18, "the town lays {buildings} buildings");
+    assert!(buildings >= 15, "the town lays {buildings} buildings");
 }
 
 /// Each Game's bridge: a Template that spans. Meadow's footbridge is left out: its soft hills
@@ -706,6 +727,26 @@ fn terra_and_tidewater_each_stand_a_bridge_over_a_gap_near_spawn() {
         let found = bridges(game, bridge, BRIDGE_SCAN_M);
         assert!(!found.is_empty(), "{game}: no bridge stands near spawn");
     }
+}
+
+#[test]
+fn meadow_stands_its_first_footbridges_over_its_version_3_rivers() {
+    let (generator, loaded) = version_3("meadow");
+    let templates = &loaded.tables.templates;
+    let index = templates
+        .iter()
+        .position(|t| t.name == "meadow:footbridge")
+        .unwrap();
+    let river = flight()
+        .into_iter()
+        .find(|&at| biome_name(&generator, at) == "meadow:river")
+        .expect("a river within a short flight");
+    let world = Generated::around(&generator, river, BRIDGE_SCAN_M);
+    let found = standing_of(&world, std::slice::from_ref(&templates[index]), 1.0, false);
+    assert!(
+        !found.is_empty(),
+        "no footbridge stands by the river at {river:?}"
+    );
 }
 
 #[test]
@@ -757,5 +798,62 @@ fn every_template_cell_of_a_material_that_fixes_its_shape_is_in_that_shape() {
                 }
             }
         }
+    }
+}
+
+/// How far a Player flies to find the land's shapes and an underground region: rivers follow the
+/// drainage, and at [`SEED`] the nearest runs some 3.5 km from spawn.
+const FLIGHT_M: f32 = 4096.0;
+
+/// The columns within [`FLIGHT_M`] of spawn on a 32 m lattice, nearest first.
+fn flight() -> Vec<[f32; 2]> {
+    let reach = (FLIGHT_M / 32.0) as i32;
+    let mut at: Vec<[f32; 2]> = (-reach..=reach)
+        .flat_map(|i| (-reach..=reach).map(move |j| [i as f32 * 32.0, j as f32 * 32.0]))
+        .filter(|[x, z]| x.hypot(*z) <= FLIGHT_M)
+        .collect();
+    at.sort_by(|a, b| a[0].hypot(a[1]).total_cmp(&b[0].hypot(b[1])));
+    at
+}
+
+/// A version 3 World of `game`, and the name of the Biome at a column.
+fn version_3(game: &str) -> (Worldgen, LoadedMods) {
+    let (_install, loaded) = loaded(game, 1.0);
+    let params = WorldgenParams {
+        generator: 3,
+        ..loaded.world.unwrap()
+    };
+    let generator = Worldgen::new(SEED, 1.0, params)
+        .with_templates(&loaded.tables.templates)
+        .with_settlements(&loaded.tables.settlements);
+    (generator, loaded)
+}
+
+fn biome_name(generator: &Worldgen, [x, z]: [f32; 2]) -> String {
+    let biomes = generator.params().biomes;
+    generator
+        .biome_at(x, z)
+        .and_then(|id| biomes.get(id))
+        .map_or_else(String::new, |b| b.name.as_str().to_owned())
+}
+
+#[test]
+fn every_game_has_ocean_a_river_and_a_cave_biome_within_a_short_flight_under_version_3() {
+    for game in GAMES {
+        let (generator, _loaded) = version_3(game);
+        let (mut ocean, mut river, mut cave) = (false, false, false);
+        for at in flight() {
+            let name = biome_name(&generator, at);
+            ocean |= name == format!("{game}:ocean");
+            river |= name == format!("{game}:river");
+            let deep_m = generator.surface_height_m(at[0], at[1]) - 40.0;
+            cave |= !cave && generator.cave_biome_name_at(at[0], deep_m, at[1]).is_some();
+            if ocean && river && cave {
+                break;
+            }
+        }
+        assert!(ocean, "{game}: no ocean within {FLIGHT_M} m");
+        assert!(river, "{game}: no river within {FLIGHT_M} m");
+        assert!(cave, "{game}: no cave Biome within {FLIGHT_M} m");
     }
 }

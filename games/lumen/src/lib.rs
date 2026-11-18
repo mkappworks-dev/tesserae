@@ -6,6 +6,7 @@ wit_bindgen::generate!({ path: "../../crates/tesserae-mods/wit/0.3", world: "mod
 
 mod building;
 mod food;
+mod landforms;
 mod plants;
 mod structures;
 mod templates;
@@ -73,6 +74,8 @@ fn biomes() -> Vec<BiomeDef> {
     vec![
         BiomeDef {
             soundscape: None,
+            selectors: None,
+            strata: None,
             name: "garden".into(),
             temperature: 0.5,
             humidity: 0.5,
@@ -93,6 +96,8 @@ fn biomes() -> Vec<BiomeDef> {
         },
         BiomeDef {
             soundscape: None,
+            selectors: None,
+            strata: None,
             name: "arid_court".into(),
             temperature: 0.78,
             humidity: 0.25,
@@ -104,12 +109,14 @@ fn biomes() -> Vec<BiomeDef> {
             cave_scale: None,
             crop_fields: Vec::new(),
             structures: structures::wild(&["crystal_spire", "observatory"]),
-            settlements: structures::village(),
+            settlements: structures::outlying(),
             surface_features: plants::arid_court(),
             loot: Some(structures::loot(structures::biome_loot("arid_court"))),
         },
         BiomeDef {
             soundscape: None,
+            selectors: None,
+            strata: None,
             name: "frost_court".into(),
             temperature: 0.22,
             humidity: 0.65,
@@ -130,6 +137,8 @@ fn biomes() -> Vec<BiomeDef> {
         },
         BiomeDef {
             soundscape: None,
+            selectors: None,
+            strata: None,
             name: "conservatory".into(),
             temperature: 0.72,
             humidity: 0.7,
@@ -141,12 +150,14 @@ fn biomes() -> Vec<BiomeDef> {
             cave_scale: None,
             crop_fields: Vec::new(),
             structures: structures::wild(&["glass_dome", "observatory"]),
-            settlements: structures::village(),
+            settlements: structures::outlying(),
             surface_features: plants::conservatory(),
             loot: Some(structures::loot(structures::biome_loot("conservatory"))),
         },
         BiomeDef {
             soundscape: None,
+            selectors: None,
+            strata: None,
             name: "lily_pond".into(),
             temperature: 0.55,
             humidity: 0.78,
@@ -470,6 +481,12 @@ impl Guest for Lumen {
             temperature_size_m: CLIMATE_SIZE_M,
             humidity_size_m: CLIMATE_SIZE_M,
         });
+        world.cave_biomes = Some(landforms::caves());
+        // Under Sea level, where version 2's ground never sinks, so only version 3 has a sea.
+        world.water = Some(tesserae::mods::content::WaterParams {
+            level_m: SEA_LEVEL_M - 1.0,
+            material: "waters:water".into(),
+        });
         Declaration {
             materials: [food::material()]
                 .into_iter()
@@ -490,7 +507,7 @@ impl Guest for Lumen {
                 kind: ToolKind::Place,
             }],
             items: vec![food::item()],
-            biomes: biomes(),
+            biomes: biomes().into_iter().chain(landforms::biomes()).collect(),
             survival: None,
             sounds: Vec::new(),
             sound_sets: Vec::new(),

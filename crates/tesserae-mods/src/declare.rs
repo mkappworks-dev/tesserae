@@ -175,6 +175,8 @@ pub struct Behaviour {
     pub(crate) material_tags: Vec<(String, Vec<String>)>,
     lake: Option<content::WaterParams>,
     ground: Option<content::GroundParams>,
+    pub(crate) lava: Option<String>,
+    pub(crate) cave_biomes: Vec<content::CaveBiomeDef>,
 }
 
 /// The first `world` field a Mod set besides `character`: anything but the engine's own terrain
@@ -365,6 +367,12 @@ pub fn apply(
     }
     let map = declaration.world.as_ref().and_then(|p| p.map_policy);
     let ground = declaration.world.as_ref().and_then(|p| p.ground.clone());
+    let lava = declaration.world.as_ref().and_then(|p| p.lava.clone());
+    let cave_biomes = declaration
+        .world
+        .as_ref()
+        .and_then(|p| p.cave_biomes.clone())
+        .unwrap_or_default();
     let (world, lake) = declaration.world.map(world_params).unzip();
     let lake = lake.flatten();
     if let Some(params) = world {
@@ -526,6 +534,8 @@ pub fn apply(
             material_tags,
             lake,
             ground,
+            lava,
+            cave_biomes,
         },
     })
 }
@@ -1000,6 +1010,8 @@ pub fn resolve_biomes(
     lake: Option<MaterialId>,
 ) -> Result<(BiomeTable, OreTable), ModError> {
     let mut biomes: Vec<Biome> = Vec::new();
+    let mut selectors: Vec<tesserae_core::BiomeSelectors> = Vec::new();
+    let mut strata: Vec<tesserae_core::Strata> = Vec::new();
     for b in behaviours {
         for (row, def) in b.biomes.iter().enumerate() {
             let bad = |source| ModError::Params {
@@ -1111,6 +1123,41 @@ pub fn resolve_biomes(
                 .collect::<Result<Vec<_>, _>>()?;
             let structures = biome_structures(b, &def.name, &def.structures, tables)?;
             let settlements = biome_settlements(b, &def.name, &def.settlements, tables)?;
+            let range = |r: &Option<content::SelectorRange>| r.as_ref().map(|r| [r.min, r.max]);
+            let chosen = def
+                .selectors
+                .as_ref()
+                .map(|s| tesserae_core::BiomeSelectors {
+                    altitude_m: range(&s.altitude),
+                    coast_m: range(&s.coast),
+                    erosion: range(&s.erosion),
+                    river_m: range(&s.river),
+                    relief: s.relief,
+                })
+                .unwrap_or_default();
+            chosen.validate().map_err(bad)?;
+            selectors.push(chosen);
+            let layers = def
+                .strata
+                .iter()
+                .flatten()
+                .map(|l| {
+                    let material = lookup(b, registry, "biome", row, &l.material)?;
+                    if !tables.materials.solid(Voxel::cube(material))
+                        || tables.fluids.contains(material)
+                    {
+                        return Err(bad(ParamError {
+                            field: "biomes.strata.material",
+                            rule: "must be a solid Material",
+                        }));
+                    }
+                    Ok(tesserae_core::Stratum {
+                        material,
+                        depth_m: [l.depth_min_m, l.depth_max_m],
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            strata.push(tesserae_core::Strata::new(&layers).map_err(bad)?);
             biomes.push(Biome {
                 name: BiomeName::new(&format!("{}:{}", b.mod_id, def.name)).map_err(bad)?,
                 temperature: def.temperature,
@@ -1176,7 +1223,10 @@ pub fn resolve_biomes(
     };
     let last = behaviours.last().map_or("", |b| b.mod_id.as_str());
     Ok((
-        BiomeTable::new(&biomes).map_err(|e| table(e, last, "biome"))?,
+        BiomeTable::new(&biomes)
+            .and_then(|t| t.with_selectors(&selectors))
+            .and_then(|t| t.with_strata(&strata))
+            .map_err(|e| table(e, last, "biome"))?,
         OreTable::new(&ores).map_err(|e| table(e, last, "ore"))?,
     ))
 }

@@ -25,6 +25,7 @@ const CANOPY: MaterialId = 189;
 const FLOWERS: MaterialId = 190;
 const CROP: [MaterialId; 3] = [191, 192, 193];
 const FURROW: MaterialId = 194;
+const FIELD: MaterialId = 195;
 
 const SEED: u64 = 0x7e55_e2ae_0000_0001;
 const SIZES: [f32; 3] = [1.0, 0.5, 0.25];
@@ -94,8 +95,17 @@ fn lone() -> Template {
     drawn("t:lone", LONE, &[&["mm", "mm"]])
 }
 
+/// An outskirt field, 6 m by 4 m, one corner cell marked.
+fn field() -> Template {
+    drawn(
+        "t:field",
+        FIELD,
+        &[&["mfffff", "ffffff", "ffffff", "ffffff"]],
+    )
+}
+
 fn templates() -> Vec<Template> {
-    vec![well(), house(), shed(), lone()]
+    vec![well(), house(), shed(), lone(), field()]
 }
 
 fn building(templates: &[Template], index: u16) -> Building {
@@ -134,6 +144,7 @@ fn village() -> Settlement {
         minimum: 3,
         path: Voxel::cube(PATH),
         loot: None,
+        outskirts: Default::default(),
     }
 }
 
@@ -1112,6 +1123,7 @@ fn hamlet() -> Settlement {
         minimum: 0,
         path: Voxel::cube(PATH),
         loot: None,
+        outskirts: Default::default(),
     }
 }
 
@@ -1652,7 +1664,7 @@ fn a_trail_stops_short_of_another_settlements_disc_and_margin() {
 }
 
 #[test]
-fn the_spawn_stands_just_outside_the_settlement_nearest_the_origin() {
+fn the_spawn_stands_inside_the_settlement_nearest_the_origin_south_of_its_centre() {
     let generator = generator(1.0, plain(listing_near(true, 128.0, 1.0, true)), village());
     let [x, z] = generator
         .settlement_spawn_m(512.0)
@@ -1682,7 +1694,7 @@ fn the_spawn_stands_just_outside_the_settlement_nearest_the_origin() {
         .unwrap();
     let from_centre = to(own, [x, z]);
     assert!(
-        (RADIUS_M - off_m..=RADIUS_M + MARGIN_M + off_m).contains(&from_centre),
+        (RADIUS_M * 0.55 - off_m..=RADIUS_M * 0.55 + off_m).contains(&from_centre),
         "the spawn stands {from_centre} m from its Settlement's well"
     );
     let nearest = all.iter().map(|c| to(c, [0.0; 2])).fold(f32::MAX, f32::min);
@@ -1706,4 +1718,264 @@ fn generator_for(listed: bool) -> Worldgen {
         plain(listing_near(listed, 128.0, 1.0, true)),
         village(),
     )
+}
+
+/// The village with fields laid beside its approach paths, within a margin wide enough for them.
+fn farmed() -> Settlement {
+    let t = templates();
+    Settlement {
+        margin_m: 20.0,
+        outskirts: vec![tesserae_core::settlement::Outskirts {
+            rules: vec![PlotRule {
+                building: building(&t, 4),
+                weight: 1.0,
+                min: 0,
+                max: 6,
+                loot: None,
+            }],
+            count: (4, 6),
+            chance: 1.0,
+        }],
+        ..village()
+    }
+}
+
+/// Each field's corner cell in the cells `with` changed, and each well's, a Settlement's centre.
+fn marked(changed: &HashMap<[i32; 3], (Voxel, Voxel)>, mark: MaterialId) -> Vec<[i32; 3]> {
+    let is = |at: [i32; 3]| changed.get(&at).is_some_and(|c| c.0.material() == mark);
+    let mut found: Vec<[i32; 3]> = changed
+        .keys()
+        .copied()
+        .filter(|&[x, y, z]| {
+            is([x, y, z]) && !is([x - 1, y, z]) && !is([x, y, z - 1]) && !is([x, y - 1, z])
+        })
+        .collect();
+    found.sort();
+    found
+}
+
+#[test]
+fn outskirt_fields_stand_past_the_disc_inside_the_margin_the_same_at_every_voxel_size() {
+    let listed = |size: f32, on: bool| generator(size, plain(listing(on)), farmed());
+    let mut in_metres = Vec::new();
+    for size in [1.0, 0.5] {
+        let (with, bare) = (listed(size, true), listed(size, false));
+        let changed = changed(&with, &bare, 160.0, false);
+        assert_eq!(
+            changed,
+            self::changed(&with, &bare, 160.0, true),
+            "{size} m: order"
+        );
+        let wells = marked(&changed, WELL);
+        let fields: Vec<[i32; 3]> = changed
+            .iter()
+            .filter(|(_, c)| c.0.material() == FIELD)
+            .map(|(at, _)| *at)
+            .collect();
+        assert!(wells.len() >= 2, "{size} m: {} Settlements", wells.len());
+        assert!(fields.len() >= 6, "{size} m: {} fields", fields.len());
+        for at in &fields {
+            let p = [at[0], at[2]].map(|g| (g as f32 + 0.5) * size);
+            // One near the scan's edge may belong to a Settlement whose well is past it.
+            if p.iter()
+                .any(|&c| (c - AWAY_M).abs() > 160.0 - RADIUS_M - 30.0)
+            {
+                continue;
+            }
+            let d = wells
+                .iter()
+                .map(|w| {
+                    let c = [w[0], w[2]].map(|g| g as f32 * size + 1.5);
+                    (p[0] - c[0]).hypot(p[1] - c[1])
+                })
+                .fold(f32::MAX, f32::min);
+            // The well stands a few metres off its centre.
+            assert!(
+                (RADIUS_M - 4.0..=RADIUS_M + 20.0 + 8.0).contains(&d),
+                "{size} m: a field's corner {d} m from its Settlement's well"
+            );
+        }
+        let mut corners: Vec<[i64; 2]> = marked(&changed, FIELD)
+            .iter()
+            .map(|c| [c[0], c[2]].map(|g| (g as f32 * size).round() as i64))
+            .collect();
+        corners.sort();
+        in_metres.push(corners);
+    }
+    assert_eq!(in_metres[0], in_metres[1], "the fields' corners in metres");
+}
+
+#[test]
+fn a_settlement_without_outskirts_lays_out_as_before() {
+    let plain_village = generator(1.0, plain(listing(true)), village());
+    let empty = generator(
+        1.0,
+        plain(listing(true)),
+        Settlement {
+            outskirts: vec![tesserae_core::settlement::Outskirts {
+                rules: Vec::new(),
+                count: (0, 0),
+                chance: 1.0,
+            }],
+            ..village()
+        },
+    );
+    let bare = generator(1.0, plain(listing(false)), village());
+    assert_eq!(
+        changed(&plain_village, &bare, 96.0, false),
+        changed(&empty, &bare, 96.0, false)
+    );
+}
+
+/// A hamlet whose fields stand on its approach paths, `chance` of its copies farming.
+fn farming_hamlet(count: (u8, u8), chance: f32) -> Settlement {
+    let t = templates();
+    Settlement {
+        margin_m: 20.0,
+        outskirts: vec![tesserae_core::settlement::Outskirts {
+            rules: vec![PlotRule {
+                building: building(&t, 4),
+                weight: 1.0,
+                min: 0,
+                max: count.1,
+                loot: None,
+            }],
+            count,
+            chance,
+        }],
+        ..hamlet()
+    }
+}
+
+/// How many fields each Settlement in a 640 m scan stands, by its well; none near the scan's edge,
+/// where a neighbour past it could claim a field.
+fn fields_per_settlement(settlement: Settlement) -> Vec<usize> {
+    let half_m = 320.0;
+    let made = |listed| {
+        generator(
+            1.0,
+            plain(listing_at(listed, 56.0, 1.0)),
+            settlement.clone(),
+        )
+    };
+    let changed = changed(&made(true), &made(false), half_m, false);
+    let wells: Vec<[f32; 2]> = marked(&changed, WELL)
+        .iter()
+        .map(|w| [w[0], w[2]].map(|g| g as f32 + 1.5))
+        .collect();
+    let mut counts = vec![0; wells.len()];
+    for corner in marked(&changed, FIELD) {
+        let middle = [corner[0], corner[2]].map(|g| g as f32);
+        let d = |w: [f32; 2]| (w[0] - middle[0]).hypot(w[1] - middle[1]);
+        let nearest = (0..wells.len())
+            .min_by(|&a, &b| d(wells[a]).total_cmp(&d(wells[b])))
+            .unwrap();
+        // Past its radius and margin, the field's own well is beyond the scan.
+        if d(wells[nearest]) < 40.0 {
+            counts[nearest] += 1;
+        }
+    }
+    wells
+        .iter()
+        .zip(counts)
+        .filter(|(w, _)| w.iter().all(|&c| (c - AWAY_M).abs() < half_m - 80.0))
+        .map(|(_, n)| n)
+        .collect()
+}
+
+#[test]
+fn a_share_of_settlements_farm_and_each_that_does_stands_its_minimum() {
+    let counts = fields_per_settlement(farming_hamlet((2, 3), 0.5));
+    let farming = counts.iter().filter(|&&n| n > 0).count();
+    assert!(counts.len() >= 20, "only {} Settlements", counts.len());
+    assert!(
+        farming * 3 > counts.len() && farming * 3 < 2 * counts.len(),
+        "{farming} of {} farm",
+        counts.len()
+    );
+    assert!(counts.iter().all(|&n| n == 0 || n >= 2), "{counts:?}");
+}
+
+#[test]
+fn a_settlement_whose_ground_cannot_hold_its_minimum_lays_no_outskirt() {
+    let counts = fields_per_settlement(farming_hamlet((40, 40), 1.0));
+    assert!(counts.len() >= 20, "only {} Settlements", counts.len());
+    assert!(counts.iter().all(|&n| n == 0), "{counts:?}");
+}
+
+#[test]
+fn fields_stand_two_deep_from_an_approach_path() {
+    let t = templates();
+    let crowded = Settlement {
+        outskirts: vec![tesserae_core::settlement::Outskirts {
+            rules: vec![PlotRule {
+                building: building(&t, 4),
+                weight: 1.0,
+                min: 0,
+                max: 40,
+                loot: None,
+            }],
+            count: (1, 40),
+            chance: 1.0,
+        }],
+        ..farmed()
+    };
+    let made = |listed| generator(1.0, plain(listing(listed)), crowded.clone());
+    let corners = marked(&changed(&made(true), &made(false), 160.0, false), FIELD);
+    // A second-row field stands straight behind its first-row neighbour: its 4 m depth and the two
+    // 2 m aprons between. Neighbours along a path stand at least 10 m apart.
+    let behind = |a: &[i32; 3], b: &[i32; 3]| {
+        (a[0] == b[0] && (a[2] - b[2]).abs() == 8) || (a[2] == b[2] && (a[0] - b[0]).abs() == 8)
+    };
+    assert!(
+        corners.iter().any(|a| corners.iter().any(|b| behind(a, b))),
+        "no field stands behind another: {corners:?}"
+    );
+}
+
+#[test]
+fn more_fields_than_the_paths_hold_ring_the_disc() {
+    let counts = fields_per_settlement(farming_hamlet((8, 8), 1.0));
+    let farming = counts.iter().filter(|&&n| n >= 8).count();
+    assert!(
+        farming * 2 > counts.len(),
+        "{farming} of {} stand eight fields: {counts:?}",
+        counts.len()
+    );
+}
+
+#[test]
+fn a_second_outskirt_group_lays_its_own_and_leaves_the_first_groups_plots() {
+    let t = templates();
+    let farms = farmed();
+    let with_lone = Settlement {
+        outskirts: [
+            farms.outskirts.clone(),
+            vec![tesserae_core::settlement::Outskirts {
+                rules: vec![PlotRule {
+                    building: building(&t, 3),
+                    weight: 1.0,
+                    min: 0,
+                    max: 4,
+                    loot: None,
+                }],
+                count: (1, 4),
+                chance: 1.0,
+            }],
+        ]
+        .concat(),
+        ..farmed()
+    };
+    let scan = |settlement: Settlement| {
+        let made = |listed| generator(1.0, plain(listing(listed)), settlement.clone());
+        changed(&made(true), &made(false), 160.0, false)
+    };
+    let (one, two) = (scan(farms), scan(with_lone));
+    assert_eq!(
+        marked(&one, FIELD),
+        marked(&two, FIELD),
+        "the fields stay put"
+    );
+    assert!(marked(&one, LONE).is_empty());
+    assert!(!marked(&two, LONE).is_empty(), "the second group stands");
 }

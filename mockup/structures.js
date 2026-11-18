@@ -677,6 +677,252 @@ const B = {
     g.put(1, 1, 1, "air");
     return g.done();
   },
+  /*
+   * Farm ground: worked soil in the Ground layer under rows of a crop, which grows and ripens like a
+   * planted one; a later Stage is a field planted earlier. `crops` cycles row by row along z, each a
+   * Material on the cross Shape or `{ m, shape }`; a grass lane runs across the middle, and a grass
+   * rim round it keeps the rows off the road.
+   */
+  field: (crops, w = 9, d = 7) => {
+    const g = new Grid(),
+      lane = d >> 1;
+    for (let x = 0; x < w; x++)
+      for (let z = 0; z < d; z++) {
+        const rim = x === 0 || z === 0 || x === w - 1 || z === d - 1;
+        if (rim || z === lane) {
+          g.put(x, 0, z, M("terra:grass"));
+          continue;
+        }
+        const crop = crops[z % crops.length];
+        g.put(x, 0, z, M("terra:dirt"));
+        g.put(
+          x,
+          1,
+          z,
+          typeof crop === "string" ? M(crop, "cross") : M(crop.m, crop.shape),
+        );
+      }
+    return g.done();
+  },
+  /*
+   * Sugar cane on sand either side of a water channel down the middle, in clumps one to three tall
+   * that grow on to the cane's height.
+   */
+  caneField: (w = 13, d = 9) => {
+    const g = new Grid(),
+      channel = d >> 1;
+    for (let x = 0; x < w; x++)
+      for (let z = 0; z < d; z++) {
+        const rim = x === 0 || z === 0 || x === w - 1 || z === d - 1;
+        if (rim) g.put(x, 0, z, M("terra:grass"));
+        else if (z === channel) g.put(x, 0, z, M("water"));
+        else {
+          g.put(x, 0, z, M("terra:sand"));
+          if (Math.abs(z - channel) <= 2 && x % 2 === 1)
+            g.fill(
+              x,
+              1,
+              z,
+              x,
+              1 + ((x * 7 + z * 3) % 3),
+              z,
+              M("flora:cane", "cross"),
+            );
+        }
+      }
+    return g.done();
+  },
+  /*
+   * A dark plank shed, its Door on +Z, over a dirt floor of mushrooms, which grow only out of the
+   * light.
+   */
+  /*
+   * A Game's first food lying ripe on a bed of `look.soil` inside a rim of `look.top`, on every
+   * other cell, so a new Player who enters a village finds a meal beside it.
+   */
+  foodPatch: (look, w = 7, d = 5) => {
+    const g = new Grid();
+    for (let x = 0; x < w; x++)
+      for (let z = 0; z < d; z++) {
+        const rim = x === 0 || z === 0 || x === w - 1 || z === d - 1;
+        g.put(x, 0, z, M(rim ? look.top : look.soil));
+        if (!rim && (x + z) % 2 === 1) g.put(x, 1, z, M(look.food));
+      }
+    return g.done();
+  },
+  /*
+   * A rounded pond in a Game's `look` (`rim`, `bed`): the World's water level with the ground, a
+   * metre deeper in its middle, on a bed with a rim round it; the ground outside the oval is kept.
+   * `pads` floats `look.pad` on one in `pads` of its cells, or stands `look.reed` on its rim, none
+   * when 0. Level sources, so nothing flows when it is made.
+   */
+  pond: (look, w = 7, d = 5, pads = 0) => {
+    const g = B.pondCells(look, w, d);
+    if (pads)
+      for (const [key, c] of [...g.map]) {
+        const [x, y, z] = key.split(",").map(Number);
+        if (y !== 0 || (x * 7 + z * 3) % pads !== 0) continue;
+        if (c.m === "water" && look.pad)
+          g.put(x, 1, z, M(look.pad, "aquatic:pad"));
+        else if (c.m === look.rim && look.reed)
+          g.put(x, 1, z, M(look.reed, "cross"));
+      }
+    return g.done();
+  },
+  /*
+   * A pond fed along a brook lined with `look.stone` from a spring stone at its +Z end, so a
+   * Player can follow the water to it. The brook is level too.
+   */
+  brookPond: (look, w = 7, d = 5, brook = 7) => {
+    const g = B.pondCells(look, w, d),
+      mid = (w - 1) >> 1;
+    for (let z = d - 1; z < d + brook; z++) {
+      g.put(mid, 0, z, M("water"));
+      g.put(mid, -1, z, M(look.bed));
+      for (const x of [mid - 1, mid + 1]) g.put(x, 0, z, M(look.stone));
+    }
+    g.fill(mid - 1, 0, d + brook, mid + 1, 1, d + brook, M(look.stone));
+    return g.done();
+  },
+  pondCells: (look, w, d) => {
+    const g = new Grid(),
+      [cx, cz] = [(w - 1) / 2, (d - 1) / 2],
+      within = (x, z, shrink) =>
+        ((x - cx) / (cx + 0.5 - shrink)) ** 2 +
+          ((z - cz) / (cz + 0.5 - shrink)) ** 2 <=
+        1;
+    for (let x = 0; x < w; x++)
+      for (let z = 0; z < d; z++) {
+        if (!within(x, z, 0)) continue;
+        if (!within(x, z, 1)) {
+          g.put(x, 0, z, M(look.rim));
+          continue;
+        }
+        const deep = within(x, z, 2);
+        g.put(x, 0, z, M("water"));
+        if (deep) g.put(x, -1, z, M("water"));
+        g.put(x, deep ? -2 : -1, z, M(look.bed));
+      }
+    return g;
+  },
+  /*
+   * Water pouring off a rock ledge into a pool before it, in a Game's `look` (`rock`, `top`,
+   * `bed`): a spring at the ledge's back runs along a channel to its lip, falls, and settles in
+   * the pool. The ledge stands in uneven columns topped with `top`, lower at its sides and higher
+   * in a crag or two, and boulders sit on the pool's rim, so it reads as rock, not a block. The
+   * columns either side of the channel stand full height, which holds the channel's water.
+   */
+  waterfall: (look, w = 9, d = 10, h = 5) => {
+    const g = new Grid(),
+      rock = M(look.rock),
+      mid = (w - 1) >> 1,
+      ledge = 4,
+      bump = (x, z) => ((x * 5 + z * 3 + x * z) % 4) - 1;
+    for (let x = 0; x < w; x++)
+      for (let z = 0; z < d; z++) {
+        if (z < ledge) {
+          const side = Math.min(x, w - 1 - x);
+          const top =
+            Math.abs(x - mid) <= 1
+              ? h
+              : h -
+                Math.max(0, 2 - side) +
+                Math.max(0, bump(x, z)) -
+                (z === ledge - 1 ? 1 : 0);
+          g.fill(x, 0, z, x, top - 1, z, rock);
+          if (Math.abs(x - mid) > 1 || z === 0) g.put(x, top, z, M(look.top));
+          else g.put(x, top, z, rock);
+          continue;
+        }
+        const edge = x === 0 || x === w - 1 || z === d - 1;
+        g.put(x, -2, z, M(look.bed));
+        if (!edge) {
+          g.fill(x, -1, z, x, 0, z, M("water"));
+          continue;
+        }
+        // A rim a Voxel over the pool, so the fall's spread stays in it, with a boulder here and
+        // there.
+        g.fill(x, -1, z, x, 1, z, rock);
+        if ((x * 3 + z * 7) % 5 === 0) g.put(x, 2, z, rock);
+      }
+    // A channel in the ledge's top to its lip, the spring at its back.
+    for (let z = 1; z < ledge; z++) g.put(mid, h, z, M("water"));
+    g.put(mid, h + 1, 0, rock);
+    return g.done();
+  },
+  mushroomShed: (w = 7, d = 6) => {
+    const g = new Grid(),
+      wall = M("terra:oak_planks");
+    for (let x = 0; x < w; x++)
+      for (let z = 0; z < d; z++) {
+        const edge = x === 0 || z === 0 || x === w - 1 || z === d - 1;
+        g.put(x, 0, z, M("terra:dirt"));
+        if (edge) g.fill(x, 1, z, x, 3, z, wall);
+        else if ((x + z) % 2 === 0 && z < d - 2)
+          g.put(
+            x,
+            1,
+            z,
+            M(
+              x % 4 === 1 ? "flora:mushroom_red" : "flora:mushroom_brown",
+              "flora:mushroom",
+            ),
+          );
+        g.put(x, 4, z, wall);
+      }
+    doorway(g, w >> 1, d - 1, 1, [0, w - 1], "terra:oak_planks");
+    return g.done();
+  },
+  /* Young fruit trees in rows on grass, three metres apart, which grow up as wild ones do. */
+  orchard: (saplings, w = 11, d = 11) => {
+    const g = new Grid();
+    for (let x = 0; x < w; x++)
+      for (let z = 0; z < d; z++) {
+        g.put(x, 0, z, M("terra:grass"));
+        if (x % 3 === 1 && z % 3 === 1)
+          g.put(x, 1, z, M(saplings[(x + z) % saplings.length], "cross"));
+      }
+    return g.done();
+  },
+  /* A fence round grass with a gate gap two wide in the middle of its road side, +Z. */
+  paddock: (w = 12, d = 10, inside = () => null) => {
+    const g = new Grid(),
+      gate = [(w >> 1) - 1, w >> 1];
+    for (let x = 0; x < w; x++)
+      for (let z = 0; z < d; z++) {
+        const edge = x === 0 || z === 0 || x === w - 1 || z === d - 1;
+        const cell = inside(x, z);
+        g.put(x, 0, z, cell?.ground ?? M("terra:grass"));
+        if (edge)
+          g.put(
+            x,
+            1,
+            z,
+            z === d - 1 && gate.includes(x)
+              ? "air"
+              : M("terra:oak_planks", "fence"),
+          );
+        else if (cell?.plant) g.put(x, 1, z, cell.plant);
+      }
+    return g.done();
+  },
+  /* A fenced vegetable plot small enough for a Plot among houses: beds of crops, a path between. */
+  garden: (w = 7, d = 6) =>
+    B.paddock(w, d, (x, z) =>
+      x === w >> 1
+        ? { ground: M("terra:sand") }
+        : {
+            ground: M("terra:dirt"),
+            plant: M(
+              [
+                "crops:carrot_sprout",
+                "crops:potato_sprout",
+                "crops:berry_sprout",
+              ][z % 3],
+              "cross",
+            ),
+          },
+    ),
   /* A tower round a two-wide stair that spirals from its cellar up its walls to the roof deck. */
   tower: (n, h, cellar = 0) => {
     const g = new Grid(),
@@ -1007,6 +1253,122 @@ const T = (game, slug, name, note, kind, build, style = "wild") => ({
   build,
   style,
 });
+/*
+ * Each Game's ponds and falls in its own Materials: a pond's rim and bed, a brook's stones, a
+ * ledge's rock and the turf over it, and lily pads where it has the aquatic Mod, else reeds.
+ */
+const WATER_LOOK = {
+  Terra: {
+    rim: "terra:sand",
+    bed: "strata:clay",
+    stone: "terra:cobblestone",
+    rock: "terra:stone",
+    top: "terra:grass",
+    pad: "aquatic:lily_pad",
+  },
+  Meadow: {
+    rim: "strata:sand",
+    bed: "strata:clay",
+    stone: "meadow:fieldstone",
+    rock: "strata:stone",
+    top: "strata:turf",
+    reed: "flora:cane",
+  },
+  Lumen: {
+    rim: "strata:sand",
+    bed: "strata:clay",
+    stone: "strata:stone",
+    rock: "strata:stone",
+    top: "strata:turf",
+    reed: "flora:cane",
+  },
+  Tidewater: {
+    rim: "strata:sand",
+    bed: "strata:sand",
+    stone: "strata:stone",
+    rock: "strata:stone",
+    top: "strata:turf",
+    pad: "aquatic:lily_pad",
+  },
+  Ember: {
+    rim: "hearth:ash",
+    bed: "strata:clay",
+    stone: "strata:basalt",
+    rock: "strata:basalt",
+    top: "hearth:ash",
+    reed: "flora:cane",
+  },
+};
+const WATER = (game) => {
+  const look = WATER_LOOK[game],
+    lilies = look.pad ? "Lily pond" : "Reed pond";
+  return [
+    T(game, "pond", "Pond", "Still water by the fields", "water", () =>
+      B.pond(look, 7, 5),
+    ),
+    T(game, "lily-pond", lilies, "A round pond with its plants", "water", () =>
+      B.pond(look, 9, 7, 3),
+    ),
+    T(
+      game,
+      "brook-pond",
+      "Brook and pond",
+      "A spring's brook into a pond",
+      "water",
+      () => B.brookPond(look),
+    ),
+    T(
+      game,
+      "waterfall",
+      "Waterfall",
+      "Water off a craggy ledge into a pool",
+      "water",
+      () => B.waterfall(look),
+    ),
+  ];
+};
+/* Each Game's first food and the ground its patch lies on. */
+const FOOD_LOOK = {
+  Terra: {
+    name: "Melon patch",
+    food: "terra:melon",
+    top: "terra:grass",
+    soil: "terra:dirt",
+  },
+  Meadow: {
+    name: "Pumpkin patch",
+    food: "meadow:pumpkin",
+    top: "strata:turf",
+    soil: "strata:soil",
+  },
+  Lumen: {
+    name: "Glowberry patch",
+    food: "lumen:glowberry",
+    top: "strata:turf",
+    soil: "strata:soil",
+  },
+  Tidewater: {
+    name: "Coconut heap",
+    food: "tidewater:coconut",
+    top: "strata:turf",
+    soil: "strata:sand",
+  },
+  Ember: {
+    name: "Pepper bed",
+    food: "ember:pepper",
+    top: "hearth:ash",
+    soil: "strata:soil",
+  },
+};
+const FOOD = (game) =>
+  T(
+    game,
+    "food-patch",
+    FOOD_LOOK[game].name,
+    "Ripe food by a village",
+    "field",
+    () => B.foodPatch(FOOD_LOOK[game]),
+  );
 const SET = (game, names) =>
   [
     ["cottage", "One room, steep roof, chimney", "home"],
@@ -1076,6 +1438,116 @@ const GAME_TEMPLATES = {
     T("Terra", "waystone", "Waystone arch", "Marks a road", "wild", () =>
       B.arch(5, 5),
     ),
+    T("Terra", "wheat-field", "Wheat field", "Rows of wheat", "field", () =>
+      B.field(["crops:wheat_sprout"], 15, 11),
+    ),
+    T(
+      "Terra",
+      "ripe-wheat-field",
+      "Ripe wheat field",
+      "Wheat ready to harvest",
+      "field",
+      () => B.field(["crops:wheat_ripe"], 19, 13),
+    ),
+    T("Terra", "carrot-field", "Carrot field", "Rows of carrots", "field", () =>
+      B.field(["crops:carrot_sprout"], 13, 9),
+    ),
+    T(
+      "Terra",
+      "potato-field",
+      "Potato field",
+      "Rows of potatoes",
+      "field",
+      () => B.field(["crops:potato_sprout", "crops:potato_young"], 13, 9),
+    ),
+    T(
+      "Terra",
+      "mixed-field",
+      "Mixed field",
+      "Wheat, carrots and potatoes",
+      "field",
+      () =>
+        B.field(
+          ["crops:wheat_sprout", "crops:carrot_sprout", "crops:potato_sprout"],
+          15,
+          11,
+        ),
+    ),
+    T(
+      "Terra",
+      "berry-field",
+      "Berry field",
+      "Rows of berry bushes",
+      "field",
+      () =>
+        B.field(
+          [
+            { m: "crops:berry_bush", shape: "crops:berry_young" },
+            { m: "crops:berry_ripe", shape: "crops:berry_ripe" },
+          ],
+          13,
+          9,
+        ),
+    ),
+    T(
+      "Terra",
+      "watermelon-patch",
+      "Watermelon patch",
+      "Vines that bear melons",
+      "field",
+      () => B.field(["crops:watermelon_vine"], 13, 9),
+    ),
+    T(
+      "Terra",
+      "cane-field",
+      "Sugar cane field",
+      "Cane beside a water channel",
+      "field",
+      () => B.caneField(),
+    ),
+    T(
+      "Terra",
+      "mushroom-shed",
+      "Mushroom shed",
+      "Mushrooms grown in the dark",
+      "field",
+      () => B.mushroomShed(),
+    ),
+    ...WATER("Terra"),
+    FOOD("Terra"),
+    T(
+      "Terra",
+      "orchard",
+      "Orchard",
+      "Apple, cherry and orange trees",
+      "field",
+      () =>
+        B.orchard(
+          [
+            "flora:apple_sapling",
+            "flora:cherry_sapling",
+            "flora:orange_sapling",
+          ],
+          13,
+          13,
+        ),
+    ),
+    T(
+      "Terra",
+      "paddock",
+      "Paddock",
+      "A fence round grass, a gate",
+      "field",
+      () => B.paddock(14, 12),
+    ),
+    T(
+      "Terra",
+      "garden",
+      "Vegetable garden",
+      "Fenced beds by a house",
+      "field",
+      () => B.garden(),
+    ),
   ],
   Tidewater: [
     ...SET("Tidewater", [
@@ -1127,6 +1599,8 @@ const GAME_TEMPLATES = {
       () => B.ropeBridge(),
       "ropeBridge",
     ),
+    ...WATER("Tidewater"),
+    FOOD("Tidewater"),
   ],
   Ember: [
     ...SET("Ember", [
@@ -1166,6 +1640,8 @@ const GAME_TEMPLATES = {
     T("Ember", "barrow", "Buried barrow", "Tomb under a mound", "wild", () =>
       B.mound(6, 3, 2),
     ),
+    ...WATER("Ember"),
+    FOOD("Ember"),
   ],
   Lumen: [
     ...SET("Lumen", [
@@ -1215,6 +1691,8 @@ const GAME_TEMPLATES = {
       "wild",
       () => B.dome(4, true),
     ),
+    ...WATER("Lumen"),
+    FOOD("Lumen"),
   ],
   Meadow: [
     ...SET("Meadow", [
@@ -1242,12 +1720,15 @@ const GAME_TEMPLATES = {
       "Footbridge",
       "On log trestles over a brook",
       "wild",
-      () => B.footbridge(),
+      /* Long enough to land dry either side of a river's narrowest water. */
+      () => B.footbridge(17),
       "woodBridge",
     ),
     T("Meadow", "fairy-ring", "Fairy ring", "Lights in a circle", "wild", () =>
       B.ring(3, 8, 1),
     ),
+    ...WATER("Meadow"),
+    FOOD("Meadow"),
   ],
 };
 const TEMPLATES = Object.fromEntries(
@@ -1259,6 +1740,8 @@ const KINDS = {
   home: "Homes",
   trade: "Trades and stores",
   farm: "Farm",
+  field: "Fields and gardens",
+  water: "Ponds and falls",
   centre: "Centre",
   wild: "Wilderness",
 };
@@ -1297,6 +1780,8 @@ function turned(id, turn) {
   return out;
 }
 function materialOf(t, c) {
+  /* A Mod's own Material, such as a crop or a sapling, named in full. */
+  if (c.m.includes(":")) return c.m;
   if (c.m === "water")
     return t.game === "Terra" ? "terra:water" : "waters:water";
   if (FIXED[c.m]) return `${t.game.toLowerCase()}:${FIXED[c.m]}`;

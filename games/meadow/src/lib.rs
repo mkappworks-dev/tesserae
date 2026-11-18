@@ -6,6 +6,7 @@ wit_bindgen::generate!({ path: "../../crates/tesserae-mods/wit/0.3", world: "mod
 
 mod building;
 mod food;
+mod landforms;
 mod plants;
 mod structures;
 mod templates;
@@ -62,6 +63,8 @@ fn biomes() -> Vec<BiomeDef> {
     vec![
         BiomeDef {
             soundscape: None,
+            selectors: None,
+            strata: None,
             name: "meadow".into(),
             temperature: 0.5,
             humidity: 0.5,
@@ -82,6 +85,8 @@ fn biomes() -> Vec<BiomeDef> {
         },
         BiomeDef {
             soundscape: None,
+            selectors: None,
+            strata: None,
             name: "heath".into(),
             temperature: 0.3,
             humidity: 0.7,
@@ -102,6 +107,8 @@ fn biomes() -> Vec<BiomeDef> {
         },
         BiomeDef {
             soundscape: None,
+            selectors: None,
+            strata: None,
             name: "dunes".into(),
             temperature: 0.75,
             humidity: 0.25,
@@ -119,6 +126,8 @@ fn biomes() -> Vec<BiomeDef> {
         },
         BiomeDef {
             soundscape: None,
+            selectors: None,
+            strata: None,
             name: "thicket".into(),
             temperature: 0.72,
             humidity: 0.7,
@@ -136,6 +145,8 @@ fn biomes() -> Vec<BiomeDef> {
         },
         BiomeDef {
             soundscape: None,
+            selectors: None,
+            strata: None,
             name: "fen".into(),
             temperature: 0.55,
             humidity: 0.78,
@@ -157,6 +168,8 @@ fn biomes() -> Vec<BiomeDef> {
         },
         BiomeDef {
             soundscape: None,
+            selectors: None,
+            strata: None,
             name: "prairie".into(),
             temperature: 0.78,
             humidity: 0.5,
@@ -172,7 +185,7 @@ fn biomes() -> Vec<BiomeDef> {
                 structures::wild(&["hive"]),
             ]
             .concat(),
-            settlements: structures::village(),
+            settlements: structures::outlying(),
             surface_features: plants::prairie(),
             loot: Some(structures::loot(structures::biome_loot("prairie"))),
         },
@@ -435,6 +448,12 @@ impl Guest for Meadow {
             temperature_size_m: CLIMATE_SIZE_M,
             humidity_size_m: CLIMATE_SIZE_M,
         });
+        world.cave_biomes = Some(landforms::caves());
+        // Under Sea level, where version 2's ground never sinks, so only version 3 has a sea.
+        world.water = Some(tesserae::mods::content::WaterParams {
+            level_m: SEA_LEVEL_M - 1.0,
+            material: "waters:water".into(),
+        });
         Declaration {
             materials: [food::material()]
                 .into_iter()
@@ -455,7 +474,7 @@ impl Guest for Meadow {
                 kind: ToolKind::Place,
             }],
             items: vec![food::item()],
-            biomes: biomes(),
+            biomes: biomes().into_iter().chain(landforms::biomes()).collect(),
             survival: None,
             sounds: Vec::new(),
             sound_sets: Vec::new(),

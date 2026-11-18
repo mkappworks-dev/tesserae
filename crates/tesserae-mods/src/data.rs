@@ -162,6 +162,8 @@ struct World {
     water: Option<world::Water>,
     ground: Option<Ground>,
     climate: Option<world::Climate>,
+    lava: Option<String>,
+    cave_biomes: Option<Vec<world::CaveBiome>>,
     movement: Option<world::Movement>,
     map: Option<world::Map>,
     character: Option<character::Character>,
@@ -323,6 +325,10 @@ pub(crate) fn parse(id: &str, payload: &CheckedPayload) -> Result<Declaration, M
                     octaves: w.octaves.unwrap_or(defaults.octaves),
                     ground: w.ground.map(Into::into),
                     climate: w.climate.map(Into::into),
+                    lava: w.lava,
+                    cave_biomes: w
+                        .cave_biomes
+                        .map(|b| b.into_iter().map(Into::into).collect()),
                     caves: w.caves.map(Into::into),
                     smoothing: w.smoothing.map(Into::into),
                     water: w.water.map(Into::into),

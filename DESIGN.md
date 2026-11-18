@@ -537,7 +537,7 @@ multiplayer is a later transport swap, not a rewrite.
    belong to step 13; they are listed there because they change what the sky and
    fog should be.
 
-### Steps 10 to 28: engine systems and game content
+### Steps 10 to 29: engine systems and game content
 
 Each step has an Engine part, the mechanism, and a Game or Mod part, the data
 that uses it. The Engine part always comes first, crosses the WIT contract, and
@@ -554,19 +554,20 @@ controls, movement, save, camera and input work already in flight is tracked in
 | 14  | Audio                   | Server-driven events, metre attenuation, mixing, Soundscapes and Audio settings                                              | CC0 Terra sounds and music         | -          | Done            |
 | 15  | Inventory               | Server-owned transactions that compose with the undo journal, save                                                           | Stack sizes, item rules            | 11, 12     | Done            |
 | 16  | Crafting                | Recipe schema, station interaction, Use on Voxels (doors, containers), UI host                                               | Recipes, stations                  | 15         | Done            |
-| 17  | Weather                 | Weather state and tick, particles, sky hooks                                                                                 | Weather types, climate rules       | 13, 22     | Not started     |
+| 17  | Terrain and water       | Generator version 3: landforms and oceans, rivers and lakes, caves and the underground, Biomes by altitude and coast (17a-d) | Terrain and water per Biome        | 13         | Done            |
 | 18  | Plants                  | Growth on the Server tick, placement rules, harvesting                                                                       | Plant data                         | 13         | Done            |
 | 19  | Map, compass            | Server-provided summaries (the Client never reads World storage), map view                                                   | Map style, markers                 | 13         | Done            |
 | 20  | Structures              | Template format, deterministic placement by worldgen and tools                                                               | Templates                          | 13         | Done            |
-| 20b | Blueprints and Sites    | Blueprint Items that lay a Site, which builds itself over time from Items brought to it                                      | Blueprints                         | 15, 20     | Not started     |
 | 21  | Survival loop           | Health, damage, hunger, death, respawn, game modes                                                                           | Numbers and rules                  | 15         | Done            |
-| 22  | Terrain and water       | Generator version 3: landforms and oceans, rivers and lakes, caves and the underground, Biomes by altitude and coast (22a-d) | Terrain and water per Biome        | 13         | Not started     |
-| 23  | Mobs, animals           | Entity AI hooks, spawning, replication shape designed against transport                                                      | Behaviours, spawn tables           | 12, 13, 21 | Not started     |
-| 24  | NPCs                    | Persistent identity, dialogue and trade plumbing                                                                             | NPC definitions, dialogue          | 15, 23     | Not started     |
-| 25  | Logic and machines      | Wiring and automation, then moving and flying Voxel bodies (see below)                                                       | Machine parts, logic components    | 12, 20     | Not started     |
-| 26  | Creation tools          | Structure, material and texture editors, screenshot and replay mode                                                          | Content made with them             | 10, 20     | Not started     |
-| 27  | Chat and commands       | Command registry, parser, permissions                                                                                        | The commands                       | -          | Not started     |
-| 28  | Release hardening       | Final 1.0 contract freeze, macOS bundle, first-run, save migration tests, diagnostics, CI budgets                            | -                                  | all        | Not started     |
+| 22  | LOD features            | Trees and Structures drawn at coarse levels as sparse impostors from the same pure draws, and a ring quality curve           | Larger default view distance       | 6, 18, 20  | Not started     |
+| 23  | Blueprints and Sites    | Blueprint Items that lay a Site, which builds itself over time from Items brought to it                                      | Blueprints                         | 15, 20     | Not started     |
+| 24  | Weather                 | Weather state and tick, particles, sky hooks                                                                                 | Weather types, climate rules       | 13, 17     | Not started     |
+| 25  | Mobs, animals           | Entity AI hooks, spawning, replication shape designed against transport                                                      | Behaviours, spawn tables           | 12, 13, 21 | Not started     |
+| 26  | NPCs                    | Persistent identity, dialogue and trade plumbing                                                                             | NPC definitions, dialogue          | 15, 25     | Not started     |
+| 27  | Logic and machines      | Wiring and automation, then moving and flying Voxel bodies (see below)                                                       | Machine parts, logic components    | 12, 20     | Not started     |
+| 28  | Creation tools          | Structure, material and texture editors, screenshot and replay mode                                                          | Content made with them             | 10, 20     | Not started     |
+| 29  | Chat and commands       | Command registry, parser, permissions                                                                                        | The commands                       | -          | Not started     |
+| 30  | Release hardening       | Final 1.0 contract freeze, macOS bundle, first-run, save migration tests, diagnostics, CI budgets                            | -                                  | all        | Not started     |
 
 Notes:
 
@@ -640,9 +641,9 @@ Notes:
   canopy while it stands), soil and water are Material tags, and a Biome may
   list 16 surface features, Plants included, with vines hung from trees by
   worldgen only. The shared Mods `flora`, `crops` and `aquatic` declare the
-  vegetation every Game places. Not shipped: falling trees as bodies (step 25),
+  vegetation every Game places. Not shipped: falling trees as bodies (step 27),
   trees as Templates (step 20 kept them parametric), leaf decay and weather
-  inputs (step 17). Measured by the benchmark pass (Apple M5, thread CPU time,
+  inputs (step 24). Measured by the benchmark pass (Apple M5, thread CPU time,
   interleaved rounds, load average 8 to 9,
   `cargo bench -p tesserae-core --bench plants` and the `--ignored` rig in
   `server/fluids/plants/tests/bench.rs`): `PLANT_SAMPLES` stays 32, so a Sample
@@ -731,7 +732,7 @@ Notes:
   Spec and tickets: `.scratch/2026-11-15-phase-20-structures/`.
 
   Not shipped, or shipped short:
-  - Blueprints and Sites are step 20b. Container loot, entities, fluids,
+  - Blueprints and Sites are step 23. Container loot, entities, fluids,
     weathering variants, mirroring and Structures at coarse LOD levels are out
     of scope.
   - A placement that would change more than the undo journal's 131,072 Voxels
@@ -823,43 +824,45 @@ Notes:
   edit-and-restart loop was run by hand in the real window for a data change, a
   Rust change, a failure and its correction (ticket 08). It establishes how
   contracts evolve compatibly while later systems add APIs. The final 1.0
-  contract freeze belongs to step 28, after those systems are implemented.
+  contract freeze belongs to step 30, after those systems are implemented.
   `mods/` holds fifteen shared data Mods and `games/` four small Rust Games
   built on them (`docs/demo-games.md`); `terra` remains the one self-contained
   Game.
-- **Step 22** is not started. It reworks the whole of worldgen, so it comes as
-  Generator version 3; a World made under version 2 keeps its terrain and
-  recorded digests. Today the surface is one height noise, caves are one tunnel
-  field, and a Biome, picked by temperature and humidity, never changes height.
-  Step 22 replaces that with a layered generator, delivered in four parts:
-  - **22a Landforms and oceans.** Continental-scale fields (how far inland, how
-    eroded, peaks against valleys), domain-warped so nothing reads as noise,
-    shape oceans (shelf, slope, deep floor, trenches), coasts with beaches,
-    cliffs and stony shores, archipelagos, plains, hills, plateaus and mesas,
-    canyons, badlands, volcanic cones and mountain ranges with ridges and
-    snow-capped peaks. A 3D density near the surface allows overhangs, arches
-    and sheer cliffs.
-  - **22b Water.** A sea level, lakes in basins, and rivers and streams found by
-    a drainage pass over a coarse lattice, from the mountains down to a lake or
-    the sea, carving valleys, deltas and waterfalls where they drop; springs and
-    a water table. Each region's drainage is computed once from the seed and
-    cached, so generation stays a pure function in any Chunk order.
-  - **22c Underground.** Rock strata, large caverns, winding tunnels, ravines,
-    underground lakes and rivers, lava lakes near the floor, aquifers and ore
-    veins, plus cave Biomes chosen in three dimensions (crystal, fungal,
-    dripstone, ice, lush) with their own surface features, such as stalactites.
-  - **22d Biomes.** Biome choice gains altitude, distance inland and erosion, so
-    ocean (warm, cold, deep, frozen), shore, river, swamp, alpine, desert-dune,
-    tundra and other Biomes fall where the land suits them, and borders blend
-    their ground, vegetation and colours. A Biome may shape its relief within
-    its landform, which amends ADR-0022. Everything is spread by seeded, layered
-    fields in metres, coarse to fine, and coarse LOD levels read the same
-    fields. The Games then declare the new Biomes and water. Phase 20's bridges
-    find river crossings with no change to their rule, and Meadow, whose rolling
-    ground has no gap, stands its first footbridges. Weather (step 17) follows
-    step 22 and reads its climate, so rain and snow fall by altitude, coast and
-    Biome; weather never edits terrain.
-- **Step 25** is the largest unknown in 1.0. Machines move as a unit, so they
+- **Step 17** is done. A new World is Generator version 3; a World made under 1
+  or 2 keeps its terrain and recorded digests. Version 3 is a stack of fields in
+  metres over a declared band (ADR-0030): continentalness, erosion and peaks
+  shape oceans with a shelf and formations on the floor, coasts, plains, benched
+  and craggy mountains and volcanic cones, with overhangs near the surface. A
+  regional drainage solve, cached per 2 km region with a halo, fills basins as
+  lakes and cuts rivers down valleys to the sea. Underground, Biomes bed strata,
+  caverns open under 22 m of rock, lava fills the deepest under a sealing floor,
+  perched aquifers raise the water table by region and well up in sealed
+  springs, and a Game declares up to 16 cave Biomes, chosen in 3D, with their
+  own rock, floor, features and fog. Biomes gain altitude, coast, erosion and
+  river selectors and a relief scale, and every demo Game declares ocean, shore,
+  river and alpine Biomes, cave Biomes and its water. Settlements gained
+  outskirts (farms, ponds, brooks and waterfalls by chance), a new Player enters
+  a village where its first food grows, and no cave opens within 16 m of a
+  Structure. The terrain's arithmetic runs on `libm`, so it rounds alike on
+  every platform; Settlement roads still use the platform's trigonometry, as in
+  version 2. Measured on the thread's CPU clock against `main`: the sky and deep
+  early-outs are unchanged (0.01 µs a Chunk), version 2's surface Chunks cost
+  about 105 µs against 90, and version 3's about 950 µs warm and 1350 cold, some
+  9 times version 2's against a budget of 3; the per-column heightfield (`fbm2`,
+  the drainage's lookup and the base height) is most of it, and
+  `tech/phase-17-worldgen-performance` takes it on with bit-identical changes.
+  Weather (step 24) follows and reads the Climate by altitude and coast; weather
+  never edits terrain.
+- **Step 22** is not started. Trees and Structures exist at level 0 only
+  ([ADR-0022](docs/adr/0022-biomes-are-column-content-and-a-world-pins-its-generator.md),
+  [ADR-0029](docs/adr/0029-structures-are-declared-templates-placed-as-pure-functions-of-metres.md)),
+  which ends at `view_distance_m` (192 m by default), so from above nothing
+  stands on the ground beyond it. This step draws them at the coarse levels as
+  sparse impostors from the same pure draws, since the coarse vote loses a lone
+  tree, and replaces the fixed doubling of the rings with a quality curve and a
+  larger default. It follows step 17 so it reads that step's fields, and its
+  memory cost is measured against the LOD budget in step 6.
+- **Step 27** is the largest unknown in 1.0. Machines move as a unit, so they
   need collision, lighting and meshing outside the Chunk grid, Server-owned
   motion that composes with the Player's flight and physics movement, and a save
   format for a body that straddles Chunks. Spike it before committing the scope.

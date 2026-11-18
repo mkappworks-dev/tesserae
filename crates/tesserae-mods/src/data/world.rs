@@ -149,3 +149,48 @@ impl From<View> for content::ViewParams {
         }
     }
 }
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+pub(super) struct CaveBiome {
+    name: String,
+    temperature: f32,
+    humidity: f32,
+    altitude: Option<[f32; 2]>,
+    rock: Option<String>,
+    floor: Option<String>,
+    sky_fog: Option<super::behaviour::SkyFog>,
+    #[serde(default)]
+    features: Vec<CaveFeature>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+struct CaveFeature {
+    material: String,
+    shape: Option<String>,
+    spacing_m: f32,
+}
+
+impl From<CaveBiome> for content::CaveBiomeDef {
+    fn from(b: CaveBiome) -> Self {
+        Self {
+            name: b.name,
+            temperature: b.temperature,
+            humidity: b.humidity,
+            altitude: b.altitude.map(Into::into),
+            rock: b.rock,
+            floor: b.floor,
+            sky_fog: b.sky_fog.map(Into::into),
+            features: b
+                .features
+                .into_iter()
+                .map(|f| content::CaveFeature {
+                    material: f.material,
+                    shape: f.shape,
+                    spacing_m: f.spacing_m,
+                })
+                .collect(),
+        }
+    }
+}

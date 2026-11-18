@@ -13,6 +13,7 @@ pub mod climate;
 pub mod collide;
 pub mod combustion;
 pub mod craft;
+pub(crate) mod drainage;
 pub mod entity;
 pub mod fire;
 pub mod flow;
@@ -39,7 +40,9 @@ pub mod shape;
 pub mod survival;
 pub mod tables;
 pub mod template;
+pub mod terrain;
 pub mod testgen;
+pub mod underground;
 pub mod usable;
 pub mod visibility;
 pub mod voxel;
@@ -47,14 +50,15 @@ pub mod worldgen;
 
 pub use chunk::{CHUNK_SIZE, CHUNK_VOLUME, Chunk};
 pub use climate::{
-    Biome, BiomeId, BiomeName, BiomeSettlement, BiomeStructure, BiomeTable, CLUMP_SCALE_M, Climate,
-    ClimateParams, Clump, CropField, FIELD_PLOT_M, FIELD_SCALE_M, FIELD_SPACING_M, Field,
-    FieldCrop, MAX_BIOME_NAME_BYTES, MAX_BIOME_SETTLEMENTS, MAX_BIOME_STRUCTURES, MAX_BIOMES,
-    MAX_CAVE_SCALE, MAX_CROP_FIELDS, MAX_FIELD_CROPS, MAX_FIELD_STRAYS, MAX_STRUCTURE_SPACING_M,
+    Biome, BiomeId, BiomeName, BiomeSelectors, BiomeSettlement, BiomeStructure, BiomeTable,
+    CLUMP_SCALE_M, Climate, ClimateParams, Clump, CropField, FIELD_PLOT_M, FIELD_SCALE_M,
+    FIELD_SPACING_M, Field, FieldCrop, MAX_BIOME_NAME_BYTES, MAX_BIOME_SETTLEMENTS,
+    MAX_BIOME_STRUCTURES, MAX_BIOMES, MAX_CAVE_SCALE, MAX_CROP_FIELDS, MAX_FIELD_CROPS,
+    MAX_FIELD_STRAYS, MAX_RELIEF_SCALE, MAX_STRATA, MAX_STRATUM_DEPTH_M, MAX_STRUCTURE_SPACING_M,
     MAX_SURFACE_FEATURES, MAX_SURFACE_FRUIT_STAGES, MAX_SURFACE_STAGES, MAX_VINE_DENSITY,
-    MAX_VINE_LENGTH_M, SURFACE_FEATURE_SPACING_M, SkyFog, SkyFogBlend, SurfaceFeature,
-    SurfaceFeatures, SurfaceFruit, SurfacePlant, SurfacePlantKind, SurfaceTree, SurfaceVine,
-    SurfaceVines, VINE_FACES,
+    MAX_VINE_LENGTH_M, SURFACE_FEATURE_SPACING_M, Site, SkyFog, SkyFogBlend, Strata, Stratum,
+    SurfaceFeature, SurfaceFeatures, SurfaceFruit, SurfacePlant, SurfacePlantKind, SurfaceTree,
+    SurfaceVine, SurfaceVines, VINE_FACES,
 };
 pub use combustion::{Burn, CombustionDef, CombustionError, CombustionTable, Heat, MAX_HEAT};
 pub use fluid::{FluidDef, FluidError, FluidTable};
@@ -84,6 +88,10 @@ pub use shape::{
 };
 pub use survival::SurvivalRules;
 pub use tables::{PlaceFault, Tables};
+pub use underground::{
+    CaveBiome, CaveBiomeTable, CaveFeature, MAX_CAVE_BIOMES, MAX_CAVE_FEATURE_SPACING_M,
+    MAX_CAVE_FEATURES,
+};
 pub use usable::{
     Across, CONTAINER_SLOTS, DOOR_HEIGHT_M, DOOR_HEIGHTS_M, DOOR_WIDTH_M, DOOR_WIDTHS_M, Door,
     MAX_CONTAINER_SLOTS, Rise, UseError, VoxelUse, VoxelUses, door_faces, facing, placed_in,

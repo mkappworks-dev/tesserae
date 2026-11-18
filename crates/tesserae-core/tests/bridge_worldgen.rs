@@ -368,3 +368,43 @@ fn a_bridge_never_stands_on_flat_ground() {
         "the same Template not spanning stands there"
     );
 }
+
+/// Version 3's valleys: a hilly stretch, found on a coarse walk, stands bridges over water and
+/// dry gaps alike.
+#[test]
+fn version_3_stands_bridges_over_its_valleys() {
+    for land in [Land::Dry, Land::Wet] {
+        let v3 = |structures: &[BiomeStructure]| WorldgenParams {
+            generator: 3,
+            ..params(structures, land)
+        };
+        let with = Worldgen::new(SEED, 1.0, v3(&[ROW])).with_templates(&[spanning()]);
+        let bare = Worldgen::new(SEED, 1.0, v3(&[]));
+        let (x_m, z_m) = (-60..60)
+            .flat_map(|i| (-60..60).map(move |j| (i as f32 * 97.0, j as f32 * 89.0)))
+            .find(|&(x, z)| {
+                bare.surface_height_m(x, z) > 60.0 && bare.water_surface_m(x, z).is_none()
+            })
+            .expect("hilly land");
+        let (low, high) = bare.surface_bounds_m();
+        let centre = [x_m, z_m].map(|m| (m / SIZE_I as f32).floor() as i32);
+        let mut marks = 0;
+        for cz in centre[1] - 12..centre[1] + 12 {
+            for cx in centre[0] - 12..centre[0] + 12 {
+                let rows = (low / SIZE_I as f32).floor() as i32 - 1
+                    ..=(high / SIZE_I as f32).ceil() as i32 + 1;
+                for cy in rows {
+                    let chunk = with.chunk(cx, cy, cz);
+                    marks += (0..CHUNK_SIZE)
+                        .flat_map(|z| {
+                            (0..CHUNK_SIZE)
+                                .flat_map(move |y| (0..CHUNK_SIZE).map(move |x| (x, y, z)))
+                        })
+                        .filter(|&(x, y, z)| chunk.get(x, y, z).material() == MARK)
+                        .count();
+                }
+            }
+        }
+        assert!(marks > 0, "{land:?}: no bridge near ({x_m}, {z_m})");
+    }
+}

@@ -7,6 +7,7 @@ wit_bindgen::generate!({ path: "../../crates/tesserae-mods/wit/0.3", world: "mod
 
 mod building;
 mod food;
+mod landforms;
 mod plants;
 mod structures;
 mod templates;
@@ -63,6 +64,8 @@ fn biomes() -> Vec<BiomeDef> {
     vec![
         BiomeDef {
             soundscape: None,
+            selectors: None,
+            strata: None,
             name: "ash_flats".into(),
             temperature: 0.5,
             humidity: 0.5,
@@ -83,6 +86,8 @@ fn biomes() -> Vec<BiomeDef> {
         },
         BiomeDef {
             soundscape: None,
+            selectors: None,
+            strata: None,
             name: "scorched".into(),
             temperature: 0.75,
             humidity: 0.3,
@@ -94,12 +99,14 @@ fn biomes() -> Vec<BiomeDef> {
             cave_scale: Some(1.5),
             crop_fields: Vec::new(),
             structures: structures::wild(&["obsidian_spire", "ash_pit"]),
-            settlements: structures::village(),
+            settlements: structures::outlying(),
             surface_features: Vec::new(),
             loot: Some(structures::loot(structures::biome_loot("scorched"))),
         },
         BiomeDef {
             soundscape: None,
+            selectors: None,
+            strata: None,
             name: "highland".into(),
             temperature: 0.25,
             humidity: 0.7,
@@ -120,6 +127,8 @@ fn biomes() -> Vec<BiomeDef> {
         },
         BiomeDef {
             soundscape: None,
+            selectors: None,
+            strata: None,
             name: "cinder_bog".into(),
             temperature: 0.55,
             humidity: 0.78,
@@ -362,6 +371,8 @@ impl Guest for Ember {
             temperature_size_m: CLIMATE_SIZE_M,
             humidity_size_m: CLIMATE_SIZE_M,
         });
+        world.cave_biomes = Some(landforms::caves());
+        world.lava = Some("hearth:lava".into());
         Declaration {
             materials: [food::material()]
                 .into_iter()
@@ -382,7 +393,7 @@ impl Guest for Ember {
                 kind: ToolKind::Place,
             }],
             items: vec![food::item()],
-            biomes: biomes(),
+            biomes: biomes().into_iter().chain(landforms::biomes()).collect(),
             survival: None,
             sounds: Vec::new(),
             sound_sets: Vec::new(),

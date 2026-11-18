@@ -646,6 +646,7 @@ pub(crate) async fn declare_all(
     let plants = tesserae_mods::DeclaredPlants::take(&mut behaviours);
     let templates = tesserae_mods::DeclaredTemplates::take(&mut behaviours);
     let settlements = tesserae_mods::DeclaredSettlements::take(&mut behaviours);
+    let underground = tesserae_mods::DeclaredUnderground::take(&mut behaviours);
     let (ground, lake) =
         resolve(behaviours, &mut loaded.tables, &loaded.registry).map_err(|e| e.to_string())?;
     // Grown Materials decide which implicit Items exist, so Plants resolve
@@ -683,17 +684,23 @@ pub(crate) async fn declare_all(
             &loaded.tables.uses.station_tags().collect::<Vec<_>>(),
         )
         .map_err(|e| e.to_string())?;
+    let (lava, cave_biomes) = underground
+        .resolve(&loaded.registry, &loaded.tables)
+        .map_err(|e| e.to_string())?;
     if let Some(world) = &mut loaded.world {
         world.water = lake;
         world.ground = ground;
         world.biomes = biomes;
         world.ores = ores;
+        world.lava = lava;
+        world.cave_biomes = cave_biomes;
     }
     let obtainable = super::obtainable::obtainable(&loaded, &loaded.every_item(world.voxel_size));
     let (used_templates, used_settlements) = stood_by_biomes(&loaded);
     // A fluid cell is exempt: a well is meant to be a Settlement's water, even where nothing else is.
     let refuse = |m| {
-        (!obtainable.contains(&m) && !loaded.tables.fluids.contains(m)).then(|| {
+        let planted = loaded.tables.plants.planted_as(m).unwrap_or(m);
+        (!obtainable.contains(&planted) && !loaded.tables.fluids.contains(m)).then(|| {
             "is not Obtainable: no Biome lays it, no Plant yields it and no Recipe makes it from \
              what is"
                 .to_owned()
@@ -1009,6 +1016,14 @@ fn install(world: &mut World) {
             .resource::<WorldParameters>()
             .0
             .biomes
+            .as_slice()
+            .iter()
+            .map(|b| b.name.as_str().to_owned())
+            .collect(),
+        cave_biomes: world
+            .resource::<WorldParameters>()
+            .0
+            .cave_biomes
             .as_slice()
             .iter()
             .map(|b| b.name.as_str().to_owned())
@@ -1528,7 +1543,7 @@ biomes = ["plain:dry"]
             ore[0].biomes.ids().map(|id| id.index()).collect::<Vec<_>>(),
             [1]
         );
-        assert_eq!(world.generator, 2);
+        assert_eq!(world.generator, tesserae_core::save::GENERATOR_VERSION);
     }
 
     #[test]
@@ -1561,6 +1576,7 @@ biomes = ["plain:dry"]
                 voxel_size_m: 0.5,
                 seed: 123,
                 biomes: vec!["base:wet".into(), "plain:dry".into()],
+                cave_biomes: Vec::new(),
                 default_mode: crate::server::game_mode::GameMode::Creative,
                 generator: tesserae_core::save::GENERATOR_VERSION,
                 temperature_size_m: tesserae_core::climate::ClimateParams::default()
@@ -1768,6 +1784,64 @@ layers = [["rp"]]
     }
 
     #[test]
+    fn a_games_lava_and_cave_biomes_resolve_and_a_bad_one_is_refused_naming_it() {
+        let magma = "[[materials]]\nname = \"magma\"\nemission = 15\ndimming = 2\n\
+                     occlusion = \"same-material\"\nrender = \"blend\"\nsolid = false\n\
+                     [[fluids]]\nmaterial = \"plain:magma\"\nreach-m = 3.0\n\
+                     sideways-m-per-s = 1.0\ndownward-m-per-s = 2.0\n\
+                     recession-m-per-s = 1.0\nreset-drop-m = 0.5\n\
+                     waterlogs = false\nextinguishes = false\n";
+        let cave = |name: &str| {
+            format!(
+                "[[world.cave-biomes]]\nname = \"{name}\"\ntemperature = 0.5\nhumidity = 0.5\n\
+                 rock = \"plain:rock\"\nsky-fog = {{ sky = [1, 2, 3], fog = [4, 5, 6] }}\n\
+                 features = [{{ material = \"plain:rock\", spacing-m = 4.0 }}]\n"
+            )
+        };
+        let game = |lava: &str, caves: &str| {
+            format!("{DATA_GAME}{magma}[world]\nlava = \"{lava}\"\n{caves}")
+        };
+        let s = Scratch::new();
+        data(&s, "plain", true, "", &game("plain:magma", &cave("glow")));
+        let loaded = s.load(TrustMode::All).unwrap();
+        let world = loaded.world.unwrap();
+        let id = |name| loaded.registry.id_of(Kind::Material, name).unwrap() as MaterialId;
+        assert_eq!(world.lava, Some(id("plain:magma")));
+        let [glow] = world.cave_biomes.as_slice() else {
+            panic!("one cave Biome");
+        };
+        assert_eq!(glow.name.as_str(), "plain:glow");
+        assert_eq!(
+            (glow.rock, glow.features()[0].spacing_m),
+            (Some(id("plain:rock")), 4.0)
+        );
+
+        let seventeen: String = (0..17).map(|i| cave(&format!("cave{i}"))).collect();
+        for (lava, caves, want) in [
+            (
+                "plain:rock",
+                cave("glow"),
+                "`plain:rock`: lava has no fluid row",
+            ),
+            (
+                "plain:magma",
+                seventeen,
+                "`cave16`: cave_biomes holds at most 16",
+            ),
+            (
+                "plain:magma",
+                cave("glow").replace("spacing-m = 4.0", "spacing-m = 0.5"),
+                "`glow`: cave_biomes.features.spacing_m",
+            ),
+        ] {
+            let s = Scratch::new();
+            data(&s, "plain", true, "", &game(lava, &caves));
+            let err = s.load(TrustMode::All).map(|_| ()).unwrap_err();
+            assert!(err.contains(want), "{err}");
+        }
+    }
+
+    #[test]
     fn a_fluid_cell_need_not_be_obtainable() {
         let from_rock = "[[recipes]]\ninputs = [{ item = \"plain:rock\", count = 1 }]\n\
                          output = { item = \"plain:planks\", count = 4 }\nstation = \"hand\"\n";
@@ -1821,30 +1895,44 @@ layers = [["rp"]]
         }
     }
 
+    const WHEAT: &str = "[[materials]]\nname = \"sprout\"\nemission = 0\ndimming = 0\n\
+                         occlusion = \"never\"\nrender = \"cutout\"\nsolid = true\n\
+                         [[materials]]\nname = \"ripe\"\nemission = 0\ndimming = 0\n\
+                         occlusion = \"never\"\nrender = \"cutout\"\nsolid = true\n\
+                         [[items]]\nname = \"seeds\"\nsize-m = 0.25\ncolor = [1, 2, 3, 255]\n\
+                         material = \"plain:sprout\"\n\
+                         [[plants]]\nname = \"wheat\"\nkind = \"crop\"\nseed = \"plain:seeds\"\n\
+                         stages = [{ material = \"plain:sprout\", mean-seconds = 20.0 }, \
+                         { material = \"plain:ripe\" }]\n\
+                         [plants.needs]\nsoil = [\"plain:rock\"]\n";
+
     #[test]
-    fn a_grown_material_or_a_doors_open_material_in_a_template_is_refused() {
-        let content = "\"g\" = { material = \"plain:ripe\" }\n\
+    fn a_trees_grown_material_or_a_doors_open_material_in_a_template_is_refused() {
+        let content = "\"g\" = { material = \"plain:log\" }\n\
                        \"d\" = { material = \"plain:open\" }\n\
-                       [[materials]]\nname = \"sprout\"\nemission = 0\ndimming = 0\n\
+                       [[materials]]\nname = \"sapling\"\nemission = 0\ndimming = 0\n\
                        occlusion = \"never\"\nrender = \"cutout\"\nsolid = true\n\
-                       [[materials]]\nname = \"ripe\"\nemission = 0\ndimming = 0\n\
+                       [[materials]]\nname = \"log\"\nemission = 0\ndimming = 15\n\
+                       occlusion = \"opaque\"\nrender = \"opaque\"\nsolid = true\n\
+                       [[materials]]\nname = \"leaf\"\nemission = 0\ndimming = 1\n\
                        occlusion = \"never\"\nrender = \"cutout\"\nsolid = true\n\
                        [[materials]]\nname = \"open\"\nemission = 0\ndimming = 15\n\
                        occlusion = \"opaque\"\nrender = \"opaque\"\nsolid = true\n\
-                       [[plants]]\nname = \"wheat\"\nkind = \"crop\"\nseed = \"plain:sprout\"\n\
-                       stages = [{ material = \"plain:sprout\", mean-seconds = 20.0 }, \
-                       { material = \"plain:ripe\" }]\n\
+                       [[plants]]\nname = \"oak\"\nkind = \"tree\"\nseed = \"plain:sapling\"\n\
+                       sapling = \"plain:sapling\"\ntrunk = \"plain:log\"\n\
+                       canopy = \"plain:leaf\"\ntrunk-height-m = [3.0, 5.0]\n\
+                       canopy-radius-m = 2.5\nmean-seconds = 60.0\nsapling-yield = [1, 1]\n\
                        [plants.needs]\nsoil = [\"plain:rock\"]\n\
                        [[voxel-uses]]\nkind = \"door\"\nmaterial = \"plain:planks\"\n\
                        open = \"plain:open\"\nwidth-m = 1.0\n";
         for (drop, want) in [
             (
                 "\"d\" = { material = \"plain:open\" }\n",
-                "palette `g`: Material `plain:ripe` is a Grown Material, which only a Plant's \
+                "palette `g`: Material `plain:log` is a Grown Material, which only a Plant's \
                  growth makes",
             ),
             (
-                "\"g\" = { material = \"plain:ripe\" }\n",
+                "\"g\" = { material = \"plain:log\" }\n",
                 "palette `d`: Material `plain:open` is a Door's open form; a Template holds the \
                  Door closed",
             ),
@@ -1867,6 +1955,25 @@ layers = [["rp"]]
                 );
             }
         }
+    }
+
+    #[test]
+    fn a_crops_later_stage_in_a_template_is_obtainable_when_its_seed_is() {
+        let planks = "[[recipes]]\ninputs = [{ item = \"plain:rock\", count = 1 }]\n\
+                      output = { item = \"plain:planks\", count = 4 }\nstation = \"hand\"\n";
+        let ripe = format!("\"w\" = {{ material = \"plain:ripe\" }}\n{WHEAT}{planks}");
+        let sown = "[[recipes]]\ninputs = [{ item = \"plain:rock\", count = 1 }]\n\
+                    output = { item = \"plain:seeds\", count = 1 }\nstation = \"hand\"\n";
+        let s = Scratch::new();
+        data(&s, "plain", true, "", &hut_game(&format!("{ripe}{sown}")));
+        assert_eq!(refusals(&s), (Ok(()), Ok(())));
+        let s = Scratch::new();
+        data(&s, "plain", true, "", &hut_game(&ripe));
+        let refusal = refusals(&s).0.unwrap_err();
+        assert!(
+            refusal.contains("palette `w`: Material `plain:ripe` is not Obtainable"),
+            "{refusal}"
+        );
     }
 
     #[test]
@@ -2432,6 +2539,14 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
         assert_eq!(generator.params().relief_m, 12.0);
     }
 
+    /// `loaded` under version 2, whose lakes stand at their declared level in its valleys.
+    fn at_version_2(mut loaded: LoadedMods) -> LoadedMods {
+        if let Some(world) = &mut loaded.world {
+            world.generator = 2;
+        }
+        loaded
+    }
+
     /// The World a load opens, as `cargo run` opens it.
     fn opened(loaded: LoadedMods) -> App {
         let mut app = App::new();
@@ -2471,7 +2586,7 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
         let brine = loaded.registry.id_of(Kind::Material, "lake:brine").unwrap() as MaterialId;
         let water = loaded.world.and_then(|w| w.water).expect("a lake");
         assert_eq!(water.material, brine);
-        let app = opened(loaded);
+        let app = opened(at_version_2(loaded));
         let generator = &app.world().resource::<super::super::WorldGenerator>().0;
         assert_eq!(generator.water().map(|w| w.material), Some(brine));
         assert_eq!(
@@ -2489,7 +2604,7 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
         let loaded = s.load(TrustMode::All).unwrap();
         assert!(loaded.game);
         assert_eq!(loaded.world.expect("the Game's parameters").water, None);
-        let app = opened(loaded);
+        let app = opened(at_version_2(loaded));
         let generator = &app.world().resource::<super::super::WorldGenerator>().0;
         assert_eq!(generator.water(), None);
         let defaults = WorldgenParams::default();

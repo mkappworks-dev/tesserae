@@ -281,24 +281,53 @@ impl ClimateField {
         sum / weights
     }
 
-    /// The earlier of two equally near Biomes. `None` for an empty table.
-    pub(crate) fn biome_at(&self, biomes: &BiomeTable, x_m: f32, z_m: f32) -> Option<BiomeId> {
+    /// The earlier of two equally near Biomes, `None` for an empty table. `site` (version 3) moves
+    /// the Climate and ranks the Biomes by their selectors; a column that none admits still gets one.
+    pub(crate) fn biome_at(
+        &self,
+        biomes: &BiomeTable,
+        x_m: f32,
+        z_m: f32,
+        site: Option<(Site, (f32, f32))>,
+    ) -> Option<BiomeId> {
         if biomes.is_empty() {
             return None;
         }
-        let c = self.warped(x_m, z_m);
+        let mut c = self.warped(x_m, z_m);
+        if let Some((_, (dt, dh))) = site {
+            c.temperature += dt;
+            c.humidity += dh;
+        }
         let distance = |b: &Biome| {
             let (dt, dh) = (b.temperature - c.temperature, b.humidity - c.humidity);
             dt * dt + dh * dh
         };
-        let mut nearest = (0, distance(&biomes.as_slice()[0]));
-        for (i, b) in biomes.as_slice().iter().enumerate().skip(1) {
-            let d = distance(b);
-            if d < nearest.1 {
-                nearest = (i, d);
+        let pick = |admit: &dyn Fn(usize) -> bool| {
+            let mut nearest: Option<(usize, f32)> = None;
+            for (i, b) in biomes.as_slice().iter().enumerate() {
+                if !admit(i) {
+                    continue;
+                }
+                let d = distance(b);
+                if nearest.is_none_or(|(_, best)| d < best) {
+                    nearest = Some((i, d));
+                }
             }
-        }
-        Some(BiomeId(nearest.0 as u8))
+            nearest
+        };
+        let selectors = biomes.selectors();
+        let chosen = match site {
+            // A Biome that names a range and admits the column beats one that names none, however
+            // near the others are in Climate; failing both, the nearest of all.
+            Some((s, _)) => pick(&|i| selectors[i].is_ranged() && selectors[i].admits(&s))
+                .or_else(|| pick(&|i| !selectors[i].is_ranged()))
+                .or_else(|| pick(&|_| true)),
+            // Before version 3 there is no altitude or coast to ask, so a Biome of the land's
+            // shape is not part of the World.
+            None => pick(&|i| !selectors[i].is_ranged()).or_else(|| pick(&|_| true)),
+        };
+        let (i, _) = chosen?;
+        Some(BiomeId(i as u8))
     }
 
     /// Continuous in position, so colour never steps where [`Self::biome_at`] does. `None` where no
@@ -308,15 +337,34 @@ impl ClimateField {
         biomes: &BiomeTable,
         x_m: f32,
         z_m: f32,
+        site: Option<(Site, (f32, f32))>,
     ) -> Option<SkyFogBlend> {
+        let selectors = biomes.selectors();
+        // Under version 3, among the Biomes `biome_at` chooses from there: those of the land's
+        // shape that admit the column, else the rest, so the sky over a mountain is its own.
+        let ranged_here = site.is_some_and(|(s, _)| {
+            biomes.as_slice().iter().enumerate().any(|(i, b)| {
+                b.sky_fog.is_some() && selectors[i].is_ranged() && selectors[i].admits(&s)
+            })
+        });
+        let considered = |i: usize| match site {
+            Some((s, _)) if ranged_here => selectors[i].is_ranged() && selectors[i].admits(&s),
+            _ => !selectors[i].is_ranged(),
+        };
         let coloured = || {
             biomes
                 .as_slice()
                 .iter()
-                .filter_map(|b| Some((b, b.sky_fog?)))
+                .enumerate()
+                .filter(move |&(i, _)| considered(i))
+                .filter_map(|(_, b)| Some((b, b.sky_fog?)))
         };
         // Unwarped: the warp varies fast to roughen a border, and the air would shimmer with it.
-        let c = self.at(x_m, z_m);
+        let mut c = self.at(x_m, z_m);
+        if let Some((_, (dt, dh))) = site {
+            c.temperature += dt;
+            c.humidity += dh;
+        }
         let distance = |b: &Biome| {
             let (dt, dh) = (b.temperature - c.temperature, b.humidity - c.humidity);
             dt.hypot(dh)
@@ -362,7 +410,7 @@ pub struct BiomeName {
 }
 
 impl BiomeName {
-    const UNUSED: BiomeName = BiomeName {
+    pub(crate) const UNUSED: BiomeName = BiomeName {
         len: 0,
         bytes: [0; MAX_BIOME_NAME_BYTES],
     };
@@ -1203,6 +1251,8 @@ const SKY_BLEND_WIDTH: f32 = 0.1;
 pub struct BiomeTable {
     len: u8,
     biomes: [Biome; MAX_BIOMES],
+    selectors: [BiomeSelectors; MAX_BIOMES],
+    strata: [Strata; MAX_BIOMES],
 }
 
 impl Default for BiomeTable {
@@ -1210,7 +1260,151 @@ impl Default for BiomeTable {
         BiomeTable {
             len: 0,
             biomes: [Biome::UNUSED; MAX_BIOMES],
+            selectors: [BiomeSelectors::default(); MAX_BIOMES],
+            strata: [Strata::default(); MAX_BIOMES],
         }
+    }
+}
+
+pub const MAX_STRATA: usize = 8;
+/// The deepest a stratum reaches below the surface, so the uniform deep rock still starts within
+/// the band.
+pub const MAX_STRATUM_DEPTH_M: f32 = 96.0;
+
+/// A layer of a Biome's rock from `depth_m[0]` to `depth_m[1]` metres below a column's surface,
+/// read by Generator version 3 only. Its edges undulate a few metres, so it reads as bedding.
+#[derive(Clone, Copy, PartialEq, Debug, Default)]
+pub struct Stratum {
+    pub material: MaterialId,
+    pub depth_m: [f32; 2],
+}
+
+/// A Biome's strata, the first that holds a depth winning; rock fills the rest.
+#[derive(Clone, Copy, PartialEq, Debug, Default)]
+pub struct Strata {
+    len: u8,
+    layers: [Stratum; MAX_STRATA],
+}
+
+impl Strata {
+    pub fn new(layers: &[Stratum]) -> Result<Self, ParamError> {
+        if layers.len() > MAX_STRATA {
+            return Err(ParamError {
+                field: "biomes.strata",
+                rule: "holds at most 8 strata",
+            });
+        }
+        if !layers.iter().all(|l| {
+            let [top, bottom] = l.depth_m;
+            top.is_finite()
+                && bottom.is_finite()
+                && 0.0 <= top
+                && top < bottom
+                && bottom <= MAX_STRATUM_DEPTH_M
+        }) {
+            return Err(ParamError {
+                field: "biomes.strata.depth_m",
+                rule: "must run down from a top of at least 0 to a deeper bottom of at most 96 m",
+            });
+        }
+        let mut strata = Strata::default();
+        strata.layers[..layers.len()].copy_from_slice(layers);
+        strata.len = layers.len() as u8;
+        Ok(strata)
+    }
+
+    pub fn as_slice(&self) -> &[Stratum] {
+        &self.layers[..usize::from(self.len)]
+    }
+
+    /// The stratum `below_m` under the surface holds, its edges shifted down by `wave_m`.
+    pub fn at(&self, below_m: f32, wave_m: f32) -> Option<MaterialId> {
+        let below_m = below_m - wave_m;
+        self.as_slice()
+            .iter()
+            .find(|l| (l.depth_m[0]..l.depth_m[1]).contains(&below_m))
+            .map(|l| l.material)
+    }
+
+    pub fn deepest_m(&self) -> f32 {
+        self.as_slice()
+            .iter()
+            .map(|l| l.depth_m[1])
+            .fold(0.0, f32::max)
+    }
+}
+
+/// Where a Biome may stand beyond its Climate, read by Generator version 3 only. A range left
+/// `None` matches every value on that axis, so a Biome declared before version 3 is unchanged.
+/// Ranges are inclusive.
+#[derive(Clone, Copy, PartialEq, Debug, Default, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct BiomeSelectors {
+    /// Metres above Sea level; negative is under the sea.
+    pub altitude_m: Option<[f32; 2]>,
+    /// Metres inland of the coast; negative is offshore.
+    pub coast_m: Option<[f32; 2]>,
+    /// 0 rugged to 1 worn flat.
+    pub erosion: Option<[f32; 2]>,
+    /// Metres a river's valley cuts the ground: 0 away from rivers, most in a riverbed.
+    pub river_m: Option<[f32; 2]>,
+    /// Multiplies the detail relief of the Biome's landform, from 0 to 4; `None` leaves it.
+    pub relief: Option<f32>,
+}
+
+/// The land a column stands on, as far as a Biome's selectors ask.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct Site {
+    pub altitude_m: f32,
+    pub coast_m: f32,
+    pub erosion: f32,
+    pub river_m: f32,
+}
+
+pub const MAX_RELIEF_SCALE: f32 = 4.0;
+
+impl BiomeSelectors {
+    pub fn admits(&self, site: &Site) -> bool {
+        let within = |r: Option<[f32; 2]>, v: f32| r.is_none_or(|[lo, hi]| (lo..=hi).contains(&v));
+        within(self.altitude_m, site.altitude_m)
+            && within(self.coast_m, site.coast_m)
+            && within(self.erosion, site.erosion)
+            && within(self.river_m, site.river_m)
+    }
+
+    /// Whether the Biome names any range, which makes it a Biome of the land's shape: version 3
+    /// prefers it where it admits the column, and versions 1 and 2 never choose it.
+    pub fn is_ranged(&self) -> bool {
+        self.altitude_m.is_some()
+            || self.coast_m.is_some()
+            || self.erosion.is_some()
+            || self.river_m.is_some()
+    }
+
+    pub fn validate(&self) -> Result<(), ParamError> {
+        let ordered = |r: Option<[f32; 2]>| {
+            r.is_none_or(|[lo, hi]| lo.is_finite() && hi.is_finite() && lo <= hi)
+        };
+        if !(ordered(self.altitude_m)
+            && ordered(self.coast_m)
+            && ordered(self.erosion)
+            && ordered(self.river_m))
+        {
+            return Err(ParamError {
+                field: "biomes.selectors",
+                rule: "must give every range a finite low end not above its high end",
+            });
+        }
+        if !self
+            .relief
+            .is_none_or(|r| (0.0..=MAX_RELIEF_SCALE).contains(&r))
+        {
+            return Err(ParamError {
+                field: "biomes.selectors.relief",
+                rule: "must be from 0 to 4",
+            });
+        }
+        Ok(())
     }
 }
 
@@ -1250,6 +1444,48 @@ impl BiomeTable {
         table.biomes[..biomes.len()].copy_from_slice(biomes);
         table.len = biomes.len() as u8;
         Ok(table)
+    }
+
+    /// This table with `selectors` for its Biomes, in order; fewer than the Biomes leaves the rest
+    /// matching everything.
+    pub fn with_selectors(mut self, selectors: &[BiomeSelectors]) -> Result<Self, ParamError> {
+        if selectors.len() > self.len() {
+            return Err(ParamError {
+                field: "biomes.selectors",
+                rule: "must not name more Biomes than the table holds",
+            });
+        }
+        for s in selectors {
+            s.validate()?;
+        }
+        self.selectors[..selectors.len()].copy_from_slice(selectors);
+        Ok(self)
+    }
+
+    pub fn selectors(&self) -> &[BiomeSelectors] {
+        &self.selectors[..self.len as usize]
+    }
+
+    /// This table with `strata` for its Biomes, in order; fewer than the Biomes leaves the rest
+    /// plain rock.
+    pub fn with_strata(mut self, strata: &[Strata]) -> Result<Self, ParamError> {
+        if strata.len() > self.len() {
+            return Err(ParamError {
+                field: "biomes.strata",
+                rule: "must not name more Biomes than the table holds",
+            });
+        }
+        self.strata[..strata.len()].copy_from_slice(strata);
+        Ok(self)
+    }
+
+    pub fn strata(&self) -> &[Strata] {
+        &self.strata[..self.len as usize]
+    }
+
+    /// Whether any Biome says anything about relief.
+    pub fn shapes_relief(&self) -> bool {
+        self.selectors().iter().any(|s| s.relief.is_some())
     }
 
     pub fn as_slice(&self) -> &[Biome] {

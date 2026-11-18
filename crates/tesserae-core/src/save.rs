@@ -8,16 +8,23 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 
+use base64::{Engine, engine::general_purpose::STANDARD};
+use flate2::Compression;
+use flate2::read::DeflateDecoder;
+use flate2::write::DeflateEncoder;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::{CHUNK_SIZE, CHUNK_VOLUME, Chunk, ChunkOverlay, Fluid, Level, Overlay, Voxel};
 
-pub const FORMAT_VERSION: u32 = 1;
-pub const GENERATOR_VERSION: u32 = 2;
+/// What a commit is written in. 2 packs each Chunk's cells; a format 1 commit still opens.
+pub const FORMAT_VERSION: u32 = 2;
+const SUPPORTED_FORMATS: [u32; 2] = [1, 2];
+/// What a new World is created under.
+pub const GENERATOR_VERSION: u32 = 3;
 /// Every version that ever shipped stays until a migration exists: a World keeps the one it was
 /// created with.
-pub const SUPPORTED_GENERATORS: [u32; 2] = [1, GENERATOR_VERSION];
+pub const SUPPORTED_GENERATORS: [u32; 3] = [1, 2, 3];
 const MAGIC: &[u8; 8] = b"TESSAVE1";
 const MAX_COMMIT_BYTES: u64 = 256 * 1024 * 1024;
 
@@ -231,14 +238,28 @@ pub struct Cell {
     pub fuel: Option<u16>,
 }
 
-/// Full authoritative Chunk, including Air. Runs are in x/y/z order, z fastest.
+/// Full authoritative Chunk, including Air, in x/y/z order, z fastest.
+///
+/// Format 2 names each distinct cell once in `palette`; `cells` is one palette index a Voxel, as
+/// a plane of low bytes then a plane of high bytes, deflated and base64. A Chunk is mostly a few
+/// long stretches of one cell, so this is a few kilobytes where format 1's `runs`, each spelling
+/// its Material's name, made a few hundred.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SavedChunk {
     pub coord: [i32; 3],
     pub revision: u64,
+    /// Format 1's cells; empty in format 2.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub runs: Vec<(u32, Cell)>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub palette: Vec<Cell>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub cells: String,
 }
+
+/// More distinct cells than this in one Chunk is corrupt: a palette index is a `u16`.
+const MAX_PALETTE: usize = u16::MAX as usize + 1;
 
 impl SavedChunk {
     pub fn capture(
@@ -249,29 +270,89 @@ impl SavedChunk {
         mapping: &Mapping,
     ) -> Result<Self, Error> {
         mapping.validate()?;
-        let mut runs: Vec<(u32, Cell)> = Vec::new();
+        let mut palette: Vec<Cell> = Vec::new();
+        let mut index: std::collections::HashMap<(Voxel, Overlay), u16> =
+            std::collections::HashMap::new();
+        let mut raw = vec![0u8; CHUNK_VOLUME * 2];
+        let mut i = 0;
         for x in 0..CHUNK_SIZE {
             for y in 0..CHUNK_SIZE {
                 for z in 0..CHUNK_SIZE {
-                    let o = overlay.get(x, y, z);
-                    let cell = Cell {
-                        solid: mapping.voxel(chunk.get(x, y, z))?,
-                        fluid: o.fluid.map(|f| mapping.fluid(f)).transpose()?,
-                        fuel: o.burning.map(|b| b.fuel),
+                    let (v, o) = (chunk.get(x, y, z), overlay.get(x, y, z));
+                    let at = match index.get(&(v, o)) {
+                        Some(&at) => at,
+                        None => {
+                            palette.push(Cell {
+                                solid: mapping.voxel(v)?,
+                                fluid: o.fluid.map(|f| mapping.fluid(f)).transpose()?,
+                                fuel: o.burning.map(|b| b.fuel),
+                            });
+                            let at = (palette.len() - 1) as u16;
+                            index.insert((v, o), at);
+                            at
+                        }
                     };
-                    if let Some((n, _)) = runs.last_mut().filter(|(_, c)| c == &cell) {
-                        *n += 1;
-                    } else {
-                        runs.push((1, cell));
-                    }
+                    let [lo, hi] = at.to_le_bytes();
+                    raw[i] = lo;
+                    raw[CHUNK_VOLUME + i] = hi;
+                    i += 1;
                 }
             }
         }
+        let mut deflater = DeflateEncoder::new(Vec::new(), Compression::fast());
+        deflater.write_all(&raw)?;
         Ok(Self {
             coord,
             revision,
-            runs,
+            runs: Vec::new(),
+            palette,
+            cells: STANDARD.encode(deflater.finish()?),
         })
+    }
+
+    /// Every Voxel's index into the cells returned beside them, from either format. A format 1
+    /// run is its own cell; a Chunk holds at most one run a Voxel, so its index fits a `u16`.
+    fn indices(&self) -> Result<(Vec<u16>, Vec<&Cell>), Error> {
+        let corrupt = |why: &str| Error::Corrupt(format!("Chunk cells {why}"));
+        if !self.runs.is_empty() {
+            if !self.palette.is_empty() || !self.cells.is_empty() {
+                return Err(corrupt("are in both formats"));
+            }
+            let count: u64 = self.runs.iter().map(|(n, _)| u64::from(*n)).sum();
+            if count != CHUNK_VOLUME as u64 || self.runs.iter().any(|(n, _)| *n == 0) {
+                return Err(Error::Corrupt(
+                    "Chunk run lengths do not fill one Chunk".into(),
+                ));
+            }
+            let mut out = Vec::with_capacity(CHUNK_VOLUME);
+            for (k, (n, _)) in self.runs.iter().enumerate() {
+                out.extend(std::iter::repeat_n(k as u16, *n as usize));
+            }
+            return Ok((out, self.runs.iter().map(|(_, c)| c).collect()));
+        }
+        if self.palette.is_empty() || self.palette.len() > MAX_PALETTE {
+            return Err(corrupt("have no palette or too large a one"));
+        }
+        let packed = STANDARD
+            .decode(&self.cells)
+            .map_err(|_| corrupt("are not base64"))?;
+        let mut raw = Vec::with_capacity(CHUNK_VOLUME * 2);
+        // One byte past the expected length, so an overlong stream is refused without being
+        // inflated whole.
+        DeflateDecoder::new(packed.as_slice())
+            .take(CHUNK_VOLUME as u64 * 2 + 1)
+            .read_to_end(&mut raw)
+            .map_err(|_| corrupt("do not inflate"))?;
+        if raw.len() != CHUNK_VOLUME * 2 {
+            return Err(corrupt("do not fill one Chunk"));
+        }
+        let out: Vec<u16> = (0..CHUNK_VOLUME)
+            .map(|i| u16::from_le_bytes([raw[i], raw[CHUNK_VOLUME + i]]))
+            .collect();
+        if out.iter().any(|&k| usize::from(k) >= self.palette.len()) {
+            return Err(corrupt("name a cell past the palette"));
+        }
+        Ok((out, self.palette.iter().collect()))
     }
 
     pub fn restore(&self, mapping: &Mapping) -> Result<(Chunk, ChunkOverlay), Error> {
@@ -285,35 +366,34 @@ impl SavedChunk {
                 "Chunk coordinate exceeds Voxel lattice".into(),
             ));
         }
-        let count: u64 = self.runs.iter().map(|(n, _)| u64::from(*n)).sum();
-        if count != CHUNK_VOLUME as u64 || self.runs.iter().any(|(n, _)| *n == 0) {
-            return Err(Error::Corrupt(
-                "Chunk run lengths do not fill one Chunk".into(),
-            ));
-        }
+        let (indices, cells) = self.indices()?;
+        let restored = cells
+            .iter()
+            .map(|cell| {
+                Ok::<_, Error>((
+                    mapping.restore_voxel(&cell.solid)?,
+                    Overlay {
+                        fluid: cell
+                            .fluid
+                            .as_ref()
+                            .map(|f| mapping.restore_fluid(f))
+                            .transpose()?,
+                        burning: cell.fuel.map(|fuel| crate::Burning { fuel }),
+                    },
+                ))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
         let mut chunk = Chunk::filled(Voxel::AIR);
         let mut overlay = ChunkOverlay::none();
-        let mut i = 0;
-        for (n, cell) in &self.runs {
-            let voxel = mapping.restore_voxel(&cell.solid)?;
-            let o = Overlay {
-                fluid: cell
-                    .fluid
-                    .as_ref()
-                    .map(|f| mapping.restore_fluid(f))
-                    .transpose()?,
-                burning: cell.fuel.map(|fuel| crate::Burning { fuel }),
-            };
-            for _ in 0..*n {
-                let (x, y, z) = (
-                    i / (CHUNK_SIZE * CHUNK_SIZE),
-                    i / CHUNK_SIZE % CHUNK_SIZE,
-                    i % CHUNK_SIZE,
-                );
-                chunk.set(x, y, z, voxel);
-                overlay.set(x, y, z, o);
-                i += 1;
-            }
+        for (i, &k) in indices.iter().enumerate() {
+            let (x, y, z) = (
+                i / (CHUNK_SIZE * CHUNK_SIZE),
+                i / CHUNK_SIZE % CHUNK_SIZE,
+                i % CHUNK_SIZE,
+            );
+            let (voxel, o) = restored[usize::from(k)];
+            chunk.set(x, y, z, voxel);
+            overlay.set(x, y, z, o);
         }
         Ok((chunk, overlay))
     }
@@ -579,11 +659,59 @@ pub struct Generation {
     /// The Settlements the Biomes lay out, for the same reason. Absent when no Biome lists one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub settlements: Option<Vec<SavedSettlement>>,
+    /// Version 3's terrain tuning. Absent in a World under version 1 or 2, which never read it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub landforms: Option<crate::terrain::LandformParams>,
+    /// Version 3's lava, by name. Absent with none, and under version 1 or 2.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lava: Option<String>,
+    /// Version 3's cave Biomes. Absent with none, and under version 1 or 2.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cave_biomes: Vec<SavedCaveBiome>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SavedCaveBiome {
+    pub name: String,
+    pub temperature: f32,
+    pub humidity: f32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub altitude_m: Option<[f32; 2]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rock: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub floor: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fog: Option<crate::SkyFog>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub features: Vec<SavedCaveFeature>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SavedCaveFeature {
+    pub material: String,
+    pub shape: String,
+    pub spacing_m: f32,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SavedStratum {
+    pub material: String,
+    pub depth_m: [f32; 2],
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SavedBiome {
+    /// Absent matches every altitude, coast and erosion and leaves relief alone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selectors: Option<crate::BiomeSelectors>,
+    /// Absent is plain rock under the soil, as before strata.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub strata: Vec<SavedStratum>,
     pub name: String,
     pub temperature: f32,
     pub humidity: f32,
@@ -644,6 +772,37 @@ pub struct SavedSettlement {
     pub path: Solid,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub loot: Option<crate::loot::LootTable>,
+    /// Absent in a Settlement saved before outskirts, which lays none; one object, not a list, in
+    /// one saved before outskirt groups.
+    #[serde(
+        default,
+        skip_serializing_if = "Vec::is_empty",
+        deserialize_with = "one_or_many"
+    )]
+    pub outskirts: Vec<SavedOutskirts>,
+}
+
+fn one_or_many<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<SavedOutskirts>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum OneOrMany {
+        One(SavedOutskirts),
+        Many(Vec<SavedOutskirts>),
+    }
+    Ok(match OneOrMany::deserialize(d)? {
+        OneOrMany::One(o) => vec![o],
+        OneOrMany::Many(v) => v,
+    })
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SavedOutskirts {
+    pub rules: Vec<SavedPlotRule>,
+    pub count: (u8, u8),
+    /// Absent where every copy farms.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chance: Option<f32>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -904,6 +1063,12 @@ impl Generation {
                 s.centre
                     .iter()
                     .chain(s.rules.iter().map(|r| &r.building))
+                    .chain(
+                        s.outskirts
+                            .iter()
+                            .flat_map(|o| &o.rules)
+                            .map(|r| &r.building),
+                    )
                     .map(|b| b.template),
             );
         }
@@ -941,7 +1106,30 @@ impl Generation {
                     p.biomes
                         .as_slice()
                         .iter()
-                        .map(|b| saved_biome(b, &kept_templates, &kept_settlements, mapping))
+                        .zip(p.biomes.selectors())
+                        .zip(p.biomes.strata())
+                        .map(|((b, selectors), strata)| {
+                            let mut saved =
+                                saved_biome(b, &kept_templates, &kept_settlements, mapping)?;
+                            // Only version 3 reads them, so an older World's snapshot is as it was.
+                            let v3 = p.generator >= crate::terrain::LANDFORMS_SINCE;
+                            saved.selectors = (v3
+                                && *selectors != crate::BiomeSelectors::default())
+                            .then_some(*selectors);
+                            if v3 {
+                                saved.strata = strata
+                                    .as_slice()
+                                    .iter()
+                                    .map(|l| {
+                                        Ok::<_, Error>(SavedStratum {
+                                            material: mapping.material_name(l.material)?,
+                                            depth_m: l.depth_m,
+                                        })
+                                    })
+                                    .collect::<Result<_, _>>()?;
+                            }
+                            Ok::<_, Error>(saved)
+                        })
                         .collect::<Result<_, _>>()
                 })
                 .transpose()?,
@@ -956,6 +1144,21 @@ impl Generation {
                 .transpose()?,
             templates: (!saved_templates.is_empty()).then_some(saved_templates),
             settlements: (!saved_settlements.is_empty()).then_some(saved_settlements),
+            landforms: (p.generator >= crate::terrain::LANDFORMS_SINCE).then_some(p.landforms),
+            lava: p
+                .lava
+                .filter(|_| p.generator >= crate::terrain::LANDFORMS_SINCE)
+                .map(|m| mapping.material_name(m))
+                .transpose()?,
+            cave_biomes: if p.generator >= crate::terrain::LANDFORMS_SINCE {
+                p.cave_biomes
+                    .as_slice()
+                    .iter()
+                    .map(|b| saved_cave_biome(b, mapping))
+                    .collect::<Result<_, _>>()?
+            } else {
+                Vec::new()
+            },
         })
     }
 
@@ -1087,10 +1290,85 @@ impl Generation {
             climate: self.climate.filter(|_| biomes_apply).unwrap_or_default(),
             biomes,
             ores: crate::OreTable::new(&ores).map_err(|e| Error::Corrupt(e.to_string()))?,
+            landforms: self
+                .landforms
+                .filter(|_| generator >= crate::terrain::LANDFORMS_SINCE)
+                .unwrap_or_default(),
+            lava: self
+                .lava
+                .as_deref()
+                .filter(|_| generator >= crate::terrain::LANDFORMS_SINCE)
+                .map(|name| mapping.material_id(name))
+                .transpose()?,
+            cave_biomes: if generator >= crate::terrain::LANDFORMS_SINCE {
+                let biomes = self
+                    .cave_biomes
+                    .iter()
+                    .map(|b| restored_cave_biome(b, mapping))
+                    .collect::<Result<Vec<_>, _>>()?;
+                crate::CaveBiomeTable::new(&biomes).map_err(|e| Error::Corrupt(e.to_string()))?
+            } else {
+                crate::CaveBiomeTable::default()
+            },
         };
         p.validate().map_err(|e| Error::Corrupt(e.to_string()))?;
         Ok(p)
     }
+}
+
+fn saved_cave_biome(b: &crate::CaveBiome, mapping: &Mapping) -> Result<SavedCaveBiome, Error> {
+    Ok(SavedCaveBiome {
+        name: b.name.to_string(),
+        temperature: b.temperature,
+        humidity: b.humidity,
+        altitude_m: b.altitude_m,
+        rock: b.rock.map(|m| mapping.material_name(m)).transpose()?,
+        floor: b.floor.map(|m| mapping.material_name(m)).transpose()?,
+        fog: b.fog,
+        features: b
+            .features()
+            .iter()
+            .map(|f| {
+                Ok(SavedCaveFeature {
+                    material: mapping.material_name(f.material)?,
+                    shape: mapping.shapes.get(&f.shape).cloned().ok_or_else(|| {
+                        Error::Incompatible(format!("unregistered Shape id {}", f.shape))
+                    })?,
+                    spacing_m: f.spacing_m,
+                })
+            })
+            .collect::<Result<_, Error>>()?,
+    })
+}
+
+fn restored_cave_biome(b: &SavedCaveBiome, mapping: &Mapping) -> Result<crate::CaveBiome, Error> {
+    let features = b
+        .features
+        .iter()
+        .map(|f| {
+            Ok(crate::CaveFeature {
+                material: mapping.material_id(&f.material)?,
+                shape: mapping.shape_id(&f.shape)?,
+                spacing_m: f.spacing_m,
+            })
+        })
+        .collect::<Result<Vec<_>, Error>>()?;
+    crate::CaveBiome::new(
+        crate::BiomeName::new(&b.name).map_err(|e| Error::Corrupt(e.to_string()))?,
+        (b.temperature, b.humidity),
+        b.altitude_m,
+        b.rock
+            .as_deref()
+            .map(|n| mapping.material_id(n))
+            .transpose()?,
+        b.floor
+            .as_deref()
+            .map(|n| mapping.material_id(n))
+            .transpose()?,
+        b.fog,
+        &features,
+    )
+    .map_err(|e| Error::Corrupt(e.to_string()))
 }
 
 fn saved_biome(
@@ -1100,6 +1378,8 @@ fn saved_biome(
     mapping: &Mapping,
 ) -> Result<SavedBiome, Error> {
     Ok(SavedBiome {
+        selectors: None,
+        strata: Vec::new(),
         name: b.name.to_string(),
         temperature: b.temperature,
         humidity: b.humidity,
@@ -1182,6 +1462,13 @@ fn saved_settlement(
             .unwrap_or_default() as u16,
         door: b.door,
     };
+    let saved_rule = |r: &crate::settlement::PlotRule| SavedPlotRule {
+        building: building(&r.building),
+        weight: r.weight,
+        min: r.min,
+        max: r.max,
+        loot: r.loot.clone(),
+    };
     Ok(SavedSettlement {
         name: s.name.clone(),
         radius_m: s.radius_m,
@@ -1190,20 +1477,20 @@ fn saved_settlement(
         centre: s.centre.as_ref().map(building),
         plots: s.plots,
         plots_min: (s.plots_min != s.plots).then_some(s.plots_min),
-        rules: s
-            .rules
-            .iter()
-            .map(|r| SavedPlotRule {
-                building: building(&r.building),
-                weight: r.weight,
-                min: r.min,
-                max: r.max,
-                loot: r.loot.clone(),
-            })
-            .collect(),
+        rules: s.rules.iter().map(saved_rule).collect(),
         minimum: s.minimum,
         path: mapping.voxel(s.path)?,
         loot: s.loot.clone(),
+        outskirts: s
+            .outskirts
+            .iter()
+            .filter(|o| !o.rules.is_empty())
+            .map(|o| SavedOutskirts {
+                rules: o.rules.iter().map(saved_rule).collect(),
+                count: o.count,
+                chance: (o.chance < 1.0).then_some(o.chance),
+            })
+            .collect(),
     })
 }
 
@@ -1215,6 +1502,13 @@ fn restored_settlement(
         template: b.template,
         door: b.door,
     };
+    let rule = |r: &SavedPlotRule| crate::settlement::PlotRule {
+        building: building(&r.building),
+        weight: r.weight,
+        min: r.min,
+        max: r.max,
+        loot: r.loot.clone(),
+    };
     Ok(crate::settlement::Settlement {
         name: s.name.clone(),
         radius_m: s.radius_m,
@@ -1223,20 +1517,19 @@ fn restored_settlement(
         centre: s.centre.as_ref().map(building),
         plots: s.plots,
         plots_min: s.plots_min.unwrap_or(s.plots),
-        rules: s
-            .rules
-            .iter()
-            .map(|r| crate::settlement::PlotRule {
-                building: building(&r.building),
-                weight: r.weight,
-                min: r.min,
-                max: r.max,
-                loot: r.loot.clone(),
-            })
-            .collect(),
+        rules: s.rules.iter().map(rule).collect(),
         minimum: s.minimum,
         path: mapping.restore_voxel(&s.path)?,
         loot: s.loot.clone(),
+        outskirts: s
+            .outskirts
+            .iter()
+            .map(|o| crate::settlement::Outskirts {
+                rules: o.rules.iter().map(rule).collect(),
+                count: o.count,
+                chance: o.chance.unwrap_or(1.0),
+            })
+            .collect(),
     })
 }
 
@@ -1384,7 +1677,30 @@ fn restored_biomes(saved: &[SavedBiome], mapping: &Mapping) -> Result<crate::Bio
             })
         })
         .collect::<Result<Vec<_>, Error>>()?;
-    crate::BiomeTable::new(&biomes).map_err(|e| Error::Corrupt(e.to_string()))
+    let selectors: Vec<_> = saved
+        .iter()
+        .map(|b| b.selectors.unwrap_or_default())
+        .collect();
+    let strata = saved
+        .iter()
+        .map(|b| {
+            let layers = b
+                .strata
+                .iter()
+                .map(|l| {
+                    Ok(crate::Stratum {
+                        material: mapping.material_id(&l.material)?,
+                        depth_m: l.depth_m,
+                    })
+                })
+                .collect::<Result<Vec<_>, Error>>()?;
+            crate::Strata::new(&layers).map_err(|e| Error::Corrupt(e.to_string()))
+        })
+        .collect::<Result<Vec<_>, Error>>()?;
+    crate::BiomeTable::new(&biomes)
+        .and_then(|t| t.with_selectors(&selectors))
+        .and_then(|t| t.with_strata(&strata))
+        .map_err(|e| Error::Corrupt(e.to_string()))
 }
 
 fn restored_features(b: &SavedBiome, mapping: &Mapping) -> Result<crate::SurfaceFeatures, Error> {
@@ -1858,7 +2174,9 @@ pub struct Commit {
 
 impl Commit {
     pub fn compatible(&self, installed: &Content) -> Result<(), Error> {
-        if self.format != FORMAT_VERSION || !SUPPORTED_GENERATORS.contains(&self.generator) {
+        if !SUPPORTED_FORMATS.contains(&self.format)
+            || !SUPPORTED_GENERATORS.contains(&self.generator)
+        {
             return Err(Error::Incompatible(format!(
                 "unsupported save/generator version {}/{}",
                 self.format, self.generator
@@ -2180,7 +2498,11 @@ fn read_commit(path: &Path) -> Result<Commit, Error> {
     }
     let value: serde_json::Value =
         serde_json::from_slice(&bytes[40..]).map_err(|e| Error::Corrupt(e.to_string()))?;
-    if value.get("format").and_then(|v| v.as_u64()) != Some(FORMAT_VERSION as u64) {
+    if !value
+        .get("format")
+        .and_then(|v| v.as_u64())
+        .is_some_and(|f| SUPPORTED_FORMATS.iter().any(|&s| u64::from(s) == f))
+    {
         return Err(Error::Incompatible("unsupported save format".into()));
     }
     let commit: Commit =

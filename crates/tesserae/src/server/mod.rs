@@ -147,13 +147,37 @@ pub fn plugin(app: &mut App) {
         footfall::plugin,
         causal_sound::plugin,
     ));
+    // Asked for, so a played World starts at its Settlement and not among test Shapes.
     #[cfg(feature = "dev")]
-    if std::env::var_os("TESSERAE_PROFILE_FIXTURE").is_none() {
+    if std::env::var_os("TESSERAE_GALLERY").is_some()
+        && std::env::var_os("TESSERAE_PROFILE_FIXTURE").is_none()
+    {
         app.add_plugins(gallery::plugin);
     }
 }
 
-/// What the World is generated with. Under `dev`, `TESSERAE_CAVES=0` and
+/// The Generator version a new World is created under. Under `dev`, `TESSERAE_GENERATOR=3` picks
+/// the version 3 terrain while it is not yet the default.
+#[cfg(feature = "dev")]
+pub(crate) fn new_world_generator() -> u32 {
+    generator_from(|name| std::env::var(name).ok())
+}
+
+#[cfg(feature = "dev")]
+fn generator_from(env: impl Fn(&str) -> Option<String>) -> u32 {
+    env("TESSERAE_GENERATOR")
+        .and_then(|v| v.parse().ok())
+        .filter(|v| tesserae_core::save::SUPPORTED_GENERATORS.contains(v))
+        .unwrap_or(tesserae_core::save::GENERATOR_VERSION)
+}
+
+#[cfg(not(feature = "dev"))]
+pub(crate) fn new_world_generator() -> u32 {
+    tesserae_core::save::GENERATOR_VERSION
+}
+
+/// What the World is generated with. Under `dev`, `TESSERAE_GENERATOR=3` makes a new World with the
+/// version 3 terrain, and `TESSERAE_CAVES=0` and
 /// `TESSERAE_SMOOTHING=0` turn the caves and the slope-smoothing stairs off, so
 /// a streaming change can be measured with and without them on one binary and
 /// not across two builds. `TESSERAE_WATER_LEVEL_M` moves the lake to that
@@ -170,6 +194,11 @@ fn dev_worldgen_params(
 ) -> WorldgenParams {
     let off = |name: &str| env(name).is_some_and(|v| v == "0");
     WorldgenParams {
+        generator: if env("TESSERAE_GENERATOR").is_some() {
+            generator_from(&env)
+        } else {
+            params.generator
+        },
         caves: if off("TESSERAE_CAVES") {
             None
         } else {
@@ -235,19 +264,54 @@ fn open_world(
     if let Some(eye) = persistence.and_then(|p| p.reopened_eye) {
         spawn = spawn.with_entry(eye);
     }
+    #[cfg(feature = "dev")]
+    if let Some(eye) = std::env::var("TESSERAE_SPAWN_M")
+        .ok()
+        .and_then(|v| dev_spawn_eye(&generator, &v))
+    {
+        spawn = spawn.with_entry(eye);
+    }
     commands.insert_resource(spawn);
     commands.insert_resource(WorldGenerator(generator));
 }
 
-/// How far from the origin a new World looks for a Settlement to spawn the Player beside.
-const SPAWN_SEARCH_M: f32 = 512.0;
+/// `x,z` puts the Eye over that column, clear of the ground and the water; `x,y,z` puts it there.
+#[cfg(feature = "dev")]
+fn dev_spawn_eye(generator: &Worldgen, value: &str) -> Option<Vec3> {
+    let v: Vec<f32> = value
+        .split(',')
+        .map(|s| s.trim().parse().ok())
+        .collect::<Option<_>>()?;
+    match v[..] {
+        [x, y, z] => Some(Vec3::new(x, y, z)),
+        [x, z] => {
+            let ground_m = generator.surface_height_m(x, z);
+            let top_m = generator
+                .water_level_m(x, z)
+                .map_or(ground_m, |level_m| level_m.max(ground_m));
+            Some(Vec3::new(x, top_m + SPAWN_CLEARANCE_M, z))
+        }
+        _ => None,
+    }
+}
 
-/// Just outside the Settlement nearest the origin, or over the origin with none that near; clear
+/// How far a new World looks for dry land when the spawn point is in the sea.
+const DRY_LAND_SEARCH_M: f32 = 6000.0;
+
+/// How far from the origin a new World looks for a Settlement to spawn the Player beside, nearest
+/// ring first: version 3 lays Settlements only on level ground, so the nearest may be kilometres
+/// out.
+const SPAWN_SEARCH_M: [f32; 4] = [512.0, 1024.0, 2048.0, 4096.0];
+
+/// Inside the Settlement nearest the origin, or the dry land nearest the origin with none; clear
 /// of the ground and of any lake standing on it, and no lower than the top of anything generated
 /// under the Player's body.
 fn spawn_eye(generator: &Worldgen) -> Vec3 {
-    let [x, z] = generator
-        .settlement_spawn_m(SPAWN_SEARCH_M)
+    // A Settlement's disc is level dry ground already; only the origin needs looking round.
+    let [x, z] = SPAWN_SEARCH_M
+        .iter()
+        .find_map(|&r| generator.settlement_spawn_m(r))
+        .or_else(|| generator.dry_land_near_m([0.0; 2], DRY_LAND_SEARCH_M))
         .unwrap_or([0.0; 2]);
     let ground_m = generator.surface_height_m(x, z);
     let top_m = generator
@@ -288,6 +352,32 @@ pub(crate) fn fixture_tables() -> Tables {
 mod tests {
     use super::*;
     use tesserae_core::CHUNK_SIZE;
+
+    #[cfg(feature = "dev")]
+    #[test]
+    fn the_dev_generator_override_takes_a_supported_version_only() {
+        let with = |v: &'static str| generator_from(move |_| Some(v.into()));
+        assert_eq!(with("3"), 3);
+        assert_eq!(with("1"), 1);
+        for ignored in ["0", "9", "three", ""] {
+            assert_eq!(with(ignored), tesserae_core::save::GENERATOR_VERSION);
+        }
+        assert_eq!(
+            generator_from(|_| None),
+            tesserae_core::save::GENERATOR_VERSION
+        );
+    }
+
+    #[cfg(feature = "dev")]
+    #[test]
+    fn the_dev_generator_override_reaches_the_parameters_a_new_world_runs() {
+        let params = dev_worldgen_params(WorldgenParams::default(), |name| {
+            (name == "TESSERAE_GENERATOR").then(|| "3".into())
+        });
+        assert_eq!(params.generator, 3);
+        let params = dev_worldgen_params(WorldgenParams::default(), |_| None);
+        assert_eq!(params.generator, tesserae_core::save::GENERATOR_VERSION);
+    }
 
     #[cfg(feature = "dev")]
     #[test]
@@ -403,6 +493,8 @@ mod tests {
                     level_m: 70.0,
                     material: LAVA,
                 }),
+                // Version 2's lake stands at its declared level; version 3's sea at Sea level.
+                generator: 2,
                 ..WorldgenParams::default()
             },
         );

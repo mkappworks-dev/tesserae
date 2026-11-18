@@ -12,10 +12,10 @@ pub use reach::first_fruit_offsets;
 
 use std::collections::HashMap;
 
-use crate::chunk::{CHUNK_SIZE, CHUNK_VOLUME};
+use crate::chunk::{CHUNK_SIZE, CHUNK_VOLUME, Chunk};
 use crate::climate::Climate;
 use crate::light::{Light, MAX_LIGHT};
-use crate::occupants::Occupants;
+use crate::occupants::{ChunkOverlay, Fluid, Occupants, Overlay};
 use crate::shape::ShapeTable;
 use crate::voxel::{MaterialId, ShapeId, Voxel};
 
@@ -418,6 +418,55 @@ impl PlantTable {
         self.by_material.get(&material).copied()
     }
 
+    /// The fluid a Plant's Voxel of `material` stands in, if its Plant stands in one: `prefer`
+    /// where the Plant accepts it, otherwise the first it declares.
+    pub fn stands_in(
+        &self,
+        material: MaterialId,
+        prefer: Option<MaterialId>,
+    ) -> Option<MaterialId> {
+        match &self.plants.get(self.of(material)?.plant)?.kind {
+            Kind::Column { stands_in, .. } => prefer
+                .filter(|p| stands_in.contains(p))
+                .or_else(|| stands_in.first().copied()),
+            _ => None,
+        }
+    }
+
+    /// The overlay a generated Chunk comes with: a source of the fluid each Plant stands in, in
+    /// its cell, `water` (the World's) where the Plant accepts it. Worldgen stands such a Plant
+    /// only in that fluid, but a Chunk holds one Voxel a cell, so without this the Plant stands
+    /// in a dry hole the fluid simulation pours into; and another fluid of the same tag would be
+    /// drawn against the sea round it.
+    pub fn generated_overlay(&self, chunk: &Chunk, water: Option<MaterialId>) -> ChunkOverlay {
+        let mut overlay = ChunkOverlay::none();
+        if !chunk
+            .kinds()
+            .iter()
+            .any(|v| self.stands_in(v.material(), water).is_some())
+        {
+            return overlay;
+        }
+        for z in 0..CHUNK_SIZE {
+            for y in 0..CHUNK_SIZE {
+                for x in 0..CHUNK_SIZE {
+                    if let Some(fluid) = self.stands_in(chunk.get(x, y, z).material(), water) {
+                        overlay.set(
+                            x,
+                            y,
+                            z,
+                            Overlay {
+                                fluid: Some(Fluid::source(fluid)),
+                                burning: None,
+                            },
+                        );
+                    }
+                }
+            }
+        }
+        overlay
+    }
+
     /// Whether a Material is made only by growth and worldgen: a later Stage,
     /// a tree's trunk, canopy or fruit. A Player cannot place it and no Item
     /// names it.
@@ -426,6 +475,18 @@ impl PlantTable {
             Some(Role::Stage(n)) => n > 0,
             Some(Role::Trunk | Role::Canopy | Role::Fruit(_)) => true,
             Some(Role::Single | Role::Sapling) | None => false,
+        }
+    }
+
+    /// The first Stage of the crop whose later Stage `material` is: what a
+    /// Template's later Stage counts as, a field planted earlier.
+    pub fn planted_as(&self, material: MaterialId) -> Option<MaterialId> {
+        let PlantRef { plant, role } = self.of(material)?;
+        match (&self.plants.get(plant)?.kind, role) {
+            (Kind::Crop { stages, .. }, Role::Stage(n)) if n > 0 => {
+                stages.first().map(|s| s.material)
+            }
+            _ => None,
         }
     }
 
@@ -1428,6 +1489,64 @@ mod tests {
         assert!(
             table.lacks_soil(1, at, &solid_at(&[])).is_none(),
             "no plant"
+        );
+    }
+
+    #[test]
+    fn a_generated_plant_that_stands_in_a_fluid_stands_in_a_source_of_it() {
+        const KELP: MaterialId = 10;
+        const WATER: MaterialId = 5;
+        let table = one(
+            Kind::Column {
+                max_height_m: 4.0,
+                direction: Direction::Up,
+                mean_seconds: 60.0,
+                stands_in: vec![WATER],
+                yields: Vec::new(),
+            },
+            KELP,
+        );
+        let mut chunk = Chunk::filled(Voxel::cube(WATER));
+        chunk.set(3, 4, 5, Voxel::cube(KELP));
+        chunk.set(3, 5, 5, Voxel::cube(KELP));
+        let overlay = table.generated_overlay(&chunk, Some(WATER));
+        for y in [4, 5] {
+            assert_eq!(overlay.get(3, y, 5).fluid, Some(Fluid::source(WATER)));
+        }
+        assert_eq!(
+            overlay.get(3, 6, 5).fluid,
+            None,
+            "packed water carries none"
+        );
+        let dry = table.generated_overlay(&Chunk::filled(Voxel::cube(WATER)), Some(WATER));
+        assert_eq!(dry.get(0, 0, 0).fluid, None);
+    }
+
+    /// A Plant standing in any of a tag's fluids stands in the World's own, the sea's, so its
+    /// water is the sea round it and not another fluid drawn against it.
+    #[test]
+    fn a_generated_plant_stands_in_the_worlds_water_when_it_accepts_several() {
+        const KELP: MaterialId = 10;
+        const OTHER: MaterialId = 5;
+        const SEA: MaterialId = 6;
+        let table = one(
+            Kind::Column {
+                max_height_m: 4.0,
+                direction: Direction::Up,
+                mean_seconds: 60.0,
+                stands_in: vec![OTHER, SEA],
+                yields: Vec::new(),
+            },
+            KELP,
+        );
+        let mut chunk = Chunk::filled(Voxel::cube(SEA));
+        chunk.set(3, 4, 5, Voxel::cube(KELP));
+        let source = |water| table.generated_overlay(&chunk, water).get(3, 4, 5).fluid;
+        assert_eq!(source(Some(SEA)), Some(Fluid::source(SEA)));
+        assert_eq!(
+            source(None),
+            Some(Fluid::source(OTHER)),
+            "the first it declares"
         );
     }
 

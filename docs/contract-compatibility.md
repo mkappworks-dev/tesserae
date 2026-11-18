@@ -254,6 +254,35 @@ keep-out, and win against their neighbours. A TOML Declaration that leaves it
 out gets false. A Declaration built against the earlier 0.3 text needs a
 rebuild.
 
+A `settlement-def` then gained `outskirts`, an optional `settlement-outskirts`
+record after `loot`: a list of `settlement-plot` rows, each Template no longer
+than the Settlement's margin, and a `count-min` and `count-max` of at most 96.
+Its Buildings stand beside the approach paths just past the disc, inside the
+margin. Absent lays none, so a Settlement declared without it lays out as
+before, and a TOML Declaration that leaves it out gets none. A Declaration built
+against the earlier 0.3 text needs a rebuild.
+
+A `settlement-outskirts` then gained `chance`, an optional `f32` last: the share
+of a Settlement's copies that lay any outskirts, above 0 and at most 1. Absent
+is 1, every copy. A copy that cannot stand `count-min` now lays none, so no
+field stands alone. A Declaration built against the earlier 0.3 text needs a
+rebuild.
+
+A `settlement-def`'s `outskirts` then became a list of groups,
+`option<list<settlement-outskirts>>`, at most 4, laid in order and each drawn by
+its own chance: fields in one, ponds in another. The first group's draws are as
+before; a later group never moves them. A TOML Declaration may still give one
+table. A Declaration built against the earlier 0.3 text needs a rebuild.
+
+A `biome-def` then gained `selectors`, an optional `biome-selectors` record of
+`selector-range`s for `altitude`, `coast`, `erosion` and `river` and an optional
+`relief`, and `strata`, an optional list of up to 8 `biome-stratum` records
+(`material`, `depth-min-m`, `depth-max-m`); Generator version 3 alone reads
+them, and absent they ask nothing. `world-params` gained `lava`, an optional
+fluid name, and `cave-biomes`, an optional list of up to 16 `cave-biome-def`
+records with their `cave-feature`s; both are the Game's alone. A Declaration
+built against the earlier 0.3 text needs a rebuild.
+
 A `settlement-def`, a `settlement-plot` and a `biome-def` then each gained an
 optional `loot`, last, a `loot-table` record: `rolls-min` and `rolls-max` (at
 most 27) and 1 to 16 `loot-entry` rows of an `item` by full name, a `min` of at
@@ -269,7 +298,7 @@ rebuild against the new record fields.
 
 Line `0.x` is pre-release. Later gameplay steps may add new lines, and
 publishing a starter does not freeze the Tools, commands or simulation features
-those steps add. The final **1.0 contract freeze belongs to roadmap step 28**
+those steps add. The final **1.0 contract freeze belongs to roadmap step 30**
 (release hardening); until then, treat any new line as possible.
 
 Saved Worlds are separate: they require the exact build that created them

@@ -20,6 +20,7 @@ const HAMLET: Village = Village {
         plot("smokehouse", 1.0, 0, 1).stocked(&SMOKEHOUSE_LOOT),
     ],
     loot: &HARBOUR_LOOT,
+    water: (0.7, (1, 2)),
 };
 
 const VILLAGE: Village = Village {
@@ -45,6 +46,7 @@ const VILLAGE: Village = Village {
         plot("boathouse", 1.0, 0, 2),
     ],
     loot: &HARBOUR_LOOT,
+    water: (0.9, (1, 3)),
 };
 
 /// A harbour keeps the catch and the gear: kelp, coconuts, driftwood and sailcloth.

@@ -114,8 +114,17 @@ const GAMES: [Game; 5] = [
                     "flora:dry_grass",
                 ],
             ),
+            // The Biomes of the land's shape, which only version 3 chooses: the sea's plants, and
+            // bare sand and rock.
+            (
+                "ocean",
+                &["aquatic:kelp", "aquatic:seagrass", "aquatic:red_weed"],
+            ),
+            ("beach", &[]),
+            ("alpine", &[]),
+            ("river", &["flora:cane"]),
         ],
-        bare: &[],
+        bare: &["beach", "alpine"],
         lake: true,
     },
     Game {
@@ -192,8 +201,13 @@ const GAMES: [Game; 5] = [
                     "flora:dry_grass",
                 ],
             ),
+            // The Biomes of the land's shape, which only version 3 chooses.
+            ("ocean", &[]),
+            ("shore", &[]),
+            ("river", &["flora:cane"]),
+            ("alpine", &[]),
         ],
-        bare: &[],
+        bare: &["ocean", "shore", "alpine"],
         lake: false,
     },
     Game {
@@ -230,8 +244,13 @@ const GAMES: [Game; 5] = [
                     "flora:tall_grass",
                 ],
             ),
+            // The Biomes of the land's shape, which only version 3 chooses.
+            ("ocean", &[]),
+            ("shore", &[]),
+            ("river", &[]),
+            ("alpine", &[]),
         ],
-        bare: &["scorched"],
+        bare: &["scorched", "ocean", "shore", "river", "alpine"],
         lake: true,
     },
     Game {
@@ -286,8 +305,13 @@ const GAMES: [Game; 5] = [
                     "flora:fern",
                 ],
             ),
+            // The Biomes of the land's shape, which only version 3 chooses.
+            ("ocean", &[]),
+            ("shore", &[]),
+            ("river", &["flora:cane"]),
+            ("alpine", &[]),
         ],
-        bare: &[],
+        bare: &["ocean", "shore", "alpine"],
         lake: true,
     },
     Game {
@@ -350,8 +374,13 @@ const GAMES: [Game; 5] = [
                     "flora:tuft",
                 ],
             ),
+            // The Biomes of the land's shape, which only version 3 chooses.
+            ("ocean", &[]),
+            ("shore", &[]),
+            ("river", &["flora:cane"]),
+            ("alpine", &[]),
         ],
-        bare: &[],
+        bare: &["ocean", "shore", "alpine"],
         lake: false,
     },
 ];
@@ -440,8 +469,13 @@ fn census(game: &Game) -> (BTreeMap<(usize, String), u64>, Vec<String>) {
             }
         }
     }
+    let selectors = generator.params().biomes;
     assert!(
-        taken.iter().all(|&n| n > 0),
+        taken
+            .iter()
+            .enumerate()
+            // A Biome of the land's shape is not chosen before version 3.
+            .all(|(i, &n)| n > 0 || selectors.selectors()[i].is_ranged()),
         "{}: a Biome has no ground within 3.8 km: {taken:?}",
         game.name
     );
@@ -477,8 +511,10 @@ fn every_biome_of_every_demo_game_grows_its_declared_species_and_none_is_bare_by
                 game.bare.contains(name),
                 "{full} is bare only if declared so"
             );
+            // A Biome of the land's shape that the census, before version 3, never chose.
+            let chosen = counts.keys().any(|(b, _)| *b == index);
             for plant in *species {
-                if WATER_PLANTS.contains(plant) && !game.lake {
+                if (WATER_PLANTS.contains(plant) && !game.lake) || !chosen {
                     continue;
                 }
                 let total: u64 = materials_of(plant)
@@ -736,7 +772,7 @@ const DENSE: [&str; 9] = [
     "lily_pond",
 ];
 const MODERATE: [&str; 4] = ["temperate", "cold", "heath", "cold_shallows"];
-const SPARSE: [&str; 12] = [
+const SPARSE: [&str; 14] = [
     "savanna",
     "dry",
     "prairie",
@@ -749,6 +785,9 @@ const SPARSE: [&str; 12] = [
     "frost_court",
     "ash_flats",
     "lagoon",
+    // The sea grows weed, not trees, and a river's banks cane.
+    "ocean",
+    "river",
 ];
 
 #[test]
@@ -1142,6 +1181,10 @@ fn ground_cover_grows_in_patches_at_each_biomes_class_and_flowers_stay_rare() {
         for (index, (name, _)) in game.biomes.iter().enumerate() {
             let full = format!("{}:{name}", game.name);
             let name = *name;
+            if grounds[index].is_empty() {
+                // A Biome of the land's shape, which only version 3 chooses.
+                continue;
+            }
             let cover = measure(&grounds[index]);
             println!(
                 "{full}: cover {:.1}% bare {:.1}% clustered {:.0}%",

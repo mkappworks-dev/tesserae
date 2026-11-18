@@ -16,7 +16,7 @@ use super::actions::{Action, Actions};
 use super::cinematic::{self as cine, Kind};
 use super::menu_ui as ui;
 use super::theme;
-use crate::content::{HereBiome, MaterialPalette, WorldFacts};
+use crate::content::{HereBiome, HereCave, MaterialPalette, WorldFacts};
 use crate::render::chunk_material::{ChunkMaterialExtension, FLAME_SLOT};
 use crate::server::game_mode::GameMode;
 use crate::session::SessionApp;
@@ -78,6 +78,17 @@ pub(super) struct Facts(pub(super) Option<WorldFacts>);
 #[derive(Resource, Default)]
 struct Here(Option<usize>);
 
+/// The cave Biome the Server last said the Player is in, which names the place over [`Here`].
+#[derive(Resource, Default)]
+pub(super) struct Cave(pub(super) Option<usize>);
+
+impl Cave {
+    /// The cave Biome's declared name, if the Player is in one.
+    pub(super) fn name<'a>(&self, facts: Option<&'a WorldFacts>) -> Option<&'a String> {
+        self.0.and_then(|i| facts?.cave_biomes.get(i))
+    }
+}
+
 #[derive(Component, Clone, Copy, PartialEq, Eq, Debug)]
 pub(super) enum Choice {
     Resume,
@@ -96,8 +107,10 @@ pub(super) fn plugin(app: &mut App) {
         .init_session_state::<Swatches>()
         .init_session_state::<Facts>()
         .init_session_state::<Here>()
+        .init_session_state::<Cave>()
         .add_session_message::<WorldFacts>()
         .add_session_message::<HereBiome>()
+        .add_session_message::<HereCave>()
         .add_observer(choose)
         .add_observer(choose_settings)
         .add_session_systems(
@@ -111,6 +124,7 @@ pub(super) fn plugin(app: &mut App) {
                 receive_palette,
                 receive_facts,
                 receive_here,
+                receive_cave,
                 render,
             )
                 .chain(),
@@ -253,6 +267,12 @@ fn receive_here(mut messages: MessageReader<HereBiome>, mut here: ResMut<Here>) 
     }
 }
 
+fn receive_cave(mut messages: MessageReader<HereCave>, mut cave: ResMut<Cave>) {
+    if let Some(latest) = messages.read().last() {
+        cave.0 = latest.0;
+    }
+}
+
 /// Where the Player is, as the footer names it: "TERRA / RIVER BEND".
 pub(super) fn place(facts: Option<&WorldFacts>) -> String {
     let game = facts
@@ -275,14 +295,17 @@ type Optional<'w> = (
     Option<Res<'w, super::map_cache::MapAllowed>>,
 );
 
+/// The menu, what it says of the World and where the Player is, and the settings over it.
+type Open<'w> = (
+    Res<'w, Menu>,
+    Res<'w, Facts>,
+    (Res<'w, Here>, Res<'w, Cave>),
+    Option<Res<'w, super::settings::Settings>>,
+);
+
 fn render(
     mut commands: Commands,
-    (menu, facts, here, settings): (
-        Res<Menu>,
-        Res<Facts>,
-        Res<Here>,
-        Option<Res<super::settings::Settings>>,
-    ),
+    (menu, facts, (here, cave), settings): Open,
     (own, preferences, allowed): Optional,
     (bindings, labels): (Res<super::actions::Bindings>, Res<super::actions::Labels>),
     roots: Query<Entity, With<MenuRoot>>,
@@ -295,6 +318,7 @@ fn render(
     if *shown == wanted
         && !facts.is_changed()
         && !here.is_changed()
+        && !cave.is_changed()
         && !own.as_ref().is_some_and(|o| o.is_changed())
         && !allowed.as_ref().is_some_and(|a| a.is_changed())
     {
@@ -364,9 +388,9 @@ fn render(
                         if !details {
                             focus = Some(resume);
                         }
-                        let biome = here
-                            .0
-                            .and_then(|i| facts.and_then(|f| f.biomes.get(i)))
+                        let biome = cave
+                            .name(facts)
+                            .or_else(|| here.0.and_then(|i| facts.and_then(|f| f.biomes.get(i))))
                             .map(|name| ui::declared_title(name));
                         if let Some(biome) = biome {
                             world_status(pause, facts, &biome);
@@ -909,6 +933,7 @@ mod tests {
             voxel_size_m: 0.5,
             seed: 42,
             biomes: vec!["terra:ash_flats".into(), "terra:meadow".into()],
+            cave_biomes: Vec::new(),
             default_mode: GameMode::Survival,
             generator: 2,
             temperature_size_m: 300.0,
