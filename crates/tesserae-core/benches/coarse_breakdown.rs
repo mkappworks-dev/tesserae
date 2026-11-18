@@ -47,7 +47,7 @@ fn params() -> WorldgenParams {
             level_m: SEA_LEVEL_M + RELIEF_M * 5.0 / 12.0,
             material: f.water,
         }),
-        ..tesserae_core::testgen::world_params()
+        ..tesserae_core::testgen::world_params_v3()
     }
 }
 

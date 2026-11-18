@@ -31,7 +31,8 @@ fn world(biomes: &[Biome], selectors: &[BiomeSelectors]) -> Worldgen {
             .unwrap()
             .with_selectors(selectors)
             .unwrap(),
-        ..tesserae_core::testgen::world_params()
+        water: None,
+        ..tesserae_core::testgen::world_params_v3()
     };
     Worldgen::new(SEED, 1.0, params)
 }
@@ -48,7 +49,8 @@ fn the_air_is_colder_higher_up_in_version_3_and_not_before() {
         1.0,
         WorldgenParams {
             generator: 2,
-            ..tesserae_core::testgen::world_params()
+            water: None,
+            ..tesserae_core::testgen::world_params_v3()
         },
     );
     for (x, z) in grid().take(200) {

@@ -7,6 +7,8 @@ use tesserae_core::{
     WorldgenParams,
 };
 
+mod common;
+
 const SEED: u64 = 0x7e55_e2ae_0000_0001;
 
 fn biome(name: &str, temperature: f32, ground: Option<GroundParams>) -> Biome {
@@ -47,14 +49,14 @@ fn small_regions() -> ClimateParams {
 
 /// Cubes only, so the terrain tests see the ground, not its stairs.
 fn params(biomes: &[Biome]) -> WorldgenParams {
-    WorldgenParams {
+    common::lowland(WorldgenParams {
         caves: None,
         smoothing: None,
         water: None,
         climate: small_regions(),
         biomes: BiomeTable::new(biomes).unwrap(),
-        ..tesserae_core::testgen::world_params()
-    }
+        ..tesserae_core::testgen::world_params_v3()
+    })
 }
 
 fn generator(biomes: &[Biome], voxel_size: f32) -> Worldgen {
@@ -150,7 +152,7 @@ fn silhouette(g: &Worldgen, reach: i32) -> Vec<Vec<(bool, u8, u8)>> {
 
 #[test]
 fn biomes_change_no_height_cave_lake_or_stair() {
-    let defaults = tesserae_core::testgen::world_params();
+    let defaults = common::lowland(tesserae_core::testgen::world_params_v3());
     let plain = WorldgenParams {
         climate: small_regions(),
         smoothing: Some(tesserae_core::SmoothingParams { min_rise_m: 0.0 }),

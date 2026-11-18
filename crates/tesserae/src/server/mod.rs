@@ -295,24 +295,10 @@ fn dev_spawn_eye(generator: &Worldgen, value: &str) -> Option<Vec3> {
     }
 }
 
-/// How far a new World looks for dry land when the spawn point is in the sea.
-const DRY_LAND_SEARCH_M: f32 = 6000.0;
-
-/// How far from the origin a new World looks for a Settlement to spawn the Player beside, nearest
-/// ring first: version 3 lays Settlements only on level ground, so the nearest may be kilometres
-/// out.
-const SPAWN_SEARCH_M: [f32; 4] = [512.0, 1024.0, 2048.0, 4096.0];
-
-/// Inside the Settlement nearest the origin, or the dry land nearest the origin with none; clear
-/// of the ground and of any lake standing on it, and no lower than the top of anything generated
-/// under the Player's body.
+/// Where the Generator spawns a new Player, clear of the ground and of any lake standing on it, and
+/// no lower than the top of anything generated under the Player's body.
 fn spawn_eye(generator: &Worldgen) -> Vec3 {
-    // A Settlement's disc is level dry ground already; only the origin needs looking round.
-    let [x, z] = SPAWN_SEARCH_M
-        .iter()
-        .find_map(|&r| generator.settlement_spawn_m(r))
-        .or_else(|| generator.dry_land_near_m([0.0; 2], DRY_LAND_SEARCH_M))
-        .unwrap_or([0.0; 2]);
+    let [x, z] = generator.spawn_m();
     let ground_m = generator.surface_height_m(x, z);
     let top_m = generator
         .water()

@@ -102,7 +102,7 @@ fn params(features: SurfaceFeatures, structures: bool) -> WorldgenParams {
             surface_features,
         }])
         .unwrap(),
-        ..tesserae_core::testgen::world_params()
+        ..tesserae_core::testgen::world_params_v3()
     }
 }
 

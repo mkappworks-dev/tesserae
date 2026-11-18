@@ -54,7 +54,7 @@ fn params(generator: u32, caves: &[CaveBiome], lava: bool) -> WorldgenParams {
         }),
         lava: lava.then_some(LAVA),
         cave_biomes: CaveBiomeTable::new(caves).unwrap(),
-        ..tesserae_core::testgen::world_params()
+        ..tesserae_core::testgen::world_params_v3()
     }
 }
 

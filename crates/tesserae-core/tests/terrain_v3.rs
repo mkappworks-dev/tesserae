@@ -20,7 +20,8 @@ fn v3() -> WorldgenParams {
         sea_level_m: 24.0,
         relief_m: 24.0,
         landforms: landforms(),
-        ..tesserae_core::testgen::world_params()
+        water: None,
+        ..tesserae_core::testgen::world_params_v3()
     }
 }
 
@@ -517,6 +518,16 @@ fn spawning_finds_dry_land_clear_of_cliffs_and_water() {
         let near = g.surface_height_m(sx + 6.0 * a.cos(), sz + 6.0 * a.sin());
         assert!((near - h).abs() <= 4.0, "a cliff beside the spawn");
     }
+}
+
+#[test]
+fn a_world_with_no_settlement_spawns_on_the_dry_land_nearest_the_origin() {
+    let g = Worldgen::new(SEED, 1.0, wet_world());
+    // Recorded from the Server's search before the Generator answered it.
+    assert_eq!(
+        g.spawn_m().map(f32::to_bits),
+        [3_286_458_261, 1_145_715_809]
+    );
 }
 
 #[test]

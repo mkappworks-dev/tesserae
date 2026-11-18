@@ -617,15 +617,17 @@ fn a_shaped_uniform_chunk_is_not_an_occluder() {
 /// be the same triangle soup `greedy_mesh` would have produced.
 #[test]
 fn declining_never_changes_the_mesh_it_would_have_produced() {
-    let g = Worldgen::new(0x7e55, 1.0, tesserae_core::testgen::world_params());
-    let center = g.chunk(0, 0, 0);
+    let g = Worldgen::new(0x7e55, 1.0, tesserae_core::testgen::world_params_v3());
+    let middle_m = CHUNK_SIZE as f32 / 2.0;
+    let cy = (g.surface_height_m(middle_m, middle_m) / CHUNK_SIZE as f32).floor() as i32;
+    let center = g.chunk(0, cy, 0);
     let neighbors = [
-        g.chunk(-1, 0, 0),
-        g.chunk(1, 0, 0),
-        g.chunk(0, -1, 0),
-        g.chunk(0, 1, 0),
-        g.chunk(0, 0, -1),
-        g.chunk(0, 0, 1),
+        g.chunk(-1, cy, 0),
+        g.chunk(1, cy, 0),
+        g.chunk(0, cy - 1, 0),
+        g.chunk(0, cy + 1, 0),
+        g.chunk(0, cy, -1),
+        g.chunk(0, cy, 1),
     ];
     let refs: [Option<LitChunk>; 6] = std::array::from_fn(|i| Some(unlit(&neighbors[i])));
 
@@ -1695,16 +1697,19 @@ fn a_block_of_glass_draws_only_its_skin() {
 // with real neighbours, not a hand-built scene in an isolated shell.
 
 fn world() -> Worldgen {
-    Worldgen::new(0x7e55_e2ae, 1.0, tesserae_core::testgen::world_params())
+    Worldgen::new(0x7e55_e2ae, 1.0, tesserae_core::testgen::world_params_v3())
 }
 
-/// Chunk coordinates near the origin, at the height the surface crosses it,
-/// whose Chunk holds at least `min` shaped Voxels. In a fixed scan order.
+/// Chunk coordinates near the origin, at the height the surface crosses each
+/// column's middle, whose Chunk holds at least `min` shaped Voxels. In a fixed
+/// scan order.
 fn ramp_chunks(g: &Worldgen, min: usize) -> Vec<[i32; 3]> {
-    let cy = (g.surface_height_m(0.0, 0.0) / CHUNK_SIZE as f32).floor() as i32;
+    let side = CHUNK_SIZE as f32;
     let mut found = vec![];
     for cz in -3..3 {
         for cx in -3..3 {
+            let middle = |c: i32| (c as f32 + 0.5) * side;
+            let cy = (g.surface_height_m(middle(cx), middle(cz)) / side).floor() as i32;
             if g.chunk(cx, cy, cz).shaped_count() >= min {
                 found.push([cx, cy, cz]);
             }

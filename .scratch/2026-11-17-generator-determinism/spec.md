@@ -191,6 +191,10 @@ recorded version 3 digests.
   Determinism job lands before the correction too, failing targets continuing on
   error and the job not yet required, so it records which platforms differ under
   `std` maths.
+- **Version 3 defects found on the way** (a Surface feature lost at a Chunk's
+  top, crop fields near water missing at 0.5 m, smoothing steps at one seed) are
+  fixed inside the same pre-release exception, before the correction, so every
+  move of version 3's output lands before the freeze resumes.
 
 ## Testing Decisions
 

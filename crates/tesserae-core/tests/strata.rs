@@ -30,7 +30,8 @@ fn params(generator: u32, strata: &[Stratum]) -> WorldgenParams {
             .unwrap()
             .with_strata(&[Strata::new(strata).unwrap()])
             .unwrap(),
-        ..tesserae_core::testgen::world_params()
+        water: None,
+        ..tesserae_core::testgen::world_params_v3()
     }
 }
 

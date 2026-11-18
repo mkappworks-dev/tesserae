@@ -10,12 +10,11 @@ use tesserae_core::{
     mesh_chunk, testgen,
 };
 
-/// A default World with its lakes left out: the terrain every figure in this
-/// file measured before lakes, so a change stays comparable with `main`.
+/// A default World with its water left out, so the figures in this file measure the terrain alone.
 fn dry() -> WorldgenParams {
     WorldgenParams {
         water: None,
-        ..tesserae_core::testgen::world_params()
+        ..tesserae_core::testgen::world_params_v3()
     }
 }
 
@@ -55,8 +54,9 @@ fn worldgen() -> (Worldgen, i32, i32, i32) {
     // the band it could reach: that one is usually empty sky, and benching it
     // as "straddling" would measure the air early-out twice.
     let straddling = (g.surface_height_m(0.0, 0.0) / cell).floor() as i32;
-    let sky = ((params.sea_level_m + params.relief_m) / cell) as i32 + 2;
-    let deep = (params.sea_level_m / cell) as i32 - 2;
+    let (lowest, highest) = g.surface_bounds_m();
+    let sky = (highest / cell) as i32 + 1;
+    let deep = (lowest / cell).floor() as i32 - 2;
     (g, straddling, sky, deep)
 }
 
@@ -794,7 +794,7 @@ fn shore() -> (Worldgen, (i32, i32, i32)) {
         1.0,
         WorldgenParams {
             caves: None,
-            ..tesserae_core::testgen::world_params()
+            ..tesserae_core::testgen::world_params_v3()
         }
         .with_default_lake(fixture().1),
     );
