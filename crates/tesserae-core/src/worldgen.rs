@@ -313,6 +313,11 @@ impl WorldgenParams {
             "must be finite and within 65536 m",
         )?;
         require(
+            land.height_m > 0.0,
+            "landforms.height_m",
+            "must be above 0 m, since a range's rise is a share of it",
+        )?;
+        require(
             land.height_m >= self.relief_m && land.depth_m >= 0.0,
             "landforms.height_m",
             "must hold the relief above Sea level",
@@ -1823,14 +1828,7 @@ impl Worldgen {
                         }
                         continue;
                     }
-                    // A tunnel or shaft never opens a flooded cavern below the water table.
-                    let walled = || {
-                        let flooded = (self.water.is_some() && y_m < table_m)
-                            || self
-                                .lava_m()
-                                .is_some_and(|lava_m| y_m < lava_m + LAVA_SEAL_M);
-                        flooded && self.caverns.is_some_and(|c| c.walls_in(x_m, y_m, z_m))
-                    };
+                    let walled = || self.walled_in([x_m, y_m, z_m], table_m);
                     // A cave carves through the Grass cap like anything else,
                     // which is what a mouth is.
                     if let Some((caves, blocks)) = &reachable
@@ -2300,8 +2298,10 @@ impl Worldgen {
                 let (mut rising, mut turn) = (0, 0);
                 for (dx, dz, quarter) in CARDINALS {
                     let (nx, nz) = (x + dx, z + dz);
-                    if tops[surface_index(nx, nz)] == top + EASED_RISE_VOXELS
-                        && self.still_solid(chunk, coord, [nx, y, nz])
+                    // The ground as it stands, so a cell the overhang density pushed solid or a
+                    // cave opened counts as it looks.
+                    if self.still_solid(chunk, coord, [nx, y, nz])
+                        && !self.still_solid(chunk, coord, [nx, y + 1, nz])
                     {
                         rising += 1;
                         turn = quarter;
@@ -2455,13 +2455,49 @@ impl Worldgen {
         (self.level_top(level_m) + 1) as f32 * s
     }
 
-    /// Whether the ground cell at global Voxel `at` is carved away: what the Chunk holding it
-    /// asks, so any Chunk can answer for it.
+    /// Whether a tunnel or a shaft opens the ground cell at global Voxel `at`, the column's top or
+    /// above: what the Chunk holding it decides, so any Chunk can answer for it. A cavern stays
+    /// [`CAVERN_MIN_DEPTH_M`] under the ground, so it never reaches the cells this is asked about.
     fn carved(&self, at: [i32; 3]) -> bool {
-        self.caves.as_ref().is_some_and(|caves| {
-            let (x_m, z_m) = (self.global_m(at[0]), self.global_m(at[2]));
-            caves.carves(x_m, self.global_m(at[1]), z_m, self.cave_scale_at(x_m, z_m))
-        })
+        let [x_m, y_m, z_m] = at.map(|g| self.global_m(g));
+        let tunnel = || {
+            self.caves
+                .as_ref()
+                .is_some_and(|caves| caves.carves(x_m, y_m, z_m, self.cave_scale_at(x_m, z_m)))
+        };
+        let shaft = || {
+            self.caverns.as_ref().is_some_and(|c| {
+                c.shafts(
+                    [x_m, z_m],
+                    [x_m, z_m],
+                    |x, z| self.surface_height_m(x, z),
+                    |x, z| self.water_surface_m(x, z).is_none(),
+                )
+                .iter()
+                .any(|s| s.cuts(x_m, y_m, z_m))
+            })
+        };
+        if !(tunnel() || shaft()) {
+            return false;
+        }
+        let clear = (CAVE_CLEAR_M / self.voxel_size).ceil() as i32;
+        let near = self.footprints_near([
+            [at[0] - clear, at[2] - clear],
+            [at[0] + 1 + clear, at[2] + 1 + clear],
+        ]);
+        !near.iter().any(|f| f.widened(clear).covers(at[0], at[2]))
+            && y_m >= self.sealed_below_m(x_m, z_m, self.surface_height_m(x_m, z_m))
+            && !self.walled_in([x_m, y_m, z_m], self.water_table_m(x_m, z_m))
+    }
+
+    /// Whether a tunnel or shaft must leave the rock at a point, which is a flooded cavern's or the
+    /// shell round it below the water table.
+    fn walled_in(&self, [x_m, y_m, z_m]: [f32; 3], table_m: f32) -> bool {
+        let flooded = (self.water.is_some() && y_m < table_m)
+            || self
+                .lava_m()
+                .is_some_and(|lava_m| y_m < lava_m + LAVA_SEAL_M);
+        flooded && self.caverns.is_some_and(|c| c.walls_in(x_m, y_m, z_m))
     }
 
     /// The Plant a Biome stands on the column at global Voxel `(gx, gz)`, if any: a pure function
@@ -2513,11 +2549,16 @@ impl Worldgen {
     }
 
     /// [`Self::plant_at`] before a planted field clears the column: what the column draws, unless
-    /// it is a tree with a stronger tree's trunk within [`CROWN_SPACING`] crowns.
+    /// it is a tree with a stronger tree's trunk within its crowding distance.
     fn plant_raw(&self, scatter: &SurfaceScatter, gx: i32, gz: i32) -> Option<Standing> {
         let standing = self.plant_drawn(scatter, gx, gz)?;
         if let SurfacePlantKind::Tree(tree) = standing.plant.kind
-            && self.crowded(scatter, [gx, gz], CROWN_SPACING * tree.canopy_radius_m)
+            && self.crowded(
+                scatter,
+                [gx, gz],
+                tree.crowding_m
+                    .unwrap_or(CROWN_SPACING * tree.canopy_radius_m),
+            )
         {
             return None;
         }
@@ -2600,7 +2641,7 @@ impl Worldgen {
             | (_, Some(_)) => return None,
             _ => {}
         }
-        if self.smoothing && self.eased(top, [gx, gz], base[1]) {
+        if self.smoothing && self.eased([gx, gz], base[1]) {
             return None;
         }
         Some(Standing {
@@ -2612,15 +2653,10 @@ impl Worldgen {
 
     /// Whether smoothing would put a stair or slab in the cell over the column's top, as `smooth`
     /// decides it for the Chunk that holds the cell.
-    fn eased(&self, top: i32, [gx, gz]: [i32; 2], y: i32) -> bool {
+    fn eased(&self, [gx, gz]: [i32; 2], y: i32) -> bool {
         CARDINALS.iter().any(|&(dx, dz, _)| {
             let (nx, nz) = (gx + dx, gz + dz);
-            let neighbour = top_index(
-                self.surface_height_m(self.global_m(nx), self.global_m(nz)),
-                0.0,
-                self.voxel_size,
-            );
-            neighbour == top + EASED_RISE_VOXELS && !self.carved([nx, y, nz])
+            self.ground_at([nx, y, nz]) && !self.ground_at([nx, y + 1, nz])
         })
     }
 
@@ -2663,7 +2699,7 @@ impl Worldgen {
             || self
                 .water_level_m(x_m, z_m)
                 .is_some_and(|level_m| y_m < level_m)
-            || (self.smoothing && self.eased(top, [gx, gz], base[1]))
+            || (self.smoothing && self.eased([gx, gz], base[1]))
         {
             return None;
         }
@@ -2706,6 +2742,7 @@ impl Worldgen {
             trunk_height_m: tree.trunk_height_m,
             canopy_radius_m: tree.canopy_radius_m,
             branching: tree.branching,
+            crowding_m: tree.crowding_m,
             mean_seconds: 0.0,
             trunk_yield: Vec::new(),
             canopy_yield: Vec::new(),
@@ -2994,26 +3031,67 @@ impl Worldgen {
         (owner * size) as f32 * self.voxel_size + local.rem_euclid(size) as f32 * self.voxel_size
     }
 
-    /// Whether the cell `at` (Voxel offsets from this Chunk's corner, possibly
-    /// one outside it) is solid ground, given that the cube pass made it so
-    /// before caves. Inside the Chunk that is a read; outside, the cell belongs
-    /// to a Chunk not held here, so it is asked of the cave field by metre
-    /// position, which is what that Chunk asks.
+    /// Whether the cell `at` (Voxel offsets from this Chunk's corner, possibly one outside it) is
+    /// ground after the cube pass. Inside the Chunk that is a read, which smoothing's own stairs
+    /// do not change; outside, it is asked as the Chunk holding it decides it.
     fn still_solid(&self, chunk: &Chunk, coord: [i32; 3], at: [i32; 3]) -> bool {
         if at.iter().all(|c| (0..CHUNK_SIZE as i32).contains(c)) {
-            return !chunk
-                .get(at[0] as usize, at[1] as usize, at[2] as usize)
-                .is_air();
+            let v = chunk.get(at[0] as usize, at[1] as usize, at[2] as usize);
+            return !v.is_air()
+                && !v.is_shaped()
+                && self.water.is_none_or(|w| v.material() != w.material);
         }
-        self.caves.as_ref().is_none_or(|caves| {
-            let (x_m, z_m) = (self.axis_m(coord[0], at[0]), self.axis_m(coord[2], at[2]));
-            !caves.carves(
-                x_m,
-                self.axis_m(coord[1], at[1]),
-                z_m,
-                self.cave_scale_at(x_m, z_m),
+        let size = CHUNK_SIZE as i32;
+        self.ground_at([0, 1, 2].map(|a| coord[a] * size + at[a]))
+    }
+
+    /// Whether the cell at global Voxel `at`, the column's top or near it, is ground once caves
+    /// are carved, as the Chunk holding it decides.
+    fn ground_at(&self, at: [i32; 3]) -> bool {
+        self.filled(at) && !self.carved(at)
+    }
+
+    /// Whether the cube pass fills the cell at global Voxel `[gx, y, gz]` with ground before
+    /// caves: under the column's surface, or past it where the overhang density pushes it. It
+    /// asks the column and its neighbours rather than their Chunk's whole Stack, since a
+    /// neighbour's Chunk may not be made yet.
+    fn filled(&self, [gx, y, gz]: [i32; 3]) -> bool {
+        let at_m = |gx, gz| [gx, gz].map(|g| self.global_m(g));
+        let [x_m, z_m] = at_m(gx, gz);
+        let y_m = self.global_m(y);
+        let surface_m = self.surface_height_m(x_m, z_m);
+        let base_m = surface_m - y_m;
+        if base_m.abs() > self.terrain.overhang_max_m() {
+            return base_m >= 0.0;
+        }
+        // `overhang_amp_at`, column by column.
+        let wettest_m = CARDINALS
+            .iter()
+            .map(|&(dx, dz, _)| at_m(gx + dx, gz + dz))
+            .filter(|&[x, z]| {
+                self.water_level_m(x, z)
+                    .is_some_and(|l| l > self.surface_height_m(x, z))
+            })
+            .chain([[x_m, z_m]])
+            .filter_map(|[x, z]| self.water_level_m(x, z))
+            .fold(f32::MIN, f32::max);
+        let amp_m = self
+            .terrain
+            .overhang_amp_m(x_m, z_m)
+            .min((surface_m - wettest_m).max(0.0));
+        let size = CHUNK_SIZE as i32;
+        // Only a banded cell reads the Structures the density keeps off, which cost the most.
+        if amp_m <= 0.0
+            || base_m.abs() > amp_m
+            || covers(
+                &self.overhang_kept_off([gx.div_euclid(size), gz.div_euclid(size)]),
+                gx,
+                gz,
             )
-        })
+        {
+            return base_m >= 0.0;
+        }
+        base_m + self.terrain.overhang_push_m(x_m, y_m, z_m, amp_m) >= 0.0
     }
 
     /// For each sub-block of the Chunk whose lowest Voxel is at `origin_m`,
@@ -3135,9 +3213,13 @@ mod tests {
     /// Smoothing with no minimum rise, so it fires at any Voxel size: the tests
     /// about where it places things, rather than whether it runs.
     fn smoothed(voxel_size: f32, caves: bool) -> Worldgen {
+        smoothed_at(SEED, voxel_size, caves)
+    }
+
+    fn smoothed_at(seed: u64, voxel_size: f32, caves: bool) -> Worldgen {
         let defaults = crate::testgen::world_params();
         Worldgen::new(
-            SEED,
+            seed,
             voxel_size,
             WorldgenParams {
                 caves: caves.then_some(CaveParams::default()),
@@ -4315,13 +4397,21 @@ mod tests {
         }
     }
 
+    /// At [`COAST`] the overhang density pushes cells past the surface the steps are read from.
     #[test]
     fn smoothing_stairs_face_the_step_they_climb() {
+        for seed in [SEED, COAST] {
+            for size in [1.0, 0.5] {
+                assert_stairs_face_their_step(&smoothed_at(seed, size, false));
+            }
+        }
+    }
+
+    fn assert_stairs_face_their_step(g: &Worldgen) {
         use crate::mesh::{NEG_X, NEG_Z, POS_X, POS_Z};
         use crate::shape::ShapeTable;
         let table = ShapeTable::builtin();
-        let g = smoothed(1.0, false);
-        let mut probe = Probe::new(&g);
+        let mut probe = Probe::new(g);
         let sides = [
             (POS_X, [1, 0, 0]),
             (NEG_X, [-1, 0, 0]),
@@ -4329,7 +4419,7 @@ mod tests {
             (NEG_Z, [0, 0, -1]),
         ];
         let (mut stairs, mut slabs, mut facings) = (0, 0, std::collections::HashSet::new());
-        for (at, v) in shaped_voxels(&g, &mut probe) {
+        for (at, v) in shaped_voxels(g, &mut probe) {
             // Which of the four neighbours stand at this Voxel's own level.
             // A neighbour that rises two Voxels also has a cube at this level,
             // but one above it; only the one-Voxel rises are what was eased.
@@ -4404,9 +4494,17 @@ mod tests {
 
     #[test]
     fn a_ramp_is_never_cut_by_a_chunk_edge_or_floating_over_a_cave() {
+        for seed in [SEED, COAST] {
+            for size in [1.0, 0.5] {
+                let (at_edge, total) = assert_ramps_are_whole(&smoothed_at(seed, size, true));
+                assert!(
+                    at_edge > 0 && total > at_edge,
+                    "{seed} {size} m: {at_edge} of {total}"
+                );
+            }
+        }
+
         let g = smoothed(1.0, true);
-        let (at_edge, total) = assert_ramps_are_whole(&g);
-        assert!(at_edge > 0 && total > at_edge, "{at_edge} of {total}");
 
         // A cave is what makes one fail to stand: where the same World without
         // tunnels has a stair or slab, this one sometimes has none.

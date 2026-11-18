@@ -294,6 +294,13 @@ Tables are frozen in the generation snapshot with the Settlements and Biomes.
 `none` stocks nothing, so a Declaration without loot loads as before but needs a
 rebuild against the new record fields.
 
+A `tree-def` of line 0.3 then gained `crowding-m`, an optional `f32` last: how
+near, in metres, a stronger tree's trunk keeps this one from generating, above 0
+and at most 12. Absent is 1.5 times `canopy-radius-m`, so a tree declared
+without it crowds as before; a dense stand of one species declares less. The
+Biome snapshot freezes it as an optional member, so no `FORMAT_VERSION` changes.
+A Declaration built against the earlier 0.3 text needs a rebuild.
+
 ## What is not frozen
 
 Line `0.x` is pre-release. Later gameplay steps may add new lines, and

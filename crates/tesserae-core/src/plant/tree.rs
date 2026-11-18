@@ -792,6 +792,7 @@ mod tests {
         Tree {
             vines: None,
             branching: None,
+            crowding_m: None,
             trunk: TRUNK,
             canopy: CANOPY,
             trunk_height_m: (3.0, 5.0),

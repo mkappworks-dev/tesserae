@@ -929,8 +929,6 @@ const SPARSE: [&str; 14] = [
 ];
 
 #[test]
-#[ignore = "the crowding rule caps a dense Biome's lone species short of its class; ticket 13 of \
-            .scratch/2026-11-17-generator-determinism"]
 fn each_biome_scatters_its_trees_at_its_density_class() {
     for game in &GAMES {
         for (name, per_ha) in trees_per_hectare(game) {

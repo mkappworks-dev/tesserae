@@ -39,6 +39,9 @@ pub const MAX_STAGES: usize = 8;
 pub const MAX_FRUIT_STAGES: usize = 4;
 /// Largest `canopy-radius-m`, `trunk-height-m` and `max-height-m` in metres.
 pub const MAX_CANOPY_RADIUS_M: f32 = 8.0;
+/// The most a tree's declared crowding distance may be: the default's 1.5 radii of the widest
+/// crown, which bounds the columns a generated tree asks about.
+pub const MAX_CROWDING_M: f32 = 12.0;
 pub const MAX_PLANT_HEIGHT_M: f32 = 32.0;
 pub const MAX_SPREAD_REACH_M: f32 = 8.0;
 pub const MAX_FRUIT_DENSITY: f32 = 0.3;
@@ -131,6 +134,9 @@ pub struct Tree {
     pub vines: Option<TreeVines>,
     /// `None` is the straight trunk under one ellipsoidal crown.
     pub branching: Option<Branching>,
+    /// How near, in metres, a stronger tree's trunk keeps this one from generating; `None` is
+    /// 1.5 crown radii.
+    pub crowding_m: Option<f32>,
 }
 
 /// Most limbs, or tiers when `tiers` is set (each tier is a ring of four limbs).
@@ -999,6 +1005,14 @@ fn check(plant: &Plant) -> Result<(), PlantError> {
             if let Some(b) = &tree.branching {
                 b.check(tree.canopy_radius_m, low)
                     .map_err(PlantError::Size)?;
+            }
+            if tree
+                .crowding_m
+                .is_some_and(|m| !(m.is_finite() && m > 0.0 && m <= MAX_CROWDING_M))
+            {
+                return Err(PlantError::Size(
+                    "crowding-m must be above 0 and at most 12",
+                ));
             }
             floor(tree.mean_seconds)?;
             if let Some(vines) = &tree.vines

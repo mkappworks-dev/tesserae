@@ -993,6 +993,9 @@ pub enum SavedPlantKind {
         /// Absent is a straight trunk under one crown, as every tree saved before branching.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         branching: Option<SavedBranching>,
+        /// Absent crowds at 1.5 crown radii, as every tree saved before it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        crowding_m: Option<f32>,
     },
 }
 
@@ -1895,6 +1898,7 @@ fn saved_plant(p: &crate::SurfacePlant, mapping: &Mapping) -> Result<SavedPlant,
                 canopy: name(t.canopy)?,
                 trunk_height_m: [t.trunk_height_m.0, t.trunk_height_m.1],
                 canopy_radius_m: t.canopy_radius_m,
+                crowding_m: t.crowding_m,
                 branching: t.branching.map(|b| SavedBranching {
                     limbs: [b.limbs.min, b.limbs.max],
                     start: b.start,
@@ -2023,7 +2027,9 @@ fn restored_plant(p: &SavedPlant, mapping: &Mapping) -> Result<crate::SurfacePla
             fruit,
             vines,
             branching,
+            crowding_m,
         } => K::Tree(crate::SurfaceTree {
+            crowding_m: *crowding_m,
             branching: branching.as_ref().map(|b| crate::plant::Branching {
                 limbs: crate::plant::CountRange {
                     min: b.limbs[0],

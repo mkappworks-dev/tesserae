@@ -1154,6 +1154,7 @@ mean-seconds = 140.0
 sapling-yield = [1, 2]
 vines = { plant = "flora:vine", density = 0.12, length-m = 4.0 }
 branching = { limbs = [3, 4], start = 0.6, reach-m = 4.5, rise = 0.2, lean-m = 0.0, lobe-radius-m = 1.8 }
+crowding-m = 2.0
 
 [plants.needs]
 soil = ["#soil"]
@@ -1191,6 +1192,7 @@ mean-seconds = 110.0
 sapling-yield = [1, 2]
 vines = { plant = "flora:vine", density = 0.2, length-m = 2.0 }
 branching = { limbs = [3, 4], start = 0.7, reach-m = 3.5, rise = -0.3, lean-m = 1.0, lobe-radius-m = 1.5 }
+crowding-m = 2.0
 
 [plants.needs]
 soil = ["#soil"]

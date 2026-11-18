@@ -724,6 +724,7 @@ pub struct SurfaceTree {
     /// Frozen with the tree, like the vines, so a Game that later edits its row cannot reshape
     /// a saved World.
     pub branching: Option<crate::plant::Branching>,
+    pub crowding_m: Option<f32>,
 }
 
 impl SurfaceTree {

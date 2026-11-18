@@ -44,6 +44,7 @@ fn block() -> Template {
 fn oak() -> SurfaceTree {
     SurfaceTree {
         branching: None,
+        crowding_m: None,
         trunk: TRUNK,
         canopy: CANOPY,
         trunk_height_m: (3.0, 5.0),
@@ -180,6 +181,7 @@ fn row() -> Tree {
     Tree {
         vines: None,
         branching: None,
+        crowding_m: None,
         trunk: o.trunk,
         canopy: o.canopy,
         trunk_height_m: o.trunk_height_m,

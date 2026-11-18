@@ -497,7 +497,10 @@ fn a_field_generates_the_same_cells_whichever_chunks_are_made_first() {
 
 #[test]
 fn a_field_stands_on_no_water_and_near_water_means_near_the_lake() {
-    // Version 3's water is the sea, so the level ground's floor is let down a metre under it.
+    // Version 3's water is the sea, so the level ground's floor is let down a metre under it, and
+    // small continents give the window a shore. On the default continent the whole window is
+    // ground 0.6 m under the sea, which a 1 m top Voxel fills to the level and a 0.5 m one leaves
+    // under water, so only 1 m stood fields there.
     let lake = |features| {
         let land = level(
             features,
@@ -509,13 +512,13 @@ fn a_field_stands_on_no_water_and_near_water_means_near_the_lake() {
         WorldgenParams {
             landforms: LandformParams {
                 depth_m: land.relief_m,
+                continent_size_m: 800.0,
                 ..land.landforms
             },
             ..land
         }
     };
     let reach_m = 16.0;
-    let mut near_water = 0;
     for size in SIZES {
         let anywhere = changed(SEED, size, lake(fielded(None, &[])), 120.0);
         let near = changed(SEED, size, lake(fielded(Some(reach_m), &[])), 120.0);
@@ -534,7 +537,7 @@ fn a_field_stands_on_no_water_and_near_water_means_near_the_lake() {
         }
         let fields_near = fields_in(&near, window(size, 120.0));
         let fields_anywhere = fields_in(&anywhere, window(size, 120.0));
-        near_water += fields_near.len();
+        assert!(!fields_near.is_empty(), "{size} m: no field near water");
         assert!(
             fields_near.len() <= fields_anywhere.len(),
             "{size} m: near-water only narrows"
@@ -553,7 +556,6 @@ fn a_field_stands_on_no_water_and_near_water_means_near_the_lake() {
             assert!(wet, "{size} m: a field with no water within {reach_m} m");
         }
     }
-    assert!(near_water > 0, "no field near water");
 }
 
 #[test]
@@ -563,6 +565,7 @@ fn a_tree_inside_the_ground_a_field_would_take_skips_that_place_whole() {
             shape: 0,
             kind: tesserae_core::SurfacePlantKind::Tree(tesserae_core::SurfaceTree {
                 branching: None,
+                crowding_m: None,
                 trunk: TRUNK,
                 canopy: TRUNK + 1,
                 trunk_height_m: (3.0, 4.0),
