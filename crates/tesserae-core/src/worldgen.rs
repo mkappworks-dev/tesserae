@@ -1133,6 +1133,20 @@ impl Worldgen {
         None
     }
 
+    /// Where a new Player spawns: inside the Settlement nearest the origin, searched in widening
+    /// rings, else the dry land nearest the origin, else the origin.
+    pub fn spawn_m(&self) -> [f32; 2] {
+        // Version 3 lays Settlements only on level ground, so the nearest may be kilometres out.
+        const SETTLEMENT_RINGS_M: [f32; 4] = [512.0, 1024.0, 2048.0, 4096.0];
+        const DRY_LAND_SEARCH_M: f32 = 6000.0;
+        // A Settlement's disc is level dry ground already; only the origin needs looking round.
+        SETTLEMENT_RINGS_M
+            .iter()
+            .find_map(|&r| self.settlement_spawn_m(r))
+            .or_else(|| self.dry_land_near_m([0.0; 2], DRY_LAND_SEARCH_M))
+            .unwrap_or([0.0; 2])
+    }
+
     /// The Water surface over a column: the height of the water standing or running on it, `None`
     /// where the ground is above the water or the Game declared no fluid.
     pub fn water_surface_m(&self, x_m: f32, z_m: f32) -> Option<f32> {
