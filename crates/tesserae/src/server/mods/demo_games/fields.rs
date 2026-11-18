@@ -10,7 +10,6 @@ use super::loaded;
 /// in Voxels, at Voxels of 1 m.
 fn field_cells(game: &str, seed: u64, half_m: f32) -> BTreeMap<String, u64> {
     let (_install, loaded) = loaded(game, 1.0);
-    let loaded = super::at_version_2(loaded);
     let params = loaded.world.unwrap();
     let bare: Vec<Biome> = params
         .biomes

@@ -17,9 +17,9 @@ demo_kit::plants!();
 pub fn meadow() -> Vec<SurfaceFeature> {
     [
         plants(&[
-            ("flora:cherry", 30.0, 96.0, 0.6),
-            ("flora:apple", 30.0, 96.0, 0.6),
-            ("flora:oak", 22.0, 96.0, 0.6),
+            ("flora:cherry", 40.0, 96.0, 0.6),
+            ("flora:apple", 40.0, 96.0, 0.6),
+            ("flora:oak", 28.0, 96.0, 0.6),
         ]),
         grouped(
             "vegetables",
@@ -59,7 +59,7 @@ pub fn meadow_fields() -> Vec<CropField> {
             ("crops:potato", 2.0),
         ],
         (8.0, 16.0),
-        96.0,
+        48.0,
         "strata:sand",
         None,
     )]

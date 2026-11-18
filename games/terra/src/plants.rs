@@ -80,7 +80,7 @@ pub fn temperate() -> Vec<SurfaceFeature> {
             plants(&[
                 ("crops:potato", 10.0, 22.0, 0.95),
                 ("crops:carrot", 10.0, 22.0, 0.95),
-                ("crops:wheat", 9.0, 22.0, 0.95),
+                ("crops:wheat", 7.5, 22.0, 0.95),
             ]),
         ),
         plants(&[
@@ -132,7 +132,7 @@ pub fn dry() -> Vec<SurfaceFeature> {
 pub fn cold() -> Vec<SurfaceFeature> {
     plants(&[
         ("flora:birch", 20.0, 56.0, 0.5),
-        ("flora:pine", 10.0, 56.0, 0.5),
+        ("flora:pine", 9.0, 56.0, 0.5),
         ("crops:berry", 12.0, 22.0, 0.95),
         ("flora:mushroom_brown", 10.0, 16.0, 0.95),
         ("flora:daisy", 8.5, 12.0, 0.95),
@@ -197,8 +197,8 @@ pub fn savanna() -> Vec<SurfaceFeature> {
             ]),
         ),
         plants(&[
-            ("flora:tuft", 7.0, 14.0, 0.95),
-            ("flora:dry_grass", 3.8, 16.0, 0.95),
+            ("flora:tuft", 8.4, 14.0, 0.95),
+            ("flora:dry_grass", 4.6, 16.0, 0.95),
         ]),
     ]
     .concat()

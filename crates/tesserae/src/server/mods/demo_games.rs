@@ -865,9 +865,9 @@ fn terra_shows_its_six_biomes_with_the_approved_sky_and_fog() {
 #[test]
 fn terra_biomes_all_cover_ground_and_the_temperate_one_most() {
     let (_install, loaded) = loaded("terra", 0.5);
-    let world = at_version_2(loaded).world.unwrap();
+    let world = loaded.world.unwrap();
     for seed in [7, 1, 2024] {
-        // The first six are the Biomes version 2 chooses.
+        // The first six are chosen by Climate, the rest by the land's shape.
         let shares = shares(world, seed, 4000.0, 50.0);
         let shares = &shares[..6];
         assert!(
@@ -929,9 +929,9 @@ fn tidewater_shows_its_five_biomes_with_the_approved_sky_and_fog() {
 #[test]
 fn tidewater_biomes_all_cover_ground_and_the_lagoon_most() {
     let (_install, loaded) = loaded("tidewater", 0.5);
-    let world = at_version_2(loaded).world.unwrap();
+    let world = loaded.world.unwrap();
     for seed in [7, 1, 2024] {
-        // A Biome of the land's shape is not chosen before version 3.
+        // Only the Biomes chosen by Climate, not those of the land's shape.
         let shares: Vec<f32> = shares(world, seed, 4000.0, 50.0)
             .into_iter()
             .zip(world.biomes.selectors())

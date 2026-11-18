@@ -32,9 +32,9 @@ pub fn ash_fields() -> Vec<CropField> {
         crop_field(
             &crops,
             (6.0, 12.0),
-            72.0,
+            64.0,
             "strata:basalt",
-            Some(("waters:water", 40.0)),
+            Some(("waters:water", 64.0)),
         ),
         crop_field(&crops, (6.0, 12.0), 112.0, "strata:basalt", None),
     ]

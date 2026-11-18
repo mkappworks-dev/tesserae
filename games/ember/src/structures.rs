@@ -26,12 +26,12 @@ const HAMLET: Village = Village {
 const VILLAGE: Village = Village {
     game: "ember",
     name: "village",
-    radius_m: (44.0, 64.0),
-    spacing_m: 160.0,
-    chance: 0.8,
+    radius_m: (44.0, 72.0),
+    spacing_m: 176.0,
+    chance: 1.0,
     near_spawn: true,
     centre: "cistern",
-    plots: (8, 20),
+    plots: (12, 30),
     minimum: 5,
     templates: &[
         plot("ash_hut", 4.0, 1, 6),

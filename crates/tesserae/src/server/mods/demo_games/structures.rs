@@ -608,7 +608,6 @@ const SIZES_SCAN_M: f32 = 768.0;
 fn a_world_of_each_game_lays_small_and_large_settlements() {
     for game in GAMES {
         let (_install, loaded) = loaded(game, 1.0);
-        let loaded = super::at_version_2(loaded);
         let templates = &loaded.tables.templates;
         let generator = Worldgen::new(SEED, 1.0, loaded.world.unwrap())
             .with_templates(templates)

@@ -51,7 +51,8 @@ pub fn biomes() -> Vec<BiomeDef> {
             &Landform {
                 name: "shore",
                 climate: (0.5, 0.5),
-                altitude_m: SHORE_M,
+                // Narrower than demo-kit's strand, which takes the islands' ground from the lagoon.
+                altitude_m: (SHORE_M.0, 1.0),
                 river_m: None,
                 ground: ["strata:stone", "strata:sand", "strata:sand"],
                 sky: [140, 156, 176],

@@ -501,6 +501,8 @@ const OVERHANG_LIMIT: u64 = 100;
 #[test]
 fn every_biome_of_every_demo_game_grows_its_declared_species_and_none_is_bare_by_accident() {
     for game in &GAMES {
+        // Under version 3 Terra's mushroom grotto runs under the alpine Biome's mountains and a
+        // neighbour's palm hangs a coconut over the beach's metre of strand.
         let (counts, biomes) = census_of(game, super::at_version_2);
         let (_install, loaded) = loaded(game.name, 1.0);
         let world = loaded.world.unwrap();
@@ -684,8 +686,16 @@ fn every_fruit_is_a_box_shape_that_breaking_picks_and_the_tree_grows_again() {
 /// Trees per hectare in each Biome, by trunk feet found in a sample of Chunks and the ground those
 /// Chunks' columns of the Biome cover.
 fn trees_per_hectare(game: &Game) -> Vec<(String, f64)> {
+    trees_per_hectare_of(game, |loaded| loaded)
+}
+
+/// [`trees_per_hectare`] of the Game as `version` leaves it.
+fn trees_per_hectare_of(
+    game: &Game,
+    version: fn(super::LoadedMods) -> super::LoadedMods,
+) -> Vec<(String, f64)> {
     let (_install, loaded) = loaded(game.name, 1.0);
-    let loaded = super::at_version_2(loaded);
+    let loaded = version(loaded);
     let world = loaded.world.unwrap();
     let biomes: Vec<String> = world
         .biomes
@@ -803,7 +813,9 @@ const SPARSE: [&str; 14] = [
 #[test]
 fn each_biome_scatters_its_trees_at_its_density_class() {
     for game in &GAMES {
-        for (name, per_ha) in trees_per_hectare(game) {
+        // Version 3 keeps a tree 1.5 crowns from a stronger one, which holds a stand of jungle or
+        // swamp trees alone under 115 a hectare, far short of the dense class's 278.
+        for (name, per_ha) in trees_per_hectare_of(game, super::at_version_2) {
             let spacing = mean_spacing_m(per_ha);
             let full = format!("{}:{name}", game.name);
             if DENSE.contains(&name.as_str()) {
@@ -874,7 +886,6 @@ fn terra_trees_find_their_climate_across_their_whole_biome() {
         ("acacia", "savanna"),
     ];
     let (_install, loaded) = loaded("terra", 1.0);
-    let loaded = super::at_version_2(loaded);
     let world = loaded.world.unwrap();
     let biomes: Vec<String> = world
         .biomes
