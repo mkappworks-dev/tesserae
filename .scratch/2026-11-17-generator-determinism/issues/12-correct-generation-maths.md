@@ -23,7 +23,7 @@ names every case that moved, or says none did.
 - [x] The `powi` replacement alone moves no digest (checked before the
       trigonometry changes, noted in a comment here).
 - [x] `libm` is pinned to an exact version.
-- [ ] The Determinism job passes on every target; 10's allowances are removed
+- [x] The Determinism job passes on every target; 10's allowances are removed
       and it becomes a required check.
 - [x] The commit message lists the digests and spawn positions that moved.
 
@@ -34,3 +34,5 @@ names every case that moved, or says none did.
 - Nothing moved on this Mac (macOS arm64): no digest and no spawn position. This is not because the tests miss the change. On 20 million sampled inputs, `libm` differed from Apple's `std` in about 1.4% of `sinf`, 1.2% of `cosf` and 17% of `atan2f` results. And a temporary probe that moved every corrected site's result up one ulp failed `generator_version`'s `a_player_spawns_where_recorded` and `settlement_worldgen`'s spawn test, so the recorded spawn sees a 1-ulp change. The angles generation actually asks (mostly multiples of a fraction of a turn, and road headings that start on an axis) are ones both libraries round alike. The probe was reverted.
 - Moved by ticket 13, re-recorded there (macOS arm64): `coarse_generation` seed 1 level 1 and seed `0xdead_beef_cafe_f00d` level 1, and `generator_version`'s high-ground box at seed 1, 1 m and at seed `0xdead_beef_cafe_f00d`, 1 m. Nothing recorded moved in this ticket.
 - `determinism.yml` no longer continues on error, and its comment naming 12 is gone. Left open: "The Determinism job passes on every target" is checked after push, on the PR's run. Making the job required is a repository setting: add `Determinism (x86_64-unknown-linux-gnu)`, `Determinism (x86_64-pc-windows-msvc)`, `Determinism (aarch64-apple-darwin)` and `Determinism (x86_64-apple-darwin)` as required status checks in branch protection for `main`.
+
+- PR #65 at f218a5c8, with no allowance: all four Determinism checks passed (x86_64-unknown-linux-gnu, x86_64-pc-windows-msvc, aarch64-apple-darwin, x86_64-apple-darwin). Making them required is a branch protection setting left to the maintainer.
