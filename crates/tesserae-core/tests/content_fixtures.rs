@@ -1,5 +1,10 @@
 //! The fixtures' content set: every kind of content generation places, each shown standing.
 
+#![allow(
+    clippy::disallowed_methods,
+    reason = "a test's own maths is not generation"
+)]
+
 use std::collections::HashSet;
 
 use tesserae_core::testgen::{content, fixtures};
