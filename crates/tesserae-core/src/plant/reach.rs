@@ -410,6 +410,10 @@ fn attach_face(plant: &Plant, view: &impl Surroundings, at: [i32; 3], h: u64) ->
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::disallowed_methods,
+    reason = "a test's own maths is not generation"
+)]
 mod tests {
     use super::*;
     use crate::climate::Climate;

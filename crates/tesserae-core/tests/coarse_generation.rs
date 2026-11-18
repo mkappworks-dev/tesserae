@@ -3,6 +3,11 @@
 //! the Server's sources for levels 1 to 3 (`LodGenerators::new`), over a box
 //! that crosses rock, caves, the surface, any water and the sky.
 
+#![allow(
+    clippy::disallowed_methods,
+    reason = "a test's own maths is not generation"
+)]
+
 use sha2::{Digest, Sha256};
 use tesserae_core::testgen::fixtures;
 use tesserae_core::worldgen::WaterParams;

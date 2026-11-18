@@ -771,6 +771,10 @@ struct SurfaceScatter {
 }
 
 impl SurfaceScatter {
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "generation: generator-determinism ticket 12 makes this a multiplication"
+    )]
     fn new(params: &WorldgenParams, voxel_size: f32) -> Option<Self> {
         params.ground?;
         let unit_chance = f64::from(voxel_size).powi(2);
@@ -811,6 +815,10 @@ impl SurfaceScatter {
         })
     }
 
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "generation: generator-determinism ticket 12 makes this a multiplication"
+    )]
     fn chance(unit_chance: f64, spacing_m: f32) -> f64 {
         (unit_chance / f64::from(spacing_m).powi(2)).min(1.0)
     }
@@ -1059,6 +1067,10 @@ impl Worldgen {
     /// The dry column nearest `from`, searched outwards to `max_m`, for a Player to spawn on: not
     /// under water, a metre or more above it, no cliff within a few metres, and dry ground all
     /// round to ~100 m so the Player is on land and not a spit or an islet.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "generation: generator-determinism ticket 12 moves this to libm"
+    )]
     pub fn dry_land_near_m(&self, from: [f32; 2], max_m: f32) -> Option<[f32; 2]> {
         const STEP_M: f32 = 16.0;
         const CLIFF_M: f32 = 6.0;
@@ -2515,6 +2527,10 @@ impl Worldgen {
     /// Whether a tree whose draw beats this column's stands within `radius_m` of it. Each column
     /// asks only draws and the trees they would stand, never whether those stand themselves, so
     /// every Chunk decides alike; a lower draw wins, so of two trees too close the same one stays.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "generation: generator-determinism ticket 12 makes this a multiplication"
+    )]
     fn crowded(&self, scatter: &SurfaceScatter, [gx, gz]: [i32; 2], radius_m: f32) -> bool {
         let own = SurfaceScatter::draw(self.seed, self.global_m(gx), self.global_m(gz));
         let reach = (radius_m / self.voxel_size).ceil() as i32;
@@ -3076,6 +3092,10 @@ fn block_of(x: usize, y: usize, z: usize) -> usize {
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::disallowed_methods,
+    reason = "a test's own maths is not generation"
+)]
 mod tests {
     use super::*;
 

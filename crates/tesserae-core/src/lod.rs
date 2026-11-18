@@ -770,6 +770,10 @@ pub fn coarse_light_in(
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::disallowed_methods,
+    reason = "a test's own maths is not generation"
+)]
 mod tests {
     use super::*;
     use crate::testgen::fixtures;

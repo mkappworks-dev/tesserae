@@ -12,3 +12,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 wit-bindgen = { version = "0.63.0", default-features = false, features = ["macros", "realloc"] }
+
+[lints.clippy]
+# ADR-0032 binds generation, and generation lives in tesserae-core.
+disallowed_methods = "allow"
