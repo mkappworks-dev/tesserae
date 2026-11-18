@@ -322,6 +322,10 @@ impl ClimateField {
 
     /// Continuous in position, so colour never steps where [`Self::biome_at`] does. `None` where no
     /// Biome has colours.
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "display only: the sky and fog blend is not generation"
+    )]
     pub(crate) fn sky_fog_at(
         &self,
         biomes: &BiomeTable,

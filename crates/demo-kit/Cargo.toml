@@ -9,3 +9,7 @@ publish = false
 [workspace]
 
 [dependencies]
+
+[lints.clippy]
+# ADR-0032 binds generation, and generation lives in tesserae-core.
+disallowed_methods = "allow"

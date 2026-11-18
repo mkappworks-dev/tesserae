@@ -1,5 +1,10 @@
 //! Generator version 3: terrain lives in a declared vertical band around Sea level.
 
+#![allow(
+    clippy::disallowed_methods,
+    reason = "a test's own maths is not generation"
+)]
+
 use tesserae_core::terrain::LandformParams;
 use tesserae_core::{CHUNK_SIZE, Worldgen, WorldgenParams};
 

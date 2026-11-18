@@ -1,6 +1,11 @@
 //! Structures in generation: a Biome lists Templates, and worldgen stands each one whole from any
 //! Chunk's viewpoint, the same in metres at every Voxel size.
 
+#![allow(
+    clippy::disallowed_methods,
+    reason = "a test's own maths is not generation"
+)]
+
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 

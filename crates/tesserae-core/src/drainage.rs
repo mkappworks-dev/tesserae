@@ -293,6 +293,10 @@ impl Drainage {
     /// The lake and river water over `(x_m, z_m)`, and how far rivers' valleys cut ground standing
     /// at `ground_m` there. Each segment in reach cuts its own valley and the deepest wins, so the
     /// ground is continuous where two segments are equally near.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "generation: generator-determinism ticket 12 makes this a multiplication"
+    )]
     pub(crate) fn wet(&self, x_m: f32, z_m: f32, ground_m: f32) -> Wet {
         let (u, v) = (x_m / self.node_m, z_m / self.node_m);
         let (i0, j0) = (u.floor() as i32, v.floor() as i32);

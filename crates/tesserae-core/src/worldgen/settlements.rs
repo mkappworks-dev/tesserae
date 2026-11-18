@@ -359,6 +359,10 @@ impl Worldgen {
     /// Where a Player enters a new World: inside the laid-out Settlement nearest the origin within
     /// `search_m` of it, of a row marked `near_spawn` if any is, halfway out from its centre on the south side or the nearest dry one round
     /// it; `None` where none stands that near.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "generation: generator-determinism ticket 12 moves this to libm"
+    )]
     pub fn settlement_spawn_m(&self, search_m: f32) -> Option<[f32; 2]> {
         let origin = [0.0; 2];
         let laid: Vec<Founding> = self
@@ -518,6 +522,10 @@ impl Worldgen {
     /// a seeded distance out, from just past the origin's keep-out for the largest copy to the
     /// cell's side, at a seeded angle across the cell's quarter, so it always lies in its cell.
     /// `None` for any other cell, or where the cell is too small to hold one past the keep-out.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "generation: generator-determinism ticket 12 moves this to libm"
+    )]
     fn near_spawn_draw(&self, row: &Row, cell: [i32; 2], hash: u64) -> Option<[f32; 2]> {
         if !row.entry.near_spawn || !cell.iter().all(|c| (-1..=0).contains(c)) {
             return None;
@@ -607,6 +615,10 @@ impl Worldgen {
 
     /// Whether the ground over a Settlement's disc is level enough to found it on: within
     /// [`DISC_RISE_M`] of its centre on two rings.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "generation: generator-determinism ticket 12 moves this to libm"
+    )]
     pub(super) fn level_disc(&self, centre_m: [f32; 2], height_m: f32, reach_m: f32) -> bool {
         [0.5, 1.0].into_iter().all(|ring| {
             (0..8).all(|k| {
@@ -816,6 +828,10 @@ impl Worldgen {
     /// and every other Plot, where the ground takes it; a second row behind the first. Drawn after
     /// the disc's Plots and every earlier group's, so it never moves one. A copy that cannot stand
     /// the group's minimum lays none of it, so no field stands alone.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "generation: generator-determinism ticket 12 moves this to libm"
+    )]
     fn lay_outskirts(
         &self,
         founding: &Founding,
@@ -917,6 +933,10 @@ impl Worldgen {
     /// bends that stays in the disc, dry, clear of `plots` and no steeper than a road climbs. Two
     /// or three run on past the disc as approach paths, heading only outwards there. In a wide
     /// disc each then forks, after them.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "generation: generator-determinism ticket 12 moves this to libm"
+    )]
     fn roads(&self, founding: &Founding, plots: &[Plot]) -> Vec<Road> {
         let centre = founding.centre_m;
         let radius_m = founding.radius_m;
@@ -1008,6 +1028,10 @@ impl Worldgen {
     /// A road from `start` heading `heading`, at most `steps` steps, each the gentlest of its
     /// bends that stays in `reach`, dry, clear of `plots` and of `others`' discs and margins, and
     /// no steeper than a road climbs.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "generation: generator-determinism ticket 12 moves this to libm"
+    )]
     fn walk(
         &self,
         start: [f32; 2],

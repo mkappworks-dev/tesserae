@@ -1,5 +1,10 @@
 //! Surface features: a Biome's Material scattered one Voxel above its ground.
 
+#![allow(
+    clippy::disallowed_methods,
+    reason = "a test's own maths is not generation"
+)]
+
 use sha2::{Digest, Sha256};
 use tesserae_core::save::{Generation, Mapping};
 use tesserae_core::testgen::fixtures;
