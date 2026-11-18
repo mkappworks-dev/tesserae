@@ -1371,6 +1371,10 @@ pub fn conditions_met(
 
 /// Whether the fluid lies within `reach_m` of `at`, measured between Voxel
 /// centres.
+#[allow(
+    clippy::disallowed_methods,
+    reason = "Plant growth is simulation, not generation"
+)]
 fn water_within(water: &Water, view: &impl Surroundings, voxel_size: f32, at: [i32; 3]) -> bool {
     let reach = (water.reach_m / voxel_size).floor() as i32;
     let limit = (water.reach_m / voxel_size).powi(2);

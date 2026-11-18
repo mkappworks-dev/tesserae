@@ -5,6 +5,11 @@
 //! `cargo bench -p tesserae-core --bench structures`; with `TESSERAE_BENCH_BARE=1` only the bare
 //! World runs, for an A/B against another build of the same rounds.
 
+#![allow(
+    clippy::disallowed_methods,
+    reason = "a bench's own maths is not generation"
+)]
+
 use std::hint::black_box;
 use tesserae_core::settlement::{Building, PlotRule, Settlement};
 use tesserae_core::template::{Cell, Template};

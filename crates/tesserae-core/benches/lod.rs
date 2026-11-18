@@ -1,3 +1,8 @@
+#![allow(
+    clippy::disallowed_methods,
+    reason = "a bench's own maths is not generation"
+)]
+
 use criterion::{Criterion, criterion_group, criterion_main};
 use std::hint::black_box;
 use tesserae_core::light::{Light, MAX_LIGHT};

@@ -482,6 +482,10 @@ impl Base {
     }
 
     /// [`Self::seabed_rise_m`] before it is kept under the surface.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "generation: generator-determinism ticket 12 makes this a multiplication"
+    )]
     fn formation_m(&self, wx: f32, wz: f32, offset_m: f32) -> f32 {
         let seed = self.seed.wrapping_add(SALT_SEABED);
         let reef = crate::noise::ridged2(wx / 220.0, wz / 220.0, seed, 2);
@@ -520,6 +524,10 @@ impl Base {
     /// The sea floor `offset_m` (below Sea level) raised into an island where one stands: a
     /// hashed disc in some cells, its edge frayed by noise, rising to a broad low crown so there
     /// is room on it for trees and Structures.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "generation: generator-determinism ticket 12 makes this a multiplication"
+    )]
     fn island(&self, x_m: f32, z_m: f32, offset_m: f32) -> f32 {
         let (cx, cz) = (
             (x_m / ISLAND_CELL_M).floor() as i32,
@@ -561,6 +569,10 @@ impl Base {
     }
 
     /// A cone at a hashed spot of some cells; one off the coast rises from the sea as an island.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "generation: generator-determinism ticket 12 makes this a multiplication"
+    )]
     fn volcano(&self, x_m: f32, z_m: f32) -> f32 {
         let (cx, cz) = (
             (x_m / VOLCANO_CELL_M).floor() as i32,

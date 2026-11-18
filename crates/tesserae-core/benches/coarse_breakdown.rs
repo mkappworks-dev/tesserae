@@ -14,6 +14,11 @@
 //! whole job as shipped, the coarse Chunk generated at its own Voxel size
 //! (`direct`), and that without caves (`columns`).
 
+#![allow(
+    clippy::disallowed_methods,
+    reason = "a bench's own maths is not generation"
+)]
+
 use std::hint::black_box;
 use std::time::Duration;
 

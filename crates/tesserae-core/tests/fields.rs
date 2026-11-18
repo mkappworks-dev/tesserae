@@ -1,6 +1,11 @@
 //! Fields: ground cover that gathers a species per region, and planted plots of one crop with paths
 //! and a ditch between them, both whole across Chunk borders at every Voxel size.
 
+#![allow(
+    clippy::disallowed_methods,
+    reason = "a test's own maths is not generation"
+)]
+
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use tesserae_core::save::{Generation, Mapping};

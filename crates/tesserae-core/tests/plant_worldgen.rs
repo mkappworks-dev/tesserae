@@ -1,6 +1,11 @@
 //! Plants in generation: a Biome's surface feature may name a Plant, and a tree is whole from any
 //! Chunk's viewpoint.
 
+#![allow(
+    clippy::disallowed_methods,
+    reason = "a test's own maths is not generation"
+)]
+
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 

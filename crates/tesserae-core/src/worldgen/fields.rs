@@ -329,6 +329,10 @@ impl Worldgen {
     /// Whether the ground under a drawn field takes it, and which edge is its ditch. The same
     /// answer from every Chunk, since it asks only metres: columns a metre apart for the Biome,
     /// the lake, caves and the lie of the land, every column for a tree.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "generation: generator-determinism ticket 12 moves this to libm"
+    )]
     fn field_accepts(&self, scatter: &SurfaceScatter, mut p: Placed) -> Option<Placed> {
         let size = self.voxel_size;
         let (_, highest) = self.terrain_band_m();

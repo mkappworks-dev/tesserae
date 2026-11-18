@@ -6,6 +6,11 @@
 //! generator: a drop's pop-out direction comes from its id and the step it was
 //! made on, which leaves no generator state to save.
 
+#![allow(
+    clippy::disallowed_methods,
+    reason = "entity motion is simulation, not generation"
+)]
+
 use std::collections::BTreeMap;
 
 use crate::chunk::CHUNK_SIZE;
