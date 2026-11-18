@@ -1,6 +1,8 @@
 //! Every demo Game's food: declared, lying on the surface of a new World near the spawn, and
 //! placed, broken, picked up and eaten through the Server's own systems.
 
+use std::ops::ControlFlow;
+
 use bevy::ecs::system::RunSystemOnce;
 use bevy::prelude::*;
 use tesserae_core::{
@@ -107,60 +109,94 @@ fn new_world_of(world: WorldgenParams, tables: &Tables, seed: u64, size: f32) ->
         .with_settlements(&tables.settlements)
 }
 
-/// Horizontal metres from the spawn to the nearest Voxel of `food`.
-fn nearest_m(generator: &Worldgen, food: MaterialId, within_m: f32) -> Option<f32> {
-    distances_m(generator, food, within_m)
-        .into_iter()
-        .reduce(f32::min)
-}
-
-/// Horizontal metres from the spawn to every Voxel of `material` within `within_m`.
-pub(super) fn distances_m(generator: &Worldgen, material: MaterialId, within_m: f32) -> Vec<f32> {
+/// The spawn's horizontal place, and the rows within 48 m of its height, which a short walk keeps
+/// to.
+pub(super) fn around_spawn(generator: &Worldgen) -> ([f32; 2], (f32, f32)) {
     let eye = crate::server::spawn_eye(generator);
-    let rows = generator.surface_bounds_m();
-    distances_around_m(generator, material, within_m, ([eye.x, eye.z], rows))
+    ([eye.x, eye.z], (eye.y - 48.0, eye.y + 48.0))
 }
 
-/// Horizontal metres from `centre` to every Voxel of `material` within `within_m`, between the
-/// heights `rows_m`.
+/// Horizontal metres from `centre` to every Voxel of each of `materials` within `within_m`, between
+/// the heights `rows_m`, by index in `materials`.
 fn distances_around_m(
     generator: &Worldgen,
-    material: MaterialId,
+    materials: &[MaterialId],
+    within_m: f32,
+    around: ([f32; 2], (f32, f32)),
+) -> Vec<Vec<f32>> {
+    let mut found = vec![Vec::new(); materials.len()];
+    search_around_m(generator, materials, within_m, around, |i, d| {
+        found[i].push(d);
+        ControlFlow::Continue(())
+    });
+    found
+}
+
+/// Whether a Voxel of any of `materials` stands within `within_m` of `centre`, between the heights
+/// `rows_m`.
+fn any_around_m(
+    generator: &Worldgen,
+    materials: &[MaterialId],
+    within_m: f32,
+    around: ([f32; 2], (f32, f32)),
+) -> bool {
+    let mut any = false;
+    search_around_m(generator, materials, within_m, around, |_, _| {
+        any = true;
+        ControlFlow::Break(())
+    });
+    any
+}
+
+/// Hands `found` each Voxel of `materials` within `within_m` of `centre`, between the heights
+/// `rows_m`: its index in `materials` and its horizontal metres from `centre`, until `found`
+/// breaks. Chunk columns are searched nearest first, so a search for any one stops early.
+pub(super) fn search_around_m(
+    generator: &Worldgen,
+    materials: &[MaterialId],
     within_m: f32,
     (centre, (lowest, highest)): ([f32; 2], (f32, f32)),
-) -> Vec<f32> {
+    mut found: impl FnMut(usize, f32) -> ControlFlow<()>,
+) {
     let size = generator.voxel_size();
     let chunk_m = CHUNK_SIZE as f32 * size;
     let rows = (lowest / chunk_m).floor() as i32..=(highest / chunk_m).ceil() as i32;
     let reach = (within_m / chunk_m).ceil() as i32;
     let [ox, oz] = centre.map(|m| (m / chunk_m).floor() as i32);
-    let mut found = Vec::new();
-    for cz in oz - reach..oz + reach {
-        for cx in ox - reach..ox + reach {
-            for cy in rows.clone() {
-                let chunk = generator.chunk(cx, cy, cz);
-                if chunk.uniform().is_some() {
-                    continue;
-                }
-                for z in 0..CHUNK_SIZE {
-                    for y in 0..CHUNK_SIZE {
-                        for x in 0..CHUNK_SIZE {
-                            if chunk.get(x, y, z).material() != material {
-                                continue;
-                            }
-                            let at = |c: i32, n: usize| (c * CHUNK_SIZE as i32 + n as i32) as f32;
-                            let d =
-                                (at(cx, x) * size - centre[0]).hypot(at(cz, z) * size - centre[1]);
-                            if d <= within_m {
-                                found.push(d);
-                            }
+    let mut columns: Vec<[i32; 2]> = (oz - reach..oz + reach)
+        .flat_map(|cz| (ox - reach..ox + reach).map(move |cx| [cx, cz]))
+        .collect();
+    let gap_m = |c: i32, from: f32| {
+        let low = c as f32 * chunk_m;
+        (low - from).max(from - low - chunk_m).max(0.0)
+    };
+    columns.sort_by(|&[ax, az], &[bx, bz]| {
+        let near = |cx, cz| gap_m(cx, centre[0]).hypot(gap_m(cz, centre[1]));
+        near(ax, az).total_cmp(&near(bx, bz))
+    });
+    for [cx, cz] in columns {
+        for cy in rows.clone() {
+            let chunk = generator.chunk(cx, cy, cz);
+            if chunk.uniform().is_some() {
+                continue;
+            }
+            for z in 0..CHUNK_SIZE {
+                for y in 0..CHUNK_SIZE {
+                    for x in 0..CHUNK_SIZE {
+                        let material = chunk.get(x, y, z).material();
+                        let Some(i) = materials.iter().position(|&m| m == material) else {
+                            continue;
+                        };
+                        let at = |c: i32, n: usize| (c * CHUNK_SIZE as i32 + n as i32) as f32;
+                        let d = (at(cx, x) * size - centre[0]).hypot(at(cz, z) * size - centre[1]);
+                        if d <= within_m && found(i, d).is_break() {
+                            return;
                         }
                     }
                 }
             }
         }
     }
-    found
 }
 
 /// Half a minute's walk. A spawn in a Biome without the food, such as Terra's snow, is the far case
@@ -184,7 +220,7 @@ fn a_new_world_of_every_demo_game_has_its_food_within_a_short_walk_of_the_spawn(
         crate::server::in_parallel(&seeds, |&seed| {
             let generator = new_world_of(world, tables, seed, 0.5);
             assert!(
-                nearest_m(&generator, id, SHORT_WALK_M).is_some(),
+                any_around_m(&generator, &[id], SHORT_WALK_M, around_spawn(&generator)),
                 "{} seed {seed}: no {} within {SHORT_WALK_M} m",
                 food.game,
                 food.item
@@ -218,11 +254,15 @@ fn a_survival_player_finds_wood_for_a_workbench_a_chest_and_a_door_in_the_oaks_n
         2024,
     ] {
         let generator = new_world(&loaded, seed, 0.5);
-        assert!(
-            distances_m(&generator, wood, SHORT_WALK_M).is_empty(),
-            "seed {seed}: Wood lies about on its own"
-        );
-        let found = distances_m(&generator, trunk, SHORT_WALK_M).len() as u32 * per_trunk;
+        let [wood, trunks] = <[_; 2]>::try_from(distances_around_m(
+            &generator,
+            &[wood, trunk],
+            SHORT_WALK_M,
+            around_spawn(&generator),
+        ))
+        .unwrap();
+        assert!(wood.is_empty(), "seed {seed}: Wood lies about on its own");
+        let found = trunks.len() as u32 * per_trunk;
         assert!(
             found >= WOOD_FOR_A_HOME,
             "seed {seed}: {found} Wood within {SHORT_WALK_M} m"
@@ -465,8 +505,7 @@ fn the_demo_games_textures_are_unchanged() {
 }
 
 /// A new Player enters a village, so its food, in a patch by it, and the oaks for a first
-/// Workbench, Chest and Door are a short walk from there. Rows within 48 m of the spawn's height,
-/// which a short walk keeps to.
+/// Workbench, Chest and Door are a short walk from there.
 #[test]
 fn a_new_world_has_food_and_wood_within_a_short_walk_of_the_spawn() {
     crate::server::in_parallel(&FOODS, |food| {
@@ -476,22 +515,34 @@ fn a_new_world_has_food_and_wood_within_a_short_walk_of_the_spawn() {
         let per_trunk = loaded.tables.plants.yields(trunk)[0].count.min;
         for seed in [crate::world::WorldSettings::default().seed, 1, 3, 7] {
             let generator = new_world(&loaded, seed, 1.0);
-            let eye = crate::server::spawn_eye(&generator);
-            let around = ([eye.x, eye.z], (eye.y - 48.0, eye.y + 48.0));
+            let around = around_spawn(&generator);
+            let needed = if food.game == "terra" {
+                WOOD_FOR_A_HOME
+            } else {
+                0
+            };
+            let (mut fed, mut wood) = (false, 0);
+            search_around_m(&generator, &[id, trunk], SHORT_WALK_M, around, |i, _| {
+                if i == 0 {
+                    fed = true;
+                } else {
+                    wood += per_trunk;
+                }
+                if fed && wood >= needed {
+                    ControlFlow::Break(())
+                } else {
+                    ControlFlow::Continue(())
+                }
+            });
             assert!(
-                !distances_around_m(&generator, id, SHORT_WALK_M, around).is_empty(),
+                fed,
                 "{} seed {seed}: no {} within {SHORT_WALK_M} m of the spawn",
-                food.game,
-                food.item
+                food.game, food.item
             );
-            if food.game == "terra" {
-                let wood = distances_around_m(&generator, trunk, SHORT_WALK_M, around).len() as u32
-                    * per_trunk;
-                assert!(
-                    wood >= WOOD_FOR_A_HOME,
-                    "seed {seed}: {wood} Wood within {SHORT_WALK_M} m of the spawn"
-                );
-            }
+            assert!(
+                wood >= needed,
+                "seed {seed}: {wood} Wood within {SHORT_WALK_M} m of the spawn"
+            );
         }
     });
 }

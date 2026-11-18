@@ -124,10 +124,10 @@ fn bread_and_pie_are_made_from_the_produce() {
 /// and wheat, though other Biomes may hold the spawn itself.
 #[test]
 fn a_new_terra_world_grows_oaks_apples_and_wheat_within_a_short_walk() {
-    use super::food::{SHORT_WALK_M, distances_m, new_world};
+    use super::food::{SHORT_WALK_M, around_spawn, new_world, search_around_m};
     let (_install, loaded) = loaded("terra", 0.5);
     let generator = new_world(&loaded, 7, 0.5);
-    for names in [
+    let groups = [
         &["flora:oak_leaves"][..],
         &["flora:apple_unripe", "flora:apple_ripe"],
         &[
@@ -136,18 +136,32 @@ fn a_new_terra_world_grows_oaks_apples_and_wheat_within_a_short_walk() {
             "crops:wheat_green",
             "crops:wheat_ripe",
         ],
-    ] {
-        let found: usize = names
-            .iter()
-            .map(|n| distances_m(&generator, material(&loaded, n), SHORT_WALK_M).len())
-            .sum();
-        assert!(found > 0, "{names:?} within {SHORT_WALK_M} m");
+    ];
+    let (materials, group): (Vec<_>, Vec<_>) = groups
+        .iter()
+        .enumerate()
+        .flat_map(|(g, names)| names.iter().map(move |n| (n, g)))
+        .map(|(n, g)| (material(&loaded, n), g))
+        .unzip();
+    let mut found = [false; 3];
+    let around = around_spawn(&generator);
+    search_around_m(&generator, &materials, SHORT_WALK_M, around, |i, _| {
+        found[group[i]] = true;
+        if found.iter().all(|&f| f) {
+            std::ops::ControlFlow::Break(())
+        } else {
+            std::ops::ControlFlow::Continue(())
+        }
+    });
+    for (names, found) in groups.iter().zip(found) {
+        assert!(found, "{names:?} within {SHORT_WALK_M} m");
     }
 }
 
 #[test]
 fn terras_plants_name_their_shapes_and_a_generated_apple_is_the_box_apple() {
     use super::food::{SHORT_WALK_M, new_world};
+    use super::structures::settled_rows;
     use tesserae_core::CHUNK_SIZE;
     let (_install, loaded) = loaded("terra", 0.5);
     let plants = &loaded.tables.plants;
@@ -189,7 +203,6 @@ fn terras_plants_name_their_shapes_and_a_generated_apple_is_the_box_apple() {
         (material(&loaded, "flora:apple_ripe"), apple),
     ];
     let chunk_m = CHUNK_SIZE as f32 * 0.5;
-    let (lowest, highest) = generator.surface_bounds_m();
     let reach = (SHORT_WALK_M / chunk_m).ceil() as i32;
     let eye = crate::server::spawn_eye(&generator);
     let [ox, oz] = [eye.x, eye.z].map(|m| (m / chunk_m).floor() as i32);
@@ -197,7 +210,8 @@ fn terras_plants_name_their_shapes_and_a_generated_apple_is_the_box_apple() {
     let mut seen = [false; 2];
     for cz in oz - reach..oz + reach {
         for cx in ox - reach..ox + reach {
-            for cy in (lowest / chunk_m).floor() as i32..=(highest / chunk_m).ceil() as i32 {
+            // An apple hangs on a tree standing on the ground.
+            for cy in settled_rows(&generator, [cx, cz]) {
                 let chunk = generator.chunk(cx, cy, cz);
                 if chunk.uniform().is_some() {
                     continue;

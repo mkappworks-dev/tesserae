@@ -4,7 +4,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use tesserae_core::plant::Kind as PlantKind;
-use tesserae_core::{CHUNK_SIZE, Worldgen};
+use tesserae_core::{CHUNK_SIZE, SurfacePlantKind, Worldgen};
 use tesserae_mods::Kind;
 
 use super::{loaded, material, shape};
@@ -417,25 +417,85 @@ const WET_SAMPLES: usize = 8;
 /// logs, which a neighbour's limb resting on a slope never is.
 const TRUNK_FOOT: &str = "trunk foot";
 
-/// `(Biome index, Material name)` to Voxels found, over a sample of every Biome's ground.
-fn census(game: &Game) -> (BTreeMap<(usize, String), u64>, Vec<String>) {
-    census_of(game, |loaded| loaded, false)
+/// The highest row of each Chunk column a Plant can reach: none stands higher than the ground of
+/// its own Chunk column or a neighbour's, past which no crown reaches, raised by the overhangs and
+/// the tallest Plant. The rows above are sky, the costliest Chunks version 3 makes.
+struct PlantCeiling<'a> {
+    generator: &'a Worldgen,
+    lift_m: f32,
+    highest_m: HashMap<[i32; 2], f32>,
 }
 
-/// [`census`] of the Game as `edit` leaves it, of only what stands on the surface: a cave under a
-/// Biome holds its cave Biome's Plants, not the Biome's.
+impl<'a> PlantCeiling<'a> {
+    fn new(generator: &'a Worldgen) -> Self {
+        // Each Plant's rounding to Voxels, with room over the generator's own three Voxels.
+        let slack_m = 8.0 * generator.voxel_size();
+        let params = generator.params();
+        let plants = || {
+            params
+                .biomes
+                .as_slice()
+                .iter()
+                .flat_map(|b| b.surface_features.as_slice())
+                .filter_map(|f| f.plant)
+        };
+        let reach_m = plants()
+            .filter_map(|p| match p.kind {
+                SurfacePlantKind::Tree(t) => Some(t.reach_m()),
+                SurfacePlantKind::Vine(v) => Some(v.reach_m),
+                _ => None,
+            })
+            .fold(0.0, f32::max)
+            + slack_m;
+        assert!(
+            reach_m <= CHUNK_SIZE as f32 * generator.voxel_size(),
+            "a crown reaches {reach_m} m, past the next Chunk column"
+        );
+        let rise_m = plants().map(|p| p.rise_m()).fold(0.0, f32::max);
+        Self {
+            generator,
+            lift_m: params.landforms.overhang_m + rise_m + slack_m,
+            highest_m: HashMap::new(),
+        }
+    }
+
+    fn row(&mut self, [cx, cz]: [i32; 2]) -> i32 {
+        let generator = self.generator;
+        let size = generator.voxel_size();
+        let mut top_m = f32::MIN;
+        for dz in -1..=1 {
+            for dx in -1..=1 {
+                let [cx, cz] = [cx + dx, cz + dz];
+                let highest_m = self.highest_m.entry([cx, cz]).or_insert_with(|| {
+                    let at = |c: i32, n: usize| (c * CHUNK_SIZE as i32 + n as i32) as f32 * size;
+                    (0..CHUNK_SIZE * CHUNK_SIZE)
+                        .map(|i| {
+                            generator
+                                .surface_height_m(at(cx, i % CHUNK_SIZE), at(cz, i / CHUNK_SIZE))
+                        })
+                        .fold(f32::MIN, f32::max)
+                });
+                top_m = top_m.max(*highest_m);
+            }
+        }
+        ((top_m + self.lift_m) / (CHUNK_SIZE as f32 * size)).floor() as i32
+    }
+}
+
+/// `(Biome index, Material name)` to Voxels found.
+type Counts = BTreeMap<(usize, String), u64>;
+
+/// What stands on the surface of a sample of every Biome's ground: a cave under a Biome holds its
+/// cave Biome's Plants, not the Biome's.
+fn census(game: &Game) -> (Counts, Vec<String>) {
+    surface_census(game, |loaded| loaded)
+}
+
+/// [`census`] of the Game as `edit` leaves it.
 fn surface_census(
     game: &Game,
     edit: fn(super::LoadedMods) -> super::LoadedMods,
-) -> (BTreeMap<(usize, String), u64>, Vec<String>) {
-    census_of(game, edit, true)
-}
-
-fn census_of(
-    game: &Game,
-    edit: fn(super::LoadedMods) -> super::LoadedMods,
-    surface_only: bool,
-) -> (BTreeMap<(usize, String), u64>, Vec<String>) {
+) -> (Counts, Vec<String>) {
     let (_install, loaded) = loaded(game.name, 1.0);
     let loaded = edit(loaded);
     let world = loaded.world.unwrap();
@@ -475,6 +535,7 @@ fn census_of(
         .collect();
 
     let generator = Worldgen::new(7, 1.0, world);
+    let mut ceiling = PlantCeiling::new(&generator);
     let water = generator.water().map(|w| w.material);
     let chunk_m = CHUNK_SIZE as f32;
     let (low, high) = generator.surface_bounds_m();
@@ -507,11 +568,18 @@ fn census_of(
         }
     }
     let at = |c: i32, n: usize| (c * CHUNK_SIZE as i32 + n as i32) as f32;
-    let mut counts = BTreeMap::new();
+    let mut counts = Counts::new();
     let rise = (TREE_CLEAR_M as usize).min(CHUNK_SIZE);
     for (cx, cz) in columns {
-        let mut surface = HashMap::new();
-        for cy in rows.clone() {
+        let ground_m = |x: usize, z: usize| generator.surface_height_m(at(cx, x), at(cz, z));
+        let surface: Vec<f32> = (0..CHUNK_SIZE * CHUNK_SIZE)
+            .map(|i| ground_m(i % CHUNK_SIZE, i / CHUNK_SIZE))
+            .collect();
+        let lowest = surface.iter().copied().fold(f32::MAX, f32::min);
+        for cy in *rows.start()..=ceiling.row([cx, cz]).min(*rows.end()) {
+            if at(cy, CHUNK_SIZE - 1) < lowest - 1.0 {
+                continue;
+            }
             let chunk = generator.chunk(cx, cy, cz);
             if chunk.uniform().is_some() {
                 continue;
@@ -524,15 +592,10 @@ fn census_of(
                         let Some(name) = named.get(&material) else {
                             continue;
                         };
-                        if surface_only {
-                            let ground = *surface.entry((x, z)).or_insert_with(|| {
-                                generator.surface_height_m(at(cx, x), at(cz, z))
-                            });
-                            // A Plant stands on the column's top Voxel, so its lowest Voxel is the
-                            // one at the surface.
-                            if at(cy, y) < ground - 1.0 {
-                                continue;
-                            }
+                        // A Plant stands on the column's top Voxel, so its lowest Voxel is the one at
+                        // the surface.
+                        if at(cy, y) < surface[z * CHUNK_SIZE + x] - 1.0 {
+                            continue;
                         }
                         let here = biome_of((at(cx, x), at(cz, z)));
                         *counts.entry((here, name.clone())).or_default() += 1;
@@ -575,7 +638,7 @@ fn census_of(
     (counts, biomes)
 }
 
-fn found(counts: &BTreeMap<(usize, String), u64>, biome: usize, name: &str) -> u64 {
+fn found(counts: &Counts, biome: usize, name: &str) -> u64 {
     counts.get(&(biome, name.to_owned())).copied().unwrap_or(0)
 }
 
@@ -592,11 +655,7 @@ fn fruit_of(loaded: &super::LoadedMods) -> BTreeSet<String> {
 /// What Biome `index` grows that a bare Biome must not. A neighbour's crowns reach over the border
 /// with their limbs, vines and fruit, however long the border; a tree standing here has a trunk
 /// foot.
-fn strays<'a>(
-    counts: &'a BTreeMap<(usize, String), u64>,
-    index: usize,
-    fruit: &BTreeSet<String>,
-) -> Vec<(&'a str, u64)> {
+fn strays<'a>(counts: &'a Counts, index: usize, fruit: &BTreeSet<String>) -> Vec<(&'a str, u64)> {
     counts
         .iter()
         .filter(|((b, name), _)| {
@@ -635,10 +694,12 @@ fn a_bare_biome_that_grows_on_its_own_surface_is_caught() {
     );
 }
 
+/// Also the vines of jungle and swamp trees, and Wood only in trees: the census is nearly all of
+/// each one's time, so the three share it.
 #[test]
 fn every_biome_of_every_demo_game_grows_its_declared_species_and_none_is_bare_by_accident() {
     for game in &GAMES {
-        let (counts, biomes) = surface_census(game, |loaded| loaded);
+        let (counts, biomes) = census(game);
         let (_install, loaded) = loaded(game.name, 1.0);
         let fruit = fruit_of(&loaded);
         let world = loaded.world.unwrap();
@@ -675,45 +736,39 @@ fn every_biome_of_every_demo_game_grows_its_declared_species_and_none_is_bare_by
                 assert!(plants.is_empty(), "{full} is bare on purpose: {plants:?}");
             }
         }
+        jungle_and_swamp_trees_hang_vines(game, &counts);
+        generated_wood_is_only_ever_the_trunk_of_a_grown_tree(game, &counts);
     }
 }
 
-#[test]
-fn jungle_and_swamp_trees_hang_vines() {
-    for game in &GAMES {
-        let (counts, _) = census(game);
-        for (index, (name, species)) in game.biomes.iter().enumerate() {
-            if species.iter().any(|p| VINED.contains(p)) {
-                assert!(
-                    found(&counts, index, "flora:vine") > 0,
-                    "{}:{name} has no vines",
-                    game.name
-                );
-            }
+fn jungle_and_swamp_trees_hang_vines(game: &Game, counts: &Counts) {
+    for (index, (name, species)) in game.biomes.iter().enumerate() {
+        if species.iter().any(|p| VINED.contains(p)) {
+            assert!(
+                found(counts, index, "flora:vine") > 0,
+                "{}:{name} has no vines",
+                game.name
+            );
         }
     }
 }
 
-#[test]
-fn generated_wood_is_only_ever_the_trunk_of_a_grown_tree() {
-    for game in &GAMES {
-        let (counts, _) = census(game);
-        let logs: u64 = counts
-            .iter()
-            .filter(|((_, name), _)| name.ends_with("_log"))
-            .map(|(_, n)| n)
-            .sum();
-        assert!(logs > 0, "{}: no tree trunks generated", game.name);
-        let standalone: Vec<_> = counts
-            .iter()
-            .filter(|((_, name), _)| is_standalone_wood(name))
-            .collect();
-        assert!(
-            standalone.is_empty(),
-            "{}: standalone Wood generated: {standalone:?}",
-            game.name
-        );
-    }
+fn generated_wood_is_only_ever_the_trunk_of_a_grown_tree(game: &Game, counts: &Counts) {
+    let logs: u64 = counts
+        .iter()
+        .filter(|((_, name), _)| name.ends_with("_log"))
+        .map(|(_, n)| n)
+        .sum();
+    assert!(logs > 0, "{}: no tree trunks generated", game.name);
+    let standalone: Vec<_> = counts
+        .iter()
+        .filter(|((_, name), _)| is_standalone_wood(name))
+        .collect();
+    assert!(
+        standalone.is_empty(),
+        "{}: standalone Wood generated: {standalone:?}",
+        game.name
+    );
 }
 
 /// A Plant is declared once, in a shared Mod, and a Game only places it: each is placed by at least
@@ -840,6 +895,7 @@ fn trees_per_hectare(game: &Game) -> Vec<(String, f64)> {
         .map(|(id, _)| id as u16)
         .collect();
     let generator = Worldgen::new(7, 1.0, world);
+    let mut ceiling = PlantCeiling::new(&generator);
     let chunk_m = CHUNK_SIZE as f32;
     let (low, high) = generator.surface_bounds_m();
     let rows = (low / chunk_m).floor() as i32..=(high / chunk_m).ceil() as i32;
@@ -861,7 +917,14 @@ fn trees_per_hectare(game: &Game) -> Vec<(String, f64)> {
                     area_m2[here] += 1.0;
                 }
             }
-            for cy in rows.clone() {
+            // A tree stands on the ground, so no trunk foot is in a row wholly below it.
+            let lowest = (0..CHUNK_SIZE * CHUNK_SIZE)
+                .map(|i| generator.surface_height_m(at(cx, i % CHUNK_SIZE), at(cz, i / CHUNK_SIZE)))
+                .fold(f32::MAX, f32::min);
+            for cy in *rows.start()..=ceiling.row([cx, cz]).min(*rows.end()) {
+                if at(cy, CHUNK_SIZE - 1) < lowest - 1.0 {
+                    continue;
+                }
                 let chunk = generator.chunk(cx, cy, cz);
                 if chunk.uniform().is_some() {
                     continue;
@@ -928,10 +991,14 @@ const SPARSE: [&str; 14] = [
     "river",
 ];
 
+/// Also that jungle and swamp are denser than savanna, prairie and desert in every Game that has
+/// both: counting a Game's trees is nearly all of either one's time, so the two share it.
 #[test]
 fn each_biome_scatters_its_trees_at_its_density_class() {
+    let mut compared = 0;
     for game in &GAMES {
-        for (name, per_ha) in trees_per_hectare(game) {
+        let density = trees_per_hectare(game);
+        for (name, per_ha) in density.iter().cloned() {
             let spacing = mean_spacing_m(per_ha);
             let full = format!("{}:{name}", game.name);
             if DENSE.contains(&name.as_str()) {
@@ -953,35 +1020,37 @@ fn each_biome_scatters_its_trees_at_its_density_class() {
                 );
             }
         }
-    }
-}
-
-#[test]
-fn jungle_and_swamp_are_denser_than_savanna_prairie_and_desert_in_every_game_that_has_both() {
-    let mut compared = 0;
-    for game in &GAMES {
-        let density = trees_per_hectare(game);
-        let of = |class: &[&str]| -> Vec<(String, f64)> {
-            density
-                .iter()
-                .filter(|(n, _)| class.contains(&n.as_str()))
-                .cloned()
-                .collect()
-        };
-        let (dense, sparse) = (of(&DENSE), of(&SPARSE));
-        if dense.is_empty() || sparse.is_empty() {
-            continue;
-        }
-        compared += 1;
-        let thinnest = dense.iter().map(|d| d.1).fold(f64::MAX, f64::min);
-        let thickest = sparse.iter().map(|d| d.1).fold(0.0, f64::max);
-        assert!(
-            thinnest > 2.0 * thickest,
-            "{}: dense {dense:?} is not clearly past sparse {sparse:?}",
-            game.name
-        );
+        compared += usize::from(jungle_and_swamp_are_denser_than_savanna_prairie_and_desert(
+            game, &density,
+        ));
     }
     assert_eq!(compared, 5);
+}
+
+/// Whether `game` has both classes to compare.
+fn jungle_and_swamp_are_denser_than_savanna_prairie_and_desert(
+    game: &Game,
+    density: &[(String, f64)],
+) -> bool {
+    let of = |class: &[&str]| -> Vec<(String, f64)> {
+        density
+            .iter()
+            .filter(|(n, _)| class.contains(&n.as_str()))
+            .cloned()
+            .collect()
+    };
+    let (dense, sparse) = (of(&DENSE), of(&SPARSE));
+    if dense.is_empty() || sparse.is_empty() {
+        return false;
+    }
+    let thinnest = dense.iter().map(|d| d.1).fold(f64::MAX, f64::min);
+    let thickest = sparse.iter().map(|d| d.1).fold(0.0, f64::max);
+    assert!(
+        thinnest > 2.0 * thickest,
+        "{}: dense {dense:?} is not clearly past sparse {sparse:?}",
+        game.name
+    );
+    true
 }
 
 /// Climate is a continuous field and a Biome is the nearest point, so a tree's band must hold
@@ -1170,6 +1239,7 @@ fn ground_of(game: &Game, seed: u64) -> Vec<Vec<Vec<Option<u8>>>> {
         .collect();
     let mut out = vec![Vec::new(); world.biomes.as_slice().len()];
     let generator = Worldgen::new(seed, 1.0, world);
+    let mut ceiling = PlantCeiling::new(&generator);
     let chunk_m = CHUNK_SIZE as f32;
     let (low, high) = generator.surface_bounds_m();
     let rows = (low / chunk_m).floor() as i32..=(high / chunk_m).ceil() as i32;
@@ -1188,6 +1258,9 @@ fn ground_of(game: &Game, seed: u64) -> Vec<Vec<Vec<Option<u8>>>> {
             }
             let mut columns = vec![None; BLOCK * BLOCK];
             for (dx, dz, cy) in block_chunks(rows.clone()) {
+                if cy > ceiling.row([cx + dx, cz + dz]) {
+                    continue;
+                }
                 let chunk = generator.chunk(cx + dx, cy, cz + dz);
                 if chunk.uniform().is_some() {
                     continue;

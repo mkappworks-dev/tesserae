@@ -3,6 +3,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::fs;
+use std::ops::RangeInclusive;
 
 use serde_json::Value;
 use tesserae_core::template::{Cell, Template, Turn};
@@ -246,6 +247,34 @@ fn a_world_with_no_game_has_no_template() {
 /// and its tallest building, with the cut and fill that level it.
 const SETTLED_BAND_M: (f32, f32) = (24.0, 40.0);
 
+/// The rows of the Chunk column `[cx, cz]` within [`SETTLED_BAND_M`] of its lowest and highest
+/// ground: whatever stands on the ground, and none of the sky and rock that make most of version
+/// 3's band and most of its cost.
+pub(super) fn settled_rows(generator: &Worldgen, [cx, cz]: [i32; 2]) -> RangeInclusive<i32> {
+    let size = generator.voxel_size();
+    let chunk_m = CHUNK_SIZE as f32 * size;
+    let (mut lowest, mut highest) = (f32::MAX, f32::MIN);
+    for z in 0..CHUNK_SIZE as i32 {
+        for x in 0..CHUNK_SIZE as i32 {
+            let at = |c: i32, n: i32| (c * CHUNK_SIZE as i32 + n) as f32 * size;
+            let ground_m = generator.surface_height_m(at(cx, x), at(cz, z));
+            lowest = lowest.min(ground_m);
+            highest = highest.max(ground_m);
+        }
+    }
+    let (below, above) = SETTLED_BAND_M;
+    ((lowest - below) / chunk_m).floor() as i32..=((highest + above) / chunk_m).floor() as i32
+}
+
+/// The lowest and, past the last, highest Chunk columns `[cx, cz]` within `half_m` of `centre_m`.
+fn columns(generator: &Worldgen, centre_m: [f32; 2], half_m: f32) -> [[i32; 2]; 2] {
+    let chunk_m = CHUNK_SIZE as f32 * generator.voxel_size();
+    [
+        centre_m.map(|c| ((c - half_m) / chunk_m).floor() as i32),
+        centre_m.map(|c| ((c + half_m) / chunk_m).ceil() as i32),
+    ]
+}
+
 /// The Chunks of a square `half_m` either side of a centre, every row a Structure reaches.
 pub(in crate::server) struct Generated {
     pub(in crate::server) chunks: HashMap<[i32; 3], Chunk>,
@@ -257,9 +286,11 @@ impl Generated {
         Self::around(generator, spawn_m(generator), half_m)
     }
 
-    /// The Chunks within `half_m` of `centre_m`.
+    /// The Chunks within `half_m` of `centre_m`, in each Chunk column only its [`settled_rows`].
     pub(in crate::server) fn around(generator: &Worldgen, centre_m: [f32; 2], half_m: f32) -> Self {
-        Self::within(generator, centre_m, half_m, generator.surface_bounds_m())
+        Self::within(generator, centre_m, half_m, |cx, cz| {
+            settled_rows(generator, [cx, cz])
+        })
     }
 
     /// [`Self::around`], in only the rows [`SETTLED_BAND_M`] about the ground at `centre_m`: a
@@ -271,33 +302,43 @@ impl Generated {
     ) -> Self {
         let ground_m = generator.surface_height_m(centre_m[0], centre_m[1]);
         let (below, above) = SETTLED_BAND_M;
-        Self::within(
-            generator,
-            centre_m,
-            half_m,
-            (ground_m - below, ground_m + above),
-        )
+        let chunk_m = CHUNK_SIZE as f32 * generator.voxel_size();
+        let rows = ((ground_m - below) / chunk_m).floor() as i32 - 1
+            ..=((ground_m + above) / chunk_m).ceil() as i32 + 1;
+        Self::within(generator, centre_m, half_m, |_, _| rows.clone())
     }
 
+    /// What [`Self::around`] would make within `half_m` of `centre_m`, out of a wider `self`.
+    fn inside(self, generator: &Worldgen, centre_m: [f32; 2], half_m: f32) -> Self {
+        let [low, high] = columns(generator, centre_m, half_m);
+        let chunks: HashMap<_, _> = self
+            .chunks
+            .into_iter()
+            .filter(|(c, _)| (low[0]..high[0]).contains(&c[0]) && (low[1]..high[1]).contains(&c[2]))
+            .collect();
+        let wanted = (high[0] - low[0]) * (high[1] - low[1]);
+        let held: HashSet<_> = chunks.keys().map(|c| [c[0], c[2]]).collect();
+        assert_eq!(held.len(), wanted as usize, "the wider scan holds this one");
+        Generated { chunks }
+    }
+
+    /// The Chunks within `half_m` of `centre_m`, in the rows `rows` gives each Chunk column.
     fn within(
         generator: &Worldgen,
         centre_m: [f32; 2],
         half_m: f32,
-        (low, high): (f32, f32),
+        rows: impl Fn(i32, i32) -> RangeInclusive<i32> + Sync,
     ) -> Self {
-        let chunk_m = CHUNK_SIZE as f32 * generator.voxel_size();
-        let [low_x, low_z] = centre_m.map(|c| ((c - half_m) / chunk_m).floor() as i32);
-        let [high_x, high_z] = centre_m.map(|c| ((c + half_m) / chunk_m).ceil() as i32);
-        let rows: Vec<i32> = (low_z..high_z).collect();
-        let ys = (low / chunk_m).floor() as i32 - 1..=(high / chunk_m).ceil() as i32 + 1;
-        let chunks = crate::server::in_parallel(&rows, |&cz| {
-            let mut row = Vec::new();
-            for cy in ys.clone() {
-                for cx in low_x..high_x {
-                    row.push(([cx, cy, cz], generator.chunk(cx, cy, cz)));
+        let [[low_x, low_z], [high_x, high_z]] = columns(generator, centre_m, half_m);
+        let lines: Vec<i32> = (low_z..high_z).collect();
+        let chunks = crate::server::in_parallel(&lines, |&cz| {
+            let mut line = Vec::new();
+            for cx in low_x..high_x {
+                for cy in rows(cx, cz) {
+                    line.push(([cx, cy, cz], generator.chunk(cx, cy, cz)));
                 }
             }
-            row
+            line
         });
         Generated {
             chunks: chunks.into_iter().flatten().collect(),
@@ -458,6 +499,8 @@ fn spawn_m(generator: &Worldgen) -> [f32; 2] {
 pub(in crate::server) const SEED: u64 = 7;
 const HALF_M: f32 = 320.0;
 
+/// Also that each Game lays small and large Settlements, whose wider scan holds this one's: the
+/// scans are nearly all of either one's time, so the two share one.
 #[test]
 fn a_world_of_each_game_shows_its_templates_and_a_settlement_level_whole_and_furnished() {
     for game in GAMES {
@@ -466,7 +509,9 @@ fn a_world_of_each_game_shows_its_templates_and_a_settlement_level_whole_and_fur
         let generator = Worldgen::new(SEED, 1.0, loaded.world.unwrap())
             .with_templates(templates)
             .with_settlements(&loaded.tables.settlements);
-        let world = Generated::new(&generator, HALF_M);
+        let wide = Generated::new(&generator, SIZES_SCAN_M);
+        lays_small_and_large_settlements(game, templates, &generator, &wide);
+        let world = wide.inside(&generator, spawn_m(&generator), HALF_M);
         let found = standing(&world, templates, 1.0);
         let exported = export(game);
         let kind = |f: &Found| exported[f.template]["kind"].as_str().unwrap();
@@ -604,34 +649,30 @@ fn a_world_of_each_game_shows_its_templates_and_a_settlement_level_whole_and_fur
 /// lattice cells, and one of Terra's town's.
 const SIZES_SCAN_M: f32 = 768.0;
 
-#[test]
-fn a_world_of_each_game_lays_small_and_large_settlements() {
-    for game in GAMES {
-        let (_install, loaded) = loaded(game, 1.0);
-        let templates = &loaded.tables.templates;
-        let generator = Worldgen::new(SEED, 1.0, loaded.world.unwrap())
-            .with_templates(templates)
-            .with_settlements(&loaded.tables.settlements);
-        let world = Generated::new(&generator, SIZES_SCAN_M);
-        let found = standing(&world, templates, 1.0);
-        let exported = export(game);
-        let kinds: Vec<&str> = found
-            .iter()
-            .map(|f| exported[f.template]["kind"].as_str().unwrap())
-            .collect();
-        assert!(
-            kinds.contains(&"water"),
-            "{game}: no pond or waterfall by a Settlement within {SIZES_SCAN_M} m"
-        );
-        let sizes = copy_sizes(&found, &kinds, spawn_m(&generator), SIZES_SCAN_M);
-        // Tidewater's islands hold only a handful of buildings, whatever a harbour draws.
-        let large = if game == "tidewater" { 3 } else { 8 };
-        assert!(
-            sizes.first().is_some_and(|&n| n < large.min(6))
-                && sizes.last().is_some_and(|&n| n >= large),
-            "{game}: copies of {sizes:?} buildings, not small and large"
-        );
-    }
+fn lays_small_and_large_settlements(
+    game: &str,
+    templates: &[Template],
+    generator: &Worldgen,
+    world: &Generated,
+) {
+    let found = standing(world, templates, 1.0);
+    let exported = export(game);
+    let kinds: Vec<&str> = found
+        .iter()
+        .map(|f| exported[f.template]["kind"].as_str().unwrap())
+        .collect();
+    assert!(
+        kinds.contains(&"water"),
+        "{game}: no pond or waterfall by a Settlement within {SIZES_SCAN_M} m"
+    );
+    let sizes = copy_sizes(&found, &kinds, spawn_m(generator), SIZES_SCAN_M);
+    // Tidewater's islands hold only a handful of buildings, whatever a harbour draws.
+    let large = if game == "tidewater" { 3 } else { 8 };
+    assert!(
+        sizes.first().is_some_and(|&n| n < large.min(6))
+            && sizes.last().is_some_and(|&n| n >= large),
+        "{game}: copies of {sizes:?} buildings, not small and large"
+    );
 }
 
 /// How many buildings each Settlement whose centre stands in `half_m` of `spawn`, less a large

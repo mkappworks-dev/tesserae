@@ -1,5 +1,9 @@
-# A test that starts late extends the job by its whole length; these four run for minutes on a
-# 2-core runner, so they take the first slots.
+# A test that starts late extends the job by its whole length; these run for minutes on a 2-core
+# runner, so they take the first slots, the longest first.
 [[profile.default.overrides]]
-filter = 'test(the_shared_spreaders) | test(every_game_with_planted_fields) | test(a_new_world_of_every_demo_game_has_its_food)'
+filter = 'test(a_world_of_each_game_shows_its_templates)'
 priority = 100
+
+[[profile.default.overrides]]
+filter = 'test(ground_cover_grows_in_patches) | test(every_game_with_planted_fields) | test(each_stand_a_bridge_over_a_gap) | test(every_biome_of_every_demo_game) | test(stands_its_first_footbridges) | test(each_biome_scatters_its_trees) | test(a_survival_player_finds_wood) | test(the_shared_spreaders) | test(a_wilderness_chest_holds_only)'
+priority = 90

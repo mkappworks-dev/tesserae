@@ -5,9 +5,11 @@ use std::collections::BTreeMap;
 use tesserae_core::{Biome, BiomeTable, CHUNK_SIZE, Worldgen};
 
 use super::loaded;
+use super::structures::settled_rows;
 
 /// The names of the materials `game`'s planted fields change within `half_m` of the spawn, counted
-/// in Voxels, at Voxels of 1 m, against the same World with only its crop fields dropped.
+/// in Voxels, at Voxels of 1 m, against the same World with only its crop fields dropped. A field
+/// and its ditch lie on the ground, so only its [`settled_rows`] are compared.
 fn field_cells(game: &str, seed: u64, half_m: f32) -> BTreeMap<String, u64> {
     let (_install, loaded) = loaded(game, 1.0);
     let params = loaded.world.unwrap();
@@ -29,15 +31,14 @@ fn field_cells(game: &str, seed: u64, half_m: f32) -> BTreeMap<String, u64> {
         Worldgen::new(seed, 1.0, params),
         Worldgen::new(seed, 1.0, without),
     );
-    let (low, high) = with.surface_bounds_m();
     let size = CHUNK_SIZE as f32;
     let reach = (half_m / size).ceil() as i32;
     let eye = crate::server::spawn_eye(&with);
     let [ox, oz] = [eye.x, eye.z].map(|m| (m / size).floor() as i32);
     let mut names: BTreeMap<u16, u64> = BTreeMap::new();
-    for cy in (low / size).floor() as i32 - 1..=(high / size).ceil() as i32 + 1 {
-        for cz in oz - reach..oz + reach {
-            for cx in ox - reach..ox + reach {
+    for cz in oz - reach..oz + reach {
+        for cx in ox - reach..ox + reach {
+            for cy in settled_rows(&with, [cx, cz]) {
                 let (a, b) = (with.chunk(cx, cy, cz), without.chunk(cx, cy, cz));
                 if a.uniform().is_some() && a.uniform() == b.uniform() {
                     continue;
