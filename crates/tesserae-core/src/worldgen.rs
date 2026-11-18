@@ -1066,10 +1066,6 @@ impl Worldgen {
     /// The dry column nearest `from`, searched outwards to `max_m`, for a Player to spawn on: not
     /// under water, a metre or more above it, no cliff within a few metres, and dry ground all
     /// round to ~100 m so the Player is on land and not a spit or an islet.
-    #[expect(
-        clippy::disallowed_methods,
-        reason = "generation: generator-determinism ticket 12 moves this to libm"
-    )]
     pub fn dry_land_near_m(&self, from: [f32; 2], max_m: f32) -> Option<[f32; 2]> {
         const STEP_M: f32 = 16.0;
         const CLIFF_M: f32 = 6.0;
@@ -1088,12 +1084,12 @@ impl Worldgen {
                 && SHORE_RINGS_M.iter().all(|&r| {
                     (0..8).all(|k| {
                         let a = k as f32 * std::f32::consts::FRAC_PI_4;
-                        dry(x + r * a.cos(), z + r * a.sin())
+                        dry(x + r * libm::cosf(a), z + r * libm::sinf(a))
                     })
                 })
                 && (0..8).all(|k| {
                     let a = k as f32 * std::f32::consts::FRAC_PI_4;
-                    let (sx, sz) = (x + CLIFF_M * a.cos(), z + CLIFF_M * a.sin());
+                    let (sx, sz) = (x + CLIFF_M * libm::cosf(a), z + CLIFF_M * libm::sinf(a));
                     (self.surface_height_m(sx, sz) - h).abs() <= CLIFF_DROP_M
                 })
         };
@@ -1106,7 +1102,7 @@ impl Worldgen {
             let n = ((std::f32::consts::TAU * r / STEP_M).ceil() as u32).max(6);
             for k in 0..n {
                 let a = k as f32 * std::f32::consts::TAU / n as f32;
-                let (x, z) = (from[0] + r * a.cos(), from[1] + r * a.sin());
+                let (x, z) = (from[0] + r * libm::cosf(a), from[1] + r * libm::sinf(a));
                 if suits(x, z) {
                     return Some([x, z]);
                 }
