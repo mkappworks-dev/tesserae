@@ -20,6 +20,10 @@ the digests:
    than metres (ADR-0003), fix it.
 3. At seed 3907 with overhangs on, smoothing places stairs that climb two steps
    and slabs that ease fewer than two.
+4. A landform height (`landforms.height_m`) of 0 divides by zero: heights turn
+   NaN and drainage loops forever, so a Game declaring it hangs the Server
+   (found by ticket 16). Validation refuses it with a clear error; no valid
+   World's output changes.
 
 ## Acceptance criteria
 
@@ -32,3 +36,6 @@ the digests:
       them alongside its own.
 - [ ] If item 2 turns out not to be a defect, the reason is written here and the
       test asserts the intended behaviour.
+- [ ] Parameters with a landform height of 0 (or any value that makes a height
+      non-finite) are refused at validation, shown by a test; no digest moves
+      for this item.
