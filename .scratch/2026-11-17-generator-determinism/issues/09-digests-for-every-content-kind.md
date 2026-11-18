@@ -18,6 +18,8 @@ spawn position from 06's query.
 
 ## Acceptance criteria
 
+- [ ] The other recorded-digest tests (`coarse_generation`, `surface_features`)
+      hash by name through ticket 07's mapping too, re-recorded on macOS.
 - [ ] Each box asserts what it holds before its digest is compared: a Settlement
       building, a Structure, a Plant, water.
 - [ ] Spawn positions are recorded per case and compared bit for bit.
