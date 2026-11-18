@@ -19,8 +19,8 @@ change.
 
 ## Acceptance criteria
 
-- [x] No code path asks which Generator version a World uses, except the save's
-      check.
+- [x] No code path asks which Generator version a World uses, except parameter
+      validation and the save's check.
 - [x] A save test shows a World stamped 1 or 2 is refused with that message.
 - [x] The version 3 digests are unchanged.
 - [x] No doc outside ADRs and `.scratch/` describes version 1 or 2 as

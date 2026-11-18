@@ -23,8 +23,9 @@ names every case that moved, or says none did.
 - [x] The `powi` replacement alone moves no digest (checked before the
       trigonometry changes, noted in a comment here).
 - [x] `libm` is pinned to an exact version.
-- [x] The Determinism job passes on every target; 10's allowances are removed
-      and it becomes a required check.
+- [x] The Determinism job passes on every target; 10's allowances are removed.
+- [ ] ~~It becomes a required check~~: a branch protection setting left to the
+      maintainer.
 - [x] The commit message lists the digests and spawn positions that moved.
 
 ## Comments
