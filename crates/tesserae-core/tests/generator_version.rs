@@ -6,8 +6,8 @@ use sha2::{Digest, Sha256};
 use tesserae_core::material::MaterialDef;
 use tesserae_core::save::Mapping;
 use tesserae_core::testgen::{
-    Fixtures, fixtures, register_glass, register_ground, register_lantern, register_leaves,
-    register_water,
+    Fixtures, fixtures, register_content, register_glass, register_ground, register_lantern,
+    register_leaves, register_water,
 };
 use tesserae_core::worldgen::WaterParams;
 use tesserae_core::{CHUNK_SIZE, Chunk, GroundParams, Tables, Worldgen, WorldgenParams};
@@ -42,6 +42,7 @@ fn names() -> Mapping {
 fn reordered() -> Fixtures {
     let mut tables = Tables::builtin();
     tables.materials.register(MaterialDef::OPAQUE).unwrap();
+    let content = register_content(&mut tables);
     let water = register_water(&mut tables);
     let leaves = register_leaves(&mut tables);
     let glass = register_glass(&mut tables);
@@ -58,6 +59,7 @@ fn reordered() -> Fixtures {
         glass,
         leaves,
         water,
+        content,
     }
 }
 
