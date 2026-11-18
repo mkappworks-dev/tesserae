@@ -843,17 +843,17 @@ Notes:
   and every demo Game declares ocean, shore, river and alpine Biomes, cave
   Biomes and its water. Settlements gained outskirts (farms, ponds, brooks and
   waterfalls by chance), a new Player enters a village where its first food
-  grows, and no cave opens within 16 m of a Structure. The terrain's arithmetic
-  runs on `libm`, so it rounds alike on every platform; Settlement roads still
-  use the platform's trigonometry. Measured on the thread's CPU clock against
-  `main` when it landed: the sky and deep early-outs were unchanged (0.01 µs a
-  Chunk), the version 2 terrain it replaced cost about 105 µs a surface Chunk
-  against 90, and version 3's about 950 µs warm and 1350 cold, some 9 times that
-  against a budget of 3; the per-column heightfield (`fbm2`, the drainage's
-  lookup and the base height) is most of it, and
-  `tech/phase-17-worldgen-performance` takes it on with bit-identical changes.
-  Weather (step 24) follows and reads the Climate by altitude and coast; weather
-  never edits terrain.
+  grows, and no cave opens within 16 m of a Structure. Generation's
+  transcendental maths runs on `libm`, so it rounds alike on every platform
+  ([ADR-0032](./docs/adr/0032-generation-uses-no-platform-maths.md)). Measured
+  on the thread's CPU clock against `main` when it landed: the sky and deep
+  early-outs were unchanged (0.01 µs a Chunk), the version 2 terrain it replaced
+  cost about 105 µs a surface Chunk against 90, and version 3's about 950 µs
+  warm and 1350 cold, some 9 times that against a budget of 3; the per-column
+  heightfield (`fbm2`, the drainage's lookup and the base height) is most of it,
+  and `tech/phase-17-worldgen-performance` takes it on with bit-identical
+  changes. Weather (step 24) follows and reads the Climate by altitude and
+  coast; weather never edits terrain.
 - **Step 22** is not started. Trees and Structures exist at level 0 only
   ([ADR-0022](docs/adr/0022-biomes-are-column-content-and-a-world-pins-its-generator.md),
   [ADR-0029](docs/adr/0029-structures-are-declared-templates-placed-as-pure-functions-of-metres.md)),
