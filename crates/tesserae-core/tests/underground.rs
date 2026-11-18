@@ -1,6 +1,11 @@
 //! Version 3's underground: lava near the band's floor, perched aquifers and their springs, and
 //! cave Biomes chosen in 3D.
 
+#![allow(
+    clippy::disallowed_methods,
+    reason = "a test's own maths is not generation"
+)]
+
 use std::collections::HashMap;
 
 use tesserae_core::terrain::LandformParams;

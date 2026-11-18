@@ -1959,7 +1959,7 @@ pub(in crate::server) mod tests {
     #[test]
     fn every_mesh_carries_the_sight_lines_of_its_chunk_as_it_stands() {
         use tesserae_core::visibility::connectivity;
-        let mut h = Harness::new(small(), UNLIMITED);
+        let mut h = Harness::on_land(small(), UNLIMITED);
         let (ready, _) = h.settle();
         let tables = crate::server::fixture_tables();
         let now = |h: &Harness, c| connectivity(h.store().get(c).unwrap(), &tables.materials);

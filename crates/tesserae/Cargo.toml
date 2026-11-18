@@ -35,3 +35,7 @@ trash = "5"
 [dev-dependencies]
 # Encodes the artwork fixtures the data-Mod tests load.
 png = "0.18"
+
+[lints.clippy]
+# ADR-0032 binds generation, and generation lives in tesserae-core.
+disallowed_methods = "allow"

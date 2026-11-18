@@ -764,6 +764,10 @@ pub fn felling_region(
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::disallowed_methods,
+    reason = "a test's own maths is not generation"
+)]
 mod tests {
     use super::*;
     use crate::climate::Climate;

@@ -1,6 +1,11 @@
 //! Settlements in generation: a Biome lists a Settlement, and worldgen lays out its roads and Plots
 //! whole from any Chunk's viewpoint, the same in metres at every Voxel size.
 
+#![allow(
+    clippy::disallowed_methods,
+    reason = "a test's own maths is not generation"
+)]
+
 use std::collections::{HashMap, HashSet};
 
 use tesserae_core::settlement::{Building, PlotRule, Settlement};
