@@ -2293,8 +2293,10 @@ impl Worldgen {
                 let (mut rising, mut turn) = (0, 0);
                 for (dx, dz, quarter) in CARDINALS {
                     let (nx, nz) = (x + dx, z + dz);
-                    if tops[surface_index(nx, nz)] == top + EASED_RISE_VOXELS
-                        && self.still_solid(chunk, coord, [nx, y, nz])
+                    // The ground as it stands, so a cell the overhang density pushed solid or a
+                    // cave opened counts as it looks.
+                    if self.still_solid(chunk, coord, [nx, y, nz])
+                        && !self.still_solid(chunk, coord, [nx, y + 1, nz])
                     {
                         rising += 1;
                         turn = quarter;
@@ -2629,7 +2631,7 @@ impl Worldgen {
             | (_, Some(_)) => return None,
             _ => {}
         }
-        if self.smoothing && self.eased(top, [gx, gz], base[1]) {
+        if self.smoothing && self.eased([gx, gz], base[1]) {
             return None;
         }
         Some(Standing {
@@ -2641,15 +2643,10 @@ impl Worldgen {
 
     /// Whether smoothing would put a stair or slab in the cell over the column's top, as `smooth`
     /// decides it for the Chunk that holds the cell.
-    fn eased(&self, top: i32, [gx, gz]: [i32; 2], y: i32) -> bool {
+    fn eased(&self, [gx, gz]: [i32; 2], y: i32) -> bool {
         CARDINALS.iter().any(|&(dx, dz, _)| {
             let (nx, nz) = (gx + dx, gz + dz);
-            let neighbour = top_index(
-                self.surface_height_m(self.global_m(nx), self.global_m(nz)),
-                0.0,
-                self.voxel_size,
-            );
-            neighbour == top + EASED_RISE_VOXELS && !self.carved([nx, y, nz])
+            self.ground_at([nx, y, nz]) && !self.ground_at([nx, y + 1, nz])
         })
     }
 
@@ -2692,7 +2689,7 @@ impl Worldgen {
             || self
                 .water_level_m(x_m, z_m)
                 .is_some_and(|level_m| y_m < level_m)
-            || (self.smoothing && self.eased(top, [gx, gz], base[1]))
+            || (self.smoothing && self.eased([gx, gz], base[1]))
         {
             return None;
         }
@@ -3023,18 +3020,67 @@ impl Worldgen {
         (owner * size) as f32 * self.voxel_size + local.rem_euclid(size) as f32 * self.voxel_size
     }
 
-    /// Whether the cell `at` (Voxel offsets from this Chunk's corner, possibly
-    /// one outside it) is solid ground, given that the cube pass made it so
-    /// before caves. Inside the Chunk that is a read; outside, the cell belongs
-    /// to a Chunk not held here, so it is asked as that Chunk decides it.
+    /// Whether the cell `at` (Voxel offsets from this Chunk's corner, possibly one outside it) is
+    /// ground after the cube pass. Inside the Chunk that is a read, which smoothing's own stairs
+    /// do not change; outside, it is asked as the Chunk holding it decides it.
     fn still_solid(&self, chunk: &Chunk, coord: [i32; 3], at: [i32; 3]) -> bool {
         if at.iter().all(|c| (0..CHUNK_SIZE as i32).contains(c)) {
-            return !chunk
-                .get(at[0] as usize, at[1] as usize, at[2] as usize)
-                .is_air();
+            let v = chunk.get(at[0] as usize, at[1] as usize, at[2] as usize);
+            return !v.is_air()
+                && !v.is_shaped()
+                && self.water.is_none_or(|w| v.material() != w.material);
         }
         let size = CHUNK_SIZE as i32;
-        !self.carved([0, 1, 2].map(|a| coord[a] * size + at[a]))
+        self.ground_at([0, 1, 2].map(|a| coord[a] * size + at[a]))
+    }
+
+    /// Whether the cell at global Voxel `at`, the column's top or near it, is ground once caves
+    /// are carved, as the Chunk holding it decides.
+    fn ground_at(&self, at: [i32; 3]) -> bool {
+        self.filled(at) && !self.carved(at)
+    }
+
+    /// Whether the cube pass fills the cell at global Voxel `[gx, y, gz]` with ground before
+    /// caves: under the column's surface, or past it where the overhang density pushes it. It
+    /// asks the column and its neighbours rather than their Chunk's whole Stack, since a
+    /// neighbour's Chunk may not be made yet.
+    fn filled(&self, [gx, y, gz]: [i32; 3]) -> bool {
+        let at_m = |gx, gz| [gx, gz].map(|g| self.global_m(g));
+        let [x_m, z_m] = at_m(gx, gz);
+        let y_m = self.global_m(y);
+        let surface_m = self.surface_height_m(x_m, z_m);
+        let base_m = surface_m - y_m;
+        if base_m.abs() > self.terrain.overhang_max_m() {
+            return base_m >= 0.0;
+        }
+        // `overhang_amp_at`, column by column.
+        let wettest_m = CARDINALS
+            .iter()
+            .map(|&(dx, dz, _)| at_m(gx + dx, gz + dz))
+            .filter(|&[x, z]| {
+                self.water_level_m(x, z)
+                    .is_some_and(|l| l > self.surface_height_m(x, z))
+            })
+            .chain([[x_m, z_m]])
+            .filter_map(|[x, z]| self.water_level_m(x, z))
+            .fold(f32::MIN, f32::max);
+        let amp_m = self
+            .terrain
+            .overhang_amp_m(x_m, z_m)
+            .min((surface_m - wettest_m).max(0.0));
+        let size = CHUNK_SIZE as i32;
+        // Only a banded cell reads the Structures the density keeps off, which cost the most.
+        if amp_m <= 0.0
+            || base_m.abs() > amp_m
+            || covers(
+                &self.overhang_kept_off([gx.div_euclid(size), gz.div_euclid(size)]),
+                gx,
+                gz,
+            )
+        {
+            return base_m >= 0.0;
+        }
+        base_m + self.terrain.overhang_push_m(x_m, y_m, z_m, amp_m) >= 0.0
     }
 
     /// For each sub-block of the Chunk whose lowest Voxel is at `origin_m`,
@@ -3156,9 +3202,13 @@ mod tests {
     /// Smoothing with no minimum rise, so it fires at any Voxel size: the tests
     /// about where it places things, rather than whether it runs.
     fn smoothed(voxel_size: f32, caves: bool) -> Worldgen {
+        smoothed_at(SEED, voxel_size, caves)
+    }
+
+    fn smoothed_at(seed: u64, voxel_size: f32, caves: bool) -> Worldgen {
         let defaults = crate::testgen::world_params();
         Worldgen::new(
-            SEED,
+            seed,
             voxel_size,
             WorldgenParams {
                 caves: caves.then_some(CaveParams::default()),
@@ -4336,13 +4386,21 @@ mod tests {
         }
     }
 
+    /// At [`COAST`] the overhang density pushes cells past the surface the steps are read from.
     #[test]
     fn smoothing_stairs_face_the_step_they_climb() {
+        for seed in [SEED, COAST] {
+            for size in [1.0, 0.5] {
+                assert_stairs_face_their_step(&smoothed_at(seed, size, false));
+            }
+        }
+    }
+
+    fn assert_stairs_face_their_step(g: &Worldgen) {
         use crate::mesh::{NEG_X, NEG_Z, POS_X, POS_Z};
         use crate::shape::ShapeTable;
         let table = ShapeTable::builtin();
-        let g = smoothed(1.0, false);
-        let mut probe = Probe::new(&g);
+        let mut probe = Probe::new(g);
         let sides = [
             (POS_X, [1, 0, 0]),
             (NEG_X, [-1, 0, 0]),
@@ -4350,7 +4408,7 @@ mod tests {
             (NEG_Z, [0, 0, -1]),
         ];
         let (mut stairs, mut slabs, mut facings) = (0, 0, std::collections::HashSet::new());
-        for (at, v) in shaped_voxels(&g, &mut probe) {
+        for (at, v) in shaped_voxels(g, &mut probe) {
             // Which of the four neighbours stand at this Voxel's own level.
             // A neighbour that rises two Voxels also has a cube at this level,
             // but one above it; only the one-Voxel rises are what was eased.
@@ -4425,9 +4483,17 @@ mod tests {
 
     #[test]
     fn a_ramp_is_never_cut_by_a_chunk_edge_or_floating_over_a_cave() {
+        for seed in [SEED, COAST] {
+            for size in [1.0, 0.5] {
+                let (at_edge, total) = assert_ramps_are_whole(&smoothed_at(seed, size, true));
+                assert!(
+                    at_edge > 0 && total > at_edge,
+                    "{seed} {size} m: {at_edge} of {total}"
+                );
+            }
+        }
+
         let g = smoothed(1.0, true);
-        let (at_edge, total) = assert_ramps_are_whole(&g);
-        assert!(at_edge > 0 && total > at_edge, "{at_edge} of {total}");
 
         // A cave is what makes one fail to stand: where the same World without
         // tunnels has a stair or slab, this one sometimes has none.
