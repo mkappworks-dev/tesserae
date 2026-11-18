@@ -150,6 +150,12 @@ impl FarProbe {
     }
 }
 
+/// How many level-0 Voxels span a level-`level` one along an axis. Shifted, not `powi`: it sizes
+/// the coarse generators' Voxels, and generation's inputs use no platform maths (ADR-0032).
+fn level_scale(level: u32) -> f32 {
+    (1u32 << level) as f32
+}
+
 /// `sources[j]` makes level-j Chunks, so a level-k job clones `sources[k - 1]`. The outermost
 /// level is never anyone's child, so there is one fewer source than levels.
 #[derive(Resource)]
@@ -175,7 +181,7 @@ impl LodGenerators {
                 if j == 0 {
                     Worldgen::new(world.seed, world.voxel_size, bare)
                 } else {
-                    Worldgen::new(world.seed, world.voxel_size * 2f32.powi(j as i32), coarse)
+                    Worldgen::new(world.seed, world.voxel_size * level_scale(j), coarse)
                 }
             })
             .collect();
@@ -210,7 +216,7 @@ impl LodGenerators {
         (1..self.levels())
             .map(|k| {
                 (k >= from).then(|| {
-                    let voxel_m = world.voxel_size * 2f32.powi(k as i32);
+                    let voxel_m = world.voxel_size * level_scale(k);
                     // The generator asks about a Voxel's floor, so a Voxel the ground barely
                     // enters is ground and a shallow lake drains. Lowering the surface and the
                     // lake by half a Voxel asks about its middle, as the downsample's vote does;
@@ -1999,6 +2005,19 @@ mod tests {
         assert!(hole((2, far.child(4))));
         assert!(!hole((3, deep)));
         assert!(hole((3, ChunkCoord::new(0, 0, 2))));
+    }
+
+    #[test]
+    fn a_level_scale_is_the_exact_power_of_two_powi_gave() {
+        for level in 0..crate::server::lod_rings::MAX_LEVELS {
+            let scale = level_scale(level);
+            assert_eq!(scale.to_bits(), (127 + level) << 23, "level {level}");
+            assert_eq!(
+                scale.to_bits(),
+                2f32.powi(level as i32).to_bits(),
+                "level {level}"
+            );
+        }
     }
 
     #[test]
