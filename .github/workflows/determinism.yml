@@ -59,12 +59,17 @@ jobs:
           key: ${{ matrix.target }}
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      # Release, because that is the build a Server generates with. The three binaries
-      # hold the recorded digests and the asserts that their boxes cover what they
-      # digest; settlement_worldgen's one recorded digest is picked out of its 32 tests.
+      # Release, because that is the build a Server generates with. The two whole
+      # binaries hold the recorded digests and the asserts that their boxes cover what
+      # they digest; surface_features' and settlement_worldgen's recorded digests are
+      # picked out of their other tests.
       - name: Digest tests
         run: |
           cargo test -p tesserae-core --release --locked --target ${{ matrix.target }} \
-            --test generator_version --test coarse_generation --test surface_features
+            --test generator_version --test coarse_generation
+          cargo test -p tesserae-core --release --locked --target ${{ matrix.target }} \
+            --test surface_features -- --exact \
+            a_world_whose_biomes_declare_no_features_makes_the_recorded_chunks \
+            a_snapshot_whose_biomes_have_no_features_restores_to_the_recorded_chunks
           cargo test -p tesserae-core --release --locked --target ${{ matrix.target }} \
             --test settlement_worldgen -- --exact a_fixed_size_settlement_lays_out_exactly_as_before_ranges
