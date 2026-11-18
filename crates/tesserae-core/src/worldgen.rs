@@ -3488,7 +3488,7 @@ mod tests {
     }
 
     #[test]
-    fn a_version_3_settlement_is_founded_only_where_its_disc_is_level() {
+    fn a_settlement_is_founded_only_where_its_disc_is_level() {
         let g = Worldgen::new(SEED, 1.0, crate::testgen::world_params());
         let reach_m = 40.0;
         let rise = |x: f32, z: f32| {

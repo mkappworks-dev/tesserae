@@ -433,7 +433,7 @@ fn caves_by_huts(g: &Worldgen, near_m: f32, depth_m: f32) -> (usize, usize, usiz
 }
 
 #[test]
-fn no_cave_opens_under_or_beside_a_structure_in_version_3() {
+fn no_cave_opens_under_or_beside_a_structure() {
     for size in [1.0, 0.5] {
         let (huts, near, far) = caves_by_huts(&with_huts(size), 16.0, 14.0);
         assert!(huts > 20, "{size} m: {huts} hut Voxels");

@@ -109,11 +109,21 @@ fn new_world_of(world: WorldgenParams, tables: &Tables, seed: u64, size: f32) ->
         .with_settlements(&tables.settlements)
 }
 
+/// Where a search looks: horizontal metres from `centre`, between the heights `rows_m`.
+#[derive(Clone, Copy)]
+pub(super) struct Around {
+    pub(super) centre: [f32; 2],
+    pub(super) rows_m: (f32, f32),
+}
+
 /// The spawn's horizontal place, and the rows within 48 m of its height, which a short walk keeps
 /// to.
-pub(super) fn around_spawn(generator: &Worldgen) -> ([f32; 2], (f32, f32)) {
+pub(super) fn around_spawn(generator: &Worldgen) -> Around {
     let eye = crate::server::spawn_eye(generator);
-    ([eye.x, eye.z], (eye.y - 48.0, eye.y + 48.0))
+    Around {
+        centre: [eye.x, eye.z],
+        rows_m: (eye.y - 48.0, eye.y + 48.0),
+    }
 }
 
 /// Horizontal metres from `centre` to every Voxel of each of `materials` within `within_m`, between
@@ -122,7 +132,7 @@ fn distances_around_m(
     generator: &Worldgen,
     materials: &[MaterialId],
     within_m: f32,
-    around: ([f32; 2], (f32, f32)),
+    around: Around,
 ) -> Vec<Vec<f32>> {
     let mut found = vec![Vec::new(); materials.len()];
     search_around_m(generator, materials, within_m, around, |i, d| {
@@ -138,7 +148,7 @@ fn any_around_m(
     generator: &Worldgen,
     materials: &[MaterialId],
     within_m: f32,
-    around: ([f32; 2], (f32, f32)),
+    around: Around,
 ) -> bool {
     let mut any = false;
     search_around_m(generator, materials, within_m, around, |_, _| {
@@ -155,7 +165,10 @@ pub(super) fn search_around_m(
     generator: &Worldgen,
     materials: &[MaterialId],
     within_m: f32,
-    (centre, (lowest, highest)): ([f32; 2], (f32, f32)),
+    Around {
+        centre,
+        rows_m: (lowest, highest),
+    }: Around,
     mut found: impl FnMut(usize, f32) -> ControlFlow<()>,
 ) {
     let size = generator.voxel_size();

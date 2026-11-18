@@ -22,7 +22,7 @@ fn column(g: &Worldgen, x: i32, z: i32, from_m: i32, to_m: i32) -> Vec<Voxel> {
 }
 
 #[test]
-fn version_3_water_has_no_air_in_it_and_kelp_leaves_the_surface_whole() {
+fn water_has_no_air_in_it_and_kelp_leaves_the_surface_whole() {
     let (_install, loaded) = loaded("terra", 1.0);
     let world = loaded.world.unwrap();
     let params = WorldgenParams {

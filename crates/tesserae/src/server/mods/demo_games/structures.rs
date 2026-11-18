@@ -283,7 +283,7 @@ pub(in crate::server) struct Generated {
 impl Generated {
     /// The Chunks within `half_m` of the spawn.
     fn new(generator: &Worldgen, half_m: f32) -> Self {
-        Self::around(generator, spawn_m(generator), half_m)
+        Self::around(generator, generator.spawn_m(), half_m)
     }
 
     /// The Chunks within `half_m` of `centre_m`, in each Chunk column only its [`settled_rows`].
@@ -488,12 +488,6 @@ pub(super) fn road_side(size: [i32; 3], [x, _, z]: [i32; 3]) -> [i32; 2] {
     .unwrap()
 }
 
-/// The column a new Player is spawned on.
-fn spawn_m(generator: &Worldgen) -> [f32; 2] {
-    let eye = crate::server::spawn_eye(generator);
-    [eye.x, eye.z]
-}
-
 /// The demo World tests' seed; the square is wide enough that each Game lays out a Settlement in
 /// it.
 pub(in crate::server) const SEED: u64 = 7;
@@ -511,7 +505,7 @@ fn a_world_of_each_game_shows_its_templates_and_a_settlement_level_whole_and_fur
             .with_settlements(&loaded.tables.settlements);
         let wide = Generated::new(&generator, SIZES_SCAN_M);
         lays_small_and_large_settlements(game, templates, &generator, &wide);
-        let world = wide.inside(&generator, spawn_m(&generator), HALF_M);
+        let world = wide.inside(&generator, generator.spawn_m(), HALF_M);
         let found = standing(&world, templates, 1.0);
         let exported = export(game);
         let kind = |f: &Found| exported[f.template]["kind"].as_str().unwrap();
@@ -665,7 +659,7 @@ fn lays_small_and_large_settlements(
         kinds.contains(&"water"),
         "{game}: no pond or waterfall by a Settlement within {SIZES_SCAN_M} m"
     );
-    let sizes = copy_sizes(&found, &kinds, spawn_m(generator), SIZES_SCAN_M);
+    let sizes = copy_sizes(&found, &kinds, generator.spawn_m(), SIZES_SCAN_M);
     // Tidewater's islands hold only a handful of buildings, whatever a harbour draws.
     let large = if game == "tidewater" { 3 } else { 8 };
     assert!(
@@ -861,8 +855,8 @@ fn terra_and_tidewater_each_stand_a_bridge_over_a_gap_by_their_nearest_river() {
 }
 
 #[test]
-fn meadow_stands_its_first_footbridges_over_its_version_3_rivers() {
-    let (generator, loaded) = version_3("meadow");
+fn meadow_stands_its_first_footbridges_over_its_rivers() {
+    let (generator, loaded) = game_world("meadow");
     let templates = &loaded.tables.templates;
     let index = templates
         .iter()
@@ -947,8 +941,8 @@ fn flight() -> Vec<[f32; 2]> {
     at
 }
 
-/// A version 3 World of `game`, and the name of the Biome at a column.
-fn version_3(game: &str) -> (Worldgen, LoadedMods) {
+/// A World of `game`, and the name of the Biome at a column.
+fn game_world(game: &str) -> (Worldgen, LoadedMods) {
     let (_install, loaded) = loaded(game, 1.0);
     let generator = Worldgen::new(SEED, 1.0, loaded.world.unwrap())
         .with_templates(&loaded.tables.templates)
@@ -965,9 +959,9 @@ fn biome_name(generator: &Worldgen, [x, z]: [f32; 2]) -> String {
 }
 
 #[test]
-fn every_game_has_ocean_a_river_and_a_cave_biome_within_a_short_flight_under_version_3() {
+fn every_game_has_ocean_a_river_and_a_cave_biome_within_a_short_flight() {
     for game in GAMES {
-        let (generator, _loaded) = version_3(game);
+        let (generator, _loaded) = game_world(game);
         let (mut ocean, mut river, mut cave) = (false, false, false);
         for at in flight() {
             let name = biome_name(&generator, at);
