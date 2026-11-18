@@ -16,8 +16,10 @@ The Writer keeps the three newest Commits it completed and deletes older `.commi
 - [x] A failed delete leaves the write successful and is retried on the next.
 - [x] Every error-injection phase and the killed-subprocess test still recover the previous Commit.
 - [x] `docs/world-persistence.md` describes retention instead of "no garbage collection yet".
-- [ ] The 3-minute flight's disk use is recorded below.
+- [x] The 3-minute flight's disk use is recorded below.
 
 ## Comments
 
-Code, tests and docs landed. The flight measurement waits until step 17 merges and the host is quiet; it runs on the rebased base.
+Code, tests and docs landed.
+
+**Flight** (2026-11-18, rebased on main `b88e7c12`, load 4.8 to 7.9, two runs each): main keeps all 73 Commits, 265.8 and 266.3 MiB; this ticket keeps 3, 16.9 MiB both runs. Bytes written per Commit are unchanged (4.2 MB median), as expected: retention deletes, it does not write less. Table for all three tickets in ticket 03.

@@ -20,12 +20,14 @@ Format 3. A Commit is a `<seq>.commit` manifest (`TESSAVE1`, SHA-256, JSON with 
 - [x] Error injection covers the pack's body, sync and rename; a kill between the pack's rename and the manifest's recovers the previous Commit, and the next writer sweeps the orphan pack.
 - [x] A pack a kept Commit names is never deleted; compaction moves records and the old pack ages out.
 - [x] `acquire` reserves `.pack` sequences.
-- [ ] Save time per Commit and the cost of the full flushes are recorded below.
+- [x] Save time per Commit and the cost of the full flushes are recorded below.
 - [x] `docs/world-persistence.md` describes format 3, packs, garbage collection and compaction.
 
 ## Comments
 
 - Paused shares store only their timers, wakes, rescans and landing cursors; a share restores with the active simulation's bounds and turn rather than storing them when equal, since resuming reads none of them but the turn, and that only as a fallback.
 - A Writer names a paused share again only while it is the same handle, so the first write after an open stores every share again.
-- Measurement waits for step 17 to merge and a quiet host.
-- The five demo-game tests in the Server suite need `./scripts/build-guests`, not run in this worktree yet.
+- The first flight still paused 3,042 shares, 2,589 of them rescan-only shares of Chunks never stored: an eviction that waited for a Commit (a running step reading the Chunk, say) went through `pause_evictions`, which kept the rescans. That path now drops them too (`an_unchanged_chunk_paused_mid_rescan_saves_no_share_and_settles_on_return`, which fails without it); the next flight paused 463, every one of a stored Chunk.
+- **Flight** (2026-11-18, on main `b88e7c12`, load 5.7 to 6.5): save worker time per Commit 93 ms median, 256 ms max, against 590 to 599 ms and 970 to 1,028 ms on main. Bytes written per Commit 524 KB median: a 367 KB manifest and a 166 KB pack. Full table in ticket 03.
+- **Full flushes.** `sync_all` is `F_FULLFSYNC` on macOS: 3.9 ms median for a 92 KB pack and 3.8 ms for a 365 KB manifest, against 0.03 and 0.07 ms for a plain `fsync`, measured on the same volume. About 8 ms of a 93 ms save, the pack's share 4%, so the pack keeps its full flush.
+- The guests built, the whole Server suite passes, the five demo-game tests among them.
