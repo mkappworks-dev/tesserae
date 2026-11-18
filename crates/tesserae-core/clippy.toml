@@ -1,5 +1,5 @@
-# Every crate but tesserae-core allows these in its Cargo.toml; inside it, only
-# code outside generation does.
+# Clippy finds this file from tesserae-core's own directory, so it binds no other
+# crate; inside tesserae-core, only code outside generation allows these.
 disallowed-methods = [
   { path = "f32::sin", reason = "varies by platform and Rust version; generation calls libm (ADR-0032)" },
   { path = "f32::cos", reason = "varies by platform and Rust version; generation calls libm (ADR-0032)" },

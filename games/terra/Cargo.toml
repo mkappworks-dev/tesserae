@@ -12,7 +12,3 @@ crate-type = ["cdylib"]
 
 [dependencies]
 wit-bindgen = { version = "0.63.0", default-features = false, features = ["macros", "realloc"] }
-
-[lints.clippy]
-# ADR-0032 binds the Engine's generation, not a Game.
-disallowed_methods = "allow"
