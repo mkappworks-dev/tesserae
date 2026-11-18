@@ -22,7 +22,7 @@ struct Drawn {
     layers: &'static [&'static [&'static str]],
 }
 
-const TEMPLATES: [Drawn; 31] = [
+const TEMPLATES: [Drawn; 32] = [
     Drawn {
         name: "cottage",
         ground_layer: 0,
@@ -2960,6 +2960,24 @@ const TEMPLATES: [Drawn; 31] = [
                 ".........",
                 ".........",
             ],
+        ],
+    },
+    Drawn {
+        name: "food_patch",
+        ground_layer: 0,
+        foundation: "terra:ashlar",
+        level_tolerance_m: None,
+        spans: false,
+        palette: &[
+            ('.', Keep),
+            (':', Air),
+            ('A', Voxel("terra:grass", "core:cube", 0)),
+            ('B', Voxel("terra:dirt", "core:cube", 0)),
+            ('C', Voxel("terra:melon", "core:cube", 0)),
+        ],
+        layers: &[
+            &["AAAAAAA", "ABBBBBA", "ABBBBBA", "ABBBBBA", "AAAAAAA"],
+            &[".......", "..C.C..", ".C.C.C.", "..C.C..", "......."],
         ],
     },
     Drawn {

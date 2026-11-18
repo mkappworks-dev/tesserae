@@ -242,6 +242,17 @@ fn waters(chance: f32, count: (u8, u8)) -> SettlementOutskirts {
     }
 }
 
+/// One or two melon patches by every copy, after its water, so a new Player who enters a village
+/// finds a meal beside it.
+fn food() -> SettlementOutskirts {
+    SettlementOutskirts {
+        templates: vec![plot("food_patch", 1.0, 0, 2)],
+        count_min: 1,
+        count_max: 2,
+        chance: Some(1.0),
+    }
+}
+
 pub fn settlements() -> Vec<SettlementDef> {
     vec![
         kind(
@@ -284,6 +295,7 @@ pub fn settlements() -> Vec<SettlementDef> {
                         ],
                     ),
                     waters(0.9, (1, 3)),
+                    food(),
                 ],
             ),
         ),
@@ -328,6 +340,7 @@ pub fn settlements() -> Vec<SettlementDef> {
                         ],
                     ),
                     waters(1.0, (2, 4)),
+                    food(),
                 ],
             ),
         ),
@@ -361,6 +374,7 @@ pub fn settlements() -> Vec<SettlementDef> {
                         ],
                     ),
                     waters(0.7, (1, 2)),
+                    food(),
                 ],
             ),
         ),

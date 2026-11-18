@@ -737,6 +737,20 @@ const B = {
    * light.
    */
   /*
+   * A Game's first food lying ripe on a bed of `look.soil` inside a rim of `look.top`, on every
+   * other cell, so a new Player who enters a village finds a meal beside it.
+   */
+  foodPatch: (look, w = 7, d = 5) => {
+    const g = new Grid();
+    for (let x = 0; x < w; x++)
+      for (let z = 0; z < d; z++) {
+        const rim = x === 0 || z === 0 || x === w - 1 || z === d - 1;
+        g.put(x, 0, z, M(rim ? look.top : look.soil));
+        if (!rim && (x + z) % 2 === 1) g.put(x, 1, z, M(look.food));
+      }
+    return g.done();
+  },
+  /*
    * A rounded pond in a Game's `look` (`rim`, `bed`): the World's water level with the ground, a
    * metre deeper in its middle, on a bed with a rim round it; the ground outside the oval is kept.
    * `pads` floats `look.pad` on one in `pads` of its cells, or stands `look.reed` on its rim, none
@@ -1313,6 +1327,48 @@ const WATER = (game) => {
     ),
   ];
 };
+/* Each Game's first food and the ground its patch lies on. */
+const FOOD_LOOK = {
+  Terra: {
+    name: "Melon patch",
+    food: "terra:melon",
+    top: "terra:grass",
+    soil: "terra:dirt",
+  },
+  Meadow: {
+    name: "Pumpkin patch",
+    food: "meadow:pumpkin",
+    top: "strata:turf",
+    soil: "strata:soil",
+  },
+  Lumen: {
+    name: "Glowberry patch",
+    food: "lumen:glowberry",
+    top: "strata:turf",
+    soil: "strata:soil",
+  },
+  Tidewater: {
+    name: "Coconut heap",
+    food: "tidewater:coconut",
+    top: "strata:turf",
+    soil: "strata:sand",
+  },
+  Ember: {
+    name: "Pepper bed",
+    food: "ember:pepper",
+    top: "hearth:ash",
+    soil: "strata:soil",
+  },
+};
+const FOOD = (game) =>
+  T(
+    game,
+    "food-patch",
+    FOOD_LOOK[game].name,
+    "Ripe food by a village",
+    "field",
+    () => B.foodPatch(FOOD_LOOK[game]),
+  );
 const SET = (game, names) =>
   [
     ["cottage", "One room, steep roof, chimney", "home"],
@@ -1458,6 +1514,7 @@ const GAME_TEMPLATES = {
       () => B.mushroomShed(),
     ),
     ...WATER("Terra"),
+    FOOD("Terra"),
     T(
       "Terra",
       "orchard",
@@ -1543,6 +1600,7 @@ const GAME_TEMPLATES = {
       "ropeBridge",
     ),
     ...WATER("Tidewater"),
+    FOOD("Tidewater"),
   ],
   Ember: [
     ...SET("Ember", [
@@ -1583,6 +1641,7 @@ const GAME_TEMPLATES = {
       B.mound(6, 3, 2),
     ),
     ...WATER("Ember"),
+    FOOD("Ember"),
   ],
   Lumen: [
     ...SET("Lumen", [
@@ -1633,6 +1692,7 @@ const GAME_TEMPLATES = {
       () => B.dome(4, true),
     ),
     ...WATER("Lumen"),
+    FOOD("Lumen"),
   ],
   Meadow: [
     ...SET("Meadow", [
@@ -1668,6 +1728,7 @@ const GAME_TEMPLATES = {
       B.ring(3, 8, 1),
     ),
     ...WATER("Meadow"),
+    FOOD("Meadow"),
   ],
 };
 const TEMPLATES = Object.fromEntries(

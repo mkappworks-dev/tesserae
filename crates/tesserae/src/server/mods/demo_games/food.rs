@@ -452,14 +452,9 @@ fn the_demo_games_textures_are_unchanged() {
     }
 }
 
-/// Version 3's short walk: a new Player enters a village, and its disc, paths and outskirts, which
-/// the wild's scatter keeps off, stand between the spawn and the nearest food. Meadow's pumpkins
-/// lie up to 164 m off at the seeds below.
-const VILLAGE_WALK_M: f32 = 176.0;
-
-/// Version 3, a new World's: a new Player enters a village, so its food and the oaks for a first
-/// Workbench, Chest and Door are a short walk from there. Rows within 48 m of the spawn's height,
-/// which a short walk keeps to.
+/// Version 3, a new World's: a new Player enters a village, so its food, in a patch by it, and the
+/// oaks for a first Workbench, Chest and Door are a short walk from there. Rows within 48 m of the
+/// spawn's height, which a short walk keeps to.
 #[test]
 fn a_new_version_3_world_has_food_and_wood_within_a_short_walk_of_the_spawn() {
     crate::server::in_parallel(&FOODS, |food| {
@@ -478,18 +473,17 @@ fn a_new_version_3_world_has_food_and_wood_within_a_short_walk_of_the_spawn() {
             let eye = crate::server::spawn_eye(&generator);
             let around = ([eye.x, eye.z], (eye.y - 48.0, eye.y + 48.0));
             assert!(
-                !distances_around_m(&generator, id, VILLAGE_WALK_M, around).is_empty(),
-                "{} seed {seed}: no {} within {VILLAGE_WALK_M} m of the spawn",
+                !distances_around_m(&generator, id, SHORT_WALK_M, around).is_empty(),
+                "{} seed {seed}: no {} within {SHORT_WALK_M} m of the spawn",
                 food.game,
                 food.item
             );
             if food.game == "terra" {
-                let wood = distances_around_m(&generator, trunk, VILLAGE_WALK_M, around).len()
-                    as u32
+                let wood = distances_around_m(&generator, trunk, SHORT_WALK_M, around).len() as u32
                     * per_trunk;
                 assert!(
                     wood >= WOOD_FOR_A_HOME,
-                    "seed {seed}: {wood} Wood within {VILLAGE_WALK_M} m of the spawn"
+                    "seed {seed}: {wood} Wood within {SHORT_WALK_M} m of the spawn"
                 );
             }
         }

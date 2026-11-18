@@ -4675,6 +4675,64 @@
    ]
   },
   {
+   "name": "terra:food_patch",
+   "label": "Melon patch",
+   "kind": "field",
+   "size": [
+    7,
+    2,
+    5
+   ],
+   "ground_layer": 0,
+   "foundation": "terra:ashlar",
+   "level_tolerance_m": null,
+   "spans": false,
+   "palette": [
+    {
+     "symbol": ".",
+     "cell": "keep"
+    },
+    {
+     "symbol": ":",
+     "cell": "air"
+    },
+    {
+     "symbol": "A",
+     "material": "terra:grass",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "B",
+     "material": "terra:dirt",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "C",
+     "material": "terra:melon",
+     "shape": "core:cube",
+     "orientation": 0
+    }
+   ],
+   "layers": [
+    [
+     "AAAAAAA",
+     "ABBBBBA",
+     "ABBBBBA",
+     "ABBBBBA",
+     "AAAAAAA"
+    ],
+    [
+     ".......",
+     "..C.C..",
+     ".C.C.C.",
+     "..C.C..",
+     "......."
+    ]
+   ]
+  },
+  {
    "name": "terra:orchard",
    "label": "Orchard",
    "kind": "field",

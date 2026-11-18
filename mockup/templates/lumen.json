@@ -4014,6 +4014,64 @@
      "........."
     ]
    ]
+  },
+  {
+   "name": "lumen:food_patch",
+   "label": "Glowberry patch",
+   "kind": "field",
+   "size": [
+    7,
+    2,
+    5
+   ],
+   "ground_layer": 0,
+   "foundation": "lumen:moonstone",
+   "level_tolerance_m": null,
+   "spans": false,
+   "palette": [
+    {
+     "symbol": ".",
+     "cell": "keep"
+    },
+    {
+     "symbol": ":",
+     "cell": "air"
+    },
+    {
+     "symbol": "A",
+     "material": "strata:turf",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "B",
+     "material": "strata:soil",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "C",
+     "material": "lumen:glowberry",
+     "shape": "core:cube",
+     "orientation": 0
+    }
+   ],
+   "layers": [
+    [
+     "AAAAAAA",
+     "ABBBBBA",
+     "ABBBBBA",
+     "ABBBBBA",
+     "AAAAAAA"
+    ],
+    [
+     ".......",
+     "..C.C..",
+     ".C.C.C.",
+     "..C.C..",
+     "......."
+    ]
+   ]
   }
  ]
 }

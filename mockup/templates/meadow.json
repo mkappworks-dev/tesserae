@@ -3894,6 +3894,64 @@
      "........."
     ]
    ]
+  },
+  {
+   "name": "meadow:food_patch",
+   "label": "Pumpkin patch",
+   "kind": "field",
+   "size": [
+    7,
+    2,
+    5
+   ],
+   "ground_layer": 0,
+   "foundation": "meadow:river_stone",
+   "level_tolerance_m": null,
+   "spans": false,
+   "palette": [
+    {
+     "symbol": ".",
+     "cell": "keep"
+    },
+    {
+     "symbol": ":",
+     "cell": "air"
+    },
+    {
+     "symbol": "A",
+     "material": "strata:turf",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "B",
+     "material": "strata:soil",
+     "shape": "core:cube",
+     "orientation": 0
+    },
+    {
+     "symbol": "C",
+     "material": "meadow:pumpkin",
+     "shape": "core:cube",
+     "orientation": 0
+    }
+   ],
+   "layers": [
+    [
+     "AAAAAAA",
+     "ABBBBBA",
+     "ABBBBBA",
+     "ABBBBBA",
+     "AAAAAAA"
+    ],
+    [
+     ".......",
+     "..C.C..",
+     ".C.C.C.",
+     "..C.C..",
+     "......."
+    ]
+   ]
   }
  ]
 }

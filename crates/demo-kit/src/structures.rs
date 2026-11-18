@@ -74,6 +74,11 @@ pub struct Village {
     pub water: (f32, (u8, u8)),
 }
 
+/// One or two patches of the Game's first food by every copy, after its water, so a new Player
+/// who enters a village finds a meal beside it.
+pub const FOOD: (u8, u8) = (1, 2);
+pub const FOOD_PATCH: &str = "food_patch";
+
 /// The ponds, brook and waterfall a Settlement lays among its outskirts, by unqualified name.
 pub const WATER: [Plot; 4] = [
     plot("pond", 3.0, 0, 2),
@@ -135,6 +140,18 @@ macro_rules! structures {
                             count_min: kind.water.1.0,
                             count_max: kind.water.1.1,
                             chance: Some(kind.water.0),
+                        },
+                        crate::tesserae::mods::content::SettlementOutskirts {
+                            templates: vec![SettlementPlot {
+                                template: kind.qualified($crate::structures::FOOD_PATCH),
+                                weight: 1.0,
+                                min: 0,
+                                max: $crate::structures::FOOD.1,
+                                loot: None,
+                            }],
+                            count_min: $crate::structures::FOOD.0,
+                            count_max: $crate::structures::FOOD.1,
+                            chance: Some(1.0),
                         },
                     ]),
                 })
