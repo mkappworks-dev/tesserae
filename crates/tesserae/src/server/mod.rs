@@ -563,7 +563,7 @@ mod tests {
                     relief_m: 48.0,
                     feature_size_m: 16.0,
                     biomes: BiomeTable::new(std::slice::from_ref(&field)).unwrap(),
-                    // Version 3 spawns seed 50 inside something at the origin, 139 m up.
+                    generator: 3,
                     ..tesserae_core::testgen::world_params()
                 },
             );

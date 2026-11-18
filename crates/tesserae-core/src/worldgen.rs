@@ -1267,6 +1267,72 @@ impl Worldgen {
         stack
     }
 
+    /// What the overhang density keeps off around the Chunk column `[cx, cz]`: Structures stand
+    /// on the heightfield, and the density would bury a wall or lean over a roof.
+    fn overhang_kept_off(&self, [cx, cz]: [i32; 2]) -> Vec<Footprint> {
+        let clear = (OVERHANG_CLEAR_M / self.voxel_size).ceil() as i32;
+        let claims = self.claims_near(self.chunk_columns([cx, cz], clear));
+        self.footprints(&claims)
+            .into_iter()
+            .map(|f| f.widened(clear))
+            .collect()
+    }
+
+    /// How far the density pushes column `[x, z]` of the Chunk column `[cx, cz]`: nowhere on
+    /// `kept_off`, and never down to water here or beside, where it would open a hollow that
+    /// water would stand or pour into.
+    fn overhang_amp_at(
+        &self,
+        s: &Stack,
+        kept_off: &[Footprint],
+        [cx, cz]: [i32; 2],
+        [x, z]: [i32; 2],
+    ) -> f32 {
+        let size = CHUNK_SIZE as i32;
+        if covers(kept_off, cx * size + x, cz * size + z) {
+            return 0.0;
+        }
+        let wettest_m = CARDINALS
+            .iter()
+            .map(|&(dx, dz, _)| surface_index(x + dx, z + dz))
+            .filter(|&i| s.water_level_m[i].is_some_and(|l| l > s.surface_m[i]))
+            .chain([surface_index(x, z)])
+            .filter_map(|i| s.water_level_m[i])
+            .fold(f32::MIN, f32::max);
+        s.overhang_m[z as usize * CHUNK_SIZE + x as usize]
+            .min((s.surface_m[surface_index(x, z)] - wettest_m).max(0.0))
+    }
+
+    /// The highest Voxel the cube pass fills in global column `(gx, gz)`, the overhang density's
+    /// push above the surface included. Caves only take away, so they are not asked.
+    fn ground_top(&self, gx: i32, gz: i32) -> i32 {
+        let (x_m, z_m) = (self.global_m(gx), self.global_m(gz));
+        let Some(terrain) = self.terrain.as_ref().filter(|t| t.overhang_max_m() > 0.0) else {
+            return top_index(self.surface_height_m(x_m, z_m), 0.0, self.voxel_size);
+        };
+        let size = CHUNK_SIZE as i32;
+        let (cx, cz) = (gx.div_euclid(size), gz.div_euclid(size));
+        let (x, z) = (gx.rem_euclid(size), gz.rem_euclid(size));
+        let stack = self.stack(cx, cz);
+        let surface_m = stack.surface_m[surface_index(x, z)];
+        let top = top_index(surface_m, 0.0, self.voxel_size);
+        let amp_m =
+            self.overhang_amp_at(&stack, &self.overhang_kept_off([cx, cz]), [cx, cz], [x, z]);
+        if amp_m <= 0.0 {
+            return top;
+        }
+        // The Chunk's own test, Voxel by Voxel down from the highest the push can reach.
+        (top + 1..=top_index(surface_m + amp_m, 0.0, self.voxel_size))
+            .rev()
+            .find(|&y| {
+                let y_m = self.global_m(y);
+                let base_m = surface_m - y_m;
+                base_m.abs() <= amp_m
+                    && base_m + terrain.overhang_push_m(x_m, y_m, z_m, amp_m) >= 0.0
+            })
+            .unwrap_or(top)
+    }
+
     /// Version 3's ground and water level over a column before either is reconciled with its
     /// neighbours'.
     fn raw_column(&self, x_m: f32, z_m: f32) -> (f32, Option<f32>) {
@@ -1530,7 +1596,7 @@ impl Worldgen {
         for z in zs {
             for x in xs.clone() {
                 let (x_m, z_m) = (self.axis_m(0, x), self.axis_m(0, z));
-                let top = top_index(self.surface_height_m(x_m, z_m), 0.0, size);
+                let top = self.ground_top(x, z);
                 let featured = self.scatter.is_some_and(|scatter| {
                     let draw = SurfaceScatter::draw(self.seed, x_m, z_m);
                     draw < scatter.most
@@ -1732,14 +1798,7 @@ impl Worldgen {
             .terrain
             .as_ref()
             .filter(|t| t.overhang_max_m() > 0.0 && floor_m <= top_m)
-            .map(|_| {
-                let clear = (OVERHANG_CLEAR_M / self.voxel_size).ceil() as i32;
-                let claims = self.claims_near(self.chunk_columns([cx, cz], clear));
-                self.footprints(&claims)
-                    .into_iter()
-                    .map(|f| f.widened(clear))
-                    .collect::<Vec<_>>()
-            })
+            .map(|_| self.overhang_kept_off([cx, cz]))
             .unwrap_or_default();
         let cavern_blocks = self.caverns.as_ref().map(|c| {
             let mut blocks = [false; BLOCKS * BLOCKS * BLOCKS];
@@ -1815,23 +1874,7 @@ impl Worldgen {
                 // The density never reaches down to water here or beside, so it opens no hollow
                 // that water would stand or pour into.
                 let amp_m = stack.as_ref().map_or(0.0, |s| {
-                    let (x, z) = (x as i32, z as i32);
-                    let wettest_m = CARDINALS
-                        .iter()
-                        .map(|&(dx, dz, _)| surface_index(x + dx, z + dz))
-                        .filter(|&i| s.water_level_m[i].is_some_and(|l| l > s.surface_m[i]))
-                        .chain([surface_index(x, z)])
-                        .filter_map(|i| s.water_level_m[i])
-                        .fold(f32::MIN, f32::max);
-                    if covers(
-                        &built,
-                        cx * CHUNK_SIZE as i32 + x,
-                        cz * CHUNK_SIZE as i32 + z,
-                    ) {
-                        return 0.0;
-                    }
-                    s.overhang_m[z as usize * CHUNK_SIZE + x as usize]
-                        .min((surface_m - wettest_m).max(0.0))
+                    self.overhang_amp_at(s, &built, [cx, cz], [x as i32, z as i32])
                 });
                 let push_m = |y_m: f32| {
                     self.terrain

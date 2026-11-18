@@ -296,6 +296,42 @@ fn rugged_ground_has_overhangs_and_arches() {
 }
 
 #[test]
+fn a_body_clears_the_overhang_density_above_the_base_surface() {
+    let g = Worldgen::new(SEED, 1.0, dry_v3());
+    let mut high: Vec<(f32, (i32, i32))> = (-80..80)
+        .flat_map(|j| (-80..80).map(move |i| (i * 61, j * 61)))
+        .filter(|&(x, z)| g.landform_fields(x as f32, z as f32).unwrap().ruggedness > 0.6)
+        .map(|(x, z)| (g.surface_height_m(x as f32, z as f32), (x, z)))
+        .collect();
+    high.sort_by(|a, b| b.0.total_cmp(&a.0));
+    let mut pushed = 0;
+    for &(h, (x, z)) in high.iter().take(60) {
+        let top = (h as i32 - 14..h as i32 + 14)
+            .rev()
+            .find(|&y| {
+                !g.chunk(x.div_euclid(32), y.div_euclid(32), z.div_euclid(32))
+                    .get(
+                        x.rem_euclid(32) as usize,
+                        y.rem_euclid(32) as usize,
+                        z.rem_euclid(32) as usize,
+                    )
+                    .is_air()
+            })
+            .expect("ground in the band");
+        pushed += usize::from(top as f32 > h);
+        let clear_m = g.clear_height_m(
+            [x as f32 + 0.2, z as f32 + 0.2],
+            [x as f32 + 0.8, z as f32 + 0.8],
+        );
+        assert!(
+            clear_m >= (top + 1) as f32,
+            "{x},{z}: clear at {clear_m} m under ground to {top} over a base surface at {h}"
+        );
+    }
+    assert!(pushed > 0, "no column was pushed above its base surface");
+}
+
+#[test]
 fn turning_overhangs_off_leaves_a_heightfield_everywhere() {
     let params = WorldgenParams {
         landforms: LandformParams {
