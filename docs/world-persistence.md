@@ -71,12 +71,17 @@ Changed Chunks are complete level-0 records, including Air. Traversal is x/y/z,
 z fastest. Format 2 names each distinct cell of a Chunk once in a palette and
 stores one palette index a Voxel, as a low-byte plane then a high-byte plane,
 deflated and base64: a few kilobytes a Chunk where format 1's run-length
-records, which spelled a cell's names in every run, took a few hundred. Format 1
-commits still open. Material and Shape references are names, including packed
-lake sources, Overlay fluid, pending flow and fire residue. Runtime ids are
-resolved against a supplied mapping; a missing name fails. Fluid records
-preserve source identity and each Void's surface, reach and descent. Burning
-records preserve fuel. Generation records resolve named ground and lake content.
+records, which spelled a cell's names in every run, took a few hundred. Format 3
+stores each Chunk version once, as a binary record in a pack (below), with the
+same palette and planes, the high plane only past 256 cells and neither for a
+single cell, deflated at the default level: about half of format 2's fast
+deflate on a flown World's Chunks, and 8% smaller than indices bit-packed at the
+fewest bits. Format 1 and 2 commits still open. Material and Shape references
+are names, including packed lake sources, Overlay fluid, pending flow and fire
+residue. Runtime ids are resolved against a supplied mapping; a missing name
+fails. Fluid records preserve source identity and each Void's surface, reach and
+descent. Burning records preserve fuel. Generation records resolve named ground
+and lake content.
 
 A World also snapshots its own Climate, Biome table and ores in its generation
 parameters, so a Game that gains a Biome later cannot reshape it. The three
@@ -179,23 +184,71 @@ must be rebuilt. A saved revision is data identity, not a reusable Lifetime.
 
 ## File protocol and recovery
 
-A World directory has immutable `00000000000000000001.commit` files and one
-OS-locked `writer.lock` file. A commit contains an eight-byte `TESSAVE1` magic,
-32-byte SHA-256 of the remaining bytes, and UTF-8 JSON. JSON records reject
-unknown fields. Sequence in the filename must agree with the body. Format 1 has
-no implicit migrations. A commit's generator version is 1 or 2 and any other is
-refused: a World keeps the version it was created with, new Worlds are stamped
-2, and a version 1 World keeps its version 1 terrain. The current prototype caps
-a whole commit at 256 MiB; exceeding it reports an error, not successful saving.
+A World directory has immutable `00000000000000000001.commit` files, immutable
+`00000000000000000001.pack` files and one OS-locked `writer.lock` file. A commit
+contains an eight-byte `TESSAVE1` magic, 32-byte SHA-256 of the remaining bytes,
+and UTF-8 JSON. JSON records reject unknown fields. Sequence in the filename
+must agree with the body. There are no implicit migrations. A commit's generator
+version is 1 or 2 and any other is refused: a World keeps the version it was
+created with, new Worlds are stamped 2, and a version 1 World keeps its version
+1 terrain. The current prototype caps a whole commit at 256 MiB; exceeding it
+reports an error, not successful saving.
+
+A format 3 commit is a manifest. It holds everything earlier formats did, except
+that each Chunk is its coordinate, revision and a record reference, and each
+paused simulation share is its home and a record reference. A reference is a
+pack sequence, an offset, a length and the SHA-256 of the record's bytes, as a
+JSON array. A pack is a `TESPACK1` magic and then records back to back; the
+records a commit is the first to need go in the pack of its own sequence, and a
+commit with none writes no pack. A record is a kind and a version, then binary
+content whose integers are LEB128, signed ones zigzagged, and whose Material and
+Shape names go once each through a record-local name table, so a record is
+self-contained and compaction copies its bytes. A Chunk record is the length of
+a deflated part holding the table, coordinate, revision and palette, that part,
+then the deflated index planes as capture made them. A share record is one
+deflated part: the table, then the share's timers, wakes, rescans and landing
+cursors. A truncated or overlong record, or one of another kind or version, is
+corrupt. A share's other fields are the active simulation's, which resuming
+reads nothing of but the fairness turn, and only when the active one has none.
+The manifest keeps the commit's shape so that an engine knowing only formats 1
+and 2 refuses it as an unsupported format; an unreadable file would be skipped
+as corrupt and an older commit opened and written over. Opening reads, verifies
+and restores every record a manifest names; a missing pack, or a record that is
+short or fails its hash, makes the commit corrupt.
 
 Writing uses a unique create-new `.pending` file, writes header/checksum/body,
 syncs the complete file, renames it to its final sequence, then syncs the parent
-directory on macOS/Linux. Windows uses a write-through `MoveFileExW` rename
-instead of POSIX directory sync. Only completion of the platform's entire
-protocol may acknowledge a snapshot. A failure after rename can leave a complete
-visible commit; the failed sequence is reserved and a retry uses a newer
-sequence. Previous commits are retained. There is no garbage collection yet;
-storage use grows with successful commits.
+directory on macOS/Linux. A commit with new records first does the same for its
+pack, and one directory sync covers both renames; a failure before the
+manifest's rename removes the pack again. Windows uses a write-through
+`MoveFileExW` rename instead of POSIX directory sync. Only completion of the
+platform's entire protocol may acknowledge a snapshot. A failure after rename
+can leave a complete visible commit; the failed sequence is reserved and a retry
+uses a newer sequence.
+
+A World keeps its three newest commits (`KEPT_COMMITS`). Once a writer has
+completed three since it acquired the lock, each later completion deletes every
+commit older than the third newest it completed; before that it deletes none, so
+a reopened World keeps the commits it opened from until newer ones replace them.
+A corrupt or reserved sequence sits below the new ones and ages out the same
+way. Deletion follows the completed protocol, so the newest commit is durable
+first, and its order does not matter: recovery falls back newest first. A failed
+delete is a warning, never a save failure, and the next completion retries it.
+Acquiring the lock removes leftover `.pending` files and reserves the sequence
+of every pack, so an orphan pack's sequence is never reused.
+
+A writer remembers the records the newest commit it opened or wrote names. A
+Chunk whose coordinate and revision it already stores, and a paused share that
+is the same shared handle, are named again without being captured, encoded or
+validated; only new records are validated. The first write after opening a
+format 1 or 2 commit therefore stores every Chunk, and the first after any open
+stores every paused share again. After retention, if every commit on disk
+parses, each pack none of them names is deleted; a commit that does not parse
+may name any pack, so its presence skips the sweep. A missing file is success,
+so a crash only leaves an orphan for the next sweep. When a commit would name
+less than half of an older pack's record bytes, it copies those records byte for
+byte into its own pack and names them there, so the old pack ages out with the
+commits that name it and the disk holds about twice the live records at most.
 
 Recovery is read-only, newest first. Pending files are ignored. Incomplete,
 checksum-invalid or semantically corrupt commits can fall back to an older
@@ -210,17 +263,25 @@ remains to avoid unlink/recreate races. A second process cannot acquire a writer
 while the first still holds it. Do not open an incompatible World for writing,
 or interpret a failed load as a new World.
 
-Tests cover interrupted/truncated files, checksum corruption, write/file-sync/
-rename/directory-sync error injection, recovery, exclusive writers, reserved
-sequences and stale completions. They verify the chosen filesystem protocol on
-the test host. A subprocess test is forcibly killed after syncing a pending file
-and before rename, then successfully recovers the previous commit and acquires
-the released writer lock. These tests do **not** prove survival of power loss,
-storage-controller failure or arbitrary filesystem behavior. Windows is not
-runtime-tested on this Mac. Its write-through rename follows
+Tests cover interrupted/truncated files, checksum corruption, damaged and
+missing records, write/file-sync/rename/directory-sync error injection for the
+pack and the manifest, recovery, exclusive writers, reserved sequences, garbage
+collection, compaction and stale completions. They verify the chosen filesystem
+protocol on the test host. A subprocess test is forcibly killed after renaming a
+pack and before renaming its manifest, then recovers the previous commit,
+acquires the released writer lock and sweeps the orphan pack. These tests do
+**not** prove survival of power loss, storage-controller failure or arbitrary
+filesystem behavior. Windows is not runtime-tested on this Mac. Its
+write-through rename follows
 [Microsoft's API contract](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-movefileexw);
 no POSIX directory-sync guarantee is claimed there. No broad crash-safety
 guarantee is made.
+
+`tesserae save dump <world-dir> [--sequence N]` prints the newest commit, or the
+one numbered N, as JSON on stdout: its fields, each Chunk's palette by name and
+indices as runs of `[count, index]`, and each paused share, each with the record
+reference it came from in format 3. It reads any format, takes no lock and
+changes no file.
 
 ## Server snapshots and streaming
 
@@ -242,19 +303,24 @@ resumes play; failed writes never authorize eviction or report success.
 Autosave requests run every 30 seconds of real elapsed time, independent of
 clamped virtual time and logical simulation progress. A changed or simulated
 Chunk leaving the streaming radius first requests a checkpoint and remains held
-until its current state commits. Its simulation pauses at the boundary while
-that write runs. Failures retain it. Returning before eviction cancels the
-request and resumes its remaining logical delays. Evicted and reopened Chunks
-resume on admission after light is rebuilt; boundary readers are rescanned
-through the existing bounded scheduler. No wall-clock catch-up is performed.
-Paused deadlines stay relative to their own pause, even while other Chunks run.
+until its current state commits. A Chunk never changed whose only simulation
+work is a rescan is not held: it leaves as dry terrain does, its rescan dropped,
+since admission queues the rescan again when it returns. Its simulation pauses
+at the boundary while that write runs. Failures retain it. Returning before
+eviction cancels the request and resumes its remaining logical delays. Evicted
+and reopened Chunks resume on admission after light is rebuilt; boundary readers
+are rescanned through the existing bounded scheduler. No wall-clock catch-up is
+performed. Paused deadlines stay relative to their own pause, even while other
+Chunks run.
 
-A snapshot stores all changed full-detail Chunks, plus active and paused
-simulation checkpoints. Dirty detection compares captured revisions and the
-current Server Player, including simulation progress between visible changes.
-The initial new-World commit may precede Game Commands that have not yet
-applied; only changes actually landed by the Server are authoritative save
-state. Pending Commands and guest process memory are not restored.
+A snapshot names all changed full-detail Chunks, plus active and paused
+simulation checkpoints, and captures and encodes only the Chunk versions and
+shares its writer does not already store. Dirty detection compares captured
+revisions and the current Server Player, including simulation progress between
+visible changes. The initial new-World commit may precede Game Commands that
+have not yet applied; only changes actually landed by the Server are
+authoritative save state. Pending Commands and guest process memory are not
+restored.
 
 Saved changes remain authoritative while evicted. Level-0 admission restores
 these before generation can replace them. Coarse Jobs recursively derive
@@ -286,12 +352,13 @@ movement/view fields require versioned extensions; this PR invents no modes.
 
 ## Limits and validation
 
-The full commit currently has a 256 MiB encoded size limit. Previous complete
-commits are retained without garbage collection. Restored changed Chunks remain
-in memory as shared handles when unloaded. Large, long-lived Worlds therefore
-need later compaction/indexing work; a limit or storage failure is a visible
-error and retains unsaved state, never a successful save report. Checkpoints
-bound simulation work by the existing count limits, not a universal time bound.
+A manifest and a pack each have a 256 MiB encoded size limit, and a record 64
+MiB. Three complete commits are kept, and the packs they name. A manifest still
+names every changed Chunk, so its size grows with them, at tens of bytes a
+Chunk. Restored changed Chunks remain in memory as shared handles when unloaded.
+A limit or storage failure is a visible error and retains unsaved state, never a
+successful save report. Checkpoints bound simulation work by the existing count
+limits, not a universal time bound.
 
 Library and headless Server regressions cover content remapping, independent
 same-seed identities, exact timers/Agenda cursors, eviction/return/restart,

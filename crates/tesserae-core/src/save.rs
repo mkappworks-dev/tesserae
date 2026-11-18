@@ -1,32 +1,38 @@
 //! Portable authoritative World records and immutable, checksummed commits.
 //!
 //! Runtime ids never cross this boundary. A commit is visible only after its
-//! complete file has been synced and renamed; previous commits are retained.
+//! complete file has been synced and renamed; older ones go once newer ones replace them.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, Read, Write};
+use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use base64::{Engine, engine::general_purpose::STANDARD};
-use flate2::Compression;
 use flate2::read::DeflateDecoder;
-use flate2::write::DeflateEncoder;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::{CHUNK_SIZE, CHUNK_VOLUME, Chunk, ChunkOverlay, Fluid, Level, Overlay, Voxel};
 
-/// What a commit is written in. 2 packs each Chunk's cells; a format 1 commit still opens.
-pub const FORMAT_VERSION: u32 = 2;
-const SUPPORTED_FORMATS: [u32; 2] = [1, 2];
+/// What a commit is written in. 3 is a manifest naming each Chunk version and paused share by
+/// its record in a pack, so each is written once; 2 packed each Chunk's cells and 1 spelled them
+/// out, and both still open.
+pub const FORMAT_VERSION: u32 = 3;
+const SUPPORTED_FORMATS: [u32; 3] = [1, 2, 3];
 /// What a new World is created under.
 pub const GENERATOR_VERSION: u32 = 3;
 /// Every version that ever shipped stays until a migration exists: a World keeps the one it was
 /// created with.
 pub const SUPPORTED_GENERATORS: [u32; 3] = [1, 2, 3];
 const MAGIC: &[u8; 8] = b"TESSAVE1";
+/// How many Commits a World keeps: recovery falls back through the older ones.
+pub const KEPT_COMMITS: usize = 3;
 const MAX_COMMIT_BYTES: u64 = 256 * 1024 * 1024;
+const PACK_MAGIC: &[u8; 8] = b"TESPACK1";
+/// A record past this, stored or inflated, is corrupt.
+const MAX_RECORD_BYTES: u64 = 64 * 1024 * 1024;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -240,22 +246,25 @@ pub struct Cell {
 
 /// Full authoritative Chunk, including Air, in x/y/z order, z fastest.
 ///
-/// Format 2 names each distinct cell once in `palette`; `cells` is one palette index a Voxel, as
-/// a plane of low bytes then a plane of high bytes, deflated and base64. A Chunk is mostly a few
-/// long stretches of one cell, so this is a few kilobytes where format 1's `runs`, each spelling
-/// its Material's name, made a few hundred.
+/// Formats 2 and 3 name each distinct cell once in `palette` and store one palette index a Voxel.
+/// Format 2's `cells` are a plane of low bytes then a plane of high bytes, deflated and base64;
+/// format 3's `packed` are the same planes, the high one only for a palette past 256 and neither
+/// for a palette of one, deflated at the default level; they travel only in a pack record. A Chunk is mostly a few long stretches of one cell, so either is
+/// a few kilobytes where format 1's `runs`, each spelling its Material's name, made a few hundred.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SavedChunk {
     pub coord: [i32; 3],
     pub revision: u64,
-    /// Format 1's cells; empty in format 2.
+    /// Format 1's cells; empty in formats 2 and 3.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub runs: Vec<(u32, Cell)>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub palette: Vec<Cell>,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub cells: String,
+    #[serde(skip)]
+    packed: Vec<u8>,
 }
 
 /// More distinct cells than this in one Chunk is corrupt: a palette index is a `u16`.
@@ -271,10 +280,8 @@ impl SavedChunk {
     ) -> Result<Self, Error> {
         mapping.validate()?;
         let mut palette: Vec<Cell> = Vec::new();
-        let mut index: std::collections::HashMap<(Voxel, Overlay), u16> =
-            std::collections::HashMap::new();
-        let mut raw = vec![0u8; CHUNK_VOLUME * 2];
-        let mut i = 0;
+        let mut index: HashMap<(Voxel, Overlay), u16> = HashMap::new();
+        let mut indices = Vec::with_capacity(CHUNK_VOLUME);
         for x in 0..CHUNK_SIZE {
             for y in 0..CHUNK_SIZE {
                 for z in 0..CHUNK_SIZE {
@@ -292,30 +299,36 @@ impl SavedChunk {
                             at
                         }
                     };
-                    let [lo, hi] = at.to_le_bytes();
-                    raw[i] = lo;
-                    raw[CHUNK_VOLUME + i] = hi;
-                    i += 1;
+                    indices.push(at);
                 }
             }
         }
-        let mut deflater = DeflateEncoder::new(Vec::new(), Compression::fast());
-        deflater.write_all(&raw)?;
         Ok(Self {
             coord,
             revision,
             runs: Vec::new(),
+            packed: record::pack_indices(&indices, palette.len())?,
             palette,
-            cells: STANDARD.encode(deflater.finish()?),
+            cells: String::new(),
         })
     }
 
-    /// Every Voxel's index into the cells returned beside them, from either format. A format 1
+    /// The palette and the packed indices a record holds, packing an older format's cells.
+    fn packed(&self) -> Result<(Vec<Cell>, std::borrow::Cow<'_, [u8]>), Error> {
+        if !self.packed.is_empty() {
+            return Ok((self.palette.clone(), self.packed.as_slice().into()));
+        }
+        let (indices, cells) = self.indices()?;
+        let packed = record::pack_indices(&indices, cells.len())?;
+        Ok((cells.into_iter().cloned().collect(), packed.into()))
+    }
+
+    /// Every Voxel's index into the cells returned beside them, from any format. A format 1
     /// run is its own cell; a Chunk holds at most one run a Voxel, so its index fits a `u16`.
     fn indices(&self) -> Result<(Vec<u16>, Vec<&Cell>), Error> {
         let corrupt = |why: &str| Error::Corrupt(format!("Chunk cells {why}"));
         if !self.runs.is_empty() {
-            if !self.palette.is_empty() || !self.cells.is_empty() {
+            if !self.palette.is_empty() || !self.cells.is_empty() || !self.packed.is_empty() {
                 return Err(corrupt("are in both formats"));
             }
             let count: u64 = self.runs.iter().map(|(n, _)| u64::from(*n)).sum();
@@ -332,6 +345,16 @@ impl SavedChunk {
         }
         if self.palette.is_empty() || self.palette.len() > MAX_PALETTE {
             return Err(corrupt("have no palette or too large a one"));
+        }
+        if !self.packed.is_empty() {
+            if !self.cells.is_empty() {
+                return Err(corrupt("are in both formats"));
+            }
+            let out = record::unpack_indices(&self.packed, self.palette.len())?;
+            if out.iter().any(|&k| usize::from(k) >= self.palette.len()) {
+                return Err(corrupt("name a cell past the palette"));
+            }
+            return Ok((out, self.palette.iter().collect()));
         }
         let packed = STANDARD
             .decode(&self.cells)
@@ -2136,9 +2159,11 @@ fn restored_ore(
     })
 }
 
+/// `C` and `P` are its Chunks and paused shares: whole in memory and in formats 1 and 2, record
+/// references in a format 3 manifest, and new or already stored in a [`Draft`].
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct Commit {
+pub struct Commit<C = SavedChunk, P = ([i32; 3], Simulation)> {
     pub format: u32,
     pub generator: u32,
     pub world: WorldId,
@@ -2148,9 +2173,9 @@ pub struct Commit {
     pub parameters: Generation,
     pub content: Content,
     pub player: Player,
-    pub chunks: Vec<SavedChunk>,
+    pub chunks: Vec<C>,
     pub simulation: Simulation,
-    pub paused: Vec<([i32; 3], Simulation)>,
+    pub paused: Vec<P>,
     /// Absent in commits written before dropped items: opens with none.
     #[serde(default)]
     pub entities: entities::SavedEntities,
@@ -2172,8 +2197,52 @@ pub struct Commit {
     pub game_mode: GameMode,
 }
 
-impl Commit {
-    pub fn compatible(&self, installed: &Content) -> Result<(), Error> {
+impl<C, P> Commit<C, P> {
+    /// This Commit's own fields, ready for Chunks and paused shares of another kind, and its own.
+    fn split<D, Q>(self) -> (Commit<D, Q>, Vec<C>, Vec<P>) {
+        let Commit {
+            format,
+            generator,
+            world,
+            sequence,
+            seed,
+            voxel_size_m,
+            parameters,
+            content,
+            player,
+            chunks,
+            simulation,
+            paused,
+            entities,
+            containers,
+            looted,
+            map,
+            game_mode,
+        } = self;
+        let head = Commit {
+            format,
+            generator,
+            world,
+            sequence,
+            seed,
+            voxel_size_m,
+            parameters,
+            content,
+            player,
+            chunks: Vec::new(),
+            simulation,
+            paused: Vec::new(),
+            entities,
+            containers,
+            looted,
+            map,
+            game_mode,
+        };
+        (head, chunks, paused)
+    }
+
+    /// Everything but the Chunks and paused shares, and the mapping their names resolve through.
+    fn compatible_head(&self, installed: &Content) -> Result<Mapping, Error> {
         if !SUPPORTED_FORMATS.contains(&self.format)
             || !SUPPORTED_GENERATORS.contains(&self.generator)
         {
@@ -2198,13 +2267,6 @@ impl Commit {
         let mapping = self.content.validation_mapping()?;
         self.parameters.restore(&mapping, self.generator)?;
         self.parameters.settlements(&mapping)?;
-        let mut coords = BTreeSet::new();
-        for chunk in &self.chunks {
-            if !coords.insert(chunk.coord) {
-                return Err(Error::Corrupt("duplicate Chunk coordinate".into()));
-            }
-            chunk.restore(&mapping)?;
-        }
         if self.simulation.landed_per_step == 0 || self.simulation.emitters_per_step == 0 {
             return Err(Error::Corrupt("invalid simulation bounds".into()));
         }
@@ -2219,18 +2281,249 @@ impl Commit {
                 "logical step exceeds supported range".into(),
             ));
         }
+        Ok(mapping)
+    }
+}
+
+impl Commit {
+    pub fn compatible(&self, installed: &Content) -> Result<(), Error> {
+        let mapping = self.compatible_head(installed)?;
+        let mut coords = BTreeSet::new();
+        for chunk in &self.chunks {
+            distinct_chunk(&mut coords, chunk.coord)?;
+            chunk.restore(&mapping)?;
+        }
         let mut homes = self.simulation.homes();
         for (home, paused) in &self.paused {
-            if !homes.insert(*home) || paused.homes().iter().any(|h| h != home) {
-                return Err(Error::Corrupt(
-                    "overlapping or misplaced paused simulation".into(),
-                ));
-            }
-            crate::agenda::Agenda::restore(&paused.agenda, self.simulation.logical_step)?;
-            crate::flow::Timers::restore(&paused.timers, self.simulation.logical_step, &mapping)?;
+            place_share(&mut homes, *home, paused)?;
+            restore_share(paused, self.simulation.logical_step, &mapping)?;
         }
         Ok(())
     }
+}
+
+fn distinct_chunk(coords: &mut BTreeSet<[i32; 3]>, coord: [i32; 3]) -> Result<(), Error> {
+    if coords.insert(coord) {
+        Ok(())
+    } else {
+        Err(Error::Corrupt("duplicate Chunk coordinate".into()))
+    }
+}
+
+/// A paused share holds only its own home's work, which nothing else in the Commit holds.
+fn place_share(
+    homes: &mut BTreeSet<[i32; 3]>,
+    home: [i32; 3],
+    share: &Simulation,
+) -> Result<(), Error> {
+    if !homes.insert(home) || share.homes().iter().any(|h| *h != home) {
+        return Err(Error::Corrupt(
+            "overlapping or misplaced paused simulation".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn restore_share(share: &Simulation, now: u64, mapping: &Mapping) -> Result<(), Error> {
+    crate::agenda::Agenda::restore(&share.agenda, now)?;
+    crate::flow::Timers::restore(&share.timers, now, mapping)?;
+    Ok(())
+}
+
+/// Where a record is: its pack's sequence, its bytes there, and their SHA-256 in base64. A tuple
+/// in JSON, since a manifest names every Chunk of a World.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(from = "(u64, u64, u64, String)", into = "(u64, u64, u64, String)")]
+pub struct RecordRef {
+    pub pack: u64,
+    pub offset: u64,
+    pub length: u64,
+    pub sha256: String,
+}
+
+impl From<(u64, u64, u64, String)> for RecordRef {
+    fn from((pack, offset, length, sha256): (u64, u64, u64, String)) -> Self {
+        Self {
+            pack,
+            offset,
+            length,
+            sha256,
+        }
+    }
+}
+
+impl From<RecordRef> for (u64, u64, u64, String) {
+    fn from(r: RecordRef) -> Self {
+        (r.pack, r.offset, r.length, r.sha256)
+    }
+}
+
+/// A format 3 Commit's file: each Chunk by coordinate, revision and record, each paused share by
+/// home and record.
+type Manifest = Commit<([i32; 3], u64, RecordRef), ([i32; 3], RecordRef)>;
+
+/// A Chunk version a [`Draft`] names: a new one, or one its Writer already stores.
+#[derive(Clone, Debug, PartialEq)]
+pub enum ChunkVersion {
+    New(SavedChunk),
+    Stored { coord: [i32; 3], revision: u64 },
+}
+
+/// What the Server hands a Writer. A paused share is a shared handle, so one the last Commit
+/// wrote is named again rather than encoded.
+pub type Draft = Commit<ChunkVersion, ([i32; 3], Arc<Simulation>)>;
+
+use record::PausedWork;
+
+impl PausedWork {
+    fn of(share: &Simulation) -> Self {
+        Self {
+            timers: share.timers.clone(),
+            wakes: share.agenda.wakes.clone(),
+            rescans: share.agenda.rescans.clone(),
+            landing_cursors: share.landing_cursors.clone(),
+        }
+    }
+
+    fn into_share(self, active: &Simulation) -> Simulation {
+        let mut share = active.empty();
+        share.timers = self.timers;
+        share.agenda.wakes = self.wakes;
+        share.agenda.rescans = self.rescans;
+        share.landing_cursors = self.landing_cursors;
+        share
+    }
+}
+
+/// The records one Commit writes, back to back after the pack's magic.
+struct Pack {
+    sequence: u64,
+    bytes: Vec<u8>,
+}
+
+impl Pack {
+    fn new(sequence: u64) -> Self {
+        Self {
+            sequence,
+            bytes: PACK_MAGIC.to_vec(),
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.bytes.len() == PACK_MAGIC.len()
+    }
+
+    fn add(&mut self, record: &[u8]) -> RecordRef {
+        let offset = self.bytes.len() as u64;
+        self.bytes.extend_from_slice(record);
+        RecordRef {
+            pack: self.sequence,
+            offset,
+            length: record.len() as u64,
+            sha256: STANDARD.encode(Sha256::digest(record)),
+        }
+    }
+}
+
+/// Reads records, opening each pack once.
+struct Packs<'a> {
+    directory: &'a Path,
+    open: HashMap<u64, File>,
+}
+
+impl<'a> Packs<'a> {
+    fn new(directory: &'a Path) -> Self {
+        Self {
+            directory,
+            open: HashMap::new(),
+        }
+    }
+
+    /// A missing pack or a record that is short or fails its hash makes the Commit corrupt, so
+    /// recovery falls back past it.
+    fn read(&mut self, record: &RecordRef) -> Result<Vec<u8>, Error> {
+        let corrupt = |why: &str| Error::Corrupt(format!("pack {} {why}", record.pack));
+        if record.length > MAX_RECORD_BYTES || record.offset < PACK_MAGIC.len() as u64 {
+            return Err(corrupt("names an impossible record"));
+        }
+        let file = match self.open.entry(record.pack) {
+            std::collections::hash_map::Entry::Occupied(e) => e.into_mut(),
+            std::collections::hash_map::Entry::Vacant(e) => {
+                match File::open(pack_path(self.directory, record.pack)) {
+                    Ok(file) => e.insert(file),
+                    Err(err) if err.kind() == io::ErrorKind::NotFound => {
+                        return Err(corrupt("is missing"));
+                    }
+                    Err(err) => return Err(err.into()),
+                }
+            }
+        };
+        let mut bytes = vec![0; record.length as usize];
+        file.seek(SeekFrom::Start(record.offset))?;
+        match file.read_exact(&mut bytes) {
+            Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => {
+                return Err(corrupt("is truncated"));
+            }
+            other => other?,
+        }
+        if STANDARD.encode(Sha256::digest(&bytes)) != record.sha256 {
+            return Err(corrupt("holds a record that fails its checksum"));
+        }
+        Ok(bytes)
+    }
+}
+
+impl Manifest {
+    /// Every record read, verified and decoded.
+    fn resolve(self, directory: &Path) -> Result<Commit, Error> {
+        let (mut commit, chunks, paused) = self.split();
+        let mut packs = Packs::new(directory);
+        commit.chunks = chunks
+            .iter()
+            .map(|(coord, revision, record)| {
+                let saved = record::read_chunk(&packs.read(record)?)?;
+                if saved.coord != *coord || saved.revision != *revision {
+                    return Err(Error::Corrupt(
+                        "a Chunk record is not the version its manifest names".into(),
+                    ));
+                }
+                Ok(saved)
+            })
+            .collect::<Result<_, Error>>()?;
+        commit.paused = paused
+            .iter()
+            .map(|(home, record)| {
+                let work = record::read_share(&packs.read(record)?)?;
+                Ok((*home, work.into_share(&commit.simulation)))
+            })
+            .collect::<Result<_, Error>>()?;
+        Ok(commit)
+    }
+
+    fn packs(&self) -> impl Iterator<Item = u64> + '_ {
+        self.chunks
+            .iter()
+            .map(|c| c.2.pack)
+            .chain(self.paused.iter().map(|p| p.1.pack))
+    }
+}
+
+fn commit_path(directory: &Path, sequence: u64) -> PathBuf {
+    directory.join(format!("{sequence:020}.commit"))
+}
+
+fn pack_path(directory: &Path, sequence: u64) -> PathBuf {
+    directory.join(format!("{sequence:020}.pack"))
+}
+
+/// The sequence a `.commit` or `.pack` file is named for.
+fn sequence_of(path: &Path, extension: &str) -> Option<Result<u64, Error>> {
+    path.extension().is_some_and(|e| e == extension).then(|| {
+        path.file_stem()
+            .and_then(|n| n.to_str())
+            .and_then(|n| n.parse::<u64>().ok())
+            .ok_or_else(|| Error::Corrupt(format!("invalid {extension} filename")))
+    })
 }
 
 #[derive(Debug)]
@@ -2265,11 +2558,21 @@ pub struct Writer {
     _lock: File,
     world: WorldId,
     last: Option<u64>,
+    /// The newest Commits this Writer completed, at most [`KEPT_COMMITS`], oldest first.
+    completed: Vec<u64>,
     installed: Content,
+    /// What the newest Commit this Writer opened or wrote names, so the next can name it again.
+    chunks: HashMap<[i32; 3], (u64, RecordRef)>,
+    shares: HashMap<[i32; 3], (Arc<Simulation>, RecordRef)>,
+    /// Each pack's record bytes, by sequence.
+    packs: BTreeMap<u64, u64>,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum WritePhase {
+    PackBody,
+    PackSync,
+    PackRename,
     Body,
     FileSync,
     Rename,
@@ -2291,7 +2594,11 @@ impl Writer {
             _lock: lock,
             world: world.clone(),
             last: None,
+            completed: Vec::new(),
             installed: installed.clone(),
+            chunks: HashMap::new(),
+            shares: HashMap::new(),
+            packs: BTreeMap::new(),
         };
         // Another writer may have completed between the read-only validation
         // and lock acquisition. Validate again while holding the writer lock.
@@ -2301,19 +2608,39 @@ impl Writer {
                     "directory belongs to another World".into(),
                 ));
             }
-            writer.last = Some(recovered.commit.sequence);
+            let sequence = recovered.commit.sequence;
+            writer.last = Some(sequence);
+            // The Chunk versions the World reopens with; its paused shares get new handles, so
+            // the first write stores them again.
+            if recovered.commit.format == 3 {
+                let manifest: Manifest =
+                    serde_json::from_value(read_body(&commit_path(directory, sequence))?)
+                        .map_err(|e| Error::Corrupt(e.to_string()))?;
+                writer.chunks = manifest
+                    .chunks
+                    .into_iter()
+                    .map(|(coord, revision, record)| (coord, (revision, record)))
+                    .collect();
+            }
         }
-        // Reserve every filename, including corrupt commits skipped by recovery,
-        // while holding the lock rather than racing an earlier writer.
+        // Reserve every filename, including corrupt commits skipped by recovery
+        // and packs no commit names, while holding the lock rather than racing
+        // an earlier writer.
         for entry in fs::read_dir(directory)? {
-            let path = entry?.path();
-            if path.extension().is_some_and(|e| e == "commit") {
-                let n = path
-                    .file_stem()
-                    .and_then(|n| n.to_str())
-                    .and_then(|n| n.parse::<u64>().ok())
-                    .ok_or_else(|| Error::Corrupt("invalid commit filename".into()))?;
+            let entry = entry?;
+            let path = entry.path();
+            if path.extension().is_some_and(|e| e == "pending") {
+                // Never read; a failed removal only leaves it for the next writer.
+                let _ = fs::remove_file(&path);
+            } else if let Some(n) = sequence_of(&path, "commit") {
+                writer.last = Some(writer.last.unwrap_or(0).max(n?));
+            } else if let Some(n) = sequence_of(&path, "pack") {
+                let n = n?;
                 writer.last = Some(writer.last.unwrap_or(0).max(n));
+                let bytes = entry.metadata()?.len();
+                writer
+                    .packs
+                    .insert(n, bytes.saturating_sub(PACK_MAGIC.len() as u64));
             }
         }
         Ok(writer)
@@ -2327,60 +2654,298 @@ impl Writer {
             .ok_or_else(|| Error::Incompatible("save sequence exhausted".into()))
     }
 
+    /// Whether the newest Commit names this Chunk version, which a [`Draft`] may then name as
+    /// [`ChunkVersion::Stored`] instead of capturing it.
+    pub fn stores(&self, coord: [i32; 3], revision: u64) -> bool {
+        self.chunks.get(&coord).is_some_and(|(r, _)| *r == revision)
+    }
+
+    /// A whole Commit, naming the Chunk versions this Writer already stores.
     pub fn write(&mut self, commit: &Commit) -> Result<(), Error> {
         self.write_with(commit, |_| Ok(()))
+    }
+
+    pub fn write_draft(&mut self, draft: Draft) -> Result<(), Error> {
+        self.write_draft_with(draft, |_| Ok(()))
     }
 
     fn write_with(
         &mut self,
         commit: &Commit,
+        before: impl FnMut(WritePhase) -> io::Result<()>,
+    ) -> Result<(), Error> {
+        let (mut draft, chunks, paused) = commit.clone().split();
+        draft.chunks = chunks
+            .into_iter()
+            .map(|c| {
+                if self.stores(c.coord, c.revision) {
+                    ChunkVersion::Stored {
+                        coord: c.coord,
+                        revision: c.revision,
+                    }
+                } else {
+                    ChunkVersion::New(c)
+                }
+            })
+            .collect();
+        draft.paused = paused.into_iter().map(|(h, s)| (h, Arc::new(s))).collect();
+        self.write_draft_with(draft, before)
+    }
+
+    /// Writes the pack of the records this Commit is the first to need, then its manifest. Only
+    /// new records are validated: a stored one was when it was written.
+    fn write_draft_with(
+        &mut self,
+        draft: Draft,
         mut before: impl FnMut(WritePhase) -> io::Result<()>,
     ) -> Result<(), Error> {
-        commit.compatible(&self.installed)?;
-        if commit.world != self.world || self.last.is_some_and(|n| commit.sequence <= n) {
+        let mapping = draft.compatible_head(&self.installed)?;
+        if draft.world != self.world || self.last.is_some_and(|n| draft.sequence <= n) {
             return Err(Error::Incompatible(
                 "stale snapshot or wrong World identity".into(),
             ));
         }
-        let path = self
-            .directory
-            .join(format!("{:020}.commit", commit.sequence));
-        if path.exists() {
-            self.last = Some(commit.sequence);
+        let sequence = draft.sequence;
+        let path = commit_path(&self.directory, sequence);
+        let pack_file = pack_path(&self.directory, sequence);
+        if path.exists() || pack_file.exists() {
+            self.last = Some(sequence);
             return Err(Error::Incompatible("commit sequence already exists".into()));
         }
-        let body = serde_json::to_vec(commit).map_err(|e| Error::Corrupt(e.to_string()))?;
-        if body.len() as u64 > MAX_COMMIT_BYTES - 40 {
+        let (mut manifest, versions, shares): (Manifest, _, _) = draft.split();
+        let mut pack = Pack::new(sequence);
+        let mut coords = BTreeSet::new();
+        for version in versions {
+            manifest.chunks.push(match version {
+                ChunkVersion::Stored { coord, revision } => {
+                    distinct_chunk(&mut coords, coord)?;
+                    let record = self
+                        .chunks
+                        .get(&coord)
+                        .filter(|(r, _)| *r == revision)
+                        .map(|(_, record)| record.clone())
+                        .ok_or_else(|| {
+                            Error::Incompatible("a Chunk version this World does not store".into())
+                        })?;
+                    (coord, revision, record)
+                }
+                ChunkVersion::New(saved) => {
+                    distinct_chunk(&mut coords, saved.coord)?;
+                    saved.restore(&mapping)?;
+                    let record = pack.add(&record::chunk(&saved)?);
+                    (saved.coord, saved.revision, record)
+                }
+            });
+        }
+        let mut homes = manifest.simulation.homes();
+        for (home, share) in &shares {
+            place_share(&mut homes, *home, share)?;
+            let stored = self
+                .shares
+                .get(home)
+                .filter(|(held, _)| Arc::ptr_eq(held, share));
+            let record = match stored {
+                Some((_, record)) => record.clone(),
+                None => {
+                    restore_share(share, manifest.simulation.logical_step, &mapping)?;
+                    pack.add(&record::share(&PausedWork::of(share))?)
+                }
+            };
+            manifest.paused.push((*home, record));
+        }
+        self.compact(&mut manifest, &mut pack)?;
+        let body = serde_json::to_vec(&manifest).map_err(|e| Error::Corrupt(e.to_string()))?;
+        if body.len() as u64 > MAX_COMMIT_BYTES - 40 || pack.bytes.len() as u64 > MAX_COMMIT_BYTES {
             return Err(Error::Corrupt("commit exceeds size limit".into()));
         }
-        let temp = self
-            .directory
-            .join(format!("{}.pending", uuid::Uuid::new_v4()));
+        let mut pending = Vec::new();
         let result = (|| {
-            let mut file = OpenOptions::new()
-                .create_new(true)
-                .write(true)
-                .open(&temp)?;
-            file.write_all(MAGIC)?;
-            file.write_all(&Sha256::digest(&body))?;
-            before(WritePhase::Body)?;
-            file.write_all(&body)?;
-            before(WritePhase::FileSync)?;
-            file.sync_all()?;
-            before(WritePhase::Rename)?;
-            drop(file);
-            rename_commit(&temp, &path)?;
+            if !pack.is_empty() {
+                self.write_file(
+                    &pack_file,
+                    &[&pack.bytes],
+                    [
+                        WritePhase::PackBody,
+                        WritePhase::PackSync,
+                        WritePhase::PackRename,
+                    ],
+                    &mut pending,
+                    &mut before,
+                )?;
+            }
+            self.write_file(
+                &path,
+                &[MAGIC, &Sha256::digest(&body), &body],
+                [WritePhase::Body, WritePhase::FileSync, WritePhase::Rename],
+                &mut pending,
+                &mut before,
+            )?;
             before(WritePhase::DirectorySync)?;
             sync_directory(&self.directory)?;
             Ok::<_, Error>(())
         })();
         if result.is_err() {
-            let _ = fs::remove_file(temp);
+            for temp in pending {
+                let _ = fs::remove_file(temp);
+            }
+            // No manifest names a pack whose manifest never became visible.
+            if !path.exists() {
+                let _ = fs::remove_file(&pack_file);
+            }
         }
-        if result.is_ok() || path.exists() {
-            self.last = Some(commit.sequence);
+        if result.is_ok() || path.exists() || pack_file.exists() {
+            self.last = Some(sequence);
         }
-        result
+        result?;
+        if !pack.is_empty() {
+            self.packs
+                .insert(sequence, (pack.bytes.len() - PACK_MAGIC.len()) as u64);
+        }
+        self.chunks = manifest
+            .chunks
+            .into_iter()
+            .map(|(coord, revision, record)| (coord, (revision, record)))
+            .collect();
+        self.shares = shares
+            .into_iter()
+            .zip(manifest.paused)
+            .map(|((home, share), (_, record))| (home, (share, record)))
+            .collect();
+        self.completed.push(sequence);
+        if self.completed.len() > KEPT_COMMITS {
+            self.completed.remove(0);
+        }
+        Ok(())
+    }
+
+    /// A unique `.pending` file holding `parts`, synced and renamed to `to`; the three phases
+    /// come before the last part, the sync and the rename.
+    fn write_file(
+        &self,
+        to: &Path,
+        parts: &[&[u8]],
+        [body, sync, rename]: [WritePhase; 3],
+        pending: &mut Vec<PathBuf>,
+        before: &mut impl FnMut(WritePhase) -> io::Result<()>,
+    ) -> Result<(), Error> {
+        let temp = self
+            .directory
+            .join(format!("{}.pending", uuid::Uuid::new_v4()));
+        pending.push(temp.clone());
+        let mut file = OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&temp)?;
+        let (last, head) = parts.split_last().expect("a file has content");
+        for part in head {
+            file.write_all(part)?;
+        }
+        before(body)?;
+        file.write_all(last)?;
+        before(sync)?;
+        file.sync_all()?;
+        before(rename)?;
+        drop(file);
+        rename_commit(&temp, to)?;
+        Ok(())
+    }
+
+    /// Copies the records of each older pack this manifest names less than half the bytes of
+    /// into the new pack, byte for byte, so that pack ages out with the Commits that name it and
+    /// the disk holds at most about twice the live records.
+    fn compact(&self, manifest: &mut Manifest, pack: &mut Pack) -> Result<(), Error> {
+        let mut live: BTreeMap<u64, u64> = BTreeMap::new();
+        for record in manifest
+            .chunks
+            .iter()
+            .map(|c| &c.2)
+            .chain(manifest.paused.iter().map(|p| &p.1))
+        {
+            *live.entry(record.pack).or_default() += record.length;
+        }
+        let sparse: BTreeSet<u64> = live
+            .into_iter()
+            .filter(|&(at, bytes)| {
+                at != pack.sequence && self.packs.get(&at).is_some_and(|&total| bytes * 2 < total)
+            })
+            .map(|(at, _)| at)
+            .collect();
+        if sparse.is_empty() {
+            return Ok(());
+        }
+        let mut packs = Packs::new(&self.directory);
+        for record in manifest
+            .chunks
+            .iter_mut()
+            .map(|c| &mut c.2)
+            .chain(manifest.paused.iter_mut().map(|p| &mut p.1))
+        {
+            if sparse.contains(&record.pack) {
+                *record = pack.add(&packs.read(record)?);
+            }
+        }
+        Ok(())
+    }
+
+    /// Deletes every Commit older than the oldest of the last [`KEPT_COMMITS`] this Writer
+    /// completed, and none before it has completed that many, so a reopened World keeps the
+    /// Commits it opened from until newer ones can replace them. Then deletes every pack no
+    /// Commit left names. Every deletion is attempted; the first failure is returned, and the
+    /// next call retries.
+    pub fn retain(&mut self) -> Result<(), Error> {
+        let mut failed = None;
+        if let Some(&oldest) = self
+            .completed
+            .first()
+            .filter(|_| self.completed.len() == KEPT_COMMITS)
+        {
+            for entry in fs::read_dir(&self.directory)? {
+                let path = entry?.path();
+                if sequence_of(&path, "commit").is_some_and(|n| n.is_ok_and(|n| n < oldest))
+                    && let Err(e) = fs::remove_file(&path)
+                    && e.kind() != io::ErrorKind::NotFound
+                {
+                    failed.get_or_insert(e);
+                }
+            }
+        }
+        if let Err(e) = self.sweep() {
+            failed.get_or_insert(e);
+        }
+        failed.map_or(Ok(()), |e| Err(e.into()))
+    }
+
+    /// Only when every Commit on disk parses: one that does not may name any pack.
+    fn sweep(&mut self) -> io::Result<()> {
+        let mut named = BTreeSet::new();
+        let mut packs = Vec::new();
+        for entry in fs::read_dir(&self.directory)? {
+            let path = entry?.path();
+            if sequence_of(&path, "commit").is_some() {
+                match read_body(&path) {
+                    Ok(body) if body.get("format").and_then(|f| f.as_u64()) != Some(3) => {}
+                    Ok(body) => match serde_json::from_value::<Manifest>(body) {
+                        Ok(manifest) => named.extend(manifest.packs()),
+                        Err(_) => return Ok(()),
+                    },
+                    Err(_) => return Ok(()),
+                }
+            } else if let Some(Ok(n)) = sequence_of(&path, "pack") {
+                packs.push((n, path));
+            }
+        }
+        let mut failed = None;
+        for (n, path) in packs.into_iter().filter(|(n, _)| !named.contains(n)) {
+            match fs::remove_file(&path) {
+                Err(e) if e.kind() != io::ErrorKind::NotFound => {
+                    failed.get_or_insert(e);
+                }
+                _ => {
+                    self.packs.remove(&n);
+                }
+            }
+        }
+        failed.map_or(Ok(()), Err)
     }
 }
 
@@ -2481,6 +3046,98 @@ fn recover_with(directory: &Path, installed: Option<&Content>) -> Result<Option<
 }
 
 fn read_commit(path: &Path) -> Result<Commit, Error> {
+    let body = read_body(path)?;
+    let sequence = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .and_then(|s| s.parse::<u64>().ok());
+    let commit = if body.get("format").and_then(|f| f.as_u64()) == Some(3) {
+        let manifest: Manifest =
+            serde_json::from_value(body).map_err(|e| Error::Corrupt(e.to_string()))?;
+        if sequence != Some(manifest.sequence) {
+            return Err(Error::Corrupt(
+                "commit filename and sequence disagree".into(),
+            ));
+        }
+        manifest.resolve(path.parent().unwrap_or(Path::new(".")))?
+    } else {
+        serde_json::from_value::<Commit>(body).map_err(|e| Error::Corrupt(e.to_string()))?
+    };
+    if sequence != Some(commit.sequence) {
+        return Err(Error::Corrupt(
+            "commit filename and sequence disagree".into(),
+        ));
+    }
+    Ok(commit)
+}
+
+/// A Commit as JSON for a person to read: its own fields, then each Chunk's palette by name and
+/// indices as runs of `[count, index]`, then each paused share, each with the record it came from
+/// in format 3. The newest Commit by sequence unless `sequence` names one. Reads, never writes,
+/// and takes no lock.
+pub fn dump(directory: &Path, sequence: Option<u64>) -> Result<serde_json::Value, Error> {
+    let sequence = match sequence {
+        Some(n) => n,
+        None => fs::read_dir(directory)?
+            .filter_map(|e| Some(sequence_of(&e.ok()?.path(), "commit")?.ok()))
+            .flatten()
+            .max()
+            .ok_or_else(|| Error::Corrupt("the folder holds no commit".into()))?,
+    };
+    let path = commit_path(directory, sequence);
+    let body = read_body(&path)?;
+    let manifest = (body.get("format").and_then(|f| f.as_u64()) == Some(3))
+        .then(|| serde_json::from_value::<Manifest>(body))
+        .transpose()
+        .map_err(|e| Error::Corrupt(e.to_string()))?;
+    let (head, chunks, paused): (Commit<(), ()>, _, _) = read_commit(&path)?.split();
+    let mut commit = to_json(&head)?;
+    if let Some(fields) = commit.as_object_mut() {
+        fields.remove("chunks");
+        fields.remove("paused");
+    }
+    let chunks = chunks
+        .iter()
+        .enumerate()
+        .map(|(i, c)| {
+            let (indices, palette) = c.indices()?;
+            let mut runs: Vec<(u32, u16)> = Vec::new();
+            for index in indices {
+                match runs.last_mut() {
+                    Some((n, at)) if *at == index => *n += 1,
+                    _ => runs.push((1, index)),
+                }
+            }
+            Ok(serde_json::json!({
+                "coord": c.coord,
+                "revision": c.revision,
+                "record": manifest.as_ref().map(|m| to_json(&m.chunks[i].2)).transpose()?,
+                "palette": to_json(&palette)?,
+                "runs": runs,
+            }))
+        })
+        .collect::<Result<Vec<_>, Error>>()?;
+    let paused = paused
+        .iter()
+        .enumerate()
+        .map(|(i, (home, share))| {
+            Ok(serde_json::json!({
+                "home": home,
+                "record": manifest.as_ref().map(|m| to_json(&m.paused[i].1)).transpose()?,
+                "share": to_json(share)?,
+            }))
+        })
+        .collect::<Result<Vec<_>, Error>>()?;
+    Ok(serde_json::json!({ "commit": commit, "chunks": chunks, "paused": paused }))
+}
+
+fn to_json(value: &impl Serialize) -> Result<serde_json::Value, Error> {
+    serde_json::to_value(value).map_err(|e| Error::Corrupt(e.to_string()))
+}
+
+/// A commit file's checked JSON, refused as incompatible when its format is one this build does
+/// not open.
+fn read_body(path: &Path) -> Result<serde_json::Value, Error> {
     let file = File::open(path)?;
     if file.metadata()?.len() > MAX_COMMIT_BYTES {
         return Err(Error::Corrupt("commit exceeds size limit".into()));
@@ -2505,18 +3162,7 @@ fn read_commit(path: &Path) -> Result<Commit, Error> {
     {
         return Err(Error::Incompatible("unsupported save format".into()));
     }
-    let commit: Commit =
-        serde_json::from_value(value).map_err(|e| Error::Corrupt(e.to_string()))?;
-    let sequence = path
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .and_then(|s| s.parse::<u64>().ok());
-    if sequence != Some(commit.sequence) {
-        return Err(Error::Corrupt(
-            "commit filename and sequence disagree".into(),
-        ));
-    }
-    Ok(commit)
+    Ok(value)
 }
 
 /// Server-owned completion guard, separate from the worker's immutable data.
@@ -2579,6 +3225,7 @@ pub mod containers;
 pub mod entities;
 pub mod library;
 pub mod map;
+mod record;
 #[cfg(test)]
 mod tests;
 

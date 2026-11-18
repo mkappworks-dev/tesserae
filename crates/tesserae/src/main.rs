@@ -11,6 +11,7 @@ mod open;
 #[cfg(feature = "profiling")]
 mod profiling;
 mod render;
+mod save_dump;
 mod server;
 mod session;
 mod world;
@@ -22,7 +23,7 @@ fn main() -> std::process::ExitCode {
     #[cfg(feature = "profiling")]
     let process_start = profiling::ProcessStart(std::time::Instant::now());
     let argv: Vec<_> = std::env::args_os().skip(1).collect();
-    if let Some(code) = author::run(&argv) {
+    if let Some(code) = author::run(&argv).or_else(|| save_dump::run(&argv)) {
         return code;
     }
     let watching = match dev::parse(&argv) {
