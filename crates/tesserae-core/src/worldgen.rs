@@ -776,13 +776,10 @@ struct SurfaceScatter {
 }
 
 impl SurfaceScatter {
-    #[expect(
-        clippy::disallowed_methods,
-        reason = "generation: generator-determinism ticket 12 makes this a multiplication"
-    )]
     fn new(params: &WorldgenParams, voxel_size: f32) -> Option<Self> {
         params.ground?;
-        let unit_chance = f64::from(voxel_size).powi(2);
+        let size = f64::from(voxel_size);
+        let unit_chance = size * size;
         let most = params
             .biomes
             .as_slice()
@@ -820,12 +817,9 @@ impl SurfaceScatter {
         })
     }
 
-    #[expect(
-        clippy::disallowed_methods,
-        reason = "generation: generator-determinism ticket 12 makes this a multiplication"
-    )]
     fn chance(unit_chance: f64, spacing_m: f32) -> f64 {
-        (unit_chance / f64::from(spacing_m).powi(2)).min(1.0)
+        let spacing = f64::from(spacing_m);
+        (unit_chance / (spacing * spacing)).min(1.0)
     }
 
     /// The most a Biome's chances sum to, each feature at its clump's densest, so `most` bounds
@@ -1072,10 +1066,6 @@ impl Worldgen {
     /// The dry column nearest `from`, searched outwards to `max_m`, for a Player to spawn on: not
     /// under water, a metre or more above it, no cliff within a few metres, and dry ground all
     /// round to ~100 m so the Player is on land and not a spit or an islet.
-    #[expect(
-        clippy::disallowed_methods,
-        reason = "generation: generator-determinism ticket 12 moves this to libm"
-    )]
     pub fn dry_land_near_m(&self, from: [f32; 2], max_m: f32) -> Option<[f32; 2]> {
         const STEP_M: f32 = 16.0;
         const CLIFF_M: f32 = 6.0;
@@ -1094,12 +1084,12 @@ impl Worldgen {
                 && SHORE_RINGS_M.iter().all(|&r| {
                     (0..8).all(|k| {
                         let a = k as f32 * std::f32::consts::FRAC_PI_4;
-                        dry(x + r * a.cos(), z + r * a.sin())
+                        dry(x + r * libm::cosf(a), z + r * libm::sinf(a))
                     })
                 })
                 && (0..8).all(|k| {
                     let a = k as f32 * std::f32::consts::FRAC_PI_4;
-                    let (sx, sz) = (x + CLIFF_M * a.cos(), z + CLIFF_M * a.sin());
+                    let (sx, sz) = (x + CLIFF_M * libm::cosf(a), z + CLIFF_M * libm::sinf(a));
                     (self.surface_height_m(sx, sz) - h).abs() <= CLIFF_DROP_M
                 })
         };
@@ -1112,7 +1102,7 @@ impl Worldgen {
             let n = ((std::f32::consts::TAU * r / STEP_M).ceil() as u32).max(6);
             for k in 0..n {
                 let a = k as f32 * std::f32::consts::TAU / n as f32;
-                let (x, z) = (from[0] + r * a.cos(), from[1] + r * a.sin());
+                let (x, z) = (from[0] + r * libm::cosf(a), from[1] + r * libm::sinf(a));
                 if suits(x, z) {
                     return Some([x, z]);
                 }
@@ -2568,14 +2558,11 @@ impl Worldgen {
     /// Whether a tree whose draw beats this column's stands within `radius_m` of it. Each column
     /// asks only draws and the trees they would stand, never whether those stand themselves, so
     /// every Chunk decides alike; a lower draw wins, so of two trees too close the same one stays.
-    #[expect(
-        clippy::disallowed_methods,
-        reason = "generation: generator-determinism ticket 12 makes this a multiplication"
-    )]
     fn crowded(&self, scatter: &SurfaceScatter, [gx, gz]: [i32; 2], radius_m: f32) -> bool {
         let own = SurfaceScatter::draw(self.seed, self.global_m(gx), self.global_m(gz));
-        let reach = (radius_m / self.voxel_size).ceil() as i32;
-        let r2 = (radius_m / self.voxel_size).powi(2);
+        let radius = radius_m / self.voxel_size;
+        let reach = radius.ceil() as i32;
+        let r2 = radius * radius;
         (-reach..=reach)
             .flat_map(|dz| (-reach..=reach).map(move |dx| (dx, dz)))
             .filter(|&(dx, dz)| (dx, dz) != (0, 0) && ((dx * dx + dz * dz) as f32) < r2)
