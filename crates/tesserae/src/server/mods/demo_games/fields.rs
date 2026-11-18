@@ -2,28 +2,29 @@
 
 use std::collections::BTreeMap;
 
-use tesserae_core::{Biome, BiomeTable, CHUNK_SIZE, SurfaceFeatures, Worldgen};
+use tesserae_core::{Biome, BiomeTable, CHUNK_SIZE, Worldgen};
 
 use super::loaded;
 
 /// The names of the materials `game`'s planted fields change within `half_m` of the spawn, counted
-/// in Voxels, at Voxels of 1 m.
+/// in Voxels, at Voxels of 1 m, against the same World with only its crop fields dropped.
 fn field_cells(game: &str, seed: u64, half_m: f32) -> BTreeMap<String, u64> {
     let (_install, loaded) = loaded(game, 1.0);
     let params = loaded.world.unwrap();
-    let bare: Vec<Biome> = params
+    let fieldless: Vec<Biome> = params
         .biomes
         .as_slice()
         .iter()
         .map(|b| Biome {
-            surface_features: SurfaceFeatures::new(b.surface_features.as_slice()).unwrap(),
+            surface_features: b.surface_features.with_crop_fields(&[]).unwrap(),
             ..*b
         })
         .collect();
-    let without = tesserae_core::WorldgenParams {
-        biomes: BiomeTable::new(&bare).unwrap(),
-        ..params
-    };
+    let biomes = BiomeTable::new(&fieldless)
+        .and_then(|t| t.with_selectors(params.biomes.selectors()))
+        .and_then(|t| t.with_strata(params.biomes.strata()))
+        .unwrap();
+    let without = tesserae_core::WorldgenParams { biomes, ..params };
     let (with, without) = (
         Worldgen::new(seed, 1.0, params),
         Worldgen::new(seed, 1.0, without),

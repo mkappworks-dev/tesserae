@@ -677,7 +677,7 @@ impl Guest for Terra {
                         fog: (192, 178, 136),
                     }),
                     cave_scale: None,
-                    crop_fields: Vec::new(),
+                    crop_fields: plants::savanna_fields(),
                     structures: [
                         structures::wild(&["standing_stones", "waystone"]),
                         structures::bridge("stone_bridge"),
