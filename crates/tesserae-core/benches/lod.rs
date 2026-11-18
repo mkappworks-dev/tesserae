@@ -210,7 +210,9 @@ fn coarse_chunk(c: &mut Criterion) {
     }
     let source = source(1);
     let top = surface_at(1)[1];
-    for (name, y) in [("air_level_1", top + 4), ("rock_level_1", top - 4)] {
+    // Above the band's top, not the column's: version 3's band stands far over most ground.
+    let sky = (source.surface_bounds_m().1 / (2 * CHUNK_SIZE) as f32).floor() as i32 + 1;
+    for (name, y) in [("air_level_1", sky), ("rock_level_1", top - 4)] {
         group.bench_function(name, |b| {
             b.iter(|| black_box(coarse(&source, &shapes, black_box([0, y, 0]))))
         });
