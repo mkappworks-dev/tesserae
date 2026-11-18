@@ -1823,14 +1823,7 @@ impl Worldgen {
                         }
                         continue;
                     }
-                    // A tunnel or shaft never opens a flooded cavern below the water table.
-                    let walled = || {
-                        let flooded = (self.water.is_some() && y_m < table_m)
-                            || self
-                                .lava_m()
-                                .is_some_and(|lava_m| y_m < lava_m + LAVA_SEAL_M);
-                        flooded && self.caverns.is_some_and(|c| c.walls_in(x_m, y_m, z_m))
-                    };
+                    let walled = || self.walled_in([x_m, y_m, z_m], table_m);
                     // A cave carves through the Grass cap like anything else,
                     // which is what a mouth is.
                     if let Some((caves, blocks)) = &reachable
@@ -2455,13 +2448,49 @@ impl Worldgen {
         (self.level_top(level_m) + 1) as f32 * s
     }
 
-    /// Whether the ground cell at global Voxel `at` is carved away: what the Chunk holding it
-    /// asks, so any Chunk can answer for it.
+    /// Whether a tunnel or a shaft opens the ground cell at global Voxel `at`, the column's top or
+    /// above: what the Chunk holding it decides, so any Chunk can answer for it. A cavern stays
+    /// [`CAVERN_MIN_DEPTH_M`] under the ground, so it never reaches the cells this is asked about.
     fn carved(&self, at: [i32; 3]) -> bool {
-        self.caves.as_ref().is_some_and(|caves| {
-            let (x_m, z_m) = (self.global_m(at[0]), self.global_m(at[2]));
-            caves.carves(x_m, self.global_m(at[1]), z_m, self.cave_scale_at(x_m, z_m))
-        })
+        let [x_m, y_m, z_m] = at.map(|g| self.global_m(g));
+        let tunnel = || {
+            self.caves
+                .as_ref()
+                .is_some_and(|caves| caves.carves(x_m, y_m, z_m, self.cave_scale_at(x_m, z_m)))
+        };
+        let shaft = || {
+            self.caverns.as_ref().is_some_and(|c| {
+                c.shafts(
+                    [x_m, z_m],
+                    [x_m, z_m],
+                    |x, z| self.surface_height_m(x, z),
+                    |x, z| self.water_surface_m(x, z).is_none(),
+                )
+                .iter()
+                .any(|s| s.cuts(x_m, y_m, z_m))
+            })
+        };
+        if !(tunnel() || shaft()) {
+            return false;
+        }
+        let clear = (CAVE_CLEAR_M / self.voxel_size).ceil() as i32;
+        let near = self.footprints_near([
+            [at[0] - clear, at[2] - clear],
+            [at[0] + 1 + clear, at[2] + 1 + clear],
+        ]);
+        !near.iter().any(|f| f.widened(clear).covers(at[0], at[2]))
+            && y_m >= self.sealed_below_m(x_m, z_m, self.surface_height_m(x_m, z_m))
+            && !self.walled_in([x_m, y_m, z_m], self.water_table_m(x_m, z_m))
+    }
+
+    /// Whether a tunnel or shaft must leave the rock at a point, which is a flooded cavern's or the
+    /// shell round it below the water table.
+    fn walled_in(&self, [x_m, y_m, z_m]: [f32; 3], table_m: f32) -> bool {
+        let flooded = (self.water.is_some() && y_m < table_m)
+            || self
+                .lava_m()
+                .is_some_and(|lava_m| y_m < lava_m + LAVA_SEAL_M);
+        flooded && self.caverns.is_some_and(|c| c.walls_in(x_m, y_m, z_m))
     }
 
     /// The Plant a Biome stands on the column at global Voxel `(gx, gz)`, if any: a pure function
@@ -2997,23 +3026,15 @@ impl Worldgen {
     /// Whether the cell `at` (Voxel offsets from this Chunk's corner, possibly
     /// one outside it) is solid ground, given that the cube pass made it so
     /// before caves. Inside the Chunk that is a read; outside, the cell belongs
-    /// to a Chunk not held here, so it is asked of the cave field by metre
-    /// position, which is what that Chunk asks.
+    /// to a Chunk not held here, so it is asked as that Chunk decides it.
     fn still_solid(&self, chunk: &Chunk, coord: [i32; 3], at: [i32; 3]) -> bool {
         if at.iter().all(|c| (0..CHUNK_SIZE as i32).contains(c)) {
             return !chunk
                 .get(at[0] as usize, at[1] as usize, at[2] as usize)
                 .is_air();
         }
-        self.caves.as_ref().is_none_or(|caves| {
-            let (x_m, z_m) = (self.axis_m(coord[0], at[0]), self.axis_m(coord[2], at[2]));
-            !caves.carves(
-                x_m,
-                self.axis_m(coord[1], at[1]),
-                z_m,
-                self.cave_scale_at(x_m, z_m),
-            )
-        })
+        let size = CHUNK_SIZE as i32;
+        !self.carved([0, 1, 2].map(|a| coord[a] * size + at[a]))
     }
 
     /// For each sub-block of the Chunk whose lowest Voxel is at `origin_m`,
