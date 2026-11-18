@@ -159,12 +159,39 @@ pub fn register_water(tables: &mut Tables) -> MaterialId {
 }
 
 /// Version 2's terrain, which the algorithm tests' fixtures were laid out on; a test of version 3
-/// asks for it.
+/// asks for [`world_params_v3`].
 pub fn world_params() -> crate::WorldgenParams {
     crate::WorldgenParams {
         ground: Some(fixtures().ground),
         generator: 2,
         ..crate::WorldgenParams::default()
+    }
+}
+
+/// Version 3's terrain on the fixture ground: its default landforms, a sea at Sea level and two
+/// Biomes, for tests moving off [`world_params`].
+pub fn world_params_v3() -> crate::WorldgenParams {
+    let biome = |name, temperature| crate::Biome {
+        name: crate::BiomeName::new(name).expect("valid fixture Biome name"),
+        temperature,
+        humidity: 0.5,
+        ground: None,
+        sky_fog: None,
+        cave_scale: None,
+        surface_features: crate::SurfaceFeatures::NONE,
+    };
+    let sea_level_m = 24.0;
+    crate::WorldgenParams {
+        sea_level_m,
+        water: Some(crate::worldgen::WaterParams {
+            level_m: sea_level_m,
+            material: fixtures().water,
+        }),
+        biomes: crate::BiomeTable::new(&[biome("cold", 0.25), biome("warm", 0.75)])
+            .expect("valid fixture Biomes"),
+        generator: 3,
+        landforms: crate::terrain::LandformParams::default(),
+        ..world_params()
     }
 }
 
@@ -323,6 +350,33 @@ mod tests {
                 heat: None,
             })
         );
+    }
+
+    #[test]
+    fn version_3_params_generate_ground_water_and_biomes() {
+        let params = world_params_v3();
+        assert_eq!(params.generator, 3);
+        assert_eq!(params.validate(), Ok(()));
+        assert_eq!(params.validate_lake(&fixtures().tables), Ok(()));
+
+        let g = crate::Worldgen::new(0x7e55_e2ae_0000_0001, 1.0, params);
+        let mut biomes = std::collections::HashSet::new();
+        let (mut ground, mut water) = (false, false);
+        for i in -8..=8 {
+            for j in -8..=8 {
+                let (x_m, z_m) = (i as f32 * 256.0, j as f32 * 256.0);
+                biomes.extend(g.biome_at(x_m, z_m));
+                let cy = (g.surface_height_m(x_m, z_m) / CHUNK_SIZE as f32).floor() as i32;
+                let (cx, cz) = (i * 8, j * 8);
+                for v in g.chunk(cx, cy, cz).kinds() {
+                    ground |= v.material() == fixtures().ground.surface;
+                    water |= v.material() == fixtures().water;
+                }
+            }
+        }
+        assert!(ground, "no fixture surface in the sampled Chunks");
+        assert!(water, "no fixture water in the sampled Chunks");
+        assert_eq!(biomes.len(), 2, "both fixture Biomes occur");
     }
 
     #[test]
