@@ -1,16 +1,28 @@
 //! A World keeps its terrain for as long as it keeps its Generator version.
 //! These digests are version 3's, over a box that crosses rock, caves, the
-//! surface, smoothed slopes, the sea and the sky, at two Voxel sizes.
+//! surface, smoothed slopes, the sea and the sky, at two Voxel sizes; and over
+//! boxes on each kind of content it places, with the spawn point.
+
+#![allow(
+    clippy::disallowed_methods,
+    reason = "a test's own maths is not generation"
+)]
+
+mod digest;
 
 use sha2::{Digest, Sha256};
 use tesserae_core::material::MaterialDef;
 use tesserae_core::save::Mapping;
 use tesserae_core::testgen::{
-    Fixtures, fixtures, register_content, register_glass, register_ground, register_lantern,
-    register_leaves, register_water,
+    Fixtures, content, fixtures, register_content, register_glass, register_ground,
+    register_lantern, register_leaves, register_water, world_params,
 };
 use tesserae_core::worldgen::WaterParams;
-use tesserae_core::{CHUNK_SIZE, Chunk, GroundParams, Tables, Worldgen, WorldgenParams};
+use tesserae_core::{
+    Biome, BiomeName, BiomeTable, CHUNK_SIZE, Chunk, ChunkOverlay, Fluid, GroundParams, MaterialId,
+    PlantTable, SHAPE_FULL_CUBE, SurfaceFeature, SurfaceFeatures, SurfacePlant, SurfacePlantKind,
+    SurfaceTree, Tables, Worldgen, WorldgenParams,
+};
 
 const SEEDS: [u64; 3] = [0x7e55_e2ae_0000_0001, 1, 0xdead_beef_cafe_f00d];
 const VOXEL_SIZES: [f32; 2] = [1.0, 0.5];
@@ -34,7 +46,9 @@ fn params_of(f: &Fixtures) -> WorldgenParams {
 }
 
 fn names() -> Mapping {
-    fixtures().mapping()
+    let mut names = fixtures().mapping();
+    names.materials.insert(WOOD, "t:wood".to_owned());
+    names
 }
 
 /// The fixtures again, behind a Material they do not use and each in another order, as another
@@ -63,28 +77,6 @@ fn reordered() -> Fixtures {
     }
 }
 
-/// Every Voxel in box order as its Material name, Shape name and Orientation, so content
-/// registered in another order makes the same digest.
-fn hash(digest: &mut Sha256, names: &Mapping, chunk: &Chunk) {
-    for z in 0..CHUNK_SIZE {
-        for y in 0..CHUNK_SIZE {
-            for x in 0..CHUNK_SIZE {
-                let v = chunk.get(x, y, z);
-                let material = names
-                    .materials
-                    .get(&v.material())
-                    .expect("a named Material");
-                let shape = names.shapes.get(&v.shape()).expect("a named Shape");
-                for name in [material, shape] {
-                    digest.update((name.len() as u32).to_le_bytes());
-                    digest.update(name.as_bytes());
-                }
-                digest.update([v.orientation()]);
-            }
-        }
-    }
-}
-
 fn digest(generator: &Worldgen, names: &Mapping) -> String {
     let chunk_m = CHUNK_SIZE as f32 * generator.voxel_size();
     let rows = (-8.0 / chunk_m).floor() as i32..=(56.0 / chunk_m).floor() as i32;
@@ -93,15 +85,11 @@ fn digest(generator: &Worldgen, names: &Mapping) -> String {
     for cy in rows {
         for cz in -reach..=reach {
             for cx in -reach..=reach {
-                hash(&mut digest, names, &generator.chunk(cx, cy, cz));
+                digest::chunk(&mut digest, names, &generator.chunk(cx, cy, cz));
             }
         }
     }
-    digest
-        .finalize()
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect()
+    digest::hex(digest)
 }
 
 fn digests() -> Vec<String> {
@@ -159,15 +147,11 @@ fn mountain_digest(generator: &Worldgen, names: &Mapping) -> String {
     for cy in rows {
         for dz in -reach..=reach {
             for dx in -reach..=reach {
-                hash(&mut digest, names, &generator.chunk(cx + dx, cy, cz + dz));
+                digest::chunk(&mut digest, names, &generator.chunk(cx + dx, cy, cz + dz));
             }
         }
     }
-    digest
-        .finalize()
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect()
+    digest::hex(digest)
 }
 
 #[test]
@@ -227,4 +211,321 @@ const RECORDED_HIGH_GROUND: [&str; 6] = [
     "df143051397417a0e8916a02eb4030b8947b8a31717c0fb72487e867c0e4581b",
     "95d2a641d8ef992f71229012b2c5b2639cb304ae2ecfb77445b4938a70a9f936",
     "44e0402afe6124bb3f702ff90d37becd443552003432be6098546cab03d05d3a",
+];
+
+/// The content digests' seeds and Voxel sizes. The sea stands over the origin at each.
+const CASES: [(u64, f32); 4] = [
+    (0x7e55_e2ae_0000_0001, 1.0),
+    (0x7e55_e2ae_0000_0001, 0.5),
+    (0xdead_beef_cafe_f00d, 1.0),
+    (0xdead_beef_cafe_f00d, 0.5),
+];
+
+/// The forest's trunks. Unregistered, since generation never asks the tables; [`names`] names it.
+const WOOD: MaterialId = 200;
+
+/// The fixture ground and sea under one Biome of trees close enough to crowd, and no Settlement,
+/// so a Player spawns on the dry land nearest the origin.
+fn forest() -> WorldgenParams {
+    let tree = SurfaceFeature {
+        material: WOOD,
+        spacing_m: 6.0,
+        plant: Some(SurfacePlant {
+            shape: SHAPE_FULL_CUBE,
+            kind: SurfacePlantKind::Tree(SurfaceTree {
+                trunk: WOOD,
+                canopy: fixtures().leaves,
+                trunk_height_m: (3.0, 5.0),
+                canopy_radius_m: 2.5,
+                fruit: None,
+                vines: None,
+                branching: None,
+            }),
+        }),
+        clump: None,
+        field: None,
+    };
+    WorldgenParams {
+        biomes: BiomeTable::new(&[Biome {
+            name: BiomeName::new("t:forest").unwrap(),
+            temperature: 0.5,
+            humidity: 0.5,
+            ground: None,
+            sky_fog: None,
+            cave_scale: None,
+            surface_features: SurfaceFeatures::new(&[tree]).unwrap(),
+        }])
+        .unwrap(),
+        ..world_params()
+    }
+}
+
+/// A content box: Chunks with the Overlay the Plant table derives for each.
+type Boxed = Vec<(Chunk, ChunkOverlay)>;
+
+fn overlay_of(g: &Worldgen, plants: &PlantTable, chunk: &Chunk) -> ChunkOverlay {
+    plants.generated_overlay(chunk, g.params().water.map(|w| w.material))
+}
+
+/// The Chunks within `half_m` of `centre_m` across, from 16 m under its ground to 16 m over it.
+fn boxed(g: &Worldgen, plants: &PlantTable, centre_m: [f32; 2], half_m: f32) -> Boxed {
+    let chunk_m = CHUNK_SIZE as f32 * g.voxel_size();
+    let span = |c: f32, half: f32| {
+        ((c - half) / chunk_m).floor() as i32..=((c + half) / chunk_m).floor() as i32
+    };
+    let ground_m = g.surface_height_m(centre_m[0], centre_m[1]);
+    let mut chunks = Vec::new();
+    for cy in span(ground_m, 16.0) {
+        for cz in span(centre_m[1], half_m) {
+            for cx in span(centre_m[0], half_m) {
+                let chunk = g.chunk(cx, cy, cz);
+                let overlay = overlay_of(g, plants, &chunk);
+                chunks.push((chunk, overlay));
+            }
+        }
+    }
+    chunks
+}
+
+fn holds(boxed: &Boxed, material: MaterialId) -> bool {
+    boxed
+        .iter()
+        .any(|(c, _)| c.kinds().iter().any(|v| v.material() == material))
+}
+
+/// Whether `material` stands in a Voxel whose generated Overlay is `fluid`.
+fn stands_in(chunk: &Chunk, overlay: &ChunkOverlay, material: MaterialId, fluid: Fluid) -> bool {
+    voxels().any(|[x, y, z]| {
+        chunk.get(x, y, z).material() == material && overlay.get(x, y, z).fluid == Some(fluid)
+    })
+}
+
+fn voxels() -> impl Iterator<Item = [usize; 3]> {
+    (0..CHUNK_SIZE)
+        .flat_map(|z| (0..CHUNK_SIZE).flat_map(move |y| (0..CHUNK_SIZE).map(move |x| [x, y, z])))
+}
+
+/// The centre of the first Chunk, swept out from `from` ring by ring within 16 m of its ground,
+/// that `found` accepts; the content's position, without API for a test.
+fn sweep(
+    g: &Worldgen,
+    plants: &PlantTable,
+    from: [f32; 2],
+    found: impl Fn(&Chunk, &ChunkOverlay) -> bool,
+) -> [f32; 2] {
+    let chunk_m = CHUNK_SIZE as f32 * g.voxel_size();
+    let [fx, fz] = from.map(|m| (m / chunk_m).floor() as i32);
+    let centre = |c: i32| (c as f32 + 0.5) * chunk_m;
+    (0..(256.0 / chunk_m) as i32)
+        .flat_map(|r| {
+            (-r..=r).flat_map(move |dz| {
+                (-r..=r)
+                    .filter(move |&dx| dx.abs() == r || dz.abs() == r)
+                    .map(move |dx| [fx + dx, fz + dz])
+            })
+        })
+        .find(|&[cx, cz]| {
+            let ground_m = g.surface_height_m(centre(cx), centre(cz));
+            let rows = ((ground_m - 16.0) / chunk_m).floor() as i32
+                ..=((ground_m + 16.0) / chunk_m).floor() as i32;
+            rows.into_iter().any(|cy| {
+                let chunk = g.chunk(cx, cy, cz);
+                found(&chunk, &overlay_of(g, plants, &chunk))
+            })
+        })
+        .map(|c| c.map(centre))
+        .expect("the content within 256 m")
+}
+
+/// The water at least 2 m deep nearest `from`, searched in rings 16 m apart: a reed leaves a Voxel
+/// of water over its top.
+fn water_near(g: &Worldgen, from: [f32; 2]) -> [f32; 2] {
+    (0..128)
+        .flat_map(|ring| {
+            let r = ring as f32 * 16.0;
+            let n = (ring * 6).max(1);
+            (0..n).map(move |k| {
+                let a = k as f32 * std::f32::consts::TAU / n as f32;
+                [from[0] + r * a.cos(), from[1] + r * a.sin()]
+            })
+        })
+        .find(|&[x, z]| {
+            g.water_surface_m(x, z)
+                .is_some_and(|level_m| level_m - g.surface_height_m(x, z) >= 2.0)
+        })
+        .expect("water within 2 km")
+}
+
+/// Each Voxel's generated Overlay in box order: a 0 where it holds no fluid, else a 1, the fluid's
+/// name, its source flag and each void's level. Generation never sets fire.
+fn hash_overlay(digest: &mut Sha256, names: &Mapping, overlay: &ChunkOverlay) {
+    for [x, y, z] in voxels() {
+        let Some(fluid) = overlay.get(x, y, z).fluid else {
+            digest.update([0]);
+            continue;
+        };
+        digest.update([1]);
+        digest::name(
+            digest,
+            names.materials.get(&fluid.material).expect("a named fluid"),
+        );
+        digest.update([u8::from(fluid.source)]);
+        for level in fluid.levels() {
+            digest.update([level.surface]);
+            digest.update(level.reach.to_le_bytes());
+            digest.update(level.descent.to_le_bytes());
+        }
+    }
+}
+
+fn box_digest(boxed: &Boxed) -> String {
+    let names = names();
+    let mut digest = Sha256::new();
+    for (chunk, overlay) in boxed {
+        digest::chunk(&mut digest, &names, chunk);
+        hash_overlay(&mut digest, &names, overlay);
+    }
+    digest::hex(digest)
+}
+
+/// Each box is checked for its content before any digest is compared, so none can pass over bare
+/// ground.
+fn case_digests(make: impl Fn(u64, f32) -> (Boxed, String)) -> Vec<String> {
+    CASES
+        .iter()
+        .map(|&(seed, size)| {
+            let (boxed, missing) = make(seed, size);
+            assert!(missing.is_empty(), "{seed:x} at {size} m: no {missing}");
+            box_digest(&boxed)
+        })
+        .collect()
+}
+
+fn missing(checks: &[(bool, &str)]) -> String {
+    checks
+        .iter()
+        .filter(|(held, _)| !held)
+        .map(|(_, what)| *what)
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+#[test]
+fn the_settlement_a_player_spawns_in_makes_the_recorded_chunks() {
+    let m = &fixtures().content;
+    let made = case_digests(|seed, size| {
+        let g = content().worldgen(seed, size);
+        let reach_m = content().settlements[0].reach_m();
+        let b = boxed(&g, &content().plants, g.spawn_m(), reach_m);
+        let checks = [(holds(&b, m.hall), "building"), (holds(&b, m.road), "road")];
+        (b, missing(&checks))
+    });
+    assert_eq!(made, RECORDED_SETTLEMENT);
+}
+
+#[test]
+fn the_structure_nearest_spawn_makes_the_recorded_chunks() {
+    let stone = fixtures().content.stone;
+    let made = case_digests(|seed, size| {
+        let g = content().worldgen(seed, size);
+        let plants = &content().plants;
+        let at = sweep(&g, plants, g.spawn_m(), |c, _| {
+            c.kinds().iter().any(|v| v.material() == stone)
+        });
+        let b = boxed(&g, plants, at, 8.0);
+        let checks = [(holds(&b, stone), "Structure")];
+        (b, missing(&checks))
+    });
+    assert_eq!(made, RECORDED_STRUCTURE);
+}
+
+#[test]
+fn the_column_plant_in_water_makes_the_recorded_chunks_and_overlay() {
+    let reed = fixtures().content.reed;
+    let wet = Fluid::source(fixtures().water);
+    let made = case_digests(|seed, size| {
+        let g = content().worldgen(seed, size);
+        let plants = &content().plants;
+        let at = sweep(&g, plants, water_near(&g, g.spawn_m()), |c, o| {
+            stands_in(c, o, reed, wet)
+        });
+        let b = boxed(&g, plants, at, 8.0);
+        let checks = [(
+            b.iter().any(|(c, o)| stands_in(c, o, reed, wet)),
+            "Plant in water",
+        )];
+        (b, missing(&checks))
+    });
+    assert_eq!(made, RECORDED_PLANT);
+}
+
+#[test]
+fn the_forest_a_player_spawns_in_makes_the_recorded_chunks() {
+    let made = case_digests(|seed, size| {
+        let g = Worldgen::new(seed, size, forest());
+        let b = boxed(&g, &PlantTable::default(), g.spawn_m(), 16.0);
+        let checks = [
+            (holds(&b, WOOD), "trunk"),
+            (holds(&b, fixtures().leaves), "canopy"),
+        ];
+        (b, missing(&checks))
+    });
+    assert_eq!(made, RECORDED_FOREST);
+}
+
+/// In the content's hamlet, then on the forest's dry land, which a Player looks for only because
+/// the origin is sea.
+#[test]
+fn a_player_spawns_where_recorded() {
+    let made: Vec<[[u32; 2]; 2]> = CASES
+        .iter()
+        .map(|&(seed, size)| {
+            let forest = Worldgen::new(seed, size, forest());
+            assert!(forest.water_surface_m(0.0, 0.0).is_some(), "{seed:x}");
+            [content().worldgen(seed, size).spawn_m(), forest.spawn_m()]
+                .map(|p| p.map(f32::to_bits))
+        })
+        .collect();
+    let recorded: Vec<[[u32; 2]; 2]> = RECORDED_SPAWN
+        .iter()
+        .map(|c| c.map(|p| p.map(f32::to_bits)))
+        .collect();
+    assert_eq!(made, recorded);
+}
+
+/// The content digests, case by case, recorded on macOS arm64.
+const RECORDED_SETTLEMENT: [&str; 4] = [
+    "4c3bed3bdf258509af3cdaf5718d89c701a9b67a4d12cbde577750b6712cb141",
+    "d2f0122fcd542eef39517a5e69358abee348aa9b9a9d2bc5cd5fe45dd115f7c1",
+    "014596455645e5e30040affcaef21807a8cce2b1ef5a1e2c9ff03f357ba3b34a",
+    "1423b450b3c40e46172ce4b30d2add6c85786e669eca6388d9fcbbb1b3d2966b",
+];
+
+const RECORDED_STRUCTURE: [&str; 4] = [
+    "a67fdb05d35498ea46216ec509e7fa11a673da838a810968c59c01f529dd7ce6",
+    "2556c024eb01fed68ecf917c11b553dfcee2ace83508d31c56b534cbecbb4016",
+    "0c5a7a58831979cb7efd5357c51cad66112b44002b9404c16faaf53b682c1821",
+    "1f0a38614024300a6cb3aa27bc91299f11b1ed55b0be668a842efe1671347cdc",
+];
+
+const RECORDED_PLANT: [&str; 4] = [
+    "debc2adff742e1944d542cc18ceb2538b5574058adf7b700ef00c8543ed34d8a",
+    "8755dfbabe3ddf2d09f88ebcf55a17c2578e78282932852be580b1968450490d",
+    "4315b5755ae17b1b18e17eacd411d91ac561930c33d672c64e914339ed9023b3",
+    "370ab713501b0510f5b54bdae8ed94e4f30dbcc678a66d29bdf716b67455843c",
+];
+
+const RECORDED_FOREST: [&str; 4] = [
+    "208e96faaaba0382cf0f8c97f854af1eef84fc08009456eea5f1b552837aa09a",
+    "2cfb0213c80b50a85fe81127378521c803038e63dee8600e378ae2aca62ee34b",
+    "5ced9a6a5d38f78a54d558498ff69c728c24b879450ffedae7ceaf47118649c0",
+    "dbae335dfab55261370553635cfe9f03e6ec78aad8cfb980b612c480a0a10daa",
+];
+
+/// The content's then the forest's, compared bit for bit.
+const RECORDED_SPAWN: [[[f32; 2]; 2]; 4] = [
+    [[-1031.0, 825.8], [-460.59995, 787.1415]],
+    [[-1031.0, 825.8], [-460.59995, 787.1415]],
+    [[-54.0, 1513.8], [-1802.0979, -938.86487]],
+    [[-54.0, 1513.8], [-1802.0979, -938.86487]],
 ];

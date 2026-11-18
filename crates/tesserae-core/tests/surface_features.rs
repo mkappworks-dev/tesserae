@@ -10,9 +10,8 @@ use tesserae_core::save::{Generation, Mapping};
 use tesserae_core::testgen::fixtures;
 use tesserae_core::worldgen::WaterParams;
 use tesserae_core::{
-    AIR, Biome, BiomeId, BiomeName, BiomeSet, BiomeTable, CHUNK_SIZE, Chunk, ClimateParams,
-    GroundParams, MaterialId, Ore, OreTable, SurfaceFeature, SurfaceFeatures, Voxel, Worldgen,
-    WorldgenParams,
+    AIR, Biome, BiomeId, BiomeName, BiomeSet, BiomeTable, CHUNK_SIZE, ClimateParams, GroundParams,
+    MaterialId, Ore, OreTable, SurfaceFeature, SurfaceFeatures, Voxel, Worldgen, WorldgenParams,
 };
 
 /// Generation never asks the tables, so ids no fixture uses mark the features apart.
@@ -31,6 +30,7 @@ fn featured(biome: Biome, features: &[SurfaceFeature]) -> Biome {
 }
 
 mod common;
+mod digest;
 
 const SEEDS: [u64; 2] = [0x7e55_e2ae_0000_0001, 0xdead_beef_cafe_f00d];
 const VOXEL_SIZES: [f32; 2] = [1.0, 0.5];
@@ -93,48 +93,20 @@ fn biome_world() -> WorldgenParams {
     })
 }
 
-fn put(digest: &mut Sha256, v: Voxel) {
-    digest.update(v.material().to_le_bytes());
-    digest.update(v.shape().to_le_bytes());
-    digest.update([v.orientation()]);
-}
-
-fn hash(digest: &mut Sha256, chunk: &Chunk) {
-    match chunk.uniform() {
-        Some(v) => {
-            digest.update([1]);
-            put(digest, v);
-        }
-        None => {
-            digest.update([0]);
-            for z in 0..CHUNK_SIZE {
-                for y in 0..CHUNK_SIZE {
-                    for x in 0..CHUNK_SIZE {
-                        put(digest, chunk.get(x, y, z));
-                    }
-                }
-            }
-        }
-    }
-}
-
 fn digest(generator: &Worldgen) -> String {
     let chunk_m = CHUNK_SIZE as f32 * generator.voxel_size();
     let rows = (8.0 / chunk_m).floor() as i32..=(56.0 / chunk_m).floor() as i32;
     let reach = (48.0 / chunk_m).ceil() as i32;
+    let names = fixtures().mapping();
     let mut digest = Sha256::new();
     for cy in rows {
         for cz in -reach..=reach {
             for cx in -reach..=reach {
-                hash(&mut digest, &generator.chunk(cx, cy, cz));
+                digest::chunk(&mut digest, &names, &generator.chunk(cx, cy, cz));
             }
         }
     }
-    digest
-        .finalize()
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect()
+    digest::hex(digest)
 }
 
 fn digests(params: WorldgenParams) -> Vec<String> {
@@ -149,10 +121,10 @@ fn digests(params: WorldgenParams) -> Vec<String> {
 }
 
 const RECORDED: [&str; 4] = [
-    "3112f65200e9db56ef900f375b68980c6ee8d8faaedac301f81313af0e4cd4db",
-    "3e4fbe12a76219faf6ac37255373e917b99c090ccb3d06bf220b62c4aa2919e3",
-    "0e024edda2287acbc442ab793da892ce77d71db0007e0f50ff24d9c0223116cb",
-    "87a4ec8a7a7ae89aa0431bd5c214528472c3a68774d1b2564dd950a59faca15b",
+    "7ba6ccc7e4808b16862f331a7ee8d2898f915cc19b5d6e4bdf0913637323122d",
+    "58256182dbb92bb8723db34ea794d459a91b784313798fadcca64998d121689b",
+    "80111a98cd84e8cb8d6bf9021842bab3ec76604c2000b56133a90ac25fd9d695",
+    "0115fc937fa1c65c12f6d3c3ebe9ebcbb9fe5edeb409c06b6a7e566ce76cf97a",
 ];
 
 #[test]

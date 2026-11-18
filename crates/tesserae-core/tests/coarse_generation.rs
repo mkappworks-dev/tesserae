@@ -8,10 +8,12 @@
     reason = "a test's own maths is not generation"
 )]
 
+mod digest;
+
 use sha2::{Digest, Sha256};
 use tesserae_core::testgen::fixtures;
 use tesserae_core::worldgen::WaterParams;
-use tesserae_core::{CHUNK_SIZE, Chunk, Voxel, Worldgen, WorldgenParams, downsample};
+use tesserae_core::{CHUNK_SIZE, Chunk, Worldgen, WorldgenParams, downsample};
 
 const SEEDS: [u64; 3] = [0x7e55_e2ae_0000_0001, 1, 0xdead_beef_cafe_f00d];
 
@@ -41,32 +43,6 @@ fn source(seed: u64, level: u32, caves: bool) -> Worldgen {
     Worldgen::new(seed, 2f32.powi(level as i32 - 1), params)
 }
 
-fn put(digest: &mut Sha256, v: Voxel) {
-    digest.update(v.material().to_le_bytes());
-    digest.update(v.shape().to_le_bytes());
-    digest.update([v.orientation()]);
-}
-
-fn hash(digest: &mut Sha256, chunk: &Chunk) {
-    match chunk.uniform() {
-        Some(v) => {
-            digest.update([1]);
-            put(digest, v);
-        }
-        None => {
-            digest.update([0]);
-            chunk.kinds().iter().for_each(|&v| put(digest, v));
-            for z in 0..CHUNK_SIZE {
-                for y in 0..CHUNK_SIZE {
-                    for x in 0..CHUNK_SIZE {
-                        put(digest, chunk.get(x, y, z));
-                    }
-                }
-            }
-        }
-    }
-}
-
 /// The box's middle column along x and its floor and ceiling, in metres. Land lies anywhere in
 /// the band, and under the sea a tunnel never opens, so the box is hung from the first ground east
 /// of the origin standing well above Sea level.
@@ -84,6 +60,7 @@ fn box_m(seed: u64) -> (f32, f32, f32) {
 fn level_digest(seed: u64, level: u32, caves: bool) -> String {
     let source = source(seed, level, caves);
     let shapes = &fixtures().tables.shapes;
+    let names = fixtures().mapping();
     let cell_m = CHUNK_SIZE as f32 * 2f32.powi(level as i32);
     let (x_m, lowest, highest) = box_m(seed);
     let middle = (x_m / cell_m).floor() as i32;
@@ -99,19 +76,18 @@ fn level_digest(seed: u64, level: u32, caves: bool) -> String {
                         2 * cz + (i >> 2) as i32,
                     )
                 });
-                children.iter().for_each(|c| hash(&mut digest, c));
-                hash(
+                children
+                    .iter()
+                    .for_each(|c| digest::chunk(&mut digest, &names, c));
+                digest::chunk(
                     &mut digest,
+                    &names,
                     &downsample(std::array::from_fn(|i| &children[i]), shapes),
                 );
             }
         }
     }
-    digest
-        .finalize()
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect()
+    digest::hex(digest)
 }
 
 fn digests() -> Vec<String> {
@@ -142,13 +118,13 @@ fn the_box_holds_caves_at_every_level_and_seed() {
 
 /// Seed by seed, levels 1 to 3.
 const RECORDED: [&str; 9] = [
-    "0dac0ab4e3f47e573f129ee13edaa7e9b32b6085ee904fcd8941924640a768eb",
-    "4143c6812bd9c83c95b95936e5b40ddddbecd16baecd0441ad8e838728f3de9b",
-    "828c72d635866191045ea71815be1f73360b9d818defedfd30d1401b267c5077",
-    "e721fa23701ccd30231d31b2aef6710d494b348df1451ff02ab18e57478285f5",
-    "275dbb72503ece87f6dbca9379a0845e84fbdf2ff06c309753dc6ac972fc78c1",
-    "231fbb8e7781ae9f47cc2fe1cd03a1a06da60158ef9daf1523559211ad66dc05",
-    "4e9208c14abe8f725e335fed32544932fb5bc109efacae51a13eed3d5afe1081",
-    "8b0871bd21530d3c966a53a5d87c5c60de3d3ba3002587a21a38a712ee2ae50a",
-    "fc5d6ec5b8ec83281061b05989ffbe98d2abc007617196d64a2ee4a3c58dbf07",
+    "86c3b503ad26f589a51ad87dee7cfd8d53b82ec733dfb655c7eb8fe8f6537114",
+    "09d02b763dea21125973a8d48b8bf9c7d029f26f2c7306cbba44a32f716e032f",
+    "5ad114e56ce708d7230bd8b15b25e9353b5b9466da86381273e188da19f0f158",
+    "04e4d0f62c9531caaf025f0a62d3dc89fde7cf0d2c76942c904e6ff5c82cb00e",
+    "fbbf55549972bdd072f07e602d18dd7dee9acbb03bbbe3c93fb797c0a5833ad9",
+    "950e30093ebf132ffa98b1fbff7f1ecaef4d3e7599bca4183fc4997fa1b32654",
+    "b4922c3c8d9d297aa0df6de32b204fdfacfc9ecb162b099e4d695a350cdb3531",
+    "446556c76add09c8437b26c2ee22a7f65a38e09b60b18c5a9d0ef6cf08396651",
+    "ea6a9b13625f0c62f3655d293611f4b9cbb899fab4070ed5bb62b9b9c59cff88",
 ];

@@ -9,7 +9,7 @@ use crate::fluid::FluidDef;
 use crate::material::{MaterialDef, Occlusion, RenderClass};
 use crate::noise::fbm2;
 use crate::save::Mapping;
-use crate::settlement::{Building, PlotRule, Settlement};
+use crate::settlement::{Building, Outskirts, PlotRule, Settlement};
 use crate::shape::{SHAPE_POST, SHAPE_SLAB, SHAPE_STAIR};
 use crate::tables::Tables;
 use crate::template::{Cell, Template};
@@ -392,7 +392,18 @@ pub fn content() -> &'static Content {
             minimum: 1,
             path: Voxel::cube(m.road),
             loot: None,
-            outskirts: Vec::new(),
+            // Each faces out from the disc at its own angle, the turning the digests must cover.
+            outskirts: vec![Outskirts {
+                rules: vec![PlotRule {
+                    building: building(2),
+                    weight: 1.0,
+                    min: 0,
+                    max: 3,
+                    loot: None,
+                }],
+                count: (1, 3),
+                chance: 1.0,
+            }],
         }];
         let hamlet = crate::BiomeSettlement {
             settlement: 0,
