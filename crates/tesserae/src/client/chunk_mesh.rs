@@ -18,7 +18,7 @@ use tesserae_core::MeshLayer;
 use tesserae_core::light::Light;
 #[cfg(test)]
 use tesserae_core::mesh::Corner;
-use tesserae_core::mesh::{PAINT_SHIFT, PAINT_SLOTS, QUAD_CORNERS, Quad, QuadKind};
+use tesserae_core::mesh::{PAINT_SHIFT, PAINT_SLOTS, QUAD_CORNERS, Quad};
 
 /// The placeholder a Chunk layer's mesh is made of: four vertices a quad, which
 /// no pipeline reads. Bevy allocates a mesh's vertex range by its vertex count,
@@ -44,92 +44,29 @@ const NARROW: u32 = 2;
 /// table index reaches.
 const WIDE: u32 = 3;
 
-/// A face direction with at least this many quads in a layer gets a draw of
-/// its own, hidden while the camera is behind every one of its planes. Fewer
-/// are drawn with the layer's other quads: on Metal each draw is a draw call of
-/// its own, and a small one saves less vertex work than it costs.
-pub const OWN_DRAW_QUADS: u32 = 128;
-
-/// How a layer's quads are drawn.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Split {
-    /// Each face direction with [`OWN_DRAW_QUADS`] or more on its own, the
-    /// rest together. Only for a layer whose back faces are culled.
-    ByFace,
-    /// All in one draw, in the mesher's order, which the blended sort indexes.
-    Whole,
-}
-
-/// The face kind, in `FACE_STEPS` order, every quad of a draw has.
-#[derive(Component, Clone, Copy, PartialEq, Eq, Debug)]
-pub struct Facing(pub u8);
-
-impl Facing {
-    pub fn normal(self) -> Vec3 {
-        let mut normal = Vec3::ZERO;
-        normal[usize::from(self.0 / 2)] = if self.0 & 1 == 1 { 1.0 } else { -1.0 };
-        normal
-    }
-
-    /// Whether a camera at `eye` sees none of the draw's quads, which lie in
-    /// `aabb` under `transform`: it is behind every one of their planes. The
-    /// margin keeps rounding from hiding a face the GPU would still draw.
-    pub fn hidden_from(self, eye: Vec3, aabb: &Aabb, transform: &GlobalTransform) -> bool {
-        const MARGIN_M: f32 = 1e-3;
-        let axis = usize::from(self.0 / 2);
-        if self.0 & 1 == 1 {
-            eye[axis] < transform.transform_point(aabb.min().into())[axis] - MARGIN_M
-        } else {
-            eye[axis] > transform.transform_point(aabb.max().into())[axis] + MARGIN_M
-        }
-    }
-}
-
-/// One draw of a layer: `count` records from the `first`.
-#[derive(Clone, Debug, PartialEq)]
-pub struct LayerDraw {
-    /// `None` for flat forms and directions too small to draw alone.
-    pub facing: Option<Facing>,
-    pub first: u32,
-    pub count: u32,
-    /// In Voxels: the placeholder has no positions Bevy could find it from.
-    pub aabb: Aabb,
-}
-
 /// One Chunk layer's words, ready for the quad buffer. The Client keeps it
-/// beside the entities drawing it, as collision and the blended sort read it.
+/// beside the entity drawing it, as collision and the blended sort read it.
 #[derive(Component, Clone, Debug)]
 pub struct ChunkQuads {
     words: Vec<u32>,
-    draws: Vec<LayerDraw>,
+    aabb: Aabb,
     /// Where `words` starts in the quad buffer, which `MeshTag` carries to the
     /// shader. Set as it lands.
     pub at: u32,
 }
 
-/// The draw a flat form goes in, after the six face directions.
-const MIXED: usize = 6;
-
-fn direction_of(quad: &Quad) -> usize {
-    match quad.kind() {
-        QuadKind::Face(face) => face,
-        QuadKind::Cross | QuadKind::Plane => MIXED,
-    }
-}
-
 impl ChunkQuads {
     /// `None` for a layer with nothing to draw.
-    pub fn pack(layer: &MeshLayer, level: u32, split: Split) -> Option<ChunkQuads> {
+    pub fn pack(layer: &MeshLayer, level: u32) -> Option<ChunkQuads> {
         if layer.is_empty() {
             return None;
         }
-        let (order, draws) = draws(layer, split);
         let mut slots: HashMap<u32, u32> = HashMap::default();
         let mut table = Vec::new();
-        let slot_of: Vec<u32> = order
+        let slot_of: Vec<u32> = layer
+            .quads
             .iter()
-            .map(|&q| {
-                let quad = &layer.quads[q as usize];
+            .map(|quad| {
                 let word = paint(quad.material, quad.light);
                 *slots.entry(word).or_insert_with(|| {
                     table.push(word);
@@ -150,23 +87,26 @@ impl ChunkQuads {
             words[1] = table.len() as u32;
             words.extend_from_slice(&table);
         }
-        for (&q, &slot) in order.iter().zip(&slot_of) {
-            let [lo, hi] = layer.quads[q as usize].geometry;
+        for (quad, &slot) in layer.quads.iter().zip(&slot_of) {
+            let [lo, hi] = quad.geometry;
             if stride == NARROW {
                 words.extend([lo, hi | slot << PAINT_SHIFT]);
             } else {
                 words.extend([lo, hi, table[slot as usize]]);
             }
         }
+        let (min, max) = layer
+            .quads
+            .iter()
+            .map(Quad::bounds)
+            .fold((Vec3::MAX, Vec3::MIN), |(lo, hi), (least, most)| {
+                (lo.min(Vec3::from(least)), hi.max(Vec3::from(most)))
+            });
         Some(ChunkQuads {
             words,
-            draws,
+            aabb: Aabb::from_min_max(min, max),
             at: 0,
         })
-    }
-
-    pub fn draws(&self) -> &[LayerDraw] {
-        &self.draws
     }
 
     pub fn words(&self) -> &[u32] {
@@ -178,23 +118,22 @@ impl ChunkQuads {
         self.words[0]
     }
 
-    #[cfg(test)]
     pub fn quad_count(&self) -> u32 {
         (self.words.len() as u32 - self.records_at()) / self.stride()
     }
 
-    /// What the GPU holds for the layer: its words and its placeholders.
+    /// The bounds of every corner, in Voxels: the placeholder has no positions
+    /// Bevy could find them from.
+    pub fn aabb(&self) -> Aabb {
+        self.aabb
+    }
+
+    /// What the GPU holds for the layer: its words and its placeholder.
     #[cfg(any(feature = "dev", feature = "profiling"))]
     pub fn gpu_bytes(&self) -> usize {
-        let placeholders: u32 = self
-            .draws
-            .iter()
-            .map(|draw| {
-                let wide = (draw.first + draw.count) * VERTICES_PER_QUAD > U16_VERTICES;
-                draw.count * (VERTICES_PER_QUAD + 6 * if wide { 4 } else { 2 })
-            })
-            .sum();
-        self.words.len() * 4 + placeholders as usize
+        let vertices = self.quad_count() * VERTICES_PER_QUAD;
+        let index_bytes = if vertices > U16_VERTICES { 4 } else { 2 };
+        self.words.len() * 4 + (vertices + self.quad_count() * 6 * index_bytes) as usize
     }
 
     fn stride(&self) -> u32 {
@@ -236,59 +175,18 @@ impl ChunkQuads {
     }
 }
 
-/// The order a layer's quads are stored in and the draws over it: the quads
-/// no direction draws alone first, in the mesher's order, then each
-/// direction's.
-fn draws(layer: &MeshLayer, split: Split) -> (Vec<u32>, Vec<LayerDraw>) {
-    let directions: Vec<usize> = layer.quads.iter().map(direction_of).collect();
-    let mut counts = [0u32; MIXED + 1];
-    for &d in &directions {
-        counts[d] += 1;
-    }
-    let alone = |d: usize| split == Split::ByFace && d < MIXED && counts[d] >= OWN_DRAW_QUADS;
-    let groups = std::iter::once(None).chain((0..MIXED).filter(|&d| alone(d)).map(Some));
-    let mut order = Vec::with_capacity(layer.quads.len());
-    let mut draws = Vec::new();
-    for group in groups {
-        let first = order.len();
-        order.extend((0..layer.quads.len() as u32).filter(|&q| {
-            let d = directions[q as usize];
-            group.map_or(!alone(d), |g| g == d)
-        }));
-        if order.len() == first {
-            continue;
-        }
-        let (min, max) = order[first..]
-            .iter()
-            .map(|&q| layer.quads[q as usize].bounds())
-            .fold((Vec3::MAX, Vec3::MIN), |(lo, hi), (least, most)| {
-                (lo.min(Vec3::from(least)), hi.max(Vec3::from(most)))
-            });
-        draws.push(LayerDraw {
-            facing: group.map(|d| Facing(d as u8)),
-            first: first as u32,
-            count: (order.len() - first) as u32,
-            aabb: Aabb::from_min_max(min, max),
-        });
-    }
-    (order, draws)
-}
-
 /// A Material and the light on it as one table word.
 pub fn paint(material: u32, light: Light) -> u32 {
     debug_assert!(material < 1 << LIGHT_SHIFT);
     material | u32::from(light.packed()) << LIGHT_SHIFT
 }
 
-/// The mesh one draw of a layer draws: render-world only, since nothing on
-/// the main world reads it. Its indices name the draw's records from the
-/// `first`, while it holds vertices for its own `count` only: no pipeline
-/// reads a vertex, and wgpu bounds an indexed draw by its indices alone.
-pub fn placeholder(first: u32, count: u32) -> Mesh {
-    let vertices = count * VERTICES_PER_QUAD;
-    let indices =
-        (first..first + count).flat_map(|q| QUAD_CORNERS.map(|c| q * VERTICES_PER_QUAD + c as u32));
-    let indices = if (first + count) * VERTICES_PER_QUAD > U16_VERTICES {
+/// The mesh a layer of `quads` quads draws: render-world only, since nothing
+/// on the main world reads it.
+pub fn placeholder(quads: u32) -> Mesh {
+    let vertices = quads * VERTICES_PER_QUAD;
+    let indices = (0..quads).flat_map(|q| QUAD_CORNERS.map(|c| q * VERTICES_PER_QUAD + c as u32));
+    let indices = if vertices > U16_VERTICES {
         Indices::U32(indices.collect())
     } else {
         Indices::U16(indices.map(|i| i as u16).collect())
@@ -523,119 +421,36 @@ mod tests {
         greedy_mesh(&Neighborhood::isolated(lit), tables)
     }
 
-    fn sorted(quads: impl IntoIterator<Item = Quad>) -> Vec<Quad> {
-        let mut quads: Vec<Quad> = quads.into_iter().collect();
-        quads.sort_by_key(|q| (q.geometry, q.material, q.light.packed()));
-        quads
-    }
-
-    /// Packs `layer` both ways at an offset into a buffer of other words, as
-    /// the quad buffer would hold it, and expands every vertex of every draw
-    /// as the shader does.
+    /// Packs `layer` at an offset into a buffer of other words, as the quad
+    /// buffer would hold it, and expands every vertex as the shader does.
     fn assert_expands_exactly(layer: &MeshLayer, what: &str) {
-        for split in [Split::ByFace, Split::Whole] {
-            let what = format!("{what}, {split:?}");
-            let level = 3;
-            let packed = ChunkQuads::pack(layer, level, split).expect("a layer with quads");
-            let at = 5;
-            let mut buffer = vec![u32::MAX; at as usize];
-            buffer.extend_from_slice(packed.words());
-            buffer.extend([u32::MAX; 4]);
-            let stored: Vec<Quad> = packed.quads().collect();
-            let mut drawn = Vec::new();
-            for draw in packed.draws() {
-                assert_eq!(draw.first as usize, drawn.len(), "{what}: draws in order");
-                let mesh = placeholder(draw.first, draw.count);
-                assert_eq!(mesh.count_vertices() as u32, draw.count * VERTICES_PER_QUAD);
-                let indices: Vec<usize> = mesh
-                    .indices()
-                    .expect("an indexed placeholder")
-                    .iter()
-                    .collect();
-                assert_eq!(indices.len(), draw.count as usize * 6, "{what}");
-                for triangles in indices.chunks(6) {
-                    let quad = expand(&buffer, at, triangles[0] as u32);
-                    let corners = [0, 1, 2, 5].map(|k| expand(&buffer, at, triangles[k] as u32));
-                    let record = stored[triangles[0] / 4];
-                    assert_eq!(
-                        corners.map(|c| c.corner),
-                        record.corners(),
-                        "{what}: {record:?}"
-                    );
-                    assert!(corners.iter().all(|c| *c
-                        == Expanded {
-                            corner: c.corner,
-                            ..quad
-                        }));
-                    assert_eq!(quad.material, record.material, "{what}");
-                    assert_eq!(quad.light, u32::from(record.light.packed()), "{what}");
-                    assert_eq!(quad.level, level);
-                    if let Some(Facing(face)) = draw.facing {
-                        assert_eq!(record.kind(), QuadKind::Face(usize::from(face)), "{what}");
-                    }
-                    drawn.push(record);
-                }
-            }
-            match split {
-                Split::Whole => assert_eq!(drawn, layer.quads, "{what}: the mesher's order"),
-                Split::ByFace => assert_eq!(sorted(drawn), sorted(layer.quads.clone()), "{what}"),
+        let level = 3;
+        let packed = ChunkQuads::pack(layer, level).expect("a layer with quads");
+        let at = 5;
+        let mut buffer = vec![u32::MAX; at as usize];
+        buffer.extend_from_slice(packed.words());
+        buffer.extend([u32::MAX; 4]);
+        let drawn = placeholder(packed.quad_count());
+        let indices: Vec<usize> = drawn
+            .indices()
+            .expect("an indexed placeholder")
+            .iter()
+            .collect();
+        assert_eq!(indices.len(), layer.quads.len() * 6, "{what}");
+        for ((q, quad), triangles) in layer.quads.iter().enumerate().zip(indices.chunks(6)) {
+            let corners = quad.corners();
+            for (k, &corner) in tesserae_core::mesh::QUAD_CORNERS.iter().enumerate() {
+                let expanded = expand(&buffer, at, triangles[k] as u32);
+                assert_eq!(
+                    expanded.corner, corners[corner],
+                    "{what}: quad {q} vertex {k}"
+                );
+                assert_eq!(expanded.material, quad.material, "{what}: quad {q}");
+                assert_eq!(expanded.light, u32::from(quad.light.packed()), "{what}");
+                assert_eq!(expanded.level, level);
             }
         }
-    }
-
-    #[test]
-    fn each_well_filled_face_direction_is_drawn_alone_and_the_rest_together() {
-        let light = Light::new(3, 1);
-        let faces =
-            |face, n: u16| (0..n).map(move |i| Quad::face(face, 16, [i, i + 1], [0, 16], 9, light));
-        let up = 3;
-        let west = 0;
-        let quads: Vec<Quad> = faces(up, 200)
-            .chain(faces(5, 5))
-            .chain([Quad::cross([1, 2, 3], 0, false, 9, light)])
-            .chain(faces(west, OWN_DRAW_QUADS as u16))
-            .collect();
-        let layer = MeshLayer { quads };
-        let packed = ChunkQuads::pack(&layer, 0, Split::ByFace).unwrap();
-        let draws: Vec<_> = packed.draws().iter().map(|d| (d.facing, d.count)).collect();
-        assert_eq!(
-            draws,
-            [
-                (None, 6),
-                (Some(Facing(west as u8)), OWN_DRAW_QUADS),
-                (Some(Facing(up as u8)), 200)
-            ]
-        );
-        let up_draw = &packed.draws()[2];
-        assert_eq!(Vec3::from(up_draw.aabb.min()), Vec3::new(0.0, 1.0, 0.0));
-        assert_eq!(
-            Vec3::from(up_draw.aabb.max()),
-            Vec3::new(1.0, 1.0, 200.0 / 16.0)
-        );
-        assert_expands_exactly(&layer, "split");
-
-        let whole = ChunkQuads::pack(&layer, 0, Split::Whole).unwrap();
-        let draws: Vec<_> = whole.draws().iter().map(|d| (d.facing, d.count)).collect();
-        assert_eq!(draws, [(None, layer.quads.len() as u32)]);
-    }
-
-    #[test]
-    fn a_direction_is_hidden_only_from_behind_all_of_its_planes() {
-        let up = Facing(3);
-        let aabb = Aabb::from_min_max(Vec3::new(0.0, 4.0, 0.0), Vec3::new(32.0, 9.0, 32.0));
-        let chunk = GlobalTransform::from(
-            Transform::from_xyz(-64.0, 32.0, 0.0).with_scale(Vec3::splat(2.0)),
-        );
-        // The lowest plane is at 32 + 4 * 2 metres.
-        assert!(up.hidden_from(Vec3::new(0.0, 39.9, 0.0), &aabb, &chunk));
-        assert!(!up.hidden_from(Vec3::new(0.0, 40.0, 0.0), &aabb, &chunk));
-        assert!(!up.hidden_from(Vec3::new(500.0, 41.0, 0.0), &aabb, &chunk));
-        let down = Facing(2);
-        assert!(down.hidden_from(Vec3::new(0.0, 50.1, 0.0), &aabb, &chunk));
-        assert!(!down.hidden_from(Vec3::new(0.0, 50.0, 0.0), &aabb, &chunk));
-        assert!(!down.hidden_from(Vec3::new(0.0, 39.0, 0.0), &aabb, &chunk));
-        assert_eq!(Facing(4).normal(), Vec3::NEG_Z);
-        assert_eq!(Facing(1).normal(), Vec3::X);
+        assert_eq!(packed.quads().collect::<Vec<_>>(), layer.quads, "{what}");
     }
 
     #[test]
@@ -709,56 +524,29 @@ mod tests {
             })
             .collect();
         let layer = MeshLayer { quads };
-        let packed = ChunkQuads::pack(&layer, 0, Split::ByFace).unwrap();
+        let packed = ChunkQuads::pack(&layer, 0).unwrap();
         assert_eq!(packed.stride(), WIDE);
         assert_expands_exactly(&layer, "wide");
     }
 
     #[test]
-    fn each_draws_aabb_is_exactly_the_bounds_of_its_corners() {
+    fn the_aabb_is_exactly_the_bounds_of_every_corner() {
         let mesh = every_kind_of_face(&tables());
-        let light = Light::new(2, 2);
-        let floor = (0..OWN_DRAW_QUADS as u16)
-            .map(|i| Quad::face(3, i32::from(i), [0, 1], [0, 16], 4, light));
-        let layer = MeshLayer {
-            quads: mesh
-                .opaque
-                .quads
-                .iter()
-                .chain(&mesh.cutout.quads)
-                .copied()
-                .chain(floor)
-                .collect(),
-        };
-        for layer in [&mesh.opaque, &mesh.cutout, &layer] {
-            let packed = ChunkQuads::pack(layer, 0, Split::ByFace).unwrap();
-            let stored: Vec<Quad> = packed.quads().collect();
-            for draw in packed.draws() {
-                let quads = &stored[draw.first as usize..][..draw.count as usize];
-                let corners = quads.iter().flat_map(Quad::corners);
-                let lo = corners
-                    .clone()
-                    .fold(Vec3::MAX, |a, c| a.min(Vec3::from(c.position)));
-                let hi = corners.fold(Vec3::MIN, |a, c| a.max(Vec3::from(c.position)));
-                assert_eq!(Vec3::from(draw.aabb.min()), lo);
-                assert_eq!(Vec3::from(draw.aabb.max()), hi);
-            }
-        }
-        let split = ChunkQuads::pack(&layer, 0, Split::ByFace).unwrap();
-        let upward = split.draws().iter().filter(|d| d.facing == Some(Facing(3)));
-        assert_eq!(upward.count(), 1, "the floor is drawn alone");
-        let packed = ChunkQuads::pack(&mesh.cutout, 0, Split::Whole).unwrap();
-        assert_eq!(
-            packed.draws()[0].aabb.min().x,
-            -1.0 / 16.0,
-            "a flame outside"
-        );
-        assert!(ChunkQuads::pack(&MeshLayer::default(), 0, Split::Whole).is_none());
+        let packed = ChunkQuads::pack(&mesh.cutout, 0).unwrap();
+        let corners = mesh.cutout.quads.iter().flat_map(Quad::corners);
+        let lo = corners
+            .clone()
+            .fold(Vec3::MAX, |a, c| a.min(Vec3::from(c.position)));
+        let hi = corners.fold(Vec3::MIN, |a, c| a.max(Vec3::from(c.position)));
+        assert_eq!(Vec3::from(packed.aabb().min()), lo);
+        assert_eq!(Vec3::from(packed.aabb().max()), hi);
+        assert_eq!(lo.x, -1.0 / 16.0, "a flame outside the Chunk");
+        assert!(ChunkQuads::pack(&MeshLayer::default(), 0).is_none());
     }
 
     #[test]
     fn the_placeholder_has_four_vertices_a_quad_and_two_triangles_over_them() {
-        let mesh = placeholder(0, 7);
+        let mesh = placeholder(7);
         assert_eq!(mesh.count_vertices(), 28);
         let Some(Indices::U16(indices)) = mesh.indices() else {
             panic!("two-byte indices while they reach");
@@ -769,34 +557,16 @@ mod tests {
     }
 
     #[test]
-    fn a_later_draws_placeholder_indexes_its_own_records_with_its_own_vertices() {
-        let mesh = placeholder(5, 2);
-        assert_eq!(mesh.count_vertices(), 8);
-        let Some(Indices::U16(indices)) = mesh.indices() else {
-            panic!("two-byte indices while they reach");
-        };
-        assert_eq!(
-            indices[..],
-            [20, 21, 22, 20, 22, 23, 24, 25, 26, 24, 26, 27]
-        );
-    }
-
-    #[test]
     fn a_placeholder_past_two_byte_indices_takes_four() {
         let quads = (1 << 14) + 1;
-        let mesh = placeholder(0, quads);
+        let mesh = placeholder(quads);
         let Some(Indices::U32(indices)) = mesh.indices() else {
             panic!("four-byte indices past 65,536 vertices");
         };
         assert_eq!(indices.last(), Some(&(quads * 4 - 1)));
         assert!(matches!(
-            placeholder(0, 1 << 14).indices(),
+            placeholder(1 << 14).indices(),
             Some(Indices::U16(_))
         ));
-        let late = placeholder((1 << 14) - 1, 2);
-        assert!(
-            matches!(late.indices(), Some(Indices::U32(_))),
-            "by its last index"
-        );
     }
 }

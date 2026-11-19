@@ -11,8 +11,7 @@
 //! `docs/adr/0019-a-level-is-drawn-until-another-replaces-it.md`.
 
 use bevy::asset::RenderAssetUsages;
-use bevy::camera::primitives::Aabb;
-use bevy::camera::visibility::{NoAutoAabb, RenderLayers, VisibilitySystems, VisibleEntities};
+use bevy::camera::visibility::{NoAutoAabb, RenderLayers};
 use bevy::light::NotShadowCaster;
 use bevy::mesh::MeshTag;
 use bevy::platform::collections::{HashMap, HashSet};
@@ -25,7 +24,7 @@ use tesserae_core::ChunkMesh;
 
 use crate::client::blend_order::{BlendOrder, sort_blended};
 use crate::client::camera::MainCamera;
-use crate::client::chunk_mesh::{ChunkQuads, Facing, Split, placeholder};
+use crate::client::chunk_mesh::{ChunkQuads, placeholder};
 use crate::client::drawn_mask::{self, DrawnMask};
 use crate::client::in_flight::InFlight;
 use crate::render::chunk_material::{ChunkMaterial, ChunkMaterialExtension, LodParams};
@@ -195,11 +194,10 @@ struct Built {
 impl Built {
     fn new(mesh: &ChunkMesh, level: u32, voxel_size: f32) -> Self {
         Self {
-            opaque: ChunkQuads::pack(&mesh.opaque, level, Split::ByFace),
-            // Water is drawn from both sides, and sorted across directions.
-            blended: ChunkQuads::pack(&mesh.blended, level, Split::Whole),
+            opaque: ChunkQuads::pack(&mesh.opaque, level),
+            blended: ChunkQuads::pack(&mesh.blended, level),
             order: BlendOrder::new(&mesh.blended, voxel_size),
-            cutout: ChunkQuads::pack(&mesh.cutout, level, Split::ByFace),
+            cutout: ChunkQuads::pack(&mesh.cutout, level),
         }
     }
 }
@@ -216,32 +214,8 @@ pub(super) fn plugin(app: &mut App) {
     app.init_session_state::<ChunkEntities>()
         .init_session_state::<super::material_textures::Textures>()
         .add_session_systems(Startup, (add_material, spawn_light))
-        .add_session_systems(PostStartup, spawn_camera)
-        .add_session_systems(
-            PostUpdate,
-            hide_back_faces.after(VisibilitySystems::CheckVisibility),
-        );
+        .add_session_systems(PostStartup, spawn_camera);
     add_view_systems(app);
-}
-
-/// Takes each draw the camera is behind every plane of out of the camera's
-/// visible list, so its depth prepass and main pass skip it. The sun's
-/// shadow cascades keep their own lists: a face the camera cannot see may
-/// still cast a shadow it can.
-fn hide_back_faces(
-    mut cameras: Query<(&GlobalTransform, &mut VisibleEntities), With<MainCamera>>,
-    draws: Query<(&Facing, &Aabb, &GlobalTransform)>,
-) {
-    for (camera, mut visible) in &mut cameras {
-        let eye = camera.translation();
-        visible
-            .get_mut(std::any::TypeId::of::<Mesh3d>())
-            .retain(|&entity| {
-                !draws
-                    .get(entity)
-                    .is_ok_and(|(facing, aabb, at)| facing.hidden_from(eye, aabb, at))
-            });
-    }
 }
 
 /// One place for the per-frame chain, so the tests run the one the app does.
@@ -374,17 +348,13 @@ struct Draw<'a, 'w, 's> {
     held_of: &'a dyn Fn(Entity) -> Option<Held>,
 }
 
-/// What a layer's entity holds that outlives it unless given back: its draws'
-/// placeholders and its range of the quad buffer.
+/// What an entity holds that outlives it unless given back: its placeholder
+/// and its range of the quad buffer.
 struct Held {
-    meshes: Vec<Handle<Mesh>>,
+    mesh: Handle<Mesh>,
     at: u32,
     len: u32,
 }
-
-/// Where the sun shines from. A face turned away from it casts nothing, as the
-/// shadow pass culls back faces.
-const SUN_FROM: Vec3 = Vec3::new(1.0, 2.2, 0.8);
 
 impl Draw<'_, '_, '_> {
     /// Brings one layer's entity for `key` in line with `layer`: spawned,
@@ -406,56 +376,39 @@ impl Draw<'_, '_, '_> {
         let (level, coord) = key;
         layer.at = self.quads.alloc(layer.words().len() as u32);
         self.quads.write(layer.at, layer.words());
-        let (at, draws) = (layer.at, layer.draws().to_vec());
-        let entity = match entities.get(&key) {
+        let drawn = (
+            Mesh3d(self.meshes.add(placeholder(layer.quad_count()))),
+            MeshTag::new(layer.at),
+            layer.aabb(),
+            layer,
+        );
+        match entities.get(&key) {
             // Replacing rather than despawning and respawning keeps the
             // entity id stable, and giving back what the old one held is what
             // stops a few minutes of flying from leaking every mesh ever sent.
             Some(&entity) => {
                 self.give_back(entity);
-                self.commands
-                    .entity(entity)
-                    .despawn_related::<Children>()
-                    .insert(layer);
-                entity
+                self.commands.entity(entity).insert(drawn);
+                Some(entity)
             }
             None => {
-                let entity = self
-                    .commands
-                    .spawn((
-                        layer,
-                        Transform::from_translation(world.chunk_origin_at(coord, level))
-                            .with_scale(Vec3::splat(world.voxel_size_at(level))),
-                        Visibility::default(),
-                        coord,
-                    ))
-                    .id();
-                entities.insert(key, entity);
-                entity
-            }
-        };
-        for draw in draws {
-            let mut child = self.commands.spawn((
-                Mesh3d(self.meshes.add(placeholder(draw.first, draw.count))),
-                MeshTag::new(at),
-                draw.aabb,
-                // The placeholder has no positions to find an `Aabb` from.
-                NoAutoAabb,
-                MeshMaterial3d(material.clone()),
-                layer_of(level),
-                ChildOf(entity),
-            ));
-            let lit = draw
-                .facing
-                .is_none_or(|facing| facing.normal().dot(SUN_FROM) > 0.0);
-            if !(casts_shadows && lit) {
-                child.insert(NotShadowCaster);
-            }
-            if let Some(facing) = draw.facing {
-                child.insert(facing);
+                let mut entity = self.commands.spawn((
+                    drawn,
+                    // The placeholder has no positions to find an `Aabb` from.
+                    NoAutoAabb,
+                    MeshMaterial3d(material.clone()),
+                    Transform::from_translation(world.chunk_origin_at(coord, level))
+                        .with_scale(Vec3::splat(world.voxel_size_at(level))),
+                    coord,
+                    layer_of(level),
+                ));
+                if !casts_shadows {
+                    entity.insert(NotShadowCaster);
+                }
+                entities.insert(key, entity.id());
+                Some(entity.id())
             }
         }
-        Some(entity)
     }
 
     fn hide(&mut self, entities: &mut LayerEntities, key: (u32, ChunkCoord)) {
@@ -468,24 +421,15 @@ impl Draw<'_, '_, '_> {
 
     fn give_back(&mut self, entity: Entity) {
         if let Some(held) = (self.held_of)(entity) {
-            for mesh in &held.meshes {
-                self.meshes.remove(mesh);
-            }
+            self.meshes.remove(&held.mesh);
             self.quads.release(held.at, held.len);
         }
     }
 }
 
-type Layers<'w, 's> = Query<'w, 's, (&'static ChunkQuads, Option<&'static Children>)>;
-
-fn held(entity: Entity, layers: &Layers, draws: &Query<&Mesh3d>) -> Option<Held> {
-    layers.get(entity).ok().map(|(quads, children)| Held {
-        meshes: children
-            .into_iter()
-            .flatten()
-            .filter_map(|&draw| draws.get(draw).ok())
-            .map(|mesh| mesh.0.clone())
-            .collect(),
+fn held(entity: Entity, existing: &Query<(&Mesh3d, &ChunkQuads)>) -> Option<Held> {
+    existing.get(entity).ok().map(|(mesh, quads)| Held {
+        mesh: mesh.0.clone(),
         at: quads.at,
         len: quads.words().len() as u32,
     })
@@ -505,7 +449,7 @@ fn land_meshes(
     (mut meshes, mut quads): (ResMut<Assets<Mesh>>, ResMut<QuadBuffer>),
     material: Res<TerrainMaterial>,
     world: Res<WorldSettings>,
-    existing: (Layers, Query<&Mesh3d>),
+    existing: Query<(&Mesh3d, &ChunkQuads)>,
     #[cfg(any(feature = "dev", feature = "profiling"))] mut cost: ResMut<
         crate::cost::MainThreadCost,
     >,
@@ -519,7 +463,7 @@ fn land_meshes(
         commands: &mut commands,
         meshes: &mut meshes,
         quads: &mut quads,
-        held_of: &|entity| held(entity, &existing.0, &existing.1),
+        held_of: &|entity| held(entity, &existing),
     };
     for (key, built) in building.in_flight.landed() {
         // Marked drawn as it lands, not as it is sent: a bit set for a mesh
@@ -655,7 +599,7 @@ fn release(
     mut commands: Commands,
     mut entities: ResMut<ChunkEntities>,
     (mut meshes, mut quads): (ResMut<Assets<Mesh>>, ResMut<QuadBuffer>),
-    existing: (Layers, Query<&Mesh3d>),
+    existing: Query<(&Mesh3d, &ChunkQuads)>,
     streaming: Res<StreamingSettings>,
     world: Res<WorldSettings>,
     camera: Query<&GlobalTransform, With<MainCamera>>,
@@ -696,7 +640,7 @@ fn release(
         commands: &mut commands,
         meshes: &mut meshes,
         quads: &mut quads,
-        held_of: &|entity| held(entity, &existing.0, &existing.1),
+        held_of: &|entity| held(entity, &existing),
     };
     for key in released {
         draw.hide(&mut entities.opaque, key);
@@ -717,8 +661,7 @@ fn apply_cover(
     mut commands: Commands,
     mut entities: ResMut<ChunkEntities>,
     terrain: Res<TerrainMaterial>,
-    layers: Query<(&Visibility, &Children)>,
-    current: Query<&MeshMaterial3d<ChunkMaterial>>,
+    current: Query<(&MeshMaterial3d<ChunkMaterial>, Option<&Visibility>)>,
 ) {
     let entities = &mut *entities;
     let due: HashSet<_> = entities
@@ -741,17 +684,15 @@ fn apply_cover(
                 continue;
             };
             let material = if cover == 0 { untested } else { tested };
-            let Ok((shown, draws)) = layers.get(entity) else {
+            let Ok((now, shown)) = current.get(entity) else {
                 continue;
             };
-            for &draw in draws {
-                if current.get(draw).is_ok_and(|now| now.0 != *material) {
-                    commands
-                        .entity(draw)
-                        .insert(MeshMaterial3d(material.clone()));
-                }
+            if now.0 != *material {
+                commands
+                    .entity(entity)
+                    .insert(MeshMaterial3d(material.clone()));
             }
-            if *shown != visibility {
+            if shown != Some(&visibility) {
                 commands.entity(entity).insert(visibility);
             }
         }
@@ -805,7 +746,7 @@ fn spawn_light(mut commands: Commands, mut ambient: ResMut<GlobalAmbientLight>) 
             shadow_maps_enabled: shadows_enabled(),
             ..default()
         },
-        Transform::from_translation(SUN_FROM).looking_at(Vec3::ZERO, Vec3::Y),
+        Transform::from_xyz(1.0, 2.2, 0.8).looking_at(Vec3::ZERO, Vec3::Y),
         RenderLayers::layer(NEAR_LAYER),
     ));
 
@@ -1172,9 +1113,7 @@ mod tests {
         if world.get::<Visibility>(entity) == Some(&Visibility::Hidden) {
             return None;
         }
-        let handle = &world
-            .get::<MeshMaterial3d<ChunkMaterial>>(draw_of(app, entity))?
-            .0;
+        let handle = &world.get::<MeshMaterial3d<ChunkMaterial>>(entity)?.0;
         let materials = world.resource::<Assets<ChunkMaterial>>();
         Some(materials.get(handle)?.extension.coverage_test)
     }
@@ -1746,56 +1685,33 @@ mod tests {
         app.world().resource::<QuadBuffer>().queued()
     }
 
-    /// Chunk layers, each drawn by one or more child entities.
     fn drawn(app: &mut App) -> usize {
         app.world_mut()
-            .query_filtered::<Entity, With<ChunkQuads>>()
+            .query_filtered::<Entity, With<Mesh3d>>()
             .iter(app.world())
             .count()
     }
 
-    fn draws_of(app: &App, layer: Entity) -> Vec<Entity> {
-        let draws = app.world().get::<Children>(layer).expect("a layer's draws");
-        draws.to_vec()
-    }
-
-    /// A layer of fewer quads than a direction needs to draw alone.
-    fn draw_of(app: &App, layer: Entity) -> Entity {
-        let [draw] = draws_of(app, layer)[..] else {
-            panic!("one draw");
-        };
-        draw
-    }
-
-    fn mesh_of(app: &App, layer: Entity) -> Handle<Mesh> {
-        let draw = draws_of(app, layer)[0];
-        app.world().get::<Mesh3d>(draw).unwrap().0.clone()
-    }
-
-    /// What the shader draws for `layer`, read from the quad buffer as the
-    /// GPU would hold it, through each draw's placeholder's indices: a vertex
-    /// per corner of every record, and the triangles every draw indexes.
-    fn decoded(app: &App, layer: Entity) -> Soup {
+    /// What the shader draws for `entity`, read from the quad buffer as the
+    /// GPU would hold it, through the placeholder's vertices and indices.
+    fn decoded(app: &App, entity: Entity) -> Soup {
         let world = app.world();
-        let quads = world.get::<ChunkQuads>(layer).expect("a Chunk layer");
+        let quads = world.get::<ChunkQuads>(entity).expect("a Chunk layer");
+        let tag = world.get::<MeshTag>(entity).unwrap().value;
+        assert_eq!(tag, quads.at, "the shader finds the layer by its tag");
         let buffer = &world.resource::<QuadBuffer>().mirror;
+        let handle = &world.get::<Mesh3d>(entity).unwrap().0;
+        let mesh = world.resource::<Assets<Mesh>>().get(handle).unwrap();
         let mut soup = Soup::default();
-        for vertex in 0..quads.quad_count() * crate::client::chunk_mesh::VERTICES_PER_QUAD {
-            let expanded = expand(buffer, quads.at, vertex);
+        for vertex in 0..mesh.count_vertices() as u32 {
+            let expanded = expand(buffer, tag, vertex);
             soup.positions.push(expanded.corner.position);
             soup.normals.push(expanded.corner.normal);
             soup.uvs.push(expanded.corner.uv);
             soup.materials.push(expanded.material);
             soup.light.push(expanded.light);
         }
-        for draw in draws_of(app, layer) {
-            let tag = world.get::<MeshTag>(draw).unwrap().value;
-            assert_eq!(tag, quads.at, "the shader finds the layer by its tag");
-            let handle = &world.get::<Mesh3d>(draw).unwrap().0;
-            let mesh = world.resource::<Assets<Mesh>>().get(handle).unwrap();
-            let indices = mesh.indices().unwrap().iter().map(|i| i as u32);
-            soup.indices.extend(indices);
-        }
+        soup.indices = mesh.indices().unwrap().iter().map(|i| i as u32).collect();
         soup
     }
 
@@ -1844,7 +1760,7 @@ mod tests {
             assert_eq!(world.get::<ChunkCoord>(blended), Some(&coord));
             assert_eq!(world.get::<ChunkQuads>(blended).unwrap().level(), level);
             assert_eq!(
-                world.get::<RenderLayers>(draw_of(&app, blended)),
+                world.get::<RenderLayers>(blended),
                 Some(&layer_of(level)),
                 "the level's camera draws it, or the mask and the sun miss it"
             );
@@ -1871,134 +1787,13 @@ mod tests {
             blended_at(&app, 0, coord).unwrap(),
             blended_at(&app, 0, ChunkCoord::new(1, 0, 0)).unwrap(),
         ] {
-            assert!(
-                world
-                    .get::<NotShadowCaster>(draw_of(&app, blended))
-                    .is_some()
-            );
+            assert!(world.get::<NotShadowCaster>(blended).is_some());
         }
         assert!(
             world
-                .get::<NotShadowCaster>(draw_of(&app, entity_for(&app, coord).unwrap()))
+                .get::<NotShadowCaster>(entity_for(&app, coord).unwrap())
                 .is_none()
         );
-    }
-
-    /// 200 faces up, 200 down and a Cross.
-    fn floors_and_ceilings() -> tesserae_core::ChunkMesh {
-        use tesserae_core::mesh::Quad;
-        let light = Light::new(MAX_LIGHT, 0);
-        let rock = u32::from(tesserae_core::testgen::fixtures().ground.rock);
-        let faces = |face, plane| {
-            (0..200u16).map(move |i| Quad::face(face, plane, [i, i + 1], [0, 16], rock, light))
-        };
-        let quads = faces(3, 32)
-            .chain(faces(2, 16))
-            .chain([Quad::cross([4, 4, 4], 1, false, rock, light)])
-            .collect();
-        tesserae_core::ChunkMesh {
-            opaque: tesserae_core::MeshLayer { quads },
-            ..default()
-        }
-    }
-
-    #[test]
-    fn each_well_filled_direction_is_its_own_draw_and_only_sunward_ones_cast() {
-        use bevy::light::NotShadowCaster;
-        let mut app = app();
-        put_eye(&mut app, FAR_M);
-        let coord = ChunkCoord::new(0, 0, 0);
-        send_mesh(&mut app, coord, floors_and_ceilings());
-        let layer = entity_for(&app, coord).unwrap();
-        let at = app.world().get::<ChunkQuads>(layer).unwrap().at;
-        let world = app.world();
-        let draws: Vec<_> = draws_of(&app, layer)
-            .into_iter()
-            .map(|draw| {
-                assert_eq!(world.get::<MeshTag>(draw).unwrap().value, at);
-                assert_eq!(world.get::<RenderLayers>(draw), Some(&layer_of(0)));
-                (
-                    world.get::<Facing>(draw).copied(),
-                    world.get::<NotShadowCaster>(draw).is_some(),
-                )
-            })
-            .collect();
-        assert_eq!(
-            draws,
-            [
-                (None, false),
-                (Some(Facing(2)), true),
-                (Some(Facing(3)), false)
-            ],
-            "the sun is above: a face turned down casts nothing"
-        );
-        assert_eq!(decoded(&app, layer).indices.len(), 401 * 6);
-
-        let coarse = ChunkCoord::new(0, 0, 0);
-        send_coarse(&mut app, 1, coarse, floors_and_ceilings());
-        send_mesh(&mut app, coarse.children().nth(1).unwrap(), geometry());
-        let coarse = entity_at(&app, 1, coarse).unwrap();
-        let world = app.world();
-        let materials = world.resource::<Assets<ChunkMaterial>>();
-        for draw in draws_of(&app, coarse) {
-            let handle = &world.get::<MeshMaterial3d<ChunkMaterial>>(draw).unwrap().0;
-            assert!(
-                materials.get(handle).unwrap().extension.coverage_test,
-                "every draw of a partly covered Chunk takes the test"
-            );
-        }
-
-        send_mesh(&mut app, coord, geometry());
-        assert_eq!(draws_of(&app, layer).len(), 1, "the old draws are gone");
-        let facings = app.world_mut().query::<&Facing>().iter(app.world()).count();
-        assert_eq!(facings, 2, "the coarse Chunk's alone");
-        assert_eq!(app.world().resource::<Assets<Mesh>>().len(), 1 + 3 + 1);
-    }
-
-    #[test]
-    fn the_camera_skips_each_draw_it_is_behind_every_plane_of() {
-        use std::any::TypeId;
-        let mut world = World::new();
-        let chunk = GlobalTransform::from_xyz(0.0, 0.0, 0.0);
-        let floor = Aabb::from_min_max(Vec3::new(0.0, 2.0, 0.0), Vec3::new(32.0, 2.0, 32.0));
-        let up = world.spawn((Facing(3), floor, chunk)).id();
-        let down = world.spawn((Facing(2), floor, chunk)).id();
-        let mixed = world.spawn((floor, chunk)).id();
-        let mut visible = VisibleEntities::default();
-        visible
-            .get_mut(TypeId::of::<Mesh3d>())
-            .extend([up, down, mixed]);
-        let camera = world
-            .spawn((
-                MainCamera,
-                GlobalTransform::from_xyz(5.0, 10.0, 5.0),
-                visible.clone(),
-            ))
-            .id();
-        let other = world
-            .spawn((GlobalTransform::from_xyz(5.0, 10.0, 5.0), visible))
-            .id();
-        world.run_system_once(hide_back_faces).unwrap();
-        let seen = |world: &World, camera| {
-            world
-                .get::<VisibleEntities>(camera)
-                .unwrap()
-                .get(TypeId::of::<Mesh3d>())
-                .to_vec()
-        };
-        assert_eq!(seen(&world, camera), [up, mixed], "above the floor");
-        assert_eq!(seen(&world, other), [up, down, mixed], "not the Player's");
-
-        world
-            .entity_mut(camera)
-            .insert(GlobalTransform::from_xyz(5.0, -1.0, 5.0));
-        let mut visible = VisibleEntities::default();
-        visible
-            .get_mut(TypeId::of::<Mesh3d>())
-            .extend([up, down, mixed]);
-        world.entity_mut(camera).insert(visible);
-        world.run_system_once(hide_back_faces).unwrap();
-        assert_eq!(seen(&world, camera), [down, mixed], "below it");
     }
 
     #[test]
@@ -2373,7 +2168,7 @@ mod tests {
         assert_eq!(drawn(&mut app), 1);
         let handle = &app
             .world()
-            .get::<MeshMaterial3d<ChunkMaterial>>(draw_of(&app, entity))
+            .get::<MeshMaterial3d<ChunkMaterial>>(entity)
             .unwrap()
             .0;
         let material = app
@@ -2384,7 +2179,7 @@ mod tests {
         assert!(matches!(material.base.alpha_mode, AlphaMode::Mask(_)));
         assert!(
             app.world()
-                .get::<bevy::light::NotShadowCaster>(draw_of(&app, entity))
+                .get::<bevy::light::NotShadowCaster>(entity)
                 .is_none(),
             "a canopy's shadow has its holes, not none"
         );
@@ -2411,7 +2206,7 @@ mod tests {
         let alpha_of = |app: &App, entity: Entity| {
             let handle = &app
                 .world()
-                .get::<MeshMaterial3d<ChunkMaterial>>(draw_of(app, entity))
+                .get::<MeshMaterial3d<ChunkMaterial>>(entity)
                 .unwrap()
                 .0;
             app.world()
@@ -2437,7 +2232,7 @@ mod tests {
         let coord = ChunkCoord::new(0, 0, 0);
         send_mesh(&mut app, coord, both_layers());
         let blended = blended_at(&app, 0, coord).unwrap();
-        let handle = mesh_of(&app, blended);
+        let handle = app.world().get::<Mesh3d>(blended).unwrap().0.clone();
 
         send_mesh(&mut app, coord, geometry());
         assert_eq!(blended_at(&app, 0, coord), None);
@@ -2550,7 +2345,7 @@ mod tests {
             let world = app.world();
             assert_eq!(world.get::<ChunkQuads>(entity).unwrap().level(), level);
             assert_eq!(
-                world.get::<RenderLayers>(draw_of(app, entity)),
+                world.get::<RenderLayers>(entity),
                 Some(&RenderLayers::layer(level as usize)),
                 "level {level}"
             );
@@ -2567,13 +2362,13 @@ mod tests {
         send_mesh(&mut app, coord, geometry());
 
         let entity = entity_for(&app, coord).unwrap();
-        let first = mesh_of(&app, entity);
+        let first = app.world().get::<Mesh3d>(entity).unwrap().0.clone();
 
         send_mesh(&mut app, coord, geometry());
         assert_eq!(entity_for(&app, coord), Some(entity), "entity id moved");
         assert_eq!(drawn(&mut app), 1, "spawned a second entity");
 
-        let second = mesh_of(&app, entity);
+        let second = app.world().get::<Mesh3d>(entity).unwrap().0.clone();
         assert_ne!(second, first, "the mesh was not replaced");
         // The leak this guards: a few minutes of flying re-meshes the same
         // Chunk many times over.
@@ -2600,7 +2395,7 @@ mod tests {
         let coord = ChunkCoord::new(4, 0, 1);
         send_coarse(&mut app, 1, coord, geometry());
         let entity = entity_at(&app, 1, coord).unwrap();
-        let first = mesh_of(&app, entity);
+        let first = app.world().get::<Mesh3d>(entity).unwrap().0.clone();
 
         send_coarse(&mut app, 1, coord, geometry());
 
@@ -2631,7 +2426,12 @@ mod tests {
         send_mesh(&mut app, coord, geometry());
         send_coarse(&mut app, 1, coord, geometry());
         send_coarse(&mut app, 2, coord, geometry());
-        let handle = mesh_of(&app, entity_at(&app, 1, coord).unwrap());
+        let handle = app
+            .world()
+            .get::<Mesh3d>(entity_at(&app, 1, coord).unwrap())
+            .unwrap()
+            .0
+            .clone();
 
         send_coarse(&mut app, 1, coord, tesserae_core::ChunkMesh::default());
 
@@ -2670,7 +2470,12 @@ mod tests {
         put_eye(&mut app, FAR_M);
         let coord = ChunkCoord::new(-3, 1, 4);
         send_mesh(&mut app, coord, geometry());
-        let handle = mesh_of(&app, entity_for(&app, coord).unwrap());
+        let handle = app
+            .world()
+            .get::<Mesh3d>(entity_for(&app, coord).unwrap())
+            .unwrap()
+            .0
+            .clone();
 
         app.world_mut().write_message(ChunkUnloaded { coord });
         app.update();
@@ -2692,7 +2497,12 @@ mod tests {
         let coord = ChunkCoord::new(-3, 1, 4);
         send_mesh(&mut app, coord, geometry());
         send_coarse(&mut app, 1, coord, geometry());
-        let handle = mesh_of(&app, entity_at(&app, 1, coord).unwrap());
+        let handle = app
+            .world()
+            .get::<Mesh3d>(entity_at(&app, 1, coord).unwrap())
+            .unwrap()
+            .0
+            .clone();
 
         app.world_mut()
             .write_message(LodUnloaded { level: 1, coord });

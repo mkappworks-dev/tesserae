@@ -184,10 +184,9 @@ pub(super) struct Obstacles<'w, 's> {
     layers: Query<
         'w,
         's,
-        (&'static ChunkQuads, &'static Transform, &'static Children),
+        (&'static Mesh3d, &'static ChunkQuads, &'static Transform),
         Without<FlyCamera>,
     >,
-    draws: Query<'w, 's, &'static Mesh3d>,
     cache: Local<'s, HashMap<AssetId<Mesh>, (bool, QuadBoxes)>>,
 }
 
@@ -206,10 +205,7 @@ impl Obstacles<'_, '_> {
                     let coord = ChunkCoord::new(x, y, z);
                     let entities: Vec<Entity> = self.chunks.solid_at(coord).collect();
                     for entity in entities {
-                        let Ok((quads, &transform, draws)) = self.layers.get(entity) else {
-                            continue;
-                        };
-                        let Some(mesh) = draws.first().and_then(|&d| self.draws.get(d).ok()) else {
+                        let Ok((mesh, quads, &transform)) = self.layers.get(entity) else {
                             continue;
                         };
                         let boxes = Self::boxes(&mut self.cache, mesh.0.id(), quads);
@@ -234,8 +230,7 @@ impl Obstacles<'_, '_> {
         nearest
     }
 
-    /// Keyed by the layer's first placeholder, which a new mesh for the layer
-    /// replaces.
+    /// Keyed by the placeholder, which a new mesh for the layer replaces.
     fn boxes(
         cache: &mut HashMap<AssetId<Mesh>, (bool, QuadBoxes)>,
         id: AssetId<Mesh>,
@@ -360,16 +355,14 @@ mod tests {
                 })
                 .collect(),
         };
-        let quads =
-            ChunkQuads::pack(&layer, 0, crate::client::chunk_mesh::Split::ByFace).expect("faces");
+        let quads = ChunkQuads::pack(&layer, 0).expect("faces");
         let handle = app
             .world_mut()
             .resource_mut::<Assets<Mesh>>()
             .add(Mesh::from(Cuboid::default()));
         let entity = app
             .world_mut()
-            .spawn((quads, Transform::default()))
-            .with_child(Mesh3d(handle))
+            .spawn((Mesh3d(handle), quads, Transform::default()))
             .id();
         app.world_mut()
             .resource_mut::<ChunkEntities>()
