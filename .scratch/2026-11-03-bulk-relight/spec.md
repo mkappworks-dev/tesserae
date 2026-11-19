@@ -1,8 +1,7 @@
 # Bulk relight: write a batch of Voxels, relight once
 
 Status: ready-for-agent; decisions grilled and confirmed 2026-11-04. Branch `tech/bulk-relight`, stacked on
-`feat/demo-games-and-shared-mods` (PR #52). Primary-source findings:
-[research.md](research.md). Tickets: [issues/](issues/). Closes
+`feat/demo-games-and-shared-mods` (PR #52). Tickets: [issues/](issues/). Closes
 [world composition ticket 07](../2026-11-03-world-composition/issues/07-faster-mod-builds.md).
 
 ## Problem
@@ -47,15 +46,15 @@ relight as its follow-up.
   the Chunk's shaped units over the whole palette per shaped write.
 - **No-op writes are paid in full.** Air over air still journals, wakes the
   fluid simulation around it, bumps the save revision and marks meshes stale.
-- **Edit invariants** a batch must keep, with their lines, are in
-  [research.md §0](research.md): canonical encoding and `vet_occupants` (I5),
+- **Edit invariants** a batch must keep, with their lines, are:
+  canonical encoding and `vet_occupants` (I5),
   the shaped cap (I6), relight only when optics change (I7), the change journal
   (I8), the level-1 cover (I9), four kinds of stale mesh (I4), no write into an
   unlit Chunk (I1), and the incremental and bulk solvers never mixed (I2).
 
 ## What other engines do
 
-From [research.md](research.md): the engines that store light per Voxel
+The engines that store light per Voxel
 (Minecraft with Starlight, and vanilla since 1.20; Luanti) batch with
 **multi-source queues**. Every changed position goes into one decrease queue,
 then one increase pass runs, so overlapping regions are paid once. For dense

@@ -7,9 +7,8 @@ Makes Generator version 3 (DESIGN.md step 17,
 without changing what it generates. Starts from `main` after `tech/generator-determinism` (#65), which left version 3
 the only Generator version and froze its output. Background reading:
 [ADR-0030](../../docs/adr/0030-generator-version-3-is-a-layered-field-stack-in-a-declared-band.md),
-[ADR-0011](../../docs/adr/0011-coarse-levels-are-derived.md),
-[ADR-0003](../../docs/adr/0003-voxel-size-is-per-world.md), and the prior art in
-[research.md](./research.md).
+[ADR-0011](../../docs/adr/0011-coarse-levels-are-derived.md) and
+[ADR-0003](../../docs/adr/0003-voxel-size-is-per-world.md).
 
 ## Problem Statement
 
@@ -112,7 +111,7 @@ Then, only if the numbers still call for it after the caches: SIMD noise, bit fo
 
 ## Further Notes
 
-- Research, with sources: [research.md](./research.md). Production engines sample density every 4×8×4 and interpolate; the 10 m overhang field is too fine for that, the cavern field is not, and the tunnel fields survive at 4 m cells. `std::simd` is still nightly-only; Rust never fuses `a*b + c`, so lane-wise SIMD keeps the scalar bits.
+- Prior art: production engines sample density every 4×8×4 and interpolate; the 10 m overhang field is too fine for that, the cavern field is not, and the tunnel fields survive at 4 m cells. `std::simd` is still nightly-only; Rust never fuses `a*b + c`, so lane-wise SIMD keeps the scalar bits.
 - The first step of every ticket is a failing test, per `/tdd`.
 - Tickets are in [issues/](./issues/).
 - `tech/generator-determinism` (#65) changed version 3's output once before this branch; the fingerprint baseline is taken on top of it. Its ticket 14 leaves one more idea, not taken here: a sky Chunk between a column's top and the band's top still runs the full pass, and an early-out on the column cache's top needs its own proof that no Water, Plant, surface feature or Structure stands there. Its other idea, one drainage for every level, is ticket 05.

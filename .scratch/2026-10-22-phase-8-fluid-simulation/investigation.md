@@ -137,9 +137,9 @@ they are not implementation authorization or ready-for-agent tickets.
   burning and declared residue, water suppression, and solid barriers blocking
   exposure. This includes heat effects without conductive temperature state
   throughout solid terrain. A primary-source comparison is being captured
-  separately in thermal-prior-art.md.
+  separately.
 - The user subsequently approved that local-exposure recommendation. The
-  primary-source comparison is complete in thermal-prior-art.md. The spec
+  primary-source comparison is complete. The spec
   now records proposed engineering choices and acceptance for review.
 - An independent builder check identified missing fuel, reach-renewal,
   lighting-resolution, and unmatched-fluid policies. The spec now proposes

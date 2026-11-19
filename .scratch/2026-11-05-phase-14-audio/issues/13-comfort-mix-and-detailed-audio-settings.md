@@ -6,7 +6,7 @@ Status: done
 
 User reports unpleasant short repeating audio and requests long recordings,
 research-backed balancing, per-action volume controls and an updated mockup.
-Read [research](../audio-comfort-research.md) and review
+Review
 [the interactive mockup](../audio-settings-comfort-mockup.html). The menu
 prototype's Audio page is updated to the same proposed controls. The original
 user instruction requires agreement on this UI before Engine implementation.

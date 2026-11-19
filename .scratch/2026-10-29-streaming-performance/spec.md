@@ -4,7 +4,7 @@ Status: shared understanding confirmed 2026-10-30; ticket 01 authorized for
 local implementation. Push, PR and later tickets each need your approval.
 
 Source baseline: `main` at `446e984`. Decisions and their history:
-[grilling.md](grilling.md). Primary-source findings: [research.md](research.md).
+[grilling.md](grilling.md).
 Tickets: [issues/](issues/).
 
 ## Problem
@@ -148,7 +148,7 @@ reordered, not re-scoped, with your approval.
 
 ## Prior art
 
-Read from source at pinned commits; citations in [research.md](research.md).
+Read from source at pinned commits.
 
 - **No holes.** Voxy (32-cubed sections at every level, as here) keeps the
   invariant "leaf nodes always contain geometry": a parent draws, and asks for

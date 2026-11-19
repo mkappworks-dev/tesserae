@@ -556,10 +556,9 @@ authority), 0003 (per-World Voxel size), 0006/0009 (table identities), 0007
 will need focused ADR/glossary updates when accepted; no existing ADR is
 silently superseded by this draft.
 
-See investigation.md for the initial code findings and thermal-prior-art.md
-for the Minecraft/Luanti comparison. Neither reference promises that those
-games universally block ignition through walls. Solid-blocked local exposure
-is the behavior explicitly selected for Tesserae.
+See investigation.md for the initial code findings. The prior art compared
+does not promise that other games universally block ignition through walls.
+Solid-blocked local exposure is the behavior explicitly selected for Tesserae.
 
 ## Comments
 
