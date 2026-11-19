@@ -79,44 +79,45 @@ fn crop_voxels(cells: &BTreeMap<String, u64>, name: &str) -> u64 {
         .sum()
 }
 
-#[test]
-fn every_game_with_planted_fields_places_its_lead_crop_most_often_beside_paths() {
-    // The window each Game needs for a field to stand in it: Terra's and tidewater's ground is
-    // rough, so a level place is rarer.
-    let games = [
-        ("terra", 512.0, "terra:sand", Some("terra:water")),
-        ("meadow", 256.0, "strata:sand", None),
-        ("tidewater", 512.0, "strata:sand", Some("waters:water")),
-        ("lumen", 256.0, "strata:sand", None),
-        ("ember", 512.0, "strata:basalt", Some("waters:water")),
-    ];
-    let fields =
-        crate::server::in_parallel(&games, |&(game, half_m, ..)| field_cells(game, 7, half_m));
-    for (&(game, _, path, ditch), cells) in games.iter().zip(fields) {
-        let [wheat, carrot, potato] = ["wheat", "carrot", "potato"].map(|c| crop_voxels(&cells, c));
-        // Ember's ash grows hardy roots, so its potatoes lead.
-        let leads = if game == "ember" {
-            potato > wheat && potato > carrot
-        } else {
-            wheat > carrot && wheat > potato
-        };
-        assert!(
-            leads && wheat > 0 && carrot > 0 && potato > 0,
-            "{game}: wheat {wheat}, carrot {carrot}, potato {potato}"
-        );
-        assert!(cells.get(path).is_some_and(|&n| n > 0), "{game}: {cells:?}");
-        match ditch {
-            Some(fluid) => assert!(
-                cells.get(fluid).is_some_and(|&n| n > 0),
-                "{game} has no ditch"
-            ),
-            None => assert!(
-                !cells.contains_key("waters:water") && !cells.contains_key("terra:water"),
-                "{game} has no lake, so no ditch"
-            ),
-        }
+/// Each Game's half window for a field to stand in it, its path and its ditch's fluid: Terra's and
+/// tidewater's ground is rough, so a level place is rarer.
+const FIELD_GAMES: [(&str, f32, &str, Option<&str>); 5] = [
+    ("terra", 512.0, "terra:sand", Some("terra:water")),
+    ("meadow", 256.0, "strata:sand", None),
+    ("tidewater", 512.0, "strata:sand", Some("waters:water")),
+    ("lumen", 256.0, "strata:sand", None),
+    ("ember", 512.0, "strata:basalt", Some("waters:water")),
+];
+
+fn every_game_with_planted_fields_places_its_lead_crop_most_often_beside_paths(game: &str) {
+    let &(game, half_m, path, ditch) = FIELD_GAMES.iter().find(|g| g.0 == game).unwrap();
+    let cells = field_cells(game, 7, half_m);
+    let [wheat, carrot, potato] = ["wheat", "carrot", "potato"].map(|c| crop_voxels(&cells, c));
+    // Ember's ash grows hardy roots, so its potatoes lead.
+    let leads = if game == "ember" {
+        potato > wheat && potato > carrot
+    } else {
+        wheat > carrot && wheat > potato
+    };
+    assert!(
+        leads && wheat > 0 && carrot > 0 && potato > 0,
+        "{game}: wheat {wheat}, carrot {carrot}, potato {potato}"
+    );
+    assert!(cells.get(path).is_some_and(|&n| n > 0), "{game}: {cells:?}");
+    match ditch {
+        Some(fluid) => assert!(
+            cells.get(fluid).is_some_and(|&n| n > 0),
+            "{game} has no ditch"
+        ),
+        None => assert!(
+            !cells.contains_key("waters:water") && !cells.contains_key("terra:water"),
+            "{game} has no lake, so no ditch"
+        ),
     }
 }
+
+each_case!(every_game_with_planted_fields_places_its_lead_crop_most_often_beside_paths:
+    terra, meadow, tidewater, lumen, ember);
 
 /// The size of each field group a Biome declares, largest first: its flowers and its vegetables.
 #[test]

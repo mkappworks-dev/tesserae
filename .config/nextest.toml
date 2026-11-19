@@ -1,4 +1,4 @@
-# A test that starts late extends the job by its whole length; these run for minutes on a 2-core
+# A test that starts late extends its shard by its whole length; these run for minutes on CI's
 # runner, so they take the first slots, the longest first.
 [[profile.default.overrides]]
 filter = 'test(a_world_of_each_game_shows_its_templates)'

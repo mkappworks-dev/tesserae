@@ -26,6 +26,10 @@ struct Game {
     lake: bool,
 }
 
+fn game_named(name: &str) -> &'static Game {
+    GAMES.iter().find(|g| g.name == name).unwrap()
+}
+
 const GAMES: [Game; 5] = [
     Game {
         name: "terra",
@@ -696,50 +700,52 @@ fn a_bare_biome_that_grows_on_its_own_surface_is_caught() {
 
 /// Also the vines of jungle and swamp trees, and Wood only in trees: the census is nearly all of
 /// each one's time, so the three share it.
-#[test]
-fn every_biome_of_every_demo_game_grows_its_declared_species_and_none_is_bare_by_accident() {
-    for game in &GAMES {
-        let (counts, biomes) = census(game);
-        let (_install, loaded) = loaded(game.name, 1.0);
-        let fruit = fruit_of(&loaded);
-        let world = loaded.world.unwrap();
-        assert_eq!(biomes.len(), game.biomes.len(), "{}", game.name);
-        for (index, (name, species)) in game.biomes.iter().enumerate() {
-            let full = format!("{}:{name}", game.name);
-            assert_eq!(biomes[index], full, "Biome order");
-            let declared = world.biomes.as_slice()[index].surface_features.as_slice();
-            let food = declared.iter().filter(|f| f.plant.is_none()).count();
-            assert_eq!(
-                declared.len() - food,
-                species.len(),
-                "{full} declares exactly the table's Plants"
-            );
-            assert_eq!(
-                declared.is_empty(),
-                game.bare.contains(name),
-                "{full} is bare only if declared so"
-            );
-            // A Biome of the land's shape the census may never choose.
-            let chosen = counts.keys().any(|(b, _)| *b == index);
-            for plant in *species {
-                if (WATER_PLANTS.contains(plant) && !game.lake) || !chosen {
-                    continue;
-                }
-                let total: u64 = materials_of(plant)
-                    .iter()
-                    .map(|material| found(&counts, index, material))
-                    .sum();
-                assert!(total > 0, "{full} grows no {plant}");
+fn every_biome_of_every_demo_game_grows_its_declared_species_and_none_is_bare_by_accident(
+    game: &str,
+) {
+    let game = game_named(game);
+    let (counts, biomes) = census(game);
+    let (_install, loaded) = loaded(game.name, 1.0);
+    let fruit = fruit_of(&loaded);
+    let world = loaded.world.unwrap();
+    assert_eq!(biomes.len(), game.biomes.len(), "{}", game.name);
+    for (index, (name, species)) in game.biomes.iter().enumerate() {
+        let full = format!("{}:{name}", game.name);
+        assert_eq!(biomes[index], full, "Biome order");
+        let declared = world.biomes.as_slice()[index].surface_features.as_slice();
+        let food = declared.iter().filter(|f| f.plant.is_none()).count();
+        assert_eq!(
+            declared.len() - food,
+            species.len(),
+            "{full} declares exactly the table's Plants"
+        );
+        assert_eq!(
+            declared.is_empty(),
+            game.bare.contains(name),
+            "{full} is bare only if declared so"
+        );
+        // A Biome of the land's shape the census may never choose.
+        let chosen = counts.keys().any(|(b, _)| *b == index);
+        for plant in *species {
+            if (WATER_PLANTS.contains(plant) && !game.lake) || !chosen {
+                continue;
             }
-            if species.is_empty() {
-                let plants = strays(&counts, index, &fruit);
-                assert!(plants.is_empty(), "{full} is bare on purpose: {plants:?}");
-            }
+            let total: u64 = materials_of(plant)
+                .iter()
+                .map(|material| found(&counts, index, material))
+                .sum();
+            assert!(total > 0, "{full} grows no {plant}");
         }
-        jungle_and_swamp_trees_hang_vines(game, &counts);
-        generated_wood_is_only_ever_the_trunk_of_a_grown_tree(game, &counts);
+        if species.is_empty() {
+            let plants = strays(&counts, index, &fruit);
+            assert!(plants.is_empty(), "{full} is bare on purpose: {plants:?}");
+        }
     }
+    jungle_and_swamp_trees_hang_vines(game, &counts);
+    generated_wood_is_only_ever_the_trunk_of_a_grown_tree(game, &counts);
 }
+
+each_case!(every_biome_of_every_demo_game_grows_its_declared_species_and_none_is_bare_by_accident: terra, meadow, ember, tidewater, lumen);
 
 fn jungle_and_swamp_trees_hang_vines(game: &Game, counts: &Counts) {
     for (index, (name, species)) in game.biomes.iter().enumerate() {
@@ -993,39 +999,39 @@ const SPARSE: [&str; 14] = [
 
 /// Also that jungle and swamp are denser than savanna, prairie and desert in every Game that has
 /// both: counting a Game's trees is nearly all of either one's time, so the two share it.
-#[test]
-fn each_biome_scatters_its_trees_at_its_density_class() {
-    let mut compared = 0;
-    for game in &GAMES {
-        let density = trees_per_hectare(game);
-        for (name, per_ha) in density.iter().cloned() {
-            let spacing = mean_spacing_m(per_ha);
-            let full = format!("{}:{name}", game.name);
-            if DENSE.contains(&name.as_str()) {
-                assert!(
-                    (2.5..=6.0).contains(&spacing),
-                    "{full}: dense, {spacing:.1} m"
-                );
-            } else if MODERATE.contains(&name.as_str()) {
-                assert!(
-                    (5.5..=11.0).contains(&spacing),
-                    "{full}: moderate, {spacing:.1} m"
-                );
-            } else if SPARSE.contains(&name.as_str()) {
-                assert!(spacing >= 12.0, "{full}: sparse, {spacing:.1} m");
-            } else {
-                assert!(
-                    game.bare.contains(&name.as_str()) || name == "scorched",
-                    "{full}: unclassed"
-                );
-            }
+fn each_biome_scatters_its_trees_at_its_density_class(game: &str) {
+    let game = game_named(game);
+    let density = trees_per_hectare(game);
+    for (name, per_ha) in density.iter().cloned() {
+        let spacing = mean_spacing_m(per_ha);
+        let full = format!("{}:{name}", game.name);
+        if DENSE.contains(&name.as_str()) {
+            assert!(
+                (2.5..=6.0).contains(&spacing),
+                "{full}: dense, {spacing:.1} m"
+            );
+        } else if MODERATE.contains(&name.as_str()) {
+            assert!(
+                (5.5..=11.0).contains(&spacing),
+                "{full}: moderate, {spacing:.1} m"
+            );
+        } else if SPARSE.contains(&name.as_str()) {
+            assert!(spacing >= 12.0, "{full}: sparse, {spacing:.1} m");
+        } else {
+            assert!(
+                game.bare.contains(&name.as_str()) || name == "scorched",
+                "{full}: unclassed"
+            );
         }
-        compared += usize::from(jungle_and_swamp_are_denser_than_savanna_prairie_and_desert(
-            game, &density,
-        ));
     }
-    assert_eq!(compared, 5);
+    assert!(
+        jungle_and_swamp_are_denser_than_savanna_prairie_and_desert(game, &density),
+        "{}: no dense and sparse Biomes to compare",
+        game.name
+    );
 }
+
+each_case!(each_biome_scatters_its_trees_at_its_density_class: terra, meadow, ember, tidewater, lumen);
 
 /// Whether `game` has both classes to compare.
 fn jungle_and_swamp_are_denser_than_savanna_prairie_and_desert(
@@ -1385,79 +1391,79 @@ const ARID: [&str; 8] = [
 
 /// A Biome's ground cover is patches with bare ground between, never an even carpet, and a flower
 /// is rarer than the grass it grows among.
-#[test]
-fn ground_cover_grows_in_patches_at_each_biomes_class_and_flowers_stay_rare() {
-    for game in &GAMES {
-        let grounds = ground_of(game, 7);
-        for (index, (name, _)) in game.biomes.iter().enumerate() {
-            let full = format!("{}:{name}", game.name);
-            let name = *name;
-            if grounds[index].is_empty() {
-                // A Biome of the land's shape, which only version 3 chooses.
-                continue;
-            }
-            let cover = measure(&grounds[index]);
-            println!(
-                "{full}: cover {:.1}% bare {:.1}% clustered {:.0}%",
-                cover.total * 100.0,
-                cover.bare * 100.0,
-                cover.clustered * 100.0
+fn ground_cover_grows_in_patches_at_each_biomes_class_and_flowers_stay_rare(game: &str) {
+    let game = game_named(game);
+    let grounds = ground_of(game, 7);
+    for (index, (name, _)) in game.biomes.iter().enumerate() {
+        let full = format!("{}:{name}", game.name);
+        let name = *name;
+        if grounds[index].is_empty() {
+            // A Biome of the land's shape, which only version 3 chooses.
+            continue;
+        }
+        let cover = measure(&grounds[index]);
+        println!(
+            "{full}: cover {:.1}% bare {:.1}% clustered {:.0}%",
+            cover.total * 100.0,
+            cover.bare * 100.0,
+            cover.clustered * 100.0
+        );
+        let share = |list: &[&str]| -> f64 {
+            list.iter()
+                .map(|p| cover.by_plant[GROUND_COVER.iter().position(|c| c == p).unwrap()])
+                .sum()
+        };
+        // The sea's floor and a river's bed lie under water, where no ground cover grows.
+        if game.bare.contains(&name) || ["ocean", "river"].contains(&name) {
+            assert!(
+                cover.total < 0.02,
+                "{full}: bare on purpose, {:.3}",
+                cover.total
             );
-            let share = |list: &[&str]| -> f64 {
-                list.iter()
-                    .map(|p| cover.by_plant[GROUND_COVER.iter().position(|c| c == p).unwrap()])
-                    .sum()
-            };
-            // The sea's floor and a river's bed lie under water, where no ground cover grows.
-            if game.bare.contains(&name) || ["ocean", "river"].contains(&name) {
+            continue;
+        }
+        let (range, bare_floor, clustered_floor) = if DENSE.contains(&name) {
+            (COVER_DENSE, 0.08, 0.75)
+        } else if GRASSY.contains(&name) {
+            (COVER_GRASSY, 0.28, 0.55)
+        } else {
+            assert!(ARID.contains(&name), "{full}: unclassed");
+            (COVER_SPARSE, 0.45, 0.0)
+        };
+        assert!(
+            range.contains(&cover.total),
+            "{full}: {:.1}% covered, wanted {range:?}",
+            cover.total * 100.0
+        );
+        assert!(
+            cover.bare >= bare_floor,
+            "{full}: only {:.1}% of the ground is more than 2 m from cover",
+            cover.bare * 100.0
+        );
+        assert!(
+            cover.clustered >= clustered_floor,
+            "{full}: {:.0}% of the cover is in patches",
+            cover.clustered * 100.0
+        );
+        if !DENSE.contains(&name) {
+            for flower in FLOWERS {
                 assert!(
-                    cover.total < 0.02,
-                    "{full}: bare on purpose, {:.3}",
-                    cover.total
-                );
-                continue;
-            }
-            let (range, bare_floor, clustered_floor) = if DENSE.contains(&name) {
-                (COVER_DENSE, 0.08, 0.75)
-            } else if GRASSY.contains(&name) {
-                (COVER_GRASSY, 0.28, 0.55)
-            } else {
-                assert!(ARID.contains(&name), "{full}: unclassed");
-                (COVER_SPARSE, 0.45, 0.0)
-            };
-            assert!(
-                range.contains(&cover.total),
-                "{full}: {:.1}% covered, wanted {range:?}",
-                cover.total * 100.0
-            );
-            assert!(
-                cover.bare >= bare_floor,
-                "{full}: only {:.1}% of the ground is more than 2 m from cover",
-                cover.bare * 100.0
-            );
-            assert!(
-                cover.clustered >= clustered_floor,
-                "{full}: {:.0}% of the cover is in patches",
-                cover.clustered * 100.0
-            );
-            if !DENSE.contains(&name) {
-                for flower in FLOWERS {
-                    assert!(
-                        share(&[flower]) <= 0.03,
-                        "{full}: {flower} covers {:.1}%",
-                        share(&[flower]) * 100.0
-                    );
-                }
-                assert!(
-                    share(&FLOWERS) <= 0.5 * share(&GRASSES),
-                    "{full}: flowers {:.1}% against grass {:.1}%",
-                    share(&FLOWERS) * 100.0,
-                    share(&GRASSES) * 100.0
+                    share(&[flower]) <= 0.03,
+                    "{full}: {flower} covers {:.1}%",
+                    share(&[flower]) * 100.0
                 );
             }
+            assert!(
+                share(&FLOWERS) <= 0.5 * share(&GRASSES),
+                "{full}: flowers {:.1}% against grass {:.1}%",
+                share(&FLOWERS) * 100.0,
+                share(&GRASSES) * 100.0
+            );
         }
     }
 }
+
+each_case!(ground_cover_grows_in_patches_at_each_biomes_class_and_flowers_stay_rare: terra, meadow, ember, tidewater, lumen);
 
 /// Headroom a Player walks under: nothing of a tree but its trunk hangs lower.
 const TREE_CLEAR_M: f32 = 4.0;

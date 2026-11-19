@@ -15,6 +15,26 @@ use tesserae_mods::{BatchReport, Command, Kind, Resolved, TickContext, validate}
 use super::{LoadedMods, TrustMode, load};
 use crate::world::WorldSettings;
 
+/// One test per case of a slow check, named `<check>::<case>`: a loop inside one test runs as long
+/// as all its cases together, where separate tests spread over a run's threads and CI's shards.
+/// A bare case passes its own name, a Game's.
+macro_rules! each_case {
+    ($check:ident: $($case:ident),+ $(,)?) => {
+        each_case!($check: $($case = stringify!($case)),+);
+    };
+    ($check:ident: $($case:ident = $arg:expr),+ $(,)?) => {
+        mod $check {
+            use super::*;
+            $(
+                #[test]
+                fn $case() {
+                    $check($arg);
+                }
+            )+
+        }
+    };
+}
+
 mod biomes;
 mod building;
 mod fields;

@@ -247,8 +247,9 @@ const WOOD_FOR_A_HOME: u32 = 15;
 
 /// Wood comes only from oaks: none lies about on its own, and the trunks within a short walk of
 /// the spawn drop enough of the placed Wood Item for a Workbench, a Chest and a Door.
-#[test]
-fn a_survival_player_finds_wood_for_a_workbench_a_chest_and_a_door_in_the_oaks_near_the_spawn() {
+fn a_survival_player_finds_wood_for_a_workbench_a_chest_and_a_door_in_the_oaks_near_the_spawn(
+    seed: u64,
+) {
     let (_install, loaded) = loaded("terra", 0.5);
     let wood = material(&loaded, "flora:wood");
     let trunk = material(&loaded, "flora:oak_log");
@@ -258,30 +259,30 @@ fn a_survival_player_finds_wood_for_a_workbench_a_chest_and_a_door_in_the_oaks_n
         "{yields:?}"
     );
     let per_trunk = yields[0].count.min;
-    for seed in [
-        crate::world::WorldSettings::default().seed,
-        1,
-        3,
-        4,
-        7,
-        2024,
-    ] {
-        let generator = new_world(&loaded, seed, 0.5);
-        let [wood, trunks] = <[_; 2]>::try_from(distances_around_m(
-            &generator,
-            &[wood, trunk],
-            SHORT_WALK_M,
-            around_spawn(&generator),
-        ))
-        .unwrap();
-        assert!(wood.is_empty(), "seed {seed}: Wood lies about on its own");
-        let found = trunks.len() as u32 * per_trunk;
-        assert!(
-            found >= WOOD_FOR_A_HOME,
-            "seed {seed}: {found} Wood within {SHORT_WALK_M} m"
-        );
-    }
+    let generator = new_world(&loaded, seed, 0.5);
+    let [wood, trunks] = <[_; 2]>::try_from(distances_around_m(
+        &generator,
+        &[wood, trunk],
+        SHORT_WALK_M,
+        around_spawn(&generator),
+    ))
+    .unwrap();
+    assert!(wood.is_empty(), "seed {seed}: Wood lies about on its own");
+    let found = trunks.len() as u32 * per_trunk;
+    assert!(
+        found >= WOOD_FOR_A_HOME,
+        "seed {seed}: {found} Wood within {SHORT_WALK_M} m"
+    );
 }
+
+each_case!(a_survival_player_finds_wood_for_a_workbench_a_chest_and_a_door_in_the_oaks_near_the_spawn:
+    default_seed = crate::world::WorldSettings::default().seed,
+    seed_1 = 1,
+    seed_3 = 3,
+    seed_4 = 4,
+    seed_7 = 7,
+    seed_2024 = 2024,
+);
 
 /// What a grown oak gives is the placed Wood Item, and nothing grown can be placed.
 #[test]

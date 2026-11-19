@@ -495,149 +495,149 @@ const HALF_M: f32 = 320.0;
 
 /// Also that each Game lays small and large Settlements, whose wider scan holds this one's: the
 /// scans are nearly all of either one's time, so the two share one.
-#[test]
-fn a_world_of_each_game_shows_its_templates_and_a_settlement_level_whole_and_furnished() {
-    for game in GAMES {
-        let (_install, loaded) = loaded(game, 1.0);
-        let templates = &loaded.tables.templates;
-        let generator = Worldgen::new(SEED, 1.0, loaded.world.unwrap())
-            .with_templates(templates)
-            .with_settlements(&loaded.tables.settlements);
-        let wide = Generated::new(&generator, SIZES_SCAN_M);
-        lays_small_and_large_settlements(game, templates, &generator, &wide);
-        let world = wide.inside(&generator, generator.spawn_m(), HALF_M);
-        let found = standing(&world, templates, 1.0);
-        let exported = export(game);
-        let kind = |f: &Found| exported[f.template]["kind"].as_str().unwrap();
+fn a_world_of_each_game_shows_its_templates_and_a_settlement_level_whole_and_furnished(game: &str) {
+    let (_install, loaded) = loaded(game, 1.0);
+    let templates = &loaded.tables.templates;
+    let generator = Worldgen::new(SEED, 1.0, loaded.world.unwrap())
+        .with_templates(templates)
+        .with_settlements(&loaded.tables.settlements);
+    let wide = Generated::new(&generator, SIZES_SCAN_M);
+    lays_small_and_large_settlements(game, templates, &generator, &wide);
+    let world = wide.inside(&generator, generator.spawn_m(), HALF_M);
+    let found = standing(&world, templates, 1.0);
+    let exported = export(game);
+    let kind = |f: &Found| exported[f.template]["kind"].as_str().unwrap();
 
-        let buildings: Vec<&Found> = found.iter().filter(|f| kind(f) != "wild").collect();
-        let minimum = loaded
-            .tables
-            .settlements
-            .iter()
-            .map(|s| s.minimum)
-            .min()
-            .unwrap();
+    let buildings: Vec<&Found> = found.iter().filter(|f| kind(f) != "wild").collect();
+    let minimum = loaded
+        .tables
+        .settlements
+        .iter()
+        .map(|s| s.minimum)
+        .min()
+        .unwrap();
+    assert!(
+        buildings.len() > usize::from(minimum),
+        "{game}: {} buildings stand",
+        buildings.len()
+    );
+    let wild = found.iter().filter(|f| kind(f) == "wild").count();
+    assert!(wild > 0, "{game}: a wilderness Structure stands");
+
+    let furnishings = ["door", "chest", "workbench", "lamp", "glass"]
+        .map(|n| material(&loaded, &format!("{game}:{n}")));
+    for furnishing in furnishings {
         assert!(
-            buildings.len() > usize::from(minimum),
-            "{game}: {} buildings stand",
-            buildings.len()
-        );
-        let wild = found.iter().filter(|f| kind(f) == "wild").count();
-        assert!(wild > 0, "{game}: a wilderness Structure stands");
-
-        let furnishings = ["door", "chest", "workbench", "lamp", "glass"]
-            .map(|n| material(&loaded, &format!("{game}:{n}")));
-        for furnishing in furnishings {
-            assert!(
-                buildings.iter().any(|f| {
-                    let t = &templates[f.template];
-                    let [w, h, d] = t.size();
-                    (0..h).any(|y| {
-                        (0..d).any(|z| {
-                            (0..w).any(|x| {
-                                matches!(t.cell([x, y, z]), Cell::Voxel(v) if v.material() == furnishing)
-                            })
+            buildings.iter().any(|f| {
+                let t = &templates[f.template];
+                let [w, h, d] = t.size();
+                (0..h).any(|y| {
+                    (0..d).any(|z| {
+                        (0..w).any(|x| {
+                            matches!(t.cell([x, y, z]), Cell::Voxel(v) if v.material() == furnishing)
                         })
                     })
-                }),
-                "{game}: furnished with {}",
-                name(&loaded, Kind::Material, furnishing.into())
-            );
-        }
-
-        // Each door looks out onto the Settlement's path, where the scan holds what is before it.
-        let paths: HashSet<MaterialId> = loaded
-            .tables
-            .settlements
-            .iter()
-            .map(|s| s.path.material())
-            .collect();
-        let door = material(&loaded, &format!("{game}:door"));
-        let mut facing = 0;
-        for f in &buildings {
-            let sampled = templates[f.template].sample(1.0, f.turn);
-            let [sx, sy, sz] = sampled.size();
-            let Some(at) = (0..sy)
-                .flat_map(|y| (0..sz).flat_map(move |z| (0..sx).map(move |x| [x, y, z])))
-                .find(|&at| matches!(sampled.cell(at), Cell::Voxel(v) if v.material() == door))
-            else {
-                continue;
-            };
-            let [dx, dz] = road_side(sampled.size(), at);
-            let from = [f.corner[0] + at[0], f.corner[2] + at[2]];
-            let ahead: Vec<Option<Voxel>> = (1..=10)
-                .flat_map(|k| (-1..=1).map(move |across| (k, across)))
-                .map(|(k, across)| {
-                    world.top([
-                        from[0] + dx * k + dz * across,
-                        from[1] + dz * k + dx * across,
-                    ])
                 })
-                .collect();
-            if ahead.iter().any(Option::is_none) {
-                continue;
-            }
-            assert!(
-                ahead
-                    .iter()
-                    .flatten()
-                    .any(|v| paths.contains(&v.material())),
-                "{game}: the door of {} at {:?} faces no path",
-                templates[f.template].name,
-                f.corner
-            );
-            facing += 1;
-        }
-        assert!(facing > 0, "{game}: no door's road was in the scan");
+            }),
+            "{game}: furnished with {}",
+            name(&loaded, Kind::Material, furnishing.into())
+        );
+    }
 
-        let mut cellars = 0;
-        for f in &found {
-            let sampled = templates[f.template].sample(1.0, f.turn);
-            let [sx, _, sz] = sampled.size();
-            // Level: nothing under its lowest layer is air, so it stands on its ground.
+    // Each door looks out onto the Settlement's path, where the scan holds what is before it.
+    let paths: HashSet<MaterialId> = loaded
+        .tables
+        .settlements
+        .iter()
+        .map(|s| s.path.material())
+        .collect();
+    let door = material(&loaded, &format!("{game}:door"));
+    let mut facing = 0;
+    for f in &buildings {
+        let sampled = templates[f.template].sample(1.0, f.turn);
+        let [sx, sy, sz] = sampled.size();
+        let Some(at) = (0..sy)
+            .flat_map(|y| (0..sz).flat_map(move |z| (0..sx).map(move |x| [x, y, z])))
+            .find(|&at| matches!(sampled.cell(at), Cell::Voxel(v) if v.material() == door))
+        else {
+            continue;
+        };
+        let [dx, dz] = road_side(sampled.size(), at);
+        let from = [f.corner[0] + at[0], f.corner[2] + at[2]];
+        let ahead: Vec<Option<Voxel>> = (1..=10)
+            .flat_map(|k| (-1..=1).map(move |across| (k, across)))
+            .map(|(k, across)| {
+                world.top([
+                    from[0] + dx * k + dz * across,
+                    from[1] + dz * k + dx * across,
+                ])
+            })
+            .collect();
+        if ahead.iter().any(Option::is_none) {
+            continue;
+        }
+        assert!(
+            ahead
+                .iter()
+                .flatten()
+                .any(|v| paths.contains(&v.material())),
+            "{game}: the door of {} at {:?} faces no path",
+            templates[f.template].name,
+            f.corner
+        );
+        facing += 1;
+    }
+    assert!(facing > 0, "{game}: no door's road was in the scan");
+
+    let mut cellars = 0;
+    for f in &found {
+        let sampled = templates[f.template].sample(1.0, f.turn);
+        let [sx, _, sz] = sampled.size();
+        // Level: nothing under its lowest layer is air, so it stands on its ground.
+        for z in 0..sz {
+            for x in 0..sx {
+                if !matches!(sampled.cell([x, 0, z]), Cell::Voxel(_)) {
+                    continue;
+                }
+                let below = [f.corner[0] + x, f.corner[1] - 1, f.corner[2] + z];
+                assert!(
+                    world.get(below).is_none_or(|v| !v.is_air()),
+                    "{game}: {} at {:?} stands on its ground",
+                    templates[f.template].name,
+                    f.corner
+                );
+            }
+        }
+        // Underground: ground stands round every cellar cell on the footprint's rim.
+        if sampled.ground() == 0 || kind(f) == "wild" {
+            continue;
+        }
+        cellars += 1;
+        let (mut rim, mut buried) = (0, 0);
+        for y in 0..sampled.ground() {
             for z in 0..sz {
-                for x in 0..sx {
-                    if !matches!(sampled.cell([x, 0, z]), Cell::Voxel(_)) {
+                for x in [0, sx - 1] {
+                    let out = if x == 0 { -1 } else { sx };
+                    if !matches!(sampled.cell([x, y, z]), Cell::Voxel(_)) {
                         continue;
                     }
-                    let below = [f.corner[0] + x, f.corner[1] - 1, f.corner[2] + z];
-                    assert!(
-                        world.get(below).is_none_or(|v| !v.is_air()),
-                        "{game}: {} at {:?} stands on its ground",
-                        templates[f.template].name,
-                        f.corner
-                    );
+                    rim += 1;
+                    let at = [f.corner[0] + out, f.corner[1] + y, f.corner[2] + z];
+                    buried += usize::from(world.get(at).is_some_and(|v| !v.is_air()));
                 }
             }
-            // Underground: ground stands round every cellar cell on the footprint's rim.
-            if sampled.ground() == 0 || kind(f) == "wild" {
-                continue;
-            }
-            cellars += 1;
-            let (mut rim, mut buried) = (0, 0);
-            for y in 0..sampled.ground() {
-                for z in 0..sz {
-                    for x in [0, sx - 1] {
-                        let out = if x == 0 { -1 } else { sx };
-                        if !matches!(sampled.cell([x, y, z]), Cell::Voxel(_)) {
-                            continue;
-                        }
-                        rim += 1;
-                        let at = [f.corner[0] + out, f.corner[1] + y, f.corner[2] + z];
-                        buried += usize::from(world.get(at).is_some_and(|v| !v.is_air()));
-                    }
-                }
-            }
-            assert!(
-                buried * 10 >= rim * 9,
-                "{game}: {}'s cellar is underground ({buried} of {rim})",
-                templates[f.template].name
-            );
         }
-        assert!(cellars > 0, "{game}: a building with a cellar stands");
+        assert!(
+            buried * 10 >= rim * 9,
+            "{game}: {}'s cellar is underground ({buried} of {rim})",
+            templates[f.template].name
+        );
     }
+    assert!(cellars > 0, "{game}: a building with a cellar stands");
 }
+
+each_case!(a_world_of_each_game_shows_its_templates_and_a_settlement_level_whole_and_furnished:
+    terra, tidewater, ember, lumen, meadow);
 
 /// How far from spawn the scan for Settlements of every size looks: a few of the villages'
 /// lattice cells, and one of Terra's town's.
