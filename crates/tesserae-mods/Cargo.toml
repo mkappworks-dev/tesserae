@@ -8,7 +8,7 @@ license.workspace = true
 
 [dependencies]
 tesserae-core = { path = "../tesserae-core", version = "0.0.0" }
-wasmtime = { version = "50.0.1", default-features = false, features = [
+wasmtime = { version = "50.0.2", default-features = false, features = [
   "runtime",
   "cranelift",
   "component-model",
@@ -16,7 +16,7 @@ wasmtime = { version = "50.0.1", default-features = false, features = [
   "parallel-compilation",
   "std",
 ] }
-wasmtime-wasi = { version = "50.0.1", default-features = false, features = ["p2"] }
+wasmtime-wasi = { version = "50.0.2", default-features = false, features = ["p2"] }
 bytes = "1"
 png = "0.18"
 dirs = "7"
