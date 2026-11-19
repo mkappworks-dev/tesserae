@@ -1,6 +1,6 @@
 # 01: A version 3 bench and the starting figures
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: None (can start immediately)
 
@@ -13,7 +13,7 @@ A bench that times version 3's Chunks as interleaved CPU time, in the style of t
 ## Acceptance criteria
 
 - [x] The bench runs every case interleaved and prints medians of thread CPU time and the load it ran under.
-- [ ] The starting bench figures and the starting flight profile (`scripts/profile-frames`, three interleaved rounds, worker time per level and stage) are in this ticket's Comments, with `uptime` and how they were taken.
+- [x] The starting bench figures and the starting flight profile (`scripts/profile-frames`, three interleaved rounds, worker time per level and stage) are in this ticket's Comments, with `uptime` and how they were taken.
 - [x] The starting fingerprint is kept with the baseline binary, outside the commit.
 - [x] No generator code changes.
 
@@ -47,3 +47,29 @@ TESSERAE_BENCH_ROUNDS=9 ./bench-01 --bench
 | cavern @ 0.5 m (1 Chunks) | 5687.3 |
 | coarse level 3 @ 0.5 m (4 Chunks) | 3897.6 |
 | forest 3x3 columns @ 0.5 m (36 Chunks) | 1103.6 |
+
+### Starting flight profile, 2026-11-19
+
+The starting commit, fcb5db58, in a real flight over Terra. Worker CPU, ms per second of flight:
+
+| Level | Generate | Relight | Mesh |
+|---|---|---|---|
+| 0 | 988.9 (912.4–1000.6) | 77.6 (71.0–87.7) | 19.5 (19.1–22.5) |
+| 1 | 284.1 (267.0–353.1) | 0 | 194.0 (187.6–200.7) |
+| 2 | 63.5 (61.5–131.4) | 0 | 2.0 (2.0–2.4) |
+| 3 | 10.0 (9.5–21.1) | 0 | 4.1 (3.8–4.5) |
+| Coarse (1–5) | 357.6 (338.4–508.1) | – | – |
+| All levels | 1350.2 (1250.8–1489.1) | – | – |
+
+Level 0's fluid work is 21.8 (21.0–23.2) ms/s. Level-0 generation is about 990 ms/s, seven times the 140 ms/s the spec quotes from earlier runs: the flight is generation-bound, at about 15 ms of worker CPU per level-0 Chunk (660 Chunks generated in the window). The high ends of the ranges are the first start run, the first series of the day.
+
+How they were taken: each binary was built at its commit with `RUSTFLAGS="-D warnings" cargo build --locked -p tesserae --features profiling --release` (after `git switch --detach <commit>`) and copied out of the target dir into a scratch folder, `$SCRATCH`, as `tesserae-start` (fcb5db58), `tesserae-mid` (3c3e9948) and `tesserae-end` (ac49c2f3); all builds, and a rebuild of Terra's dist with `scripts/build-guests` (its Flora content was stale), finished before any timing. One series is one `scripts/profile-frames` invocation, the `flight` fixture offscreen at 1920x1080 with three repeats, each logging on and off:
+
+```sh
+scripts/profile-frames --binary $SCRATCH/tesserae-<point> --profile release \
+  --features profiling --fixtures flight --repeats 3 $SCRATCH/runs/r<round>-<point>
+```
+
+Three rounds, interleaved by binary: start, mid, end; then end, mid, start; then start, mid, end. Before each series the driver checked `uptime` and waited for no `cargo`, `rustc` or `tesserae` process and no runner lock; it never had to wait. Every run passed the runner's audit (full fixture window, streaming settled before the flight, fixture ready). Figures are worker CPU per second of the 10 s fixture window, from the logging-on runs: the median over 9 runs (3 rounds x 3 repeats), with the range in brackets. Levels 4 and 5 generate nothing in this window after the first start run (2.5 ms/s at level 4 once); level 1 to 3 relight is always 0.
+
+`uptime` over the series, from `17:59 load averages: 3.50 5.22 4.68` at the first to `18:30 load averages: 5.86 6.17 6.11` at the last; the highest one-minute load was 7.10 (before round 3's mid series).

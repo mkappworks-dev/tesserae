@@ -1,6 +1,6 @@
 # 05: The coarse levels share level 0's terrain and columns
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 02
 
@@ -15,7 +15,7 @@ A generator can be made to share another's work when its seed and every terrain 
 - [x] A shared source generates the same Chunks as one made alone, at every level, warm or cold.
 - [x] Sharing a generator whose seed or terrain differs is refused.
 - [x] Version 3 Chunks match the ticket 01 fingerprint; the committed version 3 digests pass unchanged.
-- [ ] Bench figures and the coarse levels' worker time before and after in Comments.
+- [x] Bench figures and the coarse levels' worker time before and after in Comments.
 
 ## Comments
 
@@ -80,3 +80,42 @@ TESSERAE_BENCH_ROUNDS=9 TESSERAE_BENCH_AGAINST=$PWD/bench-04 ./bench-05 --bench
 Against 04 every case is within 1% (sky, at 0.2 µs, is timer noise): the bench builds each case's generator alone, so it does not exercise the sharing between levels; the coarse levels' worker time in a flight profile is what shows it.
 
 Version 3's fingerprint (an uncommitted 46-line hash of a fixed Chunk grid at 1.0 and 0.5 m, plus queries) is identical to fcb5db58's at every one of 80606a10, 3c3e9948, 8c54ad8e and ac49c2f3, and the committed version 3 digests pass.
+
+### End flight profile, 2026-11-19
+
+The end, ac49c2f3, against the starting commit, fcb5db58, and the mid-point after ticket 03, 3c3e9948, in a real flight over Terra. Worker CPU, ms per second of flight:
+
+| Level | Stage | Start | Mid | End | End / start | End / mid |
+|---|---|---|---|---|---|---|
+| 0 | generate | 988.9 (912.4–1000.6) | 254.3 (234.5–267.2) | 188.0 (183.9–199.8) | 19% | 74% |
+| 0 | relight | 77.6 (71.0–87.7) | 97.0 (86.1–104.5) | 94.7 (88.8–96.2) | 122% | 98% |
+| 0 | mesh | 19.5 (19.1–22.5) | 26.1 (24.0–27.2) | 27.6 (26.9–27.8) | 142% | 106% |
+| 1 | generate | 284.1 (267.0–353.1) | 273.2 (264.4–284.7) | 259.6 (251.9–264.6) | 91% | 95% |
+| 1 | mesh | 194.0 (187.6–200.7) | 268.5 (238.6–281.8) | 273.8 (264.6–281.5) | 141% | 102% |
+| 2 | generate | 63.5 (61.5–131.4) | 52.6 (49.8–53.6) | 50.6 (49.6–51.3) | 80% | 96% |
+| 2 | mesh | 2.0 (2.0–2.4) | 1.9 (1.7–2.0) | 1.9 (1.9–2.0) | 95% | 100% |
+| 3 | generate | 10.0 (9.5–21.1) | 8.8 (8.7–9.7) | 8.9 (8.5–9.7) | 89% | 101% |
+| 3 | mesh | 4.1 (3.8–4.5) | 4.1 (3.6–4.4) | 4.1 (3.9–4.3) | 100% | 100% |
+| Coarse (1–5) | generate | 357.6 (338.4–508.1) | 335.4 (322.9–346.9) | 318.8 (310.4–325.6) | 89% | 95% |
+| All levels | generate | 1350.2 (1250.8–1489.1) | 590.3 (557.4–602.6) | 510.0 (496.6–522.6) | 38% | 86% |
+
+Level 0's fluid work is 21.8, 32.1 and 33.0 ms/s. The coarse levels' worker time per Chunk, which is what sharing should cut, because the freed workers generate more coarse Chunks in the same 10 s (level 1: 795 at the start, 985 mid, 1001 at the end):
+
+| Level | Start ms/Chunk | Mid ms/Chunk | End ms/Chunk |
+|---|---|---|---|
+| 1 | 3.57 | 2.77 | 2.58 |
+| 2 | 3.80 | 3.19 | 3.07 |
+| 3 | 0.60 | 0.54 | 0.54 |
+
+Generation is cheaper in a real flight: level 0 by 81% against the start and 26% against the mid-point (tickets 04 and 05), the coarse levels by 11% per second and 28% per level-1 Chunk against the start. This ticket's own share, mid to end, is small at the coarse levels: 5% per second, 7% per level-1 Chunk and 4% per level-2 Chunk. Level-1 meshing and level-0 relight rise with the extra throughput; they are out of this spec's scope.
+
+How they were taken: each binary was built at its commit with `RUSTFLAGS="-D warnings" cargo build --locked -p tesserae --features profiling --release` (after `git switch --detach <commit>`) and copied out of the target dir into a scratch folder, `$SCRATCH`, as `tesserae-start` (fcb5db58), `tesserae-mid` (3c3e9948) and `tesserae-end` (ac49c2f3); all builds, and a rebuild of Terra's dist with `scripts/build-guests` (its Flora content was stale), finished before any timing. One series is one `scripts/profile-frames` invocation, the `flight` fixture offscreen at 1920x1080 with three repeats, each logging on and off:
+
+```sh
+scripts/profile-frames --binary $SCRATCH/tesserae-<point> --profile release \
+  --features profiling --fixtures flight --repeats 3 $SCRATCH/runs/r<round>-<point>
+```
+
+Three rounds, interleaved by binary: start, mid, end; then end, mid, start; then start, mid, end. Before each series the driver checked `uptime` and waited for no `cargo`, `rustc` or `tesserae` process and no runner lock; it never had to wait. Every run passed the runner's audit (full fixture window, streaming settled before the flight, fixture ready). Figures are worker CPU per second of the 10 s fixture window, from the logging-on runs: the median over 9 runs (3 rounds x 3 repeats), with the range in brackets. Levels 4 and 5 generate nothing in this window after the first start run (2.5 ms/s at level 4 once); level 1 to 3 relight is always 0.
+
+`uptime` over the series, from `17:59 load averages: 3.50 5.22 4.68` at the first to `18:30 load averages: 5.86 6.17 6.11` at the last; the highest one-minute load was 7.10 (before round 3's mid series).
