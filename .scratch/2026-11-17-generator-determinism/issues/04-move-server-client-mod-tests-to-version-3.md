@@ -17,7 +17,7 @@ themselves are left for 05.
 
 ## Acceptance criteria
 
-- [ ] No test or bench in this batch builds a World under version 1 or 2, other
+- [x] No test or bench in this batch builds a World under version 1 or 2, other
       than tests of those versions themselves.
 - [x] Every test that changed keeps asserting the behaviour it was written for;
       any whose subject only exists under version 2 is listed in a comment here
@@ -68,3 +68,4 @@ themselves are left for 05.
 - Tests of versions 1 and 2 themselves, left for 05:
   `persistence::tests` (`rewrite_as_version_1`) and
   `mods::tests::the_facts_carry_the_games_climate_sizes_and_the_worlds_generator`.
+- Ticked after 05: versions 1 and 2 are deleted, so the tests kept on version 2 above now build under version 3, and pass.

@@ -25,7 +25,7 @@ under version 3 unchanged:
 
 ## Acceptance criteria
 
-- [ ] Every listed test runs under version 3 and passes with its thresholds
+- [x] Every listed test runs under version 3 and passes with its thresholds
       unchanged.
 - [x] Only Game data changes, not Engine code; the Engine digests do not move.
 - [x] Captures of each retuned Game's spawn surroundings are taken for review
@@ -95,3 +95,4 @@ under version 3 unchanged:
   for terra, tidewater, meadow and ember, taken with
   `TESSERAE_SCREENSHOT_OFFSCREEN=1` and `TESSERAE_TRUST_MODS=1` from an install
   holding one Game and its dependencies.
+- Ticked after 05, 13 and 18: the two tests pinned to version 2 run under version 3, the density test unignored by 13 with its thresholds unchanged, and both pass.
