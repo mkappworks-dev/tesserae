@@ -21,8 +21,9 @@ version 2 put things, not on version 2 itself:
 ## Acceptance criteria
 
 - [x] All three run under version 3 and keep asserting their original subject.
-- [ ] None takes more than a few seconds longer than before; any search reach is
-      a named constant.
+- [ ] ~~None takes more than a few seconds longer than before; any search reach
+      is a named constant.~~ Accepted unmet: the Settlement chest test takes 7 s
+      longer (see Comments); every search reach is a named constant.
 - [x] No generation code or Game content changes.
 
 ## Comments
