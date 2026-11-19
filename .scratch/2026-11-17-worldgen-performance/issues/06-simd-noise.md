@@ -1,6 +1,6 @@
 # 06: SIMD noise, if noise is still worth it
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 03, 04, 05
 
@@ -13,9 +13,9 @@ First a re-measure: noise's share of generation in a sampled flight once tickets
 ## Acceptance criteria
 
 - [x] The re-measured share is in Comments, whichever way the gate goes.
-- [ ] If built: a property test over many seeds and positions shows the four-wide result equals the scalar one bit for bit, on every CI architecture.
-- [ ] If built: version 3 Chunks match the ticket 01 fingerprint; the committed version 3 digests pass unchanged.
-- [ ] If built: bench figures before and after in Comments.
+- [x] If built: a property test over many seeds and positions shows the four-wide result equals the scalar one bit for bit, on every CI architecture.
+- [x] If built: version 3 Chunks match the ticket 01 fingerprint; the committed version 3 digests pass unchanged.
+- [x] If built: bench figures before and after in Comments.
 
 ## Comments
 
@@ -71,3 +71,49 @@ Top ten inclusive symbols inside generation, pooled (iterator adapters, `CellMap
 | `Worldgen::cavern_open` | 4.2% | 9.7% | 6.8% |
 
 Level 0 is now mostly the crop fields' and Structure claims' `field_accepts`, through `surface_height_m` into the drainage (`contained_at_m`, then `Drainage::wet`, whose own code is 40% of level 0); noise is not what it waits on. That is outside this spec's tickets.
+
+### Built, 2026-11-19
+
+The 2D and 3D fBm have a four-wide form on `wide` 1.7.1 (pinned exactly): the same operations in the same order, each lane summing its own octaves, `floor` (exact on every backend) and `trunc_int` (saturating like `as`), and never `mul_add`. The scalar functions are kept for single points. Batched where a caller already walks a row:
+
+- The column cache: each row's base heights (the warp and every field `base_height_m` always asks, four columns at once; the rest of its arithmetic, and the noise it asks only on some columns, stays per column) and the overhang reach over the Cell's columns.
+- The drainage window: a region's solve asks its base heights four nodes at a time.
+- The overhang push down a column: each Voxel the density moves, and the one above the last, four heights at a time, before the Voxel walk. A height the walk asks that is not bit for bit one sampled (a Voxel size that is not a power of two) is sampled alone.
+
+`wide`'s `splat` compiles on macOS to a call to `memset_pattern16` per vector; with it, the first build ran 24% to 94% slower than 05. The noise builds its vectors from four-element arrays instead.
+
+Proof:
+
+- Property tests, in `noise.rs`: 20,000 four-lane draws each of `fbm2` and `fbm3` against the scalar, bit for bit, over hashed seeds, 0 to 10 octaves, and positions from a few metres to 1,000 km, on and just beside lattice points either side of zero. In `terrain.rs`: 24 seeds of 400 four-column draws out to 100 km, the base height and the overhang reach against the scalar, bit for bit. Both pass on aarch64 (NEON) here; CI's x86_64 Linux runs them on the SSE2 backend. A test that changes the order of the smoothstep's multiplications fails both.
+- Version 3's fingerprint (`tests/v3_fingerprint.rs`, uncommitted) equals fcb5db58's, all 46 lines; the committed digests, `cargo test --locked -p tesserae-core` and the Server's LOD tests pass. `GENERATOR_VERSION` is unchanged.
+
+### Bench figures, 2026-11-19
+
+Built with `RUSTFLAGS="-D warnings" cargo bench --locked --no-run -p tesserae-core --bench worldgen_v3` and copied out as `bench-06`; all building, the fingerprint and the tests finished before timing, and nothing else built during the run. Method as in ticket 05: thread CPU time per Chunk over 3 fresh generators, medians over 9 interleaved rounds, the ratio the median of the per-round ratios.
+
+`bench-06` against `bench-05` (ac49c2f3), `uptime` before `19:12  up 7 days, 18:11, 1 user, load averages: 4.03 4.10 3.73`, after `19:13  up 7 days, 18:11, 1 user, load averages: 3.97 4.06 3.72`:
+
+```sh
+TESSERAE_BENCH_ROUNDS=9 TESSERAE_BENCH_AGAINST=$PWD/bench-05 ./bench-06 --bench
+```
+
+| Case | µs | 05 µs | Ratio |
+|---|---|---|---|
+| straddling forest @ 1 m (1 Chunks) | 7895.2 | 9442.0 | 83.8% |
+| straddling dry @ 1 m (1 Chunks) | 5937.2 | 7107.8 | 83.8% |
+| sky @ 1 m (1 Chunks) | 0.2 | 0.2 | 93.3% |
+| deep rock @ 1 m (1 Chunks) | 1063.5 | 1179.3 | 90.4% |
+| river @ 1 m (1 Chunks) | 11761.0 | 16270.6 | 72.3% |
+| cavern @ 1 m (1 Chunks) | 13132.6 | 17767.7 | 73.9% |
+| coarse level 3 @ 1 m (4 Chunks) | 2733.1 | 3650.9 | 74.8% |
+| forest 3x3 columns @ 1 m (36 Chunks) | 1233.1 | 1329.3 | 92.8% |
+| straddling forest @ 0.5 m (1 Chunks) | 3384.5 | 4569.1 | 73.6% |
+| straddling dry @ 0.5 m (1 Chunks) | 3609.4 | 4789.2 | 75.8% |
+| sky @ 0.5 m (1 Chunks) | 0.2 | 0.2 | 100.0% |
+| deep rock @ 0.5 m (1 Chunks) | 934.1 | 1059.4 | 88.2% |
+| river @ 0.5 m (1 Chunks) | 10496.4 | 15065.1 | 69.8% |
+| cavern @ 0.5 m (1 Chunks) | 11383.2 | 15895.5 | 71.7% |
+| coarse level 3 @ 0.5 m (4 Chunks) | 2757.0 | 3633.7 | 76.2% |
+| forest 3x3 columns @ 0.5 m (36 Chunks) | 737.2 | 821.1 | 89.7% |
+
+Every case but sky (timer noise at 0.2 µs) is 7% to 30% cheaper; the most where a Cell's columns and a region's drainage are built cold (river, cavern, coarse level 3), the least where a warm column cache serves many Chunks (the 3x3 column of 36).

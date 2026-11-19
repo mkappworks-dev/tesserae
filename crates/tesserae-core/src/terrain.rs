@@ -3,8 +3,11 @@
 
 use std::sync::Arc;
 
+use wide::f32x4;
+
 use crate::climate::{BiomeTable, ClimateField, MAX_BIOMES, Site};
 use crate::drainage::Drainage;
+use crate::noise::Lanes;
 
 /// What a Game tunes of version 3's terrain, in metres. Plain `Copy` data like the rest of
 /// [`crate::WorldgenParams`].
@@ -166,6 +169,90 @@ struct Base {
     relief_by_biome: Option<(ClimateField, Arc<BiomeTable>, [f32; MAX_BIOMES])>,
 }
 
+/// Version 3's large-scale fields from their raw noise.
+fn fields_of(continent: f32, erosion: f32) -> Fields {
+    // fBm bunches around a half, so a contrast curve spreads the fields across their range.
+    let erosion = smooth(0.25, 0.75, erosion);
+    let inland = smooth(0.50, 0.66, continent);
+    Fields {
+        continent,
+        erosion,
+        ruggedness: inland * smooth(RUGGED_CUT[0], RUGGED_CUT[1], 1.0 - erosion),
+    }
+}
+
+/// What [`Base::samples`] asks of a column.
+#[derive(Clone, Copy)]
+struct Samples<L> {
+    warped: (L, L),
+    /// Continent and erosion.
+    fields: [L; 2],
+    calm: L,
+    peaks: L,
+    /// The detail octaves, all and the broad two.
+    rough: L,
+    broad: L,
+    plateau: L,
+    /// The region and the line.
+    canyon: [L; 2],
+    /// The slot and the region.
+    ravine: [L; 2],
+}
+
+impl Samples<f32x4> {
+    fn lanes(self) -> [Samples<f32>; 4] {
+        let lane = |v: f32x4| v.to_array();
+        let (wx, wz) = (lane(self.warped.0), lane(self.warped.1));
+        let fields = self.fields.map(lane);
+        let (calm, peaks) = (lane(self.calm), lane(self.peaks));
+        let (rough, broad, plateau) = (lane(self.rough), lane(self.broad), lane(self.plateau));
+        let (canyon, ravine) = (self.canyon.map(lane), self.ravine.map(lane));
+        std::array::from_fn(|k| Samples {
+            warped: (wx[k], wz[k]),
+            fields: fields.map(|f| f[k]),
+            calm: calm[k],
+            peaks: peaks[k],
+            rough: rough[k],
+            broad: broad[k],
+            plateau: plateau[k],
+            canyon: canyon.map(|f| f[k]),
+            ravine: ravine.map(|f| f[k]),
+        })
+    }
+}
+
+/// 0 to 1: how far a mountain range rises, from its field `n`, before ruggedness scales it.
+/// Massifs stand where the field is far from its middle, and the valleys between them follow the
+/// lines where it crosses its middle: those lines run on and join, so a valley drains to lower
+/// land instead of being a basin the drainage fills with a lake. Near those lines the ground is a
+/// level floor. Not capped at 1: the rare far reaches of the field are the highest peaks, which
+/// the band clamps.
+fn mountain_of(n: f32) -> f32 {
+    // Squared, so a foot rises gently off the floor and the upper flanks steepen to the top.
+    let t = (((2.0 * n - 1.0).abs() - VALLEY_FLOOR) / (MASSIF_TOP - VALLEY_FLOOR)).max(0.0);
+    t * t
+}
+
+/// 0 to 1: the patches of calm ground, before the coast fades them.
+fn calm_of(n: f32) -> f32 {
+    smooth(CALM_CUT[0], CALM_CUT[1], n)
+}
+
+/// 0 to 1: where a canyon cuts, a winding line through some regions of the land.
+fn canyon_of([region, line]: [f32; 2]) -> f32 {
+    smooth(0.6, 0.7, region) * smooth(0.88, 0.97, crate::noise::ridge(line))
+}
+
+/// 0 to 1: narrow slots cut deep into the land, ridged noise thresholded near its crest.
+fn ravine_of([slot, region]: [f32; 2]) -> f32 {
+    smooth(0.52, 0.62, region) * smooth(0.975, 0.995, crate::noise::ridge(slot))
+}
+
+/// The overhang field `n` as a signed push in `-amp_m..amp_m`.
+fn push_from(n: f32, amp_m: f32) -> f32 {
+    ((n * 2.0 - 1.0) * 2.0).clamp(-1.0, 1.0) * amp_m
+}
+
 #[inline]
 fn smooth(edge0: f32, edge1: f32, x: f32) -> f32 {
     let t = ((x - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
@@ -210,8 +297,8 @@ impl Base {
         }
     }
 
-    fn warped(&self, x_m: f32, z_m: f32) -> (f32, f32) {
-        crate::noise::warp2(
+    fn warped<L: Lanes>(&self, x_m: L, z_m: L) -> (L, L) {
+        crate::noise::warp2_lanes(
             x_m,
             z_m,
             self.seed.wrapping_add(SALT_WARP),
@@ -226,37 +313,71 @@ impl Base {
     }
 
     fn fields_warped(&self, wx: f32, wz: f32) -> Fields {
-        let size = self.continent_size_m;
-        let continent = crate::noise::fbm2(
-            wx / size,
-            wz / size,
-            self.seed.wrapping_add(SALT_CONTINENT),
-            4,
-        );
-        // fBm bunches around a half, so a contrast curve spreads the fields across their range.
-        let erosion = smooth(
-            0.25,
-            0.75,
-            crate::noise::fbm2(
-                wx / EROSION_SIZE_M,
-                wz / EROSION_SIZE_M,
+        let [continent, erosion] = self.field_noise(wx, wz);
+        fields_of(continent, erosion)
+    }
+
+    /// The continent and erosion fields before [`fields_of`] shapes them.
+    fn field_noise<L: Lanes>(&self, wx: L, wz: L) -> [L; 2] {
+        let size = L::splat(self.continent_size_m);
+        let erosion_size = L::splat(EROSION_SIZE_M);
+        [
+            L::fbm2(
+                wx / size,
+                wz / size,
+                self.seed.wrapping_add(SALT_CONTINENT),
+                4,
+            ),
+            L::fbm2(
+                wx / erosion_size,
+                wz / erosion_size,
                 self.seed.wrapping_add(SALT_EROSION),
                 3,
             ),
-        );
-        let inland = smooth(0.50, 0.66, continent);
-        Fields {
-            continent,
-            erosion,
-            ruggedness: inland * smooth(RUGGED_CUT[0], RUGGED_CUT[1], 1.0 - erosion),
+        ]
+    }
+
+    /// The noise every column's base height asks for, whatever the column: apart from the
+    /// arithmetic on it, so four columns can be sampled at once.
+    fn samples<L: Lanes>(&self, x_m: L, z_m: L) -> Samples<L> {
+        let seed = self.seed;
+        let (wx, wz) = self.warped(x_m, z_m);
+        let at = |size_m: f32, salt: u32, octaves: u32| {
+            let size = L::splat(size_m);
+            L::fbm2(wx / size, wz / size, seed.wrapping_add(salt), octaves)
+        };
+        let detail = |octaves| {
+            let k = L::splat(self.inv_feature_size);
+            L::fbm2(x_m * k, z_m * k, seed.wrapping_add(SALT_DETAIL), octaves)
+        };
+        Samples {
+            warped: (wx, wz),
+            fields: self.field_noise(wx, wz),
+            calm: at(CALM_SIZE_M, SALT_CALM, 2),
+            peaks: at(PEAKS_SIZE_M, SALT_PEAKS, 3),
+            rough: detail(self.octaves),
+            broad: detail(self.octaves.min(2)),
+            plateau: at(3500.0, SALT_PLATEAU, 2),
+            canyon: [at(2500.0, SALT_CANYON, 2), at(600.0, SALT_CANYON_LINE, 2)],
+            ravine: [at(450.0, SALT_RAVINE, 2), at(3000.0, SALT_RAVINE_MASK, 2)],
         }
     }
 
     /// The ground's height in metres before any river carves it.
     fn base_height_m(&self, x_m: f32, z_m: f32) -> f32 {
+        self.base_height_of(x_m, z_m, self.samples(x_m, z_m))
+    }
+
+    /// [`Self::base_height_m`] at four columns, bit for bit.
+    fn base_height_x4(&self, x_m: [f32; 4], z_m: [f32; 4]) -> [f32; 4] {
+        let samples = self.samples(f32x4::new(x_m), f32x4::new(z_m)).lanes();
+        std::array::from_fn(|k| self.base_height_of(x_m[k], z_m[k], samples[k]))
+    }
+
+    fn base_height_of(&self, x_m: f32, z_m: f32, s: Samples<f32>) -> f32 {
         let seed = self.seed;
-        let (wx, wz) = self.warped(x_m, z_m);
-        let f = self.fields_warped(wx, wz);
+        let (wx, wz) = s.warped;
+        let f = fields_of(s.fields[0], s.fields[1]);
         let inland = smooth(0.50, 0.66, f.continent);
         let (d, h) = (self.depth_m, self.height_m);
 
@@ -265,8 +386,8 @@ impl Base {
 
         // Patches of calm ground a few hundred metres across, everywhere inland: level places to
         // build never lie far off. Mountains rise from them rather than being cut by them.
-        let calm = self.calm(wx, wz) * inland;
-        let mountain = self.mountain(wx, wz) * f.ruggedness;
+        let calm = calm_of(s.calm) * inland;
+        let mountain = mountain_of(s.peaks) * f.ruggedness;
         // Eased toward the band's top rather than cut flat by the clamp, so a high range still
         // ends in peaks.
         let crest_m = h * SUMMIT_SHARE;
@@ -290,22 +411,13 @@ impl Base {
             offset += h * CRAG_HEIGHT * summit * crag;
         }
 
-        let detail = |octaves| {
-            crate::noise::fbm2(
-                x_m * self.inv_feature_size,
-                z_m * self.inv_feature_size,
-                seed.wrapping_add(SALT_DETAIL),
-                octaves,
-            )
-        };
         // Worn inland ground is a plain, and so is a valley floor between mountains: the fine
         // octaves that make it a field of small bumps fade out and the rest is gentler, so there
         // are wide level places to build and farm. A mountain's flank keeps only the broad
         // octaves, so it is a smooth slope and not a heap of knobs.
         let floor = f.ruggedness * (1.0 - smooth(0.0, 0.35, mountain / f.ruggedness.max(1e-3)));
         let plain = (smooth(0.2, 0.5, f.erosion) * inland).max(calm).max(floor);
-        let rough = detail(self.octaves);
-        let broad = detail(self.octaves.min(2));
+        let (rough, broad) = (s.rough, s.broad);
         let flank = smooth(0.2, 0.6, f.ruggedness) * (1.0 - summit);
         let n = rough + (broad - rough) * plain.max(flank);
         // Detail also dies out at the waterline, so noise does not litter the coast with islets.
@@ -322,8 +434,7 @@ impl Base {
         let land = smooth(-COAST_EASE, 0.0, base);
         offset += (n - 0.5) * self.relief_m * scale * (0.3 + (worn - 0.3) * land);
 
-        let plateau =
-            crate::noise::fbm2(wx / 3500.0, wz / 3500.0, seed.wrapping_add(SALT_PLATEAU), 2);
+        let plateau = s.plateau;
         let mesa = smooth(0.58, 0.68, plateau) * inland * f.erosion;
         if mesa > 0.0 {
             let above = offset.max(0.0);
@@ -333,13 +444,13 @@ impl Base {
             offset += (terraced - above) * mesa;
         }
 
-        offset -= 70.0 * self.canyon(wx, wz) * inland * offset.clamp(0.0, 70.0) / 70.0;
+        offset -= 70.0 * canyon_of(s.canyon) * inland * offset.clamp(0.0, 70.0) / 70.0;
 
         if land < 1.0 {
             offset += (self.island(x_m, z_m, offset) - offset) * (1.0 - land);
         }
 
-        offset -= 45.0 * self.ravine(wx, wz) * inland * smooth(8.0, 30.0, offset);
+        offset -= 45.0 * ravine_of(s.ravine) * inland * smooth(8.0, 30.0, offset);
 
         offset += self.volcano(x_m, z_m);
 
@@ -368,15 +479,54 @@ impl Base {
         if rugged <= 0.0 {
             return 0.0;
         }
+        self.overhang_amp_of(rugged, self.outcrop_noise(wx, wz))
+    }
+
+    /// [`Self::overhang_amp_m`] at four columns, bit for bit.
+    fn overhang_amp_x4(&self, x_m: [f32; 4], z_m: [f32; 4]) -> [f32; 4] {
+        if self.overhang_m <= 0.0 {
+            return [0.0; 4];
+        }
+        let (wx, wz) = self.warped(f32x4::new(x_m), f32x4::new(z_m));
+        let [continent, erosion] = self.field_noise(wx, wz).map(f32x4::to_array);
+        let rugged: [f32; 4] =
+            std::array::from_fn(|k| fields_of(continent[k], erosion[k]).ruggedness);
+        if rugged.iter().all(|&r| r <= 0.0) {
+            return [0.0; 4];
+        }
+        let [peaks, outcrop] = self.outcrop_noise(wx, wz).map(f32x4::to_array);
+        std::array::from_fn(|k| {
+            if rugged[k] <= 0.0 {
+                0.0
+            } else {
+                self.overhang_amp_of(rugged[k], [peaks[k], outcrop[k]])
+            }
+        })
+    }
+
+    /// The mountain and outcrop fields the overhang density's reach asks of a rugged column.
+    fn outcrop_noise<L: Lanes>(&self, wx: L, wz: L) -> [L; 2] {
+        let (peaks, outcrop) = (L::splat(PEAKS_SIZE_M), L::splat(OUTCROP_SIZE_M));
+        [
+            L::fbm2(
+                wx / peaks,
+                wz / peaks,
+                self.seed.wrapping_add(SALT_PEAKS),
+                3,
+            ),
+            L::fbm2(
+                wx / outcrop,
+                wz / outcrop,
+                self.seed.wrapping_add(SALT_OUTCROP),
+                2,
+            ),
+        ]
+    }
+
+    fn overhang_amp_of(&self, rugged: f32, [peaks, outcrop]: [f32; 2]) -> f32 {
         // And there only in scattered outcrops: everywhere, it walled whole flanks.
-        let outcrop = crate::noise::fbm2(
-            wx / OUTCROP_SIZE_M,
-            wz / OUTCROP_SIZE_M,
-            self.seed.wrapping_add(SALT_OUTCROP),
-            2,
-        );
         self.overhang_m
-            * smooth(0.04, 0.2, self.mountain(wx, wz) * rugged)
+            * smooth(0.04, 0.2, mountain_of(peaks) * rugged)
             * smooth(OUTCROP_CUT, OUTCROP_CUT + 0.08, outcrop)
     }
 
@@ -389,25 +539,20 @@ impl Base {
             self.seed.wrapping_add(SALT_OVERHANG),
             2,
         );
-        ((n * 2.0 - 1.0) * 2.0).clamp(-1.0, 1.0) * amp_m
+        push_from(n, amp_m)
     }
 
-    /// 0 to 1: how far a mountain range rises here, before ruggedness scales it. Massifs stand
-    /// where the field is far from its middle, and the valleys between them follow the lines
-    /// where it crosses its middle: those lines run on and join, so a valley drains to lower land
-    /// instead of being a basin the drainage fills with a lake. Near those lines the ground is a
-    /// level floor. Not capped at 1: the rare far reaches of the field are the highest peaks,
-    /// which the band clamps.
-    fn mountain(&self, wx: f32, wz: f32) -> f32 {
-        let n = crate::noise::fbm2(
-            wx / PEAKS_SIZE_M,
-            wz / PEAKS_SIZE_M,
-            self.seed.wrapping_add(SALT_PEAKS),
-            3,
+    /// [`Self::overhang_push_m`] at four heights of one column, bit for bit.
+    fn overhang_push_x4(&self, x_m: f32, y_m: [f32; 4], z_m: f32, amp_m: f32) -> [f32; 4] {
+        let size = crate::noise::fill(OVERHANG_SIZE_M);
+        let n = crate::noise::fbm3_lanes(
+            crate::noise::fill(x_m) / size,
+            f32x4::new(y_m) / size,
+            crate::noise::fill(z_m) / size,
+            self.seed.wrapping_add(SALT_OVERHANG),
+            2,
         );
-        // Squared, so a foot rises gently off the floor and the upper flanks steepen to the top.
-        let t = (((2.0 * n - 1.0).abs() - VALLEY_FLOOR) / (MASSIF_TOP - VALLEY_FLOOR)).max(0.0);
-        t * t
+        n.to_array().map(|n| push_from(n, amp_m))
     }
 
     /// A range's rise broken into benches: level ground every [`TERRACE_STEP_M`] with a slope up
@@ -430,44 +575,6 @@ impl Base {
         let step = t.floor();
         let terraced_m = (step + smooth(TERRACE_BENCH, 1.0, t - step)) * TERRACE_STEP_M - drift_m;
         rise_m + (terraced_m - rise_m) * foot * TERRACE_STRENGTH
-    }
-
-    /// 0 to 1: the patches of calm ground, before the coast fades them.
-    fn calm(&self, wx: f32, wz: f32) -> f32 {
-        let n = crate::noise::fbm2(
-            wx / CALM_SIZE_M,
-            wz / CALM_SIZE_M,
-            self.seed.wrapping_add(SALT_CALM),
-            2,
-        );
-        smooth(CALM_CUT[0], CALM_CUT[1], n)
-    }
-
-    /// 0 to 1: where a canyon cuts, a winding line through some regions of the land.
-    fn canyon(&self, wx: f32, wz: f32) -> f32 {
-        let seed = self.seed;
-        let region =
-            crate::noise::fbm2(wx / 2500.0, wz / 2500.0, seed.wrapping_add(SALT_CANYON), 2);
-        let line = crate::noise::ridged2(
-            wx / 600.0,
-            wz / 600.0,
-            seed.wrapping_add(SALT_CANYON_LINE),
-            2,
-        );
-        smooth(0.6, 0.7, region) * smooth(0.88, 0.97, line)
-    }
-
-    /// 0 to 1: narrow slots cut deep into the land, ridged noise thresholded near its crest.
-    fn ravine(&self, wx: f32, wz: f32) -> f32 {
-        let seed = self.seed;
-        let slot = crate::noise::ridged2(wx / 450.0, wz / 450.0, seed.wrapping_add(SALT_RAVINE), 2);
-        let region = crate::noise::fbm2(
-            wx / 3000.0,
-            wz / 3000.0,
-            seed.wrapping_add(SALT_RAVINE_MASK),
-            2,
-        );
-        smooth(0.52, 0.62, region) * smooth(0.975, 0.995, slot)
     }
 
     /// How far rock formations raise the sea floor at `offset_m` below Sea level: outcrops and
@@ -607,7 +714,7 @@ impl Terrain {
             base: base.clone(),
             drainage: Arc::new(Drainage::new(p.sea_level_m, {
                 let base = base.clone();
-                move |x, z| base.base_height_m(x, z)
+                move |x, z| base.base_height_x4(x, z)
             })),
         }
     }
@@ -621,6 +728,12 @@ impl Terrain {
     pub(crate) fn height_m(&self, x_m: f32, z_m: f32) -> f32 {
         let h = self.base.base_height_m(x_m, z_m);
         h - self.drainage.wet(x_m, z_m, h).cut_m
+    }
+
+    /// [`Self::height_m`] at four columns, bit for bit.
+    pub(crate) fn height_x4(&self, x_m: [f32; 4], z_m: [f32; 4]) -> [f32; 4] {
+        let h = self.base.base_height_x4(x_m, z_m);
+        std::array::from_fn(|k| h[k] - self.drainage.wet(x_m[k], z_m[k], h[k]).cut_m)
     }
 
     /// The level lake or river water stands at over a column, if any reaches it; the sea is the
@@ -670,8 +783,22 @@ impl Terrain {
         self.base.overhang_amp_m(x_m, z_m)
     }
 
+    pub(crate) fn overhang_amp_x4(&self, x_m: [f32; 4], z_m: [f32; 4]) -> [f32; 4] {
+        self.base.overhang_amp_x4(x_m, z_m)
+    }
+
     pub(crate) fn overhang_push_m(&self, x_m: f32, y_m: f32, z_m: f32, amp_m: f32) -> f32 {
         self.base.overhang_push_m(x_m, y_m, z_m, amp_m)
+    }
+
+    pub(crate) fn overhang_push_x4(
+        &self,
+        x_m: f32,
+        y_m: [f32; 4],
+        z_m: f32,
+        amp_m: f32,
+    ) -> [f32; 4] {
+        self.base.overhang_push_x4(x_m, y_m, z_m, amp_m)
     }
 
     pub(crate) fn forget_regions(&self) {
@@ -811,5 +938,44 @@ impl Caverns {
         }
         let scale = |p: [f32; 3]| [0, 1, 2].map(|a| p[a] / CAVERN_SIZE_M[a]);
         crate::noise::fbm3_range(scale(lo), scale(hi), self.seed, 2).1 > CAVERN_CUT
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Columns from a few metres to a hundred kilometres out, so the sea, islands, volcanoes,
+    /// mountains and plains all occur.
+    fn columns(i: u32) -> [[f32; 4]; 2] {
+        let at = |k: u32| {
+            let h = crate::noise::cell_hash(i as i32, k as i32, 0x0c01);
+            let scale = [50.0, 3e3, 4e4, 2e5][(h[0] * 4.0) as usize];
+            (h[1] - 0.5) * scale + h[2]
+        };
+        [
+            std::array::from_fn(|k| at(k as u32)),
+            std::array::from_fn(|k| at(k as u32 + 4)),
+        ]
+    }
+
+    #[test]
+    fn four_columns_at_once_are_four_single_columns_bit_for_bit() {
+        let p = crate::testgen::world_params();
+        for seed in 0..24u32 {
+            let base = Base::new(seed.wrapping_mul(0x9e37_79b9), &p);
+            for i in 0..400u32 {
+                let [x, z] = columns(seed * 1000 + i);
+                let height = base.base_height_x4(x, z);
+                let amp = base.overhang_amp_x4(x, z);
+                for k in 0..4 {
+                    let at = format!("lane {k} at {},{} seed {seed}", x[k], z[k]);
+                    let want = base.base_height_m(x[k], z[k]);
+                    assert_eq!(height[k].to_bits(), want.to_bits(), "height {at}");
+                    let want = base.overhang_amp_m(x[k], z[k]);
+                    assert_eq!(amp[k].to_bits(), want.to_bits(), "overhang {at}");
+                }
+            }
+        }
     }
 }

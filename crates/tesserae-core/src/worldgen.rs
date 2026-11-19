@@ -1038,6 +1038,55 @@ impl ColumnCache {
     }
 }
 
+/// The overhang density's push down one column of a Chunk, sampled four Voxels at a time over the
+/// Voxels it moves the surface at and the one above the last, each of which the Voxel walk asks.
+struct ColumnPush {
+    /// Each Voxel's height, the one above the top included; the band is `from..to`.
+    y_m: [f32; CHUNK_SIZE + 1],
+    from: usize,
+    to: usize,
+    push_m: [f32; CHUNK_SIZE + 4],
+}
+
+impl ColumnPush {
+    fn new(
+        terrain: &crate::terrain::Terrain,
+        [x_m, z_m]: [f32; 2],
+        amp_m: f32,
+        surface_m: f32,
+        height_m: impl Fn(usize) -> f32,
+    ) -> Self {
+        let y_m: [f32; CHUNK_SIZE + 1] = std::array::from_fn(height_m);
+        let banded = |y: &usize| amp_m > 0.0 && (surface_m - y_m[*y]).abs() <= amp_m;
+        let from = (0..CHUNK_SIZE).find(banded).unwrap_or(CHUNK_SIZE);
+        let to = (0..CHUNK_SIZE)
+            .rfind(banded)
+            .map_or(from, |last| (last + 2).min(CHUNK_SIZE + 1));
+        let mut push_m = [0.0; CHUNK_SIZE + 4];
+        for start in (from..to).step_by(4) {
+            let at = std::array::from_fn(|k| y_m[(start + k).min(CHUNK_SIZE)]);
+            push_m[start..start + 4]
+                .copy_from_slice(&terrain.overhang_push_x4(x_m, at, z_m, amp_m));
+        }
+        ColumnPush {
+            y_m,
+            from,
+            to,
+            push_m,
+        }
+    }
+
+    /// The push at Voxel `y`, if it was sampled at exactly `y_m`: a Voxel size that is not a power
+    /// of two can put the Voxel above a step's sum a bit away from the next Voxel's own height.
+    fn at(&self, y: usize, y_m: f32) -> Option<f32> {
+        (self.from..self.to)
+            .contains(&y)
+            .then(|| self.y_m[y])
+            .filter(|m| m.to_bits() == y_m.to_bits())
+            .map(|_| self.push_m[y])
+    }
+}
+
 /// About 20 MB of column caches, far more than a streamed ring holds at once.
 const MAX_COLUMN_CACHES: usize = 1024;
 
@@ -1346,10 +1395,16 @@ impl Worldgen {
         // The surface is kept to one column past the Chunk; its containment reads one further.
         const RAW_W: usize = SURFACE_W + 2;
         let raw_index = |x: i32, z: i32| (z + 2) as usize * RAW_W + (x + 2) as usize;
+        const { assert!(RAW_W.is_multiple_of(4) && CHUNK_SIZE.is_multiple_of(4)) };
         let mut raw = [(0.0f32, None); RAW_W * RAW_W];
         for z in -2..CHUNK_SIZE as i32 + 2 {
-            for x in -2..CHUNK_SIZE as i32 + 2 {
-                raw[raw_index(x, z)] = self.raw_column(self.axis_m(cx, x), self.axis_m(cz, z));
+            for x in (-2..CHUNK_SIZE as i32 + 2).step_by(4) {
+                let row = self.raw_columns_x4(
+                    std::array::from_fn(|k| self.axis_m(cx, x + k as i32)),
+                    self.axis_m(cz, z),
+                );
+                let at = raw_index(x, z);
+                raw[at..at + 4].copy_from_slice(&row);
             }
         }
         let mut surface_m = [0.0f32; SURFACE_W * SURFACE_W];
@@ -1362,10 +1417,14 @@ impl Worldgen {
             }
         }
         let terrain = &self.terrain;
-        let overhang_m = std::array::from_fn(|i| {
-            let (x, z) = ((i % CHUNK_SIZE) as i32, (i / CHUNK_SIZE) as i32);
-            terrain.overhang_amp_m(self.axis_m(cx, x), self.axis_m(cz, z))
-        });
+        let mut overhang_m = [0.0; CHUNK_SIZE * CHUNK_SIZE];
+        for (i, row) in overhang_m.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+            let (x, z) = ((i * 4 % CHUNK_SIZE) as i32, (i * 4 / CHUNK_SIZE) as i32);
+            *row = terrain.overhang_amp_x4(
+                std::array::from_fn(|k| self.axis_m(cx, x + k as i32)),
+                [self.axis_m(cz, z); 4],
+            );
+        }
         let sea_m = self.params.sea_level_m;
         let rock = std::array::from_fn(|i| {
             let (x, z) = ((i % CHUNK_SIZE) as i32, (i / CHUNK_SIZE) as i32);
@@ -1457,6 +1516,12 @@ impl Worldgen {
             self.terrain.height_m(x_m, z_m),
             self.water_level_m(x_m, z_m),
         )
+    }
+
+    /// [`Self::raw_column`] at four columns along x, bit for bit.
+    fn raw_columns_x4(&self, x_m: [f32; 4], z_m: f32) -> [(f32, Option<f32>); 4] {
+        let height_m = self.terrain.height_x4(x_m, [z_m; 4]);
+        std::array::from_fn(|k| (height_m[k], self.water_level_m(x_m[k], z_m)))
     }
 
     /// The highest Voxel the water over a column fills, if it stands above the ground: the cube
@@ -1963,6 +2028,9 @@ impl Worldgen {
                 // The density never reaches down to water here or beside, so it opens no hollow
                 // that water would stand or pour into.
                 let amp_m = self.overhang_amp_at(&cache, &built, [cx, cz], [x as i32, z as i32]);
+                let pushes = ColumnPush::new(&self.terrain, [x_m, z_m], amp_m, surface_m, |y| {
+                    floor_m + y as f32 * self.voxel_size
+                });
                 let push_m = |y_m: f32| self.terrain.overhang_push_m(x_m, y_m, z_m, amp_m);
 
                 for y in 0..CHUNK_SIZE {
@@ -1970,7 +2038,11 @@ impl Worldgen {
                     let base_m = surface_m - y_m;
                     // Only within `amp_m` of the base surface does the density move it.
                     let banded = amp_m > 0.0 && base_m.abs() <= amp_m;
-                    let below_m = if banded { base_m + push_m(y_m) } else { base_m };
+                    let below_m = if banded {
+                        base_m + pushes.at(y, y_m).unwrap_or_else(|| push_m(y_m))
+                    } else {
+                        base_m
+                    };
                     if below_m < 0.0 {
                         if let (Some(water), Some(level_m)) = (self.water, water_level_m)
                             && y_m < level_m
@@ -2034,7 +2106,10 @@ impl Worldgen {
                         continue;
                     }
                     let exposed = if banded {
-                        base_m - self.voxel_size + push_m(y_m + self.voxel_size) < 0.0
+                        let up_m = y_m + self.voxel_size;
+                        base_m - self.voxel_size
+                            + pushes.at(y + 1, up_m).unwrap_or_else(|| push_m(up_m))
+                            < 0.0
                     } else {
                         below_m < self.voxel_size
                     };

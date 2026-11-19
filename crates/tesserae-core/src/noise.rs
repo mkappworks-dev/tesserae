@@ -4,6 +4,12 @@
 //! Nothing here knows about metres or Voxels. The caller decides what one unit
 //! of the input lattice means, which is the whole reason World generation can
 //! be tuned in metres while `testgen` stays tuned in Voxel indices.
+//!
+//! The `_lanes` functions are their scalar twins four wide, bit for bit on every backend: the
+//! same operations in the same order, octaves summed per lane, and never a fused multiply-add.
+
+use wide::bytemuck::cast;
+use wide::{f32x4, i32x4, u32x4};
 
 /// A bijective integer hash. The constants are the two-round variant of
 /// Pelle Evensen's `lowbias32` search; any good avalanche works, but a weak mix
@@ -83,6 +89,161 @@ pub fn fbm2(x: f32, z: f32, seed: u32, octaves: u32) -> f32 {
     if total == 0.0 { 0.0 } else { value / total }
 }
 
+/// One point or four: what a field written once over [`Lanes`] samples at, so its scalar and its
+/// four-wide form cannot drift apart.
+pub(crate) trait Lanes:
+    Copy
+    + std::ops::Add<Output = Self>
+    + std::ops::Sub<Output = Self>
+    + std::ops::Mul<Output = Self>
+    + std::ops::Div<Output = Self>
+{
+    fn splat(v: f32) -> Self;
+    fn noise2(x: Self, z: Self, seed: u32) -> Self;
+    fn fbm2(x: Self, z: Self, seed: u32, octaves: u32) -> Self;
+}
+
+impl Lanes for f32 {
+    #[inline]
+    fn splat(v: f32) -> Self {
+        v
+    }
+
+    #[inline]
+    fn noise2(x: Self, z: Self, seed: u32) -> Self {
+        noise2(x, z, seed)
+    }
+
+    #[inline]
+    fn fbm2(x: Self, z: Self, seed: u32, octaves: u32) -> Self {
+        fbm2(x, z, seed, octaves)
+    }
+}
+
+impl Lanes for f32x4 {
+    #[inline]
+    fn splat(v: f32) -> Self {
+        fill(v)
+    }
+
+    #[inline]
+    fn noise2(x: Self, z: Self, seed: u32) -> Self {
+        noise2_lanes(x, z, seed)
+    }
+
+    #[inline]
+    fn fbm2(x: Self, z: Self, seed: u32, octaves: u32) -> Self {
+        fbm2_lanes(x, z, seed, octaves)
+    }
+}
+
+/// [`fbm2`] at four points, bit for bit.
+pub fn fbm2_x4(x: [f32; 4], z: [f32; 4], seed: u32, octaves: u32) -> [f32; 4] {
+    fbm2_lanes(f32x4::new(x), f32x4::new(z), seed, octaves).to_array()
+}
+
+/// `splat` spelled out: its `[v; 4]` compiles on macOS to a call to `memset_pattern16` in place
+/// of one `dup`, and those calls were most of a four-wide sample's cost.
+#[inline(always)]
+pub(crate) fn fill(v: f32) -> f32x4 {
+    f32x4::new([v, v, v, v])
+}
+
+#[inline(always)]
+fn fill_u32(v: u32) -> u32x4 {
+    u32x4::new([v, v, v, v])
+}
+
+#[inline(always)]
+fn fill_i32(v: i32) -> i32x4 {
+    i32x4::new([v, v, v, v])
+}
+
+/// The four-wide twin of [`mix`].
+#[inline]
+fn mix_lanes(mut x: u32x4) -> u32x4 {
+    x ^= x.unbounded_shr_scalar(16);
+    x *= fill_u32(0x7feb_352d);
+    x ^= x.unbounded_shr_scalar(15);
+    x *= fill_u32(0x846c_a68b);
+    x ^= x.unbounded_shr_scalar(16);
+    x
+}
+
+/// The top 24 bits of a hash as a value in `[0, 1)`, as [`lattice`] takes them. Below 2^24 the
+/// signed conversion is exact, and scaling by a power of two is the same as dividing by one.
+#[inline]
+fn unit_lanes(h: u32x4) -> f32x4 {
+    f32x4::from_i32x4(cast(h.unbounded_shr_scalar(8))) * fill(1.0 / (1u32 << 24) as f32)
+}
+
+/// [`lattice`] at four points.
+#[inline]
+fn lattice_lanes(xi: i32x4, zi: i32x4, seed: u32) -> f32x4 {
+    let (xi, zi): (u32x4, u32x4) = (cast(xi), cast(zi));
+    unit_lanes(mix_lanes(
+        mix_lanes(xi ^ fill_u32(0x9e37_79b9)) + zi * fill_u32(0x85eb_ca6b) + fill_u32(seed),
+    ))
+}
+
+/// [`lattice3`] at four points.
+#[inline]
+fn lattice3_lanes(xi: i32x4, yi: i32x4, zi: i32x4, seed: u32) -> f32x4 {
+    let (xi, yi, zi): (u32x4, u32x4, u32x4) = (cast(xi), cast(yi), cast(zi));
+    unit_lanes(mix_lanes(
+        mix_lanes(mix_lanes(xi ^ fill_u32(0x9e37_79b9)) + yi * fill_u32(0xc2b2_ae35))
+            + zi * fill_u32(0x85eb_ca6b)
+            + fill_u32(seed),
+    ))
+}
+
+/// A lane's cell and smoothstepped weight. `floor` is exact on every backend, and `trunc_int`
+/// saturates like `as`, so the cell is the scalar one wherever the scalar one is.
+#[inline]
+fn cell_lanes(v: f32x4) -> (i32x4, f32x4) {
+    let v0 = v.floor();
+    let t = v - v0;
+    (v0.trunc_int(), t * t * (fill(3.0) - fill(2.0) * t))
+}
+
+/// [`noise2`] at four points.
+#[inline]
+fn noise2_lanes(x: f32x4, z: f32x4, seed: u32) -> f32x4 {
+    let (xi, sx) = cell_lanes(x);
+    let (zi, sz) = cell_lanes(z);
+    let one = fill_i32(1);
+    let n0 = {
+        let a = lattice_lanes(xi, zi, seed);
+        a + (lattice_lanes(xi + one, zi, seed) - a) * sx
+    };
+    let n1 = {
+        let a = lattice_lanes(xi, zi + one, seed);
+        a + (lattice_lanes(xi + one, zi + one, seed) - a) * sx
+    };
+    n0 + (n1 - n0) * sz
+}
+
+/// [`fbm2`] at four points: each lane sums its own octaves in the scalar order.
+#[inline]
+pub(crate) fn fbm2_lanes(x: f32x4, z: f32x4, seed: u32, octaves: u32) -> f32x4 {
+    let mut value = f32x4::ZERO;
+    let mut amplitude = 1.0f32;
+    let mut frequency = 1.0f32;
+    let mut total = 0.0f32;
+    for octave in 0..octaves {
+        let f = fill(frequency);
+        value += noise2_lanes(x * f, z * f, seed.wrapping_add(octave)) * fill(amplitude);
+        total += amplitude;
+        amplitude *= 0.5;
+        frequency *= 2.0;
+    }
+    if total == 0.0 {
+        f32x4::ZERO
+    } else {
+        value / fill(total)
+    }
+}
+
 /// Smoothstep-interpolated value noise in `[0, 1)`. One lattice cell per unit
 /// of each axis.
 #[inline]
@@ -155,6 +316,51 @@ fn fbm3_with(
         frequency *= 2.0;
     }
     if total == 0.0 { 0.0 } else { value / total }
+}
+
+/// [`fbm3`] at four points, bit for bit.
+pub fn fbm3_x4(x: [f32; 4], y: [f32; 4], z: [f32; 4], seed: u32, octaves: u32) -> [f32; 4] {
+    fbm3_lanes(f32x4::new(x), f32x4::new(y), f32x4::new(z), seed, octaves).to_array()
+}
+
+/// [`noise3`] at four points.
+#[inline]
+fn noise3_lanes(x: f32x4, y: f32x4, z: f32x4, seed: u32) -> f32x4 {
+    let (xi, sx) = cell_lanes(x);
+    let (yi, sy) = cell_lanes(y);
+    let (zi, sz) = cell_lanes(z);
+    let one = fill_i32(1);
+    let c: [f32x4; 8] = std::array::from_fn(|k| {
+        let step = |bit: usize| if k >> bit & 1 == 0 { i32x4::ZERO } else { one };
+        lattice3_lanes(xi + step(0), yi + step(1), zi + step(2), seed)
+    });
+    let edge = |k: usize| c[k] + (c[k + 1] - c[k]) * sx;
+    let (n00, n10) = (edge(0), edge(2));
+    let (n01, n11) = (edge(4), edge(6));
+    let n0 = n00 + (n10 - n00) * sy;
+    let n1 = n01 + (n11 - n01) * sy;
+    n0 + (n1 - n0) * sz
+}
+
+/// [`fbm3`] at four points: each lane sums its own octaves in the scalar order.
+#[inline]
+pub(crate) fn fbm3_lanes(x: f32x4, y: f32x4, z: f32x4, seed: u32, octaves: u32) -> f32x4 {
+    let mut value = f32x4::ZERO;
+    let mut amplitude = 1.0f32;
+    let mut frequency = 1.0f32;
+    let mut total = 0.0f32;
+    for octave in 0..octaves {
+        let f = fill(frequency);
+        value += noise3_lanes(x * f, y * f, z * f, seed.wrapping_add(octave)) * fill(amplitude);
+        total += amplitude;
+        amplitude *= 0.5;
+        frequency *= 2.0;
+    }
+    if total == 0.0 {
+        f32x4::ZERO
+    } else {
+        value / fill(total)
+    }
 }
 
 /// Octaves [`Fbm3Cache`] remembers a cell for; any past them are hashed every
@@ -300,7 +506,13 @@ pub fn cell_hash(xi: i32, zi: i32, seed: u32) -> [f32; 3] {
 /// `1` along a crest.
 #[inline]
 pub fn ridged2(x: f32, z: f32, seed: u32, octaves: u32) -> f32 {
-    1.0 - (2.0 * fbm2(x, z, seed, octaves) - 1.0).abs()
+    ridge(fbm2(x, z, seed, octaves))
+}
+
+/// [`ridged2`] from the [`fbm2`] it folds.
+#[inline]
+pub(crate) fn ridge(fbm: f32) -> f32 {
+    1.0 - (2.0 * fbm - 1.0).abs()
 }
 
 /// `(x_m, z_m)` pushed by a smooth field of wavelength `size_m`, by at most `amount_m` on either
@@ -310,10 +522,24 @@ pub fn ridged2(x: f32, z: f32, seed: u32, octaves: u32) -> f32 {
 /// octaves belong to the fields it bends.
 #[inline]
 pub fn warp2(x_m: f32, z_m: f32, seed: u32, size_m: f32, amount_m: f32) -> (f32, f32) {
-    let (x, z) = (x_m / size_m, z_m / size_m);
-    let dx = noise2(x, z, seed.wrapping_add(0x7a17_0001)) * 2.0 - 1.0;
-    let dz = noise2(x, z, seed.wrapping_add(0x7a17_0002)) * 2.0 - 1.0;
-    (x_m + dx * amount_m, z_m + dz * amount_m)
+    warp2_lanes(x_m, z_m, seed, size_m, amount_m)
+}
+
+/// [`warp2`] at one point or four.
+#[inline]
+pub(crate) fn warp2_lanes<L: Lanes>(
+    x_m: L,
+    z_m: L,
+    seed: u32,
+    size_m: f32,
+    amount_m: f32,
+) -> (L, L) {
+    let (x, z) = (x_m / L::splat(size_m), z_m / L::splat(size_m));
+    let (two, one) = (L::splat(2.0), L::splat(1.0));
+    let dx = L::noise2(x, z, seed.wrapping_add(0x7a17_0001)) * two - one;
+    let dz = L::noise2(x, z, seed.wrapping_add(0x7a17_0002)) * two - one;
+    let amount = L::splat(amount_m);
+    (x_m + dx * amount, z_m + dz * amount)
 }
 
 /// An interval containing [`noise2`] everywhere in the box `lo..=hi`: the extremes of the lattice
@@ -524,6 +750,62 @@ mod tests {
                     got.to_bits(),
                     want.to_bits(),
                     "{p:?} seed {i}, {octaves} octaves"
+                );
+            }
+        }
+    }
+
+    /// Four lanes of positions from a few metres to a thousand kilometres, on and beside lattice
+    /// points and either side of zero, scaled so the finest of ten octaves stays inside `i32`.
+    fn lanes(i: u32, salt: u32) -> [f32; 4] {
+        std::array::from_fn(|k| {
+            let j = i * 4 + k as u32;
+            let scale = [4.0, 300.0, 6e4, 1e6][(unit(j, salt) * 4.0) as usize];
+            let v = (unit(j, salt + 1) - 0.5) * scale;
+            match j % 5 {
+                0 => v.floor(),
+                1 => v.floor() - f32::EPSILON * v.abs().max(1.0),
+                _ => v,
+            }
+        })
+    }
+
+    #[test]
+    fn four_wide_fbm2_is_the_scalar_one_bit_for_bit() {
+        for i in 0..20_000u32 {
+            let (x, z) = (lanes(i, 1), lanes(i, 3));
+            let seed = mix(i);
+            let octaves = i % 11;
+            let got = fbm2_x4(x, z, seed, octaves);
+            for k in 0..4 {
+                let want = fbm2(x[k], z[k], seed, octaves);
+                assert_eq!(
+                    got[k].to_bits(),
+                    want.to_bits(),
+                    "lane {k} at {},{} seed {seed}, {octaves} octaves",
+                    x[k],
+                    z[k]
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn four_wide_fbm3_is_the_scalar_one_bit_for_bit() {
+        for i in 0..20_000u32 {
+            let (x, y, z) = (lanes(i, 1), lanes(i, 3), lanes(i, 5));
+            let seed = mix(i);
+            let octaves = i % 11;
+            let got = fbm3_x4(x, y, z, seed, octaves);
+            for k in 0..4 {
+                let want = fbm3(x[k], y[k], z[k], seed, octaves);
+                assert_eq!(
+                    got[k].to_bits(),
+                    want.to_bits(),
+                    "lane {k} at {},{},{} seed {seed}, {octaves} octaves",
+                    x[k],
+                    y[k],
+                    z[k]
                 );
             }
         }
