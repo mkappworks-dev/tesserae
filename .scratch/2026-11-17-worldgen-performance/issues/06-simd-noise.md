@@ -117,3 +117,7 @@ TESSERAE_BENCH_ROUNDS=9 TESSERAE_BENCH_AGAINST=$PWD/bench-05 ./bench-06 --bench
 | forest 3x3 columns @ 0.5 m (36 Chunks) | 737.2 | 821.1 | 89.7% |
 
 Every case but sky (timer noise at 0.2 µs) is 7% to 30% cheaper; the most where a Cell's columns and a region's drainage are built cold (river, cavern, coarse level 3), the least where a warm column cache serves many Chunks (the 3x3 column of 36).
+
+### Flight effect, 2026-11-19
+
+None beyond the spread between runs: the final build against the end, interleaved, is 186.3 against 176.7 ms/s at level 0, 315.3 against 318.9 at the coarse levels and 501.6 against 495.8 in all ([ticket 07's Comments](./07-coarse-cave-lattice.md#the-gate-after-simd-and-the-final-flight-profile-2026-11-19)).
