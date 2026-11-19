@@ -13,7 +13,6 @@
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::visibility::{NoAutoAabb, RenderLayers};
 use bevy::light::NotShadowCaster;
-use bevy::mesh::MeshTag;
 use bevy::platform::collections::{HashMap, HashSet};
 use bevy::prelude::*;
 use bevy::tasks::{ComputeTaskPool, Task};
@@ -345,16 +344,12 @@ struct Draw<'a, 'w, 's> {
     commands: &'a mut Commands<'w, 's>,
     meshes: &'a mut Assets<Mesh>,
     quads: &'a mut QuadBuffer,
-    held_of: &'a dyn Fn(Entity) -> Option<Held>,
+    existing: &'a Existing<'a, 'a>,
 }
 
-/// What an entity holds that outlives it unless given back: its placeholder
-/// and its range of the quad buffer.
-struct Held {
-    mesh: Handle<Mesh>,
-    at: u32,
-    len: u32,
-}
+/// Each layer entity's placeholder and range, which outlive it unless given
+/// back.
+type Existing<'w, 's> = Query<'w, 's, (&'static Mesh3d, &'static ChunkQuads)>;
 
 impl Draw<'_, '_, '_> {
     /// Brings one layer's entity for `key` in line with `layer`: spawned,
@@ -374,11 +369,9 @@ impl Draw<'_, '_, '_> {
             return None;
         };
         let (level, coord) = key;
-        layer.at = self.quads.alloc(layer.words().len() as u32);
-        self.quads.write(layer.at, layer.words());
         let drawn = (
             Mesh3d(self.meshes.add(placeholder(layer.quad_count()))),
-            MeshTag::new(layer.at),
+            layer.land(self.quads),
             layer.aabb(),
             layer,
         );
@@ -420,19 +413,11 @@ impl Draw<'_, '_, '_> {
     }
 
     fn give_back(&mut self, entity: Entity) {
-        if let Some(held) = (self.held_of)(entity) {
-            self.meshes.remove(&held.mesh);
-            self.quads.release(held.at, held.len);
+        if let Ok((mesh, quads)) = self.existing.get(entity) {
+            self.meshes.remove(&mesh.0);
+            quads.give_back(self.quads);
         }
     }
-}
-
-fn held(entity: Entity, existing: &Query<(&Mesh3d, &ChunkQuads)>) -> Option<Held> {
-    existing.get(entity).ok().map(|(mesh, quads)| Held {
-        mesh: mesh.0.clone(),
-        at: quads.at,
-        len: quads.words().len() as u32,
-    })
 }
 
 #[cfg_attr(
@@ -449,7 +434,7 @@ fn land_meshes(
     (mut meshes, mut quads): (ResMut<Assets<Mesh>>, ResMut<QuadBuffer>),
     material: Res<TerrainMaterial>,
     world: Res<WorldSettings>,
-    existing: Query<(&Mesh3d, &ChunkQuads)>,
+    existing: Existing,
     #[cfg(any(feature = "dev", feature = "profiling"))] mut cost: ResMut<
         crate::cost::MainThreadCost,
     >,
@@ -463,7 +448,7 @@ fn land_meshes(
         commands: &mut commands,
         meshes: &mut meshes,
         quads: &mut quads,
-        held_of: &|entity| held(entity, &existing),
+        existing: &existing,
     };
     for (key, built) in building.in_flight.landed() {
         // Marked drawn as it lands, not as it is sent: a bit set for a mesh
@@ -599,7 +584,7 @@ fn release(
     mut commands: Commands,
     mut entities: ResMut<ChunkEntities>,
     (mut meshes, mut quads): (ResMut<Assets<Mesh>>, ResMut<QuadBuffer>),
-    existing: Query<(&Mesh3d, &ChunkQuads)>,
+    existing: Existing,
     streaming: Res<StreamingSettings>,
     world: Res<WorldSettings>,
     camera: Query<&GlobalTransform, With<MainCamera>>,
@@ -640,7 +625,7 @@ fn release(
         commands: &mut commands,
         meshes: &mut meshes,
         quads: &mut quads,
-        held_of: &|entity| held(entity, &existing),
+        existing: &existing,
     };
     for key in released {
         draw.hide(&mut entities.opaque, key);
@@ -830,6 +815,7 @@ mod tests {
     use super::*;
     use crate::client::chunk_mesh::expand;
     use bevy::ecs::system::RunSystemOnce;
+    use bevy::mesh::MeshTag;
     use tesserae_core::light::{Light, MAX_LIGHT};
     use tesserae_core::mesh::Soup;
     use tesserae_core::{Chunk, ChunkLight, LitChunk, MaterialId, Tables, Voxel, mesh_chunk};
@@ -1696,9 +1682,7 @@ mod tests {
     /// GPU would hold it, through the placeholder's vertices and indices.
     fn decoded(app: &App, entity: Entity) -> Soup {
         let world = app.world();
-        let quads = world.get::<ChunkQuads>(entity).expect("a Chunk layer");
-        let tag = world.get::<MeshTag>(entity).unwrap().value;
-        assert_eq!(tag, quads.at, "the shader finds the layer by its tag");
+        let tag = world.get::<MeshTag>(entity).expect("a Chunk layer").value;
         let buffer = &world.resource::<QuadBuffer>().mirror;
         let handle = &world.get::<Mesh3d>(entity).unwrap().0;
         let mesh = world.resource::<Assets<Mesh>>().get(handle).unwrap();

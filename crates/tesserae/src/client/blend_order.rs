@@ -352,7 +352,7 @@ pub(super) fn sort_blended(
         let Some(order) = order.resort(local) else {
             continue;
         };
-        buffer.write(quads.at + quads.records_at(), &quads.records_in(order));
+        quads.write_records(&mut buffer, order);
         #[cfg(any(feature = "dev", feature = "profiling"))]
         {
             sorted += 1;

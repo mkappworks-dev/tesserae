@@ -9,6 +9,7 @@
 
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::primitives::Aabb;
+use bevy::mesh::MeshTag;
 use bevy::mesh::{
     Indices, MeshVertexAttribute, PrimitiveTopology, VertexAttributeValues, VertexFormat,
 };
@@ -20,6 +21,8 @@ use tesserae_core::light::Light;
 use tesserae_core::mesh::Corner;
 use tesserae_core::mesh::layout::{GEOMETRY_MASK, PAINT_SHIFT, PAINT_SLOTS, mask};
 use tesserae_core::mesh::{QUAD_CORNERS, Quad};
+
+use crate::render::quad_buffer::QuadBuffer;
 
 /// The placeholder a Chunk layer's mesh is made of: four vertices a quad, which
 /// no pipeline reads. Bevy allocates a mesh's vertex range by its vertex count,
@@ -58,7 +61,7 @@ pub struct ChunkQuads {
     aabb: Aabb,
     /// Where `words` starts in the quad buffer, which `MeshTag` carries to the
     /// shader. Set as it lands.
-    pub at: u32,
+    at: u32,
 }
 
 impl ChunkQuads {
@@ -118,6 +121,7 @@ impl ChunkQuads {
         })
     }
 
+    #[cfg(test)]
     pub fn words(&self) -> &[u32] {
         &self.words
     }
@@ -149,8 +153,32 @@ impl ChunkQuads {
         self.words[HEADER_STRIDE as usize]
     }
 
+    /// Takes a range of `buffer` and queues the layer's words into it: the tag
+    /// the shader finds them by.
+    pub fn land(&mut self, buffer: &mut QuadBuffer) -> MeshTag {
+        self.at = buffer.alloc(self.words.len() as u32);
+        buffer.write(self.at, &self.words);
+        MeshTag::new(self.at)
+    }
+
+    /// Frees the range the layer landed in.
+    pub fn give_back(&self, buffer: &mut QuadBuffer) {
+        buffer.release(self.at, self.words.len() as u32);
+    }
+
+    /// Rewrites the layer's records in its range in `order`.
+    pub fn write_records(&self, buffer: &mut QuadBuffer, order: &[u32]) {
+        let (at, stride) = (self.records_at() as usize, self.stride() as usize);
+        let records: Vec<u32> = order
+            .iter()
+            .flat_map(|&q| &self.words[at + q as usize * stride..][..stride])
+            .copied()
+            .collect();
+        buffer.write(self.at + self.records_at(), &records);
+    }
+
     /// Where the records start, past the header and the table.
-    pub fn records_at(&self) -> u32 {
+    fn records_at(&self) -> u32 {
         HEADER_WORDS + self.words[HEADER_TABLE_LEN as usize]
     }
 
@@ -171,16 +199,6 @@ impl ChunkQuads {
                     light: Light::from_packed((word >> LIGHT_SHIFT) as u8),
                 }
             })
-    }
-
-    /// The records in `order`, for the blended sort to write over its own.
-    pub fn records_in(&self, order: &[u32]) -> Vec<u32> {
-        let (at, stride) = (self.records_at() as usize, self.stride() as usize);
-        order
-            .iter()
-            .flat_map(|&q| &self.words[at + q as usize * stride..][..stride])
-            .copied()
-            .collect()
     }
 }
 
