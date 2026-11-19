@@ -1,4 +1,4 @@
-Status: ready-for-agent
+Status: done
 
 # Worldgen performance: Generator version 3 made cheaper
 
