@@ -123,12 +123,11 @@ fn a_cross_spans_exactly_one_voxel_whatever_the_chunk_holds() {
         [3, 4, 5],
         Voxel::shaped(f.grass, f.cross, Orientation::default()),
     );
-    let m = mesh(&f, &c);
-    let m_cutout = m.cutout.soup();
-    let lo = m_cutout.positions.iter().fold([f32::MAX; 3], |a, p| {
+    let cutout = mesh(&f, &c).cutout.soup();
+    let lo = cutout.positions.iter().fold([f32::MAX; 3], |a, p| {
         [a[0].min(p[0]), a[1].min(p[1]), a[2].min(p[2])]
     });
-    let hi = m_cutout.positions.iter().fold([f32::MIN; 3], |a, p| {
+    let hi = cutout.positions.iter().fold([f32::MIN; 3], |a, p| {
         [a[0].max(p[0]), a[1].max(p[1]), a[2].max(p[2])]
     });
     assert_eq!(lo, [3.0, 4.0, 5.0]);

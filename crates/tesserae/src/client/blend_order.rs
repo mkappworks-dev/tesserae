@@ -37,8 +37,8 @@ const FRAME_BUDGET: std::time::Duration = std::time::Duration::from_micros(200);
 /// whole octant rather than divided by nearly nothing.
 const NEAR_DEPTH_M: f32 = 1e-3;
 
-/// One quad, in metres from the entity's origin.
-struct Quad {
+/// One quad's box and plane, in metres from the entity's origin.
+struct QuadBox {
     axis: usize,
     plane: f32,
     min: Vec3,
@@ -49,7 +49,7 @@ struct Quad {
 /// What re-sorting one blended entity's quads needs, kept beside it.
 #[derive(Component)]
 pub(super) struct BlendOrder {
-    quads: Vec<Quad>,
+    quads: Vec<QuadBox>,
     /// The distinct positions on each axis where a quad's box starts or ends,
     /// sorted, and which cell of them the Eye was in at the last sort: the order
     /// depends on nothing else.
@@ -68,7 +68,7 @@ impl BlendOrder {
         if layer.is_empty() {
             return None;
         }
-        let quads: Vec<Quad> = layer
+        let quads: Vec<QuadBox> = layer
             .quads
             .iter()
             .map(|quad| {
@@ -78,7 +78,7 @@ impl BlendOrder {
                 let max = corners.iter().map(at).fold(Vec3::MIN, Vec3::max);
                 let normal = Vec3::from(corners[0].normal);
                 let axis = (0..3).find(|&a| normal[a] != 0.0).unwrap_or(1);
-                Quad {
+                QuadBox {
                     axis,
                     plane: min[axis],
                     min,
@@ -291,7 +291,7 @@ fn clip_to_octant(lo: Vec3, hi: Vec3, sign: Vec3) -> Option<(Vec3, Vec3)> {
 /// front. `None` where the boxes overlap on every axis (two greedy quads that
 /// cross), where the Eye is between them (no ray meets both), and for two
 /// quads in one plane, which cannot overlap.
-fn behind(a: &Quad, b: &Quad, eye: Vec3) -> Option<bool> {
+fn behind(a: &QuadBox, b: &QuadBox, eye: Vec3) -> Option<bool> {
     if a.axis == b.axis && a.plane == b.plane {
         return None;
     }
