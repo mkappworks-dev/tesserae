@@ -1,4 +1,4 @@
-//! Terra's player figure: Minecraft's humanoid proportions and skin layout,
+//! Terra's player figure: blocky humanoid proportions on a 64x64 box-UV skin,
 //! painted here rather than shipped as an image.
 
 use crate::tesserae::mods::content::{
@@ -8,7 +8,7 @@ use crate::textures::{noise, tint};
 
 const SKIN: usize = 64;
 
-/// The cubes' box-UV corners, as a Minecraft skin lays them out.
+/// The cubes' box-UV corners on the skin.
 const HEAD_UV: (u8, u8) = (0, 0);
 const BODY_UV: (u8, u8) = (16, 16);
 const RIGHT_ARM_UV: (u8, u8) = (40, 16);
