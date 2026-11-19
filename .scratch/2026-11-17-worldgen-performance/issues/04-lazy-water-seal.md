@@ -12,6 +12,6 @@ The height below which rock beside water stays solid is computed the first time 
 
 ## Acceptance criteria
 
-- [ ] Version 3 Chunks match the ticket 01 fingerprint; versions 1 and 2 keep their recorded digests.
+- [ ] Version 3 Chunks match the ticket 01 fingerprint; the committed version 3 digests pass unchanged.
 - [ ] Generated water has no air below or beside it, and flooded caverns stay sealed from dry tunnels, at 1.0 and 0.5 m.
 - [ ] Bench figures before and after in Comments.

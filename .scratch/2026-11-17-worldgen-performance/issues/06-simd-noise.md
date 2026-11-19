@@ -14,5 +14,5 @@ First a re-measure: noise's share of generation in a sampled flight once tickets
 
 - [ ] The re-measured share is in Comments, whichever way the gate goes.
 - [ ] If built: a property test over many seeds and positions shows the four-wide result equals the scalar one bit for bit, on every CI architecture.
-- [ ] If built: version 3 Chunks match the ticket 01 fingerprint; versions 1 and 2 keep their recorded digests.
+- [ ] If built: version 3 Chunks match the ticket 01 fingerprint; the committed version 3 digests pass unchanged.
 - [ ] If built: bench figures before and after in Comments.

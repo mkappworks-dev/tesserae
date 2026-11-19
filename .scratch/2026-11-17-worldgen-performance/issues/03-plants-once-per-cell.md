@@ -12,7 +12,7 @@ The Plants standing on a Cell's columns are decided once, with the crop fields a
 
 ## Acceptance criteria
 
-- [ ] Version 3 Chunks match the ticket 01 fingerprint; versions 1 and 2 keep their recorded digests.
+- [ ] Version 3 Chunks match the ticket 01 fingerprint; the committed version 3 digests pass unchanged.
 - [ ] A tree reaching across a Chunk border is the same from both Chunks, warm or cold, in any order.
 - [ ] A generator without Plants fills no entry.
 - [ ] Bench figures before and after, and the mid-point flight profile, in Comments.

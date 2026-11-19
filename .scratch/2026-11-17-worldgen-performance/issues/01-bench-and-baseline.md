@@ -13,6 +13,6 @@ A bench that times version 3's Chunks as interleaved CPU time, in the style of t
 ## Acceptance criteria
 
 - [ ] The bench runs every case interleaved and prints medians of thread CPU time and the load it ran under.
-- [ ] The starting bench figures and the starting flight profile (`--generator 3`, three interleaved rounds, worker time per level and stage) are in this ticket's Comments, with `uptime` and how they were taken.
+- [ ] The starting bench figures and the starting flight profile (`scripts/profile-frames`, three interleaved rounds, worker time per level and stage) are in this ticket's Comments, with `uptime` and how they were taken.
 - [ ] The starting fingerprint is kept with the baseline binary, outside the commit.
 - [ ] No generator code changes.

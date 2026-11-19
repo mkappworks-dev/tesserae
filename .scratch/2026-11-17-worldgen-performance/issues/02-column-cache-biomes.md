@@ -12,7 +12,7 @@ The per-Cell surface cache, renamed so it is no longer called a Stack, also hold
 
 ## Acceptance criteria
 
-- [ ] Version 3 Chunks match the ticket 01 fingerprint at 1.0 and 0.5 m; versions 1 and 2 keep their recorded digests.
+- [ ] Version 3 Chunks match the ticket 01 fingerprint at 1.0 and 0.5 m; the committed version 3 digests pass unchanged.
 - [ ] A Chunk generated after every cache is dropped equals one generated warm, in any order, with Biomes, Plants and ores.
 - [ ] Reaching the bound keeps the newer half of the Cells.
 - [ ] Bench figures before and after, against the baseline binary, in Comments.

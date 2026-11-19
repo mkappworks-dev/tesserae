@@ -4,8 +4,8 @@ Status: ready-for-agent
 
 Makes Generator version 3 (DESIGN.md step 17,
 [spec](../2026-11-16-phase-17-terrain-and-water/spec.md)) cheaper to generate
-without changing what it generates. Starts from `feat/phase-17-terrain-and-water`
-at d4179634 and merges after it. Background reading:
+without changing what it generates. Starts from `main` after `tech/generator-determinism` (#65), which left version 3
+the only Generator version and froze its output. Background reading:
 [ADR-0030](../../docs/adr/0030-generator-version-3-is-a-layered-field-stack-in-a-declared-band.md),
 [ADR-0011](../../docs/adr/0011-coarse-levels-are-derived.md),
 [ADR-0003](../../docs/adr/0003-voxel-size-is-per-world.md), and the prior art in
@@ -13,7 +13,7 @@ at d4179634 and merges after it. Background reading:
 
 ## Problem Statement
 
-A flight over a version 3 World costs about 140 ms of level-0 World generation per second of flight on one worker, plus about 90 ms for level 1 (version 2's level 0 costs 191 ms); figures from earlier runs, re-measured in ticket 01. Most of that is not new terrain but the same columns asked again: a sampled flight of the starting commit (`--generator 3`, Terra, 13 s) puts the time here, as shares of the samples inside Chunk generation:
+A flight over a version 3 World costs about 140 ms of level-0 World generation per second of flight on one worker, plus about 90 ms for level 1 (version 2's level 0 costs 191 ms); figures from earlier runs, re-measured in ticket 01. Most of that is not new terrain but the same columns asked again: a sampled flight of the starting commit (Terra, 13 s) puts the time here, as shares of the samples inside Chunk generation:
 
 | Where                                                                                   | Level 0 | Levels 1–2 |
 | --------------------------------------------------------------------------------------- | ------- | ---------- |
@@ -42,7 +42,7 @@ Then, only if the numbers still call for it after the caches: SIMD noise, bit fo
 
 1. As a Player flying over a version 3 World, I see the ground fill in ahead of me sooner, because the workers spend less time generating each Chunk, so that the richer terrain does not cost me streaming.
 2. As a Player, I see exactly the terrain, water, caves, Plants and Structures the starting commit generates, so that this work changes the cost and nothing I can see.
-3. As a Player with a version 1 or 2 World, my World is exactly as it was, Voxel for Voxel.
+3. As a Player with an existing World, my World is exactly as it was, Voxel for Voxel.
 4. As a Player at 0.5 m or 0.25 m Voxels, generation is cheaper too, and the same columns stand in the same metres as at 1 m.
 5. As a Player looking at distant land, the coarse levels fill in sooner, because they stop solving drainage and building columns level 0 already did.
 6. As a Player on a machine with less memory, the generator holds no more memory than it did, so that the caches do not crowd out Chunks and meshes.
@@ -66,14 +66,14 @@ Then, only if the numbers still call for it after the caches: SIMD noise, bit fo
 24. As a contributor, a SIMD noise path gives the scalar result bit for bit on every CI architecture, and a test proves it.
 25. As a contributor, an optimisation the measurement no longer justifies is closed with its figure rather than built anyway.
 26. As a reviewer, each optimisation is one commit with its tests and its figures.
-27. As the author of ticket 14 (on hold), I find version 3 not yet frozen, its digests not yet recorded and `GENERATOR_VERSION` unchanged.
+27. As a maintainer, I find `GENERATOR_VERSION` unchanged and the committed version 3 digests passing.
 28. As a contributor reading the code, the per-Cell cache is not called a Stack, which in this project's language is an Item and a count.
 
 ## Implementation Decisions
 
 **Order.** By the measured share: the column cache and its Biome (with the lock and eviction changes), Plants once per Cell, the lazy seal, sharing with the coarse sources, then the two gated tickets. Each is one commit.
 
-**Identity.** Every ticket before the gated ones leaves version 3 bit-identical to the starting commit at 1.0 and 0.5 m, and versions 1 and 2 keep their recorded digests (`generator_version.rs`, `surface_features.rs`, `settlement_worldgen.rs`, `coarse_generation.rs` and the others the step 17 spec lists). Version 3 gets no committed digest here; that is ticket 14's, and `GENERATOR_VERSION` does not move.
+**Identity.** Every ticket leaves version 3 bit-identical to the starting commit at 1.0 and 0.5 m: its committed digests (`generator_version.rs` and the others) pass unchanged, and `GENERATOR_VERSION` does not move.
 
 **The column cache.** The per-Cell cache of surface heights, Water levels, overhang reach and grounds is renamed from `Stack`, which the glossary reserves for an Item and a count. It gains each column's Biome (an id per column, about 1 KB a Cell); the Plant, ore, ground and cave-scale lookups read it instead of asking `biome_at`, which recomputes the column's height and drainage. A lookup outside the Chunk's own Cell builds the neighbouring Cell's cache. The map becomes a read-write lock with a thread-local record of the last Cell asked, as the drainage regions already have. At its bound of 1024 Cells it drops the oldest half.
 
@@ -87,24 +87,24 @@ Then, only if the numbers still call for it after the caches: SIMD noise, bit fo
 
 **SIMD, gated.** Runs only if noise is still more than 15% of generation once the caches land. Uses the `wide` crate (stable, one code path, an exact floor on every backend; its fused multiply-add is never used), batched four wide where a caller already walks a row: building the column cache, the drainage window and the overhang push down a column. The output is the scalar output bit for bit, octave sums kept per lane. Otherwise closed as `wontfix` with the figure.
 
-**Coarse lattice, gated.** Runs only if the 3D density is still more than 10% of generation after SIMD. Covers the cavern field and the two tunnel fields only, on a 4 m lattice anchored at the World origin in metres, so it holds at every Voxel size; each field is interpolated before it is thresholded, and the interval bounds widen by a few ulps. The overhang push stays exact per Voxel. Cave shapes may move, which version 3 allows only because ticket 14 has not frozen it; the water rules in `terrain_v3.rs` must still hold exactly. Otherwise closed as `wontfix` with the figure.
+**Coarse lattice, gated.** Runs only if the 3D density is still more than 10% of generation after SIMD. Covers the cavern field and the two tunnel fields only, on a 4 m lattice anchored at the World origin in metres, so it holds at every Voxel size; each field is interpolated before it is thresholded, and the interval bounds widen by a few ulps. The overhang push stays exact per Voxel. Cave shapes would move, which frozen version 3 does not allow, so a passing gate sends the ticket to a human for a new Generator version instead of building it; the water rules in `terrain_v3.rs` would still have to hold exactly. Otherwise closed as `wontfix` with the figure.
 
 ## Testing Decisions
 
 - The seam is `Worldgen::chunk`, the one the version 3 property tests already use. A good test asks what a Chunk holds, never what a cache holds.
 - Cache independence: the existing any-order and cold-cache test, extended to Plants, a coarse source sharing level 0's work, and every Biome lookup the cache serves; a Chunk generated after dropping every cache equals one generated warm.
-- Bit-identity to the starting commit: a fingerprint of a fixed grid of Chunks at 1.0 and 0.5 m (with caves, water, Biomes, Plants and Structures), compared before and after each ticket and kept out of the commit, since a committed version 3 digest is ticket 14's.
+- Bit-identity to the starting commit: a fingerprint of a fixed grid of Chunks at 1.0 and 0.5 m (with caves, water, Biomes, Plants and Structures), compared before and after each ticket and kept out of the commit; it covers more cases than the committed digests.
 - Versions 1 and 2: the recorded digest tests pass unchanged.
 - The water rules (`terrain_v3.rs`): water never beside or above air, flooded caverns sealed from tunnels, no overhang near water or Structures, at every Voxel size.
 - Sharing: a coarse source made to share level 0's work generates the same Chunks as one made alone (prior art: the Server's LOD tests comparing a source with a fresh one).
 - SIMD: a property test over many seeds and positions asserting the batched result equals the scalar one bit for bit, run on every CI architecture.
 - Benchmarks: a new bench in the style of `benches/structures.rs` (interleaved rounds, thread CPU time, medians) over a synthetic World shaped like Terra (a forest Biome with a clumped tree, a dry Biome with its own ground and cave scale, the fixture's ores, water and caves): straddling, both early-outs, a river, a cavern, a coarse level-3 Chunk and a column of Chunks with Plants, found by a fixed scan. A/B against a binary of the starting commit after every commit, under the host-load rules: `uptime` checked and recorded, no other build running.
-- The flight profile (`scripts/profile-frames --generator 3`, three interleaved rounds) at the start, after the Plants ticket and at the end, per level and stage.
+- The flight profile (`scripts/profile-frames`, three interleaved rounds) at the start, after the Plants ticket and at the end, per level and stage.
 
 ## Out of Scope
 
-- Freezing version 3, recording its digests and moving `GENERATOR_VERSION` (ticket 14), and its docs (ticket 15).
-- Any change to what version 3 generates, except cave shapes under the gated lattice ticket.
+- Any new Generator version, or moving `GENERATOR_VERSION`.
+- Any change to what version 3 generates.
 - Changes to the direct column generators of the farthest levels.
 - Meshing, light and rendering costs.
 - New tuning, Declaration fields or save fields.
@@ -115,4 +115,4 @@ Then, only if the numbers still call for it after the caches: SIMD noise, bit fo
 - Research, with sources: [research.md](./research.md). Production engines sample density every 4×8×4 and interpolate; the 10 m overhang field is too fine for that, the cavern field is not, and the tunnel fields survive at 4 m cells. `std::simd` is still nightly-only; Rust never fuses `a*b + c`, so lane-wise SIMD keeps the scalar bits.
 - The first step of every ticket is a failing test, per `/tdd`.
 - Tickets are in [issues/](./issues/).
-- This branch lands after `tech/generator-determinism`, which deletes versions 1 and 2 and changes version 3's output once (its tickets 12–13). Once it merges, rebase onto it and retake the fingerprint baseline there. Its ticket 14 leaves one more idea, not taken here: a sky Chunk between a column's top and the band's top still runs the full pass, and an early-out on the column cache's top needs its own proof that no Water, Plant, surface feature or Structure stands there. Its other idea, one drainage for every level, is ticket 05.
+- `tech/generator-determinism` (#65) changed version 3's output once before this branch; the fingerprint baseline is taken on top of it. Its ticket 14 leaves one more idea, not taken here: a sky Chunk between a column's top and the band's top still runs the full pass, and an early-out on the column cache's top needs its own proof that no Water, Plant, surface feature or Structure stands there. Its other idea, one drainage for every level, is ticket 05.

@@ -14,5 +14,5 @@ A generator can be made to share another's work when its seed and every terrain 
 
 - [ ] A shared source generates the same Chunks as one made alone, at every level, warm or cold.
 - [ ] Sharing a generator whose seed or terrain differs is refused.
-- [ ] Version 3 Chunks match the ticket 01 fingerprint; versions 1 and 2 keep their recorded digests.
+- [ ] Version 3 Chunks match the ticket 01 fingerprint; the committed version 3 digests pass unchanged.
 - [ ] Bench figures and the coarse levels' worker time before and after in Comments.
