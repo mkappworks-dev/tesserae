@@ -101,3 +101,8 @@ Open questions:
   and tables. The 1 Mi-word start therefore doubles once during the first
   fill. Start at 2 Mi words (8 MiB) and keep doubling, which then happens only
   past these view distances.
+
+2026-11-19: the per-layer placeholder answer above was weighed at 6 of 14 bytes
+a quad, the non-indexed placeholder. Ticket 07's indexed draw made it 16 of 24
+(4 of vertices, 12 of indices), so bucketed placeholders save more than they
+did and may be worth measuring again, against the vertex work they add.

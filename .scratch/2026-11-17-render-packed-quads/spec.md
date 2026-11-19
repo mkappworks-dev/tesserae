@@ -1,8 +1,9 @@
 # Packed quads: Chunk mesh memory, upload and meshing cost
 
-Status: ready-for-agent. Drafted 2026-11-17. Decisions Q1 to Q8 were settled
-in a grilling round on 2026-11-17; the three questions left open wait on the
-baseline (ticket 01).
+Status: done. Drafted 2026-11-17. Decisions Q1 to Q8 were settled in a
+grilling round on 2026-11-17, and ticket 01 answered the three left open.
+Tickets 01, 02, 03, 06 and 07 are done and 04 is `wontfix`; 05 stays
+`needs-info` on purpose, since on Metal a multi-draw saves no draw call.
 
 Source: branch `tech/render-packed-quads`, cut from `main` at `d3bf6bc4`.
 Builds on `.scratch/2026-11-01-gpu-pixel-cost/` (ticket 02's attribution) and
@@ -45,10 +46,11 @@ lands or is dropped on its A/B gate (ticket 06).
    builds a per-layer table of the distinct (Material, light) pairs, stores
    each record as 8 bytes with a table index in its spare bits, and puts the
    layer's table and records in one engine-owned GPU buffer. Each Chunk
-   layer's entity keeps a `Mesh3d` whose mesh is a placeholder of six
-   one-byte vertices per quad that no pipeline reads; the vertex shader finds
-   the record from the vertex index and expands the corner. About 88 bytes a
-   quad become 8 of record plus 6 of placeholder on the GPU, and 8 on the CPU.
+   layer's entity keeps a `Mesh3d` whose mesh is a placeholder of four
+   one-byte vertices per quad, drawn through six indices, that no pipeline
+   reads; the vertex shader finds the record from the vertex index and expands
+   the corner. About 88 bytes a quad become 8 of record plus 16 of placeholder
+   (4 of vertices, 12 of two-byte indices) on the GPU, and 8 on the CPU.
 2. **Binary greedy meshing** of pass 1: build each slice's face masks a row
    of 32 Voxels at a time with bit operations, then merge runs with
    trailing-zero scans. The records stay identical, which a test asserts
@@ -134,11 +136,14 @@ holds.
   replaced or released range is freed at once, since the render world draws
   the frame it extracted.
 - **The draw (Q3).** Each Chunk layer keeps its entity, `Mesh3d` and
-  material. The mesh is non-indexed, one `Uint8` attribute, six vertices per
-  quad, render-world only. `specialize` declares no vertex buffers, so the
-  attribute is never read. `MeshTag` is the start of the layer's range; the
-  shader reads the LOD level from its header, and the quad and corner from
-  `vertex_index - mesh[instance].first_vertex_index`. The entity carries its
+  material. The mesh is indexed, render-world only: one `Uint8` attribute,
+  four vertices per quad, and `0 1 2 0 2 3` per quad in `u16` indices up to
+  65,536 vertices and `u32` past them. `specialize` keeps one vertex buffer
+  slot with no attributes and a stride of 0, since Bevy's specializer keys a
+  pipeline by `buffers[0]`, so the attribute is never read. `MeshTag` is the
+  start of the layer's range; the shader reads the LOD level from its header,
+  and the quad and corner from `vertex_index - mesh[instance].first_vertex_index`
+  over and modulo four. The entity carries its
   own `Aabb` and `NoAutoAabb`, since the placeholder has no positions. The
   prepass shaders stay: defining them is what keeps the material bind group,
   and with it the quad buffer, bound in the shadow and depth passes.
@@ -165,7 +170,13 @@ holds.
 - **Open until ticket 01 (after measuring):** the order of items 2 to 4;
   per-layer placeholders or shared ones in size buckets; the quad buffer's
   initial size (1 MiB words, 4 MiB, for now) and growth policy (doubling for
-  now).
+  now). Ticket 01's answers:
+  - Order: the frame is GPU-bound, so item 1's GPU regression first (ticket
+    07), then item 3, the face split; item 4 last, likely `wontfix`.
+  - Placeholders: per layer. Buckets trade the placeholder's bytes for about
+    12% more vertex work, the cost that had regressed.
+  - Quad buffer: 2 Mi words (8 MiB) to start, doubling. The fixtures hold
+    about 1.6 Mi words, so a 1 Mi-word start doubled during the first fill.
 
 ## Testing Decisions
 
@@ -201,5 +212,5 @@ holds.
   GPU and records the change in `RenderChangedShaderBuffers`; `NoAutoAabb`
   stops `calculate_bounds` from replacing an explicit `Aabb`.
 - Shared size buckets for placeholders (one mesh per bucket, padding quads
-  degenerate in the shader) would drop the 6 bytes a quad at about 12% more
-  vertex work; ticket 01 decides.
+  degenerate in the shader) would drop the placeholder's 16 bytes a quad at
+  about 12% more vertex work; ticket 01 chose per-layer.
