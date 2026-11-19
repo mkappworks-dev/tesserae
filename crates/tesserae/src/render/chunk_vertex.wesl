@@ -102,7 +102,7 @@ fn expand(at: u32, vertex: u32) -> Expanded {
         out.uv = vec2<f32>(f32(cu - u0 / SUB * SUB), f32(cv - v0 / SUB * SUB)) * UNIT;
     } else {
         let c = lo >> constants::CHUNK_CELL_SHIFT;
-        let bits = constants::CHUNK_CELL_BITS;
+        let bits: u32 = constants::CHUNK_CELL_BITS;
         let cell = vec3<u32>(c & CELL_MASK, (c >> bits) & CELL_MASK, (c >> (2u * bits)) & CELL_MASK);
         let reversed = ((lo >> constants::CHUNK_REVERSED_SHIFT) & 1u) == 1u;
         let i = select(corner, 3u - corner, reversed);
