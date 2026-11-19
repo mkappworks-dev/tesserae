@@ -9,22 +9,27 @@
 
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::primitives::Aabb;
-use bevy::mesh::{MeshVertexAttribute, PrimitiveTopology, VertexAttributeValues, VertexFormat};
+use bevy::mesh::{
+    Indices, MeshVertexAttribute, PrimitiveTopology, VertexAttributeValues, VertexFormat,
+};
 use bevy::platform::collections::HashMap;
 use bevy::prelude::*;
 use tesserae_core::MeshLayer;
 use tesserae_core::light::Light;
 #[cfg(test)]
 use tesserae_core::mesh::Corner;
-use tesserae_core::mesh::{PAINT_SHIFT, PAINT_SLOTS, Quad};
+use tesserae_core::mesh::{PAINT_SHIFT, PAINT_SLOTS, QUAD_CORNERS, Quad};
 
-/// The placeholder a Chunk layer's mesh is made of: six vertices a quad, which
-/// no pipeline reads. Bevy draws a mesh's vertex count, and this is the
-/// smallest attribute that gives it one.
+/// The placeholder a Chunk layer's mesh is made of: four vertices a quad, which
+/// no pipeline reads. Bevy allocates a mesh's vertex range by its vertex count,
+/// and this is the smallest attribute that gives it one.
 pub const ATTRIBUTE_PLACEHOLDER: MeshVertexAttribute =
     MeshVertexAttribute::new("Vertex_QuadPlaceholder", 2_084_155_066, VertexFormat::Uint8);
 
-pub const VERTICES_PER_QUAD: u32 = 6;
+/// Drawn indexed, so the GPU shades each corner once rather than once per
+/// triangle it is in: six vertices a quad unindexed cost the depth prepass and
+/// the shadow passes about a fifth more.
+pub const VERTICES_PER_QUAD: u32 = 4;
 
 /// The Material is in the low bits of a table word, the light above them. The
 /// Material needs 17 bits, for [`tesserae_core::mesh::FLAME`].
@@ -126,7 +131,9 @@ impl ChunkQuads {
     /// What the GPU holds for the layer: its words and its placeholder.
     #[cfg(any(feature = "dev", feature = "profiling"))]
     pub fn gpu_bytes(&self) -> usize {
-        self.words.len() * 4 + (self.quad_count() * VERTICES_PER_QUAD) as usize
+        let vertices = self.quad_count() * VERTICES_PER_QUAD;
+        let index_bytes = if vertices > U16_VERTICES { 4 } else { 2 };
+        self.words.len() * 4 + (vertices + self.quad_count() * 6 * index_bytes) as usize
     }
 
     fn stride(&self) -> u32 {
@@ -177,15 +184,26 @@ pub fn paint(material: u32, light: Light) -> u32 {
 /// The mesh a layer of `quads` quads draws: render-world only, since nothing
 /// on the main world reads it.
 pub fn placeholder(quads: u32) -> Mesh {
+    let vertices = quads * VERTICES_PER_QUAD;
+    let indices = (0..quads).flat_map(|q| QUAD_CORNERS.map(|c| q * VERTICES_PER_QUAD + c as u32));
+    let indices = if vertices > U16_VERTICES {
+        Indices::U32(indices.collect())
+    } else {
+        Indices::U16(indices.map(|i| i as u16).collect())
+    };
     Mesh::new(
         PrimitiveTopology::TriangleList,
         RenderAssetUsages::RENDER_WORLD,
     )
     .with_inserted_attribute(
         ATTRIBUTE_PLACEHOLDER,
-        VertexAttributeValues::Uint8(vec![0; (quads * VERTICES_PER_QUAD) as usize]),
+        VertexAttributeValues::Uint8(vec![0; vertices as usize]),
     )
+    .with_inserted_indices(indices)
 }
+
+/// How many vertices two-byte indices reach.
+const U16_VERTICES: u32 = 1 << 16;
 
 /// What `chunk_vertex.wesl` makes of one vertex.
 #[cfg(test)]
@@ -207,7 +225,7 @@ pub fn expand(buffer: &[u32], at: u32, vertex: u32) -> Expanded {
     let level = word(at);
     let table = at + HEADER_WORDS;
     let quad = vertex / VERTICES_PER_QUAD;
-    let corner = (0x0032_0210u32 >> (4 * (vertex % VERTICES_PER_QUAD))) & 15;
+    let corner = vertex % VERTICES_PER_QUAD;
     let record = table + word(at + 1) + quad * word(at + 2);
     let (lo, hi) = (word(record), word(record + 1));
     let paint = if word(at + 2) == WIDE {
@@ -412,11 +430,17 @@ mod tests {
         let mut buffer = vec![u32::MAX; at as usize];
         buffer.extend_from_slice(packed.words());
         buffer.extend([u32::MAX; 4]);
-        for (q, quad) in layer.quads.iter().enumerate() {
+        let drawn = placeholder(packed.quad_count());
+        let indices: Vec<usize> = drawn
+            .indices()
+            .expect("an indexed placeholder")
+            .iter()
+            .collect();
+        assert_eq!(indices.len(), layer.quads.len() * 6, "{what}");
+        for ((q, quad), triangles) in layer.quads.iter().enumerate().zip(indices.chunks(6)) {
             let corners = quad.corners();
             for (k, &corner) in tesserae_core::mesh::QUAD_CORNERS.iter().enumerate() {
-                let vertex = q as u32 * VERTICES_PER_QUAD + k as u32;
-                let expanded = expand(&buffer, at, vertex);
+                let expanded = expand(&buffer, at, triangles[k] as u32);
                 assert_eq!(
                     expanded.corner, corners[corner],
                     "{what}: quad {q} vertex {k}"
@@ -521,9 +545,28 @@ mod tests {
     }
 
     #[test]
-    fn the_placeholder_has_six_vertices_a_quad_and_no_indices() {
+    fn the_placeholder_has_four_vertices_a_quad_and_two_triangles_over_them() {
         let mesh = placeholder(7);
-        assert_eq!(mesh.count_vertices(), 42);
-        assert!(mesh.indices().is_none());
+        assert_eq!(mesh.count_vertices(), 28);
+        let Some(Indices::U16(indices)) = mesh.indices() else {
+            panic!("two-byte indices while they reach");
+        };
+        assert_eq!(indices[..12], [0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7]);
+        assert_eq!(indices.len(), 42);
+        assert_eq!(indices[41], 27);
+    }
+
+    #[test]
+    fn a_placeholder_past_two_byte_indices_takes_four() {
+        let quads = (1 << 14) + 1;
+        let mesh = placeholder(quads);
+        let Some(Indices::U32(indices)) = mesh.indices() else {
+            panic!("four-byte indices past 65,536 vertices");
+        };
+        assert_eq!(indices.last(), Some(&(quads * 4 - 1)));
+        assert!(matches!(
+            placeholder(1 << 14).indices(),
+            Some(Indices::U16(_))
+        ));
     }
 }

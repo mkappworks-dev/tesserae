@@ -12,7 +12,8 @@ import bevy_pbr::render::{
 @group(constants::MATERIAL_BIND_GROUP) @binding(106)
 var<storage, read> quads: array<u32>;
 
-// The mesh is a placeholder with six vertices a quad and nothing in them.
+// The mesh is a placeholder with four vertices a quad and nothing in them,
+// drawn through its indices, two triangles a quad.
 struct ChunkVertex {
     @builtin(instance_index) instance_index: u32,
     @builtin(vertex_index) vertex_index: u32,
@@ -32,8 +33,6 @@ struct ChunkVertexOutput {
     @location(13) unclipped_depth: f32,
 }
 
-// Which corner each of a quad's six vertices is, 0 1 2 0 2 3, a nibble each.
-const CORNER_OF_VERTEX: u32 = 0x320210u;
 const WIDE: u32 = 3u;
 
 // One vertex in the layer's own space. chunk_mesh::expand is this, step for
@@ -50,8 +49,8 @@ struct Expanded {
 fn expand(at: u32, vertex: u32) -> Expanded {
     let table = at + constants::CHUNK_HEADER_WORDS;
     let stride = quads[at + 2u];
-    let corner = (CORNER_OF_VERTEX >> (4u * (vertex % 6u))) & 15u;
-    let record = table + quads[at + 1u] + (vertex / 6u) * stride;
+    let corner = vertex % 4u;
+    let record = table + quads[at + 1u] + (vertex / 4u) * stride;
     let lo = quads[record];
     let hi = quads[record + 1u];
     var paint: u32;
@@ -121,8 +120,8 @@ fn expand(at: u32, vertex: u32) -> Expanded {
 }
 
 fn transform_vertex(in: ChunkVertex) -> ChunkVertexOutput {
-    // The tag is where the layer's words start; the index, less the mesh's
-    // own first vertex, is which vertex of the layer this is.
+    // The tag is where the layer's words start; the vertex, less the mesh's
+    // own first vertex, is the index the placeholder drew it by.
     let at = mesh_functions::get_tag(in.instance_index);
     let vertex = in.vertex_index - mesh[in.instance_index].first_vertex_index;
     let quad = expand(at, vertex);

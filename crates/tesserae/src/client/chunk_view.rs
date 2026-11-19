@@ -828,7 +828,7 @@ fn spawn_camera(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::client::chunk_mesh::{VERTICES_PER_QUAD, expand};
+    use crate::client::chunk_mesh::expand;
     use bevy::ecs::system::RunSystemOnce;
     use tesserae_core::light::{Light, MAX_LIGHT};
     use tesserae_core::mesh::Soup;
@@ -1693,24 +1693,25 @@ mod tests {
     }
 
     /// What the shader draws for `entity`, read from the quad buffer as the
-    /// GPU would hold it: six vertices a quad in drawing order, unindexed.
+    /// GPU would hold it, through the placeholder's vertices and indices.
     fn decoded(app: &App, entity: Entity) -> Soup {
         let world = app.world();
         let quads = world.get::<ChunkQuads>(entity).expect("a Chunk layer");
         let tag = world.get::<MeshTag>(entity).unwrap().value;
         assert_eq!(tag, quads.at, "the shader finds the layer by its tag");
         let buffer = &world.resource::<QuadBuffer>().mirror;
-        let vertices = quads.quad_count() * VERTICES_PER_QUAD;
+        let handle = &world.get::<Mesh3d>(entity).unwrap().0;
+        let mesh = world.resource::<Assets<Mesh>>().get(handle).unwrap();
         let mut soup = Soup::default();
-        for vertex in 0..vertices {
+        for vertex in 0..mesh.count_vertices() as u32 {
             let expanded = expand(buffer, tag, vertex);
             soup.positions.push(expanded.corner.position);
             soup.normals.push(expanded.corner.normal);
             soup.uvs.push(expanded.corner.uv);
             soup.materials.push(expanded.material);
             soup.light.push(expanded.light);
-            soup.indices.push(vertex);
         }
+        soup.indices = mesh.indices().unwrap().iter().map(|i| i as u32).collect();
         soup
     }
 
@@ -2382,7 +2383,7 @@ mod tests {
             "the superseded range is given back"
         );
         assert_eq!(
-            decoded(&app, entity).positions.len(),
+            decoded(&app, entity).indices.len(),
             6,
             "the one face open to the air"
         );
