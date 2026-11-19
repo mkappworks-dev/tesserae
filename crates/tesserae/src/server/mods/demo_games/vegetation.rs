@@ -1,5 +1,5 @@
-//! What each demo Game's Biomes grow: a sample of generated Chunks counted by Plant and Material
-//! name, so a Biome that loses a species, goes bare by accident or sprouts standalone Wood fails.
+//! What Terra's Biomes grow: a sample of generated Chunks counted by Plant and Material name, so a
+//! Biome that loses a species, goes bare by accident or sprouts standalone Wood fails.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
@@ -12,8 +12,6 @@ use super::{loaded, material, shape};
 const TREES: [&str; 10] = [
     "oak", "birch", "pine", "palm", "acacia", "jungle", "swamp", "apple", "orange", "cherry",
 ];
-/// Plants that stand in water: they generate only where the Game's lake covers the column.
-const WATER_PLANTS: [&str; 3] = ["aquatic:kelp", "aquatic:seagrass", "aquatic:red_weed"];
 /// The Biomes of a Game whose trees hang vines.
 const VINED: [&str; 2] = ["flora:jungle", "flora:swamp"];
 
@@ -23,371 +21,107 @@ struct Game {
     biomes: &'static [(&'static str, &'static [&'static str])],
     /// Biomes declared bare on purpose.
     bare: &'static [&'static str],
-    lake: bool,
 }
 
-fn game_named(name: &str) -> &'static Game {
-    GAMES.iter().find(|g| g.name == name).unwrap()
-}
-
-const GAMES: [Game; 5] = [
-    Game {
-        name: "terra",
-        biomes: &[
-            (
-                "temperate",
-                &[
-                    "flora:cherry",
-                    "flora:apple",
-                    "flora:birch",
-                    "flora:oak",
-                    "crops:potato",
-                    "crops:carrot",
-                    "crops:wheat",
-                    "crops:berry",
-                    "crops:watermelon",
-                    "crops:pumpkin",
-                    "flora:mushroom_red",
-                    "flora:daisy",
-                    "flora:poppy",
-                    "flora:tuft",
-                ],
-            ),
-            (
-                "dry",
-                &[
-                    "flora:orange",
-                    "flora:palm",
-                    "flora:cactus",
-                    "crops:berry",
-                    "flora:cane",
-                    "flora:dandelion",
-                    "flora:dry_grass",
-                ],
-            ),
-            (
-                "cold",
-                &[
-                    "flora:birch",
-                    "flora:pine",
-                    "crops:berry",
-                    "flora:mushroom_brown",
-                    "flora:daisy",
-                    "flora:fern",
-                    "flora:tuft",
-                ],
-            ),
-            (
-                "jungle",
-                &[
-                    "flora:jungle",
-                    "flora:palm",
-                    "flora:orchid",
-                    "crops:berry",
-                    "flora:cane",
-                    "flora:mushroom_red",
-                    "flora:fern",
-                    "flora:tall_grass",
-                ],
-            ),
-            (
-                "swamp",
-                &[
-                    "flora:swamp",
-                    "flora:orchid",
-                    "crops:berry",
-                    "flora:mushroom_brown",
-                    "flora:cane",
-                    "aquatic:kelp",
-                    "aquatic:seagrass",
-                    "aquatic:red_weed",
-                    "flora:fern",
-                    "flora:tuft",
-                ],
-            ),
-            (
-                "savanna",
-                &[
-                    "flora:acacia",
-                    "flora:cactus",
-                    "crops:wheat",
-                    "crops:watermelon",
-                    "flora:poppy",
-                    "flora:dandelion",
-                    "flora:tuft",
-                    "flora:dry_grass",
-                ],
-            ),
-            // The Biomes of the land's shape, which only version 3 chooses: the sea's plants, and
-            // bare sand and rock.
-            (
-                "ocean",
-                &["aquatic:kelp", "aquatic:seagrass", "aquatic:red_weed"],
-            ),
-            ("beach", &[]),
-            ("alpine", &[]),
-            ("river", &["flora:cane"]),
-        ],
-        bare: &["beach", "alpine"],
-        lake: true,
-    },
-    Game {
-        name: "meadow",
-        biomes: &[
-            (
-                "meadow",
-                &[
-                    "flora:cherry",
-                    "flora:apple",
-                    "flora:oak",
-                    "crops:potato",
-                    "crops:watermelon",
-                    "crops:pumpkin",
-                    "crops:carrot",
-                    "crops:wheat",
-                    "flora:dandelion",
-                    "flora:daisy",
-                    "flora:poppy",
-                    "flora:tuft",
-                ],
-            ),
-            (
-                "heath",
-                &[
-                    "flora:swamp",
-                    "flora:birch",
-                    "crops:berry",
-                    "crops:pumpkin",
-                    "flora:mushroom_brown",
-                    "flora:fern",
-                    "flora:tall_grass",
-                ],
-            ),
-            (
-                "dunes",
-                &[
-                    "flora:palm",
-                    "flora:cactus",
-                    "flora:cane",
-                    "flora:dry_grass",
-                ],
-            ),
-            (
-                "thicket",
-                &[
-                    "flora:jungle",
-                    "flora:orchid",
-                    "crops:berry",
-                    "flora:mushroom_red",
-                    "flora:fern",
-                    "flora:tuft",
-                ],
-            ),
-            (
-                "fen",
-                &[
-                    "flora:swamp",
-                    "flora:cane",
-                    "flora:mushroom_brown",
-                    "flora:fern",
-                    "flora:tuft",
-                ],
-            ),
-            (
-                "prairie",
-                &[
-                    "flora:acacia",
-                    "crops:wheat",
-                    "crops:pumpkin",
-                    "flora:poppy",
-                    "flora:dandelion",
-                    "flora:tuft",
-                    "flora:dry_grass",
-                ],
-            ),
-            // The Biomes of the land's shape, which only version 3 chooses.
-            ("ocean", &[]),
-            ("shore", &[]),
-            ("river", &["flora:cane"]),
-            ("alpine", &[]),
-        ],
-        bare: &["ocean", "shore", "alpine"],
-        lake: false,
-    },
-    Game {
-        name: "ember",
-        biomes: &[
-            (
-                "ash_flats",
-                &[
-                    "flora:birch",
-                    "crops:berry",
-                    "crops:pumpkin",
-                    "flora:poppy",
-                    "flora:dry_grass",
-                ],
-            ),
-            ("scorched", &[]),
-            (
-                "highland",
-                &[
-                    "flora:pine",
-                    "flora:birch",
-                    "flora:mushroom_brown",
-                    "flora:fern",
-                    "flora:tuft",
-                ],
-            ),
-            (
-                "cinder_bog",
-                &[
-                    "flora:swamp",
-                    "flora:cane",
-                    "flora:mushroom_red",
-                    "flora:fern",
-                    "flora:tall_grass",
-                ],
-            ),
-            // The Biomes of the land's shape, which only version 3 chooses.
-            ("ocean", &[]),
-            ("shore", &[]),
-            ("river", &[]),
-            ("alpine", &[]),
-        ],
-        bare: &["scorched", "ocean", "shore", "river", "alpine"],
-        lake: true,
-    },
-    Game {
-        name: "tidewater",
-        biomes: &[
-            (
-                "lagoon",
-                &[
-                    "flora:jungle",
-                    "flora:palm",
-                    "crops:berry",
-                    "crops:watermelon",
-                    "flora:cane",
-                    "aquatic:seagrass",
-                    "aquatic:kelp",
-                    "flora:fern",
-                ],
-            ),
-            (
-                "salt_flats",
-                &[
-                    "flora:palm",
-                    "flora:cactus",
-                    "flora:cane",
-                    "flora:dry_grass",
-                ],
-            ),
-            (
-                "cold_shallows",
-                &["flora:pine", "crops:berry", "aquatic:kelp", "flora:tuft"],
-            ),
-            (
-                "rainforest",
-                &[
-                    "flora:jungle",
-                    "flora:palm",
-                    "flora:orchid",
-                    "flora:mushroom_red",
-                    "flora:cane",
-                    "aquatic:kelp",
-                    "flora:fern",
-                ],
-            ),
-            (
-                "tidal_marsh",
-                &[
-                    "flora:swamp",
-                    "flora:cane",
-                    "flora:mushroom_brown",
-                    "aquatic:red_weed",
-                    "aquatic:kelp",
-                    "flora:fern",
-                ],
-            ),
-            // The Biomes of the land's shape, which only version 3 chooses.
-            ("ocean", &[]),
-            ("shore", &[]),
-            ("river", &["flora:cane"]),
-            ("alpine", &[]),
-        ],
-        bare: &["ocean", "shore", "alpine"],
-        lake: true,
-    },
-    Game {
-        name: "lumen",
-        biomes: &[
-            (
-                "garden",
-                &[
-                    "flora:cherry",
-                    "flora:apple",
-                    "crops:carrot",
-                    "crops:wheat",
-                    "crops:pumpkin",
-                    "crops:watermelon",
-                    "flora:dandelion",
-                    "flora:daisy",
-                    "flora:poppy",
-                    "flora:fern",
-                    "flora:tuft",
-                ],
-            ),
-            (
-                "arid_court",
-                &[
-                    "flora:palm",
-                    "flora:orange",
-                    "flora:cactus",
-                    "flora:dry_grass",
-                ],
-            ),
-            (
-                "frost_court",
-                &[
-                    "flora:pine",
-                    "flora:birch",
-                    "crops:berry",
-                    "flora:mushroom_brown",
-                    "flora:tall_grass",
-                ],
-            ),
-            (
-                "conservatory",
-                &[
-                    "flora:jungle",
-                    "flora:cherry",
-                    "flora:orange",
-                    "flora:palm",
-                    "flora:orchid",
-                    "flora:fern",
-                ],
-            ),
-            (
-                "lily_pond",
-                &[
-                    "flora:swamp",
-                    "flora:cherry",
-                    "flora:cane",
-                    "flora:orchid",
-                    "flora:fern",
-                    "flora:tuft",
-                ],
-            ),
-            // The Biomes of the land's shape, which only version 3 chooses.
-            ("ocean", &[]),
-            ("shore", &[]),
-            ("river", &["flora:cane"]),
-            ("alpine", &[]),
-        ],
-        bare: &["ocean", "shore", "alpine"],
-        lake: false,
-    },
-];
+const TERRA: Game = Game {
+    name: "terra",
+    biomes: &[
+        (
+            "temperate",
+            &[
+                "flora:cherry",
+                "flora:apple",
+                "flora:birch",
+                "flora:oak",
+                "crops:potato",
+                "crops:carrot",
+                "crops:wheat",
+                "crops:berry",
+                "crops:watermelon",
+                "crops:pumpkin",
+                "flora:mushroom_red",
+                "flora:daisy",
+                "flora:poppy",
+                "flora:tuft",
+            ],
+        ),
+        (
+            "dry",
+            &[
+                "flora:orange",
+                "flora:palm",
+                "flora:cactus",
+                "crops:berry",
+                "flora:cane",
+                "flora:dandelion",
+                "flora:dry_grass",
+            ],
+        ),
+        (
+            "cold",
+            &[
+                "flora:birch",
+                "flora:pine",
+                "crops:berry",
+                "flora:mushroom_brown",
+                "flora:daisy",
+                "flora:fern",
+                "flora:tuft",
+            ],
+        ),
+        (
+            "jungle",
+            &[
+                "flora:jungle",
+                "flora:palm",
+                "flora:orchid",
+                "crops:berry",
+                "flora:cane",
+                "flora:mushroom_red",
+                "flora:fern",
+                "flora:tall_grass",
+            ],
+        ),
+        (
+            "swamp",
+            &[
+                "flora:swamp",
+                "flora:orchid",
+                "crops:berry",
+                "flora:mushroom_brown",
+                "flora:cane",
+                "aquatic:kelp",
+                "aquatic:seagrass",
+                "aquatic:red_weed",
+                "flora:fern",
+                "flora:tuft",
+            ],
+        ),
+        (
+            "savanna",
+            &[
+                "flora:acacia",
+                "flora:cactus",
+                "crops:wheat",
+                "crops:watermelon",
+                "flora:poppy",
+                "flora:dandelion",
+                "flora:tuft",
+                "flora:dry_grass",
+            ],
+        ),
+        // The Biomes of the land's shape, which only version 3 chooses: the sea's plants, and
+        // bare sand and rock.
+        (
+            "ocean",
+            &["aquatic:kelp", "aquatic:seagrass", "aquatic:red_weed"],
+        ),
+        ("beach", &[]),
+        ("alpine", &[]),
+        ("river", &["flora:cane"]),
+    ],
+    bare: &["beach", "alpine"],
+};
 
 /// The Materials that show a Plant stands: a tree's trunk, a crop's every Stage, else its own.
 fn materials_of(plant: &str) -> Vec<String> {
@@ -686,7 +420,7 @@ fn beach_grown_by_accident(mut loaded: super::LoadedMods) -> super::LoadedMods {
 
 #[test]
 fn a_bare_biome_that_grows_on_its_own_surface_is_caught() {
-    let terra = &GAMES[0];
+    let terra = &TERRA;
     let (counts, biomes) = surface_census(terra, beach_grown_by_accident);
     let beach = biomes.iter().position(|b| b == "terra:beach").unwrap();
     let (_install, loaded) = loaded(terra.name, 1.0);
@@ -700,10 +434,9 @@ fn a_bare_biome_that_grows_on_its_own_surface_is_caught() {
 
 /// Also the vines of jungle and swamp trees, and Wood only in trees: the census is nearly all of
 /// each one's time, so the three share it.
-fn every_biome_of_every_demo_game_grows_its_declared_species_and_none_is_bare_by_accident(
-    game: &str,
-) {
-    let game = game_named(game);
+#[test]
+fn every_terra_biome_grows_its_declared_species_and_none_is_bare_by_accident() {
+    let game = &TERRA;
     let (counts, biomes) = census(game);
     let (_install, loaded) = loaded(game.name, 1.0);
     let fruit = fruit_of(&loaded);
@@ -727,7 +460,7 @@ fn every_biome_of_every_demo_game_grows_its_declared_species_and_none_is_bare_by
         // A Biome of the land's shape the census may never choose.
         let chosen = counts.keys().any(|(b, _)| *b == index);
         for plant in *species {
-            if (WATER_PLANTS.contains(plant) && !game.lake) || !chosen {
+            if !chosen {
                 continue;
             }
             let total: u64 = materials_of(plant)
@@ -744,8 +477,6 @@ fn every_biome_of_every_demo_game_grows_its_declared_species_and_none_is_bare_by
     jungle_and_swamp_trees_hang_vines(game, &counts);
     generated_wood_is_only_ever_the_trunk_of_a_grown_tree(game, &counts);
 }
-
-each_case!(every_biome_of_every_demo_game_grows_its_declared_species_and_none_is_bare_by_accident: terra, meadow, ember, tidewater, lumen);
 
 fn jungle_and_swamp_trees_hang_vines(game: &Game, counts: &Counts) {
     for (index, (name, species)) in game.biomes.iter().enumerate() {
@@ -775,39 +506,6 @@ fn generated_wood_is_only_ever_the_trunk_of_a_grown_tree(game: &Game, counts: &C
         "{}: standalone Wood generated: {standalone:?}",
         game.name
     );
-}
-
-/// A Plant is declared once, in a shared Mod, and a Game only places it: each is placed by at least
-/// two Games, vines through the trees that hang them.
-#[test]
-fn every_shared_plant_is_placed_by_at_least_two_games() {
-    let (_install, loaded) = loaded("terra", 1.0);
-    let declared: BTreeSet<String> = loaded
-        .tables
-        .plants
-        .plants()
-        .iter()
-        .map(|p| p.name.clone())
-        .filter(|name| {
-            ["flora:", "crops:", "aquatic:"]
-                .iter()
-                .any(|owner| name.starts_with(owner))
-        })
-        .filter(|name| !name.ends_with("_sapling"))
-        .collect();
-    assert!(declared.len() >= 26, "{declared:?}");
-    for plant in &declared {
-        let games = GAMES
-            .iter()
-            .filter(|game| {
-                game.biomes.iter().any(|(_, species)| {
-                    species.contains(&plant.as_str())
-                        || (plant == "flora:vine" && species.iter().any(|p| VINED.contains(p)))
-                })
-            })
-            .count();
-        assert!(games >= 2, "{plant} is placed by {games} Game(s)");
-    }
 }
 
 /// Every fruit tree's fruit ripens through its Stages, is broken for food and left as canopy, the
@@ -892,7 +590,7 @@ fn trees_per_hectare(game: &Game) -> Vec<(String, f64)> {
         .registry
         .names(Kind::Material)
         .filter(|(_, name)| {
-            // Ember and the other Games with their own ground stand on `flora:grass`.
+            // Flora declares `flora:grass`, but it is ground.
             *name != "flora:grass"
                 && ["flora:", "crops:", "aquatic:"]
                     .iter()
@@ -964,43 +662,20 @@ fn mean_spacing_m(per_hectare: f64) -> f64 {
     100.0 / per_hectare.max(1e-9).sqrt()
 }
 
-/// The approved mockup's density classes, by Biome name across the Games: a jungle or swamp packs
-/// trees about 4 m apart, a temperate or cold forest 6 to 10 m, a savanna, prairie, desert or
-/// frost Biome 12 m or more.
-const DENSE: [&str; 9] = [
-    "jungle",
-    "swamp",
-    "thicket",
-    "fen",
-    "cinder_bog",
-    "rainforest",
-    "tidal_marsh",
-    "conservatory",
-    "lily_pond",
-];
-const MODERATE: [&str; 4] = ["temperate", "cold", "heath", "cold_shallows"];
-const SPARSE: [&str; 14] = [
-    "savanna",
-    "dry",
-    "prairie",
-    "dunes",
-    "salt_flats",
-    "arid_court",
-    "meadow",
-    "garden",
-    "highland",
-    "frost_court",
-    "ash_flats",
-    "lagoon",
-    // The sea grows weed, not trees, and a river's banks cane.
-    "ocean",
-    "river",
+/// The approved mockup's density classes, by Terra's Biome name: a jungle or swamp packs trees
+/// about 4 m apart, a temperate or cold forest 6 to 10 m, a savanna or desert 12 m or more.
+const DENSE: [&str; 2] = ["jungle", "swamp"];
+const MODERATE: [&str; 2] = ["temperate", "cold"];
+const SPARSE: [&str; 4] = [
+    "savanna", "dry", // The sea grows weed, not trees, and a river's banks cane.
+    "ocean", "river",
 ];
 
-/// Also that jungle and swamp are denser than savanna, prairie and desert in every Game that has
-/// both: counting a Game's trees is nearly all of either one's time, so the two share it.
-fn each_biome_scatters_its_trees_at_its_density_class(game: &str) {
-    let game = game_named(game);
+/// Also that jungle and swamp are denser than savanna and desert: counting the trees is nearly all
+/// of either one's time, so the two share it.
+#[test]
+fn each_terra_biome_scatters_its_trees_at_its_density_class() {
+    let game = &TERRA;
     let density = trees_per_hectare(game);
     for (name, per_ha) in density.iter().cloned() {
         let spacing = mean_spacing_m(per_ha);
@@ -1018,23 +693,18 @@ fn each_biome_scatters_its_trees_at_its_density_class(game: &str) {
         } else if SPARSE.contains(&name.as_str()) {
             assert!(spacing >= 12.0, "{full}: sparse, {spacing:.1} m");
         } else {
-            assert!(
-                game.bare.contains(&name.as_str()) || name == "scorched",
-                "{full}: unclassed"
-            );
+            assert!(game.bare.contains(&name.as_str()), "{full}: unclassed");
         }
     }
     assert!(
-        jungle_and_swamp_are_denser_than_savanna_prairie_and_desert(game, &density),
+        jungle_and_swamp_are_denser_than_savanna_and_desert(game, &density),
         "{}: no dense and sparse Biomes to compare",
         game.name
     );
 }
 
-each_case!(each_biome_scatters_its_trees_at_its_density_class: terra, meadow, ember, tidewater, lumen);
-
 /// Whether `game` has both classes to compare.
-fn jungle_and_swamp_are_denser_than_savanna_prairie_and_desert(
+fn jungle_and_swamp_are_denser_than_savanna_and_desert(
     game: &Game,
     density: &[(String, f64)],
 ) -> bool {
@@ -1368,31 +1038,14 @@ fn measure(blocks: &[Vec<Option<u8>>]) -> Cover {
 const COVER_DENSE: std::ops::RangeInclusive<f64> = 0.20..=0.55;
 const COVER_GRASSY: std::ops::RangeInclusive<f64> = 0.09..=0.23;
 const COVER_SPARSE: std::ops::RangeInclusive<f64> = 0.015..=0.10;
-const GRASSY: [&str; 8] = [
-    "temperate",
-    "cold",
-    "meadow",
-    "garden",
-    "heath",
-    "highland",
-    "cold_shallows",
-    "prairie",
-];
-const ARID: [&str; 8] = [
-    "dry",
-    "savanna",
-    "dunes",
-    "salt_flats",
-    "arid_court",
-    "frost_court",
-    "ash_flats",
-    "lagoon",
-];
+const GRASSY: [&str; 2] = ["temperate", "cold"];
+const ARID: [&str; 2] = ["dry", "savanna"];
 
 /// A Biome's ground cover is patches with bare ground between, never an even carpet, and a flower
 /// is rarer than the grass it grows among.
-fn ground_cover_grows_in_patches_at_each_biomes_class_and_flowers_stay_rare(game: &str) {
-    let game = game_named(game);
+#[test]
+fn ground_cover_grows_in_patches_at_each_terra_biomes_class_and_flowers_stay_rare() {
+    let game = &TERRA;
     let grounds = ground_of(game, 7);
     for (index, (name, _)) in game.biomes.iter().enumerate() {
         let full = format!("{}:{name}", game.name);
@@ -1462,8 +1115,6 @@ fn ground_cover_grows_in_patches_at_each_biomes_class_and_flowers_stay_rare(game
         }
     }
 }
-
-each_case!(ground_cover_grows_in_patches_at_each_biomes_class_and_flowers_stay_rare: terra, meadow, ember, tidewater, lumen);
 
 /// Headroom a Player walks under: nothing of a tree but its trunk hangs lower.
 const TREE_CLEAR_M: f32 = 4.0;

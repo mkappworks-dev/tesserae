@@ -1,6 +1,5 @@
-//! Chests worldgen stands hold loot drawn for their place: each Game loaded through the Mod
-//! loader, its World generated, and every chest reached through Use, Edits and the Container
-//! path.
+//! Chests worldgen stands hold loot drawn for their place: Terra loaded through the Mod loader, its
+//! World generated, and every chest reached through Use, Edits and the Container path.
 
 use std::collections::BTreeMap;
 
@@ -318,31 +317,6 @@ fn a_settlement_chest_holds_only_its_buildings_table_or_else_its_settlements() {
         ("terra:town", true),
     ] {
         assert!(seen.contains_key(&kind), "{kind:?} chests opened: {seen:?}");
-    }
-}
-
-#[test]
-fn a_wilderness_chest_holds_only_its_biomes_table() {
-    let ember = game("ember", 1.0);
-    let eye = crate::server::spawn_eye(&ember.generator);
-    let (world, chests) = ember.chests([eye.x, eye.z], 640.0);
-    let wild: Vec<_> = chests
-        .into_iter()
-        .filter(|(_, t)| t == "ember:barrow")
-        .collect();
-    assert!(!wild.is_empty(), "a barrow stands with its chest");
-    let mut app = ember.server(&all(&world));
-    for (at, _) in wild {
-        let biome = ember
-            .generator
-            .biome_at(at[0] as f32 + 0.5, at[2] as f32 + 0.5)
-            .unwrap();
-        let table = ember.loaded.biome_loot[biome.index()].as_ref().unwrap();
-        let slots = open(&mut app, at);
-        assert!(slots.iter().flatten().count() >= usize::from(table.rolls_min));
-        for stack in slots.iter().flatten() {
-            assert!(ember.items(table).contains(&stack.item), "{}", stack.item);
-        }
     }
 }
 

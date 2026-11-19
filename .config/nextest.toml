@@ -1,9 +1,9 @@
 # A test that starts late extends its shard by its whole length; these run for minutes on CI's
 # runner, so they take the first slots, the longest first.
 [[profile.default.overrides]]
-filter = 'test(a_world_of_each_game_shows_its_templates)'
+filter = 'test(terras_planted_fields) | test(a_terra_world_shows_its_templates)'
 priority = 100
 
 [[profile.default.overrides]]
-filter = 'test(ground_cover_grows_in_patches) | test(every_game_with_planted_fields) | test(each_stand_a_bridge_over_a_gap) | test(every_biome_of_every_demo_game) | test(stands_its_first_footbridges) | test(each_biome_scatters_its_trees) | test(a_survival_player_finds_wood) | test(the_shared_spreaders) | test(a_wilderness_chest_holds_only)'
+filter = 'test(ground_cover_grows_in_patches) | test(terra_stands_a_bridge_over_a_gap) | test(every_terra_biome_grows) | test(each_terra_biome_scatters_its_trees) | test(a_survival_player_finds_wood) | test(a_bare_biome_that_grows) | test(the_shared_spreaders)'
 priority = 90

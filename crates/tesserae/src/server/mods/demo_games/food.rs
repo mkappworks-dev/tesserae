@@ -1,5 +1,5 @@
-//! Every demo Game's food: declared, lying on the surface of a new World near the spawn, and
-//! placed, broken, picked up and eaten through the Server's own systems.
+//! Terra's food: declared, lying on the surface of a new World near the spawn, and placed, broken,
+//! picked up and eaten through the Server's own systems.
 
 use std::ops::ControlFlow;
 
@@ -31,71 +31,48 @@ struct Food {
     biomes: &'static [&'static str],
 }
 
-const FOODS: [Food; 5] = [
-    Food {
-        game: "terra",
-        item: "terra:melon",
-        biomes: &["terra:temperate"],
-    },
-    Food {
-        game: "meadow",
-        item: "meadow:pumpkin",
-        biomes: &["meadow:meadow", "meadow:heath"],
-    },
-    Food {
-        game: "ember",
-        item: "ember:pepper",
-        biomes: &["ember:ash_flats", "ember:highland"],
-    },
-    Food {
-        game: "tidewater",
-        item: "tidewater:coconut",
-        biomes: &["tidewater:lagoon", "tidewater:salt_flats"],
-    },
-    Food {
-        game: "lumen",
-        item: "lumen:glowberry",
-        biomes: &["lumen:garden", "lumen:frost_court"],
-    },
-];
+const FOOD: Food = Food {
+    game: "terra",
+    item: "terra:melon",
+    biomes: &["terra:temperate"],
+};
 
 #[test]
-fn every_demo_game_declares_a_food_of_its_own_that_grows_on_its_biomes() {
-    for food in &FOODS {
-        let (_install, loaded) = loaded(food.game, 0.5);
-        let item = loaded
-            .items
-            .iter()
-            .find(|i| i.name == food.item)
-            .unwrap_or_else(|| panic!("{} declares {}", food.game, food.item));
-        let value = item.food.expect("a food value");
-        assert!((4.0..=8.0).contains(&value), "{}: {value}", food.item);
-        let id = material(&loaded, food.item);
-        assert_eq!(
-            item.material,
-            Some(id),
-            "{} places its own Material",
-            food.item
-        );
-        assert!(loaded.tables.materials.solid(Voxel::cube(id)));
-        assert!(loaded.appearance.iter().any(|(m, _)| *m == id));
-        assert!(loaded.textures.iter().any(|(m, _)| *m == id));
+fn terra_declares_a_food_of_its_own_that_grows_on_its_biomes() {
+    let food = &FOOD;
+    let (_install, loaded) = loaded(food.game, 0.5);
+    let item = loaded
+        .items
+        .iter()
+        .find(|i| i.name == food.item)
+        .unwrap_or_else(|| panic!("{} declares {}", food.game, food.item));
+    let value = item.food.expect("a food value");
+    assert!((4.0..=8.0).contains(&value), "{}: {value}", food.item);
+    let id = material(&loaded, food.item);
+    assert_eq!(
+        item.material,
+        Some(id),
+        "{} places its own Material",
+        food.item
+    );
+    assert!(loaded.tables.materials.solid(Voxel::cube(id)));
+    assert!(loaded.appearance.iter().any(|(m, _)| *m == id));
+    assert!(loaded.textures.iter().any(|(m, _)| *m == id));
 
-        let world = loaded.world.unwrap();
-        let growing: Vec<&str> = world
-            .biomes
-            .as_slice()
-            .iter()
-            .filter(|b| {
-                b.surface_features
-                    .as_slice()
-                    .iter()
-                    .any(|f| f.material == id && (12.0..=24.0).contains(&f.spacing_m))
-            })
-            .map(|b| b.name.as_str())
-            .collect();
-        assert_eq!(growing, food.biomes, "{}", food.item);
-    }
+    let world = loaded.world.unwrap();
+    let growing: Vec<&str> = world
+        .biomes
+        .as_slice()
+        .iter()
+        .filter(|b| {
+            b.surface_features
+                .as_slice()
+                .iter()
+                .any(|f| f.material == id && (12.0..=24.0).contains(&f.spacing_m))
+        })
+        .map(|b| b.name.as_str())
+        .collect();
+    assert_eq!(growing, food.biomes, "{}", food.item);
 }
 
 /// A new World of `loaded` at `seed`, with the Settlements a new Player is spawned in.
@@ -217,7 +194,7 @@ pub(super) fn search_around_m(
 pub(super) const SHORT_WALK_M: f32 = 96.0;
 
 #[test]
-fn a_new_world_of_every_demo_game_has_its_food_within_a_short_walk_of_the_spawn() {
+fn a_new_terra_world_has_its_food_within_a_short_walk_of_the_spawn() {
     let seeds = [
         crate::world::WorldSettings::default().seed,
         1,
@@ -226,19 +203,18 @@ fn a_new_world_of_every_demo_game_has_its_food_within_a_short_walk_of_the_spawn(
         7,
         2024,
     ];
-    crate::server::in_parallel(&FOODS, |food| {
-        let (_install, loaded) = loaded(food.game, 0.5);
-        let (world, tables) = (loaded.world.unwrap(), &loaded.tables);
-        let id = material(&loaded, food.item);
-        crate::server::in_parallel(&seeds, |&seed| {
-            let generator = new_world_of(world, tables, seed, 0.5);
-            assert!(
-                any_around_m(&generator, &[id], SHORT_WALK_M, around_spawn(&generator)),
-                "{} seed {seed}: no {} within {SHORT_WALK_M} m",
-                food.game,
-                food.item
-            );
-        });
+    let food = &FOOD;
+    let (_install, loaded) = loaded(food.game, 0.5);
+    let (world, tables) = (loaded.world.unwrap(), &loaded.tables);
+    let id = material(&loaded, food.item);
+    crate::server::in_parallel(&seeds, |&seed| {
+        let generator = new_world_of(world, tables, seed, 0.5);
+        assert!(
+            any_around_m(&generator, &[id], SHORT_WALK_M, around_spawn(&generator)),
+            "{} seed {seed}: no {} within {SHORT_WALK_M} m",
+            food.game,
+            food.item
+        );
     });
 }
 
@@ -398,84 +374,82 @@ fn hunger(app: &mut App) -> f32 {
 }
 
 #[test]
-fn every_demo_games_food_places_breaks_picks_up_and_eats() {
+fn terras_food_places_breaks_picks_up_and_eats() {
     let cell = [5, 8, 5];
-    for food in &FOODS {
-        let (_install, mut app, loaded) = kitchen(food.game);
-        let voxel = Voxel::cube(material(&loaded, food.item));
+    let food = &FOOD;
+    let (_install, mut app, loaded) = kitchen(food.game);
+    let voxel = Voxel::cube(material(&loaded, food.item));
 
-        give(&mut app, food.item);
-        send(&mut app, place_held(SHAPE_FULL_CUBE, Orientation::IDENTITY));
-        tick(&mut app);
-        assert_eq!(voxel_at(&app, cell), voxel, "{} places", food.item);
-        assert_eq!(held(&mut app, food.item), 0);
+    give(&mut app, food.item);
+    send(&mut app, place_held(SHAPE_FULL_CUBE, Orientation::IDENTITY));
+    tick(&mut app);
+    assert_eq!(voxel_at(&app, cell), voxel, "{} places", food.item);
+    assert_eq!(held(&mut app, food.item), 0);
 
-        send(&mut app, down(EditAction::Remove));
-        tick(&mut app);
-        assert!(voxel_at(&app, cell).is_air(), "{} breaks", food.item);
-        assert_eq!(app.world().resource::<EntityStore>().len(), 1);
+    send(&mut app, down(EditAction::Remove));
+    tick(&mut app);
+    assert!(voxel_at(&app, cell).is_air(), "{} breaks", food.item);
+    assert_eq!(app.world().resource::<EntityStore>().len(), 1);
 
-        for _ in 0..40 {
-            app.world_mut().run_system_once(step_entities).unwrap();
-        }
-        set_eye(&mut app, Vec3::new(5.5, 9.0, 5.5));
-        app.world_mut().run_system_once(pick_up).unwrap();
-        assert_eq!(held(&mut app, food.item), 1, "{} is picked up", food.item);
-
-        let mut vitals = app.world_mut().query::<&mut Vitals>();
-        vitals.single_mut(app.world_mut()).unwrap().hunger = 10.0;
-        app.world_mut().write_message(EatIntent);
-        // A meal takes a second, the first bite spending the Item.
-        for _ in 0..90 {
-            app.world_mut().run_system_once(eat).unwrap();
-            app.world_mut()
-                .resource_mut::<Time>()
-                .advance_by(std::time::Duration::from_millis(16));
-        }
-        let value = loaded
-            .items
-            .iter()
-            .find(|i| i.name == food.item)
-            .unwrap()
-            .food;
-        // Three bites each refill a third, so the sum may be a rounding short.
-        let eaten = hunger(&mut app) - 10.0;
-        assert!(
-            value.is_some_and(|value| (eaten - value).abs() < 1e-4),
-            "{} is eaten: {eaten} of {value:?}",
-            food.item
-        );
-        assert_eq!(held(&mut app, food.item), 0);
+    for _ in 0..40 {
+        app.world_mut().run_system_once(step_entities).unwrap();
     }
+    set_eye(&mut app, Vec3::new(5.5, 9.0, 5.5));
+    app.world_mut().run_system_once(pick_up).unwrap();
+    assert_eq!(held(&mut app, food.item), 1, "{} is picked up", food.item);
+
+    let mut vitals = app.world_mut().query::<&mut Vitals>();
+    vitals.single_mut(app.world_mut()).unwrap().hunger = 10.0;
+    app.world_mut().write_message(EatIntent);
+    // A meal takes a second, the first bite spending the Item.
+    for _ in 0..90 {
+        app.world_mut().run_system_once(eat).unwrap();
+        app.world_mut()
+            .resource_mut::<Time>()
+            .advance_by(std::time::Duration::from_millis(16));
+    }
+    let value = loaded
+        .items
+        .iter()
+        .find(|i| i.name == food.item)
+        .unwrap()
+        .food;
+    // Three bites each refill a third, so the sum may be a rounding short.
+    let eaten = hunger(&mut app) - 10.0;
+    assert!(
+        value.is_some_and(|value| (eaten - value).abs() < 1e-4),
+        "{} is eaten: {eaten} of {value:?}",
+        food.item
+    );
+    assert_eq!(held(&mut app, food.item), 0);
 }
 
-/// Creative shares Survival's economy: the melon, like each Game's food, is spent by placing and
-/// drops on the ground when broken, to be picked up.
+/// Creative shares Survival's economy: the melon is spent by placing and drops on the ground when
+/// broken, to be picked up.
 #[test]
-fn in_creative_every_demo_games_food_is_spent_by_placing_and_drops_when_broken() {
+fn in_creative_terras_food_is_spent_by_placing_and_drops_when_broken() {
     let cell = [5, 8, 5];
-    for food in &FOODS {
-        let (_install, mut app, loaded) = kitchen_in(food.game, false);
-        let voxel = Voxel::cube(material(&loaded, food.item));
+    let food = &FOOD;
+    let (_install, mut app, loaded) = kitchen_in(food.game, false);
+    let voxel = Voxel::cube(material(&loaded, food.item));
 
-        give(&mut app, food.item);
-        send(&mut app, place_held(SHAPE_FULL_CUBE, Orientation::IDENTITY));
-        tick(&mut app);
-        assert_eq!(voxel_at(&app, cell), voxel, "{} places", food.item);
-        assert_eq!(held(&mut app, food.item), 0, "{} is spent", food.item);
+    give(&mut app, food.item);
+    send(&mut app, place_held(SHAPE_FULL_CUBE, Orientation::IDENTITY));
+    tick(&mut app);
+    assert_eq!(voxel_at(&app, cell), voxel, "{} places", food.item);
+    assert_eq!(held(&mut app, food.item), 0, "{} is spent", food.item);
 
-        send(&mut app, down(EditAction::Remove));
-        tick(&mut app);
-        assert!(voxel_at(&app, cell).is_air(), "{} breaks", food.item);
-        assert_eq!(app.world().resource::<EntityStore>().len(), 1);
+    send(&mut app, down(EditAction::Remove));
+    tick(&mut app);
+    assert!(voxel_at(&app, cell).is_air(), "{} breaks", food.item);
+    assert_eq!(app.world().resource::<EntityStore>().len(), 1);
 
-        for _ in 0..40 {
-            app.world_mut().run_system_once(step_entities).unwrap();
-        }
-        set_eye(&mut app, Vec3::new(5.5, 9.0, 5.5));
-        app.world_mut().run_system_once(pick_up).unwrap();
-        assert_eq!(held(&mut app, food.item), 1, "{} is picked up", food.item);
+    for _ in 0..40 {
+        app.world_mut().run_system_once(step_entities).unwrap();
     }
+    set_eye(&mut app, Vec3::new(5.5, 9.0, 5.5));
+    app.world_mut().run_system_once(pick_up).unwrap();
+    assert_eq!(held(&mut app, food.item), 1, "{} is picked up", food.item);
 }
 
 /// FNV-1a, enough to tell whether any texture byte moved.
@@ -488,75 +462,62 @@ fn fingerprint(textures: &[(String, Vec<u8>)]) -> u64 {
         })
 }
 
-/// Pins every texture the demo Games make, so code they share cannot change what they draw.
+/// Pins every texture Terra makes, so code the Games share cannot change what it draws.
 #[test]
-fn the_demo_games_textures_are_unchanged() {
-    let pinned = [
-        ("terra", 0x6fe5049b5af5e13d),
-        ("meadow", 0xa7da360e5c42e803),
-        ("ember", 0x324f6f9f16d933f5),
-        ("tidewater", 0x05a5e08b5a1e9e58),
-        ("lumen", 0x9de6015676a2512f),
-    ];
-    for (game, expected) in pinned {
-        let (_install, loaded) = loaded(game, 1.0);
-        let mut textures: Vec<_> = loaded
-            .textures
-            .iter()
-            .map(|(id, pixels)| {
-                let name = loaded
-                    .registry
-                    .names(Kind::Material)
-                    .find(|&(at, _)| at == usize::from(*id))
-                    .map(|(_, name)| name.to_owned())
-                    .unwrap();
-                (name, pixels.clone())
-            })
-            .collect();
-        textures.sort();
-        assert_eq!(fingerprint(&textures), expected, "{game}");
-    }
+fn terras_textures_are_unchanged() {
+    let (game, expected) = ("terra", 0x6fe5049b5af5e13d);
+    let (_install, loaded) = loaded(game, 1.0);
+    let mut textures: Vec<_> = loaded
+        .textures
+        .iter()
+        .map(|(id, pixels)| {
+            let name = loaded
+                .registry
+                .names(Kind::Material)
+                .find(|&(at, _)| at == usize::from(*id))
+                .map(|(_, name)| name.to_owned())
+                .unwrap();
+            (name, pixels.clone())
+        })
+        .collect();
+    textures.sort();
+    assert_eq!(fingerprint(&textures), expected, "{game}");
 }
 
 /// A new Player enters a village, so its food, in a patch by it, and the oaks for a first
 /// Workbench, Chest and Door are a short walk from there.
 #[test]
 fn a_new_world_has_food_and_wood_within_a_short_walk_of_the_spawn() {
-    crate::server::in_parallel(&FOODS, |food| {
-        let (_install, loaded) = loaded(food.game, 1.0);
-        let id = material(&loaded, food.item);
-        let trunk = material(&loaded, "flora:oak_log");
-        let per_trunk = loaded.tables.plants.yields(trunk)[0].count.min;
-        for seed in [crate::world::WorldSettings::default().seed, 1, 3, 7] {
-            let generator = new_world(&loaded, seed, 1.0);
-            let around = around_spawn(&generator);
-            let needed = if food.game == "terra" {
-                WOOD_FOR_A_HOME
+    let food = &FOOD;
+    let (_install, loaded) = loaded(food.game, 1.0);
+    let id = material(&loaded, food.item);
+    let trunk = material(&loaded, "flora:oak_log");
+    let per_trunk = loaded.tables.plants.yields(trunk)[0].count.min;
+    for seed in [crate::world::WorldSettings::default().seed, 1, 3, 7] {
+        let generator = new_world(&loaded, seed, 1.0);
+        let around = around_spawn(&generator);
+        let needed = WOOD_FOR_A_HOME;
+        let (mut fed, mut wood) = (false, 0);
+        search_around_m(&generator, &[id, trunk], SHORT_WALK_M, around, |i, _| {
+            if i == 0 {
+                fed = true;
             } else {
-                0
-            };
-            let (mut fed, mut wood) = (false, 0);
-            search_around_m(&generator, &[id, trunk], SHORT_WALK_M, around, |i, _| {
-                if i == 0 {
-                    fed = true;
-                } else {
-                    wood += per_trunk;
-                }
-                if fed && wood >= needed {
-                    ControlFlow::Break(())
-                } else {
-                    ControlFlow::Continue(())
-                }
-            });
-            assert!(
-                fed,
-                "{} seed {seed}: no {} within {SHORT_WALK_M} m of the spawn",
-                food.game, food.item
-            );
-            assert!(
-                wood >= needed,
-                "seed {seed}: {wood} Wood within {SHORT_WALK_M} m of the spawn"
-            );
-        }
-    });
+                wood += per_trunk;
+            }
+            if fed && wood >= needed {
+                ControlFlow::Break(())
+            } else {
+                ControlFlow::Continue(())
+            }
+        });
+        assert!(
+            fed,
+            "{} seed {seed}: no {} within {SHORT_WALK_M} m of the spawn",
+            food.game, food.item
+        );
+        assert!(
+            wood >= needed,
+            "seed {seed}: {wood} Wood within {SHORT_WALK_M} m of the spawn"
+        );
+    }
 }

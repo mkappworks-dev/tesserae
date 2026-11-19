@@ -142,9 +142,9 @@ jobs:
         with:
           command: check advisories licenses bans sources
 
-  # Four shards, each building its own tests and running a quarter of them: the suite is about
-  # 10 000 s of work, 42 min on one 4-core runner. `slice` deals the tests out in turn, so the
-  # per-Game cases of one slow check land on different shards.
+  # Four shards, each building its own tests and running a quarter of them, so the job lasts about
+  # the build plus its longest test. `slice` deals the tests out in turn, so the cases of one
+  # `each_case!` check land on different shards.
   test:
     name: Test (${{ matrix.shard }}/4)
     runs-on: ubuntu-latest

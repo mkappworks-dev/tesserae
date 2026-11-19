@@ -1073,8 +1073,7 @@ fn measure_game_build_drain() {
     let mut instance = loaded.mods.remove(0);
     let line = instance.line();
     let mut batches = Vec::new();
-    // As `demo_games` runs it: the build is sent within two seconds, before
-    // the first lantern.
+    // The build is sent within two seconds, before the first lantern.
     for tick in 0..40 {
         let context = TickContext {
             tick,
