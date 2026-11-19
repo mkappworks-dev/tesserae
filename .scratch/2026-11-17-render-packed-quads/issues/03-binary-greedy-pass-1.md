@@ -31,3 +31,7 @@ per-Voxel question. `pass1_reference` is the old pass, test-only;
 on terrain under three lights, buried terrain, solid and checkerboard Chunks
 and eight seeded Chunks, opaque, translucent and wet, alone and among others.
 Breaking the merge on purpose fails it. The gate is ticket 06.
+
+2026-11-19: gated in ticket 06 against 02: level-0 mesh worker time -25-30%,
+every meshing bench faster (`greedy_mesh/terrain` -76%), frame time no worse.
+Passes; left open with 02, which it builds on.

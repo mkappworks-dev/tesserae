@@ -36,3 +36,8 @@ beside the new one on terrain, every Shape in every Orientation soaked, flames,
 seam walls and seeded random Chunks: the new records expand to exactly what the
 old 16-byte packing drew. Not yet checked: the WGSL compiles only when the game
 starts, so the shader, the captures and the gate wait for tickets 01 and 06.
+
+2026-11-19: gated in ticket 06 against the base: held mesh memory -84%, but
+frame p50 +8-13% and p95 +13-26%, from the GPU's depth prepass and shadow
+passes. Fails the gate; the code stays while the regression is looked at.
+`625f7a83` fixes the game-start panic the uncompiled pipeline had.
