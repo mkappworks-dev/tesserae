@@ -200,6 +200,25 @@ impl Quad {
         }
     }
 
+    /// The least and greatest corner on each axis, without expanding a face:
+    /// the Client bounds every quad it receives.
+    pub fn bounds(&self) -> ([f32; 3], [f32; 3]) {
+        let QuadKind::Face(face) = self.kind() else {
+            let corners = self.corners().map(|c| c.position);
+            let fold = |f: fn(f32, f32) -> f32, from: f32| {
+                std::array::from_fn(|a| corners.iter().map(|c| c[a]).fold(from, f))
+            };
+            return (fold(f32::min, f32::MAX), fold(f32::max, f32::MIN));
+        };
+        let (u, v) = ((face / 2 + 1) % 3, (face / 2 + 2) % 3);
+        let plane = self.plane().expect("a face") as f32 * UNIT;
+        let ([u0, u1], [v0, v1]) = self.spans().expect("a face");
+        let (mut least, mut most) = ([plane; 3], [plane; 3]);
+        (least[u], most[u]) = (f32::from(u0) * UNIT, f32::from(u1) * UNIT);
+        (least[v], most[v]) = (f32::from(v0) * UNIT, f32::from(v1) * UNIT);
+        (least, most)
+    }
+
     fn face_corners(&self, face: usize) -> [Corner; 4] {
         let positive = face % 2 == 1;
         let (d, u, v) = (face / 2, (face / 2 + 1) % 3, (face / 2 + 2) % 3);
@@ -403,6 +422,44 @@ mod tests {
                 assert_eq!(q.plane(), None);
                 assert_eq!(q.geometry[1] >> PAINT_SHIFT, 0);
             }
+        }
+    }
+
+    #[test]
+    fn the_bounds_are_exactly_the_corners_least_and_greatest() {
+        let mut quads = Vec::new();
+        for face in 0..6 {
+            for plane in [-PLANE_BIAS, 0, 7, 512 + PLANE_BIAS] {
+                quads.push(Quad::face(face, plane, [0, 512], [511, 512], 1, LIT));
+                quads.push(Quad::face(face, plane, [20, 36], [3, 8], 1, LIT));
+            }
+        }
+        for reversed in [false, true] {
+            for diagonal in 0..2 {
+                quads.push(Quad::cross([31, 0, 17], diagonal, reversed, 2, LIT));
+            }
+            for axis in 0..3 {
+                for offset in [0, 9, 16] {
+                    let spans = [[3, 16], [0, 7]];
+                    quads.push(Quad::plane_form(
+                        [5, 31, 0],
+                        axis,
+                        reversed,
+                        offset,
+                        spans,
+                        2,
+                        LIT,
+                    ));
+                }
+            }
+        }
+        for q in quads {
+            let corners = q.corners().map(|c| c.position);
+            let least =
+                std::array::from_fn(|a| corners.iter().map(|c| c[a]).fold(f32::MAX, f32::min));
+            let most =
+                std::array::from_fn(|a| corners.iter().map(|c| c[a]).fold(f32::MIN, f32::max));
+            assert_eq!(q.bounds(), (least, most), "{:?}", q.kind());
         }
     }
 

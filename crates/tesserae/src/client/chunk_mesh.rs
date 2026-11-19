@@ -58,13 +58,17 @@ impl ChunkQuads {
         }
         let mut slots: HashMap<u32, u32> = HashMap::default();
         let mut table = Vec::new();
-        for quad in &layer.quads {
-            let word = paint(quad.material, quad.light);
-            slots.entry(word).or_insert_with(|| {
-                table.push(word);
-                table.len() as u32 - 1
-            });
-        }
+        let slot_of: Vec<u32> = layer
+            .quads
+            .iter()
+            .map(|quad| {
+                let word = paint(quad.material, quad.light);
+                *slots.entry(word).or_insert_with(|| {
+                    table.push(word);
+                    table.len() as u32 - 1
+                })
+            })
+            .collect();
         let stride = if table.len() > PAINT_SLOTS {
             WIDE
         } else {
@@ -78,22 +82,21 @@ impl ChunkQuads {
             words[1] = table.len() as u32;
             words.extend_from_slice(&table);
         }
-        for quad in &layer.quads {
+        for (quad, &slot) in layer.quads.iter().zip(&slot_of) {
             let [lo, hi] = quad.geometry;
-            let word = paint(quad.material, quad.light);
             if stride == NARROW {
-                words.extend([lo, hi | slots[&word] << PAINT_SHIFT]);
+                words.extend([lo, hi | slot << PAINT_SHIFT]);
             } else {
-                words.extend([lo, hi, word]);
+                words.extend([lo, hi, table[slot as usize]]);
             }
         }
-        let (min, max) = layer.quads.iter().flat_map(Quad::corners).fold(
-            (Vec3::MAX, Vec3::MIN),
-            |(lo, hi), c| {
-                let p = Vec3::from(c.position);
-                (lo.min(p), hi.max(p))
-            },
-        );
+        let (min, max) = layer
+            .quads
+            .iter()
+            .map(Quad::bounds)
+            .fold((Vec3::MAX, Vec3::MIN), |(lo, hi), (least, most)| {
+                (lo.min(Vec3::from(least)), hi.max(Vec3::from(most)))
+            });
         Some(ChunkQuads {
             words,
             aabb: Aabb::from_min_max(min, max),
