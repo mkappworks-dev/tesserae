@@ -843,7 +843,7 @@ fn level_the_water(
 ) {
     let surface_m = (water.level_m / water.step_m).ceil() * water.step_m;
     let at_voxels = (surface_m - floor_m) / voxel_m;
-    let at = (at_voxels * SUBDIV as f32) as i32;
+    let at = (at_voxels * SUBDIV as f32).floor() as i32;
     let wet = overlay.may_contain_fluid();
     let mut split: Vec<usize> = Vec::new();
     for (q, quad) in layer.quads.iter_mut().enumerate() {
@@ -3538,6 +3538,35 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn a_lake_surface_below_the_chunk_lands_on_the_sixteenth_below_it() {
+        let material = tesserae_core::testgen::fixtures().water;
+        let mut layer = MeshLayer {
+            quads: vec![Quad::face(
+                POS_Y,
+                0,
+                [0, 16],
+                [0, 16],
+                u32::from(material),
+                Light::DARK,
+            )],
+        };
+        level_the_water(
+            &mut layer,
+            UnderWater {
+                level_m: -0.15,
+                material,
+                dimming: 0,
+                step_m: 0.1,
+            },
+            0.0,
+            1.0,
+            &ChunkOverlay::none(),
+        );
+        // The surface is at -0.1 m, 1.6 sixteenths below the floor.
+        assert_eq!(layer.quads[0].plane(), Some(-2));
     }
 
     #[test]
