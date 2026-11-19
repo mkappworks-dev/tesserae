@@ -22,7 +22,6 @@ fn biome(name: &str, temperature: f32, humidity: f32) -> Biome {
 
 fn world(biomes: &[Biome], selectors: &[BiomeSelectors]) -> Worldgen {
     let params = WorldgenParams {
-        generator: 3,
         sea_level_m: 24.0,
         relief_m: 24.0,
         landforms: LandformParams::default(),
@@ -31,6 +30,7 @@ fn world(biomes: &[Biome], selectors: &[BiomeSelectors]) -> Worldgen {
             .unwrap()
             .with_selectors(selectors)
             .unwrap(),
+        water: None,
         ..tesserae_core::testgen::world_params()
     };
     Worldgen::new(SEED, 1.0, params)
@@ -41,31 +41,19 @@ fn grid() -> impl Iterator<Item = (f32, f32)> {
 }
 
 #[test]
-fn the_air_is_colder_higher_up_in_version_3_and_not_before() {
-    let v3 = world(&[], &[]);
-    let v2 = Worldgen::new(
-        SEED,
-        1.0,
-        WorldgenParams {
-            generator: 2,
-            ..tesserae_core::testgen::world_params()
-        },
-    );
+fn the_air_is_colder_higher_up() {
+    let g = world(&[], &[]);
     for (x, z) in grid().take(200) {
         let (low, high) = (
-            v3.climate_at_height(x, 24.0, z),
-            v3.climate_at_height(x, 224.0, z),
+            g.climate_at_height(x, 24.0, z),
+            g.climate_at_height(x, 224.0, z),
         );
         assert!(high.temperature <= low.temperature, "{x},{z}");
-        assert_eq!(
-            v2.climate_at_height(x, 24.0, z),
-            v2.climate_at_height(x, 224.0, z)
-        );
     }
     let colder = grid()
         .filter(|&(x, z)| {
-            v3.climate_at_height(x, 224.0, z).temperature
-                < v3.climate_at_height(x, 24.0, z).temperature - 0.2
+            g.climate_at_height(x, 224.0, z).temperature
+                < g.climate_at_height(x, 24.0, z).temperature - 0.2
         })
         .count();
     assert!(colder > 1000, "{colder} columns are much colder up high");
@@ -76,7 +64,7 @@ fn the_air_is_wetter_by_the_sea_than_far_inland() {
     let g = world(&[], &[]);
     let (mut coastal, mut inland) = (vec![], vec![]);
     for (x, z) in grid() {
-        let f = g.landform_fields(x, z).unwrap();
+        let f = g.landform_fields(x, z);
         let h = g.climate_at_height(x, 30.0, z).humidity - g.climate_at(x, z).humidity;
         if f.continent < 0.5 {
             coastal.push(h);

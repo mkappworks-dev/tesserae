@@ -1620,12 +1620,33 @@ pub(in crate::server) mod tests {
         pub(in crate::server) anchor: Entity,
     }
 
+    /// The default seed's origin is far out at sea; this seed's is dry land with rivers.
+    pub(in crate::server) fn land() -> WorldSettings {
+        WorldSettings {
+            seed: 42,
+            ..WorldSettings::default()
+        }
+    }
+
     impl Harness {
         pub(in crate::server) fn new(settings: StreamingSettings, budget: StreamingBudget) -> Self {
             Self::with_world(
                 settings,
                 budget,
                 WorldSettings::default(),
+                tesserae_core::testgen::world_params(),
+            )
+        }
+
+        /// A Harness whose origin is on [`land`].
+        pub(in crate::server) fn on_land(
+            settings: StreamingSettings,
+            budget: StreamingBudget,
+        ) -> Self {
+            Self::with_world(
+                settings,
+                budget,
+                land(),
                 tesserae_core::testgen::world_params(),
             )
         }
@@ -1938,7 +1959,7 @@ pub(in crate::server) mod tests {
     #[test]
     fn every_mesh_carries_the_sight_lines_of_its_chunk_as_it_stands() {
         use tesserae_core::visibility::connectivity;
-        let mut h = Harness::new(small(), UNLIMITED);
+        let mut h = Harness::on_land(small(), UNLIMITED);
         let (ready, _) = h.settle();
         let tables = crate::server::fixture_tables();
         let now = |h: &Harness, c| connectivity(h.store().get(c).unwrap(), &tables.materials);
@@ -2255,7 +2276,7 @@ pub(in crate::server) mod tests {
     /// pointless if the Client is handed zeroes.
     #[test]
     fn a_surface_chunk_is_published_with_light_on_it() {
-        let mut h = Harness::new(small(), UNLIMITED);
+        let mut h = Harness::on_land(small(), UNLIMITED);
         let mut lit_faces = 0;
         for message in h.settle().0 {
             lit_faces += message
@@ -2467,7 +2488,7 @@ pub(in crate::server) mod tests {
     /// dropping it for that would mean never delivering at all.
     #[test]
     fn sustained_edits_to_one_chunk_still_deliver_meshes() {
-        let mut h = Harness::new(small(), UNLIMITED);
+        let mut h = Harness::on_land(small(), UNLIMITED);
         h.settle();
         h.jobs_mut().mesh.scramble = true;
         let ground = h

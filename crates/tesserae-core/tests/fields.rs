@@ -1,15 +1,23 @@
 //! Fields: ground cover that gathers a species per region, and planted plots of one crop with paths
 //! and a ditch between them, both whole across Chunk borders at every Voxel size.
 
+#![allow(
+    clippy::disallowed_methods,
+    reason = "a test's own maths is not generation"
+)]
+
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use tesserae_core::save::{Generation, Mapping};
+use tesserae_core::terrain::LandformParams;
 use tesserae_core::testgen::fixtures;
 use tesserae_core::worldgen::WaterParams;
 use tesserae_core::{
     Biome, BiomeName, BiomeTable, CHUNK_SIZE, ClimateParams, CropField, Field, FieldCrop,
     MaterialId, SurfaceFeature, SurfaceFeatures, Voxel, Worldgen, WorldgenParams,
 };
+
+mod common;
 
 const SEED: u64 = 0x7e55_e2ae_0000_0001;
 const SIZES: [f32; 3] = [1.0, 0.5, 0.25];
@@ -35,7 +43,7 @@ fn biome(features: SurfaceFeatures) -> Biome {
 
 /// Ground that never rises a metre, so every plot is level at every Voxel size.
 fn level(features: SurfaceFeatures, water: Option<WaterParams>) -> WorldgenParams {
-    WorldgenParams {
+    common::lowland(WorldgenParams {
         caves: None,
         smoothing: None,
         relief_m: 1.0,
@@ -46,7 +54,7 @@ fn level(features: SurfaceFeatures, water: Option<WaterParams>) -> WorldgenParam
         },
         biomes: BiomeTable::new(&[biome(features)]).unwrap(),
         ..tesserae_core::testgen::world_params()
-    }
+    })
 }
 
 fn grouped(material: MaterialId, group: u8, strays: f32) -> SurfaceFeature {
@@ -489,25 +497,46 @@ fn a_field_generates_the_same_cells_whichever_chunks_are_made_first() {
 
 #[test]
 fn a_field_stands_on_no_water_and_near_water_means_near_the_lake() {
-    let lake = Some(WaterParams {
-        level_m: 24.3,
-        material: fixtures().water,
-    });
+    // The water is the sea, so the level ground's floor is let down a metre under it, and
+    // small continents give the window a shore. On the default continent the whole window is
+    // ground 0.6 m under the sea, which a 1 m top Voxel fills to the level and a 0.5 m one leaves
+    // under water, so only 1 m stood fields there.
+    let lake = |features| {
+        let land = common::sea_floor(level(
+            features,
+            Some(WaterParams {
+                level_m: 0.0,
+                material: fixtures().water,
+            }),
+        ));
+        WorldgenParams {
+            landforms: LandformParams {
+                continent_size_m: 800.0,
+                ..land.landforms
+            },
+            ..land
+        }
+    };
     let reach_m = 16.0;
     for size in SIZES {
-        let anywhere = changed(SEED, size, level(fielded(None, &[]), lake), 120.0);
-        let near = changed(SEED, size, level(fielded(Some(reach_m), &[]), lake), 120.0);
-        let world = Worldgen::new(SEED, size, level(fielded(None, &[]), lake));
+        let anywhere = changed(SEED, size, lake(fielded(None, &[])), 120.0);
+        let near = changed(SEED, size, lake(fielded(Some(reach_m), &[])), 120.0);
+        let world = Worldgen::new(SEED, size, lake(fielded(None, &[])));
+        let wet = |x_m: f32, z_m: f32| world.water_surface_m(x_m, z_m).is_some();
         for (at, voxel) in &anywhere {
             if voxel.material() == PATH || CROP_A.contains(&voxel.material()) {
+                let [x, y, z] = at.map(|c| c as f32 * size);
                 assert!(
-                    (at[1] + 1) as f32 * size >= 24.3,
+                    world
+                        .water_surface_m(x, z)
+                        .is_none_or(|level_m| y + size >= level_m),
                     "{size} m: a field cell under the lake at {at:?}"
                 );
             }
         }
         let fields_near = fields_in(&near, window(size, 120.0));
         let fields_anywhere = fields_in(&anywhere, window(size, 120.0));
+        assert!(!fields_near.is_empty(), "{size} m: no field near water");
         assert!(
             fields_near.len() <= fields_anywhere.len(),
             "{size} m: near-water only narrows"
@@ -520,8 +549,7 @@ fn a_field_stands_on_no_water_and_near_water_means_near_the_lake() {
                 let reach = reach_m + half;
                 (1..=8).any(|k| {
                     let r = reach * k as f32 / 8.0;
-                    world.surface_height_m(centre(0) + r * angle.cos(), centre(1) + r * angle.sin())
-                        < 24.3
+                    wet(centre(0) + r * angle.cos(), centre(1) + r * angle.sin())
                 })
             });
             assert!(wet, "{size} m: a field with no water within {reach_m} m");
@@ -536,6 +564,7 @@ fn a_tree_inside_the_ground_a_field_would_take_skips_that_place_whole() {
             shape: 0,
             kind: tesserae_core::SurfacePlantKind::Tree(tesserae_core::SurfaceTree {
                 branching: None,
+                crowding_m: None,
                 trunk: TRUNK,
                 canopy: TRUNK + 1,
                 trunk_height_m: (3.0, 4.0),
@@ -613,7 +642,7 @@ fn a_snapshot_freezes_the_fields_and_an_older_one_has_none() {
     let json = serde_json::to_string(&saved).unwrap();
     let restored = serde_json::from_str::<Generation>(&json)
         .unwrap()
-        .restore(&mapping(), 2)
+        .restore(&mapping(), 3)
         .unwrap();
     assert_eq!(restored.biomes, params.biomes);
     let value: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -636,7 +665,7 @@ fn a_snapshot_freezes_the_fields_and_an_older_one_has_none() {
     assert_eq!(
         serde_json::from_str::<Generation>(&json)
             .unwrap()
-            .restore(&mapping(), 2)
+            .restore(&mapping(), 3)
             .unwrap()
             .biomes,
         plain.biomes

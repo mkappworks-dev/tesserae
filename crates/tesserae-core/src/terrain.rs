@@ -1,4 +1,4 @@
-//! Generator version 3's terrain: a vertical band around Sea level inside which every field lives.
+//! The terrain: a vertical band around Sea level inside which every field lives.
 //! See `docs/adr/0030-generator-version-3-is-a-layered-field-stack-in-a-declared-band.md`.
 
 use std::sync::Arc;
@@ -6,11 +6,8 @@ use std::sync::Arc;
 use crate::climate::{BiomeTable, ClimateField, MAX_BIOMES, Site};
 use crate::drainage::Drainage;
 
-/// The first Generator version whose terrain is the layered field stack.
-pub const LANDFORMS_SINCE: u32 = 3;
-
 /// What a Game tunes of version 3's terrain, in metres. Plain `Copy` data like the rest of
-/// [`crate::WorldgenParams`]; read only by version 3.
+/// [`crate::WorldgenParams`].
 #[derive(Clone, Copy, PartialEq, Debug, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct LandformParams {
@@ -508,7 +505,8 @@ impl Base {
                     (iz as f32 + 0.2 + 0.6 * h[2]) * OUTCROP_CELL_M,
                 ];
                 let radius_m = (3.0 + 7.0 * h[1]) * (0.8 + 0.4 * fray);
-                let r = ((wx - centre[0]).powi(2) + (wz - centre[1]).powi(2)).sqrt() / radius_m;
+                let (dx, dz) = (wx - centre[0], wz - centre[1]);
+                let r = (dx * dx + dz * dz).sqrt() / radius_m;
                 if r >= 1.0 {
                     continue;
                 }
@@ -548,8 +546,8 @@ impl Base {
                     (iz as f32 + 0.25 + 0.5 * h[2]) * ISLAND_CELL_M,
                 );
                 let radius_m = ISLAND_RADIUS_M[0] + (ISLAND_RADIUS_M[1] - ISLAND_RADIUS_M[0]) * k;
-                let r = ((x_m - px).powi(2) + (z_m - pz).powi(2)).sqrt()
-                    / (radius_m * (0.7 + 0.6 * fray));
+                let (dx, dz) = (x_m - px, z_m - pz);
+                let r = (dx * dx + dz * dz).sqrt() / (radius_m * (0.7 + 0.6 * fray));
                 if r >= 1.3 {
                     continue;
                 }
@@ -581,7 +579,8 @@ impl Base {
                     (ix as f32 + 0.2 + 0.6 * h[1]) * VOLCANO_CELL_M,
                     (iz as f32 + 0.2 + 0.6 * h[2]) * VOLCANO_CELL_M,
                 );
-                let r = ((x_m - px).powi(2) + (z_m - pz).powi(2)).sqrt();
+                let (dx, dz) = (x_m - px, z_m - pz);
+                let r = (dx * dx + dz * dz).sqrt();
                 if r >= VOLCANO_RADIUS_M {
                     continue;
                 }

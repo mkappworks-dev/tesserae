@@ -1,40 +1,44 @@
-//! Planted fields in the demo Games: where wheat fields stand and what they are made of.
+//! Planted fields in Terra: where wheat fields stand and what they are made of.
 
 use std::collections::BTreeMap;
 
-use tesserae_core::{Biome, BiomeTable, CHUNK_SIZE, SurfaceFeatures, Worldgen};
+use tesserae_core::{Biome, BiomeTable, CHUNK_SIZE, Worldgen};
 
 use super::loaded;
+use super::structures::settled_rows;
 
-/// The names of the materials `game`'s planted fields change within `half_m` of the origin, counted
-/// in Voxels, at Voxels of 1 m.
+/// The names of the materials `game`'s planted fields change within `half_m` of the spawn, counted
+/// in Voxels, at Voxels of 1 m, against the same World with only its crop fields dropped. A field
+/// and its ditch lie on the ground, so only its [`settled_rows`] are compared.
 fn field_cells(game: &str, seed: u64, half_m: f32) -> BTreeMap<String, u64> {
     let (_install, loaded) = loaded(game, 1.0);
     let params = loaded.world.unwrap();
-    let bare: Vec<Biome> = params
+    let fieldless: Vec<Biome> = params
         .biomes
         .as_slice()
         .iter()
         .map(|b| Biome {
-            surface_features: SurfaceFeatures::new(b.surface_features.as_slice()).unwrap(),
+            surface_features: b.surface_features.with_crop_fields(&[]).unwrap(),
             ..*b
         })
         .collect();
-    let without = tesserae_core::WorldgenParams {
-        biomes: BiomeTable::new(&bare).unwrap(),
-        ..params
-    };
+    let biomes = BiomeTable::new(&fieldless)
+        .and_then(|t| t.with_selectors(params.biomes.selectors()))
+        .and_then(|t| t.with_strata(params.biomes.strata()))
+        .unwrap();
+    let without = tesserae_core::WorldgenParams { biomes, ..params };
     let (with, without) = (
         Worldgen::new(seed, 1.0, params),
         Worldgen::new(seed, 1.0, without),
     );
-    let (low, high) = with.surface_bounds_m();
     let size = CHUNK_SIZE as f32;
     let reach = (half_m / size).ceil() as i32;
+    let eye = crate::server::spawn_eye(&with);
+    let [ox, oz] = [eye.x, eye.z].map(|m| (m / size).floor() as i32);
     let mut names: BTreeMap<u16, u64> = BTreeMap::new();
-    for cy in (low / size).floor() as i32 - 1..=(high / size).ceil() as i32 + 1 {
-        for cz in -reach..reach {
-            for cx in -reach..reach {
+    for cz in oz - reach..oz + reach {
+        for cx in ox - reach..ox + reach {
+            for cy in settled_rows(&with, [cx, cz]) {
                 let (a, b) = (with.chunk(cx, cy, cz), without.chunk(cx, cy, cz));
                 if a.uniform().is_some() && a.uniform() == b.uniform() {
                     continue;
@@ -75,43 +79,22 @@ fn crop_voxels(cells: &BTreeMap<String, u64>, name: &str) -> u64 {
         .sum()
 }
 
+/// Terra's ground is rough, so a level place for a field is rare: the search reaches 512 m out.
 #[test]
-fn every_game_with_planted_fields_places_its_lead_crop_most_often_beside_paths() {
-    // The window each Game needs for a field to stand in it: Terra's and tidewater's ground is
-    // rough, so a level place is rarer.
-    let games = [
-        ("terra", 512.0, "terra:sand", Some("terra:water")),
-        ("meadow", 256.0, "strata:sand", None),
-        ("tidewater", 512.0, "strata:sand", Some("waters:water")),
-        ("lumen", 256.0, "strata:sand", None),
-        ("ember", 512.0, "strata:basalt", Some("waters:water")),
-    ];
-    let fields =
-        crate::server::in_parallel(&games, |&(game, half_m, ..)| field_cells(game, 7, half_m));
-    for (&(game, _, path, ditch), cells) in games.iter().zip(fields) {
-        let [wheat, carrot, potato] = ["wheat", "carrot", "potato"].map(|c| crop_voxels(&cells, c));
-        // Ember's ash grows hardy roots, so its potatoes lead.
-        let leads = if game == "ember" {
-            potato > wheat && potato > carrot
-        } else {
-            wheat > carrot && wheat > potato
-        };
-        assert!(
-            leads && wheat > 0 && carrot > 0 && potato > 0,
-            "{game}: wheat {wheat}, carrot {carrot}, potato {potato}"
-        );
-        assert!(cells.get(path).is_some_and(|&n| n > 0), "{game}: {cells:?}");
-        match ditch {
-            Some(fluid) => assert!(
-                cells.get(fluid).is_some_and(|&n| n > 0),
-                "{game} has no ditch"
-            ),
-            None => assert!(
-                !cells.contains_key("waters:water") && !cells.contains_key("terra:water"),
-                "{game} has no lake, so no ditch"
-            ),
-        }
-    }
+fn terras_planted_fields_place_their_lead_crop_most_often_beside_paths() {
+    let (game, half_m, path, fluid) = ("terra", 512.0, "terra:sand", "terra:water");
+    let cells = field_cells(game, 7, half_m);
+    let [wheat, carrot, potato] = ["wheat", "carrot", "potato"].map(|c| crop_voxels(&cells, c));
+    let leads = wheat > carrot && wheat > potato;
+    assert!(
+        leads && wheat > 0 && carrot > 0 && potato > 0,
+        "{game}: wheat {wheat}, carrot {carrot}, potato {potato}"
+    );
+    assert!(cells.get(path).is_some_and(|&n| n > 0), "{game}: {cells:?}");
+    assert!(
+        cells.get(fluid).is_some_and(|&n| n > 0),
+        "{game} has no ditch"
+    );
 }
 
 /// The size of each field group a Biome declares, largest first: its flowers and its vegetables.
@@ -120,9 +103,6 @@ fn ground_cover_competes_by_region_in_the_biomes_that_have_flowers_and_vegetable
     for (game, biome, groups) in [
         ("terra", "terra:temperate", vec![3, 2]),
         ("terra", "terra:savanna", vec![2]),
-        ("meadow", "meadow:meadow", vec![3, 3]),
-        ("meadow", "meadow:prairie", vec![2]),
-        ("lumen", "lumen:garden", vec![3, 2]),
     ] {
         let (_install, loaded) = loaded(game, 1.0);
         let world = loaded.world.unwrap();

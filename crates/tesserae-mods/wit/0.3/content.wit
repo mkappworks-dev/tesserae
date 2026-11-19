@@ -648,6 +648,10 @@ interface content {
         vines: option<tree-vines>,
         /// `none` is a straight trunk under one ellipsoidal crown.
         branching: option<branching-def>,
+        /// How near, in metres, a stronger tree's trunk keeps this one from
+        /// generating, above 0 and at most 12. `none` is 1.5 times
+        /// `canopy-radius-m`; a dense stand declares less.
+        crowding-m: option<f32>,
     }
 
     /// The vines worldgen hangs from a tree, by a pure function of the tree and

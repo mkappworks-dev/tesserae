@@ -8,6 +8,8 @@ use tesserae_core::{
     OreTable, Voxel, Worldgen, WorldgenParams,
 };
 
+mod common;
+
 const SEED: u64 = 0x7e55_e2ae_0000_0001;
 
 fn ore(material: u16, min_depth_m: f32, max_depth_m: f32) -> Ore {
@@ -26,12 +28,13 @@ fn anywhere() -> Ore {
     ore(fixtures().lantern, 0.0, 400.0)
 }
 
-/// Caves, smoothing and a lake, so each property is checked against everything shaping a Chunk.
+/// Caves, smoothing and water, so each property is checked against everything shaping a Chunk;
+/// on low land, so the ground the tests count lies in the Chunks they read.
 fn params(ores: &[Ore]) -> WorldgenParams {
-    WorldgenParams {
+    common::lowland(WorldgenParams {
         ores: OreTable::new(ores).unwrap(),
-        ..tesserae_core::testgen::world_params().with_default_lake(fixtures().water)
-    }
+        ..tesserae_core::testgen::world_params()
+    })
 }
 
 fn bare(ores: &[Ore]) -> WorldgenParams {
@@ -346,28 +349,4 @@ fn two_ores_each_make_their_own_veins() {
     );
     let (a, b) = (ore_voxels(&g, lantern).len(), ore_voxels(&g, glass).len());
     assert!(a > 500 && b > 500, "{a} {b}");
-}
-
-#[test]
-fn generator_version_1_has_no_ore() {
-    let v1 = |ores: &[Ore]| WorldgenParams {
-        generator: 1,
-        ..bare(ores)
-    };
-    let (with, without) = (generator(v1(&[anywhere()]), 1.0), generator(v1(&[]), 1.0));
-    for cy in -1..3 {
-        for cz in -1..1 {
-            for cx in -1..1 {
-                let (a, b) = (with.chunk(cx, cy, cz), without.chunk(cx, cy, cz));
-                assert!(a.kinds() == b.kinds());
-                for z in 0..CHUNK_SIZE {
-                    for y in 0..CHUNK_SIZE {
-                        for x in 0..CHUNK_SIZE {
-                            assert_eq!(a.get(x, y, z), b.get(x, y, z));
-                        }
-                    }
-                }
-            }
-        }
-    }
 }

@@ -1,5 +1,10 @@
 //! Generator version 3: terrain lives in a declared vertical band around Sea level.
 
+#![allow(
+    clippy::disallowed_methods,
+    reason = "a test's own maths is not generation"
+)]
+
 use tesserae_core::terrain::LandformParams;
 use tesserae_core::{CHUNK_SIZE, Worldgen, WorldgenParams};
 
@@ -16,10 +21,10 @@ fn landforms() -> LandformParams {
 
 fn v3() -> WorldgenParams {
     WorldgenParams {
-        generator: 3,
         sea_level_m: 24.0,
         relief_m: 24.0,
         landforms: landforms(),
+        water: None,
         ..tesserae_core::testgen::world_params()
     }
 }
@@ -41,23 +46,37 @@ fn a_band_that_does_not_hold_the_relief_is_refused() {
     assert!(bad.validate().is_err());
 }
 
+/// A band of no height would scale its mountains by 0 / 0, so every height is NaN and drainage
+/// never settles; the least height above it is finite everywhere.
+#[test]
+fn a_band_of_no_height_is_refused_and_the_least_above_it_generates() {
+    let at = |height_m| WorldgenParams {
+        relief_m: 0.0,
+        landforms: LandformParams {
+            height_m,
+            ..landforms()
+        },
+        ..v3()
+    };
+    let refused = at(0.0).validate().unwrap_err();
+    assert_eq!(refused.field, "landforms.height_m");
+    assert!(refused.to_string().contains("above 0"), "{refused}");
+    let least = at(f32::from_bits(1));
+    assert_eq!(least.validate(), Ok(()));
+    for size in [1.0, 0.5] {
+        let g = Worldgen::new(SEED, size, least);
+        for (x, z) in [(0.0, 0.0), (37.0, -410.0), (-2900.0, 1300.0)] {
+            assert!(g.terrain_height_m(x, z).is_finite(), "{size} m ({x}, {z})");
+            assert!(g.surface_height_m(x, z).is_finite(), "{size} m ({x}, {z})");
+        }
+    }
+}
+
 #[test]
 fn version_3_bounds_the_surface_by_the_band_and_the_overhang() {
     let (lowest, highest) = Worldgen::new(SEED, 1.0, v3()).surface_bounds_m();
     assert_eq!(lowest, 24.0 - 100.0 - 10.0);
     assert_eq!(highest, 24.0 + 200.0 + 10.0);
-}
-
-#[test]
-fn version_2_keeps_its_old_bound() {
-    let v2 = WorldgenParams {
-        generator: 2,
-        ..v3()
-    };
-    assert_eq!(
-        Worldgen::new(SEED, 1.0, v2).surface_bounds_m(),
-        (24.0, 48.0)
-    );
 }
 
 #[test]
@@ -253,7 +272,7 @@ fn has_overhang(g: &Worldgen, x: i32, z: i32, from_m: i32, to_m: i32) -> bool {
 fn columns_where(g: &Worldgen, keep: impl Fn(f32) -> bool, want: usize) -> Vec<(i32, i32)> {
     let all: Vec<_> = (-80..80)
         .flat_map(|j| (-80..80).map(move |i| (i * 61, j * 61)))
-        .filter(|&(x, z)| keep(g.landform_fields(x as f32, z as f32).unwrap().ruggedness))
+        .filter(|&(x, z)| keep(g.landform_fields(x as f32, z as f32).ruggedness))
         .collect();
     let every = (all.len() / want.max(1)).max(1);
     all.into_iter().step_by(every).take(want).collect()
@@ -277,7 +296,7 @@ fn rugged_ground_has_overhangs_and_arches() {
     // A range's upper flanks and summits: the highest rugged land, not a valley floor in it.
     let mut high: Vec<(f32, (i32, i32))> = (-80..80)
         .flat_map(|j| (-80..80).map(move |i| (i * 61, j * 61)))
-        .filter(|&(x, z)| g.landform_fields(x as f32, z as f32).unwrap().ruggedness > 0.6)
+        .filter(|&(x, z)| g.landform_fields(x as f32, z as f32).ruggedness > 0.6)
         .map(|(x, z)| (g.surface_height_m(x as f32, z as f32), (x, z)))
         .collect();
     high.sort_by(|a, b| b.0.total_cmp(&a.0));
@@ -292,6 +311,42 @@ fn rugged_ground_has_overhangs_and_arches() {
         .count();
     // Overhangs are scattered outcrops on a range's upper flanks and crests, not every slope.
     assert!(with >= 2, "{with} of {}", rugged.len());
+}
+
+#[test]
+fn a_body_clears_the_overhang_density_above_the_base_surface() {
+    let g = Worldgen::new(SEED, 1.0, dry_v3());
+    let mut high: Vec<(f32, (i32, i32))> = (-80..80)
+        .flat_map(|j| (-80..80).map(move |i| (i * 61, j * 61)))
+        .filter(|&(x, z)| g.landform_fields(x as f32, z as f32).ruggedness > 0.6)
+        .map(|(x, z)| (g.surface_height_m(x as f32, z as f32), (x, z)))
+        .collect();
+    high.sort_by(|a, b| b.0.total_cmp(&a.0));
+    let mut pushed = 0;
+    for &(h, (x, z)) in high.iter().take(60) {
+        let top = (h as i32 - 14..h as i32 + 14)
+            .rev()
+            .find(|&y| {
+                !g.chunk(x.div_euclid(32), y.div_euclid(32), z.div_euclid(32))
+                    .get(
+                        x.rem_euclid(32) as usize,
+                        y.rem_euclid(32) as usize,
+                        z.rem_euclid(32) as usize,
+                    )
+                    .is_air()
+            })
+            .expect("ground in the band");
+        pushed += usize::from(top as f32 > h);
+        let clear_m = g.clear_height_m(
+            [x as f32 + 0.2, z as f32 + 0.2],
+            [x as f32 + 0.8, z as f32 + 0.8],
+        );
+        assert!(
+            clear_m >= (top + 1) as f32,
+            "{x},{z}: clear at {clear_m} m under ground to {top} over a base surface at {h}"
+        );
+    }
+    assert!(pushed > 0, "no column was pushed above its base surface");
 }
 
 #[test]
@@ -469,7 +524,7 @@ fn ravines_cut_narrow_slots_into_rugged_land() {
     for j in -60..60 {
         for i in -60..60 {
             let (x, z) = (i as f32 * 97.0, j as f32 * 89.0);
-            if g.landform_fields(x, z).unwrap().ruggedness < 0.3 {
+            if g.landform_fields(x, z).ruggedness < 0.3 {
                 continue;
             }
             // A slot is a point far lower than the ground ten metres either side of it.
@@ -520,13 +575,12 @@ fn spawning_finds_dry_land_clear_of_cliffs_and_water() {
 }
 
 #[test]
-fn earlier_versions_spawn_where_they_always_did() {
-    let v2 = WorldgenParams {
-        generator: 2,
-        ..wet_world()
-    };
-    let g = Worldgen::new(SEED, 1.0, v2);
-    assert_eq!(g.dry_land_near_m([12.0, -7.0], 5000.0), Some([12.0, -7.0]));
+fn a_world_with_no_settlement_spawns_on_the_dry_land_nearest_the_origin() {
+    let g = Worldgen::new(SEED, 1.0, wet_world());
+    assert_eq!(
+        g.spawn_m().map(f32::to_bits),
+        [3_286_458_261, 1_145_715_809]
+    );
 }
 
 fn caved_wet_v3() -> WorldgenParams {
@@ -644,7 +698,7 @@ fn solid_and_air_are_the_same_in_metres_at_every_voxel_size() {
 }
 
 #[test]
-fn nothing_stands_above_a_footprints_own_top_and_versions_1_and_2_keep_the_global_bound() {
+fn nothing_stands_above_a_footprints_own_top() {
     let g = Worldgen::new(SEED, 1.0, caved_wet_v3());
     let (_, global) = g.surface_bounds_m();
     let mut lower = 0;
@@ -665,18 +719,6 @@ fn nothing_stands_above_a_footprints_own_top_and_versions_1_and_2_keep_the_globa
     assert!(
         lower > 100,
         "{lower} footprints are well under the global bound"
-    );
-    let v2 = Worldgen::new(
-        SEED,
-        1.0,
-        WorldgenParams {
-            generator: 2,
-            ..wet_world()
-        },
-    );
-    assert_eq!(
-        v2.surface_top_m([0.0, 0.0], [32.0, 32.0]),
-        v2.surface_bounds_m().1
     );
 }
 
@@ -811,7 +853,7 @@ fn rugged_shape(g: &Worldgen) -> (f32, f32, usize) {
     for j in -60..60 {
         for i in -60..60 {
             let (x, z) = (i as f32 * 157.0, j as f32 * 163.0);
-            if g.landform_fields(x, z).is_none_or(|f| f.ruggedness < 0.5) {
+            if g.landform_fields(x, z).ruggedness < 0.5 {
                 continue;
             }
             let h = |dx: f32| g.terrain_height_m(x + dx, z);
@@ -840,7 +882,7 @@ fn rugged_under_inland_water(g: &Worldgen) -> f32 {
     for j in -60..60 {
         for i in -60..60 {
             let (x, z) = (i as f32 * 157.0, j as f32 * 163.0);
-            if g.landform_fields(x, z).is_none_or(|f| f.ruggedness < 0.5) {
+            if g.landform_fields(x, z).ruggedness < 0.5 {
                 continue;
             }
             n += 1;
@@ -863,7 +905,7 @@ fn valleys_between_mountains_drain_rather_than_flood() {
 fn summit_shape(g: &Worldgen) -> (f32, f32) {
     let mut high: Vec<(f32, (f32, f32))> = (-80..80)
         .flat_map(|j| (-80..80).map(move |i| (i as f32 * 61.0, j as f32 * 61.0)))
-        .filter(|&(x, z)| g.landform_fields(x, z).unwrap().ruggedness > 0.6)
+        .filter(|&(x, z)| g.landform_fields(x, z).ruggedness > 0.6)
         .map(|(x, z)| (g.terrain_height_m(x, z), (x, z)))
         .collect();
     high.sort_by(|a, b| b.0.total_cmp(&a.0));
@@ -901,7 +943,7 @@ fn mountain_slopes(g: &Worldgen) -> (f32, f32, f32, usize) {
     for j in -120..120 {
         for i in -120..120 {
             let (x, z) = (i as f32 * 41.0, j as f32 * 43.0);
-            if g.landform_fields(x, z).is_none_or(|f| f.ruggedness < 0.5) {
+            if g.landform_fields(x, z).ruggedness < 0.5 {
                 continue;
             }
             let h = |dx: f32, dz: f32| g.terrain_height_m(x + dx, z + dz);
@@ -945,8 +987,7 @@ fn voxel_walls(g: &Worldgen) -> (f32, usize) {
     for j in -40..40 {
         for i in -40..40 {
             let (x, z) = (i * 123, j * 129);
-            if g.landform_fields(x as f32, z as f32)
-                .is_none_or(|f| f.ruggedness < 0.5)
+            if g.landform_fields(x as f32, z as f32).ruggedness < 0.5
                 || g.terrain_height_m(x as f32, z as f32) < 24.0 + 40.0
             {
                 continue;

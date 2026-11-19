@@ -1,11 +1,16 @@
 //! Surface features: a Biome's Material scattered one Voxel above its ground.
 
+#![allow(
+    clippy::disallowed_methods,
+    reason = "a test's own maths is not generation"
+)]
+
 use sha2::{Digest, Sha256};
 use tesserae_core::save::{Generation, Mapping};
 use tesserae_core::testgen::fixtures;
 use tesserae_core::worldgen::WaterParams;
 use tesserae_core::{
-    AIR, Biome, BiomeId, BiomeName, BiomeSet, BiomeTable, CHUNK_SIZE, Chunk, ClimateParams,
+    AIR, Biome, BiomeId, BiomeName, BiomeSet, BiomeTable, CHUNK_SIZE, CaveParams, ClimateParams,
     GroundParams, MaterialId, Ore, OreTable, SurfaceFeature, SurfaceFeatures, Voxel, Worldgen,
     WorldgenParams,
 };
@@ -24,6 +29,9 @@ fn featured(biome: Biome, features: &[SurfaceFeature]) -> Biome {
         ..biome
     }
 }
+
+mod common;
+mod digest;
 
 const SEEDS: [u64; 2] = [0x7e55_e2ae_0000_0001, 0xdead_beef_cafe_f00d];
 const VOXEL_SIZES: [f32; 2] = [1.0, 0.5];
@@ -53,9 +61,10 @@ fn desert() -> GroundParams {
     }
 }
 
-/// Every pass the generator has: caves tuned per Biome, smoothing, a lake, Biome grounds and ore.
+/// Every pass the generator has: caves tuned per Biome, smoothing, water, Biome grounds and ore;
+/// on low land, so the ground lies in the box the digests read.
 fn biome_world() -> WorldgenParams {
-    WorldgenParams {
+    common::lowland(WorldgenParams {
         sea_level_m: 24.0,
         relief_m: 24.0,
         water: Some(WaterParams {
@@ -82,51 +91,23 @@ fn biome_world() -> WorldgenParams {
         }])
         .unwrap(),
         ..tesserae_core::testgen::world_params()
-    }
-}
-
-fn put(digest: &mut Sha256, v: Voxel) {
-    digest.update(v.material().to_le_bytes());
-    digest.update(v.shape().to_le_bytes());
-    digest.update([v.orientation()]);
-}
-
-fn hash(digest: &mut Sha256, chunk: &Chunk) {
-    match chunk.uniform() {
-        Some(v) => {
-            digest.update([1]);
-            put(digest, v);
-        }
-        None => {
-            digest.update([0]);
-            for z in 0..CHUNK_SIZE {
-                for y in 0..CHUNK_SIZE {
-                    for x in 0..CHUNK_SIZE {
-                        put(digest, chunk.get(x, y, z));
-                    }
-                }
-            }
-        }
-    }
+    })
 }
 
 fn digest(generator: &Worldgen) -> String {
     let chunk_m = CHUNK_SIZE as f32 * generator.voxel_size();
     let rows = (8.0 / chunk_m).floor() as i32..=(56.0 / chunk_m).floor() as i32;
     let reach = (48.0 / chunk_m).ceil() as i32;
+    let names = fixtures().mapping();
     let mut digest = Sha256::new();
     for cy in rows {
         for cz in -reach..=reach {
             for cx in -reach..=reach {
-                hash(&mut digest, &generator.chunk(cx, cy, cz));
+                digest::chunk(&mut digest, &names, &generator.chunk(cx, cy, cz));
             }
         }
     }
-    digest
-        .finalize()
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect()
+    digest::hex(digest)
 }
 
 fn digests(params: WorldgenParams) -> Vec<String> {
@@ -140,12 +121,11 @@ fn digests(params: WorldgenParams) -> Vec<String> {
         .collect()
 }
 
-/// Recorded from the generator before Biomes could declare surface features.
 const RECORDED: [&str; 4] = [
-    "0db202cb8cb72b310ae9a68e30cde16faba7020f3c47067d2a1667992447f738",
-    "96a265785ad001567cdc3f010e3e4fe8e0cd9373ef3cf501bd01e0f375d3bbb5",
-    "aa26ea118fcc8c882ba3c4935a1fe05d5311e97929a52fa4146c0ad875093ea4",
-    "463ab24223f05a1e74c1ce08b0cf459a4b8fdee789776305b7c5e81aef09cf41",
+    "7ba6ccc7e4808b16862f331a7ee8d2898f915cc19b5d6e4bdf0913637323122d",
+    "58256182dbb92bb8723db34ea794d459a91b784313798fadcca64998d121689b",
+    "80111a98cd84e8cb8d6bf9021842bab3ec76604c2000b56133a90ac25fd9d695",
+    "0115fc937fa1c65c12f6d3c3ebe9ebcbb9fe5edeb409c06b6a7e566ce76cf97a",
 ];
 
 #[test]
@@ -181,7 +161,7 @@ fn a_snapshot_whose_biomes_have_no_features_restores_to_the_recorded_chunks() {
     assert_eq!(biomes.len(), 3);
     assert!(biomes.iter().all(|b| b.get("surface_features").is_none()));
     let reopened: Generation = serde_json::from_value(json).unwrap();
-    let params = reopened.restore(&mapping(), 2).unwrap();
+    let params = reopened.restore(&mapping(), 3).unwrap();
     assert_eq!(digests(params), RECORDED);
 }
 
@@ -221,15 +201,21 @@ fn base_m(g: &Worldgen) -> f32 {
 
 /// Each column's Voxels from [`base_m`] to above the surface band.
 fn columns(g: &Worldgen, half_m: f32) -> Vec<((f32, f32), Vec<Voxel>)> {
+    columns_round(g, [0.0, 0.0], half_m)
+}
+
+/// [`columns`] in a square round `centre_m`.
+fn columns_round(g: &Worldgen, centre_m: [f32; 2], half_m: f32) -> Vec<((f32, f32), Vec<Voxel>)> {
     let size = CHUNK_SIZE as i32;
     let voxel = g.voxel_size();
     let chunk_m = CHUNK_SIZE as f32 * voxel;
     let first = (base_m(g) / chunk_m).round() as i32;
     let rows = first..=(g.surface_bounds_m().1 / chunk_m).ceil() as i32;
     let reach = (half_m / chunk_m).ceil() as i32;
+    let [ox, oz] = centre_m.map(|m| (m / chunk_m).round() as i32);
     let mut out = Vec::new();
-    for cz in -reach..reach {
-        for cx in -reach..reach {
+    for cz in oz - reach..oz + reach {
+        for cx in ox - reach..ox + reach {
             let chunks: Vec<_> = rows.clone().map(|cy| g.chunk(cx, cy, cz)).collect();
             for z in 0..CHUNK_SIZE {
                 for x in 0..CHUNK_SIZE {
@@ -262,6 +248,7 @@ fn plain(features: &[SurfaceFeature]) -> WorldgenParams {
         caves: None,
         smoothing: None,
         biomes: BiomeTable::new(&[featured(biome("t:plain", 0.5, None, None), features)]).unwrap(),
+        water: None,
         ..tesserae_core::testgen::world_params()
     }
 }
@@ -302,12 +289,32 @@ fn generation_is_deterministic_and_follows_the_seed() {
     assert_ne!(places(SEEDS[0]), places(SEEDS[1]));
 }
 
-/// A 4 m spacing at 4 m Voxels is every column, so each column that may hold a feature must, and
-/// the generator's every other pass is in play: caves, smoothing, a lake and Biome grounds. Lifted,
-/// the band crosses a Chunk's top, so some features stand in the Chunk above their ground.
+/// The columns that draw a 4 m feature at a Voxel size: those that hold it on a plain of nothing
+/// but ground, where every column may.
+fn drawn(
+    seed: u64,
+    size: f32,
+    centre_m: [f32; 2],
+    half_m: f32,
+) -> std::collections::HashSet<(i32, i32)> {
+    let g = Worldgen::new(seed, size, common::lowland(plain(&[feature(MELON, 4.0)])));
+    columns_round(&g, centre_m, half_m)
+        .into_iter()
+        .filter(|(_, voxels)| voxels.iter().any(|v| v.material() == MELON))
+        .map(|((x_m, z_m), _)| ((x_m / size) as i32, (z_m / size) as i32))
+        .collect()
+}
+
+/// Where the lifted World's shore crosses a Chunk's top and its tunnels reach the ground beside the
+/// sea, which the cave pass keeps shut.
+const BESIDE_THE_SEA_M: [f32; 2] = [144.0, -112.0];
+
+/// Each column that may hold a feature and draws one does, and the generator's every other pass is
+/// in play: caves, smoothing, a lake and Biome grounds. At 4 m Voxels a 4 m spacing is every
+/// column. Lifted, the land round the origin crosses 128 m, a Chunk's top at every size, so some
+/// features stand in the Chunk above their ground, which asks whether the cave pass opened it.
 #[test]
 fn a_feature_stands_on_every_full_surface_voxel_of_its_biome_and_nowhere_else() {
-    let size = 4.0;
     let mut params = biome_world();
     let table: Vec<Biome> = params.biomes.as_slice().to_vec();
     params.biomes = BiomeTable::new(&[
@@ -317,56 +324,67 @@ fn a_feature_stands_on_every_full_surface_voxel_of_its_biome_and_nowhere_else() 
     ])
     .unwrap();
     let lifted = WorldgenParams {
-        sea_level_m: params.sea_level_m + 88.0,
-        water: params.water.map(|w| WaterParams {
-            level_m: w.level_m + 88.0,
-            ..w
+        sea_level_m: params.sea_level_m + 103.0,
+        // Wide tunnels, so more of them reach the shore.
+        caves: Some(CaveParams {
+            feature_size_m: 32.0,
+            radius_m: 9.6,
+            ..CaveParams::default()
         }),
         ..params
     };
-    for (seed, params) in [(SEEDS[0], params), (SEEDS[1], params), (SEEDS[0], lifted)] {
-        let with = Worldgen::new(seed, size, params);
-        let bare = Worldgen::new(seed, size, params.without_surface_features());
-        let (base, highest) = (base_m(&bare), bare.surface_bounds_m().1);
-        let (mut placed, mut refused, mut above) = (0, 0, 0);
-        for (((x_m, z_m), bare_column), (_, column)) in
-            columns(&bare, 192.0).into_iter().zip(columns(&with, 192.0))
-        {
-            let biome = params.biomes.as_slice()[bare.biome_at(x_m, z_m).unwrap().index()];
-            let surface = biome.ground.or(params.ground).unwrap().surface;
-            // A column carved to the bottom of the box has no top.
-            let top = bare_column.iter().rposition(|v| !v.is_air());
-            let ground_top = ((bare.surface_height_m(x_m, z_m) - base) / size).floor() as usize;
-            let eligible = top == Some(ground_top)
-                && bare_column[ground_top] == Voxel::cube(surface)
-                && base + (ground_top + 1) as f32 * size <= highest;
-            let expected = biome
-                .surface_features
-                .as_slice()
-                .first()
-                .filter(|_| eligible);
-            for (y, (was, now)) in bare_column.iter().zip(&column).enumerate() {
-                match expected {
-                    Some(f) if y == ground_top + 1 => {
-                        assert_eq!(*now, Voxel::cube(f.material), "({x_m}, {z_m})")
+    for (size, centre_m, half_m) in [
+        (4.0, [0.0, 0.0], 192.0),
+        (1.0, BESIDE_THE_SEA_M, 48.0),
+        (0.5, BESIDE_THE_SEA_M, 48.0),
+    ] {
+        for (seed, params) in [(SEEDS[0], params), (SEEDS[1], params), (SEEDS[0], lifted)] {
+            let draws = drawn(seed, size, centre_m, half_m);
+            let with = Worldgen::new(seed, size, params);
+            let bare = Worldgen::new(seed, size, params.without_surface_features());
+            let (base, highest) = (base_m(&bare), bare.surface_bounds_m().1);
+            let (mut placed, mut refused, mut above) = (0, 0, 0);
+            for (((x_m, z_m), bare_column), (_, column)) in columns_round(&bare, centre_m, half_m)
+                .into_iter()
+                .zip(columns_round(&with, centre_m, half_m))
+            {
+                let biome = params.biomes.as_slice()[bare.biome_at(x_m, z_m).unwrap().index()];
+                let surface = biome.ground.or(params.ground).unwrap().surface;
+                // A column carved to the bottom of the box has no top.
+                let top = bare_column.iter().rposition(|v| !v.is_air());
+                let ground_top = ((bare.surface_height_m(x_m, z_m) - base) / size).floor() as usize;
+                let eligible = top == Some(ground_top)
+                    && bare_column[ground_top] == Voxel::cube(surface)
+                    && base + (ground_top + 1) as f32 * size <= highest
+                    && draws.contains(&((x_m / size) as i32, (z_m / size) as i32));
+                let expected = biome
+                    .surface_features
+                    .as_slice()
+                    .first()
+                    .filter(|_| eligible);
+                for (y, (was, now)) in bare_column.iter().zip(&column).enumerate() {
+                    match expected {
+                        Some(f) if y == ground_top + 1 => {
+                            assert_eq!(*now, Voxel::cube(f.material), "{size} m ({x_m}, {z_m})")
+                        }
+                        _ => assert_eq!(was, now, "{size} m ({x_m}, {z_m}) y {y}"),
                     }
-                    _ => assert_eq!(was, now, "({x_m}, {z_m}) y {y}"),
+                }
+                match expected {
+                    Some(_) => {
+                        placed += 1;
+                        above += usize::from(ground_top % CHUNK_SIZE == CHUNK_SIZE - 1);
+                    }
+                    None => refused += usize::from(!biome.surface_features.is_empty()),
                 }
             }
-            match expected {
-                Some(_) => {
-                    placed += 1;
-                    above += usize::from(ground_top % CHUNK_SIZE == CHUNK_SIZE - 1);
-                }
-                None => refused += usize::from(!biome.surface_features.is_empty()),
+            assert!(
+                placed > 100 && refused > 100,
+                "{size} m: {placed} placed, {refused} refused"
+            );
+            if params == lifted {
+                assert!(above > 10, "{size} m: {above} in the Chunk above");
             }
-        }
-        assert!(
-            placed > 100 && refused > 100,
-            "{placed} placed, {refused} refused"
-        );
-        if params == lifted {
-            assert!(above > 10, "{above} in the Chunk above");
         }
     }
 }

@@ -529,8 +529,8 @@ impl Guest for Terra {
                     selectors: None,
                     strata: bedding("temperate"),
                     name: "temperate".into(),
-                    temperature: 0.5,
-                    humidity: 0.5,
+                    temperature: 0.38,
+                    humidity: 0.59,
                     ground: None,
                     sky_fog: Some(SkyFog {
                         sky: (126, 146, 168),
@@ -541,7 +541,11 @@ impl Guest for Terra {
                     // carpet; the oaks every 9 m give Wood for a Workbench, Chest and Door in a
                     // short walk, and no Wood lies about on its own.
                     crop_fields: plants::temperate_fields(),
-                    structures: structures::wild(&["watchtower", "standing_stones", "waystone"]),
+                    structures: structures::wild_and_bridged(&[
+                        "watchtower",
+                        "standing_stones",
+                        "waystone",
+                    ]),
                     settlements: structures::town_and_village(),
                     surface_features: [SurfaceFeature {
                         material: Some("terra:melon".into()),
@@ -561,8 +565,8 @@ impl Guest for Terra {
                     selectors: None,
                     strata: bedding("dry"),
                     name: "dry".into(),
-                    temperature: 0.7,
-                    humidity: 0.3,
+                    temperature: 0.54,
+                    humidity: 0.42,
                     ground: Some(GroundParams {
                         rock: "terra:stone".into(),
                         soil: "terra:sand".into(),
@@ -574,11 +578,7 @@ impl Guest for Terra {
                     }),
                     cave_scale: Some(1.5),
                     crop_fields: Vec::new(),
-                    structures: [
-                        structures::wild(&["ruined_keep"]),
-                        structures::bridge("stone_bridge"),
-                    ]
-                    .concat(),
+                    structures: structures::wild_and_bridged(&["ruined_keep"]),
                     settlements: structures::village(),
                     surface_features: plants::dry(),
                     loot: Some(structures::biome_loot("dry")),
@@ -588,7 +588,7 @@ impl Guest for Terra {
                     selectors: None,
                     strata: bedding("cold"),
                     name: "cold".into(),
-                    temperature: 0.3,
+                    temperature: 0.29,
                     humidity: 0.55,
                     ground: Some(GroundParams {
                         rock: "terra:stone".into(),
@@ -601,7 +601,7 @@ impl Guest for Terra {
                     }),
                     cave_scale: Some(0.0),
                     crop_fields: Vec::new(),
-                    structures: structures::wild(&["watchtower", "ruined_keep"]),
+                    structures: structures::wild_and_bridged(&["watchtower", "ruined_keep"]),
                     settlements: structures::village(),
                     surface_features: plants::cold(),
                     loot: Some(structures::biome_loot("cold")),
@@ -611,8 +611,8 @@ impl Guest for Terra {
                     selectors: None,
                     strata: bedding("jungle"),
                     name: "jungle".into(),
-                    temperature: 0.72,
-                    humidity: 0.7,
+                    temperature: 0.65,
+                    humidity: 0.71,
                     ground: None,
                     sky_fog: Some(SkyFog {
                         sky: (112, 148, 128),
@@ -620,7 +620,7 @@ impl Guest for Terra {
                     }),
                     cave_scale: None,
                     crop_fields: Vec::new(),
-                    structures: structures::wild(&["ruined_keep"]),
+                    structures: structures::wild_and_bridged(&["ruined_keep"]),
                     settlements: Vec::new(),
                     surface_features: plants::jungle(),
                     loot: Some(structures::biome_loot("jungle")),
@@ -630,8 +630,8 @@ impl Guest for Terra {
                     selectors: None,
                     strata: bedding("swamp"),
                     name: "swamp".into(),
-                    temperature: 0.55,
-                    humidity: 0.78,
+                    temperature: 0.36,
+                    humidity: 0.75,
                     ground: Some(GroundParams {
                         rock: "terra:stone".into(),
                         soil: "terra:dirt".into(),
@@ -653,8 +653,8 @@ impl Guest for Terra {
                     selectors: None,
                     strata: bedding("savanna"),
                     name: "savanna".into(),
-                    temperature: 0.78,
-                    humidity: 0.5,
+                    temperature: 0.63,
+                    humidity: 0.56,
                     ground: Some(GroundParams {
                         rock: "terra:stone".into(),
                         soil: "terra:dirt".into(),
@@ -665,14 +665,14 @@ impl Guest for Terra {
                         fog: (192, 178, 136),
                     }),
                     cave_scale: None,
-                    crop_fields: Vec::new(),
-                    structures: structures::wild(&["standing_stones", "waystone"]),
+                    crop_fields: plants::savanna_fields(),
+                    structures: structures::wild_and_bridged(&["standing_stones", "waystone"]),
                     settlements: structures::village(),
                     surface_features: plants::savanna(),
                     loot: Some(structures::biome_loot("savanna")),
                 },
-                // Version 3 only: the sea floor, the strand and the high ground, chosen by altitude.
-                // They name a range, so version 3 prefers them where they fit and earlier versions never choose them.
+                // The sea floor, the strand and the high ground, chosen by altitude: they name a
+                // range, so they are preferred where they fit.
                 BiomeDef {
                     soundscape: None,
                     selectors: Some(BiomeSelectors {
@@ -708,7 +708,8 @@ impl Guest for Terra {
                 BiomeDef {
                     soundscape: None,
                     selectors: Some(BiomeSelectors {
-                        altitude: Some(SelectorRange { min: 0.0, max: 3.0 }),
+                        // A metre of strand: a wider one takes a coast's ground from the Climate Biomes.
+                        altitude: Some(SelectorRange { min: 0.0, max: 1.0 }),
                         coast: None,
                         erosion: None,
                         river: None,

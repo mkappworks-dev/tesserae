@@ -2,6 +2,9 @@
 
 Status: accepted.
 
+Amended by [ADR-0033](0033-generator-version-3-is-the-only-version.md): versions
+1 and 2 are deleted; only version 3 generates.
+
 Terrain had one ground, one cave field and one haze colour. Step 13 lets a Game
 or Mod declare Biomes, chosen from Climate, without letting a later change
 reshape a World that already exists.

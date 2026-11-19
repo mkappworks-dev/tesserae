@@ -1,4 +1,4 @@
-//! Tidewater's open sea, shore, river banks and high ground, and its underground, which Generator version 3 alone reads.
+//! Tidewater's open sea, shore, river banks and high ground, and its underground.
 
 use crate::tesserae::mods::content::{BiomeDef, CaveBiomeDef, SurfaceFeature};
 use demo_kit::{ALPINE_M, Cave, Landform, OCEAN_M, RIVER_CUT_M, RIVER_M, SHORE_M};
@@ -51,7 +51,8 @@ pub fn biomes() -> Vec<BiomeDef> {
             &Landform {
                 name: "shore",
                 climate: (0.5, 0.5),
-                altitude_m: SHORE_M,
+                // Narrower than demo-kit's strand, which takes the islands' ground from the lagoon.
+                altitude_m: (SHORE_M.0, 1.0),
                 river_m: None,
                 ground: ["strata:stone", "strata:sand", "strata:sand"],
                 sky: [140, 156, 176],

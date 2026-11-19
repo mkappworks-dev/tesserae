@@ -122,13 +122,12 @@ fn table(biomes: &[Biome]) -> BiomeTable {
     BiomeTable::new(biomes).unwrap()
 }
 
-fn with_biomes(biomes: &[Biome], generator: u32, voxel_size: f32) -> Worldgen {
+fn with_biomes(biomes: &[Biome], voxel_size: f32) -> Worldgen {
     Worldgen::new(
         SEED,
         voxel_size,
         WorldgenParams {
             biomes: table(biomes),
-            generator,
             ..WorldgenParams::default()
         },
     )
@@ -139,14 +138,19 @@ fn dense() -> impl Iterator<Item = (f32, f32)> {
     (-100..100).flat_map(|i| (-100..100).map(move |j| (i as f32 * 11.0, j as f32 * 11.0)))
 }
 
+/// The temperature a Biome is selected by: the Climate of the air at the ground.
+fn ground_temperature(g: &Worldgen, x: f32, z: f32) -> f32 {
+    g.climate_at_height(x, g.surface_height_m(x, z), z)
+        .temperature
+}
+
 const COLD: BiomeId = BiomeId::new(0);
 const WARM: BiomeId = BiomeId::new(1);
 
 /// Differ in temperature alone, so the border is where temperature crosses 0.5 at any humidity.
-fn cold_and_warm(generator: u32, voxel_size: f32) -> Worldgen {
+fn cold_and_warm(voxel_size: f32) -> Worldgen {
     with_biomes(
         &[biome("cold", 0.2, 0.5), biome("warm", 0.8, 0.5)],
-        generator,
         voxel_size,
     )
 }
@@ -158,24 +162,17 @@ fn a_world_without_biomes_has_none() {
 }
 
 #[test]
-fn generator_version_1_ignores_its_biomes() {
-    let g = cold_and_warm(1, 1.0);
-    assert!(grid().all(|(x, z)| g.biome_at(x, z).is_none()));
-    assert!(cold_and_warm(2, 1.0).biome_at(0.0, 0.0).is_some());
-}
-
-#[test]
 fn a_lone_biome_covers_the_world() {
-    let g = with_biomes(&[biome("only", 0.9, 0.1)], 2, 1.0);
+    let g = with_biomes(&[biome("only", 0.9, 0.1)], 1.0);
     assert!(grid().all(|(x, z)| g.biome_at(x, z) == Some(BiomeId::new(0))));
 }
 
 #[test]
 fn the_nearest_point_wins_away_from_the_border() {
-    let g = cold_and_warm(2, 1.0);
+    let g = cold_and_warm(1.0);
     let (mut cold, mut warm) = (0, 0);
     for (x, z) in dense() {
-        let t = g.climate_at(x, z).temperature;
+        let t = ground_temperature(&g, x, z);
         if (t - 0.5).abs() <= BORDER_WARP {
             continue;
         }
@@ -189,10 +186,10 @@ fn the_nearest_point_wins_away_from_the_border() {
 
 #[test]
 fn the_border_is_warped_and_never_strays_beyond_the_warp() {
-    let g = cold_and_warm(2, 1.0);
+    let g = cold_and_warm(1.0);
     let mut moved = 0;
     for (x, z) in dense() {
-        let t = g.climate_at(x, z).temperature;
+        let t = ground_temperature(&g, x, z);
         let straight = if t < 0.5 { COLD } else { WARM };
         if g.biome_at(x, z) != Some(straight) {
             moved += 1;
@@ -207,15 +204,15 @@ fn the_border_is_warped_and_never_strays_beyond_the_warp() {
 
 #[test]
 fn a_tie_goes_to_the_earlier_biome() {
-    let g = with_biomes(&[biome("a", 0.4, 0.4), biome("b", 0.4, 0.4)], 2, 1.0);
+    let g = with_biomes(&[biome("a", 0.4, 0.4), biome("b", 0.4, 0.4)], 1.0);
     assert!(grid().all(|(x, z)| g.biome_at(x, z) == Some(COLD)));
 }
 
 #[test]
 fn the_biome_layout_is_the_same_at_every_voxel_size_and_lod_level() {
-    let base = cold_and_warm(2, 1.0);
+    let base = cold_and_warm(1.0);
     for voxel_size in [0.25, 0.5, 2.0, 4.0, 8.0, 16.0] {
-        let other = cold_and_warm(2, voxel_size);
+        let other = cold_and_warm(voxel_size);
         assert!(
             dense().all(|(x, z)| base.biome_at(x, z) == other.biome_at(x, z)),
             "differs at voxel size {voxel_size}"
@@ -225,7 +222,7 @@ fn the_biome_layout_is_the_same_at_every_voxel_size_and_lod_level() {
 
 #[test]
 fn a_seed_makes_its_own_layout() {
-    let a = cold_and_warm(2, 1.0);
+    let a = cold_and_warm(1.0);
     let b = Worldgen::new(SEED + 1, 1.0, a.params());
     assert!(dense().any(|(x, z)| a.biome_at(x, z) != b.biome_at(x, z)));
 }

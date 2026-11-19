@@ -5,13 +5,18 @@
 //! `cargo bench -p tesserae-core --bench structures`; with `TESSERAE_BENCH_BARE=1` only the bare
 //! World runs, for an A/B against another build of the same rounds.
 
+#![allow(
+    clippy::disallowed_methods,
+    reason = "a bench's own maths is not generation"
+)]
+
 use std::hint::black_box;
 use tesserae_core::settlement::{Building, PlotRule, Settlement};
 use tesserae_core::template::{Cell, Template};
 use tesserae_core::testgen;
 use tesserae_core::{
     Biome, BiomeName, BiomeSettlement, BiomeStructure, BiomeTable, CHUNK_SIZE, ClimateParams,
-    MaterialId, SurfaceFeatures, Voxel, WaterParams, Worldgen, WorldgenParams,
+    MaterialId, SurfaceFeatures, Voxel, Worldgen, WorldgenParams,
 };
 
 /// Thread CPU time (user + system) in nanoseconds.
@@ -240,19 +245,12 @@ fn bare(size: f32) -> Worldgen {
     Worldgen::new(SEED, size, params(SurfaceFeatures::NONE))
 }
 
-/// Steep hills with lakes in their valleys: ground a bridge finds gaps in.
+/// Steep hills by the fixture's sea and rivers: ground a bridge finds gaps in.
 fn valleys(features: SurfaceFeatures) -> WorldgenParams {
-    let hills = WorldgenParams {
+    WorldgenParams {
         relief_m: 32.0,
         feature_size_m: 24.0,
         ..params(features)
-    };
-    WorldgenParams {
-        water: Some(WaterParams {
-            level_m: hills.sea_level_m + hills.relief_m * 5.0 / 12.0,
-            material: testgen::fixtures().water,
-        }),
-        ..hills
     }
 }
 
@@ -293,19 +291,27 @@ fn with_settlement(size: f32, settlement: Settlement) -> Worldgen {
         .with_settlements(&[settlement])
 }
 
-/// The metre column the 9 Chunks centre on: amid what `with` stands nearest the origin, found at
-/// 1 m, so every Voxel size times the same ground. Also the number of Voxels it changed there.
-/// How many Chunks either way of the origin [`centre_m`] looks: far enough for the cap town,
+/// How many Chunks either way of its anchor [`centre_m`] looks: far enough for the cap town,
 /// whose disc and margin keep it over 224 m out.
 const SCAN_CHUNKS: i32 = 12;
+/// How far [`centre_m`] asks for a Settlement: one is founded only on a level disc, often a
+/// kilometre or more from the origin.
+const SETTLEMENT_SEARCH_M: f32 = 4000.0;
 
+/// The metre column the 9 Chunks centre on: amid what `with` stands nearest the Settlement nearest
+/// the origin, or the origin, found at 1 m, so every Voxel size times the same ground. Also the
+/// number of Voxels it changed there.
 fn centre_m(with: &Worldgen, bare: &Worldgen) -> ([f32; 2], usize) {
     let chunk_m = CHUNK_SIZE as f32;
+    let anchor = with
+        .settlement_spawn_m(SETTLEMENT_SEARCH_M)
+        .unwrap_or([0.0; 2]);
+    let [ax, az] = anchor.map(|m| (m / chunk_m).floor() as i32);
     let (low, high) = with.surface_bounds_m();
     let rows = (low / chunk_m).floor() as i32..=(high / chunk_m).ceil() as i32;
     let mut changed = Vec::new();
-    for cz in -SCAN_CHUNKS..SCAN_CHUNKS {
-        for cx in -SCAN_CHUNKS..SCAN_CHUNKS {
+    for cz in az - SCAN_CHUNKS..az + SCAN_CHUNKS {
+        for cx in ax - SCAN_CHUNKS..ax + SCAN_CHUNKS {
             for cy in rows.clone() {
                 let (w, b) = (with.chunk(cx, cy, cz), bare.chunk(cx, cy, cz));
                 if w.same_packing(&b) {
@@ -325,7 +331,7 @@ fn centre_m(with: &Worldgen, bare: &Worldgen) -> ([f32; 2], usize) {
             }
         }
     }
-    let distance = |p: &[f32; 2]| p[0] * p[0] + p[1] * p[1];
+    let distance = |p: &[f32; 2]| (p[0] - anchor[0]).powi(2) + (p[1] - anchor[1]).powi(2);
     let nearest = *changed
         .iter()
         .min_by(|a, b| distance(a).total_cmp(&distance(b)))

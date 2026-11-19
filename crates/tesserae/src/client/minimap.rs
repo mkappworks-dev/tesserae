@@ -528,7 +528,7 @@ mod tests {
             biomes: vec!["plains".into(), "river_bend".into()],
             cave_biomes: vec!["t:crystal_cavern".into()],
             default_mode: tesserae_core::save::GameMode::Survival,
-            generator: 2,
+            generator: 3,
             temperature_size_m: 300.0,
             humidity_size_m: 700.0,
         });

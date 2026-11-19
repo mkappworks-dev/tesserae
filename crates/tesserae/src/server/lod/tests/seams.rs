@@ -4,7 +4,7 @@ use super::*;
 use bevy::platform::collections::HashSet;
 use tesserae_core::RenderClass;
 
-/// Levels 0 to 3 of `source`'s ground, built as the Server builds them.
+/// Levels 0 to 3 of the land seed's ground, built as the Server builds them.
 struct Levels {
     chunks: HashMap<(u32, ChunkCoord), Shown>,
     tables: Tables,
@@ -16,10 +16,10 @@ impl Levels {
             return s.clone();
         }
         let s = if level == 0 {
-            shown(packed(source(0).chunk(c.x, c.y, c.z)))
+            shown(packed(source_of(land().seed, 0).chunk(c.x, c.y, c.z)))
         } else {
             shown(generate_coarse(
-                &source(level - 1),
+                &source_of(land().seed, level - 1),
                 c,
                 &Default::default(),
                 &self.tables,
@@ -83,7 +83,7 @@ fn no_seam_wall_the_finer_ground_leaves_open_is_dropped() {
         chunks: HashMap::default(),
         tables: crate::server::fixture_tables(),
     };
-    let surface = source(0);
+    let surface = source_of(land().seed, 0);
     let (low_m, high_m) = surface.surface_bounds_m();
     let all = Arc::new(SeamOpenings::everywhere());
     let none = Arc::new(SeamOpenings::nowhere());

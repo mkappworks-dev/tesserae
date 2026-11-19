@@ -85,25 +85,25 @@ and lake content.
 
 A World also snapshots its own Climate, Biome table and ores in its generation
 parameters, so a Game that gains a Biome later cannot reshape it. The three
-fields are optional on read and written only for Generator version 2 and a
-non-empty table, so a version 1 commit, or one written before Biomes, restores
-with none. Ores name their Material and Biomes, and a Biome names its ground
-Materials, all through the Mapping like the World's own ground. A Biome's
-optional sky and fog colours, cave scale and surface features ride in its
-snapshot, absent when it has none, so a World saved before a Biome gained
-features keeps its bare ground. A tree Plant's frozen form carries its `vines`
-(the climber's Material and `plane` Shape by name, the Orientation against each
-side, density and length), absent when it hangs none. A surface feature that
-names a Plant freezes what generation reads of it, by Material and Shape name: a
-crop's or spreader's Stages, a column's Material, height and fluid, a tree's
-Materials, size and fruit, a vine crop's ripe Material, fruit and reach, gap and
-cap (a `vine` form, absent in a World made before vine crops); a feature that
-names a Material has none of it. A feature's `field` (group number, region scale
-and strays) and a Biome's `crop_fields` (each crop's Stage Materials, Shapes and
-weight, plot range, spacing, path and ditch Materials by name, and distance from
-the lake) ride in the same snapshot, absent when there are none, so a World made
-before fields generates none. The snapshot is separate from `entities` and
-changes neither the format nor the generator version.
+fields are optional on read and written only for a non-empty table, so a World
+without Biomes restores with none. Ores name their Material and Biomes, and a
+Biome names its ground Materials, all through the Mapping like the World's own
+ground. A Biome's optional sky and fog colours, cave scale and surface features
+ride in its snapshot, absent when it has none, so a World saved before a Biome
+gained features keeps its bare ground. A tree Plant's frozen form carries its
+`vines` (the climber's Material and `plane` Shape by name, the Orientation
+against each side, density and length), absent when it hangs none. A surface
+feature that names a Plant freezes what generation reads of it, by Material and
+Shape name: a crop's or spreader's Stages, a column's Material, height and
+fluid, a tree's Materials, size and fruit, a vine crop's ripe Material, fruit
+and reach, gap and cap (a `vine` form, absent in a World made before vine
+crops); a feature that names a Material has none of it. A feature's `field`
+(group number, region scale and strays) and a Biome's `crop_fields` (each crop's
+Stage Materials, Shapes and weight, plot range, spacing, path and ditch
+Materials by name, and distance from the lake) ride in the same snapshot, absent
+when there are none, so a World made before fields generates none. The snapshot
+is separate from `entities` and changes neither the format nor the generator
+version.
 
 Plants add nothing else to the save. A Plant Voxel is a Material and its Stage
 is that Material, a tree is Voxels, and the Overlay, the Agenda and the
@@ -189,10 +189,12 @@ A World directory has immutable `00000000000000000001.commit` files, immutable
 contains an eight-byte `TESSAVE1` magic, 32-byte SHA-256 of the remaining bytes,
 and UTF-8 JSON. JSON records reject unknown fields. Sequence in the filename
 must agree with the body. There are no implicit migrations. A commit's generator
-version is 1 or 2 and any other is refused: a World keeps the version it was
-created with, new Worlds are stamped 2, and a version 1 World keeps its version
-1 terrain. The current prototype caps a whole commit at 256 MiB; exceeding it
-reports an error, not successful saving.
+version is 3 and any other is refused: a World keeps the version it was created
+with, and new Worlds are stamped 3. A World stamped 1 or 2 is refused with a
+message naming its version and saying it predates version 3; those versions were
+deleted before the first release, with no migration (ADR-0033). The current
+prototype caps a whole commit at 256 MiB; exceeding it reports an error, not
+successful saving.
 
 A format 3 commit is a manifest. It holds everything earlier formats did, except
 that each Chunk is its coordinate, revision and a record reference, and each

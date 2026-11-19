@@ -206,7 +206,6 @@ mod tests {
             ])
             .unwrap(),
             ores: OreTable::new(&[ore(&[1]), ore(&[2]), ore(&[])]).unwrap(),
-            generator: 2,
             ..WorldgenParams::default()
         }
     }

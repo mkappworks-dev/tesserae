@@ -278,8 +278,6 @@ def main():
     parser.add_argument('--monitor-hz', type=int, help='select the unique monitor reporting this refresh rate (within 1 Hz)')
     # An engine without views ignores it, so one runner serves an A/B against main.
     parser.add_argument('--view', choices=['first', 'third'], default='first')
-    parser.add_argument('--generator', type=int, choices=[3],
-                        help='make the World under this Generator version (a dev build only)')
     parser.add_argument('--repeats', type=int, default=3)
     parser.add_argument('--fixtures', nargs='+', choices=FIXTURES,
                         default=['active', 'stationary', 'flight', 'transparency'])
@@ -367,8 +365,6 @@ def main():
                                TESSERAE_SCREENSHOT_SETTLE_S='1', TESSERAE_SCREENSHOT_VIEW=args.view,
                                TESSERAE_SCREENSHOT_SPEED_M_S='0')
                     env.update(MOTION.get(case, {}))
-                    if args.generator:
-                        env['TESSERAE_GENERATOR'] = str(args.generator)
                     for name in args.switches:
                         env['TESSERAE_DIAG_' + name.upper().replace('-', '_')] = '1'
                     if args.monitor_probe:

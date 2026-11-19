@@ -342,8 +342,8 @@ impl Worldgen {
                 (0..8).any(|d| {
                     let angle = d as f32 * std::f32::consts::FRAC_PI_4;
                     let (x, z) = (
-                        cx + reach_m * k * angle.cos(),
-                        cz + reach_m * k * angle.sin(),
+                        cx + reach_m * k * libm::cosf(angle),
+                        cz + reach_m * k * libm::sinf(angle),
                     );
                     self.water_surface_m(x, z).is_some()
                 })

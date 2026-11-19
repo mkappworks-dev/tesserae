@@ -583,7 +583,7 @@ mod tests {
             biomes: Vec::new(),
             cave_biomes: Vec::new(),
             default_mode: GameMode::Survival,
-            generator: 2,
+            generator: 3,
             temperature_size_m: 300.0,
             humidity_size_m: 700.0,
         });

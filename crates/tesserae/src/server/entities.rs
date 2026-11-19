@@ -309,7 +309,8 @@ mod tests {
             biomes: BiomeTable::new(&[field]).unwrap(),
             ..tesserae_core::testgen::world_params()
         };
-        let generator = Worldgen::new(7, 1.0, params);
+        // A seed whose origin is dry land.
+        let generator = Worldgen::new(42, 1.0, params);
         let size = CHUNK_SIZE as i32;
         let (coord, chunk, at) = (0..4)
             .find_map(|cy| {

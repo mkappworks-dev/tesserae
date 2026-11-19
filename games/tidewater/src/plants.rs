@@ -20,7 +20,7 @@ pub fn lagoon() -> Vec<SurfaceFeature> {
         ("flora:cane", 14.0, 16.0, 0.95),
         ("aquatic:seagrass", 9.0, 16.0, 0.9),
         ("aquatic:kelp", 7.0, 16.0, 0.9),
-        ("flora:fern", 3.4, 14.0, 0.9),
+        ("flora:fern", 3.6, 14.0, 0.9),
     ])
 }
 
@@ -33,9 +33,9 @@ pub fn lagoon_fields() -> Vec<CropField> {
             ("crops:potato", 2.0),
         ],
         (6.0, 8.0),
-        80.0,
+        88.0,
         "strata:sand",
-        Some(("waters:water", 48.0)),
+        Some(("waters:water", 88.0)),
     )]
 }
 

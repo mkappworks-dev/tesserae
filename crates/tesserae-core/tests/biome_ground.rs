@@ -7,6 +7,8 @@ use tesserae_core::{
     WorldgenParams,
 };
 
+mod common;
+
 const SEED: u64 = 0x7e55_e2ae_0000_0001;
 
 fn biome(name: &str, temperature: f32, ground: Option<GroundParams>) -> Biome {
@@ -47,14 +49,14 @@ fn small_regions() -> ClimateParams {
 
 /// Cubes only, so the terrain tests see the ground, not its stairs.
 fn params(biomes: &[Biome]) -> WorldgenParams {
-    WorldgenParams {
+    common::lowland(WorldgenParams {
         caves: None,
         smoothing: None,
         water: None,
         climate: small_regions(),
         biomes: BiomeTable::new(biomes).unwrap(),
         ..tesserae_core::testgen::world_params()
-    }
+    })
 }
 
 fn generator(biomes: &[Biome], voxel_size: f32) -> Worldgen {
@@ -150,7 +152,7 @@ fn silhouette(g: &Worldgen, reach: i32) -> Vec<Vec<(bool, u8, u8)>> {
 
 #[test]
 fn biomes_change_no_height_cave_lake_or_stair() {
-    let defaults = tesserae_core::testgen::world_params();
+    let defaults = common::lowland(tesserae_core::testgen::world_params());
     let plain = WorldgenParams {
         climate: small_regions(),
         smoothing: Some(tesserae_core::SmoothingParams { min_rise_m: 0.0 }),
@@ -232,29 +234,6 @@ fn a_biome_makes_the_same_ground_at_the_same_metres_at_any_voxel_size() {
             seen[id.index()] += 1;
         }
         assert!(seen.iter().all(|&n| n > 100), "{seen:?} at {voxel_size} m");
-    }
-}
-
-#[test]
-fn generator_version_1_ignores_biome_ground() {
-    let biomes = [
-        biome("cold", 0.2, Some(tundra())),
-        biome("warm", 0.8, Some(desert())),
-    ];
-    let v1 = WorldgenParams {
-        generator: 1,
-        ..params(&biomes)
-    };
-    let plain = WorldgenParams {
-        biomes: BiomeTable::default(),
-        ..v1
-    };
-    let (a, b) = (
-        Worldgen::new(SEED, 1.0, v1),
-        Worldgen::new(SEED, 1.0, plain),
-    );
-    for ((_, x), (_, y)) in columns(&a, 3).into_iter().zip(columns(&b, 3)) {
-        assert_eq!(x, y);
     }
 }
 

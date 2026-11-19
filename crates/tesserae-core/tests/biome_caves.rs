@@ -5,6 +5,8 @@ use tesserae_core::{
     Biome, BiomeName, BiomeTable, CHUNK_SIZE, Chunk, ClimateParams, Worldgen, WorldgenParams,
 };
 
+mod common;
+
 const SEED: u64 = 0x7e55_e2ae_0000_0006;
 
 fn biome(name: &str, temperature: f32, cave_scale: Option<f32>) -> Biome {
@@ -26,15 +28,16 @@ fn small_regions() -> ClimateParams {
     }
 }
 
-/// Cubes only, so the carving is the only thing that differs between Worlds.
+/// Cubes only, so the carving is the only thing that differs between Worlds; on low land, whose
+/// caverns lie above the tunnels' floor and out of their count.
 fn params(biomes: &[Biome]) -> WorldgenParams {
-    WorldgenParams {
+    common::lowland(WorldgenParams {
         smoothing: None,
         water: None,
         climate: small_regions(),
         biomes: BiomeTable::new(biomes).unwrap(),
         ..tesserae_core::testgen::world_params()
-    }
+    })
 }
 
 fn generator(biomes: &[Biome], voxel_size: f32) -> Worldgen {

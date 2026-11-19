@@ -764,6 +764,10 @@ pub fn felling_region(
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::disallowed_methods,
+    reason = "a test's own maths is not generation"
+)]
 mod tests {
     use super::*;
     use crate::climate::Climate;
@@ -788,6 +792,7 @@ mod tests {
         Tree {
             vines: None,
             branching: None,
+            crowding_m: None,
             trunk: TRUNK,
             canopy: CANOPY,
             trunk_height_m: (3.0, 5.0),

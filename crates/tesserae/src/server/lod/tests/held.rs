@@ -471,6 +471,8 @@ impl Lake {
             world().seed,
             self.voxel_m,
             WorldgenParams {
+                // The water stands at Sea level.
+                sea_level_m: self.level_m,
                 water: Some(tesserae_core::WaterParams {
                     level_m: self.level_m,
                     material: lake_fluid(),

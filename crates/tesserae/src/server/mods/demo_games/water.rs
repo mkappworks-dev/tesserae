@@ -1,4 +1,4 @@
-//! Water in a version 3 Terra World: no air standing inside it, and no Plant punching a hole in its top.
+//! Water in a Terra World: no air standing inside it, and no Plant punching a hole in its top.
 
 use tesserae_core::{Voxel, Worldgen, WorldgenParams};
 
@@ -22,7 +22,7 @@ fn column(g: &Worldgen, x: i32, z: i32, from_m: i32, to_m: i32) -> Vec<Voxel> {
 }
 
 #[test]
-fn version_3_water_has_no_air_in_it_and_kelp_leaves_the_surface_whole() {
+fn water_has_no_air_in_it_and_kelp_leaves_the_surface_whole() {
     let (_install, loaded) = loaded("terra", 1.0);
     let world = loaded.world.unwrap();
     let params = WorldgenParams {
@@ -32,9 +32,11 @@ fn version_3_water_has_no_air_in_it_and_kelp_leaves_the_surface_whole() {
     let kelp = material(&loaded, "aquatic:kelp");
     let g = Worldgen::new(1, 1.0, params);
     let (mut wet, mut kelp_columns, mut pockets, mut holed_tops) = (0, 0, 0, 0);
-    for j in -100..100 {
-        for i in -100..100 {
-            let (x, z) = (i * 59, j * 61);
+    // Every wet column generates its own Chunks, nearly all of the test's time: one in four of the
+    // columns 59 by 61 m apart, over the same 12 km square, still finds 1803 wet and 53 with kelp.
+    for j in -50..50 {
+        for i in -50..50 {
+            let (x, z) = (i * 118, j * 122);
             let Some(level) = g.water_level_m(x as f32, z as f32) else {
                 continue;
             };

@@ -1,0 +1,75 @@
+name: Determinism
+
+# CI's triggers, plus a manual run to measure a target without a PR.
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  merge_group:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  determinism:
+    name: Determinism (${{ matrix.target }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - runner: windows-latest
+            target: x86_64-pc-windows-msvc
+          - runner: macos-latest
+            target: aarch64-apple-darwin
+          # Built for x86-64 and run under Rosetta on the arm64 runner: GitHub has
+          # no x86-64 macos-latest. The image installs Rosetta in
+          # images/macos/scripts/build/install-rosetta.sh of actions/runner-images.
+          - runner: macos-latest
+            target: x86_64-apple-darwin
+            rosetta: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install Rust
+        run: rustup toolchain install stable --profile minimal --target ${{ matrix.target }}
+
+      # A missing Rosetta fails here by name rather than as "Bad CPU type" mid-run.
+      - name: Check Rosetta
+        if: matrix.rosetta
+        run: arch -x86_64 /usr/bin/true
+
+      - name: Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      # Release, because that is the build a Server generates with. The two whole
+      # binaries hold the recorded digests and the asserts that their boxes cover what
+      # they digest; surface_features' and settlement_worldgen's recorded digests are
+      # picked out of their other tests.
+      - name: Digest tests
+        run: |
+          cargo test -p tesserae-core --release --locked --target ${{ matrix.target }} \
+            --test generator_version --test coarse_generation
+          cargo test -p tesserae-core --release --locked --target ${{ matrix.target }} \
+            --test surface_features -- --exact \
+            a_world_whose_biomes_declare_no_features_makes_the_recorded_chunks \
+            a_snapshot_whose_biomes_have_no_features_restores_to_the_recorded_chunks
+          cargo test -p tesserae-core --release --locked --target ${{ matrix.target }} \
+            --test settlement_worldgen -- --exact a_fixed_size_settlement_lays_out_exactly_as_before_ranges

@@ -21,10 +21,10 @@ on another platform or after a toolchain update shifts untouched terrain today.
 With deltas every edited Chunk would also depend on it, and a mismatch would
 refuse the whole World. That drift is a present risk, not a theoretical one:
 
-- Generator version 2's Settlements and crop fields, and version 3's terrain,
-  call `sin`, `cos`, `atan2` and `powf` from `std`, which documents them as
-  varying by platform and by Rust version. The basic operations and `sqrt` are
-  exact.
+- Generator versions 2 and 3's Settlements, crop fields and spawn search call
+  `sin`, `cos` and `atan2` from `std`, and their Surface features and landforms
+  `powi`, which Rust documents as varying by platform and by version. The basic
+  operations and `sqrt` are exact.
 - CI runs on Linux only; releases build for macOS, Linux and Windows.
 - The golden digests hash runtime ids and cover version 2 only without Biomes,
   and version 2's generated Overlay changed on step 17's branch.
@@ -36,7 +36,8 @@ to a shipped Generator version can stop a World opening.
 ## Revisit when
 
 Both hold: saved Chunks are still a measured storage problem in real play after
-incremental Commits, and generation is shown deterministic — the frozen versions
-avoid `std`'s transcendental functions and name-based golden digests pass on
-macOS, Linux and Windows CI. That work is
+incremental Commits, and generation is shown deterministic — version 3, the only
+one left ([ADR-0033](0033-generator-version-3-is-the-only-version.md)), avoids
+`std`'s platform maths ([ADR-0032](0032-generation-uses-no-platform-maths.md))
+and name-based golden digests pass on macOS, Linux and Windows CI. That work is
 [generator determinism](../../.scratch/2026-11-17-generator-determinism/spec.md).

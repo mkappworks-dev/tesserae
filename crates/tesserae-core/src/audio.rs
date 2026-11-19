@@ -4,6 +4,8 @@
 //! spatial curve is a fixed inverse square with no range, so it cannot carry a
 //! Sound a declared distance (ADR-0025).
 
+#![allow(clippy::disallowed_methods, reason = "audio is not generation")]
+
 use serde::{Deserialize, Serialize};
 
 /// Repeated damage is continuous, but its feedback must not fire every tick.

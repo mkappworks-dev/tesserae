@@ -320,6 +320,7 @@ fn plant(
                         tiers: b.tiers.unwrap_or(false),
                         lobe_radius_m: b.lobe_radius_m,
                     }),
+                    crowding_m: tree.crowding_m,
                 }),
             )
         }

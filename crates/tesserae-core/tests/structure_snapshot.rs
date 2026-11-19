@@ -15,7 +15,7 @@ const STAIR_SHAPE: u8 = 2;
 const SIDE: i32 = CHUNK_SIZE as i32 - 1;
 
 const SEED: u64 = 0x7e55_e2ae_0000_0006;
-const GENERATOR: u32 = 2;
+const GENERATOR: u32 = 3;
 
 fn mapping() -> Mapping {
     let f = tesserae_core::testgen::fixtures();
@@ -90,6 +90,7 @@ fn spaced(spacing_m: f32) -> WorldgenParams {
             humidity_size_m: 64.0,
         },
         biomes: BiomeTable::new(&[biome]).unwrap(),
+        water: None,
         ..tesserae_core::testgen::world_params()
     }
 }

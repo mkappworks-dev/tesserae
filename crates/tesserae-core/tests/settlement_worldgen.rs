@@ -1,6 +1,11 @@
 //! Settlements in generation: a Biome lists a Settlement, and worldgen lays out its roads and Plots
 //! whole from any Chunk's viewpoint, the same in metres at every Voxel size.
 
+#![allow(
+    clippy::disallowed_methods,
+    reason = "a test's own maths is not generation"
+)]
+
 use std::collections::{HashMap, HashSet};
 
 use tesserae_core::settlement::{Building, PlotRule, Settlement};
@@ -26,6 +31,8 @@ const FLOWERS: MaterialId = 190;
 const CROP: [MaterialId; 3] = [191, 192, 193];
 const FURROW: MaterialId = 194;
 const FIELD: MaterialId = 195;
+
+mod common;
 
 const SEED: u64 = 0x7e55_e2ae_0000_0001;
 const SIZES: [f32; 3] = [1.0, 0.5, 0.25];
@@ -148,8 +155,9 @@ fn village() -> Settlement {
     }
 }
 
+/// Low, gentle land, so most draws stand.
 fn plain(features: SurfaceFeatures) -> WorldgenParams {
-    WorldgenParams {
+    common::lowland(WorldgenParams {
         relief_m: 3.0,
         caves: None,
         smoothing: None,
@@ -167,8 +175,9 @@ fn plain(features: SurfaceFeatures) -> WorldgenParams {
             surface_features: features,
         }])
         .unwrap(),
+        water: None,
         ..tesserae_core::testgen::world_params()
-    }
+    })
 }
 
 fn listing(settlements: bool) -> SurfaceFeatures {
@@ -668,6 +677,7 @@ fn settlements_no_biome_lists_change_nothing() {
 fn oak() -> SurfaceTree {
     SurfaceTree {
         branching: None,
+        crowding_m: None,
         trunk: TRUNK,
         canopy: CANOPY,
         trunk_height_m: (3.0, 5.0),
@@ -771,10 +781,12 @@ fn no_single_structure_field_or_tree_stands_in_a_settlement_and_no_structure_in_
     );
 }
 
-/// Hills enough that Plots are cut and filled and roads climb.
+/// Hills enough that Plots are cut and filled and roads climb: the default land, its relief
+/// doubled since the scans fall on the sea floor, where generation tempers it.
 fn hilly(features: SurfaceFeatures) -> WorldgenParams {
     WorldgenParams {
-        relief_m: 12.0,
+        relief_m: 24.0,
+        landforms: tesserae_core::testgen::world_params().landforms,
         ..plain(features)
     }
 }
@@ -974,9 +986,11 @@ fn a_road_never_rises_more_than_a_slab_per_step() {
 fn wilderness_structures_keep_the_strict_rule_and_are_never_levelled() {
     let half_m = 96.0;
     let size = 1.0;
-    let hilly_crowded = |s| WorldgenParams {
-        relief_m: 12.0,
-        ..crowded(s)
+    let hilly_crowded = |s| {
+        common::lowland(WorldgenParams {
+            relief_m: 12.0,
+            ..crowded(s)
+        })
     };
     let laid = Laid::scan(size, hilly_crowded, half_m);
     assert!(!laid.centres_within(half_m).is_empty());
@@ -1565,10 +1579,15 @@ fn digest(changed: &HashMap<[i32; 3], (Voxel, Voxel)>) -> u64 {
     hash
 }
 
-/// The digests are what the generator laid before Settlements took size ranges, re-pinned when
-/// approach paths ran on as trails (ticket 27): a fixed size still lays out as it did then.
 #[test]
 fn a_fixed_size_settlement_lays_out_exactly_as_before_ranges() {
+    assert_eq!(
+        fixed_size_digests(),
+        [0x183e_8cc7_22d6_c831, 0x70e7_a31c_5752_aafc]
+    );
+}
+
+fn fixed_size_digests() -> Vec<u64> {
     let wide = Settlement {
         radius_m: 64.0,
         radius_min_m: 64.0,
@@ -1585,15 +1604,14 @@ fn a_fixed_size_settlement_lays_out_exactly_as_before_ranges() {
             160.0,
         ),
     ];
-    let digests: Vec<u64> = cases
+    cases
         .into_iter()
         .map(|(settlement, with, bare, half_m)| {
             let with = generator(1.0, with, settlement.clone());
             let bare = generator(1.0, bare, settlement);
             digest(&changed(&with, &bare, half_m, false))
         })
-        .collect();
-    assert_eq!(digests, [0x6418_4939_4e1a_2ea1, 0xb08f_816e_daa9_9247]);
+        .collect()
 }
 
 const OTHER_PATH: MaterialId = 195;
@@ -1710,6 +1728,15 @@ fn the_spawn_stands_inside_the_settlement_nearest_the_origin_south_of_its_centre
     );
     // A World with none near keeps the origin.
     assert_eq!(generator_for(false).settlement_spawn_m(512.0), None);
+}
+
+#[test]
+fn a_new_player_spawns_in_the_nearest_settlement_else_at_the_origin() {
+    assert_eq!(
+        generator_for(true).spawn_m().map(f32::to_bits),
+        [1_110_441_984, 1_122_002_534]
+    );
+    assert_eq!(generator_for(false).spawn_m(), [0.0; 2]);
 }
 
 fn generator_for(listed: bool) -> Worldgen {

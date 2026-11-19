@@ -15,7 +15,7 @@ use super::ground::SAMPLE_M;
 use super::structures::{NEIGHBOURS, ORIGIN_CLEAR_M, Structure};
 use super::{CARDINALS, Footprint, Worldgen, top_index};
 use crate::chunk::{CHUNK_SIZE, Chunk};
-use crate::climate::{BIOMES_SINCE, BiomeId, BiomeSettlement};
+use crate::climate::{BiomeId, BiomeSettlement};
 use crate::mesh::POS_Y;
 use crate::settlement::{Building, Outskirts, PlotRule, Settlement};
 use crate::shape::{Orientation, SHAPE_SLAB, SHAPE_STAIR};
@@ -119,9 +119,7 @@ impl SettlementPass {
         templates: &[Template],
         settlements: &[Settlement],
     ) -> Option<Self> {
-        if params.generator < BIOMES_SINCE || params.ground.is_none() {
-            return None;
-        }
+        params.ground?;
         let mut rows = Vec::new();
         let mut listed = vec![0; params.biomes.as_slice().len()];
         let (mut above, mut below, mut reach_m) = (0, 0, 0.0f32);
@@ -391,7 +389,10 @@ impl Worldgen {
             .map(|k: i32| {
                 let turn = (k + 1) / 2 * if k % 2 == 1 { 1 } else { -1 };
                 let angle = toward + turn as f32 * TAU / 8.0;
-                [cx + out_m * angle.cos(), cz + out_m * angle.sin()]
+                [
+                    cx + out_m * libm::cosf(angle),
+                    cz + out_m * libm::sinf(angle),
+                ]
             })
             .find(|&[x, z]| self.water_surface_m(x, z).is_none())
     }
@@ -532,7 +533,7 @@ impl Worldgen {
         }
         let out_m = keep_m + (side_m - 1.0 - keep_m) * unit(mix(hash ^ 10)) as f32;
         let angle = TAU / 4.0 * unit(mix(hash ^ 11)) as f32;
-        let along = [out_m * angle.cos(), out_m * angle.sin()];
+        let along = [out_m * libm::cosf(angle), out_m * libm::sinf(angle)];
         Some([0, 1].map(|a| {
             let m = along[a].round();
             if cell[a] == 0 {
@@ -607,19 +608,15 @@ impl Worldgen {
         })
     }
 
-    /// Whether the ground over a Settlement's disc is level enough to found it on: under version 3,
-    /// whose land rises into hills and mountains, within [`DISC_RISE_M`] of its centre on two
-    /// rings; before it, whose land is gentle, always.
+    /// Whether the ground over a Settlement's disc is level enough to found it on: within
+    /// [`DISC_RISE_M`] of its centre on two rings.
     pub(super) fn level_disc(&self, centre_m: [f32; 2], height_m: f32, reach_m: f32) -> bool {
-        if self.terrain.is_none() {
-            return true;
-        }
         [0.5, 1.0].into_iter().all(|ring| {
             (0..8).all(|k| {
                 let angle = k as f32 * TAU / 8.0;
                 let [x, z] = [
-                    centre_m[0] + ring * reach_m * angle.cos(),
-                    centre_m[1] + ring * reach_m * angle.sin(),
+                    centre_m[0] + ring * reach_m * libm::cosf(angle),
+                    centre_m[1] + ring * reach_m * libm::sinf(angle),
                 ];
                 (self.surface_height_m(x, z) - height_m).abs() <= DISC_RISE_M
             })
@@ -859,7 +856,7 @@ impl Worldgen {
                 break;
             }
             let angle = along / radius_m;
-            let normal = [angle.cos(), angle.sin()];
+            let normal = [libm::cosf(angle), libm::sinf(angle)];
             let point = [0, 1].map(|a| centre[a] + normal[a] * radius_m);
             round_disc.push((key, (point, normal, SETBACK_M * unit(mix(key ^ 2)) as f32)));
         }
@@ -931,7 +928,7 @@ impl Worldgen {
         let approaches = 2 + (mix(founding.hash ^ 7) % 2) as usize;
         let first_approach = (mix(founding.hash ^ 8) % count as u64) as usize;
         let first = FACINGS[usize::from(founding.facing)];
-        let base = first[1].atan2(first[0]);
+        let base = libm::atan2f(first[1], first[0]);
         // Another Settlement's disc and margin, which a road stops short of.
         let others: Vec<([f32; 2], f32)> = self
             .foundings_near(widened([centre, centre], paths_m(radius_m)))
@@ -979,7 +976,7 @@ impl Worldgen {
                     continue;
                 };
                 let (from, ahead) = (points[at.saturating_sub(1)], points[at]);
-                let along = (ahead[1] - from[1]).atan2(ahead[0] - from[0]);
+                let along = libm::atan2f(ahead[1] - from[1], ahead[0] - from[0]);
                 for (side, turn) in [-1.0f32, 1.0].into_iter().enumerate() {
                     let key =
                         mix(founding.hash ^ (0x300 + ((spoke * 16 + ring) * 2 + side) as u64));
@@ -1035,8 +1032,8 @@ impl Worldgen {
             for (k, bend) in ROAD_BENDS.into_iter().enumerate() {
                 let angle = heading + bend;
                 let next = [
-                    point[0] + ROAD_STEP_M * angle.cos(),
-                    point[1] + ROAD_STEP_M * angle.sin(),
+                    point[0] + ROAD_STEP_M * libm::cosf(angle),
+                    point[1] + ROAD_STEP_M * libm::sinf(angle),
                 ];
                 let out_m = distance(next, centre);
                 if out_m > limit_m

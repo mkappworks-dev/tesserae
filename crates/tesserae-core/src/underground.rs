@@ -28,7 +28,7 @@ impl CaveFeature {
 }
 
 /// A region of the underground with its own rock, floor, features and fog, chosen where the
-/// cave Climate, two 3D fields in metres, lies nearest its point. Version 3 only.
+/// cave Climate, two 3D fields in metres, lies nearest its point.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct CaveBiome {
     pub name: BiomeName,

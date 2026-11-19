@@ -15,7 +15,7 @@ const DOOR: MaterialId = 241;
 const PATH: MaterialId = 242;
 const GRAVEL: MaterialId = 243;
 const SEED: u64 = 0x7e55_e2ae_0000_0006;
-const GENERATOR: u32 = 2;
+const GENERATOR: u32 = 3;
 const SIDE: usize = CHUNK_SIZE - 1;
 
 fn mapping() -> Mapping {
@@ -105,6 +105,7 @@ fn world() -> WorldgenParams {
             surface_features: SurfaceFeatures::NONE.with_settlements(&rows).unwrap(),
         }])
         .unwrap(),
+        water: None,
         ..tesserae_core::testgen::world_params()
     }
 }

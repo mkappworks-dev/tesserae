@@ -9,7 +9,7 @@ use crate::tesserae::mods::content::{
 /// The smallest and largest copy's disc of each kind. No Template is wider than the smallest, so
 /// every one fits a Plot.
 const HAMLET_RADIUS_M: (f32, f32) = (24.0, 32.0);
-const VILLAGE_RADIUS_M: (f32, f32) = (40.0, 64.0);
+const VILLAGE_RADIUS_M: (f32, f32) = (40.0, 72.0);
 /// Wide enough that the largest copies grow a second ring of streets.
 const TOWN_RADIUS_M: (f32, f32) = (96.0, 150.0);
 /// Room round a Settlement's disc for the paths that lead into it and two rows of fields beside
@@ -20,7 +20,7 @@ const TOWN_MARGIN_M: f32 = 52.0;
 /// rules, so a World still shows a village every few hundred metres, hamlets between them and a
 /// town rarely.
 const HAMLET_SPACING_M: f32 = 160.0;
-const VILLAGE_SPACING_M: f32 = 224.0;
+const VILLAGE_SPACING_M: f32 = 240.0;
 const TOWN_SPACING_M: f32 = 416.0;
 /// Thins the lattices' draws, so Settlements stand apart rather than in every cell.
 const HAMLET_CHANCE: f32 = 0.8;
@@ -258,7 +258,7 @@ pub fn settlements() -> Vec<SettlementDef> {
         kind(
             "village",
             VILLAGE_RADIUS_M,
-            (8, 20),
+            (12, 30),
             vec![
                 plot("cottage", 4.0, 1, 6),
                 plot("family_house", 3.0, 1, 4),
@@ -420,6 +420,11 @@ pub fn wild(names: &[&str]) -> Vec<BiomeStructure> {
             chance: WILD_CHANCE,
         })
         .collect()
+}
+
+/// Each of `names` in the wild, and the stone bridge over the Biome's water.
+pub fn wild_and_bridged(names: &[&str]) -> Vec<BiomeStructure> {
+    [wild(names), bridge("stone_bridge")].concat()
 }
 
 /// Terra's bridge `name`, a Template that spans water.

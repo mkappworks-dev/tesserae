@@ -333,7 +333,8 @@ impl Drainage {
                     / (ab[0] * ab[0] + ab[1] * ab[1]))
                     .clamp(0.0, 1.0);
                 let (cx, cz) = (a[0] + ab[0] * t, a[1] + ab[1] * t);
-                let d = ((qx - cx).powi(2) + (qz - cz).powi(2)).sqrt();
+                let (dx, dz) = (qx - cx, qz - cz);
+                let d = (dx * dx + dz * dz).sqrt();
                 let width = river_width_m(n.catchment) * (1.0 - t) + river_width_m(p.catchment) * t;
                 let surface = (n.level_m * (1.0 - t) + p.level_m * t) - SURFACE_BELOW_M;
                 let edge = (d - width / 2.0).max(0.0);

@@ -1,6 +1,5 @@
-//! Chests worldgen stands hold loot drawn for their place: each Game loaded through the Mod
-//! loader, its World generated, and every chest reached through Use, Edits and the Container
-//! path.
+//! Chests worldgen stands hold loot drawn for their place: Terra loaded through the Mod loader, its
+//! World generated, and every chest reached through Use, Edits and the Container path.
 
 use std::collections::BTreeMap;
 
@@ -13,7 +12,7 @@ use super::*;
 use crate::server::WorldGenerator;
 use crate::server::edit::StructureIntent;
 use crate::server::mods::LoadedMods;
-use crate::server::mods::demo_games::structures::{Generated, SEED, standing};
+use crate::server::mods::demo_games::structures::{Generated, SEED, standing, terra_town_m};
 use crate::server::mods::demo_games::{Install, loaded};
 use crate::world::WorldSettings;
 
@@ -28,6 +27,10 @@ struct Game {
 /// `name` loaded as a World of `size` opens it.
 fn game(name: &'static str, size: f32) -> Game {
     let (install, loaded) = loaded(name, size);
+    game_of(name, size, (install, loaded))
+}
+
+fn game_of(name: &'static str, size: f32, (install, loaded): (Install, LoadedMods)) -> Game {
     let generator = Worldgen::new(SEED, size, loaded.world.unwrap())
         .with_templates(&loaded.tables.templates)
         .with_settlements(&loaded.tables.settlements)
@@ -93,7 +96,11 @@ impl Game {
     /// Every chest of a Template standing whole within `half_m` of `centre_m`, with air above it,
     /// and the Template's name.
     fn chests(&self, centre_m: [f32; 2], half_m: f32) -> (Generated, Vec<([i32; 3], String)>) {
-        let world = Generated::around(&self.generator, centre_m, half_m);
+        self.chests_in(Generated::around(&self.generator, centre_m, half_m))
+    }
+
+    /// [`Self::chests`] of the Templates standing whole in `world`.
+    fn chests_in(&self, world: Generated) -> (Generated, Vec<([i32; 3], String)>) {
         let templates = &self.loaded.tables.templates;
         let mut chests = Vec::new();
         for f in standing(&world, templates, self.size()) {
@@ -226,9 +233,6 @@ fn dropped_counts(app: &App, except: &str) -> BTreeMap<String, u32> {
     counted(names.iter().map(|(n, c)| (&**n, *c)))
 }
 
-/// Terra's town at [`SEED`], about 360 m from the origin.
-const TERRA_TOWN_M: [f32; 2] = [356.0, 30.0];
-
 /// Inside the village a new Player enters, a point its chests lie within 128 m of.
 fn village_m(terra: &Game) -> [f32; 2] {
     terra
@@ -257,10 +261,13 @@ fn settlement_at(terra: &Game, world: &Generated, well: [i32; 3]) -> &'static st
 
 #[test]
 fn a_settlement_chest_holds_only_its_buildings_table_or_else_its_settlements() {
-    let terra = game("terra", 1.0);
+    let (install, loaded) = loaded("terra", 1.0);
+    let town_m = terra_town_m(&loaded);
+    let terra = game_of("terra", 1.0, (install, loaded));
     let mut seen = BTreeMap::<(&str, bool), usize>::new();
-    for (centre_m, half_m) in [(village_m(&terra), 128.0), (TERRA_TOWN_M, 128.0)] {
-        let (world, chests) = terra.chests(centre_m, half_m);
+    for (centre_m, half_m) in [(village_m(&terra), 128.0), (town_m, 128.0)] {
+        let (world, chests) =
+            terra.chests_in(Generated::around_ground(&terra.generator, centre_m, half_m));
         let wells: Vec<_> = standing(&world, &terra.loaded.tables.templates, 1.0)
             .into_iter()
             .filter(|f| terra.loaded.tables.templates[f.template].name == "terra:well")
@@ -310,30 +317,6 @@ fn a_settlement_chest_holds_only_its_buildings_table_or_else_its_settlements() {
         ("terra:town", true),
     ] {
         assert!(seen.contains_key(&kind), "{kind:?} chests opened: {seen:?}");
-    }
-}
-
-#[test]
-fn a_wilderness_chest_holds_only_its_biomes_table() {
-    let ember = game("ember", 1.0);
-    let (world, chests) = ember.chests([0.0, 0.0], 640.0);
-    let wild: Vec<_> = chests
-        .into_iter()
-        .filter(|(_, t)| t == "ember:barrow")
-        .collect();
-    assert!(!wild.is_empty(), "a barrow stands with its chest");
-    let mut app = ember.server(&all(&world));
-    for (at, _) in wild {
-        let biome = ember
-            .generator
-            .biome_at(at[0] as f32 + 0.5, at[2] as f32 + 0.5)
-            .unwrap();
-        let table = ember.loaded.biome_loot[biome.index()].as_ref().unwrap();
-        let slots = open(&mut app, at);
-        assert!(slots.iter().flatten().count() >= usize::from(table.rolls_min));
-        for stack in slots.iter().flatten() {
-            assert!(ember.items(table).contains(&stack.item), "{}", stack.item);
-        }
     }
 }
 

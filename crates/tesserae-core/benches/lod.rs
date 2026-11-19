@@ -1,3 +1,8 @@
+#![allow(
+    clippy::disallowed_methods,
+    reason = "a bench's own maths is not generation"
+)]
+
 use criterion::{Criterion, criterion_group, criterion_main};
 use std::hint::black_box;
 use tesserae_core::light::{Light, MAX_LIGHT};
@@ -11,8 +16,7 @@ use tesserae_core::{ShapeTable, Voxel, Worldgen, WorldgenParams, mesh_chunk, tes
 const SEED: u64 = 0x7e55_e2ae_0000_0001;
 const DEEPEST_LEVEL: u32 = 5;
 
-/// A default World with its lakes left out: the terrain every figure in this
-/// file measured before lakes, so a change stays comparable with `main`.
+/// A default World with its water left out, so the figures in this file measure the terrain alone.
 fn dry() -> WorldgenParams {
     WorldgenParams {
         water: None,
@@ -211,7 +215,9 @@ fn coarse_chunk(c: &mut Criterion) {
     }
     let source = source(1);
     let top = surface_at(1)[1];
-    for (name, y) in [("air_level_1", top + 4), ("rock_level_1", top - 4)] {
+    // Above the band's top, not the column's: the band stands far over most ground.
+    let sky = (source.surface_bounds_m().1 / (2 * CHUNK_SIZE) as f32).floor() as i32 + 1;
+    for (name, y) in [("air_level_1", sky), ("rock_level_1", top - 4)] {
         group.bench_function(name, |b| {
             b.iter(|| black_box(coarse(&source, &shapes, black_box([0, y, 0]))))
         });

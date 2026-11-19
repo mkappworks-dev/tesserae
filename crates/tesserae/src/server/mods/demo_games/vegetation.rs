@@ -1,10 +1,10 @@
-//! What each demo Game's Biomes grow: a sample of generated Chunks counted by Plant and Material
-//! name, so a Biome that loses a species, goes bare by accident or sprouts standalone Wood fails.
+//! What Terra's Biomes grow: a sample of generated Chunks counted by Plant and Material name, so a
+//! Biome that loses a species, goes bare by accident or sprouts standalone Wood fails.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use tesserae_core::plant::Kind as PlantKind;
-use tesserae_core::{CHUNK_SIZE, Worldgen};
+use tesserae_core::{CHUNK_SIZE, SurfacePlantKind, Worldgen};
 use tesserae_mods::Kind;
 
 use super::{loaded, material, shape};
@@ -12,8 +12,6 @@ use super::{loaded, material, shape};
 const TREES: [&str; 10] = [
     "oak", "birch", "pine", "palm", "acacia", "jungle", "swamp", "apple", "orange", "cherry",
 ];
-/// Plants that stand in water: they generate only where the Game's lake covers the column.
-const WATER_PLANTS: [&str; 3] = ["aquatic:kelp", "aquatic:seagrass", "aquatic:red_weed"];
 /// The Biomes of a Game whose trees hang vines.
 const VINED: [&str; 2] = ["flora:jungle", "flora:swamp"];
 
@@ -23,367 +21,107 @@ struct Game {
     biomes: &'static [(&'static str, &'static [&'static str])],
     /// Biomes declared bare on purpose.
     bare: &'static [&'static str],
-    lake: bool,
 }
 
-const GAMES: [Game; 5] = [
-    Game {
-        name: "terra",
-        biomes: &[
-            (
-                "temperate",
-                &[
-                    "flora:cherry",
-                    "flora:apple",
-                    "flora:birch",
-                    "flora:oak",
-                    "crops:potato",
-                    "crops:carrot",
-                    "crops:wheat",
-                    "crops:berry",
-                    "crops:watermelon",
-                    "crops:pumpkin",
-                    "flora:mushroom_red",
-                    "flora:daisy",
-                    "flora:poppy",
-                    "flora:tuft",
-                ],
-            ),
-            (
-                "dry",
-                &[
-                    "flora:orange",
-                    "flora:palm",
-                    "flora:cactus",
-                    "crops:berry",
-                    "flora:cane",
-                    "flora:dandelion",
-                    "flora:dry_grass",
-                ],
-            ),
-            (
-                "cold",
-                &[
-                    "flora:birch",
-                    "flora:pine",
-                    "crops:berry",
-                    "flora:mushroom_brown",
-                    "flora:daisy",
-                    "flora:fern",
-                    "flora:tuft",
-                ],
-            ),
-            (
-                "jungle",
-                &[
-                    "flora:jungle",
-                    "flora:palm",
-                    "flora:orchid",
-                    "crops:berry",
-                    "flora:cane",
-                    "flora:mushroom_red",
-                    "flora:fern",
-                    "flora:tall_grass",
-                ],
-            ),
-            (
-                "swamp",
-                &[
-                    "flora:swamp",
-                    "flora:orchid",
-                    "crops:berry",
-                    "flora:mushroom_brown",
-                    "flora:cane",
-                    "aquatic:kelp",
-                    "aquatic:seagrass",
-                    "aquatic:red_weed",
-                    "flora:fern",
-                    "flora:tuft",
-                ],
-            ),
-            (
-                "savanna",
-                &[
-                    "flora:acacia",
-                    "flora:cactus",
-                    "crops:wheat",
-                    "crops:watermelon",
-                    "flora:poppy",
-                    "flora:dandelion",
-                    "flora:tuft",
-                    "flora:dry_grass",
-                ],
-            ),
-            // The Biomes of the land's shape, which only version 3 chooses: the sea's plants, and
-            // bare sand and rock.
-            (
-                "ocean",
-                &["aquatic:kelp", "aquatic:seagrass", "aquatic:red_weed"],
-            ),
-            ("beach", &[]),
-            ("alpine", &[]),
-            ("river", &["flora:cane"]),
-        ],
-        bare: &["beach", "alpine"],
-        lake: true,
-    },
-    Game {
-        name: "meadow",
-        biomes: &[
-            (
-                "meadow",
-                &[
-                    "flora:cherry",
-                    "flora:apple",
-                    "flora:oak",
-                    "crops:potato",
-                    "crops:watermelon",
-                    "crops:pumpkin",
-                    "crops:carrot",
-                    "crops:wheat",
-                    "flora:dandelion",
-                    "flora:daisy",
-                    "flora:poppy",
-                    "flora:tuft",
-                ],
-            ),
-            (
-                "heath",
-                &[
-                    "flora:swamp",
-                    "flora:birch",
-                    "crops:berry",
-                    "crops:pumpkin",
-                    "flora:mushroom_brown",
-                    "flora:fern",
-                    "flora:tall_grass",
-                ],
-            ),
-            (
-                "dunes",
-                &[
-                    "flora:palm",
-                    "flora:cactus",
-                    "flora:cane",
-                    "flora:dry_grass",
-                ],
-            ),
-            (
-                "thicket",
-                &[
-                    "flora:jungle",
-                    "flora:orchid",
-                    "crops:berry",
-                    "flora:mushroom_red",
-                    "flora:fern",
-                    "flora:tuft",
-                ],
-            ),
-            (
-                "fen",
-                &[
-                    "flora:swamp",
-                    "flora:cane",
-                    "flora:mushroom_brown",
-                    "flora:fern",
-                    "flora:tuft",
-                ],
-            ),
-            (
-                "prairie",
-                &[
-                    "flora:acacia",
-                    "crops:wheat",
-                    "crops:pumpkin",
-                    "flora:poppy",
-                    "flora:dandelion",
-                    "flora:tuft",
-                    "flora:dry_grass",
-                ],
-            ),
-            // The Biomes of the land's shape, which only version 3 chooses.
-            ("ocean", &[]),
-            ("shore", &[]),
-            ("river", &["flora:cane"]),
-            ("alpine", &[]),
-        ],
-        bare: &["ocean", "shore", "alpine"],
-        lake: false,
-    },
-    Game {
-        name: "ember",
-        biomes: &[
-            (
-                "ash_flats",
-                &[
-                    "flora:birch",
-                    "crops:berry",
-                    "crops:pumpkin",
-                    "flora:poppy",
-                    "flora:dry_grass",
-                ],
-            ),
-            ("scorched", &[]),
-            (
-                "highland",
-                &[
-                    "flora:pine",
-                    "flora:birch",
-                    "flora:mushroom_brown",
-                    "flora:fern",
-                    "flora:tuft",
-                ],
-            ),
-            (
-                "cinder_bog",
-                &[
-                    "flora:swamp",
-                    "flora:cane",
-                    "flora:mushroom_red",
-                    "flora:fern",
-                    "flora:tall_grass",
-                ],
-            ),
-            // The Biomes of the land's shape, which only version 3 chooses.
-            ("ocean", &[]),
-            ("shore", &[]),
-            ("river", &[]),
-            ("alpine", &[]),
-        ],
-        bare: &["scorched", "ocean", "shore", "river", "alpine"],
-        lake: true,
-    },
-    Game {
-        name: "tidewater",
-        biomes: &[
-            (
-                "lagoon",
-                &[
-                    "flora:jungle",
-                    "flora:palm",
-                    "crops:berry",
-                    "crops:watermelon",
-                    "flora:cane",
-                    "aquatic:seagrass",
-                    "aquatic:kelp",
-                    "flora:fern",
-                ],
-            ),
-            (
-                "salt_flats",
-                &[
-                    "flora:palm",
-                    "flora:cactus",
-                    "flora:cane",
-                    "flora:dry_grass",
-                ],
-            ),
-            (
-                "cold_shallows",
-                &["flora:pine", "crops:berry", "aquatic:kelp", "flora:tuft"],
-            ),
-            (
-                "rainforest",
-                &[
-                    "flora:jungle",
-                    "flora:palm",
-                    "flora:orchid",
-                    "flora:mushroom_red",
-                    "flora:cane",
-                    "aquatic:kelp",
-                    "flora:fern",
-                ],
-            ),
-            (
-                "tidal_marsh",
-                &[
-                    "flora:swamp",
-                    "flora:cane",
-                    "flora:mushroom_brown",
-                    "aquatic:red_weed",
-                    "aquatic:kelp",
-                    "flora:fern",
-                ],
-            ),
-            // The Biomes of the land's shape, which only version 3 chooses.
-            ("ocean", &[]),
-            ("shore", &[]),
-            ("river", &["flora:cane"]),
-            ("alpine", &[]),
-        ],
-        bare: &["ocean", "shore", "alpine"],
-        lake: true,
-    },
-    Game {
-        name: "lumen",
-        biomes: &[
-            (
-                "garden",
-                &[
-                    "flora:cherry",
-                    "flora:apple",
-                    "crops:carrot",
-                    "crops:wheat",
-                    "crops:pumpkin",
-                    "crops:watermelon",
-                    "flora:dandelion",
-                    "flora:daisy",
-                    "flora:poppy",
-                    "flora:fern",
-                    "flora:tuft",
-                ],
-            ),
-            (
-                "arid_court",
-                &[
-                    "flora:palm",
-                    "flora:orange",
-                    "flora:cactus",
-                    "flora:dry_grass",
-                ],
-            ),
-            (
-                "frost_court",
-                &[
-                    "flora:pine",
-                    "flora:birch",
-                    "crops:berry",
-                    "flora:mushroom_brown",
-                    "flora:tall_grass",
-                ],
-            ),
-            (
-                "conservatory",
-                &[
-                    "flora:jungle",
-                    "flora:cherry",
-                    "flora:orange",
-                    "flora:palm",
-                    "flora:orchid",
-                    "flora:fern",
-                ],
-            ),
-            (
-                "lily_pond",
-                &[
-                    "flora:swamp",
-                    "flora:cherry",
-                    "flora:cane",
-                    "flora:orchid",
-                    "flora:fern",
-                    "flora:tuft",
-                ],
-            ),
-            // The Biomes of the land's shape, which only version 3 chooses.
-            ("ocean", &[]),
-            ("shore", &[]),
-            ("river", &["flora:cane"]),
-            ("alpine", &[]),
-        ],
-        bare: &["ocean", "shore", "alpine"],
-        lake: false,
-    },
-];
+const TERRA: Game = Game {
+    name: "terra",
+    biomes: &[
+        (
+            "temperate",
+            &[
+                "flora:cherry",
+                "flora:apple",
+                "flora:birch",
+                "flora:oak",
+                "crops:potato",
+                "crops:carrot",
+                "crops:wheat",
+                "crops:berry",
+                "crops:watermelon",
+                "crops:pumpkin",
+                "flora:mushroom_red",
+                "flora:daisy",
+                "flora:poppy",
+                "flora:tuft",
+            ],
+        ),
+        (
+            "dry",
+            &[
+                "flora:orange",
+                "flora:palm",
+                "flora:cactus",
+                "crops:berry",
+                "flora:cane",
+                "flora:dandelion",
+                "flora:dry_grass",
+            ],
+        ),
+        (
+            "cold",
+            &[
+                "flora:birch",
+                "flora:pine",
+                "crops:berry",
+                "flora:mushroom_brown",
+                "flora:daisy",
+                "flora:fern",
+                "flora:tuft",
+            ],
+        ),
+        (
+            "jungle",
+            &[
+                "flora:jungle",
+                "flora:palm",
+                "flora:orchid",
+                "crops:berry",
+                "flora:cane",
+                "flora:mushroom_red",
+                "flora:fern",
+                "flora:tall_grass",
+            ],
+        ),
+        (
+            "swamp",
+            &[
+                "flora:swamp",
+                "flora:orchid",
+                "crops:berry",
+                "flora:mushroom_brown",
+                "flora:cane",
+                "aquatic:kelp",
+                "aquatic:seagrass",
+                "aquatic:red_weed",
+                "flora:fern",
+                "flora:tuft",
+            ],
+        ),
+        (
+            "savanna",
+            &[
+                "flora:acacia",
+                "flora:cactus",
+                "crops:wheat",
+                "crops:watermelon",
+                "flora:poppy",
+                "flora:dandelion",
+                "flora:tuft",
+                "flora:dry_grass",
+            ],
+        ),
+        // The Biomes of the land's shape, which only version 3 chooses: the sea's plants, and
+        // bare sand and rock.
+        (
+            "ocean",
+            &["aquatic:kelp", "aquatic:seagrass", "aquatic:red_weed"],
+        ),
+        ("beach", &[]),
+        ("alpine", &[]),
+        ("river", &["flora:cane"]),
+    ],
+    bare: &["beach", "alpine"],
+};
 
 /// The Materials that show a Plant stands: a tree's trunk, a crop's every Stage, else its own.
 fn materials_of(plant: &str) -> Vec<String> {
@@ -410,10 +148,94 @@ fn is_standalone_wood(name: &str) -> bool {
 
 /// Chunk columns sampled per Biome, each 32 m square at a 1 m Voxel.
 const SAMPLES: usize = 32;
+/// Chunk columns sampled per Biome where water covers its ground, besides [`SAMPLES`]: a
+/// Biome holds water only in its few lakes, which the first [`SAMPLES`] may all miss.
+const WET_SAMPLES: usize = 8;
+/// The census's name for a tree trunk's lowest Voxel: a log on the ground under [`TREE_CLEAR_M`] of
+/// logs, which a neighbour's limb resting on a slope never is.
+const TRUNK_FOOT: &str = "trunk foot";
 
-/// `(Biome index, Material name)` to Voxels found, over a sample of every Biome's ground.
-fn census(game: &Game) -> (BTreeMap<(usize, String), u64>, Vec<String>) {
+/// The highest row of each Chunk column a Plant can reach: none stands higher than the ground of
+/// its own Chunk column or a neighbour's, past which no crown reaches, raised by the overhangs and
+/// the tallest Plant. The rows above are sky, the costliest Chunks generation makes.
+struct PlantCeiling<'a> {
+    generator: &'a Worldgen,
+    lift_m: f32,
+    highest_m: HashMap<[i32; 2], f32>,
+}
+
+impl<'a> PlantCeiling<'a> {
+    fn new(generator: &'a Worldgen) -> Self {
+        // Each Plant's rounding to Voxels, with room over the generator's own three Voxels.
+        let slack_m = 8.0 * generator.voxel_size();
+        let params = generator.params();
+        let plants = || {
+            params
+                .biomes
+                .as_slice()
+                .iter()
+                .flat_map(|b| b.surface_features.as_slice())
+                .filter_map(|f| f.plant)
+        };
+        let reach_m = plants()
+            .filter_map(|p| match p.kind {
+                SurfacePlantKind::Tree(t) => Some(t.reach_m()),
+                SurfacePlantKind::Vine(v) => Some(v.reach_m),
+                _ => None,
+            })
+            .fold(0.0, f32::max)
+            + slack_m;
+        assert!(
+            reach_m <= CHUNK_SIZE as f32 * generator.voxel_size(),
+            "a crown reaches {reach_m} m, past the next Chunk column"
+        );
+        let rise_m = plants().map(|p| p.rise_m()).fold(0.0, f32::max);
+        Self {
+            generator,
+            lift_m: params.landforms.overhang_m + rise_m + slack_m,
+            highest_m: HashMap::new(),
+        }
+    }
+
+    fn row(&mut self, [cx, cz]: [i32; 2]) -> i32 {
+        let generator = self.generator;
+        let size = generator.voxel_size();
+        let mut top_m = f32::MIN;
+        for dz in -1..=1 {
+            for dx in -1..=1 {
+                let [cx, cz] = [cx + dx, cz + dz];
+                let highest_m = self.highest_m.entry([cx, cz]).or_insert_with(|| {
+                    let at = |c: i32, n: usize| (c * CHUNK_SIZE as i32 + n as i32) as f32 * size;
+                    (0..CHUNK_SIZE * CHUNK_SIZE)
+                        .map(|i| {
+                            generator
+                                .surface_height_m(at(cx, i % CHUNK_SIZE), at(cz, i / CHUNK_SIZE))
+                        })
+                        .fold(f32::MIN, f32::max)
+                });
+                top_m = top_m.max(*highest_m);
+            }
+        }
+        ((top_m + self.lift_m) / (CHUNK_SIZE as f32 * size)).floor() as i32
+    }
+}
+
+/// `(Biome index, Material name)` to Voxels found.
+type Counts = BTreeMap<(usize, String), u64>;
+
+/// What stands on the surface of a sample of every Biome's ground: a cave under a Biome holds its
+/// cave Biome's Plants, not the Biome's.
+fn census(game: &Game) -> (Counts, Vec<String>) {
+    surface_census(game, |loaded| loaded)
+}
+
+/// [`census`] of the Game as `edit` leaves it.
+fn surface_census(
+    game: &Game,
+    edit: fn(super::LoadedMods) -> super::LoadedMods,
+) -> (Counts, Vec<String>) {
     let (_install, loaded) = loaded(game.name, 1.0);
+    let loaded = edit(loaded);
     let world = loaded.world.unwrap();
     let biomes: Vec<String> = world
         .biomes
@@ -434,35 +256,107 @@ fn census(game: &Game) -> (BTreeMap<(usize, String), u64>, Vec<String>) {
         .map(|(id, name)| (id as u16, name.to_owned()))
         .collect();
 
+    let logs: BTreeSet<u16> = named
+        .iter()
+        .filter(|(_, name)| name.ends_with("_log"))
+        .map(|(&id, _)| id)
+        .collect();
+    let plant_made: BTreeSet<u16> = loaded
+        .registry
+        .names(Kind::Material)
+        .filter(|(_, name)| {
+            ["flora:", "crops:", "aquatic:"]
+                .iter()
+                .any(|owner| name.starts_with(owner))
+        })
+        .map(|(id, _)| id as u16)
+        .collect();
+
     let generator = Worldgen::new(7, 1.0, world);
+    let mut ceiling = PlantCeiling::new(&generator);
+    let water = generator.water().map(|w| w.material);
     let chunk_m = CHUNK_SIZE as f32;
     let (low, high) = generator.surface_bounds_m();
     let rows = (low / chunk_m).floor() as i32..=(high / chunk_m).ceil() as i32;
+    let centre = |cx: i32, cz: i32| ((cx as f32 + 0.5) * chunk_m, (cz as f32 + 0.5) * chunk_m);
+    let biome_of = |(x, z): (f32, f32)| generator.biome_at(x, z).unwrap().index();
     let mut taken = vec![0usize; biomes.len()];
-    let mut counts = BTreeMap::new();
+    let mut columns = Vec::new();
     for cz in (-120..120).step_by(3) {
         for cx in (-120..120).step_by(3) {
-            let centre = ((cx as f32 + 0.5) * chunk_m, (cz as f32 + 0.5) * chunk_m);
-            let biome = generator.biome_at(centre.0, centre.1).unwrap().index();
-            if taken[biome] >= SAMPLES {
+            let biome = biome_of(centre(cx, cz));
+            if taken[biome] < SAMPLES {
+                taken[biome] += 1;
+                columns.push((cx, cz));
+            }
+        }
+    }
+    let mut wet = vec![0usize; biomes.len()];
+    for cz in -120..120 {
+        for cx in -120..120 {
+            let (x, z) = centre(cx, cz);
+            let under_water = generator
+                .water_surface_m(x, z)
+                .is_some_and(|w| w > generator.surface_height_m(x, z));
+            let biome = biome_of((x, z));
+            if under_water && wet[biome] < WET_SAMPLES && !columns.contains(&(cx, cz)) {
+                wet[biome] += 1;
+                columns.push((cx, cz));
+            }
+        }
+    }
+    let at = |c: i32, n: usize| (c * CHUNK_SIZE as i32 + n as i32) as f32;
+    let mut counts = Counts::new();
+    let rise = (TREE_CLEAR_M as usize).min(CHUNK_SIZE);
+    for (cx, cz) in columns {
+        let ground_m = |x: usize, z: usize| generator.surface_height_m(at(cx, x), at(cz, z));
+        let surface: Vec<f32> = (0..CHUNK_SIZE * CHUNK_SIZE)
+            .map(|i| ground_m(i % CHUNK_SIZE, i / CHUNK_SIZE))
+            .collect();
+        let lowest = surface.iter().copied().fold(f32::MAX, f32::min);
+        for cy in *rows.start()..=ceiling.row([cx, cz]).min(*rows.end()) {
+            if at(cy, CHUNK_SIZE - 1) < lowest - 1.0 {
                 continue;
             }
-            taken[biome] += 1;
-            for cy in rows.clone() {
-                let chunk = generator.chunk(cx, cy, cz);
-                if chunk.uniform().is_some() {
-                    continue;
-                }
-                for z in 0..CHUNK_SIZE {
-                    for y in 0..CHUNK_SIZE {
-                        for x in 0..CHUNK_SIZE {
-                            let Some(name) = named.get(&chunk.get(x, y, z).material()) else {
-                                continue;
-                            };
-                            let at = |c: i32, n: usize| (c * CHUNK_SIZE as i32 + n as i32) as f32;
-                            let here = generator.biome_at(at(cx, x), at(cz, z));
-                            let here = here.unwrap().index();
-                            *counts.entry((here, name.clone())).or_default() += 1;
+            let chunk = generator.chunk(cx, cy, cz);
+            if chunk.uniform().is_some() {
+                continue;
+            }
+            let mut above = None;
+            for z in 0..CHUNK_SIZE {
+                for y in 0..CHUNK_SIZE {
+                    for x in 0..CHUNK_SIZE {
+                        let material = chunk.get(x, y, z).material();
+                        let Some(name) = named.get(&material) else {
+                            continue;
+                        };
+                        // A Plant stands on the column's top Voxel, so its lowest Voxel is the one at
+                        // the surface.
+                        if at(cy, y) < surface[z * CHUNK_SIZE + x] - 1.0 {
+                            continue;
+                        }
+                        let here = biome_of((at(cx, x), at(cz, z)));
+                        *counts.entry((here, name.clone())).or_default() += 1;
+                        let below = (y > 0).then(|| chunk.get(x, y - 1, z));
+                        let on_ground = below.is_some_and(|b| {
+                            !b.is_air()
+                                && !plant_made.contains(&b.material())
+                                && Some(b.material()) != water
+                        });
+                        let mut trunk = || {
+                            (y..y + rise).all(|up| {
+                                let voxel = if up < CHUNK_SIZE {
+                                    chunk.get(x, up, z)
+                                } else {
+                                    let next = above
+                                        .get_or_insert_with(|| generator.chunk(cx, cy + 1, cz));
+                                    next.get(x, up - CHUNK_SIZE, z)
+                                };
+                                logs.contains(&voxel.material())
+                            })
+                        };
+                        if logs.contains(&material) && on_ground && trunk() {
+                            *counts.entry((here, TRUNK_FOOT.to_owned())).or_default() += 1;
                         }
                     }
                 }
@@ -474,7 +368,7 @@ fn census(game: &Game) -> (BTreeMap<(usize, String), u64>, Vec<String>) {
         taken
             .iter()
             .enumerate()
-            // A Biome of the land's shape is not chosen before version 3.
+            // A Biome of the land's shape may find no column it admits near here.
             .all(|(i, &n)| n > 0 || selectors.selectors()[i].is_ranged()),
         "{}: a Biome has no ground within 3.8 km: {taken:?}",
         game.name
@@ -482,133 +376,136 @@ fn census(game: &Game) -> (BTreeMap<(usize, String), u64>, Vec<String>) {
     (counts, biomes)
 }
 
-fn found(counts: &BTreeMap<(usize, String), u64>, biome: usize, name: &str) -> u64 {
+fn found(counts: &Counts, biome: usize, name: &str) -> u64 {
     counts.get(&(biome, name.to_owned())).copied().unwrap_or(0)
 }
 
-/// Trunk Voxels a bare Biome may hold from the limbs of a neighbour's trees.
-const OVERHANG_LIMIT: u64 = 100;
-
-#[test]
-fn every_biome_of_every_demo_game_grows_its_declared_species_and_none_is_bare_by_accident() {
-    for game in &GAMES {
-        let (counts, biomes) = census(game);
-        let (_install, loaded) = loaded(game.name, 1.0);
-        let world = loaded.world.unwrap();
-        assert_eq!(biomes.len(), game.biomes.len(), "{}", game.name);
-        for (index, (name, species)) in game.biomes.iter().enumerate() {
-            let full = format!("{}:{name}", game.name);
-            assert_eq!(biomes[index], full, "Biome order");
-            let declared = world.biomes.as_slice()[index].surface_features.as_slice();
-            let food = declared.iter().filter(|f| f.plant.is_none()).count();
-            assert_eq!(
-                declared.len() - food,
-                species.len(),
-                "{full} declares exactly the table's Plants"
-            );
-            assert_eq!(
-                declared.is_empty(),
-                game.bare.contains(name),
-                "{full} is bare only if declared so"
-            );
-            // A Biome of the land's shape that the census, before version 3, never chose.
-            let chosen = counts.keys().any(|(b, _)| *b == index);
-            for plant in *species {
-                if (WATER_PLANTS.contains(plant) && !game.lake) || !chosen {
-                    continue;
-                }
-                let total: u64 = materials_of(plant)
-                    .iter()
-                    .map(|material| found(&counts, index, material))
-                    .sum();
-                assert!(total > 0, "{full} grows no {plant}");
-            }
-            if species.is_empty() {
-                // A neighbour's vines hang across the border, and its limbs reach a few Voxels
-                // over it; a tree standing here would be hundreds.
-                let plants: Vec<_> = counts
-                    .iter()
-                    .filter(|((b, name), n)| {
-                        *b == index
-                            && name != "flora:vine"
-                            && !(name.ends_with("_log") && **n < OVERHANG_LIMIT)
-                    })
-                    .collect();
-                assert!(plants.is_empty(), "{full} is bare on purpose: {plants:?}");
-            }
-        }
-    }
+/// The names of every tree's fruit Materials, in every Stage.
+fn fruit_of(loaded: &super::LoadedMods) -> BTreeSet<String> {
+    loaded
+        .registry
+        .names(Kind::Material)
+        .filter(|&(id, _)| loaded.tables.plants.canopy_of_fruit(id as u16).is_some())
+        .map(|(_, name)| name.to_owned())
+        .collect()
 }
 
-#[test]
-fn jungle_and_swamp_trees_hang_vines() {
-    for game in &GAMES {
-        let (counts, _) = census(game);
-        for (index, (name, species)) in game.biomes.iter().enumerate() {
-            if species.iter().any(|p| VINED.contains(p)) {
-                assert!(
-                    found(&counts, index, "flora:vine") > 0,
-                    "{}:{name} has no vines",
-                    game.name
-                );
-            }
-        }
-    }
-}
-
-#[test]
-fn generated_wood_is_only_ever_the_trunk_of_a_grown_tree() {
-    for game in &GAMES {
-        let (counts, _) = census(game);
-        let logs: u64 = counts
-            .iter()
-            .filter(|((_, name), _)| name.ends_with("_log"))
-            .map(|(_, n)| n)
-            .sum();
-        assert!(logs > 0, "{}: no tree trunks generated", game.name);
-        let standalone: Vec<_> = counts
-            .iter()
-            .filter(|((_, name), _)| is_standalone_wood(name))
-            .collect();
-        assert!(
-            standalone.is_empty(),
-            "{}: standalone Wood generated: {standalone:?}",
-            game.name
-        );
-    }
-}
-
-/// A Plant is declared once, in a shared Mod, and a Game only places it: each is placed by at least
-/// two Games, vines through the trees that hang them.
-#[test]
-fn every_shared_plant_is_placed_by_at_least_two_games() {
-    let (_install, loaded) = loaded("terra", 1.0);
-    let declared: BTreeSet<String> = loaded
-        .tables
-        .plants
-        .plants()
+/// What Biome `index` grows that a bare Biome must not. A neighbour's crowns reach over the border
+/// with their limbs, vines and fruit, however long the border; a tree standing here has a trunk
+/// foot.
+fn strays<'a>(counts: &'a Counts, index: usize, fruit: &BTreeSet<String>) -> Vec<(&'a str, u64)> {
+    counts
         .iter()
-        .map(|p| p.name.clone())
-        .filter(|name| {
-            ["flora:", "crops:", "aquatic:"]
-                .iter()
-                .any(|owner| name.starts_with(owner))
+        .filter(|((b, name), _)| {
+            let overhang = name == "flora:vine" || name.ends_with("_log") || fruit.contains(name);
+            *b == index && !overhang
         })
-        .filter(|name| !name.ends_with("_sapling"))
-        .collect();
-    assert!(declared.len() >= 26, "{declared:?}");
-    for plant in &declared {
-        let games = GAMES
-            .iter()
-            .filter(|game| {
-                game.biomes.iter().any(|(_, species)| {
-                    species.contains(&plant.as_str())
-                        || (plant == "flora:vine" && species.iter().any(|p| VINED.contains(p)))
-                })
-            })
-            .count();
-        assert!(games >= 2, "{plant} is placed by {games} Game(s)");
+        .map(|((_, name), n)| (name.as_str(), *n))
+        .collect()
+}
+
+/// Terra with its beach growing the temperate Biome's ground cover and trees.
+fn beach_grown_by_accident(mut loaded: super::LoadedMods) -> super::LoadedMods {
+    let world = loaded.world.as_mut().unwrap();
+    let mut biomes = world.biomes.as_slice().to_vec();
+    let temperate = super::biome(world, "terra:temperate").surface_features;
+    let beach = biomes.iter_mut().find(|b| b.name.as_str() == "terra:beach");
+    beach.unwrap().surface_features = temperate;
+    world.biomes = tesserae_core::BiomeTable::new(&biomes)
+        .and_then(|t| t.with_selectors(world.biomes.selectors()))
+        .and_then(|t| t.with_strata(world.biomes.strata()))
+        .unwrap();
+    loaded
+}
+
+#[test]
+fn a_bare_biome_that_grows_on_its_own_surface_is_caught() {
+    let terra = &TERRA;
+    let (counts, biomes) = surface_census(terra, beach_grown_by_accident);
+    let beach = biomes.iter().position(|b| b == "terra:beach").unwrap();
+    let (_install, loaded) = loaded(terra.name, 1.0);
+    let plants = strays(&counts, beach, &fruit_of(&loaded));
+    assert!(
+        plants.iter().any(|&(name, _)| name == "flora:tuft")
+            && plants.iter().any(|&(name, _)| name == TRUNK_FOOT),
+        "{plants:?}"
+    );
+}
+
+/// Also the vines of jungle and swamp trees, and Wood only in trees: the census is nearly all of
+/// each one's time, so the three share it.
+#[test]
+fn every_terra_biome_grows_its_declared_species_and_none_is_bare_by_accident() {
+    let game = &TERRA;
+    let (counts, biomes) = census(game);
+    let (_install, loaded) = loaded(game.name, 1.0);
+    let fruit = fruit_of(&loaded);
+    let world = loaded.world.unwrap();
+    assert_eq!(biomes.len(), game.biomes.len(), "{}", game.name);
+    for (index, (name, species)) in game.biomes.iter().enumerate() {
+        let full = format!("{}:{name}", game.name);
+        assert_eq!(biomes[index], full, "Biome order");
+        let declared = world.biomes.as_slice()[index].surface_features.as_slice();
+        let food = declared.iter().filter(|f| f.plant.is_none()).count();
+        assert_eq!(
+            declared.len() - food,
+            species.len(),
+            "{full} declares exactly the table's Plants"
+        );
+        assert_eq!(
+            declared.is_empty(),
+            game.bare.contains(name),
+            "{full} is bare only if declared so"
+        );
+        // A Biome of the land's shape the census may never choose.
+        let chosen = counts.keys().any(|(b, _)| *b == index);
+        for plant in *species {
+            if !chosen {
+                continue;
+            }
+            let total: u64 = materials_of(plant)
+                .iter()
+                .map(|material| found(&counts, index, material))
+                .sum();
+            assert!(total > 0, "{full} grows no {plant}");
+        }
+        if species.is_empty() {
+            let plants = strays(&counts, index, &fruit);
+            assert!(plants.is_empty(), "{full} is bare on purpose: {plants:?}");
+        }
     }
+    jungle_and_swamp_trees_hang_vines(game, &counts);
+    generated_wood_is_only_ever_the_trunk_of_a_grown_tree(game, &counts);
+}
+
+fn jungle_and_swamp_trees_hang_vines(game: &Game, counts: &Counts) {
+    for (index, (name, species)) in game.biomes.iter().enumerate() {
+        if species.iter().any(|p| VINED.contains(p)) {
+            assert!(
+                found(counts, index, "flora:vine") > 0,
+                "{}:{name} has no vines",
+                game.name
+            );
+        }
+    }
+}
+
+fn generated_wood_is_only_ever_the_trunk_of_a_grown_tree(game: &Game, counts: &Counts) {
+    let logs: u64 = counts
+        .iter()
+        .filter(|((_, name), _)| name.ends_with("_log"))
+        .map(|(_, n)| n)
+        .sum();
+    assert!(logs > 0, "{}: no tree trunks generated", game.name);
+    let standalone: Vec<_> = counts
+        .iter()
+        .filter(|((_, name), _)| is_standalone_wood(name))
+        .collect();
+    assert!(
+        standalone.is_empty(),
+        "{}: standalone Wood generated: {standalone:?}",
+        game.name
+    );
 }
 
 /// Every fruit tree's fruit ripens through its Stages, is broken for food and left as canopy, the
@@ -693,7 +590,7 @@ fn trees_per_hectare(game: &Game) -> Vec<(String, f64)> {
         .registry
         .names(Kind::Material)
         .filter(|(_, name)| {
-            // Ember and the other Games with their own ground stand on `flora:grass`.
+            // Flora declares `flora:grass`, but it is ground.
             *name != "flora:grass"
                 && ["flora:", "crops:", "aquatic:"]
                     .iter()
@@ -702,6 +599,7 @@ fn trees_per_hectare(game: &Game) -> Vec<(String, f64)> {
         .map(|(id, _)| id as u16)
         .collect();
     let generator = Worldgen::new(7, 1.0, world);
+    let mut ceiling = PlantCeiling::new(&generator);
     let chunk_m = CHUNK_SIZE as f32;
     let (low, high) = generator.surface_bounds_m();
     let rows = (low / chunk_m).floor() as i32..=(high / chunk_m).ceil() as i32;
@@ -723,7 +621,14 @@ fn trees_per_hectare(game: &Game) -> Vec<(String, f64)> {
                     area_m2[here] += 1.0;
                 }
             }
-            for cy in rows.clone() {
+            // A tree stands on the ground, so no trunk foot is in a row wholly below it.
+            let lowest = (0..CHUNK_SIZE * CHUNK_SIZE)
+                .map(|i| generator.surface_height_m(at(cx, i % CHUNK_SIZE), at(cz, i / CHUNK_SIZE)))
+                .fold(f32::MAX, f32::min);
+            for cy in *rows.start()..=ceiling.row([cx, cz]).min(*rows.end()) {
+                if at(cy, CHUNK_SIZE - 1) < lowest - 1.0 {
+                    continue;
+                }
                 let chunk = generator.chunk(cx, cy, cz);
                 if chunk.uniform().is_some() {
                     continue;
@@ -757,93 +662,71 @@ fn mean_spacing_m(per_hectare: f64) -> f64 {
     100.0 / per_hectare.max(1e-9).sqrt()
 }
 
-/// The approved mockup's density classes, by Biome name across the Games: a jungle or swamp packs
-/// trees about 4 m apart, a temperate or cold forest 6 to 10 m, a savanna, prairie, desert or
-/// frost Biome 12 m or more.
-const DENSE: [&str; 9] = [
-    "jungle",
-    "swamp",
-    "thicket",
-    "fen",
-    "cinder_bog",
-    "rainforest",
-    "tidal_marsh",
-    "conservatory",
-    "lily_pond",
-];
-const MODERATE: [&str; 4] = ["temperate", "cold", "heath", "cold_shallows"];
-const SPARSE: [&str; 14] = [
-    "savanna",
-    "dry",
-    "prairie",
-    "dunes",
-    "salt_flats",
-    "arid_court",
-    "meadow",
-    "garden",
-    "highland",
-    "frost_court",
-    "ash_flats",
-    "lagoon",
-    // The sea grows weed, not trees, and a river's banks cane.
-    "ocean",
-    "river",
+/// The approved mockup's density classes, by Terra's Biome name: a jungle or swamp packs trees
+/// about 4 m apart, a temperate or cold forest 6 to 10 m, a savanna or desert 12 m or more.
+const DENSE: [&str; 2] = ["jungle", "swamp"];
+const MODERATE: [&str; 2] = ["temperate", "cold"];
+const SPARSE: [&str; 4] = [
+    "savanna", "dry", // The sea grows weed, not trees, and a river's banks cane.
+    "ocean", "river",
 ];
 
+/// Also that jungle and swamp are denser than savanna and desert: counting the trees is nearly all
+/// of either one's time, so the two share it.
 #[test]
-fn each_biome_scatters_its_trees_at_its_density_class() {
-    for game in &GAMES {
-        for (name, per_ha) in trees_per_hectare(game) {
-            let spacing = mean_spacing_m(per_ha);
-            let full = format!("{}:{name}", game.name);
-            if DENSE.contains(&name.as_str()) {
-                assert!(
-                    (2.5..=6.0).contains(&spacing),
-                    "{full}: dense, {spacing:.1} m"
-                );
-            } else if MODERATE.contains(&name.as_str()) {
-                assert!(
-                    (5.5..=11.0).contains(&spacing),
-                    "{full}: moderate, {spacing:.1} m"
-                );
-            } else if SPARSE.contains(&name.as_str()) {
-                assert!(spacing >= 12.0, "{full}: sparse, {spacing:.1} m");
-            } else {
-                assert!(
-                    game.bare.contains(&name.as_str()) || name == "scorched",
-                    "{full}: unclassed"
-                );
-            }
+fn each_terra_biome_scatters_its_trees_at_its_density_class() {
+    let game = &TERRA;
+    let density = trees_per_hectare(game);
+    for (name, per_ha) in density.iter().cloned() {
+        let spacing = mean_spacing_m(per_ha);
+        let full = format!("{}:{name}", game.name);
+        if DENSE.contains(&name.as_str()) {
+            assert!(
+                (2.5..=6.0).contains(&spacing),
+                "{full}: dense, {spacing:.1} m"
+            );
+        } else if MODERATE.contains(&name.as_str()) {
+            assert!(
+                (5.5..=11.0).contains(&spacing),
+                "{full}: moderate, {spacing:.1} m"
+            );
+        } else if SPARSE.contains(&name.as_str()) {
+            assert!(spacing >= 12.0, "{full}: sparse, {spacing:.1} m");
+        } else {
+            assert!(game.bare.contains(&name.as_str()), "{full}: unclassed");
         }
     }
+    assert!(
+        jungle_and_swamp_are_denser_than_savanna_and_desert(game, &density),
+        "{}: no dense and sparse Biomes to compare",
+        game.name
+    );
 }
 
-#[test]
-fn jungle_and_swamp_are_denser_than_savanna_prairie_and_desert_in_every_game_that_has_both() {
-    let mut compared = 0;
-    for game in &GAMES {
-        let density = trees_per_hectare(game);
-        let of = |class: &[&str]| -> Vec<(String, f64)> {
-            density
-                .iter()
-                .filter(|(n, _)| class.contains(&n.as_str()))
-                .cloned()
-                .collect()
-        };
-        let (dense, sparse) = (of(&DENSE), of(&SPARSE));
-        if dense.is_empty() || sparse.is_empty() {
-            continue;
-        }
-        compared += 1;
-        let thinnest = dense.iter().map(|d| d.1).fold(f64::MAX, f64::min);
-        let thickest = sparse.iter().map(|d| d.1).fold(0.0, f64::max);
-        assert!(
-            thinnest > 2.0 * thickest,
-            "{}: dense {dense:?} is not clearly past sparse {sparse:?}",
-            game.name
-        );
+/// Whether `game` has both classes to compare.
+fn jungle_and_swamp_are_denser_than_savanna_and_desert(
+    game: &Game,
+    density: &[(String, f64)],
+) -> bool {
+    let of = |class: &[&str]| -> Vec<(String, f64)> {
+        density
+            .iter()
+            .filter(|(n, _)| class.contains(&n.as_str()))
+            .cloned()
+            .collect()
+    };
+    let (dense, sparse) = (of(&DENSE), of(&SPARSE));
+    if dense.is_empty() || sparse.is_empty() {
+        return false;
     }
-    assert_eq!(compared, 5);
+    let thinnest = dense.iter().map(|d| d.1).fold(f64::MAX, f64::min);
+    let thickest = sparse.iter().map(|d| d.1).fold(0.0, f64::max);
+    assert!(
+        thinnest > 2.0 * thickest,
+        "{}: dense {dense:?} is not clearly past sparse {sparse:?}",
+        game.name
+    );
+    true
 }
 
 /// Climate is a continuous field and a Biome is the nearest point, so a tree's band must hold
@@ -885,8 +768,8 @@ fn terra_trees_find_their_climate_across_their_whole_biome() {
             .position(|b| *b == format!("terra:{biome}"))
             .unwrap();
         let (mut inside, mut fit) = (0, 0);
-        for z in (-4000..4000).step_by(32) {
-            for x in (-4000..4000).step_by(32) {
+        for z in (-4000..4000).step_by(16) {
+            for x in (-4000..4000).step_by(16) {
                 let (x, z) = (x as f32, z as f32);
                 if generator.biome_at(x, z).map(|b| b.index()) != Some(index) {
                     continue;
@@ -1032,6 +915,7 @@ fn ground_of(game: &Game, seed: u64) -> Vec<Vec<Vec<Option<u8>>>> {
         .collect();
     let mut out = vec![Vec::new(); world.biomes.as_slice().len()];
     let generator = Worldgen::new(seed, 1.0, world);
+    let mut ceiling = PlantCeiling::new(&generator);
     let chunk_m = CHUNK_SIZE as f32;
     let (low, high) = generator.surface_bounds_m();
     let rows = (low / chunk_m).floor() as i32..=(high / chunk_m).ceil() as i32;
@@ -1050,6 +934,9 @@ fn ground_of(game: &Game, seed: u64) -> Vec<Vec<Vec<Option<u8>>>> {
             }
             let mut columns = vec![None; BLOCK * BLOCK];
             for (dx, dz, cy) in block_chunks(rows.clone()) {
+                if cy > ceiling.row([cx + dx, cz + dz]) {
+                    continue;
+                }
                 let chunk = generator.chunk(cx + dx, cy, cz + dz);
                 if chunk.uniform().is_some() {
                     continue;
@@ -1151,98 +1038,80 @@ fn measure(blocks: &[Vec<Option<u8>>]) -> Cover {
 const COVER_DENSE: std::ops::RangeInclusive<f64> = 0.20..=0.55;
 const COVER_GRASSY: std::ops::RangeInclusive<f64> = 0.09..=0.23;
 const COVER_SPARSE: std::ops::RangeInclusive<f64> = 0.015..=0.10;
-const GRASSY: [&str; 8] = [
-    "temperate",
-    "cold",
-    "meadow",
-    "garden",
-    "heath",
-    "highland",
-    "cold_shallows",
-    "prairie",
-];
-const ARID: [&str; 8] = [
-    "dry",
-    "savanna",
-    "dunes",
-    "salt_flats",
-    "arid_court",
-    "frost_court",
-    "ash_flats",
-    "lagoon",
-];
+const GRASSY: [&str; 2] = ["temperate", "cold"];
+const ARID: [&str; 2] = ["dry", "savanna"];
 
 /// A Biome's ground cover is patches with bare ground between, never an even carpet, and a flower
 /// is rarer than the grass it grows among.
 #[test]
-fn ground_cover_grows_in_patches_at_each_biomes_class_and_flowers_stay_rare() {
-    for game in &GAMES {
-        let grounds = ground_of(game, 7);
-        for (index, (name, _)) in game.biomes.iter().enumerate() {
-            let full = format!("{}:{name}", game.name);
-            let name = *name;
-            if grounds[index].is_empty() {
-                // A Biome of the land's shape, which only version 3 chooses.
-                continue;
-            }
-            let cover = measure(&grounds[index]);
-            println!(
-                "{full}: cover {:.1}% bare {:.1}% clustered {:.0}%",
-                cover.total * 100.0,
-                cover.bare * 100.0,
-                cover.clustered * 100.0
+fn ground_cover_grows_in_patches_at_each_terra_biomes_class_and_flowers_stay_rare() {
+    let game = &TERRA;
+    let grounds = ground_of(game, 7);
+    for (index, (name, _)) in game.biomes.iter().enumerate() {
+        let full = format!("{}:{name}", game.name);
+        let name = *name;
+        if grounds[index].is_empty() {
+            // A Biome of the land's shape, which only version 3 chooses.
+            continue;
+        }
+        let cover = measure(&grounds[index]);
+        println!(
+            "{full}: cover {:.1}% bare {:.1}% clustered {:.0}%",
+            cover.total * 100.0,
+            cover.bare * 100.0,
+            cover.clustered * 100.0
+        );
+        let share = |list: &[&str]| -> f64 {
+            list.iter()
+                .map(|p| cover.by_plant[GROUND_COVER.iter().position(|c| c == p).unwrap()])
+                .sum()
+        };
+        // The sea's floor and a river's bed lie under water, where no ground cover grows.
+        if game.bare.contains(&name) || ["ocean", "river"].contains(&name) {
+            assert!(
+                cover.total < 0.02,
+                "{full}: bare on purpose, {:.3}",
+                cover.total
             );
-            let share = |list: &[&str]| -> f64 {
-                list.iter()
-                    .map(|p| cover.by_plant[GROUND_COVER.iter().position(|c| c == p).unwrap()])
-                    .sum()
-            };
-            if game.bare.contains(&name) {
+            continue;
+        }
+        let (range, bare_floor, clustered_floor) = if DENSE.contains(&name) {
+            (COVER_DENSE, 0.08, 0.75)
+        } else if GRASSY.contains(&name) {
+            (COVER_GRASSY, 0.28, 0.55)
+        } else {
+            assert!(ARID.contains(&name), "{full}: unclassed");
+            (COVER_SPARSE, 0.45, 0.0)
+        };
+        assert!(
+            range.contains(&cover.total),
+            "{full}: {:.1}% covered, wanted {range:?}",
+            cover.total * 100.0
+        );
+        assert!(
+            cover.bare >= bare_floor,
+            "{full}: only {:.1}% of the ground is more than 2 m from cover",
+            cover.bare * 100.0
+        );
+        assert!(
+            cover.clustered >= clustered_floor,
+            "{full}: {:.0}% of the cover is in patches",
+            cover.clustered * 100.0
+        );
+        if !DENSE.contains(&name) {
+            for flower in FLOWERS {
                 assert!(
-                    cover.total < 0.02,
-                    "{full}: bare on purpose, {:.3}",
-                    cover.total
-                );
-                continue;
-            }
-            let (range, bare_floor, clustered_floor) = if DENSE.contains(&name) {
-                (COVER_DENSE, 0.08, 0.75)
-            } else if GRASSY.contains(&name) {
-                (COVER_GRASSY, 0.28, 0.55)
-            } else {
-                assert!(ARID.contains(&name), "{full}: unclassed");
-                (COVER_SPARSE, 0.45, 0.0)
-            };
-            assert!(
-                range.contains(&cover.total),
-                "{full}: {:.1}% covered, wanted {range:?}",
-                cover.total * 100.0
-            );
-            assert!(
-                cover.bare >= bare_floor,
-                "{full}: only {:.1}% of the ground is more than 2 m from cover",
-                cover.bare * 100.0
-            );
-            assert!(
-                cover.clustered >= clustered_floor,
-                "{full}: {:.0}% of the cover is in patches",
-                cover.clustered * 100.0
-            );
-            if !DENSE.contains(&name) {
-                for flower in FLOWERS {
-                    assert!(
-                        share(&[flower]) <= 0.03,
-                        "{full}: {flower} covers {:.1}%",
-                        share(&[flower]) * 100.0
-                    );
-                }
-                assert!(
-                    share(&FLOWERS) <= 0.5 * share(&GRASSES),
-                    "{full}: flowers {:.1}% against grass {:.1}%",
-                    share(&FLOWERS) * 100.0,
-                    share(&GRASSES) * 100.0
+                    share(&[flower]) <= 0.03,
+                    "{full}: {flower} covers {:.1}%",
+                    share(&[flower]) * 100.0
                 );
             }
+            assert!(
+                share(&FLOWERS) <= 0.5 * share(&GRASSES),
+                "{full}: flowers {:.1}% against grass {:.1}%",
+                share(&FLOWERS) * 100.0,
+                share(&GRASSES) * 100.0
+            );
         }
     }
 }

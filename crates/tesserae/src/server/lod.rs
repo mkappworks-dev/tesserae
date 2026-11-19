@@ -150,6 +150,12 @@ impl FarProbe {
     }
 }
 
+/// How many level-0 Voxels span a level-`level` one along an axis. Shifted, not `powi`: it sizes
+/// the coarse generators' Voxels, and generation's inputs use no platform maths (ADR-0032).
+fn level_scale(level: u32) -> f32 {
+    (1u32 << level) as f32
+}
+
 /// `sources[j]` makes level-j Chunks, so a level-k job clones `sources[k - 1]`. The outermost
 /// level is never anyone's child, so there is one fewer source than levels.
 #[derive(Resource)]
@@ -175,7 +181,7 @@ impl LodGenerators {
                 if j == 0 {
                     Worldgen::new(world.seed, world.voxel_size, bare)
                 } else {
-                    Worldgen::new(world.seed, world.voxel_size * 2f32.powi(j as i32), coarse)
+                    Worldgen::new(world.seed, world.voxel_size * level_scale(j), coarse)
                 }
             })
             .collect();
@@ -210,7 +216,7 @@ impl LodGenerators {
         (1..self.levels())
             .map(|k| {
                 (k >= from).then(|| {
-                    let voxel_m = world.voxel_size * 2f32.powi(k as i32);
+                    let voxel_m = world.voxel_size * level_scale(k);
                     // The generator asks about a Voxel's floor, so a Voxel the ground barely
                     // enters is ground and a shallow lake drains. Lowering the surface and the
                     // lake by half a Voxel asks about its middle, as the downsample's vote does;
@@ -1662,7 +1668,9 @@ fn dispatch_meshes(
 mod tests {
     use super::*;
     use crate::server::edit::set_voxel;
-    use crate::server::streaming::tests::{Harness, SETTLE_CEILING, UNLIMITED, same_mesh, small};
+    use crate::server::streaming::tests::{
+        Harness, SETTLE_CEILING, UNLIMITED, land, same_mesh, small,
+    };
     use bevy::ecs::system::RunSystemOnce;
     use tesserae_core::light::{Light, MAX_LIGHT};
     use tesserae_core::{ChunkLight, SHAPE_STAIR, Tables, Voxel, downsample, mesh_chunk};
@@ -1945,6 +1953,10 @@ mod tests {
 
     /// Built on its own so a mistake in `LodGenerators` is not shared with the expectation.
     fn source(j: u32) -> Worldgen {
+        source_of(world().seed, j)
+    }
+
+    fn source_of(seed: u64, j: u32) -> Worldgen {
         let params = tesserae_core::testgen::world_params();
         let params = if j == 0 {
             params
@@ -1954,11 +1966,7 @@ mod tests {
                 ..params
             }
         };
-        Worldgen::new(
-            world().seed,
-            world().voxel_size * 2f32.powi(j as i32),
-            params,
-        )
+        Worldgen::new(seed, world().voxel_size * 2f32.powi(j as i32), params)
     }
 
     fn expected(level: u32, coord: ChunkCoord, override_child: Option<(usize, &Chunk)>) -> Chunk {
@@ -1997,6 +2005,19 @@ mod tests {
         assert!(hole((2, far.child(4))));
         assert!(!hole((3, deep)));
         assert!(hole((3, ChunkCoord::new(0, 0, 2))));
+    }
+
+    #[test]
+    fn a_level_scale_is_the_exact_power_of_two_powi_gave() {
+        for level in 0..crate::server::lod_rings::MAX_LEVELS {
+            let scale = level_scale(level);
+            assert_eq!(scale.to_bits(), (127 + level) << 23, "level {level}");
+            assert_eq!(
+                scale.to_bits(),
+                2f32.powi(level as i32).to_bits(),
+                "level {level}"
+            );
+        }
     }
 
     #[test]
@@ -3432,15 +3453,18 @@ mod tests {
     fn coarse_water(level: u32, rows: usize, level_m: Option<f32>) -> ChunkMesh {
         let tables = crate::server::fixture_tables();
         let water = tesserae_core::testgen::fixtures().water;
+        let params = tesserae_core::testgen::world_params();
         let surface = Worldgen::new(
             world().seed,
             world().voxel_size,
             WorldgenParams {
+                // The water stands at Sea level.
+                sea_level_m: level_m.unwrap_or(params.sea_level_m),
                 water: level_m.map(|level_m| tesserae_core::WaterParams {
                     level_m,
                     material: water,
                 }),
-                ..tesserae_core::testgen::world_params()
+                ..params
             },
         );
         let mut center = Chunk::air();
@@ -3626,12 +3650,13 @@ mod tests {
         assert_eq!(layer.indices.len(), 12);
     }
 
-    /// The mesh `mesh_coarse` makes of a level-`level` Chunk of `source`'s ground.
-    fn coarse_mesh(level: u32, coord: ChunkCoord, source: &Worldgen) -> ChunkMesh {
+    /// The mesh `mesh_coarse` makes of a level-`level` Chunk of `source`'s ground, made from
+    /// `seed`.
+    fn coarse_mesh(level: u32, coord: ChunkCoord, seed: u64, source: &Worldgen) -> ChunkMesh {
         let (center, around) = chunks_around(level, coord, source);
         let voxel_m = world().voxel_size * 2f32.powi(level as i32);
         mesh_coarse(
-            &Worldgen::new(world().seed, 1.0, source.params()),
+            &Worldgen::new(seed, 1.0, source.params()),
             level,
             voxel_m,
             coord,
@@ -3650,9 +3675,9 @@ mod tests {
             .unwrap_or(MAX_LIGHT)
     }
 
-    fn without_caves() -> Worldgen {
+    fn without_caves(seed: u64) -> Worldgen {
         Worldgen::new(
-            world().seed,
+            seed,
             1.0,
             WorldgenParams {
                 caves: None,
@@ -3662,18 +3687,16 @@ mod tests {
         )
     }
 
-    /// The default seed's mouth at (-26, -352) m, a hole through the surface 14 m deep at level
-    /// 1 with a tunnel off it, found by a probe over the generator. Its Chunk at level 1 is
-    /// (-1, 0, -6).
+    /// A mouth through the land seed's surface, in its level 1 Chunk (-1, 0, -6).
     #[test]
     fn a_cave_mouth_at_level_one_has_faces_lit_below_open_sky() {
-        let coord = ChunkCoord::new(-1, 0, -6);
+        let (coord, seed) = (ChunkCoord::new(-1, 0, -6), land().seed);
         assert!(
-            darkest_sky(&coarse_mesh(1, coord, &source(0))) < MAX_LIGHT,
+            darkest_sky(&coarse_mesh(1, coord, seed, &source_of(seed, 0))) < MAX_LIGHT,
             "the mouth is lit like open ground"
         );
         assert_eq!(
-            darkest_sky(&coarse_mesh(1, coord, &without_caves())),
+            darkest_sky(&coarse_mesh(1, coord, seed, &without_caves(seed))),
             MAX_LIGHT,
             "the same ground without caves is not"
         );
@@ -3726,7 +3749,7 @@ mod tests {
                         &tables,
                     );
                     assert!(
-                        same_mesh(&coarse_mesh(level, coord, &source), &open),
+                        same_mesh(&coarse_mesh(level, coord, world().seed, &source), &open),
                         "level {level} {coord} is not lit as open sky"
                     );
                     meshes += usize::from(!open.is_empty());

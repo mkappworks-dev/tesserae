@@ -57,7 +57,7 @@ pub fn garden_fields() -> Vec<CropField> {
             ("crops:potato", 2.0),
         ],
         (8.0, 16.0),
-        64.0,
+        40.0,
         "strata:sand",
         None,
     )]

@@ -1757,16 +1757,6 @@ fn saved_generator(dir: &Directory) -> u32 {
     save::inspect(&dir.0).unwrap().unwrap().commit.generator
 }
 
-fn rewrite_as_version_1(dir: &Directory) {
-    let mut commit = save::inspect(&dir.0).unwrap().unwrap().commit;
-    commit.generator = 1;
-    commit.sequence += 1;
-    Writer::acquire(&dir.0, &commit.world, &commit.content)
-        .unwrap()
-        .write(&commit)
-        .unwrap();
-}
-
 fn pinned_generator(dir: &Directory) -> u32 {
     let (opening, settings) = (dir.opening(), WorldSettings::default());
     let mut loaded = crate::server::mods::terra_for_save(&opening, &settings);
@@ -1781,18 +1771,6 @@ fn a_new_world_is_stamped_with_the_current_generator() {
     assert_eq!(pinned_generator(&dir), current);
     Rig::new(&dir).settled_save();
     assert_eq!(saved_generator(&dir), current);
-}
-
-#[test]
-fn a_version_1_world_reopens_on_version_1_and_saves_as_version_1() {
-    let dir = Directory::new();
-    Rig::new(&dir).settled_save();
-    rewrite_as_version_1(&dir);
-    assert_eq!(pinned_generator(&dir), 1);
-    let mut rig = Rig::new(&dir);
-    rig.insert();
-    rig.settled_save();
-    assert_eq!(saved_generator(&dir), 1);
 }
 
 fn declares_biomes(names: [&str; 2]) -> impl FnOnce(&mut crate::server::mods::LoadedMods) {
@@ -1915,6 +1893,7 @@ fn declares_plants() -> impl FnOnce(&mut crate::server::mods::LoadedMods) {
             feature(SurfacePlantKind::Tree(SurfaceTree {
                 vines: None,
                 branching: None,
+                crowding_m: None,
                 trunk: id("terra:wood"),
                 canopy: id("terra:leaves"),
                 trunk_height_m: (3.0, 5.0),
@@ -2072,21 +2051,6 @@ fn a_world_saved_with_no_biomes_stays_without_them_after_the_game_gains_some() {
     );
     let reopened = prepared_world(&dir, declares_biomes(["terra:dry", "terra:wet"]));
     assert!(reopened.biomes.is_empty() && reopened.ores.is_empty());
-}
-
-#[test]
-fn a_version_1_world_reopens_without_biomes_even_if_its_game_declares_them() {
-    let dir = Directory::new();
-    Rig::open_with(
-        dir.opening(),
-        WorldSettings::default(),
-        declares_biomes(["terra:dry", "terra:wet"]),
-    )
-    .settled_save();
-    rewrite_as_version_1(&dir);
-    let reopened = prepared_world(&dir, declares_biomes(["terra:dry", "terra:wet"]));
-    assert!(reopened.biomes.is_empty() && reopened.ores.is_empty());
-    assert_eq!(reopened.generator, 1);
 }
 
 /// Stands in for a Player extension a later step registers.

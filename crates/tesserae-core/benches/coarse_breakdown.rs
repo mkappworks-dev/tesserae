@@ -14,11 +14,15 @@
 //! whole job as shipped, the coarse Chunk generated at its own Voxel size
 //! (`direct`), and that without caves (`columns`).
 
+#![allow(
+    clippy::disallowed_methods,
+    reason = "a bench's own maths is not generation"
+)]
+
 use std::hint::black_box;
 use std::time::Duration;
 
 use tesserae_core::testgen::fixtures;
-use tesserae_core::worldgen::WaterParams;
 use tesserae_core::{CHUNK_SIZE, Chunk, ShapeTable, Worldgen, WorldgenParams, downsample};
 
 /// Terra's World: `World::default`'s seed, a 1 m Voxel, and the Terra Game's
@@ -39,14 +43,9 @@ const LOD_M: f32 = 4096.0;
 const LEVELS: u32 = 5;
 
 fn params() -> WorldgenParams {
-    let f = fixtures();
     WorldgenParams {
         sea_level_m: SEA_LEVEL_M,
         relief_m: RELIEF_M,
-        water: Some(WaterParams {
-            level_m: SEA_LEVEL_M + RELIEF_M * 5.0 / 12.0,
-            material: f.water,
-        }),
         ..tesserae_core::testgen::world_params()
     }
 }
@@ -74,10 +73,6 @@ fn probe(level: u32, params: WorldgenParams, caves: bool) -> Worldgen {
         smoothing: None,
         caves: params.caves.filter(|_| caves),
         sea_level_m: params.sea_level_m - half,
-        water: params.water.map(|w| WaterParams {
-            level_m: (w.level_m - half).next_up(),
-            ..w
-        }),
         ..params
     };
     Worldgen::new(SEED, voxel_m, params)

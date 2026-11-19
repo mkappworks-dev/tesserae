@@ -142,9 +142,16 @@ jobs:
         with:
           command: check advisories licenses bans sources
 
+  # Four shards, each building its own tests and running a quarter of them, so the job lasts about
+  # the build plus its longest test. `slice` deals the tests out in turn, so the cases of one
+  # `each_case!` check land on different shards.
   test:
-    name: Test
+    name: Test (${{ matrix.shard }}/4)
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
 
     steps:
       - name: Checkout
@@ -198,13 +205,24 @@ jobs:
       - name: Run tests
         run: |
           cargo nextest run --workspace --locked --features tesserae/dev \
-            --config .github/test-profile.toml
+            --config .github/test-profile.toml --partition slice:${{ matrix.shard }}/4
 
       # nextest does not run doctests.
       - name: Run doctests
+        if: matrix.shard == 1
         run: |
           cargo test --doc --workspace --locked --features tesserae/dev \
             --config .github/test-profile.toml
+
+  # The one check a ruleset requires for the suite, whatever the shard count.
+  test-result:
+    name: Test
+    if: always()
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every shard passed
+        run: test "${{ needs.test.result }}" = success
 
   benches:
     name: Benches
