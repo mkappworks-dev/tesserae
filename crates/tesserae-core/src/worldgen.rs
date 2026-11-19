@@ -1365,8 +1365,7 @@ impl Worldgen {
     fn held_columns(&self, cx: i32, cz: i32) -> Option<Arc<ColumnCache>> {
         self.last_columns([cx, cz]).or_else(|| {
             let held = self.columns.get([cx, cz])?;
-            LAST_CELL.with(|l| *l.borrow_mut() = Some((self.columns.id(), [cx, cz], held.clone())));
-            Some(held)
+            Some(self.asked_last([cx, cz], held))
         })
     }
 
@@ -1387,7 +1386,11 @@ impl Worldgen {
         let cache = self
             .columns
             .get_or_build([cx, cz], || self.build_columns(cx, cz));
-        LAST_CELL.with(|l| *l.borrow_mut() = Some((self.columns.id(), [cx, cz], cache.clone())));
+        self.asked_last([cx, cz], cache)
+    }
+
+    fn asked_last(&self, key: [i32; 2], cache: Arc<ColumnCache>) -> Arc<ColumnCache> {
+        LAST_CELL.with(|l| *l.borrow_mut() = Some((self.columns.id(), key, cache.clone())));
         cache
     }
 
@@ -1708,11 +1711,14 @@ impl Worldgen {
         top
     }
 
-    /// Drops the drainage regions, column caches and Plants this generator has kept. Nothing it answers
-    /// changes: each is built again, to the same result, when it is next asked.
-    pub fn forget_regions(&self) {
+    /// Drops every cache this generator keeps, and this thread's last Cell; another thread keeps
+    /// its last Cell until it asks another. Nothing it answers changes: each is built again, to
+    /// the same result, when it is next asked.
+    pub fn forget_caches(&self) {
         self.columns.clear();
         self.plants.clear();
+        self.tops.lock().unwrap().clear();
+        LAST_CELL.with(|l| *l.borrow_mut() = None);
         self.terrain.forget_regions();
     }
 
@@ -3583,6 +3589,14 @@ mod tests {
         generate(&bare);
         assert_eq!(bare.plants.len(), 0);
         assert!(bare.columns.len() > 0);
+    }
+
+    #[test]
+    fn forgetting_builds_the_cell_this_thread_asked_last_again() {
+        let g = terrain(1.0);
+        let before = g.column_cache(0, 0);
+        g.forget_caches();
+        assert!(!Arc::ptr_eq(&before, &g.column_cache(0, 0)));
     }
 
     #[test]

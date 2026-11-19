@@ -12,7 +12,10 @@ everywhere and stay as they are.
 
 **`libm` is pinned to an exact version.** Its answers are part of every
 Generator version, so updating it is a generator change and must pass the
-digests unchanged.
+digests unchanged. `wide`, which samples noise four points at a time, is pinned
+the same way and used only for its correctly rounded lane-wise operations, so it
+gives the scalar bits; Clippy refuses its fused multiply-adds and
+approximations.
 
 **Version 3 was corrected in place, once.** It had merged with `std`
 trigonometry in Settlements, crop fields and the spawn search, and `powi` in

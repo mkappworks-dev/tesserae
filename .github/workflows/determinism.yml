@@ -73,3 +73,12 @@ jobs:
             a_snapshot_whose_biomes_have_no_features_restores_to_the_recorded_chunks
           cargo test -p tesserae-core --release --locked --target ${{ matrix.target }} \
             --test settlement_worldgen -- --exact a_fixed_size_settlement_lays_out_exactly_as_before_ranges
+
+      # The four-wide noise against the scalar, on whichever backend `wide` picks for the target.
+      - name: SIMD property tests
+        run: |
+          cargo test -p tesserae-core --release --locked --target ${{ matrix.target }} --lib -- \
+            --exact \
+            noise::tests::four_wide_fbm2_is_the_scalar_one_bit_for_bit \
+            noise::tests::four_wide_fbm3_is_the_scalar_one_bit_for_bit \
+            terrain::tests::four_columns_at_once_are_four_single_columns_bit_for_bit

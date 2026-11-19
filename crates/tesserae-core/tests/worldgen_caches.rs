@@ -31,7 +31,7 @@ fn cold(g: &Worldgen, coords: &[[i32; 3]]) -> Vec<Vec<Voxel>> {
         .iter()
         .rev()
         .map(|&[x, y, z]| {
-            g.forget_regions();
+            g.forget_caches();
             voxels(&g.chunk(x, y, z))
         })
         .collect();
@@ -70,18 +70,9 @@ fn a_chunk_is_the_same_warm_cold_and_in_any_order() {
 
 /// Every Chunk of the band over a 3x3 patch of columns round `centre`.
 fn patch(g: &Worldgen, centre: [i32; 2]) -> Vec<[i32; 3]> {
-    let cell_m = CHUNK_SIZE as f32 * g.voxel_size();
     (-1..=1)
         .flat_map(|dz| (-1..=1).map(move |dx| [centre[0] + dx, centre[1] + dz]))
-        .flat_map(|at| {
-            let [x, z] = world::middle_m(g, at);
-            let ground_m = g.surface_height_m(x, z);
-            let (lo, hi) = (
-                world::layer(g, ground_m - 2.0 * cell_m),
-                world::layer(g, ground_m + cell_m),
-            );
-            (lo..=hi).map(move |cy| [at[0], cy, at[1]])
-        })
+        .flat_map(|at| world::band(g, at))
         .collect()
 }
 

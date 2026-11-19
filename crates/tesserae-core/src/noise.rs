@@ -137,11 +137,6 @@ impl Lanes for f32x4 {
     }
 }
 
-/// [`fbm2`] at four points, bit for bit.
-pub fn fbm2_x4(x: [f32; 4], z: [f32; 4], seed: u32, octaves: u32) -> [f32; 4] {
-    fbm2_lanes(f32x4::new(x), f32x4::new(z), seed, octaves).to_array()
-}
-
 /// `splat` spelled out: its `[v; 4]` compiles on macOS to a call to `memset_pattern16` in place
 /// of one `dup`, and those calls were most of a four-wide sample's cost.
 #[inline(always)]
@@ -159,7 +154,6 @@ fn fill_i32(v: i32) -> i32x4 {
     i32x4::new([v, v, v, v])
 }
 
-/// The four-wide twin of [`mix`].
 #[inline]
 fn mix_lanes(mut x: u32x4) -> u32x4 {
     x ^= x.unbounded_shr_scalar(16);
@@ -177,7 +171,6 @@ fn unit_lanes(h: u32x4) -> f32x4 {
     f32x4::from_i32x4(cast(h.unbounded_shr_scalar(8))) * fill(1.0 / (1u32 << 24) as f32)
 }
 
-/// [`lattice`] at four points.
 #[inline]
 fn lattice_lanes(xi: i32x4, zi: i32x4, seed: u32) -> f32x4 {
     let (xi, zi): (u32x4, u32x4) = (cast(xi), cast(zi));
@@ -186,7 +179,6 @@ fn lattice_lanes(xi: i32x4, zi: i32x4, seed: u32) -> f32x4 {
     ))
 }
 
-/// [`lattice3`] at four points.
 #[inline]
 fn lattice3_lanes(xi: i32x4, yi: i32x4, zi: i32x4, seed: u32) -> f32x4 {
     let (xi, yi, zi): (u32x4, u32x4, u32x4) = (cast(xi), cast(yi), cast(zi));
@@ -206,7 +198,6 @@ fn cell_lanes(v: f32x4) -> (i32x4, f32x4) {
     (v0.trunc_int(), t * t * (fill(3.0) - fill(2.0) * t))
 }
 
-/// [`noise2`] at four points.
 #[inline]
 fn noise2_lanes(x: f32x4, z: f32x4, seed: u32) -> f32x4 {
     let (xi, sx) = cell_lanes(x);
@@ -318,12 +309,6 @@ fn fbm3_with(
     if total == 0.0 { 0.0 } else { value / total }
 }
 
-/// [`fbm3`] at four points, bit for bit.
-pub fn fbm3_x4(x: [f32; 4], y: [f32; 4], z: [f32; 4], seed: u32, octaves: u32) -> [f32; 4] {
-    fbm3_lanes(f32x4::new(x), f32x4::new(y), f32x4::new(z), seed, octaves).to_array()
-}
-
-/// [`noise3`] at four points.
 #[inline]
 fn noise3_lanes(x: f32x4, y: f32x4, z: f32x4, seed: u32) -> f32x4 {
     let (xi, sx) = cell_lanes(x);
@@ -768,6 +753,14 @@ mod tests {
                 _ => v,
             }
         })
+    }
+
+    fn fbm2_x4(x: [f32; 4], z: [f32; 4], seed: u32, octaves: u32) -> [f32; 4] {
+        fbm2_lanes(f32x4::new(x), f32x4::new(z), seed, octaves).to_array()
+    }
+
+    fn fbm3_x4(x: [f32; 4], y: [f32; 4], z: [f32; 4], seed: u32, octaves: u32) -> [f32; 4] {
+        fbm3_lanes(f32x4::new(x), f32x4::new(y), f32x4::new(z), seed, octaves).to_array()
     }
 
     #[test]

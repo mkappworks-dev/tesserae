@@ -413,7 +413,7 @@ fn drainage_gives_the_same_answers_with_a_cold_cache() {
             .collect::<Vec<_>>()
     };
     let warm = at(&g);
-    g.forget_regions();
+    g.forget_caches();
     let cold = at(&g);
     let fresh = at(&Worldgen::new(SEED, 1.0, wet_world()));
     assert_eq!(warm, cold);
@@ -654,7 +654,7 @@ fn chunks_are_the_same_in_any_order_and_with_a_cold_cache() {
         .iter()
         .rev()
         .map(|&(x, y, z)| {
-            backward.forget_regions();
+            backward.forget_caches();
             fingerprint(&backward.chunk(x, y, z))
         })
         .collect();
@@ -764,6 +764,11 @@ fn leaks(g: &Worldgen, centre: (i32, i32), n: i32, ys: std::ops::Range<i32>) -> 
     (wet, down, side)
 }
 
+/// The Chunk index along an axis that holds metre `m`.
+fn chunk_at(g: &Worldgen, m: f32) -> i32 {
+    (m / (32.0 * g.voxel_size())).floor() as i32
+}
+
 fn caved_world() -> WorldgenParams {
     WorldgenParams {
         caves: Some(tesserae_core::CaveParams::default()),
@@ -775,9 +780,10 @@ fn caved_world() -> WorldgenParams {
 /// Water that stands beside or above air would be poured into it by the fluid simulation.
 #[test]
 fn generated_water_has_no_air_below_or_beside_it() {
-    for (size, centre, ys) in [(1.0, (-29, -33), -4..5), (0.5, (-58, -66), -8..10)] {
+    for size in [1.0, 0.5] {
         let g = Worldgen::new(SEED, size, caved_world());
-        let (wet, down, side) = leaks(&g, centre, 16, ys);
+        let at = |m: f32| chunk_at(&g, m);
+        let (wet, down, side) = leaks(&g, (at(-928.0), at(-1056.0)), 16, at(-128.0)..at(160.0));
         assert!(wet > 100_000, "the region holds water at {size} m");
         assert_eq!(
             (down, side),
@@ -827,8 +833,9 @@ fn lakes_and_rivers_meet_their_shores_and_each_other_without_a_wall() {
 
 #[test]
 fn flooded_caverns_are_sealed_from_dry_tunnels() {
-    for (size, scale) in [(1.0, 1), (0.5, 2)] {
+    for size in [1.0, 0.5] {
         let g = Worldgen::new(SEED, size, caved_world());
+        let at = |m: f32| chunk_at(&g, m);
         // Under the mountains, where caverns are deep and tunnels cross them below the water table.
         let mut checked = 0;
         for j in -32..32 {
@@ -838,8 +845,8 @@ fn flooded_caverns_are_sealed_from_dry_tunnels() {
                     continue;
                 }
                 checked += 1;
-                let centre = ((x * scale).div_euclid(32), (z * scale).div_euclid(32));
-                let (_, down, side) = leaks(&g, centre, 4 * scale, -3 * scale..scale);
+                let centre = (at(x as f32), at(z as f32));
+                let (_, down, side) = leaks(&g, centre, at(128.0), at(-96.0)..at(32.0));
                 assert_eq!(
                     (down, side),
                     (0, 0),

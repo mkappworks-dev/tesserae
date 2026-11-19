@@ -170,7 +170,7 @@ struct Base {
 }
 
 /// Version 3's large-scale fields from their raw noise.
-fn fields_of(continent: f32, erosion: f32) -> Fields {
+fn fields_of(FieldNoise { continent, erosion }: FieldNoise<f32>) -> Fields {
     // fBm bunches around a half, so a contrast curve spreads the fields across their range.
     let erosion = smooth(0.25, 0.75, erosion);
     let inland = smooth(0.50, 0.66, continent);
@@ -181,42 +181,74 @@ fn fields_of(continent: f32, erosion: f32) -> Fields {
     }
 }
 
+/// The continent and erosion fields before [`fields_of`] shapes them.
+#[derive(Clone, Copy)]
+struct FieldNoise<L> {
+    continent: L,
+    erosion: L,
+}
+
+impl FieldNoise<f32x4> {
+    fn lanes(self) -> [FieldNoise<f32>; 4] {
+        let (continent, erosion) = (self.continent.to_array(), self.erosion.to_array());
+        std::array::from_fn(|k| FieldNoise {
+            continent: continent[k],
+            erosion: erosion[k],
+        })
+    }
+}
+
+/// A cut into the land: the regions it may run through, and the ridged line it follows there.
+#[derive(Clone, Copy)]
+struct Cut<L> {
+    region: L,
+    line: L,
+}
+
+impl Cut<f32x4> {
+    fn lanes(self) -> [Cut<f32>; 4] {
+        let (region, line) = (self.region.to_array(), self.line.to_array());
+        std::array::from_fn(|k| Cut {
+            region: region[k],
+            line: line[k],
+        })
+    }
+}
+
 /// What [`Base::samples`] asks of a column.
 #[derive(Clone, Copy)]
 struct Samples<L> {
     warped: (L, L),
-    /// Continent and erosion.
-    fields: [L; 2],
+    fields: FieldNoise<L>,
     calm: L,
     peaks: L,
-    /// The detail octaves, all and the broad two.
+    /// Every detail octave.
     rough: L,
+    /// The two broadest detail octaves.
     broad: L,
     plateau: L,
-    /// The region and the line.
-    canyon: [L; 2],
-    /// The slot and the region.
-    ravine: [L; 2],
+    canyon: Cut<L>,
+    ravine: Cut<L>,
 }
 
 impl Samples<f32x4> {
     fn lanes(self) -> [Samples<f32>; 4] {
         let lane = |v: f32x4| v.to_array();
         let (wx, wz) = (lane(self.warped.0), lane(self.warped.1));
-        let fields = self.fields.map(lane);
+        let fields = self.fields.lanes();
         let (calm, peaks) = (lane(self.calm), lane(self.peaks));
         let (rough, broad, plateau) = (lane(self.rough), lane(self.broad), lane(self.plateau));
-        let (canyon, ravine) = (self.canyon.map(lane), self.ravine.map(lane));
+        let (canyon, ravine) = (self.canyon.lanes(), self.ravine.lanes());
         std::array::from_fn(|k| Samples {
             warped: (wx[k], wz[k]),
-            fields: fields.map(|f| f[k]),
+            fields: fields[k],
             calm: calm[k],
             peaks: peaks[k],
             rough: rough[k],
             broad: broad[k],
             plateau: plateau[k],
-            canyon: canyon.map(|f| f[k]),
-            ravine: ravine.map(|f| f[k]),
+            canyon: canyon[k],
+            ravine: ravine[k],
         })
     }
 }
@@ -239,13 +271,13 @@ fn calm_of(n: f32) -> f32 {
 }
 
 /// 0 to 1: where a canyon cuts, a winding line through some regions of the land.
-fn canyon_of([region, line]: [f32; 2]) -> f32 {
+fn canyon_of(Cut { region, line }: Cut<f32>) -> f32 {
     smooth(0.6, 0.7, region) * smooth(0.88, 0.97, crate::noise::ridge(line))
 }
 
 /// 0 to 1: narrow slots cut deep into the land, ridged noise thresholded near its crest.
-fn ravine_of([slot, region]: [f32; 2]) -> f32 {
-    smooth(0.52, 0.62, region) * smooth(0.975, 0.995, crate::noise::ridge(slot))
+fn ravine_of(Cut { region, line }: Cut<f32>) -> f32 {
+    smooth(0.52, 0.62, region) * smooth(0.975, 0.995, crate::noise::ridge(line))
 }
 
 /// The overhang field `n` as a signed push in `-amp_m..amp_m`.
@@ -313,28 +345,26 @@ impl Base {
     }
 
     fn fields_warped(&self, wx: f32, wz: f32) -> Fields {
-        let [continent, erosion] = self.field_noise(wx, wz);
-        fields_of(continent, erosion)
+        fields_of(self.field_noise(wx, wz))
     }
 
-    /// The continent and erosion fields before [`fields_of`] shapes them.
-    fn field_noise<L: Lanes>(&self, wx: L, wz: L) -> [L; 2] {
+    fn field_noise<L: Lanes>(&self, wx: L, wz: L) -> FieldNoise<L> {
         let size = L::splat(self.continent_size_m);
         let erosion_size = L::splat(EROSION_SIZE_M);
-        [
-            L::fbm2(
+        FieldNoise {
+            continent: L::fbm2(
                 wx / size,
                 wz / size,
                 self.seed.wrapping_add(SALT_CONTINENT),
                 4,
             ),
-            L::fbm2(
+            erosion: L::fbm2(
                 wx / erosion_size,
                 wz / erosion_size,
                 self.seed.wrapping_add(SALT_EROSION),
                 3,
             ),
-        ]
+        }
     }
 
     /// The noise every column's base height asks for, whatever the column: apart from the
@@ -358,8 +388,14 @@ impl Base {
             rough: detail(self.octaves),
             broad: detail(self.octaves.min(2)),
             plateau: at(3500.0, SALT_PLATEAU, 2),
-            canyon: [at(2500.0, SALT_CANYON, 2), at(600.0, SALT_CANYON_LINE, 2)],
-            ravine: [at(450.0, SALT_RAVINE, 2), at(3000.0, SALT_RAVINE_MASK, 2)],
+            canyon: Cut {
+                region: at(2500.0, SALT_CANYON, 2),
+                line: at(600.0, SALT_CANYON_LINE, 2),
+            },
+            ravine: Cut {
+                region: at(3000.0, SALT_RAVINE_MASK, 2),
+                line: at(450.0, SALT_RAVINE, 2),
+            },
         }
     }
 
@@ -377,7 +413,7 @@ impl Base {
     fn base_height_of(&self, x_m: f32, z_m: f32, s: Samples<f32>) -> f32 {
         let seed = self.seed;
         let (wx, wz) = s.warped;
-        let f = fields_of(s.fields[0], s.fields[1]);
+        let f = fields_of(s.fields);
         let inland = smooth(0.50, 0.66, f.continent);
         let (d, h) = (self.depth_m, self.height_m);
 
@@ -488,9 +524,8 @@ impl Base {
             return [0.0; 4];
         }
         let (wx, wz) = self.warped(f32x4::new(x_m), f32x4::new(z_m));
-        let [continent, erosion] = self.field_noise(wx, wz).map(f32x4::to_array);
-        let rugged: [f32; 4] =
-            std::array::from_fn(|k| fields_of(continent[k], erosion[k]).ruggedness);
+        let fields = self.field_noise(wx, wz).lanes();
+        let rugged: [f32; 4] = std::array::from_fn(|k| fields_of(fields[k]).ruggedness);
         if rugged.iter().all(|&r| r <= 0.0) {
             return [0.0; 4];
         }

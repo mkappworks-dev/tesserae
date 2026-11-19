@@ -84,7 +84,15 @@ The 2D and 3D fBm have a four-wide form on `wide` 1.7.1 (pinned exactly): the sa
 
 Proof:
 
-- Property tests, in `noise.rs`: 20,000 four-lane draws each of `fbm2` and `fbm3` against the scalar, bit for bit, over hashed seeds, 0 to 10 octaves, and positions from a few metres to 1,000 km, on and just beside lattice points either side of zero. In `terrain.rs`: 24 seeds of 400 four-column draws out to 100 km, the base height and the overhang reach against the scalar, bit for bit. Both pass on aarch64 (NEON) here; CI's x86_64 Linux runs them on the SSE2 backend. A test that changes the order of the smoothstep's multiplications fails both.
+- Property tests, in `noise.rs`: 20,000 four-lane draws each of `fbm2` and
+  `fbm3` against the scalar, bit for bit, over hashed seeds, 0 to 10 octaves,
+  and positions from a few metres to 1,000 km, on and just beside lattice points
+  either side of zero. In `terrain.rs`: 24 seeds of 400 four-column draws out to
+  100 km, the base height and the overhang reach against the scalar, bit for
+  bit. The Determinism workflow runs all three in release on every target it
+  digests: x86_64 Linux and Windows (SSE2), aarch64 macOS (NEON) and x86_64
+  macOS under Rosetta; they pass on aarch64 here. A test that changes the order
+  of the smoothstep's multiplications fails both.
 - Version 3's fingerprint (`tests/v3_fingerprint.rs`, uncommitted) equals fcb5db58's, all 46 lines; the committed digests, `cargo test --locked -p tesserae-core` and the Server's LOD tests pass. `GENERATOR_VERSION` is unchanged.
 
 ### Bench figures, 2026-11-19

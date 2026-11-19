@@ -7,11 +7,12 @@ use std::sync::{Arc, RwLock};
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
-/// Each Cell with when it was kept, oldest lowest.
-type Aged<T> = HashMap<[i32; 2], (u64, Arc<T>)>;
+/// Each Cell with when it was last built or read, oldest lowest. A read stores its age under the
+/// read lock, so a racing read may lose its refresh; that costs only a rebuild.
+type Aged<T> = HashMap<[i32; 2], (AtomicU64, Arc<T>)>;
 
-/// A map of Cells that drops its older half on reaching its bound, so a flight keeps the Cells
-/// round the Eye rather than starting over.
+/// A map of Cells that drops its least recently used half on reaching its bound, so a flight
+/// keeps the Cells round the Eye rather than starting over.
 pub(super) struct CellMap<T> {
     /// Tells this map from any other, for a thread's record of the last Cell it asked.
     id: u64,
@@ -45,7 +46,14 @@ impl<T> CellMap<T> {
 
     pub(super) fn get(&self, key: [i32; 2]) -> Option<Arc<T>> {
         let cells = self.cells.read().expect("cells");
-        cells.get(&key).map(|(_, t)| Arc::clone(t))
+        let (age, t) = cells.get(&key)?;
+        // A load and a compare, not a write, when nothing was built since: a held Cell is read
+        // by every worker.
+        let now = self.next.load(Ordering::Relaxed);
+        if age.load(Ordering::Relaxed) != now {
+            age.store(now, Ordering::Relaxed);
+        }
+        Some(Arc::clone(t))
     }
 
     /// Built outside the lock, so two workers may both build a Cell; they build the same, and
@@ -57,12 +65,16 @@ impl<T> CellMap<T> {
         let built = Arc::new(build());
         let mut cells = self.cells.write().expect("cells");
         if !cells.contains_key(&key) && cells.len() >= self.bound {
-            let mut ages: Vec<u64> = cells.values().map(|(age, _)| *age).collect();
+            // By key within an age, since reads between two builds share one.
+            let mut ages: Vec<(u64, [i32; 2])> = cells
+                .iter()
+                .map(|(key, (age, _))| (age.load(Ordering::Relaxed), *key))
+                .collect();
             let half = ages.len() / 2;
             let (_, &mut newer, _) = ages.select_nth_unstable(half);
-            cells.retain(|_, (age, _)| *age >= newer);
+            cells.retain(|key, (age, _)| (*age.get_mut(), *key) >= newer);
         }
-        let age = self.next.fetch_add(1, Ordering::Relaxed);
+        let age = AtomicU64::new(self.next.fetch_add(1, Ordering::Relaxed));
         let (_, t) = cells.entry(key).or_insert((age, built));
         Arc::clone(t)
     }
@@ -95,6 +107,18 @@ mod tests {
         for i in 4..9 {
             assert_eq!(map.get([i, 0]).as_deref(), Some(&i));
         }
+    }
+
+    #[test]
+    fn a_cell_read_after_newer_ones_were_built_survives_the_drop() {
+        let map = CellMap::new(8);
+        for i in 0..8 {
+            map.get_or_build([i, 0], || i);
+        }
+        map.get([0, 0]);
+        map.get_or_build([8, 0], || 8);
+        assert_eq!(map.get([0, 0]).as_deref(), Some(&0));
+        assert_eq!(map.len(), 5);
     }
 
     #[test]

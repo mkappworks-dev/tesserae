@@ -260,7 +260,7 @@ impl Case {
 }
 
 /// Every Chunk of the band over a column, bottom to top, that is not an early-out.
-fn band(g: &Worldgen, [cx, cz]: [i32; 2]) -> Vec<[i32; 3]> {
+pub fn band(g: &Worldgen, [cx, cz]: [i32; 2]) -> Vec<[i32; 3]> {
     let cell_m = CHUNK_SIZE as f32 * g.voxel_size();
     let [x, z] = middle_m(g, [cx, cz]);
     let ground_m = g.surface_height_m(x, z);
