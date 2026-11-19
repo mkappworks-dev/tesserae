@@ -6,13 +6,14 @@
 //! rendering; a later Look pack can replace appearance through this boundary.
 
 use bevy::asset::AssetPath;
-use bevy::mesh::MeshVertexBufferLayoutRef;
+use bevy::mesh::{MeshVertexBufferLayoutRef, VertexBufferLayout};
 use bevy::pbr::{
     ExtendedMaterial, MaterialExtension, MaterialExtensionKey, MaterialExtensionPipeline,
 };
 use bevy::prelude::*;
 use bevy::render::render_resource::{
-    AsBindGroup, RenderPipelineDescriptor, ShaderType, SpecializedMeshPipelineError,
+    AsBindGroup, RenderPipelineDescriptor, ShaderType, SpecializedMeshPipelineError, VertexState,
+    VertexStepMode,
 };
 use bevy::render::storage::ShaderBuffer;
 use bevy::shader::{ShaderDefVal, ShaderRef};
@@ -141,9 +142,7 @@ impl MaterialExtension for ChunkMaterialExtension {
         _layout: &MeshVertexBufferLayoutRef,
         key: MaterialExtensionKey<Self>,
     ) -> Result<(), SpecializedMeshPipelineError> {
-        // The vertex shader reads the quad buffer, never the mesh, which is a
-        // placeholder from `chunk_mesh::placeholder` for its vertex count.
-        descriptor.vertex.buffers = Vec::new();
+        read_no_vertex_attribute(&mut descriptor.vertex);
 
         // Reach the shader as `constants::*`, so neither the uniform's length
         // nor the light scale can drift from the Rust side.
@@ -186,6 +185,18 @@ impl MaterialExtension for ChunkMaterialExtension {
     }
 }
 
+/// The vertex shader reads the quad buffer, never the mesh, which is a
+/// placeholder from `chunk_mesh::placeholder` for its vertex count. Bevy's
+/// specializer keys pipelines by `buffers[0]`, so the slot stays, empty; a
+/// zero stride, as wgpu wants a multiple of four and the placeholder's is one.
+fn read_no_vertex_attribute(vertex: &mut VertexState) {
+    vertex.buffers = vec![VertexBufferLayout {
+        array_stride: 0,
+        step_mode: VertexStepMode::Vertex,
+        attributes: Vec::new(),
+    }];
+}
+
 fn shader() -> ShaderRef {
     embedded("chunk_material.wesl")
 }
@@ -199,6 +210,27 @@ fn embedded(file: &str) -> ShaderRef {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy::render::render_resource::VertexFormat;
+
+    #[test]
+    fn the_pipeline_keeps_the_vertex_buffer_bevy_reads_but_no_attribute() {
+        let mut vertex = VertexState {
+            buffers: vec![VertexBufferLayout::from_vertex_formats(
+                VertexStepMode::Vertex,
+                [VertexFormat::Uint8],
+            )],
+            ..default()
+        };
+        read_no_vertex_attribute(&mut vertex);
+        let [buffer] = vertex.buffers.as_slice() else {
+            panic!(
+                "Bevy's specializer indexes buffers[0]: {:?}",
+                vertex.buffers
+            );
+        };
+        assert!(buffer.attributes.is_empty());
+        assert_eq!(buffer.array_stride % 4, 0, "wgpu's VERTEX_ALIGNMENT");
+    }
 
     #[test]
     fn only_flames_have_a_builtin_colour() {
