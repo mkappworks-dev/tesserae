@@ -10,7 +10,7 @@ Item 1. The mesher emits one record per quad; the Client stores 8 bytes a
 quad in one engine-owned GPU buffer and expands corners in the vertex shader.
 
 - Core: `Quad`, `MeshLayer { quads }`, `Quad::corners()`, `MeshLayer::soup()`;
-  every pass writes records. ADR-0030.
+  every pass writes records. ADR-0034.
 - Server: `level_the_water` and `split_quads` work on records; `MeshSize`
   counts record bytes.
 - Client: `ChunkQuads` (table, records, range), the quad buffer and its free

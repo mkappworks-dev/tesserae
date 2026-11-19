@@ -1,7 +1,7 @@
 //! A Chunk layer's quads as the quad buffer holds them: a header, a table of
 //! the layer's (Material, light) pairs, then one record per quad, which
 //! `chunk_vertex.wesl` expands from the vertex index. See
-//! `docs/adr/0030-a-chunk-mesh-is-one-record-per-quad.md`.
+//! `docs/adr/0034-a-chunk-mesh-is-one-record-per-quad.md`.
 //!
 //! This conversion lives in `tesserae` and never in `tesserae-core`, which must
 //! acquire no `bevy` or `wgpu` dependency even transitively. See

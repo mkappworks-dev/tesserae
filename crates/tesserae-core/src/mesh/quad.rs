@@ -1,7 +1,7 @@
 //! One record per quad: what the mesher emits and the renderer expands.
 //!
 //! The two geometry words are the GPU record's, as `chunk_vertex.wesl` decodes
-//! them; see `docs/adr/0030-a-chunk-mesh-is-one-record-per-quad.md`. Positions
+//! them; see `docs/adr/0034-a-chunk-mesh-is-one-record-per-quad.md`. Positions
 //! are in sixteenths of a Voxel, the grid every Shape, fluid surface and flame
 //! lies on.
 

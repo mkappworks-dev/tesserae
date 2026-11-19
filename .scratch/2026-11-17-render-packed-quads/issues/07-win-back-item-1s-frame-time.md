@@ -9,7 +9,7 @@ Spec: [Packed quads](../spec.md).
 
 Ticket 06 failed 02 on frame time: p50 +8-13% and p95 +13-26%, with the GPU's
 depth prepass and shadow passes slower and main CPU p50 +11-42%. Find and fix
-both costs while keeping the record contract (ADR-0030), then gate again.
+both costs while keeping the record contract (ADR-0034), then gate again.
 
 - **GPU.** The placeholder is drawn non-indexed, six vertices a quad, so the
   vertex shader and its quad buffer reads run six times a quad in every pass,

@@ -28,15 +28,35 @@ order, winding and UVs the old soup had. `MeshLayer::soup()` rebuilds the
 triangles for readers that want them.
 
 The layout of the two words is part of the contract: the Client uploads them as
-they are, and `chunk_vertex.wesl` decodes them. The high word's top 14 bits are
+they are, and `chunk_vertex.wesl` decodes them. `tesserae_core::mesh::layout`
+holds it, and reaches the shader as shader defs. The high word's top 14 bits are
 left free for the Client's per-layer table of (Material, light) pairs, so that a
-quad is 8 bytes on the GPU.
+record is 8 bytes on the GPU.
+
+## The draw
+
+Every Chunk layer's header, table and records live in one engine-owned storage
+buffer, a range each. The layer's entity keeps a `Mesh3d` whose mesh is a
+placeholder that no pipeline reads: four one-byte vertices a quad and the
+indices `0 1 2 0 2 3` per quad, two bytes each up to 65,536 vertices and four
+past them. The vertex shader takes the quad from the index over four and the
+corner from the index modulo four, so the GPU can reuse a corner's vertex
+shading across the quad's two triangles, as it did with the old index buffer.
+
+The pipelines keep one vertex buffer slot with no attributes and a stride of 0:
+Bevy's specializer keys a pipeline by `buffers[0]`, so the slot must exist, and
+wgpu wants a stride that is a multiple of four, which the one-byte placeholder
+is not.
+
+A quad is then 24 bytes on the GPU: 8 of record, 4 of placeholder vertices and
+12 of indices. A layer past 65,536 vertices takes four-byte indices, 36 bytes a
+quad.
 
 ## Why records and not packed vertices
 
 - One record a quad replaces four vertices and six indices on the Server, in the
-  message, in the main world and on the GPU, where only a one-byte placeholder
-  vertex is left for each of the six the draw runs.
+  message and in the main world; on the GPU the record and its placeholder are
+  24 bytes where the packed vertices and indices were about 88.
 - The renderer expands the corners in the vertex shader from the vertex index,
   so the quad's four corners are never stored anywhere.
 - The Server's mesh jobs stop building an `f32` soup that the Client only
@@ -44,7 +64,10 @@ quad is 8 bytes on the GPU.
 
 Instancing was rejected: Bevy's `instance_index` indexes the mesh uniform, so an
 entity cannot be drawn as one instance per quad. Packed vertices with an index
-buffer, today's form, were rejected for their size.
+buffer, the old form, were rejected for their size. A non-indexed placeholder,
+six one-byte vertices a quad and 14 bytes on the GPU, ran the vertex shader six
+times a quad and made the depth prepass and shadow passes slower than the old
+form; the index buffer's 10 more bytes a quad buy that back.
 
 ## Consequences
 
@@ -55,5 +78,8 @@ buffer, today's form, were rejected for their size.
 - Any new kind of geometry needs a kind, or must be a face. Three bits of kind
   leave no room for a ninth.
 - A layer with more than 16,384 distinct (Material, light) pairs is stored by
-  the Client with the pair inline, 12 bytes a quad, so the contract holds for
+  the Client with the pair inline, 12-byte records, so the contract holds for
   any Chunk.
+- Each layer has its own placeholder. Shared placeholders in size buckets would
+  save its 16 bytes a quad for more vertex work, the cost the indexed draw won
+  back.

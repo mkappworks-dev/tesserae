@@ -101,7 +101,7 @@ holds.
   `MeshLayer::soup()` gives the old positions, normals, UVs, Materials, light
   and indices for the readers that want triangles: tests, the held-item
   preview, collision boxes. This changes what crosses from Server to Client,
-  so it has an ADR (0030).
+  so it has an ADR (0034).
 - **Three kinds of record.**
   - A face, kind 0 to 5 in `FACE_STEPS` order: an axis-aligned rectangle with
     its plane, low corner and size in sixteenths. Pass 1, pass 2, fluid,
