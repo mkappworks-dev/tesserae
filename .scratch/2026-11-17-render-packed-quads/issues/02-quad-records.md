@@ -1,6 +1,6 @@
 # 02: Quad records
 
-Status: ready-for-agent
+Status: done
 
 Spec: [Packed quads](../spec.md).
 
@@ -21,11 +21,11 @@ quad in one engine-owned GPU buffer and expands corners in the vertex shader.
 
 ## Acceptance criteria
 
-- [ ] Every meshing test passes on `soup()`.
-- [ ] The exact-expansion test covers every Shape, fluid level, flame, Cross
+- [x] Every meshing test passes on `soup()`.
+- [x] The exact-expansion test covers every Shape, fluid level, flame, Cross
       and Plane form, through the uploaded words.
-- [ ] Chunk view tests read each entity's range back from the replayed buffer.
-- [ ] Gated by ticket 06: captures identical, no worse frame p50/p95, mesh
+- [x] Chunk view tests read each entity's range back from the replayed buffer.
+- [x] Gated by ticket 06: captures identical, no worse frame p50/p95, mesh
       memory or mesh worker time.
 
 ## Comments
@@ -41,3 +41,8 @@ starts, so the shader, the captures and the gate wait for tickets 01 and 06.
 frame p50 +8-13% and p95 +13-26%, from the GPU's depth prepass and shadow
 passes. Fails the gate; the code stays while the regression is looked at.
 `625f7a83` fixes the game-start panic the uncompiled pipeline had.
+
+2026-11-19: with ticket 07's two fixes (the layer's `Aabb` from its records,
+the placeholder drawn indexed) the branch passes against the base: frame p50
+and p95 no worse in any fixture, held mesh memory -70%, mesh worker time
+lower, captures at the base's own run-to-run level. Numbers in ticket 07.

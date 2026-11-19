@@ -1,6 +1,6 @@
 # 03: Binary greedy pass 1
 
-Status: ready-for-agent
+Status: done
 Blocked by: 02
 
 Spec: [Packed quads](../spec.md).
@@ -16,9 +16,9 @@ operations and merges runs by trailing-zero scans, instead of a per-Voxel
 
 ## Acceptance criteria
 
-- [ ] A test asserts identical records against the reference on the bench
+- [x] A test asserts identical records against the reference on the bench
       fixtures and on seeded random Chunks, translucent and wet included.
-- [ ] Gated by ticket 06: `greedy_mesh` and `mesh_chunk` benches no slower,
+- [x] Gated by ticket 06: `greedy_mesh` and `mesh_chunk` benches no slower,
       mesh worker time no worse.
 
 ## Comments
@@ -35,3 +35,5 @@ Breaking the merge on purpose fails it. The gate is ticket 06.
 2026-11-19: gated in ticket 06 against 02: level-0 mesh worker time -25-30%,
 every meshing bench faster (`greedy_mesh/terrain` -76%), frame time no worse.
 Passes; left open with 02, which it builds on.
+
+2026-11-19: done with 02, which passes with ticket 07's fixes.
