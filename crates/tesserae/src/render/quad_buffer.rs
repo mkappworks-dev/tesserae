@@ -8,7 +8,7 @@
 
 use std::collections::BTreeMap;
 
-use bevy::asset::RenderAssetUsages;
+use bevy::asset::{AssetEventSystems, RenderAssetUsages};
 use bevy::prelude::*;
 use bevy::render::render_asset::RenderAssets;
 use bevy::render::render_resource::BufferUsages;
@@ -117,7 +117,7 @@ fn buffer(words: u32) -> ShaderBuffer {
 }
 
 pub fn plugin(app: &mut App) {
-    app.add_systems(Last, grow);
+    app.add_systems(PostUpdate, grow.before(AssetEventSystems));
     if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
         render_app
             .init_resource::<PendingWrites>()
@@ -127,7 +127,9 @@ pub fn plugin(app: &mut App) {
 }
 
 /// Resizing marks the asset changed, which is what has Bevy grow the GPU
-/// buffer, so it happens once a frame however many ranges grew it.
+/// buffer, so it happens once a frame however many ranges grew it. Before the
+/// asset events go out, or the render world would see the change a frame
+/// after the ranges that needed it, and draw them before their words land.
 fn grow(quads: Option<ResMut<QuadBuffer>>, mut buffers: ResMut<Assets<ShaderBuffer>>) {
     let Some(mut quads) = quads else {
         return;
@@ -154,8 +156,8 @@ fn take_writes(mut main: ResMut<MainWorld>, mut pending: ResMut<PendingWrites>) 
     }
 }
 
-/// Holds back what does not fit yet: the buffer it lands in may still be
-/// growing, a frame behind its range.
+/// Holds back what does not fit, rather than write past the buffer, should a
+/// growth ever be prepared after the writes it made room for.
 fn apply_writes(
     mut pending: ResMut<PendingWrites>,
     buffers: Res<RenderAssets<GpuShaderBuffer>>,
@@ -164,13 +166,20 @@ fn apply_writes(
     let Some(gpu) = pending.buffer.and_then(|id| buffers.get(id)) else {
         return;
     };
-    let size = gpu.buffer.size();
-    pending.writes.retain(|(at, bytes)| {
+    land_writes(&mut pending.writes, gpu.buffer.size(), |offset, bytes| {
+        queue.write_buffer(&gpu.buffer, offset, bytes);
+    });
+}
+
+/// Writes each of `pending` that fits a buffer of `size` bytes, in order, and
+/// keeps the rest.
+fn land_writes(pending: &mut Vec<(u32, Vec<u8>)>, size: u64, mut write: impl FnMut(u64, &[u8])) {
+    pending.retain(|(at, bytes)| {
         let offset = u64::from(*at) * 4;
         if offset + bytes.len() as u64 > size {
             return true;
         }
-        queue.write_buffer(&gpu.buffer, offset, bytes);
+        write(offset, bytes);
         false
     });
 }
@@ -178,6 +187,7 @@ fn apply_writes(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy::ecs::system::RunSystemOnce;
 
     fn quads() -> QuadBuffer {
         QuadBuffer::new(&mut Assets::default())
@@ -218,13 +228,99 @@ mod tests {
         assert_eq!(q.alloc(INITIAL_WORDS - 4), INITIAL_WORDS + 4);
     }
 
+    fn bytes(words: &[u32]) -> Vec<u8> {
+        words.iter().flat_map(|w| w.to_ne_bytes()).collect()
+    }
+
+    #[test]
+    fn the_render_world_takes_every_queued_write_and_the_buffer_they_go_to() {
+        let mut main = MainWorld::default();
+        let mut q = quads();
+        let handle = q.handle.id();
+        let at = q.alloc(2);
+        q.write(at, &[1, 2]);
+        main.insert_resource(q);
+        let mut render = World::new();
+        render.insert_resource(main);
+        render.insert_resource(PendingWrites {
+            buffer: None,
+            writes: vec![(7, bytes(&[9]))],
+        });
+        render.run_system_once(take_writes).unwrap();
+        let pending = render.resource::<PendingWrites>();
+        assert_eq!(pending.buffer, Some(handle));
+        assert_eq!(
+            pending.writes,
+            [(7, bytes(&[9])), (0, bytes(&[1, 2]))],
+            "after what an earlier frame held back"
+        );
+        let main = render.resource::<MainWorld>();
+        assert!(main.resource::<QuadBuffer>().writes.is_empty());
+    }
+
+    #[test]
+    fn a_write_past_the_gpu_buffer_waits_for_it_to_grow() {
+        let mut pending = vec![(0, bytes(&[1, 2])), (3, bytes(&[3, 4])), (1, bytes(&[5]))];
+        let mut written = Vec::new();
+        land_writes(&mut pending, 16, |offset, bytes| {
+            written.push((offset, bytes.to_vec()));
+        });
+        assert_eq!(written, [(0, bytes(&[1, 2])), (4, bytes(&[5]))]);
+        assert_eq!(pending, [(3, bytes(&[3, 4]))]);
+
+        written.clear();
+        land_writes(&mut pending, 32, |offset, bytes| {
+            written.push((offset, bytes.to_vec()));
+        });
+        assert_eq!(written, [(12, bytes(&[3, 4]))]);
+        assert!(pending.is_empty());
+    }
+
+    /// The render world grows its buffer from the asset's change, before it
+    /// applies the frame's writes; a change seen a frame late would draw the
+    /// new range a frame before its words are in it.
+    #[test]
+    fn a_growth_reaches_the_render_world_in_the_frame_that_needed_it() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, AssetPlugin::default()))
+            .init_asset::<ShaderBuffer>()
+            .add_plugins(plugin);
+        let q = quads_in(&mut app);
+        let handle = q.handle.id();
+        app.insert_resource(q);
+        app.add_systems(
+            Update,
+            |mut q: ResMut<QuadBuffer>, mut done: Local<bool>| {
+                if !std::mem::replace(&mut *done, true) {
+                    q.alloc(INITIAL_WORDS + 1);
+                }
+            },
+        );
+        app.update();
+        let events = app.world().resource::<Messages<AssetEvent<ShaderBuffer>>>();
+        assert!(
+            events
+                .iter_current_update_messages()
+                .any(|e| *e == AssetEvent::Modified { id: handle }),
+            "the growth's change is in this frame's events"
+        );
+        let buffers = app.world().resource::<Assets<ShaderBuffer>>();
+        assert_eq!(
+            buffers.get(handle).unwrap().buffer_size(),
+            u64::from(INITIAL_WORDS) * 8
+        );
+    }
+
+    fn quads_in(app: &mut App) -> QuadBuffer {
+        QuadBuffer::new(&mut app.world_mut().resource_mut::<Assets<ShaderBuffer>>())
+    }
+
     #[test]
     fn writes_are_queued_in_order_for_the_render_world() {
         let mut q = quads();
         let at = q.alloc(3);
         q.write(at, &[1, 2, 3]);
         q.write(at + 1, &[9]);
-        let bytes = |w: &[u32]| w.iter().flat_map(|w| w.to_ne_bytes()).collect::<Vec<u8>>();
         assert_eq!(q.writes, vec![(0, bytes(&[1, 2, 3])), (1, bytes(&[9]))]);
         assert_eq!(q.mirror, [1, 9, 3]);
     }
