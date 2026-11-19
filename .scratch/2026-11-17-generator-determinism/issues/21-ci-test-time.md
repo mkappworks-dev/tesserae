@@ -25,7 +25,7 @@ the longest scheduled first in `.config/nextest.toml`.
 - [x] No test asserts less than before; any reduced seed set or window is named
       and justified in the comment.
 - [x] No generation code changes and no recorded digest moves.
-- [ ] CI's Test job on the PR finishes in under 20 minutes (checked on the next
+- [x] CI's Test job on the PR finishes in under 20 minutes (checked on the next
       push).
 
 ## Comments
@@ -98,3 +98,4 @@ the longest scheduled first in `.config/nextest.toml`.
 - CI at 8cb72a82 (run 44412788175): `[2515.015s] 3020 tests run: 3020 passed (22 slow), 8 skipped`, the job 48 min (5 min building). The projection above was wrong: the summed test time here was taken under shifting load, and CI's 4 threads did 9996 s of work. Six tests were half of it, and the longest alone ran 21 min, past the target before any other: Settlements and templates 1256 s, fields 1047, Wood at 0.5 m 899, ground cover 813, the densities 639, the census 385.
 - Each of those six is now one test per Game (the Wood test one per seed), named `<check>::<game>` by `each_case!` in `demo_games.rs`; every assertion is the same, run on one Game. The densities' `assert_eq!(compared, 5)` is each Game asserting it has dense and sparse Biomes to compare. Locally, under load 46, the 31 cases pass and the longest is fields in Terra at 267 s.
 - CI's Test job runs as four shards (`--partition slice:k/4`, doctests on the first), and a `Test` job passes only when all four do, so the required check keeps its name. Estimate: 1 min setup, 5 min build, about 10.5 min of tests per shard.
+- CI at 1460f2d7: the four shards ran 13.7 to 13.9 min side by side, and `Test` passed 14.1 min after the run started.
