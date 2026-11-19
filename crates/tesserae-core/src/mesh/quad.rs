@@ -8,7 +8,7 @@
 use crate::light::Light;
 use crate::shape::SUBDIV;
 
-/// The corner each of a quad's six vertices is, as two triangles.
+/// The corner each of a quad's six indices names, as two triangles.
 pub const QUAD_CORNERS: [usize; 6] = [0, 1, 2, 0, 2, 3];
 
 use layout::*;
@@ -63,7 +63,6 @@ pub mod layout {
 const UNIT: f32 = 1.0 / SUBDIV as f32;
 const SUB: u32 = SUBDIV as u32;
 
-/// What a record's kind bits name.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum QuadKind {
     /// An axis-aligned rectangle, facing `FACE_STEPS[face]`.
@@ -80,7 +79,6 @@ pub struct Corner {
     pub uv: [f32; 2],
 }
 
-/// One quad of a Chunk's mesh.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Quad {
     /// The GPU record's two words, its high word's top bits left zero for the
@@ -200,7 +198,6 @@ impl Quad {
         })
     }
 
-    /// The same face moved to `plane` sixteenths.
     pub fn at_plane(self, plane: i32) -> Quad {
         let QuadKind::Face(face) = self.kind() else {
             panic!("only a face has a plane");

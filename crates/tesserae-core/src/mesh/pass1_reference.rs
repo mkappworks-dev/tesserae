@@ -1,4 +1,5 @@
-//! Pass 1 as it was before the bitmask one, which must stay identical to it.
+//! Pass 1 as a per-Voxel scan: the test-only reference whose quads, in order,
+//! the bitmask pass 1 must match.
 
 use super::*;
 
