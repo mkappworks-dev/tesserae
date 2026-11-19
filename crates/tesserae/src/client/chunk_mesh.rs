@@ -18,7 +18,8 @@ use tesserae_core::MeshLayer;
 use tesserae_core::light::Light;
 #[cfg(test)]
 use tesserae_core::mesh::Corner;
-use tesserae_core::mesh::{PAINT_SHIFT, PAINT_SLOTS, QUAD_CORNERS, Quad};
+use tesserae_core::mesh::layout::{GEOMETRY_MASK, PAINT_SHIFT, PAINT_SLOTS, mask};
+use tesserae_core::mesh::{QUAD_CORNERS, Quad};
 
 /// The placeholder a Chunk layer's mesh is made of: four vertices a quad, which
 /// no pipeline reads. Bevy allocates a mesh's vertex range by its vertex count,
@@ -34,15 +35,20 @@ pub const VERTICES_PER_QUAD: u32 = 4;
 /// The Material is in the low bits of a table word, the light above them. The
 /// Material needs 17 bits, for [`tesserae_core::mesh::FLAME`].
 pub const LIGHT_SHIFT: u32 = 24;
+const MATERIAL_MASK: u32 = mask(LIGHT_SHIFT);
 
-/// The LOD level, the table's length and the words a record takes.
+/// The header's words: the LOD level, the table's length and the words a
+/// record takes.
 pub const HEADER_WORDS: u32 = 3;
+pub const HEADER_LEVEL: u32 = 0;
+pub const HEADER_TABLE_LEN: u32 = 1;
+pub const HEADER_STRIDE: u32 = 2;
 
 /// The geometry, with the table index in the second word's top bits.
 const NARROW: u32 = 2;
 /// The geometry and the table word itself, for a layer with more pairs than a
 /// table index reaches.
-const WIDE: u32 = 3;
+pub const WIDE: u32 = 3;
 
 /// One Chunk layer's words, ready for the quad buffer. The Client keeps it
 /// beside the entity drawing it, as collision and the blended sort read it.
@@ -82,9 +88,12 @@ impl ChunkQuads {
         let mut words = Vec::with_capacity(
             (HEADER_WORDS + stride * layer.quad_count() as u32) as usize + table.len(),
         );
-        words.extend([level, 0, stride]);
+        let mut header = [0; HEADER_WORDS as usize];
+        header[HEADER_LEVEL as usize] = level;
+        header[HEADER_STRIDE as usize] = stride;
+        words.extend(header);
         if stride == NARROW {
-            words[1] = table.len() as u32;
+            words[HEADER_TABLE_LEN as usize] = table.len() as u32;
             words.extend_from_slice(&table);
         }
         for (quad, &slot) in layer.quads.iter().zip(&slot_of) {
@@ -115,7 +124,7 @@ impl ChunkQuads {
 
     #[cfg(any(test, feature = "dev", feature = "profiling"))]
     pub fn level(&self) -> u32 {
-        self.words[0]
+        self.words[HEADER_LEVEL as usize]
     }
 
     pub fn quad_count(&self) -> u32 {
@@ -137,12 +146,12 @@ impl ChunkQuads {
     }
 
     fn stride(&self) -> u32 {
-        self.words[2]
+        self.words[HEADER_STRIDE as usize]
     }
 
     /// Where the records start, past the header and the table.
     pub fn records_at(&self) -> u32 {
-        HEADER_WORDS + self.words[1]
+        HEADER_WORDS + self.words[HEADER_TABLE_LEN as usize]
     }
 
     /// The layer's quads, read back from its words.
@@ -151,14 +160,14 @@ impl ChunkQuads {
         self.words[self.records_at() as usize..]
             .chunks(self.stride() as usize)
             .map(move |record| {
-                let geometry = [record[0], record[1] & ((1 << PAINT_SHIFT) - 1)];
+                let geometry = [record[0], record[1] & GEOMETRY_MASK];
                 let word = match record {
                     [_, hi] => table[(hi >> PAINT_SHIFT) as usize],
                     _ => record[2],
                 };
                 Quad {
                     geometry,
-                    material: word & ((1 << LIGHT_SHIFT) - 1),
+                    material: word & MATERIAL_MASK,
                     light: Light::from_packed((word >> LIGHT_SHIFT) as u8),
                 }
             })
@@ -177,7 +186,7 @@ impl ChunkQuads {
 
 /// A Material and the light on it as one table word.
 pub fn paint(material: u32, light: Light) -> u32 {
-    debug_assert!(material < 1 << LIGHT_SHIFT);
+    debug_assert!(material <= MATERIAL_MASK);
     material | u32::from(light.packed()) << LIGHT_SHIFT
 }
 
@@ -220,32 +229,36 @@ pub struct Expanded {
 /// the mesh-local vertex index.
 #[cfg(test)]
 pub fn expand(buffer: &[u32], at: u32, vertex: u32) -> Expanded {
-    use tesserae_core::mesh::{KIND_CROSS, PLANE_BIAS};
+    use tesserae_core::mesh::layout::*;
+    use tesserae_core::shape::SUBDIV;
+    let sub = SUBDIV as u32;
     let word = |i: u32| buffer[i as usize];
-    let level = word(at);
+    let field = |word: u32, shift: u32, bits: u32| (word >> shift) & mask(bits);
+    let level = word(at + HEADER_LEVEL);
+    let stride = word(at + HEADER_STRIDE);
     let table = at + HEADER_WORDS;
     let quad = vertex / VERTICES_PER_QUAD;
     let corner = vertex % VERTICES_PER_QUAD;
-    let record = table + word(at + 1) + quad * word(at + 2);
+    let record = table + word(at + HEADER_TABLE_LEN) + quad * stride;
     let (lo, hi) = (word(record), word(record + 1));
-    let paint = if word(at + 2) == WIDE {
+    let paint = if stride == WIDE {
         word(record + 2)
     } else {
         word(table + (hi >> PAINT_SHIFT))
     };
-    let kind = lo & 7;
+    let kind = field(lo, 0, KIND_BITS);
     let mut position = [0.0f32; 3];
     let mut normal = [0.0f32; 3];
     let uv;
-    if kind < KIND_CROSS {
+    if kind < FACES {
         let positive = kind & 1 == 1;
         let d = (kind / 2) as usize;
         let (u, v) = ((d + 1) % 3, (d + 2) % 3);
-        let plane = ((lo >> 3) & 1023) as i32 - PLANE_BIAS;
-        let u0 = (lo >> 13) & 511;
-        let v0 = (lo >> 22) & 511;
-        let u1 = u0 + (hi & 511) + 1;
-        let v1 = v0 + ((hi >> 9) & 511) + 1;
+        let plane = field(lo, PLANE_SHIFT, PLANE_BITS) as i32 - PLANE_BIAS;
+        let u0 = field(lo, U0_SHIFT, CORNER_BITS);
+        let v0 = field(lo, V0_SHIFT, CORNER_BITS);
+        let u1 = u0 + field(hi, 0, CORNER_BITS) + 1;
+        let v1 = v0 + field(hi, DV_SHIFT, CORNER_BITS) + 1;
         let (high_u, high_v) = if positive {
             (corner == 1 || corner == 2, corner >= 2)
         } else {
@@ -253,24 +266,23 @@ pub fn expand(buffer: &[u32], at: u32, vertex: u32) -> Expanded {
         };
         let cu = if high_u { u1 } else { u0 };
         let cv = if high_v { v1 } else { v0 };
-        position[d] = plane as f32 / 16.0;
-        position[u] = cu as f32 / 16.0;
-        position[v] = cv as f32 / 16.0;
+        position[d] = plane as f32 / sub as f32;
+        position[u] = cu as f32 / sub as f32;
+        position[v] = cv as f32 / sub as f32;
         normal[d] = if positive { 1.0 } else { -1.0 };
         uv = [
-            (cu - u0 / 16 * 16) as f32 / 16.0,
-            (cv - v0 / 16 * 16) as f32 / 16.0,
+            (cu - u0 / sub * sub) as f32 / sub as f32,
+            (cv - v0 / sub * sub) as f32 / sub as f32,
         ];
     } else {
-        let c = lo >> 3;
-        let cell = [c & 31, (c >> 5) & 31, (c >> 10) & 31];
-        let reversed = (lo >> 20) & 1 == 1;
+        let cell = [0, 1, 2].map(|a| field(lo, CELL_SHIFT + a * CELL_BITS, CELL_BITS));
+        let reversed = field(lo, REVERSED_SHIFT, 1) == 1;
         let i = if reversed { 3 - corner } else { corner };
         let (high_u, high_v) = (i == 1 || i == 2, i >= 2);
         uv = [f32::from(u8::from(high_u)), f32::from(u8::from(high_v))];
         let side = if reversed { -1.0 } else { 1.0 };
         if kind == KIND_CROSS {
-            let rising = (lo >> 18) & 1 == 0;
+            let rising = field(lo, DIAGONAL_SHIFT, 1) == 0;
             let x = u32::from(if rising { high_u } else { !high_u });
             position = [
                 (cell[0] + x) as f32,
@@ -279,22 +291,15 @@ pub fn expand(buffer: &[u32], at: u32, vertex: u32) -> Expanded {
             ];
             normal[2] = side;
         } else {
-            let d = ((lo >> 18) & 3) as usize;
+            let d = field(lo, AXIS_SHIFT, AXIS_BITS) as usize;
             let (u, v) = ((d + 1) % 3, (d + 2) % 3);
-            let offset = (lo >> 21) & 31;
-            let cu = if high_u {
-                ((hi >> 4) & 15) + 1
-            } else {
-                hi & 15
-            };
-            let cv = if high_v {
-                ((hi >> 12) & 15) + 1
-            } else {
-                (hi >> 8) & 15
-            };
-            position[d] = (cell[d] * 16 + offset) as f32 / 16.0;
-            position[u] = (cell[u] * 16 + cu) as f32 / 16.0;
-            position[v] = (cell[v] * 16 + cv) as f32 / 16.0;
+            let offset = field(lo, OFFSET_SHIFT, OFFSET_BITS);
+            let span = |k: u32| field(hi, k * SPAN_BITS, SPAN_BITS);
+            let cu = if high_u { span(1) + 1 } else { span(0) };
+            let cv = if high_v { span(3) + 1 } else { span(2) };
+            position[d] = (cell[d] * sub + offset) as f32 / sub as f32;
+            position[u] = (cell[u] * sub + cu) as f32 / sub as f32;
+            position[v] = (cell[v] * sub + cv) as f32 / sub as f32;
             normal[d] = side;
         }
     }
@@ -304,7 +309,7 @@ pub fn expand(buffer: &[u32], at: u32, vertex: u32) -> Expanded {
             normal,
             uv,
         },
-        material: paint & ((1 << LIGHT_SHIFT) - 1),
+        material: paint & MATERIAL_MASK,
         light: paint >> LIGHT_SHIFT,
         level,
     }

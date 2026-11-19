@@ -15,10 +15,7 @@ use crate::tables::Tables;
 use crate::voxel::{MaterialId, Voxel};
 
 mod quad;
-pub use quad::{
-    Corner, KIND_CROSS, KIND_PLANE, PAINT_SHIFT, PAINT_SLOTS, PLANE_BIAS, QUAD_CORNERS, Quad,
-    QuadKind, Soup,
-};
+pub use quad::{Corner, QUAD_CORNERS, Quad, QuadKind, Soup, layout};
 
 /// Chunk edge plus one Voxel of neighbour on each side — exactly what face
 /// culling needs.

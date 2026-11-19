@@ -11,38 +11,54 @@ use crate::shape::SUBDIV;
 /// The corner each of a quad's six vertices is, as two triangles.
 pub const QUAD_CORNERS: [usize; 6] = [0, 1, 2, 0, 2, 3];
 
-/// The kind of a Cross's quad: one diagonal of its cell, front or back.
-pub const KIND_CROSS: u32 = 6;
-/// The kind of a Plane form's quad: across the thin axis of its box.
-pub const KIND_PLANE: u32 = 7;
+use layout::*;
 
-/// Kinds below this are faces, in `FACE_STEPS` order.
-const FACES: u32 = 6;
-const KIND_BITS: u32 = 3;
+/// The record's bit layout: `chunk_vertex.wesl` reads it through shader defs,
+/// and the Client's test-only `expand` mirrors the shader with it.
+pub mod layout {
+    /// The kind of a Cross's quad: one diagonal of its cell, front or back.
+    pub const KIND_CROSS: u32 = 6;
+    /// The kind of a Plane form's quad: across the thin axis of its box.
+    pub const KIND_PLANE: u32 = 7;
+    /// Kinds below this are faces, in `FACE_STEPS` order.
+    pub const FACES: u32 = 6;
+    pub const KIND_BITS: u32 = 3;
 
-/// A face's plane is stored this many sixteenths up, so a flame or coarse
-/// water just below the Chunk still fits.
-pub const PLANE_BIAS: i32 = 16;
-const PLANE_SHIFT: u32 = 3;
-const PLANE_BITS: u32 = 10;
-const CORNER_BITS: u32 = 9;
-const U0_SHIFT: u32 = 13;
-const V0_SHIFT: u32 = 22;
-/// In the high word: each axis's extent less one.
-const DV_SHIFT: u32 = 9;
+    /// A face's plane is stored this many sixteenths up, so a flame or coarse
+    /// water just below the Chunk still fits.
+    pub const PLANE_BIAS: i32 = 16;
+    pub const PLANE_SHIFT: u32 = 3;
+    pub const PLANE_BITS: u32 = 10;
+    pub const CORNER_BITS: u32 = 9;
+    pub const U0_SHIFT: u32 = 13;
+    pub const V0_SHIFT: u32 = 22;
+    /// In the high word: each axis's extent less one.
+    pub const DV_SHIFT: u32 = 9;
 
-/// A Cross's or Plane form's cell, five bits an axis.
-const CELL_SHIFT: u32 = 3;
-const DIAGONAL_SHIFT: u32 = 18;
-const AXIS_SHIFT: u32 = 18;
-const REVERSED_SHIFT: u32 = 20;
-const OFFSET_SHIFT: u32 = 21;
+    pub const CELL_SHIFT: u32 = 3;
+    /// A Cross's or Plane form's cell, this many bits an axis.
+    pub const CELL_BITS: u32 = 5;
+    pub const DIAGONAL_SHIFT: u32 = 18;
+    pub const AXIS_SHIFT: u32 = 18;
+    pub const AXIS_BITS: u32 = 2;
+    pub const REVERSED_SHIFT: u32 = 20;
+    pub const OFFSET_SHIFT: u32 = 21;
+    pub const OFFSET_BITS: u32 = 5;
+    /// A Plane form's high word is four fields this wide: its low corner on
+    /// `u`, its high corner less one, then the same on `v`.
+    pub const SPAN_BITS: u32 = 4;
 
-/// The high word's bits below this are geometry; the Client puts its table
-/// index above them.
-pub const PAINT_SHIFT: u32 = 18;
-/// How many (Material, light) pairs a layer's table can index.
-pub const PAINT_SLOTS: usize = 1 << (32 - PAINT_SHIFT);
+    /// The high word's bits below this are geometry; the Client puts its table
+    /// index above them.
+    pub const PAINT_SHIFT: u32 = 18;
+    /// How many (Material, light) pairs a layer's table can index.
+    pub const PAINT_SLOTS: usize = 1 << (32 - PAINT_SHIFT);
+    pub const GEOMETRY_MASK: u32 = mask(PAINT_SHIFT);
+
+    pub const fn mask(bits: u32) -> u32 {
+        (1 << bits) - 1
+    }
+}
 
 const UNIT: f32 = 1.0 / SUBDIV as f32;
 const SUB: u32 = SUBDIV as u32;
@@ -149,7 +165,9 @@ impl Quad {
                     | (axis as u32) << AXIS_SHIFT
                     | u32::from(reversed) << REVERSED_SHIFT
                     | offset << OFFSET_SHIFT,
-                u[0] | (u[1] - 1) << 4 | v[0] << 8 | (v[1] - 1) << 12,
+                u[0] | (u[1] - 1) << SPAN_BITS
+                    | v[0] << (2 * SPAN_BITS)
+                    | (v[1] - 1) << (3 * SPAN_BITS),
             ],
             material,
             light,
@@ -248,7 +266,7 @@ impl Quad {
 
     /// Both forms run their four corners the other way round for the back.
     fn flat_order(&self) -> [usize; 4] {
-        if self.geometry[0] >> REVERSED_SHIFT & 1 == 1 {
+        if self.reversed() {
             [3, 2, 1, 0]
         } else {
             [0, 1, 2, 3]
@@ -260,12 +278,13 @@ impl Quad {
     /// with no axis of their own.
     fn flat_normal(&self, axis: usize) -> [f32; 3] {
         let mut normal = [0.0; 3];
-        normal[axis] = if self.geometry[0] >> REVERSED_SHIFT & 1 == 1 {
-            -1.0
-        } else {
-            1.0
-        };
+        normal[axis] = if self.reversed() { -1.0 } else { 1.0 };
         normal
+    }
+
+    /// A flat form's back.
+    fn reversed(&self) -> bool {
+        self.geometry[0] >> REVERSED_SHIFT & 1 == 1
     }
 
     fn cross_corners(&self) -> [Corner; 4] {
@@ -290,11 +309,12 @@ impl Quad {
     fn plane_corners(&self) -> [Corner; 4] {
         let [lo, hi] = self.geometry;
         let cell = cell_of(lo);
-        let d = (lo >> AXIS_SHIFT & 3) as usize;
+        let d = (lo >> AXIS_SHIFT & mask(AXIS_BITS)) as usize;
         let (u, v) = ((d + 1) % 3, (d + 2) % 3);
-        let offset = lo >> OFFSET_SHIFT & mask(5);
-        let (u0, u1) = (hi & 15, (hi >> 4 & 15) + 1);
-        let (v0, v1) = (hi >> 8 & 15, (hi >> 12 & 15) + 1);
+        let offset = lo >> OFFSET_SHIFT & mask(OFFSET_BITS);
+        let span = |k: u32| hi >> (k * SPAN_BITS) & mask(SPAN_BITS);
+        let (u0, u1) = (span(0), span(1) + 1);
+        let (v0, v1) = (span(2), span(3) + 1);
         let at = [(u0, v0), (u1, v0), (u1, v1), (u0, v1)];
         let normal = self.flat_normal(d);
         let sixteenths = |axis: usize, s: u32| (cell[axis] * SUB as i32 + s as i32) as f32 * UNIT;
@@ -315,18 +335,14 @@ impl Quad {
 /// A flat form's UVs by corner, before the back's reversal.
 const UNIT_SQUARE: [[f32; 2]; 4] = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
 
-const fn mask(bits: u32) -> u32 {
-    (1 << bits) - 1
-}
-
 fn cell_bits([x, y, z]: [i32; 3]) -> u32 {
-    debug_assert!([x, y, z].iter().all(|c| (0..32).contains(c)));
-    (x as u32 | (y as u32) << 5 | (z as u32) << 10) << CELL_SHIFT
+    debug_assert!([x, y, z].iter().all(|c| (0..1 << CELL_BITS).contains(c)));
+    (x as u32 | (y as u32) << CELL_BITS | (z as u32) << (2 * CELL_BITS)) << CELL_SHIFT
 }
 
 fn cell_of(lo: u32) -> [i32; 3] {
     let c = lo >> CELL_SHIFT;
-    [c & 31, c >> 5 & 31, c >> 10 & 31].map(|c| c as i32)
+    [0, 1, 2].map(|a| (c >> (a * CELL_BITS) & mask(CELL_BITS)) as i32)
 }
 
 /// A layer as triangles: four vertices a quad and six indices, for readers

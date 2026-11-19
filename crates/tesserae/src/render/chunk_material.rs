@@ -18,7 +18,7 @@ use bevy::render::render_resource::{
 use bevy::render::storage::ShaderBuffer;
 use bevy::shader::{ShaderDefVal, ShaderRef};
 
-use crate::client::chunk_mesh::{HEADER_WORDS, LIGHT_SHIFT};
+use crate::client::chunk_mesh;
 
 /// What to spawn in `MeshMaterial3d`.
 pub type ChunkMaterial = ExtendedMaterial<StandardMaterial, ChunkMaterialExtension>;
@@ -144,18 +144,13 @@ impl MaterialExtension for ChunkMaterialExtension {
     ) -> Result<(), SpecializedMeshPipelineError> {
         read_no_vertex_attribute(&mut descriptor.vertex);
 
-        // Reach the shader as `constants::*`, so neither the uniform's length
-        // nor the light scale can drift from the Rust side.
-        let defs = [
+        // Reach the shader as `constants::*`, so neither the uniform's length,
+        // the light scale nor the quad layout can drift from the Rust side.
+        let mut defs = vec![
             ShaderDefVal::UInt("CHUNK_PALETTE_LEN".into(), PALETTE_LEN as u32),
             ShaderDefVal::UInt("CHUNK_PALETTE_SLOTS".into(), PALETTE_LEN as u32 + 1),
             ShaderDefVal::UInt("CHUNK_FLAME".into(), tesserae_core::mesh::FLAME),
             ShaderDefVal::UInt("CHUNK_MAX_LIGHT".into(), tesserae_core::MAX_LIGHT as u32),
-            ShaderDefVal::UInt("CHUNK_LIGHT_SHIFT".into(), LIGHT_SHIFT),
-            ShaderDefVal::UInt("CHUNK_HEADER_WORDS".into(), HEADER_WORDS),
-            ShaderDefVal::UInt("CHUNK_PAINT_SHIFT".into(), tesserae_core::mesh::PAINT_SHIFT),
-            ShaderDefVal::Int("CHUNK_PLANE_BIAS".into(), tesserae_core::mesh::PLANE_BIAS),
-            ShaderDefVal::UInt("CHUNK_KIND_CROSS".into(), tesserae_core::mesh::KIND_CROSS),
             ShaderDefVal::UInt(
                 "CHUNK_TEXTURE_EDGE".into(),
                 super::texture_atlas::EDGE as u32,
@@ -169,11 +164,11 @@ impl MaterialExtension for ChunkMaterialExtension {
                 super::texture_atlas::HEIGHT as u32,
             ),
         ];
+        defs.extend(quad_layout_defs());
         #[cfg(feature = "profiling")]
         let switched = crate::profiling::switch("TESSERAE_DIAG_NO_COVERAGE_DISCARD");
         #[cfg(not(feature = "profiling"))]
         let switched = false;
-        let mut defs = defs.to_vec();
         if !key.bind_group_data.coverage_test || switched {
             defs.push(ShaderDefVal::Bool("CHUNK_NO_COVERAGE_DISCARD".into(), true));
         }
@@ -183,6 +178,46 @@ impl MaterialExtension for ChunkMaterialExtension {
         }
         Ok(())
     }
+}
+
+/// What `chunk_vertex.wesl` decodes a layer's words by.
+fn quad_layout_defs() -> Vec<ShaderDefVal> {
+    use chunk_mesh::{
+        HEADER_LEVEL, HEADER_STRIDE, HEADER_TABLE_LEN, HEADER_WORDS, LIGHT_SHIFT,
+        VERTICES_PER_QUAD, WIDE,
+    };
+    use tesserae_core::mesh::layout::*;
+    let uint = |name: &str, value: u32| ShaderDefVal::UInt(format!("CHUNK_{name}").into(), value);
+    vec![
+        uint("VERTICES_PER_QUAD", VERTICES_PER_QUAD),
+        uint("HEADER_WORDS", HEADER_WORDS),
+        uint("HEADER_LEVEL", HEADER_LEVEL),
+        uint("HEADER_TABLE_LEN", HEADER_TABLE_LEN),
+        uint("HEADER_STRIDE", HEADER_STRIDE),
+        uint("WIDE_STRIDE", WIDE),
+        uint("LIGHT_SHIFT", LIGHT_SHIFT),
+        uint("PAINT_SHIFT", PAINT_SHIFT),
+        uint("SUBDIV", tesserae_core::shape::SUBDIV as u32),
+        uint("FACES", FACES),
+        uint("KIND_BITS", KIND_BITS),
+        uint("KIND_CROSS", KIND_CROSS),
+        ShaderDefVal::Int("CHUNK_PLANE_BIAS".into(), PLANE_BIAS),
+        uint("PLANE_SHIFT", PLANE_SHIFT),
+        uint("PLANE_BITS", PLANE_BITS),
+        uint("CORNER_BITS", CORNER_BITS),
+        uint("U0_SHIFT", U0_SHIFT),
+        uint("V0_SHIFT", V0_SHIFT),
+        uint("DV_SHIFT", DV_SHIFT),
+        uint("CELL_SHIFT", CELL_SHIFT),
+        uint("CELL_BITS", CELL_BITS),
+        uint("DIAGONAL_SHIFT", DIAGONAL_SHIFT),
+        uint("AXIS_SHIFT", AXIS_SHIFT),
+        uint("AXIS_BITS", AXIS_BITS),
+        uint("REVERSED_SHIFT", REVERSED_SHIFT),
+        uint("OFFSET_SHIFT", OFFSET_SHIFT),
+        uint("OFFSET_BITS", OFFSET_BITS),
+        uint("SPAN_BITS", SPAN_BITS),
+    ]
 }
 
 /// The vertex shader reads the quad buffer, never the mesh, which is a
