@@ -16,8 +16,9 @@ use bevy::render::renderer::RenderQueue;
 use bevy::render::storage::{GpuShaderBuffer, ShaderBuffer};
 use bevy::render::{ExtractSchedule, MainWorld, Render, RenderApp, RenderSystems};
 
-/// 4 MiB to start, doubling: ticket 01 of `.scratch/2026-11-17-render-packed-quads/` decides.
-const INITIAL_WORDS: u32 = 1 << 20;
+/// 8 MiB, doubling: the default view distances' first fill fits without a
+/// growth, each of which copies the whole buffer on the GPU.
+const INITIAL_WORDS: u32 = 2 << 20;
 
 #[derive(Resource)]
 pub struct QuadBuffer {
