@@ -14,6 +14,9 @@ use crate::shape::{Connections, FaceMask, Form, NodeBox, SUBDIV, ShapeQuad};
 use crate::tables::Tables;
 use crate::voxel::{MaterialId, Voxel};
 
+mod quad;
+pub use quad::{Corner, QUAD_CORNERS, Quad, QuadKind, Soup, layout};
+
 /// Chunk edge plus one Voxel of neighbour on each side — exactly what face
 /// culling needs.
 pub const PADDED: usize = CHUNK_SIZE + 2;
@@ -34,9 +37,9 @@ pub const POS_Z: usize = 5;
 /// renderer tells flames from any Material without a Look pack.
 pub const FLAME: u32 = MaterialId::MAX as u32 + 1;
 
-/// How far outside a burning Voxel's face its flame is drawn, in Voxels: off
-/// the face, so the two never fight for depth.
-const FLAME_OFFSET: f32 = 1.0 / SUBDIV as f32;
+/// How far outside a burning Voxel's face its flame is drawn, in sixteenths:
+/// off the face, so the two never fight for depth.
+const FLAME_OFFSET: i32 = 1;
 
 /// Which way each face looks, as the offset to the neighbour across it.
 pub const FACE_STEPS: [[i32; 3]; 6] = [
@@ -431,27 +434,27 @@ fn pad_index(x: i32, y: i32, z: i32) -> usize {
     ((y + 1) as usize * PADDED + (z + 1) as usize) * PADDED + (x + 1) as usize
 }
 
-/// One draw call's worth of triangle soup, in Voxel-index space.
-#[derive(Default, Debug)]
+/// One draw call's worth of quads, in Voxel-index space.
+///
+/// Each carries the light of the Voxel its face looks out at, baked rather
+/// than sampled: a torch is a per-Voxel light level, and thousands of them as
+/// GPU point lights is not viable.
+#[derive(Default, Debug, Clone, PartialEq)]
 pub struct MeshLayer {
-    pub positions: Vec<[f32; 3]>,
-    pub normals: Vec<[f32; 3]>,
-    pub uvs: Vec<[f32; 2]>,
-    pub materials: Vec<u32>,
-    /// The packed [`Light`] of the Voxel each vertex's face looks out at, one
-    /// per vertex. Baked rather than sampled: a torch is a per-Voxel light
-    /// level, and thousands of them as GPU point lights is not viable.
-    pub light: Vec<u32>,
-    pub indices: Vec<u32>,
+    pub quads: Vec<Quad>,
 }
 
 impl MeshLayer {
     pub fn quad_count(&self) -> usize {
-        self.indices.len() / 6
+        self.quads.len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.indices.is_empty()
+        self.quads.is_empty()
+    }
+
+    pub fn soup(&self) -> Soup {
+        Soup::of(&self.quads)
     }
 }
 
@@ -473,7 +476,7 @@ pub fn mesh_shape(quads: &[ShapeQuad], material: MaterialId) -> MeshLayer {
     layer
 }
 
-/// Triangle soup for one Chunk, in Voxel-index space. The caller scales by the
+/// The quads of one Chunk, in Voxel-index space. The caller scales by the
 /// World's Voxel size; nothing here is in metres.
 ///
 /// A layer per [`RenderClass`]: blended faces need sorting and no depth write,
@@ -506,17 +509,6 @@ impl ChunkMesh {
             RenderClass::Cutout => &mut self.cutout,
         }
     }
-}
-
-/// UVs span the merged quad so a tiling sampler repeats per Voxel rather than
-/// stretching one texel across the whole run.
-#[inline]
-fn corner(d: usize, u: usize, v: usize, plane: f32, au: usize, bv: usize) -> [f32; 3] {
-    let mut c = [0.0f32; 3];
-    c[d] = plane;
-    c[u] = au as f32;
-    c[v] = bv as f32;
-    c
 }
 
 /// Mesh one Chunk against its six face neighbours, declining without building
@@ -822,38 +814,20 @@ fn mesh_flames(n: &Neighborhood, tables: &Tables, mesh: &mut ChunkMesh) {
     }
 }
 
-/// One whole-face flame quad, in pass 1's corner order and winding.
+/// One whole-face flame quad, a sixteenth off the face.
 fn push_flame(layer: &mut MeshLayer, cell: [i32; 3], face: usize, light: Light) {
-    let positive = face % 2 == 1;
+    let sub = SUBDIV as i32;
     let (d, u, v) = (face / 2, (face / 2 + 1) % 3, (face / 2 + 2) % 3);
-    let plane = cell[d] as f32
-        + if positive {
-            1.0 + FLAME_OFFSET
+    let plane = cell[d] * sub
+        + if face % 2 == 1 {
+            sub + FLAME_OFFSET
         } else {
             -FLAME_OFFSET
         };
-    let corners: [(f32, f32); 4] = if positive {
-        [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)]
-    } else {
-        [(0.0, 0.0), (0.0, 1.0), (1.0, 1.0), (1.0, 0.0)]
-    };
-    let mut normal = [0.0f32; 3];
-    normal[d] = if positive { 1.0 } else { -1.0 };
-    let base = layer.positions.len() as u32;
-    for (cu, cv) in corners {
-        let mut pos = [0.0f32; 3];
-        pos[d] = plane;
-        pos[u] = cell[u] as f32 + cu;
-        pos[v] = cell[v] as f32 + cv;
-        layer.positions.push(pos);
-        layer.normals.push(normal);
-        layer.uvs.push([cu, cv]);
-        layer.materials.push(FLAME);
-        layer.light.push(light.packed() as u32);
-    }
+    let span = |a: usize| [(cell[a] * sub) as u16, ((cell[a] + 1) * sub) as u16];
     layer
-        .indices
-        .extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+        .quads
+        .push(Quad::face(face, plane, span(u), span(v), FLAME, light));
 }
 
 /// Pass 4: fluid in the voids of a solid, clipped to them by
@@ -1005,6 +979,12 @@ fn covers(tables: &Tables, across: Voxel, face: usize, here: Voxel) -> bool {
 /// exactly "it is a full cube, or a Shape that seals the face" - the rule before
 /// Materials had a say - and the Material table is not consulted. `SURFACES`
 /// is whether any cell holds fluid below a full surface, which is translucent.
+///
+/// A row of a slice is a 32-bit mask: which of its Voxels are full cubes, which
+/// of those may show a face, which are left to merge. Only a face that may
+/// show asks the per-Voxel question, so a buried cube costs a bit operation.
+/// The quads, and their order, are what the per-Voxel scan of
+/// `pass1_reference` makes, which a test holds.
 fn pass1<const TRANSLUCENT: bool, const SURFACES: bool>(
     n: &Neighborhood,
     tables: &Tables,
@@ -1012,7 +992,9 @@ fn pass1<const TRANSLUCENT: bool, const SURFACES: bool>(
 ) {
     let shapes = &tables.shapes;
     let materials = &tables.materials;
-    let mut mask = vec![None::<FaceKey>; CHUNK_SIZE * CHUNK_SIZE];
+    let cubes = CubeRows::of(n);
+    let mut open = [0u32; CHUNK_SIZE];
+    let mut keys: [FaceKey; CHUNK_SIZE * CHUNK_SIZE] = [(0, Light::DARK); CHUNK_SIZE * CHUNK_SIZE];
 
     for d in 0..3usize {
         // (d, u, v) is a cyclic permutation of (x, y, z), so u cross v = d and
@@ -1028,37 +1010,35 @@ fn pass1<const TRANSLUCENT: bool, const SURFACES: bool>(
             let under_surface = SURFACES && face == POS_Y;
 
             for s in 0..CHUNK_SIZE {
-                mask.fill(None);
+                let beyond = s as i32 + step;
                 for a in 0..CHUNK_SIZE {
-                    // Indexed by strides: with the cell's coordinates in an
-                    // array indexed by axis, they lived on the stack and the
-                    // loop's speed came down to how the optimiser laid out the
-                    // function around it.
+                    let here = cubes.row(v, s as i32, a);
+                    // Against a cube, a face shows only where a Material lets
+                    // it, and only a translucent Chunk has one that does.
+                    let mut maybe = if TRANSLUCENT {
+                        here
+                    } else {
+                        here & !cubes.row(v, beyond, a)
+                    };
+                    open[a] = 0;
                     let row = pad_index(0, 0, 0) + s * STRIDES[d] + a * STRIDES[u];
-                    for b in 0..CHUNK_SIZE {
+                    while maybe != 0 {
+                        let b = maybe.trailing_zeros() as usize;
+                        maybe &= maybe - 1;
                         let i = row + b * STRIDES[v];
                         let here = n.voxels[i];
-                        if !here.is_full_cube() {
-                            continue;
-                        }
                         let j = if positive {
                             i + STRIDES[d]
                         } else {
                             i - STRIDES[d]
                         };
                         let mut c = [0i32; 3];
-                        c[d] = s as i32 + step;
+                        c[d] = beyond;
                         c[u] = a as i32;
                         c[v] = b as i32;
                         // Hidden only if the Voxel across covers this whole
                         // face. A slab beside a cube hides the cube's face on
                         // the slab's sealed side and nowhere else.
-                        //
-                        // The cube test comes first and alone because it is
-                        // nearly every answer, and `seals` for all of them
-                        // measured 2-6% slower on `greedy_mesh/solid` and
-                        // `/terrain`. `seals` is the same question, asked of
-                        // the table only for a shaped Voxel.
                         let across = n.voxels[j];
                         let hidden = if across.is_full_cube() {
                             !TRANSLUCENT || hides(materials, across, here)
@@ -1083,102 +1063,107 @@ fn pass1<const TRANSLUCENT: bool, const SURFACES: bool>(
                         // one the face belongs to: an opaque Voxel holds 0 by
                         // construction, which is what makes the dimming rule
                         // work, so lighting a face by its own Voxel would make
-                        // every face black. Read from the cell this loop has
-                        // already fetched to test occlusion.
-                        let lit = n.light[j];
-                        mask[a * CHUNK_SIZE + b] = Some((here.material(), lit));
+                        // every face black.
+                        open[a] |= 1 << b;
+                        keys[a * CHUNK_SIZE + b] = (here.material(), n.light[j]);
                     }
                 }
 
-                let mut a = 0;
-                while a < CHUNK_SIZE {
-                    let mut b = 0;
-                    while b < CHUNK_SIZE {
-                        let Some(key) = mask[a * CHUNK_SIZE + b] else {
-                            b += 1;
-                            continue;
-                        };
-                        let (m, lit) = key;
+                for a in 0..CHUNK_SIZE {
+                    while open[a] != 0 {
+                        let b = open[a].trailing_zeros() as usize;
+                        let key = keys[a * CHUNK_SIZE + b];
+                        let same = |row: usize, at: usize| keys[row * CHUNK_SIZE + at] == key;
 
                         let mut w = 1;
-                        while b + w < CHUNK_SIZE && mask[a * CHUNK_SIZE + b + w] == Some(key) {
+                        while b + w < CHUNK_SIZE && open[a] >> (b + w) & 1 == 1 && same(a, b + w) {
                             w += 1;
                         }
+                        let span_bits = (u32::MAX >> (CHUNK_SIZE - w)) << b;
 
                         let mut h = 1;
-                        'grow: while a + h < CHUNK_SIZE {
-                            for k in 0..w {
-                                if mask[(a + h) * CHUNK_SIZE + b + k] != Some(key) {
-                                    break 'grow;
-                                }
-                            }
+                        while a + h < CHUNK_SIZE
+                            && open[a + h] & span_bits == span_bits
+                            && (b..b + w).all(|k| same(a + h, k))
+                        {
                             h += 1;
                         }
 
-                        let plane = if positive { (s + 1) as f32 } else { s as f32 };
-                        let (quad, uv) = if positive {
-                            (
-                                [(a, b), (a + h, b), (a + h, b + w), (a, b + w)],
-                                [
-                                    [0.0, 0.0],
-                                    [h as f32, 0.0],
-                                    [h as f32, w as f32],
-                                    [0.0, w as f32],
-                                ],
-                            )
-                        } else {
-                            (
-                                [(a, b), (a, b + w), (a + h, b + w), (a + h, b)],
-                                [
-                                    [0.0, 0.0],
-                                    [0.0, w as f32],
-                                    [h as f32, w as f32],
-                                    [h as f32, 0.0],
-                                ],
-                            )
-                        };
-
-                        let mut normal = [0.0f32; 3];
-                        normal[d] = if positive { 1.0 } else { -1.0 };
-
+                        let sub = SUBDIV;
+                        let plane = (s + usize::from(positive)) * sub;
+                        let span =
+                            |at: usize, len: usize| [(at * sub) as u16, ((at + len) * sub) as u16];
+                        let (m, lit) = key;
                         // A run is one Material, so it is one layer.
                         let layer = if TRANSLUCENT {
                             mesh.layer(materials.def(m).render)
                         } else {
                             &mut mesh.opaque
                         };
-                        let base = layer.positions.len() as u32;
-                        for k in 0..4 {
-                            layer
-                                .positions
-                                .push(corner(d, u, v, plane, quad[k].0, quad[k].1));
-                            layer.normals.push(normal);
-                            layer.uvs.push(uv[k]);
-                            layer.materials.push(m as u32);
-                            layer.light.push(lit.packed() as u32);
+                        layer.quads.push(Quad::face(
+                            face,
+                            plane as i32,
+                            span(a, h),
+                            span(b, w),
+                            m as u32,
+                            lit,
+                        ));
+                        for row in &mut open[a..a + h] {
+                            *row &= !span_bits;
                         }
-                        layer.indices.extend_from_slice(&[
-                            base,
-                            base + 1,
-                            base + 2,
-                            base,
-                            base + 2,
-                            base + 3,
-                        ]);
-
-                        for i in 0..h {
-                            for j in 0..w {
-                                mask[(a + i) * CHUNK_SIZE + b + j] = None;
-                            }
-                        }
-                        b += w;
                     }
-                    a += 1;
                 }
             }
         }
     }
 }
+
+/// Which Voxels are full cubes, a row of the Chunk at a time along each axis,
+/// with the shell's rows across the other two: what pass 1 compares a slice
+/// with the one beyond it by.
+struct CubeRows {
+    /// By the row's axis `v`, then by its coordinates on `(v + 1) % 3`, from -1,
+    /// and on `(v + 2) % 3`, from 0: a bit per Voxel along `v`.
+    rows: [Box<[u32]>; 3],
+}
+
+impl CubeRows {
+    fn of(n: &Neighborhood) -> Self {
+        let mut rows: [Box<[u32]>; 3] =
+            std::array::from_fn(|_| vec![0u32; PADDED * CHUNK_SIZE].into_boxed_slice());
+        let inside = |c: i32| (0..CHUNK_SIZE as i32).contains(&c);
+        for y in -1..=CHUNK_SIZE as i32 {
+            for z in -1..=CHUNK_SIZE as i32 {
+                let start = pad_index(-1, y, z);
+                for (k, voxel) in n.voxels[start..start + PADDED].iter().enumerate() {
+                    if !voxel.is_full_cube() {
+                        continue;
+                    }
+                    let x = k as i32 - 1;
+                    let at = [x, y, z];
+                    for v in 0..3 {
+                        let (p, q) = (at[(v + 1) % 3], at[(v + 2) % 3]);
+                        if inside(at[v]) && inside(q) {
+                            let row = (p + 1) as usize * CHUNK_SIZE + q as usize;
+                            rows[v][row] |= 1 << at[v];
+                        }
+                    }
+                }
+            }
+        }
+        CubeRows { rows }
+    }
+
+    /// The row along `v` at `p` on the next axis round, -1 to the Chunk's edge,
+    /// and `q` on the one after.
+    #[inline]
+    fn row(&self, v: usize, p: i32, q: usize) -> u32 {
+        self.rows[v][(p + 1) as usize * CHUNK_SIZE + q]
+    }
+}
+
+#[cfg(test)]
+mod pass1_reference;
 
 /// Pass 2: each shaped Voxel's own exposed surface, appended to pass 1's.
 ///
@@ -1277,76 +1262,40 @@ fn push_flat(
     material: MaterialId,
     lit: Light,
 ) {
-    const UNIT: f32 = 1.0 / SUBDIV as f32;
-    let [cx, cy, cz] = cell.map(|c| c as f32);
-    // The renderer reads a Voxel's face from the normal's axis, so it must be axis-aligned: Z
-    // picks the Material's SIDE tile, upright, for a Cross whose diagonals have no axis of their own.
-    let mut axis = 2;
-    let quads: Vec<[[f32; 3]; 4]> = match form {
-        Form::Cross => vec![
-            [
-                [cx, cy, cz],
-                [cx + 1.0, cy, cz + 1.0],
-                [cx + 1.0, cy + 1.0, cz + 1.0],
-                [cx, cy + 1.0, cz],
-            ],
-            [
-                [cx + 1.0, cy, cz],
-                [cx, cy, cz + 1.0],
-                [cx, cy + 1.0, cz + 1.0],
-                [cx + 1.0, cy + 1.0, cz],
-            ],
-        ],
+    let material = material as u32;
+    match form {
+        Form::Cross => {
+            for diagonal in 0..2 {
+                for reversed in [false, true] {
+                    layer
+                        .quads
+                        .push(Quad::cross(cell, diagonal, reversed, material, lit));
+                }
+            }
+        }
         Form::Plane => {
             let Some(b) = thin else { return };
-            let origin = [cx, cy, cz];
             let extent = |a: usize| b.max[a] as i32 - b.min[a] as i32;
             // The thin axis is the box's shortest; the quad spans the other two.
             let d = (0..3).min_by_key(|&a| extent(a)).unwrap_or(2);
-            axis = d;
             let (u, v) = ((d + 1) % 3, (d + 2) % 3);
-            let plane = origin[d] + (b.min[d] as f32 + b.max[d] as f32) * 0.5 * UNIT;
-            let corner = |cu: f32, cv: f32| {
-                let mut c = [0.0f32; 3];
-                c[d] = plane;
-                c[u] = origin[u] + cu * UNIT;
-                c[v] = origin[v] + cv * UNIT;
-                c
-            };
-            let (u0, u1) = (b.min[u] as f32, b.max[u] as f32);
-            let (v0, v1) = (b.min[v] as f32, b.max[v] as f32);
-            vec![[
-                corner(u0, v0),
-                corner(u1, v0),
-                corner(u1, v1),
-                corner(u0, v1),
-            ]]
-        }
-        Form::Box => return,
-    };
-    let light = lit.packed() as u32;
-    for corners in quads {
-        for reversed in [false, true] {
-            let base = layer.positions.len() as u32;
-            let order: [usize; 4] = if reversed { [3, 2, 1, 0] } else { [0, 1, 2, 3] };
-            for &i in &order {
-                layer.positions.push(corners[i]);
-                let mut normal = [0.0; 3];
-                normal[axis] = if reversed { -1.0 } else { 1.0 };
-                layer.normals.push(normal);
-                layer.uvs.push(match i {
-                    0 => [0.0, 0.0],
-                    1 => [1.0, 0.0],
-                    2 => [1.0, 1.0],
-                    _ => [0.0, 1.0],
-                });
-                layer.materials.push(material as u32);
-                layer.light.push(light);
+            // Through the box's middle, rounded down to the sixteenth grid
+            // every other quad lies on.
+            let offset = (u32::from(b.min[d]) + u32::from(b.max[d])) / 2;
+            let span = |a: usize| [u32::from(b.min[a]), u32::from(b.max[a])];
+            for reversed in [false, true] {
+                layer.quads.push(Quad::plane_form(
+                    cell,
+                    d,
+                    reversed,
+                    offset,
+                    [span(u), span(v)],
+                    material,
+                    lit,
+                ));
             }
-            layer
-                .indices
-                .extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
         }
+        Form::Box => {}
     }
 }
 
@@ -1509,45 +1458,19 @@ fn compact(
     kept
 }
 
-/// The same corner order, winding and UV axes as pass 1, so a pass-2 quad is
-/// indistinguishable from a merged one downstream.
-///
-/// UVs are the position inside the Voxel the quad starts in, running on across
-/// the next ones, so a half-height slab side shows the lower half of the
-/// texture rather than a squashed whole one, and a tiling sampler still repeats
-/// per Voxel.
+/// A face as pass 1 writes it, so a pass-2 quad is indistinguishable from a
+/// merged one downstream.
 fn push_merged_quad(mesh: &mut MeshLayer, p: &Pending) {
-    const UNIT: f32 = 1.0 / SUBDIV as f32;
-    let sub = SUBDIV as u16;
-    let plane = (p.group & 0x3ff) as f32 * UNIT;
+    let plane = (p.group & 0x3ff) as i32;
     let face = (p.group >> 10 & 0x7) as usize;
     let material = (p.group >> 15 & 0xffff) as u32;
-    let light = (p.group >> 31) as u32;
-    let positive = face % 2 == 1;
-    let (d, u, v) = (face / 2, (face / 2 + 1) % 3, (face / 2 + 2) % 3);
-    let (ubase, vbase) = (p.a0 / sub * sub, p.b0 / sub * sub);
-
-    let corners = if positive {
-        [(p.a0, p.b0), (p.a1, p.b0), (p.a1, p.b1), (p.a0, p.b1)]
-    } else {
-        [(p.a0, p.b0), (p.a0, p.b1), (p.a1, p.b1), (p.a1, p.b0)]
-    };
-    let mut normal = [0.0f32; 3];
-    normal[d] = if positive { 1.0 } else { -1.0 };
-
-    let base = mesh.positions.len() as u32;
-    for (cu, cv) in corners {
-        let mut pos = [0.0f32; 3];
-        pos[d] = plane;
-        pos[u] = cu as f32 * UNIT;
-        pos[v] = cv as f32 * UNIT;
-        mesh.positions.push(pos);
-        mesh.normals.push(normal);
-        mesh.uvs
-            .push([(cu - ubase) as f32 * UNIT, (cv - vbase) as f32 * UNIT]);
-        mesh.materials.push(material);
-        mesh.light.push(light);
-    }
-    mesh.indices
-        .extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+    let light = Light::from_packed((p.group >> 31) as u8);
+    mesh.quads.push(Quad::face(
+        face,
+        plane,
+        [p.a0, p.a1],
+        [p.b0, p.b1],
+        material,
+        light,
+    ));
 }

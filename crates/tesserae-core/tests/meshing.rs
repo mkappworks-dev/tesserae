@@ -71,9 +71,10 @@ fn one_voxel_emits_six_quads() {
     let mut c = Chunk::air();
     c.set(16, 16, 16, Voxel::cube(fixtures().ground.rock));
     let mesh = mesh_isolated(&c);
+    let opaque = mesh.opaque.soup();
     assert_eq!(mesh.quad_count(), 6);
-    assert_eq!(mesh.opaque.positions.len(), 24);
-    assert_eq!(mesh.opaque.indices.len(), 36);
+    assert_eq!(opaque.positions.len(), 24);
+    assert_eq!(opaque.indices.len(), 36);
 }
 
 /// The whole point of greedy meshing. A naive mesher emits 6 * 32 * 32 = 6144.
@@ -111,6 +112,7 @@ fn an_interior_face_between_two_cubes_is_culled() {
     // not exist is a quad lying *on* that plane.
     let on_seam = mesh
         .opaque
+        .soup()
         .positions
         .chunks(4)
         .filter(|quad| quad.iter().all(|p| p[0] == 11.0))
@@ -159,13 +161,11 @@ fn neighbours_are_read_from_the_correct_side() {
 #[test]
 fn triangle_winding_matches_the_declared_normal() {
     let mesh = mesh_isolated(&testgen::terrain_chunk(0, 0, 0, fixtures().ground));
+    let opaque = mesh.opaque.soup();
     assert!(mesh.quad_count() > 0);
 
-    for tri in mesh.opaque.indices.chunks(3) {
-        let p: Vec<[f32; 3]> = tri
-            .iter()
-            .map(|&i| mesh.opaque.positions[i as usize])
-            .collect();
+    for tri in opaque.indices.chunks(3) {
+        let p: Vec<[f32; 3]> = tri.iter().map(|&i| opaque.positions[i as usize]).collect();
         let e1 = [p[1][0] - p[0][0], p[1][1] - p[0][1], p[1][2] - p[0][2]];
         let e2 = [p[2][0] - p[0][0], p[2][1] - p[0][1], p[2][2] - p[0][2]];
         let cross = [
@@ -173,7 +173,7 @@ fn triangle_winding_matches_the_declared_normal() {
             e1[2] * e2[0] - e1[0] * e2[2],
             e1[0] * e2[1] - e1[1] * e2[0],
         ];
-        let n = mesh.opaque.normals[tri[0] as usize];
+        let n = opaque.normals[tri[0] as usize];
         let dot = cross[0] * n[0] + cross[1] * n[1] + cross[2] * n[2];
         assert!(
             dot > 0.0,
@@ -185,7 +185,7 @@ fn triangle_winding_matches_the_declared_normal() {
 #[test]
 fn every_quad_is_planar_and_axis_aligned() {
     let mesh = mesh_isolated(&testgen::terrain_chunk(1, 0, 1, fixtures().ground));
-    for quad in mesh.opaque.positions.chunks(4) {
+    for quad in mesh.opaque.soup().positions.chunks(4) {
         let axes = (0..3)
             .filter(|&ax| quad.iter().all(|p| p[ax] == quad[0][ax]))
             .count();
@@ -287,13 +287,14 @@ fn a_cube_loses_a_face_only_where_the_neighbour_seals_the_matching_one() {
 #[test]
 fn vertex_attributes_stay_in_lockstep() {
     let mesh = mesh_isolated(&testgen::terrain_chunk(0, 0, 0, fixtures().ground));
-    let n = mesh.opaque.positions.len();
-    assert_eq!(mesh.opaque.normals.len(), n);
-    assert_eq!(mesh.opaque.uvs.len(), n);
-    assert_eq!(mesh.opaque.materials.len(), n);
-    assert_eq!(mesh.opaque.light.len(), n);
-    assert_eq!(mesh.opaque.indices.len(), n / 4 * 6);
-    assert!(mesh.opaque.indices.iter().all(|&i| (i as usize) < n));
+    let opaque = mesh.opaque.soup();
+    let n = opaque.positions.len();
+    assert_eq!(opaque.normals.len(), n);
+    assert_eq!(opaque.uvs.len(), n);
+    assert_eq!(opaque.materials.len(), n);
+    assert_eq!(opaque.light.len(), n);
+    assert_eq!(opaque.indices.len(), n / 4 * 6);
+    assert!(opaque.indices.iter().all(|&i| (i as usize) < n));
 }
 
 #[test]
@@ -351,9 +352,9 @@ fn seams_of(
 ) -> Vec<([f32; 3], [[f32; 3]; 4], u32)> {
     let mut extra = Vec::new();
     for (p, s) in [
-        (&plain.opaque, &seamed.opaque),
-        (&plain.cutout, &seamed.cutout),
-        (&plain.blended, &seamed.blended),
+        (&plain.opaque.soup(), &seamed.opaque.soup()),
+        (&plain.cutout.soup(), &seamed.cutout.soup()),
+        (&plain.blended.soup(), &seamed.blended.soup()),
     ] {
         let n = p.positions.len();
         assert_eq!(s.positions[..n], p.positions[..]);
@@ -632,13 +633,16 @@ fn declining_never_changes_the_mesh_it_would_have_produced() {
     let refs: [Option<LitChunk>; 6] = std::array::from_fn(|i| Some(unlit(&neighbors[i])));
 
     let fast = mesh_chunk(unlit(&center), refs, tables());
+
+    let fast_opaque = fast.opaque.soup();
     let slow = greedy_mesh(&Neighborhood::new(unlit(&center), refs), tables());
-    assert_eq!(fast.opaque.positions, slow.opaque.positions);
-    assert_eq!(fast.opaque.normals, slow.opaque.normals);
-    assert_eq!(fast.opaque.uvs, slow.opaque.uvs);
-    assert_eq!(fast.opaque.materials, slow.opaque.materials);
-    assert_eq!(fast.opaque.light, slow.opaque.light);
-    assert_eq!(fast.opaque.indices, slow.opaque.indices);
+    let slow_opaque = slow.opaque.soup();
+    assert_eq!(fast_opaque.positions, slow_opaque.positions);
+    assert_eq!(fast_opaque.normals, slow_opaque.normals);
+    assert_eq!(fast_opaque.uvs, slow_opaque.uvs);
+    assert_eq!(fast_opaque.materials, slow_opaque.materials);
+    assert_eq!(fast_opaque.light, slow_opaque.light);
+    assert_eq!(fast_opaque.indices, slow_opaque.indices);
     assert_eq!(fast.shaped_voxels, slow.shaped_voxels);
 }
 
@@ -719,9 +723,11 @@ fn a_face_carries_the_light_of_the_voxel_in_front_of_it() {
         &Neighborhood::isolated(LitChunk::new(&chunk, &light)),
         tables(),
     );
-    let top: Vec<u32> = (0..mesh.opaque.positions.len())
-        .filter(|&i| mesh.opaque.normals[i] == [0.0, 1.0, 0.0])
-        .map(|i| mesh.opaque.light[i])
+
+    let opaque = mesh.opaque.soup();
+    let top: Vec<u32> = (0..opaque.positions.len())
+        .filter(|&i| opaque.normals[i] == [0.0, 1.0, 0.0])
+        .map(|i| opaque.light[i])
         .collect();
     assert!(!top.is_empty(), "the floor has a top face");
     assert!(
@@ -730,7 +736,7 @@ fn a_face_carries_the_light_of_the_voxel_in_front_of_it() {
     );
 
     // And every vertex of one quad agrees, since they share the key.
-    for quad in mesh.opaque.light.chunks(4) {
+    for quad in opaque.light.chunks(4) {
         assert!(quad.iter().all(|l| *l == quad[0]));
     }
 }
@@ -751,10 +757,11 @@ fn a_boundary_face_is_lit_from_the_neighbour_and_not_from_zero() {
         &Neighborhood::new(LitChunk::new(&center, &center_light), neighbors),
         tables(),
     );
+    let opaque = mesh.opaque.soup();
 
-    let across: Vec<u32> = (0..mesh.opaque.positions.len())
-        .filter(|&i| mesh.opaque.normals[i] == [1.0, 0.0, 0.0])
-        .map(|i| mesh.opaque.light[i])
+    let across: Vec<u32> = (0..opaque.positions.len())
+        .filter(|&i| opaque.normals[i] == [1.0, 0.0, 0.0])
+        .map(|i| opaque.light[i])
         .collect();
     assert_eq!(
         across,
@@ -797,9 +804,10 @@ fn every_level_the_solver_can_produce_survives_to_a_vertex() {
         &Neighborhood::isolated(LitChunk::new(&chunk, &light)),
         tables(),
     );
-    let seen: std::collections::BTreeSet<u8> = (0..mesh.opaque.positions.len())
-        .filter(|&i| mesh.opaque.normals[i] == [0.0, 1.0, 0.0])
-        .map(|i| (mesh.opaque.light[i] & 0x0F) as u8)
+    let opaque = mesh.opaque.soup();
+    let seen: std::collections::BTreeSet<u8> = (0..opaque.positions.len())
+        .filter(|&i| opaque.normals[i] == [0.0, 1.0, 0.0])
+        .map(|i| (opaque.light[i] & 0x0F) as u8)
         .collect();
     assert_eq!(seen.len(), 16, "lost a block level: {seen:?}");
 }
@@ -951,7 +959,11 @@ fn exposed_faces_unless(
 /// rectangle, each belonging to the solid sub-cell behind it.
 fn drawn_faces(mesh: &tesserae_core::ChunkMesh) -> std::collections::BTreeMap<SubFace, u32> {
     let mut drawn = std::collections::BTreeMap::new();
-    for layer in [&mesh.opaque, &mesh.blended, &mesh.cutout] {
+    for layer in [
+        &mesh.opaque.soup(),
+        &mesh.blended.soup(),
+        &mesh.cutout.soup(),
+    ] {
         for (q, normal) in layer.positions.chunks(4).zip(layer.normals.chunks(4)) {
             let n = normal[0];
             let f = (0..6)
@@ -1204,9 +1216,10 @@ fn an_arm_across_a_chunk_boundary_is_read_from_the_shell() {
         let m = mesh_chunk(unlit(&a), neighbors, tables());
         let cap_on_the_boundary = m
             .opaque
+            .soup()
             .positions
             .chunks(4)
-            .zip(m.opaque.normals.chunks(4))
+            .zip(m.opaque.soup().normals.chunks(4))
             .any(|(q, n)| n[0] == [1.0, 0.0, 0.0] && q.iter().all(|p| p[0] == CHUNK_SIZE as f32));
         (m.quad_count(), cap_on_the_boundary)
     };
@@ -1272,11 +1285,12 @@ fn a_stairs_tread_is_lit_by_its_own_voxel_and_its_back_by_the_neighbour() {
     light.set(10, 10, 9, Light::new(4, 0));
     light.set(10, 11, 10, Light::new(9, 9));
     let mesh = greedy_mesh(&Neighborhood::isolated(LitChunk::new(&c, &light)), tables());
+    let opaque = mesh.opaque.soup();
 
     let lit_at = |normal: [f32; 3], axis: usize, at: f32| -> Vec<u32> {
-        (0..mesh.opaque.positions.len())
-            .filter(|&i| mesh.opaque.normals[i] == normal && mesh.opaque.positions[i][axis] == at)
-            .map(|i| mesh.opaque.light[i])
+        (0..opaque.positions.len())
+            .filter(|&i| opaque.normals[i] == normal && opaque.positions[i][axis] == at)
+            .map(|i| opaque.light[i])
             .collect()
     };
     let packed = |sky, block| Light::new(sky, block).packed() as u32;
@@ -1312,14 +1326,12 @@ fn catalogue() -> Chunk {
 #[test]
 fn pass_2_geometry_is_wound_to_its_normal_planar_and_in_lockstep() {
     let mesh = mesh_isolated(&catalogue());
+    let opaque = mesh.opaque.soup();
     assert_eq!(mesh.shaped_voxels, 72);
     assert!(mesh.quad_count() > 72);
 
-    for tri in mesh.opaque.indices.chunks(3) {
-        let p: Vec<[f32; 3]> = tri
-            .iter()
-            .map(|&i| mesh.opaque.positions[i as usize])
-            .collect();
+    for tri in opaque.indices.chunks(3) {
+        let p: Vec<[f32; 3]> = tri.iter().map(|&i| opaque.positions[i as usize]).collect();
         let e1 = [p[1][0] - p[0][0], p[1][1] - p[0][1], p[1][2] - p[0][2]];
         let e2 = [p[2][0] - p[0][0], p[2][1] - p[0][1], p[2][2] - p[0][2]];
         let cross = [
@@ -1327,22 +1339,22 @@ fn pass_2_geometry_is_wound_to_its_normal_planar_and_in_lockstep() {
             e1[2] * e2[0] - e1[0] * e2[2],
             e1[0] * e2[1] - e1[1] * e2[0],
         ];
-        let n = mesh.opaque.normals[tri[0] as usize];
+        let n = opaque.normals[tri[0] as usize];
         let dot = cross[0] * n[0] + cross[1] * n[1] + cross[2] * n[2];
         assert!(dot > 0.0, "winding flipped: {cross:?} vs normal {n:?}");
     }
-    for quad in mesh.opaque.positions.chunks(4) {
+    for quad in opaque.positions.chunks(4) {
         let axes = (0..3)
             .filter(|&ax| quad.iter().all(|p| p[ax] == quad[0][ax]))
             .count();
         assert_eq!(axes, 1, "quad {quad:?} is not on one axis-aligned plane");
     }
-    let n = mesh.opaque.positions.len();
-    assert_eq!(mesh.opaque.normals.len(), n);
-    assert_eq!(mesh.opaque.uvs.len(), n);
-    assert_eq!(mesh.opaque.materials.len(), n);
-    assert_eq!(mesh.opaque.light.len(), n);
-    assert!(mesh.opaque.indices.iter().all(|&i| (i as usize) < n));
+    let n = opaque.positions.len();
+    assert_eq!(opaque.normals.len(), n);
+    assert_eq!(opaque.uvs.len(), n);
+    assert_eq!(opaque.materials.len(), n);
+    assert_eq!(opaque.light.len(), n);
+    assert!(opaque.indices.iter().all(|&i| (i as usize) < n));
 }
 
 /// A half-height slab side shows half the texture, not a squashed whole one.
@@ -1351,15 +1363,13 @@ fn uvs_are_the_position_inside_the_voxel() {
     let mut c = Chunk::air();
     c.set(10, 10, 10, shaped(SHAPE_SLAB, POS_Y, 0));
     let mesh = mesh_isolated(&c);
-    for i in 0..mesh.opaque.positions.len() {
-        if mesh.opaque.normals[i] == [1.0, 0.0, 0.0] {
+    let opaque = mesh.opaque.soup();
+    for i in 0..opaque.positions.len() {
+        if opaque.normals[i] == [1.0, 0.0, 0.0] {
             // A +X face is on axes (y, z), so (u, v) = (y, z) inside the cell.
-            let p = mesh.opaque.positions[i];
-            assert_eq!(mesh.opaque.uvs[i], [p[1] - 10.0, p[2] - 10.0]);
-            assert!(
-                mesh.opaque.uvs[i][0] <= 0.5,
-                "the slab's side is half height"
-            );
+            let p = opaque.positions[i];
+            assert_eq!(opaque.uvs[i], [p[1] - 10.0, p[2] - 10.0]);
+            assert!(opaque.uvs[i][0] <= 0.5, "the slab's side is half height");
         }
     }
 }
@@ -1374,7 +1384,7 @@ fn put(chunk: &mut Chunk, at: [usize; 3], voxel: Voxel) {
 
 /// The normals of every quad of a layer, one per quad.
 fn quad_normals(layer: &tesserae_core::MeshLayer) -> Vec<[f32; 3]> {
-    layer.normals.chunks(4).map(|n| n[0]).collect()
+    layer.soup().normals.chunks(4).map(|n| n[0]).collect()
 }
 
 /// A second, differently coloured glass: same properties, another Material.
@@ -1404,6 +1414,7 @@ fn glass_beside_glass_is_a_skin_and_not_a_honeycomb() {
     assert!(mesh.opaque.is_empty());
     let on_seam = mesh
         .blended
+        .soup()
         .positions
         .chunks(4)
         .filter(|quad| quad.iter().all(|p| p[0] == 11.0))
@@ -1431,6 +1442,7 @@ fn leaves_hide_nothing_not_even_each_other() {
     // The two shared faces are drawn, one facing each way, on the plane x=11.
     let facing_seam: Vec<_> = mesh
         .cutout
+        .soup()
         .positions
         .chunks(4)
         .zip(quad_normals(&mesh.cutout))
@@ -1481,35 +1493,41 @@ fn every_quad_lands_in_the_layer_of_its_materials_render_class() {
         );
     }
     let mesh = mesh_isolated(&c);
+    let cutout = mesh.cutout.soup();
+    let blended = mesh.blended.soup();
+    let opaque = mesh.opaque.soup();
     let class = |m: u32| tables().materials.def(m as u16).render;
     assert!(
         mesh.opaque
+            .soup()
             .materials
             .iter()
             .all(|&m| class(m) == RenderClass::Opaque)
     );
     assert!(
         mesh.blended
+            .soup()
             .materials
             .iter()
             .all(|&m| class(m) == RenderClass::Blend)
     );
     assert!(
         mesh.cutout
+            .soup()
             .materials
             .iter()
             .all(|&m| class(m) == RenderClass::Cutout)
     );
     for (layer, expected) in [
-        (&mesh.opaque, vec![fixtures().ground.rock]),
-        (&mesh.blended, vec![fixtures().glass, water()]),
-        (&mesh.cutout, vec![fixtures().leaves]),
+        (&opaque, vec![fixtures().ground.rock]),
+        (&blended, vec![fixtures().glass, water()]),
+        (&cutout, vec![fixtures().leaves]),
     ] {
         for m in expected {
             assert!(layer.materials.contains(&(m as u32)), "material {m}");
         }
     }
-    for layer in [&mesh.opaque, &mesh.blended, &mesh.cutout] {
+    for layer in [&opaque, &blended, &cutout] {
         assert_eq!(layer.positions.len(), layer.normals.len());
         assert_eq!(layer.positions.len(), layer.uvs.len());
         assert_eq!(layer.positions.len(), layer.materials.len());
@@ -1533,6 +1551,7 @@ fn a_shaped_voxel_is_hidden_only_by_a_neighbour_that_hides_it() {
         let mesh = mesh_isolated(&c);
         // Quads lying on the shared plane x=11 and facing +X are the slab's.
         mesh.opaque
+            .soup()
             .positions
             .chunks(4)
             .zip(quad_normals(&mesh.opaque))
@@ -1866,11 +1885,13 @@ fn declining_never_changes_the_mesh_of_a_ramp_chunk() {
     let block = block_around(&g, coord);
     assert!(block[13].may_contain_shaped());
     let fast = mesh_with_neighbours(&block);
+    let fast_opaque = fast.opaque.soup();
     let refs = [12, 14, 10, 16, 4, 22].map(|i| Some(unlit(&block[i])));
     let slow = greedy_mesh(&Neighborhood::new(unlit(&block[13]), refs), tables());
-    assert_eq!(fast.opaque.positions, slow.opaque.positions);
-    assert_eq!(fast.opaque.indices, slow.opaque.indices);
-    assert_eq!(fast.opaque.light, slow.opaque.light);
+    let slow_opaque = slow.opaque.soup();
+    assert_eq!(fast_opaque.positions, slow_opaque.positions);
+    assert_eq!(fast_opaque.indices, slow_opaque.indices);
+    assert_eq!(fast_opaque.light, slow_opaque.light);
     assert!(fast.shaped_voxels > 0);
 }
 
@@ -1974,7 +1995,7 @@ fn a_gap_is_not_merged_across() {
 #[test]
 fn a_merged_quad_keeps_the_textures_per_voxel_repeat_and_a_slabs_half_height() {
     let floor = slabs([2, 8, 4], [10, 9, 12], 1);
-    let layer = mesh_isolated(&floor).opaque;
+    let layer = mesh_isolated(&floor).opaque.soup();
     for (i, (q, uv)) in layer
         .positions
         .chunks(4)
@@ -2008,6 +2029,7 @@ fn a_row_of_slabs_never_leaves_its_chunk() {
     let mesh = mesh_isolated(&row);
     assert!(
         mesh.opaque
+            .soup()
             .positions
             .iter()
             .all(|p| (0.0..=32.0).contains(&p[0]))
@@ -2028,7 +2050,7 @@ fn flowing(surface: u8) -> tesserae_core::Overlay {
 
 /// Every vertex height of the blended layer's quads facing `normal`.
 fn blended_heights(mesh: &tesserae_core::ChunkMesh, normal: [f32; 3]) -> Vec<f32> {
-    let layer = &mesh.blended;
+    let layer = &mesh.blended.soup();
     let mut ys: Vec<f32> = (0..layer.positions.len())
         .filter(|&i| layer.normals[i] == normal)
         .map(|i| layer.positions[i][1])
@@ -2074,7 +2096,7 @@ fn neighbouring_flow_shows_only_the_step_between_surfaces() {
     let mesh = mesh_chunk(lit, [None; 6], tables());
     // Facing +x out of the higher one: just 8/16 to 12/16 of the shared face,
     // then the lower one's full side further out.
-    let layer = &mesh.blended;
+    let layer = &mesh.blended.soup();
     let mut plus_x: Vec<(f32, f32)> = (0..layer.positions.len())
         .filter(|&i| layer.normals[i] == [1.0, 0.0, 0.0])
         .map(|i| (layer.positions[i][0], layer.positions[i][1]))
@@ -2112,9 +2134,10 @@ fn full_water_under_a_lower_surface_draws_no_face_between_them() {
     let mesh = mesh_chunk(lit, [None; 6], tables());
     assert!(
         mesh.blended
+            .soup()
             .positions
             .chunks(4)
-            .zip(mesh.blended.normals.chunks(4))
+            .zip(mesh.blended.soup().normals.chunks(4))
             .any(|(q, n)| n[0] == [0.0, 1.0, 0.0] && q[0][1] == 5.0),
         "glass under water keeps its top"
     );
@@ -2129,6 +2152,7 @@ fn a_fence_grows_no_arm_towards_flowing_water() {
     let opaque = |chunk: &Chunk, overlay: &tesserae_core::ChunkOverlay| {
         mesh_chunk(unlit(chunk).with_overlay(overlay), [None; 6], tables())
             .opaque
+            .soup()
             .positions
     };
     let fence = place_fences(&[(10, 10, 10)]);
@@ -2153,8 +2177,8 @@ fn a_dry_overlay_meshes_exactly_as_none() {
     let overlay = tesserae_core::ChunkOverlay::none();
     let a = mesh_chunk(unlit(&chunk), [None; 6], tables());
     let b = mesh_chunk(unlit(&chunk).with_overlay(&overlay), [None; 6], tables());
-    assert_eq!(a.blended.positions, b.blended.positions);
-    assert_eq!(a.opaque.positions, b.opaque.positions);
+    assert_eq!(a.blended.soup().positions, b.blended.soup().positions);
+    assert_eq!(a.opaque.soup().positions, b.opaque.soup().positions);
     assert_eq!(a.quad_count(), b.quad_count());
 }
 
@@ -2166,7 +2190,7 @@ fn soaked(fluid: tesserae_core::Fluid) -> tesserae_core::Overlay {
 }
 
 fn blended_positions(mesh: &tesserae_core::ChunkMesh) -> Vec<[f32; 3]> {
-    mesh.blended.positions.clone()
+    mesh.blended.soup().positions.clone()
 }
 
 /// Water in a stair is drawn in the stair's notch and nowhere else, and the
@@ -2184,7 +2208,7 @@ fn a_waterlogged_stair_draws_its_water_in_the_notch_alone() {
     overlay.set(4, 4, 4, soaked(tesserae_core::Fluid::source(water())));
     let dry = mesh_chunk(unlit(&chunk), [None; 6], tables());
     let wet = mesh_chunk(unlit(&chunk).with_overlay(&overlay), [None; 6], tables());
-    assert_eq!(wet.opaque.positions, dry.opaque.positions);
+    assert_eq!(wet.opaque.soup().positions, dry.opaque.soup().positions);
     assert_eq!(wet.shaped_voxels, dry.shaped_voxels);
     // The notch is the upper front quarter: top, front and its two sides.
     assert_eq!(wet.blended.quad_count(), 4);
@@ -2297,23 +2321,26 @@ fn a_burning_solid_draws_flames_over_its_open_faces_and_keeps_its_geometry() {
         },
     );
     let dry = mesh_isolated(&chunk);
+    let dry_opaque = dry.opaque.soup();
     let lit = unlit(&chunk).with_overlay(&overlay);
     let burning = greedy_mesh(&Neighborhood::isolated(lit), tables());
-    assert_eq!(burning.opaque.positions, dry.opaque.positions);
-    assert_eq!(burning.opaque.materials, dry.opaque.materials);
+    let burning_cutout = burning.cutout.soup();
+    let burning_opaque = burning.opaque.soup();
+    assert_eq!(burning_opaque.positions, dry_opaque.positions);
+    assert_eq!(burning_opaque.materials, dry_opaque.materials);
     assert!(dry.cutout.is_empty());
     assert_eq!(
         burning.cutout.quad_count(),
         5,
         "every face but the shared one"
     );
-    assert!(burning.cutout.materials.iter().all(|&m| m == FLAME));
-    for p in &burning.cutout.positions {
+    assert!(burning_cutout.materials.iter().all(|&m| m == FLAME));
+    for p in &burning_cutout.positions {
         let outside = (0..3).any(|a| p[a] < 16.0 || p[a] > 17.0);
         assert!(outside, "a flame vertex inside its Voxel: {p:?}");
     }
     assert!(
-        !burning.cutout.normals.contains(&[1.0, 0.0, 0.0]),
+        !burning_cutout.normals.contains(&[1.0, 0.0, 0.0]),
         "a flame on the face against stone"
     );
 }
@@ -2430,6 +2457,7 @@ fn a_dry_chunk_beside_a_wet_one_meshes_against_the_neighbours_fluid() {
         neighbors[POS_X] = Some(n);
         let mesh = mesh_chunk(unlit(&center), neighbors, tables());
         mesh.blended
+            .soup()
             .normals
             .iter()
             .filter(|&&n| n == [1.0, 0.0, 0.0])
@@ -2451,9 +2479,10 @@ fn the_retired_id_draws_the_opaque_stand_in_and_is_never_a_fluid() {
     c.set(16, 16, 16, Voxel::cube(FIRST_MOD_ID.saturating_sub(1)));
     let mesh = mesh_isolated(&c);
     assert_eq!(mesh.quad_count(), 6);
-    assert!(mesh.blended.positions.is_empty() && mesh.cutout.positions.is_empty());
+    assert!(mesh.blended.soup().positions.is_empty() && mesh.cutout.soup().positions.is_empty());
     assert!(
         mesh.opaque
+            .soup()
             .materials
             .iter()
             .all(|&m| m == FIRST_MOD_ID.saturating_sub(1) as u32)

@@ -4,7 +4,7 @@
 use super::actions::{Action, Actions};
 use super::avatar::AvatarShown;
 use super::camera::FlyCamera;
-use super::chunk_mesh;
+use super::chunk_mesh::ChunkQuads;
 use super::chunk_view::ChunkEntities;
 use super::preview::HandCamera;
 use super::profile::{Preferences, Store};
@@ -181,8 +181,12 @@ type QuadBoxes = Arc<[(Vec3, Vec3)]>;
 pub(super) struct Obstacles<'w, 's> {
     world: Res<'w, WorldSettings>,
     chunks: Res<'w, ChunkEntities>,
-    layers: Query<'w, 's, (&'static Mesh3d, &'static Transform), Without<FlyCamera>>,
-    meshes: Res<'w, Assets<Mesh>>,
+    layers: Query<
+        'w,
+        's,
+        (&'static Mesh3d, &'static ChunkQuads, &'static Transform),
+        Without<FlyCamera>,
+    >,
     cache: Local<'s, HashMap<AssetId<Mesh>, (bool, QuadBoxes)>>,
 }
 
@@ -201,13 +205,10 @@ impl Obstacles<'_, '_> {
                     let coord = ChunkCoord::new(x, y, z);
                     let entities: Vec<Entity> = self.chunks.solid_at(coord).collect();
                     for entity in entities {
-                        let Ok((mesh, &transform)) = self.layers.get(entity) else {
+                        let Ok((mesh, quads, &transform)) = self.layers.get(entity) else {
                             continue;
                         };
-                        let handle = mesh.0.clone();
-                        let Some(boxes) = self.boxes(&handle) else {
-                            continue;
-                        };
+                        let boxes = Self::boxes(&mut self.cache, mesh.0.id(), quads);
                         for &(min, max) in boxes.iter() {
                             let (min, max) = (
                                 transform.transform_point(min),
@@ -229,15 +230,15 @@ impl Obstacles<'_, '_> {
         nearest
     }
 
-    fn boxes(&mut self, handle: &Handle<Mesh>) -> Option<QuadBoxes> {
-        let id = handle.id();
-        if let Some((used, boxes)) = self.cache.get_mut(&id) {
-            *used = true;
-            return Some(boxes.clone());
-        }
-        let boxes = quad_boxes(self.meshes.get(id)?)?;
-        self.cache.insert(id, (true, boxes.clone()));
-        Some(boxes)
+    /// Keyed by the placeholder, which a new mesh for the layer replaces.
+    fn boxes(
+        cache: &mut HashMap<AssetId<Mesh>, (bool, QuadBoxes)>,
+        id: AssetId<Mesh>,
+        quads: &ChunkQuads,
+    ) -> QuadBoxes {
+        let (used, boxes) = cache.entry(id).or_insert_with(|| (true, quad_boxes(quads)));
+        *used = true;
+        boxes.clone()
     }
 
     fn forget_unused(&mut self) {
@@ -245,20 +246,17 @@ impl Obstacles<'_, '_> {
     }
 }
 
-/// One box per greedy quad, from the six indices that draw it, in Voxels.
-fn quad_boxes(mesh: &Mesh) -> Option<QuadBoxes> {
-    let layer = chunk_mesh::decoded(mesh)?;
-    Some(
-        layer
-            .indices
-            .chunks(6)
-            .map(|quad| {
-                quad.iter()
-                    .map(|&i| Vec3::from_array(layer.positions[i as usize]))
-                    .fold((Vec3::MAX, Vec3::MIN), |(lo, hi), p| (lo.min(p), hi.max(p)))
-            })
-            .collect(),
-    )
+/// One box per greedy quad, in Voxels.
+fn quad_boxes(quads: &ChunkQuads) -> QuadBoxes {
+    quads
+        .quads()
+        .map(|quad| {
+            quad.corners()
+                .iter()
+                .map(|c| Vec3::from_array(c.position))
+                .fold((Vec3::MAX, Vec3::MIN), |(lo, hi), p| (lo.min(p), hi.max(p)))
+        })
+        .collect()
 }
 
 /// Where the segment enters the box, as a fraction of it, if it does from
@@ -340,35 +338,31 @@ mod tests {
 
     /// Faces `edge` metres square at a metre a Voxel, so the mesh is in metres.
     fn chunk_layer(app: &mut App, faces: &[(usize, f32)], edge: f32) -> Entity {
-        let mut layer = tesserae_core::MeshLayer::default();
-        for &(axis, at) in faces {
-            let corner = |u: f32, v: f32| {
-                let mut p = [0.0; 3];
-                p[axis] = at;
-                p[(axis + 1) % 3] = u;
-                p[(axis + 2) % 3] = v;
-                p
-            };
-            let mut normal = [0.0; 3];
-            normal[axis] = 1.0;
-            let base = layer.positions.len() as u32;
-            layer.positions.extend([
-                corner(0.0, 0.0),
-                corner(edge, 0.0),
-                corner(edge, edge),
-                corner(0.0, edge),
-            ]);
-            layer.normals.extend([normal; 4]);
-            layer.uvs.extend([[0.0; 2]; 4]);
-            layer.materials.extend([1; 4]);
-            layer.light.extend([0; 4]);
-            layer.indices.extend([0, 1, 2, 0, 2, 3].map(|i| base + i));
-        }
-        let mesh = chunk_mesh::chunk_mesh_to_mesh(&layer);
-        let handle = app.world_mut().resource_mut::<Assets<Mesh>>().add(mesh);
+        let sixteenths = |m: f32| (m * 16.0) as i32;
+        let span = [0, sixteenths(edge) as u16];
+        let layer = tesserae_core::MeshLayer {
+            quads: faces
+                .iter()
+                .map(|&(axis, at)| {
+                    tesserae_core::mesh::Quad::face(
+                        axis * 2 + 1,
+                        sixteenths(at),
+                        span,
+                        span,
+                        1,
+                        tesserae_core::Light::DARK,
+                    )
+                })
+                .collect(),
+        };
+        let quads = ChunkQuads::pack(&layer, 0).expect("faces");
+        let handle = app
+            .world_mut()
+            .resource_mut::<Assets<Mesh>>()
+            .add(Mesh::from(Cuboid::default()));
         let entity = app
             .world_mut()
-            .spawn((Mesh3d(handle), Transform::default()))
+            .spawn((Mesh3d(handle), quads, Transform::default()))
             .id();
         app.world_mut()
             .resource_mut::<ChunkEntities>()

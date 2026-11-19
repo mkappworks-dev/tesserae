@@ -96,10 +96,15 @@ impl Light {
         }
     }
 
-    /// What the vertex attribute carries. The shader unpacks the two nibbles.
+    /// What a quad carries to the renderer. The shader unpacks the two nibbles.
     #[inline]
     pub const fn packed(self) -> u8 {
         self.0
+    }
+
+    #[inline]
+    pub const fn from_packed(packed: u8) -> Self {
+        Light(packed)
     }
 }
 

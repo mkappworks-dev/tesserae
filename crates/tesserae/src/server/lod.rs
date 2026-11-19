@@ -23,6 +23,8 @@ use crate::session::SessionApp;
 use tesserae_core::lod::{
     Child, Coarse, UnderWater, Waterline, coarse_light_in, downsample_changed,
 };
+use tesserae_core::mesh::{POS_Y, Quad, QuadKind};
+use tesserae_core::shape::SUBDIV;
 use tesserae_core::worldgen::WaterParams;
 use tesserae_core::{
     CHUNK_SIZE, Chunk, ChunkMesh, ChunkOverlay, LitChunk, MeshLayer, OreTable, SeamMargin,
@@ -524,12 +526,7 @@ pub(in crate::server) mod measure {
     }
 
     fn layer_bytes(layer: &MeshLayer) -> usize {
-        size_of_val(&layer.positions[..])
-            + size_of_val(&layer.normals[..])
-            + size_of_val(&layer.uvs[..])
-            + size_of_val(&layer.materials[..])
-            + size_of_val(&layer.light[..])
-            + size_of_val(&layer.indices[..])
+        size_of_val(&layer.quads[..])
     }
 
     #[derive(Default)]
@@ -835,6 +832,8 @@ fn mesh_coarse(
 /// Only over packed water, which is the generator's lake (`downsample_changed`): fluid in the
 /// overlay is water that flowed or was placed, whose level-0 surface is anywhere, so it stays
 /// in the coarse Voxel holding it. A quad over both is split and only the lake's cells move.
+///
+/// The surface lands on the sixteenth at or below it, where the renderer always drew it.
 fn level_the_water(
     layer: &mut MeshLayer,
     water: UnderWater,
@@ -843,33 +842,33 @@ fn level_the_water(
     overlay: &ChunkOverlay,
 ) {
     let surface_m = (water.level_m / water.step_m).ceil() * water.step_m;
-    let at = (surface_m - floor_m) / voxel_m;
+    let at_voxels = (surface_m - floor_m) / voxel_m;
+    let at = (at_voxels * SUBDIV as f32).floor() as i32;
     let wet = overlay.may_contain_fluid();
     let mut split: Vec<usize> = Vec::new();
-    for (q, (corners, (normals, materials))) in layer
-        .positions
-        .chunks_mut(4)
-        .zip(layer.normals.chunks(4).zip(layer.materials.chunks(4)))
-        .enumerate()
-    {
-        let up = normals[0] == [0.0, 1.0, 0.0];
+    for (q, quad) in layer.quads.iter_mut().enumerate() {
         // Only the surface row: an upward face a coarse Voxel or more away is not this water's.
-        if !(up && materials[0] == u32::from(water.material) && (corners[0][1] - at).abs() < 1.0) {
+        let Some(plane) = quad
+            .plane()
+            .filter(|_| quad.kind() == QuadKind::Face(POS_Y))
+        else {
+            continue;
+        };
+        let off = plane as f32 / SUBDIV as f32 - at_voxels;
+        if !(quad.material == u32::from(water.material) && off.abs() < 1.0) {
             continue;
         }
         if wet {
-            let lake = cells_under(corners).filter(|&c| !moved(overlay, c)).count();
+            let lake = cells_under(quad).filter(|&c| !moved(overlay, c)).count();
             if lake == 0 {
                 continue;
             }
-            if lake < cells_under(corners).count() {
+            if lake < cells_under(quad).count() {
                 split.push(q);
                 continue;
             }
         }
-        for corner in corners {
-            corner[1] = at;
-        }
+        *quad = quad.at_plane(at);
     }
     if !split.is_empty() {
         split_quads(layer, &split, at, overlay);
@@ -877,12 +876,14 @@ fn level_the_water(
 }
 
 /// The coarse cells an upward quad lies on, as `[x, y, z]` of the cell under it.
-fn cells_under(corners: &[[f32; 3]]) -> impl Iterator<Item = [usize; 3]> {
-    let lo = |axis: usize| corners.iter().map(|c| c[axis]).fold(f32::MAX, f32::min) as usize;
-    let hi = |axis: usize| corners.iter().map(|c| c[axis]).fold(f32::MIN, f32::max) as usize;
+fn cells_under(quad: &Quad) -> impl Iterator<Item = [usize; 3]> {
+    let sub = SUBDIV as i32;
+    let ([z0, z1], [x0, x1]) = quad.spans().expect("a face");
+    let cell = |s: u16| s as usize / SUBDIV;
     // Partial fluid tops lie inside their cell; integer tops lie just above it.
-    let y = corners[0][1].ceil() as usize - 1;
-    let (x0, x1, z0, z1) = (lo(0), hi(0), lo(2), hi(2));
+    let plane = quad.plane().expect("a face");
+    let y = ((plane + sub - 1).div_euclid(sub) - 1) as usize;
+    let (x0, x1, z0, z1) = (cell(x0), cell(x1), cell(z0), cell(z1));
     (z0..z1).flat_map(move |z| (x0..x1).map(move |x| [x, y, z]))
 }
 
@@ -892,97 +893,33 @@ fn moved(overlay: &ChunkOverlay, [x, y, z]: [usize; 3]) -> bool {
 }
 
 /// Replaces each quad `quads` names with one quad per cell under it, the lake's moved to
-/// `at`, keeping the quad's corner order, light and texture coordinates.
-fn split_quads(layer: &mut MeshLayer, quads: &[usize], at: f32, overlay: &ChunkOverlay) {
-    let mut out = MeshLayer::default();
+/// `at`, keeping the quad's light. Each cell's texture restarts at the cell, which the
+/// texture's repeat per Voxel draws the same.
+fn split_quads(layer: &mut MeshLayer, quads: &[usize], at: i32, overlay: &ChunkOverlay) {
+    let sub = SUBDIV as u16;
+    let mut out = Vec::with_capacity(layer.quads.len());
     let mut next = quads.iter().copied().peekable();
-    for q in 0..layer.positions.len() / 4 {
-        let range = 4 * q..4 * q + 4;
+    for (q, quad) in layer.quads.iter().enumerate() {
         if next.peek() != Some(&q) {
-            push_quad(
-                &mut out,
-                &layer.positions[range.clone()],
-                &layer.uvs[range.clone()],
-                &layer.normals[4 * q],
-                layer.materials[4 * q],
-                &layer.light[range],
-            );
+            out.push(*quad);
             continue;
         }
         next.next();
-        let corners = &layer.positions[range.clone()];
-        let uvs = &layer.uvs[range.clone()];
-        let (p0, e0, e1) = (
-            corners[0],
-            sub(corners[1], corners[0]),
-            sub(corners[3], corners[0]),
-        );
-        let uv_at = |p: [f32; 3]| {
-            let d = sub(p, p0);
-            let (s, t) = (dot(d, e0) / dot(e0, e0), dot(d, e1) / dot(e1, e1));
-            [
-                uvs[0][0] + s * (uvs[1][0] - uvs[0][0]) + t * (uvs[3][0] - uvs[0][0]),
-                uvs[0][1] + s * (uvs[1][1] - uvs[0][1]) + t * (uvs[3][1] - uvs[0][1]),
-            ]
-        };
-        let (x_lo, z_lo) = (
-            corners.iter().map(|c| c[0]).fold(f32::MAX, f32::min),
-            corners.iter().map(|c| c[2]).fold(f32::MAX, f32::min),
-        );
-        for cell in cells_under(corners) {
-            let y = if moved(overlay, cell) {
-                corners[0][1]
-            } else {
-                at
-            };
-            let sub_corners: Vec<[f32; 3]> = corners
-                .iter()
-                .map(|c| {
-                    let x = cell[0] as f32 + if c[0] > x_lo { 1.0 } else { 0.0 };
-                    let z = cell[2] as f32 + if c[2] > z_lo { 1.0 } else { 0.0 };
-                    [x, corners[0][1], z]
-                })
-                .collect();
-            let sub_uvs: Vec<[f32; 2]> = sub_corners.iter().map(|&p| uv_at(p)).collect();
-            let placed: Vec<[f32; 3]> = sub_corners.iter().map(|p| [p[0], y, p[2]]).collect();
-            push_quad(
-                &mut out,
-                &placed,
-                &sub_uvs,
-                &layer.normals[4 * q],
-                layer.materials[4 * q],
-                &layer.light[range.clone()],
-            );
+        let plane = quad.plane().expect("a face");
+        for cell in cells_under(quad) {
+            let y = if moved(overlay, cell) { plane } else { at };
+            let span = |c: usize| [c as u16 * sub, (c as u16 + 1) * sub];
+            out.push(Quad::face(
+                POS_Y,
+                y,
+                span(cell[2]),
+                span(cell[0]),
+                quad.material,
+                quad.light,
+            ));
         }
     }
-    *layer = out;
-}
-
-fn push_quad(
-    layer: &mut MeshLayer,
-    corners: &[[f32; 3]],
-    uvs: &[[f32; 2]],
-    normal: &[f32; 3],
-    material: u32,
-    light: &[u32],
-) {
-    let base = layer.positions.len() as u32;
-    layer.positions.extend_from_slice(corners);
-    layer.uvs.extend_from_slice(uvs);
-    layer.normals.extend(std::iter::repeat_n(*normal, 4));
-    layer.materials.extend(std::iter::repeat_n(material, 4));
-    layer.light.extend_from_slice(light);
-    layer
-        .indices
-        .extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
-}
-
-fn sub(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
-    [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
-}
-
-fn dot(a: [f32; 3], b: [f32; 3]) -> f32 {
-    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+    layer.quads = out;
 }
 
 struct Plan {
@@ -2852,7 +2789,7 @@ mod tests {
         let mut vertices = 0;
         for m in &ready {
             for layer in [&m.mesh.opaque, &m.mesh.blended, &m.mesh.cutout] {
-                assert_eq!(layer.light.len(), layer.positions.len());
+                let layer = layer.soup();
                 assert!(
                     layer.light.iter().all(|l| allowed.contains(l)),
                     "level {} {} has a vertex lit as none of them",
@@ -3490,6 +3427,7 @@ mod tests {
     /// Every quad of `layer` whose normal is `normal`, as its highest point in metres at `level`.
     fn heights_facing(layer: &tesserae_core::MeshLayer, normal: [f32; 3], level: u32) -> Vec<f32> {
         let voxel_m = world().voxel_size * 2f32.powi(level as i32);
+        let layer = layer.soup();
         layer
             .positions
             .chunks(4)
@@ -3567,15 +3505,16 @@ mod tests {
                         burning: None,
                     },
                 );
-                let mut layer = MeshLayer::default();
-                push_quad(
-                    &mut layer,
-                    &corners,
-                    &[[0.0; 2]; 4],
-                    &[0.0, 1.0, 0.0],
-                    u32::from(material),
-                    &[0; 4],
-                );
+                let mut layer = MeshLayer {
+                    quads: vec![Quad::face(
+                        POS_Y,
+                        (top * 16.0) as i32,
+                        [80, 96],
+                        [0, 16],
+                        u32::from(material),
+                        Light::DARK,
+                    )],
+                };
                 level_the_water(
                     &mut layer,
                     UnderWater {
@@ -3589,12 +3528,45 @@ mod tests {
                     &overlay,
                 );
                 assert_eq!(
-                    layer.positions, corners,
+                    layer.soup().positions,
+                    corners,
                     "row {row}, fraction {fraction}: flowed water must keep its height"
                 );
-                assert_eq!(cells_under(&corners).collect::<Vec<_>>(), [[0, row, 5]]);
+                assert_eq!(
+                    cells_under(&layer.quads[0]).collect::<Vec<_>>(),
+                    [[0, row, 5]]
+                );
             }
         }
+    }
+
+    #[test]
+    fn a_lake_surface_below_the_chunk_lands_on_the_sixteenth_below_it() {
+        let material = tesserae_core::testgen::fixtures().water;
+        let mut layer = MeshLayer {
+            quads: vec![Quad::face(
+                POS_Y,
+                0,
+                [0, 16],
+                [0, 16],
+                u32::from(material),
+                Light::DARK,
+            )],
+        };
+        level_the_water(
+            &mut layer,
+            UnderWater {
+                level_m: -0.15,
+                material,
+                dimming: 0,
+                step_m: 0.1,
+            },
+            0.0,
+            1.0,
+            &ChunkOverlay::none(),
+        );
+        // The surface is at -0.1 m, 1.6 sixteenths below the floor.
+        assert_eq!(layer.quads[0].plane(), Some(-2));
     }
 
     #[test]
@@ -3610,20 +3582,16 @@ mod tests {
                 burning: None,
             },
         );
-        let mut layer = MeshLayer::default();
-        push_quad(
-            &mut layer,
-            &[
-                [0.0, 1.0, 5.0],
-                [0.0, 1.0, 6.0],
-                [2.0, 1.0, 6.0],
-                [2.0, 1.0, 5.0],
-            ],
-            &[[0.0, 0.0], [0.0, 1.0], [2.0, 1.0], [2.0, 0.0]],
-            &[0.0, 1.0, 0.0],
-            u32::from(material),
-            &[0; 4],
-        );
+        let mut layer = MeshLayer {
+            quads: vec![Quad::face(
+                POS_Y,
+                16,
+                [80, 96],
+                [0, 32],
+                u32::from(material),
+                Light::DARK,
+            )],
+        };
         level_the_water(
             &mut layer,
             UnderWater {
@@ -3636,6 +3604,7 @@ mod tests {
             1.0,
             &overlay,
         );
+        let layer = layer.soup();
         assert_eq!(layer.positions.len(), 8);
         assert!(
             layer.positions[..4]
@@ -3668,9 +3637,9 @@ mod tests {
 
     fn darkest_sky(mesh: &ChunkMesh) -> u8 {
         mesh.opaque
-            .light
+            .quads
             .iter()
-            .map(|&l| (l >> 4 & 0xF) as u8)
+            .map(|q| q.light.sky())
             .min()
             .unwrap_or(MAX_LIGHT)
     }

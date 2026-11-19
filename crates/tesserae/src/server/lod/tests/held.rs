@@ -167,9 +167,9 @@ fn and_around(h: &Harness, covering: ChunkCoord) -> Vec<ChunkCoord> {
 
 fn quads_of(layer: &tesserae_core::MeshLayer, material: u32) -> usize {
     layer
-        .materials
-        .chunks(4)
-        .filter(|m| m[0] == material)
+        .quads
+        .iter()
+        .filter(|q| q.material == material)
         .count()
 }
 
@@ -532,7 +532,7 @@ fn moving(surface: u8) -> (Voxel, Overlay) {
 /// Each upward water quad of the blended layer as (x0, x1, z0, z1, y), in
 /// coarse Voxels.
 fn tops(mesh: &ChunkMesh) -> Vec<[f32; 5]> {
-    let layer = &mesh.blended;
+    let layer = &mesh.blended.soup();
     layer
         .positions
         .chunks(4)
@@ -599,7 +599,7 @@ fn the_waterline_correction_moves_the_lake_and_never_water_that_moved() {
             );
         }
         // The split kept each cell's texture coordinates on the lattice.
-        let layer = &mesh.blended;
+        let layer = &mesh.blended.soup();
         for ((c, n), uv) in layer
             .positions
             .chunks(4)
@@ -648,7 +648,7 @@ fn every_coarse_face_of_water_that_moved_lies_in_a_level_zero_chunk_holding_it()
         lake.column(30..34, boundary..boundary + 1, (slab, moving(16).1));
 
         let mesh = lake.mesh();
-        let layer = &mesh.blended;
+        let layer = &mesh.blended.soup();
         let mut faces = 0;
         for (corners, normals) in layer.positions.chunks(4).zip(layer.normals.chunks(4)) {
             let n = normals[0];

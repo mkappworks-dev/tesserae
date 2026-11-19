@@ -2,6 +2,7 @@
 
 pub mod chunk_material;
 pub mod fog;
+pub mod quad_buffer;
 pub(crate) mod texture_atlas;
 pub(crate) mod tile_icon;
 mod view_caches;
@@ -29,6 +30,7 @@ pub fn plugin(app: &mut App) {
         MaterialPlugin::<ChunkMaterial>::default(),
         bevy::ui_render::UiMaterialPlugin::<tile_icon::TileIcon>::default(),
         fog::plugin,
+        quad_buffer::plugin,
         view_caches::plugin,
     ));
 }
