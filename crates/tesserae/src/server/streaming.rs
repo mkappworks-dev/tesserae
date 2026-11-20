@@ -56,7 +56,7 @@ use super::priority::{Aim, Order, Ring};
 use super::world_state::{ChunkStore, Snapshot};
 use super::{ContentTables, WorldGenerator};
 use crate::world::{ChunkCoord, WorldSettings};
-use causes::{Counts, Marks, Solve, Writer, Writers};
+use causes::{Counts, Marks, SolveCause, Writer, Writers};
 
 /// A Chunk's finished geometry, for the Client to upload.
 ///
@@ -358,16 +358,15 @@ struct LoadOrder {
     descending: Vec<IVec3>,
 }
 
-/// How wide a band of the light-solve order is, in priority Cells. Measured
-/// with the solves-per-Chunk test: 2.0 solves per Chunk at 2, 2.15 at 1, 2.05
-/// at 4 and with one band for the whole extent.
+/// How wide a band of the light-solve order is, in priority Cells: the width
+/// that measured fewest solves per Chunk.
 const SOLVE_BAND_CELLS: f32 = 2.0;
 
 /// Which loaded Chunks need light solved, which need a mesh, and which the
 /// Client holds one for.
 #[derive(Resource, Default)]
 pub(in crate::server) struct MeshState {
-    unlit: Marks<Solve>,
+    unlit: Marks<SolveCause>,
     dirty: HashSet<ChunkCoord>,
     delivered: HashSet<ChunkCoord>,
     /// Chunks with a light solve running. Removed from `unlit` when the job
@@ -387,7 +386,7 @@ pub(in crate::server) struct MeshState {
     cover_changed: HashSet<ChunkCoord>,
     /// Who last wrote each held Chunk, and the solves dispatched, by cause.
     writers: Writers,
-    solves: Counts<Solve>,
+    solves: Counts<SolveCause>,
     /// Each held Chunk's connectivity, and the Voxels it was worked out from:
     /// the Weak makes an Edit's `Arc::make_mut` move the Chunk, so a stale
     /// entry never matches what the store holds.
@@ -577,7 +576,7 @@ impl MeshState {
 
     #[cfg(test)]
     pub(in crate::server) fn mark_unlit(&mut self, coord: ChunkCoord) {
-        self.unlit.insert(coord, Solve::Neighbour);
+        self.unlit.insert(coord, SolveCause::Neighbour);
     }
 
     #[cfg(test)]
@@ -892,7 +891,7 @@ fn land_generated(
         // could reach. `relight` re-publishes a Chunk whose light moved, and
         // marks its neighbours for a re-solve so the change keeps travelling as
         // far as it really goes.
-        meshes.unlit.insert(coord, Solve::First);
+        meshes.unlit.insert(coord, SolveCause::First);
         meshes.dirty.insert(coord);
     }
 }
@@ -959,7 +958,7 @@ fn land_relight(
             jobs.relight.note_stale();
             *meshes.spoilt.entry(coord).or_default() += 1;
             let writer = meshes.writers.of(coord).unwrap_or_default();
-            meshes.unlit.insert(coord, Solve::spoilt_by(writer));
+            meshes.unlit.insert(coord, SolveCause::spoilt_by(writer));
             continue;
         }
         apply_solve(store, meshes, coord, solved);
@@ -982,7 +981,7 @@ fn apply_solve(store: &mut ChunkStore, meshes: &mut MeshState, coord: ChunkCoord
     // relight queue ever draining.
     for (face, neighbor) in face_neighbors(coord).into_iter().enumerate() {
         if solved.outward[face] && store.contains(neighbor) {
-            meshes.unlit.insert(neighbor, Solve::Neighbour);
+            meshes.unlit.insert(neighbor, SolveCause::Neighbour);
             // Its boundary faces are lit by the plane that just moved.
             meshes.dirty.insert(neighbor);
         }
@@ -1365,28 +1364,54 @@ pub mod stats {
         pub flow: Flow,
     }
 
+    #[derive(Default, Clone, Copy, Debug)]
+    #[cfg_attr(not(feature = "profiling"), allow(dead_code, reason = "profiler only"))]
+    pub struct Stages<T> {
+        pub generate: T,
+        pub relight: T,
+        pub mesh: T,
+    }
+
+    impl<T> Stages<T> {
+        /// Each stage with its name, in the order the profiler writes them.
+        #[cfg(feature = "profiling")]
+        pub fn named(&self) -> [(&'static str, &T); 3] {
+            [
+                ("generate", &self.generate),
+                ("relight", &self.relight),
+                ("mesh", &self.mesh),
+            ]
+        }
+    }
+
     /// Generate, relight and mesh work of one level; relight is level 0 only.
     #[derive(Default, Clone, Copy, Debug)]
     #[cfg_attr(not(feature = "profiling"), allow(dead_code, reason = "profiler only"))]
     pub struct Flow {
-        /// Due and not dispatched: a Chunk of the load extent not held, a lit
-        /// Chunk whose light is out of date, a Chunk of the mesh shell whose mesh
-        /// is.
-        pub waiting: [usize; 3],
-        pub in_flight: [usize; 3],
-        /// Since the World opened: jobs run on a worker, and their worker CPU.
-        pub run: [u64; 3],
-        pub cpu_ms: [f64; 3],
+        pub stages: Stages<StageFlow>,
         /// Since the World opened: mesh jobs whose mesh was empty. Levels above 0 only.
         pub empty_meshes: u64,
-        /// Since the World opened: jobs dispatched per stage by cause, indexed
-        /// by [`causes::Cause::index`]: [`causes::Solve`] for level 0's relight,
-        /// [`causes::Lod`] for generate and mesh above it.
-        pub causes: [[u64; causes::CAUSES]; 3],
         /// Level 1 only, since the World opened: the level-0 Chunks its jobs
         /// generated themselves, those of them inside level 0's load extent, and
         /// the jobs that generated at least one of those.
         pub children: Children,
+    }
+
+    #[derive(Default, Clone, Copy, Debug)]
+    #[cfg_attr(not(feature = "profiling"), allow(dead_code, reason = "profiler only"))]
+    pub struct StageFlow {
+        /// Due and not dispatched: a Chunk of the load extent not held, a lit
+        /// Chunk whose light is out of date, a Chunk of the mesh shell whose mesh
+        /// is.
+        pub waiting: usize,
+        pub in_flight: usize,
+        /// Since the World opened: jobs run on a worker, and their worker CPU.
+        pub run: u64,
+        pub cpu_ms: f64,
+        /// Since the World opened: jobs dispatched by cause, indexed by
+        /// [`causes::Cause::index`]: [`causes::SolveCause`] for level 0's relight,
+        /// [`causes::LodCause`] for generate and mesh above it.
+        pub causes: [u64; causes::CAUSES],
     }
 
     #[derive(Default, Clone, Copy, Debug)]
@@ -1396,14 +1421,6 @@ pub mod stats {
         pub in_load: u64,
         pub jobs_in_load: u64,
     }
-
-    /// Index of each stage in [`Flow`]'s arrays.
-    #[cfg(test)]
-    pub const GENERATE: usize = 0;
-    #[cfg(test)]
-    pub const RELIGHT: usize = 1;
-    #[cfg(test)]
-    pub const MESH: usize = 2;
 
     #[derive(Resource, Default, Clone, Debug)]
     pub struct StreamingStats {
@@ -1423,11 +1440,11 @@ pub mod stats {
         /// once. Earlier than `settled`, which also waits for the margin's
         /// light, and the one that matches what a player sees fill in.
         pub shown: bool,
-        /// Jobs landed, and results that were out of date when they landed, per
-        /// stage: generate, relight, mesh. A stale relight was dropped; a stale
-        /// mesh was delivered anyway and followed by a fresh one.
-        pub landed: [usize; 3],
-        pub stale: [usize; 3],
+        /// Jobs landed, and results that were out of date when they landed. A
+        /// stale relight was dropped; a stale mesh was delivered anyway and
+        /// followed by a fresh one.
+        pub landed: Stages<usize>,
+        pub stale: Stages<usize>,
         /// Indexed by level. Level 0 repeats `loaded` and `meshed`.
         pub levels: Vec<LevelStats>,
         /// Fluid steps' jobs run and their worker CPU since the World opened:
@@ -1459,28 +1476,32 @@ pub mod stats {
     #[derive(Resource)]
     pub(super) struct EntryLog {
         on: bool,
-        was: Option<ChunkCoord>,
+        last_center: Option<ChunkCoord>,
     }
 
     impl Default for EntryLog {
         fn default() -> Self {
             EntryLog {
-                on: std::env::var_os("TESSERAE_PROFILE_LAG").is_some(),
-                was: None,
+                on: crate::cost::measuring_lag(),
+                last_center: None,
             }
         }
     }
 
     /// The Chunks of the mesh extent around `center` that were not in it around
-    /// `was`.
-    pub fn entering(was: Option<ChunkCoord>, center: ChunkCoord, mesh: Extent) -> Vec<ChunkCoord> {
+    /// `last_center`.
+    pub fn entering(
+        last_center: Option<ChunkCoord>,
+        center: ChunkCoord,
+        mesh: Extent,
+    ) -> Vec<ChunkCoord> {
         let reach = mesh.horizontal.max(mesh.vertical);
         mesh.offsets()
             .into_iter()
             .map(|d| offset(center, d))
             .filter(|&c| {
-                was.is_none_or(|was| {
-                    let d = delta(was, c);
+                last_center.is_none_or(|last| {
+                    let d = delta(last, c);
                     // `contains` squares the offset, which overflows a teleport away.
                     d.abs().max_element() > reach || !mesh.contains(d)
                 })
@@ -1551,37 +1572,45 @@ pub mod stats {
         });
         let (generated, relit, meshed) = (jobs.generate.run(), jobs.relight.run(), jobs.mesh.run());
         let level_zero = Flow {
-            waiting: center.map_or([0; 3], |center| {
-                [
-                    order
-                        .offsets
-                        .iter()
-                        .filter(|&&d| {
-                            let c = offset(center, d);
-                            !store.contains(c) && !jobs.generate.contains(c)
-                        })
-                        .count(),
-                    meshes.unlit.len(),
-                    meshes
-                        .dirty
-                        .iter()
-                        .filter(|&&c| mesh.contains(delta(center, c)) && !jobs.mesh.contains(c))
-                        .count(),
-                ]
-            }),
-            in_flight: [
-                jobs.generate.in_flight(),
-                jobs.relight.in_flight(),
-                jobs.mesh.in_flight(),
-            ],
-            run: [generated.0, relit.0, meshed.0],
-            cpu_ms: [generated.1, relit.1, meshed.1],
+            stages: Stages {
+                generate: StageFlow {
+                    waiting: center.map_or(0, |center| {
+                        order
+                            .offsets
+                            .iter()
+                            .filter(|&&d| {
+                                let c = offset(center, d);
+                                !store.contains(c) && !jobs.generate.contains(c)
+                            })
+                            .count()
+                    }),
+                    in_flight: jobs.generate.in_flight(),
+                    run: generated.0,
+                    cpu_ms: generated.1,
+                    causes: [0; causes::CAUSES],
+                },
+                relight: StageFlow {
+                    waiting: center.map_or(0, |_| meshes.unlit.len()),
+                    in_flight: jobs.relight.in_flight(),
+                    run: relit.0,
+                    cpu_ms: relit.1,
+                    causes: meshes.solves.all(),
+                },
+                mesh: StageFlow {
+                    waiting: center.map_or(0, |center| {
+                        meshes
+                            .dirty
+                            .iter()
+                            .filter(|&&c| mesh.contains(delta(center, c)) && !jobs.mesh.contains(c))
+                            .count()
+                    }),
+                    in_flight: jobs.mesh.in_flight(),
+                    run: meshed.0,
+                    cpu_ms: meshed.1,
+                    causes: [0; causes::CAUSES],
+                },
+            },
             empty_meshes: 0,
-            causes: [
-                [0; causes::CAUSES],
-                meshes.solves.all(),
-                [0; causes::CAUSES],
-            ],
             children: Children::default(),
         };
         let mut levels = vec![LevelStats {
@@ -1595,7 +1624,7 @@ pub mod stats {
         let mut entered = Vec::new();
         if let (Some(mut log), Some(eye), Some(center)) = (log.filter(|log| log.on), eye, center) {
             let at = std::time::Instant::now();
-            entered = entering(log.was, center, mesh)
+            entered = entering(log.last_center, center, mesh)
                 .into_iter()
                 .map(|coord| Entered {
                     at,
@@ -1603,7 +1632,7 @@ pub mod stats {
                     distance_m: world.distance_to_chunk(eye, coord),
                 })
                 .collect();
-            log.was = Some(center);
+            log.last_center = Some(center);
         }
         let (lod_generating, lod_meshing) = (lod_jobs.generate.keys(), lod_jobs.mesh.keys());
         let lod_in_flight = |keys: &[(u32, ChunkCoord)], level: u32| {
@@ -1615,35 +1644,37 @@ pub mod stats {
             let [generate_cpu, mesh_cpu] = lod_jobs.times.cpu_ms(level);
             let [generated, meshed] = lod_state.causes(level);
             let flow = Flow {
-                waiting: anchor.map_or([0; 3], |anchor| {
-                    [
-                        rings
-                            .load
-                            .offsets()
-                            .into_iter()
-                            .filter(|&d| {
-                                let c = offset(anchor, d);
-                                !lod_store.contains(level, c)
-                                    && !lod_jobs.generate.contains((level, c))
-                            })
-                            .count(),
-                        0,
-                        lod_state.dirty_within(level, anchor, rings.mesh),
-                    ]
-                }),
-                in_flight: [
-                    lod_in_flight(&lod_generating, level),
-                    0,
-                    lod_in_flight(&lod_meshing, level),
-                ],
-                run: [
-                    lod_jobs.times.generate_cost(level).jobs,
-                    0,
-                    lod_jobs.times.mesh_cost(level).jobs,
-                ],
-                cpu_ms: [generate_cpu, 0.0, mesh_cpu],
+                stages: Stages {
+                    generate: StageFlow {
+                        waiting: anchor.map_or(0, |anchor| {
+                            rings
+                                .load
+                                .offsets()
+                                .into_iter()
+                                .filter(|&d| {
+                                    let c = offset(anchor, d);
+                                    !lod_store.contains(level, c)
+                                        && !lod_jobs.generate.contains((level, c))
+                                })
+                                .count()
+                        }),
+                        in_flight: lod_in_flight(&lod_generating, level),
+                        run: lod_jobs.times.generate_cost(level).jobs,
+                        cpu_ms: generate_cpu,
+                        causes: generated,
+                    },
+                    relight: StageFlow::default(),
+                    mesh: StageFlow {
+                        waiting: anchor.map_or(0, |anchor| {
+                            lod_state.dirty_within(level, anchor, rings.mesh)
+                        }),
+                        in_flight: lod_in_flight(&lod_meshing, level),
+                        run: lod_jobs.times.mesh_cost(level).jobs,
+                        cpu_ms: mesh_cpu,
+                        causes: meshed,
+                    },
+                },
                 empty_meshes: lod_jobs.times.empty_meshes(level),
-                causes: [generated, [0; causes::CAUSES], meshed],
                 children: if level == 1 {
                     lod_state.children()
                 } else {
@@ -1668,16 +1699,16 @@ pub mod stats {
             anchor: center.unwrap_or_default(),
             settled,
             shown,
-            landed: [
-                jobs.generate.landed_total(),
-                jobs.relight.landed_total(),
-                jobs.mesh.landed_total(),
-            ],
-            stale: [
-                jobs.generate.stale(),
-                jobs.relight.stale(),
-                jobs.mesh.stale(),
-            ],
+            landed: Stages {
+                generate: jobs.generate.landed_total(),
+                relight: jobs.relight.landed_total(),
+                mesh: jobs.mesh.landed_total(),
+            },
+            stale: Stages {
+                generate: jobs.generate.stale(),
+                relight: jobs.relight.stale(),
+                mesh: jobs.mesh.stale(),
+            },
             levels,
             fluid_run: fluids.map_or((0, 0.0), |f| f.jobs_run()),
             mesh_reach: meshes.reach.on.then(|| meshes.reach.totals()),
@@ -1695,7 +1726,7 @@ pub(in crate::server) mod tests {
     use bevy::ecs::system::RunSystemOnce;
     use bevy::tasks::{AsyncComputeTaskPool, TaskPoolBuilder};
     #[cfg(any(feature = "dev", feature = "profiling"))]
-    use causes::{Solve, Writer};
+    use causes::{SolveCause, Writer};
     use tesserae_core::light::{Light, MAX_LIGHT, light_chunk};
     use tesserae_core::{Chunk, ChunkLight, LitChunk, mesh_chunk};
     use tesserae_core::{Voxel, Worldgen, WorldgenParams};
@@ -3222,17 +3253,17 @@ pub(in crate::server) mod tests {
         let mut h = Harness::new(small(), UNLIMITED);
         h.settle();
         let flow = flow(&mut h, 0);
-        let solves = flow.causes[stats::RELIGHT];
+        let solves = flow.stages.relight.causes;
         assert_eq!(
-            solves[Solve::First as usize],
+            solves[SolveCause::First as usize],
             h.store().coords().count() as u64
         );
-        assert!(solves[Solve::Neighbour as usize] > 0);
+        assert!(solves[SolveCause::Neighbour as usize] > 0);
         assert_eq!(
-            solves[Solve::Fluid as usize] + solves[Solve::Edit as usize],
+            solves[SolveCause::Fluid as usize] + solves[SolveCause::Edit as usize],
             0
         );
-        assert_eq!(solves.iter().sum::<u64>(), flow.run[stats::RELIGHT]);
+        assert_eq!(solves.iter().sum::<u64>(), flow.stages.relight.run);
     }
 
     /// A solve spoilt by a write is solved again, counted to its writer.
@@ -3241,7 +3272,7 @@ pub(in crate::server) mod tests {
         let mut h = Harness::new(small(), UNLIMITED);
         h.settle();
         let (at, next) = lantern_on_a_boundary(&mut h);
-        let before = flow(&mut h, 0).causes[stats::RELIGHT];
+        let before = flow(&mut h, 0).stages.relight.causes;
         h.app.world_mut().resource_mut::<Jobs>().relight.hold.hold();
         h.app
             .world_mut()
@@ -3269,7 +3300,7 @@ pub(in crate::server) mod tests {
         h.app.world().resource::<Jobs>().relight.hold.release();
         h.settle();
         assert_eq!(h.jobs().relight.stale(), 1, "the solve was not spoilt");
-        let after = flow(&mut h, 0).causes[stats::RELIGHT];
+        let after = flow(&mut h, 0).stages.relight.causes;
         std::array::from_fn(|i| after[i] - before[i])
     }
 
@@ -3277,11 +3308,11 @@ pub(in crate::server) mod tests {
     #[test]
     fn a_solve_spoilt_by_an_edit_or_a_fluid_step_is_counted_to_it() {
         let by_edit = spoilt_solve(Writer::Edit);
-        assert_eq!(by_edit[Solve::Edit as usize], 1, "{by_edit:?}");
-        assert_eq!(by_edit[Solve::Fluid as usize], 0, "{by_edit:?}");
+        assert_eq!(by_edit[SolveCause::Edit as usize], 1, "{by_edit:?}");
+        assert_eq!(by_edit[SolveCause::Fluid as usize], 0, "{by_edit:?}");
         let by_fluid = spoilt_solve(Writer::Fluid);
-        assert_eq!(by_fluid[Solve::Fluid as usize], 1, "{by_fluid:?}");
-        assert_eq!(by_fluid[Solve::Edit as usize], 0, "{by_fluid:?}");
+        assert_eq!(by_fluid[SolveCause::Fluid as usize], 1, "{by_fluid:?}");
+        assert_eq!(by_fluid[SolveCause::Edit as usize], 0, "{by_fluid:?}");
     }
 
     #[test]

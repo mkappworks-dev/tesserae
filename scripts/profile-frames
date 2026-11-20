@@ -65,19 +65,19 @@ def nearest(values):
 STAGES = ['generate', 'relight', 'mesh']
 
 
-# The flow CSV's counts of work by cause, as `Flow::causes` names them.
-CAUSES = {
-    'generate': ['first', 'fluid', 'edit', 'reload', 'finer'],
-    'relight': ['first', 'neighbour', 'fluid', 'edit'],
-    'mesh': ['first', 'fluid', 'edit', 'reload', 'finer', 'moved'],
-}
+# A stage's flow CSV columns that are not a count of its work by cause.
+STAGE_COUNTERS = ['waiting', 'in_flight', 'run', 'cpu_ms', 'empty']
+# The width of the bands entries are grouped in by distance from the Eye.
+FILL_BAND_M = 32
 
 
-def counted(level):
-    """The counters `level` keeps: relight causes at level 0, generate and mesh
-    causes above it, and at level 1 the level-0 Chunks its jobs generated."""
+def counted(level, header):
+    """The counters of `header` that `level` keeps: relight causes at level 0,
+    generate and mesh causes above it, and at level 1 the level-0 Chunks its
+    jobs generated."""
     stages = ['relight'] if level == 0 else ['generate', 'mesh']
-    names = [f'{stage}_{cause}' for stage in stages for cause in CAUSES[stage]]
+    names = [name for name in header for stage in stages
+             if name.startswith(f'{stage}_') and name[len(stage) + 1:] not in STAGE_COUNTERS]
     return names + (['children_generated', 'children_in_load', 'jobs_in_load'] if level == 1 else [])
 
 
@@ -186,10 +186,10 @@ def streaming(path, rows):
                    if start <= float(r['t_s']) <= end]
         bands = {}
         for r in entries:
-            band = int(float(r['distance_m']) // 32) * 32
+            band = int(float(r['distance_m']) // FILL_BAND_M) * FILL_BAND_M
             bands.setdefault(band, []).append(r['drawn_after_s'])
         out['fill'] = {
-            f'{band}-{band + 32}m': dict(
+            f'{band}-{band + FILL_BAND_M}m': dict(
                 entries=len(after), undrawn=sum(not a for a in after),
                 drawn_after_s=distribution([float(a) for a in after if a]))
             for band, after in sorted(bands.items())}
@@ -245,7 +245,7 @@ def streaming(path, rows):
             chunks = work[level]['generate_run']
             work[level]['counts'] = {
                 name: dict(count=n, per_s=n / seconds, per_chunk=n / chunks if chunks else None)
-                for name in counted(level) if name in b
+                for name in counted(level, b) if name in b
                 for n in [int(b[name]) - int(a[name])]}
             if level == 0:
                 work[level]['fluid_worker_ms_per_s'] = (

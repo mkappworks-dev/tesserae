@@ -26,9 +26,7 @@ pub struct Lag {
 }
 
 pub(super) fn plugin(app: &mut App) {
-    if std::env::var_os("TESSERAE_PROFILE_CSV").is_none()
-        || std::env::var_os("TESSERAE_PROFILE_LAG").is_none()
-    {
+    if std::env::var_os("TESSERAE_PROFILE_CSV").is_none() || !crate::cost::measuring_lag() {
         return;
     }
     app.init_resource::<Lag>().add_session_systems(

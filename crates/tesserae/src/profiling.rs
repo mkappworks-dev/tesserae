@@ -19,8 +19,8 @@ use crate::server::{
     ProfileFixtureStatus, SimulationProfile,
     streaming::{
         StreamingSettings,
-        causes::{Lod, Solve},
-        stats::{Entered, Flow, StreamingStats},
+        causes::{Cause, LodCause, SolveCause},
+        stats::{Entered, Flow, Stages, StreamingStats},
     },
 };
 use crate::world::WorldSettings;
@@ -93,12 +93,18 @@ struct Row {
     missing_m: Option<f32>,
 }
 
-/// Each stage's causes, in [`Flow::causes`] order. Generation is never for a move, the last.
-const CAUSE_COLUMNS: [(&str, &[&str]); 3] = [
-    ("generate", Lod::NAMES.split_last().unwrap().1),
-    ("relight", &Solve::NAMES),
-    ("mesh", &Lod::NAMES),
-];
+/// Each stage's cause columns: the index into its counts, and the column suffix.
+fn cause_columns() -> Stages<Vec<(usize, &'static str)>> {
+    let named = |names: &[&'static str]| names.iter().copied().enumerate().collect::<Vec<_>>();
+    let mut generate = named(&LodCause::NAMES);
+    // Generation is never for a move.
+    generate.retain(|&(i, _)| i != LodCause::Moved.index());
+    Stages {
+        generate,
+        relight: named(&SolveCause::NAMES),
+        mesh: named(&LodCause::NAMES),
+    }
+}
 
 /// Camera orders recorded: the Player's and one per coarse level.
 const CAMERAS: usize = 8;
@@ -184,7 +190,7 @@ pub fn plugin(app: &mut App) {
         rows: Vec::with_capacity(MAX_FRAMES),
         pending: None,
         flow: Vec::new(),
-        lag: std::env::var_os("TESSERAE_PROFILE_LAG").is_some(),
+        lag: crate::cost::measuring_lag(),
         entered: Vec::new(),
         drawn: Vec::new(),
         fill_limited: false,
@@ -534,15 +540,16 @@ fn save(
             .open(profile.path.with_extension("flow.csv"))?,
     );
     write!(flow, "frame_id,t_s,level,held,meshed")?;
-    for stage in ["generate", "relight", "mesh"] {
+    let columns = cause_columns();
+    for (stage, _) in columns.named() {
         write!(
             flow,
             ",{stage}_waiting,{stage}_in_flight,{stage}_run,{stage}_cpu_ms"
         )?;
     }
     write!(flow, ",mesh_empty,fluid_run,fluid_cpu_ms")?;
-    for (stage, names) in CAUSE_COLUMNS {
-        for name in names {
+    for (stage, names) in columns.named() {
+        for (_, name) in names {
             write!(flow, ",{stage}_{name}")?;
         }
     }
@@ -557,11 +564,11 @@ fn save(
             "{},{},{},{},{}",
             r.frame_id, r.t_s, r.level, r.held, r.meshed
         )?;
-        for s in 0..3 {
+        for (_, s) in r.flow.stages.named() {
             write!(
                 flow,
                 ",{},{},{},{}",
-                r.flow.waiting[s], r.flow.in_flight[s], r.flow.run[s], r.flow.cpu_ms[s]
+                s.waiting, s.in_flight, s.run, s.cpu_ms
             )?;
         }
         write!(
@@ -569,9 +576,9 @@ fn save(
             ",{},{},{}",
             r.flow.empty_meshes, r.fluid_run.0, r.fluid_run.1
         )?;
-        for (stage, (_, names)) in CAUSE_COLUMNS.iter().enumerate() {
-            for count in &r.flow.causes[stage][..names.len()] {
-                write!(flow, ",{count}")?;
+        for ((_, s), (_, names)) in r.flow.stages.named().into_iter().zip(columns.named()) {
+            for &(i, _) in names {
+                write!(flow, ",{}", s.causes[i])?;
             }
         }
         let c = r.flow.children;

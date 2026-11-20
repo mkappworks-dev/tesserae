@@ -719,9 +719,7 @@ impl Base {
 /// overhang reach read again.
 #[derive(Clone, Copy)]
 pub(crate) struct Column {
-    /// [`Terrain::height_m`].
     pub(crate) height_m: f32,
-    /// [`Terrain::inland_water_m`].
     pub(crate) inland_m: Option<f32>,
     cut_m: f32,
     warped: (f32, f32),

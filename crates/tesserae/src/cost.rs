@@ -125,6 +125,11 @@ pub fn collecting() -> bool {
     })
 }
 
+/// `TESSERAE_PROFILE_LAG`: how long Chunks entering the mesh extent take to be drawn is recorded.
+pub fn measuring_lag() -> bool {
+    std::env::var_os("TESSERAE_PROFILE_LAG").is_some()
+}
+
 /// This thread's CPU seconds; excludes waits. `None` where unsupported.
 #[cfg(all(unix, feature = "profiling"))]
 pub fn thread_cpu() -> Option<f64> {

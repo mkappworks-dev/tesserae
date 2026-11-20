@@ -196,9 +196,9 @@ class Workers(unittest.TestCase):
 
     def test_each_level_reports_its_work_by_cause_per_second_and_per_chunk(self):
         counters = ['relight_neighbour', 'generate_fluid', 'mesh_moved', 'children_in_load']
-        header = ('frame_id,t_s,level,generate_waiting,generate_run,generate_cpu_ms,'
-                  'relight_waiting,relight_run,relight_cpu_ms,mesh_waiting,mesh_run,mesh_cpu_ms,'
-                  'fluid_run,fluid_cpu_ms,' + ','.join(counters) + '\n')
+        header = ('frame_id,t_s,level,generate_waiting,generate_in_flight,generate_run,'
+                  'generate_cpu_ms,relight_waiting,relight_run,relight_cpu_ms,mesh_waiting,mesh_run,'
+                  'mesh_cpu_ms,mesh_empty,fluid_run,fluid_cpu_ms,' + ','.join(counters) + '\n')
         # t, level, Chunks generated, then each counter, since the World opened.
         flow = [(22.0, 0, 10, (5, 0, 0, 0)), (22.0, 1, 4, (0, 1, 2, 3)),
                 (24.0, 0, 30, (45, 0, 0, 0)), (24.0, 1, 12, (0, 5, 6, 19))]
@@ -212,7 +212,7 @@ class Workers(unittest.TestCase):
             (run / 'frames.render.csv').write_text(
                 'frame_id,render_schedule_wall_ms,render_thread_cpu_ms\n')
             (run / 'frames.flow.csv').write_text(header + ''.join(
-                f'0,{t},{level},0,{chunks},0,0,0,0,0,0,0,0,0,' + ','.join(map(str, counts)) + '\n'
+                f'0,{t},{level},0,0,{chunks},0,0,0,0,0,0,0,0,0,0,' + ','.join(map(str, counts)) + '\n'
                 for t, level, chunks, counts in flow))
             PROFILE['analyze'](root)
             workers = json.loads((root / 'streaming.json').read_text())['flight-1-on']['workers']

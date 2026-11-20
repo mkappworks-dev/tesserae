@@ -1008,7 +1008,7 @@ type ColumnGrounds = [GroundParams; CHUNK_SIZE * CHUNK_SIZE];
 
 /// What the Chunk being generated holds, which the seal and `filled` read before asking.
 #[derive(Clone, Copy)]
-struct HeldCell<'a> {
+struct HeldColumns<'a> {
     columns: &'a ColumnCache,
     cell: [i32; 2],
     /// What the overhang density keeps off, every footprint reaching a column past the Chunk.
@@ -1039,7 +1039,7 @@ const NO_BIOME: u8 = u8::MAX - 1;
 /// A NaN: a seal is a Voxel's top or minus infinity.
 const UNSEALED: u32 = 0x7fc0_5ea1;
 
-impl HeldCell<'_> {
+impl HeldColumns<'_> {
     /// Column `[gx, gz]` in the Chunk's own indices, if it is in the Chunk or a column past it.
     fn local(&self, [gx, gz]: [i32; 2]) -> Option<[i32; 2]> {
         let size = CHUNK_SIZE as i32;
@@ -1424,7 +1424,7 @@ impl Worldgen {
     /// The contained surface and water level of the column at `at`, if it is on the Voxel lattice
     /// and `near`, its border included, or its own Cell's cache holds it. Never builds a cache:
     /// a Cell's is over a thousand columns, and its asker reads a handful.
-    fn held_column_m(&self, near: Option<HeldCell>, at: [f32; 2]) -> Option<(f32, Option<f32>)> {
+    fn held_column_m(&self, near: Option<HeldColumns>, at: [f32; 2]) -> Option<(f32, Option<f32>)> {
         let [gx, gz] = self.on_lattice(at)?;
         let size = CHUNK_SIZE as i32;
         if let Some(h) = near
@@ -1439,7 +1439,7 @@ impl Worldgen {
     }
 
     /// The level of water standing above the contained surface at `at`, if any.
-    fn wet_m(&self, near: Option<HeldCell>, at @ [x_m, z_m]: [f32; 2]) -> Option<f32> {
+    fn wet_m(&self, near: Option<HeldColumns>, at @ [x_m, z_m]: [f32; 2]) -> Option<f32> {
         match self.held_column_m(near, at) {
             Some((surface_m, level_m)) => level_m.filter(|&l| l > surface_m),
             None => self
@@ -1448,14 +1448,14 @@ impl Worldgen {
         }
     }
 
-    fn surface_m(&self, near: Option<HeldCell>, at @ [x_m, z_m]: [f32; 2]) -> f32 {
+    fn surface_m(&self, near: Option<HeldColumns>, at @ [x_m, z_m]: [f32; 2]) -> f32 {
         self.held_column_m(near, at).map_or_else(
             || self.surface_height_m(x_m, z_m),
             |(surface_m, _)| surface_m,
         )
     }
 
-    fn level_m(&self, near: Option<HeldCell>, at @ [x_m, z_m]: [f32; 2]) -> Option<f32> {
+    fn level_m(&self, near: Option<HeldColumns>, at @ [x_m, z_m]: [f32; 2]) -> Option<f32> {
         self.held_column_m(near, at)
             .map_or_else(|| self.water_level_m(x_m, z_m), |(_, level_m)| level_m)
     }
@@ -2100,7 +2100,7 @@ impl Worldgen {
             Vec::new()
         };
         let built: &[Footprint] = if floor_m <= top_m { &kept_off } else { &[] };
-        let held = HeldCell {
+        let held = HeldColumns {
             columns: &cache,
             cell: [cx, cz],
             kept_off: &kept_off,
@@ -2677,7 +2677,7 @@ impl Worldgen {
         &self,
         chunk: &mut Chunk,
         surface_m: &[f32; SURFACE_W * SURFACE_W],
-        near: Option<HeldCell>,
+        near: Option<HeldColumns>,
         coord: [i32; 3],
         floor_m: f32,
         columns: Option<&ColumnGrounds>,
@@ -2737,7 +2737,7 @@ impl Worldgen {
         scatter: &SurfaceScatter,
         placed: &[fields::Placed],
         kept: &[Footprint],
-        held: HeldCell,
+        held: HeldColumns,
         coord: [i32; 3],
     ) {
         let Some(world) = self.params.ground else {
@@ -2821,7 +2821,7 @@ impl Worldgen {
 
     /// Rock below this height stays solid: a cave opening onto water would let
     /// the fluid simulation pour it in, a hole that keeps changing and being saved.
-    fn sealed_below_m(&self, x_m: f32, z_m: f32, ground_m: f32, near: Option<HeldCell>) -> f32 {
+    fn sealed_below_m(&self, x_m: f32, z_m: f32, ground_m: f32, near: Option<HeldColumns>) -> f32 {
         /// Higher than any bank this steep is too far from the water to open onto it.
         const CLEAR_M: f32 = 64.0;
         const REACH_M: f32 = 4.0;
@@ -2862,7 +2862,7 @@ impl Worldgen {
     /// Whether a tunnel or a shaft opens the ground cell at global Voxel `at`, the column's top or
     /// above: what the Chunk holding it decides, so any Chunk can answer for it. A cavern stays
     /// [`CAVERN_MIN_DEPTH_M`] under the ground, so it never reaches the cells this is asked about.
-    fn carved(&self, at: [i32; 3], near: Option<HeldCell>) -> bool {
+    fn carved(&self, at: [i32; 3], near: Option<HeldColumns>) -> bool {
         let [x_m, y_m, z_m] = at.map(|g| self.global_m(g));
         let tunnel = || {
             self.caves
@@ -3503,7 +3503,7 @@ impl Worldgen {
     fn still_solid(
         &self,
         chunk: &Chunk,
-        near: Option<HeldCell>,
+        near: Option<HeldColumns>,
         coord: [i32; 3],
         at: [i32; 3],
     ) -> bool {
@@ -3519,7 +3519,7 @@ impl Worldgen {
 
     /// Whether the cell at global Voxel `at`, the column's top or near it, is ground once caves
     /// are carved, as the Chunk holding it decides.
-    fn ground_at(&self, at: [i32; 3], near: Option<HeldCell>) -> bool {
+    fn ground_at(&self, at: [i32; 3], near: Option<HeldColumns>) -> bool {
         self.filled(at, near) && !self.carved(at, near)
     }
 
@@ -3528,7 +3528,7 @@ impl Worldgen {
     /// reads the column and its neighbours from `near` and the caches already held, and asks the
     /// rest one by one rather than build their Chunk's whole column cache, since a neighbour's
     /// Chunk may not be made yet.
-    fn filled(&self, [gx, y, gz]: [i32; 3], near: Option<HeldCell>) -> bool {
+    fn filled(&self, [gx, y, gz]: [i32; 3], near: Option<HeldColumns>) -> bool {
         let at_m = |gx, gz| [gx, gz].map(|g| self.global_m(g));
         let [x_m, z_m] = at_m(gx, gz);
         let y_m = self.global_m(y);
@@ -3827,7 +3827,7 @@ mod tests {
                 held.column_cache(cx + 1, cz);
                 let cache = held.column_cache(cx, cz);
                 let kept_off = held.chunk_kept_off([cx, cz], &held.chunk_claims([cx, cz]));
-                let near = Some(HeldCell {
+                let near = Some(HeldColumns {
                     columns: &cache,
                     cell: [cx, cz],
                     kept_off: &kept_off,

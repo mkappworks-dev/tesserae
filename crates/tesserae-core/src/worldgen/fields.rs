@@ -94,8 +94,14 @@ const LEVEL_M: f32 = 1.0;
 /// Columns are asked this far apart when a field is tested for ground, Biome and caves.
 const SAMPLE_M: f32 = 1.0;
 
-/// A crop-field lattice cell: its Biome's index, the entry among the Biome's fields, the cell.
-pub(super) type FieldKey = (u8, u8, [i32; 2]);
+/// A crop-field lattice cell of one of a Biome's fields.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub(super) struct FieldKey {
+    biome: u8,
+    /// Among the Biome's fields.
+    entry: u8,
+    cell: [i32; 2],
+}
 
 /// A planted field's place, in global Voxel indices: a grid of plots set apart by lanes one Voxel
 /// wide, which also ring it.
@@ -276,7 +282,11 @@ impl Worldgen {
         field: &CropField,
         cell: [i32; 2],
     ) -> Option<Placed> {
-        let key = (biome.index() as u8, entry as u8, cell);
+        let key = FieldKey {
+            biome: biome.index() as u8,
+            entry: entry as u8,
+            cell,
+        };
         *self.fields.get_or_build(key, || {
             let held = self.field_held(biome, entry, cell)?;
             (0..ATTEMPTS)
