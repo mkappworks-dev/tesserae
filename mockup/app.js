@@ -517,8 +517,6 @@ const OPENING_STAGES = [
     counted: true,
   },
 ];
-/* As the Client draws it: a full-screen panel that hides the World until the ground around the
-   Player is drawn, its lines centred, no card. The preview row beside it is the mockup's own. */
 /* The loader reports a stage, not how far through it is, so the bar eases toward the next stage
    and stops short of it. The last stage is counted: the Client knows how many Cells of the ring
    it holds a level-0 mesh for, so the count leads once it passes the sweep, and only the last
@@ -547,7 +545,7 @@ function opening() {
           `<button class="${pick === v ? "active" : ""}" data-action="opening-stage" data-value="${v}" aria-pressed="${pick === v}">${label}</button>`,
       )
       .join("");
-  return `<div class="opening-screen" id="opening-screen"><section class="opening-panel" id="opening-panel"><h2>Opening ${esc(w?.name || "your World")}…</h2><small>Loading the World.</small><p class="opening-stage" id="opening-stage" aria-live="polite">${OPENING_STAGES[0].label}</p><div class="opening-track" role="progressbar" aria-label="Loading" aria-valuemin="0" aria-valuemax="100"><div class="opening-fill" id="opening-fill"></div></div></section></div><aside class="opening-example opening-preview"><p class="eyebrow">PREVIEW STAGE</p><div class="layout-method">${seg}</div><small id="opening-note"></small></aside>`;
+  return `<div class="pause-screen"><section class="pause-panel" id="opening-panel"><h2>Opening ${esc(w?.name || "your World")}…</h2><small>Loading the World.</small><p class="opening-stage" id="opening-stage" aria-live="polite">${OPENING_STAGES[0].label}</p><div class="opening-track" role="progressbar" aria-label="Loading" aria-valuemin="0" aria-valuemax="100"><div class="opening-fill" id="opening-fill"></div></div></section><aside class="opening-example"><p class="eyebrow">PREVIEW STAGE</p><div class="layout-method">${seg}</div><small id="opening-note"></small></aside></div>`;
 }
 let openingFrame = 0;
 function openingMount() {
@@ -582,7 +580,7 @@ function openingMount() {
     panel
       .querySelector(".opening-track")
       .setAttribute("aria-valuenow", Math.round(bar * 100));
-    $("#opening-screen").classList.toggle("opening-hidden", done);
+    panel.classList.toggle("opening-hidden", done);
     $("#opening-note").textContent = done
       ? "Every Cell of the ring around you has its full-detail mesh, so the screen hides on a World that is already whole. The 15 s timeout still hides it for a World saved without a Game."
       : stage.counted
