@@ -9,18 +9,18 @@ Spec: [Shadows and culling](../spec.md).
 
 wgpu validates every indirect draw in release on macOS, because Bevy drops
 `VALIDATION_INDIRECT_CALL` only when the backends lack DX12 and its default
-backends include DX12 everywhere. Each indirect render pass pays a compute
-pass, a staging buffer and a copy.
+backends include DX12 everywhere. Each indirect render pass pays a compute pass,
+a staging buffer and a copy.
 
 - On macOS, the app's `WgpuSettings` backends are
   `Backends::from_env().unwrap_or(Backends::METAL)`, so `WGPU_BACKEND` still
   overrides and Bevy drops the flag in release by its own rule. Debug builds
   keep validation.
-- One line of why where it is set. A test, if the settings are reachable
-  without a GPU, that the default backends on macOS lack DX12.
+- One line of why where it is set. A test, if the settings are reachable without
+  a GPU, that the default backends on macOS lack DX12.
 
 ## Acceptance criteria
 
-- [ ] Gated by 01's method; numbers in Comments.
+- [ ] Gated by 01's method, GPU frame as its target; numbers in Comments.
 - [ ] Pixel-identical captures against the commit before it.
 - [ ] The game launches and draws, release and debug.

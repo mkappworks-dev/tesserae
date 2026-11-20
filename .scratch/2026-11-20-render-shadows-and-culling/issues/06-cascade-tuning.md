@@ -8,9 +8,8 @@ Spec: [Shadows and culling](../spec.md).
 ## What to build
 
 Bevy's defaults: four cascades with far bounds 10, 25, 61 and 150 m, overlap
-0.2, a 2048 map, Gaussian filtering. Each cascade is a render pass, a cull
-and two parameter builds; the overlap band samples two cascades in the main
-pass.
+0.2, a 2048 map, Gaussian filtering. Each cascade is a render pass, a cull and
+two parameter builds; the overlap band samples two cascades in the main pass.
 
 - Measure a few candidates by the GPU series alone: three cascades, a 1536 or
   1024 map, a shorter far bound, overlap 0. Choose against today's 192 m view
