@@ -8,7 +8,7 @@ Spec: [Generation cost](../spec.md).
 
 ## What to build
 
-First the gate: the share of level-0 generation in Chunks whose floor is above every column's top, from the sampled flight after 05. At 10% or less, closed `wontfix` with the figure. Otherwise such a Chunk, above every column's top within a tree's reach plus the overhang, the tallest Plant and the Water level, with no Structure reaching it, returns air without the column pass, the Plant pass or `fields_near`.
+First the gate: the share of level-0 generation in Chunks whose floor is above every column's top, from the sampled flight after 05. At 10% or less, closed `wontfix` with the figure. Otherwise a Chunk whose floor is above `surface_top_m` over its footprint widened by a tree's reach, with no Structure claim near it reaching its floor, returns air without the column pass, the Plant pass or `fields_near`. Neighbour Cells' column caches are not built for it.
 
 ## Acceptance criteria
 

@@ -26,7 +26,7 @@ In a sampled 12 m/s flight, level 0's generation is mostly not terrain, and the 
 - The cavern field, the seal of rock beside water, the smoothing's neighbour test, the Structure claims and the ores each recompute per Voxel or per Chunk what a neighbour Voxel or Chunk already asked.
 - `Drainage::wet` scans 64 lattice nodes per point for stream segments, though most points have none in reach.
 - A sky Chunk between a column's top and the band's top still runs the whole pass.
-- A lone Chunk from a cold generator costs about 4.5 times what it did before the column cache (river @ 0.5 m, 4.9 ms against 1.1 ms once the bench stops counting a drainage region solve), almost all of it building whole column caches for the neighbouring Cells a tree's reach and crowding touch.
+- A lone Chunk from a cold generator builds whole column caches for every neighbouring Cell a tree's reach and crowding touch: river @ 0.5 m takes 4.9 ms once the bench stops counting a drainage region solve, three quarters of it in those caches, against the 1.1 ms the last spec's ticket 01 recorded under its narrower warm-up. Ticket 01 times both builds under the same warm-up before any ratio is claimed.
 
 ## Solution
 
@@ -56,11 +56,11 @@ Each cost is answered once, and every Chunk and LOD level that asks again reads 
 
 ## Implementation Decisions
 
-**Order.** The bench and baseline, then the cheap verified wins (one `wet` a column, the dense cave Biomes), then the crop-field cache, then the gated tickets by their measured share. Interleaved on the branch with the sister spec as: this spec's 01, 02 and 03, its 02 and 03, this spec's 04, then the rest of both by measured share. Each ticket is one commit.
+**Order.** The bench and baseline, then the cheap verified wins (one `wet` a column, the dense cave Biomes), then the crop-field cache, then the gated tickets by their measured share. Interleaved on the branch with the sister spec as: this spec's 01 to 03, the sister's 01 to 03, this spec's 04, then the rest of both by measured share. Each ticket is one commit.
 
 **Identity.** Every commit leaves version 3 bit-identical: the committed version 3 digests pass unchanged, `GENERATOR_VERSION` does not move, and the uncommitted fingerprint (`crates/tesserae-core/tests/v3_fingerprint.rs`, in `.git/info/exclude`) matches its baseline. The fingerprint gains a grid over the crop-field World, its baseline taken at the bench commit.
 
-**One drainage ask a column.** `Drainage::wet`'s Water level does not read the ground height, so one call at the base height gives both the cut and the level of a raw column. `build_columns` and `contained_at_m` make that one call. The column's Biome is decided from the fields, base height and cut the raw pass computed, not by `site` asking them again; the sea-floor rock and overhang reach read them too. The four-wide path stays bit for bit the scalar one, and a test proves it over many seeds and points.
+**One drainage ask a column.** `Drainage::wet`'s Water level does not read the ground height, so one call at the base height gives both the cut and the level of a raw column. `build_columns` and `contained_at_m` make that one call. Each column's Biome is decided while its cache is built, whenever the generator has Biomes, from the fields, base height and cut the raw pass computed, rather than lazily by `site` asking them again; the sea-floor rock and overhang reach read them too. The cache's byte per column already holds the Biome, so no memory is added; in Terra every Cell with a Chunk on the ground asks all its columns' Biomes for its grounds and Plants anyway, so only a Cell nothing asks pays the climate noise for nothing. The four-wide path stays bit for bit the scalar one, and a test proves it over many seeds and points.
 
 **The cave Biomes.** A Chunk keeps its cave Biome cells in a dense array indexed from its origin cell, sized by how many cells a Chunk spans at its Voxel size; where a Voxel is at least a cave Biome cell wide, nothing is kept, since no two Voxels share a cell.
 
@@ -70,7 +70,7 @@ Each cost is answered once, and every Chunk and LOD level that asks again reads 
 
 **Drainage, gated.** Runs if `Drainage::wet` is still more than 15% of level-0 generation after the cheaper wins. A region gains, per lattice cell, the stream segments its stencil reaches, in the order the scan meets them; `wet` walks that list and skips the meander noise where it is empty. The maxima over the same segments in the same order keep the result bit for bit.
 
-**The sky early-out, gated.** Runs if Chunks above their columns' ground are more than 10% of level-0 generation. A Chunk whose floor is above every column's top within a tree's reach, plus the overhang, the tallest Plant and the Water level, with no Structure reaching it, holds only air and returns air without the column pass, the Plant pass or `fields_near`. A sweep test proves every Chunk it takes is air in the full pass.
+**The sky early-out, gated.** Runs if Chunks above their columns' ground are more than 10% of level-0 generation. A Chunk whose floor is above `surface_top_m` over its footprint widened by a tree's reach (the sampled, cached bound relight already trusts for open sky, which holds the overhang, the Water level and the room above the ground), with no Structure claim near it reaching its floor, holds only air and returns air without the column pass, the Plant pass or `fields_near`. Taking each neighbour Cell's column tops instead would build their caches, the lone Chunk's cost. `structures_may_reach` checks only the World's band, so the claims near the Chunk are asked. A sweep test proves every Chunk it takes is air in the full pass.
 
 **The lone Chunk, gated.** Runs if, in the flight, building caches for Cells no level-0 Chunk stands over is more than 10% of level-0 generation. A neighbour Cell not yet held then has its Plants decided only on the strip within a tree's reach and crowding of the Chunk, from Biomes asked point by point, as `surface_height_m` already answers an unheld Cell; a held Cell keeps the cached path. Otherwise closed as `wontfix`: in a flight, a spawn and a teleport, the next Chunks of the same ring ask for those Cells within milliseconds, so the work is moved, not added.
 
@@ -89,7 +89,7 @@ Each cost is answered once, and every Chunk and LOD level that asks again reads 
 - Any change to what version 3 generates, any new Generator version, or moving `GENERATOR_VERSION`.
 - How soon generated terrain is drawn: streaming, light, meshing and the loading screen are the sister spec's.
 - LOD level 2 drawn from direct columns as level 3 is, which would drop caves from it: a visual change, kept as an option should the sister spec's 64 m/s gate fail on generation.
-- Changes the survey found that would move Voxels: a per-column cave Biome lattice, a five-point seal, one hash shared by all ores, the Biome asked without the river cut. Each needs a new Generator version.
+- Changes that would move Voxels: a per-column cave Biome lattice, a five-point seal, one hash shared by all ores, the Biome asked without the river cut. Each needs a new Generator version.
 - New tuning, Declaration fields or save fields.
 
 ## Further Notes

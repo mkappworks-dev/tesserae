@@ -8,7 +8,7 @@ Spec: [Terrain fill latency](../spec.md).
 
 ## What to build
 
-First a count: level-1 regenerations and meshes caused by fluid landings per second in `flight`. At 10% of level-1 jobs or less, closed `wontfix` with the figure. Otherwise a level-1 Chunk whose eight children level 0 draws is not regenerated or meshed for a fluid change until level 0 stops drawing one of them; ADR-0019's rule covers the handover.
+First a count: level-1 regenerations and meshes per second in `flight`, by cause (a fluid landing, a neighbour arriving, a first generation). If fluid landings are 10% of level-1 jobs or less, closed `wontfix` with the figure. Otherwise a level-1 Chunk whose eight children level 0 draws is not regenerated or meshed for a fluid change until level 0 stops drawing one of them; ADR-0019's rule covers the handover.
 
 ## Acceptance criteria
 

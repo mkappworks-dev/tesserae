@@ -13,4 +13,5 @@ A level-0 Chunk that cannot have a face whatever the light (the cases `light_doe
 ## Acceptance criteria
 
 - [ ] A streaming test: such a Chunk's empty mesh lands on its tick, and every other Chunk still waits for settled light.
+- [ ] The holes instrument reports no more fill or rule holes than 01's figures: an empty mesh sent early marks its Cell drawn and may discard a coarser level's ground poking into it before the Chunk below arrives.
 - [ ] `flight`, `sprint-flight` and `teleport` against 01's figures, three interleaved rounds, in Comments with `uptime`.

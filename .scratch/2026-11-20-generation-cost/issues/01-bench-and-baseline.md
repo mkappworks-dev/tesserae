@@ -8,7 +8,7 @@ Spec: [Generation cost](../spec.md).
 
 ## What to build
 
-The version 3 bench gains a World with crop fields like Terra's (one entry near the lake with a ditch on a 64 m lattice, one anywhere on a 96 m lattice) and cases over it: a straddling Chunk on a held field and a column of Chunks over one. Its warm-up solves every drainage region the case's Chunks and their neighbours within a tree's reach touch, so a lone Chunk's figure is generation, not a region solve. The uncommitted fingerprint gains a grid over the crop-field World, its baseline taken at this commit. The starting figures are recorded: the bench at this commit, the flight figures already in the spec's Further notes, and a sampled `flight` with the top symbols per level.
+The version 3 bench gains a World with crop fields like Terra's (one entry near the lake with a ditch on a 64 m lattice, one anywhere on a 96 m lattice) and cases over it: a straddling Chunk on a held field and a column of Chunks over one. Its warm-up solves every drainage region the case's Chunks and their neighbours within a tree's reach touch, so a lone Chunk's figure is generation, not a region solve. The uncommitted fingerprint gains a grid over the crop-field World, its baseline taken at this commit. The starting figures are recorded: the bench at this commit, the lone river case of this commit and of fcb5db58 (the last spec's starting commit) under the same new warm-up, the flight figures already in the spec's Further notes, and a sampled `flight` with the top symbols per level.
 
 ## Acceptance criteria
 

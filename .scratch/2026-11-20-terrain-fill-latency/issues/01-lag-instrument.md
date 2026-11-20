@@ -8,7 +8,7 @@ Spec: [Terrain fill latency](../spec.md).
 
 ## What to build
 
-A profiling instrument beside the holes count, off unless asked for: per frame, the distance from the Eye to the nearest Cell in the frustum that level 0's ring holds and level 0 does not draw, whatever coarser level covers it; per level-0 Chunk, the time from entering the mesh extent to its mesh being drawn, as percentiles per 32 m band. Counted on the Client from what it was sent. `scripts/profile-frames` summarises both per fixture, and the starting figures are recorded with it, with job counts per Chunk per level and stage.
+A profiling instrument beside the holes count, off unless asked for: per frame, the distance from the Eye to the nearest Cell in the frustum that level 0's ring holds and level 0 does not draw, whatever coarser level covers it; per level-0 Chunk, the time from entering the mesh extent to its mesh being drawn, as percentiles per 32 m band. The Server's streaming stats record when a Chunk enters the mesh extent, the Client records when its mesh is drawn from what it was sent, and the profiler joins the two; no Client system reads or mutates World state. `scripts/profile-frames` summarises both per fixture, and the starting figures are recorded with it, with job counts per Chunk per level and stage.
 
 ## Acceptance criteria
 
