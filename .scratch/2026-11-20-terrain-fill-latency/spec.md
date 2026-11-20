@@ -24,7 +24,7 @@ Where the workers' time goes, ms of CPU per second (from the [sister spec's figu
 - A level-1 mesh job computes the whole coarse light before the mesher finds the mesh is empty, so a Chunk of air inside the terrain band pays a full light pass for nothing.
 - A Chunk that cannot have a face (all air, or rock walled in by rock) still waits for its neighbours' light and a trip through the pool before its empty mesh is sent.
 - A level-1 generation job whose level-0 children are not yet held generates them itself, and level 0 generates them again where they lie inside its load extent; how often is not yet counted.
-- Every fluid change in a held level-0 Chunk regenerates the level-1 Chunk over it, and if that changes its mesh, meshes it and its six neighbours, though level 0 draws over all of them.
+- Every change in a held level-0 Chunk (a fluid's, a Plant's, a Mod's Command, an Edit) regenerates the level-1 Chunk over it, and if that changes its mesh, meshes it and its six neighbours, though level 0 draws over all of them.
 - Nothing measures how late terrain appears near the Eye: the holes count only Cells no level draws, and a level-0 Cell covered by a coarser one is not a hole.
 
 ## Solution
@@ -63,7 +63,7 @@ Where the workers' time goes, ms of CPU per second (from the [sister spec's figu
 
 **One light solve per Chunk, gated.** First the solves are counted by cause: a fill (a neighbour arriving) or a change (fluids, Edits). Runs if level 0's relight is more than 10% of worker CPU in `sprint-flight` after the generation tickets. A light solve is not dispatched until its four sideways neighbours and the one above are held or outside the load extent, and solves are ordered top-down within distance bands rather than across the whole load extent. Bulk light only increases, so a later solve converges to the same light.
 
-**Fluids under level 0, gated.** First a count: level-1 regenerations and meshes per second in the flight, by cause (a fluid landing, a neighbour arriving, a first generation). Above 10% of level-1 jobs, a level-1 Chunk whose eight children level 0 draws is not regenerated or meshed for a fluid change until level 0 stops drawing one of them; ADR-0019's rule covers the handover.
+**Changes under level 0, gated.** First a count: level-1 regenerations and meshes per second in the flight, by cause (a fluid landing, another change, a neighbour arriving, a first generation). Above 10% of level-1 jobs, a level-1 Chunk whose eight children level 0 draws is not regenerated or meshed for any change in them until level 0 stops drawing one of them; ADR-0019's rule covers the handover. Widened from fluids alone on 2026-11-20: fluids cause none of it, and Plants, Mods' Commands and Edits cause most.
 
 **The loading screen.** It hides once the Client holds a level-0 mesh for every Cell of the mesh ring around the Eye, the Client's own count of what it was sent, not on the first terrain drawn; the 15 s timeout stays. That is the whole ring, so the screen lasts about as long as a teleport's settle, 2.55 s at the start, until the other tickets bring it down. A UI change: the mockup shows the stage text first and is approved before the Client implements it.
 
