@@ -1,4 +1,4 @@
-Status: ready-for-agent
+Status: done
 
 # Terrain fill latency: the ground near the Eye drawn sooner
 
