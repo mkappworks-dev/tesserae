@@ -690,6 +690,8 @@ pub struct Worldgen {
     columns: Arc<CellMap<ColumnCache>>,
     /// Filled only by a generator that stands Plants.
     plants: Arc<CellMap<CellPlants>>,
+    /// Filled only by a generator whose Biomes plant crop fields.
+    fields: Arc<CellMap<Option<fields::Placed>, fields::FieldKey>>,
     caves: Option<CaveField>,
     /// Whether the smoothing pass runs: configured, and a one-Voxel step is at
     /// least `min_rise_m` at this Voxel size.
@@ -775,6 +777,10 @@ type CellPlants = Box<[CellPlant]>;
 
 /// About 7 MB in a forest, where some 900 Plants stand on a Cell.
 const MAX_PLANT_CELLS: usize = 1024;
+
+/// Every Biome's lattices are asked everywhere, so a few hundred cells of 64 m lattices cover a
+/// view; this keeps several views' worth in about 1 MB.
+const MAX_FIELD_CELLS: usize = 4096;
 
 /// Per feature index, so two clumped features of a Biome gather in different places.
 const CLUMP_SALT: u32 = 0x9e37_79b9;
@@ -1116,6 +1122,7 @@ impl Worldgen {
             tops: Arc::default(),
             columns: Arc::new(CellMap::new(MAX_COLUMN_CACHES)),
             plants: Arc::new(CellMap::new(MAX_PLANT_CELLS)),
+            fields: Arc::new(CellMap::new(MAX_FIELD_CELLS)),
             // A Game with cave Biomes and no tunnels still has caverns for them.
             caverns: (params.caves.is_some() || !params.cave_biomes.is_empty())
                 .then(|| Caverns::new(folded, &params)),
@@ -1728,6 +1735,7 @@ impl Worldgen {
     pub fn forget_caches(&self) {
         self.columns.clear();
         self.plants.clear();
+        self.fields.clear();
         self.tops.lock().unwrap().clear();
         LAST_CELL.with(|l| *l.borrow_mut() = None);
         self.terrain.forget_regions();
@@ -3474,6 +3482,7 @@ fn block_of(x: usize, y: usize, z: usize) -> usize {
 )]
 mod tests {
     use super::*;
+    use crate::climate::{CropField, FieldCrop};
 
     const SEED: u64 = 0x7e55_e2ae;
     /// [`SEED`]'s sweep is flat lowland; this one's holds sea, dry land and one-Voxel steps.
@@ -3584,22 +3593,45 @@ mod tests {
         }
     }
 
+    /// The Chunks over the ground of the column of Chunks at the origin.
+    fn generate_ground(g: &Worldgen) {
+        let [x, z] = [16.0, 16.0];
+        let cy = (g.surface_height_m(x, z) / CHUNK_SIZE as f32).floor() as i32;
+        for cy in cy - 1..=cy + 1 {
+            g.chunk(0, cy, 0);
+        }
+    }
+
     #[test]
     fn only_a_generator_that_stands_plants_keeps_them() {
-        let generate = |g: &Worldgen| {
-            let [x, z] = [16.0, 16.0];
-            let cy = (g.surface_height_m(x, z) / CHUNK_SIZE as f32).floor() as i32;
-            for cy in cy - 1..=cy + 1 {
-                g.chunk(0, cy, 0);
-            }
-        };
         let planted = Worldgen::new(SEED, 1.0, grassland());
-        generate(&planted);
+        generate_ground(&planted);
         assert!(planted.plants.len() > 0);
         let bare = Worldgen::new(SEED, 1.0, grassland().without_surface_features());
-        generate(&bare);
+        generate_ground(&bare);
         assert_eq!(bare.plants.len(), 0);
         assert!(bare.columns.len() > 0);
+    }
+
+    #[test]
+    fn only_a_generator_that_plants_fields_keeps_them_until_it_forgets() {
+        let mut field = CropField::new((6.0, 12.0), 64.0, None, None, None);
+        field
+            .push(FieldCrop::new(0, &[221, 222], &[], 1.0).unwrap())
+            .unwrap();
+        let mut params = grassland();
+        let mut biome = *params.biomes.get(BiomeId::new(0)).unwrap();
+        biome.surface_features = biome.surface_features.with_crop_fields(&[field]).unwrap();
+        params.biomes = BiomeTable::new(&[biome]).unwrap();
+        let fielded = Worldgen::new(SEED, 1.0, params);
+        generate_ground(&fielded);
+        assert!(fielded.fields.len() > 0);
+        fielded.forget_caches();
+        assert_eq!(fielded.fields.len(), 0);
+        let unfielded = Worldgen::new(SEED, 1.0, grassland());
+        generate_ground(&unfielded);
+        assert_eq!(unfielded.fields.len(), 0);
+        assert!(unfielded.plants.len() > 0);
     }
 
     #[test]

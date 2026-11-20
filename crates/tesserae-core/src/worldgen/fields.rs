@@ -94,6 +94,9 @@ const LEVEL_M: f32 = 1.0;
 /// Columns are asked this far apart when a field is tested for ground, Biome and caves.
 const SAMPLE_M: f32 = 1.0;
 
+/// A crop-field lattice cell: its Biome's index, the entry among the Biome's fields, the cell.
+pub(super) type FieldKey = (u8, u8, [i32; 2]);
+
 /// A planted field's place, in global Voxel indices: a grid of plots set apart by lanes one Voxel
 /// wide, which also ring it.
 #[derive(Clone, Copy, Debug)]
@@ -263,6 +266,25 @@ impl Worldgen {
             .collect()
     }
 
+    /// The field a lattice cell of a Biome's entry holds: none unless held, else the first of its
+    /// drawn places the ground takes. Decided once, since no region it is asked from changes it.
+    fn cell_field(
+        &self,
+        scatter: &SurfaceScatter,
+        biome: BiomeId,
+        entry: usize,
+        field: &CropField,
+        cell: [i32; 2],
+    ) -> Option<Placed> {
+        let key = (biome.index() as u8, entry as u8, cell);
+        *self.fields.get_or_build(key, || {
+            let held = self.field_held(biome, entry, cell)?;
+            (0..ATTEMPTS)
+                .filter_map(|attempt| self.field_draw(biome, field, cell, held, attempt))
+                .find_map(|p| self.field_accepts(scatter, p))
+        })
+    }
+
     /// The fields of one entry of a Biome that stand on any column of `region`, `[min, max)`: each
     /// held cell stands at the first of its drawn places the ground takes.
     fn entry_fields(
@@ -286,12 +308,7 @@ impl Worldgen {
         };
         self.field_cells(field, region)
             .into_iter()
-            .filter_map(|cell| {
-                let held = self.field_held(biome, entry, cell)?;
-                (0..ATTEMPTS)
-                    .filter_map(|attempt| self.field_draw(biome, field, cell, held, attempt))
-                    .find_map(|p| self.field_accepts(scatter, p))
-            })
+            .filter_map(|cell| self.cell_field(scatter, biome, entry, field, cell))
             .filter(crosses)
             .collect()
     }

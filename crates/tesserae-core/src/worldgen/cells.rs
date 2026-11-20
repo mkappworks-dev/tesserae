@@ -1,7 +1,8 @@
-//! What a generator keeps per Cell, by `[cx, cz]`: each a pure function of the seed, the
-//! parameters and the Cell, so a cache only ever saves time.
+//! What a generator keeps per Cell, by `[cx, cz]` unless keyed otherwise: each a pure function of
+//! the seed, the parameters and the key, so a cache only ever saves time.
 
 use std::collections::HashMap;
+use std::hash::Hash;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 
@@ -9,19 +10,19 @@ static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
 /// Each Cell with when it was last built or read, oldest lowest. A read stores its age under the
 /// read lock, so a racing read may lose its refresh; that costs only a rebuild.
-type Aged<T> = HashMap<[i32; 2], (AtomicU64, Arc<T>)>;
+type Aged<K, T> = HashMap<K, (AtomicU64, Arc<T>)>;
 
 /// A map of Cells that drops its least recently used half on reaching its bound, so a flight
 /// keeps the Cells round the Eye rather than starting over.
-pub(super) struct CellMap<T> {
+pub(super) struct CellMap<T, K = [i32; 2]> {
     /// Tells this map from any other, for a thread's record of the last Cell it asked.
     id: u64,
     bound: usize,
     next: AtomicU64,
-    cells: RwLock<Aged<T>>,
+    cells: RwLock<Aged<K, T>>,
 }
 
-impl<T> std::fmt::Debug for CellMap<T> {
+impl<T, K> std::fmt::Debug for CellMap<T, K> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("CellMap")
             .field("id", &self.id)
@@ -30,7 +31,7 @@ impl<T> std::fmt::Debug for CellMap<T> {
     }
 }
 
-impl<T> CellMap<T> {
+impl<T, K: Copy + Ord + Hash> CellMap<T, K> {
     pub(super) fn new(bound: usize) -> Self {
         CellMap {
             id: NEXT_ID.fetch_add(1, Ordering::Relaxed),
@@ -44,7 +45,7 @@ impl<T> CellMap<T> {
         self.id
     }
 
-    pub(super) fn get(&self, key: [i32; 2]) -> Option<Arc<T>> {
+    pub(super) fn get(&self, key: K) -> Option<Arc<T>> {
         let cells = self.cells.read().expect("cells");
         let (age, t) = cells.get(&key)?;
         // A load and a compare, not a write, when nothing was built since: a held Cell is read
@@ -58,7 +59,7 @@ impl<T> CellMap<T> {
 
     /// Built outside the lock, so two workers may both build a Cell; they build the same, and
     /// the first kept is the one both get.
-    pub(super) fn get_or_build(&self, key: [i32; 2], build: impl FnOnce() -> T) -> Arc<T> {
+    pub(super) fn get_or_build(&self, key: K, build: impl FnOnce() -> T) -> Arc<T> {
         if let Some(t) = self.get(key) {
             return t;
         }
@@ -66,7 +67,7 @@ impl<T> CellMap<T> {
         let mut cells = self.cells.write().expect("cells");
         if !cells.contains_key(&key) && cells.len() >= self.bound {
             // By key within an age, since reads between two builds share one.
-            let mut ages: Vec<(u64, [i32; 2])> = cells
+            let mut ages: Vec<(u64, K)> = cells
                 .iter()
                 .map(|(key, (age, _))| (age.load(Ordering::Relaxed), *key))
                 .collect();
@@ -106,6 +107,22 @@ mod tests {
         }
         for i in 4..9 {
             assert_eq!(map.get([i, 0]).as_deref(), Some(&i));
+        }
+    }
+
+    #[test]
+    fn a_map_keyed_by_field_cell_keeps_the_newer_half_whatever_the_key_order() {
+        let map = CellMap::new(8);
+        let key = |i: u8| (8 - i, 1, [-i32::from(i), 0]);
+        for i in 0..9 {
+            map.get_or_build(key(i), || i);
+        }
+        assert_eq!(map.len(), 5);
+        for i in 0..4 {
+            assert!(map.get(key(i)).is_none(), "{i}");
+        }
+        for i in 4..9 {
+            assert_eq!(map.get(key(i)).as_deref(), Some(&i));
         }
     }
 
