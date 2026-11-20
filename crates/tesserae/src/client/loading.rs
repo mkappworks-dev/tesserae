@@ -7,8 +7,10 @@ use bevy::prelude::*;
 
 use super::camera::{FlyCamera, MainCamera};
 use super::chunk_view::ChunkEntities;
+use super::cinematic as cine;
 use super::menu_ui as ui;
 use super::theme;
+use super::worlds::pages::fill;
 use crate::open::{Load, OpenRequest, Stage};
 use crate::server::streaming::StreamingSettings;
 use crate::session::{AppState, SessionApp};
@@ -30,6 +32,18 @@ struct StageText;
 #[derive(Component)]
 struct BarFill;
 
+/// The scenery behind the card, opaque so nothing of the unfinished World shows through.
+#[derive(Component)]
+struct Backdrop;
+
+#[derive(Component)]
+struct Card;
+
+/// The scenery the World list last painted, handed to the loading screen so it opens over the
+/// same landscape without painting it again.
+#[derive(Resource)]
+pub(super) struct Landscape(pub(super) Handle<Image>);
+
 /// The screen is drawn before the World has a camera of its own.
 #[derive(Component)]
 struct LoadingCamera;
@@ -37,7 +51,10 @@ struct LoadingCamera;
 /// Longest the loading screen waits for the ground, e.g. for a World saved without a Game.
 const LOADING_TIMEOUT_S: f32 = 15.0;
 
-const BAR_WIDTH_PX: f32 = 280.0;
+const CARD_WIDTH_PX: f32 = 300.0;
+const CARD_PAD_PX: f32 = 25.0;
+/// The card's width inside its padding and frame.
+const BAR_WIDTH_PX: f32 = CARD_WIDTH_PX - 2.0 * (CARD_PAD_PX + theme::FRAME);
 
 pub(super) fn plugin(app: &mut App) {
     app.add_systems(OnEnter(AppState::Loading), show_loading)
@@ -75,7 +92,13 @@ fn hand_behind_loading(
     }
 }
 
-fn show_loading(mut commands: Commands, request: Option<Res<OpenRequest>>, time: Res<Time<Real>>) {
+fn show_loading(
+    mut commands: Commands,
+    request: Option<Res<OpenRequest>>,
+    landscape: Option<Res<Landscape>>,
+    time: Res<Time<Real>>,
+) {
+    commands.remove_resource::<Landscape>();
     let Some(request) = request.filter(|r| r.from_list) else {
         return;
     };
@@ -90,48 +113,55 @@ fn show_loading(mut commands: Commands, request: Option<Res<OpenRequest>>, time:
                 reached: 0.0,
             },
             GlobalZIndex(200),
-            BackgroundColor(theme::panel()),
             Node {
                 position_type: PositionType::Absolute,
                 width: Val::Percent(100.0),
                 height: Val::Percent(100.0),
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
-                flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(8.0),
                 ..default()
             },
         ))
-        .with_children(|card| {
-            opening(card, &name);
-            card.spawn((
-                StageText,
-                Text::new(Stage::ReadingSave.label()),
-                TextFont {
-                    font_size: bevy::text::FontSize::Px(12.0),
-                    ..default()
-                },
-                TextColor(theme::muted()),
-            ));
-            card.spawn((
-                Node {
-                    width: Val::Px(BAR_WIDTH_PX),
-                    height: Val::Px(4.0),
-                    margin: UiRect::top(Val::Px(8.0)),
-                    ..default()
-                },
-                BackgroundColor(theme::edge()),
-            ))
-            .with_children(|track| {
-                track.spawn((
-                    BarFill,
-                    Node {
-                        width: Val::Px(0.0),
-                        height: Val::Percent(100.0),
+        .with_children(|screen| {
+            let mut backdrop = screen.spawn((Backdrop, BackgroundColor(theme::SCENE), fill()));
+            if let Some(landscape) = landscape {
+                backdrop.insert(ImageNode::new(landscape.0.clone()));
+            }
+            screen.spawn((theme::shade(), fill()));
+            opening(screen, &name, Card, |card| {
+                card.spawn((
+                    StageText,
+                    Text::new(Stage::ReadingSave.label()),
+                    TextFont {
+                        font_size: bevy::text::FontSize::Px(12.0),
                         ..default()
                     },
-                    BackgroundColor(theme::SAGE),
+                    TextColor(theme::muted()),
+                    Node {
+                        margin: UiRect::top(Val::Px(14.0)),
+                        ..default()
+                    },
                 ));
+                card.spawn((
+                    Node {
+                        width: Val::Px(BAR_WIDTH_PX),
+                        height: Val::Px(4.0),
+                        margin: UiRect::top(Val::Px(8.0)),
+                        border_radius: BorderRadius::all(Val::Px(2.0)),
+                        ..default()
+                    },
+                    BackgroundColor(theme::RAISED),
+                ))
+                .with_children(|track| {
+                    track.spawn((
+                        BarFill,
+                        Node {
+                            width: Val::Px(0.0),
+                            height: Val::Percent(100.0),
+                            border_radius: BorderRadius::all(Val::Px(2.0)),
+                            ..default()
+                        },
+                        BackgroundColor(theme::SAGE),
+                    ));
+                });
             });
         });
 }
@@ -142,16 +172,58 @@ fn drop_camera(mut commands: Commands, cameras: Query<Entity, With<LoadingCamera
     }
 }
 
-/// Also drawn by the World list just before it starts loading.
-pub(super) fn opening(parent: &mut ChildSpawnerCommands, name: &str) {
-    ui::weighted_text(
-        parent,
-        format!("Opening {name}…"),
-        theme::TEXT_HEADING,
-        theme::SEMIBOLD,
-        theme::INK,
-    );
-    ui::paragraph(parent, "Loading the World.", 12.0, theme::muted());
+/// The Opening card, where the Menu's panel sits. The World list draws it until the loader takes
+/// over, and the loading screen draws it again with the loader's stages `below` its lines.
+pub(super) fn opening(
+    main: &mut ChildSpawnerCommands,
+    name: &str,
+    marker: impl Bundle,
+    below: impl FnOnce(&mut ChildSpawnerCommands),
+) {
+    main.spawn(Node {
+        flex_grow: 1.0,
+        align_items: AlignItems::Center,
+        padding: UiRect::horizontal(Val::Vw(5.0)),
+        ..default()
+    })
+    .with_children(|screen| {
+        screen
+            .spawn((
+                marker,
+                cine::surface(theme::panel()),
+                cine::framed(Node {
+                    width: Val::Px(CARD_WIDTH_PX),
+                    padding: UiRect::all(Val::Px(CARD_PAD_PX)),
+                    flex_direction: FlexDirection::Column,
+                    ..default()
+                }),
+            ))
+            .with_children(|card| {
+                card.spawn((
+                    Text::new(format!("Opening {name}\u{2026}")),
+                    theme::weighted(theme::TEXT_PANEL_TITLE, theme::BOOK),
+                    bevy::text::LineHeight::RelativeToFont(1.2),
+                    TextColor(theme::INK),
+                    Node {
+                        margin: UiRect::new(
+                            Val::Px(0.0),
+                            Val::Px(0.0),
+                            Val::Px(10.0),
+                            Val::Px(6.0),
+                        ),
+                        ..default()
+                    },
+                    Pickable::IGNORE,
+                ));
+                ui::paragraph(
+                    card,
+                    "Loading the World.",
+                    theme::TEXT_SMALL,
+                    theme::muted(),
+                );
+                below(card);
+            });
+    });
 }
 
 /// Inside a stage the bar sweeps toward the next one without reaching it: the
@@ -271,6 +343,13 @@ mod tests {
     /// The screen as a World opened from the list shows it, a second of real
     /// time a frame, with the first terrain drawn and the Eye at [`EYE`].
     fn screen() -> App {
+        let mut app = opened();
+        app.world_mut().run_system_once(show_loading).unwrap();
+        app
+    }
+
+    /// A World opened from the list, before the screen is shown.
+    fn opened() -> App {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_secs(1)))
@@ -284,7 +363,6 @@ mod tests {
                 from_list: true,
             });
         add_screen_systems(&mut app);
-        app.world_mut().run_system_once(show_loading).unwrap();
         app.world_mut().spawn((
             MainCamera,
             FlyCamera {
@@ -333,6 +411,70 @@ mod tests {
             panic!("the bar is sized in pixels");
         };
         px
+    }
+
+    fn count<C: Component>(app: &mut App) -> usize {
+        app.world_mut()
+            .query_filtered::<(), With<C>>()
+            .iter(app.world())
+            .count()
+    }
+
+    #[test]
+    fn the_screen_draws_its_card_over_the_landscape_the_list_painted() {
+        let mut app = opened();
+        let landscape = Handle::<Image>::default();
+        app.insert_resource(Landscape(landscape.clone()));
+        app.world_mut().run_system_once(show_loading).unwrap();
+        let (backdrop, image, colour) = app
+            .world_mut()
+            .query_filtered::<(Entity, &ImageNode, &BackgroundColor), With<Backdrop>>()
+            .single(app.world())
+            .unwrap();
+        assert_eq!(image.image, landscape);
+        assert_eq!(
+            colour.0.alpha(),
+            1.0,
+            "nothing of the World shows before the landscape is drawn"
+        );
+        assert_eq!(count::<Card>(&mut app), 1);
+        let world = app.world_mut();
+        let root = world
+            .query_filtered::<Entity, With<Loading>>()
+            .single(world)
+            .unwrap();
+        let card = world
+            .query_filtered::<Entity, With<Card>>()
+            .single(world)
+            .unwrap();
+        let mut parents = world.query::<&ChildOf>();
+        let mut under_root = |mut entity: Entity| {
+            while let Ok(parent) = parents.get(world, entity) {
+                entity = parent.parent();
+                if entity == root {
+                    return true;
+                }
+            }
+            false
+        };
+        assert!(under_root(backdrop) && under_root(card));
+        assert!(
+            !app.world().contains_resource::<Landscape>(),
+            "the screen holds the landscape, so it goes with the screen"
+        );
+    }
+
+    #[test]
+    fn the_backdrop_and_the_card_go_when_the_screen_hides() {
+        let mut app = screen();
+        app.update();
+        assert_eq!(count::<Backdrop>(&mut app), 1);
+        assert_eq!(count::<Card>(&mut app), 1);
+        let ring = ring(&app);
+        land(&mut app, ring.iter().map(|&c| (0, c)));
+        app.update();
+        assert_eq!(count::<Backdrop>(&mut app), 0);
+        assert_eq!(count::<Card>(&mut app), 0);
     }
 
     #[test]

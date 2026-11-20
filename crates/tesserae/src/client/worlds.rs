@@ -774,6 +774,10 @@ fn leave(
     (mut last, mut returning): (ResMut<LastFailure>, ResMut<Returning>),
     mut scenery: ResMut<Scenery>,
 ) {
+    let clear = &mut scenery.0[Scenery::slot(super::scenery::CLEAR)];
+    if let Some(landscape) = clear.image.take() {
+        commands.insert_resource(super::loading::Landscape(landscape));
+    }
     *scenery = Scenery::default();
     for screen in &screens {
         commands.entity(screen).despawn();
