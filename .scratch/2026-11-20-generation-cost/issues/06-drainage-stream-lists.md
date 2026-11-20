@@ -1,6 +1,6 @@
 # 06: `Drainage::wet` walks only the streams in reach, if it is still worth it
 
-Status: ready-for-agent
+Status: wontfix
 
 Blocked by: 05
 
@@ -12,6 +12,12 @@ First the gate: `Drainage::wet`'s share of level-0 generation in a sampled fligh
 
 ## Acceptance criteria
 
-- [ ] The gate's figure in Comments.
-- [ ] If built: `wet` equals the scan bit for bit over many seeds and points, including points with no segment in reach and beside a region border.
-- [ ] If built: the fingerprint and the committed digests match; bench figures in Comments.
+- [x] The gate's figure in Comments.
+- [ ] ~~If built: `wet` equals the scan bit for bit over many seeds and points, including points with no segment in reach and beside a region border.~~
+- [ ] ~~If built: the fingerprint and the committed digests match; bench figures in Comments.~~
+
+## Comments
+
+### The gate, 2026-11-20
+
+`Drainage::wet` is 12.8% of level 0's generation in the sampled flight of fa6fd574 (ticket 05's Comments), under the 15% gate: closed. At the coarser levels it is 2.3%.

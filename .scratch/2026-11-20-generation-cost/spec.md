@@ -1,4 +1,4 @@
-Status: ready-for-agent
+Status: done
 
 # Generator version 3, cheaper again: drainage, cave Biomes, crop fields
 
