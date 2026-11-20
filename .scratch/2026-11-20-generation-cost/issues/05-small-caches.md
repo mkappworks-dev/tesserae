@@ -32,3 +32,7 @@ From the mid-point sampled flight in [ticket 04](./04-crop-fields-once.md#the-mi
 | The cavern field's corner cache | `Worldgen::cavern_open` | 15.9% | 12.4% |
 | One `claims_near` a Chunk | `Worldgen::claims_near` | 17.3% | 0.0% |
 | The seal and `filled` read the column cache | `Worldgen::sealed_below_m`; `Worldgen::ground_at` (`filled`) | 1.9%; 7.7% | 9.1%; 2.0% |
+
+### Ores and the cavern field
+
+- Ores remember their vein cell: `OreField::at` takes an `OreCells`, which holds, for each ore, the cell it last asked about and the vein drawn there (or none). A Chunk's column loop and `sow_deep_rock` each keep one for the Chunk. Keyed by the whole cell, so any walk order answers the same. `an_ore_walking_a_column_answers_as_it_does_per_voxel` walks columns at every Voxel size from 0.25 to 32 m over 96 ore tables and compares every Voxel with a cache that has seen nothing. The fingerprint and the committed digests match.

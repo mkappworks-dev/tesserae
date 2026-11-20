@@ -36,7 +36,7 @@ use crate::climate::{
 use crate::loot::LootTable;
 use crate::mesh::POS_Y;
 use crate::noise::{Fbm3Cache, fbm3_cached, fbm3_range};
-use crate::ore::{OreField, OreMask, OreTable};
+use crate::ore::{OreCells, OreField, OreMask, OreTable};
 use crate::plant::tree::{Part, fruit_stage, tree_voxels, vine_voxels};
 use crate::plant::{CountRange, Fruit, Stage, Tree, first_fruit_offsets};
 use crate::settlement::Settlement;
@@ -2028,6 +2028,7 @@ impl Worldgen {
         let springs = self.caverns.is_some() && self.water.is_some();
         let mut chunk = ChunkBuilder::new();
         let mut cave_cache = Default::default();
+        let mut ore_cells = OreCells::default();
         for z in 0..CHUNK_SIZE {
             for x in 0..CHUNK_SIZE {
                 let x_m = origin_m[0] + x as f32 * self.voxel_size;
@@ -2154,7 +2155,7 @@ impl Worldgen {
                         water.material
                     } else {
                         ores.and_then(|(field, mask)| {
-                            field.at(mask, [x_m, y_m, z_m], below_m, &biome)
+                            field.at(&mut ore_cells, mask, [x_m, y_m, z_m], below_m, &biome)
                         })
                         .or_else(|| {
                             if !self.underground_biomes {
@@ -2500,6 +2501,7 @@ impl Worldgen {
         ores: OreMask,
     ) {
         let cache = self.column_cache(coord[0], coord[1]);
+        let mut cells = OreCells::default();
         for z in 0..CHUNK_SIZE {
             for x in 0..CHUNK_SIZE {
                 let x_m = origin_m[0] + x as f32 * self.voxel_size;
@@ -2508,7 +2510,9 @@ impl Worldgen {
                 let biome = self.column_biome(coord, [x, z]);
                 for y in 0..CHUNK_SIZE {
                     let y_m = origin_m[1] + y as f32 * self.voxel_size;
-                    if let Some(material) = field.at(ores, [x_m, y_m, z_m], surface_m - y_m, &biome)
+                    let depth_m = surface_m - y_m;
+                    if let Some(material) =
+                        field.at(&mut cells, ores, [x_m, y_m, z_m], depth_m, &biome)
                     {
                         chunk.set(x, y, z, Voxel::cube(material));
                     }
