@@ -154,6 +154,13 @@ impl WorldSettings {
         let c = (metres / self.cell_size_at(level)).floor();
         ChunkCoord::new(c.x as i32, c.y as i32, c.z as i32)
     }
+
+    /// From a point to the nearest point of a level-0 Chunk; zero inside it.
+    #[cfg_attr(not(any(feature = "dev", feature = "profiling")), allow(dead_code))]
+    pub fn distance_to_chunk(&self, metres: Vec3, coord: ChunkCoord) -> f32 {
+        let min = self.chunk_origin_at(coord, 0);
+        metres.distance(metres.clamp(min, min + self.cell_size()))
+    }
 }
 
 #[cfg(test)]

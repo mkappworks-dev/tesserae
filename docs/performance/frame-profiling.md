@@ -278,13 +278,14 @@ Frame times run from the profiler's start, about 0.1 s after the process clock
 the fixtures move by, so a move falls just before 22 s in `frames.csv`;
 `settle_s` is measured from the move's own frame.
 
-Each run adds up to three files beside `frames.csv`, and the runner summarises
-them in `streaming.json`. Two of the instruments are opt-in through
-`--instruments`, which sets `TESSERAE_PROFILE_HOLES` and `TESSERAE_PROFILE_GPU`
-for the logging-on runs: in matched on/off rounds the GPU markers added 16 to
-21% to the median frame, far over the bound, so a timing series leaves `gpu` off
-and attributes GPU time in a separate series. The hole count added nothing
-measurable over logging alone, which was itself about 3.7% of median.
+Each run adds up to four files beside `frames.csv`, and the runner summarises
+them in `streaming.json`. The instruments are opt-in through `--instruments`,
+which sets `TESSERAE_PROFILE_HOLES`, `TESSERAE_PROFILE_LAG`,
+`TESSERAE_PROFILE_GPU` and so on for the logging-on runs: in matched on/off
+rounds the GPU markers added 16 to 21% to the median frame, far over the bound,
+so a timing series leaves `gpu` off and attributes GPU time in a separate
+series. The hole count added nothing measurable over logging alone, which was
+itself about 3.7% of median.
 
 - `frames.csv` gains `rule_holes` and `fill_holes` with per-level columns (empty
   unless `--instruments holes`), `chunk_entities` and
@@ -306,11 +307,30 @@ measurable over logging alone, which was itself about 3.7% of median.
   `mesh_unreach_cpu_ms` split level-0 mesh jobs and their worker CPU since the
   World opened by whether a walk from the Eye through open space reaches the
   Chunk. The Server walk runs on the tick, so leave it out of a timing series.
+  Last, empty unless `--instruments lag`, `level0_missing_m` is the distance
+  from the Eye to the nearest point of the nearest Cell of level 0's mesh shell
+  in the frustum that level 0 does not draw, whatever coarser level covers it;
+  `inf` when level 0 draws every one. Like the holes, it is counted on the
+  Client from what it was sent. `streaming.json` reports it as
+  `level0_missing_m`: the frames with something missing and the minimum, p1, p5
+  and median over the measured phase, nearer being worse, `null` where that
+  percentile falls on a frame with nothing missing.
+- `frames.fill.csv`, under `--instruments lag` only, has a row per level-0 Chunk
+  entering the mesh extent: when, its coordinate, its distance from the Eye as
+  it entered, and how long after that the Client drew its mesh, an empty mesh
+  included; zero when it was still drawn, empty when it never was. The Server's
+  streaming stats record the entries, the Client the Chunks it starts and stops
+  drawing, and the profiler joins them as it saves. `streaming.json` reports the
+  entries of the measured phase in `fill`, per 32 m band of that distance: how
+  many, how many were never drawn, and the percentiles of the rest.
 - `frames.flow.csv` has one row per level per fixed tick: Chunks held and
   meshed, and per stage (generate, relight, mesh) the Chunks waiting to
   dispatch, in flight, and since the World opened the jobs run and their worker
   thread CPU, plus fluid jobs run and their worker CPU. `streaming.json` reports
-  worker milliseconds per second over the measured phase.
+  worker milliseconds per second over the measured phase, and per level the
+  relight and mesh jobs run per Chunk generated (`relight_per_chunk`,
+  `mesh_per_chunk`); each move's `jobs_per_chunk` gives the same from the move
+  until settled.
 - `frames.gpu.csv`, under `--instruments gpu` only, has GPU timestamps per
   frame: `frame_start`, `frame_end`, and per camera order `view_start`,
   `prepass_end`, `main_start`, `opaque_end`, `main_end` and `view_end`, in

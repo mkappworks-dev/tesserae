@@ -3,6 +3,7 @@
 mod gpu;
 mod monitor;
 pub(crate) use monitor::window as monitor_window;
+mod fill;
 mod waits;
 
 use crate::session::SessionApp;
@@ -11,13 +12,14 @@ use std::io::{BufWriter, Write};
 use std::time::Instant;
 
 use crate::client::holes::{Holes, LEVELS};
+use crate::client::lag::Lag;
 use crate::client::sight::Sight;
 use crate::cost::{FrameCost, MainThreadCost, thread_cpu};
 use crate::server::{
     ProfileFixtureStatus, SimulationProfile,
     streaming::{
         StreamingSettings,
-        stats::{Flow, StreamingStats},
+        stats::{Entered, Flow, StreamingStats},
     },
 };
 use crate::world::WorldSettings;
@@ -30,6 +32,9 @@ pub struct ProcessStart(pub Instant);
 const MAX_FRAMES: usize = 250_000;
 /// One per level per fixed tick: about 25 minutes at 64 Hz with six levels.
 const MAX_FLOW_ROWS: usize = 600_000;
+/// Each of entries into the mesh extent and drawn changes: a 64 m/s flight
+/// makes a few hundred a second.
+const MAX_FILL_EVENTS: usize = 1_000_000;
 
 #[derive(Resource)]
 struct Profile {
@@ -40,6 +45,12 @@ struct Profile {
     rows: Vec<Row>,
     pending: Option<Row>,
     flow: Vec<FlowRow>,
+    /// `TESSERAE_PROFILE_LAG`: entries and drawn changes are kept.
+    lag: bool,
+    entered: Vec<Entered>,
+    drawn: Vec<fill::Drawn>,
+    /// Some entries or drawn changes were dropped at [`MAX_FILL_EVENTS`].
+    fill_limited: bool,
     saved: bool,
     render: RenderSamples,
     gpu: gpu::GpuSamples,
@@ -76,6 +87,9 @@ struct Row {
     visible: [u32; CAMERAS],
     sight: Sight,
     mesh_reach: Option<[(u64, f64); 2]>,
+    /// The Client's `Lag::missing_m`, infinite when nothing is missing; `None`
+    /// when not measured.
+    missing_m: Option<f32>,
 }
 
 /// Camera orders recorded: the Player's and one per coarse level.
@@ -88,6 +102,7 @@ struct VisibleMeshes([u32; CAMERAS]);
 #[derive(bevy::ecs::system::SystemParam)]
 struct Drawn<'w, 's> {
     holes: Option<Res<'w, Holes>>,
+    lag: Option<ResMut<'w, Lag>>,
     sight: Option<Res<'w, Sight>>,
     visible: Res<'w, VisibleMeshes>,
     exit: MessageReader<'w, 's, AppExit>,
@@ -161,6 +176,10 @@ pub fn plugin(app: &mut App) {
         rows: Vec::with_capacity(MAX_FRAMES),
         pending: None,
         flow: Vec::new(),
+        lag: std::env::var_os("TESSERAE_PROFILE_LAG").is_some(),
+        entered: Vec::new(),
+        drawn: Vec::new(),
+        fill_limited: false,
         saved: false,
         render,
         gpu,
@@ -191,7 +210,17 @@ fn open_session(mut profile: ResMut<Profile>) {
 }
 
 fn sample_flow(mut profile: ResMut<Profile>, streaming: Res<StreamingStats>) {
-    if profile.saved || profile.flow.len() + streaming.levels.len() > MAX_FLOW_ROWS {
+    if profile.saved {
+        return;
+    }
+    if profile.lag {
+        if profile.entered.len() + streaming.entered.len() <= MAX_FILL_EVENTS {
+            profile.entered.extend_from_slice(&streaming.entered);
+        } else {
+            profile.fill_limited = true;
+        }
+    }
+    if profile.flow.len() + streaming.levels.len() > MAX_FLOW_ROWS {
         return;
     }
     let frame_id = profile.rows.len();
@@ -268,6 +297,15 @@ fn end(
     }
     let wall_s = profile.start.elapsed().as_secs_f64();
     let cpu_s = profile.cpu.zip(thread_cpu()).map(|(a, b)| b - a);
+    let missing_m = drawn.lag.as_mut().map(|lag| {
+        let changed = std::mem::take(&mut lag.changed);
+        if profile.drawn.len() + changed.len() <= MAX_FILL_EVENTS {
+            profile.drawn.extend(changed);
+        } else {
+            profile.fill_limited = true;
+        }
+        lag.missing_m.unwrap_or(f32::INFINITY)
+    });
     profile.pending = Some(Row {
         id: profile.rows.len(),
         start_s: profile.start.duration_since(profile.origin).as_secs_f64(),
@@ -285,6 +323,7 @@ fn end(
         visible: drawn.visible.0,
         sight: drawn.sight.as_deref().copied().unwrap_or_default(),
         mesh_reach: streaming.mesh_reach,
+        missing_m,
     });
     if profile.rows.len() >= MAX_FRAMES || drawn.exit.read().next().is_some() {
         // The incomplete final interval is excluded, never replaced with virtual time.
@@ -317,7 +356,7 @@ fn save(
             .chain((0..CAMERAS).map(|c| format!(",visible_meshes_camera{c}")))
             .chain(std::iter::once(",rescore_ms".to_string()))
             .chain(std::iter::once(
-                ",sight_drawn0,sight_culled0,sight_retained_hidden0,mesh_reach_run,mesh_reach_cpu_ms,mesh_unreach_run,mesh_unreach_cpu_ms".to_string()
+                ",sight_drawn0,sight_culled0,sight_retained_hidden0,mesh_reach_run,mesh_reach_cpu_ms,mesh_unreach_run,mesh_unreach_cpu_ms,level0_missing_m".to_string()
             ))
             .collect::<String>()
     )?;
@@ -384,8 +423,12 @@ fn save(
             write!(out, ",,,")?;
         }
         match r.mesh_reach {
-            Some([(a, b), (c, d)]) => writeln!(out, ",{a},{b},{c},{d}")?,
-            None => writeln!(out, ",,,,")?,
+            Some([(a, b), (c, d)]) => write!(out, ",{a},{b},{c},{d}")?,
+            None => write!(out, ",,,,")?,
+        }
+        match r.missing_m {
+            Some(m) => writeln!(out, ",{m}")?,
+            None => writeln!(out, ",")?,
         }
     }
     out.flush()?;
@@ -507,6 +550,9 @@ fn save(
         writeln!(flow, ",{},{},{limited}", r.fluid_run.0, r.fluid_run.1)?;
     }
     flow.flush()?;
+    if profile.lag {
+        save_fill(profile)?;
+    }
     if std::env::var_os("TESSERAE_PROFILE_GPU").is_none() {
         return Ok(());
     }
@@ -522,6 +568,38 @@ fn save(
         writeln!(gpu, "{frame},{marker},{ms}")?;
     }
     gpu.flush()
+}
+
+/// Each level-0 Chunk's entry into the mesh extent, and how long after it the
+/// Client drew it, empty if it never did.
+fn save_fill(profile: &Profile) -> std::io::Result<()> {
+    let mut fill = BufWriter::new(
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(profile.path.with_extension("fill.csv"))?,
+    );
+    writeln!(fill, "t_s,x,y,z,distance_m,drawn_after_s,limit_reached")?;
+    let limited = profile.fill_limited;
+    let after = fill::drawn_after(&profile.entered, &profile.drawn);
+    for (entry, after) in profile.entered.iter().zip(after) {
+        let t_s = entry
+            .at
+            .saturating_duration_since(profile.origin)
+            .as_secs_f64();
+        let c = entry.coord;
+        let after = after.map(|d| d.as_secs_f64().to_string());
+        writeln!(
+            fill,
+            "{t_s},{},{},{},{},{},{limited}",
+            c.x,
+            c.y,
+            c.z,
+            entry.distance_m,
+            after.unwrap_or_default()
+        )?;
+    }
+    fill.flush()
 }
 
 fn phase(seconds: f64) -> &'static str {
@@ -564,6 +642,10 @@ mod tests {
             path: std::path::PathBuf::new(),
             rows: Vec::new(),
             flow: Vec::new(),
+            lag: false,
+            entered: Vec::new(),
+            drawn: Vec::new(),
+            fill_limited: false,
             saved: false,
             render: RenderSamples::default(),
             gpu: gpu::GpuSamples::default(),
@@ -586,6 +668,7 @@ mod tests {
                 visible: [0; CAMERAS],
                 sight: Sight::default(),
                 mesh_reach: None,
+                missing_m: None,
             }),
         });
         app.add_systems(First, begin.after(crate::client::presentation::FramePacing));
@@ -619,6 +702,7 @@ mod tests {
             visible: [0; CAMERAS],
             sight: Sight::default(),
             mesh_reach: None,
+            missing_m: None,
         };
         app.insert_resource(Profile {
             origin: long_ago,
@@ -627,6 +711,10 @@ mod tests {
             path: std::path::PathBuf::new(),
             rows: Vec::new(),
             flow: Vec::new(),
+            lag: false,
+            entered: Vec::new(),
+            drawn: Vec::new(),
+            fill_limited: false,
             saved: false,
             render: RenderSamples::default(),
             gpu: gpu::GpuSamples::default(),

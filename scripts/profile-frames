@@ -51,7 +51,24 @@ def distribution(values):
     })
 
 
+def nearest(values):
+    """Low percentiles of a distance where nearer is worse; `inf` is a frame
+    with nothing missing, reported as None."""
+    values = sorted(values)
+    def at(p):
+        value = values[max(0, math.ceil(len(values) * p) - 1)] if values else None
+        return None if value is None or math.isinf(value) else value
+    return dict(n=len(values), missing_frames=sum(not math.isinf(v) for v in values),
+                min=at(0), p1=at(.01), p5=at(.05), p50=at(.5))
+
+
 STAGES = ['generate', 'relight', 'mesh']
+
+
+def per_chunk(runs):
+    """Relight and mesh jobs per Chunk generated, from jobs run per stage."""
+    return {f'{stage}_per_chunk': runs[stage] / runs['generate'] if runs['generate'] else None
+            for stage in STAGES[1:]}
 
 
 def work(flow, start, end):
@@ -61,8 +78,11 @@ def work(flow, start, end):
         picked = [r for r in flow if int(r['level']) == level and float(r['t_s']) <= t]
         return picked[-1] if picked else None
     def counters(r):
-        return {k: float(r[f'{k}_cpu_ms']) for k in STAGES + ['fluid']} if r else None
-    levels, fluid = {}, 0.0
+        if not r:
+            return None
+        return {**{k: float(r[f'{k}_cpu_ms']) for k in STAGES + ['fluid']},
+                **{f'{k}_run': int(r[f'{k}_run']) for k in STAGES}}
+    levels, jobs, fluid = {}, {}, 0.0
     for level in sorted({int(r['level']) for r in flow}):
         before, after = counters(last(level, start - 1e-9)), counters(last(level, end))
         if not after:
@@ -71,11 +91,12 @@ def work(flow, start, end):
         if not before or any(after[k] < before[k] for k in after):
             before = dict.fromkeys(after, 0.0)
         levels[str(level)] = {k: after[k] - before[k] for k in STAGES}
+        jobs[str(level)] = per_chunk({k: after[f'{k}_run'] - before[f'{k}_run'] for k in STAGES})
         if level == 0:
             fluid = after['fluid'] - before['fluid']
     total = sum(sum(w.values()) for w in levels.values()) + fluid
     coarse = sum(w['generate'] for level, w in levels.items() if level != '0')
-    return dict(worker_cpu_ms=levels, fluid_cpu_ms=fluid,
+    return dict(worker_cpu_ms=levels, jobs_per_chunk=jobs, fluid_cpu_ms=fluid,
                 coarse_generate_share=coarse / total if total else None)
 
 
@@ -139,6 +160,24 @@ def streaming(path, rows):
             fill_hole_frames=sum(int(r['fill_holes']) > 0 for r in fixture),
             rule_holes_max=max(int(r['rule_holes']) for r in fixture),
             fill_holes_max=max(int(r['fill_holes']) for r in fixture))
+    # Measured only under --instruments lag.
+    if fixture[0].get('level0_missing_m'):
+        out['level0_missing_m'] = nearest([float(r['level0_missing_m']) for r in fixture])
+    fill_path = path.with_suffix('.fill.csv')
+    if fill_path.exists():
+        start, end = float(fixture[0]['start_s']), float(fixture[-1]['end_s'])
+        entries = [r for r in csv.DictReader(fill_path.read_text().splitlines())
+                   if start <= float(r['t_s']) <= end]
+        bands = {}
+        for r in entries:
+            band = int(float(r['distance_m']) // 32) * 32
+            bands.setdefault(band, []).append(r['drawn_after_s'])
+        out['fill'] = {
+            f'{band}-{band + 32}m': dict(
+                entries=len(after), undrawn=sum(not a for a in after),
+                drawn_after_s=distribution([float(a) for a in after if a]))
+            for band, after in sorted(bands.items())}
+        out['fill_limit_reached'] = any(r['limit_reached'] == 'true' for r in entries)
     gpu_path = path.with_suffix('.gpu.csv')
     if gpu_path.exists():
         marks = {}
@@ -181,6 +220,7 @@ def streaming(path, rows):
                 work[level][f'{stage}_waiting_max'] = max(
                     int(r[f'{stage}_waiting']) for r in flow
                     if int(r['level']) == level and start <= float(r['t_s']) <= end)
+            work[level].update(per_chunk({stage: work[level][f'{stage}_run'] for stage in STAGES}))
             if level == 0:
                 work[level]['fluid_worker_ms_per_s'] = (
                     float(b['fluid_cpu_ms']) - float(a['fluid_cpu_ms'])) / seconds
@@ -282,7 +322,7 @@ def main():
     parser.add_argument('--fixtures', nargs='+', choices=FIXTURES,
                         default=['active', 'stationary', 'flight', 'transparency'])
     # Each costs more than the overhead bound, so a timing series leaves them off.
-    parser.add_argument('--instruments', nargs='+', choices=['gpu', 'holes', 'visibility', 'waits'], default=[])
+    parser.add_argument('--instruments', nargs='+', choices=['gpu', 'holes', 'lag', 'visibility', 'waits'], default=[])
     parser.add_argument('--size', default='1920x1080', metavar='WxH',
                         help='physical target size offscreen, or with --presented --monitor-hz')
     # Each changes one cost and the image; a `profiling` build only, never a timing baseline.

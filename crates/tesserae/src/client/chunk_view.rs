@@ -80,6 +80,16 @@ impl ChunkEntities {
         self.delivered.contains(&key) || self.retained.contains(&key)
     }
 
+    /// Each level-0 Chunk drawn, delivered or retained.
+    #[cfg(feature = "profiling")]
+    pub(super) fn level_zero_draws(&self) -> impl Iterator<Item = ChunkCoord> + '_ {
+        self.delivered
+            .iter()
+            .chain(&self.retained)
+            .filter(|&&(level, _)| level == 0)
+            .map(|&(_, coord)| coord)
+    }
+
     #[cfg(feature = "profiling")]
     pub(super) fn published(&self) -> &[u32] {
         &self.published

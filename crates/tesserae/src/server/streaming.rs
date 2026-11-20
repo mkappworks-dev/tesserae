@@ -1276,6 +1276,53 @@ pub mod stats {
         /// unless `TESSERAE_PROFILE_VISIBILITY` is set.
         #[cfg_attr(not(feature = "profiling"), allow(dead_code, reason = "profiler only"))]
         pub mesh_reach: Option<[(u64, f64); 2]>,
+        /// The level-0 Chunks that entered the mesh extent this tick. Empty
+        /// unless `TESSERAE_PROFILE_LAG` is set.
+        #[cfg_attr(not(feature = "profiling"), allow(dead_code, reason = "profiler only"))]
+        pub entered: Vec<Entered>,
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    #[cfg_attr(not(feature = "profiling"), allow(dead_code, reason = "profiler only"))]
+    pub struct Entered {
+        pub at: std::time::Instant,
+        pub coord: ChunkCoord,
+        /// From the Eye to the Chunk's nearest point, as it entered.
+        pub distance_m: f32,
+    }
+
+    /// Whether entries are recorded, and the Chunk the Eye stood in when they
+    /// last were. A session's, so a reopened World's every Chunk enters again.
+    #[derive(Resource)]
+    pub(super) struct EntryLog {
+        on: bool,
+        was: Option<ChunkCoord>,
+    }
+
+    impl Default for EntryLog {
+        fn default() -> Self {
+            EntryLog {
+                on: std::env::var_os("TESSERAE_PROFILE_LAG").is_some(),
+                was: None,
+            }
+        }
+    }
+
+    /// The Chunks of the mesh extent around `center` that were not in it around
+    /// `was`.
+    pub fn entering(was: Option<ChunkCoord>, center: ChunkCoord, mesh: Extent) -> Vec<ChunkCoord> {
+        let reach = mesh.horizontal.max(mesh.vertical);
+        mesh.offsets()
+            .into_iter()
+            .map(|d| offset(center, d))
+            .filter(|&c| {
+                was.is_none_or(|was| {
+                    let d = delta(was, c);
+                    // `contains` squares the offset, which overflows a teleport away.
+                    d.abs().max_element() > reach || !mesh.contains(d)
+                })
+            })
+            .collect()
     }
 
     /// Where [`StreamingStats`] is written, for a reader that must see this tick's.
@@ -1284,6 +1331,7 @@ pub mod stats {
 
     pub(super) fn plugin(app: &mut App) {
         app.init_session_resource::<StreamingStats>()
+            .init_session_resource::<EntryLog>()
             .add_session_systems(
                 FixedPostUpdate,
                 publish_stats
@@ -1309,6 +1357,7 @@ pub mod stats {
         lod_jobs: Res<lod::LodJobs>,
         fluids: Option<Res<crate::server::fluids::FluidSim>>,
         player: Query<&Player>,
+        log: Option<ResMut<EntryLog>>,
     ) {
         let eye = player.single().map(Player::eye).ok();
         let center = player
@@ -1373,6 +1422,19 @@ pub mod stats {
             flow: level_zero,
             ..default()
         }];
+        let mut entered = Vec::new();
+        if let (Some(mut log), Some(eye), Some(center)) = (log.filter(|log| log.on), eye, center) {
+            let at = std::time::Instant::now();
+            entered = entering(log.was, center, mesh)
+                .into_iter()
+                .map(|coord| Entered {
+                    at,
+                    coord,
+                    distance_m: world.distance_to_chunk(eye, coord),
+                })
+                .collect();
+            log.was = Some(center);
+        }
         let (lod_generating, lod_meshing) = (lod_jobs.generate.keys(), lod_jobs.mesh.keys());
         let lod_in_flight = |keys: &[(u32, ChunkCoord)], level: u32| {
             keys.iter().filter(|(l, _)| *l == level).count()
@@ -1441,6 +1503,7 @@ pub mod stats {
             levels,
             fluid_run: fluids.map_or((0, 0.0), |f| f.jobs_run()),
             mesh_reach: meshes.reach.on.then(|| meshes.reach.totals()),
+            entered,
         };
     }
 }
@@ -1463,6 +1526,32 @@ pub(in crate::server) mod tests {
             ..default()
         };
         Rings::new(StreamingSettings::default(), world.cell_size())
+    }
+
+    #[cfg(any(feature = "dev", feature = "profiling"))]
+    #[test]
+    fn a_chunk_enters_the_mesh_extent_once_as_the_anchor_moves_to_it() {
+        let mesh = Extent {
+            horizontal: 2,
+            vertical: 1,
+        };
+        let entering = |was, center| -> HashSet<ChunkCoord> {
+            stats::entering(was, center, mesh).into_iter().collect()
+        };
+        let origin = ChunkCoord::new(0, 0, 0);
+        let east = ChunkCoord::new(1, 0, 0);
+        assert_eq!(entering(None, origin).len(), 39);
+        assert!(entering(Some(origin), origin).is_empty());
+        let leading: HashSet<ChunkCoord> = (-1..=1)
+            .flat_map(|y| {
+                [(1, -2), (2, -1), (3, 0), (2, 1), (1, 2)].map(|(x, z)| ChunkCoord::new(x, y, z))
+            })
+            .collect();
+        assert_eq!(entering(Some(origin), east), leading);
+        assert_eq!(
+            entering(Some(ChunkCoord::new(-1_000_000, 0, 0)), origin).len(),
+            39
+        );
     }
 
     #[test]
