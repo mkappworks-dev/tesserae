@@ -221,6 +221,11 @@ def streaming(path, rows):
                     int(r[f'{stage}_waiting']) for r in flow
                     if int(r['level']) == level and start <= float(r['t_s']) <= end)
             work[level].update(per_chunk({stage: work[level][f'{stage}_run'] for stage in STAGES}))
+            if level > 0 and 'mesh_empty' in b:
+                empty = int(b['mesh_empty']) - int(a['mesh_empty'])
+                work[level]['mesh_empty'] = empty
+                work[level]['mesh_empty_share'] = (
+                    empty / work[level]['mesh_run'] if work[level]['mesh_run'] else None)
             if level == 0:
                 work[level]['fluid_worker_ms_per_s'] = (
                     float(b['fluid_cpu_ms']) - float(a['fluid_cpu_ms'])) / seconds

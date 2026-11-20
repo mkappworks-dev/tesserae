@@ -326,10 +326,12 @@ itself about 3.7% of median.
 - `frames.flow.csv` has one row per level per fixed tick: Chunks held and
   meshed, and per stage (generate, relight, mesh) the Chunks waiting to
   dispatch, in flight, and since the World opened the jobs run and their worker
-  thread CPU, plus fluid jobs run and their worker CPU. `streaming.json` reports
-  worker milliseconds per second over the measured phase, and per level the
-  relight and mesh jobs run per Chunk generated (`relight_per_chunk`,
-  `mesh_per_chunk`); each move's `jobs_per_chunk` gives the same from the move
+  thread CPU, plus fluid jobs run and their worker CPU, and above level 0 the
+  mesh jobs whose mesh was empty (`mesh_empty`). `streaming.json` reports worker
+  milliseconds per second over the measured phase, and per level the relight and
+  mesh jobs run per Chunk generated (`relight_per_chunk`, `mesh_per_chunk`) and
+  above level 0 the empty meshes and their share of the mesh jobs (`mesh_empty`,
+  `mesh_empty_share`); each move's `jobs_per_chunk` gives the same from the move
   until settled.
 - `frames.gpu.csv`, under `--instruments gpu` only, has GPU timestamps per
   frame: `frame_start`, `frame_end`, and per camera order `view_start`,

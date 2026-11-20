@@ -28,7 +28,8 @@ use tesserae_core::shape::SUBDIV;
 use tesserae_core::worldgen::WaterParams;
 use tesserae_core::{
     CHUNK_SIZE, Chunk, ChunkMesh, ChunkOverlay, LitChunk, MeshLayer, OreTable, SeamMargin,
-    SeamOpenings, Tables, Voxel, Worldgen, WorldgenParams, mesh_chunk_with_seams, seam_openings,
+    SeamOpenings, Surface, Tables, Voxel, Worldgen, WorldgenParams, emits_no_faces,
+    mesh_chunk_with_seams, seam_openings,
 };
 
 use super::jobs::Stage;
@@ -536,6 +537,8 @@ pub(in crate::server) mod measure {
         cpu_nanos: AtomicU64,
         jobs: AtomicU64,
         longest_nanos: AtomicU64,
+        /// Mesh jobs only: those whose mesh was empty.
+        empty: AtomicU64,
     }
 
     /// Summed on the workers, so the wait in the queue is left out.
@@ -554,8 +557,12 @@ pub(in crate::server) mod measure {
             self.time(level, 0, work)
         }
 
-        pub fn meshed<T>(&self, level: u32, work: impl FnOnce() -> T) -> T {
-            self.time(level, 1, work)
+        pub fn meshed(&self, level: u32, work: impl FnOnce() -> ChunkMesh) -> ChunkMesh {
+            let mesh = self.time(level, 1, work);
+            if crate::cost::collecting() && mesh.is_empty() {
+                self.0[level as usize][1].empty.fetch_add(1, Relaxed);
+            }
+            mesh
         }
 
         fn time<T>(&self, level: u32, stage: usize, work: impl FnOnce() -> T) -> T {
@@ -582,6 +589,10 @@ pub(in crate::server) mod measure {
 
         pub fn mesh_cost(&self, level: u32) -> JobCost {
             self.cost(level, 1)
+        }
+
+        pub fn empty_meshes(&self, level: u32) -> u64 {
+            self.0[level as usize][1].empty.load(Relaxed)
         }
 
         /// Worker thread CPU to generate, and to mesh, since the World opened.
@@ -613,7 +624,11 @@ pub(in crate::server) mod measure {
             work()
         }
 
-        pub fn meshed<T>(&self, _level: u32, work: impl FnOnce() -> T) -> T {
+        pub fn meshed(
+            &self,
+            _level: u32,
+            work: impl FnOnce() -> tesserae_core::ChunkMesh,
+        ) -> tesserae_core::ChunkMesh {
             work()
         }
     }
@@ -780,12 +795,23 @@ pub(in crate::server) struct Shown {
     pub openings: Arc<SeamOpenings>,
 }
 
+/// What a mesh job asks of its level's generator.
+trait Source: Surface {
+    fn water(&self) -> Option<WaterParams>;
+}
+
+impl Source for Worldgen {
+    fn water(&self) -> Option<WaterParams> {
+        Worldgen::water(self)
+    }
+}
+
 /// Lit by the covered-column rule of [`coarse_light_in`]: no light is stored above level 0, so
 /// it is computed here from the generator and dropped with the job. `level` is for the water,
 /// whose depth is counted in level-0 Voxels. Fluid in the overlay is lit as the air it stands
 /// in, and a coarse fire emits nothing, as ADR-0011 has coarse light do.
 fn mesh_coarse(
-    surface: &Worldgen,
+    surface: &impl Source,
     level: u32,
     voxel_m: f32,
     coord: ChunkCoord,
@@ -793,6 +819,15 @@ fn mesh_coarse(
     around: &[Shown; 6],
     tables: &Tables,
 ) -> ChunkMesh {
+    // Sky and buried rock are much of a level's mesh shell, and their light costs more than this.
+    if emits_no_faces(
+        &center.chunk,
+        &center.overlay,
+        std::array::from_fn(|face| Some(&*around[face].chunk)),
+        &tables.materials,
+    ) {
+        return ChunkMesh::default();
+    }
     let water = surface.water().map(|w| UnderWater {
         level_m: w.level_m,
         material: w.material,
@@ -3423,6 +3458,59 @@ mod tests {
             &std::array::from_fn(|_| air.clone()),
             &tables,
         )
+    }
+
+    /// A generator that fails the test if a mesh job asks it where the ground is, which only
+    /// lighting does.
+    struct Unlit;
+
+    impl tesserae_core::Surface for Unlit {
+        fn height_m(&self, _: f32, _: f32) -> f32 {
+            panic!("asked for light")
+        }
+
+        fn bounds_m(&self) -> (f32, f32) {
+            panic!("asked for light")
+        }
+    }
+
+    impl Source for Unlit {
+        fn water(&self) -> Option<WaterParams> {
+            Some(WaterParams {
+                level_m: 40.0,
+                material: tesserae_core::testgen::fixtures().water,
+            })
+        }
+    }
+
+    fn mesh_unlit(center: Chunk, around: Chunk) -> ChunkMesh {
+        let around = shown(packed(around));
+        mesh_coarse(
+            &Unlit,
+            1,
+            world().voxel_size * 2.0,
+            ChunkCoord::new(0, 1, 0),
+            &shown(packed(center)),
+            &std::array::from_fn(|_| around.clone()),
+            &crate::server::fixture_tables(),
+        )
+    }
+
+    #[test]
+    fn a_coarse_chunk_with_no_faces_is_meshed_empty_without_its_light() {
+        let rock = Chunk::filled(stone());
+        for (center, around) in [(Chunk::air(), Chunk::air()), (rock.clone(), rock)] {
+            let mesh = mesh_unlit(center, around);
+            assert!(mesh.is_empty());
+            assert_eq!(mesh.shaped_voxels, 0);
+        }
+    }
+
+    /// What makes `Unlit` a witness: a Chunk that has faces is lit first.
+    #[test]
+    #[should_panic(expected = "asked for light")]
+    fn a_coarse_chunk_with_faces_asks_for_its_light() {
+        mesh_unlit(Chunk::filled(stone()), Chunk::air());
     }
 
     /// Every quad of `layer` whose normal is `normal`, as its highest point in metres at `level`.

@@ -71,8 +71,8 @@ pub use lod::{
 };
 pub use material::{MaterialDef, MaterialError, MaterialTable, Occlusion, RenderClass};
 pub use mesh::{
-    ChunkMesh, LitChunk, MeshLayer, Neighborhood, SeamOpenings, greedy_mesh, mesh_chunk,
-    mesh_chunk_with_seams,
+    ChunkMesh, LitChunk, MeshLayer, Neighborhood, SeamOpenings, emits_no_faces, greedy_mesh,
+    mesh_chunk, mesh_chunk_with_seams,
 };
 pub use occupants::{
     Burning, ChunkOverlay, Fluid, Level, Occupants, Overlay, optical, optical_chunk,

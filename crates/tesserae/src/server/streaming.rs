@@ -1240,6 +1240,8 @@ pub mod stats {
         /// Since the World opened: jobs run on a worker, and their worker CPU.
         pub run: [u64; 3],
         pub cpu_ms: [f64; 3],
+        /// Since the World opened: mesh jobs whose mesh was empty. Levels above 0 only.
+        pub empty_meshes: u64,
     }
 
     #[derive(Resource, Default, Clone, Debug)]
@@ -1413,6 +1415,7 @@ pub mod stats {
             ],
             run: [generated.0, relit.0, meshed.0],
             cpu_ms: [generated.1, relit.1, meshed.1],
+            empty_meshes: 0,
         };
         let mut levels = vec![LevelStats {
             held: store.coords().count(),
@@ -1471,6 +1474,7 @@ pub mod stats {
                     lod_jobs.times.mesh_cost(level).jobs,
                 ],
                 cpu_ms: [generate_cpu, 0.0, mesh_cpu],
+                empty_meshes: lod_jobs.times.empty_meshes(level),
             };
             LevelStats {
                 flow,

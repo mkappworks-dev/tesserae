@@ -169,6 +169,32 @@ def moves_run(root, frames, flow):
     return json.loads((root / 'streaming.json').read_text())['revisit-1-on']['moves']
 
 
+class Workers(unittest.TestCase):
+    def test_a_coarse_level_reports_the_share_of_its_mesh_jobs_that_were_empty(self):
+        header = ('frame_id,t_s,level,generate_waiting,generate_run,generate_cpu_ms,'
+                  'relight_waiting,relight_run,relight_cpu_ms,mesh_waiting,mesh_run,mesh_cpu_ms,'
+                  'mesh_empty,fluid_run,fluid_cpu_ms\n')
+        # t, level, mesh jobs run and how many were empty, since the World opened.
+        flow = [(22.0, 0, 50, 0), (22.0, 1, 10, 4), (23.0, 0, 90, 0), (23.0, 1, 50, 34)]
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            run = root / 'flight-1-on'
+            run.mkdir()
+            (run / 'frames.csv').write_text(FRAME_HEADER + ''.join(
+                f'{i},{start},{end},fixture,10,true,0,0,0,,0\n'
+                for i, (start, end) in enumerate([(22.0, 22.5), (22.5, 23.0)])))
+            (run / 'frames.render.csv').write_text(
+                'frame_id,render_schedule_wall_ms,render_thread_cpu_ms\n')
+            (run / 'frames.flow.csv').write_text(header + ''.join(
+                f'0,{t},{level},0,1,0,0,0,0,0,{mesh},0,{empty},0,0\n'
+                for t, level, mesh, empty in flow))
+            PROFILE['analyze'](root)
+            workers = json.loads((root / 'streaming.json').read_text())['flight-1-on']['workers']
+        self.assertEqual(workers['1']['mesh_empty'], 30)
+        self.assertAlmostEqual(workers['1']['mesh_empty_share'], 30 / 40)
+        self.assertNotIn('mesh_empty', workers['0'])
+
+
 class Moves(unittest.TestCase):
     def test_each_move_settles_after_it_is_first_seen_unsettled(self):
         frames = [(21.9, 22.0, 'true', 0), (22.0, 22.1, 'true', 1), (22.1, 22.2, 'false', 1),

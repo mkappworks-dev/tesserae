@@ -532,7 +532,7 @@ fn save(
             ",{stage}_waiting,{stage}_in_flight,{stage}_run,{stage}_cpu_ms"
         )?;
     }
-    writeln!(flow, ",fluid_run,fluid_cpu_ms,limit_reached")?;
+    writeln!(flow, ",mesh_empty,fluid_run,fluid_cpu_ms,limit_reached")?;
     let limited = profile.flow.len() + 32 > MAX_FLOW_ROWS;
     for r in &profile.flow {
         write!(
@@ -547,7 +547,11 @@ fn save(
                 r.flow.waiting[s], r.flow.in_flight[s], r.flow.run[s], r.flow.cpu_ms[s]
             )?;
         }
-        writeln!(flow, ",{},{},{limited}", r.fluid_run.0, r.fluid_run.1)?;
+        writeln!(
+            flow,
+            ",{},{},{},{limited}",
+            r.flow.empty_meshes, r.fluid_run.0, r.fluid_run.1
+        )?;
     }
     flow.flush()?;
     if profile.lag {
