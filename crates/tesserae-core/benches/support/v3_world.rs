@@ -1,5 +1,6 @@
-//! A Generator version 3 World shaped like Terra's, and the Chunks the version 3 bench times, each
-//! found by a fixed scan so a figure names the same Chunk on every run and build.
+//! A Generator version 3 World shaped like Terra's, the same World with Terra's crop fields, and the
+//! Chunks the version 3 bench times, each found by a fixed scan so a figure names the same Chunk on
+//! every run and build.
 
 #![allow(dead_code)]
 
@@ -9,9 +10,9 @@ use tesserae_core::terrain::LandformParams;
 use tesserae_core::testgen::fixtures;
 use tesserae_core::{
     AIR, Biome, BiomeId, BiomeName, BiomeSet, BiomeStructure, BiomeTable, CHUNK_SIZE,
-    ClimateParams, Clump, GroundParams, MAX_SURFACE_STAGES, MaterialId, Ore, OreTable,
-    SurfaceFeature, SurfaceFeatures, SurfacePlant, SurfacePlantKind, SurfaceTree, Voxel, Worldgen,
-    WorldgenParams,
+    ClimateParams, Clump, CropField, FieldCrop, GroundParams, MAX_SURFACE_STAGES, MaterialId, Ore,
+    OreTable, SurfaceFeature, SurfaceFeatures, SurfacePlant, SurfacePlantKind, SurfaceTree, Voxel,
+    Worldgen, WorldgenParams,
 };
 
 pub const SEED: u64 = 0x7e55_e2ae_0000_0003;
@@ -25,9 +26,12 @@ const FLOOR: MaterialId = 180;
 const WALL: MaterialId = 181;
 const ROOF: MaterialId = 183;
 const FOUNDATION: MaterialId = 185;
+/// Each crop's Stages, sprout to ripe.
+pub const CROPS: [[MaterialId; 3]; 3] = [[240, 241, 242], [243, 244, 245], [246, 247, 248]];
 
 pub const FOREST: BiomeId = BiomeId::new(0);
 pub const DRY: BiomeId = BiomeId::new(1);
+pub const PLAIN: BiomeId = BiomeId::new(2);
 
 /// Forked and leaning like Terra's broadleaf, in groves.
 fn tree() -> SurfaceFeature {
@@ -123,9 +127,31 @@ fn biome(name: &str, temperature: f32, humidity: f32) -> Biome {
     }
 }
 
+/// Terra's temperate fields: one entry near the lake with a ditch on a 64 m lattice, one anywhere on
+/// a 96 m lattice, each of three crops weighted as Terra's.
+pub fn crop_fields() -> Vec<CropField> {
+    [(64.0, Some(48.0)), (96.0, None)]
+        .map(|(spacing_m, near_water_m)| {
+            let ditch = near_water_m.map(|_| fixtures().water);
+            let mut field = CropField::new((6.0, 12.0), spacing_m, Some(SAND), ditch, near_water_m);
+            for (stages, weight) in CROPS.iter().zip([6.0, 3.0, 2.0]) {
+                let crop = FieldCrop::new(5, stages, &[], weight).unwrap();
+                field.push(crop).unwrap();
+            }
+            field
+        })
+        .to_vec()
+}
+
 /// A forest with clumped trees over grass, a dry Biome with its own ground, wider caves and huts,
 /// and a plain between; ores everywhere and one only under the dry ground; water and caves.
 pub fn params() -> WorldgenParams {
+    params_with_fields(&[])
+}
+
+/// [`params`] with `fields` planted in the forest and the plain, as Terra plants its temperate
+/// forest and its grassland.
+fn params_with_fields(fields: &[CropField]) -> WorldgenParams {
     let base = tesserae_core::testgen::world_params().with_default_lake(fixtures().water);
     let world = base.ground.unwrap();
     let hut_row = BiomeStructure {
@@ -135,7 +161,9 @@ pub fn params() -> WorldgenParams {
     };
     let biomes = [
         Biome {
-            surface_features: SurfaceFeatures::new(&[tree(), grass(2.0)]).unwrap(),
+            surface_features: SurfaceFeatures::new(&[tree(), grass(2.0)])
+                .and_then(|f| f.with_crop_fields(fields))
+                .unwrap(),
             ..biome("t:forest", 0.5, 0.75)
         },
         Biome {
@@ -150,7 +178,9 @@ pub fn params() -> WorldgenParams {
         },
         Biome {
             ground: Some(world),
-            surface_features: SurfaceFeatures::new(&[grass(4.0)]).unwrap(),
+            surface_features: SurfaceFeatures::new(&[grass(4.0)])
+                .and_then(|f| f.with_crop_fields(fields))
+                .unwrap(),
             ..biome("t:plain", 0.4, 0.45)
         },
     ];
@@ -188,6 +218,11 @@ pub fn params() -> WorldgenParams {
 
 pub fn generator(voxel_size: f32) -> Worldgen {
     Worldgen::new(SEED, voxel_size, params()).with_templates(&templates())
+}
+
+/// [`generator`]'s World with [`crop_fields`] in the forest and the plain.
+pub fn crop_generator(voxel_size: f32) -> Worldgen {
+    Worldgen::new(SEED, voxel_size, params_with_fields(&crop_fields())).with_templates(&templates())
 }
 
 /// What the Server's level-`level` source draws, as `LodGenerators` makes it: no features and, past
@@ -247,16 +282,52 @@ pub struct Case {
     pub voxel_size: f32,
     /// The Server's level-`level` source, or level 0's own generator at 0.
     pub level: u32,
+    /// Whether level 0 is [`crop_generator`]'s World rather than [`generator`]'s.
+    pub crop_fields: bool,
     pub chunks: Vec<[i32; 3]>,
 }
 
 impl Case {
     pub fn generator(&self) -> Worldgen {
         match self.level {
+            0 if self.crop_fields => crop_generator(self.voxel_size),
             0 => generator(self.voxel_size),
             level => coarse(self.voxel_size, level),
         }
     }
+}
+
+/// The Chunk holding a column's ground.
+fn straddle(g: &Worldgen, at: [i32; 2]) -> [i32; 3] {
+    let [x, z] = middle_m(g, at);
+    [at[0], layer(g, g.surface_height_m(x, z)), at[1]]
+}
+
+fn crops_in(g: &Worldgen, [cx, cy, cz]: [i32; 3]) -> usize {
+    let chunk = g.chunk(cx, cy, cz);
+    (0..CHUNK_SIZE.pow(3))
+        .filter(|i| {
+            let m = chunk
+                .get(
+                    i % CHUNK_SIZE,
+                    i / CHUNK_SIZE % CHUNK_SIZE,
+                    i / CHUNK_SIZE.pow(2),
+                )
+                .material();
+            CROPS.as_flattened().contains(&m)
+        })
+        .count()
+}
+
+/// The first Chunk column whose ground Chunk is well inside a planted field: a crop on an eighth of
+/// its columns, where a field's edge clipping a corner holds a few.
+pub fn crop_field_column(g: &Worldgen) -> [i32; 2] {
+    scan(g, |m| {
+        let at = m.map(|v| (v / (CHUNK_SIZE as f32 * g.voxel_size())).floor() as i32);
+        matches!(g.biome_at(m[0], m[1]), Some(FOREST | PLAIN))
+            && dry_land(g, m, 0.0)
+            && crops_in(g, straddle(g, at)) * 8 >= CHUNK_SIZE.pow(2)
+    })
 }
 
 /// Every Chunk of the band over a column, bottom to top, that is not an early-out.
@@ -274,10 +345,6 @@ pub fn band(g: &Worldgen, [cx, cz]: [i32; 2]) -> Vec<[i32; 3]> {
 pub fn cases(voxel_size: f32) -> Vec<Case> {
     let g = generator(voxel_size);
     let (lowest, highest) = g.surface_bounds_m();
-    let straddle = |at: [i32; 2]| {
-        let [x, z] = middle_m(&g, at);
-        [at[0], layer(&g, g.surface_height_m(x, z)), at[1]]
-    };
     let forest = scan(&g, |at| {
         g.biome_at(at[0], at[1]) == Some(FOREST) && dry_land(&g, at, 4.0)
     });
@@ -330,54 +397,78 @@ pub fn cases(voxel_size: f32) -> Vec<Case> {
         .flat_map(|dz| (-1..=1).map(move |dx| [forest[0] + dx, forest[1] + dz]))
         .flat_map(|at| band(&g, at))
         .collect();
+    let crops = crop_generator(voxel_size);
+    let field = crop_field_column(&crops);
     vec![
         Case {
             name: "straddling forest",
             voxel_size,
             level: 0,
-            chunks: vec![straddle(forest)],
+            crop_fields: false,
+            chunks: vec![straddle(&g, forest)],
         },
         Case {
             name: "straddling dry",
             voxel_size,
             level: 0,
-            chunks: vec![straddle(dry)],
+            crop_fields: false,
+            chunks: vec![straddle(&g, dry)],
         },
         Case {
             name: "sky",
             voxel_size,
             level: 0,
+            crop_fields: false,
             chunks: vec![sky],
         },
         Case {
             name: "deep rock",
             voxel_size,
             level: 0,
+            crop_fields: false,
             chunks: vec![deep],
         },
         Case {
             name: "river",
             voxel_size,
             level: 0,
-            chunks: vec![straddle(river)],
+            crop_fields: false,
+            chunks: vec![straddle(&g, river)],
         },
         Case {
             name: "cavern",
             voxel_size,
             level: 0,
+            crop_fields: false,
             chunks: vec![cavern],
         },
         Case {
             name: "coarse level 3",
             voxel_size,
             level: coarse_level,
+            crop_fields: false,
             chunks: band(&c, coarse_at),
         },
         Case {
             name: "forest 3x3 columns",
             voxel_size,
             level: 0,
+            crop_fields: false,
             chunks: patch,
+        },
+        Case {
+            name: "straddling crop field",
+            voxel_size,
+            level: 0,
+            crop_fields: true,
+            chunks: vec![straddle(&crops, field)],
+        },
+        Case {
+            name: "crop field column",
+            voxel_size,
+            level: 0,
+            crop_fields: true,
+            chunks: band(&crops, field),
         },
     ]
 }

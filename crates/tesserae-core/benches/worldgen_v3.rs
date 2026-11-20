@@ -3,8 +3,9 @@
 //! build's round too, the two alternating which goes first; medians over rounds are reported, and
 //! the median of the per-round ratios, so host load falls on both builds alike.
 //!
-//! Each case generates its Chunks from a fresh generator whose drainage is solved first: the
-//! regions are 2 km wide and a flight crosses them rarely, while the columns are new each Chunk.
+//! Each case generates its Chunks from a fresh generator whose drainage is solved first, wherever a
+//! Chunk or the neighbours it asks reach: the regions are 2 km wide and a flight crosses them
+//! rarely, while the columns are new each Chunk.
 //!
 //! `cargo bench -p tesserae-core --bench worldgen_v3`; `TESSERAE_BENCH_ROUNDS` sets the rounds.
 
@@ -44,15 +45,26 @@ fn load() -> String {
         .unwrap_or_default()
 }
 
-/// Solves the drainage under every Chunk column of the case without building any column's cache:
-/// neither asks at a column's corner.
+/// How far from a Chunk the drainage is solved: past the neighbour Cells a tree's reach and
+/// crowding touch, and past a 96 m crop-field cell beside it whose field gives way to the 64 m
+/// cells it crosses, each asking the lake 48 m from its field. Under half a 2 km drainage region,
+/// so every region the square around a Chunk crosses holds one of its corners.
+const WARM_REACH_M: f32 = 384.0;
+
+/// Solves the drainage of every region within [`WARM_REACH_M`] of the case's Chunks without
+/// building any column's cache: neither asks at a column's corner.
 fn warm(g: &tesserae_core::Worldgen, chunks: &[[i32; 3]]) {
     let cell_m = tesserae_core::CHUNK_SIZE as f32 * g.voxel_size();
+    let reach = (WARM_REACH_M / cell_m).ceil() as i32;
     for &[cx, _, cz] in chunks {
-        for (dx, dz) in [(0.25, 0.25), (0.75, 0.75)] {
-            let (x, z) = ((cx as f32 + dx) * cell_m, (cz as f32 + dz) * cell_m);
-            black_box(g.water_level_m(x, z));
-            black_box(g.terrain_height_m(x, z));
+        for i in [cx - reach, cx + reach] {
+            for j in [cz - reach, cz + reach] {
+                for (dx, dz) in [(0.25, 0.25), (0.75, 0.75)] {
+                    let (x, z) = ((i as f32 + dx) * cell_m, (j as f32 + dz) * cell_m);
+                    black_box(g.water_level_m(x, z));
+                    black_box(g.terrain_height_m(x, z));
+                }
+            }
         }
     }
 }
@@ -130,10 +142,16 @@ fn main() {
     println!("load after:  {}", load());
     println!("worldgen v3, us of CPU per Chunk  [{rounds} rounds x {REPS}]");
     let names: Vec<String> = samples[0][0].iter().map(|(n, _)| n.clone()).collect();
-    for (i, name) in names.iter().enumerate() {
-        let of = |b: usize| -> Vec<f64> { samples[b].iter().map(|r| r[i].1).collect() };
+    for name in &names {
+        // By name: a build from before a case was added runs fewer cases.
+        let of = |b: usize| -> Vec<f64> {
+            samples[b]
+                .iter()
+                .filter_map(|r| r.iter().find(|(n, _)| n == name).map(|&(_, ns)| ns))
+                .collect()
+        };
         let mut line = format!("  {name:<44} {:>10.1}", median(of(0)) / 1e3);
-        if binaries.len() > 1 {
+        if binaries.len() > 1 && !of(1).is_empty() {
             let ratios = of(0).iter().zip(of(1)).map(|(a, b)| a / b).collect();
             line += &format!(
                 "  against {:>10.1}  {:>6.1}%",
