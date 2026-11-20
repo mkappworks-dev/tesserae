@@ -321,8 +321,10 @@ function render() {
   else if (state.screen === "mods-library") screen.innerHTML = modsLibrary();
   else if (state.screen === "death") screen.innerHTML = deathScreen();
   else if (state.screen === "trust") screen.innerHTML = trustScreen();
-  else if (state.screen === "opening") screen.innerHTML = opening();
-  else if (state.screen === "blocks") {
+  else if (state.screen === "opening") {
+    screen.innerHTML = opening();
+    openingMount();
+  } else if (state.screen === "blocks") {
     screen.innerHTML = blocksPage();
     drawBlocks();
   } else if (state.screen === "plants") screen.innerHTML = plantsPage();
@@ -496,9 +498,97 @@ function trustScreen() {
     footer: `${button("← Your Worlds", "trust-back", { ghost: true })}<span class="footer-hint">Trust is for these exact files</span>${button(`Trust all ${n} and open`, "trust-open", { primary: true })}`,
   });
 }
+/* The engine's `open::Stage`s with their bar spans. `s` is the browser's example duration. */
+const OPENING_STAGES = [
+  { short: "Save", label: "Reading the save", span: [0, 0.15], s: 0.4 },
+  { short: "Game", label: "Loading the Game", span: [0.15, 0.55], s: 1.4 },
+  { short: "World", label: "Preparing the World", span: [0.55, 0.75], s: 0.6 },
+  {
+    short: "First terrain",
+    label: "Building the first terrain",
+    span: [0.75, 0.8],
+    s: 0.5,
+  },
+  {
+    short: "Ground",
+    label: "Drawing the ground around you",
+    span: [0.8, 1],
+    s: 2.4,
+    counted: true,
+  },
+];
+/* The loader reports a stage, not how far through it is, so the bar eases toward the next stage
+   and stops short of it. The last stage is counted: the Client knows how many Cells of the ring
+   it holds a level-0 mesh for, so the count leads once it passes the sweep, and only the last
+   mesh finishes the bar. */
+function openingBar(stage, t, held) {
+  const { span, counted } = stage,
+    sweep = (1 - Math.exp(-t / 2)) * 0.9;
+  return (
+    span[0] + (span[1] - span[0]) * (counted ? Math.max(sweep, held) : sweep)
+  );
+}
+/* Meshes wait for the light around them to settle, so the near ground lands late and in a burst. */
+function openingHeld(t) {
+  return Math.min(1, Math.max(0, (t - 0.6) / 1.8) ** 2);
+}
 function opening() {
-  const w = activeWorld();
-  return `<div class="pause-screen"><section class="pause-panel"><h2>Opening ${esc(w?.name || "your World")}…</h2><small>Loading the World.</small><div style="margin-top:18px;height:4px;border-radius:2px;background:var(--panel-raised)"><div style="width:42%;height:100%;border-radius:2px;background:var(--leaf)"></div></div></section></div>`;
+  const w = activeWorld(),
+    pick = state.openingStage ?? "play",
+    seg = [
+      ["play", "Replay full load"],
+      ...OPENING_STAGES.map((s, i) => [String(i), s.short]),
+      ["after", "After it lifts"],
+    ]
+      .map(
+        ([v, label]) =>
+          `<button class="${pick === v ? "active" : ""}" data-action="opening-stage" data-value="${v}" aria-pressed="${pick === v}">${label}</button>`,
+      )
+      .join("");
+  return `<div class="pause-screen"><section class="pause-panel" id="opening-panel"><h2>Opening ${esc(w?.name || "your World")}…</h2><small>Loading the World.</small><p class="opening-stage" id="opening-stage" aria-live="polite">${OPENING_STAGES[0].label}</p><div class="opening-track" role="progressbar" aria-label="Loading" aria-valuemin="0" aria-valuemax="100"><div class="opening-fill" id="opening-fill"></div></div></section><aside class="opening-example"><p class="eyebrow">PREVIEW STAGE</p><div class="layout-method">${seg}</div><small id="opening-note"></small></aside></div>`;
+}
+let openingFrame = 0;
+function openingMount() {
+  cancelAnimationFrame(openingFrame);
+  const start = performance.now(),
+    pick = state.openingStage ?? "play",
+    last = OPENING_STAGES.length - 1;
+  const draw = () => {
+    const panel = $("#opening-panel");
+    if (state.screen !== "opening" || !panel) return;
+    let i, t, held;
+    if (pick === "play") {
+      t = (performance.now() - start) / 1000;
+      for (i = 0; i < last && t >= OPENING_STAGES[i].s; i++)
+        t -= OPENING_STAGES[i].s;
+      held = OPENING_STAGES[i].counted ? openingHeld(t) : 0;
+    } else if (pick === "after") {
+      i = last;
+      t = 1.5;
+      held = 1;
+    } else {
+      i = Number(pick);
+      t = 1.5;
+      held = OPENING_STAGES[i].counted ? 0.55 : 0;
+    }
+    const stage = OPENING_STAGES[i],
+      /* Boolean, not undefined: `classList.toggle` with undefined flips rather than clears. */
+      done = Boolean(stage.counted) && held >= 1,
+      bar = done ? 1 : openingBar(stage, t, held);
+    $("#opening-stage").textContent = stage.label;
+    $("#opening-fill").style.width = `${(bar * 100).toFixed(1)}%`;
+    panel
+      .querySelector(".opening-track")
+      .setAttribute("aria-valuenow", Math.round(bar * 100));
+    panel.classList.toggle("opening-hidden", done);
+    $("#opening-note").textContent = done
+      ? "Every Cell of the ring around you has its full-detail mesh, so the screen hides on a World that is already whole. The 15 s timeout still hides it for a World saved without a Game."
+      : stage.counted
+        ? `Ground around you drawn in full detail: ${Math.round(held * 100)}% of the ring. The bar follows this count once it passes the sweep.`
+        : "The bar eases toward the next stage and never reaches it by waiting.";
+    if (pick === "play" && !done) openingFrame = requestAnimationFrame(draw);
+  };
+  draw();
 }
 function pause() {
   const w = activeWorld();
@@ -775,6 +865,11 @@ function action(name, value) {
   if (name === "trust-open") {
     state.activeWorld = worlds[0]?.id;
     navigate("pause");
+    return;
+  }
+  if (name === "opening-stage") {
+    state.openingStage = value;
+    render();
     return;
   }
   if (name === "trust-back") {
