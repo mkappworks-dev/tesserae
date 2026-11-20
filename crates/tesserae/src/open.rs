@@ -43,8 +43,9 @@ pub struct Opened {
     direct: bool,
 }
 
-/// The stages the loading bar follows, in order. The last is the Client's
-/// first drawn terrain, which only it can tell.
+/// The stages the loading bar follows, in order. The last two are the Client's,
+/// which only it can tell: its first drawn terrain, then the ground around the
+/// Eye drawn at level 0.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(u8)]
 pub enum Stage {
@@ -52,6 +53,7 @@ pub enum Stage {
     LoadingGame,
     PreparingWorld,
     FirstTerrain,
+    Ground,
 }
 
 impl Stage {
@@ -61,6 +63,7 @@ impl Stage {
             Stage::LoadingGame => "Loading the Game",
             Stage::PreparingWorld => "Preparing the World",
             Stage::FirstTerrain => "Building the first terrain",
+            Stage::Ground => "Drawing the ground around you",
         }
     }
 
@@ -70,7 +73,8 @@ impl Stage {
             Stage::ReadingSave => (0.0, 0.15),
             Stage::LoadingGame => (0.15, 0.55),
             Stage::PreparingWorld => (0.55, 0.75),
-            Stage::FirstTerrain => (0.75, 1.0),
+            Stage::FirstTerrain => (0.75, 0.8),
+            Stage::Ground => (0.8, 1.0),
         }
     }
 
@@ -122,12 +126,10 @@ pub fn plugin(app: &mut App) {
                     .run_if(in_state(AppState::Loading))
                     .run_if(resource_exists::<Load>),
                 quit_while_loading.run_if(in_state(AppState::Loading)),
-                fault_before_terrain
+                fault_before_ground
                     .run_if(in_state(AppState::InWorld))
                     .run_if(resource_exists::<Opened>)
-                    .run_if(not(
-                        resource_exists::<crate::client::loading::TerrainArrived>,
-                    )),
+                    .run_if(not(resource_exists::<crate::client::loading::GroundDrawn>)),
             ),
         );
 }
@@ -269,9 +271,9 @@ fn finish(
 }
 
 /// A Mod that traps while the World is still starting leaves nothing to play:
-/// back to the list, or out, with the reason. Once terrain is drawn a Mod that
-/// stops is only disabled.
-fn fault_before_terrain(
+/// back to the list, or out, with the reason. Once the ground around the Eye is
+/// drawn, when the loading screen lifts, a Mod that stops is only disabled.
+fn fault_before_ground(
     opened: Res<Opened>,
     mut faults: MessageReader<crate::server::mods::ModDisabled>,
     mut last: ResMut<LastFailure>,
@@ -457,10 +459,13 @@ mod tests {
             Stage::LoadingGame,
             Stage::PreparingWorld,
             Stage::FirstTerrain,
+            Stage::Ground,
         ];
         assert!(stages.windows(2).all(|w| w[0] < w[1]));
+        for stage in &stages[..4] {
+            assert_eq!(Stage::from_u8(*stage as u8), *stage);
+        }
         for stage in stages {
-            assert_eq!(Stage::from_u8(stage as u8), stage);
             assert!(!stage.label().is_empty());
         }
     }
