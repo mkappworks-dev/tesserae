@@ -86,8 +86,10 @@ Item 2 (GPU occlusion culling) and item 3 (underground visibility culling) are
   `no-shadows` switch gives the shadows' whole cost where Apple's
   encoder-boundary timestamps blur passes together.
 - **Indirect validation off (Q10).** On macOS the backends are
-  `Backends::from_env().unwrap_or(Backends::METAL)`, so Bevy drops
-  `VALIDATION_INDIRECT_CALL` in release by its own rule; debug builds keep it.
+  `Backends::from_env().unwrap_or(Backends::METAL)` and release builds drop
+  `VALIDATION_INDIRECT_CALL`, which Bevy decides inside `WgpuSettings::default`
+  from its own backends, so setting the backends alone keeps it; debug builds
+  and `WGPU_VALIDATION_INDIRECT_CALL=1` keep it.
   Bevy writes every indirect argument itself, so undefined behaviour from a
   malformed one is not a new risk.
 - **Item 2 is `wontfix` (Q11).** Bevy's two-phase culling adds a full depth

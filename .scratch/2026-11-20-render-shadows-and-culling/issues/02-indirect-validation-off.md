@@ -14,10 +14,12 @@ a staging buffer and a copy.
 
 - On macOS, the app's `WgpuSettings` backends are
   `Backends::from_env().unwrap_or(Backends::METAL)`, so `WGPU_BACKEND` still
-  overrides and Bevy drops the flag in release by its own rule. Debug builds
+  overrides, and release builds remove the flag themselves: Bevy decides it
+  inside `WgpuSettings::default` from its own backends, so setting the
+  backends alone keeps it. Debug builds and `WGPU_VALIDATION_INDIRECT_CALL=1`
   keep validation.
-- One line of why where it is set. A test, if the settings are reachable without
-  a GPU, that the default backends on macOS lack DX12.
+- One comment of why where it is set. A test that on macOS the backends are
+  Metal and the flag is set in debug only, run in debug and in release.
 
 ## Acceptance criteria
 
