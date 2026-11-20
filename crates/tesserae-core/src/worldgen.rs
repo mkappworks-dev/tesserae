@@ -45,8 +45,8 @@ use crate::tables::Tables;
 use crate::template::Template;
 use crate::terrain::{CAVERN_MIN_DEPTH_M, Caverns, Column, LandformParams, Terrain};
 use crate::underground::{
-    AQUIFER_WALL_M, CAVE_BIOME_MIN_DEPTH_M, CaveBiomeTable, LAVA_DEPTH_M, LAVA_SEAL_M,
-    SPRING_SPACING_M, aquifer_cell, aquifer_rise_m, cave_biome_at,
+    AQUIFER_WALL_M, CAVE_BIOME_MIN_DEPTH_M, CaveBiomeCells, CaveBiomeTable, LAVA_DEPTH_M,
+    LAVA_SEAL_M, SPRING_SPACING_M, aquifer_cell, aquifer_rise_m, cave_biome_at,
 };
 use crate::voxel::SHAPE_FULL_CUBE;
 use crate::voxel::{MaterialId, Voxel};
@@ -2018,7 +2018,12 @@ impl Worldgen {
             .unwrap_or_default();
 
         let ores = self.ores_reaching(floor_m, ceiling_m);
-        let mut cave_biomes: HashMap<[i32; 3], Option<u8>> = HashMap::new();
+        let mut cave_biomes = CaveBiomeCells::new(
+            self.underground_biomes,
+            origin_m,
+            self.voxel_size,
+            CHUNK_SIZE,
+        );
         // Per Chunk, so the column loop asks nothing of version 3's underground where none is.
         let springs = self.caverns.is_some() && self.water.is_some();
         let mut chunk = ChunkBuilder::new();
@@ -2366,22 +2371,19 @@ impl Worldgen {
     /// The cave Biome of a Voxel `base_m` under the surface, cached by lattice cell for the Chunk.
     fn cave_biome_cached(
         &self,
-        cache: &mut HashMap<[i32; 3], Option<u8>>,
+        cells: &mut CaveBiomeCells,
         at: [f32; 3],
         base_m: f32,
     ) -> Option<u8> {
         if !self.underground_biomes || base_m < CAVE_BIOME_MIN_DEPTH_M {
             return None;
         }
-        let cell = at.map(|m| (m / crate::underground::CAVE_CELL_M).floor() as i32);
-        *cache.entry(cell).or_insert_with(|| {
-            cave_biome_at(
-                &self.params.cave_biomes,
-                self.seed,
-                self.params.sea_level_m,
-                at,
-            )
-        })
+        cells.get(
+            &self.params.cave_biomes,
+            self.seed,
+            self.params.sea_level_m,
+            at,
+        )
     }
 
     /// The fog of the cave Biome round a point at least `CAVE_BIOME_MIN_DEPTH_M` under the

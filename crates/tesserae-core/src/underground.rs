@@ -2,6 +2,7 @@
 //! raise the water table in regions and the springs they feed.
 
 use crate::climate::{BiomeName, SkyFog, SkyFogBlend};
+use crate::noise::{Fbm3Cache, fbm3_cached};
 use crate::voxel::{MaterialId, SHAPE_FULL_CUBE, ShapeId};
 use crate::worldgen::ParamError;
 
@@ -188,18 +189,33 @@ pub(crate) fn cave_biome_at(
     table: &CaveBiomeTable,
     seed: u32,
     sea_level_m: f32,
+    at: [f32; 3],
+) -> Option<u8> {
+    cave_biome_near(table, seed, sea_level_m, at, &mut Default::default())
+}
+
+/// [`cave_biome_at`], bit for bit, for a run of nearby points sharing the corners of their
+/// cave Climate's cells.
+fn cave_biome_near(
+    table: &CaveBiomeTable,
+    seed: u32,
+    sea_level_m: f32,
     [x_m, y_m, z_m]: [f32; 3],
+    [temperature, humidity]: &mut [Fbm3Cache; 2],
 ) -> Option<u8> {
     if table.is_empty() {
         return None;
     }
     let centre = [x_m, y_m, z_m].map(|m| ((m / CAVE_CELL_M).floor() + 0.5) * CAVE_CELL_M);
     let [x, y, z] = centre.map(|m| m / CAVE_CLIMATE_SIZE_M);
-    let unit = |salt| {
-        let n = crate::noise::fbm3(x, y, z, seed ^ salt, 2);
+    let unit = |salt, cache| {
+        let n = fbm3_cached(x, y, z, seed ^ salt, 2, cache);
         ((n - 0.5) * CAVE_CLIMATE_STRETCH + 0.5).clamp(0.0, 1.0)
     };
-    let (t, h) = (unit(SALT_CAVE_TEMPERATURE), unit(SALT_CAVE_HUMIDITY));
+    let (t, h) = (
+        unit(SALT_CAVE_TEMPERATURE, temperature),
+        unit(SALT_CAVE_HUMIDITY, humidity),
+    );
     let altitude_m = centre[1] - sea_level_m;
     table
         .as_slice()
@@ -214,6 +230,59 @@ pub(crate) fn cave_biome_at(
             d(a).total_cmp(&d(b))
         })
         .map(|(i, _)| i as u8)
+}
+
+/// The cave Biome of each [`CAVE_CELL_M`] cell a Chunk spans, asked once each, indexed from the
+/// Chunk's first cell. Empty where a Voxel is at least a cell wide, since no two Voxels then share
+/// a cell.
+pub(crate) struct CaveBiomeCells {
+    origin: [i32; 3],
+    span: [usize; 3],
+    cells: Vec<Option<Option<u8>>>,
+    noise: [Fbm3Cache; 2],
+}
+
+impl CaveBiomeCells {
+    /// For `voxels` Voxels a side from `origin_m`, the `i`th at `origin_m + i * voxel_size`: a cell
+    /// is monotone in metres, so every Voxel placed so falls in the span.
+    pub(crate) fn new(kept: bool, origin_m: [f32; 3], voxel_size: f32, voxels: usize) -> Self {
+        let last_m = (voxels - 1) as f32 * voxel_size;
+        let origin = origin_m.map(cave_cell);
+        let span =
+            std::array::from_fn(|i| (cave_cell(origin_m[i] + last_m) - origin[i] + 1) as usize);
+        let len = if kept && voxel_size < CAVE_CELL_M {
+            span.iter().product()
+        } else {
+            0
+        };
+        CaveBiomeCells {
+            origin,
+            span,
+            cells: vec![None; len],
+            noise: Default::default(),
+        }
+    }
+
+    /// [`cave_biome_at`] for a Voxel of the Chunk.
+    pub(crate) fn get(
+        &mut self,
+        table: &CaveBiomeTable,
+        seed: u32,
+        sea_level_m: f32,
+        at: [f32; 3],
+    ) -> Option<u8> {
+        let mut ask = || cave_biome_near(table, seed, sea_level_m, at, &mut self.noise);
+        if self.cells.is_empty() {
+            return ask();
+        }
+        let [x, y, z] = std::array::from_fn(|i| (cave_cell(at[i]) - self.origin[i]) as usize);
+        let [w, h, _] = self.span;
+        *self.cells[(z * h + y) * w + x].get_or_insert_with(ask)
+    }
+}
+
+fn cave_cell(m: f32) -> i32 {
+    (m / CAVE_CELL_M).floor() as i32
 }
 
 impl SkyFog {

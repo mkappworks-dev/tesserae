@@ -366,6 +366,79 @@ fn cave_biomes_near_the_corners_of_the_cave_climate_each_take_a_share() {
     }
 }
 
+const BASALT: MaterialId = 215;
+const ASH: MaterialId = 216;
+
+/// Over Chunks a cave Biome border crosses, every cave Biome rock and floor Voxel belongs to the
+/// cave Biome the World names at its point.
+fn assert_cave_biomes_match_their_points(size: f32) {
+    let cave = |name: &str, at: (f32, f32), rock: MaterialId, floor: MaterialId| {
+        CaveBiome::new(
+            BiomeName::new(name).unwrap(),
+            at,
+            None,
+            Some(rock),
+            Some(floor),
+            None,
+            &[],
+        )
+        .unwrap()
+    };
+    let caves = [
+        cave("t:crystal", (0.3, 0.3), CRYSTAL, MOSS),
+        cave("t:basalt", (0.7, 0.7), BASALT, ASH),
+    ];
+    let g = Worldgen::new(SEED, size, params(&caves, false));
+    let cell_m = N as f32 * size;
+    let depth_m = -60.0;
+    let border = (0..40)
+        .flat_map(|i| (0..40).map(move |j| [i - 20, j - 20]))
+        .find(|&[cx, cz]| {
+            let [x0, z0] = [cx, cz].map(|c| c as f32 * cell_m);
+            let at = |dx: f32, dz: f32| g.cave_biome_index_at(x0 + dx, depth_m, z0 + dz);
+            let (lo, hi) = (0.0, cell_m - size);
+            at(lo, lo) != at(hi, hi) || at(lo, hi) != at(hi, lo)
+        })
+        .expect("a Chunk column a cave Biome border crosses");
+    let ys = (depth_m / cell_m).floor() as i32 - 1..(depth_m / cell_m).floor() as i32 + 2;
+    let region = Region::new(&g, &[border], ys, false);
+    let mut seen = [0usize; 2];
+    for (&at, v) in &region.voxels {
+        let Some(owner) = caves
+            .iter()
+            .position(|c| [c.rock, c.floor].contains(&Some(v.material())))
+        else {
+            continue;
+        };
+        let [x, y, z] = region.metres(at);
+        assert_eq!(
+            g.cave_biome_index_at(x, y, z),
+            Some(owner),
+            "{} at {at:?} @ {size} m",
+            caves[owner].name
+        );
+        seen[owner] += 1;
+    }
+    assert!(seen.iter().all(|&n| n > 0), "{seen:?} Voxels @ {size} m");
+}
+
+#[test]
+fn cave_biomes_match_their_points_at_1_and_0_5_m() {
+    assert_cave_biomes_match_their_points(1.0);
+    assert_cave_biomes_match_their_points(0.5);
+}
+
+#[test]
+fn cave_biomes_match_their_points_at_a_voxel_size_off_the_powers_of_two() {
+    assert_cave_biomes_match_their_points(0.75);
+}
+
+/// The Server's level-4 source at 1 m, whose Voxel is wider than a cave Biome cell.
+#[test]
+fn cave_biomes_match_their_points_at_a_lod_level_wider_than_a_cell() {
+    assert_cave_biomes_match_their_points(8.0);
+}
+
 const HUT: MaterialId = 214;
 
 /// A 4 m square of one Material on the Ground layer, a Structure to keep caves from.
