@@ -26,6 +26,7 @@ use std::sync::atomic::{AtomicU8, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use cells::CellMap;
+use structures::Claims;
 
 use crate::chunk::{CHUNK_SIZE, Chunk, ChunkBuilder};
 use crate::climate::{
@@ -1005,8 +1006,14 @@ impl BiomeGrounds {
 
 type ColumnGrounds = [GroundParams; CHUNK_SIZE * CHUNK_SIZE];
 
-/// A Cell's column cache its asker already holds, and the Cell.
-type HeldCell<'a> = (&'a ColumnCache, [i32; 2]);
+/// What the Chunk being generated holds, which the seal and `filled` read before asking.
+#[derive(Clone, Copy)]
+struct HeldCell<'a> {
+    columns: &'a ColumnCache,
+    cell: [i32; 2],
+    /// What the overhang density keeps off, every footprint reaching a column past the Chunk.
+    kept_off: &'a [Footprint],
+}
 
 /// A Cell's surface and water levels (with a one-column border), and what its columns are asked
 /// once. Version 3's band stands some ten Chunks tall, and each would otherwise sample all of it
@@ -1031,6 +1038,18 @@ const UNASKED: u8 = u8::MAX;
 const NO_BIOME: u8 = u8::MAX - 1;
 /// A NaN: a seal is a Voxel's top or minus infinity.
 const UNSEALED: u32 = 0x7fc0_5ea1;
+
+impl HeldCell<'_> {
+    /// Column `[gx, gz]` in the Chunk's own indices, if it is in the Chunk or a column past it.
+    fn local(&self, [gx, gz]: [i32; 2]) -> Option<[i32; 2]> {
+        let size = CHUNK_SIZE as i32;
+        let local = [gx - self.cell[0] * size, gz - self.cell[1] * size];
+        local
+            .iter()
+            .all(|c| (-1..=size).contains(c))
+            .then_some(local)
+    }
+}
 
 impl ColumnCache {
     /// Relaxed: a column's Biome is a pure function of it, so two workers racing store the same.
@@ -1408,12 +1427,11 @@ impl Worldgen {
     fn held_column_m(&self, near: Option<HeldCell>, at: [f32; 2]) -> Option<(f32, Option<f32>)> {
         let [gx, gz] = self.on_lattice(at)?;
         let size = CHUNK_SIZE as i32;
-        if let Some((s, [cx, cz])) = near {
-            let (x, z) = (gx - cx * size, gz - cz * size);
-            if (-1..=size).contains(&x) && (-1..=size).contains(&z) {
-                let i = surface_index(x, z);
-                return Some((s.surface_m[i], s.water_level_m[i]));
-            }
+        if let Some(h) = near
+            && let Some([x, z]) = h.local([gx, gz])
+        {
+            let i = surface_index(x, z);
+            return Some((h.columns.surface_m[i], h.columns.water_level_m[i]));
         }
         let s = self.held_columns(gx.div_euclid(size), gz.div_euclid(size))?;
         let i = surface_index(gx.rem_euclid(size), gz.rem_euclid(size));
@@ -1440,6 +1458,24 @@ impl Worldgen {
     fn level_m(&self, near: Option<HeldCell>, at @ [x_m, z_m]: [f32; 2]) -> Option<f32> {
         self.held_column_m(near, at)
             .map_or_else(|| self.water_level_m(x_m, z_m), |(_, level_m)| level_m)
+    }
+
+    /// Every claim the passes of the Chunk column `[cx, cz]` read, asked once at the widest margin
+    /// any of them reads; each takes [`Self::claims_within`] its own.
+    fn chunk_claims(&self, [cx, cz]: [i32; 2]) -> Claims {
+        let widest = (2 * self.scatter_margin())
+            .max(self.clear_columns(OVERHANG_CLEAR_M) + 1)
+            .max(self.clear_columns(CAVE_CLEAR_M));
+        self.claims_near(self.chunk_columns([cx, cz], widest))
+    }
+
+    /// What the overhang density keeps off within a column of the Chunk column `[cx, cz]`, from
+    /// its [`Self::chunk_claims`]. It covers each of those columns as the column's own Chunk's
+    /// [`Self::overhang_kept_off`] does: a footprint one holds and the other lacks reaches none.
+    fn chunk_kept_off(&self, [cx, cz]: [i32; 2], claims: &Claims) -> Vec<Footprint> {
+        let clear = self.clear_columns(OVERHANG_CLEAR_M);
+        let claims = self.claims_within(claims, self.chunk_columns([cx, cz], clear + 1));
+        self.kept_off(&claims, clear)
     }
 
     fn last_columns(&self, key: [i32; 2]) -> Option<Arc<ColumnCache>> {
@@ -1531,12 +1567,30 @@ impl Worldgen {
     /// What the overhang density keeps off around the Chunk column `[cx, cz]`: Structures stand
     /// on the heightfield, and the density would bury a wall or lean over a roof.
     fn overhang_kept_off(&self, [cx, cz]: [i32; 2]) -> Vec<Footprint> {
-        let clear = (OVERHANG_CLEAR_M / self.voxel_size).ceil() as i32;
-        let claims = self.claims_near(self.chunk_columns([cx, cz], clear));
-        self.footprints(&claims)
+        let clear = self.clear_columns(OVERHANG_CLEAR_M);
+        self.kept_off(
+            &self.claims_near(self.chunk_columns([cx, cz], clear)),
+            clear,
+        )
+    }
+
+    /// The footprints of `claims`, each widened by `clear` columns.
+    fn kept_off(&self, claims: &Claims, clear: i32) -> Vec<Footprint> {
+        self.footprints(claims)
             .into_iter()
             .map(|f| f.widened(clear))
             .collect()
+    }
+
+    /// Columns enough to span `m` metres.
+    fn clear_columns(&self, m: f32) -> i32 {
+        (m / self.voxel_size).ceil() as i32
+    }
+
+    /// How far round a column scatter and Plants read, in columns.
+    fn scatter_margin(&self) -> i32 {
+        self.scatter
+            .map_or(0, |s| self.clear_columns(s.reach_m) + 1)
     }
 
     /// How far the density pushes column `[x, z]` of the Chunk column `[cx, cz]`: nowhere on
@@ -1675,16 +1729,21 @@ impl Worldgen {
     /// The columns of the Chunk at `[cx, cz]` that no cave may open in: within
     /// [`CAVE_CLEAR_M`] of a Structure's footprint, or of a Settlement's disc, approach paths or
     /// outskirts. `None` where nothing stands near.
-    fn cave_free(&self, cx: i32, cz: i32) -> Option<[bool; CHUNK_SIZE * CHUNK_SIZE]> {
+    /// `claims` holds every claim near the Chunk, the margin included.
+    fn cave_free(
+        &self,
+        cx: i32,
+        cz: i32,
+        claims: &Claims,
+    ) -> Option<[bool; CHUNK_SIZE * CHUNK_SIZE]> {
         if self.caves.is_none() && self.caverns.is_none() {
             return None;
         }
-        let clear = (CAVE_CLEAR_M / self.voxel_size).ceil() as i32;
-        let near: Vec<Footprint> = self
-            .footprints_near(self.chunk_columns([cx, cz], clear))
-            .into_iter()
-            .map(|f| f.widened(clear))
-            .collect();
+        let clear = self.clear_columns(CAVE_CLEAR_M);
+        let near = self.kept_off(
+            &self.claims_within(claims, self.chunk_columns([cx, cz], clear)),
+            clear,
+        );
         if near.is_empty() {
             return None;
         }
@@ -1969,7 +2028,9 @@ impl Worldgen {
                     self.cave_scale_bound(),
                 )
             {
-                let free = self.cave_free(cx, cz);
+                let clear = self.clear_columns(CAVE_CLEAR_M);
+                let claims = self.claims_near(self.chunk_columns([cx, cz], clear));
+                let free = self.cave_free(cx, cz, &claims);
                 let columns = self.column_caves_clear_of(cx, cz, free.as_ref());
                 self.carve(&mut chunk, caves, origin_m, ceiling_m, columns.as_ref());
             }
@@ -2004,7 +2065,8 @@ impl Worldgen {
                     scale,
                 )
         };
-        let cave_free = self.cave_free(cx, cz);
+        let claims = self.chunk_claims([cx, cz]);
+        let cave_free = self.cave_free(cx, cz, &claims);
         let cave_columns = self
             .caves
             .as_ref()
@@ -2032,10 +2094,16 @@ impl Worldgen {
 
         // Structures stand on the heightfield, so the density keeps off them and a margin round
         // them, where it would bury a wall or lean over a roof.
-        let built = if self.terrain.overhang_max_m() > 0.0 && floor_m <= top_m {
-            self.overhang_kept_off([cx, cz])
+        let kept_off = if self.terrain.overhang_max_m() > 0.0 {
+            self.chunk_kept_off([cx, cz], &claims)
         } else {
-            Default::default()
+            Vec::new()
+        };
+        let built: &[Footprint] = if floor_m <= top_m { &kept_off } else { &[] };
+        let held = HeldCell {
+            columns: &cache,
+            cell: [cx, cz],
+            kept_off: &kept_off,
         };
         let cavern_blocks = self.caverns.as_ref().map(|c| {
             let mut blocks = [false; BLOCKS * BLOCKS * BLOCKS];
@@ -2114,12 +2182,12 @@ impl Worldgen {
                 let table_m = self.water_table_m(x_m, z_m);
                 let seal = || {
                     cache.sealed_m(z * CHUNK_SIZE + x, || {
-                        self.sealed_below_m(x_m, z_m, surface_m, Some((&*cache, [cx, cz])))
+                        self.sealed_below_m(x_m, z_m, surface_m, Some(held))
                     })
                 };
                 // The density never reaches down to water here or beside, so it opens no hollow
                 // that water would stand or pour into.
-                let amp_m = self.overhang_amp_at(&cache, &built, [cx, cz], [x as i32, z as i32]);
+                let amp_m = self.overhang_amp_at(&cache, built, [cx, cz], [x as i32, z as i32]);
                 let pushes = ColumnPush::new(&self.terrain, [x_m, z_m], amp_m, surface_m, |y| {
                     floor_m + y as f32 * self.voxel_size
                 });
@@ -2261,31 +2329,22 @@ impl Worldgen {
             self.smooth(
                 &mut chunk,
                 &surface_m,
-                Some((&*cache, [cx, cz])),
+                Some(held),
                 [cx, cy, cz],
                 floor_m,
                 columns.as_ref(),
             );
         }
-        let margin = self
-            .scatter
-            .map_or(0, |s| (s.reach_m / self.voxel_size).ceil() as i32 + 1);
+        let margin = self.scatter_margin();
         // A tree a margin away reaches a margin further.
-        let claims = self.claims_near(self.chunk_columns([cx, cz], 2 * margin));
+        let claims = self.claims_within(&claims, self.chunk_columns([cx, cz], 2 * margin));
         if self.structures_may_reach(floor_m, ceiling_m) {
             self.stand_claims(&mut chunk, [cx, cy, cz], &claims);
         }
         if let Some(scatter) = &self.scatter {
             let placed = self.fields_near(scatter, self.chunk_columns([cx, cz], margin));
             let kept = self.footprints(&claims);
-            self.scatter(
-                &mut chunk,
-                scatter,
-                &placed,
-                &kept,
-                (&*cache, [cx, cz]),
-                [cx, cy, cz],
-            );
+            self.scatter(&mut chunk, scatter, &placed, &kept, held, [cx, cy, cz]);
             if scatter.plants {
                 self.plants(&mut chunk, scatter, [cx, cy, cz]);
             }
@@ -2690,7 +2749,7 @@ impl Worldgen {
         for z in 0..size {
             for x in 0..size {
                 let top = top_index(
-                    held.0.surface_m[surface_index(x, z)],
+                    held.columns.surface_m[surface_index(x, z)],
                     floor_m,
                     self.voxel_size,
                 );
@@ -3488,14 +3547,21 @@ impl Worldgen {
         let cell = [gx.div_euclid(size), gz.div_euclid(size)];
         let i = (gz.rem_euclid(size) * size + gx.rem_euclid(size)) as usize;
         let held_amp_m = match near {
-            Some((s, c)) if c == cell => Some(s.overhang_m[i]),
+            Some(h) if h.cell == cell => Some(h.columns.overhang_m[i]),
             _ => self.held_columns(cell[0], cell[1]).map(|s| s.overhang_m[i]),
         };
         let amp_m = held_amp_m
             .unwrap_or_else(|| self.terrain.overhang_amp_m(x_m, z_m))
             .min((surface_m - wettest_m).max(0.0));
         // Only a banded cell reads the Structures the density keeps off, which cost the most.
-        if amp_m <= 0.0 || base_m.abs() > amp_m || covers(&self.overhang_kept_off(cell), gx, gz) {
+        if amp_m <= 0.0 || base_m.abs() > amp_m {
+            return base_m >= 0.0;
+        }
+        let kept_off = match near.filter(|h| h.local([gx, gz]).is_some()) {
+            Some(h) => covers(h.kept_off, gx, gz),
+            None => covers(&self.overhang_kept_off(cell), gx, gz),
+        };
+        if kept_off {
             return base_m >= 0.0;
         }
         base_m + self.terrain.overhang_push_m(x_m, y_m, z_m, amp_m) >= 0.0
@@ -3760,7 +3826,12 @@ mod tests {
                 // One neighbour held and the rest not, so both a read and an ask are met.
                 held.column_cache(cx + 1, cz);
                 let cache = held.column_cache(cx, cz);
-                let near = Some((&*cache, [cx, cz]));
+                let kept_off = held.chunk_kept_off([cx, cz], &held.chunk_claims([cx, cz]));
+                let near = Some(HeldCell {
+                    columns: &cache,
+                    cell: [cx, cz],
+                    kept_off: &kept_off,
+                });
                 for z in -1..=size {
                     for x in -1..=size {
                         let (gx, gz) = (cx * size + x, cz * size + z);
@@ -3786,6 +3857,59 @@ mod tests {
             }
         }
         assert!(sealed > 0 && pushed > 0, "{sealed} sealed, {pushed} pushed");
+    }
+
+    /// A Chunk's one ask for claims, filtered to each margin a pass reads, is that margin's own
+    /// ask; and what the overhang density keeps off, read from it a column past the Chunk, covers
+    /// each column as the ask of the column's own Chunk does.
+    #[test]
+    fn a_chunks_claims_filtered_are_each_narrower_ask() {
+        let content = crate::testgen::content();
+        let size = CHUNK_SIZE as i32;
+        let (mut settled, mut built, mut kept) = (0, 0, 0);
+        for voxel_size in [1.0, 0.5] {
+            let g = content.worldgen(SEED, voxel_size);
+            let clear = |m: f32| (m / voxel_size).ceil() as i32;
+            let margin = g.scatter.map_or(0, |s| clear(s.reach_m) + 1);
+            let margins = [
+                0,
+                margin,
+                2 * margin,
+                clear(CAVE_CLEAR_M),
+                clear(OVERHANG_CLEAR_M),
+                clear(OVERHANG_CLEAR_M) + 1,
+            ];
+            let shown = |c: &Claims| format!("{:?} {:?}", c.settlements, c.structures);
+            for cz in -6..6 {
+                for cx in -6..6 {
+                    let claims = g.chunk_claims([cx, cz]);
+                    settled += claims.settlements.len();
+                    built += claims.structures.len();
+                    for m in margins {
+                        let region = g.chunk_columns([cx, cz], m);
+                        assert_eq!(
+                            shown(&g.claims_within(&claims, region)),
+                            shown(&g.claims_near(region)),
+                            "Chunk {cx},{cz} at {voxel_size} m, margin {m}"
+                        );
+                    }
+                    let kept_off = g.chunk_kept_off([cx, cz], &claims);
+                    for z in -1..=size {
+                        for x in -1..=size {
+                            let (gx, gz) = (cx * size + x, cz * size + z);
+                            let own = g.overhang_kept_off([gx, gz].map(|g| g.div_euclid(size)));
+                            let want = covers(&own, gx, gz);
+                            assert_eq!(covers(&kept_off, gx, gz), want, "column {gx},{gz}");
+                            kept += usize::from(want);
+                        }
+                    }
+                }
+            }
+        }
+        assert!(
+            settled > 0 && built > 0 && kept > 0,
+            "{settled} Settlements, {built} Structures, {kept} columns kept off"
+        );
     }
 
     #[test]

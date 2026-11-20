@@ -363,6 +363,25 @@ impl Worldgen {
         }
     }
 
+    /// [`Self::claims_near`] for `region`, from `claims`, its answer for a region holding it: in
+    /// the same order, since both keep claim order.
+    pub(super) fn claims_within(&self, claims: &Claims, region: [[i32; 2]; 2]) -> Claims {
+        Claims {
+            settlements: claims
+                .settlements
+                .iter()
+                .filter(|laid| self.laid_near(laid, region))
+                .cloned()
+                .collect(),
+            structures: claims
+                .structures
+                .iter()
+                .filter(|s| s.touches(region))
+                .copied()
+                .collect(),
+        }
+    }
+
     /// What fields, trees and scatter keep off.
     pub(super) fn footprints(&self, claims: &Claims) -> Vec<Footprint> {
         claims

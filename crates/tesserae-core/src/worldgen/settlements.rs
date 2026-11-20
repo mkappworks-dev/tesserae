@@ -196,14 +196,18 @@ impl Founding {
         (dx * dx + dz * dz).sqrt() < self.reach_m + other.reach_m
     }
 
-    /// Whether its disc and margin reach a point of `[min, max)`, in metres.
-    fn reaches(&self, [min, max]: [[f32; 2]; 2], reach_m: f32) -> bool {
-        let [dx, dz] = [0, 1].map(|a| {
-            let c = self.centre_m[a];
-            c - c.clamp(min[a], max[a])
-        });
-        dx * dx + dz * dz < reach_m * reach_m
+    fn reaches(&self, region: [[f32; 2]; 2], reach_m: f32) -> bool {
+        reaches(self.centre_m, region, reach_m)
     }
+}
+
+/// Whether a disc of `reach_m` round `centre_m` reaches a point of `[min, max)`, in metres.
+fn reaches(centre_m: [f32; 2], [min, max]: [[f32; 2]; 2], reach_m: f32) -> bool {
+    let [dx, dz] = [0, 1].map(|a| {
+        let c = centre_m[a];
+        c - c.clamp(min[a], max[a])
+    });
+    dx * dx + dz * dz < reach_m * reach_m
 }
 
 /// A Settlement laid out: its roads, a metre cell each, and its Plots' Structures.
@@ -211,6 +215,8 @@ impl Founding {
 pub(super) struct LaidSettlement {
     centre_m: [f32; 2],
     radius_m: f32,
+    /// Its founding's disc and margin, in metres.
+    reach_m: f32,
     path: Voxel,
     /// The metre cell at the corner of the square the disc fits in.
     origin_m: [i32; 2],
@@ -309,6 +315,9 @@ struct Slot {
     side: f32,
     setback_m: f32,
 }
+
+/// How far past its disc and margin a Settlement is asked for, so its trails are found.
+const NEAR_M: f32 = TRAIL_M.1 + APPROACH_HALF_M;
 
 /// How far from its centre a Settlement's roads and trails may reach.
 fn paths_m(radius_m: f32) -> f32 {
@@ -410,11 +419,23 @@ impl Worldgen {
     /// Every Settlement laid out whose disc covers or borders a column of `region`, `[min, max)`.
     pub(super) fn laid_settlements_near(&self, region: [[i32; 2]; 2]) -> Vec<Arc<LaidSettlement>> {
         let region = self.region_m(region);
-        self.foundings_within(region, TRAIL_M.1 + APPROACH_HALF_M)
+        self.foundings_within(region, NEAR_M)
             .into_iter()
             .filter(|s| s.reaches(widened(region, self.voxel_size), paths_m(s.radius_m)))
             .filter_map(|s| self.layouts.laid((s.row, s.cell), || self.lay_out(&s)))
             .collect()
+    }
+
+    /// Whether [`Self::laid_settlements_near`] answers `laid` for `region`: its own two tests,
+    /// for a Settlement some wider region's answer holds.
+    pub(super) fn laid_near(&self, laid: &LaidSettlement, region: [[i32; 2]; 2]) -> bool {
+        let region = self.region_m(region);
+        reaches(laid.centre_m, region, laid.reach_m + NEAR_M)
+            && reaches(
+                laid.centre_m,
+                widened(region, self.voxel_size),
+                paths_m(laid.radius_m),
+            )
     }
 
     fn region_m(&self, [min, max]: [[i32; 2]; 2]) -> [[f32; 2]; 2] {
@@ -728,6 +749,7 @@ impl Worldgen {
         let mut laid = LaidSettlement {
             centre_m: centre,
             radius_m,
+            reach_m: founding.reach_m,
             path: settlement.path,
             origin_m,
             side,
