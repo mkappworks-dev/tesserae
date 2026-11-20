@@ -9,6 +9,7 @@ use bevy::asset::AssetPath;
 use bevy::mesh::{MeshVertexBufferLayoutRef, VertexBufferLayout};
 use bevy::pbr::{
     ExtendedMaterial, MaterialExtension, MaterialExtensionKey, MaterialExtensionPipeline,
+    MeshPipelineKey,
 };
 use bevy::prelude::*;
 use bevy::render::render_resource::{
@@ -172,12 +173,29 @@ impl MaterialExtension for ChunkMaterialExtension {
         if !key.bind_group_data.coverage_test || switched {
             defs.push(ShaderDefVal::Bool("CHUNK_NO_COVERAGE_DISCARD".into(), true));
         }
+        if shadow_only(key.mesh_key) {
+            defs.push(ShaderDefVal::Bool("CHUNK_SHADOW".into(), true));
+        }
         descriptor.vertex.shader_defs.extend_from_slice(&defs);
         if let Some(fragment) = descriptor.fragment.as_mut() {
             fragment.shader_defs.extend_from_slice(&defs);
         }
         Ok(())
     }
+}
+
+/// The sun's shadow pass, keyed as `bevy_pbr`'s `check_views_lights_need_specialization`
+/// keys a directional light's: it draws depth alone, so `chunk_vertex.wesl` decodes
+/// the position only, plus what cutout's alpha test reads.
+fn shadow_only(mesh_key: MeshPipelineKey) -> bool {
+    let sun = MeshPipelineKey::DEPTH_PREPASS | MeshPipelineKey::UNCLIPPED_DEPTH_ORTHO;
+    let outputs = MeshPipelineKey::NORMAL_PREPASS
+        | MeshPipelineKey::MOTION_VECTOR_PREPASS
+        | MeshPipelineKey::DEFERRED_PREPASS;
+    mesh_key.contains(sun)
+        && mesh_key.intersection(MeshPipelineKey::VIEW_PROJECTION_RESERVED_BITS)
+            == MeshPipelineKey::VIEW_PROJECTION_ORTHOGRAPHIC
+        && !mesh_key.intersects(outputs)
 }
 
 /// What `chunk_vertex.wesl` decodes a layer's words by.
@@ -265,6 +283,25 @@ mod tests {
         };
         assert!(buffer.attributes.is_empty());
         assert_eq!(buffer.array_stride % 4, 0, "wgpu's VERTEX_ALIGNMENT");
+    }
+
+    /// Keys as `bevy_pbr`'s `check_views_lights_need_specialization` and
+    /// `queue_shadows` build them.
+    #[test]
+    fn only_the_suns_shadow_pass_takes_the_position_only_path() {
+        let sun = MeshPipelineKey::DEPTH_PREPASS
+            | MeshPipelineKey::VIEW_PROJECTION_ORTHOGRAPHIC
+            | MeshPipelineKey::UNCLIPPED_DEPTH_ORTHO;
+        assert!(shadow_only(sun));
+        assert!(shadow_only(sun | MeshPipelineKey::MAY_DISCARD), "cutout");
+        let spot = MeshPipelineKey::DEPTH_PREPASS | MeshPipelineKey::VIEW_PROJECTION_PERSPECTIVE;
+        assert!(!shadow_only(spot));
+        let ortho_camera_prepass =
+            MeshPipelineKey::DEPTH_PREPASS | MeshPipelineKey::VIEW_PROJECTION_ORTHOGRAPHIC;
+        assert!(!shadow_only(ortho_camera_prepass));
+        let colour =
+            MeshPipelineKey::VIEW_PROJECTION_ORTHOGRAPHIC | MeshPipelineKey::TONEMAP_IN_SHADER;
+        assert!(!shadow_only(colour));
     }
 
     #[test]

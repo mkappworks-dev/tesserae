@@ -242,6 +242,12 @@ pub struct Expanded {
     pub level: u32,
 }
 
+/// `chunk_vertex.wesl`'s `expand_position`, the shadow pass's decode.
+#[cfg(test)]
+pub fn expand_position(buffer: &[u32], at: u32, vertex: u32) -> [f32; 3] {
+    expand(buffer, at, vertex).corner.position
+}
+
 /// `chunk_vertex.wesl`'s `expand`, step for step, for the test that holds the
 /// two equal: `buffer` is the quad buffer, `at` the layer's tag and `vertex`
 /// the mesh-local vertex index.
@@ -467,6 +473,11 @@ mod tests {
                 assert_eq!(
                     expanded.corner, corners[corner],
                     "{what}: quad {q} vertex {k}"
+                );
+                assert_eq!(
+                    expand_position(&buffer, at, triangles[k] as u32),
+                    corners[corner].position,
+                    "{what}: the shadow path's quad {q} vertex {k}"
                 );
                 assert_eq!(expanded.material, quad.material, "{what}: quad {q}");
                 assert_eq!(expanded.light, u32::from(quad.light.packed()), "{what}");

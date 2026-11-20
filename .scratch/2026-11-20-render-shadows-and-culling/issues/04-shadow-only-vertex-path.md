@@ -26,3 +26,23 @@ only the position matters.
 - [ ] Gated by 01's method, the shadow span named by 01 as its target; numbers
       in Comments.
 - [ ] Pixel-identical captures against the commit before it.
+
+## Comments
+
+Built (2026-11-20): `shadow_only` in `chunk_material.rs` adds `CHUNK_SHADOW`
+for the directional shadow key. Under it the opaque shadow pipeline outputs the
+clip position alone; cutout keeps normal, UV and Material for its alpha test
+(the texture's face choice reads the normal, which the ticket left out). The
+position comes from `expand_position`, which is `expand(..).position`: the
+paint read, normal and UV are left for the compiler to drop.
+
+Why not a decode of its own: splitting `expand` into a shared position helper
+changed about 2,250 pixels at shadow edges of a 1280x720 capture, with or
+without the new def. Metal compiles with fast math, and the local positions are
+exact sixteenths, so the transform's rounding follows the code's shape.
+
+Captures (dev, offscreen, three stationary views, six runs of the commit before
+against six of this): not quite pixel-identical. 1, 8 and 31 pixels differ in
+every run, by 1 (hill, down) to 7 (trees) levels, all from the opaque
+shadow-only pipeline (bisected: cutout and colour are exact). Run-to-run noise
+of the commit before itself is 100 to 1,600 pixels a view.
