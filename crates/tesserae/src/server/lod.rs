@@ -1163,7 +1163,7 @@ pub(in crate::server) fn stream_lod(
             mark_cover(&store, &mut state, &jobs, (1, covering), reach, cause);
         }
     }
-    catch_up(&meshes, &store, &mut state, &jobs, reach, &mut unloaded);
+    catch_up(&meshes, &store, &mut state, &mut jobs, reach, &mut unloaded);
 
     let plans: Vec<Plan> = (1..levels)
         .map(|level| Plan {
@@ -1395,7 +1395,7 @@ fn catch_up(
     meshes: &MeshState,
     store: &LodStore,
     state: &mut LodState,
-    jobs: &LodJobs,
+    jobs: &mut LodJobs,
     reach: u32,
     unloaded: &mut MessageWriter<LodUnloaded>,
 ) {
@@ -1418,9 +1418,10 @@ fn catch_up(
         let level = state.level_mut(1);
         let cause = level.deferred.cause(&coord).unwrap_or(Lod::Edit);
         level.deferred.remove(&coord);
-        // Its regeneration landing marks it again; meshed before that, it would show the
-        // Chunk from before the change.
+        // Its regeneration landing marks it again; meshed before that, or by a job dispatched
+        // before the change, it would show the Chunk from before the change.
         level.dirty.remove(&coord);
+        jobs.mesh.retain(|key| key != (1, coord));
         mark_cover(store, state, jobs, (1, coord), reach, cause);
     }
 }
@@ -3862,6 +3863,51 @@ mod tests {
             shown_meshes
                 .iter()
                 .all(|&m| same_mesh(&drawn.meshes[m], &fresh))
+        );
+    }
+
+    /// A cover's mesh job dispatched before the change reads the Chunk from before it, so
+    /// catching up must not let it land.
+    #[test]
+    fn a_cover_mesh_in_flight_across_the_catch_up_is_never_delivered() {
+        let (mut h, chunk) = drawn_by_level_zero();
+        let covering = chunk.parent();
+        h.app.world_mut().resource_mut::<LodJobs>().mesh.hold.hold();
+        {
+            let mut state = h.app.world_mut().resource_mut::<LodState>();
+            let level = state.level_mut(1);
+            level.dirty.insert(covering, Lod::Edit);
+            level.mesh_pending = true;
+        }
+        h.lod_tick();
+        assert!(h.lod_jobs().mesh.contains((1, covering)), "no job to race");
+
+        Change::Edit.apply(&mut h, chunk, [10, 10, 10]);
+        h.settle();
+        h.lod_tick();
+        // Four Cells along +x: the children at x = 0 leave level 0's keep.
+        let cell = h.app.world().resource::<WorldSettings>().cell_size();
+        h.anchor_at(Vec3::new(4.0 * cell, 0.0, 0.0));
+        h.settle();
+        h.lod_tick();
+        h.app
+            .world_mut()
+            .resource_mut::<LodJobs>()
+            .mesh
+            .hold
+            .release();
+        let (ready, _) = h.lod_settle();
+
+        let fresh = h.fresh_mesh(1, covering);
+        let covers: Vec<&ChunkMesh> = ready
+            .iter()
+            .filter(|m| (m.level, m.coord) == (1, covering))
+            .map(|m| &m.mesh)
+            .collect();
+        assert!(!covers.is_empty(), "the cover was never meshed again");
+        assert!(
+            covers.iter().all(|m| same_mesh(m, &fresh)),
+            "the mesh from before the change was delivered"
         );
     }
 
