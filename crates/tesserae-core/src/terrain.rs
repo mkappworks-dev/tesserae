@@ -384,7 +384,7 @@ impl Base {
             warped: (wx, wz),
             fields: self.field_noise(wx, wz),
             calm: at(CALM_SIZE_M, SALT_CALM, 2),
-            peaks: at(PEAKS_SIZE_M, SALT_PEAKS, 3),
+            peaks: self.peaks_noise(wx, wz),
             rough: detail(self.octaves),
             broad: detail(self.octaves.min(2)),
             plateau: at(3500.0, SALT_PLATEAU, 2),
@@ -515,47 +515,27 @@ impl Base {
         if rugged <= 0.0 {
             return 0.0;
         }
-        self.overhang_amp_of(rugged, self.outcrop_noise(wx, wz))
+        self.overhang_amp_of(
+            rugged,
+            [self.peaks_noise(wx, wz), self.outcrop_noise(wx, wz)],
+        )
     }
 
-    /// [`Self::overhang_amp_m`] at four columns, bit for bit.
-    fn overhang_amp_x4(&self, x_m: [f32; 4], z_m: [f32; 4]) -> [f32; 4] {
-        if self.overhang_m <= 0.0 {
-            return [0.0; 4];
-        }
-        let (wx, wz) = self.warped(f32x4::new(x_m), f32x4::new(z_m));
-        let fields = self.field_noise(wx, wz).lanes();
-        let rugged: [f32; 4] = std::array::from_fn(|k| fields_of(fields[k]).ruggedness);
-        if rugged.iter().all(|&r| r <= 0.0) {
-            return [0.0; 4];
-        }
-        let [peaks, outcrop] = self.outcrop_noise(wx, wz).map(f32x4::to_array);
-        std::array::from_fn(|k| {
-            if rugged[k] <= 0.0 {
-                0.0
-            } else {
-                self.overhang_amp_of(rugged[k], [peaks[k], outcrop[k]])
-            }
-        })
+    /// The mountain ranges' field, which the base height and the overhang density's reach ask.
+    fn peaks_noise<L: Lanes>(&self, wx: L, wz: L) -> L {
+        let size = L::splat(PEAKS_SIZE_M);
+        L::fbm2(wx / size, wz / size, self.seed.wrapping_add(SALT_PEAKS), 3)
     }
 
-    /// The mountain and outcrop fields the overhang density's reach asks of a rugged column.
-    fn outcrop_noise<L: Lanes>(&self, wx: L, wz: L) -> [L; 2] {
-        let (peaks, outcrop) = (L::splat(PEAKS_SIZE_M), L::splat(OUTCROP_SIZE_M));
-        [
-            L::fbm2(
-                wx / peaks,
-                wz / peaks,
-                self.seed.wrapping_add(SALT_PEAKS),
-                3,
-            ),
-            L::fbm2(
-                wx / outcrop,
-                wz / outcrop,
-                self.seed.wrapping_add(SALT_OUTCROP),
-                2,
-            ),
-        ]
+    /// The outcrop field the overhang density's reach asks of a rugged column.
+    fn outcrop_noise<L: Lanes>(&self, wx: L, wz: L) -> L {
+        let size = L::splat(OUTCROP_SIZE_M);
+        L::fbm2(
+            wx / size,
+            wz / size,
+            self.seed.wrapping_add(SALT_OUTCROP),
+            2,
+        )
     }
 
     fn overhang_amp_of(&self, rugged: f32, [peaks, outcrop]: [f32; 2]) -> f32 {
@@ -735,6 +715,20 @@ impl Base {
     }
 }
 
+/// A column's height and water, and what asking them learnt that its Biome, sea-floor rock and
+/// overhang reach read again.
+#[derive(Clone, Copy)]
+pub(crate) struct Column {
+    /// [`Terrain::height_m`].
+    pub(crate) height_m: f32,
+    /// [`Terrain::inland_water_m`].
+    pub(crate) inland_m: Option<f32>,
+    cut_m: f32,
+    warped: (f32, f32),
+    fields: FieldNoise<f32>,
+    peaks: f32,
+}
+
 /// Version 3's ground and water: the base landforms, and the lakes and rivers drained over them.
 #[derive(Clone)]
 pub(crate) struct Terrain {
@@ -765,10 +759,29 @@ impl Terrain {
         h - self.drainage.wet(x_m, z_m, h).cut_m
     }
 
-    /// [`Self::height_m`] at four columns, bit for bit.
-    pub(crate) fn height_x4(&self, x_m: [f32; 4], z_m: [f32; 4]) -> [f32; 4] {
-        let h = self.base.base_height_x4(x_m, z_m);
-        std::array::from_fn(|k| h[k] - self.drainage.wet(x_m[k], z_m[k], h[k]).cut_m)
+    /// A column's height and inland water from one drainage ask, which the water's level allows
+    /// because it never reads the ground.
+    pub(crate) fn column(&self, x_m: f32, z_m: f32) -> Column {
+        self.column_of(x_m, z_m, self.base.samples(x_m, z_m))
+    }
+
+    /// [`Self::column`] at four columns, bit for bit.
+    pub(crate) fn columns_x4(&self, x_m: [f32; 4], z_m: [f32; 4]) -> [Column; 4] {
+        let samples = self.base.samples(f32x4::new(x_m), f32x4::new(z_m)).lanes();
+        std::array::from_fn(|k| self.column_of(x_m[k], z_m[k], samples[k]))
+    }
+
+    fn column_of(&self, x_m: f32, z_m: f32, s: Samples<f32>) -> Column {
+        let base_m = self.base.base_height_of(x_m, z_m, s);
+        let wet = self.drainage.wet(x_m, z_m, base_m);
+        Column {
+            height_m: base_m - wet.cut_m,
+            inland_m: wet.level_m,
+            cut_m: wet.cut_m,
+            warped: s.warped,
+            fields: s.fields,
+            peaks: s.peaks,
+        }
     }
 
     /// The level lake or river water stands at over a column, if any reaches it; the sea is the
@@ -780,10 +793,13 @@ impl Terrain {
     /// What a Biome's selectors ask of the column, and how its Climate shifts there: the air is
     /// colder by altitude and wetter toward the sea.
     pub(crate) fn site(&self, x_m: f32, z_m: f32) -> (Site, (f32, f32)) {
-        let f = self.base.fields(x_m, z_m);
-        let h = self.base.base_height_m(x_m, z_m);
-        let river_m = self.drainage.wet(x_m, z_m, h).cut_m;
-        let altitude_m = h - river_m - self.base.sea_m;
+        self.site_of(&self.column(x_m, z_m))
+    }
+
+    /// [`Self::site`] of a column already asked.
+    pub(crate) fn site_of(&self, c: &Column) -> (Site, (f32, f32)) {
+        let f = fields_of(c.fields);
+        let altitude_m = c.height_m - self.base.sea_m;
         let coast_m =
             (f.continent - COAST_CONTINENT) * self.base.continent_size_m * COAST_M_PER_UNIT;
         (
@@ -791,7 +807,7 @@ impl Terrain {
                 altitude_m,
                 coast_m,
                 erosion: f.erosion,
-                river_m,
+                river_m: c.cut_m,
             },
             climate_shift(altitude_m, coast_m),
         )
@@ -801,25 +817,40 @@ impl Terrain {
         self.base.overhang_max_m()
     }
 
-    /// Whether a sea-floor formation stands at least a metre proud here, so its face is bare rock
-    /// and not the sea's sand.
-    pub(crate) fn seabed_rock(&self, x_m: f32, z_m: f32) -> bool {
-        let b = &self.base;
-        let (wx, wz) = b.warped(x_m, z_m);
-        let f = b.fields_warped(wx, wz);
-        if curve(&CONTINENT_CURVE, f.continent) >= 0.0 {
+    /// Whether a sea-floor formation stands at least a metre proud of a column, so its face is
+    /// bare rock and not the sea's sand.
+    pub(crate) fn seabed_rock_of(&self, c: &Column) -> bool {
+        // The continent field is the one `fields_of` leaves as it is.
+        if curve(&CONTINENT_CURVE, c.fields.continent) >= 0.0 {
             return false;
         }
-        let floor_m = self.height_m(x_m, z_m) - b.sea_m;
-        floor_m <= -SEABED_CLEAR_M && b.formation_m(wx, wz, floor_m) >= 1.0
+        let floor_m = c.height_m - self.base.sea_m;
+        let (wx, wz) = c.warped;
+        floor_m <= -SEABED_CLEAR_M && self.base.formation_m(wx, wz, floor_m) >= 1.0
     }
 
     pub(crate) fn overhang_amp_m(&self, x_m: f32, z_m: f32) -> f32 {
         self.base.overhang_amp_m(x_m, z_m)
     }
 
-    pub(crate) fn overhang_amp_x4(&self, x_m: [f32; 4], z_m: [f32; 4]) -> [f32; 4] {
-        self.base.overhang_amp_x4(x_m, z_m)
+    /// [`Self::overhang_amp_m`] at four columns already asked, bit for bit.
+    pub(crate) fn overhang_amp_x4_of(&self, c: &[Column; 4]) -> [f32; 4] {
+        let b = &self.base;
+        let rugged = c.map(|c| fields_of(c.fields).ruggedness);
+        if b.overhang_m <= 0.0 || rugged.iter().all(|&r| r <= 0.0) {
+            return [0.0; 4];
+        }
+        let lanes = |m: fn(&Column) -> f32| f32x4::new(std::array::from_fn(|k| m(&c[k])));
+        let outcrop = b
+            .outcrop_noise(lanes(|c| c.warped.0), lanes(|c| c.warped.1))
+            .to_array();
+        std::array::from_fn(|k| {
+            if rugged[k] <= 0.0 {
+                0.0
+            } else {
+                b.overhang_amp_of(rugged[k], [c[k].peaks, outcrop[k]])
+            }
+        })
     }
 
     pub(crate) fn overhang_push_m(&self, x_m: f32, y_m: f32, z_m: f32, amp_m: f32) -> f32 {
@@ -1002,15 +1033,92 @@ mod tests {
             for i in 0..400u32 {
                 let [x, z] = columns(seed * 1000 + i);
                 let height = base.base_height_x4(x, z);
-                let amp = base.overhang_amp_x4(x, z);
                 for k in 0..4 {
                     let at = format!("lane {k} at {},{} seed {seed}", x[k], z[k]);
                     let want = base.base_height_m(x[k], z[k]);
                     assert_eq!(height[k].to_bits(), want.to_bits(), "height {at}");
-                    let want = base.overhang_amp_m(x[k], z[k]);
-                    assert_eq!(amp[k].to_bits(), want.to_bits(), "overhang {at}");
                 }
             }
         }
+    }
+
+    fn site_bits((s, (t, h)): (Site, (f32, f32))) -> [u32; 6] {
+        [s.altitude_m, s.coast_m, s.erosion, s.river_m, t, h].map(f32::to_bits)
+    }
+
+    /// [`Terrain::site`] from its own asks of the fields, the base height and the valley cut.
+    fn site_asked_apart(t: &Terrain, x_m: f32, z_m: f32) -> (Site, (f32, f32)) {
+        let f = t.base.fields(x_m, z_m);
+        let h = t.base.base_height_m(x_m, z_m);
+        let river_m = t.drainage.wet(x_m, z_m, h).cut_m;
+        let altitude_m = h - river_m - t.base.sea_m;
+        let coast_m = (f.continent - COAST_CONTINENT) * t.base.continent_size_m * COAST_M_PER_UNIT;
+        (
+            Site {
+                altitude_m,
+                coast_m,
+                erosion: f.erosion,
+                river_m,
+            },
+            climate_shift(altitude_m, coast_m),
+        )
+    }
+
+    /// [`Terrain::seabed_rock_of`] from its own asks of the fields and the height.
+    fn seabed_rock_asked_apart(t: &Terrain, x_m: f32, z_m: f32) -> bool {
+        let b = &t.base;
+        let (wx, wz) = b.warped(x_m, z_m);
+        if curve(&CONTINENT_CURVE, b.fields_warped(wx, wz).continent) >= 0.0 {
+            return false;
+        }
+        let floor_m = t.height_m(x_m, z_m) - b.sea_m;
+        floor_m <= -SEABED_CLEAR_M && b.formation_m(wx, wz, floor_m) >= 1.0
+    }
+
+    #[test]
+    fn one_ask_of_a_column_is_its_separate_asks_bit_for_bit() {
+        let p = crate::testgen::world_params();
+        let (mut cut, mut wet, mut rock, mut pushed) = (0, 0, 0, 0);
+        for seed in 0..8u32 {
+            let t = Terrain::new(seed.wrapping_mul(0x9e37_79b9), &p);
+            for i in 0..40u32 {
+                // A patch of columns round each point, so a valley's cut and a formation's rise
+                // are crossed and not only stepped over.
+                let [x0, z0] = columns(seed * 1000 + i).map(|c| c[0]);
+                for row in 0..16 {
+                    let x = std::array::from_fn(|k| x0 + (row % 4 * 4 + k) as f32 * 3.7);
+                    let z = [z0 + (row / 4) as f32 * 9.1; 4];
+                    let four = t.columns_x4(x, z);
+                    let amp = t.overhang_amp_x4_of(&four);
+                    for k in 0..4 {
+                        let (x, z) = (x[k], z[k]);
+                        let at = format!("lane {k} at {x},{z} seed {seed}");
+                        let one = t.column(x, z);
+                        for (c, how) in [(&four[k], "four-wide"), (&one, "scalar")] {
+                            let at = format!("{how} {at}");
+                            assert_eq!(c.height_m.to_bits(), t.height_m(x, z).to_bits(), "{at}");
+                            let level = t.inland_water_m(x, z).map(f32::to_bits);
+                            assert_eq!(c.inland_m.map(f32::to_bits), level, "level {at}");
+                            let site = site_bits(site_asked_apart(&t, x, z));
+                            assert_eq!(site_bits(t.site_of(c)), site, "site {at}");
+                            let bare = seabed_rock_asked_apart(&t, x, z);
+                            assert_eq!(t.seabed_rock_of(c), bare, "rock {at}");
+                        }
+                        assert_eq!(site_bits(t.site(x, z)), site_bits(t.site_of(&one)));
+                        let want = t.overhang_amp_m(x, z);
+                        assert_eq!(amp[k].to_bits(), want.to_bits(), "overhang {at}");
+                        cut += usize::from(t.site_of(&one).0.river_m > 0.0);
+                        wet += usize::from(one.inland_m.is_some());
+                        rock += usize::from(t.seabed_rock_of(&one));
+                        pushed += usize::from(amp[k] > 0.0);
+                    }
+                }
+            }
+        }
+        let crossed = [cut, wet, rock, pushed];
+        assert!(
+            crossed.iter().all(|&n| n > 20),
+            "cut, wet, rock, pushed: {crossed:?}"
+        );
     }
 }

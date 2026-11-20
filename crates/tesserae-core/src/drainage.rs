@@ -598,4 +598,38 @@ mod tests {
             "{same} of {total} border nodes agree"
         );
     }
+
+    #[test]
+    fn the_water_level_is_the_same_whatever_ground_is_asked_about() {
+        let d = drainage();
+        let grounds = [
+            f32::MIN,
+            -1e4,
+            SEA_M - 30.0,
+            SEA_M,
+            SEA_M + 12.0,
+            400.0,
+            1e6,
+        ];
+        let (mut wet, mut cut) = (0, 0);
+        // Across the four regions round the origin, and their borders.
+        for j in -160..160 {
+            for i in -160..160 {
+                let h = crate::noise::cell_hash(i, j, 0x3e7);
+                let (x, z) = ((i as f32 + h[0]) * 12.8, (j as f32 + h[1]) * 12.8);
+                let want = d.wet(x, z, f32::MIN).level_m.map(f32::to_bits);
+                wet += usize::from(want.is_some());
+                for ground_m in grounds {
+                    let w = d.wet(x, z, ground_m);
+                    assert_eq!(
+                        w.level_m.map(f32::to_bits),
+                        want,
+                        "{x},{z} under {ground_m}"
+                    );
+                    cut += usize::from(w.cut_m > 0.0);
+                }
+            }
+        }
+        assert!(wet > 1000 && cut > 1000, "{wet} wet points, {cut} cuts");
+    }
 }

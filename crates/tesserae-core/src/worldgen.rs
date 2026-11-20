@@ -43,7 +43,7 @@ use crate::settlement::Settlement;
 use crate::shape::{MAX_SHAPED_PER_CHUNK, Orientation, SHAPE_SLAB, SHAPE_STAIR};
 use crate::tables::Tables;
 use crate::template::Template;
-use crate::terrain::{CAVERN_MIN_DEPTH_M, Caverns, LandformParams, Terrain};
+use crate::terrain::{CAVERN_MIN_DEPTH_M, Caverns, Column, LandformParams, Terrain};
 use crate::underground::{
     AQUIFER_WALL_M, CAVE_BIOME_MIN_DEPTH_M, CaveBiomeTable, LAVA_DEPTH_M, LAVA_SEAL_M,
     SPRING_SPACING_M, aquifer_cell, aquifer_rise_m, cave_biome_at,
@@ -997,7 +997,8 @@ struct ColumnCache {
     overhang_m: [f32; CHUNK_SIZE * CHUNK_SIZE],
     /// Columns where a sea-floor formation lays bare rock instead of the ground's surface.
     rock: [bool; CHUNK_SIZE * CHUNK_SIZE],
-    /// Each column's Biome, [`UNASKED`] until it is first asked: most Chunks over a Cell ask none.
+    /// Each column's Biome, decided as the cache is built; [`UNASKED`] in a World without Biomes,
+    /// which asks the climate for nothing.
     biomes: [AtomicU8; CHUNK_SIZE * CHUNK_SIZE],
     /// Boxed so a Cell whose caves are never asked holds a pointer, not 4 KB.
     caves: OnceLock<Box<ColumnCaves>>,
@@ -1016,13 +1017,16 @@ impl ColumnCache {
         match self.biomes[i].load(Ordering::Relaxed) {
             UNASKED => {
                 let id = ask();
-                let stored = id.map_or(NO_BIOME, |id| id.index() as u8);
-                self.biomes[i].store(stored, Ordering::Relaxed);
+                self.biomes[i].store(Self::stored(id), Ordering::Relaxed);
                 id
             }
             NO_BIOME => None,
             id => Some(BiomeId::new(id)),
         }
+    }
+
+    fn stored(id: Option<BiomeId>) -> u8 {
+        id.map_or(NO_BIOME, |id| id.index() as u8)
     }
 
     /// Relaxed like [`Self::biome`]: the seal is a pure function of the column.
@@ -1215,12 +1219,14 @@ impl Worldgen {
     /// The height up to which open air over a column fills with the Game's fluid, if the Game
     /// declared one. The ground there may stand above it, which is a dry column.
     pub fn water_level_m(&self, x_m: f32, z_m: f32) -> Option<f32> {
+        self.water?;
+        self.water_level_of(self.terrain.inland_water_m(x_m, z_m))
+    }
+
+    /// [`Self::water_level_m`] over a column whose inland water is `inland_m`.
+    fn water_level_of(&self, inland_m: Option<f32>) -> Option<f32> {
         let sea = self.water?.level_m;
-        Some(
-            self.terrain
-                .inland_water_m(x_m, z_m)
-                .map_or(sea, |l| l.max(sea)),
-        )
+        Some(inland_m.map_or(sea, |l| l.max(sea)))
     }
 
     /// The dry column nearest `from`, searched outwards to `max_m`, for a Player to spawn on: not
@@ -1312,7 +1318,12 @@ impl Worldgen {
     /// `None` where the World has no Biomes. Pure in the seed and the position, so the same at
     /// every Voxel size and LOD level.
     pub fn biome_at(&self, x_m: f32, z_m: f32) -> Option<BiomeId> {
-        let site = self.terrain.site(x_m, z_m);
+        self.biome_of([x_m, z_m], &self.terrain.column(x_m, z_m))
+    }
+
+    /// [`Self::biome_at`] of a column already asked at `[x_m, z_m]`.
+    fn biome_of(&self, [x_m, z_m]: [f32; 2], column: &Column) -> Option<BiomeId> {
+        let site = self.terrain.site_of(column);
         self.climate.biome_at(&self.params.biomes, x_m, z_m, site)
     }
 
@@ -1399,17 +1410,20 @@ impl Worldgen {
         const RAW_W: usize = SURFACE_W + 2;
         let raw_index = |x: i32, z: i32| (z + 2) as usize * RAW_W + (x + 2) as usize;
         const { assert!(RAW_W.is_multiple_of(4) && CHUNK_SIZE.is_multiple_of(4)) };
-        let mut raw = [(0.0f32, None); RAW_W * RAW_W];
-        for z in -2..CHUNK_SIZE as i32 + 2 {
-            for x in (-2..CHUNK_SIZE as i32 + 2).step_by(4) {
-                let row = self.raw_columns_x4(
-                    std::array::from_fn(|k| self.axis_m(cx, x + k as i32)),
-                    self.axis_m(cz, z),
-                );
-                let at = raw_index(x, z);
-                raw[at..at + 4].copy_from_slice(&row);
-            }
-        }
+        let terrain = &self.terrain;
+        let at_m = |x: i32, z: i32| [self.axis_m(cx, x), self.axis_m(cz, z)];
+        let rows: [[Column; 4]; RAW_W * RAW_W / 4] = std::array::from_fn(|r| {
+            let (x, z) = ((r * 4 % RAW_W) as i32 - 2, (r * 4 / RAW_W) as i32 - 2);
+            let x_m = std::array::from_fn(|k| self.axis_m(cx, x + k as i32));
+            terrain.columns_x4(x_m, [self.axis_m(cz, z); 4])
+        });
+        let columns = rows.as_flattened();
+        let raw: [(f32, Option<f32>); RAW_W * RAW_W] = std::array::from_fn(|i| {
+            (
+                columns[i].height_m,
+                self.water_level_of(columns[i].inland_m),
+            )
+        });
         let mut surface_m = [0.0f32; SURFACE_W * SURFACE_W];
         let mut water_level_m = [None; SURFACE_W * SURFACE_W];
         for z in -1..CHUNK_SIZE as i32 + 1 {
@@ -1419,27 +1433,34 @@ impl Worldgen {
                 water_level_m[surface_index(x, z)] = raw[raw_index(x, z)].1;
             }
         }
-        let terrain = &self.terrain;
+        let column = |i: usize| {
+            let (x, z) = ((i % CHUNK_SIZE) as i32, (i / CHUNK_SIZE) as i32);
+            (x, z, &columns[raw_index(x, z)])
+        };
         let mut overhang_m = [0.0; CHUNK_SIZE * CHUNK_SIZE];
         for (i, row) in overhang_m.as_chunks_mut::<4>().0.iter_mut().enumerate() {
-            let (x, z) = ((i * 4 % CHUNK_SIZE) as i32, (i * 4 / CHUNK_SIZE) as i32);
-            *row = terrain.overhang_amp_x4(
-                std::array::from_fn(|k| self.axis_m(cx, x + k as i32)),
-                [self.axis_m(cz, z); 4],
-            );
+            *row = terrain.overhang_amp_x4_of(&std::array::from_fn(|k| *column(i * 4 + k).2));
         }
         let sea_m = self.params.sea_level_m;
         let rock = std::array::from_fn(|i| {
-            let (x, z) = ((i % CHUNK_SIZE) as i32, (i / CHUNK_SIZE) as i32);
-            surface_m[surface_index(x, z)] < sea_m - 1.0
-                && terrain.seabed_rock(self.axis_m(cx, x), self.axis_m(cz, z))
+            let (x, z, c) = column(i);
+            surface_m[surface_index(x, z)] < sea_m - 1.0 && terrain.seabed_rock_of(c)
+        });
+        // Every Cell with a Chunk on the ground asks all its columns' Biomes for its grounds and
+        // Plants, so deciding them here costs only a Cell nothing asks.
+        let biomes = std::array::from_fn(|i| {
+            if self.params.biomes.is_empty() {
+                return AtomicU8::new(UNASKED);
+            }
+            let (x, z, c) = column(i);
+            AtomicU8::new(ColumnCache::stored(self.biome_of(at_m(x, z), c)))
         });
         ColumnCache {
             surface_m,
             water_level_m,
             overhang_m,
             rock,
-            biomes: std::array::from_fn(|_| AtomicU8::new(UNASKED)),
+            biomes,
             caves: OnceLock::new(),
             sealed_m: std::array::from_fn(|_| AtomicU32::new(UNSEALED)),
         }
@@ -1515,16 +1536,8 @@ impl Worldgen {
     /// The ground and water level over a column before either is reconciled with its
     /// neighbours'.
     fn raw_column(&self, x_m: f32, z_m: f32) -> (f32, Option<f32>) {
-        (
-            self.terrain.height_m(x_m, z_m),
-            self.water_level_m(x_m, z_m),
-        )
-    }
-
-    /// [`Self::raw_column`] at four columns along x, bit for bit.
-    fn raw_columns_x4(&self, x_m: [f32; 4], z_m: f32) -> [(f32, Option<f32>); 4] {
-        let height_m = self.terrain.height_x4(x_m, [z_m; 4]);
-        std::array::from_fn(|k| (height_m[k], self.water_level_m(x_m[k], z_m)))
+        let c = self.terrain.column(x_m, z_m);
+        (c.height_m, self.water_level_of(c.inland_m))
     }
 
     /// The highest Voxel the water over a column fills, if it stands above the ground: the cube
@@ -1575,7 +1588,7 @@ impl Worldgen {
             if level_m.is_none_or(|l| self.level_top(l) <= reach) {
                 (own.0, None)
             } else {
-                self.raw_column(x_m, z_m)
+                (self.terrain.height_m(x_m, z_m), level_m)
             }
         });
         self.contained_m(own, around)
@@ -1694,10 +1707,8 @@ impl Worldgen {
                 let x = (min_m[0] + i as f32 * STEP_M).min(max_m[0]);
                 let z = (min_m[1] + j as f32 * STEP_M).min(max_m[1]);
                 // Water stands above ground that is under it, so its level counts.
-                let ground = terrain.height_m(x, z);
-                let water = self
-                    .water_level_m(x, z)
-                    .map_or(ground, |level_m| level_m.max(ground));
+                let (ground, level_m) = self.raw_column(x, z);
+                let water = level_m.map_or(ground, |level_m| level_m.max(ground));
                 highest = highest.max(water);
             }
         }
@@ -3597,6 +3608,47 @@ mod tests {
         let before = g.column_cache(0, 0);
         g.forget_caches();
         assert!(!Arc::ptr_eq(&before, &g.column_cache(0, 0)));
+    }
+
+    #[test]
+    fn a_cells_biomes_are_decided_with_its_columns_as_biome_at_decides_them() {
+        let mut seen = std::collections::HashSet::new();
+        for size in [1.0, 0.5, 0.3] {
+            for seed in 0..4u64 {
+                let g = Worldgen::new(seed, size, crate::testgen::world_params());
+                for [cx, cz] in [[0, 0], [-41, 7], [260, -900], [-3000, 5100]] {
+                    let cache = g.column_cache(cx, cz);
+                    for (i, byte) in cache.biomes.iter().enumerate() {
+                        let (x, z) = ((i % CHUNK_SIZE) as i32, (i / CHUNK_SIZE) as i32);
+                        let want = g.biome_at(g.axis_m(cx, x), g.axis_m(cz, z));
+                        let at = format!("column {x},{z} of {cx},{cz}, seed {seed} at {size} m");
+                        assert_eq!(
+                            byte.load(Ordering::Relaxed),
+                            ColumnCache::stored(want),
+                            "{at}"
+                        );
+                        seen.insert(want);
+                    }
+                }
+            }
+        }
+        assert!(seen.len() >= 2, "{seen:?}");
+        let bare = Worldgen::new(
+            SEED,
+            1.0,
+            WorldgenParams {
+                biomes: BiomeTable::default(),
+                ..crate::testgen::world_params()
+            },
+        );
+        let cache = bare.column_cache(0, 0);
+        assert!(
+            cache
+                .biomes
+                .iter()
+                .all(|b| b.load(Ordering::Relaxed) == UNASKED)
+        );
+        assert_eq!(bare.column_biome_id(3, 5), None);
     }
 
     #[test]
