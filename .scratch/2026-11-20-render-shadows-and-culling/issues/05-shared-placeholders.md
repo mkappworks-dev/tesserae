@@ -31,7 +31,8 @@ a placeholder share a draw, with one instance each.
       through a larger bucket and finds the padding degenerate.
 - [ ] Gated by 01's method: draws per frame (01's count), GPU frame and the
       shadow span, held mesh bytes and upload per frame; numbers in Comments.
-- [ ] Pixel-identical captures against the commit before it.
+- [ ] Captures against the commit before it differ no more than two runs of
+      that commit do (the spec's image rule).
 
 ## Comments
 

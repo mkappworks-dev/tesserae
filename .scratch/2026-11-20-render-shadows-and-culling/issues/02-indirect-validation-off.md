@@ -24,5 +24,6 @@ a staging buffer and a copy.
 ## Acceptance criteria
 
 - [ ] Gated by 01's method, GPU frame as its target; numbers in Comments.
-- [ ] Pixel-identical captures against the commit before it.
+- [ ] Captures against the commit before it differ no more than two runs of
+      that commit do (the spec's image rule).
 - [ ] The game launches and draws, release and debug.

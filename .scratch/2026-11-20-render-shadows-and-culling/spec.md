@@ -123,10 +123,14 @@ Item 2 (GPU occlusion culling) and item 3 (underground visibility culling) are
   and cutout gain the draws; blended layers are sorted and drawn one by one, so
   they gain the memory only. ADR-0034's "each layer has its own placeholder"
   changes with it.
-- **The image (Q3).** 0, 1d and item 4 are exact: pixel-identical captures. 1a,
-  1b and 1c change distant shadows: each is shown to you as before and after
-  captures of `flight`, `stationary` and `hidden-hill` and lands only if you
-  accept it.
+- **The image (Q3).** 0, 1d and item 4 are exact: their captures differ from
+  the commit before only where, and by no more than, two runs of that commit
+  differ from each other (decided 2026-11-20: on Metal's fast math a
+  shadow-only shader cannot be bit-identical, and 1d's first build moved 1 to
+  31 shadow-edge pixels by up to 7 levels against 100 to 1,600 between base
+  runs). 1a, 1b and 1c change distant shadows: each is shown to you as before
+  and after captures of `flight`, `stationary` and `hidden-hill`, with crops
+  of distant canopy for 1a, and lands only if you accept it.
 - **No coarse casters (Q2).** The far cascades lie inside level 0's ring, where
   no coarse mesh exists, and coarse ground would shadow the finer ground it
   covers.

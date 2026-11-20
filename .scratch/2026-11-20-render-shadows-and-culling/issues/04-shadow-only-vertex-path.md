@@ -25,7 +25,8 @@ only the position matters.
       shadow path's positions.
 - [ ] Gated by 01's method, the shadow span named by 01 as its target; numbers
       in Comments.
-- [ ] Pixel-identical captures against the commit before it.
+- [ ] Captures against the commit before it differ no more than two runs of
+      that commit do (the spec's image rule).
 
 ## Comments
 
