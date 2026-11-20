@@ -10,7 +10,7 @@
 //! an agent, does not have — and because flying the camera for a fixed distance
 //! first makes the result the same picture every time.
 
-use super::chunk_mesh::ChunkQuads;
+use super::chunk_mesh::{ChunkQuads, Placeholders};
 use bevy::camera::RenderTarget;
 use bevy::prelude::*;
 
@@ -1164,7 +1164,7 @@ fn report(
     camera: Single<(&Transform, &FlyCamera), With<MainCamera>>,
     preferences: Res<super::profile::Preferences>,
     drawn: Query<(&ChunkQuads, &Transform)>,
-    world: Res<WorldSettings>,
+    (world, placeholders): (Res<WorldSettings>, Res<Placeholders>),
 ) {
     let (camera, movement) = camera.into_inner();
     let elapsed_s = capture.elapsed_s(&time);
@@ -1256,15 +1256,26 @@ fn report(
         .map(|(level, s)| format!("{level}:{}/{}", s.held, s.meshed))
         .collect();
     info!("capture_lod held/meshed={}", per_level.join(","));
-    log_levels(&capture.frames, &stats.levels, &held_bytes);
+    log_levels(
+        &capture.frames,
+        &stats.levels,
+        &held_bytes,
+        placeholders.gpu_bytes(),
+    );
 }
 
 /// One line per level and kind, so `scripts/frame-runs` still sees only the lines
 /// it reads.
 ///
-/// `held_bytes` is what the Client's own meshes add up to, level 0 included; the
-/// per-level `bytes` is what the Server delivered, for levels above 0.
-fn log_levels(frames: &FrameLog, levels: &[LevelStats], held_bytes: &[usize]) {
+/// `held_bytes` is what the Client's own meshes add up to, level 0 included,
+/// and `placeholder_bytes` the buckets they share; the per-level `bytes` is what
+/// the Server delivered, for levels above 0.
+fn log_levels(
+    frames: &FrameLog,
+    levels: &[LevelStats],
+    held_bytes: &[usize],
+    placeholder_bytes: usize,
+) {
     let at = |times: &[Option<f32>], level: usize| {
         times
             .get(level)
@@ -1312,8 +1323,8 @@ fn log_levels(frames: &FrameLog, levels: &[LevelStats], held_bytes: &[usize]) {
         .map(|(level, bytes)| format!("{level}:{bytes}"))
         .collect();
     info!(
-        "capture_lod_memory total_bytes={} levels={}",
-        held_bytes.iter().sum::<usize>(),
+        "capture_lod_memory total_bytes={} placeholder_bytes={placeholder_bytes} levels={}",
+        held_bytes.iter().sum::<usize>() + placeholder_bytes,
         per_level.join(",")
     );
 }

@@ -40,12 +40,13 @@ pub const VERTICES_PER_QUAD: u32 = 4;
 pub const LIGHT_SHIFT: u32 = 24;
 const MATERIAL_MASK: u32 = mask(LIGHT_SHIFT);
 
-/// The header's words: the LOD level, the table's length and the words a
-/// record takes.
-pub const HEADER_WORDS: u32 = 3;
+/// The header's words: the LOD level, the table's length, the words a record
+/// takes and the layer's quads, past which its bucket's placeholder only pads.
+pub const HEADER_WORDS: u32 = 4;
 pub const HEADER_LEVEL: u32 = 0;
 pub const HEADER_TABLE_LEN: u32 = 1;
 pub const HEADER_STRIDE: u32 = 2;
+pub const HEADER_QUADS: u32 = 3;
 
 /// The geometry, with the table index in the second word's top bits.
 const NARROW: u32 = 2;
@@ -94,6 +95,7 @@ impl ChunkQuads {
         let mut header = [0; HEADER_WORDS as usize];
         header[HEADER_LEVEL as usize] = level;
         header[HEADER_STRIDE as usize] = stride;
+        header[HEADER_QUADS as usize] = layer.quad_count() as u32;
         words.extend(header);
         if stride == NARROW {
             words[HEADER_TABLE_LEN as usize] = table.len() as u32;
@@ -132,7 +134,7 @@ impl ChunkQuads {
     }
 
     pub fn quad_count(&self) -> u32 {
-        (self.words.len() as u32 - self.records_at()) / self.stride()
+        self.words[HEADER_QUADS as usize]
     }
 
     /// The bounds of every corner, in Voxels: the placeholder has no positions
@@ -141,12 +143,11 @@ impl ChunkQuads {
         self.aabb
     }
 
-    /// What the GPU holds for the layer: its words and its placeholder.
+    /// What the GPU holds for the layer alone: its placeholder is its
+    /// bucket's, shared.
     #[cfg(any(feature = "dev", feature = "profiling"))]
     pub fn gpu_bytes(&self) -> usize {
-        let vertices = self.quad_count() * VERTICES_PER_QUAD;
-        let index_bytes = if vertices > U16_VERTICES { 4 } else { 2 };
-        self.words.len() * 4 + (vertices + self.quad_count() * 6 * index_bytes) as usize
+        self.words.len() * 4
     }
 
     fn stride(&self) -> u32 {
@@ -208,7 +209,57 @@ pub fn paint(material: u32, light: Light) -> u32 {
     material | u32::from(light.packed()) << LIGHT_SHIFT
 }
 
-/// The mesh a layer of `quads` quads draws: render-world only, since nothing
+/// One placeholder per bucket, shared by every layer whose quads it holds: on
+/// Metal each mesh is its own indirect draw in every pass and cascade, so
+/// opaque and cutout layers in one bucket are one draw. Blended layers are
+/// sorted and drawn one by one, and share only the memory.
+#[derive(Resource, Default)]
+pub struct Placeholders(HashMap<u32, Handle<Mesh>>);
+
+impl Placeholders {
+    /// The placeholder a layer of `quads` quads draws, built the first time
+    /// its bucket is asked for and kept for the session.
+    pub fn of(&mut self, meshes: &mut Assets<Mesh>, quads: u32) -> Handle<Mesh> {
+        self.0
+            .entry(bucket(quads))
+            .or_insert_with_key(|&size| meshes.add(placeholder(size)))
+            .clone()
+    }
+
+    /// What the GPU holds for every bucket built.
+    #[cfg(any(feature = "dev", feature = "profiling"))]
+    pub fn gpu_bytes(&self) -> usize {
+        self.0
+            .keys()
+            .map(|&quads| {
+                let vertices = quads * VERTICES_PER_QUAD;
+                let index_bytes = if vertices > U16_VERTICES { 4 } else { 2 };
+                (vertices + quads * 6 * index_bytes) as usize
+            })
+            .sum()
+    }
+}
+
+/// Each bucket holds about 2^(1/4) times the quads of the one below: about 9%
+/// of a layer's vertex work is padding on average.
+const BUCKET_GROWTH: f64 = 1.189_207_115_002_721;
+
+/// The quads of the smallest bucket that holds a layer of `quads` quads. The
+/// last bucket of two-byte indices is exactly where they run out.
+pub fn bucket(quads: u32) -> u32 {
+    let mut size = 1;
+    while size < quads {
+        let next = (size + 1).max((f64::from(size) * BUCKET_GROWTH).ceil() as u32);
+        size = if size < U16_QUADS {
+            next.min(U16_QUADS)
+        } else {
+            next
+        };
+    }
+    size
+}
+
+/// The mesh a bucket of `quads` quads draws: render-world only, since nothing
 /// on the main world reads it.
 pub fn placeholder(quads: u32) -> Mesh {
     let vertices = quads * VERTICES_PER_QUAD;
@@ -231,6 +282,7 @@ pub fn placeholder(quads: u32) -> Mesh {
 
 /// How many vertices two-byte indices reach.
 const U16_VERTICES: u32 = 1 << 16;
+const U16_QUADS: u32 = U16_VERTICES / VERTICES_PER_QUAD;
 
 /// What `chunk_vertex.wesl` makes of one vertex.
 #[cfg(test)]
@@ -244,15 +296,16 @@ pub struct Expanded {
 
 /// `chunk_vertex.wesl`'s `expand_position`, the shadow pass's decode.
 #[cfg(test)]
-pub fn expand_position(buffer: &[u32], at: u32, vertex: u32) -> [f32; 3] {
-    expand(buffer, at, vertex).corner.position
+pub fn expand_position(buffer: &[u32], at: u32, vertex: u32) -> Option<[f32; 3]> {
+    expand(buffer, at, vertex).map(|expanded| expanded.corner.position)
 }
 
-/// `chunk_vertex.wesl`'s `expand`, step for step, for the test that holds the
-/// two equal: `buffer` is the quad buffer, `at` the layer's tag and `vertex`
-/// the mesh-local vertex index.
+/// `chunk_vertex.wesl`'s `transform_vertex` and `expand`, step for step, for
+/// the test that holds the two equal: `buffer` is the quad buffer, `at` the
+/// layer's tag and `vertex` the mesh-local vertex index. `None` for the
+/// bucket's padding, which the shader degenerates.
 #[cfg(test)]
-pub fn expand(buffer: &[u32], at: u32, vertex: u32) -> Expanded {
+pub fn expand(buffer: &[u32], at: u32, vertex: u32) -> Option<Expanded> {
     use tesserae_core::mesh::layout::*;
     use tesserae_core::shape::SUBDIV;
     let sub = SUBDIV as u32;
@@ -262,6 +315,9 @@ pub fn expand(buffer: &[u32], at: u32, vertex: u32) -> Expanded {
     let stride = word(at + HEADER_STRIDE);
     let table = at + HEADER_WORDS;
     let quad = vertex / VERTICES_PER_QUAD;
+    if quad >= word(at + HEADER_QUADS) {
+        return None;
+    }
     let corner = vertex % VERTICES_PER_QUAD;
     let record = table + word(at + HEADER_TABLE_LEN) + quad * stride;
     let (lo, hi) = (word(record), word(record + 1));
@@ -327,7 +383,7 @@ pub fn expand(buffer: &[u32], at: u32, vertex: u32) -> Expanded {
             normal[d] = side;
         }
     }
-    Expanded {
+    Some(Expanded {
         corner: Corner {
             position,
             normal,
@@ -336,7 +392,7 @@ pub fn expand(buffer: &[u32], at: u32, vertex: u32) -> Expanded {
         material: paint & MATERIAL_MASK,
         light: paint >> LIGHT_SHIFT,
         level,
-    }
+    })
 }
 
 #[cfg(test)]
@@ -459,24 +515,29 @@ mod tests {
         let mut buffer = vec![u32::MAX; at as usize];
         buffer.extend_from_slice(packed.words());
         buffer.extend([u32::MAX; 4]);
-        let drawn = placeholder(packed.quad_count());
+        // The next bucket up, so the placeholder always has padding to draw.
+        let drawn = placeholder(bucket(packed.quad_count() + 1));
         let indices: Vec<usize> = drawn
             .indices()
             .expect("an indexed placeholder")
             .iter()
             .collect();
-        assert_eq!(indices.len(), layer.quads.len() * 6, "{what}");
-        for ((q, quad), triangles) in layer.quads.iter().enumerate().zip(indices.chunks(6)) {
+        let (records, padding) = indices.split_at(layer.quads.len() * 6);
+        assert!(!padding.is_empty(), "{what}");
+        for &vertex in padding {
+            assert_eq!(expand(&buffer, at, vertex as u32), None, "{what}: padding");
+        }
+        for ((q, quad), triangles) in layer.quads.iter().enumerate().zip(records.chunks(6)) {
             let corners = quad.corners();
             for (k, &corner) in tesserae_core::mesh::QUAD_CORNERS.iter().enumerate() {
-                let expanded = expand(&buffer, at, triangles[k] as u32);
+                let expanded = expand(&buffer, at, triangles[k] as u32).expect("a record's vertex");
                 assert_eq!(
                     expanded.corner, corners[corner],
                     "{what}: quad {q} vertex {k}"
                 );
                 assert_eq!(
                     expand_position(&buffer, at, triangles[k] as u32),
-                    corners[corner].position,
+                    Some(corners[corner].position),
                     "{what}: the shadow path's quad {q} vertex {k}"
                 );
                 assert_eq!(expanded.material, quad.material, "{what}: quad {q}");
@@ -576,6 +637,34 @@ mod tests {
         assert_eq!(Vec3::from(packed.aabb().max()), hi);
         assert_eq!(lo.x, -1.0 / 16.0, "a flame outside the Chunk");
         assert!(ChunkQuads::pack(&MeshLayer::default(), 0).is_none());
+    }
+
+    #[test]
+    fn a_layer_draws_the_smallest_bucket_that_holds_it() {
+        for (quads, drawn) in [(1, 1), (5, 5), (6, 6), (7, 8), (8, 8), (9, 10), (13, 15)] {
+            assert_eq!(bucket(quads), drawn, "{quads} quads");
+        }
+        assert_eq!(
+            bucket(1 << 14),
+            1 << 14,
+            "the last bucket of two-byte indices"
+        );
+        assert!(bucket((1 << 14) + 1) > 1 << 14);
+        let mut buckets = 0;
+        let mut last = 0;
+        for quads in 1..=100_000 {
+            let drawn = bucket(quads);
+            assert!(drawn >= quads);
+            assert!(
+                (drawn - quads) as f64 <= quads as f64 * 0.19 + 1.0,
+                "{quads} quads padded to {drawn}"
+            );
+            if drawn != last {
+                buckets += 1;
+                last = drawn;
+            }
+        }
+        assert!(buckets < 70, "{buckets} buckets up to 100,000 quads");
     }
 
     #[test]

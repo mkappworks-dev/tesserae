@@ -27,8 +27,36 @@ a placeholder share a draw, with one instance each.
 
 ## Acceptance criteria
 
-- [ ] Tests: the bucket for a quad count; the expansion test draws a layer
+- [x] Tests: the bucket for a quad count; the expansion test draws a layer
       through a larger bucket and finds the padding degenerate.
 - [ ] Gated by 01's method: draws per frame (01's count), GPU frame and the
       shadow span, held mesh bytes and upload per frame; numbers in Comments.
 - [ ] Pixel-identical captures against the commit before it.
+
+## Comments
+
+2026-11-20: bucket ratio checked before any GPU run. Layer quad counts logged
+as they landed in two Terra captures (base build, `dev`, offscreen; the default
+spawn and an ocean Eye), every level: 6,148 layers, 9.9 million quads, largest
+23,419 (cutout), median 300.
+
+| Ratio   | Padding (vertex-weighted) | Mean per layer | Buckets used |
+| ------- | ------------------------- | -------------- | ------------ |
+| 2^(1/8) | 4.3%                      | 3.4%           | 93           |
+| 2^(1/4) | 9.1%                      | 7.5%           | 53           |
+| 2^(1/2) | 20.2%                     | 16.4%          | 29           |
+
+At 2^(1/4): opaque 9.9% in 43 buckets, cutout 8.8% in 47, blended 6.2% in 19;
+level 0's opaque and cutout 9.1% in 50. Cutout holds 73% of the quads. No
+surprise against the spec's 9%, so the ratio stays. Buckets are 1 to 6 one by
+one, then grow by the ratio rounded up, with one ending at exactly 16,384 so
+two-byte indices reach as far as before.
+
+The camera's collision cache was keyed by the placeholder's asset id, which a
+re-meshed layer now keeps; it is keyed by entity and the quads' change tick.
+
+Captures, before (7833eaca) and after, offscreen 1920x1080, `stationary`,
+`transparency` and `hidden-hill` with profile-frames' settings, twice each:
+before against after differs in 0.0001-0.11% of pixels, base against base in
+0.03-0.09%; every differing blob is a growing crop or the minimap, the same
+places base against base differs.

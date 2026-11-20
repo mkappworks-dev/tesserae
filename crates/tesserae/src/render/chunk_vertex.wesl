@@ -12,8 +12,8 @@ import bevy_pbr::render::{
 @group(constants::MATERIAL_BIND_GROUP) @binding(106)
 var<storage, read> quads: array<u32>;
 
-// The mesh is a placeholder with four vertices a quad and nothing in them,
-// drawn through its indices, two triangles a quad.
+// The mesh is its bucket's placeholder with four vertices a quad and nothing in
+// them, drawn through its indices, two triangles a quad.
 struct ChunkVertex {
     @builtin(instance_index) instance_index: u32,
     @builtin(vertex_index) vertex_index: u32,
@@ -154,8 +154,13 @@ fn transform_vertex(in: ChunkVertex) -> ChunkVertexOutput {
     // own first vertex, is the index the placeholder drew it by.
     let at = mesh_functions::get_tag(in.instance_index);
     let vertex = in.vertex_index - mesh[in.instance_index].first_vertex_index;
-
     var out: ChunkVertexOutput;
+    if vertex / constants::CHUNK_VERTICES_PER_QUAD >= quads[at + constants::CHUNK_HEADER_QUADS] {
+        // The bucket's padding: every corner at one point outside the clip
+        // volume, so its triangles have no area and nothing rasterizes.
+        out.clip_position = vec4<f32>(2.0, 2.0, 0.5, 1.0);
+        return out;
+    }
 @if(CHUNK_SHADOW && !MAY_DISCARD) {
     let world_from_local = mesh_functions::get_world_from_local(in.instance_index);
     let world_position = mesh_functions::mesh_position_local_to_world(
