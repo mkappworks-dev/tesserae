@@ -376,6 +376,8 @@ struct Level {
     /// Taken out of `stale` at dispatch so a mark made during the flight survives the landing;
     /// also what tells landing a replacement from an intruder.
     regenerating: Marks<Lod>,
+    /// Level 1 only: changed under while level 0 draws all eight children. See [`catch_up`].
+    deferred: Marks<Lod>,
     delivered: HashSet<ChunkCoord>,
     generated: Counts<Lod>,
     meshed: Counts<Lod>,
@@ -1154,8 +1156,14 @@ pub(in crate::server) fn stream_lod(
     let reach = if chunks.persistent { levels } else { 2 };
     for coord in changed {
         let cause = Lod::of(meshes.writer_of(coord));
-        mark_cover(&store, &mut state, &jobs, (1, coord.parent()), reach, cause);
+        let covering = coord.parent();
+        if drawn_by_level_zero(&meshes, covering) {
+            state.level_mut(1).deferred.insert(covering, cause);
+        } else {
+            mark_cover(&store, &mut state, &jobs, (1, covering), reach, cause);
+        }
     }
+    catch_up(&meshes, &store, &mut state, &jobs, reach, &mut unloaded);
 
     let plans: Vec<Plan> = (1..levels)
         .map(|level| Plan {
@@ -1266,6 +1274,7 @@ fn retire(
         level.dirty.retain(|&c| inside(c));
         level.stale.retain(|&c| inside(c));
         level.regenerating.retain(|&c| inside(c));
+        level.deferred.retain(|&c| inside(c));
         // Everything left in `delivered` is inside `keep`, so inside `evict`.
         store.retain(plan.level, inside);
     }
@@ -1373,6 +1382,49 @@ fn mark_cover(
     }
 }
 
+fn drawn_by_level_zero(meshes: &MeshState, covering: ChunkCoord) -> bool {
+    covering.children().all(|c| meshes.is_delivered(c))
+}
+
+/// A level-1 Chunk whose eight children level 0 draws is wholly discarded by the Client
+/// (ADR-0019), so a change under it waits in `deferred` until level 0 stops drawing one of them,
+/// and then marks it once. Meanwhile its mesh is unloaded and none lands: the Client keeps a
+/// level-0 Chunk the Server drops drawn until a delivered cover replaces it, and a cover still
+/// delivered would replace it at once with what it showed before the change.
+fn catch_up(
+    meshes: &MeshState,
+    store: &LodStore,
+    state: &mut LodState,
+    jobs: &LodJobs,
+    reach: u32,
+    unloaded: &mut MessageWriter<LodUnloaded>,
+) {
+    let level = state.level_mut(1);
+    if level.deferred.is_empty() {
+        return;
+    }
+    let (waiting, due): (Vec<ChunkCoord>, Vec<ChunkCoord>) = level
+        .deferred
+        .iter()
+        .partition(|&&c| drawn_by_level_zero(meshes, c));
+    for coord in waiting {
+        if level.delivered.remove(&coord) {
+            #[cfg(any(feature = "dev", feature = "profiling"))]
+            level.sizes.remove(&coord);
+            unloaded.write(LodUnloaded { level: 1, coord });
+        }
+    }
+    for coord in due {
+        let level = state.level_mut(1);
+        let cause = level.deferred.cause(&coord).unwrap_or(Lod::Edit);
+        level.deferred.remove(&coord);
+        // Its regeneration landing marks it again; meshed before that, it would show the
+        // Chunk from before the change.
+        level.dirty.remove(&coord);
+        mark_cover(store, state, jobs, (1, coord), reach, cause);
+    }
+}
+
 /// A mesh lands only if its Chunk is still inside `keep`: that puts all six neighbours inside
 /// `load`, so every neighbour the job read is still held. As at level 0 it is delivered even if
 /// the Chunk was dirtied again in flight; dropping it would starve a Chunk that changes faster
@@ -1398,6 +1450,10 @@ fn land_meshes(
         if !plan.rings.keep.contains(delta(plan.anchor, coord)) {
             jobs.mesh.note_stale();
             lv.dirty.insert(coord, Lod::Moved);
+            continue;
+        }
+        if lv.deferred.contains(&coord) {
+            jobs.mesh.note_stale();
             continue;
         }
         if lv.dirty.contains(&coord) {
@@ -1593,6 +1649,7 @@ fn current_finer<'a>(
             if finer.contains_key(&(below, at))
                 || marks.stale.contains(&at)
                 || marks.regenerating.contains(&at)
+                || marks.deferred.contains(&at)
             {
                 continue;
             }
@@ -1648,7 +1705,9 @@ fn dispatch_meshes(
     for (holes, i, d) in walk(orders, &due) {
         let plan = &plans[i];
         let coord = offset(plan.anchor, d);
-        if !state.level_mut(plan.level).dirty.contains(&coord)
+        let level = state.level_mut(plan.level);
+        if !level.dirty.contains(&coord)
+            || level.deferred.contains(&coord)
             || jobs.mesh.contains((plan.level, coord))
         {
             continue;
@@ -1700,6 +1759,7 @@ fn dispatch_meshes(
 mod tests {
     use super::*;
     use crate::server::edit::set_voxel;
+    use crate::server::streaming::ChunkMeshReady;
     #[cfg(any(feature = "dev", feature = "profiling"))]
     use crate::server::streaming::causes;
     use crate::server::streaming::tests::{
@@ -2841,7 +2901,6 @@ mod tests {
 
     /// Fills the 2x2x2 Voxels at `local` with stone, in one Batch of the fluid simulation's or
     /// an Edit's.
-    #[cfg(any(feature = "dev", feature = "profiling"))]
     fn write_block(h: &mut Harness, chunk: ChunkCoord, local: [i32; 3], fluids: bool) {
         h.app
             .world_mut()
@@ -3356,20 +3415,14 @@ mod tests {
         assert!(h.delivered_at(1).contains(&target));
     }
 
-    #[test]
-    fn a_mod_fill_invalidates_a_held_level_one_cover_and_redelivers_its_mesh() {
+    /// Fills the 2x2x2 Voxels at `local` with stone by a Mod's Command.
+    fn fill_by_command(h: &mut Harness, chunk: ChunkCoord, local: [i32; 3]) {
         use tesserae_mods::{Command, Region};
-        let mut h = harness();
-        h.settle();
-        h.lod_settle();
-        let chunk = h.quiet_chunk();
-        let covering = chunk.parent();
-        let before = h.cover_arc(covering);
         let side = CHUNK_SIZE as i32;
         let min = [
-            chunk.x * side + 10,
-            chunk.y * side + 10,
-            chunk.z * side + 10,
+            chunk.x * side + local[0],
+            chunk.y * side + local[1],
+            chunk.z * side + local[2],
         ];
         let size = h.app.world().resource::<WorldSettings>().voxel_size;
         let command = Command::Fill {
@@ -3384,6 +3437,17 @@ mod tests {
             tesserae_mods::Line::V02,
             &[command],
         );
+    }
+
+    #[test]
+    fn a_mod_fill_invalidates_a_held_level_one_cover_and_redelivers_its_mesh() {
+        let mut h = harness();
+        h.settle();
+        h.lod_settle();
+        let chunk = h.quiet_chunk();
+        let covering = chunk.parent();
+        let before = h.cover_arc(covering);
+        fill_by_command(&mut h, chunk, [10, 10, 10]);
         let (ready, _) = h.lod_settle();
         assert!(!same_chunk(&before, &h.cover_arc(covering)));
         assert!(same_chunk(
@@ -3570,6 +3634,234 @@ mod tests {
         assert!(
             delivered > 0,
             "{covering} was edited every tick and never redrawn"
+        );
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    enum Change {
+        Edit,
+        Fluid,
+        Command,
+    }
+
+    impl Change {
+        const ALL: [Change; 3] = [Change::Edit, Change::Fluid, Change::Command];
+
+        /// Fills the 2x2x2 Voxels at `local` with stone.
+        fn apply(self, h: &mut Harness, chunk: ChunkCoord, local: [i32; 3]) {
+            match self {
+                Change::Edit => h.edit_block(chunk, local, stone()),
+                Change::Fluid => write_block(h, chunk, local, true),
+                Change::Command => fill_by_command(h, chunk, local),
+            }
+        }
+    }
+
+    /// Level 0 draws two Cells out and one up and down, so all eight children of the Eye's
+    /// level-1 Chunk; level 1 has no hole, so it meshes that Chunk too.
+    fn under_level_zero_settings() -> StreamingSettings {
+        StreamingSettings {
+            view_distance_m: 64.0,
+            vertical_distance_m: 32.0,
+            hysteresis_m: 32.0,
+            lod_distance_m: 256.0,
+        }
+    }
+
+    /// Settled at both levels, with an empty child of the Eye's cover, which is delivered.
+    fn drawn_by_level_zero() -> (Harness, ChunkCoord) {
+        let mut h = harness_with(under_level_zero_settings(), unlimited());
+        assert!(h.rings_of(1).mesh.hole.is_none());
+        h.settle();
+        h.lod_settle();
+        let covering = h.anchor_of(1);
+        let level_zero: HashSet<ChunkCoord> = h
+            .app
+            .world()
+            .resource::<MeshState>()
+            .delivered()
+            .copied()
+            .collect();
+        assert!(covering.children().all(|c| level_zero.contains(&c)));
+        assert!(h.delivered_at(1).contains(&covering));
+        let chunk = covering
+            .children()
+            .find(|&c| h.store().get(c).unwrap().uniform() == Some(Voxel::AIR))
+            .expect("an empty child of the Eye's cover");
+        (h, chunk)
+    }
+
+    /// What the Client draws of levels 0 and 1, by ADR-0019, from the messages alone: an
+    /// unloaded Chunk stays drawn until the other level's delivered Chunks cover it.
+    #[derive(Default)]
+    struct Drawn {
+        /// A level-1 Chunk's mesh by its index in `meshes`; `None` if sent before the test.
+        delivered: HashMap<LodKey, Option<usize>>,
+        retained: HashSet<LodKey>,
+        meshes: Vec<ChunkMesh>,
+    }
+
+    impl Drawn {
+        fn apply(
+            &mut self,
+            level_zero: (Vec<ChunkMeshReady>, Vec<ChunkCoord>),
+            coarse: (Vec<LodMeshReady>, Vec<LodUnloaded>),
+        ) {
+            for m in level_zero.0 {
+                self.retained.remove(&(0, m.coord));
+                self.delivered.insert((0, m.coord), None);
+            }
+            for m in coarse.0.into_iter().filter(|m| m.level == 1) {
+                self.retained.remove(&(1, m.coord));
+                self.delivered.insert((1, m.coord), Some(self.meshes.len()));
+                self.meshes.push(m.mesh);
+            }
+            let unloaded = level_zero.1.into_iter().map(|c| (0, c));
+            let unloaded = unloaded.chain(
+                coarse
+                    .1
+                    .into_iter()
+                    .filter(|u| u.level == 1)
+                    .map(|u| (1, u.coord)),
+            );
+            for key in unloaded.collect::<Vec<_>>() {
+                if self.delivered.remove(&key).is_some() {
+                    self.retained.insert(key);
+                }
+            }
+            let delivered = &self.delivered;
+            self.retained.retain(|&(level, coord)| match level {
+                0 => !delivered.contains_key(&(1, coord.parent())),
+                _ => !coord.children().all(|c| delivered.contains_key(&(0, c))),
+            });
+        }
+
+        fn draws(&self, key: LodKey) -> bool {
+            self.delivered.contains_key(&key) || self.retained.contains(&key)
+        }
+
+        /// The level whose fragments show over a level-0 Chunk's region, finer first.
+        fn shown(&self, chunk: ChunkCoord) -> Option<u32> {
+            [(0, chunk), (1, chunk.parent())]
+                .into_iter()
+                .find(|&key| self.draws(key))
+                .map(|(level, _)| level)
+        }
+    }
+
+    #[test]
+    fn a_change_under_a_cover_level_zero_draws_queues_no_level_one_work() {
+        for change in Change::ALL {
+            let (mut h, chunk) = drawn_by_level_zero();
+            let covering = chunk.parent();
+            let before = h.cover_arc(covering);
+            let edited = Arc::clone(&h.store().shared(chunk).unwrap().chunk);
+
+            change.apply(&mut h, chunk, [10, 10, 10]);
+            assert!(!Arc::ptr_eq(
+                &h.store().shared(chunk).unwrap().chunk,
+                &edited
+            ));
+            h.settle();
+            let (ready, _, dispatched) = h.lod_settle_counting();
+
+            assert_eq!(dispatched, 0, "{change:?} regenerated a coarse Chunk");
+            assert_eq!(ready.len(), 0, "{change:?} meshed a coarse Chunk");
+            assert!(Arc::ptr_eq(&h.cover_arc(covering), &before), "{change:?}");
+        }
+    }
+
+    #[test]
+    fn a_cover_level_zero_stops_drawing_a_child_of_catches_up_to_the_changed_children() {
+        for change in Change::ALL {
+            let (mut h, chunk) = drawn_by_level_zero();
+            let covering = chunk.parent();
+            change.apply(&mut h, chunk, [10, 10, 10]);
+            h.settle();
+            h.lod_settle();
+            assert!(!same_chunk(
+                &h.cover_arc(covering),
+                &expected_cover(&h, chunk)
+            ));
+
+            // Four Cells along +x: the children at x = 0 leave level 0's keep and stay held.
+            let cell = h.app.world().resource::<WorldSettings>().cell_size();
+            h.anchor_at(Vec3::new(4.0 * cell, 0.0, 0.0));
+            let (_, unloaded) = h.settle();
+            assert!(unloaded.contains(&covering.child(0)), "{change:?}");
+            assert!(covering.children().all(|c| h.store().contains(c)));
+            let (ready, _) = h.lod_settle();
+
+            assert!(
+                same_chunk(&h.cover_arc(covering), &expected_cover(&h, chunk)),
+                "{change:?}"
+            );
+            let meshes = latest(ready);
+            let mesh = meshes
+                .get(&(1, covering))
+                .expect("the cover was meshed again");
+            assert!(same_mesh(mesh, &h.fresh_mesh(1, covering)), "{change:?}");
+            assert!(!h.lod_state().is_stale(1, covering));
+        }
+    }
+
+    /// Between the change and the catch-up, every child's region shows level 0 or the cover's
+    /// mesh of the changed children: never nothing, and never the mesh from before.
+    #[test]
+    fn no_hole_and_no_stale_cover_shows_while_a_cover_waits_on_level_zero() {
+        let (mut h, chunk) = drawn_by_level_zero();
+        let covering = chunk.parent();
+        let mut drawn = Drawn {
+            delivered: covering.children().map(|c| ((0, c), None)).collect(),
+            ..Drawn::default()
+        };
+        drawn.delivered.insert((1, covering), None);
+        Change::Edit.apply(&mut h, chunk, [10, 10, 10]);
+
+        let cell = h.app.world().resource::<WorldSettings>().cell_size();
+        let mut shown_meshes: HashSet<usize> = HashSet::new();
+        let mut moved = false;
+        let started = std::time::Instant::now();
+        loop {
+            assert!(
+                started.elapsed() < SETTLE_CEILING,
+                "streaming never settled"
+            );
+            let level_zero = h.tick();
+            let coarse = h.lod_tick();
+            let quiet = level_zero.0.is_empty()
+                && level_zero.1.is_empty()
+                && coarse.0.is_empty()
+                && coarse.1.is_empty()
+                && h.quiet()
+                && h.lod_quiet();
+            drawn.apply(level_zero, coarse);
+            for child in covering.children() {
+                match drawn.shown(child) {
+                    None => panic!("{child} is a hole"),
+                    Some(1) => {
+                        let mesh = drawn.delivered[&(1, covering)];
+                        shown_meshes.insert(mesh.expect("the mesh from before the change showed"));
+                    }
+                    Some(_) => {}
+                }
+            }
+            if quiet {
+                if moved {
+                    break;
+                }
+                // Four Cells along +x: the children at x = 0 leave level 0's keep.
+                h.anchor_at(Vec3::new(4.0 * cell, 0.0, 0.0));
+                moved = true;
+            }
+            std::thread::sleep(std::time::Duration::from_micros(100));
+        }
+        assert!(!shown_meshes.is_empty(), "level 1 never showed");
+        let fresh = h.fresh_mesh(1, covering);
+        assert!(
+            shown_meshes
+                .iter()
+                .all(|&m| same_mesh(&drawn.meshes[m], &fresh))
         );
     }
 

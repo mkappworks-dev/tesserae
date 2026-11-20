@@ -557,6 +557,10 @@ impl MeshState {
         self.delivered.iter()
     }
 
+    pub(in crate::server) fn is_delivered(&self, coord: ChunkCoord) -> bool {
+        self.delivered.contains(&coord)
+    }
+
     pub(in crate::server) fn is_edited(&self, coord: ChunkCoord) -> bool {
         self.edited_chunks.contains(&coord)
     }
@@ -2005,7 +2009,7 @@ pub(in crate::server) mod tests {
             panic!("streaming was still busy after {SETTLE_CEILING:?}");
         }
 
-        fn quiet(&self) -> bool {
+        pub(in crate::server) fn quiet(&self) -> bool {
             let jobs = self.jobs();
             let (dispatched, landed) = jobs.generate.counts();
             jobs.in_flight() == 0

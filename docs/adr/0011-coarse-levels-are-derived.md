@@ -39,9 +39,13 @@ every other change through the one World change, a Mod Command or landed flow,
 fire or reaction, including one that leaves the packed Voxel as it was. A held
 level-0 Chunk that has been edited marks its cover stale when it leaves the
 store, because the Edit is about to stop existing. An unedited Chunk leaves with
-no mark: the generator reproduces it exactly, and a test pins that. Levels 2 and
-above read the generator alone and are never invalidated; an Edit is metres from
-the Eye and level 2 starts at 256 m.
+no mark: the generator reproduces it exactly, and a test pins that. A change
+under a level-1 Chunk whose eight children level 0 draws marks it only once
+level 0 stops drawing one of them, since until then the Client discards all of
+it ([ADR-0019](0019-a-level-is-drawn-until-another-replaces-it.md)); its mesh is
+unloaded meanwhile, so the Client keeps level 0 drawn there until the caught-up
+mesh arrives. Levels 2 and above read the generator alone and are never
+invalidated; an Edit is metres from the Eye and level 2 starts at 256 m.
 
 ## Consequences
 
