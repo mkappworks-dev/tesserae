@@ -42,6 +42,8 @@ use tesserae_core::mesh::{NEG_X, NEG_Y, NEG_Z, POS_X, POS_Y, POS_Z, emits_no_fac
 use tesserae_core::visibility::Connectivity;
 use tesserae_core::{CHUNK_SIZE, ChunkMesh, Tables};
 
+pub mod causes;
+
 use super::jobs::{Border, Jobs, Solved, build_mesh, generate, solve};
 use super::lod;
 use super::lod_rings::LevelRings;
@@ -50,6 +52,7 @@ use super::priority::{Aim, Order, Ring};
 use super::world_state::{ChunkStore, Snapshot};
 use super::{ContentTables, WorldGenerator};
 use crate::world::{ChunkCoord, WorldSettings};
+use causes::{Counts, Marks, Solve, Writer, Writers};
 
 /// A Chunk's finished geometry, for the Client to upload.
 ///
@@ -355,7 +358,7 @@ struct LoadOrder {
 /// Client holds one for.
 #[derive(Resource, Default)]
 pub(in crate::server) struct MeshState {
-    unlit: HashSet<ChunkCoord>,
+    unlit: Marks<Solve>,
     dirty: HashSet<ChunkCoord>,
     delivered: HashSet<ChunkCoord>,
     /// Chunks with a light solve running. Removed from `unlit` when the job
@@ -373,6 +376,9 @@ pub(in crate::server) struct MeshState {
     edited_chunks: HashSet<ChunkCoord>,
     /// Drained by `stream_lod`, which alone can see whether the cover exists.
     cover_changed: HashSet<ChunkCoord>,
+    /// Who last wrote each held Chunk, and the solves dispatched, by cause.
+    writers: Writers,
+    solves: Counts<Solve>,
     /// Each held Chunk's connectivity, and the Voxels it was worked out from:
     /// the Weak makes an Edit's `Arc::make_mut` move the Chunk, so a stale
     /// entry never matches what the store holds.
@@ -494,6 +500,16 @@ impl MeshState {
         }
     }
 
+    /// Which `writer` made the last `edited` mark, for the profiler.
+    pub(in crate::server) fn written_by(&mut self, coord: ChunkCoord, writer: Writer) {
+        self.writers.wrote(coord, writer);
+    }
+
+    /// `None` for a Chunk nothing wrote since it landed, or when not counting.
+    pub(in crate::server) fn writer_of(&self, coord: ChunkCoord) -> Option<Writer> {
+        self.writers.of(coord)
+    }
+
     /// Separate from `edited`, which also fires for Chunks only light or a face
     /// reached; their cover reads neither.
     pub(in crate::server) fn voxels_changed(&mut self, coord: ChunkCoord) {
@@ -548,7 +564,7 @@ impl MeshState {
 
     #[cfg(test)]
     pub(in crate::server) fn mark_unlit(&mut self, coord: ChunkCoord) {
-        self.unlit.insert(coord);
+        self.unlit.insert(coord, Solve::Neighbour);
     }
 
     #[cfg(test)]
@@ -801,6 +817,7 @@ fn retire(
         }
         meshes.dirty.remove(&coord);
         meshes.unlit.remove(&coord);
+        meshes.writers.forget(coord);
         #[cfg(any(feature = "dev", feature = "profiling"))]
         meshes.connectivity.remove(&coord);
         // An unedited Chunk is what the generator makes again; only an edited one
@@ -859,7 +876,7 @@ fn land_generated(
         // could reach. `relight` re-publishes a Chunk whose light moved, and
         // marks its neighbours for a re-solve so the change keeps travelling as
         // far as it really goes.
-        meshes.unlit.insert(coord);
+        meshes.unlit.insert(coord, Solve::First);
         meshes.dirty.insert(coord);
     }
 }
@@ -925,7 +942,8 @@ fn land_relight(
         if poisoned || !store.unchanged_since(coord, &solved.snapshot) {
             jobs.relight.note_stale();
             *meshes.spoilt.entry(coord).or_default() += 1;
-            meshes.unlit.insert(coord);
+            let writer = meshes.writers.of(coord).unwrap_or_default();
+            meshes.unlit.insert(coord, Solve::spoilt_by(writer));
             continue;
         }
         apply_solve(store, meshes, coord, solved);
@@ -948,7 +966,7 @@ fn apply_solve(store: &mut ChunkStore, meshes: &mut MeshState, coord: ChunkCoord
     // relight queue ever draining.
     for (face, neighbor) in face_neighbors(coord).into_iter().enumerate() {
         if solved.outward[face] && store.contains(neighbor) {
-            meshes.unlit.insert(neighbor);
+            meshes.unlit.insert(neighbor, Solve::Neighbour);
             // Its boundary faces are lit by the plane that just moved.
             meshes.dirty.insert(neighbor);
         }
@@ -1002,11 +1020,13 @@ fn dispatch_relight(
             .is_some_and(|&n| n >= SPOILT_BEFORE_ON_TICK);
         if starved {
             if on_tick.is_none() {
+                meshes.solves.add(meshes.unlit.cause(&coord));
                 meshes.unlit.remove(&coord);
                 on_tick = Some((coord, snapshot, border));
             }
             continue;
         }
+        meshes.solves.add(meshes.unlit.cause(&coord));
         meshes.unlit.remove(&coord);
         meshes.relighting.insert(coord);
         meshes.poisoned.remove(&coord);
@@ -1322,7 +1342,31 @@ pub mod stats {
         pub cpu_ms: [f64; 3],
         /// Since the World opened: mesh jobs whose mesh was empty. Levels above 0 only.
         pub empty_meshes: u64,
+        /// Since the World opened: jobs dispatched per stage by cause, indexed
+        /// by [`causes::Cause::index`]: [`causes::Solve`] for level 0's relight,
+        /// [`causes::Lod`] for generate and mesh above it.
+        pub causes: [[u64; causes::CAUSES]; 3],
+        /// Level 1 only, since the World opened: the level-0 Chunks its jobs
+        /// generated themselves, those of them inside level 0's load extent, and
+        /// the jobs that generated at least one of those.
+        pub children: Children,
     }
+
+    #[derive(Default, Clone, Copy, Debug)]
+    #[cfg_attr(not(feature = "profiling"), allow(dead_code, reason = "profiler only"))]
+    pub struct Children {
+        pub generated: u64,
+        pub in_load: u64,
+        pub jobs_in_load: u64,
+    }
+
+    /// Index of each stage in [`Flow`]'s arrays.
+    #[cfg(test)]
+    pub const GENERATE: usize = 0;
+    #[cfg(test)]
+    pub const RELIGHT: usize = 1;
+    #[cfg(test)]
+    pub const MESH: usize = 2;
 
     #[derive(Resource, Default, Clone, Debug)]
     pub struct StreamingStats {
@@ -1496,6 +1540,12 @@ pub mod stats {
             run: [generated.0, relit.0, meshed.0],
             cpu_ms: [generated.1, relit.1, meshed.1],
             empty_meshes: 0,
+            causes: [
+                [0; causes::CAUSES],
+                meshes.solves.all(),
+                [0; causes::CAUSES],
+            ],
+            children: Children::default(),
         };
         let mut levels = vec![LevelStats {
             held: store.coords().count(),
@@ -1526,6 +1576,7 @@ pub mod stats {
             let rings = LevelRings::new(*settings, world.cell_size(), level);
             let anchor = eye.map(|eye| world.chunk_at_level(eye, level));
             let [generate_cpu, mesh_cpu] = lod_jobs.times.cpu_ms(level);
+            let [generated, meshed] = lod_state.causes(level);
             let flow = Flow {
                 waiting: anchor.map_or([0; 3], |anchor| {
                     [
@@ -1555,6 +1606,12 @@ pub mod stats {
                 ],
                 cpu_ms: [generate_cpu, 0.0, mesh_cpu],
                 empty_meshes: lod_jobs.times.empty_meshes(level),
+                causes: [generated, [0; causes::CAUSES], meshed],
+                children: if level == 1 {
+                    lod_state.children()
+                } else {
+                    Children::default()
+                },
             };
             LevelStats {
                 flow,
@@ -1600,6 +1657,8 @@ pub(in crate::server) mod tests {
     use crate::server::world_state::VoxelCoord;
     use bevy::ecs::system::RunSystemOnce;
     use bevy::tasks::{AsyncComputeTaskPool, TaskPoolBuilder};
+    #[cfg(any(feature = "dev", feature = "profiling"))]
+    use causes::{Solve, Writer};
     use tesserae_core::light::{Light, MAX_LIGHT, light_chunk};
     use tesserae_core::{Chunk, ChunkLight, LitChunk, mesh_chunk};
     use tesserae_core::{Voxel, Worldgen, WorldgenParams};
@@ -3053,6 +3112,85 @@ pub(in crate::server) mod tests {
             h.app.world().resource::<WorldSettings>(),
         );
         assert_lit_like(&h, &expected);
+    }
+
+    /// One level's work as `publish_stats` reports it now.
+    #[cfg(any(feature = "dev", feature = "profiling"))]
+    pub(in crate::server) fn flow(h: &mut Harness, level: usize) -> stats::Flow {
+        h.app.init_resource::<stats::StreamingStats>();
+        h.app
+            .world_mut()
+            .run_system_once(stats::publish_stats)
+            .expect("the summary ran");
+        h.app.world().resource::<stats::StreamingStats>().levels[level].flow
+    }
+
+    #[cfg(any(feature = "dev", feature = "profiling"))]
+    #[test]
+    fn a_fill_counts_one_first_solve_per_chunk_and_the_rest_to_neighbours() {
+        let mut h = Harness::new(small(), UNLIMITED);
+        h.settle();
+        let flow = flow(&mut h, 0);
+        let solves = flow.causes[stats::RELIGHT];
+        assert_eq!(
+            solves[Solve::First as usize],
+            h.store().coords().count() as u64
+        );
+        assert!(solves[Solve::Neighbour as usize] > 0);
+        assert_eq!(
+            solves[Solve::Fluid as usize] + solves[Solve::Edit as usize],
+            0
+        );
+        assert_eq!(solves.iter().sum::<u64>(), flow.run[stats::RELIGHT]);
+    }
+
+    /// A solve spoilt by a write is solved again, counted to its writer.
+    #[cfg(any(feature = "dev", feature = "profiling"))]
+    fn spoilt_solve(writer: Writer) -> [u64; causes::CAUSES] {
+        let mut h = Harness::new(small(), UNLIMITED);
+        h.settle();
+        let (at, next) = lantern_on_a_boundary(&mut h);
+        let before = flow(&mut h, 0).causes[stats::RELIGHT];
+        h.app.world_mut().resource_mut::<Jobs>().relight.hold.hold();
+        h.app
+            .world_mut()
+            .resource_mut::<MeshState>()
+            .mark_unlit(next);
+        h.tick();
+        h.app
+            .world_mut()
+            .run_system_once(
+                move |mut store: ResMut<ChunkStore>,
+                      mut meshes: ResMut<MeshState>,
+                      tables: Res<ContentTables>| {
+                    let mut batch = match writer {
+                        Writer::Fluid => edit::Batch::of_fluids(),
+                        Writer::Edit => edit::Batch::default(),
+                    };
+                    let lantern = Voxel::cube(tesserae_core::testgen::fixtures().lantern);
+                    batch
+                        .set_voxel(&mut store, &mut meshes, &tables, at, lantern)
+                        .expect("the Chunk is loaded and lit");
+                    batch.finish(&mut store, &mut meshes, &tables);
+                },
+            )
+            .unwrap();
+        h.app.world().resource::<Jobs>().relight.hold.release();
+        h.settle();
+        assert_eq!(h.jobs().relight.stale(), 1, "the solve was not spoilt");
+        let after = flow(&mut h, 0).causes[stats::RELIGHT];
+        std::array::from_fn(|i| after[i] - before[i])
+    }
+
+    #[cfg(any(feature = "dev", feature = "profiling"))]
+    #[test]
+    fn a_solve_spoilt_by_an_edit_or_a_fluid_step_is_counted_to_it() {
+        let by_edit = spoilt_solve(Writer::Edit);
+        assert_eq!(by_edit[Solve::Edit as usize], 1, "{by_edit:?}");
+        assert_eq!(by_edit[Solve::Fluid as usize], 0, "{by_edit:?}");
+        let by_fluid = spoilt_solve(Writer::Fluid);
+        assert_eq!(by_fluid[Solve::Fluid as usize], 1, "{by_fluid:?}");
+        assert_eq!(by_fluid[Solve::Edit as usize], 0, "{by_fluid:?}");
     }
 
     #[test]

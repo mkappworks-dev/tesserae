@@ -495,6 +495,24 @@ fn water_flowing_in_darkens_and_receding_brightens_as_a_fresh_solve_would() {
     );
 }
 
+/// Who the profiler counts a dropped solve or a regenerated cover to: a placed
+/// source is an Edit, and its flow the fluid simulation's.
+#[cfg(any(feature = "dev", feature = "profiling"))]
+#[test]
+fn a_placed_source_is_written_as_an_edit_and_its_flow_as_the_fluid_simulation() {
+    use crate::server::streaming::causes::Writer;
+    let mut f = Fixture::new(1.0, 10.0, 16);
+    let home = ChunkCoord::new(0, 0, 0);
+    let writer = |f: &Fixture| f.app.world().resource::<MeshState>().writer_of(home);
+    assert_eq!(writer(&f), None);
+    f.send(0, EditAction::PlaceSource(water()));
+    f.apply_intents();
+    assert_eq!(writer(&f), Some(Writer::Edit));
+    f.settle();
+    assert!(f.fluid(3).is_some(), "the water never flowed");
+    assert_eq!(writer(&f), Some(Writer::Fluid));
+}
+
 /// The fluid tool aimed at a stair in the lantern's corridor waterlogs it, and
 /// water runs out of its notch along the floor towards the lantern and not
 /// through its sealed back the other way; taking the source

@@ -19,6 +19,7 @@ use crate::server::{
     ProfileFixtureStatus, SimulationProfile,
     streaming::{
         StreamingSettings,
+        causes::{Lod, Solve},
         stats::{Entered, Flow, StreamingStats},
     },
 };
@@ -91,6 +92,13 @@ struct Row {
     /// when not measured.
     missing_m: Option<f32>,
 }
+
+/// Each stage's causes, in [`Flow::causes`] order. Generation is never for a move, the last.
+const CAUSE_COLUMNS: [(&str, &[&str]); 3] = [
+    ("generate", Lod::NAMES.split_last().unwrap().1),
+    ("relight", &Solve::NAMES),
+    ("mesh", &Lod::NAMES),
+];
 
 /// Camera orders recorded: the Player's and one per coarse level.
 const CAMERAS: usize = 8;
@@ -532,7 +540,16 @@ fn save(
             ",{stage}_waiting,{stage}_in_flight,{stage}_run,{stage}_cpu_ms"
         )?;
     }
-    writeln!(flow, ",mesh_empty,fluid_run,fluid_cpu_ms,limit_reached")?;
+    write!(flow, ",mesh_empty,fluid_run,fluid_cpu_ms")?;
+    for (stage, names) in CAUSE_COLUMNS {
+        for name in names {
+            write!(flow, ",{stage}_{name}")?;
+        }
+    }
+    writeln!(
+        flow,
+        ",children_generated,children_in_load,jobs_in_load,limit_reached"
+    )?;
     let limited = profile.flow.len() + 32 > MAX_FLOW_ROWS;
     for r in &profile.flow {
         write!(
@@ -547,10 +564,21 @@ fn save(
                 r.flow.waiting[s], r.flow.in_flight[s], r.flow.run[s], r.flow.cpu_ms[s]
             )?;
         }
+        write!(
+            flow,
+            ",{},{},{}",
+            r.flow.empty_meshes, r.fluid_run.0, r.fluid_run.1
+        )?;
+        for (stage, (_, names)) in CAUSE_COLUMNS.iter().enumerate() {
+            for count in &r.flow.causes[stage][..names.len()] {
+                write!(flow, ",{count}")?;
+            }
+        }
+        let c = r.flow.children;
         writeln!(
             flow,
             ",{},{},{},{limited}",
-            r.flow.empty_meshes, r.fluid_run.0, r.fluid_run.1
+            c.generated, c.in_load, c.jobs_in_load
         )?;
     }
     flow.flush()?;

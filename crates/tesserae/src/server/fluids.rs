@@ -1012,7 +1012,7 @@ fn land_step(
     }
     // Validity reads Occupants and never light, so the step's changes relight
     // together once they have all landed.
-    let mut batch = edit::Batch::default();
+    let mut batch = edit::Batch::of_fluids();
     for p in chosen {
         debug_assert!(
             !p.next.fluid.is_some_and(|f| f.source) || p.next.fluid == p.read.fluid,

@@ -332,7 +332,30 @@ itself about 3.7% of median.
   mesh jobs run per Chunk generated (`relight_per_chunk`, `mesh_per_chunk`) and
   above level 0 the empty meshes and their share of the mesh jobs (`mesh_empty`,
   `mesh_empty_share`); each move's `jobs_per_chunk` gives the same from the move
-  until settled.
+  until settled. The rest count, since the World opened, the jobs each level
+  dispatched by cause. At level 0, `relight_first` is a Chunk's first solve
+  after it lands, `relight_neighbour` a solve again because a neighbour's solve
+  moved the plane across their shared face, and `relight_fluid` and
+  `relight_edit` a solve again because a write dropped the last one, which ran
+  while it landed: the fluid simulation's step (fluid and fire), or any other
+  write (an Edit, a Command, an undo, a plant). An Edit or a fluid relights
+  incrementally and never queues a solve itself. Above level 0, `generate_*` and
+  `mesh_*`: `first` for a Chunk that was not held and the mesh it then needs;
+  `fluid` and `edit` for one regenerated because that writer changed a level-0
+  Chunk under it, and the meshes of it and its face neighbours that follow;
+  `reload` the same for an edited level-0 Chunk leaving level 0's store or
+  coming back from the save; `finer` for a finer level's Chunk under it
+  regenerated and changed, which happens only in a saved World; and `mesh_moved`
+  for a mesh released, cancelled or landed outside `keep` as the anchor moved,
+  built again. A neighbour arriving queues no coarse mesh: the mesh waits for
+  all six and is counted once, as `first`. At level 1, `children_generated` is
+  the level-0 Chunks its jobs generated because level 0 did not hold them,
+  `children_in_load` those of them inside level 0's load extent, which level 0
+  generates again, and `jobs_in_load` the jobs that generated at least one. They
+  are counted as dispatched, so a job a move cancels before it runs is counted
+  here and not in `*_run`. `streaming.json` reports each, per level, under
+  `counts`: over the measured phase, per second and per Chunk generated at that
+  level.
 - `frames.gpu.csv`, under `--instruments gpu` only, has GPU timestamps per
   frame: `frame_start`, `frame_end`, and per camera order `view_start`,
   `prepass_end`, `main_start`, `opaque_end`, `main_end` and `view_end`, in

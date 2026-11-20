@@ -36,8 +36,9 @@ use super::jobs::Stage;
 use super::lod_rings::{LevelRings, Shell, level_count};
 use super::player::Player;
 use super::priority::{Aim, Order, Ring};
+use super::streaming::causes::{Counts, Lod, Marks};
 use super::streaming::{
-    LodMeshReady, LodUnloaded, MeshState, StreamingSettings, delta, face_neighbors, offset,
+    LodMeshReady, LodUnloaded, MeshState, Rings, StreamingSettings, delta, face_neighbors, offset,
 };
 use super::world_state::ChunkStore;
 use super::{ContentTables, WorldGenerator};
@@ -370,12 +371,14 @@ struct Level {
     pending: bool,
     /// Set when a Chunk or a neighbour of it landed, a mesh slot freed, or the anchor moved.
     mesh_pending: bool,
-    dirty: HashSet<ChunkCoord>,
-    stale: HashSet<ChunkCoord>,
+    dirty: Marks<Lod>,
+    stale: Marks<Lod>,
     /// Taken out of `stale` at dispatch so a mark made during the flight survives the landing;
     /// also what tells landing a replacement from an intruder.
-    regenerating: HashSet<ChunkCoord>,
+    regenerating: Marks<Lod>,
     delivered: HashSet<ChunkCoord>,
+    generated: Counts<Lod>,
+    meshed: Counts<Lod>,
     #[cfg(any(feature = "dev", feature = "profiling"))]
     sizes: HashMap<ChunkCoord, measure::MeshSize>,
 }
@@ -386,6 +389,8 @@ pub(in crate::server) struct LodState {
     levels: Vec<Level>,
     /// Cached per shell: five of six levels share each at the defaults.
     offsets: Vec<(Shell, Arc<Vec<IVec3>>)>,
+    #[cfg(any(feature = "dev", feature = "profiling"))]
+    children: super::streaming::stats::Children,
 }
 
 impl LodState {
@@ -436,9 +441,22 @@ impl LodState {
             })
     }
 
-    pub(in crate::server) fn invalidate(&mut self, level: u32, coord: ChunkCoord) {
+    /// Generate and mesh jobs dispatched since the World opened, by cause.
+    #[cfg(any(feature = "dev", feature = "profiling"))]
+    pub fn causes(&self, level: u32) -> [[u64; super::streaming::causes::CAUSES]; 2] {
+        self.levels
+            .get(level as usize - 1)
+            .map_or_else(Default::default, |l| [l.generated.all(), l.meshed.all()])
+    }
+
+    #[cfg(any(feature = "dev", feature = "profiling"))]
+    pub fn children(&self) -> super::streaming::stats::Children {
+        self.children
+    }
+
+    pub(in crate::server) fn invalidate(&mut self, level: u32, coord: ChunkCoord, cause: Lod) {
         let level = self.level_mut(level);
-        level.stale.insert(coord);
+        level.stale.insert(coord, cause);
         level.pending = true;
     }
 
@@ -446,7 +464,7 @@ impl LodState {
     fn dirty(&self, level: u32) -> HashSet<ChunkCoord> {
         self.levels
             .get(level as usize - 1)
-            .map_or_else(HashSet::default, |l| l.dirty.clone())
+            .map_or_else(HashSet::default, |l| (*l.dirty).clone())
     }
 
     #[cfg(test)]
@@ -1135,7 +1153,8 @@ pub(in crate::server) fn stream_lod(
     // ADR-0011: an unsaved World's levels above 1 read the generator alone.
     let reach = if chunks.persistent { levels } else { 2 };
     for coord in changed {
-        mark_cover(&store, &mut state, &jobs, (1, coord.parent()), reach);
+        let cause = Lod::of(meshes.writer_of(coord));
+        mark_cover(&store, &mut state, &jobs, (1, coord.parent()), reach, cause);
     }
 
     let plans: Vec<Plan> = (1..levels)
@@ -1172,6 +1191,10 @@ pub(in crate::server) fn stream_lod(
     land_meshes(
         &plans, &mut state, &mut jobs, &mut ready, &budget, &priority,
     );
+    let in_level_zero = |c: ChunkCoord| {
+        let load = Rings::new(*settings, world.cell_size()).load;
+        load.contains(delta(world.chunk_at(player.eye()), c))
+    };
     dispatch(
         &plans,
         &chunks,
@@ -1183,6 +1206,7 @@ pub(in crate::server) fn stream_lod(
         &tables,
         &budget,
         &orders.load,
+        &in_level_zero,
     );
     dispatch_meshes(
         &plans,
@@ -1235,7 +1259,7 @@ fn retire(
             });
             // Still held, and nothing else will mesh it again if the Eye comes
             // back.
-            level.dirty.insert(coord);
+            level.dirty.insert(coord, Lod::Moved);
         }
 
         let inside = |c: ChunkCoord| plan.rings.evict.contains(delta(plan.anchor, c));
@@ -1261,7 +1285,7 @@ fn retire(
         for (level, coord) in cancelled {
             let p = &plans[Plan::index(level)];
             if p.rings.evict.contains(delta(p.anchor, coord)) {
-                state.level_mut(level).dirty.insert(coord);
+                state.level_mut(level).dirty.insert(coord, Lod::Moved);
             }
         }
     }
@@ -1293,6 +1317,11 @@ fn land(
         lv.pending = true;
         // Chunks and their neighbours are what a mesh waits for.
         lv.mesh_pending = true;
+        let cause = if held {
+            lv.regenerating.cause(&coord).unwrap_or(Lod::First)
+        } else {
+            Lod::First
+        };
         let replacing = lv.regenerating.remove(&coord);
         if !plan.rings.evict.contains(delta(plan.anchor, coord)) || (held && !replacing) {
             jobs.generate.note_stale();
@@ -1307,16 +1336,17 @@ fn land(
             });
         store.insert(level, coord, coarse);
         if changed {
-            mark_cover(store, state, jobs, (level + 1, coord.parent()), reach);
+            let covering = (level + 1, coord.parent());
+            mark_cover(store, state, jobs, covering, reach, Lod::Finer);
         }
         let lv = state.level_mut(level);
-        lv.dirty.insert(coord);
+        lv.dirty.insert(coord, cause);
         if held {
             // A first generation cannot change a mesh whose six neighbours are
             // required to exist; a replacement can.
             for neighbor in face_neighbors(coord) {
                 if store.contains(level, neighbor) {
-                    lv.dirty.insert(neighbor);
+                    lv.dirty.insert(neighbor, cause);
                 }
             }
         }
@@ -1331,10 +1361,11 @@ fn mark_cover(
     jobs: &LodJobs,
     (mut level, mut covering): LodKey,
     reach: u32,
+    cause: Lod,
 ) {
     while level < reach {
         if store.contains(level, covering) || jobs.generate.contains((level, covering)) {
-            state.invalidate(level, covering);
+            state.invalidate(level, covering, cause);
             return;
         }
         level += 1;
@@ -1366,7 +1397,7 @@ fn land_meshes(
         lv.mesh_pending = true;
         if !plan.rings.keep.contains(delta(plan.anchor, coord)) {
             jobs.mesh.note_stale();
-            lv.dirty.insert(coord);
+            lv.dirty.insert(coord, Lod::Moved);
             continue;
         }
         if lv.dirty.contains(&coord) {
@@ -1396,7 +1427,10 @@ fn dispatch(
     tables: &ContentTables,
     budget: &LodBudget,
     orders: &[Order],
+    in_level_zero: &dyn Fn(ChunkCoord) -> bool,
 ) {
+    #[cfg(not(any(feature = "dev", feature = "profiling")))]
+    let _ = in_level_zero;
     let mut free = budget
         .in_flight
         .generate
@@ -1435,9 +1469,17 @@ fn dispatch(
         }
         free -= 1;
         let level = state.level_mut(plan.level);
+        let cause = if held {
+            level.stale.cause(&coord)
+        } else {
+            Some(Lod::First)
+        };
+        level.generated.add(cause);
         level.stale.remove(&coord);
         if held {
-            level.regenerating.insert(coord);
+            level
+                .regenerating
+                .insert(coord, cause.unwrap_or(Lod::First));
         }
         let held_children: [Option<Held>; 8] = if plan.level == 1 {
             std::array::from_fn(|i| held_child(chunks, meshes, coord.child(i)))
@@ -1480,6 +1522,21 @@ fn dispatch(
                 sources.is_none() && held_children.iter().flatten().all(|h| h.changed.is_none())
             })
             .cloned();
+        #[cfg(any(feature = "dev", feature = "profiling"))]
+        if plan.level == 1 && direct.is_none() && crate::cost::collecting() {
+            let made: Vec<ChunkCoord> = (0..8)
+                .filter(|&i| match &sources {
+                    Some(_) => !persistent.contains_key(&coord.child(i)),
+                    None => held_children[i].is_none(),
+                })
+                .map(|i| coord.child(i))
+                .collect();
+            let inside = made.iter().filter(|&&c| in_level_zero(c)).count() as u64;
+            let children = &mut state.children;
+            children.generated += made.len() as u64;
+            children.in_load += inside;
+            children.jobs_in_load += u64::from(inside > 0);
+        }
         let source = generators.sources[Plan::index(plan.level)].clone();
         let waterline = if plan.level == 1 {
             waterline(&source)
@@ -1623,7 +1680,9 @@ fn dispatch_meshes(
             return;
         }
         free -= 1;
-        state.level_mut(plan.level).dirty.remove(&coord);
+        let level = state.level_mut(plan.level);
+        level.meshed.add(level.dirty.cause(&coord));
+        level.dirty.remove(&coord);
         let tables = Arc::clone(tables);
         let times = jobs.times.clone();
         let level = plan.level;
@@ -1641,6 +1700,8 @@ fn dispatch_meshes(
 mod tests {
     use super::*;
     use crate::server::edit::set_voxel;
+    #[cfg(any(feature = "dev", feature = "profiling"))]
+    use crate::server::streaming::causes;
     use crate::server::streaming::tests::{
         Harness, SETTLE_CEILING, UNLIMITED, land, same_mesh, small,
     };
@@ -2575,7 +2636,7 @@ mod tests {
         h.app
             .world_mut()
             .resource_mut::<LodState>()
-            .invalidate(1, coord);
+            .invalidate(1, coord, Lod::Edit);
         let (ready, unloaded) = h.lod_settle();
 
         let after = h.lod_store().shared(1, coord).unwrap();
@@ -2618,7 +2679,7 @@ mod tests {
         h.app
             .world_mut()
             .resource_mut::<LodState>()
-            .invalidate(1, edge);
+            .invalidate(1, edge, Lod::Edit);
         let (ready, _) = h.lod_settle();
         assert!(ready.is_empty(), "a margin Chunk's arrival re-meshed one");
         assert_eq!(h.lod_state().dirty(1), HashSet::from([edge]));
@@ -2734,6 +2795,131 @@ mod tests {
             }
             assert!(non_empty > 0, "level {level} had nothing to mesh");
         }
+    }
+
+    #[cfg(any(feature = "dev", feature = "profiling"))]
+    fn coarse_causes(h: &mut Harness) -> [[u64; causes::CAUSES]; 3] {
+        crate::server::streaming::tests::flow(h, 1).causes
+    }
+
+    #[cfg(any(feature = "dev", feature = "profiling"))]
+    fn since(before: [[u64; causes::CAUSES]; 3], h: &mut Harness) -> [[u64; causes::CAUSES]; 3] {
+        let after = coarse_causes(h);
+        std::array::from_fn(|s| std::array::from_fn(|c| after[s][c] - before[s][c]))
+    }
+
+    #[cfg(any(feature = "dev", feature = "profiling"))]
+    #[test]
+    fn a_level_one_job_counts_the_level_zero_chunks_it_generates_inside_level_zeros_load() {
+        use crate::server::streaming::stats::{GENERATE, MESH};
+        let mut h = harness();
+        h.lod_settle();
+        let flow = crate::server::streaming::tests::flow(&mut h, 1);
+        let jobs = flow.run[GENERATE];
+        assert_eq!(flow.causes[GENERATE][Lod::First as usize], jobs);
+        assert_eq!(flow.causes[MESH][Lod::First as usize], flow.run[MESH]);
+        assert_eq!(flow.children.generated, 8 * jobs);
+        let world = h.app.world().resource::<WorldSettings>();
+        let load = Rings::new(lod_settings(), world.cell_size()).load;
+        let level_zero: HashSet<ChunkCoord> = load
+            .offsets()
+            .into_iter()
+            .map(|d| offset(ChunkCoord::new(0, 0, 0), d))
+            .collect();
+        assert_eq!(flow.children.in_load, level_zero.len() as u64);
+        let parents: HashSet<ChunkCoord> = level_zero.iter().map(|c| c.parent()).collect();
+        assert_eq!(flow.children.jobs_in_load, parents.len() as u64);
+
+        let mut h = harness();
+        h.settle();
+        h.lod_settle();
+        let flow = crate::server::streaming::tests::flow(&mut h, 1);
+        assert_eq!(flow.children.in_load, 0, "{:?}", flow.children);
+        assert_eq!(flow.children.jobs_in_load, 0);
+        assert!(flow.children.generated > 0);
+    }
+
+    /// Fills the 2x2x2 Voxels at `local` with stone, in one Batch of the fluid simulation's or
+    /// an Edit's.
+    #[cfg(any(feature = "dev", feature = "profiling"))]
+    fn write_block(h: &mut Harness, chunk: ChunkCoord, local: [i32; 3], fluids: bool) {
+        h.app
+            .world_mut()
+            .run_system_once(
+                move |mut store: ResMut<ChunkStore>,
+                      mut meshes: ResMut<MeshState>,
+                      tables: Res<ContentTables>| {
+                    let mut batch = if fluids {
+                        crate::server::edit::Batch::of_fluids()
+                    } else {
+                        crate::server::edit::Batch::default()
+                    };
+                    let side = CHUNK_SIZE as i32;
+                    for (dx, dy, dz) in (0..8).map(|i| (i & 1, i >> 1 & 1, i >> 2)) {
+                        let at = [
+                            chunk.x * side + local[0] + dx,
+                            chunk.y * side + local[1] + dy,
+                            chunk.z * side + local[2] + dz,
+                        ];
+                        batch
+                            .set_voxel(&mut store, &mut meshes, &tables, at, stone())
+                            .expect("loaded");
+                    }
+                    batch.finish(&mut store, &mut meshes, &tables);
+                },
+            )
+            .unwrap();
+    }
+
+    #[cfg(any(feature = "dev", feature = "profiling"))]
+    #[test]
+    fn a_cover_regenerated_for_a_write_under_it_counts_it_and_its_meshes_to_the_writer() {
+        use crate::server::streaming::stats::{GENERATE, MESH};
+        for (fluids, cause) in [(false, Lod::Edit), (true, Lod::Fluid)] {
+            let mut h = harness();
+            h.settle();
+            h.lod_settle();
+            let chunk = h.quiet_chunk();
+            let before = coarse_causes(&mut h);
+            write_block(&mut h, chunk, [10, 10, 10], fluids);
+            let (ready, _) = h.lod_settle();
+            let counted = since(before, &mut h);
+            let mut want = [0; causes::CAUSES];
+            want[cause as usize] = 1;
+            assert_eq!(counted[GENERATE], want, "{cause:?}");
+            want[cause as usize] = ready.len() as u64;
+            assert!(!ready.is_empty());
+            assert_eq!(counted[MESH], want, "{cause:?}");
+        }
+    }
+
+    #[cfg(any(feature = "dev", feature = "profiling"))]
+    #[test]
+    fn an_edited_chunk_leaving_level_zero_regenerates_its_cover_for_the_reload() {
+        use crate::server::streaming::stats::{GENERATE, MESH};
+        let mut h = harness();
+        h.settle();
+        h.lod_settle();
+        let chunk = h.quiet_chunk();
+        h.edit_block(chunk, [10, 10, 10], stone());
+        h.lod_settle();
+        let before = coarse_causes(&mut h);
+
+        h.anchor_at(Vec3::new(160.0, 0.0, 0.0));
+        h.settle();
+        h.lod_settle();
+        let counted = since(before, &mut h);
+        assert_eq!(counted[GENERATE][Lod::Reload as usize], 1, "{counted:?}");
+        assert_eq!(counted[GENERATE][Lod::Edit as usize], 0, "{counted:?}");
+        assert!(counted[GENERATE][Lod::First as usize] > 0);
+
+        // The covers the Eye left are still held: their meshes come back for the move alone.
+        let before = coarse_causes(&mut h);
+        h.anchor_at(Vec3::ZERO);
+        h.settle();
+        h.lod_settle();
+        let counted = since(before, &mut h);
+        assert!(counted[MESH][Lod::Moved as usize] > 0, "{counted:?}");
     }
 
     #[cfg(any(feature = "dev", feature = "profiling"))]
@@ -3064,7 +3250,7 @@ mod tests {
             .resource_mut::<LodState>()
             .level_mut(1)
             .dirty
-            .insert(marked);
+            .insert(marked, Lod::Edit);
         h.app
             .world_mut()
             .resource_mut::<LodJobs>()

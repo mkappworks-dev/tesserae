@@ -2,6 +2,7 @@
 //! journal entry and the relight and remesh it needs.
 
 use super::*;
+use crate::server::streaming::causes::Writer;
 use tesserae_core::audio::Cause;
 
 pub(in crate::server) fn apply_pending(
@@ -526,9 +527,23 @@ pub(in crate::server) struct Batch {
     /// current by every later write: counting means reading the whole Chunk,
     /// and a build of stairs would do it once per stair.
     shaped: HashMap<ChunkCoord, usize>,
+    writer: Writer,
 }
 
 impl Batch {
+    /// The fluid simulation's, whose writes the profiler counts apart.
+    pub(in crate::server) fn of_fluids() -> Self {
+        Batch {
+            writer: Writer::Fluid,
+            ..Batch::default()
+        }
+    }
+
+    fn edited(&self, meshes: &mut MeshState, coord: ChunkCoord) {
+        meshes.edited(coord);
+        meshes.written_by(coord, self.writer);
+    }
+
     /// One Voxel of a Mod's Command, through the same rules and the same World
     /// change as a player's Edit.
     pub(in crate::server) fn apply_intent(
@@ -647,7 +662,7 @@ impl Batch {
         );
 
         meshes.voxels_changed(place.chunk);
-        meshes.edited(place.chunk);
+        self.edited(meshes, place.chunk);
         let local = [place.x, place.y, place.z];
         let last = tesserae_core::CHUNK_SIZE - 1;
         for (axis, step) in [
@@ -667,7 +682,7 @@ impl Batch {
                     place.chunk.z + d[2],
                 );
                 if store.contains(neighbour) {
-                    meshes.edited(neighbour);
+                    self.edited(meshes, neighbour);
                 }
             }
         }
@@ -715,11 +730,11 @@ impl Batch {
             list.dedup();
         }
         for coord in lit {
-            meshes.edited(coord);
+            self.edited(meshes, coord);
         }
         for coord in across {
             if store.contains(coord) {
-                meshes.edited(coord);
+                self.edited(meshes, coord);
             }
         }
     }
