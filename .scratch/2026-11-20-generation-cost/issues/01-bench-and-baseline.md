@@ -1,6 +1,6 @@
 # 01: Crop fields in the bench, a warm-up that solves every region, and the starting figures
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: None (can start immediately)
 
@@ -13,7 +13,7 @@ The version 3 bench gains a World with crop fields like Terra's (one entry near 
 ## Acceptance criteria
 
 - [x] The bench runs the crop-field cases, and the lone river and cavern cases no longer include a region solve.
-- [ ] The starting bench figures and the sampled flight's top symbols, with `uptime` and how they were taken, are in Comments.
+- [x] The starting bench figures and the sampled flight's top symbols, with `uptime` and how they were taken, are in Comments.
 - [x] No generator code changes; the committed digests pass and the fingerprint's existing lines match 4e78a50f's.
 
 ## Comments
@@ -61,4 +61,24 @@ The host was loaded: another worktree was building the `tesserae` crate througho
 
 Under one warm-up the lone river @ 0.5 m is 2.3 times its fcb5db58 cost, not 13: the rest of the last spec's figure was the old warm-up's region solve. A lone crop-field Chunk is the costliest case, 48 ms @ 1 m; over a column of four it is half fcb5db58's, which decided the fields for every Chunk alike.
 
-The sampled flight waits for a window with no build running, which `scripts/profile-frames` requires; it is recorded here when taken.
+
+### The starting sampled flight, 2026-11-20
+
+Top symbols inside generation at 4e78a50f, from the sampled `flight` taken beside ticket 04's mid-point one (how, there):
+
+Samples inside generation: level 0 8876, levels 1–5 7636.
+
+| Symbol | Level 0 | Levels 1–5 | All |
+| --- | --- | --- | --- |
+| `Worldgen::fields_near` | 67.5% | 0.0% | 36.3% |
+| `Worldgen::field_accepts` | 67.0% | 0.0% | 36.0% |
+| `Drainage::wet` | 43.9% | 12.0% | 29.2% |
+| `Worldgen::surface_height_m` | 45.9% | 1.5% | 25.3% |
+| `Worldgen::contained_at_m` | 44.7% | 1.0% | 24.5% |
+| `<&mut core::array::drain::Drain<[f32; 2], <core::ops::try_trait::NeverShortCircuit<(f32, core::option::Option<` | 20.4% | 0.5% | 11.2% |
+| `tesserae_core::noise::fbm3_with` | 5.7% | 14.9% | 9.9% |
+| `Base::base_height_m` | 13.9% | 4.7% | 9.6% |
+| `OreField::at` | 3.5% | 16.3% | 9.4% |
+| `tesserae_core::noise::fbm2` | 11.2% | 5.1% | 8.3% |
+| `Worldgen::cavern_open` | 4.5% | 10.5% | 7.3% |
+| `RandomState::hash_one` | 3.3% | 11.4% | 7.1% |

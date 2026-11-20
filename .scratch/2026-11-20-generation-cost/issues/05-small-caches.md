@@ -19,3 +19,16 @@ First the gate: a sampled `flight` after 04. Each of these is built, one commit 
 - [ ] The gate's figures in Comments.
 - [ ] For each built: the fingerprint and the committed digests match, and a test of its own seam (the cached cavern field equals `fbm3`; the seal and `filled` equal their uncached answers; the ore equals today's per Voxel).
 - [ ] For each built: bench figures in Comments.
+
+## Comments
+
+### The gate, 2026-11-20
+
+From the mid-point sampled flight in [ticket 04](./04-crop-fields-once.md#the-mid-point-flight-2026-11-20), every one of the four clears 3% at some level, so all four are built:
+
+| Cache | Symbol | Level 0 | Levels 1–5 |
+| --- | --- | --- | --- |
+| Ores remember their vein cell | `OreField::at` | 12.0% | 22.6% |
+| The cavern field's corner cache | `Worldgen::cavern_open` | 15.9% | 12.4% |
+| One `claims_near` a Chunk | `Worldgen::claims_near` | 17.3% | 0.0% |
+| The seal and `filled` read the column cache | `Worldgen::sealed_below_m`; `Worldgen::ground_at` (`filled`) | 1.9%; 7.7% | 9.1%; 2.0% |
