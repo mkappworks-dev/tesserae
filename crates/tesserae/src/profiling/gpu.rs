@@ -12,7 +12,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use bevy::core_pipeline::core_3d::{main_opaque_pass_3d, main_transparent_pass_3d};
+use bevy::core_pipeline::mip_generation::experimental::depth::early_downsample_depth;
 use bevy::core_pipeline::schedule::{Core3d, Core3dSystems};
+use bevy::pbr::{EARLY_SHADOW_PASS, early_prepass_build_indirect_parameters, per_view_shadow_pass};
 use bevy::prelude::*;
 use bevy::render::camera::ExtractedCamera;
 use bevy::render::render_resource::{BufferDescriptor, BufferUsages, CommandEncoder, MapMode};
@@ -23,7 +25,7 @@ use bevy::render::{Render, RenderApp};
 
 /// Frames whose timestamps can be in flight at once.
 const SLOTS: usize = 8;
-/// Markers one frame may write: a start and an end, and six per view.
+/// Markers one frame may write: a start and an end, and eight per view.
 const PER_SLOT: u32 = 64;
 
 /// `(frame id, marker, milliseconds since the frame's first marker)`; `None`
@@ -67,12 +69,21 @@ pub(super) fn plugin(app: &mut App, samples: GpuSamples) {
         .add_systems(
             Core3d,
             (
-                mark::<0>.before(Core3dSystems::Prepass),
+                mark::<0>
+                    .before(Core3dSystems::Prepass)
+                    .before(early_prepass_build_indirect_parameters),
+                // The sun's cascades are drawn inside the prepass set, after
+                // the GPU culls for them; the later shadow pass only builds
+                // indirect parameters.
+                mark::<6>
+                    .after(early_prepass_build_indirect_parameters)
+                    .before(per_view_shadow_pass::<EARLY_SHADOW_PASS>),
+                mark::<7>
+                    .after(per_view_shadow_pass::<EARLY_SHADOW_PASS>)
+                    .before(early_downsample_depth),
                 mark::<1>
                     .after(Core3dSystems::Prepass)
                     .before(Core3dSystems::MainPass),
-                // Shadows are ordered only before the main pass, so they fall
-                // between these two.
                 mark::<2>
                     .in_set(Core3dSystems::MainPass)
                     .before(main_opaque_pass_3d),
@@ -89,13 +100,15 @@ pub(super) fn plugin(app: &mut App, samples: GpuSamples) {
         .add_systems(Render, create.run_if(not(resource_exists::<Timer>)));
 }
 
-const MARKS: [&str; 6] = [
+const MARKS: [&str; 8] = [
     "view_start",
     "prepass_end",
     "main_start",
     "opaque_end",
     "main_end",
     "view_end",
+    "shadow_start",
+    "shadow_end",
 ];
 
 fn create(

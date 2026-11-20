@@ -168,6 +168,12 @@ def streaming(path, rows):
         'visible_meshes': {
             key[len('visible_meshes_'):]: distribution([float(r[key]) for r in fixture])
             for key in fixture[0] if key.startswith('visible_meshes_')},
+        'draws': {
+            key[len('draws_'):]: distribution([float(r[key]) for r in fixture])
+            for key in fixture[0] if key.startswith('draws_')},
+        'shadow': {
+            key[len('shadow_'):]: distribution([float(r[key]) for r in fixture])
+            for key in fixture[0] if key.startswith('shadow_')},
     }
     # Counted only under --instruments holes.
     if fixture[0]['rule_holes']:
@@ -209,7 +215,10 @@ def streaming(path, rows):
             'views': {c: {
                 'view_ms': span(f'{c}:view_start', f'{c}:view_end'),
                 'prepass_ms': span(f'{c}:view_start', f'{c}:prepass_end'),
-                'shadow_and_setup_ms': span(f'{c}:prepass_end', f'{c}:main_start'),
+                'before_shadow_ms': span(f'{c}:view_start', f'{c}:shadow_start'),
+                'shadow_ms': span(f'{c}:shadow_start', f'{c}:shadow_end'),
+                'after_shadow_ms': span(f'{c}:shadow_end', f'{c}:prepass_end'),
+                'setup_ms': span(f'{c}:prepass_end', f'{c}:main_start'),
                 'opaque_ms': span(f'{c}:main_start', f'{c}:opaque_end'),
                 'transparent_ms': span(f'{c}:opaque_end', f'{c}:main_end'),
                 'post_ms': span(f'{c}:main_end', f'{c}:view_end'),

@@ -15,6 +15,7 @@ use crate::client::holes::{Holes, LEVELS};
 use crate::client::lag::Lag;
 use crate::client::sight::Sight;
 use crate::cost::{FrameCost, MainThreadCost, thread_cpu};
+use crate::render::chunk_material::ChunkMaterial;
 use crate::server::{
     ProfileFixtureStatus, SimulationProfile,
     streaming::{
@@ -84,8 +85,7 @@ struct Row {
     settled: bool,
     focused: bool,
     holes: Holes,
-    /// Mesh entities each camera's visibility pass kept, by camera order.
-    visible: [u32; CAMERAS],
+    visible: Visible,
     sight: Sight,
     mesh_reach: Option<[(u64, f64); 2]>,
     /// The Client's `Lag::missing_m`, infinite when nothing is missing; `None`
@@ -109,8 +109,23 @@ fn cause_columns() -> Stages<Vec<(usize, &'static str)>> {
 /// Camera orders recorded: the Player's and one per coarse level.
 const CAMERAS: usize = 8;
 
-#[derive(Resource, Default)]
-struct VisibleMeshes([u32; CAMERAS]);
+/// Bevy's default cascade count; a sun with more records only these.
+const CASCADES: usize = 4;
+
+/// What each view draws, counted from the visibility lists the render world
+/// extracts.
+#[derive(Resource, Default, Clone, Copy)]
+struct Visible {
+    /// Mesh entities each camera's visibility pass kept, by camera order.
+    meshes: [u32; CAMERAS],
+    /// Indirect draws each camera's opaque, cutout and blended passes issue,
+    /// by camera order.
+    draws: [u32; CAMERAS],
+    /// Mesh entities each sun cascade of the Player camera holds.
+    casters: [u32; CASCADES],
+    /// Indirect draws each of those cascades issues.
+    cascade_draws: [u32; CASCADES],
+}
 
 /// Client observations for the frame and export metadata.
 #[derive(bevy::ecs::system::SystemParam)]
@@ -118,23 +133,68 @@ struct Drawn<'w, 's> {
     holes: Option<Res<'w, Holes>>,
     lag: Option<ResMut<'w, Lag>>,
     sight: Option<Res<'w, Sight>>,
-    visible: Res<'w, VisibleMeshes>,
+    visible: Res<'w, Visible>,
     exit: MessageReader<'w, 's, AppExit>,
     monitors: Query<'w, 's, &'static bevy::window::Monitor>,
     on_monitor: Query<'w, 's, &'static bevy::window::OnMonitor, With<Window>>,
 }
 
+type DrawnBy<'a> = (
+    &'a Mesh3d,
+    Option<&'a MeshMaterial3d<ChunkMaterial>>,
+    Option<&'a MeshMaterial3d<StandardMaterial>>,
+);
+
 fn count_visible(
-    mut visible: ResMut<VisibleMeshes>,
-    cameras: Query<(&Camera, &bevy::camera::visibility::VisibleEntities)>,
+    mut visible: ResMut<Visible>,
+    cameras: Query<(Entity, &Camera, &bevy::camera::visibility::VisibleEntities)>,
+    suns: Query<&bevy::camera::visibility::CascadesVisibleEntities>,
+    meshes: Query<DrawnBy>,
+    chunk_materials: Res<Assets<ChunkMaterial>>,
+    standard_materials: Res<Assets<StandardMaterial>>,
 ) {
-    visible.0 = [0; CAMERAS];
-    for (camera, entities) in &cameras {
-        if let Some(count) = usize::try_from(camera.order)
-            .ok()
-            .and_then(|order| visible.0.get_mut(order))
-        {
-            *count = entities.len(std::any::TypeId::of::<Mesh3d>()) as u32;
+    *visible = Visible::default();
+    let blended = |(_, chunk, standard): DrawnBy| {
+        let mode = chunk
+            .and_then(|m| chunk_materials.get(&m.0).map(|m| m.base.alpha_mode))
+            .or_else(|| standard.and_then(|m| standard_materials.get(&m.0).map(|m| m.alpha_mode)));
+        mode.is_some_and(|mode| mode == AlphaMode::Blend)
+    };
+    let draws = |entities: &[Entity]| -> u32 {
+        let mut bins = bevy::platform::collections::HashSet::new();
+        for &entity in entities {
+            let Ok(drawn @ (mesh, chunk, standard)) = meshes.get(entity) else {
+                continue;
+            };
+            // A sorted phase draws each blended mesh alone; the binned phases
+            // draw each (mesh, material) once, a bin, however many share it.
+            let alone = blended(drawn).then_some(entity);
+            bins.insert((
+                mesh.id(),
+                chunk.map(|m| m.id().untyped()),
+                standard.map(|m| m.id().untyped()),
+                alone,
+            ));
+        }
+        bins.len() as u32
+    };
+    for (entity, camera, entities) in &cameras {
+        let Some(order) = usize::try_from(camera.order).ok().filter(|&o| o < CAMERAS) else {
+            continue;
+        };
+        let listed = entities.get(std::any::TypeId::of::<Mesh3d>());
+        visible.meshes[order] = listed.len() as u32;
+        visible.draws[order] = draws(listed);
+        if order != 0 {
+            continue;
+        }
+        let cascades = suns
+            .iter()
+            .filter_map(|sun| sun.entities.get(&entity))
+            .flatten();
+        for (i, cascade) in cascades.take(CASCADES).enumerate() {
+            visible.casters[i] = cascade.entities.len() as u32;
+            visible.cascade_draws[i] = draws(&cascade.entities);
         }
     }
 }
@@ -201,7 +261,7 @@ pub fn plugin(app: &mut App) {
         presentation: String::new(),
     })
     .insert_resource(bevy::winit::WinitSettings::continuous())
-    .init_resource::<VisibleMeshes>();
+    .init_resource::<Visible>();
     // Frames are rows from the World session on; startup before it is in the
     // metadata.
     app.add_session_systems(First, begin.after(crate::client::presentation::FramePacing))
@@ -334,7 +394,7 @@ fn end(
         settled: streaming.settled,
         focused: windows.iter().any(|w| w.focused),
         holes: drawn.holes.as_deref().copied().unwrap_or_default(),
-        visible: drawn.visible.0,
+        visible: *drawn.visible,
         sight: drawn.sight.as_deref().copied().unwrap_or_default(),
         mesh_reach: streaming.mesh_reach,
         missing_m,
@@ -372,6 +432,8 @@ fn save(
             .chain(std::iter::once(
                 ",sight_drawn0,sight_culled0,sight_retained_hidden0,mesh_reach_run,mesh_reach_cpu_ms,mesh_unreach_run,mesh_unreach_cpu_ms,level0_missing_m".to_string()
             ))
+            .chain((0..CAMERAS).map(|c| format!(",draws_camera{c}")))
+            .chain((0..CASCADES).map(|i| format!(",shadow_casters_cascade{i},shadow_draws_cascade{i}")))
             .collect::<String>()
     )?;
     for r in &profile.rows {
@@ -426,7 +488,7 @@ fn save(
             write!(out, "{}", ",".repeat(2 + 2 * LEVELS))?;
         }
         write!(out, ",{}", r.holes.chunk_entities)?;
-        for count in r.visible {
+        for count in r.visible.meshes {
             write!(out, ",{count}")?;
         }
         write!(out, ",{}", r.cost.rescore_s * 1e3)?;
@@ -441,9 +503,16 @@ fn save(
             None => write!(out, ",,,,")?,
         }
         match r.missing_m {
-            Some(m) => writeln!(out, ",{m}")?,
-            None => writeln!(out, ",")?,
+            Some(m) => write!(out, ",{m}")?,
+            None => write!(out, ",")?,
         }
+        for count in r.visible.draws {
+            write!(out, ",{count}")?;
+        }
+        for (casters, draws) in r.visible.casters.iter().zip(r.visible.cascade_draws) {
+            write!(out, ",{casters},{draws}")?;
+        }
+        writeln!(out)?;
     }
     out.flush()?;
     let mut meta = BufWriter::new(
@@ -704,7 +773,7 @@ mod tests {
                 settled: false,
                 focused: false,
                 holes: Holes::default(),
-                visible: [0; CAMERAS],
+                visible: Visible::default(),
                 sight: Sight::default(),
                 mesh_reach: None,
                 missing_m: None,
@@ -738,7 +807,7 @@ mod tests {
             settled: false,
             focused: false,
             holes: Holes::default(),
-            visible: [0; CAMERAS],
+            visible: Visible::default(),
             sight: Sight::default(),
             mesh_reach: None,
             missing_m: None,
