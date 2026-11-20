@@ -36,9 +36,8 @@ use bevy::platform::collections::{HashMap, HashSet};
 use bevy::prelude::*;
 
 use crate::session::SessionApp;
-#[cfg(any(feature = "dev", feature = "profiling"))]
 use tesserae_core::Chunk;
-use tesserae_core::mesh::{NEG_X, NEG_Y, NEG_Z, POS_X, POS_Y, POS_Z};
+use tesserae_core::mesh::{NEG_X, NEG_Y, NEG_Z, POS_X, POS_Y, POS_Z, emits_no_faces};
 #[cfg(any(feature = "dev", feature = "profiling"))]
 use tesserae_core::visibility::Connectivity;
 use tesserae_core::{CHUNK_SIZE, ChunkMesh, Tables};
@@ -696,6 +695,15 @@ fn stream(
         budget.landed_per_tick.mesh,
         &priority,
     );
+    send_faceless(
+        &store,
+        &mut meshes,
+        &jobs,
+        &mut ready,
+        center,
+        rings.mesh,
+        &tables.0,
+    );
     dispatch_generation(
         &store,
         &mut jobs,
@@ -1072,6 +1080,78 @@ fn land_meshes(
         });
         meshes.delivered.insert(coord);
     }
+}
+
+/// Sends an empty mesh, without a job or settled light, to every dirty Chunk of
+/// `mesh` that [`faceless`] says cannot have a face. Uncapped: an empty mesh is
+/// a despawn to the Client, with nothing to upload.
+fn send_faceless(
+    store: &ChunkStore,
+    meshes: &mut MeshState,
+    jobs: &Jobs,
+    ready: &mut MessageWriter<ChunkMeshReady>,
+    center: ChunkCoord,
+    mesh: Extent,
+    tables: &Tables,
+) {
+    let sent: Vec<ChunkCoord> = meshes
+        .dirty
+        .iter()
+        .copied()
+        .filter(|&c| mesh.contains(delta(center, c)) && !jobs.mesh.contains(c))
+        .filter(|&c| faceless(store, c, tables))
+        .collect();
+    for coord in sent {
+        meshes.dirty.remove(&coord);
+        #[cfg(any(feature = "dev", feature = "profiling"))]
+        let connectivity = {
+            let own = store.shared(coord).expect("faceless Chunks are held");
+            let c = meshes
+                .connectivity_of(coord, &own.chunk)
+                .unwrap_or_else(|| {
+                    tesserae_core::visibility::connectivity(&own.chunk, &tables.materials)
+                });
+            meshes.note_connectivity(coord, &own.chunk, c);
+            c
+        };
+        ready.write(ChunkMeshReady {
+            coord,
+            mesh: ChunkMesh::default(),
+            #[cfg(any(feature = "dev", feature = "profiling"))]
+            connectivity,
+        });
+        meshes.delivered.insert(coord);
+    }
+}
+
+/// Whether a held Chunk's mesh is empty whatever its light: one Voxel walled in
+/// by Voxels that hide it, or air among air, with no fluid among the seven.
+///
+/// Not air beside anything else, though it has no face either. Its empty mesh
+/// marks its Cell drawn, which discards a coarser level's ground there
+/// (ADR-0019), and levels 2 and up, made at their own Voxel size, stand up to a
+/// coarse Voxel above level 0's ground: sent ahead of the ground below, it
+/// would cut the top off the coarse ground still drawn in the ground's place.
+fn faceless(store: &ChunkStore, coord: ChunkCoord, tables: &Tables) -> bool {
+    let plain = |c: ChunkCoord| {
+        store
+            .shared(c)
+            .filter(|s| s.chunk.uniform().is_some() && !s.overlay.may_contain_fluid())
+    };
+    let Some(own) = plain(coord) else {
+        return false;
+    };
+    let Some(around) = face_neighbors(coord)
+        .map(plain)
+        .into_iter()
+        .collect::<Option<Vec<Snapshot>>>()
+    else {
+        return false;
+    };
+    let neighbors: [Option<&Chunk>; 6] = std::array::from_fn(|face| Some(&*around[face].chunk));
+    let air = |s: &Snapshot| s.chunk.uniform().is_some_and(|v| v.is_air());
+    emits_no_faces(&own.chunk, &own.overlay, neighbors, &tables.materials)
+        && (!air(&own) || around.iter().all(air))
 }
 
 /// Starts mesh jobs for dirty Chunks inside the mesh extent, in priority order,
@@ -2566,6 +2646,124 @@ pub(in crate::server) mod tests {
             ready.iter().any(|m| m.coord == home),
             "{home} was never meshed once its neighbourhood settled"
         );
+    }
+
+    /// Fills around `eye` with every light solve and mesh job held, so only an
+    /// empty mesh sent on the tick can reach the Client, and checks after each
+    /// tick that exactly the Chunks of the mesh extent that are air in air, or
+    /// one Voxel walled in by the same Voxel, with no fluid anywhere among the
+    /// seven, were sent one, empty and without a job. Returns how many were
+    /// sent, and how many uniform Chunks were held back.
+    fn faceless_on_the_tick(mut h: Harness, eye: Vec3) -> (usize, usize) {
+        h.anchor_at(eye);
+        h.jobs_mut().relight.hold.hold();
+        h.jobs_mut().mesh.hold.hold();
+        let center = h.center();
+        let rings = h.rings();
+        let in_mesh: Vec<ChunkCoord> = rings
+            .mesh
+            .offsets()
+            .into_iter()
+            .map(|d| offset(center, d))
+            .collect();
+        let started = std::time::Instant::now();
+        let mut sent = HashSet::new();
+        loop {
+            let (ready, _) = h.tick();
+            for m in &ready {
+                assert!(m.mesh.is_empty(), "{} was sent faces unlit", m.coord);
+                assert!(sent.insert(m.coord), "{} was sent twice", m.coord);
+            }
+            let store = h.store();
+            let plain = |c: ChunkCoord| {
+                store
+                    .get(c)
+                    .and_then(Chunk::uniform)
+                    .filter(|_| !store.overlay(c).expect("held").may_contain_fluid())
+            };
+            let mut kept = 0;
+            for &coord in &in_mesh {
+                let own = plain(coord);
+                let walled = own.is_some_and(|v| {
+                    face_neighbors(coord).iter().all(|&n| {
+                        plain(n) == Some(v) || (v.is_air() && plain(n).is_some_and(Voxel::is_air))
+                    })
+                });
+                assert_eq!(
+                    sent.contains(&coord),
+                    walled,
+                    "{coord}: {own:?}, sent {}",
+                    sent.contains(&coord)
+                );
+                assert!(
+                    !(walled && h.jobs().mesh.contains(coord)),
+                    "{coord} took a job"
+                );
+                kept += usize::from(own.is_some() && !walled);
+            }
+            let all_held = rings
+                .load
+                .offsets()
+                .into_iter()
+                .all(|d| h.store().contains(offset(center, d)));
+            if all_held {
+                return (sent.len(), kept);
+            }
+            assert!(
+                started.elapsed() < SETTLE_CEILING,
+                "generation never finished"
+            );
+            std::thread::sleep(std::time::Duration::from_micros(100));
+        }
+    }
+
+    /// A Chunk that cannot have a face whatever its light needs neither a
+    /// settled neighbourhood nor a job, so its empty mesh is sent on the tick
+    /// the last of the seven lands.
+    #[test]
+    fn a_faceless_chunk_is_sent_its_empty_mesh_on_the_tick() {
+        let world = WorldSettings::default();
+        let cell = world.cell_size();
+        let generator = Worldgen::new(
+            world.seed,
+            world.voxel_size,
+            tesserae_core::testgen::world_params(),
+        );
+        let (lowest_m, highest_m) = generator.surface_bounds_m();
+
+        let sky = Vec3::new(0.0, highest_m + 4.0 * cell, 0.0);
+        let (sent, kept) = faceless_on_the_tick(Harness::new(small(), UNLIMITED), sky);
+        assert_eq!((sent, kept), (small_mesh_count(), 0), "open sky");
+
+        let rock = Vec3::new(0.0, lowest_m - 5.0 * cell, 0.0);
+        let (sent, kept) = faceless_on_the_tick(Harness::new(small(), UNLIMITED), rock);
+        assert_eq!((sent, kept), (small_mesh_count(), 0), "deep rock");
+    }
+
+    /// Air beside ground still waits for settled light and a job: its empty
+    /// mesh marks its Cell drawn, and a coarse level's ground can stand in it
+    /// until the ground's own mesh lands.
+    #[test]
+    fn air_beside_ground_waits_for_settled_light() {
+        let world = land();
+        let cell = world.cell_size();
+        let generator = Worldgen::new(
+            world.seed,
+            world.voxel_size,
+            tesserae_core::testgen::world_params(),
+        );
+        let top_m = generator.surface_top_m([0.0, 0.0], [cell, cell]);
+        let (_, kept) = faceless_on_the_tick(
+            Harness::on_land(small(), UNLIMITED),
+            Vec3::new(0.0, top_m, 0.0),
+        );
+        assert!(kept > 0, "no uniform Chunk lay beside the surface");
+    }
+
+    fn small_mesh_count() -> usize {
+        Rings::new(small(), WorldSettings::default().cell_size())
+            .mesh
+            .count()
     }
 
     /// A Chunk edited faster than a mesh takes to build must still show the
