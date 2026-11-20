@@ -22,3 +22,16 @@ pass, once per cascade that lists them.
 - [ ] Gated by 01's method, the shadow span as its target; numbers in Comments.
 - [ ] Before and after captures of `flight`, `stationary` and `hidden-hill`
       shown to you; lands only on your approval.
+
+## Comments
+
+- Built in `client/chunk_view.rs`: cutout layers spawn with a
+  `NearCascadesOnly` marker (`Draw::show` takes a `Casts` choice in place of a
+  bool), and `drop_cutout_from_far_cascades` runs in `PostUpdate` after
+  `check_dir_light_mesh_visibility`, removing them from every cascade from
+  `FIRST_FAR_CASCADE = 2` on. Avatars, drops and opaque layers are untouched.
+- Test `leaves_cast_in_the_two_near_cascades_only_and_ground_in_all_four` runs
+  Bevy's own caster check under four unbounded cascades, so it also catches a
+  Bevy upgrade that moves the check. The seam is listed in DESIGN.md's
+  `bevy_pbr` friction points.
+- Gate and captures are still to run.
