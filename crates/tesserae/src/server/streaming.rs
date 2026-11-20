@@ -28,7 +28,11 @@
 //! have moved far enough that the Chunk being meshed is outside `mesh`; landing
 //! checks that extent, so **a mesh lands only if every neighbour it read is still
 //! held**. A light solve is validated differently - against Edits, and against
-//! the Chunk having been replaced - and not against the extents.
+//! the Chunk having been replaced - and not against the extents. It waits
+//! instead: a solve is dispatched only once its four sideways neighbours and
+//! the one above are held or lie outside `load`, so one arriving afterwards
+//! does not solve it again. Bulk light only rises, so waiting changes when the
+//! light settles and never where.
 
 use std::sync::Arc;
 
@@ -348,11 +352,16 @@ struct LoadOrder {
     extent: Vec<IVec3>,
     priority: Order,
     offsets: Vec<IVec3>,
-    /// The same offsets highest layer first, each layer in priority order. Sky
-    /// light flows downwards, so solving a Chunk before the one above it means
-    /// solving it again when the one above arrives.
+    /// The same offsets for light solves: top-down within bands of
+    /// `SOLVE_BAND_CELLS`. Sky light flows downwards, so solving a Chunk before
+    /// the one above it means solving it again when the one above lands.
     descending: Vec<IVec3>,
 }
+
+/// How wide a band of the light-solve order is, in priority Cells. Measured
+/// with the solves-per-Chunk test: 2.0 solves per Chunk at 2, 2.15 at 1, 2.05
+/// at 4 and with one band for the whole extent.
+const SOLVE_BAND_CELLS: f32 = 2.0;
 
 /// Which loaded Chunks need light solved, which need a mesh, and which the
 /// Client holds one for.
@@ -666,7 +675,9 @@ fn stream(
         let _rescoring = crate::cost::Rescoring::start();
         if order.priority.update(&ring, &aim, now_s) {
             order.offsets = order.priority.offsets().collect();
-            order.descending = order.priority.layers_top_down();
+            order.descending = order
+                .priority
+                .top_down_within_bands(SOLVE_BAND_CELLS * world.cell_size());
         }
     }
     let cell_m = world.cell_size();
@@ -737,6 +748,7 @@ fn stream(
         order,
         &world,
         center,
+        rings.load,
         budget.in_flight.relight,
         &tables.0,
     ) {
@@ -973,8 +985,9 @@ fn apply_solve(store: &mut ChunkStore, meshes: &mut MeshState, coord: ChunkCoord
     }
 }
 
-/// Starts light solves for Chunks whose light is out of date, highest layer
-/// first and each layer in priority order, until `in_flight` are outstanding.
+/// Starts light solves for Chunks whose light is out of date, in
+/// `LoadOrder::descending`, until `in_flight` are outstanding. A Chunk waits for
+/// the neighbours [`neighbours_held`] names.
 ///
 /// Top-down because sky light flows downwards: solving a Chunk before the one
 /// above it means solving it again when the one above lands.
@@ -990,6 +1003,7 @@ fn dispatch_relight(
     order: &LoadOrder,
     world: &WorldSettings,
     center: ChunkCoord,
+    load: Extent,
     in_flight: usize,
     tables: &Arc<Tables>,
 ) -> Option<(ChunkCoord, Snapshot, [Border; 6])> {
@@ -1009,6 +1023,9 @@ fn dispatch_relight(
             meshes.unlit.remove(&coord);
             continue;
         };
+        if !neighbours_held(store, coord, center, load) {
+            continue;
+        }
         let border: [Border; 6] = face_neighbors(coord).map(|n| match store.shared(n) {
             Some(snapshot) => Border::Loaded(snapshot),
             None if n.y > coord.y && above_the_surface(generator, world, n) => Border::OpenSky,
@@ -1036,6 +1053,22 @@ fn dispatch_relight(
         free -= 1;
     }
     on_tick
+}
+
+/// Whether the four sideways neighbours and the one above are held, or lie
+/// outside `load` and never will be: one that arrives after the solve moves
+/// its plane and solves this Chunk again. Below is left out because sky light,
+/// most of what a fill brings, flows down.
+fn neighbours_held(
+    store: &ChunkStore,
+    coord: ChunkCoord,
+    center: ChunkCoord,
+    load: Extent,
+) -> bool {
+    let n = face_neighbors(coord);
+    [NEG_X, POS_X, NEG_Z, POS_Z, POS_Y]
+        .into_iter()
+        .all(|face| store.contains(n[face]) || !load.contains(delta(center, n[face])))
 }
 
 /// Whether a Chunk is entirely above the band the surface can reach, so the
@@ -2635,13 +2668,66 @@ pub(in crate::server) mod tests {
         }
     }
 
-    /// Ordered highest layer first by distance this measures 3.3, and column by
-    /// column 4.2; the bound sits between them because a slow CI runner finishes
-    /// the pool's jobs later and has measured 3.6.
+    /// Waiting for the neighbours a solve reads, top-down within bands, this
+    /// measures 1.99 to 2.07; solved as soon as it lands, 2.23 to 2.43. Column
+    /// by column it was 4.2. A slow CI runner finishes the pool's jobs later and
+    /// has measured about 9% more, so the bound sits between the two.
     #[test]
     fn a_fresh_region_is_lit_without_solving_chunks_again_for_light_from_above() {
         let solves = solves_per_chunk_filling_a_fresh_region();
-        assert!(solves <= 3.75, "{solves} solves per generated Chunk");
+        assert!(solves <= 2.2, "{solves} solves per generated Chunk");
+    }
+
+    /// A solve made before a neighbour it reads is held is made again once that
+    /// neighbour is solved, so it waits; a neighbour outside the load extent is
+    /// never generated, so a Chunk at the edge is solved without it. Delaying a
+    /// solve cannot change where the light settles, as bulk light only rises.
+    #[test]
+    fn a_solve_waits_for_the_neighbours_it_reads_inside_the_load_extent() {
+        let mut h = Harness::on_land(small(), UNLIMITED);
+        h.settle();
+        let (center, load) = (h.center(), h.rings().load);
+        let missing = offset(center, IVec3::X);
+        let beside = center;
+        let below = offset(missing, IVec3::NEG_Y);
+        let edge = offset(center, IVec3::new(0, 0, load.horizontal));
+        assert!(!load.contains(delta(center, offset(edge, IVec3::Z))));
+
+        h.jobs_mut().generate.hold.hold();
+        assert!(
+            h.app
+                .world_mut()
+                .resource_mut::<ChunkStore>()
+                .remove(missing)
+        );
+        {
+            let mut meshes = h.app.world_mut().resource_mut::<MeshState>();
+            for coord in [beside, below, edge] {
+                meshes.mark_unlit(coord);
+            }
+        }
+        h.tick();
+        assert!(
+            !h.jobs().relight.contains(beside),
+            "{beside} was solved while the Chunk beside it was missing"
+        );
+        assert!(
+            !h.jobs().relight.contains(below),
+            "{below} was solved while the Chunk above it was missing"
+        );
+        assert!(
+            h.jobs().relight.contains(edge),
+            "{edge} waited for a neighbour outside the load extent"
+        );
+
+        h.jobs_mut().generate.hold.release();
+        h.settle();
+        let expected = fixed_point(
+            h.store(),
+            h.app.world().resource::<WorldGenerator>(),
+            h.app.world().resource::<WorldSettings>(),
+        );
+        assert_lit_like(&h, &expected);
     }
 
     /// Where a lantern next to a Chunk boundary lights two Chunks, and what
