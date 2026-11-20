@@ -586,6 +586,18 @@ impl CaveField {
 const BLOCK: usize = 8;
 const BLOCKS: usize = CHUNK_SIZE / BLOCK;
 
+/// A Chunk's corner caches on the cavern field, one for each place the column loop asks it: the
+/// floor check asks a Voxel above and a spring its neighbours, which would evict the Voxel's own
+/// cell where it borders another.
+#[derive(Default)]
+struct CavernCaches {
+    open: Fbm3Cache,
+    walled: Fbm3Cache,
+    fill: Fbm3Cache,
+    spring: Fbm3Cache,
+    floor: Fbm3Cache,
+}
+
 /// Columns per side of the surface array: the Chunk's own plus one either side,
 /// so a column on an edge can ask its neighbour in the next Chunk without
 /// loading it.
@@ -2029,6 +2041,7 @@ impl Worldgen {
         let mut chunk = ChunkBuilder::new();
         let mut cave_cache = Default::default();
         let mut ore_cells = OreCells::default();
+        let mut cavern_caches = CavernCaches::default();
         for z in 0..CHUNK_SIZE {
             for x in 0..CHUNK_SIZE {
                 let x_m = origin_m[0] + x as f32 * self.voxel_size;
@@ -2087,7 +2100,8 @@ impl Worldgen {
                         }
                         continue;
                     }
-                    let walled = || self.walled_in([x_m, y_m, z_m], table_m);
+                    let mut walled =
+                        || self.walled_in(&mut cavern_caches.walled, [x_m, y_m, z_m], table_m);
                     // A cave carves through the Grass cap like anything else,
                     // which is what a mouth is.
                     if let Some((caves, blocks)) = &reachable
@@ -2124,14 +2138,16 @@ impl Worldgen {
                         && blocks[block_of(x, y, z)]
                         && !free_at(x, z)
                         && base_m >= CAVERN_MIN_DEPTH_M
-                        && self.cavern_open(caverns, [x_m, y_m, z_m])
+                        && self.cavern_open(caverns, &mut cavern_caches.open, [x_m, y_m, z_m])
                         && y_m >= *sealed_m.get_or_insert_with(seal)
                     {
-                        if let Some(fill) =
-                            self.cavern_fill(caverns, [x_m, y_m, z_m], table_m, || {
-                                self.cave_biome_cached(&mut cave_biomes, [x_m, y_m, z_m], base_m)
-                            })
-                        {
+                        if let Some(fill) = self.cavern_fill(
+                            caverns,
+                            &mut cavern_caches.fill,
+                            [x_m, y_m, z_m],
+                            table_m,
+                            || self.cave_biome_cached(&mut cave_biomes, [x_m, y_m, z_m], base_m),
+                        ) {
                             chunk.set(x, y, z, fill);
                         }
                         continue;
@@ -2150,7 +2166,12 @@ impl Worldgen {
                         ground.soil
                     } else if let Some(water) = self.water
                         && springs
-                        && self.spring_at([x_m, y_m, z_m], base_m, table_m)
+                        && self.spring_at(
+                            &mut cavern_caches.spring,
+                            [x_m, y_m, z_m],
+                            base_m,
+                            table_m,
+                        )
                     {
                         water.material
                     } else {
@@ -2169,7 +2190,7 @@ impl Worldgen {
                                     self.caverns.as_ref().is_some_and(|c| {
                                         let above = [x_m, y_m + self.voxel_size, z_m];
                                         base_m - self.voxel_size >= CAVERN_MIN_DEPTH_M
-                                            && self.cavern_open(c, above)
+                                            && self.cavern_open(c, &mut cavern_caches.floor, above)
                                     })
                                 })
                                 .or(cave.rock)
@@ -2244,8 +2265,13 @@ impl Worldgen {
 
     /// Whether a cavern is open at a point: carved, and not in the rock kept over the lava or
     /// along an aquifer's border.
-    fn cavern_open(&self, caverns: &Caverns, [x_m, y_m, z_m]: [f32; 3]) -> bool {
-        if !caverns.carves(x_m, y_m, z_m) {
+    fn cavern_open(
+        &self,
+        caverns: &Caverns,
+        cache: &mut Fbm3Cache,
+        [x_m, y_m, z_m]: [f32; 3],
+    ) -> bool {
+        if !caverns.carves_near(cache, x_m, y_m, z_m) {
             return false;
         }
         if let Some(lava_m) = self.lava_m()
@@ -2292,6 +2318,7 @@ impl Worldgen {
     fn cavern_fill(
         &self,
         caverns: &Caverns,
+        cache: &mut Fbm3Cache,
         [x_m, y_m, z_m]: [f32; 3],
         table_m: f32,
         cave: impl FnOnce() -> Option<u8>,
@@ -2315,7 +2342,7 @@ impl Worldgen {
             crate::noise::cell_hash(x_m as i32, z_m as i32, seed)[0] < 1.0 / (spacing_m * spacing_m)
         };
         let cave = &self.params.cave_biomes.as_slice()[usize::from(cave()?)];
-        if self.hollow_at(caverns, [x_m, y_m - self.voxel_size, z_m]) {
+        if self.hollow_at(caverns, cache, [x_m, y_m - self.voxel_size, z_m]) {
             return None;
         }
         cave.features()
@@ -2327,7 +2354,13 @@ impl Worldgen {
 
     /// Whether a floor Voxel of a perched aquifer's dry cavern wells up as a spring: a pool one
     /// Voxel deep, rock below and on every side, so the water stands rather than pours.
-    fn spring_at(&self, [x_m, y_m, z_m]: [f32; 3], base_m: f32, table_m: f32) -> bool {
+    fn spring_at(
+        &self,
+        cache: &mut Fbm3Cache,
+        [x_m, y_m, z_m]: [f32; 3],
+        base_m: f32,
+        table_m: f32,
+    ) -> bool {
         let Some(caverns) = &self.caverns else {
             return false;
         };
@@ -2346,7 +2379,8 @@ impl Worldgen {
             return false;
         }
         let v = self.voxel_size;
-        let open = |[dx, dy, dz]: [f32; 3]| self.hollow_at(caverns, [x_m + dx, y_m + dy, z_m + dz]);
+        let mut open =
+            |[dx, dy, dz]: [f32; 3]| self.hollow_at(caverns, cache, [x_m + dx, y_m + dy, z_m + dz]);
         open([0.0, v, 0.0])
             && ![
                 [0.0, -v, 0.0],
@@ -2356,13 +2390,18 @@ impl Worldgen {
                 [0.0, 0.0, -v],
             ]
             .into_iter()
-            .any(open)
+            .any(&mut open)
     }
 
     /// Whether a cavern or a tunnel opens a point, as far as a spring or a cave feature beside it
     /// needs to know.
-    fn hollow_at(&self, caverns: &Caverns, [x_m, y_m, z_m]: [f32; 3]) -> bool {
-        self.cavern_open(caverns, [x_m, y_m, z_m])
+    fn hollow_at(
+        &self,
+        caverns: &Caverns,
+        cache: &mut Fbm3Cache,
+        [x_m, y_m, z_m]: [f32; 3],
+    ) -> bool {
+        self.cavern_open(caverns, cache, [x_m, y_m, z_m])
             || self
                 .caves
                 .as_ref()
@@ -2744,17 +2783,24 @@ impl Worldgen {
         ]);
         !near.iter().any(|f| f.widened(clear).covers(at[0], at[2]))
             && y_m >= self.sealed_below_m(x_m, z_m, self.surface_height_m(x_m, z_m))
-            && !self.walled_in([x_m, y_m, z_m], self.water_table_m(x_m, z_m))
+            && !self.walled_in(
+                &mut Default::default(),
+                [x_m, y_m, z_m],
+                self.water_table_m(x_m, z_m),
+            )
     }
 
     /// Whether a tunnel or shaft must leave the rock at a point, which is a flooded cavern's or the
     /// shell round it below the water table.
-    fn walled_in(&self, [x_m, y_m, z_m]: [f32; 3], table_m: f32) -> bool {
+    fn walled_in(&self, cache: &mut Fbm3Cache, [x_m, y_m, z_m]: [f32; 3], table_m: f32) -> bool {
         let flooded = (self.water.is_some() && y_m < table_m)
             || self
                 .lava_m()
                 .is_some_and(|lava_m| y_m < lava_m + LAVA_SEAL_M);
-        flooded && self.caverns.is_some_and(|c| c.walls_in(x_m, y_m, z_m))
+        flooded
+            && self
+                .caverns
+                .is_some_and(|c| c.walls_in(cache, x_m, y_m, z_m))
     }
 
     /// The Plant a Biome stands on the column at global Voxel `(gx, gz)`, if any: a pure function

@@ -7,7 +7,7 @@ use wide::f32x4;
 
 use crate::climate::{BiomeTable, ClimateField, MAX_BIOMES, Site};
 use crate::drainage::Drainage;
-use crate::noise::Lanes;
+use crate::noise::{Fbm3Cache, Lanes};
 
 /// What a Game tunes of version 3's terrain, in metres. Plain `Copy` data like the rest of
 /// [`crate::WorldgenParams`].
@@ -940,14 +940,31 @@ impl Caverns {
         )
     }
 
+    /// [`Caverns::field`] for a run of nearby samples sharing `cache`.
+    fn field_near(&self, cache: &mut Fbm3Cache, x_m: f32, y_m: f32, z_m: f32) -> f32 {
+        crate::noise::fbm3_cached(
+            x_m / CAVERN_SIZE_M[0],
+            y_m / CAVERN_SIZE_M[1],
+            z_m / CAVERN_SIZE_M[2],
+            self.seed,
+            2,
+            cache,
+        )
+    }
+
     pub(crate) fn carves(&self, x_m: f32, y_m: f32, z_m: f32) -> bool {
         y_m >= self.floor_m && self.field(x_m, y_m, z_m) > CAVERN_CUT
     }
 
+    /// [`Caverns::carves`] for a run of nearby samples sharing `cache`.
+    pub(crate) fn carves_near(&self, cache: &mut Fbm3Cache, x_m: f32, y_m: f32, z_m: f32) -> bool {
+        y_m >= self.floor_m && self.field_near(cache, x_m, y_m, z_m) > CAVERN_CUT
+    }
+
     /// Whether the rock at a point is a cavern's or the shell of rock kept round it, which a
     /// tunnel or a shaft must not cut below the water table, where the cavern is a lake.
-    pub(crate) fn walls_in(&self, x_m: f32, y_m: f32, z_m: f32) -> bool {
-        self.field(x_m, y_m, z_m) > CAVERN_CUT - CAVERN_SHELL
+    pub(crate) fn walls_in(&self, cache: &mut Fbm3Cache, x_m: f32, y_m: f32, z_m: f32) -> bool {
+        self.field_near(cache, x_m, y_m, z_m) > CAVERN_CUT - CAVERN_SHELL
     }
 
     /// The shafts whose mouths lie within `pad_m` of the box `min..max` on the ground plane, each
@@ -1120,5 +1137,31 @@ mod tests {
             crossed.iter().all(|&n| n > 20),
             "cut, wet, rock, pushed: {crossed:?}"
         );
+    }
+
+    /// Chunk columns walked at every LOD level's Voxel size, each Voxel also asking a neighbour as
+    /// a spring does, so one cache steps across the field's cells and jumps back.
+    #[test]
+    fn the_cached_cavern_field_is_the_plain_one_bit_for_bit() {
+        let p = crate::testgen::world_params();
+        for seed in 0..48u32 {
+            let caverns = Caverns::new(seed.wrapping_mul(0x9e37_79b9), &p);
+            let mut cache = Fbm3Cache::default();
+            for column in 0..40u32 {
+                let h = crate::noise::cell_hash(seed as i32, column as i32, 0x0ca7);
+                let voxel_m = [0.5, 1.0, 2.0, 4.0, 8.0, 16.0, 32.0][(h[0] * 7.0) as usize];
+                let [x_m, z_m] = [h[1], h[2]].map(|v| (v - 0.5) * 3000.0);
+                let floor_m = caverns.floor_m + (column % 8) as f32 * 24.0 * voxel_m;
+                for y in 0..32 {
+                    let y_m = floor_m + y as f32 * voxel_m;
+                    let beside = [x_m + voxel_m * (y % 3) as f32, y_m - voxel_m, z_m];
+                    for [x, y, z] in [[x_m, y_m, z_m], beside] {
+                        let want = caverns.field(x, y, z);
+                        let got = caverns.field_near(&mut cache, x, y, z);
+                        assert_eq!(got.to_bits(), want.to_bits(), "{x},{y},{z} seed {seed}");
+                    }
+                }
+            }
+        }
     }
 }
