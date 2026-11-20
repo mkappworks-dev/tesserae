@@ -397,7 +397,7 @@ impl Worldgen {
             let top = top_index(self.surface_height_m(x_m, z_m), 0.0, size);
             let y_m = self.global_m(top + 1);
             if y_m > highest
-                || self.carved([gx, top, gz])
+                || self.carved([gx, top, gz], None)
                 || self
                     .water_level_m(x_m, z_m)
                     .is_some_and(|level_m| y_m < level_m)

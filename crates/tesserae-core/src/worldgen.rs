@@ -1005,6 +1005,9 @@ impl BiomeGrounds {
 
 type ColumnGrounds = [GroundParams; CHUNK_SIZE * CHUNK_SIZE];
 
+/// A Cell's column cache its asker already holds, and the Cell.
+type HeldCell<'a> = (&'a ColumnCache, [i32; 2]);
+
 /// A Cell's surface and water levels (with a one-column border), and what its columns are asked
 /// once. Version 3's band stands some ten Chunks tall, and each would otherwise sample all of it
 /// again.
@@ -1399,6 +1402,46 @@ impl Worldgen {
         })
     }
 
+    /// The contained surface and water level of the column at `at`, if it is on the Voxel lattice
+    /// and `near`, its border included, or its own Cell's cache holds it. Never builds a cache:
+    /// a Cell's is over a thousand columns, and its asker reads a handful.
+    fn held_column_m(&self, near: Option<HeldCell>, at: [f32; 2]) -> Option<(f32, Option<f32>)> {
+        let [gx, gz] = self.on_lattice(at)?;
+        let size = CHUNK_SIZE as i32;
+        if let Some((s, [cx, cz])) = near {
+            let (x, z) = (gx - cx * size, gz - cz * size);
+            if (-1..=size).contains(&x) && (-1..=size).contains(&z) {
+                let i = surface_index(x, z);
+                return Some((s.surface_m[i], s.water_level_m[i]));
+            }
+        }
+        let s = self.held_columns(gx.div_euclid(size), gz.div_euclid(size))?;
+        let i = surface_index(gx.rem_euclid(size), gz.rem_euclid(size));
+        Some((s.surface_m[i], s.water_level_m[i]))
+    }
+
+    /// The level of water standing above the contained surface at `at`, if any.
+    fn wet_m(&self, near: Option<HeldCell>, at @ [x_m, z_m]: [f32; 2]) -> Option<f32> {
+        match self.held_column_m(near, at) {
+            Some((surface_m, level_m)) => level_m.filter(|&l| l > surface_m),
+            None => self
+                .water_level_m(x_m, z_m)
+                .filter(|&l| l > self.surface_height_m(x_m, z_m)),
+        }
+    }
+
+    fn surface_m(&self, near: Option<HeldCell>, at @ [x_m, z_m]: [f32; 2]) -> f32 {
+        self.held_column_m(near, at).map_or_else(
+            || self.surface_height_m(x_m, z_m),
+            |(surface_m, _)| surface_m,
+        )
+    }
+
+    fn level_m(&self, near: Option<HeldCell>, at @ [x_m, z_m]: [f32; 2]) -> Option<f32> {
+        self.held_column_m(near, at)
+            .map_or_else(|| self.water_level_m(x_m, z_m), |(_, level_m)| level_m)
+    }
+
     fn last_columns(&self, key: [i32; 2]) -> Option<Arc<ColumnCache>> {
         LAST_CELL.with(|l| {
             l.borrow()
@@ -1767,17 +1810,15 @@ impl Worldgen {
     /// The metre height of the surface over a point on the ground plane: that of the Voxel column
     /// nearest it, with its water contained: what every Chunk stands on.
     pub fn surface_height_m(&self, x_m: f32, z_m: f32) -> f32 {
-        let column = |m: f32| (m / self.voxel_size).round() as i32;
-        let (gx, gz) = (column(x_m), column(z_m));
         // A Chunk asks at its columns' corners, the column cache's lattice; anything else asks its
         // own point and the points a Voxel from it.
-        if self.global_m(gx) != x_m || self.global_m(gz) != z_m {
+        let Some([gx, gz]) = self.on_lattice([x_m, z_m]) else {
             let size = self.voxel_size;
             return self.contained_at_m(
                 [x_m, z_m],
                 CARDINALS.map(|(dx, dz, _)| [x_m + dx as f32 * size, z_m + dz as f32 * size]),
             );
-        }
+        };
         let (cx, cz) = (
             gx.div_euclid(CHUNK_SIZE as i32),
             gz.div_euclid(CHUNK_SIZE as i32),
@@ -1793,6 +1834,13 @@ impl Worldgen {
             [x_m, z_m],
             CARDINALS.map(|(dx, dz, _)| [self.global_m(gx + dx), self.global_m(gz + dz)]),
         )
+    }
+
+    /// The global column at `[x_m, z_m]` if the point is that column's corner, bit for bit.
+    fn on_lattice(&self, [x_m, z_m]: [f32; 2]) -> Option<[i32; 2]> {
+        let column = |m: f32| (m / self.voxel_size).round() as i32;
+        let (gx, gz) = (column(x_m), column(z_m));
+        (self.global_m(gx) == x_m && self.global_m(gz) == z_m).then_some([gx, gz])
     }
 
     /// The metre height above which nothing generated stands in any column
@@ -2066,7 +2114,7 @@ impl Worldgen {
                 let table_m = self.water_table_m(x_m, z_m);
                 let seal = || {
                     cache.sealed_m(z * CHUNK_SIZE + x, || {
-                        self.sealed_below_m(x_m, z_m, surface_m)
+                        self.sealed_below_m(x_m, z_m, surface_m, Some((&*cache, [cx, cz])))
                     })
                 };
                 // The density never reaches down to water here or beside, so it opens no hollow
@@ -2213,6 +2261,7 @@ impl Worldgen {
             self.smooth(
                 &mut chunk,
                 &surface_m,
+                Some((&*cache, [cx, cz])),
                 [cx, cy, cz],
                 floor_m,
                 columns.as_ref(),
@@ -2234,7 +2283,7 @@ impl Worldgen {
                 scatter,
                 &placed,
                 &kept,
-                &surface_m,
+                (&*cache, [cx, cz]),
                 [cx, cy, cz],
             );
             if scatter.plants {
@@ -2569,6 +2618,7 @@ impl Worldgen {
         &self,
         chunk: &mut Chunk,
         surface_m: &[f32; SURFACE_W * SURFACE_W],
+        near: Option<HeldCell>,
         coord: [i32; 3],
         floor_m: f32,
         columns: Option<&ColumnGrounds>,
@@ -2583,7 +2633,7 @@ impl Worldgen {
             for x in 0..size {
                 let top = tops[surface_index(x, z)];
                 let y = top + 1;
-                if !(0..size).contains(&y) || !self.still_solid(chunk, coord, [x, top, z]) {
+                if !(0..size).contains(&y) || !self.still_solid(chunk, near, coord, [x, top, z]) {
                     continue;
                 }
                 // Under water the step stays a step: a stair holds one Voxel,
@@ -2596,8 +2646,8 @@ impl Worldgen {
                     let (nx, nz) = (x + dx, z + dz);
                     // The ground as it stands, so a cell the overhang density pushed solid or a
                     // cave opened counts as it looks.
-                    if self.still_solid(chunk, coord, [nx, y, nz])
-                        && !self.still_solid(chunk, coord, [nx, y + 1, nz])
+                    if self.still_solid(chunk, near, coord, [nx, y, nz])
+                        && !self.still_solid(chunk, near, coord, [nx, y + 1, nz])
                     {
                         rising += 1;
                         turn = quarter;
@@ -2628,7 +2678,7 @@ impl Worldgen {
         scatter: &SurfaceScatter,
         placed: &[fields::Placed],
         kept: &[Footprint],
-        surface_m: &[f32; SURFACE_W * SURFACE_W],
+        held: HeldCell,
         coord: [i32; 3],
     ) {
         let Some(world) = self.params.ground else {
@@ -2639,7 +2689,11 @@ impl Worldgen {
         let floor_m = (coord[1] * size) as f32 * self.voxel_size;
         for z in 0..size {
             for x in 0..size {
-                let top = top_index(surface_m[surface_index(x, z)], floor_m, self.voxel_size);
+                let top = top_index(
+                    held.0.surface_m[surface_index(x, z)],
+                    floor_m,
+                    self.voxel_size,
+                );
                 let y = top + 1;
                 if !(0..size).contains(&y)
                     || floor_m + y as f32 * self.voxel_size > highest
@@ -2676,7 +2730,7 @@ impl Worldgen {
                 let on_surface = if top >= 0 {
                     chunk.get(x as usize, top as usize, z as usize) == Voxel::cube(surface)
                 } else {
-                    self.still_solid(chunk, coord, [x, top, z])
+                    self.still_solid(chunk, Some(held), coord, [x, top, z])
                 };
                 if on_surface {
                     chunk.set(x as usize, y as usize, z as usize, Voxel::cube(material));
@@ -2708,20 +2762,15 @@ impl Worldgen {
 
     /// Rock below this height stays solid: a cave opening onto water would let
     /// the fluid simulation pour it in, a hole that keeps changing and being saved.
-    fn sealed_below_m(&self, x_m: f32, z_m: f32, ground_m: f32) -> f32 {
+    fn sealed_below_m(&self, x_m: f32, z_m: f32, ground_m: f32, near: Option<HeldCell>) -> f32 {
         /// Higher than any bank this steep is too far from the water to open onto it.
         const CLEAR_M: f32 = 64.0;
         const REACH_M: f32 = 4.0;
         if self.water.is_none() {
             return f32::NEG_INFINITY;
         }
-        let wet = |x, z| {
-            self.water_level_m(x, z).filter(|_| {
-                self.surface_height_m(x, z) < self.water_level_m(x, z).unwrap_or(f32::MIN)
-            })
-        };
         if self
-            .water_level_m(x_m, z_m)
+            .level_m(near, [x_m, z_m])
             .is_some_and(|level| ground_m > level + CLEAR_M)
         {
             return f32::NEG_INFINITY;
@@ -2741,7 +2790,7 @@ impl Worldgen {
             (0.0, -REACH_M),
         ]
         .into_iter()
-        .filter_map(|(dx, dz)| wet(x_m + dx, z_m + dz))
+        .filter_map(|(dx, dz)| self.wet_m(near, [x_m + dx, z_m + dz]))
         .fold(f32::NEG_INFINITY, f32::max);
         // Water fills the whole Voxel its level reaches into, so the rock is sealed to that
         // Voxel's top and not only to the level.
@@ -2754,7 +2803,7 @@ impl Worldgen {
     /// Whether a tunnel or a shaft opens the ground cell at global Voxel `at`, the column's top or
     /// above: what the Chunk holding it decides, so any Chunk can answer for it. A cavern stays
     /// [`CAVERN_MIN_DEPTH_M`] under the ground, so it never reaches the cells this is asked about.
-    fn carved(&self, at: [i32; 3]) -> bool {
+    fn carved(&self, at: [i32; 3], near: Option<HeldCell>) -> bool {
         let [x_m, y_m, z_m] = at.map(|g| self.global_m(g));
         let tunnel = || {
             self.caves
@@ -2777,12 +2826,12 @@ impl Worldgen {
             return false;
         }
         let clear = (CAVE_CLEAR_M / self.voxel_size).ceil() as i32;
-        let near = self.footprints_near([
+        let kept = self.footprints_near([
             [at[0] - clear, at[2] - clear],
             [at[0] + 1 + clear, at[2] + 1 + clear],
         ]);
-        !near.iter().any(|f| f.widened(clear).covers(at[0], at[2]))
-            && y_m >= self.sealed_below_m(x_m, z_m, self.surface_height_m(x_m, z_m))
+        !kept.iter().any(|f| f.widened(clear).covers(at[0], at[2]))
+            && y_m >= self.sealed_below_m(x_m, z_m, self.surface_m(near, [x_m, z_m]), near)
             && !self.walled_in(
                 &mut Default::default(),
                 [x_m, y_m, z_m],
@@ -2908,7 +2957,7 @@ impl Worldgen {
         let base = [gx, top + 1, gz];
         let (_, highest) = self.terrain_band_m();
         let y_m = self.global_m(base[1]);
-        if y_m > highest || self.carved([gx, top, gz]) {
+        if y_m > highest || self.carved([gx, top, gz], None) {
             return None;
         }
         let under_lake = self.water.filter(|_| {
@@ -3016,7 +3065,7 @@ impl Worldgen {
     fn eased(&self, [gx, gz]: [i32; 2], y: i32) -> bool {
         CARDINALS.iter().any(|&(dx, dz, _)| {
             let (nx, nz) = (gx + dx, gz + dz);
-            self.ground_at([nx, y, nz]) && !self.ground_at([nx, y + 1, nz])
+            self.ground_at([nx, y, nz], None) && !self.ground_at([nx, y + 1, nz], None)
         })
     }
 
@@ -3055,7 +3104,7 @@ impl Worldgen {
         let (_, highest) = self.terrain_band_m();
         let y_m = self.global_m(base[1]);
         if y_m > highest
-            || self.carved([gx, top, gz])
+            || self.carved([gx, top, gz], None)
             || self
                 .water_level_m(x_m, z_m)
                 .is_some_and(|level_m| y_m < level_m)
@@ -3392,7 +3441,13 @@ impl Worldgen {
     /// Whether the cell `at` (Voxel offsets from this Chunk's corner, possibly one outside it) is
     /// ground after the cube pass. Inside the Chunk that is a read, which smoothing's own stairs
     /// do not change; outside, it is asked as the Chunk holding it decides it.
-    fn still_solid(&self, chunk: &Chunk, coord: [i32; 3], at: [i32; 3]) -> bool {
+    fn still_solid(
+        &self,
+        chunk: &Chunk,
+        near: Option<HeldCell>,
+        coord: [i32; 3],
+        at: [i32; 3],
+    ) -> bool {
         if at.iter().all(|c| (0..CHUNK_SIZE as i32).contains(c)) {
             let v = chunk.get(at[0] as usize, at[1] as usize, at[2] as usize);
             return !v.is_air()
@@ -3400,24 +3455,25 @@ impl Worldgen {
                 && self.water.is_none_or(|w| v.material() != w.material);
         }
         let size = CHUNK_SIZE as i32;
-        self.ground_at([0, 1, 2].map(|a| coord[a] * size + at[a]))
+        self.ground_at([0, 1, 2].map(|a| coord[a] * size + at[a]), near)
     }
 
     /// Whether the cell at global Voxel `at`, the column's top or near it, is ground once caves
     /// are carved, as the Chunk holding it decides.
-    fn ground_at(&self, at: [i32; 3]) -> bool {
-        self.filled(at) && !self.carved(at)
+    fn ground_at(&self, at: [i32; 3], near: Option<HeldCell>) -> bool {
+        self.filled(at, near) && !self.carved(at, near)
     }
 
     /// Whether the cube pass fills the cell at global Voxel `[gx, y, gz]` with ground before
     /// caves: under the column's surface, or past it where the overhang density pushes it. It
-    /// asks the column and its neighbours rather than their Chunk's whole column cache, since a
-    /// neighbour's Chunk may not be made yet.
-    fn filled(&self, [gx, y, gz]: [i32; 3]) -> bool {
+    /// reads the column and its neighbours from `near` and the caches already held, and asks the
+    /// rest one by one rather than build their Chunk's whole column cache, since a neighbour's
+    /// Chunk may not be made yet.
+    fn filled(&self, [gx, y, gz]: [i32; 3], near: Option<HeldCell>) -> bool {
         let at_m = |gx, gz| [gx, gz].map(|g| self.global_m(g));
         let [x_m, z_m] = at_m(gx, gz);
         let y_m = self.global_m(y);
-        let surface_m = self.surface_height_m(x_m, z_m);
+        let surface_m = self.surface_m(near, [x_m, z_m]);
         let base_m = surface_m - y_m;
         if base_m.abs() > self.terrain.overhang_max_m() {
             return base_m >= 0.0;
@@ -3425,28 +3481,21 @@ impl Worldgen {
         // `overhang_amp_at`, column by column.
         let wettest_m = CARDINALS
             .iter()
-            .map(|&(dx, dz, _)| at_m(gx + dx, gz + dz))
-            .filter(|&[x, z]| {
-                self.water_level_m(x, z)
-                    .is_some_and(|l| l > self.surface_height_m(x, z))
-            })
-            .chain([[x_m, z_m]])
-            .filter_map(|[x, z]| self.water_level_m(x, z))
+            .filter_map(|&(dx, dz, _)| self.wet_m(near, at_m(gx + dx, gz + dz)))
+            .chain(self.level_m(near, [x_m, z_m]))
             .fold(f32::MIN, f32::max);
-        let amp_m = self
-            .terrain
-            .overhang_amp_m(x_m, z_m)
-            .min((surface_m - wettest_m).max(0.0));
         let size = CHUNK_SIZE as i32;
+        let cell = [gx.div_euclid(size), gz.div_euclid(size)];
+        let i = (gz.rem_euclid(size) * size + gx.rem_euclid(size)) as usize;
+        let held_amp_m = match near {
+            Some((s, c)) if c == cell => Some(s.overhang_m[i]),
+            _ => self.held_columns(cell[0], cell[1]).map(|s| s.overhang_m[i]),
+        };
+        let amp_m = held_amp_m
+            .unwrap_or_else(|| self.terrain.overhang_amp_m(x_m, z_m))
+            .min((surface_m - wettest_m).max(0.0));
         // Only a banded cell reads the Structures the density keeps off, which cost the most.
-        if amp_m <= 0.0
-            || base_m.abs() > amp_m
-            || covers(
-                &self.overhang_kept_off([gx.div_euclid(size), gz.div_euclid(size)]),
-                gx,
-                gz,
-            )
-        {
+        if amp_m <= 0.0 || base_m.abs() > amp_m || covers(&self.overhang_kept_off(cell), gx, gz) {
             return base_m >= 0.0;
         }
         base_m + self.terrain.overhang_push_m(x_m, y_m, z_m, amp_m) >= 0.0
@@ -3692,6 +3741,51 @@ mod tests {
         let before = g.column_cache(0, 0);
         g.forget_caches();
         assert!(!Arc::ptr_eq(&before, &g.column_cache(0, 0)));
+    }
+
+    /// A Chunk's seal and `filled` read its own cache, border included, and the caches held round
+    /// it, and answer as a World that holds none answers by asking each column.
+    #[test]
+    fn the_seal_and_filled_read_held_caches_as_asking_answers() {
+        let content = crate::testgen::content();
+        let size = CHUNK_SIZE as i32;
+        let (mut sealed, mut pushed) = (0, 0);
+        for voxel_size in [1.0, 0.5, 0.75] {
+            let asked = content.worldgen(COAST, voxel_size);
+            let held = content.worldgen(COAST, voxel_size);
+            let reach = (asked.terrain.overhang_max_m() / voxel_size).ceil() as i32;
+            // Banks where the overhang density works beside water.
+            for at_m in [[144.0, -336.0], [-112.0, -304.0], [176.0, -304.0]] {
+                let [cx, cz] = at_m.map(|m: f32| (m / voxel_size / size as f32).floor() as i32);
+                // One neighbour held and the rest not, so both a read and an ask are met.
+                held.column_cache(cx + 1, cz);
+                let cache = held.column_cache(cx, cz);
+                let near = Some((&*cache, [cx, cz]));
+                for z in -1..=size {
+                    for x in -1..=size {
+                        let (gx, gz) = (cx * size + x, cz * size + z);
+                        let [x_m, z_m] = [gx, gz].map(|g| asked.global_m(g));
+                        let at = format!("column {gx},{gz} at {voxel_size} m");
+                        let ground_m = asked.surface_height_m(x_m, z_m);
+                        let want = asked.sealed_below_m(x_m, z_m, ground_m, None);
+                        let got = held.sealed_below_m(x_m, z_m, ground_m, near);
+                        assert_eq!(got.to_bits(), want.to_bits(), "{at}");
+                        sealed += usize::from(want.is_finite());
+                        let top = top_index(ground_m, 0.0, voxel_size);
+                        // The border ring and every third column inside, to keep the sweep short.
+                        if (0..size).contains(&x) && (0..size).contains(&z) && (x + z) % 3 != 0 {
+                            continue;
+                        }
+                        for y in top - reach..=top + reach + 1 {
+                            let want = asked.filled([gx, y, gz], None);
+                            assert_eq!(held.filled([gx, y, gz], near), want, "{at}, y {y}");
+                            pushed += usize::from(want != (y <= top));
+                        }
+                    }
+                }
+            }
+        }
+        assert!(sealed > 0 && pushed > 0, "{sealed} sealed, {pushed} pushed");
     }
 
     #[test]
@@ -4854,7 +4948,7 @@ mod tests {
                 }
             }
         }
-        g.smooth(&mut chunk, &surface, [0, 0, 0], 0.0, None);
+        g.smooth(&mut chunk, &surface, None, [0, 0, 0], 0.0, None);
         // A stair's cell has to be in the Chunk, so columns 26 and up have none
         // to place: 26 candidates a row.
         let per_row = CHUNK_SIZE - 6;
