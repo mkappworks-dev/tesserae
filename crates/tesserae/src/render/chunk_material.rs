@@ -183,7 +183,7 @@ impl MaterialExtension for ChunkMaterialExtension {
 /// What `chunk_vertex.wesl` decodes a layer's words by.
 fn quad_layout_defs() -> Vec<ShaderDefVal> {
     use chunk_mesh::{
-        HEADER_LEVEL, HEADER_STRIDE, HEADER_TABLE_LEN, HEADER_WORDS, LIGHT_SHIFT,
+        HEADER_LEVEL, HEADER_QUADS, HEADER_STRIDE, HEADER_TABLE_LEN, HEADER_WORDS, LIGHT_SHIFT,
         VERTICES_PER_QUAD, WIDE,
     };
     use tesserae_core::mesh::layout::*;
@@ -194,6 +194,7 @@ fn quad_layout_defs() -> Vec<ShaderDefVal> {
         uint("HEADER_LEVEL", HEADER_LEVEL),
         uint("HEADER_TABLE_LEN", HEADER_TABLE_LEN),
         uint("HEADER_STRIDE", HEADER_STRIDE),
+        uint("HEADER_QUADS", HEADER_QUADS),
         uint("WIDE_STRIDE", WIDE),
         uint("LIGHT_SHIFT", LIGHT_SHIFT),
         uint("PAINT_SHIFT", PAINT_SHIFT),
@@ -221,7 +222,7 @@ fn quad_layout_defs() -> Vec<ShaderDefVal> {
 }
 
 /// The vertex shader reads the quad buffer, never the mesh, which is a
-/// placeholder from `chunk_mesh::placeholder` for its vertex count. Bevy's
+/// placeholder from `chunk_mesh::placeholder` for its bucket's vertex count. Bevy's
 /// specializer keys pipelines by `buffers[0]`, so the slot stays, empty; a
 /// zero stride, as wgpu wants a multiple of four and the placeholder's is one.
 fn read_no_vertex_attribute(vertex: &mut VertexState) {

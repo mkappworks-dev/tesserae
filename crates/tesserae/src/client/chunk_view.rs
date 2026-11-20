@@ -23,7 +23,7 @@ use tesserae_core::ChunkMesh;
 
 use crate::client::blend_order::{BlendOrder, sort_blended};
 use crate::client::camera::MainCamera;
-use crate::client::chunk_mesh::{ChunkQuads, placeholder};
+use crate::client::chunk_mesh::{ChunkQuads, Placeholders};
 use crate::client::drawn_mask::{self, DrawnMask};
 use crate::client::in_flight::InFlight;
 use crate::render::chunk_material::{ChunkMaterial, ChunkMaterialExtension, LodParams};
@@ -261,7 +261,8 @@ pub(super) fn plugin(app: &mut App) {
 /// drawn for good; and what each level has drawn is published after both.
 fn add_view_systems(app: &mut App) {
     app.init_session_state::<super::material_textures::Textures>()
-        .init_session_state::<Building>();
+        .init_session_state::<Building>()
+        .init_session_state::<Placeholders>();
     app.add_session_systems(
         Update,
         (
@@ -380,13 +381,13 @@ fn debug_tint() -> u32 {
 struct Draw<'a, 'w, 's> {
     commands: &'a mut Commands<'w, 's>,
     meshes: &'a mut Assets<Mesh>,
+    placeholders: &'a mut Placeholders,
     quads: &'a mut QuadBuffer,
     existing: &'a Existing<'a, 'a>,
 }
 
-/// Each layer entity's placeholder and range, which outlive it unless given
-/// back.
-type Existing<'w, 's> = Query<'w, 's, (&'static Mesh3d, &'static ChunkQuads)>;
+/// Each layer entity's range, which outlives it unless given back.
+type Existing<'w, 's> = Query<'w, 's, &'static ChunkQuads>;
 
 impl Draw<'_, '_, '_> {
     /// Brings one layer's entity for `key` in line with `layer`: spawned,
@@ -407,15 +408,15 @@ impl Draw<'_, '_, '_> {
         };
         let (level, coord) = key;
         let drawn = (
-            Mesh3d(self.meshes.add(placeholder(layer.quad_count()))),
+            Mesh3d(self.placeholders.of(self.meshes, layer.quad_count())),
             layer.land(self.quads),
             layer.aabb(),
             layer,
         );
         match entities.get(&key) {
             // Replacing rather than despawning and respawning keeps the
-            // entity id stable, and giving back what the old one held is what
-            // stops a few minutes of flying from leaking every mesh ever sent.
+            // entity id stable, and giving back the old range is what stops a
+            // few minutes of flying from leaking every mesh ever sent.
             Some(&entity) => {
                 self.give_back(entity);
                 self.commands.entity(entity).insert(drawn);
@@ -450,8 +451,7 @@ impl Draw<'_, '_, '_> {
     }
 
     fn give_back(&mut self, entity: Entity) {
-        if let Ok((mesh, quads)) = self.existing.get(entity) {
-            self.meshes.remove(&mesh.0);
+        if let Ok(quads) = self.existing.get(entity) {
             quads.give_back(self.quads);
         }
     }
@@ -468,7 +468,11 @@ fn land_meshes(
     mut commands: Commands,
     mut building: ResMut<Building>,
     mut entities: ResMut<ChunkEntities>,
-    (mut meshes, mut quads): (ResMut<Assets<Mesh>>, ResMut<QuadBuffer>),
+    (mut meshes, mut placeholders, mut quads): (
+        ResMut<Assets<Mesh>>,
+        ResMut<Placeholders>,
+        ResMut<QuadBuffer>,
+    ),
     material: Res<TerrainMaterial>,
     world: Res<WorldSettings>,
     existing: Existing,
@@ -484,6 +488,7 @@ fn land_meshes(
     let mut draw = Draw {
         commands: &mut commands,
         meshes: &mut meshes,
+        placeholders: &mut placeholders,
         quads: &mut quads,
         existing: &existing,
     };
@@ -620,7 +625,11 @@ fn drop_meshes(
 fn release(
     mut commands: Commands,
     mut entities: ResMut<ChunkEntities>,
-    (mut meshes, mut quads): (ResMut<Assets<Mesh>>, ResMut<QuadBuffer>),
+    (mut meshes, mut placeholders, mut quads): (
+        ResMut<Assets<Mesh>>,
+        ResMut<Placeholders>,
+        ResMut<QuadBuffer>,
+    ),
     existing: Existing,
     streaming: Res<StreamingSettings>,
     world: Res<WorldSettings>,
@@ -661,6 +670,7 @@ fn release(
     let mut draw = Draw {
         commands: &mut commands,
         meshes: &mut meshes,
+        placeholders: &mut placeholders,
         quads: &mut quads,
         existing: &existing,
     };
@@ -1453,7 +1463,7 @@ mod tests {
         assert_eq!(drawn(&mut app), 5, "nothing covers them yet");
         put_eye(&mut app, FAR_M);
         assert_eq!(drawn(&mut app), 0);
-        assert_eq!(app.world().resource::<Assets<Mesh>>().len(), 0);
+        assert_eq!(app.world().resource::<QuadBuffer>().used(), 0);
         assert!(app.world().resource::<ChunkEntities>().retained.is_empty());
     }
 
@@ -1681,7 +1691,7 @@ mod tests {
         }
         assert_eq!(entity_for(&app, coord), None);
         assert!(!mask_has(&app, 0, coord));
-        assert_eq!(app.world().resource::<Assets<Mesh>>().len(), 0);
+        assert_eq!(app.world().resource::<QuadBuffer>().used(), 0);
     }
 
     fn entity_at(app: &App, level: u32, coord: ChunkCoord) -> Option<Entity> {
@@ -1704,6 +1714,11 @@ mod tests {
         entity_at(app, 0, coord)
     }
 
+    /// The words `entity`'s range holds in the quad buffer.
+    fn held(app: &App, entity: Entity) -> u32 {
+        app.world().get::<ChunkQuads>(entity).unwrap().words().len() as u32
+    }
+
     fn queued(app: &App) -> usize {
         app.world().resource::<QuadBuffer>().queued()
     }
@@ -1716,23 +1731,34 @@ mod tests {
     }
 
     /// What the shader draws for `entity`, read from the quad buffer as the
-    /// GPU would hold it, through the placeholder's vertices and indices.
+    /// GPU would hold it, through its bucket's vertices and indices, the
+    /// padding left out.
     fn decoded(app: &App, entity: Entity) -> Soup {
         let world = app.world();
         let tag = world.get::<MeshTag>(entity).expect("a Chunk layer").value;
         let buffer = &world.resource::<QuadBuffer>().mirror;
         let handle = &world.get::<Mesh3d>(entity).unwrap().0;
         let mesh = world.resource::<Assets<Mesh>>().get(handle).unwrap();
+        let vertices: Vec<_> = (0..mesh.count_vertices() as u32)
+            .map(|vertex| expand(buffer, tag, vertex))
+            .collect();
+        let drawn = vertices.iter().take_while(|v| v.is_some()).count();
+        assert!(vertices[drawn..].iter().all(Option::is_none));
         let mut soup = Soup::default();
-        for vertex in 0..mesh.count_vertices() as u32 {
-            let expanded = expand(buffer, tag, vertex);
+        for expanded in vertices.into_iter().flatten() {
             soup.positions.push(expanded.corner.position);
             soup.normals.push(expanded.corner.normal);
             soup.uvs.push(expanded.corner.uv);
             soup.materials.push(expanded.material);
             soup.light.push(expanded.light);
         }
-        soup.indices = mesh.indices().unwrap().iter().map(|i| i as u32).collect();
+        soup.indices = mesh
+            .indices()
+            .unwrap()
+            .iter()
+            .take_while(|&i| i < drawn)
+            .map(|i| i as u32)
+            .collect();
         soup
     }
 
@@ -2252,18 +2278,14 @@ mod tests {
         let mut app = app();
         let coord = ChunkCoord::new(0, 0, 0);
         send_mesh(&mut app, coord, both_layers());
-        let blended = blended_at(&app, 0, coord).unwrap();
-        let handle = app.world().get::<Mesh3d>(blended).unwrap().0.clone();
 
         send_mesh(&mut app, coord, geometry());
         assert_eq!(blended_at(&app, 0, coord), None);
         assert_eq!(drawn(&mut app), 1, "only the opaque entity is left");
-        assert!(
-            app.world()
-                .resource::<Assets<Mesh>>()
-                .get(&handle)
-                .is_none(),
-            "the dropped layer's Mesh asset is still loaded"
+        assert_eq!(
+            app.world().resource::<QuadBuffer>().used(),
+            held(&app, entity_for(&app, coord).unwrap()),
+            "the dropped layer's range is given back"
         );
 
         send_mesh(&mut app, coord, both_layers());
@@ -2276,14 +2298,37 @@ mod tests {
     }
 
     #[test]
-    fn unloading_removes_both_entities_and_both_assets() {
+    fn layers_in_one_bucket_share_one_placeholder_for_the_session() {
         let mut app = app();
         put_eye(&mut app, FAR_M);
         let coord = ChunkCoord::new(0, 0, 0);
         send_mesh(&mut app, coord, both_layers());
         send_coarse(&mut app, 1, coord, both_layers());
-        let before = app.world().resource::<Assets<Mesh>>().len();
-        assert_eq!(before, 4);
+        send_mesh(&mut app, ChunkCoord::new(1, 0, 0), geometry());
+        let world = app.world();
+        // One quad each, every level and layer.
+        let placeholders = [
+            entity_for(&app, coord),
+            entity_at(&app, 1, coord),
+            entity_for(&app, ChunkCoord::new(1, 0, 0)),
+            blended_at(&app, 0, coord),
+        ]
+        .map(|e| world.get::<Mesh3d>(e.unwrap()).unwrap().0.clone());
+        assert!(placeholders.iter().all(|h| *h == placeholders[0]));
+        assert_eq!(world.resource::<Assets<Mesh>>().len(), 1);
+
+        app.world_mut().write_message(ChunkUnloaded { coord });
+        app.update();
+        assert_eq!(app.world().resource::<Assets<Mesh>>().len(), 1);
+    }
+
+    #[test]
+    fn unloading_removes_both_entities_and_gives_back_both_ranges() {
+        let mut app = app();
+        put_eye(&mut app, FAR_M);
+        let coord = ChunkCoord::new(0, 0, 0);
+        send_mesh(&mut app, coord, both_layers());
+        send_coarse(&mut app, 1, coord, both_layers());
 
         app.world_mut().write_message(ChunkUnloaded { coord });
         app.world_mut()
@@ -2291,7 +2336,6 @@ mod tests {
         app.update();
 
         assert_eq!(drawn(&mut app), 0);
-        assert_eq!(app.world().resource::<Assets<Mesh>>().len(), 0);
         assert_eq!(
             app.world().resource::<QuadBuffer>().used(),
             0,
@@ -2377,7 +2421,7 @@ mod tests {
     }
 
     #[test]
-    fn a_second_mesh_replaces_the_first_and_drops_its_asset() {
+    fn a_second_mesh_replaces_the_first_and_gives_back_its_range() {
         let mut app = app();
         let coord = ChunkCoord::new(0, 0, 0);
         send_mesh(&mut app, coord, geometry());
@@ -2390,17 +2434,13 @@ mod tests {
         assert_eq!(drawn(&mut app), 1, "spawned a second entity");
 
         let second = app.world().get::<Mesh3d>(entity).unwrap().0.clone();
-        assert_ne!(second, first, "the mesh was not replaced");
+        assert_eq!(second, first, "the bucket's placeholder");
         // The leak this guards: a few minutes of flying re-meshes the same
         // Chunk many times over.
-        assert!(
-            app.world().resource::<Assets<Mesh>>().get(&first).is_none(),
-            "the superseded Mesh asset is still loaded"
-        );
-        let held = app.world().get::<ChunkQuads>(entity).unwrap().words().len();
+        assert_eq!(app.world().resource::<Assets<Mesh>>().len(), 1);
         assert_eq!(
-            app.world().resource::<QuadBuffer>().used() as usize,
-            held,
+            app.world().resource::<QuadBuffer>().used(),
+            held(&app, entity),
             "the superseded range is given back"
         );
         assert_eq!(
@@ -2411,20 +2451,19 @@ mod tests {
     }
 
     #[test]
-    fn a_second_coarse_mesh_replaces_the_first_and_drops_its_asset() {
+    fn a_second_coarse_mesh_replaces_the_first_and_gives_back_its_range() {
         let mut app = app();
         let coord = ChunkCoord::new(4, 0, 1);
         send_coarse(&mut app, 1, coord, geometry());
         let entity = entity_at(&app, 1, coord).unwrap();
-        let first = app.world().get::<Mesh3d>(entity).unwrap().0.clone();
 
         send_coarse(&mut app, 1, coord, geometry());
 
         assert_eq!(entity_at(&app, 1, coord), Some(entity));
         assert_eq!(drawn(&mut app), 1);
-        assert!(
-            app.world().resource::<Assets<Mesh>>().get(&first).is_none(),
-            "the superseded coarse Mesh asset is still loaded"
+        assert_eq!(
+            app.world().resource::<QuadBuffer>().used(),
+            held(&app, entity)
         );
     }
 
@@ -2447,12 +2486,6 @@ mod tests {
         send_mesh(&mut app, coord, geometry());
         send_coarse(&mut app, 1, coord, geometry());
         send_coarse(&mut app, 2, coord, geometry());
-        let handle = app
-            .world()
-            .get::<Mesh3d>(entity_at(&app, 1, coord).unwrap())
-            .unwrap()
-            .0
-            .clone();
 
         send_coarse(&mut app, 1, coord, tesserae_core::ChunkMesh::default());
 
@@ -2460,11 +2493,10 @@ mod tests {
         assert!(entity_at(&app, 2, coord).is_some());
         assert!(entity_for(&app, coord).is_some());
         assert_eq!(drawn(&mut app), 2);
-        assert!(
-            app.world()
-                .resource::<Assets<Mesh>>()
-                .get(&handle)
-                .is_none()
+        assert_eq!(
+            app.world().resource::<QuadBuffer>().used(),
+            held(&app, entity_at(&app, 2, coord).unwrap())
+                + held(&app, entity_for(&app, coord).unwrap())
         );
     }
 
@@ -2486,29 +2518,18 @@ mod tests {
     }
 
     #[test]
-    fn unloading_despawns_and_frees_the_mesh() {
+    fn unloading_despawns_and_frees_the_range() {
         let mut app = app();
         put_eye(&mut app, FAR_M);
         let coord = ChunkCoord::new(-3, 1, 4);
         send_mesh(&mut app, coord, geometry());
-        let handle = app
-            .world()
-            .get::<Mesh3d>(entity_for(&app, coord).unwrap())
-            .unwrap()
-            .0
-            .clone();
 
         app.world_mut().write_message(ChunkUnloaded { coord });
         app.update();
 
         assert_eq!(entity_for(&app, coord), None);
         assert_eq!(drawn(&mut app), 0);
-        assert!(
-            app.world()
-                .resource::<Assets<Mesh>>()
-                .get(&handle)
-                .is_none()
-        );
+        assert_eq!(app.world().resource::<QuadBuffer>().used(), 0);
     }
 
     #[test]
@@ -2518,12 +2539,6 @@ mod tests {
         let coord = ChunkCoord::new(-3, 1, 4);
         send_mesh(&mut app, coord, geometry());
         send_coarse(&mut app, 1, coord, geometry());
-        let handle = app
-            .world()
-            .get::<Mesh3d>(entity_at(&app, 1, coord).unwrap())
-            .unwrap()
-            .0
-            .clone();
 
         app.world_mut()
             .write_message(LodUnloaded { level: 1, coord });
@@ -2532,11 +2547,9 @@ mod tests {
         assert_eq!(entity_at(&app, 1, coord), None);
         assert!(entity_for(&app, coord).is_some());
         assert_eq!(drawn(&mut app), 1);
-        assert!(
-            app.world()
-                .resource::<Assets<Mesh>>()
-                .get(&handle)
-                .is_none()
+        assert_eq!(
+            app.world().resource::<QuadBuffer>().used(),
+            held(&app, entity_for(&app, coord).unwrap())
         );
     }
 
