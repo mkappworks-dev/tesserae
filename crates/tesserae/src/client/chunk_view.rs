@@ -276,6 +276,10 @@ fn add_view_systems(app: &mut App) {
         )
             .chain(),
     );
+    app.add_session_systems(
+        PostUpdate,
+        drop_cutout_from_far_cascades.after(bevy::light::check_dir_light_mesh_visibility),
+    );
 }
 
 fn update_textures(
@@ -375,6 +379,37 @@ fn debug_tint() -> u32 {
     0
 }
 
+/// Which of the sun's cascades a layer casts into.
+#[derive(Clone, Copy)]
+enum Casts {
+    Nowhere,
+    /// The one caster whose shadow pass runs a fragment shader, its alpha
+    /// test, so it is paid for only where a shadow is seen up close.
+    NearCascades,
+    Everywhere,
+}
+
+/// Cascades from this index on are far: at Bevy's default bounds, from 25 m.
+const FIRST_FAR_CASCADE: usize = 2;
+
+#[derive(Component)]
+struct NearCascadesOnly;
+
+fn drop_cutout_from_far_cascades(
+    mut suns: Query<&mut bevy::camera::visibility::CascadesVisibleEntities>,
+    near_only: Query<(), With<NearCascadesOnly>>,
+) {
+    for mut sun in &mut suns {
+        for cascades in sun.entities.values_mut() {
+            for cascade in cascades.iter_mut().skip(FIRST_FAR_CASCADE) {
+                cascade
+                    .entities
+                    .retain(|&entity| !near_only.contains(entity));
+            }
+        }
+    }
+}
+
 /// What `land_meshes` and `release` share: the pieces of a Client frame
 /// that spawn, replace and despawn a Chunk's entities.
 struct Draw<'a, 'w, 's> {
@@ -399,7 +434,7 @@ impl Draw<'_, '_, '_> {
         layer: Option<ChunkQuads>,
         key: (u32, ChunkCoord),
         world: &WorldSettings,
-        casts_shadows: bool,
+        casts: Casts,
     ) -> Option<Entity> {
         let Some(mut layer) = layer else {
             self.hide(entities, key);
@@ -432,8 +467,14 @@ impl Draw<'_, '_, '_> {
                     coord,
                     layer_of(level),
                 ));
-                if !casts_shadows {
-                    entity.insert(NotShadowCaster);
+                match casts {
+                    Casts::Nowhere => {
+                        entity.insert(NotShadowCaster);
+                    }
+                    Casts::NearCascades => {
+                        entity.insert(NearCascadesOnly);
+                    }
+                    Casts::Everywhere => {}
                 }
                 entities.insert(key, entity.id());
                 Some(entity.id())
@@ -498,7 +539,7 @@ fn land_meshes(
             built.opaque,
             key,
             &world,
-            true,
+            Casts::Everywhere,
         );
         let blended = draw.show(
             &mut entities.blended,
@@ -508,7 +549,7 @@ fn land_meshes(
             &world,
             // The flood-fill already dims sky light under water and glass, so
             // a shadow map treating them as solid would count it twice.
-            false,
+            Casts::Nowhere,
         );
         let cutout = draw.show(
             &mut entities.cutout,
@@ -516,7 +557,7 @@ fn land_meshes(
             built.cutout,
             key,
             &world,
-            true,
+            Casts::NearCascades,
         );
         if let Some(entity) = blended {
             match built.order {
@@ -2217,6 +2258,70 @@ mod tests {
         app.world_mut().write_message(ChunkUnloaded { coord });
         app.update();
         assert_eq!(drawn(&mut app), 0);
+    }
+
+    /// Bevy's caster check under a sun whose four cascades each take in the
+    /// whole test World, so only an edit to the lists can leave a caster out.
+    /// The view the cascades belong to.
+    fn sun_over_everything(app: &mut App) -> Entity {
+        use bevy::camera::primitives::{CascadesFrusta, Frustum};
+        let everything = Frustum(bevy::shape::ViewFrustum::from_clip_from_world(
+            &Mat4::from_scale(Vec3::splat(1e-4)),
+        ));
+        let view = app.world_mut().spawn_empty().id();
+        app.world_mut().spawn((
+            DirectionalLight {
+                shadow_maps_enabled: true,
+                ..default()
+            },
+            CascadesFrusta {
+                frusta: [(view, vec![everything; 4])].into_iter().collect(),
+            },
+            ViewVisibility::VISIBLE,
+            RenderLayers::layer(NEAR_LAYER),
+        ));
+        app.add_systems(PostUpdate, bevy::light::check_dir_light_mesh_visibility);
+        // No visibility plugin runs here to propagate it.
+        let meshes: Vec<Entity> = app
+            .world_mut()
+            .query_filtered::<Entity, With<Mesh3d>>()
+            .iter(app.world())
+            .collect();
+        for entity in meshes {
+            app.world_mut()
+                .entity_mut(entity)
+                .insert(InheritedVisibility::VISIBLE);
+        }
+        view
+    }
+
+    fn cascades_of(app: &mut App, view: Entity) -> Vec<Vec<Entity>> {
+        let mut suns = app
+            .world_mut()
+            .query::<&bevy::camera::visibility::CascadesVisibleEntities>();
+        suns.single(app.world()).unwrap().entities[&view]
+            .iter()
+            .map(|cascade| cascade.entities.clone())
+            .collect()
+    }
+
+    #[test]
+    fn leaves_cast_in_the_two_near_cascades_only_and_ground_in_all_four() {
+        let mut app = app();
+        let (leafy, bare) = (ChunkCoord::new(0, 0, 0), ChunkCoord::new(1, 0, 0));
+        send_mesh(&mut app, leafy, leaves());
+        send_mesh(&mut app, bare, geometry());
+        let canopy = cutout_at(&app, 0, leafy).expect("a cutout entity");
+        let ground = entity_at(&app, 0, bare).expect("an opaque entity");
+        let view = sun_over_everything(&mut app);
+        app.update();
+
+        let cascades = cascades_of(&mut app, view);
+        assert_eq!(cascades.len(), 4);
+        for (i, cascade) in cascades.iter().enumerate() {
+            assert!(cascade.contains(&ground), "ground in cascade {i}");
+            assert_eq!(cascade.contains(&canopy), i < 2, "leaves in cascade {i}");
+        }
     }
 
     #[test]
