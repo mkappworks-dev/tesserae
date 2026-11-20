@@ -12,6 +12,22 @@ First a count: level-1 regenerations and meshes per second in `flight`, by cause
 
 ## Acceptance criteria
 
-- [ ] The count in Comments.
+- [x] The count in Comments.
 - [ ] If built: a streaming test that a fluid change under level 0 queues no level-1 work, and that the level-1 Chunk matches level 0 once one child leaves level 0's ring.
 - [ ] If built: the holes instrument reports no more holes than 01's figures.
+
+## Comments
+
+### The count, 2026-11-20
+
+Level-1 work by cause (the counter's "edit" is every change but a fluid's: an Edit, a Mod's Command, an undo, a Plant):
+
+| Fixture | Generations: first / fluid / edit / reload | Meshes: first / fluid / edit |
+| --- | --- | --- |
+| `flight` | 330 / 0 / 676 / 34 | 157 / 0 / 4301 |
+| `sprint-flight` | 1650 / 0 / 424 / 139 | 770 / 0 / 2799 |
+| `teleport` | 1639 / 0 / 390 / 0 | 564 / 0 / 2381 |
+
+Fluids cause none, so the ticket as written fails its gate. Other changes under level 0 cause 93% of level-1 meshes in `flight` (66% at 64 m/s, 81% after a teleport) and 65% of its generations: the mechanism the ticket describes, from a different cause. Put to the user whether the ticket covers every change under level 0.
+
+One `scripts/profile-frames --fixtures flight sprint-flight teleport --repeats 3` series of dec13212 (the counters on fded14c8's successors: the sister spec's 01 to 05 and this spec's 01, 02, 04 and 07), 11:51 to 12:01, `uptime` load 9.86 falling to 5.52; medians of the three logging-on runs per fixture, counted from the World's opening.
