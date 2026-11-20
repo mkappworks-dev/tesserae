@@ -117,7 +117,7 @@ wrong as written and three questions had been missed.
 - PR 7 merged as #30 (`446e984`) and this branch was rebased onto it. Round 1
   Q12 and round 3 Q4 resolve: the baseline uses `main`'s demo, pinned by hash,
   and ticket 04 is no longer blocked.
-- The primary-source research landed ([research.md](research.md)). It confirms
+- The primary-source research landed. It confirms
   the coverage rule (Voxy, Distant Horizons) and the score's shape (Sodium,
   Luanti), and raised two questions, both accepted:
   - Q1. Ticket 08 stays at 16 B a vertex inside Bevy's mesh path. Per-quad

@@ -467,58 +467,17 @@ fn title(main: &mut ChildSpawnerCommands, l: &Launcher, installed: &Installed) -
     focus
 }
 
-/// The Opening card, where the Menu's panel sits, until the loader takes over.
 fn opening(main: &mut ChildSpawnerCommands, name: &str) {
-    main.spawn(Node {
-        flex_grow: 1.0,
-        align_items: AlignItems::Center,
-        padding: UiRect::horizontal(Val::Vw(5.0)),
-        ..default()
-    })
-    .with_children(|screen| {
-        screen
-            .spawn((
-                cine::surface(theme::panel()),
-                cine::framed(Node {
-                    width: Val::Px(300.0),
-                    padding: UiRect::all(Val::Px(25.0)),
-                    flex_direction: FlexDirection::Column,
-                    ..default()
-                }),
-            ))
-            .with_children(|card| {
-                card.spawn((
-                    Text::new(format!("Opening {name}\u{2026}")),
-                    theme::weighted(theme::TEXT_PANEL_TITLE, theme::BOOK),
-                    bevy::text::LineHeight::RelativeToFont(1.2),
-                    TextColor(theme::INK),
-                    Node {
-                        margin: UiRect::new(
-                            Val::Px(0.0),
-                            Val::Px(0.0),
-                            Val::Px(10.0),
-                            Val::Px(6.0),
-                        ),
-                        ..default()
-                    },
-                    Pickable::IGNORE,
-                ));
-                ui::paragraph(
-                    card,
-                    "Loading the World.",
-                    theme::TEXT_SMALL,
-                    theme::muted(),
-                );
-                card.spawn((
-                    BackgroundColor(theme::RAISED),
-                    Node {
-                        height: Val::Px(4.0),
-                        margin: UiRect::top(Val::Px(18.0)),
-                        border_radius: BorderRadius::all(Val::Px(2.0)),
-                        ..default()
-                    },
-                ));
-            });
+    super::super::loading::opening(main, name, (), |card| {
+        card.spawn((
+            BackgroundColor(theme::RAISED),
+            Node {
+                height: Val::Px(4.0),
+                margin: UiRect::top(Val::Px(18.0)),
+                border_radius: BorderRadius::all(Val::Px(2.0)),
+                ..default()
+            },
+        ));
     });
 }
 

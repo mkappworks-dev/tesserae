@@ -5,7 +5,7 @@ use tesserae_core::shape::{NodeBox, examples};
 use tesserae_core::testgen::fixtures;
 use tesserae_core::{
     CHUNK_SIZE, Chunk, ChunkLight, ConnectDef, Connections, LitChunk, Neighborhood, SeamOpenings,
-    Voxel, greedy_mesh, mesh_chunk, mesh_chunk_with_seams, testgen,
+    Voxel, emits_no_faces, greedy_mesh, mesh_chunk, mesh_chunk_with_seams, testgen,
 };
 use tesserae_core::{
     Orientation, SHAPE_POST, SHAPE_SLAB, SHAPE_STAIR, ShapeTable, Tables, Worldgen,
@@ -786,6 +786,32 @@ fn light_does_not_revive_either_declined_case() {
     let neighbors: [Option<LitChunk>; 6] = [Some(LitChunk::new(&solid, &lumpy)); 6];
     assert!(mesh_chunk(LitChunk::new(&air, &lumpy), neighbors, tables()).is_empty());
     assert!(mesh_chunk(LitChunk::new(&solid, &lumpy), neighbors, tables()).is_empty());
+}
+
+/// The same two cases, asked before any light exists, and the near misses that
+/// do draw something.
+#[test]
+fn a_chunk_is_faceless_in_exactly_the_two_declined_cases() {
+    let materials = &tables().materials;
+    let air = Chunk::air();
+    let solid = Chunk::filled(Voxel::cube(fixtures().ground.rock));
+    let leaves = Chunk::filled(Voxel::cube(fixtures().leaves));
+    let dry = tesserae_core::ChunkOverlay::none();
+    let mut wet = tesserae_core::ChunkOverlay::none();
+    wet.set(4, 4, 4, soaked(tesserae_core::Fluid::source(water())));
+    let all = |c| [Some(c); 6];
+    let mut one_unknown = all(&solid);
+    one_unknown[POS_Y] = None;
+
+    assert!(emits_no_faces(&air, &dry, [None; 6], materials));
+    assert!(emits_no_faces(&solid, &dry, all(&solid), materials));
+
+    assert!(!emits_no_faces(&air, &wet, all(&air), materials));
+    assert!(!emits_no_faces(&solid, &wet, all(&solid), materials));
+    assert!(!emits_no_faces(&solid, &dry, one_unknown, materials));
+    assert!(!emits_no_faces(&solid, &dry, all(&air), materials));
+    assert!(!emits_no_faces(&leaves, &dry, all(&leaves), materials));
+    assert!(!emits_no_faces(&floor(), &dry, all(&solid), materials));
 }
 
 /// The mesher bakes whatever light it is handed, so it must not quietly reject

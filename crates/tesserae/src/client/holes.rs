@@ -119,7 +119,7 @@ impl Default for Counting {
     }
 }
 
-type PlayerCamera = (
+pub(super) type PlayerCamera = (
     &'static GlobalTransform,
     &'static Projection,
     &'static FlyCamera,
@@ -151,24 +151,9 @@ fn count(
         levels,
         cell_m: world.cell_size(),
     };
-    let far_m = streaming.lod_distance_m.max(streaming.view_distance_m) + world.cell_size();
-    let clip_from_world = projection.get_clip_from_view() * transform.to_matrix().inverse();
-    let frustum = Frustum(ViewFrustum::from_clip_from_world_custom_far(
-        &clip_from_world,
-        &transform.translation(),
-        &transform.back(),
-        far_m,
-    ));
+    let frustum = frustum(transform, projection, &streaming, &world);
     for level in 0..levels {
-        let rings = LevelRings::new(*streaming, world.cell_size(), level);
-        let anchor = world.chunk_at_level(fly.eye, level);
-        let cell_m = view.cell_m(level);
-        for d in rings.mesh.offsets() {
-            let coord = ChunkCoord::new(anchor.x + d.x, anchor.y + d.y, anchor.z + d.z);
-            let min = IVec3::new(coord.x, coord.y, coord.z).as_vec3() * cell_m;
-            if !frustum.intersects_obb_identity(&Aabb::from_min_max(min, min + cell_m)) {
-                continue;
-            }
+        for coord in in_view(&frustum, &streaming, &world, fly.eye, level) {
             match view.classify(level, coord) {
                 Cover::Drawn => {}
                 Cover::Rule => holes.rule[level as usize] += 1,
@@ -176,6 +161,43 @@ fn count(
             }
         }
     }
+}
+
+/// The Player camera's frustum, out past every level's reach.
+pub(super) fn frustum(
+    transform: &GlobalTransform,
+    projection: &Projection,
+    streaming: &StreamingSettings,
+    world: &WorldSettings,
+) -> Frustum {
+    let far_m = streaming.lod_distance_m.max(streaming.view_distance_m) + world.cell_size();
+    let clip_from_world = projection.get_clip_from_view() * transform.to_matrix().inverse();
+    Frustum(ViewFrustum::from_clip_from_world_custom_far(
+        &clip_from_world,
+        &transform.translation(),
+        &transform.back(),
+        far_m,
+    ))
+}
+
+/// The Cells of a level's mesh shell around the Eye that the frustum touches.
+pub(super) fn in_view(
+    frustum: &Frustum,
+    streaming: &StreamingSettings,
+    world: &WorldSettings,
+    eye: Vec3,
+    level: u32,
+) -> impl Iterator<Item = ChunkCoord> {
+    let rings = LevelRings::new(*streaming, world.cell_size(), level);
+    let anchor = world.chunk_at_level(eye, level);
+    let cell_m = world.cell_size_at(level);
+    rings.mesh.offsets().into_iter().filter_map(move |d| {
+        let coord = ChunkCoord::new(anchor.x + d.x, anchor.y + d.y, anchor.z + d.z);
+        let min = IVec3::new(coord.x, coord.y, coord.z).as_vec3() * cell_m;
+        frustum
+            .intersects_obb_identity(&Aabb::from_min_max(min, min + cell_m))
+            .then_some(coord)
+    })
 }
 
 #[cfg(test)]

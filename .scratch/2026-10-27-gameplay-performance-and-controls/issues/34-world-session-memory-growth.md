@@ -37,8 +37,7 @@ plateau from a leak before any fix.
 
 ### Measured and triaged 2026-10-31
 
-Numbers, method, scripts:
-[issue-34/research.md](../issue-34/research.md).
+The numbers, method and scripts are kept outside the repository.
 Nothing was fixed; instrumentation is saved as a patch and reverted.
 
 - Reproduced on `feat/world-session-memory`: RSS cycle 2 to 10 rose 2.7%,

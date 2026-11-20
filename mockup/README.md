@@ -13,9 +13,6 @@ Drafts, created Worlds and preferences survive reload in this browser tab
 through session storage. They are not real game saves. Clear this site's session
 storage or open a fresh browser session to reset the samples.
 
-Read [menu-research.md](menu-research.md) for sources, decisions and measured
-contrast samples.
-
 New biome names, the expanded Terra set and other Games' names are design
 proposals. Material pickers, package availability and dependencies are
 illustrative. The three original Terra climate points, cave values and colours

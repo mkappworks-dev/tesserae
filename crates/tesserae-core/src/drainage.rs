@@ -107,7 +107,7 @@ pub(crate) struct Drainage {
     sea_m: f32,
     /// This solve's lattice spacing: [`NODE_M`], or [`COARSE_NODE_M`] for the coarse one.
     node_m: f32,
-    base: Arc<dyn Fn(f32, f32) -> f32 + Send + Sync>,
+    base: Arc<BaseRow>,
     cache: RwLock<HashMap<[i32; 2], Arc<Region>>>,
     /// A solve on a coarser lattice over a wider window, whose large lakes set the level at the
     /// edge of this one's windows. Without it a lake wider than a window is filled to whatever
@@ -117,6 +117,9 @@ pub(crate) struct Drainage {
 
 /// The coarse solve's spacing: its region is 8 km and its halo 4 km.
 const COARSE_NODE_M: f32 = NODE_M * 4.0;
+
+/// The base ground at four points, as a window's rows ask for it.
+type BaseRow = dyn Fn([f32; 4], [f32; 4]) -> [f32; 4] + Send + Sync;
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
@@ -134,15 +137,18 @@ fn sortable(f: f32) -> u32 {
 }
 
 impl Drainage {
-    pub(crate) fn new(sea_m: f32, base: impl Fn(f32, f32) -> f32 + Send + Sync + 'static) -> Self {
-        let base: Arc<dyn Fn(f32, f32) -> f32 + Send + Sync> = Arc::new(base);
+    pub(crate) fn new(
+        sea_m: f32,
+        base: impl Fn([f32; 4], [f32; 4]) -> [f32; 4] + Send + Sync + 'static,
+    ) -> Self {
+        let base: Arc<BaseRow> = Arc::new(base);
         Drainage {
             coarse: Some(Box::new(Self::lattice(sea_m, COARSE_NODE_M, base.clone()))),
             ..Self::lattice(sea_m, NODE_M, base)
         }
     }
 
-    fn lattice(sea_m: f32, node_m: f32, base: Arc<dyn Fn(f32, f32) -> f32 + Send + Sync>) -> Self {
+    fn lattice(sea_m: f32, node_m: f32, base: Arc<BaseRow>) -> Self {
         Drainage {
             id: NEXT_ID.fetch_add(1, Ordering::Relaxed),
             sea_m,
@@ -212,12 +218,15 @@ impl Drainage {
         let idx = |i: i32, j: i32| (j * WINDOW + i) as usize;
         let size = (WINDOW * WINDOW) as usize;
         let mut height = vec![0.0f32; size];
+        const { assert!(WINDOW % 4 == 0) };
         for j in 0..WINDOW {
-            for i in 0..WINDOW {
-                height[idx(i, j)] = (self.base)(
-                    (origin[0] + i) as f32 * self.node_m,
-                    (origin[1] + j) as f32 * self.node_m,
+            for i in (0..WINDOW).step_by(4) {
+                let row = (self.base)(
+                    std::array::from_fn(|k| (origin[0] + i + k as i32) as f32 * self.node_m),
+                    [(origin[1] + j) as f32 * self.node_m; 4],
                 );
+                let at = idx(i, j);
+                height[at..at + 4].copy_from_slice(&row);
             }
         }
         let mut level = vec![f32::NAN; size];
@@ -416,10 +425,18 @@ mod tests {
 
     /// Hills and a sea in one corner, so water has somewhere to go.
     fn drainage() -> Drainage {
-        Drainage::new(SEA_M, |x, z| {
-            let n = crate::noise::fbm2(x / 900.0, z / 900.0, 7, 4);
-            SEA_M - 30.0 + n * 140.0 - (x + z).max(0.0) * 0.004
-        })
+        Drainage::new(
+            SEA_M,
+            each(|x, z| {
+                let n = crate::noise::fbm2(x / 900.0, z / 900.0, 7, 4);
+                SEA_M - 30.0 + n * 140.0 - (x + z).max(0.0) * 0.004
+            }),
+        )
+    }
+
+    /// A ground of one point at a time, asked four at a time.
+    fn each(f: impl Fn(f32, f32) -> f32) -> impl Fn([f32; 4], [f32; 4]) -> [f32; 4] {
+        move |x, z| std::array::from_fn(|k| f(x[k], z[k]))
     }
 
     fn region_nodes(d: &Drainage, key: [i32; 2]) -> Vec<(i32, i32, Node)> {
@@ -523,17 +540,20 @@ mod tests {
     /// A bowl 5 km across, centred on the border between regions `[0, 0]` and `[1, 0]`, whose
     /// one low notch is inside the first region's window and outside the second's.
     fn bowl() -> Drainage {
-        Drainage::new(SEA_M, |x, z| {
-            let (dx, dz) = (x - 2048.0, z - 1024.0);
-            let r = (dx * dx + dz * dz).sqrt();
-            let notch = dx < 0.0 && dz.abs() < 200.0;
-            match r {
-                r if r < 2400.0 => SEA_M + 16.0 + r / 2400.0 * 5.0,
-                r if notch => SEA_M + 26.0 - (r - 2400.0) * 0.01,
-                r if r < 2700.0 => SEA_M + 56.0,
-                r => SEA_M + 56.0 - (r - 2700.0) * 0.01,
-            }
-        })
+        Drainage::new(
+            SEA_M,
+            each(|x, z| {
+                let (dx, dz) = (x - 2048.0, z - 1024.0);
+                let r = (dx * dx + dz * dz).sqrt();
+                let notch = dx < 0.0 && dz.abs() < 200.0;
+                match r {
+                    r if r < 2400.0 => SEA_M + 16.0 + r / 2400.0 * 5.0,
+                    r if notch => SEA_M + 26.0 - (r - 2400.0) * 0.01,
+                    r if r < 2700.0 => SEA_M + 56.0,
+                    r => SEA_M + 56.0 - (r - 2700.0) * 0.01,
+                }
+            }),
+        )
     }
 
     #[test]
@@ -577,5 +597,39 @@ mod tests {
             same * 100 >= total * 95,
             "{same} of {total} border nodes agree"
         );
+    }
+
+    #[test]
+    fn the_water_level_is_the_same_whatever_ground_is_asked_about() {
+        let d = drainage();
+        let grounds = [
+            f32::MIN,
+            -1e4,
+            SEA_M - 30.0,
+            SEA_M,
+            SEA_M + 12.0,
+            400.0,
+            1e6,
+        ];
+        let (mut wet, mut cut) = (0, 0);
+        // Across the four regions round the origin, and their borders.
+        for j in -160..160 {
+            for i in -160..160 {
+                let h = crate::noise::cell_hash(i, j, 0x3e7);
+                let (x, z) = ((i as f32 + h[0]) * 12.8, (j as f32 + h[1]) * 12.8);
+                let want = d.wet(x, z, f32::MIN).level_m.map(f32::to_bits);
+                wet += usize::from(want.is_some());
+                for ground_m in grounds {
+                    let w = d.wet(x, z, ground_m);
+                    assert_eq!(
+                        w.level_m.map(f32::to_bits),
+                        want,
+                        "{x},{z} under {ground_m}"
+                    );
+                    cut += usize::from(w.cut_m > 0.0);
+                }
+            }
+        }
+        assert!(wet > 1000 && cut > 1000, "{wet} wet points, {cut} cuts");
     }
 }

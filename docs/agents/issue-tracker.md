@@ -21,6 +21,10 @@ PRs as a request surface: **off.**
 - `.scratch/` is **committed**, not gitignored. Spec and ticket files land with
   the branch that writes them, and `Status: done` is set in the same commit that
   finishes a ticket.
+- Research notes are **never committed**: notes on other projects' code, docs or
+  sources (a `research.md`, a prior-art write-up) stay out of the history. A
+  spec or ticket states the findings it needs in its own words, without quoting
+  another project's code, and does not link the note.
 
 ## When a skill says "publish to the issue tracker"
 

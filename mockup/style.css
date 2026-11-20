@@ -844,6 +844,41 @@ summary {
   font-size: 30px;
   font-weight: 450;
 }
+.opening-stage {
+  margin: 14px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+.opening-track {
+  margin-top: 8px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--panel-raised);
+}
+.opening-fill {
+  width: 0;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--leaf);
+}
+.pause-panel.opening-hidden {
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+.opening-example {
+  align-self: flex-end;
+  width: min(440px, 45vw);
+  margin-bottom: 15px;
+}
+.opening-example .layout-method {
+  margin-bottom: 10px;
+}
+.opening-example .layout-method button {
+  min-height: 32px;
+}
+.opening-example .eyebrow {
+  margin: 0 0 6px;
+}
 .reticle {
   position: absolute;
   top: 50%;

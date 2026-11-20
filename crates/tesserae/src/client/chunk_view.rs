@@ -80,6 +80,16 @@ impl ChunkEntities {
         self.delivered.contains(&key) || self.retained.contains(&key)
     }
 
+    /// Each level-0 Chunk drawn, delivered or retained.
+    #[cfg(feature = "profiling")]
+    pub(super) fn level_zero_draws(&self) -> impl Iterator<Item = ChunkCoord> + '_ {
+        self.delivered
+            .iter()
+            .chain(&self.retained)
+            .filter(|&&(level, _)| level == 0)
+            .map(|&(_, coord)| coord)
+    }
+
     #[cfg(feature = "profiling")]
     pub(super) fn published(&self) -> &[u32] {
         &self.published
@@ -147,6 +157,33 @@ impl ChunkEntities {
     #[cfg(test)]
     pub(super) fn insert_opaque(&mut self, coord: ChunkCoord, entity: Entity) {
         self.opaque.insert((0, coord), entity);
+    }
+
+    #[cfg(test)]
+    pub(super) fn land(&mut self, key: (u32, ChunkCoord)) {
+        self.deliver(key);
+    }
+
+    /// Of level 0's mesh ring around `eye`, the Cells holding a mesh, an empty
+    /// one included, and the Cells in it.
+    pub(super) fn ground_held(
+        &self,
+        streaming: &StreamingSettings,
+        world: &WorldSettings,
+        eye: Vec3,
+    ) -> (usize, usize) {
+        let anchor = world.chunk_at(eye);
+        let ring = LevelRings::new(*streaming, world.cell_size(), 0)
+            .mesh
+            .offsets();
+        let held = ring
+            .iter()
+            .filter(|d| {
+                let coord = ChunkCoord::new(anchor.x + d.x, anchor.y + d.y, anchor.z + d.z);
+                self.delivered.contains(&(0, coord))
+            })
+            .count();
+        (held, ring.len())
     }
 }
 

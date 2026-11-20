@@ -18,6 +18,8 @@ use tesserae_core::{
 };
 
 mod common;
+#[path = "../benches/support/v3_world.rs"]
+mod world;
 
 const SEED: u64 = 0x7e55_e2ae_0000_0001;
 const SIZES: [f32; 3] = [1.0, 0.5, 0.25];
@@ -492,6 +494,91 @@ fn a_field_generates_the_same_cells_whichever_chunks_are_made_first() {
             );
             assert_eq!(x.get(at.0, at.1, at.2), y.get(at.0, at.1, at.2));
         }
+    }
+}
+
+/// Each Chunk's Voxels, by the index of its coord, made in `order`; with `forget`, every cache
+/// dropped before each Chunk.
+fn made_in(g: &Worldgen, coords: &[[i32; 3]], order: &[usize], forget: bool) -> Vec<Vec<Voxel>> {
+    let mut made = vec![Vec::new(); coords.len()];
+    for &i in order {
+        if forget {
+            g.forget_caches();
+        }
+        let [cx, cy, cz] = coords[i];
+        let chunk = g.chunk(cx, cy, cz);
+        made[i] = (0..CHUNK_SIZE.pow(3))
+            .map(|v| {
+                chunk.get(
+                    v % CHUNK_SIZE,
+                    v / CHUNK_SIZE % CHUNK_SIZE,
+                    v / CHUNK_SIZE.pow(2),
+                )
+            })
+            .collect();
+    }
+    made
+}
+
+/// Whether crops stand either side of a Chunk border at most two columns apart: a row left
+/// unplanted may lie between, but two fields stand further apart.
+fn crops_cross_a_border(coords: &[[i32; 3]], made: &[Vec<Voxel>]) -> bool {
+    let crops: HashSet<[i32; 2]> = coords
+        .iter()
+        .zip(made)
+        .flat_map(|(&[cx, _, cz], voxels)| {
+            voxels
+                .iter()
+                .enumerate()
+                .filter(|(_, voxel)| world::CROPS.as_flattened().contains(&voxel.material()))
+                .map(move |(v, _)| {
+                    let (x, z) = (v % CHUNK_SIZE, v / CHUNK_SIZE.pow(2));
+                    [cx * SIZE_I + x as i32, cz * SIZE_I + z as i32]
+                })
+        })
+        .collect();
+    let across = |a: i32, d: i32| a.div_euclid(SIZE_I) != (a + d).div_euclid(SIZE_I);
+    crops.iter().any(|&[gx, gz]| {
+        (1..=2).any(|d| {
+            (across(gx, d) && crops.contains(&[gx + d, gz]))
+                || (across(gz, d) && crops.contains(&[gx, gz + d]))
+        })
+    })
+}
+
+#[test]
+fn a_field_across_a_chunk_border_is_the_same_warm_cold_and_in_any_order() {
+    for size in [1.0, 0.5] {
+        let g = world::crop_generator(size);
+        let centre = world::crop_field_column(&g);
+        let coords: Vec<[i32; 3]> = (-1..=1)
+            .flat_map(|dz| (-1..=1).map(move |dx| [centre[0] + dx, centre[1] + dz]))
+            .flat_map(|at| world::band(&g, at))
+            .collect();
+        let forward: Vec<usize> = (0..coords.len()).collect();
+        let backward: Vec<usize> = forward.iter().rev().copied().collect();
+        let odd_first: Vec<usize> = (1..coords.len())
+            .step_by(2)
+            .chain((0..coords.len()).step_by(2))
+            .collect();
+        let made = made_in(&g, &coords, &forward, false);
+        assert!(
+            crops_cross_a_border(&coords, &made),
+            "no field crosses a border at {size} m"
+        );
+        for (name, order) in [("backward", &backward), ("odd first", &odd_first)] {
+            let fresh = world::crop_generator(size);
+            assert_eq!(
+                made_in(&fresh, &coords, order, false),
+                made,
+                "{name} at {size} m"
+            );
+        }
+        assert_eq!(
+            made_in(&g, &coords, &backward, true),
+            made,
+            "cold at {size} m"
+        );
     }
 }
 

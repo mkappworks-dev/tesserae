@@ -560,9 +560,12 @@ fn mesh_with(
 ) -> ChunkMesh {
     // A Chunk this declines has solid neighbours all round, so the only seam
     // walls it loses are those under the diagonal neighbour's corner row.
-    if !center.overlay.may_contain_fluid()
-        && emits_no_faces(center.chunk, neighbors, &tables.materials)
-    {
+    if emits_no_faces(
+        center.chunk,
+        center.overlay,
+        neighbors.map(|n| n.map(|n| n.chunk)),
+        &tables.materials,
+    ) {
         return ChunkMesh::default();
     }
     let n = Neighborhood::new(center, neighbors);
@@ -702,18 +705,24 @@ fn opening_across(
     owner.is_some_and(|o| o.openings.is_open(axis, cell.map(|c| c as usize)))
 }
 
-/// Whether `center` provably emits nothing, from `uniform()` alone.
+/// Whether [`mesh_chunk`] and [`mesh_chunk_with_seams`] of `center`, beside
+/// `overlay` and `neighbors` in face order, provably emit nothing, from
+/// `uniform()` alone; then a caller need not light the Chunk to mesh it.
 ///
 /// Light is deliberately not consulted. It can only split a quad that would
 /// otherwise merge, never create or remove a face, because face visibility is a
 /// question about geometry alone — a full cube beside a non-full-cube. So both
 /// cases below hold whatever the light is, and
 /// `light_does_not_revive_either_declined_case` is the test that says so.
-fn emits_no_faces(
+pub fn emits_no_faces(
     center: &Chunk,
-    neighbors: [Option<LitChunk<'_>>; 6],
+    overlay: &ChunkOverlay,
+    neighbors: [Option<&Chunk>; 6],
     materials: &MaterialTable,
 ) -> bool {
+    if overlay.may_contain_fluid() {
+        return false;
+    }
     let Some(voxel) = center.uniform() else {
         return false;
     };
@@ -732,7 +741,7 @@ fn emits_no_faces(
     voxel.is_full_cube()
         && hides(materials, voxel, voxel)
         && neighbors.iter().all(|n| {
-            n.and_then(|n| n.chunk.uniform()).is_some_and(|across| {
+            n.and_then(Chunk::uniform).is_some_and(|across| {
                 // The usual neighbour is the same Voxel, already answered.
                 across == voxel || (across.is_full_cube() && hides(materials, across, voxel))
             })

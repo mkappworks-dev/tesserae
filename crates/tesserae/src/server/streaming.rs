@@ -28,7 +28,11 @@
 //! have moved far enough that the Chunk being meshed is outside `mesh`; landing
 //! checks that extent, so **a mesh lands only if every neighbour it read is still
 //! held**. A light solve is validated differently - against Edits, and against
-//! the Chunk having been replaced - and not against the extents.
+//! the Chunk having been replaced - and not against the extents. It waits
+//! instead: a solve is dispatched only once its four sideways neighbours and
+//! the one above are held or lie outside `load`, so one arriving afterwards
+//! does not solve it again. Bulk light only rises, so waiting changes when the
+//! light settles and never where.
 
 use std::sync::Arc;
 
@@ -36,12 +40,13 @@ use bevy::platform::collections::{HashMap, HashSet};
 use bevy::prelude::*;
 
 use crate::session::SessionApp;
-#[cfg(any(feature = "dev", feature = "profiling"))]
 use tesserae_core::Chunk;
-use tesserae_core::mesh::{NEG_X, NEG_Y, NEG_Z, POS_X, POS_Y, POS_Z};
+use tesserae_core::mesh::{NEG_X, NEG_Y, NEG_Z, POS_X, POS_Y, POS_Z, emits_no_faces};
 #[cfg(any(feature = "dev", feature = "profiling"))]
 use tesserae_core::visibility::Connectivity;
 use tesserae_core::{CHUNK_SIZE, ChunkMesh, Tables};
+
+pub mod causes;
 
 use super::jobs::{Border, Jobs, Solved, build_mesh, generate, solve};
 use super::lod;
@@ -51,6 +56,7 @@ use super::priority::{Aim, Order, Ring};
 use super::world_state::{ChunkStore, Snapshot};
 use super::{ContentTables, WorldGenerator};
 use crate::world::{ChunkCoord, WorldSettings};
+use causes::{Counts, Marks, SolveCause, Writer, Writers};
 
 /// A Chunk's finished geometry, for the Client to upload.
 ///
@@ -346,17 +352,21 @@ struct LoadOrder {
     extent: Vec<IVec3>,
     priority: Order,
     offsets: Vec<IVec3>,
-    /// The same offsets highest layer first, each layer in priority order. Sky
-    /// light flows downwards, so solving a Chunk before the one above it means
-    /// solving it again when the one above arrives.
+    /// The same offsets for light solves: top-down within bands of
+    /// `SOLVE_BAND_CELLS`. Sky light flows downwards, so solving a Chunk before
+    /// the one above it means solving it again when the one above lands.
     descending: Vec<IVec3>,
 }
+
+/// How wide a band of the light-solve order is, in priority Cells: the width
+/// that measured fewest solves per Chunk.
+const SOLVE_BAND_CELLS: f32 = 2.0;
 
 /// Which loaded Chunks need light solved, which need a mesh, and which the
 /// Client holds one for.
 #[derive(Resource, Default)]
 pub(in crate::server) struct MeshState {
-    unlit: HashSet<ChunkCoord>,
+    unlit: Marks<SolveCause>,
     dirty: HashSet<ChunkCoord>,
     delivered: HashSet<ChunkCoord>,
     /// Chunks with a light solve running. Removed from `unlit` when the job
@@ -374,6 +384,9 @@ pub(in crate::server) struct MeshState {
     edited_chunks: HashSet<ChunkCoord>,
     /// Drained by `stream_lod`, which alone can see whether the cover exists.
     cover_changed: HashSet<ChunkCoord>,
+    /// Who last wrote each held Chunk, and the solves dispatched, by cause.
+    writers: Writers,
+    solves: Counts<SolveCause>,
     /// Each held Chunk's connectivity, and the Voxels it was worked out from:
     /// the Weak makes an Edit's `Arc::make_mut` move the Chunk, so a stale
     /// entry never matches what the store holds.
@@ -495,6 +508,16 @@ impl MeshState {
         }
     }
 
+    /// Which `writer` made the last `edited` mark, for the profiler.
+    pub(in crate::server) fn written_by(&mut self, coord: ChunkCoord, writer: Writer) {
+        self.writers.wrote(coord, writer);
+    }
+
+    /// `None` for a Chunk nothing wrote since it landed, or when not counting.
+    pub(in crate::server) fn writer_of(&self, coord: ChunkCoord) -> Option<Writer> {
+        self.writers.of(coord)
+    }
+
     /// Separate from `edited`, which also fires for Chunks only light or a face
     /// reached; their cover reads neither.
     pub(in crate::server) fn voxels_changed(&mut self, coord: ChunkCoord) {
@@ -533,6 +556,10 @@ impl MeshState {
         self.delivered.iter()
     }
 
+    pub(in crate::server) fn is_delivered(&self, coord: ChunkCoord) -> bool {
+        self.delivered.contains(&coord)
+    }
+
     pub(in crate::server) fn is_edited(&self, coord: ChunkCoord) -> bool {
         self.edited_chunks.contains(&coord)
     }
@@ -549,7 +576,7 @@ impl MeshState {
 
     #[cfg(test)]
     pub(in crate::server) fn mark_unlit(&mut self, coord: ChunkCoord) {
-        self.unlit.insert(coord);
+        self.unlit.insert(coord, SolveCause::Neighbour);
     }
 
     #[cfg(test)]
@@ -651,7 +678,9 @@ fn stream(
         let _rescoring = crate::cost::Rescoring::start();
         if order.priority.update(&ring, &aim, now_s) {
             order.offsets = order.priority.offsets().collect();
-            order.descending = order.priority.layers_top_down();
+            order.descending = order
+                .priority
+                .top_down_within_bands(SOLVE_BAND_CELLS * world.cell_size());
         }
     }
     let cell_m = world.cell_size();
@@ -696,6 +725,15 @@ fn stream(
         budget.landed_per_tick.mesh,
         &priority,
     );
+    send_faceless(
+        &store,
+        &mut meshes,
+        &jobs,
+        &mut ready,
+        center,
+        rings.mesh,
+        &tables.0,
+    );
     dispatch_generation(
         &store,
         &mut jobs,
@@ -713,6 +751,7 @@ fn stream(
         order,
         &world,
         center,
+        rings.load,
         budget.in_flight.relight,
         &tables.0,
     ) {
@@ -793,6 +832,7 @@ fn retire(
         }
         meshes.dirty.remove(&coord);
         meshes.unlit.remove(&coord);
+        meshes.writers.forget(coord);
         #[cfg(any(feature = "dev", feature = "profiling"))]
         meshes.connectivity.remove(&coord);
         // An unedited Chunk is what the generator makes again; only an edited one
@@ -851,7 +891,7 @@ fn land_generated(
         // could reach. `relight` re-publishes a Chunk whose light moved, and
         // marks its neighbours for a re-solve so the change keeps travelling as
         // far as it really goes.
-        meshes.unlit.insert(coord);
+        meshes.unlit.insert(coord, SolveCause::First);
         meshes.dirty.insert(coord);
     }
 }
@@ -917,7 +957,8 @@ fn land_relight(
         if poisoned || !store.unchanged_since(coord, &solved.snapshot) {
             jobs.relight.note_stale();
             *meshes.spoilt.entry(coord).or_default() += 1;
-            meshes.unlit.insert(coord);
+            let writer = meshes.writers.of(coord).unwrap_or_default();
+            meshes.unlit.insert(coord, SolveCause::spoilt_by(writer));
             continue;
         }
         apply_solve(store, meshes, coord, solved);
@@ -940,15 +981,16 @@ fn apply_solve(store: &mut ChunkStore, meshes: &mut MeshState, coord: ChunkCoord
     // relight queue ever draining.
     for (face, neighbor) in face_neighbors(coord).into_iter().enumerate() {
         if solved.outward[face] && store.contains(neighbor) {
-            meshes.unlit.insert(neighbor);
+            meshes.unlit.insert(neighbor, SolveCause::Neighbour);
             // Its boundary faces are lit by the plane that just moved.
             meshes.dirty.insert(neighbor);
         }
     }
 }
 
-/// Starts light solves for Chunks whose light is out of date, highest layer
-/// first and each layer in priority order, until `in_flight` are outstanding.
+/// Starts light solves for Chunks whose light is out of date, in
+/// `LoadOrder::descending`, until `in_flight` are outstanding. A Chunk waits for
+/// the neighbours [`neighbours_held`] names.
 ///
 /// Top-down because sky light flows downwards: solving a Chunk before the one
 /// above it means solving it again when the one above lands.
@@ -964,6 +1006,7 @@ fn dispatch_relight(
     order: &LoadOrder,
     world: &WorldSettings,
     center: ChunkCoord,
+    load: Extent,
     in_flight: usize,
     tables: &Arc<Tables>,
 ) -> Option<(ChunkCoord, Snapshot, [Border; 6])> {
@@ -983,6 +1026,9 @@ fn dispatch_relight(
             meshes.unlit.remove(&coord);
             continue;
         };
+        if !neighbours_held(store, coord, center, load) {
+            continue;
+        }
         let border: [Border; 6] = face_neighbors(coord).map(|n| match store.shared(n) {
             Some(snapshot) => Border::Loaded(snapshot),
             None if n.y > coord.y && above_the_surface(generator, world, n) => Border::OpenSky,
@@ -994,11 +1040,13 @@ fn dispatch_relight(
             .is_some_and(|&n| n >= SPOILT_BEFORE_ON_TICK);
         if starved {
             if on_tick.is_none() {
+                meshes.solves.add(meshes.unlit.cause(&coord));
                 meshes.unlit.remove(&coord);
                 on_tick = Some((coord, snapshot, border));
             }
             continue;
         }
+        meshes.solves.add(meshes.unlit.cause(&coord));
         meshes.unlit.remove(&coord);
         meshes.relighting.insert(coord);
         meshes.poisoned.remove(&coord);
@@ -1008,6 +1056,22 @@ fn dispatch_relight(
         free -= 1;
     }
     on_tick
+}
+
+/// Whether the four sideways neighbours and the one above are held, or lie
+/// outside `load` and never will be: one that arrives after the solve moves
+/// its plane and solves this Chunk again. Below is left out because sky light,
+/// most of what a fill brings, flows down.
+fn neighbours_held(
+    store: &ChunkStore,
+    coord: ChunkCoord,
+    center: ChunkCoord,
+    load: Extent,
+) -> bool {
+    let n = face_neighbors(coord);
+    [NEG_X, POS_X, NEG_Z, POS_Z, POS_Y]
+        .into_iter()
+        .all(|face| store.contains(n[face]) || !load.contains(delta(center, n[face])))
 }
 
 /// Whether a Chunk is entirely above the band the surface can reach, so the
@@ -1072,6 +1136,78 @@ fn land_meshes(
         });
         meshes.delivered.insert(coord);
     }
+}
+
+/// Sends an empty mesh, without a job or settled light, to every dirty Chunk of
+/// `mesh` that [`faceless`] says cannot have a face. Uncapped: an empty mesh is
+/// a despawn to the Client, with nothing to upload.
+fn send_faceless(
+    store: &ChunkStore,
+    meshes: &mut MeshState,
+    jobs: &Jobs,
+    ready: &mut MessageWriter<ChunkMeshReady>,
+    center: ChunkCoord,
+    mesh: Extent,
+    tables: &Tables,
+) {
+    let sent: Vec<ChunkCoord> = meshes
+        .dirty
+        .iter()
+        .copied()
+        .filter(|&c| mesh.contains(delta(center, c)) && !jobs.mesh.contains(c))
+        .filter(|&c| faceless(store, c, tables))
+        .collect();
+    for coord in sent {
+        meshes.dirty.remove(&coord);
+        #[cfg(any(feature = "dev", feature = "profiling"))]
+        let connectivity = {
+            let own = store.shared(coord).expect("faceless Chunks are held");
+            let c = meshes
+                .connectivity_of(coord, &own.chunk)
+                .unwrap_or_else(|| {
+                    tesserae_core::visibility::connectivity(&own.chunk, &tables.materials)
+                });
+            meshes.note_connectivity(coord, &own.chunk, c);
+            c
+        };
+        ready.write(ChunkMeshReady {
+            coord,
+            mesh: ChunkMesh::default(),
+            #[cfg(any(feature = "dev", feature = "profiling"))]
+            connectivity,
+        });
+        meshes.delivered.insert(coord);
+    }
+}
+
+/// Whether a held Chunk's mesh is empty whatever its light: one Voxel walled in
+/// by Voxels that hide it, or air among air, with no fluid among the seven.
+///
+/// Not air beside anything else, though it has no face either. Its empty mesh
+/// marks its Cell drawn, which discards a coarser level's ground there
+/// (ADR-0019), and levels 2 and up, made at their own Voxel size, stand up to a
+/// coarse Voxel above level 0's ground: sent ahead of the ground below, it
+/// would cut the top off the coarse ground still drawn in the ground's place.
+fn faceless(store: &ChunkStore, coord: ChunkCoord, tables: &Tables) -> bool {
+    let plain = |c: ChunkCoord| {
+        store
+            .shared(c)
+            .filter(|s| s.chunk.uniform().is_some() && !s.overlay.may_contain_fluid())
+    };
+    let Some(own) = plain(coord) else {
+        return false;
+    };
+    let Some(around) = face_neighbors(coord)
+        .map(plain)
+        .into_iter()
+        .collect::<Option<Vec<Snapshot>>>()
+    else {
+        return false;
+    };
+    let neighbors: [Option<&Chunk>; 6] = std::array::from_fn(|face| Some(&*around[face].chunk));
+    let air = |s: &Snapshot| s.chunk.uniform().is_some_and(|v| v.is_air());
+    emits_no_faces(&own.chunk, &own.overlay, neighbors, &tables.materials)
+        && (!air(&own) || around.iter().all(air))
 }
 
 /// Starts mesh jobs for dirty Chunks inside the mesh extent, in priority order,
@@ -1228,18 +1364,62 @@ pub mod stats {
         pub flow: Flow,
     }
 
+    #[derive(Default, Clone, Copy, Debug)]
+    #[cfg_attr(not(feature = "profiling"), allow(dead_code, reason = "profiler only"))]
+    pub struct Stages<T> {
+        pub generate: T,
+        pub relight: T,
+        pub mesh: T,
+    }
+
+    impl<T> Stages<T> {
+        /// Each stage with its name, in the order the profiler writes them.
+        #[cfg(feature = "profiling")]
+        pub fn named(&self) -> [(&'static str, &T); 3] {
+            [
+                ("generate", &self.generate),
+                ("relight", &self.relight),
+                ("mesh", &self.mesh),
+            ]
+        }
+    }
+
     /// Generate, relight and mesh work of one level; relight is level 0 only.
     #[derive(Default, Clone, Copy, Debug)]
     #[cfg_attr(not(feature = "profiling"), allow(dead_code, reason = "profiler only"))]
     pub struct Flow {
+        pub stages: Stages<StageFlow>,
+        /// Since the World opened: mesh jobs whose mesh was empty. Levels above 0 only.
+        pub empty_meshes: u64,
+        /// Level 1 only, since the World opened: the level-0 Chunks its jobs
+        /// generated themselves, those of them inside level 0's load extent, and
+        /// the jobs that generated at least one of those.
+        pub children: Children,
+    }
+
+    #[derive(Default, Clone, Copy, Debug)]
+    #[cfg_attr(not(feature = "profiling"), allow(dead_code, reason = "profiler only"))]
+    pub struct StageFlow {
         /// Due and not dispatched: a Chunk of the load extent not held, a lit
         /// Chunk whose light is out of date, a Chunk of the mesh shell whose mesh
         /// is.
-        pub waiting: [usize; 3],
-        pub in_flight: [usize; 3],
+        pub waiting: usize,
+        pub in_flight: usize,
         /// Since the World opened: jobs run on a worker, and their worker CPU.
-        pub run: [u64; 3],
-        pub cpu_ms: [f64; 3],
+        pub run: u64,
+        pub cpu_ms: f64,
+        /// Since the World opened: jobs dispatched by cause, indexed by
+        /// [`causes::Cause::index`]: [`causes::SolveCause`] for level 0's relight,
+        /// [`causes::LodCause`] for generate and mesh above it.
+        pub causes: [u64; causes::CAUSES],
+    }
+
+    #[derive(Default, Clone, Copy, Debug)]
+    #[cfg_attr(not(feature = "profiling"), allow(dead_code, reason = "profiler only"))]
+    pub struct Children {
+        pub generated: u64,
+        pub in_load: u64,
+        pub jobs_in_load: u64,
     }
 
     #[derive(Resource, Default, Clone, Debug)]
@@ -1260,11 +1440,11 @@ pub mod stats {
         /// once. Earlier than `settled`, which also waits for the margin's
         /// light, and the one that matches what a player sees fill in.
         pub shown: bool,
-        /// Jobs landed, and results that were out of date when they landed, per
-        /// stage: generate, relight, mesh. A stale relight was dropped; a stale
-        /// mesh was delivered anyway and followed by a fresh one.
-        pub landed: [usize; 3],
-        pub stale: [usize; 3],
+        /// Jobs landed, and results that were out of date when they landed. A
+        /// stale relight was dropped; a stale mesh was delivered anyway and
+        /// followed by a fresh one.
+        pub landed: Stages<usize>,
+        pub stale: Stages<usize>,
         /// Indexed by level. Level 0 repeats `loaded` and `meshed`.
         pub levels: Vec<LevelStats>,
         /// Fluid steps' jobs run and their worker CPU since the World opened:
@@ -1276,6 +1456,57 @@ pub mod stats {
         /// unless `TESSERAE_PROFILE_VISIBILITY` is set.
         #[cfg_attr(not(feature = "profiling"), allow(dead_code, reason = "profiler only"))]
         pub mesh_reach: Option<[(u64, f64); 2]>,
+        /// The level-0 Chunks that entered the mesh extent this tick. Empty
+        /// unless `TESSERAE_PROFILE_LAG` is set.
+        #[cfg_attr(not(feature = "profiling"), allow(dead_code, reason = "profiler only"))]
+        pub entered: Vec<Entered>,
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    #[cfg_attr(not(feature = "profiling"), allow(dead_code, reason = "profiler only"))]
+    pub struct Entered {
+        pub at: std::time::Instant,
+        pub coord: ChunkCoord,
+        /// From the Eye to the Chunk's nearest point, as it entered.
+        pub distance_m: f32,
+    }
+
+    /// Whether entries are recorded, and the Chunk the Eye stood in when they
+    /// last were. A session's, so a reopened World's every Chunk enters again.
+    #[derive(Resource)]
+    pub(super) struct EntryLog {
+        on: bool,
+        last_center: Option<ChunkCoord>,
+    }
+
+    impl Default for EntryLog {
+        fn default() -> Self {
+            EntryLog {
+                on: crate::cost::measuring_lag(),
+                last_center: None,
+            }
+        }
+    }
+
+    /// The Chunks of the mesh extent around `center` that were not in it around
+    /// `last_center`.
+    pub fn entering(
+        last_center: Option<ChunkCoord>,
+        center: ChunkCoord,
+        mesh: Extent,
+    ) -> Vec<ChunkCoord> {
+        let reach = mesh.horizontal.max(mesh.vertical);
+        mesh.offsets()
+            .into_iter()
+            .map(|d| offset(center, d))
+            .filter(|&c| {
+                last_center.is_none_or(|last| {
+                    let d = delta(last, c);
+                    // `contains` squares the offset, which overflows a teleport away.
+                    d.abs().max_element() > reach || !mesh.contains(d)
+                })
+            })
+            .collect()
     }
 
     /// Where [`StreamingStats`] is written, for a reader that must see this tick's.
@@ -1284,6 +1515,7 @@ pub mod stats {
 
     pub(super) fn plugin(app: &mut App) {
         app.init_session_resource::<StreamingStats>()
+            .init_session_resource::<EntryLog>()
             .add_session_systems(
                 FixedPostUpdate,
                 publish_stats
@@ -1309,6 +1541,7 @@ pub mod stats {
         lod_jobs: Res<lod::LodJobs>,
         fluids: Option<Res<crate::server::fluids::FluidSim>>,
         player: Query<&Player>,
+        log: Option<ResMut<EntryLog>>,
     ) {
         let eye = player.single().map(Player::eye).ok();
         let center = player
@@ -1339,31 +1572,46 @@ pub mod stats {
         });
         let (generated, relit, meshed) = (jobs.generate.run(), jobs.relight.run(), jobs.mesh.run());
         let level_zero = Flow {
-            waiting: center.map_or([0; 3], |center| {
-                [
-                    order
-                        .offsets
-                        .iter()
-                        .filter(|&&d| {
-                            let c = offset(center, d);
-                            !store.contains(c) && !jobs.generate.contains(c)
-                        })
-                        .count(),
-                    meshes.unlit.len(),
-                    meshes
-                        .dirty
-                        .iter()
-                        .filter(|&&c| mesh.contains(delta(center, c)) && !jobs.mesh.contains(c))
-                        .count(),
-                ]
-            }),
-            in_flight: [
-                jobs.generate.in_flight(),
-                jobs.relight.in_flight(),
-                jobs.mesh.in_flight(),
-            ],
-            run: [generated.0, relit.0, meshed.0],
-            cpu_ms: [generated.1, relit.1, meshed.1],
+            stages: Stages {
+                generate: StageFlow {
+                    waiting: center.map_or(0, |center| {
+                        order
+                            .offsets
+                            .iter()
+                            .filter(|&&d| {
+                                let c = offset(center, d);
+                                !store.contains(c) && !jobs.generate.contains(c)
+                            })
+                            .count()
+                    }),
+                    in_flight: jobs.generate.in_flight(),
+                    run: generated.0,
+                    cpu_ms: generated.1,
+                    causes: [0; causes::CAUSES],
+                },
+                relight: StageFlow {
+                    waiting: center.map_or(0, |_| meshes.unlit.len()),
+                    in_flight: jobs.relight.in_flight(),
+                    run: relit.0,
+                    cpu_ms: relit.1,
+                    causes: meshes.solves.all(),
+                },
+                mesh: StageFlow {
+                    waiting: center.map_or(0, |center| {
+                        meshes
+                            .dirty
+                            .iter()
+                            .filter(|&&c| mesh.contains(delta(center, c)) && !jobs.mesh.contains(c))
+                            .count()
+                    }),
+                    in_flight: jobs.mesh.in_flight(),
+                    run: meshed.0,
+                    cpu_ms: meshed.1,
+                    causes: [0; causes::CAUSES],
+                },
+            },
+            empty_meshes: 0,
+            children: Children::default(),
         };
         let mut levels = vec![LevelStats {
             held: store.coords().count(),
@@ -1373,6 +1621,19 @@ pub mod stats {
             flow: level_zero,
             ..default()
         }];
+        let mut entered = Vec::new();
+        if let (Some(mut log), Some(eye), Some(center)) = (log.filter(|log| log.on), eye, center) {
+            let at = std::time::Instant::now();
+            entered = entering(log.last_center, center, mesh)
+                .into_iter()
+                .map(|coord| Entered {
+                    at,
+                    coord,
+                    distance_m: world.distance_to_chunk(eye, coord),
+                })
+                .collect();
+            log.last_center = Some(center);
+        }
         let (lod_generating, lod_meshing) = (lod_jobs.generate.keys(), lod_jobs.mesh.keys());
         let lod_in_flight = |keys: &[(u32, ChunkCoord)], level: u32| {
             keys.iter().filter(|(l, _)| *l == level).count()
@@ -1381,34 +1642,44 @@ pub mod stats {
             let rings = LevelRings::new(*settings, world.cell_size(), level);
             let anchor = eye.map(|eye| world.chunk_at_level(eye, level));
             let [generate_cpu, mesh_cpu] = lod_jobs.times.cpu_ms(level);
+            let [generated, meshed] = lod_state.causes(level);
             let flow = Flow {
-                waiting: anchor.map_or([0; 3], |anchor| {
-                    [
-                        rings
-                            .load
-                            .offsets()
-                            .into_iter()
-                            .filter(|&d| {
-                                let c = offset(anchor, d);
-                                !lod_store.contains(level, c)
-                                    && !lod_jobs.generate.contains((level, c))
-                            })
-                            .count(),
-                        0,
-                        lod_state.dirty_within(level, anchor, rings.mesh),
-                    ]
-                }),
-                in_flight: [
-                    lod_in_flight(&lod_generating, level),
-                    0,
-                    lod_in_flight(&lod_meshing, level),
-                ],
-                run: [
-                    lod_jobs.times.generate_cost(level).jobs,
-                    0,
-                    lod_jobs.times.mesh_cost(level).jobs,
-                ],
-                cpu_ms: [generate_cpu, 0.0, mesh_cpu],
+                stages: Stages {
+                    generate: StageFlow {
+                        waiting: anchor.map_or(0, |anchor| {
+                            rings
+                                .load
+                                .offsets()
+                                .into_iter()
+                                .filter(|&d| {
+                                    let c = offset(anchor, d);
+                                    !lod_store.contains(level, c)
+                                        && !lod_jobs.generate.contains((level, c))
+                                })
+                                .count()
+                        }),
+                        in_flight: lod_in_flight(&lod_generating, level),
+                        run: lod_jobs.times.generate_cost(level).jobs,
+                        cpu_ms: generate_cpu,
+                        causes: generated,
+                    },
+                    relight: StageFlow::default(),
+                    mesh: StageFlow {
+                        waiting: anchor.map_or(0, |anchor| {
+                            lod_state.dirty_within(level, anchor, rings.mesh)
+                        }),
+                        in_flight: lod_in_flight(&lod_meshing, level),
+                        run: lod_jobs.times.mesh_cost(level).jobs,
+                        cpu_ms: mesh_cpu,
+                        causes: meshed,
+                    },
+                },
+                empty_meshes: lod_jobs.times.empty_meshes(level),
+                children: if level == 1 {
+                    lod_state.children()
+                } else {
+                    Children::default()
+                },
             };
             LevelStats {
                 flow,
@@ -1428,19 +1699,20 @@ pub mod stats {
             anchor: center.unwrap_or_default(),
             settled,
             shown,
-            landed: [
-                jobs.generate.landed_total(),
-                jobs.relight.landed_total(),
-                jobs.mesh.landed_total(),
-            ],
-            stale: [
-                jobs.generate.stale(),
-                jobs.relight.stale(),
-                jobs.mesh.stale(),
-            ],
+            landed: Stages {
+                generate: jobs.generate.landed_total(),
+                relight: jobs.relight.landed_total(),
+                mesh: jobs.mesh.landed_total(),
+            },
+            stale: Stages {
+                generate: jobs.generate.stale(),
+                relight: jobs.relight.stale(),
+                mesh: jobs.mesh.stale(),
+            },
             levels,
             fluid_run: fluids.map_or((0, 0.0), |f| f.jobs_run()),
             mesh_reach: meshes.reach.on.then(|| meshes.reach.totals()),
+            entered,
         };
     }
 }
@@ -1453,6 +1725,8 @@ pub(in crate::server) mod tests {
     use crate::server::world_state::VoxelCoord;
     use bevy::ecs::system::RunSystemOnce;
     use bevy::tasks::{AsyncComputeTaskPool, TaskPoolBuilder};
+    #[cfg(any(feature = "dev", feature = "profiling"))]
+    use causes::{SolveCause, Writer};
     use tesserae_core::light::{Light, MAX_LIGHT, light_chunk};
     use tesserae_core::{Chunk, ChunkLight, LitChunk, mesh_chunk};
     use tesserae_core::{Voxel, Worldgen, WorldgenParams};
@@ -1463,6 +1737,32 @@ pub(in crate::server) mod tests {
             ..default()
         };
         Rings::new(StreamingSettings::default(), world.cell_size())
+    }
+
+    #[cfg(any(feature = "dev", feature = "profiling"))]
+    #[test]
+    fn a_chunk_enters_the_mesh_extent_once_as_the_anchor_moves_to_it() {
+        let mesh = Extent {
+            horizontal: 2,
+            vertical: 1,
+        };
+        let entering = |was, center| -> HashSet<ChunkCoord> {
+            stats::entering(was, center, mesh).into_iter().collect()
+        };
+        let origin = ChunkCoord::new(0, 0, 0);
+        let east = ChunkCoord::new(1, 0, 0);
+        assert_eq!(entering(None, origin).len(), 39);
+        assert!(entering(Some(origin), origin).is_empty());
+        let leading: HashSet<ChunkCoord> = (-1..=1)
+            .flat_map(|y| {
+                [(1, -2), (2, -1), (3, 0), (2, 1), (1, 2)].map(|(x, z)| ChunkCoord::new(x, y, z))
+            })
+            .collect();
+        assert_eq!(entering(Some(origin), east), leading);
+        assert_eq!(
+            entering(Some(ChunkCoord::new(-1_000_000, 0, 0)), origin).len(),
+            39
+        );
     }
 
     #[test]
@@ -1740,7 +2040,7 @@ pub(in crate::server) mod tests {
             panic!("streaming was still busy after {SETTLE_CEILING:?}");
         }
 
-        fn quiet(&self) -> bool {
+        pub(in crate::server) fn quiet(&self) -> bool {
             let jobs = self.jobs();
             let (dispatched, landed) = jobs.generate.counts();
             jobs.in_flight() == 0
@@ -2403,13 +2703,67 @@ pub(in crate::server) mod tests {
         }
     }
 
-    /// Ordered highest layer first by distance this measures 3.3, and column by
-    /// column 4.2; the bound sits between them because a slow CI runner finishes
-    /// the pool's jobs later and has measured 3.6.
+    /// Waiting for the neighbours a solve reads, top-down within bands, this
+    /// measures 1.99 to 2.07; solved as soon as it lands, 2.23 to 2.43. Column
+    /// by column it was 4.2. A slow CI runner, or a loaded host, finishes the
+    /// pool's jobs later and has measured about 9% more, so the bound leaves that
+    /// over 2.07, at the cost of not telling the old order's lowest runs apart.
     #[test]
     fn a_fresh_region_is_lit_without_solving_chunks_again_for_light_from_above() {
         let solves = solves_per_chunk_filling_a_fresh_region();
-        assert!(solves <= 3.75, "{solves} solves per generated Chunk");
+        assert!(solves <= 2.3, "{solves} solves per generated Chunk");
+    }
+
+    /// A solve made before a neighbour it reads is held is made again once that
+    /// neighbour is solved, so it waits; a neighbour outside the load extent is
+    /// never generated, so a Chunk at the edge is solved without it. Delaying a
+    /// solve cannot change where the light settles, as bulk light only rises.
+    #[test]
+    fn a_solve_waits_for_the_neighbours_it_reads_inside_the_load_extent() {
+        let mut h = Harness::on_land(small(), UNLIMITED);
+        h.settle();
+        let (center, load) = (h.center(), h.rings().load);
+        let missing = offset(center, IVec3::X);
+        let beside = center;
+        let below = offset(missing, IVec3::NEG_Y);
+        let edge = offset(center, IVec3::new(0, 0, load.horizontal));
+        assert!(!load.contains(delta(center, offset(edge, IVec3::Z))));
+
+        h.jobs_mut().generate.hold.hold();
+        assert!(
+            h.app
+                .world_mut()
+                .resource_mut::<ChunkStore>()
+                .remove(missing)
+        );
+        {
+            let mut meshes = h.app.world_mut().resource_mut::<MeshState>();
+            for coord in [beside, below, edge] {
+                meshes.mark_unlit(coord);
+            }
+        }
+        h.tick();
+        assert!(
+            !h.jobs().relight.contains(beside),
+            "{beside} was solved while the Chunk beside it was missing"
+        );
+        assert!(
+            !h.jobs().relight.contains(below),
+            "{below} was solved while the Chunk above it was missing"
+        );
+        assert!(
+            h.jobs().relight.contains(edge),
+            "{edge} waited for a neighbour outside the load extent"
+        );
+
+        h.jobs_mut().generate.hold.release();
+        h.settle();
+        let expected = fixed_point(
+            h.store(),
+            h.app.world().resource::<WorldGenerator>(),
+            h.app.world().resource::<WorldSettings>(),
+        );
+        assert_lit_like(&h, &expected);
     }
 
     /// Where a lantern next to a Chunk boundary lights two Chunks, and what
@@ -2473,6 +2827,124 @@ pub(in crate::server) mod tests {
             ready.iter().any(|m| m.coord == home),
             "{home} was never meshed once its neighbourhood settled"
         );
+    }
+
+    /// Fills around `eye` with every light solve and mesh job held, so only an
+    /// empty mesh sent on the tick can reach the Client, and checks after each
+    /// tick that exactly the Chunks of the mesh extent that are air in air, or
+    /// one Voxel walled in by the same Voxel, with no fluid anywhere among the
+    /// seven, were sent one, empty and without a job. Returns how many were
+    /// sent, and how many uniform Chunks were held back.
+    fn faceless_on_the_tick(mut h: Harness, eye: Vec3) -> (usize, usize) {
+        h.anchor_at(eye);
+        h.jobs_mut().relight.hold.hold();
+        h.jobs_mut().mesh.hold.hold();
+        let center = h.center();
+        let rings = h.rings();
+        let in_mesh: Vec<ChunkCoord> = rings
+            .mesh
+            .offsets()
+            .into_iter()
+            .map(|d| offset(center, d))
+            .collect();
+        let started = std::time::Instant::now();
+        let mut sent = HashSet::new();
+        loop {
+            let (ready, _) = h.tick();
+            for m in &ready {
+                assert!(m.mesh.is_empty(), "{} was sent faces unlit", m.coord);
+                assert!(sent.insert(m.coord), "{} was sent twice", m.coord);
+            }
+            let store = h.store();
+            let plain = |c: ChunkCoord| {
+                store
+                    .get(c)
+                    .and_then(Chunk::uniform)
+                    .filter(|_| !store.overlay(c).expect("held").may_contain_fluid())
+            };
+            let mut kept = 0;
+            for &coord in &in_mesh {
+                let own = plain(coord);
+                let walled = own.is_some_and(|v| {
+                    face_neighbors(coord).iter().all(|&n| {
+                        plain(n) == Some(v) || (v.is_air() && plain(n).is_some_and(Voxel::is_air))
+                    })
+                });
+                assert_eq!(
+                    sent.contains(&coord),
+                    walled,
+                    "{coord}: {own:?}, sent {}",
+                    sent.contains(&coord)
+                );
+                assert!(
+                    !(walled && h.jobs().mesh.contains(coord)),
+                    "{coord} took a job"
+                );
+                kept += usize::from(own.is_some() && !walled);
+            }
+            let all_held = rings
+                .load
+                .offsets()
+                .into_iter()
+                .all(|d| h.store().contains(offset(center, d)));
+            if all_held {
+                return (sent.len(), kept);
+            }
+            assert!(
+                started.elapsed() < SETTLE_CEILING,
+                "generation never finished"
+            );
+            std::thread::sleep(std::time::Duration::from_micros(100));
+        }
+    }
+
+    /// A Chunk that cannot have a face whatever its light needs neither a
+    /// settled neighbourhood nor a job, so its empty mesh is sent on the tick
+    /// the last of the seven lands.
+    #[test]
+    fn a_faceless_chunk_is_sent_its_empty_mesh_on_the_tick() {
+        let world = WorldSettings::default();
+        let cell = world.cell_size();
+        let generator = Worldgen::new(
+            world.seed,
+            world.voxel_size,
+            tesserae_core::testgen::world_params(),
+        );
+        let (lowest_m, highest_m) = generator.surface_bounds_m();
+
+        let sky = Vec3::new(0.0, highest_m + 4.0 * cell, 0.0);
+        let (sent, kept) = faceless_on_the_tick(Harness::new(small(), UNLIMITED), sky);
+        assert_eq!((sent, kept), (small_mesh_count(), 0), "open sky");
+
+        let rock = Vec3::new(0.0, lowest_m - 5.0 * cell, 0.0);
+        let (sent, kept) = faceless_on_the_tick(Harness::new(small(), UNLIMITED), rock);
+        assert_eq!((sent, kept), (small_mesh_count(), 0), "deep rock");
+    }
+
+    /// Air beside ground still waits for settled light and a job: its empty
+    /// mesh marks its Cell drawn, and a coarse level's ground can stand in it
+    /// until the ground's own mesh lands.
+    #[test]
+    fn air_beside_ground_waits_for_settled_light() {
+        let world = land();
+        let cell = world.cell_size();
+        let generator = Worldgen::new(
+            world.seed,
+            world.voxel_size,
+            tesserae_core::testgen::world_params(),
+        );
+        let top_m = generator.surface_top_m([0.0, 0.0], [cell, cell]);
+        let (_, kept) = faceless_on_the_tick(
+            Harness::on_land(small(), UNLIMITED),
+            Vec3::new(0.0, top_m, 0.0),
+        );
+        assert!(kept > 0, "no uniform Chunk lay beside the surface");
+    }
+
+    fn small_mesh_count() -> usize {
+        Rings::new(small(), WorldSettings::default().cell_size())
+            .mesh
+            .count()
     }
 
     /// A Chunk edited faster than a mesh takes to build must still show the
@@ -2762,6 +3234,85 @@ pub(in crate::server) mod tests {
             h.app.world().resource::<WorldSettings>(),
         );
         assert_lit_like(&h, &expected);
+    }
+
+    /// One level's work as `publish_stats` reports it now.
+    #[cfg(any(feature = "dev", feature = "profiling"))]
+    pub(in crate::server) fn flow(h: &mut Harness, level: usize) -> stats::Flow {
+        h.app.init_resource::<stats::StreamingStats>();
+        h.app
+            .world_mut()
+            .run_system_once(stats::publish_stats)
+            .expect("the summary ran");
+        h.app.world().resource::<stats::StreamingStats>().levels[level].flow
+    }
+
+    #[cfg(any(feature = "dev", feature = "profiling"))]
+    #[test]
+    fn a_fill_counts_one_first_solve_per_chunk_and_the_rest_to_neighbours() {
+        let mut h = Harness::new(small(), UNLIMITED);
+        h.settle();
+        let flow = flow(&mut h, 0);
+        let solves = flow.stages.relight.causes;
+        assert_eq!(
+            solves[SolveCause::First as usize],
+            h.store().coords().count() as u64
+        );
+        assert!(solves[SolveCause::Neighbour as usize] > 0);
+        assert_eq!(
+            solves[SolveCause::Fluid as usize] + solves[SolveCause::Edit as usize],
+            0
+        );
+        assert_eq!(solves.iter().sum::<u64>(), flow.stages.relight.run);
+    }
+
+    /// A solve spoilt by a write is solved again, counted to its writer.
+    #[cfg(any(feature = "dev", feature = "profiling"))]
+    fn spoilt_solve(writer: Writer) -> [u64; causes::CAUSES] {
+        let mut h = Harness::new(small(), UNLIMITED);
+        h.settle();
+        let (at, next) = lantern_on_a_boundary(&mut h);
+        let before = flow(&mut h, 0).stages.relight.causes;
+        h.app.world_mut().resource_mut::<Jobs>().relight.hold.hold();
+        h.app
+            .world_mut()
+            .resource_mut::<MeshState>()
+            .mark_unlit(next);
+        h.tick();
+        h.app
+            .world_mut()
+            .run_system_once(
+                move |mut store: ResMut<ChunkStore>,
+                      mut meshes: ResMut<MeshState>,
+                      tables: Res<ContentTables>| {
+                    let mut batch = match writer {
+                        Writer::Fluid => edit::Batch::of_fluids(),
+                        Writer::Edit => edit::Batch::default(),
+                    };
+                    let lantern = Voxel::cube(tesserae_core::testgen::fixtures().lantern);
+                    batch
+                        .set_voxel(&mut store, &mut meshes, &tables, at, lantern)
+                        .expect("the Chunk is loaded and lit");
+                    batch.finish(&mut store, &mut meshes, &tables);
+                },
+            )
+            .unwrap();
+        h.app.world().resource::<Jobs>().relight.hold.release();
+        h.settle();
+        assert_eq!(h.jobs().relight.stale(), 1, "the solve was not spoilt");
+        let after = flow(&mut h, 0).stages.relight.causes;
+        std::array::from_fn(|i| after[i] - before[i])
+    }
+
+    #[cfg(any(feature = "dev", feature = "profiling"))]
+    #[test]
+    fn a_solve_spoilt_by_an_edit_or_a_fluid_step_is_counted_to_it() {
+        let by_edit = spoilt_solve(Writer::Edit);
+        assert_eq!(by_edit[SolveCause::Edit as usize], 1, "{by_edit:?}");
+        assert_eq!(by_edit[SolveCause::Fluid as usize], 0, "{by_edit:?}");
+        let by_fluid = spoilt_solve(Writer::Fluid);
+        assert_eq!(by_fluid[SolveCause::Fluid as usize], 1, "{by_fluid:?}");
+        assert_eq!(by_fluid[SolveCause::Edit as usize], 0, "{by_fluid:?}");
     }
 
     #[test]
