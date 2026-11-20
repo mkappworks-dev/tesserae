@@ -1,6 +1,6 @@
 # 06: Changes under level 0 stop regenerating level 1, if it is worth it
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 01
 
@@ -16,7 +16,7 @@ Widened on 2026-11-20, with the user, from fluids alone: fluids cause no level-1
 
 - [x] The count in Comments.
 - [x] If built: a streaming test that a change under level 0 (a fluid's and an Edit's) queues no level-1 work, and that the level-1 Chunk matches level 0 once one child leaves level 0's ring.
-- [ ] If built: the holes instrument reports no more holes than 01's figures.
+- [x] If built: the holes instrument reports no more holes than 01's figures.
 
 ## Comments
 
@@ -43,3 +43,7 @@ Tests in `server::lod::tests`, on rings where level 0 draws all eight children o
 - `a_change_under_a_cover_level_zero_draws_queues_no_level_one_work`: an Edit, a fluid Batch and a Mod's `Fill` each dispatch no coarse generation or mesh, and the held cover is untouched.
 - `a_cover_level_zero_stops_drawing_a_child_of_catches_up_to_the_changed_children`: after the Eye moves four Cells, the cover equals the downsample of the changed children and its new mesh equals one built fresh.
 - `no_hole_and_no_stale_cover_shows_while_a_cover_waits_on_level_zero`: a model of the Client's ADR-0019 retention, fed every message from the change through the catch-up, shows each child's region drawn on every tick, and level 1 only with the caught-up mesh. Without the unload it fails.
+
+### Figures, 2026-11-20
+
+The table in [ticket 05](./05-one-light-solve-per-chunk.md#figures-2026-11-20) covers this ticket's columns: against fa6fd574, level-1 meshes fall 38% at 12 m/s, 28% at 64 m/s and 40% after a teleport, and level-1 mesh CPU 33%, 25% and 34%; level-1 generations fall 24% at 12 m/s. Holes are as many as at ticket 01: none in `flight`, 7 frames in each `sprint-flight` run against 7 to 11, 104 to 140 after a teleport against 74 to 156; no rule holes.
