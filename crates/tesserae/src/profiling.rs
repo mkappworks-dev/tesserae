@@ -109,8 +109,7 @@ fn cause_columns() -> Stages<Vec<(usize, &'static str)>> {
 /// Camera orders recorded: the Player's and one per coarse level.
 const CAMERAS: usize = 8;
 
-/// Bevy's default cascade count; a sun with more records only these.
-const CASCADES: usize = 4;
+const CASCADES: usize = crate::client::chunk_view::SUN_CASCADE_BOUNDS.len();
 
 /// What each view draws, counted from the visibility lists the render world
 /// extracts.

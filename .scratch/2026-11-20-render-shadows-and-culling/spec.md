@@ -1,6 +1,6 @@
 # Shadows and culling: the GPU cost of drawing Chunks
 
-Status: ready-for-agent. Decisions Q1 to Q18 were settled in a grilling round on
+Status: done (2026-11-21): every ticket is done or wontfix. Decisions Q1 to Q18 were settled in a grilling round on
 2026-11-20.
 
 Source: branch `tech/render-shadows-and-culling`, cut from `main` at `5285969a`.
@@ -46,7 +46,9 @@ Tickets in this order (Q18), each gated alone:
 
 1. **Markers and baseline.** A marker after Bevy's early shadow pass, the
    comment in `profiling/gpu.rs` corrected, and the baseline on `origin/main`:
-   timing, GPU, and a `no-shadows` series for the shadows' total.
+   timing, GPU, and a `no-shadows` series for the shadows' total. The shadow
+   markers were dropped after the gates: the GPU overlaps the cascades with
+   what follows, so their span read a tenth of the shadows' cost.
 2. **Indirect validation off** in release on macOS.
 3. **1a: no cutout casters in the far cascades.**
 4. **1d: a shadow-only vertex path.**
@@ -86,7 +88,8 @@ not move) and 1c (ticket 07: emptying the far cascades outright saved at most
 
 - **Markers first (Q9).** Every later gate reads the corrected spans. The
   `no-shadows` switch gives the shadows' whole cost where Apple's
-  encoder-boundary timestamps blur passes together.
+  encoder-boundary timestamps blur passes together. In the end it alone did:
+  ticket 01 dropped the shadow markers, and the gates read the GPU frame.
 - **Indirect validation off (Q10).** On macOS the backends are
   `Backends::from_env().unwrap_or(Backends::METAL)` and release builds drop
   `VALIDATION_INDIRECT_CALL`, which Bevy decides inside `WgpuSettings::default`
@@ -110,7 +113,8 @@ not move) and 1c (ticket 07: emptying the far cascades outright saved at most
   (2026-11-21): far is now cascade 2, from 61 m, and 1c measures whether
   caching cascade 1 (10 to 61 m) as well pays.
 - **1a: no cutout in the last cascade.** A system after Bevy's caster
-  visibility removes cutout layers from cascade 3's visible list, from 61 m.
+  visibility removes cutout layers from the last cascade's visible list, from
+  61 m (cascade 2 of 1b's three).
   Cutout is the caster that runs a fragment shader in the shadow pass. Built
   first for cascades 2 and 3, from 25 m; chosen on captures (2026-11-21) for
   61 m, which kept 75 to 99% of the saving and shaded trees seen in flight.
@@ -153,7 +157,8 @@ not move) and 1c (ticket 07: emptying the far cascades outright saved at most
   seen from the sun, so turning never invalidates one; the margin is adjusted on
   captures.
 - **1c, what they hold (Q4).** Terrain only. The near cascades are redrawn every
-  frame with every caster, so avatars and drops cast within 25 m only.
+  frame with every caster, so avatars and drops cast within 25 m only (moot:
+  1c is `wontfix`).
 - **1c, when one redraws (Q5, Q17)**: when the camera leaves its margin, when a
   level-0 Chunk inside it lands, is replaced or is released, or when the sun's
   direction changes at all; at most one cached cascade a frame, taking turns,

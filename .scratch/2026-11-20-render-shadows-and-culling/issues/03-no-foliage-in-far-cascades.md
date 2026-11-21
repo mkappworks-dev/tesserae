@@ -11,9 +11,9 @@ Cutout layers (foliage) are the casters that run a fragment shader in the shadow
 pass, once per cascade that lists them.
 
 - A system after Bevy's directional caster visibility removes every cutout Chunk
-  layer from the last cascade's visible list, cascade 3 (from 61 m at the
-  defaults; chosen on captures over cascades 2 and 3, from 25 m). Nearer
-  cascades are untouched.
+  layer from the last cascade's visible list, from 61 m: cascade 3 of Bevy's
+  four, then cascade 2 of 06's three. Chosen on captures over cascades 2 and 3
+  of four, from 25 m. Nearer cascades are untouched.
 - Which cascades are far is one named constant, revisited by ticket 06.
 
 ## Acceptance criteria

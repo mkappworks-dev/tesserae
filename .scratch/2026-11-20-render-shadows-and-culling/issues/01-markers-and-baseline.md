@@ -37,7 +37,8 @@ reads.
       what each span holds. Dropped 2026-11-21, see Comments.
 - [x] Draws per frame counted for the camera and each cascade.
 - [x] The baseline numbers above, with provenance, in Comments.
-- [ ] `cargo fmt --all --check`, `npm run fmt:check`, `scripts/cargo-ci` green.
+- [x] `cargo fmt --all --check` and `npm run fmt:check` green; `scripts/cargo-ci`
+      left to the PR's CI (2026-11-21, your call).
 
 ## Comments
 

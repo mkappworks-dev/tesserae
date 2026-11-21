@@ -232,9 +232,8 @@ impl Placeholders {
         self.0
             .keys()
             .map(|&quads| {
-                let vertices = quads * VERTICES_PER_QUAD;
-                let index_bytes = if vertices > U16_VERTICES { 4 } else { 2 };
-                (vertices + quads * 6 * index_bytes) as usize
+                let index_bytes = if wide_indices(quads) { 4 } else { 2 };
+                (quads * VERTICES_PER_QUAD + quads * 6 * index_bytes) as usize
             })
             .sum()
     }
@@ -264,7 +263,7 @@ pub fn bucket(quads: u32) -> u32 {
 pub fn placeholder(quads: u32) -> Mesh {
     let vertices = quads * VERTICES_PER_QUAD;
     let indices = (0..quads).flat_map(|q| QUAD_CORNERS.map(|c| q * VERTICES_PER_QUAD + c as u32));
-    let indices = if vertices > U16_VERTICES {
+    let indices = if wide_indices(quads) {
         Indices::U32(indices.collect())
     } else {
         Indices::U16(indices.map(|i| i as u16).collect())
@@ -283,6 +282,10 @@ pub fn placeholder(quads: u32) -> Mesh {
 /// How many vertices two-byte indices reach.
 const U16_VERTICES: u32 = 1 << 16;
 const U16_QUADS: u32 = U16_VERTICES / VERTICES_PER_QUAD;
+
+fn wide_indices(quads: u32) -> bool {
+    quads * VERTICES_PER_QUAD > U16_VERTICES
+}
 
 /// What `chunk_vertex.wesl` makes of one vertex.
 #[cfg(test)]

@@ -512,8 +512,6 @@ mod tests {
         assert!(camera(&mut app).abs_diff_eq(open, 1e-3));
     }
 
-    /// A new mesh for a layer keeps its entity and, in the same bucket, its
-    /// placeholder.
     #[test]
     fn a_wall_remeshed_nearer_pulls_the_camera_in() {
         let mut app = app(View::ThirdPerson);

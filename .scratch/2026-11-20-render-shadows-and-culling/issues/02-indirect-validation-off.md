@@ -49,3 +49,7 @@ markers add about 1 ms to every GPU frame here (see 01), the same for both.
 Captures: 02 against 01 differ by 0 to 58 pixels, as `origin/main`'s own runs
 do (up to 58 in `stationary`, 32 in `transparency`). A debug build launches and
 draws the same image (45 pixels off release).
+
+The macOS test (`a_mac_draws_on_metal_and_validates_indirect_draws_in_debug_only`)
+cannot run in CI, which tests on Linux: run here on 2026-11-21 in debug and in
+release, both passing.

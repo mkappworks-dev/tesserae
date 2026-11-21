@@ -371,10 +371,10 @@ itself about 3.7% of median.
   GPU overlaps across one is charged to whichever side it ends on, and systems
   outside Bevy's sets can fall on either side of `view_start`, so shared work
   can land in either camera's view. The sun's cascades are drawn inside the
-  prepass set, before `prepass_end`, but overlap what follows: a marker pair
-  around them read a tenth of what the `no-shadows` switch takes off the frame,
-  which is the shadows' cost. `prepass_end` to `main_start`, `setup_ms` in
-  `streaming.json`, is indirect parameter builds and the shadow work that
-  overlaps into them. About 20% of frames return an earlier frame's value for
-  the last markers; those cells are left empty, and `streaming.json` reports how
-  many frames have a `frame_end`.
+  prepass set, before `prepass_end`, but the GPU overlaps them with what
+  follows, so no marker pair can bracket them: their cost is the GPU frame's
+  difference under the `no-shadows` switch. `prepass_end` to `main_start`,
+  `setup_ms` in `streaming.json`, is indirect parameter builds and the shadow
+  work that overlaps into them. About 20% of frames return an earlier frame's
+  value for the last markers; those cells are left empty, and `streaming.json`
+  reports how many frames have a `frame_end`.

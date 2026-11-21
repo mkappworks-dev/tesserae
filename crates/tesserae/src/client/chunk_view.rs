@@ -279,7 +279,7 @@ fn add_view_systems(app: &mut App) {
     );
     app.add_session_systems(
         PostUpdate,
-        drop_cutout_from_far_cascades.after(bevy::light::check_dir_light_mesh_visibility),
+        drop_cutout_from_last_cascade.after(bevy::light::check_dir_light_mesh_visibility),
     );
 }
 
@@ -392,7 +392,7 @@ enum Casts {
 
 /// Bevy's default far bounds less its 25 m one: that cascade's pass bought no
 /// visible difference.
-const SUN_CASCADE_BOUNDS: [f32; 3] = [10.0, 60.82, 150.0];
+pub(crate) const SUN_CASCADE_BOUNDS: [f32; 3] = [10.0, 60.82, 150.0];
 
 /// Cutout casts into the cascades before this one, out to 61 m. From 25 m saved
 /// a little more but left trees in flight unshaded.
@@ -401,7 +401,7 @@ const FIRST_CASCADE_WITHOUT_CUTOUT: usize = 2;
 #[derive(Component)]
 struct NearCascadesOnly;
 
-fn drop_cutout_from_far_cascades(
+fn drop_cutout_from_last_cascade(
     mut suns: Query<&mut bevy::camera::visibility::CascadesVisibleEntities>,
     near_only: Query<(), With<NearCascadesOnly>>,
 ) {
@@ -2298,9 +2298,9 @@ mod tests {
         assert_eq!(drawn(&mut app), 0);
     }
 
-    /// Bevy's caster check under a sun whose four cascades each take in the
-    /// whole test World, so only an edit to the lists can leave a caster out.
-    /// The view the cascades belong to.
+    /// Bevy's caster check under a sun whose cascades each take in the whole
+    /// test World, so only an edit to the lists can leave a caster out; returns
+    /// the view the cascades belong to.
     fn sun_over_everything(app: &mut App) -> Entity {
         use bevy::camera::primitives::{CascadesFrusta, Frustum};
         let everything = Frustum(bevy::shape::ViewFrustum::from_clip_from_world(
