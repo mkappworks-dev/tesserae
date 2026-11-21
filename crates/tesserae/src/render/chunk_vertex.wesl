@@ -20,22 +20,14 @@ struct ChunkVertex {
 }
 
 // Mirrors bevy_pbr's VertexOutput, which the fragment stage rebuilds from this.
-// CHUNK_SHADOW, the sun's shadow pass, keeps only what its alpha test reads.
 struct ChunkVertexOutput {
     @builtin(position) clip_position: vec4<f32>,
-    @if(!CHUNK_SHADOW)
     @location(0) world_position: vec4<f32>,
-    @if(!CHUNK_SHADOW || MAY_DISCARD)
     @location(1) world_normal: vec3<f32>,
-    @if(!CHUNK_SHADOW || MAY_DISCARD)
     @location(2) uv: vec2<f32>,
-    @if(!CHUNK_SHADOW)
     @location(6) @interpolate(flat) instance_index: u32,
-    @if(!CHUNK_SHADOW || MAY_DISCARD)
     @location(10) @interpolate(flat) material: u32,
-    @if(!CHUNK_SHADOW)
     @location(11) @interpolate(flat) light: u32,
-    @if(!CHUNK_SHADOW)
     @location(12) @interpolate(flat) level: u32,
     @if(UNCLIPPED_DEPTH_ORTHO_EMULATION)
     @location(13) unclipped_depth: f32,
@@ -142,13 +134,6 @@ fn expand(at: u32, vertex: u32) -> Expanded {
     return out;
 }
 
-// The shadow pass's whole decode. Through `expand` rather than a decode of its
-// own: Metal compiles with fast math, so any other shape of the same arithmetic
-// may round the shadow map differently. The compiler drops the unused reads.
-fn expand_position(at: u32, vertex: u32) -> vec3<f32> {
-    return expand(at, vertex).position;
-}
-
 fn transform_vertex(in: ChunkVertex) -> ChunkVertexOutput {
     // The tag is where the layer's words start; the vertex, less the mesh's
     // own first vertex, is the index the placeholder drew it by.
@@ -161,40 +146,27 @@ fn transform_vertex(in: ChunkVertex) -> ChunkVertexOutput {
         out.clip_position = vec4<f32>(2.0, 2.0, 0.5, 1.0);
         return out;
     }
-@if(CHUNK_SHADOW && !MAY_DISCARD) {
-    let world_from_local = mesh_functions::get_world_from_local(in.instance_index);
-    let world_position = mesh_functions::mesh_position_local_to_world(
-        world_from_local,
-        vec4<f32>(expand_position(at, vertex), 1.0),
-    );
-    out.clip_position = position_world_to_clip(world_position.xyz);
-}
-@else {
     let quad = expand(at, vertex);
 
     let world_from_local = mesh_functions::get_world_from_local(in.instance_index);
 
-    let world_position = mesh_functions::mesh_position_local_to_world(
+    out.world_position = mesh_functions::mesh_position_local_to_world(
         world_from_local,
         vec4<f32>(quad.position, 1.0),
     );
-    out.clip_position = position_world_to_clip(world_position.xyz);
+    out.clip_position = position_world_to_clip(out.world_position.xyz);
     out.world_normal = mesh_functions::mesh_normal_local_to_world(
         quad.normal,
         in.instance_index,
     );
     out.uv = quad.uv;
-    out.material = quad.material;
-@if(!CHUNK_SHADOW) {
-    out.world_position = world_position;
-    out.instance_index = in.instance_index;
-    out.light = quad.light;
-    out.level = quad.level;
-}
-}
 @if(UNCLIPPED_DEPTH_ORTHO_EMULATION) {
     out.unclipped_depth = out.clip_position.z;
     out.clip_position.z = min(out.clip_position.z, 1.0);
 }
+    out.instance_index = in.instance_index;
+    out.material = quad.material;
+    out.light = quad.light;
+    out.level = quad.level;
     return out;
 }

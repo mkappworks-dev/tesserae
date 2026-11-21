@@ -1,6 +1,6 @@
 # 04: A shadow-only vertex path (1d)
 
-Status: ready-for-agent
+Status: wontfix
 Blocked by: 01
 
 Spec: [Shadows and culling](../spec.md).
@@ -47,3 +47,22 @@ against six of this): not quite pixel-identical. 1, 8 and 31 pixels differ in
 every run, by 1 (hill, down) to 7 (trees) levels, all from the opaque
 shadow-only pipeline (bisected: cutout and colour are exact). Run-to-run noise
 of the commit before itself is 100 to 1,600 pixels a view.
+
+Gate (2026-11-21), against 03, release `profiling` builds, load 5 to 6: fails,
+reverted. Its target did not move beyond run spread in any fixture.
+
+| GPU series, p50 ms (03 → 04) | shadow span | GPU frame |
+| --- | --- | --- |
+| flight | 0.155 → 0.152 | 3.37 → 3.41 |
+| active | 0.151 → 0.150 | 3.51 → 3.43 |
+| transparency | 0.155 → 0.149 | 3.51 → 3.51 |
+| stationary | 0.155 → 0.155 | 2.99 → 2.97 |
+| sprint-flight | 0.166 → 0.167 | 3.45 → 3.43 |
+
+Frame time is no worse: a tie-break of 03, 04 and 05 run back to back
+(03-04-05-05-04-03, timing only, pooled p50) gave 2.98 → 3.02 ms in `flight`,
+3.14 → 3.27 in `active`, 3.18 → 3.17 in `transparency` and 2.77 → 2.72 in
+`stationary`, mixed in sign and inside the spread. After 03 the cascades hold
+no cutout past 25 m, and the opaque shadow pass's vertex decode is too small a
+share of the frame for a lighter decode to show. Reopen if 06 or 07 leaves the
+shadow pass's vertex work a measured cost.
