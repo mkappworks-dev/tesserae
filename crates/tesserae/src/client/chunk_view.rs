@@ -390,8 +390,9 @@ enum Casts {
     Everywhere,
 }
 
-/// Cascades from this index on are far: at Bevy's default bounds, from 25 m.
-const FIRST_FAR_CASCADE: usize = 2;
+/// Cutout casts into the cascades before this one: at Bevy's default bounds, out
+/// to 61 m. From 25 m saved a little more but left trees in flight unshaded.
+const FIRST_CASCADE_WITHOUT_CUTOUT: usize = 3;
 
 #[derive(Component)]
 struct NearCascadesOnly;
@@ -402,7 +403,7 @@ fn drop_cutout_from_far_cascades(
 ) {
     for mut sun in &mut suns {
         for cascades in sun.entities.values_mut() {
-            for cascade in cascades.iter_mut().skip(FIRST_FAR_CASCADE) {
+            for cascade in cascades.iter_mut().skip(FIRST_CASCADE_WITHOUT_CUTOUT) {
                 cascade
                     .entities
                     .retain(|&entity| !near_only.contains(entity));
@@ -2332,7 +2333,7 @@ mod tests {
     }
 
     #[test]
-    fn leaves_cast_in_the_two_near_cascades_only_and_ground_in_all_four() {
+    fn leaves_cast_in_the_three_near_cascades_only_and_ground_in_all_four() {
         let mut app = app();
         let (leafy, bare) = (ChunkCoord::new(0, 0, 0), ChunkCoord::new(1, 0, 0));
         send_mesh(&mut app, leafy, leaves());
@@ -2346,7 +2347,7 @@ mod tests {
         assert_eq!(cascades.len(), 4);
         for (i, cascade) in cascades.iter().enumerate() {
             assert!(cascade.contains(&ground), "ground in cascade {i}");
-            assert_eq!(cascade.contains(&canopy), i < 2, "leaves in cascade {i}");
+            assert_eq!(cascade.contains(&canopy), i < 3, "leaves in cascade {i}");
         }
     }
 

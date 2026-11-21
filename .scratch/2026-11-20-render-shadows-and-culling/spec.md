@@ -105,9 +105,11 @@ Item 2 (GPU occlusion culling) and item 3 (underground visibility culling) are
   fixture shows it removing more than 30% of drawn quads.
 - **Far means cascades 2 and 3 (Q16)**, from 25 m at the defaults; revisited if
   1b changes the count or the bounds.
-- **1a: no cutout in far cascades.** A system after Bevy's caster visibility
-  removes cutout layers from the far cascades' visible lists. Cutout is the
-  caster that runs a fragment shader in the shadow pass.
+- **1a: no cutout in the last cascade.** A system after Bevy's caster
+  visibility removes cutout layers from cascade 3's visible list, from 61 m.
+  Cutout is the caster that runs a fragment shader in the shadow pass. Built
+  first for cascades 2 and 3, from 25 m; chosen on captures (2026-11-21) for
+  61 m, which kept 75 to 99% of the saving and shaded trees seen in flight.
 - **1d: shadow-only vertex path (Q12).** The extension's `specialize` sees the
   directional shadow key and adds a shader def; the vertex shader then computes
   the position only, skipping the (Material, light) table read, the UVs and the

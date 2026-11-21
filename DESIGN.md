@@ -1055,7 +1055,7 @@ Windows/Linux).
   **M3+** on macOS, forbid MSAA, and force a global forward-or-deferred choice.
 - 0.20 renamed/moved a lot: bloom/DOF/motion-blur → `bevy_post_process`, AA →
   `bevy_anti_alias`, light types → `bevy_light`. Shaders are **WESL**, not WGSL.
-- The sun's far cascades hold no cutout casters: a system after Bevy's
+- The sun's last cascade holds no cutout casters: a system after Bevy's
   `check_dir_light_mesh_visibility` edits `CascadesVisibleEntities`, which
   extraction reads as each cascade's caster list. If an upgrade moves that check
   or culls cascades elsewhere, `chunk_view`'s cascade test, which runs Bevy's
