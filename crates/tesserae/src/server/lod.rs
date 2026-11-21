@@ -1757,6 +1757,9 @@ fn dispatch_meshes(
 }
 
 #[cfg(test)]
+mod agreement;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::server::edit::set_voxel;
