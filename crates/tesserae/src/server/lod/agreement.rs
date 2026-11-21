@@ -27,6 +27,9 @@ struct Rates {
     columns: usize,
     level_zero_wet: usize,
     wet_differs: usize,
+    /// Columns whose level-0 centre is wet or dry unlike a neighbouring column's.
+    coastal: usize,
+    coastal_dried: usize,
     top_differs: usize,
     level_zero_trees: usize,
 }
@@ -222,6 +225,14 @@ impl Terra {
                 let centre = coarse.map(|g| g * span + span / 2);
                 let fine = self.ground(0, centre);
                 let seen = self.ground(level, coarse);
+                let coastal =
+                    [[span, 0], [-span, 0], [0, span], [0, -span]]
+                        .iter()
+                        .any(|[dx, dz]| {
+                            self.ground(0, [centre[0] + dx, centre[1] + dz]).wet != fine.wet
+                        });
+                rates.coastal += usize::from(coastal);
+                rates.coastal_dried += usize::from(coastal && fine.wet && !seen.wet);
                 rates.columns += 1;
                 rates.level_zero_wet += usize::from(fine.wet);
                 rates.wet_differs += usize::from(fine.wet != seen.wet);
@@ -281,15 +292,18 @@ fn coarse_ground_agrees_with_level_zero_at_each_column_centre_over_terra_coast_a
             terra.world.seed
         );
         println!(
-            "level  columns  level 0 wet  wet/dry differs  top Material differs  level 0 stands a tree"
+            "level  columns  level 0 wet  wet/dry differs  coastal  coastal dry, level 0 wet  \
+             top Material differs  level 0 stands a tree"
         );
         for level in 1..terra.generators.levels() {
             let r = terra.rates(level, window);
             println!(
-                "{level:>5}  {:>7}  {:>10.1}%  {:>14.1}%  {:>19.1}%  {:>20.1}%",
+                "{level:>5}  {:>7}  {:>10.1}%  {:>14.1}%  {:>7}  {:>23.1}%  {:>19.1}%  {:>20.1}%",
                 r.columns,
                 r.share(r.level_zero_wet),
                 r.share(r.wet_differs),
+                r.coastal,
+                100.0 * r.coastal_dried as f64 / r.coastal.max(1) as f64,
                 r.share(r.top_differs),
                 r.share(r.level_zero_trees),
             );
