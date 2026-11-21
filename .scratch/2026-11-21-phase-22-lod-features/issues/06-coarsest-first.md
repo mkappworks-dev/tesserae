@@ -17,5 +17,5 @@ Level 0's own priority is unchanged.
 
 - [ ] A Bevy app test: from a cold start, the outermost level's first meshes
       land before the inner coarse levels'.
-- [ ] Time to a whole field and to each level against 01's, in Comments, with no
-      level-0 fill-time regression.
+- [ ] Time to a whole field and to each level, measured in 09's series; here, a
+      test that level 0's job order is unchanged.

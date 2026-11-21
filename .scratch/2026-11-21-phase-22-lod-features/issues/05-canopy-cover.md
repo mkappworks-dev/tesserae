@@ -21,6 +21,7 @@ Voxel, so forests have a silhouette at 8 m and are a colour at 16 and 32 m.
 - [ ] A forest's edge agrees with level 0's tree density within one coarse
       column, in 01's agreement test.
 - [ ] No Canopy cover on water, Structures or fields.
-- [ ] Coarse-Chunk time at levels 3 to 5 against 02's, in Comments.
+- [ ] Coarse-Chunk CPU time per level from an interleaved micro-benchmark
+      against the integration branch's tip, in Comments.
 - [ ] Captures of forest and open ground across the level 2 to 3 join and at 2
-      and 4 km, shown to you.
+      and 4 km; with 02 to 04's, the first review batch, shown to you.
