@@ -390,9 +390,13 @@ enum Casts {
     Everywhere,
 }
 
-/// Cutout casts into the cascades before this one: at Bevy's default bounds, out
-/// to 61 m. From 25 m saved a little more but left trees in flight unshaded.
-const FIRST_CASCADE_WITHOUT_CUTOUT: usize = 3;
+/// Bevy's default far bounds less its 25 m one: that cascade's pass bought no
+/// visible difference.
+const SUN_CASCADE_BOUNDS: [f32; 3] = [10.0, 60.82, 150.0];
+
+/// Cutout casts into the cascades before this one, out to 61 m. From 25 m saved
+/// a little more but left trees in flight unshaded.
+const FIRST_CASCADE_WITHOUT_CUTOUT: usize = 2;
 
 #[derive(Component)]
 struct NearCascadesOnly;
@@ -820,6 +824,10 @@ fn spawn_light(mut commands: Commands, mut ambient: ResMut<GlobalAmbientLight>) 
             shadow_maps_enabled: shadows_enabled(),
             ..default()
         },
+        bevy::light::CascadeShadowConfig {
+            bounds: SUN_CASCADE_BOUNDS.to_vec(),
+            ..default()
+        },
         Transform::from_xyz(1.0, 2.2, 0.8).looking_at(Vec3::ZERO, Vec3::Y),
         RenderLayers::layer(NEAR_LAYER),
     ));
@@ -1028,18 +1036,21 @@ mod tests {
         let mut app = App::new();
         app.init_resource::<GlobalAmbientLight>();
         app.world_mut().run_system_once(spawn_light).unwrap();
-        let mut suns = app
-            .world_mut()
-            .query::<(&DirectionalLight, &RenderLayers)>();
+        let mut suns = app.world_mut().query::<(
+            &DirectionalLight,
+            &RenderLayers,
+            &bevy::light::CascadeShadowConfig,
+        )>();
         let suns: Vec<_> = suns.iter(app.world()).collect();
         assert_eq!(
             suns.len(),
             1,
             "a second sun would light coarse terrain twice"
         );
-        let (sun, layers) = suns[0];
+        let (sun, layers, cascades) = suns[0];
         assert!(sun.shadow_maps_enabled);
         assert_eq!(*layers, RenderLayers::layer(NEAR_LAYER));
+        assert_eq!(cascades.bounds, SUN_CASCADE_BOUNDS);
     }
 
     /// `MinimalPlugins` rather than `DefaultPlugins`: these systems only need
@@ -2302,7 +2313,9 @@ mod tests {
                 ..default()
             },
             CascadesFrusta {
-                frusta: [(view, vec![everything; 4])].into_iter().collect(),
+                frusta: [(view, vec![everything; SUN_CASCADE_BOUNDS.len()])]
+                    .into_iter()
+                    .collect(),
             },
             ViewVisibility::VISIBLE,
             RenderLayers::layer(NEAR_LAYER),
@@ -2333,7 +2346,7 @@ mod tests {
     }
 
     #[test]
-    fn leaves_cast_in_the_three_near_cascades_only_and_ground_in_all_four() {
+    fn leaves_cast_in_the_two_near_cascades_only_and_ground_in_all_three() {
         let mut app = app();
         let (leafy, bare) = (ChunkCoord::new(0, 0, 0), ChunkCoord::new(1, 0, 0));
         send_mesh(&mut app, leafy, leaves());
@@ -2344,10 +2357,10 @@ mod tests {
         app.update();
 
         let cascades = cascades_of(&mut app, view);
-        assert_eq!(cascades.len(), 4);
+        assert_eq!(cascades.len(), 3);
         for (i, cascade) in cascades.iter().enumerate() {
             assert!(cascade.contains(&ground), "ground in cascade {i}");
-            assert_eq!(cascade.contains(&canopy), i < 3, "leaves in cascade {i}");
+            assert_eq!(cascade.contains(&canopy), i < 2, "leaves in cascade {i}");
         }
     }
 

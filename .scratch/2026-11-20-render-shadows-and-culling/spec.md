@@ -104,7 +104,9 @@ Item 2 (GPU occlusion culling) and item 3 (underground visibility culling) are
   passes, and the camera spans it could cut are about 0.4 ms. Reopen when a
   fixture shows it removing more than 30% of drawn quads.
 - **Far means cascades 2 and 3 (Q16)**, from 25 m at the defaults; revisited if
-  1b changes the count or the bounds.
+  1b changes the count or the bounds. 1b chose three cascades, 10, 61 and 150 m
+  (2026-11-21): far is now cascade 2, from 61 m, and 1c measures whether
+  caching cascade 1 (10 to 61 m) as well pays.
 - **1a: no cutout in the last cascade.** A system after Bevy's caster
   visibility removes cutout layers from cascade 3's visible list, from 61 m.
   Cutout is the caster that runs a fragment shader in the shadow pass. Built
