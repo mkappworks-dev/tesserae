@@ -215,9 +215,6 @@ def streaming(path, rows):
             'views': {c: {
                 'view_ms': span(f'{c}:view_start', f'{c}:view_end'),
                 'prepass_ms': span(f'{c}:view_start', f'{c}:prepass_end'),
-                'before_shadow_ms': span(f'{c}:view_start', f'{c}:shadow_start'),
-                'shadow_ms': span(f'{c}:shadow_start', f'{c}:shadow_end'),
-                'after_shadow_ms': span(f'{c}:shadow_end', f'{c}:prepass_end'),
                 'setup_ms': span(f'{c}:prepass_end', f'{c}:main_start'),
                 'opaque_ms': span(f'{c}:main_start', f'{c}:opaque_end'),
                 'transparent_ms': span(f'{c}:opaque_end', f'{c}:main_end'),

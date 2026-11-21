@@ -364,17 +364,17 @@ itself about 3.7% of median.
   level.
 - `frames.gpu.csv`, under `--instruments gpu` only, has GPU timestamps per
   frame: `frame_start`, `frame_end`, and per camera order `view_start`,
-  `shadow_start`, `shadow_end`, `prepass_end`, `main_start`, `opaque_end`,
-  `main_end` and `view_end`, in milliseconds since `frame_start`. Apple GPUs
-  sample timestamps only at encoder boundaries, so each marker is an empty
-  compute pass dispatching one workgroup between two of Bevy's passes. A marker
-  is ordered by the schedule: work the GPU overlaps across one is charged to
-  whichever side it ends on, systems outside Bevy's sets can fall on either side
-  of `view_start`. The sun's cascades are drawn inside the prepass set, between
-  `shadow_start` and `shadow_end`, after the GPU culls for them; `prepass_end`
-  to `main_start` is indirect parameter builds, the late shadow pass among them,
-  which draws nothing without occlusion culling. `streaming.json` reports
-  `shadow_ms`, `before_shadow_ms`, `after_shadow_ms` and `setup_ms` (that last
-  span) per view. About 20% of frames return an earlier frame's value for the
-  last markers; those cells are left empty, and `streaming.json` reports how
+  `prepass_end`, `main_start`, `opaque_end`, `main_end` and `view_end`, in
+  milliseconds since `frame_start`. Apple GPUs sample timestamps only at encoder
+  boundaries, so each marker is an empty compute pass dispatching one workgroup
+  between two of Bevy's passes. A marker is ordered by the schedule: work the
+  GPU overlaps across one is charged to whichever side it ends on, and systems
+  outside Bevy's sets can fall on either side of `view_start`, so shared work
+  can land in either camera's view. The sun's cascades are drawn inside the
+  prepass set, before `prepass_end`, but overlap what follows: a marker pair
+  around them read a tenth of what the `no-shadows` switch takes off the frame,
+  which is the shadows' cost. `prepass_end` to `main_start`, `setup_ms` in
+  `streaming.json`, is indirect parameter builds and the shadow work that
+  overlaps into them. About 20% of frames return an earlier frame's value for
+  the last markers; those cells are left empty, and `streaming.json` reports how
   many frames have a `frame_end`.
