@@ -157,3 +157,9 @@ are where the build is narrower or more exact than they say.
   with `TooBigToUndo`, so a placement is always one undo group. An undo lands in
   one tick, and its Edit events past 1,024 in that tick wait in order and reach
   Mods 1,024 a tick after it, so a Mod hears every Voxel of it.
+
+## Amended by ADR-0035
+
+Coarse levels no longer leave Structures out: from step 22 each stands as an
+Impostor at every coarse level, from the same draws. Plants other than trees
+stay out. See [ADR-0035](0035-a-coarse-level-draws-level-0s-answer.md).

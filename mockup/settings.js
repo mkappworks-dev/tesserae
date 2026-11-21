@@ -26,6 +26,11 @@ const settingsDefaults = {
   aa: "SMAA",
   renderScale: "100%",
   fps: "No limit",
+  // Proposed in step 22 (.scratch/2026-11-21-phase-22-lod-features/spec.md).
+  distancePreset: "Detailed",
+  reachKm: 8,
+  detailM: 384,
+  customDistance: { reachKm: 6, detailM: 288 },
   sound: 100,
   music: 50,
   effects: 100,
@@ -134,6 +139,7 @@ const settingsCategories = [
   "Key bindings",
   "Controller",
   "Display",
+  "Distance",
   "Audio",
   "Accessibility",
 ];
@@ -250,13 +256,20 @@ function ensureSettings() {
   state.settingsTab ||= "Behavior";
 }
 
-function settingsControl(label, key, kind, options = [], hint = "") {
+function settingsControl(
+  label,
+  key,
+  kind,
+  options = [],
+  hint = "",
+  disabled = false,
+) {
   const value = state.settingsDraft[key];
   let control;
   if (kind === "toggle")
     control = `<input class="toggle" aria-label="${label}" data-bind="settings.${key}" type="checkbox" ${value ? "checked" : ""}>`;
   else if (kind === "range")
-    control = `<div class="setting-slider"><output id="setting-${key}">${value}</output><input class="input" aria-label="${label}" data-bind="settings.${key}" type="range" min="${options[0]}" max="${options[1]}" step="${options[2]}" value="${value}"></div>`;
+    control = `<div class="setting-slider"><output id="setting-${key}">${value}</output><input class="input" aria-label="${label}" data-bind="settings.${key}" type="range" min="${options[0]}" max="${options[1]}" step="${options[2]}" value="${value}" ${disabled ? "disabled" : ""}></div>`;
   else control = customSelect(label, "settings." + key, value, options);
   return `<div class="setting-row"><div class="setting-copy"><b>${label}</b>${hint ? `<small>${hint}</small>` : ""}</div>${control}</div>`;
 }
@@ -287,6 +300,95 @@ function quickReference() {
   return QUICK_REFERENCE.map(
     ([n, verb]) => `[${d.bindings[n] || "unbound"}] ${verb}`,
   ).join("<br>");
+}
+
+// Level 0 is the Game's view distance and a 32-Voxel Chunk of 1 m Voxels; coarse level k
+// ends at min(unit * 2^k, reach), three Cells above and below (lod_rings.rs).
+const VIEW_DISTANCE_M = 192;
+const CELL_M = 32;
+const ROWS = 7;
+// Step 6's 86 MB for levels 1-5 at 4 km, less packed quads' 70%, over its ~502 Cell columns.
+const KB_PER_COLUMN = 52;
+const DISTANCE_PRESETS = [
+  [
+    "Balanced",
+    192,
+    4,
+    "Today's rings: each Voxel size doubles from 192 m. Choose Custom to set your own.",
+  ],
+  [
+    "Detailed",
+    384,
+    8,
+    "Holds each Voxel size twice as far, to 8 km. The proposed default. Choose Custom to set your own.",
+  ],
+];
+
+function distanceLevels(unitM, reachM) {
+  const levels = [{ level: 0, voxel: 1, from: 0, to: VIEW_DISTANCE_M }];
+  for (let k = 1; levels.at(-1).to < reachM; k++) {
+    const to = Math.min(unitM * 2 ** k, reachM);
+    const cell = CELL_M * 2 ** k;
+    const radius = Math.ceil(to / cell);
+    const columns = Math.round(Math.PI * radius * radius);
+    levels.push({
+      level: k,
+      voxel: 2 ** k,
+      from: levels.at(-1).to,
+      to,
+      chunks: columns * ROWS,
+      mb: (columns * KB_PER_COLUMN) / 1024,
+    });
+  }
+  return levels;
+}
+
+const metres = (m) =>
+  m >= 1000 ? `${(m / 1000).toFixed(m % 1000 ? 1 : 0)} km` : `${m} m`;
+
+function distancePanel() {
+  const d = state.settingsDraft;
+  const levels = distanceLevels(d.detailM, d.reachKm * 1000);
+  const coarse = levels.slice(1);
+  const total = coarse.reduce((sum, l) => sum + l.mb, 0);
+  const rows = levels
+    .map(
+      (l) =>
+        `<tr><td>${l.level}</td><td>${l.voxel} m</td><td>${metres(l.from)} – ${metres(l.to)}</td><td>${l.level ? l.chunks.toLocaleString() : "Full detail"}</td><td>${l.level ? `${l.mb.toFixed(1)} MB` : "—"}</td></tr>`,
+    )
+    .join("");
+  return (
+    `<table class="distance-table"><thead><tr><th>Level</th><th>Voxel</th><th>Ring</th><th>Chunks</th><th>Memory</th></tr></thead><tbody>${rows}</tbody></table>` +
+    `<div class="notice">${coarse.length} coarse levels, about ${total.toFixed(0)} MB of distant terrain before trees and buildings. An estimate; the Game sets the most its World allows.</div>`
+  );
+}
+
+const presetHint = (name) =>
+  DISTANCE_PRESETS.find(([n]) => n === name)?.[3] ||
+  "Your own reach and detail, kept while you try a preset.";
+
+function choosePreset(name) {
+  const d = state.settingsDraft;
+  const preset = DISTANCE_PRESETS.find(([n]) => n === name);
+  const { detailM, reachKm } = preset
+    ? { detailM: preset[1], reachKm: preset[2] }
+    : d.customDistance;
+  Object.assign(d, { distancePreset: name, detailM, reachKm });
+}
+
+// Moving a slider off a preset's values makes the draft Custom and remembers it.
+function refreshDistance() {
+  const d = state.settingsDraft;
+  const preset = DISTANCE_PRESETS.find(
+    ([, unit, reach]) => unit === d.detailM && reach === d.reachKm,
+  );
+  d.distancePreset = preset ? preset[0] : "Custom";
+  if (!preset) d.customDistance = { detailM: d.detailM, reachKm: d.reachKm };
+  setSelectValue($("[data-bind='settings.distancePreset']"), d.distancePreset);
+  const hint = $("#distance-preset-hint");
+  if (hint) hint.textContent = presetHint(d.distancePreset);
+  const panel = $("#distance-panel");
+  if (panel) panel.innerHTML = distancePanel();
 }
 
 function settingsBody() {
@@ -439,7 +541,36 @@ function settingsBody() {
           ["Small", "Medium", "Large"],
           mapHint("Shown only while the minimap is on."),
         ) +
-        `<p class="muted">View distance, textures, shadows, and simulation settings stay unchanged.</p>`
+        `<p class="muted">Textures, shadows, and simulation settings stay unchanged. Distance has its own tab.</p>`
+      );
+    case "Distance":
+      return (
+        group("Distant terrain") +
+        row(
+          "Preset",
+          "distancePreset",
+          "select",
+          ["Balanced", "Detailed", "Custom"],
+          `<span id="distance-preset-hint">${presetHint(state.settingsDraft.distancePreset)}</span>`,
+        ) +
+        row(
+          "Reach",
+          "reachKm",
+          "range",
+          [2, 8, 1],
+          "How far distant terrain is drawn, in km.",
+          state.settingsDraft.distancePreset !== "Custom",
+        ) +
+        row(
+          "Detail",
+          "detailM",
+          "range",
+          [192, 384, 32],
+          "Higher holds each Voxel size further out: sharper, and more memory.",
+          state.settingsDraft.distancePreset !== "Custom",
+        ) +
+        `<div id="distance-panel">${distancePanel()}</div>` +
+        `<p class="muted">The nearest ${VIEW_DISTANCE_M} m is always full detail; the Game sets how far it allows.</p>`
       );
     case "Audio":
       return (
@@ -587,6 +718,7 @@ function settings() {
     "keyboard",
     "controller",
     "display",
+    "distance",
     "audio",
     "accessibility",
   ];

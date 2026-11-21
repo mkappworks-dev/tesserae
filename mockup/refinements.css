@@ -556,3 +556,19 @@
 .game.strong-contrast .editor {
   background: #191c20;
 }
+.game .distance-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+  font-size: calc(13px * var(--text-scale));
+}
+.game .distance-table th,
+.game .distance-table td {
+  padding: 6px 8px;
+  text-align: right;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+.game .distance-table th:first-child,
+.game .distance-table td:first-child {
+  text-align: left;
+}

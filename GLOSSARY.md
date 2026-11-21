@@ -165,7 +165,25 @@ Use "Cell" whenever the unit is distance and "Chunk" whenever it is data.
 aggregates. Level 0 is full detail.
 
 **LOD ring** — what one LOD level draws: the Cells between an inner and an outer
-distance from the Eye, in metres. The outer distance doubles with each level.
+distance from the Eye, in metres. Its outer distance is set by the Quality
+curve.
+
+**Quality curve** — the outer distance of each LOD level's ring, in metres, one
+value per level: a unit and a reach. A Player's preference, which the Server
+clamps to the Game's ceiling and holds; never derived from a screen's size.
+
+**Impostor** — a Tree or Structure drawn at a coarse LOD level from the same
+pure draw that stands it at level 0: in the same place, in coarse Voxels, kept
+where the half-volume vote would lose it. Never stored and never edited.
+_Avoid_: billboard, proxy
+
+**Canopy cover** — what a coarse Voxel draws where its Voxel is too large for
+single trees to read: the share of its column that level 0's trees would cover,
+from the same Biome and density fields, shown as a canopy rather than as
+Impostors.
+
+**Coarse agreement** — a coarse column answers water or land, and its top
+Material, as level 0 does at that column's centre in metres.
 
 **Distance fog** — how much of a surface's colour is replaced by the fog colour,
 as a function of its distance from the Eye in metres. Sized from the full-detail

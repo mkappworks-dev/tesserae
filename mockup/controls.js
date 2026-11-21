@@ -17,6 +17,8 @@ function icon(name, size = 20) {
       '<path d="M7 7h10a4 4 0 0 1 4 3l1 7a2 2 0 0 1-3.4 1.7L16 16H8l-2.6 2.7A2 2 0 0 1 2 17l1-7a4 4 0 0 1 4-3Z"/><path d="M7 10v5M4.5 12.5h5M16 11h.01M19 14h.01"/>',
     display:
       '<rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/>',
+    distance:
+      '<path d="M2 20h20M5 20l5-9 3 5 2-3 4 7"/><circle cx="17" cy="6" r="2"/>',
     audio:
       '<path d="m11 4-6 5H2v6h3l6 5V4ZM15 8a6 6 0 0 1 0 8M18 5a10 10 0 0 1 0 14"/>',
     accessibility:
