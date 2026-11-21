@@ -154,8 +154,8 @@ captures are reviewed in two batches, after 05 and at 09.
   **Detailed** (`u` 384 m), each with a reach from 2 to 8 km.
 - **Default (Q15, Q20).** `u` 384 m and 8192 m. Terra's ceiling rises from
   3000 m to 8192 m, and the engine's default `lod_distance_m` from 4096 m.
-  It becomes the default only when, on the M5 with Terra at `flight` and
-  `stationary`: coarse vertex memory on the GPU, Impostors included, is at most
+  It becomes the default only when, on the M5 with Terra at `stationary` and
+  `sprint-flight`: coarse vertex memory on the GPU, Impostors included, is at most
   192 MB; the
   whole field is drawn within 10 s of spawn; GPU frame is at most 1 ms over
   `main`; and level 0's fill time does not regress. If any fails, the default is
@@ -193,14 +193,16 @@ captures are reviewed in two batches, after 05 and at 09.
   placement generator's draws equal level 0's.
 - **Quality curve.** `lod_rings` tests for every preset and the clamp; level 0
   is unchanged by any curve.
-- **Budgets and shadows (ticket 07's reopening).** The packed-quads method:
-  interleaved timing rounds and a separate `--instruments gpu` series
-  (`scripts/profile-frames`), release `profiling` builds, quiet host, run in
-  mirrored order against `origin/main`. Each budget series also reports GPU
-  frame with shadows against the `no-shadows` switch and against a build whose
-  far cascades hold nothing. Reopen cascade caching only if the far cascade's
-  draws show in the shadows' cost, or level 0's radius passes 150 m by more
-  than the cascades' 25% margin.
+- **Budgets.** The packed-quads method: interleaved timing rounds and a
+  separate `--instruments gpu` series (`scripts/profile-frames`), release
+  `profiling` builds, quiet host, run in mirrored order against `origin/main`,
+  at `stationary` (steady draw cost and memory) and `sprint-flight` (streaming
+  and fill), at 01 and 09 only.
+- **Shadows (ticket 07's reopening).** No GPU series: step 22 adds no caster
+  and leaves level 0's radius as it is, the two triggers that ticket named. A
+  test checks no coarse-level mesh is on a shadow-casting layer, so the shadows
+  cost what they cost on `main`. Reopen cascade caching if either trigger
+  changes.
 - **Agreement compares the ground.** Water or land and top Material are read
   beneath any Impostor or Canopy cover, and only on columns no Edit or saved
   change reaches.
