@@ -22,5 +22,7 @@ Material. Over saved changes, the changed Voxels are used, as in 03.
       reach, at every coarse level.
 - [ ] A Creative placement or removal, once saved and evicted, shows at the
       coarse levels as it does today.
-- [ ] Coarse-Chunk time and memory against 03's, in Comments.
-- [ ] Captures of a Settlement at 0.5, 1 and 2 km, shown to you.
+- [ ] Coarse-Chunk CPU time per level from an interleaved micro-benchmark
+      against the integration branch's tip, in Comments.
+- [ ] Captures of a Settlement at 0.5, 1 and 2 km, for the review batch after
+      05.

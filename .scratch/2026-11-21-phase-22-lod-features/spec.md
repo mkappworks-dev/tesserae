@@ -48,7 +48,10 @@ windows holding coast):
 
 ## Solution
 
-Tickets in this order, each gated alone:
+Tickets in this order. To save wall clock: 02, 06 and 07 start beside 01; the
+full timing and GPU series run only at 01 (in a quiet window) and 09, other
+tickets reporting coarse-Chunk CPU time from an interleaved micro-benchmark;
+captures are reviewed in two batches, after 05 and at 09.
 
 1. **Baseline.** The agreement measurement as a test (failing levels recorded,
    not asserted), and the budget series on `origin/main`: per-level Chunks,

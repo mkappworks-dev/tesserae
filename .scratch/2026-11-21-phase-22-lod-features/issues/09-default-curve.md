@@ -25,7 +25,8 @@ step 22 note are updated.
 
 ## Acceptance criteria
 
-- [ ] Budget and shadow series against 01's, in Comments.
+- [ ] Budget and shadow series against 01's, in Comments: the only full series
+      after 01's.
 - [ ] Captures from fixed Eyes at 0.5, 1, 2, 4 and 8 km beside your reference
       shots, shown to you; the fog's value chosen on them.
 - [ ] The chosen default, and why, in the spec.

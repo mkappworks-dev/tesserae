@@ -27,5 +27,6 @@ level 0 for a World of that size, and version 3's output is frozen.
 - [ ] Every existing worldgen, determinism and golden test passes unchanged.
 - [ ] A Chunk with an Edit or saved change still shows the change at every level
       it did.
-- [ ] Coarse-Chunk generation time per level against 01's, in Comments.
-- [ ] Before and after captures of a coast at each ring join, shown to you.
+- [ ] Coarse-Chunk CPU time per level from an interleaved micro-benchmark
+      against the integration branch's tip, in Comments.
+- [ ] Captures of a coast at each ring join, for the review batch after 05.

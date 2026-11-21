@@ -36,8 +36,10 @@ and do not pop in at the join.
       reach.
 - [ ] A felled tree whose Chunk is evicted is absent at level 1 in a persistent
       World.
-- [ ] Coarse-Chunk time and vertex memory at levels 1 and 2 against 01's, in
-      Comments, and level 0's column-cache hit rate unchanged.
+- [ ] Coarse-Chunk CPU time per level from an interleaved micro-benchmark
+      against the integration branch's tip, in Comments, with
+      vertex bytes per level from a test, and level 0's column-cache hit rate
+      unchanged.
 - [ ] The level-2 decision, Impostors or Canopy cover, with its numbers.
-- [ ] Captures of a forest edge across the level 0 to 1 and 1 to 2 joins, shown
-      to you.
+- [ ] Captures of a forest edge across the level 0 to 1 and 1 to 2 joins, for
+      the review batch after 05.
