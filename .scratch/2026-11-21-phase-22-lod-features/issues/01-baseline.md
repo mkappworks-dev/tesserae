@@ -20,16 +20,14 @@ changes.
   Testing Decisions): per level, Chunks held, non-empty and meshed, quads and
   vertex bytes; total coarse vertex memory; time for each level and the whole
   field to fill from spawn; frame timing and a `--instruments gpu` series at
-  `flight` and `stationary`.
-- **Shadow comparison** in the same GPU series: shadows on, the `no-shadows`
-  switch, and a build whose far cascades hold nothing (render shadows ticket
-  07), run in mirrored order.
+  `stationary` and `sprint-flight`. No shadow comparison (spec, Testing
+  Decisions).
 
 ## Acceptance criteria
 
 - [ ] The agreement test runs in CI and prints per-level rates; the rates are in
       Comments.
-- [ ] Budget and shadow numbers in Comments, with the load average and the
+- [ ] Budget numbers in Comments, with the load average and the
       commit measured.
 - [ ] Captures from fixed Eyes at 0.5, 1, 2 and 4 km on Terra, in one `/tmp`
       folder, the "before" of the first review batch.

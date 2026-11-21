@@ -11,7 +11,7 @@ The default looks like other engines with distant terrain: Detailed, about
 `384 * 2^k` m to 8192 m, with Terra's ceiling raised from 3000 m and the
 engine's default from 4096 m to 8192 m, and fog lightened
 so the far field reads. It becomes the default only when, on the M5 with Terra
-at `flight` and `stationary`, with Impostors and Canopy cover in:
+at `stationary` and `sprint-flight`, with Impostors and Canopy cover in:
 
 - coarse vertex memory on the GPU is at most 192 MB;
 - the whole field is drawn within 10 s of spawn;
@@ -19,13 +19,13 @@ at `flight` and `stationary`, with Impostors and Canopy cover in:
 - level 0's fill time does not regress.
 
 Otherwise the default is the widest curve that passes, recorded in the spec.
-The same series reports the shadow comparison; reopen cascade caching only if
-the far cascade's draws show in the shadows' cost. DESIGN.md's LOD section and
+No shadow series: 07's test keeps coarse meshes off the shadow casters.
+DESIGN.md's LOD section and
 step 22 note are updated.
 
 ## Acceptance criteria
 
-- [ ] Budget and shadow series against 01's, in Comments: the only full series
+- [ ] Budget series against 01's, in Comments: the only full series
       after 01's.
 - [ ] Captures from fixed Eyes at 0.5, 1, 2, 4 and 8 km beside your reference
       shots, shown to you; the fog's value chosen on them.
