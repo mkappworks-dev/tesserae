@@ -9,6 +9,7 @@ use super::chunk_view::ChunkEntities;
 use super::preview::HandCamera;
 use super::profile::{Preferences, Store};
 use crate::world::{ChunkCoord, WorldSettings};
+use bevy::ecs::change_detection::Tick;
 use bevy::ecs::system::SystemParam;
 use bevy::platform::collections::HashMap;
 use bevy::prelude::*;
@@ -175,19 +176,20 @@ pub(super) fn place(
 
 type QuadBoxes = Arc<[(Vec3, Vec3)]>;
 
+struct Cached {
+    changed: Tick,
+    used: bool,
+    boxes: QuadBoxes,
+}
+
 /// The drawn faces of nearby Chunks the Server sent, as axis-aligned boxes.
 /// What the camera collides with is what is drawn, never World storage.
 #[derive(SystemParam)]
 pub(super) struct Obstacles<'w, 's> {
     world: Res<'w, WorldSettings>,
     chunks: Res<'w, ChunkEntities>,
-    layers: Query<
-        'w,
-        's,
-        (&'static Mesh3d, &'static ChunkQuads, &'static Transform),
-        Without<FlyCamera>,
-    >,
-    cache: Local<'s, HashMap<AssetId<Mesh>, (bool, QuadBoxes)>>,
+    layers: Query<'w, 's, (Ref<'static, ChunkQuads>, &'static Transform), Without<FlyCamera>>,
+    cache: Local<'s, HashMap<Entity, Cached>>,
 }
 
 impl Obstacles<'_, '_> {
@@ -205,10 +207,10 @@ impl Obstacles<'_, '_> {
                     let coord = ChunkCoord::new(x, y, z);
                     let entities: Vec<Entity> = self.chunks.solid_at(coord).collect();
                     for entity in entities {
-                        let Ok((mesh, quads, &transform)) = self.layers.get(entity) else {
+                        let Ok((quads, &transform)) = self.layers.get(entity) else {
                             continue;
                         };
-                        let boxes = Self::boxes(&mut self.cache, mesh.0.id(), quads);
+                        let boxes = Self::boxes(&mut self.cache, entity, &quads);
                         for &(min, max) in boxes.iter() {
                             let (min, max) = (
                                 transform.transform_point(min),
@@ -230,19 +232,30 @@ impl Obstacles<'_, '_> {
         nearest
     }
 
-    /// Keyed by the placeholder, which a new mesh for the layer replaces.
+    /// Keyed by the entity and checked against when its quads last changed: a
+    /// new mesh for the layer keeps both its entity and, in the same bucket,
+    /// its placeholder.
     fn boxes(
-        cache: &mut HashMap<AssetId<Mesh>, (bool, QuadBoxes)>,
-        id: AssetId<Mesh>,
-        quads: &ChunkQuads,
+        cache: &mut HashMap<Entity, Cached>,
+        entity: Entity,
+        quads: &Ref<ChunkQuads>,
     ) -> QuadBoxes {
-        let (used, boxes) = cache.entry(id).or_insert_with(|| (true, quad_boxes(quads)));
-        *used = true;
-        boxes.clone()
+        let cached = cache.entry(entity).or_insert_with(|| Cached {
+            changed: quads.last_changed(),
+            used: true,
+            boxes: quad_boxes(quads),
+        });
+        if cached.changed != quads.last_changed() {
+            cached.changed = quads.last_changed();
+            cached.boxes = quad_boxes(quads);
+        }
+        cached.used = true;
+        cached.boxes.clone()
     }
 
     fn forget_unused(&mut self) {
-        self.cache.retain(|_, (used, _)| std::mem::take(used));
+        self.cache
+            .retain(|_, cached| std::mem::take(&mut cached.used));
     }
 }
 
@@ -338,6 +351,22 @@ mod tests {
 
     /// Faces `edge` metres square at a metre a Voxel, so the mesh is in metres.
     fn chunk_layer(app: &mut App, faces: &[(usize, f32)], edge: f32) -> Entity {
+        let quads = layer_quads(faces, edge);
+        let handle = app
+            .world_mut()
+            .resource_mut::<Assets<Mesh>>()
+            .add(Mesh::from(Cuboid::default()));
+        let entity = app
+            .world_mut()
+            .spawn((Mesh3d(handle), quads, Transform::default()))
+            .id();
+        app.world_mut()
+            .resource_mut::<ChunkEntities>()
+            .insert_opaque(ChunkCoord::new(0, 0, 0), entity);
+        entity
+    }
+
+    fn layer_quads(faces: &[(usize, f32)], edge: f32) -> ChunkQuads {
         let sixteenths = |m: f32| (m * 16.0) as i32;
         let span = [0, sixteenths(edge) as u16];
         let layer = tesserae_core::MeshLayer {
@@ -355,19 +384,7 @@ mod tests {
                 })
                 .collect(),
         };
-        let quads = ChunkQuads::pack(&layer, 0).expect("faces");
-        let handle = app
-            .world_mut()
-            .resource_mut::<Assets<Mesh>>()
-            .add(Mesh::from(Cuboid::default()));
-        let entity = app
-            .world_mut()
-            .spawn((Mesh3d(handle), quads, Transform::default()))
-            .id();
-        app.world_mut()
-            .resource_mut::<ChunkEntities>()
-            .insert_opaque(ChunkCoord::new(0, 0, 0), entity);
-        entity
+        ChunkQuads::pack(&layer, 0).expect("faces")
     }
 
     /// A one-metre corridor closed at both ends, with a floor and a ceiling
@@ -493,6 +510,22 @@ mod tests {
             app.update();
         }
         assert!(camera(&mut app).abs_diff_eq(open, 1e-3));
+    }
+
+    #[test]
+    fn a_wall_remeshed_nearer_pulls_the_camera_in() {
+        let mut app = app(View::ThirdPerson);
+        let layer = wall(&mut app, EYE.z + 2.0);
+        app.update();
+        app.world_mut()
+            .entity_mut(layer)
+            .insert(layer_quads(&[(2, EYE.z + 1.0)], 32.0));
+        app.update();
+        let boom = camera(&mut app).z - EYE.z;
+        assert!(
+            (boom - (1.0 - CAMERA_RADIUS_M - SKIN_M)).abs() < 1e-4,
+            "{boom}"
+        );
     }
 
     #[test]

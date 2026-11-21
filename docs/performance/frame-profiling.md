@@ -314,7 +314,13 @@ itself about 3.7% of median.
   Client from what it was sent. `streaming.json` reports it as
   `level0_missing_m`: the frames with something missing and the minimum, p1, p5
   and median over the measured phase, nearer being worse, `null` where that
-  percentile falls on a frame with nothing missing.
+  percentile falls on a frame with nothing missing. Last, `draws_camera<order>`
+  is the indirect draws each camera's opaque, cutout and blended passes issue:
+  one per distinct mesh and material among its visible meshes, a bin, and one
+  per blended mesh, which a sorted pass draws alone. On Metal each bin is a draw
+  even when GPU culling empties it. Then `shadow_casters_cascade<i>` and
+  `shadow_draws_cascade<i>` give the same for each of the sun's cascades of the
+  Player camera. `streaming.json` reports them under `draws` and `shadow`.
 - `frames.fill.csv`, under `--instruments lag` only, has a row per level-0 Chunk
   entering the mesh extent: when, its coordinate, its distance from the Eye as
   it entered, and how long after that the Client drew its mesh, an empty mesh
@@ -362,8 +368,13 @@ itself about 3.7% of median.
   milliseconds since `frame_start`. Apple GPUs sample timestamps only at encoder
   boundaries, so each marker is an empty compute pass dispatching one workgroup
   between two of Bevy's passes. A marker is ordered by the schedule: work the
-  GPU overlaps across one is charged to whichever side it ends on, systems
-  outside Bevy's sets can fall on either side of `view_start`, and `prepass_end`
-  to `main_start` includes the shadow passes. About 20% of frames return an
-  earlier frame's value for the last markers; those cells are left empty, and
-  `streaming.json` reports how many frames have a `frame_end`.
+  GPU overlaps across one is charged to whichever side it ends on, and systems
+  outside Bevy's sets can fall on either side of `view_start`, so shared work
+  can land in either camera's view. The sun's cascades are drawn inside the
+  prepass set, before `prepass_end`, but the GPU overlaps them with what
+  follows, so no marker pair can bracket them: their cost is the GPU frame's
+  difference under the `no-shadows` switch. `prepass_end` to `main_start`,
+  `setup_ms` in `streaming.json`, is indirect parameter builds and the shadow
+  work that overlaps into them. About 20% of frames return an earlier frame's
+  value for the last markers; those cells are left empty, and `streaming.json`
+  reports how many frames have a `frame_end`.

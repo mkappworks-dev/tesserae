@@ -50,7 +50,8 @@ fn main() -> std::process::ExitCode {
             DefaultPlugins
                 .set(window_plugin())
                 .set(task_pools())
-                .set(log_settings()),
+                .set(log_settings())
+                .set(render_settings()),
         )
         // Before the plugins that register through it: they check for its state.
         .add_plugins(session::plugin)
@@ -85,6 +86,35 @@ fn window_plugin() -> WindowPlugin {
         primary_window: Some(window),
         ..default()
     }
+}
+
+/// Bevy keeps wgpu validating every indirect draw in release whenever its
+/// default backends name DX12, which they do on macOS too: a compute pass, a
+/// staging buffer and a copy before each indirect render pass. Bevy writes
+/// those arguments itself; `WGPU_VALIDATION_INDIRECT_CALL=1` turns it back on.
+#[cfg(target_os = "macos")]
+fn render_settings() -> bevy::render::RenderPlugin {
+    use bevy::render::settings::{Backends, InstanceFlags, WgpuSettings};
+
+    let mut settings = WgpuSettings {
+        backends: Some(Backends::from_env().unwrap_or(Backends::METAL)),
+        ..default()
+    };
+    if !cfg!(debug_assertions) {
+        settings
+            .instance_flags
+            .remove(InstanceFlags::VALIDATION_INDIRECT_CALL);
+        settings.instance_flags = settings.instance_flags.with_env();
+    }
+    bevy::render::RenderPlugin {
+        render_creation: settings.into(),
+        ..default()
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn render_settings() -> bevy::render::RenderPlugin {
+    bevy::render::RenderPlugin::default()
 }
 
 fn log_settings() -> bevy::log::LogPlugin {
@@ -137,3 +167,26 @@ fn dev_plugins(app: &mut App) {
 
 #[cfg(not(any(feature = "dev", feature = "profiling")))]
 fn dev_plugins(_: &mut App) {}
+
+#[cfg(all(test, target_os = "macos"))]
+mod tests {
+    use bevy::render::settings::{Backends, InstanceFlags, RenderCreation};
+
+    #[test]
+    fn a_mac_draws_on_metal_and_validates_indirect_draws_in_debug_only() {
+        let RenderCreation::Automatic(settings) = super::render_settings().render_creation else {
+            panic!("the renderer creates its own device");
+        };
+        if std::env::var_os("WGPU_BACKEND").is_none() {
+            assert_eq!(settings.backends, Some(Backends::METAL));
+        }
+        if std::env::var_os("WGPU_VALIDATION_INDIRECT_CALL").is_none() {
+            assert_eq!(
+                settings
+                    .instance_flags
+                    .contains(InstanceFlags::VALIDATION_INDIRECT_CALL),
+                cfg!(debug_assertions)
+            );
+        }
+    }
+}

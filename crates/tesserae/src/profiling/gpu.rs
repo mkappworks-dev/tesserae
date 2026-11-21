@@ -68,11 +68,12 @@ pub(super) fn plugin(app: &mut App, samples: GpuSamples) {
             Core3d,
             (
                 mark::<0>.before(Core3dSystems::Prepass),
+                // The sun's cascades are drawn inside the prepass set, before
+                // this, but the GPU overlaps them with what follows: their cost
+                // is the frame's difference under the `no-shadows` switch.
                 mark::<1>
                     .after(Core3dSystems::Prepass)
                     .before(Core3dSystems::MainPass),
-                // Shadows are ordered only before the main pass, so they fall
-                // between these two.
                 mark::<2>
                     .in_set(Core3dSystems::MainPass)
                     .before(main_opaque_pass_3d),

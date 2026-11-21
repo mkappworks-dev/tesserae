@@ -36,27 +36,43 @@ record is 8 bytes on the GPU.
 ## The draw
 
 Every Chunk layer's header, table and records live in one engine-owned storage
-buffer, a range each. The layer's entity keeps a `Mesh3d` whose mesh is a
-placeholder that no pipeline reads: four one-byte vertices a quad and the
-indices `0 1 2 0 2 3` per quad, two bytes each up to 65,536 vertices and four
-past them. The vertex shader takes the quad from the index over four and the
-corner from the index modulo four, so the GPU can reuse a corner's vertex
-shading across the quad's two triangles, as it did with the old index buffer.
+buffer, a range each. The header holds the layer's quad count. The layer's
+entity keeps a `Mesh3d` whose mesh is a placeholder that no pipeline reads: four
+one-byte vertices a quad and the indices `0 1 2 0 2 3` per quad, two bytes each
+up to 16,384 quads and four past them. The vertex shader takes the quad from the
+index over four and the corner from the index modulo four, so the GPU can reuse
+a corner's vertex shading across the quad's two triangles, as it did with the
+old index buffer.
+
+Placeholders are shared in size buckets, each about 2^(1/4) times the quads of
+the one below, one bucket ending at exactly 16,384. A layer draws the smallest
+bucket that holds it, and the vertex shader puts every quad past the header's
+count at one point outside the clip volume, so the padding rasterizes nothing.
+On Metal every mesh is its own indirect draw in every pass and cascade, culled
+or not; opaque and cutout layers are binned by mesh, so the layers in one bucket
+are one draw. Blended layers are sorted and drawn one by one, and share the
+buckets for the memory only. A bucket's placeholder is built and uploaded the
+first time a layer asks for it, and kept for the session.
+
+The ratio was chosen from the layer quad counts of two Terra captures, 6,148
+layers and 9.9 million quads over every level: 2^(1/4) pads 9.1% of the vertex
+work and uses 53 buckets, 50 of them for level 0's opaque and cutout layers.
+2^(1/2) would pad 20% in 29 buckets, 2^(1/8) 4.3% in 93.
 
 The pipelines keep one vertex buffer slot with no attributes and a stride of 0:
 Bevy's specializer keys a pipeline by `buffers[0]`, so the slot must exist, and
 wgpu wants a stride that is a multiple of four, which the one-byte placeholder
 is not.
 
-A quad is then 24 bytes on the GPU: 8 of record, 4 of placeholder vertices and
-12 of indices. A layer past 65,536 vertices takes four-byte indices, 36 bytes a
-quad.
+A quad is then 8 bytes of record on the GPU, plus a few header and table words a
+layer. The buckets' placeholders, 16 bytes a quad (28 past 16,384), are held
+once for every layer that shares them.
 
 ## Why records and not packed vertices
 
 - One record a quad replaces four vertices and six indices on the Server, in the
-  message and in the main world; on the GPU the record and its placeholder are
-  24 bytes where the packed vertices and indices were about 88.
+  message and in the main world; on the GPU the record is 8 bytes where the
+  packed vertices and indices were about 88.
 - The renderer expands the corners in the vertex shader from the vertex index,
   so the quad's four corners are never stored anywhere.
 - The Server's mesh jobs stop building an `f32` soup that the Client only
@@ -80,6 +96,7 @@ form; the index buffer's 10 more bytes a quad buy that back.
 - A layer with more than 16,384 distinct (Material, light) pairs is stored by
   the Client with the pair inline, 12-byte records, so the contract holds for
   any Chunk.
-- Each layer has its own placeholder. Shared placeholders in size buckets would
-  save its 16 bytes a quad for more vertex work, the cost the indexed draw won
-  back.
+- Layers share their bucket's placeholder, which saves each layer's 16 bytes a
+  quad and its upload and turns one draw per opaque or cutout layer into one per
+  bucket, for about 9% more vertex work in padding quads that the shader
+  degenerates.
