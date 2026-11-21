@@ -55,7 +55,9 @@ Tickets in this order (Q18), each gated alone:
 7. **1c: cascade caching** of the far cascades.
 
 Item 2 (GPU occlusion culling) and item 3 (underground visibility culling) are
-`wontfix`; see below.
+`wontfix`; see below. So, after their gates, are 1d (ticket 04: its target did
+not move) and 1c (ticket 07: emptying the far cascades outright saved at most
+0.15 ms once 1a and 1b had landed).
 
 ## User Stories
 

@@ -1,6 +1,6 @@
 # 07: Cascade caching (1c)
 
-Status: ready-for-agent
+Status: wontfix
 Blocked by: 06
 
 Spec: [Shadows and culling](../spec.md).
@@ -44,3 +44,25 @@ Keep the far cascades between frames and redraw one only when it must.
 - [ ] Before and after captures of `flight`, `stationary` and `hidden-hill`, and
       a capture right after a Chunk lands in a far cascade, shown to you; lands
       only on your approval.
+
+## Comments
+
+Not built (2026-11-21): its ceiling is too small. After 03 (leaves to 61 m) and
+06 (three cascades, 10, 61 and 150 m) the branch head was run against the same
+build with its far cascades holding nothing, which is more than caching could
+save: caching keeps the GPU culling and indirect builds and redraws on landings
+and moves. GPU series in mirrored order, three fixtures, mean of six runs, ms:
+
+| | head | cascade 2 empty | cascades 1 and 2 empty |
+| --- | --- | --- | --- |
+| GPU frame, flight / stationary / sprint-flight | 3.37 / 2.79 / 3.26 | 3.41 / 2.83 / 3.28 | 3.22 / 2.76 / 3.18 |
+| frame p50 | 3.28 / 2.86 / 3.31 | 3.26 / 2.86 / 3.27 | 3.07 / 2.79 / 3.14 |
+| frame p95 | 5.86 / 4.57 / 6.80 | 5.68 / 4.51 / 6.80 | 5.45 / 4.50 / 6.68 |
+
+Cascade 2 (61 to 150 m, 31 opaque draws in `stationary`) costs nothing
+measurable. Emptying cascade 1 too saves at most 0.03 to 0.15 ms of GPU frame,
+and caching it would redraw often (10 to 61 m moves with the camera) and stop
+avatars and drops casting past 10 m, for two seams in Bevy's internals. Reopen
+when step 22 adds casters at distance or the view distance grows enough that
+the far cascade's draws show in the shadows' cost (GPU frame with shadows
+against `no-shadows`).
