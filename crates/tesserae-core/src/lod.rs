@@ -11,7 +11,7 @@ use crate::material::{MaterialTable, RenderClass};
 use crate::mesh::{
     FACE_STEPS, NEG_X, NEG_Y, NEG_Z, POS_X, POS_Y, SEAM_EVERY, SEAM_LAYERS, SeamOpenings,
 };
-use crate::worldgen::{ColumnTop, TreePart, Worldgen, level_index, top_index};
+use crate::worldgen::{ColumnTop, StructurePart, TreePart, Worldgen, level_index, top_index};
 
 const OCTANT: usize = CHUNK_SIZE / 2;
 
@@ -436,6 +436,69 @@ pub fn coarsen_tree_parts(
                         }
                     }
                     if let Some(m) = canopy.or(trunk) {
+                        chunk.set(base[0] + x, base[1] + y, base[2] + z, Voxel::cube(m));
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Stands a Structure's Impostor: each of `parts`, a level-0 cell, makes the coarse Voxel of Chunk
+/// `coord` holding it, `span` level-0 cells a side, its Material whatever the vote and any tree
+/// left there; the last part in a coarse Voxel wins. Octants `skip` marks keep what they hold.
+pub fn stand_structure_parts(
+    chunk: &mut Chunk,
+    coord: [i32; 3],
+    span: i32,
+    parts: &[StructurePart],
+    skip: [bool; 8],
+) {
+    let size = CHUNK_SIZE as i32;
+    let origin = coord.map(|c| c * size * span);
+    for p in parts {
+        let local = std::array::from_fn::<i32, 3, _>(|a| (p.at[a] - origin[a]).div_euclid(span));
+        if local.iter().any(|v| !(0..size).contains(v)) {
+            continue;
+        }
+        let [x, y, z] = local.map(|v| v as usize);
+        if !skip[octant_of(x, y, z)] {
+            chunk.set(x, y, z, Voxel::cube(p.material));
+        }
+    }
+}
+
+/// Over each octant `changed` marks, a coarse Voxel any of whose eight finer Voxels in `children`
+/// is of a Material in `built`, sorted, takes the last such: the rule [`stand_structure_parts`]
+/// draws by, applied to Voxels a Player or the World changed, so a removed Structure stays gone
+/// and a placed one stands.
+pub fn coarsen_structure_parts(
+    chunk: &mut Chunk,
+    children: [&Chunk; 8],
+    changed: [bool; 8],
+    built: &[MaterialId],
+) {
+    if built.is_empty() {
+        return;
+    }
+    for (octant, child) in children.into_iter().enumerate() {
+        let unbuilt = |v: Voxel| built.binary_search(&v.material()).is_err();
+        if !changed[octant] || child.uniform().is_some_and(unbuilt) {
+            continue;
+        }
+        let base = [octant & 1, octant >> 1 & 1, octant >> 2 & 1].map(|b| b * OCTANT);
+        for z in 0..OCTANT {
+            for y in 0..OCTANT {
+                for x in 0..OCTANT {
+                    let found = (0..8)
+                        .rev()
+                        .map(|i| {
+                            child
+                                .get(2 * x + (i & 1), 2 * y + (i >> 1 & 1), 2 * z + (i >> 2))
+                                .material()
+                        })
+                        .find(|m| built.binary_search(m).is_ok());
+                    if let Some(m) = found {
                         chunk.set(base[0] + x, base[1] + y, base[2] + z, Voxel::cube(m));
                     }
                 }
@@ -998,6 +1061,68 @@ mod tests {
             chunk.get(16, 0, 0),
             Voxel::AIR,
             "an unchanged octant is drawn"
+        );
+    }
+
+    const BRICK: MaterialId = 212;
+    const ROOF: MaterialId = 213;
+
+    #[test]
+    fn a_structure_part_beats_air_ground_and_a_tree_and_the_last_in_a_voxel_wins() {
+        let rock = Voxel::cube(fixtures().ground.rock);
+        let mut chunk = Chunk::air();
+        chunk.set(0, 0, 0, rock);
+        chunk.set(2, 0, 0, Voxel::cube(CANOPY));
+        let part = |at, material| StructurePart { at, material };
+        // Level 2 at coarse Chunk (0, 1, 0): level-0 cells 128..256 along y.
+        let parts = [
+            part([0, 128, 0], BRICK),
+            part([3, 131, 3], ROOF),
+            part([8, 128, 0], BRICK),
+            part([4 * 20, 128, 0], BRICK),
+            part([0, 127, 0], ROOF),
+        ];
+        let mut skip = [false; 8];
+        skip[1] = true;
+        stand_structure_parts(&mut chunk, [0, 1, 0], 4, &parts, skip);
+        assert_eq!(
+            chunk.get(0, 0, 0),
+            Voxel::cube(ROOF),
+            "the last over ground"
+        );
+        assert_eq!(chunk.get(2, 0, 0), Voxel::cube(BRICK), "over a tree");
+        assert_eq!(chunk.get(20, 0, 0), Voxel::AIR, "a skipped octant is left");
+        assert_eq!(
+            chunk.get(0, 31, 0),
+            Voxel::AIR,
+            "a part below stands nothing"
+        );
+    }
+
+    #[test]
+    fn a_changed_octant_keeps_any_finer_built_voxel_and_leaves_ground_to_the_vote() {
+        let rock = Voxel::cube(fixtures().ground.rock);
+        let mut children: [Chunk; 8] = std::array::from_fn(|_| Chunk::air());
+        children[0].set(0, 0, 0, Voxel::cube(BRICK));
+        children[0].set(3, 1, 1, Voxel::cube(ROOF));
+        children[0].set(2, 0, 0, Voxel::cube(BRICK));
+        children[0].set(4, 0, 0, rock);
+        children[1].set(0, 0, 0, Voxel::cube(BRICK));
+        children[2] = Chunk::filled(Voxel::cube(ROOF));
+        let mut chunk = Chunk::air();
+        let mut changed = [false; 8];
+        changed[0] = true;
+        changed[2] = true;
+        let built = [BRICK, ROOF];
+        coarsen_structure_parts(&mut chunk, children.each_ref(), changed, &built);
+        assert_eq!(chunk.get(0, 0, 0), Voxel::cube(BRICK), "a lone Voxel");
+        assert_eq!(chunk.get(1, 0, 0), Voxel::cube(ROOF));
+        assert_eq!(chunk.get(2, 0, 0), Voxel::AIR, "ground is the vote's");
+        assert_eq!(chunk.get(16, 0, 0), Voxel::AIR, "an unchanged octant");
+        assert_eq!(
+            chunk.get(0, 16, 0),
+            Voxel::cube(ROOF),
+            "a uniform built child"
         );
     }
 

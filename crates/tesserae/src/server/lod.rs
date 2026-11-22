@@ -22,15 +22,15 @@ use bevy::prelude::*;
 use crate::session::SessionApp;
 use tesserae_core::climate::SurfacePlantKind;
 use tesserae_core::lod::{
-    Child, Coarse, TreeMaterials, UnderWater, Waterline, coarse_light_in, coarsen_tree_parts,
-    downsample_changed, stand_tree_parts,
+    Child, Coarse, TreeMaterials, UnderWater, Waterline, coarse_light_in, coarsen_structure_parts,
+    coarsen_tree_parts, downsample_changed, stand_structure_parts, stand_tree_parts,
 };
 use tesserae_core::mesh::{POS_Y, Quad, QuadKind};
 use tesserae_core::shape::SUBDIV;
 use tesserae_core::worldgen::WaterParams;
 use tesserae_core::{
-    CHUNK_SIZE, Chunk, ChunkMesh, ChunkOverlay, ColumnTop, LitChunk, MeshLayer, OreTable,
-    SeamMargin, SeamOpenings, Surface, Tables, Voxel, Worldgen, WorldgenParams,
+    CHUNK_SIZE, Chunk, ChunkMesh, ChunkOverlay, ColumnTop, LitChunk, MaterialId, MeshLayer,
+    OreTable, SeamMargin, SeamOpenings, Surface, Tables, Voxel, Worldgen, WorldgenParams,
     agree_with_level_zero, emits_no_faces, mesh_chunk_with_seams, seam_openings,
 };
 
@@ -186,6 +186,8 @@ pub(in crate::server) struct LodGenerators {
     /// its column cache with `sources[0]`, so nothing coarse touches level 0's.
     placement: Arc<Worldgen>,
     trees: Arc<TreeMaterials>,
+    /// What [`Worldgen::built_materials`] answers for `placement`.
+    built: Arc<[MaterialId]>,
     answers: Arc<Answers>,
 }
 
@@ -212,11 +214,13 @@ impl LodGenerators {
             })
             .collect();
         let trees = tree_materials(&level_zero.params());
+        let built = placement.built_materials().into();
         let mut generators = LodGenerators {
             sources,
             direct: Vec::new(),
             placement,
             trees: Arc::new(trees),
+            built,
             answers: Arc::default(),
         };
         generators.direct = generators.made_directly(world, COLUMNS_FROM, false);
@@ -271,6 +275,8 @@ impl LodGenerators {
             level_zero: &self.sources[0],
             placement: (level <= IMPOSTORS_TO).then_some(&self.placement),
             trees: &self.trees,
+            structures: Some(&self.placement),
+            built: &self.built,
             answers: &self.answers,
         }
     }
@@ -280,6 +286,7 @@ impl LodGenerators {
             sources: self.sources.clone(),
             placement: Arc::clone(&self.placement),
             trees: Arc::clone(&self.trees),
+            built: Arc::clone(&self.built),
         }
     }
 
@@ -816,6 +823,7 @@ pub(in crate::server) fn make_coarse(
     agree(
         makers.level_zero,
         Some(makers.answers),
+        makers.structures,
         level,
         coord,
         &mut coarse.chunk,
@@ -824,7 +832,50 @@ pub(in crate::server) fn make_coarse(
     if let Some(placement) = makers.placement {
         stand_impostors(placement, level, coord, &mut coarse.chunk, held);
     }
+    if let Some(placement) = makers.structures {
+        stand_structures(
+            placement,
+            makers.built,
+            tables,
+            level,
+            coord,
+            &mut coarse.chunk,
+            held,
+        );
+    }
     coarse
+}
+
+/// Stands every solid Voxel of each Structure and Plot level 0 stands in the Chunk's footprint,
+/// but over a changed child, whose own solid built Voxels it keeps by the same any-solid rule
+/// instead (ADR-0035). A crop, flower or torch is not solid, so it stays out like a Plant.
+fn stand_structures(
+    placement: &Worldgen,
+    built: &[MaterialId],
+    tables: &Tables,
+    level: u32,
+    coord: ChunkCoord,
+    chunk: &mut Chunk,
+    held: &[Option<Held>; 8],
+) {
+    let solid = |m: &MaterialId| tables.materials.solid(Voxel::cube(*m));
+    let changed = std::array::from_fn(|i| held[i].as_ref().is_some_and(|h| h.changed.is_some()));
+    if changed.contains(&true) {
+        let built: Vec<MaterialId> = built.iter().copied().filter(solid).collect();
+        let empty = Chunk::air();
+        let children = std::array::from_fn(|i| held[i].as_ref().map_or(&empty, |h| &*h.chunk));
+        coarsen_structure_parts(chunk, children, changed, &built);
+    }
+    let span = 1i32 << level;
+    let n = CHUNK_SIZE as i32 * span;
+    let min = [coord.x * n, coord.y * n, coord.z * n];
+    let mut parts = placement.structure_parts(min, min.map(|m| m + n));
+    parts.retain(|p| solid(&p.material));
+    // A Template's ground-coloured cells stand first, so a wall beats the soil a Plot lays.
+    parts.sort_by_key(|p| built.binary_search(&p.material).is_ok());
+    if !parts.is_empty() {
+        stand_structure_parts(chunk, [coord.x, coord.y, coord.z], span, &parts, changed);
+    }
 }
 
 /// Stands every tree level 0 stands in the Chunk's footprint, but over a changed child, whose
@@ -878,15 +929,20 @@ pub(in crate::server) struct Makers<'a> {
     /// Set at the levels that stand Impostors.
     pub placement: Option<&'a Worldgen>,
     pub trees: &'a TreeMaterials,
+    /// The placement generator, where Structures stand: every coarse level.
+    pub structures: Option<&'a Worldgen>,
+    pub built: &'a [MaterialId],
     pub answers: &'a Answers,
 }
 
 /// Makes every column of a level-`level` Chunk that no changed child reaches show level 0's water
-/// or land and top Material at its centre (ADR-0035). A changed child's columns keep the
-/// downsample's answer, so a drained lake or a built pier shows as it does at level 1.
+/// or land and top Material at its centre (ADR-0035), a Settlement's path where `paths` lays one
+/// there. A changed child's columns keep the downsample's answer, so a drained lake or a built
+/// pier shows as it does at level 1.
 fn agree(
     level_zero: &Worldgen,
     answers: Option<&Answers>,
+    paths: Option<&Worldgen>,
     level: u32,
     coord: ChunkCoord,
     chunk: &mut Chunk,
@@ -908,6 +964,14 @@ fn agree(
         Some(answers) => answers.over(level_zero, level, column),
         None => Answers::ask(level_zero, level, column),
     };
+    let paved: Vec<Option<ColumnTop>>;
+    let answered: &[Option<ColumnTop>] = match paths.map(|p| pave(p, level, column, &answered)) {
+        Some(Some(with_paths)) => {
+            paved = with_paths;
+            &paved
+        }
+        _ => &answered,
+    };
     let half = CHUNK_SIZE / 2;
     let changed = |i: usize| {
         let (x, z) = (i % CHUNK_SIZE, i / CHUNK_SIZE);
@@ -924,10 +988,39 @@ fn agree(
             .collect();
         &kept
     } else {
-        &answered
+        answered
     };
     let water = level_zero.water().map_or(0, |w| w.material);
     agree_with_level_zero(chunk, coord.y, voxel_m, water, answered);
+}
+
+/// `answered` with the top Material of each column whose centre holds a Settlement's road or trail
+/// at level 0 made that path, or `None` where no column's does.
+fn pave(
+    placement: &Worldgen,
+    level: u32,
+    [cx, cz]: [i32; 2],
+    answered: &[Option<ColumnTop>],
+) -> Option<Vec<Option<ColumnTop>>> {
+    let n = CHUNK_SIZE as i32;
+    let span = 1i32 << level;
+    let centre = |c: i32, local: i32| (c * n + local) * span + span / 2;
+    let centres: Vec<[i32; 2]> = (0..n * n)
+        .map(|i| [centre(cx, i % n), centre(cz, i / n)])
+        .collect();
+    let paths = placement.paths(&centres);
+    paths.iter().any(Option::is_some).then(|| {
+        answered
+            .iter()
+            .zip(paths)
+            .map(|(a, path)| {
+                a.map(|a| ColumnTop {
+                    top: path.unwrap_or(a.top),
+                    ..a
+                })
+            })
+            .collect()
+    })
 }
 
 /// How many coarse Chunk columns [`Answers`] keeps: 16 KB each.
@@ -1029,6 +1122,7 @@ fn generate_persistent(
     agree(
         &generators.sources[0],
         None,
+        Some(&generators.placement),
         level,
         coord,
         &mut coarse.chunk,
@@ -1043,6 +1137,15 @@ fn generate_persistent(
             &children,
         );
     }
+    stand_structures(
+        &generators.placement,
+        &generators.built,
+        tables,
+        level,
+        coord,
+        &mut coarse.chunk,
+        &children,
+    );
     coarse
 }
 
@@ -1052,6 +1155,7 @@ pub(in crate::server) struct Persistent {
     sources: Vec<Worldgen>,
     placement: Arc<Worldgen>,
     trees: Arc<TreeMaterials>,
+    built: Arc<[MaterialId]>,
 }
 
 /// What generation fills with its lake at level 0, for level 1 to recognise.
@@ -1876,6 +1980,8 @@ fn dispatch(
         let level_zero = generators.sources[0].clone();
         let placement = (plan.level <= IMPOSTORS_TO).then(|| Arc::clone(&generators.placement));
         let trees = Arc::clone(&generators.trees);
+        let structures = Arc::clone(&generators.placement);
+        let built = Arc::clone(&generators.built);
         let answers = Arc::clone(&generators.answers);
         let tables = Arc::clone(&tables.0);
         let times = jobs.times.clone();
@@ -1891,6 +1997,8 @@ fn dispatch(
                         level_zero: &level_zero,
                         placement: placement.as_deref(),
                         trees: &trees,
+                        structures: Some(&structures),
+                        built: &built,
                         answers: &answers,
                     };
                     make_coarse(level, coord, makers, &held_children, &tables)
@@ -2366,7 +2474,7 @@ mod tests {
                 changed: Some(Arc::new(ChunkOverlay::none())),
             })
         });
-        agree(&source(0), None, level, coord, &mut chunk, &held);
+        agree(&source(0), None, None, level, coord, &mut chunk, &held);
         chunk
     }
 

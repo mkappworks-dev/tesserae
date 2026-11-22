@@ -20,7 +20,7 @@ use crate::mesh::POS_Y;
 use crate::settlement::{Building, Outskirts, PlotRule, Settlement};
 use crate::shape::{Orientation, SHAPE_SLAB, SHAPE_STAIR};
 use crate::template::{Template, Turn};
-use crate::voxel::Voxel;
+use crate::voxel::{MaterialId, Voxel};
 use crate::worldgen::WorldgenParams;
 
 const SETTLEMENT_SALT: u64 = 0x5e77_1e00_0000_0001;
@@ -1304,6 +1304,50 @@ impl Worldgen {
         for s in &laid.structures {
             self.stand_structure(chunk, coord, s, false);
         }
+    }
+
+    /// The Material a Settlement's road or trail lays as the top of each of `columns`, global, or
+    /// `None` where none does: what a coarse level shows as its ground's top there (ADR-0035).
+    pub fn paths(&self, columns: &[[i32; 2]]) -> Vec<Option<MaterialId>> {
+        let mut paths = vec![None; columns.len()];
+        let Some(first) = columns.first() else {
+            return paths;
+        };
+        if self.settlements.is_none() {
+            return paths;
+        }
+        let (min, max) = columns.iter().fold((*first, *first), |(lo, hi), c| {
+            (
+                [lo[0].min(c[0]), lo[1].min(c[1])],
+                [hi[0].max(c[0]), hi[1].max(c[1])],
+            )
+        });
+        // A later Settlement's road is written over an earlier's.
+        for laid in self.laid_settlements_near([min, max.map(|m| m + 1)]) {
+            for (path, &column) in paths.iter_mut().zip(columns) {
+                if let Some(m) = self.path_on(&laid, column) {
+                    *path = Some(m);
+                }
+            }
+        }
+        paths
+    }
+
+    /// The Material [`Self::stand_settlement`] lays as the top of the column at `(gx, gz)` for
+    /// `laid`'s road or trail.
+    fn path_on(&self, laid: &LaidSettlement, [gx, gz]: [i32; 2]) -> Option<MaterialId> {
+        let half = self.voxel_size / 2.0;
+        let (x_m, z_m) = (self.global_m(gx), self.global_m(gz));
+        let cell = metre_cell(x_m, z_m, half);
+        if self.road_height(laid, [gx, gz]).is_some() {
+            return (laid.lane_at(cell) == Lane::Laid).then(|| laid.path.material());
+        }
+        laid.trail.binary_search(&cell).ok()?;
+        let natural_m = self.surface_height_m(x_m, z_m);
+        let wet = self
+            .water_level_m(x_m, z_m)
+            .is_some_and(|level_m| natural_m < level_m);
+        (!wet).then(|| laid.path.material())
     }
 
     /// A Settlement's trail cells past its grid that fall in the Chunk at `origin`: each
