@@ -8,7 +8,7 @@ use tesserae_core::worldgen::Worldgen;
 use tesserae_core::{CHUNK_SIZE, Chunk, MaterialId, Tables, Voxel};
 
 use super::{
-    IMPOSTORS_TO, LodGenerators, Makers, Shown, face_neighbors, level_scale, make_coarse,
+    Held, IMPOSTORS_TO, LodGenerators, Makers, Shown, face_neighbors, level_scale, make_coarse,
     mesh_coarse,
 };
 use crate::server::lod_rings::level_count;
@@ -577,4 +577,68 @@ fn coarse_chunk_cpu_time_and_vertex_bytes_with_and_without_impostors_over_terra_
             bytes[1]
         );
     }
+}
+
+/// What a level-1 job inside level 0's load pays to generate its eight children instead of
+/// reading the held ones, Impostors drawn either way: CPU time interleaved in mirrored order,
+/// cold coarse caches every pass. Run alone with `--ignored --nocapture`.
+#[test]
+#[ignore = "a measurement, not a check"]
+fn level_one_cpu_time_generating_children_against_reading_held_ones_by_terra_spawn() {
+    const ROUNDS: usize = 9;
+    let terra = Terra::load();
+    let [sx, sz] = terra.full.spawn_m();
+    let at = [sx, sz].map(|m| (m / N as f32).floor() as i32 - WINDOW_CHUNKS / 2);
+    let block = forest_block(&terra, at, 1, 3);
+    let held: HashMap<ChunkCoord, [Option<Held>; 8]> = block
+        .iter()
+        .map(|&coord| {
+            let children = std::array::from_fn(|i| {
+                let c = coord.child(i);
+                Some(Held {
+                    chunk: Arc::new(terra.full.chunk(c.x, c.y, c.z)),
+                    changed: None,
+                })
+            });
+            (coord, children)
+        })
+        .collect();
+    let levels = terra.generators.levels();
+    let pass = |read: bool| -> f64 {
+        terra.full.forget_caches();
+        let generators = LodGenerators::new(&terra.world, &terra.full, levels);
+        let none = Default::default();
+        let mut spent = 0.0;
+        for coord in &block {
+            let children = if read { &held[coord] } else { &none };
+            let from = thread_cpu_s();
+            std::hint::black_box(make_coarse(
+                1,
+                *coord,
+                generators.makers(1),
+                children,
+                &terra.tables,
+            ));
+            spent += thread_cpu_s() - from;
+        }
+        1000.0 * spent / block.len() as f64
+    };
+    let (mut read, mut generated) = (Vec::new(), Vec::new());
+    for round in 0..ROUNDS {
+        if round % 2 == 0 {
+            read.push(pass(true));
+            generated.push(pass(false));
+        } else {
+            generated.push(pass(false));
+            read.push(pass(true));
+        }
+    }
+    let median = |v: &mut Vec<f64>| {
+        v.sort_by(f64::total_cmp);
+        v[v.len() / 2]
+    };
+    let (a, b) = (median(&mut read), median(&mut generated));
+    println!("spawn block {at:?}, seed {}", terra.world.seed);
+    println!("chunks  reading held ms  generating ms  extra ms");
+    println!("{:>6}  {a:>15.2}  {b:>13.2}  {:>8.2}", block.len(), b - a);
 }

@@ -3237,13 +3237,14 @@ mod tests {
         let parents: HashSet<ChunkCoord> = level_zero.iter().map(|c| c.parent()).collect();
         assert_eq!(flow.children.jobs_in_load, parents.len() as u64);
 
+        // Level 1 draws its trees over generated children, so a held unchanged one saves nothing.
         let mut h = harness();
         h.settle();
         h.lod_settle();
-        let flow = crate::server::streaming::tests::flow(&mut h, 1);
-        assert_eq!(flow.children.in_load, 0, "{:?}", flow.children);
-        assert_eq!(flow.children.jobs_in_load, 0);
-        assert!(flow.children.generated > 0);
+        let held = crate::server::streaming::tests::flow(&mut h, 1);
+        assert_eq!(held.children.generated, 8 * held.stages.generate.run);
+        assert_eq!(held.children.in_load, level_zero.len() as u64);
+        assert_eq!(held.children.jobs_in_load, parents.len() as u64);
     }
 
     /// Fills the 2x2x2 Voxels at `local` with stone, in one Batch of the fluid simulation's or
