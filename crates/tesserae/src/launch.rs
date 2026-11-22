@@ -548,6 +548,7 @@ fn test_manifest(id: &str) -> tesserae_mods::Manifest {
         suggests: Vec::new(),
         category: None,
         description: None,
+        thumbnail: None,
     }
 }
 

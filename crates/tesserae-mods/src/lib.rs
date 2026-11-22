@@ -32,6 +32,7 @@ mod sandbox;
 mod settlement;
 mod sound;
 mod template;
+mod thumbnail;
 mod trust;
 mod underground;
 
@@ -73,6 +74,7 @@ pub use sandbox::{ModFault, ModInstance};
 pub use settlement::DeclaredSettlements;
 pub use sound::{Sound, Sounds, Soundscape, resolve_sounds};
 pub use template::DeclaredTemplates;
+pub use thumbnail::{MAX_THUMBNAIL_BYTES, THUMBNAIL_HEIGHT, THUMBNAIL_WIDTH, Thumbnail};
 pub use trust::{CheckedPayload, Trust, Untrusted, Verdict};
 pub use underground::DeclaredUnderground;
 
