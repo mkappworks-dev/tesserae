@@ -1714,3 +1714,54 @@ fn canopy_cover_takes_a_dense_forests_leaves_and_leaves_sparse_trees_out() {
         "sparse trees covered"
     );
 }
+
+/// A mixed forest's sparser columns show the next species' leaves where its trees cover at least
+/// half what the dominant species' do, and each column's answer is its own, whatever is asked
+/// beside it.
+#[test]
+fn canopy_cover_shades_a_mixed_forests_sparser_columns_by_the_next_species_share() {
+    const OTHER: MaterialId = 215;
+    let columns: Vec<[i32; 2]> = (0..16)
+        .flat_map(|x| (0..16).map(move |z| [x * 4 - 32, z * 4 - 32]))
+        .collect();
+    let tree = |spacing_m: f32, canopy: MaterialId| {
+        let mut f = tree_feature(spacing_m, false);
+        if let Some(SurfacePlant {
+            kind: SurfacePlantKind::Tree(tree),
+            ..
+        }) = &mut f.plant
+        {
+            tree.crowding_m = Some(1.0);
+            tree.canopy = canopy;
+        }
+        f
+    };
+    let cover = |next_spacing_m: f32| {
+        let g = Worldgen::new(
+            SEED,
+            1.0,
+            flat(&[tree(3.0, CANOPY), tree(next_spacing_m, OTHER)]),
+        );
+        let shapes = g.canopy_shapes();
+        let all = g.canopy_cover(&shapes, &columns);
+        for (i, column) in columns.iter().enumerate().step_by(37) {
+            assert_eq!(g.canopy_cover(&shapes, &[*column]), [all[i]], "{column:?}");
+        }
+        all
+    };
+    // As many trees, or about a quarter as many, as the first species.
+    for (next_spacing_m, sparse) in [(3.5, OTHER), (6.0, CANOPY)] {
+        let drawn = cover(next_spacing_m);
+        assert!(
+            drawn.iter().all(Option::is_some),
+            "a dense forest left bare"
+        );
+        for canopy in drawn.iter().flatten() {
+            assert_eq!(
+                (canopy.material, canopy.sparse),
+                (CANOPY, sparse),
+                "{next_spacing_m} m: {canopy:?}"
+            );
+        }
+    }
+}

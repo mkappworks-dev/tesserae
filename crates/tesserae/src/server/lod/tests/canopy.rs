@@ -3,6 +3,7 @@
 
 use super::trees::{canopy, forest_spaced, rows, trunk, voxels};
 use super::*;
+use tesserae_core::canopy_stand;
 use tesserae_core::testgen::fixtures;
 
 const LEVELS: u32 = 5;
@@ -30,15 +31,26 @@ fn tops(chunks: &[(i32, Chunk)]) -> Vec<Option<(i32, Voxel)>> {
 }
 
 #[test]
-fn a_dense_forest_draws_one_coarse_voxel_of_leaves_over_its_ground_above_the_impostor_levels() {
+fn a_dense_forest_draws_its_leaves_as_high_over_its_ground_as_its_cover_and_trees_reach() {
     let world = land();
     let level_zero = Worldgen::new(world.seed, world.voxel_size, dense());
     let generators = LodGenerators::new(&world, &level_zero, LEVELS);
     let tables = &fixtures().tables;
+    let shapes = generators.placement.canopy_shapes();
     for level in IMPOSTORS_TO + 1..LEVELS {
-        // A 3 to 5 m trunk under a 2.5 m crown tops some 7 m up: over half a 4 or 8 m Voxel.
-        let raised = i32::from(level < 4);
+        let voxel_m = world.voxel_size * level_scale(level);
+        let mut rises = std::collections::BTreeSet::new();
         for (cx, cz) in [(-1, -1), (0, 0)] {
+            let n = CHUNK_SIZE;
+            let centres: Vec<[i32; 2]> = (0..n * n)
+                .map(|i| {
+                    [
+                        Answers::centre(level, cx, i % n),
+                        Answers::centre(level, cz, i / n),
+                    ]
+                })
+                .collect();
+            let expected = generators.placement.canopy_cover(&shapes, &centres);
             let column = |placement: bool| {
                 let makers = Makers {
                     placement: placement.then_some(&*generators.placement),
@@ -55,11 +67,17 @@ fn a_dense_forest_draws_one_coarse_voxel_of_leaves_over_its_ground_above_the_imp
             };
             let (covered, ground) = (column(true), column(false));
             let mut leaves = 0;
-            for (top, under) in covered.iter().zip(&ground) {
+            for ((top, under), drawn) in covered.iter().zip(&ground).zip(&expected) {
                 let ((y, v), (ground_y, ground_v)) = (top.unwrap(), under.unwrap());
                 if v.material() == canopy() {
+                    let (rise, material) = canopy_stand(&drawn.unwrap(), voxel_m);
                     leaves += 1;
-                    assert_eq!(y, ground_y + raised, "level {level}");
+                    rises.insert(rise);
+                    assert_eq!(
+                        (y, v.material()),
+                        (ground_y + rise, material),
+                        "level {level}"
+                    );
                 } else {
                     assert_eq!(
                         (y, v),
@@ -74,6 +92,13 @@ fn a_dense_forest_draws_one_coarse_voxel_of_leaves_over_its_ground_above_the_imp
                 covered.len()
             );
         }
+        // A 3 to 5 m trunk under a 2.5 m crown tops some 7 m up: two 4 m Voxels, one 8 m one, under
+        // half a 16 m one.
+        let reached = [(2, 2), (3, 1), (4, 0)];
+        assert!(
+            reached.contains(&(level, *rises.last().unwrap())),
+            "level {level}: rises {rises:?}"
+        );
     }
 }
 

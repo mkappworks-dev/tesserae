@@ -723,6 +723,9 @@ pub struct TreePart {
 pub struct Canopy {
     /// The dominant species' leaves.
     pub material: MaterialId,
+    /// The leaves a sparser column shows: the next species' where its trees cover at least half
+    /// what the dominant one's do, else the dominant one's.
+    pub sparse: MaterialId,
     /// That species' mean height over the ground, in metres.
     pub top_m: f32,
     /// The share of the ground its trees are expected to cover, from 0 to 1.
@@ -3732,7 +3735,7 @@ impl Worldgen {
         }
         // A tree stands only where no tree whose draw beats it stands within its crowding.
         let density: f64 = trees.iter().map(|t| t.0).sum();
-        let (cover, dominant) = trees
+        let mut covers: Vec<(f64, &SurfaceTree, CanopyShape)> = trees
             .iter()
             .map(|&(per_m2, tree, shape)| {
                 let crowd =
@@ -3744,16 +3747,19 @@ impl Worldgen {
                 };
                 (per_m2 * kept * f64::from(shape.area_m2), tree, shape)
             })
-            .fold((0.0, None), |(sum, best), t| {
-                let best = match best {
-                    Some(b @ (c, _, _)) if c >= t.0 => Some(b),
-                    _ => Some(t),
-                };
-                (sum + t.0, best)
-            });
-        let (_, tree, shape) = dominant?;
+            .collect();
+        let cover: f64 = covers.iter().map(|t| t.0).sum();
+        // Stable, so of two equal shares the earlier feature leads, as before.
+        covers.sort_by(|a, b| b.0.total_cmp(&a.0));
+        let &(lead, tree, shape) = covers.first()?;
+        let sparse = covers
+            .iter()
+            .find(|t| t.1.canopy != tree.canopy)
+            .filter(|t| 2.0 * t.0 >= lead)
+            .map_or(tree.canopy, |t| t.1.canopy);
         let canopy = Canopy {
             material: tree.canopy,
+            sparse,
             top_m: shape.top_m,
             // Crowns still overlap where crowding lets them, as scattered discs do.
             cover: (1.0 - libm::exp(-cover)) as f32,
