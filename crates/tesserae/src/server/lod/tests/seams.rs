@@ -25,6 +25,7 @@ impl Levels {
                 &self.tables,
                 None,
                 seam_margin(level),
+                None,
             ))
         };
         self.chunks.insert((level, c), s.clone());

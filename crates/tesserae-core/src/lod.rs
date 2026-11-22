@@ -11,7 +11,7 @@ use crate::material::{MaterialTable, RenderClass};
 use crate::mesh::{
     FACE_STEPS, NEG_X, NEG_Y, NEG_Z, POS_X, POS_Y, SEAM_EVERY, SEAM_LAYERS, SeamOpenings,
 };
-use crate::worldgen::{ColumnTop, Worldgen, level_index, top_index};
+use crate::worldgen::{ColumnTop, TreePart, Worldgen, level_index, top_index};
 
 const OCTANT: usize = CHUNK_SIZE / 2;
 
@@ -359,6 +359,85 @@ pub fn agree_with_level_zero(
                 };
                 if chunk.get(x, y, z) != want {
                     chunk.set(x, y, z, want);
+                }
+            }
+        }
+    }
+}
+
+/// The Materials a tree is grown of, for [`coarsen_tree_parts`] to tell from ground.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct TreeMaterials {
+    pub trunks: Vec<MaterialId>,
+    pub canopies: Vec<MaterialId>,
+}
+
+fn octant_of(x: usize, y: usize, z: usize) -> usize {
+    (x / OCTANT) | ((y / OCTANT) << 1) | ((z / OCTANT) << 2)
+}
+
+/// Stands a tree's Impostor: each of `parts`, a level-0 cell, makes the coarse Voxel of Chunk
+/// `coord` holding it, `span` level-0 cells a side, its Material whatever the vote left there,
+/// canopy over trunk, so a lone trunk the vote loses still stands. Octants `skip` marks keep what
+/// they hold.
+pub fn stand_tree_parts(
+    chunk: &mut Chunk,
+    coord: [i32; 3],
+    span: i32,
+    parts: &[TreePart],
+    skip: [bool; 8],
+) {
+    let size = CHUNK_SIZE as i32;
+    let origin = coord.map(|c| c * size * span);
+    for canopy in [false, true] {
+        for p in parts.iter().filter(|p| p.canopy == canopy) {
+            let local =
+                std::array::from_fn::<i32, 3, _>(|a| (p.at[a] - origin[a]).div_euclid(span));
+            if local.iter().any(|v| !(0..size).contains(v)) {
+                continue;
+            }
+            let [x, y, z] = local.map(|v| v as usize);
+            if !skip[octant_of(x, y, z)] {
+                chunk.set(x, y, z, Voxel::cube(p.material));
+            }
+        }
+    }
+}
+
+/// Over each octant `changed` marks, a coarse Voxel any of whose eight finer Voxels in `children`
+/// is a canopy takes that canopy, else a trunk that trunk: the rule [`stand_tree_parts`] draws by,
+/// applied to Voxels a Player or the World changed, so a felled tree stays felled.
+pub fn coarsen_tree_parts(
+    chunk: &mut Chunk,
+    children: [&Chunk; 8],
+    changed: [bool; 8],
+    trees: &TreeMaterials,
+) {
+    for (octant, child) in children.into_iter().enumerate() {
+        if !changed[octant] || child.uniform().is_some_and(|v| v.is_air()) {
+            continue;
+        }
+        let base = [octant & 1, octant >> 1 & 1, octant >> 2 & 1].map(|b| b * OCTANT);
+        for z in 0..OCTANT {
+            for y in 0..OCTANT {
+                for x in 0..OCTANT {
+                    let mut trunk = None;
+                    let mut canopy = None;
+                    for i in 0..8 {
+                        let m = child
+                            .get(2 * x + (i & 1), 2 * y + (i >> 1 & 1), 2 * z + (i >> 2))
+                            .material();
+                        if trees.canopies.contains(&m) {
+                            canopy = Some(m);
+                            break;
+                        }
+                        if trunk.is_none() && trees.trunks.contains(&m) {
+                            trunk = Some(m);
+                        }
+                    }
+                    if let Some(m) = canopy.or(trunk) {
+                        chunk.set(base[0] + x, base[1] + y, base[2] + z, Voxel::cube(m));
+                    }
                 }
             }
         }
@@ -848,6 +927,79 @@ mod tests {
 
     const SEED: u64 = 0x7e55_e2ae_0000_0001;
     const COLUMNS: usize = 60;
+
+    const TRUNK: MaterialId = 210;
+    const CANOPY: MaterialId = 211;
+
+    fn part(at: [i32; 3], canopy: bool) -> TreePart {
+        TreePart {
+            at,
+            material: if canopy { CANOPY } else { TRUNK },
+            canopy,
+        }
+    }
+
+    #[test]
+    fn a_tree_part_beats_air_and_ground_and_a_canopy_beats_a_trunk_outside_skipped_octants() {
+        let rock = Voxel::cube(fixtures().ground.rock);
+        let mut chunk = Chunk::air();
+        chunk.set(0, 0, 0, rock);
+        // Level 1 at coarse Chunk (1, 0, 0): level-0 cells 64..128 along x.
+        let parts = [
+            part([64, 0, 0], false),
+            part([65, 1, 1], false),
+            part([66, 0, 0], false),
+            part([67, 1, 0], true),
+            part([64 + 40, 0, 0], true),
+            part([1000, 0, 0], true),
+        ];
+        let mut skip = [false; 8];
+        skip[1] = true;
+        stand_tree_parts(&mut chunk, [1, 0, 0], 2, &parts, skip);
+        assert_eq!(chunk.get(0, 0, 0), Voxel::cube(TRUNK), "trunk over ground");
+        assert_eq!(chunk.get(1, 0, 0), Voxel::cube(CANOPY), "canopy over trunk");
+        assert_eq!(chunk.get(20, 0, 0), Voxel::AIR, "a skipped octant is left");
+        let solid = (0..CHUNK_SIZE.pow(3))
+            .filter(|&i| {
+                let (x, y, z) = (
+                    i % CHUNK_SIZE,
+                    i / CHUNK_SIZE % CHUNK_SIZE,
+                    i / CHUNK_SIZE.pow(2),
+                );
+                !chunk.get(x, y, z).is_air()
+            })
+            .count();
+        assert_eq!(solid, 2, "a part outside the Chunk stands nothing");
+    }
+
+    #[test]
+    fn a_changed_octant_keeps_any_finer_tree_voxel_with_a_canopy_over_a_trunk() {
+        let rock = Voxel::cube(fixtures().ground.rock);
+        let mut children: [Chunk; 8] = std::array::from_fn(|_| Chunk::air());
+        children[0].set(0, 0, 0, Voxel::cube(TRUNK));
+        children[0].set(2, 0, 0, Voxel::cube(TRUNK));
+        children[0].set(3, 1, 1, Voxel::cube(CANOPY));
+        children[0].set(4, 0, 0, rock);
+        children[0].set(5, 0, 0, Voxel::cube(CANOPY));
+        children[1].set(0, 0, 0, Voxel::cube(CANOPY));
+        let mut chunk = Chunk::air();
+        chunk.set(2, 0, 0, rock);
+        let trees = TreeMaterials {
+            trunks: vec![TRUNK],
+            canopies: vec![CANOPY],
+        };
+        let mut changed = [false; 8];
+        changed[0] = true;
+        coarsen_tree_parts(&mut chunk, children.each_ref(), changed, &trees);
+        assert_eq!(chunk.get(0, 0, 0), Voxel::cube(TRUNK), "a lone trunk Voxel");
+        assert_eq!(chunk.get(1, 0, 0), Voxel::cube(CANOPY));
+        assert_eq!(chunk.get(2, 0, 0), Voxel::cube(CANOPY), "over ground");
+        assert_eq!(
+            chunk.get(16, 0, 0),
+            Voxel::AIR,
+            "an unchanged octant is drawn"
+        );
+    }
 
     /// Eight children of rock below finer y 20, with a two-Voxel pit at finer
     /// (32, 18..20, 9): against the coarse plane x = 16, in coarse Voxel

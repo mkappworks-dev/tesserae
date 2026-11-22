@@ -73,6 +73,7 @@ fn chunk_of(generators: &LodGenerators, tables: &Tables, level: u32, c: ChunkCoo
                 tables,
                 None,
                 None,
+                None,
             )
             .chunk
         }

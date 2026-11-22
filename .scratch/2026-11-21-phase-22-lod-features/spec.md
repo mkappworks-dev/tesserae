@@ -1,7 +1,7 @@
 # LOD features: coarse levels that agree with level 0, and a longer reach
 
 Status: ready-for-agent. Decisions Q1 to Q23 were settled in a grilling round on
-2026-11-21, and Q24 (the presets) on 2026-11-22.
+2026-11-21, and Q24 (the presets) and Q25 (Terra's level 0) on 2026-11-22.
 
 Source: branch `feat/phase-22-lod-features`, cut from `main` at `65037cdd`.
 DESIGN.md step 22. Depends on steps 6, 18 and 20. Builds on
@@ -123,6 +123,9 @@ captures are reviewed in two batches, after 05 and at 09.
   draws find no warm 1 m columns; the cost per level-2 Chunk is estimated at
   several milliseconds. If ticket 03 measures it past the per-level budget,
   level 2 draws Canopy cover instead of Impostors, and the spec records it.
+  **Recorded (03):** past it. Over a Terra forest, a level-2 terrain Chunk costs
+  32.9 ms with Impostors against 4.6 ms without (level 1: 10.6 against 4.1), so
+  Impostors stand at level 1 only and Canopy cover runs from level 2 up.
 - **Over saved changes (Q23).** A coarse branch holding an Edit or saved change
   runs no Impostor draw: it takes the changed level-0 Voxels, coarsened with
   the same any-solid rule for tree and Template Materials. So a felled tree is
@@ -164,6 +167,9 @@ captures are reviewed in two batches, after 05 and at 09.
   whole field is drawn within 10 s of spawn; GPU frame is at most 1 ms over
   `main`; and level 0's fill time does not regress. If Medium fails any, the default is
   the widest curve that passes, recorded here.
+- **Terra's level 0 (Q25).** Terra declares 160 m (5 Chunks) with no recorded reason; every other
+  Game uses the engine's 192 m. Ticket 09 measures Terra at 192 m too and keeps it only if level 0's
+  fill time and GPU frame stay within budget, recording the reason either way.
 - **Fill order (Q21).** Coarse jobs are prioritised by distance over their
   level's Cell, so the outermost level fills first and finer ones replace it.
 - **Vertical extent (Q22).** Three of a level's own Cells above and below,

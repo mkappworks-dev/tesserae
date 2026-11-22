@@ -60,6 +60,12 @@ keeps it in the Player's profile.
   `lod_rings::tests::{low_is_the_game_s_own_doubling, medium_reaches_eight_of_each_level_s_own_chunks, high_holds_each_level_twice_as_far}`.
   Clippy (`--all-targets --all-features`), docs, the default-feature check,
   rustfmt and Prettier are clean.
+- After merging `feat/phase-22-lod-features` at ea48f268 (ticket 03): 3102
+  passed, 1 failed. 03's `level_one_cells` now reads `QualityCurve::HIGH.unit_m`
+  for the old `DETAILED_UNIT_M` (both 384 m).
+  `server::lod::tests::a_level_one_job_counts_the_level_zero_chunks_it_generates_inside_level_zeros_load`
+  fails the same way (`in_load: 203`, expected 0) at ea48f268 without this
+  ticket, so it is 03's to fix.
 - Capture (`TESSERAE_SCREENSHOT_OFFSCREEN=1`, `TESSERAE_SCREENSHOT_SETTINGS_TAB=distance`,
   Terra, 1440×1100): `/tmp/lod22-t08-distance-CMh5` — `engine-distance.png`
   beside `mockup-distance.png`. An offscreen capture now draws the UI for an
