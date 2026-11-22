@@ -24,6 +24,8 @@ Presets: Balanced (`u` 192 m) and Detailed (`u` 384 m); Custom is any unit from
 - [ ] Ring tests for both presets, a Custom curve and the clamp, at all four
       parities; Balanced equals today's rings exactly.
 - [ ] Level 0's rings are unchanged by any curve.
+- [ ] A test that no coarse-level mesh, Impostors included, is on a
+      shadow-casting layer at any curve.
 - [ ] Changing the curve at run time streams the new rings with no gap
       (ADR-0019), in a Bevy app test.
 - [ ] Captures with the debug tint at Balanced and Detailed, for 09's review

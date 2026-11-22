@@ -1161,6 +1161,7 @@ fn tables_of(h: &Harness) -> std::sync::Arc<Tables> {
 pub(in crate::server) fn terra_loaded(size: f32) -> LoadedMods {
     static NEXT: AtomicU64 = AtomicU64::new(0);
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    std::fs::create_dir_all(root.join("target/phase7-runs")).unwrap();
     let dir = loop {
         let dir = root.join(format!(
             "target/phase7-runs/t09-trust-{}-{}",
