@@ -30,12 +30,14 @@ It lives in the coarse path, never in `Worldgen` at a Voxel size: a World with 2
 m Voxels uses `Worldgen` at 2 m as its level 0, and Generator version 3's output
 is frozen ([ADR-0033](0033-generator-version-3-is-the-only-version.md)).
 
-**Impostors.** At levels 1 and 2 a coarse Chunk stands every tree and Structure
-that level 0's pure draws stand there, written into the coarse grid so that any
-solid beats air, which the half-volume vote does not. Level 1 always runs the
-draw, so its trees never depend on what the Server held. From level 3 up a Voxel
-is as large as a tree, and a coarse column draws Canopy cover from the same
-Biome and density fields instead; Structures stay Impostors at every level.
+**Impostors.** At level 1 a coarse Chunk stands every tree that level 0's pure
+draws stand there, written into the coarse grid so that any solid beats air,
+which the half-volume vote does not. Level 1 always runs the draw, so its trees
+never depend on what the Server held. From level 2 up a coarse column draws
+Canopy cover from the same Biome and density fields instead: level 2's tree
+draws measured about 7 times its Chunk's cost without them. Structures stay
+Impostors at every level; bridges stand at level 1 only, as their gap search
+costs seconds per square kilometre above it.
 
 **Nothing new is stored.** Impostors and Canopy cover are pure functions of the
 seed, the parameters and metres, like every coarse Chunk. There is no LOD cache
@@ -62,8 +64,9 @@ dither band would draw both levels across every overlap.
 
 ## Consequences
 
-- Coarse Chunks cost more: a centre sample per column from level 3 up, and the
-  level-0 draws for each Impostor. Both are measured against the step-6 budget.
+- Coarse Chunks cost more: a centre sample per column at every coarse level, and
+  the level-0 draws for each Impostor. Both are measured against the step-6
+  budget.
 - Plants and ground cover stay out of coarse levels; their colour is not folded
   into the ground.
 - Impostors cast no sun shadow: the shadow cascades end inside level 0's ring.
