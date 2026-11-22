@@ -382,7 +382,7 @@ const DENSE_COVER: f32 = 0.75;
 const CANOPY_RISE: i32 = 2;
 
 /// The columns of `answers`, as [`agree_with_level_zero`] takes them, whose Canopy cover could
-/// fall in Chunk row `cy`: dry, with their top or a Voxel up to [`CANOPY_RISE`] over it in the row.
+/// fall in Chunk row `cy`: dry, with their top or a Voxel up to `CANOPY_RISE` over it in the row.
 pub fn canopy_candidates(cy: i32, voxel_m: f32, answers: &[Option<ColumnTop>]) -> Vec<usize> {
     let size = CHUNK_SIZE as i32;
     let rows = cy * size..(cy + 1) * size;
@@ -398,7 +398,7 @@ pub fn canopy_candidates(cy: i32, voxel_m: f32, answers: &[Option<ColumnTop>]) -
 
 /// How many coarse Voxels of `voxel_m` a column's Canopy cover stands over its top, 0 for the top
 /// itself, and the leaves it shows. A dense column fills the Voxels its trees reach at least half
-/// of, up to [`CANOPY_RISE`]; a sparser one stands a Voxel lower in its own shade, so a forest's
+/// of, up to `CANOPY_RISE`; a sparser one stands a Voxel lower in its own shade, so a forest's
 /// top is a mass of crowns, not a sheet (ADR-0035).
 pub fn canopy_stand(canopy: &Canopy, voxel_m: f32) -> (i32, MaterialId) {
     let reached = ((canopy.top_m / voxel_m).round() as i32).min(CANOPY_RISE);
