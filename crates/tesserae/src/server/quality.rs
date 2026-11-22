@@ -98,11 +98,18 @@ impl QualityCurve {
     }
 
     /// What the Server streams for this request in a Game that declares `game`. Level 0 is the
-    /// Game's, and a NaN takes the Game's value.
+    /// Game's; the unit runs from its view distance to High's, the widest level 1 the placement
+    /// generator's cache is sized for, and the reach from its view distance to its ceiling. A unit
+    /// that is not finite takes the view distance, a reach the ceiling.
     pub fn applied_to(self, game: StreamingSettings) -> StreamingSettings {
+        let view_m = game.view_distance_m;
+        let within = |v: f32, fallback: f32, max: f32| {
+            let v = if v.is_finite() { v } else { fallback };
+            v.min(max).max(view_m)
+        };
         StreamingSettings {
-            lod_unit_m: self.unit_m.max(game.view_distance_m),
-            lod_distance_m: self.reach_m.min(game.lod_distance_m),
+            lod_unit_m: within(self.unit_m, view_m, Self::HIGH.unit_m),
+            lod_distance_m: within(self.reach_m, game.lod_distance_m, game.lod_distance_m),
             ..game
         }
     }
