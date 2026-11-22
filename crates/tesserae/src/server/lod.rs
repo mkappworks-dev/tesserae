@@ -1717,9 +1717,11 @@ fn retire(
     unloaded: &mut MessageWriter<LodUnloaded>,
 ) {
     let mut moved = false;
-    // A curve with fewer levels: the Client keeps drawing what these held until it is covered.
-    for dropped in plans.len() as u32 + 1..=state.levels.len() as u32 {
-        let level = std::mem::take(state.level_mut(dropped));
+    // A curve with fewer levels unloads these; the Client still draws them, as `chunk_view`
+    // despawns an unloaded mesh only once finer levels cover it.
+    let first_dropped = plans.len() as u32 + 1;
+    let dropped = state.levels.split_off(plans.len().min(state.levels.len()));
+    for (dropped, level) in (first_dropped..).zip(dropped) {
         moved |= level.anchor.is_some();
         for coord in level.delivered {
             unloaded.write(LodUnloaded {
