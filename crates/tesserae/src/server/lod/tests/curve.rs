@@ -178,7 +178,7 @@ fn a_new_curve_streams_its_rings_with_no_gap_and_back_again() {
     let mut h = harness_with(game(), unlimited());
     h.app
         .add_message::<QualityCurve>()
-        .insert_resource(DeclaredStreaming(game()));
+        .insert_resource(DeclaredStreaming::own(game()));
     let mut drawn = Drawn::default();
     settle_without_a_gap(&mut h, &mut drawn, "the first fill");
     assert_streams_the_rings_in_effect(&h, GAME_LEVELS, "the Game's doubling");

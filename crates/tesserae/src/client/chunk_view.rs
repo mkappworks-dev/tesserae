@@ -859,13 +859,16 @@ fn spawn_camera(
     mut commands: Commands,
     spawn: Res<crate::server::world_state::SpawnPoint>,
     streaming: Res<StreamingSettings>,
+    declared: Option<Res<crate::server::quality::DeclaredStreaming>>,
     world: Res<WorldSettings>,
     fog_settings: Res<FogSettings>,
 ) {
     let eye = spawn.entry_eye();
     let direction = Vec3::new(0.0, VIEW_PITCH, -1.0).normalize();
     let pose = Transform::from_translation(eye).looking_to(direction, Vec3::Y);
-    let layers: Vec<usize> = (0..level_count(&streaming).max(1))
+    // Layers and far plane cover any curve the Player may apply later; the fog follows it.
+    let ceiling = declared.map_or(*streaming, |declared| declared.ceiling);
+    let layers: Vec<usize> = (0..level_count(&ceiling).max(1))
         .map(|level| level as usize)
         .collect();
     #[cfg(feature = "profiling")]
@@ -883,7 +886,7 @@ fn spawn_camera(
             // Bevy's reverse-Z projection has no far plane; this one bounds
             // frustum culling, which must reach the coarsest level.
             Projection::Perspective(PerspectiveProjection {
-                far: streaming.lod_distance_m.max(streaming.view_distance_m) + world.cell_size(),
+                far: ceiling.lod_distance_m.max(ceiling.view_distance_m) + world.cell_size(),
                 ..default()
             }),
             MainCamera,
@@ -987,6 +990,48 @@ mod tests {
         let projection = projection_of_main(&mut app);
         assert!(projection.far >= streaming.lod_distance_m + cell);
         assert_eq!(projection.near, PerspectiveProjection::default().near);
+    }
+
+    #[test]
+    fn the_camera_draws_and_reaches_every_level_the_ceiling_allows_while_low_streams_fewer() {
+        let declared = crate::server::quality::DeclaredStreaming {
+            ceiling: StreamingSettings {
+                view_distance_m: 160.0,
+                lod_distance_m: 8192.0,
+                ..default()
+            },
+            low_reach_m: 3000.0,
+        };
+        let low = declared.low();
+        let mut app = App::new();
+        app.insert_resource(crate::server::world_state::SpawnPoint::for_tests(
+            Vec3::ZERO,
+        ))
+        .insert_resource(low)
+        .insert_resource(declared)
+        .init_resource::<FogSettings>()
+        .init_resource::<WorldSettings>();
+        app.world_mut().run_system_once(spawn_camera).unwrap();
+
+        assert_eq!((level_count(&low), level_count(&declared.ceiling)), (6, 7));
+        let layers = app
+            .world_mut()
+            .query_filtered::<&RenderLayers, With<MainCamera>>()
+            .single(app.world())
+            .unwrap()
+            .clone();
+        assert!(layers.intersects(&layer_of(6)));
+        assert!(projection_of_main(&mut app).far >= 8192.0);
+        let fog = app
+            .world_mut()
+            .query_filtered::<&DistanceFog, With<MainCamera>>()
+            .single(app.world())
+            .unwrap()
+            .clone();
+        assert_same_fog(
+            &fog::distance_fog(&FogSettings::default(), 160.0, 3000.0),
+            &fog,
+        );
     }
 
     #[test]
@@ -2396,8 +2441,8 @@ mod tests {
 
     #[test]
     fn no_coarse_mesh_casts_a_sun_shadow_under_any_curve() {
-        use crate::server::quality::QualityCurve;
-        let game = StreamingSettings::default();
+        use crate::server::quality::{DeclaredStreaming, QualityCurve};
+        let game = DeclaredStreaming::default();
         for curve in [
             QualityCurve::low(game),
             QualityCurve::MEDIUM,
@@ -2407,7 +2452,7 @@ mod tests {
                 reach_m: 2500.0,
             },
         ] {
-            let streaming = curve.applied_to(game);
+            let streaming = curve.applied_to(game.ceiling);
             let mut app = app();
             app.insert_resource(streaming);
             let coord = ChunkCoord::new(0, 0, 0);

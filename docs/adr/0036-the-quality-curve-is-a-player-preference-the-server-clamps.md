@@ -27,10 +27,14 @@ preference.
 The curve is a fixed table in metres, not a screen-space error: the Server
 streams it, and a Server has no screen.
 
-The default is Medium, `u` 256 m to 6 km, once its memory, fill time and GPU
-frame are measured; High, `384 * 2^k` m to 8192 m, is the look of other engines
-with distant terrain, chosen by a Player who can afford it; the doubling stays
-as Low.
+The default is Medium, `u` 192 m (6 Chunks) to 6 km: measured on an M5 over
+Terra, 8 Chunks filled the field in 13.5 s against a 10 s budget, as the coarse
+jobs are CPU-bound on three workers, and 6 Chunks filled it in under 10 s within
+the memory and GPU-frame budgets. High, `384 * 2^k` m to 8 km, is the look of
+other engines with distant terrain, chosen by a Player who can afford it; the
+doubling stays as Low. Low keeps the reach the Game declared before the ceiling
+rose (`low-lod-distance-m`, 3 km on Terra), and the Game's `lod-distance-m` is
+the ceiling, 8192 m on Terra and by default.
 
 ## Consequences
 

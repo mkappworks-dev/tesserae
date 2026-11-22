@@ -1289,7 +1289,8 @@ fn terra_contract_content_loads_and_terra_builds_nothing_at_spawn() {
         assert!(params.caves.is_some());
         assert_eq!(params.water.unwrap().level_m, 34.0);
         assert_eq!(loaded.view.unwrap().view_distance_m, 160.0);
-        assert_eq!(loaded.view.unwrap().lod_distance_m, 3000.0);
+        assert_eq!(loaded.view.unwrap().lod_distance_m, 8192.0);
+        assert_eq!(loaded.view.unwrap().low_lod_distance_m, Some(3000.0));
         let own: Vec<_> = loaded
             .appearance
             .iter()

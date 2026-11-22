@@ -58,7 +58,8 @@ impl Default for FogSettings {
         FogSettings {
             color: srgb(HAZE_FOG_SRGB),
             sky: srgb(HAZE_SKY_SRGB),
-            reach_opacity: 0.88,
+            // Ticket 09's captures: at 0.88 and below the reach's square edge shows against the sky.
+            reach_opacity: 0.95,
         }
     }
 }
@@ -76,7 +77,8 @@ pub fn plugin(app: &mut App) {
 
 /// Re-derives the clear colour and every camera's fog when [`FogSettings`] is
 /// changed after startup, so a Look pack that sets it at run time takes effect
-/// without respawning the cameras.
+/// without respawning the cameras; and every camera's fog when the Quality
+/// curve moves the reach.
 pub(crate) fn follow_settings(
     settings: Res<FogSettings>,
     streaming: Res<StreamingSettings>,
@@ -86,11 +88,15 @@ pub(crate) fn follow_settings(
     // A resource reads as changed on the first run after it is inserted, and the
     // capture probe inserts its own `ClearColor` after this plugin: re-applying
     // the sky then would overwrite the probe's magenta.
-    if !settings.is_changed() || settings.is_added() {
+    let look = settings.is_changed() && !settings.is_added();
+    let reach = streaming.is_changed() && !streaming.is_added();
+    if !look && !reach {
         return;
     }
-    let [r, g, b] = settings.sky;
-    clear.0 = Color::srgb(r, g, b);
+    if look {
+        let [r, g, b] = settings.sky;
+        clear.0 = Color::srgb(r, g, b);
+    }
     let fog = distance_fog(
         &settings,
         streaming.view_distance_m,
@@ -256,7 +262,8 @@ mod tests {
 
     #[test]
     fn default_fog_leaves_the_full_detail_rings_unhazed() {
-        let fog = distance_fog(&FogSettings::default(), DEFAULT_VIEW_M, DEFAULT_LOD_M);
+        let reach_m = crate::server::quality::QualityCurve::MEDIUM.reach_m;
+        let fog = distance_fog(&FogSettings::default(), DEFAULT_VIEW_M, reach_m);
         // Edit these with the reason if a default changes: they are the spec's figures.
         assert!(opacity_at(&fog, 192.0) < 0.01, "level 0 edge");
         assert!(opacity_at(&fog, 384.0) < 0.02, "join of levels 1 and 2");
@@ -404,6 +411,27 @@ mod tests {
             assert_eq!(density_of(fog), density_of(&want));
             assert_ne!(density_of(fog), density_of(&default_camera_fog()));
         }
+    }
+
+    #[test]
+    fn a_curve_change_refogs_every_camera_to_its_reach_and_leaves_the_sky() {
+        let mut app = running_app();
+        let magenta = Color::srgb(1.0, 0.0, 1.0);
+        app.insert_resource(ClearColor(magenta));
+        let camera = app.world_mut().spawn(default_camera_fog()).id();
+        app.update();
+
+        app.world_mut()
+            .resource_mut::<StreamingSettings>()
+            .lod_distance_m = 3000.0;
+        app.update();
+
+        let streaming = *app.world().resource::<StreamingSettings>();
+        let want = distance_fog(&FogSettings::default(), streaming.view_distance_m, 3000.0);
+        let fog = app.world().get::<DistanceFog>(camera).expect("fog");
+        assert_eq!(density_of(fog), density_of(&want));
+        assert_ne!(density_of(fog), density_of(&default_camera_fog()));
+        assert_eq!(app.world().resource::<ClearColor>().0, magenta);
     }
 
     #[test]

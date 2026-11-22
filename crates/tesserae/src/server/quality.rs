@@ -7,10 +7,46 @@ use bevy::prelude::*;
 use super::streaming::StreamingSettings;
 use crate::session::SessionApp;
 
-/// The distances the Game declares: the curve streamed until a Client asks for another, and
-/// the ceiling every request is clamped to.
-#[derive(Resource, Clone, Copy, Default, Debug)]
-pub struct DeclaredStreaming(pub StreamingSettings);
+/// The engine's ceiling for a Game that declares no view, as `ViewParams::MAX_LOD_M` allows.
+pub const DEFAULT_CEILING_M: f32 = 8192.0;
+
+/// The distances the Game declares.
+#[derive(Resource, Clone, Copy, PartialEq, Debug)]
+pub struct DeclaredStreaming {
+    /// What every request is clamped to.
+    pub ceiling: StreamingSettings,
+    /// Low's reach: the Game's own rings, streamed until a Client asks for another curve.
+    pub low_reach_m: f32,
+}
+
+impl Default for DeclaredStreaming {
+    /// The engine's own rings are `StreamingSettings::default()`'s.
+    fn default() -> Self {
+        let own = StreamingSettings::default();
+        DeclaredStreaming {
+            ceiling: StreamingSettings {
+                lod_distance_m: DEFAULT_CEILING_M,
+                ..own
+            },
+            low_reach_m: own.lod_distance_m,
+        }
+    }
+}
+
+impl DeclaredStreaming {
+    /// A Game whose Low reaches its ceiling, as every Game's did before the Quality curve.
+    pub fn own(ceiling: StreamingSettings) -> Self {
+        DeclaredStreaming {
+            ceiling,
+            low_reach_m: ceiling.lod_distance_m,
+        }
+    }
+
+    /// What the Server streams before any Client asks.
+    pub fn low(self) -> StreamingSettings {
+        QualityCurve::low(self).applied_to(self.ceiling)
+    }
+}
 
 pub(super) fn plugin(app: &mut App) {
     app.init_session_resource::<DeclaredStreaming>()
@@ -29,7 +65,7 @@ pub(crate) fn apply(
     mut settings: ResMut<StreamingSettings>,
 ) {
     if let Some(request) = requests.read().last() {
-        settings.set_if_neq(request.applied_to(declared.0));
+        settings.set_if_neq(request.applied_to(declared.ceiling));
     }
 }
 
@@ -41,9 +77,10 @@ pub struct QualityCurve {
 }
 
 impl QualityCurve {
-    /// Each Voxel size held further than the Game's rings, to 6 km: the default.
+    /// The default: 6 Chunks to 6 km. Ticket 09 measured 8 Chunks filling Terra's field in
+    /// 13.5 s against the 10 s budget, and 6 in 9.5.
     pub const MEDIUM: Self = QualityCurve {
-        unit_m: 256.0,
+        unit_m: 192.0,
         reach_m: 6000.0,
     };
     pub const HIGH: Self = QualityCurve {
@@ -51,11 +88,12 @@ impl QualityCurve {
         reach_m: 8000.0,
     };
 
-    /// The Game's own rings: the doubling from its view distance to the reach it declares.
-    pub fn low(game: StreamingSettings) -> Self {
+    /// The Game's own rings: the doubling from its view distance to its own reach, which may
+    /// be nearer than its ceiling.
+    pub fn low(game: DeclaredStreaming) -> Self {
         QualityCurve {
-            unit_m: game.view_distance_m,
-            reach_m: game.lod_distance_m,
+            unit_m: game.ceiling.view_distance_m,
+            reach_m: game.low_reach_m,
         }
     }
 

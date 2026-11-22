@@ -309,7 +309,8 @@ impl Guest for Terra {
             world: Some(world),
             view: Some(ViewParams {
                 view_distance_m: 160.0,
-                lod_distance_m: 3000.0,
+                lod_distance_m: 8192.0,
+                low_lod_distance_m: Some(3000.0),
             }),
             // Water first: registration order decides an otherwise equal claim.
             fluids: vec![

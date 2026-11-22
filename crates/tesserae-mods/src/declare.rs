@@ -92,7 +92,10 @@ impl From<content::ToolKind> for ToolKind {
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct ViewParams {
     pub view_distance_m: f32,
+    /// The ceiling of every Quality curve.
     pub lod_distance_m: f32,
+    /// The Low preset's reach; `None` reaches the ceiling.
+    pub low_lod_distance_m: Option<f32>,
 }
 
 impl ViewParams {
@@ -114,6 +117,14 @@ impl ViewParams {
                 rule: "must be finite and from view_distance_m to 8192 m",
             });
         }
+        if let Some(low) = self.low_lod_distance_m
+            && !(self.view_distance_m..=self.lod_distance_m).contains(&low)
+        {
+            return Err(ParamError {
+                field: "low_lod_distance_m",
+                rule: "must be finite and from view_distance_m to lod_distance_m",
+            });
+        }
         Ok(())
     }
 }
@@ -123,6 +134,7 @@ impl From<content::ViewParams> for ViewParams {
         ViewParams {
             view_distance_m: p.view_distance_m,
             lod_distance_m: p.lod_distance_m,
+            low_lod_distance_m: p.low_lod_distance_m,
         }
     }
 }

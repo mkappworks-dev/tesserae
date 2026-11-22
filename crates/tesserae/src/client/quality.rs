@@ -38,9 +38,8 @@ pub(super) fn plugin(app: &mut App) {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum DistancePreset {
-    /// Until Medium passes ticket 09's budgets: its whole field fills in about 16 s.
-    #[default]
     Low,
+    #[default]
     Medium,
     High,
     Custom,
@@ -88,7 +87,7 @@ impl Default for Distance {
 }
 
 impl Distance {
-    pub(crate) fn curve(self, game: StreamingSettings) -> QualityCurve {
+    pub(crate) fn curve(self, game: DeclaredStreaming) -> QualityCurve {
         match self.preset {
             DistancePreset::Low => QualityCurve::low(game),
             DistancePreset::Medium => QualityCurve::MEDIUM,
@@ -101,12 +100,12 @@ impl Distance {
     }
 
     /// What the Server streams for this preference in a World that declares `game`.
-    pub(crate) fn streamed(self, game: StreamingSettings) -> StreamingSettings {
-        self.curve(game).applied_to(game)
+    pub(crate) fn streamed(self, game: DeclaredStreaming) -> StreamingSettings {
+        self.curve(game).applied_to(game.ceiling)
     }
 
     /// The streamed curve as the sliders show it, within their ends in this World.
-    pub(crate) fn sliders(self, game: StreamingSettings) -> Sliders {
+    pub(crate) fn sliders(self, game: DeclaredStreaming) -> Sliders {
         let streamed = self.streamed(game);
         let (detail, reach) = (detail_range(game), reach_range(game));
         Sliders {
@@ -119,7 +118,7 @@ impl Distance {
 
     /// Moves a slider, which only Custom allows. Landing on a preset's values chooses that
     /// preset and leaves Custom's memory as it was.
-    pub(crate) fn moved(&mut self, game: StreamingSettings, set: impl FnOnce(&mut Sliders)) {
+    pub(crate) fn moved(&mut self, game: DeclaredStreaming, set: impl FnOnce(&mut Sliders)) {
         if self.preset != DistancePreset::Custom {
             return;
         }
@@ -142,14 +141,15 @@ impl Distance {
 }
 
 /// From the World's view distance, which level 0 always covers, to 12 Chunks.
-pub(crate) fn detail_range(game: StreamingSettings) -> std::ops::RangeInclusive<u32> {
-    let view = (game.view_distance_m / DETAIL_CHUNK_M).ceil() as u32;
+pub(crate) fn detail_range(game: DeclaredStreaming) -> std::ops::RangeInclusive<u32> {
+    let view = (game.ceiling.view_distance_m / DETAIL_CHUNK_M).ceil() as u32;
     view..=MAX_DETAIL_CHUNKS.max(view)
 }
 
 /// From 2 km to the World's ceiling, at most 8 km.
-pub(crate) fn reach_range(game: StreamingSettings) -> std::ops::RangeInclusive<u32> {
-    let ceiling = ((game.lod_distance_m / 1000.0).floor() as u32).clamp(MIN_REACH_KM, MAX_REACH_KM);
+pub(crate) fn reach_range(game: DeclaredStreaming) -> std::ops::RangeInclusive<u32> {
+    let ceiling =
+        ((game.ceiling.lod_distance_m / 1000.0).floor() as u32).clamp(MIN_REACH_KM, MAX_REACH_KM);
     MIN_REACH_KM..=ceiling
 }
 
@@ -215,7 +215,7 @@ pub(in crate::client) fn request(
         *sent = None;
         return;
     };
-    let game = declared.map_or(*streaming, |declared| declared.0);
+    let game = declared.map_or(DeclaredStreaming::own(*streaming), |declared| *declared);
     let curve = match switch.as_deref() {
         Some(Switch::Curve(curve)) => *curve,
         Some(Switch::Preset(preset)) => Distance {
@@ -254,12 +254,23 @@ fn parse(var: &str) -> Result<Switch, String> {
 mod tests {
     use super::*;
 
-    fn terra() -> StreamingSettings {
-        StreamingSettings {
-            view_distance_m: 160.0,
-            lod_distance_m: 3000.0,
-            ..default()
+    fn terra() -> DeclaredStreaming {
+        DeclaredStreaming {
+            ceiling: StreamingSettings {
+                view_distance_m: 160.0,
+                lod_distance_m: 8192.0,
+                ..default()
+            },
+            low_reach_m: 3000.0,
         }
+    }
+
+    /// A Game whose ceiling is its own reach, as Terra's was before step 22.
+    fn near() -> DeclaredStreaming {
+        DeclaredStreaming::own(StreamingSettings {
+            lod_distance_m: 3000.0,
+            ..terra().ceiling
+        })
     }
 
     fn preset(preset: DistancePreset) -> Distance {
@@ -307,12 +318,12 @@ mod tests {
                 reach_m: 7000.0
             }
         );
-        assert_eq!(Distance::default().preset, DistancePreset::Low);
+        assert_eq!(Distance::default().preset, DistancePreset::Medium);
     }
 
     #[test]
     fn the_sliders_show_what_the_world_streams_within_its_own_ends() {
-        let game = terra();
+        let game = near();
         assert_eq!(detail_range(game), 5..=12);
         assert_eq!(reach_range(game), 2..=3);
         let shown = |p| preset(p).sliders(game);
@@ -321,26 +332,21 @@ mod tests {
             reach_km,
         };
         assert_eq!(shown(DistancePreset::Low), sliders(5, 3));
-        assert_eq!(shown(DistancePreset::Medium), sliders(8, 3));
+        assert_eq!(shown(DistancePreset::Medium), sliders(6, 3));
         assert_eq!(shown(DistancePreset::High), sliders(12, 3));
         assert_eq!(shown(DistancePreset::Custom), sliders(10, 3));
 
-        let far = StreamingSettings {
-            lod_distance_m: 8192.0,
-            ..terra()
-        };
+        let far = terra();
         assert_eq!(reach_range(far), 2..=8);
-        assert_eq!(preset(DistancePreset::Medium).sliders(far), sliders(8, 6));
+        assert_eq!(preset(DistancePreset::Low).sliders(far), sliders(5, 3));
+        assert_eq!(preset(DistancePreset::Medium).sliders(far), sliders(6, 6));
         assert_eq!(preset(DistancePreset::High).sliders(far), sliders(12, 8));
         assert_eq!(preset(DistancePreset::Custom).sliders(far), sliders(10, 7));
     }
 
     #[test]
     fn the_sliders_move_only_under_custom_and_a_preset_s_values_choose_it() {
-        let far = StreamingSettings {
-            lod_distance_m: 8192.0,
-            ..terra()
-        };
+        let far = terra();
         let mut medium = preset(DistancePreset::Medium);
         medium.moved(far, |s| s.detail_chunks = 11);
         assert_eq!(medium, preset(DistancePreset::Medium), "locked");
@@ -371,10 +377,11 @@ mod tests {
             rings,
             [
                 (1.0, 0.0, 160.0),
-                (2.0, 160.0, 512.0),
-                (4.0, 512.0, 1024.0),
-                (8.0, 1024.0, 2048.0),
-                (16.0, 2048.0, 3000.0),
+                (2.0, 160.0, 384.0),
+                (4.0, 384.0, 768.0),
+                (8.0, 768.0, 1536.0),
+                (16.0, 1536.0, 3072.0),
+                (32.0, 3072.0, 6000.0),
             ]
         );
         for row in &rows {
@@ -399,19 +406,19 @@ mod tests {
         assert_eq!(sent(&mut app), vec![], "no World is open");
 
         app.init_resource::<StreamingSettings>()
-            .insert_resource(DeclaredStreaming(terra()));
+            .insert_resource(terra());
         app.update();
         app.update();
-        assert_eq!(sent(&mut app), vec![QualityCurve::low(terra())]);
+        assert_eq!(sent(&mut app), vec![QualityCurve::MEDIUM]);
 
         app.world_mut()
             .resource_mut::<Preferences>()
             .distance
-            .preset = DistancePreset::Medium;
+            .preset = DistancePreset::Low;
         app.update();
         app.world_mut().resource_mut::<Preferences>().compass = true;
         app.update();
-        assert_eq!(sent(&mut app), vec![QualityCurve::MEDIUM]);
+        assert_eq!(sent(&mut app), vec![QualityCurve::low(terra())]);
 
         app.insert_resource(Switch::Preset(DistancePreset::High));
         app.update();

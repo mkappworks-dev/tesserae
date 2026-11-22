@@ -13,7 +13,7 @@ use super::{
 };
 use crate::server::lod_rings::level_count;
 use crate::server::mods::runtime::tests::terra_loaded;
-use crate::server::streaming::streaming_settings;
+use crate::server::streaming::declared_streaming;
 use crate::world::{ChunkCoord, WorldSettings};
 
 const N: i32 = CHUNK_SIZE as i32;
@@ -103,7 +103,7 @@ impl Terra {
             .with_templates(&loaded.tables.templates)
             .with_settlements(&loaded.tables.settlements)
             .with_loot(&loaded.biome_loot);
-        let levels = level_count(&streaming_settings(loaded.view));
+        let levels = level_count(&declared_streaming(loaded.view).low());
         let generators = LodGenerators::new(&world, &full, levels);
         let tree_parts = params
             .biomes

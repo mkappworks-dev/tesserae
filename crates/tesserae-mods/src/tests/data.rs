@@ -226,6 +226,7 @@ fn component() -> Declaration {
         view: Some(content::ViewParams {
             view_distance_m: 160.0,
             lod_distance_m: 3000.0,
+            low_lod_distance_m: Some(2048.0),
         }),
         fluids: vec![
             content::FluidDef {

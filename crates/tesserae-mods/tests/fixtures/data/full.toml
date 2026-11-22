@@ -82,6 +82,7 @@ keep-inventory = true
 [view]
 view-distance-m = 160.0
 lod-distance-m = 3000
+low-lod-distance-m = 2048.0
 
 [world]
 sea-level-m = 20.0

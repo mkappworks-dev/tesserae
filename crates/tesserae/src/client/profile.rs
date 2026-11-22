@@ -467,7 +467,7 @@ mod tests {
         assert!(!older.stronger_contrast, "an older profile keeps it off");
     }
     #[test]
-    fn a_profile_without_a_distance_choice_reads_as_low() {
+    fn a_profile_without_a_distance_choice_reads_as_medium() {
         use super::super::quality::DistancePreset;
         let mut document: serde_json::Value =
             serde_json::from_slice(&encode(&Bindings::default(), &Preferences::default()).unwrap())
@@ -477,7 +477,7 @@ mod tests {
             .unwrap()
             .remove("distance");
         let (_, older) = decode(&serde_json::to_vec(&document).unwrap()).unwrap();
-        assert_eq!(older.distance.preset, DistancePreset::Low);
+        assert_eq!(older.distance.preset, DistancePreset::Medium);
     }
     #[test]
     fn a_new_default_never_displaces_an_existing_user_binding() {

@@ -53,6 +53,7 @@ use super::lod;
 use super::lod_rings::LevelRings;
 use super::player::Player;
 use super::priority::{Aim, Order, Ring};
+use super::quality::DeclaredStreaming;
 use super::world_state::{ChunkStore, Snapshot};
 use super::{ContentTables, WorldGenerator};
 use crate::world::{ChunkCoord, WorldSettings};
@@ -259,20 +260,19 @@ impl StreamingBudget {
 }
 
 /// Under `dev`, `TESSERAE_LOD=0` turns coarse streaming off, to measure its cost.
-pub(super) fn streaming_settings(view: Option<tesserae_mods::ViewParams>) -> StreamingSettings {
-    let mut settings = StreamingSettings::default();
+pub(super) fn declared_streaming(view: Option<tesserae_mods::ViewParams>) -> DeclaredStreaming {
+    let mut declared = DeclaredStreaming::default();
     if let Some(view) = view {
-        settings.view_distance_m = view.view_distance_m;
-        settings.lod_distance_m = view.lod_distance_m;
+        declared.ceiling.view_distance_m = view.view_distance_m;
+        declared.ceiling.lod_distance_m = view.lod_distance_m;
+        declared.low_reach_m = view.low_lod_distance_m.unwrap_or(view.lod_distance_m);
     }
     #[cfg(any(feature = "dev", feature = "profiling"))]
     if std::env::var("TESSERAE_LOD").is_ok_and(|v| v == "0") {
-        return StreamingSettings {
-            lod_distance_m: settings.view_distance_m,
-            ..settings
-        };
+        declared.ceiling.lod_distance_m = declared.ceiling.view_distance_m;
+        declared.low_reach_m = declared.ceiling.view_distance_m;
     }
-    settings
+    declared
 }
 
 fn streaming_budget() -> StreamingBudget {
@@ -2062,7 +2062,7 @@ pub(in crate::server) mod tests {
             world.chunk_at(player.expect("the Player exists").eye())
         }
 
-        fn jobs(&self) -> &Jobs {
+        pub(in crate::server) fn jobs(&self) -> &Jobs {
             self.app.world().resource::<Jobs>()
         }
 
