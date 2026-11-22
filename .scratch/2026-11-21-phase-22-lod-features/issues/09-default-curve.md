@@ -27,6 +27,9 @@ above; either way the reason is recorded in the spec, since 160 m has none on re
 DESIGN.md's LOD section and
 step 22 note are updated.
 
+_Superseded by 09's own measurement (Comments): Medium is `u` 192 m (6 Chunks)
+to 6 km, as 8 Chunks filled the field past the 10 s budget._
+
 ## Acceptance criteria
 
 - [x] Budget series against 01's, in Comments: the only full series

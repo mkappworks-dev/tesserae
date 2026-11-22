@@ -44,7 +44,9 @@ seconds per square kilometre above it.
 
 **Nothing new is stored.** Impostors and Canopy cover are pure functions of the
 seed, the parameters and metres, like every coarse Chunk. There is no LOD cache
-on disk or between Sessions.
+on disk or between Sessions. Level 0's column answers are kept in memory for the
+last coarse Chunk columns asked, within one Session, only so a column's rows do
+not ask the same pure function again.
 
 **The join stays a hard cut**
 ([ADR-0019](0019-a-level-is-drawn-until-another-replaces-it.md)). With agreement

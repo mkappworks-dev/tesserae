@@ -301,6 +301,13 @@ without it crowds as before; a dense stand of one species declares less. The
 Biome snapshot freezes it as an optional member, so no `FORMAT_VERSION` changes.
 A Declaration built against the earlier 0.3 text needs a rebuild.
 
+A `view-params` of line 0.3 then gained `low-lod-distance-m`, an optional `f32`
+last: the reach of the Low Quality curve, the Game's own rings, from
+`view-distance-m` to `lod-distance-m`. `lod-distance-m` is now the ceiling every
+Player's curve is clamped to, at most 8192 m. Absent, Low reaches the ceiling,
+so a Game that declared its view before streams the same rings under Low. A
+Declaration built against the earlier 0.3 text needs a rebuild.
+
 ## What is not frozen
 
 Line `0.x` is pre-release. Later gameplay steps may add new lines, and

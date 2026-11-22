@@ -446,28 +446,39 @@ fn octant_of(x: usize, y: usize, z: usize) -> usize {
 
 /// Stands a tree's Impostor: each of `parts`, a level-0 cell, makes the coarse Voxel of Chunk
 /// `coord` holding it, `span` level-0 cells a side, its Material whatever the vote left there,
-/// canopy over trunk, so a lone trunk the vote loses still stands. Octants `skip` marks keep what
-/// they hold.
-pub fn stand_tree_parts(
+/// canopy over trunk, so a lone trunk the vote loses still stands.
+pub fn stand_tree_parts(chunk: &mut Chunk, coord: [i32; 3], span: i32, parts: &[TreePart]) {
+    for canopy in [false, true] {
+        let layer = parts.iter().filter(|p| p.canopy == canopy);
+        stand_parts(
+            chunk,
+            coord,
+            span,
+            layer.map(|p| (p.at, p.material)),
+            [false; 8],
+        );
+    }
+}
+
+/// Each level-0 cell `at` makes the coarse Voxel of Chunk `coord` holding it its Material, the
+/// last in a Voxel winning, but in octants `changed` marks.
+fn stand_parts(
     chunk: &mut Chunk,
     coord: [i32; 3],
     span: i32,
-    parts: &[TreePart],
-    skip: [bool; 8],
+    parts: impl Iterator<Item = ([i32; 3], MaterialId)>,
+    changed: [bool; 8],
 ) {
     let size = CHUNK_SIZE as i32;
     let origin = coord.map(|c| c * size * span);
-    for canopy in [false, true] {
-        for p in parts.iter().filter(|p| p.canopy == canopy) {
-            let local =
-                std::array::from_fn::<i32, 3, _>(|a| (p.at[a] - origin[a]).div_euclid(span));
-            if local.iter().any(|v| !(0..size).contains(v)) {
-                continue;
-            }
-            let [x, y, z] = local.map(|v| v as usize);
-            if !skip[octant_of(x, y, z)] {
-                chunk.set(x, y, z, Voxel::cube(p.material));
-            }
+    for (at, material) in parts {
+        let local = std::array::from_fn::<i32, 3, _>(|a| (at[a] - origin[a]).div_euclid(span));
+        if local.iter().any(|v| !(0..size).contains(v)) {
+            continue;
+        }
+        let [x, y, z] = local.map(|v| v as usize);
+        if !changed[octant_of(x, y, z)] {
+            chunk.set(x, y, z, Voxel::cube(material));
         }
     }
 }
@@ -514,26 +525,16 @@ pub fn coarsen_tree_parts(
 
 /// Stands a Structure's Impostor: each of `parts`, a level-0 cell, makes the coarse Voxel of Chunk
 /// `coord` holding it, `span` level-0 cells a side, its Material whatever the vote and any tree
-/// left there; the last part in a coarse Voxel wins. Octants `skip` marks keep what they hold.
+/// left there; the last part in a coarse Voxel wins. Octants `changed` marks keep what they hold.
 pub fn stand_structure_parts(
     chunk: &mut Chunk,
     coord: [i32; 3],
     span: i32,
     parts: &[StructurePart],
-    skip: [bool; 8],
+    changed: [bool; 8],
 ) {
-    let size = CHUNK_SIZE as i32;
-    let origin = coord.map(|c| c * size * span);
-    for p in parts {
-        let local = std::array::from_fn::<i32, 3, _>(|a| (p.at[a] - origin[a]).div_euclid(span));
-        if local.iter().any(|v| !(0..size).contains(v)) {
-            continue;
-        }
-        let [x, y, z] = local.map(|v| v as usize);
-        if !skip[octant_of(x, y, z)] {
-            chunk.set(x, y, z, Voxel::cube(p.material));
-        }
-    }
+    let parts = parts.iter().map(|p| (p.at, p.material));
+    stand_parts(chunk, coord, span, parts, changed);
 }
 
 /// Over each octant `changed` marks, a coarse Voxel any of whose eight finer Voxels in `children`
@@ -1071,7 +1072,7 @@ mod tests {
     }
 
     #[test]
-    fn a_tree_part_beats_air_and_ground_and_a_canopy_beats_a_trunk_outside_skipped_octants() {
+    fn a_tree_part_beats_air_and_ground_and_a_canopy_beats_a_trunk() {
         let rock = Voxel::cube(fixtures().ground.rock);
         let mut chunk = Chunk::air();
         chunk.set(0, 0, 0, rock);
@@ -1084,12 +1085,10 @@ mod tests {
             part([64 + 40, 0, 0], true),
             part([1000, 0, 0], true),
         ];
-        let mut skip = [false; 8];
-        skip[1] = true;
-        stand_tree_parts(&mut chunk, [1, 0, 0], 2, &parts, skip);
+        stand_tree_parts(&mut chunk, [1, 0, 0], 2, &parts);
         assert_eq!(chunk.get(0, 0, 0), Voxel::cube(TRUNK), "trunk over ground");
         assert_eq!(chunk.get(1, 0, 0), Voxel::cube(CANOPY), "canopy over trunk");
-        assert_eq!(chunk.get(20, 0, 0), Voxel::AIR, "a skipped octant is left");
+        assert_eq!(chunk.get(20, 0, 0), Voxel::cube(CANOPY), "a lone canopy");
         let solid = (0..CHUNK_SIZE.pow(3))
             .filter(|&i| {
                 let (x, y, z) = (
@@ -1100,7 +1099,7 @@ mod tests {
                 !chunk.get(x, y, z).is_air()
             })
             .count();
-        assert_eq!(solid, 2, "a part outside the Chunk stands nothing");
+        assert_eq!(solid, 3, "a part outside the Chunk stands nothing");
     }
 
     #[test]
@@ -1276,16 +1275,16 @@ mod tests {
             part([4 * 20, 128, 0], BRICK),
             part([0, 127, 0], ROOF),
         ];
-        let mut skip = [false; 8];
-        skip[1] = true;
-        stand_structure_parts(&mut chunk, [0, 1, 0], 4, &parts, skip);
+        let mut changed = [false; 8];
+        changed[1] = true;
+        stand_structure_parts(&mut chunk, [0, 1, 0], 4, &parts, changed);
         assert_eq!(
             chunk.get(0, 0, 0),
             Voxel::cube(ROOF),
             "the last over ground"
         );
         assert_eq!(chunk.get(2, 0, 0), Voxel::cube(BRICK), "over a tree");
-        assert_eq!(chunk.get(20, 0, 0), Voxel::AIR, "a skipped octant is left");
+        assert_eq!(chunk.get(20, 0, 0), Voxel::AIR, "a changed octant is left");
         assert_eq!(
             chunk.get(0, 31, 0),
             Voxel::AIR,

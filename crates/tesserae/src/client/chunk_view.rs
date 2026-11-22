@@ -867,7 +867,9 @@ fn spawn_camera(
     let direction = Vec3::new(0.0, VIEW_PITCH, -1.0).normalize();
     let pose = Transform::from_translation(eye).looking_to(direction, Vec3::Y);
     // Layers and far plane cover any curve the Player may apply later; the fog follows it.
-    let ceiling = declared.map_or(*streaming, |declared| declared.ceiling);
+    let ceiling = declared
+        .as_ref()
+        .map_or(*streaming, |declared| declared.ceiling);
     let layers: Vec<usize> = (0..level_count(&ceiling).max(1))
         .map(|level| level as usize)
         .collect();
@@ -905,8 +907,8 @@ fn spawn_camera(
     if let Some(fog) = fog::camera_fog(
         fog::enabled(),
         &fog_settings,
-        streaming.view_distance_m,
-        streaming.lod_distance_m,
+        &streaming,
+        declared.as_deref(),
     ) {
         commands.entity(camera).insert(fog);
     }
@@ -1029,7 +1031,7 @@ mod tests {
             .unwrap()
             .clone();
         assert_same_fog(
-            &fog::distance_fog(&FogSettings::default(), 160.0, 3000.0),
+            &fog::streamed_fog(&FogSettings::default(), &low, Some(&declared)),
             &fog,
         );
     }
@@ -1048,11 +1050,7 @@ mod tests {
     fn the_fog_is_derived_from_the_streaming_distances() {
         let streaming = StreamingSettings::default();
         let mut app = camera_app(Vec3::ZERO, streaming);
-        let want = fog::distance_fog(
-            &FogSettings::default(),
-            streaming.view_distance_m,
-            streaming.lod_distance_m,
-        );
+        let want = fog::streamed_fog(&FogSettings::default(), &streaming, None);
         let fog = app
             .world_mut()
             .query_filtered::<&DistanceFog, With<MainCamera>>()

@@ -52,7 +52,7 @@ pub(crate) struct Preferences {
     /// Full-ink secondary text, opaque fills, brighter edges and a thicker
     /// focus ring. Absent from a profile saved before it, which reads as off.
     pub stronger_contrast: bool,
-    /// Absent from a profile saved before it, which reads as Low.
+    /// Absent from a profile saved before it, which reads as Medium.
     pub distance: super::quality::Distance,
 }
 

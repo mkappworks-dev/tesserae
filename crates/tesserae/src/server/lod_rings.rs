@@ -351,7 +351,7 @@ mod tests {
         QualityCurve { unit_m, reach_m }.applied_to(StreamingSettings::default())
     }
 
-    /// Terra's rings before step 22: Low still streams them.
+    /// Terra's own rings, which Low streams.
     fn terra_own() -> StreamingSettings {
         StreamingSettings {
             view_distance_m: 160.0,
@@ -482,6 +482,32 @@ mod tests {
         }
         .applied_to(terra);
         assert_eq!(level_count(&nonsense), level_count(&terra));
+    }
+
+    #[test]
+    fn the_server_clamps_a_unit_and_reach_from_both_sides_and_replaces_one_not_finite() {
+        let game = terra().ceiling;
+        for (unit_m, reach_m, want) in [
+            (-1.0, -1.0, (160.0, 160.0)),
+            (0.0, 0.0, (160.0, 160.0)),
+            (1.0e9, 1.0e9, (384.0, 8192.0)),
+            (f32::INFINITY, f32::INFINITY, (160.0, 8192.0)),
+            (f32::NEG_INFINITY, f32::NEG_INFINITY, (160.0, 8192.0)),
+        ] {
+            let s = QualityCurve { unit_m, reach_m }.applied_to(game);
+            assert_eq!((s.lod_unit_m, s.lod_distance_m), want, "{unit_m} {reach_m}");
+            assert_eq!(s.view_distance_m, 160.0);
+        }
+        let none = QualityCurve {
+            unit_m: 0.0,
+            reach_m: 0.0,
+        }
+        .applied_to(game);
+        assert_eq!(
+            level_count(&none),
+            1,
+            "a reach at the view distance is level 0 alone"
+        );
     }
 
     #[test]

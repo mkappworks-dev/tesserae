@@ -58,8 +58,9 @@ captures are reviewed in two batches, after 05 and at 09.
    vertex memory, fill time, timing and GPU, with the shadows comparisons.
 2. **Coarse agreement** at every coarse level, which also ends level 4's lost
    sea.
-3. **Tree Impostors at levels 1 and 2**, from a second level-0 generator that
-   answers draws only, and none over saved changes.
+3. **Tree Impostors at level 1** (03 measured level 2 past the budget), from a
+   second level-0 generator that answers draws only, and none over saved
+   changes.
 4. **Structure Impostors** at levels 1 to 3, Settlements and their paths
    included.
 5. **Canopy cover** from level 2 up (03 measured level 2's Impostors past
@@ -95,7 +96,9 @@ captures are reviewed in two batches, after 05 and at 09.
 
 - **Nothing is stored (Q1).** Coarse Chunks, Impostors and Canopy cover are
   pure functions of the seed, the parameters and metres. No LOD cache on disk or
-  between Sessions.
+  between Sessions. **Recorded:** `Answers`, level 0's column answers over the
+  last 256 coarse Chunk columns asked, is an in-memory cache for one Session,
+  cleared when full: it only saves asking the same pure function again.
 - **Coarse agreement (Q8, Q10).** Each coarse column is water or land, and has
   its top Material, as level 0 has at the column's centre in metres: the same
   terrain height against that column's own water level, sea or lake, the Biome
@@ -216,7 +219,9 @@ captures are reviewed in two batches, after 05 and at 09.
   the fog's reach follows the streamed curve, not the Game's ceiling, so under Medium fog at 3 km
   falls from `main`'s 88% to 53% and at 2 km from 61% to 28%. `reach_opacity` rises from 0.88 to
   0.95: at 0.88 and below the reach's square edge shows against the sky from an 8 km Eye, and at
-  0.95 the far shore still reads.
+  0.95 the far shore still reads. **Recorded (review):** Low keeps `main`'s 0.88, so it looks as
+  `main` did; Medium, High and Custom take 0.95. Low is the streamed rings equal to the Game's own,
+  as at a 192 m view Medium's unit is Low's too.
 - **Ground tint (Q16).** A coarse column's top colour takes the plants level 0
   would grow there, from the same density fields. Lands only if captures at the
   joins match colour better, you approve them, and coarse-Chunk time stays in
@@ -243,7 +248,17 @@ captures are reviewed in two batches, after 05 and at 09.
   for each coarse level: water or land and top Material agree with level 0 at
   every sampled column centre (exact); a forest's edge agrees with level 0's
   tree density within one coarse column. Ticket 01 records today's rates;
-  ticket 02 makes the first exact.
+  ticket 02 makes the first exact. **Recorded:** the tolerances the test
+  (`server/lod/agreement.rs`) uses:
+  - A column a cave or shaft opens at its level-0 centre is left out of the
+    exact water or land and top-Material check: no coarse level draws caves
+    there, so its top is the ground over the cave.
+  - At level 1, every footprint level 0 stands a tree in stands one, and up to
+    1% of columns may stand a tree level 0 does not: a cell level 0 gave to
+    something else first, a tuft or an overhang.
+  - Above level 1, up to 2% of columns (or one) may differ from level 0's tree
+    density by more than one column at a forest's edge: Canopy cover follows
+    expected cover from noise, not each tree's draw.
 - **Bit-identical.** Every existing worldgen, determinism and golden test passes
   unchanged after every ticket.
 - **Impostors.** A level-1 Chunk built from held children equals one built from
@@ -293,8 +308,8 @@ captures are reviewed in two batches, after 05 and at 09.
   turns overhangs into walls, which DESIGN.md rejects.
 - Measured cost of exact tree draws on level 0's lattice: 0.1 to 0.4 ms per
   level-1 Chunk with the column cache warm; 1 to 45 ms per level-3 Chunk,
-  against 3 to 4 µs today. That is why trees are Impostors only at levels 1
-  and 2.
+  against 3 to 4 µs today. That is why trees are Impostors only at level 1
+  (03's decision; levels 1 and 2 were planned).
 - Terra's tree density ranges from about 1,800 trees a km² (dry) to 41,000
   (jungle), 7 to 169 per level-1 footprint.
 - DESIGN.md's LOD section and step 22 note are updated when the branch lands.
