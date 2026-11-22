@@ -3,6 +3,7 @@ const settingsSlugs = {
   "Key bindings": "key-bindings",
   Controller: "controller",
   Display: "display",
+  Distance: "distance",
   Audio: "audio",
   Accessibility: "accessibility",
 };

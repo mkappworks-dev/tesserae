@@ -124,3 +124,10 @@ holds.
   still takes the downsample at every level, so a change shows wherever it did.
   A level-3-up Chunk made this way keeps every seam wall, having no finer
   children to read openings from.
+
+## Amended by ADR-0035
+
+From step 22 a coarse column answers water or land and its top Material as level
+0 does at its centre, replacing the half-Voxel lowering above, and coarse levels
+stand trees and Structures as Impostors or Canopy cover. See
+[ADR-0035](0035-a-coarse-level-draws-level-0s-answer.md).

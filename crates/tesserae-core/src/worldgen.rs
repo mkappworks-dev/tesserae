@@ -673,7 +673,7 @@ fn surface_index(x: i32, z: i32) -> usize {
 /// the surface is not in this Chunk's band) that the cube pass fills in a column
 /// whose surface is `surface_m`. Uses the cube pass's own comparison, not
 /// `floor(surface / voxel_size)`, so the two cannot disagree by an ulp.
-fn top_index(surface_m: f32, floor_m: f32, voxel_size: f32) -> i32 {
+pub(crate) fn top_index(surface_m: f32, floor_m: f32, voxel_size: f32) -> i32 {
     let mut y = ((surface_m - floor_m) / voxel_size).floor() as i32;
     while floor_m + (y + 1) as f32 * voxel_size <= surface_m {
         y += 1;
@@ -682,6 +682,77 @@ fn top_index(surface_m: f32, floor_m: f32, voxel_size: f32) -> i32 {
         y -= 1;
     }
     y
+}
+
+/// What a column of level 0 shows from above, beneath anything standing on it and with no
+/// cave opening it, as its Chunk lays it.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct ColumnTop {
+    /// The contained surface the cube pass fills up to.
+    pub surface_m: f32,
+    /// What open air over the column fills with water up to, sea or lake.
+    pub level_m: Option<f32>,
+    /// Whether that water fills a Voxel over the ground.
+    pub wet: bool,
+    /// The top Voxel's Material.
+    pub top: MaterialId,
+    /// The Material under it.
+    pub under: MaterialId,
+}
+
+/// The highest Voxel water standing at `level_m` fills, by the cube pass's `y_m < level`.
+pub(crate) fn level_index(level_m: f32, voxel_size: f32) -> i32 {
+    let mut k = (level_m / voxel_size).ceil() as i32;
+    while k as f32 * voxel_size >= level_m {
+        k -= 1;
+    }
+    k
+}
+
+/// One Voxel of a tree level 0 stands, as [`Worldgen::tree_parts`] draws it for a coarse level.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct TreePart {
+    /// The global cell.
+    pub at: [i32; 3],
+    pub material: MaterialId,
+    pub canopy: bool,
+}
+
+/// What Canopy cover draws on a coarse column, as [`Worldgen::canopy_cover`] reads it.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct Canopy {
+    /// The dominant species' leaves.
+    pub material: MaterialId,
+    /// The leaves a sparser column shows: the next species' where its trees cover at least half
+    /// what the dominant one's do, else the dominant one's.
+    pub sparse: MaterialId,
+    /// That species' mean height over the ground, in metres.
+    pub top_m: f32,
+    /// The share of the ground its trees are expected to cover, from 0 to 1.
+    pub cover: f32,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct CanopyShape {
+    area_m2: f32,
+    top_m: f32,
+    crowding_m: f32,
+}
+
+/// Each tree feature's crown, by Biome and feature: see [`Worldgen::canopy_shapes`].
+#[derive(Clone, Debug, Default)]
+pub struct CanopyShapes(Vec<Vec<Option<CanopyShape>>>);
+
+/// Trees grown to average a species' crown: its height and spread vary by hash of the column.
+const CANOPY_SAMPLES: i32 = 16;
+
+/// One solid Voxel of a Structure level 0 stands, as [`Worldgen::structure_parts`] draws it for a
+/// coarse level.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct StructurePart {
+    /// The global cell.
+    pub at: [i32; 3],
+    pub material: MaterialId,
 }
 
 /// One World's generator: a seed, a Voxel size and the parameters a Mod chose.
@@ -1228,6 +1299,23 @@ impl Worldgen {
         self
     }
 
+    /// This generator with caches of its own, its column cache bounded at `column_cells` Cells,
+    /// still sharing its terrain: what it answers is unchanged, and no work it does evicts the
+    /// generator it was cloned from.
+    pub fn with_own_caches(mut self, column_cells: usize) -> Self {
+        self.tops = Arc::default();
+        self.columns = Arc::new(CellMap::new(column_cells));
+        self.plants = Arc::new(CellMap::new(MAX_PLANT_CELLS.max(column_cells)));
+        self.fields = Arc::new(CellMap::new(MAX_FIELD_CELLS));
+        self.layouts = Arc::default();
+        self
+    }
+
+    /// Whether the two read and fill one column cache.
+    pub fn shares_columns_with(&self, other: &Worldgen) -> bool {
+        Arc::ptr_eq(&self.columns, &other.columns)
+    }
+
     /// Whether the seeds and every parameter but the surface features and smoothing match, as
     /// they do between level 0 and the coarse levels' sources (ADR-0011).
     pub fn can_share(&self, other: &Worldgen) -> bool {
@@ -1665,11 +1753,7 @@ impl Worldgen {
 
     /// The highest Voxel water standing at `level_m` fills, whatever the ground under it.
     fn level_top(&self, level_m: f32) -> i32 {
-        let mut k = (level_m / self.voxel_size).ceil() as i32;
-        while k as f32 * self.voxel_size >= level_m {
-            k -= 1;
-        }
-        k
+        level_index(level_m, self.voxel_size)
     }
 
     /// A column's surface once its water is contained: where a neighbour's water stands higher
@@ -1694,7 +1778,11 @@ impl Worldgen {
     /// [`Self::contained_m`] at a point, its neighbours a Voxel away along each axis, reading their
     /// ground only where their water could stand above this column's top.
     fn contained_at_m(&self, [x_m, z_m]: [f32; 2], around: [[f32; 2]; 4]) -> f32 {
-        let own = self.raw_column(x_m, z_m);
+        self.contained_of(self.raw_column(x_m, z_m), around)
+    }
+
+    /// [`Self::contained_at_m`] of a column whose raw ground and water level are `own`.
+    fn contained_of(&self, own: (f32, Option<f32>), around: [[f32; 2]; 4]) -> f32 {
         let reach =
             self.water_top(own)
                 .unwrap_or(i32::MIN)
@@ -1708,6 +1796,32 @@ impl Worldgen {
             }
         });
         self.contained_m(own, around)
+    }
+
+    /// [`ColumnTop`] of the column at global Voxel `[gx, gz]`, asking no cache: a coarse level asks
+    /// one column of a Cell, whose cache is over a thousand. `None` in a World without ground.
+    pub fn column_top(&self, gx: i32, gz: i32) -> Option<ColumnTop> {
+        let ground = self.params.ground?;
+        let (x_m, z_m) = (self.global_m(gx), self.global_m(gz));
+        let column = self.terrain.column(x_m, z_m);
+        let own = (column.height_m, self.water_level_of(column.inland_m));
+        let surface_m = self.contained_of(
+            own,
+            CARDINALS.map(|(dx, dz, _)| [self.global_m(gx + dx), self.global_m(gz + dz)]),
+        );
+        let ground = self.biome_grounds.as_ref().map_or(ground, |grounds| {
+            self.biome_of([x_m, z_m], &column)
+                .map_or(grounds.world, |id| grounds.by_biome[id.index()])
+        });
+        let rock =
+            surface_m < self.params.sea_level_m - 1.0 && self.terrain.seabed_rock_of(&column);
+        Some(ColumnTop {
+            surface_m,
+            level_m: own.1,
+            wet: self.water_top((surface_m, own.1)).is_some(),
+            top: if rock { ground.rock } else { ground.surface },
+            under: if rock { ground.rock } else { ground.soil },
+        })
     }
 
     /// 1 where no Biome tunes the caves, otherwise a mean that moves continuously across a border,
@@ -3412,6 +3526,245 @@ impl Worldgen {
         for &(at, voxel) in &crops {
             put(chunk, at, voxel, None);
         }
+    }
+
+    /// Every trunk and canopy Voxel, fully grown, that [`Self::chunk`] stands in the global cells
+    /// `min..max`, fruit counted as canopy: what a coarse level draws its trees from (ADR-0035).
+    /// Asked of a generator with Plants and Structures, it reads only their draws and the ground's
+    /// heights, never a Chunk.
+    pub fn tree_parts(&self, min: [i32; 3], max: [i32; 3]) -> Vec<TreePart> {
+        let Some(scatter) = self.scatter.filter(|s| s.plants) else {
+            return Vec::new();
+        };
+        let (lowest, _) = self.terrain_band_m();
+        let (_, highest) = self.ground_bounds_m();
+        if self.global_m(min[1]) > highest || self.global_m(max[1] - 1) < lowest - self.voxel_size {
+            return Vec::new();
+        }
+        let margin = (scatter.reach_m / self.voxel_size).ceil() as i32 + 1;
+        let rise = (scatter.rise_m / self.voxel_size).ceil() as i32 + 2;
+        let inside = |at: [i32; 3]| (0..3).all(|a| (min[a]..max[a]).contains(&at[a]));
+        // Level 0 puts a tree's Voxel only into air: over its column's top, out of its lake and off
+        // a smoothing stair.
+        let mut ground: HashMap<[i32; 2], (i32, Option<f32>)> = HashMap::new();
+        let mut open = |[gx, y, gz]: [i32; 3]| {
+            let (top, level_m) = *ground.entry([gx, gz]).or_insert_with(|| {
+                let (x_m, z_m) = (self.global_m(gx), self.global_m(gz));
+                (
+                    top_index(self.surface_height_m(x_m, z_m), 0.0, self.voxel_size),
+                    self.water.and(self.water_level_m(x_m, z_m)),
+                )
+            });
+            y > top
+                && level_m.is_none_or(|level_m| self.global_m(y) >= level_m)
+                && !(y == top + 1 && self.smoothing && self.eased([gx, gz], y))
+        };
+        let mut parts: HashMap<[i32; 3], TreePart> = HashMap::new();
+        let seed = u64::from(self.seed);
+        for standing in self.plants_on(
+            &scatter,
+            [min[0] - margin, min[2] - margin],
+            [max[0] + margin - 1, max[2] + margin - 1],
+        ) {
+            let SurfacePlantKind::Tree(tree) = standing.plant.kind else {
+                continue;
+            };
+            let base = standing.base;
+            if base[1] >= max[1] || base[1] + rise < min[1] {
+                continue;
+            }
+            let row = Self::tree_of(&tree);
+            for v in tree_voxels(&row, seed, [base[0], 0, base[2]], self.voxel_size) {
+                let at = [v.at[0], v.at[1] + base[1], v.at[2]];
+                if !inside(at) || !open(at) {
+                    continue;
+                }
+                let part = match v.part {
+                    Part::Trunk => TreePart {
+                        at,
+                        material: tree.trunk,
+                        canopy: false,
+                    },
+                    Part::Canopy | Part::Fruit => TreePart {
+                        at,
+                        material: tree.canopy,
+                        canopy: true,
+                    },
+                };
+                // Level 0 stands every trunk before any canopy.
+                parts
+                    .entry(at)
+                    .and_modify(|held| {
+                        if held.canopy && !part.canopy {
+                            *held = part;
+                        }
+                    })
+                    .or_insert(part);
+            }
+        }
+        let mut parts: Vec<TreePart> = parts.into_values().collect();
+        // Where two species meet in one coarse Voxel the later wins, so the order is fixed.
+        parts.sort_unstable_by_key(|p| p.at);
+        parts
+    }
+
+    /// Each tree feature's crown as level 0 grows it, fully grown, averaged over a few columns:
+    /// what [`Self::canopy_cover`] reads, built once per generator.
+    pub fn canopy_shapes(&self) -> CanopyShapes {
+        let seed = u64::from(self.seed);
+        let size = self.voxel_size;
+        let shape = |tree: &SurfaceTree| {
+            let row = Self::tree_of(tree);
+            let (mut area, mut top) = (0.0, 0.0);
+            for i in 0..CANOPY_SAMPLES {
+                let base = [i * 1013, 0, i * 769];
+                let voxels = tree_voxels(&row, seed, base, size);
+                let columns: std::collections::HashSet<[i32; 2]> =
+                    voxels.iter().map(|v| [v.at[0], v.at[2]]).collect();
+                area += columns.len() as f32 * size * size;
+                let highest = voxels.iter().map(|v| v.at[1]).max().unwrap_or(base[1] - 1);
+                top += (highest - base[1] + 1) as f32 * size;
+            }
+            let n = CANOPY_SAMPLES as f32;
+            CanopyShape {
+                area_m2: area / n,
+                top_m: top / n,
+                crowding_m: tree
+                    .crowding_m
+                    .unwrap_or(CROWN_SPACING * tree.canopy_radius_m),
+            }
+        };
+        CanopyShapes(
+            self.params
+                .biomes
+                .as_slice()
+                .iter()
+                .map(|b| {
+                    b.surface_features
+                        .as_slice()
+                        .iter()
+                        .map(|f| match f.plant?.kind {
+                            SurfacePlantKind::Tree(t) => Some(shape(&t)),
+                            _ => None,
+                        })
+                        .collect()
+                })
+                .collect(),
+        )
+    }
+
+    /// The Canopy cover over each of `columns`, global columns of this generator, where the share
+    /// of ground its trees are expected to cover is over half: each tree feature's density from
+    /// its draw and clump at the column, thinned by its crowding, times its crown's area (ADR-0035).
+    /// None stands on a field of the column's Biome, a Settlement or where a Structure may stand;
+    /// water is the caller's to rule out.
+    pub fn canopy_cover(&self, shapes: &CanopyShapes, columns: &[[i32; 2]]) -> Vec<Option<Canopy>> {
+        let Some(scatter) = self.scatter.filter(|s| s.plants) else {
+            return vec![None; columns.len()];
+        };
+        let expected: Vec<_> = columns
+            .iter()
+            .map(|&[gx, gz]| {
+                self.expected_canopy(&scatter, shapes, gx, gz)
+                    .filter(|(c, _)| c.cover > 0.5)
+            })
+            .collect();
+        let covered = columns.iter().zip(&expected).filter(|(_, e)| e.is_some());
+        let Some(region) = covered.fold(None, |r: Option<[[i32; 2]; 2]>, (&[x, z], _)| {
+            let [lo, hi] = r.unwrap_or([[x, z], [x + 1, z + 1]]);
+            Some([
+                [lo[0].min(x), lo[1].min(z)],
+                [hi[0].max(x + 1), hi[1].max(z + 1)],
+            ])
+        }) else {
+            return vec![None; columns.len()];
+        };
+        // A Structure's ground is not asked: deciding which candidates stand costs some hundreds
+        // of milliseconds over a far level's footprint, and a candidate is at most a column.
+        let kept = self.footprints(&Claims {
+            settlements: self.laid_settlements_near(region),
+            structures: self.structure_candidates_near(region),
+        });
+        columns
+            .iter()
+            .zip(expected)
+            .map(|(&[gx, gz], expected)| {
+                let (canopy, id) = expected?;
+                let fields = self.biome_fields_near(&scatter, id, [[gx, gz], [gx + 1, gz + 1]]);
+                (fields::cell_at(&fields, gx, gz).is_none() && !covers(&kept, gx, gz))
+                    .then_some(canopy)
+            })
+            .collect()
+    }
+
+    /// The share of the ground round column `(gx, gz)` its Biome's trees cover, by the dominant
+    /// species.
+    fn expected_canopy(
+        &self,
+        scatter: &SurfaceScatter,
+        shapes: &CanopyShapes,
+        gx: i32,
+        gz: i32,
+    ) -> Option<(Canopy, BiomeId)> {
+        let (x_m, z_m) = (self.global_m(gx), self.global_m(gz));
+        // Level 0's Biome for the column, without building its Cell's column cache.
+        let id = self.biome_at(x_m, z_m)?;
+        let features = &self.params.biomes.get(id)?.surface_features;
+        let shapes = shapes.0.get(id.index())?;
+        let ground_m2 = f64::from(self.voxel_size * self.voxel_size);
+        // Each feature wins the part of the draw its chance lays past the ones before it.
+        let mut reach = 0.0f64;
+        let mut trees: Vec<(f64, &SurfaceTree, CanopyShape)> = Vec::new();
+        for (i, f) in features.as_slice().iter().enumerate() {
+            let mut chance = SurfaceScatter::chance(scatter.unit_chance, f.spacing_m);
+            if let Some(clump) = f.clump {
+                let salt = CLUMP_SALT.wrapping_mul(i as u32 + 1);
+                chance = (chance * clump.factor(self.seed.wrapping_add(salt), x_m, z_m)).min(1.0);
+            }
+            let won = (reach + chance).min(1.0) - reach.min(1.0);
+            reach += chance;
+            let (Some(shape), Some(SurfacePlantKind::Tree(tree))) = (
+                shapes.get(i).copied().flatten(),
+                f.plant.as_ref().map(|p| &p.kind),
+            ) else {
+                continue;
+            };
+            if won > 0.0 && fields::admits(features, i, self.seed, x_m, z_m) {
+                trees.push((won / ground_m2, tree, shape));
+            }
+        }
+        // A tree stands only where no tree whose draw beats it stands within its crowding.
+        let density: f64 = trees.iter().map(|t| t.0).sum();
+        let mut covers: Vec<(f64, &SurfaceTree, CanopyShape)> = trees
+            .iter()
+            .map(|&(per_m2, tree, shape)| {
+                let crowd =
+                    density * std::f64::consts::PI * f64::from(shape.crowding_m * shape.crowding_m);
+                let kept = if crowd > 1e-9 {
+                    (1.0 - libm::exp(-crowd)) / crowd
+                } else {
+                    1.0
+                };
+                (per_m2 * kept * f64::from(shape.area_m2), tree, shape)
+            })
+            .collect();
+        let cover: f64 = covers.iter().map(|t| t.0).sum();
+        // Stable, so of two equal shares the earlier feature leads, as before.
+        covers.sort_by(|a, b| b.0.total_cmp(&a.0));
+        let &(lead, tree, shape) = covers.first()?;
+        let sparse = covers
+            .iter()
+            .find(|t| t.1.canopy != tree.canopy)
+            .filter(|t| 2.0 * t.0 >= lead)
+            .map_or(tree.canopy, |t| t.1.canopy);
+        let canopy = Canopy {
+            material: tree.canopy,
+            sparse,
+            top_m: shape.top_m,
+            // Crowns still overlap where crowding lets them, as scattered discs do.
+            cover: (1.0 - libm::exp(-cover)) as f32,
+        };
+        Some((canopy, id))
     }
 
     /// The height, in metres, of the tallest Plant Voxel in a footprint's columns, for spawning

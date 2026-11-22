@@ -804,6 +804,7 @@ fn audio_draft_applies_discards_resets_and_remembers_category() {
             Tab::Bindings,
             Tab::Controller,
             Tab::Display,
+            Tab::Distance,
             Tab::Audio,
             Tab::Accessibility
         ]
@@ -1030,4 +1031,211 @@ fn the_map_and_compass_settings_say_unavailable_while_the_world_forbids_them() {
     }
     assert!(hints(true).is_empty());
     assert_eq!(hints(false).len(), 3);
+}
+
+fn terra() -> crate::server::quality::DeclaredStreaming {
+    crate::server::quality::DeclaredStreaming {
+        ceiling: crate::server::streaming::StreamingSettings {
+            view_distance_m: 160.0,
+            lod_distance_m: 8192.0,
+            ..default()
+        },
+        low_reach_m: 3000.0,
+    }
+}
+
+fn draft_distance(app: &App) -> crate::client::quality::Distance {
+    app.world()
+        .resource::<Settings>()
+        .draft
+        .as_ref()
+        .unwrap()
+        .1
+        .distance
+}
+
+fn move_slider(app: &mut App, kind: Scalar, value: f32) {
+    use bevy::ui_widgets::{SliderValue, ValueChange};
+    let source = app.world_mut().spawn((kind, SliderValue(0.0))).id();
+    app.world_mut().trigger(ValueChange {
+        source,
+        value,
+        is_final: true,
+    });
+}
+
+#[test]
+fn the_distance_sliders_move_only_under_custom_which_remembers_its_own() {
+    use crate::client::quality::{DistancePreset, Sliders};
+    let mut app = app();
+    let far = terra();
+    app.insert_resource(far);
+    activate_operation(
+        &mut app,
+        Operation::Navigate(crate::client::menu_ui::Tab::Distance),
+    );
+    assert_eq!(draft_distance(&app).preset, DistancePreset::Medium);
+    move_slider(&mut app, Scalar::Detail(5), 11.0);
+    assert_eq!(draft_distance(&app), default(), "locked under a preset");
+
+    activate_operation(&mut app, Operation::Distance(DistancePreset::Custom));
+    let sliders = |detail_chunks, reach_km| Sliders {
+        detail_chunks,
+        reach_km,
+    };
+    assert_eq!(draft_distance(&app).sliders(far), sliders(10, 7));
+    move_slider(&mut app, Scalar::Detail(5), 11.0);
+    move_slider(&mut app, Scalar::Reach(8), 5.0);
+    assert_eq!(draft_distance(&app).sliders(far), sliders(11, 5));
+
+    activate_operation(&mut app, Operation::Distance(DistancePreset::High));
+    assert_eq!(draft_distance(&app).sliders(far), sliders(12, 8));
+    activate_operation(&mut app, Operation::Distance(DistancePreset::Custom));
+    assert_eq!(
+        draft_distance(&app).sliders(far),
+        sliders(11, 5),
+        "Custom kept its values while High was tried"
+    );
+}
+
+#[test]
+fn a_distance_preset_waits_for_apply_and_discard_and_restore_defaults_undo_it() {
+    use crate::client::quality::{Distance, DistancePreset};
+    let mut app = app();
+    activate_operation(
+        &mut app,
+        Operation::Navigate(crate::client::menu_ui::Tab::Distance),
+    );
+    activate_operation(&mut app, Operation::Distance(DistancePreset::Medium));
+    assert_eq!(
+        app.world().resource::<Preferences>().distance,
+        Distance::default()
+    );
+    activate_operation(&mut app, Operation::Apply);
+    assert_eq!(
+        app.world().resource::<Preferences>().distance.preset,
+        DistancePreset::Medium
+    );
+    let saved = std::fs::read_to_string(&app.world().resource::<Store>().path).unwrap();
+    assert!(saved.contains("\"medium\""), "{saved}");
+
+    activate_operation(&mut app, Operation::Distance(DistancePreset::High));
+    activate_operation(&mut app, Operation::Back);
+    activate_operation(&mut app, Operation::Discard);
+    assert_eq!(
+        app.world().resource::<Preferences>().distance.preset,
+        DistancePreset::Medium
+    );
+
+    activate_operation(
+        &mut app,
+        Operation::Navigate(crate::client::menu_ui::Tab::Distance),
+    );
+    activate_operation(&mut app, Operation::Reset);
+    activate_operation(&mut app, Operation::ConfirmReset);
+    assert_eq!(draft_distance(&app), Distance::default());
+}
+
+#[test]
+fn the_distance_page_locks_its_sliders_and_lists_this_world_s_levels() {
+    use crate::client::quality::{Distance, DistancePreset};
+    fn page(preset: DistancePreset) -> App {
+        let mut app = App::new();
+        app.add_systems(Startup, move |mut commands: Commands| {
+            let p = Preferences {
+                distance: Distance {
+                    preset,
+                    ..default()
+                },
+                ..default()
+            };
+            commands.spawn(Node::default()).with_children(|list| {
+                distance(list, &p, (terra(), &crate::world::WorldSettings::default()));
+            });
+        });
+        app.update();
+        app
+    }
+    let texts = |app: &mut App| -> Vec<String> {
+        app.world_mut()
+            .query::<&Text>()
+            .iter(app.world())
+            .map(|t| t.0.clone())
+            .collect()
+    };
+    let locked = |app: &mut App| -> Vec<bool> {
+        app.world_mut()
+            .query_filtered::<Has<bevy::ui::InteractionDisabled>, With<Scalar>>()
+            .iter(app.world())
+            .collect()
+    };
+
+    let mut medium = page(DistancePreset::Medium);
+    assert_eq!(locked(&mut medium), [true, true]);
+    let texts_medium = texts(&mut medium);
+    for expected in [
+        "Medium",
+        "160 m – 384 m",
+        "3.1 km – 6 km",
+        "5 coarse levels to 6 km",
+        "The nearest 160 m is always full detail; the Game sets how far it allows.",
+    ] {
+        assert!(
+            texts_medium.iter().any(|t| t == expected),
+            "{expected:?} in {texts_medium:?}"
+        );
+    }
+
+    assert!(
+        texts_medium
+            .iter()
+            .any(|t| t.starts_with("Holds each Voxel size further") && t.contains("The default.")),
+    );
+    let mut custom = page(DistancePreset::Custom);
+    assert_eq!(locked(&mut custom), [false, false]);
+    let mut low = page(DistancePreset::Low);
+    assert!(
+        texts(&mut low)
+            .iter()
+            .any(|t| t.starts_with("The World's own rings, to 3 km") && !t.contains("default")),
+    );
+}
+
+#[test]
+fn applying_a_preset_changes_the_rings_the_server_streams() {
+    use crate::client::quality::DistancePreset;
+    use crate::server::quality::QualityCurve;
+    use crate::server::streaming::StreamingSettings;
+    let mut app = app();
+    app.add_message::<QualityCurve>()
+        .insert_resource(terra().low())
+        .insert_resource(terra())
+        .add_systems(
+            Update,
+            (
+                crate::client::quality::request,
+                crate::server::quality::apply,
+            )
+                .chain(),
+        );
+    app.update();
+    let streamed = |app: &App| *app.world().resource::<StreamingSettings>();
+    assert_eq!(streamed(&app).lod_unit_m, 192.0, "Medium, the default");
+
+    activate_operation(
+        &mut app,
+        Operation::Navigate(crate::client::menu_ui::Tab::Distance),
+    );
+    activate_operation(&mut app, Operation::Distance(DistancePreset::High));
+    app.update();
+    assert_eq!(streamed(&app).lod_unit_m, 192.0, "not before Apply");
+
+    activate_operation(&mut app, Operation::Apply);
+    app.update();
+    let high = streamed(&app);
+    assert_eq!(high, QualityCurve::HIGH.applied_to(terra().ceiling));
+    // 160 m, then 768, 1536, 3072 and 6144 m, then 8 km.
+    assert_eq!(crate::server::level_count(&high), 6);
+    let rings = crate::server::LevelRings::new(high, 32.0, 1);
+    assert_eq!(rings.mesh.outer.horizontal, 12);
 }

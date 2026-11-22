@@ -694,16 +694,18 @@ fn release(
         return;
     }
     let outside = |(level, coord): (u32, ChunkCoord)| {
-        !anchors.is_empty()
-            && (level..levels).all(|at| {
+        camera_m.is_some_and(|camera_m| {
+            // A level a new curve dropped is held to its own rings, which stop at the reach.
+            (level..levels.max(level + 1)).all(|at| {
                 let covering = coord.ancestor(at - level);
                 let rings = LevelRings::new(*streaming, world.cell_size(), at);
-                let a = anchors[at as usize];
+                let a = world.chunk_at_level(camera_m, at);
                 let d = IVec3::new(covering.x - a.x, covering.y - a.y, covering.z - a.z);
                 let outer = rings.mesh.outer;
                 // `contains` squares the offset, which overflows a teleport away.
                 d.abs().max_element() > outer.horizontal.max(outer.vertical) || !outer.contains(d)
             })
+        })
     };
     let released: Vec<_> = entities
         .retained
@@ -857,13 +859,18 @@ fn spawn_camera(
     mut commands: Commands,
     spawn: Res<crate::server::world_state::SpawnPoint>,
     streaming: Res<StreamingSettings>,
+    declared: Option<Res<crate::server::quality::DeclaredStreaming>>,
     world: Res<WorldSettings>,
     fog_settings: Res<FogSettings>,
 ) {
     let eye = spawn.entry_eye();
     let direction = Vec3::new(0.0, VIEW_PITCH, -1.0).normalize();
     let pose = Transform::from_translation(eye).looking_to(direction, Vec3::Y);
-    let layers: Vec<usize> = (0..level_count(&streaming).max(1))
+    // Layers and far plane cover any curve the Player may apply later; the fog follows it.
+    let ceiling = declared
+        .as_ref()
+        .map_or(*streaming, |declared| declared.ceiling);
+    let layers: Vec<usize> = (0..level_count(&ceiling).max(1))
         .map(|level| level as usize)
         .collect();
     #[cfg(feature = "profiling")]
@@ -881,7 +888,7 @@ fn spawn_camera(
             // Bevy's reverse-Z projection has no far plane; this one bounds
             // frustum culling, which must reach the coarsest level.
             Projection::Perspective(PerspectiveProjection {
-                far: streaming.lod_distance_m.max(streaming.view_distance_m) + world.cell_size(),
+                far: ceiling.lod_distance_m.max(ceiling.view_distance_m) + world.cell_size(),
                 ..default()
             }),
             MainCamera,
@@ -900,8 +907,8 @@ fn spawn_camera(
     if let Some(fog) = fog::camera_fog(
         fog::enabled(),
         &fog_settings,
-        streaming.view_distance_m,
-        streaming.lod_distance_m,
+        &streaming,
+        declared.as_deref(),
     ) {
         commands.entity(camera).insert(fog);
     }
@@ -988,6 +995,48 @@ mod tests {
     }
 
     #[test]
+    fn the_camera_draws_and_reaches_every_level_the_ceiling_allows_while_low_streams_fewer() {
+        let declared = crate::server::quality::DeclaredStreaming {
+            ceiling: StreamingSettings {
+                view_distance_m: 160.0,
+                lod_distance_m: 8192.0,
+                ..default()
+            },
+            low_reach_m: 3000.0,
+        };
+        let low = declared.low();
+        let mut app = App::new();
+        app.insert_resource(crate::server::world_state::SpawnPoint::for_tests(
+            Vec3::ZERO,
+        ))
+        .insert_resource(low)
+        .insert_resource(declared)
+        .init_resource::<FogSettings>()
+        .init_resource::<WorldSettings>();
+        app.world_mut().run_system_once(spawn_camera).unwrap();
+
+        assert_eq!((level_count(&low), level_count(&declared.ceiling)), (6, 7));
+        let layers = app
+            .world_mut()
+            .query_filtered::<&RenderLayers, With<MainCamera>>()
+            .single(app.world())
+            .unwrap()
+            .clone();
+        assert!(layers.intersects(&layer_of(6)));
+        assert!(projection_of_main(&mut app).far >= 8192.0);
+        let fog = app
+            .world_mut()
+            .query_filtered::<&DistanceFog, With<MainCamera>>()
+            .single(app.world())
+            .unwrap()
+            .clone();
+        assert_same_fog(
+            &fog::streamed_fog(&FogSettings::default(), &low, Some(&declared)),
+            &fog,
+        );
+    }
+
+    #[test]
     fn a_world_with_no_coarse_levels_still_has_a_far_plane_past_its_view() {
         let streaming = StreamingSettings {
             lod_distance_m: 100.0,
@@ -1001,11 +1050,7 @@ mod tests {
     fn the_fog_is_derived_from_the_streaming_distances() {
         let streaming = StreamingSettings::default();
         let mut app = camera_app(Vec3::ZERO, streaming);
-        let want = fog::distance_fog(
-            &FogSettings::default(),
-            streaming.view_distance_m,
-            streaming.lod_distance_m,
-        );
+        let want = fog::streamed_fog(&FogSettings::default(), &streaming, None);
         let fog = app
             .world_mut()
             .query_filtered::<&DistanceFog, With<MainCamera>>()
@@ -1474,6 +1519,26 @@ mod tests {
         assert_eq!(entity_for(&app, fine), None, "its grandparent covers it");
         assert!(!mask_has(&app, 0, fine), "in the same frame");
         assert!(mask_has(&app, 2, ChunkCoord::new(1, 0, -1)));
+    }
+
+    #[test]
+    fn a_level_a_new_curve_drops_is_drawn_until_the_finer_levels_cover_it() {
+        let mut app = app();
+        put_eye(&mut app, Vec3::ZERO);
+        let coarse = ChunkCoord::new(0, 0, 0);
+        send_coarse(&mut app, 5, coarse, geometry());
+        unload_coarse(&mut app, 5, coarse);
+        let high =
+            crate::server::quality::QualityCurve::HIGH.applied_to(StreamingSettings::default());
+        assert_eq!(level_count(&high), 5, "level 5 is dropped");
+        app.insert_resource(high);
+        app.update();
+        assert!(entity_at(&app, 5, coarse).is_some(), "retained");
+
+        for child in coarse.children() {
+            send_coarse(&mut app, 4, child, geometry());
+        }
+        assert_eq!(entity_at(&app, 5, coarse), None, "covered");
     }
 
     #[test]
@@ -2307,7 +2372,16 @@ mod tests {
             &Mat4::from_scale(Vec3::splat(1e-4)),
         ));
         let view = app.world_mut().spawn_empty().id();
-        app.world_mut().spawn((
+        app.init_resource::<GlobalAmbientLight>();
+        app.world_mut()
+            .run_system_once(spawn_light)
+            .expect("the sun was spawned");
+        let sun = app
+            .world_mut()
+            .query_filtered::<Entity, With<DirectionalLight>>()
+            .single(app.world())
+            .unwrap();
+        app.world_mut().entity_mut(sun).insert((
             DirectionalLight {
                 shadow_maps_enabled: true,
                 ..default()
@@ -2318,7 +2392,6 @@ mod tests {
                     .collect(),
             },
             ViewVisibility::VISIBLE,
-            RenderLayers::layer(NEAR_LAYER),
         ));
         app.add_systems(PostUpdate, bevy::light::check_dir_light_mesh_visibility);
         // No visibility plugin runs here to propagate it.
@@ -2361,6 +2434,56 @@ mod tests {
         for (i, cascade) in cascades.iter().enumerate() {
             assert!(cascade.contains(&ground), "ground in cascade {i}");
             assert_eq!(cascade.contains(&canopy), i < 2, "leaves in cascade {i}");
+        }
+    }
+
+    #[test]
+    fn no_coarse_mesh_casts_a_sun_shadow_under_any_curve() {
+        use crate::server::quality::{DeclaredStreaming, QualityCurve};
+        let game = DeclaredStreaming::default();
+        for curve in [
+            QualityCurve::low(game),
+            QualityCurve::MEDIUM,
+            QualityCurve::HIGH,
+            QualityCurve {
+                unit_m: 288.0,
+                reach_m: 2500.0,
+            },
+        ] {
+            let streaming = curve.applied_to(game.ceiling);
+            let mut app = app();
+            app.insert_resource(streaming);
+            let coord = ChunkCoord::new(0, 0, 0);
+            send_mesh(&mut app, coord, geometry());
+            let ground = entity_at(&app, 0, coord).expect("level 0's ground");
+            let mut coarse = Vec::new();
+            for level in 1..level_count(&streaming) {
+                for (mesh, at) in [(both_layers(), coord), (leaves(), ChunkCoord::new(1, 0, 0))] {
+                    send_coarse(&mut app, level, at, mesh);
+                    let entities = app.world().resource::<ChunkEntities>();
+                    coarse.extend(
+                        [&entities.opaque, &entities.blended, &entities.cutout]
+                            .into_iter()
+                            .filter_map(|layer| layer.get(&(level, at)).copied()),
+                    );
+                }
+            }
+            assert!(coarse.len() >= 3 * (level_count(&streaming) as usize - 1));
+            let view = sun_over_everything(&mut app);
+            app.update();
+
+            for (i, cascade) in cascades_of(&mut app, view).iter().enumerate() {
+                assert!(
+                    cascade.contains(&ground),
+                    "{curve:?}: ground in cascade {i}"
+                );
+                for entity in &coarse {
+                    assert!(
+                        !cascade.contains(entity),
+                        "{curve:?}: a coarse mesh casts into cascade {i}"
+                    );
+                }
+            }
         }
     }
 

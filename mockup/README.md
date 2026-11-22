@@ -25,18 +25,20 @@ any Game or Mod. Gamepad hints and actual engine rendering require later engine
 implementation. Keyboard Tab, Enter and Escape work in the browser prototype.
 
 Settings now shares one category-based screen between the title and in-game
-menus: Behavior, Key bindings, Controller (including touch), Display, Audio and
-Accessibility. The first four reflect current engine settings; Audio and
-Accessibility remain proposed additions. Draft values survive category changes.
-Apply, discard, reset and keyboard rebinding are interactive in this prototype.
-Navigation containers fit their contents and scroll if needed.
+menus: Behavior, Key bindings, Controller (including touch), Display, Distance,
+Audio and Accessibility. The first five reflect current engine settings;
+Distance (step 22) is implemented, with Low the Game's own rings, Medium the
+default and High each level held twice as far. Audio and Accessibility remain
+proposed additions. Draft values survive category changes. Apply, discard, reset
+and keyboard rebinding are interactive in this prototype. Navigation containers
+fit their contents and scroll if needed.
 
 Direct URLs include `/worlds`, `/worlds/new`, `/worlds/new/mods`,
 `/worlds/new/biomes`, `/worlds/new/review`, `/worlds/1/edit`, `/mods`, `/menu`,
 `/settings/behavior`, `/settings/key-bindings`, `/settings/controller`,
-`/settings/display`, `/settings/audio` and `/settings/accessibility`. Browser
-Back and Forward navigate between screens while retaining the draft. Reloading
-restores the screen and the session draft.
+`/settings/display`, `/settings/distance`, `/settings/audio` and
+`/settings/accessibility`. Browser Back and Forward navigate between screens
+while retaining the draft. Reloading restores the screen and the session draft.
 
 Cinematic refinements include keyboard arrows, simulated controller D-pad/A/B
 and shoulder handling, persistent field validation, modal focus isolation and

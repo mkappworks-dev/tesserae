@@ -39,6 +39,7 @@ fn ore_at(generators: &LodGenerators, level: u32) -> usize {
                             tables,
                             None,
                             None,
+                            None,
                         )
                         .chunk
                     }

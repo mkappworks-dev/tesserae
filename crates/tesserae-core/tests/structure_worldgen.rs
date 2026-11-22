@@ -1276,3 +1276,53 @@ fn no_overhang_stands_over_a_structure_or_beside_it() {
         assert!(asked > 1000);
     }
 }
+
+/// The global cells [`Probe::changed`] scans in `half_m` of the centre, as `[min, max)`.
+fn scanned(probe: &Probe, half_m: f32) -> [[i32; 3]; 2] {
+    let chunk_m = SIZE_I as f32 * probe.with.voxel_size();
+    let (low, high) = probe.with.surface_bounds_m();
+    let reach = (half_m / chunk_m).ceil() as i32;
+    let centre = (probe.centre_m / chunk_m).round() as i32;
+    let rows = [
+        (low / chunk_m).floor() as i32 - 1,
+        (high / chunk_m).ceil() as i32 + 2,
+    ];
+    [
+        [centre - reach, rows[0], centre - reach].map(|c| c * SIZE_I),
+        [centre + reach, rows[1], centre + reach].map(|c| c * SIZE_I),
+    ]
+}
+
+/// What a coarse level stands its Structures from: every solid cell a Structure, its foundation
+/// and its ground cells write, with the Voxel level 0 leaves there, and nothing else.
+#[test]
+fn the_structure_parts_drawn_in_a_box_are_the_solid_voxels_level_zero_stands_there() {
+    let half_m = 64.0;
+    let rows = [row(10.0, 1.0)];
+    let probes = [
+        Probe::of(1.0, deck(Some(FOUNDATION)), hilly, &rows).centred(hills_m()),
+        Probe::of(1.0, plot(), meadow_and_desert, &[row(16.0, 1.0)]),
+        Probe::new(0.5, &[row(16.0, 1.0)]),
+    ];
+    for probe in probes {
+        let [min, max] = scanned(&probe, half_m);
+        let drawn: HashMap<[i32; 3], MaterialId> = probe
+            .with
+            .structure_parts(min, max, true)
+            .into_iter()
+            .map(|p| (p.at, p.material))
+            .collect();
+        let changed = probe.changed(half_m, false);
+        let solid = changed.iter().filter(|(_, (with, _))| !with.is_air());
+        let mut count = 0;
+        for (at, (with, _)) in solid {
+            assert_eq!(drawn.get(at), Some(&with.material()), "missing at {at:?}");
+            count += 1;
+        }
+        assert!(count > 200, "{} solid cells changed", count);
+        for (at, m) in &drawn {
+            assert!((0..3).all(|a| (min[a]..max[a]).contains(&at[a])), "{at:?}");
+            assert_eq!(probe.at(*at).0.material(), *m, "drawn at {at:?}");
+        }
+    }
+}

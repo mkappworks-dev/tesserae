@@ -165,11 +165,10 @@ impl Probe {
         self.centre_m.map(|m| (m / chunk_m) as i32)
     }
 
-    /// Every cell in `HALF_M` of the centre the Template changed, generated in one order or its
-    /// reverse, as it is with the Template and without.
-    fn changed(&self, reverse: bool) -> HashMap<[i32; 3], (Voxel, Voxel)> {
+    /// The ground's own band of Chunk rows here, and room for a Template's height above and its
+    /// piers below.
+    fn rows(&self) -> std::ops::RangeInclusive<i32> {
         let chunk_m = SIZE_I as f32 * self.with.voxel_size();
-        // The ground's own band here, and room for a Template's height above and its piers below.
         let (mut low, mut high) = (f32::MAX, f32::MIN);
         for i in -32..=32 {
             for j in -32..=32 {
@@ -180,8 +179,26 @@ impl Probe {
                 (low, high) = (low.min(h), high.max(h));
             }
         }
-        let rows =
-            ((low - 24.0) / chunk_m).floor() as i32..=((high + 24.0) / chunk_m).ceil() as i32;
+        ((low - 24.0) / chunk_m).floor() as i32..=((high + 24.0) / chunk_m).ceil() as i32
+    }
+
+    /// The global cells [`Self::changed`] scans, as `[min, max)`.
+    fn scanned(&self) -> [[i32; 3]; 2] {
+        let chunk_m = SIZE_I as f32 * self.with.voxel_size();
+        let reach = (HALF_M / chunk_m).ceil() as i32;
+        let [mx, mz] = self.centre_chunk();
+        let rows = self.rows();
+        [
+            [mx - reach, *rows.start(), mz - reach].map(|c| c * SIZE_I),
+            [mx + reach, rows.end() + 1, mz + reach].map(|c| c * SIZE_I),
+        ]
+    }
+
+    /// Every cell in `HALF_M` of the centre the Template changed, generated in one order or its
+    /// reverse, as it is with the Template and without.
+    fn changed(&self, reverse: bool) -> HashMap<[i32; 3], (Voxel, Voxel)> {
+        let chunk_m = SIZE_I as f32 * self.with.voxel_size();
+        let rows = self.rows();
         let reach = (HALF_M / chunk_m).ceil() as i32;
         let [mx, mz] = self.centre_chunk();
         let mut coords: Vec<[i32; 3]> = rows
@@ -458,4 +475,28 @@ fn bridges_stand_over_valleys() {
         }
         assert!(marks > 0, "{land:?}: no bridge near ({x_m}, {z_m})");
     }
+}
+
+/// A coarse level stands a bridge from the same draw: every solid cell it and its piers write,
+/// and none where it is asked to leave spanning Templates out.
+#[test]
+fn the_structure_parts_of_a_bridge_are_the_solid_voxels_level_zero_stands_or_none_without_spans() {
+    let probe = Probe::new(1.0, spanning(), Land::Wet);
+    let [min, max] = probe.scanned();
+    let changed = probe.changed(false);
+    let solid: HashMap<[i32; 3], MaterialId> = changed
+        .iter()
+        .filter(|(_, (w, _))| !w.is_air())
+        .map(|(at, (w, _))| (*at, w.material()))
+        .collect();
+    assert!(solid.values().any(|m| *m == MARK), "no bridge in the scan");
+    let drawn: HashMap<[i32; 3], MaterialId> = probe
+        .with
+        .structure_parts(min, max, true)
+        .into_iter()
+        .filter(|p| p.material != probe.bare_at(p.at).material())
+        .map(|p| (p.at, p.material))
+        .collect();
+    assert_eq!(drawn, solid);
+    assert!(probe.with.structure_parts(min, max, false).is_empty());
 }

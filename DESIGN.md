@@ -168,14 +168,19 @@ smaller than that is not smoothed. The generator keeps to half the cap,
 Geometric rings, built in step 6
 ([ADR-0011](docs/adr/0011-coarse-levels-are-derived.md)). Level 0 covers
 `view_distance_m` (192 m); level k >= 1 has Voxels and Cells `2^k` times larger
-and an outer distance of `view_distance_m * 2^k`, clamped to `lod_distance_m`
-(4096 m). The level count is `1 + ceil(log2(reach / view_distance_m))`, which is
-6 at the defaults (levels 0 to 5), not the ~8 this section first assumed: that
-was a 32 m full-detail radius, and the radius is the knob. Every level holds
-about as many Chunks as level 0, so the total grows with the number of levels
-and not with r². A Chunk is 32³ at every level and a Cell is its footprint in
-metres, so everything is derived from metres and a World with smaller Voxels
-gets the same rings.
+and an outer distance of `u * 2^k`, clamped to the reach. `u` and the reach are
+the Quality curve, a Player's choice the Server clamps to the view distance and
+to the Game's ceiling `lod_distance_m`, 8192 m by default
+([ADR-0036](docs/adr/0036-the-quality-curve-is-a-player-preference-the-server-clamps.md)):
+Low is the doubling from the view distance to the Game's own reach (4096 m by
+default), Medium, the default, 6 Chunks (`u` 192 m) to 6 km, and High 12 Chunks
+to 8 km. The level count is `1 + ceil(log2(reach / u))`, which is 6 for Low and
+Medium (levels 0 to 5), not the ~8 this section first assumed: that was a 32 m
+full-detail radius, and the radius is the knob. Every level holds about as many
+Chunks as level 0, so the total grows with the number of levels and not with r².
+A Chunk is 32³ at every level and a Cell is its footprint in metres, so
+everything is derived from metres and a World with smaller Voxels gets the same
+rings.
 
 - **The downsample.** A coarse Voxel is solid if its eight children's
   `ShapeTable::volume` sum to at least half, ties solid, and is always a full
@@ -210,19 +215,29 @@ gets the same rings.
   dark (`coarse_light`, from the level's generator). See the ADR for what that
   gets wrong.
 - **Fog.** Bevy's `DistanceFog` on all six cameras, built once from one
-  `FogSettings` (a fog colour, a sky colour and `reach_opacity`, 0.88 by
+  `FogSettings` (a fog colour, a sky colour and `reach_opacity`, 0.95 by
   default), so a fragment is fogged the same whichever camera draws it. The
-  density is derived from the reach in metres,
-  `max(view_distance_m, lod_distance_m)`, so the opacity at the reach is
-  `reach_opacity` at any Voxel size. The falloff is exponential squared because
-  it starts slowly: under 2% to the join of levels 1 and 2 (384 m), where plain
-  exponential already hazes the ground the Player stands on. The fog colour and
-  the flat sky colour are a pair and not one value: the tonemapper runs in the
-  shader after the fog and skips the clear colour, so the fog colour is the one
-  that comes out as the sky. `apply_fog` is already the end of the chunk shader,
-  so there is no shader change. `FogSettings` is live: changing the resource
-  re-derives the clear colour and every camera's fog, so a Look pack sets it
-  whenever it likes.
+  density is derived from the streamed reach in metres,
+  `max(view_distance_m, lod_distance_m)`, and re-derived when the Quality curve
+  changes it, so the opacity at the reach is `reach_opacity` at any Voxel size
+  and any curve. 0.95 hides the reach's square edge against the sky, which 0.88
+  showed once the reach was 6 km; Low, the Game's own doubling, keeps at most
+  0.88, its look before the Quality curve. The falloff is exponential squared
+  because it starts slowly: under 2% to the join of levels 1 and 2 (384 m) under
+  Medium, where plain exponential already hazes the ground the Player stands on.
+  The fog colour and the flat sky colour are a pair and not one value: the
+  tonemapper runs in the shader after the fog and skips the clear colour, so the
+  fog colour is the one that comes out as the sky. `apply_fog` is already the
+  end of the chunk shader, so there is no shader change. `FogSettings` is live:
+  changing the resource re-derives the clear colour and every camera's fog, so a
+  Look pack sets it whenever it likes.
+
+- **Fill.** Coarse jobs share level 0's three-worker pool, so their caps (16
+  generate and 32 mesh jobs in flight) bound how much level-0 work waits behind
+  them. Dispatch runs once a 64 Hz tick, so the caps also bound the fill rate:
+  every cap is 8 times larger in a tick that starts with no level-0 job in
+  flight. Above that the coarse field is CPU-bound, which is what limits the
+  default curve.
 
 The per-level budget is measured, in Open items.
 
@@ -559,7 +574,7 @@ controls, movement, save, camera and input work already in flight is tracked in
 | 19  | Map, compass            | Server-provided summaries (the Client never reads World storage), map view                                                   | Map style, markers                 | 13         | Done            |
 | 20  | Structures              | Template format, deterministic placement by worldgen and tools                                                               | Templates                          | 13         | Done            |
 | 21  | Survival loop           | Health, damage, hunger, death, respawn, game modes                                                                           | Numbers and rules                  | 15         | Done            |
-| 22  | LOD features            | Trees and Structures drawn at coarse levels as sparse impostors from the same pure draws, and a ring quality curve           | Larger default view distance       | 6, 18, 20  | Not started     |
+| 22  | LOD features            | Trees and Structures drawn at coarse levels as sparse impostors from the same pure draws, and a ring quality curve           | Larger default view distance       | 6, 18, 20  | Done            |
 | 23  | Blueprints and Sites    | Blueprint Items that lay a Site, which builds itself over time from Items brought to it                                      | Blueprints                         | 15, 20     | Not started     |
 | 24  | Weather                 | Weather state and tick, particles, sky hooks                                                                                 | Weather types, climate rules       | 13, 17     | Not started     |
 | 25  | Mobs, animals           | Entity AI hooks, spawning, replication shape designed against transport                                                      | Behaviours, spawn tables           | 12, 13, 21 | Not started     |
@@ -854,15 +869,22 @@ Notes:
   and `tech/phase-17-worldgen-performance` takes it on with bit-identical
   changes. Weather (step 24) follows and reads the Climate by altitude and
   coast; weather never edits terrain.
-- **Step 22** is not started. Trees and Structures exist at level 0 only
-  ([ADR-0022](docs/adr/0022-biomes-are-column-content-and-a-world-pins-its-generator.md),
-  [ADR-0029](docs/adr/0029-structures-are-declared-templates-placed-as-pure-functions-of-metres.md)),
-  which ends at `view_distance_m` (192 m by default), so from above nothing
-  stands on the ground beyond it. This step draws them at the coarse levels as
-  sparse impostors from the same pure draws, since the coarse vote loses a lone
-  tree, and replaces the fixed doubling of the rings with a quality curve and a
-  larger default. It follows step 17 so it reads that step's fields, and its
-  memory cost is measured against the LOD budget in step 6.
+- **Step 22** is done. It draws the far field as level 0 would
+  ([ADR-0035](docs/adr/0035-a-coarse-level-draws-level-0s-answer.md)): every
+  coarse column agrees with level 0's water or land and top Material at its
+  centre; level 1 stands Tree Impostors from level 0's own draws, levels 1 to 3
+  Structures, Settlements and paths, and levels 2 up Canopy cover; and the
+  coarsest level fills first. The fixed doubling became the Quality curve
+  ([ADR-0036](docs/adr/0036-the-quality-curve-is-a-player-preference-the-server-clamps.md)),
+  set from a Distance settings tab, with Medium, 6 Chunks to 6 km, the default
+  and Terra's ceiling raised to 8192 m. On Terra (M5, `profiling`) Medium fills
+  the field in 9.6 s, 9.9 s in flight, with coarse vertex memory 3.6 MB and GPU
+  frame 0.5 ms over `main`'s; 8 Chunks took 13.5 s, as the coarse jobs are
+  CPU-bound, so faster coarse jobs are what would widen it. Terra keeps its 160
+  m level 0: 192 m filled level 0 0.5 s later and the field past 10 s. Ground
+  tint (ticket 10) is `wontfix`: on Terra it moved no join's colour, and its
+  split faces took the field past 10 s. See
+  `.scratch/2026-11-21-phase-22-lod-features/spec.md`.
 - **Step 27** is the largest unknown in 1.0. Machines move as a unit, so they
   need collision, lighting and meshing outside the Chunk grid, Server-owned
   motion that composes with the Player's flight and physics movement, and a save
@@ -941,9 +963,9 @@ Not blocking 1.0, in rough order of value:
 - **Reach is configurable at load time.** Step 7 resolves the step-6 loose end
   through the Game's Declaration: full detail 32–512 m and LOD reach from that
   radius to 8192 m. Runtime changes remain deferred; tables and view parameters
-  are fixed once the World opens. Terra requests 160/3000 m, below the engine's
-  4096 m default LOD reach; its distant capture shows beyond the default 192 m
-  full-detail radius, not beyond default LOD reach.
+  are fixed once the World opens. Terra declares a 160 m view, a Low reach of
+  3000 m and an 8192 m ceiling; its distant capture shows beyond the default 192
+  m full-detail radius.
 - **Mod host follow-ups are explicit.** No World read until a batched Snapshot
   API; no save-time tombstones or missing-Mod migration; no compile cache;
   terminal-only Trust until a pre-World window state; a flat appearance palette

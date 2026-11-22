@@ -291,3 +291,31 @@ fn no_scatter_voxel_or_field_cell_stands_in_a_structure() {
         }
     }
 }
+
+#[test]
+fn no_canopy_cover_stands_on_a_structure() {
+    let mut dense = trees(3.0);
+    if let Some(SurfacePlant {
+        kind: SurfacePlantKind::Tree(tree),
+        ..
+    }) = &mut dense.plant
+    {
+        tree.crowding_m = Some(1.0);
+    }
+    let features = SurfaceFeatures::new(&[dense]).unwrap();
+    let pair = pair(1.0, features, 32.0);
+    let with = Worldgen::new(SEED, 1.0, params(features, true)).with_templates(&[block()]);
+    let wild = Worldgen::new(SEED, 1.0, params(features, false)).with_templates(&[block()]);
+    let covered: Vec<[i32; 2]> = pair.covered.iter().copied().collect();
+    let drawn = |g: &Worldgen| {
+        g.canopy_cover(&g.canopy_shapes(), &covered)
+            .iter()
+            .filter(|c| c.is_some())
+            .count()
+    };
+    assert_eq!(drawn(&with), 0, "Canopy cover on a Structure");
+    assert!(
+        drawn(&wild) * 2 > covered.len(),
+        "the forest would have covered the ground"
+    );
+}

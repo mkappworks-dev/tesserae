@@ -1619,3 +1619,149 @@ fn a_snapshot_keeps_a_trees_crowding_and_a_tree_without_it_saves_none() {
     let (_, plain) = capture(None);
     assert!(!plain.contains("crowding"), "an old tree saves as it did");
 }
+
+/// The draw a coarse level stands its trees from: every trunk and canopy cell level 0 grows in a
+/// box, fruit as canopy, and nothing level 0 leaves out, over smoothed ground and across Chunks.
+#[test]
+fn the_tree_parts_drawn_in_a_box_are_the_trunk_and_canopy_voxels_level_zero_stands_there() {
+    let params = WorldgenParams {
+        smoothing: Some(Default::default()),
+        ..flat(&[
+            tree_feature(8.0, true),
+            branching_feature(10.0, false, Some(BRANCHING)),
+        ])
+    };
+    let probe = Probe::new(SEED, 1.0, params);
+    let (low, high) = probe.with.surface_bounds_m();
+    let min = [-48, (low.floor() as i32).div_euclid(SIZE_I) * SIZE_I, -40];
+    let max = [
+        56,
+        (high.ceil() as i32).div_euclid(SIZE_I) * SIZE_I + SIZE_I,
+        72,
+    ];
+    let mut level_zero = HashMap::new();
+    for x in min[0]..max[0] {
+        for z in min[2]..max[2] {
+            for y in min[1]..max[1] {
+                let (with, bare) = probe.at([x, y, z]);
+                let m = with.material();
+                if bare.is_air() && is_tree_material(m) {
+                    level_zero.insert([x, y, z], m != TRUNK);
+                }
+            }
+        }
+    }
+    let drawn: HashMap<[i32; 3], bool> = probe
+        .with
+        .tree_parts(min, max)
+        .into_iter()
+        .map(|p| {
+            let material = if p.canopy { CANOPY } else { TRUNK };
+            assert_eq!(p.material, material, "{:?}", p.at);
+            (p.at, p.canopy)
+        })
+        .collect();
+    assert!(level_zero.len() > 2000, "{} tree cells", level_zero.len());
+    let missing: Vec<_> = level_zero
+        .iter()
+        .filter(|(at, c)| drawn.get(*at) != Some(c))
+        .take(8)
+        .collect();
+    let extra: Vec<_> = drawn
+        .iter()
+        .filter(|(at, _)| !level_zero.contains_key(*at))
+        .take(8)
+        .collect();
+    assert!(
+        missing.is_empty() && extra.is_empty(),
+        "missing or wrong {missing:?}, extra {extra:?}"
+    );
+    assert_eq!(drawn.len(), level_zero.len());
+}
+
+/// A dense forest's columns draw its leaves, lifted by its trees' height; a sparse one's none.
+#[test]
+fn canopy_cover_takes_a_dense_forests_leaves_and_leaves_sparse_trees_out() {
+    let columns: Vec<[i32; 2]> = (0..32)
+        .flat_map(|x| (0..32).map(move |z| [x * 4 - 64, z * 4 - 64]))
+        .collect();
+    let cover = |spacing_m: f32| {
+        let mut f = tree_feature(spacing_m, false);
+        if let Some(SurfacePlant {
+            kind: SurfacePlantKind::Tree(tree),
+            ..
+        }) = &mut f.plant
+        {
+            // Crowns kept 1.5 radii apart never close over half the ground.
+            tree.crowding_m = Some(1.0);
+        }
+        let g = Worldgen::new(SEED, 1.0, flat(&[f]));
+        g.canopy_cover(&g.canopy_shapes(), &columns)
+    };
+    let dense = cover(3.0);
+    for canopy in dense.iter().flatten() {
+        assert_eq!(canopy.material, CANOPY);
+        assert!(canopy.cover > 0.5 && canopy.cover <= 1.0, "{canopy:?}");
+        // A 3 to 5 m trunk under a 2.5 m crown.
+        assert!((4.0..=9.0).contains(&canopy.top_m), "{canopy:?}");
+    }
+    assert!(
+        dense.iter().all(Option::is_some),
+        "a dense forest left bare"
+    );
+    assert!(
+        cover(16.0).iter().all(Option::is_none),
+        "sparse trees covered"
+    );
+}
+
+/// A mixed forest's sparser columns show the next species' leaves where its trees cover at least
+/// half what the dominant species' do, and each column's answer is its own, whatever is asked
+/// beside it.
+#[test]
+fn canopy_cover_shades_a_mixed_forests_sparser_columns_by_the_next_species_share() {
+    const OTHER: MaterialId = 215;
+    let columns: Vec<[i32; 2]> = (0..16)
+        .flat_map(|x| (0..16).map(move |z| [x * 4 - 32, z * 4 - 32]))
+        .collect();
+    let tree = |spacing_m: f32, canopy: MaterialId| {
+        let mut f = tree_feature(spacing_m, false);
+        if let Some(SurfacePlant {
+            kind: SurfacePlantKind::Tree(tree),
+            ..
+        }) = &mut f.plant
+        {
+            tree.crowding_m = Some(1.0);
+            tree.canopy = canopy;
+        }
+        f
+    };
+    let cover = |next_spacing_m: f32| {
+        let g = Worldgen::new(
+            SEED,
+            1.0,
+            flat(&[tree(3.0, CANOPY), tree(next_spacing_m, OTHER)]),
+        );
+        let shapes = g.canopy_shapes();
+        let all = g.canopy_cover(&shapes, &columns);
+        for (i, column) in columns.iter().enumerate().step_by(37) {
+            assert_eq!(g.canopy_cover(&shapes, &[*column]), [all[i]], "{column:?}");
+        }
+        all
+    };
+    // As many trees, or about a quarter as many, as the first species.
+    for (next_spacing_m, sparse) in [(3.5, OTHER), (6.0, CANOPY)] {
+        let drawn = cover(next_spacing_m);
+        assert!(
+            drawn.iter().all(Option::is_some),
+            "a dense forest left bare"
+        );
+        for canopy in drawn.iter().flatten() {
+            assert_eq!(
+                (canopy.material, canopy.sparse),
+                (CANOPY, sparse),
+                "{next_spacing_m} m: {canopy:?}"
+            );
+        }
+    }
+}

@@ -281,6 +281,7 @@ pub(super) fn activate(
                 Operation::ReducedMotion(value) => p.reduced_motion = value,
                 Operation::SolidBackground(value) => p.solid_background = value,
                 Operation::StrongerContrast(value) => p.stronger_contrast = value,
+                Operation::Distance(preset) => p.distance.preset = preset,
                 _ => {}
             }
         }

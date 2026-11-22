@@ -53,6 +53,7 @@ use super::lod;
 use super::lod_rings::LevelRings;
 use super::player::Player;
 use super::priority::{Aim, Order, Ring};
+use super::quality::DeclaredStreaming;
 use super::world_state::{ChunkStore, Snapshot};
 use super::{ContentTables, WorldGenerator};
 use crate::world::{ChunkCoord, WorldSettings};
@@ -97,7 +98,7 @@ pub struct LodUnloaded {
 }
 
 /// How far the Server streams. Not World save data — see `crate::world`.
-#[derive(Resource, Clone, Copy, Debug)]
+#[derive(Resource, Clone, Copy, PartialEq, Debug)]
 pub struct StreamingSettings {
     /// Horizontal radius, in metres, that the Client gets geometry for.
     pub view_distance_m: f32,
@@ -109,6 +110,9 @@ pub struct StreamingSettings {
     pub hysteresis_m: f32,
     /// At or below `view_distance_m` there are no coarse levels.
     pub lod_distance_m: f32,
+    /// Coarse level k ends at `lod_unit_m * 2^k`, never nearer than the view distance, so the
+    /// default 0 is the doubling from it. See `quality::QualityCurve`.
+    pub lod_unit_m: f32,
 }
 
 impl Default for StreamingSettings {
@@ -118,6 +122,7 @@ impl Default for StreamingSettings {
             vertical_distance_m: 96.0,
             hysteresis_m: 32.0,
             lod_distance_m: 4096.0,
+            lod_unit_m: 0.0,
         }
     }
 }
@@ -255,20 +260,19 @@ impl StreamingBudget {
 }
 
 /// Under `dev`, `TESSERAE_LOD=0` turns coarse streaming off, to measure its cost.
-pub(super) fn streaming_settings(view: Option<tesserae_mods::ViewParams>) -> StreamingSettings {
-    let mut settings = StreamingSettings::default();
+pub(super) fn declared_streaming(view: Option<tesserae_mods::ViewParams>) -> DeclaredStreaming {
+    let mut declared = DeclaredStreaming::default();
     if let Some(view) = view {
-        settings.view_distance_m = view.view_distance_m;
-        settings.lod_distance_m = view.lod_distance_m;
+        declared.ceiling.view_distance_m = view.view_distance_m;
+        declared.ceiling.lod_distance_m = view.lod_distance_m;
+        declared.low_reach_m = view.low_lod_distance_m.unwrap_or(view.lod_distance_m);
     }
     #[cfg(any(feature = "dev", feature = "profiling"))]
     if std::env::var("TESSERAE_LOD").is_ok_and(|v| v == "0") {
-        return StreamingSettings {
-            lod_distance_m: settings.view_distance_m,
-            ..settings
-        };
+        declared.ceiling.lod_distance_m = declared.ceiling.view_distance_m;
+        declared.low_reach_m = declared.ceiling.view_distance_m;
     }
-    settings
+    declared
 }
 
 fn streaming_budget() -> StreamingBudget {
@@ -301,7 +305,6 @@ impl Extent {
     }
 
     /// How many Cells are inside, without building them.
-    #[cfg(any(test, feature = "dev", feature = "profiling"))]
     pub fn count(self) -> usize {
         let h = self.horizontal;
         let columns: i32 = (-h..=h).map(|x| 2 * (h * h - x * x).isqrt() + 1).sum();
@@ -595,7 +598,7 @@ pub(super) fn plugin(app: &mut App) {
         .add_session_message::<ChunkUnloaded>()
         .add_session_message::<LodMeshReady>()
         .add_session_message::<LodUnloaded>()
-        .add_plugins(lod::plugin)
+        .add_plugins((lod::plugin, super::quality::plugin))
         .add_session_systems(
             FixedUpdate,
             (stream, lod::stream_lod).chain().in_set(Streaming),
@@ -2059,7 +2062,7 @@ pub(in crate::server) mod tests {
             world.chunk_at(player.expect("the Player exists").eye())
         }
 
-        fn jobs(&self) -> &Jobs {
+        pub(in crate::server) fn jobs(&self) -> &Jobs {
             self.app.world().resource::<Jobs>()
         }
 

@@ -991,7 +991,9 @@ fn install(world: &mut World) {
     world.insert_resource(placing);
     world.insert_resource(items);
     world.insert_resource(WorldParameters(params, templates, settlements, loot));
-    world.insert_resource(super::streaming::streaming_settings(loaded.view));
+    let declared = super::streaming::declared_streaming(loaded.view);
+    world.insert_resource(declared.low());
+    world.insert_resource(declared);
     world.insert_resource(runtime::ModJobs::new(loaded.registry, loaded.mods));
     let (name, default_mode) = world
         .get_resource::<super::persistence::Persistence>()
@@ -2463,11 +2465,13 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
             assert_eq!(loaded.world.unwrap_or_default(), WorldgenParams::default());
             assert!(loaded.mods.is_empty());
             assert!(loaded.appearance.is_empty());
-            let settings = super::super::streaming::streaming_settings(loaded.view);
+            let declared = super::super::streaming::declared_streaming(loaded.view);
+            let settings = declared.low();
             assert_eq!(settings.view_distance_m, 192.0);
             assert_eq!(settings.lod_distance_m, 4096.0);
             assert_eq!(settings.vertical_distance_m, 96.0);
             assert_eq!(settings.hysteresis_m, 32.0);
+            assert_eq!(declared.ceiling.lod_distance_m, 8192.0);
         }
     }
 

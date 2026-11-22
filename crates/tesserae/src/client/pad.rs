@@ -509,7 +509,7 @@ fn navigate(
         - i32::from(pad.just_pressed(GamepadButton::LeftTrigger));
     if shift != 0 && modal.is_empty() {
         use super::menu_ui::Tab;
-        const ORDER: [Tab; 6] = Tab::ORDER;
+        const ORDER: [Tab; 7] = Tab::ORDER;
         let tab = if settings.open {
             settings.tab
         } else {

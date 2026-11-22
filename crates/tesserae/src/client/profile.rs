@@ -52,6 +52,8 @@ pub(crate) struct Preferences {
     /// Full-ink secondary text, opaque fills, brighter edges and a thicker
     /// focus ring. Absent from a profile saved before it, which reads as off.
     pub stronger_contrast: bool,
+    /// Absent from a profile saved before it, which reads as Medium.
+    pub distance: super::quality::Distance,
 }
 
 pub(super) const TEXT_SCALES: [u32; 5] = [100, 125, 150, 175, 200];
@@ -137,6 +139,7 @@ impl Default for Preferences {
             text_scale: 100,
             solid_background: false,
             stronger_contrast: false,
+            distance: default(),
         }
     }
 }
@@ -462,6 +465,19 @@ mod tests {
             .remove("stronger_contrast");
         let (_, older) = decode(&serde_json::to_vec(&document).unwrap()).unwrap();
         assert!(!older.stronger_contrast, "an older profile keeps it off");
+    }
+    #[test]
+    fn a_profile_without_a_distance_choice_reads_as_medium() {
+        use super::super::quality::DistancePreset;
+        let mut document: serde_json::Value =
+            serde_json::from_slice(&encode(&Bindings::default(), &Preferences::default()).unwrap())
+                .unwrap();
+        document["preferences"]
+            .as_object_mut()
+            .unwrap()
+            .remove("distance");
+        let (_, older) = decode(&serde_json::to_vec(&document).unwrap()).unwrap();
+        assert_eq!(older.distance.preset, DistancePreset::Medium);
     }
     #[test]
     fn a_new_default_never_displaces_an_existing_user_binding() {

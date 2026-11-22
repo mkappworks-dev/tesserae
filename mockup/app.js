@@ -954,6 +954,13 @@ document.addEventListener("input", (e) => {
           : v;
     const output = $("#setting-" + key);
     if (output) output.textContent = v;
+    if (key === "distancePreset") {
+      choosePreset(v);
+      settingsChanged();
+      render();
+      return;
+    }
+    if (key === "reachKm" || key === "detailChunks") refreshDistance();
     settingsChanged();
     return;
   }

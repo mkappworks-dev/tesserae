@@ -15,6 +15,7 @@ use bevy::prelude::*;
 
 use crate::session::SessionApp;
 
+use crate::server::quality::DeclaredStreaming;
 use crate::server::streaming::StreamingSettings;
 
 /// Floor for the reach, so a World that draws nothing cannot divide by zero.
@@ -23,6 +24,10 @@ const MIN_REACH_M: f32 = 1.0;
 /// Ceiling for `reach_opacity`: `ln(1 - 1)` is minus infinity, and one ULP
 /// below 1 is the largest opacity that still gives a finite density.
 const MAX_REACH_OPACITY: f32 = 1.0 - f32::EPSILON;
+
+/// The most Low, the Game's own rings, fogs at its reach: Low keeps the look it had before a
+/// Player could choose a farther curve.
+const LOW_REACH_OPACITY: f32 = 0.88;
 
 /// The haze a fully fogged surface shows, as sRGB bytes.
 const HAZE_SKY_SRGB: [u8; 3] = [126, 146, 168];
@@ -58,7 +63,8 @@ impl Default for FogSettings {
         FogSettings {
             color: srgb(HAZE_FOG_SRGB),
             sky: srgb(HAZE_SKY_SRGB),
-            reach_opacity: 0.88,
+            // At 0.88 and below a farther reach's square edge shows against the sky.
+            reach_opacity: 0.95,
         }
     }
 }
@@ -76,26 +82,28 @@ pub fn plugin(app: &mut App) {
 
 /// Re-derives the clear colour and every camera's fog when [`FogSettings`] is
 /// changed after startup, so a Look pack that sets it at run time takes effect
-/// without respawning the cameras.
+/// without respawning the cameras; and every camera's fog when the Quality
+/// curve moves the reach.
 pub(crate) fn follow_settings(
     settings: Res<FogSettings>,
     streaming: Res<StreamingSettings>,
+    declared: Option<Res<DeclaredStreaming>>,
     mut clear: ResMut<ClearColor>,
     mut cameras: Query<&mut DistanceFog>,
 ) {
     // A resource reads as changed on the first run after it is inserted, and the
     // capture probe inserts its own `ClearColor` after this plugin: re-applying
     // the sky then would overwrite the probe's magenta.
-    if !settings.is_changed() || settings.is_added() {
+    let look = settings.is_changed() && !settings.is_added();
+    let reach = streaming.is_changed() && !streaming.is_added();
+    if !look && !reach {
         return;
     }
-    let [r, g, b] = settings.sky;
-    clear.0 = Color::srgb(r, g, b);
-    let fog = distance_fog(
-        &settings,
-        streaming.view_distance_m,
-        streaming.lod_distance_m,
-    );
+    if look {
+        let [r, g, b] = settings.sky;
+        clear.0 = Color::srgb(r, g, b);
+    }
+    let fog = streamed_fog(&settings, &streaming, declared.as_deref());
     for mut camera in &mut cameras {
         *camera = fog.clone();
     }
@@ -144,6 +152,29 @@ pub fn distance_fog(
     }
 }
 
+/// The fog for the rings the Server streams: [`distance_fog`], at most [`LOW_REACH_OPACITY`] at
+/// the reach while they are the Game's Low, which they are wherever no Game declared any.
+pub fn streamed_fog(
+    settings: &FogSettings,
+    streaming: &StreamingSettings,
+    declared: Option<&DeclaredStreaming>,
+) -> DistanceFog {
+    let low = declared.is_none_or(|declared| declared.low() == *streaming);
+    let settings = FogSettings {
+        reach_opacity: if low {
+            settings.reach_opacity.min(LOW_REACH_OPACITY)
+        } else {
+            settings.reach_opacity
+        },
+        ..*settings
+    };
+    distance_fog(
+        &settings,
+        streaming.view_distance_m,
+        streaming.lod_distance_m,
+    )
+}
+
 /// What the shader fogs toward so that a surface fully fogged comes out as
 /// `seen` (sRGB): the tonemapper darkens the fog colour, see [`HAZE_FOG_SRGB`].
 pub fn fog_toward(seen: [f32; 3]) -> [f32; 3] {
@@ -156,10 +187,10 @@ pub fn fog_toward(seen: [f32; 3]) -> [f32; 3] {
 pub fn camera_fog(
     enabled: bool,
     settings: &FogSettings,
-    view_distance_m: f32,
-    lod_distance_m: f32,
+    streaming: &StreamingSettings,
+    declared: Option<&DeclaredStreaming>,
 ) -> Option<DistanceFog> {
-    enabled.then(|| distance_fog(settings, view_distance_m, lod_distance_m))
+    enabled.then(|| streamed_fog(settings, streaming, declared))
 }
 
 /// `TESSERAE_FOG=0` turns the fog off, to measure what it costs and to capture
@@ -256,7 +287,8 @@ mod tests {
 
     #[test]
     fn default_fog_leaves_the_full_detail_rings_unhazed() {
-        let fog = distance_fog(&FogSettings::default(), DEFAULT_VIEW_M, DEFAULT_LOD_M);
+        let reach_m = crate::server::quality::QualityCurve::MEDIUM.reach_m;
+        let fog = distance_fog(&FogSettings::default(), DEFAULT_VIEW_M, reach_m);
         // Edit these with the reason if a default changes: they are the spec's figures.
         assert!(opacity_at(&fog, 192.0) < 0.01, "level 0 edge");
         assert!(opacity_at(&fog, 384.0) < 0.02, "join of levels 1 and 2");
@@ -351,9 +383,32 @@ mod tests {
     #[test]
     fn switching_the_fog_off_gives_no_component_and_on_gives_the_derived_one() {
         let settings = FogSettings::default();
-        assert!(camera_fog(false, &settings, DEFAULT_VIEW_M, DEFAULT_LOD_M).is_none());
-        let fog = camera_fog(true, &settings, DEFAULT_VIEW_M, DEFAULT_LOD_M).unwrap();
+        let streaming = StreamingSettings::default();
+        assert!(camera_fog(false, &settings, &streaming, None).is_none());
+        let fog = camera_fog(true, &settings, &streaming, None).unwrap();
         assert!(density_of(&fog) > 0.0);
+    }
+
+    #[test]
+    fn low_fogs_its_reach_as_before_and_a_farther_curve_lighter() {
+        use crate::server::quality::QualityCurve;
+        let settings = FogSettings::default();
+        let declared = DeclaredStreaming::default();
+        let low = declared.low();
+        let medium = QualityCurve::MEDIUM.applied_to(declared.ceiling);
+        // At the engine's 192 m view Medium's unit is the view distance, as Low's is.
+        assert_eq!(medium.lod_unit_m, low.lod_unit_m.max(low.view_distance_m));
+        for (streaming, want) in [(low, 0.88), (medium, settings.reach_opacity)] {
+            let fog = streamed_fog(&settings, &streaming, Some(&declared));
+            let got = opacity_at(&fog, streaming.lod_distance_m);
+            assert!((got - f64::from(want)).abs() < 1e-5, "{streaming:?}: {got}");
+        }
+        let lighter = FogSettings {
+            reach_opacity: 0.5,
+            ..settings
+        };
+        let fog = streamed_fog(&lighter, &low, Some(&declared));
+        assert!((opacity_at(&fog, low.lod_distance_m) - 0.5).abs() < 1e-5);
     }
 
     /// `MinimalPlugins` is not needed: `follow_settings` is in `Update`, which a
@@ -365,12 +420,7 @@ mod tests {
     }
 
     fn default_camera_fog() -> DistanceFog {
-        let streaming = StreamingSettings::default();
-        distance_fog(
-            &FogSettings::default(),
-            streaming.view_distance_m,
-            streaming.lod_distance_m,
-        )
+        streamed_fog(&FogSettings::default(), &StreamingSettings::default(), None)
     }
 
     const CHANGED: FogSettings = FogSettings {
@@ -392,18 +442,34 @@ mod tests {
 
         let [r, g, b] = CHANGED.sky;
         assert_eq!(app.world().resource::<ClearColor>().0, Color::srgb(r, g, b));
-        let streaming = StreamingSettings::default();
-        let want = distance_fog(
-            &CHANGED,
-            streaming.view_distance_m,
-            streaming.lod_distance_m,
-        );
+        let want = streamed_fog(&CHANGED, &StreamingSettings::default(), None);
         for camera in cameras {
             let fog = app.world().get::<DistanceFog>(camera).expect("fog");
             assert_eq!(fog.color, want.color);
             assert_eq!(density_of(fog), density_of(&want));
             assert_ne!(density_of(fog), density_of(&default_camera_fog()));
         }
+    }
+
+    #[test]
+    fn a_curve_change_refogs_every_camera_to_its_reach_and_leaves_the_sky() {
+        let mut app = running_app();
+        let magenta = Color::srgb(1.0, 0.0, 1.0);
+        app.insert_resource(ClearColor(magenta));
+        let camera = app.world_mut().spawn(default_camera_fog()).id();
+        app.update();
+
+        app.world_mut()
+            .resource_mut::<StreamingSettings>()
+            .lod_distance_m = 3000.0;
+        app.update();
+
+        let streaming = *app.world().resource::<StreamingSettings>();
+        let want = streamed_fog(&FogSettings::default(), &streaming, None);
+        let fog = app.world().get::<DistanceFog>(camera).expect("fog");
+        assert_eq!(density_of(fog), density_of(&want));
+        assert_ne!(density_of(fog), density_of(&default_camera_fog()));
+        assert_eq!(app.world().resource::<ClearColor>().0, magenta);
     }
 
     #[test]

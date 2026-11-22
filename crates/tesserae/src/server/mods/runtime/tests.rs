@@ -1005,6 +1005,7 @@ fn measure_drain(label: &str, loaded: LoadedMods, size: f32, batches: Vec<Comman
         vertical_distance_m: 32.0,
         hysteresis_m: 32.0,
         lod_distance_m: 48.0,
+        lod_unit_m: 0.0,
     };
     let world = WorldSettings {
         voxel_size: size,
@@ -1161,6 +1162,7 @@ fn tables_of(h: &Harness) -> std::sync::Arc<Tables> {
 pub(in crate::server) fn terra_loaded(size: f32) -> LoadedMods {
     static NEXT: AtomicU64 = AtomicU64::new(0);
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    std::fs::create_dir_all(root.join("target/phase7-runs")).unwrap();
     let dir = loop {
         let dir = root.join(format!(
             "target/phase7-runs/t09-trust-{}-{}",
@@ -1287,7 +1289,8 @@ fn terra_contract_content_loads_and_terra_builds_nothing_at_spawn() {
         assert!(params.caves.is_some());
         assert_eq!(params.water.unwrap().level_m, 34.0);
         assert_eq!(loaded.view.unwrap().view_distance_m, 160.0);
-        assert_eq!(loaded.view.unwrap().lod_distance_m, 3000.0);
+        assert_eq!(loaded.view.unwrap().lod_distance_m, 8192.0);
+        assert_eq!(loaded.view.unwrap().low_lod_distance_m, Some(3000.0));
         let own: Vec<_> = loaded
             .appearance
             .iter()

@@ -228,6 +228,7 @@ pub(crate) fn declaration(d: old::Declaration, log: &LogHandle) -> content::Decl
         view: d.view.map(|v| content::ViewParams {
             view_distance_m: v.view_distance_m,
             lod_distance_m: v.lod_distance_m,
+            low_lod_distance_m: None,
         }),
         fluids: d.fluids.into_iter().map(fluid).collect(),
         reactions: d.reactions.into_iter().map(reaction).collect(),

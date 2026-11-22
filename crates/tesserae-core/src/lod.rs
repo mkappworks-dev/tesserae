@@ -11,7 +11,9 @@ use crate::material::{MaterialTable, RenderClass};
 use crate::mesh::{
     FACE_STEPS, NEG_X, NEG_Y, NEG_Z, POS_X, POS_Y, SEAM_EVERY, SEAM_LAYERS, SeamOpenings,
 };
-use crate::worldgen::Worldgen;
+use crate::worldgen::{
+    Canopy, ColumnTop, StructurePart, TreePart, Worldgen, level_index, top_index,
+};
 
 const OCTANT: usize = CHUNK_SIZE / 2;
 
@@ -301,6 +303,277 @@ pub fn seam_openings(
         }
     }
     out
+}
+
+/// Makes each column of the coarse Chunk in Chunk row `cy` show what level 0 shows at the
+/// column's centre, as `answers` gives it, indexed `z * CHUNK_SIZE + x`: water or land, and the top
+/// Material, with the surface at its height in the coarse Voxel whose middle it passes, as the vote
+/// rounds, and a dry top raised to at least the water's level so rounding cannot sink land under
+/// the drawn sea. `None` keeps a column as it is.
+///
+/// Every Voxel it sets is decided by metres, so the Chunks of one column agree without reading
+/// each other. Only the gap under a moved top is filled from the Chunk's own Voxels, and only in
+/// the Chunk holding that top: below it, a gap is buried.
+pub fn agree_with_level_zero(
+    chunk: &mut Chunk,
+    cy: i32,
+    voxel_m: f32,
+    water: MaterialId,
+    answers: &[Option<ColumnTop>],
+) {
+    let size = CHUNK_SIZE as i32;
+    let floor = cy * size;
+    let ceiling = floor + size - 1;
+    for z in 0..CHUNK_SIZE {
+        for x in 0..CHUNK_SIZE {
+            let Some(a) = answers[z * CHUNK_SIZE + x] else {
+                continue;
+            };
+            let (top, wet_to) = agreed_top(&a, voxel_m);
+            if top > ceiling {
+                continue;
+            }
+            let mut filling = false;
+            for y in (0..CHUNK_SIZE).rev() {
+                let g = floor + y as i32;
+                let want = if g > wet_to {
+                    Voxel::AIR
+                } else if g > top {
+                    Voxel::cube(water)
+                } else if g == top {
+                    filling = true;
+                    Voxel::cube(a.top)
+                } else if filling {
+                    let v = chunk.get(x, y, z);
+                    if !(v.is_air() || v.material() == water) {
+                        break;
+                    }
+                    Voxel::cube(a.under)
+                } else {
+                    break;
+                };
+                if chunk.get(x, y, z) != want {
+                    chunk.set(x, y, z, want);
+                }
+            }
+        }
+    }
+}
+
+/// The global coarse rows of the top Voxel [`agree_with_level_zero`] gives a column, and of the
+/// highest its water fills.
+fn agreed_top(a: &ColumnTop, voxel_m: f32) -> (i32, i32) {
+    let ground = top_index(a.surface_m - voxel_m / 2.0, 0.0, voxel_m);
+    let water_top = a.level_m.map(|l| level_index(l, voxel_m));
+    let top = match water_top {
+        Some(w) if a.wet => ground.min(w - 1),
+        Some(w) => ground.max(w),
+        None => ground,
+    };
+    (top, water_top.filter(|_| a.wet).unwrap_or(top))
+}
+
+/// The share of its ground a column's trees cover from which its Canopy cover stands a coarse Voxel
+/// over a sparser column's.
+const DENSE_COVER: f32 = 0.75;
+
+/// The most coarse Voxels Canopy cover stands over its column's top. Two, so a dense column steps once over a sparser one's single raised Voxel: more stands the
+/// cover in pillars as tall as the trees, cliffs at every forest's edge.
+const CANOPY_RISE: i32 = 2;
+
+/// The columns of `answers`, as [`agree_with_level_zero`] takes them, whose Canopy cover could
+/// fall in Chunk row `cy`: dry, with their top or a Voxel up to `CANOPY_RISE` over it in the row.
+pub fn canopy_candidates(cy: i32, voxel_m: f32, answers: &[Option<ColumnTop>]) -> Vec<usize> {
+    let size = CHUNK_SIZE as i32;
+    let rows = cy * size..(cy + 1) * size;
+    (0..answers.len())
+        .filter(|&i| {
+            answers[i].is_some_and(|a| {
+                let top = agreed_top(&a, voxel_m).0;
+                !a.wet && rows.start <= top + CANOPY_RISE && top < rows.end
+            })
+        })
+        .collect()
+}
+
+/// How many coarse Voxels of `voxel_m` a column's Canopy cover stands over its top, 0 for the top
+/// itself, and the leaves it shows. A dense column fills the Voxels its trees reach at least half
+/// of, up to `CANOPY_RISE`; a sparser one stands a Voxel lower in its own shade, so a forest's
+/// top is a mass of crowns, not a sheet (ADR-0035).
+pub fn canopy_stand(canopy: &Canopy, voxel_m: f32) -> (i32, MaterialId) {
+    let reached = ((canopy.top_m / voxel_m).round() as i32).min(CANOPY_RISE);
+    if canopy.cover >= DENSE_COVER {
+        (reached, canopy.material)
+    } else {
+        ((reached - 1).max(0), canopy.sparse)
+    }
+}
+
+/// Stands Canopy cover over the agreed ground of each `(column, canopy)`, as [`canopy_stand`]
+/// raises and shades it: the column's top Voxel becomes the leaves, or the Voxels over it fill
+/// with them.
+pub fn stand_canopy_cover(
+    chunk: &mut Chunk,
+    cy: i32,
+    voxel_m: f32,
+    answers: &[Option<ColumnTop>],
+    canopies: &[(usize, Canopy)],
+) {
+    let size = CHUNK_SIZE as i32;
+    for &(i, canopy) in canopies {
+        let Some(a) = answers[i].filter(|a| !a.wet) else {
+            continue;
+        };
+        let top = agreed_top(&a, voxel_m).0 - cy * size;
+        let (rise, material) = canopy_stand(&canopy, voxel_m);
+        let (x, z) = (i % CHUNK_SIZE, i / CHUNK_SIZE);
+        for y in (top + rise.min(1)..=top + rise).filter(|y| (0..size).contains(y)) {
+            chunk.set(x, y as usize, z, Voxel::cube(material));
+        }
+    }
+}
+
+/// The Materials a tree is grown of, for [`coarsen_tree_parts`] to tell from ground.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct TreeMaterials {
+    pub trunks: Vec<MaterialId>,
+    pub canopies: Vec<MaterialId>,
+}
+
+fn octant_of(x: usize, y: usize, z: usize) -> usize {
+    (x / OCTANT) | ((y / OCTANT) << 1) | ((z / OCTANT) << 2)
+}
+
+/// Stands a tree's Impostor: each of `parts`, a level-0 cell, makes the coarse Voxel of Chunk
+/// `coord` holding it, `span` level-0 cells a side, its Material whatever the vote left there,
+/// canopy over trunk, so a lone trunk the vote loses still stands.
+pub fn stand_tree_parts(chunk: &mut Chunk, coord: [i32; 3], span: i32, parts: &[TreePart]) {
+    for canopy in [false, true] {
+        let layer = parts.iter().filter(|p| p.canopy == canopy);
+        stand_parts(
+            chunk,
+            coord,
+            span,
+            layer.map(|p| (p.at, p.material)),
+            [false; 8],
+        );
+    }
+}
+
+/// Each level-0 cell `at` makes the coarse Voxel of Chunk `coord` holding it its Material, the
+/// last in a Voxel winning, but in octants `changed` marks.
+fn stand_parts(
+    chunk: &mut Chunk,
+    coord: [i32; 3],
+    span: i32,
+    parts: impl Iterator<Item = ([i32; 3], MaterialId)>,
+    changed: [bool; 8],
+) {
+    let size = CHUNK_SIZE as i32;
+    let origin = coord.map(|c| c * size * span);
+    for (at, material) in parts {
+        let local = std::array::from_fn::<i32, 3, _>(|a| (at[a] - origin[a]).div_euclid(span));
+        if local.iter().any(|v| !(0..size).contains(v)) {
+            continue;
+        }
+        let [x, y, z] = local.map(|v| v as usize);
+        if !changed[octant_of(x, y, z)] {
+            chunk.set(x, y, z, Voxel::cube(material));
+        }
+    }
+}
+
+/// Over each octant `changed` marks, a coarse Voxel any of whose eight finer Voxels in `children`
+/// is a canopy takes that canopy, else a trunk that trunk: the rule [`stand_tree_parts`] draws by,
+/// applied to Voxels a Player or the World changed, so a felled tree stays felled.
+pub fn coarsen_tree_parts(
+    chunk: &mut Chunk,
+    children: [&Chunk; 8],
+    changed: [bool; 8],
+    trees: &TreeMaterials,
+) {
+    for (octant, child) in children.into_iter().enumerate() {
+        if !changed[octant] || child.uniform().is_some_and(|v| v.is_air()) {
+            continue;
+        }
+        let base = [octant & 1, octant >> 1 & 1, octant >> 2 & 1].map(|b| b * OCTANT);
+        for z in 0..OCTANT {
+            for y in 0..OCTANT {
+                for x in 0..OCTANT {
+                    let mut trunk = None;
+                    let mut canopy = None;
+                    for i in 0..8 {
+                        let m = child
+                            .get(2 * x + (i & 1), 2 * y + (i >> 1 & 1), 2 * z + (i >> 2))
+                            .material();
+                        if trees.canopies.contains(&m) {
+                            canopy = Some(m);
+                            break;
+                        }
+                        if trunk.is_none() && trees.trunks.contains(&m) {
+                            trunk = Some(m);
+                        }
+                    }
+                    if let Some(m) = canopy.or(trunk) {
+                        chunk.set(base[0] + x, base[1] + y, base[2] + z, Voxel::cube(m));
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Stands a Structure's Impostor: each of `parts`, a level-0 cell, makes the coarse Voxel of Chunk
+/// `coord` holding it, `span` level-0 cells a side, its Material whatever the vote and any tree
+/// left there; the last part in a coarse Voxel wins. Octants `changed` marks keep what they hold.
+pub fn stand_structure_parts(
+    chunk: &mut Chunk,
+    coord: [i32; 3],
+    span: i32,
+    parts: &[StructurePart],
+    changed: [bool; 8],
+) {
+    let parts = parts.iter().map(|p| (p.at, p.material));
+    stand_parts(chunk, coord, span, parts, changed);
+}
+
+/// Over each octant `changed` marks, a coarse Voxel any of whose eight finer Voxels in `children`
+/// is of a Material in `built`, sorted, takes the last such: the rule [`stand_structure_parts`]
+/// draws by, applied to Voxels a Player or the World changed, so a removed Structure stays gone
+/// and a placed one stands.
+pub fn coarsen_structure_parts(
+    chunk: &mut Chunk,
+    children: [&Chunk; 8],
+    changed: [bool; 8],
+    built: &[MaterialId],
+) {
+    if built.is_empty() {
+        return;
+    }
+    for (octant, child) in children.into_iter().enumerate() {
+        let unbuilt = |v: Voxel| built.binary_search(&v.material()).is_err();
+        if !changed[octant] || child.uniform().is_some_and(unbuilt) {
+            continue;
+        }
+        let base = [octant & 1, octant >> 1 & 1, octant >> 2 & 1].map(|b| b * OCTANT);
+        for z in 0..OCTANT {
+            for y in 0..OCTANT {
+                for x in 0..OCTANT {
+                    let found = (0..8)
+                        .rev()
+                        .map(|i| {
+                            child
+                                .get(2 * x + (i & 1), 2 * y + (i >> 1 & 1), 2 * z + (i >> 2))
+                                .material()
+                        })
+                        .find(|m| built.binary_search(m).is_ok());
+                    if let Some(m) = found {
+                        chunk.set(base[0] + x, base[1] + y, base[2] + z, Voxel::cube(m));
+                    }
+                }
+            }
+        }
+    }
 }
 
 /// Level 1 from eight level-0 Chunks, the changed ones read through
@@ -786,6 +1059,265 @@ mod tests {
 
     const SEED: u64 = 0x7e55_e2ae_0000_0001;
     const COLUMNS: usize = 60;
+
+    const TRUNK: MaterialId = 210;
+    const CANOPY: MaterialId = 211;
+
+    fn part(at: [i32; 3], canopy: bool) -> TreePart {
+        TreePart {
+            at,
+            material: if canopy { CANOPY } else { TRUNK },
+            canopy,
+        }
+    }
+
+    #[test]
+    fn a_tree_part_beats_air_and_ground_and_a_canopy_beats_a_trunk() {
+        let rock = Voxel::cube(fixtures().ground.rock);
+        let mut chunk = Chunk::air();
+        chunk.set(0, 0, 0, rock);
+        // Level 1 at coarse Chunk (1, 0, 0): level-0 cells 64..128 along x.
+        let parts = [
+            part([64, 0, 0], false),
+            part([65, 1, 1], false),
+            part([66, 0, 0], false),
+            part([67, 1, 0], true),
+            part([64 + 40, 0, 0], true),
+            part([1000, 0, 0], true),
+        ];
+        stand_tree_parts(&mut chunk, [1, 0, 0], 2, &parts);
+        assert_eq!(chunk.get(0, 0, 0), Voxel::cube(TRUNK), "trunk over ground");
+        assert_eq!(chunk.get(1, 0, 0), Voxel::cube(CANOPY), "canopy over trunk");
+        assert_eq!(chunk.get(20, 0, 0), Voxel::cube(CANOPY), "a lone canopy");
+        let solid = (0..CHUNK_SIZE.pow(3))
+            .filter(|&i| {
+                let (x, y, z) = (
+                    i % CHUNK_SIZE,
+                    i / CHUNK_SIZE % CHUNK_SIZE,
+                    i / CHUNK_SIZE.pow(2),
+                );
+                !chunk.get(x, y, z).is_air()
+            })
+            .count();
+        assert_eq!(solid, 3, "a part outside the Chunk stands nothing");
+    }
+
+    #[test]
+    fn canopy_cover_takes_the_agreed_top_or_the_voxel_over_it_and_never_water() {
+        let rock = fixtures().ground.rock;
+        let dry = |surface_m: f32| {
+            Some(ColumnTop {
+                surface_m,
+                level_m: None,
+                wet: false,
+                top: rock,
+                under: rock,
+            })
+        };
+        let mut answers = vec![None; CHUNK_SIZE * CHUNK_SIZE];
+        // 8 m Voxels in Chunk row 0: tops at rows 3, 3, 31 and a sea's floor.
+        answers[0] = dry(30.0);
+        answers[1] = dry(30.0);
+        answers[2] = dry(258.0);
+        answers[3] = Some(ColumnTop {
+            surface_m: 10.0,
+            level_m: Some(24.0),
+            wet: true,
+            top: rock,
+            under: rock,
+        });
+        answers[4] = dry(600.0);
+        assert_eq!(canopy_candidates(0, 8.0, &answers), [0, 1, 2]);
+        assert_eq!(canopy_candidates(1, 8.0, &answers), [2]);
+        let canopy = |top_m: f32| Canopy {
+            material: CANOPY,
+            sparse: CANOPY,
+            top_m,
+            cover: 1.0,
+        };
+        let mut chunk = Chunk::air();
+        agree_with_level_zero(&mut chunk, 0, 8.0, 0, &answers);
+        let canopies = [
+            (0, canopy(4.0)),
+            (1, canopy(3.0)),
+            (2, canopy(9.0)),
+            (3, canopy(9.0)),
+        ];
+        stand_canopy_cover(&mut chunk, 0, 8.0, &answers, &canopies);
+        assert_eq!(
+            chunk.get(0, 4, 0),
+            Voxel::cube(CANOPY),
+            "raised over the top"
+        );
+        assert_eq!(chunk.get(0, 3, 0), Voxel::cube(rock));
+        assert_eq!(chunk.get(1, 3, 0), Voxel::cube(CANOPY), "the top itself");
+        assert_eq!(chunk.get(1, 4, 0), Voxel::AIR);
+        assert_eq!(
+            chunk.get(2, 31, 0),
+            Voxel::cube(rock),
+            "raised into the row above"
+        );
+        assert!(
+            (0..CHUNK_SIZE).all(|y| chunk.get(3, y, 0).material() != CANOPY),
+            "under water"
+        );
+    }
+
+    #[test]
+    fn a_denser_canopy_stands_a_coarse_voxel_over_a_sparser_one_and_takes_its_own_shade() {
+        const OTHER: MaterialId = 215;
+        let canopy = |cover: f32, top_m: f32| Canopy {
+            material: CANOPY,
+            sparse: OTHER,
+            top_m,
+            cover,
+        };
+        let (dense, sparse) = (canopy(0.9, 20.0), canopy(0.6, 20.0));
+        // 20 m trees fill two 4 m Voxels at most; a 12 m tree over half a 16 m one, under half a
+        // 32 m one, where only the shade tells the two apart.
+        assert_eq!(canopy_stand(&dense, 4.0), (2, CANOPY));
+        assert_eq!(canopy_stand(&sparse, 4.0), (1, OTHER));
+        assert_eq!(canopy_stand(&canopy(0.9, 12.0), 16.0), (1, CANOPY));
+        assert_eq!(canopy_stand(&canopy(0.6, 12.0), 16.0), (0, OTHER));
+        assert_eq!(canopy_stand(&canopy(0.9, 12.0), 32.0), (0, CANOPY));
+        assert_eq!(canopy_stand(&canopy(0.6, 12.0), 32.0), (0, OTHER));
+
+        let rock = fixtures().ground.rock;
+        let dry = |surface_m: f32| {
+            Some(ColumnTop {
+                surface_m,
+                level_m: None,
+                wet: false,
+                top: rock,
+                under: rock,
+            })
+        };
+        let mut answers = vec![None; CHUNK_SIZE * CHUNK_SIZE];
+        // 4 m Voxels: tops at rows 3, 3 and 30.
+        answers[0] = dry(14.0);
+        answers[1] = dry(14.0);
+        answers[2] = dry(122.0);
+        assert_eq!(canopy_candidates(1, 4.0, &answers), [2], "two Voxels up");
+        let canopies = [(0, dense), (1, sparse), (2, dense)];
+        let mut low = Chunk::air();
+        let mut high = Chunk::air();
+        agree_with_level_zero(&mut low, 0, 4.0, 0, &answers);
+        stand_canopy_cover(&mut low, 0, 4.0, &answers, &canopies);
+        stand_canopy_cover(&mut high, 1, 4.0, &answers, &canopies);
+        let column = |x: usize, rows: std::ops::Range<usize>| -> Vec<Voxel> {
+            rows.map(|y| low.get(x, y, 0)).collect()
+        };
+        let leaves = Voxel::cube;
+        assert_eq!(
+            column(0, 3..7),
+            [
+                Voxel::cube(rock),
+                leaves(CANOPY),
+                leaves(CANOPY),
+                Voxel::AIR
+            ],
+            "a dense column fills both Voxels over its ground"
+        );
+        assert_eq!(
+            column(1, 3..6),
+            [Voxel::cube(rock), leaves(OTHER), Voxel::AIR],
+            "a sparse one stands a Voxel lower, in its own shade"
+        );
+        assert_eq!(low.get(2, 31, 0), leaves(CANOPY));
+        assert_eq!(high.get(2, 0, 0), leaves(CANOPY), "the second Voxel up");
+        assert_eq!(high.get(2, 1, 0), Voxel::AIR);
+    }
+
+    #[test]
+    fn a_changed_octant_keeps_any_finer_tree_voxel_with_a_canopy_over_a_trunk() {
+        let rock = Voxel::cube(fixtures().ground.rock);
+        let mut children: [Chunk; 8] = std::array::from_fn(|_| Chunk::air());
+        children[0].set(0, 0, 0, Voxel::cube(TRUNK));
+        children[0].set(2, 0, 0, Voxel::cube(TRUNK));
+        children[0].set(3, 1, 1, Voxel::cube(CANOPY));
+        children[0].set(4, 0, 0, rock);
+        children[0].set(5, 0, 0, Voxel::cube(CANOPY));
+        children[1].set(0, 0, 0, Voxel::cube(CANOPY));
+        let mut chunk = Chunk::air();
+        chunk.set(2, 0, 0, rock);
+        let trees = TreeMaterials {
+            trunks: vec![TRUNK],
+            canopies: vec![CANOPY],
+        };
+        let mut changed = [false; 8];
+        changed[0] = true;
+        coarsen_tree_parts(&mut chunk, children.each_ref(), changed, &trees);
+        assert_eq!(chunk.get(0, 0, 0), Voxel::cube(TRUNK), "a lone trunk Voxel");
+        assert_eq!(chunk.get(1, 0, 0), Voxel::cube(CANOPY));
+        assert_eq!(chunk.get(2, 0, 0), Voxel::cube(CANOPY), "over ground");
+        assert_eq!(
+            chunk.get(16, 0, 0),
+            Voxel::AIR,
+            "an unchanged octant is drawn"
+        );
+    }
+
+    const BRICK: MaterialId = 212;
+    const ROOF: MaterialId = 213;
+
+    #[test]
+    fn a_structure_part_beats_air_ground_and_a_tree_and_the_last_in_a_voxel_wins() {
+        let rock = Voxel::cube(fixtures().ground.rock);
+        let mut chunk = Chunk::air();
+        chunk.set(0, 0, 0, rock);
+        chunk.set(2, 0, 0, Voxel::cube(CANOPY));
+        let part = |at, material| StructurePart { at, material };
+        // Level 2 at coarse Chunk (0, 1, 0): level-0 cells 128..256 along y.
+        let parts = [
+            part([0, 128, 0], BRICK),
+            part([3, 131, 3], ROOF),
+            part([8, 128, 0], BRICK),
+            part([4 * 20, 128, 0], BRICK),
+            part([0, 127, 0], ROOF),
+        ];
+        let mut changed = [false; 8];
+        changed[1] = true;
+        stand_structure_parts(&mut chunk, [0, 1, 0], 4, &parts, changed);
+        assert_eq!(
+            chunk.get(0, 0, 0),
+            Voxel::cube(ROOF),
+            "the last over ground"
+        );
+        assert_eq!(chunk.get(2, 0, 0), Voxel::cube(BRICK), "over a tree");
+        assert_eq!(chunk.get(20, 0, 0), Voxel::AIR, "a changed octant is left");
+        assert_eq!(
+            chunk.get(0, 31, 0),
+            Voxel::AIR,
+            "a part below stands nothing"
+        );
+    }
+
+    #[test]
+    fn a_changed_octant_keeps_any_finer_built_voxel_and_leaves_ground_to_the_vote() {
+        let rock = Voxel::cube(fixtures().ground.rock);
+        let mut children: [Chunk; 8] = std::array::from_fn(|_| Chunk::air());
+        children[0].set(0, 0, 0, Voxel::cube(BRICK));
+        children[0].set(3, 1, 1, Voxel::cube(ROOF));
+        children[0].set(2, 0, 0, Voxel::cube(BRICK));
+        children[0].set(4, 0, 0, rock);
+        children[1].set(0, 0, 0, Voxel::cube(BRICK));
+        children[2] = Chunk::filled(Voxel::cube(ROOF));
+        let mut chunk = Chunk::air();
+        let mut changed = [false; 8];
+        changed[0] = true;
+        changed[2] = true;
+        let built = [BRICK, ROOF];
+        coarsen_structure_parts(&mut chunk, children.each_ref(), changed, &built);
+        assert_eq!(chunk.get(0, 0, 0), Voxel::cube(BRICK), "a lone Voxel");
+        assert_eq!(chunk.get(1, 0, 0), Voxel::cube(ROOF));
+        assert_eq!(chunk.get(2, 0, 0), Voxel::AIR, "ground is the vote's");
+        assert_eq!(chunk.get(16, 0, 0), Voxel::AIR, "an unchanged octant");
+        assert_eq!(
+            chunk.get(0, 16, 0),
+            Voxel::cube(ROOF),
+            "a uniform built child"
+        );
+    }
 
     /// Eight children of rock below finer y 20, with a two-Voxel pit at finer
     /// (32, 18..20, 9): against the coarse plane x = 16, in coarse Voxel

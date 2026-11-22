@@ -2006,3 +2006,70 @@ fn a_second_outskirt_group_lays_its_own_and_leaves_the_first_groups_plots() {
     assert!(marked(&one, LONE).is_empty());
     assert!(!marked(&two, LONE).is_empty(), "the second group stands");
 }
+
+/// What a coarse level stands a Settlement from: every solid Voxel its Plots' Structures stand in
+/// a box, and its path Material on the top of each road and trail column, none on a worn one.
+#[test]
+fn the_structure_parts_and_paths_drawn_over_a_settlement_are_what_level_zero_stands_there() {
+    let half_m = 96.0;
+    let params = plain(listing(true));
+    let with = generator(1.0, params, village());
+    let bare = generator(1.0, plain(listing(false)), village());
+    let changed = changed(&with, &bare, half_m, false);
+    let reach = (half_m / SIZE_I as f32).ceil() as i32;
+    let centre = (AWAY_M / SIZE_I as f32).round() as i32;
+    let (low, high) = with.surface_bounds_m();
+    let min = [
+        centre - reach,
+        (low / SIZE_I as f32).floor() as i32 - 1,
+        centre - reach,
+    ]
+    .map(|c| c * SIZE_I);
+    let max = [
+        centre + reach,
+        (high / SIZE_I as f32).ceil() as i32 + 2,
+        centre + reach,
+    ]
+    .map(|c| c * SIZE_I);
+    let built = [WELL, HOUSE, SHED, FLOOR, WALL, DOOR];
+    let drawn: HashMap<[i32; 3], MaterialId> = with
+        .structure_parts(min, max, true)
+        .into_iter()
+        .map(|p| (p.at, p.material))
+        .collect();
+    let mut count = 0;
+    for (at, (w, _)) in &changed {
+        if built.contains(&w.material()) {
+            assert_eq!(drawn.get(at), Some(&w.material()), "missing at {at:?}");
+            count += 1;
+        }
+    }
+    assert!(count > 300, "{count} Plot cells");
+    assert_eq!(
+        drawn.len(),
+        count,
+        "a part stands where level 0 stands none"
+    );
+
+    let paved: HashSet<[i32; 2]> = changed
+        .iter()
+        .filter(|(_, (w, _))| w.material() == PATH)
+        .map(|(at, _)| [at[0], at[2]])
+        .collect();
+    let columns: Vec<[i32; 2]> = (min[2]..max[2])
+        .flat_map(|z| (min[0]..max[0]).map(move |x| [x, z]))
+        .collect();
+    let paths: HashSet<[i32; 2]> = columns
+        .iter()
+        .zip(with.paths(&columns))
+        .filter_map(|(&c, p)| {
+            p.map(|m| {
+                assert_eq!(m, PATH);
+                c
+            })
+        })
+        .collect();
+    assert!(paved.len() > 200, "{} path columns", paved.len());
+    assert_eq!(paths, paved);
+    assert!(bare.paths(&columns).iter().all(Option::is_none));
+}

@@ -56,6 +56,7 @@ mod pose;
 pub(crate) mod presentation;
 mod preview;
 pub(crate) mod profile;
+mod quality;
 mod removal;
 pub(crate) mod render_scale;
 mod save;
@@ -95,6 +96,7 @@ pub fn plugin(app: &mut App) {
     app.add_plugins((holes::plugin, lag::plugin, sight::plugin));
     app.add_plugins((
         save::plugin,
+        quality::plugin,
         profile::plugin,
         presentation::plugin,
         anti_alias::plugin,

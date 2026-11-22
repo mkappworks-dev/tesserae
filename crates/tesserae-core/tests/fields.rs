@@ -808,3 +808,55 @@ fn a_biome_with_sixteen_features_and_two_fields_stays_inline_in_three_kib() {
     let size = std::mem::size_of::<Biome>();
     assert!(size < 3072, "{size} bytes");
 }
+
+#[test]
+fn no_canopy_cover_stands_on_a_field() {
+    let tree = SurfaceFeature {
+        plant: Some(tesserae_core::SurfacePlant {
+            shape: 0,
+            kind: tesserae_core::SurfacePlantKind::Tree(tesserae_core::SurfaceTree {
+                branching: None,
+                crowding_m: Some(1.0),
+                trunk: TRUNK,
+                canopy: TRUNK + 1,
+                trunk_height_m: (3.0, 4.0),
+                canopy_radius_m: 2.5,
+                vines: None,
+                fruit: None,
+            }),
+        }),
+        // Groves dense enough to cover the ground, with clearings a field can take.
+        clump: Some(tesserae_core::Clump {
+            scale_m: 24.0,
+            strength: 1.0,
+        }),
+        ..SurfaceFeature::cube(TRUNK, 3.0)
+    };
+    let params = level(fielded(None, &[tree]), None);
+    let size = 1.0;
+    let found = changed(SEED, size, params, 150.0);
+    let fields = fields_in(&found, window(size, 150.0));
+    assert!(!fields.is_empty(), "no field stood");
+    let g = Worldgen::new(SEED, size, params);
+    let shapes = g.canopy_shapes();
+    let wild = Worldgen::new(
+        SEED,
+        size,
+        level(SurfaceFeatures::new(&[tree]).unwrap(), None),
+    );
+    let wild_shapes = wild.canopy_shapes();
+    let mut would = 0;
+    for field in &fields {
+        let columns: Vec<[i32; 2]> = (field.min[0]..field.max[0])
+            .flat_map(|x| (field.min[1]..field.max[1]).map(move |z| [x, z]))
+            .collect();
+        let drawn = g.canopy_cover(&shapes, &columns);
+        assert!(drawn.iter().all(Option::is_none), "Canopy cover on a field");
+        would += wild
+            .canopy_cover(&wild_shapes, &columns)
+            .iter()
+            .filter(|c| c.is_some())
+            .count();
+    }
+    assert!(would > 0, "the forest would not have covered any field");
+}

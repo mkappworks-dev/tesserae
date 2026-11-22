@@ -556,3 +556,96 @@
 .game.strong-contrast .editor {
   background: #191c20;
 }
+.game .distance-table {
+  width: 100%;
+  margin-top: 8px;
+  border-collapse: separate;
+  border-spacing: 0;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  overflow: hidden;
+  font-variant-numeric: tabular-nums;
+  font-size: calc(13px * var(--text-scale));
+}
+.game .distance-table th,
+.game .distance-table td {
+  padding: 9px 12px;
+  text-align: right;
+  vertical-align: middle;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  white-space: nowrap;
+}
+.game .distance-table th {
+  font-size: calc(11px * var(--text-scale));
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.04);
+}
+.game .distance-table th:first-child,
+.game .distance-table td:first-child,
+.game .distance-table th:nth-child(3),
+.game .distance-table td:nth-child(3) {
+  text-align: left;
+}
+.game .distance-table tbody tr:hover td {
+  background: rgba(255, 255, 255, 0.03);
+}
+.game .distance-table tr.is-full td {
+  background: rgba(193, 205, 181, 0.07);
+}
+.game .distance-table .level-chip {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  font-weight: 600;
+  color: var(--leaf-ink);
+  background: color-mix(
+    in srgb,
+    var(--leaf) calc(var(--shade) * 100%),
+    #5d6a72
+  );
+}
+.game .distance-table .ring-cell {
+  width: 45%;
+}
+.game .distance-table .ring-label {
+  display: block;
+  margin-bottom: 5px;
+}
+.game .distance-table .ring-track {
+  position: relative;
+  display: block;
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.07);
+}
+.game .distance-table .ring-span {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  min-width: 3px;
+  border-radius: 3px;
+  background: color-mix(
+    in srgb,
+    var(--leaf) calc(var(--shade) * 100%),
+    #5d6a72
+  );
+}
+.game .distance-table .pill {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: calc(12px * var(--text-scale));
+}
+.game .distance-table tfoot td {
+  border-bottom: 0;
+  font-weight: 600;
+  background: rgba(255, 255, 255, 0.04);
+}
+.game .distance-note {
+  margin-top: 8px;
+  font-size: calc(13px * var(--text-scale));
+}
