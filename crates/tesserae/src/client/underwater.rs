@@ -20,6 +20,7 @@ use super::preview::HandCamera;
 use super::tile_preview::AtlasCamera;
 use crate::content::MaterialPalette;
 use crate::render::fog::{self, FogSettings};
+use crate::server::quality::DeclaredStreaming;
 use crate::server::streaming::StreamingSettings;
 
 /// How far above the surface the camera must rise to leave the water, so chop
@@ -91,6 +92,7 @@ struct Submersion {
 struct Dry<'w> {
     settings: Res<'w, FogSettings>,
     streaming: Res<'w, StreamingSettings>,
+    declared: Option<Res<'w, DeclaredStreaming>>,
 }
 
 fn track_hues(mut palette: MessageReader<MaterialPalette>, mut state: ResMut<Submersion>) {
@@ -140,8 +142,8 @@ fn apply_submersion(
             fog::camera_fog(
                 fog::enabled(),
                 &dry.settings,
-                dry.streaming.view_distance_m,
-                dry.streaming.lod_distance_m,
+                &dry.streaming,
+                dry.declared.as_deref(),
             )
         }
     };
@@ -243,12 +245,7 @@ mod tests {
     }
 
     fn dry_fog() -> DistanceFog {
-        let streaming = StreamingSettings::default();
-        fog::distance_fog(
-            &FogSettings::default(),
-            streaming.view_distance_m,
-            streaming.lod_distance_m,
-        )
+        fog::streamed_fog(&FogSettings::default(), &StreamingSettings::default(), None)
     }
 
     fn density(fog: &DistanceFog) -> f32 {
@@ -366,10 +363,10 @@ mod tests {
         rig.app.update();
         assert!(near(rig.fog(rig.main).unwrap().color, water_fog_colour()));
         rig.place(12.0, surface(WATER, 2));
-        let want = fog::distance_fog(
+        let want = fog::streamed_fog(
             rig.app.world().resource::<FogSettings>(),
-            StreamingSettings::default().view_distance_m,
-            StreamingSettings::default().lod_distance_m,
+            &StreamingSettings::default(),
+            None,
         );
         assert_eq!(density(rig.fog(rig.main).unwrap()), density(&want));
     }
