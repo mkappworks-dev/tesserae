@@ -172,6 +172,10 @@ pub(in crate::server) const IMPOSTORS_TO: u32 = 1;
 /// metre of its ground: free over level 1's warm 1 m columns, some 3 s a km² cold above it.
 pub(in crate::server) const SPANS_TO: u32 = 1;
 
+/// Levels up to this one stand Structures and Plots and pave paths. At 16 and 32 m a building is
+/// under one Voxel, and the draws took a level-5 Chunk from 0.5 to 10 ms.
+pub(in crate::server) const STRUCTURES_TO: u32 = 3;
+
 /// The placement generator's column cache, in Cells: level 1's ring at the widest unit a Player
 /// may ask for, and its load margin. About 24 KB a Cell, held only where level 1 streams.
 fn level_one_cells(world: &WorldSettings) -> usize {
@@ -830,10 +834,11 @@ pub(in crate::server) fn make_coarse(
             makers.placement.map(|_| makers.trees),
         ),
     };
+    let structures = makers.structures.filter(|_| level <= STRUCTURES_TO);
     let agreed = agree(
         makers.level_zero,
         Some(makers.answers),
-        makers.structures,
+        structures,
         level,
         coord,
         &mut coarse.chunk,
@@ -853,7 +858,7 @@ pub(in crate::server) fn make_coarse(
             );
         }
     }
-    if let Some(placement) = makers.structures {
+    if let Some(placement) = structures {
         stand_structures(
             placement,
             makers.built,
@@ -984,7 +989,7 @@ pub(in crate::server) struct Makers<'a> {
     pub placement: Option<&'a Worldgen>,
     pub trees: &'a TreeMaterials,
     pub canopies: &'a CanopyShapes,
-    /// The placement generator, where Structures stand: every coarse level.
+    /// The placement generator, where Structures stand: levels up to [`STRUCTURES_TO`].
     pub structures: Option<&'a Worldgen>,
     pub built: &'a [MaterialId],
     pub answers: &'a Answers,
@@ -1177,10 +1182,11 @@ fn generate_persistent(
         seam_margin(level),
         Some(&generators.trees),
     );
+    let structures = (level <= STRUCTURES_TO).then_some(&*generators.placement);
     let agreed = agree(
         &generators.sources[0],
         None,
-        Some(&generators.placement),
+        structures,
         level,
         coord,
         &mut coarse.chunk,
@@ -1204,15 +1210,17 @@ fn generate_persistent(
             &agreed,
         );
     }
-    stand_structures(
-        &generators.placement,
-        &generators.built,
-        tables,
-        level,
-        coord,
-        &mut coarse.chunk,
-        &children,
-    );
+    if let Some(placement) = structures {
+        stand_structures(
+            placement,
+            &generators.built,
+            tables,
+            level,
+            coord,
+            &mut coarse.chunk,
+            &children,
+        );
+    }
     coarse
 }
 

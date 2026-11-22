@@ -35,9 +35,12 @@ draws stand there, written into the coarse grid so that any solid beats air,
 which the half-volume vote does not. Level 1 always runs the draw, so its trees
 never depend on what the Server held. From level 2 up a coarse column draws
 Canopy cover from the same Biome and density fields instead: level 2's tree
-draws measured about 7 times its Chunk's cost without them. Structures stay
-Impostors at every level; bridges stand at level 1 only, as their gap search
-costs seconds per square kilometre above it.
+draws measured about 7 times its Chunk's cost without them. Structures,
+Settlement Plots and paths stand at levels 1 to 3 only: at 16 and 32 m a
+building is under one Voxel, and their draws took a level-5 Chunk from 0.5 to 10
+ms, which delayed the whole field and level 0's own fill. Levels 4 and 5 keep
+the agreed ground. Bridges stand at level 1 only, as their gap search costs
+seconds per square kilometre above it.
 
 **Nothing new is stored.** Impostors and Canopy cover are pure functions of the
 seed, the parameters and metres, like every coarse Chunk. There is no LOD cache

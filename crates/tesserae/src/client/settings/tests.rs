@@ -1074,7 +1074,7 @@ fn the_distance_sliders_move_only_under_custom_which_remembers_its_own() {
         &mut app,
         Operation::Navigate(crate::client::menu_ui::Tab::Distance),
     );
-    assert_eq!(draft_distance(&app).preset, DistancePreset::Medium);
+    assert_eq!(draft_distance(&app).preset, DistancePreset::Low);
     move_slider(&mut app, Scalar::Detail(5), 11.0);
     assert_eq!(draft_distance(&app), default(), "locked under a preset");
 
@@ -1106,7 +1106,7 @@ fn a_distance_preset_waits_for_apply_and_discard_and_restore_defaults_undo_it() 
         &mut app,
         Operation::Navigate(crate::client::menu_ui::Tab::Distance),
     );
-    activate_operation(&mut app, Operation::Distance(DistancePreset::Low));
+    activate_operation(&mut app, Operation::Distance(DistancePreset::Medium));
     assert_eq!(
         app.world().resource::<Preferences>().distance,
         Distance::default()
@@ -1114,17 +1114,17 @@ fn a_distance_preset_waits_for_apply_and_discard_and_restore_defaults_undo_it() 
     activate_operation(&mut app, Operation::Apply);
     assert_eq!(
         app.world().resource::<Preferences>().distance.preset,
-        DistancePreset::Low
+        DistancePreset::Medium
     );
     let saved = std::fs::read_to_string(&app.world().resource::<Store>().path).unwrap();
-    assert!(saved.contains("\"low\""), "{saved}");
+    assert!(saved.contains("\"medium\""), "{saved}");
 
     activate_operation(&mut app, Operation::Distance(DistancePreset::High));
     activate_operation(&mut app, Operation::Back);
     activate_operation(&mut app, Operation::Discard);
     assert_eq!(
         app.world().resource::<Preferences>().distance.preset,
-        DistancePreset::Low
+        DistancePreset::Medium
     );
 
     activate_operation(
@@ -1192,7 +1192,7 @@ fn the_distance_page_locks_its_sliders_and_lists_this_world_s_levels() {
     assert!(
         texts(&mut low)
             .iter()
-            .any(|t| t.starts_with("The World's own rings, to 3 km")),
+            .any(|t| t.starts_with("The World's own rings, to 3 km") && t.contains("The default.")),
     );
 }
 
@@ -1215,7 +1215,7 @@ fn applying_a_preset_changes_the_rings_the_server_streams() {
         );
     app.update();
     let streamed = |app: &App| *app.world().resource::<StreamingSettings>();
-    assert_eq!(streamed(&app).lod_unit_m, 256.0, "Medium, the default");
+    assert_eq!(streamed(&app).lod_unit_m, 160.0, "Low, the default");
 
     activate_operation(
         &mut app,
@@ -1223,7 +1223,7 @@ fn applying_a_preset_changes_the_rings_the_server_streams() {
     );
     activate_operation(&mut app, Operation::Distance(DistancePreset::High));
     app.update();
-    assert_eq!(streamed(&app).lod_unit_m, 256.0, "not before Apply");
+    assert_eq!(streamed(&app).lod_unit_m, 160.0, "not before Apply");
 
     activate_operation(&mut app, Operation::Apply);
     app.update();
