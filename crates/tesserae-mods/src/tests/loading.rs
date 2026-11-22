@@ -1210,3 +1210,43 @@ fn a_project_read_by_path_checks_its_thumbnail() {
     let text = err_text(Found::read(&s.mods().join("project")));
     assert!(text.contains("`thumb.png` is 64 by 64 pixels"), "{text}");
 }
+
+#[test]
+fn a_data_mods_summary_is_counted_from_its_declaration() {
+    let timber = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../mods/timber");
+    let summary = Found::read(&timber).unwrap().summary().expect("a summary");
+    assert_eq!(
+        (summary.materials, summary.shapes, summary.fluids),
+        (2, 2, 0)
+    );
+    assert_eq!(summary.swatches, [[176, 132, 78, 255], [196, 170, 92, 255]]);
+}
+
+#[test]
+fn a_material_without_an_appearance_still_has_a_swatch() {
+    let s = Scratch::new("swatch");
+    let dir = s.mod_dir("bare");
+    fs::write(
+        dir.join("mod.toml"),
+        "id = \"bare\"\nversion = \"0.1.0\"\napi = \"0.3\"\ndeclaration = \"content.toml\"\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("content.toml"),
+        "[[materials]]\nname = \"a\"\nemission = 0\ndimming = 15\nocclusion = \"opaque\"\n\
+         render = \"opaque\"\nsolid = true\n\n[[appearance]]\nmaterial = \"bare:a\"\n\
+         color = [1, 2, 3, 255]\n\n[[materials]]\nname = \"b\"\nemission = 0\ndimming = 15\n\
+         occlusion = \"opaque\"\nrender = \"opaque\"\nsolid = true\n",
+    )
+    .unwrap();
+    let summary = Found::read(&dir).unwrap().summary().unwrap();
+    assert_eq!(summary.swatches.len(), 2);
+    assert_eq!(summary.swatches[0], [1, 2, 3, 255]);
+}
+
+#[test]
+fn a_component_has_no_summary_until_it_runs() {
+    let s = Scratch::new("nosummary");
+    s.good("component", "");
+    assert!(discover(&s.mods()).unwrap()[0].summary().is_none());
+}

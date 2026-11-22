@@ -232,6 +232,24 @@ pub(crate) fn references(id: &str, bytes: &[u8]) -> Result<Vec<Reference>, ModEr
     Ok(found)
 }
 
+/// What a Declaration adds, counted without registering it.
+pub(crate) fn summary(id: &str, bytes: &[u8]) -> Option<crate::Summary> {
+    let data = decode(id, bytes).ok()?;
+    let colour = |name: &str| {
+        let qualified = format!("{id}:{name}");
+        data.appearance
+            .iter()
+            .find(|a| a.material == name || a.material == qualified)
+            .map_or(crate::thumbnail::UNCOLOURED, |a| a.color)
+    };
+    Some(crate::Summary {
+        materials: data.materials.len(),
+        shapes: data.shapes.len(),
+        fluids: data.fluids.len(),
+        swatches: data.materials.iter().map(|m| colour(&m.name)).collect(),
+    })
+}
+
 fn recording_field(row: usize, at: usize) -> String {
     format!("sounds[{row}].recordings[{at}].file")
 }
