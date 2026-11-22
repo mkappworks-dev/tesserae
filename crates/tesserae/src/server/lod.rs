@@ -2539,6 +2539,47 @@ mod tests {
         panic!("never went quiet");
     }
 
+    /// The tick of each level's first landed mesh, through to quiet.
+    fn first_landings(h: &mut Harness) -> HashMap<u32, usize> {
+        let mut first: HashMap<u32, usize> = HashMap::new();
+        let started = std::time::Instant::now();
+        for tick in 0..SETTLE_TICKS {
+            assert!(started.elapsed() < SETTLE_CEILING, "never went quiet");
+            let (ready, _) = h.lod_tick();
+            for r in ready {
+                first.entry(r.level).or_insert(tick);
+            }
+            if h.lod_quiet() {
+                return first;
+            }
+            std::thread::sleep(std::time::Duration::from_micros(100));
+        }
+        panic!("never went quiet");
+    }
+
+    fn assert_outermost_first(first: &HashMap<u32, usize>) {
+        let coarsest = LEVELS - 1;
+        for level in 1..coarsest {
+            assert!(
+                first[&coarsest] < first[&level],
+                "level {level} landed at tick {}, the outermost at {}",
+                first[&level],
+                first[&coarsest]
+            );
+        }
+    }
+
+    #[test]
+    fn from_a_cold_start_and_after_a_teleport_the_outermost_level_lands_first() {
+        let mut h = harness_with(lod_settings(), LodBudget::default());
+        h.lod_on_private_pool();
+        assert_outermost_first(&first_landings(&mut h));
+
+        // Far past `evict` of the coarsest level, so nothing drawn stays.
+        h.anchor_at(Vec3::new(3000.0, 0.0, 0.0));
+        assert_outermost_first(&first_landings(&mut h));
+    }
+
     #[test]
     fn moving_the_anchor_loads_ahead_and_evicts_behind_on_every_level() {
         let mut h = harness();
