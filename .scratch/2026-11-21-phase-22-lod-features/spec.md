@@ -60,7 +60,7 @@ captures are reviewed in two batches, after 05 and at 09.
    sea.
 3. **Tree Impostors at levels 1 and 2**, from a second level-0 generator that
    answers draws only, and none over saved changes.
-4. **Structure Impostors** at every coarse level, Settlements and their paths
+4. **Structure Impostors** at levels 1 to 3, Settlements and their paths
    included.
 5. **Canopy cover** from level 2 up (03 measured level 2's Impostors past
    the budget).
@@ -132,8 +132,12 @@ captures are reviewed in two batches, after 05 and at 09.
   the same any-solid rule for tree and Template Materials. So a felled tree is
   gone at every level and a standing one keeps its silhouette.
 - **Structure Impostors (Q3).** Every Structure and Settlement Plot that level 0
-  stands is sampled at the coarse Voxel size, any solid beating air, at every
-  coarse level. Settlement paths are ground Material. **Recorded (04):** "any
+  stands is sampled at the coarse Voxel size, any solid beating air, at levels 1
+  to 3. Settlement paths are ground Material. **Recorded (12):** levels 4 and 5
+  stand no Structure and lay no path, and keep the agreed ground: at 16 and 32 m
+  a building is under one Voxel, and the draws took a level-5 Chunk from 0.5 to
+  10 ms, which filled the whole field 2.3 to 2.7 s later on Low and level 0 a
+  second later. **Recorded (04):** "any
   solid" is the Material table's `solid`, so a Plot's crops, flowers and torches
   stay out as Plants do; a built Material beats a Template's ground-coloured
   cell in one coarse Voxel. Paths and a Plot's cut and fill are ground: a

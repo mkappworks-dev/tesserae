@@ -582,11 +582,13 @@ fn coarse_ground_agrees_with_level_zero_at_each_column_centre_over_terra_coast_a
     }
 }
 
-/// Over the Settlement Terra spawns in, at every coarse level: each column whose footprint holds a
+/// Over the Settlement Terra spawns in, at levels 1 to 3: each column whose footprint holds a
 /// solid Structure Voxel at level 0 stands one, and each column whose centre is a road or trail at
-/// level 0 shows its path as its ground's top, where no Structure stands over it. Run with `--nocapture` to read the rates.
+/// level 0 shows its path as its ground's top, where no Structure stands over it. Levels 4 and 5
+/// hold the Chunks they would without Structures or paths. Run with `--nocapture` to read the
+/// rates.
 #[test]
-fn every_coarse_level_stands_terras_spawn_settlement_and_its_paths_as_level_zero_does() {
+fn levels_one_to_three_stand_terras_spawn_settlement_and_its_paths_as_level_zero_does() {
     let mut terra = Terra::load();
     let window = terra.find(|_, _| true);
     println!(
@@ -596,7 +598,7 @@ fn every_coarse_level_stands_terras_spawn_settlement_and_its_paths_as_level_zero
     println!(
         "level  columns  level 0 built in the footprint  stood  missing  extra  paths  differ"
     );
-    for level in 1..terra.generators.levels() {
+    for level in 1..=3 {
         let span = 1i32 << level;
         let per_chunk = N / span;
         let (mut columns, mut footprint, mut stood, mut missing, mut extra) = (0, 0, 0, 0, 0);
@@ -648,6 +650,39 @@ fn every_coarse_level_stands_terras_spawn_settlement_and_its_paths_as_level_zero
             differ, 0,
             "level {level}: path columns whose top is not the path"
         );
+    }
+    for level in 4..terra.generators.levels() {
+        let span = 1i32 << level;
+        let [first, last] =
+            [0, WINDOW_CHUNKS - 1].map(|d| window.map(|w| (w + d).div_euclid(span)));
+        let cell_m = N as f32 * terra.world.voxel_size * level_scale(level);
+        let (lowest_m, highest_m) = terra.generators.sources[0].surface_bounds_m();
+        let rows = (lowest_m / cell_m).floor() as i32 - 1..=(highest_m / cell_m).floor() as i32 + 1;
+        let mut stood = 0;
+        for cz in first[1]..=last[1] {
+            for cx in first[0]..=last[0] {
+                for cy in rows.clone() {
+                    let coord = ChunkCoord::new(cx, cy, cz);
+                    let bare = Makers {
+                        structures: None,
+                        ..terra.generators.makers(level)
+                    };
+                    let bare =
+                        make_coarse(level, coord, bare, &Default::default(), &terra.tables).chunk;
+                    let stood_chunk = terra.stood_chunk(level, coord);
+                    let n = CHUNK_SIZE;
+                    assert!(
+                        (0..n.pow(3)).all(|i| {
+                            let [x, y, z] = [i % n, i / n % n, i / n.pow(2)];
+                            stood_chunk.get(x, y, z) == bare.get(x, y, z)
+                        }),
+                        "level {level}: Chunk {coord:?} differs from its Chunk without Structures"
+                    );
+                    stood += 1;
+                }
+            }
+        }
+        assert!(stood > 0, "level {level}: no Chunk compared");
     }
 }
 

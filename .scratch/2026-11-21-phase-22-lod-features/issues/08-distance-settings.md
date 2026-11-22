@@ -29,7 +29,9 @@ keeps it in the Player's profile.
 ## Comments
 
 - The preference is `client::quality::Distance` in the profile (`distance`, a
-  preset and Custom's own Chunks and km; absent reads as Medium). The Client
+  preset and Custom's own Chunks and km; absent reads as Medium). Ticket 12
+  made Low the default again, so absent reads as Low, until 09 passes its
+  budgets. The Client
   sends its curve when a World opens and whenever an applied change asks for
   another; the Server's `quality::apply` clamps it as in 07. The Client only
   reads `DeclaredStreaming` and `WorldSettings`, for the sliders' ends and the

@@ -38,8 +38,9 @@ pub(super) fn plugin(app: &mut App) {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum DistancePreset {
-    Low,
+    /// Until Medium passes ticket 09's budgets: its whole field fills in about 16 s.
     #[default]
+    Low,
     Medium,
     High,
     Custom,
@@ -77,7 +78,7 @@ pub(crate) struct Distance {
 impl Default for Distance {
     fn default() -> Self {
         Distance {
-            preset: DistancePreset::Medium,
+            preset: DistancePreset::default(),
             custom: Sliders {
                 detail_chunks: 10,
                 reach_km: 7,
@@ -306,7 +307,7 @@ mod tests {
                 reach_m: 7000.0
             }
         );
-        assert_eq!(Distance::default().preset, DistancePreset::Medium);
+        assert_eq!(Distance::default().preset, DistancePreset::Low);
     }
 
     #[test]
@@ -401,16 +402,16 @@ mod tests {
             .insert_resource(DeclaredStreaming(terra()));
         app.update();
         app.update();
-        assert_eq!(sent(&mut app), vec![QualityCurve::MEDIUM]);
+        assert_eq!(sent(&mut app), vec![QualityCurve::low(terra())]);
 
         app.world_mut()
             .resource_mut::<Preferences>()
             .distance
-            .preset = DistancePreset::Low;
+            .preset = DistancePreset::Medium;
         app.update();
         app.world_mut().resource_mut::<Preferences>().compass = true;
         app.update();
-        assert_eq!(sent(&mut app), vec![QualityCurve::low(terra())]);
+        assert_eq!(sent(&mut app), vec![QualityCurve::MEDIUM]);
 
         app.insert_resource(Switch::Preset(DistancePreset::High));
         app.update();

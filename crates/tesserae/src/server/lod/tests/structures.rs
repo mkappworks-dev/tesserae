@@ -1,5 +1,5 @@
-//! Structure Impostors: every coarse level stands each Structure level 0 stands, from the
-//! placement generator's draws, and over a changed Chunk only what it holds.
+//! Structure Impostors: levels 1 to 3 stand each Structure level 0 stands, from the placement
+//! generator's draws, and over a changed Chunk only what it holds; levels 4 and 5 stand none.
 
 use super::*;
 use crate::server::lod_rings::level_count;
@@ -152,6 +152,30 @@ fn a_structures_impostor_occupies_the_coarse_voxels_its_level_zero_voxels_reach_
             "level {level}: coarse Voxels the towers reach that stand none, and the reverse, of {}",
             expected.len()
         );
+    }
+}
+
+#[test]
+fn no_structure_stands_above_level_three() {
+    let level_zero = towers();
+    let generators = LodGenerators::new(&land(), &level_zero, 6);
+    let tables = &fixtures().tables;
+    for level in 4..=5 {
+        let drawn = lanterns(
+            level,
+            |c| {
+                make_coarse(
+                    level,
+                    c,
+                    generators.makers(level),
+                    &Default::default(),
+                    tables,
+                )
+                .chunk
+            },
+            &level_zero,
+        );
+        assert!(drawn.is_empty(), "level {level}: {} lanterns", drawn.len());
     }
 }
 
