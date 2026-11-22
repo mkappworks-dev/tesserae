@@ -6,3 +6,4 @@ root = true
 depends = ["strata", "waters", "flora", "crops", "aquatic", "crystals"]
 suggests = ["sprite"]
 wasm = "tidewater.wasm"
+thumbnail = "thumbnail.png"

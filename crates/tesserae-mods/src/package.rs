@@ -108,6 +108,24 @@ pub fn stage(
             }
             fs::write(&path, bytes).map_err(|e| io(&path, e))?;
         }
+        // Not in the payload: a thumbnail is display data outside build identity, so it is read
+        // from the project here and checked again when the copy is read back.
+        if let Some(name) = &manifest.thumbnail {
+            let bytes = crate::artwork::read(
+                &compiled.found.dir,
+                name,
+                crate::thumbnail::MAX_THUMBNAIL_BYTES,
+            )
+            .map_err(|reason| ModError::Manifest {
+                who: id.clone(),
+                reason: format!("thumbnail {reason}"),
+            })?;
+            let path = dir.join(name);
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent).map_err(|e| io(parent, e))?;
+            }
+            fs::write(&path, bytes).map_err(|e| io(&path, e))?;
+        }
         let copy = Found::read(&dir)?;
         if Trust::hash_of(&copy)? != compiled.build_sha256 {
             return Err(ModError::Manifest {

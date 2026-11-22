@@ -5,3 +5,4 @@ depends = ["strata", "waters", "flora"]
 declaration = "content.toml"
 category = "Fire & light"
 description = "Lava, ash, and rules for lava, water and fire"
+thumbnail = "thumbnail.png"

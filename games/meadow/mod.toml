@@ -6,3 +6,4 @@ root = true
 depends = ["strata", "waters", "flora", "crops", "glassworks"]
 suggests = ["wanderer"]
 wasm = "meadow.wasm"
+thumbnail = "thumbnail.png"

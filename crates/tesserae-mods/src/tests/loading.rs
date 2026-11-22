@@ -1110,3 +1110,143 @@ fn a_manifest_may_say_which_section_and_what_a_mod_holds() {
         assert!(error.to_string().contains("mod.toml"), "{bad}: {error}");
     }
 }
+
+fn png_of(width: u32, height: u32) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    let mut encoder = png::Encoder::new(&mut bytes, width, height);
+    encoder.set_color(png::ColorType::Rgb);
+    let mut writer = encoder.write_header().unwrap();
+    writer
+        .write_image_data(&vec![90; (width * height * 3) as usize])
+        .unwrap();
+    writer.finish().unwrap();
+    bytes
+}
+
+fn with_thumbnail(s: &Scratch, id: &str, path: &str, bytes: Option<&[u8]>) {
+    s.good(id, &format!("thumbnail = \"{path}\""));
+    if let Some(bytes) = bytes {
+        let file = s.mods().join(id).join(path);
+        fs::create_dir_all(file.parent().unwrap()).unwrap();
+        fs::write(file, bytes).unwrap();
+    }
+}
+
+#[test]
+fn a_declared_thumbnail_is_found_and_decoded_before_any_trust() {
+    let s = Scratch::new("thumb");
+    with_thumbnail(&s, "pictured", "art/thumb.png", Some(&png_of(512, 288)));
+    let found = discover(&s.mods()).unwrap();
+    let thumbnail = found[0].thumbnail().unwrap().expect("a thumbnail");
+    assert_eq!((thumbnail.width, thumbnail.height), (512, 288));
+    assert_eq!(thumbnail.rgba.len(), 512 * 288 * 4);
+    assert_eq!(&thumbnail.rgba[..4], [90, 90, 90, 255]);
+}
+
+#[test]
+fn a_mod_without_a_thumbnail_has_none() {
+    let s = Scratch::new("nothumb");
+    s.good("plain", "");
+    let found = discover(&s.mods()).unwrap();
+    assert!(found[0].thumbnail().unwrap().is_none());
+}
+
+#[test]
+fn each_bad_thumbnail_rejects_its_folder_by_path_and_reason() {
+    let s = Scratch::new("badthumb");
+    let mut oversized = png_of(512, 288);
+    oversized.resize(crate::MAX_THUMBNAIL_BYTES as usize + 1, 0);
+    with_thumbnail(&s, "outside", "../elsewhere.png", None);
+    with_thumbnail(&s, "rooted", "/tmp/thumb.png", None);
+    with_thumbnail(&s, "jpeg", "thumb.jpg", Some(b"\xff\xd8\xff\xe0 not a png"));
+    with_thumbnail(&s, "small", "thumb.png", Some(&png_of(256, 144)));
+    with_thumbnail(&s, "huge", "thumb.png", Some(&oversized));
+    with_thumbnail(&s, "absent", "thumb.png", None);
+    let found = scan(&s.mods()).unwrap();
+    assert!(found.mods.is_empty(), "{:?}", ids(&found.mods));
+    let rows = rejected(&found);
+    let reason = |folder: &str| {
+        rows.iter()
+            .find(|(f, _)| f == folder)
+            .unwrap_or_else(|| panic!("no row for {folder}: {rows:?}"))
+            .1
+    };
+    for (folder, path, why) in [
+        ("outside", "../elsewhere.png", "inside the mod's directory"),
+        ("rooted", "/tmp/thumb.png", "inside the mod's directory"),
+        ("jpeg", "thumb.jpg", "not a PNG"),
+        (
+            "small",
+            "thumb.png",
+            "is 256 by 144 pixels, expected 512 by 288",
+        ),
+        ("huge", "thumb.png", "larger than"),
+        ("absent", "thumb.png", "No such file"),
+    ] {
+        let text = reason(folder);
+        assert!(
+            text.contains("thumbnail") && text.contains(&format!("`{path}`")) && text.contains(why),
+            "{folder}: {text}"
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn a_thumbnail_linked_out_of_the_folder_is_refused() {
+    let s = Scratch::new("thumblink");
+    let outside = s.0.join("outside.png");
+    fs::write(&outside, png_of(512, 288)).unwrap();
+    with_thumbnail(&s, "linked", "thumb.png", None);
+    std::os::unix::fs::symlink(&outside, s.mods().join("linked/thumb.png")).unwrap();
+    let text = err_text(discover(&s.mods()));
+    assert!(text.contains("`thumb.png` resolves outside"), "{text}");
+}
+
+#[test]
+fn a_project_read_by_path_checks_its_thumbnail() {
+    let s = Scratch::new("thumbread");
+    with_thumbnail(&s, "project", "thumb.png", Some(&png_of(64, 64)));
+    let text = err_text(Found::read(&s.mods().join("project")));
+    assert!(text.contains("`thumb.png` is 64 by 64 pixels"), "{text}");
+}
+
+#[test]
+fn a_data_mods_summary_is_counted_from_its_declaration() {
+    let timber = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../mods/timber");
+    let summary = Found::read(&timber).unwrap().summary().expect("a summary");
+    assert_eq!(
+        (summary.materials, summary.shapes, summary.fluids),
+        (2, 2, 0)
+    );
+    assert_eq!(summary.swatches, [[176, 132, 78, 255], [196, 170, 92, 255]]);
+}
+
+#[test]
+fn a_material_without_an_appearance_still_has_a_swatch() {
+    let s = Scratch::new("swatch");
+    let dir = s.mod_dir("bare");
+    fs::write(
+        dir.join("mod.toml"),
+        "id = \"bare\"\nversion = \"0.1.0\"\napi = \"0.3\"\ndeclaration = \"content.toml\"\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("content.toml"),
+        "[[materials]]\nname = \"a\"\nemission = 0\ndimming = 15\nocclusion = \"opaque\"\n\
+         render = \"opaque\"\nsolid = true\n\n[[appearance]]\nmaterial = \"bare:a\"\n\
+         color = [1, 2, 3, 255]\n\n[[materials]]\nname = \"b\"\nemission = 0\ndimming = 15\n\
+         occlusion = \"opaque\"\nrender = \"opaque\"\nsolid = true\n",
+    )
+    .unwrap();
+    let summary = Found::read(&dir).unwrap().summary().unwrap();
+    assert_eq!(summary.swatches.len(), 2);
+    assert_eq!(summary.swatches[0], [1, 2, 3, 255]);
+}
+
+#[test]
+fn a_component_has_no_summary_until_it_runs() {
+    let s = Scratch::new("nosummary");
+    s.good("component", "");
+    assert!(discover(&s.mods()).unwrap()[0].summary().is_none());
+}

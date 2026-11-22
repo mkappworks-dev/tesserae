@@ -1,0 +1,336 @@
+#!/usr/bin/env python3
+"""Writes the 512 by 288 menu thumbnails of the demo Games and of the Mods listed in MODS, each as
+thumbnail.png beside its mod.toml.
+
+A Mod's thumbnail draws its own Materials as Voxels, textured from the art that
+scripts/generate-mod-art wrote, so run that first. A Game's thumbnail is a small seeded island
+drawn in the Game's colours. The images are original and generated here, so they are CC0 and their
+source is this file. Output is deterministic, so a re-run changes no file.
+"""
+
+import pathlib
+import struct
+import zlib
+
+WIDTH, HEIGHT = 512, 288
+repo = pathlib.Path(__file__).resolve().parent.parent
+
+# Mod id -> its textures, left to right.
+MODS = {
+    "timber": ["planks", "thatch"],
+    "crystals": ["amethyst", "citrine", "aquamarine"],
+    "hearth": ["ash", "lava"],
+    "frost": ["snow", "ice", "packed_ice"],
+}
+
+# Game id -> sky (top, bottom), water, shore, ground bands from low to high, side soil and rock,
+# sea level (0..1), and what stands on the ground.
+GAMES = {
+    "terra": dict(
+        sky=((206, 214, 216), (168, 178, 180)),
+        water=(56, 104, 122),
+        shore=(214, 190, 132),
+        bands=[(98, 150, 70), (78, 128, 60), (128, 126, 118), (236, 240, 242)],
+        soil=(112, 78, 50),
+        rock=(104, 104, 112),
+        sea=0.36,
+        props="trees",
+        seed=11,
+    ),
+    "meadow": dict(
+        sky=((222, 228, 206), (184, 196, 170)),
+        water=(70, 120, 140),
+        shore=(206, 196, 140),
+        bands=[(124, 176, 78), (106, 162, 70), (94, 146, 66), (140, 160, 96)],
+        soil=(120, 86, 56),
+        rock=(116, 112, 104),
+        sea=0.3,
+        props="flowers",
+        seed=23,
+    ),
+    "ember": dict(
+        sky=((70, 52, 50), (38, 30, 32)),
+        water=(226, 96, 34),
+        shore=(60, 54, 56),
+        bands=[(84, 74, 72), (70, 64, 66), (96, 88, 86), (132, 126, 122)],
+        soil=(52, 46, 48),
+        rock=(40, 38, 44),
+        sea=0.3,
+        props="vents",
+        seed=37,
+    ),
+    "tidewater": dict(
+        sky=((200, 222, 226), (160, 192, 198)),
+        water=(48, 140, 150),
+        shore=(226, 208, 150),
+        bands=[(226, 208, 150), (112, 164, 84), (92, 146, 72), (120, 120, 112)],
+        soil=(132, 104, 70),
+        rock=(110, 108, 108),
+        sea=0.56,
+        props="palms",
+        seed=41,
+    ),
+    "lumen": dict(
+        sky=((58, 52, 86), (30, 28, 50)),
+        water=(88, 70, 150),
+        shore=(96, 90, 120),
+        bands=[(70, 96, 110), (64, 84, 104), (80, 78, 110), (104, 96, 140)],
+        soil=(58, 54, 74),
+        rock=(46, 44, 62),
+        sea=0.4,
+        props="crystals",
+        seed=53,
+    ),
+}
+
+
+def hash01(seed, x, y):
+    h = (seed ^ (x * 374_761_393) ^ (y * 668_265_263)) & 0xFFFFFFFF
+    h = ((h ^ (h >> 13)) * 1_274_126_177) & 0xFFFFFFFF
+    return ((h ^ (h >> 16)) & 0xFFFFFFFF) / 0xFFFFFFFF
+
+
+def noise(seed, x, y):
+    x0, y0 = int(x // 1), int(y // 1)
+    fx, fy = x - x0, y - y0
+    sx, sy = fx * fx * (3 - 2 * fx), fy * fy * (3 - 2 * fy)
+    a, b = hash01(seed, x0, y0), hash01(seed, x0 + 1, y0)
+    c, d = hash01(seed, x0, y0 + 1), hash01(seed, x0 + 1, y0 + 1)
+    return a + (b - a) * sx + (c - a) * sy + (a - b - c + d) * sx * sy
+
+
+def fbm(seed, x, y):
+    total, amp, norm = 0.0, 0.5, 0.0
+    for octave in range(4):
+        total += amp * noise(seed + octave * 101, x, y)
+        norm += amp
+        x, y, amp = x * 2, y * 2, amp / 2
+    return total / norm
+
+
+def shade(colour, factor, jitter=0):
+    return tuple(max(0, min(255, int(c * factor) + jitter)) for c in colour)
+
+
+class Canvas:
+    def __init__(self, top, bottom):
+        self.px = bytearray()
+        for y in range(HEIGHT):
+            t = y / (HEIGHT - 1)
+            row = bytes(int(a + (b - a) * t) for a, b in zip(top, bottom))
+            self.px += row * WIDTH
+
+    def put(self, x, y, colour):
+        if 0 <= x < WIDTH and 0 <= y < HEIGHT:
+            at = (y * WIDTH + x) * 3
+            self.px[at : at + 3] = bytes(colour)
+
+    def ellipse(self, cx, cy, rx, ry, darken):
+        for y in range(int(cy - ry), int(cy + ry) + 1):
+            for x in range(int(cx - rx), int(cx + rx) + 1):
+                d = ((x - cx) / rx) ** 2 + ((y - cy) / ry) ** 2
+                if d <= 1 and 0 <= x < WIDTH and 0 <= y < HEIGHT:
+                    at = (y * WIDTH + x) * 3
+                    k = 1 - darken * (1 - d)
+                    self.px[at : at + 3] = bytes(int(c * k) for c in self.px[at : at + 3])
+
+    def parallelogram(self, origin, u, v, paint):
+        """Fills origin + s*u + t*v for s, t in [0, 1), colouring each pixel paint(s, t)."""
+        ox, oy = origin
+        corners = [(ox, oy), (ox + u[0], oy + u[1]), (ox + v[0], oy + v[1])]
+        corners.append((ox + u[0] + v[0], oy + u[1] + v[1]))
+        det = u[0] * v[1] - u[1] * v[0]
+        x0, x1 = int(min(c[0] for c in corners)), int(max(c[0] for c in corners)) + 1
+        y0, y1 = int(min(c[1] for c in corners)), int(max(c[1] for c in corners)) + 1
+        for y in range(max(0, y0), min(HEIGHT, y1)):
+            for x in range(max(0, x0), min(WIDTH, x1)):
+                dx, dy = x + 0.5 - ox, y + 0.5 - oy
+                s = (dx * v[1] - dy * v[0]) / det
+                t = (u[0] * dy - u[1] * dx) / det
+                if 0 <= s < 1 and 0 <= t < 1:
+                    self.put(x, y, paint(s, t))
+
+    def box(self, top, a, h, paint_top, paint_left, paint_right):
+        """An isometric box whose top face's back corner is `top`; half-width a, height h."""
+        x, y = top
+        b = a / 2
+        self.parallelogram((x, y), (a, b), (-a, b), paint_top)
+        self.parallelogram((x - a, y + b), (a, b), (0, h), paint_left)
+        self.parallelogram((x, y + 2 * b), (a, -b), (0, h), paint_right)
+
+    def png(self):
+        rows = b"".join(
+            b"\x00" + bytes(self.px[y * WIDTH * 3 : (y + 1) * WIDTH * 3]) for y in range(HEIGHT)
+        )
+
+        def chunk(kind, data):
+            body = kind + data
+            return struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body))
+
+        header = struct.pack(">IIBBBBB", WIDTH, HEIGHT, 8, 2, 0, 0, 0)
+        return (
+            b"\x89PNG\r\n\x1a\n"
+            + chunk(b"IHDR", header)
+            + chunk(b"IDAT", zlib.compress(rows, 9))
+            + chunk(b"IEND", b"")
+        )
+
+
+def read_texture(path):
+    """The three 16 by 16 faces (top, side, bottom) of a texture scripts/generate-mod-art wrote."""
+    data = path.read_bytes()
+    assert data[:8] == b"\x89PNG\r\n\x1a\n", path
+    at, idat = 8, b""
+    while at < len(data):
+        length, kind = struct.unpack(">I4s", data[at : at + 8])
+        body = data[at + 8 : at + 8 + length]
+        if kind == b"IHDR":
+            width, height, depth, colour, _, _, interlace = struct.unpack(">IIBBBBB", body)
+            assert (depth, colour, interlace) == (8, 6, 0), f"{path}: not 8-bit RGBA"
+        elif kind == b"IDAT":
+            idat += body
+        at += 12 + length
+    raw = zlib.decompress(idat)
+    stride = width * 4 + 1
+    pixels = []
+    for y in range(height):
+        row = raw[y * stride : (y + 1) * stride]
+        assert row[0] == 0, f"{path}: a filtered row; generate-mod-art writes none"
+        pixels.append([tuple(row[1 + x * 4 : 5 + x * 4]) for x in range(width)])
+    edge = height
+    return [[r[f * edge : (f + 1) * edge] for r in pixels] for f in range(3)]
+
+
+def textured(face, light):
+    edge = len(face)
+
+    def paint(s, t):
+        r, g, b, a = face[min(edge - 1, int(t * edge))][min(edge - 1, int(s * edge))]
+        if a < 128:
+            r, g, b = (r // 3, g // 3, b // 3)
+        return shade((r, g, b), light)
+
+    return paint
+
+
+def mod_thumbnail(mod, textures):
+    canvas = Canvas((54, 56, 60), (30, 31, 34))
+    a = 70 if len(textures) < 3 else 60
+    gap = 30
+    span = len(textures) * 2 * a + (len(textures) - 1) * gap
+    left = (WIDTH - span) / 2
+    for i, name in enumerate(textures):
+        top, side, _ = read_texture(repo / "mods" / mod / "art" / f"{name}.png")
+        cx = left + a + i * (2 * a + gap)
+        # Middle Voxels sit a little higher, so a row reads as a group, not a shelf.
+        lift = 10 if 0 < i < len(textures) - 1 else 0
+        cy = (HEIGHT - 2 * a) / 2 - lift
+        canvas.ellipse(cx, cy + 1.5 * a + lift + 6, a * 1.2, a * 0.58, 0.5)
+        canvas.box(
+            (cx, cy),
+            a,
+            a,
+            textured(top, 1.0),
+            textured(side, 0.82),
+            textured(side, 0.64),
+        )
+    return canvas.png()
+
+
+def game_thumbnail(game, look):
+    canvas = Canvas(*look["sky"])
+    n, a, step = 15, 11, 7
+    seed = look["seed"]
+    heights = {}
+    for gy in range(n):
+        for gx in range(n):
+            # Edges fall away, so the island never fills its tile to the corners.
+            edge = min(gx, gy, n - 1 - gx, n - 1 - gy) / (n / 2)
+            e = fbm(seed, gx * 0.23, gy * 0.23)
+            e = max(0.0, min(1.0, (e - 0.5) * 2.4 + 0.5)) * (0.7 + 0.3 * min(1.0, edge * 1.6))
+            heights[gx, gy] = e
+    sea = look["sea"]
+    # The front corner's foot lands just above the bottom edge.
+    base_y = HEIGHT - 16 - ((2 * n - 2) * a / 2 + a + 8 * step + 18)
+    cx = WIDTH / 2
+    canvas.ellipse(cx, base_y + n * a + 8 * step, n * a * 1.1, n * a * 0.36, 0.25)
+    for depth in range(2 * n - 1):
+        for gx in range(n):
+            gy = depth - gx
+            if not 0 <= gy < n:
+                continue
+            e = heights[gx, gy]
+            level = 1 + int(e * 8)
+            sea_level = 1 + int(sea * 8)
+            wet = level <= sea_level
+            if wet:
+                top = look["water"]
+            elif level == sea_level + 1:
+                top = look["shore"]
+            else:
+                bands = look["bands"]
+                top = bands[min(len(bands) - 1, int((e - sea) / max(0.01, 1 - sea) * len(bands)))]
+            column = max(level, sea_level)
+            x = cx + (gx - gy) * a
+            y = base_y + (gx + gy) * a / 2 - column * step + 8 * step
+            jitter = int(hash01(seed, gx, gy) * 10) - 5
+
+            def side(light, surface=top, wet=wet, height=column * step + 18):
+                def paint(s, t):
+                    depth_px = t * height
+                    if depth_px < step and not wet:
+                        colour = surface
+                    elif depth_px < 3 * step:
+                        colour = look["soil"]
+                    else:
+                        colour = look["rock"]
+                    return shade(colour, light, int(hash01(seed, int(s * 4), int(t * 9)) * 8) - 4)
+
+                return paint
+
+            canvas.box(
+                (x, y),
+                a,
+                column * step + 18,
+                lambda s, t, c=top, j=jitter: shade(c, 1.0, j),
+                side(0.8),
+                side(0.62),
+            )
+            prop = hash01(seed + 7, gx, gy)
+            if not wet and level > sea_level + 1 and prop > 0.8:
+                draw_prop(canvas, look, (x, y), a)
+    return canvas.png()
+
+
+def draw_prop(canvas, look, top, a):
+    x, y = top
+    kind = look["props"]
+    flat = lambda c: lambda s, t: c
+    lit = lambda c, k: lambda s, t: shade(c, k)
+
+    def block(colour, size, height, lift):
+        canvas.box(
+            (x, y + a / 2 - size / 2 - lift),
+            size,
+            height,
+            flat(colour),
+            lit(colour, 0.8),
+            lit(colour, 0.62),
+        )
+
+    if kind in ("trees", "palms"):
+        block((112, 82, 52), 2, 14, 12)
+        leaves = (58, 112, 58) if kind == "trees" else (92, 150, 70)
+        block(leaves, 7 if kind == "trees" else 6, 7, 20)
+    elif kind == "flowers":
+        block((232, 210, 90) if x % 2 else (226, 120, 140), 2, 3, 3)
+    elif kind == "vents":
+        block((240, 140, 50), 3, 2, 1)
+    elif kind == "crystals":
+        block((190, 150, 255) if x % 2 else (120, 230, 240), 3, 12, 10)
+
+
+for mod, textures in MODS.items():
+    (repo / "mods" / mod / "thumbnail.png").write_bytes(mod_thumbnail(mod, textures))
+for game, look in GAMES.items():
+    (repo / "games" / game / "thumbnail.png").write_bytes(game_thumbnail(game, look))

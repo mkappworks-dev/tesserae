@@ -118,6 +118,8 @@ pub struct Installed {
     /// Folders the scan refused, as one line each.
     pub rejected: Vec<String>,
     found: Vec<tesserae_mods::Found>,
+    /// Counted once at the scan: every page that lists Mods reads them.
+    summaries: std::collections::BTreeMap<String, tesserae_mods::Summary>,
     check_trust: bool,
     /// `None` when nothing can be granted, as in tests.
     trust_file: Option<PathBuf>,
@@ -142,6 +144,12 @@ impl Installed {
                 .rejected
                 .iter()
                 .map(|r| format!("{}: {}", r.dir.display(), r.reason))
+                .collect(),
+            summaries: scan
+                .games
+                .iter()
+                .chain(&scan.mods)
+                .filter_map(|f| Some((f.manifest.id.clone(), f.summary()?)))
                 .collect(),
             found: scan.games.into_iter().chain(scan.mods).collect(),
             check_trust,
@@ -170,6 +178,7 @@ impl Installed {
             mods: Vec::new(),
             rejected: Vec::new(),
             found: Vec::new(),
+            summaries: Default::default(),
             check_trust: false,
             trust_file: None,
         }
@@ -200,6 +209,7 @@ impl Installed {
             mods: Vec::new(),
             rejected: Vec::new(),
             found: Vec::new(),
+            summaries: Default::default(),
             check_trust: false,
             trust_file: None,
         }
@@ -391,6 +401,41 @@ impl Installed {
             })
     }
 
+    /// What a data Mod's Declaration adds; `None` for a component, which must run to say.
+    pub fn summary(&self, id: &str) -> Option<&tesserae_mods::Summary> {
+        self.summaries.get(id)
+    }
+
+    /// The summary as one line, such as `2 Materials · 2 Shapes · 1 fluid`; kinds it adds none
+    /// of are left out.
+    pub fn adds(&self, id: &str) -> Option<String> {
+        let s = self.summary(id)?;
+        let count = |n: usize, one: &str| match n {
+            0 => None,
+            1 => Some(format!("1 {one}")),
+            n => Some(format!("{n} {one}s")),
+        };
+        let parts: Vec<String> = [
+            count(s.materials, "Material"),
+            count(s.shapes, "Shape"),
+            count(s.fluids, "fluid"),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        (!parts.is_empty()).then(|| parts.join(" \u{b7} "))
+    }
+
+    /// The decoded thumbnail of an installed Mod or Game, read from disk on each call. The scan
+    /// already refused a folder whose thumbnail was bad, so a failure here is a file changed since.
+    pub fn thumbnail(&self, id: &str) -> Option<tesserae_mods::Thumbnail> {
+        let found = self.found.iter().find(|f| f.manifest.id == id)?;
+        found.thumbnail().unwrap_or_else(|e| {
+            eprintln!("{e}");
+            None
+        })
+    }
+
     #[cfg(test)]
     pub fn with_game_suggests(mut self, suggests: &[&str]) -> Self {
         let id = self.game.as_ref().map(|g| g.id.clone()).unwrap();
@@ -548,6 +593,7 @@ fn test_manifest(id: &str) -> tesserae_mods::Manifest {
         suggests: Vec::new(),
         category: None,
         description: None,
+        thumbnail: None,
     }
 }
 
@@ -629,6 +675,22 @@ mod tests {
         copy_tree(&source, &root.join("mods"));
         let scan = tesserae_mods::scan(&root.join("mods")).unwrap();
         (root, Installed::new(scan, false, PathBuf::new()))
+    }
+
+    #[test]
+    fn a_mods_summary_line_counts_what_it_declares_and_leaves_out_none() {
+        let (root, installed) = shared_mods("summary");
+        let lines = ["timber", "frost", "hearth"].map(|id| installed.adds(id));
+        let _ = std::fs::remove_dir_all(&root);
+        assert_eq!(
+            lines,
+            [
+                Some("2 Materials \u{b7} 2 Shapes".to_owned()),
+                Some("4 Materials \u{b7} 1 Shape \u{b7} 1 fluid".to_owned()),
+                Some("2 Materials \u{b7} 1 fluid".to_owned()),
+            ]
+        );
+        assert_eq!(Installed::fake(None, &[]).adds("timber"), None);
     }
 
     #[test]

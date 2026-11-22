@@ -282,6 +282,17 @@ for example `"Fire & light"`) and `description` (1 to 80 characters). Neither
 changes what the Mod does, but both are part of the Manifest, so editing one
 asks for Trust again like any other change.
 
+A Manifest may also name a `thumbnail`: a PNG inside the Mod's folder, exactly
+512 by 288 pixels and at most 512 KiB, which menus show for the Mod or Game even
+before it is trusted. The scan refuses a folder whose thumbnail is outside it,
+not a PNG, the wrong size or too large, naming the file and the reason. The file
+is not part of the build, so a new picture asks for no new Trust and keeps saved
+Worlds opening; the `thumbnail` line is Manifest bytes, so adding it is a new
+build. A Mod without one is shown by one swatch per declared Material, and every
+data Mod is listed with what its Declaration adds, such as
+`2 Materials · 2 Shapes · 1 fluid`. See
+[ADR-0037](adr/0037-a-thumbnail-is-display-data-outside-the-build.md).
+
 ## Validating and packaging projects
 
 Both commands run without opening a World and take project folders (each holds a

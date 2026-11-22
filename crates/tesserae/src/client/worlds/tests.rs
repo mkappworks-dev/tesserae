@@ -2000,3 +2000,107 @@ fn moving_between_a_clear_and_a_softened_screen_swaps_layers_with_an_image_on_ev
         }
     }
 }
+
+/// A data Mod installed under `mods`, with one Material of `colour` per name.
+fn data_mod(mods: &Path, id: &str, materials: &[(&str, [u8; 4])], thumbnail: Option<Vec<u8>>) {
+    let dir = mods.join(id);
+    std::fs::create_dir_all(&dir).unwrap();
+    let picture = if thumbnail.is_some() {
+        "thumbnail = \"thumb.png\"\n"
+    } else {
+        ""
+    };
+    std::fs::write(
+        dir.join("mod.toml"),
+        format!(
+            "id = \"{id}\"\nversion = \"0.1.0\"\napi = \"0.3\"\ndeclaration = \"content.toml\"\n\
+             {picture}"
+        ),
+    )
+    .unwrap();
+    let content: String = materials
+        .iter()
+        .map(|(name, [r, g, b, a])| {
+            format!(
+                "[[materials]]\nname = \"{name}\"\nemission = 0\ndimming = 15\n\
+                 occlusion = \"opaque\"\nrender = \"opaque\"\nsolid = true\n\n\
+                 [[appearance]]\nmaterial = \"{name}\"\ncolor = [{r}, {g}, {b}, {a}]\n\n"
+            )
+        })
+        .collect();
+    std::fs::write(dir.join("content.toml"), content).unwrap();
+    if let Some(bytes) = thumbnail {
+        std::fs::write(dir.join("thumb.png"), bytes).unwrap();
+    }
+}
+
+fn thumbnail_png() -> Vec<u8> {
+    let mut bytes = Vec::new();
+    let mut encoder = png::Encoder::new(&mut bytes, 512, 288);
+    encoder.set_color(png::ColorType::Rgb);
+    let mut writer = encoder.write_header().unwrap();
+    writer.write_image_data(&vec![60; 512 * 288 * 3]).unwrap();
+    writer.finish().unwrap();
+    bytes
+}
+
+fn pictures_shown(app: &mut App) -> usize {
+    let handles: Vec<Handle<Image>> = app
+        .world_mut()
+        .query::<&ImageNode>()
+        .iter(app.world())
+        .map(|node| node.image.clone())
+        .collect();
+    let images = app.world().resource::<Assets<Image>>();
+    handles
+        .iter()
+        .filter_map(|h| images.get(h))
+        .filter(|image| image.size() == UVec2::new(512, 288))
+        .count()
+}
+
+fn colour_shown(app: &mut App, [r, g, b, a]: [u8; 4]) -> bool {
+    let wanted = Color::srgba_u8(r, g, b, a);
+    app.world_mut()
+        .query::<&BackgroundColor>()
+        .iter(app.world())
+        .any(|c| c.0 == wanted)
+}
+
+#[test]
+fn the_mods_library_shows_each_mods_thumbnail_or_swatches_and_what_it_adds() {
+    let worlds = Directory::new();
+    let mods = worlds.0.join("mods");
+    data_mod(
+        &mods,
+        "pictured",
+        &[("oak", [11, 12, 13, 255])],
+        Some(thumbnail_png()),
+    );
+    data_mod(
+        &mods,
+        "plain",
+        &[("ash", [21, 22, 23, 255]), ("soot", [31, 32, 33, 255])],
+        None,
+    );
+    let installed = Installed::new(tesserae_mods::scan(&mods).unwrap(), false, PathBuf::new());
+    let mut app = app(&worlds, installed);
+    app.init_resource::<Assets<Image>>();
+    app.update();
+    act(&mut app, Act::Library);
+    assert_eq!(launcher(&app).screen, Screen::Library);
+
+    assert!(shown(&mut app, "1 Material"), "the pictured Mod's summary");
+    assert!(shown(&mut app, "2 Materials"), "the plain Mod's summary");
+    assert_eq!(
+        pictures_shown(&mut app),
+        1,
+        "one thumbnail, for the pictured Mod"
+    );
+    assert!(
+        !colour_shown(&mut app, [11, 12, 13, 255]),
+        "a thumbnail replaces swatches"
+    );
+    assert!(colour_shown(&mut app, [21, 22, 23, 255]));
+    assert!(colour_shown(&mut app, [31, 32, 33, 255]));
+}

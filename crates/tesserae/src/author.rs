@@ -552,6 +552,65 @@ solid = true
     }
 
     #[test]
+    fn a_thumbnail_is_packaged_and_is_not_part_of_the_build() {
+        let s = Scratch::new();
+        let game = data_game(&s.dir("src"), "pictured", "");
+        let manifest = fs::read_to_string(game.join("mod.toml")).unwrap();
+        fs::write(
+            game.join("mod.toml"),
+            format!("{manifest}thumbnail = \"art/thumb.png\"\n"),
+        )
+        .unwrap();
+        fs::write(game.join("art/thumb.png"), png(512, 288, 1)).unwrap();
+        let build = || tesserae_mods::Trust::hash_of(&Found::read(&game).unwrap()).unwrap();
+        let before = build();
+        fs::write(game.join("art/thumb.png"), png(512, 288, 2)).unwrap();
+        assert_eq!(build(), before, "a new picture is the same build");
+
+        let out = s.dir("out");
+        let mods = out.join("mods");
+        assert_eq!(
+            s.run(&[
+                "package",
+                path(&game),
+                "--out",
+                path(&out),
+                "--mods",
+                path(&mods)
+            ]),
+            Outcome::Done
+        );
+        let packaged = out.join("games/pictured");
+        assert_eq!(
+            files(&packaged),
+            ["art/rock.png", "art/thumb.png", "content.toml", "mod.toml"]
+        );
+        assert_eq!(
+            fs::read(packaged.join("art/thumb.png")).unwrap(),
+            png(512, 288, 2)
+        );
+    }
+
+    #[test]
+    fn validation_reports_a_bad_thumbnail_by_mod_and_file() {
+        let s = Scratch::new();
+        let game = data_game(&s.dir("src"), "pictured", "");
+        let manifest = fs::read_to_string(game.join("mod.toml")).unwrap();
+        fs::write(
+            game.join("mod.toml"),
+            format!("{manifest}thumbnail = \"art/rock.png\"\n"),
+        )
+        .unwrap();
+        let mods = s.dir("installed/mods");
+        let message = failed(s.run(&["validate", path(&game), "--mods", path(&mods)]));
+        assert!(
+            message.contains("pictured")
+                && message.contains("`art/rock.png` is 48 by 16 pixels, expected 512 by 288"),
+            "{message}"
+        );
+    }
+
+    #[test]
     fn a_mixed_set_packages_and_loads_with_its_dependencies_selected() {
         let s = Scratch::new();
         let src = s.dir("src");
