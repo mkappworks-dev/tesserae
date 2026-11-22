@@ -7,6 +7,8 @@ mod content;
 mod cost;
 mod dev;
 mod launch;
+#[cfg(target_os = "macos")]
+mod native;
 mod open;
 #[cfg(feature = "profiling")]
 mod profiling;
@@ -63,6 +65,8 @@ fn main() -> std::process::ExitCode {
             open::plugin,
         ))
         .add_plugins(dev_plugins);
+    #[cfg(target_os = "macos")]
+    app.add_plugins(native::plugin);
     if let Some(request) = watching {
         app.add_plugins(dev::plugin(request));
     }

@@ -32,6 +32,15 @@ tesserae-core = { path = "../tesserae-core", version = "0.0.0" }
 tesserae-mods = { path = "../tesserae-mods", version = "0.0.0" }
 trash = "5"
 
+# macOS runs a bare binary, not an .app bundle, so the Dock icon and the menu bar
+# are set through AppKit at startup. muda builds the menu and keeps its own
+# objc2 on the version winit already pulls in.
+[target.'cfg(target_os = "macos")'.dependencies]
+muda = { version = "0.19", default-features = false }
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["NSApplication", "NSImage", "NSResponder"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["NSData", "NSProcessInfo", "NSString"] }
+
 [dev-dependencies]
 # Encodes the artwork fixtures the data-Mod tests load.
 png = "0.18"
