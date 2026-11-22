@@ -16,6 +16,9 @@ under water, on Structure footprints and on fields. It is raised one coarse
 Voxel above the ground where the species' mean canopy top is at least half that
 Voxel, so forests have a silhouette at 8 m and are a colour at 16 and 32 m.
 
+From level 2, not 3: ticket 03 measured level 2's Impostor draws at 33 ms a
+terrain Chunk against level 1's 11 ms, so level 2 takes Canopy cover too.
+
 ## Acceptance criteria
 
 - [ ] A forest's edge agrees with level 0's tree density within one coarse

@@ -62,6 +62,7 @@ fn towers_at(generators: &LodGenerators, level_zero: &Worldgen, level: u32) -> u
                             tables,
                             None,
                             None,
+                            None,
                         )
                         .chunk
                     }
