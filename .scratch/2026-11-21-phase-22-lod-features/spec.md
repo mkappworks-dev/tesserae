@@ -69,7 +69,7 @@ captures are reviewed in two batches, after 05 and at 09.
    clamped to the Game's values; holes and overlaps derived per pair.
 8. **A Distance settings tab** for it: the mockup page (built during the grilling,
    approved before this ticket), then the Client page.
-9. **The default curve**, Medium (`u` 256 m to 6 km), with lighter fog, only
+9. **The default curve**, Medium (`u` 192 m to 6 km, measured down from 256 m), with lighter fog, only
    once the budgets pass and you approve the captures.
 10. **Ground tint** from the plants a column would hold: lands only if it
     improves the look and stays in budget.
@@ -173,10 +173,14 @@ captures are reviewed in two batches, after 05 and at 09.
   derived from each pair of widths by `lod_rings`' existing rules, checked for
   all four parities. Presets (Q24): **Low**, the Game's own rings (`u` its `view_distance_m`, reach its declared
   `lod_distance_m` before this step: 160 m to 3 km on Terra, 192 m to 4 km by default); **Medium**
-  (`u` 256 m, 6 km), the default; **High** (`u` 384 m, 8 km); and **Custom**. `u` is a whole number of
+  (`u` 192 m, 6 km), the default; **High** (`u` 384 m, 8 km); and **Custom**. `u` is a whole number of
   32 m Chunks, so every level's ring ends on its own Cells: level k reaches `u / 32` of its own Chunks,
-  and the UI shows `u` as that count (5, 8 and 12 Chunks on Terra).
-- **Default (Q15, Q20, Q24).** Medium, `u` 256 m to 6 km. High may exceed the budgets below, as a
+  and the UI shows `u` as that count (5, 6 and 12 Chunks on Terra). **Recorded (09):** a Game's
+  `view-params` gains `low-lod-distance-m`, Low's reach where it is nearer than the ceiling
+  `lod-distance-m`; absent, Low reaches the ceiling, as every Game's did. Terra declares 3000 m under
+  8192 m, and a Game that declares no view gets 4096 m under 8192 m. The Server streams Low until a
+  Client asks.
+- **Default (Q15, Q20, Q24).** Medium, `u` 192 m to 6 km. High may exceed the budgets below, as a
   Player's choice, and its numbers are recorded. Terra's ceiling rises from
   3000 m to 8192 m, and the engine's default `lod_distance_m` from 4096 m.
   It becomes the default only when, on the M5 with Terra at `stationary` and
@@ -184,15 +188,35 @@ captures are reviewed in two batches, after 05 and at 09.
   192 MB; the
   whole field is drawn within 10 s of spawn; GPU frame is at most 1 ms over
   `main`; and level 0's fill time does not regress. If Medium fails any, the default is
-  the widest curve that passes, recorded here.
+  the widest curve that passes, recorded here. **Recorded (09):** Medium at `u` 256 m (8 Chunks)
+  filled Terra's field in 13.5 s at `stationary` and 13.8 s in `sprint-flight`, and 7 Chunks in
+  11.4 s, after the fill was freed of its tick cap (Fill order, below). The coarse jobs are then
+  CPU-bound, some 33 s of work for 8 Chunks on three workers; six workers ran each job 1.5 to 2
+  times slower and delayed level 0. 6 Chunks (`u` 192 m) to 6 km filled in 9.6 s and 9.9 s (median
+  of six; 10.25 s at worst in flight), GPU frame 3.17 ms against `main`'s 2.70, coarse vertex
+  memory 3.6 MB held, level 0 unchanged in an interleaved A/B against `main`. So Medium is 6 Chunks
+  to 6 km; the margin in flight is thin. High filled in 24.9 s, GPU frame 3.55 ms, 10.7 MB.
 - **Terra's level 0 (Q25).** Terra declares 160 m (5 Chunks) with no recorded reason; every other
   Game uses the engine's 192 m. Ticket 09 measures Terra at 192 m too and keeps it only if level 0's
-  fill time and GPU frame stay within budget, recording the reason either way.
+  fill time and GPU frame stay within budget, recording the reason either way. **Recorded (09):**
+  Terra keeps 160 m. At 192 m under Medium, level 0 filled in 2.08 s against 1.61 s at
+  `stationary` (2.17 against 1.69 in flight) and the whole field in 10.4 s and 10.7 s, over budget;
+  `main` measured the same 0.3 to 0.5 s cost at 3 km. 160 m is what keeps level 0's fill and the
+  field within budget.
 - **Fill order (Q21).** Coarse jobs are prioritised by distance over their
-  level's Cell, so the outermost level fills first and finer ones replace it.
+  level's Cell, so the outermost level fills first and finer ones replace it. **Recorded (09):**
+  levels 1 to 4 filling within 0.02 s of each other was the shared cap, not their work: dispatch
+  runs once a 64 Hz tick with 16 jobs in flight, about 1,000 Chunks a second whatever the CPU
+  could do. Every cap is 8 times larger in a tick that starts with no level-0 job in flight, as no
+  level-0 work then waits behind a coarse job: Low's field fills in 5.8 s against 10.2, level 0
+  unmoved. 16 times took the worst tick from 6 to 10.5 ms.
 - **Vertical extent (Q22).** Three of a level's own Cells above and below,
   unchanged.
-- **Fog (Q16).** Lighter at distance, by `reach_opacity`, chosen on captures.
+- **Fog (Q16).** Lighter at distance, by `reach_opacity`, chosen on captures. **Recorded (09):**
+  the fog's reach follows the streamed curve, not the Game's ceiling, so under Medium fog at 3 km
+  falls from `main`'s 88% to 53% and at 2 km from 61% to 28%. `reach_opacity` rises from 0.88 to
+  0.95: at 0.88 and below the reach's square edge shows against the sky from an 8 km Eye, and at
+  0.95 the far shore still reads.
 - **Ground tint (Q16).** A coarse column's top colour takes the plants level 0
   would grow there, from the same density fields. Lands only if captures at the
   joins match colour better, you approve them, and coarse-Chunk time stays in
