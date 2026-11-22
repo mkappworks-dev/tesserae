@@ -1,6 +1,6 @@
 //! How far each coarse level's ground strays from level 0's on Terra, column by column.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 use tesserae_core::climate::SurfacePlantKind;
@@ -57,6 +57,9 @@ struct Rates {
     canopy_off_edge: usize,
     /// Columns Canopy cover stands on that are wet at their level-0 centre.
     canopy_wet: usize,
+    /// Canopy cover's columns by how many Voxels its top stands over the ground, and by its leaves.
+    canopy_rises: BTreeMap<i32, usize>,
+    canopy_leaves: BTreeMap<MaterialId, usize>,
     /// Columns a cave or shaft opens at their level-0 centre, which no coarse level draws, so
     /// they are not compared.
     carved: usize,
@@ -177,6 +180,20 @@ impl Terra {
             },
         );
         tree
+    }
+
+    /// The row and Material of a column's topmost Voxel at `level`, if a tree's.
+    fn tree_top(&mut self, level: u32, column: [i32; 2]) -> Option<(i32, MaterialId)> {
+        let from = self.top_cy(level, column);
+        let (v, y) = scan(
+            |c| self.stood_chunk(level, c),
+            column,
+            from,
+            |v| !v.is_air(),
+        );
+        self.tree_parts
+            .contains(&v.material())
+            .then_some((y, v.material()))
     }
 
     /// Whether a solid Structure Voxel stands over the column's ground at `level`, level 0 read
@@ -385,6 +402,10 @@ impl Terra {
                     rates.dense_trees += usize::from(dense);
                     rates.canopy += usize::from(canopy);
                     rates.canopy_wet += usize::from(canopy && fine.wet);
+                    if let Some((y, leaves)) = self.tree_top(level, coarse).filter(|_| canopy) {
+                        *rates.canopy_rises.entry(y - seen.y).or_default() += 1;
+                        *rates.canopy_leaves.entry(leaves).or_default() += 1;
+                    }
                     if dense != canopy {
                         rates.canopy_differs += 1;
                         let near = (0..9).any(|i| {
@@ -437,8 +458,9 @@ fn scan_at(
 
 /// Water or land and the top Material are exact at every level wherever no cave opens level 0,
 /// every footprint level 0 stands a tree in stands one at levels 1 to [`IMPOSTORS_TO`], and above
-/// them Canopy cover keeps off water and follows level 0's tree density to within one column; run
-/// with `--nocapture` to read the rates.
+/// them Canopy cover keeps off water, follows level 0's tree density to within one column, and
+/// stands a dense forest's top at more than one height up to level 4; run with `--nocapture` to
+/// read the rates.
 #[test]
 fn coarse_ground_agrees_with_level_zero_at_each_column_centre_over_terra_coast_and_forest() {
     let mut terra = Terra::load();
@@ -499,6 +521,18 @@ fn coarse_ground_agrees_with_level_zero_at_each_column_centre_over_terra_coast_a
                     r.canopy_differs,
                     r.canopy_off_edge,
                 ));
+                println!(
+                    "level {level} Canopy cover: columns by Voxels over the ground {:?}, by \
+                     leaves {:?}",
+                    r.canopy_rises, r.canopy_leaves
+                );
+                if name == "canopy" && level <= 4 {
+                    assert!(
+                        r.canopy_rises.len() > 1,
+                        "level {level}: a dense forest's top stands at one height, {:?}",
+                        r.canopy_rises
+                    );
+                }
             }
             match name {
                 "coast" => assert!(

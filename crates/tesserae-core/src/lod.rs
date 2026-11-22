@@ -373,8 +373,16 @@ fn agreed_top(a: &ColumnTop, voxel_m: f32) -> (i32, i32) {
     (top, water_top.filter(|_| a.wet).unwrap_or(top))
 }
 
+/// The share of its ground a column's trees cover from which its Canopy cover stands a coarse Voxel
+/// over a sparser column's.
+const DENSE_COVER: f32 = 0.75;
+
+/// The most coarse Voxels Canopy cover stands over its column's top. Two, so a dense column steps once over a sparser one's single raised Voxel: more stands the
+/// cover in pillars as tall as the trees, cliffs at every forest's edge.
+const CANOPY_RISE: i32 = 2;
+
 /// The columns of `answers`, as [`agree_with_level_zero`] takes them, whose Canopy cover could
-/// fall in Chunk row `cy`: dry, with their top or the Voxel over it in the row.
+/// fall in Chunk row `cy`: dry, with their top or a Voxel up to [`CANOPY_RISE`] over it in the row.
 pub fn canopy_candidates(cy: i32, voxel_m: f32, answers: &[Option<ColumnTop>]) -> Vec<usize> {
     let size = CHUNK_SIZE as i32;
     let rows = cy * size..(cy + 1) * size;
@@ -382,15 +390,28 @@ pub fn canopy_candidates(cy: i32, voxel_m: f32, answers: &[Option<ColumnTop>]) -
         .filter(|&i| {
             answers[i].is_some_and(|a| {
                 let top = agreed_top(&a, voxel_m).0;
-                !a.wet && (rows.contains(&top) || rows.contains(&(top + 1)))
+                !a.wet && rows.start <= top + CANOPY_RISE && top < rows.end
             })
         })
         .collect()
 }
 
-/// Stands Canopy cover over the agreed ground of each `(column, canopy)`: the column's top Voxel
-/// becomes the leaves, or the Voxel over it where the trees stand at least half a Voxel tall, so
-/// a forest keeps a silhouette until its Voxel outgrows the trees (ADR-0035).
+/// How many coarse Voxels of `voxel_m` a column's Canopy cover stands over its top, 0 for the top
+/// itself, and the leaves it shows. A dense column fills the Voxels its trees reach at least half
+/// of, up to [`CANOPY_RISE`]; a sparser one stands a Voxel lower in its own shade, so a forest's
+/// top is a mass of crowns, not a sheet (ADR-0035).
+pub fn canopy_stand(canopy: &Canopy, voxel_m: f32) -> (i32, MaterialId) {
+    let reached = ((canopy.top_m / voxel_m).round() as i32).min(CANOPY_RISE);
+    if canopy.cover >= DENSE_COVER {
+        (reached, canopy.material)
+    } else {
+        ((reached - 1).max(0), canopy.sparse)
+    }
+}
+
+/// Stands Canopy cover over the agreed ground of each `(column, canopy)`, as [`canopy_stand`]
+/// raises and shades it: the column's top Voxel becomes the leaves, or the Voxels over it fill
+/// with them.
 pub fn stand_canopy_cover(
     chunk: &mut Chunk,
     cy: i32,
@@ -403,11 +424,11 @@ pub fn stand_canopy_cover(
         let Some(a) = answers[i].filter(|a| !a.wet) else {
             continue;
         };
-        let top = agreed_top(&a, voxel_m).0;
-        let y = top + i32::from(canopy.top_m >= voxel_m / 2.0) - cy * size;
-        if (0..size).contains(&y) {
-            let (x, z) = (i % CHUNK_SIZE, i / CHUNK_SIZE);
-            chunk.set(x, y as usize, z, Voxel::cube(canopy.material));
+        let top = agreed_top(&a, voxel_m).0 - cy * size;
+        let (rise, material) = canopy_stand(&canopy, voxel_m);
+        let (x, z) = (i % CHUNK_SIZE, i / CHUNK_SIZE);
+        for y in (top + rise.min(1)..=top + rise).filter(|y| (0..size).contains(y)) {
+            chunk.set(x, y as usize, z, Voxel::cube(material));
         }
     }
 }
@@ -1111,6 +1132,7 @@ mod tests {
         assert_eq!(canopy_candidates(1, 8.0, &answers), [2]);
         let canopy = |top_m: f32| Canopy {
             material: CANOPY,
+            sparse: CANOPY,
             top_m,
             cover: 1.0,
         };
@@ -1140,6 +1162,71 @@ mod tests {
             (0..CHUNK_SIZE).all(|y| chunk.get(3, y, 0).material() != CANOPY),
             "under water"
         );
+    }
+
+    #[test]
+    fn a_denser_canopy_stands_a_coarse_voxel_over_a_sparser_one_and_takes_its_own_shade() {
+        const OTHER: MaterialId = 215;
+        let canopy = |cover: f32, top_m: f32| Canopy {
+            material: CANOPY,
+            sparse: OTHER,
+            top_m,
+            cover,
+        };
+        let (dense, sparse) = (canopy(0.9, 20.0), canopy(0.6, 20.0));
+        // 20 m trees fill two 4 m Voxels at most; a 12 m tree over half a 16 m one, under half a
+        // 32 m one, where only the shade tells the two apart.
+        assert_eq!(canopy_stand(&dense, 4.0), (2, CANOPY));
+        assert_eq!(canopy_stand(&sparse, 4.0), (1, OTHER));
+        assert_eq!(canopy_stand(&canopy(0.9, 12.0), 16.0), (1, CANOPY));
+        assert_eq!(canopy_stand(&canopy(0.6, 12.0), 16.0), (0, OTHER));
+        assert_eq!(canopy_stand(&canopy(0.9, 12.0), 32.0), (0, CANOPY));
+        assert_eq!(canopy_stand(&canopy(0.6, 12.0), 32.0), (0, OTHER));
+
+        let rock = fixtures().ground.rock;
+        let dry = |surface_m: f32| {
+            Some(ColumnTop {
+                surface_m,
+                level_m: None,
+                wet: false,
+                top: rock,
+                under: rock,
+            })
+        };
+        let mut answers = vec![None; CHUNK_SIZE * CHUNK_SIZE];
+        // 4 m Voxels: tops at rows 3, 3 and 30.
+        answers[0] = dry(14.0);
+        answers[1] = dry(14.0);
+        answers[2] = dry(122.0);
+        assert_eq!(canopy_candidates(1, 4.0, &answers), [2], "two Voxels up");
+        let canopies = [(0, dense), (1, sparse), (2, dense)];
+        let mut low = Chunk::air();
+        let mut high = Chunk::air();
+        agree_with_level_zero(&mut low, 0, 4.0, 0, &answers);
+        stand_canopy_cover(&mut low, 0, 4.0, &answers, &canopies);
+        stand_canopy_cover(&mut high, 1, 4.0, &answers, &canopies);
+        let column = |x: usize, rows: std::ops::Range<usize>| -> Vec<Voxel> {
+            rows.map(|y| low.get(x, y, 0)).collect()
+        };
+        let leaves = Voxel::cube;
+        assert_eq!(
+            column(0, 3..7),
+            [
+                Voxel::cube(rock),
+                leaves(CANOPY),
+                leaves(CANOPY),
+                Voxel::AIR
+            ],
+            "a dense column fills both Voxels over its ground"
+        );
+        assert_eq!(
+            column(1, 3..6),
+            [Voxel::cube(rock), leaves(OTHER), Voxel::AIR],
+            "a sparse one stands a Voxel lower, in its own shade"
+        );
+        assert_eq!(low.get(2, 31, 0), leaves(CANOPY));
+        assert_eq!(high.get(2, 0, 0), leaves(CANOPY), "the second Voxel up");
+        assert_eq!(high.get(2, 1, 0), Voxel::AIR);
     }
 
     #[test]
