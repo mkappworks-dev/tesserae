@@ -673,7 +673,7 @@ fn surface_index(x: i32, z: i32) -> usize {
 /// the surface is not in this Chunk's band) that the cube pass fills in a column
 /// whose surface is `surface_m`. Uses the cube pass's own comparison, not
 /// `floor(surface / voxel_size)`, so the two cannot disagree by an ulp.
-fn top_index(surface_m: f32, floor_m: f32, voxel_size: f32) -> i32 {
+pub(crate) fn top_index(surface_m: f32, floor_m: f32, voxel_size: f32) -> i32 {
     let mut y = ((surface_m - floor_m) / voxel_size).floor() as i32;
     while floor_m + (y + 1) as f32 * voxel_size <= surface_m {
         y += 1;
@@ -682,6 +682,31 @@ fn top_index(surface_m: f32, floor_m: f32, voxel_size: f32) -> i32 {
         y -= 1;
     }
     y
+}
+
+/// What a column of level 0 shows from above, beneath anything standing on it and with no
+/// cave opening it, as its Chunk lays it.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct ColumnTop {
+    /// The contained surface the cube pass fills up to.
+    pub surface_m: f32,
+    /// What open air over the column fills with water up to, sea or lake.
+    pub level_m: Option<f32>,
+    /// Whether that water fills a Voxel over the ground.
+    pub wet: bool,
+    /// The top Voxel's Material.
+    pub top: MaterialId,
+    /// The Material under it.
+    pub under: MaterialId,
+}
+
+/// The highest Voxel water standing at `level_m` fills, by the cube pass's `y_m < level`.
+pub(crate) fn level_index(level_m: f32, voxel_size: f32) -> i32 {
+    let mut k = (level_m / voxel_size).ceil() as i32;
+    while k as f32 * voxel_size >= level_m {
+        k -= 1;
+    }
+    k
 }
 
 /// One World's generator: a seed, a Voxel size and the parameters a Mod chose.
@@ -1665,11 +1690,7 @@ impl Worldgen {
 
     /// The highest Voxel water standing at `level_m` fills, whatever the ground under it.
     fn level_top(&self, level_m: f32) -> i32 {
-        let mut k = (level_m / self.voxel_size).ceil() as i32;
-        while k as f32 * self.voxel_size >= level_m {
-            k -= 1;
-        }
-        k
+        level_index(level_m, self.voxel_size)
     }
 
     /// A column's surface once its water is contained: where a neighbour's water stands higher
@@ -1694,7 +1715,11 @@ impl Worldgen {
     /// [`Self::contained_m`] at a point, its neighbours a Voxel away along each axis, reading their
     /// ground only where their water could stand above this column's top.
     fn contained_at_m(&self, [x_m, z_m]: [f32; 2], around: [[f32; 2]; 4]) -> f32 {
-        let own = self.raw_column(x_m, z_m);
+        self.contained_of(self.raw_column(x_m, z_m), around)
+    }
+
+    /// [`Self::contained_at_m`] of a column whose raw ground and water level are `own`.
+    fn contained_of(&self, own: (f32, Option<f32>), around: [[f32; 2]; 4]) -> f32 {
         let reach =
             self.water_top(own)
                 .unwrap_or(i32::MIN)
@@ -1708,6 +1733,32 @@ impl Worldgen {
             }
         });
         self.contained_m(own, around)
+    }
+
+    /// [`ColumnTop`] of the column at global Voxel `[gx, gz]`, asking no cache: a coarse level asks
+    /// one column of a Cell, whose cache is over a thousand. `None` in a World without ground.
+    pub fn column_top(&self, gx: i32, gz: i32) -> Option<ColumnTop> {
+        let ground = self.params.ground?;
+        let (x_m, z_m) = (self.global_m(gx), self.global_m(gz));
+        let column = self.terrain.column(x_m, z_m);
+        let own = (column.height_m, self.water_level_of(column.inland_m));
+        let surface_m = self.contained_of(
+            own,
+            CARDINALS.map(|(dx, dz, _)| [self.global_m(gx + dx), self.global_m(gz + dz)]),
+        );
+        let ground = self.biome_grounds.as_ref().map_or(ground, |grounds| {
+            self.biome_of([x_m, z_m], &column)
+                .map_or(grounds.world, |id| grounds.by_biome[id.index()])
+        });
+        let rock =
+            surface_m < self.params.sea_level_m - 1.0 && self.terrain.seabed_rock_of(&column);
+        Some(ColumnTop {
+            surface_m,
+            level_m: own.1,
+            wet: self.water_top((surface_m, own.1)).is_some(),
+            top: if rock { ground.rock } else { ground.surface },
+            under: if rock { ground.rock } else { ground.soil },
+        })
     }
 
     /// 1 where no Biome tunes the caves, otherwise a mean that moves continuously across a border,

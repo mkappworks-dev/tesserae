@@ -27,9 +27,9 @@ use tesserae_core::mesh::{POS_Y, Quad, QuadKind};
 use tesserae_core::shape::SUBDIV;
 use tesserae_core::worldgen::WaterParams;
 use tesserae_core::{
-    CHUNK_SIZE, Chunk, ChunkMesh, ChunkOverlay, LitChunk, MeshLayer, OreTable, SeamMargin,
-    SeamOpenings, Surface, Tables, Voxel, Worldgen, WorldgenParams, emits_no_faces,
-    mesh_chunk_with_seams, seam_openings,
+    CHUNK_SIZE, Chunk, ChunkMesh, ChunkOverlay, ColumnTop, LitChunk, MeshLayer, OreTable,
+    SeamMargin, SeamOpenings, Surface, Tables, Voxel, Worldgen, WorldgenParams,
+    agree_with_level_zero, emits_no_faces, mesh_chunk_with_seams, seam_openings,
 };
 
 use super::jobs::Stage;
@@ -167,6 +167,7 @@ pub(in crate::server) struct LodGenerators {
     sources: Vec<Worldgen>,
     /// `direct[k - 1]` makes an untouched level-k Chunk itself: from [`COLUMNS_FROM`] up.
     direct: Vec<Option<Worldgen>>,
+    answers: Arc<Answers>,
 }
 
 impl LodGenerators {
@@ -193,6 +194,7 @@ impl LodGenerators {
         let mut generators = LodGenerators {
             sources,
             direct: Vec::new(),
+            answers: Arc::default(),
         };
         generators.direct = generators.made_directly(world, COLUMNS_FROM, false);
         generators
@@ -222,21 +224,10 @@ impl LodGenerators {
             .map(|k| {
                 (k >= from).then(|| {
                     let voxel_m = world.voxel_size * level_scale(k);
-                    // The generator asks about a Voxel's floor, so a Voxel the ground barely
-                    // enters is ground and a shallow lake drains. Lowering the surface and the
-                    // lake by half a Voxel asks about its middle, as the downsample's vote does;
-                    // `next_up` gives the lake its ties, as the vote does (Terra's lake sits
-                    // on a level-3 Voxel's middle).
-                    let half = voxel_m / 2.0;
                     let params = WorldgenParams {
                         smoothing: None,
                         caves: p.caves.filter(|_| caves),
                         ores: if caves { p.ores } else { OreTable::default() },
-                        sea_level_m: p.sea_level_m - half,
-                        water: p.water.map(|w| WaterParams {
-                            level_m: (w.level_m - half).next_up(),
-                            ..w
-                        }),
                         ..p
                     };
                     Worldgen::new(world.seed, voxel_m, params)
@@ -247,6 +238,16 @@ impl LodGenerators {
 
     fn direct(&self, level: u32) -> Option<&Worldgen> {
         self.direct.get(Plan::index(level))?.as_ref()
+    }
+
+    #[cfg(test)]
+    fn makers(&self, level: u32) -> Makers<'_> {
+        Makers {
+            source: &self.sources[Plan::index(level)],
+            direct: self.direct(level),
+            level_zero: &self.sources[0],
+            answers: &self.answers,
+        }
     }
 
     /// How many levels there are, level 0 included.
@@ -741,6 +742,141 @@ pub(in crate::server) fn generate_coarse(
     coarse
 }
 
+/// A level-`level` Chunk from `held` and what `source` makes, or `direct` where it is given, as a
+/// job makes one that nothing saved reaches.
+pub(in crate::server) fn make_coarse(
+    level: u32,
+    coord: ChunkCoord,
+    makers: Makers<'_>,
+    held: &[Option<Held>; 8],
+    tables: &Tables,
+) -> Coarse {
+    let mut coarse = match makers.direct {
+        Some(direct) => Coarse {
+            chunk: direct.chunk(coord.x, coord.y, coord.z),
+            overlay: ChunkOverlay::none(),
+            // No children to read openings from, so every seam wall stays.
+            openings: SeamOpenings::everywhere(),
+        },
+        None => generate_coarse(
+            makers.source,
+            coord,
+            held,
+            tables,
+            if level == 1 {
+                waterline(makers.source)
+            } else {
+                None
+            },
+            seam_margin(level),
+        ),
+    };
+    agree(
+        makers.level_zero,
+        Some(makers.answers),
+        level,
+        coord,
+        &mut coarse.chunk,
+        held,
+    );
+    coarse
+}
+
+/// The generators a coarse job reads: its level's source, its column generator, and level 0
+/// for [`agree`].
+#[derive(Clone, Copy)]
+pub(in crate::server) struct Makers<'a> {
+    pub source: &'a Worldgen,
+    pub direct: Option<&'a Worldgen>,
+    pub level_zero: &'a Worldgen,
+    pub answers: &'a Answers,
+}
+
+/// Makes every column of a level-`level` Chunk that no changed child reaches show level 0's water
+/// or land and top Material at its centre (ADR-0035). A changed child's columns keep the
+/// downsample's answer, so a drained lake or a built pier shows as it does at level 1.
+fn agree(
+    level_zero: &Worldgen,
+    answers: Option<&Answers>,
+    level: u32,
+    coord: ChunkCoord,
+    chunk: &mut Chunk,
+    held: &[Option<Held>; 8],
+) {
+    let n = CHUNK_SIZE as i32;
+    let voxel_m = level_zero.voxel_size() * level_scale(level);
+    let floor_m = (coord.y * n) as f32 * voxel_m;
+    let ceiling_m = floor_m + n as f32 * voxel_m;
+    // No column's top or water reaches a sky Chunk or leaves rock above a deep one.
+    let (lowest_m, highest_m) = level_zero.surface_bounds_m();
+    if (floor_m > highest_m + voxel_m && chunk.uniform() == Some(Voxel::AIR))
+        || ceiling_m < lowest_m - voxel_m
+    {
+        return;
+    }
+    let column = [coord.x, coord.z];
+    let answered = match answers {
+        Some(answers) => answers.over(level_zero, level, column),
+        None => Answers::ask(level_zero, level, column),
+    };
+    let half = CHUNK_SIZE / 2;
+    let changed = |i: usize| {
+        let (x, z) = (i % CHUNK_SIZE, i / CHUNK_SIZE);
+        (0..8).any(|c| {
+            c & 1 == x / half
+                && (c >> 2) & 1 == z / half
+                && held[c].as_ref().is_some_and(|h| h.changed.is_some())
+        })
+    };
+    let kept: Vec<Option<ColumnTop>>;
+    let answered: &[Option<ColumnTop>] = if held.iter().flatten().any(|h| h.changed.is_some()) {
+        kept = (0..answered.len())
+            .map(|i| answered[i].filter(|_| !changed(i)))
+            .collect();
+        &kept
+    } else {
+        &answered
+    };
+    let water = level_zero.water().map_or(0, |w| w.material);
+    agree_with_level_zero(chunk, coord.y, voxel_m, water, answered);
+}
+
+/// How many coarse Chunk columns [`Answers`] keeps: 16 KB each.
+const ANSWERED_COLUMNS: usize = 256;
+
+/// Level 0's answers over each coarse Chunk column lately asked, which every row of it over the
+/// ground asks again: they cost as much as a column-only Chunk.
+#[derive(Default)]
+pub(in crate::server) struct Answers(std::sync::Mutex<HashMap<(u32, [i32; 2]), Answered>>);
+
+/// Indexed `z * CHUNK_SIZE + x`.
+type Answered = Arc<[Option<ColumnTop>]>;
+
+impl Answers {
+    fn over(&self, level_zero: &Worldgen, level: u32, column: [i32; 2]) -> Answered {
+        let key = (level, column);
+        if let Some(answered) = self.0.lock().unwrap().get(&key) {
+            return Arc::clone(answered);
+        }
+        let answered = Self::ask(level_zero, level, column);
+        let mut kept = self.0.lock().unwrap();
+        if kept.len() >= ANSWERED_COLUMNS {
+            kept.clear();
+        }
+        kept.insert(key, Arc::clone(&answered));
+        answered
+    }
+
+    fn ask(level_zero: &Worldgen, level: u32, [cx, cz]: [i32; 2]) -> Answered {
+        let n = CHUNK_SIZE as i32;
+        let span = 1i32 << level;
+        let centre = |c: i32, local: i32| (c * n + local) * span + span / 2;
+        (0..n * n)
+            .map(|i| level_zero.column_top(centre(cx, i % n), centre(cz, i / n)))
+            .collect()
+    }
+}
+
 /// How far [`seam_openings`] looks past a level's children, or `None` to keep every seam wall.
 /// Level 1's children are level 0's own Chunks. Above it they are made at the finer level's
 /// Voxel size but not downsampled as that level is, so their ground stands a finer Voxel or two
@@ -790,14 +926,23 @@ fn generate_persistent(
         })
     });
     let source = &sources[level as usize - 1];
-    generate_coarse(
+    let mut coarse = generate_coarse(
         source,
         coord,
         &children,
         tables,
         waterline(source),
         seam_margin(level),
-    )
+    );
+    agree(
+        &sources[0],
+        None,
+        level,
+        coord,
+        &mut coarse.chunk,
+        &children,
+    );
+    coarse
 }
 
 /// What generation fills with its lake at level 0, for level 1 to recognise.
@@ -883,9 +1028,10 @@ fn mesh_coarse(
 }
 
 /// Moves a coarse mesh's lake surface to where level 0 draws its own: the top of level 0's
-/// highest water Voxel. A coarse Voxel is water when water holds half of it, so its top is up
-/// to half a coarse Voxel off, either way; drawn there, a finer level's row boundary can fall
-/// between the two surfaces, and the cut of `drawn_mask` then asks about the wrong Chunk.
+/// highest water Voxel. A coarse Voxel is water when water reaches into it, or under a change
+/// when water holds half of it, so its top is up to a coarse Voxel off; drawn there, a finer
+/// level's row boundary can fall between the two surfaces, and the cut of `drawn_mask` then asks
+/// about the wrong Chunk.
 ///
 /// Only over packed water, which is the generator's lake (`downsample_changed`): fluid in the
 /// overlay is water that flowed or was placed, whose level-0 surface is anywhere, so it stays
@@ -1615,11 +1761,8 @@ fn dispatch(
             children.jobs_in_load += u64::from(inside > 0);
         }
         let source = generators.sources[Plan::index(plan.level)].clone();
-        let waterline = if plan.level == 1 {
-            waterline(&source)
-        } else {
-            None
-        };
+        let level_zero = generators.sources[0].clone();
+        let answers = Arc::clone(&generators.answers);
         let tables = Arc::clone(&tables.0);
         let times = jobs.times.clone();
         let level = plan.level;
@@ -1627,22 +1770,14 @@ fn dispatch(
             times.generated(level, || {
                 if let Some(sources) = sources {
                     generate_persistent(level, coord, &sources, &persistent, &finer, &tables)
-                } else if let Some(direct) = direct {
-                    Coarse {
-                        chunk: direct.chunk(coord.x, coord.y, coord.z),
-                        overlay: ChunkOverlay::none(),
-                        // No children to read openings from, so every seam wall stays.
-                        openings: SeamOpenings::everywhere(),
-                    }
                 } else {
-                    generate_coarse(
-                        &source,
-                        coord,
-                        &held_children,
-                        &tables,
-                        waterline,
-                        seam_margin(level),
-                    )
+                    let makers = Makers {
+                        source: &source,
+                        direct: direct.as_ref(),
+                        level_zero: &level_zero,
+                        answers: &answers,
+                    };
+                    make_coarse(level, coord, makers, &held_children, &tables)
                 }
             })
         });
@@ -2099,7 +2234,24 @@ mod tests {
             Some((at, chunk)) if at == i => chunk,
             _ => &made[i],
         });
-        downsample(refs, &crate::server::fixture_tables().shapes)
+        agreed(
+            level,
+            coord,
+            downsample(refs, &crate::server::fixture_tables().shapes),
+            override_child.map(|(at, _)| at),
+        )
+    }
+
+    /// `chunk` once its columns agree with level 0's at their centres, but over child `changed`.
+    fn agreed(level: u32, coord: ChunkCoord, mut chunk: Chunk, changed: Option<usize>) -> Chunk {
+        let held: [Option<Held>; 8] = std::array::from_fn(|i| {
+            (changed == Some(i)).then(|| Held {
+                chunk: Arc::new(Chunk::air()),
+                changed: Some(Arc::new(ChunkOverlay::none())),
+            })
+        });
+        agree(&source(0), None, level, coord, &mut chunk, &held);
+        chunk
     }
 
     fn assert_holds_exactly_the_load_set(h: &Harness) {
@@ -2208,6 +2360,10 @@ mod tests {
             .world_mut()
             .resource_mut::<ChunkStore>()
             .insert(edited, lantern.clone());
+        h.app
+            .world_mut()
+            .resource_mut::<MeshState>()
+            .voxels_changed(edited);
         h.lod_settle();
 
         let got = h.lod_store().get(1, origin).unwrap();
@@ -2300,7 +2456,7 @@ mod tests {
                 );
             }
         }
-        // Built here as `COLUMNS_FROM` builds it: an 8 m Voxel asked about its middle, no caves.
+        // Built here as `COLUMNS_FROM` builds it: an 8 m Voxel, no caves, agreeing with level 0.
         let p = tesserae_core::testgen::world_params();
         let columns = Worldgen::new(
             world().seed,
@@ -2308,7 +2464,6 @@ mod tests {
             WorldgenParams {
                 smoothing: None,
                 caves: None,
-                sea_level_m: p.sea_level_m - 4.0,
                 ..p
             },
         );
@@ -2316,7 +2471,10 @@ mod tests {
         for coord in h.held(3) {
             let held = h.lod_store().get(3, coord).unwrap();
             assert!(
-                same_chunk(held, &columns.chunk(coord.x, coord.y, coord.z)),
+                same_chunk(
+                    held,
+                    &agreed(3, coord, columns.chunk(coord.x, coord.y, coord.z), None)
+                ),
                 "level 3 {coord}"
             );
             varied += usize::from(held.uniform().is_none());
@@ -2337,7 +2495,6 @@ mod tests {
             );
         }
         for level in 2..LEVELS {
-            // Sampled at each Voxel's middle height: half a level-k Voxel up.
             let voxel_m = 2f32.powi(level as i32);
             let p = tesserae_core::testgen::world_params();
             let own = Worldgen::new(
@@ -2345,7 +2502,6 @@ mod tests {
                 voxel_m,
                 WorldgenParams {
                     smoothing: None,
-                    sea_level_m: p.sea_level_m - voxel_m / 2.0,
                     ..p
                 },
             );
@@ -2353,7 +2509,10 @@ mod tests {
             for coord in h.held(level) {
                 let held = h.lod_store().get(level, coord).unwrap();
                 assert!(
-                    same_chunk(held, &own.chunk(coord.x, coord.y, coord.z)),
+                    same_chunk(
+                        held,
+                        &agreed(level, coord, own.chunk(coord.x, coord.y, coord.z), None)
+                    ),
                     "level {level} {coord}"
                 );
                 differs += usize::from(!same_chunk(held, &expected(level, coord, None)));
@@ -2758,6 +2917,10 @@ mod tests {
             .world_mut()
             .resource_mut::<ChunkStore>()
             .insert(coord.child(7), lantern.clone());
+        h.app
+            .world_mut()
+            .resource_mut::<MeshState>()
+            .voxels_changed(coord.child(7));
         h.app
             .world_mut()
             .resource_mut::<LodState>()
