@@ -293,11 +293,20 @@ impl Worldgen {
     /// A later row's Structure gives way to an earlier row's it would touch, so a column belongs to
     /// one Structure, and every one gives way to a Settlement.
     pub(super) fn structures_near(&self, region: [[i32; 2]; 2]) -> Vec<Structure> {
+        self.structures_near_but(region, false)
+    }
+
+    /// [`Self::structures_near`], without those of a Template that spans when `no_spans`: a later
+    /// row still gives way to one, so the rest are as level 0 stands them.
+    fn structures_near_but(&self, region: [[i32; 2]; 2], no_spans: bool) -> Vec<Structure> {
         let Some(pass) = &self.structures else {
             return Vec::new();
         };
         let mut standing = Vec::new();
-        for index in 0..pass.rows.len() {
+        for (index, row) in pass.rows.iter().enumerate() {
+            if no_spans && row.underside_m.is_some() {
+                continue;
+            }
             for s in self.row_structures(index, region) {
                 let claimed =
                     (0..index).any(|before| !self.row_structures(before, s.footprint()).is_empty());
@@ -501,15 +510,20 @@ impl Worldgen {
     /// Every solid Voxel a Structure or a Settlement Plot's Structure stands in the global cells
     /// `[min, max)`, in the order [`Self::chunk`] writes them: what a coarse level samples its
     /// Structure Impostors from (ADR-0035). It reads the draws and the ground's heights alone,
-    /// never a Chunk.
-    pub fn structure_parts(&self, min: [i32; 3], max: [i32; 3]) -> Vec<StructurePart> {
+    /// never a Chunk. With `spans` false it leaves out a Template that spans, whose cell's gap
+    /// search reads every metre of its ground.
+    pub fn structure_parts(&self, min: [i32; 3], max: [i32; 3], spans: bool) -> Vec<StructurePart> {
         let Some((lowest_m, highest_m)) = self.structure_band_m() else {
             return Vec::new();
         };
         if self.global_m(min[1]) > highest_m || self.global_m(max[1]) < lowest_m {
             return Vec::new();
         }
-        let claims = self.claims_near([[min[0], min[2]], [max[0], max[2]]]);
+        let region = [[min[0], min[2]], [max[0], max[2]]];
+        let claims = Claims {
+            settlements: self.laid_settlements_near(region),
+            structures: self.structures_near_but(region, !spans),
+        };
         let mut parts = Vec::new();
         let mut put = |at: [i32; 3], voxel: Voxel| {
             if !voxel.is_air() {

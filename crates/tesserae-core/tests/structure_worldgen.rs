@@ -1308,7 +1308,7 @@ fn the_structure_parts_drawn_in_a_box_are_the_solid_voxels_level_zero_stands_the
         let [min, max] = scanned(&probe, half_m);
         let drawn: HashMap<[i32; 3], MaterialId> = probe
             .with
-            .structure_parts(min, max)
+            .structure_parts(min, max, true)
             .into_iter()
             .map(|p| (p.at, p.material))
             .collect();

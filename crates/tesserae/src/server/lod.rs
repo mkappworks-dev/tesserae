@@ -166,6 +166,10 @@ fn level_scale(level: u32) -> f32 {
 /// terrain Chunk than level 1's 6, with no warm 1 m columns under them, so it takes Canopy cover.
 pub(in crate::server) const IMPOSTORS_TO: u32 = 1;
 
+/// Levels up to this one stand a Template that spans, a bridge. Its cell's gap search reads every
+/// metre of its ground: free over level 1's warm 1 m columns, some 3 s a km² cold above it.
+pub(in crate::server) const SPANS_TO: u32 = 1;
+
 /// The placement generator's column cache, in Cells: level 1's ring at the widest unit a Player
 /// may ask for, and its load margin. About 24 KB a Cell, held only where level 1 streams.
 fn level_one_cells(world: &WorldSettings) -> usize {
@@ -869,7 +873,7 @@ fn stand_structures(
     let span = 1i32 << level;
     let n = CHUNK_SIZE as i32 * span;
     let min = [coord.x * n, coord.y * n, coord.z * n];
-    let mut parts = placement.structure_parts(min, min.map(|m| m + n));
+    let mut parts = placement.structure_parts(min, min.map(|m| m + n), level <= SPANS_TO);
     parts.retain(|p| solid(&p.material));
     // A Template's ground-coloured cells stand first, so a wall beats the soil a Plot lays.
     parts.sort_by_key(|p| built.binary_search(&p.material).is_ok());

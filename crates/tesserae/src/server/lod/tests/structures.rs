@@ -167,7 +167,7 @@ fn the_placement_generator_stands_the_structures_level_zero_stands() {
                 let min = [cx * n, cy * n, cz * n];
                 let drawn: HashSet<[i32; 3]> = generators
                     .placement
-                    .structure_parts(min, min.map(|m| m + n))
+                    .structure_parts(min, min.map(|m| m + n), true)
                     .into_iter()
                     .map(|p| p.at)
                     .collect();

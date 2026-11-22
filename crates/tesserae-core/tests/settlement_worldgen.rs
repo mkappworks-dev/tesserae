@@ -2033,7 +2033,7 @@ fn the_structure_parts_and_paths_drawn_over_a_settlement_are_what_level_zero_sta
     .map(|c| c * SIZE_I);
     let built = [WELL, HOUSE, SHED, FLOOR, WALL, DOOR];
     let drawn: HashMap<[i32; 3], MaterialId> = with
-        .structure_parts(min, max)
+        .structure_parts(min, max, true)
         .into_iter()
         .map(|p| (p.at, p.material))
         .collect();
