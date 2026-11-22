@@ -50,6 +50,7 @@ pub(super) struct Map {
 pub(super) struct View {
     view_distance_m: f32,
     lod_distance_m: f32,
+    low_lod_distance_m: Option<f32>,
 }
 
 #[derive(Deserialize)]
@@ -146,6 +147,7 @@ impl From<View> for content::ViewParams {
         Self {
             view_distance_m: v.view_distance_m,
             lod_distance_m: v.lod_distance_m,
+            low_lod_distance_m: v.low_lod_distance_m,
         }
     }
 }

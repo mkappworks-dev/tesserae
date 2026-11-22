@@ -4,24 +4,23 @@
 use super::*;
 use crate::client::quality::{self, DistancePreset, Level};
 use crate::client::theme;
-use crate::server::quality::QualityCurve;
-use crate::server::streaming::StreamingSettings;
+use crate::server::quality::{DeclaredStreaming, QualityCurve};
 use crate::world::WorldSettings;
 
 /// The distances of the open World, or the engine's while none is.
 pub(in crate::client) type WorldDistances<'w> = (
-    Option<Res<'w, crate::server::quality::DeclaredStreaming>>,
+    Option<Res<'w, DeclaredStreaming>>,
     Option<Res<'w, WorldSettings>>,
 );
 
-pub(super) fn game(distances: &WorldDistances) -> (StreamingSettings, WorldSettings) {
+pub(super) fn game(distances: &WorldDistances) -> (DeclaredStreaming, WorldSettings) {
     (
-        distances.0.as_ref().map(|d| d.0).unwrap_or_default(),
+        distances.0.as_deref().copied().unwrap_or_default(),
         distances.1.as_deref().cloned().unwrap_or_default(),
     )
 }
 
-fn preset_hint(preset: DistancePreset, game: StreamingSettings) -> String {
+fn preset_hint(preset: DistancePreset, game: DeclaredStreaming) -> String {
     match preset {
         DistancePreset::Low => format!(
             "The World's own rings, to {}: lightest on memory. The default. Choose Custom to set \
@@ -41,7 +40,7 @@ fn preset_hint(preset: DistancePreset, game: StreamingSettings) -> String {
 pub(super) fn distance(
     list: &mut ChildSpawnerCommands,
     p: &Preferences,
-    (game, world): (StreamingSettings, &WorldSettings),
+    (game, world): (DeclaredStreaming, &WorldSettings),
 ) {
     let d = p.distance;
     let locked = d.preset != DistancePreset::Custom;
@@ -99,7 +98,7 @@ pub(super) fn distance(
         list,
         format!(
             "The nearest {} is always full detail; the Game sets how far it allows.",
-            metres(game.view_distance_m)
+            metres(game.ceiling.view_distance_m)
         ),
         theme::TEXT_SMALL,
         theme::muted(),

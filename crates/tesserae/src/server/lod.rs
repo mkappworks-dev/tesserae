@@ -725,9 +725,11 @@ fn open_lod_generators(
     mut commands: Commands,
     world: Res<WorldSettings>,
     settings: Res<StreamingSettings>,
+    declared: Res<super::quality::DeclaredStreaming>,
     generator: Res<WorldGenerator>,
 ) {
-    let generators = LodGenerators::new(&world, &generator, level_count(&settings));
+    let levels = level_count(&declared.ceiling).max(level_count(&settings));
+    let generators = LodGenerators::new(&world, &generator, levels);
     #[cfg(any(feature = "dev", feature = "profiling"))]
     let generators = {
         let var = |name| std::env::var(name).ok();
@@ -1573,7 +1575,7 @@ pub(in crate::server) fn stream_lod(
     player: Query<&Player>,
     (mut orders, time): (ResMut<LodOrders>, Option<Res<Time>>),
 ) {
-    // Never more than the generators, which the Game's own doubling, the most a curve has, sized.
+    // Never more than the generators, which the doubling to the ceiling, the most a curve has, sized.
     let levels = level_count(&settings).min(generators.levels());
     if levels <= 1 {
         retire(&[], &mut store, &mut state, &mut jobs, &mut unloaded);

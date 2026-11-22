@@ -1033,11 +1033,14 @@ fn the_map_and_compass_settings_say_unavailable_while_the_world_forbids_them() {
     assert_eq!(hints(false).len(), 3);
 }
 
-fn terra() -> crate::server::streaming::StreamingSettings {
-    crate::server::streaming::StreamingSettings {
-        view_distance_m: 160.0,
-        lod_distance_m: 3000.0,
-        ..default()
+fn terra() -> crate::server::quality::DeclaredStreaming {
+    crate::server::quality::DeclaredStreaming {
+        ceiling: crate::server::streaming::StreamingSettings {
+            view_distance_m: 160.0,
+            lod_distance_m: 8192.0,
+            ..default()
+        },
+        low_reach_m: 3000.0,
     }
 }
 
@@ -1065,11 +1068,8 @@ fn move_slider(app: &mut App, kind: Scalar, value: f32) {
 fn the_distance_sliders_move_only_under_custom_which_remembers_its_own() {
     use crate::client::quality::{DistancePreset, Sliders};
     let mut app = app();
-    let far = crate::server::streaming::StreamingSettings {
-        lod_distance_m: 8192.0,
-        ..terra()
-    };
-    app.insert_resource(crate::server::quality::DeclaredStreaming(far));
+    let far = terra();
+    app.insert_resource(far);
     activate_operation(
         &mut app,
         Operation::Navigate(crate::client::menu_ui::Tab::Distance),
@@ -1176,8 +1176,8 @@ fn the_distance_page_locks_its_sliders_and_lists_this_world_s_levels() {
     for expected in [
         "Medium",
         "160 m – 512 m",
-        "2 km – 3 km",
-        "4 coarse levels to 3 km",
+        "4.1 km – 6 km",
+        "5 coarse levels to 6 km",
         "The nearest 160 m is always full detail; the Game sets how far it allows.",
     ] {
         assert!(
@@ -1199,12 +1199,12 @@ fn the_distance_page_locks_its_sliders_and_lists_this_world_s_levels() {
 #[test]
 fn applying_a_preset_changes_the_rings_the_server_streams() {
     use crate::client::quality::DistancePreset;
-    use crate::server::quality::{DeclaredStreaming, QualityCurve};
+    use crate::server::quality::QualityCurve;
     use crate::server::streaming::StreamingSettings;
     let mut app = app();
     app.add_message::<QualityCurve>()
+        .insert_resource(terra().low())
         .insert_resource(terra())
-        .insert_resource(DeclaredStreaming(terra()))
         .add_systems(
             Update,
             (
@@ -1228,9 +1228,9 @@ fn applying_a_preset_changes_the_rings_the_server_streams() {
     activate_operation(&mut app, Operation::Apply);
     app.update();
     let high = streamed(&app);
-    assert_eq!(high, QualityCurve::HIGH.applied_to(terra()));
-    // 160 m, then 768, 1536 and Terra's 3000 m ceiling.
-    assert_eq!(crate::server::level_count(&high), 4);
+    assert_eq!(high, QualityCurve::HIGH.applied_to(terra().ceiling));
+    // 160 m, then 768, 1536, 3072 and 6144 m, then 8 km.
+    assert_eq!(crate::server::level_count(&high), 6);
     let rings = crate::server::LevelRings::new(high, 32.0, 1);
     assert_eq!(rings.mesh.outer.horizontal, 12);
 }

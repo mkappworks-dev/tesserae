@@ -277,7 +277,11 @@ interface content {
     /// engine rejects values outside its supported ranges.
     record view-params {
         view-distance-m: f32,
+        /// The farthest a Player's Quality curve may reach: the ceiling.
         lod-distance-m: f32,
+        /// The reach of the Low preset, the Game's own rings, when it is nearer
+        /// than the ceiling. Absent, Low reaches `lod-distance-m`.
+        low-lod-distance-m: option<f32>,
     }
 
     /// Exposure a hot fluid or a burning solid gives off: `strength` where it

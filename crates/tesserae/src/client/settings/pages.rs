@@ -224,8 +224,8 @@ pub(super) fn page(
         &crate::client::edit::Catalogue,
         &crate::client::edit::Notice,
     ),
-    (streaming, world): (
-        crate::server::streaming::StreamingSettings,
+    (game, world): (
+        crate::server::quality::DeclaredStreaming,
         crate::world::WorldSettings,
     ),
 ) {
@@ -234,7 +234,7 @@ pub(super) fn page(
     match settings.tab {
         Tab::Behavior => behavior(list, settings, bindings, p, labels, context),
         Tab::Display => display(list, p, map_allowed),
-        Tab::Distance => distance(list, p, (streaming, &world)),
+        Tab::Distance => distance(list, p, (game, &world)),
         Tab::Audio => audio(list, settings, p),
         Tab::Bindings => bindings_page(list, settings, bindings, labels, searches, map_allowed),
         Tab::Controller => controller(list, settings, bindings, p, labels, map_allowed),

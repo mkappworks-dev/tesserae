@@ -416,6 +416,7 @@ fn only_the_game_sets_world_or_view() {
     d.view = Some(content::ViewParams {
         view_distance_m: 160.0,
         lod_distance_m: 3000.0,
+        low_lod_distance_m: None,
     });
     assert!(matches!(
         load.apply("content", d).unwrap_err(),
@@ -430,6 +431,7 @@ fn a_game_with_no_caves_gets_no_caves_and_its_reach() {
     d.view = Some(content::ViewParams {
         view_distance_m: 160.0,
         lod_distance_m: 3000.0,
+        low_lod_distance_m: None,
     });
     let mut load = Load::new();
     let applied = apply(d, "game", &mut load.tables, &mut load.registry, true).unwrap();
@@ -445,7 +447,8 @@ fn a_game_with_no_caves_gets_no_caves_and_its_reach() {
         applied.view,
         Some(ViewParams {
             view_distance_m: 160.0,
-            lod_distance_m: 3000.0
+            lod_distance_m: 3000.0,
+            low_lod_distance_m: None,
         })
     );
     assert_eq!(load.registry.id_of(Kind::Material, "game:lamp"), Some(8));
@@ -516,6 +519,7 @@ fn the_reach_is_checked_in_metres() {
         ViewParams {
             view_distance_m: view,
             lod_distance_m: lod,
+            low_lod_distance_m: None,
         }
         .validate()
     };
@@ -533,10 +537,25 @@ fn the_reach_is_checked_in_metres() {
     ] {
         assert_eq!(ok(view, lod).unwrap_err().field, field, "{view} {lod}");
     }
+    let low = |low| {
+        ViewParams {
+            view_distance_m: 160.0,
+            lod_distance_m: 8192.0,
+            low_lod_distance_m: Some(low),
+        }
+        .validate()
+    };
+    assert_eq!(low(160.0), Ok(()));
+    assert_eq!(low(3000.0), Ok(()));
+    assert_eq!(low(8192.0), Ok(()));
+    for bad in [159.9, 8192.5, f32::NAN, f32::INFINITY] {
+        assert_eq!(low(bad).unwrap_err().field, "low_lod_distance_m", "{bad}");
+    }
     let mut d = declaring(&[], &[]);
     d.view = Some(content::ViewParams {
         view_distance_m: 10.0,
         lod_distance_m: 20.0,
+        low_lod_distance_m: None,
     });
     let mut load = Load::new();
     let err = apply(d, "game", &mut load.tables, &mut load.registry, true).unwrap_err();

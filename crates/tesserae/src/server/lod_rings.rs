@@ -163,7 +163,7 @@ fn shrunk(hole: Extent, cells: i32) -> Option<Extent> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::server::quality::QualityCurve;
+    use crate::server::quality::{DeclaredStreaming, QualityCurve};
     use crate::world::WorldSettings;
 
     fn world(voxel_size: f32) -> WorldSettings {
@@ -351,7 +351,8 @@ mod tests {
         QualityCurve { unit_m, reach_m }.applied_to(StreamingSettings::default())
     }
 
-    fn terra() -> StreamingSettings {
+    /// Terra's rings before step 22: Low still streams them.
+    fn terra_own() -> StreamingSettings {
         StreamingSettings {
             view_distance_m: 160.0,
             lod_distance_m: 3000.0,
@@ -359,10 +360,19 @@ mod tests {
         }
     }
 
+    fn terra() -> DeclaredStreaming {
+        DeclaredStreaming {
+            ceiling: StreamingSettings {
+                lod_distance_m: 8192.0,
+                ..terra_own()
+            },
+            low_reach_m: 3000.0,
+        }
+    }
+
     /// Every curve the ring tests cover: each preset, a Custom one and two the clamp cuts.
     fn curves() -> Vec<StreamingSettings> {
-        let engine = StreamingSettings::default();
-        let mut curves: Vec<_> = [engine, terra()]
+        let mut curves: Vec<_> = [DeclaredStreaming::default(), terra()]
             .into_iter()
             .flat_map(|game| {
                 [
@@ -370,7 +380,7 @@ mod tests {
                     QualityCurve::MEDIUM,
                     QualityCurve::HIGH,
                 ]
-                .map(|curve| curve.applied_to(game))
+                .map(|curve| curve.applied_to(game.ceiling))
             })
             .collect();
         curves.extend([curve(288.0, 2500.0), curve(100.0, 8192.0)]);
@@ -378,18 +388,22 @@ mod tests {
     }
 
     #[test]
-    fn low_is_the_game_s_own_doubling() {
-        for game in [StreamingSettings::default(), terra()] {
-            let low = QualityCurve::low(game).applied_to(game);
-            assert_eq!(level_count(&low), level_count(&game));
+    fn low_is_the_game_s_own_doubling_to_its_reach_before_the_ceiling_rose() {
+        for (game, own) in [
+            (DeclaredStreaming::default(), StreamingSettings::default()),
+            (terra(), terra_own()),
+        ] {
+            let low = QualityCurve::low(game).applied_to(game.ceiling);
+            assert_eq!(game.low(), low);
+            assert_eq!(level_count(&low), level_count(&own));
             for level in 0..MAX_LEVELS {
                 for voxel_size in [1.0, 0.25] {
                     let cell = world(voxel_size).cell_size();
                     assert_eq!(
                         LevelRings::new(low, cell, level),
-                        LevelRings::new(game, cell, level),
+                        LevelRings::new(own, cell, level),
                         "{} m view, {voxel_size} level {level}",
-                        game.view_distance_m
+                        own.view_distance_m
                     );
                 }
             }
@@ -398,10 +412,10 @@ mod tests {
 
     #[test]
     fn medium_reaches_eight_of_each_level_s_own_chunks() {
-        let medium = QualityCurve::MEDIUM.applied_to(terra());
-        assert_eq!(level_count(&medium), 5);
-        // 160 m, then 512, 1024 and 2048 m, then Terra's 3000 m ceiling.
-        for (level, horizontal) in [(0, 5), (1, 8), (2, 8), (3, 8), (4, 6)] {
+        let medium = QualityCurve::MEDIUM.applied_to(terra().ceiling);
+        assert_eq!(level_count(&medium), 6);
+        // 160 m, then 512 m to 4096 m, then 6 km rounded up to a whole 1024 m Cell.
+        for (level, horizontal) in [(0, 5), (1, 8), (2, 8), (3, 8), (4, 8), (5, 6)] {
             let r = LevelRings::new(medium, 32.0, level);
             assert_eq!(r.mesh.outer, ext(horizontal, 3), "level {level}");
         }
@@ -409,12 +423,13 @@ mod tests {
 
     #[test]
     fn high_holds_each_level_twice_as_far() {
-        let high = QualityCurve::HIGH.applied_to(StreamingSettings::default());
-        assert_eq!(level_count(&high), 5);
-        // 192 m, then 768, 1536 and 3072 m, then the 4096 m reach.
+        let high = QualityCurve::HIGH.applied_to(DeclaredStreaming::default().ceiling);
+        assert_eq!(level_count(&high), 6);
+        // 192 m, then 768 m to 6144 m, then 8 km rounded up to a whole 1024 m Cell.
         let table = [
             (6, None, None),
             (12, Some(ext(1, 1)), Some(ext(0, 0))),
+            (12, Some(ext(4, 1)), Some(ext(3, 0))),
             (12, Some(ext(4, 1)), Some(ext(3, 0))),
             (12, Some(ext(4, 1)), Some(ext(3, 0))),
             (8, Some(ext(4, 1)), Some(ext(3, 0))),
@@ -445,7 +460,7 @@ mod tests {
 
     #[test]
     fn the_server_clamps_the_unit_to_the_view_distance_and_the_reach_to_the_ceiling() {
-        let terra = terra();
+        let terra = terra_own();
         let clamped = QualityCurve {
             unit_m: 100.0,
             reach_m: 8192.0,
