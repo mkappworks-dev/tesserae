@@ -51,9 +51,9 @@ fn a_dense_forest_draws_its_leaves_as_high_over_its_ground_as_its_cover_and_tree
                 })
                 .collect();
             let expected = generators.placement.canopy_cover(&shapes, &centres);
-            let column = |placement: bool| {
+            let column = |trees: bool| {
                 let makers = Makers {
-                    placement: placement.then_some(&*generators.placement),
+                    stand_trees: trees,
                     ..generators.makers(level)
                 };
                 let chunks: Vec<(i32, Chunk)> = rows(&level_zero, level)

@@ -180,6 +180,42 @@ fn a_level_one_chunk_built_from_held_children_equals_one_built_from_generated_ch
     assert!(trees > 0, "no level-1 Chunk stands a tree");
 }
 
+#[test]
+fn a_branch_holding_a_changed_child_stands_no_impostor_in_any_octant() {
+    let world = land();
+    let level_zero = Worldgen::new(world.seed, world.voxel_size, forest());
+    let generators = LodGenerators::new(&world, &level_zero, LEVELS);
+    let tables = &fixtures().tables;
+    let trees_outside_octant_zero = |chunk: &Chunk| {
+        let half = CHUNK_SIZE / 2;
+        voxels(chunk)
+            .filter(|&(at, v)| is_tree(v) && at.iter().any(|&a| a >= half))
+            .count()
+    };
+    let coord = rows(&level_zero, 1)
+        .map(|cy| ChunkCoord::new(0, cy, 0))
+        .find(|&c| {
+            let stood = make_coarse(1, c, generators.makers(1), &Default::default(), tables);
+            trees_outside_octant_zero(&stood.chunk) > 0
+        })
+        .expect("a wooded level-1 Chunk");
+    let child = coord.child(0);
+    let mut felled = level_zero.chunk(child.x, child.y, child.z);
+    for (at, v) in voxels(&felled.clone()) {
+        if is_tree(v) {
+            felled.set(at[0], at[1], at[2], Voxel::AIR);
+        }
+    }
+    let mut held: [Option<Held>; 8] = Default::default();
+    held[0] = Some(Held {
+        chunk: Arc::new(felled),
+        changed: Some(Arc::new(ChunkOverlay::none())),
+    });
+    let coarse = make_coarse(1, coord, generators.makers(1), &held, tables);
+    let standing = voxels(&coarse.chunk).filter(|(_, v)| is_tree(*v)).count();
+    assert_eq!(standing, 0, "{coord}: a crown reaching an unchanged octant");
+}
+
 /// Trees in a held level-0 Chunk by the Eye whose level-1 cover stays held after the Eye walks
 /// 160 m along +x and the Chunk leaves.
 fn wooded_chunk(h: &Harness) -> ChunkCoord {

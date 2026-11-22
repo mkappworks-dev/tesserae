@@ -143,8 +143,8 @@ impl Terra {
             self.generators.sources[0].chunk(coord.x, coord.y, coord.z)
         } else {
             let makers = Makers {
-                placement: None,
-                structures: None,
+                stand_trees: false,
+                stand_structures: false,
                 ..self.generators.makers(level)
             };
             make_coarse(level, coord, makers, &Default::default(), &self.tables).chunk
@@ -664,7 +664,7 @@ fn levels_one_to_three_stand_terras_spawn_settlement_and_its_paths_as_level_zero
                 for cy in rows.clone() {
                     let coord = ChunkCoord::new(cx, cy, cz);
                     let bare = Makers {
-                        structures: None,
+                        stand_structures: false,
                         ..terra.generators.makers(level)
                     };
                     let bare =
@@ -751,7 +751,7 @@ fn cpu_time_and_vertex_bytes(terra: &Terra, forest: [i32; 2], rounds: usize) {
         let generators = LodGenerators::new(&terra.world, &terra.full, levels);
         let makers = generators.makers(level);
         let makers = Makers {
-            placement: impostors.then_some(&*generators.placement),
+            stand_trees: impostors,
             ..makers
         };
         let mut spent = 0.0;
@@ -808,7 +808,7 @@ fn cpu_time_and_vertex_bytes(terra: &Terra, forest: [i32; 2], rounds: usize) {
                     .or_insert_with(|| {
                         let makers = generators.makers(level);
                         let makers = Makers {
-                            placement: impostors.then_some(&*generators.placement),
+                            stand_trees: impostors,
                             ..makers
                         };
                         let coarse =
@@ -919,7 +919,7 @@ fn coarse_chunk_cpu_time_with_and_without_structure_impostors_over_terra_settlem
         terra.full.forget_caches();
         let generators = LodGenerators::new(&terra.world, &terra.full, levels);
         let makers = Makers {
-            structures: structures.then_some(&*generators.placement),
+            stand_structures: structures,
             ..generators.makers(level)
         };
         let mut spent = 0.0;
