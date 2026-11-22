@@ -14,7 +14,7 @@ use super::streaming::{Extent, StreamingSettings};
 /// Past this the doubling would overflow a Cell count long before it was useful.
 pub(super) const MAX_LEVELS: u32 = 32;
 
-/// The smallest `n` with `view_distance_m * 2^(n-1) >= lod_distance_m`.
+/// The smallest `n` whose level `n - 1` ends at or past `lod_distance_m`.
 pub fn level_count(settings: &StreamingSettings) -> u32 {
     let mut levels = 1;
     while levels < MAX_LEVELS && level_distance_m(settings, levels - 1) < settings.lod_distance_m {
@@ -24,7 +24,10 @@ pub fn level_count(settings: &StreamingSettings) -> u32 {
 }
 
 fn level_distance_m(settings: &StreamingSettings, level: u32) -> f32 {
-    settings.view_distance_m * scale(level)
+    if level == 0 {
+        return settings.view_distance_m;
+    }
+    settings.lod_unit_m.max(settings.view_distance_m) * scale(level)
 }
 
 fn scale(level: u32) -> f32 {
@@ -161,6 +164,7 @@ fn shrunk(hole: Extent, cells: i32) -> Option<Extent> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::server::quality::QualityCurve;
     use crate::world::WorldSettings;
 
     fn world(voxel_size: f32) -> WorldSettings {
@@ -219,6 +223,7 @@ mod tests {
                 vertical_distance_m: 31.0,
                 hysteresis_m: 65.0,
                 lod_distance_m: 10.0,
+                lod_unit_m: 0.0,
             },
         ];
         for settings in settings {
@@ -343,6 +348,159 @@ mod tests {
         assert_eq!(rings(0.25, 3).mesh.hole, Some(ext(9, 5)));
     }
 
+    fn curve(unit_m: f32, reach_m: f32) -> StreamingSettings {
+        QualityCurve { unit_m, reach_m }.applied_to(StreamingSettings::default())
+    }
+
+    /// Every curve the ring tests cover: both presets, a Custom one and two the clamp cuts.
+    fn curves() -> Vec<StreamingSettings> {
+        let terra = StreamingSettings {
+            view_distance_m: 160.0,
+            lod_distance_m: 3000.0,
+            ..default()
+        };
+        vec![
+            QualityCurve::balanced(4096.0).applied_to(StreamingSettings::default()),
+            QualityCurve::detailed(4096.0).applied_to(StreamingSettings::default()),
+            QualityCurve::detailed(8192.0).applied_to(terra),
+            curve(288.0, 2500.0),
+            curve(100.0, 8192.0),
+            QualityCurve::balanced(2048.0).applied_to(terra),
+        ]
+    }
+
+    #[test]
+    fn balanced_is_the_doubling_from_the_default_view_distance() {
+        let today = StreamingSettings::default();
+        let balanced = QualityCurve::balanced(4096.0).applied_to(today);
+        assert_eq!(level_count(&balanced), level_count(&today));
+        for level in 0..MAX_LEVELS {
+            for voxel_size in [1.0, 0.25] {
+                let cell = world(voxel_size).cell_size();
+                assert_eq!(
+                    LevelRings::new(balanced, cell, level),
+                    LevelRings::new(today, cell, level),
+                    "{voxel_size} level {level}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn detailed_holds_each_level_twice_as_far() {
+        let detailed = QualityCurve::detailed(4096.0).applied_to(StreamingSettings::default());
+        assert_eq!(level_count(&detailed), 5);
+        // 192 m, then 768, 1536 and 3072 m, then the 4096 m reach.
+        let table = [
+            (6, None, None),
+            (12, Some(ext(1, 1)), Some(ext(0, 0))),
+            (12, Some(ext(4, 1)), Some(ext(3, 0))),
+            (12, Some(ext(4, 1)), Some(ext(3, 0))),
+            (8, Some(ext(4, 1)), Some(ext(3, 0))),
+        ];
+        for (level, (horizontal, hole, keep_hole)) in table.into_iter().enumerate() {
+            let r = LevelRings::new(detailed, 32.0, level as u32);
+            assert_eq!(r.mesh.outer, ext(horizontal, 3), "level {level}");
+            assert_eq!(r.mesh.hole, hole, "level {level}");
+            assert_eq!(r.keep.hole, keep_hole, "level {level}");
+            assert_eq!(r.evict, ext(horizontal + 3, 6), "level {level}");
+        }
+    }
+
+    #[test]
+    fn a_custom_curve_ends_its_last_level_at_its_reach() {
+        let custom = curve(288.0, 2500.0);
+        assert_eq!(level_count(&custom), 5);
+        // 576, 1152 and 2304 m, then 2500 m rounded up to a whole 512 m Cell.
+        for (level, horizontal) in [(1, 9), (2, 9), (3, 9), (4, 5)] {
+            let r = LevelRings::new(custom, 32.0, level);
+            assert_eq!(r.mesh.outer, ext(horizontal, 3), "level {level}");
+        }
+        for level in 2..5 {
+            let r = LevelRings::new(custom, 32.0, level);
+            assert_eq!(r.mesh.hole, Some(ext(2, 1)), "level {level}");
+        }
+    }
+
+    #[test]
+    fn the_server_clamps_the_unit_to_the_view_distance_and_the_reach_to_the_ceiling() {
+        let terra = StreamingSettings {
+            view_distance_m: 160.0,
+            lod_distance_m: 3000.0,
+            ..default()
+        };
+        let clamped = QualityCurve {
+            unit_m: 100.0,
+            reach_m: 8192.0,
+        }
+        .applied_to(terra);
+        assert_eq!(clamped.lod_unit_m, 160.0);
+        assert_eq!(clamped.lod_distance_m, 3000.0);
+        assert_eq!(clamped.view_distance_m, 160.0);
+        // Terra's own doubling: 160 m to 2560 m, then 3000 m in 1024 m Cells.
+        assert_eq!(level_count(&clamped), 6);
+        for (level, horizontal) in [(0, 5), (1, 5), (2, 5), (3, 5), (4, 5), (5, 3)] {
+            let r = LevelRings::new(clamped, 32.0, level);
+            assert_eq!(r.mesh.outer, ext(horizontal, 3), "level {level}");
+            assert_eq!(r, LevelRings::new(terra, 32.0, level), "level {level}");
+        }
+        let nonsense = QualityCurve {
+            unit_m: f32::NAN,
+            reach_m: f32::NAN,
+        }
+        .applied_to(terra);
+        assert_eq!(level_count(&nonsense), level_count(&terra));
+    }
+
+    #[test]
+    fn every_curve_leaves_a_cell_of_overlap_at_every_join_for_all_four_parities() {
+        for settings in curves() {
+            for voxel_size in [1.0, 0.25] {
+                let cell = world(voxel_size).cell_size();
+                for level in 1..level_count(&settings) {
+                    let finer = LevelRings::new(settings, cell, level - 1).mesh.outer;
+                    let r = LevelRings::new(settings, cell, level);
+                    let hole = r.mesh.hole.expect("every curve's finer level fits a hole");
+                    assert!(
+                        fits(
+                            finer.horizontal,
+                            finer.vertical,
+                            hole.horizontal,
+                            hole.vertical
+                        ),
+                        "{settings:?} {voxel_size} level {level}"
+                    );
+                    let reach_m =
+                        |rings: Extent, at: u32| rings.horizontal as f32 * cell * scale(at);
+                    assert!(
+                        reach_m(r.mesh.outer, level) >= reach_m(finer, level - 1),
+                        "{settings:?} {voxel_size} level {level} ends inside the finer one"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn level_zero_is_the_view_distance_under_every_curve() {
+        for voxel_size in [1.0, 0.25] {
+            let cell = world(voxel_size).cell_size();
+            for settings in curves() {
+                let doubling = StreamingSettings {
+                    lod_unit_m: 0.0,
+                    ..settings
+                };
+                assert_eq!(
+                    LevelRings::new(settings, cell, 0),
+                    LevelRings::new(doubling, cell, 0),
+                    "{settings:?}"
+                );
+                let [mesh, ..] = level_zero_reference(settings, cell);
+                assert_eq!(LevelRings::new(settings, cell, 0).mesh.outer, mesh);
+            }
+        }
+    }
+
     #[test]
     fn a_reach_no_further_than_the_view_distance_is_one_level() {
         for lod_distance_m in [0.0, 100.0, 192.0] {
@@ -460,6 +618,7 @@ mod tests {
             vertical_distance_m: 32.0,
             hysteresis_m: 32.0,
             lod_distance_m: 128.0,
+            lod_unit_m: 0.0,
         };
         let r = LevelRings::new(settings, 32.0, 1);
         assert_eq!(r.mesh.hole, None);

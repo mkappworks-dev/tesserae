@@ -991,7 +991,9 @@ fn install(world: &mut World) {
     world.insert_resource(placing);
     world.insert_resource(items);
     world.insert_resource(WorldParameters(params, templates, settlements, loot));
-    world.insert_resource(super::streaming::streaming_settings(loaded.view));
+    let streaming = super::streaming::streaming_settings(loaded.view);
+    world.insert_resource(streaming);
+    world.insert_resource(super::quality::DeclaredStreaming(streaming));
     world.insert_resource(runtime::ModJobs::new(loaded.registry, loaded.mods));
     let (name, default_mode) = world
         .get_resource::<super::persistence::Persistence>()
