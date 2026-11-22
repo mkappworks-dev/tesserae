@@ -221,15 +221,16 @@ rings.
   `max(view_distance_m, lod_distance_m)`, and re-derived when the Quality curve
   changes it, so the opacity at the reach is `reach_opacity` at any Voxel size
   and any curve. 0.95 hides the reach's square edge against the sky, which 0.88
-  showed once the reach was 6 km. The falloff is exponential squared because it
-  starts slowly: under 2% to the join of levels 1 and 2 (384 m) under Medium,
-  where plain exponential already hazes the ground the Player stands on. The fog
-  colour and the flat sky colour are a pair and not one value: the tonemapper
-  runs in the shader after the fog and skips the clear colour, so the fog colour
-  is the one that comes out as the sky. `apply_fog` is already the end of the
-  chunk shader, so there is no shader change. `FogSettings` is live: changing
-  the resource re-derives the clear colour and every camera's fog, so a Look
-  pack sets it whenever it likes.
+  showed once the reach was 6 km; Low, the Game's own doubling, keeps at most
+  0.88, its look before the Quality curve. The falloff is exponential squared
+  because it starts slowly: under 2% to the join of levels 1 and 2 (384 m) under
+  Medium, where plain exponential already hazes the ground the Player stands on.
+  The fog colour and the flat sky colour are a pair and not one value: the
+  tonemapper runs in the shader after the fog and skips the clear colour, so the
+  fog colour is the one that comes out as the sky. `apply_fog` is already the
+  end of the chunk shader, so there is no shader change. `FogSettings` is live:
+  changing the resource re-derives the clear colour and every camera's fog, so a
+  Look pack sets it whenever it likes.
 
 - **Fill.** Coarse jobs share level 0's three-worker pool, so their caps (16
   generate and 32 mesh jobs in flight) bound how much level-0 work waits behind
@@ -573,7 +574,7 @@ controls, movement, save, camera and input work already in flight is tracked in
 | 19  | Map, compass            | Server-provided summaries (the Client never reads World storage), map view                                                   | Map style, markers                 | 13         | Done            |
 | 20  | Structures              | Template format, deterministic placement by worldgen and tools                                                               | Templates                          | 13         | Done            |
 | 21  | Survival loop           | Health, damage, hunger, death, respawn, game modes                                                                           | Numbers and rules                  | 15         | Done            |
-| 22  | LOD features            | Trees and Structures drawn at coarse levels as sparse impostors from the same pure draws, and a ring quality curve           | Larger default view distance       | 6, 18, 20  | Not started     |
+| 22  | LOD features            | Trees and Structures drawn at coarse levels as sparse impostors from the same pure draws, and a ring quality curve           | Larger default view distance       | 6, 18, 20  | Done            |
 | 23  | Blueprints and Sites    | Blueprint Items that lay a Site, which builds itself over time from Items brought to it                                      | Blueprints                         | 15, 20     | Not started     |
 | 24  | Weather                 | Weather state and tick, particles, sky hooks                                                                                 | Weather types, climate rules       | 13, 17     | Not started     |
 | 25  | Mobs, animals           | Entity AI hooks, spawning, replication shape designed against transport                                                      | Behaviours, spawn tables           | 12, 13, 21 | Not started     |
@@ -868,7 +869,7 @@ Notes:
   and `tech/phase-17-worldgen-performance` takes it on with bit-identical
   changes. Weather (step 24) follows and reads the Climate by altitude and
   coast; weather never edits terrain.
-- **Step 22** draws the far field as level 0 would
+- **Step 22** is done. It draws the far field as level 0 would
   ([ADR-0035](docs/adr/0035-a-coarse-level-draws-level-0s-answer.md)): every
   coarse column agrees with level 0's water or land and top Material at its
   centre; level 1 stands Tree Impostors from level 0's own draws, levels 1 to 3
@@ -962,9 +963,9 @@ Not blocking 1.0, in rough order of value:
 - **Reach is configurable at load time.** Step 7 resolves the step-6 loose end
   through the Game's Declaration: full detail 32–512 m and LOD reach from that
   radius to 8192 m. Runtime changes remain deferred; tables and view parameters
-  are fixed once the World opens. Terra requests 160/3000 m, below the engine's
-  4096 m default LOD reach; its distant capture shows beyond the default 192 m
-  full-detail radius, not beyond default LOD reach.
+  are fixed once the World opens. Terra declares a 160 m view, a Low reach of
+  3000 m and an 8192 m ceiling; its distant capture shows beyond the default 192
+  m full-detail radius.
 - **Mod host follow-ups are explicit.** No World read until a batched Snapshot
   API; no save-time tombstones or missing-Mod migration; no compile cache;
   terminal-only Trust until a pre-World window state; a flat appearance palette
