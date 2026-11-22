@@ -1,5 +1,6 @@
 //! Draft preferences become active only after a successful Apply.
 
+mod distance;
 mod drafts;
 mod pages;
 mod widgets;
@@ -15,6 +16,7 @@ use bevy::{
     ui_widgets::{Activate, ScrollArea},
 };
 
+pub(super) use distance::*;
 pub(super) use drafts::*;
 pub(super) use pages::*;
 pub(super) use widgets::*;
@@ -133,6 +135,7 @@ pub(super) enum Operation {
     ReducedMotion(bool),
     SolidBackground(bool),
     StrongerContrast(bool),
+    Distance(super::quality::DistancePreset),
 }
 
 pub(super) fn plugin(app: &mut App) {
@@ -195,6 +198,7 @@ fn launch(
             Ok("controller") => super::menu_ui::Tab::Controller,
             Ok("audio") => super::menu_ui::Tab::Audio,
             Ok("display") => super::menu_ui::Tab::Display,
+            Ok("distance") => super::menu_ui::Tab::Distance,
             Ok("accessibility") => super::menu_ui::Tab::Accessibility,
             _ => super::menu_ui::Tab::Behavior,
         };

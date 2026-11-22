@@ -1485,10 +1485,10 @@ mod tests {
         let coarse = ChunkCoord::new(0, 0, 0);
         send_coarse(&mut app, 5, coarse, geometry());
         unload_coarse(&mut app, 5, coarse);
-        let detailed = crate::server::quality::QualityCurve::detailed(4096.0)
-            .applied_to(StreamingSettings::default());
-        assert_eq!(level_count(&detailed), 5, "level 5 is dropped");
-        app.insert_resource(detailed);
+        let high =
+            crate::server::quality::QualityCurve::HIGH.applied_to(StreamingSettings::default());
+        assert_eq!(level_count(&high), 5, "level 5 is dropped");
+        app.insert_resource(high);
         app.update();
         assert!(entity_at(&app, 5, coarse).is_some(), "retained");
 
@@ -2399,8 +2399,9 @@ mod tests {
         use crate::server::quality::QualityCurve;
         let game = StreamingSettings::default();
         for curve in [
-            QualityCurve::balanced(4096.0),
-            QualityCurve::detailed(4096.0),
+            QualityCurve::low(game),
+            QualityCurve::MEDIUM,
+            QualityCurve::HIGH,
             QualityCurve {
                 unit_m: 288.0,
                 reach_m: 2500.0,
