@@ -31,14 +31,16 @@ keeps it in the Player's profile.
 - The preference is `client::quality::Distance` in the profile (`distance`, a
   preset and Custom's own Chunks and km; absent reads as Medium). Ticket 12
   made Low the default again, so absent reads as Low, until 09 passes its
-  budgets. The Client
+  budgets. _Superseded by 09: Medium is the default again, so absent reads as
+  Medium._ The Client
   sends its curve when a World opens and whenever an applied change asks for
   another; the Server's `quality::apply` clamps it as in 07. The Client only
   reads `DeclaredStreaming` and `WorldSettings`, for the sliders' ends and the
   table.
 - Presets are `QualityCurve::low(game)` (the Game's `view_distance_m` and
   `lod_distance_m`), `MEDIUM` (256 m, 6 km) and `HIGH` (384 m, 8 km, the
-  mockup's 8 rather than 8192 m). `TESSERAE_QUALITY=low|medium|high|<unit_m>,<reach_m>`
+  mockup's 8 rather than 8192 m). _Superseded by 09: `MEDIUM` is 192 m (6
+  Chunks) to 6 km._ `TESSERAE_QUALITY=low|medium|high|<unit_m>,<reach_m>`
   overrides the preference in `dev` and `profiling`.
 - Detail counts 32 m Chunks whatever the World's Voxel size, so a Custom curve
   is the same metres in every World. Custom's values are stored unclamped; the
@@ -48,6 +50,8 @@ keeps it in the Player's profile.
 - The table counts the Server's own mesh shells (`LevelRings`, holes excluded),
   so its Chunks and MB sit below the mockup's full discs: Medium on Terra is 4
   coarse levels to 3 km, 4,808 Chunks, 35 MB at the mockup's 52 KB per column.
+  _Superseded by 09: under Terra's 8192 m ceiling, Medium is 5 coarse levels
+  to 6 km._
 - For 09: Terra's ceiling rising to 8192 m makes Low reach 8 km, as Low reads
   the Game's `lod_distance_m`. Give Low its own reach (the Game's pre-step-22
   value: 3000 m on Terra, 4096 m by default) in `QualityCurve::low`, the one
