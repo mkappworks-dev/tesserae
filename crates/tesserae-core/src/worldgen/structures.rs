@@ -289,6 +289,25 @@ impl Worldgen {
             .collect()
     }
 
+    /// Every Structure a cell's draw puts on or beside `region` before the ground is asked:
+    /// whatever [`Self::structures_near`] stands there and more, from hashes alone, so far cheaper.
+    /// Crossings are left out, since they stand over water.
+    pub(super) fn structure_candidates_near(&self, region: [[i32; 2]; 2]) -> Vec<Structure> {
+        let Some(pass) = &self.structures else {
+            return Vec::new();
+        };
+        pass.rows
+            .iter()
+            .filter(|row| row.underside_m.is_none())
+            .flat_map(|row| {
+                self.structure_cells(row, region)
+                    .into_iter()
+                    .filter_map(|cell| self.structure_candidate(row, cell))
+            })
+            .filter(|s| s.touches(region))
+            .collect()
+    }
+
     /// Every Structure that covers or borders a column of `region`, `[min, max)`, in claim order.
     /// A later row's Structure gives way to an earlier row's it would touch, so a column belongs to
     /// one Structure, and every one gives way to a Settlement.

@@ -11,7 +11,9 @@ use crate::material::{MaterialTable, RenderClass};
 use crate::mesh::{
     FACE_STEPS, NEG_X, NEG_Y, NEG_Z, POS_X, POS_Y, SEAM_EVERY, SEAM_LAYERS, SeamOpenings,
 };
-use crate::worldgen::{ColumnTop, StructurePart, TreePart, Worldgen, level_index, top_index};
+use crate::worldgen::{
+    Canopy, ColumnTop, StructurePart, TreePart, Worldgen, level_index, top_index,
+};
 
 const OCTANT: usize = CHUNK_SIZE / 2;
 
@@ -327,14 +329,7 @@ pub fn agree_with_level_zero(
             let Some(a) = answers[z * CHUNK_SIZE + x] else {
                 continue;
             };
-            let ground = top_index(a.surface_m - voxel_m / 2.0, 0.0, voxel_m);
-            let water_top = a.level_m.map(|l| level_index(l, voxel_m));
-            let top = match water_top {
-                Some(w) if a.wet => ground.min(w - 1),
-                Some(w) => ground.max(w),
-                None => ground,
-            };
-            let wet_to = water_top.filter(|_| a.wet).unwrap_or(top);
+            let (top, wet_to) = agreed_top(&a, voxel_m);
             if top > ceiling {
                 continue;
             }
@@ -361,6 +356,58 @@ pub fn agree_with_level_zero(
                     chunk.set(x, y, z, want);
                 }
             }
+        }
+    }
+}
+
+/// The global coarse rows of the top Voxel [`agree_with_level_zero`] gives a column, and of the
+/// highest its water fills.
+fn agreed_top(a: &ColumnTop, voxel_m: f32) -> (i32, i32) {
+    let ground = top_index(a.surface_m - voxel_m / 2.0, 0.0, voxel_m);
+    let water_top = a.level_m.map(|l| level_index(l, voxel_m));
+    let top = match water_top {
+        Some(w) if a.wet => ground.min(w - 1),
+        Some(w) => ground.max(w),
+        None => ground,
+    };
+    (top, water_top.filter(|_| a.wet).unwrap_or(top))
+}
+
+/// The columns of `answers`, as [`agree_with_level_zero`] takes them, whose Canopy cover could
+/// fall in Chunk row `cy`: dry, with their top or the Voxel over it in the row.
+pub fn canopy_candidates(cy: i32, voxel_m: f32, answers: &[Option<ColumnTop>]) -> Vec<usize> {
+    let size = CHUNK_SIZE as i32;
+    let rows = cy * size..(cy + 1) * size;
+    (0..answers.len())
+        .filter(|&i| {
+            answers[i].is_some_and(|a| {
+                let top = agreed_top(&a, voxel_m).0;
+                !a.wet && (rows.contains(&top) || rows.contains(&(top + 1)))
+            })
+        })
+        .collect()
+}
+
+/// Stands Canopy cover over the agreed ground of each `(column, canopy)`: the column's top Voxel
+/// becomes the leaves, or the Voxel over it where the trees stand at least half a Voxel tall, so
+/// a forest keeps a silhouette until its Voxel outgrows the trees (ADR-0035).
+pub fn stand_canopy_cover(
+    chunk: &mut Chunk,
+    cy: i32,
+    voxel_m: f32,
+    answers: &[Option<ColumnTop>],
+    canopies: &[(usize, Canopy)],
+) {
+    let size = CHUNK_SIZE as i32;
+    for &(i, canopy) in canopies {
+        let Some(a) = answers[i].filter(|a| !a.wet) else {
+            continue;
+        };
+        let top = agreed_top(&a, voxel_m).0;
+        let y = top + i32::from(canopy.top_m >= voxel_m / 2.0) - cy * size;
+        if (0..size).contains(&y) {
+            let (x, z) = (i % CHUNK_SIZE, i / CHUNK_SIZE);
+            chunk.set(x, y as usize, z, Voxel::cube(canopy.material));
         }
     }
 }
@@ -1033,6 +1080,66 @@ mod tests {
             })
             .count();
         assert_eq!(solid, 2, "a part outside the Chunk stands nothing");
+    }
+
+    #[test]
+    fn canopy_cover_takes_the_agreed_top_or_the_voxel_over_it_and_never_water() {
+        let rock = fixtures().ground.rock;
+        let dry = |surface_m: f32| {
+            Some(ColumnTop {
+                surface_m,
+                level_m: None,
+                wet: false,
+                top: rock,
+                under: rock,
+            })
+        };
+        let mut answers = vec![None; CHUNK_SIZE * CHUNK_SIZE];
+        // 8 m Voxels in Chunk row 0: tops at rows 3, 3, 31 and a sea's floor.
+        answers[0] = dry(30.0);
+        answers[1] = dry(30.0);
+        answers[2] = dry(258.0);
+        answers[3] = Some(ColumnTop {
+            surface_m: 10.0,
+            level_m: Some(24.0),
+            wet: true,
+            top: rock,
+            under: rock,
+        });
+        answers[4] = dry(600.0);
+        assert_eq!(canopy_candidates(0, 8.0, &answers), [0, 1, 2]);
+        assert_eq!(canopy_candidates(1, 8.0, &answers), [2]);
+        let canopy = |top_m: f32| Canopy {
+            material: CANOPY,
+            top_m,
+            cover: 1.0,
+        };
+        let mut chunk = Chunk::air();
+        agree_with_level_zero(&mut chunk, 0, 8.0, 0, &answers);
+        let canopies = [
+            (0, canopy(4.0)),
+            (1, canopy(3.0)),
+            (2, canopy(9.0)),
+            (3, canopy(9.0)),
+        ];
+        stand_canopy_cover(&mut chunk, 0, 8.0, &answers, &canopies);
+        assert_eq!(
+            chunk.get(0, 4, 0),
+            Voxel::cube(CANOPY),
+            "raised over the top"
+        );
+        assert_eq!(chunk.get(0, 3, 0), Voxel::cube(rock));
+        assert_eq!(chunk.get(1, 3, 0), Voxel::cube(CANOPY), "the top itself");
+        assert_eq!(chunk.get(1, 4, 0), Voxel::AIR);
+        assert_eq!(
+            chunk.get(2, 31, 0),
+            Voxel::cube(rock),
+            "raised into the row above"
+        );
+        assert!(
+            (0..CHUNK_SIZE).all(|y| chunk.get(3, y, 0).material() != CANOPY),
+            "under water"
+        );
     }
 
     #[test]

@@ -335,18 +335,32 @@ impl Worldgen {
         if !scatter.fields {
             return placed;
         }
-        for (b, biome) in self.params.biomes.as_slice().iter().enumerate() {
-            let id = BiomeId::new(b as u8);
-            for entry in 0..biome.surface_features.crop_fields().len() {
-                for p in self.entry_fields(scatter, id, entry, region) {
-                    let crossed = (0..entry).any(|before| {
-                        !self
-                            .entry_fields(scatter, id, before, p.footprint())
-                            .is_empty()
-                    });
-                    if !crossed {
-                        placed.push(p);
-                    }
+        for b in 0..self.params.biomes.as_slice().len() {
+            placed.extend(self.biome_fields_near(scatter, BiomeId::new(b as u8), region));
+        }
+        placed
+    }
+
+    /// [`Self::fields_near`] for one Biome's entries.
+    pub(super) fn biome_fields_near(
+        &self,
+        scatter: &SurfaceScatter,
+        id: BiomeId,
+        region: [[i32; 2]; 2],
+    ) -> Vec<Placed> {
+        let mut placed = Vec::new();
+        let Some(biome) = self.params.biomes.get(id).filter(|_| scatter.fields) else {
+            return placed;
+        };
+        for entry in 0..biome.surface_features.crop_fields().len() {
+            for p in self.entry_fields(scatter, id, entry, region) {
+                let crossed = (0..entry).any(|before| {
+                    !self
+                        .entry_fields(scatter, id, before, p.footprint())
+                        .is_empty()
+                });
+                if !crossed {
+                    placed.push(p);
                 }
             }
         }
