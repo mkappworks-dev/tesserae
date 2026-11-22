@@ -442,28 +442,29 @@ function deathScreen() {
     : d.dropped.length
       ? `${count} items in ${d.dropped.length} stacks lie where you fell, at ${d.at}.`
       : "You carried nothing.";
-  const actions = `${button("Respawn <span>Enter</span>", "respawn", { primary: true })}${button("Return to Worlds", "leave", { ghost: true })}`;
+  // The death screen has no prompt bar, so each button carries its own key.
+  const actions = `${button("Respawn <kbd>Enter</kbd>", "respawn", { primary: true })}${button("Return to Worlds", "leave", { ghost: true })}`;
   const where = `${activeWorld()?.name || "Your World"} · ${d.distance} m from the World spawn`;
-  return `<div class="death-screen"><section class="death-centre" role="alertdialog" aria-labelledby="death-title"><p class="eyebrow">${esc(where).toUpperCase()}</p><h1 id="death-title">${esc(d.cause.title)}</h1><p class="death-cause">${esc(d.cause.detail)}</p><div class="notice">${esc(items)}${!kept && d.dropped.length ? ` <span id="despawn-left" aria-live="off">${left ? `They stay for ${clock(left)}.` : "They have despawned."}</span>` : ""}</div><div class="death-actions">${actions}</div></section></div>`;
+  return `<div class="death-screen"><section class="death-centre" role="alertdialog" aria-labelledby="death-title"><h1 id="death-title">${esc(d.cause.title)}</h1><p class="death-cause">${esc(d.cause.detail)}</p><p class="death-where">${esc(where)}</p><p class="death-items">${esc(items)}${!kept && d.dropped.length ? ` <span id="despawn-left" aria-live="off">${left ? `They stay for ${clock(left)}.` : "They have despawned."}</span>` : ""}</p><div class="death-actions">${actions}</div></section></div>`;
 }
 
-function modePicks(key, value, { legend, hint, compact }) {
+function modePicks(key, value, { legend, hint, compact, quiet }) {
   const modes = {
     Creative:
       "Take any Material from the Catalogue. Placing spends Items, as in Survival. No damage or hunger.",
     Survival:
       "Gather what you place. Health and hunger matter, and the Catalogue is closed.",
   };
-  return `<fieldset class="mode-picks ${compact ? "compact" : ""}"><legend class="section-label">${legend}</legend><div class="mode-options">${Object.entries(
+  return `<fieldset class="mode-picks ${compact ? "compact" : ""}"><legend class="section-label">${legend}</legend><div class="segmented" role="radiogroup" aria-label="${legend}">${Object.keys(
     modes,
   )
     .map(
-      ([name, about]) =>
-        `<button type="button" class="mode-pick ${value === name ? "selected" : ""}" data-action="pick-mode" data-value="${key}:${name}" aria-pressed="${value === name}"><b>${name}${value === name ? " ✓" : ""}</b><small>${about}</small></button>`,
+      (name) =>
+        `<button type="button" role="radio" class="${value === name ? "selected" : ""}" data-action="pick-mode" data-value="${key}:${name}" aria-checked="${value === name}">${name}</button>`,
     )
     .join(
       "",
-    )}</div>${hint ? `<small class="mode-hint">${hint}</small>` : ""}</fieldset>`;
+    )}</div>${quiet ? "" : `<small class="mode-hint">${modes[value] || ""}${hint ? `<br>${hint}` : ""}</small>`}</fieldset>`;
 }
 
 function simPanel() {
@@ -491,6 +492,11 @@ function survivalAction(name, value) {
   if (name === "pick-mode") {
     const [key, mode] = value.split(":");
     state[key] = mode;
+    // While the Player is the World's only one, the World's default follows them.
+    if (key === "worldMode") {
+      state.mode = mode;
+      state.playerMode = mode;
+    }
     state.dirty = true;
     const y = $(".body")?.scrollTop;
     render();

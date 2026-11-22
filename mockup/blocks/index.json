@@ -524,6 +524,39 @@
         ]
       ],
       "color": [
+        150,
+        110,
+        230,
+        255
+      ],
+      "emission": 10,
+      "faces": {
+        "bottom": "terra/crystal.bottom.png",
+        "side": "terra/crystal.side.png",
+        "top": "terra/crystal.top.png"
+      },
+      "game": "terra",
+      "name": "terra:crystal",
+      "render": "opaque",
+      "solid": true,
+      "use": null
+    },
+    {
+      "boxes": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            16,
+            16,
+            16
+          ]
+        ]
+      ],
+      "color": [
         84,
         150,
         56,
@@ -723,9 +756,9 @@
             ]
           },
           "closed": "terra:door",
-          "height-m": 2.0,
+          "height-m": 3.0,
           "open": "terra:door_open",
-          "width-m": 1.0
+          "width-m": 2.0
         }
       }
     },
@@ -793,9 +826,9 @@
             ]
           },
           "closed": "terra:door",
-          "height-m": 2.0,
+          "height-m": 3.0,
           "open": "terra:door_open",
-          "width-m": 1.0
+          "width-m": 2.0
         }
       }
     },
@@ -2387,9 +2420,9 @@
             ]
           },
           "closed": "tidewater:door",
-          "height-m": 2.0,
+          "height-m": 3.0,
           "open": "tidewater:door_open",
-          "width-m": 1.0
+          "width-m": 2.0
         }
       }
     },
@@ -2457,9 +2490,9 @@
             ]
           },
           "closed": "tidewater:door",
-          "height-m": 2.0,
+          "height-m": 3.0,
           "open": "tidewater:door_open",
-          "width-m": 1.0
+          "width-m": 2.0
         }
       }
     },
@@ -3377,9 +3410,9 @@
             ]
           },
           "closed": "ember:door",
-          "height-m": 2.0,
+          "height-m": 3.0,
           "open": "ember:door_open",
-          "width-m": 1.0
+          "width-m": 2.0
         }
       }
     },
@@ -3447,9 +3480,9 @@
             ]
           },
           "closed": "ember:door",
-          "height-m": 2.0,
+          "height-m": 3.0,
           "open": "ember:door_open",
-          "width-m": 1.0
+          "width-m": 2.0
         }
       }
     },
@@ -4367,9 +4400,9 @@
             ]
           },
           "closed": "lumen:door",
-          "height-m": 2.0,
+          "height-m": 3.0,
           "open": "lumen:door_open",
-          "width-m": 1.0
+          "width-m": 2.0
         }
       }
     },
@@ -4437,9 +4470,9 @@
             ]
           },
           "closed": "lumen:door",
-          "height-m": 2.0,
+          "height-m": 3.0,
           "open": "lumen:door_open",
-          "width-m": 1.0
+          "width-m": 2.0
         }
       }
     },
@@ -5357,9 +5390,9 @@
             ]
           },
           "closed": "meadow:door",
-          "height-m": 2.0,
+          "height-m": 3.0,
           "open": "meadow:door_open",
-          "width-m": 1.0
+          "width-m": 2.0
         }
       }
     },
@@ -5427,9 +5460,9 @@
             ]
           },
           "closed": "meadow:door",
-          "height-m": 2.0,
+          "height-m": 3.0,
           "open": "meadow:door_open",
-          "width-m": 1.0
+          "width-m": 2.0
         }
       }
     },

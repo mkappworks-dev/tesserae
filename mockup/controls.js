@@ -37,6 +37,12 @@ function icon(name, size = 20) {
     chevron: '<path d="m9 5 7 7-7 7"/>',
     down: '<path d="m6 9 6 6 6-6"/>',
     check: '<path d="m5 12 4 4L19 6"/>',
+    shuffle: '<path d="M16 3h5v5M4 20 21 3M21 16v5h-5M15 15l6 6M4 4l5 5"/>',
+    filter: '<path d="M3 5h18l-7 8v6l-4 2v-8L3 5Z"/>',
+    sort: '<path d="M7 4v16M3 16l4 4 4-4M17 20V4M13 8l4-4 4 4"/>',
+    pencil: '<path d="M4 20h4L19 9l-4-4L4 16v4ZM14 6l4 4"/>',
+    trash: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>',
+    copy: '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/>',
     craft:
       '<path d="m14 4 6 6-3 3-6-6 3-3ZM11 7 3 15v6h6l8-8"/><path d="m7 17 2 2"/>',
   };

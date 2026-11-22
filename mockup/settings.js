@@ -106,7 +106,7 @@ const settingsDefaults = {
     "Open input settings": "F1",
     Diagnostics: "F3",
   },
-  // The engine keeps a second binding per action; an empty one reads "Add binding".
+  // The engine keeps a second binding per action; an empty one shows no cap.
   altBindings: {
     "Cycle sprint speed": "Right Shift",
     Sample: "Middle mouse",
@@ -134,6 +134,13 @@ const settingsDefaults = {
   },
 };
 // Audio includes the proposed detailed effect mix.
+// Mouse buttons as the short caps games print, so a cap fits its column.
+const MOUSE_CAPS = {
+  "Left mouse": "LMB",
+  "Right mouse": "RMB",
+  "Middle mouse": "MMB",
+};
+const capText = (value) => MOUSE_CAPS[value] || value;
 const settingsCategories = [
   "Behavior",
   "Key bindings",
@@ -214,31 +221,46 @@ function bindingGroup(name) {
   );
 }
 
-function bindingRows() {
-  const d = state.settingsDraft,
-    query = (state.bindingSearch || "").trim().toLowerCase();
-  const names = query
-    ? Object.values(bindingGroups).flat()
-    : bindingGroups[state.bindingGroup || "Movement"];
-  const rows = names
-    .filter(
-      (n) =>
-        !query ||
-        `${n} ${d.bindings[n]} ${d.altBindings[n] || ""}`
-          .toLowerCase()
-          .includes(query),
+function keyCap(name, slot, value, label) {
+  const waiting = state.rebinding === name && state.rebindingSlot === slot;
+  return `<button type="button" class="key-cap${value ? "" : " unbound"}${waiting ? " waiting" : ""}" data-action="settings-rebind" data-value="${esc(slot)}|${esc(name)}" aria-label="${esc(name)}, ${label}: ${esc(value || "unbound")}">${esc(capText(value) || "—")}</button>`;
+}
+
+const BINDING_HELP =
+  "Select a key cap, then press the new key. Esc cancels; Delete clears it.";
+
+function bindingRow(n, columns) {
+  const d = state.settingsDraft;
+  const changed =
+    d.bindings[n] !== settingsDefaults.bindings[n] ||
+    (d.altBindings[n] || "") !== (settingsDefaults.altBindings[n] || "") ||
+    (d.padBindings[n] || "") !== (settingsDefaults.padBindings[n] || "");
+  const help =
+    state.mapForbidden && MAP_BINDINGS.includes(n)
+      ? MAP_UNAVAILABLE
+      : BINDING_HELP;
+  const waiting = state.rebinding === n;
+  const caps = columns
+    .map(
+      ([slot, label]) =>
+        `<span class="cap-cell">${keyCap(n, slot, d[slot][n], label)}${slot === "bindings" && d.altBindings[n] ? keyCap(n, "altBindings", d.altBindings[n], "alternative") : ""}</span>`,
     )
-    .map((n) => {
-      const primary = d.bindings[n],
-        alt = d.altBindings[n];
-      const changed =
-        primary !== settingsDefaults.bindings[n] ||
-        (alt || "") !== (settingsDefaults.altBindings[n] || "");
-      return `<div class="setting-row binding-row"><div class="setting-copy"><b>${esc(n)}</b>${state.mapForbidden && MAP_BINDINGS.includes(n) ? `<small>${MAP_UNAVAILABLE}</small>` : query ? `<small>${bindingGroup(n)}</small>` : ""}</div><div class="row">${primary ? button(esc(primary), "settings-rebind", { value: n }) : button("Add binding", "settings-rebind", { value: n, ghost: true })}${alt ? button(esc(alt), "settings-rebind-alt", { value: n }) : button("Add binding", "settings-rebind-alt", { value: n, ghost: true })}${changed ? button("↺", "settings-binding-reset", { value: n, ghost: true, small: true }) : ""}</div></div>`;
-    });
+    .join("");
+  return `<div class="setting-row binding-row${waiting ? " is-waiting" : ""}" data-title="${esc(n)}" data-help="${esc(help)}"><b>${esc(n)}</b><span class="caps">${caps}<span class="cap-reset">${changed ? button("↺", "settings-binding-reset", { value: n, ghost: true, small: true }) : ""}</span></span>${waiting ? `<span class="press-key" aria-live="assertive">${state.rebindingSlot === "padBindings" ? "Press a controller button…" : "Press a key…"} <kbd>Esc</kbd> Cancel <kbd>Del</kbd> Clear</span>` : ""}</div>`;
+}
+
+function bindingRows() {
+  const names = bindingGroups[state.bindingGroup || "Movement"];
   return (
-    rows.join("") ||
-    '<div class="empty-state">No matches. Try another name or clear your search.</div>'
+    `<div class="binding-head"><span></span><span class="caps"><span class="cap-cell">Keyboard</span><span class="cap-cell">Controller</span><span class="cap-reset"></span></span></div>` +
+    names
+      .map((n) =>
+        bindingRow(n, [
+          ["bindings", "keyboard"],
+          ["padBindings", "controller"],
+        ]),
+      )
+      .join("")
   );
 }
 
@@ -256,6 +278,12 @@ function ensureSettings() {
   state.settingsTab ||= "Behavior";
 }
 
+// Each row's explanation, collected while the tab is built, for the help panel.
+let settingsHelp = [];
+
+const optionLabel = (key, value) =>
+  key === "textScale" ? `${Math.round(Number(value) * 100)}%` : String(value);
+
 function settingsControl(
   label,
   key,
@@ -267,12 +295,19 @@ function settingsControl(
   const value = state.settingsDraft[key];
   let control;
   if (kind === "toggle")
-    control = `<input class="toggle" aria-label="${label}" data-bind="settings.${key}" type="checkbox" ${value ? "checked" : ""}>`;
+    control = `<button type="button" class="onoff" role="switch" aria-checked="${!!value}" aria-label="${label}" data-action="settings-toggle" data-value="${key}" data-cycle="${key}"><span class="${value ? "" : "on"}">Off</span><span class="${value ? "on" : ""}">On</span></button>`;
   else if (kind === "range")
     control = `<div class="setting-slider"><output id="setting-${key}">${value}</output><input class="input" aria-label="${label}" data-bind="settings.${key}" type="range" min="${options[0]}" max="${options[1]}" step="${options[2]}" value="${value}" ${disabled ? "disabled" : ""}></div>`;
-  else control = customSelect(label, "settings." + key, value, options);
-  return `<div class="setting-row"><div class="setting-copy"><b>${label}</b>${hint ? `<small>${hint}</small>` : ""}</div>${control}</div>`;
+  else {
+    settingsOptions[key] = options.map(String);
+    control = `<button type="button" class="cycle" aria-label="${label}: ${esc(optionLabel(key, value))}" data-action="settings-cycle" data-value="${key}|1" data-cycle="${key}"><span class="cycle-arrow" data-action="settings-cycle" data-value="${key}|-1" aria-hidden="true">◀</span><span class="cycle-value">${esc(optionLabel(key, value))}</span><span class="cycle-arrow" aria-hidden="true">▶</span></button>`;
+  }
+  settingsHelp.push([label, hint]);
+  return `<div class="setting-row" data-title="${esc(label)}" data-help="${esc(hint)}"><b>${label}</b>${control}</div>`;
 }
+
+// The options each cycle selector steps through, by key.
+const settingsOptions = {};
 
 const MAP_UNAVAILABLE = "Not available in this World.";
 const mapHint = (text) => (state.mapForbidden ? MAP_UNAVAILABLE : text);
@@ -376,8 +411,7 @@ function distancePanel() {
   return (
     `<table class="distance-table"><thead><tr><th>Level</th><th>Voxel</th><th>Ring</th><th>Chunks</th><th>Memory</th></tr></thead>` +
     `<tbody>${rows}</tbody>` +
-    `<tfoot><tr><td colspan="3">${coarse.length} coarse levels to ${metres(reachM)}</td><td>${totalChunks.toLocaleString()}</td><td>${totalMb.toFixed(0)} MB</td></tr></tfoot></table>` +
-    `<p class="muted distance-note">An estimate of distant terrain before trees and buildings; the Game sets the most its World allows.</p>`
+    `<tfoot><tr><td colspan="3">${coarse.length} coarse levels to ${metres(reachM)}</td><td>${totalChunks.toLocaleString()}</td><td>${totalMb.toFixed(0)} MB</td></tr></tfoot></table>`
   );
 }
 
@@ -397,15 +431,14 @@ function choosePreset(name) {
 // Moving a slider off a preset's values makes the draft Custom and remembers it.
 function refreshDistance() {
   const d = state.settingsDraft;
-  const preset = DISTANCE_PRESETS.find(
+  const match = DISTANCE_PRESETS.find(
     ([, unit, reach]) => unit === d.detailChunks && reach === d.reachKm,
   );
-  d.distancePreset = preset ? preset[0] : "Custom";
-  if (!preset)
+  d.distancePreset = match ? match[0] : "Custom";
+  if (!match)
     d.customDistance = { detailChunks: d.detailChunks, reachKm: d.reachKm };
-  setSelectValue($("[data-bind='settings.distancePreset']"), d.distancePreset);
-  const hint = $("#distance-preset-hint");
-  if (hint) hint.textContent = presetHint(d.distancePreset);
+  const preset = $("[data-cycle='distancePreset'] .cycle-value");
+  if (preset) preset.textContent = d.distancePreset;
   const panel = $("#distance-panel");
   if (panel) panel.innerHTML = distancePanel();
 }
@@ -455,19 +488,20 @@ function settingsBody() {
           ? `<p class="muted">${quickReference()}</p>`
           : "")
       );
-    case "Key bindings":
+    case "Key bindings": {
+      const current = state.bindingGroup || "Movement";
       return (
-        `<div class="search-line"><input class="input" aria-label="Search actions or keys" data-bind="bindingSearch" placeholder="Search actions or keys…" value="${esc(state.bindingSearch || "")}"></div>` +
-        (state.bindingSearch
-          ? `<p class="muted">Searching all categories</p>`
-          : `<div class="library-tabs">${Object.keys(bindingGroups)
-              .map(
-                (n) =>
-                  `<button class="${(state.bindingGroup || "Movement") === n ? "active" : ""}" data-action="settings-binding-group" data-value="${n}">${n}</button>`,
-              )
-              .join("")}</div>`) +
-        `<div class="row between"><span class="muted">Keyboard & mouse · primary and alternative</span><span class="pill">Select to rebind</span></div><div id="binding-results">${bindingRows()}</div>`
+        `<div class="game-tabs" role="tablist" aria-label="Binding categories"><kbd aria-hidden="true">Q</kbd>${Object.keys(
+          bindingGroups,
+        )
+          .map(
+            (n) =>
+              `<button type="button" role="tab" aria-selected="${current === n}" class="${current === n ? "active" : ""}" data-action="settings-binding-group" data-value="${n}">${n}</button>`,
+          )
+          .join("")}<kbd aria-hidden="true">E</kbd></div>` +
+        `<div id="binding-results">${bindingRows()}</div>`
       );
+    }
     case "Controller":
       return (
         group("Sticks & buttons") +
@@ -494,14 +528,10 @@ function settingsBody() {
         row("Control opacity", "touchOpacity", "range", [0.3, 1, 0.01]) +
         `</details>` +
         group("Controller buttons") +
-        `<p class="muted">The left stick moves and the right stick looks. In menus the D-pad or left stick moves focus, A selects, B goes back, LB and RB switch pages, and Start closes.</p>` +
         Object.values(bindingGroups)
           .flat()
           .filter((n) => n !== "Release cursor")
-          .map((n) => {
-            const b = state.settingsDraft.padBindings[n];
-            return `<div class="setting-row binding-row"><b>${esc(n)}</b>${b ? button(esc(b), "settings-rebind-pad", { value: n }) : button("Add binding", "settings-rebind-pad", { value: n, ghost: true })}</div>`;
-          })
+          .map((n) => bindingRow(n, [["padBindings", "controller"]]))
           .join("")
       );
     case "Display":
@@ -512,9 +542,8 @@ function settingsBody() {
           "sync",
           "select",
           ["Display synced", "Sync off"],
-          "Match frame presentation to your display.",
+          "Match frame presentation to your display. Synced is recommended and free of tearing; with sync off, frames may tear, so set a frame rate limit.",
         ) +
-        `<div class="notice">${state.settingsDraft.sync === "Sync off" ? "Sync is off. Frames may tear; choose a limit below to reduce unnecessary work." : "Recommended for normal play. Keeps presentation free of tearing."}</div>` +
         row(
           "Frame rate limit",
           "fps",
@@ -522,7 +551,6 @@ function settingsBody() {
           ["60", "120", "144", "240", "1000", "No limit"],
           "An optional ceiling, independent of display sync.",
         ) +
-        `<div class="setting-row"><div class="setting-copy"><b>${state.settingsDraft.sync === "Sync off" ? (state.settingsDraft.fps === "No limit" ? "Uncapped rendering" : "Sync off") : "Display synced"}</b><small>${state.settingsDraft.fps === "No limit" ? "No additional frame limit" : `${state.settingsDraft.fps} FPS ceiling`}</small></div><span class="pill">Frame pacing</span></div>` +
         group("Image quality") +
         row(
           "Anti-aliasing",
@@ -559,8 +587,7 @@ function settingsBody() {
           "select",
           ["Small", "Medium", "Large"],
           mapHint("Shown only while the minimap is on."),
-        ) +
-        `<p class="muted">Textures, shadows, and simulation settings stay unchanged. Distance has its own tab.</p>`
+        )
       );
     case "Distance":
       return (
@@ -570,14 +597,14 @@ function settingsBody() {
           "distancePreset",
           "select",
           ["Low", "Medium", "High", "Custom"],
-          `<span id="distance-preset-hint">${presetHint(state.settingsDraft.distancePreset)}</span>`,
+          presetHint(state.settingsDraft.distancePreset),
         ) +
         row(
           "Reach",
           "reachKm",
           "range",
           [2, 8, 1],
-          "How far distant terrain is drawn, in km.",
+          `How far distant terrain is drawn, in km. The nearest ${VIEW_DISTANCE_M} m is always full detail; the Game sets how far it allows.`,
           state.settingsDraft.distancePreset !== "Custom",
         ) +
         row(
@@ -588,8 +615,7 @@ function settingsBody() {
           "How many of its own Chunks each Voxel size reaches. Higher is sharper, and more memory.",
           state.settingsDraft.distancePreset !== "Custom",
         ) +
-        `<div id="distance-panel">${distancePanel()}</div>` +
-        `<p class="muted">The nearest ${VIEW_DISTANCE_M} m is always full detail; the Game sets how far it allows.</p>`
+        `<div id="distance-panel">${distancePanel()}</div>`
       );
     case "Audio":
       return (
@@ -606,7 +632,7 @@ function settingsBody() {
           "effects",
           "range",
           [0, 100, 1],
-          "All action sounds, including the fine controls below.",
+          "All action sounds. Each sound below is relative to this; set one to 0 to mute it.",
         ) +
         row(
           "Ambient",
@@ -622,7 +648,7 @@ function settingsBody() {
           [0, 100, 1],
           "Occasional tracks, with silence between them.",
         ) +
-        `<details class="audio-details"><summary>Fine-tune sound effects</summary><p class="muted">Relative to Effects. Set any sound to 0 to mute it.</p>` +
+        `<details class="audio-details"><summary>Fine-tune sound effects</summary>` +
         row(
           "Footsteps",
           "footsteps",
@@ -693,11 +719,11 @@ function settingsBody() {
           [0, 100, 1],
           "Feedback when you take damage or die.",
         ) +
-        `</details><div class="notice">Apply changes, then resume to hear your mix. World audio rests while Settings is open.</div>`
+        `</details>`
       );
     case "Accessibility":
       return (
-        `<div class="row between"><p class="section-label">Comfort & readability</p><span class="pill">Proposed category</span></div>` +
+        group("Comfort & readability") +
         row(
           "Reduced motion",
           "motion",
@@ -742,25 +768,78 @@ function settings() {
     "accessibility",
   ];
   const nav = `<nav class="rail settings-rail" aria-label="Settings categories"><div class="rail-title">SETTINGS</div>${settingsCategories.map((name, i) => `<button class="${state.settingsTab === name ? "active" : ""}" data-action="settings-category" data-value="${name}" ${state.settingsTab === name ? 'aria-current="page"' : ""}><span class="category-icon">${icon(icons[i])}</span><span class="nav-label">${name}</span><span class="nav-arrow">${icon("chevron", 12)}</span></button>`).join("")}</nav>`;
+  settingsHelp = [];
+  const rows = settingsBody();
+  const bindings = state.settingsTab === "Key bindings";
+  const [title, help] = bindings
+    ? ["Key bindings", BINDING_HELP]
+    : settingsHelp[0] || ["", ""];
   return frame({
     title: state.settingsTab,
-    subtitle: "Your preferences, across every World.",
-    eyebrow: "MENU / SETTINGS",
     rail: nav,
-    body: settingsBody(),
-    footer: `${button("← Back", "settings-back", { ghost: true })}<div class="row wrap"><span class="footer-hint" id="settings-status">${state.settingsDirty ? "Unapplied changes" : "All changes applied"}</span>${button("Restore defaults", "settings-reset", { ghost: true, small: true })}${button("Apply changes", "settings-apply", { primary: true, disabled: !state.settingsDirty })}</div>`,
+    body: `<div class="settings-layout"><div class="settings-rows">${rows}</div><aside class="settings-help" id="settings-help" aria-live="polite"><b>${esc(title)}</b><p>${esc(help)}</p></aside></div>`,
+    prompts: [
+      ["Esc", "Back", "settings-back"],
+      bindings && ["Q", "Previous", "settings-binding-step", "-1"],
+      bindings && ["E", "Next", "settings-binding-step", "1"],
+      ["R", "Reset to defaults", "settings-reset"],
+    ],
   });
 }
 
+function showSettingsHelp(row) {
+  const panel = $("#settings-help");
+  if (!panel || !row) return;
+  panel.querySelector("b").textContent = row.dataset.title;
+  panel.querySelector("p").textContent = row.dataset.help;
+}
+for (const type of ["focusin", "mouseover"])
+  document.addEventListener(type, (e) =>
+    showSettingsHelp(e.target.closest?.(".settings-rows [data-help]")),
+  );
+
+// Changes apply as they are made, as a game's options do. Display changes are
+// the exception: a mode the screen cannot show would leave the Player stranded,
+// so they revert unless kept within ten seconds.
+const DISPLAY_KEYS = ["sync", "fps", "aa", "renderScale"];
+const KEEP_SECONDS = 10;
+let keepTimer = null;
+
 function settingsChanged() {
-  state.settingsDirty =
-    JSON.stringify(state.settingsDraft) !== JSON.stringify(state.settings);
-  const apply = document.querySelector("[data-action=settings-apply]");
-  if (apply) apply.disabled = !state.settingsDirty;
-  if ($("#settings-status"))
-    $("#settings-status").textContent = state.settingsDirty
-      ? "Unapplied changes"
-      : "All changes applied";
+  const shown = DISPLAY_KEYS.filter(
+    (k) => state.settingsDraft[k] !== state.settings[k],
+  );
+  const previous = Object.fromEntries(shown.map((k) => [k, state.settings[k]]));
+  applySettings();
+  if (shown.length) confirmDisplay(previous);
+}
+
+function confirmDisplay(previous) {
+  clearInterval(keepTimer);
+  let left = KEEP_SECONDS;
+  dialog(
+    "Keep these settings?",
+    `<p id="display-keep">Reverting in <b>${left}</b> seconds.</p>`,
+    button("Revert", "settings-revert-display", { ghost: true }) +
+      button("Keep", "settings-keep-display", { primary: true }),
+  );
+  state.revertDisplay = previous;
+  keepTimer = setInterval(() => {
+    left -= 1;
+    const count = $("#display-keep b");
+    // Closing the dialog any other way, Esc included, is not keeping.
+    if (!count || left <= 0) revertDisplay();
+    else count.textContent = left;
+  }, 1000);
+}
+
+function revertDisplay() {
+  clearInterval(keepTimer);
+  Object.assign(state.settingsDraft, state.revertDisplay);
+  state.revertDisplay = null;
+  applySettings();
+  if ($("#display-keep")) closeDialog();
+  if (state.screen === "settings") render();
 }
 
 function applySettings() {
@@ -774,24 +853,60 @@ function applySettings() {
     : "smooth";
 }
 
+// A control re-rendered by its own change keeps the highlight.
+function renderKeeping(key) {
+  render();
+  document
+    .querySelector(`[data-cycle="${key}"]`)
+    ?.focus({ preventScroll: true });
+}
+
+function stepCycle(key, by) {
+  const options = settingsOptions[key];
+  if (!options) return;
+  const d = state.settingsDraft;
+  const i = options.indexOf(String(d[key]));
+  const next = options[(i + by + options.length) % options.length];
+  if (key === "distancePreset") choosePreset(next);
+  else d[key] = next;
+  settingsChanged();
+  renderKeeping(key);
+}
+
 function settingsAction(name, value) {
   if (name === "settings-category") {
     state.settingsTab = value;
+    state.rebinding = null;
     render();
     return true;
   }
-  if (name === "settings-apply") {
-    applySettings();
-    render();
-    toast("Preferences applied in the prototype.");
+  if (name === "settings-cycle") {
+    const [key, by] = value.split("|");
+    stepCycle(key, Number(by));
+    return true;
+  }
+  if (name === "settings-toggle") {
+    state.settingsDraft[value] = !state.settingsDraft[value];
+    settingsChanged();
+    renderKeeping(value);
+    return true;
+  }
+  if (name === "settings-keep-display") {
+    clearInterval(keepTimer);
+    state.revertDisplay = null;
+    closeDialog();
+    return true;
+  }
+  if (name === "settings-revert-display") {
+    revertDisplay();
     return true;
   }
   if (name === "settings-reset") {
     dialog(
-      "Restore settings defaults?",
-      `<p>${state.settingsTab === "Audio" ? "This resets only your draft audio volumes. Apply to keep them." : state.settingsTab === "Controller" ? "This resets your draft controller and touch preferences. Apply to keep them." : "This resets your draft preferences, except the controller's. Apply to keep them."}</p>`,
-      button("Keep changes", "close-dialog", { ghost: true }) +
-        button("Restore defaults", "settings-confirm-reset", { primary: true }),
+      "Reset to defaults?",
+      `<p>${state.settingsTab === "Audio" ? "Resets your audio volumes." : state.settingsTab === "Controller" ? "Resets your controller and touch settings." : "Resets every setting except the controller's."}</p>`,
+      button("Cancel", "close-dialog", { ghost: true }) +
+        button("Reset", "settings-confirm-reset", { primary: true }),
     );
     return true;
   }
@@ -817,61 +932,23 @@ function settingsAction(name, value) {
     } else {
       state.settingsDraft = clone(settingsDefaults);
     }
-    settingsChanged();
+    applySettings();
     closeDialog();
     render();
     return true;
   }
   if (name === "settings-back") {
-    if (state.settingsDirty)
-      dialog(
-        "Keep your changes?",
-        "<p>You have unapplied settings. Apply them before leaving, or discard the draft.</p>",
-        button("Keep editing", "close-dialog", { ghost: true }) +
-          button("Discard", "settings-discard") +
-          button("Apply & return", "settings-return", { primary: true }),
-      );
-    else {
-      state.settingsDraft = null;
-      navigate(state.returnTo);
-    }
-    return true;
-  }
-  if (name === "settings-discard") {
     state.settingsDraft = null;
-    state.settingsDirty = false;
-    closeDialog();
+    state.rebinding = null;
     navigate(state.returnTo);
     return true;
   }
-  if (name === "settings-return") {
-    applySettings();
-    state.settingsDraft = null;
-    closeDialog();
-    navigate(state.returnTo);
-    return true;
-  }
-  if (name === "settings-rebind" || name === "settings-rebind-alt") {
+  if (name === "settings-rebind") {
+    const [slot, action] = value.split("|");
     state.pendingConflict = null;
-    state.rebinding = value;
-    state.rebindingSlot =
-      name === "settings-rebind" ? "bindings" : "altBindings";
-    const bound = state.settingsDraft[state.rebindingSlot][value];
-    dialog(
-      "Change binding",
-      `<p><b>${esc(value)}</b> · ${name === "settings-rebind" ? "Primary" : "Alternative"}</p><p>Press a key or mouse button. Escape cancels.</p>`,
-      (bound
-        ? button("Clear binding", "settings-clear-binding", { ghost: true })
-        : "") + button("Cancel", "close-dialog"),
-    );
-    return true;
-  }
-  if (name === "settings-rebind-pad") {
-    dialog(
-      "Change binding",
-      `<p><b>${esc(value)}</b> · Controller</p><p>Press a controller button. Menu or Esc cancels.</p>`,
-      button("Cancel", "close-dialog"),
-    );
+    state.rebinding = action;
+    state.rebindingSlot = slot;
+    render();
     return true;
   }
   if (name === "settings-binding-reset") {
@@ -880,20 +957,29 @@ function settingsAction(name, value) {
     if (settingsDefaults.altBindings[value])
       d.altBindings[value] = settingsDefaults.altBindings[value];
     else delete d.altBindings[value];
-    settingsChanged();
-    render();
-    return true;
-  }
-  if (name === "settings-clear-binding") {
-    state.settingsDraft[state.rebindingSlot][state.rebinding] = "";
-    state.rebinding = null;
-    settingsChanged();
-    closeDialog();
+    d.padBindings[value] = settingsDefaults.padBindings[value] || "";
+    applySettings();
     render();
     return true;
   }
   if (name === "settings-binding-group") {
     state.bindingGroup = value;
+    state.rebinding = null;
+    render();
+    return true;
+  }
+  if (name === "settings-binding-step") {
+    const groups = Object.keys(bindingGroups);
+    const i = groups.indexOf(state.bindingGroup || "Movement");
+    state.bindingGroup =
+      groups[(i + Number(value) + groups.length) % groups.length];
+    state.rebinding = null;
+    render();
+    return true;
+  }
+  if (name === "settings-keep-binding") {
+    state.pendingConflict = null;
+    closeDialog();
     render();
     return true;
   }
@@ -901,10 +987,10 @@ function settingsAction(name, value) {
     const { key, owners } = state.pendingConflict;
     const d = state.settingsDraft;
     for (const [slot, action] of owners) d[slot][action] = "";
-    d[state.rebindingSlot][state.rebinding] = key;
+    const [action, slot] = [state.rebinding, state.rebindingSlot];
+    d[slot][action] = key;
     state.pendingConflict = null;
-    state.rebinding = null;
-    settingsChanged();
+    applySettings();
     closeDialog();
     render();
     return true;
@@ -912,30 +998,50 @@ function settingsAction(name, value) {
   return false;
 }
 
-document.addEventListener("input", (e) => {
-  if (e.target.dataset.bind !== "bindingSearch") return;
-  state.bindingSearch = e.target.value;
-  if ($("#binding-results")) $("#binding-results").innerHTML = bindingRows();
+function finishRebinding() {
+  const [action, slot] = [state.rebinding, state.rebindingSlot];
+  state.rebinding = null;
+  render();
+  document
+    .querySelector(`.key-cap[data-value="${CSS.escape(`${slot}|${action}`)}"]`)
+    ?.focus({ preventScroll: true });
+}
+
+// Left and Right change a focused selector rather than moving the highlight.
+document.addEventListener("keydown", (e) => {
+  if (state.screen !== "settings" || state.rebinding) return;
+  const cycle = e.target.closest?.(".cycle, .onoff");
+  if (!cycle || !["ArrowLeft", "ArrowRight"].includes(e.key)) return;
+  e.preventDefault();
+  const key = cycle.dataset.cycle;
+  if (cycle.classList.contains("onoff")) {
+    const on = e.key === "ArrowRight";
+    if (state.settingsDraft[key] === on) return;
+    settingsAction("settings-toggle", key);
+  } else stepCycle(key, e.key === "ArrowRight" ? 1 : -1);
 });
 
+// Choosing a key cap waits in the row for the next key, not in a dialog.
 document.addEventListener("keydown", (e) => {
-  if (
-    !state.rebinding ||
-    state.pendingConflict ||
-    !$("#dialog-root").children.length
-  )
-    return;
+  if (!state.rebinding || state.pendingConflict) return;
   e.preventDefault();
   e.stopImmediatePropagation();
-  if (e.key === "Escape") {
-    state.rebinding = null;
-    closeDialog();
-    return;
-  }
-  const key =
-    e.key === " " ? "Space" : e.key.length === 1 ? e.key.toUpperCase() : e.key;
   const slot = state.rebindingSlot || "bindings",
     d = state.settingsDraft;
+  if (e.key === "Escape") {
+    finishRebinding();
+    return;
+  }
+  if (e.key === "Delete") {
+    d[slot][state.rebinding] = "";
+    applySettings();
+    finishRebinding();
+    return;
+  }
+  // The prototype cannot read a controller here; only Esc and Delete apply.
+  if (slot === "padBindings") return;
+  const key =
+    e.key === " " ? "Space" : e.key.length === 1 ? e.key.toUpperCase() : e.key;
   const owners = ["bindings", "altBindings"].flatMap((s) =>
     Object.entries(d[s])
       .filter(
@@ -949,7 +1055,7 @@ document.addEventListener("keydown", (e) => {
     dialog(
       "Binding already in use",
       `<p>This binding is assigned to ${owners.map(([, a]) => esc(a)).join(", ")}. Replace it?</p>`,
-      button("Keep existing", "close-dialog", { ghost: true }) +
+      button("Keep existing", "settings-keep-binding", { ghost: true }) +
         button("Replace binding", "settings-replace-binding", {
           primary: true,
         }),
@@ -957,8 +1063,22 @@ document.addEventListener("keydown", (e) => {
     return;
   }
   d[slot][state.rebinding] = key;
-  state.rebinding = null;
-  settingsChanged();
-  closeDialog();
-  render();
+  applySettings();
+  finishRebinding();
 });
+
+// A click anywhere but the waiting row stops waiting.
+document.addEventListener(
+  "click",
+  (e) => {
+    if (
+      state.rebinding &&
+      !state.pendingConflict &&
+      !e.target.closest(".binding-row.is-waiting")
+    ) {
+      state.rebinding = null;
+      if (state.screen === "settings") render();
+    }
+  },
+  true,
+);

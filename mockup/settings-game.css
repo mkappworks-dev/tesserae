@@ -1,0 +1,175 @@
+/* Game-feel pass for this area; see menus.css for the shared shell. */
+.settings-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 240px;
+  gap: 28px;
+  align-items: start;
+}
+.settings-help {
+  position: sticky;
+  top: 0;
+  padding: 14px 16px;
+  background: rgb(255 255 255 / 0.04);
+  border-left: 2px solid var(--leaf);
+  min-height: 96px;
+}
+.settings-help b {
+  display: block;
+  font-size: calc(14px * var(--text-scale, 1));
+  font-weight: 600;
+}
+.settings-help p {
+  margin: 8px 0 0;
+  font-size: calc(13px * var(--text-scale, 1));
+  line-height: 1.55;
+  color: var(--muted);
+}
+.game.large-text .settings-layout {
+  grid-template-columns: 1fr;
+}
+.game.large-text .settings-help {
+  position: static;
+  order: -1;
+}
+.game .settings-rows .setting-row {
+  padding: 10px 0;
+  min-height: 56px;
+}
+.game .settings-rows .setting-row > b {
+  font-size: calc(15px * var(--text-scale, 1));
+  font-weight: 550;
+}
+
+/* ◀ value ▶: Left and Right change it, so a controller needs no popup. */
+.game .cycle {
+  display: grid;
+  grid-template-columns: 32px 1fr 32px;
+  align-items: center;
+  width: 220px;
+  min-height: 40px;
+  flex-shrink: 0;
+  padding: 0;
+  font: inherit;
+  font-size: calc(14px * var(--text-scale, 1));
+  color: var(--ink);
+  background: rgb(255 255 255 / 0.05);
+  border: 1px solid var(--edge);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.game .cycle-value {
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.game .cycle-arrow {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  font-size: 11px;
+  color: var(--muted);
+}
+.game .cycle:focus-visible .cycle-arrow,
+.game .cycle:hover .cycle-arrow {
+  color: var(--ink);
+}
+
+.game .onoff {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  width: 220px;
+  min-height: 40px;
+  flex-shrink: 0;
+  padding: 3px;
+  gap: 3px;
+  font: inherit;
+  font-size: calc(14px * var(--text-scale, 1));
+  background: rgb(255 255 255 / 0.05);
+  border: 1px solid var(--edge);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.game .onoff span {
+  display: grid;
+  place-items: center;
+  border-radius: 4px;
+  color: var(--muted);
+}
+.game .onoff span.on {
+  background: #c1cdb5;
+  color: #161b16;
+  font-weight: 600;
+}
+.game .settings-rows .setting-slider {
+  width: 220px;
+}
+.game .settings-rows .setting-slider .input {
+  width: 170px;
+  max-width: none;
+}
+
+/* Key bindings: game tabs switched with Q and E, one key cap per input. */
+.binding-head {
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 0;
+  font-size: calc(12px * var(--text-scale, 1));
+  color: var(--muted);
+  border-bottom: 1px solid var(--edge);
+}
+.caps {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.cap-cell {
+  display: flex;
+  gap: 6px;
+  justify-content: center;
+  min-width: 150px;
+}
+.cap-reset {
+  width: 36px;
+}
+.game .binding-row {
+  position: relative;
+}
+.game .key-cap {
+  min-width: 44px;
+  min-height: 36px;
+  padding: 0 10px;
+  font: inherit;
+  font-size: calc(13px * var(--text-scale, 1));
+  font-weight: 600;
+  color: var(--ink);
+  background: linear-gradient(#2b2e32, #202326);
+  border: 1px solid #4a4e54;
+  border-bottom-width: 3px;
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.game .key-cap.unbound {
+  color: var(--muted);
+  font-weight: 400;
+}
+.game .key-cap.waiting {
+  border-color: #e2d5ab;
+}
+.press-key {
+  position: absolute;
+  inset: 4px 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-size: calc(14px * var(--text-scale, 1));
+  background: rgb(10 11 12 / 0.92);
+  border: 1px solid #e2d5ab;
+  border-radius: 6px;
+}
+.game.large-text .cap-cell {
+  width: auto;
+}

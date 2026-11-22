@@ -51,16 +51,16 @@ function validationError(message, bind) {
   return false;
 }
 function stepValid(step) {
-  if (step === 0) return state.name.length <= 64;
-  if (step !== 2) return true;
+  if (step === 1)
+    return (
+      state.name.length <= 64 &&
+      ["tempSize", "humiditySize"].every((key) => {
+        const n = Number(state[key]);
+        return Number.isFinite(n) && n > 0 && n <= 100000;
+      })
+    );
+  if (step !== 3) return true;
   if (!state.biomes.some((b) => b.enabled)) return false;
-  if (
-    !["tempSize", "humiditySize"].every((key) => {
-      const n = Number(state[key]);
-      return Number.isFinite(n) && n > 0 && n <= 100000;
-    })
-  )
-    return false;
   return state.biomes.every((b) =>
     [
       ["t", 1],
@@ -73,22 +73,23 @@ function stepValid(step) {
   );
 }
 function validateStep(step) {
-  if (step === 0 && state.name.length > 64)
+  if (step === 1 && state.name.length > 64)
     return validationError(
       "Use a World name of 64 characters or fewer.",
       "name",
     );
-  if (step !== 2) return true;
+  if (step === 1)
+    for (const key of ["tempSize", "humiditySize"]) {
+      const number = Number(state[key]);
+      if (!Number.isFinite(number) || number <= 0 || number > 100000)
+        return validationError(
+          "Climate sizes must be between 1 and 100,000 metres.",
+          key,
+        );
+    }
+  if (step !== 3) return true;
   if (!state.biomes.some((b) => b.enabled))
     return validationError("Enable at least one biome to continue.");
-  for (const key of ["tempSize", "humiditySize"]) {
-    const number = Number(state[key]);
-    if (!Number.isFinite(number) || number <= 0 || number > 100000)
-      return validationError(
-        "Climate sizes must be between 1 and 100,000 metres.",
-        key,
-      );
-  }
   for (let i = 0; i < state.biomes.length; i++) {
     const biome = state.biomes[i];
     for (const [key, maximum] of [
@@ -102,6 +103,7 @@ function validateStep(step) {
         biome[key] > maximum
       ) {
         state.selected = i;
+        state.biomeEdit = i;
         render();
         return validationError(
           `${biome.name}: ${key === "caves" ? "cave scale must be 0–4" : "temperature and humidity must be 0–1"}.`,
@@ -112,6 +114,20 @@ function validateStep(step) {
   }
   return true;
 }
+let padInput = false;
+// The prompt bar shows controller buttons once a controller is used, and keys
+// again on the next key press or mouse move.
+function usingPad(on) {
+  if (padInput === on) return;
+  padInput = on;
+  document.querySelectorAll(".game-footer .prompt").forEach((p) => {
+    const cap = p.querySelector("kbd");
+    if (cap)
+      cap.textContent = on && p.dataset.pad ? p.dataset.pad : p.dataset.key;
+  });
+}
+document.addEventListener("keydown", () => usingPad(false), true);
+document.addEventListener("mousemove", () => usingPad(false));
 function menuTargets() {
   const root = openSelect
     ? $("#select-layer")
@@ -120,7 +136,7 @@ function menuTargets() {
       : $("#game");
   return [
     ...root.querySelectorAll(
-      "button:not(:disabled),input:not(:disabled),select:not(:disabled),summary",
+      'button:not(:disabled):not([tabindex="-1"]),input:not(:disabled),select:not(:disabled),summary',
     ),
   ].filter((el) => el.getClientRects().length && !el.closest("[inert]"));
 }
@@ -169,11 +185,12 @@ let padLast = 0,
 function handleMenuPad(pad, time) {
   if (!pad) return;
   const pressed = (i) => !!pad.buttons[i]?.pressed;
-  const active = [0, 1, 4, 5, 9, 12, 13, 14, 15].some(pressed);
+  const active = [0, 1, 2, 3, 4, 5, 9, 12, 13, 14, 15].some(pressed);
   if (!active) {
     padHeld = false;
     return;
   }
+  usingPad(true);
   const direction = pressed(12)
     ? "up"
     : pressed(13)
@@ -205,12 +222,26 @@ function handleMenuPad(pad, time) {
     } else moveMenuFocus(direction);
     return;
   }
+  // X and Y fire the prompts that name them, as A and B are Enter and Esc.
+  for (const [i, face] of [
+    [2, "X"],
+    [3, "Y"],
+  ])
+    if (pressed(i)) {
+      document
+        .querySelector(`.game-footer .prompt[data-pad="${face}"]`)
+        ?.click();
+      return;
+    }
   if (pressed(1)) {
     menuBack();
     return;
   }
   if (pressed(9)) {
-    state.screen === "play" ? navigate("pause") : menuBack();
+    if (state.screen === "play") navigate("pause");
+    else if (state.screen === "wizard" && !$("#dialog-root").children.length)
+      action(state.step === 4 ? "create" : "next");
+    else menuBack();
     return;
   }
   if (pressed(4) || pressed(5)) {
@@ -224,7 +255,7 @@ function handleMenuPad(pad, time) {
         ],
       );
     } else if (state.screen === "wizard")
-      goStep(Math.min(3, Math.max(0, state.step + (pressed(5) ? 1 : -1))));
+      goStep(Math.min(4, Math.max(0, state.step + (pressed(5) ? 1 : -1))));
     return;
   }
   if (pressed(0)) {

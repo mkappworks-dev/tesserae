@@ -1,0 +1,225 @@
+/* Game-feel pass for this area; see menus.css for the shared shell. */
+.inventory-overlay.game-inv {
+  height: auto;
+  max-height: 100%;
+}
+.inv-panel {
+  position: relative;
+  display: flex;
+  gap: 16px;
+  max-height: 100%;
+  padding: 16px;
+  background: #0b0b0d;
+  border: 2px solid #000;
+  border-radius: 9px;
+  box-shadow:
+    inset 0 0 0 1px #ffffff1f,
+    0 20px 60px #000a;
+}
+
+.inv-panel .catalogue-side {
+  flex: 0 0 auto;
+  width: auto;
+  padding-right: 16px;
+  background: none;
+  border: 0;
+  border-right: 1px solid #2a2b30;
+  border-radius: 0;
+  box-shadow: none;
+  overflow: visible;
+}
+.side-head.with-tabs .side-tabs {
+  flex-shrink: 0;
+  margin: 0;
+}
+.inv-panel .side-head {
+  padding: 0;
+}
+.side-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 34px;
+  margin-bottom: 8px;
+}
+.side-head > b {
+  font-size: 13px;
+  font-weight: 600;
+}
+.side-head-search {
+  display: flex;
+  flex: 1;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 6px;
+}
+.side-head-search .input {
+  flex: 1;
+  min-width: 0;
+  min-height: 32px;
+  margin: 0;
+  font-size: 13px;
+}
+.game .side-head .side-search-toggle {
+  position: static;
+  transform: none;
+  width: 32px;
+  height: 32px;
+  min-height: 0;
+  padding: 0;
+  flex-shrink: 0;
+}
+.inv-panel .side-grid {
+  flex: 1;
+  grid-template-columns: repeat(5, 52px);
+  gap: 4px;
+  padding: 0;
+  overflow: auto;
+}
+.inv-panel .side-tile,
+.recipe-tile {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  min-height: 0;
+  padding: 4px;
+  background: #17181b;
+  border: 1px solid #33343a;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.inv-panel .side-tile .voxel-icon,
+.recipe-tile .voxel-icon {
+  width: 32px;
+  height: 32px;
+}
+.recipe-tile.unaffordable {
+  opacity: 0.4;
+  filter: grayscale(0.7);
+}
+.inv-panel .side-tile:hover,
+.inv-panel .side-tile:focus-visible,
+.recipe-tile:hover,
+.recipe-tile:focus-visible {
+  border-color: #e2d5ab;
+}
+
+.inv-main {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+}
+.inv-label {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+.inv-label b {
+  font-size: 13px;
+  font-weight: 600;
+}
+.inv-label small {
+  font-size: 11px;
+  color: #9fa4ad;
+}
+.inv-label small.full {
+  color: #e7b98e;
+}
+.inv-hotbar {
+  padding-top: 12px;
+  border-top: 1px solid #2a2b30;
+}
+.inv-panel .item-slot:focus-visible {
+  outline: 2px solid #e2d5ab;
+  outline-offset: 1px;
+}
+
+.slot-tip {
+  position: absolute;
+  z-index: 30;
+  min-width: 150px;
+  max-width: 230px;
+  padding: 8px 10px;
+  background: #16171a;
+  border: 1px solid #55565e;
+  border-radius: 6px;
+  box-shadow: 0 10px 30px #000c;
+  font-size: 13px;
+}
+.slot-tip > b {
+  display: block;
+  font-weight: 600;
+}
+.slot-tip > small {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  color: #9fa4ad;
+}
+.slot-tip .shape-chips {
+  margin-top: 8px;
+}
+.slot-tip .shape-chips button {
+  padding: 2px 0;
+}
+.slot-tip .shape-chips .voxel-icon {
+  width: 24px;
+  height: 24px;
+}
+.tip-needs {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+}
+.tip-needs li {
+  display: grid;
+  grid-template-columns: 20px 1fr auto;
+  align-items: center;
+  gap: 6px;
+}
+.tip-needs .voxel-icon {
+  width: 18px;
+  height: 18px;
+}
+.tip-needs .short {
+  color: #e7a48e;
+}
+
+/* Prototype tooling, marked as the Simulate panel is. */
+.inv-panel .sim-inline.proto-tool {
+  position: static;
+  align-self: flex-start;
+  margin: 12px 0 0;
+  background: #f3eedb;
+  color: #1d1c18;
+  border: 2px dashed #8a7a3c;
+  border-radius: 4px;
+  font-size: 11px;
+}
+.shape-chips.readonly {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 8px;
+}
+.shape-chips.readonly small {
+  margin-right: 4px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.shape-chips.readonly span {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 4px;
+  background: rgb(255 255 255 / 0.05);
+}

@@ -157,8 +157,6 @@ function ensureInventory() {
   state.catalogueGroup ||= "All";
   state.quickSlot ??= 0;
   state.sideItem ||= "stone";
-  state.sideGroup ||= "All";
-  state.transferCount ??= 64;
   state.inspected ||= { area: "bag", index: 0 };
 }
 /* Boxes in unit-cube coordinates [x0, x1, y0, y1, z0, z1], drawn far to near. */
@@ -211,61 +209,153 @@ function voxelIcon(item, shape = "Cube") {
     return `<svg class="voxel-icon" viewBox="0 0 48 48" aria-hidden="true"><path d="m5 34 19-31 19 11-19 31Z" fill="${item.color}"/><path d="M5 34 24 3v42Z" fill="${item.color}"/><path d="m24 45 19-31v20Z" fill="${item.color}"/><path d="M5 34 24 3v42Z" fill="#000" opacity=".15"/><path d="m24 45 19-31v20Z" fill="#000" opacity=".35"/></svg>`;
   return `<svg class="voxel-icon" viewBox="0 0 48 48" aria-hidden="true"><path d="${top}" fill="${item.color}"/><path d="${left}" fill="${item.color}"/><path d="${right}" fill="${item.color}"/><path d="${left}" fill="#000" opacity=".16"/><path d="${right}" fill="#000" opacity=".32"/></svg>`;
 }
-function inventoryTabs() {
-  return `<div class="inventory-title">${icon("storage")}<h1>Inventory</h1><kbd>I</kbd><kbd>G</kbd><kbd>⌫</kbd></div>`;
-}
-function itemShell(content, footer) {
-  return `<section class="item-window" data-details="${!!state.showItemDetails}" aria-label="Player inventory"><header class="item-window-header">${inventoryTabs()}<div class="item-window-context"><button class="item-details-toggle" data-action="item-details" aria-label="Toggle item details" aria-expanded="${!!state.showItemDetails}" aria-controls="item-inspector">${icon("info")}</button>${creativeAccess() ? '<span class="access-badge">Creative access</span>' : ""}<button class="item-close" data-action="inventory-close" aria-label="Close and return to game">${icon("close")}</button></div></header>${content}<footer class="item-window-footer">${footer}</footer></section>`;
-}
 function renderCarriedSlot(area, index, play = false) {
   const stack = slotList(area)[index],
     item = stackItem(stack);
   const picked =
     state.carriedFrom?.area === area && state.carriedFrom?.index === index;
-  const inspected =
-    state.inspected?.area === area && state.inspected?.index === index;
-  return `<button class="item-slot ${picked ? "picked-up" : ""} ${!play && inspected ? "inspected" : ""} ${area === "bar" && index === state.quickSlot ? "active" : ""}" data-action="${play ? "play-slot" : "storage-slot"}" data-value="${play ? index : area + ":" + index}" aria-label="${slotPlace[area]} slot ${index + 1}${stack ? ": " + item?.name + ", " + stack.count + ", " + (stack.shape || "Cube") : " empty"}" ${play ? "" : `draggable="${!!stack}" data-drag-area="${area}" data-drag-index="${index}"`}>${voxelIcon(item, stack?.shape)}${stack ? `<span class="stack-count">${stack.count}</span>` : ""}${area === "bar" ? `<span class="slot-number">${index + 1}</span>` : ""}</button>`;
+  return `<button class="item-slot ${picked ? "picked-up" : ""} ${area === "bar" && index === state.quickSlot ? "active" : ""}" data-action="${play ? "play-slot" : "storage-slot"}" data-value="${play ? index : area + ":" + index}" aria-label="${slotPlace[area]} slot ${index + 1}${stack ? ": " + item?.name + ", " + stack.count + ", " + (stack.shape || "Cube") : " empty"}" ${play ? "" : `draggable="${!!stack}" data-drag-area="${area}" data-drag-index="${index}" data-tip="slot:${area}:${index}"`}>${voxelIcon(item, stack?.shape)}${stack ? `<span class="stack-count">${stack.count}</span>` : ""}${area === "bar" ? `<span class="slot-number">${index + 1}</span>` : ""}</button>`;
 }
 function creativeBar() {
   return state.bagHotbar
     .map((_, i) => renderCarriedSlot("bar", i, true))
     .join("");
 }
-function itemHotbar() {
-  return `<div class="item-hotbar"><div class="hotbar-caption"><b>Hotbar</b><small>Quick access · the same slots you use in game</small></div><div class="storage-grid quick-access">${state.bagHotbar.map((_, i) => renderCarriedSlot("bar", i)).join("")}</div></div>`;
+function slotGrid(area, cls) {
+  return `<div class="storage-grid ${cls}">${slotList(area)
+    .map((_, i) => renderCarriedSlot(area, i))
+    .join("")}</div>`;
 }
-function storageInspector() {
-  const from = state.carriedFrom || state.inspected;
-  const stack = from ? slotList(from.area)[from.index] : null,
-    item = stackItem(stack);
-  const close = `<button class="item-inspector-close" data-action="item-details" data-value="close" aria-label="Close item details">${icon("close")}</button>`;
-  if (!item)
-    return `<aside class="item-inspector" id="item-inspector">${close}<p class="item-eyebrow">ITEM DETAILS</p><div class="empty-item">${icon("storage", 40)}</div><h2>Choose an item</h2><p>Select a carried stack to inspect or move it.</p></aside>`;
-  const at = from.area + ":" + from.index,
-    shape = state.placeShape || "Cube",
-    to = { bar: "hotbar", bag: "backpack", chest: "Chest" }[
-      quickTarget(from.area)
-    ];
-  const stat = (label, value) =>
-    `<div><dd>${value}</dd><dt>${label}</dt></div>`;
-  return `<aside class="item-inspector" id="item-inspector">${close}<p class="item-eyebrow">${state.carriedFrom ? "MOVING STACK" : "ITEM DETAILS"}</p><div class="inspector-head">${voxelIcon(item, shape)}<div><h2>${item.name}</h2><p class="item-source">terra:${item.id}${item.materialId !== item.id ? ` · places ${item.material}` : ""}</p></div></div><dl class="inspector-stats">${stat("Count", stack.count)}${stat("Max", item.maxStack)}</dl><p class="inspector-label">Shape</p><div class="shape-chips" role="group" aria-label="Shape for ${esc(item.name)}">${["Cube", "Post", "Slab", "Stair", "Fence"].map((s) => `<button data-action="inventory-shape" data-value="${s}" aria-pressed="${shape === s}" class="${shape === s ? "active" : ""}" title="${s}">${voxelIcon(item, s)}<span>${s}</span></button>`).join("")}</div><div class="inspector-actions">${button("To " + to, "storage-quick", { value: at, small: true })}${button("Split", "storage-split", { value: at, small: true, ghost: true, disabled: stack.count < 2 })}${button("Drop 1", "storage-drop-one", { value: at, small: true, ghost: true })}${button("Drop stack", "storage-drop-all", { value: at, small: true, ghost: true })}${state.carriedFrom ? button("Cancel move", "storage-cancel", { small: true, ghost: true }) : ""}</div></aside>`;
-}
+/* One panel, as a game inventory is: what you are crafting from or putting
+   away on the left, your own slots on the right, and the details of whatever
+   the pointer or focus is on in a tooltip instead of a sidebar. */
 function storagePage() {
   ensureInventory();
-  const main = `<div class="item-main"><div class="item-browser inventory-browser"><div class="inventory-heading"><div><p class="item-eyebrow">YOUR ITEMS</p><h1>Backpack</h1></div><div class="row"><span class="item-capacity ${state.bag.every(Boolean) ? "full" : ""}">${state.bag.every(Boolean) ? "Full · " : ""}${state.bag.filter(Boolean).length} / ${state.bag.length} slots</span>${button("Sort", "storage-sort", { small: true, ghost: true })}</div></div><div class="item-grid-scroll"><div class="storage-grid backpack-grid">${state.bag.map((_, i) => renderCarriedSlot("bag", i)).join("")}</div><div class="inventory-inline-hint" role="status">${state.carriedFrom ? "Stack selected. Choose a destination, or select the source again to cancel." : "Click to move · Shift-click for quick transfer · Drag and drop supported · Drag out to drop"}</div></div></div>${storageInspector()}</div>`;
-  const win = itemShell(
-    main,
-    `${itemHotbar()}<div class="item-footer-actions"><small>${state.useTarget === "chest" ? "Shift-click moves a stack between the Chest and your Inventory." : state.useTarget || state.sidePane === "crafting" || !creativeAccess() ? "Crafted Items go to your Inventory; what does not fit drops at your feet." : creativeAccess() ? "Drag from the Catalogue into any slot, or set a count and transfer." : "Item counts stay intact when switching screens."}</small>${button("Back to game", "inventory-close", { ghost: true })}</div>`,
-  );
-  return `<div class="inventory-overlay with-catalogue">${sidePane()}${win}</div>`;
+  const chest = state.useTarget === "chest";
+  const used = state.bag.filter(Boolean).length;
+  const chestPart = chest
+    ? `<div class="inv-section"><div class="inv-label"><b>Chest</b><small>${state.chest.filter(Boolean).length} / ${state.chest.length}</small></div>${slotGrid("chest", "backpack-grid chest-grid")}</div>`
+    : "";
+  const main = `<div class="inv-main">${chestPart}<div class="inv-section"><div class="inv-label"><b>Backpack</b><small class="${used === state.bag.length ? "full" : ""}">${used} / ${state.bag.length}</small></div><div class="item-grid-scroll">${slotGrid("bag", "backpack-grid")}</div></div><div class="inv-section inv-hotbar">${slotGrid("bar", "quick-access")}</div>${chest ? simReach() : ""}</div>`;
+  screenPrompts = inventoryPrompts();
+  requestAnimationFrame(showTip);
+  return `<div class="inventory-overlay game-inv"><section class="inv-panel${chest ? " chest-open" : ""}" aria-label="Inventory">${chest ? "" : sidePane()}${main}<div class="slot-tip" id="slot-tip" role="tooltip" hidden></div></section></div>`;
 }
-const catalogueGroups = ["All", "Solids", "Fluids"];
-function sideItems() {
-  const q = (state.quickAddQuery || "").toLowerCase(),
-    g = catalogueGroups.includes(state.sideGroup) ? state.sideGroup : "All";
-  return catalogueItems.filter(
-    (x) => (g === "All" || x.group === g) && x.name.toLowerCase().includes(q),
+function simReach() {
+  return `<button class="sim-inline proto-tool" data-action="use-walk-away">Prototype · walk out of reach</button>`;
+}
+/* The prompt bar follows the tooltip: what the inputs do to the thing under the
+   pointer or focus. */
+function inventoryPrompts() {
+  const kind = state.tip?.split(":")[0] || "slot";
+  const chest = state.useTarget === "chest";
+  const close = [
+    ["I", "Close", "inventory-close"],
+    ["Esc", "Back", "inventory-close"],
+  ];
+  if (kind === "item")
+    return [
+      ["Click", "Take stack"],
+      ["⇧ Click", "Take one"],
+      ["1–9", "To hotbar"],
+      ["/", "Search", "side-search"],
+      ...close,
+    ];
+  if (kind === "recipe")
+    return [
+      ["Click", "Craft 1"],
+      ["⇧ Click", "Craft all"],
+      ["/", "Search", "side-search"],
+      ...close,
+    ];
+  return [
+    ["⇧ Click", "Quick move"],
+    ["Right-click", "Split"],
+    ["Q", "Drop", "slot-drop"],
+    ["1–9", "To hotbar"],
+    chest ? ["T", "Take all", "chest-take-all"] : null,
+    ["S", "Sort", chest ? "chest-sort" : "storage-sort"],
+    ...close,
+  ];
+}
+function tipTarget(tip = state.tip) {
+  return tip && $(`.inv-panel [data-tip="${tip}"]`);
+}
+// Shape is chosen in the hand while placing (Next Shape, Turn Shape), not on the
+// item, so the tooltip only says which Shapes it can take.
+function placesAs(item) {
+  return `<div class="shape-chips readonly" aria-label="Places as Cube, Post, Slab, Stair or Fence"><small>Places as</small>${["Cube", "Post", "Slab", "Stair", "Fence"].map((x) => `<span title="${x}">${voxelIcon(item, x)}</span>`).join("")}</div>`;
+}
+function tipHtml(tip = state.tip) {
+  if (!tip) return "";
+  const [kind, a, b] = tip.split(":");
+  if (kind === "slot") {
+    const stack = slotList(a)[Number(b)],
+      item = stackItem(stack);
+    if (!item) return "";
+    return `<b>${esc(item.name)}</b><small>${stack.count} / ${item.maxStack} · terra:${item.id}${item.materialId !== item.id ? ` · places ${esc(item.material)}` : ""}</small>${placesAs(item)}`;
+  }
+  if (kind === "item") {
+    const item = catalogueItems.find((x) => x.id === a);
+    return item
+      ? `<b>${esc(item.name)}</b><small>terra:${item.id} · ${item.group === "Fluids" ? "fluid" : "solid"}</small>${item.group === "Fluids" ? "" : placesAs(item)}`
+      : "";
+  }
+  if (kind === "recipe") {
+    const r = recipes[Number(a)];
+    if (!r) return "";
+    return `<b>${esc(itemName(r.out))}${r.n > 1 ? ` × ${r.n}` : ""}</b><ul class="tip-needs">${r.in.map(([id, n]) => `<li class="${holding(id) < n ? "short" : ""}">${blockIcon(id)}<span>${esc(itemName(id))}</span><span>${holding(id)} / ${n}</span></li>`).join("")}</ul>${affordable(r) ? "" : "<small>Missing items</small>"}`;
+  }
+  return "";
+}
+function showTip() {
+  const tip = $("#slot-tip"),
+    at = tipTarget();
+  const html = at ? tipHtml() : "";
+  if (!tip) return;
+  if (!html) {
+    tip.hidden = true;
+    return;
+  }
+  tip.innerHTML = html;
+  tip.hidden = false;
+  const panel = tip.parentElement.getBoundingClientRect(),
+    r = at.getBoundingClientRect(),
+    box = tip.getBoundingClientRect();
+  let left = r.right - panel.left + 6;
+  if (left + box.width > panel.width - 6)
+    left = r.left - panel.left - box.width - 6;
+  const top = Math.max(
+    6,
+    Math.min(r.top - panel.top, panel.height - box.height - 6),
   );
+  tip.style.left = Math.max(6, left) + "px";
+  tip.style.top = top + "px";
+}
+function setTip(tip) {
+  if (state.tip === tip) return;
+  state.tip = tip;
+  showTip();
+  const bar = document.querySelector(".game-footer>span:nth-child(2)");
+  if (bar && typeof promptBar === "function")
+    bar.innerHTML = promptBar(inventoryPrompts());
+}
+for (const type of ["mouseover", "focusin"])
+  document.addEventListener(type, (e) => {
+    if (state.screen !== "storage") return;
+    const at = e.target.closest?.(".inv-panel [data-tip]");
+    if (at) setTip(at.dataset.tip);
+  });
+document.addEventListener("mouseout", (e) => {
+  if (state.screen !== "storage" || !e.target.closest?.(".inv-panel")) return;
+  if (e.relatedTarget?.closest?.(".inv-panel")) return;
+  if (document.activeElement?.closest?.(".inv-panel [data-tip]")) return;
+  state.tip = null;
+  showTip();
+});
+function sideItems() {
+  const q = (state.quickAddQuery || "").toLowerCase();
+  return catalogueItems.filter((x) => x.name.toLowerCase().includes(q));
 }
 function sideGrid() {
   const items = sideItems();
@@ -273,16 +363,30 @@ function sideGrid() {
     ? items
         .map(
           (item) =>
-            `<button class="catalogue-tile side-tile ${item.id === state.sideItem ? "selected" : ""}" draggable="true" data-catalogue-drag="${item.id}" data-action="side-pick" data-value="${item.id}" aria-pressed="${item.id === state.sideItem}" title="${item.name}: drag to a slot · double-click for hotbar slot ${state.quickSlot + 1} · Shift-click for backpack">${voxelIcon(item)}<b>${item.name}</b></button>`,
+            `<button class="catalogue-tile side-tile" draggable="true" data-catalogue-drag="${item.id}" data-action="side-pick" data-value="${item.id}" data-tip="item:${item.id}" aria-label="${esc(item.name)}">${voxelIcon(item)}</button>`,
         )
         .join("")
     : '<p class="quick-add-empty">No Materials match.</p>';
 }
-function catalogueSide() {
-  const item =
-      catalogueItems.find((x) => x.id === state.sideItem) || catalogueItems[0],
-    n = state.transferCount;
-  return `<aside class="catalogue-side" aria-label="Catalogue"><header><p class="item-eyebrow">CREATIVE</p><h2>Catalogue</h2><small>Drag a Material into any slot</small></header><div class="catalogue-search side-search">${icon("search", 16)}<input class="input" data-bind="quickAddQuery" value="${esc(state.quickAddQuery || "")}" placeholder="Search Materials…" aria-label="Search Catalogue"></div><div class="side-filters" aria-label="Catalogue category">${catalogueGroups.map((g) => `<button data-action="side-group" data-value="${g}" class="${(catalogueGroups.includes(state.sideGroup) ? state.sideGroup : "All") === g ? "active" : ""}" aria-pressed="${(catalogueGroups.includes(state.sideGroup) ? state.sideGroup : "All") === g}">${g}</button>`).join("")}</div><div class="side-grid" id="side-grid">${sideGrid()}</div><footer class="transfer"><div class="transfer-item">${voxelIcon(item)}<span><b>${item.name}</b><small>terra:${item.id}</small></span></div><div class="transfer-count"><span>Count</span><div class="layout-stepper"><button data-action="transfer-count" data-value="-1" aria-label="One fewer">−</button><input class="input" type="number" min="1" max="64" inputmode="numeric" data-bind="transferCount" value="${n}" aria-label="Count to transfer"><button data-action="transfer-count" data-value="1" aria-label="One more">+</button></div><div class="count-presets">${[1, 16, 64].map((v) => `<button data-action="transfer-preset" data-value="${v}" class="${n === v ? "active" : ""}">${v}</button>`).join("")}</div></div><div class="transfer-actions">${button("To backpack", "transfer-bag", { ghost: true })}${button(`To hotbar ${state.quickSlot + 1}`, "transfer-bar", { primary: true })}</div></footer></aside>`;
+/* Search hides behind its icon until wanted, as a game's does; a query keeps it open. */
+function sideSearch(bind, value, label) {
+  const open = state.sideSearchOpen || value;
+  return `<div class="side-head-search">${open ? `<input class="input" data-bind="${bind}" value="${esc(value || "")}" placeholder="${label}…" aria-label="${label}">` : ""}<button class="field-action side-search-toggle" data-action="side-search" aria-label="${label}" aria-expanded="${!!open}" title="${label} (/)">${icon(open ? "close" : "search", 16)}</button></div>`;
+}
+function catalogueSide(strip = "") {
+  const search = sideSearch(
+    "quickAddQuery",
+    state.quickAddQuery,
+    "Search Materials",
+  );
+  return `<aside class="catalogue-side" aria-label="Catalogue">${sideTop(strip, "Catalogue", search)}<div class="side-grid" id="side-grid">${sideGrid()}</div></aside>`;
+}
+/* The tab strip, when there is one, names the pane, so search sits beside it
+   instead of under a repeated heading. */
+function sideTop(strip, title, search) {
+  return strip
+    ? `<div class="side-head with-tabs">${strip}${search}</div>`
+    : `<header class="side-head">${title ? `<b>${title}</b>` : ""}${search}</header>`;
 }
 function giveToBag(id, count) {
   const item = catalogueItems.find((x) => x.id === id),
@@ -320,11 +424,7 @@ function giveToSlot(area, index, id, count) {
   );
   return true;
 }
-function catalogueGive(
-  target,
-  id = state.sideItem,
-  count = state.transferCount,
-) {
+function catalogueGive(target, id = state.sideItem, count = 64) {
   if (!creativeAccess()) {
     toast("The Catalogue is read-only in Survival preview.");
     return;
@@ -356,7 +456,7 @@ function catalogueGive(
 function flyItem(from, at, id) {
   if (!from || state.settings.motion || at.index < 0) return;
   const slot = $(
-    `.item-window [data-drag-area="${at.area}"][data-drag-index="${at.index}"],.item-hotbar [data-drag-area="${at.area}"][data-drag-index="${at.index}"]`,
+    `.inv-panel [data-drag-area="${at.area}"][data-drag-index="${at.index}"]`,
   );
   const item = catalogueItems.find((x) => x.id === id);
   if (!slot || !item) return;
@@ -401,9 +501,9 @@ function refreshInventory() {
     value = focused?.dataset.value;
   render();
   if ($(".item-grid-scroll")) $(".item-grid-scroll").scrollTop = y;
-  const next = [
-    ...document.querySelectorAll(".item-window [data-action]"),
-  ].find((x) => x.dataset.action === actionName && x.dataset.value === value);
+  const next = [...document.querySelectorAll(".inv-panel [data-action]")].find(
+    (x) => x.dataset.action === actionName && x.dataset.value === value,
+  );
   next?.focus({ preventScroll: true });
 }
 function stashStack(list, stack) {
@@ -489,9 +589,27 @@ function inventoryAction(name, value) {
     render();
     return true;
   }
-  if (name === "item-details") {
-    state.showItemDetails = value === "close" ? false : !state.showItemDetails;
+  if (name === "slot-drop") {
+    const [kind, area, index] = (state.tip || "").split(":");
+    if (kind === "slot") dropFrom(area, Number(index), value === "all");
+    return true;
+  }
+  if (name === "slot-shape") {
+    const shapes = ["Cube", "Post", "Slab", "Stair", "Fence"];
+    state.placeShape =
+      shapes[(shapes.indexOf(state.placeShape || "Cube") + 1) % shapes.length];
     refreshInventory();
+    return true;
+  }
+  if (name === "side-search") {
+    const query =
+      state.useTarget || state.sidePane === "crafting" || !creativeAccess()
+        ? "craftQuery"
+        : "quickAddQuery";
+    state.sideSearchOpen = !(state.sideSearchOpen || state[query]);
+    if (!state.sideSearchOpen) state[query] = "";
+    refreshInventory();
+    $(".side-head-search input")?.focus();
     return true;
   }
   if (name === "inventory-open") {
@@ -506,12 +624,13 @@ function inventoryAction(name, value) {
     state.carriedFrom = null;
     if (!creativeAccess()) toast("The Catalogue needs creative access.");
     if (state.screen !== "storage") navigate("storage");
-    $(".side-search input")?.focus();
     return true;
   }
   if (name === "inventory-close") {
     state.useTarget = null;
     state.carriedFrom = null;
+    state.sideSearchOpen = false;
+    state.tip = null;
     navigate("play");
     return true;
   }
@@ -536,20 +655,8 @@ function inventoryAction(name, value) {
     return true;
   }
   if (name === "storage-split") {
-    const [area, index] = value.split(":"),
-      source = slotList(area),
-      stack = source[Number(index)],
-      empty = state.bag.findIndex((x) => !x);
-    if (!stack || stack.count < 2) return true;
-    if (empty < 0) {
-      toast("An empty backpack slot is needed to split this stack.");
-      return true;
-    }
-    const count = Math.floor(stack.count / 2);
-    state.bag[empty] = { ...stack, count };
-    stack.count -= count;
-    state.carriedFrom = null;
-    refreshInventory();
+    const [area, index] = value.split(":");
+    splitStack(area, Number(index));
     return true;
   }
   if (name === "storage-sort") {
@@ -577,33 +684,7 @@ function inventoryAction(name, value) {
   }
   if (name === "side-pick") {
     state.sideItem = value;
-    refreshInventory();
-    return true;
-  }
-  if (name === "side-group") {
-    state.sideGroup = value;
-    refreshInventory();
-    return true;
-  }
-  if (name === "transfer-count") {
-    state.transferCount = Math.max(
-      1,
-      Math.min(64, state.transferCount + Number(value)),
-    );
-    refreshInventory();
-    return true;
-  }
-  if (name === "transfer-preset") {
-    state.transferCount = Number(value);
-    refreshInventory();
-    return true;
-  }
-  if (name === "transfer-bag") {
-    catalogueGive("bag");
-    return true;
-  }
-  if (name === "transfer-bar") {
-    catalogueGive({ area: "bar", index: state.quickSlot });
+    catalogueGive("bag", value, 64);
     return true;
   }
   return false;
@@ -614,7 +695,7 @@ document.addEventListener("click", (e) => {
     e.preventDefault();
     e.stopImmediatePropagation();
     state.sideItem = tile.dataset.value;
-    catalogueGive("bag");
+    catalogueGive("bag", tile.dataset.value, 1);
     return;
   }
   const slot = e.target.closest("[data-action=storage-slot]");
@@ -624,23 +705,12 @@ document.addEventListener("click", (e) => {
   const [area, index] = slot.dataset.value.split(":");
   quickTransfer(area, Number(index));
 });
-document.addEventListener("change", (e) => {
-  if (e.target.dataset.bind !== "transferCount") return;
-  e.stopImmediatePropagation();
-  const v = Math.round(Number(e.target.value));
-  state.transferCount = Number.isFinite(v) ? Math.max(1, Math.min(64, v)) : 64;
-  refreshInventory();
-  savePrototype();
-});
 document.addEventListener("input", (e) => {
   const key = e.target.dataset.bind;
   if (key === "quickAddQuery") {
     state.quickAddQuery = e.target.value;
     $("#side-grid").innerHTML = sideGrid();
     savePrototype();
-    e.stopImmediatePropagation();
-  }
-  if (key === "transferCount") {
     e.stopImmediatePropagation();
   }
   if (key === "itemAccess") {
@@ -695,6 +765,26 @@ document.addEventListener("keydown", (e) => {
     );
     return;
   }
+  if (state.screen === "storage" && !typing) {
+    const [kind, a, b] = (state.tip || "").split(":");
+    if (key === "q" && kind === "slot") {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      dropFrom(a, Number(b), e.shiftKey);
+      return;
+    }
+    if (/^[1-9]$/.test(e.key) && (kind === "slot" || kind === "item")) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      const to = Number(e.key) - 1;
+      if (kind === "item") catalogueGive({ area: "bar", index: to }, a, 64);
+      else if (a !== "bar" || Number(b) !== to) {
+        state.carriedFrom = { area: a, index: Number(b) };
+        storageMove("bar", to);
+      }
+      return;
+    }
+  }
   if (e.key === "F10") {
     e.preventDefault();
     e.stopImmediatePropagation();
@@ -710,13 +800,28 @@ document.addEventListener("keydown", (e) => {
     refreshInventory();
   }
 });
-document.addEventListener("dblclick", (e) => {
-  const tile = e.target.closest("[data-action=side-pick]");
-  if (!tile) return;
+// Right-click splits a stack, as in most block games.
+document.addEventListener("contextmenu", (e) => {
+  const slot = e.target.closest?.(".inv-panel [data-action=storage-slot]");
+  if (!slot) return;
   e.preventDefault();
-  state.sideItem = tile.dataset.value;
-  catalogueGive({ area: "bar", index: state.quickSlot });
+  const [area, index] = slot.dataset.value.split(":");
+  splitStack(area, Number(index));
 });
+function splitStack(area, index) {
+  const stack = slotList(area)[index],
+    empty = state.bag.findIndex((x) => !x);
+  if (!stack || stack.count < 2) return;
+  if (empty < 0) {
+    toast("An empty backpack slot is needed to split this stack.");
+    return;
+  }
+  const count = Math.floor(stack.count / 2);
+  state.bag[empty] = { ...stack, count };
+  stack.count -= count;
+  state.carriedFrom = null;
+  refreshInventory();
+}
 document.addEventListener("dragstart", (e) => {
   const source = e.target.closest("[data-catalogue-drag]");
   if (source) {
@@ -782,7 +887,6 @@ function dropFrom(area, index, all) {
   stack.count -= n;
   if (!stack.count) source[index] = null;
   state.carriedFrom = null;
-  state.inspected = null;
   toast(`Dropped ${n} ${name}.`);
   refreshInventory();
 }
@@ -793,7 +897,7 @@ document.addEventListener("dragend", (e) => {
     state.carriedFrom &&
     state.screen === "storage" &&
     e.dataTransfer?.dropEffect === "none" &&
-    !over?.closest(".item-browser,.catalogue-side,.item-inspector,.item-header")
+    !over?.closest(".inv-panel")
   ) {
     const { area, index } = state.carriedFrom;
     state.carriedFrom = null;

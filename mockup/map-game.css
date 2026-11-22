@@ -1,0 +1,136 @@
+/* The Map fills the screen; title, compass rose, legend and readouts float over
+   it quietly, and its actions are prompts in the bottom bar. */
+.game[data-view="map"] #screen {
+  padding: 0;
+}
+.map-screen.full {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+.map-screen.full .map-bar {
+  padding: 18px 24px 28px;
+}
+.map-screen.full .map-bar h2 {
+  font-size: 28px;
+  font-weight: 650;
+}
+.map-screen.full .map-bar small {
+  color: var(--muted);
+  font-size: 12px;
+}
+.map-screen.full .map-rose {
+  top: 18px;
+  right: 20px;
+  bottom: auto;
+  width: 34px;
+  height: 34px;
+  opacity: 0.8;
+}
+.map-screen.full .map-rose i {
+  height: 14px;
+}
+.map-screen.full .map-banner {
+  position: absolute;
+  top: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 3;
+}
+.map-legend {
+  position: absolute;
+  top: 70px;
+  right: 20px;
+  z-index: 2;
+  width: 240px;
+  max-height: calc(100% - 140px);
+  overflow: auto;
+  padding: 10px;
+  background: rgb(6 8 7 / 0.72);
+  backdrop-filter: blur(6px);
+  border-radius: 8px;
+}
+.map-legend .wp-row {
+  padding: 5px 6px;
+}
+.map-legend .wp-list li.selected {
+  background: rgb(255 255 255 / 0.08);
+  border-color: transparent;
+}
+.map-legend .wp-row:focus-visible {
+  outline: 2px solid #e2d5ab;
+  outline-offset: -2px;
+  border-radius: 6px;
+}
+.map-legend > small {
+  display: block;
+  margin-top: 8px;
+  font-size: 11px;
+}
+.map-screen.full .map-foot {
+  padding: 20px 20px 8px;
+  font-size: 11px;
+  color: rgb(211 217 208 / 0.75);
+  background: none;
+}
+.map-screen.full .map-scale {
+  margin-right: 0;
+  opacity: 0.75;
+}
+
+.map-legend {
+  width: 260px;
+  padding: 6px 14px 14px;
+}
+.map-legend .legend {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.map-legend .legend li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 30px;
+  font-size: 13px;
+}
+.map-legend .legend i {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+.map-legend > small {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--edge);
+  font-size: 12px;
+}
+.map-legend .game-tabs {
+  margin: 4px 0 10px;
+}
+.map-legend .game-tabs button {
+  padding: 8px 8px;
+  white-space: nowrap;
+}
+.map-legend .game-tabs button span {
+  margin-left: 4px;
+  color: var(--muted);
+}
+.map-legend .game-tabs {
+  justify-content: center;
+  gap: 8px;
+}
+.map-legend .game-tabs kbd {
+  margin: 0 4px;
+}
+.map-legend {
+  width: 300px;
+}
+.map-legend .game-tabs kbd {
+  margin: 0 10px;
+}

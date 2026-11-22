@@ -1,6 +1,7 @@
 //! Writes the texture faces of every demo Game's own Materials as PNG under `mockup/blocks/<game>/`,
-//! and an index of them and Terra's Shapes, for the mockup's `/blocks` gallery. Run
-//! `scripts/build-guests` first.
+//! and an index of them and Terra's Shapes, for the mockup's `/blocks` gallery; and the faces of
+//! every data Mod's Materials under `mockup/blocks/<mod>/`, which the Structures and Vegetation
+//! pages draw. Run `scripts/build-guests` first.
 
 use std::fs::{self, File};
 use std::io::BufWriter;
@@ -33,7 +34,66 @@ fn main() {
         serde_json::to_string_pretty(&index).unwrap() + "\n",
     )
     .unwrap();
-    println!("wrote {} Materials to mockup/blocks", materials.len());
+    let mod_faces = export_data_mods(&root.join("mods"), &out);
+    println!(
+        "wrote {} Materials and {mod_faces} data-Mod textures to mockup/blocks",
+        materials.len()
+    );
+}
+
+/// Splits each data Mod's Material textures into faces, as the Game export does. A data Mod's
+/// textures are plain PNGs, so this reads `content.toml` instead of loading the Mod.
+fn export_data_mods(mods: &Path, out: &Path) -> usize {
+    let mut written = 0;
+    let mut dirs: Vec<_> = fs::read_dir(mods)
+        .unwrap()
+        .flatten()
+        .map(|e| e.path())
+        .collect();
+    dirs.sort();
+    for dir in dirs {
+        let Ok(text) = fs::read_to_string(dir.join("content.toml")) else {
+            continue;
+        };
+        let content: toml::Table = text.parse().unwrap();
+        let id = dir.file_name().unwrap().to_str().unwrap();
+        let appearances = content.get("appearance").and_then(|a| a.as_array());
+        for appearance in appearances.into_iter().flatten() {
+            let (Some(material), Some(texture)) = (
+                appearance.get("material").and_then(|m| m.as_str()),
+                appearance.get("texture").and_then(|t| t.as_str()),
+            ) else {
+                continue;
+            };
+            let pixels = read_rgba(&dir.join(texture));
+            fs::create_dir_all(out.join(id)).unwrap();
+            for (face, label) in FACES.iter().enumerate() {
+                write_face(
+                    &out.join(format!("{id}/{material}.{label}.png")),
+                    &pixels,
+                    face,
+                );
+            }
+            written += 1;
+        }
+    }
+    written
+}
+
+fn read_rgba(path: &Path) -> Vec<u8> {
+    let mut decoder = png::Decoder::new(std::io::BufReader::new(File::open(path).unwrap()));
+    decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::ALPHA);
+    let mut reader = decoder.read_info().unwrap();
+    let mut buf = vec![0; reader.output_buffer_size().unwrap()];
+    let info = reader.next_frame(&mut buf).unwrap();
+    assert_eq!(
+        (info.width as usize, info.height as usize),
+        (MATERIAL_TEXTURE_EDGE * FACES.len(), MATERIAL_TEXTURE_EDGE),
+        "{} is not a Material texture",
+        path.display()
+    );
+    buf.truncate(info.buffer_size());
+    buf
 }
 
 /// The Materials `game` declares itself, their faces written to `out/<game>/`, and its Shapes.

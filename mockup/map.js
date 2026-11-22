@@ -377,15 +377,16 @@ function mapTurn(delta) {
 }
 
 /* The Map window. */
+// The Map fills the screen, as a game's map does; its actions are prompts in
+// the bottom bar rather than a toolbar on the map.
 function mapPage() {
-  const m = ensureMap(),
-    mpp = MAP_MPP[m.zoom];
+  const m = ensureMap();
   const rows = m.wps
     .map((wp) => {
       const k = MAP_KINDS[wp.kind],
         d = mapDist(wp),
         b = mapWrap(mapBearing(wp.x - m.pos.x, wp.z - m.pos.z));
-      return `<li class="${wp.id === m.sel ? "selected" : ""}"><button class="wp-row" data-action="map-select" data-value="${wp.id}" aria-pressed="${wp.id === m.sel}"><span class="wp-icon" style="--wp:${k.color}">${k.icon}</span><span class="wp-name"><b>${esc(wp.name)}</b><small>${wp.kind} · ${d >= 1000 ? (d / 1000).toFixed(2) + " km" : Math.round(d) + " m"} ${mapCardinal(b)}</small></span></button>${wp.kind === "Death" ? "" : `<button class="wp-del" data-action="map-delete" data-value="${wp.id}" aria-label="Remove ${esc(wp.name)}">✕</button>`}</li>`;
+      return `<li class="${wp.id === m.sel ? "selected" : ""}"><button class="wp-row" data-action="map-select" data-value="${wp.id}" aria-pressed="${wp.id === m.sel}"><span class="wp-icon" style="--wp:${k.color}">${k.icon}</span><span class="wp-name"><b>${esc(wp.name)}</b><small>${d >= 1000 ? (d / 1000).toFixed(2) + " km" : Math.round(d) + " m"} ${mapCardinal(b)}</small></span></button></li>`;
     })
     .join("");
   const legend = mapSeenBiomes()
@@ -394,58 +395,65 @@ function mapPage() {
         `<li><i style="background:${biomeDefaults[i].swatch}"></i>${esc(games.Terra.names[i])}</li>`,
     )
     .join("");
-  return `<div class="map-screen">
+  const tab = (id, label) =>
+    `<button type="button" role="tab" aria-selected="${m.tab === id}" class="${m.tab === id ? "active" : ""}" data-action="map-tab" data-value="${id}">${label}</button>`;
+  screenPrompts = mapPrompts();
+  return `<div class="map-screen full">
 <section class="map-view" aria-label="Map">
 <canvas id="map-canvas" class="${m.adding ? "placing" : ""}" tabindex="0" aria-label="Map of explored ground. Drag to pan, scroll to zoom."></canvas>
-<header class="map-bar"><div><p class="eyebrow">TERRA / THE GREENWOOD</p><h2>Map</h2></div>
-</header>
+<header class="map-bar"><h2>Map</h2><small>Terra · The Greenwood</small></header>
 <div class="map-rose" aria-label="North is up"><b>N</b><i></i></div>
-<div class="map-corner">${mapControlsHtml()}${m.adding && !m.pop ? mapHintHtml() : ""}</div>
+${m.adding && !m.pop ? `<div class="map-banner" role="status">Click explored ground to place a Waypoint</div>` : ""}
 ${mapPopHtml()}
-<footer class="map-foot"><output id="map-readout">X ${mapFmt(m.pos.x)} · Z ${mapFmt(m.pos.z)} · ${m.pos.y} m · You are here</output><div class="map-scale" id="map-scale"></div></footer>
-</section>
-<aside class="map-side" aria-label="Map panel">
-<div class="map-tabs" role="tablist" aria-label="Panel">${[
-    ["waypoints", "Waypoints"],
-    ["explore", "Explore"],
-  ]
-    .map(
-      ([id, label]) =>
-        `<button role="tab" aria-selected="${m.tab === id}" class="${m.tab === id ? "on" : ""}" data-action="map-tab" data-value="${id}">${label}</button>`,
-    )
-    .join("")}</div>
+<aside class="map-legend" aria-label="Legend">
+<div class="game-tabs" role="tablist" aria-label="Legend"><kbd aria-hidden="true">Q</kbd>${tab("waypoints", `Waypoints <span>${m.wps.length}</span>`)}${tab("explore", "Explored")}<kbd aria-hidden="true">E</kbd></div>
 ${
   m.tab === "explore"
-    ? ""
-    : `<section><h3>Waypoints <span>${m.wps.length}</span></h3><ul class="wp-list">${rows}</ul></section>`
+    ? `<ul class="legend">${legend}<li><i class="fog"></i>Not explored</li><li><i class="lake"></i>Lake</li></ul><small class="muted">${mapSeenAreaKm2.toFixed(2)} km² explored</small>`
+    : `<ul class="wp-list">${rows}</ul>`
 }
-${m.tab === "explore" ? `<section><h3>Explored</h3><p class="muted">${mapSeenAreaKm2.toFixed(2)} km² · seen with the ground loaded. Fogged ground is not guessed at.</p><ul class="legend">${legend}<li><i class="fog"></i>Not explored</li><li><i class="lake"></i>Lake</li></ul></section>` : ""}
-</aside></div>`;
+</aside>
+<footer class="map-foot"><output id="map-readout">X ${mapFmt(m.pos.x)} · Z ${mapFmt(m.pos.z)} · ${m.pos.y} m · You are here</output><div class="map-scale" id="map-scale"></div></footer>
+</section></div>`;
 }
-const MC = (d) =>
-  `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
-const MAP_ICONS = {
-  out: MC('<path d="M5 12h14"/>'),
-  in: MC('<path d="M5 12h14M12 5v14"/>'),
-  centre: MC(
-    '<circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="1.5"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/>',
-  ),
-  add: MC(
-    '<path d="M5 21V4"/><path d="M5 4h10l-1.8 3.5L15 11H5"/><path d="M18 15v6M15 18h6"/>',
-  ),
-  close: MC('<path d="M6 6l12 12M18 6L6 18"/>'),
-};
-function mapControlsHtml() {
+function mapPrompts() {
   const m = ensureMap(),
-    btn = (act, icon, tip, extra = "", value = "") =>
-      `<button class="mc ${extra}" data-action="${act}" ${value ? `data-value="${value}"` : ""} data-tip="${tip}" aria-label="${tip.replace("  ", " ")}">${MAP_ICONS[icon]}</button>`;
-  return `<div class="map-controls" role="toolbar" aria-label="Map controls">${btn("map-zoom", "out", "Zoom out", "", "out").replace("<button", m.zoom === 3 ? "<button disabled" : "<button")}<output>${MAP_MPP[m.zoom]} m/px</output>${btn("map-zoom", "in", "Zoom in", "", "in").replace("<button", m.zoom === 0 ? "<button disabled" : "<button")}${btn("map-centre", "centre", "Centre on me")}${btn("map-add-toggle", "add", "Add Waypoint", `end${m.adding ? " on" : ""}`).replace("<button", `<button aria-pressed="${m.adding}"`)}<i class="mc-sep"></i>${btn("map-close", "close", "Close  M", "end")}</div>`;
+    wp = m.wps.find((w) => w.id === m.sel);
+  if (m.pop)
+    return [
+      ["Enter", m.pop.mode === "add" ? "Add" : "Save", "map-pop-ok"],
+      ["Esc", "Cancel", "map-pop-cancel"],
+    ];
+  if (m.adding)
+    return [
+      ["Click", "Place"],
+      ["H", "At my position", "map-add-here"],
+      ["Esc", "Cancel", "map-add-toggle"],
+    ];
+  return [
+    wp && ["Enter", "Edit", "map-select", wp.id],
+    wp && wp.kind !== "Death" && ["Del", "Remove", "map-delete", wp.id],
+    ["W", "Add Waypoint", "map-add-toggle"],
+    ["C", "Centre", "map-centre"],
+    ["+ −", "Zoom"],
+    ["M", "Close", "map-close"],
+  ];
 }
+// Focusing a Waypoint in the legend selects it without redrawing the screen.
+document.addEventListener("focusin", (e) => {
+  const row = e.target.closest?.(".map-legend .wp-row");
+  if (!row || state.screen !== "map") return;
+  const m = ensureMap();
+  m.sel = Number(row.dataset.value);
+  document
+    .querySelectorAll(".map-legend .wp-list li")
+    .forEach((li) => li.classList.toggle("selected", li.contains(row)));
+  document.querySelector(".game-footer>span:nth-child(2)").innerHTML =
+    promptBar(mapPrompts());
+  mapRedraw();
+});
 function mapDefaultName() {
   return `Waypoint ${ensureMap().next}`;
-}
-function mapHintHtml() {
-  return `<div class="map-banner" role="status">Click the map to add a Waypoint · <button class="link" data-action="map-add-here">At my position</button></div>`;
 }
 function mapKindChips(on) {
   return `<div class="kind-pick" role="radiogroup" aria-label="Marker kind">${Object.entries(
@@ -615,8 +623,6 @@ function mapRedraw() {
 function mapMount() {
   const c = mapSizeCanvas();
   if (!c) return;
-  document.querySelector(".game-footer>span:nth-child(2)").innerHTML =
-    "<kbd>M</kbd> Close <kbd>Drag</kbd> Pan <kbd>Wheel</kbd> Zoom <kbd>Esc</kbd> Back";
   mapRedraw();
   const input = document.getElementById("wp-name");
   if (input)
@@ -803,34 +809,6 @@ function mapAction(name, value) {
 document.addEventListener(
   "keydown",
   (e) => {
-    const b = e.target.closest?.(".map-controls .mc");
-    if (!b) return;
-    if (e.key === "Escape" && b.dataset.off !== "1") {
-      if (!b.matches(":hover, :focus-visible")) return;
-      e.preventDefault();
-      e.stopImmediatePropagation();
-      b.dataset.off = "1";
-    } else if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
-      const all = [...b.parentElement.querySelectorAll(".mc:not(:disabled)")],
-        i = all.indexOf(b) + (e.key === "ArrowRight" ? 1 : -1);
-      e.preventDefault();
-      e.stopImmediatePropagation();
-      all[(i + all.length) % all.length].focus();
-    }
-  },
-  true,
-);
-document.addEventListener(
-  "focusout",
-  (e) => e.target.dataset && delete e.target.dataset.off,
-);
-document.addEventListener(
-  "mouseout",
-  (e) => e.target.dataset && delete e.target.dataset.off,
-);
-document.addEventListener(
-  "keydown",
-  (e) => {
     if (
       !["play", "map"].includes(state.screen) ||
       e.target.matches?.("input,textarea,select") ||
@@ -843,6 +821,12 @@ document.addEventListener(
       e.preventDefault();
       e.stopImmediatePropagation();
       action(state.screen === "map" ? "map-close" : "map-open");
+    } else if (state.screen === "map" && ["+", "=", "-", "_"].includes(e.key)) {
+      e.preventDefault();
+      mapAction("map-zoom", e.key === "-" || e.key === "_" ? "out" : "in");
+    } else if (state.screen === "map" && ["q", "e"].includes(key)) {
+      e.preventDefault();
+      mapAction("map-tab", key === "q" ? "waypoints" : "explore");
     } else if (state.screen === "map" && e.key === "Escape") {
       e.preventDefault();
       e.stopImmediatePropagation();

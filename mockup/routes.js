@@ -14,6 +14,7 @@ function currentPath() {
   if (state.screen === "wizard")
     return [
       "/worlds/new",
+      "/worlds/new/world",
       "/worlds/new/mods",
       "/worlds/new/biomes",
       "/worlds/new/review",
@@ -55,7 +56,7 @@ function syncRoute() {
   if (location.pathname !== path) history.pushState(null, "", path);
   const title =
     state.screen === "wizard"
-      ? ["World", "Mods", "Biomes", "Review"][state.step]
+      ? ["Game", "World", "Mods", "Biomes", "Review"][state.step]
       : state.screen === "settings"
         ? `Settings · ${state.settingsTab}`
         : state.screen === "edit"
@@ -99,6 +100,7 @@ function restoreRoute() {
   const path = location.pathname.replace(/\/$/, "") || "/";
   const wizard = [
     "/worlds/new",
+    "/worlds/new/world",
     "/worlds/new/mods",
     "/worlds/new/biomes",
     "/worlds/new/review",
