@@ -53,9 +53,9 @@ Presets: Balanced (`u` 192 m) and Detailed (`u` 384 m); Custom is any unit from
 - Not done here: fog and the camera's far plane are set at spawn from the Game's
   reach, which bounds every curve; fog does not follow a curve change (09
   retunes fog). The curve is one per Server, as there is one Eye (ADR-0036).
-- Dev switch: `TESSERAE_QUALITY=balanced|detailed|<unit_m>,<reach_m>` (`dev` or
-  `profiling`), sent each time a World opens; presets ask for 8192 m, clamped to
-  the Game's ceiling.
+- Dev switch: `TESSERAE_QUALITY=low|medium|high|<unit_m>,<reach_m>` (`dev` or
+  `profiling`, named by 08), sent each time a World opens in place of the
+  Distance preference; the Server clamps it to the Game's ceiling.
 - Captures (debug tint, Terra default seed, Eye 1654, -733, yaw 33.3°):
   `/tmp/lod22-t07-curve-PAYQ` — `game-64m`, `balanced-150m` (Eye at 64 m, the
   lift is ignored), `detailed-64m`, `balanced-220m`, `detailed-220m`. Coarse

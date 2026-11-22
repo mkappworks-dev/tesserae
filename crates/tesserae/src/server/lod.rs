@@ -170,7 +170,7 @@ pub(in crate::server) const IMPOSTORS_TO: u32 = 1;
 /// may ask for, and its load margin. About 24 KB a Cell, held only where level 1 streams.
 fn level_one_cells(world: &WorldSettings) -> usize {
     let cell_m = CHUNK_SIZE as f32 * world.voxel_size;
-    let reach_m = 2.0 * super::quality::QualityCurve::DETAILED_UNIT_M + 2.0 * cell_m;
+    let reach_m = 2.0 * super::quality::QualityCurve::HIGH.unit_m + 2.0 * cell_m;
     let side = (2.0 * reach_m / cell_m).ceil() as usize;
     side * side
 }

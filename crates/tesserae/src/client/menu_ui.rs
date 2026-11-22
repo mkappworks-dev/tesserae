@@ -21,16 +21,18 @@ pub(super) enum Tab {
     Bindings,
     Controller,
     Display,
+    Distance,
     Audio,
     Accessibility,
 }
 impl Tab {
     /// Page order in the header, which LB/RB also follow.
-    pub const ORDER: [Tab; 6] = [
+    pub const ORDER: [Tab; 7] = [
         Tab::Behavior,
         Tab::Bindings,
         Tab::Controller,
         Tab::Display,
+        Tab::Distance,
         Tab::Audio,
         Tab::Accessibility,
     ];
@@ -42,6 +44,7 @@ impl Tab {
             Self::Bindings => "Key bindings",
             Self::Controller => "Controller",
             Self::Display => "Display",
+            Self::Distance => "Distance",
             Self::Audio => "Audio",
             Self::Accessibility => "Accessibility",
         }
@@ -52,6 +55,7 @@ impl Tab {
             Self::Bindings => IconKind::Keyboard,
             Self::Controller => IconKind::Controller,
             Self::Display => IconKind::Display,
+            Self::Distance => IconKind::Distance,
             Self::Audio => IconKind::Audio,
             Self::Accessibility => IconKind::Accessibility,
         }
@@ -948,6 +952,7 @@ pub(super) enum IconKind {
     Keyboard,
     Controller,
     Display,
+    Distance,
     Audio,
     Accessibility,
     /// The Map window's toolbar.
@@ -959,9 +964,9 @@ pub(super) enum IconKind {
     /// The place Tool's card: the prototype's `layout` outline.
     Layout,
 }
-const ICONS: usize = 24;
+const ICONS: usize = 25;
 /// The icons drawn from the prototype's 24-unit outlines, in atlas order.
-const DRAWN: [IconKind; 21] = [
+const DRAWN: [IconKind; 22] = [
     IconKind::Settings,
     IconKind::Mods,
     IconKind::Check,
@@ -975,6 +980,7 @@ const DRAWN: [IconKind; 21] = [
     IconKind::Keyboard,
     IconKind::Controller,
     IconKind::Display,
+    IconKind::Distance,
     IconKind::Audio,
     IconKind::Accessibility,
     IconKind::ZoomOut,
@@ -1185,6 +1191,17 @@ fn drawn(kind: IconKind, p: Vec2) -> f32 {
             rounded(v(12.0, 10.0), v(10.0, 7.0), 2.0)
                 .min(segment(v(8.0, 21.0), v(16.0, 21.0)))
                 .min(segment(v(12.0, 17.0), v(12.0, 21.0))),
+        ),
+        IconKind::Distance => stroke(
+            segment(v(2.0, 20.0), v(22.0, 20.0))
+                .min(path(&[
+                    v(5.0, 20.0),
+                    v(10.0, 11.0),
+                    v(13.0, 16.0),
+                    v(15.0, 13.0),
+                    v(19.0, 20.0),
+                ]))
+                .min(ring(v(17.0, 6.0), 2.0)),
         ),
         IconKind::Audio => stroke(
             path(&[

@@ -83,6 +83,7 @@ pub(super) type RenderData<'w> = (
     Res<'w, crate::client::menu_ui::Searches>,
     (Res<'w, Bindings>, Res<'w, Preferences>),
     Option<Res<'w, crate::client::map_cache::MapAllowed>>,
+    WorldDistances<'w>,
 );
 pub(super) type RenderContext<'w, 's> = (
     (
@@ -99,7 +100,7 @@ pub(in crate::client) fn render(
         Query<Entity, With<Panel>>,
         Query<Entity, With<crate::client::menu_ui::SettingsBody>>,
     ),
-    (labels, searches, active, map_allowed): RenderData,
+    (labels, searches, active, map_allowed, distances): RenderData,
     scrolls: Query<&ScrollPosition, With<SettingsScroll>>,
     (mut positions, mut previous, mut query): (
         Local<[Vec2; crate::client::menu_ui::Tab::ORDER.len()]>,
@@ -109,7 +110,8 @@ pub(in crate::client) fn render(
     (context, pressed): RenderContext,
 ) {
     use crate::client::menu_ui::{self as ui, Tab};
-    let map_changed = map_allowed.as_ref().is_some_and(|a| a.is_changed());
+    let map_changed = map_allowed.as_ref().is_some_and(|a| a.is_changed())
+        || distances.0.as_ref().is_some_and(|d| d.is_changed());
     if !pressed.is_empty() || (!settings.dirty && !labels.is_changed() && !map_changed) {
         return;
     }
@@ -195,6 +197,7 @@ pub(in crate::client) fn render(
                     &searches,
                     map_allowed.is_none_or(|a| a.0),
                     (&context.0, &context.1, &context.2),
+                    game(&distances),
                 );
             });
             footer(root, changed);
@@ -221,12 +224,17 @@ pub(super) fn page(
         &crate::client::edit::Catalogue,
         &crate::client::edit::Notice,
     ),
+    (streaming, world): (
+        crate::server::streaming::StreamingSettings,
+        crate::world::WorldSettings,
+    ),
 ) {
     use crate::client::menu_ui::Tab;
     let (bindings, p) = settings.draft.as_ref().unwrap();
     match settings.tab {
         Tab::Behavior => behavior(list, settings, bindings, p, labels, context),
         Tab::Display => display(list, p, map_allowed),
+        Tab::Distance => distance(list, p, (streaming, &world)),
         Tab::Audio => audio(list, settings, p),
         Tab::Bindings => bindings_page(list, settings, bindings, labels, searches, map_allowed),
         Tab::Controller => controller(list, settings, bindings, p, labels, map_allowed),
@@ -538,7 +546,7 @@ pub(super) fn display(list: &mut ChildSpawnerCommands, p: &Preferences, map_allo
     });
     ui::paragraph(
         list,
-        "View distance, textures, shadows, and simulation settings stay unchanged.",
+        "Textures, shadows, and simulation settings stay unchanged. Distance has its own tab.",
         theme::TEXT_SMALL,
         theme::muted(),
     );

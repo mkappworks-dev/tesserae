@@ -305,7 +305,6 @@ impl Extent {
     }
 
     /// How many Cells are inside, without building them.
-    #[cfg(any(test, feature = "dev", feature = "profiling"))]
     pub fn count(self) -> usize {
         let h = self.horizontal;
         let columns: i32 = (-h..=h).map(|x| 2 * (h * h - x * x).isqrt() + 1).sum();
