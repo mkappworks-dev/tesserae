@@ -58,7 +58,8 @@ impl Default for FogSettings {
         FogSettings {
             color: srgb(HAZE_FOG_SRGB),
             sky: srgb(HAZE_SKY_SRGB),
-            reach_opacity: 0.88,
+            // Ticket 09's captures: at 0.88 and below the reach's square edge shows against the sky.
+            reach_opacity: 0.95,
         }
     }
 }
@@ -261,7 +262,8 @@ mod tests {
 
     #[test]
     fn default_fog_leaves_the_full_detail_rings_unhazed() {
-        let fog = distance_fog(&FogSettings::default(), DEFAULT_VIEW_M, DEFAULT_LOD_M);
+        let reach_m = crate::server::quality::QualityCurve::MEDIUM.reach_m;
+        let fog = distance_fog(&FogSettings::default(), DEFAULT_VIEW_M, reach_m);
         // Edit these with the reason if a default changes: they are the spec's figures.
         assert!(opacity_at(&fog, 192.0) < 0.01, "level 0 edge");
         assert!(opacity_at(&fog, 384.0) < 0.02, "join of levels 1 and 2");

@@ -38,9 +38,8 @@ pub(super) fn plugin(app: &mut App) {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum DistancePreset {
-    /// Until Medium passes ticket 09's budgets: its whole field fills in about 16 s.
-    #[default]
     Low,
+    #[default]
     Medium,
     High,
     Custom,
@@ -319,7 +318,7 @@ mod tests {
                 reach_m: 7000.0
             }
         );
-        assert_eq!(Distance::default().preset, DistancePreset::Low);
+        assert_eq!(Distance::default().preset, DistancePreset::Medium);
     }
 
     #[test]
@@ -333,14 +332,14 @@ mod tests {
             reach_km,
         };
         assert_eq!(shown(DistancePreset::Low), sliders(5, 3));
-        assert_eq!(shown(DistancePreset::Medium), sliders(8, 3));
+        assert_eq!(shown(DistancePreset::Medium), sliders(6, 3));
         assert_eq!(shown(DistancePreset::High), sliders(12, 3));
         assert_eq!(shown(DistancePreset::Custom), sliders(10, 3));
 
         let far = terra();
         assert_eq!(reach_range(far), 2..=8);
         assert_eq!(preset(DistancePreset::Low).sliders(far), sliders(5, 3));
-        assert_eq!(preset(DistancePreset::Medium).sliders(far), sliders(8, 6));
+        assert_eq!(preset(DistancePreset::Medium).sliders(far), sliders(6, 6));
         assert_eq!(preset(DistancePreset::High).sliders(far), sliders(12, 8));
         assert_eq!(preset(DistancePreset::Custom).sliders(far), sliders(10, 7));
     }
@@ -378,11 +377,11 @@ mod tests {
             rings,
             [
                 (1.0, 0.0, 160.0),
-                (2.0, 160.0, 512.0),
-                (4.0, 512.0, 1024.0),
-                (8.0, 1024.0, 2048.0),
-                (16.0, 2048.0, 4096.0),
-                (32.0, 4096.0, 6000.0),
+                (2.0, 160.0, 384.0),
+                (4.0, 384.0, 768.0),
+                (8.0, 768.0, 1536.0),
+                (16.0, 1536.0, 3072.0),
+                (32.0, 3072.0, 6000.0),
             ]
         );
         for row in &rows {
@@ -410,16 +409,16 @@ mod tests {
             .insert_resource(terra());
         app.update();
         app.update();
-        assert_eq!(sent(&mut app), vec![QualityCurve::low(terra())]);
+        assert_eq!(sent(&mut app), vec![QualityCurve::MEDIUM]);
 
         app.world_mut()
             .resource_mut::<Preferences>()
             .distance
-            .preset = DistancePreset::Medium;
+            .preset = DistancePreset::Low;
         app.update();
         app.world_mut().resource_mut::<Preferences>().compass = true;
         app.update();
-        assert_eq!(sent(&mut app), vec![QualityCurve::MEDIUM]);
+        assert_eq!(sent(&mut app), vec![QualityCurve::low(terra())]);
 
         app.insert_resource(Switch::Preset(DistancePreset::High));
         app.update();

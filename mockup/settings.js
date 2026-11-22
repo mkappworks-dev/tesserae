@@ -29,7 +29,7 @@ const settingsDefaults = {
   // Proposed in step 22 (.scratch/2026-11-21-phase-22-lod-features/spec.md).
   distancePreset: "Medium",
   reachKm: 6,
-  detailChunks: 8,
+  detailChunks: 6,
   customDistance: { reachKm: 7, detailChunks: 10 },
   sound: 100,
   music: 50,
@@ -319,7 +319,7 @@ const DISTANCE_PRESETS = [
   ],
   [
     "Medium",
-    8,
+    6,
     6,
     "Holds each Voxel size further, to 6 km. The default. Choose Custom to set your own.",
   ],

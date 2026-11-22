@@ -411,11 +411,11 @@ mod tests {
     }
 
     #[test]
-    fn medium_reaches_eight_of_each_level_s_own_chunks() {
+    fn medium_reaches_six_of_each_level_s_own_chunks() {
         let medium = QualityCurve::MEDIUM.applied_to(terra().ceiling);
         assert_eq!(level_count(&medium), 6);
-        // 160 m, then 512 m to 4096 m, then 6 km rounded up to a whole 1024 m Cell.
-        for (level, horizontal) in [(0, 5), (1, 8), (2, 8), (3, 8), (4, 8), (5, 6)] {
+        // 160 m, then 384 m to 3072 m, then 6 km rounded up to a whole 1024 m Cell.
+        for (level, horizontal) in [(0, 5), (1, 6), (2, 6), (3, 6), (4, 6), (5, 6)] {
             let r = LevelRings::new(medium, 32.0, level);
             assert_eq!(r.mesh.outer, ext(horizontal, 3), "level {level}");
         }

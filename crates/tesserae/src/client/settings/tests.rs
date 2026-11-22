@@ -1074,7 +1074,7 @@ fn the_distance_sliders_move_only_under_custom_which_remembers_its_own() {
         &mut app,
         Operation::Navigate(crate::client::menu_ui::Tab::Distance),
     );
-    assert_eq!(draft_distance(&app).preset, DistancePreset::Low);
+    assert_eq!(draft_distance(&app).preset, DistancePreset::Medium);
     move_slider(&mut app, Scalar::Detail(5), 11.0);
     assert_eq!(draft_distance(&app), default(), "locked under a preset");
 
@@ -1175,8 +1175,8 @@ fn the_distance_page_locks_its_sliders_and_lists_this_world_s_levels() {
     let texts_medium = texts(&mut medium);
     for expected in [
         "Medium",
-        "160 m – 512 m",
-        "4.1 km – 6 km",
+        "160 m – 384 m",
+        "3.1 km – 6 km",
         "5 coarse levels to 6 km",
         "The nearest 160 m is always full detail; the Game sets how far it allows.",
     ] {
@@ -1186,13 +1186,18 @@ fn the_distance_page_locks_its_sliders_and_lists_this_world_s_levels() {
         );
     }
 
+    assert!(
+        texts_medium
+            .iter()
+            .any(|t| t.starts_with("Holds each Voxel size further") && t.contains("The default.")),
+    );
     let mut custom = page(DistancePreset::Custom);
     assert_eq!(locked(&mut custom), [false, false]);
     let mut low = page(DistancePreset::Low);
     assert!(
         texts(&mut low)
             .iter()
-            .any(|t| t.starts_with("The World's own rings, to 3 km") && t.contains("The default.")),
+            .any(|t| t.starts_with("The World's own rings, to 3 km") && !t.contains("default")),
     );
 }
 
@@ -1215,7 +1220,7 @@ fn applying_a_preset_changes_the_rings_the_server_streams() {
         );
     app.update();
     let streamed = |app: &App| *app.world().resource::<StreamingSettings>();
-    assert_eq!(streamed(&app).lod_unit_m, 160.0, "Low, the default");
+    assert_eq!(streamed(&app).lod_unit_m, 192.0, "Medium, the default");
 
     activate_operation(
         &mut app,
@@ -1223,7 +1228,7 @@ fn applying_a_preset_changes_the_rings_the_server_streams() {
     );
     activate_operation(&mut app, Operation::Distance(DistancePreset::High));
     app.update();
-    assert_eq!(streamed(&app).lod_unit_m, 160.0, "not before Apply");
+    assert_eq!(streamed(&app).lod_unit_m, 192.0, "not before Apply");
 
     activate_operation(&mut app, Operation::Apply);
     app.update();

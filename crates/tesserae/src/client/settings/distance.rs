@@ -23,12 +23,12 @@ pub(super) fn game(distances: &WorldDistances) -> (DeclaredStreaming, WorldSetti
 fn preset_hint(preset: DistancePreset, game: DeclaredStreaming) -> String {
     match preset {
         DistancePreset::Low => format!(
-            "The World's own rings, to {}: lightest on memory. The default. Choose Custom to set \
-             your own.",
+            "The World's own rings, to {}: lightest on memory. Choose Custom to set your own.",
             metres(QualityCurve::low(game).reach_m)
         ),
         DistancePreset::Medium => {
-            "Holds each Voxel size further, to 6 km. Choose Custom to set your own.".into()
+            "Holds each Voxel size further, to 6 km. The default. Choose Custom to set your own."
+                .into()
         }
         DistancePreset::High => {
             "Sharpest and furthest, to 8 km: most memory. Choose Custom to set your own.".into()

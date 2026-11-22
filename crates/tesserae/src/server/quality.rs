@@ -77,9 +77,10 @@ pub struct QualityCurve {
 }
 
 impl QualityCurve {
-    /// Each Voxel size held further than the Game's rings, to 6 km: the default.
+    /// The default: 6 Chunks to 6 km. Ticket 09 measured 8 Chunks filling Terra's field in
+    /// 13.5 s against the 10 s budget, and 6 in 9.5.
     pub const MEDIUM: Self = QualityCurve {
-        unit_m: 256.0,
+        unit_m: 192.0,
         reach_m: 6000.0,
     };
     pub const HIGH: Self = QualityCurve {
