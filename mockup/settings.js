@@ -350,23 +350,34 @@ function distanceLevels(unitM, reachM) {
   return levels;
 }
 
-const metres = (m) =>
-  m >= 1000 ? `${(m / 1000).toFixed(m % 1000 ? 1 : 0)} km` : `${m} m`;
+const metres = (m) => (m >= 1000 ? `${+(m / 1000).toFixed(1)} km` : `${m} m`);
 
+// The ring bar is linear in metres, so level 0's small share of the reach is the point.
 function distancePanel() {
   const d = state.settingsDraft;
-  const levels = distanceLevels(d.detailChunks * CELL_M, d.reachKm * 1000);
+  const reachM = d.reachKm * 1000;
+  const levels = distanceLevels(d.detailChunks * CELL_M, reachM);
   const coarse = levels.slice(1);
-  const total = coarse.reduce((sum, l) => sum + l.mb, 0);
+  const totalMb = coarse.reduce((sum, l) => sum + l.mb, 0);
+  const totalChunks = coarse.reduce((sum, l) => sum + l.chunks, 0);
+  const pct = (m) => `${((m / reachM) * 100).toFixed(2)}%`;
   const rows = levels
     .map(
       (l) =>
-        `<tr><td>${l.level}</td><td>${l.voxel} m</td><td>${metres(l.from)} – ${metres(l.to)}</td><td>${l.level ? l.chunks.toLocaleString() : "Full detail"}</td><td>${l.level ? `${l.mb.toFixed(1)} MB` : "—"}</td></tr>`,
+        `<tr class="${l.level ? "" : "is-full"}" style="--shade:${1 - l.level * 0.13}">` +
+        `<td><span class="level-chip">${l.level}</span></td>` +
+        `<td>${l.voxel} m</td>` +
+        `<td class="ring-cell"><span class="ring-label">${metres(l.from)} – ${metres(l.to)}</span>` +
+        `<span class="ring-track"><span class="ring-span" style="left:${pct(l.from)};width:${pct(l.to - l.from)}"></span></span></td>` +
+        `<td>${l.level ? l.chunks.toLocaleString() : '<span class="pill">Full detail</span>'}</td>` +
+        `<td>${l.level ? `${l.mb.toFixed(1)} MB` : "—"}</td></tr>`,
     )
     .join("");
   return (
-    `<table class="distance-table"><thead><tr><th>Level</th><th>Voxel</th><th>Ring</th><th>Chunks</th><th>Memory</th></tr></thead><tbody>${rows}</tbody></table>` +
-    `<div class="notice">${coarse.length} coarse levels, about ${total.toFixed(0)} MB of distant terrain before trees and buildings. An estimate; the Game sets the most its World allows.</div>`
+    `<table class="distance-table"><thead><tr><th>Level</th><th>Voxel</th><th>Ring</th><th>Chunks</th><th>Memory</th></tr></thead>` +
+    `<tbody>${rows}</tbody>` +
+    `<tfoot><tr><td colspan="3">${coarse.length} coarse levels to ${metres(reachM)}</td><td>${totalChunks.toLocaleString()}</td><td>${totalMb.toFixed(0)} MB</td></tr></tfoot></table>` +
+    `<p class="muted distance-note">An estimate of distant terrain before trees and buildings; the Game sets the most its World allows.</p>`
   );
 }
 
