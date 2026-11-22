@@ -253,7 +253,11 @@ fn the_placement_generator_and_level_ones_source_share_a_column_cache_level_zero
     let world = land();
     let level_zero = Worldgen::new(world.seed, world.voxel_size, forest());
     let generators = LodGenerators::new(&world, &level_zero, LEVELS);
-    assert!(generators.placement.shares_columns_with(&generators.sources[0]));
+    assert!(
+        generators
+            .placement
+            .shares_columns_with(&generators.sources[0])
+    );
     for (j, source) in generators.sources.iter().enumerate() {
         assert!(!source.shares_columns_with(&level_zero), "source {j}");
     }
