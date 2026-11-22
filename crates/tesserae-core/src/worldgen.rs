@@ -718,6 +718,15 @@ pub struct TreePart {
     pub canopy: bool,
 }
 
+/// One solid Voxel of a Structure level 0 stands, as [`Worldgen::structure_parts`] draws it for a
+/// coarse level.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct StructurePart {
+    /// The global cell.
+    pub at: [i32; 3],
+    pub material: MaterialId,
+}
+
 /// One World's generator: a seed, a Voxel size and the parameters a Mod chose.
 #[derive(Clone, Debug)]
 pub struct Worldgen {
