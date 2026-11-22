@@ -1194,8 +1194,7 @@ fn render(
     installed: Res<Installed>,
     roots: Query<Entity, With<Root>>,
     scrolled: Query<&ScrollPosition, With<PageScroll>>,
-    logo: Option<Res<ui::Mosaic>>,
-    thumbnails: Res<Thumbnails>,
+    (logo, thumbnails): (Option<Res<ui::Mosaic>>, Res<Thumbnails>),
     (mut built, mut shown, mut covered): (Local<Option<u64>>, Local<Option<Screen>>, Local<bool>),
 ) {
     let Some(l) = launcher else {
