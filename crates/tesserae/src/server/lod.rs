@@ -162,8 +162,9 @@ fn level_scale(level: u32) -> f32 {
     (1u32 << level) as f32
 }
 
-/// Levels up to this one stand tree Impostors; from the next a Voxel is as large as a tree.
-const IMPOSTORS_TO: u32 = 2;
+/// Levels up to this one stand tree Impostors. Level 2's draws cost some 28 ms more a
+/// terrain Chunk than level 1's 6, with no warm 1 m columns under them, so it takes Canopy cover.
+pub(in crate::server) const IMPOSTORS_TO: u32 = 1;
 
 /// The placement generator's column cache, in Cells: level 1's ring at the widest unit a Player
 /// may ask for, and its load margin. About 24 KB a Cell, held only where level 1 streams.
@@ -183,14 +184,14 @@ pub(in crate::server) struct LodGenerators {
     direct: Vec<Option<Worldgen>>,
     /// Level 0 with its features and Templates, asked for draws only, never a Chunk. It shares
     /// its column cache with `sources[0]`, so nothing coarse touches level 0's.
-    placement: Worldgen,
+    placement: Arc<Worldgen>,
     trees: Arc<TreeMaterials>,
     answers: Arc<Answers>,
 }
 
 impl LodGenerators {
     pub fn new(world: &WorldSettings, level_zero: &Worldgen, levels: u32) -> Self {
-        let placement = level_zero.clone().with_own_caches(level_one_cells(world));
+        let placement = Arc::new(level_zero.clone().with_own_caches(level_one_cells(world)));
         // Level 1 is the downsample of a level 0 without features, so a pair of them cannot win
         // a coarse Voxel's vote.
         let bare = level_zero.params().without_surface_features();
@@ -277,7 +278,7 @@ impl LodGenerators {
     fn persistent(&self) -> Persistent {
         Persistent {
             sources: self.sources.clone(),
-            placement: self.placement.clone(),
+            placement: Arc::clone(&self.placement),
             trees: Arc::clone(&self.trees),
         }
     }
@@ -1049,7 +1050,7 @@ fn generate_persistent(
 #[derive(Clone)]
 pub(in crate::server) struct Persistent {
     sources: Vec<Worldgen>,
-    placement: Worldgen,
+    placement: Arc<Worldgen>,
     trees: Arc<TreeMaterials>,
 }
 
@@ -1873,7 +1874,7 @@ fn dispatch(
         }
         let source = generators.sources[Plan::index(plan.level)].clone();
         let level_zero = generators.sources[0].clone();
-        let placement = (plan.level <= IMPOSTORS_TO).then(|| generators.placement.clone());
+        let placement = (plan.level <= IMPOSTORS_TO).then(|| Arc::clone(&generators.placement));
         let trees = Arc::clone(&generators.trees);
         let answers = Arc::clone(&generators.answers);
         let tables = Arc::clone(&tables.0);
@@ -1888,7 +1889,7 @@ fn dispatch(
                         source: &source,
                         direct: direct.as_ref(),
                         level_zero: &level_zero,
-                        placement: placement.as_ref(),
+                        placement: placement.as_deref(),
                         trees: &trees,
                         answers: &answers,
                     };

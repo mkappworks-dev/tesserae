@@ -3565,7 +3565,10 @@ impl Worldgen {
                     .or_insert(part);
             }
         }
-        parts.into_values().collect()
+        let mut parts: Vec<TreePart> = parts.into_values().collect();
+        // Where two species meet in one coarse Voxel the later wins, so the order is fixed.
+        parts.sort_unstable_by_key(|p| p.at);
+        parts
     }
 
     /// The height, in metres, of the tallest Plant Voxel in a footprint's columns, for spawning

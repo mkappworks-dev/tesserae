@@ -1,4 +1,4 @@
-//! Tree Impostors: levels 1 and 2 stand every tree level 0 stands, from the placement
+//! Tree Impostors: level 1 stands every tree level 0 stands, from the placement
 //! generator's draws, and over a changed Chunk only what it holds.
 
 use super::*;
@@ -92,7 +92,7 @@ fn a_trees_impostor_occupies_the_coarse_voxels_its_level_zero_trunk_and_canopy_r
     );
     let generators = LodGenerators::new(&world, &level_zero, LEVELS);
     let tables = &fixtures().tables;
-    for level in 1..=2 {
+    for level in 1..=IMPOSTORS_TO {
         let span = 1i32 << level;
         let n = CHUNK_SIZE as i32;
         let mut expected = HashSet::new();

@@ -327,8 +327,9 @@ fn scan(
     panic!("column {gx},{gz} has no ground below Chunk row {from_cy}");
 }
 
-/// Water or land and the top Material are exact at every level wherever no cave opens level 0;
-/// run with `--nocapture` to read the rates.
+/// Water or land and the top Material are exact at every level wherever no cave opens level 0,
+/// and every footprint level 0 stands a tree in stands one at levels 1 to [`IMPOSTORS_TO`]; run
+/// with `--nocapture` to read the rates.
 #[test]
 fn coarse_ground_agrees_with_level_zero_at_each_column_centre_over_terra_coast_and_forest() {
     let mut terra = Terra::load();
@@ -407,6 +408,12 @@ fn coarse_ground_agrees_with_level_zero_at_each_column_centre_over_terra_coast_a
                 stood > 0,
                 "level {level} stands no tree over the {name} window"
             );
+            // An extra is a cell level 0 gave to something else first: a tuft, or an overhang.
+            assert!(
+                missing == 0 && extra * 100 <= columns,
+                "level {level} over the {name} window: {missing} columns miss a tree, {extra} \
+                 stand one level 0 does not"
+            );
         }
     }
 }
@@ -482,7 +489,7 @@ fn coarse_chunk_cpu_time_and_vertex_bytes_with_and_without_impostors_over_terra_
         let generators = LodGenerators::new(&terra.world, &terra.full, levels);
         let makers = generators.makers(level);
         let makers = Makers {
-            placement: makers.placement.filter(|_| impostors),
+            placement: impostors.then_some(&*generators.placement),
             ..makers
         };
         let mut spent = 0.0;
@@ -501,7 +508,7 @@ fn coarse_chunk_cpu_time_and_vertex_bytes_with_and_without_impostors_over_terra_
     };
     println!("forest window {forest:?}, seed {}", terra.world.seed);
     println!("level  chunks  without ms  with ms  with / without");
-    for level in 1..=IMPOSTORS_TO {
+    for level in 1..=2 {
         let block = forest_block(&terra, forest, level, 3);
         let (mut without, mut with) = (Vec::new(), Vec::new());
         for round in 0..ROUNDS {
@@ -526,7 +533,7 @@ fn coarse_chunk_cpu_time_and_vertex_bytes_with_and_without_impostors_over_terra_
     }
 
     println!("level  meshes  without vertex bytes  with vertex bytes");
-    for level in 1..=IMPOSTORS_TO {
+    for level in 1..=2 {
         let block = forest_block(&terra, forest, level, 3);
         let generators = LodGenerators::new(&terra.world, &terra.full, levels);
         let voxel_m = terra.world.voxel_size * level_scale(level);
@@ -539,7 +546,7 @@ fn coarse_chunk_cpu_time_and_vertex_bytes_with_and_without_impostors_over_terra_
                     .or_insert_with(|| {
                         let makers = generators.makers(level);
                         let makers = Makers {
-                            placement: makers.placement.filter(|_| impostors),
+                            placement: impostors.then_some(&*generators.placement),
                             ..makers
                         };
                         let coarse =
