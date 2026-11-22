@@ -3644,34 +3644,43 @@ impl Worldgen {
     /// The Canopy cover over each of `columns`, global columns of this generator, where the share
     /// of ground its trees are expected to cover is over half: each tree feature's density from
     /// its draw and clump at the column, thinned by its crowding, times its crown's area (ADR-0035).
-    /// None stands on a field or a Structure's footprint; water is the caller's to rule out.
+    /// None stands on a field of the column's Biome, a Settlement or where a Structure may stand;
+    /// water is the caller's to rule out.
     pub fn canopy_cover(&self, shapes: &CanopyShapes, columns: &[[i32; 2]]) -> Vec<Option<Canopy>> {
         let Some(scatter) = self.scatter.filter(|s| s.plants) else {
             return vec![None; columns.len()];
         };
-        let Some(region) = columns
-            .iter()
-            .fold(None, |r: Option<[[i32; 2]; 2]>, &[x, z]| {
-                Some(r.map_or([[x, z], [x + 1, z + 1]], |[lo, hi]| {
-                    [
-                        [lo[0].min(x), lo[1].min(z)],
-                        [hi[0].max(x + 1), hi[1].max(z + 1)],
-                    ]
-                }))
-            })
-        else {
-            return Vec::new();
-        };
-        let placed = self.fields_near(&scatter, region);
-        let kept = self.footprints_near(region);
-        columns
+        let expected: Vec<_> = columns
             .iter()
             .map(|&[gx, gz]| {
-                if fields::cell_at(&placed, gx, gz).is_some() || covers(&kept, gx, gz) {
-                    return None;
-                }
                 self.expected_canopy(&scatter, shapes, gx, gz)
-                    .filter(|c| c.cover > 0.5)
+                    .filter(|(c, _)| c.cover > 0.5)
+            })
+            .collect();
+        let covered = columns.iter().zip(&expected).filter(|(_, e)| e.is_some());
+        let Some(region) = covered.fold(None, |r: Option<[[i32; 2]; 2]>, (&[x, z], _)| {
+            let [lo, hi] = r.unwrap_or([[x, z], [x + 1, z + 1]]);
+            Some([
+                [lo[0].min(x), lo[1].min(z)],
+                [hi[0].max(x + 1), hi[1].max(z + 1)],
+            ])
+        }) else {
+            return vec![None; columns.len()];
+        };
+        // A Structure's ground is not asked: deciding which candidates stand costs some hundreds
+        // of milliseconds over a far level's footprint, and a candidate is at most a column.
+        let kept = self.footprints(&Claims {
+            settlements: self.laid_settlements_near(region),
+            structures: self.structure_candidates_near(region),
+        });
+        columns
+            .iter()
+            .zip(expected)
+            .map(|(&[gx, gz], expected)| {
+                let (canopy, id) = expected?;
+                let fields = self.biome_fields_near(&scatter, id, [[gx, gz], [gx + 1, gz + 1]]);
+                (fields::cell_at(&fields, gx, gz).is_none() && !covers(&kept, gx, gz))
+                    .then_some(canopy)
             })
             .collect()
     }
@@ -3684,7 +3693,7 @@ impl Worldgen {
         shapes: &CanopyShapes,
         gx: i32,
         gz: i32,
-    ) -> Option<Canopy> {
+    ) -> Option<(Canopy, BiomeId)> {
         let (x_m, z_m) = (self.global_m(gx), self.global_m(gz));
         // Level 0's Biome for the column, without building its Cell's column cache.
         let id = self.biome_at(x_m, z_m)?;
@@ -3734,12 +3743,13 @@ impl Worldgen {
                 (sum + t.0, best)
             });
         let (_, tree, shape) = dominant?;
-        Some(Canopy {
+        let canopy = Canopy {
             material: tree.canopy,
             top_m: shape.top_m,
             // Crowns still overlap where crowding lets them, as scattered discs do.
             cover: (1.0 - libm::exp(-cover)) as f32,
-        })
+        };
+        Some((canopy, id))
     }
 
     /// The height, in metres, of the tallest Plant Voxel in a footprint's columns, for spawning
