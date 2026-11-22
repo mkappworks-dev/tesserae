@@ -1,6 +1,6 @@
 # 03: Optional thumbnail in mod.toml
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: [01: Approve the mockup](./01-mockup-approval.md)
 
@@ -17,11 +17,23 @@ them; a Mod without one shows one swatch per declared Material.
 
 ## Acceptance criteria
 
-- [ ] An ADR records the contract change; the data-Mods documentation and
+- [x] An ADR records the contract change; the data-Mods documentation and
       authoring guide describe the field
-- [ ] Validation reports each bad thumbnail case by path and reason
-- [ ] A Mod without a thumbnail loads and shows its Material swatches
-- [ ] The Mods library shows each Mod's thumbnail and a summary counted from its
+- [x] Validation reports each bad thumbnail case by path and reason
+- [x] A Mod without a thumbnail loads and shows its Material swatches
+- [x] The Mods library shows each Mod's thumbnail and a summary counted from its
       declaration
 
 ## Comments
+
+- ADR-0037. The thumbnail file stays out of build identity, but adding the
+  `thumbnail` line changes the Manifest bytes: Worlds saved with the old demo
+  builds no longer open, and Trust is asked again.
+- Thumbnails come from `scripts/generate-thumbnails` (Mods: their own textures
+  as Voxels; Games: a seeded island in the Game's colours), not copies of the
+  mockup's illustrations.
+- A component Mod has no summary or swatches before it runs; the library shows
+  its description only. The Mods step (08) and Game step (05) reuse
+  `pages::picture` and `Installed::adds`.
+- The summary line leaves out kinds a Mod adds none of, where the mockup always
+  printed a Material count.
