@@ -373,7 +373,7 @@ pub struct TreeMaterials {
 }
 
 fn octant_of(x: usize, y: usize, z: usize) -> usize {
-    x / OCTANT | (y / OCTANT) << 1 | (z / OCTANT) << 2
+    (x / OCTANT) | ((y / OCTANT) << 1) | ((z / OCTANT) << 2)
 }
 
 /// Stands a tree's Impostor: each of `parts`, a level-0 cell, makes the coarse Voxel of Chunk

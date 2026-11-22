@@ -197,7 +197,7 @@ fn trees_in_octant(h: &Harness, chunk: ChunkCoord) -> usize {
     voxels(cover)
         .filter(|&(at, v)| {
             let half = CHUNK_SIZE / 2;
-            is_tree(v) && at[0] / half | (at[1] / half) << 1 | (at[2] / half) << 2 == octant
+            is_tree(v) && ((at[0] / half) | ((at[1] / half) << 1) | ((at[2] / half) << 2)) == octant
         })
         .count()
 }

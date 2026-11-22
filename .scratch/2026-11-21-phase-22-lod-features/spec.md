@@ -123,6 +123,9 @@ captures are reviewed in two batches, after 05 and at 09.
   draws find no warm 1 m columns; the cost per level-2 Chunk is estimated at
   several milliseconds. If ticket 03 measures it past the per-level budget,
   level 2 draws Canopy cover instead of Impostors, and the spec records it.
+  **Recorded (03):** past it. Over a Terra forest, a level-2 terrain Chunk costs
+  32.9 ms with Impostors against 4.6 ms without (level 1: 10.6 against 4.1), so
+  Impostors stand at level 1 only and Canopy cover runs from level 2 up.
 - **Over saved changes (Q23).** A coarse branch holding an Edit or saved change
   runs no Impostor draw: it takes the changed level-0 Voxels, coarsened with
   the same any-solid rule for tree and Template Materials. So a felled tree is
