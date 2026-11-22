@@ -40,6 +40,7 @@ pub(super) fn spawn(
     l: &Launcher,
     installed: &Installed,
     logo: Option<&ui::Mosaic>,
+    thumbnails: &Thumbnails,
     scroll: Vec2,
 ) -> Option<Entity> {
     let mut focus = None;
@@ -85,7 +86,7 @@ pub(super) fn spawn(
                 focus = match &page {
                     Screen::Title => title(main, l, installed),
                     Screen::Worlds => worlds(main, l, installed, scroll),
-                    Screen::Library => library_page(main, installed, scroll),
+                    Screen::Library => library_page(main, installed, thumbnails, scroll),
                     Screen::Create(Step::World) => form(main, l, installed, scroll),
                     Screen::Create(Step::Mods) => mods_page(main, l, installed, scroll),
                     Screen::Create(Step::Biomes) => biomes_page(main, l, installed, scroll),
@@ -973,6 +974,7 @@ fn card_menu(actions: &mut ChildSpawnerCommands, path: &Path, open: bool) {
 fn library_page(
     main: &mut ChildSpawnerCommands,
     installed: &Installed,
+    thumbnails: &Thumbnails,
     scroll: Vec2,
 ) -> Option<Entity> {
     let mut focus = None;
@@ -1004,9 +1006,11 @@ fn library_page(
                         ModCard {
                             act: None,
                             check: None,
+                            picture: Some(picture(installed, thumbnails, &m.id)),
                             border: theme::edge(),
                             title: ui::title(&m.id),
                             detail: about.unwrap_or_default().to_owned(),
+                            adds: installed.adds(&m.id),
                             tag: category.map(|c| (c.to_owned(), theme::category_ink())),
                         },
                     );
@@ -1988,9 +1992,11 @@ fn mods_page(
                         ModCard {
                             act: None,
                             check: Some((true, false)),
+                            picture: None,
                             border: theme::edge(),
                             title: ui::title(&m.id),
                             detail: about.unwrap_or_default().to_owned(),
+                            adds: None,
                             tag: Some(("Required".to_owned(), theme::category_ink())),
                         },
                     );
@@ -2006,9 +2012,11 @@ fn mods_page(
                 let mut card = ModCard {
                     act: Some(Act::ToggleMod(i)),
                     check: Some((ticked, true)),
+                    picture: None,
                     border: theme::edge(),
                     title: ui::title(&m.id),
                     detail: about.unwrap_or_default().to_owned(),
+                    adds: None,
                     tag: category.map(|c| (c.to_owned(), theme::category_ink())),
                 };
                 if let Some(why) = installed.blocked(&game, &m.id) {
@@ -2088,10 +2096,78 @@ struct ModCard {
     act: Option<Act>,
     /// The Mods step's tick box: whether it is ticked, and whether it can change.
     check: Option<(bool, bool)>,
+    /// In place of the generic Mod icon.
+    picture: Option<Picture>,
     border: Color,
     title: String,
     detail: String,
+    /// What its Declaration adds, under the detail.
+    adds: Option<String>,
     tag: Option<(String, Color)>,
+}
+
+/// How a Mod looks in a list: its own thumbnail, else one swatch per declared Material.
+pub(super) enum Picture {
+    Thumbnail(Handle<Image>),
+    Swatches(Vec<Color>),
+}
+
+pub(super) fn picture(installed: &Installed, thumbnails: &Thumbnails, id: &str) -> Picture {
+    match thumbnails.get(id) {
+        Some(image) => Picture::Thumbnail(image.clone()),
+        None => Picture::Swatches(installed.summary(id).map_or_else(Vec::new, |s| {
+            s.swatches
+                .iter()
+                .map(|&[r, g, b, a]| Color::srgba_u8(r, g, b, a))
+                .collect()
+        })),
+    }
+}
+
+/// The thumbnail is drawn at a quarter of its size; swatches keep the mockup's 14 by 30.
+fn draw_picture(parent: &mut ChildSpawnerCommands, picture: Picture) {
+    match picture {
+        Picture::Thumbnail(image) => {
+            parent.spawn((
+                ImageNode::new(image),
+                BorderColor::all(theme::edge()),
+                Node {
+                    width: Val::Px(128.0),
+                    height: Val::Px(72.0),
+                    border: UiRect::all(Val::Px(theme::RULE)),
+                    border_radius: BorderRadius::all(Val::Px(theme::RADIUS_SMALL)),
+                    flex_shrink: 0.0,
+                    ..default()
+                },
+                Pickable::IGNORE,
+            ));
+        }
+        Picture::Swatches(colours) => {
+            parent
+                .spawn((
+                    Node {
+                        column_gap: Val::Px(2.0),
+                        flex_shrink: 0.0,
+                        ..default()
+                    },
+                    Pickable::IGNORE,
+                ))
+                .with_children(|row| {
+                    for colour in colours {
+                        row.spawn((
+                            BackgroundColor(colour),
+                            Node {
+                                width: Val::Px(14.0),
+                                height: Val::Px(30.0),
+                                border_radius: BorderRadius::all(Val::Px(2.0)),
+                                ..default()
+                            },
+                            Pickable::IGNORE,
+                        ));
+                    }
+                });
+        }
+    }
 }
 
 fn mod_card(parent: &mut ChildSpawnerCommands, c: ModCard) -> Entity {
@@ -2108,20 +2184,24 @@ fn mod_card(parent: &mut ChildSpawnerCommands, c: ModCard) -> Entity {
         if let Some((ticked, enabled)) = c.check {
             tick_box(card, ticked, enabled, 20.0);
         }
-        card.spawn((
-            BackgroundColor(theme::PILL),
-            Node {
-                width: Val::Px(34.0),
-                height: Val::Px(34.0),
-                border_radius: BorderRadius::all(Val::Px(theme::RADIUS_SMALL)),
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
-                flex_shrink: 0.0,
-                ..default()
-            },
-            Pickable::IGNORE,
-        ))
-        .with_children(|tile| ui::icon(tile, IconKind::Mods, theme::PILL_INK, 18.0));
+        if let Some(picture) = c.picture {
+            draw_picture(card, picture);
+        } else {
+            card.spawn((
+                BackgroundColor(theme::PILL),
+                Node {
+                    width: Val::Px(34.0),
+                    height: Val::Px(34.0),
+                    border_radius: BorderRadius::all(Val::Px(theme::RADIUS_SMALL)),
+                    align_items: AlignItems::Center,
+                    justify_content: JustifyContent::Center,
+                    flex_shrink: 0.0,
+                    ..default()
+                },
+                Pickable::IGNORE,
+            ))
+            .with_children(|tile| ui::icon(tile, IconKind::Mods, theme::PILL_INK, 18.0));
+        }
         card.spawn(Node {
             flex_direction: FlexDirection::Column,
             row_gap: Val::Px(4.0),
@@ -2138,9 +2218,15 @@ fn mod_card(parent: &mut ChildSpawnerCommands, c: ModCard) -> Entity {
                 theme::LABEL,
                 theme::INK,
             );
-            if !c.detail.is_empty() {
+            for line in [Some(c.detail.clone()), c.adds.clone()]
+                .into_iter()
+                .flatten()
+            {
+                if line.is_empty() {
+                    continue;
+                }
                 text.spawn((
-                    Text::new(c.detail.clone()),
+                    Text::new(line),
                     theme::font(theme::TEXT_CAPTION),
                     bevy::text::LineHeight::RelativeToFont(theme::LINE_HEIGHT),
                     TextColor(theme::muted()),

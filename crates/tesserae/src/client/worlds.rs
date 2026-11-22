@@ -666,6 +666,7 @@ fn logic(app: &mut App) {
         .init_resource::<Previewer>()
         .init_resource::<Returning>()
         .init_resource::<InputFocus>()
+        .init_resource::<Thumbnails>()
         .add_observer(activate)
         .add_observer(slide)
         .add_observer(open_settings)
@@ -676,6 +677,7 @@ fn logic(app: &mut App) {
                 keys,
                 sync_fields,
                 handle,
+                load_thumbnails,
                 render,
                 show_filter,
                 filter,
@@ -1193,6 +1195,7 @@ fn render(
     roots: Query<Entity, With<Root>>,
     scrolled: Query<&ScrollPosition, With<PageScroll>>,
     logo: Option<Res<ui::Mosaic>>,
+    thumbnails: Res<Thumbnails>,
     (mut built, mut shown, mut covered): (Local<Option<u64>>, Local<Option<Screen>>, Local<bool>),
 ) {
     let Some(l) = launcher else {
@@ -1215,13 +1218,60 @@ fn render(
     for root in &roots {
         commands.entity(root).despawn();
     }
-    let focus = pages::spawn(&mut commands, &l, &installed, logo.as_deref(), scroll);
+    let focus = pages::spawn(
+        &mut commands,
+        &l,
+        &installed,
+        logo.as_deref(),
+        &thumbnails,
+        scroll,
+    );
     if let Some(entity) = focus {
         commands.queue(move |world: &mut World| {
             if let Some(mut focus) = world.get_resource_mut::<InputFocus>() {
                 focus.set(entity, FocusCause::Auto);
             }
         });
+    }
+}
+
+/// Each installed Mod's and Game's thumbnail as an image, by id; `None` for one without.
+#[derive(Resource, Default)]
+pub(in crate::client) struct Thumbnails(std::collections::HashMap<String, Option<Handle<Image>>>);
+
+impl Thumbnails {
+    pub(in crate::client) fn get(&self, id: &str) -> Option<&Handle<Image>> {
+        self.0.get(id)?.as_ref()
+    }
+}
+
+/// Decodes each id once, so a page rebuilt on every click never rereads a file.
+fn load_thumbnails(
+    installed: Res<Installed>,
+    images: Option<ResMut<Assets<Image>>>,
+    mut thumbnails: ResMut<Thumbnails>,
+) {
+    let Some(mut images) = images else {
+        return;
+    };
+    for item in installed.games.iter().chain(&installed.mods) {
+        if thumbnails.0.contains_key(&item.id) {
+            continue;
+        }
+        let handle = installed.thumbnail(&item.id).map(|t| {
+            images.add(Image::new(
+                bevy::render::render_resource::Extent3d {
+                    width: t.width,
+                    height: t.height,
+                    depth_or_array_layers: 1,
+                },
+                bevy::render::render_resource::TextureDimension::D2,
+                t.rgba,
+                bevy::render::render_resource::TextureFormat::Rgba8UnormSrgb,
+                bevy::asset::RenderAssetUsages::default(),
+            ))
+        });
+        thumbnails.0.insert(item.id.clone(), handle);
     }
 }
 
@@ -1535,7 +1585,7 @@ fn paint_scenery(
                 bevy::render::render_resource::TextureDimension::D2,
                 scenery::paint(size.x, size.y, scale, backdrop.0),
                 bevy::render::render_resource::TextureFormat::Rgba8UnormSrgb,
-                bevy::asset::RenderAssetUsages::RENDER_WORLD,
+                bevy::asset::RenderAssetUsages::default(),
             );
             slot.image = Some(images.add(image));
             slot.size = size;
