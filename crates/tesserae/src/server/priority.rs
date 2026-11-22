@@ -326,6 +326,18 @@ mod tests {
         assert!(coarse.entries[0].0 <= fine.entries[0].0);
     }
 
+    /// Coarsest-first ordering lives in the coarse dispatch; level 0's own
+    /// order is the plain score.
+    #[test]
+    fn a_level_zero_chunk_ranks_by_its_distance_alone() {
+        let offsets = cube(4);
+        let mut order = Order::default();
+        order.update(&ring(&offsets), &aim(Vec3::NEG_Z, Vec3::ZERO), 0.0);
+        assert_eq!(order.priority(IVec3::new(0, 0, -4)), Some(56.0));
+        assert_eq!(order.priority(IVec3::new(0, 0, 4)), Some(112.0));
+        assert_eq!(order.priority(IVec3::new(0, 0, 2)), Some(24.0));
+    }
+
     #[test]
     fn columns_are_solved_top_down_band_by_band() {
         let offsets = cube(4);
