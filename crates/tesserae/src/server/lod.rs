@@ -4577,6 +4577,7 @@ mod tests {
     mod saved;
     mod seams;
     mod structures;
+    mod trees;
 }
 
 #[cfg(test)]

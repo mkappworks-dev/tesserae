@@ -67,8 +67,8 @@ pub use light::{
     relight_many,
 };
 pub use lod::{
-    COVERED_SKY, CoarseLight, SeamMargin, Surface, agree_with_level_zero, coarse_light, downsample,
-    seam_openings,
+    COVERED_SKY, CoarseLight, SeamMargin, Surface, TreeMaterials, agree_with_level_zero,
+    coarse_light, coarsen_tree_parts, downsample, seam_openings, stand_tree_parts,
 };
 pub use material::{MaterialDef, MaterialError, MaterialTable, Occlusion, RenderClass};
 pub use mesh::{
@@ -100,5 +100,5 @@ pub use usable::{
 pub use voxel::{AIR, MaterialId, SHAPE_FULL_CUBE, ShapeId, Voxel};
 pub use worldgen::{
     CaveParams, ColumnTop, GroundParams, MAX_HEIGHT_M, MAX_OCTAVES, MAX_SMOOTHED_PER_CHUNK,
-    ParamError, SmoothingParams, WaterParams, Worldgen, WorldgenParams,
+    ParamError, SmoothingParams, TreePart, WaterParams, Worldgen, WorldgenParams,
 };

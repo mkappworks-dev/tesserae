@@ -709,6 +709,15 @@ pub(crate) fn level_index(level_m: f32, voxel_size: f32) -> i32 {
     k
 }
 
+/// One Voxel of a tree level 0 stands, as [`Worldgen::tree_parts`] draws it for a coarse level.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct TreePart {
+    /// The global cell.
+    pub at: [i32; 3],
+    pub material: MaterialId,
+    pub canopy: bool,
+}
+
 /// One World's generator: a seed, a Voxel size and the parameters a Mod chose.
 #[derive(Clone, Debug)]
 pub struct Worldgen {
@@ -1251,6 +1260,23 @@ impl Worldgen {
             self.columns = Arc::clone(&other.columns);
         }
         self
+    }
+
+    /// This generator with caches of its own, its column cache bounded at `column_cells` Cells,
+    /// still sharing its terrain: what it answers is unchanged, and no work it does evicts the
+    /// generator it was cloned from.
+    pub fn with_own_caches(mut self, column_cells: usize) -> Self {
+        self.tops = Arc::default();
+        self.columns = Arc::new(CellMap::new(column_cells));
+        self.plants = Arc::new(CellMap::new(MAX_PLANT_CELLS.max(column_cells)));
+        self.fields = Arc::new(CellMap::new(MAX_FIELD_CELLS));
+        self.layouts = Arc::default();
+        self
+    }
+
+    /// Whether the two read and fill one column cache.
+    pub fn shares_columns_with(&self, other: &Worldgen) -> bool {
+        Arc::ptr_eq(&self.columns, &other.columns)
     }
 
     /// Whether the seeds and every parameter but the surface features and smoothing match, as
@@ -3463,6 +3489,83 @@ impl Worldgen {
         for &(at, voxel) in &crops {
             put(chunk, at, voxel, None);
         }
+    }
+
+    /// Every trunk and canopy Voxel, fully grown, that [`Self::chunk`] stands in the global cells
+    /// `min..max`, fruit counted as canopy: what a coarse level draws its trees from (ADR-0035).
+    /// Asked of a generator with Plants and Structures, it reads only their draws and the ground's
+    /// heights, never a Chunk.
+    pub fn tree_parts(&self, min: [i32; 3], max: [i32; 3]) -> Vec<TreePart> {
+        let Some(scatter) = self.scatter.filter(|s| s.plants) else {
+            return Vec::new();
+        };
+        let (lowest, _) = self.terrain_band_m();
+        let (_, highest) = self.ground_bounds_m();
+        if self.global_m(min[1]) > highest || self.global_m(max[1] - 1) < lowest - self.voxel_size {
+            return Vec::new();
+        }
+        let margin = (scatter.reach_m / self.voxel_size).ceil() as i32 + 1;
+        let rise = (scatter.rise_m / self.voxel_size).ceil() as i32 + 2;
+        let inside = |at: [i32; 3]| (0..3).all(|a| (min[a]..max[a]).contains(&at[a]));
+        // Level 0 puts a tree's Voxel only into air: over its column's top, out of its lake and off
+        // a smoothing stair.
+        let mut ground: HashMap<[i32; 2], (i32, Option<f32>)> = HashMap::new();
+        let mut open = |[gx, y, gz]: [i32; 3]| {
+            let (top, level_m) = *ground.entry([gx, gz]).or_insert_with(|| {
+                let (x_m, z_m) = (self.global_m(gx), self.global_m(gz));
+                (
+                    top_index(self.surface_height_m(x_m, z_m), 0.0, self.voxel_size),
+                    self.water.and(self.water_level_m(x_m, z_m)),
+                )
+            });
+            y > top
+                && level_m.is_none_or(|level_m| self.global_m(y) >= level_m)
+                && !(y == top + 1 && self.smoothing && self.eased([gx, gz], y))
+        };
+        let mut parts: HashMap<[i32; 3], TreePart> = HashMap::new();
+        let seed = u64::from(self.seed);
+        for standing in self.plants_on(
+            &scatter,
+            [min[0] - margin, min[2] - margin],
+            [max[0] + margin - 1, max[2] + margin - 1],
+        ) {
+            let SurfacePlantKind::Tree(tree) = standing.plant.kind else {
+                continue;
+            };
+            let base = standing.base;
+            if base[1] >= max[1] || base[1] + rise < min[1] {
+                continue;
+            }
+            let row = Self::tree_of(&tree);
+            for v in tree_voxels(&row, seed, [base[0], 0, base[2]], self.voxel_size) {
+                let at = [v.at[0], v.at[1] + base[1], v.at[2]];
+                if !inside(at) || !open(at) {
+                    continue;
+                }
+                let part = match v.part {
+                    Part::Trunk => TreePart {
+                        at,
+                        material: tree.trunk,
+                        canopy: false,
+                    },
+                    Part::Canopy | Part::Fruit => TreePart {
+                        at,
+                        material: tree.canopy,
+                        canopy: true,
+                    },
+                };
+                // Level 0 stands every trunk before any canopy.
+                parts
+                    .entry(at)
+                    .and_modify(|held| {
+                        if held.canopy && !part.canopy {
+                            *held = part;
+                        }
+                    })
+                    .or_insert(part);
+            }
+        }
+        parts.into_values().collect()
     }
 
     /// The height, in metres, of the tallest Plant Voxel in a footprint's columns, for spawning
