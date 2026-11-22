@@ -27,10 +27,10 @@ const settingsDefaults = {
   renderScale: "100%",
   fps: "No limit",
   // Proposed in step 22 (.scratch/2026-11-21-phase-22-lod-features/spec.md).
-  distancePreset: "Detailed",
-  reachKm: 8,
-  detailM: 384,
-  customDistance: { reachKm: 6, detailM: 288 },
+  distancePreset: "Medium",
+  reachKm: 6,
+  detailChunks: 8,
+  customDistance: { reachKm: 7, detailChunks: 10 },
   sound: 100,
   music: 50,
   effects: 100,
@@ -302,25 +302,32 @@ function quickReference() {
   ).join("<br>");
 }
 
-// Level 0 is the Game's view distance and a 32-Voxel Chunk of 1 m Voxels; coarse level k
-// ends at min(unit * 2^k, reach), three Cells above and below (lod_rings.rs).
-const VIEW_DISTANCE_M = 192;
+// Level 0 is the Game's view distance (Terra's) and a 32-Voxel Chunk of 1 m Voxels; coarse
+// level k ends at min(unit * 2^k, reach), three Cells above and below (lod_rings.rs). The unit
+// is whole Chunks so every level ends on its own Cells.
+const VIEW_DISTANCE_M = 160;
 const CELL_M = 32;
 const ROWS = 7;
 // Step 6's 86 MB for levels 1-5 at 4 km, less packed quads' 70%, over its ~502 Cell columns.
 const KB_PER_COLUMN = 52;
 const DISTANCE_PRESETS = [
   [
-    "Balanced",
-    192,
-    4,
-    "Today's rings: each Voxel size doubles from 192 m. Choose Custom to set your own.",
+    "Low",
+    5,
+    3,
+    "The World's own rings, to 3 km: lightest on memory. Choose Custom to set your own.",
   ],
   [
-    "Detailed",
-    384,
+    "Medium",
     8,
-    "Holds each Voxel size twice as far, to 8 km. The proposed default. Choose Custom to set your own.",
+    6,
+    "Holds each Voxel size further, to 6 km. The default. Choose Custom to set your own.",
+  ],
+  [
+    "High",
+    12,
+    8,
+    "Sharpest and furthest, to 8 km: most memory. Choose Custom to set your own.",
   ],
 ];
 
@@ -348,7 +355,7 @@ const metres = (m) =>
 
 function distancePanel() {
   const d = state.settingsDraft;
-  const levels = distanceLevels(d.detailM, d.reachKm * 1000);
+  const levels = distanceLevels(d.detailChunks * CELL_M, d.reachKm * 1000);
   const coarse = levels.slice(1);
   const total = coarse.reduce((sum, l) => sum + l.mb, 0);
   const rows = levels
@@ -370,20 +377,21 @@ const presetHint = (name) =>
 function choosePreset(name) {
   const d = state.settingsDraft;
   const preset = DISTANCE_PRESETS.find(([n]) => n === name);
-  const { detailM, reachKm } = preset
-    ? { detailM: preset[1], reachKm: preset[2] }
+  const { detailChunks, reachKm } = preset
+    ? { detailChunks: preset[1], reachKm: preset[2] }
     : d.customDistance;
-  Object.assign(d, { distancePreset: name, detailM, reachKm });
+  Object.assign(d, { distancePreset: name, detailChunks, reachKm });
 }
 
 // Moving a slider off a preset's values makes the draft Custom and remembers it.
 function refreshDistance() {
   const d = state.settingsDraft;
   const preset = DISTANCE_PRESETS.find(
-    ([, unit, reach]) => unit === d.detailM && reach === d.reachKm,
+    ([, unit, reach]) => unit === d.detailChunks && reach === d.reachKm,
   );
   d.distancePreset = preset ? preset[0] : "Custom";
-  if (!preset) d.customDistance = { detailM: d.detailM, reachKm: d.reachKm };
+  if (!preset)
+    d.customDistance = { detailChunks: d.detailChunks, reachKm: d.reachKm };
   setSelectValue($("[data-bind='settings.distancePreset']"), d.distancePreset);
   const hint = $("#distance-preset-hint");
   if (hint) hint.textContent = presetHint(d.distancePreset);
@@ -550,7 +558,7 @@ function settingsBody() {
           "Preset",
           "distancePreset",
           "select",
-          ["Balanced", "Detailed", "Custom"],
+          ["Low", "Medium", "High", "Custom"],
           `<span id="distance-preset-hint">${presetHint(state.settingsDraft.distancePreset)}</span>`,
         ) +
         row(
@@ -563,10 +571,10 @@ function settingsBody() {
         ) +
         row(
           "Detail",
-          "detailM",
+          "detailChunks",
           "range",
-          [192, 384, 32],
-          "Higher holds each Voxel size further out: sharper, and more memory.",
+          [VIEW_DISTANCE_M / CELL_M, 12, 1],
+          "How many of its own Chunks each Voxel size reaches. Higher is sharper, and more memory.",
           state.settingsDraft.distancePreset !== "Custom",
         ) +
         `<div id="distance-panel">${distancePanel()}</div>` +
