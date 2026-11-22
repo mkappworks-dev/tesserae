@@ -1,6 +1,6 @@
 # LOD features: coarse levels that agree with level 0, and a longer reach
 
-Status: ready-for-agent. Decisions Q1 to Q23 were settled in a grilling round on
+Status: done (2026-11-22): every ticket is done or wontfix (10). Decisions Q1 to Q23 were settled in a grilling round on
 2026-11-21, and Q24 (the presets) and Q25 (Terra's level 0) on 2026-11-22.
 
 Source: branch `feat/phase-22-lod-features`, cut from `main` at `65037cdd`.
@@ -198,7 +198,7 @@ captures are reviewed in two batches, after 05 and at 09.
   times slower and delayed level 0. 6 Chunks (`u` 192 m) to 6 km filled in 9.6 s and 9.9 s (median
   of six; 10.25 s at worst in flight), GPU frame 3.17 ms against `main`'s 2.70, coarse vertex
   memory 3.6 MB held, level 0 unchanged in an interleaved A/B against `main`. So Medium is 6 Chunks
-  to 6 km; the margin in flight is thin. High filled in 24.9 s, GPU frame 3.55 ms, 10.7 MB.
+  to 6 km; the margin in flight is thin. High filled in 24.3 s, GPU frame 3.55 ms, 10.7 MB.
 - **Terra's level 0 (Q25).** Terra declares 160 m (5 Chunks) with no recorded reason; every other
   Game uses the engine's 192 m. Ticket 09 measures Terra at 192 m too and keeps it only if level 0's
   fill time and GPU frame stay within budget, recording the reason either way. **Recorded (09):**
