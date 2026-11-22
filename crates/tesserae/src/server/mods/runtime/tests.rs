@@ -1005,6 +1005,7 @@ fn measure_drain(label: &str, loaded: LoadedMods, size: f32, batches: Vec<Comman
         vertical_distance_m: 32.0,
         hysteresis_m: 32.0,
         lod_distance_m: 48.0,
+        lod_unit_m: 0.0,
     };
     let world = WorldSettings {
         voxel_size: size,

@@ -97,7 +97,7 @@ pub struct LodUnloaded {
 }
 
 /// How far the Server streams. Not World save data — see `crate::world`.
-#[derive(Resource, Clone, Copy, Debug)]
+#[derive(Resource, Clone, Copy, PartialEq, Debug)]
 pub struct StreamingSettings {
     /// Horizontal radius, in metres, that the Client gets geometry for.
     pub view_distance_m: f32,
@@ -109,6 +109,9 @@ pub struct StreamingSettings {
     pub hysteresis_m: f32,
     /// At or below `view_distance_m` there are no coarse levels.
     pub lod_distance_m: f32,
+    /// Coarse level k ends at `lod_unit_m * 2^k`, never nearer than the view distance, so the
+    /// default 0 is the doubling from it. See `quality::QualityCurve`.
+    pub lod_unit_m: f32,
 }
 
 impl Default for StreamingSettings {
@@ -118,6 +121,7 @@ impl Default for StreamingSettings {
             vertical_distance_m: 96.0,
             hysteresis_m: 32.0,
             lod_distance_m: 4096.0,
+            lod_unit_m: 0.0,
         }
     }
 }
@@ -595,7 +599,7 @@ pub(super) fn plugin(app: &mut App) {
         .add_session_message::<ChunkUnloaded>()
         .add_session_message::<LodMeshReady>()
         .add_session_message::<LodUnloaded>()
-        .add_plugins(lod::plugin)
+        .add_plugins((lod::plugin, super::quality::plugin))
         .add_session_systems(
             FixedUpdate,
             (stream, lod::stream_lod).chain().in_set(Streaming),

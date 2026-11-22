@@ -367,6 +367,8 @@ impl LodStore {
 #[derive(Default)]
 struct Level {
     anchor: Option<ChunkCoord>,
+    /// A new Quality curve changes these as an anchor move would.
+    rings: Option<LevelRings>,
     /// Set by an anchor move, a landing, an invalidation, and a scan that ran out of budget.
     pending: bool,
     /// Set when a Chunk or a neighbour of it landed, a mesh slot freed, or the anchor moved.
@@ -1136,8 +1138,10 @@ pub(in crate::server) fn stream_lod(
     player: Query<&Player>,
     (mut orders, time): (ResMut<LodOrders>, Option<Res<Time>>),
 ) {
-    let levels = generators.levels();
+    // Never more than the generators, which the Game's own doubling, the most a curve has, sized.
+    let levels = level_count(&settings).min(generators.levels());
     if levels <= 1 {
+        retire(&[], &mut store, &mut state, &mut jobs, &mut unloaded);
         // Nobody will read the marks, and they would pile up.
         meshes.take_cover_changes();
         return;
@@ -1239,13 +1243,26 @@ fn retire(
     unloaded: &mut MessageWriter<LodUnloaded>,
 ) {
     let mut moved = false;
+    // A curve with fewer levels: the Client keeps drawing what these held until it is covered.
+    for dropped in plans.len() as u32 + 1..=state.levels.len() as u32 {
+        let level = std::mem::take(state.level_mut(dropped));
+        moved |= level.anchor.is_some();
+        for coord in level.delivered {
+            unloaded.write(LodUnloaded {
+                level: dropped,
+                coord,
+            });
+        }
+        store.retain(dropped, |_| false);
+    }
     for plan in plans {
         let level = state.level_mut(plan.level);
-        if level.anchor == Some(plan.anchor) {
+        if level.anchor == Some(plan.anchor) && level.rings == Some(plan.rings) {
             continue;
         }
         moved = true;
         level.anchor = Some(plan.anchor);
+        level.rings = Some(plan.rings);
         level.pending = true;
         level.mesh_pending = true;
 
@@ -1285,14 +1302,17 @@ fn retire(
                 .is_some_and(|p| p.rings.evict.contains(delta(p.anchor, coord)))
         });
         let kept = |(level, coord): LodKey| {
-            let p = &plans[Plan::index(level)];
-            p.rings.keep.contains(delta(p.anchor, coord))
+            plans
+                .get(Plan::index(level))
+                .is_some_and(|p| p.rings.keep.contains(delta(p.anchor, coord)))
         };
         let cancelled: Vec<LodKey> = jobs.mesh.keys().into_iter().filter(|&k| !kept(k)).collect();
         jobs.mesh.retain(kept);
         // Dispatch took these out of `dirty`, and the Chunk is still held.
         for (level, coord) in cancelled {
-            let p = &plans[Plan::index(level)];
+            let Some(p) = plans.get(Plan::index(level)) else {
+                continue;
+            };
             if p.rings.evict.contains(delta(p.anchor, coord)) {
                 state.level_mut(level).dirty.insert(coord, LodCause::Moved);
             }
@@ -3383,6 +3403,7 @@ mod tests {
             vertical_distance_m: 64.0,
             hysteresis_m: 32.0,
             lod_distance_m: 384.0,
+            lod_unit_m: 0.0,
         }
     }
 
@@ -3710,6 +3731,7 @@ mod tests {
             vertical_distance_m: 32.0,
             hysteresis_m: 32.0,
             lod_distance_m: 256.0,
+            lod_unit_m: 0.0,
         }
     }
 
@@ -4386,6 +4408,7 @@ mod tests {
     }
 
     mod biomes;
+    mod curve;
     mod held;
     mod ores;
     mod saved;

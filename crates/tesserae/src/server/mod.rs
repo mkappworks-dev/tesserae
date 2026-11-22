@@ -43,6 +43,7 @@ pub mod persistence;
 pub mod plants;
 pub mod player;
 mod priority;
+pub mod quality;
 mod sky;
 pub mod sound;
 pub mod soundscape;

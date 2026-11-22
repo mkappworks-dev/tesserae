@@ -224,6 +224,7 @@ impl Run {
             vertical_distance_m: 24.0,
             hysteresis_m: 8.0,
             lod_distance_m: 256.0,
+            lod_unit_m: 0.0,
         };
         let mut h = Harness::with_world(settings, StreamingBudget::default(), world, params);
         h.app

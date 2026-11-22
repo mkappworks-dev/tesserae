@@ -694,16 +694,18 @@ fn release(
         return;
     }
     let outside = |(level, coord): (u32, ChunkCoord)| {
-        !anchors.is_empty()
-            && (level..levels).all(|at| {
+        camera_m.is_some_and(|camera_m| {
+            // A level a new curve dropped is held to its own rings, which stop at the reach.
+            (level..levels.max(level + 1)).all(|at| {
                 let covering = coord.ancestor(at - level);
                 let rings = LevelRings::new(*streaming, world.cell_size(), at);
-                let a = anchors[at as usize];
+                let a = world.chunk_at_level(camera_m, at);
                 let d = IVec3::new(covering.x - a.x, covering.y - a.y, covering.z - a.z);
                 let outer = rings.mesh.outer;
                 // `contains` squares the offset, which overflows a teleport away.
                 d.abs().max_element() > outer.horizontal.max(outer.vertical) || !outer.contains(d)
             })
+        })
     };
     let released: Vec<_> = entities
         .retained
@@ -1474,6 +1476,26 @@ mod tests {
         assert_eq!(entity_for(&app, fine), None, "its grandparent covers it");
         assert!(!mask_has(&app, 0, fine), "in the same frame");
         assert!(mask_has(&app, 2, ChunkCoord::new(1, 0, -1)));
+    }
+
+    #[test]
+    fn a_level_a_new_curve_drops_is_drawn_until_the_finer_levels_cover_it() {
+        let mut app = app();
+        put_eye(&mut app, Vec3::ZERO);
+        let coarse = ChunkCoord::new(0, 0, 0);
+        send_coarse(&mut app, 5, coarse, geometry());
+        unload_coarse(&mut app, 5, coarse);
+        let detailed = crate::server::quality::QualityCurve::detailed(4096.0)
+            .applied_to(StreamingSettings::default());
+        assert_eq!(level_count(&detailed), 5, "level 5 is dropped");
+        app.insert_resource(detailed);
+        app.update();
+        assert!(entity_at(&app, 5, coarse).is_some(), "retained");
+
+        for child in coarse.children() {
+            send_coarse(&mut app, 4, child, geometry());
+        }
+        assert_eq!(entity_at(&app, 5, coarse), None, "covered");
     }
 
     #[test]
@@ -2307,7 +2329,16 @@ mod tests {
             &Mat4::from_scale(Vec3::splat(1e-4)),
         ));
         let view = app.world_mut().spawn_empty().id();
-        app.world_mut().spawn((
+        app.init_resource::<GlobalAmbientLight>();
+        app.world_mut()
+            .run_system_once(spawn_light)
+            .expect("the sun was spawned");
+        let sun = app
+            .world_mut()
+            .query_filtered::<Entity, With<DirectionalLight>>()
+            .single(app.world())
+            .unwrap();
+        app.world_mut().entity_mut(sun).insert((
             DirectionalLight {
                 shadow_maps_enabled: true,
                 ..default()
@@ -2318,7 +2349,6 @@ mod tests {
                     .collect(),
             },
             ViewVisibility::VISIBLE,
-            RenderLayers::layer(NEAR_LAYER),
         ));
         app.add_systems(PostUpdate, bevy::light::check_dir_light_mesh_visibility);
         // No visibility plugin runs here to propagate it.
@@ -2361,6 +2391,55 @@ mod tests {
         for (i, cascade) in cascades.iter().enumerate() {
             assert!(cascade.contains(&ground), "ground in cascade {i}");
             assert_eq!(cascade.contains(&canopy), i < 2, "leaves in cascade {i}");
+        }
+    }
+
+    #[test]
+    fn no_coarse_mesh_casts_a_sun_shadow_under_any_curve() {
+        use crate::server::quality::QualityCurve;
+        let game = StreamingSettings::default();
+        for curve in [
+            QualityCurve::balanced(4096.0),
+            QualityCurve::detailed(4096.0),
+            QualityCurve {
+                unit_m: 288.0,
+                reach_m: 2500.0,
+            },
+        ] {
+            let streaming = curve.applied_to(game);
+            let mut app = app();
+            app.insert_resource(streaming);
+            let coord = ChunkCoord::new(0, 0, 0);
+            send_mesh(&mut app, coord, geometry());
+            let ground = entity_at(&app, 0, coord).expect("level 0's ground");
+            let mut coarse = Vec::new();
+            for level in 1..level_count(&streaming) {
+                for (mesh, at) in [(both_layers(), coord), (leaves(), ChunkCoord::new(1, 0, 0))] {
+                    send_coarse(&mut app, level, at, mesh);
+                    let entities = app.world().resource::<ChunkEntities>();
+                    coarse.extend(
+                        [&entities.opaque, &entities.blended, &entities.cutout]
+                            .into_iter()
+                            .filter_map(|layer| layer.get(&(level, at)).copied()),
+                    );
+                }
+            }
+            assert!(coarse.len() >= 3 * (level_count(&streaming) as usize - 1));
+            let view = sun_over_everything(&mut app);
+            app.update();
+
+            for (i, cascade) in cascades_of(&mut app, view).iter().enumerate() {
+                assert!(
+                    cascade.contains(&ground),
+                    "{curve:?}: ground in cascade {i}"
+                );
+                for entity in &coarse {
+                    assert!(
+                        !cascade.contains(entity),
+                        "{curve:?}: a coarse mesh casts into cascade {i}"
+                    );
+                }
+            }
         }
     }
 

@@ -56,6 +56,8 @@ mod pose;
 pub(crate) mod presentation;
 mod preview;
 pub(crate) mod profile;
+#[cfg(any(feature = "dev", feature = "profiling"))]
+mod quality;
 mod removal;
 pub(crate) mod render_scale;
 mod save;
@@ -90,7 +92,7 @@ use crate::session::SessionApp;
 
 pub fn plugin(app: &mut App) {
     #[cfg(any(feature = "dev", feature = "profiling"))]
-    app.add_plugins(capture::plugin);
+    app.add_plugins((capture::plugin, quality::plugin));
     #[cfg(feature = "profiling")]
     app.add_plugins((holes::plugin, lag::plugin, sight::plugin));
     app.add_plugins((
