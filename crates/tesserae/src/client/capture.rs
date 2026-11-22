@@ -813,6 +813,7 @@ fn render_offscreen(
     cameras: Query<Entity, (With<Camera3d>, Without<super::tile_preview::AtlasCamera>)>,
     main: Single<Entity, With<MainCamera>>,
     menu: Res<super::menu::Menu>,
+    settings: Option<Res<super::settings::Settings>>,
 ) {
     let dimension = |name, fallback| {
         std::env::var(name)
@@ -835,7 +836,7 @@ fn render_offscreen(
             .insert(RenderTarget::Image(handle.clone().into()));
     }
     // The UI follows a window camera by default, and none is left.
-    if menu.open {
+    if menu.open || settings.is_some_and(|s| s.open) {
         commands.entity(*main).insert(IsDefaultUiCamera);
     }
     commands.insert_resource(super::render_scale::Output(RenderTarget::Image(

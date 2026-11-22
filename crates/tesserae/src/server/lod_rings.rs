@@ -47,7 +47,6 @@ impl Shell {
     }
 
     /// Relies on the hole lying inside the outer extent.
-    #[cfg(any(test, feature = "dev", feature = "profiling"))]
     pub fn count(self) -> usize {
         self.outer.count() - self.hole.map_or(0, Extent::count)
     }
@@ -352,44 +351,66 @@ mod tests {
         QualityCurve { unit_m, reach_m }.applied_to(StreamingSettings::default())
     }
 
-    /// Every curve the ring tests cover: both presets, a Custom one and two the clamp cuts.
-    fn curves() -> Vec<StreamingSettings> {
-        let terra = StreamingSettings {
+    fn terra() -> StreamingSettings {
+        StreamingSettings {
             view_distance_m: 160.0,
             lod_distance_m: 3000.0,
             ..default()
-        };
-        vec![
-            QualityCurve::balanced(4096.0).applied_to(StreamingSettings::default()),
-            QualityCurve::detailed(4096.0).applied_to(StreamingSettings::default()),
-            QualityCurve::detailed(8192.0).applied_to(terra),
-            curve(288.0, 2500.0),
-            curve(100.0, 8192.0),
-            QualityCurve::balanced(2048.0).applied_to(terra),
-        ]
+        }
+    }
+
+    /// Every curve the ring tests cover: each preset, a Custom one and two the clamp cuts.
+    fn curves() -> Vec<StreamingSettings> {
+        let engine = StreamingSettings::default();
+        let mut curves: Vec<_> = [engine, terra()]
+            .into_iter()
+            .flat_map(|game| {
+                [
+                    QualityCurve::low(game),
+                    QualityCurve::MEDIUM,
+                    QualityCurve::HIGH,
+                ]
+                .map(|curve| curve.applied_to(game))
+            })
+            .collect();
+        curves.extend([curve(288.0, 2500.0), curve(100.0, 8192.0)]);
+        curves
     }
 
     #[test]
-    fn balanced_is_the_doubling_from_the_default_view_distance() {
-        let today = StreamingSettings::default();
-        let balanced = QualityCurve::balanced(4096.0).applied_to(today);
-        assert_eq!(level_count(&balanced), level_count(&today));
-        for level in 0..MAX_LEVELS {
-            for voxel_size in [1.0, 0.25] {
-                let cell = world(voxel_size).cell_size();
-                assert_eq!(
-                    LevelRings::new(balanced, cell, level),
-                    LevelRings::new(today, cell, level),
-                    "{voxel_size} level {level}"
-                );
+    fn low_is_the_game_s_own_doubling() {
+        for game in [StreamingSettings::default(), terra()] {
+            let low = QualityCurve::low(game).applied_to(game);
+            assert_eq!(level_count(&low), level_count(&game));
+            for level in 0..MAX_LEVELS {
+                for voxel_size in [1.0, 0.25] {
+                    let cell = world(voxel_size).cell_size();
+                    assert_eq!(
+                        LevelRings::new(low, cell, level),
+                        LevelRings::new(game, cell, level),
+                        "{} m view, {voxel_size} level {level}",
+                        game.view_distance_m
+                    );
+                }
             }
         }
     }
 
     #[test]
-    fn detailed_holds_each_level_twice_as_far() {
-        let detailed = QualityCurve::detailed(4096.0).applied_to(StreamingSettings::default());
-        assert_eq!(level_count(&detailed), 5);
+    fn medium_reaches_eight_of_each_level_s_own_chunks() {
+        let medium = QualityCurve::MEDIUM.applied_to(terra());
+        assert_eq!(level_count(&medium), 5);
+        // 160 m, then 512, 1024 and 2048 m, then Terra's 3000 m ceiling.
+        for (level, horizontal) in [(0, 5), (1, 8), (2, 8), (3, 8), (4, 6)] {
+            let r = LevelRings::new(medium, 32.0, level);
+            assert_eq!(r.mesh.outer, ext(horizontal, 3), "level {level}");
+        }
+    }
+
+    #[test]
+    fn high_holds_each_level_twice_as_far() {
+        let high = QualityCurve::HIGH.applied_to(StreamingSettings::default());
+        assert_eq!(level_count(&high), 5);
         // 192 m, then 768, 1536 and 3072 m, then the 4096 m reach.
         let table = [
             (6, None, None),
@@ -399,7 +420,7 @@ mod tests {
             (8, Some(ext(4, 1)), Some(ext(3, 0))),
         ];
         for (level, (horizontal, hole, keep_hole)) in table.into_iter().enumerate() {
-            let r = LevelRings::new(detailed, 32.0, level as u32);
+            let r = LevelRings::new(high, 32.0, level as u32);
             assert_eq!(r.mesh.outer, ext(horizontal, 3), "level {level}");
             assert_eq!(r.mesh.hole, hole, "level {level}");
             assert_eq!(r.keep.hole, keep_hole, "level {level}");
@@ -424,11 +445,7 @@ mod tests {
 
     #[test]
     fn the_server_clamps_the_unit_to_the_view_distance_and_the_reach_to_the_ceiling() {
-        let terra = StreamingSettings {
-            view_distance_m: 160.0,
-            lod_distance_m: 3000.0,
-            ..default()
-        };
+        let terra = terra();
         let clamped = QualityCurve {
             unit_m: 100.0,
             reach_m: 8192.0,

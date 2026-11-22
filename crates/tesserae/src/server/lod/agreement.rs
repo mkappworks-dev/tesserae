@@ -8,7 +8,7 @@ use tesserae_core::worldgen::Worldgen;
 use tesserae_core::{CHUNK_SIZE, Chunk, MaterialId, Tables, Voxel};
 
 use super::{
-    IMPOSTORS_TO, LodGenerators, Makers, Shown, face_neighbors, level_scale, make_coarse,
+    Held, IMPOSTORS_TO, LodGenerators, Makers, Shown, face_neighbors, level_scale, make_coarse,
     mesh_coarse,
 };
 use crate::server::lod_rings::level_count;
@@ -84,6 +84,7 @@ struct Terra {
     tables: Tables,
     water: MaterialId,
     tree_parts: HashSet<MaterialId>,
+    built: HashSet<MaterialId>,
     made: HashMap<(u32, ChunkCoord), Arc<Chunk>>,
     stood: HashMap<(u32, ChunkCoord), Arc<Chunk>>,
     made_full: HashMap<ChunkCoord, Arc<Chunk>>,
@@ -112,6 +113,7 @@ impl Terra {
             })
             .flatten()
             .collect();
+        let built = generators.built.iter().copied().collect();
         Terra {
             world,
             full,
@@ -119,6 +121,7 @@ impl Terra {
             tables: loaded.tables,
             water: params.water.expect("Terra has a sea").material,
             tree_parts,
+            built,
             made: HashMap::new(),
             stood: HashMap::new(),
             made_full: HashMap::new(),
@@ -138,6 +141,7 @@ impl Terra {
         } else {
             let makers = Makers {
                 placement: None,
+                structures: None,
                 ..self.generators.makers(level)
             };
             make_coarse(level, coord, makers, &Default::default(), &self.tables).chunk
@@ -173,6 +177,30 @@ impl Terra {
             },
         );
         tree
+    }
+
+    /// Whether a solid Structure Voxel stands over the column's ground at `level`, level 0 read
+    /// whole, and the ground's top Material beneath any Impostor.
+    fn built_over(&mut self, level: u32, column: [i32; 2]) -> (bool, MaterialId) {
+        let from = self.top_cy(level, column);
+        let (trees, built) = (self.tree_parts.clone(), self.built.clone());
+        let materials = self.tables.materials.clone();
+        let full = self.full.clone();
+        let mut stands = false;
+        let mut stops = |v: Voxel, y: i32| {
+            let m = v.material();
+            if built.contains(&m) && materials.solid(v) {
+                // Level 0 grows some of a field's crops outside any Structure.
+                stands |= level > 0 || full.stood_at([column[0], y, column[1]]).is_some();
+            }
+            !v.is_air() && !trees.contains(&m) && !built.contains(&m)
+        };
+        let (top, _) = if level == 0 {
+            scan_at(|c| self.full_chunk(c), column, from, &mut stops)
+        } else {
+            scan_at(|c| self.stood_chunk(level, c), column, from, &mut stops)
+        };
+        (stands, top.material())
     }
 
     fn full_chunk(&mut self, coord: ChunkCoord) -> Arc<Chunk> {
@@ -374,10 +402,20 @@ impl Terra {
 
 /// The topmost Voxel that `stops` a downward scan of the column, from Chunk row `from_cy`.
 fn scan(
+    chunk: impl FnMut(ChunkCoord) -> Arc<Chunk>,
+    column: [i32; 2],
+    from_cy: i32,
+    mut stops: impl FnMut(Voxel) -> bool,
+) -> (Voxel, i32) {
+    scan_at(chunk, column, from_cy, |v, _| stops(v))
+}
+
+/// [`scan`], `stops` also told each Voxel's global row.
+fn scan_at(
     mut chunk: impl FnMut(ChunkCoord) -> Arc<Chunk>,
     [gx, gz]: [i32; 2],
     from_cy: i32,
-    mut stops: impl FnMut(Voxel) -> bool,
+    mut stops: impl FnMut(Voxel, i32) -> bool,
 ) -> (Voxel, i32) {
     let (cx, cz) = (gx.div_euclid(N), gz.div_euclid(N));
     let (x, z) = (gx.rem_euclid(N) as usize, gz.rem_euclid(N) as usize);
@@ -388,8 +426,9 @@ fn scan(
         }
         for y in (0..CHUNK_SIZE).rev() {
             let v = c.get(x, y, z);
-            if stops(v) {
-                return (v, cy * N + y as i32);
+            let g = cy * N + y as i32;
+            if stops(v, g) {
+                return (v, g);
             }
         }
     }
@@ -506,6 +545,75 @@ fn coarse_ground_agrees_with_level_zero_at_each_column_centre_over_terra_coast_a
                  from level 0's tree density past one column"
             );
         }
+    }
+}
+
+/// Over the Settlement Terra spawns in, at every coarse level: each column whose footprint holds a
+/// solid Structure Voxel at level 0 stands one, and each column whose centre is a road or trail at
+/// level 0 shows its path as its ground's top, where no Structure stands over it. Run with `--nocapture` to read the rates.
+#[test]
+fn every_coarse_level_stands_terras_spawn_settlement_and_its_paths_as_level_zero_does() {
+    let mut terra = Terra::load();
+    let window = terra.find(|_, _| true);
+    println!(
+        "settlement window: level-0 Chunk columns {window:?} + {WINDOW_CHUNKS} (seed {})",
+        terra.world.seed
+    );
+    println!(
+        "level  columns  level 0 built in the footprint  stood  missing  extra  paths  differ"
+    );
+    for level in 1..terra.generators.levels() {
+        let span = 1i32 << level;
+        let per_chunk = N / span;
+        let (mut columns, mut footprint, mut stood, mut missing, mut extra) = (0, 0, 0, 0, 0);
+        let (mut paths, mut differ) = (0, 0);
+        for x in 0..WINDOW_CHUNKS * per_chunk {
+            for z in 0..WINDOW_CHUNKS * per_chunk {
+                let coarse = [window[0] * per_chunk + x, window[1] * per_chunk + z];
+                let centre = coarse.map(|g| g * span + span / 2);
+                columns += 1;
+                let built = (0..span * span).any(|i| {
+                    terra
+                        .built_over(
+                            0,
+                            [coarse[0] * span + i % span, coarse[1] * span + i / span],
+                        )
+                        .0
+                });
+                let (stands, top) = terra.built_over(level, coarse);
+                footprint += usize::from(built);
+                stood += usize::from(stands);
+                missing += usize::from(built && !stands);
+                extra += usize::from(stands && !built);
+                // A coarse Voxel a Structure reaches is the Structure's, path or not.
+                if let Some(path) = terra.generators.placement.paths(&[centre])[0]
+                    && !stands
+                {
+                    paths += 1;
+                    differ += usize::from(top != path);
+                }
+            }
+        }
+        let share = |n: usize| 100.0 * n as f64 / columns as f64;
+        println!(
+            "{level:>5}  {columns:>7}  {:>29.1}%  {:>4.1}%  {:>6.2}%  {:>4.2}%  {paths:>5}  \
+             {differ:>6}",
+            share(footprint),
+            share(stood),
+            share(missing),
+            share(extra),
+        );
+        assert!(footprint > 0, "level {level}: no Structure in the window");
+        assert_eq!(missing, 0, "level {level}: footprints that stand nothing");
+        assert!(
+            extra * 100 <= columns,
+            "level {level}: {extra} columns stand a Structure level 0 does not"
+        );
+        assert!(level > 1 || paths > 0, "no path in the window");
+        assert_eq!(
+            differ, 0,
+            "level {level}: path columns whose top is not the path"
+        );
     }
 }
 
@@ -660,6 +768,128 @@ fn cpu_time_and_vertex_bytes(terra: &Terra, forest: [i32; 2], rounds: usize) {
             block.len(),
             bytes[0],
             bytes[1]
+        );
+    }
+}
+
+/// What a level-1 job inside level 0's load pays to generate its eight children instead of
+/// reading the held ones, Impostors drawn either way: CPU time interleaved in mirrored order,
+/// cold coarse caches every pass. Run alone with `--ignored --nocapture`.
+#[test]
+#[ignore = "a measurement, not a check"]
+fn level_one_cpu_time_generating_children_against_reading_held_ones_by_terra_spawn() {
+    const ROUNDS: usize = 9;
+    let terra = Terra::load();
+    let [sx, sz] = terra.full.spawn_m();
+    let at = [sx, sz].map(|m| (m / N as f32).floor() as i32 - WINDOW_CHUNKS / 2);
+    let block = forest_block(&terra, at, 1, 3);
+    let held: HashMap<ChunkCoord, [Option<Held>; 8]> = block
+        .iter()
+        .map(|&coord| {
+            let children = std::array::from_fn(|i| {
+                let c = coord.child(i);
+                Some(Held {
+                    chunk: Arc::new(terra.full.chunk(c.x, c.y, c.z)),
+                    changed: None,
+                })
+            });
+            (coord, children)
+        })
+        .collect();
+    let levels = terra.generators.levels();
+    let pass = |read: bool| -> f64 {
+        terra.full.forget_caches();
+        let generators = LodGenerators::new(&terra.world, &terra.full, levels);
+        let none = Default::default();
+        let mut spent = 0.0;
+        for coord in &block {
+            let children = if read { &held[coord] } else { &none };
+            let from = thread_cpu_s();
+            std::hint::black_box(make_coarse(
+                1,
+                *coord,
+                generators.makers(1),
+                children,
+                &terra.tables,
+            ));
+            spent += thread_cpu_s() - from;
+        }
+        1000.0 * spent / block.len() as f64
+    };
+    let (mut read, mut generated) = (Vec::new(), Vec::new());
+    for round in 0..ROUNDS {
+        if round % 2 == 0 {
+            read.push(pass(true));
+            generated.push(pass(false));
+        } else {
+            generated.push(pass(false));
+            read.push(pass(true));
+        }
+    }
+    let median = |v: &mut Vec<f64>| {
+        v.sort_by(f64::total_cmp);
+        v[v.len() / 2]
+    };
+    let (a, b) = (median(&mut read), median(&mut generated));
+    println!("spawn block {at:?}, seed {}", terra.world.seed);
+    println!("chunks  reading held ms  generating ms  extra ms");
+    println!("{:>6}  {a:>15.2}  {b:>13.2}  {:>8.2}", block.len(), b - a);
+}
+
+/// Coarse-Chunk CPU time with and without Structure Impostors over Terra's spawn Settlement, at
+/// every coarse level, interleaved in mirrored order with cold caches every pass. Run alone in
+/// release with `--ignored --nocapture`.
+#[test]
+#[ignore = "a measurement, not a check"]
+fn coarse_chunk_cpu_time_with_and_without_structure_impostors_over_terra_settlement() {
+    const ROUNDS: usize = 9;
+    let terra = Terra::load();
+    let window = terra.find(|_, _| true);
+    let levels = terra.generators.levels();
+    let pass = |level: u32, structures: bool, block: &[ChunkCoord]| -> f64 {
+        terra.full.forget_caches();
+        let generators = LodGenerators::new(&terra.world, &terra.full, levels);
+        let makers = Makers {
+            structures: structures.then_some(&*generators.placement),
+            ..generators.makers(level)
+        };
+        let mut spent = 0.0;
+        for &coord in block {
+            let from = thread_cpu_s();
+            std::hint::black_box(make_coarse(
+                level,
+                coord,
+                makers,
+                &Default::default(),
+                &terra.tables,
+            ));
+            spent += thread_cpu_s() - from;
+        }
+        1000.0 * spent / block.len() as f64
+    };
+    println!("settlement window {window:?}, seed {}", terra.world.seed);
+    println!("level  chunks  without ms  with ms  with / without");
+    for level in 1..levels {
+        let block = forest_block(&terra, window, level, 3);
+        let (mut without, mut with) = (Vec::new(), Vec::new());
+        for round in 0..ROUNDS {
+            if round % 2 == 0 {
+                without.push(pass(level, false, &block));
+                with.push(pass(level, true, &block));
+            } else {
+                with.push(pass(level, true, &block));
+                without.push(pass(level, false, &block));
+            }
+        }
+        let median = |v: &mut Vec<f64>| {
+            v.sort_by(f64::total_cmp);
+            v[v.len() / 2]
+        };
+        let (a, b) = (median(&mut without), median(&mut with));
+        println!(
+            "{level:>5}  {:>6}  {a:>10.2}  {b:>7.2}  {:>14.2}",
+            block.len(),
+            b / a
         );
     }
 }

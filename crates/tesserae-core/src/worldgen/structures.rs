@@ -12,11 +12,11 @@ use std::sync::Arc;
 
 use super::fields::{hashed, mix, unit};
 use super::ground::SAMPLE_M;
-use super::{Footprint, Worldgen, top_index};
+use super::{Footprint, StructurePart, Worldgen, top_index};
 use crate::chunk::{CHUNK_SIZE, Chunk};
 use crate::climate::{BiomeId, BiomeStructure};
 use crate::template::{Cell, Template, Turn};
-use crate::voxel::Voxel;
+use crate::voxel::{MaterialId, Voxel};
 use crate::worldgen::WorldgenParams;
 use crate::worldgen::settlements::LaidSettlement;
 
@@ -312,11 +312,20 @@ impl Worldgen {
     /// A later row's Structure gives way to an earlier row's it would touch, so a column belongs to
     /// one Structure, and every one gives way to a Settlement.
     pub(super) fn structures_near(&self, region: [[i32; 2]; 2]) -> Vec<Structure> {
+        self.structures_near_but(region, false)
+    }
+
+    /// [`Self::structures_near`], without those of a Template that spans when `no_spans`: a later
+    /// row still gives way to one, so the rest are as level 0 stands them.
+    fn structures_near_but(&self, region: [[i32; 2]; 2], no_spans: bool) -> Vec<Structure> {
         let Some(pass) = &self.structures else {
             return Vec::new();
         };
         let mut standing = Vec::new();
-        for index in 0..pass.rows.len() {
+        for (index, row) in pass.rows.iter().enumerate() {
+            if no_spans && row.underside_m.is_some() {
+                continue;
+            }
             for s in self.row_structures(index, region) {
                 let claimed =
                     (0..index).any(|before| !self.row_structures(before, s.footprint()).is_empty());
@@ -439,14 +448,33 @@ impl Worldgen {
     ) {
         let size = CHUNK_SIZE as i32;
         let origin = coord.map(|c| c * size);
-        let low = [0, 1, 2].map(|a| s.min[a].max(origin[a]));
-        let high = [0, 1, 2].map(|a| (s.min[a] + s.size[a]).min(origin[a] + size));
+        self.structure_voxels(
+            s,
+            foundation,
+            [origin, origin.map(|o| o + size)],
+            |at, voxel| {
+                let [lx, ly, lz] = at.map(|g| g.rem_euclid(size) as usize);
+                chunk.set(lx, ly, lz, voxel);
+            },
+        );
+    }
+
+    /// Each cell [`Self::stand_structure`] writes in the global cells `[min, max)`, in the order
+    /// it writes them.
+    pub(super) fn structure_voxels(
+        &self,
+        s: &Structure,
+        foundation: bool,
+        [min, max]: [[i32; 3]; 2],
+        mut put: impl FnMut([i32; 3], Voxel),
+    ) {
+        let low = [0, 1, 2].map(|a| s.min[a].max(min[a]));
+        let high = [0, 1, 2].map(|a| (s.min[a] + s.size[a]).min(max[a]));
         if low[0] >= high[0] || low[2] >= high[2] {
             return;
         }
         let template = &self.templates[usize::from(s.template)];
         let sampled = template.sample(self.voxel_size, s.turn);
-        let local = |at: [i32; 3]| at.map(|g| g.rem_euclid(size) as usize);
         for z in low[2]..high[2] {
             for x in low[0]..high[0] {
                 let landing = !template.spans() || self.on_landing(s, [x, z]);
@@ -467,15 +495,14 @@ impl Worldgen {
                             sampled.ground_voxel(y - s.min[1], ground)
                         }
                     };
-                    let [lx, ly, lz] = local([x, y, z]);
-                    chunk.set(lx, ly, lz, voxel);
+                    put([x, y, z], voxel);
                 }
             }
         }
         let Some(foundation) = template.foundation().filter(|_| foundation) else {
             return;
         };
-        if origin[1] >= s.min[1] {
+        if min[1] >= s.min[1] {
             return;
         }
         for z in low[2]..high[2] {
@@ -489,13 +516,86 @@ impl Worldgen {
                 }
                 let height_m = self.surface_height_m(self.global_m(x), self.global_m(z));
                 let ground = top_index(height_m, 0.0, self.voxel_size);
-                let from = (ground + 1).max(origin[1]);
-                for y in from..s.min[1].min(origin[1] + size) {
-                    let [lx, ly, lz] = local([x, y, z]);
-                    chunk.set(lx, ly, lz, Voxel::cube(foundation));
+                let from = (ground + 1).max(min[1]);
+                for y in from..s.min[1].min(max[1]) {
+                    put([x, y, z], Voxel::cube(foundation));
                 }
             }
         }
+    }
+}
+
+impl Worldgen {
+    /// Every solid Voxel a Structure or a Settlement Plot's Structure stands in the global cells
+    /// `[min, max)`, in the order [`Self::chunk`] writes them: what a coarse level samples its
+    /// Structure Impostors from (ADR-0035). It reads the draws and the ground's heights alone,
+    /// never a Chunk. With `spans` false it leaves out a Template that spans, whose cell's gap
+    /// search reads every metre of its ground.
+    pub fn structure_parts(&self, min: [i32; 3], max: [i32; 3], spans: bool) -> Vec<StructurePart> {
+        let Some((lowest_m, highest_m)) = self.structure_band_m() else {
+            return Vec::new();
+        };
+        if self.global_m(min[1]) > highest_m || self.global_m(max[1]) < lowest_m {
+            return Vec::new();
+        }
+        let region = [[min[0], min[2]], [max[0], max[2]]];
+        let claims = Claims {
+            settlements: self.laid_settlements_near(region),
+            structures: self.structures_near_but(region, !spans),
+        };
+        let mut parts = Vec::new();
+        let mut put = |at: [i32; 3], voxel: Voxel| {
+            if !voxel.is_air() {
+                parts.push(StructurePart {
+                    at,
+                    material: voxel.material(),
+                });
+            }
+        };
+        let plots = claims.settlements.iter().flat_map(|t| t.structures.iter());
+        for s in plots {
+            self.structure_voxels(s, false, [min, max], &mut put);
+        }
+        for s in &claims.structures {
+            self.structure_voxels(s, true, [min, max], &mut put);
+        }
+        parts
+    }
+
+    /// The Material each Template stands that no Biome lays as ground, sorted: what a coarse
+    /// level keeps by any solid over a changed Chunk, where ground keeps to the vote.
+    pub fn built_materials(&self) -> Vec<MaterialId> {
+        let mut ground: Vec<MaterialId> = self
+            .params
+            .biomes
+            .as_slice()
+            .iter()
+            .filter_map(|b| b.ground)
+            .chain(self.params.ground)
+            .flat_map(|g| [g.rock, g.soil, g.surface])
+            .chain(self.water.map(|w| w.material))
+            .collect();
+        ground.sort_unstable();
+        let mut built = Vec::new();
+        for template in self.templates.iter() {
+            let [sx, sy, sz] = template.size();
+            for y in 0..sy {
+                for z in 0..sz {
+                    for x in 0..sx {
+                        if let Cell::Voxel(v) = template.cell([x, y, z])
+                            && !v.is_air()
+                        {
+                            built.push(v.material());
+                        }
+                    }
+                }
+            }
+            built.extend(template.foundation());
+        }
+        built.sort_unstable();
+        built.dedup();
+        built.retain(|m| ground.binary_search(m).is_err());
+        built
     }
 }
 

@@ -743,6 +743,15 @@ pub struct CanopyShapes(Vec<Vec<Option<CanopyShape>>>);
 /// Trees grown to average a species' crown: its height and spread vary by hash of the column.
 const CANOPY_SAMPLES: i32 = 16;
 
+/// One solid Voxel of a Structure level 0 stands, as [`Worldgen::structure_parts`] draws it for a
+/// coarse level.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct StructurePart {
+    /// The global cell.
+    pub at: [i32; 3],
+    pub material: MaterialId,
+}
+
 /// One World's generator: a seed, a Voxel size and the parameters a Mod chose.
 #[derive(Clone, Debug)]
 pub struct Worldgen {

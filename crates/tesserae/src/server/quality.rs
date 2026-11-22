@@ -23,7 +23,7 @@ pub(super) fn plugin(app: &mut App) {
 }
 
 /// The last request wins; one that changes nothing leaves `StreamingSettings` unchanged.
-pub(super) fn apply(
+pub(crate) fn apply(
     mut requests: MessageReader<QualityCurve>,
     declared: Res<DeclaredStreaming>,
     mut settings: ResMut<StreamingSettings>,
@@ -41,20 +41,21 @@ pub struct QualityCurve {
 }
 
 impl QualityCurve {
-    pub const BALANCED_UNIT_M: f32 = 192.0;
-    pub const DETAILED_UNIT_M: f32 = 384.0;
+    /// Each Voxel size held further than the Game's rings, to 6 km: the default.
+    pub const MEDIUM: Self = QualityCurve {
+        unit_m: 256.0,
+        reach_m: 6000.0,
+    };
+    pub const HIGH: Self = QualityCurve {
+        unit_m: 384.0,
+        reach_m: 8000.0,
+    };
 
-    pub fn balanced(reach_m: f32) -> Self {
+    /// The Game's own rings: the doubling from its view distance to the reach it declares.
+    pub fn low(game: StreamingSettings) -> Self {
         QualityCurve {
-            unit_m: Self::BALANCED_UNIT_M,
-            reach_m,
-        }
-    }
-
-    pub fn detailed(reach_m: f32) -> Self {
-        QualityCurve {
-            unit_m: Self::DETAILED_UNIT_M,
-            reach_m,
+            unit_m: game.view_distance_m,
+            reach_m: game.lod_distance_m,
         }
     }
 

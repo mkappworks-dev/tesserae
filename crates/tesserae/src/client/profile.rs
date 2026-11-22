@@ -52,6 +52,8 @@ pub(crate) struct Preferences {
     /// Full-ink secondary text, opaque fills, brighter edges and a thicker
     /// focus ring. Absent from a profile saved before it, which reads as off.
     pub stronger_contrast: bool,
+    /// Absent from a profile saved before it, which reads as Medium.
+    pub distance: super::quality::Distance,
 }
 
 pub(super) const TEXT_SCALES: [u32; 5] = [100, 125, 150, 175, 200];
@@ -137,6 +139,7 @@ impl Default for Preferences {
             text_scale: 100,
             solid_background: false,
             stronger_contrast: false,
+            distance: default(),
         }
     }
 }

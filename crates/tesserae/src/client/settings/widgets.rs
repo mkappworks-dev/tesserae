@@ -422,6 +422,10 @@ pub(in crate::client) enum Scalar {
     TouchOpacity,
     MoveDeadzone,
     LookDeadzone,
+    /// Whole km, to the World's ceiling.
+    Reach(u32),
+    /// Whole Chunks, from the World's view distance.
+    Detail(u32),
 }
 impl Scalar {
     fn range(self) -> std::ops::RangeInclusive<f32> {
@@ -435,6 +439,10 @@ impl Scalar {
             Self::PadLook | Self::TouchLook => crate::client::profile::PAD_SENSITIVITY,
             Self::TouchOpacity => crate::client::profile::TOUCH_OPACITY,
             Self::MoveDeadzone | Self::LookDeadzone => crate::client::profile::PAD_DEADZONE,
+            Self::Reach(max) => crate::client::quality::MIN_REACH_KM as f32..=max as f32,
+            Self::Detail(min) => {
+                min as f32..=crate::client::quality::MAX_DETAIL_CHUNKS.max(min) as f32
+            }
         }
     }
     fn step(self) -> f32 {
@@ -443,7 +451,9 @@ impl Scalar {
             | Self::MasterVolume
             | Self::EffectsVolume
             | Self::AmbientVolume
-            | Self::MusicVolume => 1.0,
+            | Self::MusicVolume
+            | Self::Reach(_)
+            | Self::Detail(_) => 1.0,
             Self::MoveDeadzone | Self::LookDeadzone | Self::TouchOpacity => 0.01,
             _ => 0.05,
         }
@@ -468,7 +478,22 @@ const TRACK_PX: f32 = 151.0;
 const THUMB_PX: f32 = 16.0;
 
 pub(super) fn slider(parent: &mut ChildSpawnerCommands, kind: Scalar, value: f32) {
+    locked_slider(parent, kind, value, false);
+}
+
+/// A slider that, `locked`, shows its value and takes no input.
+pub(super) fn locked_slider(
+    parent: &mut ChildSpawnerCommands,
+    kind: Scalar,
+    value: f32,
+    locked: bool,
+) {
     use bevy::ui_widgets::{Slider, SliderRange, SliderStep, SliderThumb, SliderValue};
+    let (fill, rail) = if locked {
+        (theme::FIELD_LOCKED_EDGE, theme::DISABLED)
+    } else {
+        (theme::SAGE, theme::TRACK)
+    };
     let travel = |fraction: f32| fraction * (TRACK_PX - THUMB_PX);
     parent
         .spawn(Node {
@@ -512,13 +537,18 @@ pub(super) fn slider(parent: &mut ChildSpawnerCommands, kind: Scalar, value: f32
                     },
                 ))
                 .id();
+            if locked {
+                row.commands()
+                    .entity(slider)
+                    .insert(bevy::ui::InteractionDisabled);
+            }
             row.commands()
                 .entity(label)
                 .insert(ScalarLabel(slider, kind));
             row.commands().entity(slider).with_children(|track| {
                 track
                     .spawn((
-                        BackgroundColor(theme::TRACK),
+                        BackgroundColor(rail),
                         Node {
                             width: Val::Percent(100.0),
                             height: Val::Px(6.0),
@@ -530,7 +560,7 @@ pub(super) fn slider(parent: &mut ChildSpawnerCommands, kind: Scalar, value: f32
                     ))
                     .with_child((
                         ScalarFill(slider, kind),
-                        BackgroundColor(theme::SAGE),
+                        BackgroundColor(fill),
                         Node {
                             width: Val::Px(travel(kind.fraction(value)) + THUMB_PX / 2.0),
                             height: Val::Percent(100.0),
@@ -542,7 +572,7 @@ pub(super) fn slider(parent: &mut ChildSpawnerCommands, kind: Scalar, value: f32
                     SliderThumb,
                     Pickable::IGNORE,
                     ScalarThumb(slider, kind),
-                    BackgroundColor(theme::SAGE),
+                    BackgroundColor(fill),
                     BorderColor::all(theme::SAGE_INK.with_alpha(0.35)),
                     Node {
                         position_type: PositionType::Absolute,
@@ -562,7 +592,10 @@ pub(super) fn scalar_changed(
     values: Query<&Scalar>,
     mut commands: Commands,
     mut settings: ResMut<Settings>,
-    status: Option<Res<crate::server::persistence::SaveStatus>>,
+    (status, distances): (
+        Option<Res<crate::server::persistence::SaveStatus>>,
+        WorldDistances,
+    ),
 ) {
     if !settings.open
         || settings.modal()
@@ -595,6 +628,12 @@ pub(super) fn scalar_changed(
         Scalar::TouchOpacity => preferences.touch.opacity = value,
         Scalar::MoveDeadzone => preferences.pad.move_deadzone = value,
         Scalar::LookDeadzone => preferences.pad.look_deadzone = value,
+        Scalar::Reach(_) => preferences
+            .distance
+            .moved(game(&distances).0, |s| s.reach_km = value.round() as u32),
+        Scalar::Detail(_) => preferences.distance.moved(game(&distances).0, |s| {
+            s.detail_chunks = value.round() as u32
+        }),
     }
     settings.dirty = true;
 }

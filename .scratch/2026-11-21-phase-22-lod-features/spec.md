@@ -133,7 +133,16 @@ captures are reviewed in two batches, after 05 and at 09.
   gone at every level and a standing one keeps its silhouette.
 - **Structure Impostors (Q3).** Every Structure and Settlement Plot that level 0
   stands is sampled at the coarse Voxel size, any solid beating air, at every
-  coarse level. Settlement paths are ground Material.
+  coarse level. Settlement paths are ground Material. **Recorded (04):** "any
+  solid" is the Material table's `solid`, so a Plot's crops, flowers and torches
+  stay out as Plants do; a built Material beats a Template's ground-coloured
+  cell in one coarse Voxel. Paths and a Plot's cut and fill are ground: a
+  coarse column whose centre is a road or trail at level 0 takes the path as
+  its top Material, through the agreement, and the ground keeps level 0's
+  natural height. A Template that spans, a bridge, stands at level 1 only: its
+  lattice cell's gap search reads every metre of its ground, free over level
+  1's warm 1 m columns and some 3 s of CPU a km² cold above it (a level-5
+  Settlement Chunk took 1.5 s with it, 31 ms without).
 - **Plants (Q4).** Ground cover, crops and flowers stay out of coarse levels.
 - **Canopy cover (Q18).** From level 2 up (03's measurement) a coarse column's top Voxel becomes
   the dominant species' leaf Material where the expected cover is over half:

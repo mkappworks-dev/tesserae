@@ -68,8 +68,8 @@ pub use light::{
 };
 pub use lod::{
     COVERED_SKY, CoarseLight, SeamMargin, Surface, TreeMaterials, agree_with_level_zero,
-    canopy_candidates, coarse_light, coarsen_tree_parts, downsample, seam_openings,
-    stand_canopy_cover, stand_tree_parts,
+    canopy_candidates, coarse_light, coarsen_structure_parts, coarsen_tree_parts, downsample,
+    seam_openings, stand_canopy_cover, stand_structure_parts, stand_tree_parts,
 };
 pub use material::{MaterialDef, MaterialError, MaterialTable, Occlusion, RenderClass};
 pub use mesh::{
@@ -101,6 +101,6 @@ pub use usable::{
 pub use voxel::{AIR, MaterialId, SHAPE_FULL_CUBE, ShapeId, Voxel};
 pub use worldgen::{
     Canopy, CanopyShapes, CaveParams, ColumnTop, GroundParams, MAX_HEIGHT_M, MAX_OCTAVES,
-    MAX_SMOOTHED_PER_CHUNK, ParamError, SmoothingParams, TreePart, WaterParams, Worldgen,
-    WorldgenParams,
+    MAX_SMOOTHED_PER_CHUNK, ParamError, SmoothingParams, StructurePart, TreePart, WaterParams,
+    Worldgen, WorldgenParams,
 };
