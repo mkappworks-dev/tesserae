@@ -144,3 +144,27 @@ Ran: `cargo fmt --all`, `npm run fmt`, `cargo test -p tesserae-core` (1,068
 pass), `cargo test -p tesserae --bins` (1,669 pass, 4 ignored), `cargo clippy
 -p tesserae -p tesserae-core --all-targets --all-features`.
 
+
+2026-11-22, follow-up: a level-1 job inside level 0's load generates all
+eight children, as it does outside; `a_level_one_job_counts_...` (a `dev` test
+the `--bins` run missed) now states that rule. Reading an unchanged held child's
+terrain instead is not exact: a held Chunk carries its Structures, which also
+keep the overhang density off the ground round them, so stripping trees and
+ground cover does not give back the bare Chunk, and held would no longer equal
+generated. What the generation costs, Impostors drawn either way, CPU time per
+Chunk, median of 9 interleaved rounds in mirrored order, cold coarse caches
+every pass, a 3 x 3 level-1 Chunk-column block by Terra's spawn, every row of
+the terrain band
+(`agreement::level_one_cpu_time_generating_children_against_reading_held_ones_by_terra_spawn`,
+`--ignored`). Host heavily loaded (1-minute load 25 to 34), two runs:
+
+| Chunks | reading held ms | generating ms | extra ms   |
+| ------ | --------------- | ------------- | ---------- |
+| 63     | 13.30, 13.20    | 19.37, 18.82  | 6.07, 5.63 |
+
+About 6 ms a terrain-band level-1 job, only for the level-1 jobs over level
+0's load; 09's fill-time series shows whether it moves level 0's fill.
+
+Ran: `cargo test --workspace --locked --features tesserae/dev` (3,103 pass, 10
+ignored), `cargo clippy --workspace --all-targets --all-features` (clean),
+`cargo fmt --all`.
