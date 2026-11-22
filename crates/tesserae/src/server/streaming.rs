@@ -2062,7 +2062,7 @@ pub(in crate::server) mod tests {
             world.chunk_at(player.expect("the Player exists").eye())
         }
 
-        fn jobs(&self) -> &Jobs {
+        pub(in crate::server) fn jobs(&self) -> &Jobs {
             self.app.world().resource::<Jobs>()
         }
 

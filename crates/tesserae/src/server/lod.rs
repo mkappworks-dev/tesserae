@@ -72,6 +72,11 @@ pub(in crate::server) struct LodCounts {
 pub(in crate::server) struct LodBudget {
     pub in_flight: LodCounts,
     pub landed_per_tick: LodCounts,
+    /// Every cap is this many times larger in a tick that starts with no level-0 job in
+    /// flight, when no level-0 work queues behind a coarse job. Ticket 09 measured the busy
+    /// caps, not the CPU, setting how soon the field filled: 16 jobs a 64 Hz tick, against
+    /// coarse jobs of 0.3 to 6 ms on three workers.
+    pub idle_scale: usize,
 }
 
 #[cfg(any(feature = "dev", feature = "profiling"))]
@@ -80,7 +85,7 @@ impl LodBudget {
     fn with_env_overrides(mut self) -> Self {
         if let Ok(v) = std::env::var("TESSERAE_LOD_BUDGET") {
             let n: Vec<usize> = v.split(',').filter_map(|x| x.trim().parse().ok()).collect();
-            if let [a, b, c, d] = n[..] {
+            if let [a, b, c, d, ..] = n[..] {
                 self.in_flight = LodCounts {
                     generate: a,
                     mesh: b,
@@ -89,8 +94,9 @@ impl LodBudget {
                     generate: c,
                     mesh: d,
                 };
+                self.idle_scale = n.get(4).copied().unwrap_or(self.idle_scale);
             } else {
-                warn!("TESSERAE_LOD_BUDGET needs four counts, got {v:?}");
+                warn!("TESSERAE_LOD_BUDGET needs four counts and an idle scale, got {v:?}");
             }
         }
         self
@@ -115,9 +121,29 @@ impl Default for LodBudget {
                 generate: 16,
                 mesh: 16,
             },
+            idle_scale: IDLE_SCALE,
         }
     }
 }
+
+impl LodBudget {
+    fn for_tick(self, level_zero_in_flight: usize) -> Self {
+        if level_zero_in_flight > 0 {
+            return self;
+        }
+        let scale = |c: LodCounts| LodCounts {
+            generate: c.generate.saturating_mul(self.idle_scale),
+            mesh: c.mesh.saturating_mul(self.idle_scale),
+        };
+        LodBudget {
+            in_flight: scale(self.in_flight),
+            landed_per_tick: scale(self.landed_per_tick),
+            ..self
+        }
+    }
+}
+
+const IDLE_SCALE: usize = 4;
 
 /// From this level up an untouched coarse Chunk is generated at its own Voxel size with no
 /// caves, one height per column, instead of downsampled from eight children: captures show
@@ -1573,8 +1599,9 @@ pub(in crate::server) fn stream_lod(
     settings: Res<StreamingSettings>,
     budget: Res<LodBudget>,
     player: Query<&Player>,
-    (mut orders, time): (ResMut<LodOrders>, Option<Res<Time>>),
+    (mut orders, time, level_zero): (ResMut<LodOrders>, Option<Res<Time>>, Res<super::jobs::Jobs>),
 ) {
+    let budget = budget.for_tick(level_zero.in_flight());
     // Never more than the generators, which the doubling to the ceiling, the most a curve has, sized.
     let levels = level_count(&settings).min(generators.levels());
     if levels <= 1 {
@@ -2259,6 +2286,7 @@ mod tests {
                 generate: usize::MAX,
                 mesh: usize::MAX,
             },
+            idle_scale: 1,
         }
     }
 
@@ -2971,6 +2999,47 @@ mod tests {
     }
 
     #[test]
+    fn the_caps_scale_only_once_level_zero_has_nothing_in_flight() {
+        let mut h = harness_with(
+            lod_settings(),
+            LodBudget {
+                in_flight: LodCounts {
+                    generate: 5,
+                    ..unlimited().in_flight
+                },
+                landed_per_tick: LodCounts {
+                    generate: 2,
+                    ..unlimited().landed_per_tick
+                },
+                idle_scale: 4,
+            },
+        );
+        h.lod_on_private_pool();
+
+        h.tick();
+        assert!(h.jobs().in_flight() > 0, "level 0 is filling");
+        h.lod_tick();
+        assert_eq!(h.lod_jobs().generate.counts().0, 5, "the busy cap");
+
+        h.settle();
+        assert_eq!(h.jobs().in_flight(), 0);
+        let started = std::time::Instant::now();
+        while h.lod_jobs().generate.finished().count() < 5 {
+            assert!(
+                started.elapsed() < SETTLE_CEILING,
+                "the coarse jobs never finished"
+            );
+            std::thread::sleep(std::time::Duration::from_micros(100));
+            h.app.world_mut().resource_mut::<LodJobs>().generate.poll();
+        }
+        h.lod_tick();
+        let (dispatched, landed) = h.lod_jobs().generate.counts();
+        assert_eq!(landed, 5, "up to 8 may land once idle");
+        assert_eq!(dispatched, 20, "the idle cap refills to 20");
+        assert_eq!(h.lod_jobs().generate.in_flight(), 20);
+    }
+
+    #[test]
     fn in_flight_never_exceeds_the_cap_and_landings_never_exceed_theirs() {
         let mut h = harness_with(
             lod_settings(),
@@ -2983,6 +3052,7 @@ mod tests {
                     generate: 2,
                     ..unlimited().landed_per_tick
                 },
+                idle_scale: 1,
             },
         );
         h.lod_on_private_pool();

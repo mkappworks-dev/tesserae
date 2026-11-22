@@ -405,7 +405,6 @@ pub(in crate::server) struct Jobs {
 }
 
 impl Jobs {
-    #[cfg(any(test, feature = "dev", feature = "profiling"))]
     pub fn in_flight(&self) -> usize {
         self.generate.in_flight() + self.relight.in_flight() + self.mesh.in_flight()
     }
