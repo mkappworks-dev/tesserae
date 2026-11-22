@@ -11,7 +11,7 @@ use crate::material::{MaterialTable, RenderClass};
 use crate::mesh::{
     FACE_STEPS, NEG_X, NEG_Y, NEG_Z, POS_X, POS_Y, SEAM_EVERY, SEAM_LAYERS, SeamOpenings,
 };
-use crate::worldgen::Worldgen;
+use crate::worldgen::{ColumnTop, Worldgen, level_index, top_index};
 
 const OCTANT: usize = CHUNK_SIZE / 2;
 
@@ -301,6 +301,68 @@ pub fn seam_openings(
         }
     }
     out
+}
+
+/// Makes each column of the coarse Chunk in Chunk row `cy` show what level 0 shows at the
+/// column's centre, as `answers` gives it, indexed `z * CHUNK_SIZE + x`: water or land, and the top
+/// Material, with the surface at its height in the coarse Voxel whose middle it passes, as the vote
+/// rounds, and a dry top raised to at least the water's level so rounding cannot sink land under
+/// the drawn sea. `None` keeps a column as it is.
+///
+/// Every Voxel it sets is decided by metres, so the Chunks of one column agree without reading
+/// each other. Only the gap under a moved top is filled from the Chunk's own Voxels, and only in
+/// the Chunk holding that top: below it, a gap is buried.
+pub fn agree_with_level_zero(
+    chunk: &mut Chunk,
+    cy: i32,
+    voxel_m: f32,
+    water: MaterialId,
+    answers: &[Option<ColumnTop>],
+) {
+    let size = CHUNK_SIZE as i32;
+    let floor = cy * size;
+    let ceiling = floor + size - 1;
+    for z in 0..CHUNK_SIZE {
+        for x in 0..CHUNK_SIZE {
+            let Some(a) = answers[z * CHUNK_SIZE + x] else {
+                continue;
+            };
+            let ground = top_index(a.surface_m - voxel_m / 2.0, 0.0, voxel_m);
+            let water_top = a.level_m.map(|l| level_index(l, voxel_m));
+            let top = match water_top {
+                Some(w) if a.wet => ground.min(w - 1),
+                Some(w) => ground.max(w),
+                None => ground,
+            };
+            let wet_to = water_top.filter(|_| a.wet).unwrap_or(top);
+            if top > ceiling {
+                continue;
+            }
+            let mut filling = false;
+            for y in (0..CHUNK_SIZE).rev() {
+                let g = floor + y as i32;
+                let want = if g > wet_to {
+                    Voxel::AIR
+                } else if g > top {
+                    Voxel::cube(water)
+                } else if g == top {
+                    filling = true;
+                    Voxel::cube(a.top)
+                } else if filling {
+                    let v = chunk.get(x, y, z);
+                    if !(v.is_air() || v.material() == water) {
+                        break;
+                    }
+                    Voxel::cube(a.under)
+                } else {
+                    break;
+                };
+                if chunk.get(x, y, z) != want {
+                    chunk.set(x, y, z, want);
+                }
+            }
+        }
+    }
 }
 
 /// Level 1 from eight level-0 Chunks, the changed ones read through

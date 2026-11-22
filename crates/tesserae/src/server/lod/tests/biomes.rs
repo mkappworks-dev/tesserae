@@ -35,7 +35,7 @@ fn biome(name: &str, temperature: f32, ground: GroundParams) -> Biome {
     }
 }
 
-/// A lake too, so the half-Voxel shift the column generators apply to it is on the path.
+/// A lake too, so the column generators make water.
 fn params() -> WorldgenParams {
     WorldgenParams {
         climate: ClimateParams {

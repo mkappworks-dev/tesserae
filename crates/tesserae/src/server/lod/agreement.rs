@@ -7,7 +7,7 @@ use tesserae_core::climate::SurfacePlantKind;
 use tesserae_core::worldgen::Worldgen;
 use tesserae_core::{CHUNK_SIZE, Chunk, MaterialId, Tables, Voxel};
 
-use super::{LodGenerators, generate_coarse, level_scale, seam_margin, waterline};
+use super::{LodGenerators, level_scale, make_coarse};
 use crate::server::lod_rings::level_count;
 use crate::server::mods::runtime::tests::terra_loaded;
 use crate::server::streaming::streaming_settings;
@@ -32,6 +32,9 @@ struct Rates {
     coastal_dried: usize,
     top_differs: usize,
     level_zero_trees: usize,
+    /// Columns a cave or shaft opens at their level-0 centre, which no coarse level draws, so
+    /// they are not compared.
+    carved: usize,
 }
 
 impl Rates {
@@ -45,6 +48,8 @@ impl Rates {
 struct Ground {
     wet: bool,
     top: MaterialId,
+    /// The global Voxel row of `top`.
+    y: i32,
 }
 
 struct Terra {
@@ -100,21 +105,9 @@ impl Terra {
         }
         let chunk = if level == 0 {
             self.generators.sources[0].chunk(coord.x, coord.y, coord.z)
-        } else if let Some(direct) = self.generators.direct(level) {
-            direct.chunk(coord.x, coord.y, coord.z)
         } else {
-            let source = &self.generators.sources[level as usize - 1];
-            let water = if level == 1 { waterline(source) } else { None };
-            let held = std::array::from_fn(|_| None);
-            generate_coarse(
-                source,
-                coord,
-                &held,
-                &self.tables,
-                water,
-                seam_margin(level),
-            )
-            .chunk
+            let makers = self.generators.makers(level);
+            make_coarse(level, coord, makers, &Default::default(), &self.tables).chunk
         };
         let chunk = Arc::new(chunk);
         self.made.insert((level, coord), Arc::clone(&chunk));
@@ -144,7 +137,7 @@ impl Terra {
         let mut wet = false;
         let from = self.top_cy(level, column);
         let water = self.water;
-        let top = scan(
+        let (top, y) = scan(
             |c| self.chunk(level, c),
             column,
             from,
@@ -156,6 +149,7 @@ impl Terra {
         Ground {
             wet,
             top: top.material(),
+            y,
         }
     }
 
@@ -224,6 +218,15 @@ impl Terra {
                 let coarse = [cx * per_chunk + x, cz * per_chunk + z];
                 let centre = coarse.map(|g| g * span + span / 2);
                 let fine = self.ground(0, centre);
+                let level_zero = &self.generators.sources[0];
+                let surface_m = level_zero
+                    .column_top(centre[0], centre[1])
+                    .expect("Terra has ground")
+                    .surface_m;
+                if fine.y < (surface_m / level_zero.voxel_size()).floor() as i32 {
+                    rates.carved += 1;
+                    continue;
+                }
                 let seen = self.ground(level, coarse);
                 let coastal =
                     [[span, 0], [-span, 0], [0, span], [0, -span]]
@@ -250,7 +253,7 @@ fn scan(
     [gx, gz]: [i32; 2],
     from_cy: i32,
     mut stops: impl FnMut(Voxel) -> bool,
-) -> Voxel {
+) -> (Voxel, i32) {
     let (cx, cz) = (gx.div_euclid(N), gz.div_euclid(N));
     let (x, z) = (gx.rem_euclid(N) as usize, gz.rem_euclid(N) as usize);
     for cy in (from_cy - 64..=from_cy).rev() {
@@ -261,15 +264,15 @@ fn scan(
         for y in (0..CHUNK_SIZE).rev() {
             let v = c.get(x, y, z);
             if stops(v) {
-                return v;
+                return (v, cy * N + y as i32);
             }
         }
     }
     panic!("column {gx},{gz} has no ground below Chunk row {from_cy}");
 }
 
-/// Records today's rates and asserts none of them: ticket 02 makes water or land and the top
-/// Material exact. Run with `--nocapture` to read them.
+/// Water or land and the top Material are exact at every level wherever no cave opens level 0;
+/// run with `--nocapture` to read the rates.
 #[test]
 fn coarse_ground_agrees_with_level_zero_at_each_column_centre_over_terra_coast_and_forest() {
     let mut terra = Terra::load();
@@ -293,12 +296,13 @@ fn coarse_ground_agrees_with_level_zero_at_each_column_centre_over_terra_coast_a
         );
         println!(
             "level  columns  level 0 wet  wet/dry differs  coastal  coastal dry, level 0 wet  \
-             top Material differs  level 0 stands a tree"
+             top Material differs  level 0 stands a tree  level 0 carved"
         );
         for level in 1..terra.generators.levels() {
             let r = terra.rates(level, window);
             println!(
-                "{level:>5}  {:>7}  {:>10.1}%  {:>14.1}%  {:>7}  {:>23.1}%  {:>19.1}%  {:>20.1}%",
+                "{level:>5}  {:>7}  {:>10.1}%  {:>14.1}%  {:>7}  {:>23.1}%  {:>19.1}%  {:>20.1}%  \
+                 {:>13.1}%",
                 r.columns,
                 r.share(r.level_zero_wet),
                 r.share(r.wet_differs),
@@ -306,6 +310,13 @@ fn coarse_ground_agrees_with_level_zero_at_each_column_centre_over_terra_coast_a
                 100.0 * r.coastal_dried as f64 / r.coastal.max(1) as f64,
                 r.share(r.top_differs),
                 r.share(r.level_zero_trees),
+                100.0 * r.carved as f64 / (r.columns + r.carved) as f64,
+            );
+            assert_eq!(
+                (r.wet_differs, r.top_differs),
+                (0, 0),
+                "level {level} over the {name} window: columns whose water or land, and top \
+                 Material, differ from level 0's"
             );
             match name {
                 "coast" => assert!(
