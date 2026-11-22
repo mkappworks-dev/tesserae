@@ -150,7 +150,11 @@ captures are reviewed in two batches, after 05 and at 09.
   zero under water, on Structure footprints and on fields. It is raised one
   coarse Voxel above the ground where the species' mean canopy top reaches at
   least half that Voxel, so forests keep a silhouette until their Voxel outgrows
-  the trees.
+  the trees. Ticket 11 breaks the sheet up, from the same cover at the column's
+  centre: a column covered three quarters or more stands one coarse Voxel over a
+  sparser one, up to two Voxels and only where the trees reach half the second;
+  a sparser column shows the next species' leaves where that species covers at
+  least half what the dominant one does.
 - **The join stays a hard cut (Q5,
   [ADR-0019](../../docs/adr/0019-a-level-is-drawn-until-another-replaces-it.md)).**
 - **Shadows (Q7).** Impostors and Canopy cover cast no sun shadow: the three
